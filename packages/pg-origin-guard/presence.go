@@ -101,7 +101,7 @@ func (f *FilePresence) Read() Presence {
 	if err != nil {
 		return unknown("unreadable")
 	}
-	defer fh.Close()
+	defer func() { _ = fh.Close() }()
 	data, err := io.ReadAll(io.LimitReader(fh, maxPresenceBytes+1))
 	if err != nil || len(data) > maxPresenceBytes {
 		return unknown("unreadable")

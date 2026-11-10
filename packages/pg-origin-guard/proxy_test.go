@@ -63,7 +63,6 @@ type fakeChild struct {
 	mu      sync.Mutex
 	signals []syscall.Signal
 	dieOn   map[syscall.Signal]int
-	stderr  string
 }
 
 func (c *fakeChild) Pid() int              { return c.pid }

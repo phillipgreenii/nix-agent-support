@@ -139,7 +139,7 @@ func (r *Recorder) Record(realm string, obs Observation) (RealmState, error) {
 		wasAvailable := st.Available()
 		prev := st.LastReason
 		avail := obs.Reason == ReasonOK
-		transition := prev != string(obs.Reason) && !(prev == "" && avail)
+		transition := prev != string(obs.Reason) && (prev != "" || !avail)
 
 		st.LastReason = string(obs.Reason)
 		switch {

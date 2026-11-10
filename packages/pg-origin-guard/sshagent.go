@@ -28,7 +28,7 @@ func (SSHAgentDialer) ListCerts(ctx context.Context, socket string) ([]Cert, err
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(dialTimeout))
 
 	keys, err := agent.NewClient(conn).List()

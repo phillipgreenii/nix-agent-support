@@ -12,12 +12,11 @@ import (
 )
 
 type cliRig struct {
-	d      Deps
-	out    *bytes.Buffer
-	errb   *bytes.Buffer
-	agent  fakeAgent
-	sp     *fakeSpawner
-	cfgDir string
+	d     Deps
+	out   *bytes.Buffer
+	errb  *bytes.Buffer
+	agent fakeAgent
+	sp    *fakeSpawner
 }
 
 func newCLIRig(t *testing.T, cfgText string) *cliRig {

@@ -152,7 +152,7 @@ func runCheck(ctx context.Context, args []string, d Deps, g Guard) int {
 		return reportErr(d, err)
 	}
 	if *asJSON {
-		_ = json.NewEncoder(d.Stdout).Encode(resultJSON{res.Realm, res.Available, res.Reason, res.Since, res.LastError})
+		_ = json.NewEncoder(d.Stdout).Encode(resultJSON(res))
 	} else if res.Available {
 		fmt.Fprintf(d.Stdout, "available realm=%s reason=%s\n", res.Realm, res.Reason)
 	} else {

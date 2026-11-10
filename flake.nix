@@ -441,6 +441,13 @@
           pg-probe = final.callPackage ./packages/pg-probe {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-origin-guard: Pattern B (ADR 0008), local `replace => ../pg-failsig`
+          # (the shared failure-signature table and redaction), so default.nix roots
+          # its fileset at packages/ and sets modRoot. One binary: the ssh
+          # ProxyCommand wrapper plus check/status/ignore.
+          pg-origin-guard = final.callPackage ./packages/pg-origin-guard {
+            inherit (goBuilders) mkGoApp;
+          };
           # claude-tool-tracker (docket pg2-aj5iq8): Pattern A (ADR 0008), stdlib only.
           # The tool-event log producer: `append` for the mod and CETA, `hook` for
           # Claude Code command hooks.
@@ -1969,6 +1976,17 @@
               # pass modRoot. Filesets mirror each module's own default.nix.
               patternBGoLints = [
                 (goLint {
+                  module = "pg-origin-guard";
+                  modRoot = "pg-origin-guard";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-origin-guard
+                      ./packages/pg-failsig
+                    ];
+                  };
+                })
+                (goLint {
                   module = "pg-ccaudit";
                   modRoot = "pg-ccaudit";
                   src = lib.fileset.toSource {
@@ -2026,6 +2044,18 @@
               # src/modRoot as patternBGoLints
               # above so the tagged check lints the identical module tree.
               patternBTaggedGoLints = [
+                # pg-origin-guard: integration_test.go carries the `integration` tag.
+                (goLintTagged {
+                  module = "pg-origin-guard";
+                  modRoot = "pg-origin-guard";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-origin-guard
+                      ./packages/pg-failsig
+                    ];
+                  };
+                })
                 (goLintTagged {
                   module = "ccpool";
                   modRoot = "ccpool";
@@ -3353,6 +3383,194 @@
                     jq -e '.groups[].rules[] | select(.uid == "pg-task-focus-sound-failing") | .annotations.description | (contains("pg-osx-notifier") and contains("Notifications") and (contains("afplay") | not) and (contains("osascript") | not))' alerts.json >/dev/null || { echo "FAIL: sound-failing description text" >&2; exit 1; }
                     jq -e '[.. | objects | select(has("folderUid"))] | length == 0' alerts.json >/dev/null || { echo "FAIL: a folderUid is pinned" >&2; exit 1; }
                     jq -e '.uid == "pg-task-focus" and ([.panels[].targets[]?] | length) > 20' ${./packages/pg-task-focus/grafana/pg-task-focus.json} >/dev/null
+                    touch $out
+                  '';
+
+              # darwin/modules/pg-origin-guard: registers the event-file log source
+              # (events-*.jsonl, one file per UTC day) through observability.logSources
+              # at system scope, following the HM enable flag across home-manager.users.
+              # Same stub technique as test-pg-keep-awake-darwin-module.
+              test-pg-origin-guard-darwin-module =
+                let
+                  evalDarwin =
+                    {
+                      obsEnable,
+                      users,
+                    }:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-origin-guard/default.nix
+                        {
+                          options = {
+                            home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            phillipgreenii.observability = {
+                              enable = lib.mkOption {
+                                type = lib.types.bool;
+                                default = false;
+                              };
+                              metricsTargets = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              logSources = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              dashboardProviders = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              alertRuleFiles = lib.mkOption {
+                                type = lib.types.listOf lib.types.path;
+                                default = [ ];
+                              };
+                            };
+                          };
+                          config = {
+                            phillipgreenii.observability.enable = obsEnable;
+                            home-manager.users = users;
+                          };
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  guardUser = enable: {
+                    phillipgreenii.programs.pg-origin-guard.enable = enable;
+                  };
+                  enabled = evalDarwin {
+                    obsEnable = true;
+                    users.alice = guardUser true;
+                  };
+                  guardOff = evalDarwin {
+                    obsEnable = true;
+                    users.alice = guardUser false;
+                  };
+                  noUsers = evalDarwin {
+                    obsEnable = true;
+                    users = { };
+                  };
+                  obsOff = evalDarwin {
+                    obsEnable = false;
+                    users.alice = guardUser true;
+                  };
+                in
+                assert enabled.logSources.pg-origin-guard.serviceName == "pg-origin-guard";
+                assert
+                  enabled.logSources.pg-origin-guard.path == "\${env:XDG_STATE_HOME}/pg-origin-guard/events-*.jsonl";
+                assert guardOff.logSources == { };
+                assert noUsers.logSources == { };
+                assert obsOff.logSources == { };
+                # nothing else is registered (the Grafana rule is a separate change)
+                assert enabled.metricsTargets == { };
+                assert enabled.dashboardProviders == { };
+                assert enabled.alertRuleFiles == [ ];
+                pkgs.runCommand "test-pg-origin-guard-darwin-module-ok" { } ''
+                  # The registered glob matches the file names the tool writes
+                  # (events-YYYY-MM-DD.jsonl) and not its other state files.
+                  glob='${enabled.logSources.pg-origin-guard.path}'
+                  pat="''${glob##*/}"
+                  case events-2026-11-10.jsonl in $pat) ;; *) echo "FAIL: daily file does not match $pat" >&2; exit 1 ;; esac
+                  case events-2026-11-10.jsonl.corrupt in $pat) echo "FAIL: $pat matches a corrupt-moved file" >&2; exit 1 ;; esac
+                  case realms in $pat) echo "FAIL: $pat matches the realms dir" >&2; exit 1 ;; esac
+                  touch $out
+                '';
+
+              # home/programs/pg-origin-guard: the module renders
+              # $XDG_CONFIG_HOME/pg-origin-guard/config.toml for a sample realm, the REAL
+              # package loads it (config errors exit 78, so a bad file fails the module's
+              # own build), installs the binary and registers the tldr page.
+              test-pg-origin-guard-hm-render =
+                let
+                  evalHm =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/pg-origin-guard/default.nix
+                        {
+                          options = {
+                            home.packages = lib.mkOption {
+                              type = lib.types.listOf lib.types.package;
+                              default = [ ];
+                            };
+                            xdg.configFile = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            programs.tldr = {
+                              enable = lib.mkOption {
+                                type = lib.types.bool;
+                                default = true;
+                              };
+                              customPages = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          };
+                        }
+                        { config.phillipgreenii.programs.pg-origin-guard = cfg; }
+                      ];
+                    }).config;
+                  sample = evalHm {
+                    enable = true;
+                    presence.file = "/example/state/host-activity/userpresence.json";
+                    realms.zr = {
+                      match = {
+                        host = "github.com";
+                        user = "org-*";
+                      };
+                      login.backoff = [
+                        "1m"
+                        "2m"
+                      ];
+                    };
+                  };
+                  defaults = evalHm { enable = true; };
+                  off = evalHm { enable = false; };
+                in
+                assert off.home.packages == [ ];
+                assert off.xdg.configFile == { };
+                assert defaults.home.packages == [ pkgs.pg-origin-guard ];
+                assert sample.programs.tldr.customPages.pg-origin-guard.platform == "common";
+                pkgs.runCommand "test-pg-origin-guard-hm-render"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.pg-origin-guard
+                      pkgs.yq-go
+                      pkgs.jq
+                    ];
+                  }
+                  ''
+                    tj() { yq -p toml -o json '.' "$1" | jq -e "$2" >/dev/null; }
+                    sampleCfg=${sample.xdg.configFile."pg-origin-guard/config.toml".source}
+                    tj "$sampleCfg" '.presence.file == "/example/state/host-activity/userpresence.json"' || { echo "FAIL: presence.file" >&2; exit 1; }
+                    tj "$sampleCfg" '.realm.zr.match == {host: "github.com", user: "org-*"}' || { echo "FAIL: realm match" >&2; exit 1; }
+                    tj "$sampleCfg" '.realm.zr.login.backoff == ["1m","2m"] and .realm.zr.login.attempt_timeout == "3m"' || { echo "FAIL: login" >&2; exit 1; }
+                    tj "$sampleCfg" '.breaker.failure_threshold == 2 and .events.retention_days == 14 and .events.heartbeat_interval == "5m"' || { echo "FAIL: defaults" >&2; exit 1; }
+                    # an unset presence file is omitted, so the tool's own default applies
+                    tj ${
+                      defaults.xdg.configFile."pg-origin-guard/config.toml".source
+                    } '.presence | has("file") | not' || { echo "FAIL: presence.file default" >&2; exit 1; }
+
+                    # the real binary reads the rendered file and reports the realm
+                    export HOME="$TMPDIR/home" XDG_STATE_HOME="$TMPDIR/state" XDG_CONFIG_HOME="$TMPDIR/config"
+                    mkdir -p "$HOME" "$XDG_CONFIG_HOME/pg-origin-guard"
+                    cat "$sampleCfg" > "$XDG_CONFIG_HOME/pg-origin-guard/config.toml"
+                    unset SSH_AUTH_SOCK
+                    rc=0; pg-origin-guard status >out.txt 2>&1 || rc=$?
+                    [ "$rc" != 78 ] || { cat out.txt >&2; echo "FAIL: rendered config rejected" >&2; exit 1; }
+                    grep -q zr out.txt || { cat out.txt >&2; echo "FAIL: status does not list realm zr" >&2; exit 1; }
+                    rc=0; pg-origin-guard check --realm zr >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 75 ] || { cat out.txt >&2; echo "FAIL: check with no agent should exit 75, got $rc" >&2; exit 1; }
+
+                    # a config the tool rejects is exit 78 (what the module build relies on)
+                    printf '[breaker]\nfailure_threshold = 0\n' > "$XDG_CONFIG_HOME/pg-origin-guard/config.toml"
+                    rc=0; pg-origin-guard status >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 78 ] || { cat out.txt >&2; echo "FAIL: bad config should exit 78, got $rc" >&2; exit 1; }
                     touch $out
                   '';
 
@@ -6365,6 +6583,61 @@
                 pname = "pg-failsig-go-tests";
                 src = ./packages/pg-failsig;
                 gomod2nixToml = ./packages/pg-failsig/gomod2nix.toml;
+              };
+
+              # pg-origin-guard - whole-module Go test gate (unit tier). Pattern B: the
+              # `replace => ../pg-failsig` puts both modules in one rooted store tree.
+              # The `integration`-tagged tier is NOT in this gate; it has its own check
+              # (pg-origin-guard-integration-tests below). The unit tests use real
+              # flock and an in-process ssh agent, no network and no real credentials.
+              pg-origin-guard-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-origin-guard-go-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    (lib.fileset.difference ./packages/pg-origin-guard ./packages/pg-origin-guard/docs)
+                    ./packages/pg-failsig
+                  ];
+                };
+                modRoot = "pg-origin-guard";
+                gomod2nixToml = ./packages/pg-origin-guard/gomod2nix.toml;
+                # git: the remote resolver test runs real git.
+                testDeps = [ pkgs.git ];
+              };
+
+              # pg-origin-guard integration tier (`//go:build integration`, V-4: never in
+              # the unit gate above). Real OpenSSH ssh-agent and ssh-keygen with a
+              # throwaway CA, the real binary under real git and ssh, process groups and
+              # multi-process lock races; no network, no real origin, no browser. The
+              # pty-driven cases need a pseudo-terminal; the tests skip (not fail) when
+              # none can be opened, so a green check proves only what ran: read the log
+              # (-v) for SKIP lines. -p 1 and -count=1 keep the timing-sensitive cases
+              # from competing for the sandbox's CPU.
+              pg-origin-guard-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-origin-guard-integration-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    (lib.fileset.difference ./packages/pg-origin-guard ./packages/pg-origin-guard/docs)
+                    ./packages/pg-failsig
+                  ];
+                };
+                modRoot = "pg-origin-guard";
+                gomod2nixToml = ./packages/pg-origin-guard/gomod2nix.toml;
+                # ps: the login-holder start-time token reads `ps -o lstart=`; the sandbox
+                # PATH has no /bin, so ps comes from procps (Linux) or adv_cmds (darwin).
+                testDeps = [
+                  pkgs.git
+                  pkgs.openssh
+                ]
+                ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps
+                ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.darwin.adv_cmds;
+                testFlags = [
+                  "-tags"
+                  "integration"
+                  "-count=1"
+                  "-v"
+                ];
               };
 
               # ceta integration suite — the `//go:build integration` tests in
@@ -19369,6 +19642,7 @@
               pg-review
               pg-review-router-adapter
               pg-probe
+              pg-origin-guard
               pg-claude-code-recorder
               pg-claude-control
               claude-tool-tracker

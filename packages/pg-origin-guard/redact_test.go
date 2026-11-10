@@ -43,7 +43,7 @@ func TestRedactTailRedactsBeforeCutting(t *testing.T) {
 	secret := strings.Repeat("ab12cd34", 8)
 	text := strings.Repeat("x ", 10) + secret + " " + strings.Repeat("y ", 132) + "y"
 	cutAt := len(text) - MaxErrorLen
-	if idx := strings.Index(text, secret); !(idx < cutAt && cutAt < idx+len(secret)) {
+	if idx := strings.Index(text, secret); idx >= cutAt || cutAt >= idx+len(secret) {
 		t.Fatalf("test setup: secret [%d,%d) must straddle the cut at %d", idx, idx+len(secret), cutAt)
 	}
 	got := RedactTail(text)
