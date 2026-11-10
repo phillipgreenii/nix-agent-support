@@ -215,6 +215,12 @@ in
         runAtLoad = true;
         keepAlive = true;
         serviceConfig = {
+          # launchd SIGKILLs a job ExitTimeOut seconds after SIGTERM (default 5).
+          # serve's worst-case shutdown is two sequential shutdownGrace (5 s)
+          # waits in cmd/pg-desk/serve.go: srv.Shutdown, then the deferred
+          # telemetry flush, so 10 s; 20 is that plus a 10 s margin, under
+          # launchd's silent 60 s clamp. Keep the two in step.
+          ExitTimeOut = 20;
           EnvironmentVariables =
             emitterEnv
             // lib.optionalAttrs (pgDeskConfigSource != null) {

@@ -13498,6 +13498,10 @@
                 # TCP address), merged beside the existing EnvironmentVariables
                 # (PG_DESK_CONFIG survives); off leaves the variable out and the rest
                 # of the attribute exactly as before.
+                # two sequential 5 s shutdown waits plus margin, under launchd's 60 s clamp
+                assert
+                  darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.ExitTimeOut
+                  == 20;
                 assert
                   darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.EnvironmentVariables.PG_DESK_PPROF_ADDR
                   == "/Users/tester/.local/state/pg-desk/pprof.sock";
