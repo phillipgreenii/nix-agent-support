@@ -121,7 +121,7 @@ func TestRunRecord_IssueWithNoLinkedPRRecordsNoop(t *testing.T) {
 	path := redirectRunRecord(t)
 	origConfigLoad, origStoreOpen := runConfigLoad, runStoreOpen
 	t.Cleanup(func() { runConfigLoad, runStoreOpen = origConfigLoad, origStoreOpen })
-	st := store.OpenForTest(t)
+	st := store.OpenNewSchemaForTest(t)
 	runConfigLoad = func(ctx context.Context) (*config.Config, error) {
 		cfg := issueTestCfg()
 		cfg.TicketPatterns = []string{"PROJ-[0-9]+"}

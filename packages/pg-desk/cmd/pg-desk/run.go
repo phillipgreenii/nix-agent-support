@@ -168,6 +168,13 @@ func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 		return pipeline.TagStage(runStageStoreOpen, fmt.Errorf("run: open store: %w", err))
 	}
 	defer func() { _ = st.Close() }()
+	// Schema 2 is required by every `run` entity type, so refuse a schema-1
+	// store before anything is written: `run thread` writes xrefs (through the
+	// still schema-dual UpsertXref) before its final re-interpretation, and a
+	// late refusal would leave them behind.
+	if err := st.RequireNewSchema(); err != nil {
+		return pipeline.TagStage(runStageStoreOpen, fmt.Errorf("run: %w", err))
+	}
 
 	p := newRunPipeline(cfg, st, cmd.ErrOrStderr(), rec)
 	change := gather.ChangeKind(runF.change)

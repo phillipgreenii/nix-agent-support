@@ -25,7 +25,7 @@ import (
 func TestServePayloadGoldenOverCorpus(t *testing.T) {
 	s := store.OpenNewSchemaForTest(t)
 	cfg := corpus.Config()
-	p := pipeline.New(cfg, s, pipeline.WithClock(corpus.Clock()), pipeline.WithLogWriter(io.Discard))
+	p := pipeline.New(cfg, s, pipeline.WithStamp("corpus/stamp"), pipeline.WithClock(corpus.Clock()), pipeline.WithLogWriter(io.Discard))
 	fxs, err := corpus.Fixtures()
 	if err != nil {
 		t.Fatal(err)

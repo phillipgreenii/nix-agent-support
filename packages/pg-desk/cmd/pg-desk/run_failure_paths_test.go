@@ -200,7 +200,7 @@ func runThreadDirect(t *testing.T, st *store.Store, text, threadID string, chang
 	runThreadShow = func(context.Context, string) (threadShowResult, bool, error) {
 		return threadShowResult{Text: text, AsOf: "2026-09-18T00:00:00Z"}, false, nil
 	}
-	return runThread(context.Background(), pipeline.New(cfg, st), cfg, st, threadID, change)
+	return runThread(context.Background(), pipeline.New(cfg, st, pipeline.WithStamp("test/stamp")), cfg, st, threadID, change)
 }
 
 func newThreadStore(t *testing.T) *store.Store {
@@ -329,7 +329,7 @@ func TestRunThreadFetchErrorIsWrappedAndWritesNothing(t *testing.T) {
 		return threadShowResult{}, false, boom
 	}
 	cfg := jiraTestCfg()
-	err := runThread(context.Background(), pipeline.New(cfg, st), cfg, st, "T17", gather.ChangeChanged)
+	err := runThread(context.Background(), pipeline.New(cfg, st, pipeline.WithStamp("test/stamp")), cfg, st, "T17", gather.ChangeChanged)
 	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "run thread T17: fetch thread") {
 		t.Fatalf("err = %v", err)
 	}

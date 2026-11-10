@@ -164,7 +164,17 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := q.persist("pr", "1", facts, row); err != nil {
+	factsJSON, err := json.Marshal(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.store.UpsertEntity(store.Entity{
+		Repo: "acme/widgets", EntityType: "pr", EntityID: "1", Facts: string(factsJSON),
+		AsOf: facts.AsOf, ContentHash: contentHash(factsJSON), HeadSHA: facts.HeadSHA,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.writeInterpretation(row, contentHash(factsJSON)); err != nil {
 		t.Fatal(err)
 	}
 	viaPR, _, _ := st.GetEntity("acme/widgets", "pr", "1")

@@ -247,45 +247,27 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 		return err
 	}
 
-	entity, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
-	if err != nil {
-		err = TagStage(StageLoadFacts, err)
-		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: interpret-only get entity %s %s: %w", entityType, entityID, err)
+	opts := ReinterpretOptions{Origin: "run"}
+	if h := p.seams.interpretOnlyWrite; h != nil {
+		opts.beforeWrite = h
 	}
-	if !found {
+	res, err := ReinterpretStored(ctx, p.store, p.cfg, p.clock, entityType, entityID, opts)
+	if err != nil {
+		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
+		return err
+	}
+	if !res.Found {
 		// Decision (bead pg2-4i9ywp): a never-gathered entity is a quiet
 		// "noop", not a load_facts error. PR facts are gathered by the
-		// daemon-backed PR feed (outside this repo; `run pr` and the sync
-		// stage are gone), so an issue event can legitimately arrive for a
-		// newly linked PR before that feed has stored it. There is nothing to
-		// re-interpret yet, and the feed's own gather interprets the PR when
-		// it lands. Gathering here instead would resurrect the retired
-		// gather-from-run-issue path (Gatherer.Gather is the feed's job).
+		// daemon-backed PR feed, so an issue event can legitimately arrive
+		// for a newly linked PR before that feed has stored it. There is
+		// nothing to re-interpret yet, and the feed's own gather interprets
+		// the PR when it lands. Gathering here instead would resurrect the
+		// retired gather-from-run-issue path.
 		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "noop", "", nil, runStart)
 		return nil
 	}
-
-	var facts gather.Facts
-	if err := json.Unmarshal([]byte(entity.Facts), &facts); err != nil {
-		err = TagStage(StageLoadFacts, err)
-		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: interpret-only decode stored facts %s %s: %w", entityType, entityID, err)
-	}
-
-	row, interp, err := interpretEntity(p.repo(), p.cfg, p.clock, entityType, entityID, gather.GatherResult{Payload: json.RawMessage(entity.Facts), AsOf: entity.AsOf})
-	if err != nil {
-		err = TagStage(StageInterpret, err)
-		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: interpret-only interpret %s %s: %w", entityType, entityID, err)
-	}
-
-	err = p.persistInterpretOnly(entityType, entityID, facts, row)
-	if err != nil {
-		err = TagStage(StageStore, err)
-		p.logRunObs(pathInterpretOnly, entityType, entityID, change, "error", "", err, runStart)
-		return fmt.Errorf("pipeline: interpret-only store %s %s: %w", entityType, entityID, err)
-	}
+	interp := res.Interp
 
 	outcome := "ok"
 	if interp.Degraded != "" {
@@ -311,64 +293,6 @@ func (p *Pipeline) repo() string {
 		return ""
 	}
 	return p.cfg.Repos[0].Remote
-}
-
-// persistInterpretOnly is RunInterpretOnly's store write: persist, behind the
-// interpretOnlyWrite test seam.
-func (p *Pipeline) persistInterpretOnly(entityType, entityID string, facts gather.Facts, row store.Interpretation) error {
-	if h := p.seams.interpretOnlyWrite; h != nil {
-		if err := h(); err != nil {
-			return err
-		}
-	}
-	return p.persist(entityType, entityID, facts, row)
-}
-
-// persist writes facts and interp to the entity and interpretation
-// tables. Never touches the annotation table — see the package doc comment.
-func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, row store.Interpretation) error {
-	// Schema 2 only: checked before the entity write so a schema-1 store gets
-	// the cutover message with nothing written.
-	if err := p.store.RequireNewSchema(); err != nil {
-		return err
-	}
-	repo := p.repo()
-
-	factsJSON, err := json.Marshal(facts)
-	if err != nil {
-		return fmt.Errorf("marshal facts: %w", err)
-	}
-	// entity.as_of prefers the data's own as-of (from pg-connector, via
-	// gather); it falls back to the interpretation's clock-stamped as-of
-	// only when gather returned no data at all (the removed/not_found
-	// case, where Facts.AsOf is empty) — the column is NOT NULL, so it
-	// must always carry a value.
-	asOf := facts.AsOf
-	if asOf == "" {
-		asOf = row.AsOf
-	}
-	hash := contentHash(factsJSON)
-	if err := p.store.UpsertEntity(store.Entity{
-		Repo:       repo,
-		EntityType: entityType,
-		EntityID:   entityID,
-		Facts:      string(factsJSON),
-		AsOf:       asOf,
-		// Stale: no wire-level staleness field reaches gather.Facts in
-		// this phase (gather.Facts carries no such field) — always false,
-		// the same "no data source yet" default interpret.go documents
-		// for GateState.
-		Stale:       false,
-		ContentHash: hash,
-		HeadSHA:     facts.HeadSHA,
-	}); err != nil {
-		return fmt.Errorf("upsert entity: %w", err)
-	}
-
-	if err := p.writeInterpretation(row, hash); err != nil {
-		return fmt.Errorf("upsert interpretation: %w", err)
-	}
-	return nil
 }
 
 // unstampedWarn limits the "writing through a handle with no stamp" warning

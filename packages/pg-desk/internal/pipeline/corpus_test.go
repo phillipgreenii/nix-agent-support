@@ -50,7 +50,7 @@ func (g corpusGatherer) GatherEntityWatch(context.Context, string, string) (gath
 // whose gatherer for every entity type answers with fx.
 func corpusPipeline(t *testing.T, st *store.Store, fx corpus.Fixture) *Pipeline {
 	t.Helper()
-	p := New(corpus.Config(), st, WithClock(corpus.Clock()), WithLogWriter(io.Discard))
+	p := New(corpus.Config(), st, WithStamp("corpus/stamp"), WithClock(corpus.Clock()), WithLogWriter(io.Discard))
 	g := corpusGatherer{fx}
 	p.entityGatherers = map[string]gather.EntityGatherer{"pr": g, "issue": g, "thread": g}
 	p.extractors = NewExtractorRegistry(p.cfg, p.store, p.repo())

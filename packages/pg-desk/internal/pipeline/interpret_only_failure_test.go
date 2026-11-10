@@ -32,7 +32,7 @@ func TestRunInterpretOnly_StoreWriteFailureIsTaggedLoggedAndWritesNothing(t *tes
 	boom := errors.New("injected store failure")
 	p.seams.interpretOnlyWrite = func() error { return boom }
 	err := p.RunInterpretOnly(context.Background(), "pr", "30", gather.ChangeChanged)
-	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "interpret-only store pr 30") {
+	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "reinterpret store pr 30") {
 		t.Fatalf("err = %v, want the wrapped store failure", err)
 	}
 	if stage, _ := StageOf(err); stage != StageStore {
@@ -79,7 +79,7 @@ func TestRunInterpretOnly_LoadFactsFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		err := p.RunInterpretOnly(context.Background(), "pr", "32", gather.ChangeChanged)
-		if err == nil || !strings.Contains(err.Error(), "interpret-only get entity pr 32") {
+		if err == nil || !strings.Contains(err.Error(), "reinterpret get entity pr 32") {
 			t.Fatalf("err = %v", err)
 		}
 		if stage, _ := StageOf(err); stage != StageLoadFacts {
@@ -99,7 +99,7 @@ func TestRunInterpretOnly_LoadFactsFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		err := p.RunInterpretOnly(context.Background(), "pr", "33", gather.ChangeChanged)
-		if err == nil || !strings.Contains(err.Error(), "interpret-only decode stored facts pr 33") {
+		if err == nil || !strings.Contains(err.Error(), "reinterpret decode stored facts pr 33") {
 			t.Fatalf("err = %v", err)
 		}
 		if stage, _ := StageOf(err); stage != StageLoadFacts {
@@ -119,7 +119,7 @@ func TestRunInterpretOnly_InterpretFailureIsTaggedAndWritesNothing(t *testing.T)
 	seedInterpretOnlyEntity(t, p, "34", gather.Facts{PRShow: []byte(`"not an object"`), AsOf: "2026-09-16T00:00:00Z"})
 
 	err := p.RunInterpretOnly(context.Background(), "pr", "34", gather.ChangeChanged)
-	if err == nil || !strings.Contains(err.Error(), "interpret-only interpret pr 34") {
+	if err == nil || !strings.Contains(err.Error(), "reinterpret interpret pr 34") {
 		t.Fatalf("err = %v", err)
 	}
 	if stage, _ := StageOf(err); stage != StageInterpret {
