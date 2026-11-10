@@ -90,6 +90,11 @@ type Store struct {
 	// gateScope, because the handle is shared.
 	interpStamp atomic.Pointer[string]
 
+	// interpWriteHook, when set, is consulted before each step of the
+	// interpretation write transactions (SetInterpretationWriteHook). TEST
+	// SEAM, nil in production.
+	interpWriteHook func(step InterpretationWriteStep) error
+
 	// faultTableColumns, when set, is consulted at the start of tableColumns;
 	// a non-nil return is that call's error. TEST SEAM, nil in production:
 	// the pragma read cannot otherwise fail on an open handle.

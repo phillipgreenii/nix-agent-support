@@ -169,7 +169,7 @@ func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()), pipeline.WithRunRecordWriter(rec))
+	p := newRunPipeline(cfg, st, cmd.ErrOrStderr(), rec)
 	change := gather.ChangeKind(runF.change)
 
 	switch entityType {

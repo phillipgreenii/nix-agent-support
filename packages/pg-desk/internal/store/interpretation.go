@@ -96,31 +96,7 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 		if i.SyncError != "" {
 			return fmt.Errorf("store: upsert interpretation (%s,%s,%s): SyncError is not stored on the new schema", i.Repo, i.EntityType, i.EntityID)
 		}
-		_, err = s.sql.Exec(
-			`INSERT INTO interpretation (
-			   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
-			   dispositions, approvals, gate_state, match_reasons, panel,
-			   ready_to_promote, degraded, as_of`+stampCol+`
-			 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+stampVal+`)
-			 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
-			   ownership = excluded.ownership,
-			   enrichment = excluded.enrichment,
-			   urgency = excluded.urgency,
-			   category = excluded.category,
-			   dispositions = excluded.dispositions,
-			   approvals = excluded.approvals,
-			   gate_state = excluded.gate_state,
-			   match_reasons = excluded.match_reasons,
-			   panel = excluded.panel,
-			   ready_to_promote = excluded.ready_to_promote,
-			   degraded = excluded.degraded,
-			   as_of = excluded.as_of`+stampSet,
-			append([]any{
-				i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
-				i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
-				i.ReadyToPromote, i.Degraded, i.AsOf,
-			}, stampArgs...)...,
-		)
+		err = upsertInterpretationNew(s.sql, i, haveStamp, s.InterpStamp())
 	} else {
 		_, err = s.sql.Exec(
 			`INSERT INTO interpretation (
@@ -230,4 +206,50 @@ func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Int
 	interp.SyncError = syncError.String
 	interp.InterpVersion = stamp.String
 	return interp, true, nil
+}
+
+// execer is the Exec half of *sql.DB and *sql.Tx.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// upsertInterpretationNew is the ONE statement that writes an interpretation
+// row on the new schema (no sync_error column). WriteInterpretation runs it
+// inside its transaction; UpsertInterpretation (the schema-dual seeding and
+// cutover-test writer, not called from production code) runs it on the handle.
+// stamp is written into interp_version (NULL when empty) when haveStamp, i.e.
+// when the table has the column.
+func upsertInterpretationNew(ex execer, i Interpretation, haveStamp bool, stamp string) error {
+	stampCol, stampVal, stampSet := "", "", ""
+	var stampArgs []any
+	if haveStamp {
+		stampCol, stampVal, stampSet = ", interp_version", ", ?", ", interp_version = excluded.interp_version"
+		stampArgs = []any{nullableString(stamp)}
+	}
+	_, err := ex.Exec(
+		`INSERT INTO interpretation (
+		   repo, entity_type, entity_id, ownership, enrichment, urgency, category,
+		   dispositions, approvals, gate_state, match_reasons, panel,
+		   ready_to_promote, degraded, as_of`+stampCol+`
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+stampVal+`)
+		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
+		   ownership = excluded.ownership,
+		   enrichment = excluded.enrichment,
+		   urgency = excluded.urgency,
+		   category = excluded.category,
+		   dispositions = excluded.dispositions,
+		   approvals = excluded.approvals,
+		   gate_state = excluded.gate_state,
+		   match_reasons = excluded.match_reasons,
+		   panel = excluded.panel,
+		   ready_to_promote = excluded.ready_to_promote,
+		   degraded = excluded.degraded,
+		   as_of = excluded.as_of`+stampSet,
+		append([]any{
+			i.Repo, i.EntityType, i.EntityID, i.Ownership, i.Enrichment, i.Urgency, i.Category,
+			i.Dispositions, i.Approvals, i.GateState, i.MatchReasons, i.Panel,
+			i.ReadyToPromote, i.Degraded, i.AsOf,
+		}, stampArgs...)...,
+	)
+	return err
 }

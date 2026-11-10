@@ -44,6 +44,9 @@ func newRunStore(t *testing.T, cfg *config.Config) (st *store.Store, reopen func
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}
+	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
+		t.Fatalf("cutover test store: %v", err)
+	}
 	t.Cleanup(func() { _ = st.Close() })
 	runStoreOpen = func() (*store.Store, error) { return store.Open(dbPath) }
 	return st, func() *store.Store {

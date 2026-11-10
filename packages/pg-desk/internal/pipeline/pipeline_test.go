@@ -49,7 +49,7 @@ func minimalFacts(t *testing.T, pr map[string]any) gather.Facts {
 
 func newTestPipeline(t *testing.T, g gatherer, out *bytes.Buffer, opts ...Option) *Pipeline {
 	t.Helper()
-	st := store.OpenForTest(t)
+	st := store.OpenNewSchemaForTest(t)
 	p := New(testCfg(), st, opts...)
 	p.gatherer = g
 	if out != nil {

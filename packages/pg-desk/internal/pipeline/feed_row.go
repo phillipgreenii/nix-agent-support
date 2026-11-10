@@ -310,7 +310,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 	}
 	if err := p.finishEntityChange(repo, issueEntityType, c.entityID, postCommit{
 		observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
-		interp: interpRow, haveLinks: haveLinks, newLinks: newLinks,
+		interp: interpRow, contentHash: hash, haveLinks: haveLinks, newLinks: newLinks,
 	}); err != nil {
 		return feedOutcome{}, err
 	}

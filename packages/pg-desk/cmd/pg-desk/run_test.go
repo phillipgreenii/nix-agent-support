@@ -170,6 +170,9 @@ func TestRunCmdIssue_ResolvesAndReinterprets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}
+	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
+		t.Fatalf("cutover test store: %v", err)
+	}
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 	seedPRFacts(t, st, "acme/widgets#7")
 
@@ -227,7 +230,7 @@ func TestRunCmdIssue_ResolveFailureReturnsClearError(t *testing.T) {
 
 	cfg := issueTestCfg()
 	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
-	st := store.OpenForTest(t)
+	st := store.OpenNewSchemaForTest(t)
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 
 	wantErr := errors.New("beadref: bead unresolvable-1 (title \"some other bead\") matches no known bead shape (anchor, feedback-cycle, review-request, or a title-adopted merge-request)")
@@ -347,6 +350,9 @@ func TestRunCmdIssue_JiraTicketKey_ResolvesViaXrefAndReinterprets(t *testing.T) 
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
 	}
+	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
+		t.Fatalf("cutover test store: %v", err)
+	}
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 	seedPRFacts(t, st, "acme/widgets#7")
 	seedXref(t, st, "acme/widgets#7", "PROJ-99")
@@ -396,7 +402,7 @@ func TestRunCmdIssue_JiraTicketKey_NoLinkedPR_IsNoop(t *testing.T) {
 
 	cfg := jiraTestCfg()
 	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
-	st := store.OpenForTest(t)
+	st := store.OpenNewSchemaForTest(t)
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 
 	cmd, _, err := rootCmd.Find([]string{"run"})
@@ -424,7 +430,7 @@ func TestRunCmdIssue_NonJiraShapedID_StillUsesBeadsPath(t *testing.T) {
 
 	cfg := jiraTestCfg()
 	runConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
-	st := store.OpenForTest(t)
+	st := store.OpenNewSchemaForTest(t)
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 	seedPRFacts(t, st, "acme/widgets#7")
 
@@ -475,6 +481,9 @@ func setupRunThreadTest(t *testing.T, cfg *config.Config, show threadShowResult,
 	st, err = store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
+	}
+	if err := st.Cutover(); err != nil { // interpretation writes require schema 2
+		t.Fatalf("cutover test store: %v", err)
 	}
 	runStoreOpen = func() (*store.Store, error) { return st, nil }
 	return st, dbPath

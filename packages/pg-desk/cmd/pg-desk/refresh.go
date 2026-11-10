@@ -30,7 +30,7 @@ const refreshOrigin = "pg-desk"
 // newRefreshHydrator builds the hydrator refreshEntity uses; tests replace it
 // to observe the call.
 var newRefreshHydrator = func(cfg *config.Config, st *store.Store) changes.Hydrator {
-	return pipeline.New(cfg, st)
+	return pipeline.New(cfg, st, stampOption(cfg))
 }
 
 func init() {

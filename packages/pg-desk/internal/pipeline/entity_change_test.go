@@ -262,6 +262,7 @@ func TestRunEntityChange_RemovedObservedStateWritesAndClearsLinks(t *testing.T) 
 
 func TestRunEntityChange_OldSchemaStoreRefused(t *testing.T) {
 	p := newTestPipeline(t, nil, nil)
+	p.store = store.OpenForTest(t) // version 1: newTestPipeline's store is cut over
 	p.entityGatherers = map[string]gather.EntityGatherer{
 		"issue": funcEntityGatherer(func(gather.ChangeKind) (gather.GatherResult, error) {
 			t.Fatal("gather must not run on an old-schema store")

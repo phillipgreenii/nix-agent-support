@@ -397,7 +397,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 	// interpretation, and the derived-link replacement LAST.
 	if err := p.finishEntityChange(repo, entityType, entityID, postCommit{
 		observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
-		interp: interpRow, haveLinks: haveLinks, newLinks: newLinks,
+		interp: interpRow, contentHash: newSnap.ContentHash, haveLinks: haveLinks, newLinks: newLinks,
 	}); err != nil {
 		return res, err
 	}
@@ -412,8 +412,12 @@ type postCommit struct {
 	own        classify.WorkLookup
 	at         string
 	interp     store.Interpretation
-	haveLinks  bool
-	newLinks   []store.XrefLink
+	// contentHash is the entity.content_hash the interpretation was derived
+	// from (the hash just committed); the interpretation write is skipped only
+	// when the stored hash differs.
+	contentHash string
+	haveLinks   bool
+	newLinks    []store.XrefLink
 }
 
 // finishEntityChange runs the steps that follow the entity's own commit, in
@@ -429,7 +433,7 @@ func (p *Pipeline) finishEntityChange(repo, entityType, entityID string, pc post
 	if err := p.appendLocalRecords(repo, entityType, entityID, pc.observed, pc.propagate, pc.otherLinks, pc.own, pc.at); err != nil {
 		return err
 	}
-	if err := p.store.UpsertInterpretation(pc.interp); err != nil {
+	if err := p.writeInterpretation(pc.interp, pc.contentHash); err != nil {
 		return fmt.Errorf("pipeline: persist interpretation %s %s: %w", entityType, entityID, err)
 	}
 	if pc.haveLinks {

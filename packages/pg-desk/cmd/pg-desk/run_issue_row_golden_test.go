@@ -12,13 +12,14 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/corpus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// The three `run issue` cases in which hydrateJiraIssue reaches
+// The `run issue` cases in which hydrateJiraIssue reaches
 // pipeline.RunGenericEntity write an interpretation row; each is pinned
-// byte-exact over the same issue, so the three cases and the corpus path agree
-// today and only a task that names them may change a byte.
+// byte-exact over the same issue, so the cases and the corpus path agree and
+// only a task that names them may change a byte. The schema-1 case is gone:
+// the interpretation write requires schema 2 (it is refused with the cutover
+// message, pinned in TestRunGenericEntity_OldSchemaStoreIsRefusedAndWritesNothing).
 func TestRunIssueHydrationRowGoldens(t *testing.T) {
 	const id = "PROJ-31"
 	body := fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":4,"result":{"id":%q,"title":"t","owner":"me","assignee":"x","issue_type":"task","state":"open","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`, id)
@@ -26,32 +27,18 @@ func TestRunIssueHydrationRowGoldens(t *testing.T) {
 		name   string
 		golden string
 		setup  func(f *backendFixture)
-		// oldSchema opens the seeded store at the pre-cutover schema.
-		oldSchema bool
 	}{
 		{"no owning backend", "run_issue_no_owning", func(f *backendFixture) {
 			f.cfg.Watch.Issue.Backends = nil
-		}, false},
-		{"old schema with an owning backend", "run_issue_old_schema", func(*backendFixture) {}, true},
-		{"non-owning backend", "run_issue_non_owning", func(f *backendFixture) { f.setBackend(id, "beads-a") }, false},
+		}},
+		{"non-owning backend", "run_issue_non_owning", func(f *backendFixture) { f.setBackend(id, "beads-a") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newBackendFixture(t, id)
 			f.write("show-"+id+".json", body)
 			tc.setup(f)
-			open := func() (*store.Store, error) { return deskStoreOpen() }
-			if tc.oldSchema {
-				path := filepath.Join(t.TempDir(), "old.db")
-				store.SetSynchronousForTests("OFF")
-				s, err := store.Open(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_ = s.Close()
-				open = func() (*store.Store, error) { return store.Open(path) }
-			}
-			st, err := open()
+			st, err := deskStoreOpen()
 			if err != nil {
 				t.Fatal(err)
 			}

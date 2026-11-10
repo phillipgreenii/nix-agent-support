@@ -30,6 +30,20 @@ func failTableWrites(t *testing.T, st *store.Store, op, table string) {
 	}
 }
 
+// failBackendColumnWrites makes every UPDATE that names entity.backend fail,
+// leaving the version-lock UPDATE of an interpretation write alone.
+func failBackendColumnWrites(t *testing.T, st *store.Store) {
+	t.Helper()
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)", st.Path()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`CREATE TRIGGER inject_fail_backend BEFORE UPDATE OF backend ON entity BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatalf("install failure trigger: %v", err)
+	}
+}
+
 func dropTable(t *testing.T, st *store.Store, table string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)", st.Path()))
@@ -171,7 +185,7 @@ func TestHydrateJiraIssueUnresolvedBackendIsHydratedAndLeftNull(t *testing.T) {
 func TestHydrateJiraIssueBackendColumnWriteFailureIsReturned(t *testing.T) {
 	f := newBackendFixture(t)
 	f.write("show-PROJ-28.json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PROJ-28","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
-	failTableWrites(t, f.seed, "UPDATE", "entity")
+	failBackendColumnWrites(t, f.seed)
 	err := f.hydrateJira(t, "PROJ-28", gather.ChangeAdded)
 	if err == nil || !strings.Contains(err.Error(), "write backend beads-a") {
 		t.Fatalf("err = %v, want the column write failure", err)

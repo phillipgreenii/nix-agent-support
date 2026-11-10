@@ -157,7 +157,7 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	}
 
 	// Same facts through the PR path on a fresh store.
-	st := store.OpenForTest(t)
+	st := store.OpenNewSchemaForTest(t)
 	q := New(&config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "acme/widgets"}}}, st)
 	q.clock = p.clock
 	row, _, err := interpretEntity(q.repo(), q.cfg, q.clock, "pr", "1", gather.GatherResult{Payload: payload, AsOf: facts.AsOf})
@@ -173,10 +173,10 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	}
 }
 
-// A store that has not been cut over has no derived-link tables: hydration
-// still writes the entity and interpretation rows and skips the link rebuild,
-// so `run issue` can hold issue entities before the cutover.
-func TestRunGenericEntity_OldSchemaStoreWritesRowsAndSkipsLinks(t *testing.T) {
+// A store that has not been cut over is refused with the cutover message and
+// nothing is written (INV-REINTERPRET-12): schema 1 is removed from every
+// interpretation write path.
+func TestRunGenericEntity_OldSchemaStoreIsRefusedAndWritesNothing(t *testing.T) {
 	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{
 		"issue": fakeEntityGatherer{result: issueResult(t)},
 	})
@@ -184,13 +184,14 @@ func TestRunGenericEntity_OldSchemaStoreWritesRowsAndSkipsLinks(t *testing.T) {
 	if err := p.store.RequireNewSchema(); !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("precondition: want an old-schema store, got %v", err)
 	}
-	if err := p.RunGenericEntity(context.Background(), "issue", "i-1", gather.ChangeAdded); err != nil {
-		t.Fatalf("RunGenericEntity on an old-schema store: %v", err)
+	err := p.RunGenericEntity(context.Background(), "issue", "i-1", gather.ChangeAdded)
+	if !errors.Is(err, store.ErrOldSchema) || !strings.Contains(err.Error(), "pg-desk migrate --cutover") {
+		t.Fatalf("RunGenericEntity on an old-schema store: %v, want the cutover refusal", err)
 	}
-	if _, found, err := p.store.GetEntity("acme/widgets", "issue", "i-1"); err != nil || !found {
-		t.Fatalf("GetEntity found=%v err=%v", found, err)
+	if _, found, err := p.store.GetEntity("acme/widgets", "issue", "i-1"); err != nil || found {
+		t.Fatalf("GetEntity found=%v err=%v, want nothing written", found, err)
 	}
-	if _, found, err := p.store.GetInterpretation("acme/widgets", "issue", "i-1"); err != nil || !found {
-		t.Fatalf("GetInterpretation found=%v err=%v", found, err)
+	if _, found, err := p.store.GetInterpretation("acme/widgets", "issue", "i-1"); err != nil || found {
+		t.Fatalf("GetInterpretation found=%v err=%v, want nothing written", found, err)
 	}
 }

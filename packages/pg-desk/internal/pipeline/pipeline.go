@@ -29,9 +29,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -325,6 +327,11 @@ func (p *Pipeline) persistInterpretOnly(entityType, entityID string, facts gathe
 // persist writes facts and interp to the entity and interpretation
 // tables. Never touches the annotation table — see the package doc comment.
 func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, row store.Interpretation) error {
+	// Schema 2 only: checked before the entity write so a schema-1 store gets
+	// the cutover message with nothing written.
+	if err := p.store.RequireNewSchema(); err != nil {
+		return err
+	}
 	repo := p.repo()
 
 	factsJSON, err := json.Marshal(facts)
@@ -340,6 +347,7 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, row 
 	if asOf == "" {
 		asOf = row.AsOf
 	}
+	hash := contentHash(factsJSON)
 	if err := p.store.UpsertEntity(store.Entity{
 		Repo:       repo,
 		EntityType: entityType,
@@ -351,16 +359,37 @@ func (p *Pipeline) persist(entityType, entityID string, facts gather.Facts, row 
 		// the same "no data source yet" default interpret.go documents
 		// for GateState.
 		Stale:       false,
-		ContentHash: contentHash(factsJSON),
+		ContentHash: hash,
 		HeadSHA:     facts.HeadSHA,
 	}); err != nil {
 		return fmt.Errorf("upsert entity: %w", err)
 	}
 
-	if err := p.store.UpsertInterpretation(row); err != nil {
+	if err := p.writeInterpretation(row, hash); err != nil {
 		return fmt.Errorf("upsert interpretation: %w", err)
 	}
 	return nil
+}
+
+// unstampedWarn limits the "writing through a handle with no stamp" warning
+// to one per process.
+var unstampedWarn sync.Once
+
+// writeInterpretation is the pipeline's one interpretation write: a hydration
+// (or the interpret-only path) hands the row and the content hash of the facts
+// it was derived from to Store.WriteInterpretation, with no change record
+// (hydration records its own kinds) and no stamp requirement. A write skipped
+// because different facts were committed since is not an error: the newer
+// hydration writes its own row. A handle with no stamp writes NULL and warns
+// once per process, to slog (never to the structured run log).
+func (p *Pipeline) writeInterpretation(row store.Interpretation, hash string) error {
+	if p.store.InterpStamp() == "" {
+		unstampedWarn.Do(func() {
+			slog.Warn("pg-desk: writing an interpretation through a store handle with no stamp; the row will count as behind (a command forgot pipeline.WithStamp)")
+		})
+	}
+	_, err := p.store.WriteInterpretation(row, store.InterpretationWriteOptions{ExpectedHash: hash})
+	return err
 }
 
 // contentHash is this packet's own deterministic content-hash algorithm

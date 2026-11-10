@@ -94,12 +94,13 @@ func TestCorpusRowGoldens_Hydration(t *testing.T) {
 	}
 }
 
-// RunGenericEntity (the `run issue` hydration, on the new schema and on the old
-// one the live store is still on) writes the same row, for every type.
+// RunGenericEntity (the `run issue` hydration) writes the same row, for every
+// type. Schema 1 is gone from every write path (the interpretation write
+// requires schema 2), so only the new schema is characterized here; the
+// refusal on a schema-1 store is pinned in entity_test.go.
 func TestCorpusRowGoldens_RunGenericEntity(t *testing.T) {
 	stores := map[string]func(testing.TB) *store.Store{
 		"new-schema": func(t testing.TB) *store.Store { return store.OpenNewSchemaForTest(t) },
-		"old-schema": func(t testing.TB) *store.Store { return store.OpenForTest(t) },
 	}
 	for _, fx := range mustFixtures(t) {
 		for schema, open := range stores {

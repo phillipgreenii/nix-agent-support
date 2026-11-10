@@ -27,11 +27,20 @@ func finishLink(id string) store.XrefLink {
 	}
 }
 
+// finishHash is the content_hash of the entity row finishPipeline seeds; a
+// postCommit carries it so the interpretation write is not skipped.
+const finishHash = "finish-hash"
+
 func finishPipeline(t *testing.T) *Pipeline {
 	t.Helper()
 	var gerr error
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", nil)
-	return ecPipeline(t, &res, &gerr)
+	p := ecPipeline(t, &res, &gerr)
+	p.store.SeedEntityForTest(t, store.Entity{
+		Repo: ecRepo, EntityType: "issue", EntityID: "i-1",
+		Facts: "{}", AsOf: "2026-09-16T00:00:00Z", ContentHash: finishHash,
+	})
+	return p
 }
 
 // The pinned order is: local records, then the interpretation, then the
@@ -39,7 +48,7 @@ func finishPipeline(t *testing.T) *Pipeline {
 func TestFinishEntityChange_SuccessWritesInterpretationThenLinks(t *testing.T) {
 	p := finishPipeline(t)
 	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
-		interp: finishInterp("i-1", "A"), haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
+		interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if err != nil {
 		t.Fatalf("finishEntityChange: %v", err)
@@ -60,7 +69,7 @@ func TestFinishEntityChange_NoLinksFlagLeavesStoredLinksAlone(t *testing.T) {
 	if err := p.store.ReplaceDerivedXrefs(ecRepo, "issue", "i-1", []store.XrefLink{finishLink("i-1")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A")}); err != nil {
+	if err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A"), contentHash: finishHash}); err != nil {
 		t.Fatal(err)
 	}
 	if links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1"); len(links) != 1 {
@@ -75,7 +84,7 @@ func TestFinishEntityChange_InterpretationWriteFailureSkipsTheLinks(t *testing.T
 	bad := finishInterp("i-1", "A")
 	bad.SyncError = "boom" // refused on the new schema: a real store failure
 	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
-		interp: bad, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
+		interp: bad, contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if err == nil || !strings.Contains(err.Error(), "persist interpretation issue i-1") {
 		t.Fatalf("err = %v, want a persist interpretation error", err)
@@ -94,7 +103,7 @@ func TestFinishEntityChange_LinkFailureKeepsTheInterpretation(t *testing.T) {
 	p := finishPipeline(t)
 	wrong := finishLink("another-entity") // does not start from i-1: the store refuses it
 	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
-		interp: finishInterp("i-1", "A"), haveLinks: true, newLinks: []store.XrefLink{wrong},
+		interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{wrong},
 	})
 	if err == nil || !strings.Contains(err.Error(), "links issue i-1") {
 		t.Fatalf("err = %v, want a links error", err)
@@ -111,7 +120,7 @@ func TestFinishEntityChange_LocalRecordsFailureStopsTheLaterSteps(t *testing.T) 
 	boom := errors.New("injected local records failure")
 	p.seams.appendLocalRecords = func() error { return boom }
 	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
-		observed: true, interp: finishInterp("i-1", "A"), haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
+		observed: true, interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the injected failure", err)

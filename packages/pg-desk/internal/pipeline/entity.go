@@ -77,24 +77,30 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 // "head_sha" key and stores it, for any entity type (types without the key
 // get ""). This keeps a pr row written here identical to the PR path's.
 func (p *Pipeline) persistRaw(entityType, entityID string, payload json.RawMessage, asOf string, row store.Interpretation) (store.Interpretation, error) {
+	// Schema 2 only: checked before the entity write so a schema-1 store gets
+	// the cutover message with nothing written.
+	if err := p.store.RequireNewSchema(); err != nil {
+		return store.Interpretation{}, err
+	}
 	factsJSON, headSHA := factsAndHead(payload)
 
 	if asOf == "" {
 		asOf = row.AsOf
 	}
+	hash := contentHash(factsJSON)
 	if err := p.store.UpsertEntity(store.Entity{
 		Repo:        p.repo(),
 		EntityType:  entityType,
 		EntityID:    entityID,
 		Facts:       string(factsJSON),
 		AsOf:        asOf,
-		ContentHash: contentHash(factsJSON),
+		ContentHash: hash,
 		HeadSHA:     headSHA,
 	}); err != nil {
 		return store.Interpretation{}, fmt.Errorf("upsert entity: %w", err)
 	}
 
-	if err := p.store.UpsertInterpretation(row); err != nil {
+	if err := p.writeInterpretation(row, hash); err != nil {
 		return store.Interpretation{}, fmt.Errorf("upsert interpretation: %w", err)
 	}
 	return row, nil

@@ -12,7 +12,6 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 )
 
 // changesNow is the clock a changes call stamps seen_at and prunes with;
@@ -128,7 +127,7 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 	cmd.SilenceUsage = true
 
 	gatherer := gather.NewGatherer(cfg, st)
-	pl := pipeline.New(cfg, st, pipeline.WithLogWriter(cmd.ErrOrStderr()))
+	pl := newChangesPipeline(cfg, st, cmd.ErrOrStderr())
 	eng := &changes.Engine{
 		Cfg:   cfg,
 		Store: st,
