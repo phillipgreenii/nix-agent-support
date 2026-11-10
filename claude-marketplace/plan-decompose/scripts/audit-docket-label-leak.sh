@@ -27,6 +27,11 @@ returned bead whose issue_type is not `epic` -- a packet (or any other
 non-epic bead) that inherited its parent docket epic's `docket` label
 because a `bd create` for it omitted `--no-inherit-labels`.
 
+With --docket <id> the audit is scoped to that docket's children
+(`bd list --parent <id> ...`), so leaks under OTHER dockets neither
+appear nor change the exit code. Run it scoped after each decomposition;
+the unscoped form audits the whole workspace.
+
 Exit codes:
   0  no leaks found
   2  usage error
@@ -34,6 +39,8 @@ Exit codes:
   1  any other failure (bd/jq missing, `bd list` itself failed, ...)
 
 Options:
+  -d, --docket <id>
+                Scope the audit to the children of this docket
   -j, --json    Emit the leaked beads as a JSON array (id, issue_type, title)
                 instead of a human-readable list
   -h, --help    Show this help message
@@ -46,6 +53,7 @@ die() {
 }
 
 JSON_OUT=0
+DOCKET=""
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +61,11 @@ while [[ $# -gt 0 ]]; do
   -h | --help)
     show_help
     exit 0
+    ;;
+  -d | --docket)
+    [[ $# -ge 2 && -n $2 ]] || die "--docket requires a value" 2
+    DOCKET="$2"
+    shift 2
     ;;
   -j | --json)
     JSON_OUT=1
@@ -78,7 +91,9 @@ done
 command -v bd >/dev/null 2>&1 || die "bd not found on PATH"
 command -v jq >/dev/null 2>&1 || die "jq not found on PATH"
 
-RAW="$(bd list --label docket --status all -n 0 --json)" || die "bd list --label docket failed"
+LIST_ARGS=(list --label docket --status all -n 0 --json)
+[[ -z $DOCKET ]] || LIST_ARGS+=(--parent "$DOCKET")
+RAW="$(bd "${LIST_ARGS[@]}")" || die "bd list --label docket failed"
 
 LEAKS="$(jq -c '[.data[] | select(.issue_type != "epic") | {id, issue_type, title}]' <<<"$RAW")" ||
   die "failed to parse bd list output as JSON"

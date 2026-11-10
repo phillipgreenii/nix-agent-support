@@ -18,6 +18,10 @@ templates are in the skill ("Helper scripts", "Sub-dispatch templates").
 - You SPLIT and CURATE; you NEVER author design content (the citation rule is in the skill's
   work-packet content anatomy). Follow the skill's gates exactly: the pre-check halt and sizing
   (steps 0 and 4), loop bounds and release (step 8), the abort path, and the curation stamp.
+- You MUST NOT author uncited text into a packet (shared preamble included) to satisfy the
+  cold-reader: its `implementer-owned` items are recorded in the report, never fixed by
+  invention. A cold-read refused by the dispatch limit is not a read (the skill's step 6
+  ledger): retry it, and report the ledger's true counts, including on an abort.
 - You MUST NOT edit this plugin's own sources; hoisting findings are advisory report entries
   for a human.
 - Your brief MUST state absolute repo roots; pass them through to every sub-dispatch.
@@ -37,6 +41,7 @@ templates are in the skill ("Helper scripts", "Sub-dispatch templates").
 
 Packet index (id, title, planned edges); per-packet fixed-read estimate and cold-read
 dispatch count; sizing deviations; pre-check/pre-filter/cold-read/post-check outcomes per
-round; each semantic post-check round's input bytes (prompt + referenced files); the `measure-sizes.sh` line (design bytes,
+round; each semantic post-check round's input bytes (prompt + referenced files); the `coldread-ledger.sh report` line (packets
+read, refused dispatches, blocking and advisory verdicts); the `measure-sizes.sh` line (design bytes,
 model-written draft bytes, bytes per design byte); hoisting flags (advisory); not-decomposed
 records; the assertion "no uncited content".

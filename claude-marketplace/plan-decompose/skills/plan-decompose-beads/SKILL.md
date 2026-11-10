@@ -109,9 +109,10 @@ caller has to remember to chain.
 `--no-inherit-labels` in the example, was still dropped from hand-typed invocations more than
 once (`pg2-2j5ac`'s children `.5`-`.10`, then `pg2-84o3m.31`); the script removes the flag from
 the call site's typing surface. Still run
-`claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh` after any batch of
-`create-packet` calls (read-only; calls `bd list --label docket --status all -n 0 --json` and
-flags every returned bead whose `issue_type` is not `epic`): it is a second net that also catches
+`claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh --docket <docket-id>` after
+any batch of `create-packet` calls (read-only; calls `bd list --label docket --status all -n 0
+--json --parent <docket-id>` and flags every returned bead whose `issue_type` is not `epic`;
+always scoped to the docket being decomposed, so other dockets' leaks never fail the run): it is a second net that also catches
 a leak from an operation that still calls `bd create` directly (`create-docket`'s phase-bead
 usage above). Fix a flagged bead with `bd label remove <id> docket` (never re-run
 `create-packet` for it).
@@ -121,6 +122,9 @@ hazard this note already flags applies to phase and trigger beads too — phase 
 `docket` and `phase` labels; trigger beads carry `phase-trigger`. Which label(s) land on a bead
 is controlled by the explicit `--label`/`--no-inherit-labels` flags passed at creation, never by
 the parent's own labels.
+
+**Packet labels**: which repo and project labels a packet carries is stated once, under
+"Packet labels" in the core skill; pass them with `create-packet.sh --label`.
 
 **Revising an already-created packet's content** (core skill mode `decompose` steps 5-7's
 loop-backs to step 3; incident on docket `tc-rjzd3`, fixed as `tc-g7tmr`):
@@ -137,9 +141,13 @@ performs are in "Reconcile restamps" in `references/reconcile-and-report.md`.
 
 ## `wire-ordering`
 
-`bd dep add <blocked> --blocked-by <blocker>`, then a `bd dep list <blocked>` read-back on
-EVERY edge (a reversed edge blocks the wrong issue silently). `bd dep cycles` after bulk
-wiring — it is DATABASE-GLOBAL, so filter its output to this docket's packet ids.
+Run `claude-marketplace/plan-decompose/scripts/wire-edges.sh --edges <file> --actor
+"<session-id>[-<role>]"` (one `<blocked> <blocker>` line per planned edge). For each edge it runs
+`bd dep add <blocked> --blocked-by <blocker>`, then reads it back with `bd dep list <blocked>
+--json` (a reversed edge blocks the wrong issue silently, so a reversed or missing edge fails the
+run, exit 3, after one retry). After the bulk wiring it runs `bd dep cycles`, which is
+DATABASE-GLOBAL, and fails (exit 4) only on a cycle naming this run's packets. Never wire edges
+by hand-typed `bd dep add` calls.
 
 ## `read-packet` / `read-docket-design`
 

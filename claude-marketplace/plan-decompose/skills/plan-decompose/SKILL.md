@@ -144,6 +144,17 @@ record's Open items section.
 **Metric record** (append-only, single line, fixed key order — emitted by implementers at
 closeout): `pd_metrics outcome=<done|blocked|released> escalation-reads=<n> validation-retries=<n> tokens=<k>`
 
+## Packet labels (multi-repo decompositions)
+
+ONE rule, stated here only: a packet carries exactly the repo label (and, where that repo's own
+`CLAUDE.md` defines one, the project label) of the repo its Files land in, passed to
+`create-packet.sh` with `--label`; a packet never carries a label for a repo it does not change,
+and never inherits any label from the docket. So a packet that lands in `nix-agent-support`
+carries `agent-support` (plus its project label), and a packet that lands in another repo
+carries that repo's label and NOT `agent-support`. The label table is the workspace
+`CLAUDE.md`'s "Beads Project Labels" lookup; a packet whose Files span two repos is split
+at the repo boundary (a reviewer can reject one repo's half while approving the other).
+
 ## Work-packet content anatomy
 
 Nine parts, in this order. EVERY substantive clause in parts 2, 3, 5, and 7 MUST end with the
@@ -156,7 +167,11 @@ the block.
 1. **Shared preamble** — global constraints / docket-wide normative text binding this packet,
    VERBATIM, byte-identical and identically ordered across the siblings that share it. A
    verbatim WHOLE design section or table row MUST come from an `assemble-packet.sh` directive
-   (step 3, "Exact excerpts"), never retyped.
+   (step 3, "Exact excerpts"), never retyped. The decomposer MUST NOT add process text to it (an
+   "interface rule", a naming convention, a working agreement) that no design section supports,
+   whether to push packets past the cold-reader or for any other reason: an uncited preamble
+   clause is invention, and the cold-read's `implementer-owned` list (step 6) exists so such
+   choices are recorded instead of papered over.
 2. **Objective** — the end-to-end deliverable, one paragraph, rewritten curation.
 3. **Contract** — _Consumes:_ exact signatures/interfaces used (from predecessor packets or
    existing code). _Produces:_ names, types, behaviors later packets rely on. Neighbors
@@ -167,7 +182,9 @@ the block.
    `assemble-packet.sh` directive (step 3, "Exact excerpts"); verbatim sentences inside curated
    prose stay hand-written. Decision-encoding snippets (schema, state machine) allowed;
    implementation code is not. State the freedom boundary explicitly: anything the design did
-   not decide is the implementer's choice.
+   not decide AND that no other packet depends on (Go identifiers, file and test names, private
+   structure) is the implementer's choice. A choice another packet consumes, or that crosses a
+   repo, wire or process boundary, is a seam decision, never left open (mode `check`).
 6. **Validation (change-scoped)** — exact commands, timeouts, expected results for THIS
    change. NEVER the full pre-landing/pre-push gate. If this packet wires a new or changed
    scheduled/dispatched consumer (a cron/launchd trigger, an event-router query/role pair, a
@@ -230,6 +247,20 @@ deduplication.
    goes to the DISPATCHER of record — the session or agent that invoked this skill (in
    interactive use, the operator's session) — and when a tracking issue is named (the brief
    SHOULD name one) it is ALSO written there via `write-report` so it survives the session.
+
+   **Seam register** (part of step 3, never skipped): run `scripts/check-design.sh --design
+<design file>` (it finds TBD/TODO and "undecided" wording, a non-empty open-items section, a
+   stated count that disagrees with the list under it, and a title version that disagrees with the
+   design file's name), then, for every sketched packet, list each seam the packet exposes (a
+   contract another packet or another repo consumes: threshold and band-edge inclusivity, wire or
+   push envelope, verb reply schema, exit codes, metric names and label sets, config keys, the
+   bodies of ADRs and glossary entries the packet must write) and mark each `decided` (cite the
+   design section) or `undecided`. An undecided seam is a BLOCKING gap, never advisory: it, every
+   `check-design.sh` finding and every count or title mismatch go in the gap report, naming the
+   seam and the packet it blocks, and the run halts BEFORE step 1 so that the design is amended
+   once, up front, rather than after packets exist. Only the explicit operator override of step
+   0 continues past it. A choice that is the implementer's own (see anatomy part 5) is not a seam
+   and is not listed.
 
 ## Mode `decompose`
 
@@ -392,12 +423,26 @@ deduplication.
    packets that step 3 did not fold raises a hoisting flag (advisory, reported, never
    blocking). Failures loop to step 3 (content-only; see "Curation stamp").
 6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet's
-   stored text only (the ASSEMBLED body, never the draft), delivered by file path; output
-   `executable: yes|no` + `missing:` list, plus any assumption the reader had to make about a sibling packet's Consumes/Produces shape
-   that is not pinned by the design or a predecessor's Produces. Dispatch per "Sub-dispatch
-   templates" (Cold-read). Any packet EDITED after its cold-read MUST be cold-read again AND
-   re-sized — an editor holding the full design cannot certify self-containment. This edit is
-   content-only, per step 3 (see "Curation stamp").
+   stored text only (the ASSEMBLED body, never the draft), delivered by file path. The reader
+   has no repo access, so its answer separates `missing:` items tagged `[decision]` (a design
+   decision the text leaves open; blocking) from `implementer-owned:` items (choices the packet
+   leaves to the implementer, or the repo answers; recorded, never blocking), plus any assumption
+   about a sibling packet's Consumes/Produces shape not pinned by the design or a predecessor's
+   Produces. Dispatch per "Sub-dispatch templates" (Cold-read). Run the round through
+   `scripts/coldread-ledger.sh`, never from memory: `init` it with every packet key, dispatch
+   `batch <ledger> 8` at a time (8 is the batch size; one Agent call per key, all in one turn),
+   `dispatched` per call, then `read` each returned answer (it stores the normalized verdict
+   `ok`, `advisory` or `blocking`). A dispatch the Agent tool refuses (the concurrent-subagent
+   limit) is NOT run: record it with `refused`, it stays unread, and the next `batch` offers it
+   again, so keep batching (halve the batch size after a refusal) until `batch` prints nothing.
+   `gate <ledger>` MUST exit 0 before step 7 or any release: exit 3 means an unread packet
+   (never release, never report the packet as read), exit 4 names the packets with a `blocking`
+   verdict, which loop to step 3. The decomposition report (and any abort report) states the
+   ledger's `report` line, so the count of packets actually read is true. A packet whose
+   verdict is `advisory` proceeds; its `implementer-owned` list goes in the report and is never
+   "fixed" by adding uncited text. Any packet EDITED after its cold-read MUST be cold-read again
+   AND re-sized — an editor holding the full design cannot certify self-containment. This edit
+   is content-only, per step 3 (see "Curation stamp").
 7. **Semantic post-check** (one mid-model fresh-eyes agent, read-only; the one role that
    reads the full design AND all packets): (a) coverage both directions — every design
    element lands in a packet or is recorded via `write-report` as deliberately not
@@ -440,9 +485,11 @@ deduplication.
    Cold-read's own bound (same finding twice on a packet ⇒ gap) is UNCHANGED and unaffected
    by any of this.
 
-9. **Wire** the planned ordering (blocked-by direction verified by read-back on EVERY edge; a
-   failed read-back retried once then treated per step 8; cycle check after bulk wiring,
-   output filtered to this docket's packets). At least one packet must be immediately
+9. **Wire** the planned ordering with `scripts/wire-edges.sh --edges <file> --actor <id>` (one
+   `<blocked> <blocker>` line per planned edge): the script reads EVERY edge back (a reversed or
+   missing edge fails the run with exit 3 after one retry, then treated per step 8) and runs
+   the cycle check once after the bulk wiring, filtered to this run's packets (exit 4). Never
+   wire edges by hand-typed `bd dep add` calls. At least one packet must be immediately
    workable when the count is ≥ 1 — unless the only blockers are EXTERNAL (cross-docket)
    edges, which is legitimate: report it, do not treat it as a failure.
 10. **Release** the set (`pd_phase=releasing:<n>/<m>` as the sweep proceeds, then `released`
@@ -533,13 +580,23 @@ path, character for character, as the first word of the Bash command, every time
   and never touches metadata, labels, status or creation, so a restamp stays its own explicit
   `--set-metadata` call. Pass `--actor` as for `create-packet.sh`. Exit 3 = duplicated acceptance
   in the body (drop it from the body), 2 usage, 1 generic.
-- `scripts/audit-docket-label-leak.sh` — read-only; run it once after each batch of
-  `create-packet` calls, before `release-set`. It calls
-  `bd list --label docket --status all -n 0 --json` and flags every returned bead whose
+- `scripts/audit-docket-label-leak.sh --docket <docket-id>` — read-only; run it once after each
+  batch of `create-packet` calls, before `release-set`, ALWAYS scoped to the docket being
+  decomposed (without `--docket` it audits every docket in the workspace and reports other
+  dockets' leaks as yours). It calls `bd list --label docket --status all -n 0 --json --parent
+<docket-id>` and flags every returned bead whose
   `issue_type` is not `epic` — a packet that inherited the docket epic's `docket` label because
   its `create-packet` call omitted `--no-inherit-labels` (this has happened more than once;
   `bd label remove <id> docket` fixes a flagged bead). Exit 3 means it found leaks; exit 0 means
   clean.
+
+- `scripts/check-design.sh --design <design.md>` — read-only; the mechanical scan inside mode
+  `check`'s seam register (exit 3 lists each finding as `<kind>: line <n>: <text>`).
+- `scripts/coldread-ledger.sh` — the step 6 ledger (`init`, `batch`, `dispatched`, `refused`,
+  `read`, `verdict`, `report`, `gate`); `--help` lists them. Exit 3 from `gate` means an
+  unread packet, exit 4 a blocking verdict.
+- `scripts/wire-edges.sh --edges <file> [--actor <id>]` — the step 9 wiring with a read-back on
+  every edge (exit 3 reversed or unlanded edge, exit 4 cycle through this run's packets).
 
 ## Sub-dispatch templates
 
@@ -555,9 +612,9 @@ is ONLY two paths — the packet's ASSEMBLED body file and acceptance file, the 
 `create-packet.sh` (`--body-file`, `--acceptance-file`) or to the fix-loop `update-packet.sh` (criteria
 passed inline are first written to an acceptance file), so the reader judges the stored text.
 Never paste packet text into the prompt; the reader's own agent file (`agents/cold-reader.md`)
-carries its instructions. Dispatch one round's cold-reads as multiple Agent tool_use blocks in a
+carries its instructions. Dispatch one batch of cold-reads (step 6: 8 keys) as multiple Agent tool_use blocks in a
 SINGLE turn — never one dispatch-and-wait per turn — and never re-read a packet not edited since
-its last cold-read.
+its last cold-read. A refused call is not a read (step 6).
 
 **Semantic post-checker** (mode `decompose` step 7; one Agent call per fix round; `subagent_type:
 "plan-decompose:semantic-post-checker"`, `model: sonnet` — that agent is read-only by tool

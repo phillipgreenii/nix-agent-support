@@ -141,3 +141,52 @@ MOCK
   [ "$status" -eq 1 ]
   [[ "$output" == *"bd list --label docket failed"* ]]
 }
+
+# A mock `bd list` that honours --parent: with it, only the named docket's
+# children come back; without it, every docket-labeled bead does.
+mock_bd_list_by_parent() {
+  cat >"$MOCK_BIN/bd" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$1" == "list" ]] || { echo "mock bd: unexpected invocation: $*" >&2; exit 99; }
+parent=""
+shift
+while [[ $# -gt 0 ]]; do
+  [[ "$1" == "--parent" ]] && parent="$2"
+  shift
+done
+case "$parent" in
+mine) echo '{"data": [{"id": "mine.1", "issue_type": "task", "title": "my packet"}]}' ;;
+clean) echo '{"data": []}' ;;
+"") echo '{"data": [{"id": "mine.1", "issue_type": "task", "title": "my packet"}, {"id": "other.7", "issue_type": "task", "title": "other docket leak"}]}' ;;
+*) echo '{"data": []}' ;;
+esac
+MOCK
+  chmod +x "$MOCK_BIN/bd"
+}
+
+@test "--docket scopes the audit: leaks under other dockets do not change the exit code" {
+  mock_bd_list_by_parent
+  run "$SCRIPT" --docket clean
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no leaks found"* ]]
+}
+
+@test "--docket still flags a leak under the named docket and hides other dockets' leaks" {
+  mock_bd_list_by_parent
+  run "$SCRIPT" --docket mine
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"mine.1 (task)"* ]]
+  [[ "$output" != *"other.7"* ]]
+}
+
+@test "without --docket the audit stays workspace-wide" {
+  mock_bd_list_by_parent
+  run "$SCRIPT"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"other.7"* ]]
+}
+
+@test "--docket without a value is a usage error" {
+  run "$SCRIPT" --docket
+  [ "$status" -eq 2 ]
+}

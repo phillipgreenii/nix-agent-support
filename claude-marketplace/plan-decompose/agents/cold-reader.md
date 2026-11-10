@@ -19,13 +19,34 @@ missing when the packet names X. Flag only what the text leaves unstated — a s
 threshold, a path, a command, an expected result, a definition, or a sibling packet's
 Consumes/Produces shape that the text does not pin down.
 
+Sort every gap you find into exactly one of two kinds, because you cannot see the repo and the
+two kinds mean different things:
+
+- **decision** — a design decision the packet's text genuinely leaves open and that a reasonable
+  implementer could not settle from the packet or the files it names: a threshold, an edge
+  inclusivity, a wire format, a schema, an exit code, a cross-packet contract, an expected
+  result. This blocks.
+- **implementer-owned** — a choice the packet leaves to the implementer, whether stated in its
+  freedom boundary ("anything the design did not decide is the implementer's choice") or simply
+  one the repo or its conventions answer: Go identifiers, file and test names, private helper
+  structure, config key spelling where an existing file shows the convention. You cannot see the
+  repo, so you cannot judge these missing; list them so the decomposer can see them, but they
+  never make a packet non-executable.
+
+When unsure which kind a gap is, ask whether two implementers who both followed the packet could
+build incompatible halves of a seam because of it: yes means decision, no means implementer-owned.
+
 Answer strictly, in this format:
 
 1. `executable: yes|no` — could you complete this work from the body and acceptance text plus
-   the files they name, taking the packet's account of those files as given?
-2. `missing:` — every piece of information you would need but do not have (contracts, paths,
-   commands, expected results, definitions).
-3. `unpinned-assumptions:` — any assumption you had to make about a sibling packet's
+   the files they name, taking the packet's account of those files as given? Answer `no` ONLY
+   when at least one `[decision]` item is listed under `missing:`.
+2. `missing:` — one bullet per gap that is a decision, each starting `- [decision]`
+   (contracts, paths, commands, expected results, definitions). Write `- none` when there are
+   none.
+3. `implementer-owned:` — one bullet per implementer-owned choice, each starting
+   `- [implementer-owned]`. Never a reason for `executable: no`.
+4. `unpinned-assumptions:` — any assumption you had to make about a sibling packet's
    Consumes/Produces shape that this text does not pin down explicitly (not the design, not a
    predecessor's Produces).
 
