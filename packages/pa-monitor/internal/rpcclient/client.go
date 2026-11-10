@@ -24,6 +24,9 @@ type Client struct {
 	Socket string
 }
 
+// MaxRecvMsgSize is the client's gRPC receive cap (256 MiB; the default is 4 MiB).
+const MaxRecvMsgSize = 256 << 20
+
 // Dial returns a connected client. The caller closes via Close.
 func Dial(ctx context.Context) (*Client, error) {
 	paths, err := daemon.ResolvePaths(daemon.PathOverrides{})
@@ -41,6 +44,9 @@ func DialPath(ctx context.Context, socket string) (*Client, error) {
 	conn, err := grpc.NewClient(
 		"unix:"+socket,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		// The default 4 MiB receive cap made GetState fail once the daemon held
+		// a few hundred sessions; the daemon is local, so allow a generous cap.
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(MaxRecvMsgSize)),
 		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 		}),

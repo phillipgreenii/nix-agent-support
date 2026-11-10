@@ -63,7 +63,16 @@ service PaMonitor {
   rpc BridgeChannel(stream BridgeMsg) returns (stream DaemonMsg);
 }
 
-message GetStateRequest {}
+message GetStateRequest {
+  // rate_limits_only asks for the light answer: every account-global field
+  // (blocks, rate_limits, caffeinate, auto-resume) with NO directories or
+  // sessions, so the reply size does not depend on the number of sessions.
+  bool rate_limits_only = 1;
+  // live_sessions_only drops sessions without a live pid (stale fixtures and
+  // dead sessions) and any directory left empty, bounding the reply for
+  // one-shot CLI callers. Ignored when rate_limits_only is set.
+  bool live_sessions_only = 2;
+}
 
 message WatchStateRequest {
   // Push interval requested by the client, in milliseconds. 0 means

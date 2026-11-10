@@ -37,6 +37,29 @@ func stripJSONFlag(args []string) (rest []string, jsonMode bool) {
 	return rest, jsonMode
 }
 
+// stripFlag removes every occurrence of flag from args and reports whether it
+// was present, preserving the order of the rest.
+func stripFlag(args []string, flag string) (rest []string, found bool) {
+	for _, a := range args {
+		if a == flag {
+			found = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return rest, found
+}
+
+// rateLimitsDoc is the `status --rate-limits` document: only the rate_limits
+// key of `status --json`, omitted (an empty object) when no reading is held.
+type rateLimitsDoc struct {
+	RateLimits *rateLimitsJSON `json:"rate_limits,omitempty"`
+}
+
+func writeRateLimitsJSON(w io.Writer, state *pb.DaemonState) error {
+	return json.NewEncoder(w).Encode(rateLimitsDoc{RateLimits: toRateLimitsJSON(state)})
+}
+
 // contextWithTimeout returns the standard 3s-timeout context every
 // dial-the-daemon subcommand uses (matches runStatus/runInfo/
 // runCaffeinate's existing inline 3*time.Second calls).
@@ -61,8 +84,8 @@ func dialOrExit(ctx context.Context) (*rpcclient.Client, error) {
 
 // getStateOrExit calls GetState, printing a diagnostic and exiting 2 on
 // failure (matches runStatus's original inline block).
-func getStateOrExit(ctx context.Context, client *rpcclient.Client) (*pb.DaemonState, error) {
-	state, err := client.C.GetState(ctx, &pb.GetStateRequest{})
+func getStateOrExit(ctx context.Context, client *rpcclient.Client, req *pb.GetStateRequest) (*pb.DaemonState, error) {
+	state, err := client.C.GetState(ctx, req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "status: GetState: %v\n", err)
 		os.Exit(exitDaemonUnavailable)

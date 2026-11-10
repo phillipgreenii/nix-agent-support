@@ -14,6 +14,7 @@ import (
 // daemon state.
 func runStatus(args []string) {
 	args, jsonMode := stripJSONFlag(args)
+	args, rateLimitsOnly := stripFlag(args, "--rate-limits")
 	_ = args // status takes no positional args today; kept for a future flag to compose against.
 
 	ctx, cancel := contextWithTimeout()
@@ -26,7 +27,20 @@ func runStatus(args []string) {
 	}
 	defer func() { _ = client.Close() }()
 
-	state, err := getStateOrExit(ctx, client)
+	if rateLimitsOnly {
+		// Light call: account-global fields only, no per-session work, so the
+		// reply size does not depend on how many sessions the daemon holds.
+		state, _ := getStateOrExit(ctx, client, &pb.GetStateRequest{RateLimitsOnly: true})
+		if err := writeRateLimitsJSON(os.Stdout, state); err != nil {
+			fmt.Fprintf(os.Stderr, "status: %v\n", err)
+			os.Exit(exitGeneric)
+		}
+		return
+	}
+
+	// --json asks the daemon to drop sessions without a live pid, so the reply
+	// stays small however many stale sessions it holds.
+	state, err := getStateOrExit(ctx, client, &pb.GetStateRequest{LiveSessionsOnly: jsonMode})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "status: GetState: %v\n", err)
 		os.Exit(exitDaemonUnavailable)
@@ -47,6 +61,9 @@ func runStatus(args []string) {
 	// annotations only when at least one session has something noteworthy.
 	var details []*pb.SessionDetail
 	for _, d := range state.GetDirs() {
+		if jsonMode {
+			break // the JSON document does not use per-session details
+		}
 		for _, sv := range d.GetSessions() {
 			sid := sv.GetSessionId()
 			if sid == "" {

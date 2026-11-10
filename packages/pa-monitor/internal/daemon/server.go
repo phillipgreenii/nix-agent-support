@@ -133,8 +133,36 @@ func (s *server) Ping(ctx context.Context, _ *pb.PingRequest) (*pb.PingResponse,
 	return &pb.PingResponse{Ts: timestamppb.Now()}, nil
 }
 
-func (s *server) GetState(ctx context.Context, _ *pb.GetStateRequest) (*pb.DaemonState, error) {
-	return s.buildState(), nil
+func (s *server) GetState(ctx context.Context, req *pb.GetStateRequest) (*pb.DaemonState, error) {
+	return trimState(s.buildState(), req), nil
+}
+
+// trimState applies the GetStateRequest size controls to a freshly built
+// (never shared) state: rate_limits_only drops every directory, and
+// live_sessions_only drops sessions with no live pid plus any directory that
+// leaves empty. Directory rollup counters are left as the daemon computed them.
+func trimState(st *pb.DaemonState, req *pb.GetStateRequest) *pb.DaemonState {
+	switch {
+	case req.GetRateLimitsOnly():
+		st.Dirs = nil
+	case req.GetLiveSessionsOnly():
+		kept := st.Dirs[:0]
+		for _, d := range st.Dirs {
+			live := d.Sessions[:0]
+			for _, sv := range d.Sessions {
+				if sv.GetPid() != 0 {
+					live = append(live, sv)
+				}
+			}
+			if len(live) == 0 {
+				continue
+			}
+			d.Sessions = live
+			kept = append(kept, d)
+		}
+		st.Dirs = kept
+	}
+	return st
 }
 
 func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_WatchStateServer) error {

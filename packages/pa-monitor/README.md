@@ -88,6 +88,17 @@ at the account's own instant (reset 08:30Z), and an account at its limit cannot 
 next block, so for the last part of a limited window there is no `active_block` yet `rate_limits`
 MUST still report the window. Dropping it there makes ccpool's gate fail open (bead `pg2-ip6r5`).
 
+#### Light call: `status --rate-limits`
+
+`pa-monitor status --rate-limits` prints only the `rate_limits` key (`{}` when the daemon holds no
+reading) and asks the daemon for the light answer (`GetStateRequest.rate_limits_only`): every
+account-global field and no directories or sessions, so the reply size does not depend on how many
+sessions the daemon holds. Pollers that want one reading (ccpool's usage gate, a pg-router sensor)
+SHOULD use it instead of `status --json`. `status --json` itself asks the daemon to drop sessions
+without a live pid (`live_sessions_only`) and skips the per-session detail calls; the client's gRPC
+receive cap is raised from 4 MiB to 256 MiB, so neither fails on a state with thousands of stale
+sessions.
+
 `caffeinate` and `auto_resume` carry the two operator toggles (additive keys; no existing key
 changed):
 

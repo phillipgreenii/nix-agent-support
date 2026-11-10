@@ -217,3 +217,39 @@ func serveFakeDaemon(t *testing.T, sock string, srv pb.PaMonitorServer, opts ...
 	t.Cleanup(stop)
 	return stop
 }
+
+// TestRunStatusRateLimitsOnlyAsksDaemonForLightAnswer proves `status
+// --rate-limits` sends rate_limits_only and prints just the rate_limits key,
+// and that `status --json` asks the daemon to drop pid-less sessions.
+func TestRunStatusRateLimitsOnlyAsksDaemonForLightAnswer(t *testing.T) {
+	sock := daemonTestSocket(t)
+	d := &recordingStatusDaemon{fakeStatusDaemon: fakeStatusDaemon{state: characterizationState()}}
+	serveFakeDaemon(t, sock, d)
+
+	out := captureStdout(t, func() { runStatus([]string{"--rate-limits"}) })
+	var doc map[string]map[string]map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("not JSON: %v\n%q", err, out)
+	}
+	if len(doc) != 1 || doc["rate_limits"]["five_hour"]["used_pct"] != 22.5 {
+		t.Errorf("want only rate_limits.five_hour.used_pct=22.5, got %q", out)
+	}
+	if !d.last.GetRateLimitsOnly() {
+		t.Error("--rate-limits did not set rate_limits_only")
+	}
+
+	captureStdout(t, func() { runStatus([]string{"--json"}) })
+	if !d.last.GetLiveSessionsOnly() || d.last.GetRateLimitsOnly() {
+		t.Errorf("--json request = %v, want live_sessions_only only", d.last)
+	}
+}
+
+type recordingStatusDaemon struct {
+	fakeStatusDaemon
+	last *pb.GetStateRequest
+}
+
+func (r *recordingStatusDaemon) GetState(ctx context.Context, req *pb.GetStateRequest) (*pb.DaemonState, error) {
+	r.last = req
+	return r.fakeStatusDaemon.GetState(ctx, req)
+}

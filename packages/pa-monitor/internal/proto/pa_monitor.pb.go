@@ -79,9 +79,17 @@ func (CaffeinateProcess) EnumDescriptor() ([]byte, []int) {
 }
 
 type GetStateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// rate_limits_only asks for the light answer: every account-global field
+	// (blocks, rate_limits, caffeinate, auto-resume) with NO directories or
+	// sessions, so the reply size does not depend on the number of sessions.
+	RateLimitsOnly bool `protobuf:"varint,1,opt,name=rate_limits_only,json=rateLimitsOnly,proto3" json:"rate_limits_only,omitempty"`
+	// live_sessions_only drops sessions without a live pid (stale fixtures and
+	// dead sessions) and any directory left empty, bounding the reply for
+	// one-shot CLI callers. Ignored when rate_limits_only is set.
+	LiveSessionsOnly bool `protobuf:"varint,2,opt,name=live_sessions_only,json=liveSessionsOnly,proto3" json:"live_sessions_only,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetStateRequest) Reset() {
@@ -112,6 +120,20 @@ func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetStateRequest.ProtoReflect.Descriptor instead.
 func (*GetStateRequest) Descriptor() ([]byte, []int) {
 	return file_internal_proto_pa_monitor_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GetStateRequest) GetRateLimitsOnly() bool {
+	if x != nil {
+		return x.RateLimitsOnly
+	}
+	return false
+}
+
+func (x *GetStateRequest) GetLiveSessionsOnly() bool {
+	if x != nil {
+		return x.LiveSessionsOnly
+	}
+	return false
 }
 
 type WatchStateRequest struct {
@@ -2658,8 +2680,10 @@ var File_internal_proto_pa_monitor_proto protoreflect.FileDescriptor
 
 const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\n" +
-	"\x1finternal/proto/pa_monitor.proto\x12\rpa_monitor.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x11\n" +
-	"\x0fGetStateRequest\"=\n" +
+	"\x1finternal/proto/pa_monitor.proto\x12\rpa_monitor.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"i\n" +
+	"\x0fGetStateRequest\x12(\n" +
+	"\x10rate_limits_only\x18\x01 \x01(\bR\x0erateLimitsOnly\x12,\n" +
+	"\x12live_sessions_only\x18\x02 \x01(\bR\x10liveSessionsOnly\"=\n" +
 	"\x11WatchStateRequest\x12(\n" +
 	"\x10push_interval_ms\x18\x01 \x01(\rR\x0epushIntervalMs\"\r\n" +
 	"\vPingRequest\":\n" +
