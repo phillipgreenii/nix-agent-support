@@ -576,6 +576,12 @@ const slowRunLockWait = 5 * time.Second
 // label op) and a wait of slowRunLockWait or more is logged, so a long holder that
 // starves the tick shows up as the waiter's wait, not only as a missing tick.
 func (s *Settler) lockRun(op string) func() {
+	unlock, _ := s.lockRunWait(op)
+	return unlock
+}
+
+// lockRunWait is lockRun that also returns how long it waited.
+func (s *Settler) lockRunWait(op string) (func(), time.Duration) {
 	t0 := time.Now()
 	s.run.Lock()
 	w := time.Since(t0)
@@ -585,7 +591,7 @@ func (s *Settler) lockRun(op string) func() {
 	if w >= slowRunLockWait {
 		s.cfg.Obs.Log.Warn("settle_run_lock_wait_slow", "op", op, "wait_ms", w.Milliseconds())
 	}
-	return s.run.Unlock
+	return s.run.Unlock, w
 }
 
 // Outcome is what one evaluation of a Conversation did.
@@ -612,6 +618,11 @@ type TickStats struct {
 // stage and gauge refresh.
 type TickPhases struct {
 	Reads, Prefilter, Evaluate, Removal, Refresh time.Duration
+	// LockWait is the time the pass queued for the run lock (0 for a pass that
+	// found it free); Dirty is the time TakeDirty took, including its own
+	// group rebuild and the lock wait of that rebuild (wakes only). Both lie
+	// outside the other phases, so a slow pass shows whether it waited or worked.
+	LockWait, Dirty time.Duration
 }
 
 // LastPhases returns the phase durations of the most recent Tick (zero before
@@ -629,14 +640,18 @@ func (s *Settler) stopping() bool { return s.cfg.Ctx.Err() != nil }
 // Tick runs one pass: it evaluates every Conversation that is not live, moves
 // the ones whose Process came back to Live, and refreshes the gauges.
 func (s *Settler) Tick() (TickStats, error) {
-	defer s.lockRun("tick")()
-	return s.tickLocked()
+	unlock, w := s.lockRunWait("tick")
+	defer unlock()
+	return s.tickLockedWaited(w)
 }
 
 // tickLocked is the Tick body, run with the run lock held.
-func (s *Settler) tickLocked() (TickStats, error) {
+func (s *Settler) tickLocked() (TickStats, error) { return s.tickLockedWaited(0) }
+
+// tickLockedWaited is tickLocked that records the run-lock wait in the phases.
+func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 	var stats TickStats
-	var ph TickPhases
+	ph := TickPhases{LockWait: wait}
 	defer func() {
 		s.mu.Lock()
 		s.phases = ph

@@ -49,7 +49,7 @@ func runs(d *Daemon, outcome string) float64 {
 func TestRunTickSuccessRecordsMetricsAndEvent(t *testing.T) {
 	d, clk, buf := tickEnv()
 	stats := settle.TickStats{Examined: 7, Unchanged: 4, SettledNow: 2, Transitions: 3}
-	d.runTick(func() (settle.TickStats, error) { clk.Advance(1500 * time.Millisecond); return stats, nil })
+	d.runTick(tickKindWake, func() (settle.TickStats, error) { clk.Advance(1500 * time.Millisecond); return stats, nil })
 
 	if runs(d, "ok") != 1 || runs(d, "error") != 0 {
 		t.Fatalf("ok=%v error=%v", runs(d, "ok"), runs(d, "error"))
@@ -86,7 +86,7 @@ func TestRunTickSuccessRecordsMetricsAndEvent(t *testing.T) {
 
 func TestRunTickErrorRecordsErrorOutcome(t *testing.T) {
 	d, _, buf := tickEnv()
-	d.runTick(func() (settle.TickStats, error) { return settle.TickStats{}, errors.New("boom") })
+	d.runTick(tickKindWake, func() (settle.TickStats, error) { return settle.TickStats{}, errors.New("boom") })
 	if runs(d, "error") != 1 || runs(d, "ok") != 0 {
 		t.Fatalf("ok=%v error=%v", runs(d, "ok"), runs(d, "error"))
 	}
@@ -101,7 +101,7 @@ func TestRunTickErrorRecordsErrorOutcome(t *testing.T) {
 
 func TestRunTickOverSixtySecondsLogsSlow(t *testing.T) {
 	d, clk, buf := tickEnv()
-	d.runTick(func() (settle.TickStats, error) { clk.Advance(61 * time.Second); return settle.TickStats{}, nil })
+	d.runTick(tickKindWake, func() (settle.TickStats, error) { clk.Advance(61 * time.Second); return settle.TickStats{}, nil })
 	if len(logLines(t, buf, "settle_tick_slow")) != 1 {
 		t.Fatal("settle_tick_slow not logged")
 	}
@@ -122,7 +122,7 @@ func TestRefreshGaugesBodyIsTimed(t *testing.T) {
 // While a tick runs, the in-flight gauge is its age; when it ends the gauge is 0.
 func TestRunTickInFlightGaugeAndStuckLog(t *testing.T) {
 	d, clk, buf := tickEnv()
-	d.runTick(func() (settle.TickStats, error) {
+	d.runTick(tickKindWake, func() (settle.TickStats, error) {
 		clk.Advance(90 * time.Second)
 		d.setTickInFlight()
 		if v, _ := d.obs.Reg.Gauge(obs.MSettleTickInFlight, nil); v != 90 {
@@ -141,5 +141,53 @@ func TestRunTickInFlightGaugeAndStuckLog(t *testing.T) {
 	d.logStuckTick() // no tick running: silent
 	if got := len(logLines(t, buf, obs.EvSettleTickStuck)); got != 1 {
 		t.Fatalf("%d stuck events after the tick ended", got)
+	}
+}
+
+// The by-kind histogram and the slow warning carry the pass kind, while the
+// unlabelled histogram keeps counting every pass.
+func TestRunTickRecordsDurationByKind(t *testing.T) {
+	d, clk, buf := tickEnv()
+	d.runTick(tickKindWake, func() (settle.TickStats, error) { clk.Advance(time.Second); return settle.TickStats{}, nil })
+	d.runTick(tickKindReconcile, func() (settle.TickStats, error) { clk.Advance(90 * time.Second); return settle.TickStats{}, nil })
+	reg := d.obs.Reg
+	if h := reg.Hist(obs.MSettleTickDuration); h == nil || h.Samples != 2 {
+		t.Fatalf("unlabelled histogram %+v, want both passes", h)
+	}
+	for kind, want := range map[string]uint64{"wake": 1, "reconcile": 1, "scan": 0} {
+		h := reg.HistL(obs.MSettleTickKindDuration, map[string]string{"kind": kind})
+		got := uint64(0)
+		if h != nil {
+			got = h.Samples
+		}
+		if got != want {
+			t.Errorf("kind %s samples %d, want %d", kind, got, want)
+		}
+	}
+	l := logLines(t, buf, obs.EvSettleTickSlow)
+	if len(l) != 1 || l[0]["kind"] != "reconcile" {
+		t.Fatalf("slow lines %v, want one of kind reconcile", l)
+	}
+}
+
+// A slow wake logs how long it queued for the run lock and in TakeDirty, apart
+// from its work phases.
+func TestRunTickSlowLogsLockWaitAndDirtyPhases(t *testing.T) {
+	d, clk, buf := tickEnv()
+	d.tickPhases = func() settle.TickPhases {
+		return settle.TickPhases{LockWait: 70 * time.Second, Dirty: 72 * time.Second, Evaluate: time.Second}
+	}
+	d.runTick(tickKindWake, func() (settle.TickStats, error) { clk.Advance(75 * time.Second); return settle.TickStats{}, nil })
+	l := logLines(t, buf, obs.EvSettleTickSlow)
+	if len(l) != 1 {
+		t.Fatalf("%d settle_tick_slow lines", len(l))
+	}
+	for k, want := range map[string]float64{"lock_wait_ms": 70000, "dirty_ms": 72000, "evaluate_ms": 1000} {
+		if l[0][k] != want {
+			t.Errorf("%s = %v, want %v", k, l[0][k], want)
+		}
+	}
+	if l[0]["kind"] != "wake" {
+		t.Errorf("kind = %v", l[0]["kind"])
 	}
 }

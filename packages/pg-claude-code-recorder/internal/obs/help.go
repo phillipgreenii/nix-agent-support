@@ -47,6 +47,7 @@ var helpTexts = map[string]string{
 	MLowSpace:                 "1 when the state directory is low on space, else 0.",
 	MSettled:                  "Conversations settled.",
 	MSettleTickDuration:       "Distribution of settle wake durations in seconds: one scan tick or reconcile in scan mode, one event wake or reconcile in event mode.",
+	MSettleTickKindDuration:   "Distribution of settle pass durations in seconds, by kind: scan (a scan-mode tick), reconcile (an event-mode full reconciliation) or wake (an event wake).",
 	MRefreshGaugesDuration:    "Distribution of gauge refresh durations in seconds.",
 	MLoopRuns:                 "Background loop passes, by loop and outcome (copier_ingest is counted by its results counter, not here).",
 	MLoopDuration:             "Distribution of background loop pass durations in seconds, by loop (removal_pass is nested inside settle_tick).",

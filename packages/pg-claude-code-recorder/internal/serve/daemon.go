@@ -690,7 +690,7 @@ func (d *Daemon) settleLoop() {
 		case <-d.stop:
 			return
 		case <-tick:
-			d.runTick(d.sett.Tick)
+			d.runTick(tickKindScan, d.sett.Tick)
 		}
 	}
 }
@@ -730,9 +730,9 @@ func (d *Daemon) settleLoopEvent() {
 	poll, stopPoll := d.ticker(settlePollSeam, minWake)
 	defer stopPoll()
 	last := d.clock.Now()
-	d.runTick(d.sett.Tick) // the start-up reconciliation
+	d.runTick(tickKindReconcile, d.sett.Tick) // the start-up reconciliation
 	wake := func() {
-		d.runTick(func() (settle.TickStats, error) { return d.sett.Wake(d.clock.Now()) })
+		d.runTick(tickKindWake, func() (settle.TickStats, error) { return d.sett.Wake(d.clock.Now()) })
 		last = d.clock.Now()
 	}
 	// holdOff waits out what is left of the min-wake interval; false when stopped.
@@ -765,7 +765,7 @@ func (d *Daemon) settleLoopEvent() {
 			stopDue()
 			return
 		case <-reconcile:
-			d.runTick(d.sett.Tick)
+			d.runTick(tickKindReconcile, d.sett.Tick)
 			last = d.clock.Now()
 		case <-poll:
 			if holdOff() {
@@ -784,6 +784,14 @@ func (d *Daemon) settleLoopEvent() {
 	}
 }
 
+// The kinds of settle pass, the value of label kind on
+// settle_tick_by_kind_duration_seconds and the kind field of settle_tick_slow.
+const (
+	tickKindScan      = "scan"
+	tickKindReconcile = "reconcile"
+	tickKindWake      = "wake"
+)
+
 // settleTickSlow is the duration above which a settle tick logs a warning (the
 // tick interval).
 const settleTickSlow = time.Minute
@@ -792,7 +800,7 @@ const settleTickSlow = time.Minute
 // the tick's timing and outcome: the duration histogram, the run counter, the
 // work counters, the last-duration and last-timestamp gauges, and one
 // settle_tick event (duration_ms in milliseconds; the metrics are in seconds).
-func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
+func (d *Daemon) runTick(kind string, step func() (settle.TickStats, error)) {
 	start := d.clock.Now()
 	d.tickStartNS.Store(start.UnixNano())
 	watchdog := time.AfterFunc(settleTickSlow, d.logStuckTick)
@@ -817,6 +825,7 @@ func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 	}
 	reg := d.obs.Reg
 	reg.Observe(obs.MSettleTickDuration, dur.Seconds())
+	reg.ObserveL(obs.MSettleTickKindDuration, map[string]string{"kind": kind}, dur.Seconds())
 	reg.Add(obs.MSettleTickExamined, nil, float64(stats.Examined))
 	reg.Add(obs.MSettleTickTransitions, nil, float64(stats.Transitions))
 	reg.Set(obs.MSettleTickLastDuration, nil, dur.Seconds())
@@ -829,13 +838,14 @@ func (d *Daemon) runTick(step func() (settle.TickStats, error)) {
 		"settled_now", strconv.Itoa(stats.SettledNow),
 		"transitions", strconv.Itoa(stats.Transitions))
 	if dur > settleTickSlow {
-		attrs := []any{"duration_ms", dur.Milliseconds(), "examined", stats.Examined}
+		attrs := []any{"kind", kind, "duration_ms", dur.Milliseconds(), "examined", stats.Examined}
 		if d.tickPhases != nil {
 			p := d.tickPhases()
 			attrs = append(attrs,
 				"reads_ms", p.Reads.Milliseconds(), "prefilter_ms", p.Prefilter.Milliseconds(),
 				"evaluate_ms", p.Evaluate.Milliseconds(), "removal_ms", p.Removal.Milliseconds(),
-				"refresh_ms", p.Refresh.Milliseconds())
+				"refresh_ms", p.Refresh.Milliseconds(),
+				"lock_wait_ms", p.LockWait.Milliseconds(), "dirty_ms", p.Dirty.Milliseconds())
 		}
 		d.obs.Log.Warn(obs.EvSettleTickSlow, attrs...)
 	}

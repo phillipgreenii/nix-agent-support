@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 )
 
 func TestDirtyOnAKnownFileAddsExactlyItsSessionWithoutAStoreQuery(t *testing.T) {
@@ -259,4 +260,33 @@ func TestEveryFileStateWriteFeedsTheDirtySet(t *testing.T) {
 		}
 		e.wantDirty("extract registers the restored path")
 	})
+}
+
+// The group rebuild TakeDirty does for a file it has not placed queues for the
+// run lock through the same accounting as the other lock takers.
+func TestTakeDirtyRebuildCountsItsRunLockWait(t *testing.T) {
+	e := newGrpEnv(t)
+	e.add("append", "/c/projects/p/"+gSessA+".jsonl")
+	e.same("start")
+	b := e.add("append", "/c/projects/p/"+gSessB+".jsonl") // not placed yet
+	e.s.Dirty(b, 1)
+
+	e.s.run.Lock()
+	done := make(chan time.Duration)
+	go func() {
+		_, w := e.s.takeDirty()
+		done <- w
+	}()
+	time.Sleep(20 * time.Millisecond)
+	e.s.run.Unlock()
+	if w := <-done; w < 10*time.Millisecond {
+		t.Fatalf("reported wait %v, want at least the time the lock was held", w)
+	}
+	lbl := map[string]string{"op": "take_dirty"}
+	if n, _ := e.s.cfg.Obs.Reg.Counter(obs.MSettleRunLockWaits, lbl); n != 1 {
+		t.Fatalf("take_dirty waits counted %v, want 1", n)
+	}
+	if sec, _ := e.s.cfg.Obs.Reg.Counter(obs.MSettleRunLockWaitSeconds, lbl); sec <= 0 {
+		t.Fatalf("take_dirty wait seconds %v, want > 0", sec)
+	}
 }

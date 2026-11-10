@@ -5,7 +5,10 @@ package settle
 // Conversations whose inputs changed. Nothing consumes the set in the per-minute
 // Tick; the full scan stays the reconciliation (and the oracle).
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // dirtyFeed is the Settler's dirty state. It has its own lock, never the run
 // lock, so Dirty never waits for a pass.
@@ -91,21 +94,31 @@ func (s *Settler) TakeLiveChanged() bool {
 // one groups() rebuild under the run lock; a file that belongs to no
 // Conversation is dropped.
 func (s *Settler) TakeDirty() map[string]int64 {
+	out, _ := s.takeDirty()
+	return out
+}
+
+// takeDirty is TakeDirty that also returns the time the group rebuild queued for
+// the run lock (0 when no rebuild was needed). The wait is counted under op
+// "take_dirty" in settle_run_lock_wait_*, like the other lock takers.
+func (s *Settler) takeDirty() (map[string]int64, time.Duration) {
 	d := s.feed()
+	var waited time.Duration
 	d.mu.Lock()
 	need := len(d.unknown) > 0
 	d.mu.Unlock()
 	if need {
-		s.run.Lock()
+		unlock, w := s.lockRunWait("take_dirty")
+		waited = w
 		_, err := s.groups() // refreshes fileSession
-		s.run.Unlock()
+		unlock()
 		_ = err // on error the unknown files stay for the next call
 		if err != nil {
 			d.mu.Lock()
 			out := d.sessions
 			d.sessions = map[string]int64{}
 			d.mu.Unlock()
-			return out
+			return out, waited
 		}
 	}
 	d.mu.Lock()
@@ -118,7 +131,7 @@ func (s *Settler) TakeDirty() map[string]int64 {
 	}
 	out := d.sessions
 	d.sessions = map[string]int64{}
-	return out
+	return out, waited
 }
 
 // syncFileSession brings fileSession in line with owner after groups changed it:

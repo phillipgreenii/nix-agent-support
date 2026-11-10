@@ -84,7 +84,7 @@ func TestRunTickSlowLogsPhaseBreakdown(t *testing.T) {
 	d.tickPhases = func() settle.TickPhases {
 		return settle.TickPhases{Reads: 2 * time.Second, Prefilter: 3 * time.Second, Evaluate: 80 * time.Second, Removal: time.Second, Refresh: 4 * time.Second}
 	}
-	d.runTick(func() (settle.TickStats, error) {
+	d.runTick(tickKindWake, func() (settle.TickStats, error) {
 		clk.Advance(90 * time.Second)
 		return settle.TickStats{Examined: 8031}, nil
 	})

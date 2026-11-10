@@ -189,13 +189,29 @@ func (s *Settler) heldRewritten() map[string]bool {
 // is the reconciliation.
 func (s *Settler) Wake(now time.Time) (TickStats, error) {
 	var stats TickStats
-	// TakeDirty may rebuild the group map and so takes the run lock itself.
-	dirty := s.TakeDirty()
-	sigLive := s.TakeLiveChanged()
-	defer s.lockRun("wake")()
-	if !s.seeded {
-		return s.tickLocked()
+	t0 := s.cfg.Clock.Now()
+	lap := func(into *time.Duration) {
+		n := s.cfg.Clock.Now()
+		*into = n.Sub(t0)
+		t0 = n
 	}
+	var ph TickPhases
+	// TakeDirty may rebuild the group map and so takes the run lock itself.
+	dirty, rebuildWait := s.takeDirty()
+	sigLive := s.TakeLiveChanged()
+	lap(&ph.Dirty)
+	unlock, wait := s.lockRunWait("wake")
+	defer unlock()
+	ph.LockWait = wait + rebuildWait
+	t0 = s.cfg.Clock.Now() // the lock wait is reported by lockRunWait; the phases below start here
+	if !s.seeded {
+		return s.tickLockedWaited(ph.LockWait)
+	}
+	defer func() {
+		s.mu.Lock()
+		s.phases = ph
+		s.mu.Unlock()
+	}()
 	reg := s.cfg.Obs.Reg
 	s.checkLow()
 	low := s.LowSpace()
@@ -223,6 +239,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 			work[session], liveDiff = true, true
 		}
 	}
+	lap(&ph.Reads)
 	s.liveSeen = copySet(live)
 	for session := range s.heldRewritten() {
 		if !live[session] {
@@ -296,6 +313,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 		}
 		s.schedule(c, stage, err != nil, now, removal)
 	}
+	lap(&ph.Evaluate)
 	if s.cfg.RemoveEnable && len(removal) > 0 && !s.stopping() {
 		names := make([]string, 0, len(removal))
 		for session := range removal {
@@ -342,6 +360,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 			}
 		}
 	}
+	lap(&ph.Removal)
 	for _, session := range sortedKeys(touched) {
 		var row *store.StageRow
 		if r, ok, err := s.st.Stage(session); err == nil && ok {
@@ -371,5 +390,6 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 	s.refreshRemovalGaugesIfDue(s.gcache, live, now)
 	s.publishGauges(now)
 	s.publishNext()
+	lap(&ph.Refresh)
 	return stats, first
 }

@@ -587,7 +587,9 @@ func TestTickRecordsPhaseDurations(t *testing.T) {
 		return live()
 	}
 	e.tick()
-	if got, want := e.sett.LastPhases(), (TickPhases{Reads: 7 * time.Second}); got != want {
+	got := e.sett.LastPhases()
+	got.LockWait = 0 // real time, not the fake clock
+	if want := (TickPhases{Reads: 7 * time.Second}); got != want {
 		t.Fatalf("phases = %+v, want %+v", got, want)
 	}
 }

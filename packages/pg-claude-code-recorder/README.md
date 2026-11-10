@@ -944,6 +944,10 @@ same decisions; an equivalence test holds that. `settle.mode` is read at start, 
 restart. A wake waits for a running reconcile (the settler's run lock), which is hourly and takes up to a tick's
 duration. In `event` mode `settle_tick_duration_seconds` is the duration of a wake or a reconcile and
 `settle_tick_examined_total` counts sessions processed per wake.
+`settle_tick_by_kind_duration_seconds{kind}` splits that histogram into `scan`, `reconcile` and `wake`, and a
+`settle_tick_slow` line carries `kind`, `lock_wait_ms` (queued for the run lock) and `dirty_ms` (`TakeDirty`, including its
+group rebuild), so a slow wake shows whether it waited or worked. The `TakeDirty` rebuild counts in
+`settle_run_lock_wait_*` as `op="take_dirty"`, and a wake as `op="wake"`.
 
 ### files.last_copy_ns: the last-seen signal of an append-mode file
 

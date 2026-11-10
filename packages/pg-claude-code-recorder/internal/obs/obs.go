@@ -132,7 +132,10 @@ const (
 // the metrics and in MILLISECONDS (duration_ms) in the log events.
 // conversations_by_stage is as of the last settle tick (up to 60 s old).
 const (
-	MSettleTickDuration      = "settle_tick_duration_seconds"
+	MSettleTickDuration = "settle_tick_duration_seconds"
+	// MSettleTickKindDuration is MSettleTickDuration split by label kind: scan
+	// (a scan-mode tick), reconcile (an event-mode full reconciliation) or wake.
+	MSettleTickKindDuration  = "settle_tick_by_kind_duration_seconds"
 	MRefreshGaugesDuration   = "refresh_gauges_duration_seconds"
 	MLoopRuns                = "loop_runs_total"
 	MLoopDuration            = "loop_duration_seconds"
@@ -142,8 +145,8 @@ const (
 	MSettleTickTransitions   = "settle_tick_transitions_total"
 	MSettleTickLastDuration  = "settle_tick_last_duration_seconds"
 	MSettleTickLastTimestamp = "settle_tick_last_timestamp_seconds"
-	// The wait for the settler's run lock (label op: tick, remove, where, extract,
-	// recheck, recover): how long a caller queued behind another holder.
+	// The wait for the settler's run lock (label op: tick, wake, take_dirty, remove,
+	// where, extract, recheck, recover): how long a caller queued behind another holder.
 	MSettleRunLockWaits       = "settle_run_lock_wait_total"
 	MSettleRunLockWaitSeconds = "settle_run_lock_wait_seconds_total"
 	EvSettleTick              = "settle_tick"
@@ -561,6 +564,7 @@ func (o *Obs) RegisterStandard() {
 		{MCopyLagHistogram, LagBuckets},
 		{MWaitDuration, WaitBuckets},
 		{MSettleTickDuration, LoopBuckets},
+		{MSettleTickKindDuration, LoopBuckets},
 		{MRefreshGaugesDuration, LoopBuckets},
 		{MWALCheckpointDuration, LoopBuckets},
 		{MWALTruncateDuration, LoopBuckets},
