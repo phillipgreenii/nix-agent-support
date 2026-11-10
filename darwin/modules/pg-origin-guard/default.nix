@@ -32,5 +32,11 @@ in
       serviceName = "pg-origin-guard";
       path = "\${env:XDG_STATE_HOME}/pg-origin-guard/events-*.jsonl";
     };
+
+    # The auth-unavailable alert reads that log stream. Its folder "Work" converges
+    # by title (never pin a folderUid). Not registered with pg-router-probe.
+    phillipgreenii.observability.alertRuleFiles = [
+      ../../../packages/pg-origin-guard/grafana/alerting/alerts.yaml
+    ];
   };
 }

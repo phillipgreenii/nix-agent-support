@@ -105,6 +105,16 @@ observability log source with service name `pg-origin-guard`. The collector's fi
 include glob, re-evaluates it as it polls, and keeps read offsets in a file store, so each new daily file is
 picked up without a restart and a pruned file just disappears.
 
+## Alert
+
+The Grafana rule `pg-origin-guard-auth-unavailable` (`grafana/alerting/alerts.yaml`, folder Work, severity
+critical, `noDataState: OK`, static annotations, no awake gate, not registered with `pg-router-probe`) fires per
+realm when the last 15 minutes hold an `available="0"` event and no `available="1"` event, for 10 minutes. A
+recovery event or a flapping realm keeps it quiet. Known limit: with no caller at all (no wrapper run, no
+`check`, no periodic runner) heartbeats stop and the alert resolves after the 15 minute window; the handler gate
+(follow-up work) and a periodic runner (planned elsewhere) supply callers. The rule is tested by
+`grafana/check-alert-rules.sh` over the fixtures in `grafana/alerting/rule-tests/`.
+
 ## Nix
 
 - Package: `pg-origin-guard` (Pattern B: local `replace` of `../pg-failsig`). Refresh Go deps with `./update-deps.sh`.
@@ -112,9 +122,9 @@ picked up without a restart and a pruned file just disappears.
   `events.*`, `realms.<name>.{match,agentSocket,login}`). It installs the binary on the per-user PATH,
   renders the config (checked at build time by loading it with the real binary) and registers the tldr page.
   It does not touch ssh config: the consuming flake renders the `ProxyCommand` line.
-- Darwin module: `darwin/modules/pg-origin-guard` registers the log source, following the home-manager enable
+- Darwin module: `darwin/modules/pg-origin-guard` registers the log source and the alert rule file, following the home-manager enable
   flag and `observability.enable`.
 - Checks: `pg-origin-guard-go-tests` (unit tier), `pg-origin-guard-integration-tests` (build tag
   `integration`, real ssh-agent, ssh-keygen, git and a pty; the pty cases skip when no pseudo-terminal can be
   opened, so read its log for SKIP lines), `pg-origin-guard-golangci` and `-golangci-tagged`,
-  `test-pg-origin-guard-hm-render`, `test-pg-origin-guard-darwin-module`.
+  `test-pg-origin-guard-hm-render`, `test-pg-origin-guard-darwin-module`, `test-pg-origin-guard-alert-rules`.

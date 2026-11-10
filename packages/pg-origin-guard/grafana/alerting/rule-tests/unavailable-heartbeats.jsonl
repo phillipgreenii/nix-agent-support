@@ -1,0 +1,3 @@
+{"ts":"2026-11-10T10:00:00Z","event":"guard_state","realm":"zr","available":0,"reason":"cert_expired","transition":1}
+{"ts":"2026-11-10T10:05:00Z","event":"guard_state","realm":"zr","available":0,"reason":"cert_expired","transition":0}
+{"ts":"2026-11-10T10:10:00Z","event":"guard_state","realm":"zr","available":0,"reason":"cert_expired","transition":0}

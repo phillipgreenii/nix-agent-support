@@ -1,0 +1,75 @@
+# pg-origin-guard unified-alerting rule: git authentication to a realm is unavailable.
+#
+# A LogQL rule over the tool's own event log (events-YYYY-MM-DD.jsonl under
+# XDG_STATE_HOME/pg-origin-guard), shipped to Loki by the logSources entry in
+# darwin/modules/pg-origin-guard/default.nix (service_name pg-origin-guard).
+# The tool writes a guard_state event with available=0 on every transition to
+# unavailable and as a heartbeat (every heartbeat_interval) while the realm stays
+# unavailable, and available=1 on recovery.
+#
+# The rule fires, per realm, when the last 15 minutes hold at least one
+# available="0" event and no available="1" event, and that has held for 10
+# minutes. A recovery event or a flapping realm (both values inside the window)
+# therefore keeps it quiet: the second sum() is the `unless` side.
+#
+# Known limit: with no caller at all (no wrapper run, no `check`, no periodic
+# runner) no heartbeats are written, so a realm that stays unavailable stops
+# producing events and the alert RESOLVES once the 15 minute window passes. The
+# handler gate (follow-up work) and a periodic runner (planned elsewhere) supply
+# callers. The rule cannot see an absence, so noDataState is OK.
+#
+# No awake gate: a sleeping host runs nothing, so it writes no heartbeats, so
+# there is no data and the rule is quiet. NOT registered with pg-router-probe
+# (it files no bead for this rule). Annotations are STATIC text describing the
+# problem; the reason is in the event, and no remedy or templating is carried.
+#
+# Folder "Work" converges by title with the shared folder of pg-router's rules
+# (never pin a folderUid: Grafana's alerting file provisioning has no such field).
+# Tested by packages/pg-origin-guard/grafana/check-alert-rules.sh (logcli over the
+# fixtures in rule-tests/) from the flake check test-pg-origin-guard-alert-rules.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-origin-guard-alerts
+    folder: Work
+    interval: 1m
+    rules:
+      - uid: pg-origin-guard-auth-unavailable
+        title: pg-origin-guard git authentication unavailable
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "Git authentication to a realm has been unavailable for at least 10 minutes"
+          description: "pg-origin-guard has reported git authentication to a realm as unavailable (available=0 events and no available=1 event in the last 15 minutes). The reason is in the guard_state event of the pg-origin-guard log."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              refId: A
+              editorMode: code
+              queryType: instant
+              expr: 'sum by (realm)(count_over_time({service_name="pg-origin-guard"} | json | available="0" [15m])) > 0 unless sum by (realm)(count_over_time({service_name="pg-origin-guard"} | json | available="1" [15m])) > 0'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

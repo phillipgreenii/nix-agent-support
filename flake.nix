@@ -3463,10 +3463,13 @@
                 assert guardOff.logSources == { };
                 assert noUsers.logSources == { };
                 assert obsOff.logSources == { };
-                # nothing else is registered (the Grafana rule is a separate change)
+                # the alert rule file is registered with the log source and nothing else is
                 assert enabled.metricsTargets == { };
                 assert enabled.dashboardProviders == { };
-                assert enabled.alertRuleFiles == [ ];
+                assert enabled.alertRuleFiles == [ ./packages/pg-origin-guard/grafana/alerting/alerts.yaml ];
+                assert guardOff.alertRuleFiles == [ ];
+                assert noUsers.alertRuleFiles == [ ];
+                assert obsOff.alertRuleFiles == [ ];
                 pkgs.runCommand "test-pg-origin-guard-darwin-module-ok" { } ''
                   # The registered glob matches the file names the tool writes
                   # (events-YYYY-MM-DD.jsonl) and not its other state files.
@@ -7943,6 +7946,37 @@
                     bash ${./packages/pg-keep-awake/check-alert-rules.sh} \
                       ${./packages/pg-keep-awake/grafana/alerting/alerts.yaml} \
                       ${./packages/pg-keep-awake/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
+              # pg-origin-guard: the auth-unavailable alert rule. check-alert-rules.sh pins the
+              # structure and the contract's expression, then runs both pipelines with
+              # `logcli --stdin` over the event fixtures under grafana/alerting/rule-tests/ (promtool
+              # cannot evaluate LogQL), followed by its mutant self-test. The rule must not be
+              # registered with pg-router-probe (no bead filing).
+              test-pg-origin-guard-alert-rules =
+                pkgs.runCommand "test-pg-origin-guard-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.gnused
+                      pkgs.gnugrep
+                      pkgs.grafana-loki
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    alerts=${./packages/pg-origin-guard/grafana/alerting/alerts.yaml}
+                    tests=${./packages/pg-origin-guard/grafana/alerting/rule-tests}
+                    bash ${./packages/pg-origin-guard/grafana/check-alert-rules.sh} "$alerts" "$tests"
+                    bash ${./packages/pg-origin-guard/grafana/check-alert-rules.sh} --self-test "$alerts" "$tests"
+                    if grep -rq pg-origin-guard ${./packages/pg-router-probe}; then
+                      echo "FAIL: pg-router-probe names pg-origin-guard" >&2
+                      exit 1
+                    fi
                     touch "$out"
                   '';
 
