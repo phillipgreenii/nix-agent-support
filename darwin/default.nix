@@ -19,6 +19,7 @@
     ./modules/pg-desk-serve
     ./modules/pg-task-focus
     ./modules/pg-keep-awake
+    ./modules/pg-origin-guard
     ./modules/pg-review
     ./modules/pg-repo-runner
     ./modules/ccpool

@@ -43,6 +43,7 @@
     ./programs/pgd
     ./programs/pg-repo-runner
     ./programs/pg-probe
+    ./programs/pg-origin-guard
     ./programs/pg-ccaudit
     ./programs/integrate-branch-support
     ./programs/worktree-tools
