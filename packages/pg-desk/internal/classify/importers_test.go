@@ -90,6 +90,7 @@ func TestClassifyImporterSetIsPinned(t *testing.T) {
 	want := []string{
 		"cmd/pg-desk/doctor_changeflow.go",
 		"cmd/pg-desk/link.go",
+		"cmd/pg-desk/reinterpret.go",
 		"internal/changes/orphans.go",
 		"internal/changes/poll.go",
 		"internal/focus/candidates.go",

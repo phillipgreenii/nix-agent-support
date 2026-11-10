@@ -1,0 +1,4 @@
+o/r#30: changed: waiting_on "someone-else" -> "me", panel "old-panel" -> "mine_awaiting_me", reason "old-reason" -> "ci-failing"
+o/r#31: not open (closed): would stamp only
+dry run: nothing written, nothing stamped
+reinterpreted 1 open PRs: 1 changed, 0 unchanged; 1 not open (stamped only), 0 skipped, 1 failed

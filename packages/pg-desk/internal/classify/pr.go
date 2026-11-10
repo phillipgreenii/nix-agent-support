@@ -132,6 +132,20 @@ func prDecode(s Snapshot) (prObserved, bool) {
 	return o, true
 }
 
+// PRStateOfFacts reads the lifecycle state of a PR from its stored facts
+// (entity.facts): "open", "closed", "merged", or "" when the facts carry no
+// recognisable state (no pr_show, or an unrecognised state with no merged
+// flag). ok is false when the facts do not decode at all. It is the one open
+// test the re-interpretation paths share with the change classifier
+// (prStateOf), so "open" means the same thing in both.
+func PRStateOfFacts(facts []byte) (state string, ok bool) {
+	o, ok := prDecode(Snapshot{Payload: json.RawMessage(facts)})
+	if !ok {
+		return "", false
+	}
+	return o.state, true
+}
+
 // prStateOf folds state and the merged flag into open, closed or merged, the
 // same way gather's removed re-read does. An unrecognised state with no
 // merged flag is unknown ("").

@@ -18,6 +18,11 @@ type ReinterpretOptions struct {
 	// appends (the entry point: "run", "reinterpret", ...).
 	Origin string
 
+	// DryRun derives the row and returns it without writing anything: no
+	// interpretation write, no stamp, no change record. The result's Write is
+	// the zero value.
+	DryRun bool
+
 	// beforeWrite is a TEST SEAM, nil in production: it runs between the
 	// facts read and the interpretation write, so a test can commit competing
 	// facts in that gap. A returned error is the write's error.
@@ -79,6 +84,9 @@ func ReinterpretStored(ctx context.Context, st *store.Store, cfg *config.Config,
 	}
 	res := ReinterpretResult{Found: true, Row: row, Interp: interp}
 
+	if opts.DryRun {
+		return res, nil
+	}
 	if h := opts.beforeWrite; h != nil {
 		if err := h(); err != nil {
 			return res, TagStage(StageStore, fmt.Errorf("pipeline: reinterpret store %s %s: %w", entityType, entityID, err))

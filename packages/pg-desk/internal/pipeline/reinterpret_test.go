@@ -219,3 +219,25 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// DryRun derives the row and writes nothing: no row change, no stamp, no
+// record.
+func TestReinterpretStored_DryRunDerivesAndWritesNothing(t *testing.T) {
+	p := riPipeline(t)
+	seedStale(t, p, "41")
+	before, _, _ := p.store.GetInterpretation(riRepo, "pr", "41")
+	res, err := riReinterpret(t, p, "pr", "41", ReinterpretOptions{DryRun: true})
+	if err != nil || !res.Found || res.Write != (store.InterpretationWriteResult{}) {
+		t.Fatalf("result = %+v, %v, want found and no write", res, err)
+	}
+	if res.Row.Panel == "old-panel" {
+		t.Errorf("derived row = %+v, want the new decision", res.Row)
+	}
+	after, _, _ := p.store.GetInterpretation(riRepo, "pr", "41")
+	if after != before {
+		t.Errorf("row changed under DryRun: %+v -> %+v", before, after)
+	}
+	if recs := riHistory(t, p.store, "pr", "41"); len(recs) != 0 {
+		t.Errorf("history = %+v, want none", recs)
+	}
+}

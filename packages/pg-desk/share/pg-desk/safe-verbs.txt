@@ -48,6 +48,7 @@ pr link add
 pr link remove
 pr mark-inactive
 pr refresh
+pr reinterpret
 pr show
 pr suppress
 pr unhide

@@ -158,6 +158,9 @@ func verbClasses() map[string]verbClass {
 	m["pr feedback list"] = safe("1")
 	m["pr feedback set"] = safe("1", "c1", "--disposition", "will-fix")
 	m["pr force-review"] = safe("1")
+	// Re-interprets from stored facts only; a PR that is not stored is a
+	// failure it reports, not a schema error.
+	m["pr reinterpret"] = safe("--open")
 	m["pr head-check"] = safe("1", "--head-sha", "0123456789abcdef")
 	// The PR lane's pg-desk-owned write path (P3b1a): both write the lane
 	// state in the meta table and the entity's active flag, all schema 2.

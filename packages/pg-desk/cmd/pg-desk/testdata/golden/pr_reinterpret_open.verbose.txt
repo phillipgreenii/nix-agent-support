@@ -1,0 +1,7 @@
+o/r#10: changed: waiting_on "someone-else" -> "me", panel "old-panel" -> "mine_awaiting_me", reason "old-reason" -> "ci-failing"
+o/r#11: unchanged: waiting_on "me" -> "me", panel "mine_awaiting_me" -> "mine_awaiting_me", reason "ci-failing" -> "ci-failing"
+o/r#12: not open (closed): stamped only
+o/r#13: not open (merged): stamped only
+o/r#14: not open (no recognisable state): stamped only
+o/r#15: not open (no recognisable state): stamped only
+reinterpreted 2 open PRs: 1 changed, 1 unchanged; 4 not open (stamped only), 0 skipped, 0 failed

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -199,4 +200,30 @@ func upsertInterpretationNew(ex execer, i Interpretation, haveStamp bool, stamp 
 		}, stampArgs...)...,
 	)
 	return err
+}
+
+// Decision is the part of an interpretation an operator reads: who owes the
+// next step, the panel the entity belongs in, and the reason.
+type Decision struct {
+	WaitingOn string
+	Panel     string
+	Reason    string
+}
+
+// Decision reads the decision out of the row's approvals blob and panel. A
+// malformed blob reads as no decision.
+func (i Interpretation) Decision() Decision {
+	var a struct {
+		WaitingOn string `json:"waiting_on"`
+		Reason    string `json:"reason"`
+	}
+	_ = json.Unmarshal([]byte(i.Approvals), &a)
+	return Decision{WaitingOn: a.WaitingOn, Panel: i.Panel, Reason: a.Reason}
+}
+
+// DecisionPairChanged reports whether the pair a change record is about
+// (waiting_on, panel) differs between two rows.
+func DecisionPairChanged(old, new Interpretation) bool {
+	o, n := old.Decision(), new.Decision()
+	return o.WaitingOn != n.WaitingOn || o.Panel != n.Panel
 }

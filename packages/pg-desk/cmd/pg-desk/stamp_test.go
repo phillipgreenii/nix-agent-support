@@ -4,6 +4,8 @@ import (
 	"io"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -12,8 +14,7 @@ import (
 // INV-REINTERPRET-4: every command that builds a Pipeline gives its store
 // handle the running stamp (build version plus the config digest), so every
 // interpretation row it writes carries it. The table builds the pipeline the way
-// each command does. The heartbeat catch-up and `pr reinterpret` join this table
-// when they land.
+// each command does. The heartbeat catch-up joins this table when it lands.
 func TestEveryCommandThatWritesInterpretationsStamps(t *testing.T) {
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "acme/widgets"}}}
 	want := interpret.Stamp(Version, cfg)
@@ -24,6 +25,9 @@ func TestEveryCommandThatWritesInterpretationsStamps(t *testing.T) {
 		"changes": func(st *store.Store) { newChangesPipeline(cfg, st, io.Discard) },
 		"run":     func(st *store.Store) { newRunPipeline(cfg, st, io.Discard, nil) },
 		"refresh": func(st *store.Store) { _ = newRefreshHydrator(cfg, st) },
+		"pr reinterpret": func(st *store.Store) {
+			newReinterpreter(&cobra.Command{}, cfg, st, "acme/widgets", false, false)
+		},
 	}
 	for name, build := range builders {
 		t.Run(name, func(t *testing.T) {
