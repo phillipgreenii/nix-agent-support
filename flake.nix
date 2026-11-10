@@ -524,6 +524,9 @@
               name = "git-tools-0.0.0-${phillipgreenii-nix-base.lib.mkSrcDigest result.packages}";
               paths = result.packages;
             };
+          # pgd-mermaid-render: renders the mermaid fences the pgd render hook links to,
+          # using mermaid-cli plus an installed system Chrome (no bundled browser on darwin).
+          pgd-mermaid-render = final.callPackage ./packages/pgd-mermaid-render { };
           bg-tools =
             let
               result = import ./packages/bg-tools {
@@ -19186,6 +19189,10 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # Hash and path contract of the mermaid renderer (no browser needed).
+            // {
+              test-pgd-mermaid-render = pkgs.pgd-mermaid-render.check;
+            }
             # test-session-mode-lib / test-session-mode (bead pg2-gzrn2).
             # Same one-line idiom as bg-tools above: without this the suite
             # ran in no gate at all.
@@ -19230,6 +19237,7 @@
             # "expected a set but found null").
             inherit (pkgs)
               ccpool
+              pgd-mermaid-render
               pg-wrap
               pg-router
               pg-router-ccpool-handler
