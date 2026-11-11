@@ -36,7 +36,9 @@ type Facts struct {
 	// below (never read by GC).
 	scanMu      sync.Mutex
 	endedSeeded bool
-	live, ended []*session.Session
+	// endedPending holds ended session ids whose registry lookup failed.
+	endedPending map[string]bool
+	live, ended  []*session.Session
 }
 
 // New returns a reader that discovers the daemon's socket from opts (the
@@ -170,7 +172,15 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 		}
 		// One registry read per ended session, once, so their stored rows keep
 		// kind and entrypoint across a daemon restart.
-		f.fillRegistry(ctx, c, ended)
+		// A lookup that fails (a query timeout, the discovery deadline on a long
+		// list) is remembered and retried on later Scans, so a failed read does
+		// not leave the stored row blank for the life of the daemon.
+		f.endedPending = map[string]bool{}
+		for i, err := range f.fillRegistry(ctx, c, ended) {
+			if err != nil {
+				f.endedPending[ended[i].SessionID] = true
+			}
+		}
 	} else {
 		ended = f.ended[:0:0]
 		var gone []*session.Session
@@ -190,6 +200,7 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 				ended = append(ended, s)
 			}
 		}
+		f.retryEndedPending(ctx, c, ended)
 	}
 	if len(ended) > maxDeadProcesses {
 		ended = ended[:maxDeadProcesses]
@@ -210,6 +221,33 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 		out = append(out, &cp)
 	}
 	return out, nil
+}
+
+// endedRetryBatch bounds how many failed ended-session lookups one Scan retries.
+const endedRetryBatch = 25
+
+// retryEndedPending re-reads the registry fields of ended sessions whose
+// startup lookup failed, newest first, a bounded batch per Scan. It touches
+// nothing when no lookup failed, so a healthy steady-state Scan sends no ended
+// read.
+func (f *Facts) retryEndedPending(ctx context.Context, c *client.Client, ended []*session.Session) {
+	if len(f.endedPending) == 0 {
+		return
+	}
+	var batch []*session.Session
+	for _, s := range ended {
+		if f.endedPending[s.SessionID] {
+			batch = append(batch, s)
+			if len(batch) == endedRetryBatch {
+				break
+			}
+		}
+	}
+	for i, err := range f.fillRegistry(ctx, c, batch) {
+		if err == nil {
+			delete(f.endedPending, batch[i].SessionID)
+		}
+	}
 }
 
 // ResyncEnded makes the next Registrations read the ended Processes again, for

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -230,6 +231,11 @@ func errorsIsOffline(err error) bool { return err == session.ErrDaemonOffline }
 // failingProxy answers a registry query that names failSID with a query
 // timeout and forwards everything else.
 func failingProxy(t *testing.T, target, failSID string) string {
+	return failingProxyUntil(t, target, failSID, nil)
+}
+
+// failingProxyUntil is failingProxy that stops failing once healed is set.
+func failingProxyUntil(t *testing.T, target, failSID string, healed *atomic.Bool) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "fpx")
 	if err != nil {
@@ -248,7 +254,7 @@ func failingProxy(t *testing.T, target, failSID string) string {
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/query" {
 			b, _ := io.ReadAll(r.Body)
-			if strings.Contains(string(b), failSID) {
+			if strings.Contains(string(b), failSID) && (healed == nil || !healed.Load()) {
 				w.WriteHeader(http.StatusGatewayTimeout)
 				_, _ = w.Write([]byte(`{"error":"query_timeout","message":"injected"}`))
 				return
@@ -286,5 +292,50 @@ func TestFailedRegistryLookupForOneSessionDoesNotFailTheScan(t *testing.T) {
 	}
 	if b := byID(got, "example-live-b"); b == nil || !b.PidAlive || b.PID != 502 || b.Kind != "" {
 		t.Errorf("failed session = %+v, want the process facts and no registry fields", b)
+	}
+}
+
+// TestEndedSessionWhoseStartupLookupFailedIsRetried: after a daemon restart the
+// ended sessions' registry fields are read once; a lookup that fails then (a
+// query timeout, the discovery deadline) must not blank the stored row for the
+// life of the daemon. The ended session is retried on a later Scan and keeps
+// kind and entrypoint once the recorder answers.
+func TestEndedSessionWhoseStartupLookupFailedIsRetried(t *testing.T) {
+	e := clienttest.Start(t)
+	for pid, sid := range map[int]string{501: "example-live-a", 503: "example-ended"} {
+		e.Procs.Add(pid, time.UnixMilli(startMs), nil)
+		writeRegistry(t, e, pid, sid, "busy", "")
+	}
+	e.Procs.Exit(503, time.UnixMilli(startMs+9000))
+	var healed atomic.Bool
+	f := New(client.Options{Socket: failingProxyUntil(t, e.Socket, "example-ended", &healed)})
+	ctx := context.Background()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for { // the recorder learns of the exit asynchronously
+		f.ResyncEnded()
+		got, err := f.Registrations(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := byID(got, "example-ended"); s != nil && !s.PidAlive {
+			if s.Kind != "" {
+				t.Fatalf("lookup was meant to fail, got %+v", s)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("recorder never reported the exit")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	healed.Store(true)
+	got, err := f.Registrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := byID(got, "example-ended"); s == nil || s.Kind != "interactive" || s.Entrypoint != "cli" {
+		t.Fatalf("ended session did not regain its registry fields: %+v", s)
 	}
 }
