@@ -11,7 +11,7 @@ import type { AssumeValue } from './assume'
 // context percent, the last coloured by level. renderBand is a plain data description, so a later
 // phase can turn each label into a button without changing its text. The band hook reads cached
 // values only (readCached): it never starts a fetch, a process or a file read.
-export type Level = 'normal' | 'yellow' | 'red' | 'green' | 'dim'
+export type Level = 'normal' | 'yellow' | 'red' | 'green' | 'magenta' | 'dim'
 
 export interface BandRow {
   id: string

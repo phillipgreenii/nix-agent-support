@@ -10,8 +10,8 @@ import { registerComponents } from './components'
 import { registerGitHeadHooks } from './gitHead'
 import { resetModals, setModalHost, pressAction, type ModalSpec } from './modal'
 import { setOptions } from './options'
-import { MODE_INTERVAL_MS, parseMode, setSessionModeClock, WRAP_UP_MODE } from './session-mode'
-import { initSources, readCached, setValue } from './source'
+import { MODE_INTERVAL_MS, modeSpec, parseMode, setSessionModeClock, WRAP_UP_MODE } from './session-mode'
+import { initSources, readCached, refresh, setValue } from './source'
 import { resetToggles } from './toggles'
 import { DEFAULT_OPTIONS, type PgdOptions } from './types'
 import { fakeClock, settle, stubHost } from './testkit'
@@ -65,7 +65,7 @@ test('the session id goes in the run env and the source holds mode, state and de
   expect(readCached('sessionMode')).toEqual({ mode: 'drain-beads', state: 'running', detail: 'P1 only' })
 })
 
-test('exit 2 (no record), a failed read and a finished mode draw no button', async () => {
+test('exit 2 (no record) and a failed read draw no button', async () => {
   const none = await world(async () => ({ exitCode: 2 }))
   expect(readCached('sessionMode')).toBe(undefined)
   expect(ids().includes('mode')).toBe(false)
@@ -81,20 +81,49 @@ test('exit 2 (no record), a failed read and a finished mode draw no button', asy
   })
   expect(readCached('sessionMode')).toBe(undefined)
   void rejected
-  const fin = await world(async () => record('drain-beads', 'finished'))
-  expect(ids().includes('mode')).toBe(false)
   void none
-  void fin
 })
 
-test('the button is drawn only while a mode is active, with the stopping state in its label', async () => {
-  await world(async () => record('drain-beads'))
-  const row = renderBand({ sessionId: 'sess-1' }, 200, T).flat().find(l => l.id === 'mode')
-  expect(row).toEqual({ id: 'mode', label: 'drain-beads', action: 'mode' })
+const modeRow = (sid = 'sess-1') => renderBand({ sessionId: sid }, 200, T).flat().find(l => l.id === 'mode')
+
+test('a record in any state keeps the button, with state, detail and the old-line colour', async () => {
+  await world(async () => record('drain-beads', 'running', 'P1 only'))
+  expect(modeRow()).toEqual({ id: 'mode', label: 'drain-beads: running [P1 only]', level: 'magenta', action: 'mode' })
   setValue('sessionMode', { mode: 'drain-beads', state: 'stopping' })
-  expect(renderBand({ sessionId: 'sess-1' }, 200, T).flat().find(l => l.id === 'mode')?.label).toBe('drain-beads (stopping)')
-  setValue('sessionMode', undefined)
+  expect(modeRow()).toEqual({ id: 'mode', label: 'drain-beads: stopping', level: 'yellow', action: 'mode' })
+  setValue('sessionMode', { mode: 'drain-beads', state: 'finished', detail: 'done' })
+  expect(modeRow()).toEqual({ id: 'mode', label: 'drain-beads: finished [done]', level: 'dim', action: 'mode' })
+  setValue('sessionMode', { mode: WRAP_UP_MODE, state: 'running' })
+  expect(modeRow()).toEqual({ id: 'mode', label: 'wrapping up', level: 'yellow', action: 'mode' })
+  setValue('sessionMode', { mode: WRAP_UP_MODE, state: 'finished' })
+  expect(modeRow()).toEqual({ id: 'mode', label: 'wrapped up', level: 'green', action: 'mode' })
+})
+
+test('a finished record read from the tool is drawn; a later undefined read clears the button', async () => {
+  let answer: Answer = record('drain-beads', 'finished')
+  const w = await world(async () => answer)
+  expect(modeRow()?.label).toBe('drain-beads: finished')
+  answer = { exitCode: 2 }
+  setSessionModeClock(() => w.clock.now() + 60_000)
+  refresh('sessionMode', { force: true })
+  await settle()
+  expect(readCached('sessionMode')).toBe(undefined)
   expect(ids().includes('mode')).toBe(false)
+})
+
+test('a new session id hides the record read for the old one', async () => {
+  await world(async () => record('drain-beads'))
+  expect(modeRow('sess-1')?.id).toBe('mode')
+  expect(modeRow('sess-2')).toBe(undefined)
+})
+
+test('Stop is offered only while the mode is not finished', async () => {
+  const w = await world(async () => record('drain-beads'))
+  setValue('sessionMode', { mode: 'drain-beads', state: 'finished' })
+  expect(modeSpec()?.actions.map(a => a.id)).toEqual(['close'])
+  setValue('sessionMode', { mode: 'drain-beads', state: 'running' })
+  expect(modeSpec()?.actions.map(a => a.id)).toEqual(['stop', 'close'])
+  void w
 })
 
 test('the modal lists mode, state and detail one per line; Stop runs set-status stopping and refreshes', async () => {

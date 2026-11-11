@@ -141,10 +141,16 @@ source: `session-mode show`, run through the facade's `process.run` with `CLAUDE
 session-mode module; the tool is used as it is. With `components.sessionMode` off there is no
 button, modal, stop action, source, timer or alert.
 
-- The button (`mode`, band order 40) shows the mode name, with ` (stopping)` while it is stopping,
-  and is drawn only while a mode is active. A press opens the modal; a second press closes it.
+- The button (`mode`, band order 40) is hidden only while no record exists for this session (operator,
+  2026-11-11: "if never set, it can remain hidden, if ever set, it stays until the session clears").
+  A record in any state, finished included, keeps it; the session clears when the session id changes
+  (after `/clear`) or the record is removed (`show` exits 2 and the cached value is cleared). The label
+  is `<mode>: running|stopping|finished` plus ` [detail]`; `wrap-up-session` reads `wrapping up` while
+  active and `wrapped up` once finished. Colours (the old status line): mode magenta, wrapping up and
+  stopping yellow, wrapped up green, other finished dim. A press opens the modal; a second press closes it.
 - The modal lists `mode`, `state` and `detail` (omitted when empty), one per line, with the actions
-  Stop (runs `session-mode set-status stopping`, then reads the source again) and Close.
+  Stop (runs `session-mode set-status stopping`, then reads the source again; not offered once the
+  mode is finished) and Close.
 - The alert `wrapping up` (priority 100, the highest) shows while a wrap-up mode is active.
 
 ### Choices the design left to the builder
@@ -159,9 +165,9 @@ Each of these is covered by a test in `hooks/session-mode.test.ts` or `hooks/ses
 | Parsing               | `session-mode show` prints one JSON record; `kind` becomes `mode`, `state` and `detail` are kept. A record without `kind` or `state` is a parse failure.                                                                   |
 | No record             | Exit 2 (also as a rejection carrying exit code 2) is the value undefined, not a failure: no button, no backoff.                                                                                                            |
 | Failed read           | Any other non-zero exit, rejection, timeout, absent tool or unparseable output leaves the value undefined, so the button is not drawn.                                                                                     |
-| Active                | A record whose state is not `finished`; a finished mode draws no button, modal or alert.                                                                                                                                   |
+| Active                | A record whose state is not `finished`; only an active mode offers Stop or raises the alert.                                                                                                                               |
 | Wrapping up           | The mode `wrap-up-session` while active.                                                                                                                                                                                   |
-| Labels and action ids | Button label is the mode name; band row id and modal id `mode`; actions `stop` and `close`.                                                                                                                                |
+| Labels and action ids | Button label as above; band row id and modal id `mode`; actions `stop` and `close`.                                                                                                                                        |
 | Throwaway record      | The real-tool test sets `SESSION_MODE_STATE_DIR` to a temporary directory and creates the record with the real `session-mode start`.                                                                                       |
 | Nix check             | `test-pgd-mod` gains `pkgs.session-mode` on its inputs; `session-mode.realtool.test.ts` imports node modules, so `claude plugin test` reports it as "did not load" (as for `pr.realgh.test.ts`) and the nix check runs it. |
 
