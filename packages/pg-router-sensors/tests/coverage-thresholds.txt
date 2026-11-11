@@ -17,3 +17,4 @@ internal/sensorcli 90
 internal/host 90
 internal/netprobe 90
 internal/vpn 90
+internal/gitauth 90

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/phillipgreenii/pg-router-sensors/internal/gitauth"
 	"github.com/phillipgreenii/pg-router-sensors/internal/host"
 	"github.com/phillipgreenii/pg-router-sensors/internal/sensorcli"
 	"github.com/phillipgreenii/pg-router-sensors/internal/vpn"
@@ -20,7 +21,7 @@ var version = "dev"
 // registry holds the subcommands whose packets have landed; an unregistered
 // subcommand prints usage and exits 2.
 func registry() sensorcli.Registry {
-	return sensorcli.Registry{"host-sensor": host.New(), "vpn-sensor": vpn.New()}
+	return sensorcli.Registry{"host-sensor": host.New(), "vpn-sensor": vpn.New(), "git-auth-sensor": gitauth.New()}
 }
 
 func main() {
