@@ -47,6 +47,11 @@ type Engine struct {
 	// guards it.
 	incMu sync.Mutex
 	inc   *liveInc
+
+	// reg is the registry state a model load extends instead of rereading; regMu
+	// guards it.
+	regMu sync.Mutex
+	reg   regCache
 }
 
 // modelEntry is a cached complete model. The model is a function of the
@@ -218,25 +223,15 @@ func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
 		}
 		return q
 	}
-	rows, err := db.Query(pick(registryQuery))
-	if err != nil {
+	epoch := e.St.RollbackEpoch()
+	e.regMu.Lock()
+	defer e.regMu.Unlock()
+	if err := e.syncRegistry(db, epoch, ready, pick); err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var x regRow
-		var pid, started sql.NullInt64
-		var ps, cwd, name, status, waiting sql.NullString
-		if err := rows.Scan(&x.id, &x.session, &x.t, &pid, &ps, &cwd, &started, &name, &status, &waiting); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		x.pid, x.ps, x.cwd, x.started = pid.Int64, ps.String, cwd.String, started.Int64
-		x.name, x.status, x.waiting = name.String, status.String, waiting.String
-		k := pkey{x.pid, x.ps}
-		m.vers[k] = append(m.vers[k], x)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
+	for k, vs := range e.reg.vers {
+		// Clipped, so a later append to the cache never shows in this model.
+		m.vers[k] = vs[:len(vs):len(vs)]
 	}
 	for k, vs := range m.vers {
 		var cur *seg
@@ -262,25 +257,8 @@ func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
 	for _, ss := range m.segs {
 		sort.SliceStable(ss, func(i, j int) bool { return ss[i].start < ss[j].start })
 	}
-	drows, err := db.Query(registryDeletedQuery)
-	if err != nil {
-		return nil, err
-	}
-	for drows.Next() {
-		var t int64
-		var pid sql.NullInt64
-		var ps sql.NullString
-		if err := drows.Scan(&t, &pid, &ps); err != nil {
-			_ = drows.Close()
-			return nil, err
-		}
-		k := pkey{pid.Int64, ps.String}
-		if t > m.deleted[k] {
-			m.deleted[k] = t
-		}
-	}
-	if err := drows.Close(); err != nil {
-		return nil, err
+	for k, t := range e.reg.deleted {
+		m.deleted[k] = t
 	}
 	if !liveOnly {
 		hrows, err := db.Query(pick(slashCommandQuery))
@@ -955,4 +933,110 @@ func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// regCache holds the registry versions and deletion times a model load has read,
+// with the highest record id and the row count of each kind. Registry records
+// are only ever appended, so a load reads the records after those ids; a miss of
+// the model cache therefore costs the new records, not every version ever
+// stored. The cache is dropped when the store may have undone a write, the
+// session-ref mode changed, or the rows at or below the highest id are no
+// longer the rows read (a generation rewrite cleared some).
+type regCache struct {
+	valid   bool
+	epoch   uint64
+	ready   bool
+	maxReg  int64
+	nReg    int64
+	maxDel  int64
+	nDel    int64
+	vers    map[pkey][]regRow
+	deleted map[pkey]int64
+}
+
+// registryCountQuery and registryDeletedCountQuery count the stored records of a
+// kind up to an id; they read the records_source_type index alone.
+const (
+	registryCountQuery        = `SELECT COUNT(*) FROM records WHERE source='session-registry' AND type='registry' AND id<=?`
+	registryDeletedCountQuery = `SELECT COUNT(*) FROM records WHERE source='session-registry' AND type='registry_deleted' AND id<=?`
+)
+
+// syncRegistry brings e.reg up to the registry as db sees it. It runs under
+// e.regMu, inside the read transaction of the load. On error the cache is left
+// invalid, so the next load rebuilds it.
+func (e *Engine) syncRegistry(db store.Querier, epoch uint64, ready bool, pick func(string) string) error {
+	c := &e.reg
+	if c.valid && (c.epoch != epoch || c.ready != ready || !e.regUnchanged(db, c)) {
+		c.valid = false
+	}
+	if !c.valid {
+		*c = regCache{epoch: epoch, ready: ready, vers: map[pkey][]regRow{}, deleted: map[pkey]int64{}}
+	}
+	c.valid = false
+	rows, err := db.Query(pick(incRegistryQuery), c.maxReg)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var x regRow
+		var pid, started sql.NullInt64
+		var ps, cwd, name, status, waiting sql.NullString
+		if err := rows.Scan(&x.id, &x.session, &x.t, &pid, &ps, &cwd, &started, &name, &status, &waiting); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		x.pid, x.ps, x.cwd, x.started = pid.Int64, ps.String, cwd.String, started.Int64
+		x.name, x.status, x.waiting = name.String, status.String, waiting.String
+		k := pkey{x.pid, x.ps}
+		c.vers[k] = append(c.vers[k], x)
+		if x.id > c.maxReg {
+			c.maxReg = x.id
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	drows, err := db.Query(incDeletedQuery, c.maxDel)
+	if err != nil {
+		return err
+	}
+	for drows.Next() {
+		var id, t int64
+		var pid sql.NullInt64
+		var ps sql.NullString
+		if err := drows.Scan(&id, &t, &pid, &ps); err != nil {
+			_ = drows.Close()
+			return err
+		}
+		k := pkey{pid.Int64, ps.String}
+		if t > c.deleted[k] {
+			c.deleted[k] = t
+		}
+		if id > c.maxDel {
+			c.maxDel = id
+		}
+	}
+	if err := drows.Close(); err != nil {
+		return err
+	}
+	// The counts are taken after the reads, from the same snapshot: they include
+	// records without fields, which the joins skip.
+	if err := db.QueryRow(registryCountQuery, c.maxReg).Scan(&c.nReg); err != nil {
+		return err
+	}
+	if err := db.QueryRow(registryDeletedCountQuery, c.maxDel).Scan(&c.nDel); err != nil {
+		return err
+	}
+	c.valid = true
+	return nil
+}
+
+// regUnchanged reports whether the stored registry records at or below the
+// cached ids are exactly the ones cached (none cleared).
+func (e *Engine) regUnchanged(db store.Querier, c *regCache) bool {
+	var n, d int64
+	if db.QueryRow(registryCountQuery, c.maxReg).Scan(&n) != nil || n != c.nReg {
+		return false
+	}
+	return db.QueryRow(registryDeletedCountQuery, c.maxDel).Scan(&d) == nil && d == c.nDel
 }

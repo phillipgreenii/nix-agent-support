@@ -55,17 +55,22 @@ func TestLoadQueryPlansUseTheSourceIndex(t *testing.T) {
 UPDATE records SET type='registry_deleted' WHERE source='session-registry' AND id%2=1`); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []struct{ name, sql string }{
-		{"registry", registryQuery},
-		{"registry_deleted", registryDeletedQuery},
-		{"slash_command", slashCommandQuery},
-		{"end_reason", endReasonQuery},
-		{"registry_ref", viaSessionRef(registryQuery)},
-		{"slash_command_ref", viaSessionRef(slashCommandQuery)},
-		{"end_reason_ref", viaSessionRef(endReasonQuery)},
+	for _, q := range []struct {
+		name, sql string
+		args      []any
+	}{
+		{"registry", registryQuery, nil},
+		{"registry_inc", incRegistryQuery, []any{0}},
+		{"registry_deleted", registryDeletedQuery, nil},
+		{"registry_deleted_inc", incDeletedQuery, []any{0}},
+		{"slash_command", slashCommandQuery, nil},
+		{"end_reason", endReasonQuery, nil},
+		{"registry_ref", viaSessionRef(registryQuery), nil},
+		{"slash_command_ref", viaSessionRef(slashCommandQuery), nil},
+		{"end_reason_ref", viaSessionRef(endReasonQuery), nil},
 	} {
 		t.Run(q.name, func(t *testing.T) {
-			plan := f.planOf(q.sql)
+			plan := f.planOf(q.sql, q.args...)
 			var sawSource, sawPK bool
 			for _, d := range plan {
 				t.Log(d)
@@ -87,5 +92,31 @@ UPDATE records SET type='registry_deleted' WHERE source='session-registry' AND i
 				t.Errorf("plan does not search fields by its primary key: %v", plan)
 			}
 		})
+	}
+}
+
+// The cheap checks of the registry cache count records by kind up to an id. They
+// MUST be answered from records_source_type alone: no scan of records, and no
+// read of fields.
+func TestRegistryCountQueryPlansUseTheSourceIndex(t *testing.T) {
+	f := newCwdFixture(t)
+	for _, q := range []string{registryCountQuery, registryDeletedCountQuery} {
+		plan := f.planOf(q, 0)
+		var sawSource bool
+		for _, d := range plan {
+			t.Log(d)
+			if strings.Contains(d, "SCAN") && !strings.Contains(d, "USING") {
+				t.Errorf("plan scans a table: %q", d)
+			}
+			if strings.Contains(d, "fields") {
+				t.Errorf("plan reads fields: %q", d)
+			}
+			if strings.Contains(d, "records_source_type") {
+				sawSource = true
+			}
+		}
+		if !sawSource {
+			t.Errorf("plan does not use records_source_type: %v", plan)
+		}
 	}
 }
