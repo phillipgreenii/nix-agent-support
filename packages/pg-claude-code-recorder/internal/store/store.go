@@ -1339,7 +1339,7 @@ func (s *Store) Close() error {
 		// checkpoint connection; a cut-short pass resumes at the next one.
 		if s.wdb != nil && s.CollectStatsDue(time.Now(), StatsEvery) {
 			ctx, cancel := context.WithTimeout(context.Background(), closeStatsWait)
-			_, _ = s.collectStats(ctx, s.cdb, DefaultAnalysisLimit, time.Now())
+			_, _ = s.collectStats(ctx, s.cdb, DefaultAnalysisLimit, time.Now(), 0)
 			cancel()
 		}
 		_ = s.cdb.Close()

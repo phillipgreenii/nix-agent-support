@@ -453,9 +453,10 @@ func (m *model) conversation(session string) (Conversation, bool) {
 
 // cwdQuery finds the newest cwd of a session's transcript. CROSS JOIN makes
 // records the outer loop (records_session for the session, then the fields
-// primary key per record). The store has no sqlite_stat1, so the planner cannot
-// see that session=? is far more selective than the cwd name; on an earlier
-// schema it started from every cwd field in the store. CROSS JOIN pins the
+// primary key per record). The store now carries sqlite_stat1, but it is sampled
+// and can be absent or stale (a fresh store, a pass cut short), and without it the
+// planner cannot see that session=? is far more selective than the cwd name; on
+// an earlier schema it started from every cwd field in the store. CROSS JOIN pins the
 // order whatever the planner or schema does. INDEXED BY is avoided on
 // purpose: it can fail at prepare time. TestCwdQueryPlanStartsFromTheSessionIndex
 // guards the plan.

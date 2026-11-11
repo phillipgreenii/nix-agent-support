@@ -26,9 +26,32 @@ const (
 	DefaultAnalysisLimit = 1000
 	// StatsEvery is how often the daemon's maintenance tick re-collects.
 	StatsEvery = 24 * time.Hour
+	// MinAnalysisLimit is the smallest sample a retried step falls back to; an
+	// index that cannot be analysed within the step budget at that size is
+	// skipped for this pass.
+	MinAnalysisLimit = 50
 
 	metaStatsAtNS = "stats_collected_at_ns"
 )
+
+// A single ANALYZE holds the write lock until it ends, and on a cold page cache
+// even a sampled one can run for many seconds (the first pass on the live store
+// took about 7 minutes in total and made ingest fail with SQLITE_BUSY). So each
+// statement runs under statsStepTimeout, well under the 5 s busy_timeout of the
+// writers: SQLite interrupts it, the transaction rolls back and releases the
+// lock, and the step is retried with a quarter of the sample (the pages it
+// already read stay cached, so the retry is faster). statsPause between steps
+// lets writers that queued behind the lock run before the next step takes it.
+// These are vars so a test can shorten them.
+var (
+	statsStepTimeout = 1500 * time.Millisecond
+	statsPause       = 100 * time.Millisecond
+)
+
+// ErrStatsSkipped means CollectStats finished its pass but skipped indexes it
+// could not analyse inside the step budget; the completion time is not stamped,
+// so the next check retries (the pages read meanwhile are cached).
+var ErrStatsSkipped = errors.New("stats collection skipped slow indexes")
 
 // CollectStatsDue reports whether the last collection is older than every (or
 // none was recorded).
@@ -55,12 +78,12 @@ func (s *Store) CollectStats(ctx context.Context, limit int, now time.Time) (sta
 	if c == nil {
 		return 0, errors.New("store closed")
 	}
-	return s.collectStats(ctx, c, limit, now)
+	return s.collectStats(ctx, c, limit, now, statsPause)
 }
 
 // collectStats is CollectStats on a given connection pool; Close calls it
 // while it already holds s.mu.
-func (s *Store) collectStats(ctx context.Context, c *sql.DB, limit int, now time.Time) (statements int, err error) {
+func (s *Store) collectStats(ctx context.Context, c *sql.DB, limit int, now time.Time, pause time.Duration) (statements int, err error) {
 	if limit <= 0 {
 		limit = DefaultAnalysisLimit
 	}
@@ -73,6 +96,7 @@ func (s *Store) collectStats(ctx context.Context, c *sql.DB, limit int, now time
 		return 0, err
 	}
 	defer func() { _, _ = conn.ExecContext(context.Background(), `PRAGMA analysis_limit=0`) }()
+	skipped := 0
 	targets, err := statsTargets(ctx, conn)
 	if err != nil {
 		return 0, err
@@ -81,10 +105,25 @@ func (s *Store) collectStats(ctx context.Context, c *sql.DB, limit int, now time
 		if err := ctx.Err(); err != nil {
 			return statements, err
 		}
-		if _, err := conn.ExecContext(ctx, `ANALYZE `+t); err != nil {
+		ok, err := analyzeStep(ctx, conn, t, limit)
+		if err != nil {
 			return statements, err
 		}
-		statements++
+		if ok {
+			statements++
+		} else {
+			skipped++
+		}
+		if pause > 0 {
+			select {
+			case <-ctx.Done():
+				return statements, ctx.Err()
+			case <-time.After(pause):
+			}
+		}
+	}
+	if skipped > 0 {
+		return statements, ErrStatsSkipped
 	}
 	// Mark done on the writer: the stamp is a normal committed write.
 	if _, err := s.wdb.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
@@ -92,6 +131,31 @@ func (s *Store) collectStats(ctx context.Context, c *sql.DB, limit int, now time
 		return statements, err
 	}
 	return statements, nil
+}
+
+// analyzeStep runs one ANALYZE under statsStepTimeout, retrying with a smaller
+// sample each time the step is interrupted. It reports false (no error) when
+// even MinAnalysisLimit does not fit; an error from ctx or SQLite ends the pass.
+func analyzeStep(ctx context.Context, conn *sql.Conn, target string, limit int) (bool, error) {
+	for {
+		if _, err := conn.ExecContext(ctx, `PRAGMA analysis_limit=`+strconv.Itoa(limit)); err != nil {
+			return false, err
+		}
+		sctx, cancel := context.WithTimeout(ctx, statsStepTimeout)
+		_, err := conn.ExecContext(sctx, `ANALYZE `+target)
+		timedOut := sctx.Err() != nil
+		cancel()
+		if err == nil {
+			return true, nil
+		}
+		if ctx.Err() != nil || !timedOut {
+			return false, err
+		}
+		if limit <= MinAnalysisLimit {
+			return false, nil
+		}
+		limit = max(limit/4, MinAnalysisLimit)
+	}
 }
 
 // statsTargets lists what PRAGMA optimize would analyse (its dry run), each

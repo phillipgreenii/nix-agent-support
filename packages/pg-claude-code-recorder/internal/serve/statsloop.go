@@ -16,7 +16,7 @@ const (
 
 // statsLoop keeps sqlite_stat1 current without stalling serving: when the last
 // collection is older than store.StatsEvery it runs Store.CollectStats, which
-// analyses one index per write transaction with a lowered analysis_limit. It is
+// analyses one index per short write transaction (interrupted and retried smaller past a step budget) with a lowered analysis_limit. It is
 // its own loop (not the doctor loop's step) so the first collection, which takes
 // minutes on a large store, cannot hold up doctor. A failed or cut-short pass
 // retries at the next check.
