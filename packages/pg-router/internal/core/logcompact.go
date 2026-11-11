@@ -59,7 +59,7 @@ type LogCompactView struct {
 	RecordsAfter  int      `json:"recordsAfter"`
 	EventsKept    int      `json:"eventsKept"`
 	EventsDropped int      `json:"eventsDropped"`
-	GatesKept     int      `json:"gatesKept"`
+	LevelsKept    int      `json:"levelsKept"`
 	Torn          bool     `json:"torn,omitempty"`
 	DurationMs    *int64   `json:"durationMs,omitempty"`
 	LimitBytes    int64    `json:"limitBytes,omitempty"`
@@ -70,7 +70,7 @@ type LogCompactView struct {
 
 // NewLogCompactView renders a compaction result for the wire. limitBytes is
 // max_log_bytes (0: not configured, so no percentages). For a real run the sizes
-// and record counts are the run's own; the event and gate counts are the plan's
+// and record counts are the run's own; the event and level counts are the plan's
 // (the fold the run was about to execute).
 func NewLogCompactView(res eventqueue.CompactResult, limitBytes int64, via string) LogCompactView {
 	v := LogCompactView{
@@ -85,7 +85,7 @@ func NewLogCompactView(res eventqueue.CompactResult, limitBytes int64, via strin
 		RecordsAfter:  res.Plan.RecordsAfter,
 		EventsKept:    res.Plan.EventsKept,
 		EventsDropped: res.Plan.EventsDropped,
-		GatesKept:     res.Plan.GatesKept,
+		LevelsKept:    res.Plan.LevelsKept,
 		Torn:          res.Plan.Torn,
 	}
 	if res.Compacted {

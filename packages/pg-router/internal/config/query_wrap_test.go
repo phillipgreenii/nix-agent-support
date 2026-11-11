@@ -155,7 +155,6 @@ name = "probe"
 emits = ["e"]
 type = "command"
 description = "d"
-non_blocking_gates = ["LOW_DISK_USAGE"]
 expected_interval = "5m"
 [query.trigger]
 kind = "period"

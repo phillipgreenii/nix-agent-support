@@ -410,8 +410,7 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing kind", `{"schemaVersion":"1","id":"role-triage"}`},
 		{"kind out of enum", `{"schemaVersion":"1","id":"role-triage","kind":"orchestrator"}`},
 		{"self out of enum", `{"schemaVersion":"1","id":"role-triage","kind":"handler","self":"mostly-fine"}`},
-		{"nonBlockingGates entry not ALL CAPS", `{"schemaVersion":"1","id":"role-triage","kind":"handler","nonBlockingGates":["low_disk"]}`},
-		{"nonBlockingGates not an array", `{"schemaVersion":"1","id":"role-triage","kind":"handler","nonBlockingGates":"LOW_DISK"}`},
+		{"removed nonBlockingGates field", `{"schemaVersion":"1","id":"role-triage","kind":"handler","nonBlockingGates":["LOW_DISK"]}`},
 	},
 	"cli.register-reply": {
 		{"missing accepted", `{"schemaVersion":"1","callback":"","selfStatusCallback":"c"}`},
@@ -471,10 +470,10 @@ var negativeMatrix = map[string][]negativeCase{
 		{"unknown field", `{"schemaVersion":"1","force":true}`},
 	},
 	"cli.log-compact-reply": {
-		{"missing via", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"gatesKept":0}`},
-		{"via out of enum", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"remote","bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"gatesKept":0}`},
-		{"negative bytesAfter", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":1,"bytesAfter":-1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"gatesKept":0}`},
-		{"missing gatesKept", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0}`},
+		{"missing via", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"levelsKept":0}`},
+		{"via out of enum", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"remote","bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"levelsKept":0}`},
+		{"negative bytesAfter", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":1,"bytesAfter":-1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0,"levelsKept":0}`},
+		{"missing levelsKept", `{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":1,"bytesAfter":1,"recordsBefore":1,"recordsAfter":1,"eventsKept":0,"eventsDropped":0}`},
 	},
 }
 

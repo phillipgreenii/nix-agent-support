@@ -13,7 +13,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
@@ -30,6 +29,15 @@ const gateToggleTimeout = 10 * time.Second
 // R binding: the socket `resume` verb with `all` set, clearing EVERY active
 // gate, not just SYSTEM_PAUSE.
 const ToggleVerbResumeAll = "resume-all"
+
+// The other two Poller.ToggleGate verbs, and the name the status reply's
+// `gates` array gave the router pause. The wire verbs behind them are the level
+// verbs level-set / level-clear on the router resource (see SocketPoller.ToggleGate).
+const (
+	ToggleVerbPause  = "pause"
+	ToggleVerbResume = "resume"
+	systemPauseGate  = "SYSTEM_PAUSE"
+)
 
 // gateToggleResultMsg carries ToggleGate's outcome back to Update
 // [design: Task 4.8 Interfaces].
@@ -51,9 +59,9 @@ type gateToggleResultMsg struct {
 // itself changes m.reply's gate state. That happens in exactly one place,
 // applyGateToggleResult, and only once the RPC has actually replied.
 func (m *Model) handleToggleOperatorGate() tea.Cmd {
-	verb := core.SubcommandPause
-	if m.gateSet(core.GateSystemPause) {
-		verb = core.SubcommandResume
+	verb := ToggleVerbPause
+	if m.gateSet(systemPauseGate) {
+		verb = ToggleVerbResume
 	}
 	return m.startGateToggle(verb)
 }
@@ -112,11 +120,11 @@ func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 	}
 	switch {
 	case msg.effective == "paused":
-		m.setGate(core.GateSystemPause, true)
+		m.setGate(systemPauseGate, true)
 	case msg.verb == ToggleVerbResumeAll:
 		m.reply.Gates = nil
 	default:
-		m.setGate(core.GateSystemPause, false)
+		m.setGate(systemPauseGate, false)
 	}
 	m.setFlash(m.operatorGateFlashText(msg.effective), FlashInfo)
 	return m.flashClearCmd()
@@ -129,12 +137,12 @@ func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 // the pool resumed.
 func (m *Model) operatorGateFlashText(effective string) string {
 	if effective == "paused" {
-		return core.GateSystemPause + " set — pool now PAUSED"
+		return systemPauseGate + " set — pool now PAUSED"
 	}
-	if others := m.otherGateTypes(core.GateSystemPause); len(others) > 0 {
-		return core.GateSystemPause + " cleared — still gated by " + strings.Join(others, ", ")
+	if others := m.otherGateTypes(systemPauseGate); len(others) > 0 {
+		return systemPauseGate + " cleared — still gated by " + strings.Join(others, ", ")
 	}
-	return core.GateSystemPause + " cleared — pool now RESUMED"
+	return systemPauseGate + " cleared — pool now RESUMED"
 }
 
 // otherGateTypes lists the TYPEs of every active gate except except, sorted.

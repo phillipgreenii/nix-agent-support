@@ -18,7 +18,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
 
@@ -241,7 +240,7 @@ func fixtureSweepPaused() *Model {
 	m.screen = screenMain
 	m.reply = StatusReply{
 		Core:      CoreInfo{State: coreStateStarted},
-		Gates:     []Gate{{Type: core.GateSystemPause}},
+		Gates:     []Gate{{Type: systemPauseGate}},
 		Listeners: []Listener{{Role: "reviewer", Enabled: true}},
 	}
 	return m

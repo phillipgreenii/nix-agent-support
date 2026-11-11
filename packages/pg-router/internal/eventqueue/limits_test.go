@@ -216,14 +216,14 @@ func TestLimits_softBoundaryAndHysteresis(t *testing.T) {
 	}
 }
 
-// Crossing soft halts the emitters and nothing else: a listener WITHOUT any gate
-// exemption keeps getting dispatched to, Enqueue is still admitted, and
+// Crossing soft halts the emitters and nothing else: a listener WITHOUT any requirement
+// keeps getting dispatched to, Enqueue is still admitted, and
 // run-until-idle still drains. This is the property that makes the soft step safe:
 // space can be reclaimed and no listener loses an event.
 func TestLimits_softHaltsEmittersButListenersAndDrainKeepRunning(t *testing.T) {
 	mem := NewMemStore()
 	q, _ := newLimitQueue(t, mem, 900, 1000)
-	l := newListener("h", "T") // no GateExempter: blocks on every gate TYPE
+	l := newListener("h", "T") // no requirement registered: admitted at every level
 	q.Register(l)
 	if _, err := q.Enqueue(evt("e1", "T")); err != nil {
 		t.Fatal(err)
@@ -247,28 +247,24 @@ func TestLimits_softHaltsEmittersButListenersAndDrainKeepRunning(t *testing.T) {
 	}
 }
 
-// The halt is not a gate: no gate appears, and gate set / clear (the operator's
-// pause / resume --all) neither sets nor clears it.
-func TestLimits_haltIsNotAGateAndGateClearDoesNotTouchIt(t *testing.T) {
+// The halt is not a level: a level change (the operator's pause / resume)
+// neither sets nor clears it.
+func TestLimits_haltIsNotALevelAndLevelChangesDoNotTouchIt(t *testing.T) {
 	mem := NewMemStore()
-	q, _ := newLimitQueue(t, mem, 900, 1000)
+	src := newTestLevels(time.Now)
+	q, _ := newLimitQueue(t, mem, 900, 1000, WithLevelSource(src.snapshot), WithRegistry(testRegistry()))
 	mem.SetLogSize(950)
 	q.EnforceLogLimits()
 	if !q.EmittersHalted() {
 		t.Fatal("not halted")
 	}
-	if g := q.ActiveGates(); len(g) != 0 {
-		t.Fatalf("soft halt appeared as gates %v; it must not be a gate", gateTypes(g))
-	}
-	mustSet(t, q, GateRequest{Type: "SYSTEM_PAUSE"})
+	src.set("disk", "CRITICAL")
 	if !q.EmittersHalted() {
-		t.Fatal("a gate set cleared the halt")
+		t.Fatal("a level change cleared the halt")
 	}
-	if _, ok, err := q.ClearGate("SYSTEM_PAUSE", "op"); err != nil || !ok {
-		t.Fatalf("ClearGate: ok=%v err=%v", ok, err)
-	}
+	src.set("disk", "PLENTY")
 	if !q.EmittersHalted() {
-		t.Fatal("gate clear (resume) cleared the halt; it must be re-derived from log size only")
+		t.Fatal("a level recovery cleared the halt; it must be re-derived from log size only")
 	}
 	mem.SetLogSize(10)
 	q.EnforceLogLimits()
@@ -393,8 +389,8 @@ func TestLimits_hardRejectsEnqueueWithClassifiedReason(t *testing.T) {
 	}
 }
 
-// The hard limit is an ADMISSION limit only: above it, accept, evict, gate_set and
-// gate_cleared records still append (using the soft-to-hard headroom), and a
+// The hard limit is an ADMISSION limit only: above it, accept, evict, level_set and
+// level_cleared records still append (using the soft-to-hard headroom), and a
 // Deduped re-emit stays a no-write success.
 func TestLimits_aboveHardOnlyEnqueueAdmissionIsRefused(t *testing.T) {
 	mem := NewMemStore()
@@ -430,19 +426,19 @@ func TestLimits_aboveHardOnlyEnqueueAdmissionIsRefused(t *testing.T) {
 	if n := q.Expire(); n != 1 {
 		t.Fatalf("Expire dropped %d, want 1 (the born-expired accepted event)", n)
 	}
-	if _, err := q.SetGate(GateRequest{Type: "SYSTEM_PAUSE"}); err != nil {
-		t.Fatalf("SetGate over the hard limit: %v", err)
+	if _, err := q.AppendLevel(PauseRecord("op", clk.now(), 0)); err != nil {
+		t.Fatalf("level_set over the hard limit: %v", err)
 	}
-	if _, ok, err := q.ClearGate("SYSTEM_PAUSE", "op"); err != nil || !ok {
-		t.Fatalf("ClearGate over the hard limit: ok=%v err=%v", ok, err)
+	if _, err := q.AppendLevel(ResumeRecord(clk.now())); err != nil {
+		t.Fatalf("level_cleared over the hard limit: %v", err)
 	}
 	after, _ := mem.Replay()
 	ops := map[opKind]int{}
 	for _, r := range after[len(before):] {
 		ops[r.Op]++
 	}
-	if ops[opAccept] != 2 || ops[opEvict] != 1 || ops[opGateSet] != 1 || ops[opGateCleared] != 1 {
-		t.Fatalf("records appended above the hard limit = %v, want 2 accept, 1 evict, 1 gate_set, 1 gate_cleared", ops)
+	if ops[opAccept] != 2 || ops[opEvict] != 1 || ops[opLevelSet] != 1 || ops[opLevelCleared] != 1 {
+		t.Fatalf("records appended above the hard limit = %v, want 2 accept, 1 evict, 1 level_set, 1 level_cleared", ops)
 	}
 	if st := q.LimitStatus(); st.State != StateLogFull {
 		t.Fatalf("those writes must not mark the log unwritable; State = %q", st.State)
@@ -527,10 +523,6 @@ func TestLimits_unwritableDoesNotWedgeAndRecoversViaProbe(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the queue wedged on an unwritable log")
 	}
-	if _, err := q.SetGate(GateRequest{Type: "SYSTEM_PAUSE"}); err == nil {
-		t.Fatal("SetGate reported success although nothing could be written")
-	}
-
 	// A failed probe keeps it unwritable, and is not retried before probeInterval.
 	q.EnforceLogLimits()
 	if !q.EmittersHalted() || q.LimitStatus().State != StateLogUnwritable {

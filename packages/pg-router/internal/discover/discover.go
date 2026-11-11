@@ -148,8 +148,8 @@ type SourceFailureObserver interface {
 	// activity ring; the metrics emitter only needs this one signal.
 	OnSourceSucceeded(source string)
 	// OnSourcePaused fires once for every pass in which source was due to run
-	// but a deliberate pause stopped it from being polled: an active gate
-	// blocking it (Gate Registry) or the log-size limit's halted emitters. A
+	// but a deliberate pause stopped it from being polled: a level
+	// requirement blocking it or the log-size limit's halted emitters. A
 	// pause is NOT a failure, so the last-success gauge advances on it
 	// (DEC-OBS-4) — a pg-router pause or log-limit halt must not make every
 	// pull source look like it has stopped succeeding.
@@ -247,7 +247,7 @@ func WithSourceActivityObserver(obs SourceActivityObserver) ProduceOption {
 //     their type is UNDECLARED — no configured role binds to it (INV-DISP-3's
 //     configuration-wide view, now held on the pull path too, not just push)
 //     — never enqueued.
-//   - Blocked records, per source name, the gate TYPE (Gate Registry, bead
+//   - Blocked records, per source name, the first failing resource (levels, bead
 //     pg2-h63eu) that stopped this pass from polling it: a blocked emitter is
 //     not polled (and its LastTick is left untouched, so it fires on the first
 //     pass after the gate clears). The timer emitter is never blocked.
@@ -474,26 +474,25 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 	if cad.FailedSlots == nil {
 		cad.FailedSlots = make(map[string]time.Time)
 	}
-	// gateBlocked is the Gate Registry's emitter check (internal/eventqueue/
-	// gate.go): a source an active gate blocks is NOT polled this pass. The timer
-	// emitter is exempt from every gate ("you can't stop time moving forward");
-	// any other source is exempt only from the TYPEs it declared at registration
-	// (query.Source.NonBlockingGates).
-	gateBlocked := func(s query.Source) bool {
+	// levelBlocked is the level-based emitter check (internal/eventqueue/
+	// levelgate.go): a source no consumer of which could run at the current
+	// levels is NOT polled this pass. The timer emitter is exempt ("you can't
+	// stop time moving forward"); the queue itself reports a source with no
+	// registered consumer as not blocked.
+	levelBlocked := func(s query.Source) bool {
 		if query.IsTimer(s.Query) {
 			return false
 		}
-		gt, blocked := q.EmitterBlockedBy(s.Name, eventqueue.ExemptSet(s.NonBlockingGates))
+		res, blocked := q.EmitterBlockedBy(s.Name)
 		if blocked {
-			rpt.Blocked[s.Name] = gt
+			rpt.Blocked[s.Name] = res
 		}
 		return blocked
 	}
 	// emittersHalted is the log-size limit's soft step (bead pg2-5d3ui): while the
 	// queue says its emitters are halted, a polled source is not polled — checked
-	// right next to the gate check, but it is a queue-level in-memory flag, not a
-	// gate (no Gate Registry, BlockingGate or NonBlockingGates involvement). The
-	// timer emitter is exempt, exactly as it is from every gate: only the hard
+	// right next to the level check, but it is a queue-level in-memory flag, not a
+	// level. The timer emitter is exempt, exactly as it is from every level: only the hard
 	// limit (Enqueue admission) stops timer and pushed events.
 	emittersHalted := func(s query.Source) bool {
 		if query.IsTimer(s.Query) || !q.EmittersHalted() {
@@ -514,7 +513,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		}
 		if ct, isCal := query.Calendar(t); isCal {
 			// A calendar timer is evaluated against its slots, not a period.
-			// Gates and the log-halt never block a timer, so no check here.
+			// Levels and the log-halt never block a timer, so no check here.
 			if err := calendarPass(ctx, env, s, ct, q, declared, sleep, obs, activityObs, &rpt, now, nowT, cad); err != nil {
 				return rpt, err
 			}
@@ -524,7 +523,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 		if !cadenceDue(nowT, s.Name, t, cad) {
 			continue
 		}
-		if gateBlocked(s) || emittersHalted(s) {
+		if levelBlocked(s) || emittersHalted(s) {
 			if obs != nil {
 				obs.OnSourcePaused(s.Name)
 			}
@@ -556,7 +555,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 				depth += depthByType[b]
 			}
 			if depth >= tt.Count {
-				if gateBlocked(s) || emittersHalted(s) {
+				if levelBlocked(s) || emittersHalted(s) {
 					if obs != nil {
 						obs.OnSourcePaused(s.Name)
 					}

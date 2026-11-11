@@ -66,8 +66,6 @@ func run() int {
 		return runPause(r.rest)
 	case routeResume:
 		return runResume(r.rest)
-	case routeGate:
-		return runGate(r.rest)
 	case routeDoctor:
 		return runDoctor(r.rest)
 	case routeLog:
@@ -82,4 +80,18 @@ func run() int {
 func printUsageErr(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
 	fmt.Fprintln(os.Stderr, usageLine)
+}
+
+// runPause and runResume are stubs: the pause / resume commands over the router
+// resource's PAUSED level (the socket verbs level-set and level-clear) arrive with
+// the level verbs, which replace these two functions. Until then they report that
+// plainly instead of failing obscurely.
+func runPause(_ []string) int {
+	fmt.Fprintln(os.Stderr, "pause: not available in this build: the level-based pause arrives with the level verbs")
+	return exitGeneric
+}
+
+func runResume(_ []string) int {
+	fmt.Fprintln(os.Stderr, "resume: not available in this build: the level-based resume arrives with the level verbs")
+	return exitGeneric
 }

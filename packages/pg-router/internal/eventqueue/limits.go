@@ -16,10 +16,9 @@ import (
 //
 //   - SOFT (90% of max by default): once a compaction attempt has not brought the
 //     log back under it, the queue sets emittersHalted — an in-memory, queue-level
-//     flag the producer (internal/discover) consults next to its gate check, so
-//     polled command-source emitters are not polled. It is NOT a gate: the Gate
-//     Registry, BlockingGate, CheckPull, dropGateBlockedLocked, NonBlockingGates and
-//     run.go's gated drain-and-exit are untouched. Listeners keep dispatching and
+//     flag the producer (internal/discover) consults next to its level check, so
+//     polled command-source emitters are not polled. It is NOT a level: the level
+//     admission (levelgate.go) is untouched. Listeners keep dispatching and
 //     run-until-idle keeps draining while halted, so space can be reclaimed and no
 //     listener loses an event (INV-EVT-1 holds by construction); timer emitters and
 //     pushed events keep being admitted — only the HARD limit stops those.

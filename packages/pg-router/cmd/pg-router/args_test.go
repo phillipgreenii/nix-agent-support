@@ -88,7 +88,8 @@ func TestRoute(t *testing.T) {
 		{"reconcile-subcommand-is-deleted", []string{"pg-router", "reconcile"}, routeUsageErr},
 		{"pause-subcommand", []string{"pg-router", "pause"}, routePause},
 		{"resume-subcommand", []string{"pg-router", "resume"}, routeResume},
-		{"gate-subcommand", []string{"pg-router", "gate", "list"}, routeGate},
+		// The gate CLI verbs are removed with the gate mechanism (no alias).
+		{"gate-subcommand-is-removed", []string{"pg-router", "gate", "list"}, routeUsageErr},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

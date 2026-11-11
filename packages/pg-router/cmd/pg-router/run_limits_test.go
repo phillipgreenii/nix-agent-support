@@ -186,18 +186,18 @@ func TestRunOneTick_softHaltSkipsPollerButTimerAndListenerKeepRunning(t *testing
 		t.Fatal("the timer tick was not dispatched while only soft-halted")
 	}
 	waitInFlight(t, q)
-	if gates := q.ActiveGates(); len(gates) != 0 {
-		t.Fatalf("the soft halt appeared as gates %v", gates)
+	if _, _, paused := routerPause(q.Levels()); paused {
+		t.Fatal("the soft halt appeared as a router pause")
 	}
 
-	// The operator's resume --all (gate clear) changes nothing about the halt, and the
-	// next tick still skips the poller.
-	if _, _, err := q.ClearGate("SYSTEM_PAUSE", "op"); err != nil {
+	// The operator's resume (clearing the router pause level) changes nothing about
+	// the halt, and the next tick still skips the poller.
+	if _, err := q.AppendLevel(eventqueue.ResumeRecord(time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	runOneTick(context.Background(), config.Config{Queries: o.Cfg.Queries}, o, svc, q, "", &stderr)
 	if polls.Load() != 0 || !q.EmittersHalted() {
-		t.Fatalf("after a gate clear: polls=%d halted=%v, want 0 and true", polls.Load(), q.EmittersHalted())
+		t.Fatalf("after a resume: polls=%d halted=%v, want 0 and true", polls.Load(), q.EmittersHalted())
 	}
 	// Space returns: the controller clears the halt and the poller runs again.
 	mem.SetLogSize(10)

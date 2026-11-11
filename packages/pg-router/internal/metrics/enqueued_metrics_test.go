@@ -78,15 +78,3 @@ func TestEnqueuedIgnoresRestoredEvents(t *testing.T) {
 		t.Fatalf("enqueued[drain.alpha] = %d after a restore alone, want no series", got)
 	}
 }
-
-// The Gate Registry's routable records (gate.set, gate.cleared, gate.expired) are
-// control-plane notifications, not work.
-func TestEnqueuedIgnoresGateRecords(t *testing.T) {
-	h := newHarness(t)
-	for _, typ := range []string{eventqueue.GateEventSet, eventqueue.GateEventCleared, eventqueue.GateEventExpired} {
-		h.emitter.OnEnqueue(eventqueue.Event{ID: "g-" + typ, Type: typ, At: h.clk.now()})
-		if got := enqueuedFor(t, h, typ); got != -1 {
-			t.Errorf("enqueued[%s] = %d, want no series for a gate record", typ, got)
-		}
-	}
-}

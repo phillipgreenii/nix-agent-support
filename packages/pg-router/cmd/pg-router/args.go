@@ -103,32 +103,19 @@ Subcommands:
                           the log dir, on the interval PG_ROUTER_TUI_INTERVAL sets (below). Unlike
                           every other operator subcommand, it NEVER fails on "no running core": it
                           renders a no-core screen and keeps polling instead (ADR 0036).
-  pause                   set the SYSTEM_PAUSE gate (INV-LIFE-2): every participant that blocks on it
-                          stops (emitters are not polled, listeners are not dispatched to; pushed
-                          events are still accepted and queued events stay queued). --description and
-                          --owner (default "operator") are recorded for status/the TUI; the owner is
-                          DEBUG ONLY. Gates live in the running core's event log, so pause is a
-                          SOCKET CLIENT like status: with no core running it fails with "no running
-                          core" (exit 1) and never starts one.
-  resume [--all]          clear the SYSTEM_PAUSE gate, or — with --all — every active gate. A bare
-                          "resume" clears ONLY SYSTEM_PAUSE, so a gate another system owns is never
-                          cleared by accident. Same socket-client mechanics as pause.
-  gate set <TYPE>         set (or renew, or overwrite) the gate of one TYPE — an arbitrary ALL-CAPS
-                          name such as LOW_DISK_USAGE. Last writer wins per TYPE. --description, --owner
-                          (debug only) and --ttl <dur> (a lease the owner keeps alive by setting the
-                          gate again; a lapsed lease counts as cleared) are optional.
-  gate clear <TYPE>|--all clear one gate, or every active gate. ANY caller may clear any gate; clearing
-                          a gate that is not set is a no-op success.
-  gate list [--json]      list the active gates (TYPE, owner, set-at, TTL remaining, description).
+  pause                   pause the router (INV-LIFE-2): admission stops for every registration (emitters
+                          are not polled, listeners are not dispatched to; pushed events are still
+                          accepted and queued events stay queued). Running work is never touched.
+  resume [--all]          resume the router, or — with --all — clear every operator override.
   log compact [--dry-run] [--json]
-                          compact <LogDir>/queue.jsonl (the write-ahead log of events AND gates) down to
+                          compact <LogDir>/queue.jsonl (the write-ahead log of events AND levels) down to
                           live state now, instead of waiting for the startup or threshold trigger. With a
                           core running the request goes over its socket and runs inside the daemon (it
                           owns the log's exclusive lock); with none running it compacts offline, taking
                           the lock itself, and is refused (exit 1) if another process holds it. --socket/
                           --token name a core explicitly (no offline fallback then). --dry-run changes
                           NOTHING (no rename, no temp file, no lock kept) and reports what a real run
-                          would do: bytes and records before/after, events kept vs dropped, gates kept,
+                          would do: bytes and records before/after, events kept vs dropped, levels kept,
                           the percent of max_log_bytes after, and whether a real run would be refused. A
                           real run on a log that is already live state only rewrites nothing. Human
                           summary by default, --json for the cli.log-compact-reply object. Exit 0 ok
@@ -241,9 +228,8 @@ const (
 	routeStatus                        // operator: inspect the running core (Task 3.8, .rest)
 	routeTUI                           // operator: continuous-interactive view over status/pause/resume (Task 4.2, .rest); never fails on "no running core" (ADR 0036)
 	routeSelfStatus                    // manager->core callback: push the caller's own self-status to the running core (.rest)
-	routePause                         // operator: set the SYSTEM_PAUSE gate on the running core (INV-LIFE-2, .rest)
-	routeResume                        // operator: clear SYSTEM_PAUSE (or every gate with --all) on the running core (.rest)
-	routeGate                          // operator: gate set|clear|list against the running core's Gate Registry (.rest)
+	routePause                         // operator: pause the router (INV-LIFE-2, .rest)
+	routeResume                        // operator: resume the router, or every operator override with --all (.rest)
 	routeDoctor                        // operator: config check plus quick probes of the state dir, socket, gates, roles and handlers (.rest)
 	routeLog                           // operator: log compact [--dry-run] on the queue log, via the running core or offline (.rest)
 )
@@ -349,14 +335,12 @@ func route(argv []string) routeResult {
 		// own handler, with the same usage exit code (routeUsageErr would produce).
 		return routeResult{kind: routeSelfStatus, rest: args[1:]}
 	case "pause":
-		// Gate Registry (bead pg2-h63eu): pause/resume/gate are socket clients now,
-		// parsing their own --socket/--token/--owner/... flags in their own
-		// handlers, with the same usage exit code every operator subcommand uses.
+		// pause/resume are socket clients, parsing their own --socket/--token/...
+		// flags in their own handlers, with the same usage exit code every
+		// operator subcommand uses.
 		return routeResult{kind: routePause, rest: args[1:]}
 	case "resume":
 		return routeResult{kind: routeResume, rest: args[1:]}
-	case "gate":
-		return routeResult{kind: routeGate, rest: args[1:]}
 	case "doctor":
 		// Its own --socket/--token flags, parsed in its own handler, with the same
 		// usage exit code every operator subcommand uses.

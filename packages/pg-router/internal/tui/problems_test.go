@@ -7,7 +7,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
 
@@ -106,7 +105,7 @@ func TestRenderProblemsModal_ListsActiveGates(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{Gates: []Gate{
-		{Type: core.GateSystemPause, Owner: "operator"},
+		{Type: systemPauseGate, Owner: "operator"},
 		{Type: "LOW_DISK_USAGE", Owner: "disk-watchdog"},
 	}}
 
@@ -183,7 +182,7 @@ func TestProblemsModalFooter_EmptyCacheDirOmitsPathLine(t *testing.T) {
 func TestRenderProblemsModal_AdditiveNotReplacement(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause, Owner: "operator"}}}
+	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate, Owner: "operator"}}}
 
 	gates := m.renderGatesModal()
 	problems := m.renderProblemsModal()

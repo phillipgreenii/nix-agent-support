@@ -356,10 +356,10 @@ func TestToggleGate_ReusesClientDialsIfNeeded(t *testing.T) {
 	socketPath := core.SocketPath(logDir)
 	startFakeCore(t, socketPath, func(subcommand string, _ json.RawMessage) ([]byte, int) {
 		switch subcommand {
-		case core.SubcommandPause:
-			return []byte(`{"schemaVersion":"1","gate":"SYSTEM_PAUSE","set":true,"setAt":"2026-09-01T00:00:00Z"}`), conformance.ExitOK
-		case core.SubcommandResume:
-			return []byte(`{"schemaVersion":"1","cleared":["SYSTEM_PAUSE"]}`), conformance.ExitOK
+		case wireLevelSet:
+			return []byte(`{"schemaVersion":"1","resource":"router","level":"PAUSED","until_cleared":true}`), conformance.ExitOK
+		case wireLevelClear:
+			return []byte(`{"schemaVersion":"1","cleared":["router"]}`), conformance.ExitOK
 		default:
 			return []byte(`{"schemaVersion":"1","error":"unexpected subcommand"}`), conformance.ExitError
 		}
@@ -368,7 +368,7 @@ func TestToggleGate_ReusesClientDialsIfNeeded(t *testing.T) {
 
 	// ref starts unknown: ToggleGate must dial on demand (Discover first).
 	p := NewSocketPoller(logDir, core.Ref{})
-	effective, err := p.ToggleGate(context.Background(), core.SubcommandPause)
+	effective, err := p.ToggleGate(context.Background(), ToggleVerbPause)
 	if err != nil {
 		t.Fatalf("ToggleGate(pause) = %v, want nil", err)
 	}
@@ -381,7 +381,7 @@ func TestToggleGate_ReusesClientDialsIfNeeded(t *testing.T) {
 	if err := os.Remove(core.RecordPath(logDir)); err != nil {
 		t.Fatalf("remove discovery record: %v", err)
 	}
-	effective, err = p.ToggleGate(context.Background(), core.SubcommandResume)
+	effective, err = p.ToggleGate(context.Background(), ToggleVerbResume)
 	if err != nil {
 		t.Fatalf("second ToggleGate(resume) = %v, want nil (must reuse the cached ref, not re-Discover)", err)
 	}
@@ -394,7 +394,7 @@ func TestToggleGate_FailureDoesNotAdvanceBackoff(t *testing.T) {
 	logDir := shortTestDir(t)
 	p := NewSocketPoller(logDir, core.Ref{}) // no discovery record: ToggleGate must fail
 
-	if _, err := p.ToggleGate(context.Background(), core.SubcommandPause); err == nil {
+	if _, err := p.ToggleGate(context.Background(), ToggleVerbPause); err == nil {
 		t.Fatal("ToggleGate() error = nil, want a non-nil error with no core discoverable")
 	}
 

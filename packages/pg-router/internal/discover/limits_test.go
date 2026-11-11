@@ -27,11 +27,11 @@ func limitQueue(t *testing.T) (*eventqueue.Queue, *eventqueue.MemStore) {
 	return q, mem
 }
 
-func polled(name, typ, id string, nonBlocking ...string) query.Source {
+func polled(name, typ, id string) query.Source {
 	return query.Source{Name: name, Query: fakeQuery{
 		Meta:   query.Meta{EmitTypes: []string{typ}, Trig: query.PeriodTrigger{}},
 		events: []event.Event{itemEvt(typ, id)},
-	}, NonBlockingGates: nonBlocking}
+	}}
 }
 
 func timer() query.Source {
@@ -40,8 +40,7 @@ func timer() query.Source {
 
 // While emittersHalted: polled sources are not polled and are named in
 // ProduceReport.Halted; the timer emitter is NOT halted and its event is still
-// admitted; a polled source's NonBlockingGates exemption (a gate concept) does not
-// exempt it. No gate is involved at all.
+// admitted. No level is involved at all.
 func TestProduce_emittersHaltedSkipsPolledSourcesButNotTimer(t *testing.T) {
 	q, mem := limitQueue(t)
 	mem.SetLogSize(950) // over soft (900), under hard (1000)
@@ -51,7 +50,7 @@ func TestProduce_emittersHaltedSkipsPolledSourcesButNotTimer(t *testing.T) {
 	}
 	sources := query.SourceSet{
 		polled("poll-a", "a.ready", "a1"),
-		polled("poll-exempt", "b.ready", "b1", "SYSTEM_PAUSE", "ALPHA"), // a gate exemption is irrelevant here
+		polled("poll-exempt", "b.ready", "b1"),
 		timer(),
 	}
 	rpt, err := Produce(context.Background(), query.Env{}, sources, q, core.NewBindings("a.ready", "b.ready", "timer.tick"))
@@ -69,13 +68,10 @@ func TestProduce_emittersHaltedSkipsPolledSourcesButNotTimer(t *testing.T) {
 		t.Fatalf("Halted = %v, want poll-a and poll-exempt by %s", rpt.Halted, eventqueue.StateEmittersHalted)
 	}
 	if len(rpt.Blocked) != 0 {
-		t.Fatalf("Blocked = %v; the soft step is not a gate", rpt.Blocked)
+		t.Fatalf("Blocked = %v; the soft step is not a level", rpt.Blocked)
 	}
 	if _, polledAt := rpt.LastTick["poll-a"]; polledAt {
 		t.Fatal("a halted source's LastTick must stay untouched so it fires on the first pass after the halt clears")
-	}
-	if len(q.ActiveGates()) != 0 {
-		t.Fatalf("gates appeared: %v", q.ActiveGates())
 	}
 
 	// Once the log shrinks the next pass polls again.

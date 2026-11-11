@@ -21,7 +21,7 @@ import (
 // claim is EQUIVALENCE: Replay(compact(L)) rebuilds exactly the state Replay(L)
 // does. stateOf dumps every projection a replay builds, so "equal" below means
 // the retained events (in FIFO order, with their resolved instants and payload),
-// the per-listener accepts and settlements, the active-gate projection, the
+// the per-listener accepts and settlements, the
 // per-type depth, and the "ever enqueued" type set.
 
 // stateOf renders every replay-built projection of q as a canonical string.
@@ -56,12 +56,6 @@ func stateOf(q *Queue) string {
 			Payload: e.evt.Payload, Accepted: keys(e.accepted), Settled: keys(e.settled),
 		})
 	}
-	var gates []string
-	for _, g := range q.gates {
-		gates = append(gates, fmt.Sprintf("%s|%s|%s|%s|%s", g.Type, g.Description, g.Owner,
-			g.SetAt.UTC().Format(time.RFC3339Nano), g.ExpiresAt.UTC().Format(time.RFC3339Nano)))
-	}
-	sort.Strings(gates)
 	cell := q.cell.Load()
 	var seen []string
 	for t := range cell.everSeen {
@@ -69,7 +63,7 @@ func stateOf(q *Queue) string {
 	}
 	sort.Strings(seen)
 	b, err := json.Marshal(map[string]any{
-		"order": order, "entries": len(q.entries), "gates": gates, "depth": cell.depth, "seen": seen,
+		"order": order, "entries": len(q.entries), "depth": cell.depth, "seen": seen,
 	})
 	if err != nil {
 		panic(err)
@@ -232,9 +226,6 @@ func TestCompactEquivalenceProperty(t *testing.T) {
 				t.Fatalf("seed %d: listener %s saw different offers: %v/%v vs %v/%v", seed, la[i].id, la[i].offered, la[i].accepted, lb[i].offered, lb[i].accepted)
 			}
 		}
-		if !reflect.DeepEqual(qa.ActiveGates(), qb.ActiveGates()) {
-			t.Fatalf("seed %d: active gates differ: %v vs %v", seed, qa.ActiveGates(), qb.ActiveGates())
-		}
 		for i := 0; i < 14; i++ {
 			probe := evtUntil(fmt.Sprintf("e%d", i), []string{"alpha", "beta", "gamma", "delta"}[i%4], clk.in(time.Hour))
 			ra, ea := qa.Enqueue(probe)
@@ -277,47 +268,21 @@ func TestCompactKeepsEverSeenTypes(t *testing.T) {
 	}
 }
 
-// Gate cases through the real Queue API: an active leased gate, a lapsed-but-
-// unswept one, a cleared one, an expired-and-swept one, and a re-set gate (last
-// writer wins) all survive compaction exactly as a plain replay shows them.
-func TestCompactGateCases(t *testing.T) {
+// Legacy gate records (the removed gate mechanism) in every state: active with
+// and without a lease, lapsed, cleared, expired and re-set. A replay ignores
+// them all, and compaction drops them all, keeping every event as a plain
+// replay shows it.
+func TestCompactLegacyGateCasesAreDropped(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "queue.jsonl")
 	clk := newClock()
 	q, fs := newFileQueue(t, path, WithClock(clk.now))
-
-	if _, err := q.SetGate(GateRequest{Type: "ACTIVE_LEASED", Description: "x", Owner: "o", TTL: 24 * time.Hour}); err != nil {
-		t.Fatal(err)
+	mustEnqueue(t, q, evtUntil("e1", "T", clk.in(time.Hour)))
+	for _, r := range legacyGateLog(time.Now()) {
+		if _, err := fs.Append(r); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := q.SetGate(GateRequest{Type: "PERMANENT"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.SetGate(GateRequest{Type: "CLEARED"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := q.ClearGate("CLEARED", "op"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.SetGate(GateRequest{Type: "RESET", Description: "first", Owner: "a"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.SetGate(GateRequest{Type: "RESET", Description: "second", Owner: "b", TTL: 12 * time.Hour}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.SetGate(GateRequest{Type: "SWEPT", TTL: time.Minute}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.SetGate(GateRequest{Type: "LAPSED", TTL: time.Minute}); err != nil {
-		t.Fatal(err)
-	}
-	clk.advance(2 * time.Minute)
-	// Expire sweeps every lapsed lease (SWEPT and LAPSED alike) into a gate_expired
-	// record; re-set LAPSED afterwards with a lease that then lapses UNSWEPT.
-	q.Expire()
-	if _, err := q.SetGate(GateRequest{Type: "LAPSED", TTL: time.Minute}); err != nil {
-		t.Fatal(err)
-	}
-	clk.advance(2 * time.Minute) // LAPSED is now lapsed but not swept
 	want := stateOf(q)
 	_ = fs.Close()
 
@@ -337,28 +302,12 @@ func TestCompactGateCases(t *testing.T) {
 	q2, fs3 := newFileQueue(t, path, WithClock(clk.now))
 	defer func() { _ = fs3.Close() }()
 	if got := stateOf(q2); got != want {
-		t.Fatalf("gate state changed across compaction\n got: %s\nwant: %s", got, want)
+		t.Fatalf("event state changed across compaction\n got: %s\nwant: %s", got, want)
 	}
-	// And the semantic reading: ACTIVE_LEASED, PERMANENT and RESET in force; the
-	// lapsed lease reads inactive; cleared/swept ones are gone.
-	var active []string
-	for _, g := range q2.ActiveGates() {
-		active = append(active, g.Type)
-	}
-	if !equal(active, []string{"ACTIVE_LEASED", "PERMANENT", "RESET"}) {
-		t.Fatalf("active gates = %v", active)
-	}
-	if g, _ := q2.Gate("RESET"); g.Description != "second" || g.Owner != "b" {
-		t.Fatalf("re-set gate did not keep the last writer: %+v", g)
-	}
-	// Dropped history: no record for the cleared / swept gates remains.
 	recs, _ := fs3.Replay()
 	for _, r := range recs {
-		if r.GateType == "CLEARED" || r.GateType == "SWEPT" {
-			t.Fatalf("compacted log still carries history for %s: %+v", r.GateType, r)
-		}
-		if r.Op == opGateCleared || r.Op == opGateExpired {
-			t.Fatalf("compacted log still carries a %s record", r.Op)
+		if r.Op == opGateSet || r.Op == opGateCleared || r.Op == opGateExpired || r.GateType != "" {
+			t.Fatalf("compacted log still carries a legacy gate record: %+v", r)
 		}
 	}
 }
@@ -458,11 +407,15 @@ func seedLog(t *testing.T, path string, clk *mockClock) {
 	for i := 0; i < 5; i++ { // retained: nobody binds U
 		mustEnqueue(t, q, evtUntil(fmt.Sprintf("u%d", i), "U", clk.in(time.Hour)))
 	}
-	if _, err := q.SetGate(GateRequest{Type: "SYSTEM_PAUSE", Owner: "op"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := q.SetGate(GateRequest{Type: "SYSTEM_PAUSE", Owner: "op2", TTL: 3 * time.Hour}); err != nil {
-		t.Fatal(err)
+	// Two legacy gate records (a set and its overwrite): the plan and every
+	// compaction drops them.
+	for _, r := range []Record{
+		{Op: opGateSet, GateType: "SYSTEM_PAUSE", Owner: "op", At: clk.now()},
+		{Op: opGateSet, GateType: "SYSTEM_PAUSE", Owner: "op2", At: clk.now(), ExpiresAt: clk.in(3 * time.Hour)},
+	} {
+		if _, err := fs.Append(r); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_ = fs.Close()
 }

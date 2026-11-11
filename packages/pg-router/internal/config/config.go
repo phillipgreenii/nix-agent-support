@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/backoff"
-	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/x/gitclient"
@@ -525,15 +524,7 @@ func (c Config) Validate() error {
 func (c Config) diagnose() (errs []error, warns []string) {
 	// emitted collects every event type produced by some query; bound collects
 	// every event type consumed by some role.
-	//
-	// The Gate Registry's own routable record types (gate.set / gate.cleared /
-	// gate.expired, internal/eventqueue/gate.go) are emitted by the core itself,
-	// so a role may bind them without any [[query]] declaring them.
-	emitted := map[string]bool{
-		eventqueue.GateEventSet:     true,
-		eventqueue.GateEventCleared: true,
-		eventqueue.GateEventExpired: true,
-	}
+	emitted := map[string]bool{}
 	for _, s := range c.Queries {
 		if s.Query == nil {
 			continue

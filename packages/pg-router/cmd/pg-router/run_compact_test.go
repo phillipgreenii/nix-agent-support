@@ -20,7 +20,7 @@ import (
 
 // bootCore compacts queue.jsonl at startup (bead pg2-8e0m6): a log bloated with
 // evicted events shrinks to its live state before the queue accepts anything, the
-// live event and the active gate survive, and the size the queue reports (the
+// live event and the router pause level survive, and the size the queue reports (the
 // gauge / status source) is the compacted file's.
 func TestBootCore_CompactsQueueLogAtStartup(t *testing.T) {
 	dir := shortDir(t)
@@ -46,6 +46,7 @@ func TestBootCore_CompactsQueueLogAtStartup(t *testing.T) {
 	}
 	for _, rec := range []map[string]any{
 		{"op": "enqueue", "eventId": "live-1", "type": "t1", "at": at, "expiresAt": exp, "enqueuedAt": at},
+		{"op": "level_set", "resource": "router", "level": "PAUSED", "owner": "operator", "observedAt": at, "receivedAt": at},
 		{"op": "gate_set", "eventId": "", "gateType": "SYSTEM_PAUSE", "at": at, "owner": "operator"},
 	} {
 		if err := enc.Encode(rec); err != nil {
@@ -92,8 +93,11 @@ func TestBootCore_CompactsQueueLogAtStartup(t *testing.T) {
 	if got := q.DepthByType()["t1"]; got != 1 {
 		t.Fatalf("live event lost across startup compaction: depth = %v", q.DepthByType())
 	}
-	if gates := q.ActiveGates(); len(gates) != 1 || gates[0].Type != "SYSTEM_PAUSE" {
-		t.Fatalf("active gate lost across startup compaction: %v", gates)
+	if n := bytes.Count(compacted, []byte(`"op":"level_set"`)); n != 1 {
+		t.Fatalf("level_set records after startup compaction = %d, want the router pause kept", n)
+	}
+	if n := bytes.Count(compacted, []byte(`"op":"gate_`)); n != 0 {
+		t.Fatalf("legacy gate records after startup compaction = %d, want none", n)
 	}
 }
 

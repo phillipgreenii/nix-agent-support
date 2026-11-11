@@ -20,10 +20,8 @@ const (
 	opEnqueue opKind = "enqueue"
 	opAccept  opKind = "accept"
 	opEvict   opKind = "evict"
-	// The Gate Registry's three record kinds (bead pg2-h63eu, gate.go): they ride
-	// the SAME log, through the SAME Append/AppendBatch interface, as the event
-	// records above. A replay folds them into the active-gate projection
-	// (Queue.gates) rather than the event queue.
+	// The three legacy record kinds of the removed gate mechanism: a replay
+	// ignores them and compaction drops them (reporting an active gate once).
 	opGateSet     opKind = "gate_set"
 	opGateCleared opKind = "gate_cleared"
 	opGateExpired opKind = "gate_expired"

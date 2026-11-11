@@ -15,7 +15,7 @@
     "recordsAfter",
     "eventsKept",
     "eventsDropped",
-    "gatesKept"
+    "levelsKept"
   ],
   "properties": {
     "schemaVersion": { "const": "1" },
@@ -49,7 +49,7 @@
       "minimum": 0,
       "description": "Events whose final state is evicted: their records are discarded."
     },
-    "gatesKept": { "type": "integer", "minimum": 0 },
+    "levelsKept": { "type": "integer", "minimum": 0 },
     "torn": {
       "type": "boolean",
       "description": "True when the log has an undecodable line; everything from it on is ignored by a replay and discarded by a compaction."

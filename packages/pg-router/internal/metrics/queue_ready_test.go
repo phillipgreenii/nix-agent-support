@@ -34,7 +34,7 @@ func TestQueueReadyGatesEveryQueueBoundGauge(t *testing.T) {
 		MetricQueueDepth, MetricBacklog, MetricQueueOldestAge, MetricListenerInFlight,
 		MetricListenerPending, MetricListenerOldestPendingAge,
 		MetricQueueLogBytes, MetricQueueLogLimitBytes, MetricQueueLogPercent,
-		MetricEmittersHalted, MetricLogRejecting, MetricActiveGates,
+		MetricEmittersHalted, MetricLogRejecting,
 	}
 	ready, reads := false, 0
 	reader := sdkmetric.NewManualReader()
@@ -54,7 +54,7 @@ func TestQueueReadyGatesEveryQueueBoundGauge(t *testing.T) {
 			reads++
 			return eventqueue.LimitStatus{Bytes: 5, HardBytes: 10, State: eventqueue.StateOK}
 		}),
-		WithActiveGates(func() []eventqueue.Gate { reads++; return []eventqueue.Gate{{Type: "SYSTEM_PAUSE"}} }),
+		WithActiveGates(func() []ActiveGate { reads++; return []ActiveGate{{Type: "SYSTEM_PAUSE"}} }), // compile-only shim: registers nothing
 		// Not queue-bound: reports whatever the queue's state.
 		WithLiveness(func() bool { return true }),
 	); err != nil {

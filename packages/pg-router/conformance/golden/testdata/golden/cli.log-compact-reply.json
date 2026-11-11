@@ -10,7 +10,7 @@
   "recordsAfter": 9,
   "eventsKept": 2,
   "eventsDropped": 14106,
-  "gatesKept": 1,
+  "levelsKept": 1,
   "limitBytes": 67108864,
   "percentBefore": 49.6,
   "percentAfter": 0

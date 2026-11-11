@@ -149,12 +149,6 @@ type Source struct {
 	// content. Carried on Source rather than the Query interface itself
 	// since Query is a typed union with no shared field for it.
 	Description string
-	// NonBlockingGates is the set of gate TYPEs (Gate Registry, bead
-	// pg2-h63eu) this emitter declared, at registration, that it does NOT
-	// block on. Empty (the default): the emitter blocks on every gate TYPE, i.e.
-	// it is not polled while any gate is active. The timer emitter ignores gates
-	// altogether (IsTimer), whatever is listed here.
-	NonBlockingGates []string
 	// LevelSource names the sensor this query answers for; non-empty marks a
 	// level-source query (it has no consumer and is exempt from the polling
 	// union). Empty for an ordinary query.

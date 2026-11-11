@@ -36,16 +36,14 @@ func TestExampleTOML_roundTrips(t *testing.T) {
 	}
 }
 
-// TestExampleTOML_gateRegistryDocumented: the example explains that gates are
-// runtime records (not config keys), documents per-participant non_blocking_gates
-// and the timer emitter, and no longer advertises the retired gate-file keys
+// TestExampleTOML_gateRegistryDocumented: the example explains that the router
+// pause is a runtime level (not a config key), names the timer emitter, and no
+// longer advertises the retired gate-file keys or non_blocking_gates
 // as live examples.
 func TestExampleTOML_gateRegistryDocumented(t *testing.T) {
 	out := ExampleTOML()
 	for _, want := range []string{
-		"Gate Registry",
-		"pg-router gate set",
-		"# non_blocking_gates = [",
+		"PAUSED level",
 		`type = "timer"`,
 	} {
 		if !strings.Contains(out, want) {

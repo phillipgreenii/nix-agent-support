@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/phillipgreenii/pg-router/internal/core"
 )
 
 // TestToggleOperatorGate_NoOptimisticFlip is the packet's own red-first test
@@ -32,7 +30,7 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 	if !m.gateTogglePending {
 		t.Error("gateTogglePending = false right after P, want true (pending indicator)")
 	}
-	if m.gateSet(core.GateSystemPause) {
+	if m.gateSet(systemPauseGate) {
 		t.Fatal("SYSTEM_PAUSE flipped to set before any gateToggleResultMsg arrived -- optimistic flip")
 	}
 
@@ -45,7 +43,7 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 	}
 	updated, _ := m.Update(res)
 	mm := updated.(*Model)
-	if !mm.gateSet(core.GateSystemPause) {
+	if !mm.gateSet(systemPauseGate) {
 		t.Error("SYSTEM_PAUSE still clear after a successful \"paused\" result")
 	}
 	if mm.gateTogglePending {
@@ -55,7 +53,7 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 
 // TestToggleOperatorGate_UsesResumeWhenAlreadyPaused: P is a TOGGLE, not
 // always-pause -- when SYSTEM_PAUSE is already active, pressing it must send
-// core.SubcommandResume, not another pause.
+// ToggleVerbResume, not another pause.
 func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 	var gotVerb string
 	m := newTestModel(&stubPoller{
@@ -64,15 +62,15 @@ func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 			return "resumed", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause}}}
+	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate}}}
 
 	cmd := m.handleToggleOperatorGate()
 	if cmd == nil {
 		t.Fatal("handleToggleOperatorGate returned a nil cmd")
 	}
 	_ = cmd()
-	if gotVerb != core.SubcommandResume {
-		t.Errorf("ToggleGate called with verb %q, want %q (gate already paused)", gotVerb, core.SubcommandResume)
+	if gotVerb != ToggleVerbResume {
+		t.Errorf("ToggleGate called with verb %q, want %q (gate already paused)", gotVerb, ToggleVerbResume)
 	}
 }
 
@@ -89,7 +87,7 @@ func TestToggleOperatorGate_IgnoresOtherGates(t *testing.T) {
 	})
 	m.reply = StatusReply{Gates: []Gate{{Type: "LOW_DISK_USAGE"}}}
 	_ = m.handleToggleOperatorGate()()
-	if gotVerb != core.SubcommandPause {
+	if gotVerb != ToggleVerbPause {
 		t.Errorf("verb = %q, want pause: another system's gate does not make P a resume", gotVerb)
 	}
 }
@@ -134,7 +132,7 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 	if mm.gateTogglePending {
 		t.Error("gateTogglePending still true after a failed toggle")
 	}
-	if mm.gateSet(core.GateSystemPause) {
+	if mm.gateSet(systemPauseGate) {
 		t.Error("SYSTEM_PAUSE changed after a FAILED toggle -- state must stay put")
 	}
 	if mm.flash == "" || mm.flashLevel != FlashWarn {
@@ -158,7 +156,7 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 		},
 	})
 	m.reply = StatusReply{Gates: []Gate{
-		{Type: core.GateSystemPause},
+		{Type: systemPauseGate},
 		{Type: "LOW_DISK_USAGE"},
 	}}
 
@@ -167,7 +165,7 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 	updated, _ := m.Update(msg)
 	mm := updated.(*Model)
 
-	if mm.gateSet(core.GateSystemPause) {
+	if mm.gateSet(systemPauseGate) {
 		t.Error("SYSTEM_PAUSE should be clear after a \"resumed\" result")
 	}
 	if !mm.gateSet("LOW_DISK_USAGE") {
@@ -184,8 +182,8 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 // TestGateToggle_ResumedFlashWhenNothingElseIsActive: the plain case.
 func TestGateToggle_ResumedFlashWhenNothingElseIsActive(t *testing.T) {
 	m := newTestModel(nil)
-	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause}}}
-	m.applyGateToggleResult(gateToggleResultMsg{verb: core.SubcommandResume, effective: "resumed"})
+	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate}}}
+	m.applyGateToggleResult(gateToggleResultMsg{verb: ToggleVerbResume, effective: "resumed"})
 	if !strings.Contains(m.flash, "RESUMED") {
 		t.Errorf("flash %q, want the pool-resumed wording when no other gate is active", m.flash)
 	}
@@ -227,7 +225,7 @@ func TestResumeAllGates_ClearsEveryGateInsideGatesModal(t *testing.T) {
 		},
 	})
 	m.activeModal = ModalGates
-	m.reply = StatusReply{Gates: []Gate{{Type: core.GateSystemPause}, {Type: "LOW_DISK_USAGE"}}}
+	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate}, {Type: "LOW_DISK_USAGE"}}}
 
 	cmd := handleResumeAllGates(m)
 	if cmd == nil {
@@ -252,7 +250,7 @@ func TestRenderGatesModal_ListsEveryActiveGate(t *testing.T) {
 	setAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	m.reply = StatusReply{Gates: []Gate{
 		{Type: "LOW_DISK_USAGE", Description: "free space 3GiB", Owner: "disk-watchdog", SetAt: setAt, ExpiresAt: setAt.Add(5 * time.Minute), TTLRemainingMs: 270000},
-		{Type: core.GateSystemPause, Description: "paused by the operator", Owner: "operator", SetAt: setAt},
+		{Type: systemPauseGate, Description: "paused by the operator", Owner: "operator", SetAt: setAt},
 	}}
 	got := m.renderGatesModal()
 	for _, want := range []string{
@@ -319,11 +317,11 @@ func TestAsOfRaceGuard(t *testing.T) {
 	stale := StatusReply{
 		AsOf:  toggleStart.Add(-time.Second),
 		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Type: core.GateSystemPause}},
+		Gates: []Gate{{Type: systemPauseGate}},
 	}
 	updated, _ := m.Update(pollResultMsg{reply: stale})
 	mm := updated.(*Model)
-	if mm.gateSet(core.GateSystemPause) {
+	if mm.gateSet(systemPauseGate) {
 		t.Fatal("a stale (pre-toggle) poll result overwrote the pending gate state")
 	}
 	if mm.screen != screenMain {
@@ -331,9 +329,9 @@ func TestAsOfRaceGuard(t *testing.T) {
 	}
 
 	// The toggle itself settles.
-	updated, _ = mm.Update(gateToggleResultMsg{verb: core.SubcommandResume, effective: "resumed"})
+	updated, _ = mm.Update(gateToggleResultMsg{verb: ToggleVerbResume, effective: "resumed"})
 	mm = updated.(*Model)
-	if mm.gateSet(core.GateSystemPause) {
+	if mm.gateSet(systemPauseGate) {
 		t.Fatal("gate still set after a successful resume result")
 	}
 
@@ -342,11 +340,11 @@ func TestAsOfRaceGuard(t *testing.T) {
 	fresh := StatusReply{
 		AsOf:  toggleStart.Add(time.Second),
 		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Type: core.GateSystemPause}},
+		Gates: []Gate{{Type: systemPauseGate}},
 	}
 	updated, _ = mm.Update(pollResultMsg{reply: fresh})
 	mm = updated.(*Model)
-	if !mm.gateSet(core.GateSystemPause) {
+	if !mm.gateSet(systemPauseGate) {
 		t.Fatal("a fresh (post-toggle) poll result was not applied")
 	}
 	if mm.screen != screenMain {

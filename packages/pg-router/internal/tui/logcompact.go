@@ -194,7 +194,7 @@ func (m *Model) renderLogCompactModal() string {
 			}
 			row(label, fmt.Sprintf("%s · %d records", size(v.BytesAfter, v.PercentAfter), v.RecordsAfter))
 		}
-		row("events", fmt.Sprintf("%d kept · %d dropped (evicted) · gates kept %d", v.EventsKept, v.EventsDropped, v.GatesKept))
+		row("events", fmt.Sprintf("%d kept · %d dropped (evicted) · levels kept %d", v.EventsKept, v.EventsDropped, v.LevelsKept))
 		if v.Torn {
 			row("warning", "the log has an undecodable line; everything from it on is discarded")
 		}

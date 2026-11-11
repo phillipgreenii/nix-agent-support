@@ -350,9 +350,6 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	if _, err := svc.Register("review", KindHandler); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if _, err := svc.SetGate(eventqueue.GateRequest{Type: GateSystemPause, Owner: "ops", Description: "for the test", TTL: time.Hour}); err != nil {
-		t.Fatalf("SetGate: %v", err)
-	}
 	now := time.Now()
 	svc.PublishTick(TickSnapshot{
 		RunMode:    RunModeLongRunning,
@@ -375,17 +372,8 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	if len(queues) != 1 || queues[0].(map[string]any)["type"] != "review-requested" {
 		t.Fatalf("queues = %v, want the one enqueued type (Task 3.2 DepthByType)", queues)
 	}
-	gates, _ := reply["gates"].([]any)
-	foundGate := false
-	for _, g := range gates {
-		gm := g.(map[string]any)
-		if gm["type"] == GateSystemPause && gm["owner"] == "ops" && gm["description"] == "for the test" &&
-			gm["expiresAt"] != nil && gm["ttlRemainingMs"] != nil {
-			foundGate = true
-		}
-	}
-	if !foundGate {
-		t.Fatalf("gates = %v, want SYSTEM_PAUSE (owner, description, lease) set through Service.SetGate", gates)
+	if gates, ok := reply["gates"].([]any); !ok || len(gates) != 0 {
+		t.Fatalf("gates = %v, want the empty array (the gate mechanism is gone; the surface work replaces the field)", reply["gates"])
 	}
 	listeners, _ := reply["listeners"].([]any)
 	if len(listeners) != 1 || listeners[0].(map[string]any)["role"] != "review" {
@@ -679,11 +667,7 @@ func TestServeStatus_ThreeWayConcurrency(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			if i%2 == 0 {
-				_, _ = svc.SetGate(eventqueue.GateRequest{Type: GateSystemPause})
-			} else {
-				_, _ = svc.ClearGate(GateSystemPause, "test")
-			}
+			_ = svc.AdmitPull("churn")
 		}
 	}()
 

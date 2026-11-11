@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,6 +26,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/discover"
 	"github.com/phillipgreenii/pg-router/internal/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/internal/levels"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
@@ -306,9 +308,6 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// scrape's, not this one.
 	var queueRef atomic.Pointer[eventqueue.Queue]
 	metricsOpts = append(metricsOpts, metrics.WithQueueReady(func() bool { return queueRef.Load() != nil }))
-	// Gate Registry gauge (bead pg2-h63eu): one series per gate TYPE in force,
-	// read live off the queue on each collect (once queueRef is set).
-	metricsOpts = append(metricsOpts, metrics.WithActiveGates(func() []eventqueue.Gate { return queueRef.Load().ActiveGates() }))
 	// Event-queue write-ahead-log size gauge (bead pg2-8e0m6), read live off the
 	// queue on each collect.
 	metricsOpts = append(metricsOpts, metrics.WithQueueLogSize(func() int64 { return queueRef.Load().LogSize() }))
@@ -431,7 +430,16 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// pg_router_skipped_total{type,role,reason}: an offer the handler accepted and
 	// completed as skipped (bead pg2-6t91v7), kept out of pg_router_throughput_total.
 	o.SkippedObserver = emitter
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithGateObserver(emitter),
+	// The level projection feeds the queue's admission (WithLevelSource); its
+	// appends reach the queue's durable level path once the queue exists.
+	levelAppender := &lateLevelAppender{}
+	levelProj := core.NewLevelProjection(core.LevelProjectionConfig{
+		Registry:  cfg.Resources.Registry(),
+		Resources: levelResources(cfg.Resources),
+		Skew:      cfg.Levels.ObservedAtSkew,
+		Appender:  levelAppender,
+	})
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithLevelSource(levelProj.Snapshot), eventqueue.WithRegistry(cfg.Resources.Registry()), eventqueue.WithStartStagger(cfg.Levels.StartStagger),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows
 		// cfg.CompactThresholdBytes (bead pg2-8e0m6).
@@ -445,6 +453,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct event queue: %w", err)
 	}
+	// The level records the startup replay found go to the projection, and the
+	// projection's own appends reach the durable log through the queue.
+	levelAppender.q.Store(q)
+	core.ReplayLevels(q, levelProj)
 	// Bindings is built ONCE and threaded into both consumers so they can never
 	// disagree about which types are declared (Task 1.1, INV-DISP-3): the same
 	// value goes to core.Listen (validates PUSHED events) and onto the
@@ -554,6 +566,9 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 			return nil, nil, nil, nil, fmt.Errorf("promote role %s to started: %w", r.Name, err)
 		}
 	}
+	// Every role's compiled requirement, and each polled query's consumers, go to
+	// the queue's level admission.
+	o.RegisterLevels(q)
 	// The queue is built and every enabled role is registered: from the next
 	// collect the queue-bound gauges report (see queueRef above).
 	queueRef.Store(q)
@@ -1356,44 +1371,70 @@ func resolvedConfigFor(cfg config.Config, runMode string) core.ResolvedConfig {
 	return rc
 }
 
-// gateNotice returns the operator-facing stderr notice for the gates currently
-// in force (INV-LIFE-2, Gate Registry bead pg2-h63eu): one entry per gate with
-// its TYPE, owner (DEBUG ONLY) and when it was set, plus the remedy. Returns ""
-// when no gate is active. A gate acts on the participants that block on it, not
-// on the whole pool, so the notice says "participants that block on them" rather
-// than claiming everything is halted.
-func gateNotice(gates []eventqueue.Gate) string {
-	if len(gates) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(gates))
-	for _, g := range gates {
-		p := g.Type
-		if g.Owner != "" {
-			p += " (owner " + g.Owner + ", "
-		} else {
-			p += " ("
-		}
-		p += "set " + g.SetAt.Format(time.RFC3339)
-		if !g.ExpiresAt.IsZero() {
-			p += ", lease until " + g.ExpiresAt.Format(time.RFC3339)
-		}
-		parts = append(parts, p+")")
-	}
-	return "pg-router: gated by " + strings.Join(parts, "; ") +
-		" — participants that block on them are halted (emitters not polled, listeners not dispatched to); " +
-		"clear with `pg-router gate clear <TYPE>` (or `pg-router resume --all`)"
+// lateLevelAppender hands the level projection's appends to the queue once the
+// queue exists (the projection is built first because the queue is given its
+// snapshot accessor at construction).
+type lateLevelAppender struct {
+	q atomic.Pointer[eventqueue.Queue]
 }
 
-// gateSignature identifies the SET of active gate TYPEs, so runOneTick can
-// print the operator notice exactly when that set changes — a lease renewal (a
-// re-set of an already-active TYPE) changes nothing an operator must be told.
-func gateSignature(gates []eventqueue.Gate) string {
-	types := make([]string, len(gates))
-	for i, g := range gates {
-		types[i] = g.Type
+// Append implements core.LevelAppender.
+func (a *lateLevelAppender) Append(rec core.LevelRecord) (int64, error) {
+	q := a.q.Load()
+	if q == nil {
+		return 0, errors.New("level append before the event queue was built")
 	}
-	return strings.Join(types, ",")
+	return core.QueueLevelAppender{Q: q}.Append(rec)
+}
+
+// levelResources converts the configured resource registry into the projection's
+// per-resource ingest configuration.
+func levelResources(rs config.ResourceSet) map[string]core.LevelResource {
+	out := make(map[string]core.LevelResource, len(rs))
+	for _, r := range rs {
+		out[r.Name] = core.LevelResource{Sensor: r.Sensor, GraceFactor: r.GraceFactor}
+	}
+	return out
+}
+
+// routerPause returns the router resource's PAUSED level when one is in force:
+// its owner and when it was set.
+func routerPause(snap levels.Snapshot) (owner string, since time.Time, ok bool) {
+	lv, held := snap.Levels[eventqueue.RouterResource]
+	if !held || lv.Value != eventqueue.LevelPaused {
+		return "", time.Time{}, false
+	}
+	return lv.Owner, lv.Since, true
+}
+
+// pauseNotice returns the operator-facing stderr notice for a router pause in
+// force (INV-LIFE-2): its owner (DEBUG ONLY) and when it was set, plus the
+// remedy. Returns "" when the router is not paused. A pause stops ADMISSION only:
+// running work is never touched, so the notice says admission, not the whole pool.
+func pauseNotice(snap levels.Snapshot) string {
+	owner, since, ok := routerPause(snap)
+	if !ok {
+		return ""
+	}
+	p := "pg-router: paused"
+	if owner != "" {
+		p += " (owner " + owner
+		if !since.IsZero() {
+			p += ", set " + since.Format(time.RFC3339)
+		}
+		p += ")"
+	}
+	return p + " — admission is stopped for every registration (emitters not polled, listeners not dispatched to); resume with `pg-router resume`"
+}
+
+// pauseSignature identifies the pause state, so runOneTick can print the
+// operator notice exactly when it changes — a refresh of an unchanged pause
+// changes nothing an operator must be told.
+func pauseSignature(snap levels.Snapshot) string {
+	if owner, _, ok := routerPause(snap); ok {
+		return "router=" + eventqueue.LevelPaused + "/" + owner
+	}
+	return ""
 }
 
 // sourceFailedAttrs builds the slog attributes of the producer-tick "source
@@ -1418,18 +1459,17 @@ func sourceFailedAttrs(name string, serr error, fi discover.FailureInfo) []any {
 
 // runOneTick executes one iteration of `run`'s drive loop body (INV-LIFE-2):
 // it ALWAYS runs ProduceTick + Kick + Expire and publishes the tick — whether
-// a gate is active is no longer a pool-wide on/off decided here. Under the Gate
-// Registry (bead pg2-h63eu, internal/eventqueue/gate.go) a gate acts on
-// PARTICIPANTS: ProduceTick skips each emitter that blocks on an active gate
-// (the timer emitter is never skipped), Kick skips each listener that does
-// (gate records themselves are still delivered), and Expire sweeps lapsed gate
-// leases and retires events — so an exempt participant keeps running while a
-// gate is up, and expiry (INV-EVT-4's retry-bound clock) never pauses.
+// a level blocks admission is not a pool-wide on/off decided here. Levels act on
+// PARTICIPANTS (internal/eventqueue/levelgate.go): ProduceTick skips each emitter
+// no consumer of which could run (the timer emitter is never skipped), Kick skips
+// each listener whose requirement is unmet, and Expire retires events — so an
+// unconstrained participant keeps running while a resource is low, and expiry
+// (INV-EVT-4's retry-bound clock) never pauses.
 //
-// It prints the operator notice to stderr exactly when the set of active gate
-// TYPEs CHANGES (prevGates is the previous call's return value; the caller's
-// very first call passes "" and so reports a gate already active at startup).
-// The returned string is gateSignature of THIS tick, for the caller to pass back.
+// It prints the operator notice to stderr exactly when the router pause CHANGES
+// (prevGates is the previous call's return value; the caller's very first call
+// passes "" and so reports a pause already in force at startup). The returned
+// string is pauseSignature of THIS tick, for the caller to pass back.
 //
 // q.Dispatch() → q.Kick() (this package's design doc, "decouple
 // pg-router-core's tick loop from per-dispatch-pass completion"; INV-LIFE-3,
@@ -1440,13 +1480,13 @@ func sourceFailedAttrs(name string, serr error, fi discover.FailureInfo) []any {
 // INV-CONC-1's one-outstanding-offer-per-handler ceiling is unaffected — that
 // lives entirely in Kick's (and Dispatch's) shared phase-1 snapshot.
 func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrator, svc *core.Service, q *eventqueue.Queue, prevGates string, stderr io.Writer) string {
-	gates := q.ActiveGates()
-	sig := gateSignature(gates)
+	snap := q.Levels()
+	sig := pauseSignature(snap)
 	if sig != prevGates {
-		if notice := gateNotice(gates); notice != "" {
+		if notice := pauseNotice(snap); notice != "" {
 			fmt.Fprintln(stderr, notice)
 		} else {
-			fmt.Fprintln(stderr, "pg-router: no gate active — all participants route normally")
+			fmt.Fprintln(stderr, "pg-router: not paused — all registrations route normally")
 		}
 	}
 	// The log-size limit controller (bead pg2-5d3ui) runs FIRST, so the
@@ -1596,25 +1636,25 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 		}
 	}()
 
-	// INV-LIFE-2's gated drain-and-exit slice (Gate Registry, bead pg2-h63eu):
-	// gates live in the event log, so they are only knowable once the core is
-	// booted. With ANY gate active this run still boots (above) and stays
-	// reachable — a concurrent `ingest-event` push still succeeds and is
-	// durably enqueued — but it never produces or drains: a gate suspends the
-	// participants that block on it, so a drain-to-idle could spin on events a
-	// blocked listener will not take until the gate clears. The reachability
+	// INV-LIFE-2's paused drain-and-exit slice: the router pause is a level in the
+	// event log, so it is only knowable once the core is booted. With the router
+	// paused this run still boots (above) and stays reachable — a concurrent
+	// `ingest-event` push still succeeds and is durably enqueued — but it never
+	// produces or drains: a pause stops admission for every registration, so a
+	// drain-to-idle could spin on events a blocked listener will not take until
+	// the router is resumed. The reachability
 	// window is bounded to ONE idleDrainTick pass; expiry still runs once
 	// (INV-EVT-4's clock does not pause), and the final metrics snapshot is
 	// still flushed by the defers above. It MUST NOT report the queue as
 	// drained — it never drained anything.
-	if gates := q.ActiveGates(); len(gates) > 0 {
-		fmt.Fprintln(os.Stderr, gateNotice(gates))
+	if snap := q.Levels(); pauseNotice(snap) != "" {
+		fmt.Fprintln(os.Stderr, pauseNotice(snap))
 		q.Expire()
 		select {
 		case <-ctx.Done():
 		case <-time.After(idleDrainTick):
 		}
-		slog.Info("run-until-idle: gated; skipped drain (no dispatch), expiry advanced")
+		slog.Info("run-until-idle: paused; skipped drain (no dispatch), expiry advanced")
 		return exitOK
 	}
 

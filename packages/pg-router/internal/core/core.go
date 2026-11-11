@@ -330,9 +330,7 @@ type Service struct {
 
 	// tick is the published-state cell Serve's handlers (this package) read with
 	// no cross-package import (Task 3.5 Objective): it is written by PublishTick
-	// (status.go). The gate state is NOT cached here any more (bead pg2-h63eu): it
-	// is the event queue's own projection of the Gate Registry's log records
-	// (internal/eventqueue/gate.go), read live by composeStatusReply.
+	// (status.go).
 	//
 	// tick's single-writer discipline survives Task 6.2's concurrent
 	// phase-2 fan-out in internal/eventqueue unchanged (Task 6.4, bead
@@ -932,14 +930,6 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handleStatus(stdin, stdout)
 	case SubcommandRegister:
 		return s.handleRegister(stdin, stdout)
-	case SubcommandPause:
-		return s.handlePause(stdin, stdout)
-	case SubcommandResume:
-		return s.handleResume(stdin, stdout)
-	case SubcommandGateSet:
-		return s.handleGateSet(stdin, stdout)
-	case SubcommandGateClear:
-		return s.handleGateClear(stdin, stdout)
 	case SubcommandLogCompact:
 		return s.handleLogCompact(stdin, stdout)
 	case SubcommandGet:
@@ -1266,7 +1256,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		},
 		"registry":  statusRegistrations(regs),
 		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners(), s.readRoleProgress()),
-		"gates":     statusGates(s.q.ActiveGates(), s.q.Now()),
+		"gates":     []any{}, // no gate mechanism remains; the surface work replaces the field with levels
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
 		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions),
 		"activity":  []any{},
@@ -1328,31 +1318,6 @@ func statusQueues(depth map[string]int) []map[string]any {
 	out := make([]map[string]any, 0, len(types))
 	for _, t := range types {
 		out = append(out, map[string]any{"type": t, "depth": depth[t]})
-	}
-	return out
-}
-
-// statusGates renders the Gate Registry's active gates (Queue.ActiveGates,
-// already sorted by TYPE) as the `gates` array: only gates in force appear, so
-// an empty array means nothing is gated. description/owner/expiresAt/
-// ttlRemainingMs are omitted when the gate carries none (owner is DEBUG ONLY
-// and shown for operators; it is never a metric label).
-func statusGates(gates []eventqueue.Gate, now time.Time) []map[string]any {
-	out := make([]map[string]any, 0, len(gates))
-	for _, g := range gates {
-		entry := map[string]any{"type": g.Type, "setAt": g.SetAt.UTC().Format(time.RFC3339Nano)}
-		if g.Description != "" {
-			entry["description"] = g.Description
-		}
-		if g.Owner != "" {
-			entry["owner"] = g.Owner
-		}
-		if !g.ExpiresAt.IsZero() {
-			entry["expiresAt"] = g.ExpiresAt.UTC().Format(time.RFC3339Nano)
-			rem, _ := g.TTLRemaining(now)
-			entry["ttlRemainingMs"] = rem.Milliseconds()
-		}
-		out = append(out, entry)
 	}
 	return out
 }

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
@@ -60,7 +59,7 @@ func bannerText(gates []string, quiescing bool, inFlight int, dispatch Dispatch)
 		// whole pool is halted.
 		lead := "GATED"
 		for _, g := range gates {
-			if g == core.GateSystemPause {
+			if g == systemPauseGate {
 				lead = "PAUSED"
 			}
 		}

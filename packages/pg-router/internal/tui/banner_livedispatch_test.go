@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
@@ -82,7 +81,7 @@ func TestBanner_GatedWithLiveSessionInFlightReadsHaltedNotQuiescent(t *testing.T
 
 	reply := StatusReply{
 		Core:       CoreInfo{State: "started"},
-		Gates:      []Gate{{Type: core.GateSystemPause}},
+		Gates:      []Gate{{Type: systemPauseGate}},
 		Deliveries: make([]Delivery, inFlight),
 	}
 	got := renderTopZone(topZoneData{

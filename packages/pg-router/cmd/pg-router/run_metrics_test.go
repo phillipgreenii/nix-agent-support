@@ -43,7 +43,7 @@ import (
 
 // queueBoundMetrics are the members that read the queue on each collect: the per-type
 // depth and its scalar sum, the oldest-owed age, the per-role in-flight gauge, the
-// event-log size and limit gauges, the Gate Registry's active-gate gauge and the per-role
+// event-log size and limit gauges and the per-role
 // availability gauge.
 var queueBoundMetrics = []string{
 	metrics.MetricQueueDepth,
@@ -57,7 +57,6 @@ var queueBoundMetrics = []string{
 	metrics.MetricQueueLogPercent,
 	metrics.MetricEmittersHalted,
 	metrics.MetricLogRejecting,
-	metrics.MetricActiveGates,
 	metrics.MetricRoleAvailable,
 }
 
@@ -214,9 +213,6 @@ func TestBootCore_ACollectBeforeTheQueueExistsReadsNothing(t *testing.T) {
 	}
 	if got, ok := int64GaugePoint(built, metrics.MetricListenerInFlight, "role", "r1"); !ok || got != 0 {
 		t.Errorf("%s{role=r1} = %d (present %v), want 0: registered, idle, and present", metrics.MetricListenerInFlight, got, ok)
-	}
-	if got, ok := int64GaugePoint(built, metrics.MetricActiveGates, "type", "SYSTEM_PAUSE"); !ok || got != 1 {
-		t.Errorf("%s{type=SYSTEM_PAUSE} = %d (present %v), want 1: the restored gate", metrics.MetricActiveGates, got, ok)
 	}
 }
 

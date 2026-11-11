@@ -222,6 +222,12 @@ func (p *SocketPoller) dialLocked() (*core.Client, error) {
 	return client, nil
 }
 
+// The wire verbs ToggleGate sends (defined by the level verbs of the CLI work).
+const (
+	wireLevelSet   = "level-set"
+	wireLevelClear = "level-clear"
+)
+
 // ToggleGate implements Poller. It reuses SocketPoller's existing
 // dial/reconnect machinery (dialLocked: dials the cached ref if any,
 // Discovers first if not currently dialed) but performs its OWN fresh
@@ -229,24 +235,24 @@ func (p *SocketPoller) dialLocked() (*core.Client, error) {
 // calls — and never advances or resets Snapshot's backoff ladder, on
 // success or failure alike [design: Task 4.4 Interfaces (ToggleGate)].
 //
-// verb selects the socket subcommand: core.SubcommandPause ("pause"),
-// core.SubcommandResume ("resume", clearing SYSTEM_PAUSE only) or
-// ToggleVerbResumeAll (the `resume` verb with `all`, clearing every gate).
+// verb selects the operation: ToggleVerbPause sets the router resource's PAUSED
+// level (socket verb level-set, until cleared), ToggleVerbResume clears it
+// (level-clear on the router resource) and ToggleVerbResumeAll clears every
+// operator override (level-clear with all).
 // effective reports the ACTUAL resulting
 // gate state the core replied with (never an optimistic echo of verb), so
 // the caller (the sibling packet covering Task 4.8) never has to guess or
 // locally flip a toggle ahead of the core's own answer.
 func (p *SocketPoller) ToggleGate(ctx context.Context, verb string) (effective string, err error) {
-	var replySchema string
-	wireVerb := verb
+	var wireVerb string
 	all := false
 	switch verb {
-	case core.SubcommandPause:
-		replySchema = core.PauseReplySchema
-	case core.SubcommandResume:
-		replySchema = core.ResumeReplySchema
+	case ToggleVerbPause:
+		wireVerb = wireLevelSet
+	case ToggleVerbResume:
+		wireVerb = wireLevelClear
 	case ToggleVerbResumeAll:
-		replySchema, wireVerb, all = core.ResumeReplySchema, core.SubcommandResume, true
+		wireVerb, all = wireLevelClear, true
 	default:
 		return "", fmt.Errorf("tui: toggle gate: unknown verb %q", verb)
 	}
@@ -262,16 +268,21 @@ func (p *SocketPoller) ToggleGate(ctx context.Context, verb string) (effective s
 	callCtx, cancel := context.WithTimeout(ctx, pollerRPCDeadline)
 	defer cancel()
 
-	// The caller identity is DEBUG ONLY (the Gate Registry never acts on it):
-	// pause records the operator at this terminal as the gate's owner, resume
-	// as the clearer. Each verb's schema accepts only its own field.
+	// pause sets the router PAUSED level, owned by the operator at this
+	// terminal, until cleared; resume clears that override (or, with all,
+	// every operator override).
 	req := map[string]any{"schemaVersion": schemas.SchemaVersion}
-	if verb == core.SubcommandPause {
+	if verb == ToggleVerbPause {
+		req["resource"] = "router"
+		req["level"] = "PAUSED"
 		req["owner"] = "operator"
+		req["until_cleared"] = true
 	} else {
 		req["by"] = "operator"
 		if all {
 			req["all"] = true
+		} else {
+			req["resource"] = "router"
 		}
 	}
 	payload, err := json.Marshal(req)
@@ -284,14 +295,12 @@ func (p *SocketPoller) ToggleGate(ctx context.Context, verb string) (effective s
 		return "", fmt.Errorf("tui: toggle gate: %w", callErr)
 	}
 
-	var out struct {
-		Set bool `json:"set"`
-	}
-	if err := core.DiscriminateReply(reply, replySchema, &out); err != nil {
+	// The reply schemas of the level verbs belong to the CLI work, which adds the
+	// validation here; an error envelope is still refused.
+	if err := core.DiscriminateReply(reply, "", nil); err != nil {
 		return "", fmt.Errorf("tui: toggle gate: %w", err)
 	}
-	// Only a pause reply carries `set`; a resume reply lists what it cleared.
-	if verb == core.SubcommandPause && out.Set {
+	if verb == ToggleVerbPause {
 		return "paused", nil
 	}
 	return "resumed", nil

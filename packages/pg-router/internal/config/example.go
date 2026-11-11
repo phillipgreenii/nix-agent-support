@@ -66,14 +66,10 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 # wins — e.g. [pool].worktree_dir overrides PG_ROUTER_WORKTREE_DIR. In general,
 # [pool] wins over PG_ROUTER_* env, which wins over the built-in default.
 #
-# Gates (INV-LIFE-2, Gate Registry) are NOT configured here: they are generic,
-# TYPE-keyed records in the running core's event log, set and cleared at runtime
-# ('pg-router pause'/'resume', 'pg-router gate set|clear|list', or an external
-# system through the socket API). A [[role]] or [[query]] declares at
-# registration which gate TYPEs it does NOT block on (default: it blocks on
-# every TYPE), and the built-in type = "timer" query is never blocked by any
-# gate:
-# non_blocking_gates = ["LOW_DISK_USAGE"]
+# The router pause (INV-LIFE-2) is NOT configured here: it is the durable
+# PAUSED level of the 'router' resource, set and cleared at runtime
+# ('pg-router pause'/'resume'). The built-in type = "timer" query is never
+# blocked by any level.
 # Resources, levels and requirements (generic example; the real registry, sensor
 # and tracker names live in the deployment's own config). A [[resource]] names an
 # ordered scale (best first), what silence means for a role ("ignored": "ANY", or

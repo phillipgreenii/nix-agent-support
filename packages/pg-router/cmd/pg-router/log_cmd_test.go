@@ -20,7 +20,7 @@ import (
 // Tests for `pg-router log compact [--dry-run] [--json]` (bead pg2-maxn1).
 
 // writeBloatedLog writes dir/queue.jsonl with `dead` evicted events (three records
-// each), one live event and one gate, and returns its path.
+// each), one live event and one level record, and returns its path.
 func writeBloatedLog(t *testing.T, dir string, dead int) string {
 	t.Helper()
 	path := filepath.Join(dir, "queue.jsonl")
@@ -41,7 +41,7 @@ func writeBloatedLog(t *testing.T, dir string, dead int) string {
 		write(map[string]any{"op": "evict", "eventId": id})
 	}
 	write(map[string]any{"op": "enqueue", "eventId": "live-1", "type": "t1", "at": at, "expiresAt": at.Add(time.Hour), "enqueuedAt": at})
-	write(map[string]any{"op": "gate_set", "eventId": "", "gateType": "SYSTEM_PAUSE", "at": at, "owner": "operator"})
+	write(map[string]any{"op": "level_set", "resource": "router", "level": "PAUSED", "owner": "operator", "observedAt": at, "receivedAt": at})
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestLogCompact_AgainstRunningDaemon(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("human dry run exit = %d; stderr=%s", code, errOut)
 	}
-	for _, want := range []string{"dry run, via the running daemon", "nothing was changed", "before:", "after:", "events: 1 kept, 300 dropped", "gates kept: 1", "% of the 1.0 MiB limit", "a real run would shrink the log by"} {
+	for _, want := range []string{"dry run, via the running daemon", "nothing was changed", "before:", "after:", "events: 1 kept, 300 dropped", "levels kept: 1", "% of the 1.0 MiB limit", "a real run would shrink the log by"} {
 		if !strings.Contains(human, want) {
 			t.Errorf("dry-run summary lacks %q:\n%s", want, human)
 		}
@@ -332,7 +332,7 @@ func TestRenderLogCompact(t *testing.T) {
 	ms := int64(41)
 	base := core.LogCompactView{
 		SchemaVersion: "1", Via: core.ViaDaemon, BytesBefore: 33282518, BytesAfter: 4096, RecordsBefore: 182157, RecordsAfter: 9,
-		EventsKept: 2, EventsDropped: 14106, GatesKept: 1,
+		EventsKept: 2, EventsDropped: 14106, LevelsKept: 1,
 	}
 	for _, tc := range []struct {
 		name  string

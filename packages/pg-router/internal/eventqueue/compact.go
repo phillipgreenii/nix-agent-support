@@ -22,11 +22,10 @@ import (
 // WHAT "LIVE" MEANS. compact(L) is the shortest record sequence whose replay
 // rebuilds exactly the state Replay(L) rebuilds: the retained events in their
 // FIFO order (each with its resolved At/ExpiresAt/EnqueuedAt), the accepts of
-// those events, the active gate projection (last gate_set per TYPE, unless a
-// later gate_cleared/gate_expired removed it), and the "ever enqueued" type
-// set. Everything else is history a replay discards: enqueue/accept records of
-// an event a later evict removed, the evict itself, a gate_set that a later
-// set/clear/expiry superseded, and the clear/expiry records.
+// those events, the level records, and the "ever enqueued" type set. Everything
+// else is history a replay discards: enqueue/accept records of an event a later
+// evict removed, the evict itself, and every legacy gate record (the removed
+// gate mechanism; an active one is reported once in CompactStats.DroppedGates).
 //
 // HISTORY (bead pg2-n7da9). One thing is deliberately KEPT beyond "live": a bounded,
 // timestamped history of the events that have left the queue, as opArchive records
@@ -116,6 +115,30 @@ type CompactStats struct {
 	RecordsBefore int
 	RecordsAfter  int
 	Duration      time.Duration
+	// DroppedGates are the ACTIVE legacy gates (the removed gate mechanism) this
+	// pass deleted: the queue reports each once (OnLegacyGateDropped).
+	DroppedGates []DroppedGate
+}
+
+// DroppedGate is one active legacy gate a compaction pass dropped.
+type DroppedGate struct {
+	Type      string
+	Owner     string
+	ExpiresAt time.Time // zero: no expiry
+}
+
+// droppedGates lists the legacy gates still set after the fold (the latest
+// record of the type is a set) that are active at f.now: no expiry, or an
+// expiry that has not passed. Sorted by type.
+func (f *logFold) droppedGates() []DroppedGate {
+	var out []DroppedGate
+	for _, r := range f.gates {
+		if r.ExpiresAt.IsZero() || f.now.Before(r.ExpiresAt) {
+			out = append(out, DroppedGate{Type: r.GateType, Owner: r.Owner, ExpiresAt: r.ExpiresAt})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
+	return out
 }
 
 // CompactPlan is what a compaction WOULD do, computed without changing anything
@@ -128,8 +151,8 @@ type CompactPlan struct {
 	// EventsKept are the events still live (retained); EventsDropped the events
 	// whose final state is evicted and whose records compaction would discard.
 	EventsKept, EventsDropped int
-	// GatesKept are the active gates the compacted log would still carry.
-	GatesKept int
+	// LevelsKept are the level records the compacted log would still carry.
+	LevelsKept int `json:"levelsKept"`
 	// Torn is true when the log has an undecodable line: everything from it on is
 	// ignored by a replay and a real compaction would discard it.
 	Torn bool
@@ -295,12 +318,6 @@ func (f *logFold) records() []Record {
 	}
 	sort.Strings(seenOnly)
 
-	gateTypes := make([]string, 0, len(f.gates))
-	for t := range f.gates {
-		gateTypes = append(gateTypes, t)
-	}
-	sort.Strings(gateTypes)
-
 	f.trimArchive()
 	archive := f.archive
 	if f.archiveBudget > 0 {
@@ -315,7 +332,7 @@ func (f *logFold) records() []Record {
 		}
 		archive = archive[keepFrom:]
 	}
-	out := make([]Record, 0, len(seenOnly)+len(archive)+len(live)+len(gateTypes)+len(f.levels.latest))
+	out := make([]Record, 0, len(seenOnly)+len(archive)+len(live)+len(f.levels.latest))
 	for _, t := range seenOnly {
 		out = append(out, Record{Op: opSeen, Type: t})
 	}
@@ -325,9 +342,6 @@ func (f *logFold) records() []Record {
 		for _, a := range e.accepts {
 			out = append(out, Record{Op: opAccept, EventID: e.enq.EventID, ListenerID: a.ListenerID, At: a.At, StartedAt: a.StartedAt})
 		}
-	}
-	for _, t := range gateTypes {
-		out = append(out, f.gates[t])
 	}
 	for _, it := range f.levels.items(f.now, true) {
 		out = append(out, it.rec)
@@ -363,7 +377,7 @@ func planFrom(r io.Reader, size int64, archiveBudget int64, now time.Time) (Comp
 		RecordsAfter:  len(live),
 		EventsKept:    len(fold.events),
 		EventsDropped: fold.dropped,
-		GatesKept:     len(fold.gates),
+		LevelsKept:    len(fold.levels.items(fold.now, true)),
 		Torn:          torn,
 	}
 	for _, rec := range live {
@@ -478,6 +492,7 @@ func (s *FileStore) Compact() (stats CompactStats, err error) {
 		return stats, err
 	}
 	stats.RecordsBefore = fold.applied
+	stats.DroppedGates = fold.droppedGates()
 	live := fold.records()
 	stats.RecordsAfter = len(live)
 
@@ -699,6 +714,9 @@ func (q *Queue) compact(trigger string) (CompactStats, error) {
 	st, err := c.Compact()
 	if err != nil {
 		return st, err
+	}
+	for _, g := range st.DroppedGates {
+		q.logLegacyGateDropped(g)
 	}
 	q.compactions.Add(1)
 	q.lastCompaction.Store(&CompactionInfo{At: q.now(), Trigger: trigger, CompactStats: st})

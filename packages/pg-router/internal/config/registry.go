@@ -14,7 +14,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
-	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -152,10 +151,6 @@ type roleTOML struct {
 	// (pg2-ec754), threaded verbatim onto roles.Role.Description and
 	// surfaced in the TUI drill-down details. Absent: empty default.
 	Description string `toml:"description"`
-	// NonBlockingGates is the list of gate TYPEs (Gate Registry, bead
-	// pg2-h63eu) this role's listener does NOT block on, declared at
-	// registration. Absent: the listener blocks on every gate TYPE.
-	NonBlockingGates []string `toml:"non_blocking_gates"`
 	// Requires is the role's requires clauses ("<resource> <op> <LEVEL>"),
 	// compiled against the [[resource]] registry (requires.go).
 	Requires []string `toml:"requires"`
@@ -220,11 +215,6 @@ type queryTOML struct {
 	// (pg2-ec754), threaded verbatim onto query.Source.Description and
 	// surfaced in the TUI drill-down details. Absent: empty default.
 	Description string `toml:"description"`
-	// NonBlockingGates is the list of gate TYPEs (Gate Registry, bead
-	// pg2-h63eu) this emitter does NOT block on, declared at registration.
-	// Absent: the emitter blocks on every gate TYPE. The built-in `timer`
-	// emitter ignores gates altogether and needs no list.
-	NonBlockingGates []string `toml:"non_blocking_gates"`
 	// LevelSource names the sensor this query answers for (it is a level-source
 	// query: it has no consumer and is not gated). Empty: an ordinary query.
 	LevelSource string `toml:"level_source"`
@@ -575,10 +565,6 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys, rawT
 			errs = append(errs, fmt.Errorf("query[%d] %q: %w", i, qt.Name, err))
 			continue
 		}
-		if err := validateGateTypes(qt.NonBlockingGates); err != nil {
-			errs = append(errs, fmt.Errorf("query[%d] %q: non_blocking_gates: %w", i, qt.Name, err))
-			continue
-		}
 		deadline := query.DefaultDeadline
 		if qt.Deadline != nil {
 			if qt.Deadline.D <= 0 {
@@ -587,7 +573,7 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys, rawT
 			}
 			deadline = qt.Deadline.D
 		}
-		out = append(out, query.Source{Name: qt.Name, Query: q, Description: qt.Description, NonBlockingGates: qt.NonBlockingGates, LevelSource: qt.LevelSource, Deadline: deadline})
+		out = append(out, query.Source{Name: qt.Name, Query: q, Description: qt.Description, LevelSource: qt.LevelSource, Deadline: deadline})
 		if qt.ExpectedInterval != nil {
 			overrides[qt.Name] = qt.ExpectedInterval.D.Milliseconds()
 		}
@@ -743,9 +729,6 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("retry: %w", err)
 	}
-	if err := validateGateTypes(rt.NonBlockingGates); err != nil {
-		return roles.Role{}, fmt.Errorf("non_blocking_gates: %w", err)
-	}
 	maxRetries := 0
 	if rt.MaxDispatchRetries != nil {
 		maxRetries = *rt.MaxDispatchRetries
@@ -753,7 +736,7 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if maxRetries < 0 || maxRetries > roles.MaxDispatchRetriesCap {
 		return roles.Role{}, fmt.Errorf("max_dispatch_retries = %d: must be between 0 and %d (a hard cap so a transient-failure storm cannot amplify load)", maxRetries, roles.MaxDispatchRetriesCap)
 	}
-	role := roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates, Requires: rt.Requires}
+	role := roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, Requires: rt.Requires}
 	if err := applyHandlerKeys(&role, rt); err != nil {
 		return roles.Role{}, err
 	}
@@ -942,18 +925,6 @@ func overlayConfigBudget(c *Config, t *budgetTOML) {
 	if t.Time != nil {
 		c.BudgetTime = t.Time.D
 	}
-}
-
-// validateGateTypes checks every entry of a non_blocking_gates list is an
-// acceptable gate TYPE (ALL CAPS) — a mistyped exemption would otherwise
-// silently exempt nothing.
-func validateGateTypes(types []string) error {
-	for _, t := range types {
-		if err := eventqueue.ValidateGateType(t); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // checkUndecodedKeys rejects a key under one of the named top-level tables

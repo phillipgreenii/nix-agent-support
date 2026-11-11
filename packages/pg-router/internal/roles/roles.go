@@ -84,11 +84,6 @@ type Role struct {
 	// without having to remember it. Empty ("") means unset; nothing in this
 	// package interprets its content.
 	Description string
-	// NonBlockingGates is the set of gate TYPEs (Gate Registry, bead pg2-h63eu)
-	// this role's listener declared, at registration, that it does NOT block
-	// on. Empty (the default): the listener blocks on every gate TYPE. Surfaced
-	// to the queue through the roleListener's eventqueue.GateExempter.
-	NonBlockingGates []string
 	// Requires is the role's requires clause texts ("<resource> <op> <LEVEL>"),
 	// as written; internal/config compiles them against the resource registry.
 	Requires []string

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/levels"
+
 	"github.com/phillipgreenii/pg-router/internal/backoff"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/event"
@@ -905,63 +907,86 @@ func TestDispatchContext_Validate(t *testing.T) {
 	}
 }
 
-// --- Gate Registry: emitters (bead pg2-h63eu) -------------------------------
+// --- Levels: emitters ---------------------------------------------------------
 
-// A threshold-triggered source is an emitter too: an active gate it blocks on
-// keeps it from firing even when its upstream has produced enough events,
-// while an exempt one still fires — and the report names the blocking gate.
-func TestProduce_gatedThresholdSourceIsNotPolled(t *testing.T) {
-	newSources := func(exempt []string) query.SourceSet {
-		return query.SourceSet{
-			{Name: "up-source", Query: fakeQuery{
-				Meta:   query.Meta{EmitTypes: []string{"up"}, Trig: query.PeriodTrigger{}},
-				events: []event.Event{itemEvt("up", "u1")},
-			}, NonBlockingGates: []string{"ALPHA"}},
-			{Name: "down-source", Query: fakeQuery{
-				Meta:   query.Meta{EmitTypes: []string{"down"}, Trig: query.ThresholdTrigger{Binds: []string{"up"}, Count: 1}},
-				events: []event.Event{itemEvt("down", "d1")},
-			}, NonBlockingGates: exempt},
-		}
-	}
-	declared := core.NewBindings("up", "down")
+// diskRegistry and diskOKReq are the generic resource and requirement the
+// level-admission tests use.
+func diskRegistry() levels.Registry {
+	return levels.Registry{"disk": {Levels: []string{"PLENTY", "OK", "LOW"}, Unknown: "PLENTY"}}
+}
 
-	q := newQueue(t)
-	if _, err := q.SetGate(eventqueue.GateRequest{Type: "ALPHA"}); err != nil {
+func diskOKReq() levels.Requirement {
+	return levels.Requirement{Clauses: []levels.Clause{{Text: "disk >= OK", Resource: "disk", Allowed: []string{"PLENTY", "OK"}}}}
+}
+
+// levelQueueAt builds a queue whose disk level is held at level, with the given
+// emitter consumers registered.
+func levelQueueAt(t *testing.T, level string, emitters map[string][]levels.Consumer) *eventqueue.Queue {
+	t.Helper()
+	q, err := eventqueue.New(eventqueue.NewMemStore(),
+		eventqueue.WithRegistry(diskRegistry()),
+		eventqueue.WithLevelSource(func() levels.Snapshot {
+			return levels.Snapshot{Now: time.Now(), Levels: map[string]levels.Level{
+				"disk": {Value: level, State: levels.StateHeld, Source: "sensor", Owner: "s"},
+			}}
+		}))
+	if err != nil {
 		t.Fatal(err)
 	}
-	rpt, err := Produce(context.Background(), query.Env{}, newSources(nil), q, declared)
+	for id, cons := range emitters {
+		q.RegisterEmitter(id, cons)
+	}
+	return q
+}
+
+// A threshold-triggered source is an emitter too: an unmet requirement keeps it
+// from firing even when its upstream has produced enough events, while an
+// emitter with an unconstrained consumer still fires; the report names the
+// blocking resource.
+func TestProduce_levelBlockedThresholdSourceIsNotPolled(t *testing.T) {
+	sources := query.SourceSet{
+		{Name: "up-source", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"up"}, Trig: query.PeriodTrigger{}},
+			events: []event.Event{itemEvt("up", "u1")},
+		}},
+		{Name: "down-source", Query: fakeQuery{
+			Meta:   query.Meta{EmitTypes: []string{"down"}, Trig: query.ThresholdTrigger{Binds: []string{"up"}, Count: 1}},
+			events: []event.Event{itemEvt("down", "d1")},
+		}},
+	}
+	declared := core.NewBindings("up", "down")
+	q := levelQueueAt(t, "LOW", map[string][]levels.Consumer{
+		"up-source":   {{Enabled: true}},
+		"down-source": {{Req: diskOKReq(), Enabled: true}},
+	})
+	rpt, err := Produce(context.Background(), query.Env{}, sources, q, declared)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if q.DepthByType()["up"] != 1 || q.DepthByType()["down"] != 0 {
-		t.Fatalf("depth = %v, want up (exempt) produced and down (blocked) not fired", q.DepthByType())
+		t.Fatalf("depth = %v, want up (unconstrained) produced and down (blocked) not fired", q.DepthByType())
 	}
-	if rpt.Blocked["down-source"] != "ALPHA" || len(rpt.Blocked) != 1 {
-		t.Fatalf("Blocked = %v, want only down-source, by ALPHA", rpt.Blocked)
+	if rpt.Blocked["down-source"] != "disk" || len(rpt.Blocked) != 1 {
+		t.Fatalf("Blocked = %v, want only down-source, by disk", rpt.Blocked)
 	}
 
-	q2 := newQueue(t)
-	if _, err := q2.SetGate(eventqueue.GateRequest{Type: "ALPHA"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Produce(context.Background(), query.Env{}, newSources([]string{"ALPHA"}), q2, declared); err != nil {
+	q2 := levelQueueAt(t, "OK", map[string][]levels.Consumer{
+		"up-source":   {{Enabled: true}},
+		"down-source": {{Req: diskOKReq(), Enabled: true}},
+	})
+	if _, err := Produce(context.Background(), query.Env{}, sources, q2, declared); err != nil {
 		t.Fatal(err)
 	}
 	if q2.DepthByType()["down"] != 1 {
-		t.Fatalf("a source exempt from the active gate must still fire; depth = %v", q2.DepthByType())
+		t.Fatalf("a source whose requirement is met must fire; depth = %v", q2.DepthByType())
 	}
 }
 
-// The timer emitter is never blocked, whatever is active, even when its
-// source also (pointlessly) lists no exemptions.
-func TestProduce_timerEmitterIsNeverBlockedByAnyGate(t *testing.T) {
+// The timer emitter is never blocked, at any level, even when a (pointless)
+// blocked consumer is registered for it.
+func TestProduce_timerEmitterIsNeverBlockedByAnyLevel(t *testing.T) {
 	sources := query.SourceSet{{Name: "tick", Query: query.TimerQuery{Meta: query.Meta{EmitTypes: []string{"timer.tick"}}}}}
-	q := newQueue(t)
-	for _, ty := range []string{"ALPHA", "BETA", "SYSTEM_PAUSE"} {
-		if _, err := q.SetGate(eventqueue.GateRequest{Type: ty}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	q := levelQueueAt(t, "LOW", map[string][]levels.Consumer{"tick": {{Req: diskOKReq(), Enabled: true}}})
 	rpt, err := Produce(context.Background(), query.Env{}, sources, q, core.NewBindings("timer.tick"))
 	if err != nil {
 		t.Fatal(err)

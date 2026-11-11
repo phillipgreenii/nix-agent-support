@@ -324,46 +324,6 @@ const (
 	MetricSourceInflightChildren = "pg_router_source_inflight_children"
 )
 
-// The Gate Registry's metrics (bead pg2-h63eu; internal/eventqueue/gate.go).
-// They are NOT part of the ten-member INV-OBS-1 catalog above: they observe a
-// separate mechanism and are registered alongside it by the same Emitter, which
-// also implements eventqueue.GateObserver.
-//
-// CARDINALITY. A gate TYPE is arbitrary, so every "type"/"gate" label below goes
-// through Emitter.gateLabel, which accepts up to maxGateTypeLabels distinct
-// TYPEs and folds any further ones into GateLabelOther. A gate's OWNER is
-// DEBUG ONLY and is deliberately NEVER a metric label (unbounded cardinality):
-// it is logged and shown in the TUI instead.
-const (
-	// MetricActiveGates reports 1 per gate TYPE currently in force (gauge).
-	MetricActiveGates = "pg_router_gates_active"
-	// MetricGateSets counts GateSet records per TYPE; renewal="true" marks one
-	// that replaced an already-active gate (a lease renewal or overwrite).
-	MetricGateSets = "pg_router_gate_sets"
-	// MetricGateClears counts gates removed by a clear, per TYPE.
-	MetricGateClears = "pg_router_gate_clears"
-	// MetricGateExpiries counts gates retired by TTL expiry, per TYPE.
-	MetricGateExpiries = "pg_router_gate_expiries"
-	// MetricGateDuration is how long a gate was in force (seconds), per TYPE and
-	// outcome ("cleared" or "expired").
-	MetricGateDuration = "pg_router_gate_duration"
-	// MetricGateBlocked counts the times a gate stopped a participant from doing
-	// work it had: per participant, kind ("dispatch", "poll" or "pull") and gate
-	// TYPE.
-	MetricGateBlocked = "pg_router_gate_blocked"
-	// MetricGateDrops counts events that went away for a gate-blocked listener at
-	// its final attempt (INV-EVT-4), per event type, role (the listener id, DEC-OBS-7)
-	// and gate TYPE — the measure of how much routing a long gate cost.
-	MetricGateDrops = "pg_router_gate_drops"
-)
-
-// maxGateTypeLabels bounds how many distinct gate TYPE label values the
-// Emitter will mint; GateLabelOther collects the rest.
-const maxGateTypeLabels = 64
-
-// GateLabelOther is the label value gate TYPEs beyond maxGateTypeLabels share.
-const GateLabelOther = "OTHER"
-
 // FailureClassDeclined is fed from eventqueue.Observer.OnDeclined
 // (eventqueue.Queue.Dispatch's Offer()==false branch): a pre-accept decline —
 // a graceful "busy" decline or an unavailable self-report — the one
@@ -535,17 +495,6 @@ type Emitter struct {
 	typeMu   sync.Mutex
 	typeSeen map[string]struct{}
 
-	// Gate Registry instruments (gate.go's GateObserver half; see the const
-	// block above).
-	gateSets     metric.Int64Counter
-	gateClears   metric.Int64Counter
-	gateExpiries metric.Int64Counter
-	gateDuration metric.Float64Histogram
-	gateBlocked  metric.Int64Counter
-	gateDrops    metric.Int64Counter
-	gateMu       sync.Mutex
-	gateSeen     map[string]struct{}
-
 	now func() time.Time
 
 	// srcMu guards srcLastSuccess. The key set is fixed at construction
@@ -629,7 +578,6 @@ type pendingDispatch struct {
 // Ensure the queue can drive it.
 var (
 	_ eventqueue.Observer               = (*Emitter)(nil)
-	_ eventqueue.GateObserver           = (*Emitter)(nil)
 	_ eventqueue.RestoreObserver        = (*Emitter)(nil)
 	_ eventqueue.RejectObserver         = (*Emitter)(nil)
 	_ eventqueue.TimingObserver         = (*Emitter)(nil)
@@ -644,7 +592,6 @@ type Option func(*options)
 type options struct {
 	queueLogBytes   func() int64
 	logLimits       func() eventqueue.LimitStatus
-	activeGates     func() []eventqueue.Gate
 	isLive          func() bool
 	buildVersion    string
 	buildInfo       bool
@@ -778,11 +725,14 @@ func WithLogLimitStatus(fn func() eventqueue.LimitStatus) Option {
 	return func(o *options) { o.logLimits = fn }
 }
 
-// WithActiveGates registers MetricActiveGates, an ObservableGauge reporting 1
-// per gate TYPE returned by fn (typically queue.ActiveGates). Without it the
-// gauge is simply not registered.
-func WithActiveGates(fn func() []eventqueue.Gate) Option {
-	return func(o *options) { o.activeGates = fn }
+// ActiveGate is the compile-only shim's gate entry (WithActiveGates).
+type ActiveGate struct{ Type string }
+
+// WithActiveGates is a compile-only shim for the removed gate gauge: it
+// registers nothing. It is removed together with the rest of the shim by the
+// metrics work.
+func WithActiveGates(func() []ActiveGate) Option {
+	return func(*options) {}
 }
 
 // WithLiveness registers MetricLiveness, an ObservableGauge reporting 1 while
@@ -1085,7 +1035,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 			return nil, err
 		}
 	}
-	e := &Emitter{gateSeen: map[string]struct{}{}, srcInflight: map[string]int{}, typeSeen: map[string]struct{}{}}
+	e := &Emitter{srcInflight: map[string]int{}, typeSeen: map[string]struct{}{}}
 	e.awakeSince = cfg.awakeSince
 	if e.awakeSince == nil {
 		now := cfg.now
@@ -1136,55 +1086,6 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 			return nil, err
 		}
 	}
-	if cfg.activeGates != nil {
-		if _, err := m.Int64ObservableGauge(
-			MetricActiveGates,
-			metric.WithUnit("{gate}"),
-			metric.WithDescription("1 per gate TYPE currently in force (Gate Registry); an empty series means nothing is gated"),
-			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-				if !ready() {
-					return nil
-				}
-				for _, g := range cfg.activeGates() {
-					o.Observe(1, metric.WithAttributes(attribute.String("type", e.gateLabel(g.Type))))
-				}
-				return nil
-			}),
-		); err != nil {
-			return nil, err
-		}
-	}
-	gateSets, err := m.Int64Counter(MetricGateSets, metric.WithUnit("{record}"),
-		metric.WithDescription("GateSet records written, per gate TYPE (renewal=true when it replaced an active gate)"))
-	if err != nil {
-		return nil, err
-	}
-	gateClears, err := m.Int64Counter(MetricGateClears, metric.WithUnit("{gate}"),
-		metric.WithDescription("gates removed by a clear, per gate TYPE"))
-	if err != nil {
-		return nil, err
-	}
-	gateExpiries, err := m.Int64Counter(MetricGateExpiries, metric.WithUnit("{gate}"),
-		metric.WithDescription("gates retired by TTL expiry, per gate TYPE"))
-	if err != nil {
-		return nil, err
-	}
-	gateDuration, err := m.Float64Histogram(MetricGateDuration, metric.WithUnit("s"),
-		metric.WithDescription("how long a gate was in force, per gate TYPE and outcome (cleared|expired)"),
-		metric.WithExplicitBucketBoundaries(1, 10, 30, 60, 300, 900, 3600, 14400, 86400))
-	if err != nil {
-		return nil, err
-	}
-	gateBlocked, err := m.Int64Counter(MetricGateBlocked, metric.WithUnit("{block}"),
-		metric.WithDescription("times a gate stopped a participant from working, per participant, kind (dispatch|poll|pull) and gate TYPE"))
-	if err != nil {
-		return nil, err
-	}
-	gateDrops, err := m.Int64Counter(MetricGateDrops, metric.WithUnit("{event}"),
-		metric.WithDescription("events that went away for a gate-blocked listener at its final attempt, per event type, listener and gate TYPE"))
-	if err != nil {
-		return nil, err
-	}
 	if cfg.isLive != nil {
 		if _, err := m.Int64ObservableGauge(
 			MetricLiveness,
@@ -1233,12 +1134,6 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.dispatchLatency = dispatchLatency
 	e.queueWait = queueWait
 	e.run = run
-	e.gateSets = gateSets
-	e.gateClears = gateClears
-	e.gateExpiries = gateExpiries
-	e.gateDuration = gateDuration
-	e.gateBlocked = gateBlocked
-	e.gateDrops = gateDrops
 	e.now = cfg.now
 	e.pending = map[string]pendingDispatch{}
 	e.skippedMarks = map[string]string{}
@@ -1260,68 +1155,28 @@ func (e *Emitter) preRecordZeroCounters() {
 	e.enqueueRejected.Add(ctx, 0)
 }
 
-// gateLabel returns the label value for a gate TYPE, folding TYPEs beyond
-// maxGateTypeLabels into GateLabelOther so an arbitrary TYPE vocabulary cannot
-// blow up the series count.
-func (e *Emitter) gateLabel(t string) string {
-	e.gateMu.Lock()
-	defer e.gateMu.Unlock()
-	if _, ok := e.gateSeen[t]; ok {
-		return t
-	}
-	if len(e.gateSeen) >= maxGateTypeLabels {
-		return GateLabelOther
-	}
-	e.gateSeen[t] = struct{}{}
-	return t
-}
+// The compile-only shim for the removed gate observer: the five methods the
+// router's wiring and tests still call, all no-ops, and IsGateEvent, which is
+// always false. The metrics work removes the shim and adds the level metrics.
 
-// OnGateSet implements eventqueue.GateObserver.
-func (e *Emitter) OnGateSet(gateType string, renewal bool) {
-	r := "false"
-	if renewal {
-		r = "true"
-	}
-	e.gateSets.Add(context.Background(), 1, metric.WithAttributes(
-		attribute.String("type", e.gateLabel(gateType)), attribute.String("renewal", r),
-	))
-}
+// OnGateSet is a no-op shim.
+func (e *Emitter) OnGateSet(string, bool) {}
 
-// OnGateCleared implements eventqueue.GateObserver.
-func (e *Emitter) OnGateCleared(gateType string, held time.Duration) {
-	l := e.gateLabel(gateType)
-	e.gateClears.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", l)))
-	e.gateDuration.Record(context.Background(), held.Seconds(), metric.WithAttributes(
-		attribute.String("type", l), attribute.String("outcome", "cleared"),
-	))
-}
+// OnGateCleared is a no-op shim.
+func (e *Emitter) OnGateCleared(string, time.Duration) {}
 
-// OnGateExpired implements eventqueue.GateObserver.
-func (e *Emitter) OnGateExpired(gateType string, held time.Duration) {
-	l := e.gateLabel(gateType)
-	e.gateExpiries.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", l)))
-	e.gateDuration.Record(context.Background(), held.Seconds(), metric.WithAttributes(
-		attribute.String("type", l), attribute.String("outcome", "expired"),
-	))
-}
+// OnGateExpired is a no-op shim.
+func (e *Emitter) OnGateExpired(string, time.Duration) {}
 
-// OnGateBlocked implements eventqueue.GateObserver.
-func (e *Emitter) OnGateBlocked(participant, kind, gateType string) {
-	e.gateBlocked.Add(context.Background(), 1, metric.WithAttributes(
-		attribute.String("participant", participant),
-		attribute.String("kind", kind),
-		attribute.String("type", e.gateLabel(gateType)),
-	))
-}
+// OnGateBlocked is a no-op shim.
+func (e *Emitter) OnGateBlocked(string, string, string) {}
 
-// OnGateDrop implements eventqueue.GateObserver.
-func (e *Emitter) OnGateDrop(evtType, listenerID, gateType string) {
-	e.gateDrops.Add(context.Background(), 1, metric.WithAttributes(
-		attribute.String("event_type", evtType),
-		attribute.String("role", listenerID),
-		attribute.String("gate", e.gateLabel(gateType)),
-	))
-}
+// OnGateDrop is a no-op shim.
+func (e *Emitter) OnGateDrop(string, string, string) {}
+
+// IsGateEvent is the compile-only shim of the removed gate-record predicate:
+// no event is a gate record any more.
+func IsGateEvent(string) bool { return false }
 
 // OnEnqueue records evt's type and resolved enqueue instant, keyed by evt.ID,
 // for OnAccept to consult (RecordThroughput/RecordDispatchLatency's
@@ -1345,14 +1200,12 @@ func (e *Emitter) OnGateDrop(evtType, listenerID, gateType string) {
 // might later be evicted, never correctness (a miss is the tolerated
 // imperfection OnAccept's own doc describes).
 //
-// It also counts the arrival in MetricEnqueued (per type), except for the Gate
-// Registry's routable records (eventqueue.IsGateEvent): those are control-plane
-// notifications, not work, and counting them would make a pause look like
-// arrivals nothing completes. OnRestore deliberately does NOT count: a restored
-// event was already counted by the process that enqueued it.
+// It also counts the arrival in MetricEnqueued (per type). OnRestore
+// deliberately does NOT count: a restored event was already counted by the
+// process that enqueued it.
 func (e *Emitter) OnEnqueue(evt eventqueue.Event) {
 	e.seedPending(evt)
-	if !eventqueue.IsGateEvent(evt.Type) {
+	if !IsGateEvent(evt.Type) {
 		e.enqueued.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evt.Type)))
 	}
 }

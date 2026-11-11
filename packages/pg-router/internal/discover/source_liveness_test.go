@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/levels"
+
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -54,11 +56,8 @@ func TestProduce_successNotifiesOnSourceSucceededAndFailureDoesNot(t *testing.T)
 	}
 }
 
-func TestProduce_gateBlockedPassNotifiesOnSourcePausedNotFailure(t *testing.T) {
-	q := newQueue(t)
-	if _, err := q.SetGate(eventqueue.GateRequest{Type: "ALPHA"}); err != nil {
-		t.Fatal(err)
-	}
+func TestProduce_levelBlockedPassNotifiesOnSourcePausedNotFailure(t *testing.T) {
+	q := levelQueueAt(t, "LOW", map[string][]levels.Consumer{"gated": {{Req: diskOKReq(), Enabled: true}}})
 	obs := &recordingSourceFailureObserver{}
 	produceObserved(t, query.SourceSet{healthySource("gated")}, q, obs)
 
@@ -88,14 +87,13 @@ func TestProduce_emittersHaltedPassNotifiesOnSourcePausedButTimerDoesNot(t *test
 	}
 }
 
-// A threshold source blocked by a gate is paused too, via the second loop.
-func TestProduce_gatedThresholdSourceNotifiesOnSourcePaused(t *testing.T) {
-	q := newQueue(t)
-	if _, err := q.SetGate(eventqueue.GateRequest{Type: "ALPHA"}); err != nil {
-		t.Fatal(err)
-	}
+// A threshold source blocked by a level is paused too, via the second loop.
+func TestProduce_levelBlockedThresholdSourceNotifiesOnSourcePaused(t *testing.T) {
+	q := levelQueueAt(t, "LOW", map[string][]levels.Consumer{
+		"up":   {{Enabled: true}},
+		"down": {{Req: diskOKReq(), Enabled: true}},
+	})
 	up := healthySource("up")
-	up.NonBlockingGates = []string{"ALPHA"}
 	down := query.Source{Name: "down", Query: fakeQuery{
 		Meta:   query.Meta{EmitTypes: []string{"work.ready"}, Trig: query.ThresholdTrigger{Binds: []string{"work.ready"}, Count: 1}},
 		events: []event.Event{itemEvt("work.ready", "d1")},

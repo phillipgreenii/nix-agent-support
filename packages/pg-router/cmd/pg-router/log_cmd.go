@@ -225,7 +225,7 @@ func renderLogCompact(w io.Writer, v core.LogCompactView) {
 	default:
 		fmt.Fprintln(w, "  the log already holds live state only: no progress is possible")
 	}
-	fmt.Fprintf(w, "  events: %d kept, %d dropped (evicted); gates kept: %d\n", v.EventsKept, v.EventsDropped, v.GatesKept)
+	fmt.Fprintf(w, "  events: %d kept, %d dropped (evicted); levels kept: %d\n", v.EventsKept, v.EventsDropped, v.LevelsKept)
 	if v.Torn {
 		fmt.Fprintln(w, "  warning: the log has an undecodable line; everything from it on is ignored by a replay and discarded by a compaction")
 	}

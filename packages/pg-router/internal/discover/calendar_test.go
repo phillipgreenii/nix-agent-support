@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/levels"
+
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/event"
@@ -477,16 +479,12 @@ func TestCalendar_expiryAttributesReachTheQueueEvent(t *testing.T) {
 	}
 }
 
-func TestCalendar_gateAndSystemPauseStillEnqueue(t *testing.T) {
+func TestCalendar_levelBlockedConsumerStillEnqueues(t *testing.T) {
 	h, _ := primed(t, 10, "run-now")
-	for _, ty := range []string{"ALPHA", "SYSTEM_PAUSE"} {
-		if _, err := h.q.SetGate(eventqueue.GateRequest{Type: ty}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	h.q = levelQueueAt(t, "LOW", map[string][]levels.Consumer{"weekly": {{Req: diskOKReq(), Enabled: true}}})
 	h.pass(slotAt(t, 10).Add(time.Second))
 	if h.depth() != 1 {
-		t.Fatalf("a gated pass must still enqueue the tick, depth=%d", h.depth())
+		t.Fatalf("a level-blocked pass must still enqueue the timer's tick, depth=%d", h.depth())
 	}
 }
 

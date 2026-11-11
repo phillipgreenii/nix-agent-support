@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
 
@@ -39,7 +38,7 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 			clientVersion: "1.2.3",
 			reply: StatusReply{
 				Core:  CoreInfo{State: "started", Version: "1.2.3"},
-				Gates: []Gate{{Type: core.GateSystemPause}},
+				Gates: []Gate{{Type: systemPauseGate}},
 			},
 			width: 120,
 			theme: theme,
@@ -90,7 +89,7 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	t.Run("N in flight reflects the reply's deliveries count", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			reply: StatusReply{
-				Gates:      []Gate{{Type: core.GateSystemPause}},
+				Gates:      []Gate{{Type: systemPauseGate}},
 				Deliveries: []Delivery{{ID: "d1"}},
 			},
 			width: 120,
@@ -108,7 +107,7 @@ func TestGatesSummary_ListsActiveGateTypes(t *testing.T) {
 	if got, want := gatesSummary(nil), "none"; got != want {
 		t.Errorf("gatesSummary(nil) = %q, want %q", got, want)
 	}
-	got := gatesSummary([]Gate{{Type: "ZED"}, {Type: core.GateSystemPause}})
+	got := gatesSummary([]Gate{{Type: "ZED"}, {Type: systemPauseGate}})
 	if want := "SYSTEM_PAUSE, ZED"; got != want {
 		t.Errorf("gatesSummary = %q, want %q (sorted)", got, want)
 	}
@@ -127,9 +126,9 @@ func TestAnyGateSet_AnyActiveGate(t *testing.T) {
 		want  bool
 	}{
 		{"none", nil, false},
-		{"system pause", []Gate{{Type: core.GateSystemPause}}, true},
+		{"system pause", []Gate{{Type: systemPauseGate}}, true},
 		{"an arbitrary TYPE", []Gate{{Type: "LOW_DISK_USAGE"}}, true},
-		{"several", []Gate{{Type: core.GateSystemPause}, {Type: "LOW_DISK_USAGE"}}, true},
+		{"several", []Gate{{Type: systemPauseGate}, {Type: "LOW_DISK_USAGE"}}, true},
 	}
 	for _, c := range cases {
 		if got := anyGateSet(c.gates); got != c.want {
@@ -146,7 +145,7 @@ func TestBannerText_NamesGatesAndKeepsPausedForSystemPause(t *testing.T) {
 	if !strings.HasPrefix(got, "GATED") || !strings.Contains(got, "LOW_DISK_USAGE") {
 		t.Errorf("non-pause gate banner = %q, want a GATED lead naming the TYPE", got)
 	}
-	got = bannerText([]string{core.GateSystemPause, "LOW_DISK_USAGE"}, false, 0, Dispatch{})
+	got = bannerText([]string{systemPauseGate, "LOW_DISK_USAGE"}, false, 0, Dispatch{})
 	if !strings.HasPrefix(got, "PAUSED") || !strings.Contains(got, "LOW_DISK_USAGE") {
 		t.Errorf("SYSTEM_PAUSE banner = %q, want a PAUSED lead naming every gate", got)
 	}

@@ -237,7 +237,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		}
 		out.Roles = append(out.Roles, configShowRole{
 			Requires: clauses,
-			Name:     r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates, MaxDispatchRetries: r.MaxDispatchRetries,
+			Name:     r.Name, Enabled: r.Enabled, Binds: r.Binds, MaxDispatchRetries: r.MaxDispatchRetries,
 			Command: show.Command, CommandError: show.CommandError, SurvivesShutdown: show.SurvivesShutdown, Role: show.Role,
 		})
 	}
@@ -258,7 +258,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 			emits = s.Query.Emits()
 			stub = query.IsStub(s.Query)
 		}
-		cq := configShowQuery{Name: s.Name, Emits: emits, Stub: stub, NonBlockingGates: s.NonBlockingGates}
+		cq := configShowQuery{Name: s.Name, Emits: emits, Stub: stub}
 		if s.Query != nil {
 			if cmdline, strict, ok := queryCommand(s.Query); ok {
 				cq.Command, cq.StrictBaseEnv = cmdline, &strict
@@ -315,9 +315,6 @@ type configShowRole struct {
 	Name    string   `json:"name"`
 	Enabled bool     `json:"enabled"`
 	Binds   []string `json:"binds"`
-	// NonBlockingGates are the gate TYPEs this listener declared it does not
-	// block on (Gate Registry); omitted when it blocks on every TYPE.
-	NonBlockingGates []string `json:"nonBlockingGates,omitempty"`
 	// MaxDispatchRetries is the role's opt-in bounded re-run count for a
 	// transiently failed dispatch (bead pg2-yu5y2); omitted when 0 (off).
 	MaxDispatchRetries int `json:"maxDispatchRetries,omitempty"`
@@ -369,9 +366,6 @@ type configShowQuery struct {
 	Name  string   `json:"name"`
 	Emits []string `json:"emits"`
 	Stub  bool     `json:"stub"`
-	// NonBlockingGates are the gate TYPEs this emitter declared it does not
-	// block on (Gate Registry); omitted when it blocks on every TYPE.
-	NonBlockingGates []string `json:"nonBlockingGates,omitempty"`
 	// Command is a command query's command line (its argv, shell-quoted, as
 	// config --show prints it); omitted for a query with no command (the timer).
 	Command string `json:"command,omitempty"`

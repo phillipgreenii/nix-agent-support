@@ -17,7 +17,7 @@ import (
 // queueLog.lastCompaction (bead pg2-maxn1).
 
 // bloatedLog writes a queue.jsonl with dead (enqueued, accepted, evicted) events
-// and one live event plus one gate, and returns its path.
+// and one live event plus one level record, and returns its path.
 func bloatedLog(t *testing.T, dead int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
@@ -38,7 +38,7 @@ func bloatedLog(t *testing.T, dead int) string {
 		write(map[string]any{"op": "evict", "eventId": id})
 	}
 	write(map[string]any{"op": "enqueue", "eventId": "live-1", "type": "t1", "at": at, "expiresAt": at.Add(time.Hour), "enqueuedAt": at})
-	write(map[string]any{"op": "gate_set", "eventId": "", "gateType": "SYSTEM_PAUSE", "at": at, "owner": "operator"})
+	write(map[string]any{"op": "level_set", "resource": "router", "level": "PAUSED", "owner": "operator", "observedAt": at, "receivedAt": at})
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 	svc, q := fileServiceOver(t, path, eventqueue.WithLogLimits(0, 1<<20))
 	before, _ := os.ReadFile(path)
 
-	dry, code := serveGateVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1","dryRun":true}`)
+	dry, code := serveVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1","dryRun":true}`)
 	if code != conformance.ExitOK {
 		t.Fatalf("dry run exit = %d; reply=%v", code, dry)
 	}
@@ -77,7 +77,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 		t.Fatalf("dry-run reply failed %s: %v", LogCompactReplySchema, err)
 	}
 	if dry["dryRun"] != true || dry["compacted"] != false || dry["noProgress"] != false || dry["via"] != "daemon" ||
-		dry["eventsKept"] != float64(1) || dry["eventsDropped"] != float64(200) || dry["gatesKept"] != float64(1) ||
+		dry["eventsKept"] != float64(1) || dry["eventsDropped"] != float64(200) || dry["levelsKept"] != float64(1) ||
 		dry["recordsBefore"] != float64(200*3+2) || dry["limitBytes"] != float64(1<<20) {
 		t.Fatalf("dry-run reply = %v", dry)
 	}
@@ -94,7 +94,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 		t.Fatal("a dry run must not appear as the last compaction")
 	}
 
-	real, code := serveGateVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1"}`)
+	real, code := serveVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1"}`)
 	if code != conformance.ExitOK {
 		t.Fatalf("real run exit = %d; reply=%v", code, real)
 	}
@@ -115,7 +115,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 		t.Fatalf("status lastCompaction = %v, want the manual run", lc)
 	}
 
-	again, code := serveGateVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1"}`)
+	again, code := serveVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1"}`)
 	if code != conformance.ExitOK || again["compacted"] != false || again["noProgress"] != true {
 		t.Fatalf("second run = %v (exit %d), want a no-progress skip", again, code)
 	}
@@ -171,7 +171,7 @@ func TestLogCompact_RefusalsUseTheErrorEnvelope(t *testing.T) {
 		{"dryRun wrong type", `{"schemaVersion":"1","dryRun":"yes"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			reply, code := serveGateVerb(t, svc, SubcommandLogCompact, tc.request)
+			reply, code := serveVerb(t, svc, SubcommandLogCompact, tc.request)
 			if code != conformance.ExitError {
 				t.Fatalf("exit = %d, want %d; reply=%v", code, conformance.ExitError, reply)
 			}
@@ -185,7 +185,7 @@ func TestLogCompact_RefusalsUseTheErrorEnvelope(t *testing.T) {
 // NewLogCompactView: the percentages, the duration and noProgress are derived the
 // way the CLI and the status reply read them.
 func TestNewLogCompactView(t *testing.T) {
-	plan := eventqueue.CompactPlan{BytesBefore: 500, BytesAfter: 5, RecordsBefore: 30, RecordsAfter: 2, EventsKept: 1, EventsDropped: 9, GatesKept: 1}
+	plan := eventqueue.CompactPlan{BytesBefore: 500, BytesAfter: 5, RecordsBefore: 30, RecordsAfter: 2, EventsKept: 1, EventsDropped: 9, LevelsKept: 1}
 	stats := eventqueue.CompactStats{BytesBefore: 520, BytesAfter: 7, RecordsBefore: 31, RecordsAfter: 3, Duration: 42 * time.Millisecond}
 	f := func(v float64) *float64 { return &v }
 	ms := int64(42)
@@ -202,7 +202,7 @@ func TestNewLogCompactView(t *testing.T) {
 			1000, ViaOffline,
 			LogCompactView{
 				SchemaVersion: "1", DryRun: true, Via: "offline", BytesBefore: 500, BytesAfter: 5, RecordsBefore: 30, RecordsAfter: 2,
-				EventsKept: 1, EventsDropped: 9, GatesKept: 1, LimitBytes: 1000, PercentBefore: f(50), PercentAfter: f(0.5),
+				EventsKept: 1, EventsDropped: 9, LevelsKept: 1, LimitBytes: 1000, PercentBefore: f(50), PercentAfter: f(0.5),
 			},
 		},
 		{
@@ -211,7 +211,7 @@ func TestNewLogCompactView(t *testing.T) {
 			0, ViaDaemon,
 			LogCompactView{
 				SchemaVersion: "1", Compacted: true, Via: "daemon", BytesBefore: 520, BytesAfter: 7, RecordsBefore: 31, RecordsAfter: 3,
-				EventsKept: 1, EventsDropped: 9, GatesKept: 1, DurationMs: &ms,
+				EventsKept: 1, EventsDropped: 9, LevelsKept: 1, DurationMs: &ms,
 			},
 		},
 		{
@@ -249,7 +249,7 @@ func TestNewLogCompactView(t *testing.T) {
 // verb: compacting a large log outlives it, and a reply lost to the deadline would
 // hide a compaction that did happen.
 func TestServerDeadlineFor(t *testing.T) {
-	for _, sub := range []string{SubcommandStatus, SubcommandPause, SubcommandGateSet, SubcommandIngestEvent, "nonsense"} {
+	for _, sub := range []string{SubcommandStatus, "pause", "gate-set", SubcommandIngestEvent, "nonsense"} {
 		if got := serverDeadlineFor(sub); got != serverCallDeadline {
 			t.Errorf("serverDeadlineFor(%q) = %v, want the default %v", sub, got, serverCallDeadline)
 		}

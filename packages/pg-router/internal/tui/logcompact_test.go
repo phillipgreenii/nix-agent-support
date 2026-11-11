@@ -35,7 +35,7 @@ func shrinkingView(dryRun bool) (core.LogCompactView, error) {
 	return core.LogCompactView{
 		SchemaVersion: "1", DryRun: dryRun, Compacted: !dryRun, Via: core.ViaDaemon,
 		BytesBefore: 33282518, BytesAfter: 4096, RecordsBefore: 182157, RecordsAfter: 9,
-		EventsKept: 2, EventsDropped: 14106, GatesKept: 1,
+		EventsKept: 2, EventsDropped: 14106, LevelsKept: 1,
 		LimitBytes: 67108864, PercentBefore: f64(49.6), PercentAfter: f64(0),
 	}, nil
 }
@@ -80,7 +80,7 @@ func TestLogCompact_COpensModalAndDryRuns(t *testing.T) {
 	out := modalText(m)
 	for _, want := range []string{
 		"Compact queue log", "31.7 MiB (49.6% of 64.0 MiB) · 182157 records", "4.0 KiB (0.0% of 64.0 MiB) · 9 records",
-		"2 kept · 14106 dropped (evicted) · gates kept 1", "dry run only: nothing has been changed yet", "[y] compact now", "none since the core started",
+		"2 kept · 14106 dropped (evicted) · levels kept 1", "dry run only: nothing has been changed yet", "[y] compact now", "none since the core started",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ready view lacks %q:\n%s", want, out)
@@ -284,9 +284,9 @@ func TestSocketPoller_CompactLog(t *testing.T) {
 		_ = json.Unmarshal(payload, &req)
 		gotDry = append(gotDry, req.DryRun)
 		if req.DryRun {
-			return []byte(`{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"gatesKept":1}`), conformance.ExitOK
+			return []byte(`{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"levelsKept":1}`), conformance.ExitOK
 		}
-		return []byte(`{"schemaVersion":"1","dryRun":false,"compacted":true,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"gatesKept":1,"durationMs":4}`), conformance.ExitOK
+		return []byte(`{"schemaVersion":"1","dryRun":false,"compacted":true,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"levelsKept":1,"durationMs":4}`), conformance.ExitOK
 	})
 	writeDiscoveryRecord(t, logDir, socketPath, "tok")
 	p := NewSocketPoller(logDir, core.Ref{})

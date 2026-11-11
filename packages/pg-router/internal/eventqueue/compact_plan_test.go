@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -57,7 +58,7 @@ func dirEntries(t *testing.T, dir string) []string {
 
 // On a live store the dry run changes nothing (file bytes, directory contents,
 // size gauge) and predicts the real compaction exactly; the counts are the seeded
-// log's: 40 evicted events dropped, 5 retained, 1 gate.
+// log's: 40 evicted events dropped, 5 retained, the legacy gate dropped.
 func TestFileStorePlanCompaction(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "queue.jsonl")
@@ -79,8 +80,8 @@ func TestFileStorePlanCompaction(t *testing.T) {
 	if got := dirEntries(t, dir); len(got) != len(entriesBefore) {
 		t.Fatalf("the dry run left files behind: %v -> %v", entriesBefore, got)
 	}
-	if plan.EventsKept != 5 || plan.EventsDropped != 40 || plan.GatesKept != 1 || plan.Torn {
-		t.Fatalf("plan counts = %+v, want 5 kept / 40 dropped / 1 gate / not torn", plan)
+	if plan.EventsKept != 5 || plan.EventsDropped != 40 || plan.LevelsKept != 0 || plan.Torn {
+		t.Fatalf("plan counts = %+v, want 5 kept / 40 dropped / no level / not torn", plan)
 	}
 	if plan.NoProgress() {
 		t.Fatalf("a dead-weight log must plan to shrink: %+v", plan)
@@ -154,18 +155,20 @@ func TestPlanCompactionMatchesCompactionProperty(t *testing.T) {
 		}
 		compacted := compactRecords(recs)
 		kept := 0
-		gates := 0
+		lv := 0
 		for _, c := range compacted {
 			switch c.Op {
 			case opEnqueue:
 				kept++
-			case opGateSet:
-				gates++
+			case opLevelSet, opLevelCleared:
+				lv++
+			case opGateSet, opGateCleared, opGateExpired:
+				t.Fatalf("seed %d: compaction kept a legacy gate record %+v", seed, c)
 			}
 		}
-		if plan.EventsKept != kept || plan.GatesKept != gates || plan.RecordsAfter != len(compacted) {
-			t.Fatalf("seed %d: plan %+v disagrees with compactRecords (kept %d, gates %d, records %d)",
-				seed, plan, kept, gates, len(compacted))
+		if plan.EventsKept != kept || plan.LevelsKept != lv || plan.RecordsAfter != len(compacted) {
+			t.Fatalf("seed %d: plan %+v disagrees with compactRecords (kept %d, levels %d, records %d)",
+				seed, plan, kept, lv, len(compacted))
 		}
 		fs, err := NewFileStore(path)
 		if err != nil {
@@ -245,7 +248,7 @@ func TestQueueLastCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := q.LastCompaction(); again != info {
+	if again, _ := q.LastCompaction(); !reflect.DeepEqual(again, info) {
 		t.Fatal("a dry run must not replace the last-compaction record")
 	}
 	st, err := q.CompactNow()
@@ -254,7 +257,7 @@ func TestQueueLastCompaction(t *testing.T) {
 	}
 	planMatchesStats(t, "queue", plan, st)
 	got, ok := q.LastCompaction()
-	if !ok || got.Trigger != "manual" || got.CompactStats != st || !got.At.Equal(clk.now()) {
+	if !ok || got.Trigger != "manual" || !reflect.DeepEqual(got.CompactStats, st) || !got.At.Equal(clk.now()) {
 		t.Fatalf("after manual: %+v, %v; want manual with %+v", got, ok, st)
 	}
 	if q.Compactions() != 2 {
