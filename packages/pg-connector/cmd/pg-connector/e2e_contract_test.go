@@ -263,11 +263,31 @@ func startGitHubDaemon(t *testing.T, registryPath string) {
 		}
 		if c, err := net.Dial("unix", cfg.Socket); err == nil {
 			_ = c.Close()
-			return
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("pg-connector-github serve never opened %s: %s", cfg.Socket, out.String())
+	c, err := net.Dial("unix", cfg.Socket)
+	if err != nil {
+		t.Fatalf("pg-connector-github serve never opened %s: %s", cfg.Socket, out.String())
+	}
+	_ = c.Close()
+	// The socket accepts connections while the daemon is still migrating its
+	// store ("the daemon is starting"), and a client call then answers
+	// unavailable. Wait until the health report no longer says so.
+	ready := time.Now().Add(60 * time.Second)
+	var report []byte
+	for time.Now().Before(ready) {
+		st := exec.Command(filepath.Join(contractBinDir, "pg-connector-github"), "--config", cfgPath, "status", "--json")
+		st.Dir = "/"
+		st.Env = contractEnv(nil)
+		report, _ = st.CombinedOutput()
+		if !bytes.Contains(report, []byte("migrating")) && !bytes.Contains(report, []byte("starting")) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("pg-connector-github serve still migrating after 60s: %s", report)
 }
 
 // contractEnvKeysToStrip are env vars that must never leak from this test
