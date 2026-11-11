@@ -1275,6 +1275,7 @@ func (s *Store) replay(recs []Rec) error {
 var (
 	closeLockWait       = 2 * time.Second
 	closeCheckpointWait = 3 * time.Second
+	closeStatsWait      = 2 * time.Second
 	closeDBsWait        = 3 * time.Second
 )
 
@@ -1317,6 +1318,13 @@ func (s *Store) Close() error {
 		s.jf = nil
 	}
 	if s.cdb != nil {
+		// Keep sqlite_stat1 current: a due collection runs here, bounded, on the
+		// checkpoint connection; a cut-short pass resumes at the next one.
+		if s.wdb != nil && s.CollectStatsDue(time.Now(), StatsEvery) {
+			ctx, cancel := context.WithTimeout(context.Background(), closeStatsWait)
+			_, _ = s.collectStats(ctx, s.cdb, DefaultAnalysisLimit, time.Now())
+			cancel()
+		}
 		_ = s.cdb.Close()
 		s.cdb = nil
 	}

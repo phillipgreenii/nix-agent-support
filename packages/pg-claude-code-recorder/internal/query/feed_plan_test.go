@@ -1,8 +1,11 @@
 package query
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
@@ -15,11 +18,27 @@ import (
 // before the limit applies: the first page costs the whole table and outruns the
 // query deadline on a large store.
 func TestSelectPlanWalksTheIDRangeForASourceAndItemFilter(t *testing.T) {
+	feedPlanCase(t, false)
+}
+
+// The same plan must hold once sqlite_stat1 exists, on a store whose rows are
+// skewed the way the live one is (nearly every record is one source).
+func TestSelectPlanWalksTheIDRangeWithStatistics(t *testing.T) {
+	feedPlanCase(t, true)
+}
+
+func feedPlanCase(t *testing.T, withStats bool) {
 	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	if withStats {
+		seedSkewedRecords(t, st)
+		if _, err := st.CollectStats(context.Background(), 400, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
 	srcs := sources.All()
 	e := &Engine{
 		DB:           st.Read(),
@@ -62,5 +81,25 @@ func TestSelectPlanWalksTheIDRangeForASourceAndItemFilter(t *testing.T) {
 	}
 	if _, werr := e.Select(st.Read(), sel); werr != nil {
 		t.Fatal(werr)
+	}
+}
+
+func seedSkewedRecords(t *testing.T, st *store.Store) {
+	t.Helper()
+	err := st.WithWrite("", func(tx *sql.Tx) error {
+		for _, q := range []string{
+			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
+			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
+			 SELECT i,1,0,i,-1,1,CASE WHEN i%500=0 THEN 'other' ELSE 'claude-transcript' END,CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
+		} {
+			if _, err := tx.Exec(q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

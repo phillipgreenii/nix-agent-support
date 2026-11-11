@@ -647,6 +647,7 @@ func (d *Daemon) Start() error {
 	d.goLoop("wal_checkpoint", d.walCheckpointLoop)
 	d.goLoop("settle", d.settleLoop)
 	d.goLoop("doctor", d.doctorLoop)
+	d.goLoop("stats", d.statsLoop)
 	d.goLoop("refresh_gauges", d.refreshLoop)
 	d.goLoop("parse", d.parseLoop)
 	d.goLoop("tracker", d.trackLoop)
