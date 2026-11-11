@@ -272,12 +272,8 @@ func (s *Settler) removeLockedBody(ctx context.Context, opt RemoveOptions, now t
 		if s.stopping() {
 			break // between candidates, never inside one
 		}
-		switch {
-		case runCount >= s.cfg.MaxPerRun:
-			skip(c.session, BlockRunCap)
-			continue
-		case s.hourCount(now) >= s.cfg.MaxPerHour:
-			skip(c.session, BlockHourCap)
+		if reason := removalCap(runCount, s.cfg.MaxPerRun, func() int { return s.hourCount(now) }, s.cfg.MaxPerHour); reason != "" {
+			skip(c.session, reason)
 			continue
 		}
 		var removed bool
