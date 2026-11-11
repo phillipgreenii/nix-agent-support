@@ -69,7 +69,6 @@ func TestSetPendingQuestion_roundTrips(t *testing.T) {
 // leaves it intact when moving INTO NeedsInput (so the ask handler's subsequent
 // SetPendingQuestion survives) (pg2-7a5b).
 func TestTransition_clearsPendingQuestionExceptNeedsInput(t *testing.T) {
-	ctx := context.Background()
 	cases := []struct {
 		name      string
 		to        State
@@ -85,13 +84,13 @@ func TestTransition_clearsPendingQuestionExceptNeedsInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			st := newTestStore(t)
 			mustInsert(t, st, "a", "csid-a")
-			if err := st.SetPendingQuestion(ctx, "a", "stale question"); err != nil {
+			if err := st.SetPendingQuestion(t.Context(), "a", "stale question"); err != nil {
 				t.Fatalf("SetPendingQuestion: %v", err)
 			}
-			if _, err := st.Transition(ctx, "a", tc.to, "csid-a", ""); err != nil {
+			if _, err := st.Transition(t.Context(), "a", tc.to, "csid-a", ""); err != nil {
 				t.Fatalf("Transition: %v", err)
 			}
-			got, _, _ := st.GetByExternalID(ctx, "a")
+			got, _, _ := st.GetByExternalID(t.Context(), "a")
 			if tc.wantClear && got.PendingQuestion != "" {
 				t.Errorf("PendingQuestion = %q, want cleared on transition to %s", got.PendingQuestion, tc.to)
 			}

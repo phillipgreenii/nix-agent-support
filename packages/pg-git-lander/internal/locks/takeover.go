@@ -147,13 +147,13 @@ func (l *Layer) Classify(st ReadState) Freshness {
 
 var errRetryRead = errors.New("lock changed while judging: re-read")
 
-func (l *Layer) emitConversion(c Conversion) {
+func (l *Layer) emitConversion(ctx context.Context, c Conversion) {
 	if l.Out != nil {
 		fmt.Fprintf(l.Out, "lock %s: holder of op %s (pid %d on %s) is %s; %s\n",
 			c.Lock, c.OpID, c.PreviousOwner.PID, c.PreviousOwner.Host, c.Why, map[bool]string{true: "taken over", false: "converted to stopped"}[c.Takeover])
 	}
 	if l.OnConvert != nil {
-		l.OnConvert(c)
+		l.OnConvert(ctx, c)
 	}
 }
 
@@ -179,7 +179,7 @@ func (l *Layer) takeOver(ctx context.Context, s Spec, st ReadState) (*Held, erro
 		if err != nil {
 			return nil, err
 		}
-		l.emitConversion(Conversion{Lock: s.Ref, PreviousOwner: st.Rec.Owner, Why: why, OpID: st.Rec.OpID, Takeover: true, Refs: []string{s.Ref}})
+		l.emitConversion(ctx, Conversion{Lock: s.Ref, PreviousOwner: st.Rec.Owner, Why: why, OpID: st.Rec.OpID, Takeover: true, Refs: []string{s.Ref}})
 		return &Held{l: l, Ref: s.Ref, rec: rec, oid: oid, lastRenew: l.Clock.Now()}, nil
 	case RoleBranch, RoleWorktree:
 		done, err := l.convert(ctx, st, why)
@@ -246,7 +246,7 @@ func (l *Layer) convert(ctx context.Context, trigger ReadState, why Why) (bool, 
 			for i, e := range edits {
 				refs[i] = e.ref
 			}
-			l.emitConversion(Conversion{Lock: trigger.Ref, PreviousOwner: trigger.Rec.Owner, Why: why, OpID: trigger.Rec.OpID, Refs: refs})
+			l.emitConversion(ctx, Conversion{Lock: trigger.Ref, PreviousOwner: trigger.Rec.Owner, Why: why, OpID: trigger.Rec.OpID, Refs: refs})
 			return true, nil
 		}
 		// Re-read (section 8.4): a changed ref means another run converted or

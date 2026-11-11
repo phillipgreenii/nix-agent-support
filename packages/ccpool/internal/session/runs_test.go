@@ -39,7 +39,7 @@ func (p *spyStore) FinalizeRun(ctx context.Context, id int64, reason, source str
 
 func mustRuns(t *testing.T, st *store.Store, id string) []store.Run {
 	t.Helper()
-	runs, err := st.RunsFor(context.Background(), id)
+	runs, err := st.RunsFor(t.Context(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +47,8 @@ func mustRuns(t *testing.T, st *store.Store, id string) []store.Run {
 }
 
 func resumeService(st *store.Store) *Service {
-	waiter := waitFunc(func(_ context.Context, externalID string, _ int64) (wait.Outcome, error) {
-		_, _ = st.Transition(context.Background(), externalID, store.Ready, "", "/p/a.jsonl")
+	waiter := waitFunc(func(ctx context.Context, externalID string, _ int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, externalID, store.Ready, "", "/p/a.jsonl")
 		return wait.Outcome{State: store.Ready}, nil
 	})
 	return New(Deps{
@@ -168,20 +168,19 @@ func TestClose_hookDuringClose_keepsCloseReason(t *testing.T) {
 // close_reason stamp is skipped, so a racing hook records the purge reason
 // ("purge wins"), and the run stays readable up to Store.Delete.
 func TestClose_purgeWins_pendingReasonBeforeExit(t *testing.T) {
-	ctx := context.Background()
 	st := newMemStore(t)
 	seedIdleRow(t, st, 50)
-	_, _ = st.OpenRun(ctx, "a")
+	_, _ = st.OpenRun(t.Context(), "a")
 	tm := &closeTmux{live: true}
 	var seen store.Run
 	tm.onKill = func(string) {
-		run, _, _ := st.OpenRunFor(ctx, "a")
-		_, _ = st.FinalizeRun(ctx, run.ID, "exited", store.RunEndHook, 200)
+		run, _, _ := st.OpenRunFor(t.Context(), "a")
+		_, _ = st.FinalizeRun(t.Context(), run.ID, "exited", store.RunEndHook, 200)
 		runs := mustRuns(t, st, "a")
 		seen = runs[0]
 	}
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Prefix: "cc-", Now: func() time.Time { return time.Unix(300, 0) }})
-	if err := s.CloseReason(ctx, "a", "operator", true); err != nil {
+	if err := s.CloseReason(t.Context(), "a", "operator", true); err != nil {
 		t.Fatal(err)
 	}
 	if seen.EndReason != "operator" || seen.EndSource != store.RunEndHook || seen.Open() {

@@ -166,7 +166,7 @@ func forwardChangesOne(ctx context.Context, reg *Registry, entityType, backend, 
 		if query == "" {
 			return res
 		}
-		if serr := stampForwarded(reg, key, consumerID, time.Now(), nil, err); serr != nil {
+		if serr := stampForwarded(ctx, reg, key, consumerID, time.Now(), nil, err); serr != nil {
 			res.notes = append(res.notes, serr.Error())
 		}
 		return res
@@ -224,7 +224,7 @@ func forwardChangesOne(ctx context.Context, reg *Registry, entityType, backend, 
 				continue
 			}
 			k := LedgerKey{Type: entityType, Backend: backend, Query: q, Instance: key.Instance}
-			if serr := stampForwarded(reg, k, consumerID, time.Now(), &ans.SourcesFreshness[i], nil); serr != nil {
+			if serr := stampForwarded(ctx, reg, k, consumerID, time.Now(), &ans.SourcesFreshness[i], nil); serr != nil {
 				res.notes = append(res.notes, serr.Error())
 			}
 		}
@@ -237,7 +237,7 @@ func forwardChangesOne(ctx context.Context, reg *Registry, entityType, backend, 
 			break
 		}
 	}
-	if serr := stampForwarded(reg, key, consumerID, time.Now(), fresh, nil); serr != nil {
+	if serr := stampForwarded(ctx, reg, key, consumerID, time.Now(), fresh, nil); serr != nil {
 		res.notes = append(res.notes, serr.Error())
 	}
 	return res
@@ -273,8 +273,8 @@ func nonNullArray(raw json.RawMessage) json.RawMessage {
 // saved even when the key had no file before, so the (type, backend, query) key
 // is never a ghost row of the consumer's freshness view. A failure to stamp is
 // returned for the caller to report; it never invalidates the answer.
-func stampForwarded(reg *Registry, key LedgerKey, consumerID string, now time.Time, fresh *schema.SourceFreshness, callErr error) error {
-	err := updateLedger(context.Background(), key, reg.PreviousNames(key.Backend), func(l *Ledger) bool {
+func stampForwarded(ctx context.Context, reg *Registry, key LedgerKey, consumerID string, now time.Time, fresh *schema.SourceFreshness, callErr error) error {
+	err := updateLedger(ctx, key, reg.PreviousNames(key.Backend), func(l *Ledger) bool {
 		cs := l.Consumers[consumerID]
 		cs.LastSeen = now
 		l.Consumers[consumerID] = cs

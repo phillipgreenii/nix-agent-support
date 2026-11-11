@@ -31,9 +31,9 @@ type LockWait struct {
 	Result string
 }
 
-func (l *Layer) emitWait(w LockWait) {
+func (l *Layer) emitWait(ctx context.Context, w LockWait) {
 	if l.OnWait != nil {
-		l.OnWait(w)
+		l.OnWait(ctx, w)
 	}
 }
 
@@ -252,7 +252,7 @@ func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 		if c == nil {
 			if wait != nil {
 				wait.Waited, wait.Result = l.Clock.Since(start), WaitAcquired
-				l.emitWait(*wait)
+				l.emitWait(ctx, *wait)
 			}
 			return set, nil
 		}
@@ -274,7 +274,7 @@ func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 		wait = &LockWait{Lock: blocked.Ref, Holder: c.holder}
 		if elapsed >= l.Config.Wait {
 			wait.Waited, wait.Result = elapsed, WaitBusy
-			l.emitWait(*wait)
+			l.emitWait(ctx, *wait)
 			return nil, &BusyError{Ref: blocked.Ref, Holder: c.holder}
 		}
 		for elapsed >= nextMsg {

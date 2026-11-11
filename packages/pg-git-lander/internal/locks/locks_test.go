@@ -189,7 +189,7 @@ func TestRefsAndAdminName(t *testing.T) {
 func TestAdminNameFromRealGit(t *testing.T) {
 	f := newFx(t)
 	wt := filepath.Join(f.repo.Root(), "wt1")
-	f.mustGit(f.repo.Dir, "worktree", "add", "-b", "b1", wt)
+	f.mustGit(t.Context(), f.repo.Dir, "worktree", "add", "-b", "b1", wt)
 	for dir, want := range map[string]string{f.repo.Dir: "_main", wt: "wt1"} {
 		r := f.l.Git.Run(t.Context(), dir, "rev-parse", "--path-format=absolute", "--git-dir")
 		if got := AdminName(strings.TrimSpace(string(r.Stdout))); got != want {
@@ -198,9 +198,9 @@ func TestAdminNameFromRealGit(t *testing.T) {
 	}
 }
 
-func (f *fx) mustGit(dir string, args ...string) {
+func (f *fx) mustGit(ctx context.Context, dir string, args ...string) {
 	f.t.Helper()
-	if r := f.l.Git.Run(f.t.Context(), dir, args...); !r.OK() {
+	if r := f.l.Git.Run(ctx, dir, args...); !r.OK() {
 		f.t.Fatalf("git %v: %s", args, r.Stderr)
 	}
 }
@@ -362,7 +362,7 @@ func TestWaiterAcquiresWhenHolderReleases(t *testing.T) {
 	f.l.Sleep = func(ctx context.Context, d time.Duration) error {
 		n++
 		if n == 3 {
-			f.mustGit(f.repo.Dir, "update-ref", "-d", ref, oid)
+			f.mustGit(ctx, f.repo.Dir, "update-ref", "-d", ref, oid)
 		}
 		return inner(ctx, d)
 	}
@@ -690,7 +690,7 @@ func TestSetIsAllOrNothingWithReleaseAndRetry(t *testing.T) {
 		t.Errorf("no 0-500 ms retry wait: %v", f.sleeps)
 	}
 	// once the blocker goes away the whole set is taken
-	f.mustGit(f.repo.Dir, "update-ref", "-d", WorktreeRef("wt-b"), blockerOID)
+	f.mustGit(ctx, f.repo.Dir, "update-ref", "-d", WorktreeRef("wt-b"), blockerOID)
 	set, err := f.l.Acquire(ctx, f.l.LandLocks(op)...)
 	if err != nil || len(set.Locks) != 3 {
 		t.Fatalf("set: %v %v", set, err)
@@ -730,7 +730,7 @@ func TestStoppedRecordRefusals(t *testing.T) {
 func TestUnreadableRecordIsHeldByALiveHolder(t *testing.T) {
 	cases := map[string]func(f *fx, ref string) string{
 		"not a blob": func(f *fx, ref string) string {
-			f.mustGit(f.repo.Dir, "update-ref", ref, "HEAD")
+			f.mustGit(f.t.Context(), f.repo.Dir, "update-ref", ref, "HEAD")
 			return f.refOID(ref)
 		},
 		"unparseable": func(f *fx, ref string) string { return f.plantRaw(ref, []byte("{not json")) },
@@ -825,7 +825,7 @@ func TestOnWaitReportsBusyAndAcquiredAfterWaiting(t *testing.T) {
 	ref := BranchRef("feature/x")
 	f.plant(ref, branchRec("feature/x", "main", "holder-op"))
 	var got []LockWait
-	f.l.OnWait = func(w LockWait) { got = append(got, w) }
+	f.l.OnWait = func(_ context.Context, w LockWait) { got = append(got, w) }
 	f.l.Config.Wait = 3 * time.Second
 	if _, err := f.l.Acquire(t.Context(), Spec{Ref: ref, Role: RoleBranch, Rec: branchRec("feature/x", "main", "me")}); err == nil {
 		t.Fatal("want busy")
@@ -860,7 +860,7 @@ func TestOnWaitReportsBusyAndAcquiredAfterWaiting(t *testing.T) {
 func TestOnWaitSilentWithoutWaiting(t *testing.T) {
 	f := newFx(t)
 	called := false
-	f.l.OnWait = func(LockWait) { called = true }
+	f.l.OnWait = func(context.Context, LockWait) { called = true }
 	ref := BranchRef("feature/z")
 	if _, err := f.l.Acquire(t.Context(), Spec{Ref: ref, Role: RoleBranch, Rec: branchRec("feature/z", "main", "me")}); err != nil {
 		t.Fatal(err)

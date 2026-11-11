@@ -10,6 +10,7 @@ cachePackages = [
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest',
   'github.com/remyoudompheng/bigfft',
+  'golang.org/x/sync/errgroup',
   'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
   'modernc.org/libc',
@@ -76,6 +77,10 @@ cachePackages = [
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
     hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
+
+  [mod.'golang.org/x/sync']
+    version = 'v0.24.0'
+    hash = 'sha256-gViyLpsZFBKTEUtK6Li3m6plz5J/VCAcpTLymQVRpj4='
 
   [mod.'golang.org/x/sys']
     version = 'v0.49.0'

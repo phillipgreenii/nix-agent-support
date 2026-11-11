@@ -1,6 +1,7 @@
 package locks
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func (f *fx) withLiveness() (*seamstest.Liveness, *[]Conversion) {
 	f.l.Liveness = lv
 	f.l.Host = seamstest.Host(thisHost)
 	var got []Conversion
-	f.l.OnConvert = func(c Conversion) { got = append(got, c) }
+	f.l.OnConvert = func(_ context.Context, c Conversion) { got = append(got, c) }
 	return lv, &got
 }
 

@@ -59,10 +59,10 @@ type Layer struct {
 	Host     seams.Host
 	// OnConvert, when set, receives every conversion and takeover of a lock
 	// whose holder was dead or expired, for the log and events writer.
-	OnConvert func(Conversion)
+	OnConvert func(context.Context, Conversion)
 	// OnWait, when set, receives every wait for a held lock that ended in
 	// acquisition or in a busy outcome, for the log and events writer.
-	OnWait func(LockWait)
+	OnWait func(context.Context, LockWait)
 
 	obsMu sync.Mutex
 	obs   map[string]observation

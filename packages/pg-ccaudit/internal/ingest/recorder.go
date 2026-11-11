@@ -200,7 +200,7 @@ func runSub(ctx context.Context, db *sql.DB, opt RecorderOptions, s subscription
 			}
 			return fmt.Errorf("feed %s: %w", s.name, err)
 		}
-		if err := applyEntries(ctx, db, opt, s.name, ans.Entries, cursorWriter(s.name, ans.NextCursor), st); err != nil {
+		if err := applyEntries(ctx, db, opt, s.name, ans.Entries, cursorWriter(ctx, s.name, ans.NextCursor), st); err != nil {
 			return err
 		}
 		cur = ans.NextCursor
@@ -210,13 +210,14 @@ func runSub(ctx context.Context, db *sql.DB, opt RecorderOptions, s subscription
 	}
 }
 
-// cursorWriter saves cur as the subscription's cursor in the page's transaction.
-func cursorWriter(name, cur string) func(*sql.Tx) error {
+// cursorWriter saves cur as the subscription's cursor in the page's transaction,
+// under the caller's ctx.
+func cursorWriter(ctx context.Context, name, cur string) func(*sql.Tx) error {
 	if cur == "" {
 		return nil
 	}
 	return func(tx *sql.Tx) error {
-		return saveCursor(context.Background(), tx, name, cur)
+		return saveCursor(ctx, tx, name, cur)
 	}
 }
 

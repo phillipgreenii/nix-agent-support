@@ -223,20 +223,20 @@ func (e *Events) OpEnd(ctx context.Context, o OpEnd) error {
 // the log and the events file (either may be nil). It replaces l.OnWait and
 // l.OnConvert.
 func Attach(l *locks.Layer, log *Log, ev *Events) {
-	l.OnWait = func(w locks.LockWait) {
+	l.OnWait = func(ctx context.Context, w locks.LockWait) {
 		if log != nil {
 			log.LockWait(w)
 		}
 		if ev != nil {
-			_ = ev.LockWait(context.Background(), w)
+			_ = ev.LockWait(ctx, w)
 		}
 	}
-	l.OnConvert = func(c locks.Conversion) {
+	l.OnConvert = func(ctx context.Context, c locks.Conversion) {
 		if log != nil {
 			log.Conversion(c)
 		}
 		if ev != nil {
-			_ = ev.HolderConverted(context.Background(), c)
+			_ = ev.HolderConverted(ctx, c)
 		}
 	}
 }
