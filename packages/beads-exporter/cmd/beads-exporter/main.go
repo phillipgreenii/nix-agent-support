@@ -155,7 +155,8 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 		}
 	}
 	cancel()
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Detach from ctx: it is already cancelled here, and the drain needs its own budget.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	if err := joinLoops(done, []string{"main", "throughput", "stranded"}, joinTimeout, log); err != nil {
