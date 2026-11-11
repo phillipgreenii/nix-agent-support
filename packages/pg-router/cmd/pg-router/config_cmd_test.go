@@ -112,13 +112,13 @@ func TestRoute_configShowJSON(t *testing.T) {
 // config --show no longer reports gate files (bead pg2-h63eu): gates are live
 // state in the running core, not configuration. It says where to look instead,
 // and the --json report carries no gates object.
-func TestRenderConfigShow_pointsAtTheGateRegistryInsteadOfGateFiles(t *testing.T) {
+func TestRenderConfigShow_pointsAtStatusInsteadOfGateFiles(t *testing.T) {
 	cfg := config.Default()
 	var b bytes.Buffer
 	renderConfigShow(&b, cfg)
 	out := b.String()
-	if !strings.Contains(out, "pg-router gate list") {
-		t.Errorf("config --show should point at 'pg-router gate list'; got:\n%s", out)
+	if !strings.Contains(out, "see 'pg-router status'") {
+		t.Errorf("config --show should point at 'pg-router status' for live level state; got:\n%s", out)
 	}
 	for _, gone := range []string{"operator-paused", "cicd-down", "disk-space-low"} {
 		if strings.Contains(out, gone) {

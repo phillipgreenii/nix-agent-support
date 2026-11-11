@@ -132,7 +132,7 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 		}
 	}
 	renderLevelsShow(w, cfg)
-	_, _ = fmt.Fprintln(w, "gates: live state, not configuration — see 'pg-router gate list' (Gate Registry)")
+	_, _ = fmt.Fprintln(w, "levels: live state, not configuration — see 'pg-router status'")
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
 	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)
 	_, _ = fmt.Fprintf(w, "  allowed-tools:   %s\n", cfg.AllowedTools)

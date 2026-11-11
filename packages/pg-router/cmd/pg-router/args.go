@@ -199,8 +199,8 @@ internal/config's package doc and 'config --print-defaults's header. The XDG-glo
 [pool].budget only, beneath the repo-local file and above env; it sets nothing else.
 
 REMOVED: PG_ROUTER_OPERATOR_PAUSED, PG_ROUTER_CICD_DOWN, PG_ROUTER_DISK_SPACE_LOW and their
-*_DISABLE override files (the file-backed gates; gates are now generic records in the event
-log, set with 'gate set'/'pause' and cleared with 'gate clear'/'resume' — see MIGRATION.md),
+*_DISABLE override files (the file-backed gates; the router pause is now the PAUSED level of the
+router resource, set with 'pause' and cleared with 'resume'),
 PG_ROUTER_MAX_WORKER, PG_ROUTER_MAX_FEEDBACK, PG_ROUTER_FEEDBACK_ENABLED,
 PG_ROUTER_WORKER_ENABLED, PG_ROUTER_SKILL_MD, PG_ROUTER_WORKER_SKILL_MD. Set
 role.enabled / the role's prompt in config.toml instead; the former per-role
