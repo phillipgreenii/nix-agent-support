@@ -415,6 +415,10 @@
           pg-keep-awake = final.callPackage ./packages/pg-keep-awake {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-git-lander: Pattern A (ADR 0008), the lock-safe rebase and land tool.
+          pg-git-lander = final.callPackage ./packages/pg-git-lander {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-review: Pattern A (ADR 0008), the self-review tool's CLI; every
           # directory under cmd/ is built, so later binaries need no flake edit.
           pg-review = final.callPackage ./packages/pg-review {
@@ -7174,6 +7178,77 @@
                 gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
                 testFlags = [ "-v" ];
               };
+
+              # pg-git-lander - whole-module Go test gate (unit tier). Pattern A, flat
+              # src. Never compiles the `integration` build tag.
+              pg-git-lander-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-git-lander-go-tests";
+                src = lib.cleanSource ./packages/pg-git-lander; # matches default.nix
+                gomod2nixToml = ./packages/pg-git-lander/gomod2nix.toml;
+              };
+
+              # pg-git-lander INTEGRATION tier. ON DEMAND ONLY (same shape as
+              # pg-connector-integration-tests): it MUST NOT be wired into any hook,
+              # run-unit-tests, pre-land or land gate. Runs exactly the tests in files
+              # tagged `//go:build integration` (tagged list minus untagged list). The
+              # tier is empty at first and MUST pass empty; unlike the connector's
+              # check it does not fail when no file carries the tag (the harness packet
+              # tightens that later).
+              pg-git-lander-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-git-lander-integration-tests";
+                  src = ./packages/pg-git-lander;
+                  gomod2nixToml = ./packages/pg-git-lander/gomod2nix.toml;
+                  testDeps = [
+                    pkgs.bash
+                    pkgs.git
+                  ];
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/integration.log"
+                      : > "$log"
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -r -n1 dirname | sort -u || true)
+                      if [ -z "$pkgs" ]; then
+                        echo "pg-git-lander-integration-tests: the integration tier is empty; nothing to run"
+                      fi
+                      total=0
+                      for dir in $pkgs; do
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                        if [ -z "$names" ]; then
+                          echo "pg-git-lander-integration-tests: $dir lists no integration-only tests" >&2
+                          exit 1
+                        fi
+                        regex="^($(echo "$names" | paste -sd'|' -))\$"
+                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                        if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                          cat "$log"
+                          echo "pg-git-lander-integration-tests: $dir FAILED" >&2
+                          exit 1
+                        fi
+                        for t in $names; do
+                          if ! grep -q -- "^--- PASS: $t " "$log"; then
+                            cat "$log"
+                            echo "pg-git-lander-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                            exit 1
+                          fi
+                        done
+                        total=$((total + $(echo "$names" | wc -l)))
+                      done
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        cat "$log"
+                        echo "pg-git-lander-integration-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-git-lander-integration-tests: $total integration tests passed"
+                      runHook postBuild
+                    '';
+                  });
 
               # pg-review - whole-module Go test gate (unit tier). Pattern A, flat src.
               pg-review-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
@@ -19677,6 +19752,7 @@
               pg-rescue
               pg-task-focus
               pg-keep-awake
+              pg-git-lander
               pg-review
               pg-review-router-adapter
               pg-probe
