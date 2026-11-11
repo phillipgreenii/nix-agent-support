@@ -34,15 +34,16 @@ func (d *Daemon) refreshStatus() error {
 	d.statusRefreshMu.Lock()
 	defer d.statusRefreshMu.Unlock()
 	now := d.clock.Now()
+	// The stage rows first: the coverage pass below reuses them from the cache.
+	rows, err := d.loadStages()
+	if err != nil {
+		return err
+	}
 	cov, err := d.computeCoverageModeCtx(d.rootCtx(), "summary", false, statLazy)
 	if err != nil {
 		return err
 	}
 	snap := &statusSnap{cov: cov, stageCounts: map[string]int{}, at: now, statExceptions: int(d.statExceptions.Load())}
-	rows, err := d.st.Stages()
-	if err != nil {
-		return err
-	}
 	for _, r := range rows {
 		snap.stageCounts[r.Stage]++
 		if r.Stage == store.StageHeld {

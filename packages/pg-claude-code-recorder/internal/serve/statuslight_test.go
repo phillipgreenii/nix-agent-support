@@ -42,12 +42,12 @@ func countStat(d *Daemon) *atomic.Int64 {
 //     3 fresh, 1 touched outside status.fresh), and seedFiles numbers files from
 //     100001.
 //   - What the assertions need: "Lstat the exceptions only" is 5 calls (then 10
-//     after the second refresh) and "re-read nothing" is at most 3 statements.
+//     after the second refresh) and "re-read nothing" is 0 statements.
 //     A regression that stats every file makes at least N calls, so N only has
 //     to be far enough above 5 that the two cannot be confused: 100 is 20x the 5
 //     calls. A regression that re-reads the file table adds a fixed couple of
-//     statements (statusRows runs two whole-table queries), which the "at most
-//     3" bound catches at any N, so only the Lstat count scales with N. The
+//     statements (statusRows runs two whole-table queries), which the "0
+//     statements" bound catches at any N, so only the Lstat count scales with N. The
 //     lazy path (computeCoverageFrom and statusRows, both in ops.go) loops once
 //     per cached row with no batch or chunk size, so N has no threshold effect
 //     and a larger N tests nothing more.
@@ -110,8 +110,8 @@ func TestStatusRefreshStatsOnlyTheExceptions(t *testing.T) {
 	if got := stats.Load(); got != 10 {
 		t.Fatalf("second refresh: %d Lstat calls in all, want 10", got)
 	}
-	if q := c.Queries(); q > 3 { // the stage rows only (one per read of them)
-		t.Fatalf("second refresh issued %d statements; the file tables were re-read", q)
+	if q := c.Queries(); q != 0 { // the file, path and stage tables are all cached
+		t.Fatalf("second refresh issued %d statements; the tables were re-read", q)
 	}
 }
 

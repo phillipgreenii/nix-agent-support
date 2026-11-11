@@ -79,24 +79,66 @@ func (d *Daemon) computeCoverageModeCtx(ctx context.Context, view string, withSu
 	return cov, err
 }
 
-// statusRows returns the file rows and current paths, rebuilt only when the
-// store's commit counter moved.
+// statusRows returns the file rows and current paths. The file rows are rebuilt
+// when the store's commit counter moved; the paths, which change only with a
+// path, path-close or tombstone record, are rebuilt only when the path counter
+// (or the rollback epoch) moved, so the steady stream of copy commits re-reads
+// one table, not two.
 func (d *Daemon) statusRows(rd *store.Reader, seq uint64) ([]store.File, map[int64][]string, error) {
+	// Read before the queries: a commit in between leaves the cache one step
+	// behind, never ahead.
+	pseq, epoch := d.st.PathSeq(), d.st.RollbackEpoch()
 	d.rowsMu.Lock()
 	defer d.rowsMu.Unlock()
-	if d.rowsOK && d.rowsSeq == seq {
+	if d.rowsOK && d.rowsSeq == seq && d.pathsOK && d.pathsSeq == pseq && d.pathsEpoch == epoch {
 		return d.rowsFiles, d.rowsPaths, nil
 	}
-	files, err := rd.AllFiles()
-	if err != nil {
-		return nil, nil, err
+	if !d.rowsOK || d.rowsSeq != seq {
+		files, err := rd.AllFiles()
+		if err != nil {
+			return nil, nil, err
+		}
+		d.rowsFiles, d.rowsSeq, d.rowsOK = files, seq, true
 	}
-	paths, err := rd.AllCurrentPaths()
-	if err != nil {
-		return nil, nil, err
+	if !d.pathsOK || d.pathsSeq != pseq || d.pathsEpoch != epoch {
+		paths, err := rd.AllCurrentPaths()
+		if err != nil {
+			return nil, nil, err
+		}
+		d.rowsPaths, d.pathsSeq, d.pathsEpoch, d.pathsOK = paths, pseq, epoch, true
 	}
-	d.rowsFiles, d.rowsPaths, d.rowsSeq, d.rowsOK = files, paths, seq, true
-	return files, paths, nil
+	return d.rowsFiles, d.rowsPaths, nil
+}
+
+// loadStages returns the stage rows, re-reading them only when the store's
+// lifecycle model input counter moved. The counter is read before the query, so
+// a commit in between leaves the cache one step behind, never ahead.
+func (d *Daemon) loadStages() ([]store.StageRow, error) {
+	mseq := d.st.ModelInputSeq()
+	d.stagesMu.Lock()
+	defer d.stagesMu.Unlock()
+	if d.stagesOK && d.stagesSeq == mseq {
+		return d.stages, nil
+	}
+	rows, err := d.st.Stages()
+	if err != nil {
+		return nil, err
+	}
+	d.stages, d.stagesSeq, d.stagesOK = rows, mseq, true
+	return rows, nil
+}
+
+// cachedStages returns the cached stage rows when they are current (the status
+// loop filled them just before). A miss reads nothing, so the caller reads under
+// its own snapshot.
+func (d *Daemon) cachedStages() ([]store.StageRow, bool) {
+	mseq := d.st.ModelInputSeq()
+	d.stagesMu.Lock()
+	defer d.stagesMu.Unlock()
+	if d.stagesOK && d.stagesSeq == mseq {
+		return d.stages, true
+	}
+	return nil, false
 }
 
 // computeCoverageFrom computes the figures over rd. rd's statements run under
@@ -218,7 +260,16 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 		cov.UnparsedKinds = append(cov.UnparsedKinds, wire.UnparsedKind{Kind: k, Files: n})
 	}
 	sort.Slice(cov.UnparsedKinds, func(i, j int) bool { return cov.UnparsedKinds[i].Kind < cov.UnparsedKinds[j].Kind })
-	if rows, err := rd.Stages(); err == nil {
+	var rows []store.StageRow
+	cached := false
+	if mode == statLazy {
+		rows, cached = d.cachedStages()
+	}
+	var serr error
+	if !cached {
+		rows, serr = rd.Stages()
+	}
+	if serr == nil {
 		for _, r := range rows {
 			switch r.Stage {
 			case store.StageHeld:

@@ -200,6 +200,17 @@ type Daemon struct {
 	rowsSeq   uint64
 	rowsFiles []store.File
 	rowsPaths map[int64][]string
+	// pathsOK, pathsSeq and pathsEpoch say the cached rowsPaths are still the
+	// current paths: valid for the store's path counter and rollback epoch.
+	pathsOK    bool
+	pathsSeq   uint64
+	pathsEpoch uint64
+	// stages is the cached conv_stage table, valid for the store's lifecycle
+	// model input counter stagesSeq (guarded by stagesMu).
+	stagesMu  sync.Mutex
+	stagesOK  bool
+	stagesSeq uint64
+	stages    []store.StageRow
 	// statExceptions is how many files the last status pass Lstat'ed;
 	// lastFullStatNS is when the last coverage run or watcher sweep finished.
 	statExceptions atomic.Int64

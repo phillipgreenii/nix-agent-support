@@ -209,6 +209,7 @@ type Store struct {
 	onContended func()
 	rbEpoch     atomic.Uint64
 	commitSeq   atomic.Uint64 // journal applies committed (see CommitSeq)
+	pathSeq     atomic.Uint64 // journal applies that may have changed the path rows (see PathSeq)
 	liveSeq     atomic.Uint64 // commits that may have changed the live-Process inputs (see LiveInputSeq)
 	livePend    atomic.Bool   // a write in flight stored a live-Process input (see NoteLiveInput)
 	modelSeq    atomic.Uint64 // commits that may have changed the lifecycle model inputs (see ModelInputSeq)
@@ -744,6 +745,12 @@ func (s *Store) Epoch() int { return int(s.metaInt("epoch")) }
 // rebuilds only when it moved. It issues no query.
 func (s *Store) CommitSeq() uint64 { return s.commitSeq.Load() }
 
+// PathSeq counts the journal applies committed by this process that held a
+// record able to change the paths table (a path, a path close or a tombstone).
+// A reader that cached the current paths rebuilds only when it moved; it follows
+// the read-before-query rule of LiveInputSeq and issues no query.
+func (s *Store) PathSeq() uint64 { return s.pathSeq.Load() }
+
 // LiveInputSeq counts the commits that may have changed what decides which
 // Conversations hold a live Process: a session-registry record (a WithWrite or
 // bulk-batch commit that followed NoteLiveInput) and a journal apply holding a
@@ -1162,14 +1169,19 @@ func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
 	}
 	s.lastSeq = last
 	s.commitSeq.Add(1)
-	var proc, model bool
+	var proc, model, paths bool
 	for _, r := range recs {
 		switch r.T {
+		case TPath, TPathClose, TTomb:
+			paths = true
 		case TProc:
 			proc = true
 		case TStage, TSettle, TTorn:
 			model = true
 		}
+	}
+	if paths {
+		s.pathSeq.Add(1)
 	}
 	if proc {
 		s.liveSeq.Add(1)
