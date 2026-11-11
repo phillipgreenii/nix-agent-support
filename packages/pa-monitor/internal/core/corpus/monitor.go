@@ -129,8 +129,10 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 		return nil, err
 	}
 	recordScan(m.rec, "feed", time.Since(foldStart), int64(m.rd.linesFolded))
-	if foldErr != nil || m.rd.dirtyFiles() > 0 {
-		log.Printf("pa-monitor: fold incomplete: %d files still dirty: %v", m.rd.dirtyFiles(), foldErr)
+	dirty := m.rd.dirtyFiles()
+	recordDirtyFiles(m.rec, dirty)
+	if foldErr != nil || dirty > 0 {
+		log.Printf("pa-monitor: fold incomplete: %d files still dirty: %v", dirty, foldErr)
 	}
 
 	keep := map[string]bool{} // files still wanted (by ref)

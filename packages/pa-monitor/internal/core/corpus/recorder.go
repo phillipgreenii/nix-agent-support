@@ -10,6 +10,9 @@ import "time"
 type Recorder interface {
 	RecordScan(mode string, d time.Duration, bytes int64)
 	RecordPhase(phase string, d time.Duration)
+	// RecordScanDirtyFiles reports how many files are still dirty (waiting for
+	// a read) after a Scan fold; 0 means the fold is complete.
+	RecordScanDirtyFiles(n int)
 }
 
 func recordScan(rec Recorder, mode string, d time.Duration, bytes int64) {
@@ -21,5 +24,11 @@ func recordScan(rec Recorder, mode string, d time.Duration, bytes int64) {
 func recordPhase(rec Recorder, phase string, d time.Duration) {
 	if rec != nil {
 		rec.RecordPhase(phase, d)
+	}
+}
+
+func recordDirtyFiles(rec Recorder, n int) {
+	if rec != nil {
+		rec.RecordScanDirtyFiles(n)
 	}
 }

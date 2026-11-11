@@ -149,6 +149,10 @@ type Emitter struct {
 	// scan (0 = none since daemon start); scanLastSuccessKnown flips on the first push.
 	scanLastSuccess      int64
 	scanLastSuccessKnown bool
+	// scanDirtyFiles is the number of files still dirty after the last corpus
+	// scan fold; scanDirtyFilesKnown flips on the first push.
+	scanDirtyFiles      int64
+	scanDirtyFilesKnown bool
 	// autoResumeEnabledVal / autoResumeEnabledAttrs / autoResumeEnabledKnown
 	// mirror the caffeinate triplet for the pa_monitor.auto_resume.enabled
 	// gauge.
@@ -333,6 +337,14 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	// Files still dirty (unread) after the last corpus scan fold; non-zero means
+	// the cost totals may be undercounted. Prometheus name:
+	// pa_monitor_scan_dirty_files.
+	scanDirtyFilesGauge, err := meter.Int64ObservableGauge("pa_monitor.scan.dirty_files",
+		metric.WithUnit("{file}"), metric.WithDescription("transcript files still dirty (unread) after the last corpus scan fold"))
+	if err != nil {
+		return err
+	}
 	// Per-session gauges. Cardinality contract: session_id is unbounded
 	// over the lifetime of the daemon (every started session is a new id),
 	// so the producer (RecordSessionInfo) MUST cap which sessions it
@@ -463,6 +475,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		caffGrace := e.caffeinateGraceVal
 		keeperVal, keeperAttrs, keeperKnown := e.keeperUpVal, e.keeperUpAttrs, e.keeperUpKnown
 		scanTS, scanKnown := e.scanLastSuccess, e.scanLastSuccessKnown
+		dirtyFiles, dirtyKnown := e.scanDirtyFiles, e.scanDirtyFilesKnown
 		autoVal, autoAttrs, autoKnown := e.autoResumeEnabledVal, e.autoResumeEnabledAttrs, e.autoResumeEnabledKnown
 		blockCost, blockAttrs, blockKnown := e.blockCostUSD, e.blockCostAttrs, e.blockCostKnown
 		weekCost, weekAttrs, weekKnown := e.weekCostUSD, e.weekCostAttrs, e.weekCostKnown
@@ -484,6 +497,9 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 		}
 		if scanKnown {
 			o.ObserveInt64(scanLastSuccessGauge, scanTS)
+		}
+		if dirtyKnown {
+			o.ObserveInt64(scanDirtyFilesGauge, dirtyFiles)
 		}
 		if autoKnown {
 			o.ObserveInt64(autoResumeGauge, autoVal, metric.WithAttributes(autoAttrs...))
@@ -535,7 +551,7 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 			o.ObserveInt64(weekUsageResetsGauge, weekUsageResetsAt, metric.WithAttributes(weekUsageAttrs...))
 		}
 		return nil
-	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, keeperUpGauge, scanLastSuccessGauge, sessionsErroredGauge,
+	}, sessionsGauge, caffGauge, caffGraceGauge, autoResumeGauge, keeperUpGauge, scanLastSuccessGauge, scanDirtyFilesGauge, sessionsErroredGauge,
 		nudgeDeferredGauge,
 		blockCostGauge, weekCostGauge,
 		sessionInfoGauge, sessionTokensGauge, sessionCostGauge,
@@ -692,6 +708,19 @@ func (e *Emitter) RecordScanLastSuccess(epochSeconds int64) {
 	e.mu.Lock()
 	e.scanLastSuccess = epochSeconds
 	e.scanLastSuccessKnown = true
+	e.mu.Unlock()
+}
+
+// RecordScanDirtyFiles sets the pa_monitor.scan.dirty_files gauge (files still
+// dirty after the last corpus scan fold; 0 = fold complete). nil-safe; observed
+// only after the first push.
+func (e *Emitter) RecordScanDirtyFiles(n int) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.scanDirtyFiles = int64(n)
+	e.scanDirtyFilesKnown = true
 	e.mu.Unlock()
 }
 

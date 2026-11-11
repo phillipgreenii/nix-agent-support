@@ -205,3 +205,23 @@ func TestScanLastSuccessGauge(t *testing.T) {
 		t.Errorf("value = %d, want 1782958200", v)
 	}
 }
+
+// TestScanDirtyFilesGauge: the gauge is absent until the first push, then
+// reports the latest count, including a return to 0.
+func TestScanDirtyFilesGauge(t *testing.T) {
+	e, reader := newTestEmitter(t)
+	const name = "pa_monitor.scan.dirty_files"
+	if _, ok := collectMetric(t, reader, name); ok {
+		t.Fatal("gauge emitted before the first push")
+	}
+	for _, want := range []int64{3, 0} {
+		e.RecordScanDirtyFiles(int(want))
+		m, ok := collectMetric(t, reader, name)
+		if !ok {
+			t.Fatalf("gauge not emitted after RecordScanDirtyFiles(%d)", want)
+		}
+		if v := m.Data.(metricdata.Gauge[int64]).DataPoints[0].Value; v != want {
+			t.Errorf("value = %d, want %d", v, want)
+		}
+	}
+}

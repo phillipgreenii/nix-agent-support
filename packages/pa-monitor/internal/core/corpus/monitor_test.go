@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -277,5 +278,30 @@ func TestNoCodeOpensAClaudeFile(t *testing.T) {
 				t.Errorf("%s calls %s: the corpus must read through the recorder", e.Name(), call)
 			}
 		}
+	}
+}
+
+type dirtyRec struct{ dirty []int }
+
+func (*dirtyRec) RecordScan(string, time.Duration, int64) {}
+func (*dirtyRec) RecordPhase(string, time.Duration)       {}
+func (d *dirtyRec) RecordScanDirtyFiles(n int)            { d.dirty = append(d.dirty, n) }
+
+// Each Scan reports how many files are still dirty after its fold: the files a
+// failed read left dirty, then 0 once a healthy scan converges.
+func TestScan_ReportsDirtyFilesAfterEachFold(t *testing.T) {
+	r := newRig(t)
+	rec := &dirtyRec{}
+	r.m.SetPhaseRecorder(rec)
+	r.env.Register(111, "s1", cwd, "", true)
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "hello"))
+	r.scan(t) // bootstrap
+	r.env.Add(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", time.Second, "more"))
+	r.m.rd.readGate = func(*fileState) error { return context.DeadlineExceeded }
+	r.scan(t)
+	r.m.rd.readGate = nil
+	r.scan(t)
+	if len(rec.dirty) != 3 || rec.dirty[0] != 0 || rec.dirty[1] < 1 || rec.dirty[2] != 0 {
+		t.Fatalf("dirty counts per scan = %v, want [0 >=1 0]", rec.dirty)
 	}
 }

@@ -304,6 +304,10 @@ The daemon emits:
   `pa-monitor-scan-stale`, registered with the router probe) fires when
   `time() - max(pa_monitor_scan_last_success_timestamp) > 900` for 5m (`noDataState: OK`).
   Check: `test-pa-monitor-alert-rules`.
+- **`pa_monitor.scan.dirty_files`** (Prometheus `pa_monitor_scan_dirty_files`) — gauge, the number of
+  transcript files still waiting for a read after each scan's fold. Non-zero means a recorder read
+  failed or timed out and the cost totals may be undercounted until a later scan converges; 0 means
+  the fold is complete. Absent until the first scan.
 
 The cmux-bridge and TUI additionally emit:
 

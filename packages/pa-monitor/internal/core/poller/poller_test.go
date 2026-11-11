@@ -125,6 +125,7 @@ func newFakeRec() *fakeRec {
 func (f *fakeRec) RecordPhase(p string, _ time.Duration)         { f.phases[p]++ }
 func (f *fakeRec) RecordScan(m string, _ time.Duration, _ int64) { f.scans[m]++ }
 func (f *fakeRec) RecordSubprocess(k string, _ time.Duration)    { f.spawns[k]++ }
+func (f *fakeRec) RecordScanDirtyFiles(int)                      {}
 
 // newTestPoller builds a Poller over the shared fixture SessionsDir/ClaudeHome
 // (>=1 discoverable session with a resolvable transcript), matching the
