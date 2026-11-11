@@ -316,6 +316,43 @@ The test is whether a measurement exists, not whether the word "estimate" appear
 0 < f <= 1 because the formula divides by zero at f = 0; E-4 covers f = 0 or unknown. "Unstarted"
 is defined as "no measurable progress yet" so a claimed bead with no commits is not misread.
 
+## Asking The Operator (AQ-1..AQ-10)
+
+Problem (operator, Phillip, 2026-11-11): when an agent needed the operator to answer, decide or
+act, the ask was often condensed and relied on context the operator did not have at hand (bead,
+Jira and PR ids, rule ids, earlier turns), so the operator had to ask for context before answering.
+A recurring case: a bead carries a short question, which is enough for an agent that reads the
+whole bead, and the agent relays that question to the operator verbatim. The operator does not want
+the context duplicated into the bead, so AQ-3 makes the agent compose it at ask time and forbids
+copying it back.
+
+Placement decisions (operator, 2026-11-11):
+
+- In-session only. Asks recorded in beads are left as they are; the relay into the session is the
+  failure point.
+- Inline in this file. A sibling file cannot be conditionally loaded on "about to ask the operator":
+  `paths:` scoping triggers only on a matching file Read, and a pointer to a file fails the same way
+  a skill does (the agent must first recognize the moment).
+- No skill references these rules ("the skills should be agnostic to my specific rules"), so AQ-9
+  covers skill-instructed asks from the rule side.
+- AQ-10 records an earlier ruling (operator, 2026-10-29): "just print the context/question and let
+  me respond. the problem with using the question tool is that when it times out, i can't see it."
+
+Validation before landing: an independent review of the first draft (it moved the exemption from
+"type of question" to "context the operator already has", added "a relayed question is never
+exempt", and replaced a "scale to the stakes" clause that loosened nothing), then a two-round spike.
+Sonnet subagents wrote the reply they would send in each scenario, with and without the rule, and a
+blind Sonnet judge scored each reply from the operator's seat (answerable, context, options,
+proportion, accuracy; 1 to 5 each). Round 1 (6 scenarios, including two controls where the rule
+must not fire): the rule spelled out rule ids and added the missing recommendations and stayed
+quiet on the controls, but lost on proportion in every ask, because agents turned AQ-2's elements
+into headings and padded options with "do nothing". The wording that is now AQ-2's last sentence,
+AQ-4's defer clause and AQ-8 answered that. Round 2 (5 ask scenarios against the same baseline
+replies): the rule scored 112 against 105 (sum of per-scenario totals) and was preferred in 3 of 5,
+with proportion 21 against 19; the judge's own noise was about one point per reply. Neither round
+reproduced a bare relay, because an isolated single-task subagent expands context anyway, so AQ-3
+is untested by the spike: a real transcript showing a bare relay is the test case for tightening it.
+
 ## Beads / Dolt no-autostart
 
 See ADR 0032 (`docs/adr/0032-beads-dolt-no-autostart.md`). The runtime text keeps three bullets:

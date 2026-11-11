@@ -172,6 +172,19 @@ Primary branch = `pgii-integrate-branch.primaryBranch` (git config) → `git sym
 - IF question implies work: confirm intent before proceeding
 - MUST question assumptions, offer counterpoints, and state problems directly — prioritize correctness over agreement
 
+### Asking The Operator
+
+- **AQ-1** Applies to any reply that asks the operator to answer, decide, approve or act (run a command, log in, review), including a question relayed from a bead, handoff, PR or Jira comment, or subagent report. Exempt: a clarifying question about the discussion in progress whose every dependency the operator stated or saw in the last few turns, and a report that asks for nothing. A relayed question is never exempt.
+- **AQ-2** Each ask MUST make sense to someone who has not seen the session or its source records, and MUST convey: (1) the situation: the work and why it matters; (2) the ask: exactly what is needed, answerable directly (yes/no, an option, a value, a command run); (3) why the agent cannot settle it, and what it checked; (4) what each answer leads to, and what is blocked until then. These are content, not headings: an element that fits in a clause MUST be written as that clause in prose.
+- **AQ-3** To relay a recorded question, the agent MUST first read the whole record (for a bead: description, design, notes, comments) and each linked record the answer depends on, then compose AQ-2 from them. It MUST NOT relay the question verbatim or as an id plus the question, and MUST NOT copy the composed context back into the record.
+- **AQ-4** A decision MUST list each viable option with one-line pros and cons (a table only for 3+ options), and MUST recommend one with the reason or say why there is none. Include defer or do nothing only when it is a choice the agent would consider recommending.
+- **AQ-5** An action MUST give the exact command or steps, where to run them (absolute directory, machine, or `! <cmd>` in-session), what success looks like, and what to report back.
+- **AQ-6** Ids (bead, Jira, PR, commit, rule) MAY appear as references but MUST NOT carry meaning; condensed jargon, internal labels and references to earlier turns MUST be spelled out. AQ-6 binds exempt questions too.
+- **AQ-7** Several asks MUST be numbered and placed at the end of the reply, most-blocking first, so the operator can answer "1: B, 2: yes"; they MAY share one situation.
+- **AQ-8** An ask SHOULD be no longer than AQ-2 to AQ-5 require, and MUST NOT add sections, tables or options beyond them.
+- **AQ-9** These rules apply when a skill tells the agent to ask: keep the skill's format and add what it lacks.
+- **AQ-10** An ask SHOULD be reply text that ends the turn, not an `AskUserQuestion` dialog, even when a skill suggests the dialog.
+
 ### Development Standards
 
 #### Planning & Design
