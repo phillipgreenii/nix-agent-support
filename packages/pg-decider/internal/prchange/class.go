@@ -154,6 +154,41 @@ func oneLine(s string, max int) string {
 	return s
 }
 
+var reasonField = regexp.MustCompile(`"reason"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+
+// Bounds of a failure detail: the leading text, then at most maxReasons source
+// reasons of at most maxReasonRunes each.
+const (
+	detailRunes    = 300
+	maxReasons     = 4
+	maxReasonRunes = 200
+)
+
+// boundedDetail folds detail to one bounded line. A long connector answer
+// (a JSON envelope of per-source rows) would be cut before its rows' reasons, so
+// the reasons found past the cut are appended after it.
+func boundedDetail(detail string) string {
+	line := oneLine(detail, detailRunes)
+	folded := strings.Join(strings.Fields(detail), " ")
+	if len([]rune(folded)) <= detailRunes {
+		return line
+	}
+	var reasons []string
+	for _, m := range reasonField.FindAllStringSubmatch(folded, -1) {
+		if m[1] == "" || strings.Contains(line, m[1]) {
+			continue
+		}
+		if len(reasons) == maxReasons {
+			break
+		}
+		reasons = append(reasons, oneLine(m[1], maxReasonRunes))
+	}
+	if len(reasons) == 0 {
+		return line
+	}
+	return line + " [source reasons: " + strings.Join(reasons, "; ") + "]"
+}
+
 // failureLine renders the single stderr line of a failure:
 //
 //	pg-pr-change: <what> (stage=<stage>, class=<class>): <detail>: run <next command>
@@ -162,7 +197,7 @@ func oneLine(s string, max int) string {
 // detail; a non-retryable one has upstream text scrubbed of every router
 // retry word. The line always ends with the next command to run.
 func failureLine(spec FailureSpec, what, detail, next string) string {
-	detail = oneLine(detail, 300)
+	detail = boundedDetail(detail)
 	if spec.Retryable {
 		detail = retryWord + ", the router re-runs this delivery: " + detail
 	} else {
