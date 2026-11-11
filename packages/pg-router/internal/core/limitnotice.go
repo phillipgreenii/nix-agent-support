@@ -11,7 +11,7 @@ import (
 // the status reply's `queueLog` object, so the two surfaces cannot drift into two
 // different accounts of what is halted and what still runs.
 //
-// The soft step is NOT a gate, so nothing else (no gate list, no PAUSED banner)
+// The soft step is NOT a level, so nothing else (no level list, no PAUSED banner)
 // tells the operator it is in force — this text is its whole surface, and it MUST
 // say plainly what is HALTED, what still RUNS, why, and what to do.
 

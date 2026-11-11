@@ -31,8 +31,8 @@ shared agent `org.nixos.beads-dolt-server` is booted out. That server looks exac
 the rogue this skill hunts, and following the playbook (enumerate, then `pkill` or
 `bootout`) would kill the migration mid-run and risk the data.
 
-- Before any destructive step, run `pg-router gate list`. If a `BEAD_SERVER_DOWN` gate is
-  set, a migration window is open: STOP, do not start, stop, or restart any dolt server,
+- Before any destructive step, run `pg-router level list`. If any `beads_<tracker>` resource reads
+  `DOWN`, a migration window is open: STOP, do not start, stop, or restart any dolt server,
   and tell the operator.
 - A dolt server on port 25253 (any port other than 25252) started with a `--config`
   outside the data dir during a window is the operator's migrator, not a rogue.

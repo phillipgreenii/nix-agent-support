@@ -23,6 +23,6 @@ safety before killing anything.
 schema migrations" (reads still work) means the shared database awaits an operator-run
 `bd migrate schema`. Do not start or restart dolt and do not run the rogue-hunting
 playbook; stop and tell the operator. During a migration window a second dolt server on
-port 25253 is the operator's migrator, not a rogue (check `pg-router gate list` for
-`BEAD_SERVER_DOWN` first). Runbook: `docs/beads-1-3-1-schema-migration.md` in the
+port 25253 is the operator's migrator, not a rogue (check `pg-router level list` for a
+`beads_<tracker>` resource at `DOWN` first). Runbook: `docs/beads-1-3-1-schema-migration.md` in the
 `phillipg-nix-ziprecruiter` repo.

@@ -39,7 +39,7 @@ import (
 //
 // The soft halt and the hard rejection are RE-DERIVED from the log size every tick
 // (EnforceLogLimits / LimitStatus); nothing about them is persisted, so a restart
-// re-evaluates them after startup compaction and a gate clear / resume --all cannot
+// re-evaluates them after startup compaction and a level clear / resume --all cannot
 // affect them.
 
 // Reject reasons: the fixed, documented prefixes of a rejected event's reason

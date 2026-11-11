@@ -150,7 +150,7 @@ This is INGEST recovery (a row that could not be hydrated), not decider recovery
   alert is right. The expression `max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) or
 (vector(0) and on() absent(pg_desk_liveness == 1))` answers `0` while `pg_desk_liveness` itself has
   no series (pg-desk down), so the rule stays quiet and `pg-desk-liveness-down` speaks alone. It never
-  fires on an empty table, which reads `0`. It carries no `SYSTEM_PAUSE` guard: an empty result would
+  fires on an empty table, which reads `0`. It carries no router-pause guard: an empty result would
   alert under `noDataState: Alerting`.
 - Its uid is registered with the router probe (`registeredRuleUIDs` in `pg-router-probe`), so a
   firing instance reaches the escalation flow. The rule is modelled in `internal/alertrules` (a model
@@ -191,7 +191,7 @@ The Grafana rules `pg-desk-watched-source-not-observed` (age over `86400` second
 consecutive 5-minute polls for the second), severity `warning`. Both carry `noDataState: Alerting`
 guarded by pg-desk liveness with the same expression tail as `pg-desk-ingest-failed-old`
 (`... or (vector(0) and on() absent(pg_desk_liveness == 1))`), so they are quiet while pg-desk is down and
-alert while pg-desk is up and the series is missing; neither has a `SYSTEM_PAUSE` guard. Each uid is
+alert while pg-desk is up and the series is missing; neither has a router-pause guard. Each uid is
 registered with the router probe, is modelled in `internal/alertrules`, has a promtool case file under
 `grafana/alerting/rule-tests/`, and has its `noDataState` and liveness guard pinned by
 `grafana/check-alert-structure.sh`. The `doctor` report "an entity nothing watches" stays a report, not
@@ -215,7 +215,7 @@ longest an orphan waits under the recommended `hydration.orphan_max_per_poll` ca
 same expression tail as `pg-desk-ingest-failed-old`
 (`max by (backend) (pg_desk_oldest_orphan_read_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))`),
 so it is quiet while pg-desk is down and alerts while pg-desk is up and the series is missing; it has no
-`SYSTEM_PAUSE` guard. Its uid is registered with the router probe, it is modelled in
+router-pause guard. Its uid is registered with the router probe, it is modelled in
 `internal/alertrules`, has a promtool case file under `grafana/alerting/rule-tests/`, and has its
 `noDataState` and liveness guard pinned by `grafana/check-alert-structure.sh`.
 
@@ -244,13 +244,13 @@ mode gauge and every other family are unaffected.
 The Grafana rule `pg-desk-pr-never-hydrated` (`packages/pg-desk/grafana/alerting/alerts.yaml`; warning,
 `for: 30m`, `noDataState: OK`) fires when `pg_desk_pr_unhydrated` is above `0`, OR when that gauge has
 no series while `pg_desk_liveness` is `1` (the store cannot answer). The absence test is in the
-expression, not in `noDataState`. It is suppressed while a pg-router `SYSTEM_PAUSE` gate is active,
+expression, not in `noDataState`. It is suppressed while the pg-router `router` resource is at `PAUSED`,
 with the same guard as `pg-desk-sync-stale`. Its uid is NOT registered with the alert probe yet: it is
 red for a known reason until the backfill has hydrated the migrated PRs, and registering it earlier
 would file a bead for that. The threshold is final (above `0` for `30m`). `internal/alertrules` models
 the expression and pins it to the YAML, a `promtool` rule test exercises its four states (the gauge live
-and absent, live and `0`, `pg-desk` liveness down, and `SYSTEM_PAUSE` set) and replays 2026-10-19, and a
-structure check over the rule file carries plain negative cases (a rule file whose `SYSTEM_PAUSE` guard
+and absent, live and `0`, `pg-desk` liveness down, and the router paused) and replays 2026-10-19, and a
+structure check over the rule file carries plain negative cases (a rule file whose router-pause guard
 was removed, one whose `noDataState` differs, and one whose absence branch was removed each fail).
 
 #### Persisted lane state
@@ -436,8 +436,8 @@ existing `pg-router-failure-rate` rule already watches.
 Eight Grafana rules in `packages/pg-desk/grafana/alerting/alerts.yaml` read OUTCOMES, never "the
 process ran" (the outage of 2026-10-19 read `sync_errors: 0` throughout). Each is a `warning` with
 `noDataState: OK` and `execErrState: Error`; query A is the instant expression below, B reduces it
-with `last`, C is a `gt` threshold. Every rule ends with the `SYSTEM_PAUSE` guard of `pg-desk-sync-stale`,
-so none fires while a pg-router `SYSTEM_PAUSE` gate is active. None of these uids is registered with the
+with `last`, C is a `gt` threshold. Every rule ends with the router-pause guard of `pg-desk-sync-stale`,
+so none fires while the pg-router `router` resource is at `PAUSED`. None of these uids is registered with the
 alert probe yet; registration starts at the start of the first apply period (P6), and until then a
 deferred-registration allowlist names them.
 
@@ -464,7 +464,7 @@ deliveries no run preceded.
 [`annotation-items.md`](annotation-items.md)). The pg-router source alerts catch a failing
 `desk-pr-annotations` query but read an empty `[]` poll as success, so a stuck feed shows only as lag.
 The feed advances its cursor past the rows it scanned, so the lag stays near `0` however many pr rows are
-hydrations. Unlike the outcome rules it is suppressed while a `SYSTEM_PAUSE` gate is active, because the
+hydrations. Unlike the outcome rules it is suppressed while the pg-router `router` resource is at `PAUSED`, because the
 query does not run then and lag grows on purpose. The threshold is provisional.
 
 The two stale-anchor rules read the store's links, not the tracker and not the daemon, and are gated on
@@ -476,7 +476,7 @@ Tests. `grafana/check-alert-rules.sh` wraps query A of each rule as a Prometheus
 cases under `grafana/alerting/rule-tests/` with `promtool test rules`: each new rule has a firing, a
 healthy and an empty-input case, the primary rule its four states and the replay of 2026-10-19, and the
 residual rule a case showing it ignores `mode="plan"` series. `grafana/check-alert-structure.sh` pins
-`noDataState` and the `SYSTEM_PAUSE` guard of every outcome rule with plain negative fixtures (a rule
+`noDataState` and the router-pause guard of every outcome rule with plain negative fixtures (a rule
 file with the guard removed and one with another `noDataState` each fail). A catalog test
 (`internal/httpapi`) asserts that every `pg_desk_` and `pg_decider_` metric a rule names is emitted by a
 real scrape of a schema-2 store and, for the lane-run, decisions and residual series, after a run is
@@ -485,7 +485,7 @@ recorded the way the composed command records it.
 ### PR lane remaining alerts
 
 One more Grafana rule of the same file follows the outcome rules' shape (`noDataState: OK`, query A the
-instant expression below, B reducing with `last`, C a `gt` threshold, the `SYSTEM_PAUSE` guard of
+instant expression below, B reducing with `last`, C a `gt` threshold, the router-pause guard of
 `pg-desk-sync-stale` at the end of every expression) and has a firing, a healthy and an empty-input case
 under `grafana/alerting/rule-tests/`. Its uid is registered with the alert probe as an exempt rule.
 
@@ -517,7 +517,7 @@ no-watched-PRs rule read the connector daemon's metrics and live in the connecto
 - **INV-SERVE-3.** <!-- uuid: 7c3e5a91-2f4b-4d8e-9b06-1a5d7e2c4f38 --> The rule `pg-desk-focus-pending-beads-age` MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on
   `apply` (the lane in `off` or `plan` mode, or the gauge absent), and MUST fire as before once it does.
 - **INV-SERVE-4.** <!-- uuid: 8ab8ae5c-3ef1-41ef-be6d-fed60758d532 --> `pg_desk_pr_open_anchors`, `pg_desk_pr_open_anchors_hidden`, `pg_desk_pr_stale_anchors`, `pg_desk_pr_stale_anchor_oldest_age_seconds` and `pg_desk_pr_open_anchor_oldest_hydration_age_seconds` MUST be derived from the store's links and PR rows, MUST be emitted with a value (`0` when none) whenever the store read succeeds on a store at schema 2, and MUST have no series, never `0`, when the read fails or the store is not at schema 2. A hidden PR MUST be counted only in `pg_desk_pr_open_anchors_hidden`.
-- **INV-SERVE-5.** <!-- uuid: 22ef8d46-9ab4-41fe-add0-fc0a25772a75 --> Every outcome rule of "PR lane outcome alerts" MUST read a metric a rule test can exercise, MUST NOT fire while a pg-router `SYSTEM_PAUSE` gate is active, and MUST have `noDataState: OK`. The residual rule MUST read `mode="apply"` series only, and the two stale-anchor rules MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on `apply`.
+- **INV-SERVE-5.** <!-- uuid: 22ef8d46-9ab4-41fe-add0-fc0a25772a75 --> Every outcome rule of "PR lane outcome alerts" MUST read a metric a rule test can exercise, MUST NOT fire while the pg-router `router` resource is at `PAUSED`, and MUST have `noDataState: OK`. The residual rule MUST read `mode="apply"` series only, and the two stale-anchor rules MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on `apply`.
 - **INV-SERVE-6.** <!-- uuid: 09f2a732-be1b-4cc1-aa2d-cda84cf764ba --> `pg-desk-pr-lane-hard-failure` MUST fire on any increase of `pg_desk_pr_lane_runs_total` for class `unauthenticated` or `decide_failed`, with no `for` hold, including the first event of a series that appears already above `0`.
 - **INV-SERVE-7.** <!-- uuid: 66d3ee48-e0c9-4da4-a2dc-f515dc67258a --> `pg-desk-sweep-bound-violated` and `pg-desk-watch-listing-degraded` MUST read the issue and thread series only; a `pr` series MUST NOT make either fire.
 

@@ -13,7 +13,7 @@
         "source": "pg-router --help: no modeled subcommand reads stdin (ingest-event and self-status, the callbacks that do, are not modeled)"
       },
       "stdout": {
-        "source": "pg-router --help: operator subcommands print text, or JSON with --json; status and gate list report the running core's state (content)"
+        "source": "pg-router --help: operator subcommands print text, or JSON with --json; status and level list report the running core's state (content)"
       },
       "unknownFlag": {
         "source": "pg-router --help: top level takes only [--version | --help]; --socket, --token and the run-scoped selectors belong to subcommands this spec does not model"

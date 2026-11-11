@@ -1,0 +1,62 @@
+# ALR-1 allowlist: files that may still contain a gate name after the gates were
+# replaced by resource levels. One glob per line; blank lines and lines starting
+# with '#' are ignored. Every glob is prefixed by the repository directory name,
+# because the search check reads this one file for all three repositories.
+#
+# The searched names are LOW_DISK_USAGE, BEAD_SERVER_DOWN, SYSTEM_PAUSE,
+# non_blocking_gates, "gate list", "gate set", pg_router_gates_active,
+# pg_router_gate_, disk-watchdog and disk-check-tick (whole-word, and "gate list"
+# not when preceded by "bd ", which is the unrelated bd gate lifecycle).
+#
+# Existing ADRs are never edited, so the ones that quote old names as history are
+# listed individually.
+
+# --- nix-agent-support: superseded design and investigation documents ---
+nix-agent-support/docs/investigations/**
+nix-agent-support/docs/superpowers/**
+nix-agent-support/docs/adr/0077-entity-change-flow.md
+nix-agent-support/docs/adr/0085-daemon-restart-leaves-ccpool-backed-dispatches-running.md
+nix-agent-support/docs/adr/0101-roles-and-queries-get-a-minimal-base-env-and-expand-it-with-wrap-entries.md
+nix-agent-support/docs/adr/0108-an-operator-enabled-unattended-runner-may-publish-within-a-defined-scope.md
+nix-agent-support/docs/adr/0122-pg-router-resources-have-levels-and-requirements-replace-gates.md
+
+# --- nix-agent-support: documents that record the replacement itself ---
+# The old-to-new term mapping and the legacy-gate upgrade note.
+nix-agent-support/packages/pg-router/MIGRATION.md
+# The disposition of the retired gate tests, which names the retired tests.
+nix-agent-support/packages/pg-router/docs/gate-test-disposition.md
+# The allowlist itself.
+nix-agent-support/docs/alr1-allowlist.txt
+
+# --- nix-agent-support: unrelated uses (not converted) ---
+# pb works with the bd gate lifecycle and claude-hook-router with delegate lists.
+nix-agent-support/packages/pb/**
+nix-agent-support/packages/claude-hook-router/**
+
+# --- nix-agent-support: retained test fixtures for legacy gate input ---
+# These feed an old gate record or an old registration key on purpose, to prove
+# that it is dropped at startup or rejected, so they must keep the old names.
+nix-agent-support/packages/pg-router/conformance/driver/driver.go
+nix-agent-support/packages/pg-router/internal/core/admit_test.go
+nix-agent-support/packages/pg-router/internal/config/timer_test.go
+nix-agent-support/packages/pg-router/internal/config/example_test.go
+nix-agent-support/packages/pg-router/internal/eventqueue/levelgate_test.go
+nix-agent-support/packages/pg-router/internal/eventqueue/level_test.go
+nix-agent-support/packages/pg-router/internal/eventqueue/compact_test.go
+nix-agent-support/packages/pg-router/internal/orchestrator/levels_test.go
+nix-agent-support/packages/pg-router/internal/tui/gates_test.go
+nix-agent-support/packages/pg-router/cmd/pg-router/run_metrics_test.go
+nix-agent-support/packages/pg-router/cmd/pg-router/run_compact_test.go
+
+# --- nix-ziprecruiter ---
+nix-ziprecruiter/docs/superpowers/**
+nix-ziprecruiter/docs/investigations/**
+# The conversion golden records the old registrations next to their new requirements.
+nix-ziprecruiter/modules/zm/pg-router/conversion-golden.json
+
+# --- nix-support-apps ---
+nix-support-apps/docs/superpowers/**
+# Prose uses of the words "gate set" that are unrelated to pg-router.
+nix-support-apps/packages/jsonl-log-parser/**
+nix-support-apps/packages/host-activity/**
+nix-support-apps/darwin/modules/observability/host-activity*

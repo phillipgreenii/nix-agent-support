@@ -1,6 +1,6 @@
 // Package tui implements pg-router's operator-facing terminal UI. This file
 // (Task 4.6) carries the pinned TOP zone: either the header (core identity,
-// version pair, gates summary) or the PAUSED banner, mutually exclusive
+// version pair, levels summary) or the PAUSED banner, mutually exclusive
 // [design: Task 4.6 Files (banner.go); Binding decisions 6]. This is where
 // the sibling register-tracking bead pg2-gkpjz's "Phase 4: banner
 // rendering" stage lands.
@@ -114,7 +114,7 @@ func blockingResources(paused []PausedRole) []string {
 
 // dispatchSummary renders the additive dispatch: { busy, total } field
 // (Task 6.5) as a short "busy B/T" token, fitting alongside the existing
-// gate/banner line in every tier -- the real fan-out ratio
+// level/banner line in every tier -- the real fan-out ratio
 // (Queue.SessionsInFlight() over the active listener count), never to be
 // confused with the pinned banner's own "N in flight" reading above (that
 // one reads Deliveries; this one reads the new dispatch object) [design:
@@ -144,7 +144,7 @@ func renderPausedBanner(text string, width int, theme render.Theme) string {
 }
 
 // renderHeader composes the non-paused header: identity, the client/core
-// version pair, uptime, and the gates summary line -- adapted per tier
+// version pair, uptime, and the levels summary line -- adapted per tier
 // (Wide/Narrow drop nothing, but spread it across three lines instead of
 // two, per pg2-xp415: the pool health signal leads on its own line so "is
 // the core healthy" reads at a glance, versions move to their own
@@ -177,7 +177,7 @@ func renderHeader(d topZoneData) string {
 	)
 
 	// busy is the additive dispatch-concurrency token (Task 6.5) rendered
-	// alongside the existing gates line in every tier -- fitting each
+	// alongside the existing levels line in every tier -- fitting each
 	// tier's own column budget via the same render.Block/Line clipping the
 	// header already runs through below, never by hand-truncating the text
 	// itself [design: Task 6.5 Files; Binding decision 5].

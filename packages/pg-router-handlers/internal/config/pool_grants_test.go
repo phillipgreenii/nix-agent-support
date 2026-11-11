@@ -61,7 +61,7 @@ func TestBaseAllowedTools_HoldsNoTriagerOnlyVerb(t *testing.T) {
 		"Bash(pg-connector alert list:*)", "Bash(pg-connector config validate:*)",
 		"Bash(ccpool capacity:*)", "Bash(ccpool doctor:*)",
 		"Bash(work-report status:*)", "Bash(work-report pull:*)",
-		"Bash(pg-router gate list:*)", "Bash(pg-router config --show:*)",
+		"Bash(pg-router level list:*)", "Bash(pg-router config --show:*)",
 	} {
 		if hasGrant(grants, w7) {
 			t.Errorf("handler-wide list carries the triager-only grant %q", w7)

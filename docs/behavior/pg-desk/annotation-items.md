@@ -105,7 +105,7 @@ deliveries are skipped"). An annotation write that does not change the stored va
 The feed's health is its consumer lag, `pg_desk_consumer_lag{type,consumer}` (the type's maximum
 sequence minus the consumer's cursor). A stuck feed shows only there: the pg-router source alerts treat
 an empty `[]` poll as success. The pr lag alert (`pg-desk-pr-annotation-consumer-lag`) fires on the
-`annotations:` consumers and is held while a gate such as `SYSTEM_PAUSE` blocks the query, because lag
+`annotations:` consumers and is held while an unmet level requirement (such as the `router` resource at `PAUSED`) blocks the query, because lag
 grows on purpose then.
 
 ## Invariants

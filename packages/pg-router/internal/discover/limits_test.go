@@ -108,7 +108,7 @@ func TestProduce_emittersHaltedSkipsThresholdSource(t *testing.T) {
 }
 
 // THE WEDGE: at the hard limit every Enqueue is refused. A never-gated timer
-// source (disk-check-tick fires every few minutes) must not turn that into a
+// source (one that fires every few minutes) must not turn that into a
 // pass-aborting error — it is recorded and the pass carries on, so the tick that
 // called Produce still expires, dispatches and compacts (the only way the
 // condition ever clears).

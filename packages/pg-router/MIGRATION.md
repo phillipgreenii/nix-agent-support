@@ -224,117 +224,108 @@ internally needs to be on the real runtime PATH by construction (this flake's
 own wrapper bundles the tools its worked examples shell out to, such as the issue-tracker CLI, the PR-management CLI and
 `jq`, for exactly this reason — see `default.nix`).
 
-## Gates: file-backed gates replaced by the Gate Registry (bead `pg2-h63eu`, `INV-LIFE-2`)
+## Gates: file-backed gates replaced by the Gate Registry, then by resource levels
 
-This section **supersedes** three earlier ones that described the file-backed gates: "Hazard: gate
-file paths are now configured by default" (Task 1.2b), "Operator: disabling a gate's effect
-entirely, from outside pg-router" (beads `pg2-efbb0`, `pg2-hipf0`), and "`cicd-down` gate:
-superseded, kept for backward compatibility" (bead `pg2-h410q`). All three described machinery
-that no longer exists.
+This section records two successive replacements. The file-backed gates (`operator_paused`,
+`cicd_down`, `disk_space_low` and their `<LogDir>/gates/*` files) were first replaced by a generic
+gate registry in the event log; that registry has since been removed too, in favor of **resource
+levels** (`INV-LVL-*`, `INV-REQ-1`; decision `DEC-LEVEL-1`). Nothing described as "removed" below
+returns.
 
-**What a gate is now.** A gate is what prevents pg-router from routing: a **TYPE** (an ALL-CAPS
-string such as `SYSTEM_PAUSE` or `LOW_DISK_USAGE` — arbitrary, nothing hard-coded), an optional
-description, an optional **owner** (the caller's identity — DEBUG ONLY, no behavioral effect,
-overwritten on re-set) and an optional **TTL lease**. There is one active gate per TYPE, the last
-writer wins, and **any caller may clear any gate**. Gates are records in the same write-ahead log
-events use (`<LogDir>/queue.jsonl`): `GateSet` (each lease renewal is another one), `GateCleared`
-and `GateExpired`. The active set is a projection of that log, so it survives a restart, and a gate
-never depends on a queue drop.
+**Levels replace gates.** A gate was a global, TYPE-named flag that every participant blocked on
+unless it opted out with `non_blocking_gates`. A **resource** is now a measured or declared
+condition with an ordered scale, and a **level** is its current position on that scale. **Sensors**
+(the generic `pg-router-sensors` binary, whose subcommands read hosts, remotes, trackers and
+certificates from configuration) report levels at an interval the router sets. A registration
+declares what it needs with `requires = [ "<resource> <op> <LEVEL>", ... ]` (an AND-only list); a
+resource it does not name is one it does not care about, so the old per-registration opt-out list
+is simply the absence of a clause. Levels are enforced from the first deploy, with no observe mode.
 
-**What a gate does.** It acts on **participants, never on events.** While any gate is active, each
-participant that blocks on it is halted: a blocked **emitter** is not polled; a blocked
-**listener** is not dispatched to and its pull is rejected naming the gate. Pushed events are still
-accepted, acks and confirmations still processed, queued events stay queued, and an **unblocked**
-listener still receives them. A participant blocks on every gate TYPE by default and declares at
-registration which TYPEs it does **not** block on (`non_blocking_gates = ["LOW_DISK_USAGE"]` on a
-`[[role]]`/`[[query]]`, or `nonBlockingGates` on the `register` verb). The new built-in
-`type = "timer"` query is the **timer emitter** and is never blocked by any gate ("you can't stop
-time moving forward"). Event TTL is unchanged: when an event is about to expire, each listener that
-has not received it gets one final attempt, and a listener still blocked then **loses the event** —
-so a long gate drops events (counted in `pg_router_gate_drops`), and the queue is bounded by event
-TTL. Gate records themselves are routable as `gate.set` / `gate.cleared` / `gate.expired` events
-(a role may bind them) and always bypass gating for delivery.
+Term mapping for converting old wording:
+
+| Old                                                  | Now                                                                                                                                                             |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-router gate set\|clear\|list`                    | `pg-router level set\|clear\|list` (plus `refresh`)                                                                                                             |
+| `SYSTEM_PAUSE`                                       | the `router` resource at level `PAUSED` (`pause` / `resume` are sugar for it)                                                                                   |
+| `LOW_DISK_USAGE`                                     | the `disk`, `cpu` and `ram` resources, ladder `PLENTY > OK > TIGHT > EXHAUSTED`                                                                                 |
+| `BEAD_SERVER_DOWN`                                   | `beads_<tracker>` at level `DOWN`, one resource per tracker                                                                                                     |
+| `non_blocking_gates` / `nonBlockingGates`            | no `requires` clause for the resources a registration does not name                                                                                             |
+| the disk watchdog and its tick query                 | removed; the `disk`, `cpu` and `ram` levels replaced them                                                                                                       |
+| `pg_router_gates_active`, `pg_router_gate_*` metrics | `pg_router_resource_level`, `pg_router_role_paused`, `pg_router_requirement_blocked`, `pg_router_requirement_drops` and the other `pg_router_resource_*` series |
 
 **Operating it.**
 
 ```bash
-pg-router pause [--description TEXT]            # sets SYSTEM_PAUSE (owner: operator)
-pg-router resume [--all]                        # clears SYSTEM_PAUSE (or every gate)
-pg-router gate set LOW_DISK_USAGE --description "3GiB free" --owner disk-watchdog --ttl 6m
-pg-router gate clear LOW_DISK_USAGE             # or: gate clear --all
-pg-router gate list [--json]
+pg-router pause [--for DURATION]                       # the router resource -> PAUSED (owner: operator)
+pg-router resume [--all]                               # clears the operator pause (or every operator override)
+pg-router level list [--json]
+pg-router level set <resource> <LEVEL> --for 2h        # a time-boxed operator override (24h cap)
+pg-router level set <resource> <LEVEL> --until-cleared # held until cleared
+pg-router level clear <resource>                       # or: level clear --all
+pg-router level refresh [<resource>...]                # ask the sensors for fresh readings now
+pg-router explain <role>                               # the current decision for one role
 ```
 
-External systems use the same socket verbs (`gate-set`, `gate-clear`; schemas `cli.gate-set`,
-`cli.gate-clear`) — a TTL gate is kept alive by setting it again before the lease lapses, and
-simply stops gating when its owner dies. `pg-router status`/`--json` and the TUI Gates modal (`g`)
-list the active gates (TYPE, description, owner, set-at, TTL remaining).
+A `--for` over 24 hours is refused with an error and is never clamped to the cap. External systems
+push levels over the level-ingest socket verb. `pg-router status`/`--json` and the TUI list the
+resource levels, each with its source (sensor, operator or grace fallback).
 
-**Operator convention: `BEAD_SERVER_DOWN`.** An operator sets this gate before taking the shared
-issue-store server down (for example a schema migration):
-`pg-router gate set BEAD_SERVER_DOWN --owner beads-migration --description "..."`, with NO `--ttl`
-(a lapsed lease counts as cleared). It needs a running core, so set it BEFORE the router is stopped
-(`gate set` fails with `no running core` otherwise), and clear it last, once the server is verified
-healthy. Participants that never touch beads declare `non_blocking_gates = ["BEAD_SERVER_DOWN"]`; an
-emitter and its listener that must stay live together MUST opt out on BOTH sides. A long gate drops
-events whose TTL lapses (`pg_router_gate_drops`). The full procedure is
-`docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter` repo.
+**What a level does.** It acts on **participants, never on events.** While a registration's
+requirement is not met, each emitter is not polled; each listener is not dispatched to and its pull
+is rejected naming the resource. Pushed events are still accepted, acks and confirmations still
+processed, queued events stay queued, and a listener whose requirement is met still receives them.
+The built-in `type = "timer"` query is the **timer emitter** and is never blocked ("you can't stop
+time moving forward"). Event TTL is unchanged: when an event is about to expire, each listener that
+has not received it gets one final attempt, and a listener still blocked then **loses the event**,
+so a long hold drops events (counted in `pg_router_requirement_drops`), and the queue is bounded by
+event TTL.
 
-**The disk-space watchdog (`LOW_DISK_USAGE`).** The replacement for `disk_space_low` is an ordinary
-external listener, `pg-router-disk-watchdog` (bead `pg2-zwdwf`, `packages/pg-router-disk-watchdog`),
-not pg-router code. Wire it as a timer-driven role that is registered **non-blocking on
-`LOW_DISK_USAGE`**, so the gate it sets can never stop it from running again to clear it:
+**Operator convention: a tracker's server going down.** The operator sets EACH tracker's level before
+taking the shared issue-store server down (for example a schema migration), with no lease, and
+clears it last, once the server is verified healthy. With placeholders:
 
-```toml
-[[query]]
-name = "disk-check-tick"
-type = "timer"
-emits = ["disk.check"]
-trigger = { kind = "period", every = "5m" }
-
-[[role]]
-name = "disk-watchdog"
-binds = ["disk.check"]
-non_blocking_gates = ["LOW_DISK_USAGE"]
+```bash
+pg-router level set beads_<tracker> DOWN --until-cleared   # repeat for each tracker, BEFORE the router stops
+# ... take the server down, migrate, bring it back, verify it is healthy ...
+pg-router level clear beads_<tracker>                      # repeat for each tracker, last
 ```
 
-The role's backing command is `pg-router-disk-watchdog [--path P]... [--min-free 20GiB]
-[--recover-free SIZE] [--ttl 7m] [--pg-router-path PATH]`. Each run measures the lowest free space
-over the given paths (default `/`), then: below `--min-free` it runs `pg-router gate set
-LOW_DISK_USAGE` (description with the free space, `--owner pg-router-disk-watchdog`, `--ttl` lease,
-re-set on every low pass); at or above `--recover-free` (default `--min-free` x 1.25, hysteresis so a
-borderline disk does not flap) it clears the gate; in between it renews a gate it already owns. It
-only ever clears a gate whose owner is itself, so a hand-set `pg-router gate set LOW_DISK_USAGE`
-is left alone. The default `--min-free` is `20GiB`; the default `--ttl` is `7m` (the 5 minute check
-cadence plus margin). A failed measurement or an unreachable core exits `1` and changes nothing.
+The command needs a running core, so set the level BEFORE the router is stopped (`level set` fails
+with `no running core` otherwise). A registration that never touches beads names no
+`beads_<tracker>` clause and keeps running; an emitter and its listener that must stay live
+together MUST leave the resource unmentioned on BOTH sides. The full procedure lives in the
+deployment repository that owns the tracker names.
+
+**Legacy gates at upgrade (runbook precondition).** Gates are not translated into levels. Before the
+apply that removes the gate registry, check that no gate is still set with the previous binary's
+list command; if one is, record it and re-apply it as a `level set` after the apply. At startup the
+new router logs one `legacy_gate_dropped` line for every gate record it finds in the event log and
+drops, so a gate that was missed is visible.
 
 **Breaking changes.**
 
-- **`pause`/`resume`/`gate` are socket clients now.** The old `pause [<gate>]`/`resume [<gate>]`
-  wrote a file directly and succeeded with no core running. Gates live in the daemon's event log, so
-  these commands need a running core and fail with `no running core` (exit `1`) otherwise; a gate
-  cannot be set while the daemon is down. `pause <name>` / `resume <name>` (a positional gate name)
-  is now a usage error — use `gate set TYPE` / `gate clear TYPE`.
+- **`pause`/`resume`/`level` are socket clients.** They need a running core and fail with
+  `no running core` (exit `1`) otherwise; a level cannot be set while the daemon is down. A
+  positional gate name on `pause` / `resume` is a usage error.
 - **Removed:** the `operator_paused`/`cicd_down`/`disk_space_low` gates and their `<LogDir>/gates/*`
-  files (leftover files are inert — delete them); `PG_ROUTER_OPERATOR_PAUSED`, `PG_ROUTER_CICD_DOWN`,
+  files (leftover files are inert; delete them); `PG_ROUTER_OPERATOR_PAUSED`, `PG_ROUTER_CICD_DOWN`,
   `PG_ROUTER_DISK_SPACE_LOW` and `[pool].operator_paused_path`/`cicd_down_path`/
-  `disk_space_low_path` (the TOML keys still parse but are ignored with a warning); the whole
-  per-gate **disable-override** mechanism (`PG_ROUTER_*_DISABLE`, `<LogDir>/gate-overrides/*`,
-  `Config.OperatorPausedDisable`/`DiskSpaceLowDisable`) — clearing the gate **is** the veto now;
-  `config --show`'s gate-file rows; and the nix `daemon.gates.{operatorPausedPath,cicdDownPath}`
-  options (nothing in this workspace set them).
-- `operator_paused` is now the `SYSTEM_PAUSE` gate. `cicd_down` is no special code any more — it is
-  an arbitrary TYPE nothing sets (dead since `pg2-h410q`); for CI health prefer the per-connector
-  `command` source worked example below. `disk_space_low` is replaced by `LOW_DISK_USAGE`, set by an
-  ordinary external watchdog listener (bead `pg2-zwdwf`), not by pg-router code.
-- Wire: `cli.pause`/`cli.resume` lost their `gate` enum (SYSTEM_PAUSE only; `resume` gained `all`);
-  `cli.status-reply` `gates[]` now lists **active** gates only as `{type, description?, owner?,
-setAt, expiresAt?, ttlRemainingMs?}` and `gatesObservedAt` is gone (the list is read live).
-- `run-until-idle` while **any** gate is active still boots and stays reachable for one drain tick
-  but produces and drains nothing (a drain could spin on events a blocked listener will not take).
+  `disk_space_low_path` (the TOML keys still parse but are ignored with a warning); the per-gate
+  **disable-override** mechanism (`PG_ROUTER_*_DISABLE`, `<LogDir>/gate-overrides/*`); `config
+--show`'s gate-file rows; the nix `daemon.gates.{operatorPausedPath,cicdDownPath}` options; the
+  generic gate registry and its `gate` subcommands; the `non_blocking_gates` registration key and
+  the `nonBlockingGates` register field (both are rejected as unknown); and the disk watchdog
+  listener with its timer query, replaced by the `disk`, `cpu` and `ram` levels.
+- `operator_paused` is now the `router` resource at `PAUSED`. `cicd_down` is no special code any
+  more; for CI health prefer the per-connector `command` source worked example below.
+- Wire: `cli.status-reply` lists the resource levels instead of `gates[]`; `cli.pause`/`cli.resume`
+  address the `router` resource only (`resume` gained `all`).
+- `run-until-idle` while any registration's requirement is unmet still boots and stays reachable for
+  one drain tick but produces and drains nothing (a drain could spin on events a blocked listener
+  will not take).
 
 **Not part of this change.** A maximum queue size / overflow behavior for held events is a separate
-decision (bead `pg2-5d3ui`).
+decision.
 
 ## Behavior: a partial produce during `run-until-idle` is a generic failure (Task 1.1)
 
@@ -375,7 +366,7 @@ should use `daemon` instead.
 
 (The `daemon` submodule's `gates.{operatorPausedPath,cicdDownPath}` options this paragraph used to
 describe were removed with the file-backed gates — see "Gates: file-backed gates replaced by the Gate
-Registry" above.)
+Registry, then by resource levels" above.)
 
 ## Worked example: per-connector CI health (`pg-connector`) as a `command` source (bead `pg2-h410q`)
 

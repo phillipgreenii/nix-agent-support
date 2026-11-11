@@ -6,7 +6,7 @@
 //
 // `LEGACYEXTRACT_WRITE=1 go test ./internal/legacyextract/... -run
 // TestLegacyExtract` (the docket's own Validation command, with the write
-// gate set -- see internal/legacyextract's legacyExtractWriteEnv doc
+// gate enabled -- see internal/legacyextract's legacyExtractWriteEnv doc
 // comment for why a bare `go test` must NOT write) already regenerates
 // both files as a side effect of running; this binary exists so the same
 // conversion can also be run directly (`go run ./cmd/legacyextract

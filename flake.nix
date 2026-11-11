@@ -8527,7 +8527,7 @@
 
               # pg-desk PR lane tripwire rule (pg-desk-pr-never-hydrated, PR lane refactor P0b):
               # structure rules T1-T5 over packages/pg-desk/grafana/alerting/alerts.yaml (uid,
-              # noDataState OK, the SYSTEM_PAUSE guard copied from pg-desk-sync-stale, the absence
+              # noDataState OK, the router-pause guard copied from pg-desk-sync-stale, the absence
               # branch, the rule shape), then the script's plain negative cases: a rule file whose
               # guard has been removed, one whose noDataState differs and one whose absence branch
               # has been removed each MUST fail with exactly their own rule. The behaviour of the
@@ -8559,7 +8559,7 @@
               # the cases under grafana/alerting/rule-tests/ run under `promtool test rules`: a firing,
               # a healthy and an empty-input case for every new rule, the primary rule's four states
               # and the replay of 2026-10-19, and the residual rule ignoring mode="plan". The script's
-              # own --self-test then breaks one guard at a time (SYSTEM_PAUSE, absence branch, apply
+              # own --self-test then breaks one guard at a time (router-pause, absence branch, apply
               # gate, mode selector, first-event branch, scope, role selector) and requires the cases
               # to REJECT each broken rule file. The structure check (test-pg-desk-alert-structure)
               # pins noDataState and the guards; the same harness runs as the pg-desk-alert-rules-test

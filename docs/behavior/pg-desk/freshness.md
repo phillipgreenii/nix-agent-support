@@ -190,4 +190,4 @@ anything.
 contract; on failure it prints ordinary CLI error text on stderr. `serve` exports
 `pg_desk_source_age_seconds` and `pg_desk_sources_stale` (see [`serve.md`](serve.md)). The Grafana
 rule `pg-desk-sources-stale` alerts on `pg_desk_sources_stale >= 1` for 10 minutes, suppressed
-during a pg-router `SYSTEM_PAUSE` gate.
+while the pg-router `router` resource is at `PAUSED`.

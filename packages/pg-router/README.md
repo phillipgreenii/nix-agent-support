@@ -25,11 +25,11 @@ instead. Bare `pg-router` (no subcommand) requires an explicit subcommand.
 | `config --print-defaults`               | print the built-in default `config.toml` (a copy-paste start)                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `config --show [--json]`                | print the resolved config path, role set (each role's command, survives_shutdown value and the `role` object it is sent), and worker dispatch scalars (permission-mode/allowed-tools/budget); text, or one JSON object with `--json`                                                                                                                                                                                                                                                                                      |
 | `push-inject <json>`                    | inject one operator-supplied event into the **running** core (text, or JSON with `--json`)                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `status`                                | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus gates/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`)                                                                                                                                                                                                                                                                                                                               |
+| `status`                                | inspect the **running** core: resolved config, live deliveries, per-`type` queue depths, plus resource levels/mode/listeners/sources/unmatched bindings/recent activity (text, or JSON with `--json`)                                                                                                                                                                                                                                                                                                                     |
 | `tui [--socket <path>] [--token <tok>]` | continuous-interactive view: polls `status`'s activity ring and offers `pause`/`resume` from the same screen — never a third affordance. No `--json` (it is a terminal UI). **Never fails on "no running core"**: it renders a no-core screen and keeps polling instead (`ADR 0036`)                                                                                                                                                                                                                                      |
-| `pause [--description T]`               | set the `SYSTEM_PAUSE` gate on the **running** core (`INV-LIFE-2`) — see [below](#pause--resume--gate--operator-gate-control)                                                                                                                                                                                                                                                                                                                                                                                             |
-| `resume [--all]`                        | clear `SYSTEM_PAUSE` (or, with `--all`, every active gate) — see [below](#pause--resume--gate--operator-gate-control)                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `gate set\|clear\|list`                 | set, clear or list **generic gates** by TYPE on the running core — see [below](#pause--resume--gate--operator-gate-control)                                                                                                                                                                                                                                                                                                                                                                                               |
+| `pause [--for D]`                       | set the `router` resource to `PAUSED` on the **running** core (`INV-LIFE-2`) — see [below](#pause--resume--level--operator-level-control)                                                                                                                                                                                                                                                                                                                                                                                 |
+| `resume [--all]`                        | clear the operator `router` override (or, with `--all`, every operator level override) — see [below](#pause--resume--level--operator-level-control)                                                                                                                                                                                                                                                                                                                                                                       |
+| `level list\|set\|clear\|refresh`       | read, override, clear or refresh **resource levels** on the running core — see [below](#pause--resume--level--operator-level-control)                                                                                                                                                                                                                                                                                                                                                                                     |
 | `version`                               | print the version and exit                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `help`                                  | print help and exit                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
@@ -74,7 +74,7 @@ pg-router status [--json] [--socket <path>] [--token <tok>]
 
 `status` is the operator-facing INTF-CLI inspection verb: resolved configuration,
 live deliveries, and per-`type` queue depths — the three inspection MUSTs
-interfaces.md's "Inspecting a running core" declares — plus the current gate
+interfaces.md's "Inspecting a running core" declares — plus the current resource level
 state, run mode, registered listeners/sources, unmatched bindings, and recent
 dispatch-outcome activity (`internal/activity.Ring`, Task 3.4). It locates the
 core the same way `push-inject` does (`--socket`/`--token`, else
@@ -82,7 +82,7 @@ core the same way `push-inject` does (`--socket`/`--token`, else
 starts one** ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)).
 
 The human-output form orders its sections for incident scanning — header
-(core/socket/config/`queue log` size/gates/mode), then `QUEUES`, `DELIVERIES (live)`,
+(core/socket/config/`queue log` size/levels/mode), then `QUEUES`, `DELIVERIES (live)`,
 `ACTIVITY (last 10)`, `LISTENERS`, `SOURCES`, `UNMATCHED BINDINGS` — and never
 omits a section silently: an empty one renders an explicit `(none)` marker
 instead. `--json` emits the `cli.status-reply` wire schema verbatim, which now
@@ -97,54 +97,59 @@ Exit codes match every other operator subcommand: `0` ok, `2` usage, `1`
 everything else (`9` is reserved for the pre-accept busy decline, which this
 read-only verb never returns).
 
-### `pause` / `resume` / `gate` — operator gate control
+### `pause` / `resume` / `level` — operator level control
 
 ```
-pg-router pause [--description TEXT] [--owner WHO]
+pg-router pause [--for DURATION] [--owner WHO]
 pg-router resume [--all] [--by WHO]
-pg-router gate set TYPE [--description TEXT] [--owner WHO] [--ttl DURATION]
-pg-router gate clear (TYPE | --all) [--by WHO]
-pg-router gate list [--json]
+pg-router level list [--json]
+pg-router level set RESOURCE LEVEL (--for DURATION | --until-cleared) [--owner WHO] [--json]
+pg-router level clear (RESOURCE | --all) [--by WHO]
+pg-router level refresh [RESOURCE...] [--json]
 ```
 
-A **gate** (`INV-LIFE-2`, the Gate Registry) is what prevents pg-router from routing. It has a
-**TYPE** (an ALL-CAPS string such as `SYSTEM_PAUSE` or `LOW_DISK_USAGE` — arbitrary), an optional
-description, an optional **owner** (the setter's identity — debug only, no behavioral effect,
-overwritten on re-set) and an optional **TTL lease** that the owner renews by setting the gate again.
-There is one active gate per TYPE, the last writer wins, and **any caller may clear any gate**.
-`pause`/`resume` are sugar for `gate set`/`gate clear` of `SYSTEM_PAUSE` (owner: the operator);
-a bare `resume` clears **only** `SYSTEM_PAUSE`, so a gate another system owns is never cleared by
-accident (`resume --all` clears everything).
+A **resource** is a measured or declared condition with an ordered scale (for example `disk` with
+`PLENTY > OK > TIGHT > EXHAUSTED`, or a tracker resource `beads_<tracker>` with `UP > DOWN`'s two
+levels), and a **level** is its current position on that scale. Sensors report levels; an operator
+**override** is a level that wins while it is fresh. A registration (`[[role]]` or `[[query]]`)
+declares `requires = [ "<resource> <op> <LEVEL>", ... ]`, an AND-only list of clauses; a resource it
+does not name is one it does not care about. `==` and `!=` stay allowed on graded scales, but
+prefer `>=` and `<=`. `pg-router explain <role>` prints the current decision and
+`pg-router doctor --clauses` lists the clauses in force.
 
-Gates are records in the event log (`<LogDir>/queue.jsonl`, see "Queue log compaction" below), so they survive a restart and honor
-their TTL across one. A gate acts on **participants, never on events**: while it is active, each
-emitter that blocks on it is not polled, each listener that blocks on it is not dispatched to (and
-its pull is rejected naming the gate), pushed events are still accepted, acks and confirmations still
-processed, and queued events stay queued — an unblocked listener still receives them. A participant
-blocks on every gate TYPE by default and declares `non_blocking_gates = [...]` (on a `[[role]]` or
-`[[query]]`, or `nonBlockingGates` at `register`) for the TYPEs it does not. The built-in
-`type = "timer"` query (the timer emitter) is never blocked by any gate. A listener that is still
-blocked when an event's final attempt falls due loses that event, so long gates drop events (counted
-in `pg_router_gate_drops`). External systems use the `gate-set`/`gate-clear` socket verbs.
+`pause` and `resume` are sugar for setting and clearing the `router` resource at level `PAUSED`
+(owner: the operator). A bare `resume` clears **only** that override, so a level another system
+owns is never cleared by accident (`resume --all` clears every operator override).
 
-**Operator convention: `BEAD_SERVER_DOWN`.** Gate TYPEs are arbitrary, and `BEAD_SERVER_DOWN` is
-the one an operator sets before taking the shared issue-store server down (for example a schema
-migration): `pg-router gate set BEAD_SERVER_DOWN --owner beads-migration --description
-"issue-store schema migration: shared server down"`, with NO `--ttl` (a lapsed lease counts as
-cleared). It needs a running core, so set it BEFORE the router is stopped, and clear it last with
-`pg-router gate clear BEAD_SERVER_DOWN`. Participants that never touch beads declare
-`non_blocking_gates = ["BEAD_SERVER_DOWN"]` and keep running; an emitter/listener pair that must
-stay live together MUST opt out on BOTH sides (a heartbeat emitter whose listener still blocks
-just queues events). A long gate drops events whose TTL lapses (`pg_router_gate_drops`). The
-full migration procedure is `docs/beads-1-3-1-schema-migration.md` in the
-`phillipg-nix-ziprecruiter` repo.
+An override is capped: `--for` takes a duration of at most 24 hours (a longer value is refused, never
+clamped), and `--until-cleared` holds until `level clear`. Levels are records in the event log
+(`<LogDir>/queue.jsonl`, see "Queue log compaction" below), so they survive a restart. A level acts
+on **participants, never on events**: while a registration's requirement is not met, each emitter
+that requires it is not polled, each listener that requires it is not dispatched to (and its pull is
+rejected naming the resource), pushed events are still accepted, acks and confirmations still
+processed, and queued events stay queued; a listener whose requirement is met still receives them.
+The built-in `type = "timer"` query (the timer emitter) is never blocked. A listener that is still
+blocked when an event's final attempt falls due loses that event, so a long hold drops events
+(counted in `pg_router_requirement_drops`).
 
-Unlike the file-backed gates they replaced, these commands are **socket clients**: they need a
+**Operator convention: a tracker's server going down.** Before taking a shared issue-store server
+down (for example a schema migration), the operator sets EACH tracker's level, with no lease:
+`pg-router level set beads_<tracker> DOWN --until-cleared`. It needs a running core, so set it
+BEFORE the router is stopped, and clear it last with `pg-router level clear beads_<tracker>`, once
+the server is verified healthy. Registrations that never touch beads name no `beads_<tracker>`
+clause and keep running; an emitter/listener pair that must stay live together MUST leave the
+resource unmentioned on BOTH sides (a heartbeat emitter whose listener still requires it just queues
+events). A long hold drops events whose TTL lapses. Before an upgrade that removes the old gate
+mechanism, record any gates still set and re-apply each as a `level set`: gates are not translated,
+and the startup log names every one that was dropped (`legacy_gate_dropped`). The full migration
+procedure is `docs/beads-1-3-1-schema-migration.md` in the deployment repository that owns the
+tracker names.
+
+These commands are **socket clients**: they need a
 running core and fail with `no running core` (exit `1`) otherwise — they never start one
 ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)). See `MIGRATION.md`'s
-"Gates: file-backed gates replaced by the Gate Registry" for everything that was removed
-(`operator-paused`/`cicd-down`/`disk-space-low`, the `PG_ROUTER_*` gate paths, the disable-override
-files).
+"Gates: file-backed gates replaced by the Gate Registry" for what was removed from the original
+file-backed gates, and "Levels replace gates" for the replacement of the gate registry itself.
 
 ### Manager → core callback subcommands
 
@@ -338,7 +343,7 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
 - `PG_ROUTER_AUTONOMOUS` — block AskUserQuestion so human-less workers never stall on the picker (default `true`)
 - `PG_ROUTER_LOG_DIR` — override the event-log directory (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
-- `PG_ROUTER_LOG_DIR` — override the event-log/state directory: `queue.jsonl` (events and gates), `events.jsonl`, the discovery record (default: the standard path below)
+- `PG_ROUTER_LOG_DIR` — override the event-log/state directory: `queue.jsonl` (events and level overrides), `events.jsonl`, the discovery record (default: the standard path below)
 - `PG_ROUTER_ACTIVITY_RING` — dispatch-outcome activity ring buffer capacity (`internal/activity.Ring`, Task 3.4); default 512
 - `PG_ROUTER_COMPACT_THRESHOLD_BYTES` — `queue.jsonl` size above which the write-ahead log is compacted
   to live state in the background; default `8388608` (8 MiB); `0` disables runtime compaction (the
@@ -409,7 +414,7 @@ max_over_time(pg_router_listener_oldest_pending_age_seconds{role="pr-change"}[1h
 ```
 
 A high `queue_depth` with `listener_pending` at 0 is retention. A rising `listener_pending` together
-with a growing oldest pending age is a real backlog (a saturated handler, a pause or other gate, or
+with a growing oldest pending age is a real backlog (a saturated handler, a pause or another unmet level requirement, or
 serialize occupancy). No alert reads the per-listener gauges. The decision and its consequences:
 `DEC-OBS-12` in `docs/decisions/observability.md`; a worked example is
 `docs/investigations/2026-11-04-pr-changed-queue-backlog.md` at the repository root.
@@ -417,13 +422,13 @@ serialize occupancy). No alert reads the per-listener gauges. The decision and i
 ### Queue log compaction
 
 `<LogDir>/queue.jsonl` is the append-only write-ahead log behind both the event queue and the
-Gate Registry; an eviction is itself an appended record, so without compaction it grows for ever
+level overrides; an eviction is itself an appended record, so without compaction it grows for ever
 and every start re-reads all of it. The queue therefore compacts it down to **live state**:
-the retained events (FIFO order, resolved instants, accepts), the active gate projection, and the
+the retained events (FIFO order, resolved instants, accepts), the active level-override projection, and the
 set of event types ever enqueued. `Replay(compact(L))` rebuilds exactly the state `Replay(L)` does
 (property-tested); only history a replay already discards is dropped, **except** a bounded,
 timestamped history of departed events (below). Delivery semantics (at-least-once,
-INV-EVT-2) and gate persistence are unchanged.
+INV-EVT-2) and level-override persistence are unchanged.
 
 - **History kept across compaction** (bead `pg2-n7da9`, `DEC-OBS-9`). Accept records carry `at` and
   `startedAt` and evict records carry `at` and a `reason`; compaction folds each evicted event into one
@@ -460,7 +465,7 @@ INV-EVT-2) and gate persistence are unchanged.
     none running it compacts the file itself (`"via": "offline"`), taking the lock, and is **refused with
     exit 1** if another process holds it. A core named by `--socket` never falls back to offline.
   - _`--dry-run` changes nothing_ — no rename, no temp file, no lock kept or created, no counter. It prints
-    bytes and records before/after, events kept vs dropped (evicted), gates kept, the percent of
+    bytes and records before/after, events kept vs dropped (evicted), level overrides kept, the percent of
     `max_log_bytes` afterwards, a warning for a torn tail, and whether a real run would be refused (the
     log is locked by another process) or would do nothing.
   - _A real run on a log that already holds live state only_ rewrites nothing and says "nothing to do"
@@ -496,13 +501,13 @@ it:
 | at `max_log_bytes` (the **hard** limit)     | `log_full`        | The above, **and** every new event is rejected with a `log_full:` reason — timer emitters and pushed events included.             |
 | the log cannot be written (disk full, I/O)  | `log_unwritable`  | The same as `log_full`, with a `log_unwritable:` reason; the daemon re-probes every tick and resumes by itself once it can write. |
 
-- **The soft step is not a gate.** It is an in-memory `emittersHalted` flag on the queue, consulted
-  by the producer next to the gate check and re-derived every tick from the log size. It adds nothing
-  to the Gate Registry, does not appear in `pg-router gate list` / `pg_router_gates_active`, and is
-  **not** cleared by `gate clear` or `resume --all`. **It does NOT stop timer emitters or pushed
+- **The soft step is not a level.** It is an in-memory `emittersHalted` flag on the queue, consulted
+  by the producer next to the requirement check and re-derived every tick from the log size. It sets no resource
+  level, does not appear in `pg-router level list` / `pg_router_resource_level`, and is
+  **not** cleared by `level clear` or `resume --all`. **It does NOT stop timer emitters or pushed
   events** — only the hard limit does. Listener dispatch and the drain (including `run-until-idle`)
   keep running while halted, so space can be reclaimed and no listener loses an event.
-- **The hard limit applies to enqueue admission only.** Accept, evict and gate records still append
+- **The hard limit applies to enqueue admission only.** Accept, evict and level-override records still append
   above it. A still-retained duplicate id (a re-emit) is still accepted: it writes nothing.
 - **A refusal is non-fatal.** A pull or timer source whose event is refused is recorded as a source
   error with a per-source reject count and the tick carries on (it still runs the limit controller,
@@ -569,7 +574,7 @@ A `dispatch` row (`msg` `dispatch result`) carries `role`, `bead` and `actions`,
 `events.jsonl` (the observability ledger above) is size-and-age bounded; before this it grew without
 limit (about 85 MB in the router's state directory and 145 MB for the ccpool handler's own
 `pg-router-ccpool-handler/events.jsonl`). It is NOT the replayed log: `queue.jsonl` (events and
-gates) is untouched here and keeps its own compaction (see "Queue log compaction"). Nothing in the
+level overrides) is untouched here and keeps its own compaction (see "Queue log compaction"). Nothing in the
 daemon reads `events.jsonl` back; its only consumers are the Loki/Alloy tail and operators.
 
 - When a write finds the file at or over the size cap, the file is rotated: `events.jsonl` becomes
@@ -640,8 +645,8 @@ assertion failure, since they are independent pg-router cores that would race on
 
 Both submodules render `configText` into the Nix store and point `PG_ROUTER_CONFIG` at it — fully
 declarative, no machine-local `.pg-router/config.toml` bootstrap step. (The `daemon.gates.*` options
-that used to set the gate-file paths were removed with the file-backed gates — gates are runtime
-records now; see `MIGRATION.md`.)
+that used to set the gate-file paths were removed with the file-backed gates — the gates
+themselves are replaced by resource levels; see `MIGRATION.md`.)
 
 Each role names its own adapter in the role entry (`handler`), so the units carry no handler command or
 per-role file directory (`DEC-ROLE-1`).

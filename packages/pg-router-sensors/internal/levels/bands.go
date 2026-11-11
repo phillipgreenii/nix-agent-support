@@ -40,7 +40,7 @@ func Num(v float64) *float64 { return &v }
 
 // Hysteresis is the margin a reading must clear to leave a band upward. The
 // required value is boundary*Factor + Add; a Factor of 0 is read as 1. The
-// factors of the removed disk-watchdog are kept: 1.25 for a higher-is-better
+// factors of the removed disk watchdog are kept: 1.25 for a higher-is-better
 // reading and 0.8 for a lower-is-better one; a pace rise uses Add = -0.05.
 type Hysteresis struct {
 	Factor float64

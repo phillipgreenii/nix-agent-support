@@ -6,8 +6,8 @@ confirmed. None of these steps start a server.
 **Do not run this playbook during a migration window.** A planned `bd` schema migration
 legitimately runs a second `dolt sql-server` on an alternate port (25253) while the shared
 agent is booted out; steps 1, 2, 6 and 7 would classify it as rogue and tell you to
-`pkill` or `bootout` it. First run `pg-router gate list`: if a `BEAD_SERVER_DOWN` gate is
-set, stop, change nothing, and tell the operator. The runbook is the operator's own bd
+`pkill` or `bootout` it. First run `pg-router level list`: if any `beads_<tracker>` resource reads
+`DOWN`, stop, change nothing, and tell the operator. The runbook is the operator's own bd
 schema-migration runbook (this skill is standalone; ask the operator where it lives).
 
 If instead `bd` WRITES fail with "refusing to auto-apply N pending schema migrations" while

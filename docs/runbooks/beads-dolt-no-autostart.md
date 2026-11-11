@@ -110,7 +110,7 @@ All steps are read-only until data safety is confirmed. None start a server.
 **Do not run this playbook during a migration window.** A planned `bd` schema migration
 legitimately runs a second `dolt sql-server` on an alternate port (25253) while
 `org.nixos.beads-dolt-server` is booted out; the steps below would classify it as rogue.
-First run `pg-router gate list`: if a `BEAD_SERVER_DOWN` gate is set, stop, change nothing,
+First run `pg-router level list`: if any `beads_<tracker>` resource reads `DOWN`, stop, change nothing,
 and tell the operator. If `bd` writes fail with "refusing to auto-apply N pending schema
 migrations" the server is healthy and this is not a rogue-server incident; the fix is the
 operator-run `bd migrate schema` (see the `beads-dolt-doctor` skill's "bd writes refuse"

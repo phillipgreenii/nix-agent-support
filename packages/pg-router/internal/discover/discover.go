@@ -250,7 +250,7 @@ func WithSourceActivityObserver(obs SourceActivityObserver) ProduceOption {
 //   - Blocked records, per source name, the first failing resource (levels, bead
 //     pg2-h63eu) that stopped this pass from polling it: a blocked emitter is
 //     not polled (and its LastTick is left untouched, so it fires on the first
-//     pass after the gate clears). The timer emitter is never blocked.
+//     pass after the requirement is met again). The timer emitter is never blocked.
 //   - Halted records, per source name, why the log-size limit stopped this pass
 //     from polling it (eventqueue.StateEmittersHalted or StateLogUnwritable;
 //     bead pg2-5d3ui): like Blocked, the source is not polled and its LastTick is

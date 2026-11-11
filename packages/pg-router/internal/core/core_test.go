@@ -331,8 +331,8 @@ func TestServeStatus_NilTickBootWindow(t *testing.T) {
 
 // TestServeStatus_ComposesLiveState proves the reply actually reflects live
 // state from every seam Task 3.8's Contract names: queue depths (Task 3.2),
-// the activity ring (Task 3.4), the Gate Registry (bead pg2-h63eu, via the
-// SAME Service.SetGate the gate socket verbs call), the registry (existing
+// the activity ring (Task 3.4), the resource levels (via the
+// SAME level-set path the level socket verbs call), the registry (existing
 // Registry.List()), and a published tick.
 func TestServeStatus_ComposesLiveState(t *testing.T) {
 	ring := activity.New(4)

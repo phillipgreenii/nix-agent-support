@@ -1582,8 +1582,8 @@ Freshness` rules (F-3) —
 - Never use `--no-verify`. Transient infra failures (bd/dolt blip, `index.lock`
   contention) are NOT terminal — back off and retry.
 - **Persistent bd failure is not a blip.** A `bd` write that refuses with "refusing to
-  auto-apply N pending schema migrations", or an active `BEAD_SERVER_DOWN` pg-router gate
-  (`pg-router gate list`), is a migration state that retrying cannot clear, and a loop
+  auto-apply N pending schema migrations", or a `beads_<tracker>` pg-router resource at level
+  `DOWN` (`pg-router level list`), is a migration state that retrying cannot clear, and a loop
   that retries it spins forever. STOP the loop (do not start or restart dolt), report that
   the operator must run the schema migration, and leave claims released per B-1/B-2.
   Runbook: the operator's own bd schema-migration runbook (ask the operator where it lives).

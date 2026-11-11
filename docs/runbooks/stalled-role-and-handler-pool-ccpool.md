@@ -50,8 +50,9 @@ Read the output in this order:
 1. A `FAIL` on a handler's `validate` names a role JSON field, a `sessionEnv` key or a pool directory
    that is wrong. That is a configuration fault: fix it and re-apply.
 2. A role listed as unavailable has a reason; the core is not offering it work at all.
-3. An active gate (for example `SYSTEM_PAUSE`) explains a quiet role without any fault. List gates
-   with `pg-router gate list`.
+3. A resource below its best level (for example the `router` resource at `PAUSED`) explains a quiet
+   role without any fault. List the levels with `pg-router level list`, and ask for one role's
+   decision with `pg-router explain <role>`.
 4. The per-role progress line confirms the alert's numbers (age, unsuccessful, busy). A role whose
    unsuccessful count is high but whose handler `validate` is `ok` is failing at dispatch time:
    continue.

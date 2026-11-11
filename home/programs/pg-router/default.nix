@@ -229,8 +229,8 @@ let
     ++ [
       "PG_ROUTER_CONFIG=${pkgs.writeText configFileName configText}"
     ]
-    # (The gate-file path variables that used to lead this list are gone: gates
-    # are generic records in the event log, set with `pg-router gate set|clear`,
+    # (The gate-file path variables that used to lead this list are gone: resource
+    # levels are generic records in the event log, set with `pg-router level set|clear`,
     # pg2-h63eu. The shared handler command variables are gone too: every role
     # names its own handler in `[[role]]`, pg2-12gr4.10.18.)
     # handlerConfig: threads PG_ROUTER_CCPOOL_HANDLER_CONFIG, the handler

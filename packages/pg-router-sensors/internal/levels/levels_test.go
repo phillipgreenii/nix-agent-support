@@ -172,7 +172,7 @@ func TestHysteresis_zeroFactorIsOne(t *testing.T) {
 }
 
 // TestPressure_loadRecoveryHysteresis is the moved load-recovery hysteresis
-// test of the removed disk-watchdog: 3.5 per core is below the 4.0 boundary but
+// test of the removed disk watchdog: 3.5 per core is below the 4.0 boundary but
 // above the 3.2 recovery line, so the level holds; 3.0 recovers; in the band
 // with nothing held, nothing is raised.
 func TestPressure_loadRecoveryHysteresis(t *testing.T) {

@@ -104,7 +104,7 @@ before it would push.
 ```mermaid
 flowchart TD
   S["an operator wants the runners to stop"] --> A{"how far"}
-  A -->|"every runner now"| P["pg-router pause (sets the SYSTEM_PAUSE gate)"]
+  A -->|"every runner now"| P["pg-router pause (sets the router resource to PAUSED)"]
   A -->|"every pg-repo-runner role, including a hand run"| F["create the file push.disabled"]
   A -->|"publishing only, for one repo"| C["push = false in the deployment config, then an operator apply"]
   P --> R1["resume with pg-router resume"]
@@ -114,7 +114,7 @@ flowchart TD
 
 | Switch                                    | How to engage                                                                                        | Effect                                                                                                                                                                                         |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| pg-router pause                           | `pg-router pause --description "<why>"`; release with `pg-router resume`                             | The `SYSTEM_PAUSE` gate. The role and query entries of the deployment keep the default blocking gate, so nothing is dispatched. Check with `pg-router gate list`.                              |
+| pg-router pause                           | `pg-router pause --for <duration>`; release with `pg-router resume`                                  | The `router` resource at level `PAUSED`. The role and query entries of the deployment require it to be above `PAUSED`, so nothing is dispatched. Check with `pg-router level list`.            |
 | `push.disabled` or the `kill_switch` file | `touch "${XDG_STATE_HOME:-$HOME/.local/state}/pg-repo-runner/push.disabled"`; release by removing it | Every role (`verify`, `sync`, `build`) exits 9 ("not now", pg-router re-offers the item), and a hand run exits 9 too. The `tips` source ignores it (it only reads refs and the verdict store). |
 | `push = false`                            | Edit the deployment config (operator-owned), then an operator `pn workspace apply`                   | The sync pass never reaches the push step for that repo. This is the default for every repo.                                                                                                   |
 
