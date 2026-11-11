@@ -127,29 +127,25 @@ func (s *Settler) seedLocked(ctx context.Context, groups map[string]*conv, live 
 // heap. stage is the persisted stage ("" for none).
 func (s *Settler) schedule(ctx context.Context, c *conv, stage string, errored bool, now time.Time, removal map[string]bool) {
 	session := c.session
-	switch {
-	case errored:
-		s.due.Push(session, now)
-	case stage == StageSettled:
-		if !s.cfg.RemoveEnable {
-			return
-		}
-		at := s.newest(ctx, c).Add(s.cfg.RemoveAfter)
-		if removal != nil && !at.After(now) {
-			removal[session] = true
-			return
-		}
+	act, at := scheduleDecision(schedInput{
+		errored: errored, stage: stage, now: now,
+		removeEnable: s.cfg.RemoveEnable, removeAfter: s.cfg.RemoveAfter,
+		recheck: s.cfg.Recheck, after: s.cfg.After,
+		removalPass: removal != nil,
+		newest:      func() time.Time { return s.newest(ctx, c) },
+		checkedAt: func() time.Time {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.checkedAt[session]
+		},
+	})
+	switch act {
+	case schedPush:
+		s.due.Push(session, at)
+	case schedPushRemoval:
 		s.due.PushKind(session, DueRemoval, at)
-	case stage == StageHeld:
-		s.mu.Lock()
-		at := s.checkedAt[session]
-		s.mu.Unlock()
-		if at.IsZero() {
-			at = now
-		}
-		s.due.Push(session, at.Add(s.cfg.Recheck))
-	case stage == "" || stage == StageQuiet:
-		s.due.Push(session, s.newest(ctx, c).Add(s.cfg.After))
+	case schedRemovalNow:
+		removal[session] = true
 	}
 }
 
