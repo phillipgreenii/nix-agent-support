@@ -304,3 +304,35 @@ func TestSend_fallbackPostsThroughDaemon(t *testing.T) {
 		t.Errorf("args = %v", a)
 	}
 }
+
+// sinceTranscript is a Transcript that also bounds the reply read below, and
+// records the floor it was asked for.
+type sinceTranscript struct {
+	fakeTranscript
+	gotSince *time.Time
+}
+
+func (s sinceTranscript) LastAssistantTextSince(_ string, since time.Time) (string, error) {
+	*s.gotSince = since
+	return s.reply, nil
+}
+
+func TestSend_idleReplyIsReadWithTheSendInstantAsItsFloor(t *testing.T) {
+	ctx := context.Background()
+	st := newMemStore(t)
+	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "u", Name: "a", State: store.Ready, TmuxSession: "cc-a", TranscriptPath: "/p/a.jsonl"})
+	var got time.Time
+	tr := sinceTranscript{fakeTranscript: fakeTranscript{reply: "floored"}, gotSince: &got}
+	w := waitFunc(func(_ context.Context, name string, _ int64) (wait.Outcome, error) {
+		_, _ = st.Transition(ctx, name, store.Idle, "", "")
+		return wait.Outcome{State: store.Idle}, nil
+	})
+	s := newSendService(t, st, &sendTmux{live: true}, tr, w)
+	res, err := s.Send(ctx, "a", "hello", ModeRefuseIfBusy)
+	if err != nil || res.Reply != "floored" {
+		t.Fatalf("Send = %+v, %v", res, err)
+	}
+	if !got.Equal(time.Unix(1, 0)) {
+		t.Fatalf("reply floor = %v, want the send instant %v", got, time.Unix(1, 0))
+	}
+}

@@ -157,10 +157,22 @@ func isMessage() client.Filter {
 // LastAssistantText is the concatenated text of the last assistant line that has
 // text ("" when there is none).
 func (r *Reader) LastAssistantText(path string) (string, error) {
+	return r.LastAssistantTextSince(path, time.Time{})
+}
+
+// LastAssistantTextSince is LastAssistantText bounded below by a time floor: only
+// a text line written at or after since counts (a zero since is no floor). A
+// caller that knows when its turn began (a send) passes it so the read cannot
+// walk a long history for an answer it already knows is newer.
+func (r *Reader) LastAssistantTextSince(path string, since time.Time) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	more := []client.Filter{eq("type", "text"), exists("assistant_text", true)}
+	if !since.IsZero() {
+		more = append(more, timeFloor(since))
+	}
 	ans, err := r.query(ctx, client.QueryRequest{
-		Where:  mainSession(SessionID(path), eq("type", "text"), exists("assistant_text", true)),
+		Where:  mainSession(SessionID(path), more...),
 		Select: []string{"time"},
 		Order:  []client.Order{{By: "time", Dir: "desc"}},
 		Limit:  1,
@@ -173,6 +185,11 @@ func (r *Reader) LastAssistantText(path string) (string, error) {
 		return "", nil
 	}
 	return assistantText(ans.Raw[0]), nil
+}
+
+// timeFloor selects records whose time is at or after t.
+func timeFloor(t time.Time) client.Filter {
+	return client.Filter{Field: "time", Range: &client.Range{Gte: t.UTC().Format(time.RFC3339Nano)}}
 }
 
 // assistantText concatenates the text blocks of one raw assistant line.
@@ -205,28 +222,64 @@ func assistantText(line string) string {
 	return b.String()
 }
 
+// awaitingCandidates bounds how many of the newest AskUserQuestion tool_uses
+// IsAwaitingInput examines; awaitingResultsCap bounds the tool_results it reads
+// to answer them (the recorder's largest page).
+const (
+	awaitingCandidates = 50
+	awaitingResultsCap = 10000
+)
+
 // IsAwaitingInput reports whether the session has an AskUserQuestion tool_use
-// with no tool_result yet, asked after the last assistant record that is not a
-// question (the facts are the two record kinds; the verdict is ccpool's).
+// with no tool_result yet (the facts are the two record kinds; the verdict is
+// ccpool's). It is a direct, bounded read of at most two queries: the newest
+// awaitingCandidates questions (newest first, with their record times), then ONE
+// tool_result query, projecting only tool_use_id, floored at the oldest
+// candidate's time (an answer cannot predate its question) and capped at
+// awaitingResultsCap, newest first. The answered set is built here and the
+// verdict is true when any candidate is not in it. Both queries carry an explicit
+// source filter so the recorder's (session, source, time) index serves them; a
+// per-id tool_result lookup is not used because tool_use_id has no index and
+// would walk the whole session.
 func (r *Reader) IsAwaitingInput(path string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	id := SessionID(path)
 	asked, err := r.query(ctx, client.QueryRequest{
-		Where:  mainSession(id, eq("type", "tool_use"), eq("name", "AskUserQuestion")),
+		Where:  mainSession(id, eq("source", transcriptSource), eq("type", "tool_use"), eq("name", "AskUserQuestion")),
 		Select: []string{"tool_use_id", "time"},
-		Limit:  1000,
+		Order:  []client.Order{{By: "time", Dir: "desc"}},
+		Limit:  awaitingCandidates,
 	})
 	if err != nil {
 		return false, err
 	}
-	if len(asked.Rows) == 0 {
+	var ids []string
+	var oldest time.Time // the oldest candidate's record time
+	for _, row := range asked.Rows {
+		toolUse, _ := row[0].(string)
+		if toolUse == "" {
+			continue
+		}
+		ids = append(ids, toolUse)
+		if ts, _ := row[1].(string); ts != "" {
+			if t, perr := time.Parse(time.RFC3339Nano, ts); perr == nil && (oldest.IsZero() || t.Before(oldest)) {
+				oldest = t
+			}
+		}
+	}
+	if len(ids) == 0 {
 		return false, nil
 	}
+	more := []client.Filter{eq("source", transcriptSource), eq("type", "tool_result")}
+	if !oldest.IsZero() {
+		more = append(more, timeFloor(oldest))
+	}
 	answered, err := r.query(ctx, client.QueryRequest{
-		Where:  mainSession(id, eq("type", "tool_result")),
+		Where:  mainSession(id, more...),
 		Select: []string{"tool_use_id"},
-		Limit:  10000,
+		Order:  []client.Order{{By: "time", Dir: "desc"}},
+		Limit:  awaitingResultsCap,
 	})
 	if err != nil {
 		return false, err
@@ -237,13 +290,16 @@ func (r *Reader) IsAwaitingInput(path string) (bool, error) {
 			done[s] = true
 		}
 	}
-	for _, row := range asked.Rows {
-		if s, ok := row[0].(string); ok && s != "" && !done[s] {
+	for _, tu := range ids {
+		if !done[tu] {
 			return true, nil
 		}
 	}
 	return false, nil
 }
+
+// transcriptSource is the recorder source of Claude Code transcript lines.
+const transcriptSource = "claude-transcript"
 
 // FirstMessageActivity is the time of the newest real (user or assistant)
 // message, and whether one exists. A read that fails reports (zero, false): the
@@ -358,7 +414,11 @@ func (r *Reader) ProcessAlive(pid int64, procStart string) (bool, error) {
 }
 
 // Mark returns the feed position now: a later WaitMessage sees only records
-// written after it.
+// written after it. It stays a limit-1 query because its AsOf (the recorder's
+// head, including parse resets) is the only cursor guaranteed as fresh as the
+// query: hello carries no cursor, a snapshot's cursor is the record head only,
+// and a feed tail without a cursor walks from the retention floor. A stale mark
+// could sit before an earlier turn's record and falsely confirm a send.
 func (r *Reader) Mark(ctx context.Context) (string, error) {
 	ans, err := r.query(ctx, client.QueryRequest{Select: []string{"type"}, Limit: 1})
 	if err != nil {

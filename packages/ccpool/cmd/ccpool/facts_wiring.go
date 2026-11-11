@@ -24,6 +24,10 @@ func (transcriptAdapter) LastAssistantText(p string) (string, error) {
 	return factReader.LastAssistantText(p)
 }
 
+func (transcriptAdapter) LastAssistantTextSince(p string, since time.Time) (string, error) {
+	return factReader.LastAssistantTextSince(p, since)
+}
+
 func (transcriptAdapter) IsAwaitingInput(p string) (bool, error) {
 	return factReader.IsAwaitingInput(p)
 }

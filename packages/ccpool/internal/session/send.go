@@ -116,6 +116,14 @@ type FeedWaiter interface {
 	WaitMessage(ctx context.Context, transcriptPath, mark string, window time.Duration) (bool, error)
 }
 
+// SinceTranscript is the optional Transcript extension that bounds the reply read
+// below by a time floor: LastAssistantTextSince ignores text written before since.
+// A send passes the instant before it delivered the prompt, since its reply cannot
+// predate it.
+type SinceTranscript interface {
+	LastAssistantTextSince(path string, since time.Time) (string, error)
+}
+
 // confirmIngestedFeed is confirmIngested on the feed: one wait that returns on the
 // matching record, ErrPromptNotIngested when the window passes without one while
 // the recorder still answers, or ErrIngestUnknown when the recorder cannot say.
@@ -217,6 +225,9 @@ func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mod
 		return Result{}, err
 	}
 
+	// The reply of this send is written after this instant: it floors the
+	// post-send reply read.
+	sentAt := s.now()
 	if err := s.deliverPrompt(ctx, externalID, tmuxName, row.ClaudeSessionID, prompt); err != nil {
 		return Result{}, fmt.Errorf("deliver prompt: %w", err)
 	}
@@ -229,7 +240,7 @@ func (s *Service) sendLocked(ctx context.Context, externalID, prompt string, mod
 	if err != nil {
 		return Result{}, fmt.Errorf("wait turn: %w", err)
 	}
-	return s.resolveOutcome(ctx, externalID, row.TranscriptPath, out)
+	return s.resolveOutcome(ctx, externalID, row.TranscriptPath, sentAt, out)
 }
 
 // deliverPrompt clears the input line, then delivers the body via bracketed
@@ -286,7 +297,7 @@ func guardLeadingSlash(prompt string) string {
 	return prompt
 }
 
-func (s *Service) resolveOutcome(ctx context.Context, externalID, transcriptPath string, out wait.Outcome) (Result, error) {
+func (s *Service) resolveOutcome(ctx context.Context, externalID, transcriptPath string, sentAt time.Time, out wait.Outcome) (Result, error) {
 	if out.TimedOut {
 		// AskUserQuestion fallback: a dangling question fires no Notification
 		// hook, so detect it from the transcript.
@@ -305,7 +316,11 @@ func (s *Service) resolveOutcome(ctx context.Context, externalID, transcriptPath
 	case store.Idle:
 		reply := ""
 		if transcriptPath != "" {
-			reply, _ = s.d.Transcript.LastAssistantText(transcriptPath)
+			if ts, ok := s.d.Transcript.(SinceTranscript); ok {
+				reply, _ = ts.LastAssistantTextSince(transcriptPath, sentAt)
+			} else {
+				reply, _ = s.d.Transcript.LastAssistantText(transcriptPath)
+			}
 		}
 		return Result{State: store.Idle, Reply: reply}, nil
 	default: // needs_input, errored, etc.
