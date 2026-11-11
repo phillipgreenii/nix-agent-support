@@ -379,9 +379,10 @@ func TestTimeoutKillsTheProcessGroup(t *testing.T) {
 	f := newFx(t)
 	pidf := filepath.Join(f.scripts, "pid")
 	s := f.script("r.sh", `sleep 30 &
-echo $! > `+pidf+`
+echo $! > `+pidf+`.tmp
+mv `+pidf+`.tmp `+pidf+`
 wait`)
-	f.cfg.Rules = []config.Rule{{ID: "r", Glob: "*", RunPer: "file", Resolve: []string{s}, Timeout: 300 * time.Millisecond}}
+	f.cfg.Rules = []config.Rule{{ID: "r", Glob: "*", RunPer: "file", Resolve: []string{s}, Timeout: 5 * time.Second}}
 	f.conflicting("f.txt")
 	start := time.Now()
 	res := f.resolve(f.resolver(true), 0, nil, nil)
@@ -391,7 +392,16 @@ wait`)
 	if time.Since(start) > 20*time.Second {
 		t.Fatal("did not return promptly")
 	}
-	pid := strings.TrimSpace(f.read("/", pidf))
+	// The script publishes the pid atomically; wait (bounded) for it.
+	var pid string
+	for pd := time.Now().Add(30 * time.Second); pid == "" && time.Now().Before(pd); time.Sleep(50 * time.Millisecond) {
+		if b, err := os.ReadFile(pidf); err == nil {
+			pid = strings.TrimSpace(string(b))
+		}
+	}
+	if pid == "" {
+		t.Fatal("the resolver never published its child pid")
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		c := cmdrun.Exec(t.Context(), cmdrun.Call{Name: "kill", Args: []string{"-0", pid}})
