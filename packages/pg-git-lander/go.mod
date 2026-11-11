@@ -2,4 +2,7 @@ module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-gi
 
 go 1.26.0
 
-require github.com/phillipgreenii/x v0.0.0-20261106202408-ba17082cdd30
+require (
+	github.com/BurntSushi/toml v1.6.0
+	github.com/phillipgreenii/x v0.0.0-20261106202408-ba17082cdd30
+)
