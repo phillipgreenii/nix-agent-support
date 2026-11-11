@@ -3,6 +3,9 @@
 # at the end of each `tips` run (every 5 minutes), so each series is labelled by `repo`
 # (the allow-list key) and the rules alert per repo.
 #
+# Rule "red-no-newer-tip" likewise reads last_over_time over 1d, so a runner hold longer than the
+# 5 minute lookback does not drop the series and restart its 24h timer.
+#
 # Pushed gauges go stale a few minutes after the runner stops, so a dead runner leaves
 # no series at all. Rule "tips-stale" therefore reads the LAST KNOWN run time with
 # max_over_time over 1d; after a day without any run the series is gone and the rule
@@ -151,7 +154,7 @@ groups:
           severity: warning
         annotations:
           summary: "A repo has been red for over 24 hours with no newer tip"
-          description: "pg_repo_runner_check_latest_red has been 1 for over 24 hours: the latest non-superseded check verdict of the primary tip is red and no newer tip has replaced it. Read the verdict's log, fix the failure and push a new tip."
+          description: "pg_repo_runner_check_latest_red has been 1 for over 24 hours (read as the last known value over 1d, so a runner hold does not reset the timer): the latest non-superseded check verdict of the primary tip is red and no newer tip has replaced it. Read the verdict's log, fix the failure and push a new tip."
         data:
           - refId: A
             relativeTimeRange:
@@ -162,7 +165,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "pg_repo_runner_check_latest_red == 1"
+              expr: "last_over_time(pg_repo_runner_check_latest_red[1d]) == 1"
           - refId: B
             datasourceUid: __expr__
             model:

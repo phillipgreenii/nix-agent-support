@@ -44,3 +44,30 @@ tests:
       - eval_time: 1450m
         alertname: pg-repo-runner-red-no-newer-tip
         exp_alerts: []
+
+  - name: a multi-hour runner gap inside the wait still fires
+    interval: 1m
+    input_series:
+      # red for 300m, no samples for 120m (runner held), red again to the end
+      - series: 'pg_repo_runner_check_latest_red{repo="alpha"}'
+        values: "1x300 _x120 1x1200"
+    alert_rule_test:
+      - eval_time: 1400m
+        alertname: pg-repo-runner-red-no-newer-tip
+        exp_alerts: []
+      - eval_time: 1700m
+        alertname: pg-repo-runner-red-no-newer-tip
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: alpha
+
+  - name: a gap while red does not fire once the value dropped to 0 before it
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_check_latest_red{repo="alpha"}'
+        values: "1x300 0x10 _x1500"
+    alert_rule_test:
+      - eval_time: 1450m
+        alertname: pg-repo-runner-red-no-newer-tip
+        exp_alerts: []
