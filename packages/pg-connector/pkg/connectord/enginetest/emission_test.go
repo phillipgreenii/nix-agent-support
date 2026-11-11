@@ -285,13 +285,12 @@ func TestWatchRefusesARequestItCannotAnswer(t *testing.T) {
 
 // HT-33: WatchOne before a read.
 func TestWatchOneBeforeAReadMakesTheChangeTheReadFindsARowOfAWatchedEntity(t *testing.T) {
-	ctx := context.Background()
 	w := engine.WatchRequest{ID: idOne, Ref: refOne, Via: registry.ViaDirect, Mode: engine.WatchLate}
 
 	t.Run("watch then read finds the change", func(t *testing.T) {
 		r := watchedOnlyRig(t)
 		seedKnown(r, idOne, refOne)
-		res, err := r.Engine.WatchOne(ctx, r.Store, w)
+		res, err := r.Engine.WatchOne(t.Context(), r.Store, w)
 		if err != nil || !res.Newly || !res.Appended {
 			t.Fatalf("WatchOne = %+v, %v", res, err)
 		}
@@ -306,7 +305,7 @@ func TestWatchOneBeforeAReadMakesTheChangeTheReadFindsARowOfAWatchedEntity(t *te
 		r := watchedOnlyRig(t)
 		seedKnown(r, idOne, refOne)
 		retitle(t, r, idOne, "Another title") // the change lands in an unwatched entity's skipped row
-		res, err := r.Engine.WatchOne(ctx, r.Store, w)
+		res, err := r.Engine.WatchOne(t.Context(), r.Store, w)
 		if err != nil || !res.Newly || !res.Appended {
 			t.Fatalf("WatchOne = %+v, %v", res, err)
 		}
@@ -315,12 +314,12 @@ func TestWatchOneBeforeAReadMakesTheChangeTheReadFindsARowOfAWatchedEntity(t *te
 	t.Run("an already watched entity changes nothing", func(t *testing.T) {
 		r := watchedOnlyRig(t)
 		seedKnown(r, idOne, refOne)
-		if _, err := r.Engine.WatchOne(ctx, r.Store, w); err != nil {
+		if _, err := r.Engine.WatchOne(t.Context(), r.Store, w); err != nil {
 			t.Fatal(err)
 		}
 		ent, _ := entityOf(t, r, idOne)
 		rows := r.Rows()
-		res, err := r.Engine.WatchOne(ctx, r.Store, engine.WatchRequest{ID: idOne, Ref: refOne, Via: registry.ViaAdHoc + queryMine, Mode: engine.WatchLate})
+		res, err := r.Engine.WatchOne(t.Context(), r.Store, engine.WatchRequest{ID: idOne, Ref: refOne, Via: registry.ViaAdHoc + queryMine, Mode: engine.WatchLate})
 		if err != nil || res.Newly || res.Appended {
 			t.Fatalf("WatchOne = %+v, %v", res, err)
 		}
@@ -335,7 +334,7 @@ func TestWatchOneBeforeAReadMakesTheChangeTheReadFindsARowOfAWatchedEntity(t *te
 		if err := r.Store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if res, err := r.Engine.WatchOne(ctx, r.Store, w); err == nil || res != (engine.WatchResult{}) {
+		if res, err := r.Engine.WatchOne(t.Context(), r.Store, w); err == nil || res != (engine.WatchResult{}) {
 			t.Errorf("WatchOne on a closed store = %+v, %v", res, err)
 		}
 	})

@@ -308,7 +308,6 @@ func TestACursorPastRetentionOrMovedAsideIsExpiredForAnUnscopedConsumerToo(t *te
 
 func TestCallsAndAcksForOneConsumerAreSerialised(t *testing.T) {
 	r := newRig(t)
-	ctx := context.Background()
 	r.poll(viewAll, "c", "mine")
 	r.plain(refA)
 
@@ -322,21 +321,21 @@ func TestCallsAndAcksForOneConsumerAreSerialised(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if _, err := r.f.Poll(ctx, PollRequest{View: viewAll, Consumer: "c", Scope: "mine"}); err != nil {
+		if _, err := r.f.Poll(t.Context(), PollRequest{View: viewAll, Consumer: "c", Scope: "mine"}); err != nil {
 			t.Errorf("poll: %v", err)
 		}
 	}()
 	waitFor(t, inRun) // the poll is inside Run, holding the consumer's lock
 
 	acked := make(chan error, 1)
-	go func() { acked <- ackErr(r.f, ctx, viewAll, "c", "mine", r.head()) }()
+	go func() { acked <- ackErr(r.f, t.Context(), viewAll, "c", "mine", r.head()) }()
 	select {
 	case err := <-acked:
 		t.Fatalf("an ack of the same consumer completed while a poll held it (err %v)", err)
 	case <-time.After(150 * time.Millisecond):
 	}
 	// Another consumer is not held up by it.
-	if err := ackErr(r.f, ctx, viewAll, "other", "mine", 0); err != nil {
+	if err := ackErr(r.f, t.Context(), viewAll, "other", "mine", 0); err != nil {
 		t.Fatalf("an ack of another consumer: %v", err)
 	}
 	close(release)
@@ -351,7 +350,6 @@ func TestCallsAndAcksForOneConsumerAreSerialised(t *testing.T) {
 
 func TestConcurrentPollsAndAcksOfOneConsumerKeepItsPositionMonotonic(t *testing.T) {
 	r := newRig(t)
-	ctx := context.Background()
 	r.poll(viewAll, "c", "mine")
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -362,12 +360,12 @@ func TestConcurrentPollsAndAcksOfOneConsumerKeepItsPositionMonotonic(t *testing.
 			defer wg.Done()
 			for range 20 {
 				r.plain(refA)
-				res, err := r.f.Poll(ctx, PollRequest{View: viewAll, Consumer: "c", Scope: "mine"})
+				res, err := r.f.Poll(t.Context(), PollRequest{View: viewAll, Consumer: "c", Scope: "mine"})
 				if err != nil {
 					t.Errorf("poll: %v", err)
 					return
 				}
-				ack, err := r.f.Ack(ctx, AckRequest{View: viewAll, Consumer: "c", Scope: "mine", NextSeq: res.NextSeq})
+				ack, err := r.f.Ack(t.Context(), AckRequest{View: viewAll, Consumer: "c", Scope: "mine", NextSeq: res.NextSeq})
 				if err != nil {
 					t.Errorf("ack: %v", err)
 					return
@@ -382,7 +380,7 @@ func TestConcurrentPollsAndAcksOfOneConsumerKeepItsPositionMonotonic(t *testing.
 	if n := r.f.KeyLocksHeld(); n != 0 {
 		t.Fatalf("%d locks left behind", n)
 	}
-	if list, _ := r.st.ListConsumers(ctx); len(list) != 1 {
+	if list, _ := r.st.ListConsumers(t.Context()); len(list) != 1 {
 		t.Fatalf("concurrent calls left %d rows for one consumer", len(list))
 	}
 	res := r.poll(viewAll, "c", "mine")

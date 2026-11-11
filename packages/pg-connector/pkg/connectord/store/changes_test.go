@@ -33,7 +33,6 @@ func TestVersion1And2FixturesMigrateToVersion3KeepingTheirData(t *testing.T) {
 	if SchemaVersion < 3 {
 		t.Fatalf("SchemaVersion = %d, this test describes the step to version 3 and above", SchemaVersion)
 	}
-	ctx := context.Background()
 	for _, from := range []int{1, 2} {
 		t.Run(fmt.Sprintf("from_v%d", from), func(t *testing.T) {
 			fx, ok := fixtures(t)[from]
@@ -46,9 +45,9 @@ func TestVersion1And2FixturesMigrateToVersion3KeepingTheirData(t *testing.T) {
 			if res.Outcome != OutcomeMigrated || res.FromVersion != from || res.ToVersion != SchemaVersion {
 				t.Fatalf("result = %+v, want migrated %d -> %d", res, from, SchemaVersion)
 			}
-			assertFixtureData(t, ctx, s)
-			assertFixtureJobs(t, ctx, s, from)
-			assertFixtureChanges(t, ctx, s, from)
+			assertFixtureData(t, t.Context(), s)
+			assertFixtureJobs(t, t.Context(), s, from)
+			assertFixtureChanges(t, t.Context(), s, from)
 
 			// The new tables are usable at once, and the first sequence number is 1.
 			if seq := appendRow(t, s, ChangeRow{Kind: "pr", ID: "org/repo#1", At: ms(1)}); seq != 1 {

@@ -134,7 +134,6 @@ func runInteractive(t *testing.T, r *execRig, id, group string) scheduler.Result
 }
 
 func TestARefreshThatBeganBeforeAnInvalidationStoresNothingAndFiresNoHook(t *testing.T) {
-	ctx := context.Background()
 	for _, spec := range []registry.Spec{specAlpha, specBeta} {
 		t.Run(spec.EntityKind, func(t *testing.T) {
 			r := newExecRig(t, spec, nil, nil)
@@ -147,15 +146,15 @@ func TestARefreshThatBeganBeforeAnInvalidationStoresNothingAndFiresNoHook(t *tes
 			release := f.block()
 			t.Cleanup(release)
 
-			if err := r.svc.QueueGroup(ctx, ent1, groupSide, governor.ClassInvalidated, time.Time{}); err != nil {
+			if err := r.svc.QueueGroup(t.Context(), ent1, groupSide, governor.ClassInvalidated, time.Time{}); err != nil {
 				t.Fatal(err)
 			}
-			r.sched.Step(ctx)
+			r.sched.Step(t.Context())
 			if !f.waitStarted(1, 10*time.Second) {
 				t.Fatal("the refresh never started")
 			}
 			// A write lands while the fetch is in flight.
-			if err := groupkit.Invalidate(ctx, r.st, r.kind(), ent1, groupSide, r.clk.Now()); err != nil {
+			if err := groupkit.Invalidate(t.Context(), r.st, r.kind(), ent1, groupSide, r.clk.Now()); err != nil {
 				t.Fatal(err)
 			}
 			release()
@@ -172,7 +171,7 @@ func TestARefreshThatBeganBeforeAnInvalidationStoresNothingAndFiresNoHook(t *tes
 				t.Errorf("commitCount = %d after a superseded refresh, want 0", n)
 			}
 			// The row is due now, so the cycle refetches it, and that one is stored.
-			r.sched.Drain(ctx)
+			r.sched.Drain(t.Context())
 			row, _ = r.group(ent1, groupSide)
 			if string(row.Content) == "old" || row.Generation != 3 {
 				t.Fatalf("after the retry the row = %+v", row)

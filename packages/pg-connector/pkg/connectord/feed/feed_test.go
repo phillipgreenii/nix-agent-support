@@ -391,7 +391,6 @@ func waitFor(t *testing.T, ch <-chan string) {
 func TestConcurrentPollsAndAcksKeepThePositionMonotonic(t *testing.T) {
 	r := newRig(t)
 	r.poll(viewAll, "c", "mine")
-	ctx := context.Background()
 	var wg sync.WaitGroup
 	for w := range 4 {
 		wg.Add(1)
@@ -400,12 +399,12 @@ func TestConcurrentPollsAndAcksKeepThePositionMonotonic(t *testing.T) {
 			consumer := fmt.Sprintf("w%d", w%2)
 			for range 25 {
 				r.plain(refA)
-				res, err := r.f.Poll(ctx, PollRequest{View: viewAll, Consumer: consumer, Scope: "mine"})
+				res, err := r.f.Poll(t.Context(), PollRequest{View: viewAll, Consumer: consumer, Scope: "mine"})
 				if err != nil {
 					t.Errorf("poll: %v", err)
 					return
 				}
-				if err := ackErr(r.f, ctx, viewAll, consumer, "mine", res.NextSeq); err != nil {
+				if err := ackErr(r.f, t.Context(), viewAll, consumer, "mine", res.NextSeq); err != nil {
 					t.Errorf("ack: %v", err)
 					return
 				}
