@@ -5715,6 +5715,7 @@
                     pg-claude-control -
                     pg-wi-flow pg-wi-flow
                     pn -
+                    pg-git-lander pg-git-lander
                     pg-hooks -
                     pg-repo-runner -
                     pg-go-mutate -
@@ -18245,6 +18246,60 @@
                       || { echo "FAIL: the wrapper does not carry the config hash" >&2; cat ${r.live.wrapper} >&2; exit 1; }
                     grep -q '^exec ${r.live.package}/bin/pg-keep-awake keeper$' ${r.live.wrapper} \
                       || { echo "FAIL: the wrapper does not exec the keeper" >&2; cat ${r.live.wrapper} >&2; exit 1; }
+                    touch $out
+                  '';
+
+              # pg-git-lander HM module: the eval cases live in tests/pg-git-lander-hm.nix.
+              # This check then runs the REAL `pg-git-lander config check` on the rendered
+              # XDG file with XDG_CONFIG_HOME pointing at it (the [[repo]] roots are
+              # rewritten to a throwaway git clone, since the tool requires each root to
+              # be inside one), and expects it to reject a render with an empty root.
+              test-pg-git-lander-hm =
+                let
+                  r = import ./tests/pg-git-lander-hm.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "pg-git-lander-hm"
+                  {
+                    nativeBuildInputs = [
+                      r.live.package
+                      pkgs.git
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-git-lander eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    [ -s ${r.live.tldrSource} ] \
+                      || { echo "FAIL: the tldr page ${r.live.tldrSource} is missing" >&2; exit 1; }
+
+                    export HOME="$PWD/home"
+                    mkdir -p "$HOME" repo
+                    export GIT_CONFIG_GLOBAL="$HOME/.gitconfig" GIT_CONFIG_NOSYSTEM=1
+                    git init -q repo
+                    git -C repo -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+
+                    # The rendered file, roots pointed at the clone.
+                    mkdir -p good/pg-git-lander
+                    sed -e "s|/src/example-repo|$PWD/repo|" -e "s|/src/very-large-repo|$PWD/repo|" \
+                      ${r.live.goodFile} > good/pg-git-lander/config.toml
+                    grep -q '^trust_repo_config = true$' good/pg-git-lander/config.toml
+                    grep -q '^ignore_repo_config = true$' good/pg-git-lander/config.toml
+                    grep -q '^lease_ttl = "30s"$' good/pg-git-lander/config.toml
+                    grep -q '^wait = "60s"$' good/pg-git-lander/config.toml
+                    (cd repo && XDG_CONFIG_HOME="$PWD/../good" pg-git-lander config check) \
+                      || { echo "FAIL: config check rejected the rendered file" >&2; cat good/pg-git-lander/config.toml >&2; exit 1; }
+
+                    # Negative control: an empty root is rejected by the same command.
+                    mkdir -p bad/pg-git-lander
+                    cp ${r.live.emptyRootFile} bad/pg-git-lander/config.toml
+                    grep -q '^root = ""$' bad/pg-git-lander/config.toml
+                    rc=0
+                    (cd repo && XDG_CONFIG_HOME="$PWD/../bad" pg-git-lander config check) >out.txt 2>&1 || rc=$?
+                    [ "$rc" = 2 ] || { echo "FAIL: config check on an empty root exited $rc, want 2:" >&2; cat out.txt >&2; exit 1; }
                     touch $out
                   '';
 

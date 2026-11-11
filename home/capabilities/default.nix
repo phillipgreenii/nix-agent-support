@@ -80,6 +80,12 @@
       name = "worktree-tools";
       features = [ "worktree-tools" ];
     }
+    # pg-git-lander: the lock-safe rebase and land tool the integrate-branch
+    # skill calls as a bare command; rides in the agent-support bundle below.
+    {
+      name = "pg-git-lander";
+      features = [ "pg-git-lander" ];
+    }
     # Git helper CLIs — human git work. (The pr-tools feature was retired with
     # the PR tool's removal, bead pg2-ijsep; the capability name is kept so any
     # consumer setting `capabilities.pr-tools` keeps evaluating.)
@@ -127,6 +133,7 @@
         "claude-code"
         "beads"
         "worktree-tools"
+        "pg-git-lander"
         "pb"
         "pn-workspace"
       ];
