@@ -1011,11 +1011,19 @@ func (s *Settler) newest(ctx context.Context, c *conv) time.Time {
 	return best
 }
 
+// lastSeen is for callers that hold the run lock (it may read s.seen).
 func (s *Settler) lastSeen(ctx context.Context, f store.File) time.Time {
-	ns := f.FirstSeen
 	if v, ok := s.seen[f.ID]; ok {
-		return time.Unix(0, max(ns, v))
+		return time.Unix(0, max(f.FirstSeen, v))
 	}
+	return s.lastSeenFromStore(f)
+}
+
+// lastSeenFromStore reads the file's last-seen time straight from the store and
+// never touches s.seen, so a caller that does not hold the run lock (doctor)
+// can use it.
+func (s *Settler) lastSeenFromStore(f store.File) time.Time {
+	ns := f.FirstSeen
 	var got map[int64]int64
 	if err := s.st.ReadTxCtx(ctx, func(rd *store.Reader) (err error) {
 		got, err = rd.LastSeenByFile([]int64{f.ID})

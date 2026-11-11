@@ -150,7 +150,7 @@ func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
 				if err != nil {
 					continue
 				}
-				if (h != sn.Hash || size != sn.Size) && !s.lastSeen(ctx, f).Before(s.mtimeOf(orig)) {
+				if (h != sn.Hash || size != sn.Size) && !s.lastSeenFromStore(ctx, f).Before(s.mtimeOf(orig)) {
 					add(DoctorMismatch{Kind: MismatchSnapshot, File: f.ID, Path: orig, Detail: fmt.Sprintf("stored %d bytes, original %d", sn.Size, size)})
 				}
 			}

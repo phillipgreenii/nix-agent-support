@@ -576,7 +576,7 @@ func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File
 		if err != nil {
 			return sn.Size, nil
 		}
-		if (h != sn.Hash || size != sn.Size) && !s.lastSeen(ctx, f).Before(s.mtimeOf(orig)) {
+		if (h != sn.Hash || size != sn.Size) && !s.lastSeenFromStore(ctx, f).Before(s.mtimeOf(orig)) {
 			if s.doctorSeam.recheck != nil {
 				s.doctorSeam.recheck(f.ID)
 			}
