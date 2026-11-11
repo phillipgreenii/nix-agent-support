@@ -109,9 +109,16 @@ func (f *fileState) fold(line []byte, offset int64, at time.Time) {
 	}
 }
 
-// finish refreshes the derived values after a batch of lines.
+// finish refreshes the derived values after a batch of lines and marks the
+// file clean.
 func (f *fileState) finish() {
+	f.refresh()
 	f.dirty = false
+}
+
+// refresh rebuilds the derived values from the lines folded so far without
+// touching dirty: a partial read keeps what it folded and stays dirty.
+func (f *fileState) refresh() {
 	if f.kind == kindStatus {
 		return
 	}
@@ -123,12 +130,13 @@ func (f *fileState) finish() {
 // of them changed. Nothing here opens a file of the Claude directory: lines
 // come from the recorder's raw bytes.
 type reader struct {
-	facts   Facts
-	cursor  string
-	pending []client.InventoryRequest // inventory requests still to run after a bootstrap
-	gate    func() error              // test seam: called before each inventory request
-	files   map[string]*fileState     // by file ref
-	asked   map[string]bool           // session ids whose files were asked for by id
+	facts    Facts
+	cursor   string
+	pending  []client.InventoryRequest // inventory requests still to run after a bootstrap
+	gate     func() error              // test seam: called before each inventory request
+	readGate func(fs *fileState) error // test seam: called before each file's read
+	files    map[string]*fileState     // by file ref
+	asked    map[string]bool           // session ids whose files were asked for by id
 
 	// perf counters of the last sync.
 	queries     int
@@ -339,27 +347,55 @@ func (r *reader) query(ctx context.Context, c *client.Client, req client.QueryRe
 }
 
 // foldDirty reads the lines after each dirty file's offset cursor from the
-// recorder (raw bytes, in offset order) and folds them.
+// recorder (raw bytes, in offset order) and folds them. A file whose read
+// failed keeps what was folded but stays dirty, so the next Scan resumes at its
+// offset cursor. The loop stops at the first error that says every later read
+// would fail too (the Scan's context expired, the recorder is busy or timed a
+// query out); other errors skip to the next file.
 func (r *reader) foldDirty(ctx context.Context, c *client.Client) (firstErr error) {
 	for _, fs := range r.files {
 		if !fs.dirty {
 			continue
 		}
-		n, err := r.readLines(ctx, c, fs)
+		var n int
+		var err error
+		if r.readGate != nil {
+			err = r.readGate(fs)
+		}
+		if err == nil {
+			n, err = r.readLines(ctx, c, fs)
+		}
 		if n > 0 {
 			r.filesFolded++
 		}
-		if err != nil {
-			if errors.Is(err, client.ErrDown) || errors.Is(err, client.ErrUnavailable) {
-				return err
-			}
-			if firstErr == nil {
-				firstErr = err
-			}
+		if err == nil {
+			fs.finish()
+			continue
 		}
-		fs.finish()
+		fs.refresh() // keep the lines already folded; fs.dirty stays true
+		if errors.Is(err, client.ErrDown) || errors.Is(err, client.ErrUnavailable) {
+			return err
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
+			errors.Is(err, client.ErrQueryTimeout) || errors.Is(err, client.ErrBusy) || client.Retryable(err) {
+			return firstErr
+		}
 	}
 	return firstErr
+}
+
+// dirtyFiles counts the files still waiting for a read.
+func (r *reader) dirtyFiles() int {
+	n := 0
+	for _, fs := range r.files {
+		if fs.dirty {
+			n++
+		}
+	}
+	return n
 }
 
 func (r *reader) readLines(ctx context.Context, c *client.Client, fs *fileState) (int, error) {

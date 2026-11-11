@@ -3,6 +3,7 @@ package corpus
 import (
 	"context"
 	"errors"
+	"log"
 	"path/filepath"
 	"sort"
 	"time"
@@ -128,6 +129,9 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 		return nil, err
 	}
 	recordScan(m.rec, "feed", time.Since(foldStart), int64(m.rd.linesFolded))
+	if foldErr != nil || m.rd.dirtyFiles() > 0 {
+		log.Printf("pa-monitor: fold incomplete: %d files still dirty: %v", m.rd.dirtyFiles(), foldErr)
+	}
 
 	keep := map[string]bool{} // files still wanted (by ref)
 	newTopo := make(map[string]sessionTopology, len(sessions))
