@@ -21,6 +21,7 @@ import (
 	"github.com/phillipgreenii/x/cmdrun"
 
 	"github.com/phillipgreenii/pg-router-sensors/internal/levels"
+	"github.com/phillipgreenii/pg-router-sensors/internal/netprobe"
 	"github.com/phillipgreenii/pg-router-sensors/internal/sensorcli"
 )
 
@@ -29,6 +30,8 @@ const (
 	ResDisk = "disk"
 	ResCPU  = "cpu"
 	ResRAM  = "ram"
+	// ResNetwork is the public-internet reachability resource.
+	ResNetwork = "network"
 )
 
 // The only argv the sensor runs (command name and arguments).
@@ -88,16 +91,27 @@ type Sensor struct {
 	// Paths are the filesystems whose lowest free space is the disk reading.
 	Paths []string
 	T     Thresholds
+	// Net probes the network resource's targets (nil Client: the default
+	// verifying client; tests inject one pointed at httptest servers).
+	Net *netprobe.Prober
+	// NetTargets are the URLs probed for network (default: three public
+	// example sites); NetThreshold is the consecutive all-fail passes before
+	// UNAVAILABLE.
+	NetTargets   []string
+	NetThreshold int
 }
 
 // New returns a Sensor on the production seams with the default paths ("/")
 // and thresholds.
 func New() *Sensor {
-	return &Sensor{Run: cmdrun.Exec, Statfs: SystemStatfs, Paths: []string{"/"}, T: Defaults()}
+	return &Sensor{
+		Run: cmdrun.Exec, Statfs: SystemStatfs, Paths: []string{"/"}, T: Defaults(),
+		Net: &netprobe.Prober{}, NetTargets: netprobe.DefaultTargets, NetThreshold: netprobe.DefaultThreshold,
+	}
 }
 
 // Resources implements sensorcli.Sensor.
-func (s *Sensor) Resources() []string { return []string{ResCPU, ResDisk, ResRAM} }
+func (s *Sensor) Resources() []string { return []string{ResCPU, ResDisk, ResNetwork, ResRAM} }
 
 func (s *Sensor) diskTable() levels.Table {
 	return levels.Table{
@@ -138,7 +152,7 @@ func (s *Sensor) swapTable() levels.Table {
 // Bands implements sensorcli.Sensor: the ram bands are the swap bands (the
 // reading is swap used in GiB).
 func (s *Sensor) Bands() []levels.Info {
-	return []levels.Info{s.cpuTable().Info(), s.diskTable().Info(), s.swapTable().Info()}
+	return []levels.Info{s.cpuTable().Info(), s.diskTable().Info(), levels.NoBands(ResNetwork, "targets_reachable"), s.swapTable().Info()}
 }
 
 var configKeys = []string{
@@ -147,6 +161,7 @@ var configKeys = []string{
 	"cpu_plenty_max", "cpu_ok_max", "cpu_tight_max",
 	"swap_plenty_max", "swap_ok_max", "swap_tight_max",
 	"stepdown_swap_gib", "stepdown_disk_gib",
+	"network_targets", "network_timeout", "network_failures",
 }
 
 // Configure implements sensorcli.Sensor. Keys: paths (list of strings) and the
@@ -186,6 +201,33 @@ func (s *Sensor) Configure(cfg sensorcli.Config) error {
 		if math.IsNaN(*dst) || *dst < 0 {
 			return fmt.Errorf("config key %s: must be a non-negative number", key)
 		}
+	}
+	if s.Net == nil {
+		s.Net = &netprobe.Prober{}
+	}
+	if s.NetThreshold == 0 {
+		s.NetThreshold = netprobe.DefaultThreshold
+	}
+	if len(s.NetTargets) == 0 {
+		s.NetTargets = netprobe.DefaultTargets
+	}
+	targets, err := cfg.StringList("network_targets")
+	if err != nil {
+		return err
+	}
+	if targets != nil {
+		if len(targets) == 0 {
+			return fmt.Errorf("config key network_targets: must not be empty")
+		}
+		for _, u := range targets {
+			if !strings.HasPrefix(u, "https://") {
+				return fmt.Errorf("config key network_targets: %q is not an https:// URL", u)
+			}
+		}
+		s.NetTargets = targets
+	}
+	if err := netprobe.ConfigureCommon(cfg, "network_timeout", "network_failures", s.Net, &s.NetThreshold); err != nil {
+		return err
 	}
 	t := s.T
 	if !(t.DiskTight < t.DiskOK && t.DiskOK < t.DiskPlenty) {
@@ -314,6 +356,9 @@ func (s *Sensor) Measure(ctx context.Context, env sensorcli.Env) ([]levels.Obser
 		} else {
 			out = append(out, o)
 		}
+	}
+	if want(ResNetwork) && s.Net != nil {
+		out = append(out, netprobe.Observe(ctx, s.Net, env, ResNetwork, s.NetTargets, s.NetThreshold))
 	}
 	if want(ResRAM) {
 		if o, ok := s.measureRAM(ctx, env, free, haveDisk); ok {

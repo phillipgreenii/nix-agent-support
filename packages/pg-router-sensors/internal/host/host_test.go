@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/phillipgreenii/x/cmdruntest"
 
 	"github.com/phillipgreenii/pg-router-sensors/internal/levels"
+	"github.com/phillipgreenii/pg-router-sensors/internal/netprobe"
 	"github.com/phillipgreenii/pg-router-sensors/internal/sensorcli"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -99,7 +102,12 @@ func newRig(t *testing.T) *rig {
 		load: "{ 1.00 1.00 1.00 }\n", ncpu: "10\n", swapG: 0, press: "1\n",
 		state: t.TempDir(), now: t0,
 	}
-	r.s = &Sensor{Run: r.fake.Runner(), Paths: []string{"/"}, T: Defaults()}
+	netSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	t.Cleanup(netSrv.Close)
+	r.s = &Sensor{
+		Run: r.fake.Runner(), Paths: []string{"/"}, T: Defaults(),
+		Net: &netprobe.Prober{Client: netSrv.Client(), Timeout: time.Second}, NetTargets: []string{netSrv.URL},
+	}
 	r.s.Statfs = func(p string) (uint64, error) {
 		g, ok := r.free[p]
 		if !ok {
@@ -399,13 +407,13 @@ func TestDiskRiseNeedsMargin(t *testing.T) {
 	}
 }
 
-func TestRunAnswersAllThreeAndValidates(t *testing.T) {
+func TestRunAnswersAllFourAndValidates(t *testing.T) {
 	r := newRig(t)
 	code, ls := r.run(t)
-	if code != 0 || len(ls) != 3 {
+	if code != 0 || len(ls) != 4 {
 		t.Fatalf("exit %d lines %v", code, ls)
 	}
-	for _, res := range []string{"cpu", "disk", "ram"} {
+	for _, res := range []string{"cpu", "disk", "network", "ram"} {
 		l := byRes(ls, res)
 		if l == nil || l["owner"] != "host-sensor" {
 			t.Fatalf("%s missing: %v", res, ls)
@@ -504,7 +512,7 @@ func TestBandsOutputFollowsConfig(t *testing.T) {
 		}
 		infos = append(infos, i)
 	}
-	if len(infos) != 3 || infos[1].Resource != "disk" || *infos[1].Bands[1].Min != 12 {
+	if len(infos) != 4 || infos[1].Resource != "disk" || *infos[1].Bands[1].Min != 12 {
 		t.Errorf("bands = %+v", infos)
 	}
 }
@@ -521,10 +529,60 @@ func TestSystemStatfsRoot(t *testing.T) {
 
 func TestResourcesAndNew(t *testing.T) {
 	s := New()
-	if got := strings.Join(s.Resources(), ","); got != "cpu,disk,ram" {
+	if got := strings.Join(s.Resources(), ","); got != "cpu,disk,network,ram" {
 		t.Errorf("resources = %s", got)
 	}
 	if s.Run == nil || s.Statfs == nil || len(s.Paths) != 1 || s.Paths[0] != "/" {
 		t.Errorf("New() = %+v", s)
+	}
+}
+
+func TestConfigureNetwork(t *testing.T) {
+	s := New()
+	cfg := func(m map[string]any) sensorcli.Config { return sensorcli.Config{Raw: m} }
+	if err := s.Configure(cfg(map[string]any{
+		"network_targets": []any{"https://one.example/", "https://two.example/"},
+		"network_timeout": "3s", "network_failures": int64(2),
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.NetTargets) != 2 || s.Net.Timeout != 3*time.Second || s.NetThreshold != 2 {
+		t.Fatalf("%+v", s)
+	}
+	for _, m := range []map[string]any{
+		{"network_targets": []any{}},
+		{"network_targets": []any{"http://plain.example"}},
+		{"network_targets": "x"},
+		{"network_timeout": "0s"},
+		{"network_failures": int64(0)},
+	} {
+		if err := New().Configure(cfg(m)); err == nil {
+			t.Errorf("%v must fail", m)
+		}
+	}
+	// A bare struct literal gets the defaults filled in.
+	bare := &Sensor{Paths: []string{"/"}, T: Defaults()}
+	if err := bare.Configure(cfg(map[string]any{})); err != nil || bare.Net == nil || bare.NetThreshold != 3 || len(bare.NetTargets) != 3 {
+		t.Fatalf("%v %+v", err, bare)
+	}
+}
+
+func TestMeasureNetwork(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(302) }))
+	defer srv.Close()
+	s := &Sensor{Net: &netprobe.Prober{Client: srv.Client(), Timeout: time.Second}, NetTargets: []string{srv.URL}, NetThreshold: 3}
+	var stderr bytes.Buffer
+	obs, err := s.Measure(context.Background(), sensorcli.Env{Resource: ResNetwork, Store: levels.NewMemoryStore(), Stderr: &stderr})
+	if err != nil || len(obs) != 1 || obs[0].Resource != ResNetwork || obs[0].Level != "AVAILABLE" {
+		t.Fatalf("%+v %v", obs, err)
+	}
+	var found bool
+	for _, b := range New().Bands() {
+		if b.Resource == ResNetwork && len(b.Bands) == 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("network must appear in --bands with no bands")
 	}
 }
