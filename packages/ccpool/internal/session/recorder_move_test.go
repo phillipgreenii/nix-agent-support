@@ -98,18 +98,19 @@ func TestSend_confirmIngest_timeoutWithRecorderDownIsUnknown(t *testing.T) {
 	}
 }
 
-// With the recorder down the confirmation fails with its error before anything is
-// delivered: no guess from files.
-func TestSend_confirmIngest_markErrorFailsBeforeDelivery(t *testing.T) {
+// With the recorder down (or past its query deadline) the feed position cannot
+// be taken, but the prompt MUST still be delivered: a recorder fault must not
+// leave a launched session never prompted. The verdict is unknown, not dropped.
+func TestSend_confirmIngest_markErrorStillDeliversAndReportsUnknown(t *testing.T) {
 	offline := errors.New("daemon offline")
 	tm := &sendTmux{live: true}
 	s := feedService(t, feedTranscript{markErr: offline}, tm)
 	_, err := s.SendWithConfirm(context.Background(), "a", "do it", ModeNoWait, time.Second)
-	if !errors.Is(err, offline) {
-		t.Fatalf("err = %v; want the mark error", err)
+	if !errors.Is(err, ErrIngestUnknown) || errors.Is(err, ErrPromptNotIngested) {
+		t.Fatalf("err = %v; want ErrIngestUnknown only", err)
 	}
-	if len(tm.pasted) != 0 {
-		t.Errorf("a prompt was delivered despite the failed mark: %q", tm.pasted)
+	if len(tm.pasted) != 1 {
+		t.Errorf("pasted = %q; want the prompt delivered once despite the failed mark", tm.pasted)
 	}
 }
 

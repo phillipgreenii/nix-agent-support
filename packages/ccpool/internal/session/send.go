@@ -60,11 +60,18 @@ func (s *Service) SendWithConfirm(ctx context.Context, externalID, prompt string
 		// With a feed-backed Transcript, take the feed position BEFORE delivery so
 		// the confirmation waits for a record written after it (not a whole-file
 		// re-read every 250 ms, and not a message from an earlier turn).
+		//
+		// A Mark that fails (the recorder down or past its query deadline) MUST NOT
+		// block delivery: the recorder is only the witness, and refusing to send
+		// left a launched session live and never prompted. Deliver, skip the
+		// feed wait, and report ErrIngestUnknown (the prompt was delivered and the
+		// recorder could not say whether the model started a turn).
 		var mark string
+		var markErr error
 		fw, feed := s.d.Transcript.(FeedWaiter)
 		if feed && window > 0 && (mode == ModeNoWait || mode == ModeQueue) {
-			if mark, e = fw.Mark(ctx); e != nil {
-				return fmt.Errorf("confirm ingest: %w", e)
+			if mark, markErr = fw.Mark(ctx); markErr != nil {
+				feed = false
 			}
 		} else {
 			feed = false
@@ -72,6 +79,9 @@ func (s *Service) SendWithConfirm(ctx context.Context, externalID, prompt string
 		res, e = s.sendLocked(ctx, externalID, prompt, mode)
 		if e != nil {
 			return e
+		}
+		if markErr != nil {
+			return s.withHookEvidence(ctx, externalID, res.sentGen, fmt.Errorf("%w: could not take the feed position before delivery: %v", ErrIngestUnknown, markErr))
 		}
 		if feed {
 			return s.withHookEvidence(ctx, externalID, res.sentGen, s.confirmIngestedFeed(ctx, fw, externalID, mark, window))
