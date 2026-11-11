@@ -52,6 +52,17 @@ type Layer struct {
 	Jitter func(max time.Duration) time.Duration
 	// Interval overrides the renewal period (LeaseTTL/3) when positive.
 	Interval time.Duration
+	// Liveness and Host judge a holder on this host dead (pid gone or reused,
+	// a zombie counting as gone). With either nil no holder is judged dead by
+	// its pid and only lease expiry by observation applies.
+	Liveness seams.Liveness
+	Host     seams.Host
+	// OnConvert, when set, receives every conversion and takeover of a lock
+	// whose holder was dead or expired, for the log and events writer.
+	OnConvert func(Conversion)
+
+	obsMu sync.Mutex
+	obs   map[string]observation
 
 	commonOnce sync.Once
 	commonDir  string

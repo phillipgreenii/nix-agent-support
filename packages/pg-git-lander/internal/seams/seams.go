@@ -56,7 +56,8 @@ type Liveness interface {
 type procLiveness struct{}
 
 // ProcLiveness is the production Liveness: kill(pid, 0) plus the start time
-// reported by ps -o lstart=.
+// reported by ps -o lstart= (as Unix seconds, the form recorded in a lock
+// record's pid_start). A zombie counts as gone.
 func ProcLiveness() Liveness { return procLiveness{} }
 
 func (procLiveness) StartTime(pid int) (string, error) {
@@ -64,7 +65,16 @@ func (procLiveness) StartTime(pid int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	raw := strings.TrimSpace(string(out))
+	if t, perr := time.ParseInLocation("Mon Jan _2 15:04:05 2006", raw, time.Local); perr == nil {
+		return strconv.FormatInt(t.Unix(), 10), nil
+	}
+	return raw, nil
+}
+
+func isZombie(pid int) bool {
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
 
 func (p procLiveness) Alive(pid int, startTime string) bool {
@@ -72,6 +82,9 @@ func (p procLiveness) Alive(pid int, startTime string) bool {
 		return false
 	}
 	if err := syscall.Kill(pid, 0); err != nil && err != syscall.EPERM {
+		return false
+	}
+	if isZombie(pid) {
 		return false
 	}
 	if startTime == "" {

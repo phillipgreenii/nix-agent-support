@@ -200,21 +200,7 @@ func (o *Op) Stop(ctx context.Context, s StopInfo) error {
 	for _, h := range o.Set.Locks {
 		switch h.Record().Role {
 		case locks.RoleBranch:
-			edits = append(edits, locks.Edit{H: h, Mutate: func(r *locks.Record) {
-				retry := outcome.Stops[s.Reason].Retryable
-				if s.Retryable != nil {
-					retry = *s.Retryable
-				}
-				paths := s.Paths
-				if paths == nil {
-					paths = []string{}
-				}
-				r.State, r.Lease, r.CurrentCommand = locks.StateStopped, nil, nil
-				r.Stop = &locks.Stop{
-					Reason: string(s.Reason), Retryable: retry, At: now, Stage: r.Stage,
-					Paths: paths, Message: s.Message, MovedAlready: s.MovedAlready,
-				}
-			}})
+			edits = append(edits, locks.Edit{H: h, Mutate: func(r *locks.Record) { stopBranch(r, s, now) }})
 		case locks.RoleTarget:
 			edits = append(edits, locks.Edit{H: h, Delete: true})
 		case locks.RoleWorktree:
@@ -224,6 +210,22 @@ func (o *Op) Stop(ctx context.Context, s StopInfo) error {
 		}
 	}
 	return o.Layer.Transact(ctx, edits)
+}
+
+func stopBranch(r *locks.Record, s StopInfo, now time.Time) {
+	retry := outcome.Stops[s.Reason].Retryable
+	if s.Retryable != nil {
+		retry = *s.Retryable
+	}
+	paths := s.Paths
+	if paths == nil {
+		paths = []string{}
+	}
+	r.State, r.Lease, r.CurrentCommand = locks.StateStopped, nil, nil
+	r.Stop = &locks.Stop{
+		Reason: string(s.Reason), Retryable: retry, At: now, Stage: r.Stage,
+		Paths: paths, Message: s.Message, MovedAlready: s.MovedAlready,
+	}
 }
 
 // Finish deletes the operation's records and so releases every lock.

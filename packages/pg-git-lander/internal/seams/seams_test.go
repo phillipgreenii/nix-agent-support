@@ -107,3 +107,18 @@ func TestHosts(t *testing.T) {
 		t.Fatal("fake host")
 	}
 }
+
+func TestFakeLivenessZombieCountsAsGone(t *testing.T) {
+	l := seamstest.NewLiveness()
+	l.SetZombie(7, "tok")
+	if l.Alive(7, "tok") || l.Alive(7, "") {
+		t.Error("a zombie must not be alive")
+	}
+	if st, err := l.StartTime(7); err != nil || st != "tok" {
+		t.Errorf("StartTime = %q, %v", st, err)
+	}
+	l.SetAlive(7, "tok")
+	if !l.Alive(7, "tok") {
+		t.Error("SetAlive must clear the zombie mark")
+	}
+}

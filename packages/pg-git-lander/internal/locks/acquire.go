@@ -160,6 +160,19 @@ func (l *Layer) tryOnce(ctx context.Context, s Spec) (*Held, *conflict, error) {
 			}
 			prior := st.Rec.Clone()
 			return &Held{l: l, Ref: s.Ref, rec: rec, oid: oid, lastRenew: l.Clock.Now(), prior: &prior}, nil, nil
+		case !st.Absent && st.Rec.State == StateRunning && l.judgeDeadOrExpired(st) != "":
+			held, err := l.takeOver(ctx, s, st)
+			if errors.Is(err, errRetryRead) {
+				continue
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			if held != nil {
+				return held, nil, nil
+			}
+			h, since := l.holderOf(st.Rec)
+			return nil, &conflict{kind: conflictRunning, holder: h, since: since}, nil
 		case !st.Absent:
 			h, since := l.holderOf(st.Rec)
 			k := conflictRunning
@@ -188,7 +201,9 @@ func (l *Layer) tryOnce(ctx context.Context, s Spec) (*Held, *conflict, error) {
 // A stopped record is refused at once (stopped-pending, or target-stopped for
 // a TARGET lock); so is an unreadable one (unreadable-lock), as a live
 // holder; a running one is waited on and ends in *BusyError naming the
-// holder. Dead-holder detection and takeover belong to the takeover packet.
+// holder. A running one whose holder is dead or whose lease expired by
+// observation is taken over (TARGET role) or converted (BRANCH and worktree
+// roles, ending in a holder-died refusal), see takeover.go.
 func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 	ordered := append([]Spec(nil), specs...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Ref < ordered[j].Ref })

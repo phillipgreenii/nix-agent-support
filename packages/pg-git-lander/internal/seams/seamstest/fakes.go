@@ -35,17 +35,27 @@ func (c *Clock) Advance(d time.Duration) {
 
 // Liveness is a fake that knows which pids are alive and their start times.
 type Liveness struct {
-	mu    sync.Mutex
-	procs map[int]string
+	mu      sync.Mutex
+	procs   map[int]string
+	zombies map[int]bool
 }
 
 // NewLiveness returns a Liveness with no live processes.
-func NewLiveness() *Liveness { return &Liveness{procs: map[int]string{}} }
+func NewLiveness() *Liveness { return &Liveness{procs: map[int]string{}, zombies: map[int]bool{}} }
 
 // SetAlive marks pid alive with the given start time.
 func (l *Liveness) SetAlive(pid int, startTime string) {
 	l.mu.Lock()
 	l.procs[pid] = startTime
+	delete(l.zombies, pid)
+	l.mu.Unlock()
+}
+
+// SetZombie marks pid a zombie: it still exists but is not alive.
+func (l *Liveness) SetZombie(pid int, startTime string) {
+	l.mu.Lock()
+	l.procs[pid] = startTime
+	l.zombies[pid] = true
 	l.mu.Unlock()
 }
 
@@ -53,6 +63,7 @@ func (l *Liveness) SetAlive(pid int, startTime string) {
 func (l *Liveness) SetDead(pid int) {
 	l.mu.Lock()
 	delete(l.procs, pid)
+	delete(l.zombies, pid)
 	l.mu.Unlock()
 }
 
@@ -70,7 +81,7 @@ func (l *Liveness) Alive(pid int, startTime string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	st, ok := l.procs[pid]
-	return ok && (startTime == "" || st == startTime)
+	return ok && !l.zombies[pid] && (startTime == "" || st == startTime)
 }
 
 type noProcess struct{}
