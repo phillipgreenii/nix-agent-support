@@ -91,7 +91,7 @@ func (f *showFixture) jira(t *testing.T, id, title, due, at string) focus.Key {
 // lock writes a plan for the period (the keys in order) with a cap.
 func (f *showFixture) lock(t *testing.T, period string, cap int, keys ...focus.Key) {
 	t.Helper()
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", period)
 		if err != nil {
 			return err
@@ -116,7 +116,7 @@ func (f *showFixture) lock(t *testing.T, period string, cap int, keys ...focus.K
 
 func (f *showFixture) closePeriod(t *testing.T, period string) {
 	t.Helper()
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", period)
 		if err != nil {
 			return err

@@ -144,7 +144,7 @@ func TestPullTransactionTakesMaxPlusOneAndWritesAnnotationsAndTheRunRow(t *testi
 	a, b, c := f.pr("1", prSpec{ownership: "mine"}), f.pr("2", prSpec{ownership: "mine"}), f.pr("3", prSpec{ownership: "mine"})
 	d := lockDeps(t, f)
 	// An earlier lock with a gap: positions 1 and 4.
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", lockToday)
 		if err != nil {
 			return err
@@ -225,7 +225,7 @@ func TestPullTransactionRefusesClosedFutureAndNoPlanPeriods(t *testing.T) {
 	}
 
 	// No plan while another period holds rows.
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", "2026-10-09")
 		if err != nil {
 			return err
@@ -247,7 +247,7 @@ func TestPullTransactionRefusesClosedFutureAndNoPlanPeriods(t *testing.T) {
 	}
 
 	// Closed.
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", lockToday)
 		if err != nil {
 			return err

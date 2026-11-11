@@ -222,7 +222,7 @@ func (c *closeRun) once() error {
 		if !c.writing {
 			return c.report(closeState{closed: false, closedAt: at, note: summary}, false)
 		}
-		werr := env.Store.FocusLockTx(func(tx *store.FocusTx) error {
+		werr := env.Store.FocusLockTx(c.cmd.Context(), func(tx *store.FocusTx) error {
 			p, err := tx.CloseOpenPeriod(env.Period.Type, env.Period.Key, summary, at)
 			if err != nil {
 				return err

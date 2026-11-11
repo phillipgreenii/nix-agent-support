@@ -264,7 +264,7 @@ func Lock(ctx context.Context, d LockDeps, in LockInput) (LockResult, error) {
 			affected = append(affected, k)
 		}
 	}
-	err := d.Store.FocusLockTx(func(tx *store.FocusTx) error {
+	err := d.Store.FocusLockTx(ctx, func(tx *store.FocusTx) error {
 		res.Inserted, res.Deleted, affected, seenKey = nil, nil, nil, map[Key]bool{}
 		p, err := tx.GetOrCreatePeriod(in.Period.Type, in.Period.Key)
 		if err != nil {

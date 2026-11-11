@@ -30,7 +30,7 @@ func focusRow(periodID int64, id string, pos int) FocusSelection {
 
 func focusLock(t *testing.T, s *Store, fn func(*FocusTx) error) {
 	t.Helper()
-	if err := s.FocusLockTx(fn); err != nil {
+	if err := s.FocusLockTx(t.Context(), fn); err != nil {
 		t.Fatalf("FocusLockTx: %v", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestFocusUniqueConstraints(t *testing.T) {
 
 func TestFocusSelectionForeignKeyRejectsUnknownEntity(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	err := s.FocusLockTx(func(tx *FocusTx) error {
+	err := s.FocusLockTx(t.Context(), func(tx *FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", "2026-09-23")
 		if err != nil {
 			return err
@@ -222,7 +222,7 @@ func TestFocusPlanRowsAreOrderedByRankPositionWithTier(t *testing.T) {
 	}
 	// An out-of-vocabulary tier is refused by the CHECK constraint.
 	bad := "urgent"
-	err = s.FocusLockTx(func(tx *FocusTx) error {
+	err = s.FocusLockTx(t.Context(), func(tx *FocusTx) error {
 		r := focusRow(p.ID, "1", 9)
 		r.Tier = &bad
 		_, err := tx.InsertSelection(r)
@@ -486,7 +486,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 		s := setup()
 		before := counts(s)
 		boom := errors.New("injected crash")
-		err := s.FocusLockTx(func(tx *FocusTx) error { return lock(tx, func() error { return boom }) })
+		err := s.FocusLockTx(t.Context(), func(tx *FocusTx) error { return lock(tx, func() error { return boom }) })
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want the injected crash", err)
 		}
@@ -499,7 +499,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 		before := counts(s)
 		func() {
 			defer func() { _ = recover() }()
-			_ = s.FocusLockTx(func(tx *FocusTx) error { return lock(tx, func() error { panic("injected panic") }) })
+			_ = s.FocusLockTx(t.Context(), func(tx *FocusTx) error { return lock(tx, func() error { panic("injected panic") }) })
 		}()
 		if after := counts(s); after != before {
 			t.Fatalf("rows = %v after the panic, want %v unchanged", after, before)
@@ -511,7 +511,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 	})
 	t.Run("success commits all of it", func(t *testing.T) {
 		s := setup()
-		if err := s.FocusLockTx(func(tx *FocusTx) error { return lock(tx, func() error { return nil }) }); err != nil {
+		if err := s.FocusLockTx(t.Context(), func(tx *FocusTx) error { return lock(tx, func() error { return nil }) }); err != nil {
 			t.Fatal(err)
 		}
 		if got, want := counts(s), [4]int{1, 1, 0, 1}; got != want {
@@ -905,7 +905,7 @@ func TestFocusLockTxSerializesConcurrentLocks(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := s.FocusLockTx(func(tx *FocusTx) error {
+			err := s.FocusLockTx(t.Context(), func(tx *FocusTx) error {
 				p, err := tx.GetOrCreatePeriod("day", "2026-09-23")
 				if err != nil {
 					return err

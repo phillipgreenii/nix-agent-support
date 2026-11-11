@@ -251,7 +251,7 @@ func Pull(ctx context.Context, d LockDeps, in PullInput) (PullResult, error) {
 	repo := d.repo()
 	at := d.now().Format(time.RFC3339)
 	today := d.todayKey()
-	err := d.Store.FocusLockTx(func(tx *store.FocusTx) error {
+	err := d.Store.FocusLockTx(ctx, func(tx *store.FocusTx) error {
 		res.Inserted, res.Raced = nil, nil
 		p, err := tx.GetOrCreatePeriod(in.Period.Type, in.Period.Key)
 		if err != nil {

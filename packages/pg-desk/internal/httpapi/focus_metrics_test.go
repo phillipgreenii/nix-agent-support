@@ -76,7 +76,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 	if err := s.SetMeta("change_flow.listing.issue.mine", `{"status":"degraded","reason":"truncated","at":"`+focusAt+`"}`); err != nil {
 		t.Fatal(err)
 	}
-	err := s.FocusLockTx(func(tx *store.FocusTx) error {
+	err := s.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", "2026-10-10")
 		if err != nil {
 			return err

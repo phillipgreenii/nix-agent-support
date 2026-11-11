@@ -146,7 +146,7 @@ func TestLockSeesAChangedPlanOrDraftAndWritesNothing(t *testing.T) {
 	a, b := f.pr("1", prSpec{ownership: "mine"}), f.pr("2", prSpec{ownership: "mine"})
 	d := lockDeps(t, f)
 	// The caller read an empty plan, but a row appeared.
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", lockToday)
 		if err != nil {
 			return err
@@ -176,7 +176,7 @@ func TestLockOfAClosedPeriodIsExitSix(t *testing.T) {
 	f := newFixture(t)
 	a := f.pr("1", prSpec{ownership: "mine"})
 	d := lockDeps(t, f)
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", lockToday)
 		if err != nil {
 			return err
@@ -231,7 +231,7 @@ func TestNextRankPositionIsMaxPlusOne(t *testing.T) {
 	f := newFixture(t)
 	f.pr("1", prSpec{ownership: "mine"})
 	f.pr("2", prSpec{ownership: "mine"})
-	err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", lockToday)
 		if err != nil {
 			return err

@@ -349,7 +349,7 @@ func TestExplainDecidingKeysAndCapLine(t *testing.T) {
 		t.Errorf("#2 cap_position = %v, want 2", m2["cap_position"])
 	}
 	// A cap of 1 on the addressed period pushes #2 outside the cap line.
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", showToday)
 		if err != nil {
 			return err

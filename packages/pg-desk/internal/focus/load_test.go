@@ -48,7 +48,7 @@ func TestLoadReadsEveryInput(t *testing.T) {
 	f.external(pr, Key{"pr", "9"}, relationReferences, MergeReason)
 	f.pr("9", prSpec{})
 	// Plan rows of two periods (read-only input).
-	err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		for _, p := range []struct{ key, id string }{{"2026-10-08", "7"}, {"2026-10-09", "9"}} {
 			per, err := tx.GetOrCreatePeriod("day", p.key)
 			if err != nil {

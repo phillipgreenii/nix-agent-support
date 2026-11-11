@@ -49,7 +49,7 @@ func seedLargeFocusStore(t testing.TB, n int) *store.Store {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	err := s.FocusLockTx(func(tx *store.FocusTx) error {
+	err := s.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", "2026-10-10")
 		if err != nil {
 			return err
@@ -78,7 +78,7 @@ func addFocusPlanRow(t *testing.T, s *store.Store, id string, pos int) {
 	if _, err := s.WriteEntityStateWithLog(e, 0, focusAt, true, []string{"created"}, "sync", focusAt); err != nil {
 		t.Fatal(err)
 	}
-	err := s.FocusLockTx(func(tx *store.FocusTx) error {
+	err := s.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", "2026-10-10")
 		if err != nil {
 			return err

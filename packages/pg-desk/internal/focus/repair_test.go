@@ -9,7 +9,7 @@ import (
 
 func lockRows(t *testing.T, f *fixture, period string, keys ...Key) {
 	t.Helper()
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", period)
 		if err != nil {
 			return err
@@ -86,7 +86,7 @@ func TestRepairIgnoresAClosedPeriodAndMendsAnnotationWithoutRow(t *testing.T) {
 	f := newFixture(t)
 	a, orphan := f.pr("1", prSpec{ownership: "mine"}), f.pr("2", prSpec{ownership: "mine"})
 	lockRows(t, f, "2026-10-09", a)
-	if err := f.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := f.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", "2026-10-09")
 		if err != nil {
 			return err

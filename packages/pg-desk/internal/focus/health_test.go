@@ -37,7 +37,7 @@ func (w *healthWorld) row(periodKey string, k Key, pos int, selectedAt string) {
 // two).
 func (w *healthWorld) rowOnly(periodKey string, k Key, pos int, selectedAt string) {
 	w.t.Helper()
-	err := w.st.FocusLockTx(func(tx *store.FocusTx) error {
+	err := w.st.FocusLockTx(w.t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", periodKey)
 		if err != nil {
 			return err
@@ -443,7 +443,7 @@ func TestPlanRowsAgainstThePeriodCap(t *testing.T) {
 	} {
 		w.row(today, k, i+1, fixtureAt)
 	}
-	err := w.st.FocusLockTx(func(tx *store.FocusTx) error {
+	err := w.st.FocusLockTx(w.t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", today)
 		if err != nil {
 			return err

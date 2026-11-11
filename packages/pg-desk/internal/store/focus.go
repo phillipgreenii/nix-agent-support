@@ -130,11 +130,14 @@ func (x focusExec) row(q string, args ...any) *sql.Row {
 
 // focusImmediate runs fn inside BEGIN IMMEDIATE ... COMMIT on a dedicated
 // connection. An error return or a panic from fn rolls everything back.
-func (s *Store) focusImmediate(what string, fn func(x focusExec) error) error {
+//
+// ctx bounds only acquiring the connection and BEGIN. Once the transaction is
+// open, fn, COMMIT and ROLLBACK run detached from cancellation so a cancelled
+// caller cannot leave a half-applied transaction or skip the rollback.
+func (s *Store) focusImmediate(ctx context.Context, what string, fn func(x focusExec) error) error {
 	if err := s.RequireNewSchema(); err != nil {
 		return err
 	}
-	ctx := context.Background()
 	conn, err := s.sql.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("store: %s: acquire connection: %w", what, err)
@@ -143,6 +146,7 @@ func (s *Store) focusImmediate(what string, fn func(x focusExec) error) error {
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("store: %s: begin: %w", what, err)
 	}
+	ctx = context.WithoutCancel(ctx)
 	committed := false
 	defer func() {
 		if !committed {
@@ -264,7 +268,7 @@ func getOrCreatePeriod(x focusExec, periodType, periodKey string) (FocusPeriod, 
 // is an error and writes nothing.
 func (s *Store) GetOrCreateFocusPeriod(periodType, periodKey string) (FocusPeriod, error) {
 	var p FocusPeriod
-	err := s.focusImmediate("focus period", func(x focusExec) error {
+	err := s.focusImmediate(context.Background(), "focus period", func(x focusExec) error {
 		var err error
 		p, err = getOrCreatePeriod(x, periodType, periodKey)
 		return err
@@ -453,7 +457,7 @@ func (s *Store) FocusDraftStore(d FocusDraft, addressedKey string) (stored bool,
 		return false, err
 	}
 	d.PeriodKey = dkey
-	err = s.focusImmediate("store focus draft", func(x focusExec) error {
+	err = s.focusImmediate(context.Background(), "store focus draft", func(x focusExec) error {
 		held, err := periodHoldsRows(x, d.PeriodType, akey)
 		if err != nil {
 			return err
@@ -499,7 +503,7 @@ func (s *Store) FocusDraftReplace(d FocusDraft) (planNowExists bool, err error) 
 		return false, err
 	}
 	d.PeriodKey = key
-	err = s.focusImmediate("replace focus draft", func(x focusExec) error {
+	err = s.focusImmediate(context.Background(), "replace focus draft", func(x focusExec) error {
 		held, err := periodHoldsRows(x, d.PeriodType, key)
 		if err != nil {
 			return err
@@ -543,7 +547,7 @@ func (s *Store) FocusDraftReplan(d FocusDraft, expectPlan bool) (planStateChange
 		return false, err
 	}
 	d.PeriodKey = key
-	err = s.focusImmediate("replan focus draft", func(x focusExec) error {
+	err = s.focusImmediate(context.Background(), "replan focus draft", func(x focusExec) error {
 		held, err := periodHoldsRows(x, d.PeriodType, key)
 		if err != nil {
 			return err
@@ -580,7 +584,7 @@ func (s *Store) FocusDraftReplan(d FocusDraft, expectPlan bool) (planStateChange
 // exit_code NULL until FocusRunFinalize.
 func (s *Store) FocusRunInsert(r FocusRun) (int64, error) {
 	var id int64
-	err := s.focusImmediate("insert focus run", func(x focusExec) error {
+	err := s.focusImmediate(context.Background(), "insert focus run", func(x focusExec) error {
 		var err error
 		id, err = insertRun(x, r)
 		return err
@@ -591,7 +595,7 @@ func (s *Store) FocusRunInsert(r FocusRun) (int64, error) {
 // FocusRunFinalize sets the exit_code and counts_json of the run runID. It
 // errors when no such run exists.
 func (s *Store) FocusRunFinalize(runID string, exitCode int, countsJSON string) error {
-	return s.focusImmediate("finalize focus run", func(x focusExec) error {
+	return s.focusImmediate(context.Background(), "finalize focus run", func(x focusExec) error {
 		return finalizeRun(x, runID, exitCode, countsJSON)
 	})
 }
@@ -799,8 +803,8 @@ type FocusTx struct {
 // FocusLockTx runs fn in one write transaction (BEGIN IMMEDIATE). It commits
 // when fn returns nil and rolls everything back when fn returns an error or
 // panics. fn MUST use only the FocusTx it is given.
-func (s *Store) FocusLockTx(fn func(*FocusTx) error) error {
-	return s.focusImmediate("focus lock", func(x focusExec) error {
+func (s *Store) FocusLockTx(ctx context.Context, fn func(*FocusTx) error) error {
+	return s.focusImmediate(ctx, "focus lock", func(x focusExec) error {
 		return fn(&FocusTx{x: x})
 	})
 }
@@ -864,7 +868,7 @@ func (t *FocusTx) CloseOpenPeriod(periodType, periodKey, note, at string) (Focus
 // (period get-or-create, the close, the draft deletion). An already-closed
 // period is a *FocusPeriodClosedError and nothing changes.
 func (s *Store) FocusPeriodClose(periodType, periodKey, note, at string) error {
-	return s.FocusLockTx(func(tx *FocusTx) error {
+	return s.FocusLockTx(context.Background(), func(tx *FocusTx) error {
 		_, err := tx.CloseOpenPeriod(periodType, periodKey, note, at)
 		return err
 	})

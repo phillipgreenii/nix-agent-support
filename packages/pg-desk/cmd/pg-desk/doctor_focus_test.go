@@ -128,7 +128,7 @@ func (w *doctorFocusWorld) selected(t *testing.T, keys ...focus.Key) {
 // addRow adds k to today's existing plan at the position and annotates it.
 func (w *doctorFocusWorld) addRow(t *testing.T, k focus.Key, pos int) {
 	t.Helper()
-	if err := w.st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := w.st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", showToday)
 		if err != nil {
 			return err

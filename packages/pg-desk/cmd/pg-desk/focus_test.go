@@ -415,7 +415,7 @@ func TestFocusExitCodes(t *testing.T) {
 	closePeriod := func(t *testing.T, f *focusFixture, key string) {
 		t.Helper()
 		st := f.open(t)
-		if err := st.FocusLockTx(func(tx *store.FocusTx) error {
+		if err := st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 			p, err := tx.GetOrCreatePeriod("day", key)
 			if err != nil {
 				return err
@@ -616,7 +616,7 @@ func TestFocusJSONGolden(t *testing.T) {
 func TestFocusRunRowWrittenByStubVerbs(t *testing.T) {
 	f := newFocusFixture(t, "new")
 	st := f.open(t)
-	if err := st.FocusLockTx(func(tx *store.FocusTx) error {
+	if err := st.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
 		p, err := tx.GetOrCreatePeriod("day", "2026-10-09")
 		if err != nil {
 			return err
