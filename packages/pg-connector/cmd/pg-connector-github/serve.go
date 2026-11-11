@@ -30,7 +30,7 @@ var serveHooks = ""
 // runServe runs the daemon until SIGTERM or SIGINT, then drains. It returns 0
 // after a clean drain.
 func runServe(cfg *config.Config, stderr io.Writer) int {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	ctx, stop := armServeSignals(signal.NotifyContext)
 	defer stop()
 	// Opt-in profiling endpoint (PG_CONNECTOR_GITHUB_PPROF_ADDR): the serve mode
 	// only, never pr, ci or status. It reports on stderr and a rejected value
@@ -39,6 +39,17 @@ func runServe(cfg *config.Config, stderr io.Writer) int {
 	// tests) does not start it.
 	defer startPprofFromEnv(os.Getenv, stderr)()
 	return serveWith(ctx, cfg, stderr)
+}
+
+// armServeSignals registers SIGTERM and SIGINT through notify (signal.NotifyContext;
+// tests pass a fake) and releases the registration as soon as the returned
+// context ends, so the first signal drives the graceful drain and a second one
+// takes its default action and kills the process. The returned stop stays safe
+// to call again.
+func armServeSignals(notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)) (context.Context, context.CancelFunc) {
+	ctx, stop := notify(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	context.AfterFunc(ctx, stop)
+	return ctx, stop
 }
 
 // serveWith is runServe with the shutdown context injected.
