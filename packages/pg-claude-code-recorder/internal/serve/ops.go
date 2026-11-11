@@ -423,7 +423,7 @@ func (d *Daemon) opStatus(ctx context.Context, _ []byte) (any, *wire.Error) {
 	}
 	// The settler publishes the counts it derived at its last refresh (live and
 	// quiet included); before its first refresh the persisted stage rows stand in.
-	counts, _, published := d.sett.LastCounts()
+	counts, _, published := d.doc.LastCounts()
 	if !published {
 		counts = make(map[string]int, len(snap.stageCounts))
 		for k, v := range snap.stageCounts {

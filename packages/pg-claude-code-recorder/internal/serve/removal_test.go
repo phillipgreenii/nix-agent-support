@@ -13,7 +13,7 @@ func TestDoctorGaugesSurviveARestart(t *testing.T) {
 	e := newEnv(t, false)
 	e.cfg.DoctorInterval = time.Hour
 	d := e.open(t)
-	if _, err := d.Settler().Doctor(); err != nil {
+	if _, err := d.doc.Doctor(); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Close(); err != nil {

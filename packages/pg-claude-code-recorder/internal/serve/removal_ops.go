@@ -49,19 +49,19 @@ func (d *Daemon) opHeld(ctx context.Context, body []byte) (any, *wire.Error) {
 	}
 	var ans HeldAnswer
 	if req.Retry {
-		before, _ := d.sett.HeldCtx(ctx)
-		outs, err := d.sett.RecheckHeldCtx(ctx)
+		before, _ := d.ops.HeldCtx(ctx)
+		outs, err := d.ops.RecheckHeldCtx(ctx)
 		if err != nil {
 			return nil, wire.Errf(wire.ErrInternal, err.Error())
 		}
 		ans.Retried = len(outs)
-		after, _ := d.sett.HeldCtx(ctx)
+		after, _ := d.ops.HeldCtx(ctx)
 		ans.Cleared = len(before) - len(after)
 		if ans.Cleared < 0 {
 			ans.Cleared = 0
 		}
 	}
-	held, err := d.sett.HeldCtx(ctx)
+	held, err := d.ops.HeldCtx(ctx)
 	if err != nil {
 		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}
@@ -77,7 +77,7 @@ func (d *Daemon) opWhere(ctx context.Context, body []byte) (any, *wire.Error) {
 	if req.Session == "" {
 		return nil, wire.Errf(wire.ErrBadRequest, "where needs a session")
 	}
-	w, err := d.sett.WhereCtx(ctx, req.Session)
+	w, err := d.ops.WhereCtx(ctx, req.Session)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, wire.Errf(wire.ErrNotFound, "no Conversation "+req.Session)
 	}
@@ -92,7 +92,7 @@ func (d *Daemon) opRemove(ctx context.Context, body []byte) (any, *wire.Error) {
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
 	}
-	rep, err := d.sett.RemoveCtx(ctx, settle.RemoveOptions{Sessions: req.Sessions, DryRun: req.DryRun})
+	rep, err := d.ops.RemoveCtx(ctx, settle.RemoveOptions{Sessions: req.Sessions, DryRun: req.DryRun})
 	switch {
 	case errors.Is(err, settle.ErrRemovalDisabled):
 		return nil, wire.Errf(wire.ErrRemovalDisabled, err.Error()+"; remove --dry-run shows what would go")
@@ -110,7 +110,7 @@ func (d *Daemon) opExtract(ctx context.Context, body []byte) (any, *wire.Error) 
 	if req.Session == "" {
 		return nil, wire.Errf(wire.ErrBadRequest, "extract needs a session")
 	}
-	res, err := d.sett.ExtractCtx(ctx, req.Session, req.To)
+	res, err := d.ops.ExtractCtx(ctx, req.Session, req.To)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return nil, wire.Errf(wire.ErrNotFound, "no settled Conversation "+req.Session+" to extract")
@@ -127,7 +127,7 @@ func (d *Daemon) opExtract(ctx context.Context, body []byte) (any, *wire.Error) 
 }
 
 func (d *Daemon) opDoctor(ctx context.Context, _ []byte) (any, *wire.Error) {
-	ans, err := d.sett.DoctorRunCtx(ctx)
+	ans, err := d.doc.DoctorRunCtx(ctx)
 	if err != nil {
 		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}
@@ -141,7 +141,7 @@ func (d *Daemon) checkDoctorProjection() error {
 	if d.cfg.DoctorBytesPerSlice <= 0 || d.cfg.DoctorInterval <= 0 {
 		return nil
 	}
-	total, projected, err := d.sett.DoctorProjection()
+	total, projected, err := d.doc.DoctorProjection()
 	if err != nil {
 		return fmt.Errorf("doctor projection: %w", err)
 	}
@@ -180,7 +180,7 @@ func (d *Daemon) doctorLoop() {
 			return
 		case <-fire:
 			err := d.runLoop(obs.LoopDoctor, func() error {
-				_, err := d.sett.Doctor()
+				_, err := d.doc.Doctor()
 				return err
 			})
 			if err != nil {
@@ -210,7 +210,7 @@ func (d *Daemon) rollingDoctorLoop() {
 			stopTimer()
 			return
 		case <-fire:
-			if err := d.runLoop(obs.LoopDoctor, d.sett.DoctorTick); err != nil {
+			if err := d.runLoop(obs.LoopDoctor, d.doc.DoctorTick); err != nil {
 				d.obs.Log.Warn("doctor_failed", "err", err.Error())
 			}
 		}

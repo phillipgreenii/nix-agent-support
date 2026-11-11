@@ -15,11 +15,11 @@ func wakeCount(d *Daemon, reason string) float64 {
 // The default mode is the event loop; scan stays selectable.
 func TestSettleModeDefaultsToEvent(t *testing.T) {
 	_, d, _ := seamDaemon(t, nil)
-	if !d.sett.EventMode() {
+	if !d.loop.EventMode() {
 		t.Fatal("the default settle mode is not event")
 	}
 	_, d, _ = seamDaemon(t, func(e *env) { e.cfg.SettleMode = "scan" })
-	if d.sett.EventMode() {
+	if d.loop.EventMode() {
 		t.Fatal("settle mode scan did not select the scan loop")
 	}
 }
@@ -61,7 +61,7 @@ func TestEventSettleLoopWakesOnItsTriggers(t *testing.T) {
 	if got := wakeCount(d, "poll"); got != 1 {
 		t.Fatalf("poll wakes = %v, want 1", got)
 	}
-	d.sett.LiveChanged() // what the tracker's change callback does
+	d.dirty.LiveChanged() // what the tracker's change callback does
 	send(settleCoalesceSeam)
 	f.await(t, obs.LoopSettleTick)
 	if got := wakeCount(d, "dirty"); got != 1 {

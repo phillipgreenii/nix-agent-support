@@ -98,8 +98,13 @@ type Daemon struct {
 	exp     *exporter.Server
 	eng     *lifecycle.Engine
 	tr      *lifecycle.Tracker
-	sett    *settle.Settler
-	clock   clock.Clock
+	// loop, dirty, ops and doc are the role views of the settle stage; New wires
+	// them all to the one Settler.
+	loop  LoopDriver
+	dirty DirtySink
+	ops   OpsPort
+	doc   DoctorPort
+	clock clock.Clock
 
 	// loops tracks the passes now running (loop_in_flight_seconds). tickerFn and
 	// timerFn, when set (tests), replace the real tickers and timers behind
@@ -291,9 +296,9 @@ func Open(opt Options) (*Daemon, error) {
 	d.tr = lifecycle.NewTracker(lifecycle.TrackerConfig{
 		Store: st, Sys: opt.Procs, Obs: o, Clock: opt.Clock, Ctx: d.ctx, Engine: d.eng, Sync: func() { _ = d.prs.Drain() },
 		ClaudeDir: cfg.ClaudeDir, ControlDir: cfg.ControlStateDir, GraceEnable: cfg.GraceEnable, GraceWindow: cfg.GraceWindow, EndsSweepEvery: cfg.EndsSweepEvery, FifoSweepEvery: cfg.FifoSweepEvery,
-		OnChange: func() { d.sett.LiveChanged() },
+		OnChange: func() { d.dirty.LiveChanged() },
 	})
-	d.sett = settle.New(settle.Config{
+	sett := settle.New(settle.Config{
 		Store: st, Copier: d.cp, Parser: d.prs, Live: d.eng.LiveSessions, Clock: opt.Clock, Obs: o,
 		ClaudeDir: cfg.ClaudeDir, After: cfg.SettleAfter, Recheck: cfg.HeldRecheck,
 		MinFreeBytes: cfg.MinFreeBytes, MaxLineBytes: cfg.ParseMaxLineBytes, Free: settle.FreeFunc(FreeBytes),
@@ -302,12 +307,13 @@ func Open(opt Options) (*Daemon, error) {
 		DoctorInterval: cfg.DoctorInterval, DoctorBytesPerSlice: cfg.DoctorBytesPerSlice, DoctorSliceEvery: cfg.DoctorSliceEvery,
 		Ctx: d.ctx, Timer: func(step func() error) error { return d.runLoop(obs.LoopRemovalPass, step) },
 	})
-	d.tickPhases = d.sett.LastPhases
+	d.loop, d.dirty, d.ops, d.doc = sett, sett, sett, sett
+	d.tickPhases = d.doc.LastPhases
 	endPhase = su.begin("doctor_gauges", false)
 	d.loadDoctorGauges()
 	endPhase()
 	endPhase = su.begin("settle_recover", true)
-	err = d.sett.Recover()
+	err = sett.Recover()
 	endPhase()
 	if err != nil {
 		_ = st.Close()
@@ -348,9 +354,6 @@ func (d *Daemon) Obs() *obs.Obs { return d.obs }
 
 // Tracker returns the Process tracker (tests drive its periodic work).
 func (d *Daemon) Tracker() *lifecycle.Tracker { return d.tr }
-
-// Settler returns the settle stage (tests drive its passes).
-func (d *Daemon) Settler() *settle.Settler { return d.sett }
 
 // Parser returns the parse stage (tests drain it).
 func (d *Daemon) Parser() *parser.Parser { return d.prs }
@@ -416,7 +419,7 @@ func (d *Daemon) afterIngest(ctx context.Context, p string, res copier.Result, e
 	d.obs.Reg.Add(obs.MIngestResults, map[string]string{"result": result}, 1)
 	if res.File != 0 {
 		d.prs.Notify(res.File)
-		d.sett.Dirty(res.File, d.cp.RecordedOffset(res.File))
+		d.dirty.Dirty(res.File, d.cp.RecordedOffset(res.File))
 	}
 	switch src, _ := d.scope.Classify(p); src {
 	case scope.SrcRegistry:
@@ -539,7 +542,7 @@ func (d *Daemon) backfill(ctx context.Context, files []watcher.FileInfo) {
 			if _, ok := d.caughtMatches(f.Path, f); ok {
 				continue // persisted as caught up and unchanged since: nothing to copy
 			}
-			if d.sett.LowSpace() {
+			if d.doc.LowSpace() {
 				// Low-space mode stops backfilling Conversations not yet copied.
 				if fl, _ := d.st.FilesByCurrentPath(f.Path); len(fl) == 0 {
 					skipped = true
@@ -704,7 +707,7 @@ func (d *Daemon) drainParsed() {
 // settleLoop runs the settle pass: every settle.tick (default 5 m) in scan mode,
 // or the event loop in event mode.
 func (d *Daemon) settleLoop() {
-	if d.sett.EventMode() {
+	if d.loop.EventMode() {
 		d.settleLoopEvent()
 		return
 	}
@@ -715,7 +718,7 @@ func (d *Daemon) settleLoop() {
 		case <-d.stop:
 			return
 		case <-tick:
-			d.runTick(tickKindScan, d.sett.Tick)
+			d.runTick(tickKindScan, d.loop.Tick)
 		}
 	}
 }
@@ -749,15 +752,15 @@ func (d *Daemon) settleLoopEvent() {
 		return
 	case <-d.firstParse:
 	}
-	minWake := d.sett.MinWake()
-	reconcile, stopReconcile := d.ticker(settleReconcileSeam, d.sett.ReconcileEvery())
+	minWake := d.loop.MinWake()
+	reconcile, stopReconcile := d.ticker(settleReconcileSeam, d.loop.ReconcileEvery())
 	defer stopReconcile()
 	poll, stopPoll := d.ticker(settlePollSeam, minWake)
 	defer stopPoll()
 	last := d.clock.Now()
-	d.runTick(tickKindReconcile, d.sett.Tick) // the start-up reconciliation
+	d.runTick(tickKindReconcile, d.loop.Tick) // the start-up reconciliation
 	wake := func() {
-		d.runTick(tickKindWake, func() (settle.TickStats, error) { return d.sett.Wake(d.clock.Now()) })
+		d.runTick(tickKindWake, func() (settle.TickStats, error) { return d.loop.Wake(d.clock.Now()) })
 		last = d.clock.Now()
 	}
 	// holdOff waits out what is left of the min-wake interval; false when stopped.
@@ -778,7 +781,7 @@ func (d *Daemon) settleLoopEvent() {
 	for {
 		var dueC <-chan time.Time
 		stopDue := func() {}
-		if at, ok := d.sett.NextDue(); ok {
+		if at, ok := d.loop.NextDue(); ok {
 			wait := at.Sub(d.clock.Now())
 			if wait < 0 {
 				wait = 0
@@ -790,13 +793,13 @@ func (d *Daemon) settleLoopEvent() {
 			stopDue()
 			return
 		case <-reconcile:
-			d.runTick(tickKindReconcile, d.sett.Tick)
+			d.runTick(tickKindReconcile, d.loop.Tick)
 			last = d.clock.Now()
 		case <-poll:
 			if holdOff() {
 				wake()
 			}
-		case <-d.sett.DirtyWake():
+		case <-d.loop.DirtyWake():
 			if holdOff() {
 				wake()
 			}

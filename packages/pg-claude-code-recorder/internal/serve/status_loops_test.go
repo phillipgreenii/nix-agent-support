@@ -70,7 +70,7 @@ func TestStatusStageCountsHaveLiveAndQuietAndEqualTheGaugesFromOneTick(t *testin
 	}
 
 	clk.Advance(3 * time.Second)
-	d.runTick(tickKindScan, d.sett.Tick)
+	d.runTick(tickKindScan, d.loop.Tick)
 	st := statusOf(t, d)
 	want := map[string]int{"live": 2, "quiet": 1, "held": 1, "settled": 1}
 	for stage, n := range want {
