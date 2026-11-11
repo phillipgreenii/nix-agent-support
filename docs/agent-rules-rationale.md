@@ -269,6 +269,14 @@ currently resolve (verified 2026-07-30: 7 bare `integrate-branch` invocations su
 Skill calls over 8 days), so this is a SPECIFICITY requirement, NOT a fix for a live failure, and
 MUST NOT be cited as evidence of one.
 
+R-4 at a non-git workspace root: observed 2026-11-10, a design session whose cwd was a pn workspace
+root that is NOT a git repository tried `EnterWorktree`, which failed with "Cannot create a
+worktree: not in a git repository and no WorktreeCreate hooks are configured", and fell back to
+drafting under `~/.cache`. It never loaded `pn-workspace-rules:pn-workspace-rules` or
+`pn-workspace-rules:fork-workforest`, whose triggers are pn workspace verbs and cross-repo flake
+work, not "about to change code with a non-git cwd". R-4 named only "a git worktree", so the rule
+now names the workforest set as the isolation mechanism at such a root and for cross-repo changes.
+
 ## Version control
 
 - The ZR monorepo `Refs:` rule and the agent-authored PR comment marker apply only in ZR repos. The

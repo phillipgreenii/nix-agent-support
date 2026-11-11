@@ -121,6 +121,7 @@ Primary branch = `pgii-integrate-branch.primaryBranch` (git config) → `git sym
 - **R-2** Only the canonical clone MAY have the primary branch checked out; a worktree/workforest member MUST use a feature branch.
 - **R-3** MUST NOT switch the canonical clone off its primary branch or leave it dirty in steady state; on finding it off-branch/dirty, stop and report (no reset, re-checkout, stash, or workaround).
 - **R-4** By default an isolated single-repo change MUST be done in a git worktree.
+  When the session cwd is a pn workspace root (contains `pn-workspace.toml`, usually not a git repo) or the change spans repos, the isolation mechanism MUST be a coordinated workforest set (`pn workspace workforest add <branch>`, via the `pn-workspace-rules:fork-workforest` skill, invoked BEFORE any `EnterWorktree`, which is expected to fail at such a root).
 - **R-5** The worktree (R-4) and workforest requirements MAY be overridden when the user explicitly says so.
 - **R-6** For a very small/quick change the agent MAY commit directly on the primary branch in the canonical clone, but MUST first ask the user.
 - **R-9** To integrate completed work, MUST invoke the Skill tool with the plugin-qualified id `integrate-branch:integrate-branch` (handlers `integrate-branch:ff-merge-to-main`, `integrate-branch:pull-request`; close-out `session-wrapup:wrap-up-session`). MUST NOT use `superpowers:finishing-a-development-branch`. (R-7/R-8: the `integrate-branch` skill.)
