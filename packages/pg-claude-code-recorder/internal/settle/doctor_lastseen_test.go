@@ -16,6 +16,16 @@ func TestDoctorReadsLastSeenWithoutRacingTick(t *testing.T) {
 	// read/write pair inside its history window, and the overlap of the two
 	// loops is a matter of scheduling, so the count has to be large enough that
 	// the loops overlap many times. More would only slow the test.
+	//
+	// Cost measured 2026-11-10: 0.48 s plain, 5.27 s under -race at 30.
+	// Hand-applied negative control (doctorFull and doctorOne pointed back at
+	// lastSeen, five separate `go test -race -count=1` processes per count; a
+	// process counts only if it reports a DATA RACE): 10 iterations failed 1 of
+	// 5, 20 failed 0 of 5, 30 failed 0 of 5, 200 failed 3 of 5. So no smaller
+	// count is reliable, and 30 is kept only as the existing cost/benefit
+	// compromise: it is NOT a reliable detector of the old defect (the copier
+	// lock orders most Tick/Doctor overlaps, leaving few racy ones), only a
+	// cheap tripwire.
 	const iterations = 30
 	e := newEnv(t, false)
 	// A young Conversation that stays quiet, so every Tick evaluates it and
