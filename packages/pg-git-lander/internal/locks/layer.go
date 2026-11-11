@@ -243,6 +243,8 @@ type Held struct {
 	oid       string
 	lastRenew time.Time
 	released  bool
+	// prior is the stopped record this lock was taken back from, if any.
+	prior *Record
 }
 
 // Record returns a copy of the current record.
@@ -339,6 +341,26 @@ func (h *Held) Release(ctx context.Context) error {
 	}
 	h.released = true
 	return h.l.deleteRef(ctx, h.Ref, h.oid)
+}
+
+// Undo gives the lock back: a lock taken back from a stopped record is
+// swapped back to that record (so a resume that cannot get its other locks
+// never strands a record in running); any other lock is released.
+func (h *Held) Undo(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.released {
+		return nil
+	}
+	if h.prior == nil {
+		h.released = true
+		return h.l.deleteRef(ctx, h.Ref, h.oid)
+	}
+	if _, err := h.l.write(ctx, h.Ref, *h.prior, h.oid, nil); err != nil {
+		return err
+	}
+	h.released = true
+	return nil
 }
 
 // RunRenewal renews h every third of the lease (gated by MaybeRenew) until

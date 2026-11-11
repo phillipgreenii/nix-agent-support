@@ -19,6 +19,11 @@ type Spec struct {
 	Ref  string
 	Role Role
 	Rec  Record
+	// TakeBack, when set to an op id, lets the lock be taken by
+	// compare-and-swap from a stopped record of that operation (a resume
+	// taking back its own worktree records). Any other stopped record is
+	// still refused.
+	TakeBack string
 }
 
 // BusyError is a lock that stayed held (running) for the whole wait.
@@ -75,6 +80,19 @@ func (s *Set) ByRef(ref string) *Held {
 	return nil
 }
 
+// Undo gives every lock of the set back, in reverse acquisition order: a lock
+// taken back from a stopped record is swapped back to that record, any other
+// is released.
+func (s *Set) Undo(ctx context.Context) error {
+	var errs []error
+	for i := len(s.Locks) - 1; i >= 0; i-- {
+		if err := s.Locks[i].Undo(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Release releases every lock of the set, in reverse acquisition order.
 func (s *Set) Release(ctx context.Context) error {
 	var errs []error
@@ -129,6 +147,19 @@ func (l *Layer) tryOnce(ctx context.Context, s Spec) (*Held, *conflict, error) {
 		switch {
 		case st.Unreadable != nil:
 			return nil, &conflict{kind: conflictUnreadable, cause: st.Unreadable}, nil
+		case !st.Absent && s.TakeBack != "" && st.Rec.State == StateStopped && st.Rec.OpID == s.TakeBack:
+			rec := s.Rec.Clone()
+			rec.Role, rec.State = s.Role, StateRunning
+			l.stamp(&rec)
+			oid, err := l.write(ctx, s.Ref, rec, st.OID, nil)
+			if errors.Is(err, ErrTaken) {
+				continue
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			prior := st.Rec.Clone()
+			return &Held{l: l, Ref: s.Ref, rec: rec, oid: oid, lastRenew: l.Clock.Now(), prior: &prior}, nil, nil
 		case !st.Absent:
 			h, since := l.holderOf(st.Rec)
 			k := conflictRunning
@@ -170,7 +201,7 @@ func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 		for _, s := range ordered {
 			h, cf, err := l.tryOnce(ctx, s)
 			if err != nil {
-				_ = set.Release(context.WithoutCancel(ctx))
+				_ = set.Undo(context.WithoutCancel(ctx))
 				return nil, err
 			}
 			if cf != nil {
@@ -183,7 +214,7 @@ func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 			return set, nil
 		}
 		heldSome := len(set.Locks) > 0
-		if err := set.Release(context.WithoutCancel(ctx)); err != nil {
+		if err := set.Undo(context.WithoutCancel(ctx)); err != nil {
 			return nil, err
 		}
 		switch c.kind {
