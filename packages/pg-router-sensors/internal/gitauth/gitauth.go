@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/x/cmdrun"
 
 	"github.com/phillipgreenii/pg-router-sensors/internal/levels"
+	"github.com/phillipgreenii/pg-router-sensors/internal/originprobe"
 	"github.com/phillipgreenii/pg-router-sensors/internal/sensorcli"
 )
 
@@ -32,7 +33,6 @@ import (
 const (
 	SSHAddName    = "ssh-add"
 	SSHKeygenName = "ssh-keygen"
-	GitName       = "git"
 )
 
 // SSHAddArgs and SSHKeygenArgs are the fixed arguments of the two ssh probes.
@@ -304,18 +304,14 @@ func (s *Sensor) verdict(ctx context.Context, env sensorcli.Env) (string, time.D
 	return levels.Binary.Best(), left, ""
 }
 
-// lsRemote runs the bounded, non-interactive probe; "" means success.
+// lsRemote runs the bounded, non-interactive probe (the copied originprobe, on
+// the same command seam); "" means success.
 func (s *Sensor) lsRemote(ctx context.Context) string {
-	cctx, cancel := context.WithTimeout(ctx, LsRemoteTimeout)
-	defer cancel()
-	res := s.Run(cctx, cmdrun.Call{
-		Name: GitName, Args: []string{"ls-remote", "--exit-code", s.LsRemoteURL, "HEAD"},
-		Env: []string{"GIT_TERMINAL_PROMPT=0"}, OwnProcGroup: true,
-	})
-	if !res.OK() {
-		return fmt.Sprintf("git ls-remote failed: %s", failText(res))
+	class, tail := originprobe.Probe(ctx, s.Run, "", s.LsRemoteURL, LsRemoteTimeout)
+	if class == originprobe.OK {
+		return ""
 	}
-	return ""
+	return fmt.Sprintf("git ls-remote %s: %s", class, tail)
 }
 
 func failText(r cmdrun.Result) string {
