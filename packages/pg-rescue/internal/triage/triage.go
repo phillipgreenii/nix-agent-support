@@ -113,6 +113,12 @@ func Run(tr Tracker, o Options) (Outcome, error) {
 	if it.Status == "closed" || !hasLabel(it.Labels, RescueLabel) {
 		return Outcome{Action: ActionSkipped, Reason: "not an open pg-rescue item"}, nil
 	}
+	// The pg-rescue label is also the ordinary project label of beads ABOUT
+	// pg-rescue, so it alone does not make an item. Only pg-rescue-bead writes
+	// pg_rescue_* metadata; without any, this is a project bead: touch nothing.
+	if !hasItemMetadata(it.Metadata) {
+		return Outcome{Action: ActionSkipped, Reason: "carries the pg-rescue label but no pg-rescue item metadata (a project bead, not an item)"}, nil
+	}
 	if err := tr.Claim(o.ItemID, o.Actor); err != nil {
 		if errors.Is(err, ErrPeerHeld) {
 			return Outcome{Action: ActionPeerHeld, Reason: err.Error()}, nil
@@ -128,6 +134,16 @@ func Run(tr Tracker, o Options) (Outcome, error) {
 		return Outcome{}, err
 	}
 	return out, nil
+}
+
+// hasItemMetadata reports whether md holds any key pg-rescue-bead writes.
+func hasItemMetadata(md map[string]any) bool {
+	for k := range md {
+		if strings.HasPrefix(k, "pg_rescue_") {
+			return true
+		}
+	}
+	return false
 }
 
 // apply writes the comment first, so the record exists even if the state

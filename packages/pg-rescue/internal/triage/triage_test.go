@@ -257,8 +257,9 @@ func TestLatestCommentSnapshotWins(t *testing.T) {
 
 func TestSkippedAndPeerHeldChangeNothing(t *testing.T) {
 	for name, it := range map[string]Item{
-		"closed":   {ID: "x-1", Status: "closed", Labels: []string{RescueLabel}},
-		"no label": {ID: "x-1", Status: "open", Labels: []string{"other"}},
+		"closed":                         {ID: "x-1", Status: "closed", Labels: []string{RescueLabel}},
+		"no label":                       {ID: "x-1", Status: "open", Labels: []string{"other"}},
+		"project bead, no item metadata": {ID: "x-1", Status: "open", Labels: []string{RescueLabel}, Metadata: map[string]any{"other": "v"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tr := &fakeTracker{item: it}
@@ -268,7 +269,7 @@ func TestSkippedAndPeerHeldChangeNothing(t *testing.T) {
 			wantCalls(t, tr)
 		})
 	}
-	tr := &fakeTracker{item: Item{ID: "x-1", Status: "open", Labels: []string{RescueLabel}}, claimErr: ErrPeerHeld}
+	tr := &fakeTracker{item: Item{ID: "x-1", Status: "open", Labels: []string{RescueLabel}, Metadata: map[string]any{MetaCwd: "/x"}}, claimErr: ErrPeerHeld}
 	if out := run(t, tr); out.Action != ActionPeerHeld {
 		t.Fatalf("got %+v", out)
 	}
@@ -276,7 +277,7 @@ func TestSkippedAndPeerHeldChangeNothing(t *testing.T) {
 }
 
 func TestTrackerFailureReleasesClaim(t *testing.T) {
-	tr := &fakeTracker{item: Item{ID: "x-1", Status: "open", Labels: []string{RescueLabel}}, commentEr: errors.New("boom")}
+	tr := &fakeTracker{item: Item{ID: "x-1", Status: "open", Labels: []string{RescueLabel}, Metadata: map[string]any{MetaCwd: "/x"}}, commentEr: errors.New("boom")}
 	if _, err := Run(tr, Options{ItemID: "x-1", Actor: "a"}); err == nil {
 		t.Fatal("want error")
 	}
