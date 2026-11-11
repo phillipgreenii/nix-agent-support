@@ -4,9 +4,8 @@
 // generic additionalProperties negative, the per-message-type negative
 // matrix) — moved here so a later phase's own test suite can call
 // driver.Run(ctx, target Target) []Result directly instead of only through
-// `go test ./conformance/...`. Golden/schema loading itself stays in package
-// conformance (Task 3.13 Binding decisions); this package imports conformance
-// for that access rather than carrying a second copy.
+// `go test ./conformance/...`. Golden loading lives in the leaf package
+// conformance/golden; this package imports conformance for schema access.
 package driver
 
 import (
@@ -16,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/conformance/golden"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -116,7 +116,7 @@ func Run(ctx context.Context, target Target) []Result {
 // example must validate against its own schema (GOAL-7).
 func goldenCase(mt string) Result {
 	name := "golden/" + mt
-	g, err := conformance.Golden(mt)
+	g, err := golden.Golden(mt)
 	if err != nil {
 		return Result{Name: name, Err: fmt.Errorf("read golden: %w", err)}
 	}
@@ -130,7 +130,7 @@ func goldenCase(mt string) Result {
 // undeclared field on the golden must be rejected (additionalProperties).
 func negativeGenericCase(mt string) Result {
 	name := "negative-generic/" + mt
-	g, err := conformance.Golden(mt)
+	g, err := golden.Golden(mt)
 	if err != nil {
 		return Result{Name: name, Err: fmt.Errorf("read golden: %w", err)}
 	}
@@ -496,7 +496,7 @@ func invokeCheck(name, subcommand, replyType string, participant conformance.Par
 	if participant == nil {
 		return Result{Name: name, Skipped: true, SkipReason: "target carries no " + subcommand + " participant"}
 	}
-	req, err := conformance.Golden(subcommand)
+	req, err := golden.Golden(subcommand)
 	if err != nil {
 		return Result{Name: name, Err: fmt.Errorf("read %s golden: %w", subcommand, err)}
 	}
@@ -589,7 +589,7 @@ func invokeStore(participant conformance.Participant) Result {
 		return Result{Name: name, Skipped: true, SkipReason: "target carries no store participant"}
 	}
 
-	req, err := conformance.Golden("store.request")
+	req, err := golden.Golden("store.request")
 	if err != nil {
 		return Result{Name: name, Err: fmt.Errorf("read store.request golden: %w", err)}
 	}

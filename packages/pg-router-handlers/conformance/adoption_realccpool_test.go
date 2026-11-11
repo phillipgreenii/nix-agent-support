@@ -51,6 +51,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/recordertest"
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/conformance/golden"
 )
 
 const (
@@ -401,7 +402,7 @@ func adoptCCPoolSettings() map[string]any {
 // object.
 func adoptRequest(t *testing.T, role map[string]any) []byte {
 	t.Helper()
-	req, err := conformance.Golden("handler.dispatch")
+	req, err := golden.Golden("handler.dispatch")
 	if err != nil {
 		t.Fatalf("read handler.dispatch golden: %v", err)
 	}

@@ -7,20 +7,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/conformance/golden"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
 //go:embed testdata/compat/*.json
 var compatGolden embed.FS
 
-// loadGolden wraps the shared Golden loader (conformance.go) with a
+// loadGolden wraps the shared golden.Golden loader (package conformance/golden) with a
 // t.Fatalf-on-error signature for the tests below — the golden-loading
-// implementation itself lives once in conformance.go so package conformance's
-// own tests and the extracted conformance/driver package (Task 3.13) never
-// carry two copies of it.
+// implementation itself lives once in the leaf package conformance/golden, so
+// package conformance's own tests and conformance/driver never carry two
+// copies of it.
 func loadGolden(t *testing.T, name string) map[string]any {
 	t.Helper()
-	v, err := Golden(name)
+	v, err := golden.Golden(name)
 	if err != nil {
 		t.Fatalf("read golden %s: %v", name, err)
 	}

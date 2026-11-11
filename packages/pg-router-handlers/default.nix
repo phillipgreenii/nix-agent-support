@@ -1,5 +1,4 @@
 {
-  pkgs,
   lib,
   mkGoApp,
 }:
@@ -44,9 +43,15 @@ mkGoApp {
   # `test-pg-router-handler-ccpool-version-stamped` flake check.
   versionPath = "main.version";
 
-  # git on PATH for the moved ccpool/watchdog/beads packages' real-git
-  # fixture tests (mirrors pg-router's own default.nix nativeCheckInputs).
-  nativeCheckInputs = [ pkgs.git ];
+  # Build exactly the two shipped binaries (pinning only one would silently drop
+  # the other). The build runs no tests (mkGoApp defaults doCheck = false); the
+  # `pg-router-ccpool-handler-go-tests` check is the test gate and supplies git
+  # itself via testDeps. The testdataguard test fails if a package in either
+  # binary's dependency closure embeds a testdata/ path.
+  subPackages = [
+    "cmd/pg-router-handler-ccpool"
+    "cmd/pg-router-handler-command"
+  ];
 
   meta = {
     description = "pg-router participant implementations (ccpool-backed and command-backed handlers), speaking INTF-HANDLER/INTF-SOURCE over the wire";

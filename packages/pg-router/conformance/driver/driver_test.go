@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/conformance/golden"
 )
 
 // TestRun_ReproducesConformanceCases proves Run's static schema/golden case set
@@ -194,7 +195,7 @@ func (f fakeParticipant) Serve(subcommand string, stdin io.Reader, stdout io.Wri
 
 func validMonReadReply(t *testing.T) []byte {
 	t.Helper()
-	g, err := conformance.Golden("mon.read-reply")
+	g, err := golden.Golden("mon.read-reply")
 	if err != nil {
 		t.Fatalf("read mon.read-reply golden: %v", err)
 	}
@@ -207,7 +208,7 @@ func validMonReadReply(t *testing.T) []byte {
 
 func validQueryReply(t *testing.T) []byte {
 	t.Helper()
-	g, err := conformance.Golden("source.query-reply")
+	g, err := golden.Golden("source.query-reply")
 	if err != nil {
 		t.Fatalf("read source.query-reply golden: %v", err)
 	}

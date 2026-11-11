@@ -1,5 +1,4 @@
 {
-  pkgs,
   lib,
   mkGoApp,
   makeWrapper,
@@ -65,12 +64,14 @@ mkGoApp {
 
   nativeBuildInputs = [ makeWrapper ];
 
-  # No subPackages is set above, so this derivation's gomod2nix checkPhase runs the full
-  # `go test ./...`, including internal/config's git-common-dir tests (pg2-xl659), which build
-  # a real throwaway repo + linked worktree via the `git` binary rather than skipping when it
-  # is absent. Matches ccpool's own nativeCheckInputs = [ pkgs.git ] (packages/ccpool/default.nix),
-  # which mirrors the other Go packages' (e.g. packages/pg-connector).
-  nativeCheckInputs = [ pkgs.git ];
+  # Build only the shipped binary. The package installs just bin/pg-router, and
+  # pinning subPackages keeps every other package in the module (conformance
+  # test-support, drivers, test-only helpers) out of the nix build. The build runs
+  # no tests (mkGoApp defaults doCheck = false): the test gate, including the
+  # git-backed internal/config tests, is the `pg-router-go-tests` check, which
+  # supplies git itself via testDeps. The testdataguard test fails if a package
+  # in this binary's dependency closure embeds a testdata/ path.
+  subPackages = [ "cmd/pg-router" ];
 
   # This list MUST carry the backing command of EVERY source and handler kind
   # pg-router can validate, because `Config.Load()`'s pre-runtime check 5

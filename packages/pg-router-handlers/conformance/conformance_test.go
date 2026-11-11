@@ -40,6 +40,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/conformance/driver"
+	"github.com/phillipgreenii/pg-router/conformance/golden"
 )
 
 // TestStaticSchemaChecks runs driver.Run's golden/negative-matrix suite —
@@ -223,7 +224,7 @@ func commandRoleConfig() map[string]any {
 // {name, config} that a role with `handler` set delivers on stdin. The golden
 // itself stays {schemaVersion, id, event}.
 func newShapeDispatchRequest(name string, config map[string]any) map[string]any {
-	req, err := conformance.Golden("handler.dispatch")
+	req, err := golden.Golden("handler.dispatch")
 	if err != nil {
 		panic(fmt.Sprintf("read handler.dispatch golden: %v", err))
 	}
@@ -280,7 +281,7 @@ func TestLiveDispatch_command(t *testing.T) {
 func TestLiveDispatch_negative(t *testing.T) {
 	bin := buildBinary(t, commandAdapterCmd)
 
-	noRole, err := conformance.Golden("handler.dispatch")
+	noRole, err := golden.Golden("handler.dispatch")
 	if err != nil {
 		t.Fatalf("read handler.dispatch golden: %v", err)
 	}
@@ -340,7 +341,7 @@ func TestLiveQuery(t *testing.T) {
 func liveQuery(t *testing.T, cmdName string) {
 	t.Helper()
 	bin := buildBinary(t, cmdName)
-	req, err := conformance.Golden("source.query")
+	req, err := golden.Golden("source.query")
 	if err != nil {
 		t.Fatalf("read source.query golden: %v", err)
 	}
