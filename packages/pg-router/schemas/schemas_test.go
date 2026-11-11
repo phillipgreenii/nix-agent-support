@@ -286,8 +286,8 @@ func TestRegistryLoadsAllInterfaces(t *testing.T) {
 		"store.request", "store.reply",
 		"cli.ingest-event", "cli.ingest-event-reply", "cli.push-inject", "cli.status", "cli.status-reply",
 		"cli.self-status", "cli.self-status-reply", "cli.error", "cli.register", "cli.register-reply",
-		"cli.pause", "cli.pause-reply", "cli.resume", "cli.resume-reply",
-		"cli.gate-set", "cli.gate-set-reply", "source.level-answer", "cli.gate-clear", "cli.gate-clear-reply",
+		"source.level-answer", "cli.level-ingest", "cli.level-ingest-reply", "cli.level-list", "cli.level-list-reply",
+		"cli.level-set", "cli.level-set-reply", "cli.level-clear", "cli.level-clear-reply", "cli.level-refresh", "cli.level-refresh-reply",
 		"cli.log-compact", "cli.log-compact-reply",
 	}
 	for _, name := range want {

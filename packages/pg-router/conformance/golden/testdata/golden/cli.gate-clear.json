@@ -1,5 +1,0 @@
-{
-  "schemaVersion": "1",
-  "type": "LOW_DISK_USAGE",
-  "by": "disk-watchdog"
-}

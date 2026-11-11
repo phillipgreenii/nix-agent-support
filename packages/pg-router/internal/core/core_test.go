@@ -372,8 +372,8 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	if len(queues) != 1 || queues[0].(map[string]any)["type"] != "review-requested" {
 		t.Fatalf("queues = %v, want the one enqueued type (Task 3.2 DepthByType)", queues)
 	}
-	if gates, ok := reply["gates"].([]any); !ok || len(gates) != 0 {
-		t.Fatalf("gates = %v, want the empty array (the gate mechanism is gone; the surface work replaces the field)", reply["gates"])
+	if lv, ok := reply["levels"].([]any); !ok || len(lv) != 0 {
+		t.Fatalf("levels = %v, want the empty array with no level projection wired", reply["levels"])
 	}
 	listeners, _ := reply["listeners"].([]any)
 	if len(listeners) != 1 || listeners[0].(map[string]any)["role"] != "review" {

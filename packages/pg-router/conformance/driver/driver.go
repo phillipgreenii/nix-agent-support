@@ -369,8 +369,10 @@ var negativeMatrix = map[string][]negativeCase{
 		{"delivery carries the removed state field", `{"schemaVersion":"1","deliveries":[{"id":"h","handler":"r","event":"e","state":"running"}],"queues":[],"config":{"sources":0,"handlers":0}}`},
 		{"queue depth wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[{"type":"t","depth":"3"}],"config":{"sources":0,"handlers":0}}`},
 		{"core carries an unknown field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"core":{"state":"started","pid":1,"extra":"x"}}`},
-		{"gate missing setAt", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"type":"SYSTEM_PAUSE"}]}`},
-		{"gate carries the removed set/mtime/disabled fields", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[{"type":"SYSTEM_PAUSE","setAt":"2026-09-01T00:00:00Z","set":true}]}`},
+		{"level entry missing resource", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"levels":[{"level":"TIGHT"}]}`},
+		{"level entry source out of enum", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"levels":[{"resource":"disk","source":"guess"}]}`},
+		{"level entry carries an unknown field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"levels":[{"resource":"disk","type":"SYSTEM_PAUSE"}]}`},
+		{"carries the removed gates field", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"gates":[]}`},
 		{"activity entry missing outcome", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activity":[{"seq":1,"startedAt":"2026-09-01T00:00:00Z","type":"t"}]}`},
 		{"activityDropped wrong type", `{"schemaVersion":"1","deliveries":[],"queues":[],"config":{"sources":0,"handlers":0},"activityDropped":"yes"}`},
 		// Task 4.1 (operator-widened scope): the new listeners[].backoff shape
@@ -417,25 +419,6 @@ var negativeMatrix = map[string][]negativeCase{
 		{"accepted wrong type", `{"schemaVersion":"1","accepted":"yes","callback":"","selfStatusCallback":"c"}`},
 		{"missing selfStatusCallback", `{"schemaVersion":"1","accepted":true,"callback":""}`},
 	},
-	"cli.pause": {
-		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
-		{"owner wrong type", `{"schemaVersion":"1","owner":5}`},
-		{"carries the removed gate field", `{"schemaVersion":"1","gate":"operator_paused"}`},
-	},
-	"cli.pause-reply": {
-		{"missing set", `{"schemaVersion":"1","gate":"SYSTEM_PAUSE","setAt":"2026-09-01T00:00:00Z"}`},
-		{"set wrong type", `{"schemaVersion":"1","gate":"SYSTEM_PAUSE","set":"yes","setAt":"2026-09-01T00:00:00Z"}`},
-		{"missing setAt", `{"schemaVersion":"1","gate":"SYSTEM_PAUSE","set":true}`},
-	},
-	"cli.resume": {
-		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
-		{"all wrong type", `{"schemaVersion":"1","all":"yes"}`},
-		{"carries the removed gate field", `{"schemaVersion":"1","gate":"operator_paused"}`},
-	},
-	"cli.resume-reply": {
-		{"missing cleared", `{"schemaVersion":"1"}`},
-		{"cleared wrong item type", `{"schemaVersion":"1","cleared":[5]}`},
-	},
 	"source.level-answer": {
 		{"level lowercase", `{"schemaVersion":"1","resource":"disk","level":"tight","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":"host-sensor"}`},
 		{"missing observed_at", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","valid_for_s":120,"owner":"host-sensor"}`},
@@ -443,26 +426,56 @@ var negativeMatrix = map[string][]negativeCase{
 		{"empty owner", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":""}`},
 		{"unknown field", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":"host-sensor","extra":true}`},
 	},
-	"cli.gate-set": {
-		{"missing type", `{"schemaVersion":"1"}`},
-		{"type not ALL CAPS", `{"schemaVersion":"1","type":"low_disk"}`},
-		{"type empty", `{"schemaVersion":"1","type":""}`},
-		{"ttlMs zero (below minimum)", `{"schemaVersion":"1","type":"X","ttlMs":0}`},
-		{"ttlMs wrong type", `{"schemaVersion":"1","type":"X","ttlMs":"5m"}`},
-		{"unknown field", `{"schemaVersion":"1","type":"X","severity":"high"}`},
+	"cli.level-ingest": {
+		{"level lowercase", `{"schemaVersion":"1","resource":"disk","level":"tight","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":"host-sensor"}`},
+		{"missing observed_at", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","valid_for_s":120,"owner":"host-sensor"}`},
+		{"valid_for_s zero", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","observed_at":"2026-11-11T05:00:00Z","valid_for_s":0,"owner":"host-sensor"}`},
+		{"unknown field", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":"host-sensor","extra":true}`},
 	},
-	"cli.gate-set-reply": {
-		{"missing setAt", `{"schemaVersion":"1","type":"X","set":true}`},
-		{"set wrong type", `{"schemaVersion":"1","type":"X","set":"yes","setAt":"2026-09-01T00:00:00Z"}`},
+	"cli.level-ingest-reply": {
+		{"missing outcome", `{"schemaVersion":"1"}`},
+		{"outcome out of enum", `{"schemaVersion":"1","outcome":"maybe"}`},
+		{"reason out of enum", `{"schemaVersion":"1","outcome":"rejected","reason":"because"}`},
 	},
-	"cli.gate-clear": {
-		{"type not ALL CAPS", `{"schemaVersion":"1","type":"x"}`},
+	"cli.level-list": {
+		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},
+		{"unknown field", `{"schemaVersion":"1","resource":"disk"}`},
+	},
+	"cli.level-list-reply": {
+		{"missing levels", `{"schemaVersion":"1"}`},
+		{"entry missing resource", `{"schemaVersion":"1","levels":[{"level":"TIGHT"}]}`},
+		{"source out of enum", `{"schemaVersion":"1","levels":[{"resource":"disk","level":"TIGHT","source":"guess"}]}`},
+		{"override missing until_cleared", `{"schemaVersion":"1","levels":[{"resource":"disk","level":"TIGHT","override":{"expires_at":"2026-11-11T08:00:00Z"}}]}`},
+		{"age_s negative", `{"schemaVersion":"1","levels":[{"resource":"disk","age_s":-1}]}`},
+	},
+	"cli.level-set": {
+		{"missing level", `{"schemaVersion":"1","resource":"disk","for_s":60}`},
+		{"level lowercase", `{"schemaVersion":"1","resource":"disk","level":"tight","for_s":60}`},
+		{"for_s zero", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","for_s":0}`},
+		{"for_s over 24 hours", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","for_s":86401}`},
+		{"until_cleared wrong type", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","until_cleared":"yes"}`},
+	},
+	"cli.level-set-reply": {
+		{"missing until_cleared", `{"schemaVersion":"1","resource":"disk","level":"TIGHT"}`},
+		{"unknown field", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","until_cleared":true,"extra":1}`},
+	},
+	"cli.level-clear": {
+		{"resource not snake_case", `{"schemaVersion":"1","resource":"Disk"}`},
 		{"all wrong type", `{"schemaVersion":"1","all":"yes"}`},
-		{"by wrong type", `{"schemaVersion":"1","type":"X","by":5}`},
+		{"by wrong type", `{"schemaVersion":"1","resource":"disk","by":5}`},
 	},
-	"cli.gate-clear-reply": {
+	"cli.level-clear-reply": {
 		{"missing cleared", `{"schemaVersion":"1"}`},
-		{"cleared not an array", `{"schemaVersion":"1","cleared":"X"}`},
+		{"cleared not an array", `{"schemaVersion":"1","cleared":"disk"}`},
+	},
+	"cli.level-refresh": {
+		{"missing resources", `{"schemaVersion":"1"}`},
+		{"resources wrong item type", `{"schemaVersion":"1","resources":[5]}`},
+	},
+	"cli.level-refresh-reply": {
+		{"missing results", `{"schemaVersion":"1"}`},
+		{"outcome out of enum", `{"schemaVersion":"1","results":[{"resource":"disk","outcome":"maybe"}]}`},
+		{"result missing resource", `{"schemaVersion":"1","results":[{"outcome":"applied"}]}`},
 	},
 	"cli.log-compact": {
 		{"schemaVersion const mismatch", `{"schemaVersion":"9"}`},

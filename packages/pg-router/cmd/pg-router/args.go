@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check) | doctor [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--description <text>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | gate (set <TYPE> [--description <text>] [--owner <who>] [--ttl <dur>] | clear (<TYPE> | --all) [--by <who>] | list [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check) | doctor [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -91,7 +91,7 @@ Subcommands:
                           PG_ROUTER_SOCKET/PG_ROUTER_TOKEN, else discovery under the log dir. It NEVER
                           starts a core: with none running it fails with "no running core" (exit 1).
   status                  inspect the RUNNING core: resolved configuration, live deliveries, and
-                          per-type queue depths, plus gates/mode/listeners/sources/unmatched
+                          per-type queue depths, plus levels/mode/listeners/sources/unmatched
                           bindings/recent activity. Text by default, JSON with --json. Locates the
                           core via --socket/--token, else PG_ROUTER_SOCKET/PG_ROUTER_TOKEN, else
                           discovery under the log dir. It NEVER starts a core: with none running it
@@ -103,10 +103,27 @@ Subcommands:
                           the log dir, on the interval PG_ROUTER_TUI_INTERVAL sets (below). Unlike
                           every other operator subcommand, it NEVER fails on "no running core": it
                           renders a no-core screen and keeps polling instead (ADR 0036).
-  pause                   pause the router (INV-LIFE-2): admission stops for every registration (emitters
+  pause [--for <dur>] [--owner <who>]
+                          pause the router (INV-LIFE-2): admission stops for every registration (emitters
                           are not polled, listeners are not dispatched to; pushed events are still
-                          accepted and queued events stay queued). Running work is never touched.
-  resume [--all]          resume the router, or — with --all — clear every operator override.
+                          accepted and queued events stay queued). Running work is never touched. It is
+                          level set on the router resource, level PAUSED: until resumed, or for --for
+                          (a Go duration, at most 24h; there is no day form).
+  resume [--all]          resume the router (level clear on the router resource), or — with --all — clear
+                          every operator override on every resource.
+  level list [--json]    list every resource with the level in force (source, owner, age, any override).
+  level set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json]
+                          push an operator level that wins while fresh and returns the sensor's value on
+                          expiry or on level clear. Exactly one of --for and --until-cleared is required;
+                          --for is a plain Go duration and a value over 24h is rejected (exit 2), never
+                          clamped, so only --until-cleared is unbounded. Shown in status as OVERRIDE by
+                          <owner>, expires in <D> (or until cleared).
+  level clear (<resource> | --all) [--by <who>]
+                          remove the operator override of one resource, or of every resource.
+  level refresh [<resource>...] [--json]
+                          run the sensor's pull query once, now (every level source when none is named)
+                          and apply the answer; a rise of a credential resource skips the sensor's dwell.
+                          A probe, not an override. Exit 0 when every resource is applied, 1 otherwise.
   log compact [--dry-run] [--json]
                           compact <LogDir>/queue.jsonl (the write-ahead log of events AND levels) down to
                           live state now, instead of waiting for the startup or threshold trigger. With a
@@ -229,6 +246,7 @@ const (
 	routeTUI                           // operator: continuous-interactive view over status/pause/resume (Task 4.2, .rest); never fails on "no running core" (ADR 0036)
 	routeSelfStatus                    // manager->core callback: push the caller's own self-status to the running core (.rest)
 	routePause                         // operator: pause the router (INV-LIFE-2, .rest)
+	routeLevel                         // operator: level list|set|clear|refresh (.rest)
 	routeResume                        // operator: resume the router, or every operator override with --all (.rest)
 	routeDoctor                        // operator: config check plus quick probes of the state dir, socket, gates, roles and handlers (.rest)
 	routeLog                           // operator: log compact [--dry-run] on the queue log, via the running core or offline (.rest)
@@ -341,6 +359,10 @@ func route(argv []string) routeResult {
 		return routeResult{kind: routePause, rest: args[1:]}
 	case "resume":
 		return routeResult{kind: routeResume, rest: args[1:]}
+	case "level":
+		// Its own verb and flags, parsed in its own handler, with the same usage
+		// exit code every operator subcommand uses.
+		return routeResult{kind: routeLevel, rest: args[1:]}
 	case "doctor":
 		// Its own --socket/--token flags, parsed in its own handler, with the same
 		// usage exit code every operator subcommand uses.

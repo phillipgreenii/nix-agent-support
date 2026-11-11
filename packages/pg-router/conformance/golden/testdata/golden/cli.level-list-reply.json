@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1",
+  "levels": [
+    {
+      "resource": "disk",
+      "level": "TIGHT",
+      "source": "sensor",
+      "owner": "host-sensor",
+      "observed_at": "2026-11-11T05:00:00Z",
+      "received_at": "2026-11-11T05:00:01Z",
+      "expires_at": "2026-11-11T05:02:01Z",
+      "age_s": 12,
+      "stale": false,
+      "since": "2026-11-11T04:30:00Z",
+      "reading": { "value": 12.5, "unit": "percent_free" }
+    },
+    {
+      "resource": "network",
+      "level": "DOWN",
+      "source": "operator",
+      "owner": "operator",
+      "observed_at": "2026-11-11T05:00:00Z",
+      "received_at": "2026-11-11T05:00:00Z",
+      "expires_at": "2026-11-11T08:00:00Z",
+      "age_s": 30,
+      "stale": false,
+      "since": "2026-11-11T05:00:00Z",
+      "override": {
+        "until_cleared": false,
+        "expires_at": "2026-11-11T08:00:00Z"
+      }
+    },
+    { "resource": "ram" }
+  ]
+}

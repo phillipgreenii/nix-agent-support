@@ -1,0 +1,18 @@
+{
+  "$id": "cli.level-refresh",
+  "title": "INTF-CLI socket level-refresh verb (`pg-router level refresh`): run the sensor pull query of each named resource once, now (every level source when `resources` is empty). A probe, not an override.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "resources"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

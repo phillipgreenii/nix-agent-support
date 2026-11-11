@@ -113,11 +113,16 @@ type LevelProjectionConfig struct {
 	OnReject          func(reason string)
 	OnBoundary        func(resource, from, to string)
 	OnOverrideExpired func(resource, owner string)
+	// OnOverrideSet is called once per operator override set (level-set, pause).
+	OnOverrideSet func(resource, level, owner string, expiresAt time.Time)
 }
 
 type levelEntry struct {
 	rec LevelRecord
 	seq int64
+	// since is when the resource entered this entry's level: the previous
+	// entry's since when the level did not change, else the record's receipt time.
+	since time.Time
 }
 
 type levelSlot struct {
@@ -267,7 +272,7 @@ func (p *LevelProjection) applyLocked(rec LevelRecord, seq int64) {
 		p.lastSeq = seq
 	}
 	s := p.slotLocked(rec.Resource)
-	e := &levelEntry{rec: rec, seq: seq}
+	e := &levelEntry{rec: rec, seq: seq, since: rec.ReceivedAt}
 	if rec.Owner == LevelOwnerOperator || p.isOperatorOwner(rec) {
 		if rec.Cleared {
 			s.override = nil
@@ -283,6 +288,9 @@ func (p *LevelProjection) applyLocked(rec LevelRecord, seq int64) {
 	}
 	if s.sensor != nil && (seq <= s.sensor.seq || rec.ObservedAt.Before(s.sensor.rec.ObservedAt)) {
 		return
+	}
+	if s.sensor != nil && s.sensor.rec.Level == rec.Level && !s.sensor.since.IsZero() {
+		e.since = s.sensor.since
 	}
 	s.sensor = e
 }
@@ -324,13 +332,70 @@ func (p *LevelProjection) SetOverride(resource, level, owner string, expiresAt t
 	if expiresAt.IsZero() {
 		rec.ExpiresAt = time.Time{}
 	}
-	return p.appendAndApply(rec)
+	if err := p.appendAndApply(rec); err != nil {
+		return err
+	}
+	if p.cfg.OnOverrideSet != nil {
+		p.cfg.OnOverrideSet(resource, level, owner, rec.ExpiresAt)
+	}
+	return nil
 }
 
 // ClearOverride removes the operator override of a resource.
 func (p *LevelProjection) ClearOverride(resource string) error {
 	now := p.cfg.Now().UTC()
 	return p.appendAndApply(LevelRecord{Cleared: true, Resource: resource, Owner: LevelOwnerOperator, ReceivedAt: now})
+}
+
+// ValidateLevel reports whether resource is in the registry and level is a
+// member of its scale (the router checks this; the wire only checks the pattern).
+func (p *LevelProjection) ValidateLevel(resource, level string) error {
+	scale, ok := p.cfg.Registry[resource]
+	if !ok {
+		return errors.New("unknown resource " + resource)
+	}
+	for _, l := range scale.Levels {
+		if l == level {
+			return nil
+		}
+	}
+	return errors.New("unknown level " + level + " for resource " + resource)
+}
+
+// OverrideResources returns, sorted, the resources that hold an operator
+// override record (fresh or lapsed but not yet dropped).
+func (p *LevelProjection) OverrideResources() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for n, s := range p.slots {
+		if s.override != nil {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ClearOverrides removes the operator override of each named resource that holds
+// one and returns those resources, in input order. Resources with no override
+// are skipped (clearing is idempotent).
+func (p *LevelProjection) ClearOverrides(resources []string) ([]string, error) {
+	var cleared []string
+	for _, r := range resources {
+		p.mu.Lock()
+		s := p.slots[r]
+		has := s != nil && s.override != nil
+		p.mu.Unlock()
+		if !has {
+			continue
+		}
+		if err := p.ClearOverride(r); err != nil {
+			return cleared, err
+		}
+		cleared = append(cleared, r)
+	}
+	return cleared, nil
 }
 
 func (p *LevelProjection) appendAndApply(rec LevelRecord) error {
@@ -365,7 +430,7 @@ func (p *LevelProjection) forceApplyLocked(rec LevelRecord, seq int64) {
 		s.expired = false
 		return
 	}
-	s.override = &levelEntry{rec: rec, seq: seq}
+	s.override = &levelEntry{rec: rec, seq: seq, since: rec.ReceivedAt}
 	s.expired = false
 }
 
@@ -388,7 +453,7 @@ func (p *LevelProjection) effectiveLocked(resource string, now time.Time) (level
 		if o.rec.ExpiresAt.IsZero() || !now.After(o.rec.ExpiresAt) {
 			return levels.Level{
 				Value: o.rec.Level, State: levels.StateHeld, Source: "operator",
-				Owner: o.rec.Owner, Since: o.rec.ReceivedAt, ExpireAt: o.rec.ExpiresAt,
+				Owner: o.rec.Owner, Since: o.since, ExpireAt: o.rec.ExpiresAt,
 			}, "held"
 		}
 		if !s.expired {
@@ -404,7 +469,7 @@ func (p *LevelProjection) effectiveLocked(resource string, now time.Time) (level
 	r := s.sensor.rec
 	valid := time.Duration(r.ValidForS) * time.Second
 	grace := time.Duration(float64(valid) * p.cfg.Resources[resource].GraceFactor)
-	lv := levels.Level{Value: r.Level, State: levels.StateHeld, Source: "sensor", Owner: r.Owner, Since: r.ReceivedAt, ExpireAt: r.ExpiresAt}
+	lv := levels.Level{Value: r.Level, State: levels.StateHeld, Source: "sensor", Owner: r.Owner, Since: s.sensor.since, ExpireAt: r.ExpiresAt}
 	stale := now.After(r.ExpiresAt) || r.ReceivedAt.Sub(r.ObservedAt) > valid
 	if !stale {
 		return lv, "held"
@@ -461,4 +526,70 @@ func (p *LevelProjection) Statuses() []LevelStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.evaluateLocked(now)
+}
+
+// LevelOverride describes the operator override in force on a resource.
+type LevelOverride struct {
+	UntilCleared bool
+	ExpiresAt    time.Time
+}
+
+// LevelDetail is one resource's full row for level list and status. HasLevel is
+// false when no level is in force (never answered, or past grace): it prints as
+// "no reading".
+type LevelDetail struct {
+	Resource   string
+	HasLevel   bool
+	Level      string
+	Source     string // sensor, operator or grace_fallback
+	Owner      string
+	ObservedAt time.Time
+	ReceivedAt time.Time
+	ExpiresAt  time.Time
+	Age        time.Duration
+	Stale      bool
+	Since      time.Time
+	Reading    *LevelReading
+	Override   *LevelOverride
+}
+
+// Details returns one row per registry resource, sorted by name, at the current
+// time. It evaluates the projection, so boundary and override-expiry hooks fire
+// as for Snapshot.
+func (p *LevelProjection) Details() []LevelDetail {
+	now := p.cfg.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.evaluateLocked(now)
+	names := make([]string, 0, len(p.cfg.Registry))
+	for n := range p.cfg.Registry {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]LevelDetail, 0, len(names))
+	for _, n := range names {
+		d := LevelDetail{Resource: n}
+		lv, flag := p.effectiveLocked(n, now)
+		if flag != "unknown" {
+			s := p.slots[n]
+			d.HasLevel, d.Level, d.Owner, d.Since = true, lv.Value, lv.Owner, lv.Since
+			if lv.Source == "operator" {
+				r := s.override.rec
+				d.Source, d.ObservedAt, d.ReceivedAt, d.ExpiresAt = "operator", r.ObservedAt, r.ReceivedAt, r.ExpiresAt
+				d.Override = &LevelOverride{UntilCleared: r.ExpiresAt.IsZero(), ExpiresAt: r.ExpiresAt}
+			} else {
+				r := s.sensor.rec
+				d.Source, d.ObservedAt, d.ReceivedAt, d.ExpiresAt, d.Reading = "sensor", r.ObservedAt, r.ReceivedAt, r.ExpiresAt, r.Reading
+				if flag == "stale" {
+					d.Source, d.Stale = "grace_fallback", true
+				}
+			}
+			d.Age = now.Sub(d.ObservedAt)
+			if d.Age < 0 {
+				d.Age = 0
+			}
+		}
+		out = append(out, d)
+	}
+	return out
 }

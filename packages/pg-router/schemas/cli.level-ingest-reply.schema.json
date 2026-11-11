@@ -1,0 +1,28 @@
+{
+  "$id": "cli.level-ingest-reply",
+  "title": "INTF-CLI socket level-ingest verb reply: accepted, idempotent (a duplicate answer) or rejected; `reason` is present only when rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "outcome"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["accepted", "idempotent", "rejected"]
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "unknown_resource",
+        "unknown_level",
+        "malformed",
+        "not_registered_sensor",
+        "future_observed_at",
+        "older_than_held",
+        "conflict"
+      ]
+    }
+  }
+}

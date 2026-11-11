@@ -438,6 +438,18 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		Resources: levelResources(cfg.Resources),
 		Skew:      cfg.Levels.ObservedAtSkew,
 		Appender:  levelAppender,
+		// The override log lines (the metrics work formats the rest of the
+		// level log lines from the projection's events).
+		OnOverrideSet: func(resource, level, owner string, expiresAt time.Time) {
+			if expiresAt.IsZero() {
+				slog.Info("level_override_set", "resource", resource, "level", level, "owner", owner, "until_cleared", true)
+				return
+			}
+			slog.Info("level_override_set", "resource", resource, "level", level, "owner", owner, "expires_at", expiresAt.UTC().Format(time.RFC3339))
+		},
+		OnOverrideExpired: func(resource, owner string) {
+			slog.Info("level_override_expired", "resource", resource, "owner", owner)
+		},
 	})
 	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithLevelSource(levelProj.Snapshot), eventqueue.WithRegistry(cfg.Resources.Registry()), eventqueue.WithStartStagger(cfg.Levels.StartStagger),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
@@ -493,6 +505,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// live, and the resolved config path the verb echoes back informationally
 		// under its `core.configPath` field.
 		ActivityRing: ring,
+		// Levels / LevelRefresher: the level verbs and the status levels read the
+		// projection; level refresh pulls through the orchestrator's level puller.
+		Levels:         levelProj,
+		LevelRefresher: &levelRefresher{resources: cfg.Resources, puller: o.LevelPuller, proj: levelProj},
 		// SourceInFlight (DEC-OBS-2, bead pg2-ugcrb): activityObs again, as
 		// core.SourceInFlightReader — see the doc at its o.SourceActivityObserver
 		// assignment above for why one instance covers both roles.

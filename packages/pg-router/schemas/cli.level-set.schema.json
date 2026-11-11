@@ -1,0 +1,32 @@
+{
+  "$id": "cli.level-set",
+  "title": "INTF-CLI socket level-set verb (`pg-router level set`, `pause`): push an operator override that wins while fresh. `owner` is the caller (default operator; any custom owner still counts as an operator source). Exactly one of `for_s` (1 to 86400 seconds) and `until_cleared` is required; the daemon rejects neither or both.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "resource", "level"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "resource": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "level": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z_]{0,31}$"
+    },
+    "owner": {
+      "type": "string",
+      "pattern": "^.{1,64}$"
+    },
+    "for_s": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "until_cleared": {
+      "type": "boolean"
+    }
+  }
+}

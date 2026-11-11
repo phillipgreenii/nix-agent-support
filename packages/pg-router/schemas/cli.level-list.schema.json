@@ -1,0 +1,12 @@
+{
+  "$id": "cli.level-list",
+  "title": "INTF-CLI socket level-list verb (`pg-router level list`): list every resource of the registry with the level in force.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    }
+  }
+}

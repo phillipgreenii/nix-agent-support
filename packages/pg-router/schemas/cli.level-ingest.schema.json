@@ -1,0 +1,5 @@
+{
+  "$id": "cli.level-ingest",
+  "title": "INTF-CLI socket level-ingest verb (push path of a sensor): the request IS a level answer, so it $refs the answer schema instead of copying its fields and one schema validates both transports.",
+  "$ref": "source.level-answer"
+}

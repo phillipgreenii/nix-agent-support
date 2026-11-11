@@ -1,0 +1,24 @@
+{
+  "$id": "cli.level-set-reply",
+  "title": "INTF-CLI socket level-set verb reply: the override as recorded. `expires_at` is absent when it is until cleared.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "resource", "level", "until_cleared"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "resource": {
+      "type": "string"
+    },
+    "level": {
+      "type": "string"
+    },
+    "until_cleared": {
+      "type": "boolean"
+    },
+    "expires_at": {
+      "type": "string"
+    }
+  }
+}

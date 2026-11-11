@@ -164,7 +164,7 @@ func TestAdmitPull_ConcurrentLevelChurn(t *testing.T) {
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
 		t.Fatalf("final status reply failed its schema: %v", err)
 	}
-	if gates, ok := reply["gates"].([]any); !ok || len(gates) != 0 {
-		t.Fatalf("status gates = %v, want the empty array until the surface work", reply["gates"])
+	if lv, ok := reply["levels"].([]any); !ok || len(lv) != 0 {
+		t.Fatalf("status levels = %v, want the empty array with no level projection wired", reply["levels"])
 	}
 }

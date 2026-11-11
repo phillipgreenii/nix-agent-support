@@ -148,7 +148,7 @@ type statusReply struct {
 		ActiveRoles    int    `json:"activeRoles"`
 		ActiveQueries  int    `json:"activeQueries"`
 	} `json:"resolvedConfig"`
-	Gates []statusGate `json:"gates"`
+	Levels []levelView `json:"levels"`
 	// QueueLog is the durable write-ahead log's size and compaction count (bead
 	// pg2-8e0m6); nil when the core predates the field.
 	QueueLog *queueLogView `json:"queueLog"`
@@ -402,7 +402,7 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		} else {
 			fmt.Fprintln(w, "  last compaction: none since this core started")
 		}
-		// The soft step is not a gate, so nothing in GATES says it is in force:
+		// The soft step is not a level, so nothing in LEVELS says it is in force:
 		// state what is halted, what still runs, why, and the remedies here.
 		for _, line := range core.LogLimitNotice(ql.limitView()) {
 			fmt.Fprintf(w, "  ! %s\n", line)
@@ -411,8 +411,8 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		fmt.Fprintln(w, "queue log: -")
 	}
 
-	fmt.Fprintln(w, "GATES:")
-	renderGates(w, st.Gates)
+	fmt.Fprintln(w, "LEVELS:")
+	renderLevels(w, st.Levels, time.Now())
 
 	fmt.Fprintln(w, "QUEUES:")
 	if len(st.Queues) == 0 {

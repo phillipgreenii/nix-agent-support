@@ -158,19 +158,44 @@
         "deduped": { "type": "object" }
       }
     },
-    "gates": {
+    "levels": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "setAt"],
+        "required": ["resource"],
         "properties": {
-          "type": { "type": "string" },
-          "description": { "type": "string" },
+          "resource": { "type": "string" },
+          "level": { "type": "string" },
+          "source": {
+            "type": "string",
+            "enum": ["sensor", "operator", "grace_fallback"]
+          },
           "owner": { "type": "string" },
-          "setAt": { "type": "string" },
-          "expiresAt": { "type": "string" },
-          "ttlRemainingMs": { "type": "integer", "minimum": 0 }
+          "observed_at": { "type": "string" },
+          "received_at": { "type": "string" },
+          "expires_at": { "type": "string" },
+          "age_s": { "type": "integer", "minimum": 0 },
+          "stale": { "type": "boolean" },
+          "since": { "type": "string" },
+          "reading": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "unit"],
+            "properties": {
+              "value": { "type": "number" },
+              "unit": { "type": "string" }
+            }
+          },
+          "override": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["until_cleared"],
+            "properties": {
+              "until_cleared": { "type": "boolean" },
+              "expires_at": { "type": "string" }
+            }
+          }
         }
       }
     },

@@ -1,0 +1,18 @@
+{
+  "$id": "cli.level-clear-reply",
+  "title": "INTF-CLI socket level-clear verb reply: the resources whose operator override was removed (empty when none was held: idempotent).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "cleared"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "cleared": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$id": "cli.level-clear",
+  "title": "INTF-CLI socket level-clear verb (`pg-router level clear`, `resume`): remove the operator override of one resource, or of every resource with `all`. Exactly one of `resource` and `all` is required; `by` is the caller, DEBUG ONLY.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1"
+    },
+    "resource": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "all": {
+      "type": "boolean"
+    },
+    "by": {
+      "type": "string"
+    }
+  }
+}

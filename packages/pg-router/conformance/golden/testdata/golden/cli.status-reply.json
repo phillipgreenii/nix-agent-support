@@ -70,22 +70,6 @@
       "review-requested": 1
     }
   },
-  "gates": [
-    {
-      "type": "SYSTEM_PAUSE",
-      "description": "paused by the operator",
-      "owner": "operator",
-      "setAt": "2026-09-01T00:00:00Z"
-    },
-    {
-      "type": "LOW_DISK_USAGE",
-      "description": "free space below 10GiB",
-      "owner": "disk-watchdog",
-      "setAt": "2026-09-01T00:05:00Z",
-      "expiresAt": "2026-09-01T00:10:30Z",
-      "ttlRemainingMs": 120000
-    }
-  ],
   "listeners": [
     {
       "role": "review",
@@ -100,7 +84,11 @@
       "unavailableReason": "",
       "inFlight": true,
       "busy": true,
-      "progress": { "ageSeconds": 12.5, "unsuccessful": 0, "busy": 0 },
+      "progress": {
+        "ageSeconds": 12.5,
+        "unsuccessful": 0,
+        "busy": 0
+      },
       "backoff": null,
       "description": "reviews incoming PRs for policy violations"
     },
@@ -155,7 +143,10 @@
       "description": ""
     }
   ],
-  "busy": { "roles": ["review"], "sources": [] },
+  "busy": {
+    "roles": ["review"],
+    "sources": []
+  },
   "unmatchedBindings": ["declared-but-inactive-this-run"],
   "activity": [
     {
@@ -169,5 +160,37 @@
   "asOf": "2026-09-01T00:05:31Z",
   "lastTickAt": "2026-09-01T00:05:00Z",
   "snapshotAt": "2026-09-01T00:05:00Z",
-  "tickIntervalMs": 10000
+  "tickIntervalMs": 10000,
+  "levels": [
+    {
+      "resource": "disk",
+      "level": "TIGHT",
+      "source": "sensor",
+      "owner": "host-sensor",
+      "observed_at": "2026-09-01T00:00:00Z",
+      "received_at": "2026-09-01T00:00:01Z",
+      "expires_at": "2026-09-01T00:02:01Z",
+      "age_s": 12,
+      "stale": false,
+      "since": "2026-09-01T00:00:00Z",
+      "reading": {
+        "value": 12.5,
+        "unit": "percent_free"
+      }
+    },
+    {
+      "resource": "router",
+      "level": "PAUSED",
+      "source": "operator",
+      "owner": "operator",
+      "observed_at": "2026-09-01T00:05:00Z",
+      "received_at": "2026-09-01T00:05:00Z",
+      "age_s": 30,
+      "stale": false,
+      "since": "2026-09-01T00:05:00Z",
+      "override": {
+        "until_cleared": true
+      }
+    }
+  ]
 }

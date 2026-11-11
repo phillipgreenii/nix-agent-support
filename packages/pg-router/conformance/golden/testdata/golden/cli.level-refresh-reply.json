@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1",
+  "results": [
+    { "resource": "disk", "outcome": "applied", "level": "TIGHT" },
+    { "resource": "network", "outcome": "failed", "reason": "deadline" },
+    { "resource": "ram", "outcome": "no_source" }
+  ]
+}

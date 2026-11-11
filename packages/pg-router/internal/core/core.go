@@ -128,6 +128,13 @@ type Options struct {
 	// is always empty, the same nil-means-absent idiom MetricsReader uses.
 	// cmd/pg-router's bootCore is the production wiring site.
 	ActivityRing *activity.Ring
+	// Levels is the level projection the level verbs and the status reply read
+	// and write. Optional: nil means the level verbs reply with an error and the
+	// status reply carries an empty levels array.
+	Levels *LevelProjection
+	// LevelRefresher runs a sensor's pull query once for level-refresh.
+	// Optional: nil means level-refresh replies with an error.
+	LevelRefresher LevelRefresher
 	// SourceInFlight reports which configured pull sources currently have a
 	// fetch in progress (DEC-OBS-2, bead pg2-ugcrb; INV-OBS-2's per-source
 	// "processing now" signal) — read live by composeStatusReply, never
@@ -325,6 +332,8 @@ type Service struct {
 	excludedSources    []string
 	sourceIntervalsMs  map[string]int64
 	sourceDescriptions map[string]string
+	levels             *LevelProjection
+	levelRefresher     LevelRefresher
 	listenerCounts     map[string]*ListenerCounts
 	roleProgress       func() map[string]metrics.RoleProgress
 
@@ -587,6 +596,8 @@ func Listen(opts Options) (*Service, error) {
 		excludedSources:    opts.ExcludedSources,
 		sourceIntervalsMs:  opts.SourceIntervalsMs,
 		sourceDescriptions: opts.SourceDescriptions,
+		levels:             opts.Levels,
+		levelRefresher:     opts.LevelRefresher,
 		listenerCounts:     opts.ListenerCounts,
 		roleProgress:       opts.RoleProgress,
 		store:              kvstore.NewInMemory(),
@@ -932,6 +943,16 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 		return s.handleRegister(stdin, stdout)
 	case SubcommandLogCompact:
 		return s.handleLogCompact(stdin, stdout)
+	case SubcommandLevelIngest:
+		return s.handleLevelIngest(stdin, stdout)
+	case SubcommandLevelList:
+		return s.handleLevelList(stdin, stdout)
+	case SubcommandLevelSet:
+		return s.handleLevelSet(stdin, stdout)
+	case SubcommandLevelClear:
+		return s.handleLevelClear(stdin, stdout)
+	case SubcommandLevelRefresh:
+		return s.handleLevelRefresh(stdin, stdout)
 	case SubcommandGet:
 		return s.handleGet(stdin, stdout)
 	case SubcommandPut:
@@ -1256,7 +1277,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		},
 		"registry":  statusRegistrations(regs),
 		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners(), s.readRoleProgress()),
-		"gates":     []any{}, // no gate mechanism remains; the surface work replaces the field with levels
+		"levels":    s.statusLevels(),
 		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
 		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions),
 		"activity":  []any{},
@@ -1734,4 +1755,13 @@ func statusQueueLog(q *eventqueue.Queue) map[string]any {
 		out["detail"] = ls.Detail
 	}
 	return out
+}
+
+// statusLevels is the status reply's per-resource levels array (the same entries
+// as level-list).
+func (s *Service) statusLevels() []map[string]any {
+	if s.levels == nil {
+		return []map[string]any{}
+	}
+	return LevelEntries(s.levels)
 }
