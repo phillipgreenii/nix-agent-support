@@ -138,7 +138,7 @@ func newIssueCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "issue description")
 	// --metadata/--parent were added by bead pg2-2j5ac.28.3 (this bead's
 	// own Contract widening IssueInput).
-	cmd.Flags().StringToStringVar(&metadata, "metadata", nil, "custom metadata key=value (repeatable, or comma-separated within one flag)")
+	cmd.Flags().Var(newMetadataFlag(&metadata), "metadata", "custom metadata key=value (repeatable, or comma-separated within one flag)")
 	cmd.Flags().StringVar(&parent, "parent", "", "parent issue id")
 	_ = cmd.MarkFlagRequired("title")
 	return cmd
@@ -239,7 +239,7 @@ func newIssueUpdateCmd() *cobra.Command {
 		}, *backendFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueUpdate)
 	}
-	cmd.Flags().StringToStringVar(&metadata, "metadata", nil, "custom metadata key=value to merge/set (repeatable, or comma-separated within one flag)")
+	cmd.Flags().Var(newMetadataFlag(&metadata), "metadata", "custom metadata key=value to merge/set (repeatable, or comma-separated within one flag)")
 	cmd.Flags().StringSliceVar(&addLabels, "add-label", nil, "label to add (repeatable)")
 	cmd.Flags().StringSliceVar(&removeLabels, "remove-label", nil, "label to remove (repeatable)")
 	cmd.Flags().StringVar(&priority, "priority", "", "new priority")

@@ -475,6 +475,58 @@ func requireGHRepoAndPR(t *testing.T) (repo string, prNumber int) {
 // (cmd/pg-connector-issue-beads/main.go's newDispatchTable).
 // ---------------------------------------------------------------------
 
+// TestContract_IssueBeads_RealBD_MetadataJSONRoundTrip files an issue through
+// the real pg-connector and real bd with --metadata tokens shaped exactly as
+// pg-rescue-bead's csvPair renders them (RFC 4180 quoting of a JSON state
+// snapshot holding commas, quotes and an "=") and asserts the stored value is
+// the decoded, valid JSON: the umbrella used to keep the doubled quotes of a
+// quoted one-"=" token.
+func TestContract_IssueBeads_RealBD_MetadataJSONRoundTrip(t *testing.T) {
+	requireTool(t, "bd")
+	bdDir := newDisposableBDWorkspace(t)
+	env := contractEnv(map[string]string{
+		"PG_PR_CONFIG":                   writeContractRegistry(t),
+		"PG_CONNECTOR_ISSUE_BEADS_DIR":   bdDir,
+		"PG_CONNECTOR_ISSUE_BEADS_ACTOR": "pg-connector-contract-suite",
+	})
+	const state = `{"exists":true,"dir":"/w/a=b","kind":"rebase","files":["x","y"]}`
+	quoted := `"pg_rescue_state=` + strings.ReplaceAll(state, `"`, `""`) + `"`
+
+	created := runPGConnector(t, "", env, "issue", "create",
+		"--title", "metadata json round trip",
+		"--metadata", quoted, "--metadata", "plain=value")
+	if created.exitCode != 0 {
+		t.Fatalf("issue create: exit=%d stdout=%s stderr=%s", created.exitCode, created.stdout, created.stderr)
+	}
+	createdResp := decodeContractJSON[scriptout.Response](t, created.stdout)
+	if createdResp.Error != nil {
+		t.Fatalf("issue create: error envelope: %+v", createdResp.Error)
+	}
+	var made schema.Issue
+	if err := scriptout.Decode(createdResp.Result, &made); err != nil {
+		t.Fatalf("decode created issue: %v", err)
+	}
+
+	shown := runPGConnector(t, "", env, "issue", "show", made.ID)
+	if shown.exitCode != 0 {
+		t.Fatalf("issue show: exit=%d stdout=%s stderr=%s", shown.exitCode, shown.stdout, shown.stderr)
+	}
+	showResp := decodeContractJSON[scriptout.Response](t, shown.stdout)
+	var got schema.Issue
+	if err := scriptout.Decode(showResp.Result, &got); err != nil {
+		t.Fatalf("decode shown issue: %v", err)
+	}
+	if got.Metadata["pg_rescue_state"] != state {
+		t.Fatalf("stored pg_rescue_state = %q, want the decoded JSON %q", got.Metadata["pg_rescue_state"], state)
+	}
+	if !json.Valid([]byte(got.Metadata["pg_rescue_state"])) {
+		t.Fatalf("stored pg_rescue_state is not valid JSON: %q", got.Metadata["pg_rescue_state"])
+	}
+	if got.Metadata["plain"] != "value" {
+		t.Fatalf("stored plain = %q, want value", got.Metadata["plain"])
+	}
+}
+
 func TestContract_IssueBeads_RealBD_RoundTrip(t *testing.T) {
 	requireTool(t, "bd")
 	bdDir := newDisposableBDWorkspace(t)
