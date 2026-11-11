@@ -59,7 +59,7 @@ func TestSessionFilteredLimitQuerySearchesTheSessionIndex(t *testing.T) {
 		}
 		b := newBuilder(sources.Catalog(srcs))
 		b.sessionRef = true
-		b.idWalk = pinsSession(&flt) // as Engine.rows does
+		b.pinSession(&flt) // as Engine.rows does
 		c, werr := b.col("model")
 		if werr != nil {
 			t.Fatal(werr)

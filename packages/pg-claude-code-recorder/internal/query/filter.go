@@ -67,6 +67,21 @@ type builder struct {
 	// an index on such a column makes the planner read every matching row and
 	// sort them (the page then costs the whole table, not the page).
 	idWalk bool
+	// refPinned records that the filter pins the session through session_ref
+	// (the session_ref=? test of byRef). Then (session_ref, source) of
+	// records_session_ref_source_time serves a source test too, so source keeps
+	// its index; type and item stay plus-ed (the index has neither).
+	refPinned bool
+}
+
+// pinSession turns on the session-pinned plan for a filter that holds an
+// equality or membership test on the session: idWalk, and refPinned when the
+// session compares by session_ref.
+func (b *builder) pinSession(f *Filter) {
+	if pinsSession(f) {
+		b.idWalk = true
+		b.refPinned = b.sessionRef
+	}
 }
 
 // pinsSession reports whether the filter, on every path that matches, holds an
@@ -315,7 +330,11 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		e = tf.typed
 	}
 	if b.idWalk && !byRef {
-		if stored, _, rerr := b.resolve(f.Field); rerr == nil && (stored == "source" || stored == "type" || stored == "item") {
+		if stored, _, rerr := b.resolve(f.Field); rerr == nil && (stored == "source" || stored == "type" || stored == "item") && !(stored == "source" && b.refPinned) {
+			// A source test next to a session_ref pin is left to
+			// records_session_ref_source_time(session_ref, source): with the plus
+			// a session of millions of records of one source is read whole to
+			// find its few records of another (11 s against 0.1 s).
 			e = "+" + e // unary plus: an expression, so no index can serve it
 		}
 	}

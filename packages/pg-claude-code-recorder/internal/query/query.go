@@ -210,7 +210,7 @@ func (e *Engine) rows(tx store.Querier, req Request, ans *Answer) *wire.Error {
 		}
 		cols[i] = c
 	}
-	b.idWalk = b.idWalk || pinsSession(req.Where)
+	b.pinSession(req.Where)
 	wsql, wargs, err := b.where(req.Where)
 	if err != nil {
 		return err

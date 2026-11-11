@@ -52,7 +52,7 @@ func TestSessionFirstTimeQueryIsDrivenBySessionIndex(t *testing.T) {
 	}
 	b := newBuilder(sources.Catalog(srcs))
 	b.sessionRef = true
-	b.idWalk = pinsSession(&flt) // as Engine.rows does
+	b.pinSession(&flt) // as Engine.rows does
 	c, werr := b.col("time")
 	if werr != nil {
 		t.Fatal(werr)
@@ -65,7 +65,7 @@ func TestSessionFirstTimeQueryIsDrivenBySessionIndex(t *testing.T) {
 	args := append(append(append([]any{}, b.joinArgs...), wargs...), 2)
 	p := plan(t, st, q, args)
 	lines := strings.Split(p, "\n")
-	if len(lines) == 0 || !strings.HasPrefix(lines[0], "SEARCH r USING INDEX records_session_ref_source_time (session_ref=?)") {
+	if len(lines) == 0 || !strings.HasPrefix(lines[0], "SEARCH r USING INDEX records_session_ref_source_time (session_ref=?") {
 		t.Errorf("records is not the outer table searched through the session index:\n%s", p)
 	}
 	for _, l := range lines {
