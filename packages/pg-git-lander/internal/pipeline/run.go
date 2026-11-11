@@ -81,15 +81,38 @@ func (p *Prepared) Run(ctx context.Context) (*outcome.Outcome, error) {
 
 func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 	p := s.p
+	plan := p.plan
+	if plan == nil {
+		plan = &resumePlan{}
+	}
+	s.stats.ConflictRounds = plan.conflictRounds
+	s.rebased = plan.rebased
+	switch plan.entry {
+	case entryCleanup:
+		s.moved, s.landed = plan.moved, plan.landed
+		return s.cleanup(ctx, plan.nothing)
+	case entryAfterHook:
+		s.moved, s.landed = true, plan.landed
+		return s.afterAndCleanup(ctx)
+	}
 	if p.Done() {
 		return s.cleanup(ctx, true)
 	}
-	for {
+	for first := true; ; first = false {
 		if sp := s.lostCheck(); sp != nil {
 			return nil, sp, nil
 		}
-		s.baseMoved = false
-		if p.Path == rebase.NeedsRebase {
+		entry := entryNormal
+		if first {
+			entry = plan.entry
+		}
+		s.baseMoved = entry == entryRebased || entry == entryAfterRebase || (entry == entryBeforeMove && plan.baseMoved)
+		switch {
+		case entry == entryContinueConflict || entry == entrySkipConflict:
+			if sp, err := s.continueRebase(ctx, entry == entrySkipConflict); sp != nil || err != nil {
+				return nil, sp, err
+			}
+		case entry == entryNormal && p.Path == rebase.NeedsRebase:
 			if sp, err := s.doRebase(ctx); sp != nil || err != nil {
 				return nil, sp, err
 			}
@@ -106,7 +129,7 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 			}
 			return s.cleanup(ctx, false)
 		}
-		if s.baseMoved {
+		if s.baseMoved && entry != entryBeforeMove {
 			if sp, err := s.hookPoint(ctx, hooks.PointAfterRebase, oprecord.StageAfterRebase); sp != nil || err != nil {
 				return nil, sp, err
 			}
@@ -153,7 +176,11 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 			return s.cleanup(ctx, false)
 		}
 	}
+	return s.afterAndCleanup(ctx)
+}
 
+// afterAndCleanup is step 12, the after hook, and step 13.
+func (s *runner) afterAndCleanup(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 	// Step 12: the after hook; a failure is a warning, the move happened.
 	if sp := s.lostCheck(); sp != nil {
 		return nil, sp, nil
@@ -254,8 +281,33 @@ func (s *runner) doRebase(ctx context.Context) (*stopSpec, error) {
 		return nil, nil
 	}
 
-	rs := &conflict.Resolver{Git: p.d.Git, Hooks: s.hookRunner(), Rebase: rb, Config: p.Config, Facts: p.Facts}
-	cr, err := rs.Resolve(ctx, conflict.Input{Dir: work, Rounds: s.stats.ConflictRounds, AutoMerged: res.AutoMerged, Diag: p.Diag})
+	cr, err := s.resolver(rb).Resolve(ctx, conflict.Input{Dir: work, Rounds: s.stats.ConflictRounds, AutoMerged: res.AutoMerged, Diag: p.Diag})
+	return s.afterConflicts(ctx, work, base, cr, err)
+}
+
+func (s *runner) resolver(rb *rebase.Rebaser) *conflict.Resolver {
+	p := s.p
+	return &conflict.Resolver{Git: p.d.Git, Hooks: s.hookRunner(), Rebase: rb, Config: p.Config, Facts: p.Facts}
+}
+
+// continueRebase resumes at stage rebasing with git's rebase in progress
+// (design section 7.3): the person's resolution is committed (or, with skip,
+// the replayed commit is dropped) and the conflict loop goes on.
+func (s *runner) continueRebase(ctx context.Context, skip bool) (*stopSpec, error) {
+	p := s.p
+	work := p.Selection.Work.Path
+	base := p.Tips.Target
+	if p.Operation == worktrees.Rebase {
+		base = p.Tips.Onto
+	}
+	rb := &rebase.Rebaser{Git: p.d.Git}
+	cr, err := s.resolver(rb).Continue(ctx, conflict.Input{Dir: work, Rounds: s.stats.ConflictRounds, Diag: p.Diag}, skip)
+	return s.afterConflicts(ctx, work, base, cr, err)
+}
+
+// afterConflicts folds the end of a conflict loop into the runner.
+func (s *runner) afterConflicts(ctx context.Context, work, base string, cr *conflict.Result, err error) (*stopSpec, error) {
+	p := s.p
 	if err != nil {
 		return nil, err
 	}
@@ -502,16 +554,7 @@ func (s *runner) cleanup(ctx context.Context, nothing bool) (*outcome.Outcome, *
 	if err := p.EnterStage(ctx, oprecord.StageCleanup, nil); err != nil {
 		return nil, nil, err
 	}
-	in := cleanup.Input{
-		Operation: p.Operation, NothingToLand: nothing, OpID: p.OpID, Branch: p.Request.Branch,
-		Tips: p.Tips, KeepSourceWorktree: p.Request.KeepSourceWorktree, KeepSourceBranch: p.Request.KeepSourceBranch,
-		Worktrees: p.Selection.Worktrees, Work: p.Selection.Work, Dir: p.Repo,
-		Fence: s.fence(), Chdir: p.d.Chdir,
-	}
-	if p.Operation == worktrees.Land {
-		in.Target = p.Request.Target
-	}
-	res := (&cleanup.Cleaner{Git: p.d.Git}).Run(ctx, in)
+	res := (&cleanup.Cleaner{Git: p.d.Git}).Run(ctx, s.cleanupInput(nothing))
 	s.cres = &res
 	if res.Stop != nil {
 		return nil, &stopSpec{reason: res.Stop.Reason, message: "the clean-up stopped", detail: res.Stop.Detail}, nil
@@ -536,6 +579,21 @@ func (s *runner) cleanup(ctx context.Context, nothing bool) (*outcome.Outcome, *
 	s.fill(o)
 	s.opEnd(ctx, o)
 	return o, nil, nil
+}
+
+// cleanupInput is the recorded facts the clean-up of step 13 works from.
+func (s *runner) cleanupInput(nothing bool) cleanup.Input {
+	p := s.p
+	in := cleanup.Input{
+		Operation: p.Operation, NothingToLand: nothing, OpID: p.OpID, Branch: p.Request.Branch,
+		Tips: p.Tips, KeepSourceWorktree: p.Request.KeepSourceWorktree, KeepSourceBranch: p.Request.KeepSourceBranch,
+		Worktrees: p.Selection.Worktrees, Work: p.Selection.Work, Dir: p.Repo,
+		Fence: s.fence(), Chdir: p.d.Chdir,
+	}
+	if p.Operation == worktrees.Land {
+		in.Target = p.Request.Target
+	}
+	return in
 }
 
 // fill sets the fields every outcome of an operation that reached step 8
@@ -648,6 +706,10 @@ func (s *runner) stop(ctx context.Context, sp *stopSpec) (*outcome.Outcome, erro
 			o = lr.Outcome
 		}
 	} else {
+		// conflict_rounds bounds the whole operation, so a resume needs it.
+		_ = p.Op.SetAttempts(ctx, func(a *locks.Attempts) {
+			a.ConflictRounds, a.RaceRetries = s.stats.ConflictRounds, s.stats.RaceRetries
+		})
 		serr = p.Op.Stop(ctx, oprecord.StopInfo{Reason: sp.reason, Message: sp.message, Paths: sp.paths, MovedAlready: s.moved})
 	}
 	if o == nil {
@@ -662,4 +724,40 @@ func (s *runner) stop(ctx context.Context, sp *stopSpec) (*outcome.Outcome, erro
 	s.fill(o)
 	s.opEnd(ctx, o)
 	return o, serr
+}
+
+// resumeEntry is where a resumed operation re-enters steps 8 to 13.
+type resumeEntry int
+
+const (
+	// entryNormal starts at step 8 (or at the return to step 3 after a race).
+	entryNormal resumeEntry = iota
+	// entryContinueConflict and entrySkipConflict resume git's rebase that
+	// stopped on a conflict.
+	entryContinueConflict
+	entrySkipConflict
+	// entryRebased: the caller finished the rebase by hand; continue at
+	// after_rebase.
+	entryRebased
+	entryAfterRebase
+	entryBeforeMove
+	// entryAfterHook: the move happened; run the after hook, then clean up.
+	entryAfterHook
+	// entryCleanup runs the clean-up only.
+	entryCleanup
+)
+
+// resumePlan is what --continue hands to the runner.
+type resumePlan struct {
+	entry resumeEntry
+	// baseMoved says whether the after_rebase hook applied (for the before_move
+	// hook's BASE_MOVED).
+	baseMoved bool
+	// moved, landed and rebased restore the facts of the move that happened.
+	moved, rebased bool
+	landed         string
+	// nothing is the clean-up's NothingToLand input.
+	nothing bool
+	// conflictRounds is kept across a resume.
+	conflictRounds int
 }

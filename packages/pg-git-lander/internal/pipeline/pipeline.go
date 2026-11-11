@@ -134,6 +134,9 @@ type Prepared struct {
 	// Lost receives the error of a lease renewal that failed (lock-lost).
 	Lost <-chan error
 
+	// plan is where a resume enters steps 8 to 13; nil for a fresh operation.
+	plan *resumePlan
+
 	d         Deps
 	stopRenew func()
 	opStarted bool
@@ -285,6 +288,9 @@ type session struct {
 	onto  string
 	tco   bool
 	input worktrees.Input
+	// resumed is true when a --continue repeats steps 3 to 7: op_start and the
+	// first stage event were emitted by the original run.
+	resumed bool
 }
 
 // Start runs steps 1 to 7. The error is for failures that are not outcomes
@@ -564,8 +570,10 @@ func (s *session) targetName() string {
 }
 
 // startRenewal keeps every held lease fresh from here on.
-func (s *session) startRenewal(ctx context.Context) {
-	p := s.p
+func (s *session) startRenewal(ctx context.Context) { s.p.startRenewal(ctx) }
+
+// startRenewal keeps every held lease fresh from here on.
+func (p *Prepared) startRenewal(ctx context.Context) {
 	lost := make(chan error, len(p.Op.Set.Locks))
 	var stops []func()
 	for _, h := range p.Op.Set.Locks {
@@ -628,6 +636,13 @@ func (s *session) configOutcome(e *config.Error) *outcome.Outcome {
 
 // afterLock runs steps 3 to 7. Locks are held when it is called.
 func (s *session) afterLock(ctx context.Context) (*Result, error) {
+	s.initFacts()
+	s.p.Stage, s.p.StageStarted = oprecord.StageLocked, s.d.Clock.Now()
+	return s.stepsThreeToFive(ctx)
+}
+
+// initFacts fills the command environment facts known once the locks are held.
+func (s *session) initFacts() {
 	p, req := s.p, s.req
 	sel := p.Selection
 	p.Tips.Onto = s.onto
@@ -640,7 +655,13 @@ func (s *session) afterLock(ctx context.Context) (*Result, error) {
 		p.Facts.DestinationWorktree = sel.Destination.Path
 	}
 	p.WorkBranch = workbranch.Name(p.OpID)
-	p.Stage, p.StageStarted = oprecord.StageLocked, s.d.Clock.Now()
+}
+
+// stepsThreeToFive is steps 3 to 5 (snapshot, preconditions, the before hook)
+// and then the preparation; --continue at stage locked repeats it all.
+func (s *session) stepsThreeToFive(ctx context.Context) (*Result, error) {
+	p, req := s.p, s.req
+	sel := p.Selection
 
 	// Step 3: snapshot and configure.
 	cfgErr, err := p.snapshot(ctx, true)
@@ -652,14 +673,16 @@ func (s *session) afterLock(ctx context.Context) (*Result, error) {
 		digest = p.Config.Digest
 	}
 	rec := p.Op.Record()
-	if err := p.Events.OpStart(ctx, s.contextMap(), rec.Worktrees, p.WorkBranch, rec.PlaceholderBranch, rec.Keep, digest); err != nil {
-		return nil, err
+	if !s.resumed {
+		if err := p.Events.OpStart(ctx, s.contextMap(), rec.Worktrees, p.WorkBranch, rec.PlaceholderBranch, rec.Keep, digest); err != nil {
+			return nil, err
+		}
+		p.Log.Line("STAGE", oprecord.StageLocked)
+		if err := p.Events.Stage(ctx, oprecord.StageLocked, "", 0); err != nil {
+			return nil, err
+		}
 	}
 	p.opStarted = true
-	p.Log.Line("STAGE", oprecord.StageLocked)
-	if err := p.Events.Stage(ctx, oprecord.StageLocked, "", 0); err != nil {
-		return nil, err
-	}
 
 	// Step 4: preconditions (the cascade and the checks ran under the locks
 	// in step 2; layout, dirty and role failures were refused there).
@@ -702,6 +725,14 @@ func (s *session) afterLock(ctx context.Context) (*Result, error) {
 		}
 		return s.fail(ctx, o), nil
 	}
+
+	return s.prepare(ctx)
+}
+
+// prepare is steps 6 and 7: create the work branch and decide the path.
+func (s *session) prepare(ctx context.Context) (*Result, error) {
+	p, req := s.p, s.req
+	sel := p.Selection
 
 	// Step 6: prepare the work branch.
 	tip := p.Tips.Branch

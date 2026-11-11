@@ -86,8 +86,59 @@ type Input struct {
 // Resolve resolves the conflict stop in in.Dir and keeps going until the
 // rebase finishes or a stop.
 func (r *Resolver) Resolve(ctx context.Context, in Input) (*Result, error) {
+	return r.loop(ctx, in, &Result{Rounds: in.Rounds}, in.AutoMerged)
+}
+
+// Continue resumes after a person handled the conflict stop by hand (design
+// section 7.3). The paths are resolved and staged: the tool commits the
+// resolution with the replayed commit's message (or, when the resolution left
+// the replayed commit empty, skips it and lists it in Dropped), continues git's
+// rebase and goes on with the conflict loop. With skip the replayed commit is
+// dropped without looking at the index (--skip).
+func (r *Resolver) Continue(ctx context.Context, in Input, skip bool) (*Result, error) {
 	res := &Result{Rounds: in.Rounds}
-	pending := in.AutoMerged
+	commit, err := r.replayed(ctx, in.Dir)
+	if err != nil {
+		return nil, err
+	}
+	var out string
+	var stop *Stop
+	if skip {
+		res.Dropped = append(res.Dropped, commit)
+		out, stop, err = r.finishStep(ctx, in.Dir, r.Git.Run(ctx, in.Dir, "rebase", "--skip"))
+	} else if hand, herr := r.HandCommitted(ctx, in.Dir); herr == nil && hand {
+		out, stop, err = r.finishStep(ctx, in.Dir, r.Git.Run(ctx, in.Dir, "rebase", "--continue"))
+	} else {
+		out, stop, err = r.commitAndContinue(ctx, in.Dir, commit, res)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if stop != nil {
+		res.Stop = stop
+		return res, nil
+	}
+	return r.loop(ctx, in, res, rebase.AutoMergedPaths(out))
+}
+
+// HandCommitted reports whether the caller already committed the resolution
+// of the replayed commit by hand: the index equals HEAD and HEAD carries the
+// replayed commit's subject (a resolution that left the commit empty leaves
+// HEAD at the previous commit).
+func (r *Resolver) HandCommitted(ctx context.Context, dir string) (bool, error) {
+	commit, err := r.replayed(ctx, dir)
+	if err != nil {
+		return false, err
+	}
+	if empty := r.Git.Run(ctx, dir, "diff", "--cached", "--quiet"); !empty.OK() {
+		return false, nil
+	}
+	head := r.Git.Run(ctx, dir, "log", "-1", "--format=%an%x00%at%x00%s", "HEAD")
+	rep := r.Git.Run(ctx, dir, "log", "-1", "--format=%an%x00%at%x00%s", commit)
+	return head.OK() && rep.OK() && string(head.Stdout) == string(rep.Stdout), nil
+}
+
+func (r *Resolver) loop(ctx context.Context, in Input, res *Result, pending []string) (*Result, error) {
 	diag := in.Diag
 	if diag == nil {
 		diag = &rebase.Diagnostics{Drivers: map[string]string{}, Attrs: map[string]string{}}
@@ -410,6 +461,12 @@ func (r *Resolver) commitAndContinue(ctx context.Context, dir, commit string, re
 	default:
 		return "", nil, fmt.Errorf("git diff --cached: exit %d: %s", empty.Code, strings.TrimSpace(string(empty.Stderr)))
 	}
+	return r.finishStep(ctx, dir, g)
+}
+
+// finishStep classifies the result of the git rebase --continue or --skip that
+// ended a conflict round.
+func (r *Resolver) finishStep(ctx context.Context, dir string, g gitexec.Result) (string, *Stop, error) {
 	out := string(g.Stdout) + string(g.Stderr)
 	if g.TimedOut {
 		return out, &Stop{Reason: outcome.StopGitError, LogTail: "git rebase timed out"}, nil
