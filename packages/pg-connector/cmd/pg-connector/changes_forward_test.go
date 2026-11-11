@@ -367,6 +367,31 @@ func TestForwardedChanges_Unavailable_DegradesSource_NoDelivery_NoAck_NoList(t *
 	}
 }
 
+// A daemon whose changes op ran out its call budget under host load answers an
+// unavailable error carrying its deadline text. The umbrella degrades the source,
+// delivers nothing and never sends changes_ack, so the daemon's cursor stays
+// where it was and the next poll redelivers.
+func TestForwardedChanges_DeadlineExceeded_DegradesSource_NoDelivery_NoAck(t *testing.T) {
+	logPath := setupForwarding(t, "backend-fwd-deadline", map[string]string{
+		"changes": fwdErrorEnvelope("unavailable", "deadline exceeded after 29s (limit 28.999s) in op=changes: changes: query: run still in progress at the deadline"),
+	})
+
+	stdout, _, code := runForwardedChanges(t, logPath)
+	if code == 0 {
+		t.Fatalf("exit code = 0, want a degraded fan-out exit code; stdout=%s", stdout)
+	}
+	w := decodeFwdWire(t, stdout)
+	if len(w.Sources) != 1 || w.Sources[0].Status != "degraded" || !strings.Contains(w.Sources[0].Reason, "deadline exceeded after 29s") {
+		t.Fatalf("sources = %+v, want one degraded row carrying the deadline text", w.Sources)
+	}
+	if len(w.Changes) != 0 {
+		t.Fatalf("a timed-out forward delivered changes: %s", stdout)
+	}
+	if len(requestsFor(readRequestLog(t, logPath), "changes_ack")) != 0 {
+		t.Fatal("a timed-out source was acknowledged")
+	}
+}
+
 func TestForwardedChanges_CursorExpiredReachesTheCaller(t *testing.T) {
 	logPath := setupForwarding(t, "backend-fwd-expired", map[string]string{
 		"changes": fwdErrorEnvelope("invalid_argument", "cursor_expired: position fell outside retention; re-run with --reset"),

@@ -381,6 +381,32 @@ func TestChanges_CursorExpired_FailsTheCallAndCarriesTheReasonToStderr(t *testin
 	}
 }
 
+// A changes call that ran out its deadline under host load fails the whole call
+// (exit 1, nothing on stdout, the daemon's deadline text on stderr) and the
+// adapter sends no acknowledgement of its own: it makes exactly one
+// pg-connector call and that call is the changes poll, never a changes-ack. The
+// daemon's cursor therefore stays where it was and the next tick re-polls from
+// it (the umbrella and daemon halves are pinned in their own packages).
+func TestChanges_DeadlineExceeded_FailsTheCallAndSendsNoAckOfItsOwn(t *testing.T) {
+	fake := withFactory(t, "changes_deadline_exceeded")
+	stdout, stderr, code := runCLI(t, "changes", "pr", "--consumer", "pr-changes", "--retry-window", "6h")
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (stdout=%q)", code, stdout)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want nothing: a timed-out poll must not read as an empty change list", stdout)
+	}
+	if !strings.Contains(stderr, "deadline exceeded after 29s") {
+		t.Fatalf("stderr = %q, want the daemon's deadline text", stderr)
+	}
+	argv := onlyCall(t, fake).Args
+	for _, a := range argv {
+		if a == "changes-ack" {
+			t.Fatalf("child argv %v acknowledges a poll that failed", argv)
+		}
+	}
+}
+
 // --- bead pg2-1ldvy: metadata.entity_id, --retry-window ----------------------
 
 // entity_id is ALWAYS emitted on a changes item, with or without the

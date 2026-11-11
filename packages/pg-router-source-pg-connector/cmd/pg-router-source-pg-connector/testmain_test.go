@@ -196,6 +196,14 @@ func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 		// answers the same refusal.
 		return reply{Code: 3, Stdout: `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,` +
 			`"reason":"cursor_expired: position fell outside retention; re-run with --reset"}],"changes":[]}`}
+	case "changes_deadline_exceeded":
+		// The wire the real umbrella answers when the daemon's changes op runs
+		// out its call budget under host load (observed in the pg-router
+		// daemon log: "deadline exceeded after 29s (limit 28.999s)"): one
+		// degraded source whose reason is the daemon's deadline text, no
+		// changes, nothing acknowledged, exit 3.
+		return reply{Code: 3, Stdout: `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,` +
+			`"reason":"unavailable: deadline exceeded after 29s (limit 28.999s) in op=changes: changes: query: run still in progress at the deadline"}],"changes":[]}`}
 	case "invalid_argument":
 		return reply{
 			Code:   1,
