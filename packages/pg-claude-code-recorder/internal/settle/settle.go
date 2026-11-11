@@ -215,11 +215,8 @@ type Settler struct {
 	// lock while someone queues before it hands it over; 0 means runLockSlice.
 	yieldSlice time.Duration
 
-	// doctorMu is the single flight of the doctor cursor: a rolling slice and a
-	// CLI doctor run never overlap.
-	doctorMu   sync.Mutex
-	doctorIdle func() error
-	doctorSeam doctorSeam
+	// doctor is the doctor job (see doctor.go); Settler forwards to it.
+	doctor *Doctor
 
 	// The incrementally kept file-to-Conversation map (see groups); guarded by run.
 	trk    *store.FileTracker
@@ -337,6 +334,11 @@ func New(cfg Config) *Settler {
 		cfg.Holders = func(path string) ([]int, error) { return LsofHoldersCtx(ctx, path) }
 	}
 	s := &Settler{cfg: cfg, st: cfg.Store, fs: cfg.Store.FS(), last: map[string]string{}, reasons: map[string]string{}, checkedAt: map[string]time.Time{}, gauges: newGaugeState()}
+	s.doctor = NewDoctor(DoctorDeps{
+		Store: cfg.Store, Copier: cfg.Copier, Clock: cfg.Clock, Obs: cfg.Obs, ClaudeDir: cfg.ClaudeDir, Mtime: cfg.Mtime,
+		Interval: cfg.DoctorInterval, BytesPerSlice: cfg.DoctorBytesPerSlice, SliceEvery: cfg.DoctorSliceEvery, LagBound: cfg.DoctorLagBound,
+		Stopping: s.stopping, OnFullRun: s.markRemovalGauges,
+	})
 	if cfg.Copier != nil {
 		// Every file-state change the copier commits (a backfill batch, a
 		// tombstone, a new generation, the settler's and doctor's own) feeds the
@@ -1016,16 +1018,22 @@ func (s *Settler) lastSeen(ctx context.Context, f store.File) time.Time {
 	if v, ok := s.seen[f.ID]; ok {
 		return time.Unix(0, max(f.FirstSeen, v))
 	}
-	return s.lastSeenFromStore(f)
+	return s.lastSeenFromStore(ctx, f)
 }
 
 // lastSeenFromStore reads the file's last-seen time straight from the store and
 // never touches s.seen, so a caller that does not hold the run lock (doctor)
 // can use it.
-func (s *Settler) lastSeenFromStore(f store.File) time.Time {
+func (s *Settler) lastSeenFromStore(ctx context.Context, f store.File) time.Time {
+	return lastSeenFromStore(ctx, s.st, f)
+}
+
+// lastSeenFromStore is the read behind Settler.lastSeenFromStore, for callers
+// that have only a store (the doctor).
+func lastSeenFromStore(ctx context.Context, st *store.Store, f store.File) time.Time {
 	ns := f.FirstSeen
 	var got map[int64]int64
-	if err := s.st.ReadTxCtx(ctx, func(rd *store.Reader) (err error) {
+	if err := st.ReadTxCtx(ctx, func(rd *store.Reader) (err error) {
 		got, err = rd.LastSeenByFile([]int64{f.ID})
 		return err
 	}); err == nil {

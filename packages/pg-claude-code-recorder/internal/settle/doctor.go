@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
@@ -94,8 +95,8 @@ func splitNotices(ms []DoctorMismatch) (crit, notices []DoctorMismatch) {
 
 // doctorFull is the old synchronous comparison (doctor.bytes_per_slice = 0): it
 // holds the copier lock across every file's full hash.
-func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
-	now := s.cfg.Clock.Now()
+func (d *Doctor) doctorFull(ctx context.Context) (DoctorResult, error) {
+	now := d.clock.Now()
 	res := DoctorResult{AtNS: now.UnixNano(), Mismatches: []DoctorMismatch{}, Notices: []DoctorMismatch{}}
 	bad := map[int64]bool{}
 	add := func(m DoctorMismatch) {
@@ -106,13 +107,13 @@ func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
 			bad[-int64(len(res.Mismatches))] = true
 		}
 	}
-	files, err := s.st.AllFiles()
+	files, err := d.st.AllFiles()
 	if err != nil {
 		return res, err
 	}
-	err = s.cfg.Copier.WithLock(func() error {
+	err = d.copier.WithLock(func() error {
 		for _, f := range files {
-			orig := s.cfg.Copier.ReadOriginalPath(f)
+			orig := d.copier.ReadOriginalPath(f)
 			if orig == "" {
 				continue
 			}
@@ -121,12 +122,12 @@ func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
 				if f.CurGen == 0 {
 					continue
 				}
-				g, err := s.st.Generation(f.ID, f.CurGen)
+				g, err := d.st.Generation(f.ID, f.CurGen)
 				if err != nil {
 					return err
 				}
 				res.FilesChecked++
-				ok, detail, err := s.prefixMatches(f, g, orig)
+				ok, detail, err := d.prefixMatches(f, g, orig)
 				if err != nil {
 					return err
 				}
@@ -134,14 +135,14 @@ func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
 					continue
 				}
 				m := DoctorMismatch{Kind: MismatchCopy, File: f.ID, Path: orig, Detail: detail}
-				if err := s.cfg.Copier.NewGenerationLocked(f, orig, "full_hash_mismatch"); err != nil {
+				if err := d.copier.NewGenerationLocked(f, orig, "full_hash_mismatch"); err != nil {
 					m.Detail += "; new generation failed: " + err.Error()
 				} else {
 					m.Repaired = true
 				}
 				add(m)
 			case "snapshot":
-				sn, err := s.st.LatestSnapshot(f.ID)
+				sn, err := d.st.LatestSnapshot(f.ID)
 				if err != nil {
 					continue
 				}
@@ -150,7 +151,7 @@ func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
 				if err != nil {
 					continue
 				}
-				if (h != sn.Hash || size != sn.Size) && !s.lastSeenFromStore(ctx, f).Before(s.mtimeOf(orig)) {
+				if (h != sn.Hash || size != sn.Size) && !lastSeenFromStore(ctx, d.st, f).Before(d.mtimeOf(orig)) {
 					add(DoctorMismatch{Kind: MismatchSnapshot, File: f.ID, Path: orig, Detail: fmt.Sprintf("stored %d bytes, original %d", sn.Size, size)})
 				}
 			}
@@ -160,25 +161,25 @@ func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
 	if err != nil {
 		return res, err
 	}
-	s.doctorJournal(ctx, add)
-	if err := s.doctorArchives(&res, add); err != nil {
+	d.doctorJournal(ctx, add)
+	if err := d.doctorArchives(&res, add); err != nil {
 		return res, err
 	}
 	res.Mismatches, res.Notices = splitNotices(res.Mismatches)
 	res.MismatchFiles = countBad(res.Mismatches)
 	sort.SliceStable(res.Mismatches, func(i, j int) bool { return res.Mismatches[i].File < res.Mismatches[j].File })
-	if err := s.writeDoctor(res); err != nil {
+	if err := d.writeDoctor(res); err != nil {
 		return res, err
 	}
-	s.cfg.Obs.Reg.Set(obs.MDoctorLastRun, nil, float64(now.UnixNano())/1e9)
-	s.cfg.Obs.Reg.Set(obs.MDoctorMismatchFiles, nil, float64(res.MismatchFiles))
-	s.markRemovalGauges()
-	s.cfg.Obs.Event(obs.EvDoctorDone, "files", fmt.Sprint(res.FilesChecked), "mismatch_files", fmt.Sprint(res.MismatchFiles))
+	d.obs.Reg.Set(obs.MDoctorLastRun, nil, float64(now.UnixNano())/1e9)
+	d.obs.Reg.Set(obs.MDoctorMismatchFiles, nil, float64(res.MismatchFiles))
+	d.onFullRun()
+	d.obs.Event(obs.EvDoctorDone, "files", fmt.Sprint(res.FilesChecked), "mismatch_files", fmt.Sprint(res.MismatchFiles))
 	return res, nil
 }
 
-func (s *Settler) mtimeOf(p string) time.Time {
-	t, err := s.cfg.Mtime(p)
+func (d *Doctor) mtimeOf(p string) time.Time {
+	t, err := d.mtime(p)
 	if err != nil {
 		return time.Time{}
 	}
@@ -187,7 +188,7 @@ func (s *Settler) mtimeOf(p string) time.Time {
 
 // prefixMatches compares the copy's committed bytes with the same-length prefix
 // of the original (the original may be longer while the copier is behind).
-func (s *Settler) prefixMatches(f store.File, g store.Generation, orig string) (bool, string, error) {
+func (d *Doctor) prefixMatches(f store.File, g store.Generation, orig string) (bool, string, error) {
 	if g.CopyOffset == 0 {
 		return true, "", nil
 	}
@@ -203,7 +204,7 @@ func (s *Settler) prefixMatches(f store.File, g store.Generation, orig string) (
 	if fi.Size() < g.CopyOffset {
 		return false, fmt.Sprintf("the original has %d bytes, the copy %d", fi.Size(), g.CopyOffset), nil
 	}
-	ptr, err := s.st.OpenPointer(f.ID, g.Gen)
+	ptr, err := d.st.OpenPointer(f.ID, g.Gen)
 	if err != nil {
 		return false, "", err
 	}
@@ -225,10 +226,10 @@ func (s *Settler) prefixMatches(f store.File, g store.Generation, orig string) (
 // doctorJournal checks the journal against the index: the index never applied a
 // record beyond the journal's last intact sequence, and a replay of the journal
 // equals the index's observations.
-func (s *Settler) doctorJournal(ctx context.Context, add func(DoctorMismatch)) {
+func (d *Doctor) doctorJournal(ctx context.Context, add func(DoctorMismatch)) {
 	// A frozen view: reading the journal and the index at different instants
 	// races a commit in flight (journal first, index second).
-	fz, err := s.st.FreezeJournal()
+	fz, err := d.st.FreezeJournal()
 	if err != nil {
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: "reading the journal: " + err.Error()})
 		return
@@ -250,13 +251,13 @@ func (s *Settler) doctorJournal(ctx context.Context, add func(DoctorMismatch)) {
 // doctorArchives checks each settled Conversation's archive against its
 // manifest: the manifest file on disk equals the committed one and every file's
 // bytes, read through the archive, hash to the manifest's hash.
-func (s *Settler) doctorArchives(res *DoctorResult, add func(DoctorMismatch)) error {
-	sessions, err := s.settledSessions()
+func (d *Doctor) doctorArchives(res *DoctorResult, add func(DoctorMismatch)) error {
+	sessions, err := d.settledSessions()
 	if err != nil {
 		return err
 	}
 	for _, session := range sessions {
-		checked, _ := s.doctorArchive(session, add)
+		checked, _ := d.doctorArchive(session, add)
 		if checked {
 			res.ArchivesCheck++
 		}
@@ -265,8 +266,8 @@ func (s *Settler) doctorArchives(res *DoctorResult, add func(DoctorMismatch)) er
 }
 
 // settledSessions lists the settled Conversations in session order.
-func (s *Settler) settledSessions() ([]string, error) {
-	rows, err := s.st.Read().Query(`SELECT session FROM settled ORDER BY session`)
+func (d *Doctor) settledSessions() ([]string, error) {
+	rows, err := d.st.Read().Query(`SELECT session FROM settled ORDER BY session`)
 	if err != nil {
 		return nil, err
 	}
@@ -287,12 +288,12 @@ func (s *Settler) settledSessions() ([]string, error) {
 
 // doctorArchive checks one Conversation's archive; checked is false when the
 // Conversation is not settled, and hashed is the bytes hashed.
-func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (checked bool, hashed int64) {
-	st, ok, err := s.st.SettledOf(session)
+func (d *Doctor) doctorArchive(session string, add func(DoctorMismatch)) (checked bool, hashed int64) {
+	st, ok, err := d.st.SettledOf(session)
 	if err != nil || !ok {
 		return false, 0
 	}
-	disk, err := os.ReadFile(filepath.Join(s.st.SegDir(session), "manifest.json"))
+	disk, err := os.ReadFile(filepath.Join(d.st.SegDir(session), "manifest.json"))
 	switch {
 	case err != nil:
 		add(DoctorMismatch{Kind: MismatchManifest, Session: session, Detail: "manifest.json: " + err.Error()})
@@ -308,9 +309,9 @@ func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (check
 		if mf.Hash == "" {
 			continue
 		}
-		ptr, err := s.st.OpenPointer(mf.File, mf.Gen)
+		ptr, err := d.st.OpenPointer(mf.File, mf.Gen)
 		if err != nil {
-			s.doctorMissingBytes(session, mf, err, add)
+			d.doctorMissingBytes(session, mf, err, add)
 			continue
 		}
 		h, herr := hashReader(ptr, mf.StoredSize())
@@ -336,16 +337,16 @@ func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (check
 //   - the source exists and hashes to the manifest value: its bytes are stored
 //     again at the manifest's version (copy_restored_from_source).
 //   - the source is missing or differs: copy_unrecoverable.
-func (s *Settler) doctorMissingBytes(session string, mf store.ManifestFile, openErr error, add func(DoctorMismatch)) {
+func (d *Doctor) doctorMissingBytes(session string, mf store.ManifestFile, openErr error, add func(DoctorMismatch)) {
 	m := DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "opening the stored bytes: " + openErr.Error()}
 	if !missingBytesRepairable(errors.Is(openErr, store.ErrNotFound), mf.Mode) {
 		add(m)
 		return
 	}
-	abs := filepath.Join(s.cfg.ClaudeDir, filepath.FromSlash(mf.Path))
-	if d := s.scope().Match(abs); !d.Ingest {
+	abs := filepath.Join(d.claudeDir, filepath.FromSlash(mf.Path))
+	if dec := scope.New(d.claudeDir, "").Match(abs); !dec.Ingest {
 		m.Kind = NoticeOutOfScope
-		m.Detail = "the ingest allowlist rejects this file (" + d.Reason + "); its stored copy was removed on purpose and is not stored again"
+		m.Detail = "the ingest allowlist rejects this file (" + dec.Reason + "); its stored copy was removed on purpose and is not stored again"
 		add(m)
 		return
 	}
@@ -369,7 +370,7 @@ func (s *Settler) doctorMissingBytes(session string, mf store.ManifestFile, open
 		add(m)
 		return
 	}
-	if err := s.cfg.Copier.RestoreSnapshot(mf.File, mf.Gen, data); err != nil {
+	if err := d.copier.RestoreSnapshot(mf.File, mf.Gen, data); err != nil {
 		m.Detail += "; restoring from the source failed: " + err.Error()
 		add(m)
 		return
@@ -381,12 +382,12 @@ func (s *Settler) doctorMissingBytes(session string, mf store.ManifestFile, open
 }
 
 // writeDoctor writes the result file atomically.
-func (s *Settler) writeDoctor(res DoctorResult) error {
+func (d *Doctor) writeDoctor(res DoctorResult) error {
 	b, err := json.MarshalIndent(res, "", "  ")
 	if err != nil {
 		return err
 	}
-	final := filepath.Join(s.st.Dir(), DoctorFile)
+	final := filepath.Join(d.st.Dir(), DoctorFile)
 	tmp := final + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err

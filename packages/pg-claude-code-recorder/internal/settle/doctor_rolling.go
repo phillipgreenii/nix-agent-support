@@ -17,8 +17,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
@@ -92,43 +94,104 @@ type doctorSeam struct {
 	recheck func(file int64)
 }
 
-// SetDoctorIdleStep sets the step an idle slice (a rolling tick with no cycle
-// open and none due) runs, at most once per slice. Call it before the daemon's
-// doctor loop starts.
-func (s *Settler) SetDoctorIdleStep(fn func() error) { s.doctorIdle = fn }
-
-func (s *Settler) doctorBudget() int64 { return s.cfg.DoctorBytesPerSlice }
-
-// Doctor runs the full comparison and returns its result.
-func (s *Settler) Doctor() (DoctorResult, error) {
-	a, err := s.DoctorRun()
-	return a.DoctorResult, err
+// DoctorCopier is the part of the copier the doctor uses.
+type DoctorCopier interface {
+	WithLock(fn func() error) error
+	ReadOriginalPath(f store.File) string
+	NewGenerationLocked(f store.File, path, reason string) error
+	RestoreSnapshot(file int64, version int, data []byte) error
 }
 
-// DoctorRun runs doctor to completion: the old synchronous comparison when
-// bytes_per_slice is 0, else it takes the cursor and completes the open cycle
-// (or a new one) slice by slice, with no lock held across files.
-func (s *Settler) DoctorRun() (DoctorAnswer, error) { return s.DoctorRunCtx(s.detached()) }
+// DoctorDeps are the doctor's dependencies; NewDoctor requires Store, Copier,
+// Clock, Obs and Mtime.
+type DoctorDeps struct {
+	Store  *store.Store
+	Copier DoctorCopier
+	Clock  clock.Clock
+	Obs    *obs.Obs
+	// ClaudeDir is the Claude directory (manifest paths are relative to it).
+	ClaudeDir string
+	// Mtime reads a file's modification time.
+	Mtime func(path string) (time.Time, error)
+	// Interval is doctor.interval, BytesPerSlice doctor.bytes_per_slice (0 selects
+	// the old synchronous run), SliceEvery doctor.slice_every, LagBound the
+	// copy_lag_bytes above which a slice is deferred (1 GiB when 0).
+	Interval      time.Duration
+	BytesPerSlice int64
+	SliceEvery    time.Duration
+	LagBound      int64
+	// Stopping reports that the daemon is shutting down (never stopping when nil).
+	Stopping func() bool
+	// OnFullRun runs after a synchronous (bytes_per_slice = 0) run wrote its
+	// result; the settler marks its removal gauges stale there. Nil does nothing.
+	OnFullRun func()
+}
 
-// DoctorRunCtx is DoctorRun under ctx. The run itself is not cut by a cancelled
-// ctx (the caller is a request that may disconnect), so ctx only carries values.
-func (s *Settler) DoctorRunCtx(ctx context.Context) (DoctorAnswer, error) {
+// Doctor is the doctor job: the synchronous comparison and the rolling cycle.
+// It owns the cursor's single flight (mu) and takes no run lock; the settler
+// forwards its operations.
+type Doctor struct {
+	st            *store.Store
+	copier        DoctorCopier
+	clock         clock.Clock
+	obs           *obs.Obs
+	claudeDir     string
+	mtime         func(path string) (time.Time, error)
+	interval      time.Duration
+	bytesPerSlice int64
+	sliceEvery    time.Duration
+	lagLimit      int64
+	stopFn        func() bool
+	onFullRun     func()
+
+	// mu is the single flight of the doctor cursor: a rolling slice and a CLI
+	// doctor run never overlap.
+	mu   sync.Mutex
+	idle func() error
+	seam doctorSeam
+}
+
+// NewDoctor returns a Doctor over deps.
+func NewDoctor(deps DoctorDeps) *Doctor {
+	return &Doctor{
+		st: deps.Store, copier: deps.Copier, clock: deps.Clock, obs: deps.Obs,
+		claudeDir: deps.ClaudeDir, mtime: deps.Mtime, interval: deps.Interval,
+		bytesPerSlice: deps.BytesPerSlice, sliceEvery: deps.SliceEvery, lagLimit: deps.LagBound,
+		stopFn: deps.Stopping, onFullRun: deps.OnFullRun,
+	}
+}
+
+func (d *Doctor) stopping() bool { return d.stopFn != nil && d.stopFn() }
+
+// SetIdleStep sets the step an idle slice (a rolling tick with no cycle open
+// and none due) runs, at most once per slice. Call it before the daemon's
+// doctor loop starts.
+func (d *Doctor) SetIdleStep(fn func() error) { d.idle = fn }
+
+func (d *Doctor) doctorBudget() int64 { return d.bytesPerSlice }
+
+// Run runs doctor to completion: the old synchronous comparison when
+// bytes_per_slice is 0, else it takes the cursor and completes the open cycle
+// (or a new one) slice by slice, with no lock held across files. The run itself
+// is not cut by a cancelled ctx (the caller is a request that may disconnect),
+// so ctx only carries values.
+func (d *Doctor) Run(ctx context.Context) (DoctorAnswer, error) {
 	ctx = context.WithoutCancel(ctx)
-	if s.doctorBudget() <= 0 {
-		res, err := s.doctorFull(ctx)
+	if d.doctorBudget() <= 0 {
+		res, err := d.doctorFull(ctx)
 		return DoctorAnswer{DoctorResult: res}, err
 	}
-	s.doctorMu.Lock()
-	defer s.doctorMu.Unlock()
-	cur := s.loadCursor()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cur := d.loadCursor()
 	var ans DoctorAnswer
 	if cur.Active {
 		ans.TookOver = &DoctorCycleState{StartedNS: cur.CycleStartedNS, Phase: cur.Phase, Processed: cur.Processed, TotalFiles: cur.TotalFiles, Findings: len(cur.Mismatches)}
-	} else if err := s.startCycle(&cur); err != nil {
+	} else if err := d.startCycle(&cur); err != nil {
 		return ans, err
 	}
 	for {
-		finished, res, err := s.runSlice(ctx, &cur, s.doctorBudget())
+		finished, res, err := d.runSlice(ctx, &cur, d.doctorBudget())
 		if err != nil {
 			return ans, err
 		}
@@ -139,121 +202,120 @@ func (s *Settler) DoctorRunCtx(ctx context.Context) (DoctorAnswer, error) {
 	}
 }
 
-// DoctorTick is one wake of the rolling loop: start a cycle when one is due,
+// Tick is one wake of the rolling loop: start a cycle when one is due,
 // run one slice of the open cycle (deferred while the copier is behind), or,
 // with nothing to do, run the idle step. It does nothing while a CLI run holds
 // the cursor, and when bytes_per_slice is 0.
-func (s *Settler) DoctorTick() error {
-	ctx := s.detached()
-	if s.stopping() {
+func (d *Doctor) Tick(ctx context.Context) error {
+	if d.stopping() {
 		return nil
 	}
-	if s.doctorBudget() <= 0 || !s.doctorMu.TryLock() {
+	if d.doctorBudget() <= 0 || !d.mu.TryLock() {
 		return nil
 	}
-	defer s.doctorMu.Unlock()
-	now := s.cfg.Clock.Now()
-	cur := s.loadCursor()
+	defer d.mu.Unlock()
+	now := d.clock.Now()
+	cur := d.loadCursor()
 	if !cur.Active {
-		s.cfg.Obs.Reg.Set(obs.MDoctorCursorAge, nil, 0)
-		if !s.cycleDue(cur, now) {
-			if s.doctorIdle != nil {
-				return s.doctorIdle()
+		d.obs.Reg.Set(obs.MDoctorCursorAge, nil, 0)
+		if !d.cycleDue(cur, now) {
+			if d.idle != nil {
+				return d.idle()
 			}
 			return nil
 		}
 	}
-	if lag, ok := s.cfg.Obs.Reg.Gauge(obs.MCopyLagBytes, nil); ok && int64(lag) > s.lagBound() {
-		s.cfg.Obs.Reg.Add(obs.MDoctorSlices, map[string]string{"outcome": "deferred"}, 1)
-		s.setCursorAge(cur, now)
+	if lag, ok := d.obs.Reg.Gauge(obs.MCopyLagBytes, nil); ok && int64(lag) > d.lagBound() {
+		d.obs.Reg.Add(obs.MDoctorSlices, map[string]string{"outcome": "deferred"}, 1)
+		d.setCursorAge(cur, now)
 		return nil
 	}
 	if !cur.Active {
-		if err := s.startCycle(&cur); err != nil {
+		if err := d.startCycle(&cur); err != nil {
 			return err
 		}
 	}
-	_, _, err := s.runSlice(ctx, &cur, s.doctorBudget())
+	_, _, err := d.runSlice(ctx, &cur, d.doctorBudget())
 	return err
 }
 
-func (s *Settler) lagBound() int64 {
-	if s.cfg.DoctorLagBound > 0 {
-		return s.cfg.DoctorLagBound
+func (d *Doctor) lagBound() int64 {
+	if d.lagLimit > 0 {
+		return d.lagLimit
 	}
 	return defaultLagBound
 }
 
-func (s *Settler) setCursorAge(cur DoctorCursor, now time.Time) {
+func (d *Doctor) setCursorAge(cur DoctorCursor, now time.Time) {
 	age := 0.0
 	if cur.Active && cur.UpdatedNS > 0 {
 		age = now.Sub(time.Unix(0, cur.UpdatedNS)).Seconds()
 	}
-	s.cfg.Obs.Reg.Set(obs.MDoctorCursorAge, nil, age)
+	d.obs.Reg.Set(obs.MDoctorCursorAge, nil, age)
 }
 
 // cycleDue reports whether a new cycle starts: the last completed one is older
 // than doctor.interval minus the expected cycle length (the previous cycle's
 // duration, one hour at least). A store that never completed a cycle is due.
-func (s *Settler) cycleDue(cur DoctorCursor, now time.Time) bool {
-	interval := s.cfg.DoctorInterval
+func (d *Doctor) cycleDue(cur DoctorCursor, now time.Time) bool {
+	interval := d.interval
 	last := cur.LastEndNS
 	if last == 0 && interval > 0 {
-		if r, ok := LoadDoctor(s.st.Dir()); ok {
+		if r, ok := LoadDoctor(d.st.Dir()); ok {
 			last = r.AtNS
 		}
 	}
 	return cycleDueAt(interval, last, cur.LastDurationNS, now)
 }
 
-func (s *Settler) cursorPath() string { return filepath.Join(s.st.Dir(), DoctorCursorFile) }
+func (d *Doctor) cursorPath() string { return filepath.Join(d.st.Dir(), DoctorCursorFile) }
 
-func (s *Settler) loadCursor() DoctorCursor {
+func (d *Doctor) loadCursor() DoctorCursor {
 	var c DoctorCursor
-	b, err := os.ReadFile(s.cursorPath())
+	b, err := os.ReadFile(d.cursorPath())
 	if err != nil || json.Unmarshal(b, &c) != nil {
 		return DoctorCursor{}
 	}
 	return c
 }
 
-func (s *Settler) saveCursor(c *DoctorCursor) error {
-	c.UpdatedNS = s.cfg.Clock.Now().UnixNano()
+func (d *Doctor) saveCursor(c *DoctorCursor) error {
+	c.UpdatedNS = d.clock.Now().UnixNano()
 	b, err := json.Marshal(*c)
 	if err != nil {
 		return err
 	}
-	tmp := s.cursorPath() + ".tmp"
+	tmp := d.cursorPath() + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.cursorPath())
+	return os.Rename(tmp, d.cursorPath())
 }
 
 // startCycle opens a cycle over the files that exist now (a file created
 // during it is covered by the next cycle) and refreshes the projection gauge.
-func (s *Settler) startCycle(cur *DoctorCursor) error {
-	files, err := s.st.AllFiles()
+func (d *Doctor) startCycle(cur *DoctorCursor) error {
+	files, err := d.st.AllFiles()
 	if err != nil {
 		return err
 	}
 	*cur = DoctorCursor{
-		Active: true, CycleStartedNS: s.cfg.Clock.Now().UnixNano(), Phase: phaseFiles, TotalFiles: len(files),
+		Active: true, CycleStartedNS: d.clock.Now().UnixNano(), Phase: phaseFiles, TotalFiles: len(files),
 		LastEndNS: cur.LastEndNS, LastDurationNS: cur.LastDurationNS, LastMismatchFiles: cur.LastMismatchFiles,
 	}
-	if _, _, err := s.DoctorProjection(); err != nil {
+	if _, _, err := d.Projection(); err != nil {
 		return err
 	}
-	s.cfg.Obs.Reg.Set(obs.MDoctorCycleProgress, nil, 0)
-	return s.saveCursor(cur)
+	d.obs.Reg.Set(obs.MDoctorCycleProgress, nil, 0)
+	return d.saveCursor(cur)
 }
 
-// DoctorProjection returns the copy bytes of the file set and the cycle length
+// Projection returns the copy bytes of the file set and the cycle length
 // they project to: bytes over the slice budget (rounded up), times the slice
 // interval. It sets doctor_projected_cycle_seconds. The budget counts bytes of
 // one side, the copy.
-func (s *Settler) DoctorProjection() (int64, time.Duration, error) {
-	files, err := s.st.AllFiles()
+func (d *Doctor) Projection() (int64, time.Duration, error) {
+	files, err := d.st.AllFiles()
 	if err != nil {
 		return 0, 0, err
 	}
@@ -264,24 +326,24 @@ func (s *Settler) DoctorProjection() (int64, time.Duration, error) {
 			if f.CurGen == 0 {
 				continue
 			}
-			if g, err := s.st.Generation(f.ID, f.CurGen); err == nil {
+			if g, err := d.st.Generation(f.ID, f.CurGen); err == nil {
 				total += g.CopyOffset
 			}
 		case "snapshot":
-			if sn, err := s.st.LatestSnapshot(f.ID); err == nil {
+			if sn, err := d.st.LatestSnapshot(f.ID); err == nil {
 				total += sn.Size
 			}
 		}
 	}
 	var projected time.Duration
-	if b := s.doctorBudget(); b > 0 {
+	if b := d.doctorBudget(); b > 0 {
 		slices := (total + b - 1) / b
 		if slices < 1 {
 			slices = 1
 		}
-		projected = time.Duration(slices) * s.cfg.DoctorSliceEvery
+		projected = time.Duration(slices) * d.sliceEvery
 	}
-	s.cfg.Obs.Reg.Set(obs.MDoctorProjectedCycle, nil, projected.Seconds())
+	d.obs.Reg.Set(obs.MDoctorProjectedCycle, nil, projected.Seconds())
 	return total, projected, nil
 }
 
@@ -312,21 +374,21 @@ func hasID(ids []int64, id int64) bool {
 // runSlice runs one slice of the open cycle against budget bytes of the copy
 // and saves the cursor. finished is true, with the result, when the slice
 // completed the cycle.
-func (s *Settler) runSlice(ctx context.Context, cur *DoctorCursor, budget int64) (finished bool, res DoctorResult, err error) {
-	reg := s.cfg.Obs.Reg
-	start := s.cfg.Clock.Now()
+func (d *Doctor) runSlice(ctx context.Context, cur *DoctorCursor, budget int64) (finished bool, res DoctorResult, err error) {
+	reg := d.obs.Reg
+	start := d.clock.Now()
 	defer func() {
 		outcome := "ok"
 		if err != nil {
 			outcome = "error"
 		}
 		reg.Add(obs.MDoctorSlices, map[string]string{"outcome": outcome}, 1)
-		reg.Observe(obs.MDoctorSliceDuration, s.cfg.Clock.Now().Sub(start).Seconds())
+		reg.Observe(obs.MDoctorSliceDuration, d.clock.Now().Sub(start).Seconds())
 	}()
 	add := func(m DoctorMismatch) { cur.Mismatches = append(cur.Mismatches, m) }
 	spent := int64(0)
 	if cur.Phase == phaseFiles {
-		files, ferr := s.st.AllFiles()
+		files, ferr := d.st.AllFiles()
 		if ferr != nil {
 			return false, res, ferr
 		}
@@ -335,12 +397,12 @@ func (s *Settler) runSlice(ctx context.Context, cur *DoctorCursor, budget int64)
 			if !ok {
 				break
 			}
-			if (spent > 0 && spent >= budget) || s.stopping() {
-				return false, res, s.sliceEnd(cur)
+			if (spent > 0 && spent >= budget) || d.stopping() {
+				return false, res, d.sliceEnd(cur)
 			}
-			n, perr := s.doctorOne(ctx, cur, f, retried, add)
+			n, perr := d.doctorOne(ctx, cur, f, retried, add)
 			if perr != nil {
-				_ = s.sliceEnd(cur)
+				_ = d.sliceEnd(cur)
 				return false, res, perr
 			}
 			spent += n
@@ -353,35 +415,35 @@ func (s *Settler) runSlice(ctx context.Context, cur *DoctorCursor, budget int64)
 			}
 		}
 		// The journal check runs once per cycle; the archives follow.
-		s.doctorJournal(ctx, add)
+		d.doctorJournal(ctx, add)
 		cur.Phase = phaseArchives
 	}
-	sessions, serr := s.settledSessions()
+	sessions, serr := d.settledSessions()
 	if serr != nil {
-		_ = s.sliceEnd(cur)
+		_ = d.sliceEnd(cur)
 		return false, res, serr
 	}
 	for _, session := range sessions {
 		if session <= cur.ArchiveAfter {
 			continue
 		}
-		if (spent > 0 && spent >= budget) || s.stopping() {
-			return false, res, s.sliceEnd(cur)
+		if (spent > 0 && spent >= budget) || d.stopping() {
+			return false, res, d.sliceEnd(cur)
 		}
-		checked, n := s.doctorArchive(session, add)
+		checked, n := d.doctorArchive(session, add)
 		if checked {
 			cur.ArchivesDone++
 		}
 		spent += n
 		cur.ArchiveAfter = session
 	}
-	res, err = s.finishCycle(cur)
+	res, err = d.finishCycle(cur)
 	return err == nil, res, err
 }
 
 // sliceEnd saves the cursor and updates the per-slice gauges.
-func (s *Settler) sliceEnd(cur *DoctorCursor) error {
-	reg := s.cfg.Obs.Reg
+func (d *Doctor) sliceEnd(cur *DoctorCursor) error {
+	reg := d.obs.Reg
 	bad := float64(countBad(cur.Mismatches))
 	if prev := float64(cur.LastMismatchFiles); prev > bad {
 		bad = prev // a finding already alerting does not clear until the cycle ends
@@ -394,33 +456,33 @@ func (s *Settler) sliceEnd(cur *DoctorCursor) error {
 		}
 		reg.Set(obs.MDoctorCycleProgress, nil, p)
 	}
-	err := s.saveCursor(cur)
-	s.setCursorAge(*cur, s.cfg.Clock.Now())
+	err := d.saveCursor(cur)
+	d.setCursorAge(*cur, d.clock.Now())
 	return err
 }
 
 // finishCycle writes doctor.json, sets the gauges and closes the cycle.
-func (s *Settler) finishCycle(cur *DoctorCursor) (DoctorResult, error) {
-	end := s.cfg.Clock.Now()
+func (d *Doctor) finishCycle(cur *DoctorCursor) (DoctorResult, error) {
+	end := d.clock.Now()
 	crit, notices := splitNotices(cur.Mismatches)
 	res := DoctorResult{
 		AtNS: end.UnixNano(), FilesChecked: cur.FilesDone, ArchivesCheck: cur.ArchivesDone,
 		MismatchFiles: countBad(crit), Mismatches: crit, Notices: notices,
 	}
 	sort.SliceStable(res.Mismatches, func(i, j int) bool { return res.Mismatches[i].File < res.Mismatches[j].File })
-	if err := s.writeDoctor(res); err != nil {
+	if err := d.writeDoctor(res); err != nil {
 		return res, err
 	}
 	dur := end.Sub(time.Unix(0, cur.CycleStartedNS))
-	reg := s.cfg.Obs.Reg
+	reg := d.obs.Reg
 	reg.Set(obs.MDoctorLastRun, nil, float64(end.UnixNano())/1e9)
 	reg.Set(obs.MDoctorMismatchFiles, nil, float64(res.MismatchFiles))
 	reg.Set(obs.MDoctorCycleDuration, nil, dur.Seconds())
 	reg.Set(obs.MDoctorCycleProgress, nil, 1)
-	s.cfg.Obs.Event(obs.EvDoctorDone, "files", fmt.Sprint(res.FilesChecked), "mismatch_files", fmt.Sprint(res.MismatchFiles))
+	d.obs.Event(obs.EvDoctorDone, "files", fmt.Sprint(res.FilesChecked), "mismatch_files", fmt.Sprint(res.MismatchFiles))
 	*cur = DoctorCursor{LastEndNS: end.UnixNano(), LastDurationNS: int64(dur), LastMismatchFiles: res.MismatchFiles}
-	err := s.saveCursor(cur)
-	s.setCursorAge(*cur, end)
+	err := d.saveCursor(cur)
+	d.setCursorAge(*cur, end)
 	return res, err
 }
 
@@ -453,8 +515,8 @@ func (cur *DoctorCursor) requeue(id int64, retried bool) {
 }
 
 // doctorOne checks one file and returns the copy bytes it hashed.
-func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File, retried bool, add func(DoctorMismatch)) (int64, error) {
-	reg := s.cfg.Obs.Reg
+func (d *Doctor) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File, retried bool, add func(DoctorMismatch)) (int64, error) {
+	reg := d.obs.Reg
 	race := func() {
 		reg.Add(obs.MDoctorRaceSkips, nil, 1)
 		cur.requeue(f.ID, retried)
@@ -466,15 +528,15 @@ func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File
 			g    store.Generation
 			orig string
 		)
-		err := s.cfg.Copier.WithLock(func() error {
+		err := d.copier.WithLock(func() error {
 			var err error
-			if fc, err = s.st.File(f.ID); err != nil || fc.CurGen == 0 {
+			if fc, err = d.st.File(f.ID); err != nil || fc.CurGen == 0 {
 				return err
 			}
-			if orig = s.cfg.Copier.ReadOriginalPath(fc); orig == "" {
+			if orig = d.copier.ReadOriginalPath(fc); orig == "" {
 				return nil
 			}
-			g, err = s.st.Generation(fc.ID, fc.CurGen)
+			g, err = d.st.Generation(fc.ID, fc.CurGen)
 			return err
 		})
 		if err != nil {
@@ -486,11 +548,11 @@ func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File
 		if fc.CurGen == 0 || orig == "" {
 			return 0, nil
 		}
-		if s.doctorSeam.hashing != nil {
-			s.doctorSeam.hashing(f.ID)
+		if d.seam.hashing != nil {
+			d.seam.hashing(f.ID)
 		}
 		cur.FilesDone++
-		ok, detail, err := s.prefixMatches(fc, g, orig)
+		ok, detail, err := d.prefixMatches(fc, g, orig)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
 				reg.Add(obs.MDoctorSlices, map[string]string{"outcome": "skipped_gone"}, 1)
@@ -502,15 +564,15 @@ func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File
 		if ok {
 			return g.CopyOffset, nil
 		}
-		if s.doctorSeam.recheck != nil {
-			s.doctorSeam.recheck(f.ID)
+		if d.seam.recheck != nil {
+			d.seam.recheck(f.ID)
 		}
-		err = s.cfg.Copier.WithLock(func() error {
-			f2, err := s.st.File(f.ID)
+		err = d.copier.WithLock(func() error {
+			f2, err := d.st.File(f.ID)
 			if err != nil {
 				return err
 			}
-			g2, err := s.st.Generation(f2.ID, f2.CurGen)
+			g2, err := d.st.Generation(f2.ID, f2.CurGen)
 			if err != nil {
 				return err
 			}
@@ -519,7 +581,7 @@ func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File
 				return nil
 			}
 			// The mismatch is always re-hashed under the lock before a repair.
-			ok2, detail2, err := s.prefixMatches(f2, g2, orig)
+			ok2, detail2, err := d.prefixMatches(f2, g2, orig)
 			if err != nil {
 				return err
 			}
@@ -531,7 +593,7 @@ func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File
 			if detail2 == "" {
 				m.Detail = detail
 			}
-			if err := s.cfg.Copier.NewGenerationLocked(f2, orig, "full_hash_mismatch"); err != nil {
+			if err := d.copier.NewGenerationLocked(f2, orig, "full_hash_mismatch"); err != nil {
 				m.Detail += "; new generation failed: " + err.Error()
 			} else {
 				m.Repaired = true
@@ -546,32 +608,32 @@ func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File
 			have bool
 			orig string
 		)
-		err := s.cfg.Copier.WithLock(func() error {
+		err := d.copier.WithLock(func() error {
 			var err error
-			if sn, err = s.st.LatestSnapshot(f.ID); err != nil {
+			if sn, err = d.st.LatestSnapshot(f.ID); err != nil {
 				return nil // no snapshot yet
 			}
 			have = true
-			orig = s.cfg.Copier.ReadOriginalPath(f)
+			orig = d.copier.ReadOriginalPath(f)
 			return nil
 		})
 		if err != nil || !have || orig == "" {
 			return 0, err
 		}
-		if s.doctorSeam.hashing != nil {
-			s.doctorSeam.hashing(f.ID)
+		if d.seam.hashing != nil {
+			d.seam.hashing(f.ID)
 		}
 		cur.FilesDone++
 		h, size, err := hashFile(orig)
 		if err != nil {
 			return sn.Size, nil
 		}
-		if (h != sn.Hash || size != sn.Size) && !s.lastSeenFromStore(ctx, f).Before(s.mtimeOf(orig)) {
-			if s.doctorSeam.recheck != nil {
-				s.doctorSeam.recheck(f.ID)
+		if (h != sn.Hash || size != sn.Size) && !lastSeenFromStore(ctx, d.st, f).Before(d.mtimeOf(orig)) {
+			if d.seam.recheck != nil {
+				d.seam.recheck(f.ID)
 			}
-			err = s.cfg.Copier.WithLock(func() error {
-				sn2, err := s.st.LatestSnapshot(f.ID)
+			err = d.copier.WithLock(func() error {
+				sn2, err := d.st.LatestSnapshot(f.ID)
 				if err != nil || sn2.Hash != sn.Hash || sn2.Size != sn.Size {
 					race()
 					return nil
