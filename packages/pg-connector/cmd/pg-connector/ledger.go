@@ -304,7 +304,10 @@ func loadLedgerAdopting(key LedgerKey, previousNames []string) (*Ledger, error) 
 
 	var l Ledger
 	if err := json.Unmarshal(data, &l); err != nil {
-		return nil, fmt.Errorf("ledger: decode %s: %w", path, err)
+		if qerr := quarantineCorrupt(path, err); qerr != nil {
+			return nil, fmt.Errorf("ledger: decode %s: %w (quarantine failed: %v)", path, err, qerr)
+		}
+		return newEmptyLedger(), nil
 	}
 	if l.Entries == nil {
 		l.Entries = map[string]LedgerEntry{}
@@ -351,14 +354,46 @@ func adoptLegacyLedger(key LedgerKey, path string, previousNames []string) (*Led
 	return newEmptyLedger(), nil
 }
 
+// atomicFS is the seam writeFileAtomicTemp performs its durability steps
+// through, so a test can assert the order (Sync before Rename, directory sync
+// after) without simulating power loss.
+var atomicFS = struct {
+	Sync    func(*os.File) error
+	Rename  func(oldPath, newPath string) error
+	SyncDir func(dir string) error
+}{
+	Sync:   func(f *os.File) error { return f.Sync() },
+	Rename: os.Rename,
+	SyncDir: func(dir string) error {
+		d, err := os.Open(dir)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = d.Close() }()
+		return d.Sync()
+	},
+}
+
+// staleTempAge is how old a leftover temp file (from a killed writer) must be
+// before a save removes it; a younger one may belong to a live writer.
+const staleTempAge = time.Hour
+
 // writeFileAtomic writes data to path via a temp file in the same directory
 // and a rename, creating the directory if needed. The caller holds the flock.
 func writeFileAtomic(path string, data []byte) error {
+	return writeFileAtomicTemp(path, data, ".ledger-*.tmp")
+}
+
+// writeFileAtomicTemp is writeFileAtomic with the temp-file pattern named: it
+// removes stale temp files matching pattern, writes and fsyncs the temp file,
+// renames it onto path, then fsyncs the directory so the rename is durable.
+func writeFileAtomicTemp(path string, data []byte, pattern string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".ledger-*.tmp")
+	removeStaleTemps(dir, pattern, staleTempAge)
+	tmp, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return err
 	}
@@ -368,14 +403,47 @@ func writeFileAtomic(path string, data []byte) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
+	if err := atomicFS.Sync(tmp); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := atomicFS.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}
+	return atomicFS.SyncDir(dir)
+}
+
+// removeStaleTemps deletes files in dir matching pattern whose modification
+// time is older than age. Best effort: errors are ignored.
+func removeStaleTemps(dir, pattern string, age time.Duration) {
+	matches, err := filepath.Glob(filepath.Join(dir, pattern))
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-age)
+	for _, m := range matches {
+		if fi, err := os.Stat(m); err == nil && fi.Mode().IsRegular() && fi.ModTime().Before(cutoff) {
+			_ = os.Remove(m)
+		}
+	}
+}
+
+// quarantineCorrupt renames an undecodable file at path aside to a
+// timestamped ".corrupt-" name and logs it, so the next load starts empty
+// rather than failing on every call. The caller holds the flock. A failed
+// rename is returned so the caller can report it.
+func quarantineCorrupt(path string, decodeErr error) error {
+	aside := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405.000000000Z")
+	if err := os.Rename(path, aside); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "pg-connector: quarantined undecodable %s as %s: %v\n", path, aside, decodeErr)
 	return nil
 }
 

@@ -277,6 +277,15 @@ comment`, `issue transition`, `issue update`, `issue close` and `pr review submi
   heard from the origin, never when the umbrella last answered a caller. The backend's own `status`
   exposes the same values.
 
+- **`INV-LEDGER-FRESH-6`** <!-- uuid: 3b1f6c52-8e0a-4d57-9a41-6c2d0e7b9f13 --> — The umbrella's
+  ledger and cache files MUST be written durably: the new content is synced to disk before it is
+  renamed into place, and the directory is synced after the rename. A ledger or cache file that
+  does not decode MUST NOT wedge its key: the umbrella MUST rename it aside to a timestamped
+  `.corrupt-` name in the same directory, log that to stderr, and continue from an empty ledger or
+  cache. It MUST NOT report the source degraded for the undecodable file alone. A temp file left by
+  a killed writer MUST be removed on a later save once it is older than one hour; a younger one is
+  kept, since it may belong to a live writer.
+
 ## Read as-of and staleness
 
 - **`INV-ASOF-1`** <!-- uuid: 39888347-cfb9-45fd-b72e-b465e2337d15 --> — Every acted-on read seam

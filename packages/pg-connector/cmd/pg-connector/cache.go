@@ -186,7 +186,10 @@ func loadCache(key CacheKey) (*Cache, error) {
 
 	var c Cache
 	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("cache: decode %s: %w", path, err)
+		if qerr := quarantineCorrupt(path, err); qerr != nil {
+			return nil, fmt.Errorf("cache: decode %s: %w (quarantine failed: %v)", path, err, qerr)
+		}
+		return newEmptyCache(), nil
 	}
 	if c.Entries == nil {
 		c.Entries = map[string]CacheEntry{}
@@ -223,23 +226,8 @@ func saveCache(key CacheKey, c *Cache) error {
 		return fmt.Errorf("cache: encode %s: %w", path, err)
 	}
 
-	tmp, err := os.CreateTemp(dir, ".cache-*.tmp")
-	if err != nil {
-		return fmt.Errorf("cache: create temp file in %s: %w", dir, err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("cache: write temp file for %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("cache: close temp file for %s: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("cache: rename temp file onto %s: %w", path, err)
+	if err := writeFileAtomicTemp(path, data, ".cache-*.tmp"); err != nil {
+		return fmt.Errorf("cache: write %s: %w", path, err)
 	}
 	return nil
 }
