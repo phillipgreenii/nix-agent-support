@@ -55,10 +55,12 @@ type Source struct {
 
 // Warning is a warning carried by an exit-0 outcome.
 type Warning struct {
-	Word outcome.Warning `json:"word"`
-	File string          `json:"file"`
-	Line int             `json:"line"`
-	Key  string          `json:"key"`
+	// detail is the human explanation, shown by config check.
+	detail string
+	Word   outcome.Warning `json:"word"`
+	File   string          `json:"file"`
+	Line   int             `json:"line"`
+	Key    string          `json:"key"`
 }
 
 // Lock holds lock.* keys.

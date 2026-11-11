@@ -26,6 +26,11 @@ type Hook struct {
 	SkipExitCodes []int             `json:"skip_exit_codes"`
 	Cwd           string            `json:"cwd"` // "worktree" or "repo"
 	Env           map[string]string `json:"env"`
+
+	// Key and Line locate the entry in its file; they are not part of the
+	// configuration in effect (nor of its digest).
+	Key  string `json:"-"`
+	Line int    `json:"-"`
 }
 
 // Rule is one conflict rule (or the conflict_default rule, whose Glob is
@@ -39,6 +44,10 @@ type Rule struct {
 	Resolve []string      `json:"resolve"`
 	Verify  []string      `json:"verify"`
 	Timeout time.Duration `json:"timeout"`
+
+	// Key and Line locate the entry in its file (not part of the digest).
+	Key  string `json:"-"`
+	Line int    `json:"-"`
 }
 
 // Layer names, used in rule ids and in error locations.
@@ -60,6 +69,7 @@ type vals struct {
 
 	// XDG entry only.
 	root          string
+	rootLine      int
 	trust, ignore *bool
 }
 
@@ -313,7 +323,7 @@ func (p *parser) hooks(raw any, base string) map[string]map[string][]Hook {
 
 func (p *parser) hook(e map[string]any, key, point string) *Hook {
 	p.checkKeys(e, key, "run", "timeout", "skip_exit_codes", "cwd", "env")
-	h := &Hook{Timeout: DefaultTimeout, Cwd: "worktree", Env: map[string]string{}}
+	h := &Hook{Timeout: DefaultTimeout, Cwd: "worktree", Env: map[string]string{}, Key: key, Line: lineFor(p.lines, key)}
 	if point == "before" {
 		h.Cwd = "repo"
 	}
@@ -374,7 +384,7 @@ func (p *parser) rule(e map[string]any, key string, withGlob bool) *Rule {
 		allowed = append(allowed, "glob")
 	}
 	p.checkKeys(e, key, allowed...)
-	r := &Rule{RunPer: "file", Timeout: DefaultTimeout}
+	r := &Rule{RunPer: "file", Timeout: DefaultTimeout, Key: key, Line: lineFor(p.lines, key)}
 	n := len(p.errs)
 	if withGlob {
 		g, ok := p.str(e, key, "glob")
@@ -460,6 +470,7 @@ func parseXDG(src []byte) (*xdgDoc, []issue) {
 			v := p.common(t, base, true, "root", "trust_repo_config", "ignore_repo_config")
 			v.trust = p.boolean(t, base, "trust_repo_config")
 			v.ignore = p.boolean(t, base, "ignore_repo_config")
+			v.rootLine = lineFor(p.lines, join(base, "root"))
 			if s, ok := p.str(t, base, "root"); ok {
 				v.root = s
 			} else if t["root"] == nil {
