@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/phillipgreenii/pg-router-sensors/internal/host"
 	"github.com/phillipgreenii/pg-router-sensors/internal/sensorcli"
 )
 
@@ -17,7 +18,9 @@ var version = "dev"
 
 // registry holds the subcommands whose packets have landed; an unregistered
 // subcommand prints usage and exits 2.
-func registry() sensorcli.Registry { return sensorcli.Registry{} }
+func registry() sensorcli.Registry {
+	return sensorcli.Registry{"host-sensor": host.New()}
+}
 
 func main() {
 	args := os.Args[1:]

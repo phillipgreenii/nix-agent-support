@@ -14,3 +14,4 @@
 internal/levels 90
 internal/answer 90
 internal/sensorcli 90
+internal/host 90
