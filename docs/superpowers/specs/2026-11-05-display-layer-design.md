@@ -240,7 +240,10 @@ Info modal:
 
 Each band button opens its own modal pane (F5). No modal carries a Close action (operator, 2026-11-11:
 "the modals don't need explicit \"close\" buttons added because the framework provide a \"x\" in
-the upper right to click to close."); the engine's x and Escape dismiss the pane.
+the upper right to click to close."); the engine's x and Escape dismiss the pane. The Info modal has no agent row: the mod API exposes no agent name (the session
+accessors are id, repo, version, model, cwd, usage and messages; none returns one). Operator ruling
+(2026-11-11): the old status line's `@agent` part goes in the Info modal only, when present, never
+in the band; it is shown once the API provides a name.
 
 | Modal             | Items, one per line                                                                                                                          | Actions                                                                                                                 |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
