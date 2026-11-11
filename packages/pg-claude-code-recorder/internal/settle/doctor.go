@@ -312,9 +312,9 @@ func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (check
 			s.doctorMissingBytes(session, mf, err, add)
 			continue
 		}
-		h, herr := hashReader(ptr, mf.Size)
+		h, herr := hashReader(ptr, mf.StoredSize())
 		_ = ptr.Close()
-		hashed += mf.Size
+		hashed += mf.StoredSize()
 		if herr != nil && !errors.Is(herr, io.EOF) {
 			add(DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "reading the stored bytes: " + herr.Error()})
 			continue

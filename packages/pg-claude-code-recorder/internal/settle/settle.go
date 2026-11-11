@@ -1143,7 +1143,7 @@ func changedAgainst(st store.Settled, c *conv, offset func(store.File) (int64, b
 			return true
 		}
 		if f.Mode == "snapshot" {
-			if f.CurGen != mf.Gen || f.LastSize != mf.Size {
+			if f.CurGen != mf.Gen || f.LastSize != mf.ChangeSize() {
 				return true
 			}
 			continue
@@ -1537,7 +1537,8 @@ func (s *Settler) manifest(c *conv, method string, now time.Time) (store.Manifes
 				mf.Size, mf.Gen = sn.Size, sn.Version
 				mf.Hash = strconv.FormatUint(sn.Hash, 16)
 			}
-			mf.Size = f.LastSize
+			ls := f.LastSize
+			mf.LastSize = &ls
 		default:
 			gens, err := s.st.Generations(f.ID)
 			if err != nil {

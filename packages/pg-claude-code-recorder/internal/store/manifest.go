@@ -30,8 +30,14 @@ type ManifestFile struct {
 	Mode string `json:"mode"`
 	// Gen is the current generation (the latest version of a snapshot file) and
 	// Size the committed copy offset (the latest version's size).
-	Gen         int           `json:"gen"`
-	Size        int64         `json:"size"`
+	Gen  int   `json:"gen"`
+	Size int64 `json:"size"`
+	// LastSize is the size the file row last recorded for a snapshot file. It
+	// can differ from the stored version's size (the row follows what the
+	// source path showed, the version holds what was stored); settle compares
+	// it, never the stored size, to detect a change. Manifests written before
+	// this field existed carry that size in Size (nil here).
+	LastSize    *int64        `json:"last_size,omitempty"`
 	Hash        string        `json:"hash"` // xxhash64 of the current generation's bytes, hex
 	Generations []ManifestGen `json:"generations"`
 	Parsed      bool          `json:"parsed"`
@@ -43,4 +49,28 @@ type ManifestFile struct {
 type ManifestGen struct {
 	Gen  int   `json:"gen"`
 	Size int64 `json:"size"`
+}
+
+// StoredSize is the number of bytes the archive holds for the file's current
+// generation, the length Hash covers. A snapshot manifest written before
+// LastSize existed carried the file row's last size in Size, which can exceed
+// the stored version; its generation record always has the stored size.
+func (mf ManifestFile) StoredSize() int64 {
+	if mf.Mode == "snapshot" {
+		for _, g := range mf.Generations {
+			if g.Gen == mf.Gen {
+				return g.Size
+			}
+		}
+	}
+	return mf.Size
+}
+
+// ChangeSize is the size settle compares with the file row's LastSize for a
+// snapshot file.
+func (mf ManifestFile) ChangeSize() int64 {
+	if mf.LastSize != nil {
+		return *mf.LastSize
+	}
+	return mf.Size
 }

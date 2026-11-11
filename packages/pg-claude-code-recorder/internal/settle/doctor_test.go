@@ -299,3 +299,104 @@ func TestDoctorDoesNotRestoreAnOutOfScopeFile(t *testing.T) {
 		t.Fatal("an out-of-scope file was stored again")
 	}
 }
+
+// snapshotSettledFile seeds a settled Conversation holding one snapshot file
+// and returns its row and the content its stored version holds.
+func (e *env) snapshotSettledFile() (store.File, string) {
+	e.t.Helper()
+	content := `{"agentType":"example"}`
+	rel := "projects/example-project/" + sess + "/subagents/agent-1.meta.json"
+	e.write(rel, content, e.clk.Now().Add(-48*time.Hour), false)
+	e.ingest(rel)
+	e.oldSettled(3, 48*time.Hour)
+	fl, err := e.st.FilesByCurrentPath(e.path(rel))
+	if err != nil || len(fl) == 0 {
+		e.t.Fatalf("no snapshot file: %v", err)
+	}
+	return fl[0], content
+}
+
+func (e *env) settledManifest() store.Manifest {
+	e.t.Helper()
+	st, ok, err := e.st.SettledOf(sess)
+	if err != nil || !ok {
+		e.t.Fatalf("not settled: %v", err)
+	}
+	var m store.Manifest
+	if err := json.Unmarshal(st.Manifest, &m); err != nil {
+		e.t.Fatal(err)
+	}
+	return m
+}
+
+// A snapshot file whose row last recorded more bytes than its stored version
+// holds (the row follows the source path, the version holds what was stored)
+// must settle with the stored version's size next to its hash, so the archive
+// agrees with its own manifest.
+func TestSettleManifestRecordsTheStoredSizeOfASnapshotWhoseRowRecordsMore(t *testing.T) {
+	e := newEnv(t, false)
+	f, content := e.snapshotSettledFile()
+	f.LastSize = 1022927
+	c := &conv{session: sess, files: []store.File{f}, rel: map[int64]string{f.ID: "projects/x.json"}}
+	m, err := e.sett.manifest(c, "clone", e.clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mf := m.Files[0]
+	if mf.Size != int64(len(content)) || mf.StoredSize() != int64(len(content)) {
+		t.Fatalf("size %d stored %d, want %d", mf.Size, mf.StoredSize(), len(content))
+	}
+	if mf.LastSize == nil || *mf.LastSize != 1022927 || mf.ChangeSize() != 1022927 {
+		t.Fatalf("last_size %v", mf.LastSize)
+	}
+	// The change check still sees the row's size, so the settle is not repeated.
+	b, _ := json.Marshal(m)
+	if changedAgainst(store.Settled{Manifest: b}, c, func(store.File) (int64, bool) { return 0, false }) {
+		t.Fatal("an unchanged snapshot file reads as changed")
+	}
+}
+
+// A manifest written before last_size existed holds the row's size in size
+// while the stored version is shorter: doctor must verify the stored bytes
+// against the hash and report nothing, and extract must restore them.
+func TestDoctorAndExtractAcceptALegacyManifestWithAShortStoredGeneration(t *testing.T) {
+	e := newEnv(t, false)
+	f, content := e.snapshotSettledFile()
+	m := e.settledManifest()
+	for i := range m.Files {
+		if m.Files[i].File == f.ID {
+			m.Files[i].Size, m.Files[i].LastSize = 1022927, nil // the shape that failed the doctor
+		}
+	}
+	mb, _ := json.Marshal(m)
+	val, _ := json.Marshal(store.SettleRec{Manifest: mb})
+	if err := e.st.Commit(&store.Rec{T: store.TSettle, At: e.clk.Now().UnixNano(), Session: sess, Method: "clone", Val: string(val)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(e.st.SegDir(sess), "manifest.json"), mb, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var mf store.ManifestFile
+	for _, x := range e.settledManifest().Files {
+		if x.File == f.ID {
+			mf = x
+		}
+	}
+	if mf.Size != 1022927 || mf.StoredSize() != int64(len(content)) {
+		t.Fatalf("legacy shape not reproduced: size %d stored %d", mf.Size, mf.StoredSize())
+	}
+	res, err := e.sett.Doctor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Mismatches) != 0 || res.MismatchFiles != 0 {
+		t.Fatalf("mismatches: %+v", res.Mismatches)
+	}
+	tmp := filepath.Join(t.TempDir(), "restored")
+	if err := e.sett.writeRestored(mf, tmp, e.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(tmp); string(b) != content {
+		t.Fatalf("restored %q", b)
+	}
+}

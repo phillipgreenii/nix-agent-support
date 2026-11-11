@@ -141,7 +141,7 @@ func (s *Settler) Extract(session, to string) (ExtractResult, error) {
 	if to == "" {
 		list := make([]extractEntry, 0, len(m.Files))
 		for _, mf := range m.Files {
-			list = append(list, extractEntry{File: mf.File, Rel: mf.Path, Size: mf.Size, Hash: mf.Hash})
+			list = append(list, extractEntry{File: mf.File, Rel: mf.Path, Size: mf.StoredSize(), Hash: mf.Hash})
 		}
 		b, _ := json.Marshal(list)
 		if err := s.st.CommitFull(&store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: store.StageExtracting, Val: string(b)}); err != nil {
@@ -244,10 +244,11 @@ func (s *Settler) writeRestored(mf store.ManifestFile, tmp string, now time.Time
 	h := xxhash.New()
 	buf := make([]byte, 1<<20)
 	var off int64
-	for off < mf.Size {
+	size := mf.StoredSize()
+	for off < size {
 		n := int64(len(buf))
-		if mf.Size-off < n {
-			n = mf.Size - off
+		if size-off < n {
+			n = size - off
 		}
 		got, rerr := ptr.ReadAt(buf[:n], off)
 		if int64(got) != n {
