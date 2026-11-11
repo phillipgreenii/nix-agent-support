@@ -224,6 +224,16 @@ type Config struct {
 	// "CLI flag > PG_ROUTER_* env > built-in default" precedence
 	// PG_ROUTER_TUI_INTERVAL already documents (args.go).
 	MetricsAddr string
+
+	// Levels holds the [levels] settings; Resources the [[resource]] registry;
+	// Requirements the compiled requires clauses per role name (resources.go,
+	// requires.go). MachineSensors lists sensors present on this machine beyond
+	// the router and the registered level-source queries; it is a code-level
+	// seam, not a config key.
+	Levels         LevelsConfig
+	Resources      ResourceSet
+	Requirements   map[string]Compiled
+	MachineSensors []string
 }
 
 // Meter returns the Config's MeterProvider, defaulting to the OTel no-op
@@ -289,6 +299,7 @@ func Default() Config {
 	state := stateHome()
 	return Config{
 		RepoRoot:              cwd,
+		Levels:                DefaultLevelsConfig(),
 		BeadsPrefix:           "zr",
 		WorktreeDir:           state + "/pg-router/worktrees",
 		SkillMD:               "",
@@ -572,6 +583,7 @@ func (c Config) diagnose() (errs []error, warns []string) {
 	cycleErrs, cycleWarns := c.reentryCycleFindings()
 	errs = append(errs, cycleErrs...)
 	warns = append(warns, cycleWarns...)
+	warns = append(warns, c.RequiresWarnings()...)
 	return errs, warns
 }
 

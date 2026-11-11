@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
+	"github.com/phillipgreenii/pg-router/internal/roles"
 )
 
 func TestRenderConfigShow_includesDispatchScalars(t *testing.T) {
@@ -193,5 +194,47 @@ func TestRenderConfigShow_printsEachQuerysCommandAndStrictSwitch(t *testing.T) {
 		if _, has := r.(map[string]any)["command"]; has {
 			t.Errorf("a role carries a composed command: %v", r)
 		}
+	}
+}
+
+// config --show prints each requires clause with its expansion, the resource
+// registry, the [levels] settings and the no-sensor warning; --json carries the
+// same.
+func TestRenderConfigShow_requiresExpansion(t *testing.T) {
+	cfg := config.Default()
+	cfg.Resources = config.ResourceSet{
+		{Name: "disk", Scale: []string{"PLENTY", "OK", "TIGHT", "EXHAUSTED"}, Ignored: config.IgnoredAny, Sensor: "<sensor>", GraceFactor: 2, Unknown: config.UnknownBest},
+	}
+	comp, errs := config.CompileRequires(cfg.Resources, `role "r"`, []string{"disk >= OK"})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	cfg.Roles = roles.RoleSet{{Name: "r", Enabled: true, Binds: []string{"e"}, Handler: "/bin/h", Requires: []string{"disk >= OK"}}}
+	cfg.Requirements = map[string]config.Compiled{"r": comp}
+
+	var b bytes.Buffer
+	renderConfigShow(&b, cfg)
+	for _, want := range []string{
+		"requires[0]: disk >= OK (allowed: PLENTY, OK)",
+		"levels: observed_at_skew=5m0s grace_factor=2 start_wait=10s start_stagger=30s wake_threshold=30s",
+		"disk",
+		"warning: role \"r\" requires[0] \"disk >= OK\": no sensor configured for resource \"disk\"",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, b.String())
+		}
+	}
+
+	var j bytes.Buffer
+	renderConfigShowJSON(&j, cfg)
+	var got configShowReport
+	if err := json.Unmarshal(j.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Roles) != 1 || len(got.Roles[0].Requires) != 1 || strings.Join(got.Roles[0].Requires[0].Allowed, ",") != "PLENTY,OK" {
+		t.Errorf("json requires = %+v", got.Roles)
+	}
+	if len(got.Resources) != 1 || got.Levels.GraceFactor != 2 || len(got.Warnings) != 1 {
+		t.Errorf("json resources/levels/warnings = %+v %+v %v", got.Resources, got.Levels, got.Warnings)
 	}
 }

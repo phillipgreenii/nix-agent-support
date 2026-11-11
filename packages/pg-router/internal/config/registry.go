@@ -65,6 +65,10 @@ type fileShape struct {
 	Roles    []roleTOML    `toml:"role"`
 	Queries  []queryTOML   `toml:"query"`
 	Monitors []monitorTOML `toml:"monitor"`
+	// Levels and Resources are the level settings and the resource registry
+	// (resources.go); Requires on a role is compiled by requires.go.
+	Levels    *levelsTOML    `toml:"levels"`
+	Resources []resourceTOML `toml:"resource"`
 }
 
 type poolTOML struct {
@@ -152,6 +156,9 @@ type roleTOML struct {
 	// pg2-h63eu) this role's listener does NOT block on, declared at
 	// registration. Absent: the listener blocks on every gate TYPE.
 	NonBlockingGates []string `toml:"non_blocking_gates"`
+	// Requires is the role's requires clauses ("<resource> <op> <LEVEL>"),
+	// compiled against the [[resource]] registry (requires.go).
+	Requires []string `toml:"requires"`
 	// MaxDispatchRetries opts this role in to a bounded re-run of a dispatch
 	// that failed with a transient error (killed / deadline / unavailable;
 	// bead pg2-yu5y2). Absent or 0: no re-run (the default). Must be within
@@ -218,6 +225,12 @@ type queryTOML struct {
 	// Absent: the emitter blocks on every gate TYPE. The built-in `timer`
 	// emitter ignores gates altogether and needs no list.
 	NonBlockingGates []string `toml:"non_blocking_gates"`
+	// LevelSource names the sensor this query answers for (it is a level-source
+	// query: it has no consumer and is not gated). Empty: an ordinary query.
+	LevelSource string `toml:"level_source"`
+	// Deadline is the per-pull timeout of this query (default
+	// query.DefaultDeadline, 20s).
+	Deadline *duration `toml:"deadline"`
 	// StrictBaseEnv switches a command query's process onto the minimal base
 	// environment (default off). A pointer so a timer query that sets it can be
 	// told apart from one that does not.
@@ -405,6 +418,19 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
+	if err := checkUndecodedKeys(md, "levels", "resource"); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	lc, err := buildLevelsConfig(shape.Levels)
+	if err != nil {
+		return nil, fmt.Errorf("levels: %w", err)
+	}
+	c.Levels = lc
+	resources, rerrs := buildResources(shape.Resources, lc)
+	if len(rerrs) > 0 {
+		return nil, errors.Join(rerrs...)
+	}
+	c.Resources = resources
 	if shape.Pool.SelfLogin != "" {
 		c.SelfLogin = shape.Pool.SelfLogin
 	}
@@ -498,9 +524,16 @@ func (r *Registry) decodeRoleSet(path, configDir string, c *Config) (roles.RoleS
 	// Binds as an orphan consumer (a clear, aggregated diagnostic).
 	queries, overrides, qerrs := r.buildQueries(md, shape.Queries, rawQueryKeys(string(body)), rawTriggerKeys(string(body)), *c)
 	errs = append(errs, qerrs...)
+	requirements := map[string]Compiled{}
+	for _, role := range out {
+		comp, cerrs := CompileRequires(c.Resources, fmt.Sprintf("role %q", role.Name), role.Requires)
+		errs = append(errs, cerrs...)
+		requirements[role.Name] = comp
+	}
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
+	c.Requirements = requirements
 	c.Queries = queries
 	c.ExpectedIntervalOverrides = overrides
 	return out, nil
@@ -546,7 +579,15 @@ func (r *Registry) buildQueries(md toml.MetaData, qts []queryTOML, rawKeys, rawT
 			errs = append(errs, fmt.Errorf("query[%d] %q: non_blocking_gates: %w", i, qt.Name, err))
 			continue
 		}
-		out = append(out, query.Source{Name: qt.Name, Query: q, Description: qt.Description, NonBlockingGates: qt.NonBlockingGates})
+		deadline := query.DefaultDeadline
+		if qt.Deadline != nil {
+			if qt.Deadline.D <= 0 {
+				errs = append(errs, fmt.Errorf("query[%d] %q: deadline must be > 0, got %s", i, qt.Name, qt.Deadline.D))
+				continue
+			}
+			deadline = qt.Deadline.D
+		}
+		out = append(out, query.Source{Name: qt.Name, Query: q, Description: qt.Description, NonBlockingGates: qt.NonBlockingGates, LevelSource: qt.LevelSource, Deadline: deadline})
 		if qt.ExpectedInterval != nil {
 			overrides[qt.Name] = qt.ExpectedInterval.D.Milliseconds()
 		}
@@ -712,7 +753,7 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if maxRetries < 0 || maxRetries > roles.MaxDispatchRetriesCap {
 		return roles.Role{}, fmt.Errorf("max_dispatch_retries = %d: must be between 0 and %d (a hard cap so a transient-failure storm cannot amplify load)", maxRetries, roles.MaxDispatchRetriesCap)
 	}
-	role := roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates}
+	role := roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates, Requires: rt.Requires}
 	if err := applyHandlerKeys(&role, rt); err != nil {
 		return roles.Role{}, err
 	}
@@ -911,6 +952,21 @@ func validateGateTypes(types []string) error {
 		if err := eventqueue.ValidateGateType(t); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkUndecodedKeys rejects a key under one of the named top-level tables
+// that no field decodes (a misspelled key is never silently ignored).
+func checkUndecodedKeys(md toml.MetaData, tables ...string) error {
+	var bad []string
+	for _, k := range md.Undecoded() {
+		if len(k) > 0 && slices.Contains(tables, k[0]) {
+			bad = append(bad, k.String())
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("unknown key(s) %s", strings.Join(bad, ", "))
 	}
 	return nil
 }

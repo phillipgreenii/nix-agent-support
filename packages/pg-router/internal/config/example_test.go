@@ -123,3 +123,19 @@ func TestEmitRole_handlerKeysRoundTrip(t *testing.T) {
 		t.Errorf("round trip = %+v, want handler, survives and config %v", r, want)
 	}
 }
+
+// The example documents resources, levels and requires with generic
+// placeholders only (nix-agent-support is public), and stays loadable.
+func TestExampleTOML_documentsResourcesAndRequires(t *testing.T) {
+	out := ExampleTOML()
+	for _, want := range []string{"# [[resource]]", "# [levels]", `# requires = ["disk >= OK"`, "<sensor>", "git_auth_<remote>", "level_source", "(allowed: PLENTY, OK)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("ExampleTOML() missing %q", want)
+		}
+	}
+	writeCfg(t, out)
+	absentGlobalConfig(t)
+	if _, err := Load(); err != nil {
+		t.Fatalf("example must still load: %v", err)
+	}
+}

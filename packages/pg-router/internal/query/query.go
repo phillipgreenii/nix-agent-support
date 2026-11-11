@@ -155,7 +155,17 @@ type Source struct {
 	// it is not polled while any gate is active. The timer emitter ignores gates
 	// altogether (IsTimer), whatever is listed here.
 	NonBlockingGates []string
+	// LevelSource names the sensor this query answers for; non-empty marks a
+	// level-source query (it has no consumer and is exempt from the polling
+	// union). Empty for an ordinary query.
+	LevelSource string
+	// Deadline is the per-pull timeout parsed from the query's deadline key,
+	// DefaultDeadline when unset (the level-source runtime enforces it).
+	Deadline time.Duration
 }
+
+// DefaultDeadline is the per-query pull deadline when none is configured.
+const DefaultDeadline = 20 * time.Second
 
 // SourceSet is the ordered set of producers a drain fires (config order).
 type SourceSet []Source

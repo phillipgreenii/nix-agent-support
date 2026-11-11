@@ -89,6 +89,9 @@ type Role struct {
 	// on. Empty (the default): the listener blocks on every gate TYPE. Surfaced
 	// to the queue through the roleListener's eventqueue.GateExempter.
 	NonBlockingGates []string
+	// Requires is the role's requires clause texts ("<resource> <op> <LEVEL>"),
+	// as written; internal/config compiles them against the resource registry.
+	Requires []string
 	// Handler is the role's own adapter command, an absolute path (docket
 	// pg2-12gr4.10, the handler split). Required: core invokes
 	// [Handler, <subcommand>] with the role object on stdin and reads

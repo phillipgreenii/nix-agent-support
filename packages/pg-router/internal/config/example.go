@@ -74,6 +74,37 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 # every TYPE), and the built-in type = "timer" query is never blocked by any
 # gate:
 # non_blocking_gates = ["LOW_DISK_USAGE"]
+# Resources, levels and requirements (generic example; the real registry, sensor
+# and tracker names live in the deployment's own config). A [[resource]] names an
+# ordered scale (best first), what silence means for a role ("ignored": "ANY", or
+# "<op> <LEVEL>"), the sensor that answers for it, an optional grace_factor (a
+# multiple of valid_for_s, default [levels].grace_factor) and what an absent level
+# reads ("unknown" = "best" | "worst"). A role declares which levels it needs with
+# requires = [ "<resource> <op> <LEVEL>", ... ] (operators ==, !=, <, <=, >, >=
+# by position in the scale, "greater" means better; AND only; prefer >= and <=).
+# A resource a role does not mention does not matter to it. A query that answers
+# for a sensor is marked level_source = "<sensor>", and a query's pull deadline is
+# deadline = "20s". 'pg-router config --show' prints each clause with its
+# expansion, e.g. disk >= OK (allowed: PLENTY, OK).
+# [levels]
+# observed_at_skew = "5m"
+# grace_factor = 2
+# start_wait = "10s"
+# start_stagger = "30s"
+# wake_threshold = "30s"
+# [[resource]]
+# name = "disk"
+# scale = ["PLENTY", "OK", "TIGHT", "EXHAUSTED"]
+# ignored = "ANY"
+# sensor = "<sensor>"
+# unknown = "best"
+# [[resource]]
+# name = "git_auth_<remote>"
+# scale = ["AVAILABLE", "UNAVAILABLE"]
+# sensor = "<sensor>"
+# unknown = "worst"
+# (then, inside a [[role]]:)
+# requires = ["disk >= OK", "git_auth_<remote> >= AVAILABLE"]
 # A role MAY opt in to a bounded re-run of a dispatch whose handler failed with a
 # TRANSIENT error (killed / deadline / unavailable; never a deterministic
 # failure), at the role's retry cadence, at most this many times per event

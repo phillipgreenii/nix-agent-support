@@ -102,6 +102,9 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 			_, _ = fmt.Fprintf(w, "      command: (none: %s)\n", show.CommandError)
 		}
 		_, _ = fmt.Fprintf(w, "      survives_shutdown: %t\n", show.SurvivesShutdown)
+		for _, cl := range cfg.Requirements[r.Name].Requirement.Clauses {
+			_, _ = fmt.Fprintf(w, "      requires[%d]: %s\n", cl.Index, config.ExpandClause(cl))
+		}
 		if show.Role != nil {
 			_, _ = fmt.Fprintf(w, "      role: %s\n", show.Role)
 		}
@@ -128,6 +131,7 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 			}
 		}
 	}
+	renderLevelsShow(w, cfg)
 	_, _ = fmt.Fprintln(w, "gates: live state, not configuration — see 'pg-router gate list' (Gate Registry)")
 	_, _ = fmt.Fprintln(w, "dispatch (workers):")
 	_, _ = fmt.Fprintf(w, "  permission-mode: %s\n", cfg.PermissionMode)
@@ -138,6 +142,22 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 	_, _ = fmt.Fprintf(w, "  model:           %s\n", orDefault(cfg.Model))
 	_, _ = fmt.Fprintf(w, "  budget:          tokens=%s cost=%s time=%s\n",
 		limitStr(cfg.BudgetTokens), centsStr(cfg.BudgetCost), durStr(cfg.BudgetTime))
+}
+
+// renderLevelsShow prints the [levels] settings, the resource registry and the
+// requires warnings (a clause naming a resource with no sensor on this machine).
+func renderLevelsShow(w io.Writer, cfg config.Config) {
+	lv := cfg.Levels
+	_, _ = fmt.Fprintf(w, "levels: observed_at_skew=%s grace_factor=%v start_wait=%s start_stagger=%s wake_threshold=%s\n",
+		lv.ObservedAtSkew, lv.GraceFactor, lv.StartWait, lv.StartStagger, lv.WakeThreshold)
+	_, _ = fmt.Fprintf(w, "resources (%d):\n", len(cfg.Resources))
+	for _, r := range cfg.Resources {
+		_, _ = fmt.Fprintf(w, "  - %-14s scale=%s ignored=%s sensor=%s grace_factor=%v unknown=%s\n",
+			r.Name, strings.Join(r.Scale, " > "), r.Ignored, orNone(r.Sensor), r.GraceFactor, r.Unknown)
+	}
+	for _, warn := range cfg.RequiresWarnings() {
+		_, _ = fmt.Fprintf(w, "warning: %s\n", warn)
+	}
 }
 
 // limitStr renders a token/count budget: <=0 means unlimited.
@@ -211,11 +231,26 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 	}
 	for _, r := range cfg.Roles {
 		show := roleShowFor(cfg, r)
+		var clauses []configShowClause
+		for _, cl := range cfg.Requirements[r.Name].Requirement.Clauses {
+			clauses = append(clauses, configShowClause{Index: cl.Index, Text: cl.Text, Resource: cl.Resource, Allowed: cl.Allowed, Implicit: cl.Index == config.ImplicitClauseIndex})
+		}
 		out.Roles = append(out.Roles, configShowRole{
-			Name: r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates, MaxDispatchRetries: r.MaxDispatchRetries,
+			Requires: clauses,
+			Name:     r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates, MaxDispatchRetries: r.MaxDispatchRetries,
 			Command: show.Command, CommandError: show.CommandError, SurvivesShutdown: show.SurvivesShutdown, Role: show.Role,
 		})
 	}
+	lv := cfg.Levels
+	out.Levels = configShowLevels{
+		ObservedAtSkew: lv.ObservedAtSkew.String(), GraceFactor: lv.GraceFactor, StartWait: lv.StartWait.String(),
+		StartStagger: lv.StartStagger.String(), WakeThreshold: lv.WakeThreshold.String(),
+	}
+	out.Resources = make([]configShowResource, 0, len(cfg.Resources))
+	for _, r := range cfg.Resources {
+		out.Resources = append(out.Resources, configShowResource{Name: r.Name, Scale: r.Scale, Ignored: r.Ignored, Sensor: r.Sensor, GraceFactor: r.GraceFactor, Unknown: r.Unknown})
+	}
+	out.Warnings = cfg.RequiresWarnings()
 	for _, s := range cfg.Queries {
 		var emits []string
 		stub := false
@@ -243,6 +278,37 @@ type configShowReport struct {
 	Roles      []configShowRole   `json:"roles"`
 	Queries    []configShowQuery  `json:"queries"`
 	Dispatch   configShowDispatch `json:"dispatch"`
+	// Resources, Levels and Warnings carry the resource registry, the [levels]
+	// settings and the requires warnings.
+	Resources []configShowResource `json:"resources"`
+	Levels    configShowLevels     `json:"levels"`
+	Warnings  []string             `json:"warnings,omitempty"`
+}
+
+type configShowResource struct {
+	Name        string   `json:"name"`
+	Scale       []string `json:"scale"`
+	Ignored     string   `json:"ignored"`
+	Sensor      string   `json:"sensor,omitempty"`
+	GraceFactor float64  `json:"graceFactor"`
+	Unknown     string   `json:"unknown"`
+}
+
+type configShowLevels struct {
+	ObservedAtSkew string  `json:"observedAtSkew"`
+	GraceFactor    float64 `json:"graceFactor"`
+	StartWait      string  `json:"startWait"`
+	StartStagger   string  `json:"startStagger"`
+	WakeThreshold  string  `json:"wakeThreshold"`
+}
+
+// configShowClause is one requires clause with its expansion.
+type configShowClause struct {
+	Index    int      `json:"index"`
+	Text     string   `json:"text"`
+	Resource string   `json:"resource"`
+	Allowed  []string `json:"allowed"`
+	Implicit bool     `json:"implicit,omitempty"`
 }
 
 type configShowRole struct {
@@ -255,6 +321,8 @@ type configShowRole struct {
 	// MaxDispatchRetries is the role's opt-in bounded re-run count for a
 	// transiently failed dispatch (bead pg2-yu5y2); omitted when 0 (off).
 	MaxDispatchRetries int `json:"maxDispatchRetries,omitempty"`
+	// Requires lists the role's requires clauses with their expansions.
+	Requires []configShowClause `json:"requires,omitempty"`
 	// Command is what core runs for the role's dispatch, resolved by the ONE
 	// role-adapter resolver (config.Config.RoleCommand): [handler, dispatch].
 	// Empty with CommandError set for a role built in code without handler.
