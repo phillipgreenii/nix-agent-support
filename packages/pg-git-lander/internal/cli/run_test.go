@@ -204,9 +204,74 @@ func TestConfigCheck(t *testing.T) {
 	}
 }
 
-func TestStatusAndLogReportInternalErrorUntilTheirHandlersExist(t *testing.T) {
+func TestStatusPrintsItsOwnJSONObjectAndExitsZero(t *testing.T) {
 	f := newFx(t)
-	if r := f.cli(f.repo.Dir, "status", "--json"); r.code != 1 || f.jsonOutcome(r)["outcome"] != "internal-error" {
+	r := f.cli(f.repo.Dir, "status", "--json")
+	var m map[string]any
+	if err := json.Unmarshal([]byte(r.stdout), &m); err != nil || r.code != 0 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if m["schema"] != float64(1) || m["outcome"] != "status" {
+		t.Fatalf("%v", m)
+	}
+	for _, k := range []string{"locks", "stopped", "orphans", "stale_locks", "config"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("no %q in %v", k, m)
+		}
+	}
+	if r := f.cli(f.repo.Dir, "status"); r.code != 0 || !strings.Contains(r.stdout, "locks: none") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestStatusShowsAStoppedOperationWithItsNextCommands(t *testing.T) {
+	f := newFx(t)
+	_, stop := f.conflict()
+	r := f.cli(f.repo.Dir, "status", "--json")
+	var m struct {
+		Stopped []struct {
+			OpID string   `json:"op_id"`
+			Next []string `json:"next"`
+			Log  string   `json:"log"`
+		} `json:"stopped"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &m); err != nil || r.code != 0 || len(m.Stopped) != 1 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if m.Stopped[0].OpID != stop["op_id"] || strings.Join(m.Stopped[0].Next, "|") != joinAny(stop["next"].([]any)) {
+		t.Fatalf("%+v vs %v", m.Stopped[0], stop["next"])
+	}
+}
+
+func joinAny(a []any) string {
+	var s []string
+	for _, v := range a {
+		s = append(s, v.(string))
+	}
+	return strings.Join(s, "|")
+}
+
+func TestStatusOutsideARepositoryIsNotExitZero(t *testing.T) {
+	f := newFx(t)
+	if r := f.cli(t.TempDir(), "status", "--json"); r.code != 2 || f.jsonOutcome(r)["outcome"] != "usage-error" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestLogByOpIDAndByBranchWithTail(t *testing.T) {
+	f := newFx(t)
+	_, stop := f.conflict()
+	opID := stop["op_id"].(string)
+	byID := f.cli(f.repo.Dir, "log", opID)
+	byBranch := f.cli(f.repo.Dir, "log", "feature/x")
+	if byID.code != 0 || byID.stdout == "" || byID.stdout != byBranch.stdout || !strings.Contains(byID.stdout, "START") {
+		t.Fatalf("%+v\n%+v", byID, byBranch)
+	}
+	tail := f.cli(f.repo.Dir, "log", opID, "--tail", "1")
+	if tail.code != 0 || strings.Count(tail.stdout, "\n") != 1 || !strings.HasSuffix(byID.stdout, tail.stdout) {
+		t.Fatalf("%+v", tail)
+	}
+	if r := f.cli(f.repo.Dir, "log", "no-such-branch", "--repo", f.repo.Dir); r.code != 2 {
 		t.Fatalf("%+v", r)
 	}
 }

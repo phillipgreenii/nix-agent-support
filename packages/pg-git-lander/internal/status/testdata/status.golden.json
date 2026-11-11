@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "outcome": "status",
+  "repo": "<ROOT>/repo",
+  "branch": "",
+  "locks": [
+    {
+      "ref": "refs/pg-git-lander/locks/heads/feature/a",
+      "role": "branch",
+      "operation": "land",
+      "branch": "feature/a",
+      "state": "running",
+      "op_id": "20261110T115800Z-aaaaaa",
+      "stage": "rebasing",
+      "stage_started_at": "2026-11-10T11:59:00Z",
+      "command": {
+        "argv0": "git",
+        "pid": 4300,
+        "deadline": "2026-11-10T12:00:50Z"
+      },
+      "owner": {
+        "pid": 4242,
+        "host": "laptop.local"
+      },
+      "age_s": 120,
+      "freshness": "unobserved",
+      "unreadable": false,
+      "error": ""
+    },
+    {
+      "ref": "refs/pg-git-lander/locks/heads/feature/b",
+      "role": "branch",
+      "operation": "rebase",
+      "branch": "feature/b",
+      "state": "stopped",
+      "op_id": "20261110T110000Z-bbbbbb",
+      "stage": "rebasing",
+      "stage_started_at": "2026-11-10T11:01:40Z",
+      "command": null,
+      "owner": {
+        "pid": 1,
+        "host": "laptop.local"
+      },
+      "age_s": 3600,
+      "freshness": "",
+      "unreadable": false,
+      "error": ""
+    },
+    {
+      "ref": "refs/pg-git-lander/locks/heads/feature/c",
+      "role": "",
+      "operation": "",
+      "branch": "",
+      "state": "",
+      "op_id": "",
+      "stage": "",
+      "stage_started_at": "",
+      "command": null,
+      "owner": null,
+      "age_s": 0,
+      "freshness": "",
+      "unreadable": true,
+      "error": "lock ref refs/pg-git-lander/locks/heads/feature/c: parse lock record: invalid character 'h' in literal true (expecting 'r')"
+    },
+    {
+      "ref": "refs/pg-git-lander/locks/heads/feature/d",
+      "role": "branch",
+      "operation": "land",
+      "branch": "feature/d",
+      "state": "running",
+      "op_id": "20261110T115000Z-dddddd",
+      "stage": "rebasing",
+      "stage_started_at": "2026-11-10T11:59:00Z",
+      "command": null,
+      "owner": {
+        "pid": 777,
+        "host": "laptop.local"
+      },
+      "age_s": 120,
+      "freshness": "dead",
+      "unreadable": false,
+      "error": ""
+    },
+    {
+      "ref": "refs/pg-git-lander/locks/heads/feature/f",
+      "role": "branch",
+      "operation": "land",
+      "branch": "feature/f",
+      "state": "running",
+      "op_id": "20261110T115100Z-ffffff",
+      "stage": "rebasing",
+      "stage_started_at": "2026-11-10T11:59:00Z",
+      "command": null,
+      "owner": {
+        "pid": 5,
+        "host": "other.example"
+      },
+      "age_s": 120,
+      "freshness": "foreign-host",
+      "unreadable": false,
+      "error": ""
+    },
+    {
+      "ref": "refs/pg-git-lander/locks/heads/main",
+      "role": "target",
+      "operation": "",
+      "branch": "feature/a",
+      "state": "running",
+      "op_id": "20261110T115800Z-aaaaaa",
+      "stage": "",
+      "stage_started_at": "",
+      "command": null,
+      "owner": {
+        "pid": 4242,
+        "host": "laptop.local"
+      },
+      "age_s": 5,
+      "freshness": "unobserved",
+      "unreadable": false,
+      "error": ""
+    }
+  ],
+  "stopped": [
+    {
+      "op_id": "20261110T110000Z-bbbbbb",
+      "operation": "rebase",
+      "branch": "feature/b",
+      "target": "",
+      "reason": "conflict",
+      "stage": "rebasing",
+      "since": "2026-11-10T11:03:20Z",
+      "worktree": "/work/wt-b",
+      "context": {
+        "bead": "x-1"
+      },
+      "log": "20261110T110000Z-bbbbbb",
+      "next": [
+        "pg-git-lander rebase feature/b --continue",
+        "pg-git-lander rebase feature/b --skip",
+        "pg-git-lander rebase feature/b --abort",
+        "pg-git-lander rebase feature/b --quit"
+      ]
+    }
+  ],
+  "orphans": [
+    {
+      "branch": "pg-git-lander/orphan-1",
+      "worktrees": ["<ROOT>/orphan-wt"]
+    }
+  ],
+  "stale_locks": [
+    {
+      "namespace": "heads",
+      "path": "<ROOT>/repo/.git/refs/heads/stale-branch.lock",
+      "age_s": 300
+    },
+    {
+      "namespace": "pg-git-lander",
+      "path": "<ROOT>/repo/.git/refs/pg-git-lander/locks/heads/stale.lock",
+      "age_s": 120
+    }
+  ],
+  "config": {
+    "sources": [
+      {
+        "kind": "xdg",
+        "path": "<XDG>/config.toml",
+        "present": false
+      },
+      {
+        "kind": "repo-file",
+        "path": ".pg-git-lander.toml",
+        "present": false
+      }
+    ],
+    "primary": "main",
+    "trust_repo_config": false,
+    "ignore_repo_config": false,
+    "lease_ttl_s": 30,
+    "wait_s": 60,
+    "error": ""
+  }
+}

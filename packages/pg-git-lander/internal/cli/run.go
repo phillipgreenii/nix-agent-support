@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/outcome"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/seams"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/status"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/worktrees"
 )
 
@@ -35,14 +37,7 @@ type Env struct {
 	Interrupter pipeline.Interrupter
 	// Token is this process's owner token; empty generates a random one.
 	Token string
-
-	// Status and Log implement the subcommands added by a later change; nil
-	// reports an internal-error outcome.
-	Status, Log Handler
 }
-
-// Handler runs a subcommand and returns its outcome.
-type Handler func(ctx context.Context, env *Env, deps pipeline.Deps, c *Command, dir string) (*outcome.Outcome, error)
 
 // Production builds the Env of the real process.
 func Production(version string, stdout, stderr io.Writer) *Env {
@@ -81,6 +76,9 @@ func Run(args []string, env *Env) int {
 	ctx, stop := env.Interrupter.Context(context.Background())
 	defer stop()
 
+	if c.Kind == KindStatus || c.Kind == KindLog {
+		return readOnly(ctx, env, c)
+	}
 	o, err := dispatch(ctx, env, c)
 	if err != nil {
 		o = outcome.New(outcome.InternalError)
@@ -135,10 +133,6 @@ func dispatch(ctx context.Context, env *Env, c *Command) (*outcome.Outcome, erro
 	case KindConfigCheck:
 		l := &config.Loader{Git: deps.Git, Paths: deps.Paths}
 		return l.Check(ctx, config.CheckOptions{RepoDir: dir, File: c.File})
-	case KindStatus:
-		return env.later(ctx, env.Status, deps, c, dir)
-	case KindLog:
-		return env.later(ctx, env.Log, deps, c, dir)
 	case KindRebase, KindLand:
 		if c.Resume != "" {
 			return pipeline.Resume(ctx, deps, pipeline.ResumeRequest{
@@ -149,13 +143,6 @@ func dispatch(ctx context.Context, env *Env, c *Command) (*outcome.Outcome, erro
 		return start(ctx, deps, c, dir)
 	}
 	return nil, fmt.Errorf("unhandled subcommand %q", c.Kind)
-}
-
-func (env *Env) later(ctx context.Context, h Handler, deps pipeline.Deps, c *Command, dir string) (*outcome.Outcome, error) {
-	if h == nil {
-		return nil, fmt.Errorf("%s is not available in this build", c.Kind)
-	}
-	return h(ctx, env, deps, c, dir)
 }
 
 // pruneLogs is the log pruning at the start of every invocation (design
@@ -188,4 +175,61 @@ func start(ctx context.Context, deps pipeline.Deps, c *Command, dir string) (*ou
 		return res.Outcome, nil
 	}
 	return res.Prepared.Run(ctx)
+}
+
+// readOnly runs status and log. They print their own output instead of the
+// outcome object; status writes nothing at all (not even the log pruning of
+// the other subcommands).
+func readOnly(ctx context.Context, env *Env, c *Command) int {
+	dir := c.Repo
+	if dir == "" {
+		dir = env.Cwd
+	}
+	var err error
+	if c.Kind == KindStatus {
+		err = runStatus(ctx, env, c, dir)
+	} else {
+		err = runLog(ctx, env, c, dir)
+	}
+	if err == nil {
+		return outcome.ExitOK
+	}
+	o := outcome.New(outcome.InternalError)
+	if errors.Is(err, status.ErrNotARepo) || errors.Is(err, status.ErrNoLog) {
+		o = outcome.New(outcome.UsageError)
+	}
+	o.Operation, o.Branch, o.Repo = string(c.Kind), c.Branch, c.Repo
+	o.Message = err.Error()
+	return print(env, o, c.JSON)
+}
+
+func runStatus(ctx context.Context, env *Env, c *Command, dir string) error {
+	d := env.Deps
+	rep, err := status.Collect(ctx, status.Input{
+		Git: d.Git, Clock: d.Clock, Liveness: d.Liveness, Host: d.Host, Paths: d.Paths,
+		Dir: dir, Branch: c.Branch,
+	})
+	if err != nil {
+		return err
+	}
+	if c.JSON {
+		b, err := rep.JSON()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(env.Stdout, "%s\n", b)
+		return nil
+	}
+	fmt.Fprintln(env.Stdout, rep.Human())
+	return nil
+}
+
+func runLog(ctx context.Context, env *Env, c *Command, dir string) error {
+	d := env.Deps
+	pruneLogs(ctx, env, d, dir)
+	_, path, err := status.ResolveLog(ctx, d.Git, dir, c.Branch)
+	if err != nil {
+		return err
+	}
+	return status.PrintLog(env.Stdout, path, c.Tail)
 }
