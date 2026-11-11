@@ -5,12 +5,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -28,6 +30,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	maxGap := fs.Duration("max-gap", 3*time.Minute, "tick gap above this counts as sleep")
 	renotify := fs.Duration("renotify", time.Hour, "re-page interval during an outage")
 	notifyCmd := fs.String("notify-command", "", "command run on a page; {message} is replaced (split on spaces, no shell)")
+	notifyTimeout := fs.Duration("notify-timeout", 5*time.Second, "bound on the notify command; it gets SIGTERM at this point (keep well under the 60 s interval)")
+	notifyWait := fs.Duration("notify-wait-delay", 2*time.Second, "grace after SIGTERM before the notify command is killed")
 	version := fs.Bool("version", false, "print the version")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -49,7 +53,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			for i := range f {
 				f[i] = strings.ReplaceAll(f[i], "{message}", msg)
 			}
-			return exec.Command(f[0], f[1:]...).Run()
+			return runNotify(f, *notifyTimeout, *notifyWait)
 		},
 	}
 	if err := runOnce(d, params{*threshold, *maxGap, *renotify}); err != nil {
@@ -57,4 +61,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// runNotify runs the notify command bounded by timeout. On expiry the command
+// gets SIGTERM, and after waitDelay it is killed and its pipes are abandoned,
+// so a hung notifier cannot keep the one-shot alive past the next launchd tick.
+func runNotify(argv []string, timeout, waitDelay time.Duration) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("empty notify command")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = waitDelay
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("notify command timed out after %s: %w", timeout, err)
+		}
+		return err
+	}
+	return nil
 }
