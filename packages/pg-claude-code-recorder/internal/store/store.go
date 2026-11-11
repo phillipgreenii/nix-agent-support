@@ -214,6 +214,8 @@ type Store struct {
 	livePend    atomic.Bool   // a write in flight stored a live-Process input (see NoteLiveInput)
 	modelSeq    atomic.Uint64 // commits that may have changed the lifecycle model inputs (see ModelInputSeq)
 	modelPend   atomic.Bool   // a write in flight stored a lifecycle model input (see NoteModelInput)
+	removeSeq   atomic.Uint64 // commits that removed record rows (see RemovalSeq)
+	removePend  atomic.Bool   // a write in flight removed record rows (see NoteRowsRemoved)
 	jf          fsx.File
 	nextSeq     int64
 	nextFile    int64
@@ -777,11 +779,25 @@ func (s *Store) ModelInputSeq() uint64 { return s.modelSeq.Load() }
 // cleared from a generation); the commit of that write moves ModelInputSeq.
 func (s *Store) NoteModelInput() { s.modelPend.Store(true) }
 
+// RemovalSeq counts the commits that may have removed record rows (a rewritten
+// generation's cleared rows). Only such a commit can take away a record a
+// reader already folded, so a reader that folds records in id order and keeps
+// them may extend its state while RemovalSeq is unchanged. It follows the
+// read-before-query rule of LiveInputSeq and issues no query.
+func (s *Store) RemovalSeq() uint64 { return s.removeSeq.Load() }
+
+// NoteRowsRemoved marks the write in flight as removing record rows; the commit
+// of that write moves RemovalSeq (and ModelInputSeq, as NoteModelInput does).
+func (s *Store) NoteRowsRemoved() { s.removePend.Store(true); s.modelPend.Store(true) }
+
 // bumpLive moves LiveInputSeq when a committed write was marked by NoteLiveInput
 // and ModelInputSeq when it was marked by either mark.
 func (s *Store) bumpLive() {
 	l := s.livePend.Swap(false)
 	m := s.modelPend.Swap(false)
+	if s.removePend.Swap(false) {
+		s.removeSeq.Add(1)
+	}
 	if l {
 		s.liveSeq.Add(1)
 	}

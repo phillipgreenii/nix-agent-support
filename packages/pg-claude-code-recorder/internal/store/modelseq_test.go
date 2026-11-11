@@ -65,3 +65,29 @@ func TestModelInputSeqMovesForEveryModelInput(t *testing.T) {
 		t.Fatal("a stage record moved LiveInputSeq")
 	}
 }
+
+// RemovalSeq moves only for a write that removed record rows (and then
+// ModelInputSeq moves too), not for a history-style model input or a live one.
+func TestRemovalSeqMovesOnlyForRemovedRows(t *testing.T) {
+	st, err := Open(t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	rm, model := st.RemovalSeq(), st.ModelInputSeq()
+	for _, note := range []func(){st.NoteModelInput, st.NoteLiveInput} {
+		if err := st.WithWrite("", func(*sql.Tx) error { note(); return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if st.RemovalSeq() != rm {
+			t.Fatal("a write that removed nothing moved RemovalSeq")
+		}
+	}
+	model = st.ModelInputSeq()
+	if err := st.WithWrite("", func(*sql.Tx) error { st.NoteRowsRemoved(); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if st.RemovalSeq() != rm+1 || st.ModelInputSeq() != model+1 {
+		t.Fatalf("a removing write: RemovalSeq %d (want %d), ModelInputSeq %d (want %d)", st.RemovalSeq(), rm+1, st.ModelInputSeq(), model+1)
+	}
+}

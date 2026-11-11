@@ -43,6 +43,9 @@ type Engine struct {
 	// full is the last complete model with the store state it was read at.
 	full atomic.Pointer[modelEntry]
 
+	// list is the last Process-list model with the store state it was read at.
+	list atomic.Pointer[listEntry]
+
 	// inc is the registry state LiveSessions extends instead of rereading; incMu
 	// guards it.
 	incMu sync.Mutex
@@ -63,6 +66,15 @@ type modelEntry struct {
 	data, epoch uint64
 	ready       bool
 	m           *model
+}
+
+// listEntry is a cached Process-list model, valid while the store has committed
+// no registry record, Process observation or row removal and rolled back no
+// write since it was read; it MUST be treated as read-only.
+type listEntry struct {
+	live, removed, epoch uint64
+	ready                bool
+	m                    *model
 }
 
 // liveEntry is a cached LiveSessions answer. The answer is a function of the
@@ -731,9 +743,49 @@ func (m *model) processKeys() []pkey {
 	return ks
 }
 
+// listModel is the part of the model a Process list reads (the newest and the
+// oldest registry version of each Process, the deletions and the Process
+// observations), built from the incremental registry state. A list so reads only
+// the registry records the store gained since the last one, whatever else the
+// store committed (a history entry moves the complete model, not this).
+func (e *Engine) listModel(ctx context.Context) (*model, error) {
+	// Read BEFORE the queries: a write that lands during them moves the counters.
+	live, removed, epoch, ready := e.St.LiveInputSeq(), e.St.RemovalSeq(), e.St.RollbackEpoch(), e.St.SessionRefReady()
+	if c := e.list.Load(); c != nil && c.live == live && c.removed == removed && c.epoch == epoch && c.ready == ready {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return c.m, nil
+	}
+	e.incMu.Lock()
+	defer e.incMu.Unlock()
+	st, procs, err := e.syncInc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := &model{
+		vers: make(map[pkey][]regRow, len(st.last)), deleted: make(map[pkey]int64, len(st.del)), procs: make(map[pkey]store.Proc, len(procs)),
+	}
+	for k, l := range st.last {
+		if f := st.first[k]; f.id != l.id {
+			m.vers[k] = []regRow{f, l}
+		} else {
+			m.vers[k] = []regRow{l}
+		}
+	}
+	for k, t := range st.del {
+		m.deleted[k] = t
+	}
+	for _, p := range procs {
+		m.procs[pkey{p.Pid, p.ProcStart}] = p
+	}
+	e.list.Store(&listEntry{live: live, removed: removed, epoch: epoch, ready: ready, m: m})
+	return m, nil
+}
+
 // Processes returns the Processes that match the filter, newest first.
 func (e *Engine) Processes(ctx context.Context, f ProcessFilter) ([]Process, error) {
-	m, err := e.loadCtx(ctx)
+	m, err := e.listModel(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -799,16 +851,21 @@ var (
 // its deletion times, with the highest record id read of each kind. Registry
 // records are only ever appended, so a call reads the records after those ids.
 // The state is valid while the store has not rolled back a write, changed the
-// session-ref mode, or committed an input of the lifecycle model that is not a
-// live input (which can remove records); otherwise it is rebuilt from scratch.
+// session-ref mode, or committed a write that removed record rows (a rewritten
+// generation; see Store.RemovalSeq); otherwise it is rebuilt from scratch. A
+// history or control-end record does not touch it.
 type liveInc struct {
-	epoch  uint64
-	ready  bool
-	gap    uint64 // ModelInputSeq - LiveInputSeq when it was read
-	maxReg int64
-	maxDel int64
-	segs   map[pkey][]seg
-	del    map[pkey]int64
+	epoch   uint64
+	ready   bool
+	removed uint64 // RemovalSeq when it was read
+	maxReg  int64
+	maxDel  int64
+	segs    map[pkey][]seg
+	del     map[pkey]int64
+	// first and last are the oldest and newest registry version of each Process,
+	// all that a Process list reads of its versions.
+	first map[pkey]regRow
+	last  map[pkey]regRow
 }
 
 type incReg struct {
@@ -816,6 +873,7 @@ type incReg struct {
 	session        string
 	k              pkey
 	cwd            string
+	row            regRow
 }
 
 type incDel struct {
@@ -823,18 +881,17 @@ type incDel struct {
 	k     pkey
 }
 
-// liveIncremental derives the live sessions from the registry state held in
-// e.inc, first reading only what the store gained since.
-func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
-	e.incMu.Lock()
-	defer e.incMu.Unlock()
+// syncInc brings e.inc up to the store, first reading only what the store
+// gained since, and returns it with the Process observations read in the same
+// transaction. The caller MUST hold e.incMu and MUST NOT keep the state past
+// the unlock.
+func (e *Engine) syncInc(ctx context.Context) (*liveInc, []store.Proc, error) {
 	// Read BEFORE the queries, like the caches above.
-	live, modelSeq := e.St.LiveInputSeq(), e.St.ModelInputSeq()
+	removed := e.St.RemovalSeq()
 	epoch, ready := e.St.RollbackEpoch(), e.St.SessionRefReady()
-	gap := modelSeq - live
 	st := e.inc
-	if st == nil || st.epoch != epoch || st.ready != ready || st.gap != gap {
-		st = &liveInc{epoch: epoch, ready: ready, gap: gap, segs: map[pkey][]seg{}, del: map[pkey]int64{}}
+	if st == nil || st.epoch != epoch || st.ready != ready || st.removed != removed {
+		st = &liveInc{epoch: epoch, ready: ready, removed: removed, segs: map[pkey][]seg{}, del: map[pkey]int64{}, first: map[pkey]regRow{}, last: map[pkey]regRow{}}
 	}
 	var regs []incReg
 	var dels []incDel
@@ -857,7 +914,9 @@ func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
 				_ = rows.Close()
 				return err
 			}
-			regs = append(regs, incReg{id: x.id, t: x.t, started: started.Int64, session: x.session, k: pkey{pid.Int64, ps.String}, cwd: cwd.String})
+			x.pid, x.ps, x.cwd, x.started = pid.Int64, ps.String, cwd.String, started.Int64
+			x.name, x.status, x.waiting = name.String, status.String, waiting.String
+			regs = append(regs, incReg{id: x.id, t: x.t, started: x.started, session: x.session, k: pkey{x.pid, x.ps}, cwd: x.cwd, row: x})
 		}
 		if err := rows.Close(); err != nil {
 			return err
@@ -884,13 +943,17 @@ func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Fold only after every read succeeded, so a failure leaves the state as it was.
 	for _, r := range regs {
 		if r.id > st.maxReg {
 			st.maxReg = r.id
 		}
+		if _, ok := st.first[r.k]; !ok {
+			st.first[r.k] = r.row
+		}
+		st.last[r.k] = r.row
 		ss := st.segs[r.k]
 		if n := len(ss); n > 0 && ss[n-1].session == r.session {
 			if r.cwd != "" {
@@ -911,6 +974,18 @@ func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
 		}
 	}
 	e.inc = st
+	return st, procs, nil
+}
+
+// liveIncremental derives the live sessions from the registry state held in
+// e.inc, first reading only what the store gained since.
+func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
+	e.incMu.Lock()
+	defer e.incMu.Unlock()
+	st, procs, err := e.syncInc(ctx)
+	if err != nil {
+		return nil, err
+	}
 	m := &model{
 		segs: map[string][]seg{}, deleted: st.del, procs: make(map[pkey]store.Proc, len(procs)),
 		vers: map[pkey][]regRow{}, clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},

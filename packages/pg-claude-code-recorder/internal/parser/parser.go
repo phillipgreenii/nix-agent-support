@@ -784,7 +784,7 @@ func (p *Parser) parseGen(f store.File, src source.Source, g store.Generation, r
 }
 
 func (p *Parser) clearGen(tx *pstx, file int64, gen int) error {
-	p.cfg.Store.NoteModelInput() // rows leave the store: a cached lifecycle model may hold them
+	p.cfg.Store.NoteRowsRemoved() // rows leave the store: a cached lifecycle model may hold them
 	// The sessions that lose rows get their stats recomputed once the rows are gone.
 	affected, err := p.sessionsOfGen(tx, file, gen)
 	if err != nil {
