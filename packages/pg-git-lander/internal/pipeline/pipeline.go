@@ -57,6 +57,10 @@ type Deps struct {
 	Sleep         func(ctx context.Context, d time.Duration) error
 	Jitter        func(max time.Duration) time.Duration
 	RenewInterval time.Duration
+	// Chdir changes the process working directory for the clean-up (step 13);
+	// nil is os.Chdir. Tests that must not move the test process inject a
+	// no-op.
+	Chdir func(string) error
 }
 
 // Request is one operation, with its flags already resolved against the PGL_*
@@ -118,6 +122,9 @@ type Prepared struct {
 	// Warnings are the warning words so far (for example work-in-destination).
 	Warnings     []outcome.Warning
 	SkippedHooks []hooks.Skipped
+
+	// Diag holds the merge-driver diagnostics of step 4, for the conflict loop.
+	Diag *rebase.Diagnostics
 
 	Started time.Time
 	// Stage and StageStarted say where the operation is, for the next stage
@@ -668,6 +675,7 @@ func (s *session) afterLock(ctx context.Context) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	p.Diag = diag
 	for _, l := range diag.Lines {
 		p.Log.MergeDriver(l)
 	}

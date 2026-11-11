@@ -110,6 +110,8 @@ func (f *fx) deps(o locks.Owner) pipeline.Deps {
 		Paths: seamstest.ConfigPaths(f.xdg), Owner: o,
 		Sleep:  func(_ context.Context, d time.Duration) error { f.clock.Advance(d); return nil },
 		Jitter: func(max time.Duration) time.Duration { return max / 2 },
+		// The clean-up changes the process directory; a test must not.
+		Chdir: func(string) error { return nil },
 	}
 }
 
