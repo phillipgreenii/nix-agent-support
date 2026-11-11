@@ -195,6 +195,15 @@ func TestRollingDoctorEqualsTheSynchronousOracle(t *testing.T) {
 			for i := range want.Mismatches {
 				want.Mismatches[i].Path = strings.TrimPrefix(want.Mismatches[i].Path, sync.claude)
 			}
+			// The journal finding's detail quotes rows holding each env's own
+			// inode numbers; compare the part that names the table.
+			for _, r := range []*DoctorResult{&got, &want} {
+				for i := range r.Mismatches {
+					if r.Mismatches[i].Kind == MismatchJournal {
+						r.Mismatches[i].Detail, _, _ = strings.Cut(r.Mismatches[i].Detail, ": files: ")
+					}
+				}
+			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("rolling %+v\nsynchronous %+v", got, want)
 			}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,7 +105,13 @@ func TestDoctorSeesAJournalThatDisagreesWithTheIndex(t *testing.T) {
 	}
 	found := false
 	for _, m := range res.Mismatches {
-		found = found || m.Kind == MismatchJournal
+		if m.Kind == MismatchJournal {
+			found = true
+			// The finding names the table and the row that differ.
+			if !strings.Contains(m.Detail, "files: ") || !strings.Contains(m.Detail, "replay has ") {
+				t.Fatalf("detail does not name what differs: %q", m.Detail)
+			}
+		}
 	}
 	if !found {
 		t.Fatalf("no journal mismatch: %+v", res)

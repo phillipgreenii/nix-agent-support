@@ -243,7 +243,7 @@ func (s *Settler) doctorJournal(ctx context.Context, add func(DoctorMismatch)) {
 	case rerr != nil:
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("dump: replay=%v", rerr)})
 	case replay != fz.Live:
-		add(DoctorMismatch{Kind: MismatchJournal, Detail: "a replay of the journal differs from the index"})
+		add(DoctorMismatch{Kind: MismatchJournal, Detail: "a replay of the journal differs from the index: " + store.DumpDiff(replay, fz.Live)})
 	}
 }
 
