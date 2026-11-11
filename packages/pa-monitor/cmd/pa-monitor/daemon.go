@@ -326,7 +326,9 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		opts.Poller = p
 		opts.BlockTracker = blockTr
 		opts.WeekTracker = weekTr
-		opts.Registry = p.Registry
+		if ks, ok := p.Registry.(session.KnownSessions); ok {
+			opts.Registry = ks
+		}
 		// WeeklyEvery gates how often the daemon reads the (folded) weekly cost
 		// projection + upserts it: ~1/12 ticks (~1 minute at 5s), preserving the
 		// pre-fold cadence. The value itself comes from the corpus Monitor's

@@ -254,7 +254,7 @@ type RunOptions struct {
 	// recorder's Process facts). When non-nil alongside WriteService, an hourly GC
 	// sweeper goroutine is started to reconcile them with the DB and hard-delete
 	// stale rows.
-	Registry session.Registry
+	Registry session.KnownSessions
 	// BridgeSnapshotInterval and BridgeStaleAfter are the timing-derived
 	// connection windows (see internal/timing): the per-bridge snapshot push
 	// cadence and the registry stale cutoff. Zero selects timing defaults, so a

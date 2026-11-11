@@ -25,6 +25,14 @@ type Registry interface {
 	Registrations(ctx context.Context) ([]*Session, error)
 }
 
+// KnownSessions is what GC keeps: every session id the recorder knows a Process
+// for, alive or ended, read fresh on each call. A failed or partial answer is an
+// error, never a short list. It is deliberately separate from Registry so GC can
+// never be served a discovery snapshot.
+type KnownSessions interface {
+	KnownSessionIDs(ctx context.Context) ([]string, error)
+}
+
 // Discovery is what the corpus Monitor discovers sessions through.
 type Discovery interface {
 	Discover() ([]*Session, error)

@@ -31,6 +31,12 @@ type Facts struct {
 
 	mu sync.Mutex
 	c  *client.Client
+
+	// scanMu serialises Registrations and guards the carried discovery state
+	// below (never read by GC).
+	scanMu      sync.Mutex
+	endedSeeded bool
+	live, ended []*session.Session
 }
 
 // New returns a reader that discovers the daemon's socket from opts (the
@@ -109,11 +115,150 @@ type registryExtra struct {
 	StatusUpdatedAt *float64 `json:"statusUpdatedAt"`
 }
 
-// Registrations implements session.Registry: one row per session the recorder
-// knows a Process for, alive Processes first, with PidAlive from the Process
-// facts (no kill -0 probe and no ps start-time guard: the recorder keys a
-// Process by pid and start time, so a reused pid is a different Process).
+// registryLookupWorkers bounds how many per-session registry lookups one Scan
+// has in flight; the recorder serves at most 8 query connections at once.
+const registryLookupWorkers = 4
+
+// Registrations implements session.Registry for discovery: one row per session
+// the recorder knows a Process for, alive Processes first, with PidAlive from
+// the Process facts (no kill -0 probe and no ps start-time guard: the recorder
+// keys a Process by pid and start time, so a reused pid is a different
+// Process).
+//
+// Each call reads the alive Processes and then one newest registry version per
+// LIVE session (kind, entrypoint, waitingFor and the turn-start marker live
+// only in the registry file's bytes). Ended Processes are read once, the first
+// time after the recorder is reached (and again after a recorder outage or
+// ResyncEnded); after that a session that leaves the alive set is carried
+// forward as ended, with the registry fields it last had, so a steady-state
+// Scan sends no process.list for ended Processes and no registry read for an
+// ended session. GC must not use this snapshot: it asks KnownSessionIDs.
 func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
+	f.scanMu.Lock()
+	defer f.scanMu.Unlock()
+	c, err := f.Client(ctx)
+	if err != nil {
+		f.resetEnded()
+		return nil, err
+	}
+	yes, no := true, false
+	alive, err := c.ProcessList(ctx, client.ProcessFilter{Alive: &yes, Limit: 1000})
+	if err != nil {
+		return nil, f.wrapScan(err)
+	}
+	var live []*session.Session
+	liveSeen := map[string]bool{}
+	for _, p := range alive.Processes {
+		if p.SessionID == "" || liveSeen[p.SessionID] {
+			continue
+		}
+		liveSeen[p.SessionID] = true
+		live = append(live, fromProcess(p))
+	}
+
+	var ended []*session.Session // newest first
+	if !f.endedSeeded {
+		dead, err := c.ProcessList(ctx, client.ProcessFilter{Alive: &no, Limit: maxDeadProcesses})
+		if err != nil {
+			return nil, f.wrapScan(err)
+		}
+		for _, p := range dead.Processes {
+			if p.SessionID == "" || liveSeen[p.SessionID] || hasID(ended, p.SessionID) {
+				continue
+			}
+			ended = append(ended, fromProcess(p))
+		}
+		// One registry read per ended session, once, so their stored rows keep
+		// kind and entrypoint across a daemon restart.
+		f.fillRegistry(ctx, c, ended)
+	} else {
+		ended = f.ended[:0:0]
+		var gone []*session.Session
+		for _, s := range f.live {
+			if !liveSeen[s.SessionID] {
+				gone = append(gone, s)
+			}
+		}
+		for _, s := range gone {
+			// Carried forward as ended with the facts it last had: no recorder read.
+			d := *s
+			d.PidAlive = false
+			ended = append(ended, &d)
+		}
+		for _, s := range f.ended {
+			if !liveSeen[s.SessionID] && !hasID(ended, s.SessionID) {
+				ended = append(ended, s)
+			}
+		}
+	}
+	if len(ended) > maxDeadProcesses {
+		ended = ended[:maxDeadProcesses]
+	}
+
+	if err := f.fillRegistryLive(ctx, c, live); err != nil {
+		return nil, err
+	}
+	f.live, f.ended, f.endedSeeded = live, ended, true
+
+	out := make([]*session.Session, 0, len(live)+len(ended))
+	for _, s := range live {
+		cp := *s
+		out = append(out, &cp)
+	}
+	for _, s := range ended {
+		cp := *s
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+// ResyncEnded makes the next Registrations read the ended Processes again, for
+// a caller that knows a Process came and went between two Scans.
+func (f *Facts) ResyncEnded() {
+	f.scanMu.Lock()
+	f.endedSeeded = false
+	f.scanMu.Unlock()
+}
+
+func (f *Facts) resetEnded() {
+	f.endedSeeded = false
+	f.live, f.ended = nil, nil
+}
+
+// wrapScan is wrap for a scan: an outage also forgets the carried state.
+func (f *Facts) wrapScan(err error) error {
+	if isOffline(err) {
+		f.resetEnded()
+	}
+	return f.wrap(err)
+}
+
+func isOffline(err error) bool {
+	return errors.Is(err, client.ErrDown) || errors.Is(err, client.ErrUnavailable)
+}
+
+func hasID(ss []*session.Session, id string) bool {
+	for _, s := range ss {
+		if s.SessionID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func fromProcess(p client.ProcessInfo) *session.Session {
+	s := &session.Session{PID: int(p.Pid), SessionID: p.SessionID, Cwd: p.Cwd, Name: p.Name, RegistryStatus: p.Status, PidAlive: p.Alive}
+	if p.StartedAt != nil {
+		s.StartedAt = *p.StartedAt
+	}
+	return s
+}
+
+// KnownSessionIDs is what GC keeps: every session id the recorder knows a
+// Process for, alive or ended (ended capped at maxDeadProcesses), read fresh on
+// every call. It never reads the discovery snapshot, and a failed or degraded
+// answer is an error (so the sweep deletes nothing on it).
+func (f *Facts) KnownSessionIDs(ctx context.Context) ([]string, error) {
 	c, err := f.Client(ctx)
 	if err != nil {
 		return nil, err
@@ -127,69 +272,92 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 	if err != nil {
 		return nil, f.wrap(err)
 	}
-	var out []*session.Session
+	if alive.Degraded || dead.Degraded {
+		return nil, errors.New("recorder process list is degraded; not deciding what to keep from a partial answer")
+	}
 	seen := map[string]bool{}
-	var ids []any
-	add := func(alive bool, pid int64, sid, name, cwd, status string, started *time.Time) {
-		if sid == "" || seen[sid] {
-			return
+	var ids []string
+	for _, l := range [][]client.ProcessInfo{alive.Processes, dead.Processes} {
+		for _, p := range l {
+			if p.SessionID != "" && !seen[p.SessionID] {
+				seen[p.SessionID] = true
+				ids = append(ids, p.SessionID)
+			}
 		}
-		seen[sid] = true
-		s := &session.Session{PID: int(pid), SessionID: sid, Cwd: cwd, Name: name, RegistryStatus: status, PidAlive: alive}
-		if started != nil {
-			s.StartedAt = *started
+	}
+	return ids, nil
+}
+
+// fillRegistryLive reads the newest registry version of every live session. A
+// failed read for one session keeps what that session last had; only a recorder
+// that stopped answering fails the scan.
+func (f *Facts) fillRegistryLive(ctx context.Context, c *client.Client, live []*session.Session) error {
+	prev := map[string]*session.Session{}
+	for _, s := range f.live {
+		prev[s.SessionID] = s
+	}
+	errs := f.fillRegistry(ctx, c, live)
+	for i, s := range live {
+		if errs[i] == nil {
+			continue
 		}
-		out = append(out, s)
-		ids = append(ids, sid)
+		if isOffline(errs[i]) {
+			return f.wrapScan(errs[i])
+		}
+		if p := prev[s.SessionID]; p != nil && p.PID == s.PID {
+			s.Kind, s.Entrypoint, s.WaitingFor, s.StatusUpdatedAt = p.Kind, p.Entrypoint, p.WaitingFor, p.StatusUpdatedAt
+		}
 	}
-	for _, p := range alive.Processes {
-		add(p.Alive, p.Pid, p.SessionID, p.Name, p.Cwd, p.Status, p.StartedAt)
+	return nil
+}
+
+// fillRegistry runs one limit-1 registry lookup per session and fills the
+// fields only the registry bytes carry. It returns each lookup's error.
+func (f *Facts) fillRegistry(ctx context.Context, c *client.Client, ss []*session.Session) []error {
+	errs := make([]error, len(ss))
+	sem := make(chan struct{}, registryLookupWorkers)
+	var wg sync.WaitGroup
+	for i, s := range ss {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			errs[i] = registryLookup(ctx, c, s)
+		}()
 	}
-	for _, p := range dead.Processes {
-		add(p.Alive, p.Pid, p.SessionID, p.Name, p.Cwd, p.Status, p.StartedAt)
-	}
-	if len(ids) == 0 {
-		return out, nil
-	}
-	// Kind, entrypoint, waitingFor and the turn-start marker live only in the
-	// registry file's bytes: read the newest versions of the sessions found.
+	wg.Wait()
+	return errs
+}
+
+// registryLookup reads the newest registry version of one session, a point
+// lookup the (session, source, time) index serves.
+func registryLookup(ctx context.Context, c *client.Client, s *session.Session) error {
+	id, _ := json.Marshal(s.SessionID)
 	ans, err := c.Query(ctx, client.QueryRequest{
 		From: "records",
 		Where: &client.Filter{All: []client.Filter{
 			{Field: "source", Eq: json.RawMessage(`"session-registry"`)},
-			{Field: "session", In: ids},
+			{Field: "session", Eq: id},
 		}},
 		Select: []string{"session"},
 		Order:  []client.Order{{By: "time", Dir: "desc"}},
 		Raw:    true,
-		Limit:  5000,
+		Limit:  1,
 	})
 	if err != nil {
-		return nil, f.wrap(err)
+		return err
 	}
-	done := map[string]bool{}
-	for i, row := range ans.Rows {
-		if i >= len(ans.Raw) || len(row) == 0 {
-			continue
-		}
-		sid, _ := row[0].(string)
-		if done[sid] {
-			continue
-		}
-		var x registryExtra
-		if json.Unmarshal([]byte(ans.Raw[i]), &x) != nil {
-			continue
-		}
-		for _, s := range out {
-			if s.SessionID != sid || (x.PID != 0 && int64(s.PID) != x.PID) {
-				continue
-			}
-			done[sid] = true
-			s.Kind, s.Entrypoint, s.WaitingFor = x.Kind, x.Entrypoint, x.WaitingFor
-			if x.StatusUpdatedAt != nil && *x.StatusUpdatedAt > 0 {
-				s.StatusUpdatedAt = time.UnixMilli(int64(*x.StatusUpdatedAt))
-			}
-		}
+	if len(ans.Rows) == 0 || len(ans.Raw) == 0 {
+		return nil
 	}
-	return out, nil
+	var x registryExtra
+	if json.Unmarshal([]byte(ans.Raw[0]), &x) != nil || (x.PID != 0 && int64(s.PID) != x.PID) {
+		return nil
+	}
+	s.Kind, s.Entrypoint, s.WaitingFor = x.Kind, x.Entrypoint, x.WaitingFor
+	if x.StatusUpdatedAt != nil && *x.StatusUpdatedAt > 0 {
+		s.StatusUpdatedAt = time.UnixMilli(int64(*x.StatusUpdatedAt))
+	}
+	return nil
 }

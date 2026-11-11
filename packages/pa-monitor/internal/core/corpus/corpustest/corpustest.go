@@ -69,6 +69,7 @@ func (e *Env) Register(pid int, sid, cwd, name string, alive bool) {
 		e.Procs.Exit(pid, time.UnixMilli(StartMs+9000))
 		deadline := time.Now().Add(10 * time.Second)
 		for {
+			e.Facts.ResyncEnded() // the process may have come and gone between two Scans
 			regs, err := e.Facts.Registrations(context.Background())
 			if err == nil {
 				ended := false

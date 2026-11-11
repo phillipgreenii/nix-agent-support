@@ -16,7 +16,7 @@ type GCSweeper struct {
 	// Registry names which sessions still exist: the recorder's Process facts.
 	// While the recorder is offline the sweep keeps every row (it never reads
 	// Claude's files instead).
-	Registry session.Registry
+	Registry session.KnownSessions
 	// WriteService receives all mutations.
 	WriteService *service.WriteService
 	// Interval is how often RunOnce is called by Run. Defaults to 1h.
@@ -112,15 +112,5 @@ func (g *GCSweeper) Run(ctx context.Context) {
 // keepIDs returns the session ids the recorder knows a Process for (alive or
 // not): the rows the sweep keeps alive. Rows with no Process are soft-deleted.
 func (g *GCSweeper) keepIDs(ctx context.Context) ([]string, error) {
-	rows, err := g.Registry.Registrations(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		if r.SessionID != "" {
-			ids = append(ids, r.SessionID)
-		}
-	}
-	return ids, nil
+	return g.Registry.KnownSessionIDs(ctx)
 }

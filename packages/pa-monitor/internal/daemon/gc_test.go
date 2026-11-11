@@ -86,12 +86,12 @@ func upsertTestSessions(t *testing.T, ws *service.WriteService, ids ...string) {
 // Claude that is running); the sweeper itself never reads Claude's files.
 type dirRegistry struct{ dir string }
 
-func (d dirRegistry) Registrations(context.Context) ([]*session.Session, error) {
+func (d dirRegistry) KnownSessionIDs(context.Context) ([]string, error) {
 	entries, err := os.ReadDir(d.dir)
 	if err != nil {
 		return nil, err
 	}
-	var out []*session.Session
+	var out []string
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) != ".json" {
 			continue
@@ -100,7 +100,7 @@ func (d dirRegistry) Registrations(context.Context) ([]*session.Session, error) 
 		if err != nil || r.SessionID == "" {
 			continue
 		}
-		out = append(out, &session.Session{SessionID: r.SessionID, PID: r.PID})
+		out = append(out, r.SessionID)
 	}
 	return out, nil
 }
@@ -108,7 +108,7 @@ func (d dirRegistry) Registrations(context.Context) ([]*session.Session, error) 
 // offlineRegistry is a recorder that is not answering.
 type offlineRegistry struct{}
 
-func (offlineRegistry) Registrations(context.Context) ([]*session.Session, error) {
+func (offlineRegistry) KnownSessionIDs(context.Context) ([]string, error) {
 	return nil, session.ErrDaemonOffline
 }
 
@@ -128,7 +128,7 @@ func TestGCSweeper_RecorderOfflineKeepsEveryRow(t *testing.T) {
 	}
 }
 
-func runSweepWith(t *testing.T, ws *service.WriteService, reg session.Registry) {
+func runSweepWith(t *testing.T, ws *service.WriteService, reg session.KnownSessions) {
 	t.Helper()
 	ctx := context.Background()
 	sweeper := &GCSweeper{
