@@ -198,8 +198,8 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	// withCcpoolTimeout derives a FRESH, independent deadline for each
 	// individual ccpool subprocess call -- "every external call in run
 	// MUST carry an explicit timeout" [Binding decisions].
-	withCcpoolTimeout := func() (context.Context, context.CancelFunc) {
-		return context.WithTimeout(ctx, opts.ccpoolTimeout)
+	withCcpoolTimeout := func(parent context.Context) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(parent, opts.ccpoolTimeout)
 	}
 
 	// callCcpool runs one ccpool list call under a FRESH per-call deadline
@@ -208,12 +208,12 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	// an overloaded host is the dominant failure mode (pg2-zzf54); the retry
 	// is bounded so a wedged ccpool costs at most two deadlines per call.
 	callCcpool := func(what string, call func(ctx context.Context) ([]ccpoolSessionRow, error)) ([]ccpoolSessionRow, error) {
-		cctx, cancel := withCcpoolTimeout()
+		cctx, cancel := withCcpoolTimeout(ctx)
 		rows, err := call(cctx)
 		cancel()
 		if err != nil && errors.Is(err, errCcpoolKilled) && ctx.Err() == nil {
 			warn(fmt.Sprintf("%s: ccpool call killed; retrying once", what))
-			cctx, cancel = withCcpoolTimeout()
+			cctx, cancel = withCcpoolTimeout(ctx)
 			rows, err = call(cctx)
 			cancel()
 		}
