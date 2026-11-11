@@ -2265,6 +2265,30 @@
                     touch $out
                   '';
 
+              # TRIAGER-ANSWER handling: drain-one's UNDERSTAND step reads comments and follows a
+              # triager answer; drain-stuck demands a stated reason to re-escalate past one.
+              test-pb-triager-answer =
+                let
+                  triagerAnswerSrc = lib.fileset.toSource {
+                    root = ./claude-marketplace;
+                    fileset = ./claude-marketplace/pb;
+                  };
+                in
+                pkgs.runCommand "test-pb-triager-answer"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.perl
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export PBD_PB_DIR="${triagerAnswerSrc}/pb"
+                    bats --verbose-run ${./tests/pb-triager-answer.bats}
+                    touch $out
+                  '';
+
               # Focus-item exclusion conformance (pg2-2j5ac.44.33): the sweep that undefers or
               # closes deferred beads MUST NOT touch a `focus-item` bead (the decider holds one as
               # status=deferred; a close ends the item for good). The rule must live in the

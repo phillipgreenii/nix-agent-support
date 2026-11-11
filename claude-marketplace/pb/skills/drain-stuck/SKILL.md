@@ -92,6 +92,14 @@ may hold it, or the cause is not yet known).
      `tc-oyp6`, `tc-ts8f`, `tc-ldoz`, `tc-a8f8s` were each released with the decision already
      recorded, then re-parked as `human` within hours on the strength of the stale description
      text alone).
+   - **`triager-answer-applies?`** Read this bead's comments (`bd show <id> --json
+--include-comments`, J-1 unwrap, or plain `bd show <id>`). If a comment starting
+     `TRIAGER-ANSWER:` is newer than the latest earlier `stuck:` comment and answers the finding
+     you are about to escalate, you MUST NOT re-escalate on that finding unless the step-6
+     comment carries a line `ANSWER-DOES-NOT-APPLY: <why the TRIAGER-ANSWER does not resolve
+this finding>` that cites the answer and what you did with it. Without that line, follow
+     the answer (return to the work) instead of escalating. The triager may re-queue a bead
+     only once, so an unexplained second escalation costs an operator hand-off.
    - An earlier REVIEW of this bead's plan is NOT a freshness signal (F-6). A reviewed
      snapshot ages exactly as fast as the snapshot, so "already reviewed" / "looks
      plan-ready" MUST NOT stand in for running the probes.

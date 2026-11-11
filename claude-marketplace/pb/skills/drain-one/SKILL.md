@@ -119,7 +119,16 @@ and the container's own priority, then:
 
 2. **UNDERSTAND** (orchestrator reads the BEAD ONLY): `bd show <id>` to learn the
    target repo(s), whether the work spans repos, and whether any acceptance
-   criterion can only be confirmed once the change is LIVE. You MUST NOT Read any
+   criterion can only be confirmed once the change is LIVE. The read MUST include the
+   bead's COMMENTS: plain `bd show <id>` prints a COMMENTS section, but `bd show <id> --json`
+   omits them (it returns only `comment_count` and `comments_omitted: true`), so with `--json`
+   add `--include-comments` (the J-1 unwrap still applies). A comment starting `TRIAGER-ANSWER:`
+   is the escalation-triager's resolution of the latest earlier `stuck:` finding on this bead;
+   when it is newer than that finding you MUST treat it as binding instructions and follow it
+   (its steps are part of the work, and the brief in step 4 MUST point the subagent at the
+   bead's comments). You MUST NOT re-escalate on the same finding an answer already resolved
+   unless you can state why the answer does not apply (`pb:drain-stuck` step 2 requires that
+   statement). You MUST NOT Read any
    file, plan, spec, or doc the bead references — those are the implementation
    subagent's to read (measured: one session read the same referenced plan doc
    eight times to compose briefs, ~20K tokens of pure duplication). Record the
