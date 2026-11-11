@@ -313,7 +313,7 @@ func (r *Reader) OutputTokens(path string) (int64, error) {
 // still in the Claude directory: what makes a Conversation resumable. A session
 // the recorder has never seen is not resumable.
 func (r *Reader) OriginalsPresent(transcriptPath string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c, err := r.conn(ctx)
 	if err != nil {

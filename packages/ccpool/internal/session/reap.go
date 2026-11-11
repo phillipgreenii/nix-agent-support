@@ -80,7 +80,12 @@ func evictable(r store.Session) bool {
 // (ADR 0086). It is opt-in per call: Reap without that option never closes a
 // dead row.
 //
-// A failure on one row (resumability check, dead-row reap, stale needs_input
+// The resumability check of a dead row stats its recorded transcript first and
+// asks the recorder only for a row whose file is missing; the first recorder
+// failure of a pass stops further asking, keeps every unresolved row and logs one
+// WARN (never a per-row failure).
+//
+// A failure on one row (dead-row reap, stale needs_input
 // close, revalidated close) is recorded and that row skipped, so one bad row
 // cannot stop the rest of the pool from being reaped. Reap returns the
 // recorded failures joined (errors.Join) once the sweep ends, so the caller's
@@ -111,6 +116,8 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// (don't prune a young `starting` row that hasn't written a transcript yet).
 	var live []store.Session
 	var deadKept []store.Session // not live, but not a phantom either (resumable / fresh)
+	// One availability decision per pass for the recorder-backed originals probe.
+	gate := &probeGate{}
 	for _, r := range rows {
 		if s.d.Tmux.HasSession(TmuxName(s.d.Prefix, r.ExternalID)) {
 			live = append(live, r)
@@ -118,7 +125,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		}
 		// The classification above was made without the lock; the decision to
 		// finalize or delete is re-read under the per-external_id lock.
-		kind, cur, err := s.reapDeadRow(ctx, r.ExternalID, now, o.closedRowRetention)
+		kind, cur, err := s.reapDeadRow(ctx, r.ExternalID, now, o.closedRowRetention, gate)
 		if err != nil {
 			if cerr := ctx.Err(); cerr != nil {
 				return err
@@ -132,6 +139,12 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		case deadKeptRow:
 			deadKept = append(deadKept, cur)
 		}
+	}
+	if gate.down {
+		// One line for the whole pass, not one per row: the rows stay as they are
+		// and the next sweep asks again (nothing negative is ever cached).
+		slog.Warn("ccpool: reap could not check dead rows against the recorder; kept them unresolved",
+			"unresolved_rows", gate.skipped, "err", gate.cause)
 	}
 	// Dead-row backstop (ADR 0086): after Pass 0 has classified every row and
 	// before any metric or closure pass reads them, close the dead needs_input
@@ -457,7 +470,7 @@ const (
 // any, else `exited`, end_source=reaper, ended_at=last_activity_at) BEFORE the
 // row is deleted. A dead-but-kept row is finalized the same way unless it is a
 // fresh `starting` row.
-func (s *Service) reapDeadRow(ctx context.Context, externalID string, now time.Time, retention time.Duration) (deadRowKind, store.Session, error) {
+func (s *Service) reapDeadRow(ctx context.Context, externalID string, now time.Time, retention time.Duration, gate *probeGate) (deadRowKind, store.Session, error) {
 	kind := deadGone
 	var out store.Session
 	err := s.withLock(externalID, func() error {
@@ -470,9 +483,18 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string, now time.T
 			return nil
 		}
 		fresh := s.isFreshStarting(r)
-		resumable, rerr := s.resumableForReap(ctx, r, now)
+		resumable, rerr := s.resumableForReap(ctx, r, now, gate)
+		if errors.Is(rerr, errProbeUnavailable) {
+			// The probe is down: never prune (or finalize) on a guess. Keep the
+			// row untouched; the pass reports the outage once, not per row.
+			if cerr := ctx.Err(); cerr != nil {
+				return cerr
+			}
+			kind, out = deadKeptRow, r
+			return nil
+		}
 		if rerr != nil {
-			return fmt.Errorf("check resumable: %w", rerr) // the probe is down: never prune on a guess
+			return fmt.Errorf("check resumable: %w", rerr)
 		}
 		phantom := !resumable && !fresh
 		if phantom || !fresh {

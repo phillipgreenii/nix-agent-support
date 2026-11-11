@@ -584,9 +584,26 @@ func (s *Service) resumable(row store.Session) (bool, error) {
 	return s.d.Exister.Exists(row.TranscriptPath), nil
 }
 
-// originalsProbeTTL is how long a "present" answer from the recorder is reused
-// by the reap sweep for the same transcript path (INV-POOL-11).
-const originalsProbeTTL = time.Hour
+// originalsProbeTTL is how long a "present" answer (a local stat or the recorder's)
+// is reused by the reap sweep for the same transcript path (INV-POOL-11). A
+// transcript that existed does not come back from the dead, and a row that is
+// not resumable is deleted in the same pass, so only positives are stored.
+const originalsProbeTTL = 24 * time.Hour
+
+// errProbeUnavailable marks a reap-time resumability probe that could not
+// answer (recorder offline, timed out, or skipped because an earlier probe in
+// the same pass already failed). It is never a verdict on the row: the caller
+// keeps the row and does not report a per-row failure.
+var errProbeUnavailable = errors.New("originals probe unavailable")
+
+// probeGate is one reap pass's availability decision for the recorder-backed
+// originals probe: the first failed probe trips it, every later unresolved row
+// is kept without another request, and the pass logs a single WARN.
+type probeGate struct {
+	down    bool
+	skipped int   // rows left unresolved, including the one that tripped the gate
+	cause   error // the first failure
+}
 
 // originalsCache is the optional Store extension that persists the last
 // "present" answer across sweeps (each sweep is its own process).
@@ -595,28 +612,59 @@ type originalsCache interface {
 	SetOriginalsConfirmed(ctx context.Context, externalID, transcriptPath string, at int64) error
 }
 
-// resumableForReap is resumable with a cross-sweep memory of positive answers: a
-// dead row whose originals the recorder confirmed present within originalsProbeTTL
-// is not asked about again. Only "present" is stored, and a probe error is
-// returned as is (never reused, never read as "gone"), so a recorder outage
-// still leaves the row alone.
-func (s *Service) resumableForReap(ctx context.Context, row store.Session, now time.Time) (bool, error) {
-	oc, ok := s.d.Store.(originalsCache)
-	if !ok || row.TranscriptPath == "" {
+// resumableForReap is resumable for the reap sweep, cheapest answer first:
+//
+//  1. a local stat of the row's own transcript path: a file that exists is
+//     resumable, with no recorder request (a positive-only shortcut; a missing
+//     file proves nothing about a path the recorder may know differently);
+//  2. the cross-sweep memory of positive answers (originalsProbeTTL);
+//  3. the recorder, once per pass until it fails: the first error trips gate and
+//     every later row returns errProbeUnavailable without a request.
+//
+// A positive answer is stored; a negative one never is. Every call is made under
+// the row's per-external_id lock, so the answer used for a delete is read there.
+// Unlike a stat, the recorder may answer "not resumable" for a transcript on disk
+// it has not ingested yet; the stat-first order now keeps such a row.
+func (s *Service) resumableForReap(ctx context.Context, row store.Session, now time.Time, gate *probeGate) (bool, error) {
+	oc, hasCache := s.d.Store.(originalsCache)
+	if row.TranscriptPath == "" {
 		return s.resumable(row)
 	}
-	if at, found, err := oc.OriginalsConfirmedAt(ctx, row.ExternalID, row.TranscriptPath); err == nil && found {
-		if age := now.Sub(time.Unix(at, 0)); age >= 0 && age < originalsProbeTTL {
-			return true, nil
+	remember := func() {
+		if !hasCache {
+			return
 		}
-	}
-	res, err := s.resumable(row)
-	if err == nil && res {
 		if serr := oc.SetOriginalsConfirmed(ctx, row.ExternalID, row.TranscriptPath, now.Unix()); serr != nil {
 			slog.Debug("ccpool: could not remember originals probe", "err", serr)
 		}
 	}
-	return res, err
+	if NewFSSessionExister().Exists(row.TranscriptPath) {
+		remember()
+		return true, nil
+	}
+	if hasCache {
+		if at, found, err := oc.OriginalsConfirmedAt(ctx, row.ExternalID, row.TranscriptPath); err == nil && found {
+			if age := now.Sub(time.Unix(at, 0)); age >= 0 && age < originalsProbeTTL {
+				return true, nil
+			}
+		}
+	}
+	if gate != nil && gate.down {
+		gate.skipped++
+		return false, errProbeUnavailable
+	}
+	res, err := s.resumable(row)
+	if err != nil {
+		if gate != nil {
+			gate.down, gate.cause = true, err
+			gate.skipped++
+		}
+		return false, fmt.Errorf("%w: %v", errProbeUnavailable, err)
+	}
+	if res {
+		remember()
+	}
+	return res, nil
 }
 
 // isFreshStarting guards the fresh-session race: a row still in `starting`

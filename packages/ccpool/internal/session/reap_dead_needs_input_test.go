@@ -28,9 +28,10 @@ func (c *mutClock) Now() time.Time { return c.t }
 type deadRow struct {
 	id       string
 	state    store.State
-	ageSec   int64 // seconds since last activity at `now`
-	live     bool  // tmux reports the session
-	closedAt int64 // pre-stamped closed_at (0 = never closed)
+	ageSec   int64  // seconds since last activity at `now`
+	live     bool   // tmux reports the session
+	closedAt int64  // pre-stamped closed_at (0 = never closed)
+	path     string // transcript path; empty means /p/<id>.jsonl
 }
 
 type deadEnv struct {
@@ -51,8 +52,12 @@ func deadFixture(t *testing.T, now time.Time, rows ...deadRow) *deadEnv {
 	t.Cleanup(func() { _ = st.Close() })
 	tm := &reapTmux{live: map[string]bool{}, closed: map[string]bool{}}
 	for _, r := range rows {
+		tpath := r.path
+		if tpath == "" {
+			tpath = "/p/" + r.id + ".jsonl"
+		}
 		if err := st.Insert(ctx, store.Session{
-			ExternalID: r.id, ClaudeSessionID: "csid-" + r.id, TranscriptPath: "/p/" + r.id + ".jsonl",
+			ExternalID: r.id, ClaudeSessionID: "csid-" + r.id, TranscriptPath: tpath,
 			State: r.state, TmuxSession: "cc-" + r.id, LastActivityAt: now.Unix() - r.ageSec,
 			ClosedAt: r.closedAt,
 		}); err != nil {

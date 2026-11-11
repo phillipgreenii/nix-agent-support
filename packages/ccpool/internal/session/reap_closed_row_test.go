@@ -131,7 +131,7 @@ func TestReapClosedRow_revalidatesUnderLock(t *testing.T) {
 		deadRow{id: "resumed", state: store.Working, ageSec: 2*sec(closedRetention) - 5, closedAt: closedAt, live: true},
 		deadRow{id: "touched", state: store.Working, ageSec: 5, closedAt: closedAt})
 	for _, id := range []string{"resumed", "touched"} {
-		if _, _, err := e.s.reapDeadRow(context.Background(), id, now, closedRetention); err != nil {
+		if _, _, err := e.s.reapDeadRow(context.Background(), id, now, closedRetention, nil); err != nil {
 			t.Fatalf("reapDeadRow %s: %v", id, err)
 		}
 		if !e.exists(t, id) {

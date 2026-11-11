@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -28,51 +27,27 @@ func (p *perPathExister) ExistsChecked(path string) (bool, error) {
 	return p.present[path], p.errs[path]
 }
 
-// One dead row whose resumability check errors must not stop the sweep: the
-// phantom beside it is still pruned, and Reap still reports the failure.
-func TestReap_oneRowCheckErrorDoesNotAbortSweep(t *testing.T) {
+// A dead row whose recorder probe errors trips the pass's availability gate: it
+// and every later unresolved row are kept (never pruned on a guess), the sweep
+// is not failed, and the rows the stat already settled are unaffected.
+func TestReap_probeErrorKeepsUnresolvedRowsWithoutFailingSweep(t *testing.T) {
 	now := time.Unix(10_000_000, 0)
 	e := deadFixture(t, now,
 		deadRow{id: "a-bad", state: store.Idle, ageSec: 600},
-		deadRow{id: "b-phantom", state: store.Idle, ageSec: 600},
-		deadRow{id: "c-kept", state: store.Idle, ageSec: 600})
-	e.s.d.Exister = &perPathExister{
-		present: map[string]bool{"/p/c-kept.jsonl": true},
-		errs:    map[string]error{"/p/a-bad.jsonl": errors.New("daemon offline")},
+		deadRow{id: "b-unasked", state: store.Idle, ageSec: 600})
+	ex := &perPathExister{
+		errs: map[string]error{"/p/a-bad.jsonl": errors.New("daemon offline")},
 	}
+	e.s.d.Exister = ex
 
-	err := e.s.Reap(context.Background(), 6, time.Hour)
-	if err == nil {
-		t.Fatal("Reap must report the failed row at the end, not return nil")
+	if err := e.s.Reap(context.Background(), 6, time.Hour); err != nil {
+		t.Fatalf("Reap = %v; a probe outage is one WARN, not a sweep failure", err)
 	}
-	if !strings.Contains(err.Error(), "a-bad") || !strings.Contains(err.Error(), "daemon offline") {
-		t.Errorf("error = %v; want it to name the failed row and its cause", err)
+	if !e.exists(t, "a-bad") || !e.exists(t, "b-unasked") {
+		t.Error("a row left unresolved by the outage was pruned")
 	}
-	if e.exists(t, "b-phantom") {
-		t.Error("phantom row after the failing one was not pruned")
-	}
-	if !e.exists(t, "a-bad") {
-		t.Error("the row whose check failed must be left alone, never pruned on a guess")
-	}
-	if !e.exists(t, "c-kept") {
-		t.Error("resumable row was removed")
-	}
-}
-
-// Several failures are all reported, not just the first.
-func TestReap_allRowFailuresAreJoined(t *testing.T) {
-	now := time.Unix(10_000_000, 0)
-	e := deadFixture(t, now,
-		deadRow{id: "x1", state: store.Idle, ageSec: 600},
-		deadRow{id: "x2", state: store.Idle, ageSec: 600})
-	boom := errors.New("daemon offline")
-	e.s.d.Exister = &perPathExister{errs: map[string]error{"/p/x1.jsonl": boom, "/p/x2.jsonl": boom}}
-	err := e.s.Reap(context.Background(), 6, time.Hour)
-	if err == nil || !strings.Contains(err.Error(), "x1") || !strings.Contains(err.Error(), "x2") {
-		t.Fatalf("error = %v; want both failed rows named", err)
-	}
-	if !errors.Is(err, boom) {
-		t.Errorf("error = %v; want it to wrap the cause", err)
+	if len(ex.asked) != 1 {
+		t.Errorf("recorder asked %d times (%v); the first failure must stop the probing", len(ex.asked), ex.asked)
 	}
 }
 

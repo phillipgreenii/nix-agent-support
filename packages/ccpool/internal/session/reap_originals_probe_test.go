@@ -86,8 +86,8 @@ func TestReapOriginalsProbe_absentAnswerIsNotRemembered(t *testing.T) {
 func TestReapOriginalsProbe_outageNeverPrunesAndIsNotCached(t *testing.T) {
 	rec := &countingRecorder{err: errors.New("daemon offline")}
 	e := probeFixture(t, rec)
-	if err := e.s.Reap(context.Background(), 6, time.Hour); err == nil {
-		t.Fatal("Reap must report the probe failure")
+	if err := e.s.Reap(context.Background(), 6, time.Hour); err != nil {
+		t.Fatalf("Reap = %v; an outage is a single WARN, not a failure", err)
 	}
 	for _, id := range []string{"a", "b"} {
 		if !e.exists(t, id) {
