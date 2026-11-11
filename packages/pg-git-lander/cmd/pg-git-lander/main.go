@@ -1,11 +1,11 @@
-// Command pg-git-lander is the lock-safe rebase and land tool. This file is
-// the compiling starting point; later packets add the command-line surface.
+// Command pg-git-lander is the lock-safe rebase and land tool.
 package main
 
 import (
-	"fmt"
 	"io"
 	"os"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/cli"
 )
 
 // Version is stamped by mkGoApp's default ldflag target (-X main.Version=...).
@@ -16,10 +16,5 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 1 && (args[0] == "--version" || args[0] == "version") {
-		fmt.Fprintf(stdout, "pg-git-lander %s\n", Version)
-		return 0
-	}
-	fmt.Fprintln(stderr, "usage: pg-git-lander --version")
-	return 2
+	return cli.Run(args, cli.Production(Version, stdout, stderr))
 }

@@ -357,17 +357,26 @@ func TestRebasePathAndOntoResolvedOnce(t *testing.T) {
 	}
 }
 
+func TestLandWithoutTargetUsesThePrimaryBranch(t *testing.T) {
+	f := newFx(t)
+	f.feature()
+	p := f.prepared(pipeline.Request{Operation: worktrees.Land, Branch: "feature/x", Dir: f.repo.Dir})
+	if p.Request.Target != f.main || p.Tips.Target == "" {
+		t.Fatalf("target = %q tips %+v, want %s", p.Request.Target, p.Tips, f.main)
+	}
+}
+
 func TestUsageErrorsTakeNoLock(t *testing.T) {
 	f := newFx(t)
 	f.feature()
 	cases := map[string]pipeline.Request{
-		"branch equals target":  {Operation: worktrees.Land, Branch: "feature/x", Target: "feature/x", Dir: f.repo.Dir},
-		"missing target":        {Operation: worktrees.Land, Branch: "feature/x", Dir: f.repo.Dir},
-		"target does not exist": {Operation: worktrees.Land, Branch: "feature/x", Target: "nope", Dir: f.repo.Dir},
-		"branch does not exist": {Operation: worktrees.Land, Branch: "nope", Target: f.main, Dir: f.repo.Dir},
-		"missing onto":          {Operation: worktrees.Rebase, Branch: "feature/x", Dir: f.repo.Dir},
-		"onto not a commit":     {Operation: worktrees.Rebase, Branch: "feature/x", Onto: "nope", Dir: f.repo.Dir},
-		"not a repository":      {Operation: worktrees.Land, Branch: "a", Target: "b", Dir: t.TempDir()},
+		"branch equals target":         {Operation: worktrees.Land, Branch: "feature/x", Target: "feature/x", Dir: f.repo.Dir},
+		"default target is the branch": {Operation: worktrees.Land, Branch: f.main, Dir: f.repo.Dir},
+		"target does not exist":        {Operation: worktrees.Land, Branch: "feature/x", Target: "nope", Dir: f.repo.Dir},
+		"branch does not exist":        {Operation: worktrees.Land, Branch: "nope", Target: f.main, Dir: f.repo.Dir},
+		"missing onto":                 {Operation: worktrees.Rebase, Branch: "feature/x", Dir: f.repo.Dir},
+		"onto not a commit":            {Operation: worktrees.Rebase, Branch: "feature/x", Onto: "nope", Dir: f.repo.Dir},
+		"not a repository":             {Operation: worktrees.Land, Branch: "a", Target: "b", Dir: t.TempDir()},
 	}
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {

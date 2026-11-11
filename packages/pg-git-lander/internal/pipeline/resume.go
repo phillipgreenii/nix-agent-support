@@ -165,6 +165,10 @@ func Resume(ctx context.Context, d Deps, req ResumeRequest) (*outcome.Outcome, e
 		return nil, err
 	}
 
+	if d.Wait != nil {
+		rs.pre.Lock.Wait = *d.Wait
+	}
+
 	// The checks that need no lock.
 	found, err := FindStopped(ctx, d, req.Dir, req.Branch)
 	if err != nil {
@@ -1039,3 +1043,7 @@ func adminOf(rec locks.Record, path string) string {
 	}
 	return ""
 }
+
+// LayerFor is a lock layer over dir with the lock defaults, for the callers
+// that only read records (the log pruning, status).
+func LayerFor(d Deps, dir string) *locks.Layer { return d.layer(dir, locks.Config{}) }

@@ -61,6 +61,9 @@ type Deps struct {
 	// nil is os.Chdir. Tests that must not move the test process inject a
 	// no-op.
 	Chdir func(string) error
+	// Wait, when non-nil, replaces the configured lock.wait for this
+	// invocation (the --wait flag).
+	Wait *time.Duration
 }
 
 // Request is one operation, with its flags already resolved against the PGL_*
@@ -342,8 +345,6 @@ func (s *session) run(ctx context.Context) (*Result, error) {
 		return s.usage("unknown operation %q", req.Operation), nil
 	case req.Branch == "":
 		return s.usage("BRANCH is required"), nil
-	case req.Operation == worktrees.Land && req.Target == "":
-		return s.usage("land needs a TARGET (BRANCH is %s)", req.Branch), nil
 	case req.Operation == worktrees.Land && req.Branch == req.Target:
 		return s.usage("BRANCH and TARGET are both %s", req.Branch), nil
 	case req.Operation == worktrees.Rebase && req.Onto == "":
@@ -368,6 +369,17 @@ func (s *session) run(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 	p.Pre, p.Repo = s.pre, s.pre.Repo
+	if s.d.Wait != nil {
+		s.pre.Lock.Wait = *s.d.Wait
+	}
+	if req.Operation == worktrees.Land && req.Target == "" {
+		// TARGET defaults to the repo's primary branch (design section 4).
+		req.Target = s.pre.ResolvePrimary(ctx)
+		s.req, p.Request = req, req
+		if req.Branch == req.Target {
+			return s.usage("BRANCH and TARGET are both %s (the primary branch); name the other with --into", req.Branch), nil
+		}
+	}
 
 	if _, ok := s.resolve(ctx, "refs/heads/"+req.Branch); !ok {
 		return s.usage("BRANCH %s does not exist", req.Branch), nil
