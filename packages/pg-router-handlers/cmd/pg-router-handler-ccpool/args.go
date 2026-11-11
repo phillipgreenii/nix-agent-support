@@ -40,11 +40,9 @@ Subcommands:
                  outcome ok. --config as for dispatch.
   preShutdown   INTF-HANDLER: called by core at shutdown. Reads the
                  handler.preShutdown request on stdin (its role object is
-                 required but not decoded) and runs the global shutdown
-                 teardown: sessions actively working or still supervised are
-                 spared; the rest of this handler's sessions are closed and
-                 their worktrees removed. Replies outcome ok. --config as for
-                 dispatch.
+                 required but not decoded) and replies outcome ok at once,
+                 touching no session, bead or worktree: cleanup runs on the
+                 janitor and on dispatch. --config is accepted and unused.
   register      outbound manager contract: register this participant with a
                  running pg-router core (--socket/--token or
                  PG_ROUTER_SOCKET/PG_ROUTER_TOKEN; --id, --self

@@ -87,7 +87,7 @@ func TestCloseSinglePhase_pathIsolationNonGitCwdRemovesNothing(t *testing.T) {
 // NOTHING: not the worktree (dirty or not), not its branch. Proven against real
 // git for both teardown shapes: the single-phase purge (a cwd outside the
 // handler's worktree directory) and the two-phase purge (a cwd under it), through
-// closeSession, finishPurge (the purge_pending retry) and the shutdown sweep.
+// closeSession, finishPurge (the purge_pending retry) and the closed-bead reconcile.
 func TestTeardown_beadWorktreeSessionNeverRemovesTheFoundWorktree(t *testing.T) {
 	for _, where := range []string{"outside the handler's worktree dir", "inside the handler's worktree dir"} {
 		for _, keep := range []bool{true, false} {
@@ -144,9 +144,9 @@ func TestTeardown_beadWorktreeSessionNeverRemovesTheFoundWorktree(t *testing.T) 
 	}
 }
 
-// The purge_pending retry (finishPurge) and the shutdown sweep honour the same
+// The purge_pending retry (finishPurge) and the closed-bead reconcile honour the same
 // marker.
-func TestTeardown_beadWorktreeMarkerHonouredByFinishPurgeAndShutdownSweep(t *testing.T) {
+func TestTeardown_beadWorktreeMarkerHonouredByFinishPurgeAndClosedBeadReconcile(t *testing.T) {
 	h := newSweepHarness(t)
 	dir := filepath.Join(h.wtDir, "bead-2") // under the worktree dir: the shape that is eligible for removal
 	if out, err := h.client(h.repo).Run(t.Context(), "worktree", "add", "-b", "drain/bead-2", dir); err != nil {
@@ -168,11 +168,11 @@ func TestTeardown_beadWorktreeMarkerHonouredByFinishPurgeAndShutdownSweep(t *tes
 
 	s.Meta = map[string]string{ccpool.MetaKeyBead: "bead-2", ccpool.MetaKeyKeepWorktree: "1"}
 	cc = &fakeCC{ListSeq: [][]ccpool.Session{{s}}}
-	if n := teardownAllSessions(t.Context(), cc, h.opener, &orphanBD{}, "pg-router-", h.repo, h.wtDir); n != 1 {
-		t.Fatalf("shutdown sweep closed %d, want 1", n)
+	if n := reconcileClosedBeadSessions(t.Context(), cc, h.opener, fakeBR{out: map[string]string{"show bead-2 --json": `{"status":"closed"}`}}, "pg-router-", h.repo, h.wtDir, nil); n != 1 {
+		t.Fatalf("closed-bead reconcile closed %d, want 1", n)
 	}
 	if _, err := os.Stat(dir); err != nil {
-		t.Errorf("the shutdown sweep must leave the worktree: %v", err)
+		t.Errorf("the closed-bead reconcile must leave the worktree: %v", err)
 	}
 	if ok, err := h.client(h.repo).RefExists(t.Context(), "refs/heads/drain/bead-2"); err != nil || !ok {
 		t.Errorf("branch drain/bead-2 must survive: %v", err)

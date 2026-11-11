@@ -81,22 +81,19 @@ crosses the line is named here, mirroring `packages/pa-monitor/docs/behavior/int
 treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a citation).
 
 - **`INTF-CCH-CCPOOL`** <!-- uuid: d1fc9c42-5d04-4df3-bfb1-a11cc97d668d --> — a ccpool-backed
-  handler session's crossing into the `ccpool` CLI to start, observe, and reap an agent session,
-  PLUS (pg2-oju6w.15) this module's own `preShutdown` hook sweeping the prefix-matching sessions
-  of the daemon's default pool — not scoped to one dispatch — the once-per-process-lifetime
-  relocation of a sweep pg-router's own core used to run directly against `ccpool` before this
-  module existed. **Counterparty:** `ccpool` (boundary; `packages/ccpool/docs/behavior` owns its
+  handler session's crossing into the `ccpool` CLI to start, observe, and reap an agent session.
+  This module's `preShutdown` hook makes NO ccpool crossing: it answers at once (`INV-CCH-14`), and
+  the session cleanup that once ran there runs on the janitor (`INV-CCH-41`) and on dispatch.
+  **Counterparty:** `ccpool` (boundary; `packages/ccpool/docs/behavior` owns its
   internals). **Initiator:** this module. **Multiplicity:** one per ccpool-backed handler session
   for the per-dispatch crossing, plus one lease write per poll interval for as long as that
-  dispatch runs and one role-scoped orphan reconcile per dispatch; one sweep per daemon shutdown
-  (the core delivers `preShutdown` to the first enabled role's handler only, so the sweep is not
-  repeated per role); and one janitor run per schedule interval (`INV-CCH-41`), which reconciles
+  dispatch runs and one role-scoped orphan reconcile per dispatch; none per daemon shutdown; and
+  one janitor run per schedule interval (`INV-CCH-41`), which reconciles
   every pool and every ccpool role, plus at most one closed-bead reconcile in a dispatch that finds
   its pool full.
-  The `preShutdown` sweep MUST spare every actively working session (`INV-CCH-14`): it purges only
-  sessions closable for another reason (turn ended, or `needs_input` with its bead already closed)
-  and leaves a working session and its worktree untouched. It lists only the default pool; a
-  session in a role's own pool is outside it.
+  A daemon shutdown MUST NOT close, purge or touch any session or worktree (`INV-CCH-14`); the
+  passes that do (the janitor's closed-bead close, the orphan reconcile and the `purge_pending`
+  retry) MUST spare every actively working session and leave its worktree untouched.
   Each dispatch launches a fresh session of its own; it waits on an existing session instead only
   when that session's turn for the same event is still in progress, it declines while any other
   attempt for the bead and role is in flight, it closes a leftover `starting` or `ready` session
@@ -121,7 +118,7 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   A session in a per-bead linked worktree is torn down in two phases (`INV-CCH-20`): this module
   closes it without purging, removes the worktree and its anchor branch, and only then purges the
   record, so a removal interrupted midway leaves a record the next reconcile of the same pool
-  retries (one per closed-bead reconcile; for the default pool, the shutdown sweep too) rather than a worktree
+  retries (one per closed-bead reconcile) rather than a worktree
   no record leads to. While such a teardown is unfinished, the record is never absorbed
   (`INV-CCH-30`). This marking is a `ccpool` metadata write, never a `ccpool` label.
   The worktree removal itself is paced (`INV-CCH-20`): the tree is renamed into a `.trash` directory

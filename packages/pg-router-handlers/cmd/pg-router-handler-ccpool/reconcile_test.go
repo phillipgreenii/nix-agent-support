@@ -108,7 +108,7 @@ func TestReconcileClosedBeadSessions_leavesOpenBeadSessionAlone(t *testing.T) {
 
 // TestReconcileClosedBeadSessions_leavesUntaggedSessionAlone covers a session
 // with no pgrouter.bead metadata at all — beadAlreadyClosed fails closed
-// (preserve), matching closeUnlessNeedsInput's own posture.
+// (preserve), matching the removed shutdown sweep's own posture.
 func TestReconcileClosedBeadSessions_leavesUntaggedSessionAlone(t *testing.T) {
 	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
 		{ExternalID: "pg-router-worker-zr-untagged", State: ccpool.StateIdle},
@@ -177,7 +177,7 @@ func TestReconcileClosedBeadSessions_ignoresNonMatchingPrefix(t *testing.T) {
 
 // TestReconcileClosedBeadSessions_removesWorktreeOfClosedSession proves the
 // closed session's own worktree is best-effort removed via
-// closeSessionAndWorktree, mirroring teardownAllSessions's own behavior.
+// closeSessionAndWorktree, mirroring the removed shutdown sweep's own behavior.
 func TestReconcileClosedBeadSessions_removesWorktreeOfClosedSession(t *testing.T) {
 	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
 		{
@@ -201,7 +201,7 @@ func TestReconcileClosedBeadSessions_removesWorktreeOfClosedSession(t *testing.T
 // TestReconcileClosedBeadSessions_deletesAnchorBranch proves repoRoot is
 // threaded all the way through to closeSessionAndWorktree's own
 // branch-delete step (bead pg2-ci75j via pg2-tpa18) from THIS call site too
-// — not just teardownAllSessions's — since closeSessionAndWorktree is
+// — not just the removed shutdown sweep's — since closeSessionAndWorktree is
 // shared verbatim between preshutdown.go's shutdown-time sweep and this
 // periodic reconciliation.
 func TestReconcileClosedBeadSessions_deletesAnchorBranch(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 // session that is StateWorking (or any other state), and never a session
 // whose bead is still open (or whose bead status could not be determined;
 // beadAlreadyClosed fails closed) — pg2-hrppg's fix for the gap
-// teardownAllSessions/closeUnlessNeedsInput (preshutdown.go) deliberately
+// the removed shutdown sweep (preshutdown.go) deliberately
 // left open: that sweep only ever runs ONCE, at daemon shutdown
 // (args.go/run.go's own "once-per-process-lifetime" framing), so a
 // needs_input or idle session whose bead closed while the daemon kept
@@ -70,11 +70,11 @@ import (
 // Reuses closeSessionAndWorktree and beadAlreadyClosed (preshutdown.go) for
 // the actual purge (worktree removal AND its own pg-router/<beadID> anchor
 // branch delete, bead pg2-ci75j via pg2-tpa18) and the bead-status check
-// respectively — the SAME fail-closed bd lookup teardownAllSessions's own
+// respectively — the SAME fail-closed bd lookup the removed shutdown sweep's own
 // shutdown-time sweep already uses. Returns the number of sessions actually
 // closed.
 //
-// Deliberately different from closeUnlessNeedsInput's own shutdown-time
+// Deliberately different from the removed shutdown sweep's
 // decision: that sweep also spares actively working sessions (pg2-hwt7v) but
 // purges errored sessions and any idle/needs_input one at shutdown. Here the
 // daemon keeps running, so a session actively working a turn, or in a
@@ -184,7 +184,7 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 // StateNeedsInput only (pg2-hrppg's Ask). StateWorking is never reconciled
 // regardless of bead status (a live in-flight dispatch, not an orphan); nor
 // is StateStarting/StateReady/StateErrored — this sweep runs continuously
-// while the daemon is up, unlike the once-per-shutdown teardownAllSessions,
+// while the daemon is up, unlike the (removed) shutdown sweep,
 // so it must never race a session that might still be doing something.
 func reconcilableState(s ccpool.SessionState) bool {
 	return s == ccpool.StateIdle || s == ccpool.StateNeedsInput

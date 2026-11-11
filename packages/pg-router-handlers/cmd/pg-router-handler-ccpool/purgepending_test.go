@@ -113,18 +113,6 @@ func TestCloseSession_twoPhaseOrder(t *testing.T) {
 	}
 }
 
-// The shutdown sweep takes the same order.
-func TestTeardownAllSessions_twoPhaseOrder(t *testing.T) {
-	e := newTPEnv(t)
-	e.removingWorktree()
-	e.cc.ListSeq = [][]ccpool.Session{{e.session}}
-	n := teardownAllSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir)
-	if n != 1 {
-		t.Fatalf("teardownAllSessions = %d, want 1", n)
-	}
-	e.wantLog(e.twoPhaseLog()...)
-}
-
 // So does the dispatch-time closed-bead reconcile.
 func TestReconcileClosedBeadSessions_twoPhaseOrder(t *testing.T) {
 	e := newTPEnv(t)
@@ -588,23 +576,6 @@ func TestReconcile_skippedMarkedRowIsNotHandledByClosedBeadBranch(t *testing.T) 
 		t.Fatalf("reconcile = %d, want 0", n)
 	}
 	e.wantLog()
-}
-
-// The shutdown sweep finishes a marked row instead of re-deciding it.
-func TestTeardownAllSessions_retriesMarkedRow(t *testing.T) {
-	e := newTPEnv(t)
-	e.removingWorktree()
-	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil)}}
-	n := teardownAllSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir)
-	if n != 1 {
-		t.Fatalf("teardownAllSessions = %d, want 1", n)
-	}
-	e.wantLog(
-		e.attemptLog("1"),
-		"RemoveWorktree:"+e.cwd,
-		"DeleteBranch:pg-router/"+tpBead,
-		"Close:"+tpID+":purge=true",
-	)
 }
 
 // The orphan pass skips a marked row even when its lease has expired.

@@ -270,32 +270,31 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   opts in to the `split-triage` dispatch precheck of `INV-CCH-22`, so a moot or
   human-labelled bead launches no session.
 - **`INV-CCH-14`** <!-- uuid: 9f2a7d86-926a-41ac-8c26-851e459c40b0 --> — when the daemon shuts down (this module's `preShutdown` hook), the handler
-  MUST SPARE every session that is actively working: a session in `starting`, `ready`, or
-  `working` is left alive, and its worktree and anchor branch are left untouched, even if its bead
-  has already closed. Only a session closable for another reason is purged (with its worktree and
-  anchor branch): one whose turn has ended (`idle`, `errored`), or one in `needs_input` whose bead
-  is already closed. A `needs_input` session whose bead is still open, or whose bead status cannot
-  be determined, is also preserved (so a person can still attach). A purged session's worktree
-  MUST be kept when a spared session still uses the same directory (a per-bead worktree is shared
-  by every role's session for that bead). The sweep MUST also spare an OPEN session whose
-  supervision lease (`INV-CCH-18`) has not expired, whatever its state, because its handler is still
-  running (a dispatch of a ccpool-backed role outlives a daemon restart, see below), so closing the
-  session would pull it out from under that handler; a session with no lease, an expired lease, or
-  a close reason set is not spared by this rule, and a spared session's worktree is kept like any
-  other spared session's. A session mid-launch is spared by its state, not by a lease: it is
-  `starting` from the moment its row is created (and a resumed one is flipped to `starting` before
-  it launches), `ready` once launched, and both are spared whether or not it carries a lease, so
-  the sweep cannot purge a launch in progress (bead `pg2-7139f`). The shutdown sweep lists only the daemon's default
-  `ccpool` pool: a session in a role's own dedicated pool is outside it, neither purged nor spared
-  by shutdown, and is bounded only by the mechanisms below. Operator ruling (Phillip, 2026-09-30,
-  bead `pg2-hwt7v`), superseding the earlier behavior of closing working sessions and
-  force-removing their worktrees.
+  MUST answer at once and MUST NOT list, close, purge or reconcile any session, look up any bead,
+  remove any worktree or anchor branch, or start any process: a shutdown leaves every session,
+  worktree and anchor branch exactly as it found them. The hook used to run a global sweep, which
+  was the largest fixed cost of a stop with nothing in flight and spent the shutdown budget; its
+  passes (the `purge_pending` retry, the closed-bead close, the orphan reconcile) run in the janitor
+  (`INV-CCH-41`) and on dispatch instead, and nothing about a session is lost by deferring them to
+  the next run. The rules that spared a session at shutdown now govern those passes, which MUST
+  hold them: a session that is actively working (`starting`, `ready`, `working`) is never closed,
+  its worktree and anchor branch are untouched, even if its bead has already closed (operator
+  ruling, Phillip, 2026-09-30: "spare working sessions entirely"); a closed-bead close applies only
+  to a session whose turn has ended (`idle`, or `needs_input` with its bead already closed), and a
+  `needs_input` session whose bead is still open, or whose bead status cannot be determined, is
+  preserved so a person can still attach; a closed session's worktree MUST be kept when a live
+  peer session still uses the same directory (a per-bead worktree is shared by every role's session
+  for that bead); and a session whose supervision lease (`INV-CCH-18`) has not expired is left to
+  its handler, because a dispatch of a ccpool-backed role outlives a daemon restart (see below).
+  A session mid-launch is protected by its state, not by a lease: it is `starting` from the moment
+  its row is created (and a resumed one is flipped to `starting` before it launches), `ready` once
+  launched.
   - **What bounds a spared session after the daemon exits.** Sparing leaves a deliberate, bounded
     leak. (a) The closed-bead reconcile purges it, worktree included, once its turn has ended
     (`idle` or `needs_input`) and its bead is closed. It runs in the janitor (`INV-CCH-41`), once
     per pool per run, and in a dispatch that finds its pool full (capacity pressure,
-    `INV-CCH-41`); it no longer runs before every dispatch. The next shutdown sweep does too, but
-    only for a session in the default pool. This is the only bound for a session parked in `needs_input` with an open bead, which
+    `INV-CCH-41`); it no longer runs before every dispatch. A daemon shutdown does not run it.
+    This is the only bound for a session parked in `needs_input` with an open bead, which
     waits for a person by design (a drain session, supervised, is also bounded by `INV-CCH-29`). (b) `ccpool`'s own reaper closes any live session that is not in
     `needs_input` once its last activity is older than `idle_ttl`, and evicts `idle`/`errored`
     sessions over `max_sessions` (never `starting`/`ready`/`working`); both stamp a close reason
@@ -347,7 +346,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   worktrees); a fresh read shows the row present, not yet closed by anyone, and `idle` or
   `errored`. A `needs_input` session (`phillipgreenii-nix-agent-support` ADR 0037), a session still starting, ready or working, a session already closed (the budget-stop
   watchdog, an external idle-timeout, eviction or operator close), and any dispatch ended by daemon
-  shutdown are exempt; the shutdown sweep owns that teardown. A session that is not yet quiet is
+  shutdown are exempt; the closed-bead reconcile owns that teardown. A session that is not yet quiet is
   left open and the deferral is logged. A failed close MUST NOT change the dispatch's outcome; it
   is logged and the session is left to the closed-bead reconcile (`INV-CCH-41`) and `ccpool`'s idle
   timeout. A settled session's row, whether
@@ -569,8 +568,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   session is still live (a live one that is not `starting`, `ready` or `working` is closed again
   first), and that record MUST be neither closed again as a closed-bead session (`INV-CCH-14`'s
   closed-bead reconcile) nor reclaimed as an orphan (`INV-CCH-18`) in the same pass. The
-  default pool's record is also retried by the next shutdown sweep. Bound: the next closed-bead
-  reconcile of the same pool, or for the default pool also the next shutdown; a record with no
+  Bound: the next closed-bead
+  reconcile of the same pool; a record with no
   transcript can be pruned by the pool's own reaper first. Not covered, accepted: the retry removes
   one worktree per reconcile, so a backlog drains over several runs. Bead `pg2-kqegi`; closes the gap in
   which a purge-first teardown left a half-removed worktree no record led to (`pg2-me0t1`).
@@ -1429,7 +1428,7 @@ changes a core gate or `INV-LIFE-2`.
       once.
     - **Nothing is created, changed or removed.** The type MUST NOT create, reset, clean or remove
       anything, and a dispatch ends leaving the found worktree, its branch and its uncommitted files
-      exactly as they were. Because every teardown path (the shutdown sweep, the closed-bead and
+      exactly as they were. Because every teardown path (the closed-bead and
       stale-session reconciles, the `purge_pending` retry, `INV-CCH-20`) runs for sessions of every role
       without knowing the role's isolation, the type is stamped on the session row at dispatch
       (`pgrouter.keep_worktree`); a row carrying it is purged and its directory is never removed, even

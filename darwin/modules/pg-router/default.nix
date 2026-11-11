@@ -184,7 +184,7 @@ in
           # cmd/pg-router/run.go) BEFORE the sweep, so the budget is
           # drain (20s) + the 30s sweep allowance above + the 5s
           # inFlightDrainTimeout tail = 55s, leaving 5s margin. Keep in step
-          # with those. The sweep is now bounded at 22s (preShutdownTimeout)
+          # with those. The preShutdown hooks are now bounded at 5s (preShutdownTimeout)
           # and an overall watchdog (shutdownWatchdogDeadline, 53s) logs
           # shutdown_overrun and exits 10 before launchd's SIGKILL; keep that
           # deadline at ExitTimeOut minus 7s.

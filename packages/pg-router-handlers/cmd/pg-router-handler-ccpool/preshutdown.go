@@ -8,8 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
@@ -21,296 +19,53 @@ import (
 	"github.com/phillipgreenii/x/gitclient"
 )
 
-// runPreShutdown implements the `preShutdown` INTF-HANDLER subcommand
-// (pg2-oju6w.15): called at daemon shutdown, at the same point pg-router's own
-// core used to call the now-deleted Orchestrator.TeardownAll. The request
-// carries the role object like every other request (the request is rejected
-// without a usable one), but the sweep it triggers is GLOBAL: it matches on
-// SessionPrefix only, with no per-role scoping in ccpool.Session, so the role's
-// config is deliberately not decoded and the result is the same whichever role
-// the call names.
+// runPreShutdown implements the `preShutdown` INTF-HANDLER subcommand. It
+// answers at once and touches nothing: no ccpool call, no bd call, no git
+// call, no launch config read, no spawned process.
 //
-// Core calls a new-path adapter's preShutdown once per distinct handler, through
-// the first enabled role that names it (the routing record of pg2-12gr4.10.1,
-// which keeps the pg2-asr8z dedup: a repeated sweep ate launchd's ExitTimeOut).
-// The sweep is idempotent anyway, so a second call is slow but harmless.
+// Core calls it at daemon shutdown, once per distinct handler. It used to run
+// a global sweep that listed every session, looked up beads and closed
+// sessions and worktrees, which was the largest fixed cost of a stop with
+// nothing in flight and ate the launchd ExitTimeOut budget. Nothing is lost by
+// dropping it: the same passes (the purge_pending retry, the closed-bead
+// reconcile, the default-pool stale pass, the orphan reconcile) run on the
+// scheduled janitor (INV-CCH-41) and on dispatch, and a session spared at
+// shutdown is already outlived by the daemon. A detached janitor run from here
+// was rejected: the janitor is single-flight and scheduled, so a spawn would
+// only race the next scheduled run, and a child that outlives the daemon is
+// the shape the shutdown budget exists to avoid.
 //
-// The role is never read from a file or flag: it comes from stdin.
-// --config (or PG_ROUTER_CCPOOL_HANDLER_CONFIG) names the handler-wide launch
-// config JSON.
+// The request still carries the role object like every other request and is
+// rejected without a usable one; the role is not decoded.
 func runPreShutdown(args []string) int {
 	fs := flag.NewFlagSet("preShutdown", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
+	// --config is still accepted (the core passes the handler's launch flags to
+	// every subcommand) but is not read.
+	_ = fs.String("config", os.Getenv(rolefile.EnvConfig), "unused: preShutdown reads no launch config")
 	if exit, done := parseFlags("preShutdown", fs, args); done {
 		return exit
 	}
-	return servePreShutdown(context.Background(), os.Stdin, os.Stdout, *cfgPath, func(cfgPath string) (ccpool.Runner, beads.Runner, string, string, string, error) {
-		cfg, err := rolefile.LoadConfig(cfgPath)
-		if err != nil {
-			return nil, nil, "", "", "", err
-		}
-		useRemoveTimeout(cfg)
-		return ccpool.NewCLIRunner(cfg), beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, nil
-	}, worktree.GitOpener)
+	return servePreShutdown(os.Stdin, os.Stdout)
 }
 
-// shutdownDeps resolves the seams the shutdown sweep needs from the launch
-// config path: the default-pool ccpool runner, the bd runner, the session
-// prefix, the repo root and the worktree directory.
-type shutdownDeps func(cfgPath string) (cc ccpool.Runner, br beads.Runner, prefix, repoRoot, worktreeDir string, err error)
-
-// servePreShutdown is runPreShutdown's testable core: a test passes fake seams
-// through mkDeps and open and captures the reply, keeping ccpool, bd and git off
-// the machine. A request that fails the schema or has no usable role gets an
-// error reply and no sweep; a launch config that cannot be loaded gets an error
-// reply and exit 1.
-func servePreShutdown(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPath string, mkDeps shutdownDeps, open worktree.Opener) int {
+// servePreShutdown is runPreShutdown's testable core. A request that fails the
+// schema or has no usable role gets an error reply; any other request gets an
+// ok reply with no side effect.
+func servePreShutdown(stdin io.Reader, stdout io.Writer) int {
 	raw, _, exit, ok := readRequest("preShutdown", "handler.preShutdown", stdin, stdout)
 	if !ok {
 		return exit
 	}
 	var req wire.LifecycleRequest
 	_ = json.Unmarshal(raw, &req)
-
-	cc, br, prefix, repoRoot, worktreeDir, err := mkDeps(cfgPath)
-	if err != nil {
-		return failLifecycle("preShutdown", stdout, err.Error())
-	}
-	closed := teardownAllSessions(ctx, cc, open, br, prefix, repoRoot, worktreeDir)
-	slog.Info("preShutdown: teardown", "closed", closed)
-
+	slog.Info("preShutdown: nothing to do; session cleanup runs on the janitor")
 	wire.WriteReply(stdout, map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"id":            req.ID,
 		"outcome":       "ok",
 	})
 	return conformance.ExitOK
-}
-
-// teardownAllSessions closes every session whose name carries prefix — this
-// process's own sessions and strays left by a crashed prior run — EXCEPT two
-// groups that are SPARED (left alive, worktree and anchor branch untouched):
-//
-//   - sessions that are actively working (starting / ready / working; see
-//     sparedAtShutdown). Operator ruling (Phillip, 2026-09-30, bead
-//     pg2-hwt7v), superseding the earlier "close everything, force-remove
-//     worktrees" behavior: a daemon restart is not a reason to kill an
-//     in-flight turn, and removing its worktree out from under it destroyed
-//     uncommitted work. Such a session is spared even if its bead has
-//     already closed -- it is mid-turn, and it becomes closable on its own
-//     terms once the turn ends (see "What bounds leaked sessions" below).
-//   - sessions in needs_input WHOSE BEAD IS STILL OPEN, preserved so the
-//     operator can still `ccpool attach` after the pass. A needs_input
-//     session whose own bead has ALREADY been closed is reconciled like any
-//     other closable session (closeUnlessNeedsInput's own doc comment;
-//     pg2-5sirm).
-//
-// For every session it does close, it also best-effort removes that session's
-// own worktree (s.CWD) via open, undoing internal/worktree.Ensure's creation
-// side (pg2-a8h6c — the short-term stopgap; the full redesign is pg2-4roho)
-// -- EXCEPT when a spared peer session still uses the same directory
-// (worktreeHeldBySparedPeer): a per-bead worktree is keyed by bead id alone,
-// so every role's session for one bead shares it. Sessions outside the
-// prefix are left untouched. Returns the number actually closed.
-//
-// What bounds leaked sessions after the daemon exits (pg2-hwt7v): a spared
-// session outlives the daemon, so it is a deliberate leak. It is bounded by
-// the mechanisms below (ADR 0072, ADR 0037, ADR 0083).
-//
-// This sweep lists only the daemon's DEFAULT ccpool pool (runPreShutdown
-// builds a plain ccpool.NewCLIRunner(cfg), no role pool): a session in a
-// role's own dedicated pool (review/worker/feedback) is outside it, neither
-// purged nor spared by shutdown, so the bounds below are what apply there.
-//
-//  1. Next-dispatch reconcile. The next dispatch's reconcileClosedBeadSessions
-//     (reconcile.go), run against the dispatching role's own pool, purges a
-//     spared session once its turn has ended (idle/needs_input) AND its bead
-//     is closed, worktree and anchor branch included, transcript-quiet
-//     guarded -- as soon as new work arrives for that role; the next shutdown
-//     sweep purges it too, but only in the default pool. This is the ONLY
-//     bound for a session that parks in needs_input (ccpool's reaper exempts
-//     needs_input rows, ADR 0037) with an open bead: it waits for the
-//     operator, by design.
-//  2. ccpool's own reaper (packages/ccpool, ADR 0072). Pass 1 closes any
-//     live non-needs_input session whose last_activity_at is older than
-//     idle_ttl -- a hung working row included -- and Pass 2 evicts
-//     idle/errored rows (never starting/ready/working) over max_sessions;
-//     both stamp close_reason. A spared session whose turn ends idle with
-//     its bead still open is therefore reclaimed by ccpool after idle_ttl.
-//  3. Pool capacity (INV-CCH-6). Spared starting/ready/working rows count
-//     toward max_sessions, so the next daemon cannot launch past the cap while
-//     they run; the leak cannot grow the pool beyond the cap.
-//  4. The supervision lease (pg2-g2u9m, INV-CCH-18, ADR 0083). A ccpool-backed
-//     dispatch is NOT cancelled by a daemon restart (pg2-dtigc, ADR 0085), so
-//     its handler normally keeps refreshing pgrouter.lease_until, the next
-//     daemon re-offers the event and the redelivered dispatch absorbs the live
-//     session. Only a handler that died anyway stops refreshing: its lease then
-//     expires and the next dispatch of the same role (reconcileOrphanSessions,
-//     orphan.go) closes an idle orphan and releases its bead claim, or
-//     enforces a working orphan's time budget from its launch time. Until then
-//     the session runs unsupervised; an orphan is handled only when its OWN
-//     role next dispatches. An OPEN session whose lease has NOT expired is
-//     spared by this sweep too (supervisedAtShutdown), whatever its state.
-//
-// Two-phase teardown (bead pg2-kqegi, INV-CCH-20): a session in a per-bead
-// linked worktree is purged only after its worktree is removed (closeSession). A
-// row an earlier pass or process left marked purge_pending (an interrupted
-// removal) is finished by this sweep too (retryPurgePending, purgepending.go),
-// which is the default pool's second bound next to the dispatch-time reconcile.
-//
-// This is the once-per-process-lifetime sweep half of this module's
-// INTF-CCH-CCPOOL boundary crossing (docs/behavior/interfaces.md) — not
-// scoped to one dispatch, unlike internal/ccpool's own per-dispatch
-// start/observe/reap half.
-//
-// Ported from packages/pg-router's own (now-deleted)
-// Orchestrator.teardownAll — this module's own local re-implementation, not
-// an import (Go's internal-package visibility rule; docs/adr/0065's
-// Addendum), since that package no longer exists in this module. No longer
-// verbatim: pg2-hwt7v added the spare-active rule above.
-func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string) (closed int) {
-	sessions, err := cc.List(ctx)
-	if err != nil {
-		slog.Warn("preShutdown: teardown list failed", "err", err)
-		return 0
-	}
-	for _, s := range sessions {
-		if !strings.HasPrefix(s.ExternalID, prefix) {
-			continue
-		}
-		if s.PurgePending() {
-			// A two-phase teardown an earlier pass or process left unfinished
-			// (INV-CCH-20): finish it here instead of re-deciding the session.
-			if purged, _ := retryPurgePending(ctx, cc, open, repoRoot, worktreeDir, nil, sessions, s); purged {
-				closed++
-			}
-			continue
-		}
-		if closeUnlessNeedsInput(ctx, cc, open, br, repoRoot, worktreeDir, s, worktreeHeldBySparedPeer(sessions, s)) {
-			closed++
-		}
-	}
-	return closed
-}
-
-// sparedAtShutdown reports whether a session in state is ACTIVELY WORKING
-// and so must be spared entirely by the shutdown sweep (pg2-hwt7v): starting
-// (launch in flight), ready (awaiting its prompt), or working (mid-turn).
-// idle (turn ended), errored, needs_input (decided by its bead's status,
-// closeUnlessNeedsInput) and an unrecognized/empty state are NOT active and
-// stay closable. Liveness (ccpool.Session.Live) is deliberately NOT
-// consulted: this sweep fails toward preservation, and a row whose tmux
-// session briefly looks dead is reclaimed later by the bounds listed on
-// teardownAllSessions.
-func sparedAtShutdown(state ccpool.SessionState) bool {
-	switch state {
-	case ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking:
-		return true
-	}
-	return false
-}
-
-// supervisedAtShutdown reports whether s is still supervised by a LIVE handler
-// and so must be spared by the shutdown sweep whatever its state (bead
-// pg2-dtigc, ADR 0085): a ccpool-backed dispatch outlives the daemon that
-// started it, and while its handler runs it refreshes the supervision lease
-// (INV-CCH-18) every poll. An OPEN row whose lease has not expired is therefore
-// in the hands of a running handler -- including one whose turn has just ended
-// (idle) and which is still in its settle step (worktree cleanup, settled-
-// session close). Closing it here would pull the session out from under that
-// handler. A row with no lease (an older build), an expired lease (its handler
-// is gone: the dispatch-time orphan reconcile owns it) or a close reason set
-// (nothing left to supervise) is NOT spared by this rule.
-func supervisedAtShutdown(s ccpool.Session, now time.Time) bool {
-	if s.CloseReason != "" {
-		return false
-	}
-	until, ok := s.LeaseUntil()
-	return ok && until.After(now)
-}
-
-// sparedSession is the shutdown sweep's whole spare test for the working-state
-// and lease rules (needs_input is decided separately, by its bead).
-func sparedSession(s ccpool.Session) bool {
-	return sparedAtShutdown(s.State) || supervisedAtShutdown(s, time.Now())
-}
-
-// worktreeHeldBySparedPeer reports whether another session in sessions that
-// the shutdown sweep SPARES (sparedAtShutdown) still uses s's working
-// directory. A per-bead worktree path is keyed by bead id alone
-// (worktree.Ensure), so purging one idle session must not delete the
-// directory out from under a spared working peer of the same bead
-// (pg2-u3t04 / pg2-aqpqx, applied at shutdown). A peer that is itself being
-// purged does not protect the worktree: the same sweep reclaims it.
-func worktreeHeldBySparedPeer(sessions []ccpool.Session, s ccpool.Session) bool {
-	if s.CWD == "" {
-		return false
-	}
-	for _, o := range sessions {
-		if o.ExternalID != s.ExternalID && o.SharesCheckout(s) && sparedSession(o) {
-			return true
-		}
-	}
-	return false
-}
-
-// closeUnlessNeedsInput tears down one session UNLESS it must be spared, in
-// which case it is left alive with its worktree untouched. Returns true iff
-// the session was actually closed (purged). Two spare rules, checked in
-// order:
-//
-//  1. ACTIVELY WORKING (sparedAtShutdown: starting / ready / working) --
-//     spared unconditionally, bead status not consulted (pg2-hwt7v; operator
-//     ruling, Phillip, 2026-09-30: "spare working sessions entirely").
-//     No cc.Close, no worktree removal, no anchor-branch delete.
-//  2. needs_input WHOSE BEAD IS STILL OPEN -- preserved so the operator can
-//     still `ccpool attach <external_id>`.
-//
-// keepWorktree is passed through to closeSession when the session IS closed:
-// true leaves its worktree and anchor branch in place because a spared peer
-// still uses the same directory (worktreeHeldBySparedPeer).
-//
-// A needs_input session whose bead has ALREADY been closed is reconciled —
-// closed like any other session — rather than preserved forever: this is
-// pg2-5sirm's fix for the gap its own investigation proved live (bead
-// zr-50s7h.2: closed 2026-09-19, review fully posted; its own ccpool session
-// nonetheless sat in needs_input, live, burning CPU, for ~2.5 days because
-// nothing besides this preShutdown sweep ever revisits a needs_input session,
-// and the sweep itself unconditionally preserved every one of them). Once the
-// bead is closed there is nothing left for the operator to attach and act
-// on, so preserving the session buys nothing and only leaks a live process
-// and its worktree.
-//
-// beadAlreadyClosed (below) fails CLOSED (preserve) on every ambiguous case —
-// no bead metadata on the session at all, or a bd lookup error — so this
-// reconciliation only ever fires on an UNAMBIGUOUSLY closed bead; it can
-// never purge a session out from under an operator who still has open work
-// to attach to.
-//
-// The actual purge — cc.Close plus the best-effort worktree removal — is
-// closeSession below, shared with reconcile.go's
-// reconcileClosedBeadSessions (pg2-hrppg): the periodic counterpart to this
-// once-per-shutdown sweep, which reconciles a closed-bead session's
-// StateIdle/StateNeedsInput row while the daemon is still up, rather than
-// leaving it to leak until the next shutdown.
-func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
-	if sparedAtShutdown(s.State) {
-		slog.Info("preShutdown: teardown sparing actively working session (left alive, worktree untouched)",
-			"session", s.ExternalID, "state", string(s.State), "cwd", s.CWD)
-		return false
-	}
-	if supervisedAtShutdown(s, time.Now()) {
-		slog.Info("preShutdown: teardown sparing session still supervised by a live handler (lease not expired; left alive, worktree untouched)",
-			"session", s.ExternalID, "state", string(s.State), "cwd", s.CWD)
-		return false
-	}
-	if s.State == ccpool.StateNeedsInput && !beadAlreadyClosed(ctx, br, s) {
-		slog.Info("preShutdown: teardown preserving needs_input session for operator attach",
-			"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
-		return false
-	}
-	return closeSession(ctx, cc, open, repoRoot, worktreeDir, s, keepWorktree)
 }
 
 // closeSessionAndWorktree tears s down: for a per-bead linked worktree it runs
@@ -322,7 +77,7 @@ func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.
 // and, once that removal actually succeeds, deletes s's own
 // pg-router/<beadID> anchor branch (deleteAnchorBranch below). This must
 // fail SOFT (log + continue), never abort the caller's sweep or be promoted
-// to a nonzero overall exit: both callers — closeUnlessNeedsInput's
+// to a nonzero overall exit: both callers — the removed shutdown sweep's
 // once-per-shutdown sweep and reconcile.go's periodic
 // reconcileClosedBeadSessions — sweep sessions regardless of which
 // IsolationConfig.Type (internal/executor/isolation.go) launched them, so
@@ -527,7 +282,7 @@ func deleteAnchorBranch(ctx context.Context, open worktree.Opener, repoRoot, ext
 // never risk purging a session an operator still needs to attach to just
 // because bd could not be reached.
 //
-// Shared verbatim by both callers of this file's own sweeps: closeUnlessNeedsInput
+// Shared verbatim by both callers of this file's own sweeps: the removed shutdown sweep
 // (needs_input only) and reconcile.go's reconcileClosedBeadSessions
 // (idle or needs_input, pg2-hrppg) — the log line below is deliberately
 // state-agnostic ("preserving session"), not "preserving needs_input

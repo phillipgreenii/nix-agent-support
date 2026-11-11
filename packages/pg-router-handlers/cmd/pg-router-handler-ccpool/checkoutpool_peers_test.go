@@ -28,9 +28,6 @@ func TestPeerGuards_PooledPathAttributedByLease(t *testing.T) {
 	if worktreeInUseByPeer([]ccpool.Session{prior}, self) {
 		t.Error("worktreeInUseByPeer: a session of another lease must not be a peer")
 	}
-	if worktreeHeldBySparedPeer([]ccpool.Session{prior}, self) {
-		t.Error("worktreeHeldBySparedPeer: a session of another lease must not be a peer")
-	}
 
 	same := row("same", "lease-b", ccpool.StateWorking)
 	if !worktreeHeldByLivePeer([]ccpool.Session{same}, self) || !worktreeInUseByPeer([]ccpool.Session{same}, self) {

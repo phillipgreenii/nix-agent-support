@@ -795,7 +795,7 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // This is the single owner of the common-case cleanup, immediately, with no
 // new timer — replacing reliance on the once-per-process-lifetime
 // preShutdown sweep (cmd/pg-router-handler-ccpool/preshutdown.go's
-// closeUnlessNeedsInput, pg2-a8h6c's short-term stopgap) for the case this
+// the removed shutdown sweep, pg2-a8h6c's short-term stopgap) for the case this
 // dispatch call itself can observe. preshutdown.go's own sweep is left
 // unchanged — it remains the belt-and-suspenders path for a crashed prior
 // run's stray sessions, which this dispatch-scoped call can never see.
@@ -819,7 +819,7 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // this is a no-op while the session is still alive and needs_input, or while
 // its state can't be determined at all (needsInputAlive's own can't-tell
 // case). The worktree is removed later, once the session actually closes, by
-// closeUnlessNeedsInput's own existing RemoveWorktree call.
+// the reconcile's RemoveWorktree call.
 //
 // Deletion safety guard (decision item 5): RemoveWorktree runs with
 // force=false, so git itself refuses removal whenever the worktree is dirty

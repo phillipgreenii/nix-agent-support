@@ -522,8 +522,12 @@ sequenceDiagram
 sends each ENABLED handler exactly two additional messages across its whole process lifetime, never
 per event: `postStartup` once, immediately after the core itself finishes booting, and
 `preShutdown` once, at the point the core's own shutdown sequence used to sweep every session that
-handler's kind had created itself (this sweep is now the handler's own responsibility end to end —
-the core no longer inspects or closes a handler-owned session at all). Both hooks answer with a
+handler's kind had created itself. The core no longer inspects or closes a handler-owned session at
+all, and a handler MUST NOT sweep its own sessions inside `preShutdown` either: the hook runs on
+the shutdown critical path, which the launchd stop budget bounds, so a handler MUST answer it at
+once and leave cleanup to its own scheduled or per-dispatch work (the ccpool handler does so: its
+`preShutdown` touches nothing). The core also bounds the hook with a short timeout, so a slow or
+hung handler cannot spend the stop budget. Both hooks answer with a
 sync outcome only; **neither has a deferred form** — there is no event to hand back later, so a
 handler has nothing to defer.
 

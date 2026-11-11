@@ -162,10 +162,29 @@ func TestRunLongRunning_emitsShutdownEventsAndBoundsPreShutdown(t *testing.T) {
 func TestShutdownWatchdogBudget(t *testing.T) {
 	// launchd's ExitTimeOut clamp is 60s; keep a 7s margin over the deadline,
 	// and the deadline over the sum of the bounded phases.
-	if shutdownWatchdogDeadline+7*time.Second > 60*time.Second {
-		t.Fatalf("deadline %v leaves under 7s of ExitTimeOut margin", shutdownWatchdogDeadline)
+	const exitTimeOut = 60 * time.Second
+	const flushAllowance = 3 * time.Second // metrics flush, accept-loop close, store close
+	for _, tc := range []struct {
+		name  string
+		total time.Duration
+		limit time.Duration
+	}{
+		{"deadline plus 7s margin under ExitTimeOut", shutdownWatchdogDeadline + 7*time.Second, exitTimeOut},
+		{"bounded phases under the watchdog deadline", shutdownDrainTimeout + preShutdownTimeout + inFlightDrainTimeout, shutdownWatchdogDeadline},
+		{"bounded phases plus flush allowance under the watchdog deadline", shutdownDrainTimeout + preShutdownTimeout + inFlightDrainTimeout + flushAllowance, shutdownWatchdogDeadline},
+		{"bounded phases plus flush allowance under ExitTimeOut", shutdownDrainTimeout + preShutdownTimeout + inFlightDrainTimeout + flushAllowance, exitTimeOut},
+		{"watchdog deadline under ExitTimeOut", shutdownWatchdogDeadline, exitTimeOut},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.total > tc.limit {
+				t.Fatalf("total %v exceeds %v", tc.total, tc.limit)
+			}
+			if tc.name == "bounded phases under the watchdog deadline" && tc.total >= tc.limit {
+				t.Fatalf("total %v must be strictly under %v", tc.total, tc.limit)
+			}
+		})
 	}
-	if sum := shutdownDrainTimeout + preShutdownTimeout + inFlightDrainTimeout; sum >= shutdownWatchdogDeadline {
-		t.Fatalf("bounded phases sum %v do not fit deadline %v", sum, shutdownWatchdogDeadline)
+	if preShutdownTimeout > 10*time.Second {
+		t.Fatalf("preShutdownTimeout %v: the ccpool preShutdown answers at once, so the allowance must stay small", preShutdownTimeout)
 	}
 }

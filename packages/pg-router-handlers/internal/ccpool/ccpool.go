@@ -6,9 +6,9 @@
 // This package is the per-dispatch half of this module's INTF-CCH-CCPOOL
 // boundary crossing (docs/behavior/interfaces.md): starting, observing, and
 // reaping a ccpool-backed handler session's own agent session. The other
-// half — the once-per-process-lifetime preShutdown sweep across the default
+// half — the periodic cleanup sweep across the default
 // pool's prefix-matching sessions — lives in
-// cmd/pg-router-handler-ccpool/preshutdown.go's teardownAllSessions.
+// cmd/pg-router-handler-ccpool/the janitor (INV-CCH-41); preshutdown.go only answers.
 package ccpool
 
 import (

@@ -72,7 +72,7 @@ const inFlightDrainTimeout = 8 * time.Second
 
 // shutdownDrainTimeout bounds how long runRun, after SIGINT/SIGTERM, lets
 // the dispatches already in flight finish before it cancels their context
-// (and, only then, runs the ccpool session sweep in preShutdownAll). Without
+// (and, only then, runs preShutdownAll). Without
 // it a pn workspace apply that reloads the launchd agent (~2.5x/day) SIGKILLed
 // a running handler ("role desk-pr exited -1") and left a transient pg-desk
 // sync_error row.
@@ -82,8 +82,8 @@ const inFlightDrainTimeout = 8 * time.Second
 // two killed dispatches ran <= 15s. 20s comfortably covers those and the
 // median; it does NOT cover the p90 (~31s), which is the price of fitting the
 // launchd budget: launchd clamps ExitTimeOut at 60s (pg2-s3fzr, measured),
-// so drain (20s) + the session-sweep allowance (preShutdownTimeout, 22s) +
-// inFlightDrainTimeout's 8s tail = 50s (plus ~3s of flush/close) must stay under the 60s ExitTimeOut in
+// so drain (20s) + the preShutdown allowance (preShutdownTimeout, 5s) +
+// inFlightDrainTimeout's 8s tail = 33s (plus ~3s of flush/close) must stay under the 60s ExitTimeOut in
 // darwin/modules/pg-router/default.nix with margin -- keep the two in step,
 // and never raise this without shrinking another term. A drain that times out
 // cancels the dispatch context and kills the handler as before, but the
@@ -97,18 +97,20 @@ const inFlightDrainTimeout = 8 * time.Second
 // cancels it: its handler keeps running and the next daemon adopts the session.
 const shutdownDrainTimeout = 20 * time.Second
 
-// preShutdownTimeout bounds preShutdownAll's handler sweep (it used to run on
-// an unbounded context). It is the "session-sweep allowance" in the launchd
-// budget above, trimmed from 30s to 22s (3s went to inFlightDrainTimeout) so the
-// whole shutdown fits the
-// watchdog deadline below.
-const preShutdownTimeout = 22 * time.Second
+// preShutdownTimeout bounds preShutdownAll's handler hooks (it used to run on
+// an unbounded context). The ccpool adapter's preShutdown now answers at once
+// (its session sweep moved to the scheduled janitor), so this allowance is only a
+// ceiling for a slow or hung hook: 5s, down from 22s, which leaves the whole
+// shutdown (drain 20s + 5s + in-flight tail 8s = 33s) well inside the watchdog
+// deadline below. TestShutdownWatchdogBudget pins the sum.
+const preShutdownTimeout = 5 * time.Second
 
 // shutdownWatchdogDeadline is the overall shutdown deadline the S5 watchdog
 // enforces once the signal context ends. Worst case of the existing phases:
-// drain shutdownDrainTimeout (20s) + preShutdownTimeout (22s) +
-// inFlightDrainTimeout (8s) = 50s, plus ~3s for the metrics flush, accept-loop
-// close and store close. Deadline + 7s must stay at or under launchd's 60s
+// drain shutdownDrainTimeout (20s) + preShutdownTimeout (5s) +
+// inFlightDrainTimeout (8s) = 33s, plus ~3s for the metrics flush, accept-loop
+// close and store close = 36s. The deadline is not derived from that sum;
+// deadline + 7s must stay at or under launchd's 60s
 // ExitTimeOut clamp (darwin/modules/pg-router/default.nix), so 53s. A shutdown
 // still running at this point logs shutdown_overrun naming the phase in flight
 // and exits 10, rather than being SIGKILLed with the store lock held.
@@ -157,7 +159,7 @@ func drainThenCloseStore(ctx context.Context, q *eventqueue.Queue, storeClose fu
 // NOT cancelled by SIGTERM -- and then cancels the dispatch context, which
 // unsticks any handler that outlived the timeout (wireclient's
 // exec.CommandContext kills it). The caller MUST run this before
-// preShutdownAll so the ccpool session sweep never races a live dispatch.
+// preShutdownAll so a handler's shutdown hook never races a live dispatch.
 //
 // survives (nil: none) names the listeners whose dispatches survive a
 // shutdown (bead pg2-dtigc, ADR 0085): their listener contexts are not derived
