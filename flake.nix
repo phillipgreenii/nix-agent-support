@@ -20041,13 +20041,21 @@
         # Reusable builders for downstream flakes. mkBeadsExporterBdFlagsCheck
         # checks ANY bd package against the beads-exporter's recorded bd version
         # pin and flag list (the machine wiring runs it over its own bdPackage).
+        # `testdata` is the recorded bd fixture directory (VERSION + flags.txt); it
+        # defaults to this repo's own recording, and a consumer whose bd differs from
+        # the stock one passes its own (recorded with beads-exporter-contract
+        # --update --testdata <dir>).
         lib.mkBeadsExporterBdFlagsCheck =
           {
             pkgs,
             bd,
             name ? "beads-exporter-bd-flags",
+            testdata ? ./packages/beads-exporter/testdata/bd,
           }:
-          pkgs.callPackage ./packages/beads-exporter/bd-flags-check.nix { } { inherit bd name; };
+          pkgs.callPackage ./packages/beads-exporter/bd-flags-check.nix { } {
+            inherit bd name;
+            dataDir = testdata;
+          };
         darwinModules.default = ./darwin;
         nixosModules.default = ./nixos;
         homeModules = {
