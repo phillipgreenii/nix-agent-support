@@ -121,6 +121,37 @@ From `packages/pg-claude-code-recorder`, niced and in the background:
 `go vet -tags integration ./...`, and the tagged tiers (`faults`, `crashsweep`) once they exist.
 Pre-commit hooks pass on the changed files.
 
+## Measurements
+
+Phase 2, `internal/settle` unit tier, `nice -n 10 go test -count=1`, single runs, one at a time.
+Host load average (1 minute) at the start of each run is given; it fell from about 7 to about 5
+during the session, so differences of a few percent are inside the noise.
+
+| Run                           | Load at start | Package time |
+| ----------------------------- | ------------- | ------------ |
+| baseline, plain               | 6.72          | 18.62 s      |
+| baseline, `-race`             | 7.10          | 71.07 s      |
+| baseline, `-race` (repeat)    | 5.30          | 64.74 s      |
+| template store spike, plain   | 6.93          | 17.57 s      |
+| template store spike, `-race` | 6.72          | 59.66 s      |
+
+- 336 tests; the per-test elapsed times sum to 21.5 s plain (some run in parallel). The slowest
+  test is `TestRollingCycleChecksEachFileOnceAndSurvivesARestart` at 1.6 s, then
+  `TestGroupsTickReadsOnlyWhatChanged` 0.86 s; every other test is under 0.65 s.
+- CPU profile of the whole package, plain (4.46 s of samples in an 18.3 s run, so 24 percent of
+  the wall time is on CPU and the rest is waiting): `store.Open` 0.85 s (19 percent of samples),
+  `invariants.Check` 0.51 s (11 percent), `newEnvWith` itself 0.40 s (9 percent).
+- CPU profile of a trivial settle test (`TestByteSettleBoundaryAndIdenticalReads`, `-count=40`,
+  2.72 s, 68 ms per run, 880 ms of samples): `store.Open` 26 percent, `invariants.Check` 24
+  percent.
+- Template store spike (a `TestMain` that builds one initialised state directory and `newEnvWith`
+  copies it before the first open; invariants still on): plain 18.62 s to 17.57 s (5.6 percent
+  lower: 1.05 / 18.62), `-race` 64.74 s to 59.66 s (7.8 percent lower: 5.08 / 64.74, against the
+  71.07 s first baseline 16 percent). `store.Open` fell from 0.85 s to 0.56 s of samples.
+  Outcome: not a clear win (the gain is within the load drift between runs, and the wall time is
+  mostly waiting, not store creation), so the spike was dropped and no test code changed. The
+  settle tier stays as it is; phase 3 and the value gate do not need a template store.
+
 ## Landing
 
 The whole set stays on one feature branch in one worktree until the final verification passes: all
