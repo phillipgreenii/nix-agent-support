@@ -1080,7 +1080,7 @@ func (s *Settler) evaluate(ctx context.Context, c *conv, live bool, now time.Tim
 	}
 	newest := s.newest(ctx, c)
 	if hasRow && row.Stage == StageHeld {
-		if newest.After(time.Unix(0, row.SinceNS)) {
+		if heldHasNewWrites(newest, row.SinceNS) {
 			// Held to Quiet: a file was written after the hold.
 			if err := s.clearStage(ctx, c.session, "new_writes", now); err != nil {
 				return out, err
@@ -1090,13 +1090,13 @@ func (s *Settler) evaluate(ctx context.Context, c *conv, live bool, now time.Tim
 			s.mu.Lock()
 			at := s.checkedAt[c.session]
 			s.mu.Unlock()
-			if !force && !at.IsZero() && now.Sub(at) < s.cfg.Recheck {
+			if heldRecheckNotDue(force, at, now, s.cfg.Recheck) {
 				out.Stage, out.Skipped, out.Reason = StageHeld, "held, recheck not due", row.Reason
 				return out, nil
 			}
 		}
 	}
-	gate := now.Sub(newest) >= s.cfg.After
+	gate := quietAgeReached(now, newest, s.cfg.After)
 	if !gate && !s.LowSpace() {
 		out.Skipped = "quiet age below settle.after"
 		return out, nil
@@ -1328,11 +1328,8 @@ func (s *Settler) checkSnapshot(f store.File, rel string) ([]Failure, error) {
 	if err != nil {
 		return nil, nil
 	}
-	switch {
-	case size != sn.Size:
-		return []Failure{{File: f.ID, Path: rel, Reason: ReasonCopyOffset, Detail: fmt.Sprintf("stored %d bytes, original %d", sn.Size, size)}}, nil
-	case h != sn.Hash:
-		return []Failure{{File: f.ID, Path: rel, Reason: ReasonCopyTail, Detail: "stored version differs from the original"}}, nil
+	if reason, detail := snapshotFailure(size, h, sn.Size, sn.Hash); reason != "" {
+		return []Failure{{File: f.ID, Path: rel, Reason: reason, Detail: detail}}, nil
 	}
 	return nil, nil
 }
@@ -1351,13 +1348,8 @@ func (s *Settler) checkAppend(ctx context.Context, c *conv, f store.File, rel st
 	orig := s.cfg.Copier.ReadOriginalPath(f)
 	if orig != "" {
 		if fi, err := os.Stat(orig); err == nil {
-			switch {
-			case fi.Size() != g.CopyOffset:
-				add(ReasonCopyOffset, fmt.Sprintf("copy offset %d, original %d bytes", g.CopyOffset, fi.Size()))
-			case g.TailLen > 0:
-				if !tailMatches(orig, g) {
-					add(ReasonCopyTail, "tail hash differs from the original")
-				}
+			if reason, detail := appendOriginalFailure(fi.Size(), g.CopyOffset, g.TailLen, func() bool { return tailMatches(orig, g) }); reason != "" {
+				add(reason, detail)
 			}
 		}
 	}
@@ -1371,7 +1363,7 @@ func (s *Settler) checkAppend(ctx context.Context, c *conv, f store.File, rel st
 		if err != nil {
 			return nil, false, err
 		}
-		if fact, ok := s.st.TornTailOf(f.ID, g.Gen); ok && (fact.Off != nl || fact.Off+fact.Len != g.CopyOffset) {
+		if fact, ok := s.st.TornTailOf(f.ID, g.Gen); ok && tornFactStale(fact.Off, fact.Len, nl, g.CopyOffset) {
 			// Later growth invalidates the fact.
 			if err := s.st.CommitCtx(ctx, &store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, Reset: true}); err != nil {
 				return nil, false, err
@@ -1379,12 +1371,12 @@ func (s *Settler) checkAppend(ctx context.Context, c *conv, f store.File, rel st
 			s.Dirty(f.ID, g.CopyOffset)
 		}
 		tornLen := g.CopyOffset - nl
-		if tornLen > 0 && g.ParseOffset < g.CopyOffset {
+		if tv := tornTail(tornLen, g.ParseOffset, g.CopyOffset, s.cfg.MaxLineBytes, quiet); tv.pending {
 			s.cfg.Obs.Event(obs.EvTornTailPending, "file", strconv.FormatInt(f.ID, 10), "source", f.Source, "offset", strconv.FormatInt(nl, 10), "length", strconv.FormatInt(tornLen, 10))
 			switch {
-			case tornLen >= int64(s.cfg.MaxLineBytes):
+			case tv.tooLong:
 				add(ReasonTornTooLong, fmt.Sprintf("torn tail of %d bytes at %d", tornLen, nl))
-			case quiet:
+			case tv.tryParse:
 				parsed, err := s.cfg.Parser.ParseTail(f.ID, g.Gen)
 				if err != nil {
 					return nil, false, err
@@ -1401,10 +1393,8 @@ func (s *Settler) checkAppend(ctx context.Context, c *conv, f store.File, rel st
 				}
 			}
 		}
-		if tornLen < int64(s.cfg.MaxLineBytes) || g.ParseOffset >= g.CopyOffset {
-			if g.ParseOffset != nl && g.ParseOffset != g.CopyOffset {
-				add(ReasonParseBehind, fmt.Sprintf("parse offset %d, last newline at %d", g.ParseOffset, nl))
-			}
+		if parseBehindFailure(g.ParseOffset, g.CopyOffset, nl, tornLen, s.cfg.MaxLineBytes) {
+			add(ReasonParseBehind, fmt.Sprintf("parse offset %d, last newline at %d", g.ParseOffset, nl))
 		}
 		if !s.parsedState(f.ID, g.Gen) {
 			add(ReasonUnparsed, "no record of a parse of this generation")
@@ -1442,7 +1432,7 @@ func (s *Settler) settleLocked(ctx context.Context, c *conv, now time.Time, wasH
 	defer func() { c.hm = nil }()
 	out := Outcome{Session: c.session, Stage: StageQuiet}
 	newest := s.newest(ctx, c)
-	quiet := now.Sub(newest) >= s.cfg.After || s.LowSpace()
+	quiet := quietAgeReached(now, newest, s.cfg.After) || s.LowSpace()
 	fails, regen, err := s.check(ctx, c, quiet, now)
 	if err != nil {
 		return out, err
