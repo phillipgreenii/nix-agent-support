@@ -1,3 +1,13 @@
 schema = 3
+cachePackages = [
+  'github.com/phillipgreenii/x/cmdrun',
+  'github.com/phillipgreenii/x/cmdruntest',
+  'github.com/phillipgreenii/x/gitclient',
+  'github.com/phillipgreenii/x/gitfixture',
+  'github.com/phillipgreenii/x/gittest'
+]
 
 [mod]
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261106202408-ba17082cdd30'
+    hash = 'sha256-co6ccAn52pXMFV5b/iT6KrkCmrvitwZT808NTUH5N30='
