@@ -7,7 +7,7 @@ import (
 )
 
 // Doctor reads a file's last-seen time while Tick, under the run lock, fills and
-// clears the Settler's per-tick last-seen cache. Doctor holds only doctorMu and
+// clears the Settler's per-tick last-seen cache. Doctor holds only its own mutex and
 // the copier lock, so its read MUST NOT go through that cache.
 func TestDoctorReadsLastSeenWithoutRacingTick(t *testing.T) {
 	// iterations is how many times each goroutine runs. Each Tick writes the
