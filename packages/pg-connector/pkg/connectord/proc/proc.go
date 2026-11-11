@@ -43,6 +43,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -352,6 +353,12 @@ func (s *Server) Serve(ctx context.Context, handler Handler, hooks *Hooks) error
 				delete(conns, conn)
 				connsMu.Unlock()
 				_ = conn.Close()
+			}()
+			// Backstop: a panic in any handler must not end the daemon.
+			defer func() {
+				if r := recover(); r != nil {
+					s.log.Log("handler_panic", "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+				}
 			}()
 			handler(hctx, conn, peer)
 		}()

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime/debug"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord"
@@ -34,9 +35,15 @@ type ServerConfig struct {
 	// ReadTimeout bounds how long a client may take to send its frame; zero
 	// uses DefaultReadTimeout. It does not bound the handler.
 	ReadTimeout time.Duration
+	// WriteTimeout bounds the reply write so a client that stopped reading
+	// cannot pin the connection goroutine; zero uses DefaultWriteTimeout.
+	WriteTimeout time.Duration
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 }
+
+// DefaultWriteTimeout bounds the write of a reply frame.
+const DefaultWriteTimeout = 10 * time.Second
 
 // DefaultReadTimeout bounds the read of a request frame.
 const DefaultReadTimeout = 10 * time.Second
@@ -63,6 +70,9 @@ func Handler(d Dispatcher, cfg ServerConfig) proc.Handler {
 	}
 	if cfg.ReadTimeout <= 0 {
 		cfg.ReadTimeout = DefaultReadTimeout
+	}
+	if cfg.WriteTimeout <= 0 {
+		cfg.WriteTimeout = DefaultWriteTimeout
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -105,15 +115,53 @@ func Handler(d Dispatcher, cfg ServerConfig) proc.Handler {
 			return
 		}
 
-		resp := d.Dispatch(ctx, router.Call{
+		// The protocol is one frame per connection and the client does not
+		// half-close, so any read result after the frame (EOF or an error)
+		// means the peer left: cancel the handler instead of running it to
+		// its deadline.
+		dctx, cancel := context.WithCancel(ctx)
+		watchDone := watchPeer(conn, cancel)
+		resp := dispatchSafely(dctx, d, cfg, router.Call{
 			Instance:    frame.Instance,
 			Request:     req,
 			Deadline:    time.Duration(frame.DeadlineMS) * time.Millisecond,
 			Received:    received,
 			ClientBuild: frame.ClientBuild,
 		})
+		cancel()
+		watchDone()
 		reply(conn, cfg, resp)
 	}
+}
+
+// watchPeer reads conn in the background and calls onGone when the read ends.
+// The returned stop function unblocks the reader and waits for it, leaving the
+// connection with no read deadline.
+func watchPeer(conn net.Conn, onGone func()) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, conn)
+		onGone()
+	}()
+	return func() {
+		_ = conn.SetReadDeadline(time.Now())
+		<-done
+		_ = conn.SetReadDeadline(time.Time{})
+	}
+}
+
+// dispatchSafely runs the dispatcher and turns a panic into an unavailable
+// response, logging the panic value and stack, so one bad request cannot end
+// the daemon.
+func dispatchSafely(ctx context.Context, d Dispatcher, cfg ServerConfig, c router.Call) (resp scriptout.Response) {
+	defer func() {
+		if r := recover(); r != nil {
+			cfg.Logger.Log("handler_panic", "op", c.Request.Op, "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+			resp = errorResponse(scriptout.ErrUnavailable, "internal error: handler panicked")
+		}
+	}()
+	return d.Dispatch(ctx, c)
 }
 
 // serveReadFailure answers a frame that could not be read: over the cap, or a
@@ -149,6 +197,7 @@ func reply(conn net.Conn, cfg ServerConfig, resp scriptout.Response) {
 		cfg.Logger.Log("reply_marshal_failed", "error", err.Error())
 		return
 	}
+	_ = conn.SetWriteDeadline(time.Now().Add(cfg.WriteTimeout))
 	if err := WriteFrame(conn, ReplyFrame{SocketProtocol: cfg.Protocol, DaemonBuild: cfg.Build, Response: raw}); err != nil {
 		cfg.Logger.Log("reply_write_failed", "error", err.Error())
 	}
