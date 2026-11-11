@@ -72,6 +72,9 @@ type Snapshot struct {
 	// Worktrees maps a layout name ("main" for the main worktree) to the
 	// expected HEAD ("branch:<name>" or "detached:<id>") and status --porcelain.
 	Worktrees map[string]WorktreeState
+	// NoWorktrees names layout worktrees that must be gone: absent from git's
+	// list and from the file system.
+	NoWorktrees []string
 	// TargetTree is the expected tree hash of main (not its commit id, so a
 	// rebase does not change the expectation).
 	TargetTree string
@@ -93,6 +96,10 @@ type Expected struct {
 	Outcome map[string]any
 	// Snapshot is the repository state.
 	Snapshot Snapshot
+	// Placeholder allows the parking branches pg-git-lander/idle/* that a kept
+	// source worktree sits on; any other pg-git-lander/* branch is still a
+	// violation.
+	Placeholder bool
 	// Stopped relaxes the post-condition for a scenario that ends with a
 	// stopped operation: lock refs, pg-git-lander/* branches and dirty
 	// worktrees are then expected and are not violations. fsck must still pass.
@@ -611,6 +618,11 @@ func (h *harness) compareSnapshot() []string {
 	s := h.sc.Expected.Snapshot
 	var problems []string
 	for ref, want := range s.Refs {
+		// "=<ref>" expects the id another ref has.
+		if other, ok := strings.CutPrefix(want, "="); ok {
+			o, _ := h.gitHere(h.repo, "rev-parse", "--verify", "--quiet", other)
+			want = strings.TrimSpace(o)
+		}
 		got, err := h.gitHere(h.repo, "rev-parse", "--verify", "--quiet", ref)
 		got = strings.TrimSpace(got)
 		if err != nil {
@@ -644,6 +656,20 @@ func (h *harness) compareSnapshot() []string {
 			}
 		}
 	}
+	if len(s.NoWorktrees) > 0 {
+		wts, err := h.listWorktrees()
+		if err != nil {
+			return append(problems, err.Error())
+		}
+		for _, name := range s.NoWorktrees {
+			if _, ok := wts[name]; ok {
+				problems = append(problems, fmt.Sprintf("worktree %s still listed by git", name))
+			}
+			if _, err := os.Stat(h.wtPath(name)); err == nil {
+				problems = append(problems, fmt.Sprintf("worktree directory %s still exists", h.wtPath(name)))
+			}
+		}
+	}
 	if s.TargetTree != "" {
 		got, _ := h.gitHere(h.repo, "rev-parse", "refs/heads/main^{tree}")
 		if want := h.fact(s.TargetTree); strings.TrimSpace(got) != want {
@@ -666,7 +692,16 @@ func (h *harness) postCondition() []string {
 			problems = append(problems, "lock refs or records left behind: "+strings.Join(strings.Fields(out), " "))
 		}
 		if out, _ := h.gitHere(h.repo, "for-each-ref", "--format=%(refname)", "refs/heads/pg-git-lander/"); strings.TrimSpace(out) != "" {
-			problems = append(problems, "pg-git-lander/* branches left behind: "+strings.Join(strings.Fields(out), " "))
+			var left []string
+			for _, ref := range strings.Fields(out) {
+				if h.sc.Expected.Placeholder && strings.HasPrefix(ref, "refs/heads/pg-git-lander/idle/") {
+					continue
+				}
+				left = append(left, ref)
+			}
+			if len(left) > 0 {
+				problems = append(problems, "pg-git-lander/* branches left behind: "+strings.Join(left, " "))
+			}
 		}
 		if wts, err := h.listWorktrees(); err != nil {
 			problems = append(problems, err.Error())
