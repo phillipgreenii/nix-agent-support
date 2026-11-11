@@ -320,6 +320,27 @@ func openReadOnlyConn(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
+// openWALAwareReadConn opens a read-only connection WITHOUT immutable=1, so
+// SQLite takes a consistent snapshot through the -wal/-shm files instead of
+// reading raw main-file pages that a concurrent checkpoint may be rewriting.
+// It may create empty -wal/-shm sidecars, which is why it is only the
+// fallback after immutable retries fail, never the default.
+func openWALAwareReadConn(dbPath string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_busy_timeout=3000")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(readOnlyCacheSizePragma); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set cache_size: %w", err)
+	}
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
 // readOnlyDSN is the immutable=1 DSN shared by NewReadOnlyStore and
 // QueryRows' torn-read retry (which re-opens a fresh connection on the same
 // path — see isTornReadError).
@@ -478,10 +499,21 @@ const sqliteCorruptCode = 11
 // NewReadOnlyStore (dbPath is empty otherwise, and reopen is a no-op then —
 // callers must check that before relying on it).
 func (s *Store) reopen() error {
+	return s.reopenWith(openReadOnlyConn)
+}
+
+// reopenWALAware swaps s.db for a WAL-aware read-only connection (no
+// immutable=1), the last resort once immutable retries are exhausted. See
+// withTornReadRetry.
+func (s *Store) reopenWALAware() error {
+	return s.reopenWith(openWALAwareReadConn)
+}
+
+func (s *Store) reopenWith(open func(string) (*sql.DB, error)) error {
 	if s.dbPath == "" {
 		return fmt.Errorf("reopen: not a read-only store")
 	}
-	fresh, err := openReadOnlyConn(s.dbPath)
+	fresh, err := open(s.dbPath)
 	if err != nil {
 		return err
 	}
@@ -514,8 +546,22 @@ func (s *Store) withTornReadRetry(attempt func() error) error {
 			return nil
 		}
 		lastErr = err
-		if !isTornReadError(err) || s.dbPath == "" || i >= tornReadRetries {
+		if !isTornReadError(err) || s.dbPath == "" {
 			return lastErr
+		}
+		if i >= tornReadRetries {
+			// A scan of a multi-GB live corpus takes tens of seconds, so
+			// every immutable attempt can overlap a checkpoint and tear;
+			// retrying the same strategy more is not enough. Fall back to
+			// a WAL-aware snapshot read once; if that also fails, report
+			// the original error.
+			if s.reopenWALAware() != nil {
+				return lastErr
+			}
+			if err := attempt(); err != nil {
+				return lastErr
+			}
+			return nil
 		}
 		delay := tornReadRetryDelay << i
 		time.Sleep(delay)

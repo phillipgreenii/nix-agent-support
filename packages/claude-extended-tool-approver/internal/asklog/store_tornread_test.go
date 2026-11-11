@@ -332,3 +332,59 @@ func TestQueryRows_PersistentCorruptionStillFails(t *testing.T) {
 		t.Errorf("QueryRows took %s to give up on persistent corruption; the retry budget must stay bounded", elapsed)
 	}
 }
+
+// TestQueryRows_FallsBackToWALSnapshotWhenImmutableKeepsTearing pins the fix
+// for `report` failing with "database disk image is malformed" on the live,
+// multi-GB corpus: the immutable=1 connection ignores the -wal file, so when
+// a page of the main file is torn while a newer good version of it sits in
+// the WAL, every immutable retry fails. The fallback WAL-aware read sees the
+// good page. Real sqlite driver, temp dir, no mocks.
+func TestQueryRows_FallsBackToWALSnapshotWhenImmutableKeepsTearing(t *testing.T) {
+	prevDelay := SetTornReadRetryDelayForTests(time.Millisecond)
+	defer SetTornReadRetryDelayForTests(prevDelay)
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "asks.db")
+	const seeded = 25
+
+	pageSize, pgno := seedRowsAndLocateLeafPage(t, dbPath, seeded)
+
+	// Writer stays open so its WAL is not checkpointed away; the extra row
+	// rewrites the (single) leaf page into the WAL.
+	w, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = w.Close() }()
+	if _, err := w.db.Exec(`INSERT INTO tool_decisions
+		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
+		VALUES ('late', '/tmp', 'Bash', 'hlate', '{}', 'pending', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert into WAL: %v", err)
+	}
+
+	// Tear the stale main-file copy of that page permanently.
+	corruptCellCount(t, dbPath, pageSize, pgno)
+
+	probe, err := NewReadOnlyStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewReadOnlyStore (probe): %v", err)
+	}
+	if _, err := probe.queryRowsOnce(""); err == nil || !isTornReadError(err) {
+		_ = probe.Close()
+		t.Fatalf("immutable read did not tear (err = %v); fixture needs adjusting", err)
+	}
+	_ = probe.Close()
+
+	r, err := NewReadOnlyStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewReadOnlyStore: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	rows, err := r.QueryRows("")
+	if err != nil {
+		t.Fatalf("QueryRows did not fall back to a WAL-aware read: %v", err)
+	}
+	if len(rows) != seeded+1 {
+		t.Errorf("got %d rows, want %d (including the WAL-only row)", len(rows), seeded+1)
+	}
+}
