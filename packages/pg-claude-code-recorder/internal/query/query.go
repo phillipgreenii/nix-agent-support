@@ -148,7 +148,26 @@ func (e *Engine) asOf(tx store.Querier) string {
 
 // base joins records with files and applies the current-generation filter.
 func base(old bool) string {
-	s := " FROM records r JOIN files fl ON fl.id=r.file_id"
+	return baseJoin(old, "JOIN")
+}
+
+// rowsJoin picks the join keyword for a row query: CROSS JOIN only when there
+// is no filter and no field join.
+func rowsJoin(wsql string, joins []string) string {
+	if wsql == "1" && len(joins) == 0 {
+		return "CROSS JOIN"
+	}
+	return "JOIN"
+}
+
+// baseJoin is base with the join keyword chosen by the caller. CROSS JOIN pins
+// records as the outer loop (files is then only a primary-key lookup). An
+// unfiltered row query needs that: once sqlite_stat1 exists the planner
+// otherwise scans files, probes records_ident per file and sorts every record
+// in a temp b-tree before the LIMIT applies, about 22 s on the live store. It
+// is NOT safe for filtered queries, whose field joins or indexes want to drive.
+func baseJoin(old bool, join string) string {
+	s := " FROM records r " + join + " files fl ON fl.id=r.file_id"
 	if !old {
 		s += " AND r.gen=fl.cur_gen"
 	}
@@ -233,7 +252,7 @@ func (e *Engine) rows(tx store.Querier, req Request, ans *Answer) *wire.Error {
 	for _, c := range cols {
 		sel = append(sel, c.expr)
 	}
-	q := "SELECT " + strings.Join(sel, ",") + base(req.OldGenerations) + " " + strings.Join(b.joins, " ") +
+	q := "SELECT " + strings.Join(sel, ",") + baseJoin(req.OldGenerations, rowsJoin(wsql, b.joins)) + " " + strings.Join(b.joins, " ") +
 		" WHERE " + wsql + " ORDER BY " + strings.Join(ord, ",") + " LIMIT ?"
 	limit := limitOf(req.Limit)
 	args := append(append(append([]any{}, b.joinArgs...), wargs...), limit+1)
