@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1",
+  "resource": "disk",
+  "level": "TIGHT",
+  "valid_for_s": 120,
+  "owner": "host-sensor"
+}

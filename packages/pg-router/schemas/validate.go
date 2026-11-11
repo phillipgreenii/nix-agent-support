@@ -314,3 +314,16 @@ func jsonEqual(a, b any) bool {
 	}
 	return a == b
 }
+
+// LevelAnswerSchema is the name of the one schema that defines a sensor's level
+// answer for both transports (a pull JSONL line and the push request body).
+const LevelAnswerSchema = "source.level-answer"
+
+// ValidateLevelAnswer checks the raw JSON bytes of ONE level-answer object
+// against LevelAnswerSchema and returns an error (wrapping ErrValidation) that
+// names the failing field. The sensors module and the router ingest both call
+// it; it is schemas.ValidateBytes with the schema name fixed, not a second
+// validation path.
+func ValidateLevelAnswer(data []byte) error {
+	return ValidateBytes(LevelAnswerSchema, data)
+}

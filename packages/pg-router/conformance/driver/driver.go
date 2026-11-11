@@ -437,6 +437,13 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing cleared", `{"schemaVersion":"1"}`},
 		{"cleared wrong item type", `{"schemaVersion":"1","cleared":[5]}`},
 	},
+	"source.level-answer": {
+		{"level lowercase", `{"schemaVersion":"1","resource":"disk","level":"tight","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":"host-sensor"}`},
+		{"missing observed_at", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","valid_for_s":120,"owner":"host-sensor"}`},
+		{"valid_for_s zero", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","observed_at":"2026-11-11T05:00:00Z","valid_for_s":0,"owner":"host-sensor"}`},
+		{"empty owner", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":""}`},
+		{"unknown field", `{"schemaVersion":"1","resource":"disk","level":"TIGHT","observed_at":"2026-11-11T05:00:00Z","valid_for_s":120,"owner":"host-sensor","extra":true}`},
+	},
 	"cli.gate-set": {
 		{"missing type", `{"schemaVersion":"1"}`},
 		{"type not ALL CAPS", `{"schemaVersion":"1","type":"low_disk"}`},
