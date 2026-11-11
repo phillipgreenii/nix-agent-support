@@ -57,3 +57,13 @@ func TestProtectedPathNotice_present(t *testing.T) {
 		t.Fatalf("notice must end with a blank line so the task prompt starts on its own paragraph: %q", p)
 	}
 }
+
+func TestActorNotice(t *testing.T) {
+	p := ActorNotice("pgii-pool__worker")
+	if !strings.Contains(p, "--actor pgii-pool__worker") || !strings.Contains(p, "BEADS_ACTOR") || !strings.HasSuffix(p, "\n\n") {
+		t.Fatalf("actor notice = %q", p)
+	}
+	if ActorNotice("  ") != "" {
+		t.Fatal("an empty actor must add no notice")
+	}
+}

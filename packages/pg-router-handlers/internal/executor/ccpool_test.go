@@ -2678,3 +2678,15 @@ func TestItemContextEnv(t *testing.T) {
 		t.Errorf("itemContextEnv = %v, want %v", got, want)
 	}
 }
+
+// Every role's nudge states the bd actor its claims must carry, so a session
+// does not derive one (an empty session id gave "-worker").
+func TestRenderNudge_statesTheRoleActor(t *testing.T) {
+	cfg := fastCfg()
+	r := newExec(&dtest.FakeCC{}, &dtest.ScriptBD{}, cfg)
+	role := workerRole(cfg)
+	got := r.renderNudge(role.CCPool, DispatchContext{Role: role, Item: item.Item{ID: "pg2-x"}}, "/wt")
+	if !strings.Contains(got, prompt.ActorNotice(role.CCPool.Actor)) {
+		t.Fatalf("nudge missing the actor notice: %q", got)
+	}
+}

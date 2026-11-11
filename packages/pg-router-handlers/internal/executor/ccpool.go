@@ -1504,6 +1504,7 @@ func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d DispatchContext, workt
 	if r.deps.Cfg.PermissionMode == "dontAsk" {
 		sb.WriteString(prompt.ProtectedPathNotice())
 	}
+	sb.WriteString(prompt.ActorNotice(cc.Actor))
 	sb.WriteString(body)
 	sb.WriteString(cc.Budget.PromptLine()) // "" when unlimited
 	return sb.String()

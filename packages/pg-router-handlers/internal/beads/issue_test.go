@@ -451,3 +451,33 @@ func TestDeferredUntilAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestHeldBySession(t *testing.T) {
+	const sid = "b6bbee83-ca30-47fa-b186-0123456789ab"
+	cases := []struct {
+		name   string
+		status string
+		holder string
+		want   bool
+	}{
+		{"role actor", "in_progress", "pgii-pool__review", true},
+		{"full session id plus role", "in_progress", sid + "-review", true},
+		{"short session id plus role", "in_progress", "b6bbee83-review", true},
+		{"bead-derived actor proves nothing", "in_progress", "review-zr-9zd0m.1", false},
+		{"empty session id proves nothing", "in_progress", "-worker", false},
+		{"another session", "in_progress", "11111111-2222-3333-4444-555555555555-review", false},
+		{"not in progress", "open", sid + "-review", false},
+		{"unassigned", "in_progress", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := HeldBySession(Issue{Status: tc.status, Assignee: tc.holder}, "pgii-pool__review", sid)
+			if got != tc.want {
+				t.Errorf("HeldBySession = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if HeldBySession(Issue{Status: "in_progress", Assignee: "b6bbee83-review"}, "role", "") {
+		t.Error("a session with no recorded id attributes nothing beyond the role actor")
+	}
+}

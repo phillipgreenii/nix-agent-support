@@ -258,11 +258,14 @@ func reclaimIdleOrphan(ctx context.Context, role roles.Role, deps executor.Deps,
 				"session", s.ExternalID, "bead", beadID, "err", err)
 			return orphanLeftAlone
 		}
-		if iss.Status == "in_progress" && cc.Actor != "" && iss.Assignee == cc.Actor {
+		// The claim is this session's when it is under the role's actor or under an
+		// actor the session derived from its own Claude session id; the release is
+		// guarded by the holder just read, so a claim that changed hands is left.
+		if beads.HeldBySession(iss, cc.Actor, s.ClaudeSessionID) {
 			_ = beads.Comment(ctx, deps.BD, beadID, fmt.Sprintf(
 				"orphaned session %s reclaimed after handler loss (lease expired %s)", s.ExternalID, s.Meta[ccpool.MetaKeyLeaseUntil],
 			))
-			if err := beads.Unclaim(ctx, deps.BD, beadID); err != nil {
+			if err := beads.UnclaimObserved(ctx, deps.BD, iss); err != nil {
 				slog.Warn("orphan reconcile: unclaim failed; leaving the orphan for the next dispatch",
 					"session", s.ExternalID, "bead", beadID, "err", err)
 				return orphanLeftAlone

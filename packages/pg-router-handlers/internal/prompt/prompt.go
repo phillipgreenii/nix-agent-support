@@ -85,3 +85,18 @@ func ProtectedPathNotice() string {
 		"full unified diff, or the complete new file content for a new file) in your " +
 		"hand-back so a person can apply it. Changes to all other paths proceed as normal.\n\n"
 }
+
+// ActorNotice is the fixed, code-owned block that tells a session which bd
+// identity every claim of its bead MUST carry. The handler exports the same
+// value as BEADS_ACTOR and judges a death by it, so a session that derives its
+// own id (an empty session id gives "-worker", a bead id gives "review-<bead>")
+// writes a claim the handler cannot attribute and may never release. "" for an
+// empty actor.
+func ActorNotice(actor string) string {
+	if strings.TrimSpace(actor) == "" {
+		return ""
+	}
+	return "Identity note: your bd actor id is " + actor + " (already set in BEADS_ACTOR). " +
+		"Claim and release beads with exactly that value, never one derived from a session " +
+		"id or a bead id: `bd update <id> --claim --actor " + actor + "`.\n\n"
+}

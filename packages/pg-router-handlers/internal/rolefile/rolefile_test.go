@@ -839,3 +839,19 @@ func TestDecodeRole_rejectsInvalidCheckoutPoolIsolation(t *testing.T) {
 		})
 	}
 }
+
+// An actor with an empty session-id part ("-worker") is rejected at load, so no
+// role can be configured to write an unattributable claim.
+func TestDecodeRole_rejectsActorWithEmptyPart(t *testing.T) {
+	for _, actor := range []string{"-worker", "worker-", "a--b", "has space", "_x"} {
+		body := `{"name":"worker","ccpool":{"actor":"` + actor + `","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"}}`
+		if _, err := loadRoleFile(mustWriteRoleFile(t, body)); err == nil || !strings.Contains(err.Error(), "ccpool.actor") {
+			t.Errorf("actor %q: err = %v, want a ccpool.actor rejection", actor, err)
+		}
+	}
+	for _, actor := range []string{"pgii-pool__worker", "pgii-pool__process-feedback", "w"} {
+		if err := ValidateActor(actor); err != nil {
+			t.Errorf("actor %q must be valid: %v", actor, err)
+		}
+	}
+}

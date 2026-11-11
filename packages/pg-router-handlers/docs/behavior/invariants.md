@@ -391,8 +391,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   - **`idle` or `errored`, and quiet** (neither it nor its subagents wrote within the quiet
     window): apply the role's completion rule to its bead. A role that claims its beads
     (close-only, close-or-handback, close-or-release) MUST release the claim, with a comment naming the session,
-    only when the bead is still in progress AND claimed by that role's own actor; a bead that is
-    open, closed, or claimed by someone else is not written, and a role that never claims its
+    only when the bead is still in progress AND claimed by that role's own actor or by an actor
+    that carries the orphan's own Claude session id (a session that derived its actor from its
+    id), with the release guarded by the holder just read; a bead that is
+    open, closed, or claimed by anyone else (an actor with no session id in it proves nothing) is not written, and a role that never claims its
     bead (the triage roles) writes nothing. If the bead cannot be read, nothing is done this
     time. Then the session MUST be closed without purging, and its worktree and anchor branch
     removed under the guards of `INV-CCH-15` (kept when a live or `needs_input` session still uses

@@ -373,7 +373,7 @@ func TestReclaimIdleOrphan_closeOnlyUnclaimsClosesAndRemovesWorktree(t *testing.
 			}
 			w := h.bd.writes()
 			if len(w) != 2 || !strings.HasPrefix(w[0], "comment zr-w orphaned session "+orphanID+" reclaimed after handler loss (lease expired ") ||
-				w[1] != "update zr-w --status=open --assignee=" {
+				w[1] != "update zr-w --status=open --assignee= --if-assignee "+orphanActor+" --if-status in_progress" {
 				t.Errorf("want one reclaim comment then exactly one unclaim; writes=%v", w)
 			}
 			if got := h.cc.closed(); len(got) != 1 || got[0] != orphanID || h.cc.purges[0] {
@@ -724,5 +724,47 @@ func TestClaimsBead(t *testing.T) {
 		if got := claimsBead(c); got != want {
 			t.Errorf("claimsBead(%s) = %v, want %v", c, got, want)
 		}
+	}
+}
+
+// An orphan whose claim is under an actor the session derived from its own
+// Claude session id (not the role actor) is released, guarded by the holder
+// just read; a claim under an actor with no session id in it is left alone.
+func TestReclaimIdleOrphan_releasesSessionDerivedActorClaim(t *testing.T) {
+	const sid = "b6bbee83-ca30-47fa-b186-0123456789ab"
+	cases := []struct {
+		name       string
+		holder     string
+		wantUpdate string
+	}{
+		{"full session id", sid + "-worker", "update zr-w --status=open --assignee= --if-assignee " + sid + "-worker --if-status in_progress"},
+		{"short session id", "b6bbee83-worker", "update zr-w --status=open --assignee= --if-assignee b6bbee83-worker --if-status in_progress"},
+		{"no session id", "-worker", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := orphanRow(ccpool.StateIdle)
+			row.ClaudeSessionID = sid
+			h := newOrphanHarness(t, row)
+			h.bd.issues["zr-w"] = inProgressBy(tc.holder)
+			if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 1 {
+				t.Fatalf("reclaimed=%d, want 1", r)
+			}
+			var updates []string
+			for _, w := range h.bd.writes() {
+				if strings.HasPrefix(w, "update ") {
+					updates = append(updates, w)
+				}
+			}
+			if tc.wantUpdate == "" {
+				if len(updates) != 0 {
+					t.Errorf("must not release a claim it cannot attribute; updates=%v", updates)
+				}
+				return
+			}
+			if len(updates) != 1 || updates[0] != tc.wantUpdate {
+				t.Errorf("updates = %v, want [%s]", updates, tc.wantUpdate)
+			}
+		})
 	}
 }

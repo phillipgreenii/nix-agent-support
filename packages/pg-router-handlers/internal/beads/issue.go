@@ -208,6 +208,32 @@ func UnclaimHeld(ctx context.Context, r Runner, id string) error {
 	return nil
 }
 
+// minSessionIDPrefix is the shortest prefix of a Claude session id that still
+// attributes a claim to that session: the first UUID group, which a session
+// that shortens its own id keeps.
+const minSessionIDPrefix = 8
+
+// HeldBySession reports whether iss is an in_progress bead whose claim is
+// provably the work of one session: its assignee is the role's own actor, or
+// it is "<claude session id>-<suffix>" (the session derived its own actor from
+// its id, as the beads-lifecycle rules tell it to), also with the id shortened
+// to its first UUID group. An actor with no session id in it (review-<bead>,
+// <bead>-feedback, a bare "-worker") proves nothing and reports false: the
+// claim is then a peer's as far as the handler can tell.
+func HeldBySession(iss Issue, roleActor, claudeSessionID string) bool {
+	if iss.Status != "in_progress" || iss.Assignee == "" {
+		return false
+	}
+	if roleActor != "" && iss.Assignee == roleActor {
+		return true
+	}
+	sid := claudeSessionID
+	if len(sid) < minSessionIDPrefix {
+		return false
+	}
+	return strings.HasPrefix(iss.Assignee, sid+"-") || strings.HasPrefix(iss.Assignee, sid[:minSessionIDPrefix]+"-")
+}
+
 // UnclaimObserved is UnclaimHeld for a bead the caller has already read: the
 // guard comes from iss (no second read), so the release only lands if the claim
 // is still the one the caller observed. A stale guard (IsGuardStale) means the

@@ -155,6 +155,9 @@ func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 	if strings.TrimSpace(rf.CCPool.Actor) == "" {
 		return roles.Role{}, fmt.Errorf("role config %s: ccpool.actor is required (an empty actor makes bd attribute claims to the operator)", path)
 	}
+	if err := ValidateActor(rf.CCPool.Actor); err != nil {
+		return roles.Role{}, fmt.Errorf("role config %s: ccpool.actor: %w", path, err)
+	}
 	tmpl, err := prompt.Parse(rf.Name, rf.CCPool.PromptBody)
 	if err != nil {
 		return roles.Role{}, fmt.Errorf("role config %s: parse promptBody: %w", path, err)
@@ -349,4 +352,20 @@ func OverlayBudgetThresholds(role roles.Role, cfg config.Config) {
 		return
 	}
 	role.CCPool.Budget.Thresholds = cfg.WorkerBudget().Thresholds
+}
+
+// ValidateActor rejects an actor id that has an empty part: one that starts or
+// ends with a separator ("-worker" is what "<session-id>-worker" becomes when
+// the session id is empty) or holds a run of separators or whitespace. Such an
+// id is unattributable, so a claim under it cannot be tied to its session.
+func ValidateActor(actor string) error {
+	if actor != strings.TrimSpace(actor) || strings.ContainsAny(actor, " \t\n") {
+		return fmt.Errorf("%q must not contain whitespace", actor)
+	}
+	if strings.HasPrefix(actor, "-") || strings.HasSuffix(actor, "-") ||
+		strings.HasPrefix(actor, "_") || strings.HasSuffix(actor, "_") ||
+		strings.Contains(actor, "--") {
+		return fmt.Errorf("%q has an empty part (a leading, trailing or doubled separator), which would be an unattributable claim", actor)
+	}
+	return nil
 }
