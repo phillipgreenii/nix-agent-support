@@ -147,7 +147,7 @@ func Start(ctx context.Context, p Params) (*Daemon, error) {
 
 	fail := func(stage string, err error, attrs ...any) (*Daemon, error) {
 		d.log.Error("startup failed", append([]any{"stage", stage, "error", err.Error()}, attrs...)...)
-		d.flush()
+		d.flush(ctx)
 		return nil, &StartupError{Stage: stage, Err: err}
 	}
 
@@ -200,7 +200,7 @@ func Start(ctx context.Context, p Params) (*Daemon, error) {
 		}
 	}()
 
-	if err := d.open(); err != nil {
+	if err := d.open(ctx); err != nil {
 		_ = d.http.Close()
 		// Close shuts only the listeners the Serve goroutine has already
 		// registered, so while that goroutine has not run the port is still bound.
@@ -246,7 +246,7 @@ func loadConfig(path string) (*config.Config, error) {
 
 // open opens the store (taking the data-directory lock), replays the log and
 // applies the startup checks. The error is a *StartupError wrapping the cause.
-func (d *Daemon) open() error {
+func (d *Daemon) open(ctx context.Context) error {
 	d.log.Info("replay start", "data_dir", d.p.DataDir)
 	opened := time.Now()
 	obsv := d.compose()
@@ -265,18 +265,18 @@ func (d *Daemon) open() error {
 		return &StartupError{Stage: "active_profile", Err: err}
 	}
 	d.eng = eng
-	d.replaySpans(opened)
+	d.replaySpans(ctx, opened)
 	return nil
 }
 
 // replaySpans records the startup replay as a trace: a replay span, with a
 // quarantine child when recovery trimmed the end of the log.
-func (d *Daemon) replaySpans(opened time.Time) {
+func (d *Daemon) replaySpans(ctx context.Context, opened time.Time) {
 	tracer := d.tracerProvider().Tracer(obs.ScopeName)
 	d.mu.Lock()
 	replay, rec := d.replay, d.recovery
 	d.mu.Unlock()
-	ctx, span := tracer.Start(context.Background(), "pg-task-focus.replay", trace.WithTimestamp(opened))
+	ctx, span := tracer.Start(ctx, "pg-task-focus.replay", trace.WithTimestamp(opened))
 	obs.Attrs(span, attribute.Int("events", replay.Events))
 	if rec.TornTail || rec.UncommittedBatches > 0 {
 		_, q := tracer.Start(ctx, "pg-task-focus.replay.quarantine", trace.WithTimestamp(opened))

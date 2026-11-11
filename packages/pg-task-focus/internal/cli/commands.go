@@ -15,7 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/wire"
 )
 
-func newRoot(s *state) *cobra.Command {
+func newRoot(ctx context.Context, s *state) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "pg-task-focus",
 		Short: "Keep a written daily routine: checklists and timed work cycles",
@@ -37,8 +37,8 @@ could not start; 8 check found a problem.`,
 	root.PersistentFlags().StringVar(&s.clientName, "client", "", "the X-Client name sent to the daemon: cli, web, connector or swiftbar (default $PG_TASK_FOCUS_CLIENT, else cli)")
 	root.PersistentFlags().DurationVar(&s.wait, "timeout", 15*time.Second, "how long to wait for the daemon to answer")
 	root.AddCommand(
-		s.serveCmd(), s.statusCmd(), s.periodCmd(), s.profileCmd(), s.taskCmd(), s.cycleCmd(), s.eventsCmd(),
-		s.undoCmd(), s.checkCmd(), s.configCmd(),
+		s.serveCmd(ctx), s.statusCmd(ctx), s.periodCmd(ctx), s.profileCmd(ctx), s.taskCmd(ctx), s.cycleCmd(ctx), s.eventsCmd(ctx),
+		s.undoCmd(ctx), s.checkCmd(ctx), s.configCmd(ctx),
 	)
 	return root
 }
@@ -56,7 +56,7 @@ func (m *mutating) flags(c *cobra.Command, withAt bool) {
 	}
 }
 
-func (s *state) statusCmd() *cobra.Command {
+func (s *state) statusCmd(ctx context.Context) *cobra.Command {
 	var watch bool
 	var every time.Duration
 	c := &cobra.Command{
@@ -65,9 +65,9 @@ func (s *state) statusCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if watch {
-				return s.watch(cmd.Context(), every)
+				return s.watch(ctx, every)
 			}
-			raw, st, err := s.client().State(cmd.Context())
+			raw, st, err := s.client().State(ctx)
 			if err != nil {
 				return err
 			}
@@ -128,7 +128,7 @@ func (s *state) watch(ctx context.Context, every time.Duration) error {
 	return err
 }
 
-func (s *state) periodCmd() *cobra.Command {
+func (s *state) periodCmd(ctx context.Context) *cobra.Command {
 	root := &cobra.Command{Use: "period", Short: "Change or roll the day, week and sprint"}
 	var m mutating
 	var day, week, sprint, tz, label, profile, skipAll string
@@ -176,7 +176,7 @@ machine (TZ, then /etc/localtime) and the command fails if neither names one.`,
 			if dry {
 				body["dry_run"] = true
 			}
-			return s.mutate(cmd.Context(), "/api/v1/periods/change", body)
+			return s.mutate(ctx, "/api/v1/periods/change", body)
 		},
 	}
 	m.flags(change, true)
@@ -202,7 +202,7 @@ version carried back, so what you saw is what happens. While any cycle is runnin
 prints the blocking cycles and exits non-zero.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return s.roll(cmd.Context(), rm, rtz, rprofile, rdry)
+			return s.roll(ctx, rm, rtz, rprofile, rdry)
 		},
 	}
 	rm.flags(roll, false)
@@ -327,7 +327,7 @@ func blockingList(cs []wire.CycleRef) string {
 	return strings.Join(names, ", ")
 }
 
-func (s *state) profileCmd() *cobra.Command {
+func (s *state) profileCmd(ctx context.Context) *cobra.Command {
 	root := &cobra.Command{Use: "profile", Short: "Change the active profile"}
 	var m mutating
 	var dry bool
@@ -340,7 +340,7 @@ func (s *state) profileCmd() *cobra.Command {
 			if dry {
 				body["dry_run"] = true
 			}
-			return s.mutate(cmd.Context(), "/api/v1/profile/change", body)
+			return s.mutate(ctx, "/api/v1/profile/change", body)
 		},
 	}
 	m.flags(change, false)
@@ -349,7 +349,7 @@ func (s *state) profileCmd() *cobra.Command {
 	return root
 }
 
-func (s *state) taskCmd() *cobra.Command {
+func (s *state) taskCmd(ctx context.Context) *cobra.Command {
 	root := &cobra.Command{Use: "task", Short: "Complete or skip a task"}
 	var dm mutating
 	done := &cobra.Command{
@@ -357,7 +357,7 @@ func (s *state) taskCmd() *cobra.Command {
 		Short: "Complete a task; NAME is a definition name or a unique prefix",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := s.taskID(cmd.Context(), args[0])
+			id, err := s.taskID(ctx, args[0])
 			if err != nil {
 				return err
 			}
@@ -365,7 +365,7 @@ func (s *state) taskCmd() *cobra.Command {
 			if err := s.withAt(body, dm.at); err != nil {
 				return err
 			}
-			return s.mutate(cmd.Context(), "/api/v1/tasks/"+url.PathEscape(id)+"/complete", body)
+			return s.mutate(ctx, "/api/v1/tasks/"+url.PathEscape(id)+"/complete", body)
 		},
 	}
 	dm.flags(done, true)
@@ -379,7 +379,7 @@ func (s *state) taskCmd() *cobra.Command {
 			if strings.TrimSpace(reason) == "" {
 				return usagef("--reason is required and MUST NOT be blank")
 			}
-			id, err := s.taskID(cmd.Context(), args[0])
+			id, err := s.taskID(ctx, args[0])
 			if err != nil {
 				return err
 			}
@@ -387,7 +387,7 @@ func (s *state) taskCmd() *cobra.Command {
 			if err := s.withAt(body, sm.at); err != nil {
 				return err
 			}
-			return s.mutate(cmd.Context(), "/api/v1/tasks/"+url.PathEscape(id)+"/skip", body)
+			return s.mutate(ctx, "/api/v1/tasks/"+url.PathEscape(id)+"/skip", body)
 		},
 	}
 	sm.flags(skip, true)
@@ -396,7 +396,7 @@ func (s *state) taskCmd() *cobra.Command {
 	return root
 }
 
-func (s *state) cycleCmd() *cobra.Command {
+func (s *state) cycleCmd(ctx context.Context) *cobra.Command {
 	root := &cobra.Command{Use: "cycle", Short: "Start, pause, resume, boost, stop, switch, back-fill and annotate work cycles"}
 
 	var sm mutating
@@ -413,8 +413,8 @@ func (s *state) cycleCmd() *cobra.Command {
 			if err := s.withAt(body, sm.at); err != nil {
 				return err
 			}
-			err := s.mutateRaw(cmd.Context(), "/api/v1/cycles/start", body)
-			return s.decorateUnknownType(cmd.Context(), err, args[0])
+			err := s.mutateRaw(ctx, "/api/v1/cycles/start", body)
+			return s.decorateUnknownType(ctx, err, args[0])
 		},
 	}
 	sm.flags(start, true)
@@ -429,7 +429,7 @@ func (s *state) cycleCmd() *cobra.Command {
 			RunE: func(cmd *cobra.Command, args []string) error {
 				ref := ""
 				if len(args) == 1 {
-					r, err := s.cycleRef(cmd.Context(), args[0])
+					r, err := s.cycleRef(ctx, args[0])
 					if err != nil {
 						return err
 					}
@@ -442,7 +442,7 @@ func (s *state) cycleCmd() *cobra.Command {
 				if err := s.withAt(body, m.at); err != nil {
 					return err
 				}
-				return s.mutate(cmd.Context(), "/api/v1/cycles/"+name, body)
+				return s.mutate(ctx, "/api/v1/cycles/"+name, body)
 			},
 		}
 		m.flags(c, true)
@@ -461,7 +461,7 @@ func (s *state) cycleCmd() *cobra.Command {
 			}
 			body := map[string]any{"minutes": boostMinutes, "id": s.newID(bm.id)}
 			if len(args) == 1 {
-				r, err := s.cycleRef(cmd.Context(), args[0])
+				r, err := s.cycleRef(ctx, args[0])
 				if err != nil {
 					return err
 				}
@@ -470,7 +470,7 @@ func (s *state) cycleCmd() *cobra.Command {
 			if err := s.withAt(body, bm.at); err != nil {
 				return err
 			}
-			return s.mutate(cmd.Context(), "/api/v1/cycles/boost", body)
+			return s.mutate(ctx, "/api/v1/cycles/boost", body)
 		},
 	}
 	bm.flags(boost, true)
@@ -482,7 +482,7 @@ func (s *state) cycleCmd() *cobra.Command {
 		Short: "Make a paused cycle the focus and pause the running one",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := s.cycleRef(cmd.Context(), args[0])
+			r, err := s.cycleRef(ctx, args[0])
 			if err != nil {
 				return err
 			}
@@ -490,7 +490,7 @@ func (s *state) cycleCmd() *cobra.Command {
 			if err := s.withAt(body, wm.at); err != nil {
 				return err
 			}
-			return s.mutate(cmd.Context(), "/api/v1/cycles/switch", body)
+			return s.mutate(ctx, "/api/v1/cycles/switch", body)
 		},
 	}
 	wm.flags(switchCmd, true)
@@ -513,11 +513,11 @@ func (s *state) cycleCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			r, err := s.cycleRef(cmd.Context(), args[0])
+			r, err := s.cycleRef(ctx, args[0])
 			if err != nil {
 				return err
 			}
-			return s.mutate(cmd.Context(), "/api/v1/cycles/break", map[string]any{"cycle_id": r, "from": f, "to": t, "id": s.newID(km.id)})
+			return s.mutate(ctx, "/api/v1/cycles/break", map[string]any{"cycle_id": r, "from": f, "to": t, "id": s.newID(km.id)})
 		},
 	}
 	km.flags(brk, false)
@@ -534,7 +534,7 @@ func (s *state) cycleCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body := map[string]any{"id": s.newID(nm.id)}
 			if len(args) == 1 {
-				r, err := s.cycleRef(cmd.Context(), args[0])
+				r, err := s.cycleRef(ctx, args[0])
 				if err != nil {
 					return err
 				}
@@ -554,7 +554,7 @@ func (s *state) cycleCmd() *cobra.Command {
 			if pairs != nil {
 				body["kv"] = pairs
 			}
-			return s.mutate(cmd.Context(), "/api/v1/cycles/annotate", body)
+			return s.mutate(ctx, "/api/v1/cycles/annotate", body)
 		},
 	}
 	nm.flags(noteCmd, false)
@@ -591,7 +591,7 @@ func (s *state) decorateUnknownType(ctx context.Context, err error, typ string) 
 	return err
 }
 
-func (s *state) eventsCmd() *cobra.Command {
+func (s *state) eventsCmd(ctx context.Context) *cobra.Command {
 	root := &cobra.Command{Use: "events", Short: "The editor: list, correct and retract events"}
 	var from, to, view string
 	var types []string
@@ -617,7 +617,7 @@ func (s *state) eventsCmd() *cobra.Command {
 			if enc := q.Encode(); enc != "" {
 				path += "?" + enc
 			}
-			raw, err := s.client().Do(cmd.Context(), "GET", path, nil)
+			raw, err := s.client().Do(ctx, "GET", path, nil)
 			if err != nil {
 				return err
 			}
@@ -663,7 +663,7 @@ func (s *state) eventsCmd() *cobra.Command {
 			if reason != "" {
 				body["reason"] = reason
 			}
-			return s.mutate(cmd.Context(), "/api/v1/events/"+url.PathEscape(args[0])+"/correct", body)
+			return s.mutate(ctx, "/api/v1/events/"+url.PathEscape(args[0])+"/correct", body)
 		},
 	}
 	cm.flags(correct, false)
@@ -678,7 +678,7 @@ func (s *state) eventsCmd() *cobra.Command {
 		Short: "Take back an event, or a whole batch with --batch (undo)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return s.retract(cmd.Context(), args[0], batch, rreason, rm.id)
+			return s.retract(ctx, args[0], batch, rreason, rm.id)
 		},
 	}
 	rm.flags(retract, false)
@@ -700,14 +700,14 @@ func (s *state) retract(ctx context.Context, id string, batch bool, reason, give
 	return s.mutate(ctx, "/api/v1/"+kind+"/"+url.PathEscape(id)+"/retract", body)
 }
 
-func (s *state) undoCmd() *cobra.Command {
+func (s *state) undoCmd(ctx context.Context) *cobra.Command {
 	var m mutating
 	c := &cobra.Command{
 		Use:   "undo",
 		Short: "Retract the most recent live event or batch (subject to the dependents rule)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			raw, err := s.client().Do(cmd.Context(), "GET", "/api/v1/events", nil)
+			raw, err := s.client().Do(ctx, "GET", "/api/v1/events", nil)
 			if err != nil {
 				return err
 			}
@@ -733,9 +733,9 @@ func (s *state) undoCmd() *cobra.Command {
 					continue
 				}
 				if head.Data.Batch != "" {
-					return s.retract(cmd.Context(), head.Data.Batch, true, "undo", m.id)
+					return s.retract(ctx, head.Data.Batch, true, "undo", m.id)
 				}
-				return s.retract(cmd.Context(), ev.ID, false, "undo", m.id)
+				return s.retract(ctx, ev.ID, false, "undo", m.id)
 			}
 			return &exitError{code: ExitRefused, msg: "there is nothing to undo"}
 		},

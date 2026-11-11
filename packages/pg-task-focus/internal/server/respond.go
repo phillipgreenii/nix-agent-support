@@ -204,10 +204,11 @@ func (s *Server) respondMutation(w http.ResponseWriter, r *http.Request, c comma
 // request, with the instants the engine measured: validate, append, the fsync
 // inside it, and project.
 func (s *Server) stageSpans(ctx context.Context, stages []engine.Stage) {
-	var appendCtx context.Context
+	// appendCtx is ctx until the append stage yields its own span context.
+	appendCtx := ctx
 	for _, st := range stages {
 		parent := ctx
-		if st.Name == "fsync" && appendCtx != nil {
+		if st.Name == "fsync" {
 			parent = appendCtx
 		}
 		c, span := s.tracer.Start(parent, "pg-task-focus."+st.Name, trace.WithTimestamp(st.Start))

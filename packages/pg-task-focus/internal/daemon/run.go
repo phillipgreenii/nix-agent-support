@@ -113,7 +113,7 @@ func (d *Daemon) supervise(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			d.shutdown()
+			d.shutdown(ctx)
 			return
 		case <-ticker.C:
 			d.probe()
@@ -170,8 +170,9 @@ func (d *Daemon) Stop() {
 	<-d.done
 }
 
-func (d *Daemon) shutdown() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (d *Daemon) shutdown(ctx context.Context) {
+	// Detach: ctx is already cancelled here, and the drain needs its own budget.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	d.log.Info("stopping")
 	if err := d.http.Shutdown(ctx); err != nil {
@@ -180,13 +181,14 @@ func (d *Daemon) shutdown() {
 	if err := d.eng.Close(); err != nil {
 		d.log.Error("closing the store failed", "error", err.Error())
 	}
-	d.flush()
+	d.flush(ctx)
 }
 
 // flush flushes telemetry; it runs before the process exits, a startup
 // failure included, so the Error line is not lost.
-func (d *Daemon) flush() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+func (d *Daemon) flush(ctx context.Context) {
+	// Detach: ctx may already be cancelled, and the flush needs its own budget.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	if d.otel != nil {
 		_ = d.otel(ctx)

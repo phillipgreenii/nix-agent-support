@@ -142,7 +142,7 @@ func (s *state) client() *client.Client {
 func Execute(ctx context.Context, args []string, app App) int {
 	app.defaults()
 	st := &state{app: &app}
-	root := newRoot(st)
+	root := newRoot(ctx, st)
 	root.SetArgs(args)
 	root.SetOut(app.Stdout)
 	root.SetErr(app.Stderr)

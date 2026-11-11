@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +27,7 @@ func asProblem(err error) (*client.ProblemError, bool) {
 
 type clientEvent = client.Event
 
-func (s *state) serveCmd() *cobra.Command {
+func (s *state) serveCmd(ctx context.Context) *cobra.Command {
 	var cfg, dir string
 	c := &cobra.Command{
 		Use:   "serve",
@@ -57,7 +58,7 @@ shut it down cleanly. Logs are JSON lines on stdout.`,
 			if data == "" {
 				return usagef("serve needs --data-dir, $PG_TASK_FOCUS_DATA_DIR, or $XDG_DATA_HOME or $HOME to find the data directory")
 			}
-			if err := s.app.Serve(cmd.Context(), ServeParams{ConfigPath: path, DataDir: data}); err != nil {
+			if err := s.app.Serve(ctx, ServeParams{ConfigPath: path, DataDir: data}); err != nil {
 				return &exitError{code: ExitStartFailed, msg: err.Error()}
 			}
 			return nil
@@ -95,7 +96,7 @@ type CheckInvalid struct {
 	Events  []string `json:"events"`
 }
 
-func (s *state) checkCmd() *cobra.Command {
+func (s *state) checkCmd(ctx context.Context) *cobra.Command {
 	var dir string
 	c := &cobra.Command{
 		Use:   "check [LOG]",
@@ -197,7 +198,7 @@ type ConfigProblem struct {
 	Message string `json:"message"`
 }
 
-func (s *state) configCmd() *cobra.Command {
+func (s *state) configCmd(ctx context.Context) *cobra.Command {
 	root := &cobra.Command{Use: "config", Short: "Work with the configuration file"}
 	var file string
 	check := &cobra.Command{
