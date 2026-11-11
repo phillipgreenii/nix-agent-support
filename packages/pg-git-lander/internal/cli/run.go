@@ -68,7 +68,7 @@ func Run(args []string, env *Env) int {
 		fmt.Fprintf(env.Stdout, "pg-git-lander %s\n", env.Version)
 		return 0
 	case KindHelp:
-		fmt.Fprintln(env.Stdout, Synopsis)
+		fmt.Fprintln(env.Stdout, HelpText)
 		return 0
 	}
 	c.ApplyEnv(env.Getenv)

@@ -1,0 +1,85 @@
+#compdef pg-git-lander
+_pg_git_lander() {
+  local -a subcmds
+  subcmds=(
+    'rebase:replay a branch onto a commit'
+    'land:rebase a branch onto the target and fast-forward the target'
+    'status:show the operations in this repository'
+    'log:print the log of one operation'
+    'config:validate the configuration'
+    'help:show help'
+  )
+  local -a common resume
+  common=(
+    '--repo=[any path inside the clone]:path:_files -/'
+    '--wait=[lock wait for this invocation]:duration'
+    '--json[print exactly one JSON object]'
+    '(- *)--help[show help]'
+  )
+  resume=(
+    '(--skip --abort --quit)--continue[resume the stopped operation]'
+    '(--continue --abort --quit)--skip[drop the stopped commit and resume]'
+    '(--continue --skip --quit)--abort[undo the stopped operation]'
+    '(--continue --skip --abort)--quit[leave the work worktree and branch in place]'
+  )
+
+  if (( CURRENT == 2 )); then
+    _describe 'subcommand' subcmds
+    return
+  fi
+
+  case $words[2] in
+    rebase)
+      _arguments $common $resume \
+        '--onto=[commit to replay onto]:ref' \
+        '--source-worktree=[worktree that holds BRANCH]:path:_files -/' \
+        '--work-worktree=[worktree to do the work in]:path:_files -/' \
+        '*--context=[context for the hooks]:key=value' \
+        '1:branch:__pg_git_lander_branches'
+      ;;
+    land)
+      _arguments $common $resume \
+        '--into=[target branch]:branch:__pg_git_lander_branches' \
+        '--target-worktree=[worktree that holds the target]:path:_files -/' \
+        '--source-worktree=[worktree that holds BRANCH]:path:_files -/' \
+        '--work-worktree=[worktree to do the work in]:path:_files -/' \
+        '--keep-source-worktree[park the source worktree on the placeholder]' \
+        '--keep-source-branch[move BRANCH to the result instead of deleting it]' \
+        '*--context=[context for the hooks]:key=value' \
+        '1:branch:__pg_git_lander_branches'
+      ;;
+    status)
+      _arguments \
+        '--repo=[any path inside the clone]:path:_files -/' \
+        '--json[print exactly one JSON object]' \
+        '(- *)--help[show help]' \
+        '1:branch:__pg_git_lander_branches'
+      ;;
+    log)
+      _arguments \
+        '--repo=[any path inside the clone]:path:_files -/' \
+        '--tail=[print only the last N lines]:lines' \
+        '(- *)--help[show help]' \
+        '1:operation or branch:__pg_git_lander_branches'
+      ;;
+    config)
+      if (( CURRENT == 3 )); then
+        _values 'action' check
+      elif [[ $words[3] == check ]]; then
+        _arguments \
+          '--file=[file to validate]:file:_files' \
+          '--repo=[any path inside the clone]:path:_files -/' \
+          '--json[print exactly one JSON object]' \
+          '(- *)--help[show help]'
+      fi
+      ;;
+  esac
+}
+
+__pg_git_lander_branches() {
+  local -a branches
+  branches=(${(f)"$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)"})
+  _describe 'branch' branches
+}
+
+_pg_git_lander "$@"
