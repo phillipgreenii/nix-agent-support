@@ -1830,6 +1830,8 @@ groups:
       # Prometheus through `ccpool emit-gauge` (a generic emitter; the names carry ccpool_
       # because that is its namespace), one push per run that was not skipped:
       #   ccpool_janitor_last_success_timestamp_seconds  moves only on a COMPLETED run
+      #   ccpool_janitor_role_last_success_timestamp_seconds{role}  moves for each role that finished
+      #                                                  all its passes, even in a deadline run
       #   ccpool_janitor_last_run_seconds                wall time of the run
       #   ccpool_janitor_deadline_hit                    1 when the run hit its deadline
       #   ccpool_janitor_pass_errors{pass}               errors of a pass in that run
@@ -1860,8 +1862,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "the ccpool handler's janitor has not completed a run for more than 30 minutes"
-          description: "ccpool_janitor_last_success_timestamp_seconds is more than 3 janitor intervals (30 minutes, interval 10 minutes) old and stayed that way for an hour, so closed-bead sessions, orphans, leaked worktrees and stale locks are no longer swept between dispatches. First check the janitor's launchd log (the LaunchAgent's StandardErrorPath), then host load and whether the machine was asleep, then run one pass by hand: pg-router-handler-ccpool janitor with the agent's --config and --role-file arguments. A run that only hits its deadline does not count as a success, see pg-router-ccpool-janitor-deadline."
+          summary: "the ccpool handler's janitor has not completed a run, nor finished any role, for more than 30 minutes"
+          description: "ccpool_janitor_last_success_timestamp_seconds and ccpool_janitor_role_last_success_timestamp_seconds are both more than 3 janitor intervals (30 minutes, interval 10 minutes) old and stayed that way for an hour, so closed-bead sessions, orphans, leaked worktrees and stale locks are no longer swept between dispatches. First check the janitor's launchd log (the LaunchAgent's StandardErrorPath), then host load and whether the machine was asleep, then run one pass by hand: pg-router-handler-ccpool janitor with the agent's --config and --role-file arguments. A run that only hits its deadline does not count as a success, see pg-router-ccpool-janitor-deadline."
         data:
           - refId: A
             relativeTimeRange:
@@ -1872,7 +1874,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (time() - max(last_over_time(ccpool_janitor_last_success_timestamp_seconds[7d]))) > 1800
+              expr: (time() - max(last_over_time(ccpool_janitor_last_success_timestamp_seconds[7d]) or last_over_time(ccpool_janitor_role_last_success_timestamp_seconds[7d]))) > 1800
           - refId: B
             datasourceUid: __expr__
             model:

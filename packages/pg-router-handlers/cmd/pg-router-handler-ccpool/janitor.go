@@ -381,6 +381,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	if run.cutOff || runCtx.Err() != nil {
 		outcome = janitorDeadline
 	}
+	rolesDone := finishedRoles(order, run.cutRoles, run.skipped)
 	elapsed := time.Since(started)
 	reclaimed := 0
 	for _, st := range run.stats {
@@ -396,10 +397,11 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		"reclaimed":     reclaimed,
 		"roles_skipped": run.skipped,
 		"roles_cut":     run.cutRoles,
+		"roles_done":    rolesDone,
 		"counters":      run.counts,
 	}
 	_ = log.Emit("info", janitorRunEvent, "janitor run "+outcome, fields)
-	emitJanitorGauges(ctx, passes.emit, time.Now(), outcome, elapsed, run.stats)
+	emitJanitorGauges(ctx, passes.emit, time.Now(), outcome, elapsed, run.stats, rolesDone)
 	emitJanitorProgressGauges(ctx, passes.emit, run.counts)
 	fmt.Fprintf(stdout, "janitor: outcome=%s elapsed=%s roles=%d pools=%d reclaimed=%d\n", outcome, elapsed.Round(time.Millisecond), len(jroles), len(poolDone), reclaimed)
 	if passes.emit != nil {
@@ -437,4 +439,23 @@ func nextRotation(stateDir string, n int) int {
 		}
 	}
 	return count % n
+}
+
+// finishedRoles are the roles of order that were neither cut at their share nor
+// skipped: they ran every pass to the end.
+func finishedRoles(order, cut, skipped []string) []string {
+	bad := map[string]bool{}
+	for _, r := range cut {
+		bad[r] = true
+	}
+	for _, r := range skipped {
+		bad[r] = true
+	}
+	var out []string
+	for _, r := range order {
+		if !bad[r] {
+			out = append(out, r)
+		}
+	}
+	return out
 }

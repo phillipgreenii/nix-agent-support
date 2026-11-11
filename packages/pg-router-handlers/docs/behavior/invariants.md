@@ -1527,10 +1527,10 @@ changes a core gate or `INV-LIFE-2`.
     run's duration, per-pass error and reclaim counts). A janitor that stops running MUST be
     detectable as stale. The heartbeat is published as gauges through the generic gauge emitter of
     `ccpool` (the handler itself carries no telemetry client): last-success time (moved only by a
-    completed run), run duration, whether the run hit its deadline, and per-pass error and reclaim
+    completed run), a per-role last-success time (moved for each role that ran all its passes inside its own share, so a run ended as deadline by one slow role still shows the others were swept), run duration, whether the run hit its deadline, and per-pass error and reclaim
     counts, each pushed once per run that was not skipped. Each orphan reclaim or hard stop also
     publishes the time of the latest such event per role and kind. Three alerts watch the heartbeat:
-    no completed run for three intervals, three consecutive deadline runs, and a pass failing on
+    neither a completed run nor a finished role for three intervals, three consecutive deadline runs, and a pass failing on
     every run or nothing reclaimed for hours while a pool has no free slot.
   - **Progress counters.** A run MUST also record, per pass and per role (a pool-level pass under
     the role that ran it), how many candidates it saw (`candidates`), examined, skipped as cached

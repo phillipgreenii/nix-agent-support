@@ -27,6 +27,26 @@ tests:
           - exp_labels:
               severity: warning
 
+  - name: stale stays quiet when every run hits its deadline but some role keeps finishing, and fires when neither advances
+    interval: 10m
+    input_series:
+      # No run completes (last_success frozen at 0) but role b finishes every run until t=60m.
+      - series: ccpool_janitor_last_success_timestamp_seconds
+        values: "0x30"
+      - series: ccpool_janitor_role_last_success_timestamp_seconds{role="b"}
+        values: "0 600 1200 1800 2400 3000 3600 3600x23"
+      - series: ccpool_janitor_role_last_success_timestamp_seconds{role="a"}
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-router-ccpool-janitor-stale
+        exp_alerts: []
+      - eval_time: 200m
+        alertname: pg-router-ccpool-janitor-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
   - name: stale stays quiet while runs keep completing and on a host that never ran the janitor
     interval: 10m
     input_series:

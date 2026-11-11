@@ -17,6 +17,11 @@ import (
 const (
 	gaugeJanitorLastSuccess = "ccpool_janitor_last_success_timestamp_seconds"
 	gaugeJanitorLastRun     = "ccpool_janitor_last_run_seconds"
+	// gaugeJanitorRoleSuccess is the per-role heartbeat: set for every role that
+	// finished all its passes inside its own share, even in a run whose outcome is
+	// deadline because another role was cut. The stale alert reads the newest of
+	// this and last_success.
+	gaugeJanitorRoleSuccess = "ccpool_janitor_role_last_success_timestamp_seconds"
 	gaugeJanitorDeadlineHit = "ccpool_janitor_deadline_hit"
 	gaugeJanitorPassErrors  = "ccpool_janitor_pass_errors"
 	gaugeJanitorReclaimed   = "ccpool_janitor_reclaimed"
@@ -52,7 +57,11 @@ var allJanitorPasses = []string{passClosedBead, passDefaultPool, passOrphan, pas
 // Best effort: a failed emit is logged and never changes the run's outcome.
 // last_success moves only on a completed run, so a run that keeps hitting its
 // deadline goes stale as well as raising the deadline gauge.
-func emitJanitorGauges(ctx context.Context, emit gaugeEmitFn, now time.Time, outcome string, elapsed time.Duration, stats map[string]*passStat) {
+//
+// rolesDone are the roles that finished every pass inside their own share; each
+// gets a per-role success point, so a run cut at one role's share (outcome
+// deadline, unchanged) still shows the other roles were swept.
+func emitJanitorGauges(ctx context.Context, emit gaugeEmitFn, now time.Time, outcome string, elapsed time.Duration, stats map[string]*passStat, rolesDone []string) {
 	if emit == nil {
 		return
 	}
@@ -63,6 +72,9 @@ func emitJanitorGauges(ctx context.Context, emit gaugeEmitFn, now time.Time, out
 	}
 	if outcome == janitorCompleted {
 		put(gaugeJanitorLastSuccess, float64(now.Unix()), nil)
+	}
+	for _, r := range rolesDone {
+		put(gaugeJanitorRoleSuccess, float64(now.Unix()), map[string]string{"role": r})
 	}
 	put(gaugeJanitorLastRun, elapsed.Seconds(), nil)
 	hit := 0.0

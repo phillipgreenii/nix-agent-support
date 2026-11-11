@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -424,5 +425,50 @@ func TestJanitor_runInsideEveryShareIsCompletedWithNoCutRole(t *testing.T) {
 	}
 	if ev[0]["roles_cut"] != nil || ev[0]["roles_skipped"] != nil {
 		t.Errorf("cut %v skipped %v, want neither", ev[0]["roles_cut"], ev[0]["roles_skipped"])
+	}
+}
+
+// A role cut at its own share keeps the run's outcome deadline (unchanged), but
+// the role that finished still gets a per-role success point, the run's last
+// success stays unmoved, and the row names the finished roles.
+func TestJanitor_cutRoleDoesNotHideTheRolesThatFinished(t *testing.T) {
+	f := newJanitorFixture(t, [2]string{"a", ""}, [2]string{"b", ""})
+	f.opts.deadline = 400 * time.Millisecond
+	rec := &recorder{}
+	p := rec.passes()
+	var pts []gaugePoint
+	p.emit = spyEmit(&pts)
+	inner := p.orphan
+	p.orphan = func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
+		inner(ctx, role, cfg, deps)
+		if role.Name == "a" {
+			<-ctx.Done()
+		}
+		return 0
+	}
+	if code, out := f.run(p); code != conformance.ExitOK || !strings.Contains(out, "outcome=deadline") {
+		t.Fatalf("exit %d out %q", code, out)
+	}
+	var done []string
+	for _, pt := range pts {
+		if pt.name == gaugeJanitorRoleSuccess {
+			done = append(done, pt.labels["role"])
+		}
+	}
+	if len(done) != 1 || done[0] != "b" {
+		t.Errorf("role success points for %v, want only b", done)
+	}
+	if _, ok := find(pts, gaugeJanitorLastSuccess, ""); ok {
+		t.Error("a deadline run must not move last_success")
+	}
+	if ev := f.events(); len(ev) != 1 || fmt.Sprint(ev[0]["roles_done"]) != "[b]" || fmt.Sprint(ev[0]["roles_cut"]) != "[a]" {
+		t.Errorf("events = %v, want roles_done [b] and roles_cut [a]", ev)
+	}
+}
+
+func TestFinishedRoles(t *testing.T) {
+	got := finishedRoles([]string{"a", "b", "c", "d"}, []string{"b"}, []string{"d"})
+	if fmt.Sprint(got) != "[a c]" {
+		t.Errorf("finishedRoles = %v", got)
 	}
 }

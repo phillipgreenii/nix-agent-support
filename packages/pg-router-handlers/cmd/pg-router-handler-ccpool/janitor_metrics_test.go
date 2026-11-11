@@ -33,7 +33,7 @@ func TestEmitJanitorGaugesCompleted(t *testing.T) {
 	var pts []gaugePoint
 	now := time.Unix(1700000000, 0)
 	stats := map[string]*passStat{passOrphan: {Runs: 2, Reclaimed: 3, Errors: 1}}
-	emitJanitorGauges(context.Background(), spyEmit(&pts), now, janitorCompleted, 90*time.Second, stats)
+	emitJanitorGauges(context.Background(), spyEmit(&pts), now, janitorCompleted, 90*time.Second, stats, nil)
 	if p, ok := find(pts, gaugeJanitorLastSuccess, ""); !ok || p.value != 1700000000 {
 		t.Errorf("last success = %+v ok=%v", p, ok)
 	}
@@ -57,7 +57,10 @@ func TestEmitJanitorGaugesCompleted(t *testing.T) {
 
 func TestEmitJanitorGaugesDeadlineDoesNotAdvanceSuccess(t *testing.T) {
 	var pts []gaugePoint
-	emitJanitorGauges(context.Background(), spyEmit(&pts), time.Now(), janitorDeadline, time.Minute, nil)
+	emitJanitorGauges(context.Background(), spyEmit(&pts), time.Now(), janitorDeadline, time.Minute, nil, []string{"a", "b"})
+	if p, ok := find(pts, gaugeJanitorRoleSuccess, ""); !ok || p.labels["role"] != "a" {
+		t.Errorf("a deadline run must still mark finished roles, got %+v ok=%v", p, ok)
+	}
 	if _, ok := find(pts, gaugeJanitorLastSuccess, ""); ok {
 		t.Error("a deadline run must not move last_success")
 	}
@@ -67,9 +70,9 @@ func TestEmitJanitorGaugesDeadlineDoesNotAdvanceSuccess(t *testing.T) {
 }
 
 func TestEmitJanitorGaugesNilAndFailureAreHarmless(t *testing.T) {
-	emitJanitorGauges(context.Background(), nil, time.Now(), janitorCompleted, 0, nil)
+	emitJanitorGauges(context.Background(), nil, time.Now(), janitorCompleted, 0, nil, nil)
 	fail := func(context.Context, string, float64, map[string]string) error { return errors.New("boom") }
-	emitJanitorGauges(context.Background(), fail, time.Now(), janitorCompleted, 0, nil)
+	emitJanitorGauges(context.Background(), fail, time.Now(), janitorCompleted, 0, nil, nil)
 }
 
 func TestEmitOrphanGauge(t *testing.T) {
