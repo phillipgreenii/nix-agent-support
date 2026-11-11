@@ -146,6 +146,7 @@ let
     "pg-router"
     "pa-monitor"
     "pg-keep-awake"
+    "pg-git-lander"
     "agentsview"
   ];
 
