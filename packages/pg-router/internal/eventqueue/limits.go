@@ -282,7 +282,8 @@ func (q *Queue) noteWrite(err error) error {
 // appendLocked / appendBatchLocked are the queue's only paths to the Store's
 // writes; each feeds noteWrite. Caller holds q.mu.
 func (q *Queue) appendLocked(rec Record) error {
-	return q.noteWrite(q.store.Append(rec))
+	_, err := q.store.Append(rec)
+	return q.noteWrite(err)
 }
 
 func (q *Queue) appendBatchLocked(recs []Record) error {

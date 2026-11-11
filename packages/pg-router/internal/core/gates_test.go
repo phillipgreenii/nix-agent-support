@@ -409,9 +409,9 @@ type toggleStore struct {
 	fail bool
 }
 
-func (s *toggleStore) Append(r eventqueue.Record) error {
+func (s *toggleStore) Append(r eventqueue.Record) (int64, error) {
 	if s.fail {
-		return errStoreDown
+		return 0, errStoreDown
 	}
 	return s.MemStore.Append(r)
 }

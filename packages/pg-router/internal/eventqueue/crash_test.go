@@ -18,9 +18,9 @@ type dropAcceptStore struct {
 	inner Store
 }
 
-func (d *dropAcceptStore) Append(r Record) error {
+func (d *dropAcceptStore) Append(r Record) (int64, error) {
 	if r.Op == opAccept {
-		return nil // lost to the crash window
+		return 0, nil // lost to the crash window
 	}
 	return d.inner.Append(r)
 }
@@ -49,9 +49,9 @@ func (d *dropAcceptStore) Close() error              { return d.inner.Close() }
 // dropAcceptStore's silent success-then-loss.
 type failAcceptStore struct{ inner Store }
 
-func (s *failAcceptStore) Append(r Record) error {
+func (s *failAcceptStore) Append(r Record) (int64, error) {
 	if r.Op == opAccept {
-		return errors.New("accept-append boom")
+		return 0, errors.New("accept-append boom")
 	}
 	return s.inner.Append(r)
 }

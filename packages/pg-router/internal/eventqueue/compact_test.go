@@ -492,7 +492,7 @@ func TestCompactCrashAtEveryStep(t *testing.T) {
 					appended = true
 					// A record landing while the compaction is mid-flight must end up in
 					// the tail of the new log, after the compacted prefix.
-					if err := fs.Append(Record{Op: opEnqueue, EventID: "raced", Type: "U", At: clk.t, ExpiresAt: clk.in(time.Hour), EnqueuedAt: clk.t}); err != nil {
+					if _, err := fs.Append(Record{Op: opEnqueue, EventID: "raced", Type: "U", At: clk.t, ExpiresAt: clk.in(time.Hour), EnqueuedAt: clk.t}); err != nil {
 						t.Error(err)
 					}
 				}
@@ -586,7 +586,7 @@ func TestCompactFailureLeavesStoreUsable(t *testing.T) {
 	if _, err := fs.Compact(); err == nil {
 		t.Fatal("expected the compaction to fail")
 	}
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "b", Type: "T"}); err != nil {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "b", Type: "T"}); err != nil {
 		t.Fatalf("store unusable after failed compaction: %v", err)
 	}
 	if _, err := os.Stat(compactTempPath(path)); !os.IsNotExist(err) {
@@ -786,7 +786,7 @@ func TestFileStoreLogSizeTracksFile(t *testing.T) {
 		}
 	}
 	check("empty")
-	_ = fs.Append(Record{Op: opEnqueue, EventID: "a", Type: "T"})
+	_, _ = fs.Append(Record{Op: opEnqueue, EventID: "a", Type: "T"})
 	check("append")
 	_ = fs.AppendBatch([]Record{{Op: opEvict, EventID: "a"}, {Op: opEnqueue, EventID: "b", Type: "T"}})
 	check("batch")
@@ -794,7 +794,7 @@ func TestFileStoreLogSizeTracksFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("compact")
-	_ = fs.Append(Record{Op: opAccept, EventID: "b", ListenerID: "h"})
+	_, _ = fs.Append(Record{Op: opAccept, EventID: "b", ListenerID: "h"})
 	check("append after compact")
 	_ = fs.Close() // release the log lock before reopening
 	reopened, err := NewFileStore(path)

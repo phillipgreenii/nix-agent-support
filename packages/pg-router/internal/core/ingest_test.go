@@ -503,8 +503,8 @@ func TestIngestEvent_UnclassifiedEnqueueFailureKeepsEnqueuePrefix(t *testing.T) 
 
 type encodeFailStore struct{ failingStore }
 
-func (encodeFailStore) Append(eventqueue.Record) error {
-	return &eventqueue.EncodeError{Err: errors.New("cannot encode")}
+func (encodeFailStore) Append(eventqueue.Record) (int64, error) {
+	return 0, &eventqueue.EncodeError{Err: errors.New("cannot encode")}
 }
 
 // At the hard log-size limit a well-formed, declared event is refused with the
@@ -570,10 +570,10 @@ type failingStore struct{}
 
 var errStoreDown = errors.New("store is down")
 
-func (failingStore) Append(eventqueue.Record) error        { return errStoreDown }
-func (failingStore) AppendBatch([]eventqueue.Record) error { return errStoreDown }
-func (failingStore) Replay() ([]eventqueue.Record, error)  { return nil, nil }
-func (failingStore) Close() error                          { return nil }
+func (failingStore) Append(eventqueue.Record) (int64, error) { return 0, errStoreDown }
+func (failingStore) AppendBatch([]eventqueue.Record) error   { return errStoreDown }
+func (failingStore) Replay() ([]eventqueue.Record, error)    { return nil, nil }
+func (failingStore) Close() error                            { return nil }
 
 // The reply's schemaVersion is the one the core declares, not a literal.
 func TestIngestEvent_ReplyCarriesTheCoreSchemaVersion(t *testing.T) {

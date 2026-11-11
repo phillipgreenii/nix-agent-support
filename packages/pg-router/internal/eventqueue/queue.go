@@ -584,11 +584,13 @@ type Queue struct {
 	// lets a test (or shutdown) wait for the background run.
 	compactThreshold int64
 	compactOnStart   bool
-	compactNext      atomic.Int64
-	compacting       atomic.Bool
-	compactWG        sync.WaitGroup
-	compactions      atomic.Int64
-	lastCompaction   atomic.Pointer[CompactionInfo]
+	// level is the durable level path's state (level.go).
+	level          levelState
+	compactNext    atomic.Int64
+	compacting     atomic.Bool
+	compactWG      sync.WaitGroup
+	compactions    atomic.Int64
+	lastCompaction atomic.Pointer[CompactionInfo]
 
 	// lim is the log-size limit enforcement state (limits.go, bead pg2-5d3ui).
 	lim limitState
@@ -760,12 +762,21 @@ func New(store Store, opts ...Option) (*Queue, error) {
 // opEvict record (see retireLocked), so replay drops exactly what actually left
 // the queue and nothing else.
 func (q *Queue) replay() error {
-	recs, err := q.store.Replay()
+	recs, offs, err := q.replayRecords()
 	if err != nil {
 		return err
 	}
-	for _, r := range recs {
+	lf := newLevelFold()
+	levelHi := int64(-1)
+	for i, r := range recs {
 		switch r.Op {
+		case opLevelSet, opLevelCleared:
+			// The level path (level.go): folded here, handed to the projection by
+			// ReplayLevels. They are not queue events and change no queue state.
+			lf.apply(r, offs[i])
+			if offs[i] > levelHi {
+				levelHi = offs[i]
+			}
 		case opEnqueue:
 			e := newEntry(r.event())
 			if _, seen := q.entries[e.evt.ID]; !seen {
@@ -799,6 +810,8 @@ func (q *Queue) replay() error {
 			delete(q.gates, r.GateType)
 		}
 	}
+	q.level.replayed = lf.items(time.Time{}, false)
+	q.level.hi = levelHi
 	// Tell a RestoreObserver about each event that survived replay (pg2-0efop),
 	// in FIFO order and exactly once per retained id — AFTER the loop, so an
 	// event enqueued and then evicted within the log is never reported. Not
@@ -812,6 +825,20 @@ func (q *Queue) replay() error {
 		}
 	}
 	return nil
+}
+
+// replayRecords reads the log back with each record's offset: the store's own
+// (OffsetReplayer) when it has them, else the record index.
+func (q *Queue) replayRecords() ([]Record, []int64, error) {
+	if or, ok := q.store.(OffsetReplayer); ok {
+		return or.ReplayOffsets()
+	}
+	recs, err := q.store.Replay()
+	offs := make([]int64, len(recs))
+	for i := range offs {
+		offs[i] = int64(i)
+	}
+	return recs, offs, err
 }
 
 // Register binds a listener to the queue. Its per-listener cursor is

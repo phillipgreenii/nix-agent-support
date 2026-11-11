@@ -147,8 +147,8 @@ func TestRunOneTick_produceErrorStillKicksExpiresAndPublishes(t *testing.T) {
 // which Enqueue returns as a plain, non-admission error and ProduceTick propagates).
 type encodeFailStore struct{ eventqueue.Store }
 
-func (encodeFailStore) Append(eventqueue.Record) error {
-	return &eventqueue.EncodeError{Err: errors.New("cannot encode")}
+func (encodeFailStore) Append(eventqueue.Record) (int64, error) {
+	return 0, &eventqueue.EncodeError{Err: errors.New("cannot encode")}
 }
 
 func (encodeFailStore) AppendBatch([]eventqueue.Record) error {

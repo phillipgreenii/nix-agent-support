@@ -976,7 +976,7 @@ func TestReplayEvictedIdReEmitLeavesNoTombstone(t *testing.T) {
 		{Op: opEvict, EventID: "A"},
 		enq("A"), // re-emit of the evicted id, still within its retention
 	} {
-		if err := store.Append(r); err != nil {
+		if _, err := store.Append(r); err != nil {
 			t.Fatalf("Append: %v", err)
 		}
 	}
@@ -1320,9 +1320,9 @@ func TestExpireSurfacesEvictAppendError(t *testing.T) {
 // exactly the evict-append failure it exists to test.
 type failEvictStore struct{ inner Store }
 
-func (s *failEvictStore) Append(r Record) error {
+func (s *failEvictStore) Append(r Record) (int64, error) {
 	if r.Op == opEvict {
-		return errors.New("evict-append boom")
+		return 0, errors.New("evict-append boom")
 	}
 	return s.inner.Append(r)
 }
@@ -1343,10 +1343,10 @@ func (s *failEvictStore) Close() error              { return s.inner.Close() }
 // otherwise disturbing Append-based persistence.
 type failBatchStore struct{ inner Store }
 
-func (s *failBatchStore) Append(r Record) error      { return s.inner.Append(r) }
-func (s *failBatchStore) AppendBatch([]Record) error { return errors.New("append-batch boom") }
-func (s *failBatchStore) Replay() ([]Record, error)  { return s.inner.Replay() }
-func (s *failBatchStore) Close() error               { return s.inner.Close() }
+func (s *failBatchStore) Append(r Record) (int64, error) { return s.inner.Append(r) }
+func (s *failBatchStore) AppendBatch([]Record) error     { return errors.New("append-batch boom") }
+func (s *failBatchStore) Replay() ([]Record, error)      { return s.inner.Replay() }
+func (s *failBatchStore) Close() error                   { return s.inner.Close() }
 
 // TestEnqueueDurableBeforeVisible: Enqueue's stale-retire branch persists the
 // old entry's evict record and the new enqueue record in ONE AppendBatch call
@@ -1390,7 +1390,7 @@ func TestFileStoreCrashMidBatchTornWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := s1.Append(recordFromEvent(evtUntil("x", "T", now.Add(time.Hour)), now)); err != nil {
+	if _, err := s1.Append(recordFromEvent(evtUntil("x", "T", now.Add(time.Hour)), now)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s1.Close(); err != nil {
@@ -1462,7 +1462,7 @@ func TestFileStoreAppendBatchReplayEquivalence(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range recs {
-		if err := ss.Append(r); err != nil {
+		if _, err := ss.Append(r); err != nil {
 			t.Fatal(err)
 		}
 	}

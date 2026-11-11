@@ -171,6 +171,10 @@ type logFold struct {
 	gates   map[string]Record
 	seen    map[string]struct{}
 	applied int
+	// levels folds the level_set / level_cleared records (level.go); now is the
+	// wall clock a lapsed operator override is judged against.
+	levels *levelFold
+	now    time.Time
 	// dropped counts events a later evict removed (the dead history compaction
 	// discards); only the dry-run plan reports it.
 	dropped int
@@ -188,6 +192,8 @@ func newLogFold() *logFold {
 		events: map[string]*foldEvent{},
 		gates:  map[string]Record{},
 		seen:   map[string]struct{}{},
+		levels: newLevelFold(),
+		now:    time.Now(),
 	}
 }
 
@@ -234,6 +240,8 @@ func (f *logFold) apply(r Record) {
 		if r.Type != "" {
 			f.seen[r.Type] = struct{}{}
 		}
+	case opLevelSet, opLevelCleared:
+		f.levels.apply(r, 0)
 	}
 }
 
@@ -307,7 +315,7 @@ func (f *logFold) records() []Record {
 		}
 		archive = archive[keepFrom:]
 	}
-	out := make([]Record, 0, len(seenOnly)+len(archive)+len(live)+len(gateTypes))
+	out := make([]Record, 0, len(seenOnly)+len(archive)+len(live)+len(gateTypes)+len(f.levels.latest))
 	for _, t := range seenOnly {
 		out = append(out, Record{Op: opSeen, Type: t})
 	}
@@ -320,6 +328,9 @@ func (f *logFold) records() []Record {
 	}
 	for _, t := range gateTypes {
 		out = append(out, f.gates[t])
+	}
+	for _, it := range f.levels.items(f.now, true) {
+		out = append(out, it.rec)
 	}
 	return out
 }
@@ -338,7 +349,7 @@ func compactRecords(recs []Record) []Record {
 // planFrom folds the log bytes r (size of them, torn tail included) into the
 // CompactPlan a real compaction of them would execute. It writes nothing: the
 // compacted size is the encoded length of the records a real run would write.
-func planFrom(r io.Reader, size int64, archiveBudget int64) (CompactPlan, error) {
+func planFrom(r io.Reader, size int64, archiveBudget int64, now time.Time) (CompactPlan, error) {
 	fold := newLogFold()
 	fold.archiveBudget = archiveBudget
 	torn, err := scanRecords(r, fold.apply)
@@ -383,7 +394,7 @@ func PlanCompactionFile(path string) (CompactPlan, error) {
 	if err != nil {
 		return CompactPlan{}, err
 	}
-	return planFrom(io.NewSectionReader(f, 0, fi.Size()), fi.Size(), 0)
+	return planFrom(io.NewSectionReader(f, 0, fi.Size()), fi.Size(), 0, time.Now())
 }
 
 // PlanCompaction is the dry run of Compact: it folds the log's current prefix
@@ -402,7 +413,7 @@ func (s *FileStore) PlanCompaction() (CompactPlan, error) {
 		return CompactPlan{}, err
 	}
 	defer func() { _ = rf.Close() }()
-	return planFrom(io.NewSectionReader(rf, 0, n), n, s.archiveBudget.Load())
+	return planFrom(io.NewSectionReader(rf, 0, n), n, s.archiveBudget.Load(), s.clock())
 }
 
 // syncDir fsyncs a directory so a rename inside it is durable.
@@ -461,6 +472,7 @@ func (s *FileStore) Compact() (stats CompactStats, err error) {
 
 	fold := newLogFold()
 	fold.archiveBudget = s.archiveBudget.Load()
+	fold.now = s.clock()
 	torn, err := scanRecords(io.NewSectionReader(rf, 0, n), fold.apply)
 	if err != nil {
 		return stats, err
@@ -539,6 +551,14 @@ func (s *FileStore) Compact() (stats CompactStats, err error) {
 	}
 	s.hook(compactStageDirSynced)
 	return stats, nil
+}
+
+// clock is the wall clock compaction judges a lapsed operator override by.
+func (s *FileStore) clock() time.Time {
+	if s.nowFn != nil {
+		return s.nowFn()
+	}
+	return time.Now()
 }
 
 func (s *FileStore) hook(stage string) {

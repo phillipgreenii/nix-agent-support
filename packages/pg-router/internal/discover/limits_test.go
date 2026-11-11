@@ -175,8 +175,8 @@ func TestProduce_unclassifiedEnqueueFailureStillAbortsThePass(t *testing.T) {
 // which the queue does not classify as an unwritable log.
 type failEncodeStore struct{ eventqueue.Store }
 
-func (failEncodeStore) Append(eventqueue.Record) error {
-	return &eventqueue.EncodeError{Err: errors.New("cannot encode")}
+func (failEncodeStore) Append(eventqueue.Record) (int64, error) {
+	return 0, &eventqueue.EncodeError{Err: errors.New("cannot encode")}
 }
 
 func (failEncodeStore) AppendBatch([]eventqueue.Record) error {

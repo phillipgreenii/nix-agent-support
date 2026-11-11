@@ -56,13 +56,13 @@ func (s *failEveryAppendStore) heal() {
 	s.err = nil
 }
 
-func (s *failEveryAppendStore) Append(r Record) error {
+func (s *failEveryAppendStore) Append(r Record) (int64, error) {
 	s.mu.Lock()
 	s.calls++
 	err := s.err
 	s.mu.Unlock()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	return s.inner.Append(r)
 }
@@ -116,10 +116,10 @@ func (s *failAfterBytesStore) fits(rs ...Record) bool {
 	return !s.full && s.inner.LogSize()+n <= s.limit
 }
 
-func (s *failAfterBytesStore) Append(r Record) error {
+func (s *failAfterBytesStore) Append(r Record) (int64, error) {
 	if !s.fits(r) {
 		s.full = true
-		return syscall.ENOSPC
+		return 0, syscall.ENOSPC
 	}
 	return s.inner.Append(r)
 }
@@ -757,7 +757,7 @@ func TestFileStore_shortWriteIsRolledBackAndNothingIsLost(t *testing.T) {
 	defer func() { _ = fs.Close() }()
 	good1 := Record{Op: opEnqueue, EventID: "a", Type: "T"}
 	good2 := Record{Op: opEnqueue, EventID: "b", Type: "T"}
-	if err := fs.Append(good1); err != nil {
+	if _, err := fs.Append(good1); err != nil {
 		t.Fatal(err)
 	}
 	sizeBefore := fs.LogSize()
@@ -766,14 +766,14 @@ func TestFileStore_shortWriteIsRolledBackAndNothingIsLost(t *testing.T) {
 		n, _ := f.Write(b[:len(b)/2]) // a short write, then the disk is full
 		return n, syscall.ENOSPC
 	}
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "torn", Type: "T"}); !errors.Is(err, syscall.ENOSPC) {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "torn", Type: "T"}); !errors.Is(err, syscall.ENOSPC) {
 		t.Fatalf("Append = %v, want ENOSPC", err)
 	}
 	if got := fs.LogSize(); got != sizeBefore {
 		t.Fatalf("LogSize = %d after a failed write, want it rolled back to %d", got, sizeBefore)
 	}
 	fs.writeFn = nil
-	if err := fs.Append(good2); err != nil {
+	if _, err := fs.Append(good2); err != nil {
 		t.Fatal(err)
 	}
 	recs, err := fs.Replay()
@@ -798,21 +798,21 @@ func TestFileStore_poisonedStoreIsHealedByProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = fs.Close() }()
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "a", Type: "T"}); err != nil {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "a", Type: "T"}); err != nil {
 		t.Fatal(err)
 	}
 	// Break the descriptor under the store: the write AND the rollback fail.
 	_ = fs.f.Close()
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "x", Type: "T"}); err == nil {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "x", Type: "T"}); err == nil {
 		t.Fatal("expected the append on a broken descriptor to fail")
 	}
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "y", Type: "T"}); err == nil {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "y", Type: "T"}); err == nil {
 		t.Fatal("a poisoned store must refuse appends")
 	}
 	if err := fs.Probe(); err != nil {
 		t.Fatalf("Probe on a poisoned store: %v (it should heal by compacting)", err)
 	}
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "b", Type: "T"}); err != nil {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "b", Type: "T"}); err != nil {
 		t.Fatalf("Append after healing: %v", err)
 	}
 	recs, _ := fs.Replay()

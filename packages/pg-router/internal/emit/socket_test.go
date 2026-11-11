@@ -187,7 +187,9 @@ func TestSocketEnqueuer_BadTokenIsRefused(t *testing.T) {
 // other method here does.
 type failingStore struct{}
 
-func (failingStore) Append(eventqueue.Record) error        { return errors.New("disk on fire") }
+func (failingStore) Append(eventqueue.Record) (int64, error) {
+	return 0, errors.New("disk on fire")
+}
 func (failingStore) AppendBatch([]eventqueue.Record) error { return errors.New("disk on fire") }
 func (failingStore) Replay() ([]eventqueue.Record, error) {
 	return nil, nil

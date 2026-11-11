@@ -41,7 +41,7 @@ func fileBytes(t *testing.T, path string) []byte {
 func TestFileStoreSecondOpenerRefused(t *testing.T) {
 	fs, path := lockTestStore(t)
 	for _, r := range randomLog(rand.New(rand.NewSource(1)), 40) {
-		if err := fs.Append(r); err != nil {
+		if _, err := fs.Append(r); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -74,7 +74,7 @@ func TestFileStoreSecondOpenerRefused(t *testing.T) {
 	_ = os.Remove(compactTempPath(path))
 
 	// The holder is unharmed: it can still append and compact.
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "after", Type: "T"}); err != nil {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "after", Type: "T"}); err != nil {
 		t.Fatalf("holder append after a refused second opener: %v", err)
 	}
 	if _, err := fs.Compact(); err != nil {
@@ -86,7 +86,7 @@ func TestFileStoreSecondOpenerRefused(t *testing.T) {
 // inode over the log — the reason the lock is a separate file).
 func TestFileStoreLockLifecycle(t *testing.T) {
 	fs, path := lockTestStore(t)
-	if err := fs.Append(Record{Op: opEnqueue, EventID: "a", Type: "T"}); err != nil {
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "a", Type: "T"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fs.Compact(); err != nil {

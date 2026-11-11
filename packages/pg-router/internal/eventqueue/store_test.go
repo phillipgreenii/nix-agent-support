@@ -80,8 +80,8 @@ func TestMemStoreAppendReplay(t *testing.T) {
 	if recs, err := m.Replay(); err != nil || len(recs) != 0 {
 		t.Fatalf("empty replay = %v, %v", recs, err)
 	}
-	_ = m.Append(Record{Op: opEnqueue, EventID: "a"})
-	_ = m.Append(Record{Op: opAccept, EventID: "a", ListenerID: "h"})
+	_, _ = m.Append(Record{Op: opEnqueue, EventID: "a"})
+	_, _ = m.Append(Record{Op: opAccept, EventID: "a", ListenerID: "h"})
 	recs, err := m.Replay()
 	if err != nil {
 		t.Fatal(err)

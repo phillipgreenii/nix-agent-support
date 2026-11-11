@@ -27,6 +27,10 @@ const (
 	opGateSet     opKind = "gate_set"
 	opGateCleared opKind = "gate_cleared"
 	opGateExpired opKind = "gate_expired"
+	// The level path's two record kinds (level.go): their own durable records, NOT
+	// queue events. An older binary ignores both (it ignores any unknown kind).
+	opLevelSet     opKind = "level_set"
+	opLevelCleared opKind = "level_cleared"
 	// opSeen is written ONLY by log compaction (compact.go): it carries, in Type,
 	// an event TYPE the log once enqueued but whose events are all gone by now.
 	// A replay marks every enqueued type "ever seen" (Queue.UnmatchedBindings), so
@@ -100,6 +104,16 @@ type Record struct {
 	GateType    string `json:"gateType,omitempty"`
 	Description string `json:"description,omitempty"`
 	Owner       string `json:"owner,omitempty"`
+	// Level fields (level_set / level_cleared; level.go). Owner (shared with the
+	// gate field above) is the reporting sensor or the operator; ExpiresAt (shared)
+	// is the absolute end of validity (zero on a level_set: an until-cleared
+	// override). A record written by an older binary carries none of these.
+	Resource   string        `json:"resource,omitempty"`
+	LevelName  string        `json:"level,omitempty"`
+	Reading    *LevelReading `json:"reading,omitempty"`
+	ObservedAt time.Time     `json:"observedAt,omitzero"`
+	ReceivedAt time.Time     `json:"receivedAt,omitzero"`
+	ValidForS  int           `json:"validForS,omitempty"`
 }
 
 // AcceptStamp is one accept an archived event received: which listener, when the
@@ -135,9 +149,13 @@ const (
 // the caller's atomicity unit: either every record in one AppendBatch call is
 // durable before it returns, or a caller MUST NOT treat any of them as durable.
 type Store interface {
-	// Append durably records one operation. It MUST return only after the record
-	// is persisted (the queue's crash-window semantics depend on this ordering).
-	Append(rec Record) error
+	// Append durably records one operation and returns the record's log offset (its
+	// position in the append order; the receipt sequence of a level_set record). It
+	// MUST return only after the record is persisted (the queue's crash-window
+	// semantics depend on this ordering). A level append (Queue.AppendLevel) is the
+	// one caller that does NOT hold the queue's mutex, so an Append MUST also be
+	// safe against a concurrent Append from that path (FileStore and MemStore are).
+	Append(rec Record) (offset int64, err error)
 	// AppendBatch durably records every rec in recs as one atomic unit — one
 	// underlying write and one fsync, not one per record — so a caller with
 	// several records to persist together (e.g. an evict paired with the
@@ -149,6 +167,14 @@ type Store interface {
 	Replay() ([]Record, error)
 	// Close releases the underlying resource.
 	Close() error
+}
+
+// OffsetReplayer is implemented by a Store that can report, with every replayed
+// record, the log offset Append returned for it, so a level replay hands the
+// projection the SAME receipt sequence the live append did. A Store without it
+// is replayed by record index.
+type OffsetReplayer interface {
+	ReplayOffsets() (recs []Record, offsets []int64, err error)
 }
 
 // recordFromEvent builds an enqueue Record for an ALREADY-RESOLVED event
@@ -219,6 +245,10 @@ type FileStore struct {
 	// compactHook, when non-nil, is called at each durable step of Compact with
 	// the step's name — a test seam for crash injection (see compactStage*).
 	compactHook func(stage string)
+
+	// nowFn, when non-nil, replaces time.Now for compaction's lapsed-override
+	// decision (a test seam).
+	nowFn func() time.Time
 
 	// writeFn, when non-nil, replaces f.Write — a test seam for short-write and
 	// ENOSPC injection (the real file is still the one truncated back).
@@ -362,15 +392,20 @@ const (
 )
 
 // Append marshals and writes one record as a line, then fsyncs.
-func (s *FileStore) Append(rec Record) error {
+// It returns the byte offset of the record's line in the log.
+func (s *FileStore) Append(rec Record) (int64, error) {
 	b, err := json.Marshal(rec)
 	if err != nil {
-		return &EncodeError{Err: err}
+		return 0, &EncodeError{Err: err}
 	}
 	b = append(b, '\n')
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.writeLocked(b)
+	off := s.size
+	if err := s.writeLocked(b); err != nil {
+		return 0, err
+	}
+	return off, nil
 }
 
 // AppendBatch marshals every record in recs as its own line — the same per-line
@@ -400,10 +435,19 @@ func (s *FileStore) AppendBatch(recs []Record) error {
 // scanning stops at the first undecodable line, mirroring a real WAL's
 // truncate-on-torn-tail recovery, and torn reports that it happened.
 func scanRecords(r io.Reader, fn func(Record)) (torn bool, err error) {
+	return scanRecordsAt(r, func(rec Record, _ int64) { fn(rec) })
+}
+
+// scanRecordsAt is scanRecords that also reports each record's byte offset (the
+// start of its line, the value FileStore.Append returned for it).
+func scanRecordsAt(r io.Reader, fn func(Record, int64)) (torn bool, err error) {
 	sc := bufio.NewScanner(r)
+	var off int64
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for sc.Scan() {
 		line := sc.Bytes()
+		start := off
+		off += int64(len(line)) + 1
 		if len(line) == 0 {
 			continue
 		}
@@ -413,7 +457,7 @@ func scanRecords(r io.Reader, fn func(Record)) (torn bool, err error) {
 			// before it is intact and durable.
 			return true, nil
 		}
-		fn(rec)
+		fn(rec, start)
 	}
 	if err := sc.Err(); err != nil {
 		return false, fmt.Errorf("eventqueue: replay scan: %w", err)
@@ -425,17 +469,27 @@ func scanRecords(r io.Reader, fn func(Record)) (torn bool, err error) {
 // (torn by a crash mid-write) is tolerated: parsing stops at the first
 // undecodable line, mirroring a real WAL's truncate-on-torn-tail recovery.
 func (s *FileStore) Replay() ([]Record, error) {
+	recs, _, err := s.ReplayOffsets()
+	return recs, err
+}
+
+// ReplayOffsets implements OffsetReplayer: Replay plus each record's byte offset.
+func (s *FileStore) ReplayOffsets() ([]Record, []int64, error) {
 	f, err := os.Open(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = f.Close() }()
 	var recs []Record
-	_, err = scanRecords(f, func(r Record) { recs = append(recs, r) })
-	return recs, err
+	var offs []int64
+	_, err = scanRecordsAt(f, func(r Record, off int64) {
+		recs = append(recs, r)
+		offs = append(offs, off)
+	})
+	return recs, offs, err
 }
 
 // Close closes the WAL file. It waits for a running Compact to finish first, so
@@ -486,12 +540,15 @@ func encodedLen(rec Record) int64 {
 }
 
 // Append records one operation in memory.
-func (m *MemStore) Append(rec Record) error {
+// The offset is the encoded size of the records before it (the offset a FileStore
+// holding the same records would return).
+func (m *MemStore) Append(rec Record) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	off := m.size
 	m.recs = append(m.recs, rec)
 	m.size += encodedLen(rec)
-	return nil
+	return off, nil
 }
 
 // AppendBatch records every rec in recs in memory, in order, as one operation.
@@ -512,6 +569,22 @@ func (m *MemStore) Replay() ([]Record, error) {
 	out := make([]Record, len(m.recs))
 	copy(out, m.recs)
 	return out, nil
+}
+
+// ReplayOffsets implements OffsetReplayer: the offsets are the cumulative encoded
+// sizes, the values Append returned.
+func (m *MemStore) ReplayOffsets() ([]Record, []int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Record, len(m.recs))
+	copy(out, m.recs)
+	offs := make([]int64, len(m.recs))
+	var off int64
+	for i, r := range m.recs {
+		offs[i] = off
+		off += encodedLen(r)
+	}
+	return out, offs, nil
 }
 
 // LogSize reports the log's byte length: the encoded size of the records

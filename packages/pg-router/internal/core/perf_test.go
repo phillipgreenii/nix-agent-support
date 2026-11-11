@@ -29,7 +29,7 @@ type countingStore struct {
 	calls int
 }
 
-func (c *countingStore) Append(rec eventqueue.Record) error {
+func (c *countingStore) Append(rec eventqueue.Record) (int64, error) {
 	c.calls++
 	return c.inner.Append(rec)
 }
