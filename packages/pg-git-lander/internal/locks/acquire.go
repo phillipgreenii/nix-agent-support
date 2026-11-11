@@ -14,6 +14,29 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/outcome"
 )
 
+// Results of a lock wait (the lock_wait event's result).
+const (
+	WaitAcquired = "acquired"
+	WaitBusy     = "busy"
+)
+
+// LockWait is one wait for a held lock, handed to the log and events writer
+// through Layer.OnWait when Acquire acquired the set after waiting or gave up
+// with a BusyError (lock_wait: lock, holder, waited_ms, result).
+type LockWait struct {
+	// Lock is the ref that was held when the wait began (the last one waited on).
+	Lock   string
+	Holder outcome.Holder
+	Waited time.Duration
+	Result string
+}
+
+func (l *Layer) emitWait(w LockWait) {
+	if l.OnWait != nil {
+		l.OnWait(w)
+	}
+}
+
 // Spec is one lock to take: its ref, role and the record to write.
 type Spec struct {
 	Ref  string
@@ -209,6 +232,7 @@ func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Ref < ordered[j].Ref })
 	start := l.Clock.Now()
 	nextMsg := MessageEvery
+	var wait *LockWait
 	for {
 		set := &Set{}
 		var c *conflict
@@ -226,6 +250,10 @@ func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 			set.Locks = append(set.Locks, h)
 		}
 		if c == nil {
+			if wait != nil {
+				wait.Waited, wait.Result = l.Clock.Since(start), WaitAcquired
+				l.emitWait(*wait)
+			}
 			return set, nil
 		}
 		heldSome := len(set.Locks) > 0
@@ -243,7 +271,10 @@ func (l *Layer) Acquire(ctx context.Context, specs ...Spec) (*Set, error) {
 			return nil, &RefusedError{Ref: blocked.Ref, Reason: reason, Holder: c.holder}
 		}
 		elapsed := l.Clock.Since(start)
+		wait = &LockWait{Lock: blocked.Ref, Holder: c.holder}
 		if elapsed >= l.Config.Wait {
+			wait.Waited, wait.Result = elapsed, WaitBusy
+			l.emitWait(*wait)
 			return nil, &BusyError{Ref: blocked.Ref, Holder: c.holder}
 		}
 		for elapsed >= nextMsg {

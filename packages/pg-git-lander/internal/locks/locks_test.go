@@ -819,3 +819,53 @@ func TestStaleLockFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestOnWaitReportsBusyAndAcquiredAfterWaiting(t *testing.T) {
+	f := newFx(t)
+	ref := BranchRef("feature/x")
+	f.plant(ref, branchRec("feature/x", "main", "holder-op"))
+	var got []LockWait
+	f.l.OnWait = func(w LockWait) { got = append(got, w) }
+	f.l.Config.Wait = 3 * time.Second
+	if _, err := f.l.Acquire(t.Context(), Spec{Ref: ref, Role: RoleBranch, Rec: branchRec("feature/x", "main", "me")}); err == nil {
+		t.Fatal("want busy")
+	}
+	if len(got) != 1 || got[0].Result != WaitBusy || got[0].Lock != ref || got[0].Holder.OpID != "holder-op" ||
+		got[0].Holder.Stage != "rebasing" || got[0].Waited != 3*time.Second {
+		t.Fatalf("busy wait = %+v", got)
+	}
+
+	// the holder goes away while the waiter polls: acquired after a wait
+	got = nil
+	f.l.Config.Wait = 10 * time.Second
+	sleeps := 0
+	inner := f.l.Sleep
+	f.l.Sleep = func(ctx context.Context, d time.Duration) error {
+		sleeps++
+		if sleeps == 2 {
+			if r := f.l.Git.Run(ctx, f.repo.Dir, "update-ref", "-d", ref); !r.OK() {
+				t.Errorf("delete: %s", r.Stderr)
+			}
+		}
+		return inner(ctx, d)
+	}
+	if _, err := f.l.Acquire(t.Context(), Spec{Ref: ref, Role: RoleBranch, Rec: branchRec("feature/x", "main", "me")}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Result != WaitAcquired || got[0].Holder.OpID != "holder-op" || got[0].Waited != 2*time.Second {
+		t.Fatalf("acquired wait = %+v", got)
+	}
+}
+
+func TestOnWaitSilentWithoutWaiting(t *testing.T) {
+	f := newFx(t)
+	called := false
+	f.l.OnWait = func(LockWait) { called = true }
+	ref := BranchRef("feature/z")
+	if _, err := f.l.Acquire(t.Context(), Spec{Ref: ref, Role: RoleBranch, Rec: branchRec("feature/z", "main", "me")}); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Error("OnWait fired for an uncontended acquire")
+	}
+}
