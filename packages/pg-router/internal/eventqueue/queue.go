@@ -1312,7 +1312,7 @@ func (q *Queue) snapshotLocked(takeID func() string, sig *admissionSignals) (pen
 			// it is not dispatched to, queued events stay queued, and an event
 			// whose final attempt falls due while it is blocked goes away for it.
 			if q.dropBlockedLocked(ls, res, now, sig) {
-				sig.blocks = append(sig.blocks, admissionBlock{participant: lid, resource: firstResource(res)})
+				sig.blocks = append(sig.blocks, admissionBlock{participant: lid, resource: firstResource(res), kind: firstKind(res)})
 			}
 			continue
 		}

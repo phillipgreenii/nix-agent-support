@@ -105,8 +105,11 @@ type LevelResource struct {
 
 // LevelProjectionConfig configures NewLevelProjection. Skew is the bound on
 // observed_at ahead of now ([levels] observed_at_skew); Now is the clock seam.
-// OnReject, OnBoundary and OnOverrideExpired are optional hooks (metric and
-// log sites).
+// OnReject, OnBoundary, OnLevelChange, OnGraceExpired, OnOverrideSet and
+// OnOverrideExpired are optional hooks (the metric and log sites). The
+// evaluation hooks (OnBoundary, OnLevelChange, OnGraceExpired and
+// OnOverrideExpired) run while the projection's lock is held, so a hook MUST
+// NOT call back into the projection.
 type LevelProjectionConfig struct {
 	Registry  levels.Registry
 	Resources map[string]LevelResource
@@ -114,9 +117,20 @@ type LevelProjectionConfig struct {
 	Now       func() time.Time
 	Appender  LevelAppender
 
-	OnReject          func(reason string)
-	OnBoundary        func(resource, from, to string)
-	OnOverrideExpired func(resource, owner string)
+	// OnReject is called once per rejected answer with the answer's resource and
+	// level as far as they could be read (empty when the answer was unreadable).
+	OnReject func(resource, level, reason string)
+	// OnBoundary reports a held, stale or unknown flag change of a resource.
+	OnBoundary func(resource, from, to string)
+	// OnLevelChange reports the level in force of a resource changing; an absent
+	// level reads as the scale's unknown value, so from and to are scale levels.
+	OnLevelChange func(resource, from, to string)
+	// OnGraceExpired reports a sensor-reported resource whose grace ran out: it
+	// has no level in force any more. level is the last level the sensor held.
+	OnGraceExpired func(resource, level string)
+	// OnOverrideExpired reports an operator override that lapsed (level is the
+	// level it held).
+	OnOverrideExpired func(resource, level, owner string)
 	// OnOverrideSet is called once per operator override set (level-set, pause).
 	OnOverrideSet func(resource, level, owner string, expiresAt time.Time)
 }
@@ -133,6 +147,7 @@ type levelSlot struct {
 	sensor   *levelEntry
 	override *levelEntry
 	state    string // last reported boundary state: held, stale, unknown
+	last     string // last reported level in force (the unknown value when none)
 	expired  bool   // override expiry already reported
 }
 
@@ -157,29 +172,40 @@ func NewLevelProjection(cfg LevelProjectionConfig) *LevelProjection {
 // malformed and counted.
 func (p *LevelProjection) IngestJSON(raw []byte) (LevelOutcome, string, error) {
 	if err := schemas.ValidateLevelAnswer(raw); err != nil {
-		return p.reject(ReasonMalformed), ReasonMalformed, nil
+		return p.rejectRaw(raw, ReasonMalformed), ReasonMalformed, nil
 	}
 	var wire struct {
 		LevelAnswer
 		ObservedAt string `json:"observed_at"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
-		return p.reject(ReasonMalformed), ReasonMalformed, nil
+		return p.rejectRaw(raw, ReasonMalformed), ReasonMalformed, nil
 	}
 	t, err := time.Parse(time.RFC3339Nano, wire.ObservedAt)
 	if err != nil {
-		return p.reject(ReasonMalformed), ReasonMalformed, nil
+		return p.rejectRaw(raw, ReasonMalformed), ReasonMalformed, nil
 	}
 	a := wire.LevelAnswer
 	a.ObservedAt = t
 	return p.Ingest(a)
 }
 
-func (p *LevelProjection) reject(reason string) LevelOutcome {
+func (p *LevelProjection) reject(a LevelAnswer, reason string) LevelOutcome {
 	if p.cfg.OnReject != nil {
-		p.cfg.OnReject(reason)
+		p.cfg.OnReject(a.Resource, a.Level, reason)
 	}
 	return LevelRejected
+}
+
+// rejectRaw rejects an answer that did not validate: the resource and level are
+// read leniently from the raw JSON, and left empty when it is not even an object.
+func (p *LevelProjection) rejectRaw(raw []byte, reason string) LevelOutcome {
+	var peek struct {
+		Resource string `json:"resource"`
+		Level    string `json:"level"`
+	}
+	_ = json.Unmarshal(raw, &peek)
+	return p.reject(LevelAnswer{Resource: peek.Resource, Level: peek.Level}, reason)
 }
 
 // Ingest applies LVL-2 to a decoded answer. It returns the outcome and, when
@@ -195,7 +221,7 @@ func (p *LevelProjection) Ingest(a LevelAnswer) (LevelOutcome, string, error) {
 	}
 	if reason != "" {
 		p.mu.Unlock()
-		return p.reject(reason), reason, nil
+		return p.reject(a, reason), reason, nil
 	}
 	rec := LevelRecord{
 		Resource: a.Resource, Level: a.Level, Owner: a.Owner, Reading: a.Reading,
@@ -463,7 +489,7 @@ func (p *LevelProjection) effectiveLocked(resource string, now time.Time) (level
 		if !s.expired {
 			s.expired = true
 			if p.cfg.OnOverrideExpired != nil {
-				p.cfg.OnOverrideExpired(resource, o.rec.Owner)
+				p.cfg.OnOverrideExpired(resource, o.rec.Level, o.rec.Owner)
 			}
 		}
 	}
@@ -500,8 +526,23 @@ func (p *LevelProjection) evaluateLocked(now time.Time) []LevelStatus {
 			if s.state != "" && p.cfg.OnBoundary != nil {
 				p.cfg.OnBoundary(n, s.state, flag)
 			}
+			if flag == "unknown" && s.state != "" && s.sensor != nil && p.cfg.OnGraceExpired != nil {
+				p.cfg.OnGraceExpired(n, s.sensor.rec.Level)
+			}
 			s.state = flag
 		}
+		cur := p.cfg.Registry[n].Unknown
+		if flag != "unknown" {
+			cur = lv.Value
+		}
+		prev := s.last
+		if prev == "" {
+			prev = p.cfg.Registry[n].Unknown
+		}
+		if cur != prev && p.cfg.OnLevelChange != nil {
+			p.cfg.OnLevelChange(n, prev, cur)
+		}
+		s.last = cur
 		out = append(out, LevelStatus{Resource: n, Level: lv, Flag: flag})
 	}
 	return out

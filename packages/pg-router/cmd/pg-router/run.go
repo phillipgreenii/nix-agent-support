@@ -332,6 +332,18 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		}
 	}
 	metricsOpts = append(metricsOpts, metrics.WithRoleProgress(enabledRoles...))
+	// The level gauges read the projection built further down (levelProjRef is
+	// stored as soon as it exists; a collect before then reports no level
+	// series), and role_paused starts at 0 for every enabled role.
+	var levelProjRef atomic.Pointer[core.LevelProjection]
+	levelRegistry := cfg.Resources.Registry()
+	metricsOpts = append(metricsOpts, metrics.WithPausedRoles(enabledRoles...), metrics.WithLevels(func() []metrics.LevelSample {
+		p := levelProjRef.Load()
+		if p == nil {
+			return nil
+		}
+		return levelSamples(p, levelRegistry, time.Now())
+	}))
 	// Per-role availability gauge (docket pg2-12gr4.8, ruling 31): 1 while the
 	// role is available, 0 while a startup validate marked it unavailable. It
 	// reads o.Registry live, which bootCore sets below, before queueRef is stored
@@ -439,20 +451,17 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		Resources: markNoSensor(levelResources(cfg.Resources), cfg),
 		Skew:      cfg.Levels.ObservedAtSkew,
 		Appender:  levelAppender,
-		// The override log lines (the metrics work formats the rest of the
-		// level log lines from the projection's events).
-		OnOverrideSet: func(resource, level, owner string, expiresAt time.Time) {
-			if expiresAt.IsZero() {
-				slog.Info("level_override_set", "resource", resource, "level", level, "owner", owner, "until_cleared", true)
-				return
-			}
-			slog.Info("level_override_set", "resource", resource, "level", level, "owner", owner, "expires_at", expiresAt.UTC().Format(time.RFC3339))
-		},
-		OnOverrideExpired: func(resource, owner string) {
-			slog.Info("level_override_expired", "resource", resource, "owner", owner)
-		},
+		// Every level transition is counted and logged by the metrics Emitter.
+		OnReject:          emitter.OnLevelEventRejected,
+		OnLevelChange:     emitter.OnLevelChanged,
+		OnGraceExpired:    emitter.OnLevelGraceExpired,
+		OnOverrideSet:     emitter.OnLevelOverrideSet,
+		OnOverrideExpired: emitter.OnLevelOverrideExpired,
 	})
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithLevelSource(levelProj.Snapshot), eventqueue.WithRegistry(cfg.Resources.Registry()), eventqueue.WithStartStagger(cfg.Levels.StartStagger),
+	levelProjRef.Store(levelProj)
+	// The pull observer counts pulls and failures per sensor.
+	o.LevelPullObserver = emitter
+	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithLevelSource(levelProj.Snapshot), eventqueue.WithRegistry(cfg.Resources.Registry()), eventqueue.WithStartStagger(cfg.Levels.StartStagger), eventqueue.WithLevelObserver(emitter),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows
 		// cfg.CompactThresholdBytes (bead pg2-8e0m6).

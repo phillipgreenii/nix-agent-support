@@ -3,7 +3,6 @@ package eventqueue
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -39,18 +38,21 @@ const ReasonStartStagger = "start_stagger"
 // Every hook fires AFTER q.mu is released.
 type LevelObserver interface {
 	// OnRequirementBlocked fires each time a requirement stops a participant
-	// from doing work it had: kind is "dispatch" (a blocked listener with
+	// from doing work it had: work is "dispatch" (a blocked listener with
 	// deliverable work was skipped), "poll" (a blocked emitter was not polled)
 	// or "pull" (a blocked listener's pull was rejected); resource is the first
-	// failing resource.
-	OnRequirementBlocked(participant, kind, resource string)
+	// failing resource and kind says why its clause failed: "level" (a measured
+	// level), "unknown" (no level held) or "stale" (a held level past its lease).
+	OnRequirementBlocked(participant, work, resource, kind string)
 	// OnRequirementDrop fires when an event goes away for a blocked listener at
 	// its final attempt (INV-EVT-4, ADM-7).
 	OnRequirementDrop(evtType, role, resource string)
-	// OnRolePaused fires when a listener turns from admitted to blocked and
-	// OnRoleResumed when it turns back.
-	OnRolePaused(role, resource string)
-	OnRoleResumed(role string)
+	// OnRolePaused fires when a listener turns from admitted to blocked, naming
+	// the first failing resource and the level it is at; OnRoleResumed fires when
+	// it turns back, naming the resource that had blocked it and the level that
+	// resource is at now.
+	OnRolePaused(role, resource, level string)
+	OnRoleResumed(role, resource, level string)
 	// OnLegacyGateDropped fires once per ACTIVE legacy gate a compaction pass
 	// drops: the gate's type, owner and expiry (zero: no expiry).
 	OnLegacyGateDropped(gateType, owner string, expiresAt time.Time)
@@ -58,11 +60,11 @@ type LevelObserver interface {
 
 type noopLevelObserver struct{}
 
-func (noopLevelObserver) OnRequirementBlocked(string, string, string)   {}
-func (noopLevelObserver) OnRequirementDrop(string, string, string)      {}
-func (noopLevelObserver) OnRolePaused(string, string)                   {}
-func (noopLevelObserver) OnRoleResumed(string)                          {}
-func (noopLevelObserver) OnLegacyGateDropped(string, string, time.Time) {}
+func (noopLevelObserver) OnRequirementBlocked(string, string, string, string) {}
+func (noopLevelObserver) OnRequirementDrop(string, string, string)            {}
+func (noopLevelObserver) OnRolePaused(string, string, string)                 {}
+func (noopLevelObserver) OnRoleResumed(string, string, string)                {}
+func (noopLevelObserver) OnLegacyGateDropped(string, string, time.Time)       {}
 
 // admission is the queue's level admission state.
 type admission struct {
@@ -185,13 +187,40 @@ func firstResource(res levels.Result) string {
 	return res.Failing[0].Resource
 }
 
+// firstKind is why the first failing clause failed (level, unknown or stale).
+func firstKind(res levels.Result) string {
+	if len(res.Failing) == 0 {
+		return ""
+	}
+	return string(res.Failing[0].Kind)
+}
+
+// firstLevel is the level the first failing clause was judged against.
+func firstLevel(res levels.Result) string {
+	if len(res.Failing) == 0 {
+		return ""
+	}
+	return res.Failing[0].Level
+}
+
+// levelOfResource is the level resource reads at in view: its held level, else
+// the scale's unknown value.
+func (q *Queue) levelOfResource(view admissionView, resource string) string {
+	if lv, ok := view.snap.Levels[resource]; ok {
+		return lv.Value
+	}
+	return q.adm.registry[resource].Unknown
+}
+
 // admissionBlock is one blocked dispatch observed while snapshotting a pass.
-type admissionBlock struct{ participant, resource string }
+type admissionBlock struct{ participant, resource, kind string }
 
 // admissionDrop is one event lost to a blocked listener at its final attempt.
 type admissionDrop struct{ evtType, role, resource string }
 
-type admissionPause struct{ role, resource string }
+type admissionPause struct{ role, resource, level string }
+
+type admissionResume struct{ role, resource, level string }
 
 // admissionSignals collects the observer notifications a locked phase produces,
 // to be fired after q.mu is released.
@@ -199,18 +228,18 @@ type admissionSignals struct {
 	drops   []admissionDrop
 	blocks  []admissionBlock
 	paused  []admissionPause
-	resumed []string
+	resumed []admissionResume
 }
 
 func (q *Queue) fireAdmissionSignals(s admissionSignals) {
 	for _, p := range s.paused {
-		q.adm.obs.OnRolePaused(p.role, p.resource)
+		q.adm.obs.OnRolePaused(p.role, p.resource, p.level)
 	}
 	for _, r := range s.resumed {
-		q.adm.obs.OnRoleResumed(r)
+		q.adm.obs.OnRoleResumed(r.role, r.resource, r.level)
 	}
 	for _, b := range s.blocks {
-		q.adm.obs.OnRequirementBlocked(b.participant, "dispatch", b.resource)
+		q.adm.obs.OnRequirementBlocked(b.participant, "dispatch", b.resource, b.kind)
 	}
 	for _, d := range s.drops {
 		q.adm.obs.OnRequirementDrop(d.evtType, d.role, d.resource)
@@ -230,10 +259,10 @@ func (q *Queue) levelAdmitLocked(ls *listenerState, view admissionView, _ time.T
 		switch {
 		case blocked && ls.blockedBy == "":
 			ls.blockedBy = firstResource(res)
-			sig.paused = append(sig.paused, admissionPause{role: ls.l.ID(), resource: ls.blockedBy})
+			sig.paused = append(sig.paused, admissionPause{role: ls.l.ID(), resource: ls.blockedBy, level: firstLevel(res)})
 		case !blocked && ls.blockedBy != "":
+			sig.resumed = append(sig.resumed, admissionResume{role: ls.l.ID(), resource: ls.blockedBy, level: q.levelOfResource(view, ls.blockedBy)})
 			ls.blockedBy = ""
-			sig.resumed = append(sig.resumed, ls.l.ID())
 		}
 	}
 	return res, blocked
@@ -357,7 +386,7 @@ func (q *Queue) CheckPull(listenerID string) error {
 	if res.Admit {
 		return nil
 	}
-	q.adm.obs.OnRequirementBlocked(listenerID, "pull", firstResource(res))
+	q.adm.obs.OnRequirementBlocked(listenerID, "pull", firstResource(res), firstKind(res))
 	return &LevelBlockedError{Participant: listenerID, Result: res}
 }
 
@@ -375,7 +404,7 @@ func (q *Queue) EmitterBlockedBy(emitterID string) (string, bool) {
 	if cur == nil {
 		return "", false
 	}
-	var first string
+	var first, firstWhy string
 	enabled := 0
 	for _, c := range (*cur)[emitterID] {
 		if !c.Enabled {
@@ -387,20 +416,20 @@ func (q *Queue) EmitterBlockedBy(emitterID string) (string, bool) {
 			return "", false
 		}
 		if first == "" {
-			first = firstResource(res)
+			first, firstWhy = firstResource(res), firstKind(res)
 		}
 	}
 	if enabled == 0 {
 		return "", false
 	}
-	q.adm.obs.OnRequirementBlocked(emitterID, "poll", first)
+	q.adm.obs.OnRequirementBlocked(emitterID, "poll", first, firstWhy)
 	return first, true
 }
 
-// logLegacyGateDropped reports one dropped active legacy gate: the observer
-// event and a log line, once per gate, from the compaction pass itself.
+// logLegacyGateDropped reports one dropped active legacy gate to the level
+// observer, once per gate, from the compaction pass itself. The observer
+// formats the log line; the queue writes none.
 func (q *Queue) logLegacyGateDropped(g DroppedGate) {
-	slog.Warn("legacy_gate_dropped", "type", g.Type, "owner", g.Owner, "expiresAt", g.ExpiresAt)
 	q.adm.obs.OnLegacyGateDropped(g.Type, g.Owner, g.ExpiresAt)
 }
 

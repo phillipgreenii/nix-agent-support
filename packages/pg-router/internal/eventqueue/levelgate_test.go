@@ -57,19 +57,23 @@ func (l *testLevels) snapshot() levels.Snapshot {
 
 // recordingLevelObserver captures LevelObserver callbacks.
 type recordingLevelObserver struct {
-	mu       sync.Mutex
-	blocked  []string // "participant/kind/resource"
-	drops    []string // "evtType/role/resource"
-	paused   []string // "role/resource"
-	resumed  []string
-	legacy   []string // "type/owner"
-	legacyAt []time.Time
-	onBlock  func()
+	mu        sync.Mutex
+	blocked   []string // "participant/work/resource"
+	kinds     []string // why each block failed: level, unknown or stale
+	pausedAt  []string // "role/resource/level"
+	resumedAt []string // "role/resource/level"
+	drops     []string // "evtType/role/resource"
+	paused    []string // "role/resource"
+	resumed   []string
+	legacy    []string // "type/owner"
+	legacyAt  []time.Time
+	onBlock   func()
 }
 
-func (o *recordingLevelObserver) OnRequirementBlocked(p, k, r string) {
+func (o *recordingLevelObserver) OnRequirementBlocked(p, k, r, why string) {
 	o.mu.Lock()
 	o.blocked = append(o.blocked, p+"/"+k+"/"+r)
+	o.kinds = append(o.kinds, why)
 	cb := o.onBlock
 	o.mu.Unlock()
 	if cb != nil {
@@ -83,16 +87,18 @@ func (o *recordingLevelObserver) OnRequirementDrop(e, role, r string) {
 	o.drops = append(o.drops, e+"/"+role+"/"+r)
 }
 
-func (o *recordingLevelObserver) OnRolePaused(role, r string) {
+func (o *recordingLevelObserver) OnRolePaused(role, r, level string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.paused = append(o.paused, role+"/"+r)
+	o.pausedAt = append(o.pausedAt, role+"/"+r+"/"+level)
 }
 
-func (o *recordingLevelObserver) OnRoleResumed(role string) {
+func (o *recordingLevelObserver) OnRoleResumed(role, r, level string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.resumed = append(o.resumed, role)
+	o.resumedAt = append(o.resumedAt, role+"/"+r+"/"+level)
 }
 
 func (o *recordingLevelObserver) OnLegacyGateDropped(t, owner string, exp time.Time) {
@@ -160,6 +166,9 @@ func TestLevel_BlockedListenerIsNotDispatchedUnblockedStillIs(t *testing.T) {
 	if !slices.Contains(obs.blocked, "blocked/dispatch/disk") || !slices.Equal(obs.paused, []string{"blocked/disk"}) {
 		t.Fatalf("blocked=%v paused=%v, want blocked/dispatch/disk and one pause", obs.blocked, obs.paused)
 	}
+	if !slices.Contains(obs.kinds, "level") || !slices.Equal(obs.pausedAt, []string{"blocked/disk/LOW"}) {
+		t.Fatalf("kinds=%v pausedAt=%v, want a block of kind level and a pause at disk/LOW", obs.kinds, obs.pausedAt)
+	}
 	q.Dispatch()
 	if len(obs.paused) != 1 {
 		t.Fatalf("paused = %v: a pause is reported on the transition only", obs.paused)
@@ -167,6 +176,9 @@ func TestLevel_BlockedListenerIsNotDispatchedUnblockedStillIs(t *testing.T) {
 	// The event stayed QUEUED: when the level recovers it is delivered (ADM-3).
 	src.set("disk", "OK")
 	q.Dispatch()
+	if !slices.Equal(obs.resumedAt, []string{"blocked/disk/OK"}) {
+		t.Fatalf("resumedAt = %v, want the blocking resource and the level it is at now", obs.resumedAt)
+	}
 	if !slices.Equal(blocked.accepted, []string{"e1"}) || !slices.Equal(obs.resumed, []string{"blocked"}) {
 		t.Fatalf("after recovery accepted=%v resumed=%v, want [e1] and [blocked]", blocked.accepted, obs.resumed)
 	}

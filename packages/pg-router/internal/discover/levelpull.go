@@ -51,6 +51,14 @@ type LevelPullObserver interface {
 	OnLevelPullFailure(sensor, reason string)
 }
 
+// LevelPullTimingObserver is an optional extension of LevelPullObserver: an
+// observer that also implements it is told each time a pull of a sensor ends,
+// with how long it took, whatever its outcome (the feed of the per-sensor pull
+// counter and duration gauge). Exported name: OnLevelPull.
+type LevelPullTimingObserver interface {
+	OnLevelPull(sensor string, elapsed time.Duration)
+}
+
 // LevelPullFailure is one failure of a pull.
 type LevelPullFailure struct {
 	Reason string
@@ -351,7 +359,11 @@ func (p *LevelPuller) pull(ctx context.Context, s query.Source, extraEnv []strin
 	var res LevelPullResult
 	lv := &levelPath{ingest: p.cfg.Ingest, extraEnv: extraEnv, result: &res, onFailure: p.countFailure}
 	rpt := newProduceReport()
+	start := p.cfg.Now()
 	err := runAndEnqueue(ctx, p.cfg.Env, s, nil, core.Bindings{}, nil, p.cfg.FailureObserver, p.cfg.ActivityObserver, &rpt, p.cfg.Now, nil, lv)
+	if to, ok := p.cfg.Observer.(LevelPullTimingObserver); ok && err == nil {
+		to.OnLevelPull(s.LevelSource, p.cfg.Now().Sub(start))
+	}
 	return res, err
 }
 

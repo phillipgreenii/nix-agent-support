@@ -76,13 +76,13 @@ func newProj(t *testing.T) *projFixture {
 		Skew:     5 * time.Minute,
 		Now:      f.clk.now,
 		Appender: f.app,
-		OnReject: func(r string) { f.hmu.Lock(); f.rejects = append(f.rejects, r); f.hmu.Unlock() },
+		OnReject: func(_, _, r string) { f.hmu.Lock(); f.rejects = append(f.rejects, r); f.hmu.Unlock() },
 		OnBoundary: func(res, from, to string) {
 			f.hmu.Lock()
 			f.bounds = append(f.bounds, res+":"+from+">"+to)
 			f.hmu.Unlock()
 		},
-		OnOverrideExpired: func(res, owner string) { f.expired = append(f.expired, res+"/"+owner) },
+		OnOverrideExpired: func(res, _, owner string) { f.expired = append(f.expired, res+"/"+owner) },
 	})
 	return f
 }

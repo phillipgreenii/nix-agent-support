@@ -65,6 +65,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -149,7 +150,7 @@ const (
 	// MetricEmittersHalted is 1 while polled command-source emitters are not being
 	// polled (past the soft threshold after a compaction attempt, or the log is
 	// unwritable), else 0. It is the soft step's whole metric surface: the soft
-	// step is not a gate, so MetricActiveGates / MetricGateBlocked do not move.
+	// step is not a gate, so no requirement metric moves.
 	MetricEmittersHalted = "pg_router_emitters_halted"
 	// MetricLogRejecting is 1 per reason ("log_full", "log_unwritable") while the
 	// log is in that state and refusing new events, else 0.
@@ -531,6 +532,9 @@ type Emitter struct {
 	srcInflight map[string]int
 	srcDuration metric.Float64Histogram
 
+	// lvl is the level metrics and log lines state (levels.go).
+	lvl levelState
+
 	// mu guards pending/order — the eventID->{type, enqueue-time} correlation
 	// map OnAccept needs to feed RecordThroughput/RecordDispatchLatency (see
 	// their own docs for why: OnAccept's signature carries no event type or
@@ -607,6 +611,9 @@ type options struct {
 	progressRoles   []string
 	progressOn      bool
 	busySources     func() []string
+	levels          func() []LevelSample
+	pausedRoles     []string
+	logger          *slog.Logger
 }
 
 // WithQueueReady registers ready, the answer to "does the queue the gauges below read
@@ -723,16 +730,6 @@ func WithQueueLogSize(fn func() int64) Option {
 // always registered.
 func WithLogLimitStatus(fn func() eventqueue.LimitStatus) Option {
 	return func(o *options) { o.logLimits = fn }
-}
-
-// ActiveGate is the compile-only shim's gate entry (WithActiveGates).
-type ActiveGate struct{ Type string }
-
-// WithActiveGates is a compile-only shim for the removed gate gauge: it
-// registers nothing. It is removed together with the rest of the shim by the
-// metrics work.
-func WithActiveGates(func() []ActiveGate) Option {
-	return func(*options) {}
 }
 
 // WithLiveness registers MetricLiveness, an ObservableGauge reporting 1 while
@@ -1138,6 +1135,9 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.pending = map[string]pendingDispatch{}
 	e.skippedMarks = map[string]string{}
 	e.skipReasonSeen = map[string]struct{}{}
+	if err := e.registerLevels(m, cfg); err != nil {
+		return nil, err
+	}
 	e.preRecordZeroCounters()
 	return e, nil
 }
@@ -1154,29 +1154,6 @@ func (e *Emitter) preRecordZeroCounters() {
 	e.unknownType.Add(ctx, 0)
 	e.enqueueRejected.Add(ctx, 0)
 }
-
-// The compile-only shim for the removed gate observer: the five methods the
-// router's wiring and tests still call, all no-ops, and IsGateEvent, which is
-// always false. The metrics work removes the shim and adds the level metrics.
-
-// OnGateSet is a no-op shim.
-func (e *Emitter) OnGateSet(string, bool) {}
-
-// OnGateCleared is a no-op shim.
-func (e *Emitter) OnGateCleared(string, time.Duration) {}
-
-// OnGateExpired is a no-op shim.
-func (e *Emitter) OnGateExpired(string, time.Duration) {}
-
-// OnGateBlocked is a no-op shim.
-func (e *Emitter) OnGateBlocked(string, string, string) {}
-
-// OnGateDrop is a no-op shim.
-func (e *Emitter) OnGateDrop(string, string, string) {}
-
-// IsGateEvent is the compile-only shim of the removed gate-record predicate:
-// no event is a gate record any more.
-func IsGateEvent(string) bool { return false }
 
 // OnEnqueue records evt's type and resolved enqueue instant, keyed by evt.ID,
 // for OnAccept to consult (RecordThroughput/RecordDispatchLatency's
@@ -1205,9 +1182,7 @@ func IsGateEvent(string) bool { return false }
 // process that enqueued it.
 func (e *Emitter) OnEnqueue(evt eventqueue.Event) {
 	e.seedPending(evt)
-	if !IsGateEvent(evt.Type) {
-		e.enqueued.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evt.Type)))
-	}
+	e.enqueued.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evt.Type)))
 }
 
 // OnRestore implements eventqueue.RestoreObserver (bead pg2-0efop): it seeds

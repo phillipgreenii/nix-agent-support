@@ -3,6 +3,7 @@ package discover
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -386,4 +387,47 @@ func TestRunLevelQueryOnce_shutdownIsNotAFailure(t *testing.T) {
 	if err == nil || len(res.Failures) != 0 {
 		t.Fatalf("res=%+v err=%v; shutdown must propagate and not count", res, err)
 	}
+}
+
+// timingObs is a LevelPullObserver that also implements the optional timing
+// extension.
+type timingObs struct {
+	failObs
+	pulls []string
+	dur   map[string]time.Duration
+}
+
+func (o *timingObs) OnLevelPull(sensor string, elapsed time.Duration) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.pulls = append(o.pulls, sensor)
+	if o.dur == nil {
+		o.dur = map[string]time.Duration{}
+	}
+	o.dur[sensor] = elapsed
+}
+
+// Every finished pull is reported with its duration, a failed pull as well as a
+// good one; an observer without the timing extension is simply not told.
+func TestLevelPuller_pullReportedToTimingObserverWhateverTheOutcome(t *testing.T) {
+	cmd := &levelCmd{fn: map[string]func(context.Context, []string) ([]byte, error){
+		"exit": func(context.Context, []string) ([]byte, error) { return nil, errors.New("exit status 1") },
+		"good": func(context.Context, []string) ([]byte, error) { return answer("cpu"), nil },
+	}}
+	obs := &timingObs{}
+	p := newPuller(cmd, &fakeIngest{}, obs, levelSrc("e", "s-exit", "exit", time.Second), levelSrc("g", "s-good", "good", time.Second))
+	p.PullAll(context.Background())
+	p.Wait()
+	got := append([]string(nil), obs.pulls...)
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"s-exit", "s-good"}) {
+		t.Fatalf("pulls reported = %v, want both sensors once", got)
+	}
+	if len(obs.got) != 1 || obs.got[0] != "s-exit/exit" {
+		t.Fatalf("failures = %v, want the one exit failure", obs.got)
+	}
+	plain := &failObs{}
+	p2 := newPuller(cmd, &fakeIngest{}, plain, levelSrc("g", "s-good", "good", time.Second))
+	p2.PullAll(context.Background())
+	p2.Wait()
 }

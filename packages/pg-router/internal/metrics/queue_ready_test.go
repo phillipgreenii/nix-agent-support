@@ -54,7 +54,6 @@ func TestQueueReadyGatesEveryQueueBoundGauge(t *testing.T) {
 			reads++
 			return eventqueue.LimitStatus{Bytes: 5, HardBytes: 10, State: eventqueue.StateOK}
 		}),
-		WithActiveGates(func() []ActiveGate { reads++; return []ActiveGate{{Type: "SYSTEM_PAUSE"}} }), // compile-only shim: registers nothing
 		// Not queue-bound: reports whatever the queue's state.
 		WithLiveness(func() bool { return true }),
 	); err != nil {
