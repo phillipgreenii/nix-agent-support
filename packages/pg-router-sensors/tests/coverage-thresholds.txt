@@ -1,0 +1,16 @@
+# Per-package STATEMENT-coverage thresholds enforced by the
+# `pg-router-sensors-go-tests` flake check, with the same enforcer as the
+# pg-router module (tests/coverage-gate.sh, copied verbatim: the module
+# boundary is also the coverage-gate boundary). Format:
+#
+#   <package-import-suffix> <min-statement-percent>
+#
+# A rule matches the package whose import path equals the suffix or ends with
+# "/<suffix>". A gated package ABSENT from the profile FAILS the gate. `#`
+# comments and blank lines are ignored.
+
+# --- active rules ---
+# The sensors row: every package of this module carries the 90% strawman.
+internal/levels 90
+internal/answer 90
+internal/sensorcli 90

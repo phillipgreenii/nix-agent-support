@@ -373,6 +373,12 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-router-sensors: Pattern B (ADR 0008), the ONE generic sensors binary
+          # (host-sensor, vpn-sensor, git-auth-sensor, beads-sensor, claude-sensor);
+          # imports the level-answer schema from ../pg-router.
+          pg-router-sensors = final.callPackage ./packages/pg-router-sensors {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-checkout-pool: Pattern A, slot store (golang.org/x/sys only, for clonefile) (per-slot flock,
           # atomic lease records, slot state machine) plus a status command.
           pg-checkout-pool = final.callPackage ./packages/pg-checkout-pool {
@@ -2021,6 +2027,18 @@
                     fileset = lib.fileset.unions [
                       ./packages/pa-monitor
                       ./packages/pg-claude-code-recorder
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "pg-router-sensors";
+                  modRoot = "pg-router-sensors";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-router-sensors
+                      ./packages/pg-router
                       ./packages/claude-transcript
                     ];
                   };
@@ -7995,6 +8013,36 @@
                 gomod2nixToml = ./packages/pg-router-disk-watchdog/gomod2nix.toml;
               };
 
+              # pg-router-sensors: the shared state-machine library, the answer
+              # printer and the subcommand skeleton. Pattern B like the handlers
+              # module (schema validator from ../pg-router), with the same
+              # per-package statement-coverage gate (module boundary is the gate
+              # boundary).
+              pg-router-sensors-go-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-router-sensors-go-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-router-sensors
+                      ./packages/pg-router
+                      ./packages/claude-transcript
+                    ];
+                  };
+                  modRoot = "pg-router-sensors";
+                  gomod2nixToml = ./packages/pg-router-sensors/gomod2nix.toml;
+                  testFlags = [
+                    "-coverprofile=cover.out"
+                    "-covermode=atomic"
+                  ];
+                }).overrideAttrs
+                  (old: {
+                    postBuild = (old.postBuild or "") + ''
+                      echo "=== pg-router-sensors per-package statement-coverage gate ==="
+                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
+                    '';
+                  });
+
               # pg-checkout-pool: hermetic unit suite over the slot state machine,
               # flock liveness (including a killed helper process), atomic record
               # writes and the status command; temp dirs and a fake clock; the provisioner tests use real git.
@@ -10135,6 +10183,18 @@
                   # literally absent and the gate must FAIL (bead pg2-vybrv #9).
                   if bash ${gate} ${profile} ${metachar} >/dev/null 2>&1; then
                     fail "gate passed a suffix whose regex metachar over-matched a different package (should block as absent)"
+                  fi
+
+                  # The sensors module carries its OWN copy of the gate; the same
+                  # block/pass/absent cases must hold for that copy.
+                  sgate=${./packages/pg-router-sensors/tests/coverage-gate.sh}
+                  if bash $sgate ${profile} ${belowBar} >/dev/null 2>&1; then
+                    fail "pg-router-sensors gate passed a below-threshold package (should block)"
+                  fi
+                  bash $sgate ${profile} ${atBar} >/dev/null 2>&1 \
+                    || fail "pg-router-sensors gate blocked an at/above-threshold set (should pass)"
+                  if bash $sgate ${profile} ${absent} >/dev/null 2>&1; then
+                    fail "pg-router-sensors gate passed a gated-but-absent package (should block)"
                   fi
 
                   echo "coverage-gate meta-test: block/pass/absent/metachar all correct"
@@ -19889,6 +19949,7 @@
               pg-decider
               pg-router-probe
               pg-router-disk-watchdog
+              pg-router-sensors
               pg-checkout-pool
               pg-router-heartbeat
               beads-exporter
