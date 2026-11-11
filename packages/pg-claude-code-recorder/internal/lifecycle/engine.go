@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -41,6 +42,11 @@ type Engine struct {
 
 	// full is the last complete model with the store state it was read at.
 	full atomic.Pointer[modelEntry]
+
+	// inc is the registry state LiveSessions extends instead of rereading; incMu
+	// guards it.
+	incMu sync.Mutex
+	inc   *liveInc
 }
 
 // modelEntry is a cached complete model. The model is a function of the
@@ -91,10 +97,12 @@ type regRow struct {
 
 // seg is the span during which one Process's registry file named one session.
 type seg struct {
-	key   pkey
-	start int64
-	end   int64 // when the registry stopped naming it (0: it still does)
-	cwd   string
+	// session is the session the registry file named (set by LiveSessions' fold).
+	session string
+	key     pkey
+	start   int64
+	end     int64 // when the registry stopped naming it (0: it still does)
+	cwd     string
 	// started is the Process's startedAt (unix ns), 0 when absent.
 	started int64
 }
@@ -345,15 +353,9 @@ func (e *Engine) LiveSessions() (map[string]bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	m, err := e.loadWith(ctx, true)
+	out, err := e.liveIncremental(ctx)
 	if err != nil {
 		return nil, err
-	}
-	out := map[string]bool{}
-	for session := range m.segs {
-		if c, ok := m.conversation(session); ok && c.State == StateOpen {
-			out[session] = true
-		}
 	}
 	e.live.Store(&liveEntry{data: data, epoch: epoch, sessions: out})
 	return copyLive(out), nil
@@ -803,4 +805,154 @@ func (e *Engine) Process(ctx context.Context, pid int64, procStart string) (Proc
 		return Process{}, ErrNotFound
 	}
 	return e.process(m, *best, true), nil
+}
+
+// incRegistryQuery and incDeletedQuery are the registry and deletion queries
+// restricted to records after a given id (the one argument), the deletion query
+// also returning the id.
+var (
+	incRegistryQuery = strings.Replace(registryQuery, "AND r.type='registry' GROUP BY", "AND r.type='registry' AND r.id > ? GROUP BY", 1)
+	incDeletedQuery  = strings.Replace(strings.Replace(registryDeletedQuery, "SELECT r.time_ns,", "SELECT r.id, r.time_ns,", 1),
+		"AND r.type='registry_deleted'", "AND r.type='registry_deleted' AND r.id > ?", 1)
+)
+
+// liveInc is the registry as LiveSessions has folded it so far: the segments of
+// each Process (the last one open until the registry names another session) and
+// its deletion times, with the highest record id read of each kind. Registry
+// records are only ever appended, so a call reads the records after those ids.
+// The state is valid while the store has not rolled back a write, changed the
+// session-ref mode, or committed an input of the lifecycle model that is not a
+// live input (which can remove records); otherwise it is rebuilt from scratch.
+type liveInc struct {
+	epoch  uint64
+	ready  bool
+	gap    uint64 // ModelInputSeq - LiveInputSeq when it was read
+	maxReg int64
+	maxDel int64
+	segs   map[pkey][]seg
+	del    map[pkey]int64
+}
+
+type incReg struct {
+	id, t, started int64
+	session        string
+	k              pkey
+	cwd            string
+}
+
+type incDel struct {
+	id, t int64
+	k     pkey
+}
+
+// liveIncremental derives the live sessions from the registry state held in
+// e.inc, first reading only what the store gained since.
+func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
+	e.incMu.Lock()
+	defer e.incMu.Unlock()
+	// Read BEFORE the queries, like the caches above.
+	live, modelSeq := e.St.LiveInputSeq(), e.St.ModelInputSeq()
+	epoch, ready := e.St.RollbackEpoch(), e.St.SessionRefReady()
+	gap := modelSeq - live
+	st := e.inc
+	if st == nil || st.epoch != epoch || st.ready != ready || st.gap != gap {
+		st = &liveInc{epoch: epoch, ready: ready, gap: gap, segs: map[pkey][]seg{}, del: map[pkey]int64{}}
+	}
+	var regs []incReg
+	var dels []incDel
+	var procs []store.Proc
+	err := e.St.ReadTxCtx(ctx, func(rd *store.Reader) error {
+		db := rd.Q()
+		q := incRegistryQuery
+		if ready {
+			q = viaSessionRef(q)
+		}
+		rows, err := db.Query(q, st.maxReg)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var x regRow
+			var pid, started sql.NullInt64
+			var ps, cwd, name, status, waiting sql.NullString
+			if err := rows.Scan(&x.id, &x.session, &x.t, &pid, &ps, &cwd, &started, &name, &status, &waiting); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			regs = append(regs, incReg{id: x.id, t: x.t, started: started.Int64, session: x.session, k: pkey{pid.Int64, ps.String}, cwd: cwd.String})
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		drows, err := db.Query(incDeletedQuery, st.maxDel)
+		if err != nil {
+			return err
+		}
+		for drows.Next() {
+			var d incDel
+			var pid sql.NullInt64
+			var ps sql.NullString
+			if err := drows.Scan(&d.id, &d.t, &pid, &ps); err != nil {
+				_ = drows.Close()
+				return err
+			}
+			d.k = pkey{pid.Int64, ps.String}
+			dels = append(dels, d)
+		}
+		if err := drows.Close(); err != nil {
+			return err
+		}
+		procs, err = rd.Procs()
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Fold only after every read succeeded, so a failure leaves the state as it was.
+	for _, r := range regs {
+		if r.id > st.maxReg {
+			st.maxReg = r.id
+		}
+		ss := st.segs[r.k]
+		if n := len(ss); n > 0 && ss[n-1].session == r.session {
+			if r.cwd != "" {
+				ss[n-1].cwd = r.cwd
+			}
+			continue
+		} else if n > 0 {
+			ss[n-1].end = r.t
+		}
+		st.segs[r.k] = append(ss, seg{key: r.k, session: r.session, start: r.t, cwd: r.cwd, started: r.started})
+	}
+	for _, d := range dels {
+		if d.id > st.maxDel {
+			st.maxDel = d.id
+		}
+		if d.t > st.del[d.k] {
+			st.del[d.k] = d.t
+		}
+	}
+	e.inc = st
+	m := &model{
+		segs: map[string][]seg{}, deleted: st.del, procs: make(map[pkey]store.Proc, len(procs)),
+		vers: map[pkey][]regRow{}, clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},
+	}
+	for _, p := range procs {
+		m.procs[pkey{p.Pid, p.ProcStart}] = p
+	}
+	for _, ss := range st.segs {
+		for _, s := range ss {
+			m.segs[s.session] = append(m.segs[s.session], s)
+		}
+	}
+	for _, ss := range m.segs {
+		sort.SliceStable(ss, func(i, j int) bool { return ss[i].start < ss[j].start })
+	}
+	out := map[string]bool{}
+	for session := range m.segs {
+		if c, ok := m.conversation(session); ok && c.State == StateOpen {
+			out[session] = true
+		}
+	}
+	return out, nil
 }

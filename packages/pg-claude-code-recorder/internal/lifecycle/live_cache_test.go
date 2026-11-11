@@ -129,3 +129,46 @@ func TestLiveSessionsReadsNothingUntilALiveInputChanges(t *testing.T) {
 		t.Fatalf("after exit: %d queries, want a cached answer", q)
 	}
 }
+
+// Repeated registry writes (a live Claude rewrites its registry file on every
+// status change) cost LiveSessions the new records only: the rows it reads per
+// call stay flat while the registry history grows, and the answer always
+// equals the uncached derivation.
+func TestLiveSessionsRowsReadStayBoundedAcrossRegistryWrites(t *testing.T) {
+	v := newLiveEnv(t)
+	rowsAfterWrite := func(i int) int64 {
+		status := "idle"
+		if i%2 == 0 {
+			status = "busy"
+		}
+		v.k.AddRegistry("73291", liveRegistry(73291, liveSessA, status))
+		v.k.Parse()
+		v.cnt.Reset()
+		got, err := v.e.LiveSessions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := v.cnt.RowsRead()
+		if want := v.full(); !reflect.DeepEqual(got, want) || !got[liveSessA] {
+			t.Fatalf("write %d: LiveSessions %v, uncached derivation %v", i, got, want)
+		}
+		return rows
+	}
+	rowsAfterWrite(0)
+	rowsAfterWrite(1)
+	early := rowsAfterWrite(2)
+	var late int64
+	for i := 3; i < 80; i++ {
+		late = rowsAfterWrite(i)
+	}
+	if early == 0 || late > early {
+		t.Fatalf("rows read per call grew with the registry history: %d after 3 writes, %d after 80", early, late)
+	}
+	// A registry file that moves to a second session and a deletion still agree
+	// with the full derivation.
+	v.k.AddRegistry("73291", liveRegistry(73291, liveSessB, "busy"))
+	v.k.Parse()
+	if got, _ := v.live("process moved to another session"); !got[liveSessB] {
+		t.Fatalf("moved session: %v", got)
+	}
+}
