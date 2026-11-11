@@ -168,8 +168,12 @@ type Daemon struct {
 	// without Open). gor tracks every goLoop goroutine.
 	ctx    context.Context
 	cancel context.CancelCauseFunc
-	stop   <-chan struct{}
-	gor    goroutines
+	// cancelWatch ends the context StartCtx gave the watcher (derived from the
+	// caller's context, so the daemon root is not read inside a function that has
+	// one); the shutdown cancels it with the root.
+	cancelWatch atomic.Pointer[context.CancelCauseFunc]
+	stop        <-chan struct{}
+	gor         goroutines
 	// closeOnce makes Close idempotent; closeErr is its result. phase is the
 	// shutdown step in progress (nil before Close), read lock-free by the
 	// watchdog.
@@ -392,7 +396,7 @@ func (d *Daemon) ingest(p string) copier.Result {
 func (d *Daemon) ingestErr(p string) (copier.Result, error) {
 	start := d.clock.Now()
 	res, err := d.cp.Ingest(p)
-	out := d.afterIngest(p, res, err)
+	out := d.afterIngest(d.rootCtx(), p, res, err)
 	end := d.clock.Now()
 	d.obs.Reg.ObserveL(obs.MLoopDuration, ingestLabels, end.Sub(start).Seconds())
 	d.loops.noteIngest(end.Sub(start), end, err != nil)
@@ -401,7 +405,7 @@ func (d *Daemon) ingestErr(p string) (copier.Result, error) {
 
 // afterIngest logs a failed ingest and tells the parser and the lifecycle
 // tracker about a copied path.
-func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Result {
+func (d *Daemon) afterIngest(ctx context.Context, p string, res copier.Result, err error) copier.Result {
 	result := obs.ResultError
 	if err != nil {
 		d.obs.Log.Warn("ingest_failed", "path", p, "err", err.Error())
@@ -416,7 +420,7 @@ func (d *Daemon) afterIngest(p string, res copier.Result, err error) copier.Resu
 	}
 	switch src, _ := d.scope.Classify(p); src {
 	case scope.SrcRegistry:
-		d.tr.Observe(p)
+		d.tr.ObserveCtx(ctx, p)
 	case scope.SrcControlEnd:
 		d.tr.ObserveEnd(p)
 	}
@@ -475,7 +479,7 @@ func (d *Daemon) onSweep(files []watcher.FileInfo) {
 	d.seenDB.prune(files)
 	d.setSeenGauge()
 	if !d.backfillDone.Load() {
-		d.backfill(files)
+		d.backfill(d.rootCtx(), files)
 	}
 	if d.rootCtx().Err() != nil {
 		return // closing: the next sweep does the rest
@@ -508,7 +512,7 @@ func (d *Daemon) notifyDeletedSnapshots() {
 // journal commit and directory sync are shared.
 const backfillBatch = 64
 
-func (d *Daemon) backfill(files []watcher.FileInfo) {
+func (d *Daemon) backfill(ctx context.Context, files []watcher.FileInfo) {
 	d.backfillAt.Store(d.clock.Now().UnixNano())
 	d.filesTotal.Store(int64(len(files)))
 	d.obs.Reg.Set(obs.MBackfillFiles, nil, float64(len(files)))
@@ -516,7 +520,6 @@ func (d *Daemon) backfill(files []watcher.FileInfo) {
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ModTime.After(sorted[j].ModTime) })
 	d.obs.Event("backfill_start", "files", fmt.Sprint(len(files)))
 	skipped := false
-	ctx := d.rootCtx()
 	// Files are copied in batches that share one journal commit and one directory
 	// sync (copier.IngestBatch); the newest-first order and the low-space check
 	// are unchanged. A batch is durable as a unit: a crash inside one leaves the
@@ -572,7 +575,7 @@ func (d *Daemon) afterBatch(ctx context.Context, results []copier.BatchResult) b
 		if ctx.Err() != nil {
 			return false
 		}
-		res := d.afterIngest(br.Path, br.Result, br.Err)
+		res := d.afterIngest(ctx, br.Path, br.Result, br.Err)
 		d.filesCopied.Add(1)
 		d.obs.Reg.Set(obs.MCopiedFiles, nil, float64(d.filesCopied.Load()))
 		if res.Bytes > 0 && d.cfg.CopyThrottle > 0 && !clock.SleepCtx(ctx, d.clock, d.cfg.CopyThrottle) {
@@ -607,7 +610,14 @@ func (d *Daemon) registerOps() {
 }
 
 // Start opens the listener and the exporter and starts the watcher.
-func (d *Daemon) Start() error {
+func (d *Daemon) Start() error { return d.StartCtx(context.Background()) }
+
+// StartCtx is Start for a caller that has a context. The watcher and the
+// failed-start cleanup run under a context derived from ctx that Close also
+// cancels, so a stop request and Close both end the watcher.
+func (d *Daemon) StartCtx(ctx context.Context) error {
+	wctx, cancelWatch := context.WithCancelCause(ctx)
+	d.cancelWatch.Store(&cancelWatch)
 	d.srv = server.New(d.obs, d.cfg.Clients, d.hello)
 	d.srv.SetQueryTimeout(d.cfg.QueryTimeout)
 	d.registerOps()
@@ -632,8 +642,9 @@ func (d *Daemon) Start() error {
 		endPhase()
 	}
 	endPhase = d.su.begin("watcher_start", true)
-	if err := d.w.StartContext(d.rootCtx()); err != nil {
-		d.srv.Close()
+	if err := d.w.StartContext(wctx); err != nil {
+		d.srv.Close(wctx)
+		cancelWatch(nil)
 		return fmt.Errorf("start watcher: %w", err)
 	}
 	endPhase()
@@ -1140,15 +1151,23 @@ func (d *Daemon) refreshGaugesPass() {
 
 // Close stops everything and flushes the checkpoint. It is idempotent and safe
 // on a daemon that was never started.
-func (d *Daemon) Close() error { return d.closeFor("close") }
+func (d *Daemon) Close() error { return d.closeFor(context.Background(), "close") }
+
+// CloseCtx is Close with the shutdown steps run under ctx (values only: the
+// shutdown is detached from ctx's cancellation, see shutdown).
+func (d *Daemon) CloseCtx(ctx context.Context) error { return d.closeFor(ctx, "close") }
 
 // closeFor is Close with the reason logged in shutdown_started.
-func (d *Daemon) closeFor(reason string) error {
-	d.closeOnce.Do(func() { d.closeErr = d.shutdown(reason) })
+func (d *Daemon) closeFor(ctx context.Context, reason string) error {
+	d.closeOnce.Do(func() { d.closeErr = d.shutdown(ctx, reason) })
 	return d.closeErr
 }
 
-func (d *Daemon) shutdown(reason string) error {
+func (d *Daemon) shutdown(ctx context.Context, reason string) error {
+	// Detached from the caller's cancellation (Run's ctx has ended by now, and the
+	// first step cancels the daemon root): the server, exporter and store closes bound
+	// their own wait and need a live context to run it.
+	ctx = context.WithoutCancel(ctx)
 	t0 := d.clock.Now()
 	d.obs.Event(obs.EvShutdownStarted, "reason", reason)
 	if c, ok := d.opt.Procs.(io.Closer); ok {
@@ -1168,13 +1187,16 @@ func (d *Daemon) shutdown(reason string) error {
 		if d.cancel != nil {
 			d.cancel(errDaemonClosing)
 		}
+		if cw := d.cancelWatch.Load(); cw != nil {
+			(*cw)(errDaemonClosing)
+		}
 	})
 	step("server_exporter", func() {
 		if d.srv != nil {
-			d.srv.Close()
+			d.srv.Close(ctx)
 		}
 		if d.exp != nil {
-			d.exp.Close()
+			d.exp.Close(ctx)
 		}
 	})
 	step("watcher", func() { errs = append(errs, d.w.Close()) })
@@ -1182,7 +1204,7 @@ func (d *Daemon) shutdown(reason string) error {
 	step("seen_flush", d.seenDB.flush)
 	step("tracker", d.tr.Close)
 	step("checkpoint_flush", func() { errs = append(errs, d.ckpt.Flush()) })
-	step("store", func() { errs = append(errs, d.st.Close()) })
+	step("store", func() { errs = append(errs, d.st.CloseCtx(ctx)) })
 	d.phase.Store(&phaseRec{name: "done", since: d.clock.Now()})
 	// A deadline that fired is already exiting the process; Disarm losing the
 	// race means this line is the last the old process writes, so log first.
@@ -1228,14 +1250,14 @@ func (d *Daemon) registerShutdownHooks() {
 // Run starts the daemon and blocks until ctx ends, then closes it.
 func (d *Daemon) Run(ctx context.Context) error {
 	if ctx.Err() != nil {
-		return d.closeFor("signal") // stopped before start: nothing to serve
+		return d.closeFor(ctx, "signal") // stopped before start: nothing to serve
 	}
-	if err := d.Start(); err != nil {
-		_ = d.closeFor("start_failed")
+	if err := d.StartCtx(ctx); err != nil {
+		_ = d.closeFor(ctx, "start_failed")
 		return err
 	}
 	<-ctx.Done()
-	return d.closeFor("signal")
+	return d.closeFor(ctx, "signal")
 }
 
 func (d *Daemon) hello() any {

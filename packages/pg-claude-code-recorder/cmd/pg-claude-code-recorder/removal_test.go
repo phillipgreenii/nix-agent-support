@@ -85,7 +85,7 @@ func newOpsDaemon(t *testing.T, enabled bool, doctor any) *opsDaemon {
 	if err := s.Listen(d.sock); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return d
 }
 
@@ -288,7 +288,7 @@ func TestSweepForceStartsAndWaitsUntilTheDaemonReportsCompletion(t *testing.T) {
 	if err := s.Listen(sock); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	a, out, _ := testApp(nil)
 	a.pollEvery = time.Millisecond
 	if code := runCLI(t, a, "sweep", "--force", "--wait", "--socket", sock); code != 0 || !strings.Contains(out.String(), "finished") {

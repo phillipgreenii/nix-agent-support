@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -47,12 +48,12 @@ func TestAppendFileLastCopyDecidesIdleWithoutSnapshotsOrTombstones(t *testing.T)
 				"recent": {session: "recent", files: []store.File{recent}},
 				"stale":  {session: "stale", files: []store.File{stale}},
 			}
-			e.s.prefetchLastSeen(groups, map[string]bool{}, map[string]bool{})
+			e.s.prefetchLastSeen(context.Background(), groups, map[string]bool{}, map[string]bool{})
 		}
-		if idle := now.Sub(e.s.lastSeen(recent)) >= after; idle {
+		if idle := now.Sub(e.s.lastSeen(context.Background(), recent)) >= after; idle {
 			t.Errorf("cached=%v: recently copied file is idle", cached)
 		}
-		if idle := now.Sub(e.s.lastSeen(stale)) >= after; !idle {
+		if idle := now.Sub(e.s.lastSeen(context.Background(), stale)) >= after; !idle {
 			t.Errorf("cached=%v: file untouched for settle.after is not idle", cached)
 		}
 	}

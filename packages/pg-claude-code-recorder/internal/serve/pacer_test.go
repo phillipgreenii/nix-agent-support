@@ -66,35 +66,43 @@ func TestPacerEarnsNoBurstCreditWhileIdleAndZeroIsUnlimited(t *testing.T) {
 func TestWaitsWakeOnCancel(t *testing.T) {
 	cases := []struct {
 		name string
-		run  func(ctx context.Context) bool
+		// setup builds the case (outside any ctx) and returns what runs under ctx.
+		setup func(t *testing.T) func(ctx context.Context) bool
 	}{
-		{"pacer", func(ctx context.Context) bool {
-			p := newPacer(clock.Real{}, 1)
-			p.wait(ctx) // takes the free slot; the next is a second away
-			p.next = time.Now().Add(time.Hour)
-			return p.wait(ctx)
+		{"pacer", func(*testing.T) func(ctx context.Context) bool {
+			return func(ctx context.Context) bool {
+				p := newPacer(clock.Real{}, 1)
+				p.wait(ctx) // takes the free slot; the next is a second away
+				p.next = time.Now().Add(time.Hour)
+				return p.wait(ctx)
+			}
 		}},
-		{"copy throttle", func(ctx context.Context) bool { return clock.SleepCtx(ctx, clock.Real{}, time.Hour) }},
-		{"backfill pacing", func(ctx context.Context) bool {
+		{"copy throttle", func(*testing.T) func(ctx context.Context) bool {
+			return func(ctx context.Context) bool { return clock.SleepCtx(ctx, clock.Real{}, time.Hour) }
+		}},
+		{"backfill pacing", func(t *testing.T) func(ctx context.Context) bool {
 			e := newEnv(t, false)
 			e.cfg.MaxFilesPerSecond = 1
 			e.transcript("a.jsonl", "a\n", time.Now().Add(-time.Hour))
 			e.transcript("b.jsonl", "b\n", time.Now().Add(-time.Hour))
 			d := e.open(t)
-			defer func() { _ = d.Close() }()
+			t.Cleanup(func() { _ = d.Close() })
 			d.sweepPace.next = time.Now().Add(time.Hour)
-			ctx2, cancel := context.WithCancel(ctx)
-			d.ctx = ctx2
-			go func() { time.Sleep(20 * time.Millisecond); cancel() }()
-			d.backfill([]watcher.FileInfo{{Path: filepath.Join(e.claude, "projects", "example-proj", "a.jsonl")}})
-			return false
+			return func(ctx context.Context) bool {
+				ctx2, cancel := context.WithCancel(ctx)
+				d.ctx = ctx2
+				go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+				d.backfill(ctx2, []watcher.FileInfo{{Path: filepath.Join(e.claude, "projects", "example-proj", "a.jsonl")}})
+				return false
+			}
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan bool, 1)
-			go func() { done <- tc.run(ctx) }()
+			run := tc.setup(t)
+			go func() { done <- run(ctx) }()
 			time.Sleep(30 * time.Millisecond)
 			cancel()
 			select {

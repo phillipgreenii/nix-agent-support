@@ -9,6 +9,7 @@ package settle
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,7 +94,7 @@ func splitNotices(ms []DoctorMismatch) (crit, notices []DoctorMismatch) {
 
 // doctorFull is the old synchronous comparison (doctor.bytes_per_slice = 0): it
 // holds the copier lock across every file's full hash.
-func (s *Settler) doctorFull() (DoctorResult, error) {
+func (s *Settler) doctorFull(ctx context.Context) (DoctorResult, error) {
 	now := s.cfg.Clock.Now()
 	res := DoctorResult{AtNS: now.UnixNano(), Mismatches: []DoctorMismatch{}, Notices: []DoctorMismatch{}}
 	bad := map[int64]bool{}
@@ -149,7 +150,7 @@ func (s *Settler) doctorFull() (DoctorResult, error) {
 				if err != nil {
 					continue
 				}
-				if (h != sn.Hash || size != sn.Size) && !s.lastSeen(f).Before(s.mtimeOf(orig)) {
+				if (h != sn.Hash || size != sn.Size) && !s.lastSeen(ctx, f).Before(s.mtimeOf(orig)) {
 					add(DoctorMismatch{Kind: MismatchSnapshot, File: f.ID, Path: orig, Detail: fmt.Sprintf("stored %d bytes, original %d", sn.Size, size)})
 				}
 			}
@@ -159,7 +160,7 @@ func (s *Settler) doctorFull() (DoctorResult, error) {
 	if err != nil {
 		return res, err
 	}
-	s.doctorJournal(add)
+	s.doctorJournal(ctx, add)
 	if err := s.doctorArchives(&res, add); err != nil {
 		return res, err
 	}
@@ -224,7 +225,7 @@ func (s *Settler) prefixMatches(f store.File, g store.Generation, orig string) (
 // doctorJournal checks the journal against the index: the index never applied a
 // record beyond the journal's last intact sequence, and a replay of the journal
 // equals the index's observations.
-func (s *Settler) doctorJournal(add func(DoctorMismatch)) {
+func (s *Settler) doctorJournal(ctx context.Context, add func(DoctorMismatch)) {
 	// A frozen view: reading the journal and the index at different instants
 	// races a commit in flight (journal first, index second).
 	fz, err := s.st.FreezeJournal()
@@ -237,7 +238,7 @@ func (s *Settler) doctorJournal(add func(DoctorMismatch)) {
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("the index applied sequence %d, the journal's last intact sequence is %d", fz.LastSeq, delta.LastGoodSeq)})
 		return
 	}
-	replay, rerr := fz.Replay()
+	replay, rerr := fz.ReplayCtx(ctx)
 	switch {
 	case rerr != nil:
 		add(DoctorMismatch{Kind: MismatchJournal, Detail: fmt.Sprintf("dump: replay=%v", rerr)})

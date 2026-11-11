@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestBusyIndexIsNotSetAsideAsCorrupt(t *testing.T) {
 	busyTimeoutMS = 50
 	defer func() { busyTimeoutMS = old }()
 	// Bypass the directory lock: this exercises the corrupt-vs-busy rule alone.
-	b, err := openLocked(dir, Options{})
+	b, err := openLocked(context.Background(), dir, Options{})
 	if err == nil {
 		_ = b.Close()
 		t.Fatal("open against a write-locked index.db succeeded")

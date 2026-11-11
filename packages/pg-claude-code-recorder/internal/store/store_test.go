@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -102,7 +103,7 @@ func TestReplayIsIdempotent(t *testing.T) {
 	for i := range recs {
 		ptrs[i] = &recs[i]
 	}
-	if err := s.applyAll(ptrs); err != nil { // apply every record a second time
+	if err := s.applyAll(context.Background(), ptrs); err != nil { // apply every record a second time
 		t.Fatal(err)
 	}
 	after, _ := s.Dump()

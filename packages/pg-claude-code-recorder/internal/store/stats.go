@@ -95,7 +95,8 @@ func (s *Store) collectStats(ctx context.Context, c *sql.DB, limit int, now time
 	if _, err := conn.ExecContext(ctx, `PRAGMA analysis_limit=`+strconv.Itoa(limit)); err != nil {
 		return 0, err
 	}
-	defer func() { _, _ = conn.ExecContext(context.Background(), `PRAGMA analysis_limit=0`) }()
+	// Reset the limit even when ctx is cancelled, so the pooled connection is left clean.
+	defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA analysis_limit=0`) }()
 	skipped := 0
 	targets, err := statsTargets(ctx, conn)
 	if err != nil {

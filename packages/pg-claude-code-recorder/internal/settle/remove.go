@@ -16,6 +16,7 @@ package settle
 // A restart finds a pending removal and finishes or undoes it (recoverRemoval).
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -130,6 +131,13 @@ func (s *Settler) cfs() fsx.FS {
 // Remove removes the selected Conversations (or reports what it would remove on
 // a dry run, which works while removal is disabled and changes nothing).
 func (s *Settler) Remove(opt RemoveOptions) (RemoveReport, error) {
+	return s.RemoveCtx(s.detached(), opt)
+}
+
+// RemoveCtx is Remove under ctx. A removal is not cut by a cancelled ctx (it
+// commits durable stages as it goes), so ctx only carries values.
+func (s *Settler) RemoveCtx(ctx context.Context, opt RemoveOptions) (RemoveReport, error) {
+	ctx = context.WithoutCancel(ctx)
 	unlock, _ := s.lockRunWait("remove")
 	defer unlock()
 	if opt.DryRun {
@@ -137,7 +145,7 @@ func (s *Settler) Remove(opt RemoveOptions) (RemoveReport, error) {
 		// pass over many of them once held it 14 s and starved the settle wake.
 		opt.yield = s.yieldRun
 	}
-	rep, err := s.removeLocked(opt, s.cfg.Clock.Now())
+	rep, err := s.removeLocked(ctx, opt, s.cfg.Clock.Now())
 	if err == nil && !opt.DryRun {
 		// An operator run that completed counts even when it removed nothing.
 		s.recordRemovalRun(s.cfg.Clock.Now())
@@ -159,7 +167,7 @@ func (s *Settler) hourCount(now time.Time) int {
 }
 
 // removeLocked runs the removal pass with the run lock held.
-func (s *Settler) removeLocked(opt RemoveOptions, now time.Time) (rep RemoveReport, err error) {
+func (s *Settler) removeLocked(ctx context.Context, opt RemoveOptions, now time.Time) (rep RemoveReport, err error) {
 	defer func() {
 		if !opt.DryRun && len(rep.Removed) > 0 {
 			s.markRemovalGauges()
@@ -168,10 +176,10 @@ func (s *Settler) removeLocked(opt RemoveOptions, now time.Time) (rep RemoveRepo
 			}
 		}
 	}()
-	return s.removeLockedBody(opt, now)
+	return s.removeLockedBody(ctx, opt, now)
 }
 
-func (s *Settler) removeLockedBody(opt RemoveOptions, now time.Time) (RemoveReport, error) {
+func (s *Settler) removeLockedBody(ctx context.Context, opt RemoveOptions, now time.Time) (RemoveReport, error) {
 	rep := RemoveReport{
 		Enabled: s.cfg.RemoveEnable, DryRun: opt.DryRun,
 		Candidates: []RemoveCandidate{}, Removed: []string{}, Skipped: []RemoveSkip{}, SkipCounts: map[string]int{},
@@ -183,7 +191,7 @@ func (s *Settler) removeLockedBody(opt RemoveOptions, now time.Time) (RemoveRepo
 	if err != nil {
 		return rep, err
 	}
-	groups, err := s.groups()
+	groups, err := s.groups(ctx)
 	if err != nil {
 		return rep, err
 	}
@@ -235,7 +243,7 @@ func (s *Settler) removeLockedBody(opt RemoveOptions, now time.Time) (RemoveRepo
 			skip(session, BlockNoFiles)
 			continue
 		}
-		blocked, _ := s.blockers(c, row, hasRow, live[session], now)
+		blocked, _ := s.blockers(ctx, c, row, hasRow, live[session], now)
 		if len(blocked) > 0 {
 			if len(opt.Sessions) == 0 && onlyAgeOrState(blocked) {
 				// A Conversation that is simply not due is not worth a line in the
@@ -276,7 +284,7 @@ func (s *Settler) removeLockedBody(opt RemoveOptions, now time.Time) (RemoveRepo
 		var reason string
 		err := s.cfg.Copier.WithLock(func() error {
 			var e error
-			removed, reason, e = s.removeConversation(c, now)
+			removed, reason, e = s.removeConversation(ctx, c, now)
 			return e
 		})
 		switch {
@@ -326,7 +334,7 @@ func (s *Settler) fileBytes(f store.File) int64 {
 // blockers lists why the Conversation is not removable now (the stable
 // blocked_by list; removal_disabled is reported by the caller, not here) and the
 // earliest time the age gate opens.
-func (s *Settler) blockers(c *conv, row store.StageRow, hasRow, live bool, now time.Time) ([]string, time.Time) {
+func (s *Settler) blockers(ctx context.Context, c *conv, row store.StageRow, hasRow, live bool, now time.Time) ([]string, time.Time) {
 	var out []string
 	var next time.Time
 	if live {
@@ -347,7 +355,7 @@ func (s *Settler) blockers(c *conv, row store.StageRow, hasRow, live bool, now t
 	case row.Stage != StageSettled:
 		out = append(out, BlockNotSettled)
 	}
-	newest := s.newest(c)
+	newest := s.newest(ctx, c)
 	if due := newest.Add(s.cfg.RemoveAfter); now.Before(due) {
 		out = append(out, BlockQuietAge)
 		next = due
@@ -383,15 +391,15 @@ func (s *Settler) skipFile(reason string) {
 // removeConversation runs the removal of one Conversation. The copier's lock is
 // held. It returns whether the Conversation is now removed and, when it is not,
 // the stable reason.
-func (s *Settler) removeConversation(c *conv, now time.Time) (bool, string, error) {
+func (s *Settler) removeConversation(ctx context.Context, c *conv, now time.Time) (bool, string, error) {
 	c.hm = map[hashKey]uint64{}
 	defer func() { c.hm = nil }()
-	fails, regen, err := s.check(c, true, now)
+	fails, regen, err := s.check(ctx, c, true, now)
 	if err != nil {
 		return false, "", err
 	}
 	if len(fails) > 0 {
-		_, err := s.hold(c, fails, now, false)
+		_, err := s.hold(ctx, c, fails, now, false)
 		return false, BlockHeld, err
 	}
 	if len(regen) > 0 {
@@ -404,7 +412,7 @@ func (s *Settler) removeConversation(c *conv, now time.Time) (bool, string, erro
 	}
 	if s.cfg.Copier.CloneMode() {
 		// A clone alone never stands in for the archive: compress it first.
-		if _, err := s.settleBytes(c, now); err != nil {
+		if _, err := s.settleBytes(ctx, c, now); err != nil {
 			return false, "", err
 		}
 	} else if s.changedSinceSettle(c) {
@@ -417,16 +425,16 @@ func (s *Settler) removeConversation(c *conv, now time.Time) (bool, string, erro
 	// The durability barrier: nothing leaves Claude's directories until the
 	// archive and every index commit so far are on disk. A failure refuses the
 	// removal and changes nothing.
-	if err := s.durabilityBarrier(pl); err != nil {
+	if err := s.durabilityBarrier(ctx, pl); err != nil {
 		s.cfg.Obs.Log.Warn("removal_barrier_failed", "session", pl.Session, "err", err.Error())
 		s.cfg.Obs.NoteNoSpace(obs.OpRemovalBarrier, err, "", s.freeBytesStr())
 		return false, BlockBarrier, nil
 	}
-	if err := s.commitPending(pl, now, true); err != nil {
+	if err := s.commitPending(ctx, pl, now, true); err != nil {
 		return false, "", err
 	}
 	faults.At("remove.after-pending")
-	out, err := s.runPending(pl, now, false)
+	out, err := s.runPending(ctx, pl, now, false)
 	if err != nil {
 		return false, "", err
 	}
@@ -540,16 +548,16 @@ func (s *Settler) quarantineAvailable(orig string, st fileStat) bool {
 	return true
 }
 
-func (s *Settler) commitPending(pl *pendingList, now time.Time, full bool) error {
+func (s *Settler) commitPending(ctx context.Context, pl *pendingList, now time.Time, full bool) error {
 	b, err := json.Marshal(pl)
 	if err != nil {
 		return err
 	}
 	rec := &store.Rec{T: store.TStage, At: now.UnixNano(), Session: pl.Session, State: store.StageRemovalPending, Val: string(b)}
 	if full {
-		return s.st.CommitFull(rec)
+		return s.st.CommitFullCtx(ctx, rec)
 	}
-	return s.st.Commit(rec)
+	return s.st.CommitCtx(ctx, rec)
 }
 
 func qName(pf pendingFile) string {
@@ -579,7 +587,7 @@ func (s *Settler) findQuarantined(pf pendingFile) string {
 // persisted per-file state), so one function serves the first run and recovery.
 // It returns "" when the Conversation is removed, else the reason it went back
 // to Quiet (or "restore_conflict" when it is held).
-func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (string, error) {
+func (s *Settler) runPending(ctx context.Context, pl *pendingList, now time.Time, resume bool) (string, error) {
 	cfs := s.cfs()
 	for i := range pl.Files {
 		pf := &pl.Files[i]
@@ -593,18 +601,18 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 		case atPath:
 			if why := s.holdsSession(pl.Session); why != "" {
 				s.skipFile(why)
-				return s.abortPending(pl, now, why)
+				return s.abortPending(ctx, pl, now, why)
 			}
 			if h := s.cfg.Hooks.BeforeQuarantine; h != nil {
 				h(pl.Session, pf.Path)
 				st, statErr = lstat(pf.Path)
 			}
 			if statErr != nil || st.Size != pf.Size || st.MtimeNS != pf.MtimeNS || st.Nlink != 1 {
-				return s.abortPending(pl, now, BlockNewWrites)
+				return s.abortPending(ctx, pl, now, BlockNewWrites)
 			}
 			if resume {
 				if h, _, err := hashFile(pf.Path); err != nil || hexHash(h) != pf.Hash {
-					return s.abortPending(pl, now, BlockNewWrites)
+					return s.abortPending(ctx, pl, now, BlockNewWrites)
 				}
 			}
 			q = filepath.Join(qDir(*pf), qName(*pf))
@@ -614,7 +622,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 			if err := cfs.Rename(pf.Path, q); err != nil {
 				if errors.Is(err, syscallEXDEV) {
 					s.skipFile(obs.ReasonQuarantineUnavl)
-					return s.abortPending(pl, now, BlockUnavailable)
+					return s.abortPending(ctx, pl, now, BlockUnavailable)
 				}
 				return "", err
 			}
@@ -627,7 +635,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 				h(pl.Session, pf.Path)
 			}
 			pf.State, pf.Q = fsQuarantined, q
-			if err := s.commitPending(pl, now, false); err != nil {
+			if err := s.commitPending(ctx, pl, now, false); err != nil {
 				return "", err
 			}
 			faults.At("remove.after-quarantined")
@@ -636,7 +644,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 			// check again, then the same holder listing and re-hash.
 			if why := s.holdsSession(pl.Session); why != "" {
 				s.skipFile(why)
-				return s.abortPending(pl, now, why)
+				return s.abortPending(ctx, pl, now, why)
 			}
 			pf.State, pf.Q = fsQuarantined, q
 		}
@@ -652,7 +660,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 		}
 		if held {
 			s.skipFile("holder_found")
-			return s.abortPending(pl, now, "holder_found")
+			return s.abortPending(ctx, pl, now, "holder_found")
 		}
 		// Re-hash against the archive (a write through a descriptor opened before the
 		// rename shows up as a changed size or hash).
@@ -665,7 +673,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 		if hexHash(h) != pf.Hash || size != pf.Size {
 			s.cfg.Obs.Reg.Add(obs.MQuarantineMismatch, nil, 1)
 			s.skipFile("write_after_rename")
-			return s.abortPending(pl, now, "write_after_rename")
+			return s.abortPending(ctx, pl, now, "write_after_rename")
 		}
 		if hk := s.cfg.Hooks.BeforeUnlink; hk != nil {
 			hk(pl.Session, pf.Path)
@@ -687,7 +695,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 			}
 			s.cfg.Obs.Reg.Add(obs.MQuarantineMismatch, nil, 1)
 			s.skipFile("write_after_rename")
-			return s.abortPending(pl, now, "write_after_rename")
+			return s.abortPending(ctx, pl, now, "write_after_rename")
 		}
 		if err := cfs.Remove(q); err != nil {
 			s.skipFile("unlink_failed")
@@ -698,7 +706,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 		}
 		faults.At("remove.after-unlink")
 		pf.State, pf.Q = fsUnlinked, ""
-		if err := s.commitPending(pl, now, false); err != nil {
+		if err := s.commitPending(ctx, pl, now, false); err != nil {
 			return "", err
 		}
 	}
@@ -714,7 +722,7 @@ func (s *Settler) runPending(pl *pendingList, now time.Time, resume bool) (strin
 			recs = append(recs, &store.Rec{T: store.TPathClose, At: now.UnixNano(), File: pf.File, Path: p})
 		}
 	}
-	if err := s.st.CommitFull(recs...); err != nil {
+	if err := s.st.CommitFullCtx(ctx, recs...); err != nil {
 		return "", err
 	}
 	for _, pf := range pl.Files {
@@ -739,11 +747,11 @@ func mustJSON(v any) string {
 // index.db itself. The index runs at synchronous=NORMAL otherwise, so without
 // this the "removal pending" decision could rest on commits that a power loss
 // would roll back.
-func (s *Settler) durabilityBarrier(pl *pendingList) error {
+func (s *Settler) durabilityBarrier(ctx context.Context, pl *pendingList) error {
 	if err := s.flushArchive(pl.Session); err != nil {
 		return err
 	}
-	return s.st.Barrier()
+	return s.st.BarrierCtx(ctx)
 }
 
 // flushArchive flushes the archive that holds the Conversation's bytes (the
@@ -797,7 +805,7 @@ func (s *Settler) restoreOne(pf pendingFile, q string) (conflict bool, err error
 // abortPending restores every quarantined file and returns the Conversation to
 // Quiet (its copy continues), or holds it when a restore found a new file at the
 // path.
-func (s *Settler) abortPending(pl *pendingList, now time.Time, reason string) (string, error) {
+func (s *Settler) abortPending(ctx context.Context, pl *pendingList, now time.Time, reason string) (string, error) {
 	conflict := ""
 	for _, pf := range pl.Files {
 		q := s.findQuarantined(pf)
@@ -817,12 +825,12 @@ func (s *Settler) abortPending(pl *pendingList, now time.Time, reason string) (s
 	if conflict != "" {
 		fails := []Failure{{File: pl.Files[0].File, Path: pl.Files[0].Rel, Reason: ReasonRestoreConflict, Detail: conflict}}
 		d, _ := json.Marshal(fails)
-		err := s.st.Commit(&store.Rec{T: store.TStage, At: now.UnixNano(), Session: pl.Session, State: StageHeld, Reason: ReasonRestoreConflict, Val: string(d)})
+		err := s.st.CommitCtx(ctx, &store.Rec{T: store.TStage, At: now.UnixNano(), Session: pl.Session, State: StageHeld, Reason: ReasonRestoreConflict, Val: string(d)})
 		s.cfg.Obs.Event(obs.EvSessionHeld, "session", pl.Session, "reason", ReasonRestoreConflict, "files", "1")
 		return ReasonRestoreConflict, err
 	}
 	s.setReason(pl.Session, reason)
-	err := s.st.Commit(&store.Rec{T: store.TStage, At: now.UnixNano(), Session: pl.Session, State: "", Reason: reason})
+	err := s.st.CommitCtx(ctx, &store.Rec{T: store.TStage, At: now.UnixNano(), Session: pl.Session, State: "", Reason: reason})
 	return reason, err
 }
 
@@ -849,7 +857,7 @@ func (s *Settler) tidy(pl *pendingList) {
 
 // recoverRemoval finishes or undoes every pending removal and logs the
 // quarantine entries no pending list names. It runs at start, before the watcher.
-func (s *Settler) recoverRemoval() error {
+func (s *Settler) recoverRemoval(ctx context.Context) error {
 	rows, err := s.st.Stages()
 	if err != nil {
 		return err
@@ -866,7 +874,7 @@ func (s *Settler) recoverRemoval() error {
 		var out string
 		err := s.cfg.Copier.WithLock(func() error {
 			var e error
-			out, e = s.runPending(&pl, now, true)
+			out, e = s.runPending(ctx, &pl, now, true)
 			return e
 		})
 		if err != nil {
@@ -954,11 +962,11 @@ func (s *Settler) markRemovalGauges() { s.rgDirty.Store(true) }
 
 // refreshRemovalGaugesIfDue is the wake path's refresh: it runs only after a
 // mark or when rgInterval has passed since the last refresh. Run lock held.
-func (s *Settler) refreshRemovalGaugesIfDue(groups map[string]*conv, live map[string]bool, now time.Time) {
+func (s *Settler) refreshRemovalGaugesIfDue(ctx context.Context, groups map[string]*conv, live map[string]bool, now time.Time) {
 	if !s.rgDirty.Swap(false) && !s.rgAt.IsZero() && now.Sub(s.rgAt) < rgInterval {
 		return
 	}
-	s.refreshRemovalGauges(groups, live, now)
+	s.refreshRemovalGauges(ctx, groups, live, now)
 	s.rgAt = now
 }
 
@@ -974,7 +982,7 @@ func (s *Settler) refreshRemovalGaugesIfDue(groups map[string]*conv, live map[st
 // keeps the exact check (blockers and newest per Conversation) and refuses a
 // Conversation whose original changed recently, whatever this gauge says. On a
 // read error the maps are empty and the gauge reports zero until the next refresh.
-func (s *Settler) backlogFacts(cs []*conv) (newest map[string]time.Time, bytes map[string]int64) {
+func (s *Settler) backlogFacts(ctx context.Context, cs []*conv) (newest map[string]time.Time, bytes map[string]int64) {
 	newest, bytes = map[string]time.Time{}, map[string]int64{}
 	var ids []int64
 	for _, c := range cs {
@@ -986,7 +994,7 @@ func (s *Settler) backlogFacts(cs []*conv) (newest map[string]time.Time, bytes m
 		return
 	}
 	var seen, size map[int64]int64
-	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+	if err := s.st.ReadTxCtx(ctx, func(rd *store.Reader) (err error) {
 		if seen, err = rd.LastSeenByFile(ids); err != nil {
 			return err
 		}
@@ -1008,7 +1016,7 @@ func (s *Settler) backlogFacts(cs []*conv) (newest map[string]time.Time, bytes m
 }
 
 // refreshRemovalGauges sets the quarantine gauges and the removal backlog.
-func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]bool, now time.Time) {
+func (s *Settler) refreshRemovalGauges(ctx context.Context, groups map[string]*conv, live map[string]bool, now time.Time) {
 	s.removalGaugeRefreshes.Add(1)
 	reg := s.cfg.Obs.Reg
 	var files int
@@ -1045,7 +1053,7 @@ func (s *Settler) refreshRemovalGauges(groups map[string]*conv, live map[string]
 		}
 		settled = append(settled, c)
 	}
-	newest, size := s.backlogFacts(settled)
+	newest, size := s.backlogFacts(ctx, settled)
 	defer func() { s.setRemovalDue(len(settled), convs, now) }()
 	for _, c := range settled {
 		if t, ok := newest[c.session]; !ok || now.Sub(t) < s.cfg.RemoveAfter {

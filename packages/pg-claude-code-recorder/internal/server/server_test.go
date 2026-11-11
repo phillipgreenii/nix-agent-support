@@ -42,7 +42,7 @@ func newServer(t *testing.T) (*Server, *obs.Obs, string) {
 	if err := s.Listen(p); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return s, o, p
 }
 
@@ -54,7 +54,7 @@ func TestListenCreatesMissingSocketDirectory(t *testing.T) {
 	if err := s.Listen(p); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSocket == 0 {
 		t.Fatalf("socket not created: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestStaleSocketIsReplacedAndLiveOneIsRefused(t *testing.T) {
 	if err := s.Listen(p); err != nil {
 		t.Fatalf("stale socket not replaced: %v", err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 	s2 := New(obs.New(nil), nil, func() any { return nil })
 	if err := s2.Listen(p); err == nil {
 		t.Fatal("a live daemon's socket was taken over")

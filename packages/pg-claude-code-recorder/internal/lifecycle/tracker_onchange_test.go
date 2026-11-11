@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,7 +70,7 @@ func TestTrackerRunsOnChangeWhenLiveSetChanges(t *testing.T) {
 	}
 
 	// A seen-only commit does not.
-	tr.commit(store.ProcRec("seen", 4002, "x", 1))
+	tr.commit(context.Background(), store.ProcRec("seen", 4002, "x", 1))
 	if calls != 3 {
 		t.Fatalf("a seen-only commit ran OnChange (%d)", calls)
 	}

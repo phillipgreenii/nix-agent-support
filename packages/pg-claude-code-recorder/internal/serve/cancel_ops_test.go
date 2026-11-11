@@ -73,11 +73,12 @@ func TestEveryOperationStopsOnACancelledRequestContext(t *testing.T) {
 		}
 	}
 
-	dead, cancel := context.WithCancel(context.Background())
+	live := t.Context()
+	dead, cancel := context.WithCancel(live)
 	cancel()
 	for op, body := range cancelBodies {
 		t.Run(op, func(t *testing.T) {
-			liveCode, liveBody := post(d, context.Background(), op, body)
+			liveCode, liveBody := post(d, live, op, body)
 			code, got := post(d, dead, op, body)
 			if code == liveCode && got == liveBody {
 				t.Fatalf("%s answered the same (%d %s) under a cancelled context: the context does not reach the store", op, code, got)

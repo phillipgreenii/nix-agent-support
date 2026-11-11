@@ -17,6 +17,7 @@ package settle
 // extract again deletes those partial files and starts over.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,6 +79,14 @@ func (s *Settler) sessionExists(session string) (string, bool) {
 
 // Extract restores the Conversation. to is "" for the Claude directory.
 func (s *Settler) Extract(session, to string) (ExtractResult, error) {
+	return s.ExtractCtx(s.detached(), session, to)
+}
+
+// ExtractCtx is Extract under ctx. A restore is not cut by a cancelled ctx (a
+// half-restored Conversation is worse than a late reply), so ctx only carries
+// values.
+func (s *Settler) ExtractCtx(ctx context.Context, session, to string) (ExtractResult, error) {
+	ctx = context.WithoutCancel(ctx)
 	defer s.lockRun("extract")()
 	res := ExtractResult{Session: session, Paths: []string{}}
 	if !uuidRe.MatchString(session) {
@@ -144,7 +153,7 @@ func (s *Settler) Extract(session, to string) (ExtractResult, error) {
 			list = append(list, extractEntry{File: mf.File, Rel: mf.Path, Size: mf.StoredSize(), Hash: mf.Hash})
 		}
 		b, _ := json.Marshal(list)
-		if err := s.st.CommitFull(&store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: store.StageExtracting, Val: string(b)}); err != nil {
+		if err := s.st.CommitFullCtx(ctx, &store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: store.StageExtracting, Val: string(b)}); err != nil {
 			return res, err
 		}
 		faults.At("extract.after-register")
@@ -174,7 +183,7 @@ func (s *Settler) Extract(session, to string) (ExtractResult, error) {
 					{T: store.TIdent, At: now.UnixNano(), File: mf.File, Dev: id.Dev, Ino: id.Ino, Birth: id.Birth, FirstHash: copier.FirstHashOf(tmp)},
 					{T: store.TPath, At: now.UnixNano(), File: mf.File, Path: final},
 				}
-				if err := s.st.Commit(recs...); err != nil {
+				if err := s.st.CommitCtx(ctx, recs...); err != nil {
 					_ = os.Remove(tmp)
 					return err
 				}
@@ -206,7 +215,7 @@ func (s *Settler) Extract(session, to string) (ExtractResult, error) {
 		return res, err
 	}
 	if to == "" {
-		if err := s.st.CommitFull(&store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: "", Reason: "extracted"}); err != nil {
+		if err := s.st.CommitFullCtx(ctx, &store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: "", Reason: "extracted"}); err != nil {
 			return res, err
 		}
 		s.setReason(session, "extract")

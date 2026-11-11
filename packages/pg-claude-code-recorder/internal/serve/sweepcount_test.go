@@ -176,7 +176,7 @@ func TestFailedIngestCountsAsError(t *testing.T) {
 	e := newEnv(t, false)
 	d := e.open(t)
 	before := ingestCount(d, obs.ResultError)
-	d.afterIngest("/x", copierResult(), os.ErrNotExist)
+	d.afterIngest(context.Background(), "/x", copierResult(), os.ErrNotExist)
 	if got := ingestCount(d, obs.ResultError) - before; got != 1 {
 		t.Fatalf("error count rose by %v, want 1", got)
 	}

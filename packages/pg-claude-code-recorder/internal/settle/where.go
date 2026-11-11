@@ -115,7 +115,7 @@ func (s *Settler) WhereCtx(ctx context.Context, session string) (WhereInfo, erro
 	if err != nil {
 		return info, err
 	}
-	groups, err := s.groups()
+	groups, err := s.groups(ctx)
 	if err != nil {
 		return info, err
 	}
@@ -147,7 +147,7 @@ func (s *Settler) WhereCtx(ctx context.Context, session string) (WhereInfo, erro
 		info.Manifest = json.RawMessage(settled.Manifest)
 	}
 	if c != nil {
-		blocked, next := s.blockers(c, row, hasRow, live[session], now)
+		blocked, next := s.blockers(ctx, c, row, hasRow, live[session], now)
 		info.BlockedBy = blocked
 		if !next.IsZero() {
 			info.NextEligible = &next

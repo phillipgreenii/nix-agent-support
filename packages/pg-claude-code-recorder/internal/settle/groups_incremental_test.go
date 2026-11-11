@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -72,7 +73,7 @@ func (e *grpEnv) rename(id int64, from, to string) {
 // same asserts the incrementally kept map equals a full rebuild, exactly.
 func (e *grpEnv) same(step string) map[string]*conv {
 	e.t.Helper()
-	got, err := e.s.groups()
+	got, err := e.s.groups(context.Background())
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestGroupsRebuildsFullyWhenTheTrackerReportsFull(t *testing.T) {
 	e.same("start")
 	// Put a stale entry in the cache; only a full rebuild can remove it.
 	e.s.gcache["stale"] = &conv{session: "stale"}
-	if got, err := e.s.groups(); err != nil || got["stale"] == nil {
+	if got, err := e.s.groups(context.Background()); err != nil || got["stale"] == nil {
 		t.Fatal("control: an incremental pass with nothing changed rebuilt the map")
 	}
 	_ = e.st.WithWrite("", func(*sql.Tx) error { return errors.New("induced failure") })
@@ -185,7 +186,7 @@ func TestGroupsTickReadsOnlyWhatChanged(t *testing.T) {
 	}
 	e.same("populated")
 	e.cnt.Reset()
-	if _, err := e.s.groups(); err != nil {
+	if _, err := e.s.groups(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if r, q := e.cnt.RowsRead(), e.cnt.Queries(); r != 0 || q != 0 {
@@ -193,7 +194,7 @@ func TestGroupsTickReadsOnlyWhatChanged(t *testing.T) {
 	}
 	id := e.add("append", "/c/projects/p/"+gSessA+".jsonl")
 	e.cnt.Reset()
-	if _, err := e.s.groups(); err != nil {
+	if _, err := e.s.groups(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if r := e.cnt.RowsRead(); r > 4 {

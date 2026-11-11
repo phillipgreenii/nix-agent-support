@@ -9,6 +9,7 @@ package settle
 // written then and only then.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,9 +108,14 @@ func (s *Settler) Doctor() (DoctorResult, error) {
 // DoctorRun runs doctor to completion: the old synchronous comparison when
 // bytes_per_slice is 0, else it takes the cursor and completes the open cycle
 // (or a new one) slice by slice, with no lock held across files.
-func (s *Settler) DoctorRun() (DoctorAnswer, error) {
+func (s *Settler) DoctorRun() (DoctorAnswer, error) { return s.DoctorRunCtx(s.detached()) }
+
+// DoctorRunCtx is DoctorRun under ctx. The run itself is not cut by a cancelled
+// ctx (the caller is a request that may disconnect), so ctx only carries values.
+func (s *Settler) DoctorRunCtx(ctx context.Context) (DoctorAnswer, error) {
+	ctx = context.WithoutCancel(ctx)
 	if s.doctorBudget() <= 0 {
-		res, err := s.doctorFull()
+		res, err := s.doctorFull(ctx)
 		return DoctorAnswer{DoctorResult: res}, err
 	}
 	s.doctorMu.Lock()
@@ -122,7 +128,7 @@ func (s *Settler) DoctorRun() (DoctorAnswer, error) {
 		return ans, err
 	}
 	for {
-		finished, res, err := s.runSlice(&cur, s.doctorBudget())
+		finished, res, err := s.runSlice(ctx, &cur, s.doctorBudget())
 		if err != nil {
 			return ans, err
 		}
@@ -138,6 +144,7 @@ func (s *Settler) DoctorRun() (DoctorAnswer, error) {
 // with nothing to do, run the idle step. It does nothing while a CLI run holds
 // the cursor, and when bytes_per_slice is 0.
 func (s *Settler) DoctorTick() error {
+	ctx := s.detached()
 	if s.stopping() {
 		return nil
 	}
@@ -166,7 +173,7 @@ func (s *Settler) DoctorTick() error {
 			return err
 		}
 	}
-	_, _, err := s.runSlice(&cur, s.doctorBudget())
+	_, _, err := s.runSlice(ctx, &cur, s.doctorBudget())
 	return err
 }
 
@@ -315,7 +322,7 @@ func hasID(ids []int64, id int64) bool {
 // runSlice runs one slice of the open cycle against budget bytes of the copy
 // and saves the cursor. finished is true, with the result, when the slice
 // completed the cycle.
-func (s *Settler) runSlice(cur *DoctorCursor, budget int64) (finished bool, res DoctorResult, err error) {
+func (s *Settler) runSlice(ctx context.Context, cur *DoctorCursor, budget int64) (finished bool, res DoctorResult, err error) {
 	reg := s.cfg.Obs.Reg
 	start := s.cfg.Clock.Now()
 	defer func() {
@@ -341,7 +348,7 @@ func (s *Settler) runSlice(cur *DoctorCursor, budget int64) (finished bool, res 
 			if (spent > 0 && spent >= budget) || s.stopping() {
 				return false, res, s.sliceEnd(cur)
 			}
-			n, perr := s.doctorOne(cur, f, retried, add)
+			n, perr := s.doctorOne(ctx, cur, f, retried, add)
 			if perr != nil {
 				_ = s.sliceEnd(cur)
 				return false, res, perr
@@ -356,7 +363,7 @@ func (s *Settler) runSlice(cur *DoctorCursor, budget int64) (finished bool, res 
 			}
 		}
 		// The journal check runs once per cycle; the archives follow.
-		s.doctorJournal(add)
+		s.doctorJournal(ctx, add)
 		cur.Phase = phaseArchives
 	}
 	sessions, serr := s.settledSessions()
@@ -456,7 +463,7 @@ func (cur *DoctorCursor) requeue(id int64, retried bool) {
 }
 
 // doctorOne checks one file and returns the copy bytes it hashed.
-func (s *Settler) doctorOne(cur *DoctorCursor, f store.File, retried bool, add func(DoctorMismatch)) (int64, error) {
+func (s *Settler) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File, retried bool, add func(DoctorMismatch)) (int64, error) {
 	reg := s.cfg.Obs.Reg
 	race := func() {
 		reg.Add(obs.MDoctorRaceSkips, nil, 1)
@@ -569,7 +576,7 @@ func (s *Settler) doctorOne(cur *DoctorCursor, f store.File, retried bool, add f
 		if err != nil {
 			return sn.Size, nil
 		}
-		if (h != sn.Hash || size != sn.Size) && !s.lastSeen(f).Before(s.mtimeOf(orig)) {
+		if (h != sn.Hash || size != sn.Size) && !s.lastSeen(ctx, f).Before(s.mtimeOf(orig)) {
 			if s.doctorSeam.recheck != nil {
 				s.doctorSeam.recheck(f.ID)
 			}

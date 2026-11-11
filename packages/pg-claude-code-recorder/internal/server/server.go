@@ -377,12 +377,14 @@ func (s *Server) Listen(path string) error {
 	return nil
 }
 
-// Close stops the listener and removes the socket.
-func (s *Server) Close() {
+// Close stops the listener and removes the socket. ctx carries the shutdown:
+// the graceful wait is bounded by its own 500 ms inside ctx, so a caller that is
+// already cancelled gets the hard close at once.
+func (s *Server) Close(ctx context.Context) {
 	if s.srv == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	// A waiting feed would hold a graceful shutdown for up to a minute: after a
 	// short grace the connections are closed, which is how a client sees a

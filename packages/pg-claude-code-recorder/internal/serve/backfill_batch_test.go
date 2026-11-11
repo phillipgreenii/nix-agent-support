@@ -32,7 +32,7 @@ func TestBackfillGroupCommitsFirstCopies(t *testing.T) {
 	}
 	var commits atomic.Int64
 	d.st.OnCommit(func() { commits.Add(1) })
-	d.backfill(files)
+	d.backfill(d.rootCtx(), files)
 	if !d.backfillDone.Load() {
 		t.Fatal("backfill did not finish")
 	}

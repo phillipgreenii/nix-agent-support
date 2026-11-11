@@ -114,7 +114,7 @@ func (d *Daemon) opSessionsFacts(ctx context.Context, body []byte) (any, *wire.E
 	for _, id := range req.SessionIDs {
 		sf := lifecycle.SessionFacts{}
 		if wantAsk {
-			af, err := d.st.Reader.AskFacts(ctx, id, d.st.SessionRefReady())
+			af, err := d.st.AskFacts(ctx, id, d.st.SessionRefReady())
 			switch {
 			case errors.Is(err, store.ErrAskFactsUnavailable):
 				if len(out.Unavailable) == 0 {

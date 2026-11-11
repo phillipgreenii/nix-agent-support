@@ -406,8 +406,10 @@ func (d *Daemon) opCoverage(ctx context.Context, body []byte) (any, *wire.Error)
 
 // opStatus answers from the snapshot the status loop keeps: it issues no
 // query and touches no file, so its cost does not grow with the file count.
-func (d *Daemon) opStatus(_ context.Context, _ []byte) (any, *wire.Error) {
-	snap, err := d.statusSnapshot()
+func (d *Daemon) opStatus(ctx context.Context, _ []byte) (any, *wire.Error) {
+	// Status answers from a cache and is exempt from request cancellation, so an inline
+	// first refresh is not cut by a disconnect.
+	snap, err := d.statusSnapshot(context.WithoutCancel(ctx))
 	if err != nil {
 		return nil, wire.FromErr(err)
 	}

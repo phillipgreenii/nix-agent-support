@@ -60,7 +60,7 @@ func newFake(t *testing.T, proto int) *fake {
 	if err := s.Listen(f.sock); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return f
 }
 

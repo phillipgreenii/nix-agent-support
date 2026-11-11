@@ -4,7 +4,6 @@
 package obs
 
 import (
-	"context"
 	"log/slog"
 	"sort"
 	"strings"
@@ -624,7 +623,13 @@ func (o *Obs) event(level slog.Level, name string, kv ...string) {
 		o.events = append(o.events, Event{Name: name, Attrs: attrs})
 	}
 	o.mu.Unlock()
-	o.Log.Log(context.Background(), level, name, args...)
+	// Events carry no caller context, so use the logger's own ctx-less entry
+	// points (they log with context.Background, as before).
+	if level >= slog.LevelInfo {
+		o.Log.Info(name, args...)
+	} else {
+		o.Log.Debug(name, args...)
+	}
 }
 
 // Events returns a copy of the recorded events.

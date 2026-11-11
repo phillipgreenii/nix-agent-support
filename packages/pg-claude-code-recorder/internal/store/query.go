@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -539,12 +540,12 @@ func ReplayDump(journalPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return replayDump(data, nil)
+	return replayDump(context.Background(), data, nil)
 }
 
 // replayDump replays journal bytes into a scratch directory; dec, when not nil,
 // is the bytes already decoded.
-func replayDump(data []byte, dec *decodedJournal) (string, error) {
+func replayDump(ctx context.Context, data []byte, dec *decodedJournal) (string, error) {
 	dir, err := os.MkdirTemp("", "ccrec-replay-")
 	if err != nil {
 		return "", err
@@ -553,11 +554,11 @@ func replayDump(data []byte, dec *decodedJournal) (string, error) {
 	if err := os.WriteFile(dir+"/"+JournalName, data, 0o600); err != nil {
 		return "", err
 	}
-	st, err := Open(dir, Options{ReplayOnly: true, decoded: dec})
+	st, err := OpenCtx(ctx, dir, Options{ReplayOnly: true, decoded: dec})
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = st.CloseCtx(ctx) }()
 	return st.Dump()
 }
 

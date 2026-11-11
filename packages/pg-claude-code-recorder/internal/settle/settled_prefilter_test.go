@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -34,7 +35,7 @@ func settledFixture(e *csEnv, n int) (groups map[string]*conv, live map[string]b
 func TestSettledPrefilterMatchesPerStatementEvaluation(t *testing.T) {
 	e := newCSEnv(t)
 	groups, live := settledFixture(e, 30)
-	before, unchanged := e.s.settledPrefilter(groups, live)
+	before, unchanged := e.s.settledPrefilter(context.Background(), groups, live)
 	stages, _ := e.st.Stages()
 	if len(before) != len(stages) {
 		t.Fatalf("before has %d stages, store %d", len(before), len(stages))
@@ -64,7 +65,7 @@ func TestSettledPrefilterUsesOneReadTransaction(t *testing.T) {
 	perStatementTx, perStatementQ := e.cnt.Transactions(), e.cnt.Queries()
 
 	e.cnt.Reset()
-	e.s.settledPrefilter(groups, live)
+	e.s.settledPrefilter(context.Background(), groups, live)
 	batchedTx, batchedQ := e.cnt.Transactions(), e.cnt.Queries()
 	t.Logf("settle pass over %d conversations: per statement %d transactions for %d statements; prefilter %d transactions for %d statements",
 		len(groups), perStatementTx, perStatementQ, batchedTx, batchedQ)
@@ -84,7 +85,7 @@ func TestSettledPrefilterStatementCountIsConstant(t *testing.T) {
 		e := newCSEnv(t)
 		groups, live := settledFixture(e, n)
 		e.cnt.Reset()
-		e.s.settledPrefilter(groups, live)
+		e.s.settledPrefilter(context.Background(), groups, live)
 		return e.cnt.Queries()
 	}
 	small, large := count(6), count(18)

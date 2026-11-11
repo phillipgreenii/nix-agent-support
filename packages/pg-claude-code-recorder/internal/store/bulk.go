@@ -68,8 +68,7 @@ func bulkDSNPragmas() string {
 
 // beginRebuild writes the unfinished-rebuild marker durably (synchronous FULL,
 // checkpointed), then relaxes durability on the writer connection.
-func (s *Store) beginRebuild() error {
-	ctx := context.Background()
+func (s *Store) beginRebuild(ctx context.Context) error {
 	conn, err := s.wdb.Conn(ctx)
 	if err != nil {
 		return err

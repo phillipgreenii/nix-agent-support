@@ -14,11 +14,11 @@ import (
 
 func newGraceTracker(t *testing.T, ctx context.Context, sys proc.System) (*Tracker, string) {
 	t.Helper()
-	st, err := store.Open(t.TempDir(), store.Options{})
+	st, err := store.OpenCtx(ctx, t.TempDir(), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = st.CloseCtx(ctx) })
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0o755); err != nil {
 		t.Fatal(err)

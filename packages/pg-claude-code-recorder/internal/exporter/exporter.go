@@ -161,9 +161,10 @@ func Start(addr string, reg *obs.Registry, refresh func()) (*Server, error) {
 func (s *Server) Addr() string { return s.ln.Addr().String() }
 
 // Close stops the exporter: a graceful Shutdown for up to a second, then a hard
-// Close of whatever is still open.
-func (s *Server) Close() {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+// Close of whatever is still open. The wait runs inside ctx, so a cancelled ctx
+// goes straight to the hard close.
+func (s *Server) Close(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if err := s.srv.Shutdown(ctx); err != nil {
 		// A scrape that outlived the grace window: drop its connection now, so

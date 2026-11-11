@@ -34,7 +34,7 @@ func fakeDaemon(t *testing.T, status func() wire.Status, cov func() wire.Coverag
 	if err := s.Listen(sock); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return sock
 }
 
@@ -198,7 +198,7 @@ func TestStatusAnswersFastWhenTheCrashQueriesAreSlow(t *testing.T) {
 	if err := s.Listen(sock); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	t.Cleanup(func() { close(release) })
 
 	a, out, _ := testApp(nil)

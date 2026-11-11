@@ -39,7 +39,7 @@ func queryDaemon(t *testing.T, hasSession bool, hasText bool) (string, *[]string
 	if err := s.Listen(sock); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return sock, &seen
 }
 

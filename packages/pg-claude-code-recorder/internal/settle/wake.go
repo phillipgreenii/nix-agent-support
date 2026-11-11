@@ -11,6 +11,7 @@ package settle
 // so its cost follows the Conversations it processes, not the store.
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -101,7 +102,7 @@ func copySet(m map[string]bool) map[string]bool {
 
 // seedLocked rebuilds the due-time state from the Conversations as the
 // reconciliation left them. The run lock is held.
-func (s *Settler) seedLocked(groups map[string]*conv, live map[string]bool, now time.Time) {
+func (s *Settler) seedLocked(ctx context.Context, groups map[string]*conv, live map[string]bool, now time.Time) {
 	s.due = NewDueHeap()
 	s.liveSeen = copySet(live)
 	s.lowSeen = s.LowSpace()
@@ -114,7 +115,7 @@ func (s *Settler) seedLocked(groups map[string]*conv, live map[string]bool, now 
 		if live[session] {
 			continue
 		}
-		s.schedule(c, stage[session].Stage, false, now, nil)
+		s.schedule(ctx, c, stage[session].Stage, false, now, nil)
 	}
 	s.seeded = true
 	s.publishNext()
@@ -124,7 +125,7 @@ func (s *Settler) seedLocked(groups map[string]*conv, live map[string]bool, now 
 // evaluation and pushes it. Removal deadlines that are already due go into
 // removal when it is non-nil (the caller runs the removal pass), else into the
 // heap. stage is the persisted stage ("" for none).
-func (s *Settler) schedule(c *conv, stage string, errored bool, now time.Time, removal map[string]bool) {
+func (s *Settler) schedule(ctx context.Context, c *conv, stage string, errored bool, now time.Time, removal map[string]bool) {
 	session := c.session
 	switch {
 	case errored:
@@ -133,7 +134,7 @@ func (s *Settler) schedule(c *conv, stage string, errored bool, now time.Time, r
 		if !s.cfg.RemoveEnable {
 			return
 		}
-		at := s.newest(c).Add(s.cfg.RemoveAfter)
+		at := s.newest(ctx, c).Add(s.cfg.RemoveAfter)
 		if removal != nil && !at.After(now) {
 			removal[session] = true
 			return
@@ -148,7 +149,7 @@ func (s *Settler) schedule(c *conv, stage string, errored bool, now time.Time, r
 		}
 		s.due.Push(session, at.Add(s.cfg.Recheck))
 	case stage == "" || stage == StageQuiet:
-		s.due.Push(session, s.newest(c).Add(s.cfg.After))
+		s.due.Push(session, s.newest(ctx, c).Add(s.cfg.After))
 	}
 }
 
@@ -159,7 +160,7 @@ func (s *Settler) schedule(c *conv, stage string, errored bool, now time.Time, r
 // to quiet within a minute. The check stats the files of the held Conversations
 // only (a handful), not the store, so no per-minute full scan returns. The run
 // lock is held.
-func (s *Settler) heldRewritten() map[string]bool {
+func (s *Settler) heldRewritten(ctx context.Context) map[string]bool {
 	s.mu.Lock()
 	var held []string
 	for session, stage := range s.last {
@@ -178,7 +179,7 @@ func (s *Settler) heldRewritten() map[string]bool {
 		if err != nil || !ok || row.Stage != StageHeld {
 			continue
 		}
-		if s.newest(c).After(time.Unix(0, row.SinceNS)) {
+		if s.newest(ctx, c).After(time.Unix(0, row.SinceNS)) {
 			out[session] = true
 		}
 	}
@@ -188,6 +189,7 @@ func (s *Settler) heldRewritten() map[string]bool {
 // Wake runs one event-driven pass at now. Before the first reconciliation it
 // is the reconciliation.
 func (s *Settler) Wake(now time.Time) (TickStats, error) {
+	ctx := s.detached()
 	var stats TickStats
 	t0 := s.cfg.Clock.Now()
 	lap := func(into *time.Duration) {
@@ -205,7 +207,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 	ph.LockWait = wait + rebuildWait
 	t0 = s.cfg.Clock.Now() // the lock wait is reported by lockRunWait; the phases below start here
 	if !s.seeded {
-		return s.tickLockedWaited(ph.LockWait)
+		return s.tickLockedWaited(ctx, ph.LockWait)
 	}
 	defer func() {
 		s.mu.Lock()
@@ -221,7 +223,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 	if err != nil {
 		return stats, err
 	}
-	if err := s.syncGroups(); err != nil {
+	if err := s.syncGroups(ctx); err != nil {
 		return stats, err
 	}
 	work := map[string]bool{}
@@ -241,7 +243,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 	}
 	lap(&ph.Reads)
 	s.liveSeen = copySet(live)
-	for session := range s.heldRewritten() {
+	for session := range s.heldRewritten(ctx) {
 		if !live[session] {
 			work[session] = true
 		}
@@ -296,7 +298,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 			continue
 		}
 		stats.Examined++
-		out, err := s.evaluate(c, live[session], now, false)
+		out, err := s.evaluate(ctx, c, live[session], now, false)
 		if err != nil && first == nil {
 			first = fmt.Errorf("settle %s: %w", session, err)
 		}
@@ -311,7 +313,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 				stage = ""
 			}
 		}
-		s.schedule(c, stage, err != nil, now, removal)
+		s.schedule(ctx, c, stage, err != nil, now, removal)
 	}
 	lap(&ph.Evaluate)
 	if s.cfg.RemoveEnable && len(removal) > 0 && !s.stopping() {
@@ -323,7 +325,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 		var rep RemoveReport
 		run := func() error {
 			var e error
-			rep, e = s.removeLocked(RemoveOptions{Sessions: names}, now)
+			rep, e = s.removeLocked(ctx, RemoveOptions{Sessions: names}, now)
 			return e
 		}
 		if s.cfg.Timer != nil {
@@ -350,11 +352,11 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 				case BlockRunCap, BlockHourCap:
 					s.due.PushKind(sk.Session, DueRemoval, now)
 				case BlockQuietAge:
-					s.due.PushKind(sk.Session, DueRemoval, s.newest(c).Add(s.cfg.RemoveAfter))
+					s.due.PushKind(sk.Session, DueRemoval, s.newest(ctx, c).Add(s.cfg.RemoveAfter))
 				}
 			}
 		}
-		if err := s.syncGroups(); err == nil {
+		if err := s.syncGroups(ctx); err == nil {
 			if l, err := s.cfg.Live(); err == nil {
 				live = l
 			}
@@ -387,7 +389,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 		s.transition(session, s.priorStage(session, to), to)
 		s.noteSession(c, to, row)
 	}
-	s.refreshRemovalGaugesIfDue(s.gcache, live, now)
+	s.refreshRemovalGaugesIfDue(ctx, s.gcache, live, now)
 	s.publishGauges(now)
 	s.publishNext()
 	lap(&ph.Refresh)

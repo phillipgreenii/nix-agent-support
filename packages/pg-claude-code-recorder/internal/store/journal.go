@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -130,6 +131,9 @@ func (j *JournalFreeze) Delta() TornJournalDelta {
 
 // Replay replays the frozen journal into a scratch state directory and returns
 // its Dump, like ReplayDump, without reading or decoding the journal again.
-func (j *JournalFreeze) Replay() (string, error) {
-	return replayDump(j.data, j.decoded())
+func (j *JournalFreeze) Replay() (string, error) { return j.ReplayCtx(context.Background()) }
+
+// ReplayCtx is Replay with the scratch store opened and closed under ctx.
+func (j *JournalFreeze) ReplayCtx(ctx context.Context) (string, error) {
+	return replayDump(ctx, j.data, j.decoded())
 }

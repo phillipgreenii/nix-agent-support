@@ -102,6 +102,7 @@ func (s *Settler) TakeDirty() map[string]int64 {
 // the run lock (0 when no rebuild was needed). The wait is counted under op
 // "take_dirty" in settle_run_lock_wait_*, like the other lock takers.
 func (s *Settler) takeDirty() (map[string]int64, time.Duration) {
+	ctx := s.detached()
 	d := s.feed()
 	var waited time.Duration
 	d.mu.Lock()
@@ -110,7 +111,7 @@ func (s *Settler) takeDirty() (map[string]int64, time.Duration) {
 	if need {
 		unlock, w := s.lockRunWait("take_dirty")
 		waited = w
-		_, err := s.groups() // refreshes fileSession
+		_, err := s.groups(ctx) // refreshes fileSession
 		unlock()
 		_ = err // on error the unknown files stay for the next call
 		if err != nil {

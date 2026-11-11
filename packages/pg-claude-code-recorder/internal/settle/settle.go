@@ -478,8 +478,8 @@ func (s *Settler) groupsFull() (map[string]*conv, map[int64]string, error) {
 // after a failed incremental read, rebuilds it whole with groupsFull. Each
 // touched Conversation gets a fresh conv, so one returned earlier is never
 // mutated; the returned map is a copy the caller may keep.
-func (s *Settler) groups() (map[string]*conv, error) {
-	if err := s.syncGroups(); err != nil {
+func (s *Settler) groups(ctx context.Context) (map[string]*conv, error) {
+	if err := s.syncGroups(ctx); err != nil {
 		return nil, err
 	}
 	out := make(map[string]*conv, len(s.gcache))
@@ -491,7 +491,7 @@ func (s *Settler) groups() (map[string]*conv, error) {
 
 // syncGroups brings the kept map up to date without copying it; the event loop
 // reads s.gcache directly so a wake costs nothing per Conversation it skips.
-func (s *Settler) syncGroups() error {
+func (s *Settler) syncGroups(ctx context.Context) error {
 	if s.trk == nil {
 		s.trk = s.st.TrackFiles()
 	}
@@ -506,7 +506,7 @@ func (s *Settler) syncGroups() error {
 		s.gcache, s.owner = c, owner
 		s.syncFileSession(nil, true)
 	} else if len(ids) > 0 {
-		if err := s.applyChanged(ids); err != nil {
+		if err := s.applyChanged(ctx, ids); err != nil {
 			s.gcache, s.owner = nil, nil
 			s.syncFileSession(nil, true)
 			return err
@@ -518,10 +518,10 @@ func (s *Settler) syncGroups() error {
 
 // applyChanged rereads the given files and their paths and moves each to the
 // Conversation it now belongs to (or out of the map).
-func (s *Settler) applyChanged(ids []int64) error {
+func (s *Settler) applyChanged(ctx context.Context, ids []int64) error {
 	var files []store.File
 	var paths map[int64][]string
-	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+	if err := s.st.ReadTxCtx(ctx, func(rd *store.Reader) (err error) {
 		if files, err = rd.FilesByIDs(ids); err != nil {
 			return err
 		}
@@ -709,13 +709,14 @@ func (s *Settler) stopping() bool { return s.cfg.Ctx.Err() != nil }
 // Tick runs one pass: it evaluates every Conversation that is not live, moves
 // the ones whose Process came back to Live, and refreshes the gauges.
 func (s *Settler) Tick() (TickStats, error) {
+	ctx := s.detached()
 	unlock, w := s.lockRunWait("tick")
 	defer unlock()
-	return s.tickLockedWaited(w)
+	return s.tickLockedWaited(ctx, w)
 }
 
 // tickLockedWaited is the Tick body, run with the run lock held; it records the run-lock wait in the phases.
-func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
+func (s *Settler) tickLockedWaited(ctx context.Context, wait time.Duration) (TickStats, error) {
 	var stats TickStats
 	ph := TickPhases{LockWait: wait}
 	defer func() {
@@ -735,13 +736,13 @@ func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 	if err != nil {
 		return stats, err
 	}
-	groups, err := s.groups()
+	groups, err := s.groups(ctx)
 	if err != nil {
 		return stats, err
 	}
 	stats.Examined = len(groups)
 	lap(&ph.Reads)
-	before, unchanged := s.settledPrefilter(groups, live)
+	before, unchanged := s.settledPrefilter(ctx, groups, live)
 	lap(&ph.Prefilter)
 	sessions := make([]string, 0, len(groups))
 	for k := range groups {
@@ -749,7 +750,7 @@ func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 	}
 	sort.Strings(sessions)
 	var first error
-	s.prefetchLastSeen(groups, live, unchanged)
+	s.prefetchLastSeen(ctx, groups, live, unchanged)
 	for _, session := range sessions {
 		if s.stopping() {
 			break // between Conversations; the next start reconciles the rest
@@ -760,7 +761,7 @@ func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 			stats.add(Outcome{Session: session, Stage: StageSettled, Skipped: "settled"}, before[session])
 			continue
 		}
-		out, err := s.evaluate(groups[session], live[session], now, false)
+		out, err := s.evaluate(ctx, groups[session], live[session], now, false)
 		if err != nil && first == nil {
 			first = fmt.Errorf("settle %s: %w", session, err)
 		}
@@ -773,7 +774,7 @@ func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 	}
 	if s.cfg.RemoveEnable {
 		removal := func() error {
-			_, err := s.removeLocked(RemoveOptions{}, now)
+			_, err := s.removeLocked(ctx, RemoveOptions{}, now)
 			return err
 		}
 		if s.cfg.Timer != nil {
@@ -784,15 +785,15 @@ func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 		if err != nil && first == nil {
 			first = fmt.Errorf("removal pass: %w", err)
 		}
-		if groups, err = s.groups(); err == nil {
+		if groups, err = s.groups(ctx); err == nil {
 			live, _ = s.cfg.Live()
 		}
 	}
 	// A persisted stage whose Conversation has no files any more is dropped from view.
 	lap(&ph.Removal)
-	s.refresh(groups, live, now)
+	s.refresh(ctx, groups, live, now)
 	if s.cfg.Mode == ModeEvent {
-		s.seedLocked(groups, live, now)
+		s.seedLocked(ctx, groups, live, now)
 		s.cfg.Obs.Reg.Add(obs.MSettleWakes, map[string]string{"reason": "reconcile"}, 1)
 	}
 	lap(&ph.Refresh)
@@ -807,9 +808,9 @@ func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 // every other Conversation still goes through evaluate, so the stage machine is
 // untouched. When the transaction cannot complete the unchanged set is empty
 // and the pass falls back to evaluating every Conversation.
-func (s *Settler) settledPrefilter(groups map[string]*conv, live map[string]bool) (before map[string]string, unchanged map[string]bool) {
+func (s *Settler) settledPrefilter(ctx context.Context, groups map[string]*conv, live map[string]bool) (before map[string]string, unchanged map[string]bool) {
 	before, unchanged = map[string]string{}, map[string]bool{}
-	err := s.st.ReadTx(func(rd *store.Reader) error {
+	err := s.st.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		rows, err := rd.Stages()
 		if err != nil {
 			return err
@@ -858,7 +859,7 @@ func (s *Settler) settledPrefilter(groups map[string]*conv, live map[string]bool
 // commit, snapshot or tombstone are recorded as zero, which lastSeen reads as
 // "FirstSeen". On a read error the cache stays empty and lastSeen reads per
 // file as before. The caller holds the run lock and clears s.seen afterwards.
-func (s *Settler) prefetchLastSeen(groups map[string]*conv, live map[string]bool, unchanged map[string]bool) {
+func (s *Settler) prefetchLastSeen(ctx context.Context, groups map[string]*conv, live map[string]bool, unchanged map[string]bool) {
 	s.seen = nil
 	var ids []int64
 	for session, c := range groups {
@@ -873,7 +874,7 @@ func (s *Settler) prefetchLastSeen(groups map[string]*conv, live map[string]bool
 		return
 	}
 	var got map[int64]int64
-	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+	if err := s.st.ReadTxCtx(ctx, func(rd *store.Reader) (err error) {
 		got, err = rd.LastSeenByFile(ids)
 		return err
 	}); err != nil {
@@ -909,6 +910,13 @@ func (t *TickStats) add(out Outcome, prior string) {
 // Recheck is the on-demand re-check entry point (held --retry): it evaluates
 // one Conversation now, without waiting for held.recheck.
 func (s *Settler) Recheck(session string) (Outcome, error) {
+	return s.RecheckCtx(s.detached(), session)
+}
+
+// RecheckCtx is Recheck under ctx, which only carries values: the re-check is
+// not cut by a cancelled request.
+func (s *Settler) RecheckCtx(ctx context.Context, session string) (Outcome, error) {
+	ctx = context.WithoutCancel(ctx)
 	defer s.lockRun("recheck")()
 	now := s.cfg.Clock.Now()
 	s.checkLow()
@@ -916,7 +924,7 @@ func (s *Settler) Recheck(session string) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	groups, err := s.groups()
+	groups, err := s.groups(ctx)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -924,13 +932,16 @@ func (s *Settler) Recheck(session string) (Outcome, error) {
 	if c == nil {
 		return Outcome{}, store.ErrNotFound
 	}
-	out, err := s.evaluate(c, live[session], now, true)
-	s.refresh(groups, live, now)
+	out, err := s.evaluate(ctx, c, live[session], now, true)
+	s.refresh(ctx, groups, live, now)
 	return out, err
 }
 
 // RecheckHeld re-checks every held Conversation now.
-func (s *Settler) RecheckHeld() ([]Outcome, error) {
+func (s *Settler) RecheckHeld() ([]Outcome, error) { return s.RecheckHeldCtx(s.detached()) }
+
+// RecheckHeldCtx is RecheckHeld under ctx (values only, see RecheckCtx).
+func (s *Settler) RecheckHeldCtx(ctx context.Context) ([]Outcome, error) {
 	rows, err := s.st.Stages()
 	if err != nil {
 		return nil, err
@@ -940,7 +951,7 @@ func (s *Settler) RecheckHeld() ([]Outcome, error) {
 		if r.Stage != StageHeld {
 			continue
 		}
-		o, err := s.Recheck(r.Session)
+		o, err := s.RecheckCtx(ctx, r.Session)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return outs, err
 		}
@@ -981,7 +992,7 @@ func (s *Settler) setReason(session, reason string) {
 // newest is the newest modification time among the Conversation's files: the
 // original's when it exists, else the last time the recorder saw the file
 // change.
-func (s *Settler) newest(c *conv) time.Time {
+func (s *Settler) newest(ctx context.Context, c *conv) time.Time {
 	var best time.Time
 	for _, f := range c.files {
 		var t time.Time
@@ -991,7 +1002,7 @@ func (s *Settler) newest(c *conv) time.Time {
 			}
 		}
 		if t.IsZero() {
-			t = s.lastSeen(f)
+			t = s.lastSeen(ctx, f)
 		}
 		if t.After(best) {
 			best = t
@@ -1000,13 +1011,13 @@ func (s *Settler) newest(c *conv) time.Time {
 	return best
 }
 
-func (s *Settler) lastSeen(f store.File) time.Time {
+func (s *Settler) lastSeen(ctx context.Context, f store.File) time.Time {
 	ns := f.FirstSeen
 	if v, ok := s.seen[f.ID]; ok {
 		return time.Unix(0, max(ns, v))
 	}
 	var got map[int64]int64
-	if err := s.st.ReadTx(func(rd *store.Reader) (err error) {
+	if err := s.st.ReadTxCtx(ctx, func(rd *store.Reader) (err error) {
 		got, err = rd.LastSeenByFile([]int64{f.ID})
 		return err
 	}); err == nil {
@@ -1015,14 +1026,14 @@ func (s *Settler) lastSeen(f store.File) time.Time {
 	return time.Unix(0, ns)
 }
 
-func (s *Settler) clearStage(session, reason string, now time.Time) error {
+func (s *Settler) clearStage(ctx context.Context, session, reason string, now time.Time) error {
 	s.setReason(session, reason)
-	return s.st.Commit(&store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: "", Reason: reason})
+	return s.st.CommitCtx(ctx, &store.Rec{T: store.TStage, At: now.UnixNano(), Session: session, State: "", Reason: reason})
 }
 
 // evaluate runs one Conversation through the stage machine. force skips the
 // held.recheck wait.
-func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outcome, error) {
+func (s *Settler) evaluate(ctx context.Context, c *conv, live bool, now time.Time, force bool) (Outcome, error) {
 	out := Outcome{Session: c.session, Stage: StageQuiet}
 	row, hasRow, err := s.st.Stage(c.session)
 	if err != nil {
@@ -1032,7 +1043,7 @@ func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outco
 		// Settled to Live and Held to Live: a Process holds it again.
 		out.Stage, out.Skipped = StageLive, "live process"
 		if hasRow {
-			return out, s.clearStage(c.session, "process", now)
+			return out, s.clearStage(ctx, c.session, "process", now)
 		}
 		return out, nil
 	}
@@ -1040,7 +1051,7 @@ func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outco
 	case hasRow && row.Stage == store.StageRemoved:
 		// Removed to Quiet: a removed path reappeared (the Conversation has files
 		// with current paths again).
-		if err := s.clearStage(c.session, "path_reappeared", now); err != nil {
+		if err := s.clearStage(ctx, c.session, "path_reappeared", now); err != nil {
 			return out, err
 		}
 		hasRow = false
@@ -1054,16 +1065,16 @@ func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outco
 			return out, nil
 		}
 		// Settled to Quiet: new writes.
-		if err := s.clearStage(c.session, "new_writes", now); err != nil {
+		if err := s.clearStage(ctx, c.session, "new_writes", now); err != nil {
 			return out, err
 		}
 		hasRow = false
 	}
-	newest := s.newest(c)
+	newest := s.newest(ctx, c)
 	if hasRow && row.Stage == StageHeld {
 		if newest.After(time.Unix(0, row.SinceNS)) {
 			// Held to Quiet: a file was written after the hold.
-			if err := s.clearStage(c.session, "new_writes", now); err != nil {
+			if err := s.clearStage(ctx, c.session, "new_writes", now); err != nil {
 				return out, err
 			}
 			hasRow = false
@@ -1089,7 +1100,7 @@ func (s *Settler) evaluate(c *conv, live bool, now time.Time, force bool) (Outco
 	var res Outcome
 	err = s.cfg.Copier.WithLock(func() error {
 		var e error
-		res, e = s.settleLocked(c, now, hasRow && row.Stage == StageHeld)
+		res, e = s.settleLocked(ctx, c, now, hasRow && row.Stage == StageHeld)
 		return e
 	})
 	if res.Session == "" {
@@ -1269,7 +1280,7 @@ func (s *Settler) parsedState(file int64, gen int) bool {
 // failing condition. It may parse a torn tail or record a torn-tail fact, and
 // it reports the files whose full hash differs from the original's in clone
 // mode (the caller starts a new generation for them).
-func (s *Settler) check(c *conv, quiet bool, now time.Time) (fails []Failure, regen []store.File, err error) {
+func (s *Settler) check(ctx context.Context, c *conv, quiet bool, now time.Time) (fails []Failure, regen []store.File, err error) {
 	for _, f := range c.files {
 		rel := c.rel[f.ID]
 		switch f.Mode {
@@ -1280,7 +1291,7 @@ func (s *Settler) check(c *conv, quiet bool, now time.Time) (fails []Failure, re
 			}
 			fails = append(fails, fl...)
 		default:
-			fl, rg, err := s.checkAppend(c, f, rel, quiet, now)
+			fl, rg, err := s.checkAppend(ctx, c, f, rel, quiet, now)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1318,7 +1329,7 @@ func (s *Settler) checkSnapshot(f store.File, rel string) ([]Failure, error) {
 	return nil, nil
 }
 
-func (s *Settler) checkAppend(c *conv, f store.File, rel string, quiet bool, now time.Time) (fails []Failure, regen bool, err error) {
+func (s *Settler) checkAppend(ctx context.Context, c *conv, f store.File, rel string, quiet bool, now time.Time) (fails []Failure, regen bool, err error) {
 	if f.CurGen == 0 {
 		return nil, false, nil
 	}
@@ -1354,7 +1365,7 @@ func (s *Settler) checkAppend(c *conv, f store.File, rel string, quiet bool, now
 		}
 		if fact, ok := s.st.TornTailOf(f.ID, g.Gen); ok && (fact.Off != nl || fact.Off+fact.Len != g.CopyOffset) {
 			// Later growth invalidates the fact.
-			if err := s.st.Commit(&store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, Reset: true}); err != nil {
+			if err := s.st.CommitCtx(ctx, &store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, Reset: true}); err != nil {
 				return nil, false, err
 			}
 			s.Dirty(f.ID, g.CopyOffset)
@@ -1375,7 +1386,7 @@ func (s *Settler) checkAppend(c *conv, f store.File, rel string, quiet bool, now
 						return nil, false, err
 					}
 				} else if _, ok := s.st.TornTailOf(f.ID, g.Gen); !ok {
-					if err := s.st.Commit(&store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, From: nl, To: g.CopyOffset}); err != nil {
+					if err := s.st.CommitCtx(ctx, &store.Rec{T: store.TTorn, At: now.UnixNano(), File: f.ID, Gen: g.Gen, From: nl, To: g.CopyOffset}); err != nil {
 						return nil, false, err
 					}
 					s.Dirty(f.ID, g.CopyOffset)
@@ -1418,18 +1429,18 @@ func tailMatches(orig string, g store.Generation) bool {
 }
 
 // settleLocked checks and settles one Conversation. The copier's lock is held.
-func (s *Settler) settleLocked(c *conv, now time.Time, wasHeld bool) (Outcome, error) {
+func (s *Settler) settleLocked(ctx context.Context, c *conv, now time.Time, wasHeld bool) (Outcome, error) {
 	c.hm = map[hashKey]uint64{}
 	defer func() { c.hm = nil }()
 	out := Outcome{Session: c.session, Stage: StageQuiet}
-	newest := s.newest(c)
+	newest := s.newest(ctx, c)
 	quiet := now.Sub(newest) >= s.cfg.After || s.LowSpace()
-	fails, regen, err := s.check(c, quiet, now)
+	fails, regen, err := s.check(ctx, c, quiet, now)
 	if err != nil {
 		return out, err
 	}
 	if len(fails) > 0 {
-		return s.hold(c, fails, now, wasHeld)
+		return s.hold(ctx, c, fails, now, wasHeld)
 	}
 	if len(regen) > 0 {
 		// A full-hash mismatch at settle starts a new generation from byte 0 and
@@ -1444,15 +1455,15 @@ func (s *Settler) settleLocked(c *conv, now time.Time, wasHeld bool) (Outcome, e
 		return out, nil
 	}
 	if wasHeld {
-		if err := s.clearStage(c.session, "check_passed", now); err != nil {
+		if err := s.clearStage(ctx, c.session, "check_passed", now); err != nil {
 			return out, err
 		}
 	}
 	var settled bool
 	if s.cfg.Copier.CloneMode() {
-		settled, err = s.settleClone(c, now)
+		settled, err = s.settleClone(ctx, c, now)
 	} else {
-		settled, err = s.settleBytes(c, now)
+		settled, err = s.settleBytes(ctx, c, now)
 	}
 	if err != nil {
 		return out, err
@@ -1467,7 +1478,7 @@ func (s *Settler) settleLocked(c *conv, now time.Time, wasHeld bool) (Outcome, e
 	return out, nil
 }
 
-func (s *Settler) hold(c *conv, fails []Failure, now time.Time, wasHeld bool) (Outcome, error) {
+func (s *Settler) hold(ctx context.Context, c *conv, fails []Failure, now time.Time, wasHeld bool) (Outcome, error) {
 	out := Outcome{Session: c.session, Stage: StageHeld, Reason: fails[0].Reason, Failures: fails}
 	detail, _ := json.Marshal(fails)
 	row, has, _ := s.st.Stage(c.session)
@@ -1478,7 +1489,7 @@ func (s *Settler) hold(c *conv, fails []Failure, now time.Time, wasHeld bool) (O
 	if has && row.Stage == StageHeld && row.Reason == out.Reason && row.Detail == string(detail) {
 		return out, nil
 	}
-	if err := s.st.Commit(&store.Rec{T: store.TStage, At: since, Session: c.session, State: StageHeld, Reason: out.Reason, Val: string(detail)}); err != nil {
+	if err := s.st.CommitCtx(ctx, &store.Rec{T: store.TStage, At: since, Session: c.session, State: StageHeld, Reason: out.Reason, Val: string(detail)}); err != nil {
 		return out, err
 	}
 	s.setReason(c.session, out.Reason)
@@ -1601,7 +1612,7 @@ func (s *Settler) writeManifestFile(session string, b []byte) error {
 
 // settleBytes compresses the Conversation's copies into a new archive segment,
 // commits "settled" and deletes the covered copy bytes.
-func (s *Settler) settleBytes(c *conv, now time.Time) (bool, error) {
+func (s *Settler) settleBytes(ctx context.Context, c *conv, now time.Time) (bool, error) {
 	m, err := s.manifest(c, "bytes", now)
 	if err != nil {
 		return false, err
@@ -1687,7 +1698,7 @@ func (s *Settler) settleBytes(c *conv, now time.Time) (bool, error) {
 		s.cfg.Obs.Event(obs.EvArchiveWritten, "session", c.session, "segment", seg, "bytes", strconv.FormatInt(res.Size, 10), "ranges", strconv.Itoa(len(ranges)))
 	}
 	val, _ := json.Marshal(store.SettleRec{Manifest: mb, Ranges: ranges})
-	if err := s.st.CommitFull(&store.Rec{T: store.TSettle, At: now.UnixNano(), Session: c.session, Method: "bytes", Val: string(val)}); err != nil {
+	if err := s.st.CommitFullCtx(ctx, &store.Rec{T: store.TSettle, At: now.UnixNano(), Session: c.session, Method: "bytes", Val: string(val)}); err != nil {
 		return false, err
 	}
 	faults.At("settle.after-commit")
@@ -1722,7 +1733,7 @@ func (s *Settler) reclaim(c *conv, ranges []store.RangeRec) error {
 // and commits "settled". A write that lands between the check and the clone
 // (the clone is longer than the committed offset, or the original no longer
 // matches) discards the clones and leaves the Conversation Quiet.
-func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
+func (s *Settler) settleClone(ctx context.Context, c *conv, now time.Time) (bool, error) {
 	type cl struct {
 		f   store.File
 		g   store.Generation
@@ -1838,7 +1849,7 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 		return false, err
 	}
 	val, _ := json.Marshal(store.SettleRec{Manifest: mb})
-	if err := s.st.CommitFull(&store.Rec{T: store.TSettle, At: now.UnixNano(), Session: c.session, Method: "clone", Val: string(val)}); err != nil {
+	if err := s.st.CommitFullCtx(ctx, &store.Rec{T: store.TSettle, At: now.UnixNano(), Session: c.session, Method: "clone", Val: string(val)}); err != nil {
 		return false, err
 	}
 	faults.At("settle.after-commit")
@@ -1849,6 +1860,7 @@ func (s *Settler) settleClone(c *conv, now time.Time) (bool, error) {
 // segments that were renamed into place but never committed, removes leftover
 // temporary files, and finishes the delete a crash after "settled" cut short.
 func (s *Settler) Recover() error {
+	ctx := s.detached()
 	defer s.lockRun("recover")()
 	root := filepath.Join(s.st.Dir(), store.ArchivesDir)
 	ents, err := s.fs.ReadDir(root)
@@ -1923,7 +1935,7 @@ func (s *Settler) Recover() error {
 	if removed > 0 {
 		s.cfg.Obs.Event(obs.EvSettleCrashRecovery, "orphans_removed", strconv.Itoa(removed), "deletes_finished", strconv.Itoa(finished))
 	}
-	return s.recoverRemoval()
+	return s.recoverRemoval(ctx)
 }
 
 // gaugeStages are the stages the conversations_by_stage gauge and the published
@@ -1951,7 +1963,7 @@ func (s *Settler) LastCounts() (counts map[string]int, at time.Time, ok bool) {
 // the gauges. It is the reconciliation's half of the incremental bookkeeping: in
 // event mode it compares the stage counts kept since the last reconciliation
 // with what the store says now, logs a difference once and meters it.
-func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now time.Time) {
+func (s *Settler) refresh(ctx context.Context, groups map[string]*conv, live map[string]bool, now time.Time) {
 	rows, _ := s.st.Stages()
 	persisted := map[string]store.StageRow{}
 	for _, r := range rows {
@@ -2059,6 +2071,11 @@ func (s *Settler) refresh(groups map[string]*conv, live map[string]bool, now tim
 	s.mu.Lock()
 	s.gauges = ng
 	s.mu.Unlock()
-	s.refreshRemovalGaugesIfDue(groups, live, now)
+	s.refreshRemovalGaugesIfDue(ctx, groups, live, now)
 	s.publishGauges(now)
 }
+
+// detached is the root context without its cancellation. The settler's reads and
+// commits ran to completion when the root context ended (a pass stops between
+// candidates through stopping, never inside one statement), and still do.
+func (s *Settler) detached() context.Context { return context.WithoutCancel(s.cfg.Ctx) }

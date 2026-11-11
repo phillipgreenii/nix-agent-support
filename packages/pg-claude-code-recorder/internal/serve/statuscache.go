@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
@@ -30,7 +31,10 @@ type statusSnap struct {
 
 // refreshStatus recomputes the snapshot from the maintained lag state and the
 // cached file rows, with a Lstat only for the exceptions (see statLazy).
-func (d *Daemon) refreshStatus() error {
+func (d *Daemon) refreshStatus() error { return d.refreshStatusCtx(d.rootCtx()) }
+
+// refreshStatusCtx is refreshStatus with the coverage pass under ctx.
+func (d *Daemon) refreshStatusCtx(ctx context.Context) error {
 	d.statusRefreshMu.Lock()
 	defer d.statusRefreshMu.Unlock()
 	now := d.clock.Now()
@@ -39,7 +43,7 @@ func (d *Daemon) refreshStatus() error {
 	if err != nil {
 		return err
 	}
-	cov, err := d.computeCoverageModeCtx(d.rootCtx(), "summary", false, statLazy)
+	cov, err := d.computeCoverageModeCtx(ctx, "summary", false, statLazy)
 	if err != nil {
 		return err
 	}
@@ -66,12 +70,12 @@ func (d *Daemon) loadStatusSnap() *statusSnap {
 // statusSnapshot returns the cached figures. With the loop running and no
 // snapshot yet it waits briefly, then answers a warming snapshot; without the
 // loop (a daemon that was opened but not started) it computes once inline.
-func (d *Daemon) statusSnapshot() (*statusSnap, error) {
+func (d *Daemon) statusSnapshot(ctx context.Context) (*statusSnap, error) {
 	if s := d.loadStatusSnap(); s != nil {
 		return s, nil
 	}
 	if !d.statusLoopOn.Load() {
-		if err := d.refreshStatus(); err != nil {
+		if err := d.refreshStatusCtx(ctx); err != nil {
 			return nil, err
 		}
 		return d.loadStatusSnap(), nil

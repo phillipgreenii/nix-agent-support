@@ -141,8 +141,10 @@ type regFile struct {
 
 func (t *Tracker) now() int64 { return t.cfg.Clock.Now().UnixNano() }
 
-func (t *Tracker) commit(recs ...*store.Rec) {
-	if err := t.cfg.Store.Commit(recs...); err != nil {
+func (t *Tracker) commit(ctx context.Context, recs ...*store.Rec) {
+	// Detached: an observation is applied even when the root context has ended
+	// (an exit seen during shutdown is still recorded).
+	if err := t.cfg.Store.CommitCtx(context.WithoutCancel(ctx), recs...); err != nil {
 		t.cfg.Obs.Log.Warn("process_observation_failed", "err", err.Error())
 		return
 	}
@@ -159,7 +161,10 @@ func (t *Tracker) commit(recs ...*store.Rec) {
 
 // Observe reads a registry file the recorder just ingested and starts tracking
 // its Process on first sight.
-func (t *Tracker) Observe(path string) {
+func (t *Tracker) Observe(path string) { t.ObserveCtx(t.cfg.Ctx, path) }
+
+// ObserveCtx is Observe with the observation recorded under ctx.
+func (t *Tracker) ObserveCtx(ctx context.Context, path string) {
 	rel, err := filepath.Rel(filepath.Join(t.cfg.ClaudeDir, "sessions"), path)
 	if err != nil || strings.Contains(rel, "/") || !strings.HasSuffix(rel, ".json") {
 		return
@@ -172,10 +177,10 @@ func (t *Tracker) Observe(path string) {
 	if json.Unmarshal(b, &rf) != nil || rf.PID <= 0 {
 		return
 	}
-	t.track(pkey{rf.PID, rf.ProcStart}, rf.SessionID)
+	t.track(ctx, pkey{rf.PID, rf.ProcStart}, rf.SessionID)
 }
 
-func (t *Tracker) track(k pkey, session string) {
+func (t *Tracker) track(ctx context.Context, k pkey, session string) {
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
@@ -203,16 +208,16 @@ func (t *Tracker) track(k pkey, session string) {
 		tr.exited.Store(true)
 	case err == nil:
 		t.setSeen(tr, time.Unix(0, max(row.LastSeenNS, row.FirstSeenNS)), true)
-		t.attach(tr)
+		t.attach(ctx, tr)
 	default:
-		t.discover(tr)
+		t.discover(ctx, tr)
 	}
 }
 
 // discover is first sight of a Process: the host binding, and the stale-at-
 // discovery fact when the registry file names a dead pid (gone, or a start time
 // that differs from procStart: a reused pid is dead).
-func (t *Tracker) discover(tr *tracked) {
+func (t *Tracker) discover(ctx context.Context, tr *tracked) {
 	now := t.now()
 	alive := proc.Alive(t.cfg.Sys, int(tr.key.pid), tr.key.ps)
 	d := store.ProcRec("discover", tr.key.pid, tr.key.ps, now)
@@ -221,7 +226,7 @@ func (t *Tracker) discover(tr *tracked) {
 		d.Reason = "stale"
 		x := store.ProcRec("exit", tr.key.pid, tr.key.ps, now)
 		x.Reason, x.Val = store.ExitUnobserved, "present"
-		t.commit(d, x)
+		t.commit(ctx, d, x)
 		tr.exited.Store(true)
 		t.cfg.Obs.Reg.Add(obs.MStaleDiscovery, nil, 1)
 		t.cfg.Obs.Event("registry_stale_at_discovery", "pid", strconv.FormatInt(tr.key.pid, 10))
@@ -238,16 +243,16 @@ func (t *Tracker) discover(tr *tracked) {
 			d.Val = string(b)
 		}
 	}
-	t.commit(d, seen)
+	t.commit(ctx, d, seen)
 	t.setSeen(tr, time.Unix(0, now), true)
-	t.attach(tr)
+	t.attach(ctx, tr)
 }
 
 // attach registers the exit watch. A watch on an exited pid fails (ESRCH): that
 // failure is the recorded fact, an unobserved exit.
-func (t *Tracker) attach(tr *tracked) {
+func (t *Tracker) attach(ctx context.Context, tr *tracked) {
 	if !proc.Alive(t.cfg.Sys, int(tr.key.pid), tr.key.ps) {
-		t.recordUnobserved(tr)
+		t.recordUnobserved(ctx, tr)
 		return
 	}
 	stop, err := t.cfg.Sys.Watch(int(tr.key.pid), func(at time.Time) {
@@ -264,7 +269,7 @@ func (t *Tracker) attach(tr *tracked) {
 		}()
 	})
 	if err != nil {
-		t.recordUnobserved(tr)
+		t.recordUnobserved(ctx, tr)
 		return
 	}
 	t.mu.Lock()
@@ -272,13 +277,13 @@ func (t *Tracker) attach(tr *tracked) {
 	t.mu.Unlock()
 }
 
-func (t *Tracker) recordUnobserved(tr *tracked) {
+func (t *Tracker) recordUnobserved(ctx context.Context, tr *tracked) {
 	if !tr.exited.CompareAndSwap(false, true) {
 		return
 	}
 	x := store.ProcRec("exit", tr.key.pid, tr.key.ps, t.now())
 	x.Reason, x.Val = store.ExitUnobserved, t.presentVal(tr.key.pid)
-	t.commit(x)
+	t.commit(ctx, x)
 	t.removeFifo(tr.key.pid)
 }
 
@@ -297,6 +302,7 @@ func (t *Tracker) presentVal(pid int64) string {
 // after the event (and again after the grace window when it is on and the file
 // is still there), then the exit is recorded.
 func (t *Tracker) onExit(tr *tracked, at time.Time) {
+	ctx := t.cfg.Ctx
 	if !tr.exited.CompareAndSwap(false, true) {
 		return
 	}
@@ -313,7 +319,7 @@ func (t *Tracker) onExit(tr *tracked, at time.Time) {
 	x := store.ProcRec("exit", tr.key.pid, tr.key.ps, at.UnixNano())
 	x.Reason, x.Val = store.ExitObserved, val
 	seen := store.ProcRec("seen", tr.key.pid, tr.key.ps, at.UnixNano())
-	t.commit(seen, x)
+	t.commit(ctx, seen, x)
 	t.removeFifo(tr.key.pid)
 	t.cfg.Obs.Event(obs.EvProcessExit, "pid", strconv.FormatInt(tr.key.pid, 10), "registry_present", strconv.FormatBool(val == "present"))
 	t.countEnd(session, val == "present")
@@ -375,6 +381,7 @@ func (t *Tracker) countEndAsync(old string) {
 // re-registers the watch of every known Process that is still alive; one that
 // ended while the recorder was down gets an unobserved exit.
 func (t *Tracker) Startup() {
+	ctx := t.cfg.Ctx
 	ents, _ := os.ReadDir(filepath.Join(t.cfg.ClaudeDir, "sessions"))
 	for _, e := range ents {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
@@ -398,7 +405,7 @@ func (t *Tracker) Startup() {
 		tr := &tracked{key: k}
 		t.procs[k] = tr
 		t.mu.Unlock()
-		t.attach(tr)
+		t.attach(ctx, tr)
 	}
 	if t.cfg.ControlDir != "" {
 		t.mu.Lock()
@@ -425,6 +432,7 @@ func (t *Tracker) StartupDone() {
 // Tick refreshes last-seen-alive for every live Process (a liveness check) and
 // journals it at most once a minute.
 func (t *Tracker) Tick() {
+	ctx := t.cfg.Ctx
 	now := t.cfg.Clock.Now()
 	t.mu.Lock()
 	var live []*tracked
@@ -439,7 +447,7 @@ func (t *Tracker) Tick() {
 			continue
 		}
 		if t.setSeen(tr, now, false) {
-			t.commit(store.ProcRec("seen", tr.key.pid, tr.key.ps, now.UnixNano()))
+			t.commit(ctx, store.ProcRec("seen", tr.key.pid, tr.key.ps, now.UnixNano()))
 		}
 	}
 	t.refreshInbox(live)
@@ -879,6 +887,7 @@ func (t *Tracker) reqFS() fsx.FS {
 
 // Close stops the watches and journals each live Process's last-seen-alive time.
 func (t *Tracker) Close() {
+	ctx := t.cfg.Ctx
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
@@ -901,7 +910,7 @@ func (t *Tracker) Close() {
 			stop()
 		}
 		if !ls.IsZero() {
-			t.commit(store.ProcRec("seen", tr.key.pid, tr.key.ps, ls.UnixNano()))
+			t.commit(ctx, store.ProcRec("seen", tr.key.pid, tr.key.ps, ls.UnixNano()))
 		}
 	}
 }

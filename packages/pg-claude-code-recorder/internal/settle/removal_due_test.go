@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,11 +62,11 @@ func TestRemovalDueGaugesAndLastRun(t *testing.T) {
 	e.clk.Advance(removeAge + time.Hour)
 	refresh := func() {
 		t.Helper()
-		groups, err := e.sett.groups()
+		groups, err := e.sett.groups(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		e.sett.refreshRemovalGauges(groups, map[string]bool{}, e.clk.Now())
+		e.sett.refreshRemovalGauges(context.Background(), groups, map[string]bool{}, e.clk.Now())
 	}
 	refresh()
 	if got := gaugeOf(t, e, obs.MRemovalQuietShare); got != 1 {
@@ -99,7 +100,7 @@ func TestRemovalDueGaugesAndLastRun(t *testing.T) {
 	if got := gaugeOf(t, e, obs.MRemovalLastRun); got != 0 {
 		t.Fatalf("fresh Settler last run = %v before a refresh, want 0", got)
 	}
-	e.sett.refreshRemovalGauges(map[string]*conv{}, map[string]bool{}, e.clk.Now())
+	e.sett.refreshRemovalGauges(context.Background(), map[string]*conv{}, map[string]bool{}, e.clk.Now())
 	if got, want := gaugeOf(t, e, obs.MRemovalLastRun), float64(at.UnixNano())/1e9; got != want {
 		t.Fatalf("reloaded last run = %v, want %v", got, want)
 	}

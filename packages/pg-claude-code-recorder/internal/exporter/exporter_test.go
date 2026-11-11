@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"os"
@@ -50,7 +51,7 @@ func TestStartRefusesNonLoopbackAndServesMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer s.Close(context.Background())
 	resp, err := http.Get("http://" + s.Addr() + "/metrics")
 	if err != nil {
 		t.Fatal(err)

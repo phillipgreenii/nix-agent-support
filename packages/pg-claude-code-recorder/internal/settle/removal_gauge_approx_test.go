@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,7 +35,7 @@ func TestBacklogFactsMatchPerFileReaders(t *testing.T) {
 	for _, c := range groups {
 		cs = append(cs, c)
 	}
-	newest, bytes := e.s.backlogFacts(cs)
+	newest, bytes := e.s.backlogFacts(context.Background(), cs)
 	for _, c := range cs {
 		f := c.files[0]
 		if want := perFileLastSeen(e.st, f); !newest[c.session].Equal(want) {
@@ -57,7 +58,7 @@ func TestRemovalGaugeRefreshStatementCountIsConstant(t *testing.T) {
 		e.s.cfg.RemoveAfter = time.Nanosecond
 		e.s.cfg.Obs = obs.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
 		e.cnt.Reset()
-		e.s.refreshRemovalGauges(groups, map[string]bool{}, time.Unix(0, 1<<40))
+		e.s.refreshRemovalGauges(context.Background(), groups, map[string]bool{}, time.Unix(0, 1<<40))
 		if got, _ := e.s.cfg.Obs.Reg.Gauge(obs.MRemovalBacklogConvs, nil); got != float64(n) {
 			t.Fatalf("backlog convs = %v, want %d", got, n)
 		}
@@ -82,11 +83,11 @@ func TestRemoveRefusesWhatTheApproximateGaugeCountsAsReady(t *testing.T) {
 	if err := os.Chtimes(p, e.clk.Now().Add(-time.Hour), e.clk.Now().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	groups, err := e.sett.groups()
+	groups, err := e.sett.groups(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.sett.refreshRemovalGauges(groups, map[string]bool{}, e.clk.Now())
+	e.sett.refreshRemovalGauges(context.Background(), groups, map[string]bool{}, e.clk.Now())
 	if v, _ := e.obs.Reg.Gauge(obs.MRemovalBacklogConvs, nil); v != 1 {
 		t.Fatalf("gauge counts %v ready, want 1 (approximate by design)", v)
 	}

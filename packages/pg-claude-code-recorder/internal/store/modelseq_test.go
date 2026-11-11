@@ -74,7 +74,7 @@ func TestRemovalSeqMovesOnlyForRemovedRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	rm, model := st.RemovalSeq(), st.ModelInputSeq()
+	rm := st.RemovalSeq()
 	for _, note := range []func(){st.NoteModelInput, st.NoteLiveInput} {
 		if err := st.WithWrite("", func(*sql.Tx) error { note(); return nil }); err != nil {
 			t.Fatal(err)
@@ -83,7 +83,7 @@ func TestRemovalSeqMovesOnlyForRemovedRows(t *testing.T) {
 			t.Fatal("a write that removed nothing moved RemovalSeq")
 		}
 	}
-	model = st.ModelInputSeq()
+	model := st.ModelInputSeq()
 	if err := st.WithWrite("", func(*sql.Tx) error { st.NoteRowsRemoved(); return nil }); err != nil {
 		t.Fatal(err)
 	}

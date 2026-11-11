@@ -330,7 +330,7 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		e = tf.typed
 	}
 	if b.idWalk && !byRef {
-		if stored, _, rerr := b.resolve(f.Field); rerr == nil && (stored == "source" || stored == "type" || stored == "item") && !(stored == "source" && b.refPinned) {
+		if stored, _, rerr := b.resolve(f.Field); rerr == nil && (stored == "source" || stored == "type" || stored == "item") && (stored != "source" || !b.refPinned) {
 			// A source test next to a session_ref pin is left to
 			// records_session_ref_source_time(session_ref, source): with the plus
 			// a session of millions of records of one source is read whole to

@@ -253,6 +253,11 @@ const (
 // instance fails with ErrStateDirLocked instead of racing the first for
 // index.db.
 func Open(dir string, opt Options) (*Store, error) {
+	return OpenCtx(context.Background(), dir, opt)
+}
+
+// OpenCtx is Open with the rebuild and journal-replay statements under ctx.
+func OpenCtx(ctx context.Context, dir string, opt Options) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -267,7 +272,7 @@ func Open(dir string, opt Options) (*Store, error) {
 			_ = lk.Close()
 		}
 	}()
-	s, err := openLocked(dir, opt)
+	s, err := openLocked(ctx, dir, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +281,7 @@ func Open(dir string, opt Options) (*Store, error) {
 	return s, nil
 }
 
-func openLocked(dir string, opt Options) (*Store, error) {
+func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 	if opt.FS == nil {
 		opt.FS = fsx.OS{}
 	}
@@ -387,7 +392,7 @@ func openLocked(dir string, opt Options) (*Store, error) {
 		return nil, &UnfinishedRebuildError{}
 	}
 	if opt.BulkRebuild {
-		if err := s.beginRebuild(); err != nil {
+		if err := s.beginRebuild(ctx); err != nil {
 			s.closeDBs()
 			return nil, err
 		}
@@ -400,15 +405,15 @@ func openLocked(dir string, opt Options) (*Store, error) {
 		dbExisted = false
 	}
 	if v := s.metaInt("schema_version"); v > SchemaVersion {
-		_ = s.Close()
+		_ = s.CloseCtx(ctx)
 		return nil, &SchemaNewerError{Found: int(v), Known: SchemaVersion}
 	}
 	s.noteReplayCollisions(recs)
 	endPhase = phaseOf(opt.Phase, "store_replay")
-	err = s.replay(recs)
+	err = s.replay(ctx, recs)
 	endPhase()
 	if err != nil {
-		_ = s.Close()
+		_ = s.CloseCtx(ctx)
 		return nil, err
 	}
 	s.Rebuilt = !dbExisted && len(recs) > 0
@@ -418,14 +423,14 @@ func openLocked(dir string, opt Options) (*Store, error) {
 	}
 	jf, err := s.fs.OpenFile(jpath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		_ = s.Close()
+		_ = s.CloseCtx(ctx)
 		return nil, err
 	}
 	s.jf = jf
 	if !opt.ReplayOnly {
 		if cur := s.metaInt("epoch"); cur == 0 || s.Rebuilt {
-			if err := s.Commit(&Rec{T: TEpoch, At: time.Now().UnixNano(), Epoch: int(cur) + 1}); err != nil {
-				_ = s.Close()
+			if err := s.CommitCtx(ctx, &Rec{T: TEpoch, At: time.Now().UnixNano(), Epoch: int(cur) + 1}); err != nil {
+				_ = s.CloseCtx(ctx)
 				return nil, err
 			}
 		}
@@ -981,13 +986,25 @@ func (s *Store) TailPath(file int64) string {
 
 // Commit writes recs to the journal (sequence numbers assigned, fsynced) and
 // then applies them to the database in one transaction.
-func (s *Store) Commit(recs ...*Rec) error { return s.commit(false, recs) }
+func (s *Store) Commit(recs ...*Rec) error { return s.commit(context.Background(), false, recs) }
+
+// CommitCtx is Commit with the database transaction under ctx. A journalled
+// record is replayed at the next open, so a ctx that ends between the journal
+// write and the apply loses nothing.
+func (s *Store) CommitCtx(ctx context.Context, recs ...*Rec) error {
+	return s.commit(ctx, false, recs)
+}
 
 // CommitFull is Commit with F_FULLFSYNC on the journal and PRAGMA fullfsync=ON
 // for the database commit, for the records a delete depends on ("settled",
 // "removal pending", "removed"). On darwin the plain fsync of Commit does not
 // flush the drive's cache.
-func (s *Store) CommitFull(recs ...*Rec) error { return s.commit(true, recs) }
+func (s *Store) CommitFull(recs ...*Rec) error { return s.commit(context.Background(), true, recs) }
+
+// CommitFullCtx is CommitFull with the database transaction under ctx.
+func (s *Store) CommitFullCtx(ctx context.Context, recs ...*Rec) error {
+	return s.commit(ctx, true, recs)
+}
 
 // lockWrite takes the single write lock. A contended acquisition observes the
 // seconds the caller queued (store_write_lock_wait_seconds); an uncontended one
@@ -1008,7 +1025,7 @@ func (s *Store) lockWrite() {
 	s.obs.Reg.Observe(obs.MStoreWriteLockWait, now().Sub(start).Seconds())
 }
 
-func (s *Store) commit(full bool, recs []*Rec) error {
+func (s *Store) commit(ctx context.Context, full bool, recs []*Rec) error {
 	s.lockWrite()
 	defer s.mu.Unlock()
 	if err := s.checkFileIDs(recs); err != nil {
@@ -1039,7 +1056,6 @@ func (s *Store) commit(full bool, recs []*Rec) error {
 		// The index runs at synchronous=NORMAL; a commit a delete depends on is
 		// FULL on a pinned connection, so the setting cannot land on a different
 		// pooled connection than the transaction.
-		ctx := context.Background()
 		conn, err := s.wdb.Conn(ctx)
 		if err != nil {
 			return err
@@ -1047,10 +1063,10 @@ func (s *Store) commit(full bool, recs []*Rec) error {
 		defer func() { _ = conn.Close() }()
 		restore := s.durabilityPragmas(ctx, conn, true)
 		defer restore()
-		if err := s.applyAllOn(conn, recs); err != nil {
+		if err := s.applyAllOn(ctx, conn, recs); err != nil {
 			return err
 		}
-	} else if err := s.applyAll(recs); err != nil {
+	} else if err := s.applyAll(ctx, recs); err != nil {
 		return err
 	}
 	for _, h := range s.hooks {
@@ -1162,10 +1178,12 @@ func (s *Store) durabilityPragmas(ctx context.Context, conn *sql.Conn, withCheck
 	}
 }
 
-func (s *Store) applyAll(recs []*Rec) error { return s.applyAllOn(s.wdb, recs) }
+func (s *Store) applyAll(ctx context.Context, recs []*Rec) error {
+	return s.applyAllOn(ctx, s.wdb, recs)
+}
 
-func (s *Store) applyAllOn(db txBeginner, recs []*Rec) error {
-	tx, err := db.BeginTx(context.Background(), nil)
+func (s *Store) applyAllOn(ctx context.Context, db txBeginner, recs []*Rec) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1227,7 +1245,10 @@ const barrierBusyTimeoutMS = 250
 // fullfsync and checkpoint_fullfsync, then F_FULLFSYNC of the database file
 // itself. It returns ErrBarrierBusy when a reader keeps the checkpoint from
 // finishing; the caller MUST NOT remove anything on any error.
-func (s *Store) Barrier() error {
+func (s *Store) Barrier() error { return s.BarrierCtx(context.Background()) }
+
+// BarrierCtx is Barrier with its checkpoint connection taken under ctx.
+func (s *Store) BarrierCtx(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.wdb == nil {
@@ -1239,7 +1260,6 @@ func (s *Store) Barrier() error {
 		}
 	}
 	faults.At("store.before-barrier-checkpoint")
-	ctx := context.Background()
 	conn, err := s.wdb.Conn(ctx)
 	if err != nil {
 		return err
@@ -1270,7 +1290,7 @@ func (s *Store) Barrier() error {
 }
 
 // replay applies journal records the database has not seen. It is idempotent.
-func (s *Store) replay(recs []Rec) error {
+func (s *Store) replay(ctx context.Context, recs []Rec) error {
 	var pending []*Rec
 	for i := range recs {
 		if recs[i].Seq > s.lastSeq {
@@ -1281,7 +1301,7 @@ func (s *Store) replay(recs []Rec) error {
 		return nil
 	}
 	faults.At("store.replay")
-	return s.applyAll(pending)
+	return s.applyAll(ctx, pending)
 }
 
 // Close bounds, so a stuck write or reader cannot hold shutdown past the
@@ -1324,7 +1344,12 @@ func (s *Store) lockWithin(d time.Duration) bool {
 }
 
 // Close closes the store. It does not delete anything.
-func (s *Store) Close() error {
+func (s *Store) Close() error { return s.CloseCtx(context.Background()) }
+
+// CloseCtx is Close with the bounded stats and checkpoint steps run under ctx
+// (each still has its own deadline). A caller that is shutting down passes a
+// context that outlives its own cancellation, or both steps are skipped.
+func (s *Store) CloseCtx(ctx context.Context) error {
 	if !s.lockWithin(closeLockWait) {
 		return errCloseBusy
 	}
@@ -1338,7 +1363,7 @@ func (s *Store) Close() error {
 		// Keep sqlite_stat1 current: a due collection runs here, bounded, on the
 		// checkpoint connection; a cut-short pass resumes at the next one.
 		if s.wdb != nil && s.CollectStatsDue(time.Now(), StatsEvery) {
-			ctx, cancel := context.WithTimeout(context.Background(), closeStatsWait)
+			ctx, cancel := context.WithTimeout(ctx, closeStatsWait)
 			_, _ = s.collectStats(ctx, s.cdb, DefaultAnalysisLimit, time.Now(), 0)
 			cancel()
 		}
@@ -1350,7 +1375,7 @@ func (s *Store) Close() error {
 		// WAL makes this wait, so it runs under a deadline and is skipped on it.
 		start := time.Now()
 		s.obs.Event(obs.EvWALTruncateStart, "source", "close")
-		ctx, cancel := context.WithTimeout(context.Background(), closeCheckpointWait)
+		ctx, cancel := context.WithTimeout(ctx, closeCheckpointWait)
 		_, _ = s.wdb.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
 		cancel()
 		s.obs.Event(obs.EvWALTruncateDone, "source", "close", "duration_ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))

@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -65,14 +66,14 @@ func lastSeenFixture(e *csEnv, n int) map[string]*conv {
 func TestLastSeenBatchedEqualsPerFileComputation(t *testing.T) {
 	e := newCSEnv(t)
 	groups := lastSeenFixture(e, 20)
-	e.s.prefetchLastSeen(groups, map[string]bool{}, map[string]bool{})
+	e.s.prefetchLastSeen(context.Background(), groups, map[string]bool{}, map[string]bool{})
 	if e.s.seen == nil {
 		t.Fatal("prefetch left the cache empty")
 	}
 	distinct := map[int64]bool{}
 	for _, c := range groups {
 		for _, f := range c.files {
-			got, want := e.s.lastSeen(f), perFileLastSeen(e.st, f)
+			got, want := e.s.lastSeen(context.Background(), f), perFileLastSeen(e.st, f)
 			if !got.Equal(want) {
 				t.Errorf("file %d: batched %v, per file %v", f.ID, got.UnixNano(), want.UnixNano())
 			}
@@ -86,7 +87,7 @@ func TestLastSeenBatchedEqualsPerFileComputation(t *testing.T) {
 	e.s.seen = nil
 	for _, c := range groups {
 		for _, f := range c.files {
-			if got, want := e.s.lastSeen(f), perFileLastSeen(e.st, f); !got.Equal(want) {
+			if got, want := e.s.lastSeen(context.Background(), f), perFileLastSeen(e.st, f); !got.Equal(want) {
 				t.Errorf("uncached file %d: %v, want %v", f.ID, got.UnixNano(), want.UnixNano())
 			}
 		}
@@ -98,7 +99,7 @@ func TestLastSeenSkipsLiveAndUnchangedConversations(t *testing.T) {
 	groups := lastSeenFixture(e, 8)
 	live := map[string]bool{"s000": true}
 	unchanged := map[string]bool{"s001": true}
-	e.s.prefetchLastSeen(groups, live, unchanged)
+	e.s.prefetchLastSeen(context.Background(), groups, live, unchanged)
 	if _, ok := e.s.seen[groups["s000"].files[0].ID]; ok {
 		t.Error("live conversation was prefetched")
 	}
@@ -117,11 +118,11 @@ func TestLastSeenStatementCountIsConstant(t *testing.T) {
 		e := newCSEnv(t)
 		groups := lastSeenFixture(e, n)
 		e.cnt.Reset()
-		e.s.prefetchLastSeen(groups, map[string]bool{}, map[string]bool{})
+		e.s.prefetchLastSeen(context.Background(), groups, map[string]bool{}, map[string]bool{})
 		prefetch = e.cnt.Queries()
 		e.cnt.Reset()
 		for _, c := range groups {
-			e.s.lastSeen(c.files[0])
+			e.s.lastSeen(context.Background(), c.files[0])
 		}
 		return prefetch, e.cnt.Queries()
 	}

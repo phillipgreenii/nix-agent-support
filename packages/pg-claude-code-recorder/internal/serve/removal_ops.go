@@ -50,7 +50,7 @@ func (d *Daemon) opHeld(ctx context.Context, body []byte) (any, *wire.Error) {
 	var ans HeldAnswer
 	if req.Retry {
 		before, _ := d.sett.HeldCtx(ctx)
-		outs, err := d.sett.RecheckHeld()
+		outs, err := d.sett.RecheckHeldCtx(ctx)
 		if err != nil {
 			return nil, wire.Errf(wire.ErrInternal, err.Error())
 		}
@@ -87,12 +87,12 @@ func (d *Daemon) opWhere(ctx context.Context, body []byte) (any, *wire.Error) {
 	return w, nil
 }
 
-func (d *Daemon) opRemove(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opRemove(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req RemoveRequest
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
 	}
-	rep, err := d.sett.Remove(settle.RemoveOptions{Sessions: req.Sessions, DryRun: req.DryRun})
+	rep, err := d.sett.RemoveCtx(ctx, settle.RemoveOptions{Sessions: req.Sessions, DryRun: req.DryRun})
 	switch {
 	case errors.Is(err, settle.ErrRemovalDisabled):
 		return nil, wire.Errf(wire.ErrRemovalDisabled, err.Error()+"; remove --dry-run shows what would go")
@@ -102,7 +102,7 @@ func (d *Daemon) opRemove(_ context.Context, body []byte) (any, *wire.Error) {
 	return rep, nil
 }
 
-func (d *Daemon) opExtract(_ context.Context, body []byte) (any, *wire.Error) {
+func (d *Daemon) opExtract(ctx context.Context, body []byte) (any, *wire.Error) {
 	var req ExtractRequest
 	if werr := decodeBody(body, &req); werr != nil {
 		return nil, werr
@@ -110,7 +110,7 @@ func (d *Daemon) opExtract(_ context.Context, body []byte) (any, *wire.Error) {
 	if req.Session == "" {
 		return nil, wire.Errf(wire.ErrBadRequest, "extract needs a session")
 	}
-	res, err := d.sett.Extract(req.Session, req.To)
+	res, err := d.sett.ExtractCtx(ctx, req.Session, req.To)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return nil, wire.Errf(wire.ErrNotFound, "no settled Conversation "+req.Session+" to extract")
@@ -126,8 +126,8 @@ func (d *Daemon) opExtract(_ context.Context, body []byte) (any, *wire.Error) {
 	return res, nil
 }
 
-func (d *Daemon) opDoctor(_ context.Context, _ []byte) (any, *wire.Error) {
-	ans, err := d.sett.DoctorRun()
+func (d *Daemon) opDoctor(ctx context.Context, _ []byte) (any, *wire.Error) {
+	ans, err := d.sett.DoctorRunCtx(ctx)
 	if err != nil {
 		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}

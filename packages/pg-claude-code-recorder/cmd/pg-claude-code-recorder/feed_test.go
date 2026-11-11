@@ -39,7 +39,7 @@ func feedDaemon(t *testing.T, feedAns func(n int) (any, *wire.Error)) (string, *
 	if err := s.Listen(sock); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
+	t.Cleanup(func() { s.Close(context.Background()) })
 	return sock, &seen
 }
 

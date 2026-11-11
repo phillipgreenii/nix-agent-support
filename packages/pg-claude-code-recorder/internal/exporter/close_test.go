@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestCloseDropsAScrapeShutdownCouldNotDrain(t *testing.T) {
 	}()
 	<-entered
 	start := time.Now()
-	s.Close()
+	s.Close(context.Background())
 	if d := time.Since(start); d > 4*time.Second {
 		t.Fatalf("Close took %v", d)
 	}
