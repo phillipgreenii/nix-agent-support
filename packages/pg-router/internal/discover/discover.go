@@ -504,6 +504,10 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 	// Period-driven (and any non-threshold, non-manual) queries fire every
 	// pass EXCEPT one cad reports not yet due (Task 1.3's per-source cadence).
 	for i, s := range sources {
+		if s.LevelSource != "" {
+			// Level sources are pulled by the LevelPuller, a pass of their own.
+			continue
+		}
 		t := s.Query.Trigger()
 		if query.IsManual(t) {
 			continue
@@ -529,7 +533,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 			}
 			continue
 		}
-		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now, nil); err != nil {
+		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now, nil, nil); err != nil {
 			return rpt, err
 		}
 		fired[i] = true
@@ -542,7 +546,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 	for iter := 0; iter <= len(sources); iter++ {
 		progressed := false
 		for i, s := range sources {
-			if fired[i] {
+			if fired[i] || s.LevelSource != "" {
 				continue
 			}
 			tt, ok := query.Threshold(s.Query.Trigger())
@@ -561,7 +565,7 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 					}
 					continue
 				}
-				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now, nil); err != nil {
+				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now, nil, nil); err != nil {
 					return rpt, err
 				}
 				fired[i] = true
@@ -619,7 +623,14 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 // REJECTED — counted in rpt.Rejected[s.Name], never enqueued — rather than
 // entering the durable queue only to wait, unconsumed, until it expires. A
 // rejection is per-event and does not abort the source's other events.
-func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, activityObs SourceActivityObserver, rpt *ProduceReport, now func() time.Time, slot *query.Slot) error {
+func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventqueue.Queue, declared core.Bindings, sleep sleepFunc, obs SourceFailureObserver, activityObs SourceActivityObserver, rpt *ProduceReport, now func() time.Time, slot *query.Slot, lv *levelPath) error {
+	if s.LevelSource != "" {
+		// A level source's answer is DIVERTED to level ingest here, before
+		// anything can reach Enqueue (no dedupe, retention or unconsumed-expiry
+		// accounting applies to it). It is fail-fast: a failed pull keeps the
+		// last level and is counted, never retried inside the pass.
+		return runLevelSource(ctx, env, s, lv, obs, activityObs, rpt, now)
+	}
 	rpt.LastTick[s.Name] = now()
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event

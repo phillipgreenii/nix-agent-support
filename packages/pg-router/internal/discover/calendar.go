@@ -145,7 +145,7 @@ func calendarPass(ctx context.Context, env query.Env, s query.Source, ct query.C
 		return nil
 	}
 	slot := query.Slot{Name: name, Time: p, OnMissed: cr.Missed, Now: nowT}
-	err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, rpt, now, &slot)
+	err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, rpt, now, &slot, nil)
 	if _, failed := rpt.SourceErrors[name]; failed || err != nil {
 		cad.FailedSlots[name] = p
 		cr.EnqueueFailed = true

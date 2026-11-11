@@ -40,6 +40,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/calstate"
@@ -99,6 +100,13 @@ type Orchestrator struct {
 	// comment — every produced event is then rejected, so a caller that drives
 	// ProduceTick outside bootCore (a test) MUST set this explicitly.
 	Bindings core.Bindings
+	// LevelIngest is where a level-source query's answers go (the level
+	// projection). LevelPullObserver is notified of pull failures (sensor,
+	// reason). Both are read when LevelPuller first builds the puller.
+	LevelIngest       discover.LevelIngester
+	LevelPullObserver discover.LevelPullObserver
+	levelPullerOnce   sync.Once
+	levelPuller       *discover.LevelPuller
 	// Registry is the core's participant registry (Task 2.3, pg2-84o3m.22):
 	// when set, NewListener captures it onto each roleListener so Offer can
 	// consult self-status/lifecycle availability (core.Registry.Available,
@@ -330,7 +338,24 @@ func (o *Orchestrator) LastTick() map[string]time.Time {
 	for name, t := range o.lastTick {
 		out[name] = t
 	}
+	for name, t := range o.LevelPuller().LastTick() {
+		out[name] = t
+	}
 	return out
+}
+
+// LevelPuller returns the pass of its own that pulls the level-source queries
+// (internal/discover/levelpull.go): built on first use from the configured
+// sources, LevelIngest and LevelPullObserver (set those before the first call).
+func (o *Orchestrator) LevelPuller() *discover.LevelPuller {
+	o.levelPullerOnce.Do(func() {
+		o.levelPuller = discover.NewLevelPuller(discover.LevelPullerConfig{
+			Env: o.queryEnv(), Sources: o.Cfg.Queries, Ingest: o.LevelIngest,
+			Observer: o.LevelPullObserver, FailureObserver: o.SourceFailureObserver,
+			ActivityObserver: o.SourceActivityObserver, PollInterval: o.Cfg.PollInterval,
+		})
+	})
+	return o.levelPuller
 }
 
 // RunOne dispatches a single self-contained event through one role. It is

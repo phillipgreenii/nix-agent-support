@@ -21,7 +21,7 @@ format = "jsonl"
 `
 
 // levelsCfgBase is a generic config: a registry, a level-source query for the
-// "host" sensor, and a sink role for it. Names are
+// "host" sensor (it emits nothing and needs no consumer). Names are
 // placeholders only.
 const levelsCfgBase = `
 [levels]
@@ -47,16 +47,10 @@ sensor = "router"
 [[query]]
 name = "probe"
 type = "command"
-emits = ["lvl"]
 level_source = "host"
 [query.command]
 argv = ["x"]
 format = "jsonl"
-
-[[role]]
-name = "lvl-sink"
-handler = "/bin/h"
-binds = ["lvl"]
 `
 
 func TestConfig_levelsDefaults(t *testing.T) {
@@ -204,3 +198,72 @@ operator_paused_path = "/x/op"
 		t.Fatalf("Load() = %v, want the retired keys ignored", err)
 	}
 }
+
+const levelSourceNoEmitsCfg = `
+[[resource]]
+name = "disk"
+scale = ["PLENTY", "OK", "TIGHT", "EXHAUSTED"]
+sensor = "host"
+
+[[query]]
+name = "probe"
+type = "command"
+level_source = "host"
+deadline = "15s"
+env_allow = ["SSH_AUTH_SOCK", "PGR_X"]
+[query.command]
+argv = ["x"]
+format = "jsonl"
+` + levelsWorkQuery + `
+[[role]]
+name = "worker"
+handler = "/bin/h"
+binds = ["e"]
+`
+
+// A level-source query needs no emits, is not an orphan producer, and carries
+// its env_allow list onto the command query.
+func TestLevelSourceQuery_noEmitsNoOrphanAndEnvAllow(t *testing.T) {
+	absentGlobalConfig(t)
+	writeCfg(t, levelSourceNoEmitsCfg)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.Queries[0].Deadline; got != 15*time.Second {
+		t.Errorf("deadline = %s", got)
+	}
+	cq, ok := c.Queries[0].Query.(query.CommandQuery)
+	if !ok || len(cq.EnvAllow) != 2 || cq.EnvAllow[0] != "SSH_AUTH_SOCK" {
+		t.Fatalf("query = %#v", c.Queries[0].Query)
+	}
+	if errs, _ := c.diagnose(); len(errs) != 0 {
+		t.Errorf("a level-source query produced findings: %v", errs)
+	}
+}
+
+func TestLevelSourceQuery_envAllowValidation(t *testing.T) {
+	absentGlobalConfig(t)
+	for name, tc := range map[string]struct{ body, want string }{
+		"bad name": {strings.Replace(levelSourceNoEmitsCfg, `"PGR_X"`, `"not a name"`, 1), "not an environment variable name"},
+		"timer":    {levelSourceTimerCfg, "env_allow applies only to a command query"},
+	} {
+		writeCfg(t, tc.body)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: Load() = %v, want %q", name, err, tc.want)
+		}
+	}
+}
+
+const levelSourceTimerCfg = `
+[[query]]
+name = "tick"
+type = "timer"
+emits = ["t"]
+env_allow = ["A"]
+
+[[role]]
+name = "w"
+handler = "/bin/h"
+binds = ["t"]
+`

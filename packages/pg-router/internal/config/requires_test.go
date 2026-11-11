@@ -206,7 +206,7 @@ requires = ["disk >= OK"]
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := c.Roles[1].Requires; len(got) != 1 || got[0] != "disk >= OK" {
+	if got := c.Roles[0].Requires; len(got) != 1 || got[0] != "disk >= OK" {
 		t.Errorf("role requires = %v", got)
 	}
 	if got := c.Requirements["worker"].Allowed["disk"]; !slices.Equal(got, []string{"PLENTY", "OK"}) {

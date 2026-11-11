@@ -457,6 +457,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// projection's own appends reach the durable log through the queue.
 	levelAppender.q.Store(q)
 	core.ReplayLevels(q, levelProj)
+	// Level-source queries divert their answers to the projection's ingest.
+	o.LevelIngest = levelProj
 	// Bindings is built ONCE and threaded into both consumers so they can never
 	// disagree about which types are declared (Task 1.1, INV-DISP-3): the same
 	// value goes to core.Listen (validates PUSHED events) and onto the
@@ -1658,6 +1660,13 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 		return exitOK
 	}
 
+	// Level sources answer first (bounded wait), so admission sees levels.
+	// A pull still running when this run ends is cancelled with it.
+	pullCtx, cancelPulls := context.WithCancel(ctx)
+	defer cancelPulls()
+	if p := pr.o.LevelPuller(); len(p.Sources()) > 0 {
+		p.StartPass(pullCtx, pr.cfg.Levels.StartWait)
+	}
 	q.EnforceLogLimits()
 	rpt, produceErr := pr.o.ProduceTick(ctx, q)
 	if produceErr != nil {
@@ -1900,6 +1909,8 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// for a postStartup hook any more (the gate startPostStartupAsync once
 	// installed is gone, bead pg2-fx5x0l.6), and this pass is still silent
 	// once shutdown was requested (the same rule as runOneTick's own pass).
+	// The initial level pull pass runs before it, with a bounded wait (ADM-6).
+	startLevelPulls(ctx, pr.cfg, pr.o.LevelPuller())
 	if ctx.Err() == nil {
 		slog.Info("run: startup dispatch pass, before the first producer tick", "offersLaunched", q.Kick())
 	}

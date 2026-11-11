@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -225,6 +226,11 @@ type queryTOML struct {
 	// environment (default off). A pointer so a timer query that sets it can be
 	// told apart from one that does not.
 	StrictBaseEnv *bool `toml:"strict_base_env"`
+	// EnvAllow lists the environment variable names a command query's process
+	// receives besides the minimal base environment (for example SSH_AUTH_SOCK
+	// for a git-credential sensor). Absent: the process inherits the router's
+	// environment, unless strict_base_env is on.
+	EnvAllow []string `toml:"env_allow"`
 	// Metadata is a timer query's static metadata, copied unchanged into every
 	// tick's item. Decoded as any so a non-string value is reported by our own
 	// error, not the TOML decoder's.
@@ -770,10 +776,14 @@ func applyHandlerKeys(role *roles.Role, rt roleTOML) error {
 	return nil
 }
 
+// envNameRE is the shape of an environment variable name an env_allow list may
+// carry.
+var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // buildQuery decodes one [[query]] into a concrete query.Query, installing its
 // [[query]]-level Meta (emits + trigger).
 func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Query, error) {
-	if len(qt.Emits) == 0 {
+	if len(qt.Emits) == 0 && qt.LevelSource == "" {
 		return nil, fmt.Errorf("emits is required (the event type(s) this query produces)")
 	}
 	prims := map[string]toml.Primitive{
@@ -793,6 +803,17 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if err != nil {
 		return nil, fmt.Errorf("failure_backoff: %w", err)
 	}
+	if qt.Type != "command" && len(qt.EnvAllow) > 0 {
+		return nil, fmt.Errorf("env_allow applies only to a command query; a %q query has no command to run", qt.Type)
+	}
+	for _, name := range qt.EnvAllow {
+		if !envNameRE.MatchString(name) {
+			return nil, fmt.Errorf("env_allow: %q is not an environment variable name", name)
+		}
+	}
+	if qt.LevelSource != "" && qt.Type != "command" {
+		return nil, fmt.Errorf("level_source applies only to a command query; a %q query cannot answer with level records", qt.Type)
+	}
 	if qt.Type != "command" && qt.StrictBaseEnv != nil {
 		return nil, fmt.Errorf("strict_base_env applies only to a command query; a %q query has no command to run", qt.Type)
 	}
@@ -810,6 +831,7 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	}
 	if cq, ok := q.(query.CommandQuery); ok {
 		cq.StrictBaseEnv = qt.StrictBaseEnv != nil && *qt.StrictBaseEnv
+		cq.EnvAllow = append([]string(nil), qt.EnvAllow...)
 		return cq, nil
 	}
 	return q, nil

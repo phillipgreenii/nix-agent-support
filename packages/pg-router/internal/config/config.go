@@ -532,6 +532,12 @@ func (c Config) diagnose() (errs []error, warns []string) {
 		if err := s.Query.Validate(); err != nil {
 			errs = append(errs, fmt.Errorf("query %q: %w", s.Name, err))
 		}
+		if s.LevelSource != "" {
+			// A level-source query answers with level records, not events: it has
+			// no consumer, so what it emits is neither a producer to orphan-check
+			// nor a type a role may bind.
+			continue
+		}
 		for _, e := range s.Query.Emits() {
 			emitted[e] = true
 			if isWildcardEventType(e) {
@@ -559,7 +565,7 @@ func (c Config) diagnose() (errs []error, warns []string) {
 		}
 	}
 	for _, s := range c.Queries {
-		if s.Query == nil {
+		if s.Query == nil || s.LevelSource != "" {
 			continue
 		}
 		for _, e := range s.Query.Emits() {

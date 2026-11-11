@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
+	"github.com/phillipgreenii/pg-router/schemas"
 )
 
 // envTestMode is PG_ROUTER_TEST_MODE (docs/decisions/cli.md's DEC-CLI-2): both
@@ -244,6 +245,9 @@ func runRunQuerySource(ctx context.Context, cfg config.Config, name string, asJS
 		return exitUsage
 	}
 	env := query.Env{RepoRoot: cfg.RepoRoot, Cmd: query.OSCommander{}}
+	if src.LevelSource != "" {
+		return runRunQueryLevelSource(ctx, env, src, os.Stdout, os.Stderr)
+	}
 	evts, err := src.Query.Run(ctx, env)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run-query:", err)
@@ -258,6 +262,43 @@ func runRunQuerySource(ctx context.Context, cfg config.Config, name string, asJS
 		renderRunQueryJSON(os.Stdout, src.Name, matches, sched)
 	} else {
 		renderRunQueryText(os.Stdout, src.Name, matches, sched)
+	}
+	return exitOK
+}
+
+// runRunQueryLevelSource verifies a level-source query: it runs the query once
+// under its own deadline and checks every line of its output against the shared
+// level-answer schema. Nothing is ingested or enqueued. Exit 0 when at least
+// one answer printed and every line is valid, 1 otherwise.
+func runRunQueryLevelSource(ctx context.Context, env query.Env, src query.Source, stdout, stderr io.Writer) int {
+	deadline := src.Deadline
+	if deadline <= 0 {
+		deadline = query.DefaultDeadline
+	}
+	rctx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	out, err := query.RunRaw(rctx, env, src.Query, nil)
+	if err != nil {
+		fmt.Fprintln(stderr, "run-query:", err)
+		return exitGeneric
+	}
+	valid, invalid := 0, 0
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if verr := schemas.ValidateLevelAnswer([]byte(line)); verr != nil {
+			invalid++
+			fmt.Fprintf(stdout, "invalid\t%v\t%s\n", verr, line)
+			continue
+		}
+		valid++
+		fmt.Fprintf(stdout, "ok\t%s\n", line)
+	}
+	fmt.Fprintf(stdout, "# %d valid, %d invalid level answer(s) from level source %s\n", valid, invalid, src.Name)
+	if invalid > 0 || valid == 0 {
+		return exitGeneric
 	}
 	return exitOK
 }

@@ -34,6 +34,11 @@ type CommandQuery struct {
 	// when true the process starts from procenv.BaseEnv plus PG_ROUTER_TEST_MODE
 	// instead of the inherited environment.
 	StrictBaseEnv bool `toml:"-"`
+	// EnvAllow is the [[query]]-level env_allow list: the names, besides the
+	// base environment, that the process receives (for example SSH_AUTH_SOCK).
+	// A non-empty list puts the process on the minimal base environment, so a
+	// variable that is not listed is not passed.
+	EnvAllow []string `toml:"-"`
 }
 
 // CommandOf returns the command line of a command query (a copy of its argv: a
@@ -55,10 +60,52 @@ func CommandOf(q Query) (argv []string, strictBaseEnv bool, ok bool) {
 // runEnv is the environment the process starts from: nil (inherit) unless the
 // strict switch is on.
 func (q CommandQuery) runEnv() []string {
-	if !q.StrictBaseEnv {
+	if !q.StrictBaseEnv && len(q.EnvAllow) == 0 {
 		return nil
 	}
-	return procenv.BaseEnv(os.Environ(), []string{envTestMode})
+	return procenv.BaseEnv(os.Environ(), append([]string{envTestMode}, q.EnvAllow...))
+}
+
+// RunRaw runs a command query once and returns its raw standard output without
+// parsing it into events: the path a level-source query takes, whose output is
+// level answers and never items. extraEnv (NAME=value entries) is added to the
+// process environment for this one run and bypasses the env_allow list: the
+// allowlist narrows what the router passes through, not what the router itself
+// sets. The deadline is the caller's context; the process group is killed when
+// it ends (OSCommander).
+func RunRaw(ctx context.Context, env Env, q Query, extraEnv []string) ([]byte, error) {
+	var cq CommandQuery
+	switch v := q.(type) {
+	case CommandQuery:
+		cq = v
+	case *CommandQuery:
+		cq = *v
+	default:
+		return nil, fmt.Errorf("a level source must be a command query, got %T", q)
+	}
+	cmd := env.Cmd
+	if cmd == nil {
+		cmd = OSCommander{}
+	}
+	base := cq.runEnv()
+	if base == nil && len(extraEnv) > 0 {
+		base = os.Environ()
+	}
+	runEnv := append(append([]string(nil), base...), extraEnv...)
+	if base == nil && len(extraEnv) == 0 {
+		runEnv = nil
+	}
+	var out []byte
+	var err error
+	if ec, ok := cmd.(EnvCommander); ok {
+		out, err = ec.RunEnv(ctx, cq.Argv, runEnv)
+	} else {
+		out, err = cmd.Run(ctx, cq.Argv)
+	}
+	if err != nil {
+		return out, fmt.Errorf("command query %v: %w", cq.Argv, err)
+	}
+	return out, nil
 }
 
 func (q CommandQuery) Validate() error {
