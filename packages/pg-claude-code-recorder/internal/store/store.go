@@ -1032,6 +1032,13 @@ func (s *Store) commit(ctx context.Context, full bool, recs []*Rec) error {
 		return err
 	}
 	var buf []byte
+	firstSeq := s.nextSeq
+	var jsize int64
+	if st, err := s.jf.Stat(); err == nil {
+		jsize = st.Size()
+	} else {
+		jsize = -1
+	}
 	for _, r := range recs {
 		r.Seq = s.nextSeq
 		s.nextSeq++
@@ -1064,15 +1071,39 @@ func (s *Store) commit(ctx context.Context, full bool, recs []*Rec) error {
 		restore := s.durabilityPragmas(ctx, conn, true)
 		defer restore()
 		if err := s.applyAllOn(ctx, conn, recs); err != nil {
-			return err
+			return s.undoJournaled(err, firstSeq, jsize)
 		}
 	} else if err := s.applyAll(ctx, recs); err != nil {
-		return err
+		return s.undoJournaled(err, firstSeq, jsize)
 	}
 	for _, h := range s.hooks {
 		h()
 	}
 	return nil
+}
+
+// undoJournaled runs when the index refused records the journal already holds
+// (a busy database, a full disk). The commit reports the error, so its caller
+// treats the records as never written; the journal MUST say the same, or a
+// replay would apply what the live index never saw (the doctor's
+// journal_differs_from_index) while later records move the index past them.
+// The caller holds the write lock and the apply was one transaction, so when
+// the index's last sequence is still below the batch nothing of it landed:
+// cut the journal back to its size before the batch and reuse the sequences.
+// When the cut fails the original error is returned with the cut's, and the
+// divergence is left for the doctor to name.
+func (s *Store) undoJournaled(applyErr error, firstSeq, jsize int64) error {
+	if jsize < 0 || s.lastSeq >= firstSeq {
+		return applyErr
+	}
+	if err := s.jf.Truncate(jsize); err != nil {
+		return fmt.Errorf("%w (and the journal could not be cut back to %d bytes: %v)", applyErr, jsize, err)
+	}
+	if err := s.jf.Sync(); err != nil {
+		return fmt.Errorf("%w (and syncing the cut journal failed: %v)", applyErr, err)
+	}
+	s.nextSeq = firstSeq
+	return applyErr
 }
 
 // FileIDCollisionError is a new file record whose id already names a file of a
