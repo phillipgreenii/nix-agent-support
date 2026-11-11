@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -33,13 +34,13 @@ func (l *bridgeLogger) Term(msg string) {
 	fmt.Fprintln(l.out, formatBridgeLine(l.now(), msg))
 }
 
-func (l *bridgeLogger) Detail(event string, fields map[string]string) {
+func (l *bridgeLogger) Detail(ctx context.Context, event string, fields map[string]string) {
 	line := event
 	for k, v := range fields {
 		line += fmt.Sprintf(" %s=%q", k, v)
 	}
 	l.file.LogString(line)
-	l.emit.LogEvent(event, fields)
+	l.emit.LogEvent(ctx, event, fields)
 }
 
 // connAnnouncer turns daemon connect/disconnect events into idempotent

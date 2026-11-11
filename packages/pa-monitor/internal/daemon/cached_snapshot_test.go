@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
@@ -18,7 +19,7 @@ func TestBuildStateServesCachedSnapshot(t *testing.T) {
 	})
 	srv := newServer(st)
 
-	ds := srv.buildState()
+	ds := srv.buildState(context.Background())
 	if len(ds.GetDirs()) != 1 {
 		t.Fatalf("buildState should serve the cached tree's 1 dir, got %d", len(ds.GetDirs()))
 	}
@@ -35,7 +36,7 @@ func TestBuildStateFallsBackWhenCacheEmpty(t *testing.T) {
 	st := newSharedState()
 	srv := newServer(st)
 
-	ds := srv.buildState()
+	ds := srv.buildState(context.Background())
 	if len(ds.GetDirs()) != 0 {
 		t.Fatalf("expected empty dirs on cold start, got %d", len(ds.GetDirs()))
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,7 +148,7 @@ func TestBridgeLoggerRouting(t *testing.T) {
 	defer func() { _ = f.Close() }()
 	bl.out = f
 
-	bl.Detail("daemon.disconnect", map[string]string{"error": "x"})
+	bl.Detail(context.Background(), "daemon.disconnect", map[string]string{"error": "x"})
 	bl.Term("Lost connection to daemon")
 
 	// Pane file: only the Term line, no detail.

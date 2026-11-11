@@ -105,7 +105,7 @@ func runDaemon(args []string) {
 			"daemon: ERROR: signaler %q requires %q which is not on PATH; "+
 				"detection and auto-resume for %s sessions are disabled until it is installed\n",
 			mb.Signaler, mb.Binary, mb.Signaler)
-		opts.Emitter.RecordSignalerBinaryMissing(map[string]string{
+		opts.Emitter.RecordSignalerBinaryMissing(ctx, map[string]string{
 			"signaler": mb.Signaler,
 			"binary":   mb.Binary,
 		})
@@ -202,7 +202,10 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	var cmuxAncestor func(int) (int, bool)
 	for _, sig := range signallayer.DefaultSignalers() {
 		if cs, ok := sig.(*signallayer.CmuxSignaler); ok {
-			cmuxAncestor = cs.FindCmuxServerAncestor
+			// The handler carries no context; keep ctx values, drop its cancellation.
+			cmuxAncestor = func(pid int) (int, bool) {
+				return cs.FindCmuxServerAncestor(context.WithoutCancel(ctx), pid)
+			}
 			break
 		}
 	}
@@ -274,7 +277,7 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		dbPath := filepath.Join(paths.Dir, "state.db")
 		if db, err := sqlite.Open(dbPath); err != nil {
 			fmt.Fprintf(os.Stderr, "daemon: sqlite open %s: %v (continuing without DB)\n", dbPath, err)
-		} else if err := sqlite.Migrate(context.Background(), db); err != nil {
+		} else if err := sqlite.Migrate(ctx, db); err != nil {
 			_ = db.Close()
 			fmt.Fprintf(os.Stderr, "daemon: sqlite migrate: %v (continuing without DB)\n", err)
 		} else {
@@ -286,7 +289,9 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 				Toggles:       sqlite.NewToggleStore(db),
 				Nudges:        sqlite.NewNudgeStore(db),
 			})
-			ws.Start(context.Background())
+			// The write goroutine is stopped by the ws.Stop cleanup below, not by ctx
+			// cancellation, so it can still drain writes during shutdown: detach.
+			ws.Start(context.WithoutCancel(ctx))
 			// Ensure the write goroutine is stopped on daemon exit.
 			cleanups = append(cleanups, ws.Stop)
 
@@ -315,10 +320,10 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 			// since the runtime.json -> SQLite migration). Both seed the live
 			// daemon state at startup so user toggles survive restarts.
 			toggles := sqlite.NewToggleStore(db)
-			if v, ok, err := toggles.Get(context.Background(), "caffeinate_on"); err == nil && ok {
+			if v, ok, err := toggles.Get(ctx, "caffeinate_on"); err == nil && ok {
 				opts.InitialCaffeinateOn = v
 			}
-			if v, ok, err := toggles.Get(context.Background(), "auto_resume_enabled"); err == nil && ok {
+			if v, ok, err := toggles.Get(ctx, "auto_resume_enabled"); err == nil && ok {
 				opts.InitialAutoResumeEnabled = v
 			}
 		}

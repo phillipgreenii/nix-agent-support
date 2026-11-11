@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -57,19 +58,19 @@ func TestBuildStateReportsBatteryGate(t *testing.T) {
 	st := newSharedState()
 	srv := newServer(st)
 
-	ds := srv.buildState()
+	ds := srv.buildState(context.Background())
 	if ds.GetCaffeinateBatteryGate() != "" || ds.CaffeinateBatteryPercent != nil {
 		t.Errorf("before any tick: gate=%q percent=%v, want unreported", ds.GetCaffeinateBatteryGate(), ds.CaffeinateBatteryPercent)
 	}
 
 	st.setCaffeinateBattery(caffeinate.BatteryStatus{Gate: caffeinate.GateReleased, OnBattery: true, Percent: 15})
-	ds = srv.buildState()
+	ds = srv.buildState(context.Background())
 	if ds.GetCaffeinateBatteryGate() != "released" || !ds.GetCaffeinateOnBattery() || ds.GetCaffeinateBatteryPercent() != 15 || ds.CaffeinateBatteryPercent == nil {
 		t.Errorf("gate=%q on_battery=%v percent=%v, want released/true/15", ds.GetCaffeinateBatteryGate(), ds.GetCaffeinateOnBattery(), ds.CaffeinateBatteryPercent)
 	}
 
 	st.setCaffeinateBattery(caffeinate.BatteryStatus{Gate: caffeinate.GateUnknown, Percent: power.NoPercent})
-	ds = srv.buildState()
+	ds = srv.buildState(context.Background())
 	if ds.GetCaffeinateBatteryGate() != "unknown" || ds.CaffeinateBatteryPercent != nil {
 		t.Errorf("gate=%q percent=%v, want unknown with no percent", ds.GetCaffeinateBatteryGate(), ds.CaffeinateBatteryPercent)
 	}

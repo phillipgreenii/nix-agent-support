@@ -608,7 +608,7 @@ func pidPtrIfAlive(pid int, s *session.Session) *int {
 // If br is nil or the CmuxSignaler cannot resolve a server ancestor (e.g.
 // because the ps cache expired between Detect and this call), falls back to
 // the bare "cmux" string — never worse than the pre-refinement value.
-func refineCmuxTerminalHost(signalers []signal.Signaler, br *bridge.Registry, pid int) string {
+func refineCmuxTerminalHost(ctx context.Context, signalers []signal.Signaler, br *bridge.Registry, pid int) string {
 	if br == nil {
 		return "cmux"
 	}
@@ -617,7 +617,7 @@ func refineCmuxTerminalHost(signalers []signal.Signaler, br *bridge.Registry, pi
 		if !ok {
 			continue
 		}
-		serverPID, ok := cs.FindCmuxServerAncestor(pid)
+		serverPID, ok := cs.FindCmuxServerAncestor(ctx, pid)
 		if !ok {
 			return "cmux"
 		}

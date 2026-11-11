@@ -78,7 +78,7 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 	done := make(chan struct{})
 
 	snapshotMsg := func() *pb.DaemonMsg {
-		return &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: s.buildState()}}
+		return &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: s.buildState(ctx)}}
 	}
 
 	// send enqueues a DaemonMsg for delivery. Non-blocking: snapshots are

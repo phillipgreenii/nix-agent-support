@@ -134,7 +134,7 @@ func (s *server) Ping(ctx context.Context, _ *pb.PingRequest) (*pb.PingResponse,
 }
 
 func (s *server) GetState(ctx context.Context, req *pb.GetStateRequest) (*pb.DaemonState, error) {
-	return trimState(s.buildState(), req), nil
+	return trimState(s.buildState(ctx), req), nil
 }
 
 // trimState applies the GetStateRequest size controls to a freshly built
@@ -166,7 +166,8 @@ func trimState(st *pb.DaemonState, req *pb.GetStateRequest) *pb.DaemonState {
 }
 
 func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_WatchStateServer) error {
-	if err := stream.Send(s.buildState()); err != nil {
+	ctx := stream.Context()
+	if err := stream.Send(s.buildState(ctx)); err != nil {
 		return err
 	}
 
@@ -181,7 +182,6 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	ctx := stream.Context()
 	for {
 		select {
 		case <-ctx.Done():
@@ -194,7 +194,7 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 		case <-ticker.C:
 			// Push the current state on every tick so subscribers see
 			// RPC-driven changes (Caffeinate, SetAutoResume) immediately.
-			if err := stream.Send(s.buildState()); err != nil {
+			if err := stream.Send(s.buildState(ctx)); err != nil {
 				return err
 			}
 		}
@@ -202,7 +202,7 @@ func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_Watch
 }
 
 func (s *server) IsAnyBusy(ctx context.Context, _ *pb.IsAnyBusyRequest) (*pb.IsAnyBusyResponse, error) {
-	t := s.state.snapshot()
+	t := s.state.snapshot(ctx)
 	if t == nil {
 		return &pb.IsAnyBusyResponse{}, nil
 	}
@@ -266,7 +266,7 @@ func (s *server) Caffeinate(ctx context.Context, req *pb.CaffeinateRequest) (*pb
 }
 
 func (s *server) GetSessionInfo(ctx context.Context, req *pb.GetSessionInfoRequest) (*pb.SessionDetail, error) {
-	t := s.state.snapshot()
+	t := s.state.snapshot(ctx)
 	if t == nil {
 		return nil, status.Error(codes.NotFound, "no session data available")
 	}
@@ -294,7 +294,7 @@ func (s *server) GetSessionInfo(ctx context.Context, req *pb.GetSessionInfoReque
 }
 
 func (s *server) GetPathInfo(ctx context.Context, req *pb.GetPathInfoRequest) (*pb.PathRollup, error) {
-	t := s.state.snapshot()
+	t := s.state.snapshot(ctx)
 	if t == nil {
 		return nil, status.Error(codes.NotFound, "no path data available")
 	}
@@ -317,8 +317,8 @@ func (s *server) GetPathInfo(ctx context.Context, req *pb.GetPathInfoRequest) (*
 //
 // Returns an error only when the tree is completely unavailable. An empty
 // result (no matching sessions) is not an error.
-func (s *server) expandStringSelector(sel string) ([]string, error) {
-	t := s.state.snapshot()
+func (s *server) expandStringSelector(ctx context.Context, sel string) ([]string, error) {
+	t := s.state.snapshot(ctx)
 	if t == nil {
 		return nil, status.Error(codes.FailedPrecondition, "no session data available")
 	}
@@ -354,7 +354,7 @@ func (s *server) NudgeQueue(ctx context.Context, req *pb.NudgeQueueRequest) (*pb
 	if n == nil {
 		return nil, status.Error(codes.FailedPrecondition, "NudgeQueue: nudger not configured")
 	}
-	sids, err := s.expandStringSelector(sel)
+	sids, err := s.expandStringSelector(ctx, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +393,7 @@ func (s *server) NudgeCancel(ctx context.Context, req *pb.NudgeCancelRequest) (*
 	if n == nil {
 		return nil, status.Error(codes.FailedPrecondition, "NudgeCancel: nudger not configured")
 	}
-	sids, err := s.expandStringSelector(sel)
+	sids, err := s.expandStringSelector(ctx, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -468,14 +468,14 @@ func dirToWire(d *aggregate.Directory) *pb.Directory {
 
 // buildState constructs the wire DaemonState from the shared tree plus
 // daemon-level fields.
-func (s *server) buildState() *pb.DaemonState {
+func (s *server) buildState(ctx context.Context) *pb.DaemonState {
 	// Serve the tick-refreshed cache so this (a gRPC handler goroutine, e.g. the
 	// BridgeChannel writer) never does a synchronous SQLite read. Fall back to a
 	// live snapshot only on cold start, before the first tick refresh populates
 	// the cache. See sharedState.refreshSnapshot.
 	tree := s.state.cachedSnapshot()
 	if tree == nil {
-		tree = s.state.snapshot()
+		tree = s.state.snapshot(ctx)
 	}
 	state := pb.FromTree(tree)
 	state.Now = timestamppb.Now()

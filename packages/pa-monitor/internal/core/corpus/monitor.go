@@ -103,7 +103,7 @@ func pricingWindow(now time.Time) time.Duration {
 // the "discover" phase around ONLY Discover(). Returns the discovered sessions
 // with TranscriptMTime set from resolution (the time of the transcript's last
 // record).
-func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
+func (m *Monitor) Scan(ctx context.Context, now time.Time) ([]*session.Session, error) {
 	if m.pricingObs != nil {
 		m.pricingObs.resetErr()
 	}
@@ -124,7 +124,7 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 
 	m.rd.queries, m.rd.linesFolded, m.rd.filesFolded = 0, 0, 0
 	foldStart := time.Now()
-	foldErr, err := m.sync(now, ids)
+	foldErr, err := m.sync(ctx, now, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -209,8 +209,8 @@ func (m *Monitor) Scan(now time.Time) ([]*session.Session, error) {
 // sync brings the per-file folds up to date with the recorder. The error it
 // returns is fatal for the Scan (the recorder is not answering); foldErr is the
 // first per-file read error, which only degrades pricing.
-func (m *Monitor) sync(now time.Time, ids []string) (foldErr, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+func (m *Monitor) sync(ctx context.Context, now time.Time, ids []string) (foldErr, err error) {
+	ctx, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
 	c, err := m.rd.facts.Client(ctx)
 	if err != nil {

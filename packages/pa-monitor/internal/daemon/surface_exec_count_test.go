@@ -149,7 +149,7 @@ func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tr
 		for _, s := range sessions {
 			s.TerminalHost = cache.TerminalHost(s.SessionID, s.PID)
 			if s.TerminalHost == "cmux" {
-				cmux.FindCmuxServerAncestor(s.PID) // the refine walk (unchanged)
+				cmux.FindCmuxServerAncestor(context.Background(), s.PID) // the refine walk (unchanged)
 			}
 			dir.Sessions = append(dir.Sessions, &aggregate.SessionView{Session: s})
 		}

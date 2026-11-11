@@ -79,7 +79,7 @@ func procsForCmuxSession() []fakeProc {
 
 func TestRefineCmuxTerminalHost_NilRegistry_ReturnsBareCmux(t *testing.T) {
 	sigs := cmuxSignalerWith(procsForCmuxSession())
-	got := refineCmuxTerminalHost(sigs, nil, 5002)
+	got := refineCmuxTerminalHost(context.Background(), sigs, nil, 5002)
 	if got != "cmux" {
 		t.Errorf("nil registry: got %q, want \"cmux\"", got)
 	}
@@ -88,7 +88,7 @@ func TestRefineCmuxTerminalHost_NilRegistry_ReturnsBareCmux(t *testing.T) {
 func TestRefineCmuxTerminalHost_NoBridgeRegistered_ReturnsCmuxNoBridge(t *testing.T) {
 	br := bridge.NewRegistry(30 * time.Second)
 	sigs := cmuxSignalerWith(procsForCmuxSession())
-	got := refineCmuxTerminalHost(sigs, br, 5002)
+	got := refineCmuxTerminalHost(context.Background(), sigs, br, 5002)
 	if got != "cmux (no bridge)" {
 		t.Errorf("no bridge: got %q, want \"cmux (no bridge)\"", got)
 	}
@@ -98,7 +98,7 @@ func TestRefineCmuxTerminalHost_RegisteredAndAlive_ReturnsCmux(t *testing.T) {
 	br := bridge.NewRegistry(30 * time.Second)
 	br.AttachStream(5000 /*server pid*/, 5001 /*bridge pid*/, nil)
 	sigs := cmuxSignalerWith(procsForCmuxSession())
-	got := refineCmuxTerminalHost(sigs, br, 5002)
+	got := refineCmuxTerminalHost(context.Background(), sigs, br, 5002)
 	if got != "cmux" {
 		t.Errorf("alive bridge: got %q, want \"cmux\"", got)
 	}
@@ -112,7 +112,7 @@ func TestRefineCmuxTerminalHost_RegisteredButStale_ReturnsBridgeDisconnected(t *
 	br.SetNowForTest(func() time.Time { return now.Add(31 * time.Second) })
 
 	sigs := cmuxSignalerWith(procsForCmuxSession())
-	got := refineCmuxTerminalHost(sigs, br, 5002)
+	got := refineCmuxTerminalHost(context.Background(), sigs, br, 5002)
 	if got != "cmux (bridge disconnected)" {
 		t.Errorf("stale bridge: got %q, want \"cmux (bridge disconnected)\"", got)
 	}

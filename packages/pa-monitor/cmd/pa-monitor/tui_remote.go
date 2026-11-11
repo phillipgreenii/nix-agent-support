@@ -77,11 +77,11 @@ func runTUIRemote() {
 				connEmit.RecordDaemonConnected(connected)
 				if !connected && !announced {
 					announced = true
-					connEmit.LogEvent("daemon.disconnect", map[string]string{"component": "tui"})
+					connEmit.LogEvent(emitCtx, "daemon.disconnect", map[string]string{"component": "tui"})
 				}
 				if connected && announced {
 					announced = false
-					connEmit.LogEvent("daemon.reconnect", map[string]string{"component": "tui"})
+					connEmit.LogEvent(emitCtx, "daemon.reconnect", map[string]string{"component": "tui"})
 				}
 			}
 		}

@@ -205,15 +205,15 @@ func TestHealthLogExporter_SwallowsAndSummarizes(t *testing.T) {
 // and write the health line exactly as before this feature existed.
 func TestExportDecoratorNoopWhenInstrumentsNil(t *testing.T) {
 	// Helper-level: nil/nil, and each single-nil combination, must not panic.
-	recordExport(nil, nil, "metric", time.Millisecond, nil)
-	recordExport(nil, nil, "log", time.Millisecond, errors.New("boom"))
+	recordExport(context.Background(), nil, nil, "metric", time.Millisecond, nil)
+	recordExport(context.Background(), nil, nil, "log", time.Millisecond, errors.New("boom"))
 
 	e, _ := newTestEmitter(t)
 	if e.exportDur == nil || e.exportAttempts == nil {
 		t.Fatal("newTestEmitter's registerMetrics must create exportDur/exportAttempts")
 	}
-	recordExport(nil, e.exportAttempts, "metric", time.Millisecond, nil)
-	recordExport(e.exportDur, nil, "metric", time.Millisecond, nil)
+	recordExport(context.Background(), nil, e.exportAttempts, "metric", time.Millisecond, nil)
+	recordExport(context.Background(), e.exportDur, nil, "metric", time.Millisecond, nil)
 
 	// Decorator-level: zero-value dur/attempts fields (pre-back-patch) must
 	// leave the pre-existing swallow + health-line behavior unchanged.

@@ -54,7 +54,9 @@ func SetClockForTest(s Signaler, now func() time.Time) {
 }
 
 // CachedCmuxServerPIDsForTest exposes cachedCmuxServerPIDs for whitebox testing.
-func CachedCmuxServerPIDsForTest(c *CmuxSignaler) ([]int, error) { return c.cachedCmuxServerPIDs() }
+func CachedCmuxServerPIDsForTest(c *CmuxSignaler) ([]int, error) {
+	return c.cachedCmuxServerPIDs(context.Background())
+}
 
 // TTLs exposes the cache TTL constants so tests can pin their relationship.
 func TTLs() (surface, serverPID, tmux time.Duration) {

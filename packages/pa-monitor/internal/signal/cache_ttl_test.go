@@ -126,8 +126,8 @@ func TestCmuxFindServerAncestorReusesServerPIDCache(t *testing.T) {
 	signal.SetClockForTest(sig, clock.Now)
 
 	for range 4 {
-		if _, ok := sig.FindCmuxServerAncestor(5002); !ok {
-			t.Fatal("FindCmuxServerAncestor(5002) = false, want true")
+		if _, ok := sig.FindCmuxServerAncestor(context.Background(), 5002); !ok {
+			t.Fatal("FindCmuxServerAncestor(context.Background(), 5002) = false, want true")
 		}
 		clock.Advance(3 * time.Second)
 	}

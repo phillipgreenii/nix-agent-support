@@ -48,7 +48,7 @@ func TestStatusFileToStoredBlockLimits(t *testing.T) {
 
 	persist := func(now time.Time) (pct float64, captured string) {
 		t.Helper()
-		if _, err := m.Scan(now); err != nil {
+		if _, err := m.Scan(ctx, now); err != nil {
 			t.Fatalf("Scan: %v", err)
 		}
 		tree := &aggregate.Tree{}

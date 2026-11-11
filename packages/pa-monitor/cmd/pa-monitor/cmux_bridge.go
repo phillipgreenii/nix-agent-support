@@ -367,13 +367,13 @@ func runCmuxBridge(args []string) {
 	// receive loop below. This is what keeps a hung `cmux` call from stalling the
 	// daemon stream past its watchdog and manufacturing a false "Lost connection".
 	reporter := cmuxstatus.NewReporter(cmuxBridgeReporterOptions(cfg, func(s string) {
-		log.Detail("cmux.reporter", map[string]string{"msg": s})
+		log.Detail(ctx, "cmux.reporter", map[string]string{"msg": s})
 	}))
 	defer reporter.Clear()
 
 	announcer := &connAnnouncer{
 		term:          log.Term,
-		detail:        log.Detail,
+		detail:        func(event string, fields map[string]string) { log.Detail(ctx, event, fields) },
 		gauge:         emit.RecordDaemonConnected,
 		now:           time.Now,
 		announceAfter: paneOutageAnnounceAfter,
@@ -447,7 +447,7 @@ func runCmuxBridge(args []string) {
 				emit.RecordReexec(attemptBase, otel.ReexecOutcomeExecFailed)
 				gaveUp = true
 				log.Term(reexecGaveUpLine)
-				log.Detail("bridge.reexec_failed", map[string]string{"error": rerr.Error()})
+				log.Detail(ctx, "bridge.reexec_failed", map[string]string{"error": rerr.Error()})
 				continue
 			}
 			return // unreachable on exec success
@@ -468,10 +468,10 @@ func runCmuxBridge(args []string) {
 func resolveServerPID(ctx context.Context, cmuxSig *signal.CmuxSignaler, log *bridgeLogger) int {
 	const probeBackoff = 2 * time.Second
 	for {
-		if pid, ok := cmuxSig.FindCmuxServerAncestor(os.Getpid()); ok && pid > 0 {
+		if pid, ok := cmuxSig.FindCmuxServerAncestor(ctx, os.Getpid()); ok && pid > 0 {
 			return pid
 		}
-		log.Detail("bridge.server_pid_probe", map[string]string{"result": "no cmux server ancestor yet"})
+		log.Detail(ctx, "bridge.server_pid_probe", map[string]string{"result": "no cmux server ancestor yet"})
 		select {
 		case <-ctx.Done():
 			return 0
@@ -488,13 +488,13 @@ func logBridgeVersions(ctx context.Context, log *bridgeLogger) {
 	defer cancel()
 	client, err := rpcclient.Dial(dialCtx)
 	if err != nil {
-		log.Detail("bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
+		log.Detail(ctx, "bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
 		return
 	}
 	defer func() { _ = client.Close() }()
 	state, err := client.C.GetState(dialCtx, &pb.GetStateRequest{})
 	if err != nil {
-		log.Detail("bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
+		log.Detail(ctx, "bridge.version_probe", map[string]string{"version": version, "error": err.Error()})
 		return
 	}
 	log.Term(fmt.Sprintf("pa-monitor bridge v%s (daemon v%s)", version, state.GetDaemonVersion()))
@@ -713,7 +713,7 @@ loop:
 			loopErr = ctx.Err()
 			break loop
 		case <-timer.C:
-			log.Detail("bridge.push_missed", map[string]string{"budget": pushBudget.String()})
+			log.Detail(ctx, "bridge.push_missed", map[string]string{"budget": pushBudget.String()})
 			loopErr = fmt.Errorf("push missed: no message in %s", pushBudget)
 			break loop
 		case r := <-recvCh:
@@ -778,7 +778,7 @@ loop:
 // per-delivery handler goroutine; the outbound enqueue is abandoned if ctx is
 // cancelled (teardown) so it never blocks on a drained sender.
 func deliverLocally(ctx context.Context, cmuxSig *signal.CmuxSignaler, d *pb.Deliver, outbound chan<- *pb.BridgeMsg, log *bridgeLogger) {
-	err := cmuxSig.Send(int(d.GetTargetPid()), d.GetText())
+	err := cmuxSig.SendContext(ctx, int(d.GetTargetPid()), d.GetText())
 	errStr, reason := "", ""
 	timedOut := false
 	if err != nil {
@@ -788,7 +788,7 @@ func deliverLocally(ctx context.Context, cmuxSig *signal.CmuxSignaler, d *pb.Del
 		// timed_out) so the daemon need not re-parse the error text (pg2-p1q00).
 		r, t := signal.ClassifyCmuxFailure(err)
 		reason, timedOut = string(r), t
-		log.Detail("bridge.deliver_failed", map[string]string{
+		log.Detail(ctx, "bridge.deliver_failed", map[string]string{
 			"id":         d.GetId(),
 			"target_pid": fmt.Sprintf("%d", d.GetTargetPid()),
 			"error":      errStr,

@@ -148,7 +148,7 @@ func (h *exportHealth) record(err error, out io.Writer) {
 // nil — the state before New's back-patch assigns them (or when OTel
 // instrumentation of itself is otherwise disabled) — so callers never need
 // to guard the call site.
-func recordExport(dur metric.Float64Histogram, attempts metric.Int64Counter, signal string, d time.Duration, err error) {
+func recordExport(ctx context.Context, dur metric.Float64Histogram, attempts metric.Int64Counter, signal string, d time.Duration, err error) {
 	if dur == nil || attempts == nil {
 		return
 	}
@@ -156,9 +156,9 @@ func recordExport(dur metric.Float64Histogram, attempts metric.Int64Counter, sig
 	if err != nil {
 		outcome = "failure"
 	}
-	dur.Record(context.Background(), durMS(d),
+	dur.Record(ctx, durMS(d),
 		metric.WithAttributes(attribute.String("signal", signal)))
-	attempts.Add(context.Background(), 1,
+	attempts.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("signal", signal), attribute.String("outcome", outcome)))
 }
 
@@ -186,7 +186,7 @@ type healthMetricExporter struct {
 func (e *healthMetricExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
 	start := time.Now()
 	err := e.Exporter.Export(ctx, rm)
-	recordExport(e.dur, e.attempts, "metric", time.Since(start), err)
+	recordExport(ctx, e.dur, e.attempts, "metric", time.Since(start), err)
 	e.health.record(err, e.out)
 	return nil
 }
@@ -206,7 +206,7 @@ type healthLogExporter struct {
 func (e *healthLogExporter) Export(ctx context.Context, records []sdklog.Record) error {
 	start := time.Now()
 	err := e.Exporter.Export(ctx, records)
-	recordExport(e.dur, e.attempts, "log", time.Since(start), err)
+	recordExport(ctx, e.dur, e.attempts, "log", time.Since(start), err)
 	e.health.record(err, e.out)
 	return nil
 }

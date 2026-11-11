@@ -188,7 +188,7 @@ func (w *BeadsWatcher) init() {
 // RunOnce performs one scan-and-alert pass: find every stale issues.jsonl
 // under Roots, forget throttle memory for any that are no longer present,
 // then alert (Emitter + Warn) for each one that is due per the throttle.
-func (w *BeadsWatcher) RunOnce() {
+func (w *BeadsWatcher) RunOnce(ctx context.Context) {
 	w.init()
 	found := scanBeadsDirs(w.Roots)
 	w.alerts.prune(found)
@@ -200,7 +200,7 @@ func (w *BeadsWatcher) RunOnce() {
 		if !w.alerts.due(path) {
 			continue
 		}
-		w.Emitter.RecordStaleBeadsExport(map[string]string{"path": path})
+		w.Emitter.RecordStaleBeadsExport(ctx, map[string]string{"path": path})
 		warn(fmt.Sprintf(
 			"pa-monitor: ALERT: stale bd export snapshot found at %s -- "+
 				"this .beads dir has export.auto: false, so bd never refreshes "+
@@ -225,7 +225,7 @@ func (w *BeadsWatcher) Run(ctx context.Context) {
 		interval = defaultBeadsWatchInterval
 	}
 
-	w.RunOnce()
+	w.RunOnce(ctx)
 
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -234,7 +234,7 @@ func (w *BeadsWatcher) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			w.RunOnce()
+			w.RunOnce(ctx)
 		}
 	}
 }

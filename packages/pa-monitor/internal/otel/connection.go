@@ -169,17 +169,19 @@ func (e *ConnEmitter) RecordDaemonConnected(connected bool) {
 // also emits a companion "client.reexec" log event so the metric increment has
 // trace context. nil-safe.
 func (e *ConnEmitter) RecordReexec(attempt int, outcome string) {
+	// Reached through a context-free func field (the re-exec decision hook).
+	ctx := context.Background()
 	if e == nil {
 		return
 	}
 	if e.reexecs != nil {
-		e.reexecs.Add(context.Background(), 1, metric.WithAttributes(
+		e.reexecs.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("component", e.component),
 			attribute.Int("attempt", attempt),
 			attribute.String("outcome", outcome),
 		))
 	}
-	e.LogEvent("client.reexec", map[string]string{
+	e.LogEvent(ctx, "client.reexec", map[string]string{
 		"attempt": strconv.Itoa(attempt),
 		"outcome": outcome,
 	})
@@ -187,7 +189,7 @@ func (e *ConnEmitter) RecordReexec(attempt int, outcome string) {
 
 // LogEvent emits one info-level log record with event_name + component +
 // attrs. nil-safe.
-func (e *ConnEmitter) LogEvent(name string, attrs map[string]string) {
+func (e *ConnEmitter) LogEvent(ctx context.Context, name string, attrs map[string]string) {
 	if e == nil || e.logger == nil {
 		return
 	}
@@ -203,7 +205,7 @@ func (e *ConnEmitter) LogEvent(name string, attrs map[string]string) {
 		}
 		rec.AddAttributes(attribute.String(k, v))
 	}
-	e.logger.Emit(context.Background(), rec)
+	e.logger.Emit(ctx, rec)
 }
 
 // Shutdown flushes both providers. nil-safe.

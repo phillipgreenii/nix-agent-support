@@ -62,7 +62,7 @@ func TestServedStateCarriesPRInfo(t *testing.T) {
 		"/repo": &session.PRInfo{Number: 7, Title: "t", State: "OPEN", URL: "https://example.com/pull/7"},
 	})
 
-	tree := st.snapshot()
+	tree := st.snapshot(context.Background())
 	if tree == nil {
 		t.Fatal("snapshot() = nil")
 	}

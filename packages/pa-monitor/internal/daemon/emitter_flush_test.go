@@ -18,7 +18,7 @@ func (hangingEmitter) Shutdown(ctx context.Context) error {
 func TestFlushEmitterIsBounded(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
-		flushEmitter(hangingEmitter{}, 30*time.Millisecond)
+		flushEmitter(context.Background(), hangingEmitter{}, 30*time.Millisecond)
 		close(done)
 	}()
 	select {

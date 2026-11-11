@@ -179,7 +179,7 @@ func TestBeadsWatcher_RunOnce_AlertsOnceThenThrottles(t *testing.T) {
 		Warn:    func(line string) { warnLines = append(warnLines, line) },
 	}
 
-	w.RunOnce()
+	w.RunOnce(context.Background())
 	total, points := beadsWatchCounterTotal(t, reader)
 	if points != 1 || total != 1 {
 		t.Fatalf("after first RunOnce: total=%d points=%d, want 1/1", total, points)
@@ -188,7 +188,7 @@ func TestBeadsWatcher_RunOnce_AlertsOnceThenThrottles(t *testing.T) {
 		t.Fatalf("warnLines = %v, want exactly 1 line", warnLines)
 	}
 
-	w.RunOnce() // still well within the default 24h throttle
+	w.RunOnce(context.Background()) // still well within the default 24h throttle
 	total, _ = beadsWatchCounterTotal(t, reader)
 	if total != 1 {
 		t.Errorf("after second (throttled) RunOnce: total=%d, want still 1", total)
@@ -210,7 +210,7 @@ func TestBeadsWatcher_RunOnce_RealertsAfterPathDisappears(t *testing.T) {
 	e, reader := newReaderEmitter(t)
 	w := &BeadsWatcher{Roots: []string{root}, Emitter: e, Warn: func(string) {}}
 
-	w.RunOnce()
+	w.RunOnce(context.Background())
 	total, _ := beadsWatchCounterTotal(t, reader)
 	if total != 1 {
 		t.Fatalf("after first RunOnce: total=%d, want 1", total)
@@ -220,7 +220,7 @@ func TestBeadsWatcher_RunOnce_RealertsAfterPathDisappears(t *testing.T) {
 	if err := os.Rename(path, path+".disabled-20260911"); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
-	w.RunOnce()
+	w.RunOnce(context.Background())
 	total, _ = beadsWatchCounterTotal(t, reader)
 	if total != 1 {
 		t.Fatalf("after resolve scan: total=%d, want still 1 (no new alert for an absent file)", total)
@@ -229,7 +229,7 @@ func TestBeadsWatcher_RunOnce_RealertsAfterPathDisappears(t *testing.T) {
 	// It reappears at the SAME path (e.g. a fresh `bd export` mistake): must
 	// alert again immediately, not be throttled.
 	writeFile(t, path)
-	w.RunOnce()
+	w.RunOnce(context.Background())
 	total, _ = beadsWatchCounterTotal(t, reader)
 	if total != 2 {
 		t.Errorf("after reappearance: total=%d, want 2 (a fresh sighting of the same path must re-alert)", total)
@@ -304,5 +304,5 @@ func TestBeadsWatcher_RunOnce_NilEmitterSafe(t *testing.T) {
 
 	var e *otel.Emitter
 	w := &BeadsWatcher{Roots: []string{root}, Emitter: e, Warn: func(string) {}}
-	w.RunOnce() // must not panic
+	w.RunOnce(context.Background()) // must not panic
 }

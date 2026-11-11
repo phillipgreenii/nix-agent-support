@@ -118,7 +118,7 @@ func (s *sharedState) setLimitsSource(q limitsQuerier) {
 
 // snapshot materialises the current aggregate.Tree from the DB via ReadService.
 // Returns nil when ReadService is not yet wired (daemon not fully started).
-func (s *sharedState) snapshot() *aggregate.Tree {
+func (s *sharedState) snapshot(ctx context.Context) *aggregate.Tree {
 	s.mu.RLock()
 	rs := s.readService
 	pq := s.nudgerForPending
@@ -129,7 +129,10 @@ func (s *sharedState) snapshot() *aggregate.Tree {
 	if rs == nil {
 		return nil
 	}
-	st, err := rs.GetState(context.Background(), store.FilterAll)
+	// Deliberately detached: the read has never been abandoned when one caller's
+	// deadline or disconnect fires (a slow cold-start read must still finish and
+	// feed the cache); ctx contributes only its values.
+	st, err := rs.GetState(context.WithoutCancel(ctx), store.FilterAll)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pa-monitor: snapshot: DB read error: %v\n", err)
 		return nil
@@ -186,8 +189,8 @@ func (s *sharedState) snapshot() *aggregate.Tree {
 // so the expensive DB read happens off the gRPC request path. Because the DB
 // only changes per tick, the cache is as fresh as a per-request read for the
 // tree itself; live pending-nudge annotations may lag by up to one tick.
-func (s *sharedState) refreshSnapshot() {
-	s.setCachedSnapshot(s.snapshot())
+func (s *sharedState) refreshSnapshot(ctx context.Context) {
+	s.setCachedSnapshot(s.snapshot(ctx))
 }
 
 // setCachedSnapshot publishes tree as the cached snapshot (pointer swap under

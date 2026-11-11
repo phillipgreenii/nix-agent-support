@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -191,14 +192,14 @@ func TestEmitErrorMetrics_FiresOnNewError(t *testing.T) {
 	}
 
 	// First call: should update previousErrors["sid-1"] to now.
-	emitErrorMetrics(nil, tree, prev)
+	emitErrorMetrics(context.Background(), nil, tree, prev)
 	if !prev["sid-1"].Equal(now) {
 		t.Errorf("previousErrors not updated: got %v, want %v", prev["sid-1"], now)
 	}
 
 	// Second call with same timestamp: no new fire needed.
 	prev2 := map[string]time.Time{"sid-1": now}
-	emitErrorMetrics(nil, tree, prev2)
+	emitErrorMetrics(context.Background(), nil, tree, prev2)
 	if !prev2["sid-1"].Equal(now) {
 		t.Error("previousErrors should remain at same timestamp")
 	}
@@ -207,7 +208,7 @@ func TestEmitErrorMetrics_FiresOnNewError(t *testing.T) {
 	later := now.Add(time.Minute)
 	sv.LastError = &transcript.ErrorRecord{Kind: transcript.ErrRateLimit, At: later}
 	prev3 := map[string]time.Time{"sid-1": now}
-	emitErrorMetrics(nil, tree, prev3)
+	emitErrorMetrics(context.Background(), nil, tree, prev3)
 	if !prev3["sid-1"].Equal(later) {
 		t.Errorf("previousErrors not advanced: got %v, want %v", prev3["sid-1"], later)
 	}
@@ -216,7 +217,7 @@ func TestEmitErrorMetrics_FiresOnNewError(t *testing.T) {
 func TestEmitErrorMetrics_NilTree(t *testing.T) {
 	// nil tree should not panic.
 	prev := map[string]time.Time{}
-	emitErrorMetrics(nil, nil, prev)
+	emitErrorMetrics(context.Background(), nil, nil, prev)
 }
 
 // TestEmitErrorMetrics_ContextLimit verifies a context-limit error is handled
@@ -246,7 +247,7 @@ func TestEmitErrorMetrics_ContextLimit(t *testing.T) {
 	}
 
 	// nil emitter — must not panic and must advance the dedup bookkeeping.
-	emitErrorMetrics(nil, tree, prev)
+	emitErrorMetrics(context.Background(), nil, tree, prev)
 	if !prev["sid-ctx"].Equal(now) {
 		t.Errorf("previousErrors not advanced for context-limit error: got %v, want %v", prev["sid-ctx"], now)
 	}
@@ -262,7 +263,7 @@ func TestEmitErrorMetrics_NoError(t *testing.T) {
 			}},
 		},
 	}
-	emitErrorMetrics(nil, tree, prev)
+	emitErrorMetrics(context.Background(), nil, tree, prev)
 	if len(prev) != 0 {
 		t.Errorf("unexpected previousErrors entries: %v", prev)
 	}

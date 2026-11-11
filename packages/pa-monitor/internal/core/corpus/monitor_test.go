@@ -68,7 +68,7 @@ func newRig(t *testing.T) *rig {
 
 func (r *rig) scan(t *testing.T) []*session.Session {
 	t.Helper()
-	s, err := r.m.Scan(t0.Add(time.Hour))
+	s, err := r.m.Scan(context.Background(), t0.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestScan_IncrementalEqualsCold(t *testing.T) {
 	cold := New(r.env.Facts, r.env.Discovery())
 	so := NewSessionSnapshotObserver()
 	cold.Register(so)
-	if _, err := cold.Scan(t0.Add(time.Hour)); err != nil {
+	if _, err := cold.Scan(context.Background(), t0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	coldSnap, _ := so.Snapshot("s1")
@@ -251,7 +251,7 @@ func TestScan_RecorderDownIsDaemonOfflineWithNoFallback(t *testing.T) {
 	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "hello"))
 	r.scan(t)
 	r.env.Stop()
-	_, err := r.m.Scan(t0.Add(time.Hour))
+	_, err := r.m.Scan(context.Background(), t0.Add(time.Hour))
 	if !errors.Is(err, session.ErrDaemonOffline) {
 		t.Fatalf("Scan with the recorder down = %v, want daemon offline", err)
 	}

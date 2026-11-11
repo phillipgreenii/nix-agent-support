@@ -142,7 +142,7 @@ func enrichCmdErr(err error) error {
 // own env, which broke detection whenever the daemon was started by a
 // LaunchAgent. The ancestry approach mirrors TmuxSignaler.)
 func (c *CmuxSignaler) Detect(pid int) bool {
-	_, ok := c.FindCmuxServerAncestor(pid)
+	_, ok := c.FindCmuxServerAncestor(context.Background(), pid)
 	return ok
 }
 
@@ -155,8 +155,8 @@ func (c *CmuxSignaler) DetectIsHostClassification() bool { return true }
 // returning the PID of the first ancestor whose process name (comm) is
 // "cmux". Returns (0, false) if no such ancestor exists. Used by the
 // poller to enrich session TerminalHost with bridge-status information.
-func (c *CmuxSignaler) FindCmuxServerAncestor(targetPID int) (int, bool) {
-	servers, err := c.cachedCmuxServerPIDs()
+func (c *CmuxSignaler) FindCmuxServerAncestor(ctx context.Context, targetPID int) (int, bool) {
+	servers, err := c.cachedCmuxServerPIDs(ctx)
 	if err != nil || len(servers) == 0 {
 		return 0, false
 	}
@@ -174,7 +174,7 @@ func (c *CmuxSignaler) FindCmuxServerAncestor(targetPID int) (int, bool) {
 		if serverSet[pid] {
 			return pid, true
 		}
-		ppid, err := c.parentPID(pid)
+		ppid, err := c.parentPID(ctx, pid)
 		if err != nil || ppid < 1 {
 			return 0, false
 		}
@@ -185,13 +185,15 @@ func (c *CmuxSignaler) FindCmuxServerAncestor(targetPID int) (int, bool) {
 // cachedCmuxServerPIDs returns the PIDs of running cmux server processes
 // (those where `ps -A -o pid,comm` reports comm == "cmux"). Cached for
 // serverPIDCacheTTL so a sweep over N sessions runs ps once.
-func (c *CmuxSignaler) cachedCmuxServerPIDs() ([]int, error) {
+func (c *CmuxSignaler) cachedCmuxServerPIDs(ctx context.Context) ([]int, error) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
 	if !c.serverCacheAt.IsZero() && c.clock().Sub(c.serverCacheAt) < serverPIDCacheTTL {
 		return c.serverCachePids, c.serverCacheErr
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// The result is cached and shared by every later caller, so one caller's
+	// cancellation must not poison the cache: detach (values kept) and bound it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	pids, err := c.enumerateCmuxServerPIDs(ctx)
 	c.serverCachePids, c.serverCacheErr, c.serverCacheAt = pids, err, c.clock()
@@ -240,11 +242,11 @@ func (c *CmuxSignaler) enumerateCmuxServerPIDs(ctx context.Context) ([]int, erro
 // parentPID returns the parent PID of pid via `ps -o ppid= -p <pid>`.
 // Returns 0 if pid has no parent (or the lookup fails). Used by ancestry
 // walking; mirrors the same idiom in TmuxSignaler.findPaneLocForPID.
-func (c *CmuxSignaler) parentPID(pid int) (int, error) {
+func (c *CmuxSignaler) parentPID(ctx context.Context, pid int) (int, error) {
 	if c.Procs != nil {
 		return hopFromTable(c.Procs, pid)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	out, err := c.run(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
 	if err != nil {
@@ -265,13 +267,15 @@ func (c *CmuxSignaler) parentPID(pid int) (int, error) {
 // single signalNonWorking pass over N sessions runs the enumeration once, not N
 // times. Both Detect and Send go through this helper. Errors are cached for the
 // same window so a transient cmux failure doesn't fan out into N error reports.
-func (c *CmuxSignaler) cachedSurfaces() (map[int]surfaceLoc, error) {
+func (c *CmuxSignaler) cachedSurfaces(ctx context.Context) (map[int]surfaceLoc, error) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
 	if c.cacheAt != (time.Time{}) && c.clock().Sub(c.cacheAt) < surfaceCacheTTL {
 		return c.cacheLocs, c.cacheErr
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Cached and shared by later callers: detach from this caller's
+	// cancellation (values kept) and bound it instead.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	locs, err := c.enumerateSurfaces(ctx)
 	c.cacheLocs, c.cacheErr, c.cacheAt = locs, err, c.clock()
@@ -289,15 +293,20 @@ func (c *CmuxSignaler) cachedSurfaces() (map[int]surfaceLoc, error) {
 //     Detect would return true while Send returned "no cmux surface found".
 //  3. cmux send + cmux send-key enter against the matched workspace+surface.
 func (c *CmuxSignaler) Send(pid int, text string) error {
-	locs, err := c.cachedSurfaces()
+	return c.SendContext(context.Background(), pid, text)
+}
+
+// SendContext is Send under the caller's context (cancellation and values).
+func (c *CmuxSignaler) SendContext(ctx context.Context, pid int, text string) error {
+	locs, err := c.cachedSurfaces(ctx)
 	if err != nil {
 		return fmt.Errorf("cmux enumerate: %w", err)
 	}
-	loc, ok := c.findSurfaceForPID(locs, pid)
+	loc, ok := c.findSurfaceForPID(ctx, locs, pid)
 	if !ok {
 		return &NoCmuxSurfaceError{PID: pid}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if _, err := c.runCmux(ctx, CmuxSend, "send", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, text); err != nil {
 		return fmt.Errorf("cmux send: %w", err)
@@ -312,7 +321,7 @@ func (c *CmuxSignaler) Send(pid int, text string) error {
 // pid or one of pid's ancestors. Walks parents until the cmux server PID is
 // hit or no further parent is available, mirroring the ancestry approach
 // used by Detect. Returns (zero, false) if no surface matches.
-func (c *CmuxSignaler) findSurfaceForPID(locs map[int]surfaceLoc, pid int) (surfaceLoc, bool) {
+func (c *CmuxSignaler) findSurfaceForPID(ctx context.Context, locs map[int]surfaceLoc, pid int) (surfaceLoc, bool) {
 	seen := map[int]bool{}
 	for {
 		if pid < 1 || seen[pid] {
@@ -322,7 +331,7 @@ func (c *CmuxSignaler) findSurfaceForPID(locs map[int]surfaceLoc, pid int) (surf
 		if loc, ok := locs[pid]; ok {
 			return loc, true
 		}
-		ppid, err := c.parentPID(pid)
+		ppid, err := c.parentPID(ctx, pid)
 		if err != nil || ppid < 1 || ppid == pid {
 			return surfaceLoc{}, false
 		}

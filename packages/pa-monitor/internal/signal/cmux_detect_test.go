@@ -118,7 +118,7 @@ func TestCmuxFindCmuxServerAncestor_ReturnsServerPid(t *testing.T) {
 		{pid: 5002, comm: "claude", parent: 5001},
 	}
 	sig := &signal.CmuxSignaler{RunCmd: fakePsRun(procs)}
-	server, ok := sig.FindCmuxServerAncestor(5002)
+	server, ok := sig.FindCmuxServerAncestor(context.Background(), 5002)
 	if !ok {
 		t.Fatal("FindCmuxServerAncestor = !ok, want ok=true")
 	}
@@ -136,7 +136,7 @@ func TestCmuxFindCmuxServerAncestor_NoCmuxReturnsZero(t *testing.T) {
 		{pid: 7002, comm: "claude", parent: 7001},
 	}
 	sig := &signal.CmuxSignaler{RunCmd: fakePsRun(procs)}
-	if _, ok := sig.FindCmuxServerAncestor(7002); ok {
+	if _, ok := sig.FindCmuxServerAncestor(context.Background(), 7002); ok {
 		t.Error("FindCmuxServerAncestor = ok, want !ok (no cmux processes exist)")
 	}
 }
@@ -153,7 +153,7 @@ func TestCmuxFindCmuxServerAncestor_AcceptsPathPrefixedComm(t *testing.T) {
 		{pid: 5002, comm: "claude", parent: 5001},
 	}
 	sig := &signal.CmuxSignaler{RunCmd: fakePsRun(procs)}
-	server, ok := sig.FindCmuxServerAncestor(5002)
+	server, ok := sig.FindCmuxServerAncestor(context.Background(), 5002)
 	if !ok {
 		t.Fatal("FindCmuxServerAncestor returned !ok for a session under a path-prefixed cmux comm")
 	}

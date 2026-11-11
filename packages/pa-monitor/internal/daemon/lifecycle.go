@@ -282,8 +282,8 @@ type emitterShutdowner interface {
 
 // flushEmitter shuts the emitter down within timeout; the flush error is
 // dropped (best effort, and the telemetry path is the thing that failed).
-func flushEmitter(e emitterShutdowner, timeout time.Duration) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func flushEmitter(ctx context.Context, e emitterShutdowner, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	_ = e.Shutdown(ctx)
 }
@@ -376,7 +376,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 
 	defer func() {
 		opts.Shutdown.Phase("emitter_flush")
-		flushEmitter(opts.Emitter, EmitterFlushTimeout)
+		flushEmitter(context.WithoutCancel(ctx), opts.Emitter, EmitterFlushTimeout)
 		opts.Shutdown.Phase("release_lock")
 	}()
 
@@ -479,7 +479,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// keeps it alive on every healthy tick window (NOT every tick — heartbeatEvery
 	// throttles the ~5s tick down to heartbeatInterval).
 	heartbeatEvery := heartbeatEveryN(tick, heartbeatInterval)
-	opts.Emitter.LogEvent("daemon.started", map[string]string{
+	opts.Emitter.LogEvent(ctx, "daemon.started", map[string]string{
 		"version":   version,
 		"plan_tier": opts.PlanTier,
 	})
@@ -546,7 +546,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// phase records a once-per-tick lifecycle phase duration. opts.Emitter's
 	// RecordPhase is nil-safe, so this is always callable regardless of
 	// whether an Emitter was configured.
-	phase := func(name string, start time.Time) { opts.Emitter.RecordPhase(name, time.Since(start)) }
+	phase := func(name string, start time.Time) { opts.Emitter.RecordPhase(ctx, name, time.Since(start)) }
 
 	// Phase 3: decouple corpus/provider work from the emit tick. When the poller
 	// exposes the producer lifecycle, start its single producer goroutine (it owns
@@ -571,7 +571,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// this function belong to their own nested `for` loops and are unaffected.
 	runTick := func() {
 		tickStart := time.Now()
-		defer func() { opts.Emitter.RecordTickDuration(time.Since(tickStart)) }()
+		defer func() { opts.Emitter.RecordTickDuration(ctx, time.Since(tickStart)) }()
 
 		tickCount++
 		// Publish the corpus scan freshness BEFORE anything can return early, so a
@@ -733,10 +733,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			// above stays the toggle-driven intent for the TUI.
 			opts.Emitter.RecordCaffeinateActive(opts.Caffeinate.Held(), caffeinateProcessLabel(processState), int(graceRemaining.Seconds()), map[string]string{"plan_tier": opts.PlanTier})
 			if prevState == caffeinate.StateOff && newState != caffeinate.StateOff {
-				opts.Emitter.RecordCaffeinateRound(map[string]string{"cause": cause})
+				opts.Emitter.RecordCaffeinateRound(ctx, map[string]string{"cause": cause})
 			}
 			if prevState == caffeinate.StateArmedCountdown && newState == caffeinate.StateOff && !keepAwake {
-				opts.Emitter.RecordCaffeinateGraceExpired(nil)
+				opts.Emitter.RecordCaffeinateGraceExpired(ctx, nil)
 			}
 		}
 		// Push the auto-resume intent each tick so its observable gauge
@@ -792,7 +792,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if opts.BlockTracker != nil {
 				blockID = opts.BlockTracker.ID()
 			}
-			opts.Emitter.RecordBlockLimitHit(map[string]string{
+			opts.Emitter.RecordBlockLimitHit(ctx, map[string]string{
 				"plan_tier": opts.PlanTier,
 				"block.id":  blockID,
 			})
@@ -804,7 +804,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if opts.WeekTracker != nil {
 				weekID = opts.WeekTracker.ID()
 			}
-			opts.Emitter.RecordWeekLimitHit(map[string]string{
+			opts.Emitter.RecordWeekLimitHit(ctx, map[string]string{
 				"plan_tier": opts.PlanTier,
 				"week.id":   weekID,
 				"source":    "computed",
@@ -817,7 +817,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 
 		// Emit api_error.observed for each newly-seen error, and
 		// snapshot sessions.errored gauge per kind.
-		emitErrorMetrics(opts.Emitter, tree, previousErrors)
+		emitErrorMetrics(ctx, opts.Emitter, tree, previousErrors)
 
 		// Baseline liveness heartbeat (bead pg2-r1f1j.6): a modest
 		// daemon.heartbeat every heartbeatEvery ticks (~heartbeatInterval)
@@ -825,7 +825,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// event fires, so a healthy-but-quiet daemon isn't NO DATA on Loki.
 		// autoResumeOn is computed earlier in this tick from the WatermarkStore.
 		if shouldHeartbeat(tickCount, heartbeatEvery) {
-			opts.Emitter.LogEvent("daemon.heartbeat", heartbeatAttrs(tree, opts.PlanTier, autoResumeOn))
+			opts.Emitter.LogEvent(ctx, "daemon.heartbeat", heartbeatAttrs(tree, opts.PlanTier, autoResumeOn))
 		}
 
 		// Run nudger tick after tree is built and before publishing to clients.
@@ -933,7 +933,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		// handlers (buildState) serve it without a synchronous SQLite read on
 		// their own goroutine — keeping the BridgeChannel writer's snapshot
 		// cadence independent of DB latency. See sharedState.refreshSnapshot.
-		state.refreshSnapshot()
+		state.refreshSnapshot(ctx)
 	}
 
 	for {
@@ -1245,7 +1245,7 @@ func canonicalKey(ls labels.Set) string {
 // emitErrorMetrics fires api_error.observed counters for newly-advanced
 // session errors and updates the sessions.errored observable gauge. It
 // mutates previousErrors in place.
-func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[string]time.Time) {
+func emitErrorMetrics(ctx context.Context, e *otel.Emitter, tree *aggregate.Tree, previousErrors map[string]time.Time) {
 	if tree == nil {
 		return
 	}
@@ -1262,7 +1262,7 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 				if le.IsTerminal {
 					isTerminalStr = "true"
 				}
-				e.RecordApiErrorObserved(map[string]string{
+				e.RecordApiErrorObserved(ctx, map[string]string{
 					"session_id":  sv.SessionID,
 					"kind":        kind,
 					"is_terminal": isTerminalStr,
@@ -1271,7 +1271,7 @@ func emitErrorMetrics(e *otel.Emitter, tree *aggregate.Tree, previousErrors map[
 				// distinct, separately-counted condition. Fire it on the same
 				// newly-advanced edge so each hit is counted once.
 				if le.IsContextLimit {
-					e.RecordContextLimitHit(map[string]string{
+					e.RecordContextLimitHit(ctx, map[string]string{
 						"session_id": sv.SessionID,
 						"model":      sv.Model,
 					})

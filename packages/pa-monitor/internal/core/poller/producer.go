@@ -195,7 +195,7 @@ func (pr *Producer) Load() *DerivedState { return pr.ref.Load() }
 // immutable DerivedState priced at `now`. It performs NO burn-rate sampling,
 // status derivation, or DB writes (those stay on the emit tick, buildTree).
 func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState, error) {
-	sessions, err := pr.Monitor.Scan(now)
+	sessions, err := pr.Monitor.Scan(ctx, now)
 	if errors.Is(err, session.ErrDaemonOffline) {
 		// The recorder is not answering: publish an empty state that says so
 		// ("daemon offline") instead of keeping a stale one or reading Claude's
@@ -227,7 +227,7 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 		s.Branch = pr.Providers.GitBranch(s.Cwd)
 		s.TerminalHost = pr.Providers.TerminalHost(s.SessionID, s.PID)
 		if s.TerminalHost == "cmux" {
-			s.TerminalHost = refineCmuxTerminalHost(pr.Signalers, pr.BridgeRegistry, s.PID)
+			s.TerminalHost = refineCmuxTerminalHost(ctx, pr.Signalers, pr.BridgeRegistry, s.PID)
 		}
 		subErr, _ := pr.Monitor.SubagentError(s.SessionID)
 		projections[s.SessionID] = SessionProjection{

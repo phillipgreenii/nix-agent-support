@@ -34,7 +34,7 @@ func TestEmitter_LogEvent_ProducesRecord(t *testing.T) {
 	cl := &capturingLogger{}
 	e := &Emitter{logger: cl}
 
-	e.LogEvent("daemon.heartbeat", map[string]string{
+	e.LogEvent(context.Background(), "daemon.heartbeat", map[string]string{
 		"plan_tier":        "max_5x",
 		"sessions_working": "2",
 		"auto_resume":      "true",
@@ -157,24 +157,24 @@ func TestEmitter_NilSafeMethods(t *testing.T) {
 	e.RecordCaffeinateActive(false, "off", 0, nil)
 	e.RecordBlockCost(3.14, map[string]string{"plan_tier": "max_5x"})
 	e.RecordWeekCost(42.0, nil)
-	e.RecordBlockLimitHit(map[string]string{"plan_tier": "max_5x"})
-	e.RecordWeekLimitHit(nil)
-	e.RecordCaffeinateRound(nil)
-	e.RecordCaffeinateGraceExpired(nil)
-	e.RecordContextLimitHit(nil)
+	e.RecordBlockLimitHit(context.Background(), map[string]string{"plan_tier": "max_5x"})
+	e.RecordWeekLimitHit(context.Background(), nil)
+	e.RecordCaffeinateRound(context.Background(), nil)
+	e.RecordCaffeinateGraceExpired(context.Background(), nil)
+	e.RecordContextLimitHit(context.Background(), nil)
 	e.RecordNudgeSent(nil)
 	e.RecordNudgeSendFailed(nil, nil)
 	e.RecordNudgeSendFailed(map[string]string{"reason": "other"}, map[string]string{"session_id": "sid", "error": "boom"})
 	e.RecordNudgeSuppressed(nil)
 	e.RecordNudgeQueued(nil)
 	e.RecordNudgeDroppedNoBridge(nil)
-	e.RecordApiErrorObserved(nil)
+	e.RecordApiErrorObserved(context.Background(), nil)
 	e.RecordSessionsErrored(nil)
 	e.RecordNudgeDeferred(nil)
 	e.RecordNudgeDeferred(map[string]int{"window_pending": 2})
 	e.RecordSessionInfo(nil)
 	e.RecordSessionInfo([]SessionInfo{{SessionID: "sid"}})
-	e.LogEvent("test.event", nil)
+	e.LogEvent(context.Background(), "test.event", nil)
 	if err := e.Shutdown(context.Background()); err != nil {
 		t.Errorf("nil Shutdown returned error: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestEmitter_RecordSessionsErrored_NilSafe(t *testing.T) {
 
 func TestEmitter_RecordApiErrorObserved_NilSafe(t *testing.T) {
 	var e *Emitter
-	e.RecordApiErrorObserved(map[string]string{
+	e.RecordApiErrorObserved(context.Background(), map[string]string{
 		"session_id":  "sid-1",
 		"kind":        "rate_limit",
 		"is_terminal": "true",
@@ -345,8 +345,8 @@ func TestEmitter_RecordSessionInfo_Replaces(t *testing.T) {
 func TestRecordersAreNilSafe(t *testing.T) {
 	var e *Emitter // nil
 	// must not panic
-	e.RecordTickDuration(time.Second)
-	e.RecordPhase("discover", time.Millisecond)
+	e.RecordTickDuration(context.Background(), time.Second)
+	e.RecordPhase(context.Background(), "discover", time.Millisecond)
 	e.RecordScan("full", time.Millisecond, 1024)
 	e.RecordSubprocess("git_branch", time.Millisecond)
 	if e.MeterProvider() != nil {
@@ -365,10 +365,10 @@ func TestNewRegistersInstrumentsAndMeterProvider(t *testing.T) {
 		t.Fatal("MeterProvider must be non-nil when enabled")
 	}
 	// recorders must not panic against a live emitter
-	e.RecordPhase("discover", 2*time.Millisecond)
+	e.RecordPhase(context.Background(), "discover", 2*time.Millisecond)
 	e.RecordScan("incremental", time.Millisecond, 512)
 	e.RecordSubprocess("terminal_host", 3*time.Millisecond)
-	e.RecordTickDuration(10 * time.Millisecond)
+	e.RecordTickDuration(context.Background(), 10*time.Millisecond)
 }
 
 // TestRecordScan_CacheHitSkipsWorkloadCounters is the value-assertion proof of

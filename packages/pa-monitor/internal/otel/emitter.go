@@ -205,8 +205,9 @@ type Emitter struct {
 func NewWithReader(reader sdkmetric.Reader) (*Emitter, error) {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	e := &Emitter{metricsProvider: mp}
-	if err := e.registerMetrics(mp); err != nil {
-		_ = mp.Shutdown(context.Background())
+	ctx := context.Background()
+	if err := e.registerMetrics(ctx, mp); err != nil {
+		_ = mp.Shutdown(ctx)
 		return nil, err
 	}
 	return e, nil
@@ -268,7 +269,7 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 		logger:          lp.Logger("pa-monitor"),
 		health:          health,
 	}
-	if err := e.registerMetrics(mp); err != nil {
+	if err := e.registerMetrics(ctx, mp); err != nil {
 		_ = mp.Shutdown(ctx)
 		_ = lp.Shutdown(ctx)
 		return nil, err
@@ -282,7 +283,7 @@ func New(ctx context.Context, opts Options) (*Emitter, error) {
 	return e, nil
 }
 
-func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
+func (e *Emitter) registerMetrics(ctx context.Context, mp *sdkmetric.MeterProvider) error {
 	meter := mp.Meter("pa-monitor")
 
 	sessionsGauge, err := meter.Int64ObservableGauge("pa_monitor.sessions.count")
@@ -394,11 +395,11 @@ func (e *Emitter) registerMetrics(mp *sdkmetric.MeterProvider) error {
 	// that includes emitter creation captures the first edge. A counter first
 	// touched by Add(1) is born at 1, so increase() across the birth boundary
 	// misses that initial increment; Add(0) creates the 0 baseline.
-	e.blockLimitHits.Add(context.Background(), 0)
+	e.blockLimitHits.Add(ctx, 0)
 	if e.weekLimitHits, err = meter.Int64Counter("pa_monitor.week.usage.limit_hits_total"); err != nil {
 		return err
 	}
-	e.weekLimitHits.Add(context.Background(), 0)
+	e.weekLimitHits.Add(ctx, 0)
 	if e.caffeinateRounds, err = meter.Int64Counter("pa_monitor.caffeinate.rounds_total"); err != nil {
 		return err
 	}
@@ -825,74 +826,76 @@ func (e *Emitter) RecordWeekUsage(pct *float64, resetsAt time.Time, attrs map[st
 
 // RecordBlockLimitHit increments pa_monitor.block.usage.limit_hits_total
 // and emits the matching log event. nil-safe.
-func (e *Emitter) RecordBlockLimitHit(attrs map[string]string) {
+func (e *Emitter) RecordBlockLimitHit(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.blockLimitHits != nil {
-		e.blockLimitHits.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.blockLimitHits.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("block.usage.limit_hit", attrs)
+	e.LogEvent(ctx, "block.usage.limit_hit", attrs)
 }
 
 // RecordWeekLimitHit increments pa_monitor.week.usage.limit_hits_total
 // and emits the matching log event. nil-safe.
-func (e *Emitter) RecordWeekLimitHit(attrs map[string]string) {
+func (e *Emitter) RecordWeekLimitHit(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.weekLimitHits != nil {
-		e.weekLimitHits.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.weekLimitHits.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("week.usage.limit_hit", attrs)
+	e.LogEvent(ctx, "week.usage.limit_hit", attrs)
 }
 
 // RecordCaffeinateRound increments pa_monitor.caffeinate.rounds_total
 // and emits caffeinate.start. nil-safe.
-func (e *Emitter) RecordCaffeinateRound(attrs map[string]string) {
+func (e *Emitter) RecordCaffeinateRound(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.caffeinateRounds != nil {
-		e.caffeinateRounds.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.caffeinateRounds.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("caffeinate.start", attrs)
+	e.LogEvent(ctx, "caffeinate.start", attrs)
 }
 
 // RecordCaffeinateGraceExpired increments the grace-expiration counter
 // and emits the matching log event. nil-safe.
-func (e *Emitter) RecordCaffeinateGraceExpired(attrs map[string]string) {
+func (e *Emitter) RecordCaffeinateGraceExpired(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.caffeinateGrace != nil {
-		e.caffeinateGrace.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.caffeinateGrace.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("caffeinate.grace_expired", attrs)
+	e.LogEvent(ctx, "caffeinate.grace_expired", attrs)
 }
 
 // RecordContextLimitHit increments pa_monitor.session.context.limit_hits_total
 // and emits the matching log event. nil-safe.
-func (e *Emitter) RecordContextLimitHit(attrs map[string]string) {
+func (e *Emitter) RecordContextLimitHit(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.contextLimitHits != nil {
-		e.contextLimitHits.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.contextLimitHits.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("session.context.limit_hit", attrs)
+	e.LogEvent(ctx, "session.context.limit_hit", attrs)
 }
 
 // RecordNudgeSent increments pa_monitor.signal.sends_total and emits
 // the nudge.sent log event. nil-safe.
 func (e *Emitter) RecordNudgeSent(attrs map[string]string) {
+	// Called from the nudger.Recorder interface, which carries no context.
+	ctx := context.Background()
 	if e == nil {
 		return
 	}
 	if e.nudgesSent != nil {
-		e.nudgesSent.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.nudgesSent.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("nudge.sent", attrs)
+	e.LogEvent(ctx, "nudge.sent", attrs)
 }
 
 // RecordNudgeSendFailed increments pa_monitor.signal.send_failures_total with
@@ -902,25 +905,29 @@ func (e *Emitter) RecordNudgeSent(attrs map[string]string) {
 // on the counter. Fired when Signaler.Send returns an error so a failed
 // delivery is observable rather than silently swallowed. nil-safe.
 func (e *Emitter) RecordNudgeSendFailed(counterAttrs, logAttrs map[string]string) {
+	// Called from the nudger.Recorder interface, which carries no context.
+	ctx := context.Background()
 	if e == nil {
 		return
 	}
 	if e.nudgeSendFailures != nil {
-		e.nudgeSendFailures.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(counterAttrs)...))
+		e.nudgeSendFailures.Add(ctx, 1, metric.WithAttributes(attrsToKV(counterAttrs)...))
 	}
-	e.LogEvent("nudge.send_failed", logAttrs)
+	e.LogEvent(ctx, "nudge.send_failed", logAttrs)
 }
 
 // RecordNudgeSuppressed increments pa_monitor.nudge.suppressed_total and
 // emits the nudge.suppressed log event. nil-safe.
 func (e *Emitter) RecordNudgeSuppressed(attrs map[string]string) {
+	// Called from the nudger.Recorder interface, which carries no context.
+	ctx := context.Background()
 	if e == nil {
 		return
 	}
 	if e.nudgeSuppressed != nil {
-		e.nudgeSuppressed.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.nudgeSuppressed.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("nudge.suppressed", attrs)
+	e.LogEvent(ctx, "nudge.suppressed", attrs)
 }
 
 // RecordNudgeDroppedNoBridge increments pa_monitor.nudge.dropped_no_bridge_total
@@ -929,51 +936,55 @@ func (e *Emitter) RecordNudgeSuppressed(attrs map[string]string) {
 // cmux-bridge to retry against — a permanent give-up, distinct from the sent/
 // suppressed/send-failed outcomes. nil-safe.
 func (e *Emitter) RecordNudgeDroppedNoBridge(attrs map[string]string) {
+	// Called from the nudger.Recorder interface, which carries no context.
+	ctx := context.Background()
 	if e == nil {
 		return
 	}
 	if e.nudgeDroppedNoBridge != nil {
-		e.nudgeDroppedNoBridge.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.nudgeDroppedNoBridge.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("nudge.dropped_no_bridge", attrs)
+	e.LogEvent(ctx, "nudge.dropped_no_bridge", attrs)
 }
 
 // RecordNudgeQueued increments pa_monitor.nudge.queued_total and emits
 // the nudge.queued log event. nil-safe.
 func (e *Emitter) RecordNudgeQueued(attrs map[string]string) {
+	// Called from the nudger.Recorder interface, which carries no context.
+	ctx := context.Background()
 	if e == nil {
 		return
 	}
 	if e.nudgeQueued != nil {
-		e.nudgeQueued.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.nudgeQueued.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("nudge.queued", attrs)
+	e.LogEvent(ctx, "nudge.queued", attrs)
 }
 
 // RecordApiErrorObserved increments pa_monitor.session.api_error.observed_total
 // and emits the session.api_error.observed log event. nil-safe.
-func (e *Emitter) RecordApiErrorObserved(attrs map[string]string) {
+func (e *Emitter) RecordApiErrorObserved(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.apiErrorObserved != nil {
-		e.apiErrorObserved.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.apiErrorObserved.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("session.api_error.observed", attrs)
+	e.LogEvent(ctx, "session.api_error.observed", attrs)
 }
 
 // RecordSignalerBinaryMissing fires pa_monitor.signaler.binary_missing_total
 // and logs a signaler.binary_missing event. Called once per missing binary at
 // daemon startup so an unwrapped tmux/cmux dependency is loudly visible instead
 // of silently disabling that terminal's detection and auto-resume.
-func (e *Emitter) RecordSignalerBinaryMissing(attrs map[string]string) {
+func (e *Emitter) RecordSignalerBinaryMissing(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.signalerBinMissing != nil {
-		e.signalerBinMissing.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.signalerBinMissing.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("signaler.binary_missing", attrs)
+	e.LogEvent(ctx, "signaler.binary_missing", attrs)
 }
 
 // RecordStaleBeadsExport fires the TOP-LEVEL alert (pg2-zjopv) for a stray
@@ -990,14 +1001,14 @@ func (e *Emitter) RecordSignalerBinaryMissing(attrs map[string]string) {
 // MUST include "path" (the exact file found); the caller (BeadsWatcher) is
 // responsible for its own repeat-alert throttling — every call here emits.
 // nil-safe.
-func (e *Emitter) RecordStaleBeadsExport(attrs map[string]string) {
+func (e *Emitter) RecordStaleBeadsExport(ctx context.Context, attrs map[string]string) {
 	if e == nil {
 		return
 	}
 	if e.staleBeadsExport != nil {
-		e.staleBeadsExport.Add(context.Background(), 1, metric.WithAttributes(attrsToKV(attrs)...))
+		e.staleBeadsExport.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
-	e.LogEvent("beads.stale_export_found", attrs)
+	e.LogEvent(ctx, "beads.stale_export_found", attrs)
 }
 
 // RecordSessionInfo replaces the buffered per-session rows. Callers MUST
@@ -1117,7 +1128,7 @@ func (e *Emitter) RecordNudgeDeferred(counts map[string]int) {
 
 // LogEvent emits one log record at info level with the given attributes
 // and an event_name attribute set to name. nil-safe.
-func (e *Emitter) LogEvent(name string, attrs map[string]string) {
+func (e *Emitter) LogEvent(ctx context.Context, name string, attrs map[string]string) {
 	if e == nil || e.logger == nil {
 		return
 	}
@@ -1132,7 +1143,7 @@ func (e *Emitter) LogEvent(name string, attrs map[string]string) {
 		}
 		rec.AddAttributes(attribute.String(k, v))
 	}
-	e.logger.Emit(context.Background(), rec)
+	e.logger.Emit(ctx, rec)
 }
 
 // tupleKey builds a stable canonical string for a full attribute tuple by
@@ -1171,19 +1182,19 @@ func (e *Emitter) MeterProvider() *sdkmetric.MeterProvider {
 func durMS(d time.Duration) float64 { return float64(d.Microseconds()) / 1000.0 }
 
 // RecordTickDuration records the total poll-tick duration. nil-safe.
-func (e *Emitter) RecordTickDuration(d time.Duration) {
+func (e *Emitter) RecordTickDuration(ctx context.Context, d time.Duration) {
 	if e == nil || e.pollTickDuration == nil {
 		return
 	}
-	e.pollTickDuration.Record(context.Background(), durMS(d))
+	e.pollTickDuration.Record(ctx, durMS(d))
 }
 
 // RecordPhase records one once-per-tick phase duration under a `phase` attr. nil-safe.
-func (e *Emitter) RecordPhase(phase string, d time.Duration) {
+func (e *Emitter) RecordPhase(ctx context.Context, phase string, d time.Duration) {
 	if e == nil || e.pollPhaseDuration == nil {
 		return
 	}
-	e.pollPhaseDuration.Record(context.Background(), durMS(d),
+	e.pollPhaseDuration.Record(ctx, durMS(d),
 		metric.WithAttributes(attribute.String("phase", phase)))
 }
 

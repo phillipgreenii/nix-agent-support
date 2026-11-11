@@ -60,7 +60,7 @@ func TestConnectionEmitterDisabledWhenNoEndpoint(t *testing.T) {
 		t.Fatalf("want nil emitter when endpoint unset, got %#v", e)
 	}
 	e.RecordDaemonConnected(false)
-	e.LogEvent("daemon.disconnect", map[string]string{"error": "x"})
+	e.LogEvent(context.Background(), "daemon.disconnect", map[string]string{"error": "x"})
 	if err := e.Shutdown(context.Background()); err != nil {
 		t.Fatalf("nil Shutdown: %v", err)
 	}
@@ -102,8 +102,8 @@ func TestConnectionEmitterLogEvent(t *testing.T) {
 	}
 	defer func() { _ = e.Shutdown(context.Background()) }()
 	// Non-empty and empty values: the empty value must be skipped by the loop.
-	e.LogEvent("daemon.disconnect", map[string]string{"error": "boom", "skipped": ""})
-	e.LogEvent("daemon.reconnect", nil)
+	e.LogEvent(context.Background(), "daemon.disconnect", map[string]string{"error": "boom", "skipped": ""})
+	e.LogEvent(context.Background(), "daemon.reconnect", nil)
 }
 
 // TestConnEmitter_LogEvent_BridgeDeliverFailedIsWarn is the end-to-end WARN
@@ -119,7 +119,7 @@ func TestConnEmitter_LogEvent_BridgeDeliverFailedIsWarn(t *testing.T) {
 	cl := &capturingLogger{}
 	e := &ConnEmitter{logger: cl, component: "cmux-bridge"}
 
-	e.LogEvent("bridge.deliver_failed", map[string]string{"error": "no live bridge"})
+	e.LogEvent(context.Background(), "bridge.deliver_failed", map[string]string{"error": "no live bridge"})
 
 	if len(cl.records) != 1 {
 		t.Fatalf("records = %d, want 1", len(cl.records))

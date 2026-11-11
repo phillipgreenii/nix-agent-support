@@ -1,6 +1,7 @@
 package otel
 
 import (
+	"context"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -16,7 +17,7 @@ func TestRecordStaleBeadsExport_EmitsErrorLog(t *testing.T) {
 	cl := &capturingLogger{}
 	e := &Emitter{logger: cl} // no SDK counter; RecordStaleBeadsExport is nil-safe on it
 
-	e.RecordStaleBeadsExport(map[string]string{"path": "/ws/.beads/issues.jsonl"})
+	e.RecordStaleBeadsExport(context.Background(), map[string]string{"path": "/ws/.beads/issues.jsonl"})
 
 	if len(cl.records) != 1 {
 		t.Fatalf("records = %d, want 1", len(cl.records))
@@ -48,8 +49,8 @@ func TestRecordStaleBeadsExport_EmitsErrorLog(t *testing.T) {
 func TestRecordStaleBeadsExport_IncrementsCounter(t *testing.T) {
 	e, reader := newTestEmitter(t)
 
-	e.RecordStaleBeadsExport(map[string]string{"path": "/ws/.beads/issues.jsonl"})
-	e.RecordStaleBeadsExport(map[string]string{"path": "/ws/repo/.beads/issues.jsonl"})
+	e.RecordStaleBeadsExport(context.Background(), map[string]string{"path": "/ws/.beads/issues.jsonl"})
+	e.RecordStaleBeadsExport(context.Background(), map[string]string{"path": "/ws/repo/.beads/issues.jsonl"})
 
 	m, ok := collectMetric(t, reader, "pa_monitor.beads.stale_export_found_total")
 	if !ok {
@@ -75,5 +76,5 @@ func TestRecordStaleBeadsExport_IncrementsCounter(t *testing.T) {
 // panic — the same nil-safety contract every other Record* method carries.
 func TestRecordStaleBeadsExport_NilSafe(t *testing.T) {
 	var e *Emitter
-	e.RecordStaleBeadsExport(map[string]string{"path": "/ws/.beads/issues.jsonl"})
+	e.RecordStaleBeadsExport(context.Background(), map[string]string{"path": "/ws/.beads/issues.jsonl"})
 }
