@@ -50,8 +50,8 @@ paths below were checked against the built package.
 
 **Kill switch.** Two files stop every role (`verify`, `sync`, `build`; a hand run too) with exit 9: the
 state directory's `push.disabled` and the file named by `kill_switch` in the config (the home module
-defaults it to `<state dir>/kill`). `tips` ignores both. Beyond the files, `pg-router pause` (the
-`SYSTEM_PAUSE` gate) stops the deployment's roles, and `repos.<key>.push = false` (the default of every
+defaults it to `<state dir>/kill`). `tips` ignores both. Beyond the files, `pg-router pause` (the router
+`PAUSED` level) stops the deployment's roles, and `repos.<key>.push = false` (the default of every
 repo) keeps `sync` from reaching the push step. `pg-repo-runner status` prints `push.disabled` only, not
 the config `kill_switch` file.
 
@@ -323,7 +323,7 @@ deletion, other ref, `--tags`, `--mirror` or `--no-verify` (the repo's own pre-p
 
 | Gate | Check                                                                                                                                                                                                                                                                                                                                           |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| (a)  | `push = true`, and no kill switch (`<state dir>/push.disabled`, the config `kill_switch` file, the pg-router `SYSTEM_PAUSE` gate that stops the role before it runs): re-read right before the push.                                                                                                                                            |
+| (a)  | `push = true`, and no kill switch (`<state dir>/push.disabled`, the config `kill_switch` file, the pg-router `PAUSED` level that stops the role before it runs): re-read right before the push.                                                                                                                                                 |
 | (b)  | A `check` verdict, `green`, over the locked inputs, for the newest commit of `origin/<primary>..<tip>` that has one: the tip when it is green, else the newest green ancestor that descends from `origin/<primary>` (ADR 0108 amendment, 2026-11-03). The tip is re-read right before the push; the pushed sha is never newer than the verdict. |
 | (c)  | The canonical precheck of this pass passed (a dirty, off-primary or mid-operation clone is `yielded` before the step is reached).                                                                                                                                                                                                               |
 | (d)  | `origin/<primary>` is an ancestor of the tip. Otherwise the repo is diverged and takes the F5 branch (one deduplicated bead). A remote that moves after the check makes git refuse: `push-rejected`.                                                                                                                                            |

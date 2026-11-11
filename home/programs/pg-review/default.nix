@@ -108,42 +108,50 @@ let
   handler = "${cfg.handlerPackage}/bin/pg-router-handler-command";
   adapter = "${cfg.adapterPackage}/bin/pg-review-router-adapter";
 
-  # Gates and retry keys are set explicitly (no defaults assumed).
-  # `review-run` blocks on every gate (a paused router or low disk holds it);
-  # `review-maintain` is non-blocking on the low-disk gate.
+  # The retry key is set explicitly (no default assumed). A role gets a
+  # `requires` key only when the deployment supplies clauses for it through
+  # the `requires` option (default none: the role then does not care about any
+  # resource level).
   # `review-run` binds an event only schedules emit; with no schedule it is
   # omitted (the router rejects a role that binds an event no query emits).
+  withRequires =
+    name: lib.optionalAttrs (cfg.requires.${name} != [ ]) { requires = cfg.requires.${name}; };
+
   roles =
-    lib.optional (cfg.schedules != { }) {
-      name = "review-run";
-      enabled = true;
-      binds = [ "review.run" ];
-      inherit handler;
-      non_blocking_gates = [ ];
-      max_dispatch_retries = 0;
-      config.command.argv = [
-        adapter
-        "run"
-        "{{.Item.ID}}"
-        ''{{index .Item.Metadata "schedule_id"}}''
-        ''{{index .Item.Metadata "lens"}}''
-        ''{{index .Item.Metadata "scope"}}''
-        ''{{index .Item.Metadata "window"}}''
-      ];
-    }
-    ++ [
+    lib.optional (cfg.schedules != { }) (
       {
-        name = "review-maintain";
+        name = "review-run";
         enabled = true;
-        binds = [ "review.maintain" ];
+        binds = [ "review.run" ];
         inherit handler;
-        non_blocking_gates = [ "LOW_DISK_USAGE" ];
         max_dispatch_retries = 0;
         config.command.argv = [
           adapter
-          "maintain"
+          "run"
+          "{{.Item.ID}}"
+          ''{{index .Item.Metadata "schedule_id"}}''
+          ''{{index .Item.Metadata "lens"}}''
+          ''{{index .Item.Metadata "scope"}}''
+          ''{{index .Item.Metadata "window"}}''
         ];
       }
+      // withRequires "review-run"
+    )
+    ++ [
+      (
+        {
+          name = "review-maintain";
+          enabled = true;
+          binds = [ "review.maintain" ];
+          inherit handler;
+          max_dispatch_retries = 0;
+          config.command.argv = [
+            adapter
+            "maintain"
+          ];
+        }
+        // withRequires "review-maintain"
+      )
     ];
 
   queries = lib.mapAttrsToList scheduleQuery cfg.schedules ++ [ maintainQuery ];
@@ -322,6 +330,27 @@ in
       );
       default = { };
       description = "Lens overrides, merged onto the built-in lens of the same name.";
+    };
+
+    requires = mkOption {
+      type = types.submodule {
+        options = {
+          "review-run" = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            example = [ "disk >= OK" ];
+            description = "The `requires` clauses of the review-run role, each \"<resource> <op> <LEVEL>\". Default none: the role does not care about any resource level; the deployment supplies its own.";
+          };
+          "review-maintain" = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            example = [ "cpu >= OK" ];
+            description = "The `requires` clauses of the review-maintain role. Default none; the deployment supplies its own.";
+          };
+        };
+      };
+      default = { };
+      description = "Per-role requires clauses written into the generated router roles. Empty by default: this public module names no resource; the deployment supplies the clauses for the resources of its own registry.";
     };
 
     schedules = mkOption {

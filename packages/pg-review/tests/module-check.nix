@@ -8,7 +8,8 @@
 #     provider as a command-only entry (so the built-in queries stay in effect),
 #   * asserts the generated router stanzas (timer queries with static metadata,
 #     calendar triggers, the 5 minute maintain period trigger, the two roles
-#     with explicit gates, max_dispatch_retries 0 and adapter argv, an absolute
+#     with no requires by default (and the deployment-supplied clauses when the
+#     requires option is set), max_dispatch_retries 0 and adapter argv, an absolute
 #     handler store path, at least one role, every bound event emitted by a
 #     generated query),
 #   * asserts the module adds nothing with enable = false.
@@ -85,6 +86,21 @@ let
   };
   sampleOpts = sample.config.phillipgreenii.programs.pg-review;
 
+  withRequires = evaluate {
+    enable = true;
+    schedules.s = {
+      lens = "agent-workflow";
+      scope = "w";
+      schedule = "daily";
+      at = "01:00";
+    };
+    requires = {
+      "review-run" = [ "disk >= OK" ];
+      "review-maintain" = [ "cpu >= OK" ];
+    };
+  };
+  reqRoles = withRequires.config.phillipgreenii.programs.pg-review.routerConfig.role;
+
   disabled = evaluate { enable = false; };
   noScope = evaluate { enable = true; };
   badWeekly = evaluate {
@@ -159,14 +175,15 @@ let
         };
 
     "at least one role is declared" = lib.length rc.role >= 1;
-    "review-run binds review.run and blocks on every gate" =
-      runRole.binds == [ "review.run" ]
-      && runRole.non_blocking_gates == [ ]
-      && runRole.max_dispatch_retries == 0;
-    "review-maintain binds review.maintain, non-blocking on low disk" =
+    "review-run binds review.run and has no requires by default" =
+      runRole.binds == [ "review.run" ] && !(runRole ? requires) && runRole.max_dispatch_retries == 0;
+    "review-maintain binds review.maintain and has no requires by default" =
       maintainRole.binds == [ "review.maintain" ]
-      && maintainRole.non_blocking_gates == [ "LOW_DISK_USAGE" ]
+      && !(maintainRole ? requires)
       && maintainRole.max_dispatch_retries == 0;
+    "the requires option writes the deployment clauses onto the matching role only" =
+      (lib.findFirst (r: r.name == "review-run") null reqRoles).requires == [ "disk >= OK" ]
+      && (lib.findFirst (r: r.name == "review-maintain") null reqRoles).requires == [ "cpu >= OK" ];
     "every role handler is an absolute store path" = lib.all (
       r: lib.hasPrefix "/nix/store/" r.handler
     ) rc.role;
@@ -240,8 +257,8 @@ pkgs.runCommand "pg-review-module"
       and (.role | length) == 2
       and ([.role[].handler] | all(startswith("/nix/store/")))
       and ([.role[].max_dispatch_retries] == [0, 0])
-      and (.role[] | select(.name == "review-run") | .binds == ["review.run"] and .non_blocking_gates == [] and .config.command.argv[1] == "run")
-      and (.role[] | select(.name == "review-maintain") | .config.command.argv[1] == "maintain" and .non_blocking_gates == ["LOW_DISK_USAGE"])
+      and (.role[] | select(.name == "review-run") | .binds == ["review.run"] and (has("requires") | not) and .config.command.argv[1] == "run")
+      and (.role[] | select(.name == "review-maintain") | .config.command.argv[1] == "maintain" and (has("requires") | not))
       and (.query[] | select(.name == "agent-workflow-workspace-daily") | .metadata == {schedule_id: "agent-workflow-workspace-daily", lens: "agent-workflow", scope: "workspace", window: "24h"} and .trigger.kind == "calendar" and .trigger.on_missed == "next-slot")
       and ([.role[].binds[]] - [.query[].emits[]] == [])
     ' router.json >/dev/null || { echo "unexpected router stanzas:" >&2; cat router.json >&2; exit 1; }

@@ -52,12 +52,27 @@ let
           true (the core defaults it to false).
         '';
       };
+      requires = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        example = [
+          "disk >= OK"
+          "git_auth_<remote> >= AVAILABLE"
+        ];
+        description = ''
+          The role's `requires` clauses (TOML `requires`), each
+          "<resource> <op> <LEVEL>" against the resource registry. Emitted only
+          when non-empty: a role with no clause does not care about any
+          resource. The router's config loader compiles and validates the
+          clauses; this module only renders them.
+        '';
+      };
       extra = lib.mkOption {
         inherit (tomlFormat) type;
         default = { };
         description = ''
           Any other `[[role]]` keys, under their TOML spelling (for example
-          `extra.non_blocking_gates`, `extra.retry`, `extra.description`,
+          `extra.retry`, `extra.description`,
           `extra.max_dispatch_retries`), merged into the rendered table so a
           consumer never has to hand-write a `[[role]]` table for a role it
           also declares here.
@@ -75,12 +90,120 @@ let
     // lib.optionalAttrs (r.handler != null) { inherit (r) handler; }
     // lib.optionalAttrs (r.config != { }) { inherit (r) config; }
     // lib.optionalAttrs r.survivesShutdown { survives_shutdown = true; }
+    // lib.optionalAttrs (r.requires != [ ]) { inherit (r) requires; }
     // r.extra;
 
   # Roles with a handler, in attribute-name order (lib.mapAttrsToList sorts).
   renderedRoles = lib.concatLists (
     lib.mapAttrsToList (name: r: lib.optional (r.handler != null) (renderRole name r)) cfg.roles
   );
+
+  resourceModule = _: {
+    options = {
+      scale = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        example = [
+          "PLENTY"
+          "OK"
+          "TIGHT"
+          "EXHAUSTED"
+        ];
+        description = "The ordered level scale of the resource, best first (TOML `scale`).";
+      };
+      sensor = lib.mkOption {
+        type = lib.types.str;
+        description = "The sensor that answers for the resource (TOML `sensor`); a `levelQueries` entry of the same name answers for it.";
+      };
+      ignored = lib.mkOption {
+        type = lib.types.str;
+        default = "ANY";
+        description = "What silence means for a role with no clause on the resource (TOML `ignored`): \"ANY\" or \"<op> <LEVEL>\".";
+      };
+      unknown = lib.mkOption {
+        type = lib.types.enum [
+          "best"
+          "worst"
+        ];
+        default = "best";
+        description = "What an absent or expired level reads as (TOML `unknown`).";
+      };
+      graceFactor = lib.mkOption {
+        type = lib.types.nullOr lib.types.float;
+        default = null;
+        description = "Per-resource stale-grace factor (TOML `grace_factor`); null inherits [levels].grace_factor.";
+      };
+    };
+  };
+
+  renderResource =
+    name: r:
+    {
+      inherit name;
+      inherit (r)
+        scale
+        sensor
+        ignored
+        unknown
+        ;
+    }
+    // lib.optionalAttrs (r.graceFactor != null) { grace_factor = r.graceFactor; };
+
+  # A level-source query: a command query marked level_source = "<sensor>" whose
+  # JSONL output answers for that sensor.
+  levelQueryModule = _: {
+    options = {
+      argv = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        example = [
+          "/path/to/pg-router-sensors"
+          "host-sensor"
+        ];
+        description = "The sensor command (TOML `[query.command] argv`); its stdout is JSONL.";
+      };
+      every = lib.mkOption {
+        type = lib.types.str;
+        default = "60s";
+        description = "The pull period (`trigger.every`).";
+      };
+      deadline = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "The per-pull deadline (TOML `deadline`); null keeps the router default.";
+      };
+      envAllow = lib.mkOption {
+        type = lib.types.nullOr (lib.types.listOf lib.types.str);
+        default = null;
+        description = "Environment variable names the sensor process receives besides the minimal base environment (TOML `env_allow`); null inherits the router environment.";
+      };
+      strictBaseEnv = lib.mkOption {
+        type = lib.types.nullOr lib.types.bool;
+        default = null;
+        description = "TOML `strict_base_env`; null leaves the router default.";
+      };
+    };
+  };
+
+  renderLevelQuery =
+    name: q:
+    {
+      inherit name;
+      type = "command";
+      level_source = name;
+      trigger = {
+        kind = "period";
+        inherit (q) every;
+      };
+      command = {
+        inherit (q) argv;
+        format = "jsonl";
+      };
+    }
+    // lib.optionalAttrs (q.deadline != null) { inherit (q) deadline; }
+    // lib.optionalAttrs (q.envAllow != null) { env_allow = q.envAllow; }
+    // lib.optionalAttrs (q.strictBaseEnv != null) { strict_base_env = q.strictBaseEnv; };
+
+  renderedResources = lib.mapAttrsToList renderResource cfg.resources;
+  renderedLevelQueries = lib.mapAttrsToList renderLevelQuery cfg.levelQueries;
 
   # Shared PG_ROUTER_* Environment-list builder for both systemd units below
   # (periodicDrain's oneshot run-until-idle pass, daemon's long-running
@@ -200,6 +323,52 @@ in
         handler only, sorted by name), under their TOML key spelling, ready to
         append to a consumer's own `role` list.
       '';
+    };
+
+    resources = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule resourceModule);
+      default = { };
+      description = ''
+        The resource registry, one entry per resource (attribute name = the
+        resource name), rendered as `[[resource]]` tables in `renderedResources`.
+        A consumer merges the read-only `renderedResources` and
+        `renderedLevelQueries` into the config it builds, like `renderedRoles`.
+        This module names no resource itself.
+      '';
+    };
+
+    levelQueries = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule levelQueryModule);
+      default = { };
+      description = ''
+        Level-source queries, one per sensor (attribute name = the sensor name
+        a `resources.<name>.sensor` refers to), rendered as `[[query]]` tables
+        marked `level_source` in `renderedLevelQueries`.
+      '';
+    };
+
+    renderedResources = lib.mkOption {
+      type = lib.types.listOf lib.types.attrs;
+      readOnly = true;
+      default = renderedResources;
+      description = "Read-only: the `[[resource]]` attrs rendered from `resources`, sorted by name.";
+    };
+
+    renderedLevelQueries = lib.mkOption {
+      type = lib.types.listOf lib.types.attrs;
+      readOnly = true;
+      default = renderedLevelQueries;
+      description = "Read-only: the level-source `[[query]]` attrs rendered from `levelQueries`, sorted by name.";
+    };
+
+    levelsFile = lib.mkOption {
+      type = lib.types.path;
+      readOnly = true;
+      default = tomlFormat.generate "pg-router-levels.toml" {
+        resource = renderedResources;
+        query = renderedLevelQueries;
+      };
+      description = "Read-only: a TOML file holding only the `[[resource]]` and level-source `[[query]]` tables.";
     };
 
     rolesFile = lib.mkOption {

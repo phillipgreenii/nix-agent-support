@@ -367,12 +367,6 @@
           pg-router-probe = final.callPackage ./packages/pg-router-probe {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-router-disk-watchdog: Pattern A (ADR 0008), a stdlib-only module that
-          # execs the `pg-router` CLI (gate set|clear|list) as a subprocess (bead
-          # pg2-zwdwf); no local `replace`/modRoot.
-          pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
-            inherit (goBuilders) mkGoApp;
-          };
           # pg-router-sensors: Pattern B (ADR 0008), the ONE generic sensors binary
           # (host-sensor, vpn-sensor, git-auth-sensor, beads-sensor, claude-sensor);
           # imports the level-answer schema from ../pg-router.
@@ -1950,7 +1944,6 @@
                 "pg-router-source-pg-desk"
                 "pg-decider"
                 "pg-router-probe"
-                "pg-router-disk-watchdog"
                 "pg-checkout-pool"
                 "pg-router-heartbeat"
                 "ccpool-probe"
@@ -8004,15 +7997,6 @@
                 gomod2nixToml = ./packages/pg-router-probe/gomod2nix.toml;
               };
 
-              # pg-router-disk-watchdog (bead pg2-zwdwf) - table-driven unit suite over
-              # the set/hold/clear decision with a faked statfs and a faked `pg-router`
-              # CLI. No testDeps: nothing real is exec'd except `sh` in execRun's test.
-              pg-router-disk-watchdog-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-router-disk-watchdog-go-tests";
-                src = lib.cleanSource ./packages/pg-router-disk-watchdog; # matches default.nix
-                gomod2nixToml = ./packages/pg-router-disk-watchdog/gomod2nix.toml;
-              };
-
               # pg-router-sensors: the shared state-machine library, the answer
               # printer and the subcommand skeleton. Pattern B like the handlers
               # module (schema validator from ../pg-router), with the same
@@ -10558,7 +10542,8 @@
                         handler = "/nix/store/fake-handler/bin/pg-router-handler-command";
                         config.command.argv = [ "/usr/bin/true" ];
                         survivesShutdown = true;
-                        extra.non_blocking_gates = [ "cicd-down" ];
+                        extra.retry = "5m";
+                        requires = [ "disk >= OK" ];
                       };
                       minimal = {
                         binds = [ "min.event" ];
@@ -10570,6 +10555,22 @@
                       };
                     };
                     existingRoleNames = [ "worker" ];
+                    resources.disk = {
+                      scale = [
+                        "PLENTY"
+                        "OK"
+                        "TIGHT"
+                        "EXHAUSTED"
+                      ];
+                      sensor = "host";
+                    };
+                    levelQueries.host = {
+                      argv = [
+                        "/nix/store/fake-sensors/bin/pg-router-sensors"
+                        "host-sensor"
+                      ];
+                      deadline = "20s";
+                    };
                   };
                   renderedByName = lib.listToAttrs (
                     map (r: lib.nameValuePair r.name r) rolesDeclared.phillipgreenii.programs.pg-router.renderedRoles
@@ -10756,8 +10757,46 @@
                     handler = "/nix/store/fake-handler/bin/pg-router-handler-command";
                     config.command.argv = [ "/usr/bin/true" ];
                     survives_shutdown = true;
-                    non_blocking_gates = [ "cicd-down" ];
+                    retry = "5m";
+                    requires = [ "disk >= OK" ];
                   };
+                assert
+                  rolesDeclared.phillipgreenii.programs.pg-router.renderedResources == [
+                    {
+                      name = "disk";
+                      scale = [
+                        "PLENTY"
+                        "OK"
+                        "TIGHT"
+                        "EXHAUSTED"
+                      ];
+                      sensor = "host";
+                      ignored = "ANY";
+                      unknown = "best";
+                    }
+                  ];
+                assert
+                  rolesDeclared.phillipgreenii.programs.pg-router.renderedLevelQueries == [
+                    {
+                      name = "host";
+                      type = "command";
+                      level_source = "host";
+                      trigger = {
+                        kind = "period";
+                        every = "60s";
+                      };
+                      command = {
+                        argv = [
+                          "/nix/store/fake-sensors/bin/pg-router-sensors"
+                          "host-sensor"
+                        ];
+                        format = "jsonl";
+                      };
+                      deadline = "20s";
+                    }
+                  ];
+                # A role with no clause renders no requires key (it does not care).
+                assert !(renderedByName.minimal ? requires);
                 assert
                   renderedByName.minimal == {
                     name = "minimal";
@@ -10796,7 +10835,7 @@
                     grep -q '^handler = "/nix/store/fake-handler/bin/pg-router-handler-command"' "$rolesFile"
                     grep -q '^survives_shutdown = true' "$rolesFile"
                     grep -q '^\[role.config.command\]' "$rolesFile"
-                    grep -q '^non_blocking_gates = ' "$rolesFile"
+                    grep -q '^requires = ' "$rolesFile"
                     # The handler-less role is not rendered, and survives_shutdown
                     # appears only for the role that set it.
                     ! grep -q 'undecided' "$rolesFile"
@@ -19948,7 +19987,6 @@
               pg-router-source-pg-desk
               pg-decider
               pg-router-probe
-              pg-router-disk-watchdog
               pg-router-sensors
               pg-checkout-pool
               pg-router-heartbeat

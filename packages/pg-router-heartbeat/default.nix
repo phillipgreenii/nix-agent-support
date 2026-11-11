@@ -7,10 +7,10 @@ mkGoApp {
   pname = "pg-router-heartbeat";
 
   # Pattern A (phillipg-nix-repo-base ADR 0008): a single stdlib-only module
-  # rooted at this package dir. It execs the `pg-router` CLI (`gate set|clear|
-  # list`, path given by --pg-router-path) as a subprocess and has no
-  # compile-time dependency on packages/pg-router, so no local `replace`,
-  # modRoot or parent-rooted fileset is needed (same shape as
+  # rooted at this package dir. It queries Prometheus and runs an optional
+  # notify command, and has no compile-time dependency on
+  # packages/pg-router, so no local `replace`, modRoot or parent-rooted
+  # fileset is needed (same shape as
   # packages/pg-router-probe).
   src = lib.cleanSource ./.;
   modRoot = null;
