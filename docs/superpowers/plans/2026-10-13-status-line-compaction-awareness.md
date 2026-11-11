@@ -1,5 +1,7 @@
 # Status line: compaction awareness
 
+**Superseded**: the shell status line this plan changes (the `claude-status-line` module and its part scripts) was retired, and the display mod (`claude-marketplace/pgd`) replaced it. Do not implement this plan; see `docs/superpowers/specs/2026-11-05-display-layer-design.md`.
+
 **Status**: Approved for implementation by the operator (2026-10-13), after two independent read-only reviews of earlier drafts. This is the implementer's source of truth.
 **Repo**: `phillipgreenii-nix-agent-support`. Every path below is relative to the repo root; locate code by NAME, not by line number (the files move).
 **Effort**: L overall (PD S, A S, B1 M, B2 M, H S, V S).

@@ -1,10 +1,12 @@
 # pgd link resolvers: context-aware transcript links
 
-Status: draft 3, 2026-11-09, packets filed. Draft 2 folded in an independent review of draft 1
+Status: built (draft 3, 2026-11-09). The resolver kinds `github-pr`, `jira` and `file-ref` ship in
+`claude-marketplace/pgd/hooks` (`githubPr.ts`, `jira.ts`, `fileRef.ts`, `linkContext.ts`,
+`links.ts`). Draft 2 folded in an independent review of draft 1
 (stale-link and refresh-trigger blockers, protected spans, `file-ref` safety, counters, test
 gaps). Draft 3 folds in a review of the packets against the code: uppercase `PR` only, the
 `ABC-1/ABC-2` exception to the path rule, snapshot seeding from the options before the first
-fetch, `{path}` including its leading slash, and `{col}` defaulting to 1. Nothing here is built.
+fetch, `{path}` including its leading slash, and `{col}` defaulting to 1.
 Package: `claude-marketplace/pgd` (hooks in `hooks/links.ts`, Home Manager module in
 `home/programs/pgd/default.nix`). Public repo: no employer-specific names, hosts or keys in
 code, tests, comments or docs; deployments supply them as data.

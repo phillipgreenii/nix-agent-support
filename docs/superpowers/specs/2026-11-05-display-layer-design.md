@@ -377,10 +377,12 @@ session resolves credentials from the profile. The role list is the profile name
 in the operator's AWS config, read once. When the role's expiry passes, an alert
 row appears.
 
-Open, and MUST be verified before phase 4 builds this: that setting the four
-variables is enough for an agent's AWS call to authenticate; where the expiry
-comes from (no expiry variable exists in the environment); and what happens when
-the SSO login has lapsed. A process run has a 30-second default timeout and a
+Resolved as built: the expiry comes from the `Expiration` of
+`aws configure export-credentials --profile NAME --format process`, read when the
+role is applied (`claude-marketplace/pgd/hooks/assume.ts`); a role set before the
+session started has no expiry and raises no alert. Still to be verified live: that
+setting the four variables is enough for an agent's AWS call to authenticate, and
+what happens when the SSO login has lapsed. A process run has a 30-second default timeout and a
 ten-minute maximum (docs), so a browser login MAY fit if the call passes an
 explicit timeout.
 
@@ -429,7 +431,7 @@ module path `home/programs/pgd/`, the log directory `$XDG_STATE_HOME/pgd/` and t
 check names `test-pgd-*`. A name starting `claude-` cannot be used:
 `claude plugin validate` (Claude Code 2.1.314) refuses it as reserved. The
 skeleton first shipped as `status` (the plugin) and `claude-display` (the module);
-the rename to `pgd` is its own packet. The `pgd` noun and the `pgd_*`
+the rename to `pgd` has since landed (the mod is `claude-marketplace/pgd`). The `pgd` noun and the `pgd_*`
 metric names keep their names unless the operator rules otherwise.
 
 Host access and the registration shape. `claude plugin validate` (Claude Code
@@ -437,7 +439,7 @@ Host access and the registration shape. `claude plugin validate` (Claude Code
 passed as an argument (bound, passed, spread, returned or read); $ is always
 spelled $.noun.event(...) at the call site") and a generic forwarder such as
 `env.get: k => $.env.get(k)` ("$.env.get takes a literal name as its first
-argument"). So the mod's one hooks module, `claude-marketplace/status/hooks/register.ts`,
+argument"). So the mod's one hooks module, `claude-marketplace/pgd/hooks/register.ts`,
 builds a host facade inside its `session.start` hook: an object of closures, one
 purpose-named member per `$` call the mod needs (`process.run`, `fs.read`,
 `fs.write`, `http.fetch`, `config.set` today; `ui.invalidate`, `session.usage`,
@@ -489,8 +491,8 @@ Scope calls (the builder MAY rely on these):
   the empty `statusLine` command and the removal of the part scripts) wait for it.
 - Retiring the shell line is the settings option change described under
   "Coexistence and retirement". A delete filter for the stale key is optional.
-- The wrap-up button pre-fills the wrap-up skill's slash command; the exact text
-  is confirmed when the button is built.
+- The wrap-up button pre-fills the wrap-up skill's slash command; the text is
+  `/session-wrapup:wrap-up-session` (resolved; `claude-marketplace/pgd/hooks/wrap-up.ts`).
 - A button inside Display's own plugin (the band and modals) runs its action in
   the plugin. Only a button contributed by another bundle needs the open
   mechanism in "Open items".

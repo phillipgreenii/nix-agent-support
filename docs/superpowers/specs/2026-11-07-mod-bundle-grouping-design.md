@@ -28,7 +28,7 @@ bundles so that:
 
 In scope: every plugin that runs code in a session, through command hooks in
 `hooks/hooks.json` or a mod (a hooks module named under `modules`). Today these are
-CETA (`claude-extended-tool-approver`), `claude-tool-tracker`, `pg-claude-control`,
+CETA (`pg-claude-extended-tool-approver`), `pg-claude-tool-tracker`, `pg-claude-control`,
 `pgd`, `pb` and the ccpool plugin. The note also places one planned member, a
 `session-mode` plugin, and records that the ZR bundle needs no plugin (see "ZR").
 `pb` stays in scope
@@ -85,7 +85,7 @@ operator chose the first for now (ruling above).
 flowchart TB
     subgraph Base["Base: on in every session"]
         SAF["Safety: CETA (command hooks)"]
-        TRK["Tracking: claude-tool-tracker (command hooks and mod)"]
+        TRK["Tracking: pg-claude-tool-tracker (command hooks and mod)"]
         CTL["Control: pg-claude-control (mod)"]
         DSP["Display: pgd (mod)"]
         SM["Session mode: session-mode (command hooks)"]
@@ -102,7 +102,7 @@ flowchart TB
 | Bundle       | Members                                               | Enable condition                               | Command hooks (classic events)                                                                                                 | Native mod events                                                                                                                                              |
 | ------------ | ----------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Safety       | CETA                                                  | Every session                                  | PreToolUse, PermissionRequest, PostToolUse, PermissionDenied, PostToolUseFailure, SessionEnd                                   | None                                                                                                                                                           |
-| Tracking     | `claude-tool-tracker`                                 | Every session                                  | PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, PermissionDenied                                               | `session.start`, `tool.call`, `tool.check`, `ui.render`, `session.end`                                                                                         |
+| Tracking     | `pg-claude-tool-tracker`                              | Every session                                  | PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, PermissionDenied                                               | `session.start`, `tool.call`, `tool.check`, `ui.render`, `session.end`                                                                                         |
 | Control      | `pg-claude-control`                                   | Every session                                  | None                                                                                                                           | `session.start`, `turn.start`, `turn.complete`, `session.end`                                                                                                  |
 | Display      | `pgd`                                                 | Every session; each component opt-in           | None                                                                                                                           | `engine.create` (the `pgd` noun), `session.start`, `session.measure`, `turn.complete`, `session.compact`, `config.set`, `command.run`, `ui.render`, `ui.close` |
 | Session mode | `session-mode` (new; its hooks move out of `pb`)      | Every session                                  | SessionEnd, PostCompact (decided: stay command hooks, see "Placement findings")                                                | None yet                                                                                                                                                       |
@@ -156,7 +156,7 @@ interactive sessions.
   its input the way PreToolUse does for rtk. Running a command hook and a mod side by
   side also risks deciding one call twice. A native port is reopened only for a concrete gain:
   speed, or a moment only a mod can see.
-- **Tracking (`claude-tool-tracker`) stays as is.** It ships command hooks and a mod
+- **Tracking (`pg-claude-tool-tracker`) stays as is.** It ships command hooks and a mod
   together. One headless Bash call produced distinct record kinds from the two paths
   (`tracker.pre_tool` and `tracker.post_tool` from the hooks; `tracker.call_start`,
   `tracker.call_end` and `tracker.check` from the mod), one of each per tool call,

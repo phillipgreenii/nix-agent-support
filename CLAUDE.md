@@ -326,6 +326,15 @@ display mod (`claude-marketplace/pgd`) draws the band and status row. See
 `docs/guides/claude-code-mods.md` (F2) and the display layer design. Do not reintroduce part
 scripts or a `status-line-parts` option.
 
+The mod's switchable components (`phillipgreenii.programs.pgd.components.*`, registered by
+`claude-marketplace/pgd/hooks/components.ts`) are `beads` (defaults from
+`phillipgreenii.programs.beads.enable`), `assume`, `sessionMode`, `prStatus`, `sessionName`,
+`links`, `modelEffort` and `focus`. The Info and Context modals and the Wrap up button have no
+flag and follow `enable` alone. Another plugin MAY contribute rows through the `pgd` noun:
+`$.pgd.put({ id, surface, priority, text, color?, ttlMs?, url? })` and `$.pgd.remove({ id })`
+(`claude-marketplace/pgd/hooks/pgd-noun.ts`). `surface` is `alert` or `focus`; only a `focus`
+contribution MAY carry a `url`; a put with the same `id` replaces the earlier one.
+
 ## Development Workflow
 
 - **Format**: Use `nix fmt` for formatting Nix files
