@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cutover"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/trackeradapter"
 	"github.com/spf13/cobra"
 )
@@ -12,7 +13,8 @@ import (
 // The two histories evaluate, report and show (and the two label commands) can
 // read. They are never mixed: --source tracker shows only calls the
 // claude-tool-tracker recorded, --source ceta shows CETA's own ask log. The
-// default stays ceta until the cut-over flips it.
+// default is ceta, and tracker on a machine whose cut-over switch is on
+// (internal/cutover); --source ceta still reads CETA's old database there.
 const (
 	sourceCeta    = "ceta"
 	sourceTracker = "tracker"
@@ -24,8 +26,17 @@ type sourceFlags struct {
 	trackerDB string
 }
 
+// defaultSource is the --source default: ceta, or tracker once the cut-over
+// switch is on.
+func defaultSource() string {
+	if cutover.Enabled() {
+		return sourceTracker
+	}
+	return sourceCeta
+}
+
 func addSourceFlags(cmd *cobra.Command, f *sourceFlags) {
-	cmd.Flags().StringVar(&f.source, "source", sourceCeta, "History to read: ceta (CETA's ask log) or tracker (the claude-tool-tracker database, read-only)")
+	cmd.Flags().StringVar(&f.source, "source", defaultSource(), "History to read: ceta (CETA's ask log) or tracker (the claude-tool-tracker database, read-only)")
 	cmd.Flags().StringVar(&f.trackerDB, "tracker-db", "", "Path of the tracker database for --source tracker (default: the tracker's own default path)")
 }
 

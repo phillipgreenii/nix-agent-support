@@ -183,7 +183,17 @@ let
         ''--set CETA_UNATTENDED_EXTRA_READONLY_ROOTS "${lib.concatStringsSep ":" cfg.unattendedExtraReadOnlyRoots}"''
     ++ lib.optional (
       knownAbsentRoots != [ ]
-    ) ''--set CETA_DENIED_ROOTS "${lib.concatStringsSep ":" knownAbsentRoots}"'';
+    ) ''--set CETA_DENIED_ROOTS "${lib.concatStringsSep ":" knownAbsentRoots}"''
+    # The per-machine tracker cut-over switch (internal/cutover). Off: nothing is
+    # exported and the binary behaves as it always has.
+    ++ lib.optional cfg.trackerCutover "--set CETA_TRACKER_CUTOVER 1";
+
+  # With trackerCutover on, only these events stay registered (PostToolUse only
+  # for background-shell registration).
+  cutoverKeptEvents = {
+    PreToolUse = true;
+    PostToolUse = true;
+  };
 
   hookPkg =
     if wrapArgs == [ ] then
@@ -219,6 +229,29 @@ in
         bare `claude-extended-tool-approver`, and the unwrapped binary carries none
         of the settings, so every configured root silently disappears in that
         session (bead pg2-1peo5k).
+      '';
+    };
+    trackerCutover = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Per-machine cut-over switch: hand CETA's recording over to the
+        claude-tool-tracker. OFF by default, and no module, host or flake file in
+        this repository sets it: a machine nobody has checked keeps all of CETA's
+        recording. A consuming flake MUST set it to true only on a machine where the
+        tracker is observed recording and its comparison with CETA is clean (or every
+        difference is explained and accepted).
+
+        On: the binary stops writing `tool_decisions`, `outcomes` and
+        `decision_trace_entries`, stops flushing `rule_errors` to its database (they
+        are `ceta.rule_errors` events), and `--source` defaults to `tracker` (the
+        database stays readable with `--source ceta`); the
+        `pg-claude-extended-tool-approver-recording` plugin, which carries the
+        PermissionRequest, PermissionDenied, PostToolUseFailure and SessionEnd
+        hooks, is turned off, so only PreToolUse and PostToolUse (background-shell
+        registration) stay registered; and, under the hook router, only those two
+        delegates are contributed. Off again is the revert: the same hooks and
+        recording return. See the package README, "Tracker cut-over switch".
       '';
     };
     inputProcessors = lib.mkOption {
@@ -463,56 +496,58 @@ in
         # banded mkOrder convention precedent), never on a
         # per-element priority field.
         claude-hook-router.delegates = lib.mkIf routerEnabled (
-          lib.mkOrder 1000 [
-            {
-              name = "ceta";
-              event = "PreToolUse";
-              matcher = null;
-              command = "claude-extended-tool-approver";
-              contract = "decide+rewrite";
-              priority = 1000;
-            }
-            {
-              name = "ceta";
-              event = "PostToolUse";
-              matcher = null;
-              command = "claude-extended-tool-approver";
-              contract = "observe";
-              priority = 1000;
-            }
-            {
-              name = "ceta";
-              event = "PermissionRequest";
-              matcher = null;
-              command = "claude-extended-tool-approver";
-              contract = "observe";
-              priority = 1000;
-            }
-            {
-              name = "ceta";
-              event = "PermissionDenied";
-              matcher = null;
-              command = "claude-extended-tool-approver";
-              contract = "observe";
-              priority = 1000;
-            }
-            {
-              name = "ceta";
-              event = "SessionEnd";
-              matcher = null;
-              command = "claude-extended-tool-approver";
-              contract = "observe";
-              priority = 1000;
-            }
-            {
-              name = "ceta";
-              event = "PostToolUseFailure";
-              matcher = null;
-              command = "claude-extended-tool-approver";
-              contract = "observe";
-              priority = 1000;
-            }
-          ]
+          lib.mkOrder 1000 (
+            lib.filter (d: !cfg.trackerCutover || cutoverKeptEvents ? ${d.event}) [
+              {
+                name = "ceta";
+                event = "PreToolUse";
+                matcher = null;
+                command = "claude-extended-tool-approver";
+                contract = "decide+rewrite";
+                priority = 1000;
+              }
+              {
+                name = "ceta";
+                event = "PostToolUse";
+                matcher = null;
+                command = "claude-extended-tool-approver";
+                contract = "observe";
+                priority = 1000;
+              }
+              {
+                name = "ceta";
+                event = "PermissionRequest";
+                matcher = null;
+                command = "claude-extended-tool-approver";
+                contract = "observe";
+                priority = 1000;
+              }
+              {
+                name = "ceta";
+                event = "PermissionDenied";
+                matcher = null;
+                command = "claude-extended-tool-approver";
+                contract = "observe";
+                priority = 1000;
+              }
+              {
+                name = "ceta";
+                event = "SessionEnd";
+                matcher = null;
+                command = "claude-extended-tool-approver";
+                contract = "observe";
+                priority = 1000;
+              }
+              {
+                name = "ceta";
+                event = "PostToolUseFailure";
+                matcher = null;
+                command = "claude-extended-tool-approver";
+                contract = "observe";
+                priority = 1000;
+              }
+            ]
+          )
         );
       })
 
@@ -525,9 +560,16 @@ in
         # contributed, so the plugin's own `defaultEnabled = true` applies
         # and ceta's direct registration remains the sole, unmodified
         # fallback dispatch path.
-        claude-code.marketplaces.overrides = lib.mkIf routerEnabled {
-          claude-extended-tool-approver = false;
-        };
+        claude-code.marketplaces.overrides = lib.mkMerge [
+          (lib.mkIf routerEnabled {
+            claude-extended-tool-approver = false;
+          })
+          # The recording hooks live in their own plugin so the switch can leave
+          # them unregistered per machine; off by default (override absent).
+          (lib.mkIf cfg.trackerCutover {
+            pg-claude-extended-tool-approver-recording = false;
+          })
+        ];
       })
     ];
 

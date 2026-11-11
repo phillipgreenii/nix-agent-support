@@ -20,6 +20,30 @@ direct registration to avoid double-dispatch), and either way ceta evaluates and
 identically — the router only changes who invokes ceta, never what ceta decides. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sequence diagram covering both paths.
 
+## Tracker cut-over switch
+
+`phillipgreenii.programs.claude-extended-tool-approver.trackerCutover` (bool, default `false`) hands
+CETA's recording over to the claude-tool-tracker, per machine. Nothing in this repository sets it to
+`true`: a machine that does not set it keeps all of CETA's recording, and flipping it on is a separate,
+operator-accepted step taken only where the tracker is observed recording and its comparison with CETA
+is clean (or every difference is explained and accepted). Reverting is setting it back to `false`.
+
+|                    | Switch off (default)                                                                         | Switch on                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Database writes    | `tool_decisions`, outcomes, `decision_trace_entries` and the `rule_errors` flush, as always  | none; the `ceta.*` events (including `ceta.rule_errors`) replace the flush            |
+| Hooks registered   | PreToolUse, PermissionRequest, PostToolUse, PermissionDenied, PostToolUseFailure, SessionEnd | PreToolUse and PostToolUse only (PostToolUse stays for background-shell registration) |
+| `--source` default | `ceta`                                                                                       | `tracker`; the old database stays readable with `--source ceta`                       |
+
+Mechanism: the option exports `CETA_TRACKER_CUTOVER=1` around the binary (only the exact value `1`
+counts; see `internal/cutover`), turns off the `pg-claude-extended-tool-approver-recording` plugin
+(which carries the PermissionRequest, PermissionDenied, PostToolUseFailure and SessionEnd hooks, so
+the switch can leave them unregistered per machine) and, under the hook router, contributes only the
+PreToolUse and PostToolUse delegates. The binary also no-ops those four events at run time, so a stale
+registration records nothing. Tests: the golden files under
+`cmd/claude-extended-tool-approver/testdata/cutover/` (captured from the build before the switch
+existed; the capture command is in `cutover_test.go`), `TestCutover_*`, the integration test
+`TestCutoverLive_*`, and the Nix eval check `test-claude-extended-tool-approver-cutover-switch`.
+
 ## Hook Events
 
 | Event             | Purpose                                                       |

@@ -1,0 +1,7 @@
+{
+  "name": "pg-claude-extended-tool-approver-recording",
+  "description": "CETA recording hooks: permission requests, denials, tool failures and session end",
+  "version": "1.0.0",
+  "defaultEnabled": true,
+  "requires": ["claude-extended-tool-approver"]
+}

@@ -30,6 +30,11 @@
       "description": "Pre-tool permission hook with rule-based evaluation"
     },
     {
+      "name": "pg-claude-extended-tool-approver-recording",
+      "source": "./pg-claude-extended-tool-approver-recording",
+      "description": "CETA recording hooks (PermissionRequest, PermissionDenied, PostToolUseFailure, SessionEnd); turned off per machine by the tracker cut-over switch"
+    },
+    {
       "name": "pg-claude-tool-tracker",
       "source": "./pg-claude-tool-tracker",
       "description": "Observer-only command hooks recording tool-call facts for the tool-event log"

@@ -6265,6 +6265,127 @@
                   touch $out
                 '';
 
+              # test-claude-extended-tool-approver-cutover-switch: the per-machine tracker
+              # cut-over switch (`trackerCutover`) is OFF by default and, off, changes
+              # nothing: no CETA_TRACKER_CUTOVER in the wrapped binary's environment, no
+              # plugin override, all six router delegates, and the two CETA plugins'
+              # hooks together equal the golden file captured from the hooks.json that
+              # existed before the switch. On: the wrapper exports the variable, the
+              # recording plugin is turned off, only PreToolUse and PostToolUse remain
+              # (plugin hooks and router delegates alike).
+              test-claude-extended-tool-approver-cutover-switch =
+                let
+                  inherit (import ./tests/pg-router-ccpool-handler-eval-hm.nix { inherit lib pkgs llm-agents; })
+                    evalHMWith
+                    ;
+                  stubPkg = pkgs.runCommand "ceta-cutover-stub-0" { } ''
+                    mkdir -p $out/bin
+                    {
+                      echo '#!${pkgs.runtimeShell}'
+                      echo 'echo "CUTOVER=$CETA_TRACKER_CUTOVER"'
+                    } > $out/bin/claude-extended-tool-approver
+                    chmod +x $out/bin/claude-extended-tool-approver
+                  '';
+                  cetaModules = extra: [
+                    ./home/programs/claude-extended-tool-approver/default.nix
+                    (
+                      { lib, ... }:
+                      {
+                        options.phillipgreenii.programs.claude-code = {
+                          enable = lib.mkEnableOption "claude (stub)";
+                          knownAbsentRoots = lib.mkOption {
+                            type = lib.types.listOf lib.types.str;
+                            default = [ ];
+                          };
+                          marketplaces.overrides = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.bool;
+                            default = { };
+                          };
+                        };
+                        options.phillipgreenii.programs.claude-hook-router = {
+                          enable = lib.mkEnableOption "hook router (stub)";
+                          delegates = lib.mkOption {
+                            type = lib.types.listOf lib.types.attrs;
+                            default = [ ];
+                          };
+                        };
+                      }
+                    )
+                    {
+                      phillipgreenii.programs.claude-code.enable = true;
+                      phillipgreenii.programs.claude-extended-tool-approver = {
+                        enable = true;
+                        package = stubPkg;
+                      }
+                      // extra;
+                    }
+                  ];
+                  offCfg = evalHMWith { extraModules = cetaModules { }; };
+                  onCfg = evalHMWith { extraModules = cetaModules { trackerCutover = true; }; };
+                  routerOnOff = evalHMWith {
+                    extraModules = cetaModules { } ++ [ { phillipgreenii.programs.claude-hook-router.enable = true; } ];
+                  };
+                  routerOnOn = evalHMWith {
+                    extraModules = cetaModules { trackerCutover = true; } ++ [
+                      { phillipgreenii.programs.claude-hook-router.enable = true; }
+                    ];
+                  };
+                  pcfg = c: c.phillipgreenii.programs;
+                  events = c: lib.sort (a: b: a < b) (map (d: d.event) (pcfg c).claude-hook-router.delegates);
+                  recording = "pg-claude-extended-tool-approver-recording";
+                  failed = c: lib.filter (a: !a.assertion) c.assertions;
+                in
+                assert failed offCfg == [ ] && failed onCfg == [ ];
+                assert (pcfg offCfg).claude-extended-tool-approver.trackerCutover == false;
+                assert (pcfg onCfg).claude-extended-tool-approver.trackerCutover == true;
+                # off: no override of the recording plugin; on: it is turned off
+                assert !((pcfg offCfg).claude-code.marketplaces.overrides ? ${recording});
+                assert (pcfg onCfg).claude-code.marketplaces.overrides.${recording} == false;
+                # router delegates: off keeps all six events, on keeps PreToolUse and PostToolUse
+                assert
+                  events routerOnOff == [
+                    "PermissionDenied"
+                    "PermissionRequest"
+                    "PostToolUse"
+                    "PostToolUseFailure"
+                    "PreToolUse"
+                    "SessionEnd"
+                  ];
+                assert
+                  events routerOnOn == [
+                    "PostToolUse"
+                    "PreToolUse"
+                  ];
+                pkgs.runCommand "test-claude-extended-tool-approver-cutover-switch"
+                  {
+                    nativeBuildInputs = [ pkgs.jq ];
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+                    mkt=${./claude-marketplace}
+                    main="$mkt/pg-claude-extended-tool-approver/hooks/hooks.json"
+                    rec="$mkt/${recording}/hooks/hooks.json"
+
+                    # the wrapped binary: nothing exported off, exported on
+                    [ "$(${(pcfg offCfg).claude-extended-tool-approver.finalPackage}/bin/claude-extended-tool-approver)" = "CUTOVER=" ] \
+                      || fail "switch off: CETA_TRACKER_CUTOVER is exported"
+                    [ "$(${(pcfg onCfg).claude-extended-tool-approver.finalPackage}/bin/claude-extended-tool-approver)" = "CUTOVER=1" ] \
+                      || fail "switch on: CETA_TRACKER_CUTOVER=1 is not exported"
+
+                    # switch off: the two plugins' hooks together equal the pre-change golden
+                    jq -S -s '{description: .[0].description, hooks: (.[0].hooks + .[1].hooks)}' "$main" "$rec" \
+                      | jq 'del(.description)' > union.json
+                    jq -S 'del(.description)' ${./packages/claude-extended-tool-approver/cmd/claude-extended-tool-approver/testdata/cutover/hooks-switch-off.golden.json} > golden.json
+                    diff -u golden.json union.json || fail "rendered hooks differ from the golden captured before the switch"
+
+                    # switch on: the main plugin keeps exactly PreToolUse and PostToolUse, and the
+                    # plugin that is turned off carries exactly the four recording hooks
+                    [ "$(jq -c '.hooks | keys' "$main")" = '["PostToolUse","PreToolUse"]' ] || fail "main plugin hooks are not PreToolUse and PostToolUse"
+                    [ "$(jq -c '.hooks | keys' "$rec")" = '["PermissionDenied","PermissionRequest","PostToolUseFailure","SessionEnd"]' ] \
+                      || fail "recording plugin hooks are not the four recording events"
+                    touch $out
+                  '';
+
               # test-claude-baseline-role-tool-commands (bead pg2-hou7i): the role
               # half of the hook-command scan above. Every `Bash(<cmd> ...)` grant in
               # a role's EFFECTIVE allowed tools (the handler-wide `allowedTools` +

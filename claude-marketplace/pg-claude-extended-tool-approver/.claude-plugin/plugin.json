@@ -4,5 +4,5 @@
   "version": "1.0.0",
   "defaultEnabled": true,
   "requires": ["claude-extended-tool-approver"],
-  "uses": ["beads", "pb", "pg-ccaudit"]
+  "uses": ["beads", "pb", "pg-ccaudit", "claude-tool-tracker"]
 }

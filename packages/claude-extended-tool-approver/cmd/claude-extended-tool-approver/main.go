@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cutover"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/engine"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/inputproc"
@@ -284,6 +285,12 @@ func handlePreToolUse(input *hookio.HookInput) {
 	// change the verdict nor block the call.
 	recordToolEvents(input, engineVerdict, result, sandboxOn)
 
+	// Cut-over (internal/cutover): the tracker records the decision, so CETA's
+	// own database write, rule_errors flush and spool drain stop. The store was
+	// opened above only as the killshell rule's shell-ownership store.
+	if cutover.Enabled() {
+		return
+	}
 	logPreToolDecision(store, dbPath, openCause, input, result, sandboxOn)
 }
 
@@ -338,6 +345,11 @@ func logPreToolDecision(store *asklog.Store, dbPath, openCause string, input *ho
 }
 
 func handlePermissionRequest(input *hookio.HookInput) {
+	if cutover.Enabled() {
+		// The tracker records this event; CETA writes nothing (internal/cutover).
+		fmt.Println("{}")
+		return
+	}
 	store, err := asklog.NewStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
@@ -367,8 +379,12 @@ func handlePostToolUse(input *hookio.HookInput) {
 	}
 	defer func() { _ = store.Close() }()
 
-	if err := asklog.ResolveApproved(store, input, ""); err != nil {
-		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
+	// With the cut-over on the tracker records outcomes; only the background-
+	// shell registration below stays (the killshell rule's ownership check).
+	if !cutover.Enabled() {
+		if err := asklog.ResolveApproved(store, input, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog: %v\n", err)
+		}
 	}
 	// Track agent-spawned background shells (Bash run_in_background) so the
 	// killshell rule can later verify ownership (hook-support parity). No-op for
@@ -380,6 +396,11 @@ func handlePostToolUse(input *hookio.HookInput) {
 }
 
 func handlePermissionDenied(input *hookio.HookInput) {
+	if cutover.Enabled() {
+		// The tracker records this event; CETA writes nothing (internal/cutover).
+		fmt.Println("{}")
+		return
+	}
 	store, err := asklog.NewStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
@@ -401,6 +422,11 @@ func handlePermissionDenied(input *hookio.HookInput) {
 // it never influences the outcome, only records it, so it prints "{}"
 // unconditionally.
 func handlePostToolUseFailure(input *hookio.HookInput) {
+	if cutover.Enabled() {
+		// The tracker records this event; CETA writes nothing (internal/cutover).
+		fmt.Println("{}")
+		return
+	}
 	store, err := asklog.NewStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
@@ -416,6 +442,11 @@ func handlePostToolUseFailure(input *hookio.HookInput) {
 }
 
 func handleSessionEnd(input *hookio.HookInput) {
+	if cutover.Enabled() {
+		// The tracker records this event; CETA writes nothing (internal/cutover).
+		fmt.Println("{}")
+		return
+	}
 	store, err := asklog.NewStore(asklog.DefaultDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog open: %v\n", err)
