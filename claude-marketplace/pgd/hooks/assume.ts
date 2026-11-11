@@ -199,7 +199,6 @@ export function assumeSpec(): ModalSpec {
     actions: [
       { id: 'apply', label: 'Apply' },
       { id: 'clear', label: 'Clear' },
-      { id: 'close', label: 'Close' },
     ],
   }
 }

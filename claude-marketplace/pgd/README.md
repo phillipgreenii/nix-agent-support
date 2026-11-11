@@ -65,7 +65,7 @@ Each of these is covered by a test in `hooks/modals.test.ts`, `hooks/modal.test.
 | Choice                          | Decision                                                                                                               |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | What `pressButton` does         | It toggles: the first press opens the modal, a second press on the open modal closes it.                               |
-| Close action                    | Always added with id `close`; the framework closes the modal itself and `onAction` never receives it.                  |
+| Close action                    | None is added (operator, 2026-11-11): the engine's x control and Escape close the pane.                                |
 | Info name row without a name    | Shows the session id (the session id also has its own row).                                                            |
 | Band collapse button            | No plugin button: the engine draws the only `[-]`; `/pgd-band` hides or shows the band.                                |
 | Toggle ids                      | `band`, `info`, `context`. The band is open and each modal closed by default.                                          |
@@ -150,7 +150,7 @@ button, modal, stop action, source, timer or alert.
   stopping yellow, wrapped up green, other finished dim. A press opens the modal; a second press closes it.
 - The modal lists `mode`, `state` and `detail` (omitted when empty), one per line, with the actions
   Stop (runs `session-mode set-status stopping`, then reads the source again; not offered once the
-  mode is finished) and Close.
+  mode is finished).
 - The alert `wrapping up` (priority 100, the highest) shows while a wrap-up mode is active.
 
 ### Choices the design left to the builder
@@ -192,7 +192,7 @@ Each of these is covered by a test in `hooks/model-modal.test.ts`.
 | Items                 | One per choice, labelled `model` or `effort`, value the choice; the current one carries `current: true`.                                                 |
 | Unknown current model | A current model that is not a choice is appended as one more `model` item marked current.                                                                |
 | Blank effort          | Before the first turn the effort group is one item labelled `effort` with an empty value and no current marker; the choices appear after the first turn. |
-| Action ids            | `apply-model:<id>` (label `Apply <id>`) and `effort:<level>` (label `Effort <level>`), then the framework's Close.                                       |
+| Action ids            | `apply-model:<id>` (label `Apply <id>`) and `effort:<level>` (label `Effort <level>`).                                                                   |
 | Apply value           | The model id string, passed to `host.config.set({ key: "model", value })`.                                                                               |
 | Model refresh         | After `config.set` the model source is read again with a forced `refresh('model')` (the `config.set` hook also updates it).                              |
 | Effort choice         | `host.prompt.fill({ text: "/effort <level>", mode: "replace" })`; nothing is submitted.                                                                  |
@@ -212,7 +212,7 @@ facade's `env.awsProfile()`. Pressing it opens the Assume modal.
 - Source: `assume`, value `{ role?, expiresAt? }` (epoch milliseconds), polled once a minute
   (`intervalMs` 60000, feeds the band and the alert); Apply and Clear update it directly.
 - Modal `assume`: the current role and its expiry when known, one `role:<name>` row per profile (alphabetical, ignoring case), and
-  the actions `apply`, `clear` and `close`. Choosing a role only marks it; Apply uses the marked
+  the actions `apply` and `clear`. Choosing a role only marks it; Apply uses the marked
   role (else the current role when the config lists it).
 - Alert `assume expired` (priority 50): true when a stored expiry has passed. A missing expiry never
   raises it.

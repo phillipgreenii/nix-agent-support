@@ -163,7 +163,7 @@ test('the button now opens the assume modal, and the label and level are unchang
   expect(rows.find(r => r.id === 'assume')).toEqual({ id: 'assume', label: 'example-dev', level: 'green', action: 'assume' })
 })
 
-test('the config is read once through fs.read and the modal offers role:<name>, apply, clear and close', async () => {
+test('the config is read once through fs.read and the modal offers role:<name>, apply and clear', async () => {
   const { sh } = await modalWorld()
   expect(sh.calls.filter(c => c === `fs.read ${CONFIG_PATH}`)).toHaveLength(1)
   expect(actionIds()).toEqual([
@@ -172,7 +172,6 @@ test('the config is read once through fs.read and the modal offers role:<name>, 
     'role:example-prod',
     'apply',
     'clear',
-    'close',
   ])
   assumeSpec()
   assumeSpec()

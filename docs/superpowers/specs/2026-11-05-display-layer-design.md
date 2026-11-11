@@ -233,21 +233,22 @@ Info modal:
  │ worktree    /Volumes/gitrepos/phillipg/nix-agent-support/.worktrees │
  │ branch      example-branch                                          │
  │ PR          #412 (changes requested)                                │
- │                                                  [ Close ]          │
  └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Modals
 
-Each band button opens its own modal pane (F5):
+Each band button opens its own modal pane (F5). No modal carries a Close action (operator, 2026-11-11:
+"the modals don't need explicit \"close\" buttons added because the framework provide a \"x\" in
+the upper right to click to close."); the engine's x and Escape dismiss the pane.
 
-| Modal             | Items, one per line                                                                                                                          | Actions                                                                                                                        |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Info              | name, session id, actor, version, repo, worktree, branch, PR with review state colored                                                       | Close                                                                                                                          |
-| Model and effort  | model choices (current marked), effort choices (current marked, blank until the first turn)                                                  | Apply: model through `$.config.set` (F6); effort pre-fills `/effort <level>` in the prompt box for the operator to send; Close |
-| Context and usage | context percent and tokens, last compaction, five-hour limit with reset time, seven-day limit with reset time (each only when present), cost | Close                                                                                                                          |
-| Session mode      | mode, state, detail                                                                                                                          | Stop (runs `session-mode set-status stopping`); Close                                                                          |
-| Assume            | role choices read from the AWS profile names, current role, expiry when known                                                                | Apply (sets the variable list, F7); Clear; Close                                                                               |
+| Modal             | Items, one per line                                                                                                                          | Actions                                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Info              | name, session id, actor, version, repo, worktree, branch, PR with review state colored                                                       | none                                                                                                                    |
+| Model and effort  | model choices (current marked), effort choices (current marked, blank until the first turn)                                                  | Apply: model through `$.config.set` (F6); effort pre-fills `/effort <level>` in the prompt box for the operator to send |
+| Context and usage | context percent and tokens, last compaction, five-hour limit with reset time, seven-day limit with reset time (each only when present), cost | none                                                                                                                    |
+| Session mode      | mode, state, detail                                                                                                                          | Stop (runs `session-mode set-status stopping`, only while not finished)                                                 |
+| Assume            | role choices read from the AWS profile names, current role, expiry when known                                                                | Apply (sets the variable list, F7); Clear                                                                               |
 
 The Focus pane is a list, one row per item, each row `kind  id  title  [ open ]`
 where `open` follows the item's `url` when it has one. Rows are ordered by the

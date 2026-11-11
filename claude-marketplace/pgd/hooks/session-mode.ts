@@ -128,7 +128,6 @@ export function modeSpec(): ModalSpec | undefined {
     ],
     actions: [
       ...(isActive(v) ? [{ id: 'stop', label: 'Stop' }] : []),
-      { id: 'close', label: 'Close' },
     ],
   }
 }

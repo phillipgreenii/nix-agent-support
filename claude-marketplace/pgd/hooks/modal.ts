@@ -2,9 +2,9 @@ import { setVisible } from './source'
 import { isOpen, onToggle, setOpen, syncOpen } from './toggles'
 
 // The modal pane framework: a modal is a plain data description (ModalSpec), drawn as a pane by
-// the ui.render hook below. The framework never uses holdToasts. A Close action is always added
-// (id CLOSE_ACTION) and is handled here: it closes the modal and onAction never sees it; every
-// other action id is passed to onAction.
+// the ui.render hook below. The framework never uses holdToasts. No Close action is added: the
+// pane is dismissed by the engine's own x control and by Escape (closeOnEscape), which the host
+// reports through hostClosed. Every action id a spec lists is passed to onAction.
 export interface ModalAction {
   id: string
   label: string
@@ -29,8 +29,6 @@ export interface ModalSpec {
 }
 
 export type ActionHandler = (actionId: string) => void | Promise<void>
-
-export const CLOSE_ACTION = 'close'
 
 export interface ModalHost {
   open(spec: ModalSpec, onAction: ActionHandler): void
@@ -91,16 +89,11 @@ export function markBandDrawn(): void {
 }
 
 export function openModal(spec: ModalSpec, onAction: ActionHandler): void {
-  const actions = spec.actions.some(a => a.id === CLOSE_ACTION)
-    ? spec.actions
-    : [...spec.actions, { id: CLOSE_ACTION, label: 'Close' }]
-  const full: ModalSpec = { ...spec, actions }
   openIds.add(spec.id)
   syncOpen(spec.id, true)
   setVisible('modal', true)
-  modalHost.open(full, async actionId => {
-    if (actionId === CLOSE_ACTION) closeModal(spec.id)
-    else await onAction(actionId)
+  modalHost.open(spec, async actionId => {
+    await onAction(actionId)
   })
 }
 
@@ -180,18 +173,10 @@ export function isModalOpen(id: string): boolean {
 // The spec a draw shows: the live builder's, else the one the modal was opened with.
 export function currentSpec(id: string): ModalSpec | undefined {
   const built = builders.get(id)?.()
-  const base = built ?? live.get(id)?.spec
-  if (!base) return undefined
-  return base.actions.some(a => a.id === CLOSE_ACTION)
-    ? base
-    : { ...base, actions: [...base.actions, { id: CLOSE_ACTION, label: 'Close' }] }
+  return built ?? live.get(id)?.spec
 }
 
 export function pressAction(id: string, actionId: string): void {
-  if (actionId === CLOSE_ACTION) {
-    closeModal(id)
-    return
-  }
   const h = live.get(id)?.onAction ?? actionHandlers.get(id)
   if (h) void Promise.resolve(h(actionId)).catch(() => undefined)
 }
@@ -238,14 +223,18 @@ export function drawModal(ui: any, id: string): unknown {
           ],
         }),
       ),
-      Box({
-        key: 'actions',
-        flexDirection: 'row',
-        children: spec.actions.flatMap((a, i) => [
-          ...(i > 0 ? [Text({ key: `gap-${a.id}`, children: ' ' })] : []),
-          Button({ key: `action-${a.id}`, label: a.label, onPress: () => pressAction(id, a.id) }),
-        ]),
-      }),
+      ...(spec.actions.length > 0
+        ? [
+            Box({
+              key: 'actions',
+              flexDirection: 'row',
+              children: spec.actions.flatMap((a, i) => [
+                ...(i > 0 ? [Text({ key: `gap-${a.id}`, children: ' ' })] : []),
+                Button({ key: `action-${a.id}`, label: a.label, onPress: () => pressAction(id, a.id) }),
+              ]),
+            }),
+          ]
+        : []),
     ],
   })
 }

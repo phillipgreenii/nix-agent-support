@@ -6,7 +6,7 @@ import { registerComponents } from './components'
 import { bandLabels, clearBandButtons, pressButton, renderBand } from './band'
 import { recordCompaction, contextSpec } from './context-modal'
 import { infoSpec, resetSessionFacts, actorOf } from './info-modal'
-import { hostClosed, resetModals, setModalHost, type ModalSpec, CLOSE_ACTION, isModalOpen } from './modal'
+import { hostClosed, resetModals, setModalHost, type ModalSpec, isModalOpen } from './modal'
 import { setOptions } from './options'
 import { defineSource, initSources, setValue } from './source'
 import { hydrateToggles, isOpen, resetToggles, setOpen } from './toggles'
@@ -62,7 +62,7 @@ test('the session id button opens the Info modal: one item per line', async () =
     'PR: #412 (changes requested)',
   ])
   expect(w.opened[0].items[7].color).toBe('red')
-  expect(w.opened[0].actions.map(a => a.id)).toEqual([CLOSE_ACTION])
+  expect(w.opened[0].actions.map(a => a.id)).toEqual([])
 })
 
 test('the context button opens the Context and usage modal', async () => {

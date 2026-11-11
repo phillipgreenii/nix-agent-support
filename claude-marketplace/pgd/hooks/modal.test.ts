@@ -1,7 +1,7 @@
-// Tests of the modal framework: openModal and closeModal through the injectable host, the always
-// present Close action, the pane calls of the default host (no holdToasts) and the drawing.
+// Tests of the modal framework: openModal and closeModal through the injectable host, the absence
+// of an added Close action (the engine's x closes the pane), the pane calls of the default host (no holdToasts) and the drawing.
 import { expect, test } from 'claude-code/testing'
-import { closeModal, CLOSE_ACTION, drawModal, openModal, pressAction, resetModals, setModalHost, setPaneApi, type ModalSpec } from './modal'
+import { closeModal, drawModal, openModal, pressAction, resetModals, setModalHost, setPaneApi, type ModalSpec } from './modal'
 import { isOpen, resetToggles } from './toggles'
 import { initSources } from './source'
 import { settle, stubHost } from './testkit'
@@ -36,33 +36,32 @@ function fresh() {
   initSources(stubHost().host)
 }
 
-test('openModal hands the host the spec with a Close action added', () => {
+test('openModal hands the host the spec as it is, with no Close action added', () => {
   fresh()
   const r = recording()
   openModal(spec, () => undefined)
   expect(r.opened).toHaveLength(1)
-  expect(r.opened[0].actions.map(a => a.id)).toEqual(['apply', CLOSE_ACTION])
+  expect(r.opened[0].actions.map(a => a.id)).toEqual(['apply'])
   expect(r.opened[0].items).toEqual(spec.items)
   expect(isOpen('demo')).toBe(true)
 })
 
-test('a spec that already has a Close action is not given a second', () => {
+test('a spec with no actions produces no Close item', () => {
   fresh()
   const r = recording()
-  openModal({ ...spec, actions: [{ id: CLOSE_ACTION, label: 'Done' }] }, () => undefined)
-  expect(r.opened[0].actions).toEqual([{ id: CLOSE_ACTION, label: 'Done' }])
+  openModal({ ...spec, actions: [] }, () => undefined)
+  expect(r.opened[0].actions).toEqual([])
 })
 
-test('Close closes the modal and onAction never sees it; other actions reach onAction', async () => {
+test('the actions a spec lists reach onAction; the pane stays open until the host or closeModal closes it', async () => {
   fresh()
   const r = recording()
   const seen: string[] = []
   openModal(spec, a => void seen.push(a))
   await r.handlers[0]('apply')
-  await r.handlers[0](CLOSE_ACTION)
   expect(seen).toEqual(['apply'])
-  expect(r.closed).toEqual(['demo'])
-  expect(isOpen('demo')).toBe(false)
+  expect(r.closed).toEqual([])
+  expect(isOpen('demo')).toBe(true)
 })
 
 test('closeModal of a modal that is not open does nothing', () => {
@@ -89,7 +88,7 @@ test('the default host opens a pane with focus and Escape, and never holdToasts'
   expect(calls[1]).toEqual({ closed: 'pgd-demo' })
 })
 
-test('drawModal draws one row per item and one button per action, Close included', () => {
+test('drawModal draws one row per item and one button per action, none for Close', () => {
   fresh()
   const r = recording()
   setModalHost()
@@ -105,7 +104,10 @@ test('drawModal draws one row per item and one button per action, Close included
   ])
   expect(rows[1].children[1].color).toBe('red')
   const buttons = tree.children[2].children.filter((c: any) => c.type === 'Button')
-  expect(buttons.map((b: any) => b.label)).toEqual(['Apply', 'Close'])
-  pressAction('demo', CLOSE_ACTION)
-  expect(isOpen('demo')).toBe(false)
+  expect(buttons.map((b: any) => b.label)).toEqual(['Apply'])
+  // a spec with no actions draws no actions row at all
+  openModal({ ...spec, id: 'bare', actions: [] }, () => undefined)
+  const bare = drawModal({ Box: el('Box'), Text: el('Text'), Button: el('Button') }, 'bare') as any
+  expect(bare.children.some((c: any) => c.key === 'actions')).toBe(false)
+  pressAction('demo', 'apply')
 })

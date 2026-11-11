@@ -120,9 +120,9 @@ test('a new session id hides the record read for the old one', async () => {
 test('Stop is offered only while the mode is not finished', async () => {
   const w = await world(async () => record('drain-beads'))
   setValue('sessionMode', { mode: 'drain-beads', state: 'finished' })
-  expect(modeSpec()?.actions.map(a => a.id)).toEqual(['close'])
+  expect(modeSpec()?.actions.map(a => a.id)).toEqual([])
   setValue('sessionMode', { mode: 'drain-beads', state: 'running' })
-  expect(modeSpec()?.actions.map(a => a.id)).toEqual(['stop', 'close'])
+  expect(modeSpec()?.actions.map(a => a.id)).toEqual(['stop'])
   void w
 })
 
@@ -140,7 +140,7 @@ test('the modal lists mode, state and detail one per line; Stop runs set-status 
   expect(w.opened).toHaveLength(1)
   expect(w.opened[0].title).toBe('Session mode')
   expect(w.opened[0].items.map(i => `${i.label}: ${i.value}`)).toEqual(['mode: drain-beads', 'state: running', 'detail: P1 only'])
-  expect(w.opened[0].actions.map(a => a.id)).toEqual(['stop', 'close'])
+  expect(w.opened[0].actions.map(a => a.id)).toEqual(['stop'])
   // a press shortly after the first read: Stop still reads at once (the throttle is bypassed)
   pressAction('mode', 'stop')
   await settle()

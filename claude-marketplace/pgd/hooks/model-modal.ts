@@ -13,7 +13,7 @@ import type { ModApi, PgdOptions } from './types'
 //    current: true. A current model that is not a choice is appended as an extra item. A blank
 //    effort (before the first turn) is one item labelled `effort` with an empty value and no current.
 //  - Actions: `apply-model:<id>` (label `Apply <id>`) and `effort:<level>` (label `Effort <level>`),
-//    then the framework's Close.
+//    and no Close (the engine's x closes the pane).
 //  - Apply passes the model id string: host.config.set({ key: 'model', value }); the cached model is
 //    then read again with a forced refresh('model'), and the modal closes.
 //  - An effort choice calls host.prompt.fill({ text: '/effort <level>', mode: 'replace' }) and never
