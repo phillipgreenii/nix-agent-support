@@ -318,6 +318,13 @@ func (s *runner) afterConflicts(ctx context.Context, work, base string, cr *conf
 		return nil, err
 	}
 	s.stats.ConflictRounds = cr.Rounds
+	if p.Diag != nil {
+		// The conflict loop's attribute checks may have found an attribute that
+		// names a merge driver with no definition (design section 9.4).
+		for _, w := range p.Diag.Warnings() {
+			s.addWarning(w)
+		}
+	}
 	s.resolved = append(s.resolved, cr.Resolved...)
 	s.dropped = append(s.dropped, cr.Dropped...)
 	if err := s.conflictEvents(ctx, cr); err != nil {
@@ -768,4 +775,14 @@ type resumePlan struct {
 	nothing bool
 	// conflictRounds is kept across a resume.
 	conflictRounds int
+}
+
+// addWarning records a warning word once.
+func (s *runner) addWarning(w outcome.Warning) {
+	for _, e := range s.entries {
+		if e.Warning == w {
+			return
+		}
+	}
+	s.entries = append(s.entries, outcome.WarningEntry{Warning: w})
 }

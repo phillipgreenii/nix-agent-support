@@ -7534,9 +7534,12 @@
                   pname = "pg-git-lander-integration-tests";
                   src = ./packages/pg-git-lander;
                   gomod2nixToml = ./packages/pg-git-lander/gomod2nix.toml;
+                  # mergiraf: the tier 2 real-merge-driver scenario must run in this
+                  # gate, not skip (the buildPhase below fails on any SKIP).
                   testDeps = [
                     pkgs.bash
                     pkgs.git
+                    pkgs.mergiraf
                   ];
                 }).overrideAttrs
                   (_: {

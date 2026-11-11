@@ -169,6 +169,17 @@ func (r *Resolver) loop(ctx context.Context, in Input, res *Result, pending []st
 		if err != nil {
 			return nil, err
 		}
+		// Design section 9.4: every conflicted path is checked for the merge
+		// attribute too, so an attribute naming an undefined driver is found.
+		var unchecked []string
+		for _, p := range paths {
+			if _, ok := diag.Attrs[p]; !ok {
+				unchecked = append(unchecked, p)
+			}
+		}
+		if err := r.Rebase.CheckAttrs(ctx, in.Dir, diag, unchecked); err != nil {
+			return nil, err
+		}
 		if err := r.driverEntries(ctx, in.Dir, diag, pending, commit, res); err != nil {
 			return nil, err
 		}
