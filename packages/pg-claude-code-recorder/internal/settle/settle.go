@@ -139,11 +139,11 @@ type Config struct {
 	Obs   *obs.Obs
 	// ClaudeDir is the Claude directory (file paths in manifests are relative to it).
 	ClaudeDir string
-	// After is settle.after, Recheck held.recheck, HeldAlertAfter held.alertAfter.
-	After, Recheck, HeldAlertAfter time.Duration
-	MinFreeBytes                   int64
-	MaxLineBytes                   int
-	Free                           FreeSpace
+	// After is settle.after, Recheck held.recheck.
+	After, Recheck time.Duration
+	MinFreeBytes   int64
+	MaxLineBytes   int
+	Free           FreeSpace
 	// Mtime reads a file's modification time (os.Lstat when nil).
 	Mtime func(path string) (time.Time, error)
 	Hooks Hooks

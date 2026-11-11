@@ -295,7 +295,7 @@ func Open(opt Options) (*Daemon, error) {
 	})
 	d.sett = settle.New(settle.Config{
 		Store: st, Copier: d.cp, Parser: d.prs, Live: d.eng.LiveSessions, Clock: opt.Clock, Obs: o,
-		ClaudeDir: cfg.ClaudeDir, After: cfg.SettleAfter, Recheck: cfg.HeldRecheck, HeldAlertAfter: cfg.HeldMaxAge,
+		ClaudeDir: cfg.ClaudeDir, After: cfg.SettleAfter, Recheck: cfg.HeldRecheck,
 		MinFreeBytes: cfg.MinFreeBytes, MaxLineBytes: cfg.ParseMaxLineBytes, Free: settle.FreeFunc(FreeBytes),
 		RemoveEnable: cfg.RemoveEnable, RemoveAfter: cfg.RemoveAfter, MaxPerRun: cfg.RemoveMaxPerRun, MaxPerHour: cfg.RemoveMaxPerHour,
 		DueShare: cfg.RemoveDueShare, DueEvery: cfg.RemoveDueEvery, Mode: cfg.SettleMode, Reconcile: cfg.SettleReconcile, MinWake: cfg.SettleMinWake,
