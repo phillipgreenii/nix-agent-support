@@ -1,0 +1,6 @@
+stopped: land feature/x: conflict in docs/guide.md, no conflict rule matches
+  work worktree: /src/example/.worktrees/feature-x   (work branch pg-git-lander/20261107T101500Z-3f9c2a)
+  resolve and `git add` the files there, then:  pg-git-lander land feature/x --continue
+  drop the replayed commit instead:             pg-git-lander land feature/x --skip
+  give up:                                      pg-git-lander land feature/x --abort
+  keep the worktree and work branch, stop tracking: pg-git-lander land feature/x --quit
