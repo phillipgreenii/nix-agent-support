@@ -33,7 +33,7 @@
       "verdict": "approve",
       "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"
     },
-    "gate list --json": {
+    "level list --json": {
       "role": "literal",
       "verdict": "approve",
       "policyBasis": "no effect is produced by a literal flag; the node only has its stdout EffectStdio, judged by effectpolicy.StdioIsLocal (always Permitted)"

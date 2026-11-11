@@ -148,21 +148,21 @@
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
-      "gate": {
-        "name": "gate",
-        "provenance": "pg-router --help, gate (set | clear | list [--json])",
+      "explain": {
+        "name": "explain",
+        "provenance": "pg-router --help, explain <role>: the current admission decision of one role, read from the RUNNING core",
         "citations": {
           "provenance": {
-            "source": "pg-router --help, Subcommands: \"gate (set <TYPE> ... | clear (<TYPE> | --all) ... | list [--json])\"; only `list` is modeled, set and clear change gate state"
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
           },
           "stdin": {
-            "source": "pg-router --help: gate takes no stdin"
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
           },
           "stdout": {
-            "source": "pg-router --help: gate prints text; the modeled verb (list) is read-only"
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
           },
           "unknownFlag": {
-            "source": "pg-router --help: gate has no flag of its own before its verb (--socket and --token come after it and are not modeled)"
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
           }
         },
         "positionals": {
@@ -175,64 +175,13 @@
             }
           },
           "citation": {
-            "source": "pg-router --help: \"gate (set ... | clear ... | list [--json])\": the verb is the subcommand word"
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
           }
         },
         "stdin": "never",
-        "stdout": "none",
+        "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true,
-        "subcommands": {
-          "list": {
-            "name": "list",
-            "provenance": "pg-router --help, gate list [--json]: list the active gates",
-            "citations": {
-              "provenance": {
-                "source": "pg-router --help: \"gate list [--json]  list the active gates (TYPE, owner, set-at, TTL remaining, description)\""
-              },
-              "stdin": {
-                "source": "pg-router --help: gate list reads no stdin"
-              },
-              "stdout": {
-                "source": "pg-router --help: \"gate list [--json]  list the active gates\" (content)"
-              },
-              "unknownFlag": {
-                "source": "pg-router --help: gate list takes [--json] only here; --socket and --token are not modeled"
-              }
-            },
-            "flags": {
-              "--json": {
-                "arity": "none",
-                "operand": {
-                  "kind": "literal"
-                },
-                "transform": {
-                  "kind": "none"
-                },
-                "citation": {
-                  "source": "pg-router --help: \"gate list [--json]\""
-                }
-              }
-            },
-            "positionals": {
-              "rest": {
-                "kind": "unmodeled"
-              },
-              "restOverride": {
-                "role": {
-                  "kind": "literal"
-                }
-              },
-              "citation": {
-                "source": "pg-router --help: \"gate list [--json]\" takes no operand"
-              }
-            },
-            "stdin": "never",
-            "stdout": "content",
-            "unknownFlag": "insufficient",
-            "endOfOptions": true
-          }
-        }
+        "endOfOptions": true
       },
       "help": {
         "name": "help",
@@ -268,6 +217,92 @@
         "stdout": "metadata",
         "unknownFlag": "insufficient",
         "endOfOptions": true
+      },
+      "level": {
+        "name": "level",
+        "provenance": "pg-router --help, level (list [--json] | set ... | clear ... | refresh ...)",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "list": {
+            "name": "list",
+            "provenance": "pg-router --help, level list [--json]: list every resource with the level in force",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+              }
+            },
+            "flags": {
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
       },
       "status": {
         "name": "status",

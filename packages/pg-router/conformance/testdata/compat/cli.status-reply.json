@@ -8,5 +8,6 @@
     }
   ],
   "queues": [{ "type": "review-requested", "depth": 3 }],
-  "config": { "sources": 2, "handlers": 3 }
+  "config": { "sources": 2, "handlers": 3 },
+  "levels": [{ "resource": "router" }]
 }

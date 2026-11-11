@@ -14770,12 +14770,12 @@
     "notes": "pg2-niyyq: wtnew creates one worktree under .worktrees and prints read-only integrate-branch-support facts; git worktree add already approves."
   },
   {
-    "case": "support_tool_pg_router_gate_list_approve",
+    "case": "support_tool_pg_router_level_list_approve",
     "tags": ["plugin-support-tool", "pg2-niyyq"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pg-router gate list --json"
+        "command": "pg-router level list --json"
       }
     },
     "cwd_path_state": {
@@ -14824,7 +14824,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-niyyq: sets the pool-wide SYSTEM_PAUSE gate; a mutating subcommand a blanket approval would hand to any session, so it abstains."
+    "notes": "pg2-niyyq: sets the operator PAUSED level on resource router; a mutating subcommand a blanket approval would hand to any session, so it abstains."
   },
   {
     "case": "support_tool_pg_router_resume_not_approve",
@@ -14843,15 +14843,15 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-niyyq: clears every gate on the running core; abstains."
+    "notes": "pg2-niyyq: clears every operator level override on the running core; abstains."
   },
   {
-    "case": "support_tool_pg_router_gate_set_not_approve",
+    "case": "support_tool_pg_router_level_set_not_approve",
     "tags": ["plugin-support-tool", "pg2-niyyq"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pg-router gate set LOW_DISK_USAGE"
+        "command": "pg-router level set disk TIGHT --for 1h"
       }
     },
     "cwd_path_state": {
@@ -14862,7 +14862,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-niyyq: sets a gate; abstains."
+    "notes": "pg2-niyyq: sets an operator level override; abstains."
   },
   {
     "case": "support_tool_pg_router_doctor_not_approve",

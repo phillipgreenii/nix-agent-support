@@ -1,1 +1,5 @@
-{ "schemaVersion": "1", "outcome": "rejected", "reason": "older_than_held" }
+{
+  "schemaVersion": "1",
+  "outcome": "rejected",
+  "reason": "not_registered_sensor"
+}

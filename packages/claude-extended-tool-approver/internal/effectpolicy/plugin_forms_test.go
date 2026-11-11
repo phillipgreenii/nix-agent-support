@@ -636,8 +636,8 @@ var pluginForms = []pluginForm{
 	// the in-command variable rows are TestPluginSupportToolDecisions.
 	{"pb", `hand-to-human pg2-abc12 --actor sess-1`, evalcontract.Approve, ""},
 	{"pb", `hand-to-human pg2-abc12 --also-add stale-escalation --note "Automation timed out." --if-assignee "" --if-status open`, evalcontract.Approve, ""},
-	{"pb", `pg-router gate list`, evalcontract.Approve, ""},
-	{"pb", `pg-router pause`, evalcontract.Abstain, "sets the pool-wide SYSTEM_PAUSE gate: a mutating subcommand, not blanket-approved"},
+	{"pb", `pg-router level list`, evalcontract.Approve, ""},
+	{"pb", `pg-router pause`, evalcontract.Abstain, "sets the operator PAUSED level on resource router: a mutating subcommand, not blanket-approved"},
 	{"integrate-branch", `wtnew pg2-abc12`, evalcontract.Approve, ""},
 	{"integrate-branch", "WT=<ROOT>\nbgrun preland-x -- bash -c \"cd $WT && integrate-branch-support --prek-branch-diff\"", evalcontract.Approve, ""},
 }

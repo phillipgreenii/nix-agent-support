@@ -44,12 +44,13 @@ package cmddesc
 //	                          bgkill rule of the live chain keeps that decision.
 //	pb                        APPROVE the instructed verbs (registry_pb.go).
 //	pg-router                 APPROVE only the READ-ONLY subcommands: status,
-//	                          gate list, config --show / --print-defaults / check,
-//	                          version, help (pgRouterSchema, below). ABSTAIN on every
-//	                          mutating or process-starting one: pause, resume, gate
-//	                          set, gate clear, push-inject, log compact, run,
-//	                          run-until-idle, run-role, run-query, doctor, tui,
-//	                          ingest-event, self-status.
+//	                          level list, explain, config --show / --print-defaults /
+//	                          check, version, help (pgRouterSchema, below). ABSTAIN
+//	                          on every mutating or process-starting one: pause,
+//	                          resume, level set, level clear, level refresh,
+//	                          push-inject, log compact, run, run-until-idle,
+//	                          run-role, run-query, doctor, tui, ingest-event,
+//	                          self-status.
 //	example-tick-probe  NOT A PACKAGE OF THIS REPO. It ships in a consumer's
 //	                          monorepo, and this public repo MUST NOT name that
 //	                          consumer's tools (repo CLAUDE.md, "No ZipRecruiter
@@ -123,17 +124,18 @@ var wtnewSchema = CommandSchema{
 // ---- pg-router (packages/pg-router) -----------------------------------------
 
 // pgRouterSchema models ONLY the read-only subcommands (see this file's header
-// for the abstain list). `status` and `gate list` inspect the RUNNING core over its
-// local socket and "NEVER start a core"; `config --show`, `config --print-defaults`
+// for the abstain list). `status`, `level list` and `explain <role>` inspect the
+// RUNNING core over its local socket and "NEVER start a core"; `config --show`, `config --print-defaults`
 // and `config check` read the resolved config (`check` stats the named handler
 // files, it runs none); `version` and `help` print. Deliberately absent, so any
 // of them abstains:
 //
 //   - --socket and --token: they name which core, and a token, to talk to; a
 //     caller-chosen socket is a path this model does not vet;
-//   - pause, resume, gate set, gate clear, push-inject, log compact: they change
-//     the running core's state (the pool-wide SYSTEM_PAUSE gate, the queue, the
-//     event log), which a blanket approval would hand to any session;
+//   - pause, resume, level set, level clear, level refresh, push-inject, log
+//     compact: they change the running core's state (the operator level override
+//     on resource router, a level override, the queue, the event log), which a
+//     blanket approval would hand to any session;
 //   - run, run-until-idle, run-role, run-query, doctor, tui, ingest-event,
 //     self-status: they start a core, execute configured sources and handlers
 //     (doctor runs each handler's `validate`), or are manager-to-core callbacks.
@@ -156,16 +158,26 @@ var pgRouterSchema = CommandSchema{
 			UnknownFlag:  UnknownFlagInsufficient,
 			EndOfOptions: true,
 		},
-		"gate": {
-			Name:         "gate",
-			Provenance:   "pg-router --help, gate (set | clear | list [--json])",
+		"explain": {
+			Name:         "explain",
+			Provenance:   "pg-router --help, explain <role>: the current admission decision of one role, read from the RUNNING core",
+			Flags:        map[string]FlagSpec{},
+			Positionals:  PositionalSpec{Rest: Literal},
+			Stdin:        StdinNever,
+			Stdout:       StdoutContent,
+			UnknownFlag:  UnknownFlagInsufficient,
+			EndOfOptions: true,
+		},
+		"level": {
+			Name:         "level",
+			Provenance:   "pg-router --help, level (list [--json] | set ... | clear ... | refresh ...)",
 			Flags:        map[string]FlagSpec{},
 			UnknownFlag:  UnknownFlagInsufficient,
 			EndOfOptions: true,
 			Subcommands: map[string]CommandSchema{
 				"list": {
 					Name:         "list",
-					Provenance:   "pg-router --help, gate list [--json]: list the active gates",
+					Provenance:   "pg-router --help, level list [--json]: list every resource with the level in force",
 					Flags:        map[string]FlagSpec{"--json": inert},
 					Positionals:  PositionalSpec{Rest: Unmodeled},
 					Stdin:        StdinNever,

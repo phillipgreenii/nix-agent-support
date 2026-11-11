@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1",
-  "resource": "network",
-  "level": "DOWN",
+  "resource": "router",
+  "level": "PAUSED",
   "until_cleared": false,
   "expires_at": "2026-11-11T08:00:00Z"
 }

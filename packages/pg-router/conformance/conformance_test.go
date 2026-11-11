@@ -50,6 +50,66 @@ func TestBackwardCompat_LegacyGoldens(t *testing.T) {
 	}
 }
 
+// TestBackwardCompat_LevelsAreOptionalAndGatesRemoved pins the level-era
+// contract on the compat anchor: the anchor carries a minimal levels entry (a
+// resource that has never answered, listed with no level), a reply without the
+// levels field still validates (a core with no resources reports none), and the
+// removed gates field is rejected.
+func TestBackwardCompat_LevelsAreOptionalAndGatesRemoved(t *testing.T) {
+	b, err := compatGolden.ReadFile("testdata/compat/cli.status-reply.json")
+	if err != nil {
+		t.Fatalf("read compat golden: %v", err)
+	}
+	decode := func() map[string]any {
+		var v map[string]any
+		if err := json.Unmarshal(b, &v); err != nil {
+			t.Fatalf("decode compat golden: %v", err)
+		}
+		return v
+	}
+	if _, ok := decode()["levels"]; !ok {
+		t.Fatal("compat anchor carries no levels entry")
+	}
+	noLevels := decode()
+	delete(noLevels, "levels")
+	if err := Check("cli.status-reply", noLevels); err != nil {
+		t.Errorf("a reply without levels was rejected: %v", err)
+	}
+	withGates := decode()
+	withGates["gates"] = []any{}
+	if err := Check("cli.status-reply", withGates); err == nil {
+		t.Error("the removed gates field was accepted")
+	}
+}
+
+// TestLevelGoldens_RouterAndIngestRejection pins the hand-reviewed level
+// goldens: level-set and level-clear address resource router (the pause level),
+// and a level-ingest request whose owner is the reserved operator value is
+// schema-valid (the router, not the schema, rejects it) while its reply golden
+// carries reason not_registered_sensor.
+func TestLevelGoldens_RouterAndIngestRejection(t *testing.T) {
+	for _, mt := range []string{"cli.level-set", "cli.level-set-reply", "cli.level-clear"} {
+		if got := loadGolden(t, mt)["resource"]; got != "router" {
+			t.Errorf("%s resource = %v, want router", mt, got)
+		}
+	}
+	if got := loadGolden(t, "cli.level-set")["level"]; got != "PAUSED" {
+		t.Errorf("cli.level-set level = %v, want PAUSED", got)
+	}
+	if got := loadGolden(t, "cli.level-clear-reply")["cleared"]; len(got.([]any)) != 1 || got.([]any)[0] != "router" {
+		t.Errorf("cli.level-clear-reply cleared = %v, want [router]", got)
+	}
+	req := loadGolden(t, "source.level-answer")
+	req["owner"] = "operator"
+	if err := Check("cli.level-ingest", req); err != nil {
+		t.Errorf("level-ingest with owner operator is a router decision, not a schema one: %v", err)
+	}
+	reply := loadGolden(t, "cli.level-ingest-reply")
+	if reply["outcome"] != "rejected" || reply["reason"] != "not_registered_sensor" {
+		t.Errorf("cli.level-ingest-reply = %v, want rejected / not_registered_sensor", reply)
+	}
+}
+
 // TestStatusReply_ListenerProgressShape pins the per-listener `progress` key
 // (docket pg2-12gr4.8): required, null or exactly {ageSeconds, unsuccessful, busy}.
 func TestStatusReply_ListenerProgressShape(t *testing.T) {
