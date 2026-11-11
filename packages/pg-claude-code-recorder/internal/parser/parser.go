@@ -816,6 +816,9 @@ WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.
 	if err := p.clearExt(tx, file, gen); err != nil {
 		return err
 	}
+	if err := p.clearAsk(tx, file, gen); err != nil {
+		return err
+	}
 	for _, s := range stmts {
 		if _, err := tx.Exec(s, file, gen); err != nil {
 			return err
@@ -1126,6 +1129,9 @@ ON CONFLICT(rec_id,name_id) DO UPDATE SET s=excluded.s, n=excluded.n, f=excluded
 			}
 		}
 		if err := insertExt(tx, id, extRows); err != nil {
+			return err
+		}
+		if err := p.noteAsk(tx, src.Name(), caps, r, ref, tns, id); err != nil {
 			return err
 		}
 		for _, u := range r.Unknown {

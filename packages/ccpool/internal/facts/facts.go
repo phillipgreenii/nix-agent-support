@@ -231,6 +231,37 @@ const (
 )
 
 // IsAwaitingInput reports whether the session has an AskUserQuestion tool_use
+// with no tool_result yet. It asks the recorder's sessions.facts (a read of the
+// recorder's derived ask tables, whose cost does not depend on the size of the
+// session) and falls back to IsAwaitingInputByQuery when the recorder predates the
+// operation or has not finished deriving the tables for an older database.
+func (r *Reader) IsAwaitingInput(path string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c, err := r.conn(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !c.HasCapability("sessions.facts") {
+		return r.IsAwaitingInputByQuery(path)
+	}
+	id := SessionID(path)
+	ans, err := c.SessionsFacts(ctx, []string{id}, []string{client.FactAwaitingInput})
+	if err != nil {
+		if werr := wrapErr(err); errors.Is(werr, ErrDaemonOffline) {
+			r.reset()
+			return false, werr
+		}
+		return false, err
+	}
+	if len(ans.Unavailable) > 0 {
+		return r.IsAwaitingInputByQuery(path)
+	}
+	f := ans.Sessions[id]
+	return f.AwaitingInput != nil && f.AwaitingInput.Open, nil
+}
+
+// IsAwaitingInputByQuery is the two-query form of IsAwaitingInput: it reports whether the session has an AskUserQuestion tool_use
 // with no tool_result yet (the facts are the two record kinds; the verdict is
 // ccpool's). It is a direct, bounded read of at most two queries: the newest
 // awaitingCandidates questions (newest first, with their record times), then ONE
@@ -241,7 +272,7 @@ const (
 // source filter so the recorder's (session, source, time) index serves them; a
 // per-id tool_result lookup is not used because tool_use_id has no index and
 // would walk the whole session.
-func (r *Reader) IsAwaitingInput(path string) (bool, error) {
+func (r *Reader) IsAwaitingInputByQuery(path string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	id := SessionID(path)

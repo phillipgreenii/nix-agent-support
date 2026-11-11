@@ -557,6 +557,7 @@ func (s *Store) openDB(path string, bulk bool) error {
 	// background and marked when that finishes (see filefacts.go).
 	if hasRecords == 0 {
 		ddl += `INSERT OR IGNORE INTO meta(key,value) VALUES('` + MetaFileFactsComplete + `','1');` + "\n"
+		ddl += `INSERT OR IGNORE INTO meta(key,value) VALUES('` + MetaAskFactsComplete + `','1');` + "\n"
 	}
 	if err := execInTx(w, ddl); err != nil {
 		_ = w.Close()

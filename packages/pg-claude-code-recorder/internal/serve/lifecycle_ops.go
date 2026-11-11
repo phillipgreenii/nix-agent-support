@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/lifecycle"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
 
@@ -88,4 +91,49 @@ func (d *Daemon) opProcessList(ctx context.Context, body []byte) (any, *wire.Err
 		ps = []lifecycle.Process{}
 	}
 	return lifecycle.ProcessList{Processes: ps, Degraded: !d.backfillDone.Load()}, nil
+}
+
+// opSessionsFacts answers per-session facts for a list of session ids from the
+// derived ask tables (no scan of a session's records).
+func (d *Daemon) opSessionsFacts(ctx context.Context, body []byte) (any, *wire.Error) {
+	var req lifecycle.SessionsFacts
+	if werr := decodeBody(body, &req); werr != nil {
+		return nil, werr
+	}
+	if len(req.SessionIDs) == 0 || len(req.SessionIDs) > lifecycle.SessionFactsMax {
+		return nil, wire.Errf(wire.ErrBadRequest, fmt.Sprintf("sessions.facts needs 1 to %d session_ids", lifecycle.SessionFactsMax))
+	}
+	var wantAsk bool
+	for _, f := range req.Fields {
+		if f != lifecycle.FactAwaitingInput {
+			return nil, wire.Errf(wire.ErrBadRequest, fmt.Sprintf("sessions.facts: unknown field %q", f))
+		}
+		wantAsk = true
+	}
+	out := lifecycle.SessionsFactsAnswer{Sessions: map[string]lifecycle.SessionFacts{}}
+	for _, id := range req.SessionIDs {
+		sf := lifecycle.SessionFacts{}
+		if wantAsk {
+			af, err := d.st.Reader.AskFacts(ctx, id, d.st.SessionRefReady())
+			switch {
+			case errors.Is(err, store.ErrAskFactsUnavailable):
+				if len(out.Unavailable) == 0 {
+					out.Unavailable = []string{lifecycle.FactAwaitingInput}
+				}
+			case err != nil:
+				return nil, wire.FromErr(err)
+			default:
+				sf.Found = af.Known
+				if af.Known {
+					a := &lifecycle.AwaitingInput{Open: af.Open, ToolUseID: af.ToolUseID}
+					if af.Open {
+						a.AskedAt = time.Unix(0, af.AskedNS).UTC()
+					}
+					sf.AwaitingInput = a
+				}
+			}
+		}
+		out.Sessions[id] = sf
+	}
+	return out, nil
 }

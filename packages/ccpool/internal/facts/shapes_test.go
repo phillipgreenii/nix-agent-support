@@ -164,8 +164,12 @@ func TestAwaitingInputAgreesWithTheLegacyTwoQueryForm(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if legacy := legacyAwaiting(t, e, sess); got != legacy || got != tc.want {
-				t.Fatalf("IsAwaitingInput = %v, legacy = %v, want %v", got, legacy, tc.want)
+			byQuery, err := newReader(e).IsAwaitingInputByQuery(transcriptPath(e))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if legacy := legacyAwaiting(t, e, sess); got != legacy || got != tc.want || byQuery != got {
+				t.Fatalf("IsAwaitingInput = %v, by query = %v, legacy = %v, want %v", got, byQuery, legacy, tc.want)
 			}
 		})
 	}
@@ -194,7 +198,7 @@ func TestStateReadsOnABigSessionAreBoundedAndNeverLookUpPerId(t *testing.T) {
 	r, rec := proxyTo(t, e)
 	path := transcriptPath(e)
 
-	if aw, err := r.IsAwaitingInput(path); err != nil || !aw {
+	if aw, err := r.IsAwaitingInputByQuery(path); err != nil || !aw {
 		t.Fatalf("IsAwaitingInput = %v, %v; want true", aw, err)
 	}
 	if _, ok, err := r.MessageActivity(path); err != nil || !ok {
@@ -239,7 +243,7 @@ func TestAwaitingInputIsAtMostTwoQueriesHoweverManyQuestions(t *testing.T) {
 	e.Write(filepath.Join("projects", e.Project, sess+".jsonl"), b.String())
 	e.Settle()
 	r, rec := proxyTo(t, e)
-	if aw, err := r.IsAwaitingInput(transcriptPath(e)); err != nil || !aw {
+	if aw, err := r.IsAwaitingInputByQuery(transcriptPath(e)); err != nil || !aw {
 		t.Fatalf("awaiting = %v, %v", aw, err)
 	}
 	if n := len(rec.snapshot()); n != 2 {
@@ -254,7 +258,7 @@ func TestAwaitingInputFloorsTheResultPageAtTheOldestCandidate(t *testing.T) {
 		resultLine("2026-01-01T00:00:01Z", "ancient")+askLine("2026-01-01T00:00:05Z", "m1", "t1"))
 	e.Settle()
 	r, rec := proxyTo(t, e)
-	if aw, err := r.IsAwaitingInput(transcriptPath(e)); err != nil || !aw {
+	if aw, err := r.IsAwaitingInputByQuery(transcriptPath(e)); err != nil || !aw {
 		t.Fatalf("awaiting = %v, %v", aw, err)
 	}
 	qs := rec.snapshot()
@@ -268,7 +272,7 @@ func TestAwaitingInputAsksForTheNewestQuestionsFirstAndCapsThem(t *testing.T) {
 	e.Write(filepath.Join("projects", e.Project, sess+".jsonl"), userLine("2026-01-01T00:00:01Z", "hi"))
 	e.Settle()
 	r, rec := proxyTo(t, e)
-	if aw, err := r.IsAwaitingInput(transcriptPath(e)); err != nil || aw {
+	if aw, err := r.IsAwaitingInputByQuery(transcriptPath(e)); err != nil || aw {
 		t.Fatalf("awaiting = %v, %v", aw, err)
 	}
 	qs := rec.snapshot()
@@ -306,5 +310,27 @@ func TestLastAssistantTextSinceFloorsTheReadAndTheAnswer(t *testing.T) {
 	}
 	if q := rec.snapshot(); len(q) != 1 || strings.Contains(q[0].Raw, `"gte"`) {
 		t.Fatalf("unfloored query carried a floor: %+v", q)
+	}
+}
+
+// IsAwaitingInput reads the recorder's derived ask tables through
+// sessions.facts: it sends no query at all, however big the session is.
+func TestAwaitingInputSendsNoQueryToTheRecorder(t *testing.T) {
+	e := clienttest.Start(t)
+	var b strings.Builder
+	b.WriteString(askLine("2026-01-01T00:00:02Z", "m0", "q-answered"))
+	b.WriteString(resultLine("2026-01-01T00:00:03Z", "q-answered"))
+	for i := 0; i < 2000; i++ {
+		b.WriteString(resultLine("2026-01-01T00:01:00Z", fmt.Sprintf("bulk-%d", i)))
+	}
+	b.WriteString(askLine("2026-01-01T00:02:00Z", "m1", "q-open"))
+	e.Write(filepath.Join("projects", e.Project, sess+".jsonl"), b.String())
+	e.Settle()
+	r, rec := proxyTo(t, e)
+	if aw, err := r.IsAwaitingInput(transcriptPath(e)); err != nil || !aw {
+		t.Fatalf("awaiting = %v, %v; want true", aw, err)
+	}
+	if qs := rec.snapshot(); len(qs) != 0 {
+		t.Fatalf("%d /query requests, want 0: %v", len(qs), qs)
 	}
 }

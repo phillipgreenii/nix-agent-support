@@ -267,3 +267,41 @@ type ProcessList struct {
 type Poster interface {
 	Post(ctx context.Context, op string, body, out any) error
 }
+
+// SessionsFacts is the sessions.facts request: per-session facts for a bounded
+// list of session ids, each field requested by name so a caller pays only for
+// what it names. The only field today is "awaiting_input".
+type SessionsFacts struct {
+	SessionIDs []string `json:"session_ids"`
+	Fields     []string `json:"fields"`
+}
+
+// SessionFactsMax is the most session ids one sessions.facts request may carry.
+const SessionFactsMax = 500
+
+// FactAwaitingInput is the sessions.facts field name of the awaiting-input fact.
+const FactAwaitingInput = "awaiting_input"
+
+// AwaitingInput is the awaiting-input fact of one session: a question among the
+// newest 50 AskUserQuestion tool_uses of the session's own transcript that no
+// tool_result answers. ToolUseID and AskedAt describe the newest such question.
+type AwaitingInput struct {
+	Open      bool      `json:"open"`
+	ToolUseID string    `json:"tool_use_id,omitempty"`
+	AskedAt   time.Time `json:"asked_at,omitempty"`
+}
+
+// SessionFacts is the facts of one session. Found is false for a session the
+// recorder has never seen.
+type SessionFacts struct {
+	Found         bool           `json:"found"`
+	AwaitingInput *AwaitingInput `json:"awaiting_input,omitempty"`
+}
+
+// SessionsFactsAnswer is the sessions.facts answer. Unavailable lists requested
+// fields the recorder cannot serve yet (a backfill is running); a caller falls
+// back to its own query for those and never reads a negative from them.
+type SessionsFactsAnswer struct {
+	Sessions    map[string]SessionFacts `json:"sessions"`
+	Unavailable []string                `json:"unavailable,omitempty"`
+}

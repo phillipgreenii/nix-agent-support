@@ -118,3 +118,37 @@ func (c *Client) Crashed(ctx context.Context, since time.Time) ([]EndedConversat
 	}
 	return res.Rows, nil
 }
+
+// The sessions.facts types.
+type (
+	// SessionsFactsAnswer is the sessions.facts answer.
+	SessionsFactsAnswer = lifecycle.SessionsFactsAnswer
+	// SessionFacts is the facts of one session.
+	SessionFacts = lifecycle.SessionFacts
+	// AwaitingInput is the awaiting-input fact of one session.
+	AwaitingInput = lifecycle.AwaitingInput
+)
+
+// FactAwaitingInput names the awaiting-input field of SessionsFacts.
+const FactAwaitingInput = lifecycle.FactAwaitingInput
+
+// HasCapability reports whether the daemon's last hello listed the operation.
+func (c *Client) HasCapability(op string) bool {
+	for _, x := range c.hello.Capabilities {
+		if x == op {
+			return true
+		}
+	}
+	return false
+}
+
+// SessionsFacts returns per-session facts for at most 500 session ids, each
+// field named in fields. A field listed in Unavailable is not served yet and the
+// caller must read it another way.
+func (c *Client) SessionsFacts(ctx context.Context, ids, fields []string) (*SessionsFactsAnswer, error) {
+	var ans SessionsFactsAnswer
+	if err := c.post(ctx, "sessions.facts", 0, lifecycle.SessionsFacts{SessionIDs: ids, Fields: fields}, &ans); err != nil {
+		return nil, err
+	}
+	return &ans, nil
+}

@@ -30,6 +30,7 @@ var cancelBodies = map[string]string{
 	"conversation.list": `{}`,
 	"process.show":      `{"pid":1}`,
 	"process.list":      `{}`,
+	"sessions.facts":    `{"session_ids":["example-session"],"fields":["awaiting_input"]}`,
 	"held":              `{}`,
 	"where":             `{"session":"example-session"}`,
 }

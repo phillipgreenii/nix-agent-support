@@ -597,6 +597,7 @@ func (d *Daemon) registerOps() {
 	d.srv.Register("conversation.list", server.KindQuery, d.opConversationList)
 	d.srv.Register("process.show", server.KindQuery, d.opProcessShow)
 	d.srv.Register("process.list", server.KindQuery, d.opProcessList)
+	d.srv.Register("sessions.facts", server.KindQuery, d.opSessionsFacts)
 	d.srv.Register("held", server.KindQuery, d.opHeld)
 	d.srv.Register("where", server.KindQuery, d.opWhere)
 	d.srv.Register("remove", server.KindQuery, d.opRemove)
@@ -642,6 +643,7 @@ func (d *Daemon) Start() error {
 	d.startLagRebuild()
 	d.goLoop("lag_reconcile", d.lagReconcileLoop)
 	d.goLoop("file_facts", d.fileFactsLoop)
+	d.goLoop("ask_facts", d.askFactsLoop)
 	d.statusLoopOn.Store(true)
 	d.goLoop("status", d.statusLoop)
 	d.goLoop("wal_checkpoint", d.walCheckpointLoop)
@@ -1067,6 +1069,44 @@ func (d *Daemon) fileFactsPass(ctx context.Context, after *int64) time.Duration 
 		d.obs.Log.Warn("file_facts_drift", "file", dr.File, "stored_ns", dr.Stored, "recomputed_ns", dr.Computed, "missing", dr.Missing)
 	}
 	return fileFactsCheckEvery
+}
+
+const (
+	askFactsStart = 45 * time.Second
+	askFactsGap   = 2 * time.Second
+	askFactsWait  = 10 * time.Minute
+)
+
+// askFactsLoop backfills the ask tables of a database that existed before them,
+// one bounded write transaction per pass, then idles.
+func (d *Daemon) askFactsLoop() {
+	wait := askFactsStart
+	for {
+		tick, stop := d.timer("ask_facts", wait)
+		select {
+		case <-d.stop:
+			stop()
+			return
+		case <-tick:
+		}
+		stop()
+		if d.st.AskFactsComplete() {
+			return
+		}
+		ctx, cancel := context.WithCancel(d.rootCtx())
+		done, err := d.prs.BackfillAskFacts(ctx)
+		cancel()
+		switch {
+		case err != nil:
+			d.obs.Log.Warn("ask_facts_backfill_failed", "err", err.Error())
+			wait = askFactsWait
+		case done:
+			d.obs.Event("ask_facts_backfill_done")
+			return
+		default:
+			wait = askFactsGap
+		}
+	}
 }
 
 // refreshGaugesPass is the body of one refresh_gauges pass.

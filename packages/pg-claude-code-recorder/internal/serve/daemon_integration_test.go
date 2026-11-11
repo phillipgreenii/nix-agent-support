@@ -488,7 +488,7 @@ func TestHelloAndTheDaemonFeedOperations(t *testing.T) {
 	if h.ProtocolVersion != wire.ProtocolVersion || h.SchemaVersion < 1 || h.Epoch < 1 || h.Service == "" {
 		t.Fatalf("hello %+v", h)
 	}
-	want := []string{"conversation.list", "conversation.show", "coverage", "doctor", "extract", "feed", "files.inventory", "held", "hello", "process.list", "process.show", "query", "raw", "remove", "search", "snapshot", "status", "sweep", "where"}
+	want := []string{"conversation.list", "conversation.show", "coverage", "doctor", "extract", "feed", "files.inventory", "held", "hello", "process.list", "process.show", "query", "raw", "remove", "search", "sessions.facts", "snapshot", "status", "sweep", "where"}
 	if strings.Join(h.Capabilities, ",") != strings.Join(want, ",") {
 		t.Fatalf("capabilities %v, want %v", h.Capabilities, want)
 	}

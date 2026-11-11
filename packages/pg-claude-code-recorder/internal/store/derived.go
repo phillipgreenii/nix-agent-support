@@ -263,6 +263,11 @@ var derivedIndexes = []struct{ name, sql string }{
 	{"feed_marks_at", `CREATE INDEX IF NOT EXISTS feed_marks_at ON feed_marks(at_ns)`},
 	{"session_files_file", `CREATE INDEX IF NOT EXISTS session_files_file ON session_files(file_id)`},
 	{"texts_rec", `CREATE INDEX IF NOT EXISTS texts_rec ON texts(rec_id)`},
+	// The ask tables (see askfacts.go): the newest questions of a session, and the
+	// answer lookup by tool_use_id for both the read and the parser.
+	{"ask_questions_session", `CREATE INDEX IF NOT EXISTS ask_questions_session ON ask_questions(session_ref, time_ns)`},
+	{"ask_questions_tool", `CREATE INDEX IF NOT EXISTS ask_questions_tool ON ask_questions(tool_use_id)`},
+	{"ask_answers_tool", `CREATE INDEX IF NOT EXISTS ask_answers_tool ON ask_answers(tool_use_id)`},
 }
 
 // metaSessionRef is the meta key that marks a store whose every records row
@@ -298,7 +303,7 @@ func sessionRefIndexesSQL() string {
 // sessText is whether records has the legacy session TEXT column; the version 3
 // layout (Options.V3Layout) has none and reads the session through session_ref.
 func derivedTables(tri, ext, sessText bool) string {
-	base := derivedTablesSQL
+	base := derivedTablesSQL + askTablesSQL
 	if ext {
 		base += extDDL()
 	}
