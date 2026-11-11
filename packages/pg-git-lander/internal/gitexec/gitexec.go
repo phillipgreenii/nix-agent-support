@@ -51,6 +51,11 @@ type Result struct {
 
 // Run runs git with args in dir.
 func (g *Git) Run(ctx context.Context, dir string, args ...string) Result {
+	return g.RunInput(ctx, dir, nil, args...)
+}
+
+// RunInput is Run with stdin fed to the command (git hash-object --stdin).
+func (g *Git) RunInput(ctx context.Context, dir string, stdin []byte, args ...string) Result {
 	d := g.Timeout
 	if d <= 0 {
 		d = Timeout
@@ -63,6 +68,7 @@ func (g *Git) Run(ctx context.Context, dir string, args ...string) Result {
 		Name:         "git",
 		Args:         full,
 		Dir:          dir,
+		Stdin:        stdin,
 		Env:          g.Env.Environ(),
 		EnvMode:      cmdrun.EnvExact,
 		OwnProcGroup: true,
@@ -148,27 +154,4 @@ func ParseWorktrees(out string) []Worktree {
 		}
 	}
 	return wts
-}
-
-// RunInput is Run with stdin.
-func (g *Git) RunInput(ctx context.Context, dir string, stdin []byte, args ...string) Result {
-	d := g.Timeout
-	if d <= 0 {
-		d = Timeout
-	}
-	cctx, cancel := context.WithTimeout(ctx, d)
-	defer cancel()
-
-	full := append(append([]string{}, PinnedOptions...), args...)
-	res := g.Runner(cctx, cmdrun.Call{
-		Name:         "git",
-		Args:         full,
-		Dir:          dir,
-		Stdin:        stdin,
-		Env:          g.Env.Environ(),
-		EnvMode:      cmdrun.EnvExact,
-		OwnProcGroup: true,
-	})
-	timedOut := ctx.Err() == nil && errors.Is(res.CtxErr, context.DeadlineExceeded)
-	return Result{Result: res, TimedOut: timedOut}
 }
