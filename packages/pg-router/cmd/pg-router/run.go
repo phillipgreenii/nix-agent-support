@@ -7,13 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
@@ -1607,7 +1605,7 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 // (STORY-OP-3, DEC-CLI-1), as parsed by parseRunLikeArgs; resolveSelectors
 // folds in PG_ROUTER_ONLY/PG_ROUTER_DISABLE before prepareRun applies them.
 func runRunUntilIdle(only, disable []string) int {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := armRunSignals()
 	defer stop()
 
 	pr, code := prepareRun(ctx, resolveSelectors(only, disable))
@@ -1824,7 +1822,7 @@ func resolveMetricsAddr(flagAddr string, cfg config.Config) string {
 // the "deployment-bound-backend" case its own doc comment already
 // anticipated — resolves to it.
 func runRun(only, disable []string, metricsAddr string) int {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := armRunSignals()
 	defer stop()
 
 	pr, code := prepareRun(ctx, resolveSelectors(only, disable))
