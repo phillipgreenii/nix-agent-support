@@ -81,6 +81,9 @@ type Copier struct {
 	privMax   int64
 	privTotal int64
 
+	// scan is the incremental private-size scan of the whole copies/ tree.
+	scan privateScan
+
 	// onContended, when set, runs once a lock attempt found the copier busy and
 	// before it queues (a test seam that lets a test move the injected clock
 	// while the caller is queued).

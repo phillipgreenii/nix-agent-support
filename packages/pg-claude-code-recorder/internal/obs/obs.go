@@ -18,6 +18,11 @@ const (
 	MClonePrivateTotal = "clone_private_size_total_bytes"
 	MClonePrivateFiles = "clone_private_files_total"
 	EvClonePrivate     = "clone_private"
+
+	MCopiesPrivateSize    = "copies_private_size_bytes"
+	MCopiesPrivateFiles   = "copies_private_files"
+	MCopiesPrivateScanned = "copies_private_scan_timestamp_seconds"
+
 	MCopyLagBytes      = "copy_lag_bytes"
 	MCopyLagSeconds    = "copy_lag_seconds"
 	MCopyLagHistogram  = "copy_lag_seconds_histogram"

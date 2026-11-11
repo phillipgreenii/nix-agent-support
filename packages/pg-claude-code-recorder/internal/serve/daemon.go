@@ -1109,6 +1109,9 @@ func (d *Daemon) askFactsLoop() {
 	}
 }
 
+// copiesPrivateEvery is how often a new private-size sweep of copies/ starts.
+const copiesPrivateEvery = time.Hour
+
 // refreshGaugesPass is the body of one refresh_gauges pass.
 func (d *Daemon) refreshGaugesPass() {
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
@@ -1116,6 +1119,8 @@ func (d *Daemon) refreshGaugesPass() {
 		collectPoolMetrics(d.obs.Reg, d.st.PoolStats())
 	}
 	d.setMaintainedLagGauges()
+	// Bounded slice of the slow private-size scan of copies/ (a sweep per hour).
+	d.cp.PrivateScanStep(d.clock.Now(), copiesPrivateEvery)
 	if t := d.w.LastSweep(); !t.IsZero() {
 		d.obs.Reg.Set(obs.MHeartbeat, nil, float64(t.UnixNano())/1e9)
 	}

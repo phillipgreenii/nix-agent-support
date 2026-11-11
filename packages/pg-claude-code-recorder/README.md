@@ -184,7 +184,11 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `state_used_bytes` (database-derived with no directory walk: the copies the database lists plus
   `index.db`, its `-wal`/`-shm`, the journal and the watcher checkpoint, plus `quarantine_bytes`;
   it excludes archives, manifests, the doctor cursor and orphans, so it steps down when first
-  deployed), `requests_total{client,op,outcome}`,
+  deployed), `copies_private_size_bytes` (private, unshared bytes of the whole `copies/` tree on
+  APFS, from a slow scan: one sweep an hour, at most 500 files per `refreshGauges` pass, so it never walks the
+  tree inside a tick; absent until the first sweep finishes and on platforms that report no private size),
+  `copies_private_files` (files that sweep counted), `copies_private_scan_timestamp_seconds` (when it finished),
+  `requests_total{client,op,outcome}`,
   `query_duration_seconds{op}`, `feed_latency_seconds{op}` (no unlabelled series: use `sum without (op)`),
   `requests_inflight{op}`, `wait_duration_seconds`, `backfill_files_*`,
   `caught_up`, and the loop and process series: `settle_tick_duration_seconds`,

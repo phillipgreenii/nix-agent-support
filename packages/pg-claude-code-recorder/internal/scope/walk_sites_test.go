@@ -41,9 +41,10 @@ var approvedWalkSites = map[string]string{
 	"internal/lifecycle/tracker.go:sweepFifos":       "exempt: lists the control inbox directory, not the Claude directory",
 	"internal/lifecycle/tracker.go:sweepEnds":        "exempt: lists the control ends directory, an allowlisted root, one level",
 	// the recorder's own state directory
-	"internal/copier/copier.go:recoverLocked": "exempt: lists the recorder's own copies directory (state, not the Claude directory)",
-	"internal/settle/settle.go:Recover":       "exempt: lists the recorder's own archives directory (state, not the Claude directory)",
-	"internal/serve/disk.go:DirBytes":         "exempt: sizes the recorder's own state directory",
+	"internal/copier/copier.go:recoverLocked":        "exempt: lists the recorder's own copies directory (state, not the Claude directory)",
+	"internal/copier/privatescan.go:PrivateScanStep": "exempt: walks the recorder's own copies directory incrementally (state, not the Claude directory)",
+	"internal/settle/settle.go:Recover":              "exempt: lists the recorder's own archives directory (state, not the Claude directory)",
+	"internal/serve/disk.go:DirBytes":                "exempt: sizes the recorder's own state directory",
 	// generic seams
 	"internal/fsx/fsx.go:ReadDir":      "exempt: the filesystem seam; its callers are on this list individually",
 	"internal/fsx/recorder.go:ReadDir": "exempt: the recording wrapper of the filesystem seam",
