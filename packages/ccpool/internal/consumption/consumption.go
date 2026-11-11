@@ -32,10 +32,12 @@ type PriceTable map[string]Price
 const DefaultKey = "_default"
 
 // DefaultPrices is the built-in table (USD per MTok, API list prices, values
-// current as of 2026-06). It is data, not logic.
+// current as of 2026-11; cache write is the 5-minute 1.25x input rate). It is data, not logic.
 func DefaultPrices() PriceTable {
 	return PriceTable{
 		DefaultKey:          {InputPerMTok: 15, OutputPerMTok: 75, CacheWritePerMTok: 18.75, CacheReadPerMTok: 1.5},
+		"claude-opus-5-5":   {InputPerMTok: 4, OutputPerMTok: 20, CacheWritePerMTok: 5, CacheReadPerMTok: 0.2},
+		"claude-sonnet-5-5": {InputPerMTok: 2, OutputPerMTok: 10, CacheWritePerMTok: 2.5, CacheReadPerMTok: 0.2},
 		"claude-opus-4-8":   {InputPerMTok: 15, OutputPerMTok: 75, CacheWritePerMTok: 18.75, CacheReadPerMTok: 1.5},
 		"claude-sonnet-4-6": {InputPerMTok: 3, OutputPerMTok: 15, CacheWritePerMTok: 3.75, CacheReadPerMTok: 0.3},
 		"claude-haiku-4-5":  {InputPerMTok: 1, OutputPerMTok: 5, CacheWritePerMTok: 1.25, CacheReadPerMTok: 0.1},

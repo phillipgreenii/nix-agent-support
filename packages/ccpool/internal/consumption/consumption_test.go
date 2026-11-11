@@ -69,3 +69,31 @@ func TestRead_overridePrices(t *testing.T) {
 		t.Errorf("cents = %d, want 400", r.EstimatedCostCents)
 	}
 }
+
+func TestDefaultPrices_currentModelsResolveToOwnEntries(t *testing.T) {
+	prices := DefaultPrices()
+	def := prices[DefaultKey]
+	for _, tc := range []struct {
+		model string
+		key   string
+	}{
+		{"claude-sonnet-5-5", "claude-sonnet-5-5"},
+		{"claude-sonnet-5-5-20261101", "claude-sonnet-5-5"},
+		{"claude-opus-5-5", "claude-opus-5-5"},
+		{"claude-opus-5-5-20261101", "claude-opus-5-5"},
+	} {
+		got := priceFor(tc.model, prices)
+		if got != prices[tc.key] {
+			t.Errorf("%s: got %+v, want entry %s %+v", tc.model, got, tc.key, prices[tc.key])
+		}
+		if got == def {
+			t.Errorf("%s resolved to the default price", tc.model)
+		}
+	}
+	if s := prices["claude-sonnet-5-5"]; s.InputPerMTok != 2 || s.OutputPerMTok != 10 {
+		t.Errorf("sonnet-5-5 price = %+v, want 2/10", s)
+	}
+	if o := prices["claude-opus-5-5"]; o.InputPerMTok != 4 || o.OutputPerMTok != 20 {
+		t.Errorf("opus-5-5 price = %+v, want 4/20", o)
+	}
+}
