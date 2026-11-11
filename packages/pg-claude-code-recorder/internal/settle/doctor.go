@@ -338,7 +338,7 @@ func (s *Settler) doctorArchive(session string, add func(DoctorMismatch)) (check
 //   - the source is missing or differs: copy_unrecoverable.
 func (s *Settler) doctorMissingBytes(session string, mf store.ManifestFile, openErr error, add func(DoctorMismatch)) {
 	m := DoctorMismatch{Kind: MismatchManifest, File: mf.File, Session: session, Path: mf.Path, Detail: "opening the stored bytes: " + openErr.Error()}
-	if !errors.Is(openErr, store.ErrNotFound) || mf.Mode != "snapshot" {
+	if !missingBytesRepairable(errors.Is(openErr, store.ErrNotFound), mf.Mode) {
 		add(m)
 		return
 	}
@@ -363,8 +363,7 @@ func (s *Settler) doctorMissingBytes(session string, mf store.ManifestFile, open
 		add(m)
 		return
 	}
-	h, _ := hashReader(bytes.NewReader(data), int64(len(data)))
-	if int64(len(data)) != mf.Size || hexHash(h) != mf.Hash {
+	if !sourceMatchesManifest(data, mf.Size, mf.Hash) {
 		m.Kind = NoticeUnrecoverable
 		m.Detail = "the stored bytes are missing and the source no longer matches the manifest"
 		add(m)
