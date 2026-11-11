@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
 
 func TestScrubbedEnv_removesBeadsTaint(t *testing.T) {
@@ -151,5 +155,81 @@ func TestCLIRunner_Run_NonClaimsAndEnvActorAllowed(t *testing.T) {
 	r = NewCLIRunnerForRepo(t.TempDir(), "")
 	if _, err := r.Run(context.Background(), "update", "x", "--claim"); err != nil {
 		t.Errorf("claim with BEADS_ACTOR set must be allowed: %v", err)
+	}
+}
+
+func TestCLIRunnerRun_boundsAHungBdWithTheTimeout(t *testing.T) {
+	var seen context.Context
+	fake := cmdruntest.New(t)
+	fake.On(func(cmdrun.Call) bool { return true }).Respond(func(cmdrun.Call) cmdrun.Result {
+		<-seen.Done() // a wedged bd: returns only when its context ends
+		return cmdrun.Result{Code: -1, Signal: "killed", CtxErr: seen.Err()}
+	})
+	inner := fake.Runner()
+	r := &CLIRunner{Timeout: 50 * time.Millisecond, Exec: func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		seen = ctx
+		return inner(ctx, c)
+	}}
+	start := time.Now()
+	_, err := r.Run(context.Background(), "show", "x")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
+	}
+	if el := time.Since(start); el > 2*time.Second {
+		t.Errorf("Run took %s, want ~50ms", el)
+	}
+}
+
+func TestCLIRunnerRun_mapsExitAndStartFailures(t *testing.T) {
+	fake := cmdruntest.New(t)
+	fake.On(func(c cmdrun.Call) bool { return c.Args[0] == "fail" }).
+		Return(cmdrun.Result{Code: 3, Stderr: []byte("boom\n")})
+	fake.On(func(c cmdrun.Call) bool { return c.Args[0] == "ok" }).
+		Return(cmdrun.Result{Stdout: []byte("out")})
+	fake.On(func(c cmdrun.Call) bool { return c.Args[0] == "nobd" }).
+		Return(cmdrun.Result{Code: -1, StartErr: errors.New("not found")})
+	r := &CLIRunner{Exec: fake.Runner(), Env: []string{"A=1"}, Dir: "/d"}
+	if out, err := r.Run(t.Context(), "ok"); err != nil || out != "out" {
+		t.Errorf("ok: out=%q err=%v", out, err)
+	}
+	if _, err := r.Run(t.Context(), "fail"); err == nil || !strings.Contains(err.Error(), "exit status 3: boom") {
+		t.Errorf("fail: err=%v", err)
+	}
+	if _, err := r.Run(t.Context(), "nobd"); err == nil || !strings.Contains(err.Error(), "is bd on PATH?") {
+		t.Errorf("nobd: err=%v", err)
+	}
+	c := fake.Calls()[0]
+	if c.Name != Command || c.Dir != "/d" || c.EnvMode != cmdrun.EnvExact {
+		t.Errorf("call = %+v", c)
+	}
+}
+
+// A real #!/bin/sh bd stub on PATH that sleeps proves the real Exec path is
+// bounded, even for a caller on context.Background().
+func TestCLIRunnerRun_realProcessStubIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "bd")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	r := &CLIRunner{Timeout: 200 * time.Millisecond, WaitDelay: 200 * time.Millisecond}
+	start := time.Now()
+	_, err := r.Run(context.Background(), "ready")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
+	}
+	if el := time.Since(start); el > 3*time.Second {
+		t.Errorf("Run took %s, want under 3s", el)
+	}
+}
+
+func TestCLIRunnerRun_nonZeroExitKeepsTheCodeForIsGuardStale(t *testing.T) {
+	fake := cmdruntest.New(t)
+	fake.On(func(cmdrun.Call) bool { return true }).Return(cmdrun.Result{Code: 13, Stderr: []byte("assignee mismatch")})
+	r := &CLIRunner{Exec: fake.Runner()}
+	_, err := r.Run(t.Context(), "update", "x")
+	if !IsGuardStale(err) {
+		t.Fatalf("IsGuardStale(%v) = false, want true for exit 13", err)
 	}
 }

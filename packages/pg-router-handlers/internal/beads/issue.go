@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -164,7 +163,7 @@ const guardStaleExit = 13
 // bd itself: the claim changed hands between the read and the write, so a retry
 // of the same guard is pointless.
 func IsGuardStale(err error) bool {
-	var ee *exec.ExitError
+	var ee interface{ ExitCode() int } // *ExitError, or a raw *exec.ExitError
 	return errors.As(err, &ee) && ee.ExitCode() == guardStaleExit
 }
 

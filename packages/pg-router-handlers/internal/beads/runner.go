@@ -13,20 +13,48 @@
 package beads
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
+
+// DefaultTimeout bounds one bd call. Measured 2026-11-11 against the shared
+// store: `bd show` and `bd list` return in about 0.5 s. A claim or write also
+// goes through dolt and can take a few seconds under load, so 60 s is more than
+// 100x the observed read latency yet still frees a role whose bd has wedged.
+// The ccpool dispatch root context is never cancelled by design, so this
+// per-call bound is the only thing that ends a hung bd.
+const DefaultTimeout = 60 * time.Second
+
+// DefaultWaitDelay is how long Run waits, after the timeout has killed bd, for
+// a grandchild that inherited bd's pipes to release them.
+const DefaultWaitDelay = 2 * time.Second
 
 // Command is the bd binary this package invokes. It is exported so the pieces
 // that must NAME the backing command without running it — the pre-runtime
 // absent-backing-command validation of a bead-backed event source — share this
 // one literal instead of duplicating it.
 const Command = "bd"
+
+// ExitError is the error Run returns when bd ran and exited non-zero. It keeps
+// the exit code so callers can branch on it (see IsGuardStale).
+type ExitError struct {
+	Cmdline string
+	Code    int
+	Stderr  string
+}
+
+func (e *ExitError) Error() string {
+	return fmt.Sprintf("%s: exit status %d: %s", e.Cmdline, e.Code, e.Stderr)
+}
+
+// ExitCode returns bd's exit status.
+func (e *ExitError) ExitCode() int { return e.Code }
 
 // Runner shells out to `bd`. Production uses CLIRunner; tests inject a fake.
 type Runner interface {
@@ -56,6 +84,14 @@ type CLIRunner struct {
 	// (roles.CCPoolConfig.Actor) -- the same identity the role's worker
 	// sessions claim under via BEADS_ACTOR.
 	Actor string
+	// Timeout bounds each Run call (0 = DefaultTimeout). It applies even when
+	// the caller's context is context.Background().
+	Timeout time.Duration
+	// WaitDelay is how long to wait for bd's pipes to close after the kill
+	// (0 = DefaultWaitDelay).
+	WaitDelay time.Duration
+	// Exec runs the bd process (nil = cmdrun.Exec); tests inject a fake.
+	Exec cmdrun.Runner
 }
 
 // NewCLIRunnerForRepo returns a CLIRunner rooted at dir, with BEADS_DIR and
@@ -151,29 +187,46 @@ func scrubEnv(env []string) []string {
 	return out
 }
 
+// Run invokes bd with the per-call timeout. When the timeout (or the caller's
+// context) ends first, bd is killed and the error wraps
+// context.DeadlineExceeded (or context.Canceled).
 func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	args, err := r.bdArgs(args)
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, Command, args...)
-	if r.Dir != "" {
-		cmd.Dir = r.Dir
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	run := r.Exec
+	if run == nil {
+		run = cmdrun.Exec
+	}
+	call := cmdrun.Call{Name: Command, Args: args, Dir: r.Dir, WaitDelay: r.WaitDelay}
+	if call.WaitDelay <= 0 {
+		call.WaitDelay = DefaultWaitDelay
 	}
 	if r.Env != nil {
-		cmd.Env = r.Env
+		call.Env = r.Env
+		call.EnvMode = cmdrun.EnvExact
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return stdout.String(), fmt.Errorf("bd %s: %w: %s",
-				strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-		}
-		return stdout.String(), fmt.Errorf("bd %s: %w (is bd on PATH?)",
-			strings.Join(args, " "), err)
+	res := run(ctx, call)
+	stdout := string(res.Stdout)
+	cmdline := "bd " + strings.Join(args, " ")
+	switch {
+	case res.StartErr != nil:
+		return stdout, fmt.Errorf("%s: %w (is bd on PATH?)", cmdline, res.StartErr)
+	case res.CtxErr != nil:
+		return stdout, fmt.Errorf("%s: aborted after at most %s: %w: %s",
+			cmdline, timeout, res.CtxErr, strings.TrimSpace(string(res.Stderr)))
+	case res.Signal != "":
+		return stdout, fmt.Errorf("%s: signal: %s: %s",
+			cmdline, res.Signal, strings.TrimSpace(string(res.Stderr)))
+	case res.Code != 0:
+		return stdout, &ExitError{Cmdline: cmdline, Code: res.Code, Stderr: strings.TrimSpace(string(res.Stderr))}
 	}
-	return stdout.String(), nil
+	return stdout, nil
 }

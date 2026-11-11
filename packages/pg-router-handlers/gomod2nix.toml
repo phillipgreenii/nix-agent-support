@@ -14,6 +14,8 @@ cachePackages = [
   'github.com/phillipgreenii/pg-router/schemas',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest',
+  'github.com/phillipgreenii/x/cmdrun',
+  'github.com/phillipgreenii/x/cmdruntest',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
