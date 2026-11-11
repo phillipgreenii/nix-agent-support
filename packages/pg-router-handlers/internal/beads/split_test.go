@@ -343,3 +343,54 @@ func TestMarkUnsplittable_staleGuardIsSkippedNotFailed(t *testing.T) {
 		t.Errorf("needs-split-review must still be removed last; calls=%v", bd.calls)
 	}
 }
+
+func TestDecodeSplitPlan_priorityForms(t *testing.T) {
+	plan := func(pri string) []byte {
+		return []byte(`{"rationale":"r","children":[{"title":"a","description":"d","acceptance":"x","priority":` + pri + `},{"title":"b","description":"d","acceptance":"x"}]}`)
+	}
+	for _, tc := range []struct{ in, want string }{
+		{`4`, "4"}, {`0`, "0"}, {`"3"`, "3"}, {`"P2"`, "P2"}, {`null`, ""},
+	} {
+		p, err := DecodeSplitPlan(plan(tc.in))
+		if err != nil || p.Children[0].Priority != tc.want {
+			t.Errorf("priority %s: got %q err=%v, want %q", tc.in, p.Children[0].Priority, err, tc.want)
+		}
+	}
+	for _, bad := range []string{`"high"`, `7`, `-1`, `2.5`, `true`, `""x`} {
+		if _, err := DecodeSplitPlan(plan(bad)); err == nil {
+			t.Errorf("priority %s: want decode error", bad)
+		}
+	}
+}
+
+func TestApplySplit_numericPriorityReachesBd(t *testing.T) {
+	p, err := DecodeSplitPlan([]byte(`{"rationale":"r","children":[{"title":"a","description":"d","acceptance":"x","priority":4},{"title":"b","description":"d","acceptance":"x"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bd := &splitBD{parent: fmt.Sprintf(parentJSON, "in_progress")}
+	if _, err := ApplySplit(context.Background(), bd, "pg2-p", p); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range bd.calls {
+		if strings.Contains(c, "--priority=4") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no --priority=4 in calls: %v", bd.calls)
+	}
+}
+
+func TestApplySplit_invalidPriorityCreatesNothing(t *testing.T) {
+	plan := twoChildren()
+	plan.Children[1].Priority = "high"
+	bd := &splitBD{parent: fmt.Sprintf(parentJSON, "in_progress")}
+	if _, err := ApplySplit(context.Background(), bd, "pg2-p", plan); err == nil {
+		t.Fatal("want error")
+	}
+	if len(bd.calls) != 0 {
+		t.Errorf("bd was called before the plan was refused: %v", bd.calls)
+	}
+}

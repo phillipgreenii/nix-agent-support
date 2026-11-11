@@ -29,6 +29,44 @@ type SplitChild struct {
 	Type        string `json:"type,omitempty"`     // bd --type value; "" => task
 }
 
+// UnmarshalJSON accepts priority as a JSON number (4) or a string ("4", "P4"),
+// normalising it to the string form bd -p takes. An unusable priority fails
+// the decode, so a bad plan is refused before any child is created.
+func (c *SplitChild) UnmarshalJSON(b []byte) error {
+	type plain SplitChild
+	aux := struct {
+		*plain
+		Priority json.RawMessage `json:"priority"`
+	}{plain: (*plain)(c)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	c.Priority = ""
+	raw := strings.TrimSpace(string(aux.Priority))
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var s string
+	if strings.HasPrefix(raw, `"`) {
+		if err := json.Unmarshal(aux.Priority, &s); err != nil {
+			return fmt.Errorf("child priority: %w", err)
+		}
+	} else {
+		s = raw // a JSON number; checked below
+	}
+	c.Priority = s
+	return checkPriority(c.Priority)
+}
+
+// checkPriority accepts "" (bd's default) or a bd -p value: 0-4 or P0-P4.
+func checkPriority(p string) error {
+	switch p {
+	case "", "0", "1", "2", "3", "4", "P0", "P1", "P2", "P3", "P4":
+		return nil
+	}
+	return fmt.Errorf("invalid child priority %q: want a number 0-4 or a string 0-4/P0-P4", p)
+}
+
 // SplitPlan is the triage session's decomposition decision.
 type SplitPlan struct {
 	Rationale string       `json:"rationale"`
@@ -43,6 +81,9 @@ func (p SplitPlan) Validate() error {
 		return fmt.Errorf("a split needs at least 2 children, got %d", len(p.Children))
 	}
 	for i, c := range p.Children {
+		if err := checkPriority(c.Priority); err != nil {
+			return fmt.Errorf("child %d (%s): %w", i+1, c.Title, err)
+		}
 		switch {
 		case strings.TrimSpace(c.Title) == "":
 			return fmt.Errorf("child %d: title is required", i+1)

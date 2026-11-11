@@ -18,7 +18,7 @@ its tracker from the session's inherited environment (BEADS_DIR / cwd).
   split apply <bead-id>         SPLITTABLE: reads a JSON plan (stdin or --file)
                                  {"rationale": "...", "children": [{"title",
                                  "description", "acceptance", "priority"?,
-                                 "type"?}, ...]}; creates the children
+                                 "type"?}, ...]}; priority is a number 0-4 or a string (4, "4", "P4"); creates the children
                                  (labelled split-from:<bead-id>, no stop-count
                                  inheritance), wires bead-id blocked-by each
                                  child and verifies the edges, labels bead-id
