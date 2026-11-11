@@ -27,49 +27,89 @@ type topZoneData struct {
 	theme         render.Theme
 }
 
-// renderTopZone renders the ONE pinned top zone: the PAUSED banner when any
-// gate is set (it always wins -- the more actionable, operator-facing fact
-// -- so the two wordings are never combined, per INV-LIFE-2's mutual
-// exclusivity), the quiescing line when the core itself is draining and no
-// gate is set, or the header otherwise [design: Task 4.6 Files (banner.go);
+// renderTopZone renders the ONE pinned top zone: the paused-roles banner when a
+// level requirement blocks any role (it always wins -- the more actionable,
+// operator-facing fact -- so the two wordings are never combined, per
+// INV-LIFE-2's mutual exclusivity), the quiescing line when the core itself is
+// draining and no role is paused, or the header otherwise [design: Task 4.6 Files (banner.go);
 // Task 4.6 Step 3].
 func renderTopZone(d topZoneData) string {
-	if text := bannerText(gateTypes(d.reply.Gates), d.quiescing, inFlightCount(d.reply), d.reply.Dispatch); text != "" {
+	if text := bannerText(d.reply.PausedRoles, d.quiescing, inFlightCount(d.reply), d.reply.Dispatch); text != "" {
 		return renderPausedBanner(text, d.width, d.theme)
 	}
 	return renderHeader(d)
 }
 
-// bannerText returns the PAUSED banner's wording when gated, or an
-// informational quiescing line when the core itself is draining and no
-// gate is set -- never both at once (INV-LIFE-2's mutual exclusivity).
-// Returns "" when neither applies, telling the caller to render the header
-// instead [design: Task 4.6 Step 3; Binding decisions 6].
+// bannerText returns the paused-roles banner's wording when a level
+// requirement blocks any role, or an informational quiescing line when the core
+// itself is draining and no role is paused -- never both at once (INV-LIFE-2's
+// mutual exclusivity). Returns "" when neither applies, telling the caller to
+// render the header instead.
 //
-// Both branches also carry dispatch's own busy/N summary (Task 6.5,
-// dispatchSummary below) -- additive, and distinct from -- never a
-// replacement for -- inFlight's own pinned "N in flight" wording, which is
-// UNCHANGED by this addition [design: Binding decision 5].
-func bannerText(gates []string, quiescing bool, inFlight int, dispatch Dispatch) string {
+// The wording is "N roles paused (disk TIGHT, ...)": the resources blocking,
+// ordered by the number of roles each blocks (descending, ties by resource
+// name), each with the level it is at. Both branches also carry dispatch's own
+// busy/N summary (Task 6.5, dispatchSummary below) -- additive, and distinct
+// from -- never a replacement for -- inFlight's own "N in flight" wording.
+func bannerText(paused []PausedRole, quiescing bool, inFlight int, dispatch Dispatch) string {
 	switch {
-	case len(gates) > 0:
-		// SYSTEM_PAUSE keeps the operator-facing "PAUSED" wording; any other gate
-		// reads "GATED" -- a gate acts on the participants that block on it, so
-		// the banner names which gates are in force rather than claiming the
-		// whole pool is halted.
-		lead := "GATED"
-		for _, g := range gates {
-			if g == systemPauseGate {
-				lead = "PAUSED"
-			}
+	case len(paused) > 0:
+		noun := "roles"
+		if len(paused) == 1 {
+			noun = "role"
 		}
-		return fmt.Sprintf("%s — routing halted for blocked participants (%s) · %d in flight · %s",
-			lead, strings.Join(gates, ", "), inFlight, dispatchSummary(dispatch))
+		return fmt.Sprintf("%d %s paused (%s) · %d in flight · %s",
+			len(paused), noun, strings.Join(blockingResources(paused), ", "), inFlight, dispatchSummary(dispatch))
 	case quiescing:
-		return fmt.Sprintf("quiescing — core is draining toward exit (no gate set) · %s", dispatchSummary(dispatch))
+		return fmt.Sprintf("quiescing — core is draining toward exit (no role held by levels) · %s", dispatchSummary(dispatch))
 	default:
 		return ""
 	}
+}
+
+// blockingResources lists the resources that block the paused roles as "disk
+// TIGHT" (the resource and the level it is at; "no reading" for a silent one),
+// ordered by the number of roles each blocks, descending, ties by resource name.
+func blockingResources(paused []PausedRole) []string {
+	type blocker struct {
+		name, label string
+		roles       int
+	}
+	byName := map[string]*blocker{}
+	for _, p := range paused {
+		seen := map[string]bool{}
+		for _, f := range p.Failing {
+			if seen[f.Resource] {
+				continue
+			}
+			seen[f.Resource] = true
+			b := byName[f.Resource]
+			if b == nil {
+				label := textsafe.Sanitize(f.Resource) + " " + textsafe.Sanitize(f.Level)
+				if f.Kind == "unknown" {
+					label = textsafe.Sanitize(f.Resource) + " no reading"
+				}
+				b = &blocker{name: f.Resource, label: label}
+				byName[f.Resource] = b
+			}
+			b.roles++
+		}
+	}
+	all := make([]*blocker, 0, len(byName))
+	for _, b := range byName {
+		all = append(all, b)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].roles != all[j].roles {
+			return all[i].roles > all[j].roles
+		}
+		return all[i].name < all[j].name
+	})
+	out := make([]string, 0, len(all))
+	for _, b := range all {
+		out = append(out, b.label)
+	}
+	return out
 }
 
 // dispatchSummary renders the additive dispatch: { busy, total } field
@@ -108,7 +148,7 @@ func renderPausedBanner(text string, width int, theme render.Theme) string {
 // (Wide/Narrow drop nothing, but spread it across three lines instead of
 // two, per pg2-xp415: the pool health signal leads on its own line so "is
 // the core healthy" reads at a glance, versions move to their own
-// secondary line, and gates/config trail on a tertiary line with the
+// secondary line, and levels/config trail on a tertiary line with the
 // config path visually de-emphasized -- Tiny is unchanged, still dropping
 // the version pair and config path, per the design's own Tiny mockup)
 // [design: Task 4.6 Files (banner.go); §4.3 Tier mockups; pg2-xp415].
@@ -149,7 +189,7 @@ func renderHeader(d topZoneData) string {
 	case render.TierTiny:
 		lines = []string{
 			fmt.Sprintf(" pg-router  core: %s       up %s", coreStateLabel(ci.State), uptime),
-			" gates: " + gatesSummary(d.reply.Gates) + "  " + busy + "  " + logSize,
+			" levels: " + levelsSummary(d.reply) + "  " + busy + "  " + logSize,
 		}
 	default:
 		lines = []string{
@@ -159,11 +199,11 @@ func renderHeader(d topZoneData) string {
 			fmt.Sprintf(" [%s] pg-router · core: %s · up %s", health, coreStateLabel(ci.State), uptime),
 			// Line 2: version detail, secondary to health/uptime.
 			fmt.Sprintf(" client v%s · core v%s", d.clientVersion, coreVersion),
-			// Line 3: gates + dispatch concurrency + config path, tertiary
+			// Line 3: levels + dispatch concurrency + config path, tertiary
 			// -- the config path is muted so it competes least for
 			// attention (it's the longest, least actionable field on the
 			// banner).
-			" gates: " + gatesSummary(d.reply.Gates) + "   " + busy + "   " + logSize + "   config: " + d.theme.Muted.Render(configPath),
+			" levels: " + levelsSummary(d.reply) + "   " + busy + "   " + logSize + "   config: " + d.theme.Muted.Render(configPath),
 		}
 	}
 
@@ -281,34 +321,11 @@ func coreStateLabel(state string) string {
 	return textsafe.Sanitize(state)
 }
 
-// gatesSummary renders the active gates as a compact list for the header's
-// gates line: "none" when nothing is gated, else the sorted TYPEs (at most
-// gatesSummaryMax, then "+N more") -- the full detail is the Gates modal's job.
-func gatesSummary(gates []Gate) string {
-	types := gateTypes(gates)
-	if len(types) == 0 {
-		return "none"
-	}
-	if len(types) > gatesSummaryMax {
-		more := len(types) - gatesSummaryMax
-		types = append(types[:gatesSummaryMax:gatesSummaryMax], fmt.Sprintf("+%d more", more))
-	}
-	return strings.Join(types, ", ")
-}
+// levelsSummary renders the header's short levels token. The header only shows
+// when no role is paused, so the token says the levels hold nothing back; it is
+// deliberately short so the Tiny tier keeps its log-size column.
+func levelsSummary(StatusReply) string { return "ok" }
 
-// gatesSummaryMax bounds how many gate TYPEs the header line spells out.
-const gatesSummaryMax = 3
-
-// gateTypes returns the sanitized TYPEs of the active gates, sorted.
-func gateTypes(gates []Gate) []string {
-	out := make([]string, 0, len(gates))
-	for _, g := range gates {
-		out = append(out, textsafe.Sanitize(g.Type))
-	}
-	sort.Strings(out)
-	return out
-}
-
-// anyGateSet reports whether any gate is in force (the wire lists active gates
-// only), the aggregate the pane dimming and the PAUSED/GATED banner key on.
-func anyGateSet(gates []Gate) bool { return len(gates) > 0 }
+// anyRolePaused reports whether a level requirement blocks any role, the
+// aggregate the pane dimming and the paused-roles banner key on.
+func anyRolePaused(paused []PausedRole) bool { return len(paused) > 0 }

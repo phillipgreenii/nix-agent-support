@@ -219,7 +219,7 @@ func TestDoctor_NoDaemon(t *testing.T) {
 	for _, want := range []string{
 		"ok   state dir: " + w.logDir + " is writable",
 		"FAIL socket:",
-		"info gates: daemon not reachable",
+		"info levels: daemon not reachable",
 		"info unavailable roles: daemon not reachable",
 		"info progress: daemon not reachable",
 	} {
@@ -286,10 +286,10 @@ func TestDoctor_HandlerMissing(t *testing.T) {
 	}
 }
 
-// Against a running core, doctor reads gates, unavailable roles with their
+// Against a running core, doctor reads levels, unavailable roles with their
 // reason, and per-role progress from its status reply, and exits 1 for the
 // unavailable role.
-func TestDoctor_RunningCoreReportsGatesUnavailableRolesAndProgress(t *testing.T) {
+func TestDoctor_RunningCoreReportsLevelsUnavailableRolesAndProgress(t *testing.T) {
 	f := bootWithValidate(t, failsRole("bad"))
 	ctx, cancel := context.WithCancel(context.Background())
 	accepted := make(chan error, 1)
@@ -310,7 +310,8 @@ func TestDoctor_RunningCoreReportsGatesUnavailableRolesAndProgress(t *testing.T)
 	}
 	for _, want := range []string{
 		"ok   socket: " + f.svc.Ref().Socket + " is reachable",
-		"info gates: none active",
+		"info levels: 0 resources",
+		"info paused by levels: no role",
 		"FAIL unavailable roles: bad: pool dir missing; unknown key",
 		"info progress: bad: last progress",
 		"info progress: good: last progress",

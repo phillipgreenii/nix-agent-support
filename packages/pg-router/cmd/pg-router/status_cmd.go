@@ -149,6 +149,8 @@ type statusReply struct {
 		ActiveQueries  int    `json:"activeQueries"`
 	} `json:"resolvedConfig"`
 	Levels []levelView `json:"levels"`
+	// PausedRoles are the roles a level requirement blocks right now.
+	PausedRoles []pausedRoleView `json:"pausedRoles"`
 	// QueueLog is the durable write-ahead log's size and compaction count (bead
 	// pg2-8e0m6); nil when the core predates the field.
 	QueueLog *queueLogView `json:"queueLog"`
@@ -413,6 +415,7 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 
 	fmt.Fprintln(w, "LEVELS:")
 	renderLevels(w, st.Levels, time.Now())
+	renderPausedRoles(w, st.PausedRoles, time.Now())
 
 	fmt.Fprintln(w, "QUEUES:")
 	if len(st.Queues) == 0 {
@@ -476,6 +479,18 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 	renderSection(w, "UNMATCHED BINDINGS", len(st.UnmatchedBindings), func() {
 		for _, b := range st.UnmatchedBindings {
 			fmt.Fprintf(w, "  %s\n", dash(b))
+		}
+	})
+}
+
+// renderPausedRoles writes the PAUSED ROLES block: one line per role a level
+// requirement blocks, "<role>  <clause> (<resource> <LEVEL>, <reading> since
+// <time>); ...", with "(none)" when no role is paused. A pause stops admission
+// only; running work is never touched.
+func renderPausedRoles(w io.Writer, paused []pausedRoleView, now time.Time) {
+	renderSection(w, fmt.Sprintf("PAUSED ROLES (%d)", len(paused)), len(paused), func() {
+		for _, p := range paused {
+			fmt.Fprintf(w, "  %s  %s\n", textsafe.Sanitize(p.Role), pausedRoleSummary(p, now))
 		}
 	})
 }

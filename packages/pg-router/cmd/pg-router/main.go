@@ -68,6 +68,8 @@ func run() int {
 		return runPause(r.rest)
 	case routeResume:
 		return runResume(r.rest)
+	case routeExplain:
+		return runExplain(r.rest)
 	case routeDoctor:
 		return runDoctor(r.rest)
 	case routeLog:

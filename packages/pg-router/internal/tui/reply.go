@@ -21,12 +21,15 @@ import "time"
 // legacy `config` object (sources/handlers counts) — nothing in this phase's
 // TUI screens renders either.
 type StatusReply struct {
-	Core  CoreInfo `json:"core"`
-	Mode  string   `json:"mode"`
-	Gates []Gate   `json:"gates"`
-	// AsOf is when the core composed this reply; the gate list is read live at
-	// that instant (the Gate Registry is a projection of the event log, not a
-	// polled cache), so it doubles as the gates' freshness stamp.
+	Core CoreInfo `json:"core"`
+	Mode string   `json:"mode"`
+	// Levels is every resource's level in force (none for a resource with no
+	// reading); PausedRoles are the roles a level requirement blocks right now.
+	Levels      []LevelRow   `json:"levels"`
+	PausedRoles []PausedRole `json:"pausedRoles"`
+	// AsOf is when the core composed this reply; the levels are read live at
+	// that instant (a projection of the event log, not a polled cache), so it
+	// doubles as their freshness stamp.
 	AsOf           time.Time `json:"asOf"`
 	LastTickAt     time.Time `json:"lastTickAt"`
 	SnapshotAt     time.Time `json:"snapshotAt"`
@@ -74,19 +77,48 @@ type CoreInfo struct {
 	ConfigPath string    `json:"configPath"`
 }
 
-// Gate mirrors one entry of the wire's `gates` array: a Gate Registry gate
-// in force (bead pg2-h63eu). The array lists ACTIVE gates only, so presence
-// means "set"; an empty array means nothing is gated. Type is the arbitrary
-// ALL-CAPS gate TYPE; Owner is DEBUG ONLY (shown, never acted on). Description,
-// Owner, ExpiresAt and TTLRemainingMs are omitted on the wire when the gate
-// carries none.
-type Gate struct {
-	Type           string    `json:"type"`
-	Description    string    `json:"description"`
-	Owner          string    `json:"owner"`
-	SetAt          time.Time `json:"setAt"`
-	ExpiresAt      time.Time `json:"expiresAt"`
-	TTLRemainingMs int64     `json:"ttlRemainingMs"`
+// LevelRow mirrors one entry of the wire's `levels` array: a resource and the
+// level in force. Level is empty when the resource has no reading (it prints as
+// "no reading", or "no sensor configured" when NoSensor). Source is sensor,
+// operator (an override) or grace_fallback.
+type LevelRow struct {
+	Resource string         `json:"resource"`
+	Level    string         `json:"level"`
+	Source   string         `json:"source"`
+	Owner    string         `json:"owner"`
+	Since    time.Time      `json:"since"`
+	Stale    bool           `json:"stale"`
+	NoSensor bool           `json:"no_sensor"`
+	Reading  *LevelReading  `json:"reading"`
+	Override *LevelOverride `json:"override"`
+}
+
+// LevelReading is the numeric reading behind a level.
+type LevelReading struct {
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+}
+
+// LevelOverride marks an operator override; ExpiresAt is empty until cleared.
+type LevelOverride struct {
+	UntilCleared bool      `json:"until_cleared"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// PausedRole mirrors one entry of the wire's `pausedRoles` array: a role a
+// level requirement blocks right now, with the failing clauses.
+type PausedRole struct {
+	Role    string          `json:"role"`
+	Failing []FailingClause `json:"failing"`
+}
+
+// FailingClause is one failing requires clause: the resource, the level it is at
+// and its kind (level, unknown or stale; unknown means no reading).
+type FailingClause struct {
+	Clause   string `json:"clause"`
+	Resource string `json:"resource"`
+	Level    string `json:"level"`
+	Kind     string `json:"kind"`
 }
 
 // Queue mirrors one entry of the wire's `queues` array: a per-type depth.

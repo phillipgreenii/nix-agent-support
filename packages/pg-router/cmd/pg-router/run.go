@@ -33,6 +33,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/shutdown"
 	"github.com/phillipgreenii/pg-router/internal/telemetry"
+	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
@@ -435,7 +436,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	levelAppender := &lateLevelAppender{}
 	levelProj := core.NewLevelProjection(core.LevelProjectionConfig{
 		Registry:  cfg.Resources.Registry(),
-		Resources: levelResources(cfg.Resources),
+		Resources: markNoSensor(levelResources(cfg.Resources), cfg),
 		Skew:      cfg.Levels.ObservedAtSkew,
 		Appender:  levelAppender,
 		// The override log lines (the metrics work formats the rest of the
@@ -1415,6 +1416,16 @@ func levelResources(rs config.ResourceSet) map[string]core.LevelResource {
 	return out
 }
 
+// markNoSensor flags every resource whose sensor is not configured on this
+// machine (see config.Config.SensorPresent), so status can say so.
+func markNoSensor(out map[string]core.LevelResource, cfg config.Config) map[string]core.LevelResource {
+	for name, r := range out {
+		r.NoSensor = !cfg.SensorPresent(r.Sensor)
+		out[name] = r
+	}
+	return out
+}
+
 // routerPause returns the router resource's PAUSED level when one is in force:
 // its owner and when it was set.
 func routerPause(snap levels.Snapshot) (owner string, since time.Time, ok bool) {
@@ -1724,7 +1735,9 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 			LastTickAt: now,
 			SnapshotAt: now,
 		})
-		if q.Idle() {
+		// A registration a level requirement blocks is not waited on: work only it
+		// could take does not hold the run open (it is reported below).
+		if q.IdleExceptPaused() {
 			break
 		}
 		select {
@@ -1734,6 +1747,7 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 		case <-time.After(idleDrainTick):
 		}
 	}
+	reportPausedByLevels(os.Stderr, q.PausedRoles())
 	// Source isolation (INV-FAIL-3, INV-EVT-1; ADR per Task 0.6 — INV-PREC-1
 	// resolved as never-drop-work): the drain above already completed — every
 	// enqueued event (including one pushed in over the socket, unrelated to any
@@ -1751,6 +1765,20 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	}
 	slog.Info("run-until-idle: queue drained")
 	return exitOK
+}
+
+// reportPausedByLevels names, one line per registration, what a level
+// requirement still blocks when run-until-idle exits: "run-until-idle: worker is
+// paused by levels (disk >= OK: disk is TIGHT)". A blocked registration neither
+// delays the exit nor changes its status.
+func reportPausedByLevels(w io.Writer, paused []eventqueue.PausedRole) {
+	for _, p := range paused {
+		parts := make([]string, 0, len(p.Result.Failing))
+		for _, f := range p.Result.Failing {
+			parts = append(parts, fmt.Sprintf("%s: %s is %s", f.ClauseText, f.Resource, f.Level))
+		}
+		fmt.Fprintf(w, "run-until-idle: %s is paused by levels (%s)\n", textsafe.Sanitize(p.Role), textsafe.Sanitize(strings.Join(parts, "; ")))
+	}
 }
 
 // resolveMetricsAddr decides the --metrics-addr this invocation actually

@@ -8,15 +8,19 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
 
+// pausedDisk is a role blocked by disk at TIGHT.
+func pausedDisk(role string) PausedRole {
+	return PausedRole{Role: role, Failing: []FailingClause{{Clause: "disk >= OK", Resource: "disk", Level: "TIGHT", Kind: "level"}}}
+}
+
 // TestBanner_MutuallyExclusiveHeaderVsPaused is this packet's own
-// acceptance bar: the header and the PAUSED banner are mutually exclusive;
-// PAUSED wording is "dispatch halted · N in flight"; a quiescing screen
-// never combines with the halted wording [design: Task 4.6 Step 3;
-// Binding decisions 6].
+// acceptance bar: the header and the paused-roles banner are mutually
+// exclusive; the paused wording is "N roles paused (disk TIGHT) · N in
+// flight"; a quiescing screen never combines with the paused wording.
 func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	theme := render.NewTheme(false)
 
-	t.Run("neither gated nor quiescing renders the header", func(t *testing.T) {
+	t.Run("no role paused and not quiescing renders the header", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			clientVersion: "1.2.3",
 			reply: StatusReply{
@@ -28,47 +32,48 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 		if !strings.Contains(got, "pg-router") {
 			t.Errorf("expected the header (contains %q); got:\n%s", "pg-router", got)
 		}
-		if strings.Contains(got, "routing halted") {
-			t.Errorf("header must not carry the PAUSED wording; got:\n%s", got)
+		if strings.Contains(got, "paused (") {
+			t.Errorf("header must not carry the paused wording; got:\n%s", got)
+		}
+		if !strings.Contains(got, "levels:") {
+			t.Errorf("header must carry the levels summary; got:\n%s", got)
 		}
 	})
 
-	t.Run("gated renders the PAUSED banner, never the header", func(t *testing.T) {
+	t.Run("a paused role renders the banner, never the header", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			clientVersion: "1.2.3",
 			reply: StatusReply{
-				Core:  CoreInfo{State: "started", Version: "1.2.3"},
-				Gates: []Gate{{Type: systemPauseGate}},
+				Core:        CoreInfo{State: "started", Version: "1.2.3"},
+				PausedRoles: []PausedRole{pausedDisk("worker")},
 			},
 			width: 120,
 			theme: theme,
 		})
-		if !strings.Contains(got, "routing halted for blocked participants (SYSTEM_PAUSE) · 0 in flight") {
-			t.Errorf("PAUSED banner wording wrong; got:\n%s", got)
+		if !strings.Contains(got, "1 role paused (disk TIGHT) · 0 in flight") {
+			t.Errorf("paused banner wording wrong; got:\n%s", got)
 		}
 		if strings.Contains(got, "config:") {
-			t.Errorf("PAUSED banner must not also render the header; got:\n%s", got)
+			t.Errorf("paused banner must not also render the header; got:\n%s", got)
 		}
 	})
 
-	t.Run("gated AND quiescing still shows only the halted wording", func(t *testing.T) {
+	t.Run("paused AND quiescing still shows only the paused wording", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
-			reply: StatusReply{
-				Gates: []Gate{{Type: "LOW_DISK_USAGE"}},
-			},
+			reply:     StatusReply{PausedRoles: []PausedRole{pausedDisk("worker")}},
 			quiescing: true,
 			width:     120,
 			theme:     theme,
 		})
-		if !strings.Contains(got, "routing halted") {
-			t.Errorf("expected the halted wording to win; got:\n%s", got)
+		if !strings.Contains(got, "role paused") {
+			t.Errorf("expected the paused wording to win; got:\n%s", got)
 		}
 		if strings.Contains(got, "quiescing —") {
-			t.Errorf("halted and quiescing wordings must never combine; got:\n%s", got)
+			t.Errorf("paused and quiescing wordings must never combine; got:\n%s", got)
 		}
 	})
 
-	t.Run("quiescing with no gate set renders the quiescing line, not the header", func(t *testing.T) {
+	t.Run("quiescing with no role paused renders the quiescing line, not the header", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			reply:     StatusReply{},
 			quiescing: true,
@@ -78,8 +83,8 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 		if !strings.Contains(got, "quiescing") {
 			t.Errorf("expected the quiescing wording; got:\n%s", got)
 		}
-		if strings.Contains(got, "routing halted") {
-			t.Errorf("quiescing (ungated) must not show the halted wording; got:\n%s", got)
+		if strings.Contains(got, "role paused") || strings.Contains(got, "roles paused") {
+			t.Errorf("quiescing (nothing paused) must not show the paused wording; got:\n%s", got)
 		}
 		if strings.Contains(got, "config:") {
 			t.Errorf("quiescing must not also render the header; got:\n%s", got)
@@ -89,8 +94,8 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	t.Run("N in flight reflects the reply's deliveries count", func(t *testing.T) {
 		got := renderTopZone(topZoneData{
 			reply: StatusReply{
-				Gates:      []Gate{{Type: systemPauseGate}},
-				Deliveries: []Delivery{{ID: "d1"}},
+				PausedRoles: []PausedRole{pausedDisk("worker")},
+				Deliveries:  []Delivery{{ID: "d1"}},
 			},
 			width: 120,
 			theme: theme,
@@ -101,61 +106,41 @@ func TestBanner_MutuallyExclusiveHeaderVsPaused(t *testing.T) {
 	})
 }
 
-// TestGatesSummary_ListsActiveGateTypes pins the header's compact gates
-// line: "none" when clear, else the sorted TYPEs, capped with "+N more".
-func TestGatesSummary_ListsActiveGateTypes(t *testing.T) {
-	if got, want := gatesSummary(nil), "none"; got != want {
-		t.Errorf("gatesSummary(nil) = %q, want %q", got, want)
+// TestBannerText_OrdersResourcesByRolesBlockedThenName: the banner names every
+// blocking resource with its level, ordered by the number of roles each blocks
+// (descending), ties by resource name; a role counts once per resource; a silent
+// resource reads "no reading"; with no paused role and no quiescing it is empty.
+func TestBannerText_OrdersResourcesByRolesBlockedThenName(t *testing.T) {
+	two := PausedRole{Role: "b", Failing: []FailingClause{
+		{Resource: "git_auth", Level: "UNAVAILABLE", Kind: "level"},
+		{Resource: "disk", Level: "TIGHT", Kind: "level"},
+		{Resource: "disk", Level: "TIGHT", Kind: "level"},
+	}}
+	paused := []PausedRole{
+		two,
+		{Role: "c", Failing: []FailingClause{{Resource: "git_auth", Level: "UNAVAILABLE", Kind: "level"}}},
+		{Role: "d", Failing: []FailingClause{{Resource: "claude_5h", Level: "EXHAUSTED", Kind: "level"}}},
+		{Role: "e", Failing: []FailingClause{{Resource: "net", Level: "DOWN", Kind: "unknown"}}},
 	}
-	got := gatesSummary([]Gate{{Type: "ZED"}, {Type: systemPauseGate}})
-	if want := "SYSTEM_PAUSE, ZED"; got != want {
-		t.Errorf("gatesSummary = %q, want %q (sorted)", got, want)
-	}
-	many := []Gate{{Type: "A"}, {Type: "B"}, {Type: "C"}, {Type: "D"}, {Type: "E"}}
-	if got, want := gatesSummary(many), "A, B, C, +2 more"; got != want {
-		t.Errorf("gatesSummary(5 gates) = %q, want %q", got, want)
-	}
-}
-
-// TestAnyGateSet_AnyActiveGate checks the aggregate: the wire lists ACTIVE gates
-// only, so any entry at all means something is gated, whatever its TYPE.
-func TestAnyGateSet_AnyActiveGate(t *testing.T) {
-	cases := []struct {
-		name  string
-		gates []Gate
-		want  bool
-	}{
-		{"none", nil, false},
-		{"system pause", []Gate{{Type: systemPauseGate}}, true},
-		{"an arbitrary TYPE", []Gate{{Type: "LOW_DISK_USAGE"}}, true},
-		{"several", []Gate{{Type: systemPauseGate}, {Type: "LOW_DISK_USAGE"}}, true},
-	}
-	for _, c := range cases {
-		if got := anyGateSet(c.gates); got != c.want {
-			t.Errorf("%s: anyGateSet = %v, want %v", c.name, got, c.want)
-		}
-	}
-}
-
-// TestBannerText_NamesGatesAndKeepsPausedForSystemPause: SYSTEM_PAUSE keeps the
-// operator-facing "PAUSED" lead, any other gate reads "GATED", and the banner
-// names every gate in force.
-func TestBannerText_NamesGatesAndKeepsPausedForSystemPause(t *testing.T) {
-	got := bannerText([]string{"LOW_DISK_USAGE"}, false, 2, Dispatch{})
-	if !strings.HasPrefix(got, "GATED") || !strings.Contains(got, "LOW_DISK_USAGE") {
-		t.Errorf("non-pause gate banner = %q, want a GATED lead naming the TYPE", got)
-	}
-	got = bannerText([]string{systemPauseGate, "LOW_DISK_USAGE"}, false, 0, Dispatch{})
-	if !strings.HasPrefix(got, "PAUSED") || !strings.Contains(got, "LOW_DISK_USAGE") {
-		t.Errorf("SYSTEM_PAUSE banner = %q, want a PAUSED lead naming every gate", got)
+	got := bannerText(paused, false, 2, Dispatch{})
+	want := "4 roles paused (git_auth UNAVAILABLE, claude_5h EXHAUSTED, disk TIGHT, net no reading) · 2 in flight"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("banner = %q, want prefix %q", got, want)
 	}
 	if got := bannerText(nil, false, 0, Dispatch{}); got != "" {
-		t.Errorf("no gates, not quiescing: banner = %q, want empty (header renders)", got)
+		t.Errorf("no paused role, not quiescing: banner = %q, want empty (header renders)", got)
+	}
+}
+
+// TestAnyRolePaused: any paused role at all.
+func TestAnyRolePaused(t *testing.T) {
+	if anyRolePaused(nil) || !anyRolePaused([]PausedRole{pausedDisk("w")}) {
+		t.Error("anyRolePaused must be true exactly when a role is paused")
 	}
 }
 
 // The header carries the durable queue log's size (bead pg2-8e0m6) in every
-// tier that shows the gates line.
+// tier that shows the levels line.
 func TestBanner_HeaderShowsQueueLogSize(t *testing.T) {
 	theme := render.NewTheme(false)
 	for _, width := range []int{120, 40} {

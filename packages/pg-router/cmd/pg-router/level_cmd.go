@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -63,6 +64,7 @@ type levelView struct {
 	AgeS       int64  `json:"age_s"`
 	Stale      bool   `json:"stale"`
 	Since      string `json:"since"`
+	NoSensor   bool   `json:"no_sensor"`
 	Reading    *struct {
 		Value float64 `json:"value"`
 		Unit  string  `json:"unit"`
@@ -116,7 +118,11 @@ func renderLevels(w io.Writer, levels []levelView, now time.Time) {
 	for _, v := range levels {
 		name := textsafe.Sanitize(v.Resource)
 		if v.Level == "" {
-			fmt.Fprintf(w, "  %s: no reading\n", name)
+			if v.NoSensor {
+				fmt.Fprintf(w, "  %s: no sensor configured\n", name)
+			} else {
+				fmt.Fprintf(w, "  %s: no reading (sensor has no answer)\n", name)
+			}
 			continue
 		}
 		line := fmt.Sprintf("  %s: %s (%s", name, textsafe.Sanitize(v.Level), textsafe.Sanitize(v.Source))
@@ -445,17 +451,49 @@ func runResumeIO(args []string, stdout, stderr io.Writer) int {
 	if c := callVerb(stderr, ref, core.SubcommandLevelClear, core.LevelClearReplySchema, req, &reply, core.CallOptions{}); c != exitOK {
 		return c
 	}
+	still := stillPausedByLevels(ref)
 	switch {
 	case len(reply.Cleared) == 0 && *all:
-		fmt.Fprintln(stdout, "no operator override to clear")
+		fmt.Fprintln(stdout, "no operator override to clear"+still)
 	case len(reply.Cleared) == 0:
-		fmt.Fprintln(stdout, "not paused")
+		fmt.Fprintln(stdout, "not paused"+still)
 	case *all:
-		fmt.Fprintln(stdout, "cleared: "+textsafe.Sanitize(strings.Join(reply.Cleared, ", ")))
+		fmt.Fprintln(stdout, "cleared: "+textsafe.Sanitize(strings.Join(reply.Cleared, ", "))+still)
 	default:
-		fmt.Fprintln(stdout, "resumed")
+		fmt.Fprintln(stdout, "resumed"+still)
 	}
 	return exitOK
+}
+
+// stillPausedByLevels asks the core which roles a level requirement still blocks
+// and returns "; still paused by levels: worker (disk, git_auth), ..." (the
+// resources each role waits on), or "" when none is blocked or the core cannot
+// say. Resuming the router does not lift a requirement, so the operator is told
+// which roles stay held and why.
+func stillPausedByLevels(ref core.Ref) string {
+	var st statusReply
+	if c := callVerb(io.Discard, ref, core.SubcommandStatus, core.StatusReplySchema, map[string]any{"schemaVersion": schemas.SchemaVersion}, &st, core.CallOptions{}); c != exitOK {
+		return ""
+	}
+	return pausedByLevelsText(st.PausedRoles)
+}
+
+// pausedByLevelsText formats the roles-still-paused suffix of resume.
+func pausedByLevelsText(paused []pausedRoleView) string {
+	if len(paused) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(paused))
+	for _, p := range paused {
+		var res []string
+		for _, f := range p.Failing {
+			if !slices.Contains(res, f.Resource) {
+				res = append(res, f.Resource)
+			}
+		}
+		parts = append(parts, textsafe.Sanitize(p.Role)+" ("+textsafe.Sanitize(strings.Join(res, ", "))+")")
+	}
+	return "; still paused by levels: " + strings.Join(parts, ", ") + " (see 'pg-router explain <role>')"
 }
 
 var _ = flag.ErrHelp

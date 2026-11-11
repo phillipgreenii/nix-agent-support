@@ -177,6 +177,7 @@
           "expires_at": { "type": "string" },
           "age_s": { "type": "integer", "minimum": 0 },
           "stale": { "type": "boolean" },
+          "no_sensor": { "type": "boolean" },
           "since": { "type": "string" },
           "reading": {
             "type": "object",
@@ -194,6 +195,47 @@
             "properties": {
               "until_cleared": { "type": "boolean" },
               "expires_at": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "pausedRoles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "failing"],
+        "properties": {
+          "role": { "type": "string" },
+          "failing": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["clause", "resource", "kind"],
+              "properties": {
+                "clause": { "type": "string" },
+                "resource": { "type": "string" },
+                "level": { "type": "string" },
+                "kind": {
+                  "type": "string",
+                  "enum": ["level", "unknown", "stale"]
+                },
+                "source": { "type": "string" },
+                "owner": { "type": "string" },
+                "since": { "type": "string" },
+                "allowed": { "type": "array", "items": { "type": "string" } },
+                "reading": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["value", "unit"],
+                  "properties": {
+                    "value": { "type": "number" },
+                    "unit": { "type": "string" }
+                  }
+                }
+              }
             }
           }
         }

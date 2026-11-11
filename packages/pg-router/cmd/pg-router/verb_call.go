@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
@@ -18,7 +17,7 @@ import (
 
 // This file holds the helpers the socket-client commands share (status, doctor,
 // log compact and the pause / resume and level verbs): the connection flags, the
-// flag parser, one socket call, and the status reply's `gates` array reader. They
+// flag parser, one socket call. They
 // lived in the removed gate commands file and moved here unchanged.
 
 // defaultGateCaller is recorded as the owner/clearer when --owner/--by is
@@ -47,42 +46,6 @@ func parseGateFlags(fs *flag.FlagSet, name string, args []string) (pos []string,
 		return nil, conformance.ExitUsage, false
 	}
 	return pos, exitOK, true
-}
-
-// statusGate is one entry of the status reply's `gates` array, as a CONSUMER
-// reads it (schemas/cli.status-reply.schema.json).
-type statusGate struct {
-	Type           string `json:"type"`
-	Description    string `json:"description,omitempty"`
-	Owner          string `json:"owner,omitempty"`
-	SetAt          string `json:"setAt"`
-	ExpiresAt      string `json:"expiresAt,omitempty"`
-	TTLRemainingMs int64  `json:"ttlRemainingMs,omitempty"`
-}
-
-// renderGates writes the human view of the active gates: one line per gate,
-// sorted by TYPE, with an explicit "(none)" when nothing is gated.
-func renderGates(w io.Writer, gates []statusGate) {
-	if len(gates) == 0 {
-		fmt.Fprintln(w, "  (none)")
-		return
-	}
-	sorted := append([]statusGate(nil), gates...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Type < sorted[j].Type })
-	for _, g := range sorted {
-		line := "  " + textsafe.Sanitize(g.Type) + ": setAt=" + shortTime(g.SetAt)
-		if g.Owner != "" {
-			line += " owner=" + textsafe.Sanitize(g.Owner)
-		}
-		if g.ExpiresAt != "" {
-			line += fmt.Sprintf(" expiresAt=%s ttlRemaining=%s", shortTime(g.ExpiresAt),
-				(time.Duration(g.TTLRemainingMs) * time.Millisecond).Round(time.Second))
-		}
-		if g.Description != "" {
-			line += " description=" + fmt.Sprintf("%q", textsafe.Sanitize(g.Description))
-		}
-		fmt.Fprintln(w, line)
-	}
 }
 
 // callGateVerb performs one socket call: it dials ref, sends req as the verb's

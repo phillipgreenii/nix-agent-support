@@ -1,7 +1,8 @@
 // Package tui implements pg-router's operator-facing terminal UI. This file
-// (Task 4.8, reworked by bead pg2-h63eu for the Gate Registry) carries the
-// command-pattern P gate toggle, its R = resume-all sub-binding, and the gates
-// modal (g) that lists every gate currently in force.
+// carries the command-pattern P toggle of the router PAUSED level, its
+// R = resume-all sub-binding (clear every operator override), and the levels
+// modal (g) that lists every resource's level in force. The toggle is the socket
+// verbs level-set / level-clear on the router resource.
 package tui
 
 import (
@@ -21,55 +22,58 @@ import (
 // side -- the same safety-net role pollTimeout plays above the Poller's
 // own internal deadline (poll.go's pollTimeout above poller.go's
 // pollerRPCDeadline). A core that never replies cannot pin the pending
-// indicator forever: the RPC deadline is what clears it with a warn flash
-// [design: Task 4.8 Step 3].
+// indicator forever: the RPC deadline is what clears it with a warn flash.
 const gateToggleTimeout = 10 * time.Second
 
-// ToggleVerbResumeAll is the Poller.ToggleGate verb behind the Gates modal's
-// R binding: the socket `resume` verb with `all` set, clearing EVERY active
-// gate, not just SYSTEM_PAUSE.
+// ToggleVerbResumeAll is the Poller.ToggleGate verb behind the levels modal's
+// R binding: level-clear with `all`, removing EVERY operator override.
 const ToggleVerbResumeAll = "resume-all"
 
-// The other two Poller.ToggleGate verbs, and the name the status reply's
-// `gates` array gave the router pause. The wire verbs behind them are the level
-// verbs level-set / level-clear on the router resource (see SocketPoller.ToggleGate).
+// The other two Poller.ToggleGate verbs. The wire verbs behind them are the
+// level verbs level-set / level-clear on the router resource (see
+// SocketPoller.ToggleGate).
 const (
 	ToggleVerbPause  = "pause"
 	ToggleVerbResume = "resume"
-	systemPauseGate  = "SYSTEM_PAUSE"
 )
 
-// gateToggleResultMsg carries ToggleGate's outcome back to Update
-// [design: Task 4.8 Interfaces].
+// routerResource and levelPaused name the router pause: the router resource at
+// its PAUSED level.
+const (
+	routerResource = "router"
+	levelPaused    = "PAUSED"
+	levelRunning   = "RUNNING"
+)
+
+// gateToggleResultMsg carries ToggleGate's outcome back to Update.
 type gateToggleResultMsg struct {
 	verb      string
 	effective string
 	err       error
 }
 
-// handleToggleOperatorGate implements the P key [design: Task 4.8 Files]: a
-// command-pattern toggle of the SYSTEM_PAUSE gate ONLY -- never another
-// system's gate, which a bare pause/resume deliberately cannot reach (resume
-// clears only SYSTEM_PAUSE unless `all` is given, so a gate another system
-// owns is never cleared by accident). It calls m.poller.ToggleGate(ctx,
-// verb), never a raw *core.Client, via startGateToggle.
+// handleToggleOperatorGate implements the P key: a command-pattern toggle of
+// the router PAUSED level ONLY -- a bare pause / resume deliberately cannot touch
+// a requirement of a registration, which only the resource's own level decides.
+// It calls m.poller.ToggleGate(ctx, verb), never a raw *core.Client, via
+// startGateToggle.
 //
-// No optimistic flip, ever [design: Task 4.8 Step 1]: this method only
-// resolves which verb to send and stamps the pending indicator: it never
-// itself changes m.reply's gate state. That happens in exactly one place,
-// applyGateToggleResult, and only once the RPC has actually replied.
+// No optimistic flip, ever: this method only resolves which verb to send and
+// stamps the pending indicator: it never itself changes m.reply's levels. That
+// happens in exactly one place, applyGateToggleResult, and only once the RPC has
+// actually replied.
 func (m *Model) handleToggleOperatorGate() tea.Cmd {
 	verb := ToggleVerbPause
-	if m.gateSet(systemPauseGate) {
+	if m.routerPaused() {
 		verb = ToggleVerbResume
 	}
 	return m.startGateToggle(verb)
 }
 
-// handleResumeAllGates implements the "R = resume-all inside the Gates
-// modal" sub-binding [design: Task 4.8 Files]: a no-op everywhere except
-// while the Gates modal is open. It clears EVERY active gate (any caller may
-// clear any gate), via the socket `resume` verb's `all` flag.
+// handleResumeAllGates implements the "R = resume all inside the levels modal"
+// sub-binding: a no-op everywhere except while the levels modal is open. It
+// clears EVERY operator override (any caller may clear any), via level-clear
+// with `all`.
 func handleResumeAllGates(m *Model) tea.Cmd {
 	if m.activeModal != ModalGates {
 		return nil
@@ -97,153 +101,155 @@ func (m *Model) startGateToggle(verb string) tea.Cmd {
 	}
 }
 
-// applyGateToggleResult is Update's gateToggleResultMsg handler
-// [design: Task 4.8 Step 3]. It always clears the pending indicator.
+// applyGateToggleResult is Update's gateToggleResultMsg handler. It always
+// clears the pending indicator.
 //
-// On failure (an RPC error, including the gateToggleTimeout deadline
-// firing with no reply): the rendered gate state is left exactly where it
-// was, a warn flash names the failure, and the failure is logged.
+// On failure (an RPC error, including the gateToggleTimeout deadline firing
+// with no reply): the rendered level state is left exactly where it was, a warn
+// flash names the failure, and the failure is logged.
 //
-// On success: this is the ONE place allowed to change the rendered gate
-// state (the no-optimistic-flip contract's other half) -- it applies the
-// toggle locally so the operator sees the new state immediately rather than
-// waiting for the next poll tick, and flashes the resulting EFFECTIVE state,
-// not just the toggled gate: clearing SYSTEM_PAUSE while another gate remains
-// active must not imply the pool resumed [design: Task 4.8 (worked flash
-// example)].
+// On success: this is the ONE place allowed to change the rendered level state
+// (the no-optimistic-flip contract's other half) -- it applies the toggle locally
+// so the operator sees the new state immediately rather than waiting for the next
+// poll tick, and flashes the resulting EFFECTIVE state, not just the toggle:
+// resuming the router while another resource still blocks a role must not imply
+// the pool resumed.
 func (m *Model) applyGateToggleResult(msg gateToggleResultMsg) tea.Cmd {
 	m.gateTogglePending = false
 	if msg.err != nil {
-		m.errorLogger.LogString("gate toggle failed: " + msg.err.Error())
-		m.setFlash("operator gate toggle failed: "+msg.err.Error(), FlashWarn)
+		m.errorLogger.LogString("level toggle failed: " + msg.err.Error())
+		m.setFlash("operator level toggle failed: "+msg.err.Error(), FlashWarn)
 		return m.flashClearCmd()
 	}
 	switch {
 	case msg.effective == "paused":
-		m.setGate(systemPauseGate, true)
+		m.setRouterPaused(true)
 	case msg.verb == ToggleVerbResumeAll:
-		m.reply.Gates = nil
+		for i := range m.reply.Levels {
+			m.reply.Levels[i].Override = nil
+		}
+		m.setRouterPaused(false)
 	default:
-		m.setGate(systemPauseGate, false)
+		m.setRouterPaused(false)
 	}
 	m.setFlash(m.operatorGateFlashText(msg.effective), FlashInfo)
 	return m.flashClearCmd()
 }
 
 // operatorGateFlashText names the resulting EFFECTIVE state, not just the
-// toggled gate [design: Task 4.8 (worked flash example)]: clearing SYSTEM_PAUSE
-// while another gate remains active still leaves routing blocked for the
-// participants that block on it, and the flash says so rather than implying
-// the pool resumed.
+// toggle: resuming the router while another resource still blocks a role leaves
+// that role held, and the flash says so rather than implying the pool resumed.
 func (m *Model) operatorGateFlashText(effective string) string {
 	if effective == "paused" {
-		return systemPauseGate + " set — pool now PAUSED"
+		return "router PAUSED — admission stopped for every role"
 	}
-	if others := m.otherGateTypes(systemPauseGate); len(others) > 0 {
-		return systemPauseGate + " cleared — still gated by " + strings.Join(others, ", ")
+	if others := m.otherBlockers(); len(others) > 0 {
+		return "router RUNNING — roles still held by " + strings.Join(others, ", ")
 	}
-	return systemPauseGate + " cleared — pool now RESUMED"
+	return "router RUNNING — pool now RESUMED"
 }
 
-// otherGateTypes lists the TYPEs of every active gate except except, sorted.
-func (m *Model) otherGateTypes(except string) []string {
+// otherBlockers lists the resources, other than the router, that block a role
+// right now (a failing clause that is a reading, not "no reading"), sorted.
+func (m *Model) otherBlockers() []string {
+	seen := map[string]bool{}
 	var out []string
-	for _, g := range m.reply.Gates {
-		if g.Type != except {
-			out = append(out, textsafe.Sanitize(g.Type))
+	for _, p := range m.reply.PausedRoles {
+		for _, f := range p.Failing {
+			if f.Resource != routerResource && f.Kind != "unknown" && !seen[f.Resource] {
+				seen[f.Resource] = true
+				out = append(out, textsafe.Sanitize(f.Resource))
+			}
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// gate looks up the named gate TYPE in the last-polled reply, reporting
-// whether it is active. The wire lists ACTIVE gates only, so ok means "in
-// force".
-func (m *Model) gate(gateType string) (Gate, bool) {
-	for _, g := range m.reply.Gates {
-		if g.Type == gateType {
-			return g, true
-		}
-	}
-	return Gate{}, false
-}
-
-// gateSet reports whether the named gate TYPE is currently active in the
+// routerPaused reports whether the router resource is at PAUSED in the
 // last-polled reply.
-func (m *Model) gateSet(gateType string) bool {
-	_, ok := m.gate(gateType)
-	return ok
+func (m *Model) routerPaused() bool {
+	for _, l := range m.reply.Levels {
+		if l.Resource == routerResource {
+			return l.Level == levelPaused
+		}
+	}
+	return false
 }
 
-// setGate is applyGateToggleResult's own no-optimistic-flip exception: it
-// locally adds or removes the named gate in the rendered list, run only once
-// the RPC has actually replied.
-func (m *Model) setGate(gateType string, set bool) {
-	for i, g := range m.reply.Gates {
-		if g.Type != gateType {
-			continue
-		}
-		if !set {
-			m.reply.Gates = append(m.reply.Gates[:i:i], m.reply.Gates[i+1:]...)
-		}
-		return
+// setRouterPaused is applyGateToggleResult's own no-optimistic-flip exception: it
+// locally sets the router row to PAUSED or RUNNING (adding the row when the
+// reply had none), run only once the RPC has actually replied.
+func (m *Model) setRouterPaused(paused bool) {
+	level := levelRunning
+	if paused {
+		level = levelPaused
 	}
-	if set {
-		m.reply.Gates = append(m.reply.Gates, Gate{Type: gateType, SetAt: time.Now()})
+	for i, l := range m.reply.Levels {
+		if l.Resource == routerResource {
+			m.reply.Levels[i].Level = level
+			m.reply.Levels[i].Since = time.Now()
+			return
+		}
 	}
+	m.reply.Levels = append(m.reply.Levels, LevelRow{Resource: routerResource, Level: level, Source: "operator", Since: time.Now()})
 }
 
-// renderGatesModal lists every gate currently in force -- TYPE, description,
-// owner, set-at and TTL remaining -- or an unambiguous "none active" row.
-// R = resume-all is named in the modal's own footer.
+// renderGatesModal lists every resource's level in force -- the resource, its
+// level, the reading, the source and since when -- or "no reading" for a silent
+// one. R = resume all is named in the modal's own footer.
 //
 // The Left column's guaranteed gap from the status text in Right is
-// render.Modal's own job [pg2-y6sy5]: it sizes that column from the actual
-// Left values in play, so gate TYPEs of any length need no padding here.
+// render.Modal's own job: it sizes that column from the actual Left values in
+// play, so resource names of any length need no padding here.
 func (m *Model) renderGatesModal() string {
-	return render.Modal("Gates", m.gateModalRows(), "[R] resume all", m.width, m.height, m.modalScrollOffset)
+	return render.Modal("Levels", m.levelModalRows(), "[R] resume all", m.width, m.height, m.modalScrollOffset)
 }
 
-// gateModalRows renders one row per active gate (sorted by TYPE), shared by the
-// Gates modal and the Problems modal so the two never drift into different
-// renderings of the same state. A clear registry renders the explicit "none
-// active" -- never a blank section -- mirroring unmatchedBindingRows' "(none)"
-// precedent (pg2-y6sy5): an empty section must read as a confirmed fact.
-func (m *Model) gateModalRows() []render.ModalRow {
-	if len(m.reply.Gates) == 0 {
-		return []render.ModalRow{{Left: "gates", Right: "none active"}}
+// levelModalRows renders one row per resource (sorted by name). An empty reply
+// renders the explicit "none" -- never a blank section: an empty section must
+// read as a confirmed fact.
+func (m *Model) levelModalRows() []render.ModalRow {
+	if len(m.reply.Levels) == 0 {
+		return []render.ModalRow{{Left: "levels", Right: "none configured"}}
 	}
-	gates := append([]Gate(nil), m.reply.Gates...)
-	sort.Slice(gates, func(i, j int) bool { return gates[i].Type < gates[j].Type })
-	rows := make([]render.ModalRow, 0, len(gates))
-	for _, g := range gates {
-		rows = append(rows, render.ModalRow{Left: textsafe.Sanitize(g.Type), Right: gateDetail(g)})
+	rows := append([]LevelRow(nil), m.reply.Levels...)
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Resource < rows[j].Resource })
+	out := make([]render.ModalRow, 0, len(rows))
+	for _, l := range rows {
+		out = append(out, render.ModalRow{Left: textsafe.Sanitize(l.Resource), Right: levelDetail(l)})
 	}
-	return rows
+	return out
 }
 
-// gateDetail renders one gate's TTL / set-at / owner / description line. The
-// fixed-width facts (TTL left, set-at, owner) lead and the free-text
-// description trails, because render.Modal hard-clips a long Right value with
-// no ellipsis: a narrow terminal then loses the tail of the description, never
-// the TTL an operator needs to see.
-func gateDetail(g Gate) string {
-	ttl := "no TTL"
-	if !g.ExpiresAt.IsZero() {
-		ttl = "TTL " + formatCoarse(time.Duration(g.TTLRemainingMs)*time.Millisecond) + " left"
+// levelDetail renders one resource's line. The level, its numbers and any
+// override lead and the since time trails, because render.Modal hard-clips a long Right value with
+// no ellipsis: a narrow terminal then loses the tail, never the level.
+func levelDetail(l LevelRow) string {
+	if l.Level == "" {
+		if l.NoSensor {
+			return "no sensor configured"
+		}
+		return "no reading (sensor has no answer)"
 	}
-	since := "-"
-	if !g.SetAt.IsZero() {
-		since = g.SetAt.Format("2006-01-02 15:04")
+	s := textsafe.Sanitize(l.Level)
+	if l.Reading != nil {
+		s += fmt.Sprintf(" · %g %s", l.Reading.Value, textsafe.Sanitize(l.Reading.Unit))
 	}
-	owner := textsafe.Sanitize(g.Owner)
-	if owner == "" {
-		owner = "-"
+	if l.Source == "operator" && l.Override != nil {
+		if l.Override.UntilCleared {
+			s += " · OVERRIDE by " + textsafe.Sanitize(l.Owner) + ", until cleared"
+		} else {
+			s += " · OVERRIDE by " + textsafe.Sanitize(l.Owner) + ", expires " + l.Override.ExpiresAt.UTC().Format("2006-01-02 15:04") + "Z"
+		}
+	} else if l.Owner != "" {
+		s += " · " + textsafe.Sanitize(l.Owner)
 	}
-	desc := textsafe.Sanitize(g.Description)
-	if desc == "" {
-		desc = "(no description)"
+	if !l.Since.IsZero() {
+		s += " · since " + l.Since.UTC().Format("2006-01-02 15:04") + "Z"
 	}
-	return fmt.Sprintf("%s · set %s · owner: %s · %s", ttl, since, owner, desc)
+	if l.Stale {
+		s += " · stale"
+	}
+	return s
 }

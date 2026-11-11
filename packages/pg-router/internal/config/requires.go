@@ -200,12 +200,9 @@ func unionInOrder(scale, a, b []string) []string {
 	return out
 }
 
-// RequiresWarnings returns one warning per requires clause (of an enabled or
-// disabled role alike) that names a resource with no sensor on this machine.
-// The sensor is present when it is the router's own, when a registered
-// level-source query names it, or when it is listed in Config.MachineSensors.
-// The CLI prints the returned lines; they are not errors.
-func (c Config) RequiresWarnings() []string {
+// presentSensors is the set of sensors on this machine: the router's own, the
+// ones a level-source query names and Config.MachineSensors.
+func (c Config) presentSensors() map[string]bool {
 	present := map[string]bool{RouterSensor: true}
 	for _, s := range c.MachineSensors {
 		present[s] = true
@@ -215,6 +212,23 @@ func (c Config) RequiresWarnings() []string {
 			present[src.LevelSource] = true
 		}
 	}
+	return present
+}
+
+// SensorPresent reports whether the named sensor is configured on this machine.
+// A resource with no sensor name at all (an operator-only resource) counts as
+// present: its silence is not a missing sensor.
+func (c Config) SensorPresent(sensor string) bool {
+	return sensor == "" || c.presentSensors()[sensor]
+}
+
+// RequiresWarnings returns one warning per requires clause (of an enabled or
+// disabled role alike) that names a resource with no sensor on this machine.
+// The sensor is present when it is the router's own, when a registered
+// level-source query names it, or when it is listed in Config.MachineSensors.
+// The CLI prints the returned lines; they are not errors.
+func (c Config) RequiresWarnings() []string {
+	present := c.presentSensors()
 	var out []string
 	for _, role := range c.Roles {
 		for _, cl := range c.Requirements[role.Name].Requirement.Clauses {

@@ -542,7 +542,7 @@ func (m *Model) View() string {
 // (static above dynamic), Interfaces; Task 4.6 Interfaces].
 func (m *Model) renderMain() string {
 	now := time.Now()
-	gated := anyGateSet(m.reply.Gates)
+	gated := anyRolePaused(m.reply.PausedRoles)
 
 	top := renderTopZone(topZoneData{
 		clientVersion: m.clientVersion,

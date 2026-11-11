@@ -789,3 +789,62 @@ func TestLevel_EvaluationIsCalledOnlyFromTheAdmissionSites(t *testing.T) {
 		t.Fatalf("levelAdmitLocked is called from %v, want exactly %v", admit, want)
 	}
 }
+
+func TestLevel_PausedRolesListsOnlyBlockedListenersWithoutSignals(t *testing.T) {
+	c := newClock()
+	q, src, obs := newLevelQueue(t, NewMemStore(), c)
+	q.Register(newListener("blocked", "work"))
+	q.Register(newListener("free", "work"))
+	q.RegisterListener("blocked", reqDiskOK())
+	if got := q.PausedRoles(); len(got) != 0 {
+		t.Fatalf("PausedRoles with no reading = %v, want none", got)
+	}
+	src.set("disk", "LOW")
+	got := q.PausedRoles()
+	if len(got) != 1 || got[0].Role != "blocked" || len(got[0].Result.Failing) != 1 || got[0].Result.Failing[0].ClauseText != "disk >= OK" {
+		t.Fatalf("PausedRoles = %+v, want blocked by disk >= OK", got)
+	}
+	if len(obs.paused) != 0 || len(obs.blocked) != 0 {
+		t.Fatalf("PausedRoles must be read-only; paused=%v blocked=%v", obs.paused, obs.blocked)
+	}
+}
+
+func TestLevel_IdleExceptPausedIgnoresWorkOnlyABlockedListenerCouldTake(t *testing.T) {
+	c := newClock()
+	q, src, _ := newLevelQueue(t, NewMemStore(), c)
+	q.Register(newListener("blocked", "work"))
+	q.RegisterListener("blocked", reqDiskOK())
+	src.set("disk", "LOW")
+	if _, err := q.Enqueue(Event{ID: "e1", Type: "work", ExpiresAt: c.in(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if q.Idle() {
+		t.Fatal("precondition: plain Idle is held open by the blocked listener's event")
+	}
+	if !q.IdleExceptPaused() {
+		t.Fatal("IdleExceptPaused must not wait on an event only a blocked listener could take")
+	}
+	src.set("disk", "OK")
+	if q.IdleExceptPaused() {
+		t.Fatal("once the role is admitted its event is deliverable work again")
+	}
+}
+
+func TestLevel_IdleExceptPausedStillWaitsForAnAdmittedListener(t *testing.T) {
+	c := newClock()
+	q, src, _ := newLevelQueue(t, NewMemStore(), c)
+	q.Register(newListener("blocked", "work"))
+	q.Register(newListener("free", "work"))
+	q.RegisterListener("blocked", reqDiskOK())
+	src.set("disk", "LOW")
+	if _, err := q.Enqueue(Event{ID: "e1", Type: "work", ExpiresAt: c.in(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if q.IdleExceptPaused() {
+		t.Fatal("a free listener still owes the event; the queue is not idle")
+	}
+	q.Dispatch()
+	if !q.IdleExceptPaused() {
+		t.Fatal("after the free listener accepted, only the blocked one remains: idle")
+	}
+}

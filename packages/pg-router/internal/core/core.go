@@ -71,6 +71,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/kvstore"
+	"github.com/phillipgreenii/pg-router/internal/levels"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
@@ -1278,9 +1279,13 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 		"registry":  statusRegistrations(regs),
 		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners(), s.readRoleProgress()),
 		"levels":    s.statusLevels(),
-		"asOf":      time.Now().UTC().Format(time.RFC3339Nano),
-		"sources":   statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions),
-		"activity":  []any{},
+		// pausedRoles: every role a level requirement blocks right now, with the
+		// failing clauses (the data of status's paused roles block, explain and
+		// the TUI banner).
+		"pausedRoles": s.statusPausedRoles(),
+		"asOf":        time.Now().UTC().Format(time.RFC3339Nano),
+		"sources":     statusSources(nil, s.excludedSources, s.sourceIntervalsMs, inFlightSources, s.sourceDescriptions),
+		"activity":    []any{},
 		// activityDropped defaults false (no ring, or since==0's "no cursor, no
 		// gap to report" case per Ring.Read's own doc) and is set true below
 		// only when the ring itself reports a gap (bead pg2-vtuou).
@@ -1764,4 +1769,51 @@ func (s *Service) statusLevels() []map[string]any {
 		return []map[string]any{}
 	}
 	return LevelEntries(s.levels)
+}
+
+// statusPausedRoles is the status reply's pausedRoles array: one entry per role
+// the level requirements block right now, with its failing clauses, each carrying
+// the level, its source and owner, when the resource entered that level and the
+// reading behind it. Empty with no level projection wired.
+func (s *Service) statusPausedRoles() []map[string]any {
+	out := []map[string]any{}
+	if s.levels == nil {
+		return out
+	}
+	paused := s.q.PausedRoles()
+	if len(paused) == 0 {
+		return out
+	}
+	details := map[string]LevelDetail{}
+	for _, d := range s.levels.Details() {
+		details[d.Resource] = d
+	}
+	for _, p := range paused {
+		failing := make([]map[string]any, 0, len(p.Result.Failing))
+		for _, f := range p.Result.Failing {
+			e := map[string]any{"clause": f.ClauseText, "resource": f.Resource, "kind": string(f.Kind), "level": f.Level}
+			if len(f.Allowed) > 0 {
+				e["allowed"] = f.Allowed
+			}
+			if f.Kind != levels.KindUnknown {
+				if f.Source != "" {
+					e["source"] = f.Source
+				}
+				if f.Owner != "" {
+					e["owner"] = f.Owner
+				}
+				if d, ok := details[f.Resource]; ok {
+					if !d.Since.IsZero() {
+						e["since"] = d.Since.UTC().Format(time.RFC3339Nano)
+					}
+					if d.Reading != nil {
+						e["reading"] = map[string]any{"value": d.Reading.Value, "unit": d.Reading.Unit}
+					}
+				}
+			}
+			failing = append(failing, e)
+		}
+		out = append(out, map[string]any{"role": p.Role, "failing": failing})
+	}
+	return out
 }

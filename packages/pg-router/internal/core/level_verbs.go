@@ -109,6 +109,9 @@ func LevelEntries(p *LevelProjection) []map[string]any {
 	out := make([]map[string]any, 0, len(details))
 	for _, d := range details {
 		e := map[string]any{"resource": d.Resource}
+		if d.NoSensor {
+			e["no_sensor"] = true
+		}
 		if d.HasLevel {
 			e["level"] = d.Level
 			e["source"] = d.Source

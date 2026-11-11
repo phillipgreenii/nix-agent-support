@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check) | doctor [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check) | doctor [--socket <path>] [--token <tok>] | doctor --clauses | explain <role> [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -72,10 +72,25 @@ Subcommands:
                           not an executable file, a role without a handler, and the rest) is printed, one per line, in ONE run. Exit 0
                           and one "config ok" line when there is none, 1 otherwise. --json is not
                           valid with check.
+  explain <role> [--socket <path>] [--token <tok>]
+                          say whether the role is paused by levels RIGHT NOW and why: the paused-role
+                          line names each failing requirement with the level, the reading and since
+                          when. A role no requirement blocks is reported as not paused. An unknown
+                          role exits 1 with "unknown role <name>". Reads the RUNNING core; it never
+                          starts one.
+  doctor --clauses
+                          read-only report of what the CURRENT readings would pause. It runs every
+                          level-source query of the config once with --raw (and once with --bands),
+                          independent of the router's projection, so it works before the router
+                          enforces. Per registration it prints "BLOCKED NOW" with the shortfall, then
+                          a summary line ("N of M registrations blocked"), the level of every
+                          resource (including "no reading") and a statement when the bands start the
+                          machine below OK. A sensor that fails shows its resources as "no reading".
+                          Always exits 0 once the config loads.
   doctor [--socket <path>] [--token <tok>]
                           run "config check" plus quick probes, one verdict line each (ok, FAIL or
                           info): the state directory is writable, the core's socket is reachable,
-                          the active gates, the roles the core marked unavailable (with the reason),
+                          the levels and the roles paused by levels, the roles the core marked unavailable (with the reason),
                           per-role progress (age since last progress, unsuccessful and busy counts),
                           and each enabled role's handler "validate". A handler without "validate" is
                           reported "not supported" (not a failure); one that does not answer within 5
@@ -248,6 +263,7 @@ const (
 	routePause                         // operator: pause the router (INV-LIFE-2, .rest)
 	routeLevel                         // operator: level list|set|clear|refresh (.rest)
 	routeResume                        // operator: resume the router, or every operator override with --all (.rest)
+	routeExplain                       // operator: why a role is or is not paused by levels (.rest)
 	routeDoctor                        // operator: config check plus quick probes of the state dir, socket, gates, roles and handlers (.rest)
 	routeLog                           // operator: log compact [--dry-run] on the queue log, via the running core or offline (.rest)
 )
@@ -363,6 +379,10 @@ func route(argv []string) routeResult {
 		// Its own verb and flags, parsed in its own handler, with the same usage
 		// exit code every operator subcommand uses.
 		return routeResult{kind: routeLevel, rest: args[1:]}
+	case "explain":
+		// Its own --socket/--token flags and <role> positional, parsed in its own
+		// handler, with the same usage exit code every operator subcommand uses.
+		return routeResult{kind: routeExplain, rest: args[1:]}
 	case "doctor":
 		// Its own --socket/--token flags, parsed in its own handler, with the same
 		// usage exit code every operator subcommand uses.

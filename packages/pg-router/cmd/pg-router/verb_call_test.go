@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"strings"
 	"testing"
 )
 
@@ -15,20 +13,6 @@ func TestShortTime(t *testing.T) {
 	}
 	if got := shortTime("2026-10-01T12:34:56Z"); len(got) != len("15:04:05") {
 		t.Errorf("shortTime(valid) = %q, want HH:MM:SS", got)
-	}
-}
-
-func TestRenderGates_emptyAndSorted(t *testing.T) {
-	var buf bytes.Buffer
-	renderGates(&buf, nil)
-	if got := buf.String(); got != "  (none)\n" {
-		t.Fatalf("empty render = %q", got)
-	}
-	buf.Reset()
-	renderGates(&buf, []statusGate{{Type: "B", SetAt: "2026-10-01T12:00:00Z", Owner: "o"}, {Type: "A", SetAt: "2026-10-01T12:00:00Z"}})
-	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "  A:") || !strings.Contains(lines[1], "owner=o") {
-		t.Fatalf("render = %q, want A before B with B's owner", buf.String())
 	}
 }
 

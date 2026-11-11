@@ -97,6 +97,10 @@ type LevelAppender interface {
 type LevelResource struct {
 	Sensor      string
 	GraceFactor float64
+	// NoSensor is true when no sensor of this resource is configured on this
+	// machine, so its silence is not a failing sensor: status prints "no sensor
+	// configured" for it.
+	NoSensor bool
 }
 
 // LevelProjectionConfig configures NewLevelProjection. Skew is the bound on
@@ -551,6 +555,8 @@ type LevelDetail struct {
 	Since      time.Time
 	Reading    *LevelReading
 	Override   *LevelOverride
+	// NoSensor is true when no sensor is configured for the resource.
+	NoSensor bool
 }
 
 // Details returns one row per registry resource, sorted by name, at the current
@@ -568,7 +574,7 @@ func (p *LevelProjection) Details() []LevelDetail {
 	sort.Strings(names)
 	out := make([]LevelDetail, 0, len(names))
 	for _, n := range names {
-		d := LevelDetail{Resource: n}
+		d := LevelDetail{Resource: n, NoSensor: p.cfg.Resources[n].NoSensor}
 		lv, flag := p.effectiveLocked(n, now)
 		if flag != "unknown" {
 			s := p.slots[n]

@@ -80,21 +80,21 @@ func TestBanner_GatedWithLiveSessionInFlightReadsHaltedNotQuiescent(t *testing.T
 	}
 
 	reply := StatusReply{
-		Core:       CoreInfo{State: "started"},
-		Gates:      []Gate{{Type: systemPauseGate}},
-		Deliveries: make([]Delivery, inFlight),
+		Core:        CoreInfo{State: "started"},
+		PausedRoles: []PausedRole{{Role: "h", Failing: []FailingClause{{Clause: "router == RUNNING", Resource: "router", Level: "PAUSED", Kind: "level"}}}},
+		Deliveries:  make([]Delivery, inFlight),
 	}
 	got := renderTopZone(topZoneData{
 		reply:     reply,
-		quiescing: true, // both conditions hold at once: gated must still win.
+		quiescing: true, // both conditions hold at once: paused must still win.
 		width:     120,
 		theme:     render.NewTheme(false),
 	})
-	if !strings.Contains(got, "routing halted") {
+	if !strings.Contains(got, "1 role paused (router PAUSED)") {
 		t.Errorf("expected the halted banner with a real session in flight; got:\n%s", got)
 	}
 	if strings.Contains(got, "quiescing —") {
-		t.Errorf("halted must win over quiescing even with a real session in flight; got:\n%s", got)
+		t.Errorf("paused must win over quiescing even with a real session in flight; got:\n%s", got)
 	}
 	if want := fmt.Sprintf("%d in flight", inFlight); !strings.Contains(got, want) {
 		t.Errorf("expected the banner's in-flight count (%q) to reflect the live SessionsInFlight() value; got:\n%s", want, got)

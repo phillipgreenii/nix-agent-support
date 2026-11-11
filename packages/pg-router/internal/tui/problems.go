@@ -7,7 +7,7 @@
 // signalling mechanism -- none of them are removed or changed by this file:
 //
 //   - the one-line attention banner (liveness.go's attentionLine),
-//   - the Gates modal ("g", gates.go),
+//   - the Levels modal ("g", gates.go),
 //   - the Legend modal ("l", render.LegendModal),
 //   - per-row drilldown (enter on a Listener/Source row, drilldown.go),
 //   - the file-only error logger (errorlog.go's ErrorLogger), which this
@@ -19,17 +19,21 @@
 //  1. unmatched-binding types with no single-row home of their own
 //     (reply.UnmatchedBindings) -- these can never appear as a Listener/
 //     Source row, since by definition no configured role matched them;
-//  2. current gate state, reusing gates.go's own gateModalRow so this view
-//     and the Gates modal never drift into two different renderings of the
-//     same fact;
+//  2. one row per FAILING resource -- a resource whose level blocks at least
+//     one role right now -- naming the level and the roles it blocks (a
+//     resource with no reading is not a failing resource);
 //  3. the most recent tui-errors.log lines (errorlog.go's tailErrorLog).
 //
 // Between 2 and 3 it also shows the event-log size limit's state (bead
-// pg2-5d3ui, loglimit.go): the soft step is not a gate, so the Gates section
+// pg2-5d3ui, loglimit.go): the soft step is not a level, so the levels section
 // cannot carry it.
 package tui
 
 import (
+	"fmt"
+	"sort"
+	"strings"
+
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/tui/render"
 )
@@ -44,12 +48,12 @@ const problemsErrorLogTailLines = 10
 // renderProblemsModal composes the Problems modal's rows and hands them to
 // render.Modal -- the same scrollable/bordered/full-screen-takeover
 // presentation every other modal in this package uses (gates.go's
-// renderGatesModal, render.LegendModal, render.HelpModal), so the Problems
+// renderGatesModal (the Levels modal), render.LegendModal, render.HelpModal), so the Problems
 // modal scrolls, closes on esc, and clips to width/height for free.
 func (m *Model) renderProblemsModal() string {
 	var rows []render.ModalRow
 	rows = append(rows, m.unmatchedBindingRows()...)
-	rows = append(rows, m.gateModalRows()...)
+	rows = append(rows, m.failingResourceRows()...)
 	rows = append(rows, m.logLimitRows()...)
 	rows = append(rows, m.recentErrorLogRows()...)
 	return render.Modal("Problems", rows, m.problemsModalFooter(), m.width, m.height, m.modalScrollOffset)
@@ -71,6 +75,65 @@ func (m *Model) unmatchedBindingRows() []render.ModalRow {
 		rows = append(rows, render.ModalRow{Left: "unmatched binding", Right: textsafe.Sanitize(t)})
 	}
 	return rows
+}
+
+// failingResourceRows renders one row per failing resource, sorted by name:
+// the resource is the label and the value names the level it is at and the roles
+// it blocks ("TIGHT · blocks 2 roles: drain, worker"). A resource with no reading
+// is not failing and gets no row. With none failing the explicit "none failing"
+// reads as a confirmed fact, never a blank section.
+func (m *Model) failingResourceRows() []render.ModalRow {
+	type failing struct {
+		level string
+		roles []string
+	}
+	by := map[string]*failing{}
+	for _, p := range m.reply.PausedRoles {
+		for _, f := range p.Failing {
+			if f.Kind == "unknown" {
+				continue
+			}
+			e := by[f.Resource]
+			if e == nil {
+				e = &failing{level: f.Level}
+				by[f.Resource] = e
+			}
+			if !containsString(e.roles, p.Role) {
+				e.roles = append(e.roles, p.Role)
+			}
+		}
+	}
+	if len(by) == 0 {
+		return []render.ModalRow{{Left: "failing resources", Right: "none failing"}}
+	}
+	names := make([]string, 0, len(by))
+	for n := range by {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	rows := make([]render.ModalRow, 0, len(names))
+	for _, n := range names {
+		e := by[n]
+		sort.Strings(e.roles)
+		noun := "roles"
+		if len(e.roles) == 1 {
+			noun = "role"
+		}
+		rows = append(rows, render.ModalRow{
+			Left:  textsafe.Sanitize(n),
+			Right: fmt.Sprintf("%s · blocks %d %s: %s", textsafe.Sanitize(e.level), len(e.roles), noun, textsafe.Sanitize(strings.Join(e.roles, ", "))),
+		})
+	}
+	return rows
+}
+
+func containsString(set []string, v string) bool {
+	for _, s := range set {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 // recentErrorLogRows renders up to problemsErrorLogTailLines of the most

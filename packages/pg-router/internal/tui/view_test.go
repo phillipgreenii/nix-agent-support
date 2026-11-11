@@ -239,9 +239,9 @@ func fixtureSweepPaused() *Model {
 	m := NewModel(Options{}, render.NewTheme(false))
 	m.screen = screenMain
 	m.reply = StatusReply{
-		Core:      CoreInfo{State: coreStateStarted},
-		Gates:     []Gate{{Type: systemPauseGate}},
-		Listeners: []Listener{{Role: "reviewer", Enabled: true}},
+		Core:        CoreInfo{State: coreStateStarted},
+		PausedRoles: []PausedRole{{Role: "reviewer", Failing: []FailingClause{{Clause: "router == RUNNING", Resource: "router", Level: "PAUSED", Kind: "level"}}}},
+		Listeners:   []Listener{{Role: "reviewer", Enabled: true}},
 	}
 	return m
 }

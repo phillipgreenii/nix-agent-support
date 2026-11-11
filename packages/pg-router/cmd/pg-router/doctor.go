@@ -38,7 +38,7 @@ const (
 
 // runDoctor implements `pg-router doctor [--socket <path>] [--token <tok>]`: the
 // operator's one-shot health check. It runs `config check` plus quick probes (the
-// state dir, the socket, the active gates, the unavailable roles, per-role
+// state dir, the socket, the levels and the roles paused by levels, the unavailable roles, per-role
 // progress, and each handler's validate), printing one verdict line per finding.
 //
 // CONFIG SOURCE: doctor validates the config resolved from the CURRENT directory
@@ -54,6 +54,7 @@ func runDoctor(args []string) int {
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves
 	socket := fs.String("socket", "", "path to the running core's socket (overrides discovery)")
 	token := fs.String("token", "", "auth token for the running core (with --socket)")
+	clauses := fs.Bool("clauses", false, "report what the current sensor readings would pause (read-only, exits 0)")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Println(helpText)
@@ -66,7 +67,26 @@ func runDoctor(args []string) int {
 		fmt.Fprintln(os.Stderr, "doctor: unexpected argument:", fs.Arg(0))
 		return conformance.ExitUsage
 	}
+	if *clauses {
+		return runDoctorClauses(os.Stdout)
+	}
 	return doctor(os.Stdout, *socket, *token)
+}
+
+// runDoctorClauses loads the config of the current directory and prints the
+// --clauses report. A config that does not load cannot be evaluated: its problems
+// print as FAIL lines and the exit status is 1; otherwise the exit status is 0
+// whatever the sensors answered.
+func runDoctorClauses(stdout io.Writer) int {
+	cfg, err := config.Load()
+	if err != nil {
+		rep := &doctorReport{w: stdout}
+		for _, line := range errorLines(err) {
+			rep.line(verdictFail, "config", "%s", textsafe.Sanitize(line))
+		}
+		return exitGeneric
+	}
+	return doctorClauses(stdout, cfg, query.Env{RepoRoot: cfg.RepoRoot, Cmd: query.OSCommander{}})
 }
 
 // doctorReport collects the verdict lines and whether any is a FAIL.
@@ -102,11 +122,11 @@ func doctor(stdout io.Writer, socket, token string) int {
 
 	st, ok := doctorSocket(rep, socket, token)
 	if ok {
-		doctorGates(rep, st)
+		doctorLevels(rep, st, time.Now())
 		doctorUnavailable(rep, st)
 		doctorProgress(rep, st)
 	} else {
-		for _, probe := range []string{"gates", "unavailable roles", "progress"} {
+		for _, probe := range []string{"levels", "unavailable roles", "progress"} {
 			rep.line(verdictInfo, probe, "daemon not reachable")
 		}
 	}
@@ -180,8 +200,9 @@ func doctorCalendar(rep *doctorReport, cfg config.Config, logDir string, now tim
 
 // doctorStatus is the part of the status reply doctor reads.
 type doctorStatus struct {
-	Gates     []statusGate   `json:"gates"`
-	Listeners []listenerView `json:"listeners"`
+	Levels      []levelView      `json:"levels"`
+	PausedRoles []pausedRoleView `json:"pausedRoles"`
+	Listeners   []listenerView   `json:"listeners"`
 }
 
 // doctorSocket probes that a core's socket is reachable and, when it is, reads one
@@ -210,16 +231,21 @@ func doctorSocket(rep *doctorReport, socket, token string) (doctorStatus, bool) 
 	return st, true
 }
 
-// doctorGates reports the active gates (info only).
-func doctorGates(rep *doctorReport, st doctorStatus) {
-	if len(st.Gates) == 0 {
-		rep.line(verdictInfo, "gates", "none active")
+// doctorLevels reports the level of every resource and the roles paused by
+// levels (info only: a paused role is the router doing its job, not a failure).
+func doctorLevels(rep *doctorReport, st doctorStatus, now time.Time) {
+	var b bytes.Buffer
+	renderLevels(&b, st.Levels, now)
+	rep.line(verdictInfo, "levels", "%d resources", len(st.Levels))
+	_, _ = rep.w.Write(b.Bytes())
+	if len(st.PausedRoles) == 0 {
+		rep.line(verdictInfo, "paused by levels", "no role")
 		return
 	}
-	var b bytes.Buffer
-	renderGates(&b, st.Gates)
-	rep.line(verdictInfo, "gates", "%d active", len(st.Gates))
-	_, _ = rep.w.Write(b.Bytes())
+	rep.line(verdictInfo, "paused by levels", "%d roles", len(st.PausedRoles))
+	for _, p := range st.PausedRoles {
+		_, _ = fmt.Fprintf(rep.w, "  %s\n", pausedRoleLine(p, now))
+	}
 }
 
 // doctorUnavailable FAILs once per role the core marked unavailable, with the reason.

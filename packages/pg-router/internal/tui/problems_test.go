@@ -96,28 +96,40 @@ func TestRenderProblemsModal_NoUnmatchedBindingsIsUnambiguous(t *testing.T) {
 	}
 }
 
-// TestRenderProblemsModal_ListsActiveGates is the bead's second "at minimum"
-// item: current gate state, reusing gateModalRows (gates.go) so this view and
-// the Gates modal never drift into two different renderings of the same fact.
-// Every active gate must appear, whatever its (arbitrary) TYPE; with none the
-// section reads "none active", never blank.
-func TestRenderProblemsModal_ListsActiveGates(t *testing.T) {
+// TestRenderProblemsModal_OneRowPerFailingResource is the bead's second "at
+// minimum" item: current level state, one row per FAILING resource -- a
+// resource whose level blocks at least one role -- naming the level and the roles
+// it blocks, each role once per resource. A resource with no reading is not a
+// failing resource; with none failing the section reads "none failing", never
+// blank.
+func TestRenderProblemsModal_OneRowPerFailingResource(t *testing.T) {
 	m := newTestModel(nil)
-	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{
-		{Type: systemPauseGate, Owner: "operator"},
-		{Type: "LOW_DISK_USAGE", Owner: "disk-watchdog"},
+	m.width, m.height = 100, 24
+	m.reply = StatusReply{PausedRoles: []PausedRole{
+		{Role: "worker", Failing: []FailingClause{
+			{Resource: "disk", Level: "TIGHT", Kind: "level"},
+			{Resource: "disk", Level: "TIGHT", Kind: "level"},
+			{Resource: "git_auth", Level: "UNAVAILABLE", Kind: "level"},
+		}},
+		{Role: "drain", Failing: []FailingClause{{Resource: "disk", Level: "TIGHT", Kind: "level"}}},
+		{Role: "quiet", Failing: []FailingClause{{Resource: "net", Level: "DOWN", Kind: "unknown"}}},
 	}}
 
 	got := m.renderProblemsModal()
-	for _, want := range []string{"SYSTEM_PAUSE", "LOW_DISK_USAGE", "operator", "disk-watchdog"} {
+	for _, want := range []string{"TIGHT · blocks 2 roles: drain, worker", "UNAVAILABLE · blocks 1 role: worker"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Problems modal missing %q; got:\n%s", want, got)
 		}
 	}
+	if strings.Count(got, "TIGHT · blocks") != 1 {
+		t.Errorf("a resource must have exactly one row; got:\n%s", got)
+	}
+	if strings.Contains(got, "DOWN") || strings.Contains(got, "net ") {
+		t.Errorf("a resource with no reading is not a failing resource; got:\n%s", got)
+	}
 	m.reply = StatusReply{}
-	if got := m.renderProblemsModal(); !strings.Contains(got, "none active") {
-		t.Errorf("Problems modal with no gates should show \"none active\"; got:\n%s", got)
+	if got := m.renderProblemsModal(); !strings.Contains(got, "none failing") {
+		t.Errorf("Problems modal with nothing failing should show \"none failing\"; got:\n%s", got)
 	}
 }
 
@@ -128,11 +140,11 @@ func TestRenderProblemsModal_ListsRecentErrorLogEntries(t *testing.T) {
 	dir := t.TempDir()
 	m := NewModel(Options{CacheDir: dir}, render.NewTheme(false))
 	m.width, m.height = 80, 24
-	m.errorLogger.LogString("gate toggle failed: dial: no running core")
+	m.errorLogger.LogString("level toggle failed: dial: no running core")
 	m.errorLogger.LogString("something else went wrong")
 
 	got := m.renderProblemsModal()
-	for _, want := range []string{"tui-errors.log", "gate toggle failed", "something else went wrong"} {
+	for _, want := range []string{"tui-errors.log", "level toggle failed", "something else went wrong"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Problems modal missing %q; got:\n%s", want, got)
 		}
@@ -176,25 +188,28 @@ func TestProblemsModalFooter_EmptyCacheDirOmitsPathLine(t *testing.T) {
 }
 
 // TestRenderProblemsModal_AdditiveNotReplacement: opening the Problems modal
-// must not disturb the Gates modal's own rendering, and vice versa --
+// must not disturb the Levels modal's own rendering, and vice versa --
 // bead pg2-5l2he's own explicit acceptance criterion that this view is a
 // superset/detail view, not a replacement.
 func TestRenderProblemsModal_AdditiveNotReplacement(t *testing.T) {
 	m := newTestModel(nil)
-	m.width, m.height = 80, 24
-	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate, Owner: "operator"}}}
+	m.width, m.height = 100, 30
+	m.reply = StatusReply{
+		Levels:      []LevelRow{{Resource: "disk", Level: "TIGHT", Source: "sensor", Owner: "host-sensor"}},
+		PausedRoles: []PausedRole{{Role: "worker", Failing: []FailingClause{{Resource: "disk", Level: "TIGHT", Kind: "level"}}}},
+	}
 
-	gates := m.renderGatesModal()
+	levels := m.renderGatesModal()
 	problems := m.renderProblemsModal()
 
-	if !strings.Contains(gates, "SYSTEM_PAUSE") {
-		t.Fatalf("renderGatesModal() no longer lists SYSTEM_PAUSE; got:\n%s", gates)
+	if !strings.Contains(levels, "host-sensor") {
+		t.Fatalf("renderGatesModal() no longer lists the disk level; got:\n%s", levels)
 	}
-	if !strings.Contains(problems, "SYSTEM_PAUSE") {
-		t.Fatalf("renderProblemsModal() does not list SYSTEM_PAUSE; got:\n%s", problems)
+	if !strings.Contains(problems, "blocks 1 role: worker") {
+		t.Fatalf("renderProblemsModal() does not list the failing resource; got:\n%s", problems)
 	}
-	if strings.Contains(gates, "Problems") {
-		t.Errorf("renderGatesModal() unexpectedly carries the Problems modal's own title; got:\n%s", gates)
+	if strings.Contains(levels, "Problems") {
+		t.Errorf("renderGatesModal() unexpectedly carries the Problems modal's own title; got:\n%s", levels)
 	}
 }
 

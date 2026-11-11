@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/levels"
+	"github.com/phillipgreenii/pg-router/internal/query"
 )
 
 func testResources() ResourceSet {
@@ -356,5 +357,18 @@ requires = ["disk >= OK", "git_auth_x >= AVAILABLE"]
 	c.MachineSensors = []string{"git"}
 	if w := c.RequiresWarnings(); len(w) != 0 {
 		t.Errorf("a sensor listed on the machine silences the warning: %v", w)
+	}
+}
+
+// SensorPresent: the router's own sensor, a sensor a level-source query names, a
+// machine sensor and an empty sensor name (an operator-only resource) are present;
+// anything else is not.
+func TestSensorPresent(t *testing.T) {
+	c := Config{MachineSensors: []string{"git"}}
+	c.Queries = append(c.Queries, query.Source{Name: "q", LevelSource: "host"})
+	for sensor, want := range map[string]bool{RouterSensor: true, "git": true, "host": true, "": true, "other": false} {
+		if got := c.SensorPresent(sensor); got != want {
+			t.Errorf("SensorPresent(%q) = %v, want %v", sensor, got, want)
+		}
 	}
 }

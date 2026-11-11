@@ -27,7 +27,8 @@ import (
 // Exported names: LevelObserver, LevelBlockedError, ErrLevelBlocked,
 // ReasonStartStagger, WithLevelSource, WithRegistry, WithStartStagger,
 // WithLevelObserver, Queue.RegisterListener, Queue.RegisterEmitter,
-// Queue.CheckPull, Queue.EmitterBlockedBy, Queue.Explain, Queue.Levels, Queue.Now.
+// Queue.CheckPull, Queue.EmitterBlockedBy, Queue.Explain, Queue.Levels, Queue.Now,
+// PausedRole, Queue.PausedRoles, Queue.IdleExceptPaused.
 
 // ReasonStartStagger is the explanation reason of a listener held back by the
 // start stagger (ADM-2). It is not a requirement block.
@@ -401,4 +402,69 @@ func (q *Queue) EmitterBlockedBy(emitterID string) (string, bool) {
 func (q *Queue) logLegacyGateDropped(g DroppedGate) {
 	slog.Warn("legacy_gate_dropped", "type", g.Type, "owner", g.Owner, "expiresAt", g.ExpiresAt)
 	q.adm.obs.OnLegacyGateDropped(g.Type, g.Owner, g.ExpiresAt)
+}
+
+// PausedRole is one listener a requirement holds back right now, with the
+// failing clauses that explain it.
+type PausedRole struct {
+	Role   string
+	Result levels.Result
+}
+
+// PausedRoles returns every registered listener the level requirements block as
+// of now, in registration order. It is a read-only evaluation for the operator
+// surfaces (status, explain, run-until-idle): it goes through Explain, so it
+// records no paused / resumed transition and fires no observer hook, and the
+// evaluation stays at its admission sites. The start stagger is not a block.
+func (q *Queue) PausedRoles() []PausedRole {
+	q.mu.Lock()
+	ids := make([]string, 0, len(q.listeners))
+	for _, ls := range q.listeners {
+		ids = append(ids, ls.l.ID())
+	}
+	q.mu.Unlock()
+	var out []PausedRole
+	for _, id := range ids {
+		if res := q.Explain(id); !res.Admit {
+			out = append(out, PausedRole{Role: id, Result: res})
+		}
+	}
+	return out
+}
+
+// IdleExceptPaused is Idle with the work held back by level requirements set
+// aside: a listener a requirement blocks is not waited on, and an unexpired event
+// that only a blocked listener could still take does not hold the queue open.
+// run-until-idle exits on it and reports the blocked listeners as "paused by
+// levels". Caller must NOT hold q.mu.
+func (q *Queue) IdleExceptPaused() bool {
+	blocked := map[string]bool{}
+	for _, p := range q.PausedRoles() {
+		blocked[p.Role] = true
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	for _, ls := range q.listeners {
+		if !blocked[ls.l.ID()] && q.headFor(ls.l) != nil {
+			return false
+		}
+	}
+	for _, id := range q.order {
+		e, ok := q.entries[id]
+		if !ok || e.evt.Expired(now) || len(e.accepted) > 0 {
+			continue
+		}
+		heldByBlocked := false
+		for _, ls := range q.listeners {
+			if blocked[ls.l.ID()] && !e.settled[ls.l.ID()] && ls.l.Matches(e.evt) {
+				heldByBlocked = true
+				break
+			}
+		}
+		if !heldByBlocked {
+			return false
+		}
+	}
+	return true
 }

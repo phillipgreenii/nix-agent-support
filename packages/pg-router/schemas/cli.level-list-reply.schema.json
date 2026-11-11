@@ -44,6 +44,9 @@
           "stale": {
             "type": "boolean"
           },
+          "no_sensor": {
+            "type": "boolean"
+          },
           "since": {
             "type": "string"
           },

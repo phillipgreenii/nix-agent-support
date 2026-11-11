@@ -30,7 +30,7 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 	if !m.gateTogglePending {
 		t.Error("gateTogglePending = false right after P, want true (pending indicator)")
 	}
-	if m.gateSet(systemPauseGate) {
+	if m.routerPaused() {
 		t.Fatal("SYSTEM_PAUSE flipped to set before any gateToggleResultMsg arrived -- optimistic flip")
 	}
 
@@ -43,7 +43,7 @@ func TestToggleOperatorGate_NoOptimisticFlip(t *testing.T) {
 	}
 	updated, _ := m.Update(res)
 	mm := updated.(*Model)
-	if !mm.gateSet(systemPauseGate) {
+	if !mm.routerPaused() {
 		t.Error("SYSTEM_PAUSE still clear after a successful \"paused\" result")
 	}
 	if mm.gateTogglePending {
@@ -62,7 +62,7 @@ func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 			return "resumed", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate}}}
+	m.reply = StatusReply{Levels: []LevelRow{routerRow(levelPaused)}}
 
 	cmd := m.handleToggleOperatorGate()
 	if cmd == nil {
@@ -74,10 +74,10 @@ func TestToggleOperatorGate_UsesResumeWhenAlreadyPaused(t *testing.T) {
 	}
 }
 
-// TestToggleOperatorGate_IgnoresOtherGates: P toggles SYSTEM_PAUSE only. A
-// different gate being active must not make P send "resume" (which would
+// TestToggleOperatorGate_IgnoresOtherResources: P toggles the router level only.
+// Another resource blocking a role must not make P send "resume" (which would
 // merely be a no-op for it): the operator still wants to PAUSE.
-func TestToggleOperatorGate_IgnoresOtherGates(t *testing.T) {
+func TestToggleOperatorGate_IgnoresOtherResources(t *testing.T) {
 	var gotVerb string
 	m := newTestModel(&stubPoller{
 		toggle: func(_ context.Context, verb string) (string, error) {
@@ -85,10 +85,10 @@ func TestToggleOperatorGate_IgnoresOtherGates(t *testing.T) {
 			return "paused", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{{Type: "LOW_DISK_USAGE"}}}
+	m.reply = StatusReply{Levels: []LevelRow{{Resource: "disk", Level: "TIGHT"}}, PausedRoles: []PausedRole{pausedDisk("worker")}}
 	_ = m.handleToggleOperatorGate()()
 	if gotVerb != ToggleVerbPause {
-		t.Errorf("verb = %q, want pause: another system's gate does not make P a resume", gotVerb)
+		t.Errorf("verb = %q, want pause: another resource's level does not make P a resume", gotVerb)
 	}
 }
 
@@ -132,7 +132,7 @@ func TestGateToggle_FailureFlash(t *testing.T) {
 	if mm.gateTogglePending {
 		t.Error("gateTogglePending still true after a failed toggle")
 	}
-	if mm.gateSet(systemPauseGate) {
+	if mm.routerPaused() {
 		t.Error("SYSTEM_PAUSE changed after a FAILED toggle -- state must stay put")
 	}
 	if mm.flash == "" || mm.flashLevel != FlashWarn {
@@ -155,24 +155,24 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 			return "resumed", nil
 		},
 	})
-	m.reply = StatusReply{Gates: []Gate{
-		{Type: systemPauseGate},
-		{Type: "LOW_DISK_USAGE"},
-	}}
+	m.reply = StatusReply{
+		Levels:      []LevelRow{routerRow(levelPaused), {Resource: "disk", Level: "TIGHT"}},
+		PausedRoles: []PausedRole{pausedDisk("worker")},
+	}
 
 	cmd := m.handleToggleOperatorGate()
 	msg := cmd().(gateToggleResultMsg)
 	updated, _ := m.Update(msg)
 	mm := updated.(*Model)
 
-	if mm.gateSet(systemPauseGate) {
+	if mm.routerPaused() {
 		t.Error("SYSTEM_PAUSE should be clear after a \"resumed\" result")
 	}
-	if !mm.gateSet("LOW_DISK_USAGE") {
-		t.Error("the other system's gate must survive a SYSTEM_PAUSE resume")
+	if len(mm.reply.PausedRoles) != 1 {
+		t.Error("a role held by another resource must stay held after a router resume")
 	}
-	if !strings.Contains(mm.flash, "LOW_DISK_USAGE") {
-		t.Errorf("flash %q should name LOW_DISK_USAGE as the reason the pool is STILL gated", mm.flash)
+	if !strings.Contains(mm.flash, "disk") {
+		t.Errorf("flash %q should name disk as the reason a role is STILL held", mm.flash)
 	}
 	if mm.flashLevel != FlashInfo {
 		t.Errorf("a successful toggle's flash level = %v, want FlashInfo", mm.flashLevel)
@@ -182,7 +182,7 @@ func TestGateToggle_SuccessFlashNamesEffectiveAggregate(t *testing.T) {
 // TestGateToggle_ResumedFlashWhenNothingElseIsActive: the plain case.
 func TestGateToggle_ResumedFlashWhenNothingElseIsActive(t *testing.T) {
 	m := newTestModel(nil)
-	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate}}}
+	m.reply = StatusReply{Levels: []LevelRow{routerRow(levelPaused)}}
 	m.applyGateToggleResult(gateToggleResultMsg{verb: ToggleVerbResume, effective: "resumed"})
 	if !strings.Contains(m.flash, "RESUMED") {
 		t.Errorf("flash %q, want the pool-resumed wording when no other gate is active", m.flash)
@@ -225,7 +225,10 @@ func TestResumeAllGates_ClearsEveryGateInsideGatesModal(t *testing.T) {
 		},
 	})
 	m.activeModal = ModalGates
-	m.reply = StatusReply{Gates: []Gate{{Type: systemPauseGate}, {Type: "LOW_DISK_USAGE"}}}
+	m.reply = StatusReply{Levels: []LevelRow{
+		routerRow(levelPaused),
+		{Resource: "disk", Level: "EXHAUSTED", Source: "operator", Owner: "operator", Override: &LevelOverride{UntilCleared: true}},
+	}}
 
 	cmd := handleResumeAllGates(m)
 	if cmd == nil {
@@ -236,65 +239,72 @@ func TestResumeAllGates_ClearsEveryGateInsideGatesModal(t *testing.T) {
 		t.Errorf("ToggleGate verb = %q, want %q", gotVerb, ToggleVerbResumeAll)
 	}
 	m.Update(res)
-	if len(m.reply.Gates) != 0 {
-		t.Errorf("gates after resume-all = %+v, want none", m.reply.Gates)
+	if m.routerPaused() {
+		t.Error("router still PAUSED after resume-all")
+	}
+	for _, l := range m.reply.Levels {
+		if l.Override != nil {
+			t.Errorf("override of %s survived resume-all", l.Resource)
+		}
 	}
 }
 
-// TestRenderGatesModal_ListsEveryActiveGate: the modal shows TYPE,
-// description, owner, set-at and TTL remaining for each gate in force,
-// whatever the (arbitrary) TYPE is.
-func TestRenderGatesModal_ListsEveryActiveGate(t *testing.T) {
+// TestRenderGatesModal_ListsEveryResource: the levels modal shows each
+// resource's level, reading, since time, source and any override, sorted by name.
+func TestRenderGatesModal_ListsEveryResource(t *testing.T) {
 	m := newTestModel(nil)
-	m.width, m.height = 120, 30
-	setAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	m.reply = StatusReply{Gates: []Gate{
-		{Type: "LOW_DISK_USAGE", Description: "free space 3GiB", Owner: "disk-watchdog", SetAt: setAt, ExpiresAt: setAt.Add(5 * time.Minute), TTLRemainingMs: 270000},
-		{Type: systemPauseGate, Description: "paused by the operator", Owner: "operator", SetAt: setAt},
+	m.width, m.height = 140, 30
+	since := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	m.reply = StatusReply{Levels: []LevelRow{
+		{Resource: "router", Level: "PAUSED", Source: "operator", Owner: "operator", Since: since, Override: &LevelOverride{UntilCleared: true}},
+		{Resource: "disk", Level: "TIGHT", Source: "sensor", Owner: "host-sensor", Since: since, Reading: &LevelReading{Value: 19.9, Unit: "GiB"}},
+		{Resource: "claude_5h"},
+		{Resource: "git_auth", NoSensor: true},
 	}}
 	got := m.renderGatesModal()
 	for _, want := range []string{
-		"SYSTEM_PAUSE", "LOW_DISK_USAGE",
-		"disk-watchdog", "operator", "2026-09-01 12:00", "no TTL", "TTL 4m",
+		"TIGHT · 19.9 GiB · host-sensor · since 2026-09-01 12:00Z",
+		"PAUSED", "OVERRIDE by operator, until cleared",
+		"no reading (sensor has no answer)", "no sensor configured",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("Gates modal missing %q; got:\n%s", want, got)
+			t.Errorf("Levels modal missing %q; got:\n%s", want, got)
 		}
 	}
-	if strings.Index(got, "LOW_DISK_USAGE") > strings.Index(got, "SYSTEM_PAUSE") {
-		t.Errorf("gates are not sorted by TYPE; got:\n%s", got)
+	if strings.Index(got, "claude_5h") > strings.Index(got, "disk") || strings.Index(got, "disk") > strings.Index(got, "router") {
+		t.Errorf("resources are not sorted by name; got:\n%s", got)
 	}
 	if !strings.Contains(got, "[R] resume all") {
-		t.Errorf("Gates modal footer must name R = resume all; got:\n%s", got)
+		t.Errorf("Levels modal footer must name R = resume all; got:\n%s", got)
 	}
 }
 
-// TestRenderGatesModal_NoneActiveIsUnambiguous (pg2-y6sy5's spirit): with
-// nothing gated the modal says so outright rather than rendering nothing.
-func TestRenderGatesModal_NoneActiveIsUnambiguous(t *testing.T) {
+// TestRenderGatesModal_NoneConfiguredIsUnambiguous (pg2-y6sy5's spirit): with no
+// resources the modal says so outright rather than rendering nothing.
+func TestRenderGatesModal_NoneConfiguredIsUnambiguous(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 80, 24
 	m.reply = StatusReply{}
 	got := m.renderGatesModal()
-	if !strings.Contains(got, "none active") {
-		t.Errorf("empty Gates modal must read \"none active\"; got:\n%s", got)
+	if !strings.Contains(got, "none configured") {
+		t.Errorf("empty Levels modal must read \"none configured\"; got:\n%s", got)
 	}
 }
 
-// TestRenderGatesModal_LongTypeGetsGuaranteedGap is pg2-y6sy5's regression
-// test, carried forward: a long gate TYPE must never run straight into the
-// detail text with no gap.
-func TestRenderGatesModal_LongTypeGetsGuaranteedGap(t *testing.T) {
+// TestRenderGatesModal_LongNameGetsGuaranteedGap is pg2-y6sy5's regression test,
+// carried forward: a long resource name must never run straight into the detail
+// text with no gap.
+func TestRenderGatesModal_LongNameGetsGuaranteedGap(t *testing.T) {
 	m := newTestModel(nil)
 	m.width, m.height = 120, 24
-	long := "A_VERY_LONG_ARBITRARY_GATE_TYPE_NAME"
-	m.reply = StatusReply{Gates: []Gate{{Type: long, Description: "d", Owner: "o"}}}
+	long := "a_very_long_arbitrary_resource_name"
+	m.reply = StatusReply{Levels: []LevelRow{{Resource: long, Level: "OK"}}}
 	got := m.renderGatesModal()
-	if strings.Contains(got, long+"d") {
-		t.Errorf("gate TYPE runs into its detail with no gap; got:\n%s", got)
+	if strings.Contains(got, long+"OK") {
+		t.Errorf("resource name runs into its detail with no gap; got:\n%s", got)
 	}
 	if !strings.Contains(got, long) {
-		t.Errorf("gate TYPE missing; got:\n%s", got)
+		t.Errorf("resource name missing; got:\n%s", got)
 	}
 }
 
@@ -315,13 +325,13 @@ func TestAsOfRaceGuard(t *testing.T) {
 	// Captured BEFORE the toggle started: discarded, even though it
 	// disagrees with the (still pending) local state.
 	stale := StatusReply{
-		AsOf:  toggleStart.Add(-time.Second),
-		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Type: systemPauseGate}},
+		AsOf:   toggleStart.Add(-time.Second),
+		Core:   CoreInfo{State: coreStateStarted},
+		Levels: []LevelRow{routerRow(levelPaused)},
 	}
 	updated, _ := m.Update(pollResultMsg{reply: stale})
 	mm := updated.(*Model)
-	if mm.gateSet(systemPauseGate) {
+	if mm.routerPaused() {
 		t.Fatal("a stale (pre-toggle) poll result overwrote the pending gate state")
 	}
 	if mm.screen != screenMain {
@@ -331,20 +341,20 @@ func TestAsOfRaceGuard(t *testing.T) {
 	// The toggle itself settles.
 	updated, _ = mm.Update(gateToggleResultMsg{verb: ToggleVerbResume, effective: "resumed"})
 	mm = updated.(*Model)
-	if mm.gateSet(systemPauseGate) {
+	if mm.routerPaused() {
 		t.Fatal("gate still set after a successful resume result")
 	}
 
 	// A FRESH poll (AsOf after the toggle start) applies normally, even
 	// though it disagrees -- this is "the next poll catches up".
 	fresh := StatusReply{
-		AsOf:  toggleStart.Add(time.Second),
-		Core:  CoreInfo{State: coreStateStarted},
-		Gates: []Gate{{Type: systemPauseGate}},
+		AsOf:   toggleStart.Add(time.Second),
+		Core:   CoreInfo{State: coreStateStarted},
+		Levels: []LevelRow{routerRow(levelPaused)},
 	}
 	updated, _ = mm.Update(pollResultMsg{reply: fresh})
 	mm = updated.(*Model)
-	if !mm.gateSet(systemPauseGate) {
+	if !mm.routerPaused() {
 		t.Fatal("a fresh (post-toggle) poll result was not applied")
 	}
 	if mm.screen != screenMain {
@@ -369,21 +379,27 @@ func TestApplyPollResult_PreservesOpenModalScreen(t *testing.T) {
 	}
 }
 
-// TestGateDetail_CarriesEveryField: the detail line carries TTL left, set-at,
-// owner and description (the modal may clip the tail, so the unclipped text is
-// checked here directly), with explicit placeholders for what a gate omits.
-func TestGateDetail_CarriesEveryField(t *testing.T) {
-	setAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	full := gateDetail(Gate{Type: "X", Description: "free space 3GiB", Owner: "disk-watchdog", SetAt: setAt, ExpiresAt: setAt.Add(5 * time.Minute), TTLRemainingMs: 270000})
-	for _, want := range []string{"TTL 4m", "2026-09-01 12:00", "disk-watchdog", "free space 3GiB"} {
+// TestLevelDetail_CarriesEveryField: the detail line carries the level, reading,
+// since time, owner and override, with explicit wording for what a resource
+// omits (the modal may clip the tail, so the unclipped text is checked here).
+func TestLevelDetail_CarriesEveryField(t *testing.T) {
+	since := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	full := levelDetail(LevelRow{Resource: "disk", Level: "TIGHT", Owner: "host-sensor", Since: since, Stale: true, Reading: &LevelReading{Value: 19.9, Unit: "GiB"}})
+	for _, want := range []string{"TIGHT", "19.9 GiB", "2026-09-01 12:00", "host-sensor", "stale"} {
 		if !strings.Contains(full, want) {
-			t.Errorf("gateDetail missing %q: %q", want, full)
+			t.Errorf("levelDetail missing %q: %q", want, full)
 		}
 	}
-	bare := gateDetail(Gate{Type: "X"})
-	for _, want := range []string{"no TTL", "owner: -", "(no description)"} {
-		if !strings.Contains(bare, want) {
-			t.Errorf("gateDetail of a bare gate missing %q: %q", want, bare)
-		}
+	timed := levelDetail(LevelRow{Resource: "disk", Level: "OK", Source: "operator", Owner: "op", Override: &LevelOverride{ExpiresAt: since.Add(time.Hour)}})
+	if !strings.Contains(timed, "OVERRIDE by op, expires 2026-09-01 13:00Z") {
+		t.Errorf("timed override = %q", timed)
 	}
+	if bare := levelDetail(LevelRow{Resource: "x"}); !strings.Contains(bare, "no reading") {
+		t.Errorf("bare level = %q, want no reading", bare)
+	}
+}
+
+// routerRow is the router resource at level.
+func routerRow(level string) LevelRow {
+	return LevelRow{Resource: routerResource, Level: level, Source: "operator", Owner: "operator"}
 }

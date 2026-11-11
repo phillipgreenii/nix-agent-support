@@ -199,3 +199,86 @@ func TestPauseNotice_formats(t *testing.T) {
 		t.Errorf("only the router resource's PAUSED level is a pause; got %q", other)
 	}
 }
+
+// seedBlockedWork writes a sensor level (disk LOW) and one event bound to t1, due
+// in an hour, into logDir's event log the way a previous daemon would have.
+func seedBlockedWork(t *testing.T, logDir string) {
+	t.Helper()
+	store, err := eventqueue.NewFileStore(filepath.Join(logDir, "queue.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := eventqueue.New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := q.AppendLevel(eventqueue.LevelRecord{
+		Resource: "disk", Level: "LOW", Owner: "host-sensor", ObservedAt: now, ReceivedAt: now,
+		ExpiresAt: now.Add(time.Hour), ValidForS: 3600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: "t1", ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// GATE-1: a registration a level requirement blocks does not hold run-until-idle
+// open. Work only that registration could take (due in an hour) would otherwise
+// keep the queue busy until it expired; the run exits 0 at once and dispatches
+// nothing.
+func TestRunUntilIdleBody_RegistrationPausedByLevelsDoesNotHoldTheRunOpen(t *testing.T) {
+	fh := &fakeHandlerClient{}
+	logDir := shortDir(t)
+	seedBlockedWork(t, logDir)
+	res := config.ResourceSet{{Name: "disk", Scale: []string{"OK", "LOW"}, Sensor: "host-sensor", GraceFactor: 2}}
+	cfg := config.Config{
+		LogDir:    logDir,
+		Resources: res,
+		Roles:     roles.RoleSet{{Name: "r1", Enabled: true, Binds: []string{"t1"}}},
+		Requirements: map[string]config.Compiled{"r1": {Requirement: levels.Requirement{Clauses: []levels.Clause{
+			{Index: 0, Text: "disk >= OK", Resource: "disk", Allowed: []string{"OK"}},
+		}}}},
+	}
+	o := &orchestrator.Orchestrator{Cfg: cfg, Reg: cfg.Roles, Handler: fh}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- runUntilIdleBody(ctx, preparedRun{cfg: cfg, o: o, cleanup: func() {}, declaredRoles: cfg.Roles})
+	}()
+	select {
+	case code := <-done:
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0", code)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("run-until-idle is held open by work only a blocked registration could take")
+	}
+	if got := fh.dispatchedCalls(); len(got) != 0 {
+		t.Fatalf("a level-blocked role was dispatched to: %v", got)
+	}
+}
+
+// The "paused by levels" report names the registration, the failing clause and the
+// level, one line per blocked registration, and says nothing when none is blocked.
+func TestReportPausedByLevels_Text(t *testing.T) {
+	var out strings.Builder
+	reportPausedByLevels(&out, nil)
+	if out.Len() != 0 {
+		t.Fatalf("no blocked registration must print nothing, got %q", out.String())
+	}
+	reportPausedByLevels(&out, []eventqueue.PausedRole{{Role: "worker", Result: levels.Result{Failing: []levels.Entry{
+		{ClauseText: "disk >= OK", Resource: "disk", Level: "TIGHT"},
+		{ClauseText: "net == UP", Resource: "net", Level: "DOWN"},
+	}}}})
+	want := "run-until-idle: worker is paused by levels (disk >= OK: disk is TIGHT; net == UP: net is DOWN)\n"
+	if out.String() != want {
+		t.Fatalf("report = %q, want %q", out.String(), want)
+	}
+}
