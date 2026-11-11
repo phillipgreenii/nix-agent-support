@@ -1,0 +1,37 @@
+# promtool unit tests for the pg-router-resource-held-nonbest alert. Run by the flake check test-pg-router-alert-rules,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for` and labels, plus a recording rule
+# `wrapped:<uid with _>` over the same expression. Every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a resource below best for 6 hours fires, not before, labelled with its resource
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level{resource="cpu",job="pg-router"}
+        values: "1x500"
+    alert_rule_test:
+      - eval_time: 350m
+        alertname: pg-router-resource-held-nonbest
+        exp_alerts: []
+      - eval_time: 370m
+        alertname: pg-router-resource-held-nonbest
+        exp_alerts:
+          - exp_labels:
+              resource: cpu
+              severity: warning
+
+  - name: a resource at best never fires, and a recovery inside 6 hours resets the wait
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "0x500"
+      - series: pg_router_resource_level{resource="ram",job="pg-router"}
+        values: "1x300 0x200"
+    alert_rule_test:
+      - eval_time: 480m
+        alertname: pg-router-resource-held-nonbest
+        exp_alerts: []

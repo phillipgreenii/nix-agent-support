@@ -21,7 +21,7 @@
 #       OK for every other rule
 #   S6  every pg_claude_code_recorder_* token of an expression is a catalogued name (a histogram's
 #       _bucket/_sum/_count stripped first)
-#   S7  the guards: daemon-down adds the SYSTEM_PAUSE gate to an `or vector(0)` value (never empty, so a
+#   S7  the guards: daemon-down adds the router pause to an `or vector(0)` value (never empty, so a
 #       pause cannot read as NoData-as-Alerting; no `unless`) and its description states the
 #       30s scrape interval; heartbeat-stale and doctor-mismatch carry `and on() (max(up{...}) == 1)`
 #       and `or vector(0)`; control-inbox-gone selects only state="gone"; crash-share carries
@@ -162,7 +162,7 @@ check() {
   if ! printf '%s' "$j" | jq -e --arg up "$up" '
       def rule($n): .groups[].rules[] | select(.uid == "pg-ccrec-" + $n);
       def expr($n): [rule($n) | .data[] | select(.refId == "A") | .model.expr] | first;
-      (expr("daemon-down") | endswith("+ on() (max(pg_router_gates_active{type=\"SYSTEM_PAUSE\"} == 1) or vector(0))") and contains("or vector(0)) + on()") and (contains("unless") | not))
+      (expr("daemon-down") | endswith("+ on() (max(pg_router_resource_level{resource=\"router\"} == 1) or vector(0))") and contains("or vector(0)) + on()") and (contains("unless") | not))
       and ([rule("daemon-down") | .annotations.description | test("scrape interval is 30s")] | first)
       and (. as $root | ["daemon-down", "doctor-mismatch"] | all(. as $n | $root | rule($n) | .annotations.logql | test("^\\{service_name=\"pg-claude-code-recorder\"\\}")))
       and (expr("heartbeat-stale") | contains($up) and contains("or vector(0)"))
@@ -173,7 +173,7 @@ check() {
       and (expr("request-slow") | contains("> 50)") and contains("{le=\"10\"}"))
       and (expr("schema-rebuild-required") | contains("service_name=\"pg-claude-code-recorder\"") and contains("event=\"schema_rebuild_required\""))
       and (expr("shutdown-overrun") | contains("service_name=\"pg-claude-code-recorder\"") and contains("event=\"shutdown_overrun\""))' >/dev/null; then
-    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down SYSTEM_PAUSE and scrape interval; daemon-down and doctor-mismatch logql annotation on the recorder log stream; heartbeat-stale and doctor-mismatch up guard; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket; schema-rebuild-required and shutdown-overrun service_name and event)"
+    rule_fail "RULE-S7: a guard is missing or wrong (daemon-down router pause and scrape interval; daemon-down and doctor-mismatch logql annotation on the recorder log stream; heartbeat-stale and doctor-mismatch up guard; control-inbox-gone state gone; crash-share floor; loop-stalled literal bounds and no parser_drain; request-slow floor and le=10 bucket; schema-rebuild-required and shutdown-overrun service_name and event)"
   fi
   # S8
   local ruids
@@ -249,14 +249,14 @@ mutant RULE-S5 "a missing noDataState" 'del(.groups[0].rules[] | select(.uid == 
 mutant RULE-S5 "a wrong noDataState" '(.groups[0].rules[] | select(.uid == "pg-ccrec-copy-lag") | .noDataState) = "Alerting"'
 mutant RULE-S6 "an uncatalogued metric" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-copy-lag") | .data[0].model.expr) = "max(pg_claude_code_recorder_not_a_metric)"'
-mutant RULE-S7 "daemon-down without the SYSTEM_PAUSE guard" \
+mutant RULE-S7 "daemon-down without the router pause guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .data[0].model.expr) = "min(up{job=\"pg-claude-code-recorder\"})"'
 mutant RULE-S7 "daemon-down without its logql annotation" \
   'del(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .annotations.logql)'
 mutant RULE-S7 "heartbeat-stale without the up guard" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-heartbeat-stale") | .data[0].model.expr) = "(time() - max(pg_claude_code_recorder_last_sweep_timestamp_seconds))"'
 mutant RULE-S7 "daemon-down back on the empty-under-pause unless form" \
-  '(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .data[0].model.expr) = "min(up{job=\"pg-claude-code-recorder\"}) unless on() (pg_router_gates_active{type=\"SYSTEM_PAUSE\"} == 1)"'
+  '(.groups[0].rules[] | select(.uid == "pg-ccrec-daemon-down") | .data[0].model.expr) = "min(up{job=\"pg-claude-code-recorder\"}) unless on() (pg_router_resource_level{resource=\"router\"} == 1)"'
 mutant RULE-S7 "loop-stalled with a changed watcher_sweep bound" \
   '(.groups[0].rules[] | select(.uid == "pg-ccrec-loop-stalled") | .data[0].model.expr) |= sub("> 2700"; "> 270")'
 mutant RULE-S7 "loop-stalled covering parser_drain" \

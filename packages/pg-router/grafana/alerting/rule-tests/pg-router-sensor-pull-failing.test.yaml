@@ -1,0 +1,28 @@
+# promtool unit tests for the pg-router-sensor-pull-failing alert. Run by the flake check test-pg-router-alert-rules,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for` and labels, plus a recording rule
+# `wrapped:<uid with _>` over the same expression. Every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a failure ratio above 0.3 fires, one below does not
+    interval: 1m
+    input_series:
+      - series: pg_router_sensor_pull_failures_total{sensor="host-sensor",reason="deadline",job="pg-router"}
+        values: "0+4x60"
+      - series: pg_router_sensor_pull_total{sensor="host-sensor",job="pg-router"}
+        values: "0+10x60"
+      - series: pg_router_sensor_pull_failures_total{sensor="network-sensor",reason="exit",job="pg-router"}
+        values: "0+1x60"
+      - series: pg_router_sensor_pull_total{sensor="network-sensor",job="pg-router"}
+        values: "0+10x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-sensor-pull-failing
+        exp_alerts:
+          - exp_labels:
+              sensor: host-sensor
+              severity: warning

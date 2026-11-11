@@ -258,7 +258,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick") unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))
+              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick") unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -390,13 +390,13 @@ groups:
       # pg2-9uvm5; when it lands this rule needs one more `unless` clause on that signal
       # and nothing else changes.
       #
-      # Gates. A gate (any TYPE, SYSTEM_PAUSE included) halts every listener except its
-      # owner, so an idle lane with a backlog is expected while one is in force:
-      # `unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)` drops every
-      # series from the first scrape of a gate until 10 minutes after it ends (the
-      # window). A gate held for long is pg-router-gate-held's job. pg_router_gate_blocked
-      # would only narrow the exclusion to the blocked role and gates are global, so it
-      # is not used.
+      # Paused roles. A role whose requirements fail (or that the operator paused) is
+      # held, so an idle lane with a backlog is expected for THAT role only:
+      # `unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)`
+      # drops that role's series from the first scrape of the pause until 10 minutes
+      # after it ends (the window). An UNRELATED paused role does not mute the rule, so
+      # a role held for hours by a resource level does not silence every lane. A
+      # resource held below best is pg-router-gate-held's job.
       #
       # Type to role. The depth gauge carries `type` and the in-flight gauge `role`;
       # the binding between them is configuration, not a metric, so the join is the
@@ -460,7 +460,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router queue for type {{ $labels.type }} has a backlog but nothing is processing it"
-          description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch running in it (pg_router_listener_in_flight on 6 consecutive scrapes; a declined attempt is in flight for a second or two and does not count) and completed none, and the role's pg_router_listener_pending was above 0 on every scrape of the window (a depth made only of settled, retained events is not a backlog), and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A pg-router pause or any other gate suppresses it (pg-router-gate-held covers a long hold), and so does a laptop sleep, which needs 10 minutes of fresh scrapes before the condition can hold. A daemon restart is covered only by the 10 minute window: the new daemon holds no offer until its first dispatch pass re-offers a session the restart left running, so check whether the daemon restarted shortly before this fired."
+          description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch running in it (pg_router_listener_in_flight on 6 consecutive scrapes; a declined attempt is in flight for a second or two and does not count) and completed none, and the role's pg_router_listener_pending was above 0 on every scrape of the window (a depth made only of settled, retained events is not a backlog), and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A paused role (a requirement it declares failing, or an operator pause of that role) suppresses it for that role only (pg-router-gate-held covers a long hold), and so does a laptop sleep, which needs 10 minutes of fresh scrapes before the condition can hold. A daemon restart is covered only by the 10 minute window: the new daemon holds no offer until its first dispatch pass re-offers a session the restart left running, so check whether the daemon restarted shortly before this fired."
           logql: '{service_name="pg-router"}'
         data:
           - refId: A
@@ -472,7 +472,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
+              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0) unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1302,7 +1302,7 @@ groups:
       # pg_router_source_last_success_timestamp_seconds{source} is still exported
       # (a wall-clock reading, for dashboards) but is not read here. The age resets
       # to 0 on a successful pass AND on a pass skipped by a deliberate pause (an
-      # active gate or log-limit-halted emitters), so a pg-router pause does not
+      # router pause or log-limit-halted emitters), so a pg-router pause does not
       # fire this for every source; a failed pass never resets it. It starts at 0
       # at PROCESS START, so a restart resets the clock: a source that keeps
       # failing across restarts re-alerts only after threshold + `for` of awake
@@ -1348,7 +1348,7 @@ groups:
 
       # Event-log size limit (pg2-5d3ui). pg-router caps queue.jsonl (max_log_bytes,
       # default 64MiB): past 90% of it the daemon halts its POLLED command-source
-      # emitters (an in-memory flag, NOT a gate -- pg_router_gates_active does not
+      # emitters (an in-memory flag, NOT a level -- pg_router_resource_level does not
       # move; listeners, drain, timer emitters and pushed events keep running);
       # at the limit, or when the log cannot be written, it also rejects every
       # new event with a log_full / log_unwritable reason. Either is the daemon
@@ -1563,44 +1563,32 @@ groups:
                     type: gt
                     params: [0]
 
-      # A Gate Registry gate held for a long time (bead pg2-l6ody). A gate halts
-      # every listener and polled source except its owner for as long as it is in
-      # force. On 2026-10-08 a LOW_DISK_USAGE gate (the disk watchdog's, renewed
-      # every 5 minutes while free space stayed below its floor) held desk-pr,
-      # desk-issue, the probes and every polled source for 4h18m with nothing
-      # alerting: pg_router_failures_total does not move, because a gate pause is
-      # not a failure (docs/decisions/observability.md), and no rule watched the
-      # gates themselves (docs/investigations/2026-10-09-desk-pr-stall.md).
+      # A resource held below its best level for a long time, with a registration
+      # waiting on it. A resource level halts the roles that require it for as long as
+      # it stays below what they need, and a pause does not move pg_router_failures_total
+      # (a held role is not a failure, docs/decisions/observability.md), so nothing else
+      # watches it (docs/investigations/2026-10-09-desk-pr-stall.md is the incident:
+      # a low-disk hold stalled desk-pr, desk-issue and every polled source for 4h18m).
       #
-      # Signal: pg_router_gates_active{type}, a 1-per-TYPE gauge that exists only
-      # while a gate is in force (no zero sample, no since-timestamp, and the owner
-      # is deliberately not a label). So the hold duration cannot be read from the
-      # metric; it is expressed by `for: 30m`. A gate's lease is renewed by its
-      # owner (the disk watchdog every 5 minutes), so a healthy transient gate
-      # (a short pause, a watchdog blip) clears in minutes; 30m is far below the
-      # 4.3h incident and keeps a
-      # routine `pg-router pause` / `resume` from alerting. Every TYPE counts,
-      # SYSTEM_PAUSE included: a pause forgotten for 30 minutes stalls routing
-      # exactly as a watchdog gate does. While a gate is in force
-      # pg-router-queue-stalled is suppressed (an idle lane with a backlog is
-      # expected under a gate), so this rule is what pages a gate that stays.
+      # Signal: pg_router_resource_level{resource} above 0 (0 is best) AND a
+      # pg_router_requirement_blocked_total increase for the same resource, so a resource
+      # below best that no registration cares about does not page here
+      # (pg-router-resource-held-nonbest is the rule for that). The hold duration is not
+      # a metric; it is expressed by `for: 30m`, far below the 4.3h incident, and keeps a
+      # routine short pause from alerting. last_over_time and the 10m increase window
+      # bridge the gap a daemon restart leaves. While a role is paused
+      # pg-router-queue-stalled is suppressed for that role only, so this rule is what
+      # pages a hold that stays.
       #
-      # last_over_time over 10m bridges the gap a daemon restart leaves (the lease
-      # of the incident gate lapsed for about 6 minutes while the daemon was down,
-      # which would otherwise reset the pending timer); a gap longer than 10m does
-      # restart the wait.
-      #
-      # Severity: warning, deliberately. Desktop notifications are critical-only
-      # (ADR 0040 amendment, operator ruling 2026-10-08), so this surfaces in
-      # Grafana and the pg-router-probe bead flow, not as a banner. A gate is
-      # usually protective (disk pressure, an operator pause) and its owner is
-      # already acting on it; promoting to critical would banner every long pause,
-      # and is an operator call. noDataState: OK because the series is absent
-      # whenever nothing is gated, which is the healthy state. Annotations are
-      # STATIC (see the escalation convention above); the gate TYPE is the
-      # `type` label of the alert.
+      # The uid pg-router-gate-held is kept (a rename would break the deployment's
+      # exemption lists). Severity: warning, deliberately. Desktop notifications are
+      # critical-only (ADR 0040 amendment, operator ruling 2026-10-08), so this surfaces
+      # in Grafana and the pg-router-probe bead flow, not as a banner; promoting it is an
+      # operator call. noDataState: OK because the series is empty whenever nothing is
+      # blocked, which is the healthy state. Annotations are STATIC (see the escalation
+      # convention above); the resource is the `resource` label of the alert.
       - uid: pg-router-gate-held
-        title: pg-router gate has been held for a long time (by type)
+        title: pg-router resource held below best with a role blocked (by resource)
         condition: C
         for: 30m
         noDataState: OK
@@ -1608,8 +1596,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "a pg-router gate has been in force for over 30 minutes, halting every role except its owner"
-          description: "pg_router_gates_active has stayed above 0 for over 30 minutes for the gate TYPE in this alert's `type` label. A gate halts every listener and polled source except its owner, so dispatch (desk-pr, desk-issue, reviews, drains) is stalled while it is held. Inspect it with `pg-router gate list` (owner, set-at, TTL remaining, description). LOW_DISK_USAGE is the disk watchdog's: free space on the volume is below its floor, so free disk space, and the watchdog clears the gate once it recovers. SYSTEM_PAUSE is an operator pause: `pg-router resume` when done. If the owner is gone and the gate is only being renewed or will not lapse, clear it with `pg-router gate clear <TYPE>`."
+          summary: "a pg-router resource has been below its best level for over 30 minutes with a registration blocked on it"
+          description: "pg_router_resource_level has stayed above 0 for over 30 minutes for the resource in this alert's resource label, and pg_router_requirement_blocked_total kept increasing for it, so at least one registration is held back by that resource and dispatch is stalled for it. Inspect it with pg-router level list (level, source, owner, age) and pg-router explain <role> for a blocked role. A sensor reading is cleared by fixing the shortage it reports; an operator override is cleared with pg-router level clear <resource>, and a router pause with pg-router resume."
         data:
           - refId: A
             relativeTimeRange:
@@ -1620,7 +1608,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max by (type)(last_over_time(pg_router_gates_active[10m])) > 0
+              expr: "max by (resource)(last_over_time(pg_router_resource_level[10m]) > 0) and on(resource) (sum by (resource)(increase(pg_router_requirement_blocked_total[10m])) > 0)"
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1805,7 +1793,7 @@ groups:
           severity: warning
         annotations:
           summary: "the ccpool worktree pool has grown by 10 or more over the last 12 hours and never dropped back"
-          description: "The lowest ccpool_worktree_count of the last 12 hours is at least 10 above the lowest of the 12 hours before that, so the number of per-bead worktree directories under the handler's worktree directory keeps rising without being cleaned up. Worktrees of a monorepo checkout are large, so a leak ends in a full disk (the disk watchdog's LOW_DISK_USAGE gate would then halt every role). Inspect the pool directory (PG_ROUTER_WORKTREE_DIR, default <state>/pg-router/worktrees) for worktrees whose bead is closed or released, and check the worktree size panel on the ccpool-pools dashboard (ccpool_worktree_bytes). Remove spent worktrees with git worktree remove; a worktree whose bead is still open is not a leak."
+          description: "The lowest ccpool_worktree_count of the last 12 hours is at least 10 above the lowest of the 12 hours before that, so the number of per-bead worktree directories under the handler's worktree directory keeps rising without being cleaned up. Worktrees of a monorepo checkout are large, so a leak ends in a full disk (a low disk level would then halt every role that requires disk). Inspect the pool directory (PG_ROUTER_WORKTREE_DIR, default <state>/pg-router/worktrees) for worktrees whose bead is closed or released, and check the worktree size panel on the ccpool-pools dashboard (ccpool_worktree_bytes). Remove spent worktrees with git worktree remove; a worktree whose bead is still open is not a leak."
         data:
           - refId: A
             relativeTimeRange:
@@ -2123,7 +2111,7 @@ groups:
       # repo.sync, disk.check, ...) launch no ccpool session and are NOT in the selector.
       # The backlog clause needs depth > 0 on EVERY scrape of the 2h (at least 200 scrapes,
       # so a laptop sleep or a restart that left gaps cannot satisfy it on a few points,
-      # same device as pg-router-queue-stalled), and a held gate (pg-router pause) turns
+      # same device as pg-router-queue-stalled), and a paused consumer role (pg_router_role_paused) turns
       # the rule off, as it does there. One honest limit: an account usage window
       # (five_hour) that stays at its limit for more than 2 hours also yields queued work
       # and no launch; that is a warning-level false positive the description names.
@@ -2148,7 +2136,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (max(min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) >= 200) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
+              expr: max(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) >= 200, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2") unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -2215,6 +2203,268 @@ groups:
               editorMode: code
               instant: true
               expr: max by (role) (pg_router_listener_oldest_pending_age_seconds) > 14400
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Level alerts added with the conversion of the gates to levels. The three rules
+      # below watch the sensors and the levels themselves; they carry static annotations
+      # (copied verbatim into beads) and are probed under their own uids.
+      #
+      # pg-router-sensor-stale: a sensor has not reported for over 10 minutes. noDataState
+      # is Alerting because a router that exports no sensor series at all while the host is
+      # awake is itself broken; a sleeping laptop must not page, so the expression is gated
+      # on the host being awake (the condition pg-router-liveness-down uses) and, while the
+      # host sleeps, returns a single 0 sample (`vector(0) unless on() <awake>`) instead of
+      # an empty result, which would read as no data.
+      - uid: pg-router-sensor-stale
+        title: pg-router sensor has not reported (by sensor)
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a pg-router sensor has not reported for over 10 minutes while the host was awake"
+          description: "pg_router_sensor_last_observed_age_seconds has been above 600 for over 5 minutes for the sensor in this alerts sensor label, or no sensor series exists while the host is awake, so the levels that sensor reports are held on their last reading or have fallen back. A sleeping host is not counted. Check pg-router level list for the stale resources and pg-router level refresh to pull them again."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: '(max by (sensor)(pg_router_sensor_last_observed_age_seconds > 600) and on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))) or (vector(0) unless on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total))))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-resource-held-nonbest: a resource below best for 6 hours, whether or not
+      # a registration is blocked by it (pg-router-gate-held covers the blocked case after
+      # 30 minutes).
+      - uid: pg-router-resource-held-nonbest
+        title: pg-router resource below best for 6 hours (by resource)
+        condition: C
+        for: 6h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a pg-router resource has been below its best level for over 6 hours"
+          description: "pg_router_resource_level has stayed above 0 for over 6 hours for the resource in this alert's resource label, whether or not a registration is blocked by it. Inspect it with pg-router level list. A graded scale's level 1 is normal on some resources; compare pg_router_resource_scale_size and tune the threshold if this is the resting state."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (resource)(last_over_time(pg_router_resource_level[10m]) > 0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-role-paused-long: a registration held for 4 hours, for any reason.
+      - uid: pg-router-role-paused-long
+        title: pg-router role has been paused for 4 hours (by role)
+        condition: C
+        for: 4h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a pg-router role has been paused for over 4 hours"
+          description: "pg_router_role_paused has been 1 for over 4 hours for the role in this alert's role label: its requirements fail, or the operator paused the router. Inspect it with pg-router explain <role> and pg-router level list; resume an operator pause with pg-router resume."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (role)(last_over_time(pg_router_role_paused[10m]) > 0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-sensor-pull-failing: more than 30 percent of a sensor's pulls failed over
+      # 15 minutes (deadline, exit, malformed or rejected). The ratio is NaN while a sensor
+      # has no pulls in the window, which compares false.
+      - uid: pg-router-sensor-pull-failing
+        title: pg-router sensor pulls are failing (by sensor)
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "more than 30 percent of a pg-router sensor pulls failed over 15 minutes"
+          description: "The ratio of pg_router_sensor_pull_failures_total to pg_router_sensor_pull_total for the sensor in this alert's sensor label stayed above 0.3 over 15 minutes. Break it down by reason (deadline, exit, malformed, rejected) with sum by (reason)(increase(pg_router_sensor_pull_failures_total[15m])) and run the sensor by hand with its --raw flag."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum by (sensor)(increase(pg_router_sensor_pull_failures_total[15m])) / sum by (sensor)(increase(pg_router_sensor_pull_total[15m])) > 0.3"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-override-left: an operator override with a lease has been in force for
+      # 12 hours. The lease series is emitted only for a level that has an expiry, so the
+      # join with it excludes an until-cleared override, which is deliberate and quiet.
+      - uid: pg-router-override-left
+        title: pg-router operator override left in place (by resource)
+        condition: C
+        for: 12h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a pg-router operator override with a lease has been in force for over 12 hours"
+          description: "pg_router_resource_level_override_active has been 1 for over 12 hours for the resource in this alert's resource label, on an override that has a lease. Remove it with pg-router level clear <resource> if the reason has passed. An until-cleared override has no lease and is not reported here."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (resource)(pg_router_resource_level_override_active == 1) and on(resource) pg_router_resource_level_lease_remaining_seconds"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-level-events-rejected: the router rejected a level answer in the last
+      # 15 minutes (the reason label names why).
+      - uid: pg-router-level-events-rejected
+        title: pg-router rejected level answers (by reason)
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router rejected a level answer in the last 15 minutes"
+          description: "pg_router_level_events_rejected_total increased over the last 15 minutes for the reason in this alert's reason label (unknown_resource, unknown_level, malformed, not_registered_sensor, future_observed_at, older_than_held, conflict). A sensor or a push sender is answering with something the router does not accept; check the router log for level_event_rejected."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum by (reason)(increase(pg_router_level_events_rejected_total[15m])) > 0"
           - refId: B
             datasourceUid: __expr__
             model:

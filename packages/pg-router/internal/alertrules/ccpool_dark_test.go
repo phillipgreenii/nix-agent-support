@@ -9,7 +9,7 @@ import (
 // for 33 h on 2026-10-31/11-02 and only the generic failure-rate rule fired.
 const (
 	wantCapacityAbsentExpr = `absent_over_time(ccpool_pool_capacity[10m])`
-	wantNoLaunchExpr       = `(max(min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) >= 200) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)`
+	wantNoLaunchExpr       = `max(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) >= 200, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2") unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)`
 )
 
 func TestCcpoolDarkRules(t *testing.T) {
@@ -63,7 +63,7 @@ func TestCcpoolNoLaunchSelectsOnlyCcpoolQueues(t *testing.T) {
 			t.Errorf("command-role queue %q must not be selected: %q", bad, got)
 		}
 	}
-	if !strings.Contains(got, "pg_router_gates_active") {
-		t.Errorf("a held gate must suppress the rule: %q", got)
+	if !strings.Contains(got, "unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)") {
+		t.Errorf("a paused consumer role must be left out of the backlog, per role: %q", got)
 	}
 }

@@ -11,16 +11,16 @@
 # `*.test.yaml` in the rule-tests directory runs under `promtool test rules`.
 #
 # Grafana-only fields (noDataState, execErrState, annotations) are pinned by
-# check-alert-structure.sh (noDataState and the SYSTEM_PAUSE guard) and by the Go tests in
+# check-alert-structure.sh (noDataState and the router pause guard) and by the Go tests in
 # internal/alertrules; promtool cannot run them. This script asserts only the structure the
 # wrapping depends on.
 #
 # --self-test runs the cases against the real rule file (they MUST pass) and then against rule
 # files with one guard deliberately broken, each of which MUST make the cases fail: the primary
-# rule without its SYSTEM_PAUSE guard, without its absence branch, the stale-anchor rule without its
+# rule without its router pause guard, without its absence branch, the stale-anchor rule without its
 # apply gate, the residual rule reading every mode, the hard-failure rule without its first-event
 # branch, the sweep-bound rule without its scope, the
-# hidden-PR rule without its SYSTEM_PAUSE guard, the ingest-failed rule with its threshold lowered to 0, the watched-source rule with its threshold lowered to 0, the unflagged-members rule with its threshold raised and the orphan-read-lag rule with its threshold raised. A case set that passed over any of them
+# hidden-PR rule without its router pause guard, the ingest-failed rule with its threshold lowered to 0, the watched-source rule with its threshold lowered to 0, the unflagged-members rule with its threshold raised and the orphan-read-lag rule with its threshold raised. A case set that passed over any of them
 # would be vacuous.
 #
 # Exit codes: 0 every case passed (self-test: and every broken rule file was rejected), 1 a check
@@ -148,8 +148,8 @@ broken() {
 }
 expr_path() { printf '(.groups[0].rules[] | select(.uid == "%s") | .data[] | select(.refId == "A") | .model.expr)' "$1"; }
 
-broken "the never-hydrated SYSTEM_PAUSE guard removed" \
-  "$(expr_path pg-desk-pr-never-hydrated) |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")"
+broken "the never-hydrated router pause guard removed" \
+  "$(expr_path pg-desk-pr-never-hydrated) |= sub(\" unless on[(][)] [(]pg_router_resource_level.*\$\"; \"\")"
 broken "the never-hydrated absence branch removed" \
   "$(expr_path pg-desk-pr-never-hydrated) |= sub(\" or [(]pg_desk_liveness == 1 unless on[(][)] pg_desk_pr_unhydrated[)]\"; \"\")"
 broken "the stale-anchor apply gate removed" \
@@ -170,8 +170,8 @@ broken "the orphan-read-lag threshold raised from 1800 to 100000" \
   '(.groups[0].rules[] | select(.uid == "pg-desk-issue-orphan-read-lag") | .data[] | select(.refId == "C") | .model.conditions[0].evaluator.params[0]) = 100000'
 broken "the dead-man's role selector widened to every role" \
   "$(expr_path pg-desk-pr-hydrate-dead-man) |= sub(\"[{]role=.pr-change.[}]\"; \"\")"
-broken "the hidden-PR rule's SYSTEM_PAUSE guard removed" \
-  "$(expr_path pg-desk-pr-hidden-open-anchor) |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")"
+broken "the hidden-PR rule's router pause guard removed" \
+  "$(expr_path pg-desk-pr-hidden-open-anchor) |= sub(\" unless on[(][)] [(]pg_router_resource_level.*\$\"; \"\")"
 
 [ "$selftest_fail" -eq 0 ]
 echo "OK: self-test passes"

@@ -1,31 +1,27 @@
-# promtool unit tests for the pg-router-gate-held alert (pg2-l6ody). Run by the flake check
-# test-pg-router-alert-rules, which generates rules.yml next to this file: the Grafana rule's
-# refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 30m` and
+# promtool unit tests for the pg-router-gate-held alert (a resource below best AND a
+# registration blocked on it, for 30 minutes). Run by the flake check
+# test-pg-router-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 30m` and
 # labels, plus a recording rule `wrapped:<uid with _>`.
 #
-# Time model: the metric is a 1-per-TYPE gauge (pg_router_gates_active{type}) that exists
-# only while a gate is in force, and the router exposes it every scrape, so every series
-# here has a 1m interval. A steady gate is pending from its first sample and firing once it
-# has been held for 30m (1800s): not firing at 29m, firing at 32m. Series shapes mirror the
-# exporter: a cleared or lapsed gate has NO series (no zero sample), so its end is modelled
-# as missing samples (`_`).
+# Time model: pg_router_resource_level{resource} is a gauge (0 is best) and
+# pg_router_requirement_blocked_total{role,resource,kind} a counter that rises at every
+# evaluation of a blocked role; every series here has a 1m interval. A steady hold is
+# pending from its first sample and firing once held for 30m: not firing at 29m, firing at
+# 32m. A resource that has no level sample (never answered) is modelled as missing samples (`_`).
 rule_files:
   - rules.yml
 
 evaluation_interval: 1m
 
 tests:
-  - name: a gate held for 4h fires after 30m, not before, labelled with its own type
+  - name: a resource below best with a blocked role fires after 30m, not before, labelled with its resource
     interval: 1m
     input_series:
-      - series: pg_router_gates_active{type="LOW_DISK_USAGE",job="pg-router"}
-        values: "1x240"
-    promql_expr_test:
-      - expr: count(wrapped:pg_router_gate_held)
-        eval_time: 32m
-        exp_samples:
-          - labels: "{}"
-            value: 1
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_requirement_blocked_total{role="worker",resource="disk",kind="level",job="pg-router"}
+        values: "0+1x240"
     alert_rule_test:
       - eval_time: 29m
         alertname: pg-router-gate-held
@@ -34,30 +30,58 @@ tests:
         alertname: pg-router-gate-held
         exp_alerts:
           - exp_labels:
-              type: LOW_DISK_USAGE
+              resource: disk
               severity: warning
 
-  - name: only the long-held gate fires, a brief neighbour does not
+  - name: a resource below best that no registration is blocked on does not fire
     interval: 1m
     input_series:
-      - series: pg_router_gates_active{type="LOW_DISK_USAGE",job="pg-router"}
-        values: "1x240"
-      # SYSTEM_PAUSE held for 10m, then cleared (no series after).
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
-        values: "1x10 _x230"
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "2x240"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-router-gate-held
+        exp_alerts: []
+
+  - name: a blocked role on a resource at its best level does not fire
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_requirement_blocked_total{role="worker",resource="disk",kind="level",job="pg-router"}
+        values: "0+1x240"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-router-gate-held
+        exp_alerts: []
+
+  - name: only the long-held resource fires, a brief neighbour does not
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_requirement_blocked_total{role="worker",resource="disk",kind="level",job="pg-router"}
+        values: "0+1x240"
+      # cpu below best for 10m, then back to best.
+      - series: pg_router_resource_level{resource="cpu",job="pg-router"}
+        values: "1x10 0x230"
+      - series: pg_router_requirement_blocked_total{role="review",resource="cpu",kind="level",job="pg-router"}
+        values: "0+1x10 10x230"
     alert_rule_test:
       - eval_time: 60m
         alertname: pg-router-gate-held
         exp_alerts:
           - exp_labels:
-              type: LOW_DISK_USAGE
+              resource: disk
               severity: warning
 
-  - name: a gate cleared before 30m never fires
+  - name: a hold cleared before 30m never fires
     interval: 1m
     input_series:
-      - series: pg_router_gates_active{type="LOW_DISK_USAGE",job="pg-router"}
-        values: "1x25 _x215"
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "2x25 0x215"
+      - series: pg_router_requirement_blocked_total{role="worker",resource="disk",kind="level",job="pg-router"}
+        values: "0+1x25 25x215"
     alert_rule_test:
       - eval_time: 29m
         alertname: pg-router-gate-held
@@ -66,53 +90,36 @@ tests:
         alertname: pg-router-gate-held
         exp_alerts: []
 
-  - name: a fired alert resolves once the gate is cleared
+  - name: a fired alert resolves once the resource recovers
     interval: 1m
     input_series:
-      # Held 60m, then gone.
-      - series: pg_router_gates_active{type="LOW_DISK_USAGE",job="pg-router"}
-        values: "1x60 _x180"
+      # Held 60m, then at best.
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "2x60 0x180"
+      - series: pg_router_requirement_blocked_total{role="worker",resource="disk",kind="level",job="pg-router"}
+        values: "0+1x60 60x180"
     alert_rule_test:
       - eval_time: 55m
         alertname: pg-router-gate-held
         exp_alerts:
           - exp_labels:
-              type: LOW_DISK_USAGE
+              resource: disk
               severity: warning
-      # Past the 10m last_over_time lookback after the last sample.
       - eval_time: 75m
         alertname: pg-router-gate-held
         exp_alerts: []
 
-  - name: a 6-minute gap (daemon restart, lapsed lease) does not reset the pending timer
+  - name: a 6-minute gap (daemon restart) does not reset the pending timer
     interval: 1m
     input_series:
-      # The 2026-10-08 incident shape: a gate renewed every 5m, lease lapsed for about 6m
-      # while the daemon was down, then set again. The gap is inside the 10m lookback.
-      - series: pg_router_gates_active{type="LOW_DISK_USAGE",job="pg-router"}
-        values: "1x20 _x6 1x214"
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "2x20 _x6 2x214"
+      - series: pg_router_requirement_blocked_total{role="worker",resource="disk",kind="level",job="pg-router"}
+        values: "0+1x20 _x6 20+1x214"
     alert_rule_test:
       - eval_time: 32m
         alertname: pg-router-gate-held
         exp_alerts:
           - exp_labels:
-              type: LOW_DISK_USAGE
-              severity: warning
-
-  - name: a gap longer than the lookback restarts the 30m wait
-    interval: 1m
-    input_series:
-      # 40m of gate, a 15m gap, then the gate again from 55m: pending restarts there, so
-      # at 60m it has been pending for about 5m, and it fires again after 85m.
-      - series: pg_router_gates_active{type="LOW_DISK_USAGE",job="pg-router"}
-        values: "1x40 _x15 1x200"
-    alert_rule_test:
-      - eval_time: 60m
-        alertname: pg-router-gate-held
-        exp_alerts: []
-      - eval_time: 90m
-        alertname: pg-router-gate-held
-        exp_alerts:
-          - exp_labels:
-              type: LOW_DISK_USAGE
+              resource: disk
               severity: warning

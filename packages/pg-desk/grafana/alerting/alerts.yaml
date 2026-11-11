@@ -93,21 +93,21 @@ groups:
       # metric (the process itself being down) is already covered by the
       # dedicated liveness rule above.
       #
-      # pg2-9awkw: SUPPRESSED while a pg-router SYSTEM_PAUSE gate is in force.
+      # pg2-9awkw: SUPPRESSED while the pg-router is paused (the router resource at level 1).
       # A pause blocks the producer from dispatching the desk-heartbeat role,
       # so meta.last_heartbeat stops advancing and the snapshot goes stale BY
       # DESIGN (2026-10-02: a deliberate ~2h38m pause fired this rule as a
       # false positive). The expression is
-      #   pg_desk_dashboard_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
-      # i.e. drop the stale series whenever ANY SYSTEM_PAUSE series reads 1.
+      #   pg_desk_dashboard_stale unless on() (pg_router_resource_level{resource="router"} == 1)
+      # i.e. drop the stale series whenever the router resource level reads 1 (PAUSED).
       #   - `on()` matches on no labels, so the differing label sets (job=
       #     pg-desk/pg-desk-legacy vs job=pg-router, instance, ...) cannot make the
       #     match silently fail and disable the alert; both the job=pg-desk
       #     and the job=pg-desk-legacy duplicate series are suppressed together.
-      #   - pg-router exports pg_router_gates_active ONLY for gate types
-      #     currently in force (an ObservableGauge with one point per active
-      #     gate), so the series is normally ABSENT. An absent or 0 gate
-      #     series leaves the left side untouched: the rule behaves exactly as
+      #   - pg-router exports pg_router_resource_level for every registered resource
+      #     (an ObservableGauge with one point per resource, 0 = best, and the
+      #     router resource reads 1 only while paused), so an absent or 0 level
+      #     leaves the left side untouched: the rule behaves exactly as
       #     before (fail-open toward alerting). This includes pg-router being
       #     down/unscraped.
       #   - While suppressed the query returns no data; noDataState: OK turns
@@ -124,7 +124,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-desk-serve's dashboard snapshot has been stale for over 10 minutes"
-          description: 'pg_desk_dashboard_stale has reported 1 for over 10 minutes -- the served snapshot has not been refreshed within its configured staleAfterSeconds bound. See pg_desk_dashboard_age_seconds for the actual age in seconds. This rule is suppressed while a pg-router SYSTEM_PAUSE gate is active (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1), because a pause deliberately stops the desk-heartbeat dispatch; if it fires, no SYSTEM_PAUSE gate was in force.'
+          description: 'pg_desk_dashboard_stale has reported 1 for over 10 minutes -- the served snapshot has not been refreshed within its configured staleAfterSeconds bound. See pg_desk_dashboard_age_seconds for the actual age in seconds. This rule is suppressed while a pg-router router pause is active (pg_router_resource_level{resource="router"} == 1), because a pause deliberately stops the desk-heartbeat dispatch; if it fires, no router pause was in force.'
         data:
           - refId: A
             relativeTimeRange:
@@ -135,7 +135,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_desk_dashboard_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
+              expr: pg_desk_dashboard_stale unless on() (pg_router_resource_level{resource="router"} == 1)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -161,7 +161,7 @@ groups:
       # live source that never succeeded: pg_desk_source_age_seconds exports no
       # series for that one, so an age rule could not see it). Retired and
       # abandoned ghost rows leave the report (INV-FRESH-6), so they are not
-      # counted. Same SYSTEM_PAUSE suppression as pg-desk-sync-stale (a pause
+      # counted. Same router pause suppression as pg-desk-sync-stale (a pause
       # stops the connector polls, so sources age by design); noDataState: OK
       # for the same reasons (absence is covered by the liveness rule).
       - uid: pg-desk-sources-stale
@@ -174,7 +174,7 @@ groups:
           severity: warning
         annotations:
           summary: "One or more pg-desk sources have been stale for over 10 minutes"
-          description: "pg_desk_sources_stale has reported at least 1 for over 10 minutes -- a source has no successful origin fetch within its stale-after bound, or has never succeeded. See pg_desk_source_age_seconds{source} for ages (a never-succeeded source has no series) and `pg-desk freshness` for the per-source report. Retired/abandoned ghost rows are not counted. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          description: "pg_desk_sources_stale has reported at least 1 for over 10 minutes -- a source has no successful origin fetch within its stale-after bound, or has never succeeded. See pg_desk_source_age_seconds{source} for ages (a never-succeeded source has no series) and `pg-desk freshness` for the per-source report. Retired/abandoned ghost rows are not counted. Suppressed while a pg-router router pause is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -185,7 +185,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_desk_sources_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)
+              expr: pg_desk_sources_stale unless on() (pg_router_resource_level{resource="router"} == 1)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -298,7 +298,7 @@ groups:
       #   or (vector(0) and on() absent(liveness == 1))   0 when pg-desk is down
       # Liveness up and the series absent leaves both branches empty: NoData.
       #
-      # No SYSTEM_PAUSE guard: with an empty result NoData would alert, and a
+      # No router pause guard: with an empty result NoData would alert, and a
       # pause that outlasts the bound leaves a stuck entry stuck, which is
       # worth hearing about. `for: 10m` rides out one slow poll; warning,
       # because the feed is acknowledged past a row only after it is recorded,
@@ -357,7 +357,7 @@ groups:
       # which is never "healthy". While pg-desk itself is down the second branch
       # of the expression answers 0 and pg-desk-liveness-down speaks alone. A
       # deployment with no owning backend emits one backendless series valued 0.
-      # No SYSTEM_PAUSE guard: an empty result would alert under NoData.
+      # No router pause guard: an empty result would alert under NoData.
       #
       - uid: pg-desk-watched-source-not-observed
         title: pg-desk has not observed a watched source for over a day
@@ -412,7 +412,7 @@ groups:
       # which is never "healthy". While pg-desk itself is down the second branch
       # of the expression answers 0 and pg-desk-liveness-down speaks alone. A
       # deployment with no owning backend emits one backendless series valued 0.
-      # No SYSTEM_PAUSE guard: an empty result would alert under NoData.
+      # No router pause guard: an empty result would alert under NoData.
       #
       - uid: pg-desk-issue-unflagged-members
         title: pg-desk holds watched-query members that are not flagged watched
@@ -467,7 +467,7 @@ groups:
       # pg-desk-ingest-failed-old: the series is derived from the store at scrape
       # time, so while pg-desk is up its ABSENCE means the store read failed. A
       # deployment with no orphan emits one backendless series valued 0. No
-      # SYSTEM_PAUSE guard: an empty result would alert under NoData.
+      # router pause guard: an empty result would alert under NoData.
       #
       - uid: pg-desk-issue-orphan-read-lag
         title: pg-desk has not read an orphaned watched issue for over 30 minutes
@@ -864,7 +864,7 @@ groups:
       # it printed, so a page of hydration rows cannot stall it and the lag stays near 0 however
       # many pr rows are hydrations. The threshold (50) is PROVISIONAL, a sustained backlog rather
       # than one scrape that caught a row between a poll and the scrape. While a pg-router
-      # SYSTEM_PAUSE gate blocks the query the lag grows on purpose, so the rule is suppressed.
+      # router pause blocks the query the lag grows on purpose, so the rule is suppressed.
       - uid: pg-desk-pr-annotation-consumer-lag
         title: pg-desk pr annotation feed is lagging
         condition: C
@@ -875,7 +875,7 @@ groups:
           severity: warning
         annotations:
           summary: "The pr annotation feed (consumer annotations:pr-lane) is over 50 changes behind"
-          description: "pg_desk_consumer_lag for type pr and consumer annotations:pr-lane (highest pr change sequence minus the consumer cursor) has exceeded 50 for over 30 minutes, so annotation changes (hide, unhide, wip, annotate, suppress, feedback, force-review) are not reaching the pr-change role: the desk-pr-annotations query is failing or never runs. An empty poll is a success to the router source alerts, so this lag is the only signal of a stuck feed. The verb advances its cursor past the rows it scanned, so a feed that runs keeps the lag near 0 even when most pr rows are hydrations. The 50 threshold is provisional. Suppressed while a pg-router SYSTEM_PAUSE gate is active (the query does not run then, so lag grows on purpose)."
+          description: "pg_desk_consumer_lag for type pr and consumer annotations:pr-lane (highest pr change sequence minus the consumer cursor) has exceeded 50 for over 30 minutes, so annotation changes (hide, unhide, wip, annotate, suppress, feedback, force-review) are not reaching the pr-change role: the desk-pr-annotations query is failing or never runs. An empty poll is a success to the router source alerts, so this lag is the only signal of a stuck feed. The verb advances its cursor past the rows it scanned, so a feed that runs keeps the lag near 0 even when most pr rows are hydrations. The 50 threshold is provisional. Suppressed while a pg-router router pause is active (the query does not run then, so lag grows on purpose)."
         data:
           - refId: A
             relativeTimeRange:
@@ -886,7 +886,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane"}) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: 'max(pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane"}) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -907,7 +907,7 @@ groups:
 
       # PR never hydrated (PR lane refactor: the P0b tripwire, finalized by P8a-1 with
       # its promtool rule test, grafana/alerting/rule-tests/, whose four states are
-      # the gauge live and absent, live and 0, pg-desk liveness down and SYSTEM_PAUSE
+      # the gauge live and absent, live and 0, pg-desk liveness down and router pause
       # set, and whose replay of 2026-10-19 fires it). The final threshold is the
       # one the P0b rule shipped with: above 0 for 30 minutes, because a PR that is
       # listed and unhydrated for half an hour is one that nothing is hydrating.
@@ -926,9 +926,9 @@ groups:
       #      never "healthy". The absence test lives in the expression, not in
       #      noDataState: `pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated`
       #      yields the liveness series only when no unhydrated series exists.
-      # Both are dropped by the SYSTEM_PAUSE guard copied from
-      # pg-desk-sync-stale (`unless on() (pg_router_gates_active{type=
-      # "SYSTEM_PAUSE"} == 1)`, whose reasoning is documented there): a pause
+      # Both are dropped by the router pause guard copied from
+      # pg-desk-sync-stale (`unless on() (pg_router_resource_level{resource=
+      # "router"} == 1)`, whose reasoning is documented there): a pause
       # deliberately stops the hydrating dispatches. With pg-desk itself down
       # both branches are empty and pg-desk-liveness-down is the alert that
       # speaks, so noDataState is OK: an empty result here means "nothing to
@@ -948,7 +948,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-desk lists PRs that no hydration has ever written, or cannot count them"
-          description: 'pg_desk_pr_unhydrated (open, not hidden, not inactive, version 0) has been above 0 for over 30 minutes, or has no series while pg-desk is up (the store cannot answer: not migrated to schema 2, or the read failed). The PR lane is not running or not hydrating: see the pr lane line of pg-desk status and doctor, and pg_desk_pr_unhydrated_oldest_age_seconds for how long the oldest has waited. This rule is suppressed while a pg-router SYSTEM_PAUSE gate is active (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1).'
+          description: 'pg_desk_pr_unhydrated (open, not hidden, not inactive, version 0) has been above 0 for over 30 minutes, or has no series while pg-desk is up (the store cannot answer: not migrated to schema 2, or the read failed). The PR lane is not running or not hydrating: see the pr lane line of pg-desk status and doctor, and pg_desk_pr_unhydrated_oldest_age_seconds for how long the oldest has waited. This rule is suppressed while a pg-router router pause is active (pg_router_resource_level{resource="router"} == 1).'
         data:
           - refId: A
             relativeTimeRange:
@@ -959,7 +959,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '((pg_desk_pr_unhydrated > 0) or (pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '((pg_desk_pr_unhydrated > 0) or (pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated)) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -987,7 +987,7 @@ groups:
       # every one is exercised by promtool through grafana/check-alert-rules.sh with
       # a firing, a healthy and an empty-input case (grafana/alerting/rule-tests/).
       #
-      # Every rule ends with the SYSTEM_PAUSE guard of pg-desk-sync-stale (its
+      # Every rule ends with the router pause guard of pg-desk-sync-stale (its
       # reasoning is documented there): a pause deliberately stops the dispatches
       # these rules watch. The residual rule reads the mode="apply" series of its
       # gauge, and the two stale-anchor rules are gated on the configured lane mode
@@ -1018,7 +1018,7 @@ groups:
           severity: warning
         annotations:
           summary: "A PR has had actions left in its plan after apply for over an hour"
-          description: 'pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply"} has exceeded 3600 for 15 minutes: at least one PR still has an action in its plan after the lane applied it (a missing anchor or a missing review, fix-ci or conflict item). Run the composed command in plan mode for the PR (the run record names it), then `pg-desk pr show` and `pg-desk pr history`. This rule reads mode=apply only and is suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+          description: 'pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply"} has exceeded 3600 for 15 minutes: at least one PR still has an action in its plan after the lane applied it (a missing anchor or a missing review, fix-ci or conflict item). Run the composed command in plan mode for the PR (the run record names it), then `pg-desk pr show` and `pg-desk pr history`. This rule reads mode=apply only and is suppressed while a pg-router router pause is active.'
         data:
           - refId: A
             relativeTimeRange:
@@ -1029,7 +1029,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply"}) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: 'max(pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply"}) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1066,7 +1066,7 @@ groups:
           severity: warning
         annotations:
           summary: "An anchor has stayed open for over an hour on a PR the store shows as merged or closed"
-          description: "pg_desk_pr_stale_anchor_oldest_age_seconds has exceeded 3600 for 10 minutes while the lane is in apply mode: at least one open anchor belongs to a PR that the store shows merged or closed, so the lane did not close it. Run `pg-desk pr show <id>` for the PR and the composed command in plan mode to see what the decider would do; pg_desk_pr_stale_anchors is the count. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          description: "pg_desk_pr_stale_anchor_oldest_age_seconds has exceeded 3600 for 10 minutes while the lane is in apply mode: at least one open anchor belongs to a PR that the store shows merged or closed, so the lane did not close it. Run `pg-desk pr show <id>` for the PR and the composed command in plan mode to see what the decider would do; pg_desk_pr_stale_anchors is the count. Suppressed while a pg-router router pause is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -1077,7 +1077,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_pr_stale_anchor_oldest_age_seconds) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: 'max(pg_desk_pr_stale_anchor_oldest_age_seconds) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1113,7 +1113,7 @@ groups:
           severity: warning
         annotations:
           summary: "A PR with an open anchor has not been hydrated for over 7 days"
-          description: "pg_desk_pr_open_anchor_oldest_hydration_age_seconds has exceeded 604800 for 30 minutes while the lane is in apply mode: a PR that has an open anchor, and that the store still shows as open, was last hydrated over 7 days ago. A lost or failed hydration of its merged or closed state leaves the store saying open. Run `pg-desk pr refresh <id>` for the oldest PRs. The 7 day threshold is provisional and is set from the measured hydration cadence at the plan-period checkpoint. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          description: "pg_desk_pr_open_anchor_oldest_hydration_age_seconds has exceeded 604800 for 30 minutes while the lane is in apply mode: a PR that has an open anchor, and that the store still shows as open, was last hydrated over 7 days ago. A lost or failed hydration of its merged or closed state leaves the store saying open. Run `pg-desk pr refresh <id>` for the oldest PRs. The 7 day threshold is provisional and is set from the measured hydration cadence at the plan-period checkpoint. Suppressed while a pg-router router pause is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -1124,7 +1124,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_pr_open_anchor_oldest_hydration_age_seconds) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: 'max(pg_desk_pr_open_anchor_oldest_hydration_age_seconds) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1168,7 +1168,7 @@ groups:
           severity: warning
         annotations:
           summary: "The PR lane recorded an unauthenticated or decide_failed run in the last 10 minutes"
-          description: 'pg_desk_pr_lane_runs_total{class="unauthenticated"} or {class="decide_failed"} (stage {{ $labels.stage }}, class {{ $labels.class }}) increased in the last 10 minutes. unauthenticated: the connector has no valid credentials, so nothing hydrates; decide_failed: the decider itself failed on a PR. Run the composed command by hand in plan mode for the PR named in the run record (pr-change-runs.jsonl). Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+          description: 'pg_desk_pr_lane_runs_total{class="unauthenticated"} or {class="decide_failed"} (stage {{ $labels.stage }}, class {{ $labels.class }}) increased in the last 10 minutes. unauthenticated: the connector has no valid credentials, so nothing hydrates; decide_failed: the decider itself failed on a PR. Run the composed command by hand in plan mode for the PR named in the run record (pr-change-runs.jsonl). Suppressed while a pg-router router pause is active.'
         data:
           - refId: A
             relativeTimeRange:
@@ -1179,7 +1179,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '((sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[10m])) > 0) or (sum by (stage, class) (pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}) > 0 unless sum by (stage, class) (max_over_time(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[24h] offset 10m)))) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '((sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[10m])) > 0) or (sum by (stage, class) (pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}) > 0 unless sum by (stage, class) (max_over_time(pg_desk_pr_lane_runs_total{class=~"unauthenticated|decide_failed"}[24h] offset 10m)))) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1216,7 +1216,7 @@ groups:
           severity: warning
         annotations:
           summary: "More than 5 PR lane runs failed in the last hour (stage {{ $labels.stage }}, class {{ $labels.class }})"
-          description: 'sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class!~"unauthenticated|decide_failed"}[1h])) has exceeded 5 for 15 minutes for stage {{ $labels.stage }}, class {{ $labels.class }}. transient is the only signal that a delivery failed every router attempt; not_found, degraded, unhydrated, hydrate_error and decide_partial name what failed. Read pr-change-runs.jsonl for the PRs, then run the composed command by hand in plan mode. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+          description: 'sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class!~"unauthenticated|decide_failed"}[1h])) has exceeded 5 for 15 minutes for stage {{ $labels.stage }}, class {{ $labels.class }}. transient is the only signal that a delivery failed every router attempt; not_found, degraded, unhydrated, hydrate_error and decide_partial name what failed. Read pr-change-runs.jsonl for the PRs, then run the composed command by hand in plan mode. Suppressed while a pg-router router pause is active.'
         data:
           - refId: A
             relativeTimeRange:
@@ -1227,7 +1227,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class!~"unauthenticated|decide_failed"}[1h])) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: 'sum by (stage, class) (increase(pg_desk_pr_lane_runs_total{class!~"unauthenticated|decide_failed"}[1h])) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1260,7 +1260,7 @@ groups:
           severity: warning
         annotations:
           summary: "PR hydrations are failing or repeatedly degraded"
-          description: 'More than 5 PR hydrations failed or came back degraded in the last 30 minutes (pg_desk_hydration_failures_total{type="pr"}), or pg_desk_repeated_degraded_entities{type="pr"} is above 0, for 15 minutes. Run `pg-desk pr refresh <id>` for a PR in the run record and read its class line. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+          description: 'More than 5 PR hydrations failed or came back degraded in the last 30 minutes (pg_desk_hydration_failures_total{type="pr"}), or pg_desk_repeated_degraded_entities{type="pr"} is above 0, for 15 minutes. Run `pg-desk pr refresh <id>` for a PR in the run record and read its class line. Suppressed while a pg-router router pause is active.'
         data:
           - refId: A
             relativeTimeRange:
@@ -1271,7 +1271,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '((sum(increase(pg_desk_hydration_failures_total{type="pr"}[30m])) > 5) or (max(pg_desk_repeated_degraded_entities{type="pr"}) > 0)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '((sum(increase(pg_desk_hydration_failures_total{type="pr"}[30m])) > 5) or (max(pg_desk_repeated_degraded_entities{type="pr"}) > 0)) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1305,7 +1305,7 @@ groups:
           severity: warning
         annotations:
           summary: "Issue hydrations are failing or repeatedly degraded"
-          description: 'More than 5 issue hydrations failed or came back degraded in the last 30 minutes (pg_desk_hydration_failures_total{type="issue"}), or pg_desk_repeated_degraded_entities{type="issue"} is above 0, for 15 minutes. Check the Jira daemon (pg-conn-jira-* alerts), its config hash against the running pg-desk, and the pg-desk poll log for the failing issue keys. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+          description: 'More than 5 issue hydrations failed or came back degraded in the last 30 minutes (pg_desk_hydration_failures_total{type="issue"}), or pg_desk_repeated_degraded_entities{type="issue"} is above 0, for 15 minutes. Check the Jira daemon (pg-conn-jira-* alerts), its config hash against the running pg-desk, and the pg-desk poll log for the failing issue keys. Suppressed while a pg-router router pause is active.'
         data:
           - refId: A
             relativeTimeRange:
@@ -1316,7 +1316,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '((sum(increase(pg_desk_hydration_failures_total{type="issue"}[30m])) > 5) or (max(pg_desk_repeated_degraded_entities{type="issue"}) > 0)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '((sum(increase(pg_desk_hydration_failures_total{type="issue"}[30m])) > 5) or (max(pg_desk_repeated_degraded_entities{type="issue"}) > 0)) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1352,7 +1352,7 @@ groups:
           severity: warning
         annotations:
           summary: "The pr-change role was dispatched in the last hour but no PR was hydrated"
-          description: 'pg_router_throughput_total{role="pr-change"} increased in the last hour while pg_desk_hydrations_total{type="pr"} did not: the role is dispatched but its hydrate stage never ran. Run the composed command by hand in plan mode for one PR, and check the role definition and the lock directory. An own-origin skip (an annotation write by the decider itself coming back through the annotation feed) is a dispatch without a hydration; that is safe only because each skip follows a run that hydrated the PR. Suppressed while a pg-router SYSTEM_PAUSE gate is active.'
+          description: 'pg_router_throughput_total{role="pr-change"} increased in the last hour while pg_desk_hydrations_total{type="pr"} did not: the role is dispatched but its hydrate stage never ran. Run the composed command by hand in plan mode for one PR, and check the role definition and the lock directory. An own-origin skip (an annotation write by the decider itself coming back through the annotation feed) is a dispatch without a hydration; that is safe only because each skip follows a run that hydrated the PR. Suppressed while a pg-router router pause is active.'
         data:
           - refId: A
             relativeTimeRange:
@@ -1363,7 +1363,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '(sum(increase(pg_router_throughput_total{role="pr-change"}[1h])) > 0) unless on() (sum(increase(pg_desk_hydrations_total{type="pr"}[1h])) > 0) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '(sum(increase(pg_router_throughput_total{role="pr-change"}[1h])) > 0) unless on() (sum(increase(pg_desk_hydrations_total{type="pr"}[1h])) > 0) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1384,7 +1384,7 @@ groups:
 
       # ---- PR lane remaining alerts (PR lane refactor, P8b-1) ----
       # Two more rules of the same shape as the outcome rules above: each ends with the
-      # SYSTEM_PAUSE guard of pg-desk-sync-stale, noDataState is OK, and each has a
+      # router pause guard of pg-desk-sync-stale, noDataState is OK, and each has a
       # firing, a healthy and an empty-input case under grafana/alerting/rule-tests/.
       # The tracked-set and no-watched-PRs rules read the daemon's metrics and live in
       # the connector's alert file (pg-connector-github-alerts.yaml). None of these
@@ -1406,7 +1406,7 @@ groups:
           severity: info
         annotations:
           summary: "A hidden PR has an open anchor"
-          description: "pg_desk_pr_open_anchors_hidden has been above 0 for 30 minutes: at least one PR carrying the hidden annotation still has an open anchor. The decider skips a hidden PR for every rule including closure, so the anchor stays open even after the PR merges. Run `pg-desk pr unhide <id>` for a PR the lane should handle again so it can close the anchor, or close the anchor by hand if the PR is meant to stay hidden. Low severity; suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          description: "pg_desk_pr_open_anchors_hidden has been above 0 for 30 minutes: at least one PR carrying the hidden annotation still has an open anchor. The decider skips a hidden PR for every rule including closure, so the anchor stays open even after the PR merges. Run `pg-desk pr unhide <id>` for a PR the lane should handle again so it can close the anchor, or close the anchor by hand if the PR is meant to stay hidden. Low severity; suppressed while a pg-router router pause is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -1417,7 +1417,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_pr_open_anchors_hidden) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: 'max(pg_desk_pr_open_anchors_hidden) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:

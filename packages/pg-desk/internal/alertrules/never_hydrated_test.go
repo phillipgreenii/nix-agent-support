@@ -8,7 +8,7 @@ import (
 )
 
 // neverHydratedExpr MUST equal the expr of rule pg-desk-pr-never-hydrated.
-const neverHydratedExpr = `((pg_desk_pr_unhydrated > 0) or (pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)`
+const neverHydratedExpr = `((pg_desk_pr_unhydrated > 0) or (pg_desk_liveness == 1 unless on() pg_desk_pr_unhydrated)) unless on() (pg_router_resource_level{resource="router"} == 1)`
 
 func neverHydratedBlock(t *testing.T) string {
 	t.Helper()
@@ -32,7 +32,7 @@ func neverHydratedBlock(t *testing.T) string {
 //
 //	(unhydrated > 0)                       the gauge's series above 0 (a filter)
 //	or (liveness == 1 unless on() gauge)   the liveness series, only while the gauge has NO series
-//	unless on() (gates == 1)               every surviving series dropped while a SYSTEM_PAUSE gate reads 1
+//	unless on() (gates == 1)               every surviving series dropped while a router pause reads 1
 //
 // `unless on()` matches on zero labels, so any right-hand element drops every
 // left-hand one whatever their labels. `or` adds the right-hand elements whose
@@ -81,7 +81,7 @@ func TestNeverHydratedRuleMatchesModel(t *testing.T) {
 	if m[1] != neverHydratedExpr {
 		t.Errorf("rule expr drifted from the modelled one:\n got %q\nwant %q", m[1], neverHydratedExpr)
 	}
-	for _, need := range []string{"for: 30m", "noDataState: OK", "execErrState: Error", "severity: warning", "type: gt", "params: [0]", "reducer: last", "SYSTEM_PAUSE"} {
+	for _, need := range []string{"for: 30m", "noDataState: OK", "execErrState: Error", "severity: warning", "type: gt", "params: [0]", "reducer: last", "router pause"} {
 		if !strings.Contains(rest, need) {
 			t.Errorf("rule lost %q", need)
 		}
@@ -109,7 +109,7 @@ func TestNeverHydratedFiresWhenTheGaugeIsAbsentWhileLivenessIsUp(t *testing.T) {
 		t.Error("an absent gauge with liveness up must fire: the store cannot answer")
 	}
 	if !firesAbove0(evalNeverHydrated(nil, up, []series{{"pg-router", 0}})) {
-		t.Error("a SYSTEM_PAUSE series reading 0 is not a pause: it must still fire")
+		t.Error("a router pause series reading 0 is not a pause: it must still fire")
 	}
 }
 
@@ -133,9 +133,9 @@ func TestNeverHydratedIsQuietWhenPgDeskIsDown(t *testing.T) {
 func TestNeverHydratedIsSuppressedUnderSystemPause(t *testing.T) {
 	pause := []series{{"pg-router", 1}}
 	if firesAbove0(evalNeverHydrated([]series{{"pg-desk", 495}}, up, pause)) {
-		t.Error("the gauge above 0 fired under SYSTEM_PAUSE")
+		t.Error("the gauge above 0 fired under router pause")
 	}
 	if firesAbove0(evalNeverHydrated(nil, up, pause)) {
-		t.Error("the absent gauge fired under SYSTEM_PAUSE")
+		t.Error("the absent gauge fired under router pause")
 	}
 }

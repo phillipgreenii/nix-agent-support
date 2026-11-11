@@ -87,12 +87,12 @@ tests:
         alertname: pg-desk-pr-residual-after-apply
         exp_alerts: []
 
-  - name: SYSTEM_PAUSE suppresses it
+  - name: router pause suppresses it
     interval: 1m
     input_series:
       - series: pg_desk_pr_lane_residual_oldest_age_seconds{mode="apply",job="pg-desk"}
         values: "4000x60"
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+      - series: pg_router_resource_level{resource="router",job="pg-router"}
         values: "1x60"
     alert_rule_test:
       - eval_time: 40m

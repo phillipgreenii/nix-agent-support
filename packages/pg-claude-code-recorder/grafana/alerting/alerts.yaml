@@ -20,7 +20,7 @@
 # test-pg-claude-code-recorder-alert-rules) pin the PromQL behaviour.
 #
 # Grafana has no inhibition, so each guard is in the expression: daemon-down ends with the
-# SYSTEM_PAUSE guard of the pg-connector rules; heartbeat-stale and doctor-mismatch carry
+# router pause guard of the pg-connector rules; heartbeat-stale and doctor-mismatch carry
 # `and on() (max(up) == 1)` and read 0 while the daemon is not scraped, so they never page with
 # daemon-down.
 #
@@ -38,8 +38,8 @@ groups:
       # Daemon scraped. noDataState is Alerting (the pg-conn-github-daemon-down polarity): once the
       # daemon is deployed an absent up series means the scrape target is gone. The scrape interval is
       # 30s (darwin/modules/pg-claude-code-recorder metricsTargets), so for: 2m is four missed scrapes.
-      # SYSTEM_PAUSE guard: the expression is never empty. A missing up series reads 0 (`or vector(0)`),
-      # and an active SYSTEM_PAUSE gate adds 1 (`+ on() (max(gate == 1) or vector(0))`), lifting the
+      # router pause guard: the expression is never empty. A missing up series reads 0 (`or vector(0)`),
+      # and an active router pause adds 1 (`+ on() (max(level == 1) or vector(0))`), lifting the
       # value to 1 or more so the threshold (below 1) does not fire. The earlier `unless on()` form
       # returned an EMPTY result under a pause, which Grafana mapped to Alerting through
       # noDataState, paging a live daemon. Cases: rule-tests/pg-ccrec-daemon-down.test.yaml.
@@ -53,7 +53,7 @@ groups:
           severity: critical
         annotations:
           summary: "pg-claude-code-recorder has not been scraped for over 2 minutes"
-          description: "Prometheus has had no successful scrape of the recorder (up of job pg-claude-code-recorder is 0, or the series is gone) for over 2 minutes; the scrape interval is 30s, so about 4 scrapes in a row have failed. The recorder is not copying, so Claude Code files changed meanwhile are caught up on restart (no loss while remove.enable is false). Run pg-claude-code-recorder status, then read the launch agent log (launchd-stderr.log in the agent log directory). Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          description: "Prometheus has had no successful scrape of the recorder (up of job pg-claude-code-recorder is 0, or the series is gone) for over 2 minutes; the scrape interval is 30s, so about 4 scrapes in a row have failed. The recorder is not copying, so Claude Code files changed meanwhile are caught up on restart (no loss while remove.enable is false). Run pg-claude-code-recorder status, then read the launch agent log (launchd-stderr.log in the agent log directory). Suppressed while a pg-router router pause is active."
           logql: '{service_name="pg-claude-code-recorder"}'
         data:
           - refId: A
@@ -65,7 +65,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '(min(up{job="pg-claude-code-recorder"}) or vector(0)) + on() (max(pg_router_gates_active{type="SYSTEM_PAUSE"} == 1) or vector(0))'
+              expr: '(min(up{job="pg-claude-code-recorder"}) or vector(0)) + on() (max(pg_router_resource_level{resource="router"} == 1) or vector(0))'
           - refId: B
             datasourceUid: __expr__
             model:

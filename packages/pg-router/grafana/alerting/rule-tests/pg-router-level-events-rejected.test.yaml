@@ -1,0 +1,35 @@
+# promtool unit tests for the pg-router-level-events-rejected alert. Run by the flake check test-pg-router-alert-rules,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for` and labels, plus a recording rule
+# `wrapped:<uid with _>` over the same expression. Every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a rejected level answer fires with its reason, and resolves once the window passes
+    interval: 1m
+    input_series:
+      - series: pg_router_level_events_rejected_total{reason="malformed",job="pg-router"}
+        values: "0x5 1x60"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: pg-router-level-events-rejected
+        exp_alerts:
+          - exp_labels:
+              reason: malformed
+              severity: warning
+      - eval_time: 40m
+        alertname: pg-router-level-events-rejected
+        exp_alerts: []
+
+  - name: a counter that never moves never fires
+    interval: 1m
+    input_series:
+      - series: pg_router_level_events_rejected_total{reason="conflict",job="pg-router"}
+        values: "3x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-level-events-rejected
+        exp_alerts: []

@@ -47,7 +47,7 @@ const (
 var laneEnd = parseUTC("2026-10-13T00:25:00Z")
 
 // stalledRoles is the type-to-role table the rule's label_replace chain encodes:
-// one entry per role of the daemon config (18 roles: the PR lane refactor made
+// one entry per role of the daemon config (17 roles: the PR lane refactor made
 // pr-change the one role that binds pr.changed and removed pr.reconcile, and the
 // escalation-watchdog timer role was added), in the
 // order of the chain. A role added to the config MUST be added here and to the rule;
@@ -66,7 +66,6 @@ var stalledRoles = []struct{ typeRE, role string }{
 	{"desk[.]heartbeat", "desk-heartbeat"},
 	{"pg-router-probe[.]tick", "pg-router-probe"},
 	{"ccpool-probe[.]tick", "ccpool-probe"},
-	{"disk[.]check", "disk-watchdog"},
 	{"escalated[.]pg2", "pg2-escalation-triager"},
 	{"escalated[.]zr", "zr-escalation-triager"},
 	{"split-review[.]pg2", "pg2-split-triager"},
@@ -89,7 +88,6 @@ var stalledTypes = map[string]string{
 	"desk.heartbeat":           "desk-heartbeat",
 	"pg-router-probe.tick":     "pg-router-probe",
 	"ccpool-probe.tick":        "ccpool-probe",
-	"disk.check":               "disk-watchdog",
 	"escalated.pg2":            "pg2-escalation-triager",
 	"escalated.zr":             "zr-escalation-triager",
 	"split-review.pg2":         "pg2-split-triager",
@@ -106,7 +104,7 @@ func wantStalledExpr() string {
 	for _, r := range stalledRoles {
 		fmt.Fprintf(&b, `, "role", %q, "type", %q)`, r.role, r.typeRE)
 	}
-	b.WriteString(` and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)`)
+	b.WriteString(` and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0) unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1))`)
 	return b.String()
 }
 
@@ -142,7 +140,7 @@ func stalledCondWith(series []obs, t time.Time, minPresent, run int) bool {
 		if o.depth > 0 {
 			present++
 		}
-		gated = gated || o.gate
+		gated = gated || o.paused
 		completed = completed || o.settled
 	}
 	// min_over_time(pending[10m]) == 0 drops the role; an absent series drops nothing.
@@ -714,7 +712,7 @@ func TestStormReplayDoesNotReadTheRetimedStarts(t *testing.T) {
 			t.Fatalf("phase %s: %d scrapes with the recorded starts, %d with the true ones", phase, len(a), len(b))
 		}
 		for i := range a {
-			if !a[i].at.Equal(b[i].at) || a[i].depth != b[i].depth || a[i].inFlight != b[i].inFlight || a[i].gate != b[i].gate || a[i].settled != b[i].settled {
+			if !a[i].at.Equal(b[i].at) || a[i].depth != b[i].depth || a[i].inFlight != b[i].inFlight || a[i].paused != b[i].paused || a[i].settled != b[i].settled {
 				t.Fatalf("phase %s: the scrape at %s reads %+v with the recorded starts and %+v with the true ones", phase, a[i].at.Format("15:04:05"), a[i], b[i])
 			}
 		}
@@ -896,17 +894,18 @@ func TestStalledWakeAfterSleepDoesNotFireOnStalePending(t *testing.T) {
 	}
 }
 
-// A gate (SYSTEM_PAUSE or any other) halts every listener except its owner, so an
-// idle lane with a backlog is expected while one is in force: nothing pages under it,
-// the condition stays false for the 10 minutes the gate's last sample stays in the
-// window, and the alert then fires normally if the lane is still idle.
-func TestStalledGateSuppressesTheRule(t *testing.T) {
+// A paused role (pg_router_role_paused is 1) is held, so an idle lane with a backlog
+// is expected while it is paused: nothing pages under it, the condition stays false for
+// the 10 minutes the pause's last sample stays in the window, and the alert then fires
+// normally if the lane is still idle. The promtool case also pauses an UNRELATED role
+// and requires the rule to still fire.
+func TestStalledPausedRoleSuppressesTheRule(t *testing.T) {
 	start := parseUTC("2026-10-12T10:00:00Z")
 	gateFrom, gateTo := start.Add(10*time.Minute), start.Add(70*time.Minute)
 	var series []obs
 	for i := 0; i < 360; i++ { // 3h, depth 4, nothing in flight, a gate for an hour
 		at := start.Add(time.Duration(i) * scrape)
-		series = append(series, obs{at: at, depth: 4, gate: !at.Before(gateFrom) && at.Before(gateTo)})
+		series = append(series, obs{at: at, depth: 4, paused: !at.Before(gateFrom) && at.Before(gateTo)})
 	}
 	always := func(time.Time) bool { return true }
 	m := replayStalled(series, always, start.Add(15*time.Minute), start.Add(3*time.Hour))
@@ -958,7 +957,7 @@ func TestStalledAnnotationsDescribeIdleWithBacklog(t *testing.T) {
 	r := ruleBlock(t, "pg-router-queue-stalled")
 	i, j := strings.Index(r, "annotations:"), strings.Index(r, "data:")
 	ann := r[i:j]
-	for _, need := range []string{"has a backlog but nothing is processing it", "pg_router_listener_in_flight", "pg_router_listener_pending", "pg-router status", "gate"} {
+	for _, need := range []string{"has a backlog but nothing is processing it", "pg_router_listener_in_flight", "pg_router_listener_pending", "pg-router status", "paused role"} {
 		if !strings.Contains(ann, need) {
 			t.Errorf("annotations lost %q", need)
 		}

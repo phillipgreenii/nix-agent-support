@@ -214,7 +214,7 @@ tests:
         alertname: pg-conn-github-tracked-set
         exp_alerts: []
 
-  - name: SYSTEM_PAUSE suppresses every branch
+  - name: router pause suppresses every branch
     interval: 1m
     input_series:
       - series: pg_connector_github_tracked_entities{class="members",service_name="pg-connector-github",job="pg-connector-github"}
@@ -223,7 +223,7 @@ tests:
         values: "1000x80"
       - series: pg_connector_github_governor_backlog{class="keepalive",service_name="pg-connector-github",job="pg-connector-github"}
         values: "900x80"
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+      - series: pg_router_resource_level{resource="router",job="pg-router"}
         values: "1x80"
     alert_rule_test:
       - eval_time: 60m

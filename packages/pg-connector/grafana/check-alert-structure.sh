@@ -27,7 +27,7 @@
 #   S9  the two PR lane rules of P8b-1: the tracked-set rule alerts on the ratio to the daemon's own
 #       limit gauge (guarded by `max(limit) > 0`, never a number copied into YAML) and reads the
 #       governor backlog; the no-watched-PRs rule reads the watched gauge and pg-desk's open-anchor
-#       gauge; both end with the SYSTEM_PAUSE guard
+#       gauge; both end with the router pause guard
 #   S10 the unavailable-ratio rule (pg2-4pfrkm) selects {service_name="pg-connector-github"}, counts
 #       kind="request" rows and error_code="unavailable", guards the ratio with a request floor, and
 #       parses as LogQL offline (its behaviour is check-loki-ratio-rule.sh's)
@@ -67,7 +67,7 @@ loki_uid="pg-conn-github-store-aside"
 tracked_uid="pg-conn-github-tracked-set"
 ratio_uid="pg-conn-github-unavailable-ratio"
 watched_uid="pg-conn-github-no-watched-prs"
-pause_guard=' unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+pause_guard=' unless on() (pg_router_resource_level{resource="router"} == 1)'
 down_uid="pg-conn-github-daemon-down"
 want_uids="pg-conn-github-consumer-stuck
 pg-conn-github-daemon-down
@@ -237,7 +237,7 @@ lint() {
   for uid in "$tracked_uid" "$watched_uid"; do
     expr="$(jq -r --arg uid "$uid" '.groups[]?.rules[]? | select(.uid == $uid) | .data[0].model.expr // empty' <<<"$json")"
     if [ "${expr%"$pause_guard"}" = "$expr" ]; then
-      echo "RULE-S9: $uid: the expression does not end with the SYSTEM_PAUSE guard:$pause_guard" >&2
+      echo "RULE-S9: $uid: the expression does not end with the router pause guard:$pause_guard" >&2
       status=1
     fi
   done
@@ -379,10 +379,10 @@ mutant S9 "the tracked-set rule without its governor backlog branch" \
   "($(rule_of "$tracked_uid") | .data[0].model.expr) |= sub(\"pg_connector_github_governor_backlog\"; \"pg_connector_github_queue_depth\")" ""
 mutant S9 "the no-watched-PRs rule without the pg-desk open-anchor gauge" \
   "($(rule_of "$watched_uid") | .data[0].model.expr) |= sub(\"pg_desk_pr_open_anchors\"; \"pg_desk_pr_unhydrated\")" ""
-mutant S9 "the no-watched-PRs rule without its SYSTEM_PAUSE guard" \
-  "($(rule_of "$watched_uid") | .data[0].model.expr) |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")" ""
-mutant S9 "the tracked-set rule without its SYSTEM_PAUSE guard" \
-  "($(rule_of "$tracked_uid") | .data[0].model.expr) |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")" ""
+mutant S9 "the no-watched-PRs rule without its router pause guard" \
+  "($(rule_of "$watched_uid") | .data[0].model.expr) |= sub(\" unless on[(][)] [(]pg_router_resource_level.*\$\"; \"\")" ""
+mutant S9 "the tracked-set rule without its router pause guard" \
+  "($(rule_of "$tracked_uid") | .data[0].model.expr) |= sub(\" unless on[(][)] [(]pg_router_resource_level.*\$\"; \"\")" ""
 mutant S8 "a deleteRules entry dropped (a rule uid no longer deleted)" "" "" \
   'del(.deleteRules[] | select(.uid == "pg-conn-github-store-aside"))'
 mutant S8 "a deleteRules uid that is not a rule uid" "" "" \

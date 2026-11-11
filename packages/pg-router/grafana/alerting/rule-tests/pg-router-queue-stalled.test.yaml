@@ -6,7 +6,7 @@
 #
 # What this proves that the Go replay (internal/alertrules/queue_stalled_test.go) cannot: the
 # PromQL itself, i.e. the type-to-role label_replace join, the in-flight comparison, the
-# presence guard, the gate exclusion and the label set of the alert, evaluated by the real
+# presence guard, the paused-role exclusion and the label set of the alert, evaluated by the real
 # engine. The Go tests model the same expression and replay a recorded lane through it.
 #
 # Time model: the router is scraped every 30s, so every series has a 30s interval; rules
@@ -15,7 +15,7 @@
 # alert is Pending from there and fires after `for: 5m`, at 14m: not firing at 12m, firing at
 # 20m. pg_router_listener_in_flight{role} is present on every scrape (0 or 1);
 # pg_router_queue_depth{type} exists only while the type is non-empty and
-# pg_router_gates_active{type} only while a gate is in force.
+# pg_router_role_paused{role} is 0 or 1 for every role.
 rule_files:
   - rules.yml
 
@@ -462,10 +462,6 @@ tests:
         values: "2x240"
       - series: pg_router_listener_in_flight{role="pg2-split-triager"}
         values: "0x240"
-      - series: pg_router_queue_depth{type="disk.check"}
-        values: "2x240"
-      - series: pg_router_listener_in_flight{role="disk-watchdog"}
-        values: "0x240"
       - series: pg_router_queue_depth{type="pr.changed"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="pr-change"}
@@ -483,7 +479,7 @@ tests:
         eval_time: 20m
         exp_samples:
           - labels: "{}"
-            value: 9
+            value: 8
 
   # The escalation-watchdog clause (pg2-f9x7i): the timer role that hands stale escalations to the
   # operator. Its ticks pile up while the role is idle, and a role that is busy is not stalled.
@@ -585,25 +581,25 @@ tests:
               job: pg-router
               severity: warning
 
-  - name: any gate in force suppresses every type, and the rule fires normally once the gate is gone
+  - name: a paused role suppresses its own lane only, and the rule fires normally once it resumes
     interval: 30s
     input_series:
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x240"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
         values: "0x240"
-      # SYSTEM_PAUSE for the first 30m (60 scrapes), then cleared (no series).
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
-        values: "1x60 _x180"
+      # The role is paused for the first 30m (60 scrapes), then resumes.
+      - series: pg_router_role_paused{role="drain-pg2",job="pg-router"}
+        values: "1x60 0x180"
     alert_rule_test:
-      # Idle with a backlog the whole time, but the gate is in the window until 40m.
+      # Idle with a backlog the whole time, but the pause is in the window until 40m.
       - eval_time: 25m
         alertname: pg-router-queue-stalled
         exp_alerts: []
       - eval_time: 38m
         alertname: pg-router-queue-stalled
         exp_alerts: []
-      # The condition holds again from 40m and fires after `for` (45m).
+      # The pause ends at 30m; the condition holds again from 40m and fires after `for` (45m).
       - eval_time: 43m
         alertname: pg-router-queue-stalled
         exp_alerts: []
@@ -735,3 +731,24 @@ tests:
       - eval_time: 60m
         alertname: pg-router-queue-stalled
         exp_alerts: []
+
+  - name: an UNRELATED paused role does not suppress a stalled lane
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x240"
+      # Another role is held by a resource for the whole hour; this lane's role is not paused.
+      - series: pg_router_role_paused{role="review",job="pg-router"}
+        values: "1x240"
+      - series: pg_router_role_paused{role="drain-pg2",job="pg-router"}
+        values: "0x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning

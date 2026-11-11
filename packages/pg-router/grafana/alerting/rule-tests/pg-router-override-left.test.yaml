@@ -1,0 +1,49 @@
+# promtool unit tests for the pg-router-override-left alert. Run by the flake check test-pg-router-alert-rules,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for` and labels, plus a recording rule
+# `wrapped:<uid with _>` over the same expression. Every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an override with a lease in force for 12 hours fires, labelled with its resource
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level_override_active{resource="router",job="pg-router"}
+        values: "1x800"
+      - series: pg_router_resource_level_lease_remaining_seconds{resource="router",job="pg-router"}
+        values: "3600x800"
+    alert_rule_test:
+      - eval_time: 700m
+        alertname: pg-router-override-left
+        exp_alerts: []
+      - eval_time: 740m
+        alertname: pg-router-override-left
+        exp_alerts:
+          - exp_labels:
+              resource: router
+              severity: warning
+
+  - name: an until-cleared override (no lease series) never fires
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level_override_active{resource="router",job="pg-router"}
+        values: "1x800"
+    alert_rule_test:
+      - eval_time: 790m
+        alertname: pg-router-override-left
+        exp_alerts: []
+
+  - name: a resource with no override never fires
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level_override_active{resource="disk",job="pg-router"}
+        values: "0x800"
+      - series: pg_router_resource_level_lease_remaining_seconds{resource="disk",job="pg-router"}
+        values: "3600x800"
+    alert_rule_test:
+      - eval_time: 790m
+        alertname: pg-router-override-left
+        exp_alerts: []

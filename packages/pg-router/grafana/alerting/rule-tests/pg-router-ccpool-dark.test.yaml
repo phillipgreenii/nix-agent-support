@@ -93,7 +93,7 @@ tests:
         alertname: pg-router-ccpool-no-launch-while-queued
         exp_alerts: []
 
-  - name: no-launch is quiet for a command-role queue, a backlog that drained, a short backlog and a held gate
+  - name: no-launch is quiet for a command-role queue, a backlog that drained, and a short backlog
     interval: 30s
     input_series:
       # Command roles launch no ccpool session.
@@ -114,14 +114,30 @@ tests:
         alertname: pg-router-ccpool-no-launch-while-queued
         exp_alerts: []
 
-  - name: no-launch is quiet while a gate is held
+  - name: no-launch is quiet while the consumer role of the queue is paused
     interval: 30s
     input_series:
       - series: pg_router_queue_depth{type="review.ready"}
         values: "2x600"
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+      - series: pg_router_role_paused{role="review",job="pg-router"}
         values: "1x600"
     alert_rule_test:
       - eval_time: 250m
         alertname: pg-router-ccpool-no-launch-while-queued
         exp_alerts: []
+
+  - name: no-launch still fires when an UNRELATED role is paused
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.ready"}
+        values: "2x600"
+      - series: pg_router_role_paused{role="review",job="pg-router"}
+        values: "0x600"
+      - series: pg_router_role_paused{role="worker",job="pg-router"}
+        values: "1x600"
+    alert_rule_test:
+      - eval_time: 250m
+        alertname: pg-router-ccpool-no-launch-while-queued
+        exp_alerts:
+          - exp_labels:
+              severity: warning

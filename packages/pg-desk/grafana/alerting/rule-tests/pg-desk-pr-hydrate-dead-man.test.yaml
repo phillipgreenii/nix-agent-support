@@ -107,14 +107,14 @@ tests:
         alertname: pg-desk-pr-hydrate-dead-man
         exp_alerts: []
 
-  - name: SYSTEM_PAUSE suppresses it
+  - name: router pause suppresses it
     interval: 1m
     input_series:
       - series: pg_router_throughput_total{type="pr.changed",role="pr-change",job="pg-router"}
         values: "0+2x180"
       - series: pg_desk_hydrations_total{type="pr",job="pg-desk"}
         values: "50x180"
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+      - series: pg_router_resource_level{resource="router",job="pg-router"}
         values: "1x180"
     alert_rule_test:
       - eval_time: 25m

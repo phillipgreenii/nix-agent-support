@@ -13,9 +13,9 @@ import (
 )
 
 // wantSourcesExpr MUST equal the expr of rule pg-desk-sources-stale. It reuses
-// the `unless on()` SYSTEM_PAUSE suppression of pg-desk-sync-stale, so
+// the `unless on()` router pause suppression of pg-desk-sync-stale, so
 // evalStaleRule models it too.
-const wantSourcesExpr = `pg_desk_sources_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)`
+const wantSourcesExpr = `pg_desk_sources_stale unless on() (pg_router_resource_level{resource="router"} == 1)`
 
 func sourcesRuleBlock(t *testing.T) string {
 	t.Helper()
@@ -44,7 +44,7 @@ func TestSourcesStaleRuleExprMatchesModel(t *testing.T) {
 	if m[1] != wantSourcesExpr {
 		t.Errorf("rule expr drifted from the modelled one:\n got %q\nwant %q", m[1], wantSourcesExpr)
 	}
-	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "type: gte", "params: [1]", "SYSTEM_PAUSE"} {
+	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "type: gte", "params: [1]", "router pause"} {
 		if !strings.Contains(rest, need) {
 			t.Errorf("rule lost %q", need)
 		}
@@ -98,7 +98,7 @@ func TestOneLiveSourceForcedStaleFires(t *testing.T) {
 		t.Fatalf("a live never-succeeded source did not fire (series %v)", never)
 	}
 	if firing(evalStaleRule(stale, []series{{"pg-router", 1}})) {
-		t.Fatal("fired during a SYSTEM_PAUSE gate")
+		t.Fatal("fired during a router pause")
 	}
 }
 

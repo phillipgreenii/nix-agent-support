@@ -4,7 +4,7 @@
 // rule's `unless on()` suppression are modelled here and the test pins the YAML
 // expression to the exact text the model implements (the same approach as
 // packages/pg-router/internal/alertrules). The expression itself was also
-// checked against a live Prometheus over the 2026-10-02 SYSTEM_PAUSE incident
+// checked against a live Prometheus over the 2026-10-02 router pause incident
 // window (pg2-9awkw).
 package alertrules
 
@@ -16,7 +16,7 @@ import (
 )
 
 // wantExpr MUST equal the expr of rule pg-desk-sync-stale.
-const wantExpr = `pg_desk_dashboard_stale unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)`
+const wantExpr = `pg_desk_dashboard_stale unless on() (pg_router_resource_level{resource="router"} == 1)`
 
 // series is one sample of an instant vector: the job label (only used to show
 // that label sets differing between the two sides do not matter) and its value.
@@ -83,7 +83,7 @@ func TestSyncStaleRuleExprMatchesModel(t *testing.T) {
 	if m[1] != wantExpr {
 		t.Errorf("rule expr drifted from the modelled one:\n got %q\nwant %q", m[1], wantExpr)
 	}
-	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "type: gte", "params: [1]", "SYSTEM_PAUSE"} {
+	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "type: gte", "params: [1]", "router pause"} {
 		if !strings.Contains(rest, need) {
 			t.Errorf("rule lost %q", need)
 		}
@@ -109,7 +109,7 @@ func TestStaleDuringPauseDoesNotFire(t *testing.T) {
 	// The gate series carries job=pg-router while the stale series carry
 	// job=pg-desk/pg-desk-legacy: on() must still match across the differing labels.
 	if firing(evalStaleRule(staleBoth, []series{{"pg-router", 1}})) {
-		t.Fatal("stale snapshot fired during a SYSTEM_PAUSE gate")
+		t.Fatal("stale snapshot fired during a router pause")
 	}
 }
 

@@ -4,7 +4,7 @@
 # rule's `for: 30m` and labels, plus a recording rule `wrapped:<uid with _>`.
 #
 # Time model: 1m series. The lag of the pr annotation feed's consumer (annotations:pr-lane) above 50
-# for 30m fires; another consumer or type is out of scope; a SYSTEM_PAUSE gate suppresses it (the
+# for 30m fires; another consumer or type is out of scope; a router pause suppresses it (the
 # query does not run then, so lag grows on purpose).
 rule_files:
   - rules.yml
@@ -68,12 +68,12 @@ tests:
         alertname: pg-desk-pr-annotation-consumer-lag
         exp_alerts: []
 
-  - name: SYSTEM_PAUSE suppresses it
+  - name: router pause suppresses it
     interval: 1m
     input_series:
       - series: pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane",job="pg-desk"}
         values: "800x120"
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+      - series: pg_router_resource_level{resource="router",job="pg-router"}
         values: "1x120"
     alert_rule_test:
       - eval_time: 40m

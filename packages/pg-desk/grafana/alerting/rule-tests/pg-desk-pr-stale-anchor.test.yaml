@@ -115,7 +115,7 @@ tests:
         alertname: pg-desk-pr-stale-anchor
         exp_alerts: []
 
-  - name: SYSTEM_PAUSE suppresses it
+  - name: router pause suppresses it
     interval: 1m
     input_series:
       - series: pg_desk_pr_stale_anchor_oldest_age_seconds{job="pg-desk"}
@@ -126,7 +126,7 @@ tests:
         values: "0x120"
       - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
         values: "1x120"
-      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+      - series: pg_router_resource_level{resource="router",job="pg-router"}
         values: "1x120"
     alert_rule_test:
       - eval_time: 20m

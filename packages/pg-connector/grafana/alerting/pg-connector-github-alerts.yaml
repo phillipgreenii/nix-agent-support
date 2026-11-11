@@ -403,7 +403,7 @@ groups:
       # daemon reports no limit gauge while none is configured, and `max(limit) > 0`
       # drops the denominator then, so branches 1 and 2 are quiet instead of dividing
       # by zero; branch 3 needs no limit. The 0.8, 0.1, 0.5 and 500 are PROVISIONAL
-      # and revisited with data. Ends with the SYSTEM_PAUSE guard of the pg-desk
+      # and revisited with data. Ends with the router pause guard of the pg-desk
       # rules (a pause starves the queue on purpose). noDataState is OK: a missing
       # daemon is the daemon-down rule's to report.
       - uid: pg-conn-github-tracked-set
@@ -416,7 +416,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-connector-github: the tracked set is near its configured limit or growing fast, or the governor backlog is high"
-          description: "For over 30 minutes at least one of: the tracked set (pg_connector_github_tracked_entities, classes members and other_open) is above 0.8 of pg_connector_github_tracked_limit; it grew by more than 0.1 of the limit in a day while above 0.5 of it; or pg_connector_github_governor_backlog (queued tasks due now that have not gone out) summed over the classes is above 500. The limit caps and evicts nothing, so a breach means keep-alive refreshes will outgrow the budget. Compare the members and other_open series (`pg-connector pr inspect <id>...` answers tracked and watched for one PR), raise tracked_set_limit only after checking why the set grew, and read pg_connector_github_governor_paused for a budget pause. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          description: "For over 30 minutes at least one of: the tracked set (pg_connector_github_tracked_entities, classes members and other_open) is above 0.8 of pg_connector_github_tracked_limit; it grew by more than 0.1 of the limit in a day while above 0.5 of it; or pg_connector_github_governor_backlog (queued tasks due now that have not gone out) summed over the classes is above 500. The limit caps and evicts nothing, so a breach means keep-alive refreshes will outgrow the budget. Compare the members and other_open series (`pg-connector pr inspect <id>...` answers tracked and watched for one PR), raise tracked_set_limit only after checking why the set grew, and read pg_connector_github_governor_paused for a budget pause. Suppressed while a pg-router router pause is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -427,7 +427,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '((sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) / (max(pg_connector_github_tracked_limit) > 0) > 0.8) or (((sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) - sum(pg_connector_github_tracked_entities{class=~"members|other_open"} offset 1d)) / (max(pg_connector_github_tracked_limit) > 0) > 0.1) and on() (sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) / (max(pg_connector_github_tracked_limit) > 0) > 0.5)) or (sum(pg_connector_github_governor_backlog) > 500)) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: '((sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) / (max(pg_connector_github_tracked_limit) > 0) > 0.8) or (((sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) - sum(pg_connector_github_tracked_entities{class=~"members|other_open"} offset 1d)) / (max(pg_connector_github_tracked_limit) > 0) > 0.1) and on() (sum(pg_connector_github_tracked_entities{class=~"members|other_open"}) / (max(pg_connector_github_tracked_limit) > 0) > 0.5)) or (sum(pg_connector_github_governor_backlog) > 500)) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -456,7 +456,7 @@ groups:
       # count, so the rule's threshold is gt 0. A missing watched gauge (no daemon) or
       # a missing anchor gauge (pg-desk cannot answer) leaves the result empty: the
       # daemon-down rule and the pg-desk rules speak for those, hence noDataState OK.
-      # Ends with the SYSTEM_PAUSE guard.
+      # Ends with the router pause guard.
       - uid: pg-conn-github-no-watched-prs
         title: pg-connector-github watches no PR while anchors are open
         condition: C
@@ -467,7 +467,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-connector-github watches no pull request although open anchors exist"
-          description: "pg_connector_github_watched_entities has been 0 for over 30 minutes while pg_desk_pr_open_anchors (PRs that have an open anchor) is above 0: the marking step has not watched any of them, so their changes are not tracked. Run `pg-connector pr inspect <id>...` over the open-anchor PRs (its counts line reports how many are watched), then rerun the marking step. Suppressed while a pg-router SYSTEM_PAUSE gate is active."
+          description: "pg_connector_github_watched_entities has been 0 for over 30 minutes while pg_desk_pr_open_anchors (PRs that have an open anchor) is above 0: the marking step has not watched any of them, so their changes are not tracked. Run `pg-connector pr inspect <id>...` over the open-anchor PRs (its counts line reports how many are watched), then rerun the marking step. Suppressed while a pg-router router pause is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -478,7 +478,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_pr_open_anchors) > 0 and on() (max(pg_connector_github_watched_entities) == 0) unless on() (pg_router_gates_active{type="SYSTEM_PAUSE"} == 1)'
+              expr: 'max(pg_desk_pr_open_anchors) > 0 and on() (max(pg_connector_github_watched_entities) == 0) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:

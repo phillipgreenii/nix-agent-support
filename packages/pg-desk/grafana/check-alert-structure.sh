@@ -12,8 +12,8 @@
 #
 #   T1  the rule uid exists exactly once and is at most 40 characters (Grafana's cap)
 #   T2  noDataState is OK: an absence test belongs in the expression, never in noDataState
-#   T3  the expression ends with the SYSTEM_PAUSE guard, byte for byte the guard of
-#       pg-desk-sync-stale, so the rule is suppressed under SYSTEM_PAUSE
+#   T3  the expression ends with the router pause guard, byte for byte the guard of
+#       pg-desk-sync-stale, so the rule is suppressed under router pause
 #   T4  (never-hydrated only) the expression carries the absence branch (liveness up while the
 #       gauge has no series)
 #   T5  the rule shape: condition C, refIds A B C, a non-empty for, summary and description,
@@ -27,7 +27,7 @@
 #       Alerting guarded by pg-desk liveness: the expression carries the branch that answers 0
 #       while pg-desk is down (so liveness-down speaks alone and NoData alerts only with pg-desk
 #       up), and the rule has the T5 shape. It is NOT an outcome rule: noDataState is Alerting and
-#       there is no SYSTEM_PAUSE guard (an empty result would alert).
+#       there is no router pause guard (an empty result would alert).
 #   T10 (only when the delete-only file is given; PR lane refactor P9b) the deleteRules file is
 #       apiVersion 1 with no groups key, each entry has orgId 1, the uids are exactly the five
 #       retired sync_error rules (each once), none of them is still a rule of alerts.yaml, and the
@@ -123,9 +123,9 @@ lint() {
   local file="$1" status=0 json count expr guard uid
   json="$(yq -o=json '.' "$file")"
 
-  guard="$(expr_of "$json" "$guard_uid" | grep -oE 'unless on\(\) \(pg_router_gates_active\{type="SYSTEM_PAUSE"\} == 1\)$' || true)"
+  guard="$(expr_of "$json" "$guard_uid" | grep -oE 'unless on\(\) \(pg_router_resource_level\{resource="router"\} == 1\)$' || true)"
   if [ -z "$guard" ]; then
-    echo "RULE-T3: the reference rule $guard_uid has no SYSTEM_PAUSE guard to copy" >&2
+    echo "RULE-T3: the reference rule $guard_uid has no router pause guard to copy" >&2
     status=1
   fi
 
@@ -152,7 +152,7 @@ lint() {
 
     # T3
     if [ -n "$guard" ] && [ "${expr%"$guard"}" = "$expr" ]; then
-      echo "RULE-T3: $uid: the expression does not end with the SYSTEM_PAUSE guard of $guard_uid: $guard" >&2
+      echo "RULE-T3: $uid: the expression does not end with the router pause guard of $guard_uid: $guard" >&2
       status=1
     fi
 
@@ -346,8 +346,8 @@ rule_of() { printf '.groups[0].rules[] | select(.uid == "%s")' "$1"; }
 expr_path() { printf '(%s | .data[] | select(.refId == "A") | .model.expr)' "$(rule_of "$1")"; }
 
 for uid in "${outcome_uids[@]}"; do
-  negative T3 "$uid: the SYSTEM_PAUSE guard removed from the expression" \
-    "$(expr_path "$uid") |= sub(\" unless on[(][)] [(]pg_router_gates_active.*\$\"; \"\")"
+  negative T3 "$uid: the router pause guard removed from the expression" \
+    "$(expr_path "$uid") |= sub(\" unless on[(][)] [(]pg_router_resource_level.*\$\"; \"\")"
   negative T2 "$uid: noDataState differs (Alerting)" \
     "($(rule_of "$uid") | .noDataState) = \"Alerting\""
 done

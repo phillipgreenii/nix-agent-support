@@ -1,0 +1,37 @@
+# promtool unit tests for the pg-router-role-paused-long alert. Run by the flake check test-pg-router-alert-rules,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for` and labels, plus a recording rule
+# `wrapped:<uid with _>` over the same expression. Every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a role paused for 4 hours fires, not before, labelled with its role
+    interval: 1m
+    input_series:
+      - series: pg_router_role_paused{role="worker",job="pg-router"}
+        values: "1x300"
+      - series: pg_router_role_paused{role="review",job="pg-router"}
+        values: "0x300"
+    alert_rule_test:
+      - eval_time: 235m
+        alertname: pg-router-role-paused-long
+        exp_alerts: []
+      - eval_time: 250m
+        alertname: pg-router-role-paused-long
+        exp_alerts:
+          - exp_labels:
+              role: worker
+              severity: warning
+
+  - name: a pause that ends inside 4 hours never fires
+    interval: 1m
+    input_series:
+      - series: pg_router_role_paused{role="worker",job="pg-router"}
+        values: "1x200 0x200"
+    alert_rule_test:
+      - eval_time: 300m
+        alertname: pg-router-role-paused-long
+        exp_alerts: []
