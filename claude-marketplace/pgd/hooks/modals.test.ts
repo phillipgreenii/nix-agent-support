@@ -89,7 +89,7 @@ test('the context button opens the Context and usage modal', async () => {
   ])
   expect(w.opened[0].items[0].color).toBe('red')
   expect(w.opened[0].items[1].color).toBe('red')
-  expect(w.opened[0].items[2].color).toBe(undefined)
+  expect(w.opened[0].items[2].color).toBe('green')
 })
 
 test('the Info modal omits branch and worktree when the .git reads fail, and the PR row without a PR value', async () => {
@@ -122,6 +122,24 @@ test('the Context modal shows each limit with its reset time only when present',
   expect(rows(contextSpec())).toEqual(['7d limit: 20%'])
   setValue('usage', { limits: [] })
   expect(rows(contextSpec())).toEqual([])
+})
+
+test('each limit is coloured green below 60, yellow from 60 and red from 80; missing values add no row', async () => {
+  await world({ limits: [] })
+  const colorAt = (p: number) => {
+    setValue('usage', { limits: [{ kind: 'five_hour', usedPercent: p }, { kind: 'seven_day', usedPercent: p }] })
+    return contextSpec().items.map(i => i.color)
+  }
+  expect(colorAt(0)).toEqual(['green', 'green'])
+  expect(colorAt(59)).toEqual(['green', 'green'])
+  expect(colorAt(60)).toEqual(['yellow', 'yellow'])
+  expect(colorAt(79)).toEqual(['yellow', 'yellow'])
+  expect(colorAt(80)).toEqual(['red', 'red'])
+  expect(colorAt(100)).toEqual(['red', 'red'])
+  setValue('usage', { limits: [{ kind: 'five_hour', usedPercent: 85 }] })
+  expect(contextSpec().items.map(i => `${i.label}:${i.color}`)).toEqual(['5h limit:red'])
+  setValue('usage', { limits: [] })
+  expect(contextSpec().items).toEqual([])
 })
 
 test('the Context modal shows last compaction when the event-driven value exists and omits it otherwise', async () => {
