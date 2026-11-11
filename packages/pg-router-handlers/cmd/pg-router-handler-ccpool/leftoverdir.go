@@ -257,7 +257,7 @@ func reclaimLeftoverDir(ctx context.Context, role roles.Role, deps executor.Deps
 		slog.Warn("worktree sweep: leftover directory moved aside but not fully deleted (a later sweep purges the trash)", "bead", l.bead, "trash", trash, "err", err)
 	}
 	slog.Info("worktree sweep: unregistered leftover directory reclaimed", "bead", l.bead, "path", l.path, "role", role.Name, "age", l.age)
-	emitOrphan(deps, "info", worktreeEventReclaimed, "unregistered leftover directory reclaimed", map[string]any{
+	emitOrphan(ctx, deps, "info", worktreeEventReclaimed, "unregistered leftover directory reclaimed", map[string]any{
 		"bead": l.bead, "role": role.Name, "worktree": l.path, "leftover": true, "age_seconds": l.age.Seconds(),
 	})
 	return true

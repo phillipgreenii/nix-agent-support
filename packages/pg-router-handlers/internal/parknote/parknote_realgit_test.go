@@ -15,9 +15,9 @@ import (
 // branch resolution and the ahead count are properties of git itself, so they
 // run against a throwaway repository, never a fake.
 
-func git(t *testing.T, dir string, args ...string) {
+func git(ctx context.Context, t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := gitenv.Command(context.Background(), dir, args...)
+	cmd := gitenv.Command(ctx, dir, args...)
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -37,17 +37,17 @@ func TestBuild_realGitDrainWorktree(t *testing.T) {
 	if err := os.Mkdir(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	git(t, repo, "init", "-q", "-b", "main")
-	git(t, repo, "commit", "-q", "--allow-empty", "-m", "base")
+	git(t.Context(), t, repo, "init", "-q", "-b", "main")
+	git(t.Context(), t, repo, "commit", "-q", "--allow-empty", "-m", "base")
 	wt := filepath.Join(repo, ".worktrees", "b-1")
-	git(t, repo, "worktree", "add", "-q", "-b", "drain/b-1", wt)
-	git(t, wt, "commit", "-q", "--allow-empty", "-m", "one")
-	git(t, wt, "commit", "-q", "--allow-empty", "-m", "two")
+	git(t.Context(), t, repo, "worktree", "add", "-q", "-b", "drain/b-1", wt)
+	git(t.Context(), t, wt, "commit", "-q", "--allow-empty", "-m", "one")
+	git(t.Context(), t, wt, "commit", "-q", "--allow-empty", "-m", "two")
 	if err := os.WriteFile(filepath.Join(wt, "scratch.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// A second bead's branch, with no worktree and no commits.
-	git(t, repo, "branch", "drain/b-2")
+	git(t.Context(), t, repo, "branch", "drain/b-2")
 
 	note := Build(context.Background(), Input{Trigger: "t", Session: "s", Role: "drain", Bead: "b-1", Dirs: []string{repo}})
 	for _, want := range []string{
@@ -63,15 +63,15 @@ func TestBuild_realGitDrainWorktree(t *testing.T) {
 	}
 
 	// Branch only: remove the worktree, keep the branch.
-	git(t, repo, "worktree", "remove", "--force", wt)
+	git(t.Context(), t, repo, "worktree", "remove", "--force", wt)
 	note = Build(context.Background(), Input{Trigger: "t", Session: "s", Role: "drain", Bead: "b-1", Dirs: []string{repo}})
 	if !strings.Contains(note, "branch drain/b-1 (no worktree): 2 commit(s) ahead of main") {
 		t.Errorf("a branch whose worktree is gone must still be named:\n%s", note)
 	}
 
 	// A configured primary branch wins.
-	git(t, repo, "branch", "trunk", "main")
-	git(t, repo, "config", "pgii-integrate-branch.primaryBranch", "trunk")
+	git(t.Context(), t, repo, "branch", "trunk", "main")
+	git(t.Context(), t, repo, "config", "pgii-integrate-branch.primaryBranch", "trunk")
 	note = Build(context.Background(), Input{Trigger: "t", Session: "s", Role: "drain", Bead: "b-1", Dirs: []string{repo}})
 	if !strings.Contains(note, "ahead of trunk") {
 		t.Errorf("the configured primary branch must be used:\n%s", note)
@@ -95,12 +95,12 @@ func TestLocate_realGit(t *testing.T) {
 		if err := os.Mkdir(repo, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		git(t, repo, "init", "-q", "-b", "main")
-		git(t, repo, "commit", "-q", "--allow-empty", "-m", "base")
+		git(t.Context(), t, repo, "init", "-q", "-b", "main")
+		git(t.Context(), t, repo, "commit", "-q", "--allow-empty", "-m", "base")
 		return repo
 	}
 	a, b := mkRepo("repo-a"), mkRepo("repo-b")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("none", func(t *testing.T) {
 		loc, err := Locate(ctx, nil, "b-0", []string{a, b})
@@ -111,9 +111,9 @@ func TestLocate_realGit(t *testing.T) {
 
 	t.Run("one worktree, and a same-named directory on another branch is not it", func(t *testing.T) {
 		wt := filepath.Join(a, ".worktrees", "b-1")
-		git(t, a, "worktree", "add", "-q", "-b", "drain/b-1", wt)
+		git(ctx, t, a, "worktree", "add", "-q", "-b", "drain/b-1", wt)
 		// The handler's own per-bead worktree for the same bead: not a drain worktree.
-		git(t, b, "worktree", "add", "-q", "-b", "pg-router/b-1", filepath.Join(b, ".worktrees", "b-1"))
+		git(ctx, t, b, "worktree", "add", "-q", "-b", "pg-router/b-1", filepath.Join(b, ".worktrees", "b-1"))
 		loc, err := Locate(ctx, nil, "b-1", []string{a, b})
 		if err != nil {
 			t.Fatal(err)
@@ -135,8 +135,8 @@ func TestLocate_realGit(t *testing.T) {
 	})
 
 	t.Run("two repositories each holding one", func(t *testing.T) {
-		git(t, a, "worktree", "add", "-q", "-b", "drain/b-2", filepath.Join(a, ".worktrees", "b-2"))
-		git(t, b, "worktree", "add", "-q", "-b", "drain/b-2", filepath.Join(b, ".worktrees", "b-2"))
+		git(ctx, t, a, "worktree", "add", "-q", "-b", "drain/b-2", filepath.Join(a, ".worktrees", "b-2"))
+		git(ctx, t, b, "worktree", "add", "-q", "-b", "drain/b-2", filepath.Join(b, ".worktrees", "b-2"))
 		loc, err := Locate(ctx, nil, "b-2", []string{a, b})
 		if err != nil {
 			t.Fatal(err)
@@ -150,7 +150,7 @@ func TestLocate_realGit(t *testing.T) {
 	})
 
 	t.Run("branch with no worktree", func(t *testing.T) {
-		git(t, b, "branch", "drain/b-3")
+		git(ctx, t, b, "branch", "drain/b-3")
 		loc, err := Locate(ctx, nil, "b-3", []string{a, b})
 		if err != nil || len(loc.Worktrees) != 0 || len(loc.BranchOnly) != 1 || loc.BranchOnly[0] != b {
 			t.Fatalf("loc=%+v err=%v, want branch-only in %s", loc, err, b)
@@ -159,7 +159,7 @@ func TestLocate_realGit(t *testing.T) {
 
 	t.Run("a worktree whose directory is gone is not found", func(t *testing.T) {
 		wt := filepath.Join(a, ".worktrees", "b-4")
-		git(t, a, "worktree", "add", "-q", "-b", "drain/b-4", wt)
+		git(ctx, t, a, "worktree", "add", "-q", "-b", "drain/b-4", wt)
 		if err := os.RemoveAll(wt); err != nil {
 			t.Fatal(err)
 		}
@@ -176,19 +176,19 @@ func TestLocate_realGit(t *testing.T) {
 	})
 
 	t.Run("it changes nothing", func(t *testing.T) {
-		before := gitList(t, a)
+		before := gitList(ctx, t, a)
 		if _, err := Locate(ctx, nil, "b-1", []string{a, b}); err != nil {
 			t.Fatal(err)
 		}
-		if after := gitList(t, a); after != before {
+		if after := gitList(ctx, t, a); after != before {
 			t.Fatalf("worktree list changed:\n%s\nvs\n%s", before, after)
 		}
 	})
 }
 
-func gitList(t *testing.T, dir string) string {
+func gitList(ctx context.Context, t *testing.T, dir string) string {
 	t.Helper()
-	out, err := OSGit{}.Output(context.Background(), dir, "worktree", "list", "--porcelain")
+	out, err := OSGit{}.Output(ctx, dir, "worktree", "list", "--porcelain")
 	if err != nil {
 		t.Fatal(err)
 	}

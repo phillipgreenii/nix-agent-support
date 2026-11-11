@@ -282,7 +282,7 @@ func TestSweep_deadlineExpiryReturnsPartialResultWithoutError(t *testing.T) {
 		if calls.Add(1) == 3 {
 			cancel()
 		}
-		return inner(context.Background(), dir)
+		return inner(context.WithoutCancel(ctx), dir)
 	}
 	if got := sweepLeakedWorktrees(ctx, h.role, h.deps, h.env); got != 1 {
 		t.Fatalf("removed %d, want 1 (the first worktree, before the deadline)", got)

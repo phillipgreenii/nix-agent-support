@@ -79,7 +79,7 @@ func TestEmitOrphanGauge(t *testing.T) {
 	var pts []gaugePoint
 	orphanGaugeEmit = spyEmit(&pts)
 	t.Cleanup(func() { orphanGaugeEmit = nil })
-	emitOrphanGauge("worker", orphanEventReclaimed, time.Unix(42, 0))
+	emitOrphanGauge(t.Context(), "worker", orphanEventReclaimed, time.Unix(42, 0))
 	if len(pts) != 1 || pts[0].name != gaugeOrphanLastEvent || pts[0].value != 42 ||
 		pts[0].labels["role"] != "worker" || pts[0].labels["kind"] != orphanEventReclaimed {
 		t.Errorf("points = %+v", pts)

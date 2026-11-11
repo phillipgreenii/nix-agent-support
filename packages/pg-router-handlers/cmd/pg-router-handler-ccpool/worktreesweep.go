@@ -444,7 +444,7 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	}
 	deleteAnchorBranch(ctx, env.open, deps.Cfg.RepoRoot, "worktree-sweep:"+c.bead, c.bead)
 	slog.Info("worktree sweep: leaked worktree reclaimed", "bead", c.bead, "worktree", c.path, "role", role.Name, "age", c.age)
-	emitOrphan(deps, "info", worktreeEventReclaimed, "leaked worktree reclaimed", map[string]any{
+	emitOrphan(ctx, deps, "info", worktreeEventReclaimed, "leaked worktree reclaimed", map[string]any{
 		"bead": c.bead, "role": role.Name, "worktree": c.path, "branch": branch, "age_seconds": c.age.Seconds(),
 	})
 	return true, true, false

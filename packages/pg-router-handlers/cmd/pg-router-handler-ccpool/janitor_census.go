@@ -150,7 +150,8 @@ func emitCensus(ctx context.Context, passes janitorPasses, jroles []janitorRole,
 	if maxEntries <= 0 {
 		maxEntries = censusMaxEntries
 	}
-	cctx, cancel := context.WithTimeout(context.Background(), censusBudget(max, sinceStart))
+	// The census gets its own budget and must not be cut by the run context.
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), censusBudget(max, sinceStart))
 	defer cancel()
 	t0 := time.Now()
 	st := scanWorktreeDirs(cctx, dirs, maxEntries)

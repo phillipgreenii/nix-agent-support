@@ -138,11 +138,11 @@ var orphanGaugeEmit gaugeEmitFn
 
 // emitOrphanGauge records an orphan_reclaimed / orphan_hard_stop event as a
 // gauge, the only orphan-frequency signal besides events.jsonl.
-func emitOrphanGauge(role, kind string, now time.Time) {
+func emitOrphanGauge(ctx context.Context, role, kind string, now time.Time) {
 	if orphanGaugeEmit == nil {
 		return
 	}
-	if err := orphanGaugeEmit(context.Background(), gaugeOrphanLastEvent, float64(now.Unix()), map[string]string{"role": role, "kind": kind}); err != nil {
+	if err := orphanGaugeEmit(ctx, gaugeOrphanLastEvent, float64(now.Unix()), map[string]string{"role": role, "kind": kind}); err != nil {
 		slog.Warn("orphan: gauge emit failed", "err", err)
 	}
 }

@@ -375,7 +375,8 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	if len(jroles) > 0 {
 		lockDeps = jroles[0].deps
 	}
-	run.runPass(context.Background(), passLockGC, "", lockDeps, func(context.Context) int { return passes.lockGC(lockDeps) })
+	// Lock GC is deliberately detached from the run deadline (a cheap, handler-wide pass that always runs).
+	run.runPass(context.WithoutCancel(runCtx), passLockGC, "", lockDeps, func(context.Context) int { return passes.lockGC(lockDeps) })
 
 	outcome := janitorCompleted
 	if run.cutOff || runCtx.Err() != nil {
