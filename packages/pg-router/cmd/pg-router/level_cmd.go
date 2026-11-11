@@ -118,6 +118,10 @@ func renderLevels(w io.Writer, levels []levelView, now time.Time) {
 	for _, v := range levels {
 		name := textsafe.Sanitize(v.Resource)
 		if v.Level == "" {
+			if v.Resource == "router" {
+				fmt.Fprintf(w, "  %s: RUNNING (no pause in force)\n", name)
+				continue
+			}
 			if v.NoSensor {
 				fmt.Fprintf(w, "  %s: no sensor configured\n", name)
 			} else {

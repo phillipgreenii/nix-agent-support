@@ -161,3 +161,13 @@ func TestRenderStatusText_LevelsAndPausedRolesBlocks(t *testing.T) {
 		t.Errorf("status paused roles block wrong:\n%s", out.String())
 	}
 }
+
+// The router resource with no level in force is running: status says so rather
+// than "no reading".
+func TestRenderLevels_RouterWithNoPauseIsRunning(t *testing.T) {
+	var out strings.Builder
+	renderLevels(&out, []levelView{{Resource: "router"}, {Resource: "disk"}}, explainNow)
+	if !strings.Contains(out.String(), "  router: RUNNING (no pause in force)\n") || !strings.Contains(out.String(), "  disk: no reading (sensor has no answer)\n") {
+		t.Fatalf("levels = %q", out.String())
+	}
+}
