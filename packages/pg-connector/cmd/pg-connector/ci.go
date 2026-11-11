@@ -189,7 +189,7 @@ func ciCacheFallback(ctx context.Context, reg *Registry, backend, prID string) (
 		runs[i].AsOf = asOfStr
 	}
 	c.MarkAccessed(prID, now)
-	if saveErr := saveCache(key, c); saveErr != nil {
+	if saveErr := updateCache(key, func(cur *Cache) bool { cur.MarkAccessed(prID, now); return true }); saveErr != nil {
 		// Best-effort persistence of the MarkAccessed bump, mirroring
 		// tryCacheFallback's own tolerance — the runs already decoded
 		// above are served regardless.
@@ -225,14 +225,14 @@ func putCIListCache(ctx context.Context, reg *Registry, backend, prID string, ru
 		return
 	}
 	key := CacheKey{Type: "ci", Backend: backend}
-	c, err := loadCache(key)
-	if err != nil {
-		return
-	}
 	now := time.Now()
-	c.Put(prID, content, ciListAsOf(runs), now)
-	c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, noConsumersTracked, now)
-	_ = saveCache(key, c)
+	asOf := ciListAsOf(runs)
+	sizeCap := resolveCacheSizeCap(reg)
+	_ = updateCache(key, func(c *Cache) bool {
+		c.Put(prID, content, asOf, now)
+		c.Evict(sizeCap, cacheTombstoneRetention, noConsumersTracked, now)
+		return true
+	})
 }
 
 // ciListAsOf derives the single as-of time stored for one Put call's

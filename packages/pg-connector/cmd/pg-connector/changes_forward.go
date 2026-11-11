@@ -274,28 +274,27 @@ func nonNullArray(raw json.RawMessage) json.RawMessage {
 // is never a ghost row of the consumer's freshness view. A failure to stamp is
 // returned for the caller to report; it never invalidates the answer.
 func stampForwarded(reg *Registry, key LedgerKey, consumerID string, now time.Time, fresh *schema.SourceFreshness, callErr error) error {
-	l, err := loadLedgerAdopting(key, reg.PreviousNames(key.Backend))
-	if err != nil {
-		return fmt.Errorf("changes: stamp ledger for backend %q: %w", key.Backend, err)
-	}
-	cs := l.Consumers[consumerID]
-	cs.LastSeen = now
-	l.Consumers[consumerID] = cs
+	err := updateLedger(context.Background(), key, reg.PreviousNames(key.Backend), func(l *Ledger) bool {
+		cs := l.Consumers[consumerID]
+		cs.LastSeen = now
+		l.Consumers[consumerID] = cs
 
-	switch {
-	case callErr != nil:
-		if forwardedFailureRecorded(callErr) {
-			recordForwardedError(l, now, scriptout.CodeForError(callErr))
+		switch {
+		case callErr != nil:
+			if forwardedFailureRecorded(callErr) {
+				recordForwardedError(l, now, scriptout.CodeForError(callErr))
+			}
+		case fresh != nil:
+			if t, ok := parseFreshnessTime(fresh.LastSuccessAt); ok {
+				l.RefreshedAt = &t
+			}
+			if fresh.LastError != "" {
+				recordForwardedError(l, now, ledgerErrorForwarded)
+			}
 		}
-	case fresh != nil:
-		if t, ok := parseFreshnessTime(fresh.LastSuccessAt); ok {
-			l.RefreshedAt = &t
-		}
-		if fresh.LastError != "" {
-			recordForwardedError(l, now, ledgerErrorForwarded)
-		}
-	}
-	if err := saveLedger(key, l); err != nil {
+		return true
+	})
+	if err != nil {
 		return fmt.Errorf("changes: stamp ledger for backend %q: %w", key.Backend, err)
 	}
 	return nil

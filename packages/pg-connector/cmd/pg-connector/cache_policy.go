@@ -194,8 +194,10 @@ func lookupShowCache(ctx context.Context, reg *Registry, entityType string, back
 		if enabled, err := cacheEnabled(ctx, reg, entityType, b); err != nil || !enabled {
 			continue
 		}
-		c.MarkAccessed(id, now)
-		_ = saveCache(key, c) // best-effort LRU bump; the hit is served regardless
+		// Best-effort LRU bump on the CURRENT file (updateCache), so it cannot
+		// overwrite a tombstone written since c was read; the hit is served
+		// regardless.
+		_ = updateCache(key, func(cur *Cache) bool { cur.MarkAccessed(id, now); return true })
 		return showCacheHit{backend: b, content: content, asOf: asOf}, true
 	}
 	return showCacheHit{}, false
@@ -352,13 +354,7 @@ func invalidateEntity(ctx context.Context, reg *Registry, entityType, id, pinned
 	defer release()
 	for _, b := range backends {
 		key := CacheKey{Type: entityType, Backend: b}
-		c, err := loadCache(key)
-		if err != nil {
-			continue
-		}
-		if c.Drop(id) {
-			_ = saveCache(key, c)
-		}
+		_ = updateCache(key, func(c *Cache) bool { return c.Drop(id) })
 	}
 }
 
@@ -418,25 +414,24 @@ func putEntitiesCacheLevel(ctx context.Context, reg *Registry, entityType, backe
 		return
 	}
 	key := CacheKey{Type: entityType, Backend: backend}
-	c, err := loadCache(key)
-	if err != nil {
-		return
-	}
 	now := time.Now()
 	sort.SliceStable(writes, func(i, j int) bool { return writes[i].id < writes[j].id })
-	for _, w := range writes {
-		lv := level
-		if w.level != "" {
-			lv = w.level
+	sizeCap := resolveCacheSizeCap(reg)
+	_ = updateCache(key, func(c *Cache) bool {
+		for _, w := range writes {
+			lv := level
+			if w.level != "" {
+				lv = w.level
+			}
+			if w.refreshed {
+				c.PutRefreshed(w.id, w.content, w.asOf, now, lv)
+			} else {
+				c.PutLevel(w.id, w.content, w.asOf, now, lv)
+			}
 		}
-		if w.refreshed {
-			c.PutRefreshed(w.id, w.content, w.asOf, now, lv)
-		} else {
-			c.PutLevel(w.id, w.content, w.asOf, now, lv)
-		}
-	}
-	c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, noConsumersTracked, now)
-	_ = saveCache(key, c)
+		c.Evict(sizeCap, cacheTombstoneRetention, noConsumersTracked, now)
+		return true
+	})
 }
 
 // cacheWriteFor builds a cacheWrite from a raw entity, reporting ok=false for

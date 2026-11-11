@@ -178,7 +178,7 @@ func tryCacheFallback(ctx context.Context, reg *Registry, entityType, backend, i
 		return nil, false
 	}
 	c.MarkAccessed(id, now)
-	if saveErr := saveCache(key, c); saveErr != nil {
+	if saveErr := updateCache(key, func(cur *Cache) bool { cur.MarkAccessed(id, now); return true }); saveErr != nil {
 		// Best-effort persistence of the MarkAccessed bump — the entity
 		// this call already has decoded in hand is served regardless,
 		// mirroring this docket's existing Evict/saveCache error
@@ -240,6 +240,7 @@ func cacheFallbackEntities(ctx context.Context, reg *Registry, entityType, backe
 	now := time.Now()
 	var entries []json.RawMessage
 	var ids []string
+	var marked []string
 	for _, id := range allIDs {
 		content, asOf, ok := c.Get(id, maxAge, now)
 		if !ok {
@@ -250,13 +251,19 @@ func cacheFallbackEntities(ctx context.Context, reg *Registry, entityType, backe
 			continue
 		}
 		c.MarkAccessed(id, now)
+		marked = append(marked, id)
 		entries = append(entries, stale)
 		ids = append(ids, id)
 	}
 	if len(entries) == 0 {
 		return nil, nil, false
 	}
-	if saveErr := saveCache(key, c); saveErr != nil {
+	if saveErr := updateCache(key, func(cur *Cache) bool {
+		for _, id := range marked {
+			cur.MarkAccessed(id, now)
+		}
+		return true
+	}); saveErr != nil {
 		// Best-effort persistence, same tolerance as tryCacheFallback.
 		_ = saveErr
 	}
@@ -350,12 +357,11 @@ func putEntityCacheLevel(ctx context.Context, reg *Registry, entityType, backend
 		return
 	}
 	key := CacheKey{Type: entityType, Backend: backend}
-	c, err := loadCache(key)
-	if err != nil {
-		return
-	}
 	now := time.Now()
-	c.PutLevel(id, content, asOf, now, level)
-	c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, noConsumersTracked, now)
-	_ = saveCache(key, c)
+	sizeCap := resolveCacheSizeCap(reg)
+	_ = updateCache(key, func(c *Cache) bool {
+		c.PutLevel(id, content, asOf, now, level)
+		c.Evict(sizeCap, cacheTombstoneRetention, noConsumersTracked, now)
+		return true
+	})
 }

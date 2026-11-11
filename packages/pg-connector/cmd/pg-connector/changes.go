@@ -466,6 +466,19 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 	key := LedgerKey{Type: entityType, Backend: b, Query: query, Instance: instance}
 	res := changesBackendResult{backend: b, key: key}
 
+	// A non-cached poll writes the ledger, so it holds the key's cycle lock from
+	// load to save (ledger_lock.go). A --cached poll only reads and takes none.
+	if !cached {
+		release, lockErr := acquireLedgerCycle(ctx, key)
+		if lockErr != nil {
+			res.status = SourceDegraded
+			res.reason = lockErr.Error()
+			res.skipAdvance = true
+			return res
+		}
+		defer release()
+	}
+
 	l, err := loadLedgerAdopting(key, reg.PreviousNames(b))
 	if err != nil {
 		res.status = SourceDegraded
@@ -553,7 +566,9 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 // then failed is never persisted, and writes nothing for an error that
 // is not a failure of a source (RecordFetchOutcome's own rule). The stamp
 // is best-effort: a failure to persist it MUST NOT replace the original
-// fetch error already reported on the sources[] row.
+// fetch error already reported on the sources[] row. The caller holds key's
+// cycle lock, so this uses loadLedger and saveLedger directly (the lock is
+// not reentrant).
 func recordFailedFetch(key LedgerKey, fetchErr error) {
 	l, err := loadLedger(key)
 	if err != nil {
@@ -707,7 +722,15 @@ func commitAdvances(results []changesBackendResult, consumerID string) error {
 			continue
 		}
 		r.ledger.AdvanceConsumer(consumerID, now)
-		if err := saveLedger(r.key, r.ledger); err != nil {
+		// Re-read under the cycle lock and move only this consumer's cursor,
+		// forward: another poll of the key may have saved since r.ledger was
+		// loaded, and writing r.ledger back whole would undo it.
+		version := r.ledger.Version
+		err := updateLedger(context.Background(), r.key, nil, func(l *Ledger) bool {
+			l.advanceConsumerTo(consumerID, version, now)
+			return true
+		})
+		if err != nil {
 			return fmt.Errorf("changes: advance consumer %q for backend %q: %w", consumerID, r.backend, err)
 		}
 	}
@@ -755,14 +778,6 @@ func commitCacheTombstones(ctx context.Context, reg *Registry, entityType string
 		}
 
 		key := CacheKey{Type: entityType, Backend: r.backend}
-		c, err := loadCache(key)
-		if err != nil {
-			return fmt.Errorf("changes: load cache for backend %q: %w", r.backend, err)
-		}
-		for _, id := range removedIDs {
-			c.Remove(id, now)
-		}
-
 		ledger := r.ledger
 		consumersPassed := func(id string) bool {
 			entry, ok := ledger.Entries[id]
@@ -776,9 +791,18 @@ func commitCacheTombstones(ctx context.Context, reg *Registry, entityType string
 			}
 			return true
 		}
-		c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, consumersPassed, now)
-		if err := saveCache(key, c); err != nil {
-			return fmt.Errorf("changes: save cache for backend %q: %w", r.backend, err)
+		// One locked read-modify-write on the CURRENT cache file: a load and a
+		// later save as separate steps let a concurrent Put or access bump
+		// overwrite these tombstones.
+		sizeCap := resolveCacheSizeCap(reg)
+		if err := updateCache(key, func(c *Cache) bool {
+			for _, id := range removedIDs {
+				c.Remove(id, now)
+			}
+			c.Evict(sizeCap, cacheTombstoneRetention, consumersPassed, now)
+			return true
+		}); err != nil {
+			return fmt.Errorf("changes: update cache for backend %q: %w", r.backend, err)
 		}
 	}
 	return nil

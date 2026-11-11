@@ -175,7 +175,12 @@ func loadCache(key CacheKey) (*Cache, error) {
 		return nil, fmt.Errorf("cache: lock %s: %w", path, err)
 	}
 	defer func() { _ = fl.Unlock() }()
+	return readCacheLocked(path)
+}
 
+// readCacheLocked reads and decodes the cache file at path; the caller holds
+// the flock.
+func readCacheLocked(path string) (*Cache, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return newEmptyCache(), nil
@@ -205,7 +210,6 @@ var cacheSaves atomic.Int64
 // saveCache writes c for key via flock-on-sibling-lock-file plus
 // temp-file-and-rename, mirroring saveLedger exactly.
 func saveCache(key CacheKey, c *Cache) error {
-	cacheSaves.Add(1)
 	path, err := cachePath(key)
 	if err != nil {
 		return err
@@ -220,7 +224,12 @@ func saveCache(key CacheKey, c *Cache) error {
 		return fmt.Errorf("cache: lock %s: %w", path, err)
 	}
 	defer func() { _ = fl.Unlock() }()
+	return writeCacheLocked(path, c)
+}
 
+// writeCacheLocked encodes c and writes it to path; the caller holds the flock.
+func writeCacheLocked(path string, c *Cache) error {
+	cacheSaves.Add(1)
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("cache: encode %s: %w", path, err)
@@ -230,6 +239,37 @@ func saveCache(key CacheKey, c *Cache) error {
 		return fmt.Errorf("cache: write %s: %w", path, err)
 	}
 	return nil
+}
+
+// updateCache is a read-modify-write of key's cache under ONE hold of its
+// flock: it reads the CURRENT file, applies fn, and writes the result back
+// when fn returns true. A load, a change and a later save taken as separate
+// lock holds let two writers read the same snapshot and the second save
+// overwrite the first (a lost tombstone, a lost entry), so every cache
+// writer uses this. Unlike the ledger cycle there is no backend call inside
+// fn, so holding the lock for it costs only the file read and write.
+func updateCache(key CacheKey, fn func(*Cache) bool) error {
+	path, err := cachePath(key)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("cache: create cache dir %s: %w", dir, err)
+	}
+	fl := flock.New(lockPath(path))
+	if err := fl.Lock(); err != nil {
+		return fmt.Errorf("cache: lock %s: %w", path, err)
+	}
+	defer func() { _ = fl.Unlock() }()
+	c, err := readCacheLocked(path)
+	if err != nil {
+		return err
+	}
+	if !fn(c) {
+		return nil
+	}
+	return writeCacheLocked(path, c)
 }
 
 // deleteCache removes key's on-disk cache file (and its lock file)

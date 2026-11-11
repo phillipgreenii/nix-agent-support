@@ -285,6 +285,17 @@ comment`, `issue transition`, `issue update`, `issue close` and `pr review submi
   cache. It MUST NOT report the source degraded for the undecodable file alone. A temp file left by
   a killed writer MUST be removed on a later save once it is older than one hour; a younger one is
   kept, since it may belong to a live writer.
+- **`INV-LEDGER-FRESH-7`** <!-- uuid: ce2bdc75-3bcb-4f35-a366-b01f1d53d423 --> — Two calls that write one ledger key MUST take
+  turns, and a write MUST start from the state the previous writer saved. A non-cached `changes`
+  poll holds a per-key writer lock from reading the ledger through saving it (across the backend
+  call, so a second poll of the SAME key waits behind the first, bounded by two minutes and the
+  caller's context); the post-response cursor advance and the forwarded-call stamp re-read the
+  current ledger under the same lock and change only their own fields. A cursor advance MUST NOT
+  move a consumer's cursor backward, and a poll MUST NOT write an older snapshot over a newer one,
+  so a `--reset` or a tombstone another poll saved is never lost. Reads (`--cached`, `ledger show`,
+  the cache fallback) take no writer lock and never wait on a backend call. Every cache write is one
+  read-modify-write of the current file under the cache lock, so a tombstone is never overwritten
+  by an entry or an access bump read before it.
 
 ## Read as-of and staleness
 
