@@ -226,7 +226,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 	if err := k.Start(); err != nil {
 		return err
 	}
-	defer k.Shutdown()
+	defer k.Shutdown(ctx)
 	ticker := time.NewTicker(k.Interval())
 	defer ticker.Stop()
 	for {
@@ -246,14 +246,15 @@ func (k *Keeper) Run(ctx context.Context) error {
 // dead leases and keeper.heartbeat, which starts the anchor's watchdog
 // countdown) and a bounded OTel flush. Valid leases, assertion.json, the
 // anchor and caffeinate are left alone.
-func (k *Keeper) Shutdown() {
+func (k *Keeper) Shutdown(ctx context.Context) {
 	k.logf("shutdown: sweeping leases")
 	if _, err := k.sw.Shutdown(); err != nil {
 		k.logf("shutdown sweep: %v", err)
 	}
 	k.em.RecordKeeperUp(false)
 	k.logf("shutdown: flushing telemetry")
-	ctx, cancel := context.WithTimeout(context.Background(), emitterCloseTimeout)
+	// Detach: on the SIGTERM path ctx is already cancelled, and the flush needs its own budget.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), emitterCloseTimeout)
 	defer cancel()
 	if err := k.em.Close(ctx); err != nil {
 		k.logf("close emitter: %v", err)

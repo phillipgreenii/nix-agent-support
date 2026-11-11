@@ -565,7 +565,7 @@ func TestShutdownRemovesHeartbeatKeepsLeasesAndPair(t *testing.T) {
 	pair := g.k.rc.cur
 	g.fp.reset()
 
-	g.k.Shutdown()
+	g.k.Shutdown(t.Context())
 
 	if _, err := os.Stat(g.hbPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("heartbeat survived the shutdown sweep: %v", err)

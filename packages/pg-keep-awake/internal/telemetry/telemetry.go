@@ -184,7 +184,7 @@ func New(ctx context.Context, opts Options) (Emitter, error) {
 		sdkmetric.WithInterval(exportInterval),
 	)
 	proc := sdklog.NewBatchProcessor(&healthLogExporter{Exporter: logExp, health: health, out: os.Stderr})
-	return newEmitter(reader, proc, res)
+	return newEmitter(ctx, reader, proc, res)
 }
 
 // NewWithReader builds an Emitter whose metrics are served by reader (for
@@ -192,7 +192,7 @@ func New(ctx context.Context, opts Options) (Emitter, error) {
 // OTLP exporters. It exists so tests in other packages can observe recordings
 // without a collector; production code uses New. Either argument may be nil.
 func NewWithReader(reader sdkmetric.Reader, proc sdklog.Processor) (Emitter, error) {
-	return newEmitter(reader, proc, nil)
+	return newEmitter(context.Background(), reader, proc, nil)
 }
 
 type emitter struct {
@@ -224,7 +224,7 @@ type emitter struct {
 
 var _ Emitter = (*emitter)(nil)
 
-func newEmitter(reader sdkmetric.Reader, proc sdklog.Processor, res *resource.Resource) (*emitter, error) {
+func newEmitter(ctx context.Context, reader sdkmetric.Reader, proc sdklog.Processor, res *resource.Resource) (*emitter, error) {
 	var mpOpts []sdkmetric.Option
 	if reader != nil {
 		mpOpts = append(mpOpts, sdkmetric.WithReader(reader))
@@ -246,15 +246,15 @@ func newEmitter(reader sdkmetric.Reader, proc sdklog.Processor, res *resource.Re
 		flagsSeen:  map[string]struct{}{},
 	}
 	e.logger = e.lp.Logger("pg-keep-awake")
-	if err := e.register(); err != nil {
-		_ = e.mp.Shutdown(context.Background())
-		_ = e.lp.Shutdown(context.Background())
+	if err := e.register(ctx); err != nil {
+		_ = e.mp.Shutdown(ctx)
+		_ = e.lp.Shutdown(ctx)
 		return nil, err
 	}
 	return e, nil
 }
 
-func (e *emitter) register() error {
+func (e *emitter) register(ctx context.Context) error {
 	m := e.mp.Meter("pg-keep-awake")
 	var err error
 	i64g := func(name, desc string) metric.Int64Gauge {
@@ -299,7 +299,6 @@ func (e *emitter) register() error {
 	// Birth each fixed-reason counter series at zero so increase() over a
 	// range that includes emitter creation captures the first event (the same
 	// reason pa-monitor adds 0 at startup).
-	ctx := context.Background()
 	for _, r := range ReapReasons {
 		e.reaped.Add(ctx, 0, reasonAttr(r))
 	}
