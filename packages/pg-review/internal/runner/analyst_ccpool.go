@@ -139,18 +139,19 @@ func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 		return err
 	}
 	closed := false
-	closeSession := func() {
+	closeSession := func(ctx context.Context) {
 		if closed {
 			return
 		}
-		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Detached: the session must be closed even when ctx is already cancelled.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if cl.Close(cctx, extID, "handler") == nil {
 			closed = true
-			_ = updateRun(context.Background(), s, func(r *ledger.Run) { r.SessionID = "" })
+			_ = updateRun(cctx, s, func(r *ledger.Run) { r.SessionID = "" })
 		}
 	}
-	defer closeSession()
+	defer closeSession(ctx)
 
 	e := d.Cfg.Env
 	startErr := cl.Start(ctx, ccpool.StartOpts{
@@ -274,7 +275,8 @@ func (a *CcpoolAnalyst) await(ctx context.Context, s *State, id, turn string, de
 			return "", err
 		}
 		if !s.Deps.Now().Before(deadline) {
-			cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			// Detached: the cancel must go out even when ctx is already cancelled.
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			_ = cl.Cancel(cctx, id)
 			cancel()
 			return "", fmt.Errorf("time limit of %d minutes reached", minutes)

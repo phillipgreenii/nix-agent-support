@@ -52,7 +52,8 @@ func (l *Ledger) Export(ctx context.Context, w io.Writer) error {
 	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
 		return err
 	}
-	defer func() { _, _ = conn.ExecContext(context.Background(), "ROLLBACK") }()
+	// Detached: the rollback must run even when ctx is already cancelled.
+	defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
 	var ver int
 	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&ver); err != nil {
 		return err

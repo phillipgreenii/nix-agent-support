@@ -165,7 +165,7 @@ func Run(ctx context.Context, d *Deps, p Params) (Result, error) {
 	}()
 	for _, st := range stages(d) {
 		if err := st.Run(ctx, s); err != nil {
-			return Result{Run: s.Run}, finishFailed(d, s, err)
+			return Result{Run: s.Run}, finishFailed(ctx, d, s, err)
 		}
 	}
 	return Result{Run: s.Run}, nil
@@ -173,11 +173,12 @@ func Run(ctx context.Context, d *Deps, p Params) (Result, error) {
 
 // finishFailed ends the run for a stage error and returns the error to report.
 // Before the run row exists (the lock stage failed) there is nothing to end.
-func finishFailed(d *Deps, s *State, err error) error {
+func finishFailed(ctx context.Context, d *Deps, s *State, err error) error {
 	if s.Run.ID == 0 {
 		return err
 	}
-	bg := context.Background()
+	// Detached: the failure must be recorded even when ctx is already cancelled.
+	bg := context.WithoutCancel(ctx)
 	state, reason := ledger.RunFailed, err.Error()
 	var sk *SkippedError
 	if errors.As(err, &sk) {

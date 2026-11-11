@@ -345,7 +345,8 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 		return fail(CheckSession, exitcode.Provider, "ccpool new: %v", err)
 	}
 	defer func() {
-		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Detached: the session must be closed even when ctx is already cancelled.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := d.Ccpool.Close(cctx, extID, sessionCloseReason); err != nil && res.Status == Pass {
 			res = fail(CheckSession, exitcode.Provider, "the session resolved but could not be closed: %v", err)

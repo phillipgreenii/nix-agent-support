@@ -150,7 +150,8 @@ func (l *Ledger) WithTx(ctx context.Context, fn func(*Tx) error) (err error) {
 	done := false
 	defer func() {
 		if !done {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			// Detached: the rollback must run even when ctx is already cancelled.
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
 		}
 	}()
 	if err := fn(&Tx{conn: conn, l: l}); err != nil {
