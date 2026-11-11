@@ -10121,6 +10121,47 @@
                     '';
                   });
 
+              # pg-router integration tier (`//go:build integration`, V-4: never in
+              # the unit gate above). Runs the real command adapter binary (built
+              # by pg-router-ccpool-handler, a sibling module whose binary cannot be
+              # imported) under wireclient.OSRunner with a payload that writes its
+              # pid, cancels the dispatch, and asserts the payload process is gone.
+              # PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER turns the test's skip into a
+              # failure, so a green check means it ran. Only that test is selected
+              # (-run): the other integration/smoke-tagged tests in pg-router need
+              # a real bd and are not part of this check.
+              pg-router-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-router-integration-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                  modRoot = "pg-router";
+                  gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
+                  # coreutils: the payload runs `sleep`; the sandbox PATH has none.
+                  testDeps = [
+                    pkgs.git
+                    pkgs.coreutils
+                  ];
+                  testFlags = [
+                    "-tags"
+                    "integration"
+                    "-count=1"
+                    "-v"
+                    "-run"
+                    "^TestOSRunner_cancelStopsTheCommandAdaptersPayload$"
+                  ];
+                }).overrideAttrs
+                  (_: {
+                    PG_ROUTER_TEST_COMMAND_ADAPTER = "${pkgs.pg-router-ccpool-handler}/bin/pg-router-handler-command";
+                    PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER = "1";
+                  });
+
               # Red/green meta-test for the coverage gate (bead pg2-hvlyj.19
               # acceptance): a synthetic profile deliberately BELOW its bar makes
               # the gate FAIL, at/above PASSES, and a gated-but-absent package

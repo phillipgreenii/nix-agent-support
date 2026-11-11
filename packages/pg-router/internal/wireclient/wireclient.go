@@ -28,6 +28,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
@@ -142,12 +143,17 @@ type OSRunner struct {
 	Stderr io.Writer
 }
 
-// runWaitDelay is cmd.WaitDelay for OSRunner.Run: a few seconds, long enough for a
-// well-behaved handler's last bytes and short enough that a deadline reaches the
-// caller promptly.
+// runWaitDelay is cmd.WaitDelay for OSRunner.Run. It bounds two things: how long
+// a handler that was sent SIGTERM on cancel has to exit before it is SIGKILLed,
+// and how long Run waits for the stdout copy after the handler has exited.
+//
+// It MUST exceed the command adapter's own payload cancel grace (5 s, SIGTERM to
+// the payload group and then SIGKILL) plus a margin for the adapter to write its
+// reply, or the SIGKILL would land while the adapter is still stopping its
+// payload and leave that payload running. 8 s is that 5 s plus about 3 s.
 //
 // A package var so tests can lower it; production never reassigns it.
-var runWaitDelay = 3 * time.Second
+var runWaitDelay = 8 * time.Second
 
 func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
 	if len(argv) == 0 {
@@ -162,6 +168,13 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 	} else {
 		cmd.Stderr = os.Stderr
 	}
+	// A cancelled context sends the handler SIGTERM, not the SIGKILL that
+	// exec.CommandContext sends by default: the command adapter's only cleanup is
+	// its SIGTERM/SIGINT handler, which stops its payload's process group (the
+	// payload runs in a group of its own, so it would otherwise outlive the
+	// adapter). Only the adapter's pid is signalled, never a group: the handler
+	// shares this process's group. WaitDelay then escalates to SIGKILL.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	// WaitDelay bounds how long Run waits, after the handler process exits or is
 	// killed on the context's deadline, for the stdout copy to finish. Without it a
 	// child the handler left running with the pipe open (a handler that hangs, or

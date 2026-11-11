@@ -67,8 +67,10 @@ const idleDrainTick = 500 * time.Millisecond
 // until-idle: on SIGINT/SIGTERM) -- which is what unsticks a genuinely-stuck
 // subprocess call via wireclient's exec.CommandContext -- so this bound only
 // needs to cover that unwind's own tail latency, never a fresh MaxWait
-// window; a few seconds is ample.
-const inFlightDrainTimeout = 5 * time.Second
+// window. That tail is wireclient's SIGTERM to the handler plus its WaitDelay (8s:
+// the command adapter's 5s payload cancel grace and a reply margin), so this
+// bound is 8s, taken from preShutdownTimeout.
+const inFlightDrainTimeout = 8 * time.Second
 
 // shutdownDrainTimeout bounds how long runRun, after SIGINT/SIGTERM, lets
 // the dispatches already in flight finish before it cancels their context
@@ -82,8 +84,8 @@ const inFlightDrainTimeout = 5 * time.Second
 // two killed dispatches ran <= 15s. 20s comfortably covers those and the
 // median; it does NOT cover the p90 (~31s), which is the price of fitting the
 // launchd budget: launchd clamps ExitTimeOut at 60s (pg2-s3fzr, measured),
-// so drain (20s) + the session-sweep allowance (preShutdownTimeout, 25s) +
-// inFlightDrainTimeout's 5s tail = 50s (plus ~3s of flush/close) must stay under the 60s ExitTimeOut in
+// so drain (20s) + the session-sweep allowance (preShutdownTimeout, 22s) +
+// inFlightDrainTimeout's 8s tail = 50s (plus ~3s of flush/close) must stay under the 60s ExitTimeOut in
 // darwin/modules/pg-router/default.nix with margin -- keep the two in step,
 // and never raise this without shrinking another term. A drain that times out
 // cancels the dispatch context and kills the handler as before, but the
@@ -99,14 +101,15 @@ const shutdownDrainTimeout = 20 * time.Second
 
 // preShutdownTimeout bounds preShutdownAll's handler sweep (it used to run on
 // an unbounded context). It is the "session-sweep allowance" in the launchd
-// budget above, trimmed from 30s to 25s so the whole shutdown fits the
+// budget above, trimmed from 30s to 22s (3s went to inFlightDrainTimeout) so the
+// whole shutdown fits the
 // watchdog deadline below.
-const preShutdownTimeout = 25 * time.Second
+const preShutdownTimeout = 22 * time.Second
 
 // shutdownWatchdogDeadline is the overall shutdown deadline the S5 watchdog
 // enforces once the signal context ends. Worst case of the existing phases:
-// drain shutdownDrainTimeout (20s) + preShutdownTimeout (25s) +
-// inFlightDrainTimeout (5s) = 50s, plus ~3s for the metrics flush, accept-loop
+// drain shutdownDrainTimeout (20s) + preShutdownTimeout (22s) +
+// inFlightDrainTimeout (8s) = 50s, plus ~3s for the metrics flush, accept-loop
 // close and store close. Deadline + 7s must stay at or under launchd's 60s
 // ExitTimeOut clamp (darwin/modules/pg-router/default.nix), so 53s. A shutdown
 // still running at this point logs shutdown_overrun naming the phase in flight
