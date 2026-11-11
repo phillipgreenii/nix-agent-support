@@ -64,6 +64,7 @@ let
     "pa-monitor"
     "pb"
     "perles"
+    "pg-git-lander"
     "pg-keep-awake"
     "pg-router"
     "rtk"
