@@ -13,6 +13,7 @@ import type { ModApi, PgdOptions } from './types'
 //  - Roles: the profile names in the AWS config file (the file named by AWS_CONFIG_FILE, else
 //    ~/.aws/config), read once through host.fs.read; [default] and [profile NAME] sections count,
 //    any other section (for example sso-session) does not.
+//    The modal lists them alphabetically (case-insensitive), not in file order.
 //  - Apply: sets AWS_PROFILE, AWS_REGION, AWS_DEFAULT_REGION and GRANTED_COMMAND through four
 //    facade closures (fixed literal names), never runs assume. The region variables are set only
 //    when the profile has a region key in the config.
@@ -172,6 +173,11 @@ async function lookupExpiry(host: ModApi, role: string): Promise<void> {
   publish({ role, expiresAt })
 }
 
+// A sorted copy for the modal (case-insensitive, stable); config.roles keeps the file order.
+function sortedRoles(roles: string[]): string[] {
+  return [...roles].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+}
+
 export function assumeSpec(): ModalSpec {
   const cur = stored()
   const sel = chosenRole()
@@ -179,7 +185,7 @@ export function assumeSpec(): ModalSpec {
     { label: 'current', value: cur.role ?? 'none' },
     ...(cur.expiresAt !== undefined ? [{ label: 'expires', value: new Date(cur.expiresAt).toISOString() }] : []),
     ...(config.roles.length === 0 ? [{ label: 'roles', value: 'none found in the AWS config' }] : []),
-    ...config.roles.map(r => ({
+    ...sortedRoles(config.roles).map(r => ({
       label: 'role',
       value: r,
       ...(r === sel ? { current: true } : {}),

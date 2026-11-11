@@ -205,7 +205,7 @@ facade's `env.awsProfile()`. Pressing it opens the Assume modal.
   so a name containing both is red.
 - Source: `assume`, value `{ role?, expiresAt? }` (epoch milliseconds), polled once a minute
   (`intervalMs` 60000, feeds the band and the alert); Apply and Clear update it directly.
-- Modal `assume`: the current role and its expiry when known, one `role:<name>` row per profile, and
+- Modal `assume`: the current role and its expiry when known, one `role:<name>` row per profile (alphabetical, ignoring case), and
   the actions `apply`, `clear` and `close`. Choosing a role only marks it; Apply uses the marked
   role (else the current role when the config lists it).
 - Alert `assume expired` (priority 50): true when a stored expiry has passed. A missing expiry never

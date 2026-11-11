@@ -117,13 +117,13 @@ const CONFIG = [
 ].join('\n')
 const CONFIG_PATH = '/cfg/aws-config'
 
-async function modalWorld(profile?: string, options = only) {
+async function modalWorld(profile?: string, options = only, config = CONFIG) {
   resetModals()
   resetAlertState()
   clearBandButtons()
   const clock = fakeClock()
   setAssumeClock(clock.now)
-  const sh = stubHost({ [CONFIG_PATH]: CONFIG })
+  const sh = stubHost({ [CONFIG_PATH]: config })
   sh.state.awsProfile = profile
   sh.state.awsConfigFile = CONFIG_PATH
   initSources(sh.host, clock)
@@ -319,4 +319,18 @@ test('with components.assume off there is no modal, alert, source, timer or $.en
   expect(sh.envSets).toEqual([])
   expect(sh.calls.some(c => c.startsWith('fs.read'))).toBe(false)
   expect(bandLabels({ sessionId: 'sess-1' }, T).find(l => l.id === 'assume')).toBe(undefined)
+})
+
+test('the modal lists roles alphabetically, ignoring case, while the config order is kept', async () => {
+  const unsorted = ['[profile zeta]', '[default]', '[profile Beta]', '[profile alpha]', '[profile beta2]'].join('\n')
+  await modalWorld('zeta', only, unsorted)
+  expect(parseAwsConfig(unsorted).roles).toEqual(['zeta', 'default', 'Beta', 'alpha', 'beta2'])
+  expect(assumeSpec().items.filter(i => i.label === 'role').map(i => i.value)).toEqual([
+    'alpha',
+    'Beta',
+    'beta2',
+    'default',
+    'zeta',
+  ])
+  expect(assumeSpec().items.filter(i => i.current).map(i => i.value)).toEqual(['zeta'])
 })
