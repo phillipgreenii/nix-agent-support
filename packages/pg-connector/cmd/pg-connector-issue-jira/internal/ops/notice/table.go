@@ -90,7 +90,7 @@ func key(id string) string { return groups.FoldRef(id) }
 // Begin holds id for lease (zero or negative means the configured lease). A Begin
 // on an id that is already held extends the hold: the old expiry timer is
 // cancelled and a new one starts.
-func (t *Table) Begin(_ context.Context, id string, lease time.Duration) {
+func (t *Table) Begin(ctx context.Context, id string, lease time.Duration) {
 	if lease <= 0 {
 		lease = t.cfg.Lease
 	}
@@ -103,7 +103,10 @@ func (t *Table) Begin(_ context.Context, id string, lease time.Duration) {
 	t.seq++
 	seq := t.seq
 	h := &hold{seq: seq}
-	h.stop = t.cfg.AfterFunc(lease, func() { t.expire(k, seq) })
+	// The timer fires after the caller is done, so it keeps the values but not
+	// the cancellation of ctx.
+	timerCtx := context.WithoutCancel(ctx)
+	h.stop = t.cfg.AfterFunc(lease, func() { t.expire(timerCtx, k, seq) })
 	t.holds[k] = h
 }
 
@@ -134,8 +137,7 @@ func (t *Table) Held(id string) bool {
 // expire is the timer of the hold seq of k: it bumps the generations once more
 // while the hold is still in force, releases the hold and queues one re-pull. A
 // stale timer (the hold was released or extended since) does nothing.
-func (t *Table) expire(k string, seq uint64) {
-	ctx := context.Background()
+func (t *Table) expire(ctx context.Context, k string, seq uint64) {
 	t.mu.Lock()
 	h := t.holds[k]
 	if h == nil || h.seq != seq {

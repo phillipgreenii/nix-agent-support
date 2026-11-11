@@ -601,7 +601,7 @@ func TestList_WhenTheGovernorRefusesItServesStaleInsideExpiryAndNamesTheCapOutsi
 	r := newRig(t)
 	first, _ := r.list(`{"query":"mine"}`, "")
 	r.clk.Advance(2 * time.Hour) // stale, but inside expiry (7 d)
-	if err := r.gov.Record(governor.Spend{
+	if err := r.gov.Record(context.Background(), governor.Spend{
 		Bucket: governor.BucketGraphQL, Class: governor.ClassInteractive,
 		Cost: int64(r.cfg.GraphQLPointsPerHour), Outcome: "ok",
 	}); err != nil {
@@ -626,7 +626,7 @@ func TestList_WhenTheGovernorRefusesItServesStaleInsideExpiryAndNamesTheCapOutsi
 
 	// Outside expiry there is nothing to serve: unavailable, naming the cap.
 	r.clk.Advance(8 * 24 * time.Hour)
-	if err := r.gov.Record(governor.Spend{
+	if err := r.gov.Record(context.Background(), governor.Spend{
 		Bucket: governor.BucketGraphQL, Class: governor.ClassInteractive,
 		Cost: int64(r.cfg.GraphQLPointsPerHour), Outcome: "ok",
 	}); err != nil {
@@ -640,7 +640,7 @@ func TestList_WhenTheGovernorRefusesItServesStaleInsideExpiryAndNamesTheCapOutsi
 
 func TestList_WhenTheReserveIsBelowItNamesTheReserve(t *testing.T) {
 	r := newRig(t)
-	if err := r.gov.Observe(governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 10, ResetAt: t0.Add(time.Hour)}); err != nil {
+	if err := r.gov.Observe(context.Background(), governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 10, ResetAt: t0.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	code, msg := r.errCode(`{"query":"mine"}`, "")

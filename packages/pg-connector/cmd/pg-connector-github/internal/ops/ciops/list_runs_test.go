@@ -300,7 +300,7 @@ func TestListRunsIsUnavailableNamingTheCapWhenTheGovernorRefusesAndNothingIsStor
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tk.Settle(governor.Spend{Bucket: governor.BucketRESTCore, Cost: 1, Outcome: "ok"}); err != nil {
+	if err := tk.Settle(context.Background(), governor.Spend{Bucket: governor.BucketRESTCore, Cost: 1, Outcome: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 

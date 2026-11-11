@@ -360,7 +360,7 @@ func TestARefusalRunsNothingAndBooksNothingOnEveryRoute(t *testing.T) {
 			spend(h, b, governor.ClassInteractive, h.bucket(b).Cap)
 		}},
 		{"the reserve is reached", governor.ClassInteractive, governor.RefusedReserve, func(h *harness, b governor.Bucket) {
-			if err := h.gov.Observe(governor.Reading{Bucket: b, Remaining: 0, ResetAt: reset}); err != nil {
+			if err := h.gov.Observe(context.Background(), governor.Reading{Bucket: b, Remaining: 0, ResetAt: reset}); err != nil {
 				h.t.Fatal(err)
 			}
 		}},
@@ -416,7 +416,7 @@ func TestARefusalRunsNothingAndBooksNothingOnEveryRoute(t *testing.T) {
 // spend books cost on bucket as class, as a call that has already happened.
 func spend(h *harness, b governor.Bucket, class governor.Class, cost int64) {
 	h.t.Helper()
-	if err := h.gov.Record(governor.Spend{Bucket: b, Class: class, Purpose: governor.PurposeQuery, Cost: cost}); err != nil {
+	if err := h.gov.Record(context.Background(), governor.Spend{Bucket: b, Class: class, Purpose: governor.PurposeQuery, Cost: cost}); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -789,7 +789,7 @@ func TestASearchIsStillAdmittedAtItsUpperBound(t *testing.T) {
 	h := newHarness(t, func(innerCall) ([]byte, error) { return []byte("[]"), nil })
 	cap := config.Defaults().RESTSearchPerMinute
 	// Leave 5 of the window: below the ten pages a limit of 1000 is admitted at.
-	if err := h.gov.Record(governor.Spend{Bucket: governor.BucketRESTSearch, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: int64(cap) - 5}); err != nil {
+	if err := h.gov.Record(context.Background(), governor.Spend{Bucket: governor.BucketRESTSearch, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: int64(cap) - 5}); err != nil {
 		t.Fatal(err)
 	}
 	h.events = nil

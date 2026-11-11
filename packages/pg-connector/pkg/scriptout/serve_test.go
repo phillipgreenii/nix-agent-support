@@ -15,7 +15,7 @@ func runServeLoop(t *testing.T, table DispatchTable, requestJSON string) (int, m
 	t.Helper()
 	in := bytes.NewBufferString(requestJSON)
 	var out bytes.Buffer
-	code := serveLoop(dispatchEnv{in: in, out: &out}, table)
+	code := serveLoop(context.Background(), dispatchEnv{in: in, out: &out}, table)
 
 	var decoded map[string]any
 	if out.Len() > 0 {
@@ -239,7 +239,7 @@ func TestServeOne_MatchesServeLoop(t *testing.T) {
 	}
 	in := bytes.NewBufferString(`{"op":"echo","args":{}}`)
 	var out bytes.Buffer
-	code := ServeOne(table, in, &out)
+	code := ServeOne(context.Background(), table, in, &out)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}

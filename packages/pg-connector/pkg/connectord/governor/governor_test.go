@@ -1,6 +1,7 @@
 package governor
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -59,7 +60,7 @@ func spend(t *testing.T, g *Governor, b Bucket, c Class, cost int64) error {
 	if err != nil {
 		return err
 	}
-	if err := tk.Settle(Spend{Purpose: purposeOf(c), Cost: cost, Outcome: "ok"}); err != nil {
+	if err := tk.Settle(context.Background(), Spend{Purpose: purposeOf(c), Cost: cost, Outcome: "ok"}); err != nil {
 		t.Fatalf("Settle: %v", err)
 	}
 	return nil
@@ -226,7 +227,7 @@ func TestPriorityOrderOfAdmission(t *testing.T) {
 
 	// A reserve reading stops every class before the cap does.
 	g2, _ := newGov(t, cfg, Options{})
-	if err := g2.Observe(Reading{Bucket: BucketGraphQL, Remaining: 50, ResetAt: t0.Add(time.Hour)}); err != nil {
+	if err := g2.Observe(context.Background(), Reading{Bucket: BucketGraphQL, Remaining: 50, ResetAt: t0.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	want(g2, "at the reserve", map[Class]RefusalKind{
@@ -253,7 +254,7 @@ func TestReserveProtectsEveryBucket(t *testing.T) {
 		for _, class := range []Class{ClassInteractive, ClassInvalidated, ClassQuery, ClassFill} {
 			g, clk := newGov(t, cfg, Options{})
 			reset := t0.Add(30 * time.Minute)
-			if err := g.Observe(Reading{Bucket: b, Remaining: reserve + 5, Limit: 5000, ResetAt: reset}); err != nil {
+			if err := g.Observe(context.Background(), Reading{Bucket: b, Remaining: reserve + 5, Limit: 5000, ResetAt: reset}); err != nil {
 				t.Fatal(err)
 			}
 			if err := g.Check(Request{Bucket: b, Class: class, Cost: 5}); err != nil {
@@ -292,7 +293,7 @@ func TestNothingSpendsBelowTheReserveWhateverTheCapSays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tk.Settle(Spend{Purpose: PurposeInteractive, Cost: 10, Reading: &Reading{Remaining: 1000, ResetAt: reading.ResetAt}}); err != nil {
+	if err := tk.Settle(context.Background(), Spend{Purpose: PurposeInteractive, Cost: 10, Reading: &Reading{Remaining: 1000, ResetAt: reading.ResetAt}}); err != nil {
 		t.Fatal(err)
 	}
 	for c := ClassInteractive; c <= ClassFill; c++ {
@@ -315,7 +316,7 @@ func TestFallingReadingsTightenAdmission(t *testing.T) {
 	// largest request it may make shrinks with every reading.
 	for _, remaining := range []int64{5000, 3000, 1500, 1100, 1000} {
 		clk.Advance(time.Minute)
-		if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: remaining, Limit: 5000, ResetAt: reset}); err != nil {
+		if err := g.Observe(context.Background(), Reading{Bucket: BucketGraphQL, Remaining: remaining, Limit: 5000, ResetAt: reset}); err != nil {
 			t.Fatal(err)
 		}
 		for _, class := range []Class{ClassInteractive, ClassQuery} {
@@ -342,14 +343,14 @@ func TestFallingReadingsTightenAdmission(t *testing.T) {
 	}
 	// A reading from the next window relaxes it again.
 	clk.Advance(time.Minute)
-	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 5000, ResetAt: reset.Add(time.Hour)}); err != nil {
+	if err := g.Observe(context.Background(), Reading{Bucket: BucketGraphQL, Remaining: 5000, ResetAt: reset.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.Check(Request{Bucket: BucketGraphQL, Class: ClassQuery, Cost: 100}); err != nil {
 		t.Errorf("after a fresh window: %v", err)
 	}
 	// A late response from the earlier window is not allowed to tighten it back.
-	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 1000, ResetAt: reset}); err != nil {
+	if err := g.Observe(context.Background(), Reading{Bucket: BucketGraphQL, Remaining: 1000, ResetAt: reset}); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.Check(Request{Bucket: BucketGraphQL, Class: ClassQuery, Cost: 100}); err != nil {
@@ -377,13 +378,13 @@ func TestALateHigherReadingOfTheSameWindowDoesNotRelaxAFallenOne(t *testing.T) {
 		}
 	}
 	clk.Advance(time.Second)
-	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 500, ResetAt: reset}); err != nil {
+	if err := g.Observe(context.Background(), Reading{Bucket: BucketGraphQL, Remaining: 500, ResetAt: reset}); err != nil {
 		t.Fatal(err)
 	}
 	refused("after the fallen reading")
 	// The answer generated before it, settling after it.
 	clk.Advance(time.Second)
-	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 4900, ResetAt: reset}); err != nil {
+	if err := g.Observe(context.Background(), Reading{Bucket: BucketGraphQL, Remaining: 4900, ResetAt: reset}); err != nil {
 		t.Fatal(err)
 	}
 	refused("after the late, higher reading of the same window")
@@ -392,7 +393,7 @@ func TestALateHigherReadingOfTheSameWindowDoesNotRelaxAFallenOne(t *testing.T) {
 	if err == nil {
 		t.Fatalf("admitted below the reserve: %v", tk)
 	}
-	if err := g.Record(Spend{
+	if err := g.Record(context.Background(), Spend{
 		Bucket: BucketGraphQL, Class: ClassInteractive, Purpose: PurposeInteractive, Cost: 1,
 		Reading: &Reading{Remaining: 4900, ResetAt: reset}, Outcome: "ok",
 	}); err != nil {
@@ -403,7 +404,7 @@ func TestALateHigherReadingOfTheSameWindowDoesNotRelaxAFallenOne(t *testing.T) {
 	}
 	// A new window does relax it.
 	clk.Advance(time.Second)
-	if err := g.Observe(Reading{Bucket: BucketGraphQL, Remaining: 5000, ResetAt: reset.Add(time.Hour)}); err != nil {
+	if err := g.Observe(context.Background(), Reading{Bucket: BucketGraphQL, Remaining: 5000, ResetAt: reset.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := g.Check(Request{Bucket: BucketGraphQL, Class: ClassInvalidated, Cost: 1}); err != nil {
@@ -578,14 +579,14 @@ func TestSpendObserverSeesEveryRecordedCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	reading := Reading{Remaining: 3990, ResetAt: t0.Add(time.Hour)}
-	if err := tk.Settle(Spend{Purpose: PurposeRefresh, Group: "summary", BatchSize: 74, Cost: 1, Reading: &reading, Outcome: "ok"}); err != nil {
+	if err := tk.Settle(context.Background(), Spend{Purpose: PurposeRefresh, Group: "summary", BatchSize: 74, Cost: 1, Reading: &reading, Outcome: "ok"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tk.Settle(Spend{Cost: 1}); !errors.Is(err, ErrTicketDone) {
+	if err := tk.Settle(context.Background(), Spend{Cost: 1}); !errors.Is(err, ErrTicketDone) {
 		t.Errorf("second Settle = %v", err)
 	}
 	// A call that already happened is recorded even past the cap.
-	if err := g.Record(Spend{Bucket: BucketRESTCore, Class: ClassInteractive, Purpose: PurposePassthrough, Cost: 4000, Outcome: "error"}); err != nil {
+	if err := g.Record(context.Background(), Spend{Bucket: BucketRESTCore, Class: ClassInteractive, Purpose: PurposePassthrough, Cost: 4000, Outcome: "error"}); err != nil {
 		t.Fatal(err)
 	}
 	want := []SpendEvent{
@@ -603,7 +604,7 @@ func TestSpendObserverSeesEveryRecordedCall(t *testing.T) {
 	if bs, _ := g.State().Bucket(BucketRESTCore); bs.Spent != 4000 || bs.SpentByPurpose[PurposePassthrough] != 4000 {
 		t.Errorf("state = %+v", bs)
 	}
-	if err := g.Record(Spend{Bucket: "nope"}); err == nil {
+	if err := g.Record(context.Background(), Spend{Bucket: "nope"}); err == nil {
 		t.Error("Record accepted an unknown bucket")
 	}
 }
@@ -632,7 +633,7 @@ func TestInFlightReservationsCountAgainstTheCap(t *testing.T) {
 		t.Errorf("after Release: %+v", bs)
 	}
 	// The actual cost may exceed the estimate; it is what is recorded.
-	if err := b.Settle(Spend{Purpose: PurposeInteractive, Cost: 9}); err != nil {
+	if err := b.Settle(context.Background(), Spend{Purpose: PurposeInteractive, Cost: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if bs, _ := g.State().Bucket(BucketGraphQL); bs.InFlight != 0 || bs.Spent != 9 {
@@ -677,7 +678,7 @@ func TestConcurrentWorkersNeverPassTheCap(t *testing.T) {
 				mu.Lock()
 				total += 3
 				mu.Unlock()
-				_ = tk.Settle(Spend{Purpose: PurposeInteractive, Cost: 3})
+				_ = tk.Settle(context.Background(), Spend{Purpose: PurposeInteractive, Cost: 3})
 			}
 		}()
 	}
@@ -689,7 +690,7 @@ func TestConcurrentWorkersNeverPassTheCap(t *testing.T) {
 
 func TestASpendWithoutAClassCountsAsBackground(t *testing.T) {
 	g, _ := newGov(t, testConfig(), Options{})
-	if err := g.Record(Spend{Bucket: BucketGraphQL, Purpose: PurposeRefresh, Cost: 3600}); err != nil {
+	if err := g.Record(context.Background(), Spend{Bucket: BucketGraphQL, Purpose: PurposeRefresh, Cost: 3600}); err != nil {
 		t.Fatal(err)
 	}
 	if bs, _ := g.State().Bucket(BucketGraphQL); bs.BackgroundSpent != 3600 || bs.Spent != 3600 {

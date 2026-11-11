@@ -458,7 +458,7 @@ func TestFetch_GovernorRefusalIsReturnedUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tk.Settle(governor.Spend{Purpose: governor.PurposeInteractive, Cost: bs.BackgroundCap - 1, Outcome: ratefeed.OutcomeOK}); err != nil {
+	if err := tk.Settle(context.Background(), governor.Spend{Purpose: governor.PurposeInteractive, Cost: bs.BackgroundCap - 1, Outcome: ratefeed.OutcomeOK}); err != nil {
 		t.Fatal(err)
 	}
 	o := h.commits().Fetch(context.Background(), background, []groups.Target{target("h", "b")})[0]

@@ -320,7 +320,7 @@ func (t *Tracker) fetchViewer(ctx context.Context) (string, error) {
 	}
 	out, err := t.opts.GH.Run(ctx, "api", "graphql", "-f", "query="+viewerQuery)
 	if metered {
-		_ = t.opts.Feed.SettleGraphQL(tk, meta, out, err)
+		_ = t.opts.Feed.SettleGraphQL(ctx, tk, meta, out, err)
 	}
 	if err != nil {
 		return "", fmt.Errorf("viewer: %w", err)

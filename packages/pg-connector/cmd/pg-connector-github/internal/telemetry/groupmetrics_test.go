@@ -118,9 +118,9 @@ func TestGroupObserverRecordsStalenessInSeconds(t *testing.T) {
 
 func TestRecordEvictionsIncrementsTheCounter(t *testing.T) {
 	f := newGroupFixture(t)
-	f.tel.RecordEvictions(3)
-	f.tel.RecordEvictions(0)
-	f.tel.RecordEvictions(-2)
+	f.tel.RecordEvictions(t.Context(), 3)
+	f.tel.RecordEvictions(t.Context(), 0)
+	f.tel.RecordEvictions(t.Context(), -2)
 	got := sumByLabels(t, f.collect()[MetricStoreEvictions])
 	if got[""] != 3 || len(got) != 1 {
 		t.Errorf("store.evictions = %v, want 3 with no labels", got)
@@ -168,7 +168,7 @@ func TestGroupMetricsCarryOnlyGroupAndResultLabels(t *testing.T) {
 	o.Served("PR_kwDOexample", time.Second)
 	o.Revalidated("runs", "extended")
 	o.Served("files", 5*time.Second)
-	f.tel.RecordEvictions(1)
+	f.tel.RecordEvictions(t.Context(), 1)
 	writeFile(t, f.store, 1)
 
 	keys := map[string]bool{}
@@ -212,11 +212,11 @@ func TestGroupObserverIsInertWithNoopProviders(t *testing.T) {
 	o := NewGroupObserver(tel)
 	o.Revalidated("detail", "extended")
 	o.Served("detail", time.Minute)
-	tel.RecordEvictions(2)
+	tel.RecordEvictions(t.Context(), 2)
 }
 
 func TestSetupWithoutEndpointKeepsTheGroupObserverInert(t *testing.T) {
-	shutdown, err := Setup(Config{})
+	shutdown, err := Setup(t.Context(), Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestSetupWithoutEndpointKeepsTheGroupObserverInert(t *testing.T) {
 	o := NewGroupObserver(tel)
 	o.Revalidated("detail", "repulled")
 	o.Served("pending", 0)
-	tel.RecordEvictions(1)
+	tel.RecordEvictions(t.Context(), 1)
 	if err := tel.Close(); err != nil {
 		t.Fatal(err)
 	}

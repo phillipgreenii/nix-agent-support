@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -26,7 +27,7 @@ func TestRun_InstrumentWritesStartAndFinalRowPerCallToTheBackendsOwnLog(t *testi
 	}
 	table := instrument(newDispatchTable(newTestBackend()), getenv)
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"tp-1"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"tp-1"}}`), &out)
 
 	path := filepath.Join(stateHome, "pg-connector-issue-beads", "events.jsonl")
 	raw, err := os.ReadFile(path)
@@ -66,7 +67,7 @@ func TestInstrument_DisabledLeavesTableAlone(t *testing.T) {
 	}
 	table := instrument(newDispatchTable(newTestBackend()), getenv)
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"tp-1"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"tp-1"}}`), &out)
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("disabled event log wrote files: %v", entries)
 	}

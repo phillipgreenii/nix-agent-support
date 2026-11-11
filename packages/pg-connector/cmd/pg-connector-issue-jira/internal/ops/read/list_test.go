@@ -39,8 +39,8 @@ func (r *rig) mustList(args string) *schema.IssueListResult {
 // seedMembers stores two issues and a fresh complete row of query "mine" over them.
 func (r *rig) seedMembers() {
 	r.t.Helper()
-	r.putSummary(issueOf("ABC-1", "first"), r.clk.Now())
-	r.putSummary(issueOf("ABC-2", "second"), r.clk.Now())
+	r.putSummary(r.t.Context(), issueOf("ABC-1", "first"), r.clk.Now())
+	r.putSummary(r.t.Context(), issueOf("ABC-2", "second"), r.clk.Now())
 	r.putQuery("mine", true, r.clk.Now(), "ABC-1", "ABC-2")
 }
 

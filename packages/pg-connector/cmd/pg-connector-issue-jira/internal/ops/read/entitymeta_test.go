@@ -73,7 +73,7 @@ func TestShowStatesTheWatchedFlagFalseForAReadOnlyIssueAndTrueAfterAOneOffWatch(
 	// ... and one first seen by a plain read is stated not watched.
 	r.origin.set(issueOf("XYZ-8", "other"), "its description")
 	wantWatched(t, "first sighting without watch", r.mustShow(`{"id":"XYZ-8"}`).EntityMeta, false)
-	if r.isWatched("XYZ-8") {
+	if r.isWatched(r.t.Context(), "XYZ-8") {
 		t.Error("exposing the flag watched an issue read without the option")
 	}
 }
@@ -90,7 +90,7 @@ func TestListStatesTheWatchedFlagOfEveryEntity(t *testing.T) {
 	for _, e := range res.Entities {
 		wantWatched(t, "list entity "+e.ID, e.EntityMeta, e.ID == "ABC-1")
 	}
-	if r.isWatched("ABC-2") {
+	if r.isWatched(r.t.Context(), "ABC-2") {
 		t.Error("listing watched a member")
 	}
 
@@ -128,7 +128,7 @@ func TestTheWatchedFlagIsStickyAfterTheIssueLeavesEveryQueryAndClearsOnlyAtEvict
 	if n, err := summary.Sweep(context.Background(), r.st, testExpiry, closedAt.Add(testExpiry)); err != nil || n != 1 {
 		t.Fatalf("sweep evicted %d (%v), want 1", n, err)
 	}
-	if r.isWatched("ABC-1") {
+	if r.isWatched(r.t.Context(), "ABC-1") {
 		t.Fatal("the flag survived the eviction")
 	}
 	r.origin.set(issueOf("ABC-1", "again"), "d")
@@ -172,9 +172,9 @@ func TestReadingTheFlagNeverSetsOrClearsIt(t *testing.T) {
 		r.mustShow(`{"id":"ABC-2"}`)
 		r.mustList(`{"query":"mine"}`)
 	}
-	if r.isWatched("ABC-1") || !r.isWatched("ABC-2") || r.head() != head {
+	if r.isWatched(r.t.Context(), "ABC-1") || !r.isWatched(r.t.Context(), "ABC-2") || r.head() != head {
 		t.Errorf("watched ABC-1=%v ABC-2=%v head %d -> %d, want the flags and the log untouched",
-			r.isWatched("ABC-1"), r.isWatched("ABC-2"), head, r.head())
+			r.isWatched(r.t.Context(), "ABC-1"), r.isWatched(r.t.Context(), "ABC-2"), head, r.head())
 	}
 }
 

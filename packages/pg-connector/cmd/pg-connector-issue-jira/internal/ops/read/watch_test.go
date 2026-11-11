@@ -14,12 +14,12 @@ import (
 func TestShowWithWatchOnAKnownIssueAppendsOneAddedRowOnceAndASecondShowAppendsNone(t *testing.T) {
 	r := newRig(t)
 	r.seed(issueKey, "t", "d")
-	if r.isWatched(issueKey) || len(r.rows(issueKey)) != 0 {
+	if r.isWatched(r.t.Context(), issueKey) || len(r.rows(issueKey)) != 0 {
 		t.Fatal("the issue starts watched or with rows")
 	}
 
 	r.mustShow(`{"id":"ABC-1","watch":true}`)
-	if !r.isWatched(issueKey) {
+	if !r.isWatched(r.t.Context(), issueKey) {
 		t.Fatal("the issue is not watched after show with watch")
 	}
 	rows := r.rows(issueKey)
@@ -56,7 +56,7 @@ func TestShowWithWatchOnAnUnknownIssueSetsTheFlagAfterTheReadAndAppendsNoRow(t *
 	r.origin.set(issueOf("XYZ-7", "new one"), "its description")
 
 	r.mustShow(`{"id":"xyz-7","watch":true}`)
-	if !r.isWatched("XYZ-7") {
+	if !r.isWatched(r.t.Context(), "XYZ-7") {
 		t.Fatal("the issue is not watched after show with watch")
 	}
 	if rows := r.rows("XYZ-7"); len(rows) != 0 {
@@ -82,13 +82,13 @@ func TestShowWithoutWatchNeverWatchesNorClearsAWatch(t *testing.T) {
 	r.seed(issueKey, "t", "d")
 	r.mustShow(`{"id":"ABC-1"}`)
 	r.mustShow(`{"id":"ABC-1","watch":false}`)
-	if r.isWatched(issueKey) || len(r.rows(issueKey)) != 0 {
+	if r.isWatched(r.t.Context(), issueKey) || len(r.rows(issueKey)) != 0 {
 		t.Error("a read without the option watched the issue")
 	}
 	r.mustShow(`{"id":"ABC-1","watch":true}`)
 	r.mustShow(`{"id":"ABC-1"}`)
 	r.mustShow(`{"id":"ABC-1","watch":false}`)
-	if !r.isWatched(issueKey) {
+	if !r.isWatched(r.t.Context(), issueKey) {
 		t.Error("a read without the option cleared the watch")
 	}
 }
@@ -101,7 +101,7 @@ func TestShowWithWatchOfAnIdThatCannotBeReadWatchesNothing(t *testing.T) {
 	if _, err := r.show(`{"id":"ZZZ-9","watch":true}`); !errors.Is(err, scriptout.ErrNotFound) {
 		t.Errorf("show of an issue the origin does not know with watch = %v, want not_found", err)
 	}
-	if r.isWatched("ZZZ-9") {
+	if r.isWatched(r.t.Context(), "ZZZ-9") {
 		t.Error("an issue that was not found is watched")
 	}
 }
@@ -112,7 +112,7 @@ func TestShowWithWatchOnAnUnreadableUnknownIssueWatchesNothing(t *testing.T) {
 	if _, err := r.show(`{"id":"NEW-5","watch":true}`); !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Errorf("show = %v, want unavailable", err)
 	}
-	if r.isWatched("NEW-5") {
+	if r.isWatched(r.t.Context(), "NEW-5") {
 		t.Error("an issue that could not be read is watched")
 	}
 }
@@ -125,7 +125,7 @@ func TestShowWithWatchOfAKnownIssueKeepsTheWatchWhenTheReadFails(t *testing.T) {
 	if _, err := r.show(`{"id":"ABC-1","watch":true}`); !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("show = %v, want unavailable", err)
 	}
-	if !r.isWatched(issueKey) {
+	if !r.isWatched(r.t.Context(), issueKey) {
 		t.Error("the one-off watch of a known issue is applied before the read, so it stays when the read fails")
 	}
 }

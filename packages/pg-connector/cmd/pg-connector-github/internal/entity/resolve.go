@@ -159,7 +159,7 @@ func (r *Resolver) resolveBatch(ctx context.Context, call ratefeed.Meta, batch [
 	}
 	body, runErr := r.GH.Run(ctx, args...)
 	call.Group, call.BatchSize = "", len(batch)
-	_ = r.Feed.SettleGraphQL(tk, call, body, runErr)
+	_ = r.Feed.SettleGraphQL(ctx, tk, call, body, runErr)
 	var cost int64
 	if rd, found, perr := ratefeed.ParseGraphQL(body); perr == nil && found {
 		cost = rd.Cost

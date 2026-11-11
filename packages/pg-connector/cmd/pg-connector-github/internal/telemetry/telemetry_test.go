@@ -183,7 +183,7 @@ func TestEveryPhase2MetricAppearsWithExactlyItsLabels(t *testing.T) {
 		At: f.clock.Now(), Bucket: governor.BucketGraphQL, Class: governor.ClassQuery,
 		Purpose: governor.PurposeQuery, Group: "summary", Cost: 3, Outcome: "ok",
 	})
-	if err := f.gov.Observe(governor.Reading{
+	if err := f.gov.Observe(context.Background(), governor.Reading{
 		Bucket: governor.BucketGraphQL, Remaining: 3990, Limit: 5000,
 		ResetAt: f.clock.Now().Add(time.Hour),
 	}); err != nil {

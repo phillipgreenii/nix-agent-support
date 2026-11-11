@@ -129,7 +129,7 @@ func (o *Origin) summaryLocked(nodeID string) summary.Summary {
 }
 
 // Fetch implements summary.BatchFetcher.
-func (o *Origin) Fetch(_ context.Context, call ratefeed.Meta, ids []string) ([]summary.Summary, int64, error) {
+func (o *Origin) Fetch(ctx context.Context, call ratefeed.Meta, ids []string) ([]summary.Summary, int64, error) {
 	o.mu.Lock()
 	o.calls = append(o.calls, OriginCall{IDs: slices.Clone(ids), Class: call.Class})
 	gate, entered, gov, ferr, lat := o.gate, o.entered, o.Gov, o.err, o.Latency
@@ -146,7 +146,7 @@ func (o *Origin) Fetch(_ context.Context, call ratefeed.Meta, ids []string) ([]s
 			o.mu.Unlock()
 			return nil, 0, err
 		}
-		_ = tk.Settle(governor.Spend{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1, Outcome: "ok"})
+		_ = tk.Settle(ctx, governor.Spend{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1, Outcome: "ok"})
 	}
 	if gate != nil {
 		<-gate

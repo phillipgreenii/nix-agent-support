@@ -183,7 +183,7 @@ func TestAViewerChangeRunsBothFlushesOnce(t *testing.T) {
 	if err := tr.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := view.Last("foo/bar", 1); got == nil || *got != before {
+	if got := view.Last(context.Background(), "foo/bar", 1); got == nil || *got != before {
 		t.Fatalf("before any change: last_append = %+v, want %+v", got, before)
 	}
 	if got := fmt.Sprint(groupsOf(t, st, "PR_1")); got != "[detail pending summary]" {
@@ -200,10 +200,10 @@ func TestAViewerChangeRunsBothFlushesOnce(t *testing.T) {
 			t.Errorf("%s groups = %s, want the pending row flushed", id, got)
 		}
 	}
-	if got := view.Last("foo/bar", 1); got != nil {
+	if got := view.Last(context.Background(), "foo/bar", 1); got != nil {
 		t.Errorf("an append from before the change is still reported: %+v", got)
 	}
-	if got := view.Last("foo/bar", 2); got == nil || *got != after {
+	if got := view.Last(context.Background(), "foo/bar", 2); got == nil || *got != after {
 		t.Errorf("an append recorded after the change = %+v, want %+v", got, after)
 	}
 
@@ -270,12 +270,12 @@ func TestAFailingFlushStaysPendingAndTheNextRefreshRetriesIt(t *testing.T) {
 
 func TestSidecarViewDegradesToNoLastAppend(t *testing.T) {
 	var nilView *SidecarView
-	if nilView.Last("foo/bar", 1) != nil || (&SidecarView{}).Last("foo/bar", 1) != nil {
+	if nilView.Last(context.Background(), "foo/bar", 1) != nil || (&SidecarView{}).Last(context.Background(), "foo/bar", 1) != nil {
 		t.Error("an unconfigured view reported a last_append")
 	}
 	st := openStore(t)
 	v := &SidecarView{Store: openSidecar(t, st)}
-	if v.Last("foo/bar", 1) != nil || v.Last("nope", 1) != nil || v.Last("foo/bar", 0) != nil {
+	if v.Last(context.Background(), "foo/bar", 1) != nil || v.Last(context.Background(), "nope", 1) != nil || v.Last(context.Background(), "foo/bar", 0) != nil {
 		t.Error("a missing sidecar, a bad repo or a bad number reported a last_append")
 	}
 	if _, err := st.DB().Exec(
@@ -283,7 +283,7 @@ func TestSidecarViewDegradesToNoLastAppend(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if v.Last("foo/bar", 1) != nil {
+	if v.Last(context.Background(), "foo/bar", 1) != nil {
 		t.Error("a corrupt sidecar reported a last_append")
 	}
 }
@@ -294,11 +294,11 @@ func TestSidecarViewHidesAnAppendWithAnUnreadableTimeOnceTheIdentityChanged(t *t
 		t.Fatal(err)
 	}
 	v := &SidecarView{Store: s}
-	if v.Last("foo/bar", 1) == nil {
+	if v.Last(context.Background(), "foo/bar", 1) == nil {
 		t.Fatal("before any change the append is reported")
 	}
 	v.MarkIdentityChanged(t0)
-	if v.Last("foo/bar", 1) != nil {
+	if v.Last(context.Background(), "foo/bar", 1) != nil {
 		t.Error("an append that cannot be shown to postdate the change is reported")
 	}
 }

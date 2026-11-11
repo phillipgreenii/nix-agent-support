@@ -43,7 +43,7 @@ func (d *daemon) sweepOnce(ctx context.Context, qrun *lq.Runner, st *store.Store
 		d.log.Log("expiry_sweep_failed", "error", err.Error())
 	}
 	if tel != nil {
-		tel.RecordEvictions(evicted)
+		tel.RecordEvictions(ctx, evicted)
 	}
 	if _, err := qrun.Expire(ctx, d.cfg.Expiry.Std()); err != nil {
 		d.log.Log("query_expiry_failed", "error", err.Error())

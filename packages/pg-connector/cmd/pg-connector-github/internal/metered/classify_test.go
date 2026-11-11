@@ -27,7 +27,7 @@ func refusalFor(t *testing.T, h *harness, kind governor.RefusalKind) *governor.R
 	case governor.RefusedCap:
 		spend(h, b, governor.ClassInteractive, h.bucket(b).Cap)
 	case governor.RefusedReserve:
-		if err := h.gov.Observe(governor.Reading{Bucket: b, Remaining: 1000, ResetAt: reset}); err != nil {
+		if err := h.gov.Observe(context.Background(), governor.Reading{Bucket: b, Remaining: 1000, ResetAt: reset}); err != nil {
 			t.Fatal(err)
 		}
 	case governor.RefusedBackgroundShare:

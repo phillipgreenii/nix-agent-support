@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -38,10 +39,10 @@ func TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog(t *testing.T) {
 	table := instrument(newDispatchTable(backend), getenv)
 
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"PROJ-1"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"PROJ-1"}}`), &out)
 	failing = true
 	out.Reset()
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"PROJ-1"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"PROJ-1"}}`), &out)
 	var resp scriptout.Response
 	if err := json.Unmarshal(out.Bytes(), &resp); err != nil || resp.Error == nil || resp.Error.Code != "unauthenticated" {
 		t.Fatalf("wire response for the failing call = %s (err %v), want error.code unauthenticated", out.Bytes(), err)
@@ -90,7 +91,7 @@ func TestInstrument_DisabledLeavesTableAlone(t *testing.T) {
 	}
 	table := instrument(newDispatchTable(newTestBackend()), getenv)
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"PROJ-1"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"PROJ-1"}}`), &out)
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("disabled event log wrote files: %v", entries)
 	}

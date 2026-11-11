@@ -80,7 +80,7 @@ func (o *origin) Run(ctx context.Context, args ...string) ([]byte, error) {
 	}
 	if (resp.StatusCode == 403 || resp.StatusCode == 429) && hd.Remaining == 0 {
 		if rd, ok := hd.Reading(governor.BucketGraphQL); ok {
-			_ = o.gov.Observe(rd)
+			_ = o.gov.Observe(ctx, rd)
 		}
 		return resp.Body, &ratefeed.RateLimitError{StatusCode: resp.StatusCode, ResetAt: hd.Reset, Resource: hd.Resource}
 	}

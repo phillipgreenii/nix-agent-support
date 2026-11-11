@@ -226,7 +226,7 @@ func TestMetering_RefusalIsUnavailableNamingTheCapAndRunsNothing(t *testing.T) {
 		t.Run(op.name, func(t *testing.T) {
 			h := newHarness(t, 20, cannedReply(false))
 			// Another caller has spent the whole window of the search bucket.
-			if err := h.gov.Record(governor.Spend{Bucket: governor.BucketRESTSearch, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: 20}); err != nil {
+			if err := h.gov.Record(context.Background(), governor.Spend{Bucket: governor.BucketRESTSearch, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: 20}); err != nil {
 				t.Fatal(err)
 			}
 			h.events = nil

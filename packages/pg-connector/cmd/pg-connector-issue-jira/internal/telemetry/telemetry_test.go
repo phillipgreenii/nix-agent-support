@@ -212,7 +212,7 @@ func (f *fixture) exerciseEverything() {
 	}
 	f.tel.Request(origin.ResultOK, time.Millisecond)
 	f.tel.Served("summary", 3*time.Second)
-	f.tel.RecordEvictions(2)
+	f.tel.RecordEvictions(f.t.Context(), 2)
 	ob := f.tel.ChangeObserver()
 	ob.Detected("closed", engine.OriginQuery, time.Minute)
 	ob.Settled(engine.ResultSettled)
@@ -233,7 +233,7 @@ func (f *fixture) admitOne() {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if err := tk.Settle(governor.Spend{
+	if err := tk.Settle(context.Background(), governor.Spend{
 		Bucket: origin.Bucket, Class: governor.ClassInteractive, Purpose: governor.PurposeInteractive,
 		Cost: 1, Outcome: "ok",
 	}); err != nil {
@@ -325,7 +325,7 @@ func TestBudgetRemainingNeverGoesNegative(t *testing.T) {
 		if err != nil {
 			break
 		}
-		_ = tk.Settle(governor.Spend{Bucket: origin.Bucket, Class: governor.ClassInteractive, Cost: 1, Outcome: "ok"})
+		_ = tk.Settle(context.Background(), governor.Spend{Bucket: origin.Bucket, Class: governor.ClassInteractive, Cost: 1, Outcome: "ok"})
 	}
 	if v := points(t, f.metric(MetricBudgetRemaining))[""]; v < 0 {
 		t.Errorf("budget.remaining = %v, want at least 0", v)
@@ -459,10 +459,10 @@ func TestQueueGaugesFollowTheSchedulerUnderAFakeClock(t *testing.T) {
 
 func TestEvictionsAccumulateAndIgnoreNonPositive(t *testing.T) {
 	f := newFixture(t, nil)
-	f.tel.RecordEvictions(0)
-	f.tel.RecordEvictions(-3)
-	f.tel.RecordEvictions(2)
-	f.tel.RecordEvictions(3)
+	f.tel.RecordEvictions(t.Context(), 0)
+	f.tel.RecordEvictions(t.Context(), -3)
+	f.tel.RecordEvictions(t.Context(), 2)
+	f.tel.RecordEvictions(t.Context(), 3)
 	if v := points(t, f.metric(MetricStoreEvictions))[""]; v != 5 {
 		t.Errorf("store.evictions = %v, want 5", v)
 	}
@@ -609,7 +609,7 @@ func TestNilTelemetryIsInert(t *testing.T) {
 	tel.FeedObserver().Redelivered("desk", "mine", 1)
 	tel.Request(origin.ResultOK, time.Second)
 	tel.OnSpend(governor.SpendEvent{Cost: 1})
-	tel.RecordEvictions(1)
+	tel.RecordEvictions(t.Context(), 1)
 	tel.Served("summary", time.Second)
 	tel.Revalidated("summary", "extended")
 }
@@ -736,7 +736,7 @@ func TestSetupWithNoEndpointInstallsNoExporter(t *testing.T) {
 				t.Fatal("a span exporter was built with no endpoint")
 				return nil, nil
 			})
-		shutdown, err := Setup(Config{Endpoint: endpoint})
+		shutdown, err := Setup(t.Context(), Config{Endpoint: endpoint})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -764,7 +764,7 @@ func TestSetupWithAnEndpointBuildsBothExportersAndShutdownFlushesThem(t *testing
 	stubExporters(t,
 		func(ep string) (sdkmetric.Exporter, error) { me.endpoint = ep; return me, nil },
 		func(ep string) (sdktrace.SpanExporter, error) { se.endpoint = ep; return se, nil })
-	shutdown, err := Setup(Config{Endpoint: " http://127.0.0.1:4317 ", ServiceVersion: "1.2.3", Interval: time.Hour})
+	shutdown, err := Setup(t.Context(), Config{Endpoint: " http://127.0.0.1:4317 ", ServiceVersion: "1.2.3", Interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -785,13 +785,13 @@ func TestSetupExporterFailuresAreErrorsAndLeaveNothingInstalled(t *testing.T) {
 	stubExporters(t,
 		func(string) (sdkmetric.Exporter, error) { return nil, boom },
 		func(string) (sdktrace.SpanExporter, error) { return &fakeSpanExporter{}, nil })
-	if _, err := Setup(Config{Endpoint: "http://x:1"}); !errors.Is(err, boom) {
+	if _, err := Setup(t.Context(), Config{Endpoint: "http://x:1"}); !errors.Is(err, boom) {
 		t.Errorf("metric exporter failure = %v, want boom", err)
 	}
 	stubExporters(t,
 		func(string) (sdkmetric.Exporter, error) { return me, nil },
 		func(string) (sdktrace.SpanExporter, error) { return nil, boom })
-	if _, err := Setup(Config{Endpoint: "http://x:1"}); !errors.Is(err, boom) {
+	if _, err := Setup(t.Context(), Config{Endpoint: "http://x:1"}); !errors.Is(err, boom) {
 		t.Errorf("span exporter failure = %v, want boom", err)
 	}
 	if !me.shutdown {

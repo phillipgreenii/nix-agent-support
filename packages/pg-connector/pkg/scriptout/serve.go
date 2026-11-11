@@ -46,7 +46,7 @@ type dispatchEnv struct {
 // same classification — the exit code is an additional, parse-free signal,
 // not a replacement for the JSON body as the primary source of truth.
 func ServeLoop(table DispatchTable) int {
-	return ServeOne(table, os.Stdin, os.Stdout)
+	return ServeOne(context.Background(), table, os.Stdin, os.Stdout)
 }
 
 // ServeOne is ServeLoop's logic against caller-supplied in/out instead of
@@ -54,12 +54,12 @@ func ServeLoop(table DispatchTable) int {
 // round trip, exported so a caller (e.g. pkg/scriptout/conformance's
 // in-process Backend double) can drive an in-process DispatchTable without
 // redirecting real process stdio. ServeLoop itself is exactly
-// ServeOne(table, os.Stdin, os.Stdout).
-func ServeOne(table DispatchTable, in io.Reader, out io.Writer) int {
-	return serveLoop(dispatchEnv{in: in, out: out}, table)
+// ServeOne(ctx, table, os.Stdin, os.Stdout).
+func ServeOne(ctx context.Context, table DispatchTable, in io.Reader, out io.Writer) int {
+	return serveLoop(ctx, dispatchEnv{in: in, out: out}, table)
 }
 
-func serveLoop(env dispatchEnv, table DispatchTable) int {
+func serveLoop(ctx context.Context, env dispatchEnv, table DispatchTable) int {
 	req, err := readRequest(env.in)
 	if err != nil {
 		return writeErrorResponse(env.out, 0, WrapError(ErrUnavailable, err.Error()))
@@ -103,7 +103,7 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	// timeouts.show [bead pg2-apllc]; the umbrella adds BackendDeadlineMargin
 	// to whichever applies (exec.go's execTimeoutFor).
 	limit := backendTimeoutFor(req.Op, req.Config)
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	// Every op handler transitively receives the request's own opaque
 	// config block via ConfigFromContext, without widening OpHandler's own

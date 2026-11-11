@@ -148,7 +148,7 @@ func (l *lister) searchPage(ctx context.Context, call ratefeed.Meta, q, after st
 	if jsonErr == nil && resp.Data.Search != nil {
 		call.BatchSize = len(resp.Data.Search.Nodes)
 	}
-	_ = l.feed.SettleGraphQL(tk, call, body, runErr)
+	_ = l.feed.SettleGraphQL(ctx, tk, call, body, runErr)
 	if l.auth != nil {
 		l.auth.Observe(runErr)
 	}

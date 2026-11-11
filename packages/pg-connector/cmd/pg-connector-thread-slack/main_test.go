@@ -198,10 +198,10 @@ func TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog(t *testing.T) {
 	table := instrument(newDispatchTable(backend), getenv)
 
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"1726000000.000100"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"1726000000.000100"}}`), &out)
 	failing = true
 	out.Reset()
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"1726000000.000100"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"1726000000.000100"}}`), &out)
 	var resp scriptout.Response
 	if err := json.Unmarshal(out.Bytes(), &resp); err != nil || resp.Error == nil || resp.Error.Code != "unavailable" {
 		t.Fatalf("wire response for the failing call = %s (err %v), want error.code unavailable", out.Bytes(), err)
@@ -257,7 +257,7 @@ func TestInstrument_DisabledLeavesTableAlone(t *testing.T) {
 	}
 	table := instrument(newDispatchTable(newTestBackend()), getenv)
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"show","args":{"id":"1726000000.000100"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"show","args":{"id":"1726000000.000100"}}`), &out)
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("disabled event log wrote files: %v", entries)
 	}
@@ -278,7 +278,7 @@ func TestServeOne_ListEmitsOnlyCanonicalIDs(t *testing.T) {
 	}})
 
 	var out bytes.Buffer
-	code := scriptout.ServeOne(newDispatchTable(backend),
+	code := scriptout.ServeOne(context.Background(), newDispatchTable(backend),
 		strings.NewReader(`{"op":"list","args":{"query":"mine"},"config":{"queries":{"mine":"to:@me"}}}`), &out)
 	if code != 0 {
 		t.Fatalf("exit code = %d, stdout=%s", code, out.Bytes())

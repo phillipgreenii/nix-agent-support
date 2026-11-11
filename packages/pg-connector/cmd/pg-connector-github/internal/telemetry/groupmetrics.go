@@ -29,9 +29,9 @@ const (
 
 // RecordEvictions adds n to store.evictions, the count the expiry sweep reports
 // (summary.Service.Sweep). A non-positive n records nothing.
-func (t *Telemetry) RecordEvictions(n int) {
+func (t *Telemetry) RecordEvictions(ctx context.Context, n int) {
 	if n > 0 {
-		t.evictions.Add(context.Background(), int64(n))
+		t.evictions.Add(ctx, int64(n))
 	}
 }
 

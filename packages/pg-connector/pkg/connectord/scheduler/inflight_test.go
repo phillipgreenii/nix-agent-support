@@ -34,7 +34,7 @@ func (e *admitExec) Spend(class governor.Class, n int) governor.Request {
 	return governor.Request{Bucket: requestsBucket, Class: class, Cost: 1}
 }
 
-func (e *admitExec) Execute(_ context.Context, items []Item) []Result {
+func (e *admitExec) Execute(ctx context.Context, items []Item) []Result {
 	tk, err := e.gov.Admit(e.Spend(governor.ClassQuery, 1))
 	if err != nil {
 		e.entered <- false
@@ -42,7 +42,7 @@ func (e *admitExec) Execute(_ context.Context, items []Item) []Result {
 	}
 	e.entered <- true
 	<-e.release
-	if err := tk.Settle(governor.Spend{Purpose: governor.PurposeQuery, Cost: 1, Outcome: "ok"}); err != nil {
+	if err := tk.Settle(ctx, governor.Spend{Purpose: governor.PurposeQuery, Cost: 1, Outcome: "ok"}); err != nil {
 		return []Result{{Err: err}}
 	}
 	e.mu.Lock()

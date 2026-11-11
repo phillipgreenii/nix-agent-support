@@ -63,7 +63,7 @@ func TestSetupWithNoEndpointIsAWorkingNoOpAndBuildsNoExporter(t *testing.T) {
 				t.Fatal("a span exporter was built with no endpoint")
 				return nil, nil
 			})
-		shutdown, err := Setup(Config{Endpoint: endpoint})
+		shutdown, err := Setup(t.Context(), Config{Endpoint: endpoint})
 		if err != nil {
 			t.Fatalf("endpoint %q: %v", endpoint, err)
 		}
@@ -94,7 +94,7 @@ func TestSetupWithAnEndpointBuildsBothExportersAndShutdownFlushesThem(t *testing
 	stubExporters(t,
 		func(ep string) (sdkmetric.Exporter, error) { me.endpoint = ep; return me, nil },
 		func(ep string) (sdktrace.SpanExporter, error) { se.endpoint = ep; return se, nil })
-	shutdown, err := Setup(Config{Endpoint: " http://127.0.0.1:4317 ", ServiceVersion: "test"})
+	shutdown, err := Setup(t.Context(), Config{Endpoint: " http://127.0.0.1:4317 ", ServiceVersion: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestSetupExporterFailuresAreErrorsAndLeaveNothingInstalled(t *testing.T) {
 			t.Fatal("trace exporter built after the metric one failed")
 			return nil, nil
 		})
-	if _, err := Setup(Config{Endpoint: "http://127.0.0.1:4317"}); !errors.Is(err, boom) {
+	if _, err := Setup(t.Context(), Config{Endpoint: "http://127.0.0.1:4317"}); !errors.Is(err, boom) {
 		t.Errorf("metric exporter failure: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestSetupExporterFailuresAreErrorsAndLeaveNothingInstalled(t *testing.T) {
 	stubExporters(t,
 		func(string) (sdkmetric.Exporter, error) { return me, nil },
 		func(string) (sdktrace.SpanExporter, error) { return nil, boom })
-	if _, err := Setup(Config{Endpoint: "http://127.0.0.1:4317"}); !errors.Is(err, boom) {
+	if _, err := Setup(t.Context(), Config{Endpoint: "http://127.0.0.1:4317"}); !errors.Is(err, boom) {
 		t.Errorf("trace exporter failure: %v", err)
 	}
 	if !me.shutdown {

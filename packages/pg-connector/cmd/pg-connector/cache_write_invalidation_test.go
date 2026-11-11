@@ -152,9 +152,9 @@ func TestInvalidateEntity_DropsOnlyThatIdAtAnyLevel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	invalidateEntity(reg, "issue", "A", "")
-	invalidateEntity(reg, "issue", "B", "")
-	invalidateEntity(reg, "issue", "never-cached", "")
+	invalidateEntity(t.Context(), reg, "issue", "A", "")
+	invalidateEntity(t.Context(), reg, "issue", "B", "")
+	invalidateEntity(t.Context(), reg, "issue", "never-cached", "")
 
 	got, err := loadCache(key)
 	if err != nil {
@@ -181,7 +181,7 @@ func TestInvalidateEntity_NothingCachedWritesNothing(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	reg := registryFor(t, "backend-inv-empty", "")
 	before := cacheSaves.Load()
-	invalidateEntity(reg, "pr", "pr-9", "")
+	invalidateEntity(t.Context(), reg, "pr", "pr-9", "")
 	if got := cacheSaves.Load(); got != before {
 		t.Fatalf("saveCache calls = %d, want %d (no entry was held)", got, before)
 	}

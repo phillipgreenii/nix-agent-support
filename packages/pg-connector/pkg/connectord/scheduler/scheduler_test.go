@@ -289,7 +289,7 @@ func TestGovernorRefusalHoldsBackgroundUntilTheWindowMoves(t *testing.T) {
 	}
 	e := &fakeExec{max: 1, bucket: governor.BucketGraphQL}
 	e.fn = func(items []Item) []Result {
-		_ = gov.Record(governor.Spend{Bucket: governor.BucketGraphQL, Class: items[0].Task.Class, Cost: 1})
+		_ = gov.Record(context.Background(), governor.Spend{Bucket: governor.BucketGraphQL, Class: items[0].Task.Class, Cost: 1})
 		return make([]Result, len(items))
 	}
 	s := New(Options{Clock: clk, Gate: gov, Workers: 1})
@@ -321,7 +321,7 @@ func TestInteractiveRefusedIsCompletedWithTheRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gov.Record(governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassQuery, Cost: 1}); err != nil {
+	if err := gov.Record(context.Background(), governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassQuery, Cost: 1}); err != nil {
 		t.Fatal(err)
 	}
 	e := &fakeExec{max: 1, bucket: governor.BucketGraphQL}

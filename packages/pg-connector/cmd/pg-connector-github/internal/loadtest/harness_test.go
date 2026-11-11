@@ -277,7 +277,7 @@ func (f *groupFetcher) Spend(class governor.Class, _ int) governor.Request {
 	return governor.Request{Bucket: f.bucket, Class: class, Cost: 1}
 }
 
-func (f *groupFetcher) Fetch(_ context.Context, call ratefeed.Meta, targets []groups.Target) []groups.Outcome {
+func (f *groupFetcher) Fetch(ctx context.Context, call ratefeed.Meta, targets []groups.Target) []groups.Outcome {
 	out := make([]groups.Outcome, len(targets))
 	tk, err := f.h.gov.Admit(governor.Request{Bucket: f.bucket, Class: call.Class, Cost: 1})
 	if err != nil {
@@ -287,7 +287,7 @@ func (f *groupFetcher) Fetch(_ context.Context, call ratefeed.Meta, targets []gr
 		return out
 	}
 	f.h.gate.wait(f.group + "/" + targets[0].NodeID)
-	_ = tk.Settle(governor.Spend{
+	_ = tk.Settle(ctx, governor.Spend{
 		Bucket: f.bucket, Class: call.Class, Purpose: call.Purpose, Group: f.group,
 		BatchSize: len(targets), Cost: 1, Outcome: "ok",
 	})
@@ -793,7 +793,7 @@ func (h *harness) fire(elapsed time.Duration) {
 				h.world.nextWindow(governor.DefaultWindow)
 			}
 			h.world.set(remaining)
-			if err := h.gov.Observe(governor.Reading{
+			if err := h.gov.Observe(context.Background(), governor.Reading{
 				Bucket: governor.BucketGraphQL, Limit: fullRemaining, Remaining: remaining, ResetAt: h.world.resetAt,
 			}); err != nil {
 				h.t.Fatal(err)

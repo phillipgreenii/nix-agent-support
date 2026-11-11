@@ -241,7 +241,7 @@ func TestOnSpendIsTheGovernorsObserver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := g.Record(governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Group: "summary", BatchSize: 5, Cost: 7, Outcome: "ok"}); err != nil {
+	if err := g.Record(context.Background(), governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Group: "summary", BatchSize: 5, Cost: 7, Outcome: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 	rows := readRows(t, EventLogPath(dir))

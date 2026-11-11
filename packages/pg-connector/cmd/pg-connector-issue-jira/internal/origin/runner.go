@@ -260,7 +260,7 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 			r.auth.Clear()
 		}
 		spend.Outcome = ResultOK
-		_ = ticket.Settle(spend)
+		_ = ticket.Settle(ctx, spend)
 		r.observe(ResultOK, r.clock.Now().Sub(start))
 		return out, nil
 	}
@@ -284,7 +284,7 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 	if kind == KindUnauthenticated && r.auth != nil {
 		r.auth.MarkUnauthenticated(runErr)
 	}
-	_ = ticket.Settle(spend)
+	_ = ticket.Settle(ctx, spend)
 	r.observe(kind, r.clock.Now().Sub(start))
 	return out, &CallError{Kind: kind, Err: runErr}
 }

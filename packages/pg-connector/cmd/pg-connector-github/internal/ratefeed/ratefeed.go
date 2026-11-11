@@ -129,7 +129,7 @@ func (f *Feed) RetryGuard(class governor.Class, bucket governor.Bucket, cost int
 // charged. A call that never ran (gh refused to start without a credential)
 // releases the ticket instead. callErr is the call's own error, if any; it only
 // colours the outcome.
-func (f *Feed) SettleGraphQL(t *governor.Ticket, m Meta, body []byte, callErr error) error {
+func (f *Feed) SettleGraphQL(ctx context.Context, t *governor.Ticket, m Meta, body []byte, callErr error) error {
 	if callErr != nil && len(body) == 0 && errors.Is(callErr, github.ErrGHAuthInvalid) {
 		t.Release()
 		return nil
@@ -146,7 +146,7 @@ func (f *Feed) SettleGraphQL(t *governor.Ticket, m Meta, body []byte, callErr er
 		s.Cost = rd.Cost
 		s.Reading = &rd.Reading
 	}
-	return t.Settle(s)
+	return t.Settle(ctx, s)
 }
 
 // RESTCall is one REST read.
@@ -269,6 +269,6 @@ func (f *Feed) rest(ctx context.Context, call RESTCall, run func(ctx context.Con
 	// A failure to persist the spend is the governor's to log
 	// ("budget_persist_failed"); the call happened, so its answer is still the
 	// caller's.
-	_ = tk.Settle(spend)
+	_ = tk.Settle(ctx, spend)
 	return resp, result
 }

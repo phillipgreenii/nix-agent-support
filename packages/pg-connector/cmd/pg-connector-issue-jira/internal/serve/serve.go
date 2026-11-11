@@ -186,7 +186,9 @@ func (d *daemon) start(ctx context.Context) error {
 	cfg := d.cfg
 	hooks := d.o.Hooks
 
-	bgCtx, bgCancel := context.WithCancel(context.Background())
+	// The background loops outlive startup: they stop on bgCancel, not when the
+	// start context ends.
+	bgCtx, bgCancel := context.WithCancel(context.WithoutCancel(ctx))
 	d.mu.Lock()
 	d.bgCancel = bgCancel
 	d.mu.Unlock()
@@ -200,7 +202,7 @@ func (d *daemon) start(ctx context.Context) error {
 	}
 
 	// Logs and telemetry.
-	shutdown, err := telemetry.Setup(telemetry.Config{Endpoint: cfg.OTelEndpoint, ServiceVersion: d.o.Version})
+	shutdown, err := telemetry.Setup(ctx, telemetry.Config{Endpoint: cfg.OTelEndpoint, ServiceVersion: d.o.Version})
 	if err != nil {
 		d.log.Log("telemetry_setup_failed", "error", err.Error())
 		shutdown = func(context.Context) error { return nil }
@@ -265,13 +267,13 @@ func (d *daemon) start(ctx context.Context) error {
 	onSpend := func(ev governor.SpendEvent) {
 		d.ev.OnSpend(ev)
 		if tel != nil {
-			tel.OnSpend(ev)
+			tel.RecordSpend(bgCtx, ev)
 		}
 	}
 
 	// The governor: its cap is what limits the refill after a move-aside and the
 	// catch-up after a long outage.
-	gov, err := governor.New(origin.GovernorConfig(cfg), governor.Options{
+	gov, err := governor.NewWithContext(ctx, origin.GovernorConfig(cfg), governor.Options{
 		Store:         st,
 		Logger:        d.log,
 		OnPauseChange: d.log.OnPauseChange,

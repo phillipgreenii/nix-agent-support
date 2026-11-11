@@ -171,7 +171,7 @@ func (r *Runner) graphQL(ctx context.Context, call ratefeed.Meta, rt route, invo
 	out, runErr := invoke(ctx, args...)
 	// A failure to persist the spend is the governor's to log; the call happened,
 	// so its answer is still the caller's.
-	_ = r.Feed.SettleGraphQL(tk, call, out, runErr)
+	_ = r.Feed.SettleGraphQL(ctx, tk, call, out, runErr)
 	return out, runErr
 }
 
@@ -224,7 +224,7 @@ func (r *Runner) cli(ctx context.Context, call ratefeed.Meta, rt route, invoke i
 	default:
 		outcome = ratefeed.OutcomeError
 	}
-	_ = tk.Settle(governor.Spend{
+	_ = tk.Settle(ctx, governor.Spend{
 		Purpose: call.Purpose, Group: call.Group, BatchSize: call.BatchSize,
 		Cost: cost, Outcome: outcome,
 	})

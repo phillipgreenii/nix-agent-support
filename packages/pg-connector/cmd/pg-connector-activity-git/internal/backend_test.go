@@ -93,7 +93,7 @@ func TestConfigKeysDecodeThroughDispatchTable(t *testing.T) {
 		`"config":{"author_emails":["a@example.test"," b@example.test "],"repo_paths":["/r/one","/r/two"],` +
 		`"repo_search_paths":["/search"],"include_merges":true}}`
 	var out bytes.Buffer
-	if code := scriptout.ServeOne(table, strings.NewReader(req), &out); code != 0 {
+	if code := scriptout.ServeOne(context.Background(), table, strings.NewReader(req), &out); code != 0 {
 		t.Fatalf("ServeOne exit = %d, out = %s", code, out.String())
 	}
 

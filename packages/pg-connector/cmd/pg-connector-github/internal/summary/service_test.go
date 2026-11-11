@@ -64,7 +64,7 @@ func (f *countingFetcher) Fetch(ctx context.Context, call ratefeed.Meta, ids []s
 			f.mu.Unlock()
 			return nil, 0, err
 		}
-		_ = tk.Settle(governor.Spend{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1, Outcome: "ok"})
+		_ = tk.Settle(ctx, governor.Spend{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1, Outcome: "ok"})
 	}
 	if block != nil {
 		<-block

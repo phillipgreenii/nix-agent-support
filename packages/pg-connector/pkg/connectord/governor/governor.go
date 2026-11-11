@@ -38,7 +38,7 @@
 //	tk, err := g.Admit(governor.Request{Bucket: governor.BucketGraphQL, Class: governor.ClassQuery, Cost: 1})
 //	if err != nil { /* *Refusal: serve stale, or answer unavailable naming err */ }
 //	... call the origin ...
-//	_ = tk.Settle(governor.Spend{Purpose: governor.PurposeQuery, Cost: cost, Reading: &reading, Outcome: "ok"})
+//	_ = tk.Settle(ctx, ctx, governor.Spend{Purpose: governor.PurposeQuery, Cost: cost, Reading: &reading, Outcome: "ok"})
 //
 // A call that failed before reaching the origin releases the ticket instead.
 package governor
@@ -141,6 +141,12 @@ type Governor struct {
 // New returns a governor for cfg. With a store it replays the budget rows still
 // inside each window, so spend already recorded counts.
 func New(cfg Config, opts Options) (*Governor, error) {
+	return NewWithContext(context.Background(), cfg, opts)
+}
+
+// NewWithContext is New with the context of the startup that builds the governor;
+// the budget replay and the first prune run under it.
+func NewWithContext(ctx context.Context, cfg Config, opts Options) (*Governor, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -173,7 +179,7 @@ func New(cfg Config, opts Options) (*Governor, error) {
 	if g.store != nil {
 		for _, b := range g.order {
 			st := g.buckets[b]
-			rows, err := g.store.BudgetSince(context.Background(), string(b), now.Add(-st.lim.Window))
+			rows, err := g.store.BudgetSince(ctx, string(b), now.Add(-st.lim.Window))
 			if err != nil {
 				return nil, fmt.Errorf("governor: replay %s budget rows: %w", b, err)
 			}
@@ -182,7 +188,7 @@ func New(cfg Config, opts Options) (*Governor, error) {
 			}
 			st.expire(now)
 		}
-		g.prune(now)
+		g.prune(ctx, now)
 	}
 	return g, nil
 }
@@ -475,7 +481,7 @@ func (t *Ticket) Request() Request { return t.req }
 // and counts against every later admission, so callers estimate high rather than
 // low. The in-memory accounting is updated even when persisting fails; the
 // returned error is that failure.
-func (t *Ticket) Settle(s Spend) error {
+func (t *Ticket) Settle(ctx context.Context, s Spend) error {
 	t.g.mu.Lock()
 	done := t.done
 	t.done = true
@@ -489,7 +495,7 @@ func (t *Ticket) Settle(s Spend) error {
 	if s.Class == 0 {
 		s.Class = t.req.Class
 	}
-	return t.g.record(s, &t.req)
+	return t.g.record(ctx, s, &t.req)
 }
 
 // Release gives the reservation back without recording a spend: the call never
@@ -522,9 +528,9 @@ func (g *Governor) release(req Request) {
 // that has already happened cannot be refused, so it is always recorded, even
 // past the cap). It appends the call to the budget table, fires the spend
 // observer, and returns the persistence error if there was one.
-func (g *Governor) Record(s Spend) error { return g.record(s, nil) }
+func (g *Governor) Record(ctx context.Context, s Spend) error { return g.record(ctx, s, nil) }
 
-func (g *Governor) record(s Spend, reserved *Request) error {
+func (g *Governor) record(ctx context.Context, s Spend, reserved *Request) error {
 	now := g.enter()
 	if reserved != nil {
 		g.release(*reserved)
@@ -568,7 +574,7 @@ func (g *Governor) record(s Spend, reserved *Request) error {
 
 	var err error
 	if g.store != nil {
-		err = g.persist(row, now)
+		err = g.persist(ctx, row, now)
 	}
 	if g.onSpend != nil {
 		g.onSpend(ev)
@@ -579,7 +585,7 @@ func (g *Governor) record(s Spend, reserved *Request) error {
 // Observe feeds a reading that arrived without a spend of its own (for example
 // the remaining of a probe). It is the governor's input feed for readings: the
 // reading takes effect at once and tightens admission as it falls.
-func (g *Governor) Observe(r Reading) error {
+func (g *Governor) Observe(ctx context.Context, r Reading) error {
 	b := g.buckets[r.Bucket]
 	if b == nil {
 		return fmt.Errorf("governor: unknown bucket %q", r.Bucket)
@@ -593,13 +599,17 @@ func (g *Governor) Observe(r Reading) error {
 	if !accepted || g.store == nil {
 		return nil
 	}
-	return g.persist(store.BudgetSample{
+	return g.persist(ctx, store.BudgetSample{
 		Bucket: string(r.Bucket), At: r.At, Remaining: r.Remaining, ResetAt: r.ResetAt,
 	}, now)
 }
 
-func (g *Governor) persist(row store.BudgetSample, now time.Time) error {
-	if err := g.store.AppendBudget(context.Background(), row); err != nil {
+func (g *Governor) persist(ctx context.Context, row store.BudgetSample, now time.Time) error {
+	// The call being recorded already happened, so its row is written even if the
+	// caller's context has since been cancelled (the persistence was never
+	// cancellable before ctx was threaded through).
+	ctx = context.WithoutCancel(ctx)
+	if err := g.store.AppendBudget(ctx, row); err != nil {
 		g.log.Log("budget_persist_failed", "bucket", row.Bucket, "error", err.Error())
 		return fmt.Errorf("governor: record %s spend: %w", row.Bucket, err)
 	}
@@ -610,14 +620,14 @@ func (g *Governor) persist(row store.BudgetSample, now time.Time) error {
 	}
 	g.mu.Unlock()
 	if due {
-		g.prune(now)
+		g.prune(ctx, now)
 	}
 	return nil
 }
 
 // prune deletes budget rows older than the retention.
-func (g *Governor) prune(now time.Time) {
-	if _, err := g.store.PruneBudgetBefore(context.Background(), now.Add(-g.retention)); err != nil {
+func (g *Governor) prune(ctx context.Context, now time.Time) {
+	if _, err := g.store.PruneBudgetBefore(ctx, now.Add(-g.retention)); err != nil {
 		g.log.Log("budget_prune_failed", "error", err.Error())
 	}
 }

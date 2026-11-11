@@ -292,7 +292,7 @@ func TestShowAnAuthenticationFailureIsUnauthenticatedWhenNothingIsStoredAndServe
 
 func TestShowRefusesAnAnswerWhoseDetailIsUnavailable(t *testing.T) {
 	r := newRig(t)
-	r.putSummary(issueOf(issueKey, "t"), t0) // a summary but no detail stored
+	r.putSummary(r.t.Context(), issueOf(issueKey, "t"), t0) // a summary but no detail stored
 	r.origin.set(issueOf(issueKey, "t"), "d")
 	r.clk.Advance(2 * summaryTTL)
 	r.origin.setErr(errors.New("origin down"))

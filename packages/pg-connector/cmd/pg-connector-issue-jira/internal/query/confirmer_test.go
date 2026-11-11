@@ -108,6 +108,6 @@ func spendAll(t *testing.T, h *harness) {
 		if err != nil {
 			return
 		}
-		_ = tk.Settle(governor.Spend{Purpose: governor.PurposeInteractive, Cost: 1, Outcome: "ok"})
+		_ = tk.Settle(context.Background(), governor.Spend{Purpose: governor.PurposeInteractive, Cost: 1, Outcome: "ok"})
 	}
 }

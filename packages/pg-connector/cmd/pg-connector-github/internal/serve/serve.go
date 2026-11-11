@@ -285,7 +285,9 @@ func (d *daemon) start(ctx context.Context) error {
 	cfg := d.cfg
 	hooks := d.o.Hooks
 
-	bgCtx, bgCancel := context.WithCancel(context.Background())
+	// The background loops outlive startup: they stop on bgCancel, not when the
+	// start context ends.
+	bgCtx, bgCancel := context.WithCancel(context.WithoutCancel(ctx))
 	d.mu.Lock()
 	d.bgCancel = bgCancel
 	d.mu.Unlock()
@@ -299,7 +301,7 @@ func (d *daemon) start(ctx context.Context) error {
 	}
 
 	// Logs and telemetry.
-	shutdown, err := telemetry.Setup(telemetry.Config{Endpoint: cfg.OTelEndpoint, ServiceVersion: d.o.Version})
+	shutdown, err := telemetry.Setup(ctx, telemetry.Config{Endpoint: cfg.OTelEndpoint, ServiceVersion: d.o.Version})
 	if err != nil {
 		d.log.Log("telemetry_setup_failed", "error", err.Error())
 		shutdown = func(context.Context) error { return nil }
@@ -353,18 +355,18 @@ func (d *daemon) start(ctx context.Context) error {
 	onSpend := func(ev governor.SpendEvent) {
 		d.ev.OnSpend(ev)
 		if tel != nil {
-			tel.OnSpend(ev)
+			tel.RecordSpend(bgCtx, ev)
 		}
 	}
 	onBatch := func(ids []string, role scheduler.Role) {
 		if tel != nil {
-			tel.OnBatchSent(ids, role)
+			tel.RecordBatchSent(bgCtx, ids, role)
 		}
 	}
 
 	// The governor: its caps are what limit the refill after a move-aside and
 	// the catch-up after a long outage.
-	gov, err := governor.New(ratefeed.GovernorConfig(cfg.Settings), governor.Options{
+	gov, err := governor.NewWithContext(ctx, ratefeed.GovernorConfig(cfg.Settings), governor.Options{
 		Store:         st,
 		Logger:        d.log,
 		OnPauseChange: d.log.OnPauseChange,
@@ -473,7 +475,7 @@ func (d *daemon) start(ctx context.Context) error {
 		pstore = nil
 	}
 	if pstore != nil {
-		d.importLegacySidecar(st)
+		d.importLegacySidecar(ctx, st)
 	}
 	view := &pending.SidecarView{}
 	if pstore != nil {
@@ -700,9 +702,9 @@ func cutQueryKey(key string) (name, args string, adhoc bool) {
 // store, once (guarded by a store_meta marker). It reads the legacy home from the
 // daemon's own environment. A failure is logged loudly and does not stop the
 // daemon; no marker is written, so the next start retries.
-func (d *daemon) importLegacySidecar(st *store.Store) {
+func (d *daemon) importLegacySidecar(ctx context.Context, st *store.Store) {
 	home := legacyimport.HomeFromEnv(os.Getenv)
-	res, err := legacyimport.Import(context.Background(), st, home)
+	res, err := legacyimport.Import(ctx, st, home)
 	if err != nil {
 		d.log.Log("sidecar_import_failed", "error", err.Error(), "legacy_home", home,
 			"note", "the legacy posted-review records were NOT imported; the next start retries")
@@ -841,7 +843,7 @@ func (d *daemon) sweepLoop(ctx context.Context, svc *summary.Service, runner *qu
 			evicted += int(n)
 		}
 		if tel != nil {
-			tel.RecordEvictions(evicted)
+			tel.RecordEvictions(ctx, evicted)
 		}
 		if _, err := runner.Expire(ctx, d.cfg.Expiry.Std()); err != nil {
 			d.log.Log("query_expiry_failed", "error", err.Error())

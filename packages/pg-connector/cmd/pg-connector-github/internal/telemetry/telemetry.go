@@ -404,7 +404,12 @@ func (t *Telemetry) RecordSpend(ctx context.Context, ev governor.SpendEvent) {
 // (summary.ServiceConfig.OnBatchSent): one batch.ids observation per call, the
 // number of ids the batch carried in that role.
 func (t *Telemetry) OnBatchSent(ids []string, role scheduler.Role) {
-	t.batchIDs.Record(context.Background(), int64(len(ids)),
+	t.RecordBatchSent(context.Background(), ids, role)
+}
+
+// RecordBatchSent is OnBatchSent with the context a call site holds.
+func (t *Telemetry) RecordBatchSent(ctx context.Context, ids []string, role scheduler.Role) {
+	t.batchIDs.Record(ctx, int64(len(ids)),
 		metric.WithAttributes(attribute.String(keyRole, roleLabel(role))))
 }
 

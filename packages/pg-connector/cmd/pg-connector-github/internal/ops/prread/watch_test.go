@@ -56,21 +56,21 @@ func newWatchRig(t *testing.T) *watchRig {
 
 // persist stores the canned summary as a refresh would: the first call is the
 // first sighting (no row), a later call with a changed title is a change.
-func (r *watchRig) persist(t *testing.T, mutate func(*summary.Summary)) summary.Summary {
+func (r *watchRig) persist(ctx context.Context, t *testing.T, mutate func(*summary.Summary)) summary.Summary {
 	t.Helper()
 	s := cannedSummary()
 	if mutate != nil {
 		mutate(&s)
 	}
-	if _, err := r.pers.Persist(context.Background(), s); err != nil {
+	if _, err := r.pers.Persist(ctx, s); err != nil {
 		t.Fatal(err)
 	}
 	return s
 }
 
-func (r *watchRig) entity(t *testing.T) store.EntityRow {
+func (r *watchRig) entity(ctx context.Context, t *testing.T) store.EntityRow {
 	t.Helper()
-	row, _, err := r.st.GetEntity(context.Background(), "pr", cannedSummary().NodeID)
+	row, _, err := r.st.GetEntity(ctx, "pr", cannedSummary().NodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,13 +102,13 @@ type storeEngine struct {
 
 func (e *storeEngine) Ensure(ctx context.Context, _ string, _ []string, _ groupsvc.EnsureOptions) (groupsvc.EnsureResult, error) {
 	e.calls++
-	e.watchedAtCall = !e.rig.entity(e.t).WatchedAt.IsZero()
+	e.watchedAtCall = !e.rig.entity(ctx, e.t).WatchedAt.IsZero()
 	if e.err != nil {
 		return groupsvc.EnsureResult{}, e.err
 	}
 	if e.persistIfFresh {
 		if _, ok, _ := e.rig.st.GetGroup(ctx, "pr", cannedSummary().NodeID, summary.GroupName); !ok {
-			e.rig.persist(e.t, nil)
+			e.rig.persist(ctx, e.t, nil)
 		}
 	}
 	return e.res, nil
@@ -140,7 +140,7 @@ func TestAWatchReadOfAPRTheStoreHasNeverSeenWatchesItAndAppendsNoRow(t *testing.
 	if _, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, "true")); err != nil {
 		t.Fatal(err)
 	}
-	row := r.entity(t)
+	row := r.entity(t.Context(), t)
 	if row.WatchedAt.IsZero() || row.WatchedVia != registry.ViaDirect {
 		t.Fatalf("the PR must be watched via a direct read, got watched_at %v via %q", row.WatchedAt, row.WatchedVia)
 	}
@@ -154,7 +154,7 @@ func TestAWatchReadOfAPRTheStoreHasNeverSeenWatchesItAndAppendsNoRow(t *testing.
 
 func TestAWatchReadOfAKnownPRWatchesItBeforeTheReadAndAppendsOneAddedRow(t *testing.T) {
 	r := newWatchRig(t)
-	r.persist(t, nil) // the daemon knows the PR: alias, entity and summary stored
+	r.persist(t.Context(), t, nil) // the daemon knows the PR: alias, entity and summary stored
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	if _, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, "true")); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestAWatchReadOfAKnownPRWatchesItBeforeTheReadAndAppendsOneAddedRow(t *test
 	if !eng.watchedAtCall {
 		t.Error("a known PR must be watched BEFORE the read, so a change the read finds is a row of a watched PR")
 	}
-	row := r.entity(t)
+	row := r.entity(t.Context(), t)
 	if row.WatchedAt.IsZero() || row.WatchedVia != registry.ViaDirect {
 		t.Fatalf("watched_at %v via %q", row.WatchedAt, row.WatchedVia)
 	}
@@ -184,7 +184,7 @@ func TestAWatchReadChangeIsARowOfAWatchedPR(t *testing.T) {
 	// The ordering the design needs: the watch is set before the refresh the read
 	// triggers, so the change that refresh finds is delivered.
 	r := newWatchRig(t)
-	r.persist(t, nil)
+	r.persist(t.Context(), t, nil)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	h := r.handler(&refreshingEngine{storeEngine: eng}, OpFiles, true)
 	if _, err := h(watchArgs(wireID, "true")); err != nil {
@@ -208,19 +208,19 @@ type refreshingEngine struct{ *storeEngine }
 
 func (e *refreshingEngine) Ensure(ctx context.Context, id string, want []string, opt groupsvc.EnsureOptions) (groupsvc.EnsureResult, error) {
 	res, err := e.storeEngine.Ensure(ctx, id, want, opt)
-	e.rig.persist(e.t, func(s *summary.Summary) { s.Title = "A new title" })
+	e.rig.persist(ctx, e.t, func(s *summary.Summary) { s.Title = "A new title" })
 	return res, err
 }
 
 func TestAReadWithoutTheWatchOptionWatchesNothingAndClearsNothing(t *testing.T) {
 	r := newWatchRig(t)
-	r.persist(t, nil)
+	r.persist(t.Context(), t, nil)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	if _, err := r.handler(eng, OpFiles, true)(`{"id":"` + wireID + `"}`); err != nil {
 		t.Fatal(err)
 	}
-	if !r.entity(t).WatchedAt.IsZero() || len(r.rows(t)) != 0 {
-		t.Fatalf("a read without the option must not watch: %+v, rows %+v", r.entity(t), r.rows(t))
+	if !r.entity(t.Context(), t).WatchedAt.IsZero() || len(r.rows(t)) != 0 {
+		t.Fatalf("a read without the option must not watch: %+v, rows %+v", r.entity(t.Context(), t), r.rows(t))
 	}
 	// A watched PR stays watched across a read without the option, and false is the
 	// same as absent.
@@ -231,7 +231,7 @@ func TestAReadWithoutTheWatchOptionWatchesNothingAndClearsNothing(t *testing.T) 
 		if _, err := r.handler(eng, OpFiles, true)(a); err != nil {
 			t.Fatal(err)
 		}
-		if r.entity(t).WatchedAt.IsZero() {
+		if r.entity(t.Context(), t).WatchedAt.IsZero() {
 			t.Fatalf("a read with %s cleared the watch", a)
 		}
 	}
@@ -244,7 +244,7 @@ func TestWatchIsAcceptedByEveryReadOp(t *testing.T) {
 	for _, op := range []string{OpShow, OpFiles, OpCommits, OpReviewPending} {
 		t.Run(op, func(t *testing.T) {
 			r := newWatchRig(t)
-			r.persist(t, nil)
+			r.persist(t.Context(), t, nil)
 			eng := &storeEngine{rig: r, t: t}
 			switch op {
 			case OpShow:
@@ -261,7 +261,7 @@ func TestWatchIsAcceptedByEveryReadOp(t *testing.T) {
 			if _, err := r.handler(eng, op, true)(watchArgs(wireID, "true")); err != nil {
 				t.Fatalf("%s with watch: %v", op, err)
 			}
-			if r.entity(t).WatchedAt.IsZero() {
+			if r.entity(t.Context(), t).WatchedAt.IsZero() {
 				t.Errorf("%s with watch did not watch the PR", op)
 			}
 		})
@@ -270,7 +270,7 @@ func TestWatchIsAcceptedByEveryReadOp(t *testing.T) {
 
 func TestAWatchThatIsNotABooleanIsInvalidArgumentAndNothingIsRead(t *testing.T) {
 	r := newWatchRig(t)
-	r.persist(t, nil)
+	r.persist(t.Context(), t, nil)
 	eng := &storeEngine{rig: r, t: t, res: filesResult(t)}
 	for _, bad := range []string{`"yes"`, `1`, `[true]`, `{"a":1}`} {
 		_, err := r.handler(eng, OpFiles, true)(watchArgs(wireID, bad))
@@ -278,7 +278,7 @@ func TestAWatchThatIsNotABooleanIsInvalidArgumentAndNothingIsRead(t *testing.T) 
 			t.Errorf("watch %s = %v, want invalid_argument", bad, err)
 		}
 	}
-	if eng.calls != 0 || !r.entity(t).WatchedAt.IsZero() {
+	if eng.calls != 0 || !r.entity(t.Context(), t).WatchedAt.IsZero() {
 		t.Errorf("a rejected request must neither read nor watch (engine calls %d)", eng.calls)
 	}
 }
@@ -303,7 +303,7 @@ func TestAWatchReadOfAPRThatIsGoneWatchesNothing(t *testing.T) {
 	if err == nil || code(t, err) != "not_found" {
 		t.Fatalf("err = %v, want not_found", err)
 	}
-	if !r.entity(t).WatchedAt.IsZero() {
+	if !r.entity(t.Context(), t).WatchedAt.IsZero() {
 		t.Error("a PR that does not exist must not be watched")
 	}
 }

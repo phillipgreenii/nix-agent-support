@@ -756,7 +756,7 @@ func TestAGovernorRefusalAnswersUnavailableBeforeAnythingIsWritten(t *testing.T)
 		t.Fatal("no graphql bucket")
 	}
 	// Spend the whole cap: even a class 2 call is now refused.
-	if err := gov.Record(governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassInteractive, Purpose: governor.PurposeInteractive, Cost: bs.Cap}); err != nil {
+	if err := gov.Record(context.Background(), governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassInteractive, Purpose: governor.PurposeInteractive, Cost: bs.Cap}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := f.submit(req("overall", point("main.go", 3, "x")))

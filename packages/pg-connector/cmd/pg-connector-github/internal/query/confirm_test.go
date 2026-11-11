@@ -84,7 +84,7 @@ func TestNewConfirmer_AnErrorForARefusedRead(t *testing.T) {
 	r, c := confirmRig(t)
 	r.alias(t, memA)
 	r.clk.Advance(2 * time.Minute)
-	if err := r.gov.Record(governor.Spend{
+	if err := r.gov.Record(context.Background(), governor.Spend{
 		Bucket: governor.BucketGraphQL, Class: governor.ClassInteractive,
 		Cost: int64(r.cfg.GraphQLPointsPerHour), Outcome: "ok",
 	}); err != nil {

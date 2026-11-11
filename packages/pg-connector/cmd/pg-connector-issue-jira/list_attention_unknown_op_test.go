@@ -19,7 +19,7 @@ func TestListAttention_AnswersUnknownOp(t *testing.T) {
 	table := newDispatchTable(newTestBackend())
 
 	var out bytes.Buffer
-	code := scriptout.ServeOne(table, strings.NewReader(`{"op":"list_attention","args":{}}`), &out)
+	code := scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"list_attention","args":{}}`), &out)
 	if want := scriptout.ExitCodeForError(scriptout.ErrUnknownOp); code != want {
 		t.Fatalf("exit code = %d, want %d (unknown_op)", code, want)
 	}

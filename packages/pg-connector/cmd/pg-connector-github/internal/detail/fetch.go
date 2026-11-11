@@ -301,7 +301,7 @@ func (f *Fetcher) once(ctx context.Context, call ratefeed.Meta, ids []string) ([
 	}
 	body, runErr := f.GH.Run(ctx, args...)
 	call.Group, call.BatchSize = groups.Detail, len(ids)
-	_ = f.Feed.SettleGraphQL(tk, call, body, runErr)
+	_ = f.Feed.SettleGraphQL(ctx, tk, call, body, runErr)
 	var cost int64
 	if rd, found, perr := ratefeed.ParseGraphQL(body); perr == nil && found {
 		cost = rd.Cost

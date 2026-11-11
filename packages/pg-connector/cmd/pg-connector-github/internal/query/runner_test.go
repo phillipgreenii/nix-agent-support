@@ -515,7 +515,7 @@ func TestRun_ABudgetRefusalIsReportedAndNotRecordedAsAnOriginFailure(t *testing.
 	}
 	r.clk.Advance(2 * time.Minute)
 	// Spend the whole cap so every class is refused.
-	if err := r.gov.Record(governor.Spend{
+	if err := r.gov.Record(context.Background(), governor.Spend{
 		Bucket: governor.BucketGraphQL, Class: governor.ClassInteractive,
 		Cost: int64(r.cfg.GraphQLPointsPerHour), Outcome: "ok",
 	}); err != nil {

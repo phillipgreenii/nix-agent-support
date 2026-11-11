@@ -59,7 +59,7 @@ func runWrite(ctx context.Context, o Options, raw json.RawMessage, req scriptout
 	}
 
 	var out bytes.Buffer
-	code := scriptout.ServeOne(writeTable(backend), bytes.NewReader(raw), &out)
+	code := scriptout.ServeOne(ctx, writeTable(backend), bytes.NewReader(raw), &out)
 
 	if begun {
 		switch {

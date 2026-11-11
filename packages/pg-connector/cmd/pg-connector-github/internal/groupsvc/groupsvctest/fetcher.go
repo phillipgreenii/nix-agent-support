@@ -111,7 +111,7 @@ func (f *Fetcher) Fetch(ctx context.Context, call ratefeed.Meta, targets []group
 			f.mu.Unlock()
 			return failAll(len(targets), err)
 		}
-		_ = tk.Settle(governor.Spend{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1, Outcome: "ok"})
+		_ = tk.Settle(ctx, governor.Spend{Bucket: governor.BucketGraphQL, Class: call.Class, Cost: 1, Outcome: "ok"})
 	}
 	if gate != nil {
 		<-gate

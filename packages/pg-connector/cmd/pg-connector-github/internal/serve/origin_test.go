@@ -194,7 +194,7 @@ func TestOriginTheRetryGuardStopsARetryThatWouldSpendBelowTheReserve(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gov.Observe(governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 10, ResetAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := gov.Observe(context.Background(), governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 10, ResetAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	bad := response("502 Bad Gateway", "", `{}`)

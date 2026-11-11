@@ -76,7 +76,7 @@ func (v *SidecarView) MarkIdentityChanged(at time.Time) {
 // pending), or when the append was recorded before the last identity change. An
 // append whose time cannot be read is hidden once an identity change has been
 // marked, because it cannot be shown to belong to the current identity.
-func (v *SidecarView) Last(repo string, number int) *pr.LastAppend {
+func (v *SidecarView) Last(ctx context.Context, repo string, number int) *pr.LastAppend {
 	if v == nil || v.Store == nil {
 		return nil
 	}
@@ -84,9 +84,8 @@ func (v *SidecarView) Last(repo string, number int) *pr.LastAppend {
 	if !ok {
 		return nil
 	}
-	// The view has no request context (the pending group computes its rows
-	// without one), so the read runs under its own bound.
-	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+	// The read runs under its own bound inside the caller's context.
+	ctx, cancel := context.WithTimeout(ctx, loadTimeout)
 	defer cancel()
 	st, err := v.Store.Load(ctx, owner, name, number)
 	if err != nil || st.LastAppend == nil {

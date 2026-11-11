@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,7 @@ func TestBackend_ImplementsNoAuthChecker(t *testing.T) {
 
 func TestCapabilities_AdvertisesBothSchemaVersions(t *testing.T) {
 	var out bytes.Buffer
-	if code := scriptout.ServeOne(newTestTable(), strings.NewReader(`{"op":"capabilities"}`), &out); code != 0 {
+	if code := scriptout.ServeOne(context.Background(), newTestTable(), strings.NewReader(`{"op":"capabilities"}`), &out); code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
 	var caps scriptout.CapabilitiesResponse
@@ -95,7 +96,7 @@ func TestInstrument_WritesStartAndFinalRowPerCallToTheBackendsOwnLog(t *testing.
 	table := instrument(newTestTable(), getenv)
 	var out bytes.Buffer
 	req := `{"op":"list_attention","config":{"base_url":"` + url + `"}}`
-	if code := scriptout.ServeOne(table, strings.NewReader(req), &out); code != 0 {
+	if code := scriptout.ServeOne(context.Background(), table, strings.NewReader(req), &out); code != 0 {
 		t.Fatalf("exit = %d, out = %s", code, out.String())
 	}
 
@@ -140,7 +141,7 @@ func TestInstrument_UnreachableDaemonFinalRowNamesTheStage(t *testing.T) {
 
 	table := instrument(newTestTable(), getenv)
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"list_attention","config":{"base_url":"`+url+`"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"list_attention","config":{"base_url":"`+url+`"}}`), &out)
 
 	raw, err := os.ReadFile(filepath.Join(stateHome, "pg-connector-calendar-task-focus", "events.jsonl"))
 	if err != nil {
@@ -171,7 +172,7 @@ func TestInstrument_DisabledLeavesTableAlone(t *testing.T) {
 	url := fakeDaemonURL(t)
 	table := instrument(newTestTable(), getenv)
 	var out bytes.Buffer
-	scriptout.ServeOne(table, strings.NewReader(`{"op":"list_attention","config":{"base_url":"`+url+`"}}`), &out)
+	scriptout.ServeOne(context.Background(), table, strings.NewReader(`{"op":"list_attention","config":{"base_url":"`+url+`"}}`), &out)
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("disabled event log wrote files: %v", entries)
 	}

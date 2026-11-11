@@ -322,7 +322,7 @@ func (h *handlers) reviewPending(ctx context.Context, a request) (any, error) {
 	if res.Summary.Repo != "" && res.Summary.Number > 0 {
 		repo, number = res.Summary.Repo, res.Summary.Number
 	}
-	last := h.deps.Sidecar.Last(repo, number)
+	last := h.deps.Sidecar.Last(ctx, repo, number)
 	out, err := pending.Compute(data, res.Summary.HeadRefOid, repo, number, g.Row.FetchedAt, last)
 	if err != nil {
 		return nil, err

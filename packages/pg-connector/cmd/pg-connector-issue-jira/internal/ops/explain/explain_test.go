@@ -49,8 +49,8 @@ type failingExecutor struct{ origin *originCalls }
 
 func (failingExecutor) MaxBatch() int                              { return 1 }
 func (failingExecutor) Spend(governor.Class, int) governor.Request { return governor.Request{} }
-func (e failingExecutor) Execute(_ context.Context, items []scheduler.Item) []scheduler.Result {
-	_, _ = e.origin.Run(context.Background())
+func (e failingExecutor) Execute(ctx context.Context, items []scheduler.Item) []scheduler.Result {
+	_, _ = e.origin.Run(ctx)
 	return make([]scheduler.Result, len(items))
 }
 

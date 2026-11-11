@@ -139,14 +139,14 @@ func issueOf(id, title string) schema.Issue {
 
 // putSummary stores an issue's entity row and summary group as a fetch at
 // fetchedAt would.
-func (r *rig) putSummary(iss schema.Issue, fetchedAt time.Time) {
+func (r *rig) putSummary(ctx context.Context, iss schema.Issue, fetchedAt time.Time) {
 	r.t.Helper()
 	content, err := json.Marshal(groups.SummaryContent{Issue: iss})
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	r.putEntity(iss.ID)
-	if err := r.st.PutGroup(context.Background(), store.GroupRow{
+	r.putEntity(ctx, iss.ID)
+	if err := r.st.PutGroup(ctx, store.GroupRow{
 		Kind: groups.EntityKind, ID: iss.ID, Group: groups.Summary, Content: content, Fingerprint: "f",
 		FetchedAt: fetchedAt, FreshUntil: fetchedAt.Add(summaryTTL), Generation: 1,
 	}); err != nil {
@@ -155,13 +155,13 @@ func (r *rig) putSummary(iss schema.Issue, fetchedAt time.Time) {
 }
 
 // putDetail stores an issue's detail group.
-func (r *rig) putDetail(id string, d groups.DetailContent, fetchedAt time.Time) {
+func (r *rig) putDetail(ctx context.Context, id string, d groups.DetailContent, fetchedAt time.Time) {
 	r.t.Helper()
 	content, err := json.Marshal(d)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	if err := r.st.PutGroup(context.Background(), store.GroupRow{
+	if err := r.st.PutGroup(ctx, store.GroupRow{
 		Kind: groups.EntityKind, ID: id, Group: groups.Detail, Content: content, Fingerprint: "f",
 		FetchedAt: fetchedAt, FreshUntil: fetchedAt.Add(detailTTL), Generation: 1,
 	}); err != nil {
@@ -169,16 +169,16 @@ func (r *rig) putDetail(id string, d groups.DetailContent, fetchedAt time.Time) 
 	}
 }
 
-func (r *rig) putEntity(id string) {
+func (r *rig) putEntity(ctx context.Context, id string) {
 	r.t.Helper()
-	ent, ok, err := r.st.GetEntity(context.Background(), groups.EntityKind, id)
+	ent, ok, err := r.st.GetEntity(ctx, groups.EntityKind, id)
 	if err != nil {
 		r.t.Fatal(err)
 	}
 	if !ok {
 		ent = store.EntityRow{Kind: groups.EntityKind, ID: id, Version: 1, LastAccess: r.clk.Now(), KeepAlive: true}
 	}
-	if err := r.st.PutEntity(context.Background(), ent); err != nil {
+	if err := r.st.PutEntity(ctx, ent); err != nil {
 		r.t.Fatal(err)
 	}
 }
@@ -187,17 +187,17 @@ func (r *rig) putEntity(id string) {
 func (r *rig) seed(id, title, description string) {
 	r.t.Helper()
 	iss := issueOf(id, title)
-	r.putSummary(iss, r.clk.Now())
-	r.putDetail(id, groups.DetailContent{
+	r.putSummary(r.t.Context(), iss, r.clk.Now())
+	r.putDetail(r.t.Context(), id, groups.DetailContent{
 		Description: description, Deps: []schema.IssueDependency{{ID: "ABC-9", Type: "blocks"}},
 		StatusChangedAt: "2026-10-01T00:00:00Z", OperatorUpdatedAt: "2026-10-02T00:00:00Z",
 	}, r.clk.Now())
 	r.origin.set(iss, description)
 }
 
-func (r *rig) isWatched(id string) bool {
+func (r *rig) isWatched(ctx context.Context, id string) bool {
 	r.t.Helper()
-	ent, ok, err := r.st.GetEntity(context.Background(), groups.EntityKind, id)
+	ent, ok, err := r.st.GetEntity(ctx, groups.EntityKind, id)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func (f *fakeSummary) ensure(ctx context.Context, key string, opts summary.Ensur
 	iss, shown := o.issues[id]
 	if failure == nil {
 		o.summaryCalls++
-		o.watchedAtSummaryFetch[id] = r.isWatched(id)
+		o.watchedAtSummaryFetch[id] = r.isWatched(ctx, id)
 	}
 	o.mu.Unlock()
 	if failure != nil {
@@ -268,7 +268,7 @@ func (f *fakeSummary) ensure(ctx context.Context, key string, opts summary.Ensur
 	if !shown {
 		return summary.Result{}, scriptout.WrapError(scriptout.ErrNotFound, "issue "+id+" not found")
 	}
-	r.putSummary(iss, now)
+	r.putSummary(ctx, iss, now)
 	row, _, _ = r.st.GetGroup(ctx, groups.EntityKind, id, groups.Summary)
 	return summary.Result{Content: groups.SummaryContent{Issue: iss}, Row: row, FetchedNow: true}, nil
 }
@@ -331,7 +331,7 @@ func (f *fakeDetail) Ensure(ctx context.Context, id string, want []string, opt g
 		}
 		return res(groupsvc.GroupResult{Status: groupsvc.Unavailable, Err: scriptout.WrapError(scriptout.ErrUnavailable, failure.Error())})
 	}
-	r.putDetail(id, groups.DetailContent{Description: desc}, now)
+	r.putDetail(ctx, id, groups.DetailContent{Description: desc}, now)
 	row, _, _ = r.st.GetGroup(ctx, groups.EntityKind, id, groups.Detail)
 	return res(groupsvc.GroupResult{Row: row, Status: groupsvc.Fresh, FromOrigin: true})
 }

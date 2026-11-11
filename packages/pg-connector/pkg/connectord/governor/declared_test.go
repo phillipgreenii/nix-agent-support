@@ -1,6 +1,7 @@
 package governor
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -213,7 +214,7 @@ func TestARefusalCausedOnlyByReservationsSaysSo(t *testing.T) {
 	if err := g.Check(Request{Bucket: requestsBucket, Class: ClassInteractive}); err != nil {
 		t.Errorf("interactive request refused: %v", err)
 	}
-	if err := tk.Settle(Spend{Purpose: PurposeQuery, Cost: 1, Outcome: "ok"}); err != nil {
+	if err := tk.Settle(context.Background(), Spend{Purpose: PurposeQuery, Cost: 1, Outcome: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 	err = g.Check(bg)

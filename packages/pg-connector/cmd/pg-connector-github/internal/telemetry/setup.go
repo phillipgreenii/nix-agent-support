@@ -93,14 +93,16 @@ var (
 // batch to the endpoint and shutdown flushes both. An exporter that cannot be
 // built is returned as an error with no provider installed; the caller logs it
 // and runs without telemetry.
-func Setup(cfg Config) (shutdown func(context.Context) error, err error) {
+func Setup(ctx context.Context, cfg Config) (shutdown func(context.Context) error, err error) {
 	if !cfg.Enabled() {
 		otel.SetMeterProvider(metricnoop.NewMeterProvider())
 		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 		return func(context.Context) error { return nil }, nil
 	}
 	endpoint := strings.TrimSpace(cfg.Endpoint)
-	ctx := context.Background() // construction dials lazily; only the exports use the network
+	// Construction dials lazily and only the exports use the network; the
+	// exporters outlive the caller's context, so detach it from cancellation.
+	ctx = context.WithoutCancel(ctx)
 
 	res := buildResource(ctx, cfg.ServiceVersion)
 

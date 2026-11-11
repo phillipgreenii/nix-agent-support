@@ -257,7 +257,7 @@ func TestACallThatNeverReachedGitHubSpendsNothing(t *testing.T) {
 func TestRESTIsRefusedWithoutRunningGhWhenTheGovernorSaysNo(t *testing.T) {
 	out := ghInclude("200 OK", rateHeaders("core", 5000, 4000, 1000), "{}")
 	f, g, _, run, _ := newFeed(t, out, nil)
-	if err := g.Record(governor.Spend{Bucket: governor.BucketRESTCore, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: 2700}); err != nil {
+	if err := g.Record(context.Background(), governor.Spend{Bucket: governor.BucketRESTCore, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: 2700}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := f.REST(context.Background(), RESTCall{Meta: Meta{Class: governor.ClassKeepAlive}, Args: []string{"repos/o/r"}})
@@ -287,7 +287,7 @@ func TestSettleGraphQLBooksTheFoldedCostAndReading(t *testing.T) {
 
 	// The response's own cost and reading replace the estimate.
 	body := []byte(`{"data":{"rateLimit":{"cost":3,"remaining":1400,"resetAt":"2026-10-12T12:30:00Z"},"search":{"nodes":[]}}}`)
-	if err := f.SettleGraphQL(admit(1), meta, body, nil); err != nil {
+	if err := f.SettleGraphQL(context.Background(), admit(1), meta, body, nil); err != nil {
 		t.Fatal(err)
 	}
 	bs := bucketState(t, g, governor.BucketGraphQL)
@@ -295,7 +295,7 @@ func TestSettleGraphQLBooksTheFoldedCostAndReading(t *testing.T) {
 		t.Errorf("after a folded response: %+v", bs)
 	}
 	// A response without the selection books the estimate, as an error.
-	if err := f.SettleGraphQL(admit(2), meta, []byte(`{"data":null,"errors":[{"message":"boom"}]}`), errors.New("gh: boom")); err != nil {
+	if err := f.SettleGraphQL(context.Background(), admit(2), meta, []byte(`{"data":null,"errors":[{"message":"boom"}]}`), errors.New("gh: boom")); err != nil {
 		t.Fatal(err)
 	}
 	if bs := bucketState(t, g, governor.BucketGraphQL); bs.Spent != 5 {
@@ -303,7 +303,7 @@ func TestSettleGraphQLBooksTheFoldedCostAndReading(t *testing.T) {
 	}
 	// gh refused to run without a credential: nothing reached GitHub.
 	authErr := fmt.Errorf("gh api graphql: no usable GitHub credential: %w", github.ErrGHAuthInvalid)
-	if err := f.SettleGraphQL(admit(4), meta, nil, authErr); err != nil {
+	if err := f.SettleGraphQL(context.Background(), admit(4), meta, nil, authErr); err != nil {
 		t.Fatal(err)
 	}
 	bs = bucketState(t, g, governor.BucketGraphQL)
@@ -322,7 +322,7 @@ func TestSettleGraphQLBooksTheFoldedCostAndReading(t *testing.T) {
 func TestSettleGraphQLWithACostOnlySelectionBooksTheCostAndKeepsTheLastReading(t *testing.T) {
 	f, g, _, _, events := newFeed(t, nil, nil)
 	meta := Meta{Class: governor.ClassInteractive, Purpose: governor.PurposeInteractive, Group: "conversation", BatchSize: 1}
-	if err := g.Observe(governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 3000, ResetAt: reset}); err != nil {
+	if err := g.Observe(context.Background(), governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 3000, ResetAt: reset}); err != nil {
 		t.Fatal(err)
 	}
 	tk, err := g.Admit(governor.Request{Bucket: governor.BucketGraphQL, Class: meta.Class, Cost: 1})
@@ -330,7 +330,7 @@ func TestSettleGraphQLWithACostOnlySelectionBooksTheCostAndKeepsTheLastReading(t
 		t.Fatal(err)
 	}
 	body := []byte(`{"data":{"rateLimit":{"cost":2},"repository":{"pullRequest":{"comments":{"nodes":[]}}}}}`)
-	if err := f.SettleGraphQL(tk, meta, body, nil); err != nil {
+	if err := f.SettleGraphQL(context.Background(), tk, meta, body, nil); err != nil {
 		t.Fatal(err)
 	}
 	bs := bucketState(t, g, governor.BucketGraphQL)
@@ -466,7 +466,7 @@ func TestRESTStdinPausesTheBackgroundOnASecondaryLimitLikeREST(t *testing.T) {
 func TestRetryGuardStopsAGraphQLRetryTheGovernorWouldRefuse(t *testing.T) {
 	f, g, _, _, _ := newFeed(t, nil, nil)
 	reading := governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 1000, ResetAt: reset}
-	if err := g.Observe(reading); err != nil {
+	if err := g.Observe(context.Background(), reading); err != nil {
 		t.Fatal(err)
 	}
 
@@ -492,7 +492,7 @@ func TestRetryGuardStopsAGraphQLRetryTheGovernorWouldRefuse(t *testing.T) {
 	// With room the same retry goes ahead. The room arrives with the next window:
 	// within one window the origin's remaining only falls, so the governor takes a
 	// higher reading of the same window for a stale answer and ignores it.
-	if err := g.Observe(governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 4000, ResetAt: reset.Add(time.Hour)}); err != nil {
+	if err := g.Observe(context.Background(), governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 4000, ResetAt: reset.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	allowed := &sequenceRunner{results: []result{{err: transient}, {out: page}}}

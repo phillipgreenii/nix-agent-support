@@ -466,7 +466,7 @@ func TestARefusedAdmissionIsAnErrorNotAnAuthFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	if err := tk.Settle(governor.Spend{Cost: cfg.GraphQL.Cap, Outcome: "ok"}); err != nil {
+	if err := tk.Settle(context.Background(), governor.Spend{Cost: cfg.GraphQL.Cap, Outcome: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 	gh := &fakeGH{login: "octo-one"}

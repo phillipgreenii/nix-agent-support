@@ -91,8 +91,8 @@ type TableBackend struct {
 // always produces some exit code and (best-effort) some stdout bytes,
 // mirroring how a real backend process always exits with SOME code even
 // when it produced no valid output.
-func (b TableBackend) Invoke(_ context.Context, request []byte) (stdout []byte, exitCode int, err error) {
+func (b TableBackend) Invoke(ctx context.Context, request []byte) (stdout []byte, exitCode int, err error) {
 	var out bytes.Buffer
-	code := scriptout.ServeOne(b.Table, bytes.NewReader(request), &out)
+	code := scriptout.ServeOne(ctx, b.Table, bytes.NewReader(request), &out)
 	return out.Bytes(), code, nil
 }

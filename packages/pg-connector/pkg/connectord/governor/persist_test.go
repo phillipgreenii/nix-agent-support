@@ -38,7 +38,7 @@ func busyHour(t *testing.T, g *Governor, clk *ManualClock) {
 		t.Fatal(err)
 	}
 	reading := Reading{Remaining: 2000, Limit: 5000, ResetAt: t0.Add(50 * time.Minute)}
-	if err := tk.Settle(Spend{Purpose: PurposeInteractive, Group: "summary", BatchSize: 1, Cost: 200, Reading: &reading, Outcome: "ok"}); err != nil {
+	if err := tk.Settle(context.Background(), Spend{Purpose: PurposeInteractive, Group: "summary", BatchSize: 1, Cost: 200, Reading: &reading, Outcome: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -126,11 +126,11 @@ func TestAReadingSurvivesARestartSoTheReserveStillHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tk.Settle(Spend{Purpose: PurposeInteractive, Cost: 1, Reading: &Reading{Remaining: 1005, ResetAt: t0.Add(30 * time.Minute)}}); err != nil {
+	if err := tk.Settle(context.Background(), Spend{Purpose: PurposeInteractive, Cost: 1, Reading: &Reading{Remaining: 1005, ResetAt: t0.Add(30 * time.Minute)}}); err != nil {
 		t.Fatal(err)
 	}
 	// A reading fed on its own is persisted too.
-	if err := g1.Observe(Reading{Bucket: BucketRESTSearch, Remaining: 7, ResetAt: t0.Add(30 * time.Second)}); err != nil {
+	if err := g1.Observe(context.Background(), Reading{Bucket: BucketRESTSearch, Remaining: 7, ResetAt: t0.Add(30 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	_ = s1.Close()
@@ -257,7 +257,7 @@ func TestAPersistenceFailureIsReportedButTheSpendStillCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = tk.Settle(Spend{Purpose: PurposeInteractive, Cost: 1})
+	err = tk.Settle(context.Background(), Spend{Purpose: PurposeInteractive, Cost: 1})
 	if err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("Settle = %v, want the persistence failure", err)
 	}

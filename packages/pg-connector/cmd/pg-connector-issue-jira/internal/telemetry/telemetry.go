@@ -477,9 +477,9 @@ func (t *Telemetry) RecordSpend(ctx context.Context, ev governor.SpendEvent) {
 
 // RecordEvictions adds n to store.evictions, the count the expiry sweep reports
 // (summary.Sweep). A non-positive n records nothing.
-func (t *Telemetry) RecordEvictions(n int) {
+func (t *Telemetry) RecordEvictions(ctx context.Context, n int) {
 	if t != nil && n > 0 {
-		t.evictions.Add(context.Background(), int64(n))
+		t.evictions.Add(ctx, int64(n))
 	}
 }
 

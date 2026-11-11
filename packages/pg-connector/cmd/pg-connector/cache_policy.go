@@ -336,7 +336,7 @@ func dispatchShowWatch(ctx context.Context, reg *Registry, entityType, id, pinne
 // an entry was actually dropped. It does not consult the cache opt-outs,
 // because an opted-out pair holds no entry to drop. The ledger is untouched
 // (see INV-CACHE-10: a write changes no membership fact the ledger records).
-func invalidateEntity(reg *Registry, entityType, id, pinned string) {
+func invalidateEntity(ctx context.Context, reg *Registry, entityType, id, pinned string) {
 	if id == "" {
 		return
 	}
@@ -347,7 +347,8 @@ func invalidateEntity(reg *Registry, entityType, id, pinned string) {
 	if err := ensureCacheDirExists(); err != nil {
 		return
 	}
-	release, _ := acquireShowFlight(context.Background(), entityType, id)
+	// The write already completed, so the drop runs even if the request was cancelled.
+	release, _ := acquireShowFlight(context.WithoutCancel(ctx), entityType, id)
 	defer release()
 	for _, b := range backends {
 		key := CacheKey{Type: entityType, Backend: b}
@@ -369,7 +370,7 @@ func invalidateEntity(reg *Registry, entityType, id, pinned string) {
 func dispatchWrite(ctx context.Context, reg *Registry, entityType, op, id string, args any, pinned string) (*scriptout.Response, error) {
 	resp, err := DispatchTargeted(ctx, reg, entityType, op, args, pinned)
 	if err == nil {
-		invalidateEntity(reg, entityType, id, pinned)
+		invalidateEntity(ctx, reg, entityType, id, pinned)
 	}
 	return resp, err
 }

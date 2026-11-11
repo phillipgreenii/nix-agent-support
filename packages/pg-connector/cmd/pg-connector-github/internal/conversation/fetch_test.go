@@ -381,7 +381,7 @@ func TestFetch_AGovernorRefusalIsReturnedUntouchedAndStopsTheRest(t *testing.T) 
 	r := newRig(t, pagesFromFixtures(t))
 	// Room for exactly one page of background spend.
 	bs, _ := r.gov.State().Bucket(governor.BucketGraphQL)
-	if err := r.gov.Record(governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: bs.BackgroundCap - 1}); err != nil {
+	if err := r.gov.Record(context.Background(), governor.Spend{Bucket: governor.BucketGraphQL, Class: governor.ClassQuery, Purpose: governor.PurposeQuery, Cost: bs.BackgroundCap - 1}); err != nil {
 		t.Fatal(err)
 	}
 
