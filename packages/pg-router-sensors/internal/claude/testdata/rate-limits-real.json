@@ -1,0 +1,6 @@
+{
+  "rate_limits": {
+    "five_hour": { "used_pct": 31, "resets_at": "2026-11-11T16:00:00Z" },
+    "captured_at": "2026-11-11T13:42:36Z"
+  }
+}

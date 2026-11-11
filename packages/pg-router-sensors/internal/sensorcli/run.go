@@ -208,11 +208,21 @@ func Run(args []string, reg Registry, sio IO) int {
 			fmt.Fprintf(sio.Stderr, "pg-router-sensors %s: state not saved: %v\n", name, err)
 		}
 	}
-	if answered == 0 {
+	if answered == 0 && !emptyOK(sensor) {
 		fmt.Fprintf(sio.Stderr, "pg-router-sensors %s: no resource could be answered\n", name)
 		return ExitNone
 	}
 	return ExitOK
+}
+
+// EmptyOK is an optional interface of a sensor whose successful measurement
+// with nothing to answer exits 0 with no lines (claude-sensor); a measurement
+// error still exits 1.
+type EmptyOK interface{ EmptyOK() bool }
+
+func emptyOK(s Sensor) bool {
+	e, ok := s.(EmptyOK)
+	return ok && e.EmptyOK()
 }
 
 func printBands(stdout, stderr io.Writer, s Sensor, only string) int {

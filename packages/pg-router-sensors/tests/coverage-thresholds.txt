@@ -21,3 +21,4 @@ internal/gitauth 90
 internal/beads 90
 internal/failsig 90
 internal/originprobe 90
+internal/claude 90
