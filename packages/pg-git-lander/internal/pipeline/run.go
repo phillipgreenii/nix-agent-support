@@ -49,6 +49,9 @@ type runner struct {
 	moved     bool
 	landed    string
 	cres      *cleanup.Result
+	// ctx is the operation's context: a signal cancels it, and lostCheck turns
+	// that into an interrupted stop at the next step boundary.
+	ctx context.Context
 }
 
 // Run completes the operation of steps 8 to 13 from a Prepared that holds its
@@ -58,7 +61,7 @@ type runner struct {
 // unexpected failure is a stop with reason internal-error, never an error
 // return; the error is only for a stop that itself could not be recorded.
 func (p *Prepared) Run(ctx context.Context) (*outcome.Outcome, error) {
-	s := &runner{p: p}
+	s := &runner{p: p, ctx: ctx}
 	for _, w := range p.Warnings {
 		s.entries = append(s.entries, outcome.WarningEntry{Warning: w})
 	}
@@ -69,7 +72,7 @@ func (p *Prepared) Run(ctx context.Context) (*outcome.Outcome, error) {
 	case err != nil && errors.Is(err, locks.ErrLockLost):
 		sp = &stopSpec{reason: outcome.StopLockLost, message: err.Error()}
 	case err != nil && ctx.Err() != nil:
-		sp = &stopSpec{reason: outcome.StopInterrupted, message: ctx.Err().Error()}
+		sp = &stopSpec{reason: outcome.StopInterrupted, message: context.Cause(ctx).Error()}
 	case err != nil:
 		sp = &stopSpec{reason: outcome.StopInternalError, message: err.Error()}
 	}
@@ -199,6 +202,9 @@ func (s *runner) afterAndCleanup(ctx context.Context) (*outcome.Outcome, *stopSp
 }
 
 func (s *runner) lostCheck() *stopSpec {
+	if s.ctx != nil && s.ctx.Err() != nil {
+		return &stopSpec{reason: outcome.StopInterrupted, message: context.Cause(s.ctx).Error()}
+	}
 	select {
 	case err := <-s.p.Lost:
 		return &stopSpec{reason: outcome.StopLockLost, message: fmt.Sprintf("lock lost: %v", err)}
@@ -420,7 +426,7 @@ func (s *runner) runHook(ctx context.Context, point, stage string) (*hooks.Failu
 	})
 	for _, rec := range hr.Records {
 		p.Log.Command("hook", rec)
-		_ = p.Events.Hook(ctx, rec)
+		_ = p.Events.Hook(context.WithoutCancel(ctx), rec)
 	}
 	p.SkippedHooks = append(p.SkippedHooks, hr.Skipped...)
 	if err != nil {
@@ -491,7 +497,9 @@ func (s *runner) move(ctx context.Context) (landmove.Status, *stopSpec, error) {
 	sel := p.Selection
 	if p.Operation == worktrees.Land {
 		mv := &landmove.Mover{Git: p.d.Git, Brancher: &workbranch.Brancher{Git: p.d.Git}}
-		r := mv.Move(ctx, landmove.Input{
+		// The fenced transaction and the merge take milliseconds: once started
+		// they finish, so the move runs detached from a signal's cancellation.
+		r := mv.Move(context.WithoutCancel(ctx), landmove.Input{
 			OpID: p.OpID, Target: p.Request.Target, TipsTarget: p.Tips.Target, Result: tip,
 			DW: sel.Destination, WW: sel.Work, TargetCheckedOut: sel.TargetCheckedOut, Fence: fence,
 		})
@@ -509,7 +517,7 @@ func (s *runner) move(ctx context.Context) (landmove.Status, *stopSpec, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	r := (&branchmove.Mover{Git: p.d.Git}).Move(ctx, branchmove.Input{
+	r := (&branchmove.Mover{Git: p.d.Git}).Move(context.WithoutCancel(ctx), branchmove.Input{
 		Operation: worktrees.Rebase, Branch: p.Request.Branch, TipsBranch: p.Tips.Branch,
 		Result: tip, Dir: sel.Work.Path, Holder: holder, Fence: fence,
 	})
