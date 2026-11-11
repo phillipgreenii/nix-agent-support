@@ -63,6 +63,7 @@ test('the band first row shows the name when one exists and the id otherwise', (
   expect(bandLabels({ sessionId: 'abcdefghijkl', sessionName: 'drain-bead' }, t)[0]).toEqual({
     id: 'session',
     label: 'drain-bead',
+    bold: true,
     action: 'info',
   })
   expect(bandLabels({ sessionId: 'abcdefghijkl' }, t)[0].label).toBe('abcdefgh')

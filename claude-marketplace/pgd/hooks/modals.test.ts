@@ -131,9 +131,25 @@ test('the Context modal shows last compaction when the event-driven value exists
   expect(rows(contextSpec())).toEqual(['context: 10%', 'last compaction: 2026-11-06 12:03 UTC'])
 })
 
-test('context colour is by level: normal, yellow from contextWarn, red from contextAlert', async () => {
+test('the Context modal carries the 200k marker and red when contextTokens reaches 200000', async () => {
+  await world({ contextPercent: 10, contextTokens: 199_999, limits: [] })
+  expect(rows(contextSpec())).toEqual(['context: 10%, 199,999 tokens'])
+  setValue('usage', { contextPercent: 10, contextTokens: 200_000, limits: [] })
+  expect(rows(contextSpec())).toEqual(['context: 10%, 200,000 tokens (!)'])
+  expect(contextSpec().items[0].color).toBe('red')
+})
+
+test('the Info modal colours worktree bold yellow and branch green; version and repo are dim', async () => {
+  await world({ limits: [] })
+  setValue('gitHead', { branch: 'feat-x', worktree: 'wt-1' })
+  const by = (label: string) => infoSpec().items.find(i => i.label === label)
+  expect(by('worktree')).toEqual({ label: 'worktree', value: 'wt-1', color: 'yellow', bold: true })
+  expect(by('branch')).toEqual({ label: 'branch', value: 'feat-x', color: 'green' })
+})
+
+test('context colour is by level: green, yellow from contextWarn, red from contextAlert', async () => {
   await world({ contextPercent: 59, limits: [] })
-  expect(contextSpec().items[0].color).toBe(undefined)
+  expect(contextSpec().items[0].color).toBe('green')
   setValue('usage', { contextPercent: 60, limits: [] })
   expect(contextSpec().items[0].color).toBe('yellow')
   setValue('usage', { contextPercent: 80, limits: [] })

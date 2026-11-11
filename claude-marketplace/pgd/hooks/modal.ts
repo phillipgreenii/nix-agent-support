@@ -14,6 +14,8 @@ export interface ModalItem {
   label: string
   value: string
   color?: string
+  bold?: boolean
+  dim?: boolean
   current?: boolean
   // A button drawn after the value of this row (the Focus pane's per-row open).
   action?: ModalAction
@@ -221,7 +223,12 @@ export function drawModal(ui: any, id: string): unknown {
           flexDirection: 'row',
           children: [
             Text({ key: 'label', dimColor: true, children: `${it.label.padEnd(width)}  ` }),
-            Text({ key: 'value', ...(it.color ? { color: it.color } : {}), children: `${it.current ? '* ' : ''}${it.value}` }),
+            Text({
+              key: 'value',
+              ...(it.color ? { color: it.color } : {}),
+              ...(it.bold ? { bold: true } : {}),
+              ...(it.dim ? { dimColor: true } : {}),
+              children: `${it.current ? '* ' : ''}${it.value}` }),
             ...(it.action
               ? [
                   Text({ key: 'row-gap', children: ' ' }),

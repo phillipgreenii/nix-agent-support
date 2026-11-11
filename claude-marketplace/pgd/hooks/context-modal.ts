@@ -1,5 +1,5 @@
 import { pgdEnabled, getOptions } from './options'
-import { contextLevel } from './band'
+import { contextLevel, exceeds200k, EXCEEDS_200K_MARKER } from './band'
 import { defineSource, readCached, requestInvalidate, setValue } from './source'
 import type { ModalSpec, ModalItem } from './modal'
 import type { Usage, Limit } from './usage'
@@ -46,12 +46,13 @@ export function contextSpec(): ModalSpec {
   const usage = readCached<Usage>('usage')
   const items: ModalItem[] = []
   if (typeof usage?.contextPercent === 'number') {
-    const level = contextLevel(usage.contextPercent, t)
+    const over = exceeds200k(usage)
+    const level = over ? 'red' : contextLevel(usage.contextPercent, t)
     const tokens = typeof usage.contextTokens === 'number' ? `, ${formatTokens(usage.contextTokens)} tokens` : ''
     items.push({
       label: 'context',
-      value: `${Math.round(usage.contextPercent)}%${tokens}`,
-      ...(level !== 'normal' ? { color: level } : {}),
+      value: `${Math.round(usage.contextPercent)}%${tokens}${over ? EXCEEDS_200K_MARKER : ''}`,
+      color: level,
     })
   } else if (typeof usage?.contextTokens === 'number') {
     items.push({ label: 'context', value: `${formatTokens(usage.contextTokens)} tokens` })

@@ -1,6 +1,6 @@
 // Tests of the phase 1 band: the pure layout, the level colours, and the render hook.
 import { expect, test } from 'claude-code/testing'
-import { bandHook, clearBandButtons, contextLevel, drawnWidth, ENGINE_RESERVE, registerBandButton, renderBand } from './band'
+import { bandHook, clearBandButtons, contextLevel, textStyle, drawnWidth, ENGINE_RESERVE, registerBandButton, renderBand } from './band'
 import { setOptions } from './options'
 import { defineSource, initSources, setValue } from './source'
 import { DEFAULT_OPTIONS, parseOptions } from './types'
@@ -11,22 +11,47 @@ const T = DEFAULT_OPTIONS.alerts.thresholds
 const usage = (p?: number): Usage => ({ contextPercent: p, limits: [] })
 const labels = (rows: ReturnType<typeof renderBand>) => rows.map(r => r.map(l => l.label))
 
-test('context label is normal below 60, yellow from 60 and red from 80', () => {
-  expect(contextLevel(59.4, T)).toBe('normal')
+test('context label is green below 60, yellow from 60 and red from 80', () => {
+  expect(contextLevel(59.4, T)).toBe('green')
+  // always colour coded: no input, 0 included, gives the plain level
+  expect(contextLevel(0, T)).toBe('green')
+  expect(contextLevel(59.9, T)).toBe('green')
+  expect(renderBand({ sessionId: 'abcdef123456', usage: usage(0) }, 80, T)[0].find(l => l.id === 'context')?.level).toBe('green')
+  expect(renderBand({ sessionId: 'abcdef123456', usage: usage(59.9) }, 80, T)[0].find(l => l.id === 'context')?.level).toBe('green')
   expect(contextLevel(60, T)).toBe('yellow')
   expect(contextLevel(79, T)).toBe('yellow')
   expect(contextLevel(80, T)).toBe('red')
   const lv = (p: number) =>
     renderBand({ sessionId: 'abcdef123456', usage: usage(p) }, 80, T)[0].find(l => l.id === 'context')
   expect(lv(42)?.label).toBe('ctx 42%')
-  expect(lv(42)?.level).toBe('normal')
+  expect(lv(42)?.level).toBe('green')
   expect(lv(60)?.level).toBe('yellow')
   expect(lv(80)?.level).toBe('red')
 })
 
 test('context level follows the alerts.thresholds option', () => {
   const t = { contextWarn: 30, contextAlert: 50, limit: 80 }
-  expect(contextLevel(29, t)).toBe('normal')
+  expect(contextLevel(29, t)).toBe('green')
+
+  const ctx = (tokens?: number) =>
+    renderBand({ sessionId: 'abcdef123456', usage: { contextPercent: 10, contextTokens: tokens, limits: [] } }, 80, T)[0].find(
+      l => l.id === 'context',
+    )
+  expect(ctx(199_999)?.label).toBe('ctx 10%')
+  expect(ctx(199_999)?.level).toBe('green')
+  expect(ctx(200_000)?.label).toBe('ctx 10% (!)')
+  expect(ctx(200_000)?.level).toBe('red')
+  expect(ctx(undefined)?.label).toBe('ctx 10%')
+  const row = (id: string) =>
+    renderBand({ sessionId: 'abcdef123456', sessionName: 'my-name', model: 'sonnet', effort: 'high' }, 80, T)
+      .flat()
+      .find(l => l.id === id)
+  expect(row('model')?.level).toBe('cyan')
+  expect(row('session')?.bold).toBe(true)
+  expect(row('session')?.label).toBe('my-name')
+  expect(textStyle('cyan')).toEqual({ color: 'cyan' })
+  expect(textStyle(undefined, true)).toEqual({ bold: true })
+  expect(textStyle('dim', true)).toEqual({ dimColor: true, bold: true })
   expect(contextLevel(30, t)).toBe('yellow')
   expect(contextLevel(50, t)).toBe('red')
 })

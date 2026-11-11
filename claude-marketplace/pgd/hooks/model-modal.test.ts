@@ -50,7 +50,7 @@ const marked = (s: ModalSpec, label: string): string[] => s.items.filter(i => i.
 
 test('the model label is a button that opens the modal with the current model marked and effort blank', async () => {
   const w = await world()
-  expect(bandRow()).toEqual({ id: 'model', label: 'sonnet', action: 'model' })
+  expect(bandRow()).toEqual({ id: 'model', label: 'sonnet', level: 'cyan', action: 'model' })
   pressButton('model')
   await settle()
   expect(w.opened).toHaveLength(1)

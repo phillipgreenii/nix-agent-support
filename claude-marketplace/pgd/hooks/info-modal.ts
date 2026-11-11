@@ -65,12 +65,13 @@ export function infoSpec(): ModalSpec {
     items.push({ label: 'session id', value: facts.id })
     items.push({ label: 'actor', value: actorOf(facts.id) })
   }
-  if (facts.version) items.push({ label: 'version', value: facts.version })
-  if (facts.repo) items.push({ label: 'repo', value: facts.repo })
+  // The old status line's colours: version and repo dim, worktree bold yellow, branch green.
+  if (facts.version) items.push({ label: 'version', value: facts.version, dim: true })
+  if (facts.repo) items.push({ label: 'repo', value: facts.repo, dim: true })
   const git = readCached<GitHead>('gitHead')
-  if (git?.worktree) items.push({ label: 'worktree', value: git.worktree })
-  if (git?.branch) items.push({ label: 'branch', value: git.branch })
-  else if (git?.detached) items.push({ label: 'branch', value: `detached at ${git.detached.slice(0, 8)}` })
+  if (git?.worktree) items.push({ label: 'worktree', value: git.worktree, color: 'yellow', bold: true })
+  if (git?.branch) items.push({ label: 'branch', value: git.branch, color: 'green' })
+  else if (git?.detached) items.push({ label: 'branch', value: `detached at ${git.detached.slice(0, 8)}`, color: 'green' })
   const pr = readCached<PrValue>('pr')
   if (pr) {
     const color = reviewColor(pr.reviewState)

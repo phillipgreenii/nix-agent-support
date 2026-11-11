@@ -11,12 +11,14 @@ import type { AssumeValue } from './assume'
 // context percent, the last coloured by level. renderBand is a plain data description, so a later
 // phase can turn each label into a button without changing its text. The band hook reads cached
 // values only (readCached): it never starts a fetch, a process or a file read.
-export type Level = 'normal' | 'yellow' | 'red' | 'green' | 'magenta' | 'dim'
+export type Level = 'normal' | 'yellow' | 'red' | 'green' | 'magenta' | 'cyan' | 'dim'
 
 export interface BandRow {
   id: string
   label: string
   level?: Level
+  // Level carries no weight, so bold is its own field.
+  bold?: boolean
   // The id of the modal (or toggle) a press on this label opens.
   action?: string
 }
@@ -73,27 +75,43 @@ export interface BandValues {
 }
 
 // A level boundary value belongs to the higher level.
-export function contextLevel(percent: number, t: AlertThresholds): Level {
+// Always colour coded: no input, 0 included, gives the plain 'normal' level.
+export function contextLevel(percent: number, t: AlertThresholds): 'green' | 'yellow' | 'red' {
   if (percent >= t.contextAlert) return 'red'
   if (percent >= t.contextWarn) return 'yellow'
-  return 'normal'
+  return 'green'
+}
+
+// The old status line's alert marker (its nerd-font-off form), appended once the context holds
+// 200000 tokens or more. The mod API has no exceeds_200k flag, so it is derived from contextTokens.
+export const EXCEEDS_200K_TOKENS = 200_000
+export const EXCEEDS_200K_MARKER = ' (!)'
+export function exceeds200k(usage: Usage | undefined): boolean {
+  return typeof usage?.contextTokens === 'number' && usage.contextTokens >= EXCEEDS_200K_TOKENS
 }
 
 // An item whose condition is false is not drawn: no placeholder, never a "no X" row.
 export function bandLabels(v: BandValues, t: AlertThresholds): BandRow[] {
   const labels: BandRow[] = []
-  if (v.sessionId) labels.push({ id: 'session', label: v.sessionName || v.sessionId.slice(0, 8), action: 'info' })
+  if (v.sessionId) labels.push({ id: 'session', label: v.sessionName || v.sessionId.slice(0, 8), bold: true, action: 'info' })
   if (v.model) {
     // a button only while components.modelEffort is on (the band hook also leaves the model out when off)
     labels.push({
       id: 'model',
       label: v.effort ? `${v.model} · ${v.effort}` : v.model,
+      level: 'cyan',
       ...(getOptions()?.components.modelEffort ? { action: 'model' } : {}),
     })
   }
   const pct = v.usage?.contextPercent
   if (typeof pct === 'number') {
-    labels.push({ id: 'context', label: `ctx ${Math.round(pct)}%`, level: contextLevel(pct, t), action: 'context' })
+    const over = exceeds200k(v.usage)
+    labels.push({
+      id: 'context',
+      label: `ctx ${Math.round(pct)}%${over ? EXCEEDS_200K_MARKER : ''}`,
+      level: over ? 'red' : contextLevel(pct, t),
+      action: 'context',
+    })
   }
   for (const b of buttons) {
     const label = b.label(v)
@@ -136,10 +154,12 @@ export function renderBand(v: BandValues, width: number, t: AlertThresholds): Ba
   return rows
 }
 
-// yellow, red and green are Text colours; dim is the Text dim property (dimColor); normal is plain.
-function textStyle(level: Level | undefined): Record<string, unknown> {
-  if (level === 'dim') return { dimColor: true }
-  return level && level !== 'normal' ? { color: level } : {}
+// yellow, red, green, magenta and cyan are Text colours; dim is the Text dim property (dimColor);
+// normal is plain; bold is the Text bold property.
+export function textStyle(level: Level | undefined, bold?: boolean): Record<string, unknown> {
+  const weight = bold ? { bold: true } : {}
+  if (level === 'dim') return { dimColor: true, ...weight }
+  return level && level !== 'normal' ? { color: level, ...weight } : weight
 }
 
 type Next =(e: unknown) => unknown
@@ -175,7 +195,7 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
       flexDirection: 'row',
       flexShrink: 0,
       children: row.flatMap((l, j) => {
-        const text = textStyle(l.level)
+        const text = textStyle(l.level, l.bold)
         const item = l.action
           ? Button({
               key: l.id,
