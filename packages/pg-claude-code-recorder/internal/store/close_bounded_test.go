@@ -13,17 +13,17 @@ func shortCloseBounds(t *testing.T) {
 	t.Cleanup(func() { closeLockWait, closeCheckpointWait, closeDBsWait = l, c, d })
 }
 
-func closeWithin(t *testing.T, s *Store, d time.Duration) (error, time.Duration) {
+func closeWithin(t *testing.T, s *Store, d time.Duration) (time.Duration, error) {
 	t.Helper()
 	start := time.Now()
 	done := make(chan error, 1)
 	go func() { done <- s.Close() }()
 	select {
 	case err := <-done:
-		return err, time.Since(start)
+		return time.Since(start), err
 	case <-time.After(d):
 		t.Fatalf("Store.Close still running after %v", d)
-		return nil, 0
+		return 0, nil
 	}
 }
 
@@ -53,7 +53,7 @@ func TestCloseReturnsWhileAReaderPinsTheWAL(t *testing.T) {
 	// Measured: with the reader still open, closing the connections (the
 	// implicit last-connection checkpoint) did not wait out busy_timeout either;
 	// closeDBs stays bounded regardless.
-	_, took := closeWithin(t, s, 10*time.Second)
+	took, _ := closeWithin(t, s, 10*time.Second)
 	if took > 5*time.Second {
 		t.Fatalf("Close took %v with a reader pinning the WAL", took)
 	}
@@ -70,7 +70,7 @@ func TestCloseReturnsWhileTheWriteLockIsHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
-	err, took := closeWithin(t, s, 10*time.Second)
+	took, err := closeWithin(t, s, 10*time.Second)
 	if !errors.Is(err, errCloseBusy) {
 		t.Fatalf("Close = %v, want errCloseBusy", err)
 	}

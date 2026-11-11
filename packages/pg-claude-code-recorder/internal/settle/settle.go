@@ -714,10 +714,7 @@ func (s *Settler) Tick() (TickStats, error) {
 	return s.tickLockedWaited(w)
 }
 
-// tickLocked is the Tick body, run with the run lock held.
-func (s *Settler) tickLocked() (TickStats, error) { return s.tickLockedWaited(0) }
-
-// tickLockedWaited is tickLocked that records the run-lock wait in the phases.
+// tickLockedWaited is the Tick body, run with the run lock held; it records the run-lock wait in the phases.
 func (s *Settler) tickLockedWaited(wait time.Duration) (TickStats, error) {
 	var stats TickStats
 	ph := TickPhases{LockWait: wait}

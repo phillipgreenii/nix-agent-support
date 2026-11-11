@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -92,7 +93,7 @@ func TestOpSweepRefusedWhileClosing(t *testing.T) {
 	e := newEnv(t, false)
 	d := e.open(t)
 	d.beginClosing()
-	ans, werr := d.opSweep(nil, []byte(`{"force":true}`))
+	ans, werr := d.opSweep(context.TODO(), []byte(`{"force":true}`))
 	if werr == nil || werr.Name != wire.ErrUnavailable {
 		t.Fatalf("answer %+v err %v, want an unavailable refusal", ans, werr)
 	}
