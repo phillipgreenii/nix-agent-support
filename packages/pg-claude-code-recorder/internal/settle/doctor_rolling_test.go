@@ -69,7 +69,7 @@ func TestRollingCycleChecksEachFileOnceAndSurvivesARestart(t *testing.T) {
 		c.DoctorSliceEvery = time.Minute
 	}
 	counts := map[int64]int{}
-	arm := func() { e.sett.doctorSeam.hashing = func(f int64) { counts[f]++ } }
+	arm := func() { e.sett.doctorSeamRef().hashing = func(f int64) { counts[f]++ } }
 	e.crash() // the settler is rebuilt with the budget
 	arm()
 	for i := 1; i <= perSlice; i++ {
@@ -115,7 +115,7 @@ func TestRollingSliceReleasesTheCopierLockBetweenFiles(t *testing.T) {
 	e.many(3)
 	inHash := make(chan struct{})
 	release := make(chan struct{})
-	e.sett.doctorSeam.hashing = func(int64) {
+	e.sett.doctorSeamRef().hashing = func(int64) {
 		inHash <- struct{}{}
 		<-release
 	}
@@ -246,7 +246,7 @@ func TestRollingDropsAFindingWhenTheGenerationChangesBeforeTheRecheck(t *testing
 		t.Fatal(err)
 	}
 	first := true
-	e.sett.doctorSeam.recheck = func(id int64) {
+	e.sett.doctorSeamRef().recheck = func(id int64) {
 		if !first {
 			return
 		}
@@ -285,7 +285,7 @@ func TestRollingCopyReclaimedUnderTheSliceIsSkippedGone(t *testing.T) {
 	file := e.fileID()
 	f, _ := e.st.File(file)
 	calls := 0
-	e.sett.doctorSeam.hashing = func(int64) {
+	e.sett.doctorSeamRef().hashing = func(int64) {
 		calls++
 		_ = os.Remove(e.st.CopyPath(file, f.CurGen))
 	}
@@ -421,11 +421,11 @@ func TestDoctorRunTakesOverAnOpenCycleAndTheRollingTickStandsDown(t *testing.T) 
 		t.Fatal("the cycle is still open after the CLI run")
 	}
 	// a held cursor: the tick does nothing
-	e.sett.doctorMu.Lock()
+	e.sett.doctorMuRef().Lock()
 	before := e.slices("ok")
 	e.clk.Advance(48 * time.Hour)
 	e.tickDoctor()
-	e.sett.doctorMu.Unlock()
+	e.sett.doctorMuRef().Unlock()
 	if e.slices("ok") != before {
 		t.Fatal("a rolling slice ran while the CLI held the cursor")
 	}
@@ -434,7 +434,7 @@ func TestDoctorRunTakesOverAnOpenCycleAndTheRollingTickStandsDown(t *testing.T) 
 func TestRollingProjectionAndGauges(t *testing.T) {
 	e := rollEnv(t, 0)
 	size := e.many(5)
-	e.sett.cfg.DoctorBytesPerSlice = size * 2
+	e.sett.setDoctorBudget(size * 2)
 	total, proj, err := e.sett.DoctorProjection()
 	if err != nil || total != 5*size || proj != 3*time.Minute {
 		t.Fatalf("%v: %d bytes, %v", err, total, proj)
