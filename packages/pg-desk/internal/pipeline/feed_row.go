@@ -129,8 +129,14 @@ func (p *Pipeline) IngestFeedRow(ctx context.Context, in FeedRowInput) (FeedRowR
 	return FeedRowResult{Written: out.written, Version: out.version}, nil
 }
 
+// FeedDegradedStreak is the number of consecutive degraded feed hydrations
+// (or retries) after which the backend counts as down and the rest of the pass
+// is left for the next poll.
+const FeedDegradedStreak = 3
+
 // RetryIngestFailures re-hydrates every failed-ingest entry of instance ("" =
-// every instance), at every poll with no counter and no deferral. An entry
+// every instance), at every poll with no counter and no deferral, except that a run of
+// FeedDegradedStreak consecutive degraded retries ends the pass (the rest wait for the next poll). An entry
 // that now hydrates is written with its RECORDED kinds as given (no marker,
 // no skip check) and cleared; an entry that still fails keeps its first
 // failure time and gets the new error. retried is the number of entries
@@ -143,7 +149,13 @@ func (p *Pipeline) RetryIngestFailures(ctx context.Context, instance string) (re
 	if err != nil {
 		return 0, 0, fmt.Errorf("pipeline: list ingest failures: %w", err)
 	}
+	streak := 0
 	for _, f := range fails {
+		// A run of degraded retries means the backend is down: leave the
+		// remaining entries untouched for the next poll.
+		if streak >= FeedDegradedStreak {
+			break
+		}
 		replay := f.Seq == 0
 		c := feedCommit{
 			instance: f.Instance, entityID: f.EntityID,
@@ -156,6 +168,11 @@ func (p *Pipeline) RetryIngestFailures(ctx context.Context, instance string) (re
 		out, err := p.commitFeedRow(ctx, c)
 		if err != nil {
 			return retried, stillFailing, err
+		}
+		if out.degraded {
+			streak++
+		} else {
+			streak = 0
 		}
 		if out.failure != "" {
 			f.LastError = out.failure
@@ -221,7 +238,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 		if errors.Is(err, gather.ErrUnavailable) {
 			reason = "hydration unavailable: " + err.Error()
 		}
-		return feedOutcome{failure: reason}, nil
+		return feedOutcome{failure: reason, degraded: errors.Is(err, gather.ErrUnavailable)}, nil
 	}
 
 	removedRow := slices.Contains(c.kinds, feedKindRemoved)

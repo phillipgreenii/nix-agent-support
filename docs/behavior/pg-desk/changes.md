@@ -305,6 +305,15 @@ row.
   otherwise cause. The table is retried at every poll (level-triggered, no counter) and an alert
   fires on its oldest age. This is ingest recovery (a row that could not be hydrated), not decider
   recovery.
+- **A down backend ends the pass, not the poll's patience.** Every call pg-desk makes to the
+  connector has a deadline, and a call that exceeds it counts as an unavailable (degraded) answer.
+  Three consecutive degraded answers, as on the listed path, stop the feed row loop and the
+  failed-ingest retry: the row that makes the third is committed (recorded as failed) and
+  acknowledged, the rows after it are neither ingested nor recorded and the feed is acknowledged
+  no further than the last committed row, so they are redelivered; the entries of the failed-ingest
+  table not yet retried stay untouched until the next poll. The source is reported degraded
+  (`hydration_backend_degraded`). A healthy row resets the streak. Which failed rows are retried at
+  all is unchanged.
 - **Serialised across fetch and commit.** The consumer named `pg-desk`, under which pg-desk reads an
   owning backend's feed, MUST be serialised across the feed fetch AND the commit, not only across
   the delivery step (see [`consumer.md`](consumer.md)).

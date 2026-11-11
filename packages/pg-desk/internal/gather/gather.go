@@ -101,6 +101,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -246,6 +247,11 @@ const pgConnectorBinary = "pg-connector"
 // pg-connector binary or a stubbed exec" wire-double requirement) — the
 // shape mirrors packages/pg-decider/internal/prchange/exec.go's Runner.
 var runner cmdrun.Runner = cmdrun.Exec
+
+// callTimeout bounds one pg-connector invocation: a call that never returns
+// fails at the deadline instead of holding the feed lock (a var so a test can
+// inject a short one).
+var callTimeout = 60 * time.Second
 
 // ThreadRef is one thread already cross-referenced to the triggering PR in
 // the store — Facts.LinkedThreads' own element type (Phase 13's eighth
@@ -854,7 +860,31 @@ type runResult struct {
 // permission denied, context already canceled, ...) — there is then no
 // exit code to classify.
 func (g *Gatherer) run(ctx context.Context, args []string, extraEnv []string) (runResult, error) {
-	res := runner(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
+	timeout := callTimeout
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	// The runner runs in its own goroutine so the deadline holds even for a
+	// runner that does not watch its context; a real cmdrun.Exec kills the
+	// child at the deadline and returns at once.
+	done := make(chan cmdrun.Result, 1)
+	exec := runner // read here, not in the goroutine: tests swap the seam
+	go func() {
+		done <- exec(cctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
+	}()
+	var res cmdrun.Result
+	select {
+	case res = <-done:
+	case <-cctx.Done():
+		res = cmdrun.Result{Code: -1, CtxErr: cctx.Err()}
+	}
+	if res.CtxErr != nil {
+		if perr := ctx.Err(); perr != nil {
+			return runResult{}, fmt.Errorf("exec pg-connector %v: %w", args, perr)
+		}
+		// Only the per-call deadline ended it: a timeout is the backend being
+		// unavailable, so callers that degrade on ErrUnavailable treat it so.
+		return runResult{}, fmt.Errorf("exec pg-connector %v: timed out after %s: %w", args, timeout, ErrUnavailable)
+	}
 	if res.StartErr != nil {
 		return runResult{}, fmt.Errorf("exec pg-connector %v: %w", args, res.StartErr)
 	}

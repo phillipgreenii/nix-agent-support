@@ -117,6 +117,8 @@ type fakeIngester struct {
 	st     *store.Store
 	ev     *feedEvents
 	failID map[string]bool
+	// degrade makes a failing row a degraded one (the backend is down).
+	degrade bool
 
 	retries atomic.Int32
 	rows    []pipeline.FeedRowInput
@@ -140,7 +142,7 @@ func (g *fakeIngester) IngestFeedRow(_ context.Context, in pipeline.FeedRowInput
 			Instance: in.Instance, EntityID: in.Row.EntityID, Seq: in.Row.Seq,
 			StoreIdentity: in.StoreIdentity, Kinds: in.Row.Kinds, LastError: "hydration failed: boom",
 		})
-		return pipeline.FeedRowResult{Failed: true}, err
+		return pipeline.FeedRowResult{Failed: true, Degraded: g.degrade}, err
 	}
 	return g.commit(in.Instance, in.Row, in.StoreIdentity, !replay)
 }
@@ -780,5 +782,50 @@ func TestFeedAFlipBurstIsHydratedAtMostMaxPerPollAndLosesNoRow(t *testing.T) {
 		if n != 1 {
 			t.Errorf("%s has %d rows, want exactly one added row", id, n)
 		}
+	}
+}
+
+// Three consecutive degraded rows trip the breaker: the later rows are neither
+// ingested nor recorded as failed, the acknowledgement stops at the last
+// committed row and the source is reported backend-degraded.
+func TestFeedDegradedStreakStopsTheRowLoopAndAcksOnlyCommittedRows(t *testing.T) {
+	f := newFeedFixture(t, []string{"jira-q"}, nil,
+		feedAnswer(feedIdentity, 10, frow(1, "J-1", "x"), frow(2, "J-2", "x"), frow(3, "J-3", "x"), frow(4, "J-4", "x"), frow(5, "J-5", "x")))
+	f.ing.degrade = true
+	for _, id := range []string{"J-1", "J-2", "J-3", "J-4", "J-5"} {
+		f.ing.failID[id] = true
+	}
+	env, out, err := f.run("router")
+	if err != nil || !out.Partial {
+		t.Fatalf("run = %+v, %v", out, err)
+	}
+	if len(f.ing.rows) != backendDownStreak {
+		t.Fatalf("ingested %d rows, want %d", len(f.ing.rows), backendDownStreak)
+	}
+	if !reflect.DeepEqual(f.feeder.acks, []int64{3}) {
+		t.Errorf("acks = %v, want the last committed row's seq, not the scanned next position", f.feeder.acks)
+	}
+	fails, _ := f.st.ListIngestFailures(feedInst)
+	if len(fails) != backendDownStreak {
+		t.Errorf("failed-ingest = %+v, want only the three rows before the trip", fails)
+	}
+	if s, _ := sourceOf(env, "jira-q"); s.Status != StatusDegraded || !strings.Contains(s.Reason, ReasonBackendDegraded) {
+		t.Errorf("source = %+v", s)
+	}
+}
+
+// A healthy row between degraded ones resets the streak.
+func TestFeedDegradedStreakResetsOnAHealthyRow(t *testing.T) {
+	f := newFeedFixture(t, []string{"jira-q"}, nil,
+		feedAnswer(feedIdentity, 6, frow(1, "J-1", "x"), frow(2, "J-2", "x"), frow(3, "J-ok", "x"), frow(4, "J-4", "x"), frow(5, "J-5", "x")))
+	f.ing.degrade = true
+	for _, id := range []string{"J-1", "J-2", "J-4", "J-5"} {
+		f.ing.failID[id] = true
+	}
+	if _, _, err := f.run("router"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ing.rows) != 5 || !reflect.DeepEqual(f.feeder.acks, []int64{6}) {
+		t.Errorf("ingested %d rows, acks %v; want all 5 and the scanned next position", len(f.ing.rows), f.feeder.acks)
 	}
 }

@@ -451,3 +451,37 @@ func TestPropagationToALinkedIssueIsGatedByWatched(t *testing.T) {
 		t.Fatalf("unwatched issue rows = %+v, want only its delivered row", u)
 	}
 }
+
+// A run of FeedDegradedStreak degraded retries ends the pass: the remaining
+// entries are untouched and are retried at the next poll.
+func TestRetryIngestFailures_StopsAfterADegradedStreakAndResumesNextPoll(t *testing.T) {
+	p, g := frPipeline(t)
+	g.err = fmt.Errorf("gather: fetch: %w", gather.ErrUnavailable)
+	for i := int64(1); i <= 5; i++ {
+		if r := frIngest(t, p, frRow(i, fmt.Sprintf("i-%d", i), "labels_changed")); !r.Failed || !r.Degraded {
+			t.Fatalf("row %d = %+v, want a degraded failure", i, r)
+		}
+	}
+	callsBefore := g.calls
+
+	retried, still, err := p.RetryIngestFailures(context.Background(), frInstance)
+	if err != nil || retried != FeedDegradedStreak || still != FeedDegradedStreak {
+		t.Fatalf("retry = %d, %d, %v, want the pass to stop after %d", retried, still, err, FeedDegradedStreak)
+	}
+	if got := g.calls - callsBefore; got != FeedDegradedStreak {
+		t.Fatalf("hydrations = %d, want %d", got, FeedDegradedStreak)
+	}
+	if n, _ := p.store.CountIngestFailures(frInstance); n != 5 {
+		t.Fatalf("entries = %d, want all 5 kept", n)
+	}
+
+	// Next poll, backend back: every entry is retried and cleared.
+	g.err = nil
+	retried, still, err = p.RetryIngestFailures(context.Background(), frInstance)
+	if err != nil || retried != 5 || still != 0 {
+		t.Fatalf("next poll = %d, %d, %v", retried, still, err)
+	}
+	if n, _ := p.store.CountIngestFailures(frInstance); n != 0 {
+		t.Fatalf("entries = %d, want 0", n)
+	}
+}

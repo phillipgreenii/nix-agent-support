@@ -33,7 +33,7 @@ const (
 // hydrations are deferred instead of retried inline. One degraded entity must
 // not stop the others (it would otherwise starve the sweep forever, since a
 // degraded read leaves hydrated_at untouched).
-const backendDownStreak = 3
+const backendDownStreak = pipeline.FeedDegradedStreak
 
 // casAttempts bounds the lost-race retries of the membership and
 // source-terminal deactivation writes.

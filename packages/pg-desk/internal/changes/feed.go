@@ -239,7 +239,7 @@ func (e *Engine) feedStep(ctx context.Context, entityType string, inst feedInsta
 	if !replay {
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Seq < rows[j].Seq })
 	}
-	lastSeq, processed, cut := int64(0), 0, false
+	lastSeq, processed, cut, tripped, streak := int64(0), 0, false, false, 0
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
 			return o, fmt.Errorf("changes: %w", err)
@@ -264,9 +264,26 @@ func (e *Engine) feedStep(ctx context.Context, entityType string, inst feedInsta
 		}
 		processed++
 		lastSeq = row.Seq
+		// A run of degraded answers means the backend is down or
+		// rate-limited: stop hydrating, as the list path does, and leave the
+		// rest of the batch unprocessed (neither ingested nor recorded) so it
+		// is redelivered.
+		switch {
+		case res.Degraded:
+			streak++
+		case !res.Skipped:
+			streak = 0
+		}
+		if streak >= backendDownStreak {
+			tripped = true
+			break
+		}
 	}
 	if cut {
 		o.reasons = appendUnique(o.reasons, ReasonHydrationBudget)
+	}
+	if tripped {
+		o.reasons = appendUnique(o.reasons, ReasonBackendDegraded)
 	}
 
 	// Acknowledge only after the commit: the scanned next position once the
@@ -277,9 +294,12 @@ func (e *Engine) feedStep(ctx context.Context, entityType string, inst feedInsta
 	}
 	var ack *int64
 	switch {
-	case cut && processed > 0:
+	case tripped && replay:
+		// A replay row has no sequence to acknowledge up to: leave the whole
+		// reset read to be redelivered.
+	case (cut || tripped) && processed > 0:
 		ack = &lastSeq
-	case cut:
+	case cut || tripped:
 		// Nothing was processed: nothing is acknowledged.
 	default:
 		ack = src.NextSeq
