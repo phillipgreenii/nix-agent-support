@@ -6,7 +6,7 @@
 // exact shape that let the sibling ListReviews id int64-vs-string bug
 // escape (real gh returns "id":"PRR_kwDO..." as a string; the fixture typed
 // "id":12345). This file instead builds the REAL five binaries this module
-// produces (pg-connector plus its four Tier-2 backends) via `go build`,
+// produces (pg-connector plus its Tier-2 backends) via `go build`,
 // execs the REAL pg-connector binary as a genuinely separate OS process
 // (mirroring packages/pg-router/cmd/pg-router/e2e_test.go's own
 // build-the-real-binary-and-exec-it convention), and lets IT exec the real
@@ -48,11 +48,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -74,12 +76,14 @@ const (
 )
 
 // contractBackendBinaries is every binary this suite builds and runs for
-// real: the Tier-1 umbrella plus all four Tier-2 backends this bead's scope
-// names (pr-github, ci-github-actions, issue-beads, scm-git).
+// real: the Tier-1 umbrella plus its Tier-2 backends. The pr and ci
+// instances are both served by the one daemon-backed pg-connector-github
+// binary (serve, pr and ci modes), which replaced the retired stateless
+// pr-github and ci-github-actions backends; issue-beads and scm-git are
+// unchanged.
 var contractBackendBinaries = []string{
 	"pg-connector",
-	"pg-connector-pr-github",
-	"pg-connector-ci-github-actions",
+	"pg-connector-github",
 	"pg-connector-issue-beads",
 	"pg-connector-scm-git",
 }
@@ -137,31 +141,133 @@ func buildContractBinaries() (string, error) {
 	return dir, nil
 }
 
-// contractRegistryYAML is the connector.<type> registry every case in this
-// file registers all four real backends under, by their bare binary names
-// (registry.go's own PATH-lookup convention) — issue/ci/pr are list-valued,
-// scm is single-valued (scm.go's own doc comment: "connector.scm is a
-// SINGLE-VALUED registry entry").
-const contractRegistryYAML = `connector:
+// Instance names of the two daemon-backed GitHub registrations. They keep
+// the pre-daemon names (the daemon's registration rule: every --backend pin,
+// sources[] row and backends.<name> key stays valid) while the command behind
+// each becomes the daemon's client mode.
+const (
+	prInstance = "pg-connector-pr-github"
+	ciInstance = "pg-connector-ci-github-actions"
+)
+
+// githubConfigName is the daemon's rendered config file, written next to the
+// registry file by writeContractRegistry.
+const githubConfigName = "github-config.json"
+
+// writeContractRegistry writes the connector.<type> registry every case in
+// this file uses, plus the pg-connector-github daemon config it points at,
+// into a fresh temp directory, and returns the registry path for setting
+// $PG_PR_CONFIG (registry.go's own resolution order checks that env var
+// first). issue/ci/pr are list-valued, scm is single-valued (scm.go's own
+// doc comment: "connector.scm is a SINGLE-VALUED registry entry"). The pr and
+// ci entries are instances whose command is the daemon binary's client mode.
+// The daemon itself is NOT started here: see startGitHubDaemon.
+func writeContractRegistry(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, githubConfigName)
+	stateDir := shortContractDir(t)
+	raw, err := json.Marshal(map[string]any{
+		"state_dir":   stateDir,
+		"socket_path": filepath.Join(stateDir, "sock"),
+		"pr":          map[string]any{"queries": map[string]any{}},
+		"ci":          map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("marshal github daemon config: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, raw, 0o600); err != nil {
+		t.Fatalf("write github daemon config: %v", err)
+	}
+	registry := fmt.Sprintf(`connector:
   pr:
-    - pg-connector-pr-github
+    - name: %[1]s
+      command: [pg-connector-github, --config, %[3]s, pr]
   ci:
-    - pg-connector-ci-github-actions
+    - name: %[2]s
+      command: [pg-connector-github, --config, %[3]s, ci]
   issue:
     - pg-connector-issue-beads
   scm: pg-connector-scm-git
-`
-
-// writeContractRegistry writes contractRegistryYAML to a fresh temp file
-// and returns its path, for setting $PG_PR_CONFIG (registry.go's own
-// resolution order checks that env var first).
-func writeContractRegistry(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(contractRegistryYAML), 0o644); err != nil {
+`, prInstance, ciInstance, cfgPath)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(registry), 0o644); err != nil {
 		t.Fatalf("write registry config: %v", err)
 	}
 	return path
+}
+
+// shortContractDir returns a fresh directory with a short absolute path (a
+// unix socket path is capped near 104 bytes, and t.TempDir can exceed that).
+func shortContractDir(t *testing.T) string {
+	t.Helper()
+	d, err := os.MkdirTemp("/tmp", "pcc")
+	if err != nil {
+		t.Fatalf("mkdir short temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	return d
+}
+
+// startGitHubDaemon starts the real pg-connector-github daemon (serve mode)
+// for the registry writeContractRegistry wrote, under the same real
+// environment as every other contract subprocess (real gh and its
+// credentials, no fake), and returns once its socket accepts connections.
+// The daemon is stopped (SIGTERM, then kill) at the end of the test. Callers
+// invoke it only when real GitHub access is configured: the daemon-backed pr
+// and ci instances need a running daemon, and without one their client modes
+// answer unavailable, which the fan-out cases tolerate as a degraded row.
+func startGitHubDaemon(t *testing.T, registryPath string) {
+	t.Helper()
+	cfgPath := filepath.Join(filepath.Dir(registryPath), githubConfigName)
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read github daemon config: %v", err)
+	}
+	var cfg struct {
+		Socket string `json:"socket_path"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("decode github daemon config: %v", err)
+	}
+	cmd := exec.Command(filepath.Join(contractBinDir, "pg-connector-github"), "--config", cfgPath, "serve")
+	cmd.Dir = "/"
+	cmd.Env = contractEnv(nil)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start pg-connector-github serve: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	t.Cleanup(func() {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	})
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-done:
+			t.Fatalf("pg-connector-github serve exited before it was ready: %s", out.String())
+		default:
+		}
+		if c, err := net.Dial("unix", cfg.Socket); err == nil {
+			_ = c.Close()
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("pg-connector-github serve never opened %s: %s", cfg.Socket, out.String())
 }
 
 // contractEnvKeysToStrip are env vars that must never leak from this test
@@ -179,6 +285,8 @@ var contractEnvKeysToStrip = map[string]bool{
 	"ZR_MACHINE_SUPPORT_WORKSPACE_ROOT": true,
 	"PG_PR_CONFIG":                      true,
 	"PG_CONNECTOR_ISSUE_BEADS_DIR":      true,
+	"PG_CONNECTOR_ISSUE_BEADS_ACTOR":    true,
+	"BEADS_ACTOR":                       true,
 	"XDG_STATE_HOME":                    true,
 }
 
@@ -353,6 +461,9 @@ func TestContract_IssueBeads_RealBD_RoundTrip(t *testing.T) {
 	env := contractEnv(map[string]string{
 		"PG_PR_CONFIG":                 writeContractRegistry(t),
 		"PG_CONNECTOR_ISSUE_BEADS_DIR": bdDir,
+		// The backend refuses an in_progress transition (a claim) without an
+		// actor, so the claim is never recorded in the operator's name.
+		"PG_CONNECTOR_ISSUE_BEADS_ACTOR": "pg-connector-contract-suite",
 	})
 
 	created := runPGConnector(t, "", env, "issue", "create",
@@ -389,7 +500,7 @@ func TestContract_IssueBeads_RealBD_RoundTrip(t *testing.T) {
 
 	transitioned := runPGConnector(t, "", env, "issue", "transition", issue.ID, "--state", "in_progress")
 	if transitioned.exitCode != 0 {
-		t.Fatalf("issue transition: exit=%d stderr=%s", transitioned.exitCode, transitioned.stderr)
+		t.Fatalf("issue transition: exit=%d stderr=%s stdout=%s", transitioned.exitCode, transitioned.stderr, transitioned.stdout)
 	}
 
 	shown := runPGConnector(t, "", env, "issue", "show", issue.ID)
@@ -532,8 +643,10 @@ func ghRealModeConfigured() bool {
 }
 
 func TestContract_ConfigValidate_AllFourRealBackends(t *testing.T) {
+	registry := writeContractRegistry(t)
+	startGitHubDaemon(t, registry)
 	env := contractEnv(map[string]string{
-		"PG_PR_CONFIG": writeContractRegistry(t),
+		"PG_PR_CONFIG": registry,
 	})
 
 	res := runPGConnector(t, "", env, "config", "validate")
@@ -554,8 +667,10 @@ func TestContract_ConfigValidate_AllFourRealBackends(t *testing.T) {
 }
 
 func TestContract_AuthStatus_AllFourRealBackends(t *testing.T) {
+	registry := writeContractRegistry(t)
+	startGitHubDaemon(t, registry)
 	env := contractEnv(map[string]string{
-		"PG_PR_CONFIG": writeContractRegistry(t),
+		"PG_PR_CONFIG": registry,
 	})
 
 	res := runPGConnector(t, "", env, "auth", "status")
@@ -589,15 +704,25 @@ func TestContract_AuthStatus_AllFourRealBackends(t *testing.T) {
 func assertFourBackendSources(t *testing.T, sources []SourceResult) {
 	t.Helper()
 	want := map[string]bool{
-		"pg-connector-pr-github":         true,
-		"pg-connector-ci-github-actions": true,
-		"pg-connector-issue-beads":       true,
-		"pg-connector-scm-git":           true,
+		prInstance:                 true,
+		ciInstance:                 true,
+		"pg-connector-issue-beads": true,
+		"pg-connector-scm-git":     true,
 	}
-	if len(sources) != len(want) {
-		t.Fatalf("sources = %+v, want exactly %d rows (one per registered backend)", sources, len(want))
-	}
+	// A daemon-backed instance also reports a "<name>/health" row
+	// (healthRowSuffix, backend_status.go) next to its own row; those are
+	// accepted but never counted as backends.
+	var rows []SourceResult
 	for _, s := range sources {
+		if strings.HasSuffix(s.Source, healthRowSuffix) && (strings.TrimSuffix(s.Source, healthRowSuffix) == prInstance || strings.TrimSuffix(s.Source, healthRowSuffix) == ciInstance) {
+			continue
+		}
+		rows = append(rows, s)
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("sources = %+v, want exactly %d rows (one per registered backend, plus the daemon health rows)", sources, len(want))
+	}
+	for _, s := range rows {
 		if !want[s.Source] {
 			t.Fatalf("unexpected source %q in %+v", s.Source, sources)
 		}
@@ -644,7 +769,7 @@ func assertLocalBackendsHealthy(t *testing.T, sources []SourceResult) {
 // environment limitation.
 func assertGHBackendsHealthy(t *testing.T, sources []SourceResult) {
 	t.Helper()
-	for _, name := range []string{"pg-connector-pr-github", "pg-connector-ci-github-actions"} {
+	for _, name := range []string{prInstance, ciInstance} {
 		s := sourceFor(t, sources, name)
 		if s.Status != SourceSucceeded {
 			t.Fatalf("%s = %+v, want succeeded (this run is configured for real GitHub access)", name, s)
@@ -655,7 +780,7 @@ func assertGHBackendsHealthy(t *testing.T, sources []SourceResult) {
 // ---------------------------------------------------------------------
 // pr (pg-connector-pr-github): show — every op this backend's own
 // capabilities response declares
-// (the removed pg-connector-pr-github/main.go's newDispatchTable) — against a
+// (now served by the pg-connector-github daemon's pr instance; its own unit and integration tests cover the ops against a fake gh) — against a
 // real, caller-chosen PR/repo (requireGHRepoAndPR). categorize/
 // feedback-set were retired by bead pg2-2j5ac.28.7 (statelessness, D3;
 // category/disposition are re-derived by pg-desk rather than persisted by
@@ -665,8 +790,10 @@ func assertGHBackendsHealthy(t *testing.T, sources []SourceResult) {
 func TestContract_PRGithub_RealGH_Show(t *testing.T) {
 	repo, prNumber := requireGHRepoAndPR(t)
 	id := fmt.Sprintf("%s#%d", repo, prNumber)
+	registry := writeContractRegistry(t)
+	startGitHubDaemon(t, registry)
 	env := contractEnv(map[string]string{
-		"PG_PR_CONFIG": writeContractRegistry(t),
+		"PG_PR_CONFIG": registry,
 	})
 
 	shown := runPGConnector(t, "", env, "pr", "show", id)
@@ -706,15 +833,17 @@ func TestContract_PRGithub_RealGH_Show(t *testing.T) {
 // ---------------------------------------------------------------------
 // ci (pg-connector-ci-github-actions): list, logs, rerun-failed — every
 // op this backend's own capabilities response declares
-// (the removed pg-connector-ci-github-actions/main.go's newDispatchTable) —
+// (now served by the pg-connector-github daemon's ci instance; its own tests cover the ops against a fake gh) —
 // against the same real, caller-chosen PR/repo.
 // ---------------------------------------------------------------------
 
 func TestContract_CIGithubActions_RealGH_ListLogsRerunFailed(t *testing.T) {
 	repo, prNumber := requireGHRepoAndPR(t)
 	id := fmt.Sprintf("%s#%d", repo, prNumber)
+	registry := writeContractRegistry(t)
+	startGitHubDaemon(t, registry)
 	env := contractEnv(map[string]string{
-		"PG_PR_CONFIG": writeContractRegistry(t),
+		"PG_PR_CONFIG": registry,
 	})
 
 	listed := runPGConnector(t, "", env, "ci", "list", id)
@@ -722,8 +851,8 @@ func TestContract_CIGithubActions_RealGH_ListLogsRerunFailed(t *testing.T) {
 		t.Fatalf("ci list %s: exit=%d stderr=%s stdout=%s", id, listed.exitCode, listed.stderr, listed.stdout)
 	}
 	outcome := decodeContractJSON[ciListOutcome](t, listed.stdout)
-	if len(outcome.Sources) != 1 || outcome.Sources[0].Source != "pg-connector-ci-github-actions" {
-		t.Fatalf("ci list %s: sources = %+v, want exactly one row for pg-connector-ci-github-actions", id, outcome.Sources)
+	if len(outcome.Sources) != 1 || outcome.Sources[0].Source != ciInstance {
+		t.Fatalf("ci list %s: sources = %+v, want exactly one row for %s", id, outcome.Sources, ciInstance)
 	}
 	if outcome.Sources[0].Status != SourceSucceeded {
 		t.Fatalf("ci list %s: source = %+v, want succeeded (a real, resolvable PR/repo)", id, outcome.Sources[0])
