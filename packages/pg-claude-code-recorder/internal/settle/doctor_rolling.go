@@ -197,23 +197,13 @@ func (s *Settler) setCursorAge(cur DoctorCursor, now time.Time) {
 // duration, one hour at least). A store that never completed a cycle is due.
 func (s *Settler) cycleDue(cur DoctorCursor, now time.Time) bool {
 	interval := s.cfg.DoctorInterval
-	if interval <= 0 {
-		return false
-	}
 	last := cur.LastEndNS
-	if last == 0 {
+	if last == 0 && interval > 0 {
 		if r, ok := LoadDoctor(s.st.Dir()); ok {
 			last = r.AtNS
 		}
 	}
-	if last == 0 {
-		return true
-	}
-	expected := time.Duration(cur.LastDurationNS)
-	if expected < minExpectedCycle {
-		expected = minExpectedCycle
-	}
-	return now.Sub(time.Unix(0, last)) >= interval-expected
+	return cycleDueAt(interval, last, cur.LastDurationNS, now)
 }
 
 func (s *Settler) cursorPath() string { return filepath.Join(s.st.Dir(), DoctorCursorFile) }
