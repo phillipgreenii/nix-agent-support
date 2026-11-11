@@ -226,23 +226,15 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 	for session := range dirty {
 		work[session] = true
 	}
-	liveDiff := false
-	for session := range live {
-		if live[session] && !s.liveSeen[session] {
-			work[session], liveDiff = true, true
-		}
-	}
-	for session := range s.liveSeen {
-		if !live[session] {
-			work[session], liveDiff = true, true
-		}
+	changedLive := liveDiffSessions(live, s.liveSeen)
+	liveDiff := len(changedLive) > 0
+	for session := range changedLive {
+		work[session] = true
 	}
 	lap(&ph.Reads)
 	s.liveSeen = copySet(live)
-	for session := range s.heldRewritten(ctx) {
-		if !live[session] {
-			work[session] = true
-		}
+	for session := range notLiveSessions(s.heldRewritten(ctx), live) {
+		work[session] = true
 	}
 	if flip {
 		rows, _ := s.st.Stages()
@@ -252,10 +244,8 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 				settled[r.Session] = true
 			}
 		}
-		for session := range s.gcache {
-			if !settled[session] {
-				work[session] = true
-			}
+		for session := range unsettledSessions(s.gcache, settled) {
+			work[session] = true
 		}
 	}
 	items := s.due.PopDue(now)
@@ -266,12 +256,7 @@ func (s *Settler) Wake(now time.Time) (TickStats, error) {
 			removal[it.Session] = true
 		}
 	}
-	dirtyReason := len(dirty) > 0 || sigLive
-	for reason, on := range map[string]bool{
-		"dirty": dirtyReason,
-		"due":   len(items) > 0,
-		"poll":  (liveDiff && !sigLive) || flip || (!dirtyReason && len(items) == 0),
-	} {
+	for reason, on := range wakeReasons(len(dirty), len(items), sigLive, liveDiff, flip) {
 		if on {
 			reg.Add(obs.MSettleWakes, map[string]string{"reason": reason}, 1)
 		}
