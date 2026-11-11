@@ -33,6 +33,15 @@ resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Autho
 A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
 reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
 
+`mkGoApp` (and so `mkGoBinary`) excludes every `*_test.go` file and every `testdata/` directory from
+`src`, and therefore from the version digest and the build input, unless `doCheck = true`
+(`phillipg-nix-repo-base` ADR 0006 amendment 2026-11-10). A test-only edit changes no derivation,
+including those of packages that consume the module through a local `replace`. Production (non-test)
+code MUST NOT depend on tests or `testdata/` (a non-test `//go:embed testdata/...` fails the build
+with "no matching files"; such a package MUST keep test-support packages out of its `subPackages`
+closure). `doCheck = true` opts out of the filter. Renaming `testdata` to dodge the filter is not
+allowed (operator ruling, Phillip, 2026-11-10).
+
 **Cross-module consistency of local replaces** (bead `pg2-cahkj`): `go-deps-wired` checks wiring,
 not that sibling modules still build against each other. A dependency bump synced into one module
 (e.g. `pg-connector`) leaves every module that consumes it through `replace => ../<module>`

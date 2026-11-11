@@ -35,13 +35,19 @@ mkGoApp {
   # added test-pg-connector-version-stamped's dependency on `pkgs.pg-connector`,
   # which forces THIS derivation itself to build under `nix flake check` and
   # therefore actually run doCheck's `go test ./...` against this filtered
-  # src for the first time. (Historical since bead pg2-pla9d.2: repo-base's
-  # mkGoApp now defaults `doCheck = false`, so this package build runs no
-  # tests at all and the whole-module suite runs only in
-  # `checks.<system>.pg-connector-go-tests`, whose own `src` is the raw,
-  # unfiltered package dir. The filtered `src` and its `*.nix` inclusion are
-  # kept as-is: they are harmless, and still correct should doCheck ever be
-  # re-enabled here.) This still means an edit to ANY backend's Go
+  # src for the first time. (Superseded: repo-base's mkGoApp defaults
+  # `doCheck = false`, so this package build runs no tests at all and the
+  # whole-module suite runs only in `checks.<system>.pg-connector-go-tests`,
+  # whose own `src` is the raw, unfiltered package dir. Further, mkGoApp now
+  # excludes every `*_test.go` file and `testdata/` directory from `src` and
+  # from the version digest unless `doCheck = true` (repo-base ADR 0006
+  # amendment 2026-11-10), so a test-only edit no longer re-digests this
+  # derivation or the packages that consume it through a local replace.
+  # Production code here MUST NOT depend on tests or testdata/, and `testdata`
+  # MUST NOT be renamed to dodge the filter (operator ruling, Phillip,
+  # 2026-11-10). Setting `doCheck = true` would opt out of the filter and
+  # make test edits re-digest again; the `*.nix` inclusion below is kept for
+  # that case.) This still means an edit to ANY backend's Go
   # source, or to any of the 5 `*.nix` files, legitimately re-digests this
   # ONE derivation — that is correct, not a bug: the guard must re-verify the
   # invariant over the new content. Each Tier-2 backend below stays isolated
