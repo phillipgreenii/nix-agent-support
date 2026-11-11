@@ -825,7 +825,7 @@ groups:
           severity: warning
         annotations:
           summary: "The focus role's issue.changed consumer is over 500 changes behind"
-          description: "The lag of an issue change-log consumer (highest issue change sequence minus the consumer cursor) has exceeded 500 for over 30 minutes, so the focus decider is not keeping up with issue changes. The 500 threshold is provisional: the operator checkpoint sets the final budget from the measured decider cost."
+          description: "The lag of the pg-router issue change-log consumer (highest issue change sequence minus the consumer cursor) has exceeded 500 for over 30 minutes, so the focus decider is not keeping up with issue changes. The 500 threshold is provisional: the operator checkpoint sets the final budget from the measured decider cost."
         data:
           - refId: A
             relativeTimeRange:
@@ -836,7 +836,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max(pg_desk_consumer_lag{type="issue"})
+              expr: max(pg_desk_consumer_lag{type="issue",consumer="pg-router"})
           - refId: B
             datasourceUid: __expr__
             model:

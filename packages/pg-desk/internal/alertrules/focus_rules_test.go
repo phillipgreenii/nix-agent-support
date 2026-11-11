@@ -192,12 +192,14 @@ var focusRules = []focusRule{
 		uid: "pg-desk-focus-consumer-lag",
 		// The threshold is PROVISIONAL: the operator checkpoint sets the final
 		// budget from the measured decider cost (serve.md says so too).
-		expr:      `max(pg_desk_consumer_lag{type="issue"})`,
+		expr:      `max(pg_desk_consumer_lag{type="issue",consumer="pg-router"})`,
 		forText:   "30m",
 		forDur:    30 * time.Minute,
 		threshold: 500,
 		agg: func(in []focusSample) (float64, bool) {
-			return maxOf(matchSeries(in, labelEq("type", "issue")))
+			return maxOf(matchSeries(in, func(l map[string]string) bool {
+				return l["type"] == "issue" && l["consumer"] == "pg-router"
+			}))
 		},
 	},
 }
@@ -258,7 +260,7 @@ func (r focusRule) hot() []focusSample {
 	case "pg-desk-focus-rank-degraded":
 		return []focusSample{{map[string]string{"input": "unparseable_due"}, 1}, {map[string]string{"input": "age_fallback"}, 35}}
 	case "pg-desk-focus-consumer-lag":
-		return []focusSample{{map[string]string{"type": "issue", "consumer": "focus"}, 501}}
+		return []focusSample{{map[string]string{"type": "issue", "consumer": "pg-router"}, 501}}
 	}
 	panic("unknown rule " + r.uid)
 }
@@ -300,10 +302,13 @@ func (r focusRule) cold() []focusSample {
 			{map[string]string{"input": "unmapped_priority"}, 19},
 		}
 	case "pg-desk-focus-consumer-lag":
-		// At the provisional threshold exactly; a pr-type consumer far over it.
+		// At the provisional threshold exactly on the router consumer; a pr-type consumer far over it.
 		return []focusSample{
-			{map[string]string{"type": "issue", "consumer": "focus"}, 500},
+			{map[string]string{"type": "issue", "consumer": "pg-router"}, 500},
 			{map[string]string{"type": "pr", "consumer": "other"}, 99999},
+			// A stale scratch consumer left by a verification run: a huge lag that
+			// the pg-router scoping must ignore.
+			{map[string]string{"type": "issue", "consumer": "cfuf3b-scratch-1"}, 25532},
 		}
 	}
 	panic("unknown rule " + r.uid)

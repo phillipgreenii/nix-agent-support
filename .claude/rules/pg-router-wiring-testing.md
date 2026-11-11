@@ -72,6 +72,16 @@ config-testing-trap paragraph): deliberately break ONE required input the real a
 changes. If breaking the input produces the same result as the working case, this test isn't
 exercising anything.
 
+**Scratch consumer cleanup.** A `run-query` of a pg-desk change-flow source registers a change
+consumer in the pg-desk store under the consumer name in its argv, and that row persists until
+forgotten. If the pass runs against the LIVE pg-desk store (a scratch router config does not scratch
+the pg-desk store unless the pg-desk config is scratch too), use a distinctive scratch consumer name
+and, when done, remove it with `pg-desk issue consumer forget <name>` (list first with
+`pg-desk issue consumer list`). Otherwise the abandoned row's lag grows without bound and
+`pg-desk status` keeps listing it. The focus lag alert counts only the `pg-router` consumer, so a
+leftover scratch consumer no longer pages, but it still pins change-log pruning until
+`consumer_stale_after` passes.
+
 ### 3. Test the listener (the role) in isolation
 
 Take one real match's JSON from step 2 and:
