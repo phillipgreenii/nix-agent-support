@@ -50,7 +50,7 @@ func serveMonRead(t *testing.T, svc *Service, request string) (map[string]any, i
 // dropped from the reply even though the caller asked for it.
 func TestServeMonRead(t *testing.T) {
 	mp, reader := metrics.NewReadableProvider()
-	emitter, err := metrics.New(mp, func() map[string]int { return nil })
+	emitter, err := metrics.New(t.Context(), mp, func() map[string]int { return nil })
 	if err != nil {
 		t.Fatalf("metrics.New: %v", err)
 	}

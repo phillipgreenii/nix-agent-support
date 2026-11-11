@@ -744,6 +744,9 @@ func (s *Service) Accept(ctx context.Context) error {
 	s.setState(conformance.Started)
 	stopped := make(chan struct{})
 	defer close(stopped)
+	// In-flight requests are drained, not aborted, when ctx is cancelled to stop
+	// accepting, so they run on a context that survives that cancellation.
+	reqCtx := context.WithoutCancel(ctx)
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -764,7 +767,7 @@ func (s *Service) Accept(ctx context.Context) error {
 		s.inflight.Add(1)
 		go func() {
 			defer s.inflight.Done()
-			s.handleConn(conn)
+			s.handleConn(reqCtx, conn)
 		}()
 	}
 }
@@ -851,7 +854,7 @@ func serverDeadlineFor(subcommand string) time.Duration {
 // handleConn serves one transport frame: authenticate, admission-control the
 // two read verbs, run the subcommand through the participant boundary, return
 // the reply and coarse exit code.
-func (s *Service) handleConn(conn net.Conn) {
+func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	// A socket deadline is WALL-clock, so it deliberately uses time.Now rather than
 	// the injectable clock seam (which stamps domain timestamps): a mock clock must
@@ -903,7 +906,7 @@ func (s *Service) handleConn(conn net.Conn) {
 		}
 	}
 	var out bytes.Buffer
-	code := s.Serve(req.Subcommand, bytes.NewReader(req.Payload), &out)
+	code := s.serve(ctx, req.Subcommand, bytes.NewReader(req.Payload), &out)
 	s.respond(conn, code, out.Bytes())
 }
 
@@ -927,6 +930,12 @@ func (s *Service) respond(w io.Writer, code int, reply []byte) {
 // after that the request is refused with the protocol error envelope rather than
 // silently dropped, so the caller's exit code tells it what happened.
 func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) int {
+	return s.serve(context.Background(), subcommand, stdin, stdout)
+}
+
+// serve is Serve with the context of the request being served, threaded to the
+// verbs that call out (status and mon.read metric snapshots, level refresh).
+func (s *Service) serve(ctx context.Context, subcommand string, stdin io.Reader, stdout io.Writer) int {
 	if st := s.State(); st != conformance.Started {
 		writeBody(stdout, errorReply(fmt.Sprintf("not accepting: core is %s", st)))
 		return conformance.ExitError
@@ -937,9 +946,9 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 	case SubcommandSelfStatus:
 		return s.handleSelfStatus(stdin, stdout)
 	case SubcommandMonRead:
-		return s.handleMonRead(stdin, stdout)
+		return s.handleMonRead(ctx, stdin, stdout)
 	case SubcommandStatus:
-		return s.handleStatus(stdin, stdout)
+		return s.handleStatus(ctx, stdin, stdout)
 	case SubcommandRegister:
 		return s.handleRegister(stdin, stdout)
 	case SubcommandLogCompact:
@@ -953,7 +962,7 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 	case SubcommandLevelClear:
 		return s.handleLevelClear(stdin, stdout)
 	case SubcommandLevelRefresh:
-		return s.handleLevelRefresh(stdin, stdout)
+		return s.handleLevelRefresh(ctx, stdin, stdout)
 	case SubcommandGet:
 		return s.handleGet(stdin, stdout)
 	case SubcommandPut:
@@ -1185,7 +1194,7 @@ const activityReadWindow = activity.DefaultSize
 // one is outside this task's Files — a documented realization gap, not a
 // silent guess. The resolved-configuration and per-type-queue-depth MUSTs
 // are fully realized below.
-func (s *Service) handleStatus(stdin io.Reader, stdout io.Writer) int {
+func (s *Service) handleStatus(ctx context.Context, stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply("status: read request: "+err.Error()))
@@ -1204,7 +1213,7 @@ func (s *Service) handleStatus(stdin io.Reader, stdout io.Writer) int {
 		return conformance.ExitError
 	}
 
-	body, err := json.Marshal(s.composeStatusReply(req.Since))
+	body, err := json.Marshal(s.composeStatusReply(ctx, req.Since))
 	if err != nil { // unreachable: composeStatusReply holds only JSON-safe scalars/slices/maps
 		writeBody(stdout, errorReply("status: marshal reply: "+err.Error()))
 		return conformance.ExitError
@@ -1224,7 +1233,7 @@ func (s *Service) handleStatus(stdin io.Reader, stdout io.Writer) int {
 // PublishTick) — every tick-derived field is simply omitted from the reply
 // rather than guessed at, and nothing here panics on that nil (Task 3.8
 // Acceptance).
-func (s *Service) composeStatusReply(since uint64) map[string]any {
+func (s *Service) composeStatusReply(ctx context.Context, since uint64) map[string]any {
 	regs := s.reg.List()
 	tick := s.CurrentTick()
 
@@ -1326,7 +1335,7 @@ func (s *Service) composeStatusReply(since uint64) map[string]any {
 	// never fail outright over a metrics-snapshot hiccup, deliberately NOT
 	// mon.read's own error-surfacing posture.
 	if s.metricsReader != nil {
-		if rm, err := s.metricsReader.Snapshot(context.Background()); err == nil {
+		if rm, err := s.metricsReader.Snapshot(ctx); err == nil {
 			reply["counters"] = statusCounters(rm)
 		}
 	}

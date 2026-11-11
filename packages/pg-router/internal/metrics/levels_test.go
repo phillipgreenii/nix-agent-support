@@ -41,7 +41,7 @@ func newLevelHarness(t *testing.T, samples *[]LevelSample, opts ...Option) *leve
 		WithLevels(func() []LevelSample { return *samples }),
 		WithPausedRoles("seeded"),
 	}, opts...)
-	h.e, err = New(mp, func() map[string]int { return nil }, all...)
+	h.e, err = New(t.Context(), mp, func() map[string]int { return nil }, all...)
 	if err != nil {
 		t.Fatal(err)
 	}

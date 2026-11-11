@@ -230,7 +230,7 @@ func (s *Service) handleLevelClear(stdin io.Reader, stdout io.Writer) int {
 	return writeJSONReply(stdout, verb, map[string]any{"schemaVersion": schemas.SchemaVersion, "cleared": cleared})
 }
 
-func (s *Service) handleLevelRefresh(stdin io.Reader, stdout io.Writer) int {
+func (s *Service) handleLevelRefresh(ctx context.Context, stdin io.Reader, stdout io.Writer) int {
 	const verb = SubcommandLevelRefresh
 	if s.levelRefresher == nil {
 		writeBody(stdout, errorReply(verb+": level refresh is not available on this core"))
@@ -242,7 +242,7 @@ func (s *Service) handleLevelRefresh(stdin io.Reader, stdout io.Writer) int {
 	if !decodeVerb(stdin, stdout, verb, LevelRefreshRequestSchema, &req) {
 		return conformance.ExitError
 	}
-	results := s.levelRefresher.RefreshLevels(context.Background(), req.Resources)
+	results := s.levelRefresher.RefreshLevels(ctx, req.Resources)
 	rows := make([]map[string]any, 0, len(results))
 	for _, r := range results {
 		row := map[string]any{"resource": r.Resource, "outcome": r.Outcome}

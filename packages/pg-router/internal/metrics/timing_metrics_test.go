@@ -208,6 +208,7 @@ func newGaugeHarness(t *testing.T) *harness {
 	clk := &mockClock{t: time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)}
 	var q *eventqueue.Queue
 	emitter, err := New(
+		t.Context(),
 		mp, func() map[string]int { return q.DepthByType() },
 		WithClock(clk.now),
 		WithQueueAges(func() map[string]time.Duration { return q.OldestPendingAgeByType() }),

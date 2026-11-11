@@ -22,6 +22,7 @@ func TestListenerPendingGaugesExportEveryRegisteredListener(t *testing.T) {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	reads := 0
 	if _, err := New(
+		t.Context(),
 		mp, func() map[string]int { return nil },
 		WithListenerPending(func() map[string]eventqueue.ListenerPending {
 			reads++
@@ -66,6 +67,7 @@ func TestListenerPendingGaugesLabelSetIsExactlyTheRegisteredIDs(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	if _, err := New(
+		t.Context(),
 		mp, func() map[string]int { return nil },
 		WithListenerPending(func() map[string]eventqueue.ListenerPending {
 			return map[string]eventqueue.ListenerPending{"r1": {Count: 1}, "r2": {}}
@@ -109,7 +111,7 @@ func TestListenerPendingGaugesLabelSetIsExactlyTheRegisteredIDs(t *testing.T) {
 func TestListenerPendingGaugesAbsentWithoutOption(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	if _, err := New(mp, func() map[string]int { return nil }); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	var rm metricdata.ResourceMetrics
@@ -129,6 +131,7 @@ func TestListenerPendingGaugesAgainstRealQueue(t *testing.T) {
 	clk := &mockClock{t: time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)}
 	var q *eventqueue.Queue
 	if _, err := New(
+		t.Context(),
 		mp, func() map[string]int { return q.DepthByType() },
 		WithClock(clk.now),
 		WithListenerPending(func() map[string]eventqueue.ListenerPending { return q.PendingByListener() }),

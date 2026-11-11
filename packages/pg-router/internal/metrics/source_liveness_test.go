@@ -27,7 +27,7 @@ func newSourceLivenessHarness(t *testing.T, sources map[string]time.Duration) *s
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	clk := &mockClock{t: time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)}
-	e, err := New(mp, func() map[string]int { return nil }, WithClock(clk.now), WithPullSources(sources))
+	e, err := New(t.Context(), mp, func() map[string]int { return nil }, WithClock(clk.now), WithPullSources(sources))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -187,7 +187,7 @@ func newSleepHarness(t *testing.T, sources map[string]time.Duration) (*sourceLiv
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	host := &hostClock{wall: time.Date(2026, 10, 12, 9, 6, 1, 0, time.UTC)}
-	e, err := New(mp, func() map[string]int { return nil },
+	e, err := New(t.Context(), mp, func() map[string]int { return nil },
 		WithClock(host.now), WithAwakeSince(host.awakeSince), WithPullSources(sources))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -300,7 +300,7 @@ func TestSourceLiveness_HostSleepBeforeFirstSuccessDoesNotAgeASource(t *testing.
 func TestSourceLiveness_AgeUsesTheMonotonicReadingByDefault(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	e, err := New(mp, func() map[string]int { return nil }, WithPullSources(map[string]time.Duration{"a": time.Minute}))
+	e, err := New(t.Context(), mp, func() map[string]int { return nil }, WithPullSources(map[string]time.Duration{"a": time.Minute}))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestSourceLiveness_RestartContinuesAgeFromPersistedSuccess(t *testing.T) {
 	build := func(clk *mockClock) *sourceLivenessHarness {
 		reader := sdkmetric.NewManualReader()
 		mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-		e, err := New(mp, func() map[string]int { return nil }, WithClock(clk.now), WithPullSources(sources), WithSourceStateFile(path))
+		e, err := New(t.Context(), mp, func() map[string]int { return nil }, WithClock(clk.now), WithPullSources(sources), WithSourceStateFile(path))
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -378,7 +378,7 @@ func TestSourceLiveness_CorruptOrFutureStateFallsBackToStart(t *testing.T) {
 		}
 		mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
 		clk := &mockClock{t: now}
-		e, err := New(mp, func() map[string]int { return nil }, WithClock(clk.now),
+		e, err := New(t.Context(), mp, func() map[string]int { return nil }, WithClock(clk.now),
 			WithPullSources(map[string]time.Duration{"s": time.Minute}), WithSourceStateFile(path))
 		if err != nil {
 			t.Fatalf("%s: New: %v", name, err)

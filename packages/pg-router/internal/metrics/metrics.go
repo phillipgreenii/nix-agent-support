@@ -756,7 +756,7 @@ func WithBuildInfo(version string) Option {
 // not exist yet when it calls New (the queue takes the Emitter as its observer, so the
 // Emitter comes first) passes WithQueueReady, which keeps every gauge that reads the
 // queue silent until the queue is there.
-func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option) (*Emitter, error) {
+func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option) (*Emitter, error) {
 	cfg := options{now: time.Now}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -1138,7 +1138,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	if err := e.registerLevels(m, cfg); err != nil {
 		return nil, err
 	}
-	e.preRecordZeroCounters()
+	e.preRecordZeroCounters(ctx)
 	return e, nil
 }
 
@@ -1148,8 +1148,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 // series, leaving Prometheus without a `_total` to rate()/absent() against
 // (pg2-9q3pq). The label-less series sits beside, and is never merged with, the
 // labelled per-type series the real events create, so sum() is unaffected.
-func (e *Emitter) preRecordZeroCounters() {
-	ctx := context.Background()
+func (e *Emitter) preRecordZeroCounters(ctx context.Context) {
 	e.deduped.Add(ctx, 0)
 	e.unknownType.Add(ctx, 0)
 	e.enqueueRejected.Add(ctx, 0)

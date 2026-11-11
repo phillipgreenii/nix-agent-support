@@ -28,7 +28,7 @@ func newRoleProgressHarness(t *testing.T, roles ...string) *roleProgressHarness 
 		inFlight: map[string]int{},
 	}
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(h.reader))
-	e, err := New(mp, func() map[string]int { return nil }, WithClock(h.clk.now),
+	e, err := New(t.Context(), mp, func() map[string]int { return nil }, WithClock(h.clk.now),
 		WithListenerInFlight(func() map[string]int {
 			out := map[string]int{}
 			for k, v := range h.inFlight {
@@ -151,7 +151,7 @@ func TestRoleProgress_ExportedReadMatchesGauges(t *testing.T) {
 }
 
 func TestRoleProgress_ExportedReadNilWithoutOption(t *testing.T) {
-	e, err := New(sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())), func() map[string]int { return nil })
+	e, err := New(t.Context(), sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())), func() map[string]int { return nil })
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

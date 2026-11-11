@@ -17,7 +17,7 @@ func newTimingHarness(t *testing.T, sources map[string]time.Duration) (*Emitter,
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	e, err := New(mp, func() map[string]int { return nil }, WithPullSources(sources))
+	e, err := New(t.Context(), mp, func() map[string]int { return nil }, WithPullSources(sources))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

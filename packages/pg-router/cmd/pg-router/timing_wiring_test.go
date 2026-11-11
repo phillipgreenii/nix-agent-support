@@ -62,7 +62,7 @@ func TestStartMetricsServer_ExposesWaitRunHistogramsAndNewGauges(t *testing.T) {
 		defer cancel()
 		_ = shutdown(ctx)
 	})
-	emitter, err := metrics.New(mp, func() map[string]int { return map[string]int{"pr.changed": 2} },
+	emitter, err := metrics.New(t.Context(), mp, func() map[string]int { return map[string]int{"pr.changed": 2} },
 		metrics.WithQueueAges(func() map[string]time.Duration { return map[string]time.Duration{"pr.changed": 42 * time.Second} }),
 		metrics.WithListenerInFlight(func() map[string]int { return map[string]int{"desk-pr": 1} }),
 		metrics.WithListenerPending(func() map[string]eventqueue.ListenerPending {

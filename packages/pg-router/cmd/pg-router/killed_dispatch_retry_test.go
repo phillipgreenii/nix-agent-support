@@ -280,7 +280,7 @@ func TestKilledHandlerDispatch_RetriedAsKilledAndExportedOnMetrics(t *testing.T)
 
 	// The catalog exactly as run.go wires it for dispatch retries.
 	var q *eventqueue.Queue
-	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() })
+	emitter, err := metrics.New(t.Context(), mp, func() map[string]int { return q.DepthByType() })
 	if err != nil {
 		t.Fatalf("metrics.New: %v", err)
 	}

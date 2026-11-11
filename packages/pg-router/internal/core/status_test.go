@@ -218,7 +218,7 @@ func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
 		excludedRoles:  []string{"worker"},
 		listenerCounts: map[string]*ListenerCounts{"review": reviewCounts},
 	}
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	listeners, ok := reply["listeners"].([]map[string]any)
 	if !ok || len(listeners) != 3 {
 		t.Fatalf("listeners = %v, want 3 entries (the full declared set)", reply["listeners"])
@@ -265,7 +265,7 @@ func TestStatusListeners_DescriptionAlwaysPresent(t *testing.T) {
 			{Name: "worker", Binds: []string{"work-ready"}, Enabled: true},
 		},
 	}
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	listeners, ok := reply["listeners"].([]map[string]any)
 	if !ok || len(listeners) != 2 {
 		t.Fatalf("listeners = %v, want 2 entries", reply["listeners"])
@@ -308,7 +308,7 @@ func TestStatusListeners_DeclinedByReasonBreaksDownDeclined(t *testing.T) {
 		},
 		listenerCounts: map[string]*ListenerCounts{"review": reviewCounts},
 	}
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	listeners, ok := reply["listeners"].([]map[string]any)
 	if !ok || len(listeners) != 2 {
 		t.Fatalf("listeners = %v, want 2 entries", reply["listeners"])
@@ -413,7 +413,7 @@ func TestStatusSources_TypeModeLastTickFailure(t *testing.T) {
 			{Name: "failing-src", Type: "pull", Failure: &FailureInfo{Count: 2, NextEligible: now}},
 		},
 	})
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	sources, ok := reply["sources"].([]map[string]any)
 	if !ok || len(sources) != 3 {
 		t.Fatalf("sources = %v, want 3 entries (2 active + 1 selector-excluded)", reply["sources"])
@@ -584,7 +584,7 @@ func TestStatusSources_DescriptionAlwaysPresent(t *testing.T) {
 			{Name: "active-src", Type: "pull", LastTick: now},
 		},
 	})
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	sources, ok := reply["sources"].([]map[string]any)
 	if !ok || len(sources) != 2 {
 		t.Fatalf("sources = %v, want 2 entries (1 active + 1 selector-excluded)", reply["sources"])
@@ -643,7 +643,7 @@ func TestStatusResolvedConfig_PerParticipantPresentButEmpty(t *testing.T) {
 // "never a second, divergently-counted set" by construction.
 func TestStatusCounters_MirrorsMetricCatalogVerbatim(t *testing.T) {
 	mp, reader := metrics.NewReadableProvider()
-	emitter, err := metrics.New(mp, func() map[string]int { return nil })
+	emitter, err := metrics.New(t.Context(), mp, func() map[string]int { return nil })
 	if err != nil {
 		t.Fatalf("metrics.New: %v", err)
 	}
@@ -657,7 +657,7 @@ func TestStatusCounters_MirrorsMetricCatalogVerbatim(t *testing.T) {
 		reg:           NewRegistry(nil),
 		metricsReader: reader,
 	}
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	counters, ok := reply["counters"].(map[string]any)
 	if !ok {
 		t.Fatalf("counters absent = %v, want present when MetricsReader != nil", reply["counters"])
@@ -682,7 +682,7 @@ func TestStatusCounters_NilMetricsReaderOmitsKey(t *testing.T) {
 		bindings: testBindings(),
 		reg:      NewRegistry(nil),
 	}
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	if _, present := reply["counters"]; present {
 		t.Fatalf("counters = %v, want omitted entirely when MetricsReader is nil", reply["counters"])
 	}
@@ -760,7 +760,7 @@ func TestStatusSources_Calendar(t *testing.T) {
 			{Name: "fresh", Type: "pull", Calendar: &CalendarInfo{Schedule: "calendar 02:00 daily UTC", OnMissed: "run-now", Next: "2026-11-02T02:00Z"}},
 		},
 	})
-	reply := svc.composeStatusReply(0)
+	reply := svc.composeStatusReply(t.Context(), 0)
 	rows := reply["sources"].([]map[string]any)
 	by := map[string]map[string]any{}
 	for _, r := range rows {

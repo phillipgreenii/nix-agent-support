@@ -24,7 +24,7 @@ func newBusyHarness(t *testing.T, sources map[string]time.Duration, roles ...str
 	t.Helper()
 	h := &busyHarness{reader: sdkmetric.NewManualReader(), inFlight: map[string]int{}}
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(h.reader))
-	e, err := New(mp, func() map[string]int { return nil },
+	e, err := New(t.Context(), mp, func() map[string]int { return nil },
 		WithListenerInFlight(func() map[string]int {
 			out := map[string]int{}
 			for k, v := range h.inFlight {

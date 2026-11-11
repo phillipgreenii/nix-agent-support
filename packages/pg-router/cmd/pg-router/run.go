@@ -139,8 +139,10 @@ const inFlightDrainPollInterval = 100 * time.Millisecond
 // running past this process (ADR 0085); they never settle here, so they are
 // neither waited on nor reported as lost -- their events stay un-accepted in
 // the durable log and the next process re-offers them.
-func drainThenCloseStore(q *eventqueue.Queue, storeClose func() error, survives func(listenerID string) bool) {
-	drainCtx, cancel := context.WithTimeout(context.Background(), inFlightDrainTimeout)
+func drainThenCloseStore(ctx context.Context, q *eventqueue.Queue, storeClose func() error, survives func(listenerID string) bool) {
+	// ctx is typically already cancelled (the signal that began shutdown); the drain
+	// must outlive that cancellation, so it keeps only ctx's values.
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inFlightDrainTimeout)
 	defer cancel()
 	if !q.WaitForInFlightDrainExcept(drainCtx, inFlightDrainPollInterval, survives) {
 		slog.Error("shutdown: in-flight dispatch offer(s) did not drain before the timeout; closing the durable store anyway -- any still-outstanding offer's durable write will be lost",
@@ -163,8 +165,10 @@ func drainThenCloseStore(q *eventqueue.Queue, storeClose func() error, survives 
 // excluded from the wait -- a ccpool-backed dispatch lasts far longer than any
 // drain budget launchd allows -- and left running, supervised by their own
 // handler, until the next daemon re-offers the event and absorbs the session.
-func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelFunc, timeout time.Duration, survives func(listenerID string) bool) {
-	drainCtx, cancel := context.WithTimeout(context.Background(), timeout)
+func drainThenCancelDispatch(ctx context.Context, q *eventqueue.Queue, cancelDispatch context.CancelFunc, timeout time.Duration, survives func(listenerID string) bool) {
+	// ctx is typically already cancelled (the signal that began shutdown); the drain
+	// must outlive that cancellation, so it keeps only ctx's values.
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if !q.WaitForInFlightDrainExcept(drainCtx, inFlightDrainPollInterval, survives) {
 		slog.Info("shutdown: in-flight dispatch(es) did not finish before the drain timeout; cancelling them (cut offers are re-offered by the next daemon)",
@@ -381,7 +385,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	ring := activity.New(cfg.ActivityRingSize)
 	activityObs := newActivityObserver(ring)
 	metricsOpts = append(metricsOpts, metrics.WithBusySources(activityObs.InFlightSources))
-	emitter, err := metrics.New(mp, func() map[string]int { return queueRef.Load().DepthByType() }, metricsOpts...)
+	emitter, err := metrics.New(ctx, mp, func() map[string]int { return queueRef.Load().DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("construct metrics emitter: %w", err)
@@ -1254,7 +1258,7 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 		telemetry.NewSlogHandler(),
 	)))
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadContext(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return preparedRun{}, exitPrecheck
@@ -1645,11 +1649,12 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// deliberately: reordering would make metrics.Flush wait on the SAME
 	// bounded drain this defer performs, which is a real behavior change,
 	// not a comment-only fix.
-	defer drainThenCloseStore(q, storeClose, nil)
+	defer drainThenCloseStore(ctx, q, storeClose, nil)
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
-	defer preShutdownAll(context.Background(), pr.o, pr.cfg)
+	// Shutdown work runs after ctx (the signal) is cancelled, so it must not inherit the cancellation.
+	defer preShutdownAll(context.WithoutCancel(ctx), pr.o, pr.cfg)
 	defer func() {
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
@@ -1670,7 +1675,7 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// final-snapshot limitation, not a new regression — see that defer's own
 	// comment for the full reasoning.
 	defer func() {
-		if err := metrics.Flush(context.Background(), mp); err != nil {
+		if err := metrics.Flush(context.WithoutCancel(ctx), mp); err != nil {
 			slog.Warn("run-until-idle: metrics flush failed", "err", err)
 		}
 	}()
@@ -1881,7 +1886,8 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 			pr.tracker.Done()
 		}
 	}()
-	dispatchCtx, cancelDispatch := context.WithCancel(context.Background())
+	// Dispatches run decoupled from the signal context so SIGTERM does not cancel them.
+	dispatchCtx, cancelDispatch := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelDispatch()
 	svc, q, mp, storeClose, err := bootCore(dispatchCtx, pr.cfg, pr.o, pr.declaredRoles, pr.excluded, core.RunModeLongRunning)
 	if err != nil {
@@ -1914,14 +1920,14 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	survives := func(listenerID string) bool { return survivors[listenerID] }
 	defer func() {
 		pr.tracker.Phase("store_close")
-		drainThenCloseStore(q, storeClose, survives)
+		drainThenCloseStore(ctx, q, storeClose, survives)
 	}()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
 	defer func() {
 		pr.tracker.Phase("pre_shutdown")
-		ctx, cancel := context.WithTimeout(context.Background(), preShutdownTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), preShutdownTimeout)
 		defer cancel()
 		preShutdownAll(ctx, pr.o, pr.cfg)
 	}()
@@ -1947,7 +1953,7 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// comment for the full reasoning.
 	defer func() {
 		pr.tracker.Phase("metrics_flush")
-		if err := metrics.Flush(context.Background(), mp); err != nil {
+		if err := metrics.Flush(context.WithoutCancel(ctx), mp); err != nil {
 			slog.Warn("run: metrics flush failed", "err", err)
 		}
 	}()
@@ -1984,7 +1990,7 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 			pr.tracker.Phase("drain")
 			// Drain BEFORE returning: the deferred preShutdownAll (the ccpool
 			// session sweep) must not run while a dispatch is still in flight.
-			drainThenCancelDispatch(q, cancelDispatch, drainTimeout, survives)
+			drainThenCancelDispatch(ctx, q, cancelDispatch, drainTimeout, survives)
 			return exitOK
 		case <-ticker.C:
 		}

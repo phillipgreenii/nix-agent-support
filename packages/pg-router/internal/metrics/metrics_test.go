@@ -41,7 +41,7 @@ func newHarness(t *testing.T) *harness {
 	clk := &mockClock{t: time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)}
 
 	var q *eventqueue.Queue
-	emitter, err := New(mp, func() map[string]int { return q.DepthByType() }, WithClock(clk.now))
+	emitter, err := New(t.Context(), mp, func() map[string]int { return q.DepthByType() }, WithClock(clk.now))
 	if err != nil {
 		t.Fatalf("New emitter: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestCatalogHasTenMembers(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	var q *eventqueue.Queue
-	emitter, err := New(mp, func() map[string]int { return q.DepthByType() }, WithLiveness(func() bool { return true }))
+	emitter, err := New(t.Context(), mp, func() map[string]int { return q.DepthByType() }, WithLiveness(func() bool { return true }))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestLivenessReflectsIsLive(t *testing.T) {
 	live := true
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	if _, err := New(mp, func() map[string]int { return nil }, WithLiveness(func() bool { return live })); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }, WithLiveness(func() bool { return live })); err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
@@ -944,7 +944,7 @@ func TestRestartRestoredEventsCountTowardThroughputAndLatency(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	var q2 *eventqueue.Queue
-	emitter, err := New(mp, func() map[string]int { return q2.DepthByType() }, WithClock(clk2.now))
+	emitter, err := New(t.Context(), mp, func() map[string]int { return q2.DepthByType() }, WithClock(clk2.now))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1174,7 +1174,7 @@ func (panickingListener) Offer(eventqueue.Offering) eventqueue.OfferResult {
 
 // New surfaces an instrument-registration error rather than panicking.
 func TestNewInstrumentError(t *testing.T) {
-	if _, err := New(failMP{}, func() map[string]int { return nil }); err == nil {
+	if _, err := New(t.Context(), failMP{}, func() map[string]int { return nil }); err == nil {
 		t.Fatal("expected instrument-registration error")
 	}
 }
@@ -1232,7 +1232,7 @@ func TestFlushRealProviderReportsNonEmptyDepth(t *testing.T) {
 // bootCore is expected to call wires the two together correctly on its own.
 func TestNewReadableProvider_SnapshotReadsBackRecordedValue(t *testing.T) {
 	mp, reader := NewReadableProvider()
-	emitter, err := New(mp, func() map[string]int { return nil })
+	emitter, err := New(t.Context(), mp, func() map[string]int { return nil })
 	if err != nil {
 		t.Fatalf("New emitter: %v", err)
 	}
@@ -1255,7 +1255,7 @@ func TestNewReadableProvider_SnapshotReadsBackRecordedValue(t *testing.T) {
 // gauge).
 func TestNewReadableProvider_SnapshotBeforeAnyRecordingIsNotAnError(t *testing.T) {
 	mp, reader := NewReadableProvider()
-	if _, err := New(mp, func() map[string]int { return nil }); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }); err != nil {
 		t.Fatalf("New emitter: %v", err)
 	}
 
@@ -1750,7 +1750,7 @@ func TestNew_WithoutBuildInfo_RegistersNoBuildInfoGauge(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	defer func() { _ = mp.Shutdown(context.Background()) }()
-	if _, err := New(mp, func() map[string]int { return nil }, WithLiveness(func() bool { return true })); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }, WithLiveness(func() bool { return true })); err != nil {
 		t.Fatal(err)
 	}
 	var rm metricdata.ResourceMetrics
@@ -1768,7 +1768,7 @@ func TestNew_WithoutBuildInfo_RegistersNoBuildInfoGauge(t *testing.T) {
 // timing histograms (DEC-OBS-13).
 func TestOnExpiredPendingCountsPerRoleAndType(t *testing.T) {
 	mp, reader := NewReadableProvider()
-	emitter, err := New(mp, func() map[string]int { return nil })
+	emitter, err := New(t.Context(), mp, func() map[string]int { return nil })
 	if err != nil {
 		t.Fatalf("New emitter: %v", err)
 	}

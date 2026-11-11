@@ -86,7 +86,7 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 		_ = shutdown(ctx)
 	})
 
-	emitter, err := metrics.New(mp, func() map[string]int {
+	emitter, err := metrics.New(t.Context(), mp, func() map[string]int {
 		return map[string]int{"review-requested": 4}
 	}, metrics.WithLiveness(func() bool { return true }),
 		metrics.WithPullSources(map[string]time.Duration{"srcA": time.Minute}))
@@ -226,7 +226,7 @@ func TestStartMetricsServer_ServesBuildInfoGaugeWithoutSuffix(t *testing.T) {
 		defer cancel()
 		_ = shutdown(ctx)
 	})
-	if _, err := metrics.New(mp, func() map[string]int { return nil }, metrics.WithBuildInfo("1.2.3-test")); err != nil {
+	if _, err := metrics.New(t.Context(), mp, func() map[string]int { return nil }, metrics.WithBuildInfo("1.2.3-test")); err != nil {
 		t.Fatalf("metrics.New: %v", err)
 	}
 	if err := forceFlush(context.Background(), mp); err != nil {

@@ -40,6 +40,7 @@ func TestQueueReadyGatesEveryQueueBoundGauge(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	if _, err := New(
+		t.Context(),
 		mp,
 		func() map[string]int { reads++; return map[string]int{"t1": 2} },
 		WithQueueReady(func() bool { return ready }),

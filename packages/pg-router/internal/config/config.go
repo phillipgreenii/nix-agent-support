@@ -347,6 +347,12 @@ func Default() Config {
 // The no-file case itself is not an error: it logs at WARN (or INFO when
 // PG_ROUTER_NO_CONFIG_WARN opts out — pg2-xl659) and leaves Roles/Queries nil.
 func Load() (Config, error) {
+	return LoadContext(context.Background())
+}
+
+// LoadContext is Load with the caller's context, which the git probe that
+// locates the config file runs under.
+func LoadContext(ctx context.Context) (Config, error) {
 	c := Default()
 	// Pool-scalar env overlay. The legacy role-specific env vars
 	// (PG_ROUTER_MAX_WORKER/MAX_FEEDBACK/*_ENABLED/*_SKILL_MD) are intentionally GONE:
@@ -391,7 +397,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("stat %s: %w", globalPath, statErr)
 	}
 
-	path := envStr("PG_ROUTER_CONFIG", resolveConfigPath(c.RepoRoot))
+	path := envStr("PG_ROUTER_CONFIG", resolveConfigPath(ctx, c.RepoRoot))
 	c.ConfigPath = path
 	reg := NewRegistry()
 	if _, statErr := os.Stat(path); statErr == nil {
@@ -450,9 +456,8 @@ func Load() (Config, error) {
 // failing Load() outright. GatePaths() below reuses this same helper so its
 // own documented "identical precedence" promise holds for a linked worktree
 // too.
-func resolveConfigPath(repoRoot string) string {
+func resolveConfigPath(ctx context.Context, repoRoot string) string {
 	naive := filepath.Join(repoRoot, ".pg-router", "config.toml")
-	ctx := context.Background()
 	client, err := gitclient.New(ctx, repoRoot)
 	if err != nil {
 		return naive

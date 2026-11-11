@@ -25,7 +25,7 @@ func TestRoleBusy_DerivedFromDeclineKindNeverFromReason(t *testing.T) {
 		wantBusy := kind != "fault" && kind != "neutral"
 		for _, reason := range reasons {
 			t.Run("kind="+kind+"/reason="+reason, func(t *testing.T) {
-				e, err := metrics.New(sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())),
+				e, err := metrics.New(t.Context(), sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())),
 					func() map[string]int { return nil }, metrics.WithRoleProgress("desk-pr"))
 				if err != nil {
 					t.Fatalf("metrics.New: %v", err)

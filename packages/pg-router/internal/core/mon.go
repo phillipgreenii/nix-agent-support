@@ -72,7 +72,7 @@ type monReadReply struct {
 // widen it: a requested name outside Subset is silently omitted, never an
 // error — the subset is a ceiling the caller does not get to raise by
 // asking.
-func (s *Service) handleMonRead(stdin io.Reader, stdout io.Writer) int {
+func (s *Service) handleMonRead(ctx context.Context, stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply("mon.read: read request: "+err.Error()))
@@ -100,7 +100,7 @@ func (s *Service) handleMonRead(stdin io.Reader, stdout io.Writer) int {
 
 	values := []monReadValue{}
 	if s.metricsReader != nil {
-		rm, err := s.metricsReader.Snapshot(context.Background())
+		rm, err := s.metricsReader.Snapshot(ctx)
 		if err != nil {
 			writeBody(stdout, errorReply("mon.read: snapshot: "+err.Error()))
 			return conformance.ExitError

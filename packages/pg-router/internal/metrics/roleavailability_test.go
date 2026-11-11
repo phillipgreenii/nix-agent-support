@@ -15,7 +15,7 @@ func TestWithRoleAvailability_OneSeriesPerRoleOneOrZero(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	avail := map[string]bool{"a": true, "b": false}
-	if _, err := New(mp, func() map[string]int { return nil }, WithRoleAvailability(func() map[string]bool { return avail })); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }, WithRoleAvailability(func() map[string]bool { return avail })); err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	read := func() map[string]int64 {
@@ -51,7 +51,7 @@ func TestWithRoleAvailability_OneSeriesPerRoleOneOrZero(t *testing.T) {
 func TestWithoutRoleAvailability_NoGauge(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	if _, err := New(mp, func() map[string]int { return nil }); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	var rm metricdata.ResourceMetrics

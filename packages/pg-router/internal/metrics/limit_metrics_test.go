@@ -16,7 +16,7 @@ func TestLogLimitGauges(t *testing.T) {
 	st := eventqueue.LimitStatus{Bytes: 500, SoftBytes: 900, HardBytes: 1000, State: eventqueue.StateOK}
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	if _, err := New(mp, func() map[string]int { return nil }, WithLogLimitStatus(func() eventqueue.LimitStatus { return st })); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }, WithLogLimitStatus(func() eventqueue.LimitStatus { return st })); err != nil {
 		t.Fatal(err)
 	}
 	h := &harness{reader: reader, mp: mp}
@@ -81,7 +81,7 @@ func TestLogLimitGauges(t *testing.T) {
 func TestLogLimitGaugesNotRegisteredWithoutOption(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	if _, err := New(mp, func() map[string]int { return nil }); err != nil {
+	if _, err := New(t.Context(), mp, func() map[string]int { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	var rm metricdata.ResourceMetrics
