@@ -61,12 +61,23 @@ func init() {
 }
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := armSignals(signal.NotifyContext, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	if code := execute(ctx, os.Stderr); code != 0 {
 		os.Exit(code)
 	}
+}
+
+// armSignals registers sigs once and returns a context that ends on the first
+// one. It also releases the registration as soon as that context ends, so a
+// second signal takes its default action and kills the process while the first
+// drives a graceful shutdown (the workspace "second signal kills" convention).
+// notify is signal.NotifyContext; tests pass a fake.
+func armSignals(notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc), sigs ...os.Signal) (context.Context, context.CancelFunc) {
+	ctx, stop := notify(context.Background(), sigs...)
+	context.AfterFunc(ctx, stop)
+	return ctx, stop
 }
 
 // execute runs the command tree against the process arguments and returns
