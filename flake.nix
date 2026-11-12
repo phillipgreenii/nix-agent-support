@@ -7432,6 +7432,14 @@
                 pname = "pg-git-lander-go-tests";
                 src = lib.cleanSource ./packages/pg-git-lander; # matches default.nix
                 gomod2nixToml = ./packages/pg-git-lander/gomod2nix.toml;
+                # internal/worktrees tests build real git repos through x/gittest;
+                # internal/seams reads `ps -o lstart=`, and the sandbox PATH has no
+                # /bin, so ps comes from procps (Linux) or adv_cmds (darwin).
+                testDeps = [
+                  pkgs.git
+                ]
+                ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps
+                ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.darwin.adv_cmds;
               };
 
               # pg-git-lander INTEGRATION tier. ON DEMAND ONLY (same shape as
