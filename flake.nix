@@ -7652,6 +7652,52 @@
                     '';
                   });
 
+              # pg-claude-code-recorder CRASH-SWEEP tier. ON DEMAND ONLY: build it by hand
+              # (`nix build .#checks.<system>.pg-claude-code-recorder-crashsweep-tests -L`).
+              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land gate
+              # (V-4; phillipg-nix-repo-base ADR 0024), and the package test timeout is NOT raised
+              # for it. Runs the `//go:build crashsweep` TestCrashSweep in internal/settle: each
+              # scenario (settle in clone and byte mode, removal with abort and restore, extract,
+              # doctor repair) is stopped after each of its N file-system operations, once as a
+              # plain crash and once with power loss (unsynced data discarded), then the store is
+              # reopened, recovery runs, the invariants are checked and the scenario is finished.
+              # Fails when the sweep fails, when a scenario does not report PASS, or when a test is
+              # skipped.
+              pg-claude-code-recorder-crashsweep-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-claude-code-recorder-crashsweep-tests";
+                  src = ./packages/pg-claude-code-recorder;
+                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/crashsweep.log"
+                      if ! go test -tags crashsweep -run 'TestCrashSweep' -count=1 -v -timeout 30m ./internal/settle/ > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-claude-code-recorder-crashsweep-tests: the crash sweep FAILED" >&2
+                        exit 1
+                      fi
+                      grep -- 'operations$' "$log" || true
+                      for s in settle-clone settle-byte removal removal-abort-restore removal-restore-live extract doctor-repair; do
+                        for m in crash power; do
+                          grep -q -- "^    --- PASS: TestCrashSweep/$s/$m " "$log" || {
+                            cat "$log"
+                            echo "pg-claude-code-recorder-crashsweep-tests: $s/$m did not report PASS" >&2
+                            exit 1
+                          }
+                        done
+                      done
+                      if grep -q -- '--- SKIP' "$log"; then
+                        echo "pg-claude-code-recorder-crashsweep-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-claude-code-recorder LOAD tier (bead pg2-yme5i5; phillipg-nix-repo-base ADR
               # 0024, V-4). ON DEMAND ONLY: build it by hand
               # (`nix build .#checks.<system>.pg-claude-code-recorder-load-tests -L`). It MUST
