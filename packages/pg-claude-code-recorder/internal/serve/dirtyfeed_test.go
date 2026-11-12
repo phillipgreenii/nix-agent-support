@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/settle"
 )
 
 const feedSess = "0a1b2c3d-0000-4000-8000-0000000000aa"
@@ -72,5 +74,38 @@ func TestDaemonFeedsTheDirtySinkAndLiveChanges(t *testing.T) {
 	}
 	if _, live = fake.snapshot(); live == 0 {
 		t.Fatal("discovering a Process did not notify the sink")
+	}
+}
+
+// The daemon wires its dirty sink to the real Settler: an ingest puts the
+// Conversation (by session key) in the Settler's dirty set at the copy offset,
+// and a discovered Process sets its live-changed flag.
+func TestDaemonDirtySinkIsTheRealSettler(t *testing.T) {
+	e := newEnv(t, false)
+	content := "{\"type\":\"user\"}\n"
+	e.transcript(feedSess+".jsonl", content, time.Now().Add(-time.Hour))
+	d := e.open(t)
+	sett, ok := d.dirty.(*settle.Settler)
+	if !ok {
+		t.Fatalf("dirty sink is %T, want *settle.Settler", d.dirty)
+	}
+	if err := d.Watcher().Rescan(); err != nil {
+		t.Fatal(err)
+	}
+	got := sett.TakeDirty()
+	if off, found := got[feedSess]; !found || off != int64(len(content)) || len(got) != 1 {
+		t.Fatalf("settler dirty set %v, want {%s: %d}", got, feedSess, len(content))
+	}
+	if sett.TakeLiveChanged() {
+		t.Fatal("a live change before any Process")
+	}
+	start := time.Now().Add(-time.Hour)
+	e.registry(t, 4711, regJSON(4711, feedSess, start, "idle", 1))
+	e.procs.Add(4711, start, nil)
+	if err := d.Watcher().Rescan(); err != nil {
+		t.Fatal(err)
+	}
+	if !sett.TakeLiveChanged() {
+		t.Fatal("discovering a Process did not set the settler's live-changed flag")
 	}
 }

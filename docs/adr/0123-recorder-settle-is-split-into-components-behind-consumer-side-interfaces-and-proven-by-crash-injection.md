@@ -66,6 +66,8 @@ flowchart LR
 - The crash-safety claim is checked at every file-system operation of each scenario, not only at the
   named points; the new tiers cost build tags and two on-demand nix checks, and add the third-party
   modules `pgregory.net/rapid` and `github.com/sasha-s/go-deadlock` (test builds only).
-- The unit tier is not slower: the settle package ran in about the same time before and after the split
-  (see the verification record in the plan).
+- The unit tier is not shown to be slower: the settle package took 47.47 s after the split against an
+  18.62 s baseline from before it, but the two runs were measured under host-load noise (the later one
+  at about 2.4 times the load), so no regression is shown and none is ruled out. A re-measure on a quiet
+  host MUST be the check before the claim is relied on (see the verification record in the plan).
 - A future fake store carries the cost of a contract suite, which is the price of trusting the fake.
