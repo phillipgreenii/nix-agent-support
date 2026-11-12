@@ -7,9 +7,55 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store/countdriver"
 )
+
+// The hoisted roots and the targeted generation lookup answer as the per-file
+// scans did: every file counts under the Claude root, and each file's lag
+// entry is the one the whole-state snapshot holds for its current generation.
+func TestCoverageHoistedRootsAndTargetedLagLookupAnswerAsBefore(t *testing.T) {
+	e := newEnv(t, false)
+	d := e.open(t)
+	seedFiles(t, d, e.claude, 50)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d = e.open(t) // the reopen seeds the lag state from the stored generations
+	defer func() { _ = d.Close() }()
+
+	files, err := d.st.AllFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur := map[int64]int{}
+	for _, f := range files {
+		cur[f.ID] = f.CurGen
+	}
+	got := d.lag.CurrentGenerations(cur)
+	all := d.lag.Generations()
+	for _, f := range files {
+		var want parser.GenLag
+		for _, g := range all[f.ID] {
+			if g.Gen == f.CurGen {
+				want = g
+			}
+		}
+		if got[f.ID] != want {
+			t.Fatalf("file %d: targeted %+v, whole snapshot %+v", f.ID, got[f.ID], want)
+		}
+	}
+	for _, mode := range []statMode{statAll, statLazy} {
+		cov, err := d.computeCoverageFrom(context.Background(), &d.st.Reader, "summary", false, mode, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cov.Files != 50 || len(cov.Roots) == 0 || cov.Roots[0].Path != e.cfg.ClaudeDir || cov.Roots[0].Files != 50 {
+			t.Fatalf("mode %v: files %d roots %+v", mode, cov.Files, cov.Roots)
+		}
+	}
+}
 
 func TestCoverageReadsInOneTransactionAndAnswersAsBefore(t *testing.T) {
 	c := countdriver.Register("coverage-tx-counting")

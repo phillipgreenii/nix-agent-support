@@ -148,7 +148,6 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 	var files []store.File
 	var curPaths map[int64][]string
 	var byGen, parse map[genKey]int64 // statAll: copy and parse offsets
-	lagGens := d.lag.Generations()
 	var fresh map[int64]bool
 	var err error
 	if mode == statLazy {
@@ -174,11 +173,24 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 			parse[genKey{g.File, g.Gen}] = g.ParseOffset
 		}
 	}
+	// Each file's current-generation lag entry, one lock acquisition. Both modes
+	// read UnparsedSince from it (the parse-lag seconds), so statAll needs it
+	// too, but never the whole per-generation copy.
+	curGen := make(map[int64]int, len(files))
+	for _, f := range files {
+		curGen[f.ID] = f.CurGen
+	}
+	lagGens := d.lag.CurrentGenerations(curGen)
 	exceptions := 0
 	now := d.clock.Now()
 	var cov wire.Coverage
 	kinds := map[string]int{}
-	cov.Roots = make([]wire.RootCoverage, 0, len(d.cfg.Roots()))
+	roots := d.cfg.Roots()
+	prefixes := make([]string, len(roots)) // root + separator, once
+	for i, root := range roots {
+		prefixes[i] = root + string(os.PathSeparator)
+	}
+	cov.Roots = make([]wire.RootCoverage, 0, len(roots))
 	counts := map[string]int{}
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
@@ -197,20 +209,15 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 		if !d.prs.HasSource(f.Source) {
 			kinds[f.Source]++
 		}
-		for _, root := range d.cfg.Roots() {
-			if strings.HasPrefix(p, root+string(os.PathSeparator)) {
+		for i, root := range roots {
+			if strings.HasPrefix(p, prefixes[i]) {
 				counts[root]++
 				break
 			}
 		}
 		var fc wire.FileCoverage
 		var parseS float64
-		var gl parser.GenLag
-		for _, g := range lagGens[f.ID] {
-			if g.Gen == f.CurGen {
-				gl = g
-			}
-		}
+		gl := lagGens[f.ID] // zero when the file has no tracked current generation
 		if mode == statLazy {
 			var stat bool
 			fc, stat = d.lazyFileCoverage(f, p, gl, fresh[f.ID], now)
@@ -242,7 +249,7 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 			cov.FileList = append(cov.FileList, fc)
 		}
 	}
-	for _, root := range d.cfg.Roots() {
+	for _, root := range roots {
 		_, err := os.Stat(root)
 		cov.Roots = append(cov.Roots, wire.RootCoverage{Path: root, Present: err == nil, Files: counts[root]})
 	}

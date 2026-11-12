@@ -226,3 +226,83 @@ func TestLagSecondsStaySmallWhileParseAdvancesButNeverCatchesUp(t *testing.T) {
 		t.Fatal("fixture error: parse caught up")
 	}
 }
+
+// CurrentGenerations returns exactly the entry Generations holds for each
+// file's named generation, and nothing for a file or generation not tracked.
+func TestLagCurrentGenerationsMatchesGenerationsFilteredByCurrent(t *testing.T) {
+	l := lagTestState()
+	l.hook(1, 1, 10, 0, at(100))
+	l.hook(1, 2, 30, 5, at(200))
+	l.hook(2, 1, 7, 7, at(300))
+	l.hook(3, 1, 9, 1, at(400))
+	cur := map[int64]int{1: 2, 2: 1, 3: 4, 99: 1} // file 3's generation and file 99 are untracked
+	got := l.CurrentGenerations(cur)
+	want := map[int64]GenLag{}
+	for f, gs := range l.Generations() {
+		for _, g := range gs {
+			if c, ok := cur[f]; ok && c == g.Gen {
+				want[f] = g
+			}
+		}
+	}
+	if len(got) != 2 || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	if got[1].Gen != 2 || got[1].CopyOffset != 30 || got[1].ParseOffset != 5 {
+		t.Fatalf("file 1 = %+v", got[1])
+	}
+	// The result is a private snapshot: later deliveries do not change it.
+	l.hook(1, 2, 90, 90, at(500))
+	if got[1].CopyOffset != 30 {
+		t.Fatalf("snapshot changed after a delivery: %+v", got[1])
+	}
+	if l.CurrentGenerations(cur)[1].CopyOffset != 90 {
+		t.Fatal("a fresh call must see the delivery")
+	}
+}
+
+// Deliveries and CurrentGenerations calls interleave under -race.
+func TestLagCurrentGenerationsRace(t *testing.T) {
+	l := lagTestState()
+	const files, steps = 8, 500
+	cur := map[int64]int{}
+	for f := int64(1); f <= files; f++ {
+		cur[f] = 1
+	}
+	var wg sync.WaitGroup
+	for f := int64(1); f <= files; f++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := int64(1); i <= steps; i++ {
+				l.hook(f, 1, i*10, i*5, at(i))
+			}
+		}()
+	}
+	done := make(chan struct{})
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				for _, g := range l.CurrentGenerations(cur) {
+					if g.ParseOffset > g.CopyOffset {
+						t.Errorf("torn entry %+v", g)
+						return
+					}
+				}
+			}
+		}
+	}()
+	wg.Wait()
+	close(done)
+	<-readerDone
+	for f, g := range l.CurrentGenerations(cur) {
+		if g.CopyOffset != steps*10 {
+			t.Fatalf("file %d copy offset %d", f, g.CopyOffset)
+		}
+	}
+}

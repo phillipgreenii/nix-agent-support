@@ -312,6 +312,23 @@ func (l *lagState) Generations() map[int64][]GenLag {
 	return out
 }
 
+// CurrentGenerations returns, for each file in cur (file -> its current
+// generation), that generation's snapshot; a file with no tracked current
+// generation is absent. It takes mu once and copies only the matching entries
+// by value, so the result is private to the caller and the lock is held no
+// longer than one pass over the generations (Generations also sorts per file).
+func (l *lagState) CurrentGenerations(cur map[int64]int) map[int64]GenLag {
+	out := make(map[int64]GenLag, len(cur))
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k, lg := range l.gens {
+		if g, ok := cur[k.file]; ok && g == k.gen {
+			out[k.file] = l.genLag(k, lg)
+		}
+	}
+	return out
+}
+
 // FileGenerations is Generations for one file.
 func (l *lagState) FileGenerations(file int64) []GenLag {
 	l.mu.Lock()

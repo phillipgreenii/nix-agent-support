@@ -13,7 +13,7 @@ import (
 
 // seedFiles inserts n append files, each with one current path and one
 // generation, straight into the tables (no transcripts on disk).
-func seedFiles(t *testing.T, d *Daemon, dir string, n int) {
+func seedFiles(t testing.TB, d *Daemon, dir string, n int) {
 	t.Helper()
 	err := d.st.WithWrite("", func(tx *sql.Tx) error {
 		for i := 1; i <= n; i++ {

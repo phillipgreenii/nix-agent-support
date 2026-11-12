@@ -27,7 +27,7 @@ type env struct {
 
 // newEnv builds a daemon over throwaway directories; start=false leaves it
 // opened but not started so a test can drive the watcher by hand.
-func newEnv(t *testing.T, ctl bool) *env {
+func newEnv(t testing.TB, ctl bool) *env {
 	t.Helper()
 	tmp, err := os.MkdirTemp("/tmp", "ccrec")
 	if err != nil {
@@ -61,7 +61,7 @@ func newEnv(t *testing.T, ctl bool) *env {
 	return e
 }
 
-func (e *env) open(t *testing.T) *Daemon {
+func (e *env) open(t testing.TB) *Daemon {
 	t.Helper()
 	d, err := Open(Options{Config: e.cfg, Logger: NewLogger(e.log), NoEvents: true, Version: "test", Procs: e.procs})
 	if err != nil {
