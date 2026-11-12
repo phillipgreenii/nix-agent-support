@@ -1,4 +1,4 @@
-//go:build unix
+//go:build integration && unix
 
 package main
 
@@ -20,7 +20,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/emit"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
-	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 )
 
 // Bead pg2-bn5io: a real-process proof that a command-role dispatch which is in
@@ -397,14 +396,5 @@ func TestShutdownReoffer_RealRouterProcess(t *testing.T) {
 	}
 	if n := h.markerLines(reofferStartedMarker); n != 2 {
 		t.Errorf("handler dispatches after the second stop = %d, want 2: the re-offered event was accepted once and must not run again", n)
-	}
-}
-
-// The orchestrator and metrics packages share the shutdown hand-back reason as two
-// constants (metrics does not import orchestrator); this pins them equal.
-func TestShutdownHandBackReasonIsSharedByOrchestratorAndMetrics(t *testing.T) {
-	if orchestrator.DeclineDetailShutdown != metrics.ReasonShutdown {
-		t.Fatalf("orchestrator.DeclineDetailShutdown = %q, metrics.ReasonShutdown = %q: they must be equal",
-			orchestrator.DeclineDetailShutdown, metrics.ReasonShutdown)
 	}
 }

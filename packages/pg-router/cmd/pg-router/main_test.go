@@ -7,14 +7,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// TestShutdownReoffer_RealRouterProcess re-executes this test binary as a
-	// router process (TestHelperRouterProcess) with a complete, explicit
-	// environment that includes the PG_ROUTER_* variables the router needs.
-	// That child must keep them, so the scrub is skipped for it only; it is
-	// recognised by the same exact sentinel the helper itself requires, which no
-	// caller exports. Every other process, including the test process itself,
-	// is scrubbed.
-	if os.Getenv(routerSentinelEnv) != routerSentinelValue {
+	// The integration tier re-executes this test binary as a router process
+	// with a complete, explicit environment that includes the PG_ROUTER_*
+	// variables the router needs; keepRouterEnv is true for that child only
+	// (see keep_router_env_integration_test.go). Every other process,
+	// including the test process itself, is scrubbed.
+	if !keepRouterEnv() {
 		unsetRouterEnv()
 	}
 	os.Exit(m.Run())

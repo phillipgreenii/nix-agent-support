@@ -100,19 +100,19 @@ func TestOSRunner_cancelStopsTheCommandAdaptersPayload(t *testing.T) {
 	t.Fatalf("payload pid %d is still alive after the dispatch was cancelled", pid)
 }
 
-// Environment the re-executed parent process reads (see TestParentDeathHelper).
+// Environment the re-executed parent process reads (see TestHelperParentDeath).
 const (
 	envHelperRole     = "PG_ROUTER_TEST_PARENT_HELPER_REQ"
 	envHelperSurvives = "PG_ROUTER_TEST_PARENT_HELPER_SURVIVES"
 	envHelperAdapter  = "PG_ROUTER_TEST_PARENT_HELPER_ADAPTER"
 )
 
-// TestParentDeathHelper is not a test: it is the "parent" process of
+// TestHelperParentDeath is not a test: it is the "parent" process of
 // TestOSRunner_parentSIGKILL*, re-executed from the test binary. It stands in for
 // the pg-router daemon, running the real adapter under OSRunner (and, for a
 // survives_shutdown role, under WithoutParentDeath, as Client does) until the
 // test SIGKILLs it.
-func TestParentDeathHelper(t *testing.T) {
+func TestHelperParentDeath(t *testing.T) {
 	req := os.Getenv(envHelperRole)
 	if req == "" {
 		t.Skip("helper process only")
@@ -146,7 +146,7 @@ func runKilledParent(t *testing.T, survives bool) (pid int, killedAt time.Time) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := exec.Command(os.Args[0], "-test.run=^TestParentDeathHelper$")
+	parent := exec.Command(os.Args[0], "-test.run=^TestHelperParentDeath$")
 	parent.Env = append(os.Environ(), envHelperRole+"="+string(req), envHelperAdapter+"="+bin)
 	if survives {
 		parent.Env = append(parent.Env, envHelperSurvives+"=1")

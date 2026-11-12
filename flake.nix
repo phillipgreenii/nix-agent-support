@@ -10349,17 +10349,31 @@
                     '';
                   });
 
-              # pg-router integration tier (`//go:build integration`, V-4: never in
-              # the unit gate above). Runs the real command adapter binary (built
-              # by pg-router-ccpool-handler, a sibling module whose binary cannot be
-              # imported) under wireclient.OSRunner with a payload that writes its
-              # pid, cancels the dispatch, and asserts the payload process is gone; plus the
-              # parent-SIGKILL cases (a re-executed parent dies, the adapter stops its
-              # payload; a survives_shutdown role's payload is left running).
-              # PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER turns the test's skip into a
-              # failure, so a green check means it ran. Only that test is selected
-              # (-run): the other integration/smoke-tagged tests in pg-router need
-              # a real bd and are not part of this check.
+              # pg-router INTEGRATION tier (`//go:build integration`, V-4: never in
+              # the unit gate above). ON DEMAND ONLY: build it by hand when the
+              # router's process lifecycle, the wire client or the command adapter
+              # changes (`nix build .#checks.<system>.pg-router-integration-tests`).
+              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
+              # gate.
+              #
+              # The tests are the ones in files tagged `//go:build integration`: they
+              # re-execute the test binary as a real router or helper process, build
+              # and run the real router binary (the level-source test, formerly
+              # tagged `smoke`), or run the real command adapter
+              # binary (built by pg-router-ccpool-handler, a sibling module whose
+              # binary cannot be imported) under wireclient.OSRunner. The buildPhase
+              # runs EXACTLY those tests (the tagged package's test list minus its
+              # untagged list, so the unit tests are not run a second time; the
+              # `TestHelper*` names are helper-process entry points that skip unless
+              # re-executed, so they are not listed) and fails when the listing is
+              # empty, when a test does not report PASS, or when any test is skipped,
+              # so a gate that silently ran nothing cannot pass.
+              # PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER turns the adapter tests' skip
+              # into a failure. The unit-tier guard that keeps these tests out of the
+              # unit gate is TestUnitTierHasNoIntegrationTests in cmd/pg-router.
+              # cmd/pg-router/e2e_test.go keeps its `smoke` tag and is NOT run here:
+              # its test skips unconditionally (its premise was removed), so a
+              # fail-on-skip check could never pass it.
               pg-router-integration-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-router-integration-tests";
@@ -10378,18 +10392,54 @@
                     pkgs.git
                     pkgs.coreutils
                   ];
-                  testFlags = [
-                    "-tags"
-                    "integration"
-                    "-count=1"
-                    "-v"
-                    "-run"
-                    "^TestOSRunner_(cancelStopsTheCommandAdaptersPayload|parentSIGKILLStopsThePayload|survivesShutdownIgnoresParentDeath)$"
-                  ];
                 }).overrideAttrs
                   (_: {
                     PG_ROUTER_TEST_COMMAND_ADAPTER = "${pkgs.pg-router-ccpool-handler}/bin/pg-router-handler-command";
                     PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER = "1";
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/integration.log"
+                      : > "$log"
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                      if [ -z "$pkgs" ]; then
+                        echo "pg-router-integration-tests: no test file carries //go:build integration" >&2
+                        exit 1
+                      fi
+                      total=0
+                      for dir in $pkgs; do
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        names=$(comm -23 <(echo "$tagged") <(echo "$plain") | grep -v '^TestHelper' || true)
+                        if [ -z "$names" ]; then
+                          echo "pg-router-integration-tests: $dir lists no integration-only tests" >&2
+                          exit 1
+                        fi
+                        regex="^($(echo "$names" | paste -sd'|' -))\$"
+                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                        if ! go test -tags integration -count=1 -v -timeout 30m -run "$regex" "$dir" >> "$log" 2>&1; then
+                          cat "$log"
+                          echo "pg-router-integration-tests: $dir FAILED" >&2
+                          exit 1
+                        fi
+                        for t in $names; do
+                          if ! grep -q -- "^--- PASS: $t " "$log"; then
+                            cat "$log"
+                            echo "pg-router-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                            exit 1
+                          fi
+                        done
+                        total=$((total + $(echo "$names" | wc -l)))
+                      done
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        cat "$log"
+                        echo "pg-router-integration-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-router-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
                   });
 
               # Red/green meta-test for the coverage gate (bead pg2-hvlyj.19

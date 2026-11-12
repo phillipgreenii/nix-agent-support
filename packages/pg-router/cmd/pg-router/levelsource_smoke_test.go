@@ -1,4 +1,4 @@
-//go:build smoke
+//go:build integration
 
 package main
 
