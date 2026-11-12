@@ -2,6 +2,7 @@ package beadhandler
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -94,7 +95,7 @@ type connectorResult struct {
 // run execs pg-connector with args. The error is non-nil only when the child
 // could not be started or waited on; a non-zero exit is reported in the result.
 func (c *connector) run(args []string) (connectorResult, error) {
-	cmd := exec.Command(connectorBinary, args...)
+	cmd := exec.CommandContext(context.Background(), connectorBinary, args...)
 	cmd.Env = c.env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var stdout, stderr bytes.Buffer

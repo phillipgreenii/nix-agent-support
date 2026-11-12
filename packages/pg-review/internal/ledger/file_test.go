@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -78,7 +79,7 @@ func topicOf(t *testing.T, l *Ledger, subject string) Topic {
 func occurrences(t *testing.T, l *Ledger, tp Topic) int {
 	t.Helper()
 	var n int
-	if err := l.DB().QueryRow(`SELECT COUNT(*) FROM occurrence WHERE topic_id=?`, tp.ID).Scan(&n); err != nil {
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM occurrence WHERE topic_id=?`, tp.ID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -114,7 +115,7 @@ func TestFileCreatesPendingAndDedupesAcrossLensAndScope(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	var topics int
-	_ = l.DB().QueryRow(`SELECT COUNT(*) FROM topic`).Scan(&topics)
+	_ = l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM topic`).Scan(&topics)
 	if topics != 1 || occurrences(t, l, tp) != 2 {
 		t.Fatalf("topics %d occurrences %d", topics, occurrences(t, l, tp))
 	}
@@ -192,7 +193,7 @@ func TestBatchRollbackLeavesNothing(t *testing.T) {
 	}
 	for _, q := range []string{"topic", "occurrence", "revision", "subject"} {
 		var n int
-		_ = l.DB().QueryRow(`SELECT COUNT(*) FROM ` + q).Scan(&n)
+		_ = l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+q).Scan(&n)
 		if n != 0 {
 			t.Errorf("%s has %d rows after a rolled-back batch", q, n)
 		}
@@ -276,8 +277,8 @@ func TestTwoConcurrentFileProcessesAreConsistent(t *testing.T) {
 		}
 	}
 	var topics, occ int
-	_ = l.DB().QueryRow(`SELECT COUNT(*) FROM topic`).Scan(&topics)
-	_ = l.DB().QueryRow(`SELECT COUNT(*) FROM occurrence`).Scan(&occ)
+	_ = l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM topic`).Scan(&topics)
+	_ = l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM occurrence`).Scan(&occ)
 	if topics != 1 || occ != 2 {
 		t.Fatalf("topics %d occurrences %d", topics, occ)
 	}
@@ -449,7 +450,7 @@ func TestAutoDeferAfterThirtyDays(t *testing.T) {
 	}
 	// Not a ruling: no decision row, so it cannot lift a lens pause.
 	var n int
-	_ = l.DB().QueryRow(`SELECT COUNT(*) FROM decision`).Scan(&n)
+	_ = l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM decision`).Scan(&n)
 	if n != 0 {
 		t.Errorf("%d decisions", n)
 	}
@@ -463,7 +464,7 @@ func TestAutoDeferAfterThirtyDays(t *testing.T) {
 func TestSchemaHasTopicEvent(t *testing.T) {
 	l := open(t)
 	var n int
-	if err := l.DB().QueryRow(`SELECT COUNT(*) FROM topic_event`).Scan(&n); err != nil {
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM topic_event`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if SchemaVersion() < 2 {

@@ -37,7 +37,7 @@ func setFileFactsComplete(t *testing.T, e *corpustest.Env, complete bool) {
 	if complete {
 		q = `INSERT INTO meta(key,value) VALUES('file_facts_complete','1') ON CONFLICT(key) DO UPDATE SET value='1'`
 	}
-	if _, err := db.Exec(q); err != nil {
+	if _, err := db.ExecContext(context.Background(), q); err != nil {
 		t.Fatal(err)
 	}
 }

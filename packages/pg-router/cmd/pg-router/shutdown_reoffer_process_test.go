@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -167,7 +168,7 @@ handler = "` + h.script + `"
 		t.Fatalf("write config.toml: %v", err)
 	}
 	// An ephemeral loopback port for the /metrics endpoint, reserved then released.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("reserve a loopback port: %v", err)
 	}
@@ -209,7 +210,7 @@ func (h *reofferHarness) startRouter() *router {
 	if !filepath.IsAbs(self) {
 		h.t.Fatalf("test binary path %q is not absolute", self)
 	}
-	cmd := exec.Command(self, "-test.run=^"+routerHelperName+"$")
+	cmd := exec.CommandContext(context.Background(), self, "-test.run=^"+routerHelperName+"$")
 	// A complete, explicit environment: nothing of the operator's PG_ROUTER_* or
 	// XDG state reaches the child, so it cannot read or write the live daemon's.
 	cmd.Env = []string{
@@ -264,7 +265,11 @@ func (h *reofferHarness) inject() {
 
 func (h *reofferHarness) scrape() (string, error) {
 	client := http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://" + h.metrics + "/metrics")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+h.metrics+"/metrics", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

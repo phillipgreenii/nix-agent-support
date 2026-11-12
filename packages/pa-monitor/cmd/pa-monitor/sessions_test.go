@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -181,14 +182,14 @@ func TestParseSessionsArgs(t *testing.T) {
 // "the recorder is not available" and exits 1 instead of reading the transcript files.
 func TestSessionsExitCodeAndHelp(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	home := t.TempDir()
 	env := append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
 		"XDG_STATE_HOME="+filepath.Join(home, ".state"), "PG_CLAUDE_CODE_RECORDER_SOCKET="+filepath.Join(home, "absent.sock"))
 
-	cmd := exec.Command(bin, "sessions", "--since", "not-a-time")
+	cmd := exec.CommandContext(context.Background(), bin, "sessions", "--since", "not-a-time")
 	cmd.Env = env
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -201,7 +202,7 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 		t.Errorf("stderr %q should name --since", stderr.String())
 	}
 
-	cmd = exec.Command(bin, "sessions", "--since", "1d", "--json")
+	cmd = exec.CommandContext(context.Background(), bin, "sessions", "--since", "1d", "--json")
 	cmd.Env = env
 	stderr.Reset()
 	cmd.Stderr = &stderr
@@ -216,7 +217,7 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 		t.Errorf("stderr %q should say %q and not daemon offline", stderr.String(), wantMsg)
 	}
 
-	cmd = exec.Command(bin, "search", "x")
+	cmd = exec.CommandContext(context.Background(), bin, "search", "x")
 	cmd.Env = env
 	stderr.Reset()
 	cmd.Stderr = &stderr

@@ -11,6 +11,7 @@
 package keepertest
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -50,7 +51,7 @@ func Main(m *testing.M) int {
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 	out := filepath.Join(tmp, "pg-keep-awake")
-	cmd := exec.Command("go", "build", "-o", out, ".")
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", out, ".")
 	cmd.Dir = src
 	if b, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "keepertest: go build pg-keep-awake: %v\n%s", err, b)

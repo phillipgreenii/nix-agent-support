@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -335,7 +336,7 @@ func TestRuleSeveralIdsAndIdempotent(t *testing.T) {
 		t.Fatalf("repeat: %+v %v", res, err)
 	}
 	var n int
-	_ = l.DB().QueryRow(`SELECT COUNT(*) FROM decision`).Scan(&n)
+	_ = l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM decision`).Scan(&n)
 	if n != 2 {
 		t.Errorf("decisions %d", n)
 	}

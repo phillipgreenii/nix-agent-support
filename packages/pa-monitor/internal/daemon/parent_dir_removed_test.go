@@ -40,7 +40,7 @@ func TestRun_ParentDirRemovedMidRunDoesNotCrash(t *testing.T) {
 
 	// Confirm the listener was bound (we can no longer dial because the
 	// socket file is gone) — sanity check that we yanked the right files.
-	if _, err := net.Dial("unix", paths.Socket); err == nil {
+	if _, err := (&net.Dialer{}).DialContext(context.Background(), "unix", paths.Socket); err == nil {
 		t.Log("post-remove dial succeeded — kernel may keep abstract socket open; that's fine")
 	} else if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, net.ErrClosed) {
 		// either "no such file" or kernel-level close is acceptable

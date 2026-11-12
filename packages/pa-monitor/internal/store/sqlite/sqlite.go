@@ -4,6 +4,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/url"
@@ -39,7 +40,7 @@ func Open(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open: %w", err)
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping: %w", err)
 	}

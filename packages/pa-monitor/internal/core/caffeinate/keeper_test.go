@@ -1,6 +1,7 @@
 package caffeinate
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -130,7 +131,7 @@ func TestAcquireResolvesTheCLIWithoutALoginPATH(t *testing.T) {
 	}
 	run := func(mode string) string {
 		t.Helper()
-		cmd := exec.Command("/usr/bin/env", "-i",
+		cmd := exec.CommandContext(context.Background(), "/usr/bin/env", "-i",
 			"PATH=/usr/bin:/bin",
 			"XDG_STATE_HOME="+os.Getenv("XDG_STATE_HOME"),
 			helperModeEnv+"="+mode,

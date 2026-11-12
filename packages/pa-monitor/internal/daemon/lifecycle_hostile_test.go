@@ -11,6 +11,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +30,7 @@ func TestRun_SIGKILLRecoveredOnNextStart(t *testing.T) {
 	bin := buildTestBinary(t)
 	stateDir := shortTempDir(t)
 
-	cmd := exec.Command(bin, "daemon")
+	cmd := exec.CommandContext(context.Background(), bin, "daemon")
 	cmd.Env = append(
 		os.Environ(),
 		"XDG_STATE_HOME="+stateDir,
@@ -47,7 +48,7 @@ func TestRun_SIGKILLRecoveredOnNextStart(t *testing.T) {
 	}
 	_ = cmd.Wait()
 
-	cmd2 := exec.Command(bin, "daemon")
+	cmd2 := exec.CommandContext(context.Background(), bin, "daemon")
 	cmd2.Env = cmd.Env
 	if err := cmd2.Start(); err != nil {
 		t.Fatalf("second start failed: %v", err)
@@ -60,7 +61,8 @@ func TestRun_SIGKILLRecoveredOnNextStart(t *testing.T) {
 func buildTestBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	out, err := exec.Command(
+	out, err := exec.CommandContext(
+		context.Background(),
 		"go", "build",
 		"-o", bin,
 		"github.com/phillipgreenii/pa-monitor/cmd/pa-monitor",
@@ -93,7 +95,7 @@ func TestRun_ConcurrentStartExactlyOneWins(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		go func() {
-			cmd := exec.Command(bin, "daemon")
+			cmd := exec.CommandContext(context.Background(), bin, "daemon")
 			cmd.Env = env
 			out, err := cmd.CombinedOutput()
 			results <- result{err: err, out: out}

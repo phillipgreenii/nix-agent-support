@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -378,7 +379,7 @@ while [ ! -e "$WRAPPER_GO" ] && [ "$i" -lt 1500 ]; do sleep 0.01; i=$((i + 1)); 
 if [ -e "$WRAPPER_GO" ]; then exit 0; fi
 kill "$handler"
 exit 3`
-	cmd := exec.Command("/bin/sh", append([]string{"-c", wrapper, "wrapper"}, handlerArgv()...)...)
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", append([]string{"-c", wrapper, "wrapper"}, handlerArgv()...)...)
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Env = append(
 		cmd.Env,

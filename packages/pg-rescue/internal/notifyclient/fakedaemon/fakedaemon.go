@@ -3,6 +3,7 @@
 package fakedaemon
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -45,7 +46,7 @@ func Start(t testing.TB, o Options) *Server {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	s := &Server{Path: filepath.Join(dir, "s.sock"), closed: make(chan struct{}, 8), hold: make(chan struct{}), reply: o.Reply, hang: o.Hang}
-	l, err := net.Listen("unix", s.Path)
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", s.Path)
 	if err != nil {
 		t.Fatal(err)
 	}

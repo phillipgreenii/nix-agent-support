@@ -554,7 +554,7 @@ func Listen(opts Options) (*Service, error) {
 	if err := clearStaleSocket(sock); err != nil {
 		return nil, err
 	}
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		return nil, fmt.Errorf("core: listen on %s: %w", sock, err)
 	}

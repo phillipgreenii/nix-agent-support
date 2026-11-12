@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -25,7 +26,7 @@ func (PSInspector) StartTime(pid int) (time.Time, bool) {
 	if pid <= 0 {
 		return time.Time{}, false
 	}
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return time.Time{}, false
 	}

@@ -7,6 +7,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,7 +34,7 @@ func TestAcquirePIDFile_RecycledPidIsReclaimed(t *testing.T) {
 
 	// Start a real short-lived child whose pid we will write into the
 	// pidfile, then kill it before AcquirePIDFile runs.
-	cmd := exec.Command("sleep", "60")
+	cmd := exec.CommandContext(context.Background(), "sleep", "60")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

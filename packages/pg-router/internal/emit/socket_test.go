@@ -280,7 +280,7 @@ func TestDiscoverer_NoCoreIsErrNoRunningCore(t *testing.T) {
 func fakeCore(t *testing.T, exitCode int, reply string) string {
 	t.Helper()
 	sock := filepath.Join(shortDir(t), "fake.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestFakeCore_FramesMatchTheRealTransport(t *testing.T) {
 	dir := shortDir(t)
 	svc := startCore(t, dir, eventqueue.NewMemStore())
 
-	conn, err := net.DialTimeout("unix", svc.Ref().Socket, 2*time.Second)
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(context.Background(), "unix", svc.Ref().Socket)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

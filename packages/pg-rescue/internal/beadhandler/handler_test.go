@@ -2,6 +2,7 @@ package beadhandler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -1170,7 +1171,7 @@ func TestOrphanWatcherKillsTheRunningChild(t *testing.T) {
 		t.Error("the orphan watch was not stopped on the way out")
 	}
 	pid := strings.TrimSpace(readFile(t, filepath.Join(s.fake.Dir, "started.child")))
-	if err := exec.Command("kill", "-0", pid).Run(); err == nil {
+	if err := exec.CommandContext(context.Background(), "kill", "-0", pid).Run(); err == nil {
 		t.Errorf("the fake pg-connector (pid %s) is still alive", pid)
 	}
 }
@@ -1178,7 +1179,7 @@ func TestOrphanWatcherKillsTheRunningChild(t *testing.T) {
 func TestOrphanCleanupBeforeTheChildStartsKillsItOnArrival(t *testing.T) {
 	c := &child{}
 	c.kill()
-	cmd := exec.Command("sleep", "60")
+	cmd := exec.CommandContext(context.Background(), "sleep", "60")
 	cmd.SysProcAttr = sysProcGroup()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

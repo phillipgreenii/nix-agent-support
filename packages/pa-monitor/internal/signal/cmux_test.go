@@ -31,7 +31,7 @@ func TestRunCmux_EnrichesStderr(t *testing.T) {
 // error must surface cmux's own stderr so the failing path is diagnosable.
 func TestEnrichCmdErr_IncludesStderr(t *testing.T) {
 	// A real *exec.ExitError with populated Stderr, exactly as .Output() yields.
-	_, err := exec.Command("sh", "-c", "echo cmux-boom >&2; exit 1").Output()
+	_, err := exec.CommandContext(context.Background(), "sh", "-c", "echo cmux-boom >&2; exit 1").Output()
 	if err == nil {
 		t.Fatal("expected a non-nil error from a command that exits 1")
 	}

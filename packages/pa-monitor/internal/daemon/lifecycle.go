@@ -91,7 +91,7 @@ func BindSocket(p Paths) (net.Listener, error) {
 		return nil, fmt.Errorf("remove stale socket: %w", err)
 	}
 
-	l, err := net.Listen("unix", p.Socket)
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", p.Socket)
 	if err != nil {
 		return nil, fmt.Errorf("listen unix: %w", err)
 	}

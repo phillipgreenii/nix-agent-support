@@ -1,6 +1,7 @@
 package livestate
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io/fs"
@@ -14,7 +15,7 @@ import (
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{
 		"-C", dir,
 		"-c", "user.name=t", "-c", "user.email=t@example.com",
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
@@ -57,7 +58,7 @@ func newRepo(t *testing.T) string {
 func stopRebase(t *testing.T, dir string) {
 	t.Helper()
 	git(t, dir, "checkout", "-q", "topic")
-	cmd := exec.Command("git", "-C", dir, "rebase", "main")
+	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "rebase", "main")
 	if err := cmd.Run(); err == nil {
 		t.Fatal("rebase unexpectedly succeeded")
 	}

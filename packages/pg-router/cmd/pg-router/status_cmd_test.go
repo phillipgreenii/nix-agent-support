@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"strings"
@@ -100,7 +101,7 @@ func TestStatus_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
 func TestStatus_RefusedBySaturatedReadSemaphore(t *testing.T) {
 	dir := shortDir(t)
 	sock := dir + "/busy.sock"
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

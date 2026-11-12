@@ -125,7 +125,7 @@ func TestListen_RebindsOverAStaleSocket(t *testing.T) {
 	// Simulate a crash: bind, close the listener WITHOUT unlinking, leaving a dead
 	// socket file on disk.
 	sock := SocketPath(dir)
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatalf("pre-bind: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestServe_MalformedTransportFrame(t *testing.T) {
 	dir := shortDir(t)
 	_, ref := startService(t, dir)
 
-	conn, err := net.Dial("unix", ref.Socket)
+	conn, err := (&net.Dialer{}).DialContext(context.Background(), "unix", ref.Socket)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestCall_OnAClosedConnection(t *testing.T) {
 func TestCall_NullReplyIsNoBody(t *testing.T) {
 	dir := shortDir(t)
 	sock := filepath.Join(dir, "busy.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -842,7 +842,7 @@ func TestNoGoroutineLeak_ConcurrentAndAbandonedCalls(t *testing.T) {
 	// handleConn goroutine has no ctx to watch here; it can only be bounded
 	// by serverCallDeadline, so this is what actually proves that bound
 	// works rather than trivially passing because nothing was ever stuck.
-	stalled, err := net.Dial("unix", ref.Socket)
+	stalled, err := (&net.Dialer{}).DialContext(context.Background(), "unix", ref.Socket)
 	if err != nil {
 		t.Fatalf("dial stalled conn: %v", err)
 	}

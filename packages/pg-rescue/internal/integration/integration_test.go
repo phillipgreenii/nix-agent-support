@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -108,7 +109,7 @@ func binary(t *testing.T, name string) string {
 	if _, err := os.Stat(out); err == nil {
 		return out
 	}
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/"+name)
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", out, "./cmd/"+name)
 	cmd.Dir = moduleRoot(t)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s is not on PATH and go build failed: %v\n%s", name, err, b)
@@ -268,7 +269,7 @@ func (r *rig) commit(repo *gitfixture.Repo, msg string, files map[string]string)
 // chain `sync`, and returns the wrapper's exit code and stderr.
 func (r *rig) pull() (code int, stderr string) {
 	r.t.Helper()
-	cmd := exec.Command(binary(r.t, "pg-rescue"), "--config", r.cfg, "--chain", "sync",
+	cmd := exec.CommandContext(context.Background(), binary(r.t, "pg-rescue"), "--config", r.cfg, "--chain", "sync",
 		"-C", r.work.Dir, "--context", "integration: rebase onto origin", "--", "git", "pull", "--rebase")
 	cmd.Env = append(os.Environ(), r.env...)
 	var errb bytes.Buffer

@@ -2,6 +2,7 @@ package beadhandler
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"os"
@@ -17,7 +18,7 @@ import (
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.editor=true"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.editor=true"}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil && args[0] != "rebase" {
 		t.Fatalf("git %v: %v\n%s", args, err, out)

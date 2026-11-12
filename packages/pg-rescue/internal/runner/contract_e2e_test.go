@@ -1,6 +1,7 @@
 package runner_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,7 +145,7 @@ func TestEvalOfPGRescueCmdReproducesTheArgv(t *testing.T) {
 	argv := helperArgv("exit", "code=1", "it's", "a b", "$HOME", ";", "", "x\ny", "`id`", `a"b`)
 	e.wrap("r1", argv)
 	cmd := readRecord(t, filepath.Join(dir, "rec-1")).Env["PG_RESCUE_CMD"]
-	c := exec.Command("sh", "-c", `eval set -- "$PG_RESCUE_CMD"; printf '%s\0' "$@"`)
+	c := exec.CommandContext(context.Background(), "sh", "-c", `eval set -- "$PG_RESCUE_CMD"; printf '%s\0' "$@"`)
 	c.Env = append(os.Environ(), "PG_RESCUE_CMD="+cmd)
 	out, err := c.Output()
 	if err != nil {

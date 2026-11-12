@@ -2,6 +2,7 @@ package runlog
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -73,7 +74,7 @@ func TestReadmeJqRecipesRunAgainstAFixtureLog(t *testing.T) {
 			if !ok {
 				t.Fatalf("the README has no recipe %q", name)
 			}
-			cmd := exec.Command("sh", "-c", script)
+			cmd := exec.CommandContext(context.Background(), "sh", "-c", script)
 			cmd.Env = append(os.Environ(), "XDG_STATE_HOME="+state)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr

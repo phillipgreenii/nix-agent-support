@@ -207,7 +207,7 @@ func waitForSocketAccepting(t *testing.T, sockPath string) {
 	t.Helper()
 	deadline := time.Now().Add(socketReadyTimeout)
 	for {
-		c, err := net.Dial("unix", sockPath)
+		c, err := (&net.Dialer{}).DialContext(context.Background(), "unix", sockPath)
 		if err == nil {
 			_ = c.Close()
 			return
@@ -285,7 +285,7 @@ func dialTCP(t *testing.T, addr string) *grpc.ClientConn {
 // against exactly that. The server must still start and answer a trivial
 // RPC without panicking.
 func TestServeNilMeterProviderStarts(t *testing.T) {
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestServeNilMeterProviderStarts(t *testing.T) {
 // the otelgrpc default absent OTEL_SEMCONV_STABILITY_OPT_IN). A ManualReader
 // lets us inspect the recorded datapoint without a live collector.
 func TestServeWithMeterProviderRecordsRPCDuration(t *testing.T) {
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

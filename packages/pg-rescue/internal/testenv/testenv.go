@@ -6,6 +6,7 @@
 package testenv
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,7 +61,7 @@ func BuildHelper(importPath string) (bin string, cleanup func(), err error) {
 	}
 	cleanup = func() { _ = os.RemoveAll(dir) }
 	bin = filepath.Join(dir, filepath.Base(importPath))
-	cmd := exec.Command("go", "build", "-race=false", "-o", bin, importPath)
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-race=false", "-o", bin, importPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("go build %s: %v\n%s", importPath, err, out)

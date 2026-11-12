@@ -146,7 +146,7 @@ func runKilledParent(t *testing.T, survives bool) (pid int, killedAt time.Time) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := exec.Command(os.Args[0], "-test.run=^TestHelperParentDeath$")
+	parent := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestHelperParentDeath$")
 	parent.Env = append(os.Environ(), envHelperRole+"="+string(req), envHelperAdapter+"="+bin)
 	if survives {
 		parent.Env = append(parent.Env, envHelperSurvives+"=1")

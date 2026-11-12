@@ -133,7 +133,7 @@ func recordingProxy(t *testing.T, target string) (socket string, sent func() str
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket = filepath.Join(dir, "p.sock")
-	ln, err := net.Listen("unix", socket)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func recordingProxy(t *testing.T, target string) (socket string, sent func() str
 			}
 			go func() {
 				defer func() { _ = cl.Close() }()
-				up, err := net.Dial("unix", target)
+				up, err := (&net.Dialer{}).DialContext(context.Background(), "unix", target)
 				if err != nil {
 					return
 				}

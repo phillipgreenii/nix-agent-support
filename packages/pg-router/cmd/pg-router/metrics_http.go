@@ -49,7 +49,7 @@ func startMetricsServer(addr string, onListen func(net.Listener)) (metric.MeterP
 	}
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
 
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listen on %s: %w", addr, err)
 	}

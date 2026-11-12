@@ -3,6 +3,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -18,7 +19,7 @@ import (
 // (CMUX_WORKSPACE_ID, TMUX, WORKSPACE), this is fine for the use case.
 // Robust parsing would require libproc + cgo, which we avoid.
 func readProcessEnv(pid int) (map[string]string, error) {
-	out, err := exec.Command("ps", "-E", "-ww", "-o", "command=", "-p", fmt.Sprintf("%d", pid)).Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-E", "-ww", "-o", "command=", "-p", fmt.Sprintf("%d", pid)).Output()
 	if err != nil {
 		return map[string]string{}, err
 	}

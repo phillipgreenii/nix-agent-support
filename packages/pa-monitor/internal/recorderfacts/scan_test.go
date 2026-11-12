@@ -243,13 +243,15 @@ func failingProxyUntil(t *testing.T, target, failSID string, healed *atomic.Bool
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket := filepath.Join(dir, "p.sock")
-	ln, err := net.Listen("unix", socket)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rp := &httputil.ReverseProxy{
-		Director:  func(r *http.Request) { r.URL.Scheme, r.URL.Host = "http", "recorder" },
-		Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) { return net.Dial("unix", target) }},
+		Director: func(r *http.Request) { r.URL.Scheme, r.URL.Host = "http", "recorder" },
+		Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(context.Background(), "unix", target)
+		}},
 	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/query" {

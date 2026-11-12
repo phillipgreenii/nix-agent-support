@@ -25,7 +25,7 @@ func lateDaemon(t *testing.T, delay time.Duration) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "r.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

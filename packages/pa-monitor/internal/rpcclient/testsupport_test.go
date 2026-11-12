@@ -9,6 +9,7 @@
 package rpcclient
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,7 +34,8 @@ func shortTempDir(t *testing.T) string {
 func buildDaemonBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	out, err := exec.Command(
+	out, err := exec.CommandContext(
+		context.Background(),
 		"go", "build", "-o", bin,
 		"github.com/phillipgreenii/pa-monitor/cmd/pa-monitor",
 	).CombinedOutput()

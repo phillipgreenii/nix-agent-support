@@ -102,7 +102,7 @@ func hashTree(dir string) (string, error) {
 }
 
 // makeScratch creates the scratch git worktree under the literal /tmp.
-func makeScratch() (string, error) {
+func makeScratch(ctx context.Context) (string, error) {
 	p, err := os.MkdirTemp(stagingRoot, "pg-review-scratch-")
 	if err != nil {
 		return "", err
@@ -111,7 +111,7 @@ func makeScratch() (string, error) {
 		{"init", "-q"},
 		{"-c", "user.name=pg-review", "-c", "user.email=pg-review@invalid", "commit", "--allow-empty", "-q", "-m", "scratch"},
 	} {
-		if out, err := exec.Command("git", append([]string{"-C", p}, args...)...).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, "git", append([]string{"-C", p}, args...)...).CombinedOutput(); err != nil {
 			_ = os.RemoveAll(p)
 			return "", fmt.Errorf("scratch worktree: git %s: %v: %s", args[0], err, out)
 		}

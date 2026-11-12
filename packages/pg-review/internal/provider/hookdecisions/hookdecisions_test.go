@@ -202,7 +202,7 @@ func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
 func TestOpensReadOnly(t *testing.T) {
 	db := fixture.Build(t, fixture.Standard())
-	h, err := hookdecisions.OpenReadOnly(db)
+	h, err := hookdecisions.OpenReadOnly(t.Context(), db)
 	if err != nil {
 		t.Fatal(err)
 	}

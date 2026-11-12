@@ -1,6 +1,7 @@
 package triage
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -13,7 +14,7 @@ import (
 // server) and returns the bead id it printed.
 func realBD(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("bd", args...)
+	cmd := exec.CommandContext(context.Background(), "bd", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "BEADS_DOLT_AUTO_START=0", "BEADS_DIR="+filepath.Join(dir, ".beads"), "BEADS_ACTOR=scratch")
 	out, err := cmd.CombinedOutput()
@@ -52,7 +53,7 @@ func TestRealBDProjectBeadIsNotAnItem(t *testing.T) {
 		t.Skip("bd not on PATH")
 	}
 	dir := t.TempDir()
-	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	realBD(t, dir, "init", "--non-interactive", "--quiet", "-p", "scr")

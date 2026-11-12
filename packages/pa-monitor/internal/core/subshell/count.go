@@ -1,6 +1,7 @@
 package subshell
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -14,7 +15,7 @@ type Counter struct {
 // DefaultRunPs uses `pgrep -P <parent> -l` to list direct children.
 // An exit code of 1 (no matches) is translated to an empty list, not an error.
 func DefaultRunPs(parent int) (string, error) {
-	out, err := exec.Command("pgrep", "-P", fmt.Sprintf("%d", parent), "-l").Output()
+	out, err := exec.CommandContext(context.Background(), "pgrep", "-P", fmt.Sprintf("%d", parent), "-l").Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return "", nil

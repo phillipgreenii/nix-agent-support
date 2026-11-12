@@ -16,6 +16,7 @@
 package testdataguard
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestShippedBinariesEmbedNoTestdata(t *testing.T) {
 	for _, main := range shippedMains {
 		t.Run(main, func(t *testing.T) {
 			// One line per dependency: "<import path>\t<embed patterns>\t<embed files>".
-			cmd := exec.Command("go", "list", "-deps", "-f",
+			cmd := exec.CommandContext(context.Background(), "go", "list", "-deps", "-f",
 				`{{.ImportPath}}{{"\t"}}{{join .EmbedPatterns ","}}{{"\t"}}{{join .EmbedFiles ","}}`, main)
 			cmd.Dir = "../.."
 			out, err := cmd.Output()

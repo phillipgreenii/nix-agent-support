@@ -167,7 +167,7 @@ func Discover(logDir string) (Ref, error) {
 // probe reports whether something is accepting connections on socket within
 // timeout, mapping a dead/stale socket to ErrNoRunningCore.
 func probe(socket string, timeout time.Duration) error {
-	conn, err := net.DialTimeout("unix", socket, timeout)
+	conn, err := (&net.Dialer{Timeout: timeout}).DialContext(context.Background(), "unix", socket)
 	if err != nil {
 		return fmt.Errorf("%w: socket %s is not accepting connections: %v", ErrNoRunningCore, socket, err)
 	}
@@ -230,7 +230,7 @@ func Dial(ref Ref, probeTimeout time.Duration) (*Client, error) {
 	if probeTimeout <= 0 {
 		probeTimeout = DefaultProbeTimeout
 	}
-	conn, err := net.DialTimeout("unix", ref.Socket, probeTimeout)
+	conn, err := (&net.Dialer{Timeout: probeTimeout}).DialContext(context.Background(), "unix", ref.Socket)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cannot reach socket %s: %v", ErrNoRunningCore, ref.Socket, err)
 	}

@@ -1,6 +1,7 @@
 package report
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -306,7 +307,7 @@ func TestQuoteArgvRoundTripsThroughEval(t *testing.T) {
 		t.Fatalf("bash is required (the pg-rescue-go-tests check puts it in testDeps): %v", err)
 	}
 	argv := []string{"printf", "it's", "", "a b", `$HOME;"x"`, "`id`", "*", "\\n", "tab\there", "new\nline", "-n", "é"}
-	cmd := exec.Command(bash, "-c", `eval set -- "$PG_RESCUE_CMD"; printf '%s\0' "$@"`)
+	cmd := exec.CommandContext(context.Background(), bash, "-c", `eval set -- "$PG_RESCUE_CMD"; printf '%s\0' "$@"`)
 	cmd.Env = append(os.Environ(), "PG_RESCUE_CMD="+QuoteArgv(argv))
 	out, err := cmd.Output()
 	if err != nil {

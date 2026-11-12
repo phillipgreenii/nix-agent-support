@@ -48,7 +48,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("no listening line: %q", line)
 	}
 	addr := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	resp, err := httpGetCtx(http.DefaultClient, "http://"+addr+"/debug/pprof/")
 	if err != nil {
 		stop()
 		t.Fatalf("GET: %v", err)
@@ -59,7 +59,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	stop()
-	if resp, err := http.Get("http://" + addr + "/debug/pprof/"); err == nil {
+	if resp, err := httpGetCtx(http.DefaultClient, "http://"+addr+"/debug/pprof/"); err == nil {
 		_ = resp.Body.Close()
 		t.Fatal("still serving after stop")
 	}
@@ -104,7 +104,7 @@ func TestStartPprofFromEnvUnixSocketServesWith0600AndStops(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{
 		DialContext: dialUnix(sock),
 	}}
-	resp, err := client.Get("http://pprof/debug/pprof/")
+	resp, err := httpGetCtx(client, "http://pprof/debug/pprof/")
 	if err != nil {
 		t.Fatalf("GET over socket: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestStartPprofFromEnvUnixSocketServesWith0600AndStops(t *testing.T) {
 	}
 	stop()
 	stopped = true
-	if resp, err := client.Get("http://pprof/debug/pprof/"); err == nil {
+	if resp, err := httpGetCtx(client, "http://pprof/debug/pprof/"); err == nil {
 		_ = resp.Body.Close()
 		t.Fatal("still serving after stop")
 	}
@@ -125,4 +125,13 @@ func dialUnix(sock string) func(ctx context.Context, network, addr string) (net.
 		var d net.Dialer
 		return d.DialContext(ctx, "unix", sock)
 	}
+}
+
+// httpGetCtx issues a GET bound to context.Background through client.
+func httpGetCtx(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
 }

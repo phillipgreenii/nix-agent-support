@@ -16,7 +16,7 @@ import (
 func buildProvider(t *testing.T, name string) string {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.Command("go", "build", "-o", filepath.Join(dir, name), "../../cmd/"+name)
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", filepath.Join(dir, name), "../../cmd/"+name)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build %s: %v\n%s", name, err, out)
 	}

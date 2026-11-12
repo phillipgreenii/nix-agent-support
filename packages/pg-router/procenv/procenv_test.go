@@ -106,12 +106,12 @@ func TestGroupCancelEscalatesToSigkill(t *testing.T) {
 }
 
 func TestGroupSetsWaitDelayOnlyWhenZero(t *testing.T) {
-	c := exec.Command("/bin/true")
+	c := exec.CommandContext(context.Background(), "/bin/true")
 	Group(c, 2*time.Second)
 	if c.WaitDelay != 3*time.Second {
 		t.Fatalf("WaitDelay = %v, want grace+1s", c.WaitDelay)
 	}
-	c = exec.Command("/bin/true")
+	c = exec.CommandContext(context.Background(), "/bin/true")
 	c.WaitDelay = time.Minute
 	Group(c, 2*time.Second)
 	if c.WaitDelay != time.Minute {

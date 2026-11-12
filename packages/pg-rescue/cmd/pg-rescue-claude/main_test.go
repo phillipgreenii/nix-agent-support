@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -847,7 +848,7 @@ func TestOrphanedHandlerExitsAndKillsItsClaudeChild(t *testing.T) {
 	// bash plays the wrapper: it starts the handler in the background, records
 	// its pid, and waits. Killing bash then orphans the handler.
 	handlerPIDFile := filepath.Join(r.recDir, "handler-pid")
-	cmd := exec.Command("bash", append([]string{"-c", `"$@" >/dev/null 2>&1 & echo $! > "$HANDLER_PID_FILE"; wait`, "wrapper"}, handlerArgv()...)...)
+	cmd := exec.CommandContext(context.Background(), "bash", append([]string{"-c", `"$@" >/dev/null 2>&1 & echo $! > "$HANDLER_PID_FILE"; wait`, "wrapper"}, handlerArgv()...)...)
 	cmd.Env = append(append(os.Environ(), r.env...),
 		"GO_WANT_HELPER_PROCESS=1", "FAKE_CLAUDE_MODE=hang", "HANDLER_PID_FILE="+handlerPIDFile, "PG_RESCUE_REPORT="+contracttest.Fixture("first-attempt"))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

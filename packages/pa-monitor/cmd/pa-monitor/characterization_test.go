@@ -196,7 +196,7 @@ func daemonTestSocket(t *testing.T) string {
 func serveFakeDaemon(t *testing.T, sock string, srv pb.PaMonitorServer, opts ...grpc.ServerOption) (stop func()) {
 	t.Helper()
 	_ = os.Remove(sock)
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

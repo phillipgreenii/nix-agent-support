@@ -12,6 +12,7 @@
 package reexec
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,11 +43,11 @@ func TestReexecExecvePreservesArgsEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	stubBin := filepath.Join(dir, "pa-monitor")
-	if out, err := exec.Command("go", "build", "-o", stubBin, stubSrc).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "go", "build", "-o", stubBin, stubSrc).CombinedOutput(); err != nil {
 		t.Fatalf("build stub: %v\n%s", err, out)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestReexecHelperProcess")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=TestReexecHelperProcess")
 	cmd.Env = append(
 		os.Environ(),
 		"GO_WANT_REEXEC_HELPER=1",

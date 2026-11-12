@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,7 +127,7 @@ func TestOrphanedHandlerKillsItsChildAndExits(t *testing.T) {
 
 	// "wrapper" is a shell that starts the handler in the background and
 	// waits; killing the shell orphans the handler.
-	wrapper := exec.Command("/bin/sh", append([]string{"-c", `"$@" </dev/null >/dev/null 2>&1 & wait`, "sh"}, argv...)...)
+	wrapper := exec.CommandContext(context.Background(), "/bin/sh", append([]string{"-c", `"$@" </dev/null >/dev/null 2>&1 & wait`, "sh"}, argv...)...)
 	wrapper.Env = append(append(os.Environ(), helperEnv...), append(fake.Env(), "PG_RESCUE_REPORT="+reportPath)...)
 	wrapper.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := wrapper.Start(); err != nil {
@@ -149,7 +150,9 @@ func TestOrphanedHandlerKillsItsChildAndExits(t *testing.T) {
 	waitFor(t, func() bool { return !alive(childPid) })
 }
 
-func alive(pid string) bool { return exec.Command("kill", "-0", pid).Run() == nil }
+func alive(pid string) bool {
+	return exec.CommandContext(context.Background(), "kill", "-0", pid).Run() == nil
+}
 
 func read(t *testing.T, p string) string {
 	t.Helper()

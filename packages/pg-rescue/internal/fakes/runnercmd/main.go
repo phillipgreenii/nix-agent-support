@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -171,7 +172,7 @@ func helperMain(args []string) {
 		if kind == "" {
 			kind = "sleep"
 		}
-		child := exec.Command(os.Args[0], kind, "secs="+kv["secs"], "ms="+kv["ms"], "text="+kv["text"], "started="+kv["ready"])
+		child := exec.CommandContext(context.Background(), os.Args[0], kind, "secs="+kv["secs"], "ms="+kv["ms"], "text="+kv["text"], "started="+kv["ready"])
 		child.Env = os.Environ()
 		if kv["setsid"] == "1" {
 			child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

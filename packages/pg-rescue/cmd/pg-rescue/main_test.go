@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,7 +47,7 @@ func runMain(t *testing.T, env []string, args ...string) (code int, stdout, stde
 // runMainProc runs the real main as a process (this test binary re-executed).
 func runMainProc(t *testing.T, env []string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^$", "--"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), os.Args[0], append([]string{"-test.run=^$", "--"}, args...)...)
 	cmd.Env = append(os.Environ(), append([]string{"GO_WANT_HELPER_PROCESS=1"}, env...)...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

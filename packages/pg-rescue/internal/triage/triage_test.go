@@ -1,6 +1,7 @@
 package triage
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -15,7 +16,7 @@ import (
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{
 		"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com",
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
 	}, args...)...)
@@ -52,7 +53,7 @@ func repoStoppedInRebase(t *testing.T) string {
 	write(t, f, "main\n")
 	git(t, dir, "commit", "-qam", "main")
 	git(t, dir, "checkout", "-q", "topic")
-	cmd := exec.Command("git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "rebase", "main")
+	cmd := exec.CommandContext(context.Background(), "git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "rebase", "main")
 	if err := cmd.Run(); err == nil {
 		t.Fatal("rebase unexpectedly succeeded")
 	}
@@ -66,7 +67,7 @@ func worktreeStoppedInRebase(t *testing.T) string {
 	git(t, main, "rebase", "--abort")
 	wt := filepath.Join(t.TempDir(), "wt")
 	git(t, main, "worktree", "add", "-q", "--detach", wt, "topic")
-	cmd := exec.Command("git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@example.com", "rebase", "main")
+	cmd := exec.CommandContext(context.Background(), "git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@example.com", "rebase", "main")
 	if err := cmd.Run(); err == nil {
 		t.Fatal("rebase unexpectedly succeeded")
 	}

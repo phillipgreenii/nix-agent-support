@@ -75,7 +75,7 @@ type fakeCore struct {
 
 func startFakeCore(t *testing.T, socketPath string, handler fakeCoreHandler) *fakeCore {
 	t.Helper()
-	l, err := net.Listen("unix", socketPath)
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", socketPath)
 	if err != nil {
 		t.Fatalf("listen %s: %v", socketPath, err)
 	}

@@ -1,6 +1,7 @@
 package orphan
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -177,7 +178,7 @@ func TestDefaults(t *testing.T) {
 
 func TestRealOrphanRunsCleanupAndExits(t *testing.T) {
 	dir := t.TempDir()
-	cmd := exec.Command(helperBin)
+	cmd := exec.CommandContext(context.Background(), helperBin)
 	cmd.Env = append(os.Environ(), "GO_ORPHAN_ROLE=parent", "ORPHAN_TEST_DIR="+dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("parent role failed: %v\n%s", err, out)

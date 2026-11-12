@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,7 @@ func main() {
 	dir := os.Getenv("ORPHAN_TEST_DIR")
 	switch os.Getenv("GO_ORPHAN_ROLE") {
 	case "parent":
-		child := exec.Command(os.Args[0])
+		child := exec.CommandContext(context.Background(), os.Args[0])
 		child.Env = append(os.Environ(), "GO_ORPHAN_ROLE=child")
 		if err := child.Start(); err != nil {
 			os.Exit(2)

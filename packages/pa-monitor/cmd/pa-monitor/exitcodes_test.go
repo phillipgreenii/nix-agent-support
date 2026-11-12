@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -18,7 +19,7 @@ import (
 // daemon-bound subcommand sees "daemon unavailable".
 func TestExitCodeContract(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	home := t.TempDir()
@@ -49,7 +50,7 @@ func TestExitCodeContract(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := exec.Command(bin, tc.args...)
+			cmd := exec.CommandContext(context.Background(), bin, tc.args...)
 			cmd.Env = append(append(os.Environ(), base...), "XDG_CONFIG_HOME="+tc.cfg)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr

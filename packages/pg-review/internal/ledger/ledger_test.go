@@ -56,11 +56,11 @@ func TestOpenModesWALAndDefaultPath(t *testing.T) {
 		t.Errorf("file mode %o", m)
 	}
 	var jm string
-	if err := l.DB().QueryRow("PRAGMA journal_mode").Scan(&jm); err != nil || jm != "wal" {
+	if err := l.DB().QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&jm); err != nil || jm != "wal" {
 		t.Errorf("journal_mode %q %v", jm, err)
 	}
 	var bt int
-	if err := l.DB().QueryRow("PRAGMA busy_timeout").Scan(&bt); err != nil || bt != BusyTimeoutMillis {
+	if err := l.DB().QueryRowContext(context.Background(), "PRAGMA busy_timeout").Scan(&bt); err != nil || bt != BusyTimeoutMillis {
 		t.Errorf("busy_timeout %d %v", bt, err)
 	}
 	if v, _ := l.userVersion(ctx); v != SchemaVersion() {
@@ -79,7 +79,7 @@ func TestStateDirFallsBackToHome(t *testing.T) {
 
 func TestNoQuestionOrOutboxTables(t *testing.T) {
 	l := open(t)
-	rows, err := l.DB().Query(`SELECT name FROM sqlite_master WHERE type='table'`)
+	rows, err := l.DB().QueryContext(context.Background(), `SELECT name FROM sqlite_master WHERE type='table'`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestNoQuestionOrOutboxTables(t *testing.T) {
 
 func TestRunTableColumns(t *testing.T) {
 	l := open(t)
-	rows, err := l.DB().Query(`PRAGMA table_info(run)`)
+	rows, err := l.DB().QueryContext(context.Background(), `PRAGMA table_info(run)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestRollbackLeavesNothing(t *testing.T) {
 	}
 	for _, tb := range []string{"topic", "subject", "run", "meta"} {
 		var n int
-		if err := l.DB().QueryRow("SELECT COUNT(*) FROM " + tb).Scan(&n); err != nil {
+		if err := l.DB().QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+tb).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		if n != 0 {
@@ -241,7 +241,7 @@ func TestPanicRollsBack(t *testing.T) {
 		})
 	}()
 	var n int
-	_ = l.DB().QueryRow("SELECT COUNT(*) FROM topic").Scan(&n)
+	_ = l.DB().QueryRowContext(context.Background(), "SELECT COUNT(*) FROM topic").Scan(&n)
 	if n != 0 {
 		t.Errorf("topic rows %d", n)
 	}
@@ -271,7 +271,7 @@ func TestMigrationFromPriorVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	var name, extra string
-	if err := l.DB().QueryRow(`SELECT name, extra FROM legacy`).Scan(&name, &extra); err != nil || name != "kept" || extra != "x" {
+	if err := l.DB().QueryRowContext(context.Background(), `SELECT name, extra FROM legacy`).Scan(&name, &extra); err != nil || name != "kept" || extra != "x" {
 		t.Fatalf("%q %q %v", name, extra, err)
 	}
 	if v, _ := l.userVersion(ctx); v != 2 {
@@ -286,7 +286,7 @@ func TestMigrationFromPriorVersion(t *testing.T) {
 
 func TestMigrationFromEmptyDatabaseBuildsCurrentSchema(t *testing.T) {
 	l := open(t)
-	if _, err := l.DB().Exec(`INSERT INTO meta(key,value) VALUES('x','y')`); err != nil {
+	if _, err := l.DB().ExecContext(context.Background(), `INSERT INTO meta(key,value) VALUES('x','y')`); err != nil {
 		t.Fatal(err)
 	}
 	p := l.Path()
@@ -405,7 +405,7 @@ func TestCountsAndPromoteWaiting(t *testing.T) {
 		t.Errorf("w2 %s", g.State)
 	}
 	_, _ = l.Rule(ctx, Ruling{TopicID: p.ID, Ruling: RulingRejected})
-	_, _ = l.db.Exec(`UPDATE decision SET bead_state='filing'`)
+	_, _ = l.db.ExecContext(context.Background(), `UPDATE decision SET bead_state='filing'`)
 	c, _ = l.Counts(ctx)
 	if c.Pending != 1 || c.Waiting != 1 || c.Filing != 1 {
 		t.Errorf("%+v", c)

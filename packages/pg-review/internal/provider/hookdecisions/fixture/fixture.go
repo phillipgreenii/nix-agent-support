@@ -4,6 +4,7 @@
 package fixture
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
@@ -61,7 +62,7 @@ func Build(t testing.TB, rows []Decision) string {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(ddl); err != nil {
+	if _, err := db.ExecContext(context.Background(), ddl); err != nil {
 		t.Fatal(err)
 	}
 	for i, r := range rows {
@@ -72,7 +73,7 @@ func Build(t testing.TB, rows []Decision) string {
 			in["file_path"] = "relative/file.txt"
 		}
 		b, _ := json.Marshal(in)
-		_, err := db.Exec(`INSERT INTO tool_decisions
+		_, err := db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at, excluded)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			r.Session, r.CWD, r.Tool, "h"+string(rune('a'+i%26)), string(b), r.Outcome, r.At, r.Excluded)

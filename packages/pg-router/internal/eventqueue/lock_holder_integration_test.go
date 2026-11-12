@@ -4,6 +4,7 @@ package eventqueue
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -36,7 +37,7 @@ func TestHelperHoldLog(t *testing.T) {
 // leaves a stale lock behind that would wedge the next start.
 func TestFileStoreLockReleasedWhenHolderDies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperHoldLog$")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestHelperHoldLog$")
 	cmd.Env = append(os.Environ(), holdLogEnv+"="+path)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

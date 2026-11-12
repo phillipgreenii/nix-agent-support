@@ -160,13 +160,13 @@ func selectQueries(names []string) ([]query, error) {
 }
 
 // OpenReadOnly opens the decision database with the SQLite mode=ro URI.
-func OpenReadOnly(path string) (*sql.DB, error) {
+func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 	u := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -214,7 +214,7 @@ func Run(ctx context.Context, o Options) ([]Row, error) {
 		return nil, err
 	}
 
-	db, err := OpenReadOnly(o.DBPath)
+	db, err := OpenReadOnly(ctx, o.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("open decision database: %w", err)
 	}

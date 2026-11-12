@@ -35,7 +35,7 @@ func TestStreamingPoller_LiveRecoversFromDaemonRestart(t *testing.T) {
 	sockPath := filepath.Join(stateDir, "pa-monitor", "daemon.sock")
 
 	start := func() *exec.Cmd {
-		cmd := exec.Command(bin, "daemon", "--no-poller", "--tick-seconds=1")
+		cmd := exec.CommandContext(context.Background(), bin, "daemon", "--no-poller", "--tick-seconds=1")
 		cmd.Env = env
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)

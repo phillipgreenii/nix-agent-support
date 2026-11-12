@@ -122,7 +122,7 @@ func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 			return fmt.Errorf("neutral directory: %w", err)
 		}
 	}
-	scratch, err := makeScratch()
+	scratch, err := makeScratch(ctx)
 	if err != nil {
 		return err
 	}
