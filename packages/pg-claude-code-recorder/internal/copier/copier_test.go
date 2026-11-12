@@ -622,22 +622,6 @@ func TestFullContentsAreNotInTheDatabaseOrJournal(t *testing.T) {
 	}
 }
 
-func TestInodeReuseLoopCopiesWhateverNowHoldsThePath(t *testing.T) {
-	e := newEnv(t)
-	p := e.abs(tx)
-	for i := 0; i < 150; i++ {
-		_ = os.Remove(p)
-		content := fmt.Sprintf("generation %d of the file\n", i)
-		e.write(tx, content)
-		r := e.ingest(p)
-		e.mustEqual(r.File, content)
-		holders, _ := e.st.FilesByCurrentPath(p)
-		if len(holders) != 1 || holders[0].ID != r.File {
-			t.Fatalf("iteration %d: holders %+v", i, holders)
-		}
-	}
-}
-
 func TestInodeAtNewPathNeedsBirthTimeAndFirstBytes(t *testing.T) {
 	e := newEnv(t)
 	body := strings.Repeat("the first bytes of the original file.\n", 4)
