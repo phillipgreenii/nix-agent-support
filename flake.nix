@@ -11118,22 +11118,23 @@
                   '';
                   invalidText =
                     lib.replaceStrings
-                      [ "format = \"json\"" ]
+                      [ "type = \"command\"" ]
                       [
-                        "format = \"json\"\nnon_blocking_gates = [\"x\"]"
+                        "type = \"command\"\nnon_blocking_gates = [\"x\"]"
                       ]
                       validText;
                   valid = pkgs.writeText "valid.toml" validText;
                   invalid = pkgs.writeText "invalid.toml" invalidText;
                 in
                 assert invalidText != validText;
-                # the real module path: a config accepted by the loader builds
-                assert (checked.mkChecked "pg-router-valid.toml" validText) ? drvPath;
                 pkgs.runCommand "test-pg-router-config-build-check" { } ''
+                  # the module's own path: building the interpolated config file
+                  # builds its check first
+                  test -s ${checked.mkChecked "pg-router-valid.toml" validText}
                   (
                     ${checked.checkScript "valid.toml" valid}
                   ) || { echo "FAIL: the unmodified fixture was rejected" >&2; exit 1; }
-                  if out="$(
+                  if problems="$(
                     (
                       ${checked.checkScript "invalid.toml" invalid}
                     ) 2>&1
@@ -11141,9 +11142,9 @@
                     echo "FAIL: a config with an unknown key passed the build check" >&2
                     exit 1
                   fi
-                  case "$out" in
+                  case "$problems" in
                     *non_blocking_gates*) ;;
-                    *) echo "FAIL: the loader's error line is not printed: $out" >&2; exit 1 ;;
+                    *) echo "FAIL: the loader's error line is not printed: $problems" >&2; exit 1 ;;
                   esac
                   touch $out
                 '';

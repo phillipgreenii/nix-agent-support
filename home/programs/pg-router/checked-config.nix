@@ -1,6 +1,6 @@
 # (import ./checked-config.nix { inherit pkgs package; }).mkChecked name text
 #
-# Renders `text` as the store file `name` AND fails the build unless the
+# Renders `text` as the store file `name` (the plain writeText path) AND fails the build unless the
 # packaged pg-router binary's own config loader accepts it. A system generation
 # can otherwise pair a new binary with a config in an older schema; the daemon
 # then exits at startup and launchd restarts it in a loop for as long as that
@@ -29,13 +29,19 @@ rec {
     fi
   '';
 
+  # The result is the plain writeText store path (content-addressed by name
+  # and text, so pg-desk-serve's own spelling of the same writeText still names
+  # the very file the router runs on), carrying the check derivation as string
+  # context: whatever interpolates it must build the check first, and a rejected
+  # config fails that build.
   mkChecked =
     name: text:
     let
       rendered = pkgs.writeText name text;
+      check = pkgs.runCommand "${name}-check" { } ''
+        ${checkScript name rendered}
+        touch "$out"
+      '';
     in
-    pkgs.runCommand name { } ''
-      ${checkScript name rendered}
-      cp ${rendered} "$out"
-    '';
+    pkgs.lib.addContextFrom check "${rendered}";
 }
