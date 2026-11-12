@@ -33,7 +33,7 @@ func TestWorktreeCreateLocksTheSlot(t *testing.T) {
 	if list := run(t, f.repo, "worktree", "list", "--porcelain"); !strings.Contains(list, "locked "+LockReason) {
 		t.Fatalf("slot worktree not locked with %q:\n%s", LockReason, list)
 	}
-	cmd := exec.Command("git", "-C", f.repo, "worktree", "remove", f.slot)
+	cmd := exec.CommandContext(t.Context(), "git", "-C", f.repo, "worktree", "remove", f.slot)
 	cmd.Env = append(os.Environ(), hermeticEnv...)
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("git removed a locked slot: %s", out)

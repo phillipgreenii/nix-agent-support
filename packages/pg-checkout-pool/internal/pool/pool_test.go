@@ -318,7 +318,7 @@ func TestLeakDetectionUsesLockNotRecord(t *testing.T) {
 // Real process death: a child holds the slot's flock; killing it frees the lock.
 func TestFlockReleasedWhenHolderProcessDies(t *testing.T) {
 	s, _ := newTestStore(t, "a")
-	cmd := exec.Command(os.Args[0], "-test.run=TestHelperHoldFlock")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestHelperHoldFlock")
 	cmd.Env = append(os.Environ(), "POOL_HELPER_LOCK="+filepath.Join(s.slotPath("a"), lockName))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

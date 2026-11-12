@@ -46,7 +46,7 @@ func buildFakeBD(t *testing.T) string {
 		goBin = filepath.Join(runtime.GOROOT(), "bin", "go")
 	}
 	out := filepath.Join(t.TempDir(), "bd")
-	cmd := exec.Command(goBin, "build", "-o", out, "github.com/phillipgreenii/pg-decider/internal/fakebd/cmd/fake-bd")
+	cmd := exec.CommandContext(t.Context(), goBin, "build", "-o", out, "github.com/phillipgreenii/pg-decider/internal/fakebd/cmd/fake-bd")
 	cmd.Env = os.Environ()
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build the fake bd: %v\n%s", err, b)

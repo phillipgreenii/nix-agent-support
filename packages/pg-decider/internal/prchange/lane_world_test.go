@@ -535,7 +535,7 @@ func (w *e2eWorld) setStaleCeiling(n int) {
 // listing is the real connector's answer to the decider's lookup query.
 func (w *e2eWorld) listing() (raw []byte, items int) {
 	w.t.Helper()
-	cmd := exec.Command(w.tools.connector, "issue", "list", "--query", "work-items-all", "--backend", "beads")
+	cmd := exec.CommandContext(w.t.Context(), w.tools.connector, "issue", "list", "--query", "work-items-all", "--backend", "beads")
 	cmd.Env = dedupEnv(w.connEnv)
 	cmd.Dir = w.r.dir
 	var out, errb bytes.Buffer

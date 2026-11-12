@@ -32,7 +32,7 @@ func tmpDir(t *testing.T) string {
 func pprofServer(t *testing.T) (socket string, hits *atomic.Int32) {
 	t.Helper()
 	socket = filepath.Join(tmpDir(t), "pprof.sock")
-	l, err := net.Listen("unix", socket)
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestPprof_SocketDefaultsFromXDGStateHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	sock := filepath.Join(state, "pa-monitor", "pprof.sock")
-	l, err := net.Listen("unix", sock)
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

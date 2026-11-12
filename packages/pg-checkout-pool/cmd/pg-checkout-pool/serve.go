@@ -58,7 +58,7 @@ func (a *app) serve(args []string, ready func(addr string)) int {
 		fmt.Fprintf(a.stderr, "pg-checkout-pool: serve: %v\n", err)
 		return exitUsage
 	}
-	ln, err := net.Listen("tcp", *addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", *addr)
 	if err != nil {
 		return a.fail(err)
 	}

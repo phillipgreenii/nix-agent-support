@@ -53,7 +53,7 @@ func TestMeasureCloneVsWorktree(t *testing.T) {
 	var counter *exec.Cmd
 	var lines *bufio.Scanner
 	if bin := os.Getenv("PG_CHECKOUT_POOL_FSCOUNT"); bin != "" {
-		counter = exec.Command(bin, base)
+		counter = exec.CommandContext(t.Context(), bin, base)
 		out, _ := counter.StdoutPipe()
 		if err := counter.Start(); err != nil {
 			t.Fatal(err)

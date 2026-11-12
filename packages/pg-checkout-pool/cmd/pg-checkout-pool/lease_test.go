@@ -24,7 +24,7 @@ var hermeticEnv = []string{
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), hermeticEnv...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

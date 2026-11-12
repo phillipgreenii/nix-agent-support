@@ -22,7 +22,7 @@ var hermeticEnv = []string{
 
 func run(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", dir}, args...)...)
 	cmd.Env = append(os.Environ(), hermeticEnv...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -203,7 +203,7 @@ func (s suite) TestHookRunsAtCreationNotAtResetAndHooksPathNeverPersisted() {
 		t.Errorf("hook runs after resets and detach = %d, want still 1", n)
 	}
 	for _, d := range []string{f.repo, f.slot} {
-		cmd := exec.Command("git", "-C", d, "config", "--get-regexp", "(?i)^core\\.hookspath$")
+		cmd := exec.CommandContext(t.Context(), "git", "-C", d, "config", "--get-regexp", "(?i)^core\\.hookspath$")
 		cmd.Env = append(os.Environ(), hermeticEnv...)
 		if out, err := cmd.Output(); err == nil || len(out) != 0 {
 			t.Errorf("core.hooksPath set in config of %s: %q", d, out)

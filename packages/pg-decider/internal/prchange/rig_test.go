@@ -582,7 +582,7 @@ func (r *rig) storePath() string { return filepath.Join(r.stateHome, "pg-desk", 
 
 func (r *rig) sqlite(stmt string) string {
 	r.t.Helper()
-	out, err := exec.Command(r.b.sqliteBin(r.t), r.storePath(), stmt).CombinedOutput()
+	out, err := exec.CommandContext(r.t.Context(), r.b.sqliteBin(r.t), r.storePath(), stmt).CombinedOutput()
 	if err != nil {
 		r.t.Fatalf("sqlite3 %s: %v: %s", stmt, err, out)
 	}
@@ -620,7 +620,7 @@ func (r *rig) startBlocked(args ...string) (kill func()) {
 	r.t.Helper()
 	r.ctlWrite("block", "")
 	before := len(r.calls("pr show"))
-	cmd := exec.Command(r.changeBin, args...)
+	cmd := exec.CommandContext(context.Background(), r.changeBin, args...)
 	cmd.Env = r.env
 	cmd.Dir = filepath.Join(r.dir, "work")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -690,7 +690,7 @@ func (r *rig) runRecords() []RunRecord {
 // the persisted lane state) are read the way a scraper reads them.
 func (r *rig) scrape() string {
 	r.t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(r.t.Context(), "tcp", "127.0.0.1:0")
 	must(r.t, err)
 	addr := l.Addr().String()
 	must(r.t, l.Close())
@@ -712,7 +712,9 @@ func (r *rig) scrape() string {
 	client := &http.Client{Timeout: 5 * time.Second}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		resp, err := client.Get("http://" + addr + "/metrics")
+		req, rerr0 := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/metrics", nil)
+		must(r.t, rerr0)
+		resp, err := client.Do(req)
 		last := ""
 		if err == nil {
 			body, rerr := io.ReadAll(resp.Body)

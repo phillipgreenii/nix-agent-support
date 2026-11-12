@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -35,7 +36,7 @@ func build(m *testing.M) (int, error) {
 	defer func() { _ = os.RemoveAll(dir) }()
 	binDir = dir
 	for _, name := range []string{"pg-wrap", "pg-wrap-exec"} {
-		cmd := exec.Command("go", "build", "-o", filepath.Join(dir, name), "./cmd/"+name)
+		cmd := exec.CommandContext(context.Background(), "go", "build", "-o", filepath.Join(dir, name), "./cmd/"+name)
 		cmd.Dir = filepath.Join("..", "..")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return 0, fmt.Errorf("go build %s: %v\n%s", name, err, out)
@@ -93,7 +94,7 @@ type outcome struct {
 // run executes one of the binaries with exactly the given environment.
 func run(t *testing.T, bin string, env []string, args ...string) outcome {
 	t.Helper()
-	cmd := exec.Command(filepath.Join(binDir, bin), args...)
+	cmd := exec.CommandContext(t.Context(), filepath.Join(binDir, bin), args...)
 	cmd.Env = env
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se

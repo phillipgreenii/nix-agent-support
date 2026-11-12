@@ -43,7 +43,7 @@ func newFixture(t *testing.T, base string, handler func(w http.ResponseWriter, r
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	f := &fixture{Socket: filepath.Join(dir, base)}
-	l, err := net.Listen("unix", f.Socket)
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", f.Socket)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,11 @@ func rawGet(t *testing.T, socket, path string) {
 		var d net.Dialer
 		return d.DialContext(ctx, "unix", socket)
 	}}}
-	resp, err := hc.Get("http://pprof" + path)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://pprof"+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

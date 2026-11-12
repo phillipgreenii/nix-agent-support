@@ -2,6 +2,7 @@ package prchange
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +30,7 @@ type bgRun struct {
 func (r *rig) startChange(args ...string) *bgRun {
 	r.t.Helper()
 	b := &bgRun{done: make(chan struct{})}
-	b.cmd = exec.Command(r.changeBin, args...)
+	b.cmd = exec.CommandContext(context.Background(), r.changeBin, args...)
 	b.cmd.Env = r.env
 	b.cmd.Dir = filepath.Join(r.dir, "work")
 	b.cmd.Stdout, b.cmd.Stderr = &b.out, &b.errb

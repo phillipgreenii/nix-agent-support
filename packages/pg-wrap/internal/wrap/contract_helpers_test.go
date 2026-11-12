@@ -242,7 +242,7 @@ func gnuTimeout(t *testing.T) string {
 		if err != nil {
 			continue
 		}
-		out, err := exec.Command(p, "--version").CombinedOutput()
+		out, err := exec.CommandContext(context.Background(), p, "--version").CombinedOutput()
 		if err == nil && strings.Contains(string(out), "GNU coreutils") {
 			abs, _ := filepath.Abs(p)
 			return abs

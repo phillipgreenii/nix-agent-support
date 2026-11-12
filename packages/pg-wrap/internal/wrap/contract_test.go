@@ -6,6 +6,7 @@ package wrap_test
 // "Contract" or "WC" so `-run 'Contract|WC'` selects the whole suite.
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -731,7 +732,7 @@ func runInTmux(t *testing.T, tmux string, entries []wrap.Entry) (*report, string
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
 	sock := filepath.Join(sockDir, "s")
-	t.Cleanup(func() { _ = exec.Command(tmux, "-S", sock, "kill-server").Run() })
+	t.Cleanup(func() { _ = exec.CommandContext(context.Background(), tmux, "-S", sock, "kill-server").Run() })
 
 	dir := t.TempDir()
 	probe := newProbe(t, dir)
@@ -749,7 +750,7 @@ func runInTmux(t *testing.T, tmux string, entries []wrap.Entry) (*report, string
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(tmux, "-S", sock, "-f", "/dev/null",
+	out, err := exec.CommandContext(t.Context(), tmux, "-S", sock, "-f", "/dev/null",
 		"new-session", "-d", "-x", "100", "-y", "30", script).CombinedOutput()
 	if err != nil {
 		t.Skipf("tmux cannot start a session here: %v: %s", err, strings.TrimSpace(string(out)))

@@ -50,7 +50,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("no listening line: %q", line)
 	}
 	addr := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	resp, err := httpGet(t, http.DefaultClient, "http://"+addr+"/debug/pprof/")
 	if err != nil {
 		stop()
 		t.Fatalf("GET: %v", err)
@@ -61,7 +61,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	stop()
-	if resp, err := http.Get("http://" + addr + "/debug/pprof/"); err == nil {
+	if resp, err := httpGet(t, http.DefaultClient, "http://"+addr+"/debug/pprof/"); err == nil {
 		_ = resp.Body.Close()
 		t.Fatal("still serving after stop")
 	}
@@ -106,7 +106,7 @@ func TestStartPprofFromEnvUnixSocketServesWith0600AndStops(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{
 		DialContext: dialUnix(sock),
 	}}
-	resp, err := client.Get("http://pprof/debug/pprof/")
+	resp, err := httpGet(t, client, "http://pprof/debug/pprof/")
 	if err != nil {
 		t.Fatalf("GET over socket: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestStartPprofFromEnvUnixSocketServesWith0600AndStops(t *testing.T) {
 	}
 	stop()
 	stopped = true
-	if resp, err := client.Get("http://pprof/debug/pprof/"); err == nil {
+	if resp, err := httpGet(t, client, "http://pprof/debug/pprof/"); err == nil {
 		_ = resp.Body.Close()
 		t.Fatal("still serving after stop")
 	}
@@ -177,4 +177,15 @@ func TestServeRefusesNonLoopbackPprofButKeepsServing(t *testing.T) {
 	if !strings.Contains(got, pprofEnv+" ignored") || strings.Contains(got, "pprof listening") {
 		t.Errorf("non-loopback pprof address was not refused: %q", got)
 	}
+}
+
+// httpGet issues a GET bound to the test's context (the non-Context
+// http.Get forms are what the noctx linter rejects).
+func httpGet(t *testing.T, c *http.Client, url string) (*http.Response, error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.Do(req)
 }

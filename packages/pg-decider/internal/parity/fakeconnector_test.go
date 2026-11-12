@@ -40,7 +40,7 @@ func writeFake(t *testing.T) (bin, callLog string) {
 
 func runFake(t *testing.T, bin string, args ...string) (stdout string, code int) {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(t.Context(), bin, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}

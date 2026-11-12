@@ -138,7 +138,7 @@ func TestFirstWord(t *testing.T) {
 // run executes argv under the base env and returns stdout, stderr and the error.
 func run(t *testing.T, argv []string, extraEnv ...string) (string, string, error) {
 	t.Helper()
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := exec.CommandContext(t.Context(), argv[0], argv[1:]...)
 	cmd.Env = append(BaseEnv(os.Environ(), nil), extraEnv...)
 	var so, se strings.Builder
 	cmd.Stdout, cmd.Stderr = &so, &se
