@@ -71,8 +71,12 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 			d.BD = &recBD{failOn: "update"}
 			return PrecheckTriage(context.Background(), DispatchContext{Role: triageRole(cfg), Item: reviewItem()}, d, triage(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }))
 		}, SkipBeadHumanStripFailed, false, true},
-		{"triage: blocked", triageRun(triage(func(i *beads.Issue) { i.Status = "blocked" })), SkipBeadBlocked, false, false},
-		{"triage: deferred", triageRun(triage(func(i *beads.Issue) { i.DeferUntil = future })), SkipBeadDeferred, false, false},
+		{"triage: blocked", triageRun(triage(func(i *beads.Issue) { i.Status = "blocked" })), SkipBeadBlockedTriage, true, false},
+		{"triage: deferred", triageRun(triage(func(i *beads.Issue) { i.DeferUntil = future })), SkipBeadDeferredTriage, true, false},
+		{"triage: blocked by an open dependency", triageRun(triage(func(i *beads.Issue) {
+			i.Dependencies = []beads.Dependency{{ID: "b-1", Status: "open", DependencyType: "blocks"}}
+		})), SkipBeadBlockedTriage, true, false},
+		{"triage: deferred status", triageRun(triage(func(i *beads.Issue) { i.Status = "deferred" })), SkipBeadDeferredTriage, true, false},
 		{"triage: not open (in_progress)", triageRun(triage(func(i *beads.Issue) { i.Status = "in_progress" })), SkipBeadNotOpen, false, false},
 	}
 	seen := map[string]bool{}
@@ -107,6 +111,7 @@ func TestPrecheck_EveryReasonIsPinnedMootOrDecline(t *testing.T) {
 	for reason, want := range map[string]bool{
 		SkipBeadClosed: true, SkipPRMerged: true, SkipBeadNotEscalated: true, SkipBeadHumanEscalated: true, SkipBeadHumanStripFailed: false,
 		SkipBeadNotSplitReview: true, SkipBeadHumanSplitReview: true,
+		SkipBeadBlockedTriage: true, SkipBeadDeferredTriage: true,
 		SkipPendingReview: false, SkipBeadHuman: false, SkipBeadNotGroomed: false, SkipBeadBlocked: false,
 		SkipBeadDeferred: false, SkipBeadClaimed: false, SkipBeadNotOpen: false, ReasonConnectorUnavailable: false,
 		"some-future-reason": false,

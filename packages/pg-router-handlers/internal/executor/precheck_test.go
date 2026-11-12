@@ -576,14 +576,14 @@ func TestPrecheckTriage_SkipReasons(t *testing.T) {
 		{"deferred without escalated is moot, not deferred", with(func(i *beads.Issue) { i.Status = "deferred"; i.Labels = []string{"agent-support"} }), SkipBeadNotEscalated},
 		{"closed, human, no escalated is still closed", with(func(i *beads.Issue) { i.Status = "closed"; i.Labels = []string{"human"} }), SkipBeadClosed},
 		{"no labels at all", with(func(i *beads.Issue) { i.Labels = nil }), SkipBeadNotEscalated},
-		{"deferred status", with(func(i *beads.Issue) { i.Status = "deferred" }), SkipBeadDeferred},
-		{"future defer_until", with(func(i *beads.Issue) { i.DeferUntil = future }), SkipBeadDeferred},
+		{"deferred status", with(func(i *beads.Issue) { i.Status = "deferred" }), SkipBeadDeferredTriage},
+		{"future defer_until", with(func(i *beads.Issue) { i.DeferUntil = future }), SkipBeadDeferredTriage},
 		{"past defer_until proceeds", with(func(i *beads.Issue) { i.DeferUntil = past }), ""},
 		{"unparseable defer_until fails open", with(func(i *beads.Issue) { i.DeferUntil = "tomorrow-ish" }), ""},
-		{"blocked status", with(func(i *beads.Issue) { i.Status = "blocked" }), SkipBeadBlocked},
+		{"blocked status", with(func(i *beads.Issue) { i.Status = "blocked" }), SkipBeadBlockedTriage},
 		{"open blocks dependency", with(func(i *beads.Issue) {
 			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "open", DependencyType: "blocks"}}
-		}), SkipBeadBlocked},
+		}), SkipBeadBlockedTriage},
 		{"closed blocker proceeds", with(func(i *beads.Issue) {
 			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "closed", DependencyType: "blocks"}}
 		}), ""},

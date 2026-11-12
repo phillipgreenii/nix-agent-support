@@ -649,7 +649,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     per handler (`DEC-EVENT-2`), so a dead event declined at the head of the queue blocks every
     later event for that handler (observed 2026-10-15: a closed bead's event declined 288 times
     over 15 hours while no other event of its type was dispatched; bead `pg2-57oql`). Exactly
-    four outcomes are moot: the bead is closed (`skipped-bead-closed`, for every check, a closed
+    four outcomes are moot, plus the two of the triage checks named at the end of this list: the bead is closed (`skipped-bead-closed`, for every check, a closed
     status being read as this and not as not-open), the pull request is merged (`skipped-pr-merged`)
     and the bead no longer carries `escalated` (`skipped-bead-not-escalated`; this includes a bead
     that carries `human` but not `escalated`, which was handed to a person through hand-to-human
@@ -657,7 +657,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     `escalated` together with a human label, after the check commented and removed `escalated`
     (`skipped-bead-human-escalated`, bead `pg2-n7pufu`); the `split-triage` check adds the two
     analogues, `skipped-bead-not-split-review` and `skipped-bead-human-split-review`
-    (below). The router counts
+    (below), and the triage and `split-triage` checks' bead that is dependency-blocked
+    (`skipped-bead-blocked-triage`) or deferred (`skipped-bead-deferred-triage`), which is moot
+    for that EVENT, not for the bead (see the `triage` item for why dropping it is safe). The router counts
     the completion on its own counter (`pg_router_skipped_total`, by type, role and reason) and
     NOT as throughput or as role progress, so a stream of them cannot make a stuck queue look
     like it is progressing (`pg-router-queue-stalled`).
@@ -734,8 +736,8 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     `escalated` and adds `human`) (MOOT, completed as `skipped-bead-not-escalated`, whatever its
     status and whether or not it carries `human`: no triager work can remain, and a decline of
     such an event at the head of the queue jammed it, bead `pg2-4u0d0u`); (c) the bead is not
-    `open` otherwise (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
-    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (d) the bead carries `escalated`
+    `open` otherwise (`skipped-bead-not-open`; a `deferred` or `blocked` status gets the MOOT
+    `skipped-bead-deferred-triage` or `skipped-bead-blocked-triage` instead); (d) the bead carries `escalated`
     together with any label of `HUMAN_LABELS` (`attention`, `human-focus`, `human-focus-required`,
     `human`), a state the discovery query never lists and the park step no longer creates: the
     check adds a bead comment saying what it did, THEN removes `escalated` (safe under LV-4, a
@@ -744,8 +746,30 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     through (b). A failed comment or removal declines retryably
     (`skipped-bead-human-strip-failed`) and is tried again. The `ready` check is unchanged and
     still declines a human bead (`skipped-bead-human`); (e) the bead's
-    deferral date is in the future (`skipped-bead-deferred`); (f) the bead has an open `blocks`
-    dependency (`skipped-bead-blocked`). Who holds the bead is NOT checked: the discovery query
+    deferral date is in the future (MOOT, completed as `skipped-bead-deferred-triage`); (f) the
+    bead has an open `blocks` dependency (MOOT, completed as `skipped-bead-blocked-triage`).
+    **Why (e) and (f) are completions, not declines** (operator ruling, Phillip, 2026-10-27,
+    verbatim: "it must be that when a triager escalates to a human, it must not sure up it the
+    triager queue. waiting for a time out is not acceptable."): an agent models "wait for the fix
+    bead" as a `blocks` edge on the escalated bead and leaves `escalated` on it, and any
+    re-emitted event for that bead (a comment changes its hash) declined at the head of the
+    serial queue held every later event until its 6-hour expiry (observed 2026-11-12: 100 and 35
+    declines for two beads, the queue pending count doubling while nothing was in flight). A
+    completion drops the event, which is safe only because the bead cannot be lost: the source
+    query is `ready --label escalated --exclude-label human`, so a blocked or deferred bead is
+    OUT of the discovery set, and when its last blocker closes or its deferral passes it
+    re-enters the set, which pg-connector's ledger reports as `added` with the full entity
+    "whether or not its content differs from before it left", and the source adapter gives an
+    `added` row of a bead (no head or version) its own id, so the router enqueues a fresh
+    `escalated.pg2` event and the triager sees the bead again (pinned by
+    `TestLedgerRefresh_ReEntryAfterRemovalIsAddedEveryTime` in pg-connector and
+    `TestChanges_RetryWindow_ReEnteringRevisionlessEntityGetsDistinctIDs` in the source adapter).
+    This relies on the source observing the bead out of the discovery set at least once; a
+    blocker added and closed between two polls leaves the ledger unchanged (a `changed` row
+    coalesces into the already-completed id), a window accepted as far narrower than the
+    6-hour jam it removes. The `ready` check keeps declining these two cases
+    (`skipped-bead-blocked`, `skipped-bead-deferred`) because a drain event is born expired and
+    offered once, so a decline holds no queue. Who holds the bead is NOT checked: the discovery query
     lists an open bead whatever its assignee, and this role never claims its bead. An unreadable
     bead (no bead came back) proceeds, and so does a deferral date that does not parse as a
     timestamp. **Why.** An event for such a role queues behind a running session and can arrive
@@ -774,9 +798,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     bead comment saying what was done, THEN removal of `needs-split-review` only (a human label
     is already present, so LV-4 holds and the bead keeps it), completed as skipped (MOOT,
     `skipped-bead-human-split-review`, no session); a failed write declines retryably
-    (`skipped-bead-human-strip-failed`); (d) not `open` (`skipped-bead-not-open`, or
-    `skipped-bead-deferred` / `skipped-bead-blocked`), a future deferral date or an open `blocks`
-    dependency declines. Who holds the bead is not checked. The role config names it with
+    (`skipped-bead-human-strip-failed`); (d) not `open` (`skipped-bead-not-open`, a decline), or `deferred` or `blocked` by status, a
+    future deferral date or an open `blocks` dependency, which are MOOT for the event exactly as
+    in the `triage` check (`skipped-bead-deferred-triage` / `skipped-bead-blocked-triage`, the
+    bead re-enters the `needs-split-review` discovery set when unblocked). Who holds the bead is not checked. The role config names it with
     `precheck = "split-triage"` (rendered as `ccpool.precheck`), and, as for `triage`, the handler
     MUST be deployed before a role config names the value.
 

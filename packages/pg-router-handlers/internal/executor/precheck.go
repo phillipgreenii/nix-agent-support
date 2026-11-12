@@ -83,6 +83,23 @@ const SkipBeadNotSplitReview = "skipped-bead-not-split-review"
 // commented on the bead and stripped needs-split-review.
 const SkipBeadHumanSplitReview = "skipped-bead-human-split-review"
 
+// SkipBeadBlockedTriage and SkipBeadDeferredTriage are the "triage" and
+// "split-triage" prechecks' MOOT reasons for a bead that is dependency-blocked
+// (blocked status or an open blocks dependency) or deferred (deferred status or
+// a future defer_until). The queue is serial and a decline is re-offered until
+// the event expires, so a declined head jammed every later event for up to the
+// whole expiry window. Completing the event as skipped drops it safely only
+// because the bead is outside the role's `ready` discovery query while blocked
+// or deferred, and re-enters it when its last blocker closes or its deferral
+// passes, which the source reports as a fresh event (see the INV-CCH-22 triage
+// item). They are deliberately not SkipBeadBlocked / SkipBeadDeferred, which the
+// "ready" precheck shares and keeps declining: its events are born expired and
+// offered once, so a decline there holds no queue.
+const (
+	SkipBeadBlockedTriage  = "skipped-bead-blocked-triage"
+	SkipBeadDeferredTriage = "skipped-bead-deferred-triage"
+)
+
 // SkipBeadHumanStripFailed is the RETRYABLE decline when the comment or the
 // escalated strip of the SkipBeadHumanEscalated disposition could not be
 // written: the event is re-offered and the write is tried again.
@@ -118,7 +135,9 @@ const reviewRoleName = "review"
 // 2026-10-26, bead pg2-6t91v7). A decline is re-offered until the event expires,
 // and the queue is a per-handler serial FIFO, so a dead event declined at the head
 // blocks every later event for the handler; a completion settles it on its first
-// offer. Exactly four outcomes are moot: the bead is closed, the PR is merged, the
+// offer. Exactly six outcomes are moot (the split-triage analogues and the
+// triage blocked and deferred reasons, SkipBeadBlockedTriage and
+// SkipBeadDeferredTriage, included): the bead is closed, the PR is merged, the
 // bead no longer carries the escalated label (this includes a human bead that lost it
 // through hand-to-human, bead pg2-4u0d0u), and a bead carrying escalated AND a human
 // label whose escalated the triage precheck just stripped (bead pg2-n7pufu). Every other outcome stays a decline
@@ -128,7 +147,8 @@ const reviewRoleName = "review"
 func Moot(reason string) bool {
 	switch reason {
 	case SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated, SkipBeadHumanEscalated,
-		SkipBeadNotSplitReview, SkipBeadHumanSplitReview:
+		SkipBeadNotSplitReview, SkipBeadHumanSplitReview,
+		SkipBeadBlockedTriage, SkipBeadDeferredTriage:
 		return true
 	}
 	return false
@@ -420,11 +440,12 @@ const escalatedLabel = complete.EscalatedLabel
 //     advances; a repeat is moot through the not-escalated check. A failed write
 //     declines retryably (SkipBeadHumanStripFailed). It is the only precheck that
 //     writes to a bead;
-//  3. it is otherwise not open (a deferred or blocked status gets its own reason,
-//     the rest is not-open; all are declines);
+//  3. it is otherwise not open (a deferred or blocked status gets its own MOOT
+//     reason, SkipBeadDeferredTriage / SkipBeadBlockedTriage; the rest is a
+//     not-open decline);
 //  4. (a human bead never reaches here: it is handled above);
-//  5. its defer_until is in the future;
-//  6. it has an open blocks dependency.
+//  5. its defer_until is in the future (MOOT, SkipBeadDeferredTriage);
+//  6. it has an open blocks dependency (MOOT, SkipBeadBlockedTriage).
 //
 // The assignee is deliberately NOT checked: `bd ready` lists an open bead
 // whatever its assignee, and the triager never claims its bead. A nil iss (the
@@ -503,17 +524,17 @@ func precheckQueue(ctx context.Context, d DispatchContext, deps Deps, iss *beads
 	switch iss.Status {
 	case "open":
 	case "deferred":
-		return decline(SkipBeadDeferred, "the bead's status is deferred")
+		return decline(SkipBeadDeferredTriage, "the bead's status is deferred")
 	case "blocked":
-		return decline(SkipBeadBlocked, "the bead's status is blocked")
+		return decline(SkipBeadBlockedTriage, "the bead's status is blocked")
 	default:
 		return decline(SkipBeadNotOpen, "the bead's status is "+iss.Status+", not open")
 	}
 	if iss.DeferredUntilAfter(deps.clock()) {
-		return decline(SkipBeadDeferred, "the bead's defer_until is in the future")
+		return decline(SkipBeadDeferredTriage, "the bead's defer_until is in the future")
 	}
 	if iss.HasOpenBlocker() {
-		return decline(SkipBeadBlocked, "the bead has an open blocks dependency")
+		return decline(SkipBeadBlockedTriage, "the bead has an open blocks dependency")
 	}
 	return Skip{}, false
 }
@@ -611,6 +632,10 @@ func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
 		msg = "dispatch declined: bead is deferred"
 	case SkipBeadBlocked:
 		msg = "dispatch declined: bead is blocked"
+	case SkipBeadBlockedTriage:
+		msg = "dispatch skipped: bead is blocked; it re-enters the queue's discovery set when unblocked"
+	case SkipBeadDeferredTriage:
+		msg = "dispatch skipped: bead is deferred; it re-enters the queue's discovery set when the deferral passes"
 	case SkipBeadNotEscalated:
 		msg = "dispatch skipped: bead is no longer escalated"
 	case SkipBeadHumanEscalated:

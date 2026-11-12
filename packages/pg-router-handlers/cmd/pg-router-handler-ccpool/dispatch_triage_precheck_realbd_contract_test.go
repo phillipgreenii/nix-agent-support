@@ -195,8 +195,8 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 		{"escalated and human bead is commented, stripped and completed as skipped (pg2-n7pufu)", human, "skipped-bead-human-escalated"},
 		{"de-escalated bead is completed as skipped", deEscalated, "skipped-bead-not-escalated"},
 		{"human bead without escalated is completed as skipped (pg2-4u0d0u)", handedToHuman, "skipped-bead-not-escalated"},
-		{"deferred bead is declined", deferred, "skipped-bead-deferred"},
-		{"blocked bead is declined", blocked, "skipped-bead-blocked"},
+		{"deferred bead is completed as skipped (moot, pg2 queue must not jam)", deferred, "skipped-bead-deferred-triage"},
+		{"blocked bead is completed as skipped (moot, pg2 queue must not jam)", blocked, "skipped-bead-blocked-triage"},
 		{"unreadable bead fails open", unreadable, wire.BusyReasonPoolUnreadable},
 	}
 	for _, tc := range tests {
@@ -221,7 +221,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 			}
 			// A MOOT outcome (closed, de-escalated) is completed as skipped (exit 0,
 			// bead pg2-6t91v7); every other precheck outcome is still a busy decline.
-			if moot := tc.wantReason == "skipped-bead-closed" || tc.wantReason == "skipped-bead-not-escalated" || tc.wantReason == "skipped-bead-human-escalated"; moot {
+			if moot := tc.wantReason == "skipped-bead-closed" || tc.wantReason == "skipped-bead-not-escalated" || tc.wantReason == "skipped-bead-human-escalated" || tc.wantReason == "skipped-bead-blocked-triage" || tc.wantReason == "skipped-bead-deferred-triage"; moot {
 				if code != conformance.ExitOK || reply.Skipped != tc.wantReason || reply.Reason != "" {
 					t.Fatalf("got exit %d skipped %q reason %q, want ExitOK completed as skipped %q", code, reply.Skipped, reply.Reason, tc.wantReason)
 				}

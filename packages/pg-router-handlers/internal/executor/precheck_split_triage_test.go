@@ -47,12 +47,12 @@ func TestPrecheckSplitTriage_Dispositions(t *testing.T) {
 		{"escalated alone is not the split queue", with(func(i *beads.Issue) { i.Labels = []string{"escalated"} }), SkipBeadNotSplitReview},
 		{"human with the label", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }), SkipBeadHumanSplitReview},
 		{"attention with the label", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "attention") }), SkipBeadHumanSplitReview},
-		{"deferred status", with(func(i *beads.Issue) { i.Status = "deferred" }), SkipBeadDeferred},
-		{"blocked status", with(func(i *beads.Issue) { i.Status = "blocked" }), SkipBeadBlocked},
+		{"deferred status", with(func(i *beads.Issue) { i.Status = "deferred" }), SkipBeadDeferredTriage},
+		{"blocked status", with(func(i *beads.Issue) { i.Status = "blocked" }), SkipBeadBlockedTriage},
 		{"in_progress", with(func(i *beads.Issue) { i.Status = "in_progress" }), SkipBeadNotOpen},
 		{"open blocks dependency", with(func(i *beads.Issue) {
 			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "open", DependencyType: "blocks"}}
-		}), SkipBeadBlocked},
+		}), SkipBeadBlockedTriage},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

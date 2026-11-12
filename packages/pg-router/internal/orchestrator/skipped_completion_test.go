@@ -152,3 +152,43 @@ func TestSkippedCompletion_NoObserverIsSafe(t *testing.T) {
 		t.Fatalf("Offer = %+v, want %+v", got, want)
 	}
 }
+
+// A dependency-blocked or deferred escalated bead's event, completed as skipped by
+// the triage precheck (reasons skipped-bead-blocked-triage and
+// skipped-bead-deferred-triage), settles at the head of the real queue on its first
+// offer, so the next queued event is offered at once and never waits for the head's
+// expiresAt (the 6 h head-of-line jam of 2026-11-12). The handler side, a real bd
+// bead producing exactly these replies, is pinned by the ccpool handler's triage
+// precheck contract test.
+func TestSkippedCompletion_BlockedOrDeferredTriageHeadDoesNotHoldTheQueue(t *testing.T) {
+	for _, reason := range []string{"skipped-bead-blocked-triage", "skipped-bead-deferred-triage"} {
+		t.Run(reason, func(t *testing.T) {
+			h := &scriptedReplyHandler{replies: map[string]wireclient.Reply{
+				"blocked-head": {ID: "dsp-1", Outcome: `{"actions":[{"verb":"skipped"}]}`, Skipped: reason},
+				"live-next":    {ID: "dsp-2", Outcome: "ok"},
+			}}
+			o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+			o.Handler = h
+			q, err := eventqueue.New(eventqueue.NewMemStore())
+			if err != nil {
+				t.Fatal(err)
+			}
+			q.Register(o.NewListener(context.Background(), roles.Role{Name: "triager", Binds: []string{"escalated.pg2"}}))
+			// A 6 h expiry: were the head re-offered until expiry, pass 2 would offer it again.
+			exp := time.Now().Add(6 * time.Hour)
+			for _, id := range []string{"blocked-head", "live-next"} {
+				if _, err := q.Enqueue(eventqueue.Event{ID: id, Type: "escalated.pg2", ExpiresAt: exp, Payload: map[string]any{"id": id}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for pass, want := range []int{1, 1, 0} {
+				if n := q.Dispatch(); n != want {
+					t.Fatalf("pass %d accepted %d, want %d", pass+1, n, want)
+				}
+			}
+			if got := h.callList(); len(got) != 2 || got[0] != "blocked-head" || got[1] != "live-next" {
+				t.Fatalf("handler offers = %v, want [blocked-head live-next] (one offer each)", got)
+			}
+		})
+	}
+}
