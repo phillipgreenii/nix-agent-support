@@ -1,0 +1,5 @@
+package pkg
+
+import "os/exec"
+
+func Meta() error { return exec.Command("go", "list", ".").Run() }

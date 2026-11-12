@@ -1,0 +1,8 @@
+package pkg
+
+import "os/exec"
+
+// build runs go build, like the harness does for the daemon.
+func build() error { return exec.Command("go", "build", ".").Run() }
+
+func Prepare() error { return build() }

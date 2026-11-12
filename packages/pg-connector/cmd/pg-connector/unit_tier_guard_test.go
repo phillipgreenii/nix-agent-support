@@ -210,6 +210,11 @@ func requiresIntegrationTag(src []byte) bool {
 // re-executes is itself a violation, so the list cannot go stale.
 func evaluateUnitTierPurity(root string, reexecAllowed map[string]string) (violations []string, integrationFiles int, err error) {
 	used := map[string]bool{}
+	tainted, err := computeTaint(root)
+	if err != nil {
+		return nil, 0, err
+	}
+	modPath := readModulePath(root)
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -242,6 +247,11 @@ func evaluateUnitTierPurity(root string, reexecAllowed map[string]string) (viola
 		if relErr != nil {
 			rel = path
 		}
+		helperReasons, err := helperMarkers(path, src, filepath.ToSlash(filepath.Dir(rel)), modPath, tainted)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		reasons = append(reasons, helperReasons...)
 		for _, r := range reasons {
 			if _, ok := reexecAllowed[filepath.ToSlash(rel)]; ok && r == reexecReason {
 				used[filepath.ToSlash(rel)] = true

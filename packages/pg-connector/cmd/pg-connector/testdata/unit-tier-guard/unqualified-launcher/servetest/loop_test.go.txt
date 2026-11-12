@@ -1,0 +1,7 @@
+package servetest
+
+import "testing"
+
+func TestKillLoop(t *testing.T) {
+	NewDaemon()
+}

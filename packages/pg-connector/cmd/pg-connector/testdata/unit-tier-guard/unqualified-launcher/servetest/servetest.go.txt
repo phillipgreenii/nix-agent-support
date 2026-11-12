@@ -1,0 +1,4 @@
+package servetest
+
+// NewDaemon stands in for the real launcher of the daemon harness.
+func NewDaemon() {}
