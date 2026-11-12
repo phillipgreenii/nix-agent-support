@@ -817,6 +817,57 @@
           inherit (basePkgs) git-fixture-harness;
         };
 
+      # The `run-unit-tests` pre-commit hook wrapper, hoisted to ONE shared `let`
+      # binding so the production hook entry (extraHooks below) and its bats
+      # regression test (tests/run-unit-tests-pinned-go.bats, built as
+      # `checks.<system>.run-unit-tests-pinned-go`) cannot diverge. It runs the
+      # tests under this flake's pinned nixpkgs `go` (the compiler that builds the
+      # deployed binaries) and forbids GOTOOLCHAIN auto-download; pg-test-runner
+      # itself stays resolved from the ambient PATH by design.
+      run-unit-tests-hook-pkg =
+        pkgs:
+        pkgs.writeShellApplication {
+          name = "run-unit-tests-hook";
+          runtimeInputs = [
+            pkgs.go
+            pkgs.git
+            pkgs.coreutils
+            pkgs.diffutils
+            pkgs.gnused
+          ];
+          text = ''
+            # Inside the nix sandbox that builds checks.pre-commit the
+            # hermetic checks.* tier already covers everything -- skip
+            # rather than double-run (and nested `nix build`/network
+            # would fail outright in that no-network sandbox anyway).
+            if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+              echo "run-unit-tests: inside the nix build sandbox; skipping (hermetic checks.* tier already covers this)" >&2
+              exit 0
+            fi
+
+            if ! command -v pg-test-runner >/dev/null 2>&1; then
+              echo "run-unit-tests: pg-test-runner not found on PATH -- install it (phillipgreenii.pg-test-runner home-manager module) before committing. Do NOT bypass with --no-verify." >&2
+              exit 1
+            fi
+
+            # Cross-repo test dependency (tc-4ehow): tests read the
+            # git-fixture-harness ONLY from GFH_LIB. Default to the LOCKED nix
+            # copy; a caller (or the workspace .envrc) MAY override it.
+            export GFH_LIB="''${GFH_LIB:-${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash}"
+
+            # Ambient-repo guard (core.worktree incident class): the tests run
+            # with every inherited GIT_* variable removed, and the run FAILS if
+            # it changed the ambient repo's shared .git/config. Regression
+            # guard: tests/run-unit-tests-guard.bats.
+            #
+            # Run under the flake's pinned go (runtimeInputs puts pkgs.go
+            # first on PATH) and forbid GOTOOLCHAIN auto-download.
+            # Regression guard: tests/run-unit-tests-pinned-go.bats.
+            export GOTOOLCHAIN=local
+            exec bash ${./scripts/run-unit-tests-guard.sh} pg-test-runner --labels unit --files "$@"
+          '';
+        };
+
       # pg2-i5t0k: the `prevent-main-rebase` pre-rebase hook's shell text
       # (used below as the `phillipgreenii.pre-commit.extraHooks` entry, and
       # again -- unchanged -- as `checks.<system>.test-prevent-main-rebase-hook`'s
@@ -937,43 +988,7 @@
           enable = true;
           name = "run-unit-tests";
           description = "unit tests (changed projects) -- pg-test-runner --labels unit, no nix, seconds";
-          entry = "${
-            pkgs.writeShellApplication {
-              name = "run-unit-tests-hook";
-              runtimeInputs = [
-                pkgs.git
-                pkgs.coreutils
-                pkgs.diffutils
-                pkgs.gnused
-              ];
-              text = ''
-                # Inside the nix sandbox that builds checks.pre-commit the
-                # hermetic checks.* tier already covers everything -- skip
-                # rather than double-run (and nested `nix build`/network
-                # would fail outright in that no-network sandbox anyway).
-                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                  echo "run-unit-tests: inside the nix build sandbox; skipping (hermetic checks.* tier already covers this)" >&2
-                  exit 0
-                fi
-
-                if ! command -v pg-test-runner >/dev/null 2>&1; then
-                  echo "run-unit-tests: pg-test-runner not found on PATH -- install it (phillipgreenii.pg-test-runner home-manager module) before committing. Do NOT bypass with --no-verify." >&2
-                  exit 1
-                fi
-
-                # Cross-repo test dependency (tc-4ehow): tests read the
-                # git-fixture-harness ONLY from GFH_LIB. Default to the LOCKED nix
-                # copy; a caller (or the workspace .envrc) MAY override it.
-                export GFH_LIB="''${GFH_LIB:-${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash}"
-
-                # Ambient-repo guard (core.worktree incident class): the tests run
-                # with every inherited GIT_* variable removed, and the run FAILS if
-                # it changed the ambient repo's shared .git/config. Regression
-                # guard: tests/run-unit-tests-guard.bats.
-                exec bash ${./scripts/run-unit-tests-guard.sh} pg-test-runner --labels unit --files "$@"
-              '';
-            }
-          }/bin/run-unit-tests-hook";
+          entry = "${run-unit-tests-hook-pkg pkgs}/bin/run-unit-tests-hook";
           language = "system";
           pass_filenames = true;
           require_serial = true;
@@ -2179,6 +2194,29 @@
                     export PATH="${preventMainRebaseHookPkg}/bin:$PATH"
                     export GFH_LIB="${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash"
                     bats ${./tests/prevent-main-rebase.bats}
+                    touch $out
+                  '';
+
+              # bats test of the run-unit-tests hook wrapper's Go toolchain pinning:
+              # with a fake older `go` earlier on PATH, the runner still sees the
+              # flake's pinned pkgs.go first and GOTOOLCHAIN=local exported. Builds
+              # the EXACT wrapper the pre-commit extraHooks entry installs.
+              run-unit-tests-pinned-go =
+                let
+                  wrapper = run-unit-tests-hook-pkg pkgs;
+                in
+                pkgs.runCommand "check-run-unit-tests-pinned-go"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                    ];
+                    WRAPPER = "${wrapper}/bin/run-unit-tests-hook";
+                    PINNED_GO_BIN = "${pkgs.go}/bin";
+                  }
+                  ''
+                    export HOME="$TMPDIR/home"; mkdir -p "$HOME"
+                    bats ${./tests/run-unit-tests-pinned-go.bats}
                     touch $out
                   '';
 
