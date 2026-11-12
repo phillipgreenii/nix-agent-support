@@ -47,12 +47,27 @@ nix-agent-support/packages/pg-router/internal/orchestrator/levels_test.go
 nix-agent-support/packages/pg-router/internal/tui/gates_test.go
 nix-agent-support/packages/pg-router/cmd/pg-router/run_metrics_test.go
 nix-agent-support/packages/pg-router/cmd/pg-router/run_compact_test.go
+nix-agent-support/packages/pg-router/cmd/pg-router/log_cmd_test.go
+nix-agent-support/packages/pg-router/internal/eventqueue/compact_plan_test.go
+# flake.nix: a fixture that proves the removed non_blocking_gates key is rejected.
+nix-agent-support/flake.nix
+# pg-review design: records the decision that the removed non_blocking_gates opt-out does not exist.
+nix-agent-support/packages/pg-review/docs/design.md
+
+# --- nix-agent-support: the ALR-1 check itself, its test and fixtures ---
+nix-agent-support/scripts/check-gate-names-gone.sh
+nix-agent-support/tests/check-gate-names-gone.bats
 
 # --- nix-ziprecruiter ---
 nix-ziprecruiter/docs/superpowers/**
 nix-ziprecruiter/docs/investigations/**
 # The conversion golden records the old registrations next to their new requirements.
 nix-ziprecruiter/modules/zm/pg-router/conversion-golden.json
+# Statements that the old gates, the non_blocking_gates key, the disk watchdog and its timer
+# are gone, and the negative guards in flake.nix that fail if they return.
+nix-ziprecruiter/CLAUDE.md
+nix-ziprecruiter/flake.nix
+nix-ziprecruiter/modules/zm/default.nix
 
 # --- nix-support-apps ---
 nix-support-apps/docs/superpowers/**

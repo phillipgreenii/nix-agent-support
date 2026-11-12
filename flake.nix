@@ -2154,6 +2154,38 @@
                     touch $out
                   '';
 
+              # ALR-1 and the public-repo check: the old pg-router gate names appear
+              # nowhere in this repo outside docs/alr1-allowlist.txt (the landing
+              # validation runs the same script over all three workspace repos), and
+              # both scripts' bats regression guard (tests/check-gate-names-gone.bats,
+              # real scripts, throwaway fixtures). The public-repo check reads a
+              # machine-local denylist and so only has a fixture run here; a run
+              # against the operator's denylist is a deployment step, never a pass
+              # here.
+              check-gate-names-gone =
+                pkgs.runCommand "check-gate-names-gone"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                      pkgs.ripgrep
+                      pkgs.findutils
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR/home"; mkdir -p "$HOME"
+                    ${pkgs.bash}/bin/bash ${./scripts/check-gate-names-gone.sh} \
+                      --allowlist ${./docs/alr1-allowlist.txt} nix-agent-support=${./.}
+                    mkdir -p scripts docs tests
+                    cp ${./scripts/check-gate-names-gone.sh} scripts/check-gate-names-gone.sh
+                    cp ${./scripts/check-public-repo-denylist.sh} scripts/check-public-repo-denylist.sh
+                    cp ${./docs/alr1-allowlist.txt} docs/alr1-allowlist.txt
+                    cp ${./tests/check-gate-names-gone.bats} tests/check-gate-names-gone.bats
+                    bats tests/check-gate-names-gone.bats
+                    touch $out
+                  '';
+
               # Drift check between the pb command markdown (canonical for agents) and
               # claude-marketplace/pb/queues.json (the exporter's machine-readable mirror),
               # with automated mutants. NOT generated from either side (ADR 0017 rejects

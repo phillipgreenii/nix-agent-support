@@ -35,3 +35,9 @@ conformance/driver 85
 internal/tui/render 90
 internal/tui 70
 internal/kvstore 85
+# The levels conversion: the configuration, the discovery and the new leaf package that
+# holds the level snapshot, the pure decision function and its explanation (the internal/core
+# row stays at 85 because the new decision code lives in internal/levels). 90 is the strawman.
+internal/config 90
+internal/discover 90
+internal/levels 90
