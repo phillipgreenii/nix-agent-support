@@ -98,7 +98,7 @@ deadline per sensor remain tunable (open item).
 
 ### `DEC-LEVEL-4` — the sensors module layout and invocation <!-- uuid: 62f7f98c-4f73-424b-b48b-300ddec7d6e7 -->
 
-**Decided** (delegated, 2026-11-10). The five sensors are ONE generic binary with subcommands (hosts,
+**Decided** (delegated, 2026-11-10). The six sensors are ONE generic binary with subcommands (hosts,
 remotes, tracker names and certificate margins are configuration, so the public code carries no
 deployment name). The module directory is `packages/pg-router-sensors`, the Go module path
 `github.com/phillipgreenii/pg-router-sensors`, the binary `pg-router-sensors` and the check
@@ -106,7 +106,7 @@ deployment name). The module directory is `packages/pg-router-sensors`, the Go m
 
 Invocation: `pg-router-sensors <subcommand> [--config FILE] [--state-dir DIR] [--resource RESOURCE]`,
 the subcommand one of `host-sensor` (resources `cpu`, `disk`, `ram`, `network`), `vpn-sensor` (the configured reachability and trust resources),
-`git-auth-sensor`, `beads-sensor`, `claude-sensor`; an unknown or missing subcommand prints usage to
+`git-auth-sensor`, `beads-sensor`, `claude-sensor`, `aws-sso-sensor` (resource `aws_sso_zr`); an unknown or missing subcommand prints usage to
 stderr and exits 2, and a configuration file that cannot be loaded exits 2 with the cause on stderr. One invocation answers all the resources of that sensor, one JSONL line per
 resource on stdout and diagnostics on stderr; `--resource` limits it to one resource (not `--only`, which clashes with pg-router's own `--only <kind>:<name>`). `--config` is a
 TOML file (absent means built-in defaults); `--state-dir` defaults to
@@ -131,7 +131,7 @@ of one invocation run concurrently, so a black-holed host costs one timeout, not
 The credential sensor parses the validity of the ssh certificate selected by a configured key id or
 principal (the latest expiry when several match), with a configurable margin (default 30 minutes) and
 an optional bounded remote listing; a missing agent socket, no identity or an expired certificate is
-`UNAVAILABLE`. The tracker sensor reads the exporter's up series per configured tracker and emits no
+`UNAVAILABLE`. The AWS SSO sensor reads only the expiry and refresh-token presence fields of the AWS CLI SSO cache JSON for a configured session name (`sso_session`, default `zip`; `cache_dir`, default `/.aws/sso/cache`), never a token value: it is `AVAILABLE` when the access token is unexpired, or a refresh token is present and `registrationExpiresAt` (when present) is in the future, with the same configurable margin; a missing cache or no matching file is `UNAVAILABLE`, not an error. The tracker sensor reads the exporter's up series per configured tracker and emits no
 line for a tracker with no series. The Claude sensor reads the 5-hour block and the week from the
 usage monitor's API and treats a capture older than 15 minutes as unknown. The sensors replace the
 disk watchdog role, its timer and its package.

@@ -368,7 +368,7 @@
             inherit (goBuilders) mkGoApp;
           };
           # pg-router-sensors: Pattern B (ADR 0008), the ONE generic sensors binary
-          # (host-sensor, vpn-sensor, git-auth-sensor, beads-sensor, claude-sensor);
+          # (host-sensor, vpn-sensor, git-auth-sensor, beads-sensor, claude-sensor, aws-sso-sensor);
           # imports the level-answer schema from ../pg-router.
           pg-router-sensors = final.callPackage ./packages/pg-router-sensors {
             inherit (goBuilders) mkGoApp;

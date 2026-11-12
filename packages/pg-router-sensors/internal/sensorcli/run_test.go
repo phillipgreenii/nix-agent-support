@@ -94,7 +94,7 @@ func newHarness(t *testing.T) *harness {
 	f := &fake{value: 30}
 	h := &harness{dir: t.TempDir(), now: t0, env: map[string]string{}, f: f}
 	h.reg = Registry{}
-	for _, n := range []string{"host-sensor", "vpn-sensor", "git-auth-sensor", "beads-sensor", "claude-sensor"} {
+	for _, n := range []string{"host-sensor", "vpn-sensor", "git-auth-sensor", "beads-sensor", "claude-sensor", "aws-sso-sensor"} {
 		h.reg[n] = f
 	}
 	return h
@@ -164,7 +164,7 @@ func TestRun_unknownOrMissingSubcommandExits2WithUsage(t *testing.T) {
 // TestRun_unloadableConfigExits2PerSubcommand: an unreadable file, invalid TOML
 // or an invalid key exits 2 with the cause on stderr, for every subcommand.
 func TestRun_unloadableConfigExits2PerSubcommand(t *testing.T) {
-	for _, sub := range []string{"host-sensor", "vpn-sensor", "git-auth-sensor", "beads-sensor", "claude-sensor"} {
+	for _, sub := range []string{"host-sensor", "vpn-sensor", "git-auth-sensor", "beads-sensor", "claude-sensor", "aws-sso-sensor"} {
 		t.Run(sub, func(t *testing.T) {
 			h := newHarness(t)
 			h.f.onlyKey = true

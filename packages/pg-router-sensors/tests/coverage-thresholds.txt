@@ -18,6 +18,7 @@ internal/host 90
 internal/netprobe 90
 internal/vpn 90
 internal/gitauth 90
+internal/awssso 90
 internal/beads 90
 internal/failsig 90
 internal/originprobe 90

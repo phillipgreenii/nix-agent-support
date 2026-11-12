@@ -32,7 +32,7 @@ deploy and tuned afterwards.
    only). A resource it does not name is one it does not care about (`ignored`). A clause is added only
    when its absence causes a problem and its facts are known.
 3. **Levels are their own durable log records**, not queue events, appended without passing admission.
-   A **sensor** (one generic binary, five subcommands) reports a level on a pull query or a push, owns
+   A **sensor** (one generic binary, six subcommands) reports a level on a pull query or a push, owns
    its thresholds, hysteresis and dwell, and keeps working while the router is paused. The operator can
    override a level for at most 24 hours, or until cleared.
 4. **A stale level is held for a grace period, then reads `unknown`**: best for every resource except

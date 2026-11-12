@@ -29,7 +29,7 @@ mkGoApp {
   subPackages = [ "cmd/pg-router-sensors" ];
 
   meta = {
-    description = "The router's sensors: one binary whose subcommands each print JSONL level answers (host, vpn, git-auth, beads, claude)";
+    description = "The router's sensors: one binary whose subcommands each print JSONL level answers (host, vpn, git-auth, beads, claude, aws-sso)";
     mainProgram = "pg-router-sensors";
   };
 }
