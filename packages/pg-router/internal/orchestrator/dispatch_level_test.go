@@ -65,3 +65,42 @@ func TestOffer_DispatchLevelObserver_SnapshotAtStartOutcomeAtEnd(t *testing.T) {
 		t.Errorf("failure call = %+v", c1)
 	}
 }
+
+// A skipped reply, a busy decline and a shutdown hand-back are not booked.
+func TestOffer_DispatchLevelObserver_NotBookedForSkippedBusyShutdown(t *testing.T) {
+	role := roles.Role{Name: "desk-pr", Binds: []string{"pr.changed"}}
+	lobs := &fakeDispatchLevelObserver{levels: [][2]string{{"disk", "OK"}}}
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+	o.DispatchLevelObserver = lobs
+
+	o.Handler = &scriptedReplyHandler{replies: map[string]wireclient.Reply{"e1": {ID: "dsp-1", Outcome: "x", Skipped: "skipped-pr-merged"}}}
+	if got := o.NewListener(context.Background(), role).Offer(eventqueue.Offering{ID: "d", Event: retryEvent("e1")}); !got.Accepted {
+		t.Fatalf("skipped is an accept, got %+v", got)
+	}
+
+	o.Handler = &seqHandler{errs: []error{&wireclient.BusyDecline{Reason: "at-capacity"}}}
+	if got := o.NewListener(context.Background(), role).Offer(eventqueue.Offering{ID: "d", Event: retryEvent("e2")}); got.Accepted {
+		t.Fatalf("busy must decline, got %+v", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	o.Handler = &seqHandler{errs: []error{killedErr}}
+	l := o.NewListener(ctx, role)
+	cancel()
+	if got := l.Offer(eventqueue.Offering{ID: "d", Event: retryEvent("e3")}); got.Accepted {
+		t.Fatalf("shutdown must hand back, got %+v", got)
+	}
+	if len(lobs.calls) != 0 {
+		t.Fatalf("booked %+v, want nothing for skipped, busy or shutdown", lobs.calls)
+	}
+}
+
+// With no level observer Offer behaves as before.
+func TestOffer_NilDispatchLevelObserver(t *testing.T) {
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+	o.Handler = &seqHandler{}
+	role := roles.Role{Name: "desk-pr", Binds: []string{"pr.changed"}}
+	if got := o.NewListener(context.Background(), role).Offer(eventqueue.Offering{ID: "d", Event: retryEvent("e1")}); !got.Accepted {
+		t.Fatalf("got %+v", got)
+	}
+}

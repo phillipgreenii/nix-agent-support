@@ -19,10 +19,13 @@ const (
 // observability companion of Decide, never an input to it.
 type Shortfall struct {
 	Resource string
-	// Steps is the distance, in scale steps, from the level the resource reads at
-	// to the nearest level that satisfies every clause the requirement has on it
-	// (1: relaxing the threshold by one step would clear it), or StepsUnknown or
-	// StepsNone. A two-level scale always reports 1 for a level that is held.
+	// Steps is the ABSOLUTE distance, in scale steps, from the level the resource
+	// reads at to the nearest level that satisfies every clause the requirement
+	// has on it (1: relaxing the threshold by one step would clear it), or
+	// StepsUnknown or StepsNone. It is a distance, not "below": the nearest
+	// allowed level can be on the better side (at PLENTY under "!= PLENTY" the
+	// distance is 1). On a two-level scale it is 1 unless the clauses allow no
+	// level (StepsNone).
 	Steps int
 	// Sole is true when this is the only resource with an unmet clause.
 	Sole bool
@@ -64,9 +67,6 @@ func Shortfalls(snap Snapshot, reg Registry, req Requirement) []Shortfall {
 func stepsBelow(sc Scale, req Requirement, f Entry) int {
 	if f.Kind != KindLevel {
 		return StepsUnknown
-	}
-	if len(sc.Levels) == 2 {
-		return 1
 	}
 	pos := slices.Index(sc.Levels, f.Level)
 	if pos < 0 {

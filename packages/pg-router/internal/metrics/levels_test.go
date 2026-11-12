@@ -2,11 +2,13 @@ package metrics
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -322,14 +324,15 @@ func TestLevelMetrics_requirementBlockedSeconds(t *testing.T) {
 	})
 }
 
-// DispatchLevels keeps only graded-scale resources with a level in force, and
+// DispatchLevels keeps only graded-scale resources with a fresh level in force, and
 // OnDispatchAtLevel books count and seconds per resource for success and failure.
 func TestLevelMetrics_dispatchAtLevel(t *testing.T) {
 	samples := []LevelSample{
 		{Resource: "disk", Level: "TIGHT", ScaleSize: 4, HasLevel: true},
 		{Resource: "router", Level: "RUNNING", ScaleSize: 2, HasLevel: true}, // two-level: skipped
 		{Resource: "cpu", Level: "PLENTY", ScaleSize: 4},                     // no level: skipped
-		{Resource: "net", Level: "OK", ScaleSize: 3, HasLevel: true, Stale: true},
+		{Resource: "net", Level: "OK", ScaleSize: 3, HasLevel: true},
+		{Resource: "ram", Level: "OK", ScaleSize: 4, HasLevel: true, Stale: true}, // stale: admission reads it as stale, not as OK
 	}
 	h := newLevelHarness(t, &samples)
 	at := h.e.DispatchLevels()
@@ -350,8 +353,58 @@ func TestLevelMetrics_dispatchAtLevel(t *testing.T) {
 		"pg_router_dispatch_at_level_seconds_total{level=OK,resource=disk,role=r1}":            10,
 	})
 	for k := range got {
-		if strings.HasPrefix(k, "pg_router_dispatch_at_level") && (strings.Contains(k, "resource=router") || strings.Contains(k, "resource=cpu")) {
+		if strings.HasPrefix(k, "pg_router_dispatch_at_level") && (strings.Contains(k, "resource=router") || strings.Contains(k, "resource=cpu") || strings.Contains(k, "resource=ram")) {
 			t.Errorf("%s: two-level or unknown-level resource must not be booked", k)
 		}
+	}
+}
+
+// RunRequirementAccrual restarts the clock when it starts (time before it is
+// never booked), books on each tick against the injected clock, and stops when
+// its context ends.
+func TestLevelMetrics_runRequirementAccrual(t *testing.T) {
+	var samples []LevelSample
+	var clock atomic.Int64 // seconds past the harness start
+	base := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	h := newLevelHarness(t, &samples, WithClock(func() time.Time { return base.Add(time.Duration(clock.Load()) * time.Second) }))
+	// 20 s pass between construction and the loop starting: not booked.
+	clock.Store(20)
+	var calls atomic.Int64
+	ticked := make(chan struct{}, 16)
+	src := func() []eventqueue.BlockedParticipant {
+		calls.Add(1)
+		clock.Add(5)
+		select {
+		case ticked <- struct{}{}:
+		default:
+		}
+		return []eventqueue.BlockedParticipant{{Participant: "a", Shortfalls: []levels.Shortfall{{Resource: "disk", Steps: 1, Sole: true}}}}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { h.e.RunRequirementAccrual(ctx, time.Millisecond, src); close(done) }()
+	for range 2 {
+		select {
+		case <-ticked:
+		case <-time.After(10 * time.Second):
+			t.Fatal("no tick")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunRequirementAccrual did not stop on cancel")
+	}
+	n := calls.Load()
+	// The src call advances the clock by 5 s before the accrual reads it, so
+	// each tick books exactly 5 s, and the first one books 5 s, not 25.
+	const name = "pg_router_requirement_blocked_seconds_total{resource=disk,role=a,sole=true,steps_below=1}"
+	if got := h.series(t)[name]; got != 5*float64(n) {
+		t.Fatalf("%s = %v after %d ticks, want %v", name, got, n, 5*float64(n))
+	}
+	time.Sleep(20 * time.Millisecond)
+	if calls.Load() != n {
+		t.Fatal("ticks continued after cancel")
 	}
 }

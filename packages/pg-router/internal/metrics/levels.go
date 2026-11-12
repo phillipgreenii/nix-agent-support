@@ -26,12 +26,14 @@ import (
 // asserted where the router is wired, because discover imports this package's
 // importers).
 //
-// Constants omit the unit and _total suffixes the exporter adds. Two forced
+// Constants omit the unit and _total suffixes the exporter adds. Four forced
 // exceptions are registered with NO unit so the exposed name is exactly the
 // catalog name and does not clash with a sibling instrument:
 // MetricResourceLevelSeconds (the counter; the gauge MetricResourceLevel
-// already owns the bare name) and MetricSensorPullSeconds (the gauge; the
-// counter MetricSensorPull owns the bare name).
+// already owns the bare name), MetricSensorPullSeconds (the gauge; the
+// counter MetricSensorPull owns the bare name), MetricRequirementBlockedSeconds
+// (the counter; MetricRequirementBlocked owns the bare name) and
+// MetricDispatchAtLevelSeconds (the counter; MetricDispatchAtLevel owns it).
 //
 // Every log line carries the key resource_level (never level): the level the
 // line is about, and for a legacy gate the gate's type.
@@ -425,7 +427,10 @@ func (e *Emitter) OnRequirementBlocked(participant, _, resource, kind string) {
 }
 
 // AccrueRequirementBlocked books the wall-clock time since the previous call
-// (zero before the first, measured from construction; capped at maxAccrualGap)
+// (capped at maxAccrualGap) or, on the first call, since RunRequirementAccrual
+// started its loop (the clock is reset there, so time before the queue and its
+// roles exist is never booked; a caller using this method directly measures the
+// first interval from construction)
 // to MetricRequirementBlockedSeconds, one increment per unmet resource of each
 // blocked participant. sole is "true" when that resource is the participant's
 // only unmet one; steps_below is levels.StepsLabel. The clock restarts with the
@@ -455,9 +460,12 @@ func (e *Emitter) AccrueRequirementBlocked(blocked []eventqueue.BlockedParticipa
 	}
 }
 
-// RunRequirementAccrual calls AccrueRequirementBlocked(src()) every interval
-// until ctx ends.
+// RunRequirementAccrual restarts the accrual clock, then calls
+// AccrueRequirementBlocked(src()) every interval until ctx ends.
 func (e *Emitter) RunRequirementAccrual(ctx context.Context, interval time.Duration, src func() []eventqueue.BlockedParticipant) {
+	e.lvl.mu.Lock()
+	e.lvl.accrualLast = e.lvl.now()
+	e.lvl.mu.Unlock()
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -471,16 +479,17 @@ func (e *Emitter) RunRequirementAccrual(ctx context.Context, interval time.Durat
 }
 
 // DispatchLevels snapshots the level of every graded-scale resource (more than
-// two levels, a level in force) as {resource, level} pairs, for
-// orchestrator.DispatchLevelObserver. Two-level and unknown-level resources are
-// skipped. It reads the WithLevels source and is nil-safe.
+// two levels, a level in force that is not stale) as {resource, level} pairs,
+// for orchestrator.DispatchLevelObserver. Two-level, unknown-level and
+// stale-level resources are skipped: admission reads a stale level as stale, not
+// as its last value, so it is not booked as that value either. It reads the WithLevels source and is nil-safe.
 func (e *Emitter) DispatchLevels() [][2]string {
 	if e.levelSource == nil {
 		return nil
 	}
 	var out [][2]string
 	for _, x := range e.levelSource() {
-		if x.HasLevel && x.ScaleSize > 2 {
+		if x.HasLevel && !x.Stale && x.ScaleSize > 2 {
 			out = append(out, [2]string{x.Resource, x.Level})
 		}
 	}

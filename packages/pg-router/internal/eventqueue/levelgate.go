@@ -514,7 +514,9 @@ type BlockedParticipant struct {
 // paused / resumed transition, fires no observer hook and takes q.mu only to copy
 // the listener ids. The start stagger is not a block. An emitter is blocked only
 // when every enabled consumer is (EmitterBlockedBy); its shortfalls are those of
-// the consumer closest to admitting (fewest unmet resources, the first on a tie).
+// the consumer closest to admitting (fewest unmet resources, then smallest total
+// steps with an unknown or none distance counting as stepsPenalty, then the
+// first registered).
 func (q *Queue) BlockedRequirements() []BlockedParticipant {
 	view := q.loadView()
 	if !view.has {
@@ -554,7 +556,7 @@ func (q *Queue) BlockedRequirements() []BlockedParticipant {
 				blocked = false
 				break
 			}
-			if best == nil || len(sf) < len(best) {
+			if best == nil || closer(sf, best) {
 				best = sf
 			}
 		}
@@ -563,4 +565,29 @@ func (q *Queue) BlockedRequirements() []BlockedParticipant {
 		}
 	}
 	return out
+}
+
+// stepsPenalty stands in for an unknown or none distance when comparing
+// consumers, so a measured distance always beats an unmeasured one.
+const stepsPenalty = 1 << 20
+
+func totalSteps(sf []levels.Shortfall) int {
+	t := 0
+	for _, s := range sf {
+		if s.Steps < 0 {
+			t += stepsPenalty
+		} else {
+			t += s.Steps
+		}
+	}
+	return t
+}
+
+// closer reports whether a is strictly closer to admitting than b: fewer unmet
+// resources, else a smaller total distance.
+func closer(a, b []levels.Shortfall) bool {
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return totalSteps(a) < totalSteps(b)
 }

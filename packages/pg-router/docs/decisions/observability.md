@@ -877,24 +877,33 @@ lock and reads nothing from these counters.
   level to the nearest level that satisfies every clause the role has on it: `1` means relaxing the clause
   by one step would clear it, so `sole="true",steps_below="1"` is the exact "a one-step looser threshold would
   have admitted this" signal. It is `1` for a two-level resource, `unknown` when no level is held or the held
-  level is stale (or off the scale), and `none` when the clauses on the resource allow no level at all.
+  level is stale (or off the scale), and `none` when the clauses on the resource allow no level at all
+  (also on a two-level resource). It is an absolute distance, not "below": the nearest allowed level can be
+  on the better side of the scale (at the best level under `!= <best>` the distance is 1).
 - **Accrual.** There is no pre-existing periodic evaluation (`role_paused` flips on admission passes), so the
-  long-running daemon runs one: every 5 seconds (`metrics.RequirementAccrualInterval`) it reads
+  long-running daemon runs one, started once the queue is built and every role is registered: every 5
+  seconds (`metrics.RequirementAccrualInterval`) it reads
   `Queue.BlockedRequirements` (a read-only evaluation over the same unmet clauses `levels.Decide` reports,
-  via `levels.Shortfalls`) and adds the time since the previous evaluation to each series. The time since
-  the last evaluation is capped at six intervals (30 s), so a suspended host books at most that. The clock
-  starts with the process and nothing is persisted, so a restart never books the same time twice; the counter
+  via `levels.Shortfalls`) and adds the time since the previous evaluation to each series. The clock is
+  reset when the loop starts, so time before the queue and its roles exist is never booked, and the
+  time since the last evaluation is capped at six intervals (30 s), so a suspended host books at most
+  that. Nothing is persisted, so a restart never books the same time twice; the counter
   resets to 0 with the process (read it with `increase()`). It accrues whether or not events are waiting for
   the role. An emitter is blocked only when every enabled consumer is; its series use the consumer closest to
-  admitting (fewest unmet resources, first on a tie). `run-until-idle` does not accrue.
+  admitting: fewest unmet resources, then smallest total steps (an `unknown` or `none` distance counts
+  as larger than any measured one), then the first registered. `run-until-idle` does not accrue.
 - **`pg_router_dispatch_at_level_total{role,resource,level,outcome}`** and
   **`pg_router_dispatch_at_level_seconds_total{role,resource,level}`** (counters; seconds is handler run
   time). At each dispatch start the level of every graded-scale resource (more than two levels, a level in
-  force) is snapshotted; two-level and unknown-level resources are skipped. When the dispatch ends, each
+  force and not stale) is snapshotted; two-level, unknown-level and stale-level resources are skipped
+  (admission reads a stale level as stale, not as its last value, and so does `steps_below`). When the dispatch ends, each
   snapshotted resource gets one count under `outcome="success"` or `"failure"` and the run seconds. A dispatch
   ends failed under the same rule as `dispatch_failed`: a handler error that is not handed back for a retry.
   A retried attempt, a busy decline, a shutdown hand-back and a skipped reply are not booked, so seconds of a
-  retried attempt are absent. The level is the one at dispatch start, not at the end.
+  retried attempt are absent. The level is the one at dispatch start, not at the end. For an adopted
+  dispatch (a handler continuing a dispatch an earlier daemon started) the snapshot is taken at THIS
+  daemon's offer, while the run seconds are extended back to the earlier daemon's start; the booked
+  level can therefore differ from the level the work actually began at.
 - **Cardinality.** `role` and `resource` take the 64-value fold (`OTHER` after that); `level` is a scale
   level (at most the scale size, about 4); `outcome` is 2; `sole` is 2; `steps_below` is at most the largest
   scale size plus `unknown` and `none`. The per-role bound is therefore resources times levels times 2 for
