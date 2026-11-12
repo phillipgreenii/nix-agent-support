@@ -11,7 +11,15 @@ import (
 
 // RepairResult is what Repair wrote (or, for a dry run, would write): one
 // entry per entity whose annotation was missing or did not match the table.
-type RepairResult struct{ Written []AnnotationOutcome }
+//
+// Reoffered lists the PRs whose focus bead is open and unclaimed although the
+// annotation reads none (see Reoffered); a real run announces each to the
+// decider through EmitRemoved, a dry run only lists them (judged by the
+// annotations as stored now).
+type RepairResult struct {
+	Written   []AnnotationOutcome
+	Reoffered []Key
+}
 
 // Repair re-writes every missing or mismatched focus_selected annotation from
 // the committed table (`select --repair`, spec section 7.2). It scans EVERY
@@ -82,7 +90,19 @@ func Repair(ctx context.Context, d LockDeps, dryRun bool) (RepairResult, error) 
 		for _, k := range stale {
 			out.Written = append(out.Written, AnnotationOutcome{Key: k, Outcome: AnnotationWouldWrite})
 		}
+		if out.Reoffered, err = Reoffered(d); err != nil {
+			return RepairResult{}, err
+		}
 		return out, nil
 	}
-	return RepairResult{Written: ApplyAnnotations(ctx, d, stale, d.now().Format(time.RFC3339))}, nil
+	out := RepairResult{Written: ApplyAnnotations(ctx, d, stale, d.now().Format(time.RFC3339))}
+	if out.Reoffered, err = Reoffered(d); err != nil {
+		return RepairResult{}, err
+	}
+	if d.EmitRemoved != nil && len(out.Reoffered) > 0 {
+		if err := d.EmitRemoved(ctx, out.Reoffered); err != nil && d.Stderr != nil {
+			_, _ = fmt.Fprintf(d.Stderr, "WARNING: focus: removal not announced to the decider: %v\n", err)
+		}
+	}
+	return out, nil
 }

@@ -492,6 +492,15 @@ same id (a retry folds); a later removal after a re-selection is a new run and a
 Failure handling is the selection announcement's: one `WARNING:` line, no change to the outcome or
 exit code, and a preview announces nothing.
 
+**The re-offer sweep.** A PR dropped before the removal announcement existed, or whose announcement
+was lost, never gets its hold if the PR stays quiet. `select --repair` therefore also lists every PR
+whose annotation reads `none` (or is unset) and whose linked bead is open and unclaimed (plain open,
+marker stale, or source done) and injects the removal event for each, as above, after the annotations
+are mended. A held, claimed, closed, has-children, hidden or suppressed row is left alone. With
+`--dry-run` it prints `would-reoffer` and injects nothing; a real run prints `reoffered` and a failed
+injection is the same one `WARNING:` line. Running it again offers the PR again until the decider holds
+the bead.
+
 **Hand-add hydration** is a separate, reported pre-step, not part of the atomic parse: a key the store
 has never gathered is hydrated first (a read of the tracker that writes the store's own entity row),
 the run is recomputed over the result and the hydrated keys are listed. A failure is a usage error

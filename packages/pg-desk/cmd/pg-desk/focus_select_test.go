@@ -1128,6 +1128,48 @@ func TestRepairScansEveryAnnotatedEntityAndEveryPlanRowEntity(t *testing.T) {
 	}
 }
 
+// Spec scenario "a PR dropped from the plan": a PR dropped while the removal
+// announcement did not exist left an open, unclaimed bead with the annotation
+// at none and nothing to wake the decider. Repair re-offers exactly those:
+// the held, claimed and bead-less PRs are left alone, a dry run announces
+// nothing, and a second repair offers the PR again until the decider holds it.
+func TestRepairReoffersOpenUnclaimedBeadOfDroppedPR(t *testing.T) {
+	f := newSelFixture(t)
+	dropped := f.pr(t, 1, "dropped", "2026-10-09T08:00:00Z")
+	held := f.pr(t, 2, "held", "2026-10-09T09:00:00Z")
+	claimed := f.pr(t, 3, "claimed", "2026-10-09T10:00:00Z")
+	noBead := f.pr(t, 4, "no bead", "2026-10-09T11:00:00Z")
+	f.bead(t, dropped, "bd-1", "open", "", "")
+	f.bead(t, held, "bd-2", "deferred", "", "struck")
+	f.bead(t, claimed, "bd-3", "in_progress", "me", "")
+	for _, k := range []focus.Key{dropped, held, claimed, noBead} {
+		if err := f.st.SetAnnotation(store.KVAnnotation{
+			Repo: showRepo, EntityType: k.Type, EntityID: k.ID, Key: store.AnnotationFocusSelected,
+			Value: "none", Origin: "pg-desk", SetBy: "me", SetAt: showAt,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := captureInject(t, nil)
+
+	out, _, err := sel(t, "", "--repair", "--dry-run")
+	mustOK(t, err)
+	mustContain(t, out, "repair pr:o/r#1 would-reoffer -")
+	mustNotContain(t, out, "o/r#2", "o/r#3", "o/r#4")
+	if len(*got) != 0 {
+		t.Fatalf("a dry-run repair announced %v", *got)
+	}
+
+	out, _, err = sel(t, "", "--repair")
+	mustOK(t, err)
+	mustContain(t, out, "repair pr:o/r#1 reoffered -")
+	mustNotContain(t, out, "o/r#2", "o/r#3", "o/r#4")
+	if len(*got) != 1 || !strings.Contains((*got)[0], `"entity_id":"o/r#1"`) ||
+		!strings.Contains((*got)[0], `"focus_removed"`) || !strings.Contains((*got)[0], `"id":"focus-remove:o/r#1@`) {
+		t.Fatalf("announced %v, want one focus_removed event for o/r#1", *got)
+	}
+}
+
 // Traces INV-FOCUS-27: repair ignores the closed-period check.
 func TestRepairIgnoresClosedPeriod(t *testing.T) {
 	f := newSelFixture(t)

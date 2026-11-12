@@ -743,11 +743,15 @@ func runFocusRepair(cmd *cobra.Command, f selectFlags) error {
 	run.SetCounts(focusCounts{})
 	w := cmd.OutOrStdout()
 	if env.JSON {
+		reoffered := make([]string, 0, len(res.Reoffered))
+		for _, k := range res.Reoffered {
+			reoffered = append(reoffered, keyText(k))
+		}
 		anns := make([]map[string]any, 0, len(res.Written))
 		for _, a := range res.Written {
 			anns = append(anns, map[string]any{"key": keyText(a.Key), "outcome": a.Outcome, "seq": a.Seq})
 		}
-		if err := printFocusJSON(w, "repair", map[string]any{"dry_run": f.dry, "annotations": anns}, run.RunID()); err != nil {
+		if err := printFocusJSON(w, "repair", map[string]any{"dry_run": f.dry, "annotations": anns, "reoffered": reoffered}, run.RunID()); err != nil {
 			return err
 		}
 	} else {
@@ -759,6 +763,15 @@ func runFocusRepair(cmd *cobra.Command, f selectFlags) error {
 				word = "wrote"
 			}
 			if _, err := fmt.Fprintf(w, "repair %s %s -\n", keyText(a.Key), word); err != nil {
+				return err
+			}
+		}
+		word := "reoffered"
+		if f.dry {
+			word = "would-reoffer"
+		}
+		for _, k := range res.Reoffered {
+			if _, err := fmt.Fprintf(w, "repair %s %s -\n", keyText(k), word); err != nil {
 				return err
 			}
 		}
