@@ -182,5 +182,6 @@ export function onSessionModeTurnComplete(): void {
   const o = getOptions()
   if (!o?.enable || !o.components.sessionMode) return
   if (lastReadAt !== undefined && nowFn() - lastReadAt < MODE_INTERVAL_MS) return
-  refresh('sessionMode')
+  // forced: the source layer's own throttle is keyed to the poll and would swallow this read
+  refresh('sessionMode', { force: true })
 }

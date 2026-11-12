@@ -42,7 +42,7 @@ test('an engine.create hook adds the pgd noun to $ and its put stores a contribu
   const make = (path: string): unknown =>
     new Proxy(() => undefined, {
       get: (_t, k) => make(`${path}.${String(k)}`),
-      apply: () => Promise.resolve(undefined),
+      apply: () => Object.assign(Promise.resolve(undefined), { cancel: () => undefined }),
     })
   await start.fn(make('$'), {}, async () => undefined)
   await built.pgd.put({ id: 'r', surface: 'alert', priority: 1, text: 'wired' })

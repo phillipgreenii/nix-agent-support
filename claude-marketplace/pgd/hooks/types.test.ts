@@ -151,6 +151,7 @@ test('session.start writes one warn per skipped rule to the log file', async () 
       written.push({ path: String(args[0]), text: String(args[1]) })
       return Promise.resolve(undefined)
     }
+    if (path === '$.clock.after') return Object.assign(Promise.resolve(undefined), { cancel: () => undefined })
     return Promise.resolve(undefined)
   }
   const make = (path: string): unknown =>
