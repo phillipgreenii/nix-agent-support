@@ -525,6 +525,132 @@ tests:
         alertname: pg-router-queue-stalled
         exp_alerts: []
 
+  # The pg-rescue-triage clause: its type has a bound role, so an idle consumer pages and a busy one does not.
+  - name: the pg-rescue-triage role maps to pg-rescue.item (idle pages, busy does not)
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="pg-rescue.item",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="pg-rescue-triage",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="pg-rescue.item.extra",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="pg-rescue-triage-other",job="pg-router"}
+        values: "1x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: pg-rescue.item
+              job: pg-router
+              severity: warning
+
+  - name: the pg-rescue-triage role is not stalled while it is dispatching
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="pg-rescue.item",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="pg-rescue-triage",job="pg-router"}
+        values: "1x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
+  # The review-run clause: its type has a bound role, so an idle consumer pages and a busy one does not.
+  - name: the review-run role maps to review.run (idle pages, busy does not)
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.run",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="review-run",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="review.run.extra",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="review-run-other",job="pg-router"}
+        values: "1x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: review.run
+              job: pg-router
+              severity: warning
+
+  - name: the review-run role is not stalled while it is dispatching
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.run",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="review-run",job="pg-router"}
+        values: "1x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
+  # The review-maintain clause: its type has a bound role, so an idle consumer pages and a busy one does not.
+  - name: the review-maintain role maps to review.maintain (idle pages, busy does not)
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.maintain",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="review-maintain",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="review.maintain.extra",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="review-maintain-other",job="pg-router"}
+        values: "1x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: review.maintain
+              job: pg-router
+              severity: warning
+
+  - name: the review-maintain role is not stalled while it is dispatching
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.maintain",job="pg-router"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="review-maintain",job="pg-router"}
+        values: "1x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
   - name: a type the table does not know is not covered, and neither is a role that is not bound
     interval: 30s
     input_series:
