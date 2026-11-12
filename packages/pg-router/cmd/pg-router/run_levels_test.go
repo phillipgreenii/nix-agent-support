@@ -79,8 +79,8 @@ func TestRunUntilIdleBody_pausedReachableAnswersIngestNoDispatch(t *testing.T) {
 		t.Fatal("paused run-until-idle never became discoverable; it must still boot the core (INV-LIFE-1)")
 	}
 
-	// postStartupAll fires right after bootCore succeeds (pg2-g3gqe: wait,
-	// bounded, for it); exactly once, for the ENABLED role only.
+	// postStartupAll fires right after bootCore succeeds (wait, bounded,
+	// for it); exactly once, for the ENABLED role only.
 	hookDeadline := time.Now().Add(5 * time.Second)
 	for len(fh.postStartupCalls()) == 0 && time.Now().Before(hookDeadline) {
 		time.Sleep(time.Millisecond)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -384,5 +385,22 @@ func TestCompactFileOffline(t *testing.T) {
 	// And the compacted log is intact: a restart rebuilds the same state.
 	if got := replayStateOfCopy(t, path); got != wantState {
 		t.Fatalf("state changed across the offline compaction\n got: %s\nwant: %s", got, wantState)
+	}
+}
+
+// An offline compaction hands back each ACTIVE legacy gate it deleted (the CLI
+// prints them), and none of the lapsed, cleared or expired ones.
+func TestCompactFileOffline_ReportsActiveLegacyGates(t *testing.T) {
+	path := fileStoreWithLegacyGates(t)
+	res, err := CompactFileOffline(path, false)
+	if err != nil || !res.Compacted {
+		t.Fatalf("offline run = %+v, %v", res, err)
+	}
+	var got []string
+	for _, g := range res.Stats.DroppedGates {
+		got = append(got, g.Type+"/"+g.Owner)
+	}
+	if want := []string{"BEAD_SERVER_DOWN/bd", "SYSTEM_PAUSE/operator"}; !slices.Equal(got, want) {
+		t.Fatalf("dropped gates = %v, want %v", got, want)
 	}
 }

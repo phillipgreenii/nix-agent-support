@@ -179,6 +179,18 @@ func logCompactOffline(stderr io.Writer, o logCompactOpts) (core.LogCompactView,
 		fmt.Fprintf(stderr, "log compact: %v\n", err)
 		return core.LogCompactView{}, conformance.ExitError
 	}
+	// The compaction deleted these active legacy gates (the removed gate
+	// mechanism); the daemon logs each at startup, but an offline run leaves
+	// nothing for a later startup to report, so say so here (stderr keeps --json
+	// output clean).
+	for _, g := range res.Stats.DroppedGates {
+		exp := "no expiry"
+		if !g.ExpiresAt.IsZero() {
+			exp = "expires " + g.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		fmt.Fprintf(stderr, "log compact: dropped active legacy gate %s (owner %s, %s)\n",
+			textsafe.Sanitize(g.Type), textsafe.Sanitize(g.Owner), exp)
+	}
 	var limit int64
 	if o.limit != nil {
 		limit = o.limit()

@@ -720,6 +720,9 @@ func New(store Store, opts ...Option) (*Queue, error) {
 			ab.SetArchiveBudget(limit / archiveBudgetDivisor)
 		}
 	}
+	if dr, ok := q.store.(DroppedGateReporter); ok {
+		dr.SetDroppedGateSink(q.logLegacyGateDropped)
+	}
 	q.compactNext.Store(q.compactThreshold)
 	if q.compactOnStart {
 		// Before the queue replays or accepts anything. A failure is not fatal:

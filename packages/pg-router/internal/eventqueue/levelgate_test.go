@@ -685,6 +685,32 @@ func TestLevel_LegacyGateReportedByLaterCompactionWhenStartupOff(t *testing.T) {
 	}
 }
 
+// The poisoned-tail repair (FileStore.Probe, reached from EnforceLogLimits)
+// compacts too, so it reports each ACTIVE legacy gate it deletes, and only those.
+func TestLevel_PoisonedTailRepairReportsActiveLegacyGates(t *testing.T) {
+	path := fileStoreWithLegacyGates(t)
+	fs, err := NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fs.Close() }()
+	obs := &recordingLevelObserver{}
+	if _, err := New(fs, WithLevelObserver(obs), WithCompaction(1<<30, false)); err != nil {
+		t.Fatal(err)
+	}
+	// Break the descriptor under the store: the write AND the rollback fail.
+	_ = fs.f.Close()
+	if _, err := fs.Append(Record{Op: opEnqueue, EventID: "x", Type: "T"}); err == nil {
+		t.Fatal("expected the append on a broken descriptor to fail")
+	}
+	if err := fs.Probe(); err != nil {
+		t.Fatalf("Probe on a poisoned store: %v", err)
+	}
+	if want := []string{"BEAD_SERVER_DOWN/bd", "SYSTEM_PAUSE/operator"}; !slices.Equal(obs.legacy, want) {
+		t.Fatalf("poisoned-tail repair reported %v, want one per ACTIVE gate %v (not the lapsed, cleared or expired ones)", obs.legacy, want)
+	}
+}
+
 // Level set, replay and dispatch together under -race; an observer may call
 // back into the queue without deadlock.
 func TestLevel_ConcurrentSetReplayDispatchAndObserverReentry(t *testing.T) {

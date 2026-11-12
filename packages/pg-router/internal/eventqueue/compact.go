@@ -105,6 +105,13 @@ type ArchiveBudgeter interface {
 	SetArchiveBudget(bytes int64)
 }
 
+// DroppedGateReporter is implemented by a Store that can run a compaction the
+// queue does not (FileStore.Probe's poisoned-tail repair): the queue installs a
+// sink so the active legacy gates that pass deletes are reported too.
+type DroppedGateReporter interface {
+	SetDroppedGateSink(fn func(DroppedGate))
+}
+
 // archiveBudgetDivisor sets the history's byte budget to 1/N of the soft log limit.
 const archiveBudgetDivisor = 10
 

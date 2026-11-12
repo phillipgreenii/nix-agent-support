@@ -228,6 +228,53 @@ func TestLogCompact_OfflineDryRunThenReal(t *testing.T) {
 	}
 }
 
+// The offline run prints each ACTIVE legacy gate it deletes to stderr (a later
+// startup finds none left to report) and nothing for lapsed, cleared or expired
+// ones; stdout stays a clean --json document.
+func TestLogCompact_OfflineReportsDroppedActiveLegacyGates(t *testing.T) {
+	dir := shortDir(t)
+	path := filepath.Join(dir, "queue.jsonl")
+	now := time.Now().UTC()
+	var buf bytes.Buffer
+	for _, rec := range []map[string]any{
+		{"op": "gate_set", "gateType": "SYSTEM_PAUSE", "owner": "operator", "at": now.Add(-time.Hour)},
+		{"op": "gate_set", "gateType": "BEAD_SERVER_DOWN", "owner": "bd", "at": now.Add(-time.Hour), "expiresAt": now.Add(time.Hour)},
+		{"op": "gate_set", "gateType": "LAPSED", "owner": "x", "at": now.Add(-2 * time.Hour), "expiresAt": now.Add(-time.Hour)},
+		{"op": "gate_set", "gateType": "CLEARED", "owner": "x", "at": now.Add(-2 * time.Hour)},
+		{"op": "gate_cleared", "gateType": "CLEARED", "owner": "op", "at": now.Add(-time.Hour)},
+		{"op": "gate_set", "gateType": "EXPIRED", "owner": "x", "at": now.Add(-2 * time.Hour), "expiresAt": now.Add(time.Hour)},
+		{"op": "gate_expired", "gateType": "EXPIRED", "at": now.Add(-time.Minute)},
+	} {
+		b, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := runLogCompactCapture(t, logCompactOpts{asJSON: true, logDir: dir})
+	if code != exitOK {
+		t.Fatalf("offline real run exit = %d; stderr=%s", code, errOut)
+	}
+	decodeLogCompactJSON(t, out)
+	for _, want := range []string{"legacy gate SYSTEM_PAUSE (owner operator, no expiry)", "legacy gate BEAD_SERVER_DOWN (owner bd, expires "} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errOut)
+		}
+	}
+	for _, not := range []string{"LAPSED", "CLEARED", "EXPIRED"} {
+		if strings.Contains(errOut, not) {
+			t.Errorf("stderr reports the inactive gate %s:\n%s", not, errOut)
+		}
+	}
+	if n := strings.Count(errOut, "dropped active legacy gate"); n != 2 {
+		t.Errorf("stderr reports %d gates, want 2:\n%s", n, errOut)
+	}
+}
+
 // A log some other process holds (no daemon answering on a socket) refuses a real
 // offline run with exit 1 and a message naming the lock, leaving the log
 // byte-identical; the dry run still exits 0 and says a real run would be refused.

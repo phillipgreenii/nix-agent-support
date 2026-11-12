@@ -251,6 +251,18 @@ type FileStore struct {
 	// writeFn, when non-nil, replaces f.Write — a test seam for short-write and
 	// ENOSPC injection (the real file is still the one truncated back).
 	writeFn func(f *os.File, b []byte) (int, error)
+
+	// droppedGateSink, when non-nil, receives each ACTIVE legacy gate a
+	// compaction run by Probe (the poisoned-tail repair) deleted; the queue's own
+	// compactions report through CompactStats instead. Guarded by mu.
+	droppedGateSink func(DroppedGate)
+}
+
+// SetDroppedGateSink implements DroppedGateReporter.
+func (s *FileStore) SetDroppedGateSink(fn func(DroppedGate)) {
+	s.mu.Lock()
+	s.droppedGateSink = fn
+	s.mu.Unlock()
 }
 
 // NewFileStore opens (creating parent dirs) the append-only WAL at path, holding
@@ -373,12 +385,18 @@ func (s *FileStore) Probe() error {
 		return err
 	}
 	s.mu.Lock()
-	poisoned := s.poisoned
+	poisoned, sink := s.poisoned, s.droppedGateSink
 	s.mu.Unlock()
 	if poisoned {
 		// The tail holds a partial line a failed rollback left behind; a compaction
 		// rewrites the file from its decodable prefix and clears the condition.
-		_, err := s.Compact()
+		// It drops active legacy gates like any other pass, so report them.
+		st, err := s.Compact()
+		if err == nil && sink != nil {
+			for _, g := range st.DroppedGates {
+				sink(g)
+			}
+		}
 		return err
 	}
 	return nil
