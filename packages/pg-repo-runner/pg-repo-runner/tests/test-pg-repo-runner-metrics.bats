@@ -186,7 +186,7 @@ EOF
 
 @test "tips --repo: an unverified tip is 1 and a red latest verdict is 1" {
   mkdir -p "$STATE/verdicts/nix-alpha"
-  jq -n --arg sha "$ALPHA_SHA" '{repo:"nix-alpha",sha:$sha,kind:"check",result:"red",inputs:"locked",startedAt:"2026-11-01T00:00:00Z",finishedAt:"2026-11-01T00:01:00Z",exit:1,durationS:60}' \
+  jq -n --arg sha "$ALPHA_SHA" '{repo:"nix-alpha",sha:$sha,kind:"check",result:"red",inputs:"locked",startedAt:"2026-11-01T00:00:00Z",finishedAt:"2026-11-01T00:01:00Z",exit:1,durationS:60,failedChecks:["checks.x.a","checks.x.b"]}' \
     >"$STATE/verdicts/nix-alpha/old.check.json"
   tips --repo nix-alpha
   [ "$status" -eq 0 ]

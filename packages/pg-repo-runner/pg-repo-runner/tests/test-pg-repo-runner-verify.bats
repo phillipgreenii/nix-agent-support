@@ -233,11 +233,34 @@ hold_lease() {
   # the exact command: flake check, no lock write, the commit as a git+file snapshot
   local real
   real="$(realpath "$WS")"
-  [ "$(cat "$TEST_DIR/nix.argv")" = "flake check --no-write-lock-file git+file://$real/nix-alpha?rev=$ALPHA_SHA" ]
+  [ "$(cat "$TEST_DIR/nix.argv")" = "flake check --keep-going --no-write-lock-file git+file://$real/nix-alpha?rev=$ALPHA_SHA" ]
   # its output is kept where the verdict says
   [ -s "$(jq -r .logPath "$f")" ]
   grep -q 'shim output line' "$(jq -r .logPath "$f")"
   assert_no_lease
+}
+
+@test "a red check run with --keep-going records every failed attribute in failedChecks" {
+  local f
+  SHIM_EXIT=1 SHIM_TEXT="error: failed to build attribute 'checks.aarch64-darwin.alpha-lint', build of '/nix/store/x.drv' failed\nerror: failed to build attribute 'checks.aarch64-darwin.beta-test', build of '/nix/store/y.drv' failed\nerror: failed to build attribute 'checks.aarch64-darwin.alpha-lint', build of '/nix/store/x.drv' failed" verify
+  [ "$status" -eq 0 ]
+  grep -q -- '--keep-going' "$TEST_DIR/nix.argv"
+  f="$(verdict_file nix-alpha "$ALPHA_SHA")"
+  [ "$(jq -r .result "$f")" = red ]
+  [ "$(jq -c .failedChecks "$f")" = '["checks.aarch64-darwin.alpha-lint","checks.aarch64-darwin.beta-test"]' ]
+  # the status JSON carries the field and the gauge is emitted per failed check
+  run "${RUNNER[@]}" status --json
+  [ "$(jq -c '.[0].failedChecks | length' <<<"$output")" -eq 2 ]
+}
+
+@test "a red check with no attribute lines has an empty failedChecks, and a green has none" {
+  local f
+  SHIM_EXIT=1 verify
+  f="$(verdict_file nix-alpha "$ALPHA_SHA")"
+  [ "$(jq -c .failedChecks "$f")" = '[]' ]
+  rm -rf "$STATE/verdicts"
+  verify
+  [ "$(jq -r 'has("failedChecks")' "$(verdict_file nix-alpha "$ALPHA_SHA")")" = false ]
 }
 
 @test "a failing check is a red verdict, the run still exits 0, and a red is not retried" {

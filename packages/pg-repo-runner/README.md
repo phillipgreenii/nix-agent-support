@@ -139,7 +139,7 @@ and ignores the kill switch: it only reads refs and the verdict store.
 5. Otherwise, under the lease:
 
    ```text
-   nice -n 10 pg-nix-log-wrapped nix flake check --no-write-lock-file "git+file://<canonical abs path>?rev=<sha>"
+   nice -n 10 pg-nix-log-wrapped nix flake check --keep-going --no-write-lock-file "git+file://<canonical abs path>?rev=<sha>"
    ```
 
    The target is an immutable commit read from git objects, so a dirty or untracked working tree
@@ -147,7 +147,13 @@ and ignores the kill switch: it only reads refs and the verdict store.
 
 6. Verdict (`kind` `check`, `inputs` `locked`): exit 0 is `green`; any other non-zero exit is `red`;
    a signal exit (128 + n, that is 129 to 192) is a malfunction: exit 1, NO verdict is stored, and
-   pg-router retries (`max_dispatch_retries`). There is no "inconclusive" class and a red is never
+   pg-router retries (`max_dispatch_retries`). A `red` verdict also carries `failedChecks`: a sorted
+   JSON array of every distinct `checks.<system>.<name>` attribute named by a `failed to build
+attribute` line in the log (`--keep-going` makes nix check every attribute instead of stopping at
+   the first failure), `[]` when the log names none. It is shown in `status` and `status --json`, in
+   the text of the red transition bead, and as the gauge `pg_repo_runner_check_failed`. It is
+   information only: overall green still means exit 0 and remains the only push-gate input. A
+   `--keep-going` red run lasts longer than a stop-at-first-failure one. There is no "inconclusive" class and a red is never
    retried automatically. A red verdict exits 0 (it is data, not a failure of the runner).
 7. **The sibling-override check (a signal, never a gate).** A `red` locked verdict is followed, in the
    same run and under the same lease, by `pn workspace flake-check --no-build --rev <sha> <repo>`
@@ -497,6 +503,7 @@ Emitted at the end of `tips` and `tips --repo KEY`, per repo processed (every 5 
 | `pg_repo_runner_check_verdicts`                  | `repo`,`result` | Count of stored check verdicts, for `result` = `green`, `red`, `superseded`, `error`.                                                       |
 | `pg_repo_runner_check_last_timestamp_seconds`    | `repo`,`result` | `finishedAt` of the latest `green` and of the latest `red` verdict (omitted when none).                                                     |
 | `pg_repo_runner_check_last_duration_seconds`     | `repo`          | `durationS` of the latest non-superseded verdict.                                                                                           |
+| `pg_repo_runner_check_failed`                    | `repo`,`check`  | 1 for each attribute in `failedChecks` of the latest non-superseded verdict when it is red (nothing otherwise).                             |
 | `pg_repo_runner_check_latest_red`                | `repo`          | 1 when the latest non-superseded verdict is red, else 0.                                                                                    |
 | `pg_repo_runner_check_override_verdicts`         | `repo`,`result` | Count of stored sibling-override check verdicts, for `result` = `green`, `red`. `check_verdicts` counts the locked ones only.               |
 | `pg_repo_runner_check_latest_red_class`          | `repo`,`class`  | 1 for the `class` (`skew`, `defect`, `unclassified`) of the latest red locked verdict, 0 for the others and for all when it is not red.     |

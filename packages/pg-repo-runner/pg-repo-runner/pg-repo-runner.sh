@@ -117,7 +117,7 @@ verify, in its act step: <sha> MUST exist (else the run is skipped, exit 0); if
 the repo's primary branch no longer points at <sha> a "superseded" verdict is
 stored and no nix runs; otherwise it runs
 
-  nice -n <level> pg-nix-log-wrapped nix flake check --no-write-lock-file \
+  nice -n <level> pg-nix-log-wrapped nix flake check --keep-going --no-write-lock-file \
       "git+file://<canonical path>?rev=<sha>"
 
 (an immutable commit: no working tree is read) and stores a check verdict:
@@ -335,7 +335,7 @@ rr_verify_override() {
 # working tree is never read (the check runs on an immutable git snapshot).
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_verify() {
-  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls reason
+  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls reason failed
   root="$(rr_cfg '.workspace_root // empty')"
 
   # precheck: the sha exists as a commit
@@ -383,9 +383,9 @@ act_verify() {
   started="$(rr_now)"
   t0="$(rr_epoch)"
   load0="$(rr_loadavg1)" || load0=""
-  rr_log "check start: nix flake check --no-write-lock-file $url (load $load0)"
+  rr_log "check start: nix flake check --keep-going --no-write-lock-file $url (load $load0)"
   rc=0
-  rr_nix_run flake check --no-write-lock-file "$url" >"$log" 2>&1 || rc=$?
+  rr_nix_run flake check --keep-going --no-write-lock-file "$url" >"$log" 2>&1 || rc=$?
   t1="$(rr_epoch)"
   finished="$(rr_now)"
   load1="$(rr_loadavg1)" || load1=""
@@ -408,6 +408,9 @@ act_verify() {
       "Green verdict for $repo@$full (nix flake check, finished $finished, log $log). This tip descends from the red one." ||
       rr_log "surface: green handling failed for $repo@$full"
   else
+    # every failed attribute of the run (--keep-going), for the verdict, the bead text and the gauges
+    failed="$(rr_failed_checks "$log")" || failed='[]'
+    extra="$(rr_jq -c --argjson f "$failed" '. + {failedChecks: $f}' <<<"$extra")" || return 1
     rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
     # a red locked check is classified by the same check over the sibling overrides
     # (signal only: the override verdict never opens the push gate)
@@ -422,7 +425,7 @@ act_verify() {
       reason="$(rr_override_reason "$repo" "$full")"
     fi
     cls="$(rr_override_class "$repo" "$full")"
-    rr_surface_raise "$repo" red "$full" "$(rr_override_text "$cls" "$reason"), red check verdict, exit $rc, log $log" ||
+    rr_surface_raise "$repo" red "$full" "$(rr_override_text "$cls" "$reason"), red check verdict, exit $rc$(rr_failed_checks_text "$failed"), log $log" ||
       rr_log "surface: raising the red transition failed for $repo@$full"
   fi
   rr_surface_flush_repo "$repo" || true
@@ -1003,7 +1006,7 @@ run_status() {
     printf 'verdicts: none\n'
   else
     printf 'verdicts:\n'
-    rr_jq -r '.[] | [.repo, .sha[0:12], .kind, .result, .inputs, .finishedAt] | @tsv' <<<"$verdicts"
+    rr_jq -r '.[] | [.repo, .sha[0:12], .kind, .result, .inputs, .finishedAt] + (if (.failedChecks // []) | length > 0 then ["failed: " + (.failedChecks | join(","))] else [] end) | @tsv' <<<"$verdicts"
   fi
   transitions="$(rr_surface_records_json)" || transitions='[]'
   if [[ -n $repo ]]; then

@@ -444,6 +444,21 @@ assert_argv_clean() {
   no_push "$before"
 }
 
+@test "a red verdict that lists failedChecks still withholds the push" {
+  local tip before
+  commit_file "$A" f
+  tip="$(git -C "$A" rev-parse HEAD)"
+  write_verdict "$tip" red
+  jq '. + {failedChecks: ["checks.aarch64-darwin.a", "checks.aarch64-darwin.b"]}' "$STATE/verdicts/nix-alpha/$tip.check.json" >"$TEST_DIR/v.json"
+  mv -f "$TEST_DIR/v.json" "$STATE/verdicts/nix-alpha/$tip.check.json"
+  go_live
+  before="$(remote_refs)"
+  sync_pass
+  [ "$status" -eq 0 ]
+  [[ "$(rec nix-alpha detail)" == *"is red"* ]]
+  no_push "$before"
+}
+
 @test "a red verdict: not pushed (and no relock transition without a consumed sibling)" {
   local tip before
   commit_file "$A" f

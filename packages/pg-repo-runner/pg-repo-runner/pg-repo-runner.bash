@@ -1127,6 +1127,25 @@ rr_locked_build_failure() {
   [[ -f $1 ]] && grep -Eq 'error: failed to build attribute|Cannot build ' "$1"
 }
 
+# rr_failed_checks LOG: prints a JSON array of every distinct attribute named by a
+# "failed to build attribute 'checks.<system>.<name>'" line of the locked check log
+# (nix flake check --keep-going names each failed check), sorted; [] when none.
+rr_failed_checks() {
+  [[ -f $1 ]] || {
+    printf '[]'
+    return 0
+  }
+  { grep -oE "failed to build attribute 'checks\.[^']+'" "$1" || true; } |
+    rr_jq -R -s -c 'split("\n") | map(select(. != "") | capture("'"'"'(?<a>[^'"'"']+)'"'"'").a) | unique'
+}
+
+# rr_failed_checks_text JSON: ", failed checks: a, b" for a non-empty array, else nothing.
+rr_failed_checks_text() {
+  local t
+  t="$(rr_jq -r 'join(", ")' <<<"${1:-[]}" 2>/dev/null)" || return 0
+  [[ -z $t ]] || printf ', failed checks: %s' "$t"
+}
+
 # rr_override_revs_identical LOG: succeeds when the override log has at least one
 # "Updated input" block and every block's replacement resolves to the SAME revision
 # as the locked input (only the URL scheme changed), so the pair cannot be skew.
@@ -1614,6 +1633,9 @@ rr_m_state_points() {
        | pt("check_last_timestamp_seconds"; ($x.finishedAt | fromdateiso8601); "repo=\($r),result=\($res)")),
       (select($l != null and ($l.durationS | type) == "number")
        | pt("check_last_duration_seconds"; $l.durationS; "repo=\($r)")),
+      (select($l != null and $l.result == "red")
+       | ($l.failedChecks // [])[] as $fc
+       | pt("check_failed"; 1; "repo=\($r),check=\($fc)")),
       pt("check_latest_red"; (if $l != null and $l.result == "red" then 1 else 0 end); "repo=\($r)"),
       (["green", "red"][] as $res
        | pt("check_override_verdicts"; ($o | map(select(.result == $res)) | length); "repo=\($r),result=\($res)")),
