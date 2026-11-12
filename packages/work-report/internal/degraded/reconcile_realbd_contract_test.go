@@ -65,25 +65,33 @@ func newRealBD(t *testing.T) *realBD {
 	if err != nil {
 		t.Skip("bd not on PATH")
 	}
-	goBin, err := exec.LookPath("go")
-	if err != nil {
-		t.Fatalf("go not on PATH, cannot build the real pg-connector binaries: %v", err)
-	}
 	f := &realBD{t: t, dir: t.TempDir(), bin: t.TempDir(), bdPath: bdPath}
 
-	// Module root of pg-connector: internal/degraded -> work-report -> packages.
-	moduleRoot, err := filepath.Abs("../../../pg-connector")
-	if err != nil {
-		t.Fatalf("resolve pg-connector module root: %v", err)
-	}
-	for _, name := range []string{"pg-connector", "pg-connector-issue-beads"} {
-		ctx, cancel := context.WithTimeout(context.Background(), realBDDeadline)
-		cmd := exec.CommandContext(ctx, goBin, "build", "-o", filepath.Join(f.bin, name), "./cmd/"+name)
-		cmd.Dir = moduleRoot
-		out, buildErr := cmd.CombinedOutput()
-		cancel()
-		if buildErr != nil {
-			t.Fatalf("go build ./cmd/%s: %v\n%s", name, buildErr, out)
+	if prebuilt := os.Getenv("PG_CONNECTOR_BIN_DIR"); prebuilt != "" {
+		// The nix check supplies the real pg-connector and
+		// pg-connector-issue-beads (built from this repo's source) in one
+		// directory, because the build sandbox cannot run `go build` against
+		// the sibling module.
+		f.bin = prebuilt
+	} else {
+		goBin, err := exec.LookPath("go")
+		if err != nil {
+			t.Fatalf("go not on PATH, cannot build the real pg-connector binaries: %v", err)
+		}
+		// Module root of pg-connector: internal/degraded -> work-report -> packages.
+		moduleRoot, err := filepath.Abs("../../../pg-connector")
+		if err != nil {
+			t.Fatalf("resolve pg-connector module root: %v", err)
+		}
+		for _, name := range []string{"pg-connector", "pg-connector-issue-beads"} {
+			ctx, cancel := context.WithTimeout(context.Background(), realBDDeadline)
+			cmd := exec.CommandContext(ctx, goBin, "build", "-o", filepath.Join(f.bin, name), "./cmd/"+name)
+			cmd.Dir = moduleRoot
+			out, buildErr := cmd.CombinedOutput()
+			cancel()
+			if buildErr != nil {
+				t.Fatalf("go build ./cmd/%s: %v\n%s", name, buildErr, out)
+			}
 		}
 	}
 

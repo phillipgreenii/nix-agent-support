@@ -32,7 +32,7 @@ import (
 // another, and read the bead back.
 //
 // The test names carry the `TestPark_RealBD_` prefix so the
-// `pg-router-ccpool-handler-bd-contract-test` hook's -run filter picks them up.
+// `pg-router-ccpool-handler-bd-contract-tests` check's -run filter picks them up.
 // Hermetic store: dtest.NewRealBD. Run directly with
 //
 //	nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run 'TestPark_RealBD_(Death|Unguarded)' ./internal/executor/

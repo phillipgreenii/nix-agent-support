@@ -38,7 +38,7 @@ import (
 // Behind the `contract` build tag, like the repo's other real-bd suites
 // (packages/pg-desk/internal/sync/closure_realbd_contract_test.go): skipped
 // when `bd` is not on PATH, and not part of the unit tier. The
-// `pg-router-ccpool-handler-bd-contract-test` hook in flake.nix puts it under
+// `pg-router-ccpool-handler-bd-contract-tests` check in flake.nix puts it under
 // the commit-time and `pg-hooks run pre-land` runs. Run it directly with
 //
 //	nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run RealBD ./internal/watchdog/
@@ -168,7 +168,7 @@ func (r *recordingRunner) index(prefix string) int {
 // another, and bd 1.3.1 refuses an unguarded `--assignee=` overwrite of
 // another actor's in_progress claim, which stranded the bead under a stopped
 // session. The release must therefore be guarded by the observed holder. The
-// name carries the TestPark_RealBD_ prefix so the bd-contract-test hook runs it.
+// name carries the TestPark_RealBD_ prefix so the bd-contract-tests check runs it.
 func TestPark_RealBD_HardStopReleasesClaimHeldByAnotherActor(t *testing.T) {
 	ctx, worker := newRealBD(t)
 	id := claimedBead(ctx, t, worker)

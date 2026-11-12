@@ -40,11 +40,11 @@ import (
 // workspace (GIT_DIR from a commit hook, BEADS_*, ...) can reach it, and nothing
 // can point at this machine's shared dolt server.
 //
-// Behind the `contract` build tag: it is not part of the unit tier and not part
-// of the nix check (the sandbox has no bd). It is run by the
-// `pg-pr-change-contract-test` hook (scripts/run-pg-pr-change-contract.sh) at
-// commit and under `pg-hooks run pre-land`. A missing bd or go is a LOUD
-// failure, never a skip. Run it directly with
+// Behind the `contract` build tag: it is not part of the unit tier and runs in
+// no git hook. It is run by `checks.<system>.pg-pr-change-bd-contract-tests`,
+// which takes the pinned bd and the built binaries as inputs and so re-runs
+// only when bd or the sources change. A missing bd or go is a LOUD failure,
+// never a skip. Run it directly with
 //
 //	nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run RealBD ./internal/prchange/
 
@@ -92,6 +92,17 @@ func goBuild(t *testing.T, goBin, modDir, out, pkg string) {
 // process, from this repo's current source.
 func buildBinaries(t *testing.T) (binaries, string) {
 	t.Helper()
+	// The nix check hands over the real, already-built binaries (the sandbox
+	// cannot `go build` the sibling modules): PG_PR_CHANGE_PG_DESK_BIN,
+	// PG_PR_CHANGE_PG_DECIDER_BIN, PG_PR_CHANGE_BIN and a directory holding
+	// pg-connector and pg-connector-issue-beads in PG_PR_CHANGE_CONNECTOR_BIN_DIR.
+	if conn := os.Getenv("PG_PR_CHANGE_CONNECTOR_BIN_DIR"); conn != "" {
+		return binaries{
+			desk:    os.Getenv("PG_PR_CHANGE_PG_DESK_BIN"),
+			decider: os.Getenv("PG_PR_CHANGE_PG_DECIDER_BIN"),
+			change:  os.Getenv("PG_PR_CHANGE_BIN"),
+		}, conn
+	}
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatalf("go not on PATH, cannot build the real binaries: %v", err)

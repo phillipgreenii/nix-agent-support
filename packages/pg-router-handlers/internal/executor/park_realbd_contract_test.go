@@ -44,7 +44,7 @@ import (
 // environment.
 //
 // Behind the `contract` build tag; the
-// `pg-router-ccpool-handler-bd-contract-test` hook in flake.nix runs it. Run it
+// `pg-router-ccpool-handler-bd-contract-tests` check in flake.nix runs it. Run it
 // directly with
 //
 //	nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run RealBD ./internal/executor/

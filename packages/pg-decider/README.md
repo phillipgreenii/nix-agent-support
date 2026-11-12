@@ -18,7 +18,7 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
 - `pg-pr-change` real-tool gate (the real `pg-desk`, `pg-decider` and `pg-pr-change` against a
   fixture-driven connector): `nix build .#checks.<system>.pg-pr-change-real-tools -L`. The tests that
   need a real `bd` (the not-found escalation's lookup across closed beads) carry the `contract` build
-  tag and run from the `pg-pr-change-contract-test` hook, or by hand with
+  tag and run from `checks.<system>.pg-pr-change-bd-contract-tests`, or by hand with
   `go test -tags contract -run RealBD ./internal/prchange/`.
 
 - End-to-end suite of the PR lane (the real `pg-desk`, `pg-decider`, `pg-pr-change`, `pg-pr-backfill`,
@@ -91,7 +91,7 @@ this package's output beside `pg-pr-change`, with `pg-connector` and the sibling
 - Real-tool gate (the driver over the real `pg-pr-change`, `pg-desk` and `pg-decider`, with the fake
   `remaining` control): `nix build .#checks.<system>.pg-pr-backfill-real-tools -L`. `enumerate` against a
   real tracker is a `contract`-tagged test (`TestPRChangeRealBD_BackfillEnumerate...`) that runs from the
-  same `pg-pr-change-contract-test` hook.
+  same `pg-pr-change-bd-contract-tests` check.
 - Rollback drill: the scenario `a-rollback-drill-lists-every-write-since-the-flip-marker-by-timestamp-and-reverts-each`
   of the lane suite (the real driver over the real composed command and the tracker: the fake `bd` in
   `pg-decider-lane-fake`, a real one in the by-hand soak); the

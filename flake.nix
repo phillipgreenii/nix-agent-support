@@ -1116,50 +1116,13 @@
           require_serial = true;
         };
 
-        # docket pg2-6mo45.3, packet P3b1b: pg-pr-change's not-found escalation
-        # looks for an earlier escalation in EVERY status, closed included, with
-        # `pg-connector search` against the beads tracker. Whether that lookup
-        # finds a CLOSED bead is a property of a REAL tool (bd's search), so its
-        # regression guard runs against a real bd in a throwaway embedded store
-        # (global rule V-3): the `contract`-tagged `TestPRChangeRealBD_*` tests in
-        # packages/pg-decider/internal/prchange, which build the real pg-desk,
-        # pg-decider, pg-pr-change, pg-connector and pg-connector-issue-beads from
-        # source. Like the other contract-tagged hooks: the nix sandbox has no
-        # bd, so `checks.<system>.pg-pr-change-real-tools` covers everything else
-        # (the real pg-desk, pg-decider and pg-pr-change against a fixture-driven
-        # connector) and this path-scoped hook is what puts the real-tracker half
-        # under the commit-time and `pg-hooks run pre-land` runs. The logic lives in
-        # scripts/run-pg-pr-change-contract.sh; its path regex lives in
-        # scripts/pg-pr-change-contract-files.regex, which this hook and
-        # tests/pg-pr-change-contract-hook.bats both read (the bats case feeds the
-        # regex one path of every input and runs the script against PATH shims, so a
-        # missing tool is shown to fail loudly). A missing `bd` or `go` is a LOUD
-        # failure, never a skip.
-        pg-pr-change-contract-test = {
-          enable = true;
-          name = "pg-pr-change-contract-test";
-          description = "pg-pr-change and pg-pr-backfill: run the contract-tagged real-bd tests (escalation dedup; backfill enumerate) (docket pg2-6mo45.3, P3b1b and P4b)";
-          entry = "${
-            pkgs.writeShellApplication {
-              name = "pg-pr-change-contract-test-hook";
-              runtimeInputs = [ pkgs.git ];
-              text = ''
-                # No bd in the nix build sandbox (and no network/module cache):
-                # this runs on the operator's machine via pg-hooks only.
-                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                  echo "pg-pr-change-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
-                  exit 0
-                fi
-
-                exec bash ${./scripts/run-pg-pr-change-contract.sh} "$@"
-              '';
-            }
-          }/bin/pg-pr-change-contract-test-hook";
-          language = "system";
-          files = pkgs.lib.removeSuffix "\n" (builtins.readFile ./scripts/pg-pr-change-contract-files.regex);
-          pass_filenames = false;
-          require_serial = true;
-        };
+        # The contract-tagged real-bd suites (pg-pr-change and pg-pr-backfill,
+        # the pg-router-ccpool-handler hard-stop/park/triage/split tests and the
+        # work-report degraded reconcile tests) are NOT hooks: they are
+        # `checks.<system>.*-bd-contract-tests` (HK-2 in phillipg-nix-repo-base's
+        # flake-modules/pre-commit.nix: a git hook MUST NOT run any non-unit test
+        # kind). tests/no-contract-tag-in-hooks.bats keeps `-tags contract` out of
+        # every hook entry.
 
         # pg2-ty6mjm: guard against new re-exec test doubles (shared command
         # runner ADR in repo x, decision 5; ADR 0111 here). A Go test file the
@@ -1192,114 +1155,6 @@
           language = "system";
           files = "_test\\.go$";
           pass_filenames = true;
-        };
-
-        # pg2-sx246: the pg-router-ccpool-handler budget hard stop MUST NOT
-        # reopen a bead that is already closed. Whether the release
-        # (`bd update --status=open --assignee=`) reopens a closed bead is a
-        # property of a REAL tool, so the regression guard runs against a real
-        # bd in a throwaway embedded store (global rule V-3): the
-        # `contract`-tagged `TestTerminal_RealBD_*` tests in
-        # packages/pg-router-handlers/internal/watchdog. Like the other contract-tagged hooks: no default check runs the
-        # `contract` tag and the nix sandbox has no bd, so this path-scoped
-        # hook is what puts the suite under the commit-time and
-        # `pg-hooks run pre-land` runs. Cost is two `bd init`s' worth of tests
-        # (about half a minute), paid only on diffs touching the watchdog or
-        # the beads client it drives. A missing `bd` or `go` is a LOUD
-        # failure, never a skip.
-        #
-        # pg2-78mxs: the same hook also runs the `TestPark_RealBD_*` tests in
-        # internal/executor (the handler parks a bead as human with a park
-        # note, then label+release, on a session death and on the second
-        # needs_input stall), so its file filter also covers the executor,
-        # complete, parknote and dtest packages (four more `bd init`s, about a
-        # minute).
-        #
-        # pg2-p9lcg: it also runs `TestTriage_RealBD_Dispatch` (the real
-        # runDispatch against a real bd for the `triage` dispatch precheck),
-        # so its file filter also covers the roles package and the dispatch
-        # sources of cmd/pg-router-handler-ccpool (one more `bd init`).
-        pg-router-ccpool-handler-bd-contract-test = {
-          enable = true;
-          name = "pg-router-ccpool-handler-bd-contract-test";
-          description = "pg-router-ccpool-handler: run the contract-tagged real-bd hard-stop, park-note, triage-precheck and split-triage tests (pg2-sx246, pg2-78mxs, pg2-p9lcg, pg2-9hd67n)";
-          entry = "${
-            pkgs.writeShellApplication {
-              name = "pg-router-ccpool-handler-bd-contract-test-hook";
-              runtimeInputs = [ pkgs.git ];
-              text = ''
-                # No bd in the nix build sandbox (and no network/module cache):
-                # this runs on the operator's machine via pg-hooks only.
-                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                  echo "pg-router-ccpool-handler-bd-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
-                  exit 0
-                fi
-
-                for tool in go bd; do
-                  if ! command -v "$tool" >/dev/null 2>&1; then
-                    echo "pg-router-ccpool-handler-bd-contract-test: $tool not found on PATH -- enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
-                    exit 1
-                  fi
-                done
-
-                top="$(git rev-parse --show-toplevel)"
-                cd "$top/packages/pg-router-handlers"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage|Split)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-handler-command/ ./cmd/pg-router-handler-ccpool/
-              '';
-            }
-          }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
-          language = "system";
-          files = "^packages/pg-router-handlers/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles|wire|dispatchlib|handlerstate|rolefile)/|cmd/(pg-router-handler-command|pg-router-handler-ccpool)/(dispatch|split)[^/]*\\.go$|go\\.(mod|sum)$)";
-          pass_filenames = false;
-          require_serial = true;
-        };
-
-        # pg2-jp5m8: the degraded-source reconcile closes its own alert beads
-        # with `--force`, because bd refuses to close an issue that still has an
-        # open blocker and a blocks edge can be added to an alert after it was
-        # created. That refusal is a property of a REAL tool, so the regression
-        # guard runs against a real bd in a throwaway embedded store (global
-        # rule V-3): the `contract`-tagged `TestReconcile_RealBD_*` tests in
-        # packages/work-report/internal/degraded, which drive Reconcile through
-        # the real pg-connector and pg-connector-issue-beads binaries built from
-        # this repo. Like the other contract-tagged hooks: no default
-        # check runs the `contract` tag and the nix sandbox has no bd, so this
-        # path-scoped hook puts the suite under the commit-time and
-        # `pg-hooks run pre-land` runs. A missing `bd` or `go` is a LOUD
-        # failure, never a skip.
-        work-report-degraded-contract-test = {
-          enable = true;
-          name = "work-report-degraded-contract-test";
-          description = "work-report degraded reconcile: run the contract-tagged real-bd close tests (pg2-jp5m8)";
-          entry = "${
-            pkgs.writeShellApplication {
-              name = "work-report-degraded-contract-test-hook";
-              runtimeInputs = [ pkgs.git ];
-              text = ''
-                # No bd in the nix build sandbox (and no network/module cache):
-                # this runs on the operator's machine via pg-hooks only.
-                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
-                  echo "work-report-degraded-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
-                  exit 0
-                fi
-
-                for tool in go bd; do
-                  if ! command -v "$tool" >/dev/null 2>&1; then
-                    echo "work-report-degraded-contract-test: $tool not found on PATH -- enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
-                    exit 1
-                  fi
-                done
-
-                top="$(git rev-parse --show-toplevel)"
-                cd "$top/packages/work-report"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^TestReconcile_RealBD_' ./internal/degraded/
-              '';
-            }
-          }/bin/work-report-degraded-contract-test-hook";
-          language = "system";
-          files = "^packages/(work-report/(internal/(degraded|pgconn)/|go\\.(mod|sum)$)|pg-connector/(cmd/pg-connector/|cmd/pg-connector-issue-beads/|pkg/))";
-          pass_filenames = false;
-          require_serial = true;
         };
 
         # PR lane refactor, P8a-1: the pg-desk outcome alert rules (grafana/alerting/alerts.yaml)
@@ -1747,6 +1602,85 @@
               ./claude-marketplace/behavior-docs-conformance/skills/behavior-docs-impl-conformance/scripts
             ];
           };
+
+          # The bd every `*-bd-contract-tests` check runs against: the SAME
+          # package the deployment wires (the overlay's `beads` above). The checks
+          # take it as an input, so nix re-runs a suite exactly when bd or the
+          # suite's sources change and serves it from the store otherwise. They
+          # run in the post-land verify role and on demand
+          # (`nix build .#checks.<system>.<name>-bd-contract-tests`), never in a
+          # git hook (HK-2, phillipg-nix-repo-base flake-modules/pre-commit.nix).
+          # `bd init` and an embedded store work inside the build sandbox with no
+          # network and no dolt server: the tests use a private embedded store per
+          # test, and BEADS_DOLT_AUTO_START=0 is exported here.
+          # pg-connector and pg-connector-issue-beads in one bin directory, for
+          # the suites that drive the real connector over a real bd.
+          connectorBins = pkgs.symlinkJoin {
+            name = "pg-connector-bins";
+            paths = [
+              pkgs.pg-connector
+              pkgs.pg-connector-issue-beads
+            ];
+          };
+          contractBd = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${system}.beads;
+
+          # mkBdContractCheck: `go test -tags contract` for the named packages of
+          # one Go module against `contractBd`. A skipped test or an empty run
+          # fails the check, so it cannot pass vacuously.
+          mkBdContractCheck =
+            {
+              pname,
+              src,
+              gomod2nixToml,
+              modRoot ? null,
+              runRegex,
+              testPackages,
+              testDeps ? [ ],
+              env ? { },
+            }:
+            (pkgs._agentSupportGoBuilders.mkGoTest {
+              inherit
+                pname
+                src
+                gomod2nixToml
+                modRoot
+                ;
+              enableRace = false;
+              testDeps = [
+                contractBd
+                pkgs.git
+              ]
+              ++ testDeps;
+            }).overrideAttrs
+              (
+                _:
+                env
+                // {
+                  BEADS_DOLT_AUTO_START = "0";
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/${pname}.log"
+                    if ! go test -count=1 -v -tags contract -timeout 30m -run '${runRegex}' ${lib.escapeShellArgs testPackages} > "$log" 2>&1; then
+                      cat "$log"
+                      echo "${pname}: the contract tests FAILED" >&2
+                      exit 1
+                    fi
+                    cat "$log"
+                    if grep -q -- '--- SKIP' "$log"; then
+                      echo "${pname}: a contract test was SKIPPED" >&2
+                      grep -- '--- SKIP' "$log" >&2
+                      exit 1
+                    fi
+                    if ! grep -q -- '^--- PASS: ' "$log"; then
+                      echo "${pname}: no contract test passed (filter matched nothing?)" >&2
+                      exit 1
+                    fi
+                    runHook postBuild
+                  '';
+                }
+              );
         in
         {
           # The perSystem pkgs carries the full agent-support overlay stack
@@ -8097,6 +8031,65 @@
                       runHook postBuild
                     '';
                   });
+
+              # Contract-tagged real-bd suites (global rule V-3), moved off the
+              # commit and pre-land hooks. Each runs the suite against `contractBd`
+              # (see mkBdContractCheck) and re-runs only when bd or its inputs
+              # change. Post-land verify role, or on demand.
+              pg-pr-change-bd-contract-tests = mkBdContractCheck {
+                pname = "pg-pr-change-bd-contract-tests";
+                src = lib.cleanSource ./packages/pg-decider;
+                gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
+                runRegex = "^TestPRChangeRealBD_";
+                testPackages = [ "./internal/prchange/" ];
+                env = {
+                  PG_PR_CHANGE_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
+                  PG_PR_CHANGE_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
+                  PG_PR_CHANGE_BIN = "${pkgs.pg-decider}/bin/pg-pr-change";
+                  PG_PR_CHANGE_CONNECTOR_BIN_DIR = "${connectorBins}/bin";
+                  __darwinAllowLocalNetworking = true;
+                };
+              };
+
+              pg-router-ccpool-handler-bd-contract-tests = mkBdContractCheck {
+                pname = "pg-router-ccpool-handler-bd-contract-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
+                    ./packages/pg-router
+                    ./packages/ccpool
+                    ./packages/pg-claude-code-recorder
+                    ./packages/claude-transcript
+                    ./packages/pg-failsig
+                  ];
+                };
+                modRoot = "pg-router-handlers";
+                gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
+                runRegex = "^Test(Terminal|Park|Triage|Split)_RealBD_";
+                testPackages = [
+                  "./internal/watchdog/"
+                  "./internal/executor/"
+                  "./cmd/pg-router-handler-command/"
+                  "./cmd/pg-router-handler-ccpool/"
+                ];
+              };
+
+              work-report-bd-contract-tests = mkBdContractCheck {
+                pname = "work-report-bd-contract-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/work-report
+                    ./packages/pg-connector
+                  ];
+                };
+                modRoot = "work-report";
+                gomod2nixToml = ./packages/work-report/gomod2nix.toml;
+                runRegex = "^TestReconcile_RealBD_";
+                testPackages = [ "./internal/degraded/" ];
+                env.PG_CONNECTOR_BIN_DIR = "${connectorBins}/bin";
+              };
 
               # pg-pr-backfill real-tool gate (docket pg2-6mo45.3, packet P4b; design 6.5
               # "Adoption, backfill and the first apply" and the test row "Backfill

@@ -20,8 +20,10 @@ import (
 // dolt server.
 
 // RealBDDeadline is a hang guard for real bd runs under heavy host load, not a
-// performance assertion.
-const RealBDDeadline = 3 * time.Minute
+// performance assertion. It covers a whole test (its bd init and every bd call),
+// and a real bd inside the nix build sandbox, run beside other builds, needs
+// minutes for the longest tests.
+const RealBDDeadline = 10 * time.Minute
 
 // NewRealBD returns a context and a runner rooted at a fresh private embedded
 // bd store, whose identity is actor. The test is skipped when bd is not on PATH

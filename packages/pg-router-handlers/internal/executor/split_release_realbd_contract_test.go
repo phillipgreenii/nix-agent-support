@@ -33,8 +33,8 @@ import (
 // (death_release_realbd_contract_test.go).
 //
 // The names carry the `TestPark_RealBD_` prefix so the
-// `pg-router-ccpool-handler-bd-contract-test` hook's -run filter picks them up
-// (the beads package is not in that hook's package list, which is why the split
+// `pg-router-ccpool-handler-bd-contract-tests` check's -run filter picks them up
+// (the beads package is not in that check's package list, which is why the split
 // tests live here). Run directly with
 //
 //	nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run 'TestPark_RealBD_(Split|Unsplittable|ExternalClose)' ./internal/executor/
