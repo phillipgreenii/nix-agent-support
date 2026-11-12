@@ -369,13 +369,19 @@ func (f *Facts) fillRegistry(ctx context.Context, c *client.Client, ss []*sessio
 }
 
 // registryLookup reads the newest registry version of one session, a point
-// lookup the (session, source, time) index serves.
+// lookup the (session, source, time) index serves. It skips the registry_deleted
+// record an ended session ends with, which has no registry bytes.
 func registryLookup(ctx context.Context, c *client.Client, s *session.Session) error {
 	id, _ := json.Marshal(s.SessionID)
 	ans, err := c.Query(ctx, client.QueryRequest{
 		From: "records",
 		Where: &client.Filter{All: []client.Filter{
 			{Field: "source", Eq: json.RawMessage(`"session-registry"`)},
+			// Only a registry version carries bytes: the record written when the
+			// registry file is deleted (registry_deleted) is the newest one of an
+			// ended session and has none, so without this filter the limit-1
+			// lookup lands on it and the session reads back blank.
+			{Field: "type", Eq: json.RawMessage(`"registry"`)},
 			{Field: "session", Eq: id},
 		}},
 		Select: []string{"session"},

@@ -127,3 +127,38 @@ func TestDiscovererAddsProcessEnvToRecorderRows(t *testing.T) {
 		t.Errorf("env = %v", got[0].Env)
 	}
 }
+
+// TestEndedSessionWhoseRegistryFileWasDeletedKeepsKindAndEntrypoint: when a
+// session ends, Claude deletes its registry file and the recorder stores a
+// newest record with no registry bytes. A startup lookup of that ended session
+// must still read the last real registry version, or its stored row is blank.
+func TestEndedSessionWhoseRegistryFileWasDeletedKeepsKindAndEntrypoint(t *testing.T) {
+	e := clienttest.Start(t)
+	e.Procs.Add(503, time.UnixMilli(startMs), nil)
+	writeRegistry(t, e, 503, "example-deleted", "idle", "")
+	e.Procs.Exit(503, time.UnixMilli(startMs+9000))
+	if err := os.Remove(filepath.Join(e.ClaudeDir, "sessions", "503.json")); err != nil {
+		t.Fatal(err)
+	}
+	e.Settle()
+
+	f := New(client.Options{Socket: e.Socket})
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := f.Registrations(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := byID(got, "example-deleted"); s != nil && !s.PidAlive {
+			if s.Kind != "interactive" || s.Entrypoint != "cli" {
+				t.Errorf("ended session read back blank: kind=%q entrypoint=%q", s.Kind, s.Entrypoint)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recorder never reported the ended session: %+v", got)
+		}
+		f.ResyncEnded()
+		time.Sleep(5 * time.Millisecond)
+	}
+}
