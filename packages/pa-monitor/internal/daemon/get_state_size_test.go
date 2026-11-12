@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -43,35 +42,43 @@ func TestGetState_SizeIndependentOfStaleSessions(t *testing.T) {
 	if err := sqlite.Migrate(ctx, db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	ss, bs, cs := sqlite.NewSessionStore(db), sqlite.NewBlockStore(db), sqlite.NewContributionStore(db)
+	ss, bs := sqlite.NewSessionStore(db), sqlite.NewBlockStore(db)
 	now := time.Now().UTC()
+	// The read side hides rows whose last_processed_at is older than a
+	// wall-clock freshness window (60 s for sessions, 12 min for blocks), and
+	// building 3000 rows one by one can outlast it on a slow host (the nix
+	// sandbox), which made the default answer come back empty. This test
+	// guards size, not freshness, so stamp the rows as processed far enough in
+	// the future that they stay fresh however slowly the test runs.
+	processedAt := now.Add(2 * loadBound)
 	blockID, err := bs.Upsert(ctx, store.Block{
 		BlockID: "blk", StartedAt: now.Add(-time.Hour), EndedAt: now.Add(time.Hour),
-		LastProcessedAt: now, UpdatedAt: now,
+		LastProcessedAt: processedAt, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatalf("block upsert: %v", err)
 	}
-	for i := 0; i < stale+live; i++ {
-		sid := fmt.Sprintf("session-%05d", i)
-		sess := store.Session{
-			SessionID: sid, Cwd: fmt.Sprintf("/work/project-%d/with/a/reasonably/long/path", i%200),
-			Status: "idle", LastProcessedAt: now, UpdatedAt: now, CreatedAt: now,
-		}
-		if i >= stale {
-			pid := 1000 + i
-			sess.PID = &pid
-		}
-		if err := ss.Upsert(ctx, sess); err != nil {
-			t.Fatalf("session upsert: %v", err)
-		}
-		var id int64
-		if err := db.QueryRowContext(ctx, "SELECT id FROM sessions WHERE session_id=?", sid).Scan(&id); err != nil {
-			t.Fatalf("session id: %v", err)
-		}
-		if err := cs.UpsertBlock(ctx, store.Contribution{SessionID: id, ParentID: blockID, CostUSD: 1, Tokens: 10, UpdatedAt: now}); err != nil {
-			t.Fatalf("contribution: %v", err)
-		}
+	// Seed with two bulk statements instead of thousands of single-row
+	// round-trips: under CPU starvation each autocommit statement cost ~0.3 s
+	// in the nix sandbox, so a row-at-a-time fixture alone outlasted the
+	// package test timeout. Rows match what SessionStore.Upsert and
+	// ContributionStore.UpsertBlock write for these fields.
+	ts := processedAt.Format(time.RFC3339Nano)
+	created := now.Format(time.RFC3339Nano)
+	if _, err := db.ExecContext(ctx, `
+		WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+		INSERT INTO sessions (session_id, pid, cwd, status, last_processed_at, updated_at, created_at)
+		SELECT printf('session-%05d', i),
+		       CASE WHEN i >= ? THEN 1000 + i END,
+		       printf('/work/project-%d/with/a/reasonably/long/path', i % 200),
+		       'idle', ?, ?, ?
+		FROM n`, stale+live-1, stale, ts, created, created); err != nil {
+		t.Fatalf("seed sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO session_block_contributions (session_id, block_id, cost_usd, tokens, updated_at)
+		SELECT id, ?, 1, 10, ? FROM sessions`, blockID, created); err != nil {
+		t.Fatalf("seed contributions: %v", err)
 	}
 	rs := service.NewReadService(service.ReadDeps{
 		Sessions: ss, Blocks: bs, Weeks: sqlite.NewWeekStore(db),
