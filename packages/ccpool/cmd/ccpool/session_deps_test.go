@@ -15,7 +15,7 @@ import (
 )
 
 // TestNewSessionDeps_wiresExister is the regression for CRITICAL #1: every
-// production session.Deps must carry a non-nil Exister, or claudeSessionResumable
+// production session.Deps must carry a non-nil Exister, or resumable
 // is always false, resume never happens and `ccpool reap` prunes resumable rows
 // (ADR 0015). The wired Exister is the recorder's "originals present" fact, and
 // with the recorder down it fails (daemon offline) instead of answering false, so

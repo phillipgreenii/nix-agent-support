@@ -44,7 +44,7 @@ func TestProductionExister_statsRecordedTranscriptPath(t *testing.T) {
 
 // TestReap_realWiring_keepsResumableRow drives the REAL prune path with the REAL
 // production Exister. A dead row (no tmux) whose hook-recorded transcript exists
-// on disk MUST be kept (resume later). With a nil Exister claudeSessionResumable
+// on disk MUST be kept (resume later). With a nil Exister resumable
 // returns false and reap would prune this row.
 func TestReap_realWiring_keepsResumableRow(t *testing.T) {
 	ctx := context.Background()

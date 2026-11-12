@@ -561,17 +561,13 @@ func (s *Service) endOpenRun(ctx context.Context, externalID, reason, source str
 	return err
 }
 
-// claudeSessionResumable reports whether the row's Claude session still exists on
-// disk at its HOOK-RECORDED transcript path (the resume precondition, ADR 0015).
-// The transcript path is authoritative (Claude reported it via the hook); ccpool
-// no longer reconstructs the path from the cwd. Nil Exister or an empty recorded
-// path → false. Resume itself still launches `--resume <row.ClaudeSessionID>`.
-func (s *Service) claudeSessionResumable(row store.Session) bool {
-	ok, _ := s.resumable(row)
-	return ok
-}
-
-// resumable is claudeSessionResumable with the probe's error: an Exister that is
+// resumable reports whether the row's Claude session still exists on disk at its
+// HOOK-RECORDED transcript path (the resume precondition, ADR 0015). The transcript
+// path is authoritative (Claude reported it via the hook); ccpool no longer
+// reconstructs the path from the cwd. Nil Exister or an empty recorded path →
+// false. Resume itself still launches `--resume <row.ClaudeSessionID>`.
+//
+// The error: an Exister that is
 // a CheckedExister (the recorder-backed one) fails with "the recorder is not available" instead
 // of answering false, so a recorder outage never reads as "the session is gone".
 func (s *Service) resumable(row store.Session) (bool, error) {
