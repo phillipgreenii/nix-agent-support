@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -392,5 +393,23 @@ func TestApplySplit_invalidPriorityCreatesNothing(t *testing.T) {
 	}
 	if len(bd.calls) != 0 {
 		t.Errorf("bd was called before the plan was refused: %v", bd.calls)
+	}
+}
+
+func TestChildLabelsDropsOperatorQueueLabels(t *testing.T) {
+	parent := Issue{ID: "p-1", Labels: []string{
+		"attention", "human-focus", "human-focus-required", "human", "escalated",
+		"budget-stop:2", "needs-split-review", "agent-support", "pg-router-handlers",
+	}}
+	got := childLabels(parent)
+	for _, bad := range []string{"attention", "human-focus", "human-focus-required", "human", "escalated", "budget-stop:2", "needs-split-review"} {
+		if slices.Contains(got, bad) {
+			t.Errorf("child kept %q: %v", bad, got)
+		}
+	}
+	for _, want := range []string{"agent-support", "pg-router-handlers", "split-from:p-1"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("child lacks %q: %v", want, got)
+		}
 	}
 }

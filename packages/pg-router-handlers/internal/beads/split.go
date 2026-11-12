@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 )
 
@@ -98,7 +99,7 @@ func (p SplitPlan) Validate() error {
 
 // childLabels derives a child's labels from its parent: the parent's labels
 // minus everything that is the PARENT's own state (stop history, split-review
-// and outcome markers, human/escalated flags, an earlier split-from), plus
+// and outcome markers, every HUMAN_LABELS member and escalated (docs/guides/bead-label-vocabulary.md), an earlier split-from), plus
 // split-from:<parent>. Dropping the budget-stop:* labels is what keeps a child
 // from inheriting the parent's stop count.
 func childLabels(parent Issue) []string {
@@ -107,7 +108,8 @@ func childLabels(parent Issue) []string {
 		switch {
 		case strings.HasPrefix(l, BudgetStopLabelPrefix),
 			strings.HasPrefix(l, LabelSplitFromPrefix),
-			l == LabelNeedsSplitReview, l == LabelWasSplit, l == LabelHuman, l == "escalated":
+			l == LabelNeedsSplitReview, l == LabelWasSplit, l == LabelEscalated,
+			slices.Contains(HumanLabels, l):
 			continue
 		}
 		out = append(out, l)
