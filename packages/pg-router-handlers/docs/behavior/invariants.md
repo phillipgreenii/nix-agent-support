@@ -167,6 +167,13 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   records, never in the reason, so the reason stays a bounded label. The gate lives here, at the
   handler boundary, because only the handler knows which repo a dispatch runs in; the core's
   global gate over its fixed named set (`INV-LIFE-2`) is not changed by it.
+  - Alongside its own probe, the handler MUST ask pg-origin-guard's Check (the certificate-and-presence
+    answer for the repo's realm, exit 3 of `pg-origin-guard check`; it never uses the network) before accepting a dispatch that has a repo
+    root, and a refused or unavailable answer MUST decline with the same `origin-unavailable` reason.
+    A fault of the check itself (any other exit code or a timeout, not "unavailable") MUST fail open: the dispatch
+    proceeds and the fault is logged. The review pre-fetch MUST ask the same check before its network
+    fetch and, when the answer is unavailable, MUST skip the fetch and record a distinct outcome
+    (`origin-unavailable`, not a failed fetch); the session then does those steps itself.
   - The probe MUST check that the repo root exists and holds a git checkout, then MUST ask the
     origin for its HEAD under a hard timeout, in the same hermetic git environment every other git
     child of this module gets (repository-naming variables dropped; credential delivery such as

@@ -239,7 +239,9 @@ enabled = false
 		"LeaseTTL":            int64(adoptLeaseTTL),
 		"WorktreeQuietWindow": int64(100 * time.Millisecond),
 		"ConfirmIngest":       0, // the fake never starts a real model turn
-		"OriginProbe":         map[string]any{"stateDir": sb.stateDir},
+		// a nonexistent guard binary is a guard fault, which fails open: the test
+		// does not depend on a pg-origin-guard installed on the machine.
+		"OriginProbe": map[string]any{"stateDir": sb.stateDir, "guardBin": filepath.Join(root, "no-such-guard")},
 	}
 	raw, err := json.Marshal(launchCfg)
 	if err != nil {

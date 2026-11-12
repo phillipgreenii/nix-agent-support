@@ -93,7 +93,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// dispatch_decline record (INV-CCH-35) to the handler's event log just before
 	// its reply.
 	declineLog := handlerstate.NewEventLog(cfg)
-	if reason, declined := originGate(ctx, newOriginProber(cfg), role, cfg, dctx.Item.ID); declined {
+	if reason, declined := originGate(ctx, newOriginProber(cfg), newGuardCheck(cfg), role, cfg, dctx.Item.ID); declined {
 		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, wire.NeutralDecline(reason, ""))
 		return conformance.ExitBusy
 	}

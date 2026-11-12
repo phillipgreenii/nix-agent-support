@@ -1016,6 +1016,19 @@ rr_sync_counts() {
   rr_git -C "$1" rev-list --left-right --count "refs/remotes/origin/$2...refs/heads/$2" 2>/dev/null
 }
 
+# rr_origin_guard PATH: runs `pg-origin-guard check --repo PATH` and returns its exit
+# status (0 available, 3 origin unavailable, anything else a fault). A machine
+# without the binary has no guard: returns 0 and says so in the log. Never uses the
+# network itself (the guard reads the local cert and recorded state only).
+rr_origin_guard() {
+  local bin="${RR_ORIGIN_GUARD_BIN:-pg-origin-guard}"
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    rr_log "origin guard: $bin not found; fetching without it"
+    return 0
+  fi
+  "$bin" check --repo "$1" >/dev/null 2>&1
+}
+
 # rr_sync_fetch PATH BRANCH: updates the remote-tracking ref of BRANCH and
 # nothing else of the clone (no working tree, no local branch). The refspec is
 # explicit so that a clone without a default fetch refspec cannot silently keep

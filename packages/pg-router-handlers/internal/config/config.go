@@ -197,6 +197,11 @@ type OriginProbe struct {
 	// $XDG_STATE_HOME/pg-router-ccpool-handler, else
 	// ~/.local/state/pg-router-ccpool-handler.
 	StateDir string `json:"stateDir"`
+	// GuardBin is the pg-origin-guard binary whose `check --repo` gates a
+	// dispatch and the review pre-fetch (INV-CCH-10). Empty resolves
+	// "pg-origin-guard" on PATH; a binary that cannot run is a guard fault,
+	// which fails open.
+	GuardBin string `json:"guardBin,omitempty"`
 }
 
 // DefaultOriginProbe is OriginProbe's baseline: no origins, K=2, 60s TTL, 20s

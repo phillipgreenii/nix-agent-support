@@ -43,6 +43,14 @@ export RR_BD_BIN="${PG_REPO_RUNNER_BD_BIN:-${RR_BD_BIN:-bd}}"
 # absolute store path; empty in a raw run, which emits nothing. PG_REPO_RUNNER_CCPOOL_BIN
 # replaces it (a test seam: the metrics suite records the calls with a fake).
 export RR_CCPOOL_BIN="${PG_REPO_RUNNER_CCPOOL_BIN:-${RR_CCPOOL_BIN:-}}"
+# pg-origin-guard gates the sync fetch (`check --repo <clone>`: exit 0 available, 3
+# origin unavailable, anything else a fault). Resolved from the ambient PATH like bd;
+# a machine without it runs no guard. PG_REPO_RUNNER_ORIGIN_GUARD_BIN replaces it (a
+# test seam: the sync suite stubs it with exit 0, 3, 1 and the retired 75).
+export RR_ORIGIN_GUARD_BIN="${PG_REPO_RUNNER_ORIGIN_GUARD_BIN:-${RR_ORIGIN_GUARD_BIN:-pg-origin-guard}}"
+# The check exit code for an unavailable origin: the shared x/exitcode Unavailable (the
+# pg-origin-guard README exit table: 0 available, 3 unavailable, 1 internal, 2 usage, 7 config).
+RR_ORIGIN_GUARD_UNAVAILABLE=3
 
 # The bare tool names the kernel still uses (sha256sum, nproc, sort -z, find,
 # sed, mktemp, ps, ...) must not depend on the caller's PATH: pg-router runs this
@@ -130,7 +138,8 @@ sync, in its act step (it publishes nothing unless repos.<key>.push is true): th
 MUST be steady (no core.worktree, on the primary branch, an empty
 `git status --porcelain`, no rebase, merge, cherry-pick or revert in progress),
 else the repo is skipped this pass ("yielded: canonical not steady") and never
-repaired. Then `git fetch origin <primary>` (a remote-tracking ref update only)
+repaired. Then `pg-origin-guard check --repo <clone>` (exit 3 records `origin-unavailable` and
+fetches nothing; any other non-zero exit records `fetch-failed`), then `git fetch origin <primary>` (a remote-tracking ref update only)
 and the classification of `git rev-list --left-right --count
 origin/<primary>...<primary>`: 0,0 nothing; behind only `git merge --ff-only
 origin/<primary>` (a refusal is recorded, not retried this pass); ahead only the
@@ -459,6 +468,19 @@ act_sync() {
   # the stale ones (kept in the record), the classification below re-reads.
   pre_counts="$(rr_sync_counts "$path" "$branch")" || pre_counts=""
   pre_behind="${pre_counts%%[[:space:]]*}"
+  # pg-origin-guard first: an unavailable origin (exit 3: no valid cert, nobody
+  # present, an open breaker) is not a failed fetch and is recorded as its own outcome.
+  rc=0
+  rr_origin_guard "$path" || rc=$?
+  if ((rc == RR_ORIGIN_GUARD_UNAVAILABLE)); then
+    rr_sync_record "$repo" "$branch" origin-unavailable "" "" "$pre_behind" "pg-origin-guard reports the origin unavailable; no fetch" || return 1
+    rr_log "sync: $repo origin-unavailable (pg-origin-guard exit $rc); no fetch, the next pass retries"
+    return 0
+  elif ((rc != 0)); then
+    rr_sync_record "$repo" "$branch" fetch-failed "" "" "$pre_behind" "pg-origin-guard check exited $rc; no fetch" || return 1
+    rr_log "sync: $repo fetch-failed (pg-origin-guard check exited $rc)"
+    return 0
+  fi
   if ! rr_sync_fetch "$path" "$branch"; then
     rr_sync_record "$repo" "$branch" fetch-failed "" "" "$pre_behind" "git fetch origin $branch failed" || return 1
     rr_log "sync: $repo fetch-failed (not a malfunction of the runner: the next pass retries)"

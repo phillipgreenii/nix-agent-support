@@ -61,7 +61,33 @@ const (
 	// SIGKILLed leaves it behind, and the next pre-fetch reads it as "this
 	// handler-owned scratch worktree is half-updated" (bead pg2-lpctwk).
 	prefetchCheckoutMarker = "pg-router-prefetch-checkout"
+
+	// prefetchSkipOriginUnavailable is the manifest outcome of a pre-fetch whose
+	// fetch was skipped because pg-origin-guard reported the origin unavailable;
+	// it is distinct from a fetch that ran and failed.
+	prefetchSkipOriginUnavailable = "origin-unavailable"
 )
+
+// guardSkipsFetch reports whether pg-origin-guard says the origin is
+// unavailable, so the network fetch must be skipped. A guard fault (error)
+// fails open: the fetch runs and the fault is logged.
+func (r *ccpoolRun) guardSkipsFetch(ctx context.Context, wt string, d DispatchContext) bool {
+	if r.deps.OriginCheck == nil {
+		return false
+	}
+	v, err := r.deps.OriginCheck(ctx, wt)
+	if err != nil {
+		slog.Warn("dispatch: worktree pre-fetch: origin guard fault; fetching anyway",
+			"role", d.Role.Name, "bead", d.Item.ID, "err", err)
+		return false
+	}
+	if v.Available {
+		return false
+	}
+	slog.Warn("dispatch: worktree pre-fetch: origin unavailable; fetch skipped",
+		"role", d.Role.Name, "bead", d.Item.ID, "reason", v.Reason)
+	return true
+}
 
 // GitRun runs `git <args...>` in dir, writing the child's stdout to stdout. A
 // non-zero exit is an error carrying the child's stderr. It is a Deps seam so
@@ -203,6 +229,10 @@ func (r *ccpoolRun) prefetch(ctx context.Context, pf roles.PrefetchConfig, d Dis
 	if !have(rev) {
 		if refspec == "" {
 			return fail("resolve", fmt.Errorf("commit %s is not local and no Refspec is configured", rev))
+		}
+		if skip := r.guardSkipsFetch(ctx, wt, d); skip {
+			info.Skipped = prefetchSkipOriginUnavailable
+			return fail("origin-unavailable", errors.New("pg-origin-guard reports the origin unavailable; fetch skipped"))
 		}
 		if err := git(ctx, wt, io.Discard, "fetch", "--no-tags", remote, refspec); err != nil {
 			return fail("fetch", err)

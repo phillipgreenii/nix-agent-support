@@ -43,6 +43,8 @@ setup() {
   gfh_save_env SCRIPTS_DIR SCRIPT_UNDER_TEST TEST_SUPPORT GFH_LIB TDIR
   gfh_setup "pg-repo-runner"
   gfh_restore_env
+  # no test depends on a pg-origin-guard installed on the machine running it
+  export PG_REPO_RUNNER_ORIGIN_GUARD_BIN=/usr/bin/true
   bd_fixture_setup
   bd_fixture_assert_isolated
   # the database is shared by every test of the file: only beads created by THIS test count

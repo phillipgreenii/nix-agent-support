@@ -33,6 +33,10 @@ type PrefetchInfo struct {
 	Dir         string `json:"dir,omitempty"`
 	DiffFile    string `json:"diffFile,omitempty"`
 	NumstatFile string `json:"numstatFile,omitempty"`
+	// Skipped is "origin-unavailable" when the fetch was skipped because
+	// pg-origin-guard reported the origin unavailable (OK is then false and the
+	// session does the steps itself); empty otherwise.
+	Skipped string `json:"skipped,omitempty"`
 }
 
 // BeadID is a convenience alias for {{.BeadID}} == {{.Item.ID}}.

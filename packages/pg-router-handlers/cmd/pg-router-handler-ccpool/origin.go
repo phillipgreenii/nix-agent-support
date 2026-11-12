@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
+	"github.com/phillipgreenii/pg-router-handlers/internal/originguard"
 	"github.com/phillipgreenii/pg-router-handlers/internal/originprobe"
 	"github.com/phillipgreenii/pg-router-handlers/internal/rolefile"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
@@ -61,18 +62,33 @@ func dispatchRepoRoot(role roles.Role, cfg config.Config) string {
 // origin it runs against is unavailable. It runs BEFORE anything that touches
 // beads or ccpool, so a decline mutates nothing. A role with no resolvable
 // watched origin is never gated.
-func originGate(ctx context.Context, p *originprobe.Prober, role roles.Role, cfg config.Config, beadID string) (reason string, declined bool) {
-	w, ok := p.Resolve(dispatchRepoRoot(role, cfg))
-	if !ok {
+//
+// Two checks, either of which declines: the handler's own active reachability
+// probe (per watched origin, flap controlled), and pg-origin-guard's Check for
+// the certificate-and-presence part (per realm). A guard fault (an error from
+// check) fails OPEN: the dispatch proceeds and the fault is logged.
+func originGate(ctx context.Context, p *originprobe.Prober, check originguard.Check, role roles.Role, cfg config.Config, beadID string) (reason string, declined bool) {
+	root := dispatchRepoRoot(role, cfg)
+	if w, ok := p.Resolve(root); ok {
+		if d := p.Check(ctx, w); d.Gated {
+			slog.Warn("dispatch declined: origin unavailable", "role", role.Name, "bead", beadID,
+				"origin", w.Key, "class", string(d.State.Class), "since", d.State.Since,
+				"consecutive_failures", d.State.ConsecutiveFailures, "stderr_tail", d.State.LastError)
+			return busyReasonOriginUnavailable, true
+		}
+	}
+	if root == "" || check == nil {
 		return "", false
 	}
-	d := p.Check(ctx, w)
-	if !d.Gated {
+	v, err := check(ctx, root)
+	if err != nil {
+		slog.Warn("origin guard fault; dispatching anyway", "role", role.Name, "bead", beadID, "err", err)
 		return "", false
 	}
-	slog.Warn("dispatch declined: origin unavailable", "role", role.Name, "bead", beadID,
-		"origin", w.Key, "class", string(d.State.Class), "since", d.State.Since,
-		"consecutive_failures", d.State.ConsecutiveFailures, "stderr_tail", d.State.LastError)
+	if v.Available {
+		return "", false
+	}
+	slog.Warn("dispatch declined: origin guard reports auth unavailable", "role", role.Name, "bead", beadID, "reason", v.Reason)
 	return busyReasonOriginUnavailable, true
 }
 
@@ -172,3 +188,9 @@ usage: pg-router-handler-ccpool origin <status|ignore|unignore> [--config FILE] 
 There is no "pause an origin" verb: the gate auto-clears on the first ok probe,
 so a hand-set pause would fight it. Use the global pg-router pause for that.
 `
+
+// newGuardCheck builds the production pg-origin-guard Check for cfg. A package
+// variable so a test can substitute a fake without a binary on PATH.
+var newGuardCheck = func(cfg config.Config) originguard.Check {
+	return originguard.ExecCheck(cfg.OriginProbe.GuardBin)
+}

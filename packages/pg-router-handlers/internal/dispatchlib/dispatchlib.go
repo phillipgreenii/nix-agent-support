@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/handlerstate"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
+	"github.com/phillipgreenii/pg-router-handlers/internal/originguard"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router-handlers/internal/sessionlock"
 )
@@ -150,6 +151,8 @@ func BuildDeps(cfg config.Config, role roles.Role) executor.Deps {
 		BD:  beads.NewCLIRunnerForRepo(bdDir, RoleActor(role)),
 		Cfg: cfg,
 		Log: handlerstate.NewEventLog(cfg),
+		// pg-origin-guard's Check, for the review pre-fetch (INV-CCH-10).
+		OriginCheck: originguard.ExecCheck(cfg.OriginProbe.GuardBin),
 		// Per-session flocks under the handler state directory (the same one as
 		// events.jsonl) serialize the orphan reconcile against an absorbing
 		// dispatch (pg2-g2u9m, INV-CCH-18).

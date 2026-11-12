@@ -73,6 +73,8 @@ setup() {
   REMOTE="$TEST_DIR/remotes/alpha.git"
   make_git_wrapper
   make_notifier
+  # no test depends on a pg-origin-guard installed on the machine: available by default
+  make_origin_guard 0
   # a pre-push hook in the canonical clone: if anything ever pushed from it, the marker appears
   mkdir -p "$A/.git/hooks"
   printf '#!/bin/sh\ntouch "%s/pre-push.ran"\nexit 0\n' "$TEST_DIR" >"$A/.git/hooks/pre-push"
@@ -542,6 +544,65 @@ assert_yielded() {
   [ "$(rec nix-alpha outcome)" = fetch-failed ]
   [ "$(git -C "$A" rev-parse HEAD)" = "$tip" ]
   assert_no_history_rewriting
+}
+
+# make_origin_guard EXIT: a stub pg-origin-guard that records its argv and exits EXIT.
+make_origin_guard() {
+  cat >"$TEST_DIR/pg-origin-guard-stub" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"$TEST_DIR/guard.argv"
+exit $1
+EOF
+  chmod +x "$TEST_DIR/pg-origin-guard-stub"
+  export PG_REPO_RUNNER_ORIGIN_GUARD_BIN="$TEST_DIR/pg-origin-guard-stub"
+}
+
+@test "guard exit 0: the guard is asked about the clone and the fetch proceeds" {
+  make_origin_guard 0
+  remote_commit g
+  sync_pass nix-alpha
+  [ "$status" -eq 0 ]
+  # macOS resolves /var to /private/var, so compare the real paths
+  [ "$(cat "$TEST_DIR/guard.argv")" = "check --repo $(cd "$A" && pwd -P)" ]
+  [ "$(rec nix-alpha outcome)" = fast-forwarded ]
+}
+
+@test "guard exit 3: outcome origin-unavailable, no fetch, exit 0" {
+  make_origin_guard 3
+  remote_commit g
+  local tip
+  tip="$(git -C "$A" rev-parse HEAD)"
+  sync_pass nix-alpha
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = origin-unavailable ]
+  no_verb 'fetch'
+  [ "$(git -C "$A" rev-parse HEAD)" = "$tip" ]
+}
+
+@test "guard exit 1: a guard fault is recorded as fetch-failed, no fetch, exit 0" {
+  make_origin_guard 1
+  remote_commit g
+  sync_pass nix-alpha
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = fetch-failed ]
+  no_verb 'fetch'
+}
+
+@test "guard exit 75, the code before pg-origin-guard moved to the shared exit codes, is a fault: fetch-failed" {
+  make_origin_guard 75
+  remote_commit g
+  sync_pass nix-alpha
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = fetch-failed ]
+  no_verb 'fetch'
+}
+
+@test "no guard binary on the machine: the sync runs unguarded" {
+  export PG_REPO_RUNNER_ORIGIN_GUARD_BIN="$TEST_DIR/no-such-guard"
+  remote_commit g
+  sync_pass nix-alpha
+  [ "$status" -eq 0 ]
+  [ "$(rec nix-alpha outcome)" = fast-forwarded ]
 }
 
 @test "an item for a repo whose sync flag is off is skipped before any git runs" {

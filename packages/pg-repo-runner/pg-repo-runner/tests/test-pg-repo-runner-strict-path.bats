@@ -48,6 +48,8 @@ setup() {
   gfh_save_env SCRIPTS_DIR TEST_SUPPORT GFH_LIB
   gfh_setup "pg-repo-runner"
   gfh_restore_env
+  # no test depends on a pg-origin-guard installed on the machine running it
+  export PG_REPO_RUNNER_ORIGIN_GUARD_BIN=/usr/bin/true
 
   TEST_DIR="$GFH_WORK"
   STRICT_BIN="$TEST_DIR/strict-bin"

@@ -10,6 +10,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/originguard"
 	"github.com/phillipgreenii/pg-router-handlers/internal/procprobe"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
@@ -107,6 +108,10 @@ type Deps struct {
 	// GitRun runs git for the handler-side worktree pre-fetch (bead pg2-hh32y);
 	// nil => osGitRun (gitenv-hermetic). Tests substitute a script.
 	GitRun GitRun
+	// OriginCheck is pg-origin-guard's Check, consulted before the review
+	// pre-fetch's network fetch (INV-CCH-10). nil => no guard (the fetch runs);
+	// a returned error is a guard fault and the fetch runs (fail open).
+	OriginCheck originguard.Check
 	// PR is the read-only PR reader the review precheck uses (INV-CCH-22, bead
 	// pg2-5x29j). nil => ConnectorReader over Cmd (nil Cmd => OSCommander).
 	// Tests substitute a fake so they never run pg-connector.

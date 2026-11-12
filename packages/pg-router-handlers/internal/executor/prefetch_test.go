@@ -14,6 +14,8 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
+	"github.com/phillipgreenii/pg-router-handlers/internal/originguard"
+	"github.com/phillipgreenii/pg-router-handlers/internal/prompt"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/x/gitfixture"
 	"github.com/phillipgreenii/x/gittest"
@@ -446,5 +448,70 @@ func TestRenderNudge_prefetchFieldsEmptyWithoutPrefetchBlock(t *testing.T) {
 
 	if !strings.Contains(got, "[false|]") {
 		t.Errorf("nudge = %q, want the zero PrefetchInfo", got)
+	}
+}
+
+// ---- pg-origin-guard gate (INV-CCH-10) --------------------------------------
+
+func guardPrefetch(t *testing.T, check originguard.Check, local map[string]bool) (*scriptGit, prompt.PrefetchInfo, string) {
+	t.Helper()
+	g := &scriptGit{local: local}
+	r := newScriptRun(t, g)
+	r.deps.OriginCheck = check
+	wt := t.TempDir()
+	pf := roles.PrefetchConfig{Refspec: testRefspec, Rev: testRev}
+	d := DispatchContext{Role: prefetchRole(pf), Item: prefetchItem(goodSHA)}
+	return g, r.prefetch(context.Background(), pf, d, wt), wt
+}
+
+func TestPrefetch_guardUnavailableSkipsFetchWithDistinctOutcome(t *testing.T) {
+	var asked string
+	g, info, wt := guardPrefetch(t, func(_ context.Context, repo string) (originguard.Verdict, error) {
+		asked = repo
+		return originguard.Verdict{Available: false, Reason: "cert-expired"}, nil
+	}, map[string]bool{})
+	if g.has("fetch") {
+		t.Errorf("the fetch must be skipped; calls=%v", g.calls)
+	}
+	if info.OK || info.Skipped != "origin-unavailable" {
+		t.Fatalf("info = %+v, want OK=false Skipped=origin-unavailable", info)
+	}
+	if asked != wt {
+		t.Errorf("guard asked about %q, want the worktree %q", asked, wt)
+	}
+	if got := loadPrefetchInfo(wt); got.Skipped != "origin-unavailable" {
+		t.Errorf("manifest = %+v, want the skip recorded", got)
+	}
+}
+
+func TestPrefetch_guardAvailableFetches(t *testing.T) {
+	g, _, _ := guardPrefetch(t, func(context.Context, string) (originguard.Verdict, error) {
+		return originguard.Verdict{Available: true}, nil
+	}, map[string]bool{})
+	if !g.has("fetch") {
+		t.Errorf("an available origin must be fetched; calls=%v", g.calls)
+	}
+}
+
+func TestPrefetch_guardFaultFailsOpenAndFetches(t *testing.T) {
+	g, info, _ := guardPrefetch(t, func(context.Context, string) (originguard.Verdict, error) {
+		return originguard.Verdict{}, errors.New("exit status 1")
+	}, map[string]bool{})
+	if !g.has("fetch") {
+		t.Errorf("a guard fault must fail open to the fetch; calls=%v", g.calls)
+	}
+	if info.Skipped != "" {
+		t.Errorf("Skipped = %q, want empty on a fault", info.Skipped)
+	}
+}
+
+func TestPrefetch_localRevNeverAsksTheGuard(t *testing.T) {
+	asked := false
+	g, info, _ := guardPrefetch(t, func(context.Context, string) (originguard.Verdict, error) {
+		asked = true
+		return originguard.Verdict{}, nil
+	}, map[string]bool{goodSHA: true})
+	if asked || g.has("fetch") || !info.OK {
+		t.Fatalf("a local commit needs no network: asked=%v info=%+v calls=%v", asked, info, g.calls)
 	}
 }

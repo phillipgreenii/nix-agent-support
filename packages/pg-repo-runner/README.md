@@ -294,7 +294,10 @@ something this tool sequences. The pass:
    `yielded` with `canonical not steady: <reason>`, and nothing is repaired: no fetch, no stash, no checkout. The
    precheck writes nothing (`GIT_OPTIONAL_LOCKS=0`: not even a refreshed index), which the tests prove by
    hashing the whole `.git` directory before and after.
-2. **Fetch.** `git fetch origin +refs/heads/<primary>:refs/remotes/origin/<primary>`: a remote-tracking
+2. **Origin guard, then fetch.** First `pg-origin-guard check --repo <clone>` (from the ambient `PATH`; a
+   machine without it fetches unguarded). Exit 3 (origin unavailable) records `origin-unavailable` and
+   fetches nothing; any other non-zero exit records `fetch-failed`; both exit 0 and the next event retries.
+   Then `git fetch origin +refs/heads/<primary>:refs/remotes/origin/<primary>`: a remote-tracking
    ref update only. The count read BEFORE the fetch is kept as `behindBeforeFetch`, because a remote-tracking
    ref that was never fetched understates "behind" (the design's stale-ref caveat); the classification re-reads
    after the fetch. A failed fetch is recorded (`fetch-failed`) and the pass exits 0: an unreachable remote is
