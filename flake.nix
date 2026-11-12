@@ -6772,31 +6772,110 @@
                     "-coverprofile=cover.out"
                     "-covermode=atomic"
                   ];
-                  # ccpool + tmux: internal/executor's hermetic real-ccpool test
-                  # of INV-CCH-30 (bead pg2-qaeb8, prior_sessions_realccpool_test.go)
-                  # drives the REAL ccpool binary in a sandboxed pool and tmux
-                  # socket. It skips when either is missing; the REQUIRE variable
-                  # below turns that skip into a failure here, so a green check
-                  # means it ran.
+                  # git only: the real-ccpool, tmux, built-binary and re-exec tests
+                  # are tagged `integration` and run in
+                  # pg-router-handlers-integration-tests below.
+                  testDeps = [ pkgs.git ];
+                }).overrideAttrs
+                  (old: {
+                    postBuild = (old.postBuild or "") + ''
+                      echo "=== pg-router-ccpool-handler per-package statement-coverage gate ==="
+                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
+                    '';
+                  });
+
+              # pg-router-handlers INTEGRATION tier. ON DEMAND ONLY: build it by hand
+              # when the handlers' process wiring, the real-ccpool adoption or the
+              # conformance wire changes
+              # (`nix build .#checks.<system>.pg-router-handlers-integration-tests`).
+              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
+              # gate (operator ruling, Phillip, 2026-10-26: "the integration tests are
+              # taking way too long. they should not be running as typical unit tests
+              # and in typical unit test situations like commit or landing").
+              #
+              # It runs EXACTLY the tests in files tagged `//go:build integration`
+              # (the tagged package's test list minus its untagged list) with the REAL
+              # ccpool and tmux (and bd for internal/beads), builds the handler
+              # binaries with go, and re-executes the test binaries. It fails when the
+              # listing is empty, when a test does not report PASS, or when any test
+              # is skipped, so a gate that silently ran nothing cannot pass. The
+              # unit-tier guard is internal/unittier (TestUnitTierHasNoIntegrationTests).
+              pg-router-handlers-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-router-handlers-integration-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
+                      ./packages/pg-router
+                      ./packages/ccpool
+                      ./packages/pg-claude-code-recorder
+                      ./packages/claude-transcript
+                      ./packages/pg-failsig
+                    ];
+                  };
+                  modRoot = "pg-router-handlers";
+                  gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
                   testDeps = [
                     pkgs.git
                     pkgs.ccpool
                     pkgs.tmux
+                    pkgs.bd
+                    pkgs.coreutils
+                    pkgs.jq
                   ];
                 }).overrideAttrs
-                  (old: {
+                  (_: {
                     PG_ROUTER_CCPOOL_HANDLER_REQUIRE_CCPOOL = "1";
                     # The module-rendered specs and pool config the strict-spec
-                    # end-to-end test (spec_e2e_realccpool_test.go) reads. The
-                    # reference puts the fixture, and the pg-wrap-exec its
-                    # config.toml names, in this check's closure.
+                    # end-to-end test (spec_e2e_realccpool_test.go) reads.
                     PG_ROUTER_CCPOOL_HANDLER_SPEC_FIXTURE =
                       self.checks.${system}.pg-router-ccpool-handler-spec-fixtures;
                     # tmux serves each sandboxed pool over a unix socket.
                     __darwinAllowLocalNetworking = true;
-                    postBuild = (old.postBuild or "") + ''
-                      echo "=== pg-router-ccpool-handler per-package statement-coverage gate ==="
-                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/integration.log"
+                      : > "$log"
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                      if [ -z "$pkgs" ]; then
+                        echo "pg-router-handlers-integration-tests: no test file carries //go:build integration" >&2
+                        exit 1
+                      fi
+                      total=0
+                      for dir in $pkgs; do
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        names=$(comm -23 <(echo "$tagged") <(echo "$plain") | grep -v '^TestHelper' || true)
+                        if [ -z "$names" ]; then
+                          echo "pg-router-handlers-integration-tests: $dir lists no integration-only tests" >&2
+                          exit 1
+                        fi
+                        regex="^($(echo "$names" | paste -sd'|' -))\$"
+                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                        if ! go test -tags integration -count=1 -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                          cat "$log"
+                          echo "pg-router-handlers-integration-tests: $dir FAILED" >&2
+                          exit 1
+                        fi
+                        for t in $names; do
+                          if ! grep -q -- "^--- PASS: $t " "$log"; then
+                            cat "$log"
+                            echo "pg-router-handlers-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                            exit 1
+                          fi
+                        done
+                        total=$((total + $(echo "$names" | wc -l)))
+                      done
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        cat "$log"
+                        echo "pg-router-handlers-integration-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-router-handlers-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                      runHook postBuild
                     '';
                   });
 

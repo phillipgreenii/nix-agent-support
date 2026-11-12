@@ -1,3 +1,5 @@
+//go:build integration
+
 package executor
 
 // End-to-end test of the pg-wrap spec chain under REAL tmux (pg-wrap design

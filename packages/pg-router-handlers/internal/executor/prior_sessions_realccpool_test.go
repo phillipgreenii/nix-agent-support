@@ -1,3 +1,5 @@
+//go:build integration
+
 package executor
 
 // Hermetic tests of INV-CCH-30 (ADR 0094, bead pg2-qaeb8) against the REAL

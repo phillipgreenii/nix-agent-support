@@ -1,3 +1,5 @@
+//go:build integration
+
 package conformance
 
 // Adoption across a daemon restart, against REAL ccpool and REAL tmux (global
