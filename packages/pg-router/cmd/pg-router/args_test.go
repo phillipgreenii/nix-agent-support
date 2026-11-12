@@ -182,6 +182,8 @@ func TestRoute_runSubcommands(t *testing.T) {
 		{"config-no-flag", []string{"pg-router", "config"}, routeUsageErr},
 		{"config-bad-flag", []string{"pg-router", "config", "--nope"}, routeUsageErr},
 		{"config-check", []string{"pg-router", "config", "check"}, routeConfig},
+		{"config-check-offline", []string{"pg-router", "config", "check", "--offline"}, routeConfig},
+		{"config-check-offline-json-is-usage-error", []string{"pg-router", "config", "check", "--offline", "--json"}, routeUsageErr},
 		{"config-check-json-is-usage-error", []string{"pg-router", "config", "check", "--json"}, routeUsageErr},
 		{"config-check-extra-arg", []string{"pg-router", "config", "check", "extra"}, routeUsageErr},
 		{"doctor", []string{"pg-router", "doctor"}, routeDoctor},
@@ -349,7 +351,7 @@ func TestHelp_ListsConfigCheckAndDoctor(t *testing.T) {
 	if r := route([]string{"pg-router", "config", "check"}); r.configMode != "check" {
 		t.Errorf("configMode = %q, want check", r.configMode)
 	}
-	for _, want := range []string{"config (--print-defaults | --show [--json] | check)", "doctor [--socket <path>] [--token <tok>]"} {
+	for _, want := range []string{"config (--print-defaults | --show [--json] | check [--offline])", "doctor [--socket <path>] [--token <tok>]"} {
 		if !strings.Contains(usageLine, want) {
 			t.Errorf("usageLine does not list %q", want)
 		}

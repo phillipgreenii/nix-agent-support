@@ -11081,6 +11081,73 @@
                     touch $out
                   '';
 
+              # test-pg-router-config-build-check: the build-time gate that stops a
+              # system generation pairing the packaged pg-router with a rendered
+              # config it refuses to load (the daemon would exit at startup and
+              # launchd would restart it in a loop). The gate is the helper's own
+              # check script (home/programs/pg-router/checked-config.nix); a build
+              # failure cannot be asserted from inside the sandbox, so this runs
+              # that SAME script over a valid fixture (must pass) and over the
+              # fixture plus a key the binary does not know, non_blocking_gates,
+              # the removed gates-era key (must fail, printing the loader's line).
+              # The valid config must carry real wiring: a query, and a role
+              # bound to it, whose handler path does not exist here (the offline
+              # check skips that probe).
+              test-pg-router-config-build-check =
+                let
+                  checked = import ./home/programs/pg-router/checked-config.nix {
+                    inherit pkgs;
+                    package = pkgs.pg-router;
+                  };
+                  validText = ''
+                    [[query]]
+                    name = "src"
+                    emits = ["x.event"]
+                    type = "command"
+                    [query.command]
+                    argv = ["/nonexistent/producer", "[]"]
+                    format = "json"
+                    [query.trigger]
+                    kind = "manual"
+
+                    [[role]]
+                    name = "r"
+                    enabled = true
+                    binds = ["x.event"]
+                    handler = "/nonexistent/handler"
+                  '';
+                  invalidText =
+                    lib.replaceStrings
+                      [ "format = \"json\"" ]
+                      [
+                        "format = \"json\"\nnon_blocking_gates = [\"x\"]"
+                      ]
+                      validText;
+                  valid = pkgs.writeText "valid.toml" validText;
+                  invalid = pkgs.writeText "invalid.toml" invalidText;
+                in
+                assert invalidText != validText;
+                # the real module path: a config accepted by the loader builds
+                assert (checked.mkChecked "pg-router-valid.toml" validText) ? drvPath;
+                pkgs.runCommand "test-pg-router-config-build-check" { } ''
+                  (
+                    ${checked.checkScript "valid.toml" valid}
+                  ) || { echo "FAIL: the unmodified fixture was rejected" >&2; exit 1; }
+                  if out="$(
+                    (
+                      ${checked.checkScript "invalid.toml" invalid}
+                    ) 2>&1
+                  )"; then
+                    echo "FAIL: a config with an unknown key passed the build check" >&2
+                    exit 1
+                  fi
+                  case "$out" in
+                    *non_blocking_gates*) ;;
+                    *) echo "FAIL: the loader's error line is not printed: $out" >&2; exit 1 ;;
+                  esac
+                  touch $out
+                '';
+
               # test-pg-router-ccpool-handler-module (beads pg2-pteab, pg2-12gr4.10.10,
               # pg2-12gr4.10.18): eval-level coverage of
               # home/programs/pg-router-ccpool-handler/default.nix. Every role names its

@@ -9,6 +9,14 @@ let
 
   tomlFormat = pkgs.formats.toml { };
 
+  # Every config file handed to the daemon passes the packaged binary's own
+  # loader at build time (see checked-config.nix).
+  checkedConfigFile =
+    (import ./checked-config.nix {
+      inherit pkgs;
+      inherit (cfg) package;
+    }).mkChecked;
+
   # roles.<name> (pg2-12gr4.10.9): one declaration per role, joined by name
   # through module merging. The submodule's `name` is the attribute name and
   # becomes the rendered [[role]] table's `name`.
@@ -227,7 +235,7 @@ let
     ]
     ++ lib.optional (beadsPrefix != null) "PG_ROUTER_BEADS_PREFIX=${beadsPrefix}"
     ++ [
-      "PG_ROUTER_CONFIG=${pkgs.writeText configFileName configText}"
+      "PG_ROUTER_CONFIG=${checkedConfigFile configFileName configText}"
     ]
     # (The gate-file path variables that used to lead this list are gone: resource
     # levels are generic records in the event log, set with `pg-router level set|clear`,

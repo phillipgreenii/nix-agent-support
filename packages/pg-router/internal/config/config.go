@@ -390,7 +390,28 @@ func OSSources() Sources {
 // LoadWith is LoadContext reading its environment, HOME and git-common-dir
 // through src instead of the process globals.
 func LoadWith(ctx context.Context, src Sources) (Config, error) {
+	return loadWith(ctx, src, nil)
+}
+
+// AssumeCommandsPresent is a CommandLocator that finds every command. It lets a
+// build-time check run the full strict decode and validation of a rendered
+// config in a sandbox that has none of the machine's source or handler
+// commands, so only the environment probe is skipped.
+type AssumeCommandsPresent struct{}
+
+func (AssumeCommandsPresent) Locate(string) error { return nil }
+
+// LoadWithLocator is LoadContext with the backing-command probe replaced by
+// loc (nil keeps the default PATH probe). Every other check is unchanged.
+func LoadWithLocator(ctx context.Context, loc CommandLocator) (Config, error) {
+	return loadWith(ctx, OSSources(), loc)
+}
+
+func loadWith(ctx context.Context, src Sources, loc CommandLocator) (Config, error) {
 	c := defaultWith(src)
+	if loc != nil {
+		c.Locator = loc
+	}
 	// Pool-scalar env overlay. The legacy role-specific env vars
 	// (PG_ROUTER_MAX_WORKER/MAX_FEEDBACK/*_ENABLED/*_SKILL_MD) are intentionally GONE:
 	// role identity now lives only in config / built-in defaults (spec C decision 7).

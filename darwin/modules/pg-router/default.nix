@@ -67,6 +67,14 @@ let
 
   pkg = pkgs.pg-router;
 
+  # The rendered daemon config must load under the very binary the LaunchAgent
+  # execs, or the build fails (see the home module's checked-config.nix).
+  checkedConfigFile =
+    (import ../../../home/programs/pg-router/checked-config.nix {
+      inherit pkgs;
+      package = pkg;
+    }).mkChecked;
+
   # XDG_STATE_HOME default for macOS user agents. The launchdServices helper
   # plist runs under the primary user, so resolve via system.primaryUser.
   primaryUser = config.system.primaryUser or null;
@@ -130,7 +138,7 @@ in
           ${lib.optionalString (
             daemonCfg.beadsPrefix != null
           ) "export PG_ROUTER_BEADS_PREFIX=${lib.escapeShellArg daemonCfg.beadsPrefix}"}
-          export PG_ROUTER_CONFIG=${pkgs.writeText "pg-router-daemon-config.toml" daemonCfg.configText}
+          export PG_ROUTER_CONFIG=${checkedConfigFile "pg-router-daemon-config.toml" daemonCfg.configText}
           ${lib.optionalString (
             daemonCfg.handlerConfig != null
           ) "export PG_ROUTER_CCPOOL_HANDLER_CONFIG=${lib.escapeShellArg daemonCfg.handlerConfig}"}

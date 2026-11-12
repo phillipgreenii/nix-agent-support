@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,6 +33,8 @@ func runConfig(mode string, asJSON bool) int {
 		return exitOK
 	case "check":
 		return configCheck(os.Stdout, os.Stderr)
+	case "check-offline":
+		return configCheckWith(os.Stdout, os.Stderr, config.AssumeCommandsPresent{})
 	case "show":
 		cfg, err := config.Load()
 		if err != nil {
@@ -55,7 +58,15 @@ func runConfig(mode string, asJSON bool) int {
 // command, a missing handler command and a bad role config show in one run.
 // Exit 1 on any problem; with none it prints one line, "config ok", and exits 0.
 func configCheck(stdout, stderr io.Writer) int {
-	cfg, err := config.Load()
+	return configCheckWith(stdout, stderr, nil)
+}
+
+// configCheckWith is configCheck with the backing-command probe replaced by loc
+// (nil keeps the PATH probe). `config check --offline` passes
+// config.AssumeCommandsPresent so a hermetic build runs the strict decode and
+// every wiring check over a rendered config without the machine's commands.
+func configCheckWith(stdout, stderr io.Writer, loc config.CommandLocator) int {
+	cfg, err := config.LoadWithLocator(context.Background(), loc)
 	if err != nil {
 		for _, line := range errorLines(err) {
 			_, _ = fmt.Fprintln(stderr, line)

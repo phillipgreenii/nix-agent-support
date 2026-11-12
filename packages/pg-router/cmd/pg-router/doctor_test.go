@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/internal/config"
 )
 
 // doctorWorkspace is a hermetic config plus handler stub for config check and
@@ -127,6 +128,20 @@ func TestConfigCheck_CleanConfigPrintsOKAndExitsZero(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+// config check --offline skips the backing-command probe (a hermetic build has
+// none of the machine's commands) but still runs the strict decode.
+func TestConfigCheckWith_AssumeCommandsPresentSkipsOnlyTheProbe(t *testing.T) {
+	newDoctorWorkspace(t, "/nonexistent/k11-producer")
+
+	var stdout, stderr strings.Builder
+	if code := configCheckWith(&stdout, &stderr, config.AssumeCommandsPresent{}); code != exitOK {
+		t.Fatalf("exit = %d, want 0 with the probe skipped; stderr=%q", code, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "config ok" {
+		t.Errorf("stdout = %q, want %q", got, "config ok")
 	}
 }
 

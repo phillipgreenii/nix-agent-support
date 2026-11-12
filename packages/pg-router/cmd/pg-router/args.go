@@ -8,7 +8,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check) | doctor [--socket <path>] [--token <tok>] | doctor --clauses | explain <role> [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check [--offline]) | doctor [--socket <path>] [--token <tok>] | doctor --clauses | explain <role> [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -282,7 +282,7 @@ type routeResult struct {
 	// is event-generic, not beads-specific, and no longer has a beads.Runner
 	// of its own to resolve a bead id through.
 	eventJSON  string
-	configMode string // "print-defaults" | "show" | "check" (routeConfig only)
+	configMode string // "print-defaults" | "show" | "check" | "check-offline" (routeConfig only)
 	// only / disable carry the raw --only/--disable flag OCCURRENCES for
 	// routeRun/routeRunUntilIdle (STORY-OP-3, DEC-CLI-1) — NOT yet combined
 	// with PG_ROUTER_ONLY/PG_ROUTER_DISABLE, since reading the environment is I/O
@@ -497,8 +497,14 @@ func parseRunQueryArgs(args []string) routeResult {
 // Task 1.5b defines no JSON encoding for it.
 func parseConfigArgs(args []string) routeResult {
 	asJSON, pos := extractJSONFlag(args)
+	if len(pos) == 2 && pos[0] == "check" && pos[1] == "--offline" {
+		if asJSON {
+			return routeResult{kind: routeUsageErr, msg: "config: --json is valid only with --show"}
+		}
+		return routeResult{kind: routeConfig, configMode: "check-offline"}
+	}
 	if len(pos) != 1 {
-		return routeResult{kind: routeUsageErr, msg: "config: usage: config (--print-defaults | --show [--json] | check)"}
+		return routeResult{kind: routeUsageErr, msg: "config: usage: config (--print-defaults | --show [--json] | check [--offline])"}
 	}
 	switch pos[0] {
 	case "check":
