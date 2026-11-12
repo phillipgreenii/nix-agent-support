@@ -29,13 +29,16 @@ mkGoApp {
 
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [
-      ./go.mod
-      ./go.sum
-      ./gomod2nix.toml
-      ./pkg
-      ./cmd/pg-connector-github
-    ];
+    # Generated from the binary's Go import graph by ./gen-filesets.sh (kept
+    # current by the pg-connector-filesets pre-commit hook); never hand-list.
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+        ./go.sum
+        ./gomod2nix.toml
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-github.nix)
+    );
   };
   gomod2nixToml = ./gomod2nix.toml;
 

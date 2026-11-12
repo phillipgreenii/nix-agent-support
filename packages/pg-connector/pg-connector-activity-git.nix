@@ -22,21 +22,16 @@ mkGoApp {
   # the same change (fileset_coverage_test.go enforces it).
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [
-      ./go.mod
-      ./go.sum
-      ./gomod2nix.toml
-      ./pkg/schema
-      (lib.fileset.difference ./pkg/scriptout (
-        lib.fileset.unions [
-          ./pkg/scriptout/schemas
-          ./pkg/scriptout/conformance
-        ]
-      ))
-      ./pkg/provider/iface.go
-      ./pkg/provider/activity
-      ./cmd/pg-connector-activity-git
-    ];
+    # Generated from the binary's Go import graph by ./gen-filesets.sh (kept
+    # current by the pg-connector-filesets pre-commit hook); never hand-list.
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+        ./go.sum
+        ./gomod2nix.toml
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-activity-git.nix)
+    );
   };
   gomod2nixToml = ./gomod2nix.toml;
 

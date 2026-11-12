@@ -22,17 +22,16 @@ mkGoApp {
   # so editing a sibling backend does not touch this derivation's hash.
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [
-      ./go.mod
-      ./go.sum
-      ./gomod2nix.toml
-      ./pkg/schema
-      ./pkg/scriptout
-      ./pkg/provider/iface.go
-      ./pkg/provider/alert
-      ./pkg/provider/attention
-      ./cmd/pg-connector-alert-pagerduty
-    ];
+    # Generated from the binary's Go import graph by ./gen-filesets.sh (kept
+    # current by the pg-connector-filesets pre-commit hook); never hand-list.
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+        ./go.sum
+        ./gomod2nix.toml
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-alert-pagerduty.nix)
+    );
   };
   gomod2nixToml = ./gomod2nix.toml;
 

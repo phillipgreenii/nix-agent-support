@@ -23,18 +23,16 @@ mkGoApp {
   # so editing a sibling's files does not touch this derivation's content hash.
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [
-      ./go.mod
-      ./go.sum
-      ./gomod2nix.toml
-      ./pkg/schema
-      ./pkg/eventlog
-      ./pkg/scriptout
-      ./pkg/provider/iface.go
-      ./pkg/provider/calendar
-      ./pkg/provider/attention
-      ./cmd/pg-connector-calendar-task-focus
-    ];
+    # Generated from the binary's Go import graph by ./gen-filesets.sh (kept
+    # current by the pg-connector-filesets pre-commit hook); never hand-list.
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+        ./go.sum
+        ./gomod2nix.toml
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-calendar-task-focus.nix)
+    );
   };
   gomod2nixToml = ./gomod2nix.toml;
 

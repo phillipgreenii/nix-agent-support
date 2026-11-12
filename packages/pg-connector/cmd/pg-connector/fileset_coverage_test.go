@@ -37,6 +37,12 @@ var (
 		`lib\.fileset\.difference\s+(\./[A-Za-z0-9_./-]+)\s*\(\s*lib\.fileset\.unions\s*\[([^\]]*)\]\s*\)`,
 	)
 	moduleClause = regexp.MustCompile(`(?m)^module\s+(\S+)\s*$`)
+	// map (p: ./. + "/${p}") (import ./filesets/<name>.nix) — the shape every
+	// backend uses to pull in its generated fileset (gen-filesets.sh).
+	nixGeneratedImport = regexp.MustCompile(
+		`map\s*\(\s*p:\s*\./\.\s*\+\s*"/\$\{p\}"\s*\)\s*\(\s*import\s+(\./filesets/[A-Za-z0-9_.-]+\.nix)\s*\)`,
+	)
+	nixQuotedPath = regexp.MustCompile(`"([A-Za-z0-9_./-]+)"`)
 )
 
 // nixFileset is the parsed allowlist: module-root-relative paths, "." meaning
@@ -103,7 +109,28 @@ func parseNixFileset(moduleRoot, nixSrc string) (nixFileset, error) {
 		}
 	}
 
-	var fs nixFileset
+	var (
+		fs           nixFileset
+		generatedErr error
+	)
+	block = nixGeneratedImport.ReplaceAllStringFunc(block, func(match string) string {
+		rel := nixGeneratedImport.FindStringSubmatch(match)[1]
+		gen, err := os.ReadFile(filepath.Join(moduleRoot, filepath.FromSlash(strings.TrimPrefix(rel, "./"))))
+		if err != nil {
+			generatedErr = fmt.Errorf("generated fileset %s: %w", rel, err)
+			return ""
+		}
+		for line := range strings.SplitSeq(string(gen), "\n") {
+			line, _, _ = strings.Cut(line, "#")
+			for _, m := range nixQuotedPath.FindAllStringSubmatch(line, -1) {
+				fs.include = append(fs.include, path.Clean(m[1]))
+			}
+		}
+		return ""
+	})
+	if generatedErr != nil {
+		return nixFileset{}, generatedErr
+	}
 	rest := nixDifference.ReplaceAllStringFunc(block, func(match string) string {
 		sub := nixDifference.FindStringSubmatch(match)
 		fs.include = append(fs.include, nixTokens(sub[1])...)
@@ -267,6 +294,39 @@ func writeFilesetFixture(t *testing.T, nixEntries string) string {
 // TestBackendFilesetCoversImports_DetectsMissingTransitivePackage proves the
 // check flags the exact miss it exists for: pkg/a is listed, but the pkg/b it
 // imports (a TRANSITIVE import, not one the cmd names directly) is not.
+// TestBackendFilesetCoversImports_GeneratedFileset proves the generated-fileset
+// shape the real backends use is parsed: the quoted paths of the imported file
+// are the allowlist, and a stale generated file is flagged.
+func TestBackendFilesetCoversImports_GeneratedFileset(t *testing.T) {
+	const nix = `{ lib, mkGoApp, ... }:
+mkGoApp {
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-x.nix)
+    );
+  };
+}
+`
+	root := writeFilesetFixture(t, "      ./pkg/a")
+	writeCompositionFixture(t, root, "pg-connector-x.nix", nix)
+	writeCompositionFixture(t, root, "filesets/pg-connector-x.nix",
+		"# generated\n[\n  \"cmd/pg-connector-x/main.go\"\n  \"pkg/a/a.go\"\n]\n")
+	violations, err := evaluateFilesetCoverage(root)
+	if err != nil {
+		t.Fatalf("evaluateFilesetCoverage: %v", err)
+	}
+	assertContainsViolation(t, violations, "pkg/b/b.go")
+	for _, v := range violations {
+		if strings.Contains(v, "pkg/a/a.go") || strings.Contains(v, "main.go") {
+			t.Errorf("flagged a listed file: %s", v)
+		}
+	}
+}
+
 func TestBackendFilesetCoversImports_DetectsMissingTransitivePackage(t *testing.T) {
 	root := writeFilesetFixture(t, "      ./pkg/a")
 	violations, err := evaluateFilesetCoverage(root)

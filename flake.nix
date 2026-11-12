@@ -868,6 +868,42 @@
           '';
         };
 
+      # The `pg-connector-filesets` hook wrapper, hoisted to ONE shared `let`
+      # binding so the production hook entry (extraHooks below), the
+      # `pg-hooks fix` fixer and its bats test (tests/pg-connector-filesets-hook.bats,
+      # `checks.<system>.pg-connector-filesets-hook`) cannot diverge. It runs
+      # packages/pg-connector/gen-filesets.sh (in --check mode for the hook) with
+      # this flake's pinned `go` and GOTOOLCHAIN=local; it never calls nix and
+      # skips inside the nix build sandbox (no module cache or network there; the
+      # derivations' fileset eval still fails loudly on a missing file).
+      pg-connector-filesets-hook-pkg =
+        pkgs:
+        pkgs.writeShellApplication {
+          name = "pg-connector-filesets-hook";
+          runtimeInputs = [
+            pkgs.go
+            pkgs.git
+            pkgs.coreutils
+            pkgs.diffutils
+          ];
+          text = ''
+            mode=--check
+            if [ "''${1:-}" = "--fix" ]; then
+              mode=""
+              shift
+            fi
+            if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+              echo "pg-connector-filesets: inside the nix build sandbox; skipping" >&2
+              exit 0
+            fi
+            export GOTOOLCHAIN=local
+            top="$(git rev-parse --show-toplevel)"
+            module="''${PG_CONNECTOR_FILESETS_MODULE:-$top/packages/pg-connector}"
+            # shellcheck disable=SC2086 # $mode is empty or one flag
+            exec bash ${./packages/pg-connector/gen-filesets.sh} $mode "$module"
+          '';
+        };
+
       # pg2-i5t0k: the `prevent-main-rebase` pre-rebase hook's shell text
       # (used below as the `phillipgreenii.pre-commit.extraHooks` entry, and
       # again -- unchanged -- as `checks.<system>.test-prevent-main-rebase-hook`'s
@@ -984,6 +1020,21 @@
       # concurrent invocations of the entry, which would race one project's
       # suite against itself.
       phillipgreenii.pre-commit.extraHooks = pkgs: {
+        # Each pg-connector binary's nix fileset is generated from its Go import
+        # graph (packages/pg-connector/gen-filesets.sh -> filesets/<binary>.nix).
+        # This hook fails with a diff when a committed fileset is stale (a new
+        # in-module import not yet listed); `pg-hooks fix` regenerates it.
+        pg-connector-filesets = {
+          enable = true;
+          name = "pg-connector-filesets";
+          description = "pg-connector per-binary nix filesets are current (gen-filesets.sh --check)";
+          entry = "${pg-connector-filesets-hook-pkg pkgs}/bin/pg-connector-filesets-hook";
+          language = "system";
+          files = "^packages/pg-connector/(.*\\.go|go\\.mod|go\\.sum|gen-filesets\\.sh|filesets/.*\\.nix)$";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         run-unit-tests = {
           enable = true;
           name = "run-unit-tests";
@@ -1531,6 +1582,19 @@
       # stamp already covers.
       phillipgreenii.pre-commit = {
         bundle.enable = true;
+        # `pg-hooks fix` regenerates the pg-connector filesets after `git add`
+        # (the hook above only checks). Uses the `go` on PATH, GOTOOLCHAIN=local.
+        fixers = [
+          {
+            name = "pg-connector-filesets";
+            command = "env GOTOOLCHAIN=local bash ${./packages/pg-connector/gen-filesets.sh} --fixer";
+            includes = [
+              "packages/pg-connector/*.go"
+              "packages/pg-connector/go.mod"
+              "packages/pg-connector/go.sum"
+            ];
+          }
+        ];
         driftGuard = {
           enable = true;
           allowlist = import ./nix/hook-drift-allowlist.nix;
@@ -2151,6 +2215,26 @@
                   ''
                     export HOME="$TMPDIR/home"; mkdir -p "$HOME"
                     bats ${./tests/run-unit-tests-pinned-go.bats}
+                    touch $out
+                  '';
+
+              # bats test of the pg-connector-filesets hook (real go, throwaway module).
+              pg-connector-filesets-hook =
+                let
+                  wrapper = pg-connector-filesets-hook-pkg pkgs;
+                in
+                pkgs.runCommand "check-pg-connector-filesets-hook"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                      pkgs.go
+                    ];
+                    HOOK = "${wrapper}/bin/pg-connector-filesets-hook";
+                  }
+                  ''
+                    export HOME="$TMPDIR/home"; mkdir -p "$HOME"
+                    bats ${./tests/pg-connector-filesets-hook.bats}
                     touch $out
                   '';
 

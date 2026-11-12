@@ -40,19 +40,16 @@ mkGoApp {
   # own files does not touch this derivation's content hash.
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [
-      ./go.mod
-      ./go.sum
-      ./gomod2nix.toml
-      ./pkg/schema
-      ./pkg/scriptout
-      ./pkg/provider/iface.go
-      ./pkg/provider/thread
-      # Shared event-log writer (bead pg2-kjdfi): this backend's internal/eventlog
-      # imports it, so it is part of the build+test dependency graph.
-      ./pkg/eventlog
-      ./cmd/pg-connector-thread-slack
-    ];
+    # Generated from the binary's Go import graph by ./gen-filesets.sh (kept
+    # current by the pg-connector-filesets pre-commit hook); never hand-list.
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+        ./go.sum
+        ./gomod2nix.toml
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-thread-slack.nix)
+    );
   };
   gomod2nixToml = ./gomod2nix.toml;
 

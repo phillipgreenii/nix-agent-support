@@ -22,13 +22,16 @@ mkGoApp {
   # another backend's cmd/ tree does not touch this derivation's content hash.
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [
-      ./go.mod
-      ./go.sum
-      ./gomod2nix.toml
-      ./pkg
-      ./cmd/pg-connector-issue-jira
-    ];
+    # Generated from the binary's Go import graph by ./gen-filesets.sh (kept
+    # current by the pg-connector-filesets pre-commit hook); never hand-list.
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+        ./go.sum
+        ./gomod2nix.toml
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-issue-jira.nix)
+    );
   };
   gomod2nixToml = ./gomod2nix.toml;
 

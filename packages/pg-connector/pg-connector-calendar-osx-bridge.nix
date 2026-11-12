@@ -33,18 +33,16 @@ mkGoApp {
   # content hash.
   src = lib.fileset.toSource {
     root = ./.;
-    fileset = lib.fileset.unions [
-      ./go.mod
-      ./go.sum
-      ./gomod2nix.toml
-      ./pkg/schema
-      ./pkg/scriptout
-      ./pkg/provider/iface.go
-      ./pkg/provider/calendar
-      ./pkg/provider/attention
-      ./pkg/provider/search
-      ./cmd/pg-connector-calendar-osx-bridge
-    ];
+    # Generated from the binary's Go import graph by ./gen-filesets.sh (kept
+    # current by the pg-connector-filesets pre-commit hook); never hand-list.
+    fileset = lib.fileset.unions (
+      [
+        ./go.mod
+        ./go.sum
+        ./gomod2nix.toml
+      ]
+      ++ map (p: ./. + "/${p}") (import ./filesets/pg-connector-calendar-osx-bridge.nix)
+    );
   };
   gomod2nixToml = ./gomod2nix.toml;
 
