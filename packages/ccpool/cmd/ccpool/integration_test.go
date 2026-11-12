@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,7 @@ import (
 func buildCCPool(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "ccpool")
-	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build ccpool: %v\n%s", err, out)
 	}
@@ -24,7 +25,7 @@ func buildCCPool(t *testing.T) string {
 
 func runCC(t *testing.T, bin, xdgData, xdgState, externalID, stdin string, args ...string) (string, int) {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(t.Context(), bin, args...)
 	cmd.Env = runCCEnv(os.Environ(), xdgData, xdgState)
 	if externalID != "" {
 		cmd.Env = append(cmd.Env, "CCPOOL_EXTERNAL_ID="+externalID)
@@ -59,7 +60,7 @@ func runCCEnv(base []string, xdgData, xdgState string) []string {
 		if os.Getenv(k) != "" {
 			continue
 		}
-		if v, err := exec.Command("go", "env", k).Output(); err == nil {
+		if v, err := exec.CommandContext(context.Background(), "go", "env", k).Output(); err == nil {
 			env = append(env, k+"="+strings.TrimSpace(string(v)))
 		}
 	}
@@ -161,7 +162,7 @@ func TestRunCCEnv_sandboxesHome(t *testing.T) {
 		t.Fatalf("HOME = %q, want sandbox %q (real %q)", got["HOME"], base, realHome)
 	}
 	for _, k := range []string{"GOCACHE", "GOMODCACHE", "GOPATH"} {
-		if want, err := exec.Command("go", "env", k).Output(); err == nil && got[k] != strings.TrimSpace(string(want)) {
+		if want, err := exec.CommandContext(t.Context(), "go", "env", k).Output(); err == nil && got[k] != strings.TrimSpace(string(want)) {
 			t.Errorf("%s = %q, want real %q", k, got[k], strings.TrimSpace(string(want)))
 		}
 	}

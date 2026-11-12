@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +24,7 @@ func TestMain(m *testing.M) {
 
 func freePort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +48,7 @@ func writeConfig(t *testing.T, path string, port int, minutes int) {
 
 func get(t *testing.T, port int, path string, v any) int {
 	t.Helper()
-	res, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
+	res, err := httpGet(t, nil, fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
 	if err != nil {
 		return 0
 	}
@@ -69,7 +68,7 @@ func TestServeReloadsOnSIGHUPAndStopsOnSIGTERM(t *testing.T) {
 	port := freePort(t)
 	writeConfig(t, cfg, port, 50)
 
-	cmd := exec.Command(os.Args[0], "serve", "--config", cfg, "--data-dir", data)
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "serve", "--config", cfg, "--data-dir", data)
 	cmd.Env = append(os.Environ(), "PG_TASK_FOCUS_AS_MAIN=1", "HOME="+dir)
 	logFile, err := os.Create(filepath.Join(dir, "serve.log"))
 	if err != nil {
@@ -135,7 +134,7 @@ func TestServeReloadsOnSIGHUPAndStopsOnSIGTERM(t *testing.T) {
 		t.Fatal("the daemon did not stop on SIGTERM")
 	}
 	// The data directory is released: another daemon can take it.
-	cmd2 := exec.Command(os.Args[0], "check", data)
+	cmd2 := exec.CommandContext(t.Context(), os.Args[0], "check", data)
 	cmd2.Env = append(os.Environ(), "PG_TASK_FOCUS_AS_MAIN=1")
 	if out, err := cmd2.CombinedOutput(); err != nil {
 		t.Errorf("check after the stop: %v\n%s", err, out)
@@ -149,7 +148,7 @@ func TestServeFailureExitsWithItsOwnCode(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte(`{"listen_port": 1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(os.Args[0], "serve", "--config", cfg, "--data-dir", filepath.Join(dir, "data"))
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "serve", "--config", cfg, "--data-dir", filepath.Join(dir, "data"))
 	cmd.Env = append(os.Environ(), "PG_TASK_FOCUS_AS_MAIN=1")
 	out, err := cmd.CombinedOutput()
 	ee, ok := err.(*exec.ExitError)

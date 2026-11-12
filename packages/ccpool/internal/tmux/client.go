@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -28,11 +29,11 @@ func NewClient(socket string) *Client {
 }
 
 func (c *Client) execRun(args ...string) ([]byte, error) {
-	return exec.Command("tmux", args...).CombinedOutput()
+	return exec.CommandContext(context.Background(), "tmux", args...).CombinedOutput()
 }
 
 func (c *Client) execRunStdin(stdin string, args ...string) ([]byte, error) {
-	cmd := exec.Command("tmux", args...)
+	cmd := exec.CommandContext(context.Background(), "tmux", args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	return cmd.CombinedOutput()
 }

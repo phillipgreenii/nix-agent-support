@@ -4,6 +4,7 @@
 package notify
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,7 +34,7 @@ func (e Exec) Notify(ev Event) error {
 	if len(e.Argv) == 0 {
 		return nil
 	}
-	cmd := exec.Command(e.Argv[0], e.Argv[1:]...)
+	cmd := exec.CommandContext(context.Background(), e.Argv[0], e.Argv[1:]...)
 	cmd.Env = append(
 		os.Environ(),
 		"CCPOOL_NAME="+ev.Name,

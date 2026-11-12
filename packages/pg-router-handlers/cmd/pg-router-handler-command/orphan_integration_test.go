@@ -53,7 +53,7 @@ func TestOrphanedPayloadHoldsTheEventLock(t *testing.T) {
 	cfg := cmdConfig(false, "/bin/sh", "-c", `echo $$ > "`+pidFile+`"; exec sleep 600`)
 	req := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", cfg, true)
 
-	adapter := exec.Command(os.Args[0], "-test.run=^TestHelperAdapterProcess$")
+	adapter := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHelperAdapterProcess$")
 	adapter.Env = append(os.Environ(), envAdapterReq+"="+req, envAdapterLock+"="+lockDir)
 	if err := adapter.Start(); err != nil {
 		t.Fatal(err)

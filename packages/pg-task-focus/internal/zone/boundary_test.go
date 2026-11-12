@@ -128,7 +128,7 @@ func TestLoadChecksTheSpellingInZONEINFO(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Pgtf", "Synthetic"), utcTZif(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperLoadNames$") // #nosec G204 -- re-executes this test binary
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHelperLoadNames$") // #nosec G204 -- re-executes this test binary
 	cmd.Env = append(os.Environ(), "ZONEINFO="+dir, "PG_TASK_FOCUS_HELPER_NAMES=Pgtf/Synthetic,pgtf/synthetic,PGTF/Synthetic")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -20,7 +20,7 @@ import (
 func TestReapAll_gcAndSkip(t *testing.T) {
 	base := t.TempDir()
 	bin := filepath.Join(base, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	reg := filepath.Join(base, "reg")
@@ -60,7 +60,7 @@ func TestReapAll_gcAndSkip(t *testing.T) {
 		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
 		"CCPOOL_REGISTRY_DIR="+reg,
 	)
-	cmd := exec.Command(bin, "reap-all")
+	cmd := exec.CommandContext(t.Context(), bin, "reap-all")
 	cmd.Env = env
 	cmd.Dir = base
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -101,7 +101,7 @@ func TestReapAll_governsRegisteredPools(t *testing.T) {
 	bin := filepath.Join(base, "bin")
 	_ = os.MkdirAll(bin, 0o755)
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, _ := os.ReadFile("testdata/fake-claude")
@@ -156,7 +156,7 @@ timeout = "10s"
 		}
 	})
 	run := func(args ...string) (string, int) {
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()
@@ -169,7 +169,7 @@ timeout = "10s"
 		return string(out), code
 	}
 	hasSession := func(socket, name string) bool {
-		return exec.Command("tmux", "-L", socket, "has-session", "-t", "cc-"+name).Run() == nil
+		return exec.CommandContext(t.Context(), "tmux", "-L", socket, "has-session", "-t", "cc-"+name).Run() == nil
 	}
 
 	// Register each named pool by letting ccpool create its dir (a read-only `list`
@@ -242,7 +242,7 @@ func TestReapAll_closureNarrationResolvesEachPoolsOwnLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, err := os.ReadFile("testdata/fake-claude")
@@ -278,7 +278,7 @@ func TestReapAll_closureNarrationResolvesEachPoolsOwnLabels(t *testing.T) {
 	)
 	run := func(extraEnv []string, args ...string) string {
 		t.Helper()
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = append(append([]string{}, env...), extraEnv...)
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()

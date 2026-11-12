@@ -24,7 +24,7 @@ func serve(t *testing.T, reply string) (path string, req chan map[string]any) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	path = filepath.Join(dir, "s.sock")
-	l, err := net.Listen("unix", path)
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}

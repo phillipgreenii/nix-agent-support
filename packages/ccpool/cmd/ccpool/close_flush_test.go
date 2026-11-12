@@ -67,7 +67,7 @@ func (c *fakeCollector) saw(name string) bool {
 // environment (the environment is inherited like any exec'd child's).
 func TestClose_flushesRunLifecycleMetricsThroughRun(t *testing.T) {
 	col := &fakeCollector{names: map[string]bool{}}
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	lis, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Skipf("cannot listen on loopback: %v", err)
 	}

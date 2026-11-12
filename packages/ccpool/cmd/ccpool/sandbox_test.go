@@ -5,6 +5,7 @@ package main
 // sandboxes the whole run lives in hermetic_test.go.
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,8 +49,8 @@ func killTmuxServersUnder(dir string) map[string][]string {
 		return live
 	}
 	for _, sock := range tmuxSocketsUnder(dir) {
-		out, err := exec.Command("tmux", "-S", sock, "list-sessions", "-F", "#{session_name}").Output()
-		_ = exec.Command("tmux", "-S", sock, "kill-server").Run()
+		out, err := exec.CommandContext(context.Background(), "tmux", "-S", sock, "list-sessions", "-F", "#{session_name}").Output()
+		_ = exec.CommandContext(context.Background(), "tmux", "-S", sock, "kill-server").Run()
 		if err == nil {
 			live[sock] = strings.Fields(string(out))
 		}

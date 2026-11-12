@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -54,7 +55,7 @@ func ccpoolBin(t *testing.T) string {
 		}
 		builtDir = dir
 		bin := filepath.Join(dir, "ccpool")
-		if out, e := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); e != nil {
+		if out, e := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput(); e != nil {
 			buildErr = fmt.Errorf("build ccpool: %v\n%s", e, out)
 			return
 		}
@@ -68,7 +69,7 @@ func ccpoolBin(t *testing.T) string {
 
 func TestContract_GuardAndBuild(t *testing.T) {
 	bin := ccpoolBin(t)
-	out, err := exec.Command(bin, "version").CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), bin, "version").CombinedOutput()
 	if err != nil {
 		t.Fatalf("ccpool version: %v\n%s", err, out)
 	}
@@ -177,7 +178,7 @@ func (sb *sandbox) envGet(key string) string {
 // ccp runs the binary-under-test with the sandbox env; returns combined output + exit code.
 func (sb *sandbox) ccp(args ...string) (string, int) {
 	sb.t.Helper()
-	cmd := exec.Command(sb.bin, args...)
+	cmd := exec.CommandContext(context.Background(), sb.bin, args...)
 	cmd.Env = sb.env
 	cmd.Dir = sb.cwd
 	// Force a non-TTY stdin. With Stdin unset, exec wires the child to /dev/null,
@@ -208,7 +209,7 @@ func (sb *sandbox) ccpTimed(budget time.Duration, args ...string) (string, int, 
 		code int
 		err  error
 	}
-	cmd := exec.Command(sb.bin, args...)
+	cmd := exec.CommandContext(context.Background(), sb.bin, args...)
 	cmd.Env = sb.env
 	cmd.Dir = sb.cwd
 	cmd.Stdin = strings.NewReader("") // non-TTY stdin; see ccp for rationale
@@ -245,7 +246,7 @@ func (sb *sandbox) ccpTimed(budget time.Duration, args ...string) (string, int, 
 // cap captures the tmux pane for session <prefix><name>.
 func (sb *sandbox) cap(name string) string {
 	sb.t.Helper()
-	out, _ := exec.Command("tmux", "-L", sb.socket, "capture-pane", "-t", sb.prefix+name, "-p").Output()
+	out, _ := exec.CommandContext(context.Background(), "tmux", "-L", sb.socket, "capture-pane", "-t", sb.prefix+name, "-p").Output()
 	return string(out)
 }
 
@@ -255,7 +256,7 @@ func (sb *sandbox) cap(name string) string {
 // diagnostic-gathering itself introduce a new failure mode (unlike ccp/ccpTimed,
 // which intentionally Fatalf on an unexpected exec error).
 func (sb *sandbox) ccpBestEffort(args ...string) string {
-	cmd := exec.Command(sb.bin, args...)
+	cmd := exec.CommandContext(context.Background(), sb.bin, args...)
 	cmd.Env = sb.env
 	cmd.Dir = sb.cwd
 	cmd.Stdin = strings.NewReader("")

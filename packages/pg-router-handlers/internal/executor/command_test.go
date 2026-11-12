@@ -29,7 +29,7 @@ func (f fakeExitCmd) Run(_ context.Context, _ []string) ([]byte, error) { return
 // hand-rolled type merely satisfying an ExitCode() interface).
 func fabricateExitError(t *testing.T, code int) *exec.ExitError {
 	t.Helper()
-	err := exec.Command("/bin/sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	err := exec.CommandContext(t.Context(), "/bin/sh", "-c", fmt.Sprintf("exit %d", code)).Run()
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("fabricateExitError(%d): sh -c did not produce *exec.ExitError; err=%v", code, err)

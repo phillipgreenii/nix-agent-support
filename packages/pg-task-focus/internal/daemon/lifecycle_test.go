@@ -188,7 +188,7 @@ func TestStartReleasesItsPortWhenOpeningTheStoreFails(t *testing.T) {
 		if err := startErr(t, second); !errors.As(err, &se) || se.Stage != "lock" {
 			t.Fatalf("attempt %d: a second daemon on a held data directory: %v", attempt, err)
 		}
-		ln, err := net.Listen("tcp", addr)
+		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", addr)
 		if err != nil {
 			t.Fatalf("attempt %d: the port is still bound after the failed Start returned: %v", attempt, err)
 		}

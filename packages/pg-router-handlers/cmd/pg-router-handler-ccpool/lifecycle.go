@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -139,7 +140,7 @@ func kickJanitor(cfgPath, roleFile string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "janitor", "--config", cfgPath, "--role-file", roleFile)
+	cmd := exec.CommandContext(context.Background(), exe, "janitor", "--config", cfgPath, "--role-file", roleFile)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return err

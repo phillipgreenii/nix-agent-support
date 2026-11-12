@@ -55,7 +55,7 @@ func proxyTo(t *testing.T, e *clienttest.Env) (*facts.Reader, *recordingProxy) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "p.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,7 +25,7 @@ func TestCapacity_emptyPoolFreeEqualsMax(t *testing.T) {
 	bin := filepath.Join(base, "bin")
 	_ = os.MkdirAll(bin, 0o755)
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	installFakePAMonitor(t, bin, `{"sessions":[]}`)
@@ -48,7 +48,7 @@ socket = "`+socket+`"
 		"HOME="+base, "PATH="+bin+":"+os.Getenv("PATH"),
 	)
 	run := func(args ...string) (string, int) {
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()
@@ -107,7 +107,7 @@ func TestUsageGate_endToEndRefusesWhileWindowHit(t *testing.T) {
 	bin := filepath.Join(base, "bin")
 	_ = os.MkdirAll(bin, 0o755)
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	hit := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
@@ -125,7 +125,7 @@ func TestUsageGate_endToEndRefusesWhileWindowHit(t *testing.T) {
 		"HOME="+base, "PATH="+bin+":"+os.Getenv("PATH"),
 	)
 	run := func(args ...string) (stdout, stderr string, code int) {
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		var so, se strings.Builder

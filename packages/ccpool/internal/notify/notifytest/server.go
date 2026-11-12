@@ -44,7 +44,7 @@ func Start(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	s := &Server{Path: filepath.Join(dir, "n.sock")}
-	s.ln, err = net.Listen("unix", s.Path)
+	s.ln, err = (&net.ListenConfig{}).Listen(t.Context(), "unix", s.Path)
 	if err != nil {
 		t.Fatal(err)
 	}

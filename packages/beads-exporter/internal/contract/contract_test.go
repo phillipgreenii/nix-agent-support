@@ -141,7 +141,7 @@ func (e *env) writeEnv() []string {
 
 func (e *env) bdCmd(stdin string, args ...string) (stdout, stderr string, code int) {
 	e.t.Helper()
-	cmd := exec.Command(*bdPath, args...)
+	cmd := exec.CommandContext(context.Background(), *bdPath, args...)
 	cmd.Dir = e.ws
 	cmd.Env = e.writeEnv()
 	if stdin != "" {

@@ -34,7 +34,7 @@ func fakeRecorder(t *testing.T) (socket string, hellos *atomic.Int64) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket = filepath.Join(dir, "r.sock")
-	l, err := net.Listen("unix", socket)
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}

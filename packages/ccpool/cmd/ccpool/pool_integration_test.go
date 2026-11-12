@@ -22,7 +22,7 @@ func TestPools_isolated(t *testing.T) {
 	}
 	base := t.TempDir()
 	bin := filepath.Join(base, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, err := os.ReadFile("testdata/fake-claude")
@@ -57,7 +57,7 @@ func TestPools_isolated(t *testing.T) {
 	})
 	run := func(pool string, args ...string) (string, int) {
 		full := append([]string{"--pool", pool}, args...)
-		cmd := exec.Command(bin, full...)
+		cmd := exec.CommandContext(t.Context(), bin, full...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()

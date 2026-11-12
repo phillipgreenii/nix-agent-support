@@ -29,7 +29,7 @@ func TestResolveRef_flagsThenEnv(t *testing.T) {
 
 func TestRelay_roundTripsThroughAUnixSocket(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "c.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sock)
 	if err != nil {
 		t.Skipf("unix sockets unavailable: %v", err)
 	}

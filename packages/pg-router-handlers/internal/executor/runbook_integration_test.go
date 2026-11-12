@@ -19,7 +19,7 @@ func TestRunbookRecipes(t *testing.T) {
 	fixture := filepath.Join("testdata", "dispatch-results.jsonl")
 	run := func(args ...string) string {
 		t.Helper()
-		out, err := exec.Command(jq, append(args, fixture)...).CombinedOutput()
+		out, err := exec.CommandContext(t.Context(), jq, append(args, fixture)...).CombinedOutput()
 		if err != nil {
 			t.Fatalf("jq %v: %v\n%s", args, err, out)
 		}

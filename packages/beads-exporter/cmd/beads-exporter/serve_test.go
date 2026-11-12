@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +65,7 @@ func (s *syncBuffer) String() string {
 
 func freePort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +103,7 @@ func TestServeRunsTheStrandedPassOnItsInterval(t *testing.T) {
 	deadline := time.Now().Add(20 * time.Second)
 	var body string
 	for time.Now().Before(deadline) {
-		if resp, err := http.Get(url); err == nil {
+		if resp, err := httpGet(t, nil, url); err == nil {
 			raw, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 			body = string(raw)

@@ -19,7 +19,7 @@ func TestClose_endsTheSession(t *testing.T) {
 	bin := filepath.Join(base, "bin")
 	_ = os.MkdirAll(bin, 0o755)
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, _ := os.ReadFile("testdata/fake-claude")
@@ -47,7 +47,7 @@ timeout = "10s"
 		"HOME="+base, "CCPOOL_BIN="+ccpool, "PATH="+bin+":"+os.Getenv("PATH"),
 	)
 	run := func(args ...string) (string, int) {
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()
@@ -67,7 +67,7 @@ timeout = "10s"
 		t.Fatalf("close exit=%d:\n%s", code, out)
 	}
 	time.Sleep(300 * time.Millisecond)
-	if exec.Command("tmux", "-L", socket, "has-session", "-t", "cc-alpha").Run() == nil {
+	if exec.CommandContext(t.Context(), "tmux", "-L", socket, "has-session", "-t", "cc-alpha").Run() == nil {
 		t.Error("cc-alpha still live after close")
 	}
 	// --purge drops the row: build a fresh one, purge, assert gone from --all.

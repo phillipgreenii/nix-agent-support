@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"os/exec"
 	"testing"
 )
@@ -18,19 +19,19 @@ func tmuxAvailable(t *testing.T) {
 func TestHasSession_trueForLive_falseAfterKill(t *testing.T) {
 	tmuxAvailable(t)
 	// ensure clean server
-	_ = exec.Command("tmux", "-L", testSocket, "kill-server").Run()
-	t.Cleanup(func() { _ = exec.Command("tmux", "-L", testSocket, "kill-server").Run() })
+	_ = exec.CommandContext(t.Context(), "tmux", "-L", testSocket, "kill-server").Run()
+	t.Cleanup(func() { _ = exec.CommandContext(context.Background(), "tmux", "-L", testSocket, "kill-server").Run() })
 
 	if HasSession(testSocket, "cc-live") {
 		t.Fatal("HasSession true before creation")
 	}
-	if err := exec.Command("tmux", "-L", testSocket, "new-session", "-d", "-s", "cc-live", "sleep", "30").Run(); err != nil {
+	if err := exec.CommandContext(t.Context(), "tmux", "-L", testSocket, "new-session", "-d", "-s", "cc-live", "sleep", "30").Run(); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	if !HasSession(testSocket, "cc-live") {
 		t.Fatal("HasSession false for a live session")
 	}
-	_ = exec.Command("tmux", "-L", testSocket, "kill-session", "-t", "cc-live").Run()
+	_ = exec.CommandContext(t.Context(), "tmux", "-L", testSocket, "kill-session", "-t", "cc-live").Run()
 	if HasSession(testSocket, "cc-live") {
 		t.Fatal("HasSession true after kill")
 	}
@@ -38,7 +39,7 @@ func TestHasSession_trueForLive_falseAfterKill(t *testing.T) {
 
 func TestHasSession_falseWhenNoServer(t *testing.T) {
 	tmuxAvailable(t)
-	_ = exec.Command("tmux", "-L", "ccpool-noserver", "kill-server").Run()
+	_ = exec.CommandContext(t.Context(), "tmux", "-L", "ccpool-noserver", "kill-server").Run()
 	if HasSession("ccpool-noserver", "cc-anything") {
 		t.Fatal("HasSession true with no server running")
 	}

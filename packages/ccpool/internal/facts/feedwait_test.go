@@ -26,7 +26,7 @@ func fakeRecorder(t *testing.T, feed func(n int32) (int, any)) (string, *atomic.
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "r.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

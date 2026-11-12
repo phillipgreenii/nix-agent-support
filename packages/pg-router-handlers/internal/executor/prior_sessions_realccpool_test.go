@@ -184,7 +184,7 @@ func newRealSandbox(t *testing.T) *realSandbox {
 func (sb *realSandbox) killTmux() {
 	socks, _ := filepath.Glob(filepath.Join(sb.tmuxDir, "tmux-*", "*"))
 	for _, s := range socks {
-		_ = exec.Command("tmux", "-S", s, "kill-server").Run()
+		_ = exec.CommandContext(context.Background(), "tmux", "-S", s, "kill-server").Run()
 	}
 }
 
@@ -283,7 +283,7 @@ func (p *realPool) hook(id, event, notificationType string) {
 		"session_id": s.ClaudeSessionID, "transcript_path": s.TranscriptPath,
 		"hook_event_name": event, "notification_type": notificationType,
 	})
-	cmd := exec.Command("ccpool", "hook", event)
+	cmd := exec.CommandContext(context.Background(), "ccpool", "hook", event)
 	cmd.Env = append(os.Environ(), "CCPOOL_POOL="+p.poolDir, "CCPOOL_EXTERNAL_ID="+id)
 	cmd.Stdin = strings.NewReader(string(payload))
 	if out, err := cmd.CombinedOutput(); err != nil {

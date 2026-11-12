@@ -119,7 +119,7 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	mainPass.Init(ctx, dbs)
 
 	reg := metrics.Default()
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

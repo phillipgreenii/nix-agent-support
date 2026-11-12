@@ -170,7 +170,7 @@ func Start(ctx context.Context, p Params) (*Daemon, error) {
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
 		return fail("listen", fmt.Errorf("%q is not a loopback address; the API is loopback-only", host))
 	}
-	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(cfg.ListenPort())))
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(cfg.ListenPort())))
 	if err != nil {
 		return fail("listen", err)
 	}

@@ -254,7 +254,7 @@ func assertWedgeKilled(t *testing.T, wedgedGitPath string) {
 		t.Fatalf("wedged git never started its wedge (no pid file): %v", err)
 	}
 	pid := strings.TrimSpace(string(raw))
-	out, _ := exec.Command("ps", "-o", "command=", "-p", pid).Output()
+	out, _ := exec.CommandContext(t.Context(), "ps", "-o", "command=", "-p", pid).Output()
 	if strings.Contains(string(out), "sleep") {
 		t.Errorf("wedged git process %s is still running (%q): it was not killed by gitCallTimeout", pid, strings.TrimSpace(string(out)))
 	}

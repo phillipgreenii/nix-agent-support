@@ -84,7 +84,7 @@ func (l *lockedBuf) String() string {
 
 func freePort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func (r resp) Reason() string {
 // any contract check.
 func (e *env) raw(method, path string, body []byte, hdr map[string]string) resp {
 	e.t.Helper()
-	req, err := http.NewRequest(method, e.url(path), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(e.t.Context(), method, e.url(path), bytes.NewReader(body))
 	if err != nil {
 		e.t.Fatal(err)
 	}

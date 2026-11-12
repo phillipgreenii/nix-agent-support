@@ -23,7 +23,7 @@ func fakeCore(t *testing.T, exit int, reply string) (sock string, seen <-chan ma
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock = filepath.Join(dir, "c.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sock)
 	if err != nil {
 		t.Skipf("unix sockets unavailable: %v", err)
 	}

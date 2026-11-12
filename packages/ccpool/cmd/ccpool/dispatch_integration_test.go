@@ -15,7 +15,7 @@ import (
 // which always sets up isolated XDG dirs for paths that DO touch the store).
 func runHelpish(t *testing.T, bin string, args ...string) (string, int) {
 	t.Helper()
-	out, err := exec.Command(bin, args...).CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), bin, args...).CombinedOutput()
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()

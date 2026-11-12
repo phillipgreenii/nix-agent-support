@@ -22,7 +22,7 @@ func TestSweep_killedHandlerBetweenWorktreeAndSession_reclaimedOnNextDispatch(t 
 	h := newSweepHarness(t)
 	path := h.leak("zr-k")
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperHoldWorktreeLock$")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHelperHoldWorktreeLock$")
 	// The helper never runs git, so it gets a minimal environment: nothing
 	// inherited (in particular no GIT_*), only what it reads.
 	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, "PGR_HELPER_HOLD_LOCK=1", "PGR_HELPER_LOCK_DIR="+h.lockDir, "PGR_HELPER_BEAD=zr-k")
@@ -88,7 +88,7 @@ func TestSweep_realProcessInTheWorktreeIsFoundByLsof(t *testing.T) {
 	path := h.leak("zr-k")
 	h.env.cwds = processCWDs
 
-	cmd := exec.Command("sleep", "300")
+	cmd := exec.CommandContext(t.Context(), "sleep", "300")
 	cmd.Dir = path
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

@@ -18,7 +18,7 @@ func TestReply_returnsAssistantReply(t *testing.T) {
 	bin := filepath.Join(base, "bin")
 	_ = os.MkdirAll(bin, 0o755)
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, _ := os.ReadFile("testdata/fake-claude")
@@ -52,7 +52,7 @@ timeout = "10s"
 		"PATH="+bin+":"+os.Getenv("PATH"),
 	)
 	run := func(args ...string) (string, int) {
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()

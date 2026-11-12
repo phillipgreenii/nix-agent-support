@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -39,7 +40,7 @@ func newFFPool(t *testing.T, claudeBin, timeout string) *ffPool {
 		t.Fatal(err)
 	}
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, err := os.ReadFile("testdata/fake-claude")
@@ -101,7 +102,7 @@ func (p *ffPool) writeConfig(claudeBin, timeout string) {
 // it took.
 func (p *ffPool) run(args ...string) (string, int, time.Duration) {
 	p.t.Helper()
-	cmd := exec.Command(p.ccpool, args...)
+	cmd := exec.CommandContext(context.Background(), p.ccpool, args...)
 	cmd.Env = p.env
 	cmd.Dir = filepath.Join(p.base, "proj")
 	start := time.Now()
@@ -207,7 +208,7 @@ func TestFailFast_replyResumeFailsFast(t *testing.T) {
 	if out, code, _ := p.run("new", "rs"); code != 0 {
 		t.Fatalf("new exit=%d:\n%s", code, out)
 	}
-	if out, err := exec.Command("tmux", "-L", p.socket, "kill-session", "-t", "cc-rs").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "tmux", "-L", p.socket, "kill-session", "-t", "cc-rs").CombinedOutput(); err != nil {
 		t.Fatalf("kill-session: %v\n%s", err, out)
 	}
 

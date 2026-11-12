@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,7 +48,12 @@ func (h *healthReaders) read(n int, paths ...string) {
 				default:
 				}
 				path := paths[i%len(paths)]
-				res, err := h.client.Get(h.url(path))
+				req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, h.url(path), nil)
+				if err != nil {
+					h.record(path, -1)
+					return
+				}
+				res, err := h.client.Do(req)
 				if err != nil {
 					time.Sleep(200 * time.Microsecond)
 					continue

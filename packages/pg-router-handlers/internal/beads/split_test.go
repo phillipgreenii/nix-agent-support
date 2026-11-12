@@ -259,7 +259,7 @@ const guardedRelease = "update pg2-p --status=open --assignee= --if-assignee pgi
 // longer holds: a real *exec.ExitError, which is what IsGuardStale reads.
 func guardStaleErr(t *testing.T) error {
 	t.Helper()
-	err := exec.Command("sh", "-c", "exit 13").Run()
+	err := exec.CommandContext(t.Context(), "sh", "-c", "exit 13").Run()
 	if !IsGuardStale(err) {
 		t.Fatalf("test setup: %v is not a stale-guard error", err)
 	}

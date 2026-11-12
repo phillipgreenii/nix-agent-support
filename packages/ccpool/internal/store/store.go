@@ -133,7 +133,7 @@ func Open(dbPath string, c clock.Clock, opts ...Option) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open: %w", err)
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping: %w", err)
 	}

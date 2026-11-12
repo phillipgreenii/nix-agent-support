@@ -256,7 +256,7 @@ enabled = false
 func (sb *adoptSandbox) killTmux() {
 	socks, _ := filepath.Glob(filepath.Join(sb.tmuxDir, "tmux-*", "*"))
 	for _, s := range socks {
-		_ = exec.Command("tmux", "-S", s, "kill-server").Run()
+		_ = exec.CommandContext(context.Background(), "tmux", "-S", s, "kill-server").Run()
 	}
 }
 
@@ -320,7 +320,7 @@ type handlerProc struct {
 func (sb *adoptSandbox) start(name, bin string, args []string, request []byte) *handlerProc {
 	sb.t.Helper()
 	p := &handlerProc{name: name, done: make(chan struct{})}
-	p.cmd = exec.Command(bin, args...)
+	p.cmd = exec.CommandContext(context.Background(), bin, args...)
 	p.cmd.Env = append(os.Environ(), "PATH="+sb.fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	p.cmd.Stdin = bytes.NewReader(request)
 	p.cmd.Stdout, p.cmd.Stderr = &p.out, &p.err

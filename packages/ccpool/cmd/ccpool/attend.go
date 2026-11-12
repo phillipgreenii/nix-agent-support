@@ -134,7 +134,7 @@ func pickFzf(cands []store.Session) (string, bool) {
 		in.WriteString(candidateLine(c))
 		in.WriteByte('\n')
 	}
-	cmd := exec.Command("fzf", "--delimiter", "\t", "--with-nth", "1,2,3,4,5", "--prompt", "attend> ")
+	cmd := exec.CommandContext(context.Background(), "fzf", "--delimiter", "\t", "--with-nth", "1,2,3,4,5", "--prompt", "attend> ")
 	cmd.Stdin = strings.NewReader(in.String())
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()

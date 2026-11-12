@@ -18,7 +18,7 @@ import (
 // args and a request on stdin, and returns the exit code and stdout.
 func runAdapterProcess(t *testing.T, args []string, stdin string, env ...string) (int, string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], args...)
+	cmd := exec.CommandContext(t.Context(), os.Args[0], args...)
 	cmd.Env = append(os.Environ(), append([]string{adapterRunEnv + "=1"}, env...)...)
 	cmd.Dir = t.TempDir()
 	cmd.Stdin = strings.NewReader(stdin)

@@ -165,7 +165,7 @@ func TestLoadIgnoresBrokenZONEINFO(t *testing.T) {
 	}
 	for name, zoneinfo := range cases {
 		t.Run(name, func(t *testing.T) {
-			cmd := exec.Command(os.Args[0], "-test.run=^TestHelperLoad$") // #nosec G204 -- re-executes this test binary
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHelperLoad$") // #nosec G204 -- re-executes this test binary
 			cmd.Env = append(os.Environ(), "ZONEINFO="+zoneinfo, "PG_TASK_FOCUS_HELPER=1")
 			out, err := cmd.CombinedOutput()
 			if err != nil {

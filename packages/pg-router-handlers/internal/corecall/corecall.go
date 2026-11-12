@@ -5,6 +5,7 @@
 package corecall
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,7 +93,7 @@ const callTimeout = 5 * time.Second
 // the reply body plus the core's own coarse exit code — the client half of
 // the same wire framing pg-router's core (internal/core.Client.Call) speaks.
 func Call(ref Ref, subcommand string, payload []byte) ([]byte, int, error) {
-	conn, err := net.DialTimeout("unix", ref.Socket, dialTimeout)
+	conn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(context.Background(), "unix", ref.Socket)
 	if err != nil {
 		return nil, 0, fmt.Errorf("dial core socket %s: %w", ref.Socket, err)
 	}

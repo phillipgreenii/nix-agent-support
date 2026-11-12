@@ -139,7 +139,7 @@ func TestMigration009_appliesOnExistingDBLeavingRowsUntouched(t *testing.T) {
 	}
 	insertSess(t, st, "a")
 	// Roll the DB back to its pre-009 shape.
-	if _, err := st.db.Exec(`DROP TABLE session_runs; DELETE FROM schema_migrations WHERE version = 9`); err != nil {
+	if _, err := st.db.ExecContext(t.Context(), `DROP TABLE session_runs; DELETE FROM schema_migrations WHERE version = 9`); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.Close()
@@ -177,7 +177,7 @@ func TestMigration010_endedRunsDefaultEmittedLaterRunsStartAtZero(t *testing.T) 
 	}
 	_, _ = st.OpenRun(ctx, "a") // still open when 010 applies
 	// Roll the DB back to its pre-010 shape (drop the column, forget the version).
-	if _, err := st.db.Exec(`ALTER TABLE session_runs DROP COLUMN metrics_emitted; DELETE FROM schema_migrations WHERE version = 10`); err != nil {
+	if _, err := st.db.ExecContext(t.Context(), `ALTER TABLE session_runs DROP COLUMN metrics_emitted; DELETE FROM schema_migrations WHERE version = 10`); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.Close()

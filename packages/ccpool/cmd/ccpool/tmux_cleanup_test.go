@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -8,7 +9,7 @@ import (
 
 // tmuxServerUp reports whether a tmux server still answers on the -L socket.
 func tmuxServerUp(socket string) bool {
-	return exec.Command("tmux", "-L", socket, "list-sessions").Run() == nil
+	return exec.CommandContext(context.Background(), "tmux", "-L", socket, "list-sessions").Run() == nil
 }
 
 // killTmuxServer kills the test's own tmux server on socket and fails t when a
@@ -20,7 +21,7 @@ func killTmuxServer(t *testing.T, socket string) {
 	if socket == "" {
 		return
 	}
-	_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", socket, "kill-server").Run()
 	if tmuxServerUp(socket) {
 		t.Errorf("tmux server still running on socket %q after kill-server", socket)
 	}
@@ -44,7 +45,7 @@ func TestKillTmuxServer_removesServerAndTolerantOfAbsent(t *testing.T) {
 		socket = socket[:40]
 	}
 	killTmuxServer(t, socket) // no server yet: must not fail
-	if out, err := exec.Command("tmux", "-L", socket, "new-session", "-d", "-s", "cc-x", "sleep", "30").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "tmux", "-L", socket, "new-session", "-d", "-s", "cc-x", "sleep", "30").CombinedOutput(); err != nil {
 		t.Fatalf("new-session: %v\n%s", err, out)
 	}
 	registerTmuxCleanup(t, socket)

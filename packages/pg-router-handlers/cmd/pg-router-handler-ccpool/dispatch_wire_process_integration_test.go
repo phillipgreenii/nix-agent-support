@@ -39,7 +39,7 @@ func runWithClosedStdoutPipe(t *testing.T, mode string) error {
 	} else {
 		env = brokenPipeBareEnv + "=1"
 	}
-	cmd := exec.Command(exe, args...)
+	cmd := exec.CommandContext(t.Context(), exe, args...)
 	cmd.Env = append(os.Environ(), env)
 	cmd.Stdout = pw
 	var stderr strings.Builder

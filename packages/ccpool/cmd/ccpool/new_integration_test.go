@@ -26,7 +26,7 @@ func TestNew_launchesFakeClaude_reachesReadyAndLive(t *testing.T) {
 	}
 	// Build ccpool and place fake-claude beside it.
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, err := os.ReadFile("testdata/fake-claude")
@@ -66,7 +66,7 @@ timeout = "10s"
 	)
 
 	run := func(args ...string) (string, int) {
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()
@@ -95,7 +95,7 @@ timeout = "10s"
 	}
 
 	// kill the tmux session → list shows not-live.
-	_ = exec.Command("tmux", "-L", socket, "kill-session", "-t", "cc-alpha").Run()
+	_ = exec.CommandContext(t.Context(), "tmux", "-L", socket, "kill-session", "-t", "cc-alpha").Run()
 	time.Sleep(300 * time.Millisecond)
 	out, _ = run("list", "--all")
 	if !strings.Contains(out, "alpha") {
@@ -123,7 +123,7 @@ func TestNew_metaFlag_setsMetadataAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, err := os.ReadFile("testdata/fake-claude")
@@ -161,7 +161,7 @@ timeout = "10s"
 	_ = os.MkdirAll(proj, 0o755)
 
 	// new WITH --meta, no separate `meta set`.
-	newCmd := exec.Command(ccpool, "new", "ext-meta", "--cwd", proj,
+	newCmd := exec.CommandContext(t.Context(), ccpool, "new", "ext-meta", "--cwd", proj,
 		"--meta", "pgrouter.bead=zr-1", "--meta", "pgrouter.role=worker")
 	newCmd.Env = env
 	if out, err := newCmd.CombinedOutput(); err != nil {
@@ -169,7 +169,7 @@ timeout = "10s"
 	}
 
 	// meta get must return the value set by `new`.
-	getCmd := exec.Command(ccpool, "meta", "get", "ext-meta", "pgrouter.bead")
+	getCmd := exec.CommandContext(t.Context(), ccpool, "meta", "get", "ext-meta", "pgrouter.bead")
 	getCmd.Env = env
 	out, err := getCmd.CombinedOutput()
 	if err != nil {
@@ -198,7 +198,7 @@ func TestNew_labelFlag_carriesLabelIntoSessionNarration(t *testing.T) {
 		t.Fatal(err)
 	}
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, err := os.ReadFile("testdata/fake-claude")
@@ -239,7 +239,7 @@ func TestNew_labelFlag_carriesLabelIntoSessionNarration(t *testing.T) {
 	}
 	run := func(args ...string) string {
 		t.Helper()
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()

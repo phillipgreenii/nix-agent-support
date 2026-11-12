@@ -375,7 +375,7 @@ func TestRemoveWorktree_realGit_crashBetweenRenameAndDeleteLeavesDrainableTrash(
 // environment (a pre-commit hook run exports the repository-redirecting ones)
 // removed.
 func hermeticGit(dir string, args ...string) *exec.Cmd {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...)
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "GIT_") {
 			cmd.Env = append(cmd.Env, kv)

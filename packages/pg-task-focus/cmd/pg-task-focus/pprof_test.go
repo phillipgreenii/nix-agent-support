@@ -48,7 +48,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("no listening line: %q", line)
 	}
 	addr := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	resp, err := httpGet(t, nil, "http://"+addr+"/debug/pprof/")
 	if err != nil {
 		stop()
 		t.Fatalf("GET: %v", err)
@@ -59,7 +59,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	stop()
-	if resp, err := http.Get("http://" + addr + "/debug/pprof/"); err == nil {
+	if resp, err := httpGet(t, nil, "http://"+addr+"/debug/pprof/"); err == nil {
 		_ = resp.Body.Close()
 		t.Fatal("still serving after stop")
 	}
@@ -104,7 +104,7 @@ func TestStartPprofFromEnvUnixSocketServesWith0600AndStops(t *testing.T) {
 	client := &http.Client{Transport: &http.Transport{
 		DialContext: dialUnix(sock),
 	}}
-	resp, err := client.Get("http://pprof/debug/pprof/")
+	resp, err := httpGet(t, client, "http://pprof/debug/pprof/")
 	if err != nil {
 		t.Fatalf("GET over socket: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestStartPprofFromEnvUnixSocketServesWith0600AndStops(t *testing.T) {
 	}
 	stop()
 	stopped = true
-	if resp, err := client.Get("http://pprof/debug/pprof/"); err == nil {
+	if resp, err := httpGet(t, client, "http://pprof/debug/pprof/"); err == nil {
 		_ = resp.Body.Close()
 		t.Fatal("still serving after stop")
 	}

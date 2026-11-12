@@ -40,7 +40,7 @@ func TestMetricsEndpointServesTheSnapshot(t *testing.T) {
 
 	srv := httptest.NewServer(Handler(c, metrics.Default(), quiet()))
 	defer srv.Close()
-	resp, err := http.Get(srv.URL + "/metrics")
+	resp, err := httpGet(t, nil, srv.URL+"/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestEmptySnapshotIsAnEmptyBody(t *testing.T) {
 	c := collect.New(fixedClock{}, nil, nil, quiet())
 	srv := httptest.NewServer(Handler(c, metrics.Default(), quiet()))
 	defer srv.Close()
-	resp, err := http.Get(srv.URL + "/metrics")
+	resp, err := httpGet(t, nil, srv.URL+"/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestOtherPathsAndMethodsAreRejected(t *testing.T) {
 	c := collect.New(fixedClock{}, nil, nil, quiet())
 	srv := httptest.NewServer(Handler(c, metrics.Default(), quiet()))
 	defer srv.Close()
-	resp, err := http.Get(srv.URL + "/other")
+	resp, err := httpGet(t, nil, srv.URL+"/other")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestOtherPathsAndMethodsAreRejected(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("/other status = %d", resp.StatusCode)
 	}
-	resp, err = http.Post(srv.URL+"/metrics", "text/plain", strings.NewReader(""))
+	resp, err = httpPost(t, srv.URL+"/metrics", "text/plain", strings.NewReader(""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestRenderErrorIs500(t *testing.T) {
 	empty, _ := metrics.NewRegistry()
 	srv := httptest.NewServer(Handler(c, empty, quiet()))
 	defer srv.Close()
-	resp, err := http.Get(srv.URL + "/metrics")
+	resp, err := httpGet(t, nil, srv.URL+"/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}

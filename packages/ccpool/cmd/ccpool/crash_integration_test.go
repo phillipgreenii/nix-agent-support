@@ -33,7 +33,7 @@ func TestCrash_leavesInspectablePane(t *testing.T) {
 		t.Fatal(err)
 	}
 	ccpool := filepath.Join(bin, "ccpool")
-	if out, err := exec.Command("go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "go", "build", "-o", ccpool, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	src, err := os.ReadFile("testdata/fake-claude-crash")
@@ -72,7 +72,7 @@ timeout = "10s"
 	)
 
 	run := func(args ...string) (string, int) {
-		cmd := exec.Command(ccpool, args...)
+		cmd := exec.CommandContext(t.Context(), ccpool, args...)
 		cmd.Env = env
 		cmd.Dir = base
 		out, err := cmd.CombinedOutput()
@@ -96,14 +96,14 @@ timeout = "10s"
 	// Deliver one line directly (bypassing `ccpool reply`, which would block on
 	// a Stop hook that a crash never fires): fake-claude-crash reads it, prints
 	// its forensic marker to stderr, and exits 7.
-	if out, err := exec.Command("tmux", "-L", socket, "send-keys", "-t", tmuxSession, "trigger", "Enter").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "tmux", "-L", socket, "send-keys", "-t", tmuxSession, "trigger", "Enter").CombinedOutput(); err != nil {
 		t.Fatalf("send-keys: %v\n%s", err, out)
 	}
 
 	// Poll (bounded) until the pane reports dead, rather than a fixed sleep.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		out, _ := exec.Command("tmux", "-L", socket, "display-message", "-p", "-t", tmuxSession, "#{pane_dead}").CombinedOutput()
+		out, _ := exec.CommandContext(t.Context(), "tmux", "-L", socket, "display-message", "-p", "-t", tmuxSession, "#{pane_dead}").CombinedOutput()
 		if strings.TrimSpace(string(out)) == "1" {
 			break
 		}
@@ -116,12 +116,12 @@ timeout = "10s"
 	// 1. Raw tmux must still know about the session: the pane (and, since this
 	// is single-window, the whole session) survived the crash instead of being
 	// destroyed. This is the behavior remain-on-exit=failed changed.
-	if out, err := exec.Command("tmux", "-L", socket, "has-session", "-t", tmuxSession).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(t.Context(), "tmux", "-L", socket, "has-session", "-t", tmuxSession).CombinedOutput(); err != nil {
 		t.Fatalf("has-session after crash: %v\n%s (session should have survived for forensic inspection)", err, out)
 	}
 
 	// 2. The forensic evidence (stderr) must still be visible in the dead pane.
-	captured, err := exec.Command("tmux", "-L", socket, "capture-pane", "-p", "-t", tmuxSession).CombinedOutput()
+	captured, err := exec.CommandContext(t.Context(), "tmux", "-L", socket, "capture-pane", "-p", "-t", tmuxSession).CombinedOutput()
 	if err != nil {
 		t.Fatalf("capture-pane after crash: %v\n%s", err, captured)
 	}
