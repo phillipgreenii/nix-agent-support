@@ -591,6 +591,40 @@ Result for the operator: the two recorders agree on 80195 matched calls for ever
 except the groups above; the counts do not show a defect that blocks the cut-over by themselves,
 but the open questions above are unexplained and are not accepted here (section 8.4).
 
+Cause of the missing command hooks (investigated 2026-11-12, read-only, from the transcripts, the
+installed plugin directories and the commit history): the plugin rename, not a hook-loading defect
+in either tool. Both plugins are registered per plugin (each plugin's own `hooks/hooks.json`, not
+`settings.json`), and Claude Code loads a plugin's hooks, skills and directory path when the process
+starts. The rename of `claude-extended-tool-approver` and `claude-tool-tracker` to
+`pg-claude-extended-tool-approver` and `pg-claude-tool-tracker` was applied at about
+2026-11-10T13:55Z (the new plugin data directories date from 13:57Z). A process started before that
+apply still held the old names, whose directories under `~/.local/share/pgii-marketplaces/` no
+longer exist.
+
+- Mid-session cases (`8f3ae5f6`, `07b78cbe`, `d4e5fa6a`): the last CETA `hook_success` of the
+  first two (06:28Z, 06:17Z on 2026-11-10) is simply the last call before the session went idle;
+  the next calls (13:54Z to 14:08Z) each carry `hook_non_blocking_error` attachments, "Plugin
+  directory does not exist: .../claude-extended-tool-approver (run /plugin to reinstall)" and the
+  same for the tracker, and after 14:08Z the transcript shows no CETA or tracker hook attachment at
+  all, only the multiplexer's. `d4e5fa6a` is the same pattern on 2026-11-11 (errors at 17:15Z; its
+  `pre_tool` events end 2026-11-06T18:36Z because the session sat idle until then). The mod, which
+  loads separately, kept writing `call_start`.
+- Whole-session case (`9d5016e1`): its first record is a `SessionStart:clear` at 2026-11-10T14:01Z,
+  inside the same apply window, in a process that predated the rename. It has no hook error
+  attachments and no CETA or tracker hook from the first call, and its skill listing (17:05Z)
+  contains none of the `pg-claude-extended-tool-approver` or `pg-claude-tool-tracker` skills, which
+  a normally loaded process lists; so the process had dropped both plugins. That a `/clear` after
+  the directories vanished dropped the plugins quietly, rather than printing errors as the
+  mid-session cases do, is inferred from those facts, not observed.
+- The gap is therefore per process and ends when the process restarts; the same kind of expected
+  gap as the sessions that predate the install (section 8.2, comparison). No repo change closes it.
+  Not determinable from files: which Claude Code code path drops a plugin whose directory is gone,
+  and the exact start time of the long-lived process of `9d5016e1`.
+- The 9 refusal-settlement calls (4 `dontAsk` refusals, 4 refusals from another plugin's Atlassian
+  `PreToolUse` hook, 1 classifier refusal) are the known tracker storage defect (live check 2): the
+  tracker stores the call as `settled_by` `ceta`, `settlement` `approved` when the ask log holds an
+  approve, even though Claude Code refused it afterwards. Not a CETA mapping error.
+
 #### Calls without `call_start`: captured trace, handling, hypothesis
 
 Captured from the live event files on 2026-11-07 (read-only; ids shortened, tool names only). A
