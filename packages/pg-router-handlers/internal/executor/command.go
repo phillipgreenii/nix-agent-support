@@ -2,6 +2,8 @@ package executor
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/query"
 	"github.com/phillipgreenii/pg-router-handlers/internal/report"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
+	"github.com/phillipgreenii/pg-router-handlers/internal/sessionlock"
 	"github.com/phillipgreenii/pg-router/procenv"
 )
 
@@ -144,8 +147,18 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) ([]byte, error)
 	// starts, so a payload that hangs or is killed still has its record (ruling
 	// 33). A busy exit 9 is only known after the command ran: it is a decline, and
 	// leaves dispatch_start followed by the cmd layer's dispatch_decline.
+	// The per-(role, event) lock is taken before dispatch_start: a redelivery that
+	// finds an earlier run of the same event alive is a decline, not a dispatch
+	// (INV-CMA-11).
+	lock, lockErr := r.lockEvent(d)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	// Release, not Unlock: the payload group holds an inherited copy of the lock
+	// descriptor, which must keep the lock if the group outlives this call.
+	defer lock.Release()
 	r.emitCommandStart(d, argv, baseNames)
-	out, err := r.runPayload(ctx, argv, env)
+	out, err := r.runPayload(ctx, argv, env, lock)
 	if err == nil {
 		emitDispatchEnd(r.deps.Log, d, "", OutcomeCompleted)
 		return out, nil
@@ -175,12 +188,43 @@ func commandFailureText(err error) string {
 	return err.Error()
 }
 
+// eventLockKey is the lock key of one (role, event id) pair: a fixed-width hash,
+// so no pair can collide through the lock file name's character mapping.
+func eventLockKey(role, eventID string) string {
+	sum := sha256.Sum256([]byte(role + "\x00" + eventID))
+	return "command--" + hex.EncodeToString(sum[:16])
+}
+
+// lockEvent takes the Idempotent Consumer lock of this dispatch's (role, event):
+// a non-blocking exclusive flock under Deps.LockDir, held for the payload's
+// lifetime. A redelivery of an event whose earlier run is still alive (a payload
+// the core abandoned when it stopped the adapter) finds it held and is declined
+// as busy, ErrBusy, the same decline as a payload that exits 9. No LockDir or no
+// event id (unit tests) means no lock. A lock that cannot be taken for any other
+// reason fails the dispatch rather than risking a double run.
+func (r *commandRun) lockEvent(d DispatchContext) (*sessionlock.Lock, error) {
+	if r.deps.LockDir == "" || d.EventID == "" {
+		return nil, nil
+	}
+	l, err := sessionlock.TryLock(r.deps.LockDir, eventLockKey(d.Role.Name, d.EventID))
+	if errors.Is(err, sessionlock.ErrHeld) {
+		return nil, fmt.Errorf("command role %q item %s: event %s already has a live run: %w", d.Role.Name, d.Item.ID, d.EventID, ErrBusy)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("command role %q item %s: event lock: %w", d.Role.Name, d.Item.ID, err)
+	}
+	return l, nil
+}
+
 // runPayload runs argv with env through the commander. A Commander that can
 // take an environment (query.EnvCommander, the default OSCommander) runs it with
 // exactly env, in its own process group; any other Commander (a test double)
 // runs through Run.
-func (r *commandRun) runPayload(ctx context.Context, argv, env []string) ([]byte, error) {
+func (r *commandRun) runPayload(ctx context.Context, argv, env []string, lock *sessionlock.Lock) ([]byte, error) {
 	c := r.deps.commander()
+	if fc, ok := c.(query.FileCommander); ok && lock.File() != nil {
+		return fc.RunEnvFiles(ctx, argv, env, []*os.File{lock.File()})
+	}
 	if ec, ok := c.(query.EnvCommander); ok {
 		return ec.RunEnv(ctx, argv, env)
 	}

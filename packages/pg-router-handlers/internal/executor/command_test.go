@@ -231,3 +231,96 @@ func TestCommandDispatch_ReportsActionsFromStdoutLastLine(t *testing.T) {
 		})
 	}
 }
+
+// blockingCmd is a query.Commander double whose payload runs until released, so
+// a test can dispatch the same event again while the first run is alive.
+type blockingCmd struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b blockingCmd) Run(_ context.Context, _ []string) ([]byte, error) {
+	b.started <- struct{}{}
+	<-b.release
+	return nil, nil
+}
+
+// A redelivery of the event whose payload is still alive is declined busy; a
+// different event of the same role runs; once the payload has ended the next
+// dispatch of the event runs.
+func TestCommandDispatch_RedeliveredEventIsBusyWhileFirstRunLives(t *testing.T) {
+	lockDir := t.TempDir()
+	b := blockingCmd{started: make(chan struct{}, 4), release: make(chan struct{})}
+	deps := Deps{Cmd: b, LockDir: lockDir}
+	d := DispatchContext{Role: commandRole(), Item: item.Item{ID: "b1"}, EventID: "evt-1"}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := commandExecutor{}.Dispatch(context.Background(), d, deps)
+		first <- err
+	}()
+	<-b.started
+
+	if _, err := (commandExecutor{}).Dispatch(context.Background(), d, deps); !errors.Is(err, ErrBusy) {
+		t.Fatalf("redelivery while the first run lives = %v, want ErrBusy", err)
+	}
+	select {
+	case <-b.started:
+		t.Fatal("the declined redelivery started a payload")
+	default:
+	}
+
+	// A different event of the same role and a different role with the same event
+	// are independent.
+	other := d
+	other.EventID = "evt-2"
+	otherRole := d
+	otherRole.Role = roles.Role{Name: "other", Command: &roles.CommandConfig{Argv: []string{"noop"}}}
+	close(b.release)
+	for _, dd := range []DispatchContext{other, otherRole} {
+		if _, err := (commandExecutor{}).Dispatch(context.Background(), dd, Deps{Cmd: fakeOKCmd{}, LockDir: lockDir}); err != nil {
+			t.Fatalf("independent dispatch %+v: %v", dd.EventID, err)
+		}
+	}
+	if err := <-first; err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if _, err := (commandExecutor{}).Dispatch(context.Background(), d, Deps{Cmd: fakeOKCmd{}, LockDir: lockDir}); err != nil {
+		t.Fatalf("dispatch after the first run ended: %v", err)
+	}
+}
+
+type fakeOKCmd struct{}
+
+func (fakeOKCmd) Run(_ context.Context, _ []string) ([]byte, error) { return nil, nil }
+
+// A failed payload still frees the lock.
+func TestCommandDispatch_LockFreedAfterFailure(t *testing.T) {
+	lockDir := t.TempDir()
+	d := DispatchContext{Role: commandRole(), Item: item.Item{ID: "b1"}, EventID: "evt-1"}
+	_, err := commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: fakeExitCmd{err: fabricateExitError(t, 2)}, LockDir: lockDir})
+	if err == nil || errors.Is(err, ErrBusy) {
+		t.Fatalf("exit 2 = %v, want a plain failure", err)
+	}
+	if _, err := (commandExecutor{}).Dispatch(context.Background(), d, Deps{Cmd: fakeOKCmd{}, LockDir: lockDir}); err != nil {
+		t.Fatalf("dispatch after a failed run: %v", err)
+	}
+}
+
+// No lock directory (or no event id) disables the lock.
+func TestCommandDispatch_NoLockDirNoLock(t *testing.T) {
+	b := blockingCmd{started: make(chan struct{}, 4), release: make(chan struct{})}
+	d := DispatchContext{Role: commandRole(), Item: item.Item{ID: "b1"}, EventID: "evt-1"}
+	done := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { _, err := commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: b}); done <- err }()
+	}
+	<-b.started
+	<-b.started
+	close(b.release)
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("unlocked dispatch: %v", err)
+		}
+	}
+}

@@ -49,7 +49,9 @@ func TestRun_SubcommandSet(t *testing.T) {
 func adapter(t *testing.T, args []string, stdin string) (*exec.Cmd, *bytes.Buffer) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], args...)
-	cmd.Env = append(os.Environ(), "PG_ROUTER_HANDLER_COMMAND_TEST_RUN=1")
+	// A private state directory: the adapter keeps its per-event dispatch locks
+	// there, and the developer's real one is shared with every concurrent run.
+	cmd.Env = append(os.Environ(), "PG_ROUTER_HANDLER_COMMAND_TEST_RUN=1", "XDG_STATE_HOME="+t.TempDir())
 	cmd.Dir = t.TempDir()
 	cmd.Stdin = strings.NewReader(stdin)
 	var out bytes.Buffer

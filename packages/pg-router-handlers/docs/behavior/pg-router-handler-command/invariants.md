@@ -89,3 +89,16 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   while the payload ran) or, when the payload exits non-zero or cannot start, the `dispatch_result`
   failure record (`role`, `pool` and `session` empty, `bead`, `failure_signature`,
   `signature_evidence`; `INV-CCH-9`), never both.
+- **`INV-CMA-11`** <!-- uuid: 16d982fe-b59f-46cf-b940-3389123a4204 --> — **A redelivered event is declined while an earlier run of it is alive.**
+  The adapter **MUST** take an exclusive, non-blocking lock keyed by the role and the event's id before it
+  starts a payload, and the payload and its process group **MUST** hold that lock for as long as any of
+  them lives: the adapter passes the lock's descriptor to the payload, so the lock outlives the adapter
+  process itself, whether it exited, was killed or crashed. A dispatch that finds the lock held
+  **MUST** decline as busy, the same pre-accept decline as exit `9` (`INV-CMA-4`, `INV-CONC-1`), without
+  starting a payload or writing a `dispatch_start` record, and the core re-offers it with backoff. When
+  the payload group has exited, including by SIGKILL, the lock is free and the next dispatch of the
+  event runs. This keeps a payload the core abandoned (a stopped or crashed adapter leaves its payload
+  group running) from being started a second time by the event's redelivery. A lock that cannot be
+  taken for any other reason fails the dispatch, never runs the payload unguarded. The lock is
+  per event, so it never serialises two different events of one role (`INV-CONC-1` still leaves
+  capacity to the command).

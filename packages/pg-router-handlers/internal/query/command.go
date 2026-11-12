@@ -12,6 +12,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -38,6 +39,15 @@ type EnvCommander interface {
 	RunEnv(ctx context.Context, argv []string, env []string) ([]byte, error)
 }
 
+// FileCommander is an EnvCommander that can also pass open files to the payload
+// as extra descriptors (fd 3 onward, os/exec Cmd.ExtraFiles). The command
+// executor uses it to hand the payload the per-(role, event) dispatch lock, so
+// the lock outlives the adapter process for as long as the payload group lives.
+type FileCommander interface {
+	EnvCommander
+	RunEnvFiles(ctx context.Context, argv []string, env []string, files []*os.File) ([]byte, error)
+}
+
 // OSCommander is the default Commander: shells out via os/exec.
 type OSCommander struct{}
 
@@ -53,12 +63,18 @@ func (OSCommander) Run(ctx context.Context, argv []string) ([]byte, error) {
 // then SIGKILL after CancelGrace, so a non-exec child (a timeout layer, a shell
 // script) cannot orphan its payload. Stdout is returned; on failure the
 // *exec.ExitError carries the stderr, as with Run.
-func (OSCommander) RunEnv(ctx context.Context, argv []string, env []string) ([]byte, error) {
+func (c OSCommander) RunEnv(ctx context.Context, argv []string, env []string) ([]byte, error) {
+	return c.RunEnvFiles(ctx, argv, env, nil)
+}
+
+// RunEnvFiles is RunEnv with files inherited by the payload as fd 3 onward.
+func (OSCommander) RunEnvFiles(ctx context.Context, argv []string, env []string, files []*os.File) ([]byte, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("empty argv")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = env
+	cmd.ExtraFiles = files
 	procenv.Group(cmd, CancelGrace)
 	return cmd.Output()
 }

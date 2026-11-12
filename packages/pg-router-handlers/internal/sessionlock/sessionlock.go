@@ -222,6 +222,31 @@ func removeIfIdle(p string, olderThan time.Duration, now time.Time) bool {
 	return os.Remove(p) == nil
 }
 
+// File is the held lock file. A caller that starts a process meant to keep
+// the lock for its own lifetime passes it as an extra file (os/exec
+// Cmd.ExtraFiles): flock belongs to the open file description, so the child's
+// inherited copy keeps the lock after this process exits or is killed. Nil for a
+// released or nil Lock.
+func (l *Lock) File() *os.File {
+	if l == nil {
+		return nil
+	}
+	return l.f
+}
+
+// Release closes this process's descriptor without an explicit unlock. A copy
+// of the descriptor a child inherited (File) keeps the lock until that child
+// and every process it passed the descriptor to has exited, which is the point
+// of a lock held for a payload's lifetime. With no inheritor it is the same as
+// Unlock. The zero value and a nil Lock are safe no-ops.
+func (l *Lock) Release() {
+	if l == nil || l.f == nil {
+		return
+	}
+	_ = l.f.Close()
+	l.f = nil
+}
+
 // Unlock releases the lock. Closing the descriptor drops the flock; the lock
 // file itself is left in place. Only SweepStale ever removes one, and only
 // under the exclusive flock with openers re-verifying the inode (see its
