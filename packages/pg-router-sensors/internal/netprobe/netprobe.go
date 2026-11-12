@@ -1,10 +1,11 @@
 // Package netprobe is the HTTPS reachability probe shared by the network
 // resource of host-sensor and by vpn-sensor.
 //
-// A target is reachable when an HTTPS HEAD completes with TLS verification and
-// a status below 500 (a 3xx is reachable: redirects are NOT followed). A DNS,
-// connect, TLS or timeout failure is unreachable, so a captive portal that
-// answers with a certificate for another name fails the check. The resource is
+// In the default (verifying) mode a target is reachable when an HTTPS HEAD
+// completes with TLS verification and a status below 500 (a 3xx is reachable:
+// redirects are NOT followed). A DNS, connect, TLS or timeout failure is
+// unreachable, so a captive portal that answers with a certificate for another
+// name fails the check. The resource is
 // UNAVAILABLE only when ALL targets fail on Threshold consecutive passes (one
 // pass is one sensor invocation); the counter lives in the state file.
 //
@@ -12,7 +13,11 @@
 // connect, the TLS handshake and an HTTP response must complete, but the
 // certificate chain and name are not verified (reachability is not trust).
 // Only vpn-sensor uses it, for its reachability resource; the network
-// resource of host-sensor always verifies.
+// resource of host-sensor always verifies. The accepted trade-off: a
+// skip-verify prober reads reachable for ANY HTTP response below 500 from ANY
+// TLS endpoint at the target name (a captive portal included); the only guard
+// is that the private hostname resolves, and the verifying probe of the same
+// hosts is the trust signal.
 //
 // Exported names: Prober, Result, Probe, Observe, Defaults (DefaultTargets,
 // DefaultTimeout, DefaultThreshold), HostURLs, ConfigureCommon, FailKey.
@@ -73,7 +78,15 @@ func (p *Prober) Probe(ctx context.Context, targets []string) []Result {
 	}
 	c := *client
 	if p.SkipVerify {
-		c.Transport = insecureTransport(client.Transport)
+		t, err := insecureTransport(client.Transport)
+		if err != nil {
+			out := make([]Result, len(targets))
+			for i, u := range targets {
+				out[i] = Result{URL: u, Err: err}
+			}
+			return out
+		}
+		c.Transport = t
 	}
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	timeout := p.Timeout
@@ -94,18 +107,26 @@ func (p *Prober) Probe(ctx context.Context, targets []string) []Result {
 }
 
 // insecureTransport returns a copy of base (the default transport when base is
-// nil or not an *http.Transport) that does not verify server certificates.
-func insecureTransport(base http.RoundTripper) *http.Transport {
-	t, ok := base.(*http.Transport)
-	if !ok || t == nil {
+// nil) that does not verify server certificates. A base that is not an
+// *http.Transport cannot be copied, and substituting another transport would
+// silently drop its behaviour, so that is an error (every target reads
+// unreachable).
+func insecureTransport(base http.RoundTripper) (*http.Transport, error) {
+	var t *http.Transport
+	switch b := base.(type) {
+	case nil:
 		t = http.DefaultTransport.(*http.Transport)
+	case *http.Transport:
+		t = b
+	default:
+		return nil, fmt.Errorf("netprobe: skip-verify needs an *http.Transport, got %T", base)
 	}
 	t = t.Clone()
 	if t.TLSClientConfig == nil {
 		t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
 	t.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // reachability probe only: trust is a separate resource
-	return t
+	return t, nil
 }
 
 func headOne(ctx context.Context, c *http.Client, url string, timeout time.Duration) Result {
@@ -128,7 +149,14 @@ func headOne(ctx context.Context, c *http.Client, url string, timeout time.Durat
 // UNAVAILABLE. Otherwise the all-fail counter is kept in the state file and the
 // answer is AVAILABLE until it reaches threshold.
 func Observe(ctx context.Context, p *Prober, env sensorcli.Env, resource string, targets []string, threshold int) levels.Observation {
-	results := p.Probe(ctx, targets)
+	return ObserveResults(env, resource, p.Probe(ctx, targets), threshold)
+}
+
+// ObserveResults is Observe over already-probed results: it keeps the all-fail
+// counter in env.Store and logs to env.Stderr, so a caller that probes several
+// resources concurrently MUST call it sequentially (Store and Stderr are not
+// safe for concurrent use).
+func ObserveResults(env sensorcli.Env, resource string, results []Result, threshold int) levels.Observation {
 	ok := 0
 	for _, r := range results {
 		if r.Reachable {

@@ -104,6 +104,22 @@ func TestProbeSkipVerify(t *testing.T) {
 	}
 }
 
+type stubTransport struct{}
+
+func (stubTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("stub")
+}
+
+// A custom transport that is not an *http.Transport is refused, not replaced.
+func TestProbeSkipVerifyCustomTransport(t *testing.T) {
+	p := &Prober{Client: &http.Client{Transport: stubTransport{}}, Timeout: time.Second, SkipVerify: true}
+	for _, r := range p.Probe(context.Background(), []string{"https://a.invalid/", "https://b.invalid/"}) {
+		if r.Reachable || r.Err == nil || !strings.Contains(r.Err.Error(), "*http.Transport") {
+			t.Fatalf("%+v", r)
+		}
+	}
+}
+
 func TestProbeBadURL(t *testing.T) {
 	r := (&Prober{}).Probe(context.Background(), []string{"http://[::1"})[0]
 	if r.Reachable || r.Err == nil {

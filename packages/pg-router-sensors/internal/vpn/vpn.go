@@ -27,6 +27,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/phillipgreenii/pg-router-sensors/internal/levels"
 	"github.com/phillipgreenii/pg-router-sensors/internal/netprobe"
@@ -129,12 +130,28 @@ func (s *Sensor) Measure(ctx context.Context, env sensorcli.Env) ([]levels.Obser
 		return nil, levels.ErrNoReading
 	}
 	urls := netprobe.HostURLs(s.Hosts)
-	var out []levels.Observation
-	if env.Resource == "" || env.Resource == s.Resource {
-		out = append(out, netprobe.Observe(ctx, s.Reach, env, s.Resource, urls, s.Threshold))
+	// The two probes run concurrently (two sequential probes of a black-holed host
+	// would take twice the timeout); only the network I/O is concurrent, the
+	// counters and diagnostics below are applied sequentially.
+	var reach, trust []netprobe.Result
+	var wg sync.WaitGroup
+	wantReach := env.Resource == "" || env.Resource == s.Resource
+	wantTrust := env.Resource == "" || env.Resource == s.TrustResource
+	if wantReach {
+		wg.Add(1)
+		go func() { defer wg.Done(); reach = s.Reach.Probe(ctx, urls) }()
 	}
-	if env.Resource == "" || env.Resource == s.TrustResource {
-		out = append(out, netprobe.Observe(ctx, s.Prober, env, s.TrustResource, urls, s.Threshold))
+	if wantTrust {
+		wg.Add(1)
+		go func() { defer wg.Done(); trust = s.Prober.Probe(ctx, urls) }()
+	}
+	wg.Wait()
+	var out []levels.Observation
+	if wantReach {
+		out = append(out, netprobe.ObserveResults(env, s.Resource, reach, s.Threshold))
+	}
+	if wantTrust {
+		out = append(out, netprobe.ObserveResults(env, s.TrustResource, trust, s.Threshold))
 	}
 	return out, nil
 }

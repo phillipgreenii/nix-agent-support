@@ -30,7 +30,7 @@ var levelAlerts = []struct {
 	},
 	{
 		"pg-router-resource-held-nonbest",
-		`max by (resource)(last_over_time(pg_router_resource_level[10m]) > 0)`,
+		`max by (resource)(last_over_time(pg_router_resource_level{resource!~"network_zr_trust"}[10m]) > 0)`,
 		"for: 6h", "noDataState: OK",
 	},
 	{

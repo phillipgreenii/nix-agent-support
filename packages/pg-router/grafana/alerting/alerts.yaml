@@ -2280,6 +2280,14 @@ groups:
       # pg-router-resource-held-nonbest: a resource below best for 6 hours, whether or not
       # a registration is blocked by it (pg-router-gate-held covers the blocked case after
       # 30 minutes).
+      #
+      # MONITOR-ONLY resources are excluded by the resource!~"..." matcher in refId A
+      # below: a resource that no role requires (a deployment watches it over time before
+      # deciding to gate on it) must not page. To add one, append its name to that
+      # alternation (`network_zr_trust|aws_sso_zr`; Prometheus regex matchers are fully
+      # anchored) and add a case to rule-tests/pg-router-resource-held-nonbest.test.yaml.
+      # The exclusion applies only to THIS alert: pg-router-gate-held needs a blocked
+      # registration, which a resource nobody requires never causes.
       - uid: pg-router-resource-held-nonbest
         title: pg-router resource below best for 6 hours (by resource)
         condition: C
@@ -2290,7 +2298,7 @@ groups:
           severity: warning
         annotations:
           summary: "a pg-router resource has been below its best level for over 6 hours"
-          description: "pg_router_resource_level has stayed above 0 for over 6 hours for the resource in this alert's resource label, whether or not a registration is blocked by it. Inspect it with pg-router level list. A graded scale's level 1 is normal on some resources; compare pg_router_resource_scale_size and tune the threshold if this is the resting state."
+          description: "pg_router_resource_level has stayed above 0 for over 6 hours for the resource in this alert's resource label, whether or not a registration is blocked by it. Inspect it with pg-router level list. A graded scale's level 1 is normal on some resources; compare pg_router_resource_scale_size and tune the threshold if this is the resting state. Monitor-only resources (no role requires them) are excluded in the rule's expression and never fire this alert."
         data:
           - refId: A
             relativeTimeRange:
@@ -2301,7 +2309,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "max by (resource)(last_over_time(pg_router_resource_level[10m]) > 0)"
+              expr: 'max by (resource)(last_over_time(pg_router_resource_level{resource!~"network_zr_trust"}[10m]) > 0)'
           - refId: B
             datasourceUid: __expr__
             model:

@@ -115,7 +115,7 @@ Exit 0 when at least one resource was answered, 1 when none could be measured (a
 router, `INV-SEN-5`).
 
 Probes: the network sensors send an HTTPS `HEAD` (5 s timeout per target, redirects not followed so a
-3xx counts as reachable, a DNS or TLS failure counts as unreachable, targets in parallel) and report
+3xx counts as reachable, and in the verifying mode (`host-sensor`'s `network`, and `vpn-sensor`'s trust resource) a DNS or TLS failure counts as unreachable, targets in parallel) and report
 `UNAVAILABLE` only when ALL targets fail on 3 consecutive passes, the counter kept in the state file.
 `vpn-sensor` answers TWO resources per invocation over the same hosts: the reachability resource (config
 key `resource`) counts a target reachable when the connect, the TLS handshake and an HTTP response
@@ -124,6 +124,10 @@ VPN being down), and the trust resource (config key `trust_resource`, default `n
 repeats the `HEAD` with normal verification against the system roots. Each has its own consecutive-failure
 counter and dwell state; `--resource` limits the run to one. The skip-verify mode is an option of the
 shared prober used only by the reachability resource: `host-sensor`'s `network` resource always verifies.
+Accepted trade-off: the skip-verify reachability resource (`network_zr`) reads `AVAILABLE` for any HTTP
+response below 500 from any TLS endpoint answering at the target name, a captive portal included; its
+only guard is that the private hostname resolves. `network_zr_trust` is the trust signal. The two probes
+of one invocation run concurrently, so a black-holed host costs one timeout, not two.
 The credential sensor parses the validity of the ssh certificate selected by a configured key id or
 principal (the latest expiry when several match), with a configurable margin (default 30 minutes) and
 an optional bounded remote listing; a missing agent socket, no identity or an expired certificate is

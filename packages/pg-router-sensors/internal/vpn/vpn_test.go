@@ -213,3 +213,24 @@ func TestMeasure(t *testing.T) {
 		t.Errorf("after 3 failing passes: %s", last)
 	}
 }
+
+// Both probes run concurrently: against a server that never answers, a
+// measure takes about one timeout, not two.
+func TestMeasureProbesConcurrently(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+	defer srv.Close()
+	defer close(release)
+	s := New()
+	if err := s.Configure(cfgOf(map[string]any{"resource": "network_zr", "hosts": []any{strings.TrimPrefix(srv.URL, "https://")}, "timeout": "400ms"})); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	got := levelsOf(t, s, newEnv())
+	if el := time.Since(start); el >= 750*time.Millisecond {
+		t.Errorf("measure took %v, want about one 400ms timeout", el)
+	}
+	if len(got) != 2 {
+		t.Errorf("%v", got)
+	}
+}

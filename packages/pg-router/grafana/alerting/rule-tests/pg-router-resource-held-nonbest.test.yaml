@@ -35,3 +35,18 @@ tests:
       - eval_time: 480m
         alertname: pg-router-resource-held-nonbest
         exp_alerts: []
+
+  - name: a monitor-only resource held at its worst level never fires, while a real resource still does
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level{resource="network_zr_trust",job="pg-router"}
+        values: "1x500"
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "1x500"
+    alert_rule_test:
+      - eval_time: 370m
+        alertname: pg-router-resource-held-nonbest
+        exp_alerts:
+          - exp_labels:
+              resource: disk
+              severity: warning
