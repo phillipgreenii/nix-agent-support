@@ -156,7 +156,10 @@ type proc struct {
 	killed bool
 }
 
-const stepTimeout = 60 * time.Second
+// stepTimeout only bounds a hang: a tool run or a rendezvous that never ends.
+// It is not an assertion about speed, so it is generous enough for a host
+// under heavy load, where eight concurrent landers each take many seconds.
+const stepTimeout = 5 * time.Minute
 
 func (h *harness) wtPath(name string) string {
 	if name == "main" {

@@ -22,17 +22,6 @@ func resolverConfig(glob string) string {
 	return "[[repo]]\nroot = \"{repo}\"\n\n[[repo.conflict]]\nglob = \"" + glob + "\"\nresolve = [\"{hooks}/resolver\"]\n"
 }
 
-// hasWarning reports whether the outcome's warnings name the word.
-func hasWarning(r *result, word string) bool {
-	ws, _ := r.json["warnings"].([]any)
-	for _, w := range ws {
-		if m, ok := w.(map[string]any); ok && m["warning"] == word {
-			return true
-		}
-	}
-	return false
-}
-
 // commitIn writes a file in dir and commits it.
 func commitIn(t *testing.T, h *harness, dir, file, content, msg string) {
 	t.Helper()

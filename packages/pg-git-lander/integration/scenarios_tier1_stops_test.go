@@ -435,7 +435,7 @@ func TestTier1BusyWhileLockHeldByLiveProcess(t *testing.T) {
 		Shape:  ShapeAhead,
 		Fifos:  []string{"up", "go"},
 		Layout: srcOnBr,
-		Config: blockingConfig("before_move"),
+		Config: crashConfig("before_move"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	other := h.addBranch("other")

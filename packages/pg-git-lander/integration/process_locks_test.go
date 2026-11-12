@@ -354,12 +354,15 @@ func TestSigkillHolderMidRebase(t *testing.T) {
 }
 
 // blockingConfig names the first-run-blocking hook at the given land point, and
-// a one-second lease so that a stopped holder lapses quickly.
+// a short lease so that a stopped holder lapses. Five seconds, not one: a
+// holder that merely competes for CPU on a loaded host must renew in time
+// before it is stopped on purpose. A scenario that never stops the holder
+// uses crashConfig instead.
 func blockingConfig(point string) string {
 	return `
 [defaults.lock]
-lease_ttl = "1s"
-wait = "30s"
+lease_ttl = "5s"
+wait = "60s"
 
 [[repo]]
 root = "{repo}"
@@ -452,7 +455,7 @@ func TestSigtermDuringLongHook(t *testing.T) {
 	h := newHarness(t, Scenario{
 		Name: "sigterm-long-hook", Shape: ShapeAhead, Fifos: []string{"up", "go"},
 		Layout: []Worktree{{Name: "src", Branch: "feature/x"}},
-		Config: blockingConfig("before_move"),
+		Config: crashConfig("before_move"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	holder := h.start("holder", "land", "feature/x")

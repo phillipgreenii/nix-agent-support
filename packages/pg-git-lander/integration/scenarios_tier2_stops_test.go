@@ -254,7 +254,7 @@ func TestTier2ObservabilityBusy(t *testing.T) {
 		Layout: srcOnBr,
 		// A long lease keeps a heartbeat starved by host load from expiring the
 		// holder's lock, which would turn the busy refusal into a takeover.
-		Config: strings.Replace(blockingConfig("before_move"), `lease_ttl = "1s"`, `lease_ttl = "30s"`, 1),
+		Config: crashConfig("before_move"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	h.addBranch("other")
