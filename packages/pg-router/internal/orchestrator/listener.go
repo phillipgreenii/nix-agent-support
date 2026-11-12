@@ -212,6 +212,9 @@ type roleListener struct {
 	// failedObs is notified of a dispatch that ended failed (not re-run),
 	// captured at construction like the observers above; nil disables it.
 	failedObs DispatchFailedObserver
+	// levelObs snapshots levels at dispatch start and books the outcome against
+	// them, captured at construction like the observers above; nil disables it.
+	levelObs DispatchLevelObserver
 	// progressObs is notified of each offer's outcome for the role-progress
 	// gauges, captured at construction like the observers above; nil disables it.
 	progressObs RoleProgressObserver
@@ -245,6 +248,7 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		handlerFailureObs: o.HandlerFailureObserver,
 		retryObs:          o.DispatchRetryObserver,
 		failedObs:         o.DispatchFailedObserver,
+		levelObs:          o.DispatchLevelObserver,
 		progressObs:       o.RoleProgressObserver,
 		skippedObs:        o.SkippedObserver,
 		maxRetries:        clampRetries(role.MaxDispatchRetries),
@@ -426,6 +430,10 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	// started is the wall instant this run began; the queue's own in-flight instant
 	// (Offering.StartedAt) is preferred for the row so events.jsonl and the
 	// queue-wait/run histograms share one start (bead pg2-n7da9).
+	var atLevels [][2]string
+	if l.levelObs != nil {
+		atLevels = l.levelObs.DispatchLevels()
+	}
 	begun := time.Now()
 	reply, err := l.o.workOne(l.ctx, d, evt)
 	ran := time.Since(begun)
@@ -531,6 +539,9 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if err != nil && l.failedObs != nil {
 		// The dispatch ended failed: no re-run follows (shouldRetry said no above).
 		l.failedObs.OnDispatchFailed(evt.Type, l.role.Name)
+	}
+	if l.levelObs != nil && !skipped {
+		l.levelObs.OnDispatchAtLevel(l.role.Name, atLevels, ran, err != nil)
 	}
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err, meta)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone, StartedAt: adopted}

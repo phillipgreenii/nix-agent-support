@@ -547,6 +547,9 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   | `pg_router_role_paused` (0/1)                                                                    | role                                                                                                                |
   | `pg_router_requirement_blocked`                                                                  | role, resource, kind (the 64-value fold applies; kind is level, unknown or stale, no longer dispatch, poll or pull) |
   | `pg_router_requirement_drops`                                                                    | event type, role, resource                                                                                          |
+  | `pg_router_requirement_blocked_seconds` (counter, seconds)                                       | role, resource, sole (true or false), steps_below (1, 2, ..., unknown, none); the 64-value fold applies             |
+  | `pg_router_dispatch_at_level`                                                                    | role, resource, level, outcome = success / failure (graded-scale resources only; the 64-value fold applies)         |
+  | `pg_router_dispatch_at_level_seconds` (counter, seconds of handler run time)                     | role, resource, level                                                                                               |
 
   `resource_scale_size` lets an alert tell "below best" from "worst" on any scale (a two-level
   scale's 1 is the worst; a graded scale's 1 is `OK`, which is normal). Mapping from the retired

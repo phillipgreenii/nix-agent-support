@@ -534,6 +534,8 @@ type Emitter struct {
 
 	// lvl is the level metrics and log lines state (levels.go).
 	lvl levelState
+	// levelSource is the WithLevels reader (nil when none), read by DispatchLevels.
+	levelSource func() []LevelSample
 
 	// mu guards pending/order — the eventID->{type, enqueue-time} correlation
 	// map OnAccept needs to feed RecordThroughput/RecordDispatchLatency (see

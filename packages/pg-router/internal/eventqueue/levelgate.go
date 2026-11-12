@@ -3,6 +3,7 @@ package eventqueue
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -496,4 +497,70 @@ func (q *Queue) IdleExceptPaused() bool {
 		}
 	}
 	return true
+}
+
+// BlockedParticipant is one registered listener or emitter a level requirement
+// holds back right now, with how far each unmet resource is from clearing.
+type BlockedParticipant struct {
+	Participant string
+	Shortfalls  []levels.Shortfall
+}
+
+// BlockedRequirements returns every registered listener and emitter a level
+// requirement blocks as of now, listeners in registration order, then emitters
+// in name order. It is the read-only feed of the requirement_blocked_seconds
+// metric: like PausedRoles it goes through the admission decision's own inputs
+// (levels.Shortfalls reads the same unmet clauses levels.Decide does), records no
+// paused / resumed transition, fires no observer hook and takes q.mu only to copy
+// the listener ids. The start stagger is not a block. An emitter is blocked only
+// when every enabled consumer is (EmitterBlockedBy); its shortfalls are those of
+// the consumer closest to admitting (fewest unmet resources, the first on a tie).
+func (q *Queue) BlockedRequirements() []BlockedParticipant {
+	view := q.loadView()
+	if !view.has {
+		return nil
+	}
+	q.mu.Lock()
+	ids := make([]string, 0, len(q.listeners))
+	for _, ls := range q.listeners {
+		ids = append(ids, ls.l.ID())
+	}
+	q.mu.Unlock()
+	var out []BlockedParticipant
+	for _, id := range ids {
+		if sf := levels.Shortfalls(view.snap, q.adm.registry, q.requirement(id)); len(sf) > 0 {
+			out = append(out, BlockedParticipant{Participant: id, Shortfalls: sf})
+		}
+	}
+	cur := q.adm.emitters.Load()
+	if cur == nil {
+		return out
+	}
+	names := make([]string, 0, len(*cur))
+	for name := range *cur {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		var best []levels.Shortfall
+		enabled, blocked := 0, true
+		for _, c := range (*cur)[name] {
+			if !c.Enabled {
+				continue
+			}
+			enabled++
+			sf := levels.Shortfalls(view.snap, q.adm.registry, c.Req)
+			if len(sf) == 0 {
+				blocked = false
+				break
+			}
+			if best == nil || len(sf) < len(best) {
+				best = sf
+			}
+		}
+		if enabled > 0 && blocked {
+			out = append(out, BlockedParticipant{Participant: name, Shortfalls: best})
+		}
+	}
+	return out
 }

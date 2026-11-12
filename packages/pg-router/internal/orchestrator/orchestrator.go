@@ -153,6 +153,11 @@ type Orchestrator struct {
 	// captured by NewListener like the observers above. cmd/pg-router's
 	// bootCore wires the metrics.Emitter in here.
 	DispatchFailedObserver DispatchFailedObserver
+	// DispatchLevelObserver snapshots resource levels at dispatch start and
+	// books the finished dispatch against them (see retry.go). nil disables it;
+	// captured by NewListener like the observers above. cmd/pg-router's bootCore
+	// wires the metrics.Emitter in here.
+	DispatchLevelObserver DispatchLevelObserver
 	// RoleProgressObserver is notified of each offer's outcome for the per-role
 	// progress gauges (docket pg2-12gr4.8). nil disables it; captured by
 	// NewListener like the observers above. cmd/pg-router's bootCore wires the

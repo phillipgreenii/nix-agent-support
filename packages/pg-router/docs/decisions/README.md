@@ -90,6 +90,10 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 - [`DEC-OBS-13`](observability.md) — a per-listener counter of events whose retention ended while a
   matching listener never accepted them (counted once per event and listener; `role` and `type`; no
   alert).
+- [`DEC-OBS-14`](observability.md) — measurement counters for level thresholds, no admission change:
+  `requirement_blocked_seconds` (blocked time per role and unmet resource, with `sole` and
+  `steps_below`) and `dispatch_at_level` and `dispatch_at_level_seconds` (outcome and run time by the
+  graded levels a dispatch started at).
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-RETRY-2`](retry.md) — a role MAY opt in to a bounded (hard cap 3), transient-class-only

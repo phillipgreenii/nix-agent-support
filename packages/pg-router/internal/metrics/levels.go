@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/internal/levels"
 )
 
 // The level metrics and the level log lines. Level 0 of a scale is its best.
@@ -52,6 +54,22 @@ const (
 	MetricRolePaused                  = "pg_router_role_paused"
 	MetricRequirementBlocked          = "pg_router_requirement_blocked"
 	MetricRequirementDrops            = "pg_router_requirement_drops"
+	// MetricRequirementBlockedSeconds is registered with NO unit (like
+	// MetricResourceLevelSeconds) so the exposed name is
+	// pg_router_requirement_blocked_seconds_total and does not clash with the
+	// MetricRequirementBlocked counter.
+	MetricRequirementBlockedSeconds = "pg_router_requirement_blocked_seconds"
+	MetricDispatchAtLevel           = "pg_router_dispatch_at_level"
+	MetricDispatchAtLevelSeconds    = "pg_router_dispatch_at_level_seconds"
+)
+
+// RequirementAccrualInterval is how often RunRequirementAccrual evaluates which
+// roles a requirement blocks. maxAccrualGap caps the time one evaluation may
+// add (six intervals), so a suspended host or a stalled goroutine does not
+// book the whole gap as blocked time.
+const (
+	RequirementAccrualInterval = 5 * time.Second
+	maxAccrualGap              = 6 * RequirementAccrualInterval
 )
 
 // OverflowLabel is the value a label takes once its 64 distinct values are used.
@@ -102,6 +120,9 @@ func WithLogger(l *slog.Logger) Option { return func(o *options) { o.logger = l 
 // levelState is the Emitter's level bookkeeping.
 type levelState struct {
 	changes, rejected, pulls, pullFails, blocked, drops metric.Int64Counter
+	blockedSecs, atLevelSecs                            metric.Float64Counter
+	atLevel                                             metric.Int64Counter
+	accrualLast                                         time.Time
 	log                                                 *slog.Logger
 	now                                                 func() time.Time
 
@@ -144,9 +165,11 @@ func (e *Emitter) foldLabel(kind, v string) string {
 func (e *Emitter) registerLevels(m metric.Meter, cfg options) error {
 	s := &e.lvl
 	s.log, s.now = cfg.logger, cfg.now
+	e.levelSource = cfg.levels
 	s.paused, s.pullDur = map[string]bool{}, map[string]float64{}
 	s.fold, s.accum = map[string]map[string]struct{}{}, map[[2]string]float64{}
 	s.lastTick = cfg.now()
+	s.accrualLast = s.lastTick
 	for _, r := range cfg.pausedRoles {
 		s.paused[r] = false
 	}
@@ -167,6 +190,21 @@ func (e *Emitter) registerLevels(m metric.Meter, cfg options) error {
 		if *c.dst, err = m.Int64Counter(c.name, metric.WithDescription(c.desc)); err != nil {
 			return err
 		}
+	}
+	if s.atLevel, err = m.Int64Counter(MetricDispatchAtLevel, metric.WithDescription(
+		"finished dispatches per role, per graded resource and the level it was at when the dispatch started, and outcome (success, failure)",
+	)); err != nil {
+		return err
+	}
+	if s.blockedSecs, err = m.Float64Counter(MetricRequirementBlockedSeconds, metric.WithDescription(
+		"seconds a role or emitter was held back by an unmet requirement, per role and unmet resource; sole is true when that resource was the only unmet one, steps_below is the distance in scale steps to the nearest allowed level (unknown, none)",
+	)); err != nil {
+		return err
+	}
+	if s.atLevelSecs, err = m.Float64Counter(MetricDispatchAtLevelSeconds, metric.WithDescription(
+		"handler run seconds of finished dispatches per role, per graded resource and the level it was at when the dispatch started",
+	)); err != nil {
+		return err
 	}
 	if _, err = m.Int64ObservableGauge(MetricRolePaused,
 		metric.WithDescription("1 while a requirement holds the role back, else 0"),
@@ -384,6 +422,91 @@ func (e *Emitter) OnRequirementBlocked(participant, _, resource, kind string) {
 		attribute.String("resource", e.foldLabel("resource", resource)),
 		attribute.String("kind", kind),
 	))
+}
+
+// AccrueRequirementBlocked books the wall-clock time since the previous call
+// (zero before the first, measured from construction; capped at maxAccrualGap)
+// to MetricRequirementBlockedSeconds, one increment per unmet resource of each
+// blocked participant. sole is "true" when that resource is the participant's
+// only unmet one; steps_below is levels.StepsLabel. The clock restarts with the
+// process, so a restart never books the same time twice. Series per participant
+// are bounded by the 64-value fold on role and resource and by the scale sizes
+// (steps_below is a small integer, "unknown" or "none").
+func (e *Emitter) AccrueRequirementBlocked(blocked []eventqueue.BlockedParticipant) {
+	s := &e.lvl
+	now := s.now()
+	s.mu.Lock()
+	delta := min(max(now.Sub(s.accrualLast), 0), maxAccrualGap).Seconds()
+	s.accrualLast = now
+	s.mu.Unlock()
+	if delta <= 0 {
+		return
+	}
+	for _, b := range blocked {
+		role := e.foldLabel("role", b.Participant)
+		for _, sf := range b.Shortfalls {
+			s.blockedSecs.Add(context.Background(), delta, metric.WithAttributes(
+				attribute.String("role", role),
+				attribute.String("resource", e.foldLabel("resource", sf.Resource)),
+				attribute.String("sole", strconv.FormatBool(sf.Sole)),
+				attribute.String("steps_below", levels.StepsLabel(sf.Steps)),
+			))
+		}
+	}
+}
+
+// RunRequirementAccrual calls AccrueRequirementBlocked(src()) every interval
+// until ctx ends.
+func (e *Emitter) RunRequirementAccrual(ctx context.Context, interval time.Duration, src func() []eventqueue.BlockedParticipant) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			e.AccrueRequirementBlocked(src())
+		}
+	}
+}
+
+// DispatchLevels snapshots the level of every graded-scale resource (more than
+// two levels, a level in force) as {resource, level} pairs, for
+// orchestrator.DispatchLevelObserver. Two-level and unknown-level resources are
+// skipped. It reads the WithLevels source and is nil-safe.
+func (e *Emitter) DispatchLevels() [][2]string {
+	if e.levelSource == nil {
+		return nil
+	}
+	var out [][2]string
+	for _, x := range e.levelSource() {
+		if x.HasLevel && x.ScaleSize > 2 {
+			out = append(out, [2]string{x.Resource, x.Level})
+		}
+	}
+	return out
+}
+
+// OnDispatchAtLevel implements orchestrator.DispatchLevelObserver: one dispatch
+// finished after running ran, having started with the levels at. It adds one to
+// MetricDispatchAtLevel (outcome success or failure) and ran to
+// MetricDispatchAtLevelSeconds for each resource in at.
+func (e *Emitter) OnDispatchAtLevel(role string, at [][2]string, ran time.Duration, failed bool) {
+	outcome := "success"
+	if failed {
+		outcome = "failure"
+	}
+	r := e.foldLabel("role", role)
+	for _, rl := range at {
+		res := e.foldLabel("resource", rl[0])
+		e.lvl.atLevel.Add(context.Background(), 1, metric.WithAttributes(
+			attribute.String("role", r), attribute.String("resource", res),
+			attribute.String("level", rl[1]), attribute.String("outcome", outcome),
+		))
+		e.lvl.atLevelSecs.Add(context.Background(), max(ran, 0).Seconds(), metric.WithAttributes(
+			attribute.String("role", r), attribute.String("resource", res), attribute.String("level", rl[1]),
+		))
+	}
 }
 
 // OnRequirementDrop implements eventqueue.LevelObserver.

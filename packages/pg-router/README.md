@@ -382,7 +382,10 @@ unconsumed-expired, unknown-type-rejected, throughput, backlog, liveness, dispat
 latency (deprecated), queue wait and run time, oldest pending age, per-listener in-flight,
 per-listener pending count and oldest pending age
 (`pg_router_listener_pending`, `pg_router_listener_oldest_pending_age_seconds`; no alert reads them),
-source failures, deduped) against an injected `metric.MeterProvider` — the
+source failures, deduped; the level-threshold measurements
+`pg_router_requirement_blocked_seconds_total{role,resource,sole,steps_below}` and
+`pg_router_dispatch_at_level_total{role,resource,level,outcome}` with
+`pg_router_dispatch_at_level_seconds_total{role,resource,level}`, see `DEC-OBS-14`) against an injected `metric.MeterProvider` — the
 core stays unaware of any concrete monitoring backend. `run`'s own `--metrics-addr
 <host:port>` flag (or `PG_ROUTER_METRICS_ADDR`; the flag wins) opts a **daemon-mode**
 run into a real backend: `cmd/pg-router/metrics_http.go`'s `startMetricsServer` builds

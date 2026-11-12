@@ -860,3 +860,43 @@ accepted, another never did) is not counted and a listener cannot be named.
 - **Hook.** An optional queue observer extension, `ExpiredPendingObserver`, fired after `q.mu` is
   released and opt-in like the other extensions; the metrics emitter implements it.
 - **No alert.** Operator ruling in the epic (`DEC-OBS-12`), unchanged: no rule reads this counter.
+
+### `DEC-OBS-14` — blocked time and dispatch outcome are measured against resource levels, so a looser threshold can be judged from data <!-- uuid: 9262fc14-f3b2-48b6-bc5f-2504e983bb7d -->
+
+**Decided** (operator request to measure before any threshold is loosened). `requirement_blocked` counts
+poll ticks, not time, and nothing compared work that ran at a tight level with work that ran at a good one.
+Two additions, both pure observation: admission (`INV-ADM-1`, `levels.Decide`) is unchanged, takes no new
+lock and reads nothing from these counters.
+
+- **`pg_router_requirement_blocked_seconds_total{role,resource,sole,steps_below}`** (counter, seconds; the
+  instrument is registered as `pg_router_requirement_blocked_seconds` with no unit). While a listener or an
+  emitter is held back by an unmet requirement clause, wall-clock seconds accrue to one series per unmet
+  resource. `role` is the listener or emitter id (`DEC-OBS-7`), `resource` the resource of an unmet clause
+  (clauses on one resource are one resource). `sole` is `true` when that resource is the only unmet one for
+  the role at that moment, else `false`. `steps_below` is the distance in scale steps from the resource's
+  level to the nearest level that satisfies every clause the role has on it: `1` means relaxing the clause
+  by one step would clear it, so `sole="true",steps_below="1"` is the exact "a one-step looser threshold would
+  have admitted this" signal. It is `1` for a two-level resource, `unknown` when no level is held or the held
+  level is stale (or off the scale), and `none` when the clauses on the resource allow no level at all.
+- **Accrual.** There is no pre-existing periodic evaluation (`role_paused` flips on admission passes), so the
+  long-running daemon runs one: every 5 seconds (`metrics.RequirementAccrualInterval`) it reads
+  `Queue.BlockedRequirements` (a read-only evaluation over the same unmet clauses `levels.Decide` reports,
+  via `levels.Shortfalls`) and adds the time since the previous evaluation to each series. The time since
+  the last evaluation is capped at six intervals (30 s), so a suspended host books at most that. The clock
+  starts with the process and nothing is persisted, so a restart never books the same time twice; the counter
+  resets to 0 with the process (read it with `increase()`). It accrues whether or not events are waiting for
+  the role. An emitter is blocked only when every enabled consumer is; its series use the consumer closest to
+  admitting (fewest unmet resources, first on a tie). `run-until-idle` does not accrue.
+- **`pg_router_dispatch_at_level_total{role,resource,level,outcome}`** and
+  **`pg_router_dispatch_at_level_seconds_total{role,resource,level}`** (counters; seconds is handler run
+  time). At each dispatch start the level of every graded-scale resource (more than two levels, a level in
+  force) is snapshotted; two-level and unknown-level resources are skipped. When the dispatch ends, each
+  snapshotted resource gets one count under `outcome="success"` or `"failure"` and the run seconds. A dispatch
+  ends failed under the same rule as `dispatch_failed`: a handler error that is not handed back for a retry.
+  A retried attempt, a busy decline, a shutdown hand-back and a skipped reply are not booked, so seconds of a
+  retried attempt are absent. The level is the one at dispatch start, not at the end.
+- **Cardinality.** `role` and `resource` take the 64-value fold (`OTHER` after that); `level` is a scale
+  level (at most the scale size, about 4); `outcome` is 2; `sole` is 2; `steps_below` is at most the largest
+  scale size plus `unknown` and `none`. The per-role bound is therefore resources times levels times 2 for
+  the dispatch counters and resources times 2 times about 6 for blocked seconds.
+- **No alert**, as for `DEC-OBS-12`: these exist to size a threshold change.

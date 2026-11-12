@@ -13,6 +13,8 @@ import (
 	otelprometheus "go.opentelemetry.io/otel/exporters/prometheus"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
+	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/internal/levels"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -267,5 +269,89 @@ func TestLevelLogLines_eachCarriesResourceLevel(t *testing.T) {
 	last := lines[len(lines)-1]
 	if last["resource_level"] != "EXAMPLE_GATE" || last["owner"] != "operator" || last["expires_at"] != "none" {
 		t.Errorf("legacy_gate_dropped = %v", last)
+	}
+}
+
+// requirement_blocked_seconds accrues wall-clock time per unmet resource, with
+// sole and steps_below labels, never double counting and capped on a long gap.
+func TestLevelMetrics_requirementBlockedSeconds(t *testing.T) {
+	var samples []LevelSample
+	h := newLevelHarness(t, &samples)
+	bp := func(p string, sf ...levels.Shortfall) eventqueue.BlockedParticipant {
+		return eventqueue.BlockedParticipant{Participant: p, Shortfalls: sf}
+	}
+	const name = "pg_router_requirement_blocked_seconds_total"
+	h.now = h.now.Add(5 * time.Second)
+	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{
+		bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true}),
+		bp("b", levels.Shortfall{Resource: "disk", Steps: 2, Sole: false}, levels.Shortfall{Resource: "net", Steps: levels.StepsUnknown, Sole: false}),
+		bp("c", levels.Shortfall{Resource: "router", Steps: 1, Sole: true}),
+	})
+	wantSeries(t, h.series(t), map[string]float64{
+		name + "{resource=disk,role=a,sole=true,steps_below=1}":       5,
+		name + "{resource=disk,role=b,sole=false,steps_below=2}":      5,
+		name + "{resource=net,role=b,sole=false,steps_below=unknown}": 5,
+		name + "{resource=router,role=c,sole=true,steps_below=1}":     5,
+	})
+	// Next evaluation: only a is still blocked; it books the time since the LAST
+	// evaluation, so b and c keep 5 and a goes to 5 + 3.
+	h.now = h.now.Add(3 * time.Second)
+	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	// An evaluation with nobody blocked still advances the clock: the blocked
+	// minute that follows is not stretched back over the idle gap.
+	h.now = h.now.Add(4 * time.Second)
+	h.e.AccrueRequirementBlocked(nil)
+	h.now = h.now.Add(2 * time.Second)
+	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	got := h.series(t)
+	wantSeries(t, got, map[string]float64{
+		name + "{resource=disk,role=a,sole=true,steps_below=1}":   10,
+		name + "{resource=disk,role=b,sole=false,steps_below=2}":  5,
+		name + "{resource=router,role=c,sole=true,steps_below=1}": 5,
+	})
+	// A gap longer than the cap (a suspended host) books only the cap.
+	h.now = h.now.Add(time.Hour)
+	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	wantSeries(t, h.series(t), map[string]float64{
+		name + "{resource=disk,role=a,sole=true,steps_below=1}": 10 + maxAccrualGap.Seconds(),
+	})
+	// A call with no time elapsed adds nothing (no double count).
+	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	wantSeries(t, h.series(t), map[string]float64{
+		name + "{resource=disk,role=a,sole=true,steps_below=1}": 10 + maxAccrualGap.Seconds(),
+	})
+}
+
+// DispatchLevels keeps only graded-scale resources with a level in force, and
+// OnDispatchAtLevel books count and seconds per resource for success and failure.
+func TestLevelMetrics_dispatchAtLevel(t *testing.T) {
+	samples := []LevelSample{
+		{Resource: "disk", Level: "TIGHT", ScaleSize: 4, HasLevel: true},
+		{Resource: "router", Level: "RUNNING", ScaleSize: 2, HasLevel: true}, // two-level: skipped
+		{Resource: "cpu", Level: "PLENTY", ScaleSize: 4},                     // no level: skipped
+		{Resource: "net", Level: "OK", ScaleSize: 3, HasLevel: true, Stale: true},
+	}
+	h := newLevelHarness(t, &samples)
+	at := h.e.DispatchLevels()
+	if want := [][2]string{{"disk", "TIGHT"}, {"net", "OK"}}; !slices.Equal(at, want) {
+		t.Fatalf("DispatchLevels = %v, want %v", at, want)
+	}
+	h.e.OnDispatchAtLevel("r1", at, 90*time.Second, false)
+	h.e.OnDispatchAtLevel("r1", at[:1], 30*time.Second, true)
+	h.e.OnDispatchAtLevel("r1", [][2]string{{"disk", "OK"}}, 10*time.Second, false)
+	got := h.series(t)
+	wantSeries(t, got, map[string]float64{
+		"pg_router_dispatch_at_level_total{level=TIGHT,outcome=success,resource=disk,role=r1}": 1,
+		"pg_router_dispatch_at_level_total{level=TIGHT,outcome=failure,resource=disk,role=r1}": 1,
+		"pg_router_dispatch_at_level_total{level=OK,outcome=success,resource=net,role=r1}":     1,
+		"pg_router_dispatch_at_level_total{level=OK,outcome=success,resource=disk,role=r1}":    1,
+		"pg_router_dispatch_at_level_seconds_total{level=TIGHT,resource=disk,role=r1}":         120,
+		"pg_router_dispatch_at_level_seconds_total{level=OK,resource=net,role=r1}":             90,
+		"pg_router_dispatch_at_level_seconds_total{level=OK,resource=disk,role=r1}":            10,
+	})
+	for k := range got {
+		if strings.HasPrefix(k, "pg_router_dispatch_at_level") && (strings.Contains(k, "resource=router") || strings.Contains(k, "resource=cpu")) {
+			t.Errorf("%s: two-level or unknown-level resource must not be booked", k)
+		}
 	}
 }

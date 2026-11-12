@@ -444,6 +444,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	o.DispatchRetryObserver = emitter
 	// pg_router_dispatch_failed_total{type,role}: a dispatch that ended failed.
 	o.DispatchFailedObserver = emitter
+	// pg_router_dispatch_at_level_{,seconds_}total{role,resource,level[,outcome]}.
+	o.DispatchLevelObserver = emitter
 	// pg_router_role_{last_progress_age_seconds,unsuccessful_since_progress,
 	// busy_since_progress}{role}, counted in roleListener.Offer (docket pg2-12gr4.8).
 	o.RoleProgressObserver = emitter
@@ -607,6 +609,13 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// The queue is built and every enabled role is registered: from the next
 	// collect the queue-bound gauges report (see queueRef above).
 	queueRef.Store(q)
+	// pg_router_requirement_blocked_seconds_total: the long-running daemon books
+	// the time each blocked role and emitter is held back, every
+	// metrics.RequirementAccrualInterval. run-until-idle is a short drain and
+	// does not.
+	if runMode == core.RunModeLongRunning {
+		go emitter.RunRequirementAccrual(ctx, metrics.RequirementAccrualInterval, q.BlockedRequirements)
+	}
 	return svc, q, mp, store.Close, nil
 }
 

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"sync"
+	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/transient"
 )
@@ -31,6 +32,21 @@ type DispatchRetryObserver interface {
 // pg_router_dispatch_failed_total{type,role}. nil disables the notification.
 type DispatchFailedObserver interface {
 	OnDispatchFailed(evtType, listenerID string)
+}
+
+// DispatchLevelObserver measures work against the resource levels it started
+// at. DispatchLevels snapshots the graded-scale resources as {resource, level}
+// pairs (two-level and unknown-level resources omitted); Offer takes it before
+// the handler runs. OnDispatchAtLevel is told, once per dispatch that ended
+// (accepted and finished, not skipped, not handed back for a retry, a busy
+// decline or a shutdown), the role, that snapshot, the handler's run time and
+// whether the dispatch ended failed, the same notion as DispatchFailedObserver.
+// The production implementation is metrics.Emitter's
+// pg_router_dispatch_at_level_total and pg_router_dispatch_at_level_seconds_total.
+// nil disables both calls.
+type DispatchLevelObserver interface {
+	DispatchLevels() [][2]string
+	OnDispatchAtLevel(role string, at [][2]string, ran time.Duration, failed bool)
 }
 
 // classifyTransient reports whether err is a transient handler failure worth
