@@ -46,6 +46,10 @@ type Engine struct {
 	// list is the last Process-list model with the store state it was read at.
 	list atomic.Pointer[listEntry]
 
+	// procm is the last registry-only model Process reads, with the store state
+	// it was read at.
+	procm atomic.Pointer[listEntry]
+
 	// inc is the registry state LiveSessions extends instead of rereading; incMu
 	// guards it.
 	incMu sync.Mutex
@@ -784,6 +788,26 @@ func (e *Engine) listModel(ctx context.Context) (*model, error) {
 	return m, nil
 }
 
+// processModel is the model Process reads: the registry, its deletions and the
+// Process observations (loadWith liveOnly), kept while the store has committed
+// none of them. The caller MUST NOT modify it.
+func (e *Engine) processModel(ctx context.Context) (*model, error) {
+	// Read BEFORE the load: a write that lands during it moves the counters.
+	live, removed, epoch, ready := e.St.LiveInputSeq(), e.St.RemovalSeq(), e.St.RollbackEpoch(), e.St.SessionRefReady()
+	if c := e.procm.Load(); c != nil && c.live == live && c.removed == removed && c.epoch == epoch && c.ready == ready {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return c.m, nil
+	}
+	m, err := e.loadWith(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	e.procm.Store(&listEntry{live: live, removed: removed, epoch: epoch, ready: ready, m: m})
+	return m, nil
+}
+
 // Processes returns the Processes that match the filter, newest first.
 func (e *Engine) Processes(ctx context.Context, f ProcessFilter) ([]Process, error) {
 	m, err := e.listModel(ctx)
@@ -815,8 +839,13 @@ func (e *Engine) Processes(ctx context.Context, f ProcessFilter) ([]Process, err
 
 // Process returns one Process with its registry versions and the Conversations
 // it held. An empty procStart selects the newest Process with that pid.
+//
+// It reads the registry-only model (processModel), not the complete one: the
+// history, end reasons and stages of the complete model are no input of a
+// Process, and every history write moves the complete model, so a show on a live
+// session reread them (14 to 26 s on the live store).
 func (e *Engine) Process(ctx context.Context, pid int64, procStart string) (Process, error) {
-	m, err := e.loadCtx(ctx)
+	m, err := e.processModel(ctx)
 	if err != nil {
 		return Process{}, err
 	}
