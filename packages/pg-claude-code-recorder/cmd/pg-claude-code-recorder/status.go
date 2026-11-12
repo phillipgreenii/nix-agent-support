@@ -94,7 +94,6 @@ func (a *app) statusOnce(cfg config.Config, cl *client.Client, c *common, short 
 		}
 		return a.emitWireError(c.jsonOut, err, cfg.Socket), false
 	}
-	a.addRecent(&st, cl)
 	a.printStatus(st, c.jsonOut, short)
 	if st.Degraded && !c.partialOK {
 		return a.emitErrorFor(c.jsonOut, wire.ErrBehind, st.Verdict, cfg.Socket), st.CaughtUp

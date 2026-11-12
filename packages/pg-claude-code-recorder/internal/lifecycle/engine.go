@@ -1116,3 +1116,35 @@ func (e *Engine) regUnchanged(db store.Querier, c *regCache) bool {
 	}
 	return db.QueryRow(registryDeletedCountQuery, c.maxDel).Scan(&d) == nil && d == c.nDel
 }
+
+// CountEnded counts the Conversations that ended crashed, and those in the
+// suspected-crash list (crashed, or unknown with a stale registry file), whose
+// sort time is at or after since. It answers what conversation.list with the
+// crashed and suspected filters would, row for row, without that read's cost:
+// the evidence test comes before any transcript query, and the transcript is
+// read only for a Conversation whose end time the model could not derive.
+func (e *Engine) CountEnded(ctx context.Context, since time.Time) (crashed, suspected int, err error) {
+	m, err := e.loadCtx(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	for session := range m.segs {
+		c, ok := m.conversation(session)
+		if !ok || !Suspected(c.Evidence) {
+			continue
+		}
+		if c.EndTime == nil {
+			if err := e.transcriptFacts(ctx, &c); err != nil {
+				return 0, 0, err
+			}
+		}
+		if !since.IsZero() && c.sortTime() < since.UnixNano() {
+			continue
+		}
+		suspected++
+		if EndLabel(c.Evidence) == LabelCrashed {
+			crashed++
+		}
+	}
+	return crashed, suspected, nil
+}

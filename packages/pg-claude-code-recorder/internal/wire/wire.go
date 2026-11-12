@@ -152,8 +152,9 @@ type Status struct {
 	StatusAgeS float64 `json:"status_age_s,omitempty"`
 	// CrashedRecent and SuspectedRecent count the Conversations that ended crashed,
 	// and crashed plus unknown with a stale registry file, in the last 7 days. The
-	// command derives them with the client's EndLabel (the daemon returns
-	// evidence, never a label); they are absent when it could not ask.
+	// daemon counts them from its Conversation model with EndLabel in the status
+	// refresh loop, so they match conversations --crashed and --suspected-crash;
+	// they are absent before the first refresh or when it failed.
 	CrashedRecent   *int `json:"crashed_recent,omitempty"`
 	SuspectedRecent *int `json:"suspected_recent,omitempty"`
 	// The offline answer fills these from disk.

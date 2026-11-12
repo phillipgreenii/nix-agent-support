@@ -451,6 +451,7 @@ func (d *Daemon) opStatus(ctx context.Context, _ []byte) (any, *wire.Error) {
 		Backfill:       d.backfillProgress(),
 		Socket:         d.cfg.Socket,
 	}
+	st.CrashedRecent, st.SuspectedRecent = d.crashCounts()
 	st.Loops = d.loopStatuses()
 	d.lastTickMu.Lock()
 	lt := d.lastTick

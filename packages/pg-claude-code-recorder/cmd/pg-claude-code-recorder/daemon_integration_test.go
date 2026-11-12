@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -114,11 +115,24 @@ func TestStatusCarriesCrashedRecentAndSuspectedRecent(t *testing.T) {
 	base := time.Now().Add(-time.Hour).UnixMilli()
 	row := twoCrashes(base)
 	row.Steps = append(row.Steps, clienttest.LabelStep{Do: "registry", Pid: 604, Session: "example-stale", Ms: base + 1000, StartMs: base})
+	// A crash and a clean close, the crash ten days ago (outside the 7-day window)
+	// and the clean close inside it: neither may count.
+	old := base - 10*24*int64(time.Hour/time.Millisecond)
+	row.Steps = append(
+		row.Steps,
+		clienttest.LabelStep{Do: "start", Pid: 605, StartMs: old},
+		clienttest.LabelStep{Do: "registry", Pid: 605, Session: "example-old-crash", Ms: old + 1000, StartMs: old},
+		clienttest.LabelStep{Do: "exit_kept", Pid: 605, Ms: old + 60000},
+		clienttest.LabelStep{Do: "start", Pid: 606, StartMs: base},
+		clienttest.LabelStep{Do: "registry", Pid: 606, Session: "example-clean", Ms: base + 1000, StartMs: base},
+		clienttest.LabelStep{Do: "exit_clean", Pid: 606, Ms: base + 30000},
+	)
 	e := clienttest.RunRow(t, row)
-	// The crash counts have a 500ms budget by default; under -race and a
-	// loaded host that expires, so this test gives them room.
+	// The status loop refreshes every 5 s; take the figures now.
+	if err := e.Daemon.RefreshStatus(); err != nil {
+		t.Fatal(err)
+	}
 	a, o, _ := testApp(nil)
-	a.recentBudget = time.Minute
 	code := a.run([]string{"status", "--json", "--socket", e.Socket})
 	out := o.String()
 	var st wire.Status
@@ -126,10 +140,20 @@ func TestStatusCarriesCrashedRecentAndSuspectedRecent(t *testing.T) {
 		t.Fatalf("%d %v %s", code, err, out)
 	}
 	if st.CrashedRecent == nil || *st.CrashedRecent != 2 || st.SuspectedRecent == nil || *st.SuspectedRecent != 3 {
-		t.Fatalf("crashed_recent %v suspected_recent %v", st.CrashedRecent, st.SuspectedRecent)
+		t.Fatalf("crashed_recent %s suspected_recent %s", ptr(st.CrashedRecent), ptr(st.SuspectedRecent))
+	}
+	// The counts agree with the authoritative lists.
+	for flag, want := range map[string]int{"--crashed": *st.CrashedRecent, "--suspected-crash": *st.SuspectedRecent} {
+		a, o, _ = testApp(nil)
+		if code := a.run([]string{"conversations", flag, "--since", "7d", "--json", "--socket", e.Socket}); code != 0 {
+			t.Fatalf("conversations %s: exit %d", flag, code)
+		}
+		var rows []json.RawMessage
+		if err := json.Unmarshal(o.Bytes(), &rows); err != nil || len(rows) != want {
+			t.Fatalf("conversations %s lists %d rows (%v), status counted %d", flag, len(rows), err, want)
+		}
 	}
 	a, o, _ = testApp(nil)
-	a.recentBudget = time.Minute
 	a.run([]string{"status", "--socket", e.Socket})
 	text := o.String()
 	if !strings.Contains(text, "crashed (7d): 2") {
@@ -281,4 +305,11 @@ func twoCrashes(base int64) clienttest.LabelRow {
 		{Do: "start", Pid: 603, StartMs: base},
 		{Do: "registry", Pid: 603, Session: "example-live", Ms: base + 1000, StartMs: base},
 	}}
+}
+
+func ptr(p *int) string {
+	if p == nil {
+		return "nil"
+	}
+	return strconv.Itoa(*p)
 }

@@ -187,11 +187,14 @@ type Daemon struct {
 	phase     atomic.Pointer[phaseRec]
 
 	// statusMu guards statusSnap, the cached figures opStatus serves.
-	statusMu     sync.Mutex
-	statusSnap   *statusSnap
-	statusLoopOn atomic.Bool
-	statusReady  chan struct{} // closed once the loop has stored its first snapshot
-	statusFirst  sync.Once
+	statusMu   sync.Mutex
+	statusSnap *statusSnap
+	// crashed and suspected are the 7-day counts of status (nil until the first
+	// count); see refreshCrashCounts.
+	crashed, suspected *int
+	statusLoopOn       atomic.Bool
+	statusReady        chan struct{} // closed once the loop has stored its first snapshot
+	statusFirst        sync.Once
 	// statusRefreshMu guards the refresh bookkeeping below.
 	statusRefreshMu sync.Mutex
 

@@ -1,48 +1,15 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/lifecycle"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
-
-// recentWindow is the window of status's crashed_recent and suspected_recent.
-const recentWindow = 7 * 24 * time.Hour
-
-// recentBudgetDefault is how long status waits, in total, for the two crash
-// queries. They are conversation.list reads that walk every record of every
-// Conversation, so on a large index each takes tens of seconds; status answers
-// from a cached snapshot in milliseconds and must not inherit that cost.
-const recentBudgetDefault = 500 * time.Millisecond
-
-// addRecent fills crashed_recent and suspected_recent from the crash query. It
-// leaves them absent when the daemon cannot answer within the budget.
-func (a *app) addRecent(st *wire.Status, cl *client.Client) {
-	budget := a.recentBudget
-	if budget <= 0 {
-		budget = recentBudgetDefault
-	}
-	ctx, cancel := context.WithTimeout(a.ctx, budget)
-	defer cancel()
-	since := time.Now().Add(-recentWindow)
-	cr, err := lifecycle.QueryEnded(ctx, cl, lifecycle.EndQuery{Label: lifecycle.LabelCrashed, Since: since})
-	if err != nil {
-		return
-	}
-	su, err := lifecycle.QueryEnded(ctx, cl, lifecycle.EndQuery{Suspected: true, Since: since})
-	if err != nil {
-		return
-	}
-	c, s := len(cr.Rows), len(su.Rows)
-	st.CrashedRecent, st.SuspectedRecent = &c, &s
-}
 
 // parseSince reads a duration such as 7d (back from now) or an RFC 3339 time.
 func parseSince(s string, now time.Time) (time.Time, error) {

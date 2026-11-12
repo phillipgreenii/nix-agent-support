@@ -677,6 +677,12 @@ did not observe is `unknown`; the registry file still present at the exit is `cr
 (`client/labels_test.go`) and the command test (`cmd/pg-claude-code-recorder/labels_integration_test.go`); each calls
 `clienttest.Covered`, and a guard fails when a consumer stops loading every row.
 
+`status` carries `crashed_recent` and `suspected_recent`: the 7-day counts of the `--crashed` and `--suspected-crash`
+lists. The daemon counts them from its in-memory Conversation model (evidence test first, a transcript read only
+for a Conversation whose end time the model cannot derive), so they agree with those two lists row for row. They
+are recomputed after each pass of the status loop (every 5 s plus the pass), not per request, so `status` stays
+fast and the counts can be up to one refresh old. They are absent only before the first count or when it failed.
+
 ```text
 pg-claude-code-recorder conversations --crashed --since 1d
 pg-claude-code-recorder conversations --suspected-crash      # crashed plus unknown rows with a stale registry file

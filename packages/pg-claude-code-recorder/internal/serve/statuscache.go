@@ -29,6 +29,9 @@ type statusSnap struct {
 	statExceptions int
 }
 
+// crashWindow is the window of status's crashed_recent and suspected_recent.
+const crashWindow = 7 * 24 * time.Hour
+
 // refreshStatus recomputes the snapshot from the maintained lag state and the
 // cached file rows, with a Lstat only for the exceptions (see statLazy).
 func (d *Daemon) refreshStatus() error { return d.refreshStatusCtx(d.rootCtx()) }
@@ -59,6 +62,36 @@ func (d *Daemon) refreshStatusCtx(ctx context.Context) error {
 	d.statusMu.Unlock()
 	d.statusFirst.Do(func() { close(d.statusReady) })
 	return nil
+}
+
+// refreshCrashCounts recomputes the 7-day crashed and suspected counts from the
+// model the engine keeps, not from a conversation.list read, so they cost one
+// pass over the Conversations. It is a separate step from refreshStatus because
+// it may load the model; a failure keeps the previous counts.
+func (d *Daemon) refreshCrashCounts() error {
+	c, su, err := d.eng.CountEnded(d.rootCtx(), d.clock.Now().Add(-crashWindow))
+	if err != nil {
+		return err
+	}
+	d.statusMu.Lock()
+	d.crashed, d.suspected = &c, &su
+	d.statusMu.Unlock()
+	return nil
+}
+
+// RefreshStatus recomputes the cached status figures and the crash counts now,
+// instead of at the next pass of the status loop.
+func (d *Daemon) RefreshStatus() error {
+	if err := d.refreshStatus(); err != nil {
+		return err
+	}
+	return d.refreshCrashCounts()
+}
+
+func (d *Daemon) crashCounts() (crashed, suspected *int) {
+	d.statusMu.Lock()
+	defer d.statusMu.Unlock()
+	return d.crashed, d.suspected
 }
 
 func (d *Daemon) loadStatusSnap() *statusSnap {
@@ -94,6 +127,9 @@ func (d *Daemon) statusLoop() {
 	for {
 		if err := d.runLoop(obs.LoopStatusRefresh, d.refreshStatus); err != nil {
 			d.obs.Event("status_refresh_failed", "error", err.Error())
+		}
+		if err := d.refreshCrashCounts(); err != nil {
+			d.obs.Event("crash_counts_failed", "error", err.Error())
 		}
 		wait, stopTimer := d.timer(obs.LoopStatusRefresh, statusRefreshEvery)
 		select {
