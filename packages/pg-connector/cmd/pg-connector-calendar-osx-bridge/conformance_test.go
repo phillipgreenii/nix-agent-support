@@ -95,7 +95,7 @@ func startFakeOsxBridgeSocket(t *testing.T) string {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	sock := filepath.Join(dir, "s.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatalf("listen on %s: %v", sock, err)
 	}

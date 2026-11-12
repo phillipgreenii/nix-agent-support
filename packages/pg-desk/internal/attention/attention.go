@@ -23,7 +23,6 @@ package attention
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -349,6 +348,3 @@ func collapse(v *View, cands []Candidate) Item {
 		// Group is filled in by the grouping stage (group.go).
 	}
 }
-
-// joinReasons renders a list of causes for a rule's reason text.
-func joinReasons(parts []string) string { return strings.Join(parts, "; ") }

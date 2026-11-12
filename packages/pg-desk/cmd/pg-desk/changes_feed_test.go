@@ -103,7 +103,7 @@ func TestChangesFeedEndToEndOneRow(t *testing.T) {
 	feed := callIndex(calls, "issue changes ")
 	show := callIndex(calls, "issue show J-1")
 	ack := callIndex(calls, "issue changes-ack ")
-	if feed < 0 || show < 0 || ack < 0 || !(feed < show && show < ack) {
+	if feed < 0 || show < 0 || ack < 0 || feed >= show || show >= ack {
 		t.Fatalf("calls = %v; want changes, then show, then changes-ack", calls)
 	}
 	if c := calls[feed]; !strings.Contains(c, "--backend "+feedTestInstance) || !strings.Contains(c, "--no-ack") ||

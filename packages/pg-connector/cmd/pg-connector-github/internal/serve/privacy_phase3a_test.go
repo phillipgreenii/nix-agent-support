@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,7 @@ func TestPrivacy_AFixtureTokenNeverAppearsInAnyGroupAJobRowOrALogWhateverTheNewO
 		t.Fatal("fixture: the token was never requested or no job was fetched, so this test proves less than it claims")
 	}
 	var jobs int
-	if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM job`).Scan(&jobs); err != nil || jobs == 0 {
+	if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COUNT(*) FROM job`).Scan(&jobs); err != nil || jobs == 0 {
 		t.Fatalf("fixture: no job row stored (%v)", err)
 	}
 	if code := servetest.StopDaemon(t, d); code != 0 {

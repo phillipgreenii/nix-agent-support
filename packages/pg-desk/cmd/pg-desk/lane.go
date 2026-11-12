@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -69,7 +68,7 @@ recorded; 1 any error (nothing recorded).`,
 }
 
 func runLaneRecord(cmd *cobra.Command, input string) error {
-	var r io.Reader = cmd.InOrStdin()
+	r := cmd.InOrStdin()
 	if input != "-" {
 		f, err := os.Open(input)
 		if err != nil {

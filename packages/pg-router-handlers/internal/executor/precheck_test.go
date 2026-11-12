@@ -93,7 +93,7 @@ func TestPrecheckReview_SkipReasons(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer w.Close()
+			defer func() { _ = w.Close() }()
 			deps := Deps{Cfg: cfg, PR: tc.pr, Log: w}
 
 			got, skipped := PrecheckReview(context.Background(), DispatchContext{Role: role, Item: reviewItem()}, deps, tc.bead)

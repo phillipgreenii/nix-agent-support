@@ -109,7 +109,7 @@ type storedChange struct {
 // storedChanges reads the change log.
 func storedChanges(t *testing.T, d *servetest.Daemon) []storedChange {
 	t.Helper()
-	rows, err := d.OpenStore(t).Query(`SELECT seq, version, head_sha, kinds FROM change_log ORDER BY seq`)
+	rows, err := d.OpenStore(t).QueryContext(context.Background(), `SELECT seq, version, head_sha, kinds FROM change_log ORDER BY seq`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestChangesAssembly_AStartRequeuesTheGroupsAStoredPendingRowAwaitsAndSettle
 	deadline := time.Now().Add(time.Hour).UnixMilli()
 	awaited := `[{"group":"runs","since":"` + time.Now().Add(-time.Minute).UTC().Format(time.RFC3339) + `"}]`
 	db := d.WritableStore(t)
-	if _, err := db.Exec(`INSERT INTO pending_change (kind, id, kinds, fields, awaited, head_sha, base_sha, origin, detected_at, deadline)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO pending_change (kind, id, kinds, fields, awaited, head_sha, base_sha, origin, detected_at, deadline)
 		VALUES ('pr', ?, '["head_changed"]', '[]', ?, 'head-3', 'base-1', 'refresh', ?, ?)`, prA.NodeID, awaited, detected, deadline); err != nil {
 		t.Fatal(err)
 	}

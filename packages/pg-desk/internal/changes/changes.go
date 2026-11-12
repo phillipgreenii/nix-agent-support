@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -474,22 +473,6 @@ func (e *Engine) hydrateResult(ctx context.Context, entityType, id string, chang
 		e.warnf("changes: deactivate %s %s: %v\n", entityType, id, derr)
 	}
 	return res, nil
-}
-
-// activeEntityIDs lists the ids of the type's active entities, sorted.
-func (e *Engine) activeEntityIDs(entityType string) ([]string, error) {
-	all, err := e.Store.ListEntities()
-	if err != nil {
-		return nil, fmt.Errorf("changes: list entities: %w", err)
-	}
-	var ids []string
-	for _, ent := range all {
-		if ent.EntityType == entityType && !ent.Inactive {
-			ids = append(ids, ent.EntityID)
-		}
-	}
-	sort.Strings(ids)
-	return ids, nil
 }
 
 // consumerCursor is the consumer's current cursor, 0 when it is unregistered.

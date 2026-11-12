@@ -91,7 +91,7 @@ func (h *storeHydrator) RunEntityChange(_ context.Context, entityType, id string
 	// mark set by the same write.
 	var wo store.WriteOptions
 	if opts.WatchLocal {
-		if !(found && row.Watched != nil && *row.Watched) {
+		if !found || row.Watched == nil || !*row.Watched {
 			kinds = []string{"added"}
 		}
 		on := true

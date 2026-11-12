@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"slices"
 	"testing"
 	"time"
@@ -238,7 +239,7 @@ func TestJobResults_AreFetchedOnceAndAFailedFetchKeepsWhatIsKnown(t *testing.T) 
 	store := d.OpenStore(t)
 	jobRows := func() int {
 		var n int
-		if err := store.QueryRow(`SELECT COUNT(*) FROM job`).Scan(&n); err != nil {
+		if err := store.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM job`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -314,7 +315,7 @@ func TestJobResults_AreFetchedOnceAndAFailedFetchKeepsWhatIsKnown(t *testing.T) 
 		servetest.Run{ID: 3002, Name: "lint", Status: "completed", Conclusion: "success", Head: "head-3"})
 	until(t, 30*time.Second, "the runs group to record the failed job fetch", func() bool {
 		var lastErr string
-		_ = d.OpenStore(t).QueryRow(`SELECT last_error FROM entity_group WHERE id = ? AND group_name = 'runs'`, prA.NodeID).Scan(&lastErr)
+		_ = d.OpenStore(t).QueryRowContext(context.Background(), `SELECT last_error FROM entity_group WHERE id = ? AND group_name = 'runs'`, prA.NodeID).Scan(&lastErr)
 		return lastErr != ""
 	})
 	if got := jobRows(); got != 2 {

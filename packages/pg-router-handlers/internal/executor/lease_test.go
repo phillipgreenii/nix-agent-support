@@ -172,7 +172,7 @@ func TestLease_refreshedThroughEveryPhaseThenStops(t *testing.T) {
 	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	calls := settle.FakeCC.SetMetaCalls()
+	calls := settle.SetMetaCalls()
 	if len(calls) < 12 {
 		t.Fatalf("want >= 12 lease writes across the four phases, got %d", len(calls))
 	}
@@ -188,7 +188,7 @@ func TestLease_refreshedThroughEveryPhaseThenStops(t *testing.T) {
 	// Stopped when Dispatch returned.
 	n := len(calls)
 	time.Sleep(60 * time.Millisecond)
-	if got := len(settle.FakeCC.SetMetaCalls()); got != n {
+	if got := len(settle.SetMetaCalls()); got != n {
 		t.Errorf("lease ticker still running after Dispatch returned: %d -> %d writes", n, got)
 	}
 }
@@ -240,7 +240,7 @@ func TestLease_disabledWhenTTLZero(t *testing.T) {
 	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if n := len(settle.FakeCC.SetMetaCalls()); n != 0 {
+	if n := len(settle.SetMetaCalls()); n != 0 {
 		t.Errorf("no lease writes expected with TTL 0, got %d", n)
 	}
 	if _, ok := settle.EnsuredMeta[ccpool.MetaKeyLeaseUntil]; ok {

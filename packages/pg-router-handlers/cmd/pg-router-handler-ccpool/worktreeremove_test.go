@@ -169,12 +169,3 @@ func containsPath(porcelain, path string) bool {
 	}
 	return false
 }
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
-}

@@ -73,8 +73,6 @@ func attnFixture(t *testing.T, cutover bool, prs ...attnPR) string {
 			t.Fatal(err)
 		}
 	}
-	if cutover {
-	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

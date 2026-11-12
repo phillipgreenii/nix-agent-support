@@ -119,7 +119,7 @@ func TestApplySplit_goldenPath(t *testing.T) {
 	was := bd.idx("update pg2-p --add-label was-split")
 	rel := bd.idx("update pg2-p --status=open --assignee=")
 	rm := bd.idx("update pg2-p --remove-label needs-split-review")
-	if was < 0 || rel < 0 || rm < 0 || !(was < rel && rel < rm) || rm != len(bd.calls)-1 {
+	if was < 0 || rel < 0 || rm < 0 || (was >= rel || rel >= rm) || rm != len(bd.calls)-1 {
 		t.Errorf("was=%d release=%d remove=%d of %d; calls=%v", was, rel, rm, len(bd.calls), bd.calls)
 	}
 	cm := ""

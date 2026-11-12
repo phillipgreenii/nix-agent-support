@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -23,7 +24,7 @@ func runReal(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, args...)
+	cmd := exec.CommandContext(context.Background(), exe, args...)
 	cmd.Dir = "/"
 	cmd.Env = []string{reexecEnv + "=1"}
 	var out, errb bytes.Buffer

@@ -195,7 +195,7 @@ func TestServeLoop_ExitCodeMatchesErrorCode_AllSevenSentinels(t *testing.T) {
 		}
 		// invalid_argument and query_not_recognized deliberately share Usage:
 		// both mean the request itself is wrong. Every other code is distinct.
-		if prior, dup := seen[code]; dup && !(code == exitcode.Usage && (prior == "invalid_argument" || c.code == "invalid_argument") && (prior == "query_not_recognized" || c.code == "query_not_recognized")) {
+		if prior, dup := seen[code]; dup && (code != exitcode.Usage || (prior != "invalid_argument" && c.code != "invalid_argument") || (prior != "query_not_recognized" && c.code != "query_not_recognized")) {
 			t.Fatalf("exit code %d assigned to both %q and %q, want each code distinct", code, prior, c.code)
 		}
 		seen[code] = c.code

@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -106,7 +107,7 @@ func restartAfterALongDowntime(t *testing.T, originDelay int) {
 	past := time.Now().Add(-48 * time.Hour).UnixMilli()
 	db := d.WritableStore(t)
 	for _, stmt := range []string{`UPDATE entity_group SET fresh_until = ?`, `UPDATE query SET fresh_until = ?`} {
-		if _, err := db.Exec(stmt, past); err != nil {
+		if _, err := db.ExecContext(context.Background(), stmt, past); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -169,7 +170,7 @@ func restartAfterALongDowntime(t *testing.T, originDelay int) {
 		t.Errorf("the hour's spend is %d points, over the cap %d", spent, cap)
 	} else if want := int64(filledGraphQL + newGraphQL); spent != want {
 		t.Errorf("budget table says %d points, the shim saw %d GraphQL calls (after the fill: %v)", spent, want, kinds(d.Shim.OriginCalls()[filled:]))
-		rows, _ := d.OpenStore(t).Query(`SELECT seq, bucket, spent, purpose, remaining FROM budget ORDER BY seq`)
+		rows, _ := d.OpenStore(t).QueryContext(context.Background(), `SELECT seq, bucket, spent, purpose, remaining FROM budget ORDER BY seq`)
 		for rows.Next() {
 			var seq, spent, rem int64
 			var bucket, purpose string
@@ -205,7 +206,7 @@ func awaitRunsRefetched(t *testing.T, d *servetest.Daemon, since int64, prs int)
 	db := d.OpenStore(t)
 	until(t, 60*time.Second, "the runs group of every fixture pull request to be fetched again", func() bool {
 		var n int
-		err := db.QueryRow(`SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND group_name = 'runs' AND fetched_at >= ?`, since).Scan(&n)
+		err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND group_name = 'runs' AND fetched_at >= ?`, since).Scan(&n)
 		return err == nil && n >= prs
 	})
 }
@@ -214,7 +215,7 @@ func awaitRunsRefetched(t *testing.T, d *servetest.Daemon, since int64, prs int)
 func countRows(t *testing.T, d *servetest.Daemon, table string) int {
 	t.Helper()
 	var n int
-	if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+	if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+table).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -227,7 +228,7 @@ func graphqlSpent(t *testing.T, d *servetest.Daemon) int64 {
 	db := d.OpenStore(t)
 	var n int64
 	since := time.Now().Add(-time.Hour).UnixMilli()
-	if err := db.QueryRow(`SELECT COALESCE(SUM(spent), 0) FROM budget WHERE bucket = 'graphql' AND at >= ?`, since).Scan(&n); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(SUM(spent), 0) FROM budget WHERE bucket = 'graphql' AND at >= ?`, since).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n

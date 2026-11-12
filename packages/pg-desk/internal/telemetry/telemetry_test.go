@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"testing"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
-	logglobal "go.opentelemetry.io/otel/log/global"
 )
 
 // TestInit_NoEndpoint_InstallsNoopLoggerProvider verifies that pg-desk
@@ -25,7 +25,7 @@ func TestInit_NoEndpoint_InstallsNoopLoggerProvider(t *testing.T) {
 	}
 	defer func() { _ = shutdown(context.Background()) }()
 
-	lp := logglobal.GetLoggerProvider()
+	lp := otel.GetLoggerProvider()
 	if lp == nil {
 		t.Fatal("nil global logger provider")
 	}

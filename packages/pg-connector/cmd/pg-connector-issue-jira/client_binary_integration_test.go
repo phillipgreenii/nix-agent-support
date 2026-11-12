@@ -79,7 +79,7 @@ func realBinary(t *testing.T) string {
 			return
 		}
 		buildBin = filepath.Join(buildDir, "pg-connector-issue-jira")
-		cmd := exec.Command(goBin, "build", "-o", buildBin, "-ldflags", "-X main.clientBudgetOverride=2s", ".")
+		cmd := exec.CommandContext(context.Background(), goBin, "build", "-o", buildBin, "-ldflags", "-X main.clientBudgetOverride=2s", ".")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			buildErr = errors.New("go build: " + err.Error() + "\n" + string(out))
 		}
@@ -142,7 +142,7 @@ func newClientRig(t *testing.T) clientRig {
 // the fake origin tool reports and the override naming the fake origin tool.
 func (r clientRig) runBinary(t *testing.T, stdin string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	cmd := exec.Command(realBinary(t), args...)
+	cmd := exec.CommandContext(context.Background(), realBinary(t), args...)
 	cmd.Dir = "/"
 	cmd.Env = []string{"PJIRA_TEST_ACTOR=alice-actor", "PG_CONNECTOR_ISSUE_JIRA_BINARY=" + r.fakeBin, "PG_CONNECTOR_ISSUE_JIRA_PROJECT=ABC"}
 	cmd.Stdin = strings.NewReader(stdin)

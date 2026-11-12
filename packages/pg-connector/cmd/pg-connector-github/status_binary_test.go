@@ -139,7 +139,7 @@ func startStatusDaemon(t *testing.T, cfgPath string, o statusDaemonOpts) *status
 // runBinary runs bin with args, an empty environment and working directory "/".
 func runBinary(t *testing.T, bin string, stdin string, args ...string) clientResult {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(context.Background(), bin, args...)
 	cmd.Dir = "/"
 	cmd.Env = []string{}
 	cmd.Stdin = strings.NewReader(stdin)

@@ -457,10 +457,10 @@ func TestPriorityInheritance(t *testing.T) {
 		t.Errorf("UnmappedPriority = %d, want 1", r.Inputs.UnmappedPriority)
 	}
 	// Not-started tier, no dates, all unblocks 0: priority orders them.
-	if !(r.pos(t, high) < r.pos(t, p4)) {
+	if r.pos(t, high) >= r.pos(t, p4) {
 		t.Errorf("High (P1) must rank before a P4 bead: %v", rowKeys(r))
 	}
-	if !(r.pos(t, p4) < r.pos(t, unmapped)) || !(r.pos(t, lowest) < r.pos(t, unmapped)) {
+	if (r.pos(t, p4) >= r.pos(t, unmapped)) || (r.pos(t, lowest) >= r.pos(t, unmapped)) {
 		t.Errorf("an unmapped value must sort after P4: %v", rowKeys(r))
 	}
 
@@ -613,7 +613,7 @@ func TestPRUnblocksFromDependencyResolver(t *testing.T) {
 	f.external(ext, one, "depends_on", "waits on one")
 	f.pr("o/r#7", prSpec{state: "merged", merged: true, branch: "m1", base: "none"})
 	r := f.rank(rankOpts())
-	if !(r.pos(t, two) < r.pos(t, one) && r.pos(t, one) < r.pos(t, none)) {
+	if r.pos(t, two) >= r.pos(t, one) || r.pos(t, one) >= r.pos(t, none) {
 		t.Errorf("order = %v, want #3 (2 dependents), #2 (1), #1 (0, the merged dependent does not count)", rowKeys(r))
 	}
 	if got := r.row(t, two).DecidingKey; got != KeyUnblocks {

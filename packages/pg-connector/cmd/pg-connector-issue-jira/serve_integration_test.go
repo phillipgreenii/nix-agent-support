@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -61,7 +62,7 @@ func runReal(t *testing.T, stdin string, env []string, args ...string) (code int
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, args...)
+	cmd := exec.CommandContext(context.Background(), exe, args...)
 	cmd.Dir = "/"
 	cmd.Env = append([]string{reexecEnv + "=1"}, env...)
 	cmd.Stdin = strings.NewReader(stdin)
@@ -145,7 +146,7 @@ func startServe(t *testing.T, cfgPath string, env ...string) (cmd *exec.Cmd, std
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd = exec.Command(exe, "--config", cfgPath, "serve")
+	cmd = exec.CommandContext(context.Background(), exe, "--config", cfgPath, "serve")
 	cmd.Dir = "/"
 	cmd.Env = append([]string{reexecEnv + "=1"}, env...)
 	stderr = &syncBuffer{}
@@ -172,7 +173,7 @@ func waitListening(t *testing.T, socket string, done chan error, stderr *syncBuf
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		if c, err := net.Dial("unix", socket); err == nil {
+		if c, err := (&net.Dialer{}).DialContext(context.Background(), "unix", socket); err == nil {
 			_ = c.Close()
 			return
 		}

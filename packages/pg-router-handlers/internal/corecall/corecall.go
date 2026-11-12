@@ -97,7 +97,7 @@ func Call(ref Ref, subcommand string, payload []byte) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("dial core socket %s: %w", ref.Socket, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := conn.SetDeadline(time.Now().Add(callTimeout)); err != nil {
 		return nil, 0, fmt.Errorf("set deadline: %w", err)
 	}

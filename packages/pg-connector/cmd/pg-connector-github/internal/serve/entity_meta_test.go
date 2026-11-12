@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -160,7 +161,7 @@ func TestEntityMeta_AFlipOfTheFlagChangesNoVersionNoRowAndNoEvent(t *testing.T) 
 	// Flip the stored flag the way a watched query run does, bypassing every
 	// read path, so the test sees what the flip itself causes.
 	db := d.WritableStore(t)
-	if _, err := db.Exec(`UPDATE entity SET watched_at = ?, watched_via = ? WHERE kind = 'pr' AND id = ?`,
+	if _, err := db.ExecContext(context.Background(), `UPDATE entity SET watched_at = ?, watched_via = ? WHERE kind = 'pr' AND id = ?`,
 		time.Now().UnixMilli(), "query:"+servetest.QueryTeam, prT.NodeID); err != nil {
 		t.Fatal(err)
 	}

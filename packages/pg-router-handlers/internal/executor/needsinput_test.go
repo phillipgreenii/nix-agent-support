@@ -446,7 +446,7 @@ func TestStall_recoveryInBetweenResetsTheTimer(t *testing.T) {
 				}
 			}
 			err := rig.run(stallT0.Add(3 * time.Hour))
-			mustStalled(t, err)
+			_ = mustStalled(t, err)
 			esc, _ := rig.cc.firstCall("cancel")
 			if want := again.Add(15 * time.Minute); !esc.at.Equal(want) {
 				t.Errorf("Escape at %s, want %s (15m after the re-entry)", esc.at.Format(time.TimeOnly), want.Format(time.TimeOnly))
@@ -523,7 +523,7 @@ func TestStall_unconfirmedEscapeStillEndsInClose(t *testing.T) {
 	rig.lastWrite = in.Add(-5 * time.Second)
 	rig.cc.script = needsInputBetween(in, time.Time{})
 	err := rig.run(stallT0.Add(3 * time.Hour))
-	mustStalled(t, err)
+	_ = mustStalled(t, err)
 	if got := rig.cc.callNames(); !slices.Equal(got, []string{"cancel", "close"}) {
 		t.Fatalf("ccpool calls = %v", got)
 	}
@@ -651,7 +651,7 @@ func TestStall_unreadableBeadDefersTheCloseToTheNextPoll(t *testing.T) {
 		}
 	}
 	err := rig.run(stallT0.Add(3 * time.Hour))
-	mustStalled(t, err)
+	_ = mustStalled(t, err)
 	cls, _ := rig.cc.firstCall("close")
 	if want := clearAt.Add(10 * time.Second); !cls.at.Equal(want) {
 		t.Errorf("closed at %s, want %s: the first poll at which the bead was readable again (the unreadable polls close nothing)",
@@ -725,7 +725,7 @@ func TestStall_configurableBound(t *testing.T) {
 		in := stallT0.Add(time.Minute)
 		rig.lastWrite = in.Add(-5 * time.Second)
 		rig.cc.script = needsInputBetween(in, time.Time{})
-		mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
+		_ = mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
 		if esc, _ := rig.cc.firstCall("cancel"); !esc.at.Equal(in.Add(5 * time.Minute)) {
 			t.Errorf("Escape at %s, want 5m after entry", esc.at.Format(time.TimeOnly))
 		}
@@ -737,7 +737,7 @@ func TestStall_configurableBound(t *testing.T) {
 		in := stallT0.Add(time.Minute)
 		rig.lastWrite = in.Add(-5 * time.Second)
 		rig.cc.script = needsInputBetween(in, time.Time{})
-		mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
+		_ = mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
 		if esc, _ := rig.cc.firstCall("cancel"); !esc.at.Equal(in.Add(8 * time.Minute)) {
 			t.Errorf("Escape at %s, want 8m after entry", esc.at.Format(time.TimeOnly))
 		}
@@ -753,7 +753,7 @@ func TestStall_absorbedSessionCountsFromItsLastActivity(t *testing.T) {
 	rig.lastWrite = blocked.Add(-5 * time.Second)
 	rig.cc.row.State = ccpool.StateNeedsInput
 	rig.cc.row.LastActivityAt = blocked.Unix()
-	mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
+	_ = mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
 	if esc, _ := rig.cc.firstCall("cancel"); !esc.at.Equal(stallT0) {
 		t.Errorf("Escape at %s, want on the first poll (already blocked for 20m)", esc.at.Format(time.TimeOnly))
 	}
@@ -765,7 +765,7 @@ func TestStall_unobservableTranscriptDoesNotBlockTheBound(t *testing.T) {
 	rig := newStallRig(t, releaseRole(config.Default()), nil)
 	rig.cc.row.State = ccpool.StateNeedsInput
 	rig.cc.row.LastActivityAt = stallT0.Add(-3 * time.Hour).Unix() // stale and unverifiable
-	mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
+	_ = mustStalled(t, rig.run(stallT0.Add(3*time.Hour)))
 	if esc, _ := rig.cc.firstCall("cancel"); !esc.at.Equal(stallT0.Add(15 * time.Minute)) {
 		t.Errorf("Escape at %s, want 15m after the first observation", esc.at.Format(time.TimeOnly))
 	}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -56,7 +57,7 @@ func TestEnvIndependenceServeUnderEnvDashI(t *testing.T) {
 	// The configured gh is the wrapper: the daemon must call exactly this path.
 	d.Rewrite(map[string]any{"gh_path": wrapper})
 
-	cmd := exec.Command(envBin, "-i", bin, "--config", d.ConfigPath, "serve")
+	cmd := exec.CommandContext(context.Background(), envBin, "-i", bin, "--config", d.ConfigPath, "serve")
 	cmd.Dir = "/"
 	cmd.Env = []string{} // env itself starts empty too; nothing leaks in either way
 	var out lockedBuf

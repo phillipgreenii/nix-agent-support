@@ -336,7 +336,7 @@ func TestConformanceDaemonDownIsUnavailableNeverFromACache(t *testing.T) {
 // result and error: a protocol violation CheckResponse must reject.
 func corruptDaemon(t *testing.T, sock string) {
 	t.Helper()
-	l, err := net.Listen("unix", sock)
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

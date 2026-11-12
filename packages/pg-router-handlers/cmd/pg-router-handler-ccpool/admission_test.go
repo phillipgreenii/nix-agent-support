@@ -48,8 +48,8 @@ func (c *poolCC) Capacity(context.Context) (ccpool.Capacity, error) {
 	if c.usageHit {
 		return ccpool.Capacity{MaxSessions: 2, Counted: 2, UsageLimit: &ccpool.UsageLimit{Window: "five_hour", UsedPct: 100, ResetsAt: orphanNowT.Add(time.Hour)}}, nil
 	}
-	c.orphanCC.mu.Lock()
-	defer c.orphanCC.mu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, s := range c.sessions {
 		if s.CloseReason != "" {
 			return ccpool.Capacity{MaxSessions: 2, Counted: 1, Free: 1}, nil
@@ -234,9 +234,9 @@ func expiredOrphan(id, bead, state, eventID string) ccpool.Session {
 }
 
 func orphanMarked(cc *poolCC, id string) bool {
-	cc.orphanCC.mu.Lock()
-	defer cc.orphanCC.mu.Unlock()
-	for _, m := range cc.orphanCC.metaSets {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	for _, m := range cc.metaSets {
 		if m[0] == id && m[1] == ccpool.MetaKeyOrphanReclaimed {
 			return true
 		}

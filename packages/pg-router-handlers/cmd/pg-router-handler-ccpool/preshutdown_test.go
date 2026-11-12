@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/x/gitclient"
@@ -208,15 +207,6 @@ func (m *fakeWorktreeManager) DeleteBranch(_ context.Context, branch string, for
 	return nil
 }
 
-func contains(a []string, x string) bool {
-	for _, v := range a {
-		if v == x {
-			return true
-		}
-	}
-	return false
-}
-
 // TestCloseSessionAndWorktree_deletesAnchorBranchAfterSuccessfulRemoval is
 // pg2-tpa18's own regression: bead pg2-ci75j fixed the orphaned-branch bug
 // at internal/executor.cleanupWorktree and the nix mkWorktreeSweepScript,
@@ -318,12 +308,6 @@ func TestCloseSessionAndWorktree_noBeadMetaSkipsBranchDelete(t *testing.T) {
 	if len(open.BranchDeletes) != 0 {
 		t.Errorf("branch must not be deleted without a bead id; deletes=%v", open.BranchDeletes)
 	}
-}
-
-// leaseMeta is a session meta map carrying a supervision lease that expires at
-// until (INV-CCH-18), plus the bead tag the sweep reads.
-func leaseMeta(until time.Time, bead string) map[string]string {
-	return map[string]string{ccpool.MetaKeyLeaseUntil: ccpool.FormatMetaTime(until), ccpool.MetaKeyBead: bead}
 }
 
 // TestCloseSinglePhase_worktreeRemoveWarnOnlyForRealFailures pins pg2-tp8rx:

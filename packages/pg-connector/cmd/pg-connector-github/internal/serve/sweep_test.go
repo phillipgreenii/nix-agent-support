@@ -32,13 +32,13 @@ func TestSweep_PrunesJobRowsPastTheHorizonAndCountsTheEvictions(t *testing.T) {
 
 	// A job row of a run nobody has looked at since 1970 is past any horizon.
 	db := d.WritableStore(t)
-	if _, err := db.Exec(`INSERT INTO job (run_id, attempt, jobs, fetched_at) VALUES ('9999', 1, '[]', 1000)`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO job (run_id, attempt, jobs, fetched_at) VALUES ('9999', 1, '[]', 1000)`); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()
 	until(t, 20*time.Second, "the sweep to prune the old job row", func() bool {
 		var n int
-		if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM job WHERE run_id = '9999'`).Scan(&n); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COUNT(*) FROM job WHERE run_id = '9999'`).Scan(&n); err != nil {
 			return false
 		}
 		return n == 0

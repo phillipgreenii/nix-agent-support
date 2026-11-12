@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
@@ -104,7 +105,7 @@ func awaitFirstSightingFetches(t *testing.T, d *servetest.Daemon, prs int) {
 	db := d.OpenStore(t)
 	until(t, 60*time.Second, "every first-sighting group of the fixture pull requests to be stored", func() bool {
 		var n int
-		err := db.QueryRow(`SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND fetched_at IS NOT NULL AND group_name IN (?, ?, ?, ?)`,
+		err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND fetched_at IS NOT NULL AND group_name IN (?, ?, ?, ?)`,
 			firstSightingGroups[0], firstSightingGroups[1], firstSightingGroups[2], firstSightingGroups[3]).Scan(&n)
 		return err == nil && n >= prs*len(firstSightingGroups)
 	})

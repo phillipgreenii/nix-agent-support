@@ -355,7 +355,7 @@ func TestJanitor_dryRunChangesNothing(t *testing.T) {
 func TestJanitor_invalidRoleFileIsAUsageError(t *testing.T) {
 	f := newJanitorFixture(t)
 	bad := filepath.Join(t.TempDir(), "bad.json")
-	os.WriteFile(bad, []byte(`{"role":{"name":"x","config":{"nope":1}}}`), 0o644)
+	_ = os.WriteFile(bad, []byte(`{"role":{"name":"x","config":{"nope":1}}}`), 0o644)
 	f.opts.roleFiles = []string{bad}
 	if code, _ := f.run((&recorder{}).passes()); code != conformance.ExitUsage {
 		t.Errorf("exit %d, want %d", code, conformance.ExitUsage)
@@ -368,12 +368,12 @@ func TestConfig_inlineSweepsDefaultsOnAndLoads(t *testing.T) {
 		t.Error("InlineSweeps default is false, want true (today's behavior)")
 	}
 	p := filepath.Join(t.TempDir(), "c.json")
-	os.WriteFile(p, []byte(`{"inlineSweeps":false}`), 0o644)
+	_ = os.WriteFile(p, []byte(`{"inlineSweeps":false}`), 0o644)
 	c, err := rolefile.LoadConfig(p)
 	if err != nil || c.InlineSweeps {
 		t.Errorf("LoadConfig inlineSweeps=false: %v, InlineSweeps=%v", err, c.InlineSweeps)
 	}
-	os.WriteFile(p, []byte(`{}`), 0o644)
+	_ = os.WriteFile(p, []byte(`{}`), 0o644)
 	if c, err := rolefile.LoadConfig(p); err != nil || !c.InlineSweeps {
 		t.Errorf("LoadConfig {}: %v, InlineSweeps=%v, want true", err, c.InlineSweeps)
 	}

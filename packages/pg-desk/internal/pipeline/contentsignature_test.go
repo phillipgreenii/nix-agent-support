@@ -64,32 +64,6 @@ func newSigDoc() sigDoc {
 	}
 }
 
-func (d sigDoc) build(t *testing.T) gather.Facts {
-	t.Helper()
-	raw := func(v any) json.RawMessage {
-		b, err := json.Marshal(v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return b
-	}
-	f := gather.Facts{
-		PRShow: raw(d.show), CI: raw(d.ci), WorkBeads: raw(d.workBeads),
-		HeadSHA: d.headSHA, AsOf: d.asOf,
-	}
-	jira := map[string]json.RawMessage{}
-	for k, v := range d.jira {
-		jira[k] = raw(v)
-	}
-	f.JiraIssues = jira
-	return f
-}
-
-// ownBead returns the i-th entity of workBeads for in-place edits.
-func ownBead(d sigDoc, i int) map[string]any {
-	return d.workBeads["entities"].([]any)[i].(map[string]any)
-}
-
 func TestPRWorkBeadsView(t *testing.T) {
 	d := newSigDoc()
 	raw, err := json.Marshal(d.workBeads)

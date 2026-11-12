@@ -57,7 +57,7 @@ func runDispatch(args []string) int {
 	// so the parent-death pipe's EOF cancels the same context.
 	var pdr io.Reader
 	if f := parentDeathReader(os.Getenv); f != nil {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		pdr = f
 	}
 	ctx, stopPD := withParentDeath(ctx, pdr)

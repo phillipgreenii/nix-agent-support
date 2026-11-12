@@ -125,7 +125,7 @@ func startFakeBridge(t *testing.T, handle func(op string, args map[string]any) m
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	f := &fakeBridge{sock: filepath.Join(dir, "s.sock")}
-	ln, err := net.Listen("unix", f.sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", f.sock)
 	if err != nil {
 		t.Fatalf("listen on %s: %v", f.sock, err)
 	}

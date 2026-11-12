@@ -4,6 +4,7 @@ package serve_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"os"
@@ -100,7 +101,7 @@ func TestErrorTable_StoreNewerThanTheBinary_RefusesToStartAndNeverMovesTheFile(t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`CREATE TABLE from_the_future (x INTEGER); PRAGMA user_version = 99`); err != nil {
+		if _, err := db.ExecContext(context.Background(), `CREATE TABLE from_the_future (x INTEGER); PRAGMA user_version = 99`); err != nil {
 			t.Fatal(err)
 		}
 		if err := db.Close(); err != nil {

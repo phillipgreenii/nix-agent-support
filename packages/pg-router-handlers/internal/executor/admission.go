@@ -52,17 +52,17 @@ func (r *ccpoolRun) admissionActive() bool {
 // found its pool full, then reads capacity once more. note describes what was
 // tried, for the decline's detail text ("" when nothing was). It never loops: the
 // caller calls it at most once per dispatch.
-func (r *ccpoolRun) reconcileForCapacity(ctx context.Context, d DispatchContext, before ccpool.Capacity) (after ccpool.Capacity, capErr error, note string) {
+func (r *ccpoolRun) reconcileForCapacity(ctx context.Context, d DispatchContext, before ccpool.Capacity) (after ccpool.Capacity, note string, capErr error) {
 	out, err := r.deps.Reconciler.ReconcileClosedBeads(ctx)
 	switch {
 	case err != nil:
 		slog.Warn("capacity-pressure reconcile failed; declining", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
-		return before, nil, "a closed-bead reconcile was tried and failed"
+		return before, "a closed-bead reconcile was tried and failed", nil
 	case out.Skipped:
 		slog.Info("capacity-pressure reconcile skipped: one found nothing recently", "role", d.Role.Name, "bead", d.Item.ID)
-		return before, nil, "a closed-bead reconcile found nothing recently and was not repeated"
+		return before, "a closed-bead reconcile found nothing recently and was not repeated", nil
 	}
 	slog.Info("capacity-pressure reconcile ran", "role", d.Role.Name, "bead", d.Item.ID, "closed", out.Closed)
 	after, capErr = r.deps.CC.Capacity(ctx)
-	return after, capErr, fmt.Sprintf("a closed-bead reconcile was tried and closed %d", out.Closed)
+	return after, fmt.Sprintf("a closed-bead reconcile was tried and closed %d", out.Closed), capErr
 }

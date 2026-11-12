@@ -278,7 +278,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		old := classify.Snapshot{Type: entityType, ID: entityID}
 		if found {
 			old.Active = !row.Inactive
-			if !opts.ForceReconcile && !(row.Version == 0 && row.HydratedAt == "") {
+			if !opts.ForceReconcile && (row.Version != 0 || row.HydratedAt != "") {
 				old.Exists = true
 				old.Payload = []byte(row.Facts)
 				if entityType == issueEntityType {
@@ -349,7 +349,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 
 		// An unchanged read of an existing, active entity writes nothing.
 		if opts.SkipUnchangedWrite && !opts.ForceReconcile && found && !row.Inactive &&
-			!(row.Version == 0 && row.HydratedAt == "") && !(markWatched && !alreadyWatched) {
+			(row.Version != 0 || row.HydratedAt != "") && (!markWatched || alreadyWatched) {
 			storedCompare := []byte(row.Facts)
 			if entityType == issueEntityType {
 				storedCompare = issueCompareBytes(storedCompare)

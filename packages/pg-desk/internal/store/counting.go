@@ -92,7 +92,7 @@ func (cn *countingConn) PrepareContext(ctx context.Context, query string) (drive
 	if p, ok := cn.Conn.(driver.ConnPrepareContext); ok {
 		return p.PrepareContext(ctx, query)
 	}
-	return cn.Conn.Prepare(query)
+	return cn.Prepare(query)
 }
 
 func (cn *countingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {

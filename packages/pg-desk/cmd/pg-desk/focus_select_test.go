@@ -25,7 +25,6 @@ import (
 // Annotator whose per-entity lock lives in a temp dir.
 type selFixture struct {
 	*showFixture
-	annotWrap func(focus.Annotator) focus.Annotator
 }
 
 func newSelFixture(t *testing.T) *selFixture {

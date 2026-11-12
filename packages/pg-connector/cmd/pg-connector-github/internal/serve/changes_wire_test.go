@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -76,7 +77,7 @@ func awaitBaselines(t *testing.T, d *servetest.Daemon, queries ...string) {
 	for _, q := range queries {
 		until(t, 60*time.Second, "the baseline of the query "+q, func() bool {
 			var n int
-			err := db.QueryRow(`SELECT COUNT(*) FROM query WHERE key = ? AND baseline_at IS NOT NULL`, q).Scan(&n)
+			err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM query WHERE key = ? AND baseline_at IS NOT NULL`, q).Scan(&n)
 			return err == nil && n == 1
 		})
 	}
@@ -246,7 +247,7 @@ func TestChangesWire_OneConsumerHoldingBothKeysOfAQueryIsRefused(t *testing.T) {
 		t.Errorf("the ci ack of a consumer holding the pr key = %+v, want invalid_argument", ack.Error)
 	}
 	var n int
-	if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM consumer WHERE consumer = 'both-keys' AND feed_view = 'ci'`).Scan(&n); err != nil || n != 0 {
+	if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COUNT(*) FROM consumer WHERE consumer = 'both-keys' AND feed_view = 'ci'`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("ci keys of the refused consumer = %d (%v), want none", n, err)
 	}
 }

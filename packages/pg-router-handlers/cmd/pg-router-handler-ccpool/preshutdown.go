@@ -136,7 +136,7 @@ func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, r
 	// A pooled checkout is always torn down in two phases, whatever its path: the
 	// lease release stands where the worktree removal stands, and the row is
 	// purged only once the pool has the checkout back (finishPurge).
-	if keepWorktree || !(twoPhaseEligible(s, repoRoot, worktreeDir) || s.CheckoutLease() != "") {
+	if keepWorktree || (!twoPhaseEligible(s, repoRoot, worktreeDir) && s.CheckoutLease() == "") {
 		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
 	}
 	// The marker goes on BEFORE the non-purge close: a handler-closed idle row

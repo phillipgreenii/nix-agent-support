@@ -216,7 +216,3 @@ func TestPipelineRunInterpretOnly_Degraded(t *testing.T) {
 // --- Reconcile budget: pg2-a5z69 — bounded, convergent runs -----------------
 
 // --- Reconcile and transient failures: pg2-hpakl ----------------------------
-
-// killedErr is the exact failure text the 2026-10-07 router health review
-// found behind desk-reconcile's exit 1.
-const killedErrText = "gather: removed re-read pr show: pg-connector [pr show acme/widgets#9 --fresh]: exit 1: unavailable: scriptout: pg-connector-pr-github: signal: killed"

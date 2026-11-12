@@ -12,7 +12,7 @@ func TestWithParentDeath_cancelsOnEOF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	ctx, stop := withParentDeath(context.Background(), pr)
 	defer stop()
 	select {
@@ -20,7 +20,7 @@ func TestWithParentDeath_cancelsOnEOF(t *testing.T) {
 		t.Fatal("cancelled while the parent's write end was still open")
 	case <-time.After(50 * time.Millisecond):
 	}
-	pw.Close() // the parent died
+	_ = pw.Close() // the parent died
 	select {
 	case <-ctx.Done():
 	case <-time.After(5 * time.Second):

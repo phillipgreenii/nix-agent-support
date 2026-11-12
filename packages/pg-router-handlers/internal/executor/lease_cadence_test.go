@@ -196,7 +196,7 @@ func TestLeaseCadence_failedTickRetriesAndLeaseNeverLapses(t *testing.T) {
 		t.Errorf("retry landed %v after start, want 2 ticks (%v)", got, 2*every)
 	}
 	// FakeCC recorded only the successful writes.
-	if n := len(cc.FakeCC.SetMetaCalls()); n != 3 {
+	if n := len(cc.SetMetaCalls()); n != 3 {
 		t.Errorf("successful lease writes = %d, want 3", n)
 	}
 }

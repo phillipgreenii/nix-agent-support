@@ -67,8 +67,7 @@ func sweepDispatch(t *testing.T, cfg map[string]any, extraLaunch string) []strin
 	t.Helper()
 	t.Setenv("PATH", "/usr/bin")
 	cfgPath, _ := launchConfig(t, extraLaunch)
-	var msgs []string
-	msgs = captureSlog(t, func() {
+	msgs := captureSlog(t, func() {
 		dispatchWith(t, "worker", cfg, cfgPath, defaultEvent)
 	})
 	return msgs

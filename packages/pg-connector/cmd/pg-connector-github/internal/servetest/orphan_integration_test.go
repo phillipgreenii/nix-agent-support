@@ -4,6 +4,7 @@ package servetest
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"os/exec"
 	"strconv"
@@ -32,7 +33,7 @@ func TestDaemonExitsWhenItsParentIsKilled(t *testing.T) {
 	}
 	d := NewDaemon(t, Options{})
 
-	parent := exec.Command(sh, "-c", `"$0" --config "$1" serve >/dev/null 2>&1 </dev/null & echo $!; wait`, d.bin, d.ConfigPath)
+	parent := exec.CommandContext(context.Background(), sh, "-c", `"$0" --config "$1" serve >/dev/null 2>&1 </dev/null & echo $!; wait`, d.bin, d.ConfigPath)
 	parent.Dir = "/"
 	parent.Env = []string{"PATH=" + DaemonPath(), "FAKE_GH_DIR=" + d.Shim.Dir}
 	out, err := parent.StdoutPipe()

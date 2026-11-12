@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func perPRFallback(t *testing.T, status int) {
 	// single-PR request does not. The host now says prA is behind its base.
 	past := time.Now().Add(-time.Hour).UnixMilli()
 	db := d.WritableStore(t)
-	if _, err := db.Exec(`UPDATE entity_group SET fresh_until = ? WHERE group_name = 'detail'`, past); err != nil {
+	if _, err := db.ExecContext(context.Background(), `UPDATE entity_group SET fresh_until = ? WHERE group_name = 'detail'`, past); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()
@@ -126,7 +127,7 @@ func TestErrorTable_PRDeleted_IsTombstonedItsQueuedTasksAreGoneAndAReadAnswersNo
 	callOK(t, d, "pr", "refresh", map[string]any{"id": prC.Ref(), "groups": []string{"detail"}})
 	until(t, 20*time.Second, "the entity to be tombstoned", func() bool {
 		var at *int64
-		if err := d.OpenStore(t).QueryRow(`SELECT tombstoned_at FROM entity WHERE id = ?`, prC.NodeID).Scan(&at); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT tombstoned_at FROM entity WHERE id = ?`, prC.NodeID).Scan(&at); err != nil {
 			return false
 		}
 		return at != nil && *at != 0
@@ -254,7 +255,7 @@ func TestErrorTable_ViewerChanged_FlushesIdentityScopedDataAndHidesOlderAppends(
 	d.Shim.WaitQuiet(t, time.Second, 30*time.Second, "search", "nodes", "pending", "write_items", "create_review")
 	pendingRows := func() int {
 		var n int
-		if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM entity_group WHERE group_name = 'pending'`).Scan(&n); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity_group WHERE group_name = 'pending'`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -272,7 +273,7 @@ func TestErrorTable_ViewerChanged_FlushesIdentityScopedDataAndHidesOlderAppends(
 	}
 	mineFetched := func() int64 {
 		var at int64
-		if err := d.OpenStore(t).QueryRow(`SELECT COALESCE(fetched_at, 0) FROM query WHERE key = ?`, servetest.QueryMine).Scan(&at); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COALESCE(fetched_at, 0) FROM query WHERE key = ?`, servetest.QueryMine).Scan(&at); err != nil {
 			return 0
 		}
 		return at

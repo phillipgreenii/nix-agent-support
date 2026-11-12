@@ -41,15 +41,6 @@ func (f *feedEvents) list() []string {
 	return append([]string(nil), f.ev...)
 }
 
-func (f *feedEvents) index(prefix string) int {
-	for i, e := range f.list() {
-		if strings.HasPrefix(e, prefix) {
-			return i
-		}
-	}
-	return -1
-}
-
 type listCall struct {
 	Type, Query, Consumer, Backend string
 	Reset                          bool

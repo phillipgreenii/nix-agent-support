@@ -1,0 +1,11 @@
+# Go modules under packages/ that deliberately have no `<module>-golangci` flake
+# check. One module name per line. scripts/check-go-lint-wired.sh (run by the
+# go-deps-wired check) fails for any other Go module without a lint check, and
+# for an entry here that is now linted or whose module is gone.
+#
+# These three were never linted (found by the 2026-11-11 pg-apps review). Wire
+# each into simpleGoLintModules / patternBGoLints in flake.nix and delete its
+# line here once the linter's findings in it are fixed.
+claude-hook-router
+pg-git-lander
+work-report

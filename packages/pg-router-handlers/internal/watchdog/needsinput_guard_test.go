@@ -101,10 +101,10 @@ func TestRun_reminderIsHeldWhileTheSessionNeedsInput(t *testing.T) {
 			if i < len(sentAtPoll) {
 				sentAtPoll[i] = len(cc.sent)
 			}
-			switch {
-			case i == 2 || i == 3 || i == 4: // the dialog is open through polls 2-4
+			switch i {
+			case 2, 3, 4: // the dialog is open through polls 2-4
 				cc.state = ccpool.StateNeedsInput
-			case i == 1:
+			case 1:
 				cc.state = ccpool.StateNeedsInput // the level is first crossed with the dialog already open
 			default:
 				cc.state = ccpool.StateWorking

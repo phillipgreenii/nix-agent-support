@@ -49,13 +49,12 @@ func (c *seqCapCC) capacityCalls() int {
 
 // fakeReconciler records its calls and answers from its fields.
 type fakeReconciler struct {
-	mu       sync.Mutex
-	outcome  ReconcileOutcome
-	err      error
-	closed   int
-	wtBeads  []string
-	wtErr    error
-	onCancel func()
+	mu      sync.Mutex
+	outcome ReconcileOutcome
+	err     error
+	closed  int
+	wtBeads []string
+	wtErr   error
 }
 
 func (f *fakeReconciler) ReconcileClosedBeads(context.Context) (ReconcileOutcome, error) {

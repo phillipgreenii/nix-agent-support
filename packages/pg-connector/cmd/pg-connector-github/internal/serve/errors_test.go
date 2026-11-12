@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -115,11 +116,11 @@ func TestErrorTable_GitHub5xx_RetriesThreeTimesThenServesStaleInsideExpiry(t *te
 	}
 	db := d.OpenStore(t)
 	var qerr string
-	if err := db.QueryRow(`SELECT last_error FROM query WHERE key = 'mine'`).Scan(&qerr); err != nil || !strings.Contains(qerr, "502") {
+	if err := db.QueryRowContext(context.Background(), `SELECT last_error FROM query WHERE key = 'mine'`).Scan(&qerr); err != nil || !strings.Contains(qerr, "502") {
 		t.Errorf("the query row's last_error = %q (%v), want the 502", qerr, err)
 	}
 	var withErr int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_group WHERE group_name = 'summary' AND last_error != ''`).Scan(&withErr); err != nil || withErr != 3 {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity_group WHERE group_name = 'summary' AND last_error != ''`).Scan(&withErr); err != nil || withErr != 3 {
 		t.Errorf("summary groups with last_error = %d (%v), want 3", withErr, err)
 	}
 }
@@ -359,7 +360,7 @@ func TestErrorTable_ViewerChanged_FlushesIdentityScopedQueriesAndLogsIt(t *testi
 
 	fetchedAt := func(key string) int64 {
 		var at int64
-		if err := d.OpenStore(t).QueryRow(`SELECT COALESCE(fetched_at, 0) FROM query WHERE key = ?`, key).Scan(&at); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COALESCE(fetched_at, 0) FROM query WHERE key = ?`, key).Scan(&at); err != nil {
 			return 0 // the row is gone (flushed) and not yet re-run
 		}
 		return at

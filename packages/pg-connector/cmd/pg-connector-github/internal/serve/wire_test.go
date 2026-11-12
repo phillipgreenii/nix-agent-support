@@ -72,7 +72,7 @@ func TestErrorTable_ProtocolOutsideNAndNMinus1_IsVersionMismatch(t *testing.T) {
 		}
 	}
 	// A frame that is not JSON is invalid_argument, not a crash.
-	conn, err := net.Dial("unix", d.Socket)
+	conn, err := (&net.Dialer{}).DialContext(context.Background(), "unix", d.Socket)
 	if err != nil {
 		t.Fatal(err)
 	}

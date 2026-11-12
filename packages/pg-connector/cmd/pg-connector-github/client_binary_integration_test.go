@@ -84,7 +84,7 @@ func buildClient(t *testing.T, ldflags string) string {
 		args = append(args, "-ldflags", ldflags)
 	}
 	args = append(args, ".")
-	cmd := exec.Command(goBin, args...)
+	cmd := exec.CommandContext(context.Background(), goBin, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
@@ -160,7 +160,7 @@ type clientResult struct {
 // runClient runs bin in mode ("pr" or "ci") with stdin and an empty environment.
 func runClientBinary(t *testing.T, bin, cfgPath, mode, stdin string) clientResult {
 	t.Helper()
-	cmd := exec.Command(bin, "--config", cfgPath, mode)
+	cmd := exec.CommandContext(context.Background(), bin, "--config", cfgPath, mode)
 	cmd.Dir = "/"
 	cmd.Env = []string{}
 	cmd.Stdin = strings.NewReader(stdin)

@@ -89,7 +89,7 @@ func TestTerminal_budgetStop_recordsBeforeUnclaimWithExactComment(t *testing.T) 
 	if rec < 0 || cm < 0 || un < 0 {
 		t.Fatalf("missing call(s) rec=%d comment=%d unclaim=%d; calls=%v", rec, cm, un, bd.calls)
 	}
-	if !(rec < un && cm < un) {
+	if rec >= un || cm >= un {
 		t.Errorf("record and comment must precede unclaim; calls=%v", bd.calls)
 	}
 }
@@ -329,7 +329,7 @@ func TestEscalate_atThresholdLabelsEscalatedBeforeUnclaim(t *testing.T) {
 				exact := fmt.Sprintf("comment zr-1 budget stops reached threshold %d; labelled escalated for the escalation triager%s"+
 					". stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000", sc.threshold, hint, sc.sessions)
 				lab, cm, un := bd.idx("update zr-1 --add-label escalated"), bd.idx(exact), bd.idx(unclaim)
-				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
+				if lab < 0 || cm < 0 || un < 0 || (lab >= un || cm >= un) {
 					t.Fatalf("want escalated label+comment before unclaim; lab=%d cm=%d un=%d calls=%v", lab, cm, un, bd.calls)
 				}
 				if bd.has("update zr-1 --add-label needs-split-review") || bd.has("update zr-1 --add-label human") {
@@ -362,7 +362,7 @@ func TestEscalate_splitIneligibleBeadsAreEscalatedWithReason(t *testing.T) {
 					"; not eligible for split review). stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000",
 					sc.threshold, tc.reason, sc.sessions)
 				lab, cm, un := bd.idx("update zr-1 --add-label escalated"), bd.idx(exact), bd.idx(unclaim)
-				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
+				if lab < 0 || cm < 0 || un < 0 || (lab >= un || cm >= un) {
 					t.Fatalf("lab=%d cm=%d un=%d; calls=%v", lab, cm, un, bd.calls)
 				}
 				if bd.has("update zr-1 --add-label human") || bd.has("update zr-1 --add-label needs-split-review") {
@@ -388,7 +388,7 @@ func TestEscalate_triageRoleStopGoesToHuman(t *testing.T) {
 				// The hand-off is the ONE call that writes the strict pair human +
 				// attention and drops escalated (bead pg2-ikkpk).
 				lab, cm, un := bd.idx("update zr-1 --add-label human --add-label attention --remove-label escalated"), bd.idx(exact), bd.idx(unclaim)
-				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
+				if lab < 0 || cm < 0 || un < 0 || (lab >= un || cm >= un) {
 					t.Fatalf("lab=%d cm=%d un=%d; calls=%v", lab, cm, un, bd.calls)
 				}
 				if !bd.labels["human"] || !bd.labels["attention"] || bd.labels["escalated"] {

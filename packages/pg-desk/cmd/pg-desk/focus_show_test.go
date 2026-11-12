@@ -260,13 +260,12 @@ func TestShowStoresOneDraftAndReRendersIt(t *testing.T) {
 	if len(doc.Rows) != 2 || !doc.Rows[0].Plus || !doc.Rows[1].Plus {
 		t.Fatalf("stored draft rows = %+v, want two proposed", doc.Rows)
 	}
-	before := f.snapshot(t)
 
 	// A candidate that arrives after the draft is NEW SINCE DRAFT and never
 	// joins the table; a fact changed since is read live.
 	f.jira(t, "J-1", "overdue jira", "2026-10-01", "2026-10-10T10:00:00Z")
 	f.pr(t, 1, "alpha renamed", "2026-10-10T10:00:00Z")
-	before = f.snapshot(t)
+	before := f.snapshot(t)
 	focusNow = func() time.Time { return focusFixedNow.Add(2 * time.Hour) }
 	out, _, err = show(t)
 	mustOK(t, err)
@@ -277,7 +276,7 @@ func TestShowStoresOneDraftAndReRendersIt(t *testing.T) {
 	// The table (before the new-since block) holds the draft's rows only.
 	tbl := out[:strings.Index(out, "new since draft")]
 	mustNotContain(t, tbl, "J-1")
-	if !(strings.Index(tbl, "o/r#1") < strings.Index(tbl, "o/r#2")) {
+	if strings.Index(tbl, "o/r#1") >= strings.Index(tbl, "o/r#2") {
 		t.Errorf("the draft's order is not kept:\n%s", tbl)
 	}
 }
@@ -688,7 +687,7 @@ func TestShowPlanModeFreezesOrderAndShowsDrift(t *testing.T) {
 
 	out, _, err := show(t, "--no-store")
 	mustOK(t, err)
-	if !(strings.Index(out, "o/r#2") < strings.Index(out, "o/r#1")) {
+	if strings.Index(out, "o/r#2") >= strings.Index(out, "o/r#1") {
 		t.Errorf("plan rows are not in the recorded order:\n%s", out)
 	}
 	mustContain(t, out, "NOTICE 1 candidates now rank above the plan's last row; run replan to re-order", "current rank, not frozen", "J-1")
@@ -714,7 +713,7 @@ func TestReplanShowsPlanBlockThenSortedCandidates(t *testing.T) {
 	mustContain(t, plan, "o/r#1", "*")
 	mustNotContain(t, plan, "+ ")
 	// Re-ranked: the overdue issue sorts ahead of the other PR, and is NEW.
-	if !(strings.Index(cands, "J-1") < strings.Index(cands, "o/r#2")) {
+	if strings.Index(cands, "J-1") >= strings.Index(cands, "o/r#2") {
 		t.Errorf("candidates are not sorted by the fresh rank:\n%s", cands)
 	}
 	mustContain(t, cands, "new")

@@ -14,7 +14,7 @@ import (
 // The real ps on a real descendant: the sample must list it and, since it is
 // not ccpool, name no component.
 func TestSampleProcessTree_realPsSeesAChildOfThisProcess(t *testing.T) {
-	cmd := exec.Command("sleep", "30")
+	cmd := exec.CommandContext(context.Background(), "sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Skip("cannot start sleep:", err)
 	}

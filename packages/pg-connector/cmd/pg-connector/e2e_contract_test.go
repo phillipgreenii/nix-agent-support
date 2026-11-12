@@ -231,7 +231,7 @@ func startGitHubDaemon(t *testing.T, registryPath string) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("decode github daemon config: %v", err)
 	}
-	cmd := exec.Command(filepath.Join(contractBinDir, "pg-connector-github"), "--config", cfgPath, "serve")
+	cmd := exec.CommandContext(context.Background(), filepath.Join(contractBinDir, "pg-connector-github"), "--config", cfgPath, "serve")
 	cmd.Dir = "/"
 	cmd.Env = contractEnv(nil)
 	var out bytes.Buffer
@@ -262,13 +262,13 @@ func startGitHubDaemon(t *testing.T, registryPath string) {
 			t.Fatalf("pg-connector-github serve exited before it was ready: %s", out.String())
 		default:
 		}
-		if c, err := net.Dial("unix", cfg.Socket); err == nil {
+		if c, err := (&net.Dialer{}).DialContext(context.Background(), "unix", cfg.Socket); err == nil {
 			_ = c.Close()
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	c, err := net.Dial("unix", cfg.Socket)
+	c, err := (&net.Dialer{}).DialContext(context.Background(), "unix", cfg.Socket)
 	if err != nil {
 		t.Fatalf("pg-connector-github serve never opened %s: %s", cfg.Socket, out.String())
 	}
@@ -279,7 +279,7 @@ func startGitHubDaemon(t *testing.T, registryPath string) {
 	ready := time.Now().Add(60 * time.Second)
 	var report []byte
 	for time.Now().Before(ready) {
-		st := exec.Command(filepath.Join(contractBinDir, "pg-connector-github"), "--config", cfgPath, "status", "--json")
+		st := exec.CommandContext(context.Background(), filepath.Join(contractBinDir, "pg-connector-github"), "--config", cfgPath, "status", "--json")
 		st.Dir = "/"
 		st.Env = contractEnv(nil)
 		report, _ = st.CombinedOutput()

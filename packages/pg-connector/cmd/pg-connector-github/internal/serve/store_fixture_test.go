@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -171,7 +172,7 @@ func dropSyntheticPendingRow(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DELETE FROM pending_change`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM pending_change`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

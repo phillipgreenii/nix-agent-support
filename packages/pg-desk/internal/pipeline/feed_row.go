@@ -341,7 +341,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 	version, cur, found := cr.version, cr.cur, cr.found
 
 	// A reset replay is a first observation: nothing propagates from it.
-	observed := !c.replay && found && !cur.Inactive && !(cur.Version == 0 && cur.HydratedAt == "")
+	observed := !c.replay && found && !cur.Inactive && (cur.Version != 0 || cur.HydratedAt != "")
 	propagate := false
 	for _, k := range c.kinds {
 		if k != string(classify.KindReconcile) {
@@ -402,7 +402,7 @@ func (p *Pipeline) commitRemovedFeedRow(ctx context.Context, c feedCommit, repo,
 	}
 	cur := cr.cur
 	own := classify.NewStoreWorkLookup(p.store, repo)
-	observed := !c.replay && !cur.Inactive && !(cur.Version == 0 && cur.HydratedAt == "")
+	observed := !c.replay && !cur.Inactive && (cur.Version != 0 || cur.HydratedAt != "")
 	if err := p.appendLocalRecords(repo, issueEntityType, c.entityID, observed, len(c.kinds) > 0, nil, own, at); err != nil {
 		return feedOutcome{}, err
 	}

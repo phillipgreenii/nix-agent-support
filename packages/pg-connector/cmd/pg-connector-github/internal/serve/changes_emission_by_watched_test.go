@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sort"
@@ -61,7 +62,7 @@ func runScenario(t *testing.T, queries map[string]any, wantRows bool) scenarioOu
 		// Nothing will be delivered, so wait until the daemon has tracked the arrival.
 		until(t, 60*time.Second, "the arrival to be tracked", func() bool {
 			var n int
-			err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM entity WHERE kind = 'pr' AND id = ?`, prD.NodeID).Scan(&n)
+			err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity WHERE kind = 'pr' AND id = ?`, prD.NodeID).Scan(&n)
 			return err == nil && n == 1
 		})
 		time.Sleep(3 * time.Second) // a few query runs (mine re-runs every second) after the arrival
@@ -77,7 +78,7 @@ func runScenario(t *testing.T, queries map[string]any, wantRows bool) scenarioOu
 	sort.Strings(out.Answers)
 
 	db := d.OpenStore(t)
-	rows, err := db.Query(`SELECT kind, id, version, head_sha, kinds, fields, origin FROM change_log ORDER BY seq`)
+	rows, err := db.QueryContext(context.Background(), `SELECT kind, id, version, head_sha, kinds, fields, origin FROM change_log ORDER BY seq`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func runScenario(t *testing.T, queries map[string]any, wantRows bool) scenarioOu
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM entity WHERE watched_at IS NOT NULL`).Scan(&out.Watched); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity WHERE watched_at IS NOT NULL`).Scan(&out.Watched); err != nil {
 		t.Fatal(err)
 	}
 	return out

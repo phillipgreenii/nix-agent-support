@@ -3,6 +3,7 @@
 package servetest
 
 import (
+	"context"
 	"os/exec"
 	"slices"
 	"strings"
@@ -13,7 +14,7 @@ import (
 // environment the shim's own directory and PATH make.
 func runShim(t *testing.T, s *Shim, args ...string) (stdout string, exit int) {
 	t.Helper()
-	cmd := exec.Command(s.Path, args...)
+	cmd := exec.CommandContext(context.Background(), s.Path, args...)
 	cmd.Dir = "/"
 	cmd.Env = []string{"FAKE_PJIRA_DIR=" + s.Dir, "PATH=" + DaemonPath()}
 	out, err := cmd.Output()

@@ -2011,6 +2011,7 @@
                 "pg-claude-control"
                 "claude-tool-tracker"
                 "pg-wrap"
+                "pg-sqlite"
                 # pg2-rpo30t: Pattern A since its claude-transcript replace went.
                 "beads-exporter"
               ];
@@ -2020,6 +2021,8 @@
               taggedGoLintModules = [
                 "pb"
                 "claude-extended-tool-approver"
+                # 75 `//go:build`-tagged files (contract/integration/smoke/hostile).
+                "pg-connector"
                 # pg2-04jgw: internal/integration is `integration`-tagged.
                 "pg-rescue"
                 # internal/contract is `contract`-tagged.
@@ -2104,6 +2107,37 @@
                     ];
                   };
                 })
+                (goLint {
+                  module = "pg-desk";
+                  modRoot = "pg-desk";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-desk
+                      ./packages/pg-connector
+                      # internal/alertrules tests read pg-router-probe's
+                      # cmd/pg-router-probe/run.go by relative path.
+                      ./packages/pg-router-probe
+                      # pg-desk/internal/store imports pg-sqlite via a local replace.
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "pg-router-handlers";
+                  modRoot = "pg-router-handlers";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
+                      ./packages/pg-router
+                      ./packages/ccpool
+                      ./packages/pg-claude-code-recorder
+                      ./packages/claude-transcript
+                      ./packages/pg-failsig
+                    ];
+                  };
+                })
               ];
 
               # `-tagged` companions for every Pattern-B module — every one of
@@ -2161,6 +2195,37 @@
                     ];
                   };
                 })
+                (goLintTagged {
+                  module = "pg-desk";
+                  modRoot = "pg-desk";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-desk
+                      ./packages/pg-connector
+                      # internal/alertrules tests read pg-router-probe's
+                      # cmd/pg-router-probe/run.go by relative path.
+                      ./packages/pg-router-probe
+                      # pg-desk/internal/store imports pg-sqlite via a local replace.
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                })
+                (goLintTagged {
+                  module = "pg-router-handlers";
+                  modRoot = "pg-router-handlers";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
+                      ./packages/pg-router
+                      ./packages/ccpool
+                      ./packages/pg-claude-code-recorder
+                      ./packages/claude-transcript
+                      ./packages/pg-failsig
+                    ];
+                  };
+                })
               ];
             in
             {
@@ -2178,12 +2243,19 @@
               # the check reads, so unrelated edits do not rebuild it.
               go-deps-wired =
                 let
+                  goLintCheckNames = pkgs.writeText "go-lint-check-names.txt" (
+                    lib.concatMapStrings (n: n + "\n") (
+                      (map (module: "${module}-golangci") simpleGoLintModules) ++ (map (e: e.name) patternBGoLints)
+                    )
+                  );
                   goDepsWiredSrc = lib.fileset.toSource {
                     root = ./.;
                     fileset = lib.fileset.unions [
                       ./update-locks.sh
                       ./flake.lock
                       ./scripts/check-go-deps-wired.sh
+                      ./scripts/check-go-lint-wired.sh
+                      ./scripts/go-lint-exempt.txt
                       (lib.fileset.fileFilter (
                         file:
                         builtins.elem file.name [
@@ -2198,6 +2270,10 @@
                 in
                 pkgs.runCommand "go-deps-wired" { nativeBuildInputs = [ pkgs.jq ]; } ''
                   bash ${goDepsWiredSrc}/scripts/check-go-deps-wired.sh ${goDepsWiredSrc} ${pkgs.go.version}
+                  # Every Go module needs a `<module>-golangci` check or a named
+                  # exemption (scripts/go-lint-exempt.txt); the names come from the
+                  # same lists that define the checks, so they cannot drift.
+                  bash ${goDepsWiredSrc}/scripts/check-go-lint-wired.sh ${goDepsWiredSrc} ${goLintCheckNames} ${goDepsWiredSrc}/scripts/go-lint-exempt.txt
                   touch $out
                 '';
 
@@ -10431,6 +10507,8 @@
                       # internal/alertrules tests read pg-router-probe's
                       # cmd/pg-router-probe/run.go by relative path.
                       ./packages/pg-router-probe
+                      # pg-desk/internal/store imports pg-sqlite via a local replace.
+                      ./packages/pg-sqlite
                     ];
                   };
                   modRoot = "pg-desk";
@@ -10463,6 +10541,8 @@
                       ./packages/pg-connector
                       ./packages/pg-sqlite
                       ./packages/pg-router-probe
+                      # pg-desk/internal/store imports pg-sqlite via a local replace.
+                      ./packages/pg-sqlite
                     ];
                   };
                   modRoot = "pg-desk";

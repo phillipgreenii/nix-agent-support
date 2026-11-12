@@ -341,7 +341,7 @@ func TestRun_budgetErrorCarriesContext(t *testing.T) {
 			cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
 			wd := newWD(&fakeReader{seq: []usage.Snapshot{tc.snap}}, cc, &recBD{}, tc.b)
 			wd.Log, wd.Role, wd.Pool = lw, "worker", "pool-a"
-			var now time.Time = time.Unix(0, 0)
+			now := time.Unix(0, 0)
 			wd.Now = func() time.Time { t := now; now = now.Add(tc.elapsed); return t }
 			runErr := wd.Run(context.Background(), "s", "zr-1")
 			_ = lw.Close()

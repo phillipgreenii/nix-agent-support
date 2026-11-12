@@ -71,11 +71,6 @@ type repeatedFlag []string
 func (r *repeatedFlag) String() string     { return strings.Join(*r, ",") }
 func (r *repeatedFlag) Set(v string) error { *r = append(*r, v); return nil }
 
-// janitorPass is one pass over one role (or the lock directory): it returns how
-// many things it reclaimed. A pass is best effort; the error is for the record
-// (and a recovered panic), never fatal to the run.
-type janitorPass func(ctx context.Context) (int, error)
-
 // janitorPasses are the production passes, injectable so a test exercises the
 // scheduling (dedupe, deadline, best effort, rotation) without ccpool or bd.
 type janitorPasses struct {

@@ -147,8 +147,8 @@ func describe(w Work, primary string) string {
 	}
 	ahead := "commits ahead of the primary branch: not determined"
 	if w.AheadKnown {
-		switch {
-		case w.Ahead == 0:
+		switch w.Ahead {
+		case 0:
 			ahead = fmt.Sprintf("no commits ahead of %s", primary)
 		default:
 			ahead = fmt.Sprintf("%d commit(s) ahead of %s", w.Ahead, primary)

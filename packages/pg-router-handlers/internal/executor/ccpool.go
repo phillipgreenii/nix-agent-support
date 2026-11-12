@@ -281,7 +281,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// reconcile was tried.
 	reconcileNote := ""
 	if capacity.Free == 0 && capacity.UsageLimit == nil && r.admissionActive() {
-		capacity, capErr, reconcileNote = r.reconcileForCapacity(ctx, d, capacity)
+		capacity, reconcileNote, capErr = r.reconcileForCapacity(ctx, d, capacity)
 		if capErr != nil {
 			slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
 			return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
@@ -615,7 +615,7 @@ func (r *ccpoolRun) worktreePathExists(beadID string) bool {
 // worktree-keyed sweep (cmd/pg-router-handler-ccpool/worktreesweep.go,
 // pg2-ganjb, INV-CCH-19), which keys on the worktree rather than a session row.
 func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPoolConfig, beadID, wt string, createdHere bool) {
-	if wt == "" || !createdHere || !(usesWorktreeIsolation(cc.Isolation) || r.lease != "") {
+	if wt == "" || !createdHere || (!usesWorktreeIsolation(cc.Isolation) && r.lease == "") {
 		return
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
@@ -703,7 +703,7 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 			return report.Result{}
 		}
 		res := failureAction(report.Unclaimed, beadID)
-		if cc.OnFailure == roles.AddHuman && !(sd != nil && sd.exempt) {
+		if cc.OnFailure == roles.AddHuman && (sd == nil || !sd.exempt) {
 			res.Actions = append([]report.Action{{Verb: report.Escalated, Refs: res.Actions[0].Refs}}, res.Actions...)
 		}
 		return res
@@ -856,7 +856,7 @@ func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig,
 // worktree may now be removed (removeWorktree); the quietResult is as
 // cleanupWorktree's.
 func (r *ccpoolRun) prepareWorktreeCleanup(ctx context.Context, cc *roles.CCPoolConfig, name, wt string) (q quietResult, proceed bool) {
-	if wt == "" || !(usesWorktreeIsolation(cc.Isolation) || UsesCheckoutPoolIsolation(cc.Isolation)) {
+	if wt == "" || (!usesWorktreeIsolation(cc.Isolation) && !UsesCheckoutPoolIsolation(cc.Isolation)) {
 		return quietResult{}, false
 	}
 	if UsesCheckoutPoolIsolation(cc.Isolation) && r.lease == "" {

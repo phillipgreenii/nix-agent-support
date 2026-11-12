@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -97,7 +98,7 @@ func openStoreRW(t *testing.T, d *servetest.Daemon) *sql.DB {
 // daemon's store, as the sidecar's Load does: ok is false when there is no row.
 func sidecarRecord(t *testing.T, d *servetest.Daemon, owner, repo string, n int) (st posted.State, raw string, ok bool) {
 	t.Helper()
-	err := d.OpenStore(t).QueryRow(`SELECT state FROM posted_review WHERE owner = ? AND repo = ? AND number = ?`, owner, repo, n).Scan(&raw)
+	err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT state FROM posted_review WHERE owner = ? AND repo = ? AND number = ?`, owner, repo, n).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return posted.State{}, "", false
 	}
@@ -126,7 +127,7 @@ func TestWrites_ReviewSubmitThroughTheDaemon_RecordsTheSidecarInvalidatesPending
 	pendingBefore := d.Shim.CountKindWith("pending", "number=21")
 	fetchedAtOf := func(group string) int64 {
 		var at int64
-		if err := d.OpenStore(t).QueryRow(`SELECT fetched_at FROM entity_group WHERE id = ? AND group_name = ?`, prW.NodeID, group).Scan(&at); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT fetched_at FROM entity_group WHERE id = ? AND group_name = ?`, prW.NodeID, group).Scan(&at); err != nil {
 			t.Fatalf("group %s of %s: %v", group, prW.NodeID, err)
 		}
 		return at
@@ -194,7 +195,7 @@ func TestWrites_ReviewSubmitThroughTheDaemon_RecordsTheSidecarInvalidatesPending
 	db := d.OpenStore(t)
 	until(t, 60*time.Second, "the queued refresh of the pending group to be stored", func() bool {
 		var freshUntil sql.NullInt64
-		err := db.QueryRow(`SELECT fresh_until FROM entity_group WHERE id = ? AND group_name = 'pending'`, prW.NodeID).Scan(&freshUntil)
+		err := db.QueryRowContext(context.Background(), `SELECT fresh_until FROM entity_group WHERE id = ? AND group_name = 'pending'`, prW.NodeID).Scan(&freshUntil)
 		return err == nil && freshUntil.Valid && freshUntil.Int64 > time.Now().UnixMilli()
 	})
 	d.Shim.WaitQuiet(t, time.Second, 30*time.Second)
@@ -243,7 +244,8 @@ func TestWrites_ACorruptSidecarRefusesTheWriteAndIsNeverReplaced(t *testing.T) {
 	settlePRs(t, d, 4)
 
 	const garbage = "{ this is not json"
-	if _, err := openStoreRW(t, d).Exec(
+	if _, err := openStoreRW(t, d).ExecContext(
+		context.Background(),
 		`INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('example-org', 'widget', 21, ?, 1)`, garbage,
 	); err != nil {
 		t.Fatal(err)
@@ -257,7 +259,7 @@ func TestWrites_ACorruptSidecarRefusesTheWriteAndIsNeverReplaced(t *testing.T) {
 		t.Errorf("a refused write reached the host (%d writes)", got)
 	}
 	var raw string
-	if err := d.OpenStore(t).QueryRow(`SELECT state FROM posted_review WHERE owner = 'example-org' AND repo = 'widget' AND number = 21`).Scan(&raw); err != nil || raw != garbage {
+	if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT state FROM posted_review WHERE owner = 'example-org' AND repo = 'widget' AND number = 21`).Scan(&raw); err != nil || raw != garbage {
 		t.Errorf("the corrupt record was replaced or removed: %q (%v)", raw, err)
 	}
 	// review_pending is local bookkeeping's reader: a corrupt sidecar only hides
@@ -284,7 +286,7 @@ func TestWrites_ALegacyImportThatCannotRunLeavesTheDaemonRunningWithNoMarkerAndW
 		t.Error("a failed import must be in the structured log")
 	}
 	var n int
-	if err := d.OpenStore(t).QueryRow(`SELECT count(*) FROM store_meta WHERE key = 'posted_import_v1'`).Scan(&n); err != nil || n != 0 {
+	if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT count(*) FROM store_meta WHERE key = 'posted_import_v1'`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("a failed import wrote a marker: count %d (%v)", n, err)
 	}
 	// The daemon runs and the write path works: the record goes to the store.
@@ -333,7 +335,7 @@ func TestWrites_ALegacySidecarFileIsImportedAtStartAndReadByReviewSubmit(t *test
 	}
 
 	// A restart does not import again: a record deleted by hand stays deleted.
-	if _, err := openStoreRW(t, d).Exec(`DELETE FROM posted_review`); err != nil {
+	if _, err := openStoreRW(t, d).ExecContext(context.Background(), `DELETE FROM posted_review`); err != nil {
 		t.Fatal(err)
 	}
 	if code := servetest.StopDaemon(t, d); code != 0 {
@@ -543,7 +545,7 @@ func TestWrites_ARefreshStartedBeforeAWriteNeitherOverwritesItNorSurvivesIt(t *t
 		t.Errorf("review_pending after the write and the late refresh = %+v, want the posted review, not stale", got)
 	}
 	var content string
-	if err := d.OpenStore(t).QueryRow(`SELECT content FROM entity_group WHERE id = ? AND group_name = 'pending'`, prW.NodeID).Scan(&content); err != nil {
+	if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT content FROM entity_group WHERE id = ? AND group_name = 'pending'`, prW.NodeID).Scan(&content); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(content, "PRR_new1") {
@@ -568,14 +570,14 @@ func TestWrites_RerunFailedSendsTheExplicitRepositoryRerunInvalidatesRunsAndIsSa
 
 	runsFetchedAt := func() int64 {
 		var at int64
-		if err := d.OpenStore(t).QueryRow(`SELECT fetched_at FROM entity_group WHERE id = ? AND group_name = 'runs'`, prA.NodeID).Scan(&at); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT fetched_at FROM entity_group WHERE id = ? AND group_name = 'runs'`, prA.NodeID).Scan(&at); err != nil {
 			t.Fatal(err)
 		}
 		return at
 	}
 	detailAt := func() int64 {
 		var at int64
-		if err := d.OpenStore(t).QueryRow(`SELECT fetched_at FROM entity_group WHERE id = ? AND group_name = 'detail'`, prA.NodeID).Scan(&at); err != nil {
+		if err := d.OpenStore(t).QueryRowContext(context.Background(), `SELECT fetched_at FROM entity_group WHERE id = ? AND group_name = 'detail'`, prA.NodeID).Scan(&at); err != nil {
 			t.Fatal(err)
 		}
 		return at

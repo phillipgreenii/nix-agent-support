@@ -113,7 +113,7 @@ func TestFinishWait_aFailedSettledCloseKeepsTheWorktreeThroughItsOwnProcess(t *t
 		}
 		return []string{wt}, nil
 	})
-	cc.FakeCC.CloseErr = errors.New("ccpool close: boom")
+	cc.CloseErr = errors.New("ccpool close: boom")
 	h.finish(t)
 	if !h.dirPresent() {
 		t.Error("an unclosed own session still holds the worktree: it must be kept")

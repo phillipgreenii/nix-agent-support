@@ -34,7 +34,7 @@ func fakeCore(t *testing.T, exit int, reply string) (sock string, seen <-chan ma
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		var req map[string]any
 		_ = json.NewDecoder(c).Decode(&req)
 		ch <- req

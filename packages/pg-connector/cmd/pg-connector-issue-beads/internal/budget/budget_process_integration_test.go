@@ -46,7 +46,7 @@ func runHelper() int {
 		fmt.Fprintln(os.Stderr, "helper: no slot:", err)
 		return 2
 	}
-	cmd := exec.Command("sleep", os.Getenv("PG_BUDGET_SLEEP"))
+	cmd := exec.CommandContext(context.Background(), "sleep", os.Getenv("PG_BUDGET_SLEEP"))
 	cmd.ExtraFiles = []*os.File{slot.File()}
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "helper:", err)
@@ -67,7 +67,7 @@ func startHelper(t *testing.T, dir string, max int, sleepSeconds string) *exec.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe)
+	cmd := exec.CommandContext(context.Background(), exe)
 	cmd.Env = append(os.Environ(), helperEnv+"=1", "PG_BUDGET_DIR="+dir,
 		"PG_BUDGET_MAX="+strconv.Itoa(max), "PG_BUDGET_SLEEP="+sleepSeconds)
 	cmd.Stderr = os.Stderr

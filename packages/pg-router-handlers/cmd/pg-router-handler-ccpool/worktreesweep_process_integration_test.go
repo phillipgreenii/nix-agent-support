@@ -66,11 +66,11 @@ func TestHelperHoldWorktreeLock(t *testing.T) {
 	}
 	l, err := sessionlock.TryRLock(os.Getenv("PGR_HELPER_LOCK_DIR"), sessionlock.WorktreeKey(os.Getenv("PGR_HELPER_BEAD")))
 	if err != nil {
-		os.Stdout.WriteString("error " + err.Error() + "\n")
+		_, _ = os.Stdout.WriteString("error " + err.Error() + "\n")
 		os.Exit(2)
 	}
 	_ = l
-	os.Stdout.WriteString("locked\n")
+	_, _ = os.Stdout.WriteString("locked\n")
 	select {} // until killed
 }
 

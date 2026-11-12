@@ -136,7 +136,7 @@ func TestFocusRankGateCatchesInputDrift(t *testing.T) {
 				t.Fatalf("%s no longer contains %q: update the drift case", tc.file, tc.replace[0])
 			}
 			drifted := filepath.Join(t.TempDir(), filepath.Base(tc.file))
-			if err := os.WriteFile(drifted, []byte(strings.Replace(text, tc.replace[0], tc.replace[1], -1)), 0o644); err != nil {
+			if err := os.WriteFile(drifted, []byte(strings.ReplaceAll(text, tc.replace[0], tc.replace[1])), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			c := readRankCase(t, drifted)

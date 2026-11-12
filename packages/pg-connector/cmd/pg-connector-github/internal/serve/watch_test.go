@@ -3,6 +3,7 @@
 package serve_test
 
 import (
+	"context"
 	"database/sql"
 	"slices"
 	"testing"
@@ -47,7 +48,7 @@ func readEntity(t *testing.T, db *sql.DB, node string) entityFlags {
 		watched sql.NullInt64
 		via     sql.NullString
 	)
-	err := db.QueryRow(`SELECT watched_at, watched_via FROM entity WHERE kind = 'pr' AND id = ?`, node).Scan(&watched, &via)
+	err := db.QueryRowContext(context.Background(), `SELECT watched_at, watched_via FROM entity WHERE kind = 'pr' AND id = ?`, node).Scan(&watched, &via)
 	if err == sql.ErrNoRows {
 		return entityFlags{}
 	}

@@ -97,14 +97,13 @@ var staleSessionID = "pg-router-worker-zr-done-20260919T033857.961022000"
 
 // staleHarness is one reconcile pass over a single default-pool session.
 type staleHarness struct {
-	t       *testing.T
-	cc      *fakeCC
-	open    *guardOpener
-	br      fakeBR
-	sess    ccpool.Session
-	latest  func(string) (time.Time, bool)
-	wtDir   string // handler cfg.WorktreeDir ("" = single-phase teardown)
-	idleFor time.Duration
+	t      *testing.T
+	cc     *fakeCC
+	open   *guardOpener
+	br     fakeBR
+	sess   ccpool.Session
+	latest func(string) (time.Time, bool)
+	wtDir  string // handler cfg.WorktreeDir ("" = single-phase teardown)
 }
 
 // newStaleHarness: a not-live needs_input session, bead closed, idle 10 days,

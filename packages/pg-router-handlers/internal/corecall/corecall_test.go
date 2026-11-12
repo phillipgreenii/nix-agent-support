@@ -33,14 +33,14 @@ func TestRelay_roundTripsThroughAUnixSocket(t *testing.T) {
 	if err != nil {
 		t.Skipf("unix sockets unavailable: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	got := make(chan wireRequest, 1)
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		var req wireRequest
 		_ = json.NewDecoder(c).Decode(&req)
 		got <- req

@@ -37,7 +37,7 @@ func TestLimiter_reservationsAreLaidEndToEnd(t *testing.T) {
 	if w := l.Reserve(5); w != 2*time.Second {
 		t.Fatalf("third reservation waits %v, want 2s", w)
 	}
-	clk.Sleep(context.Background(), time.Hour)
+	_ = clk.Sleep(context.Background(), time.Hour)
 	if w := l.Reserve(10); w != 0 {
 		t.Fatalf("reservation after idle waits %v, want 0", w)
 	}

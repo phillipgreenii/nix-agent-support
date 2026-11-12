@@ -28,7 +28,7 @@ func withHeadCheckConfig(t *testing.T) {
 
 // runHeadCheckCmd runs a fresh head-check command with args and returns its
 // stdout, the error and the process exit code the error maps to.
-func runHeadCheckCmd(t *testing.T, args ...string) (stdout string, err error, code int) {
+func runHeadCheckCmd(t *testing.T, args ...string) (stdout string, code int, err error) {
 	t.Helper()
 	var out bytes.Buffer
 	c := newHeadCheckCmd()
@@ -40,7 +40,7 @@ func runHeadCheckCmd(t *testing.T, args ...string) (stdout string, err error, co
 	if err != nil {
 		code = exitCodeFor(err)
 	}
-	return out.String(), err, code
+	return out.String(), code, err
 }
 
 func TestHeadCheckRegisteredUnderPR(t *testing.T) {
@@ -77,7 +77,7 @@ func readFile(t *testing.T, path string) string {
 func TestHeadCheck_UnchangedExitsZero(t *testing.T) {
 	withHeadCheckConfig(t)
 	argv := fakeShow(t, headCheckOld, 0)
-	out, err, code := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
+	out, code, err := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
 	if err != nil || code != 0 {
 		t.Fatalf("err = %v, code = %d; want success", err, code)
 	}
@@ -93,7 +93,7 @@ func TestHeadCheck_UnchangedExitsZero(t *testing.T) {
 func TestHeadCheck_MovedExitsConflict(t *testing.T) {
 	withHeadCheckConfig(t)
 	fakeShow(t, headCheckNew, 0)
-	_, err, code := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
+	_, code, err := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
 	if err == nil || code != exitHeadMoved {
 		t.Fatalf("err = %v, code = %d; want exit %d", err, code, exitHeadMoved)
 	}
@@ -110,11 +110,11 @@ func TestHeadCheck_MovedExitsConflict(t *testing.T) {
 func TestHeadCheck_AbbreviatedHeadMatches(t *testing.T) {
 	withHeadCheckConfig(t)
 	fakeShow(t, headCheckOld, 0)
-	if _, err, code := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld[:8]); err != nil || code != 0 {
+	if _, code, err := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld[:8]); err != nil || code != 0 {
 		t.Fatalf("an abbreviated head of the current commit: err = %v, code = %d; want success", err, code)
 	}
 	// ... but a too-short prefix never matches.
-	if _, err, code := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld[:3]); err == nil || code != exitHeadMoved {
+	if _, code, err := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld[:3]); err == nil || code != exitHeadMoved {
 		t.Fatalf("a 3-character prefix: err = %v, code = %d; want exit %d", err, code, exitHeadMoved)
 	}
 }
@@ -122,7 +122,7 @@ func TestHeadCheck_AbbreviatedHeadMatches(t *testing.T) {
 func TestHeadCheck_LookupFailureExitsOne(t *testing.T) {
 	withHeadCheckConfig(t)
 	fakeShow(t, "", 1)
-	_, err, code := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
+	_, code, err := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
 	if err == nil || code != 1 {
 		t.Fatalf("err = %v, code = %d; want exit 1 (nothing known about the head)", err, code)
 	}
@@ -131,7 +131,7 @@ func TestHeadCheck_LookupFailureExitsOne(t *testing.T) {
 func TestHeadCheck_NotFoundExitsOne(t *testing.T) {
 	withHeadCheckConfig(t)
 	fakeShow(t, "", 4)
-	_, err, code := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
+	_, code, err := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
 	if err == nil || code != 1 || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, code = %d; want exit 1 with a not-found message", err, code)
 	}
@@ -139,10 +139,10 @@ func TestHeadCheck_NotFoundExitsOne(t *testing.T) {
 
 func TestHeadCheck_RequiresHeadSHA(t *testing.T) {
 	withHeadCheckConfig(t)
-	if _, err, _ := runHeadCheckCmd(t, "5"); err == nil {
+	if _, _, err := runHeadCheckCmd(t, "5"); err == nil {
 		t.Fatal("head-check without --head-sha succeeded")
 	}
-	if _, err, _ := runHeadCheckCmd(t, "5", "--head-sha", "  "); err == nil {
+	if _, _, err := runHeadCheckCmd(t, "5", "--head-sha", "  "); err == nil {
 		t.Fatal("head-check with a blank --head-sha succeeded")
 	}
 }

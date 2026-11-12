@@ -56,7 +56,7 @@ func TestCLIRunner_Budget_SlotHeldAfterBackendSIGKILL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	helper := exec.Command(exe, "-test.run=^$")
+	helper := exec.CommandContext(context.Background(), exe, "-test.run=^$")
 	helper.Env = append(os.Environ(), budgetHelperEnv+"="+stateDir)
 	if err := helper.Start(); err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
@@ -32,7 +33,7 @@ func startServe(t *testing.T, cfgPath string) *serveProc {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &serveProc{cmd: exec.Command(exe, "--config", cfgPath, "serve"), stderr: &syncBuffer{}, done: make(chan struct{})}
+	p := &serveProc{cmd: exec.CommandContext(context.Background(), exe, "--config", cfgPath, "serve"), stderr: &syncBuffer{}, done: make(chan struct{})}
 	p.cmd.Dir = "/"
 	p.cmd.Env = []string{reexecEnv + "=1"}
 	p.cmd.Stderr = p.stderr
@@ -57,7 +58,7 @@ func (p *serveProc) waitListening(t *testing.T, socket string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if c, err := net.Dial("unix", socket); err == nil {
+		if c, err := (&net.Dialer{}).DialContext(context.Background(), "unix", socket); err == nil {
 			_ = c.Close()
 			return
 		}
@@ -107,7 +108,7 @@ func TestRealServeLifecycle(t *testing.T) {
 
 	// A client from the same uid is accepted and served: a malformed frame is
 	// answered invalid_argument (the assembled daemon's router, not a stub).
-	c, err := net.Dial("unix", socket)
+	c, err := (&net.Dialer{}).DialContext(context.Background(), "unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}

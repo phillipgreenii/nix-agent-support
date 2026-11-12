@@ -23,7 +23,7 @@ import (
 
 // externalCloseRun drives waitDone's external-close branch (close reason
 // idle_ttl) for a worker whose bead is held by dead-actor, with bd as given.
-func externalCloseRun(t *testing.T, wrap func(*dtest.ScriptBD) beads.Runner) (*ccpoolRun, *dtest.ScriptBD, error, string) {
+func externalCloseRun(t *testing.T, wrap func(*dtest.ScriptBD) beads.Runner) (*ccpoolRun, *dtest.ScriptBD, string, error) {
 	t.Helper()
 	cfg := fastCfg()
 	script := &dtest.ScriptBD{
@@ -36,12 +36,12 @@ func externalCloseRun(t *testing.T, wrap func(*dtest.ScriptBD) beads.Runner) (*c
 	e := newExecWithLog(cc, script, cfg, logPath)
 	e.deps.BD = wrap(script)
 	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
-	return e, script, e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w"), logPath
+	return e, script, logPath, e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w")
 }
 
 // A landed release is the guarded update, and the dispatch reports the unclaim.
 func TestWaitDone_externalCloseReleaseIsGuardedByTheObservedHolder(t *testing.T) {
-	e, script, err, _ := externalCloseRun(t, func(s *dtest.ScriptBD) beads.Runner { return s })
+	e, script, _, err := externalCloseRun(t, func(s *dtest.ScriptBD) beads.Runner { return s })
 	if !errors.Is(err, ErrExternallyClosed) {
 		t.Fatalf("want an external close, got %v", err)
 	}
@@ -57,7 +57,7 @@ func TestWaitDone_externalCloseReleaseIsGuardedByTheObservedHolder(t *testing.T)
 // the dispatch result carries no Unclaimed verb, the failure is logged, and one
 // external_close_release_failed eventlog record names the bead and bd's refusal.
 func TestWaitDone_externalCloseReleaseFailureIsSurfaced(t *testing.T) {
-	e, _, err, logPath := externalCloseRun(t, func(s *dtest.ScriptBD) beads.Runner { return refuseUpdateBD{s} })
+	e, _, logPath, err := externalCloseRun(t, func(s *dtest.ScriptBD) beads.Runner { return refuseUpdateBD{s} })
 	if !errors.Is(err, ErrExternallyClosed) {
 		t.Fatalf("want an external close, got %v", err)
 	}

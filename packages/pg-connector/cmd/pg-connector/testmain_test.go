@@ -3,8 +3,11 @@
 package main
 
 import (
+	"context"
 	"os"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // TestMain routes backend invocations through the in-process fake registry
@@ -16,4 +19,19 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	removeExecCache()
 	os.Exit(code)
+}
+
+// installFakeRunner routes backend invocations through the registry; TestMain
+// calls it once before any test runs. It lives beside TestMain, in the same
+// build-tag scope, so the contract-tagged build does not carry it unused.
+func installFakeRunner() (restore func()) {
+	return scriptout.SwapRunner(func(ctx context.Context, c scriptout.Call) scriptout.Result {
+		fakeMu.Lock()
+		h, ok := fakeHandlers[c.Name]
+		fakeMu.Unlock()
+		if !ok {
+			return scriptout.ExecRunner(ctx, c)
+		}
+		return scriptout.Result{Stdout: h(c.Stdin)}
+	})
 }

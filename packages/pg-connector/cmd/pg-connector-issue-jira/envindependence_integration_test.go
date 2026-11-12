@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os/exec"
@@ -45,7 +46,7 @@ func TestEnvIndependenceServeUnderEnvDashI(t *testing.T) {
 		d.Shim.RecordEnv()
 	}})
 
-	cmd := exec.Command(envBin, "-i", bin, "--config", d.ConfigPath, "serve")
+	cmd := exec.CommandContext(context.Background(), envBin, "-i", bin, "--config", d.ConfigPath, "serve")
 	cmd.Dir = "/"
 	cmd.Env = []string{} // env itself starts empty too; nothing leaks in either way
 	var out lockedBuf

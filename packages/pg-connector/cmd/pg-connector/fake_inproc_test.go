@@ -1,14 +1,11 @@
 package main
 
 import (
-	"context"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // In-process fake backends. A backend invocation is a scriptout.Call whose
@@ -27,20 +24,6 @@ var (
 	fakeMu       sync.Mutex
 	fakeHandlers = map[string]fakeHandler{}
 )
-
-// installFakeRunner routes backend invocations through the registry; TestMain
-// calls it once before any test runs.
-func installFakeRunner() (restore func()) {
-	return scriptout.SwapRunner(func(ctx context.Context, c scriptout.Call) scriptout.Result {
-		fakeMu.Lock()
-		h, ok := fakeHandlers[c.Name]
-		fakeMu.Unlock()
-		if !ok {
-			return scriptout.ExecRunner(ctx, c)
-		}
-		return scriptout.Result{Stdout: h(c.Stdin)}
-	})
-}
 
 // registerFake answers backend name with h until the test ends.
 func registerFake(t *testing.T, name string, h fakeHandler) {

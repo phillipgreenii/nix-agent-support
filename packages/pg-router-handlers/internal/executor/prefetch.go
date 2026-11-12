@@ -171,7 +171,7 @@ func (r *ccpoolRun) prefetch(ctx context.Context, pf roles.PrefetchConfig, d Dis
 		return fail("render", err)
 	}
 	if !hexRev.MatchString(rev) {
-		return fail("render", fmt.Errorf("Rev rendered to %q, want a 7-64 digit hex object id", rev))
+		return fail("render", fmt.Errorf("rev rendered to %q, want a 7-64 digit hex object id", rev))
 	}
 	remote, err := renderPrefetchField("Remote", pf.Remote, pctx)
 	if err != nil {
