@@ -76,7 +76,24 @@ MOCK
   [ "$status" -eq 0 ]
   create_call="$(grep '^create ' "$CALL_LOG")"
   [[ "$create_call" == *'--metadata {"pd_curated_rev":"1"}'* ]]
-  [[ "$create_call" == *"--labels extra-label"* ]]
+  [[ "$create_call" == *"--labels extra-label,has-acceptance-criteria"* ]]
+}
+
+@test "default call labels the packet has-acceptance-criteria" {
+  mock_bd "xyz-1.9"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "criteria"
+  [ "$status" -eq 0 ]
+  create_call="$(grep '^create ' "$CALL_LOG")"
+  [[ "$create_call" == *"--labels has-acceptance-criteria"* ]]
+}
+
+@test "an explicit has-acceptance-criteria label is not duplicated" {
+  mock_bd "xyz-1.10"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "criteria" --label has-acceptance-criteria
+  [ "$status" -eq 0 ]
+  create_call="$(grep '^create ' "$CALL_LOG")"
+  [[ "$create_call" == *"--labels has-acceptance-criteria --"* || "$create_call" == *"--labels has-acceptance-criteria" ]]
+  [[ "$create_call" != *"has-acceptance-criteria,has-acceptance-criteria"* ]]
 }
 
 @test "--actor reaches BOTH bd create and bd defer" {

@@ -123,6 +123,13 @@ hazard this note already flags applies to phase and trigger beads too — phase 
 is controlled by the explicit `--label`/`--no-inherit-labels` flags passed at creation, never by
 the parent's own labels.
 
+**Acceptance label**: `create-packet.sh` always adds `has-acceptance-criteria` to the packet (every
+packet is created with non-empty acceptance criteria). The drain pool's precheck declines a bead
+without that label as not groomed, so omitting it left released packets drainable only by
+interactive sessions; the omission was never a ruling (no ADR or skill text keeps packets out of
+the pool). A packet whose criteria are added later by `update-packet.sh` MUST get the label by hand
+(`bd update <id> --add-label has-acceptance-criteria`).
+
 **Packet labels**: which repo and project labels a packet carries is stated once, under
 "Packet labels" in the core skill; pass them with `create-packet.sh --label`.
 

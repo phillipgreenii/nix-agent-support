@@ -46,7 +46,7 @@ Runs, in order:
     more whole acceptance lines appearing as whole lines in the body)
   bd create "<title>" -t task --parent <docket-id> --no-inherit-labels \
     --body-file <file> --acceptance "<text>" [--metadata <json>] \
-    [--labels <labels>] [--actor <id>] --silent
+    --labels has-acceptance-criteria[,<labels>] [--actor <id>] --silent
   bd defer <new-id> [--actor <id>]
 
 --no-inherit-labels is ALWAYS passed unless --allow-inherit-labels is given
@@ -65,9 +65,10 @@ Options:
                              (exactly one of --acceptance/--acceptance-file
                              is required)
   --metadata <json>         Passed through to bd create --metadata
-  --label <labels>          Passed through to bd create --labels (comma
-                             separated); rarely needed since packets
-                             normally carry no explicit labels of their own
+  --label <labels>          Extra labels for bd create --labels (comma
+                             separated). has-acceptance-criteria is ALWAYS
+                             added (when the criteria are non-blank) so the
+                             drain pool does not skip the packet as not groomed
   --allow-inherit-labels     Explicit opt-out: omit --no-inherit-labels and
                              let the packet inherit the parent's labels
   --actor <id>              Explicit agent actor identity (e.g. the session id,
@@ -178,12 +179,25 @@ esac
 
 command -v bd >/dev/null 2>&1 || die "bd not found on PATH"
 
+ACCEPTANCE_LABEL_NEEDED=""
+if [[ -n ${ACCEPTANCE//[[:space:]]/} ]]; then
+  case ",$LABELS," in
+  *,has-acceptance-criteria,*) ;;
+  *) ACCEPTANCE_LABEL_NEEDED=1 ;;
+  esac
+fi
+
 ARGS=(create "$TITLE" -t task --parent "$PARENT" --body-file "$BODY_FILE" --acceptance "$ACCEPTANCE" --silent)
 
 if [[ $ALLOW_INHERIT -eq 0 ]]; then
   ARGS+=(--no-inherit-labels)
 fi
 [[ -n $METADATA ]] && ARGS+=(--metadata "$METADATA")
+# Every packet is created with non-empty acceptance criteria (enforced above), so it always carries
+# has-acceptance-criteria: the drain pool's precheck declines a bead without it as not groomed.
+if [[ -n $ACCEPTANCE_LABEL_NEEDED ]]; then
+  if [[ -n $LABELS ]]; then LABELS="$LABELS,has-acceptance-criteria"; else LABELS="has-acceptance-criteria"; fi
+fi
 [[ -n $LABELS ]] && ARGS+=(--labels "$LABELS")
 [[ -n $ACTOR ]] && ARGS+=(--actor "$ACTOR")
 
