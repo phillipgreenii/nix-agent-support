@@ -23,7 +23,8 @@ expected='{
   "pg-repo-runner-tip-unverified":     {"for": "2h",   "severity": "warning"},
   "pg-repo-runner-red-no-newer-tip":   {"for": "24h",  "severity": "warning"},
   "pg-repo-runner-diverged":           {"for": "1h",   "severity": "warning"},
-  "pg-repo-runner-surface-stuck":      {"for": "168h", "severity": "warning"}
+  "pg-repo-runner-surface-stuck":      {"for": "168h", "severity": "warning"},
+  "pg-repo-runner-no-green":           {"for": "1h",   "severity": "warning"}
 }'
 
 fail() {

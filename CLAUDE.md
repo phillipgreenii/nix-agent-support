@@ -301,7 +301,7 @@ The module sets `ExitTimeOut = 15` (a literal: the daemon's 8 s shutdown deadlin
 
 ### pg-repo-runner alerts and dashboard
 
-`darwin/modules/pg-repo-runner` registers `packages/pg-repo-runner/grafana/alerting/alerts.yaml` (six rules over
+`darwin/modules/pg-repo-runner` registers `packages/pg-repo-runner/grafana/alerting/alerts.yaml` (seven rules over
 the runner's `pg_repo_runner_*` gauges, folder "Host") and the dashboard `packages/pg-repo-runner/grafana/pg-repo-runner.json`,
 gated on `observability.enable` and some `home-manager.users.<u>` enabling `pg-repo-runner`. Checks:
 `test-pg-repo-runner-alert-rules` (promtool, `check-alert-rules.sh`) and `test-grafana-dashboards-lint`. Each rule uid

@@ -13,6 +13,13 @@
 # other rules have noDataState OK: no series means the runner is not reporting, which
 # tips-stale covers.
 #
+# Rule "no-green" reads the always-present gauge pg_repo_runner_check_last_green_or_epoch_seconds
+# (latest locked green, else the oldest locked verdict), so a repo whose tips are always red or
+# superseded still alerts after 2 days (operator ruling, Phillip, 2026-11-11: "2 is fine to start
+# with"). Severity warning: pg-router-probe files an escalated bead for any firing
+# registered rule uid and a bead is a ticket, not a page (docs/superpowers/specs/
+# 2026-11-07-probe-grace-period-and-remediation-design.md), so warning does not page.
+#
 # refId A is plain PromQL and refId C a single `gt 0` threshold stage, so every rule can
 # be wrapped and run under `promtool test rules`: packages/pg-repo-runner/check-alert-rules.sh
 # does that for the cases under rule-tests/. The `for:` of each rule is the duration the
@@ -261,3 +268,42 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+      - uid: pg-repo-runner-no-green
+        title: pg-repo-runner no locked green check for a repo
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A repo has had no locked green check for over 2 days"
+          description: "pg_repo_runner_check_last_green_or_epoch_seconds is older than 2 days for this repo: no locked green verdict has been stored since then (or ever, in which case the value is the oldest verdict on record). Read the latest verdicts under the runner's state directory; every tip is red, superseded or declined by the verify load ceiling. The verify role is a signal, never a gate."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "time() - max by (repo) (max_over_time(pg_repo_runner_check_last_green_or_epoch_seconds[7d]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [172800]

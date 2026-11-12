@@ -173,6 +173,7 @@ EOF
   run grep -q -- '--name pg_repo_runner_check_last_timestamp_seconds .*result=red' "$CALLS"
   [ "$status" -eq 1 ]
   grep -q -- '--name pg_repo_runner_check_last_duration_seconds --value [0-9]\+ --label repo=nix-alpha$' "$CALLS"
+  grep -q -- '--name pg_repo_runner_check_last_green_or_epoch_seconds --value [0-9]\+ --label repo=nix-alpha$' "$CALLS"
   point pg_repo_runner_check_latest_red 0 repo=nix-alpha
   point pg_repo_runner_sync_ahead 3 repo=nix-alpha
   point pg_repo_runner_sync_behind 0 repo=nix-alpha
@@ -196,6 +197,29 @@ EOF
   point pg_repo_runner_check_last_timestamp_seconds "$(jq -n '"2026-11-01T00:01:00Z" | fromdateiso8601')" repo=nix-alpha result=red
   point pg_repo_runner_check_last_duration_seconds 60 repo=nix-alpha
   no_point pg_repo_runner_sync_ahead
+}
+
+@test "tips --repo: the last-green gauge is the green finish time, else the oldest verdict, else absent" {
+  mkdir -p "$STATE/verdicts/nix-alpha"
+  mk() { # FILE RESULT FINISHED
+    jq -n --arg sha "$ALPHA_SHA" --arg r "$2" --arg f "$3" '{repo:"nix-alpha",sha:$sha,kind:"check",result:$r,inputs:"locked",startedAt:$f,finishedAt:$f,exit:0,durationS:1,failedChecks:[]}' \
+      >"$STATE/verdicts/nix-alpha/$1.check.json"
+  }
+  # no verdict at all: no point
+  tips --repo nix-alpha
+  [ "$status" -eq 0 ]
+  no_point pg_repo_runner_check_last_green_or_epoch_seconds
+  # never green: the oldest verdict of any result is the epoch
+  mk a red 2026-11-01T00:01:00Z
+  mk b red 2026-11-03T00:01:00Z
+  : >"$CALLS"
+  tips --repo nix-alpha
+  point pg_repo_runner_check_last_green_or_epoch_seconds "$(jq -n '"2026-11-01T00:01:00Z" | fromdateiso8601')" repo=nix-alpha
+  # a stored green wins over the epoch
+  mk c green 2026-11-02T00:01:00Z
+  : >"$CALLS"
+  tips --repo nix-alpha
+  point pg_repo_runner_check_last_green_or_epoch_seconds "$(jq -n '"2026-11-02T00:01:00Z" | fromdateiso8601')" repo=nix-alpha
 }
 
 # ---- (b) a failing repo ----------------------------------------------------

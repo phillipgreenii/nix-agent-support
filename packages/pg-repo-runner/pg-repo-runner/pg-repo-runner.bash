@@ -1631,6 +1631,11 @@ rr_m_state_points() {
        | ($s | map(select(.result == $res)) | last) as $x
        | select($x != null and ($x.finishedAt | type) == "string")
        | pt("check_last_timestamp_seconds"; ($x.finishedAt | fromdateiso8601); "repo=\($r),result=\($res)")),
+      (($s | map(select(.result == "green" and (.finishedAt | type) == "string")) | last) as $g
+       | ($s | map(select((.finishedAt | type) == "string")) | first) as $f
+       | ($g // $f) as $x
+       | select($x != null)
+       | pt("check_last_green_or_epoch_seconds"; ($x.finishedAt | fromdateiso8601); "repo=\($r)")),
       (select($l != null and ($l.durationS | type) == "number")
        | pt("check_last_duration_seconds"; $l.durationS; "repo=\($r)")),
       (select($l != null and $l.result == "red")
