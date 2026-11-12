@@ -348,3 +348,115 @@ func TestRefreshBypassesDwell(t *testing.T) {
 		t.Error("refresh must bypass the dwell")
 	}
 }
+
+func TestLiveAccessTokenRescuesRegistration(t *testing.T) {
+	cases := []struct {
+		name     string
+		access   time.Duration
+		reg      time.Duration
+		refresh  bool
+		want     string
+		wantLeft float64
+	}{
+		{"live access, expired registration", 2 * hr, -hr, true, "AVAILABLE", 7200},
+		{"live access, registration inside margin", 2 * hr, 10 * time.Minute, true, "AVAILABLE", 7200},
+		{"registration rescues inside-margin access", 10 * time.Minute, 5 * hr, true, "AVAILABLE", 18000},
+		{"both inside margin", 10 * time.Minute, 10 * time.Minute, true, "UNAVAILABLE", 600},
+		{"live access, expired registration, no refresh token", 2 * hr, -hr, false, "AVAILABLE", 7200},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newRig(t)
+			r.login(c.access, c.reg, c.refresh)
+			if got, left := r.level(); got != c.want || left != c.wantLeft {
+				t.Errorf("level %s left %v, want %s %v", got, left, c.want, c.wantLeft)
+			}
+		})
+	}
+}
+
+// TestRefreshWithoutRegistrationProvisional documents the PROVISIONAL branch:
+// a refresh token with no registrationExpiresAt reads AVAILABLE even with an
+// expired access token (reading 0). Under review against the real cache fields.
+func TestRefreshWithoutRegistrationProvisional(t *testing.T) {
+	r := newRig(t)
+	r.login(-hr, 0, true)
+	if got, left := r.level(); got != "AVAILABLE" || left != 0 {
+		t.Errorf("provisional behavior changed: %s %v", got, left)
+	}
+}
+
+func TestStartURLMustMatchWhenConfigured(t *testing.T) {
+	r := newRig(t)
+	r.cfg["start_url"] = "https://example.invalid/start"
+	// A sessionName hit from a file with a different startUrl is rejected.
+	r.put("a.json", map[string]any{"sessionName": "zip", "startUrl": "https://other.invalid/x", "expiresAt": ts(2 * hr)})
+	// The session's own hashed file with a different startUrl is rejected too.
+	r.put(sha1Name("zip"), map[string]any{"startUrl": "https://other.invalid/x", "expiresAt": ts(2 * hr)})
+	if got, _ := r.level(); got != "UNAVAILABLE" {
+		t.Errorf("level %s, want UNAVAILABLE", got)
+	}
+	r.put("b.json", map[string]any{"sessionName": "zip", "startUrl": "https://example.invalid/start", "expiresAt": ts(2 * hr)})
+	if got, _ := r.level(); got != "AVAILABLE" {
+		t.Errorf("level %s, want AVAILABLE", got)
+	}
+}
+
+func TestOnlyRegularFilesAreRead(t *testing.T) {
+	r := newRig(t)
+	outside := t.TempDir()
+	target := filepath.Join(outside, "live.json")
+	b, _ := json.Marshal(map[string]any{"expiresAt": ts(2 * hr)})
+	if err := os.WriteFile(target, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink to a valid file, one to a device, and a FIFO-free dir: none counts.
+	if err := os.Symlink(target, filepath.Join(r.cache, sha1Name("zip"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/zero", filepath.Join(r.cache, "zero.json")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.level(); got != "UNAVAILABLE" {
+		t.Errorf("symlinks must be ignored: level %s", got)
+	}
+}
+
+func TestOversizeFileSkipped(t *testing.T) {
+	r := newRig(t)
+	pad := strings.Repeat("x", MaxFileBytes)
+	r.put(sha1Name("zip"), map[string]any{"expiresAt": ts(2 * hr), "pad": pad})
+	if got, _ := r.level(); got != "UNAVAILABLE" {
+		t.Errorf("oversize file must be skipped: level %s", got)
+	}
+}
+
+func TestFileCountCapKeepsSessionFile(t *testing.T) {
+	r := newRig(t)
+	for i := 0; i < MaxFiles+20; i++ {
+		r.putRaw(fmt.Sprintf("a%04d.json", i), "{}")
+	}
+	// Sorts after all the junk by name, but is examined first.
+	r.login(2*hr, 0, false)
+	if got, _ := r.level(); got != "AVAILABLE" {
+		t.Errorf("session file hidden by the file cap: level %s", got)
+	}
+	// A matching file beyond the cap (not the hashed name) is never reached.
+	r2 := newRig(t)
+	for i := 0; i < MaxFiles; i++ {
+		r2.putRaw(fmt.Sprintf("a%04d.json", i), "{}")
+	}
+	r2.put("zzzz.json", map[string]any{"sessionName": "zip", "expiresAt": ts(2 * hr)})
+	if got, _ := r2.level(); got != "UNAVAILABLE" {
+		t.Errorf("file beyond the cap must not be examined: level %s", got)
+	}
+}
+
+func TestRelativeCacheDirRejected(t *testing.T) {
+	if err := New().Configure(sensorcli.Config{Raw: map[string]any{"cache_dir": "relative/cache"}}); err == nil {
+		t.Error("a relative cache_dir must be a configuration error")
+	}
+	if err := New().Configure(sensorcli.Config{Raw: map[string]any{"cache_dir": "/abs/cache"}}); err != nil {
+		t.Errorf("absolute cache_dir: %v", err)
+	}
+}

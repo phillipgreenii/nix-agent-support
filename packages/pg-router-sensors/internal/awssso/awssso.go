@@ -19,11 +19,13 @@
 // errors (the unknown value of a credential is the worst level).
 //
 // Reading: seconds until the session can no longer be renewed (unit s_left):
-// registrationExpiresAt when a refresh token is present and the field exists,
-// else the access token's expiresAt. With a refresh token and no
-// registrationExpiresAt the horizon is unknown, so the session counts as
-// usable, the reading is the access token's remaining seconds (never negative)
-// and the margin is not applied.
+// the longer of the access token's remaining life and, with a refresh token and
+// a registrationExpiresAt, the registration's remaining life. With a refresh
+// token and no registrationExpiresAt the horizon is unknown (PROVISIONAL, under
+// review against the real cache fields): the session counts as usable, the
+// reading is the access token's remaining seconds (never negative) and the
+// margin is not applied. Only regular files are opened (at most MaxFiles, each
+// at most MaxFileBytes); cache_dir MUST be absolute.
 //
 // Config keys: sso_session (default "zip"), cache_dir (default
 // $HOME/.aws/sso/cache), start_url (optional extra match on startUrl), margin
@@ -38,8 +40,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -55,6 +59,9 @@ const (
 	DefaultSession = "zip"
 	DefaultMargin  = 30 * time.Minute
 	reasonUnit     = "s_left"
+	// MaxFiles bounds the files examined; MaxFileBytes bounds each read.
+	MaxFiles     = 200
+	MaxFileBytes = 1 << 20
 )
 
 // present is true when a JSON value is a non-empty string; the value itself is
@@ -129,6 +136,9 @@ func (s *Sensor) Configure(cfg sensorcli.Config) error {
 	if err != nil {
 		return err
 	}
+	if dir != "" && !filepath.IsAbs(dir) {
+		return fmt.Errorf("config key cache_dir: %q must be an absolute path", dir)
+	}
 	s.Session, s.CacheDir, s.StartURL, s.Margin = session, dir, url, margin
 	return nil
 }
@@ -183,14 +193,24 @@ func (s *Sensor) verdict(env sensorcli.Env) (string, time.Duration, string) {
 		return bad, 0, fmt.Sprintf("SSO cache directory unreadable: %v", err)
 	}
 	byName := sha1Name(s.Session)
+	// The session's own file is examined first, so the file cap never hides it.
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Name() == byName && entries[j].Name() != byName
+	})
 	var best candidate
 	found := false
+	examined := 0
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		// Only regular files: a symlink, FIFO, device or directory is never opened.
+		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
+		if examined >= MaxFiles {
+			break
+		}
+		examined++
+		raw, ok := readCapped(filepath.Join(dir, e.Name()))
+		if !ok {
 			continue
 		}
 		var f cacheFile
@@ -217,11 +237,29 @@ func (s *Sensor) verdict(env sensorcli.Env) (string, time.Duration, string) {
 	return levels.Binary.Best(), best.left, ""
 }
 
-func (s *Sensor) matches(byName bool, f cacheFile) bool {
-	if byName || f.SessionName == s.Session {
-		return true
+// readCapped reads a file of at most MaxFileBytes; larger or unreadable files
+// are skipped.
+func readCapped(path string) ([]byte, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
 	}
-	return s.StartURL != "" && f.StartURL == s.StartURL
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
+	if err != nil || len(raw) > MaxFileBytes {
+		return nil, false
+	}
+	return raw, true
+}
+
+// matches: a configured start_url MUST match the file's startUrl; then the
+// file is the session's when named by its hash or carrying its sessionName (or,
+// with start_url set, by the URL itself).
+func (s *Sensor) matches(byName bool, f cacheFile) bool {
+	if s.StartURL != "" && f.StartURL != s.StartURL {
+		return false
+	}
+	return byName || f.SessionName == s.Session || s.StartURL != ""
 }
 
 // judge applies the usability rule to one file; ok=false means the file has no
@@ -231,17 +269,29 @@ func (s *Sensor) judge(f cacheFile, now time.Time) (candidate, bool) {
 	if !ok {
 		return candidate{}, false
 	}
-	accessLeft := exp.Sub(now)
+	accessLeft := floor0(exp.Sub(now))
+	// Either branch makes the session usable: a live access token with at
+	// least the margin left, OR a refresh token whose registration is at least
+	// the margin away. The reading is the longer of the two horizons.
+	c := candidate{ok: accessLeft >= s.Margin && accessLeft > 0, left: accessLeft}
 	if f.RefreshToken {
 		if reg, ok := parseTime(f.RegistrationAt); ok {
-			left := floor0(reg.Sub(now))
-			return candidate{ok: left >= s.Margin && left > 0, left: left}, true
+			regLeft := floor0(reg.Sub(now))
+			if regLeft >= s.Margin && regLeft > 0 {
+				c.ok = true
+			}
+			if regLeft > c.left {
+				c.left = regLeft
+			}
+		} else {
+			// PROVISIONAL (under review against the real cache field names): a
+			// refresh token with no readable registrationExpiresAt has an
+			// unknown renewal horizon and counts as usable, with the access
+			// token's remaining seconds as the reading and no margin applied.
+			c.ok = true
 		}
-		// Refresh token with an unknown renewal horizon: usable.
-		return candidate{ok: true, left: floor0(accessLeft)}, true
 	}
-	left := floor0(accessLeft)
-	return candidate{ok: left >= s.Margin && left > 0, left: left}, true
+	return c, true
 }
 
 func floor0(d time.Duration) time.Duration {
