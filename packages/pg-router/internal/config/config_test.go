@@ -2,10 +2,11 @@ package config
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestMain(m *testing.M) {
 }
 
 // runWithPrivateUserHome points HOME and XDG_CONFIG_HOME at a fresh temp dir
-// for the whole run, so configHome() cannot resolve to the real user's
+// for the whole run, so OSSources().configHome() cannot resolve to the real user's
 // ~/.config (or $XDG_CONFIG_HOME) and Load() cannot read a real
 // pg-router/config.toml, whether or not a test calls absentGlobalConfig
 // (bead pg2-50k41). A test that needs other values sets them with t.Setenv,
@@ -82,10 +83,10 @@ func runWithPrivateUserHome(m *testing.M) int {
 // user-level config lookup resolves under a temp dir, never to the HOME or
 // XDG_CONFIG_HOME the test binary was started with.
 func TestUserConfigIsUnreachable(t *testing.T) {
-	got := configHome()
+	got := OSSources().configHome()
 	tmp := os.TempDir()
 	if !strings.HasPrefix(got, tmp) {
-		t.Errorf("configHome() = %q, want a path under the temp dir %q", got, tmp)
+		t.Errorf("OSSources().configHome() = %q, want a path under the temp dir %q", got, tmp)
 	}
 	// Compare against the caller's CONFIG dirs, not its HOME: under the nix
 	// build sandbox HOME is $TMPDIR itself (mkGoTest), so every temp path is
@@ -96,7 +97,7 @@ func TestUserConfigIsUnreachable(t *testing.T) {
 	}
 	for name, real := range callerConfigDirs {
 		if real != "" && (got == real || strings.HasPrefix(got, real+string(filepath.Separator))) {
-			t.Errorf("configHome() = %q is under the caller's %s %q", got, name, real)
+			t.Errorf("OSSources().configHome() = %q is under the caller's %s %q", got, name, real)
 		}
 	}
 	if home := os.Getenv("HOME"); !strings.HasPrefix(home, tmp) {
@@ -125,36 +126,94 @@ func unsetRouterEnv() {
 	}
 }
 
-// TestPackageTestsPassWithRouterEnvExported is the regression guard for
-// unsetRouterEnv. It re-runs this test binary with the PG_ROUTER_* variables a
-// drain session exports, set to arbitrary non-empty values, and requires every
-// other test in the package to pass. A child process is needed because the
-// variables must already be exported when TestMain runs, as they are for the
-// commit-time hook of a drain session; a t.Setenv here would come too late.
-func TestPackageTestsPassWithRouterEnvExported(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), os.Args[0], // #nosec G204 -- re-executes this test binary
-		"-test.skip=^"+t.Name()+"$", fmt.Sprintf("-test.short=%t", testing.Short()))
-	// The child also starts with an XDG_CONFIG_HOME holding a malformed
-	// pg-router config: a test that reached it would fail (pg2-50k41).
+// fakeSources builds an injected Sources whose environment is env, whose HOME
+// is home and whose git-common-dir probe answers commonDir (or fails when
+// commonDir is empty). Nothing in it touches the process environment or git.
+func fakeSources(env map[string]string, commonDir string) Sources {
+	return Sources{
+		Getenv: func(k string) (string, bool) { v, ok := env[k]; return v, ok },
+		GitCommonDir: func(context.Context, string) (string, error) {
+			if commonDir == "" {
+				return "", errors.New("not a git work tree")
+			}
+			return commonDir, nil
+		},
+	}
+}
+
+// TestLoadWith_ignoresProcessEnvironment is the in-process replacement for the
+// old whole-package re-exec guard: the PG_ROUTER_* variables a drain session
+// exports, and a poisoned XDG_CONFIG_HOME/HOME, sit in the real process
+// environment, yet LoadWith reads only its injected Getenv.
+func TestLoadWith_ignoresProcessEnvironment(t *testing.T) {
 	poisoned := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(poisoned, "pg-router"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(poisoned, "pg-router", "config.toml"), []byte("not = valid [[[ toml"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(poisoned, "pg-router", "config.toml"), []byte("not = valid [[["), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd.Env = append(
-		os.Environ(),
-		"XDG_CONFIG_HOME="+poisoned,
-		"HOME="+poisoned,
-		"PG_ROUTER_CONFIG=/nonexistent/pg2-pjqk3/config.toml",
-		"PG_ROUTER_CCPOOL_HANDLER_CONFIG=/nonexistent/pg2-pjqk3/launch.json",
-		"PG_ROUTER_REPO_ROOT=/nonexistent/pg2-pjqk3/repo",
-		"PG_ROUTER_BEADS_PREFIX=arbitrary",
-		"PG_ROUTER_METRICS_ADDR=invalid-host:invalid-port",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("this package's tests fail when the caller exports PG_ROUTER_* variables: %v\n%s", err, out)
+	t.Setenv("XDG_CONFIG_HOME", poisoned)
+	t.Setenv("HOME", poisoned)
+	t.Setenv("PG_ROUTER_CONFIG", "/nonexistent/process/config.toml")
+	t.Setenv("PG_ROUTER_CCPOOL_HANDLER_CONFIG", "/nonexistent/process/launch.json")
+	t.Setenv("PG_ROUTER_REPO_ROOT", "/nonexistent/process/repo")
+	t.Setenv("PG_ROUTER_BEADS_PREFIX", "arbitrary")
+	t.Setenv("PG_ROUTER_METRICS_ADDR", "invalid-host:invalid-port")
+
+	home := t.TempDir()
+	repo := t.TempDir()
+	c, err := LoadWith(t.Context(), fakeSources(map[string]string{"HOME": home, "PG_ROUTER_REPO_ROOT": repo}, ""))
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if c.RepoRoot != repo {
+		t.Errorf("RepoRoot = %q, want the injected %q", c.RepoRoot, repo)
+	}
+	if c.BeadsPrefix == "arbitrary" {
+		t.Errorf("BeadsPrefix = %q leaked from the process environment", c.BeadsPrefix)
+	}
+	if c.MetricsAddr == "invalid-host:invalid-port" {
+		t.Errorf("MetricsAddr leaked from the process environment")
+	}
+	if want := filepath.Join(repo, ".pg-router", "config.toml"); c.ConfigPath != want {
+		t.Errorf("ConfigPath = %q, want the naive %q", c.ConfigPath, want)
+	}
+	if !strings.HasPrefix(c.WorktreeDir, home) {
+		t.Errorf("WorktreeDir = %q, want it under the injected HOME %q", c.WorktreeDir, home)
+	}
+}
+
+// TestLoadWith_honorsInjectedEnvAndGitCommonDir pins the positive side: the
+// injected variables win, and the git-common-dir read-through locates the
+// canonical clone's config.
+func TestLoadWith_honorsInjectedEnvAndGitCommonDir(t *testing.T) {
+	home := t.TempDir()
+	canonical := t.TempDir()
+	common := filepath.Join(canonical, ".git")
+	src := fakeSources(map[string]string{"HOME": home, "PG_ROUTER_REPO_ROOT": t.TempDir(), "PG_ROUTER_BEADS_PREFIX": "inj"}, common)
+	c, err := LoadWith(t.Context(), src)
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if c.BeadsPrefix != "inj" {
+		t.Errorf("BeadsPrefix = %q, want inj", c.BeadsPrefix)
+	}
+	if want := filepath.Join(canonical, ".pg-router", "config.toml"); c.ConfigPath != want {
+		t.Errorf("ConfigPath = %q, want %q (via the injected git-common-dir)", c.ConfigPath, want)
+	}
+	src.Getenv = func(k string) (string, bool) {
+		if k == "PG_ROUTER_CONFIG" {
+			return "/injected/config.toml", true
+		}
+		return fakeSources(map[string]string{"HOME": home, "PG_ROUTER_REPO_ROOT": c.RepoRoot}, "").Getenv(k)
+	}
+	c2, err := LoadWith(t.Context(), src)
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if c2.ConfigPath != "/injected/config.toml" {
+		t.Errorf("ConfigPath = %q, want PG_ROUTER_CONFIG to win over the read-through", c2.ConfigPath)
 	}
 }
 
@@ -1148,16 +1207,16 @@ binds = ["down.ready"]
 
 func TestConfigHome_xdgWins(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
-	if got := configHome(); got != "/xdg/config" {
-		t.Errorf("configHome() = %q, want /xdg/config (XDG_CONFIG_HOME must win)", got)
+	if got := OSSources().configHome(); got != "/xdg/config" {
+		t.Errorf("OSSources().configHome() = %q, want /xdg/config (XDG_CONFIG_HOME must win)", got)
 	}
 }
 
 func TestConfigHome_defaultsToHomeDotConfig(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/home/me")
-	if got := configHome(); got != "/home/me/.config" {
-		t.Errorf("configHome() = %q, want /home/me/.config (default ~/.config)", got)
+	if got := OSSources().configHome(); got != "/home/me/.config" {
+		t.Errorf("OSSources().configHome() = %q, want /home/me/.config (default ~/.config)", got)
 	}
 }
 

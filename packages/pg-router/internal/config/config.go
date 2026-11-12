@@ -293,9 +293,12 @@ func (c Config) locator() CommandLocator {
 const baseAllowedTools = "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git commit:*),Bash(git checkout:*),Bash(git switch:*),Bash(git branch:*),Bash(git worktree:*),Bash(git rev-parse:*),Bash(git fetch:*),Bash(bd:*),Bash(nix flake check:*),Bash(nix fmt:*)"
 
 // Default returns the built-in defaults (mirrors pg-router.sh's ${VAR:-default}).
-func Default() Config {
+func Default() Config { return defaultWith(OSSources()) }
+
+// defaultWith is Default with its environment and home read through src.
+func defaultWith(src Sources) Config {
 	cwd, _ := os.Getwd()
-	state := stateHome()
+	state := src.stateHome()
 	return Config{
 		RepoRoot:              cwd,
 		Levels:                DefaultLevelsConfig(),
@@ -353,41 +356,75 @@ func Load() (Config, error) {
 // LoadContext is Load with the caller's context, which the git probe that
 // locates the config file runs under.
 func LoadContext(ctx context.Context) (Config, error) {
-	c := Default()
+	return LoadWith(ctx, OSSources())
+}
+
+// Sources are the process-global inputs Load reads, injected so a caller (and a
+// test) can supply them without touching the real environment, HOME or git.
+type Sources struct {
+	// Getenv has os.LookupEnv semantics: the second result reports whether the
+	// variable is set (an empty value still overrides a default). HOME,
+	// XDG_STATE_HOME and XDG_CONFIG_HOME are read through it too.
+	Getenv func(key string) (string, bool)
+	// GitCommonDir returns the git common dir of repoRoot, for the
+	// .pg-router/config.toml read-through. An error falls back to the naive
+	// <repoRoot>/.pg-router/config.toml.
+	GitCommonDir func(ctx context.Context, repoRoot string) (string, error)
+}
+
+// OSSources is the production wiring: the real process environment and a
+// `git rev-parse --git-common-dir` probe.
+func OSSources() Sources {
+	return Sources{
+		Getenv: os.LookupEnv,
+		GitCommonDir: func(ctx context.Context, repoRoot string) (string, error) {
+			client, err := gitclient.New(ctx, repoRoot)
+			if err != nil {
+				return "", err
+			}
+			return client.CommonDir(ctx)
+		},
+	}
+}
+
+// LoadWith is LoadContext reading its environment, HOME and git-common-dir
+// through src instead of the process globals.
+func LoadWith(ctx context.Context, src Sources) (Config, error) {
+	c := defaultWith(src)
 	// Pool-scalar env overlay. The legacy role-specific env vars
 	// (PG_ROUTER_MAX_WORKER/MAX_FEEDBACK/*_ENABLED/*_SKILL_MD) are intentionally GONE:
 	// role identity now lives only in config / built-in defaults (spec C decision 7).
-	c.RepoRoot = envStr("PG_ROUTER_REPO_ROOT", c.RepoRoot)
-	c.BeadsPrefix = envStr("PG_ROUTER_BEADS_PREFIX", c.BeadsPrefix)
-	c.WorktreeDir = envStr("PG_ROUTER_WORKTREE_DIR", c.WorktreeDir)
-	c.MaxWait = envSecs("PG_ROUTER_MAX_WAIT", c.MaxWait)
-	c.PollInterval = envSecs("PG_ROUTER_POLL_INTERVAL", c.PollInterval)
-	c.LoadBackoffThreshold = envFloat("PG_ROUTER_LOAD_BACKOFF_THRESHOLD", c.LoadBackoffThreshold)
-	c.Effort = envStr("PG_ROUTER_EFFORT", c.Effort)
-	c.Model = envStr("PG_ROUTER_MODEL", c.Model)
-	c.PermissionMode = envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
-	c.Autonomous = envBool("PG_ROUTER_AUTONOMOUS", c.Autonomous)
-	c.AllowedTools = envStr("PG_ROUTER_ALLOWED_TOOLS", c.AllowedTools)
-	c.SessionPrefix = envStr("PG_ROUTER_SESSION_PREFIX", c.SessionPrefix)
-	c.BudgetTokens = int64(envInt("PG_ROUTER_BUDGET_TOKENS", int(c.BudgetTokens)))
-	c.BudgetCost = int64(envInt("PG_ROUTER_BUDGET_COST", int(c.BudgetCost)))
-	c.BudgetTime = envSecs("PG_ROUTER_BUDGET_TIME", c.BudgetTime)
-	c.ConfirmIngest = envSecs("PG_ROUTER_CONFIRM_INGEST", c.ConfirmIngest)
-	c.LogDir = envStr("PG_ROUTER_LOG_DIR", c.LogDir)
-	c.ActivityRingSize = envInt("PG_ROUTER_ACTIVITY_RING", c.ActivityRingSize)
-	c.CompactThresholdBytes = int64(envInt("PG_ROUTER_COMPACT_THRESHOLD_BYTES", int(c.CompactThresholdBytes)))
-	maxLog, err := envBytes("PG_ROUTER_MAX_LOG_BYTES", c.MaxLogBytes)
+	c.RepoRoot = src.envStr("PG_ROUTER_REPO_ROOT", c.RepoRoot)
+	c.BeadsPrefix = src.envStr("PG_ROUTER_BEADS_PREFIX", c.BeadsPrefix)
+	c.WorktreeDir = src.envStr("PG_ROUTER_WORKTREE_DIR", c.WorktreeDir)
+	c.MaxWait = src.envSecs("PG_ROUTER_MAX_WAIT", c.MaxWait)
+	c.PollInterval = src.envSecs("PG_ROUTER_POLL_INTERVAL", c.PollInterval)
+	c.LoadBackoffThreshold = src.envFloat("PG_ROUTER_LOAD_BACKOFF_THRESHOLD", c.LoadBackoffThreshold)
+	c.Effort = src.envStr("PG_ROUTER_EFFORT", c.Effort)
+	c.Model = src.envStr("PG_ROUTER_MODEL", c.Model)
+	c.PermissionMode = src.envStr("PG_ROUTER_PERMISSION_MODE", c.PermissionMode)
+	c.Autonomous = src.envBool("PG_ROUTER_AUTONOMOUS", c.Autonomous)
+	c.AllowedTools = src.envStr("PG_ROUTER_ALLOWED_TOOLS", c.AllowedTools)
+	c.SessionPrefix = src.envStr("PG_ROUTER_SESSION_PREFIX", c.SessionPrefix)
+	c.BudgetTokens = int64(src.envInt("PG_ROUTER_BUDGET_TOKENS", int(c.BudgetTokens)))
+	c.BudgetCost = int64(src.envInt("PG_ROUTER_BUDGET_COST", int(c.BudgetCost)))
+	c.BudgetTime = src.envSecs("PG_ROUTER_BUDGET_TIME", c.BudgetTime)
+	c.ConfirmIngest = src.envSecs("PG_ROUTER_CONFIRM_INGEST", c.ConfirmIngest)
+	c.LogDir = src.envStr("PG_ROUTER_LOG_DIR", c.LogDir)
+	c.ActivityRingSize = src.envInt("PG_ROUTER_ACTIVITY_RING", c.ActivityRingSize)
+	c.CompactThresholdBytes = int64(src.envInt("PG_ROUTER_COMPACT_THRESHOLD_BYTES", int(c.CompactThresholdBytes)))
+	maxLog, err := src.envBytes("PG_ROUTER_MAX_LOG_BYTES", c.MaxLogBytes)
 	if err != nil {
 		return Config{}, err
 	}
 	c.MaxLogBytes = maxLog
-	c.MetricsAddr = envStr("PG_ROUTER_METRICS_ADDR", c.MetricsAddr)
+	c.MetricsAddr = src.envStr("PG_ROUTER_METRICS_ADDR", c.MetricsAddr)
 
 	// XDG-global budget layer: sits BENEATH the repo-local file but ABOVE env.
 	// Contributes [pool].budget only; absent/empty file = no change. The path is
 	// overridable via PG_ROUTER_GLOBAL_CONFIG (test seam, mirrors PG_ROUTER_CONFIG).
 	globalReg := NewRegistry()
-	globalPath := envStr("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(configHome(), "pg-router", "config.toml"))
+	globalPath := src.envStr("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(src.configHome(), "pg-router", "config.toml"))
 	if _, statErr := os.Stat(globalPath); statErr == nil {
 		if err := globalReg.decodeGlobalBudget(globalPath, &c); err != nil {
 			return Config{}, err
@@ -397,7 +434,7 @@ func LoadContext(ctx context.Context) (Config, error) {
 		return Config{}, fmt.Errorf("stat %s: %w", globalPath, statErr)
 	}
 
-	path := envStr("PG_ROUTER_CONFIG", resolveConfigPath(ctx, c.RepoRoot))
+	path := src.envStr("PG_ROUTER_CONFIG", src.resolveConfigPath(ctx, c.RepoRoot))
 	c.ConfigPath = path
 	reg := NewRegistry()
 	if _, statErr := os.Stat(path); statErr == nil {
@@ -413,7 +450,7 @@ func LoadContext(ctx context.Context) (Config, error) {
 		}
 	} else if !os.IsNotExist(statErr) {
 		return Config{}, fmt.Errorf("stat %s: %w", path, statErr)
-	} else if noConfigWarnSuppressed() {
+	} else if noConfigWarnSuppressed(src) {
 		slog.Info("no pg-router config found; running with zero roles and zero queries until configured", "path", path)
 	} else {
 		slog.Warn("no pg-router config found; running with zero roles and zero queries until configured (set PG_ROUTER_NO_CONFIG_WARN=true to silence this)", "path", path)
@@ -456,13 +493,9 @@ func LoadContext(ctx context.Context) (Config, error) {
 // failing Load() outright. GatePaths() below reuses this same helper so its
 // own documented "identical precedence" promise holds for a linked worktree
 // too.
-func resolveConfigPath(ctx context.Context, repoRoot string) string {
+func (s Sources) resolveConfigPath(ctx context.Context, repoRoot string) string {
 	naive := filepath.Join(repoRoot, ".pg-router", "config.toml")
-	client, err := gitclient.New(ctx, repoRoot)
-	if err != nil {
-		return naive
-	}
-	commonDir, err := client.CommonDir(ctx)
+	commonDir, err := s.GitCommonDir(ctx, repoRoot)
 	if err != nil {
 		return naive
 	}
@@ -475,8 +508,8 @@ func resolveConfigPath(ctx context.Context, repoRoot string) string {
 // and does not want an ongoing operator-visible nag every Load(). Opting out
 // still leaves an INFO trace (this package's pre-pg2-xl659 behavior)
 // rather than going fully silent.
-func noConfigWarnSuppressed() bool {
-	return envBool("PG_ROUTER_NO_CONFIG_WARN", false)
+func noConfigWarnSuppressed(src Sources) bool {
+	return src.envBool("PG_ROUTER_NO_CONFIG_WARN", false)
 }
 
 // Validate runs the PRE-RUNTIME wiring checks and blocks on anything determinable
@@ -843,27 +876,28 @@ func (c Config) reentryCycleFindings() (errs []error, warns []string) {
 // able to FIND a running core even when the repo-local config.toml is missing or
 // broken. Load() remains the full resolution for everything else.
 func LogDir() string {
-	return envStr("PG_ROUTER_LOG_DIR", Default().LogDir)
+	src := OSSources()
+	return src.envStr("PG_ROUTER_LOG_DIR", defaultWith(src).LogDir)
 }
 
-func stateHome() string {
-	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
+func (s Sources) stateHome() string {
+	if v := s.get("XDG_STATE_HOME"); v != "" {
 		return v
 	}
-	return os.Getenv("HOME") + "/.local/state"
+	return s.get("HOME") + "/.local/state"
 }
 
 // configHome resolves the XDG config base dir for the pg-router global config file,
 // mirroring stateHome(). XDG_CONFIG_HOME wins; otherwise ~/.config.
-func configHome() string {
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
+func (s Sources) configHome() string {
+	if v := s.get("XDG_CONFIG_HOME"); v != "" {
 		return v
 	}
-	return os.Getenv("HOME") + "/.config"
+	return s.get("HOME") + "/.config"
 }
 
-func envStr(key, def string) string {
-	if v, ok := os.LookupEnv(key); ok {
+func (s Sources) envStr(key, def string) string {
+	if v, ok := s.Getenv(key); ok {
 		return v
 	}
 	return def
@@ -871,8 +905,8 @@ func envStr(key, def string) string {
 
 // envBool overlays a bool from env: "false"/"0"/"no" → false, "true"/"1"/"yes" →
 // true; an unset or unparseable value keeps def.
-func envBool(key string, def bool) bool {
-	v := os.Getenv(key)
+func (s Sources) envBool(key string, def bool) bool {
+	v := s.get(key)
 	if v == "" {
 		return def
 	}
@@ -958,8 +992,8 @@ func ParseBytes(s string) (int64, error) {
 // fall back on a value it cannot parse: a mistyped size limit (e.g. "64Mib " vs
 // "64 megabytes") would otherwise be ignored without a word. An unset or empty
 // variable keeps def.
-func envBytes(key string, def int64) (int64, error) {
-	v, ok := os.LookupEnv(key)
+func (s Sources) envBytes(key string, def int64) (int64, error) {
+	v, ok := s.Getenv(key)
 	if !ok || strings.TrimSpace(v) == "" {
 		return def, nil
 	}
@@ -973,8 +1007,8 @@ func envBytes(key string, def int64) (int64, error) {
 // DefaultLoadBackoffThreshold is the load1 above which producer ticks back off.
 const DefaultLoadBackoffThreshold = 50.0
 
-func envFloat(key string, def float64) float64 {
-	if v, ok := os.LookupEnv(key); ok {
+func (s Sources) envFloat(key string, def float64) float64 {
+	if v, ok := s.Getenv(key); ok {
 		if n, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
 			return n
 		}
@@ -982,8 +1016,8 @@ func envFloat(key string, def float64) float64 {
 	return def
 }
 
-func envInt(key string, def int) int {
-	if v, ok := os.LookupEnv(key); ok {
+func (s Sources) envInt(key string, def int) int {
+	if v, ok := s.Getenv(key); ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
@@ -991,11 +1025,17 @@ func envInt(key string, def int) int {
 	return def
 }
 
-func envSecs(key string, def time.Duration) time.Duration {
-	if v, ok := os.LookupEnv(key); ok {
+func (s Sources) envSecs(key string, def time.Duration) time.Duration {
+	if v, ok := s.Getenv(key); ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			return time.Duration(n) * time.Second
 		}
 	}
 	return def
+}
+
+// get returns the value of key, or "" when unset.
+func (s Sources) get(key string) string {
+	v, _ := s.Getenv(key)
+	return v
 }
