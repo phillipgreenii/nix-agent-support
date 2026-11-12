@@ -652,6 +652,17 @@ sequenceDiagram
     The age and this interval together let an observer tell a source that is **persistently**
     failing (no success for far longer than its period) from one that merely hit transient failures
     with a success always intervening, which `source_failures` alone cannot (`DEC-OBS-4`);
+  - **producer_load_backoff** — gauge: **1** while the core's most recent **producer tick** was
+    **skipped because host load was above the load-backoff threshold** (`PG_ROUTER_LOAD_BACKOFF_THRESHOLD`),
+    else **0**; it starts at 0. On a skipped tick **no pull source is polled**, so a **load-backoff skip
+    is neither a success nor a deliberate pause**: every source's **source_last_success_age** grows
+    together though nothing failed. This gauge is how an observer tells that single cause from per-source
+    failure: a watcher of the persistent-failure signal **MUST** stand aside for a source while the gauge
+    was set recently (the shipped rule uses the last 10 minutes), because the stall is not that source's
+    fault, and the cause is reported **once**, by a watcher of this gauge, instead of once per source;
+  - **producer_ticks_skipped** — counter: producer ticks skipped for host load (the count behind
+    **producer_load_backoff**). Both are exported whether or not any source is polled, and neither
+    carries a label;
   - **source_duration** — histogram, in seconds, per source: how long one **pull-source query
     attempt** ran, recorded for every attempt that ran to its own end (success or failure, so a
     timeout kill lands at the timeout's bucket) and **not** for an attempt cut short by the daemon's

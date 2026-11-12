@@ -333,6 +333,9 @@ configured via env (use `config.toml`). See `internal/config` for the full set.
   producer tick skips polling sources (it still dispatches, expires and publishes; skipped sources
   stay due and are polled by the first tick at or below the threshold). 0 or less disables; an
   unreadable load never backs off (default 50)
+  A skipped tick sets the gauge `pg_router_producer_load_backoff` to 1 and counts on
+  `pg_router_producer_ticks_skipped_total`; the `pg-router-producer-load-backoff` alert fires for a
+  sustained backoff.
 - `PG_ROUTER_BUDGET_TOKENS` — per-worker token budget; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_COST` — per-worker cost budget in cents; 0 = unlimited (default 0)
 - `PG_ROUTER_BUDGET_TIME` — per-worker wall-clock budget in seconds (default 1500)

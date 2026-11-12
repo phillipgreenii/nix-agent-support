@@ -68,6 +68,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -152,6 +153,15 @@ const (
 	// unwritable), else 0. It is the soft step's whole metric surface: the soft
 	// step is not a gate, so no requirement metric moves.
 	MetricEmittersHalted = "pg_router_emitters_halted"
+	// MetricProducerLoadBackoff is 1 while the router's LAST producer tick was
+	// skipped because host load1 was above the load-backoff threshold, else 0
+	// (it starts at 0). MetricProducerTicksSkipped counts those skipped ticks.
+	// During a skipped tick no pull source is polled, so every source's last-success
+	// age grows together; these two series let one rule name that single cause
+	// (pg-router-producer-load-backoff) and let the per-source persistent-failure
+	// rule stand aside while it holds.
+	MetricProducerLoadBackoff  = "pg_router_producer_load_backoff"
+	MetricProducerTicksSkipped = "pg_router_producer_ticks_skipped"
 	// MetricLogRejecting is 1 per reason ("log_full", "log_unwritable") while the
 	// log is in that state and refusing new events, else 0.
 	MetricLogRejecting = "pg_router_log_rejecting"
@@ -483,6 +493,8 @@ type Emitter struct {
 	enqueued        metric.Int64Counter
 	sourceFailures  metric.Int64Counter
 	sourceBackoff   metric.Int64Counter
+	ticksSkipped    metric.Int64Counter
+	loadBackoff     atomic.Int64
 	deduped         metric.Int64Counter
 	enqueueRejected metric.Int64Counter
 	dispatchRetries metric.Int64Counter
@@ -840,6 +852,14 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	if err != nil {
 		return nil, err
 	}
+	ticksSkipped, err := m.Int64Counter(
+		MetricProducerTicksSkipped,
+		metric.WithUnit("{tick}"),
+		metric.WithDescription("producer ticks skipped because host load1 was above the load-backoff threshold; no pull source is polled on such a tick"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	deduped, err := m.Int64Counter(
 		MetricDeduped,
 		metric.WithUnit("{event}"),
@@ -1126,6 +1146,18 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	e.enqueued = enqueued
 	e.sourceFailures = sourceFailures
 	e.sourceBackoff = sourceBackoff
+	e.ticksSkipped = ticksSkipped
+	if _, err := m.Int64ObservableGauge(
+		MetricProducerLoadBackoff,
+		metric.WithUnit("{state}"),
+		metric.WithDescription("1 while the last producer tick was skipped because host load1 was above the load-backoff threshold, else 0"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			o.Observe(e.loadBackoff.Load())
+			return nil
+		}),
+	); err != nil {
+		return nil, err
+	}
 	e.deduped = deduped
 	e.enqueueRejected = enqueueRejected
 	e.dispatchRetries = dispatchRetries
@@ -2165,4 +2197,17 @@ func registerLogLimitGauges(m metric.Meter, fn func() eventqueue.LimitStatus, re
 		return err
 	}
 	return nil
+}
+
+// OnProducerTick records the outcome of one producer tick (the load-backoff
+// decision in cmd/pg-router's runOneTick): skipped=true sets the
+// MetricProducerLoadBackoff gauge and counts a skipped tick; skipped=false
+// clears the gauge.
+func (e *Emitter) OnProducerTick(skipped bool) {
+	if !skipped {
+		e.loadBackoff.Store(0)
+		return
+	}
+	e.loadBackoff.Store(1)
+	e.ticksSkipped.Add(context.Background(), 1)
 }

@@ -1,0 +1,50 @@
+# promtool unit tests for pg-router-producer-load-backoff, run by the flake check
+# test-pg-router-alert-rules (check-alert-rules.sh). The rule is
+# `avg_over_time(pg_router_producer_load_backoff[30m]) > 0.7` with `for: 5m`.
+#
+# Time model: scraped every 30 s. A sustained backoff (the 2026-11-12 episode, 50 minutes) fires;
+# a flapping one that skips 4 of every 5 samples fires; a 10 minute one stays quiet.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a 50 minute backoff fires
+    interval: 30s
+    input_series:
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x20 1x100 0x40"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-router-producer-load-backoff
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pg-router
+
+  - name: a backoff that skips 4 of every 5 samples fires
+    interval: 30s
+    input_series:
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x20 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0 1 1 1 1 0"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-router-producer-load-backoff
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pg-router
+
+  - name: a 10 minute backoff stays quiet
+    interval: 30s
+    input_series:
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x20 1x20 0x100"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-producer-load-backoff
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-producer-load-backoff
+        exp_alerts: []

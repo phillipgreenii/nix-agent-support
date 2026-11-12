@@ -38,8 +38,8 @@ const retiredPersistentFailureExpr = `time() - pg_router_source_last_success_tim
 func TestPersistentFailureRule(t *testing.T) {
 	r := ruleBlock(t, "pg-router-source-persistent-failure")
 	got := ruleExpr(t, r)
-	if got != wantPersistentFailureExpr {
-		t.Errorf("persistent-failure expr:\n got %q\nwant %q", got, wantPersistentFailureExpr)
+	if got != wantPersistentFailureExpr+wantPersistentFailureExclusion {
+		t.Errorf("persistent-failure expr:\n got %q\nwant %q", got, wantPersistentFailureExpr+wantPersistentFailureExclusion)
 	}
 	// The regression guard for pg2-ez292, stated as the property rather than the
 	// text: the staleness must come from the router-measured age, never from
@@ -265,7 +265,10 @@ func (r srcRun) wallCondition(t time.Time) bool {
 func deployedCondition(t *testing.T, r srcRun) func(time.Time) bool {
 	t.Helper()
 	switch got := ruleExpr(t, ruleBlock(t, "pg-router-source-persistent-failure")); got {
-	case wantPersistentFailureExpr:
+	// The exclusion clause only removes series while the backoff gauge is set; the
+	// sleep and failure replays here have no backoff, so the age-only model applies
+	// (producer_load_backoff_test.go models the exclusion).
+	case wantPersistentFailureExpr + wantPersistentFailureExclusion:
 		return r.condition
 	case retiredPersistentFailureExpr:
 		return r.wallCondition

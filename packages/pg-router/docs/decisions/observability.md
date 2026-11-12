@@ -471,6 +471,18 @@ source's attempt is observed:
   `attempts`, `argv` (the source's command line, `query.ArgvOf`) and `load1` (host 1-minute load
   average, `/proc/loadavg` or `sysctl vm.loadavg`)**. Elapsed and argv ride on `discover.FailureInfo`.
   The load lookup runs only on this failure path.
+- **A host-load backoff is observed as one cause, not as per-source failure** (2026-11-12: about 50
+  minutes of load1 50 to 130 against a threshold of 50 skipped every producer tick and the
+  per-source persistent-failure rule filed about 24 escalated beads). `runOneTick` reports each tick's
+  decision to the metrics emitter (`OnProducerTick`), which exports `pg_router_producer_load_backoff`
+  (gauge, 1 while the last tick was skipped) and `pg_router_producer_ticks_skipped_total`. Choice
+  between resetting the per-source age on a skipped tick and excluding sources in the rule: the rule
+  excludes. The age is left growing, so the per-source view still shows the real starvation;
+  `pg-router-source-persistent-failure` carries `unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)`;
+  and `pg-router-producer-load-backoff` (gauge average above 0.7 over 30 minutes, `for: 5m`) is the one
+  alert for a sustained backoff, registered with pg-router-probe in the deployment repo. The 0.7 average
+  (not a plain `== 1`) is deliberate: the real episode skipped 47 to 60 of every 60 ticks, so the gauge
+  flaps.
 
 **Bounds.** `source` is config-bounded; the new `reason` value is a fixed constant. The gauge and
 histogram add one series per source (the histogram 14 buckets). No argv, load or elapsed becomes a

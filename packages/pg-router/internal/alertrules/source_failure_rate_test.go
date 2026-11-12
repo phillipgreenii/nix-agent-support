@@ -67,7 +67,7 @@ func TestSourceBackoffRule(t *testing.T) {
 	// Neither failure alert references the back-off counter, and the failure-rate
 	// rule still reads only the failure counter, which a back-off never increments.
 	for _, uid := range []string{"pg-router-source-failure-rate", "pg-router-source-persistent-failure"} {
-		if strings.Contains(ruleExpr(t, ruleBlock(t, uid)), "backoff") {
+		if strings.Contains(ruleExpr(t, ruleBlock(t, uid)), "source_backoff") {
 			t.Errorf("%s must not read the back-off counter", uid)
 		}
 	}

@@ -1308,6 +1308,14 @@ groups:
       # failing across restarts re-alerts only after threshold + `for` of awake
       # time following each restart.
       #
+      # A host-load backoff skip is neither a success nor a deliberate pause, so the
+      # age keeps growing for every source during it. The expression therefore ends in
+      # `unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)`: while
+      # the router skipped producer ticks for host load in the last 10m this rule
+      # stands aside, and pg-router-producer-load-backoff (below) reports that one
+      # cause once. The age is deliberately NOT reset, so a real starvation stays
+      # visible in the per-source series.
+      #
       # noDataState: OK is deliberate: both series exist from daemon start, so
       # absence means the daemon (or /metrics) is down, which is
       # pg-router-liveness-down's job (noDataState: Alerting). (A router build
@@ -1334,7 +1342,55 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_router_source_last_success_age_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800)
+              expr: pg_router_source_last_success_age_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{ evaluator: { type: gt, params: [0] } }]
+
+      # Host-load backoff stall: ONE alert for the ONE cause (2026-11-12: host load1
+      # 50 to 130 over the threshold of 50 for about 50 minutes made the router skip
+      # every producer tick, no source was polled, every source's last-success age
+      # grew together, and pg-router-source-persistent-failure filed about 24
+      # escalated beads for a failure that was not one). The router exports
+      # pg_router_producer_load_backoff (1 while the last producer tick was skipped
+      # for host load) and pg_router_producer_ticks_skipped_total. The per-source
+      # rule above now stands aside while the gauge was set at any point in the
+      # last 10m (`unless on() max_over_time(...[10m]) > 0`), so a backoff-only stall
+      # is no longer shown per source; THIS rule is where it surfaces. It fires when
+      # the gauge averaged above 0.7 over 30m (most ticks skipped; ticks are about
+      # 10 s apart and a real episode skipped 47 to 60 of every 60), then `for: 5m`,
+      # so a backoff of a few minutes stays quiet. It is registered with
+      # pg-router-probe in the deployment repo (nix-ziprecruiter modules/zm/pg-router).
+      # noDataState: OK because a dead daemon is pg-router-liveness-down's job.
+      # Replay evidence: internal/alertrules/producer_load_backoff_test.go and
+      # rule-tests/pg-router-producer-load-backoff.test.yaml.
+      - uid: pg-router-producer-load-backoff
+        title: pg-router is skipping every producer tick because host load is above its backoff threshold
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router has skipped most producer ticks for 30m because host load is above its backoff threshold"
+          description: 'pg-router skipped producer ticks (no event source polled) for most of the last 30m because host load1 exceeded PG_ROUTER_LOAD_BACKOFF_THRESHOLD (default 50). Every source is stale for this one reason; nothing failed. Reduce host load (check the number of concurrent sessions and builds), or raise the threshold. Inspect: grep "producer tick skipped" in the pg-router stderr log.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: avg_over_time(pg_router_producer_load_backoff[30m]) > 0.7
           - refId: B
             datasourceUid: __expr__
             model: { refId: B, type: reduce, expression: A, reducer: last }

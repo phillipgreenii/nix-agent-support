@@ -48,3 +48,42 @@ tests:
           - exp_labels:
               source: daily-scan
               severity: warning
+
+  # Host-load backoff (the 2026-11-12 episode): the router skipped every producer tick for 50
+  # minutes, no source was polled, the age grew past the 1800 s floor, and the rule fired for every
+  # source. While pg_router_producer_load_backoff was set in the last 10 m the rule stands aside
+  # (pg-router-producer-load-backoff reports the one cause). Time: scraped every 30 s; the age
+  # climbs 30 s per sample for 50 m (100 samples) from 0, the gauge is 1 for the same span.
+  - name: a backoff-only stall longer than the threshold does not fire
+    interval: 30s
+    input_series:
+      - series: pg_router_source_last_success_age_seconds{source="repo-tip",job="pg-router"}
+        values: "0+30x100 3000x40"
+      - series: pg_router_source_expected_interval_seconds{source="repo-tip",job="pg-router"}
+        values: "60x140"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "1x100 0x40"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-router-source-persistent-failure
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: pg-router-source-persistent-failure
+        exp_alerts: []
+
+  - name: the same age with no backoff fires (negative control, the stall is not hidden in general)
+    interval: 30s
+    input_series:
+      - series: pg_router_source_last_success_age_seconds{source="repo-tip",job="pg-router"}
+        values: "0+30x100 3000x40"
+      - series: pg_router_source_expected_interval_seconds{source="repo-tip",job="pg-router"}
+        values: "60x140"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x140"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-router-source-persistent-failure
+        exp_alerts:
+          - exp_labels:
+              source: repo-tip
+              severity: warning

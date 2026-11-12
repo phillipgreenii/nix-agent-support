@@ -168,6 +168,10 @@ type Orchestrator struct {
 	// disables it; captured by NewListener like the observers above.
 	// cmd/pg-router's bootCore wires the metrics.Emitter in here.
 	SkippedObserver SkippedObserver
+	// LoadBackoffObserver is told, once per tick, whether the producer pass was
+	// skipped for host load (cmd/pg-router runOneTick). nil disables it;
+	// bootCore wires the metrics.Emitter in here.
+	LoadBackoffObserver interface{ OnProducerTick(skipped bool) }
 	// lastTick is the per-source next-fire substrate ProduceTick threads into
 	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
 	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker

@@ -452,6 +452,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// pg_router_skipped_total{type,role,reason}: an offer the handler accepted and
 	// completed as skipped (bead pg2-6t91v7), kept out of pg_router_throughput_total.
 	o.SkippedObserver = emitter
+	// pg_router_producer_load_backoff / pg_router_producer_ticks_skipped_total.
+	o.LoadBackoffObserver = emitter
 	// The level projection feeds the queue's admission (WithLevelSource); its
 	// appends reach the queue's durable level path once the queue exists.
 	levelAppender := &lateLevelAppender{}
@@ -1581,7 +1583,11 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 	// at or below the threshold.
 	var rpt discover.ProduceReport
 	var err error
-	if l, over := loadBackoff(cfg); over {
+	l, over := loadBackoff(cfg)
+	if o.LoadBackoffObserver != nil {
+		o.LoadBackoffObserver.OnProducerTick(over)
+	}
+	if over {
 		slog.Warn("producer tick skipped: host load above the backoff threshold", "load1", l, "threshold", cfg.LoadBackoffThreshold)
 	} else {
 		rpt, err = o.ProduceTick(ctx, q)
