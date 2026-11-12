@@ -331,9 +331,14 @@ hold_lease() {
   # the config key drives it when the env override is absent
   unset PG_REPO_RUNNER_CHECK_INTERVAL
   sd '\[thresholds\]' $'[thresholds]\ncheck_interval = 10' "$TEST_DIR/config.toml"
-  verify "nix-alpha@$tip2"
+  # pin the clock relative to the stored verdict's finish time, so a loaded host
+  # cannot stretch the real time between the two runs past the 10 s window
+  local fin
+  fin="$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "$(jq -r .finishedAt "$(verdict_file nix-alpha "$ALPHA_SHA")")" +%s 2>/dev/null ||
+    date -u -d "$(jq -r .finishedAt "$(verdict_file nix-alpha "$ALPHA_SHA")")" +%s)"
+  PG_REPO_RUNNER_EPOCH=$((fin + 5)) verify "nix-alpha@$tip2"
   [ "$status" -eq 9 ]
-  PG_REPO_RUNNER_EPOCH=$(($(date -u +%s) + 20)) verify "nix-alpha@$tip2"
+  PG_REPO_RUNNER_EPOCH=$((fin + 20)) verify "nix-alpha@$tip2"
   [ "$status" -eq 0 ]
 }
 
