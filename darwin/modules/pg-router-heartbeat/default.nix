@@ -49,22 +49,35 @@ in
   };
 
   # A system-domain LaunchDaemon starts at boot, before any login, which is the
-  # window the user-agent stack cannot cover. StartInterval does not fire while
-  # the host sleeps; the binary treats the resulting tick gap as sleep.
+  # window the user-agent stack cannot cover. Registered through the shared
+  # launchdServices registry so ProgramArguments[0] is the boot shim (waits for
+  # /nix/store before exec) and the log is size-rotated at startup by the
+  # wrapper. StartInterval does not fire while the host sleeps; the binary
+  # treats the resulting tick gap as sleep.
   config = lib.mkIf cfg.enable {
-    launchd.daemons.pg-router-heartbeat = {
+    phillipgreenii.system.launchdServices.daemons.pg-router-heartbeat = {
+      label = "com.phillipg.pg-router-heartbeat";
+      script = ''
+        exec ${
+          lib.escapeShellArgs [
+            "${cfg.package}/bin/pg-router-heartbeat"
+            "--prometheus-url"
+            cfg.prometheusUrl
+            "--state-dir"
+            cfg.stateDir
+            "--notify-command"
+            cfg.notifyCommand
+          ]
+        }
+      '';
+      # A StartInterval job that exits between runs, not a KeepAlive service.
+      keepAlive = false;
+      runAtLoad = true;
+      checkMode = "periodic";
+      # The log is root-owned under /var/log, which the user-run collector
+      # cannot read, so no observability.logSources entry could ship it.
+      logCollection.enable = false;
       serviceConfig = {
-        Label = "com.phillipg.pg-router-heartbeat";
-        ProgramArguments = [
-          "${cfg.package}/bin/pg-router-heartbeat"
-          "--prometheus-url"
-          cfg.prometheusUrl
-          "--state-dir"
-          cfg.stateDir
-          "--notify-command"
-          cfg.notifyCommand
-        ];
-        RunAtLoad = true;
         StartInterval = 60;
         StandardErrorPath = "/var/log/pg-router-heartbeat.log";
         StandardOutPath = "/var/log/pg-router-heartbeat.log";

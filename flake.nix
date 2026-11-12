@@ -2859,6 +2859,58 @@
                   touch $out
                 '';
 
+              # darwin/modules/pg-router-heartbeat: the heartbeat is registered through the
+              # shared launchdServices registry (periodic daemon, boot shim, managed log)
+              # and no longer defines a raw launchd.daemons entry. The registry is stubbed
+              # with attrsOf anything; launchd.daemons is declared so a raw definition
+              # would be visible.
+              test-pg-router-heartbeat-darwin-module =
+                let
+                  evalDarwin =
+                    enable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-router-heartbeat/default.nix
+                        {
+                          options = {
+                            launchd.daemons = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            phillipgreenii.system.launchdServices.daemons = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                          };
+                          config.phillipgreenii.programs.pg-router-heartbeat = {
+                            inherit enable;
+                            package = pkgs.emptyDirectory;
+                          };
+                        }
+                      ];
+                    }).config;
+                  on = evalDarwin true;
+                  off = evalDarwin false;
+                  d = on.phillipgreenii.system.launchdServices.daemons.pg-router-heartbeat;
+                in
+                assert d.label == "com.phillipg.pg-router-heartbeat";
+                assert d.runAtLoad;
+                assert !d.keepAlive;
+                assert d.checkMode == "periodic";
+                assert d.serviceConfig.StartInterval == 60;
+                assert d.serviceConfig.StandardErrorPath == "/var/log/pg-router-heartbeat.log";
+                assert d.serviceConfig.StandardOutPath == "/var/log/pg-router-heartbeat.log";
+                # manageLogs is left at the registry default (enabled), so rotation applies
+                assert !(d ? manageLogs) || d.manageLogs.enable;
+                assert lib.hasInfix "--prometheus-url" d.script;
+                assert lib.hasInfix "--state-dir" d.script;
+                # no raw launchd.daemons definition remains
+                assert on.launchd.daemons == { };
+                assert off.launchd.daemons == { };
+                assert off.phillipgreenii.system.launchdServices.daemons == { };
+                pkgs.runCommand "test-pg-router-heartbeat-darwin-module-ok" { } "touch $out";
+
               # pg-task-focus HM module (bead pg2-t7me1.2): the daemon's LaunchAgent is
               # registered from home/programs/pg-task-focus via
               # phillipgreenii.programs.launchdServices.userAgents (personal ADR 0055,
