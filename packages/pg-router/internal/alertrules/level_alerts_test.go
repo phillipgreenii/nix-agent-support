@@ -25,7 +25,7 @@ var levelAlerts = []struct {
 }{
 	{
 		"pg-router-sensor-stale",
-		`(max by (sensor)(pg_router_sensor_last_observed_age_seconds > 600) and on() ` + awakeExpr + `) or (vector(0) unless on() ` + awakeExpr + `)`,
+		`(max by (sensor)(pg_router_sensor_last_observed_age_seconds > bool 600) and on() ` + awakeExpr + `) or (vector(0) unless on() ` + awakeExpr + `)`,
 		"for: 5m", "noDataState: Alerting",
 	},
 	{

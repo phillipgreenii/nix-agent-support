@@ -2227,12 +2227,16 @@ groups:
       # below watch the sensors and the levels themselves; they carry static annotations
       # (copied verbatim into beads) and are probed under their own uids.
       #
-      # pg-router-sensor-stale: a sensor has not reported for over 10 minutes. noDataState
-      # is Alerting because a router that exports no sensor series at all while the host is
-      # awake is itself broken; a sleeping laptop must not page, so the expression is gated
-      # on the host being awake (the condition pg-router-liveness-down uses) and, while the
-      # host sleeps, returns a single 0 sample (`vector(0) unless on() <awake>`) instead of
-      # an empty result, which would read as no data.
+      # pg-router-sensor-stale: a sensor has not reported for over 10 minutes. The sensor
+      # branch returns one 0/1 sample per sensor (`> bool 600`) instead of filtering, so the
+      # four cases read as follows. Host awake, sensor fresh: 0 for that sensor, which is
+      # Normal (a filter would drop every series and read as NoData). Host awake, sensor
+      # stale: 1 for that sensor, which fires after `for` labelled with the sensor. Host
+      # awake, no sensor series at all: empty, which is NoData and so Alerting (noDataState),
+      # because a router that exports no sensor series while the host is awake is itself
+      # broken. Host asleep: the sensor branch is gated on the host being awake (the
+      # condition pg-router-liveness-down uses) and `vector(0) unless on() <awake>` returns a
+      # single 0 sample, so a sleeping laptop is Normal rather than NoData.
       - uid: pg-router-sensor-stale
         title: pg-router sensor has not reported (by sensor)
         condition: C
@@ -2254,7 +2258,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '(max by (sensor)(pg_router_sensor_last_observed_age_seconds > 600) and on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))) or (vector(0) unless on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total))))'
+              expr: '(max by (sensor)(pg_router_sensor_last_observed_age_seconds > bool 600) and on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))) or (vector(0) unless on() ((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total))))'
           - refId: B
             datasourceUid: __expr__
             model:

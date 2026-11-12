@@ -7,7 +7,8 @@
 # RULE_UIDS has its refId A wrapped as a Prometheus `alert:` rule
 # `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator, `for`
 # and labels carried over) next to a recording rule `wrapped:<uid>` over the same
-# expression, so a case can count instances, and every `*.test.yaml` in the
+# expression, so a case can count instances (plus `raw:<uid with _>` over the bare refId A
+# expression, whose 0 samples the `> 0` wrapper drops), and every `*.test.yaml` in the
 # rule-tests directory runs under `promtool test rules`.
 #
 # Grafana-only fields (noDataState, execErrState, annotations) are pinned by the Go
@@ -64,7 +65,8 @@ printf '%s\n' "$alerts_json" | jq --argjson uids "$rule_uids" '
         | ({ gt: ">", lt: "<" }[$e.type] // error("unsupported evaluator \($e.type)")) as $op
         | "(\($a)) \($op) \($e.params[0])" as $wrapped
         | ( { alert: .uid, expr: $wrapped, for: .for, labels: .labels },
-            { record: ("wrapped:" + (.uid | gsub("-"; "_"))), expr: $wrapped } ) ]
+            { record: ("wrapped:" + (.uid | gsub("-"; "_"))), expr: $wrapped },
+            { record: ("raw:" + (.uid | gsub("-"; "_"))), expr: $a } ) ]
     } ] }' >rules.yml
 
 echo "--- wrapped rules"

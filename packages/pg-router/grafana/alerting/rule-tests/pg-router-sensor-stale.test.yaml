@@ -1,7 +1,9 @@
 # promtool unit tests for the pg-router-sensor-stale alert. Run by the flake check test-pg-router-alert-rules,
 # which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
 # `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for` and labels, plus a recording rule
-# `wrapped:<uid with _>` over the same expression. Every series has a 1m interval.
+# `wrapped:<uid with _>` over the same expression, and `raw:<uid with _>` over the bare
+# refId A expression (what Grafana reads before the threshold: a 0 sample is a value, an empty
+# result is NoData). Every series has a 1m interval.
 rule_files:
   - rules.yml
 
@@ -37,6 +39,14 @@ tests:
         values: "200x60"
       - series: host_power_last_sleep_timestamp_seconds
         values: "100x60"
+    promql_expr_test:
+      # Awake and fresh returns a 0 sample for the sensor (a value, so Normal), not an empty
+      # result (NoData, which noDataState Alerting would fire).
+      - expr: raw:pg_router_sensor_stale
+        eval_time: 30m
+        exp_samples:
+          - labels: 'raw:pg_router_sensor_stale{sensor="host-sensor"}'
+            value: 0
     alert_rule_test:
       - eval_time: 30m
         alertname: pg-router-sensor-stale
@@ -54,10 +64,24 @@ tests:
         values: "200x60"
     promql_expr_test:
       # The asleep branch is a single 0 sample: a value (OK), where an empty result would be NoData -> Alerting.
-      - expr: wrapped:pg_router_sensor_stale
+      - expr: raw:pg_router_sensor_stale
         eval_time: 30m
-        exp_samples: []
+        exp_samples:
+          - labels: "raw:pg_router_sensor_stale"
+            value: 0
     alert_rule_test:
       - eval_time: 30m
         alertname: pg-router-sensor-stale
         exp_alerts: []
+
+  - name: a host awake with no sensor series at all returns an empty result (NoData, which alerts)
+    interval: 1m
+    input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x60"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x60"
+    promql_expr_test:
+      - expr: raw:pg_router_sensor_stale
+        eval_time: 30m
+        exp_samples: []
