@@ -181,10 +181,7 @@ func TestParseSessionsArgs(t *testing.T) {
 // naming --since on stderr, and with no recorder answering `sessions` says
 // "the recorder is not available" and exits 1 instead of reading the transcript files.
 func TestSessionsExitCodeAndHelp(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	if out, err := exec.CommandContext(context.Background(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
+	bin := selfBinary(t)
 	home := t.TempDir()
 	env := append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
 		"XDG_STATE_HOME="+filepath.Join(home, ".state"), "PG_CLAUDE_CODE_RECORDER_SOCKET="+filepath.Join(home, "absent.sock"))

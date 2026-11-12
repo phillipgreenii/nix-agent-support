@@ -18,10 +18,7 @@ import (
 // HOME and the XDG dirs are a temp dir with no daemon socket, so every
 // daemon-bound subcommand sees "daemon unavailable".
 func TestExitCodeContract(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "pa-monitor")
-	if out, err := exec.CommandContext(context.Background(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
+	bin := selfBinary(t)
 	home := t.TempDir()
 	badCfg := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(badCfg, "pa-monitor"), 0o755); err != nil {
@@ -50,6 +47,9 @@ func TestExitCodeContract(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// The daemon-unavailable cases each wait out the client dial deadline
+			// (2-3 s of real time), so run the cases side by side.
+			t.Parallel()
 			cmd := exec.CommandContext(context.Background(), bin, tc.args...)
 			cmd.Env = append(append(os.Environ(), base...), "XDG_CONFIG_HOME="+tc.cfg)
 			var stderr bytes.Buffer
