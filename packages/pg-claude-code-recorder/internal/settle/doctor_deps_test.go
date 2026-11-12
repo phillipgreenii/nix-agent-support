@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -17,7 +18,7 @@ func TestDoctorRunsFromNarrowDependencies(t *testing.T) {
 		Stopping:  func() bool { stopChecks++; return false },
 		OnFullRun: func() { marked++ },
 	})
-	ans, err := doc.Run()
+	ans, err := doc.Run(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +32,7 @@ func TestDoctorRunsFromNarrowDependencies(t *testing.T) {
 		t.Fatalf("result file: %v %+v", ok, got)
 	}
 	// The rolling tick is off when bytes_per_slice is 0.
-	if err := doc.Tick(); err != nil || stopChecks != 1 {
+	if err := doc.Tick(context.Background()); err != nil || stopChecks != 1 {
 		t.Fatalf("Tick: %v, %d stopping checks", err, stopChecks)
 	}
 }
@@ -50,7 +51,7 @@ func TestDoctorRollingCycleFromNarrowDependencies(t *testing.T) {
 		SliceEvery:    time.Minute,
 		OnFullRun:     func() { marked++ },
 	})
-	ans, err := doc.Run()
+	ans, err := doc.Run(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -232,6 +232,13 @@ type Settler struct {
 	// otherwise. Guarded by run.
 	seen map[int64]int64
 
+	// beforePrefetch and afterPrefetch are test seams, called by
+	// prefetchLastSeen just before and just after it writes seen, with the run
+	// lock held and no other lock taken. Nil in production: one comparison
+	// each, no lock-order change.
+	beforePrefetch func()
+	afterPrefetch  func()
+
 	// The event loop's state (see wake.go); guarded by run.
 	due      *DueHeap
 	liveSeen map[string]bool
@@ -862,6 +869,9 @@ func (s *Settler) settledPrefilter(ctx context.Context, groups map[string]*conv,
 // "FirstSeen". On a read error the cache stays empty and lastSeen reads per
 // file as before. The caller holds the run lock and clears s.seen afterwards.
 func (s *Settler) prefetchLastSeen(ctx context.Context, groups map[string]*conv, live map[string]bool, unchanged map[string]bool) {
+	if s.beforePrefetch != nil {
+		s.beforePrefetch()
+	}
 	s.seen = nil
 	var ids []int64
 	for session, c := range groups {
@@ -888,6 +898,9 @@ func (s *Settler) prefetchLastSeen(ctx context.Context, groups map[string]*conv,
 		}
 	}
 	s.seen = got
+	if s.afterPrefetch != nil {
+		s.afterPrefetch()
+	}
 }
 
 // add folds one evaluation Outcome into the stats. prior is the persisted

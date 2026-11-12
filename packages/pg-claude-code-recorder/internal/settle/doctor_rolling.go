@@ -92,6 +92,10 @@ type doctorSeam struct {
 	hashing func(file int64)
 	// recheck is called before a finding is re-checked under the lock.
 	recheck func(file int64)
+	// lastSeenBefore and lastSeenAfter bracket the doctor's read of a file's
+	// last-seen time (see Doctor.lastSeen); nil costs one comparison.
+	lastSeenBefore func()
+	lastSeenAfter  func()
 }
 
 // DoctorCopier is the part of the copier the doctor uses.
@@ -162,6 +166,21 @@ func NewDoctor(deps DoctorDeps) *Doctor {
 }
 
 func (d *Doctor) stopping() bool { return d.stopFn != nil && d.stopFn() }
+
+// lastSeen is the file's last-seen time, read straight from the store. It MUST
+// NOT go through the Settler's per-tick cache (Settler.seen): the doctor holds
+// no run lock, so that cache belongs to Tick alone. The seam hooks only let a
+// test hold the read open; they take no lock.
+func (d *Doctor) lastSeen(ctx context.Context, f store.File) time.Time {
+	if d.seam.lastSeenBefore != nil {
+		d.seam.lastSeenBefore()
+	}
+	t := lastSeenFromStore(ctx, d.st, f)
+	if d.seam.lastSeenAfter != nil {
+		d.seam.lastSeenAfter()
+	}
+	return t
+}
 
 // SetIdleStep sets the step an idle slice (a rolling tick with no cycle open
 // and none due) runs, at most once per slice. Call it before the daemon's
@@ -628,7 +647,7 @@ func (d *Doctor) doctorOne(ctx context.Context, cur *DoctorCursor, f store.File,
 		if err != nil {
 			return sn.Size, nil
 		}
-		if (h != sn.Hash || size != sn.Size) && !lastSeenFromStore(ctx, d.st, f).Before(d.mtimeOf(orig)) {
+		if (h != sn.Hash || size != sn.Size) && !d.lastSeen(ctx, f).Before(d.mtimeOf(orig)) {
 			if d.seam.recheck != nil {
 				d.seam.recheck(f.ID)
 			}
