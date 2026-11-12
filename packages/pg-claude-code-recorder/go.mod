@@ -10,6 +10,7 @@ require (
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.61.0
+	pgregory.net/rapid v1.3.0
 )
 
 require (

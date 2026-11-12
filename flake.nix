@@ -7656,7 +7656,8 @@
               # (`nix build .#checks.<system>.pg-claude-code-recorder-crashsweep-tests -L`).
               # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land gate
               # (V-4; phillipg-nix-repo-base ADR 0024), and the package test timeout is NOT raised
-              # for it. Runs the `//go:build crashsweep` TestCrashSweep in internal/settle: each
+              # for it. Runs the `//go:build crashsweep` TestCrashSweep and the rapid model-based
+              # TestModelSequence (about 100 s at its default 100 checks, so not unit tier) in internal/settle: each
               # scenario (settle in clone and byte mode, removal with abort and restore, extract,
               # doctor repair) is stopped after each of its N file-system operations, once as a
               # plain crash and once with power loss (unsynced data discarded), then the store is
@@ -7675,7 +7676,7 @@
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
                       log="$TMPDIR/crashsweep.log"
-                      if ! go test -tags crashsweep -run 'TestCrashSweep' -count=1 -v -timeout 30m ./internal/settle/ > "$log" 2>&1; then
+                      if ! go test -tags crashsweep -run 'TestCrashSweep|TestModelSequence' -count=1 -v -timeout 30m ./internal/settle/ > "$log" 2>&1; then
                         cat "$log"
                         echo "pg-claude-code-recorder-crashsweep-tests: the crash sweep FAILED" >&2
                         exit 1
@@ -7690,6 +7691,11 @@
                           }
                         done
                       done
+                      grep -q -- '^--- PASS: TestModelSequence ' "$log" || {
+                        cat "$log"
+                        echo "pg-claude-code-recorder-crashsweep-tests: TestModelSequence did not report PASS" >&2
+                        exit 1
+                      }
                       if grep -q -- '--- SKIP' "$log"; then
                         echo "pg-claude-code-recorder-crashsweep-tests: a test was SKIPPED" >&2
                         exit 1

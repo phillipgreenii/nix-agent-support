@@ -10,6 +10,7 @@ cachePackages = [
   'github.com/phillipgreenii/x/cmdruntest',
   'github.com/phillipgreenii/x/pprofserver',
   'github.com/remyoudompheng/bigfft',
+  'go.uber.org/goleak',
   'golang.org/x/sync/errgroup',
   'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
@@ -105,3 +106,7 @@ cachePackages = [
   [mod.'modernc.org/sqlite']
     version = 'v1.61.0'
     hash = 'sha256-hkdsithYwoAc5svUA878mPtOs2eIhtQnmGnSabXfTtc='
+
+  [mod.'pgregory.net/rapid']
+    version = 'v1.3.0'
+    hash = 'sha256-GmWX33UKjofHgHDw8QiwxSaeDjqT81Tb2m+ChtC+ueg='
