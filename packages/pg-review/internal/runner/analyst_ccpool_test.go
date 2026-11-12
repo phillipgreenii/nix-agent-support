@@ -497,7 +497,7 @@ func TestPlantedSecretInFinalMessageIsRedactedBeforeStorage(t *testing.T) {
 		_ = rows.Scan(&n)
 		tables = append(tables, n)
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, tb := range tables {
 		r, err := e.l.DB().Query(`SELECT * FROM ` + tb)
 		if err != nil {
