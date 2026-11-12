@@ -319,24 +319,25 @@ func TestResumeQuitDeletesTheRecordsAndLeavesEverythingElse(t *testing.T) {
 	}
 }
 
+// One fixture serves all four flags: a lost compare-and-swap refuses and leaves
+// the record exactly as the winner wrote it, so the next flag meets the same
+// state. (Four fixtures cost four full land runs for no extra coverage.)
 func TestResumeEveryFlagTakesTheRecordByCompareAndSwap(t *testing.T) {
+	f := newFx(t)
+	f.conflicting()
+	f.wantStopped(f.run(f.land()), outcome.StopConflict)
+	// Another invocation took the record first: it is running now.
+	l := &locks.Layer{Git: f.g, Clock: f.clock, Dir: f.repo.Dir, Config: locks.Config{LeaseTTL: 60e9, Wait: 3e9}}
+	if _, _, err := l.TakeBack(t.Context(), locks.BranchRef("feature/x"), func(r *locks.Record) { r.Owner = owner(9, "other") }); err != nil {
+		t.Fatal(err)
+	}
+	before := f.branchOID()
 	for _, flag := range []string{outcome.FlagContinue, outcome.FlagSkip, outcome.FlagAbort, outcome.FlagQuit} {
-		t.Run(flag, func(t *testing.T) {
-			f := newFx(t)
-			f.conflicting()
-			f.wantStopped(f.run(f.land()), outcome.StopConflict)
-			// Another invocation took the record first: it is running now.
-			l := &locks.Layer{Git: f.g, Clock: f.clock, Dir: f.repo.Dir, Config: locks.Config{LeaseTTL: 60e9, Wait: 3e9}}
-			if _, _, err := l.TakeBack(t.Context(), locks.BranchRef("feature/x"), func(r *locks.Record) { r.Owner = owner(9, "other") }); err != nil {
-				t.Fatal(err)
-			}
-			before := f.branchOID()
-			o := f.resume(flag)
-			f.wantRefusedOutcome(o, outcome.RefLostToConcurrent, "")
-			if f.branchOID() != before {
-				t.Fatal("the loser changed the record")
-			}
-		})
+		o := f.resume(flag)
+		f.wantRefusedOutcome(o, outcome.RefLostToConcurrent, "")
+		if f.branchOID() != before {
+			t.Fatalf("%s: the loser changed the record", flag)
+		}
 	}
 }
 
