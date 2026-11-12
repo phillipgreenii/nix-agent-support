@@ -1418,6 +1418,14 @@ changes a core gate or `INV-LIFE-2`.
   - **Accepted race.** Between the check and the send the session can die. That race is accepted, and
     its outcome is bounded: a resume into a session that has just died fails at once, rather than
     waiting for a launch that cannot happen.
+  - **The nudge's ingestion confirmation has headroom.** The nudge asks the session tool to confirm
+    the model started a turn within a window. The session tool does more than wait the window:
+    before it, a resume of a cold session and a recorder query for the feed position; after it, a
+    second recorder query to tell "not ingested" from "the recorder did not answer". Each recorder
+    query can run to its own 30 second deadline under load. The handler's bound on that one call
+    MUST therefore exceed the window by at least the sum of that work, so that a slow recorder makes
+    the session tool report "ingestion unknown" (exit 9, which the nudge treats as delivered)
+    rather than the handler killing the call and failing the dispatch.
 
 - **`INV-CCH-39`** <!-- uuid: 260b4781-bcc2-4270-ab3f-33eaf2a9496b --> — a role that needs no working
   tree of its own MUST NOT cost a per-dispatch worktree: it runs with the `path` isolation (one fixed,

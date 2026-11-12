@@ -30,8 +30,13 @@ const (
 	quickCallTimeout = 60 * time.Second
 	// confirmCallSlack is the headroom added on top of a `--confirm-ingest`
 	// window to bound the `ccpool reply` call that carries it, so the call
-	// timeout always exceeds the confirm window (pg2-iznqf3).
-	confirmCallSlack = 30 * time.Second
+	// timeout always exceeds the confirm window. The call also does a cold
+	// resume, a pre-delivery feed Mark and a post-window probe Mark (each
+	// recorder query can take its own 30s deadline under load), so the slack
+	// covers those plus delivery, letting a slow recorder end the call as exit
+	// 9 (ingest unknown) instead of the handler killing it at the old 30s
+	// margin.
+	confirmCallSlack = 150 * time.Second
 	// EnsureTimeout bounds `ccpool new`, which blocks until the session reaches
 	// ready. ccpool's own wait default is 10m, so this sits comfortably above it
 	// to avoid killing a legitimately-slow launch while still bounding a wedge.

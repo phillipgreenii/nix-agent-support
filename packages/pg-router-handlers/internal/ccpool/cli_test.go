@@ -823,8 +823,8 @@ func TestReplyTimeout_exceedsConfirmWindow(t *testing.T) {
 			t.Errorf("replyTimeout(%v, NoWait) = %v, must exceed the confirm window", confirm, got)
 		}
 	}
-	if got := replyTimeout(90*time.Second, ModeNoWait); got != 120*time.Second {
-		t.Errorf("replyTimeout(90s) = %v, want 2m0s (confirm + 30s)", got)
+	if got := replyTimeout(90*time.Second, ModeNoWait); got != 90*time.Second+confirmCallSlack {
+		t.Errorf("replyTimeout(90s) = %v, want confirm + confirmCallSlack", got)
 	}
 	if got := replyTimeout(90*time.Second, ModeQueue); got != quickCallTimeout {
 		t.Errorf("queue reply timeout = %v, want quickCallTimeout", got)
@@ -869,7 +869,7 @@ func TestSend_usesReplyTimeout(t *testing.T) {
 		confirm time.Duration
 		want    time.Duration
 	}{
-		{"no-wait confirm", ModeNoWait, 90 * time.Second, 120 * time.Second},
+		{"no-wait confirm", ModeNoWait, 90 * time.Second, 90*time.Second + confirmCallSlack},
 		{"queue keeps quick", ModeQueue, 90 * time.Second, quickCallTimeout},
 		{"no confirm keeps quick", ModeNoWait, 0, quickCallTimeout},
 	}
@@ -931,5 +931,18 @@ func TestConsumption_badJSONIsAnError(t *testing.T) {
 	setOut([]byte(`not json`))
 	if _, err := cli.Consumption(context.Background(), "s"); err == nil {
 		t.Error("want a decode error")
+	}
+}
+
+// The reply call does a cold resume, a pre-delivery feed Mark and a post-window
+// probe Mark besides the confirm wait; each recorder query can run to its own
+// 30s deadline under load. The call bound MUST leave room for both queries so a
+// slow recorder ends the call as exit 9 instead of the handler killing it
+// (a 30s margin was killed at 2m0s with the recorder up).
+func TestReplyTimeout_marginCoversTwoRecorderQueries(t *testing.T) {
+	const recorderQueryDeadline = 30 * time.Second
+	margin := replyTimeout(90*time.Second, ModeNoWait) - 90*time.Second
+	if margin < 2*recorderQueryDeadline+30*time.Second {
+		t.Errorf("margin over the confirm window = %v, want at least two recorder queries plus delivery", margin)
 	}
 }
