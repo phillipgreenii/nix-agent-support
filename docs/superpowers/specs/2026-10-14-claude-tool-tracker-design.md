@@ -520,6 +520,73 @@ mapping change; 596 `unresolved`/`failed`, 33 `pending`/`failed`, 17 `unresolved
 2 `approved`/`unresolved`). Open: the mod's missing `call_start` / `call_end` events and the
 10:02:46Z subagent call, each needing the captured trace named above.
 
+Post-fix comparison (2026-11-12, this laptop). Window: `2026-11-08T00:00:00Z` to
+`2026-11-12T07:10:09Z` (exclusive), after the 2026-11-07 fixes were applied, on the live databases
+(read-only for the comparison) with the installed binaries. First `claude-tool-tracker ingest`
+(default database and events directory), exit 0, 265789 new lines, 0 skipped. Then
+`claude-extended-tool-approver compare-tracker --since 2026-11-08T00:00:00Z --until 2026-11-12T07:10:09Z`,
+exit code 2 (differences found), run twice; the two reports are byte-identical (the window end was
+fixed, and the tracker database did not change between them). Counts: CETA 37778 calls, tracker
+39214, matched 37725; only CETA 53; only the tracker 1376 (plus 113 more under
+`refused_before_hook`, which does not make a report unclean); verdict differs 0; outcome differs
+257; `permission_mode`, `agent_type`, `sandbox_enabled`, is-error and denial-reason presence
+differ 0; duplicate keys 1; CETA rows with no `tool_use_id` 9; sessions with CETA rows but no
+tracker event file 1 (10 rows); ingest skipped lines 0 (of 265789 read in 865 files). The verdict
+rule fix holds (0 verdict differences against 5 on 2026-11-07), and the carried fields all agree.
+Each group against section 8.2 above:
+
+- Only CETA, 53. 52 are timing: they are the last calls before the window end, in sessions still
+  running while the ingest ran (CETA ids 1109956 to 1110007, sessions 47ece735, fdabbe74, 3ea61ad6,
+  99c56110 and others); a second ingest afterwards loaded all 52 with a `call_start`, so they
+  match on a re-run (the comparison itself was not repeated). The 53rd is the test-fixture session
+  `x` with tool use id `x` (one CETA row; the same fixture is the 1 duplicate key `x`/`x` seven rows
+  and the 1 session with no tracker file), the fixture of another tool writing into the real
+  directories already noted above. No missing-`call_start` call appears: they are now counted.
+- Only the tracker, 1376 (113 `refused_before_hook` not included): NEW, not covered by the
+  2026-11-07 explanations. In 1368 of the 1376 the tracker has `call_start`, `check` and `call_end`
+  but no `pre_tool` and no `ceta.verdict`: no command hook ran for the call (the `check` is the
+  mod's observation of Claude Code's own permission decision, `approver` person, decision `ask`
+  or `allow`). 1284 of them are one session, `9d5016e1` (2026-11-10T14:01Z to 2026-11-11T05:14Z,
+  permission mode auto): its transcript holds 260 hook attachments, all of the terminal
+  multiplexer's own hook, and none from CETA or the tracker, from the first call; the other
+  sessions in the same hours have both. Another 79 are in three sessions (`8f3ae5f6` 56, `d4e5fa6a`
+  16, `07b78cbe` 7) whose `pre_tool` and `ceta.verdict` events stop partway (2026-11-10T06:28Z,
+  2026-11-06T18:36Z and 2026-11-10T06:17Z) while the mod's `call_start` continues until the end of
+  the session. The remaining 13 are single calls; 8 of the 1376 have a `pre_tool` and 5 a
+  `ceta.verdict` (ask log row not written, the 2026-11-07 "75 calls" group). Cause of the lost hooks
+  not settled; it is a tracker and CETA hook-loading gap (a process whose command hooks are absent
+  or stop), not a CETA decision difference. Open.
+- Verdict differs, 0. The 5 of 2026-11-07 (delivered `reject` against engine `ask`) are fixed.
+- Outcome differs, 257 (CETA, tracker): 198 `unresolved`, `denied`; 18 `pending`, `denied`; 11
+  `unresolved`, `failed`; 7 `unresolved`, `approved`; 5 `pending`, `failed`; 5 `pending`,
+  `approved`; 4 `approved`, `pending`; 2 `pending`, `unresolved`; 2 `failed`, `unresolved`; 2
+  `failed`, `pending`; 2 `approved`, `unresolved`; 1 `rejected`, `unresolved`. The hook-error
+  mapping fix holds: 0 `rejected`, `failed` (668 on 2026-11-07).
+  - `unresolved`/`denied` 198 and `pending`/`denied` 18: the `dontAsk` mode refusals (214 of 216
+    settled by `mode`, error "Permission to use Bash has been denied because Claude Code is running
+    ..."; the other 2 are a `rule` refusal of a `CLAUDE.md` write) that 2026-11-07 expected to map
+    to `denied` against CETA's `unresolved` or `pending` (CETA never receives a post event for
+    them). Explained, with the mapping fix.
+  - `approved`/`pending` 4 and `failed`/`pending` 2: timing, the same last-calls-before-the-end
+    calls as the 52 only-CETA rows (CETA ids 1109763 to 1109954); they agree after a re-ingest.
+  - `unresolved`/`approved` 7 and `pending`/`approved` 5 (12 calls, all with a tracker `call_end`
+    `ok`): CETA's post-tool write never landed or its `SessionEnd` sweep did not run, as the
+    2026-11-07 `unresolved`/`approved` and `pending`/`approved` groups. Explained.
+  - `pending`/`unresolved` 2: the tracker's quiet-period settlement against CETA's `pending`, as
+    2026-11-07. Explained.
+  - `failed`/`unresolved` 2, `approved`/`unresolved` 2 and `rejected`/`unresolved` 1 (CETA ids
+    1094257, 1094259, 1084471, 1073796, 1073807): calls the mod has no `call_end` (or, for
+    1094259, no `call_start`) for, the "missing mod event" group of 2026-11-07 (post-tool event
+    present with an error or ok, tracker `unresolved`). Explained, cause open as before.
+  - `unresolved`/`failed` 11 and `pending`/`failed` 5: 5 exit code 137 kills, 1 `bgwait` exit 2, 4 `dontAsk` refusals, 4 Atlassian hook-error refusals, 1 classifier
+    refusal, 1 user rejection ("The user doesn't want to take this action right now").
+    The `failed` mapping is as 2026-11-07 (CETA gets no post event). Two details are NEW and
+    small: the 4 `dontAsk` refusals and the 4 Atlassian-hook refusals (hook error text of another
+    plugin's `PreToolUse` hook, CETA delivered `approve`) are stored with `settled_by` `ceta` and
+    `settlement` `approved`, not `refused`, so the tracker cannot call them `denied` (the same
+    storage defect as the classifier refusal, 1 call here, settled `classifier`/`approved`:
+    already recorded under live check 2); each group is a handful of calls.
+
 Result for the operator: the two recorders agree on 80195 matched calls for every carried field
 except the groups above; the counts do not show a defect that blocks the cut-over by themselves,
 but the open questions above are unexplained and are not accepted here (section 8.4).
