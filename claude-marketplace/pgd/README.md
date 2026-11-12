@@ -62,22 +62,23 @@ Context are governed by the top-level `enable` option only; they have no compone
 Each of these is covered by a test in `hooks/modals.test.ts`, `hooks/modal.test.ts` or
 `hooks/toggles.test.ts`.
 
-| Choice                          | Decision                                                                                                               |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| What `pressButton` does         | It toggles: the first press opens the modal, a second press on the open modal closes it.                               |
-| Close action                    | None is added (operator, 2026-11-11): the engine's x control and Escape close the pane.                                |
-| Info name row without a name    | Shows the session id (the session id also has its own row).                                                            |
-| Band collapse button            | No plugin button: the engine draws the only `[-]`; `/pgd-band` hides or shows the band.                                |
-| Toggle ids                      | `band`, `info`, `context`. The band is open and each modal closed by default.                                          |
-| Slash commands                  | `/pgd-band`, `/pgd-info`, `/pgd-context`, no arguments; each toggles and answers `<id> shown.` or `<id> hidden.`.      |
-| Host-closed pane (Esc, dismiss) | A `ui.close` with origin `person` for a `pgd-` pane resyncs the toggle state to closed.                                |
-| Colours                         | Literal `yellow`, `red`, `green`; context yellow from `contextWarn`, red from `contextAlert`; limits red from `limit`. |
-| Actor                           | The session id cut to 8 characters and an ellipsis.                                                                    |
-| Value formats                   | Tokens with thousands separators, cost `$1.50`, time `YYYY-MM-DD HH:MM UTC`, reset time as the engine gives it.        |
-| `lastCompaction` source         | Event-driven, defined by the modal component, set from the single `session.compact` hook in `gitHead.ts`; it redraws.  |
-| Open modal on invalidate        | Rebuilt on each draw from the live builder, so values stay current.                                                    |
-| Toggle persistence              | An engine atom (`pgd.toggles`), hydrated at `session.start`; it survives a hot reload.                                 |
-| Pane ids                        | `pgd-<modal id>`.                                                                                                      |
+| Choice                          | Decision                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| What `pressButton` does         | It toggles: the first press opens the modal, a second press on the open modal closes it.                                  |
+| Close action                    | None is added (operator, 2026-11-11): the engine's x control and Escape close the pane.                                   |
+| Info name row without a name    | Shows the session id (the session id also has its own row).                                                               |
+| Band collapse button            | No plugin button: the engine draws the only `[-]`; `/pgd-band` hides or shows the band.                                   |
+| Toggle ids                      | `band`, `info`, `context`. The band is open and each modal closed by default.                                             |
+| Slash commands                  | `/pgd-band`, `/pgd-info`, `/pgd-context`, no arguments; each toggles and answers `<id> shown.` or `<id> hidden.`.         |
+| Host-closed pane (Esc, dismiss) | A `ui.close` with origin `person` for a `pgd-` pane resyncs the toggle state to closed.                                   |
+| Colours                         | Literal `yellow`, `red`, `green`; context yellow from `contextWarn`, red from `contextAlert`; limits red from `limit`.    |
+| Actor                           | The session id cut to 8 characters and an ellipsis.                                                                       |
+| Value formats                   | Tokens with thousands separators, cost `$1.50`, time `YYYY-MM-DD HH:MM UTC`, reset time as the engine gives it.           |
+| `lastCompaction` source         | Event-driven, defined by the modal component, set from the single `session.compact` hook in `gitHead.ts`; it redraws.     |
+| `compactionMarker` source       | Read at first turn and after `session.compact`: marker file beside the transcript (ADR 0096); band note 30 min; no toast. |
+| Open modal on invalidate        | Rebuilt on each draw from the live builder, so values stay current.                                                       |
+| Toggle persistence              | An engine atom (`pgd.toggles`), hydrated at `session.start`; it survives a hot reload.                                    |
+| Pane ids                        | `pgd-<modal id>`.                                                                                                         |
 
 ## Session name (`components.sessionName`)
 

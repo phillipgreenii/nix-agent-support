@@ -3,6 +3,7 @@ import { defineSource, noteEvent, refresh } from './source'
 import { LINK_CONTEXT_SOURCE } from './linkContext'
 import type { ModApi } from './types'
 import { recordCompaction } from './context-modal'
+import { readCompactionOnce, refreshCompaction } from './compaction'
 import { onSessionModeTurnComplete } from './session-mode'
 import { refreshSessionName } from './session-name'
 
@@ -88,6 +89,7 @@ export function registerGitHeadHooks(on: ModApi): void {
       refresh(LINK_CONTEXT_SOURCE, { force: true })
       refreshSessionName()
       onSessionModeTurnComplete()
+      readCompactionOnce()
     }
     return next(e)
   })
@@ -99,6 +101,7 @@ export function registerGitHeadHooks(on: ModApi): void {
       noteEvent()
       refresh('gitHead')
       recordCompaction()
+      refreshCompaction()
     }
     return result
   })

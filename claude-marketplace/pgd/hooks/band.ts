@@ -6,6 +6,7 @@ import { timedDraw } from './metrics'
 import { isOpen, toggle } from './toggles'
 import { markBandDrawn } from './modal'
 import type { AssumeValue } from './assume'
+import { currentCompactionNote } from './compaction'
 
 // The phase 1 band: plain labels (no buttons yet) for the session id, model and effort, and the
 // context percent, the last coloured by level. renderBand is a plain data description, so a later
@@ -72,6 +73,8 @@ export interface BandValues {
   effort?: string
   // The AWS profile the session runs with (the assume source's role); unset or empty is undefined.
   assumeRole?: string
+  // The recent-compaction note (glyph and age) appended to the context label; unset draws none.
+  compactNote?: string
 }
 
 // A level boundary value belongs to the higher level.
@@ -108,7 +111,7 @@ export function bandLabels(v: BandValues, t: AlertThresholds): BandRow[] {
     const over = exceeds200k(v.usage)
     labels.push({
       id: 'context',
-      label: `ctx ${Math.round(pct)}%${over ? EXCEEDS_200K_MARKER : ''}`,
+      label: `ctx ${Math.round(pct)}%${over ? EXCEEDS_200K_MARKER : ''}${v.compactNote ? ` ${v.compactNote}` : ''}`,
       level: over ? 'red' : contextLevel(pct, t),
       action: 'context',
     })
@@ -182,6 +185,7 @@ export async function bandHook($: ModApi, e: ModApi, next: Next): Promise<unknow
       usage: readCached<Usage>('usage'),
       model: options.components.modelEffort ? model : undefined,
       effort: options.components.modelEffort ? readCached<string>('effort') : undefined,
+      compactNote: currentCompactionNote(),
       assumeRole: options.components.assume ? readCached<AssumeValue>('assume')?.role : undefined,
     },
     e?.props?.bodyColumns ?? e?.viewport?.columns ?? 80,

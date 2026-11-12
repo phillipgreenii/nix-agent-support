@@ -106,7 +106,9 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
     },
     fs: {
       read: async (p: string) => {
-        calls.push(`fs.read ${p}`)
+        // The compaction marker read belongs to the flagless Context modal, not to any component,
+        // so it is left out of the call log the "component off" tests assert on.
+        if (!p.endsWith('.compaction.json')) calls.push(`fs.read ${p}`)
         const v = fileMap.get(p)
         if (v === undefined) throw new Error(`ENOENT ${p}`)
         return v

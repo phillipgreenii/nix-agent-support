@@ -1,6 +1,6 @@
-# A compaction leaves a marker file beside the transcript, and the status line shows it
+# A compaction leaves a marker file beside the transcript, and the display shows it
 
-**Status**: Accepted (extends 0019 and 0021; resolves `pg2-thkh0`); the shell status line display half was retired in November 2026, the marker file itself is still written by the PostCompact hook
+**Status**: Accepted (extends 0019 and 0021; resolves `pg2-thkh0`); the shell status line display half was retired in November 2026. The marker file is still written by the PostCompact hook, and the `pgd` display mod now reads it (see "Amendment: the pgd display reads the marker"). The title and items 1, 7 and 8 below describe the retired shell reader.
 **Date**: 2026-10-14
 **Deciders**: Phillip Green II
 
@@ -94,3 +94,30 @@ flowchart LR
 - Whether `PostCompact` fires on the installed build, the real `trigger` value, and the real
   zero-percent `current_usage` shape are unverified until the post-apply verification bead;
   deterministic behavior is covered by the in-repo bats tests and the pa-monitor truth table.
+
+## Amendment: the pgd display reads the marker
+
+The shell status line reader (items 1, 7 and 8) was retired with the shell status line. The marker
+file contract (items 2 to 6) is unchanged, and its reader is now the `pgd` display mod
+(`claude-marketplace/pgd/hooks/compaction.ts`):
+
+1. **Source.** An event-driven source `compactionMarker` reads
+   `<claude config dir or ~/.claude>/projects/<cwd with each non-alphanumeric character replaced by
+"-">/<session_id>.compaction.json` through the facade's `fs.read` (the facade has no transcript
+   path, so the directory is derived from the cwd the way Claude Code names it). It is read once at
+   the first `turn.complete` and once after each `session.compact`, never polled and with no timer. A
+   missing, malformed or zero-byte file is an absent value. `ts` MUST be a positive integer.
+2. **Band.** While the marker's age is below 30 minutes the context button reads
+   `ctx 12% <glyph><age>` (`<1m`, `Nm`, `Nh`). The window is a constant, not an option; a stale
+   marker stays cached and draws no note at the next redraw.
+3. **Context modal.** The `last compaction` row shows the later of the marker time and the
+   in-memory `session.compact` time, so it survives a restart or resume.
+4. **No toast.** The display design's Events surface promised a compaction toast. No toast surface
+   could be built: the only toast facts in this repo are that a pane opened with `holdToasts` holds
+   toasts (`docs/guides/claude-code-mods.md`, F5), and every `$` member the mod uses or the guide
+   records (`ui.status`, `ui.invalidate`, `ui.open`, `ui.close`, `ui.resolve`, `command.register`)
+   has no way to raise one. Finding recorded 2026-11-12 from the repo's documents and the mod's
+   own facade; it was not verified against the engine's shipped typings. Revisit if the engine
+   gains a documented toast call.
+5. **Plugin descriptions.** The `session-mode` plugin's `plugin.json` and `hooks.json` descriptions
+   no longer say the status line shows the marker.

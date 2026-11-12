@@ -1,6 +1,7 @@
 import type { PgdOptions, ModApi } from './types'
 import { registerModalBuilder, setPaneApi, registerModalHooks, applyBandState } from './modal'
 import { infoSpec, loadSessionFacts } from './info-modal'
+import { startCompaction } from './compaction'
 import { contextSpec, startLastCompaction } from './context-modal'
 import { registerFocusToggleCommand, registerToggleCommands, registerToggleCommandSpecs } from './toggleCommands'
 
@@ -15,6 +16,7 @@ export function registerModals(_options: PgdOptions, host: ModApi): void {
     invalidate: () => host.ui.invalidate(),
   })
   startLastCompaction()
+  startCompaction(host)
   registerModalBuilder('info', infoSpec, undefined, () => loadSessionFacts(host))
   registerModalBuilder('context', contextSpec)
   applyBandState()

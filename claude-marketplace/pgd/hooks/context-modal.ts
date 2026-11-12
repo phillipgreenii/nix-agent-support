@@ -2,6 +2,7 @@ import { pgdEnabled, getOptions } from './options'
 import { contextLevel, exceeds200k, EXCEEDS_200K_MARKER } from './band'
 import { defineSource, readCached, requestInvalidate, setValue } from './source'
 import type { ModalSpec, ModalItem } from './modal'
+import { markerAt } from './compaction'
 import type { Usage, Limit } from './usage'
 
 // The Context and usage modal, one item per line: context percent and tokens, last compaction
@@ -65,7 +66,9 @@ export function contextSpec(): ModalSpec {
     items.push({ label: 'context', value: `${formatTokens(usage.contextTokens)} tokens` })
   }
   const compacted = readCached<LastCompaction>('lastCompaction')
-  if (compacted) items.push({ label: 'last compaction', value: formatTime(compacted.at) })
+  // The marker file survives a restart and the in-memory event does not: the later one is the last.
+  const lastAt = Math.max(compacted?.at ?? 0, markerAt() ?? 0)
+  if (lastAt > 0) items.push({ label: 'last compaction', value: formatTime(lastAt) })
   const five = usage?.limits.find(l => l.kind === 'five_hour')
   const seven = usage?.limits.find(l => l.kind === 'seven_day')
   if (five) items.push(limitItem(five, '5h limit', t.contextWarn, t.limit))

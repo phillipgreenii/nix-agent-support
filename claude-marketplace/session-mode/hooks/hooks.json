@@ -1,5 +1,5 @@
 {
-  "description": "session-mode hooks: a SessionEnd backstop (a killed/crashed session leaves a stale running/stopping record; this flips it to finished exactly once, when the session actually terminates) and a PostCompact hook that records that a compaction happened (a marker file beside the transcript, shown by the status line)",
+  "description": "session-mode hooks: a SessionEnd backstop (a killed/crashed session leaves a stale running/stopping record; this flips it to finished exactly once, when the session actually terminates) and a PostCompact hook that records that a compaction happened (a marker file beside the transcript, read by the pgd display)",
   "hooks": {
     "SessionEnd": [
       {
