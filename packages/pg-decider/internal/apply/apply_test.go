@@ -11,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/config"
+	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/item"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
@@ -525,6 +526,30 @@ func TestExitCodes(t *testing.T) {
 			t.Fatalf("result %+v", r)
 		}
 	})
+	t.Run("a permanent refusal alone exits PartialPermanent", func(t *testing.T) {
+		d := newDouble(t, respRule{Match: "issue close wb-1", Exit: 1, Stdout: claimRefusal})
+		r := run(t, d, nil, []action.Action{
+			{Op: action.OpClose, Rule: "r", Target: str("wb-1")},
+			{Op: action.OpClose, Rule: "r", Target: str("wb-2")},
+		})
+		if r.ExitCode != exitcode.PartialPermanent || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed, OutcomeApplied}) {
+			t.Fatalf("result %+v", r)
+		}
+	})
+	t.Run("a permanent refusal beside a retryable failure exits 2", func(t *testing.T) {
+		for name, order := range map[string][]string{"refusal first": {"wb-1", "wb-2"}, "refusal last": {"wb-2", "wb-1"}} {
+			d := newDouble(t,
+				respRule{Match: "issue close wb-1", Exit: 1, Stdout: claimRefusal},
+				respRule{Match: "issue close wb-2", Exit: 1, Stdout: `{"error":{"code":"unavailable","message":"down"}}`})
+			var acts []action.Action
+			for _, id := range order {
+				acts = append(acts, action.Action{Op: action.OpClose, Rule: "r", Target: str(id)})
+			}
+			if r := run(t, d, nil, acts); r.ExitCode != 2 {
+				t.Fatalf("%s: exit %d, want 2", name, r.ExitCode)
+			}
+		}
+	})
 	t.Run("not found is an error", func(t *testing.T) {
 		d := newDouble(t, respRule{Match: "issue close", Exit: 4, Stdout: `{"error":{"code":"not_found","message":"gone"}}`})
 		r := run(t, d, nil, []action.Action{{Op: action.OpClose, Rule: "r", Target: str("wb-1")}})
@@ -684,3 +709,7 @@ func TestDedupAgainstTheRecordedWorkBeadsFixture(t *testing.T) {
 		t.Fatalf("events: %+v", r.Events)
 	}
 }
+
+// claimRefusal is the connector's answer to a close another actor's claim
+// blocks: invalid_argument, never unavailable.
+const claimRefusal = `{"error":{"code":"invalid_argument","message":"cannot close wb-1: assignee is \"a\", actor is \"b\"; reclaim or use --force to override"}}`

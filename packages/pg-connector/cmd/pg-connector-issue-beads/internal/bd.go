@@ -314,5 +314,23 @@ func classifyBDErrorMessage(msg string) error {
 	if strings.Contains(lower, "no issue found") || strings.Contains(lower, "no issues found") {
 		return scriptout.WrapError(scriptout.ErrNotFound, msg)
 	}
+	if isClaimHeldRefusal(lower) {
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, msg)
+	}
 	return scriptout.WrapError(scriptout.ErrUnavailable, msg)
+}
+
+// isClaimHeldRefusal reports whether lower (a lower-cased bd error message)
+// is bd's cross-actor claim refusal, e.g. (bd 1.3.1) `cannot close <id>:
+// assignee is "<holder>", actor is "<closer>"; reclaim or use --force to
+// override`. The refusal is a standing fact about the issue (another actor
+// holds the claim), not a backend-health problem, so a retry of the same call
+// cannot succeed. The wire taxonomy has no conflict code and INV-ERR-1 closes
+// it, so the refusal is reported as invalid_argument: the request as made
+// (this actor acting on an issue another actor holds) is refused, and only a
+// changed request (a different actor, or an explicit reclaim or force) can
+// succeed. The match requires both halves of bd's phrasing so a message that
+// merely mentions an assignee stays unclassified.
+func isClaimHeldRefusal(lower string) bool {
+	return strings.Contains(lower, "assignee is ") && strings.Contains(lower, "actor is ")
 }

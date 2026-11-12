@@ -23,6 +23,11 @@ const (
 	// maps it to the class decide_failed, or to the retryable class transient
 	// when the reason is lookup-unavailable.
 	LookupUntrusted = 4
+	// PartialPermanent: some actions failed, and every failure is a refusal a
+	// retry cannot clear (the connector answered invalid_argument, e.g. another
+	// actor holds the item's claim). Nothing is rolled back. The composed
+	// command reports it as a decide_partial failure the router does not retry.
+	PartialPermanent = 5
 )
 
 // osExit is os.Exit, swapped by tests.

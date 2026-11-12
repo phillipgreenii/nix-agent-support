@@ -123,7 +123,7 @@ func newApplyCmd() *cobra.Command {
 			"calls for. --from-item names the routed pg-router item that triggered the run\n" +
 			"(a file path, or - for stdin); it only identifies the trigger and never\n" +
 			"decides what is applied. Exit 0 when all actions are applied or none are\n" +
-			"needed, 2 when some failed, 3 when the view is unreadable (nothing applied).\n" +
+			"needed, 2 when some failed, 5 when every failure is one a retry cannot clear, 3 when the view is unreadable (nothing applied).\n" +
 			"--json prints the plan that was applied (the same object `plan --json` prints)\n" +
 			"on stdout when the run finished, on exit 0 and on exit 2.",
 		Args: cobra.ExactArgs(2),

@@ -17,6 +17,7 @@ import (
 	"fmt"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
@@ -75,8 +76,19 @@ func Run(ctx context.Context, in Input) Result {
 	if hookFailed {
 		res.ExitCode = 2
 	}
+	// Exit 5 (PartialPermanent) when every failure is one a retry cannot clear;
+	// any other failure, a skip with no failure behind it, or a failed hook
+	// keeps exit 2, so a mixed run is still retried.
 	for _, ev := range res.Events {
-		if ev.Outcome == OutcomeFailed || ev.Outcome == OutcomeSkippedDependency {
+		switch {
+		case ev.Outcome == OutcomeFailed && permanentFailure(ev.Err):
+			if res.ExitCode == 0 {
+				res.ExitCode = exitcode.PartialPermanent
+			}
+		case ev.Outcome == OutcomeFailed || ev.Outcome == OutcomeSkippedDependency:
+			if ev.Outcome == OutcomeSkippedDependency && res.ExitCode == exitcode.PartialPermanent {
+				continue
+			}
 			res.ExitCode = 2
 		}
 	}

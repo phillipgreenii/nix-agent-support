@@ -295,6 +295,7 @@ func TestDeciderExitMapping(t *testing.T) {
 		retry bool
 	}{
 		{"exit 2 is partial and retryable", exit(2, "", "rule x failed: Service Unavailable\n"+counters+"\n"), ExitDecidePartial, true},
+		{"exit 5 is partial but permanent, so not retried", exit(5, "", "close wb-1: failed: pg-connector issue close wb-1: exit 1: invalid_argument: cannot close wb-1: assignee is \"a\", actor is \"b\"; Service Unavailable\n"+counters+"\n"), ExitDecidePartial, false},
 		{"exit 3 is failed", exit(3, "", "cannot read the view: signal: killed\n"), ExitDecideFailed, false},
 		{"exit 1 is failed", exit(1, "", "bad config: deadline exceeded"), ExitDecideFailed, false},
 		{"exit 1 no text", exit(1, "", ""), ExitDecideFailed, false},

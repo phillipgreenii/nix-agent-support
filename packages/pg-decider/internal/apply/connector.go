@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -34,6 +35,9 @@ type connectorError struct {
 	args     []string
 	exitCode int
 	detail   string
+	// code is the wire error.code of the failure's JSON body, "" when the
+	// body carried none.
+	code string
 }
 
 func (e *connectorError) Error() string {
@@ -118,13 +122,15 @@ func call(ctx context.Context, env Env, args []string) ([]byte, error) {
 	if res.Code != 0 {
 		detail := strings.TrimSpace(string(res.Stdout))
 		var w wireEnvelope
+		code := ""
 		if json.Unmarshal([]byte(res.Stdout), &w) == nil && w.Error != nil {
 			detail = w.Error.Code + ": " + w.Error.Message
+			code = w.Error.Code
 		}
 		if s := strings.TrimSpace(string(res.Stderr)); s != "" && detail == "" {
 			detail = s
 		}
-		return nil, &connectorError{args: args, exitCode: res.Code, detail: detail}
+		return nil, &connectorError{args: args, exitCode: res.Code, detail: detail, code: code}
 	}
 	return []byte(res.Stdout), nil
 }
@@ -345,4 +351,14 @@ func sameKey(ref workitem.EntityRef, a, b string) bool {
 		return false
 	}
 	return (ia == ref.ID && ib == ref.NodeID) || (ia == ref.NodeID && ib == ref.ID)
+}
+
+// permanentFailure reports whether err is a connector refusal that a repeat of
+// the same call cannot clear: the connector answered invalid_argument, which is
+// how it reports a request the tracker refuses outright (an item another actor
+// holds, a malformed field). A failure with any other code, or none, is not
+// permanent, so a retry stays possible.
+func permanentFailure(err error) bool {
+	var ce *connectorError
+	return errors.As(err, &ce) && ce.code == "invalid_argument"
 }

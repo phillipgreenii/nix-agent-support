@@ -277,16 +277,17 @@ before anything else happens.
 
 ### Exit codes
 
-| Code | Meaning                                                                                                                                          |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                                                         |
-| `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config                                     |
-| `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run                                     |
-| `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                                                           |
-| `4`  | A `pr` run's work-item lookup could not be trusted (truncated, unavailable, inconsistent with the view, or its query unset); nothing was written |
+| Code | Meaning                                                                                                                                                                                                                                                                                                                           |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                                                                                                                                                                                                                                          |
+| `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config                                                                                                                                                                                                                      |
+| `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run                                                                                                                                                                                                                      |
+| `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                                                                                                                                                                                                                                            |
+| `5`  | Every failed action was a refusal a retry cannot clear: the connector answered `invalid_argument` (for example another actor holds the item's claim, so a close is refused); nothing is rolled back. A run that also has a retryable failure, a skipped action with no such failure behind it, or a failed hook exits `2` instead |
+| `4`  | A `pr` run's work-item lookup could not be trusted (truncated, unavailable, inconsistent with the view, or its query unset); nothing was written                                                                                                                                                                                  |
 
-`plan` uses `0`, `1`, `3` and `4` the same way; it never exits `2` because it executes nothing. The
-composed command maps exit `4` to the class `decide_failed`, except a run whose counters line names the reason
+`plan` uses `0`, `1`, `3` and `4` the same way; it never exits `2` or `5` because it executes nothing. The
+composed command maps exit `5` to the class `decide_partial` with a failure line the router does not retry (see `pr-change.md`), and exit `4` to the class `decide_failed`, except a run whose counters line names the reason
 `lookup-unavailable`, which it maps to the retryable class `transient` (see `pr-change.md`). A view of
 an entity type the `focus.item` rule serves (`pr` or `issue`) whose `annotations` carries no
 `focus_selected` member at all fails the run closed with exit `3` before any rule or hook runs (see

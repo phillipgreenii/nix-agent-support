@@ -221,6 +221,18 @@ func (r *run) fail(stage, class, what, detail, next string) int {
 	return spec.Code
 }
 
+// failFinal is fail for a failure the row of (stage, class) calls retryable
+// but this occurrence is not: the line carries no router retry word, and the
+// upstream text is scrubbed of them.
+func (r *run) failFinal(stage, class, what, detail, next string) int {
+	spec := specFor(stage, class)
+	r.failStage, r.failClass = stage, class
+	code := spec.Code
+	spec.Retryable = false
+	fmt.Fprintln(r.o.Stderr, failureLine(spec, what, detail, next))
+	return code
+}
+
 func (r *run) call(c Call) Result { return r.o.Runner(r.ctx, c) }
 
 // firstLine is the first non-empty line of s.
@@ -457,7 +469,7 @@ func (r *run) decide() int {
 		// nothing, so the residual is 0 by definition: skip the lookup-heavy re-plan.
 		n := 0
 		r.residual = &n
-	case r.o.Mode == ModeApply && (res.Code == 0 || res.Code == 2):
+	case r.o.Mode == ModeApply && (res.Code == 0 || res.Code == 2 || res.Code == exitcode.PartialPermanent):
 		// The residual after an apply: a read-only plan, never a recorded run.
 		residualStart := r.o.Clock()
 		post, msg := r.readPlan()
@@ -559,6 +571,12 @@ func (r *run) mapDecide(res Result) int {
 	}
 	if res.Code == 2 {
 		return r.fail(StageDecide, ClassDecidePartial, "the decider applied only part of its plan", detail, r.planCmd())
+	}
+	if res.Code == exitcode.PartialPermanent {
+		// Every failed action was a refusal a retry cannot clear: the same
+		// class and exit code as decide_partial, but a failure line without the
+		// router's retry word, so the router does not re-run the delivery.
+		return r.failFinal(StageDecide, ClassDecidePartial, "the decider applied only part of its plan; the rest was refused and a retry cannot clear it", detail, r.planCmd())
 	}
 	return r.fail(StageDecide, ClassDecideFailed, "the decider failed", fmt.Sprintf("exit %d: %s", res.Code, detail), r.planCmd())
 }

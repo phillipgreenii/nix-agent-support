@@ -40,6 +40,7 @@ flowchart TD
     V -->|"no"| D["pg-decider MODE pr ID"]
     D -->|"exit 0"| OK["exit 0"]
     D -->|"exit 2"| P["exit 30: class decide_partial"]
+    D -->|"exit 5"| PP["exit 30: class decide_partial, line not retried"]
     D -->|"exit 1 or 3"| DF["exit 31: class decide_failed"]
     D -->|"exit 4, lookup unavailable"| DU["exit 32: class transient"]
     D -->|"exit 4, any other reason"| DF
@@ -281,7 +282,7 @@ error (a bad mode or id, an unknown flag, a decider configuration file that cann
 | `23` | `hydrate` | `unauthenticated` | no                    | A missing or invalid credential; needs a person                                                                                                           |
 | `24` | `hydrate` | `hydrate_error`   | no                    | Refresh exit `1`, or any other failure that is not one of the classes above                                                                               |
 | `25` | `hydrate` | `unhydrated`      | no                    | The stored view is at version `0` or marked stale, so the decider was not run                                                                             |
-| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `2`: some actions failed or were skipped; captured and retried                                                                         |
+| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `2`: some actions failed or were skipped; captured and retried (an exit `5` also maps here, but its line is not retried)               |
 | `31` | `decide`  | `decide_failed`   | no                    | The decider exited `1` or `3`, or could not be started                                                                                                    |
 | `32` | `decide`  | `transient`       | yes                   | The decider exited `4` because its work-item lookup was unavailable; nothing was written                                                                  |
 | `40` | `lock`    | `transient`       | yes                   | The per-PR lock was not free within the wait                                                                                                              |
@@ -317,7 +318,10 @@ The router re-runs a failed dispatch only when the failure text carries one of i
 while the event carries a future `expiresAt`, and only if the role opts in with
 `max_dispatch_retries`. Therefore:
 
-- every retryable class (`transient`, `degraded`, `decide_partial`) writes a failure line that
+- a decider exit `5` (every failed action was a refusal a retry cannot clear, such as a close that
+  another actor's claim blocks) exits `30` with class `decide_partial`, but its line carries none of
+  the retry words, so the router does not re-run the delivery;
+- every other run of a retryable class (`transient`, `degraded`, `decide_partial`) writes a failure line that
   carries the word `unavailable`;
 - the failure line of every other class carries none of the three words, including when it re-wraps
   upstream text: the command rewrites each of them in the upstream text before it is quoted;

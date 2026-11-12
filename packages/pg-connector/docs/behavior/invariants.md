@@ -363,7 +363,14 @@ comment`, `issue transition`, `issue update`, `issue close` and `pr review submi
     not exist. A **valid negative answer**, never a failure.
   - **`invalid_argument`** — the **caller's own** request was malformed (an empty required field,
     an id that does not even parse into this backend's own id shape). The backend itself is
-    healthy; only the request was bad.
+    healthy; only the request was bad. The same code answers a refusal the tracker itself makes
+    because of who holds the item: the beads backend reports bd's cross-actor claim refusal
+    (`cannot close <id>: assignee is "<holder>", actor is "<closer>"; reclaim or use --force to
+override`, from `close`, `update` and any other verb that returns it) as `invalid_argument`,
+    never `unavailable`. The refusal is a standing fact about the item, so repeating the same call
+    cannot succeed, and a caller that retries `unavailable` MUST NOT be sent a refusal under that
+    code. Only a changed request (another actor, or an explicit reclaim or force) can succeed.
+    No eighth `conflict` code exists (`INV-ERR-1`).
   - **`unavailable`** — the backend itself cannot currently be used (down, unreachable, or any
     other backend-health problem).
 
