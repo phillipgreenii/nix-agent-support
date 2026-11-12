@@ -22,9 +22,10 @@ import "context"
 // provider package defines whatever auth-invalid sentinel its errors wrap,
 // mirroring vcs.ErrAuthInvalid). A provider that does not implement
 // AuthChecker is not treated as a forced/meaningless answer by anything in
-// this module — pg-connector ships no shared credential-resolution library
-// or convention of its own; each backend resolves its own credentials
-// entirely on its own.
+// this module. Credential resolution is each backend's own concern (ADR 0062
+// principle 6, clarified by ADR 0124): there is no shared credential-resolution
+// code or convention, and each backend resolves its own credentials on its own.
+// Other generic code MAY be shared (ADR 0124).
 type AuthChecker interface {
 	CheckAuth(ctx context.Context) error
 }

@@ -2,8 +2,8 @@
 // 10). The API key comes from the macOS Keychain (default service
 // pd-schedule-manager, account pagerduty-api, both configurable), falling
 // back to the PAGERDUTY_API_TOKEN environment variable. Credential resolution
-// is each backend's own concern (ADR 0062 principle 6); the existing Python
-// pd-schedule-manager is only a source of patterns, not a dependency.
+// is each backend's own concern, so it stays here and is never shared (ADR
+// 0062 principle 6); the existing Python pd-schedule-manager is only a source of patterns, not a dependency.
 package internal
 
 import (

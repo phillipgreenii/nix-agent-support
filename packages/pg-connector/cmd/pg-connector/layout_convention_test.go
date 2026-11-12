@@ -22,7 +22,9 @@ import (
 // governor, change log, socket and process scaffolding — whose own
 // subpackages are shared surface via allowedSharedLayoutPrefixes; only its
 // GENERIC parts live here, each connector's upstream-specific code stays in
-// its cmd/<binary>/internal/) may be shared across backend
+// its cmd/<binary>/internal/) and pkg/connectorkit (generic infrastructure
+// that names no backend or external system and holds no credential, auth or
+// store logic; ADR 0124 — adding a root here is a normal change) may be shared across backend
 // boundaries — every backend's own code must live in main or under its own
 // cmd/<binary>/internal/.
 var allowedSharedLayout = map[string]bool{
@@ -33,6 +35,8 @@ var allowedSharedLayout = map[string]bool{
 	// pkg/connectord is the daemon library's own root package (doc.go); its
 	// subpackages are covered by the "pkg/connectord/" prefix below.
 	"pkg/connectord": true,
+	// pkg/connectorkit is the generic-infrastructure root ADR 0124 allows.
+	"pkg/connectorkit": true,
 }
 
 // Both prefixes name a package whose OWN per-something subpackages are
@@ -165,7 +169,7 @@ func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 			return nil
 		}
 		violations = append(violations, fmt.Sprintf(
-			"%s: package %q is outside the shared surface (pkg/schema, pkg/provider, pkg/scriptout, pkg/eventlog) and outside cmd/<binary>/ — move it under a backend's own cmd/<binary>/internal/ or into the shared surface",
+			"%s: package %q is outside the shared surface (pkg/schema, pkg/provider, pkg/scriptout, pkg/eventlog, pkg/connectord, pkg/connectorkit) and outside cmd/<binary>/ — move it under a backend's own cmd/<binary>/internal/ or into the shared surface",
 			rel, relDir,
 		))
 		return nil
@@ -298,5 +302,44 @@ func TestBackendLayoutConvention_AllowsNestedPackageMainTool(t *testing.T) {
 	}
 	if !foundRejected {
 		t.Fatalf("evaluateLayoutConvention did not flag %s as a violation at the same nesting depth; got: %v", stillRejected, violations)
+	}
+}
+
+// TestBackendLayoutConvention_AllowsConnectorkitRejectsPrivatePackage proves
+// the generic-infrastructure root pkg/connectorkit (ADR 0124) is shared
+// surface, while a backend-private package placed where a sibling could import
+// it, and an unlisted pkg/ root, are still rejected.
+func TestBackendLayoutConvention_AllowsConnectorkitRejectsPrivatePackage(t *testing.T) {
+	root := t.TempDir()
+
+	writeFile := func(rel, content string) {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	writeFile("pkg/connectorkit/kit.go", "package connectorkit\n")
+	writeFile("cmd/pg-connector-fake-backend/shared/shared.go", "package shared\n")
+	writeFile("pkg/notlisted/x.go", "package notlisted\n")
+
+	violations, err := evaluateLayoutConvention(root)
+	if err != nil {
+		t.Fatalf("evaluateLayoutConvention: %v", err)
+	}
+	got := map[string]bool{}
+	for _, v := range violations {
+		got[strings.SplitN(v, ":", 2)[0]] = true
+	}
+	if got["pkg/connectorkit/kit.go"] {
+		t.Errorf("pkg/connectorkit was flagged: %v", violations)
+	}
+	for _, want := range []string{"cmd/pg-connector-fake-backend/shared/shared.go", "pkg/notlisted/x.go"} {
+		if !got[want] {
+			t.Errorf("%s was not flagged; got: %v", want, violations)
+		}
 	}
 }

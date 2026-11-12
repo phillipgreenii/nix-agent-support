@@ -87,6 +87,12 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    local-git `scm` backend, which has no remote credential concept at all) simply does not implement
    it, and is reported as a well-formed "disabled: not applicable" rather than a forced or
    meaningless answer. pg-connector ships no shared credential-resolution library of its own.
+
+   > **Clarified 2026-11-12 (see ADR 0124).** This principle covers credential resolution, auth
+   > checking and a backend's own store, and nothing else. It does NOT forbid sharing code across
+   > backends: generic infrastructure that names no backend or external system and holds no credential,
+   > auth or store logic MAY be shared under an allowlisted `pkg/` root, as ADR 0124 sets out.
+
 7. **Adding a backend is a registry-config change, never an umbrella code change.** A registry
    entry is either a bare binary name on `PATH` or an instance, `{name, command}`, where `command`
    is an argv list whose first word is a bare binary name (no path separator, no whitespace) and

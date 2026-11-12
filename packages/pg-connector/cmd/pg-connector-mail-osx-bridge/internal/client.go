@@ -1,9 +1,10 @@
 // client.go: the socket dialer/round-tripper — this backend's own
 // injectable transport seam, structurally mirroring
-// cmd/pg-connector-calendar-osx-bridge/internal/client.go. ADR 0062
-// principle 6 forbids a shared library across backends, so this file is
-// its own COPY of the socket-client code, never an import of another
-// backend's package.
+// cmd/pg-connector-calendar-osx-bridge/internal/client.go. This file
+// is its own copy of the socket-client code, never an import of another
+// backend's package: backend-specific code stays private and no backend
+// imports another (ADR 0124). The socket client is not yet in a shared
+// root, so it is copied until it is moved there.
 //
 // phillipgreenii-nix-support-apps/packages/pg-osx-bridge-api is a WHOLLY
 // SEPARATE Go module (its own go.mod) from this module, and every symbol

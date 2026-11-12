@@ -726,8 +726,8 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   MUST be treated as the same address, but `alice@example.com` and `alice@sub.example.com` MUST
   NOT); a non-email entry matches only against an attendee's own `name` field (compared
   case-insensitively, exact string match — no fuzzy or substring matching). Every `calendar`
-  backend implements this matching independently (ADR 0062 principle 6 forbids a shared
-  credential/logic library across backends), so this invariant — not each backend's own private
+  backend implements this matching independently (backend-specific logic stays private to
+  its backend, ADR 0124), so this invariant — not each backend's own private
   copy — is what keeps `pg-connector-calendar-osx-bridge` and a future `pg-connector-mail-osx-bridge`
   from silently drifting apart, even though the `important_people` config VALUES themselves are
   shared between them via nix. (How a `mail` backend splits a sender string into the name and
