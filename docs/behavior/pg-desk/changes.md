@@ -55,7 +55,10 @@ does not restate it.
   hydration. The log also holds, for `pr`, one history-only kind of its own:
   `interpretation_changed`, appended when a re-interpretation changes who owes the next step or the
   panel (see [`reinterpret.md`](reinterpret.md)). No consumer is woken by it and no feed delivers
-  it, so `annotation_changed` remains the only local kind that triggers work.
+  it, so no history-only kind triggers work. Of the kinds that do, `annotation_changed` always
+  triggers, and `work_changed` and `link_changed` trigger only for a PR whose lane row still holds a
+  residual (see [`annotation-items.md`](annotation-items.md), "Out-of-band changes of a PR with a
+  residual").
 - **For `issue`, ownership is decided per backend.** pg-desk MUST NOT choose how to detect an issue
   change by type alone. Its configuration names, for each watched query, the backend instance that
   serves it and whether that backend owns its changes, rendered from the same source as the

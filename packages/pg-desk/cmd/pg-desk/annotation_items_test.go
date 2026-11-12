@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/lanestate"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -321,5 +322,112 @@ func TestAnnotationConsumerHoldsBackPruningUntilStale(t *testing.T) {
 	}
 	if rows, _ := seed.ListChangesAfter("pr", 0, 0); len(rows) != 0 {
 		t.Errorf("rows left = %d, want 0 once the consumer is stale", len(rows))
+	}
+}
+
+// setLaneRow writes a PR's persisted lane state the way the lane's run record
+// does, with the residual given.
+func setLaneRow(t *testing.T, st *store.Store, id string, residual int) {
+	t.Helper()
+	b, err := json.Marshal(lanestate.PRState{Mode: "apply", Residual: residual, UpdatedAt: "2026-11-07T14:58:50Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMeta(lanestate.KeyPRPrefix+id, string(b)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// appendKind appends one change record of the kind given to a seeded entity,
+// as a link write or a hydration propagation does.
+func appendKind(t *testing.T, st *store.Store, typ, id, kind, origin string) {
+	t.Helper()
+	if _, err := st.AppendEntityChange("o/r", typ, id, []string{kind}, origin, "2026-11-11T06:37:00Z"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A work_changed or link_changed record on a PR whose lane row holds a residual
+// is a trigger: the blocker behind the residual may have been removed out of
+// band, and nothing else re-runs the lane.
+func TestAnnotationItemsDeliversWorkAndLinkChangesOfAPRWithAResidual(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#1"}, [2]string{"pr", "o/r#2"})
+	withOpenSeams(t, linkTestConfig(), open)
+	if _, err := runAnnotationItemsCmd(t, "pr", "--consumer", annotationsConsumer); err != nil {
+		t.Fatal(err)
+	}
+	setLaneRow(t, seed, "o/r#1", 2)
+	appendKind(t, seed, "pr", "o/r#1", "work_changed", "sync")
+	appendKind(t, seed, "pr", "o/r#1", "link_changed", "pg-desk")
+
+	out, err := runAnnotationItemsCmd(t, "pr", "--consumer", annotationsConsumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := itemsOf(t, out)
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want one per record: %s", len(items), out)
+	}
+	for i, kind := range []string{"work_changed", "link_changed"} {
+		it := items[i]
+		if it.Type != "pr.changed" || it.Metadata["entity_id"] != "o/r#1" {
+			t.Errorf("item %d = %+v, want a pr.changed item for o/r#1", i, it)
+		}
+		if k, _ := it.Metadata["kinds"].([]any); len(k) != 1 || k[0] != kind {
+			t.Errorf("item %d kinds = %v, want [%s]", i, it.Metadata["kinds"], kind)
+		}
+	}
+	if items[0].ID == items[1].ID {
+		t.Errorf("two records share the item id %q", items[0].ID)
+	}
+}
+
+// With no residual (a zero, or no lane row at all), a work or link change is
+// not a trigger, and neither is one on a type that has no lane.
+func TestAnnotationItemsIgnoresWorkAndLinkChangesWithoutAResidual(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#1"}, [2]string{"pr", "o/r#2"}, [2]string{"issue", "o/r#7"})
+	withOpenSeams(t, linkTestConfig(), open)
+	for _, typ := range []string{"pr", "issue"} {
+		if _, err := runAnnotationItemsCmd(t, typ, "--consumer", annotationsConsumer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setLaneRow(t, seed, "o/r#1", 0)
+	appendKind(t, seed, "pr", "o/r#1", "work_changed", "sync") // residual 0
+	appendKind(t, seed, "pr", "o/r#2", "work_changed", "sync") // no lane row
+	appendKind(t, seed, "pr", "o/r#2", "link_changed", "sync")
+	setLaneRow(t, seed, "o/r#7", 3)
+	appendKind(t, seed, "issue", "o/r#7", "work_changed", "sync") // not a pr
+
+	for _, typ := range []string{"pr", "issue"} {
+		out, err := runAnnotationItemsCmd(t, typ, "--consumer", annotationsConsumer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(out) != "[]" {
+			t.Errorf("%s: got %s, want [] (no residual)", typ, out)
+		}
+	}
+}
+
+// Once the lane has run and the row reads residual 0, the same kind of record
+// stops delivering: the extra deliveries are bounded by the residuals.
+func TestAnnotationItemsStopsDeliveringOnceTheResidualIsZero(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#1"})
+	withOpenSeams(t, linkTestConfig(), open)
+	if _, err := runAnnotationItemsCmd(t, "pr", "--consumer", annotationsConsumer); err != nil {
+		t.Fatal(err)
+	}
+	setLaneRow(t, seed, "o/r#1", 1)
+	appendKind(t, seed, "pr", "o/r#1", "work_changed", "sync")
+	out, err := runAnnotationItemsCmd(t, "pr", "--consumer", annotationsConsumer)
+	if err != nil || len(itemsOf(t, out)) != 1 {
+		t.Fatalf("first record: out=%s err=%v, want one item", out, err)
+	}
+	setLaneRow(t, seed, "o/r#1", 0) // what the lane's apply run records
+	appendKind(t, seed, "pr", "o/r#1", "work_changed", "sync")
+	out, err = runAnnotationItemsCmd(t, "pr", "--consumer", annotationsConsumer)
+	if err != nil || strings.TrimSpace(out) != "[]" {
+		t.Fatalf("after the residual cleared: out=%s err=%v, want []", out, err)
 	}
 }

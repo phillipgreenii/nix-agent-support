@@ -17,7 +17,9 @@ pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] [--orig
 of a watched PR (the connector daemon's feed), a change of one of the PR's pg-desk annotations (the
 pg-desk annotation feed, `pg-desk pr annotation-items`, see
 [`annotation-items.md`](../pg-desk/annotation-items.md); its items carry `metadata.origin`, which the role
-renders into `--origin`), and the selection announcement of `pg-desk focus select`
+renders into `--origin`; the same feed also delivers a `work_changed` or `link_changed` record of a PR
+whose lane row still holds a residual, so a residual cleared out of band re-runs the lane and returns to
+zero), and the selection announcement of `pg-desk focus select`
 and `focus pull`, which injects one `pr.changed` event per newly selected PR so a selected PR that never
 changes again is still minted (bead `pg2-e5g9gx`; see `docs/behavior/pg-desk/focus.md`). The injected
 event's item id is `<repo>#<n>@<12 hex>`, so the delivery key is the id suffix as for any item with no

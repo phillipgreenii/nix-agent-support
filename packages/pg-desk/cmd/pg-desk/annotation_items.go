@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/lanestate"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -23,6 +24,14 @@ const annotationConsumerPrefix = "annotations:"
 // annotationItemsNow is the clock for seen_at, pruning and expiresAt; tests
 // replace it.
 var annotationItemsNow = func() time.Time { return time.Now().UTC() }
+
+// The local link-derived change_log kinds (the values of classify.KindWorkChanged
+// and classify.KindLinkChanged, spelled out so this verb does not import the
+// classifier).
+const (
+	changeKindWorkChanged = "work_changed"
+	changeKindLinkChanged = "link_changed"
+)
 
 // annotationItemHexLen is the length of the id digest suffix; it is the width
 // pg-pr-change's delivery key reads (`@<12 hex>`).
@@ -118,7 +127,7 @@ func runAnnotationItems(cmd *cobra.Command, entityType, consumer string, retryWi
 	if err != nil {
 		return fmt.Errorf("annotation-items: %w", err)
 	}
-	items := annotationItemsOf(entityType, rows, now, retryWindow)
+	items := annotationItemsOf(entityType, rows, now, retryWindow, laneResidualCheck(st, entityType))
 	b, err := json.Marshal(items)
 	if err != nil {
 		return fmt.Errorf("annotation-items: marshal json: %w", err)
@@ -142,13 +151,41 @@ func runAnnotationItems(cmd *cobra.Command, entityType, consumer string, retryWi
 	return nil
 }
 
+// laneResidualCheck returns the predicate "this entity's lane row holds a
+// non-zero residual". Only a pr has a lane row; for any other type the
+// predicate is always false. A missing or unreadable row reads as no residual.
+func laneResidualCheck(st *store.Store, entityType string) func(entityID string) bool {
+	if entityType != "pr" {
+		return func(string) bool { return false }
+	}
+	return func(entityID string) bool {
+		raw, found, err := st.GetMeta(lanestate.KeyPRPrefix + entityID)
+		if err != nil || !found {
+			return false
+		}
+		var s lanestate.PRState
+		return json.Unmarshal([]byte(raw), &s) == nil && s.Residual > 0
+	}
+}
+
 // annotationItemsOf maps the scanned rows to router items: one per
-// annotation_changed row, other kinds dropped. The result is never nil, so an
-// empty poll prints [].
-func annotationItemsOf(entityType string, rows []store.ChangeRecord, now time.Time, retryWindow time.Duration) []annotationItem {
+// annotation_changed row, and one per work_changed or link_changed row of an
+// entity for which hasResidual reports true (a PR whose lane row still holds a
+// residual: the blocker behind it may just have been removed out of band, and
+// nothing else re-runs the lane). Other kinds are dropped. The result is never
+// nil, so an empty poll prints [].
+func annotationItemsOf(entityType string, rows []store.ChangeRecord, now time.Time, retryWindow time.Duration, hasResidual func(entityID string) bool) []annotationItem {
 	items := []annotationItem{}
 	for _, r := range rows {
-		if !hasKind(r.Kinds, store.ChangeKindAnnotationChanged) {
+		kind := ""
+		switch {
+		case hasKind(r.Kinds, store.ChangeKindAnnotationChanged):
+			kind = store.ChangeKindAnnotationChanged
+		case hasKind(r.Kinds, changeKindWorkChanged) && hasResidual(r.EntityID):
+			kind = changeKindWorkChanged
+		case hasKind(r.Kinds, changeKindLinkChanged) && hasResidual(r.EntityID):
+			kind = changeKindLinkChanged
+		default:
 			continue
 		}
 		it := annotationItem{
@@ -158,7 +195,7 @@ func annotationItemsOf(entityType string, rows []store.ChangeRecord, now time.Ti
 			Metadata: map[string]any{
 				"entity_id": r.EntityID,
 				"origin":    r.Origin,
-				"kinds":     []string{store.ChangeKindAnnotationChanged},
+				"kinds":     []string{kind},
 			},
 		}
 		if retryWindow > 0 {

@@ -29,8 +29,11 @@ flowchart LR
 - **Local store only.** The verb reads pg-desk's own store. It does not call pg-connector, does not
   hydrate, and refuses a store left on the retired schema 1 with the same error as `<type> changes`.
 - **What is scanned and what is printed.** The verb reads the change-log rows of `<type>` past the
-  consumer's cursor, in ascending sequence, and prints an item only for a row whose kind is
-  `annotation_changed`; a row of another kind, among them a `pr`'s history-only
+  consumer's cursor, in ascending sequence, and prints an item for a row whose kind is
+  `annotation_changed`, and, for `pr` only, for a row whose kind is `work_changed` or `link_changed`
+  when the PR's lane row (`pr_lane.pr.<id>` in the store's meta) holds a residual above zero at the
+  moment of the poll (see "Out-of-band changes of a PR with a residual" below); a row of another kind,
+  among them a `pr`'s history-only
   `interpretation_changed` (see [`reinterpret.md`](reinterpret.md)), is scanned and skipped, so it
   never becomes an item and never wakes a decider. `--limit N` bounds the rows SCANNED, not the items printed (0 = no limit).
   The cursor advances, after the output is flushed, to the last row SCANNED, not the last item
@@ -64,6 +67,31 @@ flowchart LR
 - **At-least-once.** The cursor advances after the print, as `<type> changes` does: a router failure
   between the print and the enqueue loses that record's trigger.
 
+## Out-of-band changes of a PR with a residual
+
+The lane rewrites a PR's lane row only when it runs, and it runs on a `pr.changed` item. A residual
+(actions the plan still lists after an apply) is often cleared by something outside the lane: a person
+or an agent closes the review item or the anchor the plan wanted to close. That changes the PR's work
+items, which the daemon's feed and the annotation records never report, so without a trigger the
+residual stays in the lane row and `pg-desk-pr-residual-after-apply` keeps firing for a PR whose plan
+is already empty.
+
+The records that re-trigger the lane are therefore these, and only these:
+
+| Record kind                                                               | PR   | Delivered when                              |
+| ------------------------------------------------------------------------- | ---- | ------------------------------------------- |
+| `annotation_changed`                                                      | `pr` | always                                      |
+| `work_changed` (a link or hydration change of one of the PR's work items) | `pr` | the PR's lane row has a residual above zero |
+| `link_changed` (any other link change of the PR)                          | `pr` | the PR's lane row has a residual above zero |
+| any other kind (`refreshed`, `interpretation_changed`, ...)               | any  | never                                       |
+
+The item has the same shape as an annotation item (one per record, `metadata.kinds` naming the record's
+own kind, `metadata.origin` the record's origin). The delivery runs the lane in its configured mode,
+which re-plans, and in apply mode applies, and records the new residual; once that is zero the lane
+row stops qualifying and the extra deliveries stop, so they are bounded by the PRs that have a
+residual. A PR with no lane row, or a zero residual, gets no item from these kinds. Only `pr` has a lane
+row, so `issue` and `thread` never deliver them.
+
 ## Loop prevention
 
 A decider's own annotation writes come back through this feed. The loop is closed in the decider's
@@ -84,6 +112,9 @@ grows on purpose then.
 
 - **INV-ANNITEMS-1.** <!-- uuid: 8df34d77-b37e-453a-b10d-d2cf3af50458 --> The verb MUST print one item per `annotation_changed` record of the type past the consumer's
   cursor, in ascending sequence, with no merging of records, and MUST print `[]` when there is none.
+  For `pr` it MUST also print one item per `work_changed` or `link_changed` record of a PR whose lane
+  row holds a residual above zero, and MUST print none for those kinds when the residual is zero or the
+  row is absent.
 - **INV-ANNITEMS-2.** <!-- uuid: 70b14771-75c1-43f7-9c83-8d4bbd02ea7c --> An item's id MUST be `<entity id>@<12 hex>` with the hex a digest of the type, entity id,
   change-log sequence and origin (stable for one record, distinct across records, never all zeros),
   and an item MUST NOT carry `metadata.seq`.
