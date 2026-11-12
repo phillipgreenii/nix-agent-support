@@ -224,6 +224,17 @@ export function setValue(id: string, value: unknown): void {
   if (e) store(e, value)
 }
 
+// Update an event-driven source only when there is something new to say: a nil value (null or
+// undefined) and a value equal to the cached one are both a no-op, so the cache's fetchedAt, the
+// listeners and the redraw request are left alone. Returns true when the value was stored.
+export function setValueIfChanged(id: string, value: unknown): boolean {
+  if (value === undefined || value === null) return false
+  const e = entries.get(id)
+  if (!e || same(e.cache?.value, value)) return false
+  store(e, value)
+  return true
+}
+
 // Coalesce any number of changes in one event turn into one host.ui.invalidate() call.
 export function requestInvalidate(): void {
   if (!host) return

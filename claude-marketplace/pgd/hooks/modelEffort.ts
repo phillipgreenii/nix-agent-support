@@ -1,13 +1,20 @@
 import { pgdEnabled } from './options'
-import { defineSource, noteEvent, refresh, setValue } from './source'
+import { defineSource, noteEvent, refresh, setValueIfChanged } from './source'
 import type { ModApi } from './types'
 
-// The model and effort sources, both event-driven (intervalMs 0). model: read through
-// host.session.model() at session start (refresh) and again after a config.set; effort: the
-// turn.step event's effort for the main loop (a subagent's step is ignored), a string, undefined
-// until the first turn. The turn.step hook is an async generator that delegates with yield* next(e).
-export function startModelEffort(_host: ModApi): void {
+// The model and effort sources, both event-driven (intervalMs 0). Both are written through
+// setValueIfChanged, so a nil value or one equal to the cached value changes nothing.
+//   model: read through host.session.model() at session start (refresh), again when the main
+//   loop's turn.step event names a different model than the previous step (which catches a /model
+//   change on the next step), and again after a config.set.
+//   effort: the main loop's turn.step `effort`, a string, undefined until the first turn.
+// A subagent's step (it carries an agentId) is ignored for both. The turn.step hook is an async
+// generator that delegates with yield* next(e).
+// The model the last main-loop step named, as the step spells it; only compared with the next step.
+let lastStepModel: string | undefined
 
+export function startModelEffort(_host: ModApi): void {
+  lastStepModel = undefined
   defineSource<string>({
     id: 'model',
     intervalMs: 0,
@@ -24,7 +31,7 @@ export function registerModelEffortHooks(on: ModApi): void {
     if (pgdEnabled()) {
       noteEvent()
       try {
-        setValue('model', await $.session.model())
+        setValueIfChanged('model', await $.session.model())
       } catch {
         // keep the last cached model
       }
@@ -35,13 +42,20 @@ export function registerModelEffortHooks(on: ModApi): void {
     'turn.step',
     async function* (
       _$: ModApi,
-      e: { agentId?: string; effort?: string | number },
+      e: { agentId?: string; model?: string; effort?: string | number },
       next: (e: unknown) => AsyncGenerator<unknown, unknown>,
     ) {
       if (pgdEnabled()) {
         noteEvent()
         if (e.agentId === undefined) {
-          setValue('effort', e.effort === undefined ? undefined : String(e.effort))
+          // The step's model may be spelled differently from $.session.model() (a full id against
+          // the name /model shows), so a change in it only triggers a read of $.session.model(),
+          // which keeps the cached value in one spelling.
+          if (e.model != null && e.model !== lastStepModel) {
+            lastStepModel = e.model
+            refresh('model', { force: true })
+          }
+          setValueIfChanged('effort', e.effort === undefined ? undefined : String(e.effort))
         }
       }
       return yield* next(e)

@@ -4,7 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 import { registerModelEffortHooks, startModelEffort } from './modelEffort'
 import { setOptions } from './options'
-import { initSources, readCached } from './source'
+import { defineSource, initSources, onChange, readCached, setValueIfChanged } from './source'
 import { fakeClock, settle, stubHost } from './testkit'
 import { DEFAULT_OPTIONS } from './types'
 import { mapUsage, registerUsageHooks, startUsage } from './usage'
@@ -93,6 +93,86 @@ test('a subagent step does not set the effort', async () => {
   ) as AsyncGenerator<unknown, unknown>
   for await (const _ of gen) void _
   expect(readCached('effort')).toBe(undefined)
+})
+
+async function step(hooks: Record<string, Hook>, e: object): Promise<void> {
+  const gen = hooks['turn.step'](undefined, e, function* (x: unknown) {
+    return x
+  }) as AsyncGenerator<unknown, unknown>
+  for await (const _ of gen) void _
+}
+
+const modelReads = (s: { calls: string[] }): number => s.calls.filter(c => c === 'session.model').length
+
+test('a changed model on a main-loop step re-reads session.model(), keeping its spelling', async () => {
+  const { s, hooks } = boot()
+  await settle()
+  expect(readCached('model')).toBe('sonnet')
+  s.state.model = 'opus' // what /model changed; the step names it by a full id
+  await step(hooks, { model: 'claude-opus-full-id', effort: 'high' })
+  await settle()
+  expect(readCached('model')).toBe('opus')
+  expect(readCached('effort')).toBe('high')
+})
+
+test('a subagent step neither re-reads the model nor sets the effort', async () => {
+  const { s, hooks } = boot()
+  await settle()
+  const before = modelReads(s)
+  s.state.model = 'haiku'
+  await step(hooks, { model: 'haiku-full-id', effort: 'low', agentId: 'sub1' })
+  await settle()
+  expect(modelReads(s)).toBe(before)
+  expect(readCached('model')).toBe('sonnet')
+  expect(readCached('effort')).toBe(undefined)
+})
+
+test('a step without a model or effort leaves the cached values alone', async () => {
+  const { s, hooks } = boot()
+  await settle()
+  await step(hooks, { model: 'sonnet-full-id', effort: 'high' })
+  await settle()
+  const before = modelReads(s)
+  await step(hooks, {})
+  await settle()
+  expect(modelReads(s)).toBe(before)
+  expect(readCached('model')).toBe('sonnet')
+  expect(readCached('effort')).toBe('high')
+})
+
+test('a step naming the same model and effort again is a no-op: no read, no change', async () => {
+  const { s, hooks } = boot()
+  await settle()
+  await step(hooks, { model: 'sonnet-full-id', effort: 'high' })
+  await settle()
+  const before = modelReads(s)
+  let fired = 0
+  onChange('model', () => fired++)
+  onChange('effort', () => fired++)
+  await step(hooks, { model: 'sonnet-full-id', effort: 'high' })
+  await settle()
+  expect(modelReads(s)).toBe(before)
+  expect(fired).toBe(0)
+})
+
+test('config.set with an unchanged model is a no-op', async () => {
+  const { hooks } = boot()
+  await settle()
+  let fired = 0
+  onChange('model', () => fired++)
+  await hooks['config.set']({ session: { model: async () => 'sonnet' } }, {}, async (e: unknown) => e)
+  expect(fired).toBe(0)
+})
+
+test('setValueIfChanged stores a new value and ignores nil, equal and unknown-source values', () => {
+  boot()
+  defineSource<string>({ id: 'probe', intervalMs: 0 })
+  expect(setValueIfChanged('probe', undefined)).toBe(false)
+  expect(setValueIfChanged('probe', null)).toBe(false)
+  expect(setValueIfChanged('probe', 'a')).toBe(true)
+  expect(setValueIfChanged('probe', 'a')).toBe(false)
+  expect(setValueIfChanged('probe', 'b')).toBe(true)
+  expect(setValueIfChanged('no-such-source', 'x')).toBe(false)
 })
 
 test('with enable false the hooks leave the sources untouched', async () => {
