@@ -259,9 +259,12 @@ func reclaimIdleOrphan(ctx context.Context, role roles.Role, deps executor.Deps,
 			return orphanLeftAlone
 		}
 		// The claim is this session's when it is under the role's actor or under an
-		// actor the session derived from its own Claude session id; the release is
-		// guarded by the holder just read, so a claim that changed hands is left.
-		if beads.HeldBySession(iss, cc.Actor, s.ClaudeSessionID) {
+		// actor the session derived from its own Claude session id, or, whatever
+		// actor it carries (review-<bead>, <bead>-feedback, a bare "-worker"), when
+		// the dispatcher started this session for the bead and no other live
+		// session works it. The release is guarded by the holder just read, so a
+		// claim that changed hands is left.
+		if beads.HeldBySession(iss, cc.Actor, s.ClaudeSessionID) || heldByDispatchedSession(iss, beadID, s, sessions) {
 			_ = beads.Comment(ctx, deps.BD, beadID, fmt.Sprintf(
 				"orphaned session %s reclaimed after handler loss (lease expired %s)", s.ExternalID, s.Meta[ccpool.MetaKeyLeaseUntil],
 			))
@@ -292,6 +295,26 @@ func reclaimIdleOrphan(ctx context.Context, role roles.Role, deps executor.Deps,
 		"role", role.Name, "state", string(s.State), "lease_until", s.Meta[ccpool.MetaKeyLeaseUntil], "unclaimed", unclaimed)
 	emitOrphan(ctx, deps, "info", orphanEventReclaimed, "orphaned session reclaimed after handler loss", f)
 	return orphanReclaimed
+}
+
+// heldByDispatchedSession reports whether iss is an in_progress claim the
+// dispatcher can attribute to orphan s from its own record of (session, bead),
+// not from the actor string: the session was started for beadID and no other
+// open, live session in the pool works that bead, so nothing alive can be the
+// holder.
+func heldByDispatchedSession(iss beads.Issue, beadID string, s ccpool.Session, sessions []ccpool.Session) bool {
+	if iss.Status != "in_progress" || iss.Assignee == "" || beadID == "" {
+		return false
+	}
+	for _, o := range sessions {
+		if o.ExternalID == s.ExternalID || o.CloseReason != "" || !o.Live {
+			continue
+		}
+		if o.Meta[ccpool.MetaKeyBead] == beadID {
+			return false
+		}
+	}
+	return true
 }
 
 // stopActiveOrphan enforces the role's TIME budget on a starting/ready/working

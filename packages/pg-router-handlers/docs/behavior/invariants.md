@@ -392,8 +392,10 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     (close-only, close-or-handback, close-or-release) MUST release the claim, with a comment naming the session,
     only when the bead is still in progress AND claimed by that role's own actor or by an actor
     that carries the orphan's own Claude session id (a session that derived its actor from its
-    id), with the release guarded by the holder just read; a bead that is
-    open, closed, or claimed by anyone else (an actor with no session id in it proves nothing) is not written, and a role that never claims its
+    id), or by any other actor while no other open, live session works the same bead (the
+    dispatcher's own record that it started the orphan for that bead attributes the claim), with
+    the release guarded by the holder just read; a bead that is
+    open or closed, or claimed under an actor with no session id while another live session works the bead, is not written, and a role that never claims its
     bead (the triage roles) writes nothing. If the bead cannot be read, nothing is done this
     time. Then the session MUST be closed without purging, and its worktree and anchor branch
     removed under the guards of `INV-CCH-15` (kept when a live or `needs_input` session still uses

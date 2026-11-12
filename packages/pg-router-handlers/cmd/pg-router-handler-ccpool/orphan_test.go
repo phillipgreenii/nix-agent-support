@@ -424,8 +424,8 @@ func TestReclaimIdleOrphan_beadRules(t *testing.T) {
 	}{
 		{"close-or-handback in_progress by this actor", roles.CloseOrHandback, inProgressBy(orphanActor), 2},
 		{"close-or-release in_progress by this actor", roles.CloseOrRelease, inProgressBy(orphanActor), 2},
-		{"close-or-release in_progress by a PEER", roles.CloseOrRelease, inProgressBy("someone-else"), 0},
-		{"in_progress by ANOTHER actor", roles.CloseOnly, inProgressBy("someone-else"), 0},
+		{"close-or-release in_progress by another actor, no live session on the bead", roles.CloseOrRelease, inProgressBy("someone-else"), 2},
+		{"in_progress by another actor, no live session on the bead", roles.CloseOnly, inProgressBy("someone-else"), 2},
 		{"already open", roles.CloseOnly, `{"id":"zr-w","status":"open"}`, 0},
 		{"already closed", roles.CloseOnly, `{"id":"zr-w","status":"closed","assignee":"` + orphanActor + `"}`, 0},
 		{"close-or-triage never claims: no bead write", roles.CloseOrTriage, inProgressBy(orphanActor), 0},
@@ -739,7 +739,11 @@ func TestReclaimIdleOrphan_releasesSessionDerivedActorClaim(t *testing.T) {
 	}{
 		{"full session id", sid + "-worker", "update zr-w --status=open --assignee= --if-assignee " + sid + "-worker --if-status in_progress"},
 		{"short session id", "b6bbee83-worker", "update zr-w --status=open --assignee= --if-assignee b6bbee83-worker --if-status in_progress"},
-		{"no session id", "-worker", ""},
+		// No session id in the actor: released on the dispatcher's own record of the
+		// (session, bead) pair, since no other live session works the bead.
+		{"no session id", "-worker", "update zr-w --status=open --assignee= --if-assignee -worker --if-status in_progress"},
+		{"bead-derived review actor", "review-zr-w", "update zr-w --status=open --assignee= --if-assignee review-zr-w --if-status in_progress"},
+		{"bead-derived feedback actor", "zr-w-feedback", "update zr-w --status=open --assignee= --if-assignee zr-w-feedback --if-status in_progress"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -764,6 +768,45 @@ func TestReclaimIdleOrphan_releasesSessionDerivedActorClaim(t *testing.T) {
 			}
 			if len(updates) != 1 || updates[0] != tc.wantUpdate {
 				t.Errorf("updates = %v, want [%s]", updates, tc.wantUpdate)
+			}
+		})
+	}
+}
+
+// A claim with an actor that carries no session id is NOT released while another
+// open, live session still works the same bead (it may be that session's claim);
+// a closed or dead peer does not hold it back.
+func TestReclaimIdleOrphan_unattributableClaimKeptWhileLivePeerWorksBead(t *testing.T) {
+	peer := func(live bool, closeReason string) ccpool.Session {
+		p := orphanRow(ccpool.StateWorking)
+		p.ExternalID = "pg-router-review-zr-w"
+		p.Live = live
+		p.CloseReason = closeReason
+		p.Meta[ccpool.MetaKeyRole] = "review"
+		return p
+	}
+	cases := []struct {
+		name        string
+		peer        ccpool.Session
+		wantRelease bool
+	}{
+		{"live peer", peer(true, ""), false},
+		{"dead peer", peer(false, ""), true},
+		{"closed peer", peer(true, "handler"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newOrphanHarness(t, orphanRow(ccpool.StateIdle), tc.peer)
+			h.bd.issues["zr-w"] = inProgressBy("review-zr-w")
+			h.run(orphanRole(roles.CloseOnly, 0))
+			released := false
+			for _, w := range h.bd.writes() {
+				if strings.HasPrefix(w, "update ") {
+					released = true
+				}
+			}
+			if released != tc.wantRelease {
+				t.Errorf("released=%v, want %v; writes=%v", released, tc.wantRelease, h.bd.writes())
 			}
 		})
 	}
