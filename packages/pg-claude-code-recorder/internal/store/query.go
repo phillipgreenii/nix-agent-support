@@ -307,16 +307,17 @@ func (s *Reader) LaggingGenerations() ([]Generation, error) {
 // SetParseOffset records how far the parser has parsed a generation. It is a
 // derived column, not an observation, and MUST NOT exceed the copy offset.
 func (s *Store) SetParseOffset(file int64, gen int, off int64) error {
+	ctx := context.Background()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.wdb.Exec(`UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, off, file, gen, off)
+	res, err := s.wdb.ExecContext(ctx, `UPDATE generations SET parse_offset=? WHERE file_id=? AND gen=? AND ?<=copy_offset`, off, file, gen, off)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("store: parse offset %d beyond copy offset or unknown generation %d.%d", off, file, gen)
 	}
-	s.fireOffsets([]offNote{{file: file, gen: gen, read: true}})
+	s.fireOffsets(ctx, []offNote{{file: file, gen: gen, read: true}})
 	return nil
 }
 

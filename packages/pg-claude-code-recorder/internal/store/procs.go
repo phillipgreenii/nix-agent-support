@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 )
@@ -32,21 +33,21 @@ const (
 	ExitUnobserved = "unobserved"
 )
 
-func applyProc(tx *sql.Tx, r *Rec) error {
+func applyProc(ctx context.Context, tx *sql.Tx, r *Rec) error {
 	// Every kind starts by making sure the row exists, so replay in any order
 	// converges.
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO procs(pid,proc_start,first_seen_ns) VALUES(?,?,?)`, r.Pid, r.ProcStart, r.At); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO procs(pid,proc_start,first_seen_ns) VALUES(?,?,?)`, r.Pid, r.ProcStart, r.At); err != nil {
 		return err
 	}
 	var err error
 	switch r.Kind {
 	case "discover":
-		_, err = tx.Exec(`UPDATE procs SET host=?, stale=? WHERE pid=? AND proc_start=? AND first_seen_ns=?`,
+		_, err = tx.ExecContext(ctx, `UPDATE procs SET host=?, stale=? WHERE pid=? AND proc_start=? AND first_seen_ns=?`,
 			r.Val, nz(r.Reason == "stale"), r.Pid, r.ProcStart, r.At)
 	case "seen":
-		_, err = tx.Exec(`UPDATE procs SET last_seen_ns=MAX(last_seen_ns,?) WHERE pid=? AND proc_start=?`, r.At, r.Pid, r.ProcStart)
+		_, err = tx.ExecContext(ctx, `UPDATE procs SET last_seen_ns=MAX(last_seen_ns,?) WHERE pid=? AND proc_start=?`, r.At, r.Pid, r.ProcStart)
 	case "exit":
-		_, err = tx.Exec(`UPDATE procs SET exit_ns=?, exit_kind=?, registry_present=? WHERE pid=? AND proc_start=? AND exit_ns=0`,
+		_, err = tx.ExecContext(ctx, `UPDATE procs SET exit_ns=?, exit_kind=?, registry_present=? WHERE pid=? AND proc_start=? AND exit_ns=0`,
 			r.At, r.Reason, nz(r.Val == "present"), r.Pid, r.ProcStart)
 	}
 	return err

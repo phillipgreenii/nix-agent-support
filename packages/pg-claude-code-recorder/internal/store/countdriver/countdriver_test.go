@@ -1,6 +1,7 @@
 package countdriver
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -19,16 +20,16 @@ func openDB(t *testing.T, name string) *sql.DB {
 func TestSelectCountsOneQueryAndNRows(t *testing.T) {
 	c := Register("countdriver-test-select")
 	db := openDB(t, "countdriver-test-select")
-	if _, err := db.Exec(`CREATE TABLE t(x INTEGER)`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE t(x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
-		if _, err := db.Exec(`INSERT INTO t(x) VALUES(?)`, i); err != nil {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO t(x) VALUES(?)`, i); err != nil {
 			t.Fatal(err)
 		}
 	}
 	c.Reset()
-	rs, err := db.Query(`SELECT x FROM t WHERE x >= ?`, 2)
+	rs, err := db.QueryContext(context.Background(), `SELECT x FROM t WHERE x >= ?`, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,11 +48,11 @@ func TestSelectCountsOneQueryAndNRows(t *testing.T) {
 func TestResetZeroesBoth(t *testing.T) {
 	c := Register("countdriver-test-reset")
 	db := openDB(t, "countdriver-test-reset")
-	if _, err := db.Exec(`CREATE TABLE t(x INTEGER)`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE t(x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	var one int
-	if err := db.QueryRow(`SELECT 1`).Scan(&one); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT 1`).Scan(&one); err != nil {
 		t.Fatal(err)
 	}
 	if c.Queries() == 0 || c.RowsRead() == 0 {
@@ -74,7 +75,7 @@ func TestRegisterTwiceReturnsSameCounter(t *testing.T) {
 func TestPreparedStatementCounts(t *testing.T) {
 	c := Register("countdriver-test-prepare")
 	db := openDB(t, "countdriver-test-prepare")
-	st, err := db.Prepare(`SELECT 1`)
+	st, err := db.PrepareContext(context.Background(), `SELECT 1`)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -55,7 +56,7 @@ func TestBarrierCheckpointsTheWholeWALAndRestoresTheSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	var busy, log, ckpt int
-	if err := s.wdb.QueryRow(`PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &log, &ckpt); err != nil {
+	if err := s.wdb.QueryRowContext(context.Background(), `PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &log, &ckpt); err != nil {
 		t.Fatal(err)
 	}
 	if log != 0 {
@@ -75,12 +76,12 @@ func TestBarrierReportsABlockedCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	rd, err := s.Read().Begin()
+	rd, err := s.Read().BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var n int
-	if err := rd.QueryRow(`SELECT COUNT(*) FROM meta`).Scan(&n); err != nil {
+	if err := rd.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM meta`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Commit(&Rec{T: TEpoch, At: 1, Epoch: 5}); err != nil {

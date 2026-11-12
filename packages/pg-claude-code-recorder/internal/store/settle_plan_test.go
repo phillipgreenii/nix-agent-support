@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -11,7 +12,7 @@ func TestSessionsOfFilePlansSearchRecordsByFile(t *testing.T) {
 	s := open(t, t.TempDir())
 	defer func() { _ = s.Close() }()
 	for name, q := range map[string]string{"text": sessionsOfFileQuery, "session_ref": sessionsOfFileRefQuery} {
-		rows, err := s.Read().Query("EXPLAIN QUERY PLAN "+q, 1)
+		rows, err := s.Read().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+q, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

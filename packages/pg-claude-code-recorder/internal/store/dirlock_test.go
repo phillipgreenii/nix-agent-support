@@ -44,12 +44,12 @@ func TestBusyIndexIsNotSetAsideAsCorrupt(t *testing.T) {
 	defer func() { _ = a.Close() }()
 
 	// Hold the write lock the way a startup ParseAll does.
-	tx, err := a.wdb.Begin()
+	tx, err := a.wdb.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`INSERT OR REPLACE INTO meta(key,value) VALUES('busy_probe','1')`); err != nil {
+	if _, err := tx.ExecContext(context.Background(), `INSERT OR REPLACE INTO meta(key,value) VALUES('busy_probe','1')`); err != nil {
 		t.Fatal(err)
 	}
 

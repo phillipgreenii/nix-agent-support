@@ -16,7 +16,7 @@ const slowQuery = `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c 
 
 func checkpoint(t *testing.T, s *Store, mode string) (busy, log, done int) {
 	t.Helper()
-	if err := s.wdb.QueryRow(`PRAGMA wal_checkpoint(`+mode+`)`).Scan(&busy, &log, &done); err != nil {
+	if err := s.wdb.QueryRowContext(context.Background(), `PRAGMA wal_checkpoint(`+mode+`)`).Scan(&busy, &log, &done); err != nil {
 		t.Fatal(err)
 	}
 	return busy, log, done
@@ -72,7 +72,7 @@ func TestSlowReadIsCutAtTheDeadlineAndTheWALResets(t *testing.T) {
 	// the log: frames written after its snapshot cannot be backfilled.
 	pinned := false
 	for i := 0; i < 100000 && !pinned; i++ {
-		if _, err := s.wdb.Exec(`INSERT OR REPLACE INTO meta(key,value) VALUES('probe', ?)`, i); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), `INSERT OR REPLACE INTO meta(key,value) VALUES('probe', ?)`, i); err != nil {
 			t.Fatal(err)
 		}
 		_, log, done := checkpoint(t, s, "PASSIVE")
@@ -109,11 +109,11 @@ func TestReadTransactionEndsAtTheDeadline(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var n int
-	if err := tx.QueryRow(`SELECT 1`).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(context.Background(), `SELECT 1`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(300 * time.Millisecond)
-	if err := tx.QueryRow(`SELECT 1`).Scan(&n); !errors.Is(err, context.DeadlineExceeded) {
+	if err := tx.QueryRowContext(context.Background(), `SELECT 1`).Scan(&n); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("a statement after the transaction deadline returned %v, want the deadline error", err)
 	}
 }
@@ -128,17 +128,17 @@ func TestReopenedReadConnectionsKeepTheirPragmas(t *testing.T) {
 	s.Read().SetMaxIdleConns(0) // every use opens a fresh connection
 	for i := 0; i < 3; i++ {
 		var qo, bt int
-		if err := s.Read().QueryRow(`PRAGMA query_only`).Scan(&qo); err != nil {
+		if err := s.Read().QueryRowContext(context.Background(), `PRAGMA query_only`).Scan(&qo); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Read().QueryRow(`PRAGMA busy_timeout`).Scan(&bt); err != nil {
+		if err := s.Read().QueryRowContext(context.Background(), `PRAGMA busy_timeout`).Scan(&bt); err != nil {
 			t.Fatal(err)
 		}
 		if qo != 1 || bt != 5000 {
 			t.Fatalf("connection %d: query_only=%d busy_timeout=%d, want 1 and 5000", i, qo, bt)
 		}
 	}
-	if _, err := s.Read().Exec(`INSERT INTO meta(key,value) VALUES('x','y')`); err == nil {
+	if _, err := s.Read().ExecContext(context.Background(), `INSERT INTO meta(key,value) VALUES('x','y')`); err == nil {
 		t.Fatal("the read pool accepted a write")
 	}
 }

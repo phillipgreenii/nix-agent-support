@@ -5,7 +5,7 @@ import "testing"
 func hasTable(t *testing.T, s *Store, name string) bool {
 	t.Helper()
 	var n int
-	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name=?`, name).Scan(&n); err != nil {
+	if err := s.Read().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_master WHERE name=?`, name).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n > 0

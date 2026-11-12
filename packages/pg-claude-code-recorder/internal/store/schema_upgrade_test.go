@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
@@ -26,12 +27,12 @@ func legacyIndex(t *testing.T, dir string) string {
 		`CREATE INDEX fields_rec ON fields(rec_id, name)`,
 		`INSERT INTO fields(rec_id,name,s) VALUES(1,'cwd','/example/work')`,
 	} {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Fold the WAL into the file so a byte comparison sees every page.
-	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -53,7 +54,7 @@ func TestOpenReplacesFullFieldsIndexWithPartialOne(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
 	for _, q := range []string{`DROP INDEX fields_name_n`, `CREATE INDEX fields_name_n ON fields(name_id, n)`} {
-		if _, err := s.wdb.Exec(q); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -63,7 +64,7 @@ func TestOpenReplacesFullFieldsIndexWithPartialOne(t *testing.T) {
 	s = open(t, dir)
 	defer func() { _ = s.Close() }()
 	var def string
-	if err := s.Read().QueryRow(`SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
 		t.Fatalf("a full fields_name_n survived open: %q, %v", def, err)
 	}
 	if s.SchemaVersion() != SchemaVersion {
@@ -76,7 +77,7 @@ func TestOpenReplacesFullFieldsIndexWithPartialOne(t *testing.T) {
 func TestOpenCreatesTheSourceTypeIndexOnAnExistingStore(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
-	if _, err := s.wdb.Exec(`DROP INDEX records_source_type`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `DROP INDEX records_source_type`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -85,7 +86,7 @@ func TestOpenCreatesTheSourceTypeIndexOnAnExistingStore(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		s = open(t, dir)
 		var def string
-		if err := s.Read().QueryRow(`SELECT sql FROM sqlite_master WHERE name='records_source_type'`).Scan(&def); err != nil || !strings.Contains(def, "records(source, type)") {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name='records_source_type'`).Scan(&def); err != nil || !strings.Contains(def, "records(source, type)") {
 			t.Fatalf("open %d: records_source_type is %q, %v", i, def, err)
 		}
 		if err := s.Close(); err != nil {
@@ -119,7 +120,7 @@ func TestOlderSchemaIsRefusedUntouchedAndRebuildKeepsTheOldFile(t *testing.T) {
 		t.Fatalf("rebuilt schema_version %d, want %d", s.SchemaVersion(), SchemaVersion)
 	}
 	var n int
-	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('fields') WHERE name='name_id'`).Scan(&n); err != nil || n != 1 {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM pragma_table_info('fields') WHERE name='name_id'`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("rebuilt fields has no name_id column (%d, %v)", n, err)
 	}
 	if err := s.Close(); err != nil {
@@ -139,7 +140,7 @@ func TestOpenBackfillsUnknownKeysTotalOnceForAnExistingStore(t *testing.T) {
 		`INSERT INTO unknown_keys(file_id,gen,source,rtype,path,count) VALUES(1,1,'example','user','a',2),(2,1,'example','user','a',3),(2,1,'example','tool','b',1)`,
 		`DROP TABLE unknown_keys_total`,
 	} {
-		if _, err := s.wdb.Exec(q); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -148,7 +149,7 @@ func TestOpenBackfillsUnknownKeysTotalOnceForAnExistingStore(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		s = open(t, dir)
-		rows, err := s.Read().Query(`SELECT source,rtype,path,count FROM unknown_keys_total ORDER BY rtype,path`)
+		rows, err := s.Read().QueryContext(context.Background(), `SELECT source,rtype,path,count FROM unknown_keys_total ORDER BY rtype,path`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +185,7 @@ func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
 		`ALTER TABLE records DROP COLUMN session_ref`,
 		`DROP TABLE session_files`, `DROP TABLE session_stats`, `DROP TABLE sessions`,
 	} {
-		if _, err := s.wdb.Exec(q); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -194,10 +195,10 @@ func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		s = open(t, dir)
 		var ref, tables int
-		if err := s.Read().QueryRow(`SELECT session_ref FROM records WHERE id=1`).Scan(&ref); err != nil || ref != 0 {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT session_ref FROM records WHERE id=1`).Scan(&ref); err != nil || ref != 0 {
 			t.Fatalf("open %d: old row session_ref %d, %v", i, ref, err)
 		}
-		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions','session_stats','session_files')`).Scan(&tables); err != nil || tables != 3 {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('sessions','session_stats','session_files')`).Scan(&tables); err != nil || tables != 3 {
 			t.Fatalf("open %d: %d session tables, %v", i, tables, err)
 		}
 		if s.SessionRefReady() {
@@ -215,7 +216,7 @@ func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
 func hasIndex(t *testing.T, s *Store, name string) bool {
 	t.Helper()
 	var n int
-	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&n); err != nil {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n > 0
@@ -252,7 +253,7 @@ func TestExistingStoreWithoutTheMarkStaysOnTheTextSessionAndBuildsNoIndex(t *tes
 		`DELETE FROM meta WHERE key='session_ref_complete'`,
 		`DROP INDEX records_session_ref_source_time`,
 	} {
-		if _, err := s.wdb.Exec(q); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -316,7 +317,7 @@ func TestOpenAddsTheLookupColumnsAndTablesToAnExistingStore(t *testing.T) {
 		`ALTER TABLE records DROP COLUMN entrypoint_id`, `ALTER TABLE records DROP COLUMN user_type_id`,
 		`DROP TABLE lk_cwd`, `DROP TABLE lk_branch`, `DROP TABLE lk_version`, `DROP TABLE lk_entrypoint`, `DROP TABLE lk_user_type`,
 	} {
-		if _, err := s.wdb.Exec(q); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -326,13 +327,13 @@ func TestOpenAddsTheLookupColumnsAndTablesToAnExistingStore(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		s = open(t, dir)
 		var nulls, cols, tables int
-		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM records WHERE id=1 AND cwd_id IS NULL AND branch_id IS NULL AND version_id IS NULL AND entrypoint_id IS NULL AND user_type_id IS NULL`).Scan(&nulls); err != nil || nulls != 1 {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM records WHERE id=1 AND cwd_id IS NULL AND branch_id IS NULL AND version_id IS NULL AND entrypoint_id IS NULL AND user_type_id IS NULL`).Scan(&nulls); err != nil || nulls != 1 {
 			t.Fatalf("open %d: old row lookup ids not NULL: %d, %v", i, nulls, err)
 		}
-		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name IN ('cwd_id','branch_id','version_id','entrypoint_id','user_type_id')`).Scan(&cols); err != nil || cols != 5 {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM pragma_table_info('records') WHERE name IN ('cwd_id','branch_id','version_id','entrypoint_id','user_type_id')`).Scan(&cols); err != nil || cols != 5 {
 			t.Fatalf("open %d: %d lookup columns, %v", i, cols, err)
 		}
-		if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('lk_cwd','lk_branch','lk_version','lk_entrypoint','lk_user_type')`).Scan(&tables); err != nil || tables != 5 {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('lk_cwd','lk_branch','lk_version','lk_entrypoint','lk_user_type')`).Scan(&tables); err != nil || tables != 5 {
 			t.Fatalf("open %d: %d lookup tables, %v", i, tables, err)
 		}
 		if s.SchemaVersion() != SchemaVersion {
@@ -362,7 +363,7 @@ func TestLastCopyNSIsDerivedFromTheJournalAndSurvivesReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got int64
-	if err := s.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, id).Scan(&got); err != nil || got != 500 {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT last_copy_ns FROM files WHERE id=?`, id).Scan(&got); err != nil || got != 500 {
 		t.Fatalf("last_copy_ns %d, %v; want 500", got, err)
 	}
 	dump, err := s.Dump()
@@ -404,11 +405,11 @@ func TestOpenAddsLastCopyColumnAndBackfillsItFromCommits(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.wdb.Exec(`ALTER TABLE files DROP COLUMN last_copy_ns`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `ALTER TABLE files DROP COLUMN last_copy_ns`); err != nil {
 		t.Fatal(err)
 	}
 	// An old database still holds the commits table the code no longer writes.
-	if _, err := s.wdb.Exec(`CREATE TABLE commits(file_id INTEGER NOT NULL, gen INTEGER NOT NULL, seq INTEGER NOT NULL, from_off INTEGER NOT NULL, to_off INTEGER NOT NULL, seen_ns INTEGER NOT NULL, PRIMARY KEY(file_id, gen, seq));
+	if _, err := s.wdb.ExecContext(context.Background(), `CREATE TABLE commits(file_id INTEGER NOT NULL, gen INTEGER NOT NULL, seq INTEGER NOT NULL, from_off INTEGER NOT NULL, to_off INTEGER NOT NULL, seen_ns INTEGER NOT NULL, PRIMARY KEY(file_id, gen, seq));
 INSERT INTO commits VALUES(?,1,1,0,5,40),(?,1,2,5,9,70)`, a, a); err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +419,7 @@ INSERT INTO commits VALUES(?,1,1,0,5,40),(?,1,2,5,9,70)`, a, a); err != nil {
 	for i := 0; i < 2; i++ {
 		s = open(t, dir)
 		if i == 1 {
-			if _, err := s.wdb.Exec(`DROP TABLE commits`); err != nil {
+			if _, err := s.wdb.ExecContext(context.Background(), `DROP TABLE commits`); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.Close(); err != nil {
@@ -427,10 +428,10 @@ INSERT INTO commits VALUES(?,1,1,0,5,40),(?,1,2,5,9,70)`, a, a); err != nil {
 			s = open(t, dir)
 		}
 		var ga, gb int64
-		if err := s.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, a).Scan(&ga); err != nil || ga != 70 {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT last_copy_ns FROM files WHERE id=?`, a).Scan(&ga); err != nil || ga != 70 {
 			t.Fatalf("open %d: file a last_copy_ns %d, %v; want 70", i, ga, err)
 		}
-		if err := s.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, b).Scan(&gb); err != nil || gb != 0 {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT last_copy_ns FROM files WHERE id=?`, b).Scan(&gb); err != nil || gb != 0 {
 			t.Fatalf("open %d: file b last_copy_ns %d, %v; want 0", i, gb, err)
 		}
 		if s.SchemaVersion() != SchemaVersion {
@@ -445,7 +446,7 @@ INSERT INTO commits VALUES(?,1,1,0,5,40),(?,1,2,5,9,70)`, a, a); err != nil {
 func commitsTableCount(t *testing.T, s *Store) int {
 	t.Helper()
 	var n int
-	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commits'`).Scan(&n); err != nil {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commits'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -470,7 +471,7 @@ func TestJournalCommitRecordsDoNotCreateTheCommitsTable(t *testing.T) {
 		t.Fatal("applying commit records created the commits table")
 	}
 	var off int64
-	if err := s.Read().QueryRow(`SELECT copy_offset FROM generations WHERE file_id=?`, id).Scan(&off); err != nil || off != 9 {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT copy_offset FROM generations WHERE file_id=?`, id).Scan(&off); err != nil || off != 9 {
 		t.Fatalf("copy_offset %d, %v; want 9", off, err)
 	}
 	dump, err := s.Dump()
@@ -500,7 +501,7 @@ func TestExistingCommitsTableIsLeftAloneAndIgnored(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.wdb.Exec(`CREATE TABLE commits(file_id INTEGER NOT NULL, gen INTEGER NOT NULL, seq INTEGER NOT NULL, from_off INTEGER NOT NULL, to_off INTEGER NOT NULL, seen_ns INTEGER NOT NULL, PRIMARY KEY(file_id, gen, seq));
+	if _, err := s.wdb.ExecContext(context.Background(), `CREATE TABLE commits(file_id INTEGER NOT NULL, gen INTEGER NOT NULL, seq INTEGER NOT NULL, from_off INTEGER NOT NULL, to_off INTEGER NOT NULL, seen_ns INTEGER NOT NULL, PRIMARY KEY(file_id, gen, seq));
 INSERT INTO commits VALUES(?,1,1,0,5,40)`, id); err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +517,7 @@ INSERT INTO commits VALUES(?,1,1,0,5,40)`, id); err != nil {
 		t.Fatal(err)
 	}
 	var n int
-	if err := s.Read().QueryRow(`SELECT COUNT(*) FROM commits`).Scan(&n); err != nil || n != 1 {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM commits`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("commits rows %d, %v; want the one old row untouched", n, err)
 	}
 	var counts map[string]int

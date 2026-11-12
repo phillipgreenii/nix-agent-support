@@ -52,9 +52,9 @@ func (*UnfinishedRebuildError) Error() string {
 		"run pg-claude-code-recorder rebuild again"
 }
 
-func (s *Store) metaString(key string) string {
+func (s *Store) metaString(ctx context.Context, key string) string {
 	var v string
-	if err := s.wdb.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil {
+	if err := s.wdb.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil {
 		return ""
 	}
 	return v
@@ -330,6 +330,7 @@ func (s *Store) BulkCommits() int {
 }
 
 func (s *Store) commitBatchLocked() error {
+	ctx := context.Background()
 	if s.btx == nil {
 		return nil
 	}
@@ -358,15 +359,15 @@ func (s *Store) commitBatchLocked() error {
 	for _, h := range s.wrHooks {
 		h()
 	}
-	s.fireOffsets(s.takePend())
+	s.fireOffsets(ctx, s.takePend())
 	return nil
 }
 
 // bulkWriteLocked runs fn in a savepoint of the batch transaction, so an
 // error undoes only fn's work.
-func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
+func (s *Store) bulkWriteLocked(ctx context.Context, point string, fn func(tx *sql.Tx) error) error {
 	if s.btx == nil {
-		tx, err := s.wdb.Begin()
+		tx, err := s.wdb.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -380,7 +381,7 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 		if timed {
 			t0 = s.stepClock()
 		}
-		_, err := tx.Exec(`SAVEPOINT bulk_write`)
+		_, err := tx.ExecContext(ctx, `SAVEPOINT bulk_write`)
 		if timed {
 			spNS = int64(s.stepClock() - t0)
 		}
@@ -392,8 +393,8 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 	if err := fn(tx); err != nil {
 		s.rbEpoch.Add(1)
 		s.pendTrunc(mark)
-		_, _ = tx.Exec(`ROLLBACK TO bulk_write`)
-		_, _ = tx.Exec(`RELEASE bulk_write`)
+		_, _ = tx.ExecContext(ctx, `ROLLBACK TO bulk_write`)
+		_, _ = tx.ExecContext(ctx, `RELEASE bulk_write`)
 		return err
 	}
 	if point != "" {
@@ -406,7 +407,7 @@ func (s *Store) bulkWriteLocked(point string, fn func(tx *sql.Tx) error) error {
 	if timed {
 		t0 = s.stepClock()
 	}
-	_, err := tx.Exec(`RELEASE bulk_write`)
+	_, err := tx.ExecContext(ctx, `RELEASE bulk_write`)
 	if timed {
 		s.addStep(StepSavepoint, spNS+int64(s.stepClock()-t0))
 	}

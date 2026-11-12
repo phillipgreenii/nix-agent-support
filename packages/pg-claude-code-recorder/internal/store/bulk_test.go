@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -58,7 +59,7 @@ func TestFinishBulkRebuildClearsTheMarkerAndRestoresTheRunningSetting(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.metaString(metaRebuildUnfinished) != "1" {
+	if s.metaString(t.Context(), metaRebuildUnfinished) != "1" {
 		t.Fatal("the marker is not written before the rebuild starts")
 	}
 	if err := s.FinishRebuild(); err != nil {
@@ -67,7 +68,7 @@ func TestFinishBulkRebuildClearsTheMarkerAndRestoresTheRunningSetting(t *testing
 	if got := syncMode(t, s); got != 1 {
 		t.Fatalf("synchronous after finishing is %d, want 1 (NORMAL, the running setting; FULL only for the final checkpoint)", got)
 	}
-	if s.metaString(metaRebuildUnfinished) != "" {
+	if s.metaString(t.Context(), metaRebuildUnfinished) != "" {
 		t.Fatal("the marker survived FinishRebuild")
 	}
 	_ = s.Close()
@@ -88,7 +89,7 @@ func TestBulkBatchCommitsOnBudgetAndRollsBackOnlyAFailedWrite(t *testing.T) {
 	s.BulkBegin()
 	ins := func(v string) func(tx *sql.Tx) error {
 		return func(tx *sql.Tx) error {
-			_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "k"+v, v)
+			_, err := tx.ExecContext(context.Background(), `INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "k"+v, v)
 			return err
 		}
 	}
@@ -110,8 +111,8 @@ func TestBulkBatchCommitsOnBudgetAndRollsBackOnlyAFailedWrite(t *testing.T) {
 	if err := s.BulkAdd(5, 0); err != nil || s.BulkCommits() != 1 {
 		t.Fatalf("at budget must commit once: %v commits=%d", err, s.BulkCommits())
 	}
-	if s.metaString("ka") != "a" || s.metaString("kb") != "" {
-		t.Fatalf("committed ka=%q kb=%q, want a and nothing", s.metaString("ka"), s.metaString("kb"))
+	if s.metaString(t.Context(), "ka") != "a" || s.metaString(t.Context(), "kb") != "" {
+		t.Fatalf("committed ka=%q kb=%q, want a and nothing", s.metaString(t.Context(), "ka"), s.metaString(t.Context(), "kb"))
 	}
 	if err := s.BulkEnd(); err != nil {
 		t.Fatal(err)
@@ -129,7 +130,7 @@ func TestCrashMidBatchLeavesAFileTheNextStartRefuses(t *testing.T) {
 	}
 	s.BulkBegin()
 	_ = s.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('half','1')`)
+		_, err := tx.ExecContext(context.Background(), `INSERT INTO meta(key,value) VALUES('half','1')`)
 		return err
 	})
 	disarm := faults.ArmPanic("rebuild.before-batch-commit")
@@ -156,7 +157,7 @@ func TestDeferredUniqueIndexViolationFailsTheRebuildAndReportsTheRows(t *testing
 	defer func() { _ = s.Close() }()
 	ins := `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version) VALUES(7,1,100,0,5,'src','t',1)`
 	for i := 0; i < 2; i++ {
-		if _, err := s.wdb.Exec(ins); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), ins); err != nil {
 			t.Fatalf("a deferred load must accept the duplicate inline: %v", err)
 		}
 	}
@@ -169,10 +170,10 @@ func TestDeferredUniqueIndexViolationFailsTheRebuildAndReportsTheRows(t *testing
 		t.Fatalf("reported rows %+v", dup.Rows)
 	}
 	var n int
-	if err := s.wdb.QueryRow(`SELECT COUNT(*) FROM records`).Scan(&n); err != nil || n != 2 {
+	if err := s.wdb.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM records`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("rows after the failure: %d %v, want both kept", n, err)
 	}
-	if s.metaString(metaRebuildUnfinished) != "1" {
+	if s.metaString(t.Context(), metaRebuildUnfinished) != "1" {
 		t.Fatal("the unfinished marker must stay after a failed index build")
 	}
 }

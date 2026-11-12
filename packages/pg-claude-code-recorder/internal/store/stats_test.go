@@ -10,7 +10,7 @@ import (
 func statRows(t *testing.T, s *Store) int {
 	t.Helper()
 	var n int
-	if err := s.Read().QueryRow(`SELECT count(*) FROM sqlite_stat1`).Scan(&n); err != nil {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT count(*) FROM sqlite_stat1`).Scan(&n); err != nil {
 		return 0 // the table does not exist yet
 	}
 	return n
@@ -40,7 +40,7 @@ func TestCollectStatsCreatesStat1AndGates(t *testing.T) {
 		t.Fatalf("statements=%d rows=%d", n, statRows(t, s))
 	}
 	var idx int
-	if err := s.Read().QueryRow(`SELECT count(*) FROM sqlite_stat1 WHERE tbl='records' AND idx='records_time'`).Scan(&idx); err != nil || idx != 1 {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT count(*) FROM sqlite_stat1 WHERE tbl='records' AND idx='records_time'`).Scan(&idx); err != nil || idx != 1 {
 		t.Fatalf("no records_time row: n=%d err=%v", idx, err)
 	}
 	if s.CollectStatsDue(now.Add(time.Hour), StatsEvery) {
@@ -93,7 +93,7 @@ func TestCollectStatsAfterClose(t *testing.T) {
 func seedRecords(t *testing.T, s *Store) {
 	t.Helper()
 	for i := 0; i < 50; i++ {
-		if _, err := s.wdb.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(1,1,?,0,10,'s','t',1,'example-session',?)`, i, i); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(1,1,?,0,10,'s','t',1,'example-session',?)`, i, i); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -137,7 +137,7 @@ func TestFirstCollectionDoesNotBlockWriterNearBusyTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if _, err := s.wdb.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
+	if _, err := s.wdb.ExecContext(context.Background(), `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
 		WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30000)
 		SELECT 1,1,i,0,10,'s','t',1,'sess'||(i%50),i FROM n`); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestFirstCollectionDoesNotBlockWriterNearBusyTimeout(t *testing.T) {
 			default:
 			}
 			t0 := time.Now()
-			_, err := s.wdb.Exec(`INSERT INTO meta(key,value) VALUES('probe',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, i)
+			_, err := s.wdb.ExecContext(context.Background(), `INSERT INTO meta(key,value) VALUES('probe',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, i)
 			if err != nil {
 				failures++
 			}

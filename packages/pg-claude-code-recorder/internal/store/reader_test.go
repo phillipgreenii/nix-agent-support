@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -122,7 +123,7 @@ func TestReadTxTakesOneTransactionForManyStatements(t *testing.T) {
 func TestReadConnectionPragmasAreConfigurable(t *testing.T) {
 	pragma := func(s *Store, name string) int64 {
 		var v int64
-		if err := s.Read().QueryRow("PRAGMA " + name).Scan(&v); err != nil {
+		if err := s.Read().QueryRowContext(context.Background(), "PRAGMA "+name).Scan(&v); err != nil {
 			t.Fatal(err)
 		}
 		return v

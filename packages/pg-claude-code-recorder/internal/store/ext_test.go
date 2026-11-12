@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -42,7 +43,7 @@ func TestExtensionTablesFollowTheConvention(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	for _, tb := range ExtTables() {
 		var sql string
-		if err := s.Read().QueryRow(`SELECT sql FROM sqlite_master WHERE name=?`, tb.Table()).Scan(&sql); err != nil {
+		if err := s.Read().QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name=?`, tb.Table()).Scan(&sql); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.HasPrefix(tb.Table(), "ext_") || !strings.Contains(sql, "rec_id INTEGER PRIMARY KEY") || !strings.HasSuffix(strings.TrimSpace(sql), "STRICT") {

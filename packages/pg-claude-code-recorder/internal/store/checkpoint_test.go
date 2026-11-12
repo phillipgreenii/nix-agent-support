@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -20,12 +21,12 @@ func TestCheckpointReaderPin(t *testing.T) {
 	s := open(t, t.TempDir())
 	defer func() { _ = s.Close() }()
 	commitFile(t, s)
-	tx, err := s.rdb.Begin()
+	tx, err := s.rdb.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var n int
-	if err := tx.QueryRow(`SELECT count(*) FROM files`).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(context.Background(), `SELECT count(*) FROM files`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	commitFile(t, s)
@@ -55,7 +56,7 @@ func TestCheckpointReaderPin(t *testing.T) {
 func journalLimit(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var v int
-	if err := db.QueryRow(`PRAGMA journal_size_limit`).Scan(&v); err != nil {
+	if err := db.QueryRowContext(context.Background(), `PRAGMA journal_size_limit`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
 	return v
@@ -112,7 +113,7 @@ func TestWALFileShrinksToLimitAfterCompleteCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if _, err := s.wdb.Exec(`PRAGMA wal_autocheckpoint=0`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `PRAGMA wal_autocheckpoint=0`); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 200; i++ {

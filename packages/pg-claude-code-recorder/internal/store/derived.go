@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 
@@ -191,12 +192,13 @@ SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP BY source,rtype,path
 // before the commit, so a test can crash exactly there; a panic or an error
 // rolls the transaction back.
 func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
+	ctx := context.Background()
 	s.lockWrite()
 	defer s.mu.Unlock()
 	if s.batching {
-		return s.bulkWriteLocked(point, fn)
+		return s.bulkWriteLocked(ctx, point, fn)
 	}
-	tx, err := s.wdb.Begin()
+	tx, err := s.wdb.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -225,7 +227,7 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 	for _, h := range s.wrHooks {
 		h()
 	}
-	s.fireOffsets(s.takePend())
+	s.fireOffsets(ctx, s.takePend())
 	return nil
 }
 

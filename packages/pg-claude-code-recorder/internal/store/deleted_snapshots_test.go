@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
 	"testing"
@@ -25,7 +26,7 @@ func TestDeletedSnapshotFilesReturnsOnlyDeletedSnapshots(t *testing.T) {
 	}
 	err := s.WithWrite("", func(tx *sql.Tx) error {
 		for _, r := range rows {
-			if _, err := tx.Exec(`INSERT INTO files(id,source,mode,state,first_seen_ns,cur_gen) VALUES(?,?,?,?,1,1)`, r.id, "x", r.mode, r.state); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO files(id,source,mode,state,first_seen_ns,cur_gen) VALUES(?,?,?,?,1,1)`, r.id, "x", r.mode, r.state); err != nil {
 				return err
 			}
 		}

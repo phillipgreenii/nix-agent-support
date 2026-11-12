@@ -23,8 +23,9 @@ const metaFileFactsCursor = "file_facts_cursor"
 // FileFactsComplete reports whether file_facts covers every file with records
 // (see MetaFileFactsComplete).
 func (s *Store) FileFactsComplete() bool {
+	ctx := context.Background()
 	var v string
-	if err := s.rdb.QueryRow(`SELECT value FROM meta WHERE key=?`, MetaFileFactsComplete).Scan(&v); err != nil {
+	if err := s.rdb.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, MetaFileFactsComplete).Scan(&v); err != nil {
 		return false
 	}
 	return v == "1"
@@ -32,8 +33,9 @@ func (s *Store) FileFactsComplete() bool {
 
 // MarkFileFactsComplete records that the backfill is done.
 func (s *Store) MarkFileFactsComplete() error {
+	ctx := context.Background()
 	return s.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES(?,'1') ON CONFLICT(key) DO UPDATE SET value='1'`, MetaFileFactsComplete)
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,'1') ON CONFLICT(key) DO UPDATE SET value='1'`, MetaFileFactsComplete)
 		return err
 	})
 }
@@ -41,8 +43,9 @@ func (s *Store) MarkFileFactsComplete() error {
 // FileFactsCursor returns the id of the last file the backfill finished (0 when
 // it has not started).
 func (s *Store) FileFactsCursor() int64 {
+	ctx := context.Background()
 	var v string
-	if err := s.rdb.QueryRow(`SELECT value FROM meta WHERE key=?`, metaFileFactsCursor).Scan(&v); err != nil {
+	if err := s.rdb.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, metaFileFactsCursor).Scan(&v); err != nil {
 		return 0
 	}
 	n, _ := strconv.ParseInt(v, 10, 64)
@@ -51,8 +54,9 @@ func (s *Store) FileFactsCursor() int64 {
 
 // SetFileFactsCursor saves the backfill's position.
 func (s *Store) SetFileFactsCursor(id int64) error {
+	ctx := context.Background()
 	return s.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, metaFileFactsCursor, strconv.FormatInt(id, 10))
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, metaFileFactsCursor, strconv.FormatInt(id, 10))
 		return err
 	})
 }

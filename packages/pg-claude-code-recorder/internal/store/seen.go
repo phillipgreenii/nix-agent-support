@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -43,10 +44,11 @@ type SeenRow struct {
 // identity differs from the one recorded beside it (a restored backup). It then
 // rotates the identity token, in the database and in the sidecar file.
 func (s *Store) SeenPrepare(epoch int) (reset bool, err error) {
+	ctx := context.Background()
 	tokPath := filepath.Join(s.dir, seenTokenFile)
 	side, _ := os.ReadFile(tokPath)
-	meta := s.metaString(metaSeenToken)
-	reset = s.metaString(metaSeenEpoch) != strconv.Itoa(epoch) || meta == "" || strings.TrimSpace(string(side)) != meta
+	meta := s.metaString(ctx, metaSeenToken)
+	reset = s.metaString(ctx, metaSeenEpoch) != strconv.Itoa(epoch) || meta == "" || strings.TrimSpace(string(side)) != meta
 	if reset {
 		if err := s.SeenTruncate(); err != nil {
 			return false, err
@@ -58,7 +60,7 @@ func (s *Store) SeenPrepare(epoch int) (reset bool, err error) {
 	}
 	tok := hex.EncodeToString(b[:])
 	for k, v := range map[string]string{metaSeenEpoch: strconv.Itoa(epoch), metaSeenToken: tok} {
-		if _, err := s.wdb.Exec(`INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v); err != nil {
+		if _, err := s.wdb.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v); err != nil {
 			return reset, err
 		}
 	}
@@ -67,14 +69,16 @@ func (s *Store) SeenPrepare(epoch int) (reset bool, err error) {
 
 // SeenTruncate empties the table.
 func (s *Store) SeenTruncate() error {
-	_, err := s.wdb.Exec(`DELETE FROM seen`)
+	ctx := context.Background()
+	_, err := s.wdb.ExecContext(ctx, `DELETE FROM seen`)
 	return err
 }
 
 // SeenCount is the number of rows.
 func (s *Store) SeenCount() (int64, error) {
+	ctx := context.Background()
 	var n int64
-	err := s.wdb.QueryRow(`SELECT COUNT(*) FROM seen`).Scan(&n)
+	err := s.wdb.QueryRowContext(ctx, `SELECT COUNT(*) FROM seen`).Scan(&n)
 	return n, err
 }
 
@@ -84,7 +88,8 @@ func (s *Store) SeenCount() (int64, error) {
 // path is still one of its open paths (a closed, renamed or tombstoned path is
 // not).
 func (s *Store) SeenLoad() ([]SeenRow, error) {
-	rows, err := s.wdb.Query(`SELECT n.path,n.file_id,n.dev,n.ino,n.birth_ns,n.size,n.mtime_ns
+	ctx := context.Background()
+	rows, err := s.wdb.QueryContext(ctx, `SELECT n.path,n.file_id,n.dev,n.ino,n.birth_ns,n.size,n.mtime_ns
 FROM seen n JOIN files f ON f.id=n.file_id
 WHERE f.state<>'deleted' AND f.last_size=n.size AND f.cur_gen=n.gen
   AND f.dev=n.dev AND f.ino=n.ino AND f.birth_ns=n.birth_ns
@@ -109,21 +114,22 @@ WHERE f.state<>'deleted' AND f.last_size=n.size AND f.cur_gen=n.gen
 // SeenWrite applies one batch in one transaction: put rows are replaced (the
 // row's generation is read from the file's current one), del paths removed.
 func (s *Store) SeenWrite(put []SeenRow, del []string) error {
+	ctx := context.Background()
 	if len(put) == 0 && len(del) == 0 {
 		return nil
 	}
-	tx, err := s.wdb.Begin()
+	tx, err := s.wdb.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	for _, p := range del {
-		if _, err := tx.Exec(`DELETE FROM seen WHERE path=?`, p); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM seen WHERE path=?`, p); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
 	}
 	for _, r := range put {
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO seen(path,file_id,dev,ino,birth_ns,size,mtime_ns,gen)
+		if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO seen(path,file_id,dev,ino,birth_ns,size,mtime_ns,gen)
 SELECT ?,id,?,?,?,?,?,cur_gen FROM files WHERE id=?`, r.Path, int64(r.Dev), int64(r.Ino), r.BirthNS, r.Size, r.MTimeNS, r.File); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -135,7 +141,8 @@ SELECT ?,id,?,?,?,?,?,cur_gen FROM files WHERE id=?`, r.Path, int64(r.Dev), int6
 // SeenPrune deletes the rows whose path is not in keep (the paths a complete
 // walk found) and returns how many it removed.
 func (s *Store) SeenPrune(keep map[string]bool) (int, error) {
-	rows, err := s.wdb.Query(`SELECT path FROM seen`)
+	ctx := context.Background()
+	rows, err := s.wdb.QueryContext(ctx, `SELECT path FROM seen`)
 	if err != nil {
 		return 0, err
 	}

@@ -98,8 +98,8 @@ func metaInt(q Querier, key string) int64 {
 	return n
 }
 
-func setMeta(tx *sql.Tx, key, value string) error {
-	_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+func setMeta(ctx context.Context, tx *sql.Tx, key, value string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 	return err
 }
 
@@ -167,18 +167,20 @@ func (s *Store) AskBackfill() AskBackfillState {
 
 // SetAskAsksEnd freezes the record id the question pass runs up to.
 func (s *Store) SetAskAsksEnd(tx *sql.Tx, end int64) error {
-	return setMeta(tx, metaAskAsksEnd, strconv.FormatInt(end, 10))
+	return setMeta(context.Background(), tx, metaAskAsksEnd, strconv.FormatInt(end, 10))
 }
 
 // SetAskAsksCursor saves the question pass position inside tx.
 func (s *Store) SetAskAsksCursor(tx *sql.Tx, id int64) error {
-	return setMeta(tx, metaAskAsksCursor, strconv.FormatInt(id, 10))
+	return setMeta(context.Background(), tx, metaAskAsksCursor, strconv.FormatInt(id, 10))
 }
 
 // SetAskAnswersCursor saves the answer pass position inside tx.
 func (s *Store) SetAskAnswersCursor(tx *sql.Tx, id int64) error {
-	return setMeta(tx, metaAskAnswersCursor, strconv.FormatInt(id, 10))
+	return setMeta(context.Background(), tx, metaAskAnswersCursor, strconv.FormatInt(id, 10))
 }
 
 // MarkAskFactsComplete records that the backfill is done, inside tx.
-func (s *Store) MarkAskFactsComplete(tx *sql.Tx) error { return setMeta(tx, MetaAskFactsComplete, "1") }
+func (s *Store) MarkAskFactsComplete(tx *sql.Tx) error {
+	return setMeta(context.Background(), tx, MetaAskFactsComplete, "1")
+}

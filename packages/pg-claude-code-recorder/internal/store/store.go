@@ -365,7 +365,7 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 		dbExisted = false
 	}
 	endPhase = phaseOf(opt.Phase, "store_open_db")
-	err = s.openDB(dbPath, opt.BulkRebuild)
+	err = s.openDB(ctx, dbPath, opt.BulkRebuild)
 	endPhase()
 	if err != nil {
 		var older *SchemaOlderError
@@ -383,11 +383,11 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 			return nil, err
 		}
 		dbExisted = false
-		if err := s.openDB(dbPath, opt.BulkRebuild); err != nil {
+		if err := s.openDB(ctx, dbPath, opt.BulkRebuild); err != nil {
 			return nil, err
 		}
 	}
-	if !opt.BulkRebuild && s.metaString(metaRebuildUnfinished) != "" {
+	if !opt.BulkRebuild && s.metaString(ctx, metaRebuildUnfinished) != "" {
 		s.closeDBs()
 		return nil, &UnfinishedRebuildError{}
 	}
@@ -397,14 +397,14 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 			return nil, err
 		}
 	}
-	s.lastSeq = s.metaInt("last_seq")
+	s.lastSeq = s.metaInt(context.Background(), "last_seq")
 	if dbExisted && s.lastSeq == 0 && len(recs) > 0 {
 		// A database that applied nothing of a non-empty journal is a rebuild
 		// that was interrupted before it committed: it is still a rebuild (the
 		// epoch must bump so clients resync).
 		dbExisted = false
 	}
-	if v := s.metaInt("schema_version"); v > SchemaVersion {
+	if v := s.metaInt(context.Background(), "schema_version"); v > SchemaVersion {
 		_ = s.CloseCtx(ctx)
 		return nil, &SchemaNewerError{Found: int(v), Known: SchemaVersion}
 	}
@@ -428,7 +428,7 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 	}
 	s.jf = jf
 	if !opt.ReplayOnly {
-		if cur := s.metaInt("epoch"); cur == 0 || s.Rebuilt {
+		if cur := s.metaInt(context.Background(), "epoch"); cur == 0 || s.Rebuilt {
 			if err := s.CommitCtx(ctx, &Rec{T: TEpoch, At: time.Now().UnixNano(), Epoch: int(cur) + 1}); err != nil {
 				_ = s.CloseCtx(ctx)
 				return nil, err
@@ -453,7 +453,7 @@ func phaseOf(hook func(string) func(), name string) func() {
 // busyTimeoutMS is the SQLite busy_timeout of every connection; a var so a test can shorten it.
 var busyTimeoutMS = 5000
 
-func (s *Store) openDB(path string, bulk bool) error {
+func (s *Store) openDB(ctx context.Context, path string, bulk bool) error {
 	dsn := "file:" + path + "?_pragma=journal_mode(" + ablateJournal + ")&_pragma=busy_timeout(" + strconv.Itoa(busyTimeoutMS) + ")&_pragma=synchronous(NORMAL)" + ablateDSNExtra
 	// journal_size_limit lives in the DSN so a re-opened pooled connection keeps
 	// it; it caps the WAL file left behind when the WAL restarts.
@@ -470,37 +470,37 @@ func (s *Store) openDB(path string, bulk bool) error {
 	// An older schema is refused before any DDL runs: the idempotent CREATE
 	// statements below would not change an existing table's columns.
 	var cur string
-	if w.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&cur) == nil {
+	if w.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&cur) == nil {
 		if v, err := strconv.Atoi(cur); err == nil && v < SchemaVersion {
 			_ = w.Close()
 			return &SchemaOlderError{Found: v, Known: SchemaVersion}
 		}
 	}
-	if err := dropFullFieldsIndex(w); err != nil {
+	if err := dropFullFieldsIndex(ctx, w); err != nil {
 		_ = w.Close()
 		return err
 	}
-	if err := addSessionRefColumn(w); err != nil {
+	if err := addSessionRefColumn(ctx, w); err != nil {
 		_ = w.Close()
 		return err
 	}
-	if err := addLookupColumns(w); err != nil {
+	if err := addLookupColumns(ctx, w); err != nil {
 		_ = w.Close()
 		return err
 	}
-	if err := addLastCopyColumn(w); err != nil {
+	if err := addLastCopyColumn(ctx, w); err != nil {
 		_ = w.Close()
 		return err
 	}
 	// One transaction: one commit for the whole script instead of one per
 	// statement (the FTS5 tables add many).
 	var hasTri int
-	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='fts_tri'`).Scan(&hasTri); err != nil {
+	if err := w.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='fts_tri'`).Scan(&hasTri); err != nil {
 		_ = w.Close()
 		return err
 	}
 	var hasRecords int
-	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&hasRecords); err != nil {
+	if err := w.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&hasRecords); err != nil {
 		_ = w.Close()
 		return err
 	}
@@ -509,12 +509,12 @@ func (s *Store) openDB(path string, bulk bool) error {
 	// options only pick the layout of a file that has none.
 	s.trigram = hasTri > 0 || (hasRecords == 0 && !s.noTrigram)
 	var hasExt int
-	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, extTables[0].Table()).Scan(&hasExt); err != nil {
+	if err := w.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, extTables[0].Table()).Scan(&hasExt); err != nil {
 		_ = w.Close()
 		return err
 	}
 	s.ext = hasExt > 0 || s.wantExt
-	sessText, err := recordsHasSessionText(w, s.v3)
+	sessText, err := recordsHasSessionText(ctx, w, s.v3)
 	if err != nil {
 		_ = w.Close()
 		return err
@@ -529,13 +529,13 @@ func (s *Store) openDB(path string, bulk bool) error {
 	// An index.db from before unknown_keys_total existed gets the aggregate
 	// backfilled in the transaction that creates the table.
 	var hasTotal int
-	if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='unknown_keys_total'`).Scan(&hasTotal); err != nil {
+	if err := w.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='unknown_keys_total'`).Scan(&hasTotal); err != nil {
 		_ = w.Close()
 		return err
 	}
 	if hasTotal == 0 {
 		var hasKeys int
-		if err := w.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='unknown_keys'`).Scan(&hasKeys); err != nil {
+		if err := w.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='unknown_keys'`).Scan(&hasKeys); err != nil {
 			_ = w.Close()
 			return err
 		}
@@ -546,7 +546,7 @@ func (s *Store) openDB(path string, bulk bool) error {
 	// A database created empty by this code has session_ref on every row, so it
 	// is marked and gets the session_ref indexes with its (empty) records table;
 	// a database that already had rows is never marked (see metaSessionRef).
-	marked, err := sessionRefMarked(w)
+	marked, err := sessionRefMarked(ctx, w)
 	if err != nil {
 		_ = w.Close()
 		return err
@@ -564,11 +564,11 @@ func (s *Store) openDB(path string, bulk bool) error {
 		ddl += `INSERT OR IGNORE INTO meta(key,value) VALUES('` + MetaFileFactsComplete + `','1');` + "\n"
 		ddl += `INSERT OR IGNORE INTO meta(key,value) VALUES('` + MetaAskFactsComplete + `','1');` + "\n"
 	}
-	if err := execInTx(w, ddl); err != nil {
+	if err := execInTx(ctx, w, ddl); err != nil {
 		_ = w.Close()
 		return err
 	}
-	if _, err := w.Exec(`INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version', ?)`, strconv.Itoa(SchemaVersion)); err != nil {
+	if _, err := w.ExecContext(ctx, `INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version', ?)`, strconv.Itoa(SchemaVersion)); err != nil {
 		_ = w.Close()
 		return err
 	}
@@ -604,16 +604,16 @@ func (s *Store) openDB(path string, bulk bool) error {
 
 // recordsHasSessionText reports whether records carries the legacy session
 // column: an existing table by its columns, a new one by the layout wanted.
-func recordsHasSessionText(db *sql.DB, v3 bool) (bool, error) {
+func recordsHasSessionText(ctx context.Context, db *sql.DB, v3 bool) (bool, error) {
 	var tbl int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil {
 		return false, err
 	}
 	if tbl == 0 {
 		return !v3, nil
 	}
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session'`).Scan(&n)
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session'`).Scan(&n)
 	return n > 0, err
 }
 
@@ -623,20 +623,20 @@ func (s *Store) HasSessionText() bool { return s.sessText }
 
 // sessionRefMarked reports whether the database being opened is marked, or is
 // new (no records table yet) and so is marked by this open.
-func sessionRefMarked(db *sql.DB) (bool, error) {
+func sessionRefMarked(ctx context.Context, db *sql.DB) (bool, error) {
 	var tbl int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil {
 		return false, err
 	}
 	if tbl == 0 {
 		return true, nil
 	}
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='meta'`).Scan(&n); err != nil || n == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='meta'`).Scan(&n); err != nil || n == 0 {
 		return false, err
 	}
 	var v string
-	err := db.QueryRow(`SELECT value FROM meta WHERE key=?`, metaSessionRef).Scan(&v)
+	err := db.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, metaSessionRef).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -661,6 +661,7 @@ const JournalSizeLimit = 1073741824
 // take the write lock, so it is safe beside a writer. It returns an error
 // after Close.
 func (s *Store) Checkpoint() (log, checkpointed int, err error) {
+	ctx := context.Background()
 	s.mu.Lock()
 	c := s.cdb
 	s.mu.Unlock()
@@ -668,7 +669,7 @@ func (s *Store) Checkpoint() (log, checkpointed int, err error) {
 		return 0, 0, errors.New("store closed")
 	}
 	var busy int
-	if err := c.QueryRow(`PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &log, &checkpointed); err != nil {
+	if err := c.QueryRowContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &log, &checkpointed); err != nil {
 		return 0, 0, err
 	}
 	return log, checkpointed, nil
@@ -730,9 +731,9 @@ func (s *Store) closeDBs() {
 	s.wdb, s.rdb, s.cdb = nil, nil, nil
 }
 
-func (s *Store) metaInt(key string) int64 {
+func (s *Store) metaInt(ctx context.Context, key string) int64 {
 	var v string
-	if err := s.wdb.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil {
+	if err := s.wdb.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil {
 		return 0
 	}
 	n, _ := strconv.ParseInt(v, 10, 64)
@@ -746,7 +747,7 @@ func (s *Store) Dir() string { return s.dir }
 func (s *Store) FS() fsx.FS { return s.fs }
 
 // Epoch returns the current state epoch; a rebuild bumps it so clients resync.
-func (s *Store) Epoch() int { return int(s.metaInt("epoch")) }
+func (s *Store) Epoch() int { return int(s.metaInt(context.Background(), "epoch")) }
 
 // CommitSeq counts the journal applies committed by this process. The file,
 // path and generation rows change only inside one, so a reader that cached them
@@ -813,14 +814,14 @@ func (s *Store) bumpLive() {
 }
 
 // LastSeq returns the last journal sequence applied to the database.
-func (s *Store) LastSeq() int64 { return s.metaInt("last_seq") }
+func (s *Store) LastSeq() int64 { return s.metaInt(context.Background(), "last_seq") }
 
 // SchemaVersion returns the schema_version recorded in index.db.
 // HasTrigram reports whether this index.db has the trigram table fts_tri. When
 // it does not, opaque fields are indexed in the word index.
 func (s *Store) HasTrigram() bool { return s.trigram }
 
-func (s *Store) SchemaVersion() int { return int(s.metaInt("schema_version")) }
+func (s *Store) SchemaVersion() int { return int(s.metaInt(context.Background(), "schema_version")) }
 
 // OnCommit registers a hook called after each successful database commit (the
 // recording file-system wrapper observes the commit through it).
@@ -913,7 +914,7 @@ func (s *Store) pendTrunc(n int) {
 // fireOffsets delivers the notes to the OnOffsets hooks. The caller holds the
 // write lock, no transaction of its own is open on the write handle that would
 // block a read, and the notes' writes are committed.
-func (s *Store) fireOffsets(notes []offNote) {
+func (s *Store) fireOffsets(ctx context.Context, notes []offNote) {
 	if len(s.offHooks) == 0 && len(s.fileHooks) == 0 {
 		return
 	}
@@ -923,7 +924,7 @@ func (s *Store) fireOffsets(notes []offNote) {
 				continue
 			}
 			var src, state string
-			if err := s.wdb.QueryRow(`SELECT source,state FROM files WHERE id=?`, n.file).Scan(&src, &state); err != nil {
+			if err := s.wdb.QueryRowContext(ctx, `SELECT source,state FROM files WHERE id=?`, n.file).Scan(&src, &state); err != nil {
 				continue
 			}
 			for _, h := range s.fileHooks {
@@ -935,7 +936,7 @@ func (s *Store) fireOffsets(notes []offNote) {
 			if s.wdb == nil {
 				continue
 			}
-			if err := s.wdb.QueryRow(`SELECT copy_offset,parse_offset FROM generations WHERE file_id=? AND gen=?`, n.file, n.gen).Scan(&n.copy, &n.parse); err != nil {
+			if err := s.wdb.QueryRowContext(ctx, `SELECT copy_offset,parse_offset FROM generations WHERE file_id=? AND gen=?`, n.file, n.gen).Scan(&n.copy, &n.parse); err != nil {
 				continue
 			}
 			if n.at.IsZero() {
@@ -1028,7 +1029,7 @@ func (s *Store) lockWrite() {
 func (s *Store) commit(ctx context.Context, full bool, recs []*Rec) error {
 	s.lockWrite()
 	defer s.mu.Unlock()
-	if err := s.checkFileIDs(recs); err != nil {
+	if err := s.checkFileIDs(ctx, recs); err != nil {
 		return err
 	}
 	var buf []byte
@@ -1123,7 +1124,7 @@ func (e *FileIDCollisionError) Error() string {
 // mode or source. A same-mode, same-source repeat stays an idempotent no-op.
 // Replay does not call it: a journal that already holds a collision must still
 // open (see noteReplayCollisions).
-func (s *Store) checkFileIDs(recs []*Rec) error {
+func (s *Store) checkFileIDs(ctx context.Context, recs []*Rec) error {
 	var seen map[int64]*Rec
 	for _, r := range recs {
 		if r.T != TFile {
@@ -1132,7 +1133,7 @@ func (s *Store) checkFileIDs(recs []*Rec) error {
 		mode, src, found := "", "", false
 		if prev, ok := seen[r.File]; ok {
 			mode, src, found = prev.Mode, prev.Source, true
-		} else if err := s.wdb.QueryRow(`SELECT mode, source FROM files WHERE id=?`, r.File).Scan(&mode, &src); err == nil {
+		} else if err := s.wdb.QueryRowContext(ctx, `SELECT mode, source FROM files WHERE id=?`, r.File).Scan(&mode, &src); err == nil {
 			found = true
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
@@ -1220,13 +1221,13 @@ func (s *Store) applyAllOn(ctx context.Context, db txBeginner, recs []*Rec) erro
 	}
 	var notes []offNote
 	for _, r := range recs {
-		if err := apply(tx, r, &notes); err != nil {
+		if err := apply(ctx, tx, r, &notes); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("store: apply seq %d (%s): %w", r.Seq, r.T, err)
 		}
 	}
 	last := recs[len(recs)-1].Seq
-	if _, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('last_seq',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, strconv.FormatInt(last, 10)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES('last_seq',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, strconv.FormatInt(last, 10)); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -1256,7 +1257,7 @@ func (s *Store) applyAllOn(ctx context.Context, db txBeginner, recs []*Rec) erro
 		s.modelSeq.Add(1)
 	}
 	s.noteFiles(recs)
-	s.fireOffsets(notes)
+	s.fireOffsets(ctx, notes)
 	return nil
 }
 
@@ -1441,8 +1442,8 @@ func resRows(res sql.Result, err error) (int64, error) {
 	return res.RowsAffected()
 }
 
-func apply(tx *sql.Tx, r *Rec, notes *[]offNote) error {
-	err := applyRec(tx, r, notes)
+func apply(ctx context.Context, tx *sql.Tx, r *Rec, notes *[]offNote) error {
+	err := applyRec(ctx, tx, r, notes)
 	if err == nil {
 		switch r.T {
 		case TFile, TState, TTomb, TSnap, TIdent:
@@ -1452,67 +1453,67 @@ func apply(tx *sql.Tx, r *Rec, notes *[]offNote) error {
 	return err
 }
 
-func applyRec(tx *sql.Tx, r *Rec, notes *[]offNote) error {
+func applyRec(ctx context.Context, tx *sql.Tx, r *Rec, notes *[]offNote) error {
 	var err error
 	switch r.T {
 	case TEpoch:
-		_, err = tx.Exec(`INSERT INTO meta(key,value) VALUES('epoch',?) ON CONFLICT(key) DO UPDATE SET value=MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))`, strconv.Itoa(r.Epoch))
+		_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES('epoch',?) ON CONFLICT(key) DO UPDATE SET value=MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))`, strconv.Itoa(r.Epoch))
 	case TFile:
-		_, err = tx.Exec(`INSERT OR IGNORE INTO files(id,source,mode,dev,ino,birth_ns,first_hash,link_target,first_seen_ns,last_size) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO files(id,source,mode,dev,ino,birth_ns,first_hash,link_target,first_seen_ns,last_size) VALUES(?,?,?,?,?,?,?,?,?,?)`,
 			r.File, r.Source, r.Mode, int64(r.Dev), int64(r.Ino), r.Birth, int64(r.FirstHash), r.Link, r.At, r.Size)
 	case TIdent:
-		_, err = tx.Exec(`UPDATE files SET dev=?, ino=?, birth_ns=?, deleted_ns=0, state=CASE WHEN state='deleted' THEN 'ok' ELSE state END WHERE id=?`,
+		_, err = tx.ExecContext(ctx, `UPDATE files SET dev=?, ino=?, birth_ns=?, deleted_ns=0, state=CASE WHEN state='deleted' THEN 'ok' ELSE state END WHERE id=?`,
 			int64(r.Dev), int64(r.Ino), r.Birth, r.File)
 		if err == nil && r.FirstHash != 0 {
-			_, err = tx.Exec(`UPDATE files SET first_hash=? WHERE id=?`, int64(r.FirstHash), r.File)
+			_, err = tx.ExecContext(ctx, `UPDATE files SET first_hash=? WHERE id=?`, int64(r.FirstHash), r.File)
 		}
 	case TPath:
-		_, err = tx.Exec(`INSERT OR IGNORE INTO paths(file_id,path,first_seen_ns) VALUES(?,?,?)`, r.File, r.Path, r.At)
+		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO paths(file_id,path,first_seen_ns) VALUES(?,?,?)`, r.File, r.Path, r.At)
 	case TPathClose:
-		_, err = tx.Exec(`UPDATE paths SET closed_ns=? WHERE file_id=? AND path=? AND closed_ns IS NULL`, r.At, r.File, r.Path)
+		_, err = tx.ExecContext(ctx, `UPDATE paths SET closed_ns=? WHERE file_id=? AND path=? AND closed_ns IS NULL`, r.At, r.File, r.Path)
 	case TGen:
-		_, err = tx.Exec(`INSERT OR IGNORE INTO generations(file_id,gen,method,reason,start_ns) VALUES(?,?,?,?,?)`, r.File, r.Gen, r.Method, r.Reason, r.At)
+		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO generations(file_id,gen,method,reason,start_ns) VALUES(?,?,?,?,?)`, r.File, r.Gen, r.Method, r.Reason, r.At)
 		if err == nil {
-			_, err = tx.Exec(`UPDATE files SET cur_gen=MAX(cur_gen,?) WHERE id=?`, r.Gen, r.File)
+			_, err = tx.ExecContext(ctx, `UPDATE files SET cur_gen=MAX(cur_gen,?) WHERE id=?`, r.Gen, r.File)
 		}
 		if err == nil && r.Reset {
-			_, err = tx.Exec(`INSERT OR IGNORE INTO resets(id,file_id,from_gen,to_gen,reason,at_ns,pinned) VALUES(?,?,?,?,?,?,1)`, r.Seq, r.File, r.Gen-1, r.Gen, r.Reason, r.At)
+			_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO resets(id,file_id,from_gen,to_gen,reason,at_ns,pinned) VALUES(?,?,?,?,?,?,1)`, r.Seq, r.File, r.Gen-1, r.Gen, r.Reason, r.At)
 		}
 	case TCommit:
 		{
 			var res sql.Result
-			res, err = tx.Exec(`UPDATE generations SET copy_offset=?, tail_hash=?, tail_len=? WHERE file_id=? AND gen=? AND copy_offset<=?`,
+			res, err = tx.ExecContext(ctx, `UPDATE generations SET copy_offset=?, tail_hash=?, tail_len=? WHERE file_id=? AND gen=? AND copy_offset<=?`,
 				r.To, int64(r.Tail), r.TailLen, r.File, r.Gen, r.To)
 			if n, _ := resRows(res, err); n > 0 {
 				note := offNote{file: r.File, gen: r.Gen, copy: r.To, at: time.Unix(0, r.At)}
-				err = tx.QueryRow(`SELECT parse_offset FROM generations WHERE file_id=? AND gen=?`, r.File, r.Gen).Scan(&note.parse)
+				err = tx.QueryRowContext(ctx, `SELECT parse_offset FROM generations WHERE file_id=? AND gen=?`, r.File, r.Gen).Scan(&note.parse)
 				*notes = append(*notes, note)
 			}
 		}
 		if err == nil {
-			_, err = tx.Exec(`UPDATE files SET last_size=?, last_copy_ns=MAX(last_copy_ns,?) WHERE id=?`, r.Size, r.At, r.File)
+			_, err = tx.ExecContext(ctx, `UPDATE files SET last_size=?, last_copy_ns=MAX(last_copy_ns,?) WHERE id=?`, r.Size, r.At, r.File)
 		}
 	case TSnap:
-		_, err = tx.Exec(`INSERT OR IGNORE INTO snapshots(file_id,version,hash,size,seen_ns) VALUES(?,?,?,?,?)`, r.File, r.Version, int64(r.Hash), r.Size, r.At)
+		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO snapshots(file_id,version,hash,size,seen_ns) VALUES(?,?,?,?,?)`, r.File, r.Version, int64(r.Hash), r.Size, r.At)
 		if err == nil {
-			_, err = tx.Exec(`UPDATE files SET last_size=?, cur_gen=MAX(cur_gen,?), deleted_ns=0, state='ok' WHERE id=?`, r.Size, r.Version, r.File)
+			_, err = tx.ExecContext(ctx, `UPDATE files SET last_size=?, cur_gen=MAX(cur_gen,?), deleted_ns=0, state='ok' WHERE id=?`, r.Size, r.Version, r.File)
 		}
 	case TTomb:
-		_, err = tx.Exec(`INSERT OR IGNORE INTO tombstones(file_id,path,at_ns) VALUES(?,?,?)`, r.File, r.Path, r.At)
+		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO tombstones(file_id,path,at_ns) VALUES(?,?,?)`, r.File, r.Path, r.At)
 		if err == nil {
-			_, err = tx.Exec(`UPDATE files SET deleted_ns=?, state='deleted' WHERE id=?`, r.At, r.File)
+			_, err = tx.ExecContext(ctx, `UPDATE files SET deleted_ns=?, state='deleted' WHERE id=?`, r.At, r.File)
 		}
 		if err == nil {
-			_, err = tx.Exec(`UPDATE paths SET closed_ns=? WHERE file_id=? AND closed_ns IS NULL`, r.At, r.File)
+			_, err = tx.ExecContext(ctx, `UPDATE paths SET closed_ns=? WHERE file_id=? AND closed_ns IS NULL`, r.At, r.File)
 		}
 	case TState:
-		_, err = tx.Exec(`UPDATE files SET state=? WHERE id=?`, r.State, r.File)
+		_, err = tx.ExecContext(ctx, `UPDATE files SET state=? WHERE id=?`, r.State, r.File)
 	case TRelease:
-		_, err = tx.Exec(`UPDATE resets SET pinned=0 WHERE id<=?`, r.Version)
+		_, err = tx.ExecContext(ctx, `UPDATE resets SET pinned=0 WHERE id<=?`, r.Version)
 	case TProc:
-		err = applyProc(tx, r)
+		err = applyProc(ctx, tx, r)
 	case TStage, TSettle, TTorn:
-		err = applySettle(tx, r)
+		err = applySettle(ctx, tx, r)
 	default:
 		err = fmt.Errorf("unknown record type %q", r.T)
 	}
@@ -1534,25 +1535,25 @@ var ErrNotFound = errNotFound
 // would keep it, and the full index is the size the partial one exists to
 // avoid. derivedIndexes then recreates it partial. A partial index (its SQL has a
 // WHERE clause) is left alone, so a normal open costs one catalog read.
-func dropFullFieldsIndex(db *sql.DB) error {
+func dropFullFieldsIndex(ctx context.Context, db *sql.DB) error {
 	var def sql.NullString
-	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name='fields_name_n'`).Scan(&def)
+	err := db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='index' AND name='fields_name_n'`).Scan(&def)
 	if err == sql.ErrNoRows || (err == nil && strings.Contains(strings.ToUpper(def.String), " WHERE ")) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`DROP INDEX fields_name_n`)
+	_, err = db.ExecContext(ctx, `DROP INDEX fields_name_n`)
 	return err
 }
 
-func execInTx(db *sql.DB, q string) error {
-	tx, err := db.Begin()
+func execInTx(ctx context.Context, db *sql.DB, q string) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(q); err != nil {
+	if _, err := tx.ExecContext(ctx, q); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -1562,15 +1563,15 @@ func execInTx(db *sql.DB, q string) error {
 // addSessionRefColumn gives a records table created before session_ref existed
 // the column. The default is a constant, so SQLite adds it without rewriting a
 // row; older rows keep 0 (no session row) until the database is rebuilt.
-func addSessionRefColumn(db *sql.DB) error {
+func addSessionRefColumn(ctx context.Context, db *sql.DB) error {
 	var tbl, has int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil || tbl == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil || tbl == 0 {
 		return err
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session_ref'`).Scan(&has); err != nil || has > 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session_ref'`).Scan(&has); err != nil || has > 0 {
 		return err
 	}
-	_, err := db.Exec(`ALTER TABLE records ADD COLUMN session_ref INTEGER NOT NULL DEFAULT 0`)
+	_, err := db.ExecContext(ctx, `ALTER TABLE records ADD COLUMN session_ref INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 
@@ -1581,22 +1582,22 @@ func addSessionRefColumn(db *sql.DB) error {
 // 44 ms on a 13 GB database with 106k commits and 91k files. A file with no
 // commit keeps 0. The backfill runs only when the column is added, so a later
 // drop of the commits table leaves the column alone.
-func addLastCopyColumn(db *sql.DB) error {
+func addLastCopyColumn(ctx context.Context, db *sql.DB) error {
 	var tbl, has int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='files'`).Scan(&tbl); err != nil || tbl == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='files'`).Scan(&tbl); err != nil || tbl == 0 {
 		return err
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('files') WHERE name='last_copy_ns'`).Scan(&has); err != nil || has > 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('files') WHERE name='last_copy_ns'`).Scan(&has); err != nil || has > 0 {
 		return err
 	}
-	if _, err := db.Exec(`ALTER TABLE files ADD COLUMN last_copy_ns INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if _, err := db.ExecContext(ctx, `ALTER TABLE files ADD COLUMN last_copy_ns INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	var hasCommits int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commits'`).Scan(&hasCommits); err != nil || hasCommits == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='commits'`).Scan(&hasCommits); err != nil || hasCommits == 0 {
 		return err
 	}
-	_, err := db.Exec(`UPDATE files SET last_copy_ns=c.m FROM (SELECT file_id, MAX(seen_ns) AS m FROM commits GROUP BY file_id) c WHERE files.id=c.file_id`)
+	_, err := db.ExecContext(ctx, `UPDATE files SET last_copy_ns=c.m FROM (SELECT file_id, MAX(seen_ns) AS m FROM commits GROUP BY file_id) c WHERE files.id=c.file_id`)
 	return err
 }
 
@@ -1612,20 +1613,20 @@ var lookupColumns = []struct{ col, table string }{
 // addLookupColumns gives a records table created before the lookup ids existed
 // the five columns (NULL default, so no row is rewritten; older rows keep NULL
 // until the database is rebuilt).
-func addLookupColumns(db *sql.DB) error {
+func addLookupColumns(ctx context.Context, db *sql.DB) error {
 	var tbl int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil || tbl == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='records'`).Scan(&tbl); err != nil || tbl == 0 {
 		return err
 	}
 	for _, c := range lookupColumns {
 		var has int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name=?`, c.col).Scan(&has); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('records') WHERE name=?`, c.col).Scan(&has); err != nil {
 			return err
 		}
 		if has > 0 {
 			continue
 		}
-		if _, err := db.Exec(`ALTER TABLE records ADD COLUMN ` + c.col + ` INTEGER REFERENCES ` + c.table + `(id)`); err != nil {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE records ADD COLUMN `+c.col+` INTEGER REFERENCES `+c.table+`(id)`); err != nil {
 			return err
 		}
 	}

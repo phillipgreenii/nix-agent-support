@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -35,14 +36,14 @@ const (
 	StageExtracting     = "extracting"
 )
 
-func applySettle(tx *sql.Tx, r *Rec) error {
+func applySettle(ctx context.Context, tx *sql.Tx, r *Rec) error {
 	switch r.T {
 	case TStage:
 		if r.State == "" {
-			_, err := tx.Exec(`DELETE FROM conv_stage WHERE session=?`, r.Session)
+			_, err := tx.ExecContext(ctx, `DELETE FROM conv_stage WHERE session=?`, r.Session)
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO conv_stage(session,stage,reason,since_ns,detail) VALUES(?,?,?,?,?)
+		_, err := tx.ExecContext(ctx, `INSERT INTO conv_stage(session,stage,reason,since_ns,detail) VALUES(?,?,?,?,?)
 ON CONFLICT(session) DO UPDATE SET stage=excluded.stage, reason=excluded.reason, since_ns=excluded.since_ns, detail=excluded.detail`,
 			r.Session, r.State, r.Reason, r.At, r.Val)
 		return err
@@ -51,27 +52,27 @@ ON CONFLICT(session) DO UPDATE SET stage=excluded.stage, reason=excluded.reason,
 		if err := json.Unmarshal([]byte(r.Val), &sr); err != nil {
 			return fmt.Errorf("settle record: %w", err)
 		}
-		if _, err := tx.Exec(`INSERT INTO settled(session,seq,at_ns,method,manifest) VALUES(?,1,?,?,?)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO settled(session,seq,at_ns,method,manifest) VALUES(?,1,?,?,?)
 ON CONFLICT(session) DO UPDATE SET seq=seq+1, at_ns=excluded.at_ns, method=excluded.method, manifest=excluded.manifest`,
 			r.Session, r.At, r.Method, string(sr.Manifest)); err != nil {
 			return err
 		}
 		for _, g := range sr.Ranges {
-			if _, err := tx.Exec(`INSERT OR REPLACE INTO ranges(file_id,gen,from_off,to_off,session,seg) VALUES(?,?,?,?,?,?)`,
+			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO ranges(file_id,gen,from_off,to_off,session,seg) VALUES(?,?,?,?,?,?)`,
 				g.File, g.Gen, g.From, g.To, r.Session, g.Seg); err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(`INSERT INTO conv_stage(session,stage,reason,since_ns,detail) VALUES(?,?,?,?,?)
+		_, err := tx.ExecContext(ctx, `INSERT INTO conv_stage(session,stage,reason,since_ns,detail) VALUES(?,?,?,?,?)
 ON CONFLICT(session) DO UPDATE SET stage=excluded.stage, reason=excluded.reason, since_ns=excluded.since_ns, detail=excluded.detail`,
 			r.Session, StageSettled, "", r.At, "")
 		return err
 	case TTorn:
 		if r.Reset {
-			_, err := tx.Exec(`DELETE FROM torn_tails WHERE file_id=? AND gen=?`, r.File, r.Gen)
+			_, err := tx.ExecContext(ctx, `DELETE FROM torn_tails WHERE file_id=? AND gen=?`, r.File, r.Gen)
 			return err
 		}
-		_, err := tx.Exec(`INSERT OR REPLACE INTO torn_tails(file_id,gen,off,len,at_ns) VALUES(?,?,?,?,?)`,
+		_, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO torn_tails(file_id,gen,off,len,at_ns) VALUES(?,?,?,?,?)`,
 			r.File, r.Gen, r.From, r.To-r.From, r.At)
 		return err
 	}

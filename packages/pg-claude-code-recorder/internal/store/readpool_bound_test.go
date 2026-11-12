@@ -76,7 +76,7 @@ func TestReadPoolBoundQueuesExcessReaders(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var n int
-			errs <- s.Read().QueryRow(`SELECT poolbound_block()`).Scan(&n)
+			errs <- s.Read().QueryRowContext(context.Background(), `SELECT poolbound_block()`).Scan(&n)
 		}()
 	}
 	<-started
@@ -121,7 +121,7 @@ func TestReadPoolBoundCancelFreesTheSlot(t *testing.T) {
 	third := make(chan error, 1)
 	go func() {
 		var n int
-		third <- s.Read().QueryRow(`SELECT 1`).Scan(&n)
+		third <- s.Read().QueryRowContext(context.Background(), `SELECT 1`).Scan(&n)
 	}()
 	until(t, "third reader queued", func() bool { return s.Read().Stats().WaitCount == 1 })
 	cancel1()

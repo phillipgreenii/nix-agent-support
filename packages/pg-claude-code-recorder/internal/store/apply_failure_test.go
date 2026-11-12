@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func TestFailedIndexApplyLeavesNoJournalRecord(t *testing.T) {
 	seqBefore := s.nextSeq
 
 	if err := s.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`CREATE TRIGGER fail_commit BEFORE UPDATE ON files BEGIN SELECT RAISE(ABORT, 'database is locked'); END`)
+		_, err := tx.ExecContext(context.Background(), `CREATE TRIGGER fail_commit BEFORE UPDATE ON files BEGIN SELECT RAISE(ABORT, 'database is locked'); END`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -41,7 +42,7 @@ func TestFailedIndexApplyLeavesNoJournalRecord(t *testing.T) {
 	}
 
 	if err := s.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`DROP TRIGGER fail_commit`)
+		_, err := tx.ExecContext(context.Background(), `DROP TRIGGER fail_commit`)
 		return err
 	}); err != nil {
 		t.Fatal(err)

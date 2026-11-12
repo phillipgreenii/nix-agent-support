@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +12,7 @@ import (
 // grows well past limit, and returns its path.
 func growWAL(t *testing.T, s *Store, dir string, n int, limit int64) string {
 	t.Helper()
-	if _, err := s.wdb.Exec(`PRAGMA wal_autocheckpoint=0`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `PRAGMA wal_autocheckpoint=0`); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < n; i++ {
@@ -28,7 +29,7 @@ func growWAL(t *testing.T, s *Store, dir string, n int, limit int64) string {
 func fileCount(t *testing.T, s *Store) int {
 	t.Helper()
 	var n int
-	if err := s.wdb.QueryRow(`SELECT count(*) FROM files`).Scan(&n); err != nil {
+	if err := s.wdb.QueryRowContext(context.Background(), `SELECT count(*) FROM files`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -72,12 +73,12 @@ func TestCheckpointTruncateIsBusyWhileAReaderPinsTheWAL(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 	commitFile(t, s)
-	tx, err := s.rdb.Begin()
+	tx, err := s.rdb.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var n int
-	if err := tx.QueryRow(`SELECT count(*) FROM files`).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(context.Background(), `SELECT count(*) FROM files`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	wal := growWAL(t, s, dir, 200, limit)
@@ -108,7 +109,7 @@ func TestCheckpointTruncateIsBusyWhileAReaderPinsTheWAL(t *testing.T) {
 	}
 	// The checkpoint connection keeps its normal busy_timeout.
 	var ms int
-	if err := s.cdb.QueryRow(`PRAGMA busy_timeout`).Scan(&ms); err != nil || ms != walBusyTimeoutMS {
+	if err := s.cdb.QueryRowContext(context.Background(), `PRAGMA busy_timeout`).Scan(&ms); err != nil || ms != walBusyTimeoutMS {
 		t.Fatalf("busy_timeout after TRUNCATE = %d err=%v", ms, err)
 	}
 }
@@ -124,12 +125,12 @@ func TestTruncateWithoutAllFramesStallsWriters(t *testing.T) {
 	s := open(t, t.TempDir())
 	defer func() { _ = s.Close() }()
 	commitFile(t, s)
-	tx, err := s.rdb.Begin()
+	tx, err := s.rdb.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var n int
-	if err := tx.QueryRow(`SELECT count(*) FROM files`).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(context.Background(), `SELECT count(*) FROM files`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	commitFile(t, s)

@@ -47,7 +47,7 @@ func TestOpenCreatesLayoutWALAndSchemaVersion(t *testing.T) {
 		}
 	}
 	var mode string
-	if err := s.rdb.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+	if err := s.rdb.QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal_mode %q %v", mode, err)
 	}
 	if s.SchemaVersion() != SchemaVersion || s.Epoch() != 1 {
@@ -58,7 +58,7 @@ func TestOpenCreatesLayoutWALAndSchemaVersion(t *testing.T) {
 func TestNewerSchemaIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
-	if _, err := s.wdb.Exec(`UPDATE meta SET value='99' WHERE key='schema_version'`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `UPDATE meta SET value='99' WHERE key='schema_version'`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
@@ -263,7 +263,7 @@ func TestNewerSchemaSaysHowToProceedAndRebuildIsThatWay(t *testing.T) {
 	s := open(t, dir)
 	id := seed(t, s)
 	epoch := s.Epoch()
-	if _, err := s.wdb.Exec(`UPDATE meta SET value='99' WHERE key='schema_version'`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `UPDATE meta SET value='99' WHERE key='schema_version'`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()
@@ -412,7 +412,7 @@ func TestCountingDriverCountsStoreReads(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	seed(t, s)
 	c.Reset()
-	rs, err := s.rdb.Query(`SELECT key FROM meta`)
+	rs, err := s.rdb.QueryContext(context.Background(), `SELECT key FROM meta`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +475,7 @@ func TestFeedMarksAtIndexIsCreatedByOpenAndGainedByAnOlderDatabase(t *testing.T)
 	if !hasIndex(t, s, "feed_marks_at") {
 		t.Fatal("a new store lacks feed_marks_at")
 	}
-	if _, err := s.wdb.Exec(`DROP INDEX feed_marks_at`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `DROP INDEX feed_marks_at`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -497,7 +497,7 @@ func TestBulkRebuildCreatesFeedMarksAtIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if _, err := s.wdb.Exec(`DROP INDEX IF EXISTS feed_marks_at`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `DROP INDEX IF EXISTS feed_marks_at`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.FinishRebuild(); err != nil {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -38,6 +39,7 @@ func (s *Store) RebuildProfile() RebuildProfile {
 // JSON meta row (last_rebuild_profile), so the operator can read them from
 // index.db after the daemon restarts, and returns the profile it stored.
 func (s *Store) RecordRebuildSummary(wall time.Duration, records int64) (RebuildProfile, error) {
+	ctx := context.Background()
 	p := s.RebuildProfile()
 	rate := 0.0
 	if wall > 0 {
@@ -54,6 +56,6 @@ func (s *Store) RecordRebuildSummary(wall time.Duration, records int64) (Rebuild
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err = s.wdb.Exec(`INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, metaRebuildProfile, string(b))
+	_, err = s.wdb.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, metaRebuildProfile, string(b))
 	return p, err
 }

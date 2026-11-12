@@ -56,7 +56,7 @@ var ErrStatsSkipped = errors.New("stats collection skipped slow indexes")
 // CollectStatsDue reports whether the last collection is older than every (or
 // none was recorded).
 func (s *Store) CollectStatsDue(now time.Time, every time.Duration) bool {
-	last := s.metaInt(metaStatsAtNS)
+	last := s.metaInt(context.Background(), metaStatsAtNS)
 	return last == 0 || now.Sub(time.Unix(0, last)) >= every
 }
 

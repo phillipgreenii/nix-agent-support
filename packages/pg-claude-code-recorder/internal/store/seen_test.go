@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,7 +27,7 @@ func loadSeenT(t *testing.T, s *Store) []SeenRow {
 func TestOpenCreatesTheSeenTableOnAnExistingStore(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
-	if _, err := s.wdb.Exec(`DROP TABLE seen`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `DROP TABLE seen`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

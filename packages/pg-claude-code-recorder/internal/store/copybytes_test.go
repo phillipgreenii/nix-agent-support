@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -19,7 +20,7 @@ func TestCopyBytesMatchesOnDiskAndSkipsReclaimed(t *testing.T) {
 	}
 	exec := func(q string, args ...any) {
 		t.Helper()
-		if _, err := s.wdb.Exec(q, args...); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), q, args...); err != nil {
 			t.Fatal(err)
 		}
 	}

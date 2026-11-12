@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ func v2Store(t *testing.T, dir string) {
 	t.Helper()
 	s := open(t, dir)
 	seed(t, s)
-	if _, err := s.wdb.Exec(`UPDATE meta SET value='2' WHERE key='schema_version'`); err != nil {
+	if _, err := s.wdb.ExecContext(context.Background(), `UPDATE meta SET value='2' WHERE key='schema_version'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -50,9 +51,9 @@ func TestVersionTwoStoreIsRefusedAndRebuildsIntoTheVersionThreeLayout(t *testing
 		t.Fatal("the old file was not kept intact as index.db.pre-rebuild")
 	}
 	var sessionCol, tri, ext int
-	_ = s.Read().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session'`).Scan(&sessionCol)
-	_ = s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='fts_tri'`).Scan(&tri)
-	_ = s.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='ext_assistant_usage'`).Scan(&ext)
+	_ = s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session'`).Scan(&sessionCol)
+	_ = s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE name='fts_tri'`).Scan(&tri)
+	_ = s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE name='ext_assistant_usage'`).Scan(&ext)
 	if sessionCol != 0 || tri != 0 || ext != 1 || s.HasSessionText() || !s.SessionRefReady() || s.SchemaVersion() != SchemaVersion {
 		t.Fatalf("not the v3 layout: session col %d, fts_tri %d, ext %d, ready %v, version %d", sessionCol, tri, ext, s.SessionRefReady(), s.SchemaVersion())
 	}
@@ -154,7 +155,7 @@ func TestBulkRebuildRecordsWallTimeRateAndProfile(t *testing.T) {
 		t.Fatalf("profile %+v", p)
 	}
 	var js string
-	if err := s.Read().QueryRow(`SELECT value FROM meta WHERE key=?`, metaRebuildProfile).Scan(&js); err != nil {
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key=?`, metaRebuildProfile).Scan(&js); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{`"wall_sec":2`, `"records":1000`, `"records_per_sec":500`, `"index_build_sec"`, `"fts_optimize_sec"`, `"checkpoint_sec"`, `"batch_commit_sec"`} {
