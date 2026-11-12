@@ -152,6 +152,20 @@ during the session, so differences of a few percent are inside the noise.
   mostly waiting, not store creation), so the spike was dropped and no test code changed. The
   settle tier stays as it is; phase 3 and the value gate do not need a template store.
 
+Final verification (whole set, `nice -n 10 go test -p 4 -count=1`, single runs). The host was far
+busier than during phase 2 (1-minute load average 15.9 at the start of the settle run, 37.9 at the end
+of the race run, against 5 to 7 before), so the times are NOT comparable to the baseline above:
+
+| Run                                                  | Load at start | Package time |
+| ---------------------------------------------------- | ------------- | ------------ |
+| `internal/settle`, plain                             | 15.90         | 47.47 s      |
+| `internal/settle`, `-race` (whole module run)        | about 16      | 123.00 s     |
+| whole module, plain / `-race`, `go vet` (4 tag sets) | n/a           | all pass     |
+
+The settle unit tier is 2.5 times the phase 2 plain baseline (47.47 s / 18.62 s) at 2.4 times the load
+(15.90 / 6.72), and `-race` is 1.7 times the baseline (123.00 s / 71.07 s); the ratios track the load, so no
+regression is shown, but none is ruled out to better than the load noise.
+
 ## Landing
 
 The whole set stays on one feature branch in one worktree until the final verification passes: all

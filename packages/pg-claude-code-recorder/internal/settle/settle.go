@@ -18,6 +18,21 @@
 //
 // A restart (Recover) removes a segment that was renamed but never committed
 // and finishes a delete the crash cut short.
+//
+// Structure. The package is split into components, each behind an interface
+// its consumer declares: internal/serve depends on LoopDriver, DirtySink,
+// OpsPort and DoctorPort, which *Settler satisfies, and the Doctor is its own
+// type (own mutex, narrow DoctorDeps, no run lock). Decisions that need no
+// state (the schedule, the removal rate limit, the check and stage-gate
+// predicates) are pure functions. Lock order is the run lock, then the copier
+// lock; Dirty and LiveChanged never take the run lock.
+//
+// Tests. The unit tier runs in the normal go test. Three tiers sit behind
+// build tags and their own nix checks: crashsweep (crash injection at every
+// file-system operation, then Recover and invariants.Check, plus a rapid
+// model-based sequence test), lockorder (go-deadlock on the run lock and the
+// copier lock), and integration. A fake store MUST pass a contract suite that
+// is also run against the real store. See docs/adr/0123-recorder-settle-is-split-into-components-behind-consumer-side-interfaces-and-proven-by-crash-injection.md.
 package settle
 
 import (
