@@ -144,7 +144,7 @@ func TestVerdicts(t *testing.T) {
 		{"expired access, no refresh", func(r *rig) { r.login(-1*hr, 0, false) }, "UNAVAILABLE", 0, ""},
 		{"expired access, registration valid but no refresh", func(r *rig) { r.login(-1*hr, 5*hr, false) }, "UNAVAILABLE", 0, ""},
 		{"refresh with expired registration", func(r *rig) { r.login(-1*hr, -30*time.Minute, true) }, "UNAVAILABLE", 0, ""},
-		{"refresh, no registration field, expired access", func(r *rig) { r.login(-1*hr, 0, true) }, "AVAILABLE", 0, ""},
+		{"refresh, no registration field, expired access", func(r *rig) { r.login(-1*hr, 0, true) }, "UNAVAILABLE", 0, ""},
 		{"no cache dir", func(r *rig) { r.cache = filepath.Join(r.cache, "absent") }, "UNAVAILABLE", 0, ""},
 		{"empty cache dir", func(r *rig) {}, "UNAVAILABLE", 0, ""},
 		{"file for another session", func(r *rig) {
@@ -375,14 +375,75 @@ func TestLiveAccessTokenRescuesRegistration(t *testing.T) {
 	}
 }
 
-// TestRefreshWithoutRegistrationProvisional documents the PROVISIONAL branch:
-// a refresh token with no registrationExpiresAt reads AVAILABLE even with an
-// expired access token (reading 0). Under review against the real cache fields.
-func TestRefreshWithoutRegistrationProvisional(t *testing.T) {
-	r := newRig(t)
-	r.login(-hr, 0, true)
-	if got, left := r.level(); got != "AVAILABLE" || left != 0 {
-		t.Errorf("provisional behavior changed: %s %v", got, left)
+// TestRefreshWithoutRegistrationFailsClosed: a refresh token with no readable
+// registrationExpiresAt earns no refresh credit; the file is judged on its
+// access token alone, with the margin.
+func TestRefreshWithoutRegistrationFailsClosed(t *testing.T) {
+	cases := []struct {
+		name   string
+		access time.Duration
+		reg    string
+		want   string
+		left   float64
+	}{
+		{"expired access, no registration", -hr, "", "UNAVAILABLE", 0},
+		{"expired access, unparseable registration", -hr, "soon", "UNAVAILABLE", 0},
+		{"live access, no registration", 2 * hr, "", "AVAILABLE", 7200},
+		{"access inside margin, no registration", 10 * time.Minute, "", "UNAVAILABLE", 600},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newRig(t)
+			m := map[string]any{"expiresAt": ts(c.access), "refreshToken": secretRefresh}
+			if c.reg != "" {
+				m["registrationExpiresAt"] = c.reg
+			}
+			r.put(sha1Name("zip"), m)
+			if got, left := r.level(); got != c.want || left != c.left {
+				t.Errorf("level %s left %v, want %s %v", got, left, c.want, c.left)
+			}
+		})
+	}
+}
+
+// TestRealCacheKeySets uses exactly the key sets of a real login (synthetic
+// values): the registration file is ignored, the token file is used.
+func TestRealCacheKeySets(t *testing.T) {
+	for _, withURL := range []bool{false, true} {
+		r := newRig(t)
+		const url = "https://example.invalid/start"
+		if withURL {
+			r.cfg["start_url"] = url
+		}
+		// Client registration file: no startUrl, sessionName or refreshToken.
+		r.put("0registration.json", map[string]any{
+			"clientId": "cid", "clientSecret": secretClient, "expiresAt": ts(90 * 24 * hr),
+			"grantTypes": []string{"authorization_code", "refresh_token"}, "scopes": []string{"sso:account:access"},
+		})
+		// Token file: no sessionName; named by sha1 of the session when withURL
+		// is false, under an arbitrary name (matched by startUrl) when true.
+		name := sha1Name("zip")
+		if withURL {
+			name = "9token-other-name.json"
+		}
+		r.put(name, map[string]any{
+			"accessToken": secretAccess, "clientId": "cid", "clientSecret": secretClient,
+			"expiresAt": ts(-hr), "refreshToken": secretRefresh, "region": "us-west-2",
+			"registrationExpiresAt": ts(20 * hr), "startUrl": url,
+		})
+		got, left := r.level()
+		if got != "AVAILABLE" || left != 72000 {
+			t.Errorf("withURL=%v: level %s left %v, want AVAILABLE 72000 (from the token file, not the registration's 90 days)", withURL, got, left)
+		}
+		// The registration file alone is never a session.
+		r2 := newRig(t)
+		if withURL {
+			r2.cfg["start_url"] = url
+		}
+		r2.put("0registration.json", map[string]any{"clientId": "cid", "clientSecret": secretClient, "expiresAt": ts(90 * 24 * hr), "grantTypes": []string{"refresh_token"}})
+		if got, _ := r2.level(); got != "UNAVAILABLE" {
+			t.Errorf("withURL=%v: registration file alone must not be a session: %s", withURL, got)
+		}
 	}
 }
 

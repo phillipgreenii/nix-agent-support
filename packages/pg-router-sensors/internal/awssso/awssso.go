@@ -20,12 +20,18 @@
 //
 // Reading: seconds until the session can no longer be renewed (unit s_left):
 // the longer of the access token's remaining life and, with a refresh token and
-// a registrationExpiresAt, the registration's remaining life. With a refresh
-// token and no registrationExpiresAt the horizon is unknown (PROVISIONAL, under
-// review against the real cache fields): the session counts as usable, the
-// reading is the access token's remaining seconds (never negative) and the
-// margin is not applied. Only regular files are opened (at most MaxFiles, each
-// at most MaxFileBytes); cache_dir MUST be absolute.
+// a readable registrationExpiresAt, the registration's remaining life. A
+// refresh token WITHOUT a readable registrationExpiresAt earns no refresh
+// credit (fail closed): the file is judged on its access token alone, with the
+// margin. Only regular files are opened (at most MaxFiles, each at most
+// MaxFileBytes); cache_dir MUST be absolute.
+//
+// The real token file has the keys accessToken, clientId, clientSecret,
+// expiresAt, refreshToken, region, registrationExpiresAt and startUrl (no
+// sessionName), so it is matched by its sha1(sso_session).json name or, when
+// start_url is configured, by its startUrl. The sibling client-registration
+// file (clientId, clientSecret, expiresAt, grantTypes, scopes) has neither a
+// startUrl nor a session-named file name and is never matched.
 //
 // Config keys: sso_session (default "zip"), cache_dir (default
 // $HOME/.aws/sso/cache), start_url (optional extra match on startUrl), margin
@@ -283,13 +289,10 @@ func (s *Sensor) judge(f cacheFile, now time.Time) (candidate, bool) {
 			if regLeft > c.left {
 				c.left = regLeft
 			}
-		} else {
-			// PROVISIONAL (under review against the real cache field names): a
-			// refresh token with no readable registrationExpiresAt has an
-			// unknown renewal horizon and counts as usable, with the access
-			// token's remaining seconds as the reading and no margin applied.
-			c.ok = true
 		}
+		// A refresh token with no readable registrationExpiresAt is unexpected
+		// (the AWS CLI writes the two together): it earns no refresh credit, so
+		// the file is judged on its access token alone, with the margin.
 	}
 	return c, true
 }
