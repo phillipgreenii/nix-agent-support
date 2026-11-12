@@ -27,9 +27,10 @@ as a claim to verify (it may be there by error). Where nothing is left for a per
 absorbs and closes the handoff, where person-steps remain it rewrites the handoff to list only
 those, and breaking the non-human parts out into beads is fine.
 
-## `$ARGUMENTS`
+## Command arguments
 
-`$ARGUMENTS` is free text and MAY be empty. Read it for intent:
+The command arguments are free text and MAY be empty (the value substituted here is:
+`$ARGUMENTS`). When that is empty there are no arguments: walk as usual. Read them for intent:
 
 - A bead id the operator wants processed: process exactly that handoff, with no walk before or
   after it.
@@ -42,9 +43,10 @@ those, and breaking the non-human parts out into beads is fine.
 ## Startup / resume (survives compaction)
 
 1. Mark this session's mode (best-effort, `|| true`; a missing or broken `session-mode` tool
-   MUST NOT block the work): if `$ARGUMENTS` is 24 characters or fewer, run
-   `session-mode start process-handoff --force --detail "$ARGUMENTS"`; otherwise pass a few-word
-   summary of it as `--detail`.
+   MUST NOT block the work): when the command arguments are empty, run
+   `session-mode start process-handoff --force`; when they are 24 characters or fewer, run
+   `session-mode start process-handoff --force --detail "<the arguments>"`; otherwise pass a
+   few-word summary of them as `--detail`.
 2. Invoke the `beads-lifecycle` skill before any `bd` command that writes, then run `bd prime`.
 3. Your actor id: `pb actor --role handoff --scratchpad <your session's own scratchpad dir>`.
    Keep the printed value as ID and pass `--actor "ID"` on every claim, comment, close and

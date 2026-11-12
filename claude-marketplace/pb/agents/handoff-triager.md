@@ -114,9 +114,12 @@ apply|update`, `sudo`, production deploys and credentials are always `HUMAN`. Be
    close, and release.
    f. If ANY item is `HUMAN` (including an item an existing `human` bead holds that is actionable
    now): REWRITE the handoff and keep it open under the outer claim, in this order. (1) Write
-   the original body verbatim to a fresh temp file (`mktemp`), add it as an `ORIGINAL BODY:`
-   comment (`bd comment <id> --file <file>`), and confirm the comment exists by reading it
-   back; the rewrite MUST NOT run before that. (2) Replace the description (`bd update <id>
+   the original body verbatim to a fresh temp file (`mktemp`) whose first line is `ORIGINAL BODY:`.
+   First list the handoff's comments: if one starting `ORIGINAL BODY:` already exists (a prior
+   run archived it), add nothing and treat that one as the archive. Otherwise add EXACTLY ONE
+   comment from that file (`bd comment <id> --file <file>`), never a second one, with or
+   without the prefix, and confirm it exists by reading it back; the rewrite MUST NOT run
+   before that. (2) Replace the description (`bd update <id>
 --body-file <file>`) with: the first line unchanged (`Handoff from session <id>`, so
    identity and metadata survive); a line `Rewritten <date> by /process-handoff; original body
 archived in a comment`; `## Remaining for the operator` (each step: what, why_human,
