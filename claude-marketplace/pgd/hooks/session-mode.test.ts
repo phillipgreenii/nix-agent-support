@@ -183,23 +183,37 @@ test('with components.sessionMode off nothing is registered: no read, button, mo
   expect(w.calls).toHaveLength(0)
 })
 
-test('the source is read on turn.complete at most once per ten seconds, and after a stop regardless', async () => {
+test('a turn.complete read is skipped when the previous read is younger than the interval, and a stop reads regardless', async () => {
   const w = await world(async () => record('drain-beads'))
   const hooks: Record<string, (...a: unknown[]) => unknown> = {}
   registerGitHeadHooks((n: string, fn: (...a: unknown[]) => unknown) => void (hooks[n] = fn))
   const shows = (): number => w.calls.filter(c => c.argv[1] === 'show').length
   expect(shows()).toBe(1)
-  await w.clock.advance(4000)
+  await w.clock.advance(2000)
   hooks['turn.complete'](undefined, {}, (e: unknown) => e)
   await w.clock.advance(0)
   expect(shows()).toBe(1)
-  await w.clock.advance(7000)
+  await w.clock.advance(MODE_INTERVAL_MS)
+  const before = shows()
   hooks['turn.complete'](undefined, {}, (e: unknown) => e)
   await w.clock.advance(0)
-  expect(shows()).toBe(2)
-  // no timer polls the source between turns
-  await w.clock.advance(MODE_INTERVAL_MS * 3)
-  expect(shows()).toBe(2)
+  expect(shows()).toBe(before + 1)
+})
+
+test('a record written mid-turn (no turn.complete) is picked up by the poll, running then finished', async () => {
+  let current: Answer = { exitCode: 2 }
+  const w = await world(async () => current)
+  expect(alertRow()).toBe('')
+  expect(ids().includes('mode')).toBe(false)
+  current = record(WRAP_UP_MODE, 'running')
+  await w.clock.advance(MODE_INTERVAL_MS + 1)
+  expect(readCached('sessionMode')).toEqual({ mode: WRAP_UP_MODE, state: 'running' })
+  expect(alertRow()).toBe('wrapping up')
+  expect(ids().includes('mode')).toBe(true)
+  current = record(WRAP_UP_MODE, 'finished')
+  await w.clock.advance(MODE_INTERVAL_MS + 1)
+  expect(alertRow()).toBe('')
+  expect(readCached('sessionMode')).toEqual({ mode: WRAP_UP_MODE, state: 'finished' })
 })
 
 test('parseMode maps kind, state and detail; a record without kind or state is a parse failure', () => {

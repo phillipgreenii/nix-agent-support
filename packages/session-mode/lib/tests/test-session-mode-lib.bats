@@ -72,9 +72,25 @@ load_lib() {
 @test "session_mode_state_dir: falls back to the encoded cwd under HOME when no arg given" {
   load_lib
   unset SESSION_MODE_STATE_DIR
-  HOME="/Users/phillipg" PWD="/Users/phillipg/repo" run session_mode_state_dir
+  local real
+  real=$(mkdir -p "$BATS_TEST_TMPDIR/repo" && cd "$BATS_TEST_TMPDIR/repo" && pwd -P)
+  cd "$real"
+  HOME="/Users/phillipg" run session_mode_state_dir
   [ "$status" -eq 0 ]
-  [ "$output" = "/Users/phillipg/.claude/projects/-Users-phillipg-repo" ]
+  [ "$output" = "/Users/phillipg/.claude/projects/$(session_mode_encode_cwd "$real")" ]
+}
+
+@test "session_mode_state_dir: a symlinked cwd resolves to the real path (pwd -P)" {
+  load_lib
+  unset SESSION_MODE_STATE_DIR
+  mkdir -p "$BATS_TEST_TMPDIR/real/x"
+  ln -s "$BATS_TEST_TMPDIR/real/x" "$BATS_TEST_TMPDIR/link"
+  local real
+  real=$(cd "$BATS_TEST_TMPDIR/real/x" && pwd -P)
+  cd "$BATS_TEST_TMPDIR/link"
+  HOME="/h" run session_mode_state_dir
+  [ "$status" -eq 0 ]
+  [ "$output" = "/h/.claude/projects/$(session_mode_encode_cwd "$real")" ]
 }
 
 # --- session_mode_find_transcript ---

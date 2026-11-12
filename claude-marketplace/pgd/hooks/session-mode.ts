@@ -13,9 +13,12 @@ import type { ModApi, PgdOptions } from './types'
 //
 // Choices made by the builder (documented in the package README, each covered by
 // session-mode.test.ts):
-//  - Source: id sessionMode, event-driven (intervalMs 0, no timer); it is read once at start, on
-//    turn.complete and after a stop action.
-//  - Throttle: a read is skipped when the previous one began less than ten seconds ago; a stop
+//  - Source: id sessionMode, polled every MODE_INTERVAL_MS (5 s; the source layer multiplies it by
+//    four after five idle minutes and backs off after failures), plus a read at start, on
+//    turn.complete and after a stop action. A one-turn wrap-up starts, runs its phases and finishes
+//    inside one turn, so reading at turn completion alone never sees it running; the poll does. It
+//    polls with and without a record, because a wrap-up starts after the last read.
+//  - Throttle: a turn.complete read is skipped when the previous one began less than five seconds ago; a stop
 //    action bypasses the throttle once so the button reflects the stop at once.
 //  - Parsing: `session-mode show` prints one JSON record { kind, state, detail?, ... }; the value is
 //    { mode: kind, state, detail? }. Exit 2 (no record) is the value undefined, not a failure; any
@@ -32,7 +35,7 @@ import type { ModApi, PgdOptions } from './types'
 //    reads "wrapping up" while active and "wrapped up" once finished. Colour (the old status line):
 //    mode magenta, wrapping up and stopping yellow, wrapped up green, other finished dim.
 //    Actions: stop (not while finished) and close.
-export const MODE_INTERVAL_MS = 10_000
+export const MODE_INTERVAL_MS = 5_000
 export const MODE_TIMEOUT_MS = 10_000
 export const WRAP_UP_MODE = 'wrap-up-session'
 
@@ -145,7 +148,7 @@ export function startSessionMode(_options: PgdOptions, host: ModApi): void {
   readForSession = undefined
   defineSource<ModeValue>({
     id: 'sessionMode',
-    intervalMs: 0,
+    intervalMs: MODE_INTERVAL_MS,
     feeds: ['band', 'modal', 'alert'],
     fetch: ({ host: h }) => fetchMode(h),
   })
@@ -174,7 +177,7 @@ export function startSessionMode(_options: PgdOptions, host: ModApi): void {
   refresh('sessionMode', { force: true })
 }
 
-// A turn finished: read the record again, at most once per ten seconds. It needs no `$`.
+// A turn finished: read the record again, at most once per MODE_INTERVAL_MS. It needs no `$`.
 export function onSessionModeTurnComplete(): void {
   const o = getOptions()
   if (!o?.enable || !o.components.sessionMode) return

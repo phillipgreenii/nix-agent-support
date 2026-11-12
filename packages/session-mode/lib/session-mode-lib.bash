@@ -37,7 +37,11 @@ session_mode_state_dir() {
   elif [[ -n $transcript_path ]]; then
     printf '%s' "${transcript_path%/*}"
   else
-    printf '%s/.claude/projects/%s' "$HOME" "$(session_mode_encode_cwd "$PWD")"
+    # pwd -P: Claude Code names the project directory after the resolved cwd, so a
+    # symlinked $PWD (/tmp/x versus /private/tmp/x) must be resolved the same way.
+    local cwd
+    cwd=$(pwd -P 2>/dev/null) || cwd=$PWD
+    printf '%s/.claude/projects/%s' "$HOME" "$(session_mode_encode_cwd "$cwd")"
   fi
 }
 
