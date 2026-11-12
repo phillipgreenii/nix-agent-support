@@ -3,6 +3,6 @@
   "description": "Integrate the current branch by the repo's method (ff-merge / PR / custom)",
   "version": "0.1.0",
   "defaultEnabled": true,
-  "requires": ["integrate-branch-support", "wtdone"],
+  "requires": ["integrate-branch-support", "pg-git-lander", "wtdone"],
   "uses": ["beads", "claude-extended-tool-approver"]
 }

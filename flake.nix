@@ -5555,7 +5555,7 @@
                   fi
 
                   ff="$surface/claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md"
-                  for want in 'integrate-branch-support --prek-branch-diff' 'pg-hooks run pre-land' 'pg-hooks not installed on this machine; ask the operator to run pn workspace apply' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule' '## FF-1c' 'stopped:eval-failed' 'pre-land-eval "$WT" "$FB"' 'bgwait "pre-land-eval-' 'AGENT-FIXABLE' 'pre-land-eval not installed on this machine; ask the operator to run pn workspace apply' 'pgii-integrate-branch.preLandEval' 'pre-land eval: not enabled for <repo>' 'pn workspace flake-check --no-build' 'MUST NOT be made to pass by relocking' 'unchanged hoping for a different answer'; do
+                  for want in 'pg-git-lander land' 'pg-git-lander rebase' 'pg-hooks run pre-land' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule' '## FF-1b and FF-1c are before_move hooks' 'stopped:eval-failed' 'pre-land-eval "$WT" "$FB"' 'bgwait "pgl-land-' 'AGENT-FIXABLE' 'pgii-integrate-branch.preLandEval' 'pn workspace flake-check --no-build' 'MUST NOT be made to pass by relocking' 'unchanged hoping for a different answer' '--source-worktree' '--keep-source-worktree' 'pg-git-lander/idle/'; do
                     if ! grep -qF -- "$want" "$ff"; then
                       echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1b/FF-4 pg-hooks text: $want" >&2
                       exit 1
@@ -5570,7 +5570,7 @@
                       exit 1
                     fi
                   done
-                  for relock in 'no land step MAY call' '`pn workspace update`, `pn workspace upgrade` or `pn workspace lock`'; do
+                  for relock in 'No land step calls' '`pn workspace update`, `upgrade` or `lock`'; do
                     if ! grep -qF -- "$relock" "$ff"; then
                       echo "FAIL: ff-merge-to-main SKILL.md no longer forbids FF-1c relocking: $relock" >&2
                       exit 1
@@ -5579,7 +5579,7 @@
                   # Operator ruling 2026-10-23 (bead pg2-quj42): FF-1c (the eval-only
                   # pre-land-eval step) is pinned in the skill, in its status table and
                   # mermaid flow, in the lander reference and in the agent how-to.
-                  if ! grep -qF -- '| `eval-failed`' "$ff" || ! grep -qF -- 'F1C -->' "$ff"; then
+                  if ! grep -qF -- '| `eval-failed`' "$ff" || ! grep -qF -- 'H -->|"evaluation check"|' "$ff"; then
                     echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1c status-table row or decision-flow edge" >&2
                     exit 1
                   fi

@@ -1,13 +1,13 @@
 ---
 name: ff-merge-to-main
-description: Local rebase-then-fast-forward-merge landing handler (FF-0..FF-4). Invoked by the `integrate-branch` skill as its `ff-merge-to-main` handler when the resolved strategy is "ff-merge-to-main" — not normally invoked directly.
+description: Local rebase-then-fast-forward-merge landing handler. Delegates to `pg-git-lander land` (and `pg-git-lander rebase` for catching a branch up). Invoked by the `integrate-branch` skill as its `ff-merge-to-main` handler when the resolved strategy is "ff-merge-to-main" — not normally invoked directly.
 ---
 
 # ff-merge-to-main handler
 
 This is the **Command-style handler** for the `ff-merge-to-main` integration
-strategy: land the current branch by rebasing it onto the primary branch, then
-fast-forward-merging it into the canonical clone, then retiring the worktree and
+strategy: land the current branch by rebasing it onto the primary branch and
+fast-forwarding the primary branch to the result, then retiring the worktree and
 branch. It is invoked by the `integrate-branch` skill (via the `Skill` tool, using
 the strategy string as the skill name) — do not invoke it directly unless you are
 deliberately replaying its flow outside the dispatcher.
@@ -16,21 +16,26 @@ Because that dispatch goes through the `Skill` tool, this handler MUST NOT set
 `disable-model-invocation` in its frontmatter. The flag is enforced against the
 `Skill` tool and also drops the entry from the model-visible skill listing, so
 setting it breaks both halves of the dispatcher's Step 4 — its "is this strategy
-installed" check and the dispatch itself. It was set here once as a listing-token
-saving and reverted for exactly this reason (bd `pg2-okzl0`); the prose above is
-the only sanctioned deterrent against invoking a handler directly.
+installed" check and the dispatch itself.
+
+**The work is done by `pg-git-lander`**, a lock-safe rebase and land tool that is
+on `PATH`. It holds the repository's locks for the whole operation (concurrent
+landings queue and report `busy` instead of colliding), rebases onto the target,
+runs the repository's configured hooks, fast-forwards the target, and removes the
+branch and worktree. Its `--help` and its README
+(`packages/pg-git-lander/README.md` in the agent-support repository) are the
+authority on flags, outcomes and stop reasons; this handler states only what a
+caller must do around it. This handler no longer rebases, merges, retries or
+removes worktrees by hand.
 
 Skills receive no typed arguments, so this handler **re-derives its own context
-from git** rather than trusting values handed to it. It re-verifies its own
-preconditions (FF-0) rather than trusting the caller's anomaly check — even if
-`integrate-branch` already surfaced a canonical anomaly, this handler halts on it
-independently.
+from git** rather than trusting values handed to it.
 
 ## Step 0 — Re-derive context from git
 
-Do not assume `<WT>`, `<FB>`, `<CC>`, or the primary branch were passed in —
-compute them fresh by running `integrate-branch-support --facts` (it is on
-`PATH`) and parsing its stable `KEY=value` block:
+Compute `<WT>`, `<FB>`, `<CC>` and the primary branch fresh by running
+`integrate-branch-support --facts` (it is on `PATH`) and parsing its stable
+`KEY=value` block:
 
 ```bash
 while IFS='=' read -r key value; do
@@ -40,47 +45,26 @@ while IFS='=' read -r key value; do
   CC) CC="$value" ;;
   PRIMARY) PRIMARY="$value" ;;
   DIRTY) DIRTY="$value" ;;
-  AHEAD) AHEAD="$value" ;;
-  BEHIND) BEHIND="$value" ;;
-  PRECOMMIT) PRECOMMIT="$value" ;;
   CC_CORE_WORKTREE) CC_CORE_WORKTREE="$value" ;;
   esac
 done < <(integrate-branch-support --facts)
 ```
 
-- **`<WT>`** = the current working tree's worktree root — wherever this handler
-  is running.
+- **`<WT>`** = the current working tree's worktree root (the branch's own worktree).
 - **`<FB>`** = the current branch. If it reads `(detached)`, there is no feature
-  branch to integrate — **halt and report** "nothing to integrate: detached
-  HEAD," and stop here.
-- **`<CC>`** = the canonical clone, i.e. the **main working tree** of the common
-  git dir. This is true whether or not `<WT>` and `<CC>` are the same directory.
-- **primary branch** (`<PRIMARY>`) = the shared resolution (the same one every
-  caller of `integrate-branch-support` uses, so they all agree): `git config
---get pgii-integrate-branch.primaryBranch` → else `git symbolic-ref
-refs/remotes/origin/HEAD` (stripped of the `refs/remotes/origin/` prefix) →
-  else `main`.
-- `DIRTY`, `AHEAD`, `BEHIND`, and `PRECOMMIT` are also available from this same
-  call — FF-0b below uses `DIRTY` instead of re-running `git status --porcelain`
-  itself. `PRECOMMIT` (`bundle` / `stale` / `missing` / `broken`,
-  from `pg-hooks status --porcelain`; an absent `pg-hooks` or an unrecognized
-  state reports `missing`) is informational only: FF-1b decides for itself,
-  through `pg-hooks`, whether hooks can run.
-- `CC_CORE_WORKTREE` is empty on a healthy canonical clone. A non-empty value is
-  the `core.worktree` key found in the canonical clone's own `.git/config`
-  (read straight from that file, read-only); FF-0a below treats it as the
-  diagnosis for a phantom dirty tree.
+  branch to integrate: **halt and report** "nothing to integrate: detached HEAD".
+- **`<CC>`** = the canonical clone, the **main working tree** of the common git dir.
+  `<WT>` and `<CC>` may be the same directory only when someone works directly in
+  the canonical clone, which Tier R forbids for a feature branch (R-2).
+- **`<PRIMARY>`** = `git config --get pgii-integrate-branch.primaryBranch`, else
+  `git symbolic-ref refs/remotes/origin/HEAD` without the `refs/remotes/origin/`
+  prefix, else `main` (the shared resolution every caller of
+  `integrate-branch-support` uses).
 
-## FF-0 — Precondition: canonical steady-state, and `<WT>` actually rebasable
-
-FF-0 checks **two** trees, because the two steps that follow depend on different
-ones: FF-2 advances `<CC>`'s primary branch, and FF-1 rebases `<WT>`. Checking
-`<CC>` alone would leave the one tree FF-1 actually operates on unverified.
-
-### FF-0a — the canonical clone (`<CC>`)
+## FF-0 — Canonical steady state (Tier R)
 
 Before touching anything, verify the canonical clone is in the steady state Tier R
-requires:
+requires. The tool does not enforce this.
 
 ```bash
 [ -z "$CC_CORE_WORKTREE" ]                 # MUST hold: no core.worktree in the canonical config (checked FIRST)
@@ -88,818 +72,271 @@ git -C "$CC" rev-parse --abbrev-ref HEAD   # MUST equal the primary branch
 git -C "$CC" status --porcelain            # MUST be empty
 ```
 
-The `CC_CORE_WORKTREE` check runs **first** because it makes the other two
-untrustworthy. A stray `core.worktree` in the canonical `.git/config` (bead
-`pg2-4c4nv`) makes git **lie** about the canonical clone: `$CC` itself (derived via
-`rev-parse --show-toplevel`) resolves to _another_ worktree's path, and `git status`
-there lists that worktree's files as untracked — a **phantom** dirty tree, with
-nothing actually wrong in the real canonical directory. When `CC_CORE_WORKTREE` is
-non-empty, **halt and report** the exact text `core.worktree set in canonical
-config` with the key's value, the (misleading) `$CC`, and the real canonical root
-(the parent of `git rev-parse --path-format=absolute --git-common-dir`) — and do
-**not** report it as an ordinary dirty canonical clone or go on to read `status`.
-The operator clears it (`git config --file <canonical>/.git/config --unset
-core.worktree`); the handler MUST NOT (R-3).
+A stray `core.worktree` in the canonical `.git/config` makes git lie about the
+canonical clone (a phantom dirty tree), so it is checked first: when
+`CC_CORE_WORKTREE` is non-empty, **halt and report** the exact text
+`core.worktree set in canonical config` with the key's value; the operator clears
+it, the handler MUST NOT (R-3). If the canonical clone is off the primary branch
+or dirty, **halt and report** (R-3/R-8): do not reset, stash or re-checkout it.
 
-If any check fails — canonical is off the primary branch, has
-local changes, or carries a `core.worktree` — **halt and report** (R-3/R-8). Do **not** reset, stash, or
-re-checkout the canonical clone to "fix" it; that is exactly the work-around Tier R
-forbids. Report the anomaly and stop; this handler goes no further.
+A dirty `<WT>` or a rebase already in progress there is reported by the tool itself
+(refusal `dirty`, detail `foreign-rebase`); the handler MUST NOT commit, stash,
+continue or abort on the caller's behalf (see "Handling the outcome").
 
-### FF-0b — the worktree FF-1 will rebase (`<WT>`)
+## Land — delegate to `pg-git-lander land`
 
-`<WT>` MUST be clean, and MUST NOT already have a rebase in progress. Verify both
-**before** FF-1 runs:
+Capture the primary branch's tip first (the bundle refresh below diffs from it),
+then run the tool **detached** and wait for its outcome. A repository's
+`before_move` hooks (the hook run and the evaluation check; see "FF-1b and FF-1c
+are before_move hooks") can run for minutes, longer than a foreground command
+timeout, so the handler MUST run it through `bgrun` and wait with `bgwait`, never
+in the foreground and never polling with `sleep`, `date`, `tail` or repeated
+`bgcheck`:
 
 ```bash
-[ "$DIRTY" = no ]                          # from Step 0's integrate-branch-support --facts call; MUST be "no"
+OLD_PRIMARY=$(git -C "$CC" rev-parse "$PRIMARY")
+bgrun "pgl-land-$(basename "$CC")-$FB" -- pg-git-lander land "$FB" --source-worktree "$WT" --json
+bgwait "pgl-land-$(basename "$CC")-$FB" --timeout 540   # Bash timeout: 600000; exit 2 = still running, call it again
 ```
 
-Reusing `$DIRTY` here (rather than re-running `git -C "$WT" status --porcelain`)
-is safe: nothing between Step 0 and FF-0b performs any action that could dirty
-`<WT>`, so the fact captured at Step 0 is still current.
+`bgwait` prints `DONE exit=<N>` (the true exit code of the tool) and the log tail,
+which holds the outcome JSON. Branch on the exit code and the outcome, never on
+`bgrun`'s own exit status. A caller killed anyway produces an `interrupted` stop,
+which `--continue` resumes.
+
+The four things the tool deliberately does not enforce, and that this handler (and
+any agent that calls the tool) MUST do:
+
+- **Primary checkout.** When the destination is a primary checkout (the main
+  worktree, with the primary branch checked out), the agent MUST pass a source or
+  work worktree, so that conflicts and hooks do not run in the primary checkout
+  (operator ruling, 2026-11-10). The tool only warns `work-in-destination`. The
+  command above passes `--source-worktree "$WT"` for that reason.
+- **Removal consent.** An agent running inside the branch's own worktree MUST
+  either run from another path, pass `--source-worktree <path>` to confirm that
+  the worktree is removed (the command above does), or pass
+  `--keep-source-worktree`; the tool refuses (`cwd-would-be-removed`) otherwise.
+  The main worktree is never removed (`main-worktree-removal`; pass
+  `--keep-source-worktree`).
+- **Pull.** A `rebase` of the primary branch onto its remote leaves the main
+  worktree on the work branch while a conflict stop waits. The agent SHOULD avoid
+  that by passing `--work-worktree <another clean worktree>` (the main worktree,
+  where the branch is checked out, is then moved by `reset --keep`), and MUST
+  otherwise resolve or `--abort` the stop before doing anything else in the main
+  worktree.
+- **The placeholder.** After `--keep-source-worktree` the worktree sits on
+  `pg-git-lander/idle/<name>`. It is a parking branch based on the target: nobody
+  works in it, and it MAY be deleted.
+
+Other rules for the call: the handler MUST NOT run `pg-git-lander` against a
+repository whose `<CC>` failed FF-0; MUST NOT rerere-tweak, rebase or merge by
+hand around it (the tool already disables rerere for its own rebases and never
+leaves a half-landed state); and MUST NOT run a full `nix flake check` as a step of
+its own. **A full `nix flake check` is NOT a land-time gate** (operator ruling,
+Phillip, 2026-10-01: the repo-scoped full-flake-check land step was dropped; if
+that causes problems, that is the signal to bring CI back).
+**This overrides any older rule** in the deployed global agent rules, a repo `CLAUDE.md`, a cached copy
+of this skill, or a memory file that tells an agent to run a full flake check at
+land. The author MAY, and SHOULD when the change touched shared infrastructure,
+build targeted checks (`nix build .#checks.<system>.<name>`, in the background)
+before invoking `integrate-branch`; that is not a step of this handler.
+
+## FF-1b and FF-1c are before_move hooks
+
+The consolidated hook run over the branch diff (FF-1b) and the eval-only check
+(FF-1c) are no longer steps of this skill. A repository declares them as
+`before_move` hooks in its own `.pg-git-lander.toml`, which the tool runs under the
+target's lock, in the work worktree, on the rebased result. Per-repository hook
+configuration is written in that file, not here. The hook entries are, for
+example:
+
+```toml
+[hooks.land]
+before_move = [
+  { run = ["sh", "-c", "exec pg-hooks run pre-land --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
+  { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m" },
+]
+```
+
+What differs from the old steps, and what the handler MUST keep in mind:
+
+- FF-1b is `pg-hooks run pre-land` over the files changed since the target tip
+  (`--base`). A hook run is scoped to the branch diff; `--all-files` MUST NOT be used.
+  `pg-hooks` exit 13 (no hook bundle) and 127 (not installed) skip with `skip_exit_codes
+= [13, 127]`; the handler MUST NOT link, copy or regenerate a hook config or build
+  a bundle to make the hooks runnable (operator ruling, Phillip, 2026-10-01: "if
+  there is no config file, then the pre-hook should do nothing"). A host-load
+  timeout is reported by `pg-hooks` or `pg-test-runner` as exit 75, which the tool
+  treats as a retryable stop.
+- FF-1c is `pre-land-eval`, the eval-only check (`pn workspace flake-check
+--no-build`): it evaluates `checks`, `packages` and `devShells` derivation paths
+  and builds none of them. It is enabled by the hook's presence in the repository's
+  configuration. **The skill neither sets nor requires the retired git config key
+  `pgii-integrate-branch.preLandEval`**; a leftover key is historical and ignored.
+  No land step calls `pn workspace update`, `upgrade` or `lock`, runs
+  `nix flake update` or `nix flake lock`, or writes `flake.lock` to make FF-1c pass
+  (operator ruling, Phillip, 2026-10-23); FF-1c
+  MUST NOT be made to pass by relocking, has no inconclusive outcome, and the handler MUST NOT re-run the
+  command unchanged hoping for a different answer.
+- A fixer that rewrites a file during the hook run is committed by the tool's
+  autofix and the hook re-runs; an exhausted autofix is a `hook-failed` stop.
+- The hooks run in the caller's environment, so the caller's `PATH` MUST carry
+  `bd`, `go`, `pg-test-runner` and the rest the hooks use (`pg-git-lander config
+check` warns about a missing command). Landings onto one target are serial for
+  the hooks' duration.
+- A hook that needs `pn` or a store-write command is still a `bgrun`/`bgwait`
+  concern of the whole `land` call above, not of the hook.
+
+## Handling the outcome
+
+The tool prints one outcome. With `--json` it is an object with `outcome`, `exit`,
+`reason`, `detail`, `retryable`, `stage`, `next`, `hint`, `paths` and `log_tail`.
+Exit codes: 0 done, 1 internal error, 2 usage or config error, 3 `busy`, 4
+`stopped`, 5 `refused`.
+
+| Outcome                                                                                                                                      | Handler action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `landed` (0)                                                                                                                                 | Continue to "After landing". Report `landed`. Relay each `warnings` entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `nothing-to-land` (0)                                                                                                                        | Report `landed` noting nothing was left to land (the target already held every change); the tool's branch and worktree handling still applies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `busy` (3)                                                                                                                                   | Retryable, nothing changed. Run again after a short pause, at most twice; then stop and ask (R-7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `stopped`, reason `conflict` or `resolve-failed` (4)                                                                                         | The operation waits in the work worktree (the outcome's `next` and `paths` name it). Resolve in that worktree, `git add` the paths, and run `pg-git-lander land "$FB" --continue` (or `--skip`); when not confident in the resolution, run `--abort` and report `stopped:rebase-conflict` with the conflicted paths. Summarize every confident resolution to the user. Never hand-resolve `flake.lock` JSON: a repository that wants it merged mechanically declares a `[[conflict]]` rule for it, and an unresolved one is a stop.                                                                                                   |
+| `stopped`, reason `hook-failed` at `before_move` (4)                                                                                         | Read `log_tail` for which hook failed. The pre-land hook run failing: report `stopped:precommit-branch-diff-failed` with the repo, the failing hook(s) and their output; the handler does not fix a hook violation itself (operator-decided); `--abort`. The evaluation check failing: report `stopped:eval-failed`, naming the failing output and the reproduce command `pre-land-eval "$WT" "$FB"` (or `pn workspace flake-check --no-build --rev "$FB" "$WT"`); this is **agent-fixable** (AGENT-FIXABLE): `--abort`, fix the evaluation error in `<WT>`, commit, and re-invoke `integrate-branch`. The two MUST NOT be conflated. |
+| `stopped`, retryable reason (`transient`, `timeout`, `interrupted`, `race`, `lock-lost`, `holder-died`, `checkout-changed`) (4)              | `--continue` after a pause, or `--abort`. The tool already retries a lost fast-forward race `max_race_retries` times; a persistent `race` after that is a stop-and-ask (R-7).                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `stopped`, any other reason (`max-conflict-rounds`, `branch-moved`, `move-unverified`, `commit-rejected`, `git-error`, `internal-error`) (4) | `--abort` (or `--quit` where only that is valid), and report the reason and `log_tail` verbatim. Do not map it onto a nearer reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `refused` (5)                                                                                                                                | Nothing changed (except `holder-died`, which converted a record to `stopped`). Report `stopped:<reason>` using the tool's own reason. For a dirty `<WT>` report `stopped:worktree-dirty` with `git -C "$WT" status --porcelain`; for a foreign rebase in `<WT>` report `stopped:rebase-in-progress`; the operator commits, stashes, finishes or aborts, then re-invokes. For `stopped-pending` or `target-stopped`, resolve or `--abort` that operation first. The handler MUST NOT perform the disposition itself.                                                                                                                   |
+| `config-error`, `usage-error` (2)                                                                                                            | The invocation or configuration is wrong; the fix is the command or the file, not the code. Report the message verbatim.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| exit 127 (command not installed)                                                                                                             | `pg-git-lander not installed on this machine; ask the operator to run pn workspace apply`: halt and report; the handler MUST NOT fall back to a hand-rolled rebase and merge.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+Each `stopped:<reason>` reported MUST be the reason matching the state actually
+observed. The handler MUST NOT map an unenumerated state onto the nearest existing
+reason; consumers key their operator advice on the string.
+
+A resumed operation (`--continue`, `--skip`, `--abort`, `--quit`) keeps its original
+context, roles and flags and accepts no worktree or keep flags. The operation word
+MUST match the stopped operation (`land`).
+
+## Bringing a branch up to date — `pg-git-lander rebase`
+
+Whenever this skill or its caller needs a branch brought up to date with the
+primary branch without landing it (for example to resolve a conflict early or after
+a `race`), use the tool, never a hand-run `git rebase`:
 
 ```bash
-# MUST print nothing: no rebase already in progress in <WT>. Both git backends.
-for name in rebase-merge rebase-apply; do
-  path="$(git -C "$WT" rev-parse --git-path "$name")"
-  case "$path" in /*) ;; *) path="$WT/$path" ;; esac   # re-anchor a relative answer on <WT>
-  if [ -d "$path" ]; then echo "rebase already in progress: $path"; fi
-done
+pg-git-lander rebase "$FB" --onto "$PRIMARY" --source-worktree "$WT" --json
 ```
 
-Each failure is its **own** halt, because each has its own disposition and FF-0 is
-the last point at which they are still distinguishable:
+`<FB>` ends equal to the result, left on the branch, clean. The same stop handling
+as above applies to its outcome. To pull the primary branch from its remote:
+`git fetch`, then `pg-git-lander rebase "$PRIMARY" --onto "origin/$PRIMARY"` (an
+ordinary rebase of a checked-out branch whose source and work worktree is the main
+worktree, which MUST be clean; see "Pull" above for the conflict-stop hazard).
+A direct `git rebase` of the primary branch is refused by the repository's
+`prevent-main-rebase` pre-rebase hook, and that hook passes the tool's own rebase of
+its work branch `pg-git-lander/<op_id>`.
 
-- **`<WT>` dirty** (`$DIRTY = yes`) → **halt and report** `stopped:worktree-dirty`
-  with the absolute path of `<WT>` and, for the diagnostic detail `$DIRTY` alone
-  doesn't carry, `git -C "$WT" status --porcelain`'s output. The operator commits
-  or stashes in `<WT>`, then re-invokes `integrate-branch`.
-- **rebase already in progress in `<WT>`** → **halt and report**
-  `stopped:rebase-in-progress` with the state directory the probe found. The
-  operator finishes that rebase (`git -C "$WT" rebase --continue`) or abandons it
-  (`git -C "$WT" rebase --abort`), then re-invokes `integrate-branch`.
+## After landing
 
-Unlike FF-0a, these are **caller-state** halts rather than Tier R anomalies: `<WT>`
-is the tree the caller handed this handler, and both dispositions above are
-ordinary operator actions, not the canonical-clone work-arounds Tier R forbids.
-The handler still MUST NOT perform either one itself — committing, stashing,
-continuing, or aborting on the caller's behalf silently decides the fate of work
-the handler did not create.
+Only reached after the tool reported `landed` (or `nothing-to-land`).
 
-**FF-0b is load-bearing, not a cheaper early copy of an FF-1 check.** Neither
-failure is reliably detectable once FF-1 has run:
+### Refresh the canonical clone's hook bundle
 
-- **A dirty `<WT>` may not stop FF-1 at all.** `git rebase` refuses on a dirty tree
-  only while `rebase.autoStash` is **off**; with it on, git stashes, rebases, and
-  pops — and reports **exit 0** even when that pop leaves conflicts behind.
-  Verified on git 2.54 with `rebase.autoStash=true`: the rebase printed both
-  "Applying autostash resulted in conflicts" and "Successfully rebased", exited
-  **0**, and left `<WT>` at `UU <file>` with the autostash still in
-  `git stash list`. FF-1 reads exit 0 as its clean no-conflict path and proceeds;
-  FF-2 then advances `<CC>`'s primary branch; and only FF-4 fails, because
-  `git worktree remove` refuses a worktree that "contains modified or untracked
-  files". The result is **half-landed** — merged onto the primary branch, worktree
-  still present, and the operator's uncommitted work stranded in an orphaned
-  autostash. That is precisely the state FF-0b exists to prevent, and no later step
-  can.
-- **A rebase already in progress is indistinguishable at FF-1** from a conflict
-  FF-1 itself caused — the state directory is present either way (git refuses the
-  second rebase with exit 128, "there is already a rebase-merge directory"). Only a
-  check that runs BEFORE the rebase separates "someone else's unfinished rebase"
-  from "our conflict".
-
-Both readings cut the other way too: because FF-0b establishes that `<WT>` is clean
-and un-rebasing, FF-1's exit 0 genuinely means a clean rebase (nothing was there to
-autostash) and FF-1's state directory genuinely means FF-1's own conflict. FF-0b is
-what makes FF-1's outcomes decisive.
-
-**Why `rev-parse --git-path`, and why it is not optional here.** `<WT>` is
-routinely a linked git **worktree** — that is the whole point of the flow FF-4
-retires — and a linked worktree's `.git` is a **gitfile**, not a directory: its
-rebase state lives under the canonical clone's `.git/worktrees/<name>/`. A
-hardcoded `"$WT/.git/rebase-merge"` can therefore **never** exist there, so every
-pre-existing rebase would be missed and every refused rebase later misread as a
-conflict. `git rev-parse --git-path` asks git where the state actually is. It
-prints an **absolute** path in a linked worktree but a path **relative to git's own
-cwd** in a main worktree, which is why a relative answer is re-anchored on `<WT>`
-(`-C "$WT"` is what made that git's cwd) and never on this handler's arbitrary cwd.
-Both backends MUST be probed: `rebase-merge` for the merge backend (interactive,
-and the default since git 2.26) and `rebase-apply` for the older apply/am backend
-that `--apply` / `--whitespace` still select. Prior art for this probe, carrying
-the same rationale: the workspace's shared `pnwf` shell library's
-`pnwf_rebase_in_progress`.
-
-## FF-1 — Rebase the worktree onto primary
-
-```bash
-git -c rerere.enabled=false -C "$WT" rebase "$PRIMARY"
-```
-
-**`rerere.enabled=false` is scoped to this one invocation, never written to
-`<CC>`'s `.git/config`.** `rerere`'s resolution cache (`.git/rr-cache`) lives in
-the shared `.git` directory, not per-worktree — so a conflict-shape match one
-concurrent drain worktree's rebase recorded can be silently auto-applied by a
-completely different worktree's unrelated rebase here, injecting a peer
-session's unlanded content into this landing commit (observed live: `pg2-t4nud`
-— a benign instance, but the mechanism is not inherently benign). A persistent
-`git config rerere.enabled false` in `<CC>` would fix this too, but it would
-also disable rerere for the operator's own manual git usage in that clone,
-which is out of scope (operator decision, `pg2-t4nud`) — so the override rides
-on the `git -c` invocation itself, exactly once per rebase attempt (including
-every FF-3 retry, since the retry loop re-enters here at FF-1 and reruns this
-same command).
-
-A non-zero exit here conflates **two different states** that take **opposite**
-recoveries. Either git started the rebase and stopped mid-way (a **conflict** —
-something is there to resolve, and `--continue` / `--abort` apply), or it
-**refused** to start and ran nothing (so there is nothing to resolve and neither
-verb applies). Separate them by the **observable** — git's own rebase-in-progress
-state directory, the same state `git rebase --continue` / `--abort` themselves
-require — and never by matching git's message text, which is localized and changes
-between git versions:
-
-```bash
-# Prints a path iff a rebase is in progress. Same probe and same --git-path
-# rationale as FF-0b — a hardcoded "$WT/.git/<name>" cannot work in a worktree.
-for name in rebase-merge rebase-apply; do
-  path="$(git -C "$WT" rev-parse --git-path "$name")"
-  case "$path" in /*) ;; *) path="$WT/$path" ;; esac
-  if [ -d "$path" ]; then echo "in progress: $path"; fi
-done
-```
-
-FF-0b is what makes this reading **decisive** rather than merely suggestive: it
-already established that no rebase was in progress in `<WT>` before this step, so
-state found here can only be the state this step created — and that `<WT>` was
-clean, so exit 0 here cannot be the autostash false-success FF-0b describes.
-
-- **Exit 0 — no conflict:** proceed to FF-2.
-- **Conflict (rebase in progress):** before judging confidence, list every
-  conflicted path — do not guess or eyeball which files git flagged:
-
-  ```bash
-  git -C "$WT" diff --name-only --diff-filter=U
-  ```
-
-  (`--name-only` is unaffected by the external diff driver these repos
-  configure.)
-  - **The conflicted-path list is exactly `flake.lock` — nothing else:** this
-    conflict has a mechanical resolution; do **not** hand-resolve the JSON or
-    reason about which side's `lastModified`/`rev` is newer. Pick **either**
-    side (it does not matter which), stage it, continue the rebase, then
-    recompute the lockfile from the flake's actual `inputs{}`/`follows` graph,
-    committing the relock only if it produced a diff:
-
-    ```bash
-    conflicted_inputs="$(awk '/^<<<<<<<|^>>>>>>>/{c=!c; next} c' "$WT/flake.lock" \
-      | grep -E '^    "[^"]+": \{' | sed -E 's/^    "([^"]+)": \{.*/\1/' | sort -u | tr '\n' ' ')"
-    git -C "$WT" checkout --theirs -- flake.lock
-    git -C "$WT" add flake.lock
-    git -C "$WT" rebase --continue
-    if [ -n "$conflicted_inputs" ]; then
-      (cd "$WT" && nix flake update $conflicted_inputs)
-    else
-      (cd "$WT" && nix flake update)
-    fi
-    if [ -n "$(git -C "$WT" status --porcelain -- flake.lock)" ]; then
-      git -C "$WT" add flake.lock
-      git -C "$WT" commit -m 'chore: relock flake.lock after rebase'
-    fi
-    ```
-
-    The `conflicted_inputs` extraction MUST run BEFORE the `checkout --theirs`
-    below (which removes the conflict markers it reads) — it scans between the
-    `<<<<<<<`/`>>>>>>>` markers for top-level `nodes` entries (`flake.lock`'s
-    nix-generated pretty-printer always indents a node name at exactly 4
-    spaces, e.g. `    "nixpkgs": {`, one level shallower than any field inside
-    it) and passes ONLY those names to `nix flake update`. **`nix flake update`
-    with no arguments MUST NOT be used here as the default** — it force-refreshes
-    EVERY input, including unrelated third-party ones (e.g. `nixpkgs`) that had
-    nothing to do with the conflict, silently pulling untested upstream changes
-    into an otherwise-mechanical relock that then gets auto-committed and landed
-    unattended. Falling back to the bare form is permitted ONLY when the
-    extraction finds no node names (an unexpected shape for this conflict).
-    `--theirs` is an arbitrary pick here — `--ours` resolves the conflict
-    equally well — because the targeted `nix flake update` that follows
-    recomputes those specific inputs from the flake's own `inputs{}` rather than
-    trusting either side's picked content; the checkout only needs to hand
-    `rebase --continue` some resolved, non-conflicted `flake.lock`. A bare
-    `nix flake lock` (distinct from `nix flake update`) MUST NOT be substituted
-    either way — it only fills MISSING lock entries and leaves an already-pinned
-    input at its stale, conflicting revision, which silently defeats this whole
-    resolution (observed live: a conflict resolved this way passed
-    `rebase --continue` but left two sibling inputs pinned to their pre-conflict
-    revs, caught only by a later `flake-lock-fresh` doctor check). Do
-    **not** stop for this case, and
-    do **not** apply either confidence branch below — it is a mechanical
-    resolution, not a hand-resolved one. Continue to FF-1b, and record in the
-    outcome report which side was picked and whether the relock produced a
-    diff (see "Reporting the outcome" below).
-
-  - **Any other path is conflicted** — `flake.lock` conflicted alongside
-    another path, or a different path entirely — **and you are confident in
-    the resolution:** resolve it, continue the rebase (`git -C "$WT" rebase
---continue`), and do **not** stop — but summarize the resolution to the
-    user (what conflicted, how it was resolved) so it isn't silent.
-  - **Any other path is conflicted, and you are not confident:** `git -C
-"$WT" rebase --abort` to restore the pre-rebase state, keep the branch
-    and worktree exactly as they were, and hand off to the user — report
-    `stopped:rebase-conflict` with what conflicted. Do not guess at a
-    resolution you aren't sure of.
-
-- **Refused (NO rebase in progress) — it never started:** report
-  `stopped:rebase-refused` with the absolute path of `<WT>` and git's own refusal
-  message **verbatim**. Nothing ran, so there is nothing to resolve: you MUST NOT
-  run `git rebase --abort` or `git rebase --continue` on this path — verified on git
-  2.54, with no rebase in progress both exit **128** — and you MUST NOT dispose of
-  whatever blocked it (commit, stash, discard) yourself. FF-0b already ruled out the
-  two commonest causes, so a refusal that reaches here is one FF-0b does not
-  enumerate — an unborn `HEAD`, an in-progress merge/cherry-pick/bisect, an
-  unmerged index, a repo policy hook. Relay git's message rather than guessing
-  which; the operator dispositions it, then re-invokes `integrate-branch` and FF-1
-  rebases for the first time.
-- **Indeterminate (the observable itself could not be read):** report
-  `stopped:rebase-indeterminate`, quoting both git's failure and the probe's. You
-  MUST NOT assert either recovery above — which one applies is exactly what could
-  not be determined, and a confident wrong answer is worse than an honest unknown.
-
-## FF-1b — Consolidated hook check across the whole branch diff
-
-Every commit on `<FB>` already had its own hooks run against its own staged
-diff at commit time — but that only ever validated one commit in isolation.
-Nothing before this step has checked the **union** of every file any commit on
-the branch touched, together, in one pass. This step closes that gap, and it
-applies to **every repo this handler lands**:
-
-```bash
-(cd "$WT" && integrate-branch-support --prek-branch-diff)
-```
-
-`integrate-branch-support --prek-branch-diff` delegates to
-`pg-hooks run pre-land "$FB"` from `<WT>`'s root: `pg-hooks` runs the repo's
-`pre-commit` hooks over the files `git diff --name-only "$PRIMARY"...` would
-list, so this scopes to files the branch actually touched, not the whole repo
-(`--all-files` MUST NOT be used here for the same reason it MUST NOT be used
-as a per-commit gate — it forces every hook over the whole tree and can
-false-block on a pre-existing violation the branch never touched). `<FB>`
-already reflects FF-1's rebase, so this runs against the freshly-rebased tree,
-at the default `pre-commit` hook stage — the same stage every individual
-commit already ran, just scoped to the whole branch's diff instead of one
-commit's. `pg-hooks` resolves the clone's hook bundle itself — this handler never
-chooses a hook source.
-
-The exit status maps as follows (the exit-code contract of `pg-hooks`):
-
-| Exit                                                          | Meaning                                                                   | This handler                                                                                                           |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 0                                                             | hooks passed, or nothing to run                                           | continue to FF-2                                                                                                       |
-| 10                                                            | a hook failed                                                             | halt: `stopped:precommit-branch-diff-failed`                                                                           |
-| 13                                                            | no hook bundle for this clone                                             | record `pg-hooks`'s one notice line verbatim in the outcome report, continue to FF-2                                   |
-| 127                                                           | `pg-hooks` is not installed (also reported when it is absent from `PATH`) | record `pg-hooks not installed on this machine; ask the operator to run pn workspace apply` verbatim, continue to FF-2 |
-| other non-zero (12 broken bundle, 2 usage, 11 skipped, 1 ...) | the check could not run or finish                                         | halt as `stopped:precommit-branch-diff-failed`, reporting the exit status and `pg-hooks`'s own message verbatim        |
-
-**No bundle → skip with the notice line, never silently.** On exit 13 the
-command runs nothing, creates nothing, and prints `pg-hooks`'s one notice line
-on stderr, for example
-
-```text
-pg-hooks: no hook bundle for <repo>; pre-land hooks not run. Fix: (cd <canonical> && nix run .#install-pre-commit-hooks)
-```
-
-and exits 0; the land continues to FF-2. Operator ruling (Phillip, 2026-10-01,
-bead `pg2-pla9d.1`), verbatim: "if there is no config file, then the pre-hook
-should do nothing. trying to copy or symlink to other worktrees didn't seem to
-work". So the handler MUST NOT link, copy, or regenerate a hook config or build
-a bundle to make the hooks runnable, and MUST NOT treat the notice as a failure;
-it relays the notice line in its outcome report so the skip is visible.
-
-On exit 10, **halt and report** `stopped:precommit-branch-diff-failed` with the
-repo name, the failing hook(s), and the hooks' own output. Do not attempt to fix
-the violation yourself; that decision belongs to the operator. (FF-1c below is
-deliberately different: an evaluation failure is agent-fixable.)
-
-### FF-1b MAY reuse a passing run across a rebase (opt-in, lost fast-forward race)
-
-A hook run over a branch diff takes tens of minutes on a loaded host, and the
-primary branch usually advances under it, so FF-2b loses the race and FF-3
-re-runs everything. `integrate-branch-support --prek-branch-diff` can remember a
-passing run and reuse it on the FF-3 retry when nothing the hooks could see has
-changed. **It is OFF unless the clone opts in** with `git config
-pgii-integrate-branch.preLandReuse true`; any other value (including a typo such
-as `flase`), an unreadable value, a one-shot `--no-reuse` flag, and a nix build
-sandbox (`IN_NIX_BUILD` or `NIX_BUILD_TOP` set, where the unit-test hook
-self-skips) all mean off. The decision is the tool's, not the agent's: the agent
-runs the same command and relays the one `FF-1b: ...` line it prints (`reused
-the pre-land pass ...` or `re-running hooks (<reason>)`). A reuse exits 0.
-
-A pass is recorded only when `pg-hooks run pre-land` exited 0 with a clean
-worktree, `HEAD` equal to the branch tip, and the same present hook bundle
-before and after the run (the bundle identity is its resolved real path,
-captured before the run). Under `<git-common-dir>/integrate-branch/pre-land-pass/<branch>`
-the tool keeps a hash of the branch diff's post-image, the base the run was
-against, the bundle and the time. A pass is reused only when ALL of these hold,
-and any doubt re-runs:
-
-1. the marker is at most six hours old (`INTEGRATE_BRANCH_PRE_LAND_REUSE_MAX_AGE`
-   seconds overrides the limit), and the hook bundle is the same one;
-2. the recorded base is an ancestor of the new merge-base with the primary
-   branch (the branch moved forward by a rebase);
-3. the branch's post-image is byte-identical: a hash over the `(new mode, new
-blob oid, path)` tuples of `git diff --raw` base..`<FB>`. Blob oids do not
-   change under a rebase for files main did not touch, and unlike `git
-patch-id` they do not ignore whitespace or hunk positions;
-4. every path the branch diff touches is inside a Go module (nearest ancestor
-   directory with a `go.mod`, never the repo root), the tree has no `go.work`,
-   and every path the primary branch gained since the recorded base is inside
-   a project directory (`go.mod`, `package.json` or `pyproject.toml`) that is
-   NOT in the diff's dependency component. The component starts at the diff's
-   modules and, to a fixpoint and in either direction, follows (a) each local
-   `replace ... => ./x` or `=> ../x` of a `go.mod` (quoted and backtick targets
-   included), and (b) any sibling project whose directory name appears within
-   three lines of a `..` path token in a module's Go, script or data files (a
-   test that builds or reads `../pg-desk`, `filepath.Join("..", "pg-desk")`, a
-   `runtime.Caller` path with `..` segments). A `go.mod` `=>` target that is
-   neither local nor a versioned module, and any symlink inside the component,
-   fail closed.
-
-Why this is safe: the hooks read the branch's files, their own project, and the
-projects those name or replace, in either direction. Main's new files lie in
-none of those, and the branch's files are byte-identical, so the tree the hooks
-saw differs from the tree to be landed only in files they do not read. A path
-outside every project (`flake.nix`, `docs/`, `scripts/`, a root file, a skill,
-a shell package) is shared, so a change there, or a branch diff there, always
-re-runs. Known limit: the name scan is a heuristic. A coupling built without
-the sibling's directory name near a `..` token (a path assembled from an
-environment variable or from concatenated pieces) is not seen; that is why reuse
-is opt-in. Real pairs the rule is pinned against (all without a `replace`):
-pg-desk reading `../pg-decider` testdata, the pg-decider PR-change contract test
-building pg-desk and pg-connector, pa-monitor building `../pg-keep-awake`, and
-pg-desk-shadow building `../pg-desk`.
-
-### What is NOT a land-time gate: a full `nix flake check`
-
-FF-1b and FF-1c (below) are the only checks this handler runs before it merges.
-**A full `nix flake check` is NOT a land-time gate** — for any repo this handler lands —
-and the handler MUST NOT run one, or halt on one, as a step of its own.
-Operator ruling (Phillip, 2026-10-01): the repo-scoped full-flake-check land
-step was dropped; if that causes problems, that is the signal to bring CI
-back. **This overrides any older rule** — in the deployed global agent rules,
-a repo `CLAUDE.md`, a cached copy of this skill, or a memory file — that tells
-an agent to run a full flake check at land (the deployed copies of these
-rules keep saying so until the operator next runs `pn workspace apply`).
-
-FF-1c is a different, narrower thing and does not reopen that ruling: it is the
-eval-only `pre-land-eval` check, a caller of `pn workspace flake-check --no-build`
-(it evaluates `checks`, `packages` and `devShells` derivation paths and builds
-none of them, and it runs no hooks), it is a separate gate, and it runs only in a
-clone that opted in (operator ruling, Phillip, 2026-10-23).
-
-Interim risk, accepted by the operator: a workspace repo with no CI has, as its
-only automatic test runners, the commit-time `run-unit-tests` hook
-(`pg-test-runner`, touched projects only) plus this FF-1b hook run over the
-branch diff (and, where opted in, FF-1c's evaluation check). Repos with
-cloud CI keep CI as their whole-repo gate. The change's author MAY — and
-SHOULD when the change touched shared infrastructure — build the targeted
-checks relevant to it (`nix build .#checks.<system>.<name>`, in the
-background) before invoking `integrate-branch`; that is the author's
-judgment, not a step of this handler.
-
-## FF-1c — Eval-only check of the rebased commit (enablement-gated)
-
-FF-1b runs hooks; it never evaluates the flake. An evaluation error (a missing
-option, a `throw`, a bad import) therefore passes FF-1b and lands. This step
-closes that gap with `pre-land-eval`, a standalone command (it is NOT a
-`pg-hooks` subcommand and its exit codes are unrelated to `pg-hooks`'s). It adds
-the per-clone opt-in key and a one-word verdict to
-`pn workspace flake-check --no-build --caller ff-1c --rev <FB> <WT>`, which
-evaluates, without building, the derivation paths of the repo's flake `checks`,
-`packages` and `devShells` at one commit, **against the LOCAL workspace
-siblings** (pn's `--override-input <alias> git+file://<clone>` set, read from the
-siblings' working trees), so a repo whose locked siblings lag the local clones
-gets a true answer with no push, no relock and no `flake.lock` write. It is
-**not** a `nix flake check` and it is **not** nix's own `--no-build` either: it
-builds nothing the repo ships, runs no hooks, and its verdict does not depend on
-the store. Operator rulings (Phillip, 2026-10-23, recorded on `pg2-pla9d.26` and
-`pg2-8uc2d`): the eval-only pre-land check is built now (it supersedes the
-deferral banner in design `pg2-3i12x` section 9), and using it for landing is an
-EXPERIMENT whose runs pn logs to
-`${XDG_STATE_HOME:-$HOME/.local/state}/pn/flake-check-no-build.jsonl`. Tool and
-contract: `pre-land-eval` and `pn workspace flake-check --no-build` in
-`nix-repo-base` (`docs/hooks.md`, section "The eval-only pre-land check").
-
-**No land step calls `pn workspace update`, `upgrade` or `lock`, or relocks, to
-make FF-1c pass** (operator ruling, 2026-10-23): the check never writes
-`flake.lock`, and a failure is a failure to fix in `<WT>`, not a lock to
-refresh.
-
-Run it only after FF-1b did not halt, against the commit being landed, which is
-`<FB>` as FF-1 just rebased it (`<WT>`'s `HEAD`). It is a store-write operation
-(it writes `.drv` files and source copies, and builds the small
-import-from-derivation derivations) and takes about one to four minutes, so the
-handler MUST run it through `bgrun` and wait with `bgwait`, never in the
-foreground, and MUST NOT wait with `sleep`, `date`, `tail` or repeated `bgcheck`:
-
-```bash
-bgrun "pre-land-eval-$(basename "$CC")" -- pre-land-eval "$WT" "$FB"
-bgwait "pre-land-eval-$(basename "$CC")" --timeout 540   # Bash timeout: 600000; exit 2 = still running, call it again
-```
-
-`bgwait` prints `DONE exit=<N>` (the true exit code of `pre-land-eval`) and the
-log tail, which holds the one-word verdict and the details. Branch on the exit
-code, and read the verdict word from the log to tell the two exit-0 outcomes
-apart. Never infer success from `bgrun`'s own exit status.
-
-**Enablement is opt-in per clone.** The check runs only when
-`git -C <repo> config --get pgii-integrate-branch.preLandEval` prints exactly
-`true`; any other value, and an absent key, makes the command print `not-enabled`
-and exit 0, which is never an error. The handler MUST NOT set the key itself.
-For EVERY clone where the key is `true` the check is
-`pn workspace flake-check --no-build`, through `pre-land-eval`.
-
-**There is no `inconclusive` outcome and no retry** (operator ruling, 2026-10-23):
-an environmental failure (store busy, a fetch failure, a timeout) is reported as
-`eval-failed` exactly like an evaluation error, a sibling's uncommitted
-working-tree edits can fail the check, and a pass proves evaluation only (nothing
-is built or tested, one system, and `darwinConfigurations` is not evaluated). The
-handler MUST NOT re-run the command unchanged to get a different answer.
-
-| Exit (verdict word)           | Meaning                                                                 | This handler                                                                                                                                              |
-| ----------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 (`ok`)                      | every evaluated set evaluated cleanly                                   | continue to FF-2                                                                                                                                          |
-| 0 (`not-enabled`)             | this clone has not opted in                                             | print one line, `pre-land eval: not enabled for <repo>`, and continue to FF-2                                                                             |
-| 10 (`eval-failed`)            | `pn workspace flake-check --no-build` reported a failure                | halt: `stopped:eval-failed`, naming the failing output and printing the reproduce command (below)                                                         |
-| 127                           | `pre-land-eval` (or the `pn` it calls) is not installed                 | exactly like FF-1b's 127 row: record `pre-land-eval not installed on this machine; ask the operator to run pn workspace apply` verbatim, continue to FF-2 |
-| other non-zero (2 usage, ...) | the check could not run (a usage error, or a ref that does not resolve) | halt as `stopped:eval-failed`, reporting the exit status and the command's own message verbatim                                                           |
-
-**On `eval-failed`, halt and report** `stopped:eval-failed` with the repo name,
-the failing output copied from the log (the command prints the first 10 lines of
-nix's error, then the last 3 `error:` lines), and the command to reproduce it:
-`pre-land-eval "$WT" "$FB"` (add `--no-ifd` only if the original run used it), or
-the check it wraps: `pn workspace flake-check --no-build --rev "$FB" "$WT"`.
-Unlike an FF-1b hook failure, **this one is agent-fixable**: an evaluation error
-is a deterministic failure of the code the branch itself just changed, so the
-agent that invoked `integrate-branch` fixes it in `<WT>`, commits, and re-invokes
-`integrate-branch` (which rebases and runs FF-1b and FF-1c again). It does not
-need an operator decision. FF-1b's `stopped:precommit-branch-diff-failed` stays
-operator-decided, exactly as above; the two MUST NOT be conflated. For the other-non-zero row, read the message first: a usage error or an
-unresolvable ref means the command was invoked wrongly, and the fix is the
-invocation, not the code.
-
-When `pre-land-eval` is not installed (exit 127) it behaves exactly like FF-1b's
-127 row: the handler MUST NOT improvise (no `nix eval`, no `nix flake check`, no
-substitute), MUST NOT fail the land over it, and the outcome report relays the
-notice line verbatim. The command reaches a machine only through
-`pn workspace apply`, so a 127 is the expected state until the operator applies.
-
-## FF-2 — Fast-forward-only merge
-
-FF-2's single part keeps its historical label, FF-2b, because other skills
-(e.g. `land-workforest`) cite this step by that name.
-
-### FF-2b — Fast-forward-only merge in the canonical clone
-
-Run this only after FF-1b exited 0 (or 13 / 127 with its notice recorded)
-and FF-1c ended in a continue outcome (`ok`, `not-enabled`, or exit 127 with
-its notice recorded). Any other FF-1b exit status, 10 included,
-means FF-2b MUST NOT run: halt as `stopped:precommit-branch-diff-failed` and
-leave the primary branch untouched. Any other FF-1c outcome (`eval-failed`, or a
-non-zero exit other than 0 and 127) likewise: halt as `stopped:eval-failed`
-and leave the primary branch untouched. Rebase, FF-1b, FF-1c and this merge MUST NOT be chained in one unguarded script — check
-each step's exit status before the next (`pg2-1rlme`).
-
-```bash
-OLD_PRIMARY=$(git -C "$CC" rev-parse "$PRIMARY")   # FF-4's bundle refresh diffs from here
-git -C "$CC" merge --ff-only "$FB"
-```
-
-This is valid even though `<FB>` is checked out in `<WT>`, not in `<CC>` — a
-fast-forward-only merge only moves `<CC>`'s ref forward; it does not need `<FB>`
-checked out where it runs.
-
-## FF-3 — Retry loop on a lost fast-forward race
-
-The primary branch can advance between FF-0's check and FF-2b's merge (another
-agent landing concurrently, per R-7) — so `merge --ff-only` can fail with "not
-possible to fast-forward." Handle it as a bounded retry, not a one-shot failure:
-
-- `attempts = 0`.
-- If FF-2b fails as non-fast-forward: `attempts++`, then **retry from FF-1**
-  (rebase `<WT>` onto the now-advanced primary again, then re-attempt FF-1b,
-  FF-1c and FF-2 — this re-runs FF-1b's consolidated hook check (unless an
-  opted-in clone's recorded pass is reused under the conditions of "FF-1b MAY
-  reuse a passing run across a rebase") and always FF-1c's eval-only check
-  against the freshly rebased tree before FF-2b's merge is retried).
-- When `attempts` reaches **2** (the second consecutive non-ff failure), **stop
-  and ask** the user rather than retry indefinitely — a persistent ff-race
-  warrants attention (R-7).
-
-The loop re-enters at **FF-1**, not FF-0, and does not need to re-run FF-0b:
-FF-2 is only ever reached when FF-1's rebase completed, which leaves `<WT>` clean
-with no rebase in progress — so FF-0b's invariant still holds when FF-1 re-runs,
-and FF-1's own classification stays decisive on the retry pass. A refusal that
-first appears on a retry is therefore reported the same way, by FF-1.
-
-## FF-4 — Cleanup
-
-Only reached after FF-1b (a passing hook run, or `pg-hooks`'s one-line
-no-bundle / not-installed notice), FF-1c (a continue outcome) and FF-2b's merge
-succeed.
-
-### FF-4a — Refresh the canonical clone's hook bundle
-
-The bundle reflects the working tree at install time, and the primary branch
-just moved. Run the refresh from `<CC>`, passing the primary branch's sha as
-captured BEFORE FF-2b's merge (each Bash call is a fresh shell, so if FF-2b and
-this step are separate calls, carry the sha forward as a literal):
+The bundle reflects the working tree at install time, and the primary branch just
+moved. Run the refresh from `<CC>`, passing the primary branch's tip as captured
+BEFORE the land (each Bash call is a fresh shell, so carry the sha forward as a
+literal):
 
 ```bash
 (cd "$CC" && integrate-branch-support --bundle-refresh "$OLD_PRIMARY")
 ```
 
-When the landed diff (`$OLD_PRIMARY..HEAD`) touches a stamp input —
-`flake.lock`, `flake.nix`, or a `stampPaths` entry of the clone's current
-bundle — and the clone has a bundle, this starts the one-line command in
-`<CC>`'s `.git/pg-hooks/reinstall` in the background through `bgrun` (job
-`pg-hooks-refresh-<repo>`; wait for it with `bgwait pg-hooks-refresh-<repo> --timeout 540` and Bash
-`timeout: 600000`, or peek once with `bgcheck`). It prints exactly one
-`FF-4: bundle refresh ...` line and **always exits 0**: a refresh that is
-skipped (no bundle), not needed, cannot start (no `bgrun`, no `nix`, a job
-already running) or later fails is **reported in the outcome report, never a
-failed land**. A recorded `nix run ...` command is resolved without relying on
-the caller's `PATH` (a pg-router pool worker's `PATH` lacks
-`/run/current-system/sw/bin`): the tool falls back to the system nix and puts
-its directory on the job's `PATH`; only when nix is found nowhere does it print
-`FF-4: bundle refresh NOT started (nix is not on PATH ...)` with the manual
-command, in its own output rather than only in the `bgrun` log. The handler MUST NOT wait for the refresh, retry it, or fail the land
-over it, and MUST NOT run the `reinstall` command in the foreground.
+It prints exactly one `FF-4: bundle refresh ...` line and **always exits 0**: a
+refresh that is skipped, not needed, cannot start or later fails is **reported in
+the outcome report, never a failed land**. The handler MUST NOT wait for it, retry
+it, run its recorded command in the foreground, or fail the land over it. A
+repository may instead configure that refresh as an `after` hook.
 
-### FF-4b — Remove the worktree
+### The branch and worktree
 
-Delegate to
-`wtdone` (bead `pg2-hpurf`) rather than hand-rolling the
-fsmonitor-stop / worktree-remove / branch-delete / prune sequence: it folds in
-a liveness guard this handler did not previously have. **Relocate the shell
-out of `<WT>` into `<CC>` first** — removing the worktree you are currently
-standing in breaks every subsequent command in that shell, and `wtdone`'s
-liveness probe cannot protect the caller from itself (it can only see OTHER
-processes anchored inside `<WT>`, never the shell issuing the call):
-
-```bash
-cd "$CC"                # leave <WT> before tearing it down
-wtdone "$FB" --cc "$CC"
-```
-
-`wtdone` refuses (non-zero exit, naming the offending PIDs) if a process
-whose name is on its blocking allow-list (by default `claude`, `git`, shells,
-`python*`, `vim`/`nvim`/`emacs`, `go`, `nix`; override via the
-`WTDONE_BLOCKING_COMMANDS` environment variable) is still anchored inside
-`<WT>` — most likely this handler's own shell if step 0 was skipped, or a peer
-session that isolated the same worktree — leaving `<WT>` and `<FB>` untouched.
-A process anchored there under any other name (a language server, `caffeinate`,
-…) is reported on stderr as `ignoring anchored process` and does NOT block.
-Otherwise it stops `<WT>`'s
-fsmonitor daemon (best-effort — it may be absent), removes `<WT>`, deletes
-`<FB>` with a plain `git branch -d` (never `-D` — an unmerged branch is
-refused, never force-discarded), prunes worktree admin, and prints the landed
-sha plus `<CC>`'s remaining worktrees. `git worktree remove` (which `wtdone`
-calls, never forced) refuses to remove the **main** working tree, so even if
-something upstream got `<WT>` and `<CC>` confused, the canonical clone is
-inherently protected from this step.
+The tool removes the source worktree (with plain `git worktree remove`, never
+forced) and deletes the branch, unless the keep flags say otherwise. A failure to
+remove the worktree is the warning `source-worktree-not-removed` and the outcome
+stays `landed`: relay it. The handler MUST NOT run `wtdone` for a worktree the tool
+already removed. Before the call the shell MUST NOT be standing in a worktree the
+tool will remove unless `--source-worktree` confirmed it; after a `landed`, change
+directory to `<CC>` before further commands, because the shell's own worktree is
+gone.
 
 ## Decision flow
 
 ```mermaid
 flowchart TD
-    A["agent in WT on FB; report says CC on primary"] --> F0A{"FF-0a: CC on primary and clean?"}
-    F0A -->|No| S0["STOP: R-3/R-8"]
-    F0A -->|Yes| F0B{"FF-0b: WT clean and no rebase in progress?"}
-    F0B -->|"dirty"| S3["STOP: stopped:worktree-dirty — operator commits or stashes in WT"]
-    F0B -->|"rebase already running"| S6["STOP: stopped:rebase-in-progress — operator finishes or aborts THAT rebase"]
-    F0B -->|Yes| INIT["attempts = 0"]
-    INIT --> B["FF-1: git -c rerere.enabled=false -C WT rebase primary"]
-    B --> C{"exit 0?"}
-    C -->|Yes| F1B{"FF-1b: integrate-branch-support --prek-branch-diff (pg-hooks run pre-land FB)"}
-    C -->|No| P{"rebase in progress in WT? (--git-path probe)"}
-    P -->|"unreadable"| S4["STOP: stopped:rebase-indeterminate — assert neither recovery"]
-    P -->|"No — refused, never started"| S5["STOP: stopped:rebase-refused — relay git's message, NO abort/continue"]
-    P -->|"Yes — conflict"| CL{"conflicted paths (diff --name-only --diff-filter=U) exactly flake.lock?"}
-    CL -->|Yes| FLOCK["checkout --theirs flake.lock, add, rebase --continue, nix flake update &lt;conflicted inputs&gt;, commit relock if changed"] --> F1B
-    CL -->|No| C2{"confident in the resolution?"}
-    C2 -->|Yes| D["resolve + continue + summarize"] --> F1B
-    C2 -->|No| S1["STOP: stopped:rebase-conflict — abort, keep branch"]
-    F1B -->|"exit 10, or any other non-zero"| S12["STOP: stopped:precommit-branch-diff-failed — operator fixes it"]
-    F1B -->|"passes, or exit 13 / 127: one notice line recorded"| F1C{"FF-1c: pre-land-eval WT FB (bgrun + bgwait; opt-in per clone)"}
-    F1C -->|"exit 10, or any other non-zero except 127"| S13["STOP: stopped:eval-failed — the agent fixes the evaluation error and re-invokes"]
-    F1C -->|"ok, not-enabled, or 127: one line recorded"| G["FF-2b: git -C CC merge --ff-only FB"]
-    G --> H{"ff-only ok?"}
-    H -->|Yes| I["FF-4: bundle refresh (reported, never fails the land), then cd to CC and wtdone FB --cc CC"]
-    H -->|"No: attempts++"| J{"attempts < 2?"}
-    J -->|Yes| B
-    J -->|No| S2["STOP: ask"]
+    A["agent in WT on FB"] --> F0{"FF-0: CC on primary, clean, no core.worktree?"}
+    F0 -->|No| S0["STOP: R-3/R-8, report"]
+    F0 -->|Yes| L["bgrun + bgwait: pg-git-lander land FB --source-worktree WT --json"]
+    L --> O{"outcome"}
+    O -->|"landed / nothing-to-land"| R["bundle refresh (reported, never fails the land), cd to CC, report landed"]
+    O -->|"busy"| B["pause and run again, at most twice, then ask"]
+    O -->|"stopped: conflict"| C{"confident in the resolution?"}
+    C -->|Yes| CC["resolve in the work worktree, add, land FB --continue"]
+    C -->|No| AB["land FB --abort, report stopped:rebase-conflict"]
+    O -->|"stopped: hook-failed at before_move"| H{"which hook?"}
+    H -->|"pre-land hook run"| S1["abort, report stopped:precommit-branch-diff-failed"]
+    H -->|"evaluation check"| S2["abort, report stopped:eval-failed, agent fixes and re-invokes"]
+    O -->|"stopped: retryable"| T["land FB --continue after a pause, or abort"]
+    O -->|"stopped: other"| S3["abort, report the reason verbatim"]
+    O -->|"refused"| S4["report stopped:reason, operator disposes, re-invoke"]
 ```
 
 ## Reporting the outcome
 
-Report the result back using the shared handler vocabulary: `landed` (FF-4
-completed) or `stopped:<reason>` (any halt above). This handler never returns
-`pr-opened` — that outcome belongs to the `pull-request` handler.
+Report the result back using the shared handler vocabulary: `landed` or
+`stopped:<reason>`. This handler never returns `pr-opened` (that outcome belongs to
+the `pull-request` handler). A `landed` report MUST include the tool's warnings, the
+`FF-4: bundle refresh ...` line, any `pg-hooks:` no-bundle notice line the hooks
+printed (verbatim, so the skip is visible), and a line for each conflict the agent
+resolved. Its `<reason>` values, and what the operator does next:
 
-When FF-1's flake.lock-only mechanical resolution (above) fired during this
-run, a `landed` report MUST also include a line recording which side was
-picked and whether the relock produced a diff — e.g. `flake.lock conflict:
-took theirs, relocked yes` — so a reviewer or an aggregating drain session
-does not have to re-derive it from git history. Likewise, when FF-1b skipped
-the hooks (`pg-hooks` exit 13, no bundle) or could not run them (`pg-hooks`
-missing), a `landed` report MUST include the notice line verbatim
-(`pg-hooks: no hook bundle for ...`, or `pg-hooks not installed on this machine;
-ask the operator to run pn workspace apply`), and it MUST include FF-4a's
-`FF-4: bundle refresh ...` line. When FF-1b reused a recorded pass, the report
-MUST also include the `FF-1b: reused the pre-land pass ...` line verbatim, so a
-reviewer sees that the hooks were not re-run on the landed tree. Likewise for FF-1c: a `landed` report MUST
-include the one line it printed for a `not-enabled` clone (`pre-land eval: not
-enabled for <repo>`), or the verbatim not-installed notice (`pre-land-eval not installed on this machine; ask the
-operator to run pn workspace apply`). Its
-`<reason>` values, and the
-disposition each one asks of the operator:
-
-| `<reason>`                     | Raised by | What the operator does next                                               |
-| ------------------------------ | --------- | ------------------------------------------------------------------------- |
-| detached `HEAD`                | Step 0    | check out the feature branch                                              |
-| canonical off-primary or dirty | FF-0a     | Tier R guidance — never reset the canonical (R-3/R-8)                     |
-| `core.worktree` in canonical   | FF-0a     | operator unsets the key in the canonical `.git/config`; never the handler |
-| `worktree-dirty`               | FF-0b     | commit or stash in `<WT>`, then re-invoke                                 |
-| `rebase-in-progress`           | FF-0b     | finish or abort **that** rebase in `<WT>`, then re-invoke                 |
-| `rebase-conflict`              | FF-1      | resolve the conflict, then re-invoke                                      |
-| `rebase-refused`               | FF-1      | disposition whatever git's message names, then re-invoke                  |
-| `rebase-indeterminate`         | FF-1      | inspect `<WT>`; the handler asserts no recovery                           |
-| `precommit-branch-diff-failed` | FF-1b     | fix the hook violation (every repo with a hook bundle), then re-invoke    |
-| `eval-failed`                  | FF-1c     | agent-fixable: fix the evaluation error in `<WT>`, commit, then re-invoke |
-| ff-race retry limit hit        | FF-3      | re-run once concurrent landings settle                                    |
-
-These reasons MUST NOT be collapsed into one another — above all,
-`rebase-conflict` MUST NOT absorb the four other rebase reasons
-(`worktree-dirty`, `rebase-in-progress`, `rebase-refused`,
-`rebase-indeterminate`). They carry **opposite** recoveries, and the consumer keys
-its operator advice on the reason string: `land-workforest`'s "Operator report on
-any stop" maps each to a different next action. Reporting a refusal or a dirty
-worktree as `rebase-conflict` sends the operator hunting a conflict that does not
-exist, and prescribes a `git rebase --continue` that exits 128.
+| `<reason>`                     | Raised by        | What the operator does next                                               |
+| ------------------------------ | ---------------- | ------------------------------------------------------------------------- |
+| detached `HEAD`                | Step 0           | check out the feature branch                                              |
+| canonical off-primary or dirty | FF-0             | Tier R guidance — never reset the canonical (R-3/R-8)                     |
+| `core.worktree` in canonical   | FF-0             | operator unsets the key in the canonical `.git/config`; never the handler |
+| `worktree-dirty`               | tool refusal     | commit or stash in `<WT>`, then re-invoke                                 |
+| `rebase-in-progress`           | tool refusal     | finish or abort **that** rebase in `<WT>`, then re-invoke                 |
+| `rebase-conflict`              | conflict stop    | resolve the conflict, then re-invoke                                      |
+| `precommit-branch-diff-failed` | before_move hook | fix the hook violation (every repo with a hook bundle), then re-invoke    |
+| `eval-failed`                  | before_move hook | agent-fixable: fix the evaluation error in `<WT>`, commit, then re-invoke |
+| tool reason (any other)        | the tool         | as the outcome's `hint` and `next` say                                    |
+| `busy` or race retry limit hit | the tool         | re-run once concurrent landings settle                                    |
 
 ## Rules this handler enforces (Tier R, RFC 2119)
 
-- The handler MUST re-derive `<WT>`, `<FB>`, `<CC>`, and the primary branch from
-  git itself rather than trusting caller-supplied values (skills have no typed
-  arguments).
-- The handler MUST halt and report — not work around — if `<CC>` is off the
-  primary branch or dirty at FF-0a (R-3, R-8), even if the caller already surfaced
-  the same anomaly.
-- The handler MUST check `CC_CORE_WORKTREE` before `<CC>`'s `status` at FF-0a and,
-  when non-empty, MUST report `core.worktree set in canonical config` rather than a
-  phantom dirty tree, and MUST NOT clear the key itself (R-3).
-- FF-0 MUST verify **both** trees before FF-1 runs: `<CC>` on the primary branch
-  and clean (FF-0a), and `<WT>` clean with no rebase already in progress (FF-0b).
-  Checking `<CC>` alone leaves the tree FF-1 actually rebases unverified.
-- FF-0b's dirty check MUST NOT be deferred to FF-1 on the assumption that a dirty
-  tree makes `git rebase` fail. Under `rebase.autoStash` it does not: the rebase
-  reports exit 0, FF-2 advances the canonical primary branch, and FF-4 is the first
-  step to fail — a half-landed state no later step can prevent.
-- The handler MUST NOT conflate the two FF-0 halts. `<CC>`'s is a Tier R violation
-  it MUST NOT work around (R-3, R-8); `<WT>`'s is caller state whose disposition is
-  an ordinary operator action — but the handler MUST NOT perform that disposition
-  itself either, in `<WT>` or `<CC>`.
-- On a detached `HEAD` in `<WT>`, the handler MUST halt and report "nothing to
-  integrate" rather than guess at a feature branch.
-- The handler MUST rebase (`<WT>` onto primary) before attempting the fast-forward
-  merge — this is the rebase-first requirement; it MUST NOT fall back to a plain
-  non-fast-forward merge.
-- FF-1's rebase (and every FF-3 retry of it) MUST disable `rerere` scoped to
-  that one invocation (`git -c rerere.enabled=false rebase ...`), because the
-  shared `.git/rr-cache` is not per-worktree and a concurrent peer worktree's
-  recorded resolution could otherwise be auto-applied here (`pg2-t4nud`). The
-  handler MUST NOT achieve this with a persistent `git config rerere.enabled
-false` write to `<CC>`'s `.git/config` — that would also disable rerere for
-  the operator's own manual git usage in that clone, which is out of scope.
-- FF-1b MUST run `integrate-branch-support --prek-branch-diff` from the rebased
-  `<WT>` before FF-2, and MUST halt and report
-  `stopped:precommit-branch-diff-failed` on any non-zero exit rather than
-  proceed to FF-2 — this check is universal (every repo this handler lands): a
-  per-commit hook run only ever validated ONE commit's own diff, never the
-  union of every commit's changes across the whole branch. The handler MUST
-  NOT substitute `prek run --all-files` (same false-block risk as a per-commit
-  `--all-files` run).
-- FF-1b MAY reuse a recorded passing run across FF-3's rebase only through
-  `integrate-branch-support --prek-branch-diff`, only in a clone that opted in
-  (`pgii-integrate-branch.preLandReuse true`), and only under the four
-  conditions of "FF-1b MAY reuse a passing run across a rebase". The agent MUST
-  NOT skip FF-1b, hand-write a marker, or decide to reuse on its own; a failed
-  or never-recorded run always re-runs.
-- When `pg-hooks` reports no bundle (exit 13) or is not installed (exit 127),
-  FF-1b MUST NOT run `prek` itself, MUST NOT link, copy, or regenerate a hook
-  config, MUST NOT build a bundle, and MUST continue the land after the single
-  notice line (`pg-hooks: no hook bundle for ...`, or `pg-hooks not installed on
-this machine; ask the operator to run pn workspace apply`), which the outcome
-  report relays verbatim (operator ruling, Phillip, 2026-10-01). An exit status
-  other than 0, 10, 13 or 127 (a broken bundle, a usage error) MUST halt the land
-  as `stopped:precommit-branch-diff-failed`, reporting the status and
-  `pg-hooks`'s message verbatim: the check could not run, which is not the
-  same as having nothing to check.
-- FF-1c MUST run `pre-land-eval "$WT" "$FB"` (a caller of
-  `pn workspace flake-check --no-build`, so the sibling overrides and the
-  experiment log are pn's) after FF-1b did not halt and before
-  FF-2, through `bgrun` and `bgwait` (about one to four minutes, a store-write
-  operation, never a foreground call, never polled with `sleep`/`date`/`tail`),
-  and MUST branch on `bgwait`'s `DONE exit=<N>` line. Exit 0 with `ok` continues;
-  exit 0 with `not-enabled` continues after the one line `pre-land eval: not
-enabled for <repo>`; exit 10 (`eval-failed`) MUST halt as
-  `stopped:eval-failed`, naming the failing output and printing the reproduce
-  command; any other non-zero exit other than 127 MUST halt as
-  `stopped:eval-failed`, reporting the status and the command's own message
-  verbatim. The check runs only in a clone that set
-  `pgii-integrate-branch.preLandEval` to exactly `true`; the handler MUST NOT set
-  that key itself.
-- FF-1c MUST NOT be made to pass by relocking: no land step MAY call
-  `pn workspace update`, `pn workspace upgrade` or `pn workspace lock`, run
-  `nix flake update` or `nix flake lock`, or write `flake.lock` for it (operator
-  ruling, Phillip, 2026-10-23). FF-1c has no `inconclusive` outcome and no retry:
-  an exit 10 is `eval-failed` whatever the cause, and the handler MUST NOT re-run
-  the command unchanged hoping for a different answer.
-- Exit 127 from FF-1c (`pre-land-eval` not installed) MUST behave exactly like
-  FF-1b's 127 row: record `pre-land-eval not installed on this machine; ask the
-operator to run pn workspace apply` verbatim, continue the land, and MUST NOT
-  improvise a substitute (no `nix eval`, no `nix flake check`).
-- Who decides differs by step, and the two MUST NOT be conflated: an FF-1c
-  `stopped:eval-failed` is AGENT-FIXABLE (a deterministic failure of the code the
-  branch just changed: the agent fixes it in `<WT>`, commits, and re-invokes
-  `integrate-branch`), while an FF-1b `stopped:precommit-branch-diff-failed` stays
-  OPERATOR-DECIDED (the handler does not fix the violation itself).
-- FF-4a (the hook-bundle refresh) MUST run after a successful FF-2b merge, MUST
-  use the primary branch sha captured before that merge, MUST run in the
-  background through `integrate-branch-support --bundle-refresh`, and MUST NOT
-  fail, retry, or block the land: any problem is reported in the outcome
-  report only.
-- The handler MUST NOT run a full `nix flake check`, or halt on one, as a step
-  of its own, for any repo: a full `nix flake check` is NOT a land-time gate
-  (operator ruling, Phillip, 2026-10-01). This overrides any older rule telling
-  an agent to run a full flake check at land. FF-1c's eval-only
-  `pre-land-eval` is a separate, enablement-gated gate (operator ruling,
-  Phillip, 2026-10-23), not a flake check, and does not weaken this rule.
-- The handler MUST classify a non-zero `git rebase` exit by git's own
-  rebase-in-progress state directory, probed with `git rev-parse --git-path` for
-  **both** `rebase-merge` and `rebase-apply`, re-anchoring a relative answer on the
-  probed directory. It MUST NOT classify by matching git's message text (localized,
-  and it changes between git versions), and it MUST NOT probe a hardcoded
-  `<WT>/.git/<name>` — a linked worktree's `.git` is a gitfile, so that path can
-  never exist there and every refusal would be misread as a conflict.
-- On a rebase conflict the handler MUST NOT stop just because a conflict occurred;
-  it MUST attempt resolution, and MUST summarize any confident resolution to the
-  user rather than resolving silently. It MUST abort the rebase (leaving the
-  branch untouched) and hand off when it is not confident in the resolution.
-- Before applying that confidence judgment, the handler MUST list every
-  conflicted path (`git -C "$WT" diff --name-only --diff-filter=U`). When
-  that list is exactly `flake.lock` and nothing else, the handler MUST
-  resolve it mechanically, rather than hand-resolving the JSON or reasoning
-  about which side is newer, and MUST NOT treat this case as needing the
-  confidence judgment above: pick either side, stage it, continue the
-  rebase, then run `nix flake update` scoped to the specific inputs that
-  were actually in conflict (extracted from the conflict markers before
-  they are discarded) in `<WT>` and commit the relock only if it changed
-  the file. The handler MUST NOT run a bare `nix flake update` (no args) as
-  the default — that force-refreshes every input, including unrelated
-  third-party ones the conflict never touched — and MUST NOT substitute a
-  bare `nix flake lock`, which only fills missing lock entries and leaves
-  an already-pinned input stale. It MUST
-  record which side was picked and whether the relock produced a diff in the
-  outcome report. When any other
-  path is conflicted (including `flake.lock` alongside another path), the
-  confidence-based discipline above applies unchanged.
-- On a **refused** rebase (non-zero exit with NO rebase in progress) the handler
-  MUST report `stopped:rebase-refused` — distinct from `stopped:rebase-conflict` —
-  and MUST NOT run `git rebase --abort` or `git rebase --continue`: nothing was
-  started, so neither applies and both exit 128. It MUST NOT itself commit, stash,
-  or discard whatever blocked the rebase; that disposition belongs to the operator.
-- When the rebase-in-progress observable itself cannot be read, the handler MUST
-  report `stopped:rebase-indeterminate` and MUST NOT assert either of the two
-  recoveries above.
-- Each `stopped:<reason>` this handler reports MUST be the reason matching the state
-  it actually observed. The handler MUST NOT map an unenumerated state onto the
-  nearest existing reason — a wrong reason is not a lesser error than no reason,
-  because the consumer's operator advice is keyed on it.
-- The handler MUST bound its fast-forward retry loop and stop-and-ask after the
-  second consecutive non-fast-forward failure (R-7) rather than retry
-  indefinitely.
-- FF-4 MUST relocate the shell out of `<WT>` into `<CC>` before invoking `wtdone`
-  — `wtdone`'s own liveness guard cannot see the calling shell's process, only
-  other processes anchored inside `<WT>`, so removing this shell's own presence
-  is on the handler, not the guard.
-- FF-4 MUST delegate the removal, branch deletion, and prune to `wtdone "$FB"
---cc "$CC"` rather than hand-rolling `git worktree remove` / `git branch -d` /
-  `git worktree prune` — it folds in the liveness guard (refuse if a process
-  on `wtdone`'s blocking allow-list is anchored inside `<WT>`; anchored
-  processes under other names are ignored), stops `<WT>`'s `git fsmonitor--daemon`
-  best-effort immediately before removal (the daemon is keyed by worktree path
-  and is NOT torn down by the removal itself, so skipping this orphans it), and
-  never escalates an unmerged branch's `-d` to `-D`.
-- The handler MUST NOT remove, reset, or otherwise mutate `<CC>` beyond the
-  fast-forward merge, the FF-4a bundle refresh (which writes only under
-  `<CC>`'s `.git/pg-hooks`), and the FF-4b cleanup step.
+- The handler MUST re-derive `<WT>`, `<FB>`, `<CC>` and the primary branch from git
+  itself rather than trusting caller-supplied values.
+- The handler MUST halt and report, not work around, if `<CC>` is off the primary
+  branch or dirty at FF-0 (R-3, R-8), and MUST check `CC_CORE_WORKTREE` before
+  `<CC>`'s `status` (reporting `core.worktree set in canonical config`, never clearing
+  the key itself).
+- On a detached `HEAD` the handler MUST halt and report "nothing to integrate".
+- The handler MUST land through `pg-git-lander land` and MUST NOT fall back to a
+  hand-run rebase and merge, nor to a plain non-fast-forward merge.
+- The handler MUST run `land` detached (`bgrun`) and wait with `bgwait`.
+- The handler MUST pass a source or work worktree so conflicts and hooks do not run
+  in a primary checkout, MUST confirm removal consent (`--source-worktree` or
+  `--keep-source-worktree`), and MUST resolve or `--abort` a pull's conflict stop
+  before using the main worktree.
+- The handler MUST NOT set or require `pgii-integrate-branch.preLandEval`.
+- The handler MUST NOT run a full `nix flake check`, or halt on one, as a step of
+  its own, and MUST NOT relock (`pn workspace update`, `upgrade`, `lock`,
+  `nix flake update`, `nix flake lock`) to make a hook pass.
+- The handler MUST NOT improvise when a hook command is missing (exit 127): record
+  the notice line and continue only where the configuration says so
+  (`skip_exit_codes`); no substitute check, no `prek run --all-files`.
+- The handler MUST NOT itself commit, stash, discard or abort whatever blocked a
+  refused operation; that disposition belongs to the operator. It MAY `--abort` or
+  `--continue` an operation it started.
+- The handler MUST NOT remove, reset, or otherwise mutate `<CC>` beyond what the
+  tool does and the bundle refresh (which writes only under `<CC>`'s
+  `.git/pg-hooks`).
+- The handler MUST bound its retries and stop and ask after the second consecutive
+  `busy` or `race` (R-7) rather than retry indefinitely.

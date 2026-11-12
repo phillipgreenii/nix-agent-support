@@ -103,3 +103,18 @@ teardown() {
     run prevent-main-rebase-hook
   [ "$status" -eq 0 ]
 }
+
+@test "prevent-main-rebase: passes a rebase of pg-git-lander's work branch pg-git-lander/<op_id> onto main" {
+  # pg-git-lander rebases through a work branch named pg-git-lander/<op_id>;
+  # git's pre-rebase hook receives the upstream and that branch, which is not
+  # the primary branch, so the hook must let it through untouched.
+  git checkout -qb pg-git-lander/test-op
+  printf 'work\n' >work.txt
+  git add work.txt
+  git commit -qm "work branch change"
+
+  PRE_COMMIT_PRE_REBASE_UPSTREAM="main" PRE_COMMIT_PRE_REBASE_BRANCH="pg-git-lander/test-op" \
+    run prevent-main-rebase-hook
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
