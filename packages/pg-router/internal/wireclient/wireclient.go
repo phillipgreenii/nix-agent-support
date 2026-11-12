@@ -155,6 +155,35 @@ type OSRunner struct {
 // A package var so tests can lower it; production never reassigns it.
 var runWaitDelay = 8 * time.Second
 
+// ParentDeathFDEnv names the environment variable that carries the file
+// descriptor number of the parent-death pipe's read end (always 3: the first
+// cmd.ExtraFiles entry). The pipe reads EOF when the pg-router process dies.
+const ParentDeathFDEnv = "PG_ROUTER_PARENT_DEATH_FD"
+
+type noParentDeathKey struct{}
+
+// WithoutParentDeath returns a context under which OSRunner.Run passes no
+// parent-death pipe: the handler's dispatch is meant to outlive the daemon
+// (a survives_shutdown role, ADR 0085).
+func WithoutParentDeath(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noParentDeathKey{}, true)
+}
+
+func parentDeathDisabled(ctx context.Context) bool {
+	v, _ := ctx.Value(noParentDeathKey{}).(bool)
+	return v
+}
+
+// run is the Runner call every subcommand shares: a survives_shutdown role's
+// call carries no parent-death pipe.
+func (c *Client) run(ctx context.Context, role roles.Role, argv []string, body []byte) ([]byte, int, error) {
+	rctx := ctx
+	if role.SurvivesShutdown {
+		rctx = WithoutParentDeath(ctx)
+	}
+	return c.runner().Run(rctx, argv, body)
+}
+
 func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
 	if len(argv) == 0 {
 		return nil, 0, errors.New("wireclient: empty argv")
@@ -182,6 +211,23 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 	// never arrives (docket pg2-12gr4.8, the validate call's "handler that hangs"
 	// case).
 	cmd.WaitDelay = runWaitDelay
+	// Parent-death pipe: the handler gets the read end as fd 3 and its number in
+	// ParentDeathFDEnv; this process keeps the write end open until the call
+	// returns. If this process dies without a graceful cancel (SIGKILL, the
+	// watchdog's hard exit, a crash) the kernel closes the write end and the
+	// handler reads EOF, so a handler that wants to (the command adapter) can stop
+	// its payload group. A survives_shutdown role opts out (WithoutParentDeath),
+	// and an adapter that never reads the variable (ccpool) is unaffected.
+	if !parentDeathDisabled(ctx) {
+		pr, pw, perr := os.Pipe()
+		if perr != nil {
+			return nil, 0, fmt.Errorf("wireclient: parent-death pipe: %w", perr)
+		}
+		defer pw.Close()
+		defer pr.Close()
+		cmd.ExtraFiles = []*os.File{pr}
+		cmd.Env = append(os.Environ(), ParentDeathFDEnv+"=3")
+	}
 	err := cmd.Run()
 	var exitErr *exec.ExitError
 	switch {
@@ -371,7 +417,7 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		return Reply{}, fmt.Errorf("wireclient: encode dispatch request: %w", err)
 	}
 
-	stdout, code, err := c.runner().Run(ctx, argv, body)
+	stdout, code, err := c.run(ctx, role, argv, body)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -514,7 +560,7 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 		return Reply{}, fmt.Errorf("wireclient: encode %s request: %w", subcommand, err)
 	}
 
-	stdout, code, err := c.runner().Run(ctx, argv, body)
+	stdout, code, err := c.run(ctx, role, argv, body)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -592,7 +638,7 @@ func (c *Client) Validate(ctx context.Context, role roles.Role) (ValidateResult,
 	if err != nil {
 		return ValidateResult{}, fmt.Errorf("wireclient: encode validate request: %w", err)
 	}
-	stdout, code, err := c.runner().Run(ctx, argv, body)
+	stdout, code, err := c.run(ctx, role, argv, body)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ValidateResult{}, fmt.Errorf("wireclient: role %q validate: %w", role.Name, ctxErr)
 	}

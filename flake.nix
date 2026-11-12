@@ -10125,7 +10125,9 @@
               # the unit gate above). Runs the real command adapter binary (built
               # by pg-router-ccpool-handler, a sibling module whose binary cannot be
               # imported) under wireclient.OSRunner with a payload that writes its
-              # pid, cancels the dispatch, and asserts the payload process is gone.
+              # pid, cancels the dispatch, and asserts the payload process is gone; plus the
+              # parent-SIGKILL cases (a re-executed parent dies, the adapter stops its
+              # payload; a survives_shutdown role's payload is left running).
               # PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER turns the test's skip into a
               # failure, so a green check means it ran. Only that test is selected
               # (-run): the other integration/smoke-tagged tests in pg-router need
@@ -10154,7 +10156,7 @@
                     "-count=1"
                     "-v"
                     "-run"
-                    "^TestOSRunner_cancelStopsTheCommandAdaptersPayload$"
+                    "^TestOSRunner_(cancelStopsTheCommandAdaptersPayload|parentSIGKILLStopsThePayload|survivesShutdownIgnoresParentDeath)$"
                   ];
                 }).overrideAttrs
                   (_: {

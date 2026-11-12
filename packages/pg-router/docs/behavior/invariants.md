@@ -392,6 +392,12 @@ here changes a level or `INV-LIFE-2`.
   is cancelled. **Exit 9 stays "busy" for a command role** (`DEC-WIRE-1`): a command that ends with
   9 for any other reason is read as a busy decline, which is a consequence of the code's meaning and
   not a defect.
+  **When the daemon dies without a graceful cancel** (`SIGKILL`, the watchdog's hard exit, a
+  crash), no `SIGTERM` reaches the command adapter, so the core MUST hand each handler call a
+  parent-death pipe that reads end-of-file when the core is gone, and the command adapter MUST
+  then cancel its payload's process group exactly as for a `SIGTERM` (within its cancel grace plus
+  one second). A role with `survives_shutdown` MUST get no such pipe, and an adapter meant to
+  outlive the daemon (the ccpool adapter) MUST ignore it: their work is deliberately left running.
 
 ## Wiring
 

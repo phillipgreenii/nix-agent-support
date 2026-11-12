@@ -53,6 +53,15 @@ func runDispatch(args []string) int {
 	// orphan behind.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	// The daemon dying without a graceful cancel (SIGKILL, a crash) sends no TERM,
+	// so the parent-death pipe's EOF cancels the same context.
+	var pdr io.Reader
+	if f := parentDeathReader(os.Getenv); f != nil {
+		defer f.Close()
+		pdr = f
+	}
+	ctx, stopPD := withParentDeath(ctx, pdr)
+	defer stopPD()
 	return serveDispatch(ctx, os.Stdin, os.Stdout, *cfgPath, dispatchlib.BuildDeps)
 }
 
