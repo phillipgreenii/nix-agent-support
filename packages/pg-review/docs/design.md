@@ -329,8 +329,19 @@ flowchart LR
   window, simply runs); on SIGTERM `pg-review` (which receives the group's signal itself) closes
   its ccpool session and marks the run Failed within those 5 seconds, and if it is killed first the
   reaper at the next start does both (a re-offered event retries the run); the adapter maps skip and busy
-  (3 and 5) to exit 0 so a skip is not reported as a failure, and never exits 9. Roles block on
-  every gate by default, which is wanted for the analysis role (a paused router or low disk holds it).
+  (3 and 5) to exit 0 so a skip is not reported as a failure, and never exits 9. A role is held only by the `requires` clauses the deployment writes for it
+  (the module writes none by default). The deployment SHOULD give `review-run` a disk requirement
+  and MUST NOT give it to `review-maintain`: the analysis role is wanted held under disk pressure
+  (a run drives ccpool sessions and writes evidence, so starting it on a nearly full disk is
+  harmful), while the maintain role only reads state and reports, and must keep running so metrics
+  and backups continue. Decision (2026-11-12, the bead for the observed 2026-11-11 expiry of
+  `calendar:agent-workflow-daily`): `review-run` is deliberately NOT exempted from the disk
+  requirement; an exemption (the old `non_blocking_gates` idea) would run the heaviest role on a
+  full disk and does not exist any more. The cost, a scheduled run whose event expires undelivered
+  during a long disk-pressure spell, is reported by the router, not by this package: the per-type
+  counter `pg_router_unconsumed_expired_total` counts events retired unconsumed, and an operator
+  can see a dropped `review.run` as `increase(pg_router_unconsumed_expired_total{type="review.run"}[1d]) > 0`. The module does not expose the event lifetime; a longer one is a router timer setting.
+  A schedule that must survive a long hold raises its event lifetime with `expires_in`.
 - C11a. A command role's dispatch re-reads bead metadata for its item id through `bd`, best
   effort. A non-bead item id keeps the payload metadata. The builder confirms this holds for the
   `schedule:timestamp` ids the adapter builds (the item id itself is the timer's timestamp).
@@ -913,7 +924,7 @@ flowchart LR
 - A command role runs one dispatch at a time in first-in first-out order, so only one analysis
   runs at once and the rest wait their turn, visible in router status.
 - `review-maintain` is a separate role so metrics, backups and bead filing never queue behind a
-  long analysis; it is non-blocking on the low-disk gate so it keeps reporting while analysis is held.
+  long analysis; it carries no disk requirement (the deployment writes one only for `review-run`), so it keeps reporting while analysis is held.
 - A manual run is the same command without the adapter: `pg-review job run agent-workflow --scope
 workspace --duration 24h` reviews the previous 24 hours now. There is no router-side manual
   trigger and none is added (operator ruling, 2026-11-06, verbatim: "i should be able to
@@ -957,7 +968,7 @@ scope with no prefix. Router-side checks belong to the router (5.14).
   of a byte-identical Go copy is a drift trap and is not followed).
 - Roles are declared once through the pg-router module's `roles.<name>` (`binds`, `enabled`) and
   the command adapter's settings (`handler`, `command.argv`, `strictBaseEnv`). Defaults are not
-  assumed: the module sets each role's gates and retry keys explicitly.
+  assumed: the module sets each role's retry key explicitly and writes `requires` only when the deployment supplies clauses.
 - Two traps the builder tests for: a configuration with no `[[role]]` runs zero roles AND zero
   queries, logging only "defines no [[role]]; running with zero roles and zero queries"
   (`pg-router/internal/config/config.go`; there are no built-in roles), so every test
