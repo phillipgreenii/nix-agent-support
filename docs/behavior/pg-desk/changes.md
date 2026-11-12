@@ -305,8 +305,12 @@ row.
   hydrate is recorded in a small pg-desk table (the entity id and the row's sequence), pg-desk
   continues, and the feed is acknowledged past it: a permanently failing issue MUST NOT block every
   other issue's feed, which is the head-of-line blocking that position-based acknowledgement would
-  otherwise cause. The table is retried at every poll (level-triggered, no counter) and an alert
-  fires on its oldest age. This is ingest recovery (a row that could not be hydrated), not decider
+  otherwise cause. Each entry records the typed class of its failure (the connector's wire error
+  code, or a local call timeout, which counts as `unavailable`; never read from error text). An entry
+  whose class is permanent (`not_found`, `invalid_argument`) is FLAGGED: it is no longer retried, stays
+  in the table, and is shown by `status` and the `pg_desk_ingest_flagged` series until a later
+  successful row for the same entity clears it. Every other entry is retried at every poll
+  (level-triggered, no counter). An alert fires on the table's oldest age, flagged entries included. This is ingest recovery (a row that could not be hydrated), not decider
   recovery.
 - **A down backend ends the pass, not the poll's patience.** Every call pg-desk makes to the
   connector has a deadline, and a call that exceeds it counts as an unavailable (degraded) answer.
@@ -775,8 +779,18 @@ changes`; for a backend that owns its changes it calls `<type> changes` (in manu
 - **INV-CHANGES-19.** <!-- uuid: d1b6fbb4-ebc7-4438-b0ba-e2e96c1dd034 --> pg-desk MUST NOT acknowledge a feed row before it has been committed. An empty
   poll MUST still acknowledge the scanned next position. pg-desk MUST commit rows in order; a row
   that fails to hydrate MUST be recorded (entity id and the row's sequence) in the failed-ingest
-  table, pg-desk MUST continue and acknowledge past it, and the table MUST be retried at every poll
-  with no counter.
+  table with the typed class of its failure (the connector's error class, read from the error's type and
+  never from its message text; a local call timeout is `unavailable`), pg-desk MUST continue and
+  acknowledge past it, and the table MUST be retried at every poll with no counter EXCEPT that an
+  entry whose class is permanent MUST be flagged and not retried. The permanent classes are `not_found`
+  (the entity is gone and will never hydrate) and `invalid_argument` (the connector rejected the request
+  built from the entity id as malformed, and the same id builds the same request). Every other class is
+  transient and retried: `unavailable` and timeouts and network errors (the backend returns),
+  `unauthenticated` (restoring the credential makes the same row succeed), `unknown_op` and
+  `version_mismatch` (a connector upgrade fixes them), and an unclassified failure (never assumed
+  permanent). A flagged entry MUST stay visible in `status` and in `pg_desk_ingest_flagged`, and in the
+  count and oldest age that drive the failed-ingest alert, until a later successful commit for the same
+  entity clears it; it MUST NOT count as pending backlog.
 - **INV-CHANGES-20.** <!-- uuid: a7389f5b-5519-4ff5-828b-ab7124fc2d75 --> A redelivered feed row MUST NOT append a row, bump a version or produce an event.
   pg-desk MUST key idempotence on the feed's sequence AND the daemon's store identity, recording in
   the same transaction as each row's commit the highest committed sequence for the pair (daemon

@@ -191,3 +191,28 @@ func TestRecordLastRunFailureIsOneLine(t *testing.T) {
 		t.Errorf("stderr = %q", buf.String())
 	}
 }
+
+func TestStatusShowsFlaggedIngestFailures(t *testing.T) {
+	rs := newRIStore(t)
+	seedOpen(t, rs, 1)
+	for _, f := range []store.IngestFailure{
+		{Instance: "owning-a", EntityID: "i-1", Seq: 1, FirstFailedAt: "2026-11-10T09:00:00Z", LastError: "gone", FailureClass: "not_found", FlaggedAt: "2026-11-10T09:00:00Z"},
+		{Instance: "owning-a", EntityID: "i-2", Seq: 2, FirstFailedAt: "2026-11-10T09:00:00Z", LastError: "down", FailureClass: "unavailable"},
+	} {
+		if err := rs.seed.RecordIngestFailure(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := statusOut(t)
+	for _, want := range []string{
+		"  ingest_failed: 2 (flagged, not retried: 1)\n",
+		"    flagged owning-a i-1 seq=1 class=not_found since=2026-11-10T09:00:00Z: gone\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "flagged owning-a i-2") {
+		t.Errorf("a retryable entry is listed as flagged:\n%s", out)
+	}
+}

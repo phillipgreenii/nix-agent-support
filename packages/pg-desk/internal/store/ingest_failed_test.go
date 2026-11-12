@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -137,5 +138,64 @@ func TestIngestFailed_EmptyFirstFailedAtIsStamped(t *testing.T) {
 	at, ok, err := s.OldestIngestFailureAt()
 	if err != nil || !ok || time.Since(at) > time.Minute {
 		t.Fatalf("OldestIngestFailureAt = (%v, %v, %v), want a recent stamp", at, ok, err)
+	}
+}
+
+func TestIngestFailedFlagIsStickyAndClearedPerEntity(t *testing.T) {
+	s := OpenForTest(t)
+	first := "2026-11-10T09:00:00Z"
+	rec := func(f IngestFailure) {
+		t.Helper()
+		if err := s.RecordIngestFailure(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec(IngestFailure{Instance: "b", EntityID: "i-1", Seq: 1, FirstFailedAt: first, FailureClass: "unavailable"})
+	rec(IngestFailure{Instance: "b", EntityID: "i-1", Seq: 1, FailureClass: "not_found", FlaggedAt: "2026-11-10T10:00:00Z"})
+	rec(IngestFailure{Instance: "b", EntityID: "i-1", Seq: 1, FailureClass: "not_found", FlaggedAt: "2026-11-10T11:00:00Z"})
+	rec(IngestFailure{Instance: "b", EntityID: "i-1", Seq: 2, FirstFailedAt: first, FailureClass: "unavailable"})
+	rec(IngestFailure{Instance: "b", EntityID: "i-9", Seq: 3, FirstFailedAt: first, FailureClass: "not_found", FlaggedAt: first})
+	got, err := s.ListIngestFailures("b")
+	if err != nil || len(got) != 3 {
+		t.Fatalf("list = %+v, %v", got, err)
+	}
+	if got[0].FlaggedAt != "2026-11-10T10:00:00Z" || got[0].FirstFailedAt != first {
+		t.Fatalf("flag moved or first-failed lost: %+v", got[0])
+	}
+	if n, err := s.ClearFlaggedIngestFailures("b", "i-1"); err != nil || n != 1 {
+		t.Fatalf("clear = %d, %v", n, err)
+	}
+	left, _ := s.ListIngestFailures("b")
+	if len(left) != 2 || left[0].Seq != 2 || left[1].EntityID != "i-9" {
+		t.Fatalf("left = %+v", left)
+	}
+}
+
+// A table written before the failure_class and flagged_at columns gains them
+// on open and its rows read as unflagged.
+func TestIngestFailedLegacyTableGainsFlagColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE ingest_failed DROP COLUMN failure_class`,
+		`ALTER TABLE ingest_failed DROP COLUMN flagged_at`,
+		`INSERT INTO ingest_failed (instance, entity_id, seq, first_failed_at) VALUES ('b','i-1',1,'2026-11-10T09:00:00Z')`,
+	} {
+		if _, err := s.sql.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	_ = s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	got, err := s.ListIngestFailures("")
+	if err != nil || len(got) != 1 || got[0].Flagged() || got[0].FailureClass != "" {
+		t.Fatalf("list = %+v, %v", got, err)
 	}
 }

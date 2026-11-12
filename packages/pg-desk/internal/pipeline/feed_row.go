@@ -72,6 +72,9 @@ type feedOutcome struct {
 	version  int64
 	failure  string
 	degraded bool
+	// class is the typed failure class (see failureClassOf); "" when the
+	// failure carries none.
+	class string
 }
 
 // IngestFeedRow commits ONE feed row of an owning backend. It hydrates the
@@ -121,12 +124,26 @@ func (p *Pipeline) IngestFeedRow(ctx context.Context, in FeedRowInput) (FeedRowR
 		if err := p.store.RecordIngestFailure(store.IngestFailure{
 			Instance: in.Instance, EntityID: row.EntityID, Seq: row.Seq,
 			StoreIdentity: in.StoreIdentity, Kinds: c.kinds, LastError: out.failure,
+			FailureClass: out.class, FlaggedAt: p.flagTime(out.class),
 		}); err != nil {
 			return FeedRowResult{}, fmt.Errorf("pipeline: record ingest failure %s %s#%d: %w", in.Instance, row.EntityID, row.Seq, err)
 		}
 		return FeedRowResult{Failed: true, Degraded: out.degraded}, nil
 	}
+	// A later success for the entity resolves its flagged entries.
+	if _, err := p.store.ClearFlaggedIngestFailures(in.Instance, row.EntityID); err != nil {
+		return FeedRowResult{}, fmt.Errorf("pipeline: clear flagged ingest failures %s %s: %w", in.Instance, row.EntityID, err)
+	}
 	return FeedRowResult{Written: out.written, Version: out.version}, nil
+}
+
+// flagTime is the FlaggedAt stamp for a failure of class: the current UTC time
+// for a permanent class, "" otherwise.
+func (p *Pipeline) flagTime(class string) string {
+	if !PermanentFailureClass(class) {
+		return ""
+	}
+	return p.clock.Now().UTC().Format(time.RFC3339)
 }
 
 // FeedDegradedStreak is the number of consecutive degraded feed hydrations
@@ -135,7 +152,8 @@ func (p *Pipeline) IngestFeedRow(ctx context.Context, in FeedRowInput) (FeedRowR
 const FeedDegradedStreak = 3
 
 // RetryIngestFailures re-hydrates every failed-ingest entry of instance ("" =
-// every instance), at every poll with no counter and no deferral, except that a run of
+// every instance), at every poll with no counter and no deferral, except that a flagged entry
+// (a permanent failure class, see PermanentFailureClass) is skipped, and that a run of
 // FeedDegradedStreak consecutive degraded retries ends the pass (the rest wait for the next poll). An entry
 // that now hydrates is written with its RECORDED kinds as given (no marker,
 // no skip check) and cleared; an entry that still fails keeps its first
@@ -151,6 +169,10 @@ func (p *Pipeline) RetryIngestFailures(ctx context.Context, instance string) (re
 	}
 	streak := 0
 	for _, f := range fails {
+		// A flagged entry can never hydrate: it stays visible and is not retried.
+		if f.Flagged() {
+			continue
+		}
 		// A run of degraded retries means the backend is down: leave the
 		// remaining entries untouched for the next poll.
 		if streak >= FeedDegradedStreak {
@@ -176,6 +198,8 @@ func (p *Pipeline) RetryIngestFailures(ctx context.Context, instance string) (re
 		}
 		if out.failure != "" {
 			f.LastError = out.failure
+			f.FailureClass = out.class
+			f.FlaggedAt = p.flagTime(out.class)
 			if err := p.store.RecordIngestFailure(f); err != nil {
 				return retried, stillFailing, fmt.Errorf("pipeline: record ingest failure %s %s#%d: %w", f.Instance, f.EntityID, f.Seq, err)
 			}
@@ -184,6 +208,9 @@ func (p *Pipeline) RetryIngestFailures(ctx context.Context, instance string) (re
 		}
 		if err := p.store.ClearIngestFailure(f.Instance, f.EntityID, f.Seq); err != nil {
 			return retried, stillFailing, fmt.Errorf("pipeline: clear ingest failure %s %s#%d: %w", f.Instance, f.EntityID, f.Seq, err)
+		}
+		if _, err := p.store.ClearFlaggedIngestFailures(f.Instance, f.EntityID); err != nil {
+			return retried, stillFailing, fmt.Errorf("pipeline: clear flagged ingest failures %s %s: %w", f.Instance, f.EntityID, err)
 		}
 	}
 	return retried, stillFailing, nil
@@ -238,7 +265,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 		if errors.Is(err, gather.ErrUnavailable) {
 			reason = "hydration unavailable: " + err.Error()
 		}
-		return feedOutcome{failure: reason, degraded: errors.Is(err, gather.ErrUnavailable)}, nil
+		return feedOutcome{failure: reason, degraded: errors.Is(err, gather.ErrUnavailable), class: failureClassOf(err)}, nil
 	}
 
 	removedRow := slices.Contains(c.kinds, feedKindRemoved)
@@ -250,12 +277,12 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 
 	if result.RemovedState == "not_found" {
 		if !removedRow {
-			return feedOutcome{failure: "hydration failed: issue not found"}, nil
+			return feedOutcome{failure: "hydration failed: issue not found", class: FailureClassNotFound}, nil
 		}
 		return p.commitRemovedFeedRow(ctx, c, repo, at, opts)
 	}
 	if result.Degraded != "" {
-		return feedOutcome{failure: "degraded answer: " + result.Degraded, degraded: true}, nil
+		return feedOutcome{failure: "degraded answer: " + result.Degraded, degraded: true, class: FailureClassUnavailable}, nil
 	}
 	// A stated entity_meta.watched of false is mirrored AFTER the append, like
 	// a terminal row; NOT STATED counts as watched (a delivered feed row

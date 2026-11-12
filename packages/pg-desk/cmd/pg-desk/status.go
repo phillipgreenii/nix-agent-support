@@ -242,5 +242,10 @@ func printChangeFlow(ctx context.Context, w io.Writer, st *store.Store, version 
 			fmt.Fprintln(w, "      none")
 		}
 	}
+	fmt.Fprintf(w, "  ingest_failed: %d (flagged, not retried: %d)\n", flow.IngestFailed, len(flow.IngestFlagged))
+	for _, f := range flow.IngestFlagged {
+		fmt.Fprintf(w, "    flagged %s %s seq=%d class=%s since=%s: %s\n",
+			f.Instance, f.EntityID, f.Seq, orDash(f.FailureClass), f.FlaggedAt, f.LastError)
+	}
 	return nil
 }

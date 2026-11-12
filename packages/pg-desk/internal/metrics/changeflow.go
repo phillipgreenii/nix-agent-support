@@ -55,6 +55,12 @@ const (
 	// empty (never absent for a configured owning instance, so an empty table
 	// reads as 0 and an absent series means the store could not answer).
 	MetricIngestFailedOldestAge = "pg_desk_ingest_failed_oldest_age_seconds"
+	// MetricIngestFlagged is the number of failed-ingest entries of a backend
+	// instance that are flagged: their failure class is permanent (not_found,
+	// invalid_argument), so pg-desk no longer retries them. They stay counted
+	// in MetricIngestFailed and MetricIngestFailedOldestAge too, so the
+	// existing oldest-age alert keeps firing until the entry is cleared.
+	MetricIngestFlagged = "pg_desk_ingest_flagged"
 )
 
 // IngestFailedBackend is one backend instance's slice of the failed-ingest
@@ -63,6 +69,7 @@ const (
 type IngestFailedBackend struct {
 	Backend          string
 	Count            int64
+	Flagged          int64
 	OldestAgeSeconds int64
 }
 
@@ -94,6 +101,9 @@ func IngestFailedFromStore(st *store.Store, owning []string, now func() time.Tim
 				by[f.Instance] = b
 			}
 			b.Count++
+			if f.Flagged() {
+				b.Flagged++
+			}
 			first, err := time.Parse(time.RFC3339Nano, f.FirstFailedAt)
 			if err != nil {
 				return nil, fmt.Errorf("metrics: ingest failure (%s,%s,%d): parse first_failed_at %q: %w",
@@ -239,6 +249,11 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 	if err != nil {
 		return err
 	}
+	ingestFlagged, err := m.Int64ObservableGauge(MetricIngestFlagged,
+		metric.WithDescription("flagged failed-ingest entries (permanent failure class, no longer retried), by backend instance; read from the ingest_failed table at scrape time"))
+	if err != nil {
+		return err
+	}
 	ingestOldest, err := m.Int64ObservableGauge(MetricIngestFailedOldestAge,
 		metric.WithDescription("age in seconds of the oldest failed-ingest entry of a backend instance, 0 when it has none"))
 	if err != nil {
@@ -308,6 +323,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 			for _, r := range rows {
 				be := attribute.String("backend", r.Backend)
 				o.ObserveInt64(ingestFailed, r.Count, metric.WithAttributes(be))
+				o.ObserveInt64(ingestFlagged, r.Flagged, metric.WithAttributes(be))
 				o.ObserveInt64(ingestOldest, r.OldestAgeSeconds, metric.WithAttributes(be))
 			}
 		}
@@ -343,7 +359,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 			))
 		}
 		return nil
-	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestOldest, observedAge, unflagged, watchedEntities, oldestOrphan)
+	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestFlagged, ingestOldest, observedAge, unflagged, watchedEntities, oldestOrphan)
 	return err
 }
 

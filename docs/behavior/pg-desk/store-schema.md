@@ -361,13 +361,18 @@ request change, and an annotation write.
 `ingest_failed` is a small table holding the feed rows that could not be hydrated: one row per
 `(backend instance, entity id, feed seq)` carrying the identity of the backend's own store the `seq`
 belongs to, the change kinds of the row (a JSON array), the time the failure was first recorded and the
-latest error text. Recording the same key again updates the error text only and keeps the first-failed
+latest error text, the typed class of the latest failure (`failure_class`, empty when the failure carried
+none) and, once the class is permanent, the time the entry was flagged (`flagged_at`, empty while it is
+retryable). Recording the same key again updates the error text only and keeps the first-failed
 time. The feed
 is acknowledged by position, so a row that fails is recorded here and passed over, and one permanently
 failing issue never blocks every other issue's feed.
 
-- Every entry is retried at every poll. There is no attempt counter, no backoff and no timer: the
-  entry is level-triggered, and it is deleted when its entity hydrates.
+- Every unflagged entry is retried at every poll. There is no attempt counter, no backoff and no timer:
+  the entry is level-triggered, and it is deleted when its entity hydrates. An entry whose failure class
+  is permanent (`not_found`, `invalid_argument`) is flagged, and a flagged entry is not retried: it stays
+  until a later successful commit for the same entity deletes it. The flag, once set, is never unset, and a
+  flagged entry does not count as pending hydration backlog.
 - Its oldest age and its count (the `pg_desk_ingest_failed` series and the `doctor` gate; see
   [`operator-commands.md`](operator-commands.md), "doctor") are the signal that ingest is failing.
 - A redelivered feed row for a `seq` that already has an entry is skipped and adds no second entry.

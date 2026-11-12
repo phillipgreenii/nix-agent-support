@@ -174,3 +174,27 @@ func TestSweepKeysAreStillReadForTheNonPRTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestObserveSeparatesFlaggedIngestFailuresFromTheRetryableBacklog(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	for _, f := range []store.IngestFailure{
+		{Instance: "b", EntityID: "i-1", Seq: 1, FirstFailedAt: "2026-10-01T10:00:00Z", FailureClass: "not_found", FlaggedAt: "2026-10-01T10:00:00Z"},
+		{Instance: "b", EntityID: "i-2", Seq: 2, FirstFailedAt: "2026-10-01T10:00:00Z", FailureClass: "unavailable"},
+	} {
+		if err := st.RecordIngestFailure(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	flow, err := Observe(st, observeNow, 6*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.IngestFailed != 2 || len(flow.IngestFlagged) != 1 || flow.IngestFlagged[0].EntityID != "i-1" {
+		t.Fatalf("flow ingest = %d, %+v", flow.IngestFailed, flow.IngestFlagged)
+	}
+	for _, tf := range flow.Types {
+		if tf.Type == EntityTypeIssue && tf.Due != 1 {
+			t.Errorf("issue due backlog = %d, want 1 (the flagged entry owes no work)", tf.Due)
+		}
+	}
+}

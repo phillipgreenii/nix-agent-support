@@ -639,3 +639,39 @@ func TestUnflaggedSeriesCoversBeadsInstancesAndKeepsThePlaceholder(t *testing.T)
 		}
 	}
 }
+
+// A flagged entry (permanent failure class) is counted in the flagged series
+// of its backend and still in the failed count and oldest age.
+func TestIngestFlaggedSeriesCountsOnlyFlaggedEntries(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	first := now.Add(-time.Hour).Format(time.RFC3339)
+	for _, f := range []store.IngestFailure{
+		{Instance: "a", EntityID: "i-1", Seq: 1, FirstFailedAt: first, FailureClass: "not_found", FlaggedAt: first},
+		{Instance: "a", EntityID: "i-2", Seq: 2, FirstFailedAt: first, FailureClass: "unavailable"},
+	} {
+		if err := st.RecordIngestFailure(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rm, err := collectIngest(t, IngestFailedFromStore(st, []string{"a", "b"}, func() time.Time { return now }), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := findMetric(t, rm, MetricIngestFlagged).Data.(metricdata.Gauge[int64])
+	if !ok {
+		t.Fatalf("%s is not an int64 gauge", MetricIngestFlagged)
+	}
+	got := map[string]int64{}
+	for _, p := range d.DataPoints {
+		be, _ := p.Attributes.Value("backend")
+		got[be.AsString()] = p.Value
+	}
+	if len(got) != 2 || got["a"] != 1 || got["b"] != 0 {
+		t.Fatalf("%s = %v, want a=1 b=0", MetricIngestFlagged, got)
+	}
+	count, _ := ingestPoints(t, rm)
+	if count["a"] != 2 {
+		t.Fatalf("%s{a} = %d, want 2", MetricIngestFailed, count["a"])
+	}
+}

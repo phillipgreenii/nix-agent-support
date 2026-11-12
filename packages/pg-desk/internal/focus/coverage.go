@@ -68,7 +68,11 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 		if err != nil {
 			return CoverageReport{}, err
 		}
-		failedIngest = len(fails)
+		for _, f := range fails {
+			if !f.Flagged() {
+				failedIngest++
+			}
+		}
 	}
 	rows := make([]store.Entity, 0, len(entities))
 	for _, e := range entities {

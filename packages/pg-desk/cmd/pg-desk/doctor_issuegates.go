@@ -360,8 +360,12 @@ func gateFailedIngestAgeCheck(rep gateReport, cfg *config.Config, st *store.Stor
 			continue
 		}
 		if age := now.Sub(at); age > bound {
-			what = append(what, fmt.Sprintf("backend %s entity %s: failing since %s (%s, bound %s): %s",
-				f.Instance, f.EntityID, f.FirstFailedAt, age.Round(time.Second), bound, f.LastError))
+			note := ""
+			if f.Flagged() {
+				note = fmt.Sprintf(" [flagged %s, class %s, not retried]", f.FlaggedAt, f.FailureClass)
+			}
+			what = append(what, fmt.Sprintf("backend %s entity %s: failing since %s (%s, bound %s)%s: %s",
+				f.Instance, f.EntityID, f.FirstFailedAt, age.Round(time.Second), bound, note, f.LastError))
 		}
 	}
 	if len(what) > 0 {

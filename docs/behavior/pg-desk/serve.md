@@ -135,6 +135,10 @@ its bound is checked and alerting. An absent series (no verdict) is Normal, not 
   `0` and `0` (never absent), so an empty table is a value and an absent series means the read failed.
   A deployment with no owning instance and an empty table emits one series with an empty `backend`
   (no label in Prometheus), valued `0`.
+- `pg_desk_ingest_flagged{backend}` — how many of those entries are flagged (permanent failure class,
+  no longer retried), emitted for the same backends with the same read-failure rule. A flagged entry is
+  still counted in `pg_desk_ingest_failed` and its age in the oldest-age series, so the rule below keeps
+  firing until the entry is cleared.
 
 The Grafana rule `pg-desk-ingest-failed-old` (`packages/pg-desk/grafana/alerting/alerts.yaml`)
 fires per `backend` while the oldest failed-ingest entry is older than `1800` seconds, held for

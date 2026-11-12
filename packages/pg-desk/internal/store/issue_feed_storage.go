@@ -31,8 +31,18 @@ const ingestFailedDDL = `CREATE TABLE IF NOT EXISTS ingest_failed (
   kinds          TEXT NOT NULL DEFAULT '[]',
   first_failed_at TEXT NOT NULL,
   last_error     TEXT NOT NULL DEFAULT '',
+  failure_class  TEXT NOT NULL DEFAULT '',
+  flagged_at     TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (instance, entity_id, seq)
 )`
+
+// ingestFailedAddedColumns are the ingest_failed columns added after the
+// table first shipped: failure_class is the typed class of the last failure
+// and flagged_at the time the entry became flagged ("" = not flagged).
+var ingestFailedAddedColumns = []struct{ name, decl string }{
+	{"failure_class", "TEXT NOT NULL DEFAULT ''"},
+	{"flagged_at", "TEXT NOT NULL DEFAULT ''"},
+}
 
 // ensureIssueFeedStorage adds the owning-backend issue flow's storage: the
 // entity.backend, entity.watched, entity.read_attempt_at and entity.read_ok_at
@@ -70,6 +80,21 @@ func ensureIssueFeedStorage(s *Store) error {
 	}
 	if _, err := s.sql.Exec(ingestFailedDDL); err != nil {
 		return fmt.Errorf("create ingest_failed: %w", err)
+	}
+	cols, err := s.tableColumns("ingest_failed")
+	if err != nil {
+		return err
+	}
+	for _, col := range ingestFailedAddedColumns {
+		if cols[col.name] {
+			continue
+		}
+		if _, err := s.sql.Exec(`ALTER TABLE ingest_failed ADD COLUMN ` + col.name + ` ` + col.decl); err != nil {
+			again, cerr := s.tableColumns("ingest_failed")
+			if cerr != nil || !again[col.name] {
+				return fmt.Errorf("add ingest_failed.%s: %w", col.name, err)
+			}
+		}
 	}
 	return nil
 }

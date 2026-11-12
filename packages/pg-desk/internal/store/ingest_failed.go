@@ -19,10 +19,20 @@ type IngestFailure struct {
 	Kinds         []string
 	FirstFailedAt string
 	LastError     string
+	// FailureClass is the typed class of the last failure (a connector wire
+	// error code such as not_found or unavailable); "" when it carried none.
+	FailureClass string
+	// FlaggedAt is an RFC3339 time: set once the failure's class is permanent,
+	// after which the entry is no longer retried; "" while it is retryable.
+	FlaggedAt string
 }
 
+// Flagged reports whether the entry is flagged (permanent, not retried).
+func (f IngestFailure) Flagged() bool { return f.FlaggedAt != "" }
+
 // RecordIngestFailure records f. A repeat of the same (Instance, EntityID,
-// Seq) updates LastError only and keeps FirstFailedAt. An empty
+// Seq) updates LastError and FailureClass, keeps FirstFailedAt, and sets
+// FlaggedAt only when the entry is not flagged yet. An empty
 // FirstFailedAt on a first record is stamped with the current UTC time.
 func (s *Store) RecordIngestFailure(f IngestFailure) error {
 	kinds := f.Kinds
@@ -39,10 +49,13 @@ func (s *Store) RecordIngestFailure(f IngestFailure) error {
 	}
 	if _, err := s.sql.Exec(
 		`INSERT INTO ingest_failed
-		   (instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT (instance, entity_id, seq) DO UPDATE SET last_error = excluded.last_error`,
-		f.Instance, f.EntityID, f.Seq, f.StoreIdentity, string(kindsJSON), first, f.LastError,
+		   (instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, failure_class, flagged_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (instance, entity_id, seq) DO UPDATE SET
+		   last_error = excluded.last_error,
+		   failure_class = excluded.failure_class,
+		   flagged_at = CASE WHEN ingest_failed.flagged_at = '' THEN excluded.flagged_at ELSE ingest_failed.flagged_at END`,
+		f.Instance, f.EntityID, f.Seq, f.StoreIdentity, string(kindsJSON), first, f.LastError, f.FailureClass, f.FlaggedAt,
 	); err != nil {
 		return fmt.Errorf("store: record ingest failure (%s,%s,%d): %w", f.Instance, f.EntityID, f.Seq, err)
 	}
@@ -67,7 +80,19 @@ func (s *Store) ListIngestFailures(instance string) ([]IngestFailure, error) {
 	if err != nil || !ok {
 		return nil, err
 	}
-	q := `SELECT instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error FROM ingest_failed`
+	cols, err := s.tableColumns("ingest_failed")
+	if err != nil {
+		return nil, err
+	}
+	// A store opened read-only that predates the added columns reads them as "".
+	class, flagged := `''`, `''`
+	if cols["failure_class"] {
+		class = "failure_class"
+	}
+	if cols["flagged_at"] {
+		flagged = "flagged_at"
+	}
+	q := `SELECT instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, ` + class + `, ` + flagged + ` FROM ingest_failed`
 	var args []any
 	if instance != "" {
 		q += ` WHERE instance = ?`
@@ -83,7 +108,7 @@ func (s *Store) ListIngestFailures(instance string) ([]IngestFailure, error) {
 	for rows.Next() {
 		var f IngestFailure
 		var kinds string
-		if err := rows.Scan(&f.Instance, &f.EntityID, &f.Seq, &f.StoreIdentity, &kinds, &f.FirstFailedAt, &f.LastError); err != nil {
+		if err := rows.Scan(&f.Instance, &f.EntityID, &f.Seq, &f.StoreIdentity, &kinds, &f.FirstFailedAt, &f.LastError, &f.FailureClass, &f.FlaggedAt); err != nil {
 			return nil, fmt.Errorf("store: scan ingest failure: %w", err)
 		}
 		if err := json.Unmarshal([]byte(kinds), &f.Kinds); err != nil {
@@ -107,6 +132,26 @@ func (s *Store) ClearIngestFailure(instance, entityID string, seq int64) error {
 		return fmt.Errorf("store: clear ingest failure (%s,%s,%d): %w", instance, entityID, seq, err)
 	}
 	return nil
+}
+
+// ClearFlaggedIngestFailures removes the flagged entries of (instance,
+// entityID): a later successful commit for the entity resolves them. Entries
+// that are not flagged are left to their own retry, which still owes their
+// recorded kinds. It reports how many entries it removed.
+func (s *Store) ClearFlaggedIngestFailures(instance, entityID string) (int, error) {
+	ok, err := s.ingestFailedExists()
+	if err != nil || !ok {
+		return 0, err
+	}
+	res, err := s.sql.Exec(
+		`DELETE FROM ingest_failed WHERE instance = ? AND entity_id = ? AND flagged_at <> ''`,
+		instance, entityID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("store: clear flagged ingest failures (%s,%s): %w", instance, entityID, err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // OldestIngestFailureAt returns the earliest first_failed_at over every

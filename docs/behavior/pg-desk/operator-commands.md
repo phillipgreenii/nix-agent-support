@@ -67,7 +67,7 @@ reports only its inputs (`active_count`, `N`, `D`) and `poll_interval: unknown`,
 poll interval is
 the router's timer period, which `pg-desk` does not own, so only `doctor` evaluates the bound (with
 `--router-config`). For the watched-only `issue` flow `status` also prints counts, and only counts,
-per backend: the watched entities by type, the failed-ingest entries and the age of the oldest, the
+per backend: the watched entities by type, the failed-ingest entries (with each flagged one, its class and the time it was flagged) and the age of the oldest, the
 oldest orphan read age, the age of the oldest successful observation of the source of a watched open
 issue, and the members of a watched query whose entity carries no watched mark (the same figures the
 `pg_desk_watched_entities`, `pg_desk_ingest_failed`, `pg_desk_oldest_orphan_read_age_seconds`,

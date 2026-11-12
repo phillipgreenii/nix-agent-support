@@ -96,7 +96,9 @@ table focus_selection
 
 table ingest_failed
   col entity_id TEXT notnull=1 default=<none> pk=2
+  col failure_class TEXT notnull=1 default='' pk=0
   col first_failed_at TEXT notnull=1 default=<none> pk=0
+  col flagged_at TEXT notnull=1 default='' pk=0
   col instance TEXT notnull=1 default=<none> pk=1
   col kinds TEXT notnull=1 default='[]' pk=0
   col last_error TEXT notnull=1 default='' pk=0

@@ -62,8 +62,9 @@ const EntityTypePR = "pr"
 // re-hydrated on a clock and counting it by age would read incomplete for ever.
 // The backlog is the PENDING hydrations only: the ACTIVE entities that are
 // watched and have never been hydrated (HydratedAt is empty), plus failedIngest,
-// the number of failed-ingest entries the caller read from the store
-// (len of Store.ListIngestFailures("")). An entity whose listed fingerprint
+// the number of RETRYABLE failed-ingest entries the caller read from the store
+// (Store.ListIngestFailures("") without the flagged ones, which never hydrate
+// and so owe no work). An entity whose listed fingerprint
 // changed but which is not yet re-hydrated is NOT counted: the stored list_fp is
 // only compared against a listing the poll holds, which this count does not
 // have. maxAge is not used for issue.

@@ -57,6 +57,11 @@ type Flow struct {
 	Migrated  bool
 	Types     []TypeFlow
 	Consumers []ConsumerFlow
+	// IngestFailed is the number of failed-ingest entries and IngestFlagged
+	// the flagged ones among them (permanent failure class, no longer
+	// retried), sorted by (instance, entity id, seq).
+	IngestFailed  int
+	IngestFlagged []store.IngestFailure
 }
 
 // Observe reads the change-flow observability from the store at now: the
@@ -112,7 +117,25 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 		addType(t)
 	}
 
-	flow := Flow{Migrated: true}
+	flow := Flow{Migrated: true, IngestFailed: len(failures)}
+	retryable := 0
+	for _, f := range failures {
+		if f.Flagged() {
+			flow.IngestFlagged = append(flow.IngestFlagged, f)
+		} else {
+			retryable++
+		}
+	}
+	sort.Slice(flow.IngestFlagged, func(i, j int) bool {
+		a, b := flow.IngestFlagged[i], flow.IngestFlagged[j]
+		if a.Instance != b.Instance {
+			return a.Instance < b.Instance
+		}
+		if a.EntityID != b.EntityID {
+			return a.EntityID < b.EntityID
+		}
+		return a.Seq < b.Seq
+	})
 	maxSeq := map[string]int64{}
 	for _, t := range types {
 		records, err := st.ListChangesAfter(t, 0, 0)
@@ -140,7 +163,7 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 			Type:     t,
 			MaxSeq:   top,
 			Active:   ActiveCount(entities, t),
-			Due:      DueBacklog(entities, t, now, maxAge, len(failures)),
+			Due:      DueBacklog(entities, t, now, maxAge, retryable),
 			Stats:    stats,
 			Repeated: RepeatedDegraded(stats),
 		}

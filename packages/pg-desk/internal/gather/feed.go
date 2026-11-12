@@ -28,22 +28,46 @@ func wireErrorCode(stdout []byte) string {
 	return ""
 }
 
-// unavailableError keeps the call's own error text unchanged (callers print it)
-// while matching ErrUnavailable under errors.Is.
-type unavailableError struct{ msg string }
+// WireError is the error for a pg-connector call that exited with a code the
+// caller treats as failure. Code is the wire error code of the call's stdout
+// envelope (one of the closed taxonomy of nix-agent-support ADR 0062
+// principle 3: not_found, unauthenticated, unavailable, unknown_op,
+// version_mismatch, invalid_argument), or "" when the stdout was not an error
+// envelope. The message keeps the call's own text (callers print it). A wire
+// error "unavailable" matches ErrUnavailable under errors.Is.
+type WireError struct {
+	Code string
+	msg  string
+}
 
-func (e *unavailableError) Error() string        { return e.msg }
-func (e *unavailableError) Is(target error) bool { return target == ErrUnavailable }
+func (e *WireError) Error() string        { return e.msg }
+func (e *WireError) Is(target error) bool { return target == ErrUnavailable && e.Code == "unavailable" }
+
+// NewWireError builds the typed error of a failed call with the wire error
+// code and message given. It exists so a caller's tests can feed a typed
+// error whose message text says nothing about its class.
+func NewWireError(code, msg string) *WireError { return &WireError{Code: code, msg: msg} }
+
+// ErrorCode returns the typed class of a failed pg-connector call: the wire
+// error code of a *WireError found in err's chain, "unavailable" for any
+// error that matches ErrUnavailable (including a local call deadline), and ""
+// for an error that carries no connector class. It never reads err's text.
+func ErrorCode(err error) string {
+	var we *WireError
+	if errors.As(err, &we) && we.Code != "" {
+		return we.Code
+	}
+	if errors.Is(err, ErrUnavailable) {
+		return "unavailable"
+	}
+	return ""
+}
 
 // exitError is the error for a pg-connector call that exited with a code the
-// caller treats as failure. A wire error "unavailable" matches ErrUnavailable
-// under errors.Is; the message is the same either way.
+// caller treats as failure; see WireError.
 func exitError(args []string, code int, stdout []byte) error {
 	msg := fmt.Sprintf("pg-connector %v: exit %d: %s", args, code, wireErrorMessage(stdout))
-	if wireErrorCode(stdout) == "unavailable" {
-		return &unavailableError{msg: msg}
-	}
-	return errors.New(msg)
+	return &WireError{Code: wireErrorCode(stdout), msg: msg}
 }
 
 // FeedRow is one row of an owning backend's change feed: the log position,
