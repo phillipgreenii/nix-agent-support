@@ -10129,11 +10129,15 @@
               # heartbeat probe or the pg-connector client path changes
               # (`nix build .#checks.<system>.pg-desk-integration-tests`). It MUST
               # NOT be wired into any hook, run-unit-tests, pre-land or land gate.
-              # It runs only the `//go:build integration` test in cmd/pg-desk, which
-              # drives the REAL umbrella and the REAL GitHub backend client (as
-              # processes) against a socket with no daemon behind it; the built
-              # binaries are handed over by env var because the sandbox cannot
-              # build a sibling module. Fails when the test does not report PASS.
+              # It runs EVERY `//go:build integration` test of the module (the tagged
+              # list minus the untagged list, per package: the re-executed verb and
+              # serve children, the plugin processes, the real pg-connector umbrella
+              # and GitHub backend client against a socket with no daemon behind it);
+              # the built binaries are handed over by env var because the sandbox
+              # cannot build a sibling module. Fails when none exist, when a test
+              # does not report PASS, or when one is skipped. Same shape as
+              # pg-connector-integration-tests. The unit-tier guard is
+              # TestUnitTierHasNoIntegrationTests in cmd/pg-desk.
               pg-desk-integration-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-desk-integration-tests";
@@ -10156,19 +10160,49 @@
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
                       log="$TMPDIR/integration.log"
-                      if ! go test -tags integration -count=1 -v -timeout 10m \
-                        -run '^TestHeartbeatProbeWithTheDaemonDownLeavesTheSourceRowsStale$' \
-                        ./cmd/pg-desk > "$log" 2>&1; then
-                        cat "$log"
-                        echo "pg-desk-integration-tests: FAILED" >&2
+                      : > "$log"
+                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                      if [ -z "$pkgs" ]; then
+                        echo "pg-desk-integration-tests: no test file carries //go:build integration" >&2
                         exit 1
                       fi
-                      if ! grep -q -- '^--- PASS: TestHeartbeatProbeWithTheDaemonDownLeavesTheSourceRowsStale ' "$log"; then
+                      total=0
+                      failed=""
+                      for dir in $pkgs; do
+                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                        if [ -z "$names" ]; then
+                          echo "pg-desk-integration-tests: $dir lists no integration-only tests" >&2
+                          exit 1
+                        fi
+                        regex="^($(echo "$names" | paste -sd'|' -))\$"
+                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                        # One package failing must not hide the rest: record and go on.
+                        if ! go test -tags integration -count=1 -v -timeout 30m -run "$regex" "$dir" >> "$log" 2>&1; then
+                          echo "pg-desk-integration-tests: $dir FAILED" >&2
+                          failed="$failed $dir"
+                          continue
+                        fi
+                        for t in $names; do
+                          if ! grep -q -- "^--- PASS: $t " "$log"; then
+                            echo "pg-desk-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                            failed="$failed $dir"
+                          fi
+                        done
+                        total=$((total + $(echo "$names" | wc -l)))
+                      done
+                      if [ -n "$failed" ]; then
                         cat "$log"
-                        echo "pg-desk-integration-tests: the test did not report PASS (skipped or not run)" >&2
+                        echo "pg-desk-integration-tests: failing packages:$failed" >&2
                         exit 1
                       fi
-                      echo "pg-desk-integration-tests: the daemon-down heartbeat test reported PASS"
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        cat "$log"
+                        echo "pg-desk-integration-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-desk-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
                       runHook postBuild
                     '';
                   });

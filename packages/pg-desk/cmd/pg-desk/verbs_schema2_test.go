@@ -18,18 +18,15 @@ package main
 // guaranteed to run on a schema-2 store.
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"sort"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -491,19 +488,6 @@ type verbResult struct {
 	err            error // non-nil when the process could not be started or timed out
 }
 
-// start launches the verb as its own process (a re-execution of this test
-// binary, see runVerbChildIfRequested). Only the daemon verb still runs this
-// way: its SIGTERM-to-clean-exit contract belongs to a real process.
-func (f *verbFixture) start(ctx context.Context, verb string, args []string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
-	full := append(strings.Fields(verb), args...)
-	cmd := exec.CommandContext(ctx, os.Args[0])
-	cmd.Env = append(append([]string{}, f.env...), verbChildArgsEnv+"="+strings.Join(full, argSep))
-	cmd.Stdin = strings.NewReader("")
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	return cmd, &out, &errb
-}
-
 // run runs one verb IN PROCESS (bead pg2-zpmuzy: a re-executed race-built test
 // binary sleeps 1 s at every exit, and this walk used to start about seventy
 // of them). It is the same code path as the process the daemon verb still
@@ -623,47 +607,6 @@ func resetFlags(c *cobra.Command) {
 	}
 }
 
-// runDaemon starts a long-running verb, waits for its log to say it is
-// listening, stops it with SIGTERM and returns its result.
-func (f *verbFixture) runDaemon(verb string, args []string) verbResult {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd, out, errb := f.start(ctx, verb, args)
-	if err := cmd.Start(); err != nil {
-		return verbResult{err: err}
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	deadline := time.After(20 * time.Second)
-	listening := false
-	for !listening {
-		select {
-		case err := <-done:
-			res := verbResult{stdout: out.String(), stderr: errb.String()}
-			if ee, ok := err.(*exec.ExitError); ok {
-				res.exit = ee.ExitCode()
-			}
-			res.err = fmt.Errorf("daemon exited before it listened: %v", err)
-			return res
-		case <-deadline:
-			_ = cmd.Process.Kill()
-			<-done
-			return verbResult{stdout: out.String(), stderr: errb.String(), err: fmt.Errorf("daemon did not listen within 20s")}
-		case <-time.After(50 * time.Millisecond):
-			if b, err := os.ReadFile(f.serveLog); err == nil && strings.Contains(string(b), "listening") {
-				listening = true
-			}
-		}
-	}
-	_ = cmd.Process.Signal(syscall.SIGTERM)
-	err := <-done
-	res := verbResult{stdout: out.String(), stderr: errb.String()}
-	if ee, ok := err.(*exec.ExitError); ok {
-		res.exit = ee.ExitCode()
-	}
-	return res
-}
-
 // checkEverySafeVerbRunsOnASchema2Store runs each safe verb on the migrated
 // fixture store. The test fails when a verb's error output names a schema,
 // ledger or dropped-table problem, when a verb cannot be started, or when a
@@ -672,14 +615,12 @@ func checkEverySafeVerbRunsOnASchema2Store(t *testing.T) {
 	classes := verbClasses()
 	for _, verb := range safeVerbList(classes) {
 		c := classes[verb]
+		if c.Daemon {
+			continue // a whole process: TestDaemonVerbsRunAndStopCleanlyOnASchema2Store (integration tier)
+		}
 		t.Run(strings.ReplaceAll(verb, " ", "_"), func(t *testing.T) {
 			f := newVerbFixture(t)
-			var res verbResult
-			if c.Daemon {
-				res = f.runDaemon(verb, c.Args)
-			} else {
-				res = f.run(verb, c.Args)
-			}
+			res := f.run(verb, c.Args)
 			t.Logf("%s %v: exit=%d\nstderr: %s", verb, c.Args, res.exit, strings.TrimSpace(res.stderr))
 			if res.err != nil {
 				t.Fatalf("%s: %v\nstderr: %s", verb, res.err, res.stderr)
@@ -689,9 +630,6 @@ func checkEverySafeVerbRunsOnASchema2Store(t *testing.T) {
 			}
 			if m := schemaOrLedgerError(res); m != "" {
 				t.Fatalf("%s hit a schema or ledger error on a schema-2 store (%q):\nstdout: %s\nstderr: %s", verb, m, res.stdout, res.stderr)
-			}
-			if c.Daemon && res.exit != 0 {
-				t.Fatalf("%s did not stop cleanly on SIGTERM: exit %d\n%s", verb, res.exit, res.stderr)
 			}
 		})
 	}
