@@ -278,13 +278,16 @@ func (s *Service) deliverCommand(ctx context.Context, externalID, tmuxName, cmd 
 }
 
 // waitGone polls liveness until the session disappears or the budget elapses.
+// The budget is counted in injected sleeps (s.sleep, a no-op in tests) rather
+// than wall-clock time, so a test whose fake session never exits does not wait
+// out the real budget.
 func (s *Service) waitGone(tmuxName string, budget time.Duration) bool {
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
+	const poll = 100 * time.Millisecond
+	for waited := time.Duration(0); waited < budget; waited += poll {
 		if !s.d.Tmux.HasSession(tmuxName) {
 			return true
 		}
-		time.Sleep(100 * time.Millisecond)
+		s.sleep(poll)
 	}
 	return !s.d.Tmux.HasSession(tmuxName)
 }
