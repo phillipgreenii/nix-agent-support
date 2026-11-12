@@ -410,6 +410,7 @@ act_verify() {
   else
     # every failed attribute of the run (--keep-going), for the verdict, the bead text and the gauges
     failed="$(rr_failed_checks "$log")" || failed='[]'
+    # shellcheck disable=SC2016  # jq program, not shell: the f is a jq variable
     extra="$(rr_jq -c --argjson f "$failed" '. + {failedChecks: $f}' <<<"$extra")" || return 1
     rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
     # a red locked check is classified by the same check over the sibling overrides
