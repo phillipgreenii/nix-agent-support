@@ -404,6 +404,47 @@ func TestSigstopHolderPastItsLease(t *testing.T) {
 	h.noProblems()
 }
 
+// TestSigstopHolderLosesLockMidHook: SIGSTOP the holder past its lease and
+// SIGCONT it while its hook is still blocked, and never release the hook. The
+// holder must kill the hook's process group at once and end with exit 4 and
+// lock-lost, long before the hook's 60 second timeout (design section 8.7).
+func TestSigstopHolderLosesLockMidHook(t *testing.T) {
+	h := newHarness(t, Scenario{
+		Name: "sigstop-lock-lost-mid-hook", Shape: ShapeAhead, Fifos: []string{"up", "go"},
+		Layout: []Worktree{{Name: "src", Branch: "feature/x"}},
+		Config: blockingConfig("before_move"),
+		Hooks:  map[string]string{"blocker": blockingHook},
+	})
+	h.addBranch("y")
+	startMain := h.mustGit(h.repo, "rev-parse", "main")
+
+	holder := h.start("holder", "land", "feature/x")
+	h.await("up")
+	hookPid := h.readPid("hook.pid")
+	if err := holder.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, h.run("land", "y", "--wait", "30s"), 5, "refused", "holder-died")
+	resumed := time.Now()
+	if err := holder.cmd.Process.Signal(syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	// The go fifo is never written: only the lost lock can end the hook.
+	r := h.wait("holder")
+	expect(t, r, 4, "stopped", "lock-lost")
+	if took := time.Since(resumed); took > 20*time.Second {
+		t.Errorf("the holder took %v after SIGCONT, it waited for the hook", took)
+	}
+	if !gone(hookPid) {
+		t.Fatalf("the hook (pid %d) survived the lost lock", hookPid)
+	}
+	if got := h.mustGit(h.repo, "rev-parse", "main"); got != startMain {
+		t.Fatalf("main moved to %s from %s", got, startMain)
+	}
+	expect(t, h.run("land", "feature/x", "--abort"), 0, "aborted", "")
+	h.noProblems()
+}
+
 // TestSigtermDuringLongHook: SIGTERM during a long before_move hook; the
 // hook's process group dies, the record is stopped with interrupted, TARGET's
 // lock is released, and --continue then lands.

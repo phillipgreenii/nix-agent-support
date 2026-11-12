@@ -61,6 +61,18 @@ type runner struct {
 // unexpected failure is a stop with reason internal-error, never an error
 // return; the error is only for a stop that itself could not be recorded.
 func (p *Prepared) Run(ctx context.Context) (*outcome.Outcome, error) {
+	// A lease that fails renewal cancels the operation's context at once, so
+	// the current step's process group is killed instead of running on until
+	// the next step boundary (design section 8.7).
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	go func() {
+		select {
+		case err := <-p.Lost:
+			cancel(&lostCause{err: err})
+		case <-ctx.Done():
+		}
+	}()
 	s := &runner{p: p, ctx: ctx}
 	for _, w := range p.Warnings {
 		s.entries = append(s.entries, outcome.WarningEntry{Warning: w})
@@ -71,6 +83,8 @@ func (p *Prepared) Run(ctx context.Context) (*outcome.Outcome, error) {
 	switch {
 	case err != nil && errors.Is(err, locks.ErrLockLost):
 		sp = &stopSpec{reason: outcome.StopLockLost, message: err.Error()}
+	case err != nil && lockLostCause(ctx) != nil:
+		sp = &stopSpec{reason: outcome.StopLockLost, message: lockLostCause(ctx).Error()}
 	case err != nil && ctx.Err() != nil:
 		sp = &stopSpec{reason: outcome.StopInterrupted, message: context.Cause(ctx).Error()}
 	case err != nil:
@@ -201,7 +215,27 @@ func (s *runner) afterAndCleanup(ctx context.Context) (*outcome.Outcome, *stopSp
 	return s.cleanup(ctx, false)
 }
 
+// lostCause is the cancellation cause of a context ended by a lost lease.
+type lostCause struct{ err error }
+
+func (c *lostCause) Error() string { return fmt.Sprintf("lock lost: %v", c.err) }
+func (c *lostCause) Unwrap() error { return c.err }
+
+// lockLostCause returns the lost-lease cause of ctx, or nil.
+func lockLostCause(ctx context.Context) error {
+	var lc *lostCause
+	if errors.As(context.Cause(ctx), &lc) {
+		return lc
+	}
+	return nil
+}
+
 func (s *runner) lostCheck() *stopSpec {
+	if s.ctx != nil {
+		if err := lockLostCause(s.ctx); err != nil {
+			return &stopSpec{reason: outcome.StopLockLost, message: err.Error()}
+		}
+	}
 	if s.ctx != nil && s.ctx.Err() != nil {
 		return &stopSpec{reason: outcome.StopInterrupted, message: context.Cause(s.ctx).Error()}
 	}
@@ -714,18 +748,25 @@ func (s *runner) stop(ctx context.Context, sp *stopSpec) (*outcome.Outcome, erro
 		o    *outcome.Outcome
 		serr error
 	)
+	if sp.reason != outcome.StopLockLost {
+		// conflict_rounds bounds the whole operation, so a resume needs it.
+		_ = p.Op.SetAttempts(ctx, func(a *locks.Attempts) {
+			a.ConflictRounds, a.RaceRetries = s.stats.ConflictRounds, s.stats.RaceRetries
+		})
+		serr = p.Op.Stop(ctx, oprecord.StopInfo{Reason: sp.reason, Message: sp.message, Paths: sp.paths, MovedAlready: s.moved})
+		if errors.Is(serr, locks.ErrLockLost) {
+			// The records changed hands while this stop was written: that is
+			// a lost lock (exit 4), not an internal error.
+			sp = &stopSpec{reason: outcome.StopLockLost, message: serr.Error()}
+			serr = nil
+		}
+	}
 	if sp.reason == outcome.StopLockLost {
 		lr, err := p.Op.HandleLostLock(ctx, oprecord.LostLock{Reason: sp.reason, Repo: p.Request.RepoFlag})
 		serr = err
 		if lr != nil {
 			o = lr.Outcome
 		}
-	} else {
-		// conflict_rounds bounds the whole operation, so a resume needs it.
-		_ = p.Op.SetAttempts(ctx, func(a *locks.Attempts) {
-			a.ConflictRounds, a.RaceRetries = s.stats.ConflictRounds, s.stats.RaceRetries
-		})
-		serr = p.Op.Stop(ctx, oprecord.StopInfo{Reason: sp.reason, Message: sp.message, Paths: sp.paths, MovedAlready: s.moved})
 	}
 	if o == nil {
 		o = outcome.NewStopped(sp.reason, string(p.Operation), p.Request.Branch, p.Stage, p.Request.RepoFlag)
