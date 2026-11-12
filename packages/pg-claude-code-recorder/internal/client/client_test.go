@@ -21,7 +21,8 @@ func headerSeen(t *testing.T) (string, chan string) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "r.sock")
-	ln, err := net.Listen("unix", sock)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,8 @@ func TestDoNamesAClientTimeoutQueryTimeout(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "r.sock")
-	ln, err := net.Listen("unix", sock)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

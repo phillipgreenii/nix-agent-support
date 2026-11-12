@@ -7,6 +7,7 @@ package parser
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -376,7 +377,7 @@ func (p *Parser) reparseStale(f store.File) error {
 			continue
 		}
 		var v int
-		err := p.cfg.Store.Read().QueryRow(`SELECT version FROM parse_state WHERE file_id=? AND gen=?`, f.ID, g.Gen).Scan(&v)
+		err := p.cfg.Store.Read().QueryRowContext(context.Background(), `SELECT version FROM parse_state WHERE file_id=? AND gen=?`, f.ID, g.Gen).Scan(&v)
 		if err == sql.ErrNoRows || (err == nil && v != src.Version()) {
 			if err := p.ReparseGen(f.ID, g.Gen); err != nil {
 				return err
@@ -1352,7 +1353,7 @@ type BadLine struct {
 
 // BadLines lists the bad lines of a file.
 func BadLines(st *store.Store, file int64) ([]BadLine, error) {
-	rows, err := st.Read().Query(`SELECT file_id,gen,off,len,reason FROM bad_lines WHERE file_id=? ORDER BY gen,off`, file)
+	rows, err := st.Read().QueryContext(context.Background(), `SELECT file_id,gen,off,len,reason FROM bad_lines WHERE file_id=? ORDER BY gen,off`, file)
 	if err != nil {
 		return nil, err
 	}
@@ -1431,7 +1432,7 @@ func (p *Parser) Line(file int64, gen int, off int64, ln int) ([]byte, error) {
 func (p *Parser) fieldNameID(tx *pstx, name string) (int64, error) {
 	if ep := p.cfg.Store.RollbackEpoch(); p.names == nil || p.namesEpoch != ep {
 		m := map[string]int64{}
-		rows, err := tx.Query(`SELECT id, name FROM field_names`)
+		rows, err := tx.QueryContext(context.Background(), `SELECT id, name FROM field_names`)
 		if err != nil {
 			return 0, err
 		}
@@ -1474,12 +1475,12 @@ func (p *pstx) QueryRow(q string, args ...any) *sql.Row {
 	st, ok := p.st[q]
 	if !ok {
 		var err error
-		if st, err = p.Prepare(q); err != nil {
+		if st, err = p.PrepareContext(context.Background(), q); err != nil {
 			return p.QueryRow(q, args...) // reports the same error from Scan
 		}
 		p.st[q] = st
 	}
-	return st.QueryRow(args...)
+	return st.QueryRowContext(context.Background(), args...)
 }
 
 // pstx is a transaction whose Exec statements are prepared once and reused
@@ -1514,17 +1515,17 @@ func (p *pstx) Exec(q string, args ...any) (sql.Result, error) {
 // exec runs q on its prepared statement.
 func (p *pstx) exec(q string, args ...any) (sql.Result, error) {
 	if ablateNoPrepare {
-		return p.Tx.Exec(q, args...)
+		return p.ExecContext(context.Background(), q, args...)
 	}
 	st, ok := p.st[q]
 	if !ok {
 		var err error
-		if st, err = p.Prepare(q); err != nil {
+		if st, err = p.PrepareContext(context.Background(), q); err != nil {
 			return nil, err
 		}
 		p.st[q] = st
 	}
-	return st.Exec(args...)
+	return st.ExecContext(context.Background(), args...)
 }
 
 // Close releases the prepared statements.

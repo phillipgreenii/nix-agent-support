@@ -689,7 +689,7 @@ func (t *Tracker) removeEnd(p string, now time.Time) {
 		return
 	}
 	var n int
-	if err := t.cfg.Store.Read().QueryRow(`SELECT COUNT(*) FROM records WHERE file_id=?`, files[0].ID).Scan(&n); err != nil || n == 0 {
+	if err := t.cfg.Store.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM records WHERE file_id=?`, files[0].ID).Scan(&n); err != nil || n == 0 {
 		retry() // not parsed yet (or invalid): keep it
 		return
 	}

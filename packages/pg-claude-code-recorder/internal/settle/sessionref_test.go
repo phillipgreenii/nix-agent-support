@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
 	"regexp"
@@ -37,7 +38,7 @@ func sessionRefFixture(t *testing.T, dir string) *store.Store {
 			`INSERT INTO fields(rec_id,name_id,s) VALUES(1,(SELECT id FROM field_names WHERE name='version'),'1.0.1'),(2,(SELECT id FROM field_names WHERE name='version'),'1.0.2'),(3,(SELECT id FROM field_names WHERE name='version'),'0.9.0')`,
 		}
 		for _, q := range stmts {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				t.Fatalf("%s: %v", q, err)
 			}
 		}
@@ -104,7 +105,7 @@ func TestSettleReadsThroughSessionRefEqualTheTextSessionPath(t *testing.T) {
 	// The same data as a store that predates session_ref: no mark, session_ref 0,
 	// no session rows.
 	for _, q := range []string{`UPDATE records SET session_ref=0`, `DELETE FROM session_files`, `DELETE FROM session_stats`, `DELETE FROM sessions`, `DELETE FROM meta WHERE key='session_ref_complete'`, `DROP INDEX records_session_ref_source_time`} {
-		if err := st.WithWrite("", func(tx *sql.Tx) error { _, e := tx.Exec(q); return e }); err != nil {
+		if err := st.WithWrite("", func(tx *sql.Tx) error { _, e := tx.ExecContext(context.Background(), q); return e }); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -137,7 +138,7 @@ func TestSettleSessionRefQueryPlansSearchTheSessionRefIndex(t *testing.T) {
 		"registryNames":    registryNamesQueryRef,
 	} {
 		t.Run(name, func(t *testing.T) {
-			rows, err := st.Read().Query("EXPLAIN QUERY PLAN "+q, "example-a")
+			rows, err := st.Read().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+q, "example-a")
 			if err != nil {
 				t.Fatal(err)
 			}

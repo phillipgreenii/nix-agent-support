@@ -112,7 +112,8 @@ func TestErrorsCarryTheirStableNameAndUnknownClientsAreOther(t *testing.T) {
 
 func TestStaleSocketIsReplacedAndLiveOneIsRefused(t *testing.T) {
 	p := sockPath(t)
-	ln, err := net.Listen("unix", p)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "unix", p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestQueryTimeoutLogsKindArgsAndWaitVersusExec(t *testing.T) {
 	})
 	body := `{"op":"select","from":"records","limit":5,"api_token":"hunter2","where":{"session":"abc"}}`
 	for i := 0; i < 2; i++ {
-		r := httptest.NewRequest("POST", "/v1/query", strings.NewReader(body))
+		r := httptest.NewRequestWithContext(context.Background(), "POST", "/v1/query", strings.NewReader(body))
 		r.Header.Set(wire.ClientHeader, "swiftbar")
 		s.Handler().ServeHTTP(httptest.NewRecorder(), r)
 	}
@@ -208,7 +209,7 @@ func logServer(t *testing.T) (*Server, *obs.Obs, *bytes.Buffer, *time.Time) {
 
 func post(t *testing.T, s *Server, op string) {
 	t.Helper()
-	req := httptest.NewRequest("POST", "/v1/"+op, strings.NewReader("{}"))
+	req := httptest.NewRequestWithContext(context.Background(), "POST", "/v1/"+op, strings.NewReader("{}"))
 	s.Handler().ServeHTTP(httptest.NewRecorder(), req)
 }
 
@@ -311,7 +312,7 @@ func TestRequestDeadlineClampsTheHeader(t *testing.T) {
 		{"equal to query.timeout is not shorter", "25000", 0, false},
 		{"above query.timeout is not shorter", "600000", 0, false},
 	} {
-		r := httptest.NewRequest("POST", "/v1/echo", nil)
+		r := httptest.NewRequestWithContext(context.Background(), "POST", "/v1/echo", nil)
 		if tc.header != "" {
 			r.Header.Set(wire.DeadlineHeader, tc.header)
 		}
@@ -322,7 +323,7 @@ func TestRequestDeadlineClampsTheHeader(t *testing.T) {
 	}
 	// With no ceiling configured only the floor applies.
 	s.SetQueryTimeout(0)
-	r := httptest.NewRequest("POST", "/v1/echo", nil)
+	r := httptest.NewRequestWithContext(context.Background(), "POST", "/v1/echo", nil)
 	r.Header.Set(wire.DeadlineHeader, "600000")
 	if d, ok := s.requestDeadline(r); !ok || d != 600*time.Second {
 		t.Fatalf("no ceiling: got %v %v", d, ok)
@@ -340,7 +341,7 @@ func TestHeaderDeadlineEndsTheRequestAsQueryTimeout(t *testing.T) {
 		<-ctx.Done()
 		return nil, wire.FromErr(ctx.Err())
 	})
-	r := httptest.NewRequest("POST", "/v1/hang", strings.NewReader("{}"))
+	r := httptest.NewRequestWithContext(context.Background(), "POST", "/v1/hang", strings.NewReader("{}"))
 	r.Header.Set(wire.DeadlineHeader, "1")
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, r)
@@ -375,7 +376,7 @@ func TestCancelledRequestIsClientGoneNotATimeout(t *testing.T) {
 		})
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		r := httptest.NewRequest("POST", "/v1/hang", strings.NewReader("{}")).WithContext(ctx)
+		r := httptest.NewRequestWithContext(context.Background(), "POST", "/v1/hang", strings.NewReader("{}")).WithContext(ctx)
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, r)
 		if rec.Code != 499 || !strings.Contains(rec.Body.String(), wire.ErrCancelled) {
@@ -423,7 +424,7 @@ func TestOKRequestIsNotLoggedAtInfoButFailureIs(t *testing.T) {
 		return nil, wire.Errf(wire.ErrInternal, "boom")
 	})
 	for _, op := range []string{"query", "bad"} {
-		r := httptest.NewRequest("POST", "/v1/"+op, strings.NewReader(`{}`))
+		r := httptest.NewRequestWithContext(context.Background(), "POST", "/v1/"+op, strings.NewReader(`{}`))
 		r.Header.Set(wire.ClientHeader, "swiftbar")
 		s.Handler().ServeHTTP(httptest.NewRecorder(), r)
 	}

@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"strings"
@@ -69,7 +70,7 @@ func TestReconcileLagMatchThenDrift(t *testing.T) {
 		t.Fatalf("match %v drift %v", lagRebuildCount(d, "match"), lagRebuildCount(d, "drift"))
 	}
 	err := d.st.WithWrite("", func(tx *sql.Tx) error { // no hook fires for a raw UPDATE
-		_, err := tx.Exec(`UPDATE files SET state='deleted'`)
+		_, err := tx.ExecContext(context.Background(), `UPDATE files SET state='deleted'`)
 		return err
 	})
 	if err != nil {

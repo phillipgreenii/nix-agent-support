@@ -267,7 +267,7 @@ func (d *Doctor) doctorArchives(res *DoctorResult, add func(DoctorMismatch)) err
 
 // settledSessions lists the settled Conversations in session order.
 func (d *Doctor) settledSessions() ([]string, error) {
-	rows, err := d.st.Read().Query(`SELECT session FROM settled ORDER BY session`)
+	rows, err := d.st.Read().QueryContext(context.Background(), `SELECT session FROM settled ORDER BY session`)
 	if err != nil {
 		return nil, err
 	}

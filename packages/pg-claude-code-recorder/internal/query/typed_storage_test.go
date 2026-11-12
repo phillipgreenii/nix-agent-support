@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -107,7 +108,7 @@ func TestRecordFieldsAreReadFromTheLookupIds(t *testing.T) {
 	old, nw := typedKits(t)
 	for _, k := range []*testkit.Kit{old, nw} {
 		err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-			_, err := tx.Exec(`DELETE FROM fields WHERE name_id IN (SELECT id FROM field_names WHERE name IN ('cwd','git_branch','version'))`)
+			_, err := tx.ExecContext(context.Background(), `DELETE FROM fields WHERE name_id IN (SELECT id FROM field_names WHERE name IN ('cwd','git_branch','version'))`)
 			return err
 		})
 		if err != nil {
@@ -135,7 +136,7 @@ func TestMismatchRawValueIsPresentNotMissing(t *testing.T) {
 			`INSERT INTO field_names(name) VALUES('message.usage.output_tokens') ON CONFLICT(name) DO NOTHING`,
 			`INSERT INTO fields(rec_id,name_id,s) SELECT rec_id,(SELECT id FROM field_names WHERE name='message.usage.output_tokens'),'1e999' FROM ext_assistant_usage WHERE output_tokens IS NULL`,
 		} {
-			if _, err := tx.Exec(s); err != nil {
+			if _, err := tx.ExecContext(context.Background(), s); err != nil {
 				return err
 			}
 		}

@@ -23,7 +23,12 @@ func TestCloseDropsAScrapeShutdownCouldNotDrain(t *testing.T) {
 	defer close(release)
 	got := make(chan error, 1)
 	go func() {
-		resp, err := http.Get("http://" + s.Addr() + "/metrics")
+		req, rerr := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+s.Addr()+"/metrics", nil)
+		if rerr != nil {
+			got <- rerr
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 		}

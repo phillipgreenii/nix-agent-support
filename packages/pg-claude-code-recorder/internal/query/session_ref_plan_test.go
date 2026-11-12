@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestSessionFilterPlanSearchesTheSessionRefIndex(t *testing.T) {
 			`INSERT INTO sessions(session_id,first_time_ns) VALUES('s',0)`,
 			`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref) VALUES(1,1,0,0,0,1,'claude-transcript','user',1,'s',1,1)`,
 		} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
@@ -44,7 +45,7 @@ func TestSessionFilterPlanSearchesTheSessionRefIndex(t *testing.T) {
 			t.Fatal(werr)
 		}
 		q := `EXPLAIN QUERY PLAN SELECT r.id FROM records r JOIN files fl ON fl.id=r.file_id AND r.gen=fl.cur_gen WHERE ` + cond
-		rows, err := st.Read().Query(q, args...)
+		rows, err := st.Read().QueryContext(context.Background(), q, args...)
 		if err != nil {
 			t.Fatal(err)
 		}

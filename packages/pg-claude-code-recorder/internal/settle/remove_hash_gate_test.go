@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 // recordDump reads every stored record of a file as one comparable string.
 func (e *env) recordDump(file int64) string {
 	e.t.Helper()
-	rows, err := e.st.Read().Query(`SELECT gen, off, item, len, type, source, COALESCE(session,''), time_ns
+	rows, err := e.st.Read().QueryContext(context.Background(), `SELECT gen, off, item, len, type, source, COALESCE(session,''), time_ns
 FROM records WHERE file_id=? ORDER BY gen, off, item`, file)
 	if err != nil {
 		e.t.Fatal(err)
@@ -67,7 +68,7 @@ func TestRemovalIgnoresTheBadLineRateAndTheArchiveReparsesIdentically(t *testing
 		t.Fatalf("the archive reparsed differently\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 	var bad int
-	if err := e.st.Read().QueryRow(`SELECT COUNT(*) FROM bad_lines WHERE file_id=?`, file).Scan(&bad); err != nil || bad != 5 {
+	if err := e.st.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM bad_lines WHERE file_id=?`, file).Scan(&bad); err != nil || bad != 5 {
 		t.Fatalf("bad lines after the reparse = %d (%v), want 5", bad, err)
 	}
 }

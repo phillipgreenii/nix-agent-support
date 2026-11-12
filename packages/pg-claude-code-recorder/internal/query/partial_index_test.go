@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -26,7 +27,7 @@ func partialStore(t *testing.T, full bool) *store.Store {
 	err = st.WithWrite("", func(tx *sql.Tx) error {
 		if full {
 			for _, q := range []string{`DROP INDEX fields_name_n`, `CREATE INDEX fields_name_n ON fields(name_id, n)`} {
-				if _, err := tx.Exec(q); err != nil {
+				if _, err := tx.ExecContext(context.Background(), q); err != nil {
 					return err
 				}
 			}
@@ -35,29 +36,29 @@ func partialStore(t *testing.T, full bool) *store.Store {
 			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
 			`INSERT INTO field_names(id,name) VALUES(1,'tokens'),(2,'label')`,
 		} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
 		for i := 1; i <= 3000; i++ {
-			if _, err := tx.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns) VALUES(?,1,0,?,0,1,'claude-transcript','assistant',1,?)`, i, i, i); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns) VALUES(?,1,0,?,0,1,'claude-transcript','assistant',1,?)`, i, i, i); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO fields(rec_id,name_id,s) VALUES(?,2,?)`, i, fmt.Sprint("l", i%7)); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s) VALUES(?,2,?)`, i, fmt.Sprint("l", i%7)); err != nil {
 				return err
 			}
 			var err error
 			switch i % 3 {
 			case 0:
-				_, err = tx.Exec(`INSERT INTO fields(rec_id,name_id,n) VALUES(?,1,?)`, i, i%100)
+				_, err = tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,n) VALUES(?,1,?)`, i, i%100)
 			case 1:
-				_, err = tx.Exec(`INSERT INTO fields(rec_id,name_id,s) VALUES(?,1,'none')`, i)
+				_, err = tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s) VALUES(?,1,'none')`, i)
 			}
 			if err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(`ANALYZE`)
+		_, err := tx.ExecContext(context.Background(), `ANALYZE`)
 		return err
 	})
 	if err != nil {
@@ -95,7 +96,7 @@ func sqlFor(t *testing.T, where string, sortBy string) (string, []any) {
 
 func plan(t *testing.T, st *store.Store, q string, args []any) string {
 	t.Helper()
-	rs, err := st.Read().Query("EXPLAIN QUERY PLAN "+q, args...)
+	rs, err := st.Read().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+q, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,7 @@ func plan(t *testing.T, st *store.Store, q string, args []any) string {
 
 func ids(t *testing.T, st *store.Store, q string, args []any) []int64 {
 	t.Helper()
-	rs, err := st.Read().Query(q, args...)
+	rs, err := st.Read().QueryContext(context.Background(), q, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,11 +143,11 @@ func TestNumericFilterUsesPartialIndex(t *testing.T) {
 	// The index holds only the 1000 rows with a number, not the 2000 rows that
 	// have a tokens row: a full index would make this count 2000.
 	var held int
-	if err := st.Read().QueryRow(`SELECT COUNT(*) FROM fields INDEXED BY fields_name_n WHERE name_id=1 AND n IS NOT NULL`).Scan(&held); err != nil {
+	if err := st.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM fields INDEXED BY fields_name_n WHERE name_id=1 AND n IS NOT NULL`).Scan(&held); err != nil {
 		t.Fatal(err)
 	}
 	var def string
-	if err := st.Read().QueryRow(`SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
+	if err := st.Read().QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
 		t.Fatalf("fields_name_n is not partial on n IS NOT NULL: %q, %v", def, err)
 	}
 	if held != 1000 {

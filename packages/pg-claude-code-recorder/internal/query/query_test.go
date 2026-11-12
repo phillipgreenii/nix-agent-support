@@ -280,7 +280,7 @@ func TestOnlyTextAndOpaqueAreIndexedAndNoContentsStored(t *testing.T) {
 	}
 	// No raw line text sits in any ordinary table.
 	for _, tbl := range []string{"records", "fields", "texts"} {
-		rows, err := k.Store.Read().Query(`SELECT * FROM ` + tbl)
+		rows, err := k.Store.Read().QueryContext(context.Background(), `SELECT * FROM `+tbl)
 		if err != nil {
 			t.Fatal(err)
 		}

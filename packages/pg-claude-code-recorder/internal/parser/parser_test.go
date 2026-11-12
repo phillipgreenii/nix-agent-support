@@ -238,7 +238,7 @@ func TestRebuildEqualityAfterReparse(t *testing.T) {
 	k.Add("example-proj", "example-session-1.jsonl", transcriptFixture)
 	k.Parse()
 	dump := func() string {
-		rows, err := k.Store.Read().Query(`SELECT r.type||'|'||r.item||'|'||r.off||'|'||COALESCE(fn.name,'')||'='||COALESCE(f.s,f.n,f.f,'')
+		rows, err := k.Store.Read().QueryContext(context.Background(), `SELECT r.type||'|'||r.item||'|'||r.off||'|'||COALESCE(fn.name,'')||'='||COALESCE(f.s,f.n,f.f,'')
 FROM records r LEFT JOIN fields f ON f.rec_id=r.id LEFT JOIN field_names fn ON fn.id=f.name_id ORDER BY r.off,r.item,fn.name`)
 		if err != nil {
 			t.Fatal(err)

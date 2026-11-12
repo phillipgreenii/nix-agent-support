@@ -92,10 +92,10 @@ func TestIncrementalRegistryLoadDropsClearedRecords(t *testing.T) {
 	}
 	err := v.k.Store.WithWrite("test-clear", func(tx *sql.Tx) error {
 		const sub = `(SELECT id FROM records WHERE source='session-registry' ORDER BY id LIMIT 2)`
-		if _, err := tx.Exec(`DELETE FROM fields WHERE rec_id IN ` + sub); err != nil {
+		if _, err := tx.ExecContext(context.Background(), `DELETE FROM fields WHERE rec_id IN `+sub); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`DELETE FROM records WHERE id IN ` + sub)
+		_, err := tx.ExecContext(context.Background(), `DELETE FROM records WHERE id IN `+sub)
 		return err
 	})
 	if err != nil {

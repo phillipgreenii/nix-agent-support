@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -44,17 +45,17 @@ func TestCrashBetweenArchiveFlushAndCheckpointRemovesNothing(t *testing.T) {
 func TestBarrierThatCannotCheckpointRefusesRemoval(t *testing.T) {
 	e := newRemoveEnv(t, false)
 	content := e.oldSettled(6, removeAge+time.Hour)
-	rd, err := e.st.Read().Begin()
+	rd, err := e.st.Read().BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var n int
-	if err := rd.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&n); err != nil {
+	if err := rd.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM files`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	// A write after the reader's snapshot: the checkpoint cannot truncate past it.
 	if err := e.st.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('barrier_probe','1') ON CONFLICT(key) DO UPDATE SET value='1'`)
+		_, err := tx.ExecContext(context.Background(), `INSERT INTO meta(key,value) VALUES('barrier_probe','1') ON CONFLICT(key) DO UPDATE SET value='1'`)
 		return err
 	}); err != nil {
 		t.Fatal(err)

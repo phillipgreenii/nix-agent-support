@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"path/filepath"
@@ -39,7 +40,7 @@ func legacyRows(t *testing.T, k *testkit.Kit) {
 		typ, sessions string
 	}
 	var recs []rec
-	rs, err := k.Store.Read().Query(`SELECT r.id, r.source, p.path, r.type, r.session FROM records r JOIN paths p ON p.file_id=r.file_id AND p.closed_ns IS NULL`)
+	rs, err := k.Store.Read().QueryContext(context.Background(), `SELECT r.id, r.source, p.path, r.type, r.session FROM records r JOIN paths p ON p.file_id=r.file_id AND p.closed_ns IS NULL`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,10 +57,10 @@ func legacyRows(t *testing.T, k *testkit.Kit) {
 			if s == "" {
 				return nil
 			}
-			if _, err := tx.Exec(`INSERT INTO field_names(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO field_names(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name); err != nil {
 				return err
 			}
-			_, err := tx.Exec(`INSERT INTO fields(rec_id,name_id,s) VALUES(?,(SELECT id FROM field_names WHERE name=?),?)
+			_, err := tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s) VALUES(?,(SELECT id FROM field_names WHERE name=?),?)
 ON CONFLICT(rec_id,name_id) DO NOTHING`, id, name, s)
 			return err
 		}
@@ -222,13 +223,13 @@ func TestPathFactsOfEverySourceShape(t *testing.T) {
 	err = st.WithWrite("", func(tx *sql.Tx) error {
 		for i, c := range cases {
 			id := i + 1
-			if _, err := tx.Exec(`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(?,?,'append',1,0)`, id, c.src); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(?,?,'append',1,0)`, id, c.src); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO paths(file_id,path,first_seen_ns) VALUES(?,?,1)`, id, filepath.Join("/claude", c.rel)); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO paths(file_id,path,first_seen_ns) VALUES(?,?,1)`, id, filepath.Join("/claude", c.rel)); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version) VALUES(?,?,0,0,-1,1,?,'x',1)`, id, id, c.src); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version) VALUES(?,?,0,0,-1,1,?,'x',1)`, id, id, c.src); err != nil {
 				return err
 			}
 		}
@@ -242,12 +243,12 @@ func TestPathFactsOfEverySourceShape(t *testing.T) {
 			fmt.Sprintf(`INSERT INTO paths(file_id,path,first_seen_ns,closed_ns) VALUES(%d,'/claude/projects/gone-proj/gone.jsonl',1,5)`, n+2),
 			fmt.Sprintf(`INSERT INTO paths(file_id,path,first_seen_ns) VALUES(%d,'/elsewhere/projects/out-proj/out.jsonl',1)`, n+3),
 		} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
 		for i := n + 1; i <= n+3; i++ {
-			if _, err := tx.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version) VALUES(?,?,0,0,-1,1,'claude-transcript','x',1)`, i, i); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version) VALUES(?,?,0,0,-1,1,'claude-transcript','x',1)`, i, i); err != nil {
 				return err
 			}
 		}

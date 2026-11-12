@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/exec"
@@ -13,7 +14,7 @@ const profileScript = "../../scripts/profile-cpu.sh"
 
 func runScript(t *testing.T, env []string, args ...string) (string, int) {
 	t.Helper()
-	cmd := exec.Command("bash", append([]string{profileScript}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "bash", append([]string{profileScript}, args...)...)
 	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	code := 0
@@ -51,7 +52,8 @@ func TestProfileScriptReportsTheCPUFigureFromPprofOutput(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "p.sock")
-	ln, err := net.Listen("unix", sock)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

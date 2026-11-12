@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func bodyFixture(t *testing.T) *testkit.Kit {
 // as the baseline the stored-field link is compared with.
 func legacyBodyToResults(t *testing.T, k *testkit.Kit, rel string) []string {
 	t.Helper()
-	rs, err := k.Store.Read().Query(`SELECT r.id,r.file_id,r.gen,r.off,r.item,r.source,r.len FROM fts_tri JOIN texts t ON t.id=fts_tri.rowid JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id AND r.gen=fl.cur_gen WHERE fts_tri MATCH ? AND t.field='tool_result.body' AND r.type='tool_result' ORDER BY r.id`,
+	rs, err := k.Store.Read().QueryContext(context.Background(), `SELECT r.id,r.file_id,r.gen,r.off,r.item,r.source,r.len FROM fts_tri JOIN texts t ON t.id=fts_tri.rowid JOIN records r ON r.id=t.rec_id JOIN files fl ON fl.id=r.file_id AND r.gen=fl.cur_gen WHERE fts_tri MATCH ? AND t.field='tool_result.body' AND r.type='tool_result' ORDER BY r.id`,
 		`"`+strings.ReplaceAll(rel, `"`, `""`)+`"`)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +92,7 @@ func TestFollowResultFromBodyMatchesTrigramLink(t *testing.T) {
 		}
 	}
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`DROP TABLE fts_tri`)
+		_, err := tx.ExecContext(context.Background(), `DROP TABLE fts_tri`)
 		return err
 	})
 	if err != nil {

@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -95,7 +96,7 @@ func TestOwnTimestampServedFromTimeNs(t *testing.T) {
 	}
 	// A line with no timestamp of its own must not match its observation time.
 	var obs int64
-	if err := k.Store.Read().QueryRow(`SELECT time_ns FROM records WHERE own_time=0 AND item=-1 AND source='claude-transcript' ORDER BY id LIMIT 1`).Scan(&obs); err != nil {
+	if err := k.Store.Read().QueryRowContext(context.Background(), `SELECT time_ns FROM records WHERE own_time=0 AND item=-1 AND source='claude-transcript' ORDER BY id LIMIT 1`).Scan(&obs); err != nil {
 		t.Fatal(err)
 	}
 	ob := qe(t, k.Engine, `{"where":{"field":"timestamp","eq":"`+time.Unix(0, obs).UTC().Format(time.RFC3339Nano)+`"},"select":["uuid"]}`)
@@ -112,10 +113,10 @@ func TestOwnTimestampServedFromTimeNs(t *testing.T) {
 	setMarker := func(on bool) {
 		err := k.Store.WithWrite("", func(tx *sql.Tx) error {
 			if !on {
-				_, err := tx.Exec(`UPDATE records SET own_time=0`)
+				_, err := tx.ExecContext(context.Background(), `UPDATE records SET own_time=0`)
 				return err
 			}
-			_, err := tx.Exec(`UPDATE records SET own_time=1 WHERE id IN (SELECT rec_id FROM fields WHERE name_id=(SELECT id FROM field_names WHERE name='timestamp'))`)
+			_, err := tx.ExecContext(context.Background(), `UPDATE records SET own_time=1 WHERE id IN (SELECT rec_id FROM fields WHERE name_id=(SELECT id FROM field_names WHERE name='timestamp'))`)
 			return err
 		})
 		if err != nil {
@@ -123,10 +124,10 @@ func TestOwnTimestampServedFromTimeNs(t *testing.T) {
 		}
 	}
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`INSERT INTO field_names(name) VALUES('timestamp') ON CONFLICT(name) DO NOTHING`); err != nil {
+		if _, err := tx.ExecContext(context.Background(), `INSERT INTO field_names(name) VALUES('timestamp') ON CONFLICT(name) DO NOTHING`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO fields(rec_id,name_id,n) SELECT id,(SELECT id FROM field_names WHERE name='timestamp'),time_ns FROM records WHERE own_time=1`)
+		_, err := tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,n) SELECT id,(SELECT id FROM field_names WHERE name='timestamp'),time_ns FROM records WHERE own_time=1`)
 		return err
 	})
 	if err != nil {

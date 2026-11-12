@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
 	"sort"
@@ -13,10 +14,10 @@ import (
 func oldFileFacts(t *testing.T, db *sql.DB, session string) (int64, []int64) {
 	t.Helper()
 	var last sql.NullInt64
-	if err := db.QueryRow(`SELECT MAX(time_ns) FROM records WHERE session=? AND source='claude-transcript'`, session).Scan(&last); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT MAX(time_ns) FROM records WHERE session=? AND source='claude-transcript'`, session).Scan(&last); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := db.Query(`SELECT DISTINCT file_id FROM records WHERE session=? AND source='claude-transcript' LIMIT 50`, session)
+	rows, err := db.QueryContext(context.Background(), `SELECT DISTINCT file_id FROM records WHERE session=? AND source='claude-transcript' LIMIT 50`, session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func oldFileFacts(t *testing.T, db *sql.DB, session string) (int64, []int64) {
 func (f *cwdFixture) recFile(session, source string, fileID, timeNS int64) {
 	f.t.Helper()
 	f.id++
-	if _, err := f.db.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref)
+	if _, err := f.db.ExecContext(context.Background(), `INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref)
 VALUES(?,?,1,?,0,1,?,'x',1,?,?,?)`, f.id, fileID, f.id, source, session, timeNS, f.ref(session)); err != nil {
 		f.t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func TestFileFactsQueryUsesTheSessionSourceTimeIndex(t *testing.T) {
 		{fileFactsQuery, "records_session_source_time"},
 		{fileFactsQueryRef, "records_session_ref_source_time"},
 	} {
-		rows, err := f.db.Query(`EXPLAIN QUERY PLAN `+c.q, "s")
+		rows, err := f.db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN `+c.q, "s")
 		if err != nil {
 			t.Fatal(err)
 		}

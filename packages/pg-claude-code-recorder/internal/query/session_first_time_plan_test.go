@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func TestSessionFirstTimeQueryIsDrivenBySessionIndex(t *testing.T) {
 			// every record is a main-thread record
 			`INSERT INTO fields(rec_id,name_id,n) SELECT id,1,0 FROM records`,
 		} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
@@ -74,7 +75,7 @@ func TestSessionFirstTimeQueryIsDrivenBySessionIndex(t *testing.T) {
 		}
 	}
 	start := time.Now()
-	rs, err := st.Read().Query(q, args...)
+	rs, err := st.Read().QueryContext(context.Background(), q, args...)
 	if err != nil {
 		t.Fatal(err)
 	}

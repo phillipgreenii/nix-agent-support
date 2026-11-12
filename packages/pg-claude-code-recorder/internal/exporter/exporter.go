@@ -148,7 +148,8 @@ func Start(addr string, reg *obs.Registry, refresh func()) (*Server, error) {
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return nil, fmt.Errorf("metrics address %q: only a loopback host is accepted", addr)
 	}
-	ln, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -62,7 +63,7 @@ func TestFieldNameLookupsStopAfterWarmup(t *testing.T) {
 // sorted by name, independent of the ids the names were given.
 func fieldsDump(t *testing.T, k *testkit.Kit) string {
 	t.Helper()
-	rows, err := k.Store.Read().Query(`
+	rows, err := k.Store.Read().QueryContext(context.Background(), `
 SELECT r.file_id, r.gen, r.off, r.item, fn.name, COALESCE(f.s,''), COALESCE(f.n,''), COALESCE(f.f,'')
 FROM fields f JOIN records r ON r.id=f.rec_id JOIN field_names fn ON fn.id=f.name_id
 ORDER BY r.file_id, r.gen, r.off, r.item, fn.name`)
@@ -91,7 +92,7 @@ func failParseState(t *testing.T, k *testkit.Kit, on bool) {
 		if on {
 			q = `CREATE TRIGGER fail_parse_state BEFORE INSERT ON parse_state BEGIN SELECT RAISE(ABORT, 'injected'); END`
 		}
-		_, err := tx.Exec(q)
+		_, err := tx.ExecContext(context.Background(), q)
 		return err
 	})
 	if err != nil {

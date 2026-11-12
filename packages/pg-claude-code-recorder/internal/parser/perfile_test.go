@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -57,7 +58,7 @@ func TestParseAllAfterReparseStaleParsesNothingTwice(t *testing.T) {
 	k.Parse()
 	// The generation is now behind: an older parser version and unparsed bytes.
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE parse_state SET version=0`)
+		_, err := tx.ExecContext(context.Background(), `UPDATE parse_state SET version=0`)
 		return err
 	})
 	if err != nil {
@@ -94,7 +95,7 @@ func TestVersionBumpReparseOverExistingRowsCompletes(t *testing.T) {
 		t.Fatal("no records parsed")
 	}
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE parse_state SET version=0`)
+		_, err := tx.ExecContext(context.Background(), `UPDATE parse_state SET version=0`)
 		return err
 	})
 	if err != nil {
@@ -118,7 +119,7 @@ func TestParseAllUntilStopsAndLeavesStaleGenerations(t *testing.T) {
 	k.Add("example-proj", "example-session-1.jsonl", transcriptFixture)
 	k.Parse()
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE parse_state SET version=0`)
+		_, err := tx.ExecContext(context.Background(), `UPDATE parse_state SET version=0`)
 		return err
 	})
 	if err != nil {

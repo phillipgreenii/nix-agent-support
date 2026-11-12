@@ -470,7 +470,7 @@ func TestWhileBehindAnEveryOperationAnswersAnywayMarkedDegraded(t *testing.T) {
 
 func TestFloorQueryPlanUsesTheAtNsIndex(t *testing.T) {
 	e := newEnv(t)
-	rows, err := e.k.Store.Read().Query(`EXPLAIN QUERY PLAN `+feed.FloorSQL, int64(1))
+	rows, err := e.k.Store.Read().QueryContext(context.Background(), `EXPLAIN QUERY PLAN `+feed.FloorSQL, int64(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,16 +500,16 @@ func TestFloorIsUnchangedWhenAtNsIsNotMonotonicInRecID(t *testing.T) {
 	}
 	defer func() { _ = w.Close() }()
 	for _, m := range [][2]int64{{1, 100}, {2, 500}, {3, 200}, {4, 900}, {5, 300}} {
-		if _, err := w.Exec(`INSERT INTO feed_marks(rec_id,at_ns) VALUES(?,?)`, m[0], m[1]); err != nil {
+		if _, err := w.ExecContext(context.Background(), `INSERT INTO feed_marks(rec_id,at_ns) VALUES(?,?)`, m[0], m[1]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, cut := range []int64{50, 150, 250, 350, 600, 1000} {
 		var want, got int64
-		if err := db.QueryRow(`SELECT COALESCE(MAX(rec_id),0) FROM feed_marks WHERE at_ns < ?`, cut).Scan(&want); err != nil {
+		if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(MAX(rec_id),0) FROM feed_marks WHERE at_ns < ?`, cut).Scan(&want); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.QueryRow(feed.FloorSQL, cut).Scan(&got); err != nil {
+		if err := db.QueryRowContext(context.Background(), feed.FloorSQL, cut).Scan(&got); err != nil {
 			t.Fatal(err)
 		}
 		if got != want {

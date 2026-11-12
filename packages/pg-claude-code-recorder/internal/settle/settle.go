@@ -1318,7 +1318,7 @@ func lastNewline(p *store.Pointer, n int64) (int64, error) {
 
 func (s *Settler) parsedState(file int64, gen int) bool {
 	var v int
-	return s.st.Read().QueryRow(`SELECT version FROM parse_state WHERE file_id=? AND gen=?`, file, gen).Scan(&v) == nil
+	return s.st.Read().QueryRowContext(context.Background(), `SELECT version FROM parse_state WHERE file_id=? AND gen=?`, file, gen).Scan(&v) == nil
 }
 
 // check runs the settle check over every file. Each clause is an independent
@@ -1535,7 +1535,7 @@ func (s *Settler) hold(ctx context.Context, c *conv, fails []Failure, now time.T
 // registryVersions returns the registry file versions whose records name the
 // session.
 func (s *Settler) registryVersions(session string) ([]store.ManifestRegistry, error) {
-	rows, err := s.st.Read().Query(pick(s.st.SessionRefReady(), registryVersionsQuery, registryVersionsQueryRef), session)
+	rows, err := s.st.Read().QueryContext(context.Background(), pick(s.st.SessionRefReady(), registryVersionsQuery, registryVersionsQueryRef), session)
 	if err != nil {
 		return nil, err
 	}

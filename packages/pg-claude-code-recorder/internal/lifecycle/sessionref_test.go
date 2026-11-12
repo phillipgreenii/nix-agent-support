@@ -33,7 +33,7 @@ func (f *cwdFixture) loadFixture() {
 		f.rec(s, "claude-history", int64(25+i), [2]any{"slash_command", "/clear"})
 		f.rec(s, "claude-control-end", int64(50+i), [2]any{"reason", "logout"})
 	}
-	if _, err := f.db.Exec(`UPDATE records SET type='registry' WHERE source='session-registry';
+	if _, err := f.db.ExecContext(context.Background(), `UPDATE records SET type='registry' WHERE source='session-registry';
 UPDATE fields SET n=100+rec_id, s=NULL WHERE name_id=(SELECT id FROM field_names WHERE name='pid')`); err != nil {
 		f.t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestLifecycleAnswersThroughSessionRefEqualTheTextSessionPath(t *testing.T) 
 	// no session rows.
 	dir := f.st.Dir()
 	for _, q := range []string{`UPDATE records SET session_ref=0`, `DELETE FROM session_files`, `DELETE FROM session_stats`, `DELETE FROM sessions`, `DELETE FROM meta WHERE key='session_ref_complete'`, `DROP INDEX records_session_ref_source_time`} {
-		if _, err := f.db.Exec(q); err != nil {
+		if _, err := f.db.ExecContext(context.Background(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}

@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"os"
@@ -94,7 +95,7 @@ func TestDoctorSeesAJournalThatDisagreesWithTheIndex(t *testing.T) {
 	e.seed(3, time.Hour)
 	e.skipInv = true // the test makes the index disagree on purpose
 	if err := e.st.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE files SET last_size=last_size+1`)
+		_, err := tx.ExecContext(context.Background(), `UPDATE files SET last_size=last_size+1`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -185,7 +186,7 @@ func (e *env) snapshotSettled(content string) (rel string, file int64, stored st
 	stored = e.st.SnapshotPath(fl[0].ID, 1)
 	// Reproduce the live damage: no plain copy and no archive range.
 	if err := e.st.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`DELETE FROM ranges WHERE file_id=?`, fl[0].ID)
+		_, err := tx.ExecContext(context.Background(), `DELETE FROM ranges WHERE file_id=?`, fl[0].ID)
 		return err
 	}); err != nil {
 		e.t.Fatal(err)
@@ -283,7 +284,7 @@ func TestDoctorDoesNotRestoreAnOutOfScopeFile(t *testing.T) {
 	}
 	b, _ := json.Marshal(m)
 	if err := e.st.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE settled SET manifest=? WHERE session=?`, b, sess)
+		_, err := tx.ExecContext(context.Background(), `UPDATE settled SET manifest=? WHERE session=?`, b, sess)
 		return err
 	}); err != nil {
 		t.Fatal(err)

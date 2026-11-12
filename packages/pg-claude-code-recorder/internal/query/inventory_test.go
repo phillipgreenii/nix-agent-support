@@ -65,7 +65,7 @@ func TestInventoryReadsFilesNotRecords(t *testing.T) {
 	}
 
 	q, args := query.InventorySQL(query.InventoryRequest{Sources: []string{"x"}, Since: "2026-10-29T00:00:00Z", Sessions: []string{"s"}}, 1, 10)
-	rs, err := k.Store.Read().Query("EXPLAIN QUERY PLAN "+q, args...)
+	rs, err := k.Store.Read().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+q, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestInventoryNarrowing(t *testing.T) {
 
 func factsDump(t *testing.T, k *testkit.Kit) string {
 	t.Helper()
-	rs, err := k.Store.Read().Query(`SELECT file_id, COALESCE(project,''), COALESCE(file_session,''), COALESCE(agent_id,''), last_time_ns FROM file_facts ORDER BY file_id`)
+	rs, err := k.Store.Read().QueryContext(context.Background(), `SELECT file_id, COALESCE(project,''), COALESCE(file_session,''), COALESCE(agent_id,''), last_time_ns FROM file_facts ORDER BY file_id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,13 +136,13 @@ func TestFileFactsMaintainedAndSurviveRebuild(t *testing.T) {
 	k.AddAgent("example-proj", "example-session-1", "example-agent-1", lines("example-session-1", 2, 5))
 	k.Parse()
 	var last int64
-	if err := k.Store.Read().QueryRow(`SELECT last_time_ns FROM file_facts WHERE file_id=?`, id).Scan(&last); err != nil {
+	if err := k.Store.Read().QueryRowContext(context.Background(), `SELECT last_time_ns FROM file_facts WHERE file_id=?`, id).Scan(&last); err != nil {
 		t.Fatal(err)
 	}
 	k.Append(id, lines("example-session-1", 9, 2))
 	k.Parse()
 	var after int64
-	if err := k.Store.Read().QueryRow(`SELECT last_time_ns FROM file_facts WHERE file_id=?`, id).Scan(&after); err != nil {
+	if err := k.Store.Read().QueryRowContext(context.Background(), `SELECT last_time_ns FROM file_facts WHERE file_id=?`, id).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
 	if after <= last {
@@ -178,7 +178,7 @@ func TestFileFactsBackfillOfAnOlderDatabase(t *testing.T) {
 	want := factsDump(t, k)
 	if err := k.Store.WithWrite("", func(tx *sql.Tx) error {
 		for _, q := range []string{`DELETE FROM file_facts`, `DELETE FROM meta WHERE key='` + store.MetaFileFactsComplete + `'`} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
@@ -219,7 +219,7 @@ func TestFileFactsDriftIsDetectedAndRepaired(t *testing.T) {
 		t.Fatalf("clean check: %+v next=%d err=%v", d, next, err)
 	}
 	if err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE file_facts SET last_time_ns=1 WHERE file_id=?`, id)
+		_, err := tx.ExecContext(context.Background(), `UPDATE file_facts SET last_time_ns=1 WHERE file_id=?`, id)
 		return err
 	}); err != nil {
 		t.Fatal(err)

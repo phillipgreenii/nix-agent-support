@@ -1,6 +1,9 @@
 package parser
 
-import "sort"
+import (
+	"context"
+	"sort"
+)
 
 // sessionBatch is what one write transaction learned about sessions: per
 // session the newest record time, the records written and the files that hold
@@ -31,7 +34,7 @@ type sessionDelta struct {
 func (p *Parser) sessionRef(tx *pstx, id, project string, firstNS int64) (int64, error) {
 	if ep := p.cfg.Store.RollbackEpoch(); p.sessRefs == nil || p.sessEpoch != ep {
 		m := map[string]int64{}
-		rows, err := tx.Query(`SELECT session_id, session_ref FROM sessions`)
+		rows, err := tx.QueryContext(context.Background(), `SELECT session_id, session_ref FROM sessions`)
 		if err != nil {
 			return 0, err
 		}
@@ -172,7 +175,7 @@ func (p *Parser) sessionsOfGen(tx *pstx, file int64, gen int) ([]string, error) 
 	if !p.cfg.Store.HasSessionText() {
 		q = `SELECT DISTINCT s.session_id FROM records r JOIN sessions s ON s.session_ref=r.session_ref WHERE r.file_id=? AND r.gen=?`
 	}
-	rows, err := tx.Query(q, file, gen)
+	rows, err := tx.QueryContext(context.Background(), q, file, gen)
 	if err != nil {
 		return nil, err
 	}

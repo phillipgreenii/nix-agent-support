@@ -111,7 +111,7 @@ func TestBackfillAskFactsMatchesTheLiveTables(t *testing.T) {
 	dump := func() string {
 		var b strings.Builder
 		for _, q := range []string{`SELECT rec_id,session_ref,time_ns,tool_use_id FROM ask_questions ORDER BY rec_id`, `SELECT rec_id,tool_use_id FROM ask_answers ORDER BY rec_id`} {
-			rs, err := k.Store.Read().Query(q)
+			rs, err := k.Store.Read().QueryContext(context.Background(), q)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -135,7 +135,7 @@ func TestBackfillAskFactsMatchesTheLiveTables(t *testing.T) {
 	live := dump()
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
 		for _, q := range []string{`DELETE FROM ask_questions`, `DELETE FROM ask_answers`, `DELETE FROM meta WHERE key LIKE 'ask_facts%'`} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
@@ -170,7 +170,7 @@ func TestAskFactsReadPlanUsesTheAskIndexes(t *testing.T) {
 	k := testkit.New(t)
 	k.Add("example-proj", askSess+".jsonl", askTranscript)
 	k.Parse()
-	rs, err := k.Store.Read().Query("EXPLAIN QUERY PLAN "+store.AskFactsSQL, 1, 50)
+	rs, err := k.Store.Read().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+store.AskFactsSQL, 1, 50)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -49,11 +50,11 @@ func newCwdFixture(t *testing.T) *cwdFixture {
 // way the parser does.
 func (f *cwdFixture) ref(session string) int64 {
 	f.t.Helper()
-	if _, err := f.db.Exec(`INSERT INTO sessions(session_id,first_time_ns) VALUES(?,0) ON CONFLICT(session_id) DO NOTHING`, session); err != nil {
+	if _, err := f.db.ExecContext(context.Background(), `INSERT INTO sessions(session_id,first_time_ns) VALUES(?,0) ON CONFLICT(session_id) DO NOTHING`, session); err != nil {
 		f.t.Fatal(err)
 	}
 	var ref int64
-	if err := f.db.QueryRow(`SELECT session_ref FROM sessions WHERE session_id=?`, session).Scan(&ref); err != nil {
+	if err := f.db.QueryRowContext(context.Background(), `SELECT session_ref FROM sessions WHERE session_id=?`, session).Scan(&ref); err != nil {
 		f.t.Fatal(err)
 	}
 	return ref
@@ -64,15 +65,15 @@ func (f *cwdFixture) ref(session string) int64 {
 func (f *cwdFixture) rec(session, source string, timeNS int64, fields ...[2]any) {
 	f.t.Helper()
 	f.id++
-	if _, err := f.db.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref)
+	if _, err := f.db.ExecContext(context.Background(), `INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref)
 VALUES(?,1,1,?,0,1,?,'x',1,?,?,?)`, f.id, f.id, source, session, timeNS, f.ref(session)); err != nil {
 		f.t.Fatal(err)
 	}
 	for _, fv := range fields {
-		if _, err := f.db.Exec(`INSERT OR IGNORE INTO field_names(name) VALUES(?)`, fv[0]); err != nil {
+		if _, err := f.db.ExecContext(context.Background(), `INSERT OR IGNORE INTO field_names(name) VALUES(?)`, fv[0]); err != nil {
 			f.t.Fatal(err)
 		}
-		if _, err := f.db.Exec(`INSERT INTO fields(rec_id,name_id,s) VALUES(?,(SELECT id FROM field_names WHERE name=?),?)`,
+		if _, err := f.db.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s) VALUES(?,(SELECT id FROM field_names WHERE name=?),?)`,
 			f.id, fv[0], fv[1]); err != nil {
 			f.t.Fatal(err)
 		}
@@ -82,7 +83,7 @@ VALUES(?,1,1,?,0,1,?,'x',1,?,?,?)`, f.id, f.id, source, session, timeNS, f.ref(s
 func (f *cwdFixture) run(q, session string) string {
 	f.t.Helper()
 	var s sql.NullString
-	err := f.db.QueryRow(q, session).Scan(&s)
+	err := f.db.QueryRowContext(context.Background(), q, session).Scan(&s)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return "<no row>"
@@ -159,13 +160,13 @@ func TestCwdQueryPlanStartsFromTheSessionIndex(t *testing.T) {
 	f := newCwdFixture(t)
 	f.rec("s", transcript, 10, cwd("/a"))
 	var ver string
-	if err := f.db.QueryRow(`SELECT sqlite_version()`).Scan(&ver); err != nil {
+	if err := f.db.QueryRowContext(context.Background(), `SELECT sqlite_version()`).Scan(&ver); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("sqlite_version() = %s", ver)
 
 	plan := func(q string) []string {
-		rows, err := f.db.Query(`EXPLAIN QUERY PLAN `+q, "s")
+		rows, err := f.db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN `+q, "s")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,11 +239,11 @@ func TestUntimedTranscriptRowsAreIgnored(t *testing.T) {
 			q = cwdQueryRef
 		}
 		var cwd sql.NullString
-		err := f.db.QueryRow(q, "s").Scan(&cwd)
+		err := f.db.QueryRowContext(context.Background(), q, "s").Scan(&cwd)
 		if err != nil || cwd.String != "/timed" {
 			t.Fatalf("byRef=%v: cwd %q err %v, want /timed", byRef, cwd.String, err)
 		}
-		if err := f.db.QueryRow(q, "only-untimed").Scan(&cwd); !errors.Is(err, sql.ErrNoRows) {
+		if err := f.db.QueryRowContext(context.Background(), q, "only-untimed").Scan(&cwd); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("byRef=%v: an untimed-only session has a cwd: %q %v", byRef, cwd.String, err)
 		}
 		last, _, err := sessionFileFacts(f.db, "s", byRef)

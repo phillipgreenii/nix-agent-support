@@ -30,7 +30,7 @@ func TestUnfilteredRowQueryWalksRecordsByIDWithStatistics(t *testing.T) {
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
 			 SELECT i,i%3000+1,0,i,-1,1,'claude-transcript',CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
 		} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
@@ -43,7 +43,7 @@ func TestUnfilteredRowQueryWalksRecordsByIDWithStatistics(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := st.Read().QueryRow(`SELECT COUNT(*) FROM sqlite_stat1`).Scan(&n); err != nil || n == 0 {
+	if err := st.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_stat1`).Scan(&n); err != nil || n == 0 {
 		t.Fatalf("store carries no sqlite_stat1 (%d rows, err %v)", n, err)
 	}
 

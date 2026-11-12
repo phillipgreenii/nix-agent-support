@@ -140,7 +140,7 @@ func (p *Parser) backfillOne(ctx context.Context, file int64) error {
 	}
 	project, session, agentID := p.factsOf(file)
 	return p.cfg.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(upsertFileFact, file, nullable(project), nullable(session), nullable(agentID), last)
+		_, err := tx.ExecContext(context.Background(), upsertFileFact, file, nullable(project), nullable(session), nullable(agentID), last)
 		return err
 	})
 }
@@ -193,7 +193,7 @@ func (p *Parser) CheckFileFacts(ctx context.Context, after int64, limit int, rep
 		if repair {
 			project, session, agentID := p.factsOf(id)
 			if err := st.WithWrite("", func(tx *sql.Tx) error {
-				_, err := tx.Exec(`INSERT INTO file_facts(file_id,project,file_session,agent_id,last_time_ns) VALUES(?,?,?,?,?)
+				_, err := tx.ExecContext(context.Background(), `INSERT INTO file_facts(file_id,project,file_session,agent_id,last_time_ns) VALUES(?,?,?,?,?)
 ON CONFLICT(file_id) DO UPDATE SET last_time_ns=excluded.last_time_ns`, id, nullable(project), nullable(session), nullable(agentID), computed)
 				return err
 			}); err != nil {

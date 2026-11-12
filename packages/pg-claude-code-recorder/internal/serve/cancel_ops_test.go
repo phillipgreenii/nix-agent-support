@@ -45,7 +45,7 @@ var cancelExempt = map[string]string{
 }
 
 func post(d *Daemon, ctx context.Context, op, body string) (int, string) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/"+op, strings.NewReader(body)).WithContext(ctx)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/"+op, strings.NewReader(body)).WithContext(ctx)
 	rec := httptest.NewRecorder()
 	d.srv.Handler().ServeHTTP(rec, req)
 	return rec.Code, rec.Body.String()
@@ -118,7 +118,7 @@ func spinOp(d *Daemon) {
 }
 
 func postHeader(d *Daemon, op, deadlineMs string) (int, string) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/"+op, strings.NewReader("{}"))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/"+op, strings.NewReader("{}"))
 	if deadlineMs != "" {
 		req.Header.Set(wire.DeadlineHeader, deadlineMs)
 	}

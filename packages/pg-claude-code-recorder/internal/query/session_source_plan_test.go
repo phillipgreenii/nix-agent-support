@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func TestSessionSourceQuerySearchesSessionAndSource(t *testing.T) {
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
 			 SELECT 300000+i,1,0,300000+i,0,1,CASE WHEN i%2=0 THEN 'claude-transcript' ELSE 'session-registry' END,CASE WHEN i%2=0 THEN 'text' ELSE 'registry' END,1,i,i%19+2 FROM n`,
 		} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
@@ -74,7 +75,7 @@ func TestSessionSourceQuerySearchesSessionAndSource(t *testing.T) {
 		t.Errorf("a table is scanned:\n%s", p)
 	}
 	start := time.Now()
-	rs, err := st.Read().Query(q, args...)
+	rs, err := st.Read().QueryContext(context.Background(), q, args...)
 	if err != nil {
 		t.Fatal(err)
 	}

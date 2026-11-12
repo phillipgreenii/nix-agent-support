@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"context"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -118,7 +119,7 @@ func TestScrapeRefreshNeverReachesTheStoreOrTheDirectoryWalk(t *testing.T) {
 	h := exporter.Handler(d.obs.Reg, d.scrapeRefresh)
 	start := time.Now()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "process_cpu_seconds") {
 		t.Fatalf("scrape: %d %q", rec.Code, rec.Body.String())
 	}

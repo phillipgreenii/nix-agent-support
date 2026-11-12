@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -26,7 +27,7 @@ func extKit(t *testing.T) *testkit.Kit {
 // (the record id differs between two databases), as one text per row.
 func extDump(t *testing.T, k *testkit.Kit) []string {
 	t.Helper()
-	rows, err := k.Store.Read().Query(`SELECT r.off, r.item, e.input_tokens, e.output_tokens, e.cache_creation_input_tokens,
+	rows, err := k.Store.Read().QueryContext(context.Background(), `SELECT r.off, r.item, e.input_tokens, e.output_tokens, e.cache_creation_input_tokens,
 e.cache_read_input_tokens, e.cache_1h_input_tokens, e.cache_5m_input_tokens, e.service_tier, e.inference_geo, e.speed
 FROM ext_assistant_usage e JOIN records r ON r.id=e.rec_id ORDER BY r.file_id, r.gen, r.off, r.item`)
 	if err != nil {

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"database/sql"
 	"io"
 	"strconv"
@@ -75,7 +76,7 @@ func (p *Parser) parseSnapshots(f store.File, src source.Source, reparse bool) (
 	var lastRaw []byte // the newest version's bytes, when parseVersion read them
 	for i, sn := range snaps {
 		var v int
-		err := p.cfg.Store.Read().QueryRow(`SELECT version FROM parse_state WHERE file_id=? AND gen=?`, f.ID, sn.Version).Scan(&v)
+		err := p.cfg.Store.Read().QueryRowContext(context.Background(), `SELECT version FROM parse_state WHERE file_id=? AND gen=?`, f.ID, sn.Version).Scan(&v)
 		have := err == nil
 		if err != nil && err != sql.ErrNoRows {
 			return total, err
@@ -194,7 +195,7 @@ func (p *Parser) parseTombstones(f store.File, src source.Source, ts source.Tomb
 	count := 0
 	for _, at := range ats {
 		var n int
-		if err := p.cfg.Store.Read().QueryRow(`SELECT COUNT(*) FROM records WHERE file_id=? AND gen=? AND off=? AND item=?`,
+		if err := p.cfg.Store.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM records WHERE file_id=? AND gen=? AND off=? AND item=?`,
 			f.ID, last.Version, at, source.ItemTombstone).Scan(&n); err != nil {
 			return count, err
 		}

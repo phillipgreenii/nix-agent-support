@@ -349,7 +349,7 @@ func (s *Server) Listen(path string) error {
 		if fi.Mode()&os.ModeSocket == 0 {
 			return fmt.Errorf("%s exists and is not a socket", path)
 		}
-		if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
+		if c, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", path); err == nil {
 			_ = c.Close()
 			return fmt.Errorf("another recorder is already listening on %s", path)
 		}
@@ -357,7 +357,8 @@ func (s *Server) Listen(path string) error {
 			return err
 		}
 	}
-	ln, err := net.Listen("unix", path)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "unix", path)
 	if err != nil {
 		return err
 	}

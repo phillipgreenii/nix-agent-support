@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,7 +29,7 @@ func bulkCorpus(t *testing.T, files int) *testkit.Kit {
 func indexDump(t *testing.T, k *testkit.Kit) string {
 	t.Helper()
 	var b strings.Builder
-	rows, err := k.Store.Read().Query(`
+	rows, err := k.Store.Read().QueryContext(context.Background(), `
 SELECT r.file_id, r.gen, r.off, r.item, r.type, r.session, r.time_ns,
   COALESCE((SELECT group_concat(fn.name||'='||COALESCE(f.s,'')||'/'||COALESCE(f.n,'')||'/'||COALESCE(f.f,''), ';')
     FROM fields f JOIN field_names fn ON fn.id=f.name_id WHERE f.rec_id=r.id ORDER BY fn.name), ''),
@@ -133,7 +134,7 @@ func schemaAndPlans(t *testing.T, k *testkit.Kit) string {
 	t.Helper()
 	db := k.Store.Read()
 	var out []string
-	rows, err := db.Query(`SELECT type||' '||name||' '||tbl_name||' '||COALESCE(sql,'') FROM sqlite_master`)
+	rows, err := db.QueryContext(context.Background(), `SELECT type||' '||name||' '||tbl_name||' '||COALESCE(sql,'') FROM sqlite_master`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +155,7 @@ func schemaAndPlans(t *testing.T, k *testkit.Kit) string {
 		`SELECT rec_id FROM fields WHERE name_id=1 AND n>3`,
 		`SELECT id FROM texts WHERE rec_id=1`,
 	} {
-		prows, err := db.Query(`EXPLAIN QUERY PLAN ` + q)
+		prows, err := db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN `+q)
 		if err != nil {
 			t.Fatal(err)
 		}

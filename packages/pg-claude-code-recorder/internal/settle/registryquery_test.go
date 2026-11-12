@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"path/filepath"
@@ -32,14 +33,14 @@ func TestRegistryQueryPlansStartFromTheSessionIndex(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	sources := []string{"session-registry", "claude-history", "claude-transcript", "other"}
 	for i := 1; i <= 2000; i++ {
-		if _, err := db.Exec(`INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
 VALUES(?,1,1,?,0,1,?,'x',1,?,?)`, i, i, sources[i%len(sources)], fmt.Sprintf("s%d", i%40), i); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`INSERT OR IGNORE INTO field_names(name) VALUES('version')`); err != nil {
+		if _, err := db.ExecContext(context.Background(), `INSERT OR IGNORE INTO field_names(name) VALUES('version')`); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`INSERT INTO fields(rec_id,name_id,s) VALUES(?,(SELECT id FROM field_names WHERE name='version'),'v')`, i); err != nil {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s) VALUES(?,(SELECT id FROM field_names WHERE name='version'),'v')`, i); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -50,7 +51,7 @@ VALUES(?,1,1,?,0,1,?,'x',1,?,?)`, i, i, sources[i%len(sources)], fmt.Sprintf("s%
 		"registryNames":    registryNamesQuery,
 	} {
 		t.Run(name, func(t *testing.T) {
-			rows, err := db.Query("EXPLAIN QUERY PLAN "+q, "s1")
+			rows, err := db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+q, "s1")
 			if err != nil {
 				t.Fatal(err)
 			}

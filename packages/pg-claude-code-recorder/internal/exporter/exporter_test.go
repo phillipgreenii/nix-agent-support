@@ -52,7 +52,11 @@ func TestStartRefusesNonLoopbackAndServesMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close(context.Background())
-	resp, err := http.Get("http://" + s.Addr() + "/metrics")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+s.Addr()+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

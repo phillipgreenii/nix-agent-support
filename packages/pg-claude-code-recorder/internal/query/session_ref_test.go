@@ -24,14 +24,14 @@ func sessionRefKit(t *testing.T) *testkit.Kit {
 	k.Parse()
 	// One record of each linked type, so follow by session has targets.
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`UPDATE records SET type='status' WHERE id IN (SELECT MIN(id) FROM records WHERE item=-1 GROUP BY session)`); err != nil {
+		if _, err := tx.ExecContext(context.Background(), `UPDATE records SET type='status' WHERE id IN (SELECT MIN(id) FROM records WHERE item=-1 GROUP BY session)`); err != nil {
 			return err
 		}
 		// A record of the empty session, which has the sentinel sessions row.
-		if _, err := tx.Exec(`INSERT INTO sessions(session_id,first_time_ns) VALUES('',0) ON CONFLICT(session_id) DO NOTHING`); err != nil {
+		if _, err := tx.ExecContext(context.Background(), `INSERT INTO sessions(session_id,first_time_ns) VALUES('',0) ON CONFLICT(session_id) DO NOTHING`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`UPDATE records SET session='', session_ref=(SELECT session_ref FROM sessions WHERE session_id='') WHERE id=(SELECT MAX(id) FROM records WHERE item=0)`)
+		_, err := tx.ExecContext(context.Background(), `UPDATE records SET session='', session_ref=(SELECT session_ref FROM sessions WHERE session_id='') WHERE id=(SELECT MAX(id) FROM records WHERE item=0)`)
 		return err
 	})
 	if err != nil {
@@ -150,7 +150,7 @@ func TestAStoreWithUnreferencedRowsKeepsAnsweringFromTheTextSession(t *testing.T
 	}
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
 		for _, q := range []string{`UPDATE records SET session_ref=0`, `DELETE FROM session_files`, `DELETE FROM session_stats`, `DELETE FROM sessions`, `DELETE FROM meta WHERE key='session_ref_complete'`} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}

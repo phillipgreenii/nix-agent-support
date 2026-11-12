@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strings"
@@ -117,7 +118,7 @@ func TestSessionCacheIsDroppedAfterARolledBackWrite(t *testing.T) {
 	k.Parse()
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
 		for _, q := range []string{`DELETE FROM session_files`, `DELETE FROM session_stats`, `DELETE FROM records`, `DELETE FROM sessions`} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}

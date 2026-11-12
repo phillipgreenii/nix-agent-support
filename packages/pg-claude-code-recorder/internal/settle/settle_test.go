@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -121,7 +122,10 @@ func TestUnparsedFileHolds(t *testing.T) {
 	e.ingest(e.transcript())
 	e.prs.Drain() //nolint:errcheck
 	// Drain parsed it; drop the parse record to model a never-parsed file.
-	if err := e.st.WithWrite("", func(tx *sql.Tx) error { _, err := tx.Exec(`DELETE FROM parse_state`); return err }); err != nil {
+	if err := e.st.WithWrite("", func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(context.Background(), `DELETE FROM parse_state`)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	e.tick()

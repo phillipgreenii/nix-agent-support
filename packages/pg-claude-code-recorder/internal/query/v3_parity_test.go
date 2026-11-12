@@ -49,7 +49,7 @@ func answerJSON(t *testing.T, e *query.Engine, req string) string {
 
 func rowsOf(t *testing.T, k *testkit.Kit, qs string) string {
 	t.Helper()
-	rs, err := k.Store.Read().Query(qs)
+	rs, err := k.Store.Read().QueryContext(context.Background(), qs)
 	if err != nil {
 		t.Fatalf("%s: %v", qs, err)
 	}

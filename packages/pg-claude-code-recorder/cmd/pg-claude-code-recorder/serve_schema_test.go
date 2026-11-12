@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -28,7 +29,7 @@ func TestServeRefusesAnOlderIndexSchemaAndNamesTheRebuildCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE meta SET value=? WHERE key='schema_version'`, fmt.Sprint(store.SchemaVersion-1)); err != nil {
+	if _, err := db.ExecContext(context.Background(), `UPDATE meta SET value=? WHERE key='schema_version'`, fmt.Sprint(store.SchemaVersion-1)); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()

@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestFieldsRepeatedNameKeepsLastWinsAndOrder(t *testing.T) {
 			t.Fatalf("%s: want n=%d with s NULL, matching rows %d", c.name, c.want, n)
 		}
 	}
-	rows, err := k.Store.Read().Query(`SELECT name FROM field_names ORDER BY id`)
+	rows, err := k.Store.Read().QueryContext(context.Background(), `SELECT name FROM field_names ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}

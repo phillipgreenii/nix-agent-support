@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -23,7 +24,7 @@ func noTrigramKit(t *testing.T) *testkit.Kit {
 func dropTrigram(t *testing.T, k *testkit.Kit) {
 	t.Helper()
 	if err := k.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`DROP TABLE fts_tri`)
+		_, err := tx.ExecContext(context.Background(), `DROP TABLE fts_tri`)
 		return err
 	}); err != nil {
 		t.Fatal(err)

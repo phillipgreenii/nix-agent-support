@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -15,7 +16,7 @@ func tline(uuid, extra string) string {
 func str(t *testing.T, k *testkit.Kit, q string, args ...any) string {
 	t.Helper()
 	var s sql.NullString
-	if err := k.Store.Read().QueryRow(q, args...).Scan(&s); err != nil {
+	if err := k.Store.Read().QueryRowContext(context.Background(), q, args...).Scan(&s); err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
 	return s.String
@@ -112,7 +113,7 @@ func TestLookupCacheIsDroppedAfterARolledBackWrite(t *testing.T) {
 	k.Parse()
 	err := k.Store.WithWrite("", func(tx *sql.Tx) error {
 		for _, q := range []string{`DELETE FROM session_files`, `DELETE FROM session_stats`, `DELETE FROM records`, `DELETE FROM sessions`, `DELETE FROM lk_cwd`} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}

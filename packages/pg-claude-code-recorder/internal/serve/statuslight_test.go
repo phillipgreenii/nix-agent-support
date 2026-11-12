@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -79,7 +80,7 @@ func TestStatusRefreshStatsOnlyTheExceptions(t *testing.T) {
 	defer func() { _ = d.Close() }()
 	seedFiles(t, d, filepath.Join(e.claude, "projects", "example-proj"), statusLightFiles)
 	err = d.st.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE files SET last_size=10 WHERE id IN (100001,100002)`) // lagging: nothing copied
+		_, err := tx.ExecContext(context.Background(), `UPDATE files SET last_size=10 WHERE id IN (100001,100002)`) // lagging: nothing copied
 		return err
 	})
 	if err != nil {
@@ -201,7 +202,7 @@ func TestStatusRefreshSeesALaggingFileAndItClears(t *testing.T) {
 	// has not run): last_size is set directly, as the copier's size record does.
 	growOriginal(t, p, "more bytes\n", time.Now().Add(-90*time.Second))
 	err := d.st.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE files SET last_size=last_size+11`)
+		_, err := tx.ExecContext(context.Background(), `UPDATE files SET last_size=last_size+11`)
 		return err
 	})
 	if err != nil {

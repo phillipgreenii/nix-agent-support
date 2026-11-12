@@ -17,13 +17,13 @@ func seedFiles(t testing.TB, d *Daemon, dir string, n int) {
 	t.Helper()
 	err := d.st.WithWrite("", func(tx *sql.Tx) error {
 		for i := 1; i <= n; i++ {
-			if _, err := tx.Exec(`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(?,?,?,?,1)`, 100000+i, "transcript", "append", 1); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(?,?,?,?,1)`, 100000+i, "transcript", "append", 1); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO paths(file_id,path,first_seen_ns) VALUES(?,?,1)`, 100000+i, filepath.Join(dir, fmt.Sprintf("f%d.jsonl", i))); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO paths(file_id,path,first_seen_ns) VALUES(?,?,1)`, 100000+i, filepath.Join(dir, fmt.Sprintf("f%d.jsonl", i))); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO generations(file_id,gen,start_ns) VALUES(?,1,1)`, 100000+i); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO generations(file_id,gen,start_ns) VALUES(?,1,1)`, 100000+i); err != nil {
 				return err
 			}
 		}

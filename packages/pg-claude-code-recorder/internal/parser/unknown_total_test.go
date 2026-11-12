@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ const oldGroupBy = `SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP 
 
 func oldSummary(t *testing.T, k *testkit.Kit) []parser.UnknownKey {
 	t.Helper()
-	rows, err := k.Store.Read().Query(oldGroupBy)
+	rows, err := k.Store.Read().QueryContext(context.Background(), oldGroupBy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestClearedGenerationLeavesNoZeroAggregateRows(t *testing.T) {
 
 func TestSummarizeDoesNotScanThePerFileTable(t *testing.T) {
 	k := testkit.New(t)
-	rows, err := k.Store.Read().Query(`EXPLAIN QUERY PLAN SELECT source,rtype,path,count FROM unknown_keys_total ORDER BY source,rtype,path`)
+	rows, err := k.Store.Read().QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT source,rtype,path,count FROM unknown_keys_total ORDER BY source,rtype,path`)
 	if err != nil {
 		t.Fatal(err)
 	}

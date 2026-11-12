@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -25,10 +26,10 @@ func TestRegistryVersionStoredByV2IsReparsed(t *testing.T) {
 	jobs := `SELECT COUNT(*) FROM fields f JOIN field_names n ON n.id=f.name_id WHERE n.name='job_id' AND f.s='d503eec4'`
 	// Emulate a v2 parse: stale version and no job_id field.
 	err = k.Store.WithWrite("", func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`UPDATE parse_state SET version=2`); err != nil {
+		if _, err := tx.ExecContext(context.Background(), `UPDATE parse_state SET version=2`); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`DELETE FROM fields WHERE name_id IN (SELECT id FROM field_names WHERE name='job_id')`)
+		_, err := tx.ExecContext(context.Background(), `DELETE FROM fields WHERE name_id IN (SELECT id FROM field_names WHERE name='job_id')`)
 		return err
 	})
 	if err != nil {

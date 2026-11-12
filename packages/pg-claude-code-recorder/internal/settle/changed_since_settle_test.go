@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -130,7 +131,7 @@ func dropTable(t *testing.T, st *store.Store, table string) {
 		t.Fatal(err)
 	}
 	defer func() { _ = raw.Close() }()
-	if _, err := raw.Exec(`DROP TABLE ` + table); err != nil {
+	if _, err := raw.ExecContext(context.Background(), `DROP TABLE `+table); err != nil {
 		t.Fatal(err)
 	}
 }

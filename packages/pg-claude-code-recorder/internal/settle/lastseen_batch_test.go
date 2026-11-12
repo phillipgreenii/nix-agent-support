@@ -14,7 +14,7 @@ import (
 func perFileLastSeen(st *store.Store, f store.File) time.Time {
 	ns := f.FirstSeen
 	var lc int64
-	if err := st.Read().QueryRow(`SELECT last_copy_ns FROM files WHERE id=?`, f.ID).Scan(&lc); err == nil {
+	if err := st.Read().QueryRowContext(context.Background(), `SELECT last_copy_ns FROM files WHERE id=?`, f.ID).Scan(&lc); err == nil {
 		ns = max(ns, lc)
 	}
 	if sn, err := st.Snapshots(f.ID); err == nil {

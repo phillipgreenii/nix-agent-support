@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -98,7 +99,7 @@ func TestRebuildLogsProgressAndASummaryWithConsistentNumbers(t *testing.T) {
 	}
 	k.Reopen()
 	var stored string
-	if err := k.Store.Read().QueryRow(`SELECT value FROM meta WHERE key='last_rebuild_profile'`).Scan(&stored); err != nil || !strings.Contains(stored, `"records_per_sec"`) {
+	if err := k.Store.Read().QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key='last_rebuild_profile'`).Scan(&stored); err != nil || !strings.Contains(stored, `"records_per_sec"`) {
 		t.Fatalf("the stored profile: %q, %v", stored, err)
 	}
 	if want := k.Count(`SELECT COUNT(*) FROM records`); want == 0 || sum["records_parsed"].(float64) != float64(want) {
