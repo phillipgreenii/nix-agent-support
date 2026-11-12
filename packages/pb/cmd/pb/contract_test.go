@@ -170,7 +170,7 @@ func shellOut(t *testing.T, dir, name string, args ...string) string {
 // shellTry runs name in dir, returning (stdout, error-with-stderr). Does not fail.
 func shellTry(dir, name string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	cmd.Dir = dir
 	cmd.Env = hermeticEnviron()
 	cmd.Stdout = &stdout
@@ -570,7 +570,7 @@ func TestContract_GitPatchID(t *testing.T) {
 		}
 		show := string(showOut)
 		var sout, serr bytes.Buffer
-		vc := exec.Command("git", "-C", dir, "patch-id", "--verbatim")
+		vc := exec.CommandContext(ctx, "git", "-C", dir, "patch-id", "--verbatim")
 		vc.Env = hermeticEnviron()
 		vc.Stdin = strings.NewReader(show)
 		vc.Stdout = &sout

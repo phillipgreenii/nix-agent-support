@@ -165,7 +165,7 @@ func initGitRepoWithCommit(t *testing.T) string {
 func runTool(t *testing.T, dir, name string, args ...string) string {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(t.Context(), name, args...)
 	cmd.Dir = dir
 	cmd.Env = hermeticEnviron()
 	cmd.Stdout = &stdout

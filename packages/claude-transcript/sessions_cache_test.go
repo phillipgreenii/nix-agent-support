@@ -429,7 +429,7 @@ func TestSessionsCache_KilledColdCallKeepsCheckpointedFiles(t *testing.T) {
 	}
 	cache := t.TempDir()
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestSessionsCacheCheckpointChild$")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestSessionsCacheCheckpointChild$")
 	cmd.Env = append(os.Environ(),
 		checkpointChildRootEnv+"="+root,
 		checkpointChildCacheEnv+"="+cache,

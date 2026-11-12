@@ -205,7 +205,7 @@ func TestReclaim_noWorktreeIsANoOpAndIdempotent(t *testing.T) {
 // no note: the note would claim a removal that did not happen.
 func TestReclaim_wtdoneRefusalLeavesWorktreeAndWritesNoNote(t *testing.T) {
 	repo, wt, r := reclaimFixture(t, "pg2-r6")
-	anchor := exec.Command("sh", "-c", "sleep 60; :")
+	anchor := exec.CommandContext(t.Context(), "sh", "-c", "sleep 60; :")
 	anchor.Dir = wt
 	if err := anchor.Start(); err != nil {
 		t.Fatal(err)

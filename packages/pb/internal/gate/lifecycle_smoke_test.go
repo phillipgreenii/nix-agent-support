@@ -28,7 +28,7 @@ func buildPB(t *testing.T) string {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "pb")
 	// Module root is two levels up from internal/gate.
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/pb")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", out, "./cmd/pb")
 	cmd.Dir = mustModuleRoot(t)
 	cmd.Env = goBuildEnviron()
 	if b, err := cmd.CombinedOutput(); err != nil {
@@ -138,7 +138,7 @@ func writeFile(t *testing.T, path, content string) {
 // non-zero exit (pb gate check exits 1 when anything is skipped).
 func runToolAllow(t *testing.T, dir, name string, args ...string) (string, int) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(t.Context(), name, args...)
 	cmd.Dir = dir
 	// Same scrubbed env as runTool: pb/pn/bd run git under it, and an inherited
 	// GIT_DIR/GIT_WORK_TREE would redirect them at the ambient repository.

@@ -181,7 +181,7 @@ func setForeignGitEnv(t *testing.T, repo string) {
 // vcsRevision is the vcs.revision Go stamped into bin ("" when unstamped).
 func vcsRevision(t *testing.T, bin string) string {
 	t.Helper()
-	out, err := exec.Command("go", "version", "-m", bin).CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "go", "version", "-m", bin).CombinedOutput()
 	if err != nil {
 		t.Fatalf("go version -m: %v\n%s", err, out)
 	}
@@ -215,7 +215,7 @@ func TestContract_ForeignGitEnv_PbBuildNegativeControl(t *testing.T) {
 	skipNoBin(t, "go")
 	foreign, foreignRev := foreignGitRepo(t)
 	bin := filepath.Join(t.TempDir(), "pb")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".")
 	cmd.Env = append(goBuildEnviron(), foreignGitEnv(foreign)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build under the foreign git environment: %v\n%s", err, out)
@@ -252,7 +252,7 @@ func TestContract_ForeignGitEnv_RealToolContractsStillPass(t *testing.T) {
 func pinGoEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{"GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT"} {
-		out, err := exec.Command("go", "env", name).Output()
+		out, err := exec.CommandContext(t.Context(), "go", "env", name).Output()
 		if err != nil {
 			t.Fatalf("go env %s: %v", name, err)
 		}

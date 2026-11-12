@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -151,7 +152,9 @@ func runChild(argv []string, stdout, stderr io.Writer, sigs <-chan os.Signal) in
 		fmt.Fprintf(stderr, "pg-review-router-adapter: %v\n", err)
 		return 1
 	}
-	cmd := exec.Command(path, argv...)
+	// Deliberately not a cancellable context: the child must outlive the
+	// adapter's own SIGTERM (see below).
+	cmd := exec.CommandContext(context.Background(), path, argv...)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {

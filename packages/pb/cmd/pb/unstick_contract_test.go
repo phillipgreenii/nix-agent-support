@@ -23,7 +23,7 @@ func pbBin(t *testing.T) string {
 	t.Helper()
 	skipNoBin(t, "go")
 	bin := filepath.Join(t.TempDir(), "pb")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".")
 	cmd.Env = goBuildEnviron()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build pb: %v\n%s", err, out)
@@ -35,7 +35,7 @@ func pbBin(t *testing.T) string {
 func runPB(t *testing.T, bin string, args ...string) (string, string, int) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(t.Context(), bin, args...)
 	cmd.Env = hermeticEnviron()
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()

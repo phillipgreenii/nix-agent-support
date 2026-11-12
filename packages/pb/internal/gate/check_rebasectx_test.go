@@ -31,7 +31,7 @@ type ctxRepo struct {
 
 func (r ctxRepo) git(date string, args ...string) string {
 	r.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", r.dir}, args...)...)
+	cmd := exec.CommandContext(r.t.Context(), "git", append([]string{"-C", r.dir}, args...)...)
 	cmd.Env = append(gitOnlyEnviron(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e.com",
 		"GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE=2026-07-01T00:00:00+00:00")
