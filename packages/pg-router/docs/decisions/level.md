@@ -105,7 +105,7 @@ deployment name). The module directory is `packages/pg-router-sensors`, the Go m
 `pg-router-sensors-go-tests`; it mirrors the handlers and heartbeat modules.
 
 Invocation: `pg-router-sensors <subcommand> [--config FILE] [--state-dir DIR] [--resource RESOURCE]`,
-the subcommand one of `host-sensor` (resources `cpu`, `disk`, `ram`, `network`), `vpn-sensor`,
+the subcommand one of `host-sensor` (resources `cpu`, `disk`, `ram`, `network`), `vpn-sensor` (the configured reachability and trust resources),
 `git-auth-sensor`, `beads-sensor`, `claude-sensor`; an unknown or missing subcommand prints usage to
 stderr and exits 2, and a configuration file that cannot be loaded exits 2 with the cause on stderr. One invocation answers all the resources of that sensor, one JSONL line per
 resource on stdout and diagnostics on stderr; `--resource` limits it to one resource (not `--only`, which clashes with pg-router's own `--only <kind>:<name>`). `--config` is a
@@ -117,6 +117,13 @@ router, `INV-SEN-5`).
 Probes: the network sensors send an HTTPS `HEAD` (5 s timeout per target, redirects not followed so a
 3xx counts as reachable, a DNS or TLS failure counts as unreachable, targets in parallel) and report
 `UNAVAILABLE` only when ALL targets fail on 3 consecutive passes, the counter kept in the state file.
+`vpn-sensor` answers TWO resources per invocation over the same hosts: the reachability resource (config
+key `resource`) counts a target reachable when the connect, the TLS handshake and an HTTP response
+complete even if the certificate does not verify (a private CA the machine does not trust is not the
+VPN being down), and the trust resource (config key `trust_resource`, default `network_zr_trust`)
+repeats the `HEAD` with normal verification against the system roots. Each has its own consecutive-failure
+counter and dwell state; `--resource` limits the run to one. The skip-verify mode is an option of the
+shared prober used only by the reachability resource: `host-sensor`'s `network` resource always verifies.
 The credential sensor parses the validity of the ssh certificate selected by a configured key id or
 principal (the latest expiry when several match), with a configurable margin (default 30 minutes) and
 an optional bounded remote listing; a missing agent socket, no identity or an expired certificate is

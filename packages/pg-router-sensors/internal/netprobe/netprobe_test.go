@@ -74,6 +74,36 @@ func TestProbeBadCertificate(t *testing.T) {
 	}
 }
 
+// SkipVerify accepts the untrusted certificate but still needs an HTTP
+// response; the zero value keeps verifying.
+func TestProbeSkipVerify(t *testing.T) {
+	srv := status(200)
+	defer srv.Close()
+	r := (&Prober{Timeout: time.Second, SkipVerify: true}).Probe(context.Background(), []string{srv.URL})[0]
+	if !r.Reachable || r.Err != nil || r.Status != 200 {
+		t.Fatalf("skip-verify must reach an untrusted certificate: %+v", r)
+	}
+	r = (&Prober{Timeout: time.Second}).Probe(context.Background(), []string{srv.URL})[0]
+	if r.Reachable {
+		t.Fatalf("the zero value must verify: %+v", r)
+	}
+	// A custom client's transport is cloned, not mutated.
+	tr := srv.Client().Transport.(*http.Transport)
+	p := &Prober{Client: srv.Client(), Timeout: time.Second, SkipVerify: true}
+	if r := p.Probe(context.Background(), []string{srv.URL})[0]; !r.Reachable {
+		t.Fatalf("%+v", r)
+	}
+	if tr.TLSClientConfig != nil && tr.TLSClientConfig.InsecureSkipVerify {
+		t.Error("the caller's transport must not be modified")
+	}
+	// A 5xx over an unverified handshake is still unreachable.
+	s5 := status(503)
+	defer s5.Close()
+	if r := (&Prober{Timeout: time.Second, SkipVerify: true}).Probe(context.Background(), []string{s5.URL})[0]; r.Reachable {
+		t.Fatalf("503 must be unreachable: %+v", r)
+	}
+}
+
 func TestProbeBadURL(t *testing.T) {
 	r := (&Prober{}).Probe(context.Background(), []string{"http://[::1"})[0]
 	if r.Reachable || r.Err == nil {

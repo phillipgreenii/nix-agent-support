@@ -8,12 +8,19 @@
 // UNAVAILABLE only when ALL targets fail on Threshold consecutive passes (one
 // pass is one sensor invocation); the counter lives in the state file.
 //
+// A Prober with SkipVerify set instead measures bare reachability: the TCP
+// connect, the TLS handshake and an HTTP response must complete, but the
+// certificate chain and name are not verified (reachability is not trust).
+// Only vpn-sensor uses it, for its reachability resource; the network
+// resource of host-sensor always verifies.
+//
 // Exported names: Prober, Result, Probe, Observe, Defaults (DefaultTargets,
 // DefaultTimeout, DefaultThreshold), HostURLs, ConfigureCommon, FailKey.
 package netprobe
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -44,6 +51,9 @@ type Prober struct {
 	// client's transport does (the default verifies).
 	Client  *http.Client
 	Timeout time.Duration
+	// SkipVerify skips TLS certificate verification for this prober only (the
+	// handshake must still complete). The zero value verifies.
+	SkipVerify bool
 }
 
 // Result is the outcome of one target.
@@ -62,6 +72,9 @@ func (p *Prober) Probe(ctx context.Context, targets []string) []Result {
 		client = p.Client
 	}
 	c := *client
+	if p.SkipVerify {
+		c.Transport = insecureTransport(client.Transport)
+	}
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	timeout := p.Timeout
 	if timeout <= 0 {
@@ -78,6 +91,21 @@ func (p *Prober) Probe(ctx context.Context, targets []string) []Result {
 	}
 	wg.Wait()
 	return out
+}
+
+// insecureTransport returns a copy of base (the default transport when base is
+// nil or not an *http.Transport) that does not verify server certificates.
+func insecureTransport(base http.RoundTripper) *http.Transport {
+	t, ok := base.(*http.Transport)
+	if !ok || t == nil {
+		t = http.DefaultTransport.(*http.Transport)
+	}
+	t = t.Clone()
+	if t.TLSClientConfig == nil {
+		t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
+	t.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec // reachability probe only: trust is a separate resource
+	return t
 }
 
 func headOne(ctx context.Context, c *http.Client, url string, timeout time.Duration) Result {
