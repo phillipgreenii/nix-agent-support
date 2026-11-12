@@ -1788,6 +1788,39 @@
           # mirrors gofumpt's built-in vendor/* skip.
           treefmt.settings.global.excludes = [ "*.pb.go" ];
 
+          # Opt-in runner for the real-tool conflict-rule suite of .pg-git-lander.toml
+          # (type:integration: real pg-git-lander, git, `nix flake lock`/`update` and
+          # `go mod tidy` against throwaway fixture repos), so it cannot be a sandboxed
+          # checks.* entry and the unit tier and pre-land never select it. Run it with
+          # `nix run .#pg-git-lander-conflict-rules-tests` from the checkout root.
+          apps.pg-git-lander-conflict-rules-tests = {
+            type = "app";
+            program = "${
+              pkgs.writeShellApplication {
+                name = "pg-git-lander-conflict-rules-tests";
+                runtimeInputs = [
+                  pkgs.bats
+                  pkgs.jq
+                  pkgs.git
+                  pkgs.go
+                  pkgs.zip
+                  pkgs.gawk
+                  pkgs.coreutils
+                  pkgs.pg-git-lander
+                ];
+                text = ''
+                  root="''${REPO_ROOT:-$PWD}"
+                  if [ ! -f "$root/tests/pg-git-lander-conflict-rules.bats" ]; then
+                    echo "run from the checkout root (or set REPO_ROOT)" >&2
+                    exit 2
+                  fi
+                  export GFH_LIB="''${GFH_LIB:-${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash}"
+                  exec bats --filter-tags type:integration "$root/tests/pg-git-lander-conflict-rules.bats" "$@"
+                '';
+              }
+            }/bin/pg-git-lander-conflict-rules-tests";
+          };
+
           checks =
             let
               # Rows + check builder for the single-boolean tie tests (tc-2k1o8).

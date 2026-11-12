@@ -1,0 +1,70 @@
+# pg-git-lander repo file: land-time checks and the conflict rules for derived files.
+# Read from TARGET's tip; its commands run only where the operator's XDG entry for this
+# clone sets trust_repo_config = true (otherwise a land refuses `untrusted-config`).
+# A branch that edits this file is processed under the OLD rules; the new ones apply from
+# the next land.
+
+[hooks.land]
+before_move = [
+  # The repo's pre-land hooks over the diff from TARGET's tip (the tool rebases first, so
+  # the hooks must see the rebased result). `sh -c` because hook argv has no shell
+  # expansion. Exit 13 (no hook bundle) and 127 (pg-hooks not installed) skip; 75 (host
+  # load) stops the land as a retryable `transient`.
+  { run = ["sh", "-c", "exec pg-hooks run pre-land --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
+  # The eval-only gate: every flake output must still evaluate.
+  { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m" },
+]
+
+# Conflict rules. The file order matters: the first rule whose glob matches a path wins,
+# and rules run in file order. Only DERIVED files get a rule; any other conflict stays a
+# stop for a person.
+
+# flake.lock: regenerated, never taken from either side (operator ruling, Phillip,
+# 2026-11-12: "if there is a conflict on flake.lock, then the flake.lock must be
+# regenerated."). The copy of the side being replayed onto only provides valid JSON
+# without conflict markers. Then `nix flake update` re-resolves every input the branch
+# changed against the common ancestor (changed url or pin, or newly added), the same
+# procedure the pg-rescue flake.lock handler uses: a bare `nix flake lock` keeps an
+# already-pinned input stale. A final `nix flake lock` only fills anything still missing.
+[[conflict]]
+glob    = "flake.lock"
+timeout = "10m"
+resolve = ["sh", "-c", '''
+set -eu
+cp "$PG_GIT_LANDER_ONTO_FILE" "$PG_GIT_LANDER_PATH"
+base="$PG_GIT_LANDER_BASE_FILE"
+[ -s "$base" ] || { base=$(mktemp); echo '{"nodes":{"root":{"inputs":{}}}}' >"$base"; }
+changed=""
+if [ -s "$PG_GIT_LANDER_BRANCH_FILE" ]; then
+  changed=$(jq -nr --slurpfile b "$base" --slurpfile n "$PG_GIT_LANDER_BRANCH_FILE" '
+    $n[0] as $N | $b[0] as $B
+    | $N.nodes.root.inputs | to_entries[]
+    | select(.value | type == "string")
+    | .key as $name | .value as $k
+    | select(($B.nodes[$k] // null) == null
+             or $N.nodes[$k].locked != $B.nodes[$k].locked
+             or $N.nodes[$k].original != $B.nodes[$k].original)
+    | $name')
+fi
+if [ -n "$changed" ]; then
+  # shellcheck disable=SC2086
+  nix flake update $changed
+fi
+nix flake lock
+''']
+
+# go.sum: regenerated from go.mod. Must come before the gomod2nix.toml rule.
+# During a rebase git's "ours" is the side being replayed onto.
+[[conflict]]
+glob    = "packages/*/go.sum"
+run_per = "dir"
+resolve = ["sh", "-c", "git checkout --ours -- go.sum && go mod tidy"]
+verify  = ["go", "mod", "verify"]
+
+# gomod2nix.toml: regenerated from go.mod and go.sum by each package's update-deps.sh.
+# The relative command path is accepted only because the repo is trusted.
+[[conflict]]
+glob    = "packages/*/gomod2nix.toml"
+run_per = "dir"
+resolve = ["./update-deps.sh"]
+timeout = "15m"
