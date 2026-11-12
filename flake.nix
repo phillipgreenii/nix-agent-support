@@ -6820,9 +6820,10 @@
                     pkgs.git
                     pkgs.ccpool
                     pkgs.tmux
-                    pkgs.bd
+                    (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
                     pkgs.coreutils
                     pkgs.jq
+                    pkgs.lsof
                   ];
                 }).overrideAttrs
                   (_: {
