@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -116,7 +117,7 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 	if err := s.RequireNewSchema(); err != nil {
 		return 0, err
 	}
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): begin: %w", e.Repo, e.EntityType, e.EntityID, err)
 	}
@@ -150,7 +151,7 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 	updateSQL += ` WHERE repo = ? AND entity_type = ? AND entity_id = ? AND version = ?`
 	updateArgs = append(updateArgs, e.Repo, e.EntityType, e.EntityID, expectedVersion)
 
-	res, err := tx.Exec(updateSQL, updateArgs...)
+	res, err := tx.ExecContext(context.Background(), updateSQL, updateArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
 	}
@@ -166,7 +167,8 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 			return 0, s.conflict(e)
 		}
 		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(insertArgs)), ", ")
-		ins, err := tx.Exec(
+		ins, err := tx.ExecContext(
+			context.Background(),
 			`INSERT INTO entity (`+insertCols+`) VALUES (`+placeholders+`)
 			 ON CONFLICT (repo, entity_type, entity_id) DO NOTHING`,
 			insertArgs...,
@@ -235,14 +237,15 @@ func (s *Store) AppendEntityChange(repo, entityType, entityID string, kinds []st
 	wrap := func(err error) error {
 		return fmt.Errorf("store: append entity change (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return 0, wrap(err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	var version int64
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(
+		context.Background(),
 		`SELECT version FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&version)
@@ -301,7 +304,8 @@ func (s *Store) AppendChangeLogTx(tx *sql.Tx, r ChangeRecord) (int64, error) {
 	}
 	var seq int64
 	if !gated {
-		res, err := tx.Exec(
+		res, err := tx.ExecContext(
+			context.Background(),
 			`INSERT INTO change_log (repo, entity_type, entity_id, version, kinds, origin, at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			r.Repo, r.EntityType, r.EntityID, r.Version, string(kindsJSON), r.Origin, r.At,
@@ -383,7 +387,7 @@ func (s *Store) queryChanges(query string, args ...any) ([]ChangeRecord, error) 
 	if err := s.RequireNewSchema(); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(query, args...)
+	rows, err := s.sql.QueryContext(context.Background(), query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list change_log: %w", err)
 	}
@@ -417,7 +421,8 @@ func (s *Store) LatestChangeAt(entityType string) (map[string]string, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(
+	rows, err := s.sql.QueryContext(
+		context.Background(),
 		`SELECT entity_id, MAX(at) FROM change_log WHERE entity_type = ? GROUP BY entity_id`,
 		entityType,
 	)

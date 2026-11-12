@@ -25,7 +25,7 @@ func failTableWrites(t *testing.T, st *store.Store, op, table string) {
 	}
 	defer func() { _ = db.Close() }()
 	ddl := fmt.Sprintf(`CREATE TRIGGER inject_fail_%s_%s BEFORE %s ON %s BEGIN SELECT RAISE(ABORT, 'injected failure'); END`, op, table, op, table)
-	if _, err := db.Exec(ddl); err != nil {
+	if _, err := db.ExecContext(context.Background(), ddl); err != nil {
 		t.Fatalf("install failure trigger: %v", err)
 	}
 }
@@ -39,7 +39,7 @@ func failBackendColumnWrites(t *testing.T, st *store.Store) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(`CREATE TRIGGER inject_fail_backend BEFORE UPDATE OF backend ON entity BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `CREATE TRIGGER inject_fail_backend BEFORE UPDATE OF backend ON entity BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
 		t.Fatalf("install failure trigger: %v", err)
 	}
 }
@@ -51,7 +51,7 @@ func dropTable(t *testing.T, st *store.Store, table string) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec("DROP TABLE " + table); err != nil {
+	if _, err := db.ExecContext(context.Background(), "DROP TABLE "+table); err != nil {
 		t.Fatalf("drop %s: %v", table, err)
 	}
 }

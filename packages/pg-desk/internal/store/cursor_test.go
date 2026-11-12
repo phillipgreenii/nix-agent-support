@@ -272,7 +272,7 @@ func TestStaleConsumerExcludedFromPruneHorizon(t *testing.T) {
 
 	// A NULL seen_at counts as stale as well.
 	seedChanges(t, s, "pr", 2, old.Add(time.Hour))
-	if _, err := s.sql.Exec(`INSERT INTO consumer (name, type, cursor, seen_at) VALUES ('nullseen', 'pr', 0, NULL)`); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), `INSERT INTO consumer (name, type, cursor, seen_at) VALUES ('nullseen', 'pr', 0, NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := s.PruneChangeLog(curNow, 0, 0); err != nil || n != 2 {

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -33,7 +34,7 @@ func focusScrape(t *testing.T, s *store.Store) string {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}

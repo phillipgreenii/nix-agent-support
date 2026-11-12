@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ func TestCountPRAnchors(t *testing.T) {
 	now := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
 	mustExec := func(q string, args ...any) {
 		t.Helper()
-		if _, err := s.sql.Exec(q, args...); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), q, args...); err != nil {
 			t.Fatal(err)
 		}
 	}

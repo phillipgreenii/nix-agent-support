@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -90,7 +91,8 @@ func (s *Store) SetAnnotation(a KVAnnotation) error {
 
 // upsertAnnotation writes a's row (insert, or replace of the same key).
 func upsertAnnotation(tx *sql.Tx, a KVAnnotation) error {
-	_, err := tx.Exec(
+	_, err := tx.ExecContext(
+		context.Background(),
 		`INSERT INTO annotation (repo, entity_type, entity_id, key, value, origin, set_by, set_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, entity_type, entity_id, key) DO UPDATE SET
@@ -116,7 +118,8 @@ func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err e
 	var mutated bool
 	seq, mutated, err = s.annotationTx(a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
 		var current string
-		qerr := tx.QueryRow(
+		qerr := tx.QueryRowContext(
+			context.Background(),
 			`SELECT value FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
 			a.Repo, a.EntityType, a.EntityID, a.Key,
 		).Scan(&current)
@@ -141,7 +144,8 @@ func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err e
 func (s *Store) DeleteAnnotation(repo, entityType, entityID, key, origin, at string) (bool, error) {
 	removed := false
 	_, _, err := s.annotationTx(repo, entityType, entityID, key, origin, at, func(tx *sql.Tx) (bool, error) {
-		res, err := tx.Exec(
+		res, err := tx.ExecContext(
+			context.Background(),
 			`DELETE FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
 			repo, entityType, entityID, key,
 		)
@@ -169,7 +173,7 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 	wrap := func(err error) error {
 		return fmt.Errorf("store: annotation %q on (%s,%s,%s): %w", key, repo, entityType, entityID, err)
 	}
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return 0, false, wrap(err)
 	}
@@ -182,14 +186,16 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 	// annotation (an operator verb and a decider run) serialize, and the second
 	// one reads what the first wrote. Nothing is changed: the version is set to
 	// itself.
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(
+		context.Background(),
 		`UPDATE entity SET version = version WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	); err != nil {
 		return 0, false, wrap(err)
 	}
 	var version int64
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(
+		context.Background(),
 		`SELECT version FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&version)
@@ -231,7 +237,8 @@ func (s *Store) GetKVAnnotation(repo, entityType, entityID, key string) (KVAnnot
 		return KVAnnotation{}, false, err
 	}
 	var a KVAnnotation
-	err := s.sql.QueryRow(
+	err := s.sql.QueryRowContext(
+		context.Background(),
 		`SELECT repo, entity_type, entity_id, key, value, origin, set_by, set_at
 		 FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
 		repo, entityType, entityID, key,
@@ -250,7 +257,8 @@ func (s *Store) ListKVAnnotations(repo, entityType, entityID string) ([]KVAnnota
 	if err := s.RequireNewSchema(); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(
+	rows, err := s.sql.QueryContext(
+		context.Background(),
 		`SELECT repo, entity_type, entity_id, key, value, origin, set_by, set_at
 		 FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? ORDER BY key`,
 		repo, entityType, entityID,

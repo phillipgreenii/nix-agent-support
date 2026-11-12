@@ -228,7 +228,7 @@ func TestHistoryTitleEmptyWhenEntityRowUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.Exec(`DELETE FROM entity WHERE entity_id = 'o/r#5'`); err != nil {
+	if _, err := raw.ExecContext(context.Background(), `DELETE FROM entity WHERE entity_id = 'o/r#5'`); err != nil {
 		t.Fatalf("delete entity row: %v", err)
 	}
 	_ = raw.Close()

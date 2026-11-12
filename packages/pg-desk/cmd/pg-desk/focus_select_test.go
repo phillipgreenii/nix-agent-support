@@ -123,7 +123,7 @@ func (f *selFixture) runs(t *testing.T) []runRecord {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query(`SELECT run_id, verb, exit_code, counts_json FROM focus_run ORDER BY id`)
+	rows, err := db.QueryContext(context.Background(), `SELECT run_id, verb, exit_code, counts_json FROM focus_run ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func (f *selFixture) tables(t *testing.T, names ...string) string {
 	defer func() { _ = db.Close() }()
 	var sb strings.Builder
 	for _, n := range names {
-		rows, err := db.Query("SELECT * FROM " + n + " ORDER BY 1") //nolint:gosec // test-only table names
+		rows, err := db.QueryContext(context.Background(), "SELECT * FROM "+n+" ORDER BY 1") //nolint:gosec // test-only table names
 		if err != nil {
 			t.Fatalf("dump %s: %v", n, err)
 		}
@@ -192,7 +192,7 @@ func (f *selFixture) count(t *testing.T, table string) int {
 	}
 	defer func() { _ = db.Close() }()
 	var n int
-	if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil { //nolint:gosec // test-only table names
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil { //nolint:gosec // test-only table names
 		t.Fatal(err)
 	}
 	return n

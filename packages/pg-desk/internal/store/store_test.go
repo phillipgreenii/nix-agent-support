@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +16,7 @@ func TestOpenAppliesPragmas(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	var journalMode string
-	if err := s.sql.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&journalMode); err != nil {
 		t.Fatalf("query journal_mode: %v", err)
 	}
 	if journalMode != "wal" {
@@ -23,7 +24,7 @@ func TestOpenAppliesPragmas(t *testing.T) {
 	}
 
 	var busyTimeout int
-	if err := s.sql.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
 		t.Fatalf("query busy_timeout: %v", err)
 	}
 	if busyTimeout < 5000 {
@@ -81,7 +82,7 @@ func TestOpenCreatesEveryTable(t *testing.T) {
 	want := []string{"entity", "interpretation", "xref", "annotation", "meta", "change_log", "consumer", "ingest_failed", "focus_period", "focus_selection", "focus_draft", "focus_run"}
 	for _, table := range want {
 		var name string
-		err := s.sql.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name)
+		err := s.sql.QueryRowContext(context.Background(), "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name)
 		if err != nil {
 			t.Fatalf("table %q missing: %v", table, err)
 		}
@@ -109,7 +110,7 @@ func TestReopenIsIdempotentAndKeepsSchemaVersion(t *testing.T) {
 	t.Cleanup(func() { _ = s2.Close() })
 
 	var userVersion int
-	if err := s2.sql.QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
+	if err := s2.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&userVersion); err != nil {
 		t.Fatalf("query user_version: %v", err)
 	}
 	if userVersion != schemaVersion {

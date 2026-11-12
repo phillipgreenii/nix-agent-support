@@ -102,7 +102,7 @@ func (f *selFixture) runPeriodID(t *testing.T) int64 {
 	}
 	defer func() { _ = db.Close() }()
 	var id int64
-	if err := db.QueryRow(`SELECT COALESCE(focus_period_id, 0) FROM focus_run ORDER BY id DESC LIMIT 1`).Scan(&id); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(focus_period_id, 0) FROM focus_run ORDER BY id DESC LIMIT 1`).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -116,7 +116,7 @@ func (f *selFixture) rawExec(t *testing.T, q string) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(q); err != nil {
+	if _, err := db.ExecContext(context.Background(), q); err != nil {
 		t.Fatalf("exec %q: %v", q, err)
 	}
 }

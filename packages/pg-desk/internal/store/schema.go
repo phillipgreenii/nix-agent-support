@@ -243,7 +243,7 @@ func (s *Store) createSchemaWith(steps []string) error {
 // refused as newer than this binary.
 func checkSchema(s *Store) error {
 	var current int
-	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&current); err != nil {
 		return fmt.Errorf("read user_version: %w", err)
 	}
 	switch {

@@ -287,7 +287,7 @@ func (s *Store) FocusPeriodGet(periodType, periodKey string) (FocusPeriod, bool,
 	if err != nil {
 		return FocusPeriod{}, false, err
 	}
-	p, err := scanFocusPeriod(s.sql.QueryRow(`SELECT `+focusPeriodCols+` FROM focus_period WHERE period_type = ? AND period_key = ?`, periodType, key))
+	p, err := scanFocusPeriod(s.sql.QueryRowContext(context.Background(), `SELECT `+focusPeriodCols+` FROM focus_period WHERE period_type = ? AND period_key = ?`, periodType, key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return FocusPeriod{}, false, nil
 	}
@@ -303,7 +303,7 @@ func (s *Store) FocusPeriods() ([]FocusPeriod, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(`SELECT ` + focusPeriodCols + ` FROM focus_period ORDER BY period_type, period_key`)
+	rows, err := s.sql.QueryContext(context.Background(), `SELECT `+focusPeriodCols+` FROM focus_period ORDER BY period_type, period_key`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list focus periods: %w", err)
 	}
@@ -328,7 +328,7 @@ func (s *Store) focusSelections(what, where string, args ...any) ([]FocusSelecti
 	if err := s.RequireNewSchema(); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(`SELECT `+focusSelectionCols+` FROM focus_selection `+where, args...)
+	rows, err := s.sql.QueryContext(context.Background(), `SELECT `+focusSelectionCols+` FROM focus_selection `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: focus rows of %s: %w", what, err)
 	}
@@ -415,7 +415,7 @@ func (s *Store) FocusDraftGet() (FocusDraft, bool, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return FocusDraft{}, false, err
 	}
-	d, err := scanFocusDraft(s.sql.QueryRow(`SELECT ` + focusDraftCols + ` FROM focus_draft WHERE id = 1`))
+	d, err := scanFocusDraft(s.sql.QueryRowContext(context.Background(), `SELECT `+focusDraftCols+` FROM focus_draft WHERE id = 1`))
 	if errors.Is(err, sql.ErrNoRows) {
 		return FocusDraft{}, false, nil
 	}
@@ -660,7 +660,7 @@ func (s *Store) FocusRunStats() (FocusRunStats, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return out, err
 	}
-	rows, err := s.sql.Query(`SELECT ` + focusRunCols + ` FROM focus_run ORDER BY id`)
+	rows, err := s.sql.QueryContext(context.Background(), `SELECT `+focusRunCols+` FROM focus_run ORDER BY id`)
 	if err != nil {
 		return out, fmt.Errorf("store: focus run stats: %w", err)
 	}

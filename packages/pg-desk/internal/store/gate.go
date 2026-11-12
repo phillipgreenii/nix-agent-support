@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -106,7 +107,8 @@ func (o WriteOptions) isZero() bool {
 func gateColumns(tx *sql.Tx, repo, entityType, entityID string) (backend string, watched, found bool, err error) {
 	var b sql.NullString
 	var w sql.NullInt64
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(
+		context.Background(),
 		`SELECT backend, watched FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&b, &w)
@@ -141,7 +143,8 @@ func setColumnsTx(tx *sql.Tx, repo, entityType, entityID string, backend *string
 		return nil
 	}
 	args = append(args, repo, entityType, entityID)
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(
+		context.Background(),
 		`UPDATE entity SET `+strings.Join(sets, ", ")+` WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		args...,
 	); err != nil {

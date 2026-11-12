@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -78,7 +79,8 @@ func (s *Store) InterpretationsFailed(repo string) (n int, known bool, err error
 	if !haveStamp {
 		return 0, false, nil
 	}
-	err = s.sql.QueryRow(
+	err = s.sql.QueryRowContext(
+		context.Background(),
 		`SELECT COUNT(*) FROM interpretation WHERE repo = ? AND entity_type = 'pr' AND `+interpStampColumn+` = ?`,
 		repo, stamp+FailedStampSuffix,
 	).Scan(&n)

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -29,7 +30,7 @@ func TestCountPRUnhydrated(t *testing.T) {
 	seed("issue", "i-1", `{}`, "2026-09-01T00:00:00Z")                          // not a pr
 	mustExec := func(q string, args ...any) {
 		t.Helper()
-		if _, err := s.sql.Exec(q, args...); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), q, args...); err != nil {
 			t.Fatal(err)
 		}
 	}

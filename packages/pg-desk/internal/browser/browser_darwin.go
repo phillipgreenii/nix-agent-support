@@ -4,6 +4,7 @@ package browser
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,11 +62,11 @@ func openWindow(urls []string, bin string) error {
 
 	args := append([]string{"--profile-directory=" + profile, "--new-window"}, urls...)
 
-	// Deliberately exec.Command, NOT exec.CommandContext: CommandContext kills
+	// The context is detached from cancellation on purpose: CommandContext kills
 	// the child when its context is cancelled, and main's signal context is
 	// cancelled as this process returns — which would shoot down the very
 	// browser this command just started in the cold-start case below.
-	cmd := exec.Command(resolvedBin, args...)
+	cmd := exec.CommandContext(context.WithoutCancel(context.Background()), resolvedBin, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

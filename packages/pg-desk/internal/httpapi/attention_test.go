@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -87,7 +88,7 @@ func TestDashboardJSONAttentionIsAnArrayWhenNothingNeedsTheOperator(t *testing.T
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/dashboard", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
@@ -130,7 +131,7 @@ func TestFailedEvaluationIsNeverAllClear(t *testing.T) {
 				t.Fatalf("NewHandler: %v", err)
 			}
 			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil))
+			handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/dashboard", nil))
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200 (the panels still serve); body: %s", rr.Code, rr.Body.String())
 			}

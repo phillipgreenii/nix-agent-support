@@ -69,7 +69,7 @@ func (rs *riStore) exec(t *testing.T, q string, args ...any) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(q, args...); err != nil {
+	if _, err := db.ExecContext(context.Background(), q, args...); err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
 }

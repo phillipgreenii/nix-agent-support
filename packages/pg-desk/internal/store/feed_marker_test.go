@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -324,7 +325,7 @@ func TestAdvanceFeedMarker(t *testing.T) {
 		t.Errorf("change_log rows = %d, want 0", n)
 	}
 	var entities int
-	if err := s.sql.QueryRow(`SELECT COUNT(*) FROM entity`).Scan(&entities); err != nil || entities != 0 {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity`).Scan(&entities); err != nil || entities != 0 {
 		t.Errorf("entity rows = (%d, %v), want 0", entities, err)
 	}
 	// The advanced marker drives the skip rule.

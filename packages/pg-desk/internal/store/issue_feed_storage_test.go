@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -191,7 +192,7 @@ func legacyCutoverStore(t *testing.T) (string, int) {
 		`ALTER TABLE entity DROP COLUMN read_attempt_at`,
 		`ALTER TABLE entity DROP COLUMN read_ok_at`,
 	} {
-		if _, err := s.sql.Exec(stmt); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
@@ -299,7 +300,7 @@ func TestSetEntityColumns(t *testing.T) {
 		t.Errorf("both nil: %v, want nil", err)
 	}
 	var isNull bool
-	if err := s.sql.QueryRow(`SELECT backend IS NULL FROM entity WHERE entity_id = ?`, clID).Scan(&isNull); err != nil || !isNull {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT backend IS NULL FROM entity WHERE entity_id = ?`, clID).Scan(&isNull); err != nil || !isNull {
 		t.Errorf("backend not NULL after empty write (isNull=%v, err=%v)", isNull, err)
 	}
 	if v := read().Version; v != base.Version {
@@ -423,7 +424,7 @@ func TestEnsureIssueFeedStorage_AddsReadTimeColumnsOnly(t *testing.T) {
 		`ALTER TABLE entity ADD COLUMN backend TEXT`,
 		`ALTER TABLE entity ADD COLUMN watched INTEGER`,
 	} {
-		if _, err := s.sql.Exec(stmt); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}

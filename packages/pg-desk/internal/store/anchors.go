@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -48,7 +49,8 @@ type PRAnchors struct {
 // callers check SchemaVersion first and treat an older store as "no data",
 // never as an empty view. A read failure is returned, never folded into zero.
 func (s *Store) CountPRAnchors(now time.Time) (PRAnchors, error) {
-	rows, err := s.sql.Query(
+	rows, err := s.sql.QueryContext(
+		context.Background(),
 		`SELECT x.to_id, a.facts,
 		        COALESCE(p.facts, ''), p.entity_id IS NOT NULL,
 		        COALESCE(p.hydrated_at, p.first_seen_at, p.as_of, ''),

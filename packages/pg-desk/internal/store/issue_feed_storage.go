@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -69,7 +70,7 @@ func ensureIssueFeedStorage(s *Store) error {
 		if have[col.name] {
 			continue
 		}
-		if _, err := s.sql.Exec(`ALTER TABLE entity ADD COLUMN ` + col.name + ` ` + col.decl); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), `ALTER TABLE entity ADD COLUMN `+col.name+` `+col.decl); err != nil {
 			// A second process may have added it between the check and the
 			// ALTER; the column being present now is success.
 			again, cerr := s.tableColumns("entity")
@@ -78,7 +79,7 @@ func ensureIssueFeedStorage(s *Store) error {
 			}
 		}
 	}
-	if _, err := s.sql.Exec(ingestFailedDDL); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), ingestFailedDDL); err != nil {
 		return fmt.Errorf("create ingest_failed: %w", err)
 	}
 	cols, err := s.tableColumns("ingest_failed")
@@ -89,7 +90,7 @@ func ensureIssueFeedStorage(s *Store) error {
 		if cols[col.name] {
 			continue
 		}
-		if _, err := s.sql.Exec(`ALTER TABLE ingest_failed ADD COLUMN ` + col.name + ` ` + col.decl); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), `ALTER TABLE ingest_failed ADD COLUMN `+col.name+` `+col.decl); err != nil {
 			again, cerr := s.tableColumns("ingest_failed")
 			if cerr != nil || !again[col.name] {
 				return fmt.Errorf("add ingest_failed.%s: %w", col.name, err)
@@ -109,7 +110,7 @@ func (s *Store) tableColumns(table string) (map[string]bool, error) {
 			return nil, err
 		}
 	}
-	rows, err := s.sql.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	rows, err := s.sql.QueryContext(context.Background(), `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return nil, fmt.Errorf("store: read %s columns: %w", table, err)
 	}
@@ -191,7 +192,8 @@ func (s *Store) SetEntityColumns(repo, entityType, entityID string, backend *str
 		return nil
 	}
 	args = append(args, repo, entityType, entityID)
-	res, err := s.sql.Exec(
+	res, err := s.sql.ExecContext(
+		context.Background(),
 		`UPDATE entity SET `+strings.Join(sets, ", ")+`
 		 WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		args...,
@@ -232,7 +234,8 @@ func (s *Store) SetEntityReadTimes(repo, entityType, entityID string, attemptAt,
 		return nil
 	}
 	args = append(args, repo, entityType, entityID)
-	res, err := s.sql.Exec(
+	res, err := s.sql.ExecContext(
+		context.Background(),
 		`UPDATE entity SET `+strings.Join(sets, ", ")+`
 		 WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		args...,

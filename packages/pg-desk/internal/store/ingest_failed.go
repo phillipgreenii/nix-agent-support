@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -47,7 +48,8 @@ func (s *Store) RecordIngestFailure(f IngestFailure) error {
 	if first == "" {
 		first = time.Now().UTC().Format(time.RFC3339)
 	}
-	if _, err := s.sql.Exec(
+	if _, err := s.sql.ExecContext(
+		context.Background(),
 		`INSERT INTO ingest_failed
 		   (instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, failure_class, flagged_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -99,7 +101,7 @@ func (s *Store) ListIngestFailures(instance string) ([]IngestFailure, error) {
 		args = append(args, instance)
 	}
 	q += ` ORDER BY seq, instance, entity_id`
-	rows, err := s.sql.Query(q, args...)
+	rows, err := s.sql.QueryContext(context.Background(), q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list ingest failures: %w", err)
 	}
@@ -125,7 +127,8 @@ func (s *Store) ListIngestFailures(instance string) ([]IngestFailure, error) {
 // ClearIngestFailure removes the entry for (instance, entityID, seq); an
 // absent entry is not an error.
 func (s *Store) ClearIngestFailure(instance, entityID string, seq int64) error {
-	if _, err := s.sql.Exec(
+	if _, err := s.sql.ExecContext(
+		context.Background(),
 		`DELETE FROM ingest_failed WHERE instance = ? AND entity_id = ? AND seq = ?`,
 		instance, entityID, seq,
 	); err != nil {
@@ -143,7 +146,8 @@ func (s *Store) ClearFlaggedIngestFailures(instance, entityID string) (int, erro
 	if err != nil || !ok {
 		return 0, err
 	}
-	res, err := s.sql.Exec(
+	res, err := s.sql.ExecContext(
+		context.Background(),
 		`DELETE FROM ingest_failed WHERE instance = ? AND entity_id = ? AND flagged_at <> ''`,
 		instance, entityID,
 	)
@@ -161,7 +165,7 @@ func (s *Store) OldestIngestFailureAt() (at time.Time, ok bool, err error) {
 	if err != nil || !exists {
 		return time.Time{}, false, err
 	}
-	rows, err := s.sql.Query(`SELECT first_failed_at FROM ingest_failed`)
+	rows, err := s.sql.QueryContext(context.Background(), `SELECT first_failed_at FROM ingest_failed`)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("store: oldest ingest failure: %w", err)
 	}
@@ -199,7 +203,7 @@ func (s *Store) CountIngestFailures(instance string) (int, error) {
 		args = append(args, instance)
 	}
 	var n int
-	if err := s.sql.QueryRow(q, args...).Scan(&n); err != nil && err != sql.ErrNoRows {
+	if err := s.sql.QueryRowContext(context.Background(), q, args...).Scan(&n); err != nil && err != sql.ErrNoRows {
 		return 0, fmt.Errorf("store: count ingest failures: %w", err)
 	}
 	return n, nil

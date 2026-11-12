@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +22,7 @@ func scrape(t *testing.T, s *store.Store) string {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
@@ -129,7 +130,7 @@ func TestMetricsSweepBoundViolatedPerTier(t *testing.T) {
 			t.Fatal(err)
 		}
 		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
 		}
@@ -236,7 +237,7 @@ func TestMetricsExposeTheJiraOutcomeSeriesFromTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	for _, want := range []string{
 		`pg_desk_watched_source_observed_age_seconds{backend="jira-a"} 7200`,
 		`pg_desk_issue_unflagged_members{backend="jira-a"} 2`,

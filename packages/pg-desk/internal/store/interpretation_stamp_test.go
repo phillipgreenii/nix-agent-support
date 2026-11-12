@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -32,7 +33,7 @@ func stampRow(id string) Interpretation {
 
 func execStamp(t *testing.T, s *Store, q string, args ...any) {
 	t.Helper()
-	if _, err := s.sql.Exec(q, args...); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), q, args...); err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
 }

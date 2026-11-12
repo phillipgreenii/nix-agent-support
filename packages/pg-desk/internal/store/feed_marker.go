@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -76,7 +77,8 @@ func (s *Store) ShouldSkipFeedRow(instance, storeIdentity string, seq int64, ent
 		return false, err
 	}
 	var identity string
-	err = s.sql.QueryRow(
+	err = s.sql.QueryRowContext(
+		context.Background(),
 		`SELECT store_identity FROM ingest_failed WHERE instance = ? AND entity_id = ? AND seq = ?`,
 		instance, entityID, seq,
 	).Scan(&identity)
@@ -101,7 +103,7 @@ func (s *Store) ResetFeedMarker(instance string) error {
 // write path's rule: within one store identity the marker only moves
 // forward, and a different identity replaces it.
 func (s *Store) AdvanceFeedMarker(m FeedMarker) error {
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("store: advance feed marker %q: begin: %w", m.Instance, err)
 	}
@@ -121,7 +123,7 @@ func (s *Store) AdvanceFeedMarker(m FeedMarker) error {
 func writeFeedMarkerTx(tx *sql.Tx, m FeedMarker) error {
 	key := feedMarkerKey(m.Instance)
 	var raw string
-	err := tx.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&raw)
+	err := tx.QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key = ?`, key).Scan(&raw)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		// No marker yet: write below.
@@ -140,7 +142,8 @@ func writeFeedMarkerTx(tx *sql.Tx, m FeedMarker) error {
 	if err != nil {
 		return fmt.Errorf("store: encode feed marker %q: %w", m.Instance, err)
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(
+		context.Background(),
 		`INSERT INTO meta (key, value) VALUES (?, ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 		key, string(val),

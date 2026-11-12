@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -57,7 +58,7 @@ func focusPlan(t *testing.T, s *Store, key string, ids ...string) FocusPeriod {
 func tableCount(t *testing.T, s *Store, table string) int {
 	t.Helper()
 	var n int
-	if err := s.sql.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+table).Scan(&n); err != nil {
 		t.Fatalf("count %s: %v", table, err)
 	}
 	return n
@@ -122,17 +123,17 @@ func TestFocusPeriodGetOrCreate(t *testing.T) {
 func TestFocusUniqueConstraints(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	focusSeed(t, s, "1")
-	if _, err := s.sql.Exec(`INSERT INTO focus_period (period_type, period_key) VALUES ('day', '2026-09-23')`); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), `INSERT INTO focus_period (period_type, period_key) VALUES ('day', '2026-09-23')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.sql.Exec(`INSERT INTO focus_period (period_type, period_key) VALUES ('day', '2026-09-23')`); err == nil {
+	if _, err := s.sql.ExecContext(context.Background(), `INSERT INTO focus_period (period_type, period_key) VALUES ('day', '2026-09-23')`); err == nil {
 		t.Errorf("a second focus_period (day, 2026-09-23) was accepted; want the UNIQUE constraint to refuse it")
 	}
 	ins := `INSERT INTO focus_selection (focus_period_id, repo, entity_type, entity_id, selected_at, rank_position) VALUES (1, ?, 'pr', '1', 't', 1)`
-	if _, err := s.sql.Exec(ins, focusRepo); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), ins, focusRepo); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.sql.Exec(ins, focusRepo); err == nil {
+	if _, err := s.sql.ExecContext(context.Background(), ins, focusRepo); err == nil {
 		t.Errorf("a second focus_selection for the same (period, entity) was accepted; want the UNIQUE constraint to refuse it")
 	}
 }
@@ -293,13 +294,13 @@ func TestAnnotationIsMaxPeriodAcrossPeriods(t *testing.T) {
 func TestFocusDraftRejectsIdOtherThanOneAndASecondRow(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	ins := `INSERT INTO focus_draft (id, period_type, period_key, cap, made_at, body_json) VALUES (?, 'day', '2026-09-23', 5, 't', '{}')`
-	if _, err := s.sql.Exec(ins, 2); err == nil {
+	if _, err := s.sql.ExecContext(context.Background(), ins, 2); err == nil {
 		t.Errorf("a draft with id 2 was accepted; want the CHECK (id = 1) to refuse it")
 	}
-	if _, err := s.sql.Exec(ins, 1); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), ins, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.sql.Exec(ins, 1); err == nil {
+	if _, err := s.sql.ExecContext(context.Background(), ins, 1); err == nil {
 		t.Errorf("a second draft row was accepted; want the primary key to refuse it")
 	}
 	// The layer itself never writes a second row.
@@ -695,7 +696,7 @@ func TestFocusRunInsertAndFinalize(t *testing.T) {
 	read := func() {
 		t.Helper()
 		var e *int
-		if err := s.sql.QueryRow(`SELECT exit_code, counts_json FROM focus_run WHERE run_id = '01A'`).Scan(&e, &counts); err != nil {
+		if err := s.sql.QueryRowContext(context.Background(), `SELECT exit_code, counts_json FROM focus_run WHERE run_id = '01A'`).Scan(&e, &counts); err != nil {
 			t.Fatal(err)
 		}
 		exit = e

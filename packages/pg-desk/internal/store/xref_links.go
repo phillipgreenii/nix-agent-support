@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -60,7 +61,7 @@ func (s *Store) ReplaceDerivedXrefs(repo, fromType, fromID string, links []XrefL
 			return wrap(fmt.Errorf("link to (%s,%s) needs a derived:<extractor> origin (not %q) and a relation", l.ToType, l.ToID, xrefLegacyOrigin))
 		}
 	}
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return wrap(err)
 	}
@@ -70,7 +71,8 @@ func (s *Store) ReplaceDerivedXrefs(repo, fromType, fromID string, links []XrefL
 	keep := map[key]bool{}
 	for _, l := range links {
 		keep[key{l.ToType, l.ToID, l.Relation, l.Origin}] = true
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(
+			context.Background(),
 			`INSERT INTO xref (repo, from_type, from_id, to_type, to_id, origin, relation, evidence, first_seen, last_confirmed)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT (repo, from_type, from_id, to_type, to_id, relation, origin) DO UPDATE SET
@@ -82,7 +84,8 @@ func (s *Store) ReplaceDerivedXrefs(repo, fromType, fromID string, links []XrefL
 		}
 	}
 
-	rows, err := tx.Query(
+	rows, err := tx.QueryContext(
+		context.Background(),
 		`SELECT to_type, to_id, relation, origin FROM xref
 		 WHERE repo = ? AND from_type = ? AND from_id = ? AND origin LIKE 'derived:%' AND origin != ?`,
 		repo, fromType, fromID, xrefLegacyOrigin,
@@ -107,7 +110,8 @@ func (s *Store) ReplaceDerivedXrefs(repo, fromType, fromID string, links []XrefL
 	}
 	_ = rows.Close()
 	for _, k := range stale {
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(
+			context.Background(),
 			`DELETE FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ? AND to_id = ? AND relation = ? AND origin = ?`,
 			repo, fromType, fromID, k.toType, k.toID, k.relation, k.origin,
 		); err != nil {
@@ -141,7 +145,8 @@ func (s *Store) AddExternalXref(x XrefLink) error {
 	// The origin is always external:<actor>, so the conflict target below can
 	// only ever match this actor's own external row, never a derived one.
 	origin := xrefExternalPrefix + x.Actor
-	if _, err := s.sql.Exec(
+	if _, err := s.sql.ExecContext(
+		context.Background(),
 		`INSERT INTO xref (repo, from_type, from_id, to_type, to_id, origin, relation, evidence, first_seen, last_confirmed, actor, acted_at, reason)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, from_type, from_id, to_type, to_id, relation, origin) DO UPDATE SET
@@ -167,7 +172,8 @@ func (s *Store) RemoveExternalXref(repo, fromType, fromID, toType, toID, relatio
 	if actor == "" {
 		return false, fmt.Errorf("store: remove external xref: actor is required")
 	}
-	res, err := s.sql.Exec(
+	res, err := s.sql.ExecContext(
+		context.Background(),
 		`DELETE FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ? AND to_id = ? AND relation = ? AND origin = ?`,
 		repo, fromType, fromID, toType, toID, relation, xrefExternalPrefix+actor,
 	)
@@ -196,7 +202,8 @@ func (s *Store) queryXrefLinks(where string, args ...any) ([]XrefLink, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(
+	rows, err := s.sql.QueryContext(
+		context.Background(),
 		`SELECT `+xrefLinkCols+` FROM xref `+where+` ORDER BY from_type, from_id, to_type, to_id, relation, origin`, args...,
 	)
 	if err != nil {

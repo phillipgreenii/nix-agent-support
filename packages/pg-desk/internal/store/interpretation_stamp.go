@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
@@ -38,7 +39,7 @@ func ensureInterpretationStamp(s *Store) error {
 	if len(have) == 0 || have[interpStampColumn] {
 		return nil
 	}
-	if _, err := s.sql.Exec(`ALTER TABLE interpretation ADD COLUMN ` + interpStampColumn + ` TEXT`); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), `ALTER TABLE interpretation ADD COLUMN `+interpStampColumn+` TEXT`); err != nil {
 		// A second process may have added it between the check and the ALTER;
 		// the column being present now is success.
 		again, cerr := s.tableColumns("interpretation")
@@ -129,7 +130,7 @@ func (s *Store) InterpretationsBehind(repo string, limit int) (keys []Interpreta
 		q += ` LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := s.sql.Query(q, args...)
+	rows, err := s.sql.QueryContext(context.Background(), q, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("store: interpretations behind: %w", err)
 	}

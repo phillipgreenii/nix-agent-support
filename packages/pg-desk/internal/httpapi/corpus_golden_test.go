@@ -65,7 +65,7 @@ func TestServePayloadGoldenOverCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/dashboard", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}

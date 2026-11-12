@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -48,7 +49,8 @@ func (s *Store) RegisterConsumer(name, entityType string, now time.Time) error {
 	if err := s.RequireNewSchema(); err != nil {
 		return err
 	}
-	if _, err := s.sql.Exec(
+	if _, err := s.sql.ExecContext(
+		context.Background(),
 		`INSERT INTO consumer (name, type, cursor, seen_at) VALUES (?, ?, 0, ?)
 		 ON CONFLICT (name, type) DO UPDATE SET seen_at = excluded.seen_at`,
 		name, entityType, formatTime(now),
@@ -69,7 +71,8 @@ func (s *Store) RegisterConsumerAtMax(name, entityType string, now time.Time) er
 	if err := s.RequireNewSchema(); err != nil {
 		return err
 	}
-	if _, err := s.sql.Exec(
+	if _, err := s.sql.ExecContext(
+		context.Background(),
 		`INSERT INTO consumer (name, type, cursor, seen_at)
 		 SELECT ?, ?, COALESCE(MAX(seq), 0), ? FROM change_log WHERE entity_type = ?
 		 ON CONFLICT (name, type) DO UPDATE SET seen_at = excluded.seen_at`,
@@ -101,7 +104,7 @@ func (s *Store) PeekChanges(name, entityType string, limit int) ([]ChangeRecord,
 		return nil, err
 	}
 	var cursor int64
-	err := s.sql.QueryRow(`SELECT cursor FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&cursor)
+	err := s.sql.QueryRowContext(context.Background(), `SELECT cursor FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&cursor)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: read consumer cursor (%s,%s): %w", name, entityType, err)
 	}
@@ -120,7 +123,7 @@ func (s *Store) AdvanceCursor(name, entityType string, seq int64) error {
 	if err := s.RequireNewSchema(); err != nil {
 		return err
 	}
-	res, err := s.sql.Exec(`UPDATE consumer SET cursor = ? WHERE name = ? AND type = ? AND cursor < ?`,
+	res, err := s.sql.ExecContext(context.Background(), `UPDATE consumer SET cursor = ? WHERE name = ? AND type = ? AND cursor < ?`,
 		seq, name, entityType, seq)
 	if err != nil {
 		return fmt.Errorf("store: advance consumer (%s,%s): %w", name, entityType, err)
@@ -129,7 +132,7 @@ func (s *Store) AdvanceCursor(name, entityType string, seq int64) error {
 		return fmt.Errorf("store: advance consumer (%s,%s): %w", name, entityType, err)
 	} else if n == 0 {
 		var one int
-		qerr := s.sql.QueryRow(`SELECT 1 FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&one)
+		qerr := s.sql.QueryRowContext(context.Background(), `SELECT 1 FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&one)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return fmt.Errorf("store: advance consumer (%s,%s): %w", name, entityType, ErrConsumerNotFound)
 		} else if qerr != nil {
@@ -146,7 +149,7 @@ func (s *Store) ResetConsumer(name, entityType string) error {
 	if err := s.RequireNewSchema(); err != nil {
 		return err
 	}
-	res, err := s.sql.Exec(`UPDATE consumer SET cursor = 0 WHERE name = ? AND type = ?`, name, entityType)
+	res, err := s.sql.ExecContext(context.Background(), `UPDATE consumer SET cursor = 0 WHERE name = ? AND type = ?`, name, entityType)
 	if err != nil {
 		return fmt.Errorf("store: reset consumer (%s,%s): %w", name, entityType, err)
 	}
@@ -163,7 +166,7 @@ func (s *Store) ListConsumers() ([]Consumer, error) {
 	if err := s.RequireNewSchema(); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(`SELECT name, type, cursor, seen_at FROM consumer ORDER BY type, name`)
+	rows, err := s.sql.QueryContext(context.Background(), `SELECT name, type, cursor, seen_at FROM consumer ORDER BY type, name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list consumers: %w", err)
 	}
@@ -190,7 +193,7 @@ func (s *Store) ForgetConsumer(name, entityType string) error {
 	if err := s.RequireNewSchema(); err != nil {
 		return err
 	}
-	if _, err := s.sql.Exec(`DELETE FROM consumer WHERE name = ? AND type = ?`, name, entityType); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), `DELETE FROM consumer WHERE name = ? AND type = ?`, name, entityType); err != nil {
 		return fmt.Errorf("store: forget consumer (%s,%s): %w", name, entityType, err)
 	}
 	return nil
@@ -236,7 +239,8 @@ func (s *Store) PruneChangeLog(now time.Time, retention, staleAfter time.Duratio
 	// Per type: the slowest non-stale consumer's cursor, or unbounded (the
 	// max int64) when there is none. Rows with seq <= that cursor have been
 	// delivered to everyone who is still waiting.
-	res, err := s.sql.Exec(
+	res, err := s.sql.ExecContext(
+		context.Background(),
 		`DELETE FROM change_log
 		 WHERE at < ?
 		   AND seq <= COALESCE(

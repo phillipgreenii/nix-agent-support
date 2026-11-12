@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -87,8 +88,9 @@ func (s *Store) ListInterpretations() ([]Interpretation, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: list interpretations: %w", err)
 	}
-	rows, err := s.sql.Query(
-		`SELECT ` + cols + `
+	rows, err := s.sql.QueryContext(
+		context.Background(),
+		`SELECT `+cols+`
 		 FROM interpretation ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {
@@ -121,7 +123,7 @@ func (s *Store) ListInterpretations() ([]Interpretation, error) {
 // "503 for every route until the interpretation table has ≥1 row").
 func (s *Store) HasAnyInterpretation() (bool, error) {
 	var exists int
-	if err := s.sql.QueryRow(`SELECT EXISTS(SELECT 1 FROM interpretation LIMIT 1)`).Scan(&exists); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM interpretation LIMIT 1)`).Scan(&exists); err != nil {
 		return false, fmt.Errorf("store: has any interpretation: %w", err)
 	}
 	return exists != 0, nil
@@ -135,7 +137,8 @@ func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Int
 		return Interpretation{}, false, fmt.Errorf("store: get interpretation (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
 	var stamp sql.NullString
-	row := s.sql.QueryRow(
+	row := s.sql.QueryRowContext(
+		context.Background(),
 		`SELECT `+cols+`
 		 FROM interpretation WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,

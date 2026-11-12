@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -29,7 +30,7 @@ func kvAnn(key, value string) KVAnnotation {
 func annotationCount(t *testing.T, s *Store) int {
 	t.Helper()
 	var n int
-	if err := s.sql.QueryRow(`SELECT COUNT(*) FROM annotation`).Scan(&n); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM annotation`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n

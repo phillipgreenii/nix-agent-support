@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -19,7 +20,7 @@ func dumpDB(t *testing.T, s *Store) string {
 	}
 	fmt.Fprintf(&b, "user_version=%d\n", v)
 
-	rows, err := s.sql.Query(`SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`)
+	rows, err := s.sql.QueryContext(context.Background(), `SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`)
 	if err != nil {
 		t.Fatalf("read sqlite_master: %v", err)
 	}
@@ -45,7 +46,7 @@ func dumpDB(t *testing.T, s *Store) string {
 		for i := range cols {
 			order[i] = fmt.Sprint(i + 1)
 		}
-		rs, err := s.sql.Query(fmt.Sprintf(`SELECT * FROM %q ORDER BY %s`, table, strings.Join(order, ", ")))
+		rs, err := s.sql.QueryContext(context.Background(), fmt.Sprintf(`SELECT * FROM %q ORDER BY %s`, table, strings.Join(order, ", ")))
 		if err != nil {
 			t.Fatalf("dump %s: %v", table, err)
 		}
@@ -86,7 +87,7 @@ type columnInfo struct {
 
 func tableInfo(t *testing.T, s *Store, table string) []columnInfo {
 	t.Helper()
-	rows, err := s.sql.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	rows, err := s.sql.QueryContext(context.Background(), fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {
 		t.Fatalf("table_info(%s): %v", table, err)
 	}

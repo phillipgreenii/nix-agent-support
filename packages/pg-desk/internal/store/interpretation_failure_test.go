@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -37,7 +38,7 @@ func TestUpsertInterpretationWriteFailureKeepsThePreviousRow(t *testing.T) {
 	if err := s.UpsertInterpretation(failureInterp()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.sql.Exec(`CREATE TRIGGER inject_fail BEFORE UPDATE ON interpretation BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), `CREATE TRIGGER inject_fail BEFORE UPDATE ON interpretation BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
 		t.Fatal(err)
 	}
 	changed := failureInterp()
@@ -61,7 +62,7 @@ func TestGetInterpretationDistinguishesNotFoundFromAReadFailure(t *testing.T) {
 		t.Fatalf("got = %+v found=%v err=%v, want a clean not-found", got, found, err)
 	}
 
-	if _, err := s.sql.Exec(`DROP TABLE interpretation`); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), `DROP TABLE interpretation`); err != nil {
 		t.Fatal(err)
 	}
 	got, found, err = s.GetInterpretation("o/r", "pr", "o/r#1")

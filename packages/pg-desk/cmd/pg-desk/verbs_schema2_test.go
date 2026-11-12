@@ -672,7 +672,7 @@ func TestHarnessSeesARealMigrationBreak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DROP TABLE annotation"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "DROP TABLE annotation"); err != nil {
 		t.Fatalf("drop annotation: %v", err)
 	}
 	if err := db.Close(); err != nil {

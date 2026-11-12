@@ -664,7 +664,7 @@ func snapshotAllTables(t *testing.T, path string) string {
 		t.Fatalf("open snapshot: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	names, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	names, err := db.QueryContext(context.Background(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		t.Fatalf("list tables: %v", err)
 	}
@@ -679,7 +679,7 @@ func snapshotAllTables(t *testing.T, path string) string {
 	_ = names.Close()
 	var sb strings.Builder
 	for _, tbl := range tables {
-		rows, err := db.Query("SELECT * FROM " + tbl + " ORDER BY 1, 2") //nolint:gosec // table names come from sqlite_master
+		rows, err := db.QueryContext(context.Background(), "SELECT * FROM "+tbl+" ORDER BY 1, 2") //nolint:gosec // table names come from sqlite_master
 		if err != nil {
 			t.Fatalf("select %s: %v", tbl, err)
 		}

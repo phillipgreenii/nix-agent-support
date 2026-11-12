@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -22,7 +23,7 @@ func failEntityUpdates(t *testing.T, st *store.Store) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(`CREATE TRIGGER inject_fail_entity_update BEFORE UPDATE ON entity BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `CREATE TRIGGER inject_fail_entity_update BEFORE UPDATE ON entity BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
 		t.Fatalf("install failure trigger: %v", err)
 	}
 }

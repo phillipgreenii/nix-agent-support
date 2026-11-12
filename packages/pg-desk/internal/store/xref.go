@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
@@ -50,7 +51,8 @@ func xrefLegacyFilter() (clause string, args []any) {
 // (Repo, FromType, FromID, ToType, ToID). The row is the legacy-marked one
 // (see Xref).
 func (s *Store) UpsertXref(x Xref) error {
-	_, err := s.sql.Exec(
+	_, err := s.sql.ExecContext(
+		context.Background(),
 		`INSERT INTO xref (repo, from_type, from_id, to_type, to_id, origin, relation, evidence, first_seen, last_confirmed)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, from_type, from_id, to_type, to_id, relation, origin) DO UPDATE SET
@@ -70,7 +72,8 @@ func (s *Store) UpsertXref(x Xref) error {
 // legacy-marked row is visible (see Xref).
 func (s *Store) GetXref(repo, fromType, fromID, toType, toID string) (xref Xref, found bool, err error) {
 	filter, filterArgs := xrefLegacyFilter()
-	row := s.sql.QueryRow(
+	row := s.sql.QueryRowContext(
+		context.Background(),
 		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
 		 FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ? AND to_id = ?`+filter,
 		append([]any{repo, fromType, fromID, toType, toID}, filterArgs...)...,
@@ -97,7 +100,8 @@ func (s *Store) GetXref(repo, fromType, fromID, toType, toID string) (xref Xref,
 // rows are returned (see Xref).
 func (s *Store) ListXrefsByTo(repo, toType, toID string) ([]Xref, error) {
 	filter, filterArgs := xrefLegacyFilter()
-	rows, err := s.sql.Query(
+	rows, err := s.sql.QueryContext(
+		context.Background(),
 		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
 		 FROM xref WHERE repo = ? AND to_type = ? AND to_id = ?`+filter,
 		append([]any{repo, toType, toID}, filterArgs...)...,
@@ -134,7 +138,8 @@ func (s *Store) ListXrefsByTo(repo, toType, toID string) ([]Xref, error) {
 // returned (see Xref).
 func (s *Store) ListXrefsByFrom(repo, fromType, fromID, toType string) ([]Xref, error) {
 	filter, filterArgs := xrefLegacyFilter()
-	rows, err := s.sql.Query(
+	rows, err := s.sql.QueryContext(
+		context.Background(),
 		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
 		 FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ?`+filter,
 		append([]any{repo, fromType, fromID, toType}, filterArgs...)...,

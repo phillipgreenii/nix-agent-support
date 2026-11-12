@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -184,7 +185,7 @@ func TestIngestFailedLegacyTableGainsFlagColumns(t *testing.T) {
 		`ALTER TABLE ingest_failed DROP COLUMN flagged_at`,
 		`INSERT INTO ingest_failed (instance, entity_id, seq, first_failed_at) VALUES ('b','i-1',1,'2026-11-10T09:00:00Z')`,
 	} {
-		if _, err := s.sql.Exec(stmt); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}

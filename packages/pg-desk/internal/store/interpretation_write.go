@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -153,7 +154,8 @@ func (s *Store) WriteInterpretation(row Interpretation, opts InterpretationWrite
 		return InterpretationWriteResult{}, wrap(err)
 	}
 	var oldApprovals, oldPanel string
-	oldErr := tx.QueryRow(
+	oldErr := tx.QueryRowContext(
+		context.Background(),
 		`SELECT approvals, panel FROM interpretation WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		row.Repo, row.EntityType, row.EntityID,
 	).Scan(&oldApprovals, &oldPanel)
@@ -253,7 +255,7 @@ func (s *Store) MarkInterpretationFailed(key InterpretationKey, stamp string) er
 	if stamp == "" {
 		return wrap(ErrStampRequired)
 	}
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return wrap(err)
 	}
@@ -279,7 +281,8 @@ func (s *Store) setStampTx(tx *sql.Tx, key InterpretationKey, stamp string) erro
 	if err := s.interpStep(StepUpsert); err != nil {
 		return err
 	}
-	res, err := tx.Exec(
+	res, err := tx.ExecContext(
+		context.Background(),
 		`UPDATE interpretation SET `+interpStampColumn+` = ? WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		stamp, key.Repo, key.EntityType, key.EntityID,
 	)
@@ -298,7 +301,7 @@ func (s *Store) setStampTx(tx *sql.Tx, key InterpretationKey, stamp string) erro
 
 // beginLocked begins a transaction, running the begin-step hook.
 func (s *Store) beginLocked(step InterpretationWriteStep) (*sql.Tx, error) {
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +318,8 @@ func (s *Store) lockEntity(tx *sql.Tx, repo, entityType, entityID string) (versi
 	if err := s.interpStep(StepLock); err != nil {
 		return 0, "", err
 	}
-	res, err := tx.Exec(
+	res, err := tx.ExecContext(
+		context.Background(),
 		`UPDATE entity SET version = version WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)
@@ -329,7 +333,8 @@ func (s *Store) lockEntity(tx *sql.Tx, repo, entityType, entityID string) (versi
 	if n == 0 {
 		return 0, "", ErrNoEntity
 	}
-	err = tx.QueryRow(
+	err = tx.QueryRowContext(
+		context.Background(),
 		`SELECT version, content_hash FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&version, &hash)

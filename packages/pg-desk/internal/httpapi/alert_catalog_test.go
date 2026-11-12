@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -81,7 +82,7 @@ func scrapeWith(t *testing.T, s *store.Store, opts ...Option) string {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
@@ -157,7 +158,7 @@ func TestTheLaneSeriesAnAlertReadsAreWrittenByTheComposedCommandsPath(t *testing
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	requireLines(
 		t, rr.Body.String(),
 		`pg_desk_pr_lane_runs_total{class="unauthenticated",stage="hydrate"} 1`,

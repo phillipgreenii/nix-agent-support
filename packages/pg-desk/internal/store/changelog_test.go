@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -21,7 +22,7 @@ func clEntity(facts string) Entity {
 func changeCount(t *testing.T, s *Store) int {
 	t.Helper()
 	var n int
-	if err := s.sql.QueryRow(`SELECT COUNT(*) FROM change_log`).Scan(&n); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM change_log`).Scan(&n); err != nil {
 		t.Fatalf("count change_log: %v", err)
 	}
 	return n
@@ -317,7 +318,7 @@ func TestListChangesAfter_AscendingLimitedAndTypeScoped(t *testing.T) {
 
 func TestAppendChangeLogTx_UsableInCallerTransaction(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -41,7 +42,7 @@ func storeAtVersion(t *testing.T, kind string) string {
 			`INSERT INTO meta (key, value) VALUES ('schema_version', '1')`,
 			`PRAGMA user_version = 1`,
 		} {
-			if _, err := db.Exec(stmt); err != nil {
+			if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 				t.Fatalf("retired store fixture: %v", err)
 			}
 		}
@@ -167,7 +168,7 @@ func TestDefaultRawStoreSeamOpensWithoutTheVersionGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
-	if _, err := raw.Exec("PRAGMA user_version = 3"); err != nil {
+	if _, err := raw.ExecContext(context.Background(), "PRAGMA user_version = 3"); err != nil {
 		t.Fatalf("set user_version: %v", err)
 	}
 	_ = raw.Close()

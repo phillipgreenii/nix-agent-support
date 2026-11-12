@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"testing"
@@ -54,7 +55,7 @@ func TestIncrMetaCreatesAddsAndKeepsTheValueAsText(t *testing.T) {
 		}
 	}
 	var typ string
-	if err := s.sql.QueryRow(`SELECT typeof(value) FROM meta WHERE key = 'c'`).Scan(&typ); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT typeof(value) FROM meta WHERE key = 'c'`).Scan(&typ); err != nil {
 		t.Fatal(err)
 	}
 	if v, _, _ := s.GetMeta("c"); v != "7" || typ != "text" {

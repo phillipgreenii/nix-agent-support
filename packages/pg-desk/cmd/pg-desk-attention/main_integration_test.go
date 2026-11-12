@@ -175,7 +175,7 @@ func TestRealBinary_ExecsNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command(bin)
+	cmd := exec.CommandContext(context.Background(), bin)
 	cmd.Env = append([]string{"PATH=" + trip}, writePluginEnv(t, path)...)
 	cmd.Stdin = strings.NewReader(`{"op":"list_attention"}`)
 	var out bytes.Buffer

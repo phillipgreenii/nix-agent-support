@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -41,7 +42,7 @@ func TestReadyGate503BeforeFirstInterpretation(t *testing.T) {
 	for _, path := range []string{"/api/v1/dashboard", "/metrics"} {
 		t.Run(path, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+			handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
 			if rr.Code != http.StatusServiceUnavailable {
 				t.Fatalf("%s: status = %d, want %d", path, rr.Code, http.StatusServiceUnavailable)
 			}
@@ -67,7 +68,7 @@ func TestDashboard200AfterFirstInterpretation(t *testing.T) {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/dashboard", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
@@ -198,7 +199,7 @@ func TestMetricsSmoke(t *testing.T) {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
@@ -248,7 +249,7 @@ func TestMetricsSmoke_StalePolarity(t *testing.T) {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
 	}
@@ -458,7 +459,7 @@ func TestDashboardSourcesAreAdditiveAndSeparateFromLiveness(t *testing.T) {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/dashboard", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
 	}
@@ -532,7 +533,7 @@ func TestMetricsSourceAgeSeriesPerKnownSource(t *testing.T) {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	body := rr.Body.String()
 	for _, want := range []string{
 		"# TYPE pg_desk_source_age_seconds gauge",
@@ -584,7 +585,7 @@ func TestMetricsSourcesStaleIgnoresRetiredGhostRows(t *testing.T) {
 		t.Fatalf("NewHandler: %v", err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	handler.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	if body := rr.Body.String(); !strings.Contains(body, "pg_desk_sources_stale 0") {
 		t.Errorf("body missing pg_desk_sources_stale 0:\n%s", body)
 	}

@@ -23,6 +23,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -135,7 +136,7 @@ func openDB(path string) (*Store, error) {
 	// pool so WAL writers don't contend within one process.
 	sqlDB.SetMaxOpenConns(1)
 	if synchronousPragma != "" {
-		if _, err := sqlDB.Exec("PRAGMA synchronous=" + synchronousPragma); err != nil {
+		if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA synchronous="+synchronousPragma); err != nil {
 			_ = sqlDB.Close()
 			return nil, fmt.Errorf("store: set synchronous %s: %w", path, err)
 		}
@@ -183,7 +184,7 @@ func OpenRaw(path string) (*Store, error) {
 	}
 	// sql.Open is lazy; touch the file now so a path that is not a usable
 	// database fails here rather than on the caller's first query.
-	if err := s.sql.Ping(); err != nil {
+	if err := s.sql.PingContext(context.Background()); err != nil {
 		_ = s.sql.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
@@ -207,7 +208,7 @@ func OpenReadOnly(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := sqlDB.Ping(); err != nil {
+	if err := sqlDB.PingContext(context.Background()); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
 	}
@@ -253,7 +254,7 @@ var ErrOldSchema = errors.New("store is on the retired schema")
 // `status`). 0 means the file holds no schema at all.
 func (s *Store) SchemaVersion() (int, error) {
 	var v int
-	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&v); err != nil {
 		return 0, fmt.Errorf("store: read user_version: %w", err)
 	}
 	return v, nil

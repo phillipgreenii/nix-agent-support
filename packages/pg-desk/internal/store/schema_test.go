@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -43,7 +44,7 @@ func TestOpenRefusesRetiredSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.sql.Exec(`CREATE TABLE entity (x TEXT); PRAGMA user_version = 1`); err != nil {
+	if _, err := raw.sql.ExecContext(context.Background(), `CREATE TABLE entity (x TEXT); PRAGMA user_version = 1`); err != nil {
 		t.Fatal(err)
 	}
 	_ = raw.Close()
@@ -71,7 +72,7 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := raw.sql.Exec(`PRAGMA user_version = 3`); err != nil {
+	if _, err := raw.sql.ExecContext(context.Background(), `PRAGMA user_version = 3`); err != nil {
 		t.Fatal(err)
 	}
 	_ = raw.Close()
@@ -117,7 +118,7 @@ func TestCreateSchemaFailureLeavesStoreEmpty(t *testing.T) {
 			t.Errorf("step %d: user_version = %d after failure, want 0", i+1, v)
 		}
 		var n int
-		if err := s.sql.QueryRow(`SELECT COUNT(*) FROM sqlite_master`).Scan(&n); err != nil || n != 0 {
+		if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master`).Scan(&n); err != nil || n != 0 {
 			t.Errorf("step %d: %d schema objects after failure (%v), want 0", i+1, n, err)
 		}
 		_ = s.Close()

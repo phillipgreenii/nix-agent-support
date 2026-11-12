@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // MarkEntityInactive sets the entity's active flag to 0 and, in the same
 // transaction, adds one to the meta counter counterKey. It reports whether the
@@ -16,12 +19,13 @@ func (s *Store) MarkEntityInactive(repo, entityType, entityID, counterKey string
 	if err := s.RequireNewSchema(); err != nil {
 		return false, err
 	}
-	tx, err := s.sql.Begin()
+	tx, err := s.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		return false, fmt.Errorf("store: mark inactive (%s,%s,%s): begin: %w", repo, entityType, entityID, err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
-	res, err := tx.Exec(
+	res, err := tx.ExecContext(
+		context.Background(),
 		`UPDATE entity SET active = 0
 		  WHERE repo = ? AND entity_type = ? AND entity_id = ? AND active = 1`,
 		repo, entityType, entityID,
@@ -36,7 +40,8 @@ func (s *Store) MarkEntityInactive(repo, entityType, entityID, counterKey string
 	if n == 0 {
 		return false, nil
 	}
-	if _, err := tx.Exec(
+	if _, err := tx.ExecContext(
+		context.Background(),
 		`INSERT INTO meta (key, value) VALUES (?, '1')
 		 ON CONFLICT (key) DO UPDATE SET value = CAST(meta.value AS INTEGER) + excluded.value`,
 		counterKey,

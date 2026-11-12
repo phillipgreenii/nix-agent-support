@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
@@ -83,7 +84,8 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	var headSHA, hydratedAt, listFP, firstSeenAt, backend, readAttempt, readOK sql.NullString
 	var watched sql.NullInt64
 	var active int
-	row := s.sql.QueryRow(
+	row := s.sql.QueryRowContext(
+		context.Background(),
 		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, `+feedCols+`
 		 FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
@@ -112,7 +114,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 // ListInterpretations-style rows just to count them.
 func (s *Store) CountEntities() (int, error) {
 	var n int
-	if err := s.sql.QueryRow(`SELECT COUNT(*) FROM entity`).Scan(&n); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("store: count entities: %w", err)
 	}
 	return n, nil
@@ -129,8 +131,9 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.Query(
-		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, ` + feedCols + `
+	rows, err := s.sql.QueryContext(
+		context.Background(),
+		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, `+feedCols+`
 		 FROM entity ORDER BY repo, entity_type, entity_id`,
 	)
 	if err != nil {

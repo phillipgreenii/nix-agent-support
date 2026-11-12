@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 )
@@ -36,7 +37,8 @@ func (s *Store) SeedEntityForTest(t seedT, e Entity) {
 // active. A first insert stamps first_seen_at with e.AsOf and the
 // update branch never rewrites it.
 func (s *Store) UpsertEntityForTest(e Entity) error {
-	_, err := s.sql.Exec(
+	_, err := s.sql.ExecContext(
+		context.Background(),
 		`INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, first_seen_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
@@ -109,7 +111,7 @@ func OpenRetiredSchemaForTest(t testT) *Store {
 		`INSERT INTO meta (key, value) VALUES ('schema_version', '1')`,
 		`PRAGMA user_version = 1`,
 	} {
-		if _, err := s.sql.Exec(stmt); err != nil {
+		if _, err := s.sql.ExecContext(context.Background(), stmt); err != nil {
 			t.Fatalf("OpenRetiredSchemaForTest: %v", err)
 		}
 	}

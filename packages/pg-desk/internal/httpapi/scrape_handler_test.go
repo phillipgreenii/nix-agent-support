@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -54,7 +55,7 @@ func TestScrapeHandler_ConcurrentScrapesShareOneCollection(t *testing.T) {
 	serve := func(i int) {
 		defer wg.Done()
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 		codes[i] = rec.Code
 	}
 	wg.Add(1)
@@ -93,7 +94,7 @@ func TestScrapeHandler_SlowCollectionAnswers503AtDeadline(t *testing.T) {
 	done := make(chan int, 1)
 	go func() {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 		done <- rec.Code
 	}()
 	select {

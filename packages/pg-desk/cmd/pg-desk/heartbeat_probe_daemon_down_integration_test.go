@@ -52,7 +52,7 @@ func buildConnectorBinaries(t *testing.T) string {
 			args = append(args, "-ldflags", b.ldflags)
 		}
 		args = append(args, b.pkg)
-		cmd := exec.Command(goBin, args...)
+		cmd := exec.CommandContext(context.Background(), goBin, args...)
 		cmd.Dir = modDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("go build %s: %v\n%s", b.pkg, err, out)
