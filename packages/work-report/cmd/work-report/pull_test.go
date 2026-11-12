@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -238,11 +239,11 @@ func TestPullStoreLockedAtOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	lock.SetMaxOpenConns(1)
-	tx, err := lock.Begin()
+	tx, err := lock.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(`CREATE TABLE lock_holder (x INTEGER)`); err != nil {
+	if _, err := tx.ExecContext(context.Background(), `CREATE TABLE lock_holder (x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback(); _ = lock.Close() })
@@ -441,11 +442,11 @@ func TestPullPGRouterStoreLockedExitsNonZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	lock.SetMaxOpenConns(1)
-	tx, err := lock.Begin()
+	tx, err := lock.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(`CREATE TABLE lock_holder (x INTEGER)`); err != nil {
+	if _, err := tx.ExecContext(context.Background(), `CREATE TABLE lock_holder (x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback(); _ = lock.Close() })

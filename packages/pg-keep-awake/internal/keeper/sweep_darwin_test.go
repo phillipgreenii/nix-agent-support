@@ -4,6 +4,7 @@ package keeper
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -54,7 +55,9 @@ func startChild(t *testing.T, cmd *exec.Cmd) *child {
 	return c
 }
 
-func spawnSleep(t *testing.T) *child { return startChild(t, exec.Command("sleep", "120")) }
+func spawnSleep(t *testing.T) *child {
+	return startChild(t, exec.CommandContext(context.Background(), "sleep", "120"))
+}
 
 // spawnNamed starts a copy of the test binary under the given executable name
 // (the helper mode just sleeps), so ProcessInfo reports that name.
@@ -72,7 +75,7 @@ func spawnNamed(t *testing.T, name string) *child {
 	if err := os.WriteFile(path, src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(path)
+	cmd := exec.CommandContext(context.Background(), path)
 	cmd.Env = append(os.Environ(), "KEEPER_TEST_HELPER=sleep")
 	c := startChild(t, cmd)
 	for i := 0; i < 500; i++ { // wait for exec to replace the forked image
@@ -186,7 +189,7 @@ func TestStoppedClientHoldingLockMakesSweepGiveUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe)
+	cmd := exec.CommandContext(context.Background(), exe)
 	cmd.Env = append(os.Environ(), "KEEPER_TEST_HELPER=flock:"+filepath.Join(d.LeasesPath(), ".lock"))
 	out, err := cmd.StdoutPipe()
 	if err != nil {

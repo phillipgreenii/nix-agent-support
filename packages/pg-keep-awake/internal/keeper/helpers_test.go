@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -29,7 +30,7 @@ import (
 func TestMain(m *testing.M) {
 	switch h := os.Getenv("KEEPER_TEST_HELPER"); {
 	case strings.HasPrefix(h, "parent:"):
-		c := exec.Command(h[len("parent:"):], "-i", "-t", "300")
+		c := exec.CommandContext(context.Background(), h[len("parent:"):], "-i", "-t", "300")
 		c.Args[0] = "caffeinate"
 		c.Env = append(os.Environ(), "KEEPER_TEST_HELPER=sleep")
 		if err := c.Start(); err != nil {

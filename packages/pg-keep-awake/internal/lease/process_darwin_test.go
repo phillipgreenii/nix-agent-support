@@ -3,6 +3,7 @@
 package lease
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -43,7 +44,7 @@ func TestMissingPIDDoesNotExist(t *testing.T) {
 		}
 	}
 	// A pid that just exited and was reaped.
-	cmd := exec.Command("true")
+	cmd := exec.CommandContext(context.Background(), "true")
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestMissingPIDDoesNotExist(t *testing.T) {
 // only the pid it started.
 func spawn(t *testing.T, name string, args ...string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -163,7 +164,7 @@ func TestProcessNameLongerThan16Chars(t *testing.T) {
 	if err := os.WriteFile(copyPath, src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(copyPath)
+	cmd := exec.CommandContext(context.Background(), copyPath)
 	cmd.Env = append(os.Environ(), "LEASE_TEST_HELPER=sleep")
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Start(); err != nil {

@@ -9,6 +9,7 @@
 package timing
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"math"
@@ -195,7 +196,7 @@ func Analyze(calls []Call, opt Options) *Report {
 // Load reads every call through the published views (tool_calls and
 // annotations) of a database opened read-only.
 func Load(db *sql.DB) ([]Call, error) {
-	rows, err := db.Query(`SELECT COALESCE(t.tool_name,''), COALESCE(json_extract(t.tool_input,'$.command'),''),
+	rows, err := db.QueryContext(context.Background(), `SELECT COALESCE(t.tool_name,''), COALESCE(json_extract(t.tool_input,'$.command'),''),
 		COALESCE((SELECT json_extract(a.data,'$.class') FROM annotations a
 			WHERE a.call_id = t.call_id AND a.kind = 'ceta.command_class' ORDER BY a.ts DESC LIMIT 1),''),
 		COALESCE(t.repo,''), t.duration_ms, t.running_ts, t.call_end_ts, t.failed_timing, COALESCE(t.result,'')

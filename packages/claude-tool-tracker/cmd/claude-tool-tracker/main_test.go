@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,7 +21,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	binPath = filepath.Join(dir, "claude-tool-tracker")
-	if out, err := exec.Command("go", "build", "-o", binPath, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "go", "build", "-o", binPath, ".").CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build failed: %v\n%s", err, out)
 		os.Exit(1)
 	}
@@ -32,7 +33,7 @@ func TestMain(m *testing.M) {
 // run executes the real binary with XDG_STATE_HOME=state.
 func run(t *testing.T, state, stdin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	cmd := exec.Command(binPath, args...)
+	cmd := exec.CommandContext(context.Background(), binPath, args...)
 	cmd.Env = append(os.Environ(), "XDG_STATE_HOME="+state)
 	cmd.Stdin = strings.NewReader(stdin)
 	var o, e bytes.Buffer
@@ -149,7 +150,7 @@ func TestConcurrentAppendsOneFile(t *testing.T) {
 func TestModesUnderPermissiveUmask(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "state")
 	script := fmt.Sprintf(`umask 000; XDG_STATE_HOME=%q exec %q append --session-id s1 --source tracker --kind tracker.session_end </dev/null`, state, binPath)
-	if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "sh", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
 	mode := func(p string) os.FileMode {

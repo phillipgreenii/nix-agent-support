@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -213,7 +214,7 @@ func TestS4ExpiredLeaseReaped(t *testing.T) {
 // and never held anything.
 func TestS5KilledShimLeaseReaped(t *testing.T) {
 	e := newEnv(t)
-	cmd := exec.Command(shimBin, "-i")
+	cmd := exec.CommandContext(context.Background(), shimBin, "-i")
 	cmd.Env = e.env()
 	shim := e.spawn(cmd)
 
@@ -493,7 +494,7 @@ func TestS11ConcurrentAcquireAndReap(t *testing.T) {
 
 // cliNoFatal is cli safe for a goroutine: it reports through the exit code.
 func (e *testEnv) cliNoFatal(args ...string) (int, string, string) {
-	cmd := exec.Command(keepAwakeBin, args...)
+	cmd := exec.CommandContext(context.Background(), keepAwakeBin, args...)
 	cmd.Env = e.env()
 	var out, errb strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -515,7 +516,7 @@ func TestS12StoppedClientHoldingLock(t *testing.T) {
 	e.acquire("t", "hold", "120s")
 	e.waitHeld()
 
-	helper := exec.Command(os.Args[0])
+	helper := exec.CommandContext(context.Background(), os.Args[0])
 	helper.Env = e.env(envHelper+"=holdlock", envHelperDir+"="+filepath.Join(e.stateDir, "leases"))
 	h := e.spawn(helper)
 	waitFor(t, "the helper to hold the lock", mustHappen, func() bool {
@@ -757,7 +758,7 @@ func TestS16ForeignAnchorNeverTouched(t *testing.T) {
 	if err := os.WriteFile(hb, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(keepAwakeBin, "anchor",
+	cmd := exec.CommandContext(context.Background(), keepAwakeBin, "anchor",
 		"--release-pct", "0", "--blind-pct", "0", "--watchdog", "120s",
 		"--heartbeat", hb, "--interval", "1s", "--state-dir", f)
 	cmd.Env = e.env()

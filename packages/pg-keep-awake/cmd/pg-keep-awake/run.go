@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -52,7 +53,7 @@ func runCommand(args []string, stdout, stderr io.Writer) int {
 		return usageError(stderr, "run: %s", msg)
 	}
 
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...)
 	if cmd.Err != nil { // not found on PATH: nothing to hold a lease for
 		fmt.Fprintf(stderr, "pg-keep-awake: run: %v\n", cmd.Err)
 		return exitNotFound

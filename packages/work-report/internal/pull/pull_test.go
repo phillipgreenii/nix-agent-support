@@ -514,11 +514,11 @@ func holdWriteLock(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("take write lock: %v", err)
 	}
-	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS lock_holder (x INTEGER)`); err != nil {
+	if _, err := tx.ExecContext(context.Background(), `CREATE TABLE IF NOT EXISTS lock_holder (x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback(); _ = db.Close() })

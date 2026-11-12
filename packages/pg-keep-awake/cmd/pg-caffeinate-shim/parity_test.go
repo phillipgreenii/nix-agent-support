@@ -124,7 +124,7 @@ func requireRealCaffeinate(t *testing.T) {
 	if _, err := os.Stat(realCaffeinate); err != nil {
 		t.Skipf("%s not present", realCaffeinate)
 	}
-	if err := exec.Command("pmset", "-g", "assertions").Run(); err != nil {
+	if err := exec.CommandContext(context.Background(), "pmset", "-g", "assertions").Run(); err != nil {
 		t.Skipf("pmset -g assertions failed (%v): this sandbox does not allow assertions", err)
 	}
 }
@@ -151,7 +151,7 @@ func TestParityWithRealCaffeinate(t *testing.T) {
 			t.Run(r.name, func(t *testing.T) {
 				t.Parallel()
 				real := runRow(t, r, func(args []string, env []string) *exec.Cmd {
-					cmd := exec.Command(realCaffeinate, args...)
+					cmd := exec.CommandContext(context.Background(), realCaffeinate, args...)
 					cmd.Args[0] = "caffeinate"
 					return cmd
 				}, nil)
@@ -170,7 +170,7 @@ func TestParityWithRealCaffeinate(t *testing.T) {
 				}
 				xdg := t.TempDir()
 				got := runRow(t, r, func(args []string, env []string) *exec.Cmd {
-					cmd := exec.Command(shimBin, args...)
+					cmd := exec.CommandContext(context.Background(), shimBin, args...)
 					cmd.Env = env
 					return cmd
 				}, shimEnv(xdg))
@@ -209,7 +209,7 @@ func runRow(t *testing.T, r row, mk func(args, env []string) *exec.Cmd, env []st
 	args := make([]string, len(r.args))
 	copy(args, r.args)
 	if r.helper != "" {
-		h := start(t, exec.Command("sleep", r.helper))
+		h := start(t, exec.CommandContext(context.Background(), "sleep", r.helper))
 		for i := range args {
 			args[i] = strings.ReplaceAll(args[i], "{PID}", fmt.Sprint(h.cmd.Process.Pid))
 		}

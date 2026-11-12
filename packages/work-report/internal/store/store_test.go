@@ -54,7 +54,7 @@ func mustAppend(t *testing.T, s *Store, e Entry, now time.Time) AppendResult {
 func rowCount(t *testing.T, s *Store, table string) int {
 	t.Helper()
 	var n int
-	if err := s.sql.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -72,7 +72,7 @@ func TestOpenCreatesSchemaWALAndVersion(t *testing.T) {
 	s := openTemp(t)
 
 	var mode string
-	if err := s.sql.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal_mode = %q, %v; want wal", mode, err)
 	}
 	for _, tbl := range []string{"entry", "entry_label", "pull", "meta"} {
@@ -82,16 +82,16 @@ func TestOpenCreatesSchemaWALAndVersion(t *testing.T) {
 	}
 	for _, idx := range []string{"entry_id", "entry_occurred_at", "entry_type", "entry_source_id", "entry_label_label"} {
 		var n int
-		if err := s.sql.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, idx).Scan(&n); err != nil || n != 1 {
+		if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, idx).Scan(&n); err != nil || n != 1 {
 			t.Errorf("index %s missing (n=%d, err=%v)", idx, n, err)
 		}
 	}
 	var v string
-	if err := s.sql.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v); err != nil || v != "2" {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&v); err != nil || v != "2" {
 		t.Errorf("meta schema_version = %q, %v; want 2", v, err)
 	}
 	var uv int
-	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&uv); err != nil || uv != schemaVersion {
 		t.Errorf("user_version = %d, %v; want %d", uv, err, schemaVersion)
 	}
 }
@@ -121,7 +121,7 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("PRAGMA user_version = 99"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "PRAGMA user_version = 99"); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()
@@ -148,7 +148,7 @@ func TestMigrationV2DropsReportStorage(t *testing.T) {
 		"INSERT INTO pull (source, started_at, ended_at, status) VALUES ('src', 'a', 'b', 'succeeded')",
 		"INSERT INTO report (kind, generated_at) VALUES ('activity', 'g')",
 	} {
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			t.Fatalf("seed %q: %v", stmt, err)
 		}
 	}
@@ -172,21 +172,21 @@ func TestMigrationV2DropsReportStorage(t *testing.T) {
 	check := func(when string) {
 		t.Helper()
 		var n int
-		if err := s.sql.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='report'`).Scan(&n); err != nil || n != 0 {
+		if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE name='report'`).Scan(&n); err != nil || n != 0 {
 			t.Errorf("%s: report table still exists (n=%d, err=%v)", when, n, err)
 		}
 		var uv int
-		if err := s.sql.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv != 2 {
+		if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&uv); err != nil || uv != 2 {
 			t.Errorf("%s: user_version = %d, %v; want 2", when, uv, err)
 		}
 		for key, want := range map[string]string{"schema_version": "2", "last_pull": "p", "other": "o"} {
 			var v string
-			if err := s.sql.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil || v != want {
+			if err := s.sql.QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil || v != want {
 				t.Errorf("%s: meta %s = %q, %v; want %q", when, key, v, err, want)
 			}
 		}
 		var n2 int
-		if err := s.sql.QueryRow(`SELECT COUNT(*) FROM meta WHERE key='last_report'`).Scan(&n2); err != nil || n2 != 0 {
+		if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM meta WHERE key='last_report'`).Scan(&n2); err != nil || n2 != 0 {
 			t.Errorf("%s: last_report meta row remains (n=%d, err=%v)", when, n2, err)
 		}
 		want := map[string]int{"entry": 1, "entry_label": 1, "pull": 1, "meta": 3}
@@ -197,14 +197,14 @@ func TestMigrationV2DropsReportStorage(t *testing.T) {
 	check("after migration")
 
 	// Idempotent: re-running the v2 DDL changes nothing.
-	if _, err := s.sql.Exec(migrations[1]); err != nil {
+	if _, err := s.sql.ExecContext(context.Background(), migrations[1]); err != nil {
 		t.Fatalf("re-run migration 2: %v", err)
 	}
 	check("after re-running the migration")
 
 	// An older binary (ladder top 1) refuses a version-2 database.
 	var uv int
-	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&uv); err != nil || uv <= 1 {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&uv); err != nil || uv <= 1 {
 		t.Fatalf("user_version = %d, %v; want > 1 so a v1 binary refuses it", uv, err)
 	}
 }
@@ -571,11 +571,11 @@ func holdWriteLock(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("take write lock: %v", err)
 	}
-	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS lock_holder (x INTEGER)`); err != nil {
+	if _, err := tx.ExecContext(context.Background(), `CREATE TABLE IF NOT EXISTS lock_holder (x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback(); _ = db.Close() })
@@ -685,7 +685,7 @@ func TestRecordPullAndStatus(t *testing.T) {
 	// The pull row keeps the open-ended range and every counter.
 	var since string
 	var count, unchanged, rejected, truncated int
-	if err := s.sql.QueryRow(`SELECT since, count, unchanged, rejected, truncated FROM pull WHERE source='src-c'`).
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT since, count, unchanged, rejected, truncated FROM pull WHERE source='src-c'`).
 		Scan(&since, &count, &unchanged, &rejected, &truncated); err != nil {
 		t.Fatal(err)
 	}
@@ -701,12 +701,12 @@ func TestRecordPullOpenEndedRangeAndMeta(t *testing.T) {
 		t.Fatal(err)
 	}
 	var since string
-	if err := s.sql.QueryRow(`SELECT since FROM pull`).Scan(&since); err != nil || since != "" {
+	if err := s.sql.QueryRowContext(context.Background(), `SELECT since FROM pull`).Scan(&since); err != nil || since != "" {
 		t.Errorf("open-ended since = %q, %v; want empty", since, err)
 	}
 	for key, want := range map[string]string{"last_pull": formatTime(end)} {
 		var v string
-		if err := s.sql.QueryRow(`SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil || v != want {
+		if err := s.sql.QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key=?`, key).Scan(&v); err != nil || v != want {
 			t.Errorf("meta %s = %q, %v; want %q", key, v, err, want)
 		}
 	}

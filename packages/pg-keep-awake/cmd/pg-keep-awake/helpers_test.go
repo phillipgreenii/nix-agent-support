@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -66,7 +67,7 @@ func fileExists(path string) bool {
 // deadPID returns the pid of a process that has exited and been reaped.
 func deadPID(t *testing.T) int {
 	t.Helper()
-	cmd := exec.Command("true")
+	cmd := exec.CommandContext(context.Background(), "true")
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,7 @@ func deadPID(t *testing.T) int {
 // startBinary starts the real command (this test binary in binary mode).
 func startBinary(t *testing.T, stdout, stderr *bytes.Buffer, args ...string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], args...)
+	cmd := exec.CommandContext(context.Background(), os.Args[0], args...)
 	cmd.Env = append(os.Environ(), binaryEnv+"=1")
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Start(); err != nil {

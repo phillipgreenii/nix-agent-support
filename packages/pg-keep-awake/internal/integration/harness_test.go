@@ -209,7 +209,7 @@ type keeperProc struct {
 // ready) with its stderr captured and logged if the test fails.
 func (e *testEnv) startKeeper() *keeperProc {
 	e.t.Helper()
-	cmd := exec.Command(keepAwakeBin, "keeper")
+	cmd := exec.CommandContext(context.Background(), keepAwakeBin, "keeper")
 	cmd.Env = e.env()
 	p := e.spawn(cmd)
 	e.t.Cleanup(func() {
@@ -244,7 +244,7 @@ func (e *testEnv) waitReady(k *keeperProc) {
 // stdout and stderr.
 func (e *testEnv) cli(args ...string) (int, string, string) {
 	e.t.Helper()
-	cmd := exec.Command(keepAwakeBin, args...)
+	cmd := exec.CommandContext(context.Background(), keepAwakeBin, args...)
 	cmd.Env = e.env()
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -551,7 +551,7 @@ func inodeOf(t *testing.T, path string) uint64 {
 // does NOT wait for (so it can become a zombie), and returns it.
 func (e *testEnv) spawnSleeper(reap bool) *exec.Cmd {
 	e.t.Helper()
-	cmd := exec.Command("/bin/sleep", "600")
+	cmd := exec.CommandContext(context.Background(), "/bin/sleep", "600")
 	cmd.Env = e.env()
 	if reap {
 		e.spawn(cmd)

@@ -6,6 +6,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -73,7 +74,7 @@ func TestMain(m *testing.M) {
 			keepAwakeBin: "../../cmd/pg-keep-awake",
 			shimBin:      "../../cmd/pg-caffeinate-shim",
 		} {
-			build := exec.Command(goTool, "build", "-o", out, pkg)
+			build := exec.CommandContext(context.Background(), goTool, "build", "-o", out, pkg)
 			if msg, err := build.CombinedOutput(); err != nil {
 				fmt.Fprintf(os.Stderr, "building %s: %v\n%s", pkg, err, msg)
 				return 1
@@ -106,7 +107,7 @@ func computeSkipReason() string {
 	if !f.caffeinateFound {
 		return skipReasonFor(f)
 	}
-	if err := exec.Command(pmsetPath, "-g", "assertions").Run(); err != nil {
+	if err := exec.CommandContext(context.Background(), pmsetPath, "-g", "assertions").Run(); err != nil {
 		f.pmsetErr = err
 		return skipReasonFor(f)
 	}
@@ -144,7 +145,7 @@ func skipLine(reason string) string {
 // probeCaffeinateVisible starts /usr/bin/caffeinate -i -t 20 as a child and
 // polls pmset every 200 ms for up to 10 seconds for an entry with its pid.
 func probeCaffeinateVisible() bool {
-	cmd := exec.Command(caffeinatePath, "-i", "-t", "20")
+	cmd := exec.CommandContext(context.Background(), caffeinatePath, "-i", "-t", "20")
 	if err := cmd.Start(); err != nil {
 		return false
 	}

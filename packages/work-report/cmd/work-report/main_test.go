@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -190,7 +191,7 @@ func runMain(t *testing.T, args ...string) (string, string, int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, args...)
+	cmd := exec.CommandContext(context.Background(), exe, args...)
 	cmd.Env = append(os.Environ(), envAsMain+"=1")
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
@@ -249,7 +250,7 @@ func TestChildWithoutARoleRefusesToRunTheSuite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "status")
+	cmd := exec.CommandContext(context.Background(), exe, "status")
 	cmd.Env = []string{} // non-nil and empty: neither WR_FAKE_GEN nor WR_AS_MAIN
 	out, err := cmd.CombinedOutput()
 	var ee *exec.ExitError

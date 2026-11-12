@@ -3,6 +3,7 @@
 package keeper
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -53,7 +54,7 @@ func requireCaffeinate(t *testing.T) {
 	if _, err := exec.LookPath("/usr/bin/caffeinate"); err != nil {
 		t.Skip("/usr/bin/caffeinate is not available")
 	}
-	if err := exec.Command("/usr/bin/pmset", "-g", "assertions").Run(); err != nil {
+	if err := exec.CommandContext(context.Background(), "/usr/bin/pmset", "-g", "assertions").Run(); err != nil {
 		t.Skipf("pmset -g assertions is not usable here (sandbox?): %v", err)
 	}
 }
@@ -90,7 +91,7 @@ func TestRealProcessesHoldReplaceAndStop(t *testing.T) {
 	// An anchor of a different state_dir, not spawned through procs.
 	otherCfg := cfg
 	otherCfg.StateDir = t.TempDir()
-	foreign := exec.Command(os.Args[0], otherCfg.AnchorArgv(os.Args[0])[1:]...)
+	foreign := exec.CommandContext(context.Background(), os.Args[0], otherCfg.AnchorArgv(os.Args[0])[1:]...)
 	foreign.Env = append(os.Environ(), "KEEPER_TEST_HELPER=sleep")
 	if err := foreign.Start(); err != nil {
 		t.Fatal(err)

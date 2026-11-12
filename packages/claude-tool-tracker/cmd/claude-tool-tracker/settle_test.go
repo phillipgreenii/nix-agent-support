@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"strconv"
 	"testing"
@@ -42,7 +43,7 @@ func (a *app) feed(c settleCase, i int, ts int64) string {
 
 func settleOf(t *testing.T, db *sql.DB, tu string) (by, st sql.NullString, conv int, failed sql.NullInt64) {
 	t.Helper()
-	if err := db.QueryRow("SELECT settled_by, settlement, converted_ask, failed_timing FROM tool_calls WHERE tool_use_id=?", tu).
+	if err := db.QueryRowContext(context.Background(), "SELECT settled_by, settlement, converted_ask, failed_timing FROM tool_calls WHERE tool_use_id=?", tu).
 		Scan(&by, &st, &conv, &failed); err != nil {
 		t.Fatal(err)
 	}

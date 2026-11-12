@@ -9,6 +9,7 @@ package ingest
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -61,7 +62,7 @@ func Run(db *sql.DB, dir string, now time.Time) (*Result, error) {
 	}
 	sort.Strings(names)
 
-	res, err := db.Exec("INSERT INTO ingest_runs(started_ms) VALUES (?)", now.UnixMilli())
+	res, err := db.ExecContext(context.Background(), "INSERT INTO ingest_runs(started_ms) VALUES (?)", now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -96,17 +97,17 @@ func ingestFile(db *sql.DB, runID int64, dir, name string, repoCache map[string]
 		return fr, err
 	}
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fr, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.Exec("INSERT OR IGNORE INTO files(file, session_id, source) VALUES (?,?,?)", name, session, source); err != nil {
+	if _, err := tx.ExecContext(context.Background(), "INSERT OR IGNORE INTO files(file, session_id, source) VALUES (?,?,?)", name, session, source); err != nil {
 		return fr, err
 	}
 	var offset int64
-	if err := tx.QueryRow("SELECT read_offset FROM files WHERE file = ?", name).Scan(&offset); err != nil {
+	if err := tx.QueryRowContext(context.Background(), "SELECT read_offset FROM files WHERE file = ?", name).Scan(&offset); err != nil {
 		return fr, err
 	}
 	if st.Size() < offset {
@@ -148,11 +149,11 @@ func ingestFile(db *sql.DB, runID int64, dir, name string, repoCache map[string]
 		if env.ToolUseID == "" {
 			fr.EventsWithoutCall++
 		} else {
-			if _, err := tx.Exec("INSERT OR IGNORE INTO calls(session_id, tool_use_id) VALUES (?,?)", env.SessionID, env.ToolUseID); err != nil {
+			if _, err := tx.ExecContext(context.Background(), "INSERT OR IGNORE INTO calls(session_id, tool_use_id) VALUES (?,?)", env.SessionID, env.ToolUseID); err != nil {
 				return fr, err
 			}
 			var id int64
-			if err := tx.QueryRow("SELECT call_id FROM calls WHERE session_id=? AND tool_use_id=?", env.SessionID, env.ToolUseID).Scan(&id); err != nil {
+			if err := tx.QueryRowContext(context.Background(), "SELECT call_id FROM calls WHERE session_id=? AND tool_use_id=?", env.SessionID, env.ToolUseID).Scan(&id); err != nil {
 				return fr, err
 			}
 			touched[id] = true
@@ -162,11 +163,11 @@ func ingestFile(db *sql.DB, runID int64, dir, name string, repoCache map[string]
 		}
 	}
 
-	if _, err := tx.Exec("UPDATE files SET read_offset = ? WHERE file = ?", offset, name); err != nil {
+	if _, err := tx.ExecContext(context.Background(), "UPDATE files SET read_offset = ? WHERE file = ?", offset, name); err != nil {
 		return fr, err
 	}
 	if fr.LinesRead > 0 {
-		if _, err := tx.Exec(`INSERT INTO file_runs(run_id, file, lines_read, events_new, events_duplicate,
+		if _, err := tx.ExecContext(context.Background(), `INSERT INTO file_runs(run_id, file, lines_read, events_new, events_duplicate,
 			skipped_invalid_json, skipped_missing_field, events_without_call) VALUES (?,?,?,?,?,?,?,?)`,
 			runID, name, fr.LinesRead, fr.EventsNew, fr.EventsDuplicate, fr.SkippedInvalidJSON,
 			fr.SkippedMissingField, fr.EventsWithoutCall); err != nil {
@@ -214,7 +215,7 @@ func parseLine(line []byte, session, source string) (*events.Envelope, []byte, l
 }
 
 func store(tx *sql.Tx, env *events.Envelope, rawData []byte, file string) (bool, error) {
-	res, err := tx.Exec(`INSERT OR IGNORE INTO events(event_id, session_id, source, kind, ts, tool_use_id, agent_id, data, file)
+	res, err := tx.ExecContext(context.Background(), `INSERT OR IGNORE INTO events(event_id, session_id, source, kind, ts, tool_use_id, agent_id, data, file)
 		VALUES (?,?,?,?,?,?,?,?,?)`,
 		env.EventID, env.SessionID, env.Source, env.Kind, env.TS,
 		nullable(env.ToolUseID), nullable(env.AgentID), string(rawData), file)
@@ -243,7 +244,7 @@ func mapRepo(tx *sql.Tx, env *events.Envelope, seen map[string]bool) error {
 	}
 	seen[cwd] = true
 	var have string
-	err := tx.QueryRow("SELECT repo FROM cwd_repo WHERE cwd = ?", cwd).Scan(&have)
+	err := tx.QueryRowContext(context.Background(), "SELECT repo FROM cwd_repo WHERE cwd = ?", cwd).Scan(&have)
 	if err == nil {
 		return nil
 	}
@@ -251,7 +252,7 @@ func mapRepo(tx *sql.Tx, env *events.Envelope, seen map[string]bool) error {
 		return err
 	}
 	if name := repo.Name(cwd); name != "" {
-		_, err = tx.Exec("INSERT OR IGNORE INTO cwd_repo(cwd, repo) VALUES (?,?)", cwd, name)
+		_, err = tx.ExecContext(context.Background(), "INSERT OR IGNORE INTO cwd_repo(cwd, repo) VALUES (?,?)", cwd, name)
 		return err
 	}
 	return nil

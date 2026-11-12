@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 )
@@ -102,26 +103,27 @@ DELETE FROM meta WHERE key = 'last_report';
 // A database newer than this binary understands is refused.
 func migrate(s *Store) error {
 	var current int
-	if err := s.sql.QueryRow("PRAGMA user_version").Scan(&current); err != nil {
+	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&current); err != nil {
 		return fmt.Errorf("read user_version: %w", err)
 	}
 	if current > schemaVersion {
 		return fmt.Errorf("database schema version %d is newer than this binary supports (%d)", current, schemaVersion)
 	}
 	for i := current; i < len(migrations); i++ {
-		tx, err := s.sql.Begin()
+		tx, err := s.sql.BeginTx(context.Background(), nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %d: %w", i+1, err)
 		}
-		if _, err := tx.Exec(migrations[i]); err != nil {
+		if _, err := tx.ExecContext(context.Background(), migrations[i]); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %d: %w", i+1, err)
 		}
-		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", i+1)); err != nil {
+		if _, err := tx.ExecContext(context.Background(), fmt.Sprintf("PRAGMA user_version = %d", i+1)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("set user_version %d: %w", i+1, err)
 		}
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(
+			context.Background(),
 			`INSERT INTO meta (key, value) VALUES ('schema_version', ?)
 			 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 			strconv.Itoa(i+1),

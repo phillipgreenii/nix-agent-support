@@ -7,6 +7,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/url"
@@ -122,7 +123,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -130,29 +131,29 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 }
 
 func migrate(db *sql.DB) error {
-	tx, err := db.Begin() // BEGIN IMMEDIATE: concurrent openers serialize here
+	tx, err := db.BeginTx(context.Background(), nil) // BEGIN IMMEDIATE: concurrent openers serialize here
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	var v int
-	if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+	if err := tx.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&v); err != nil {
 		return err
 	}
 	if v > len(migrations) {
 		return fmt.Errorf("database schema version %d is newer than this binary (%d)", v, len(migrations))
 	}
 	for ; v < len(migrations); v++ {
-		if _, err := tx.Exec(migrations[v]); err != nil {
+		if _, err := tx.ExecContext(context.Background(), migrations[v]); err != nil {
 			return fmt.Errorf("migration %d: %w", v+1, err)
 		}
-		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", v+1)); err != nil {
+		if _, err := tx.ExecContext(context.Background(), fmt.Sprintf("PRAGMA user_version = %d", v+1)); err != nil {
 			return err
 		}
 	}
 	// Views hold no data, so they are recreated on every open and a view
 	// change needs no migration step.
-	if _, err := tx.Exec(viewsSQL()); err != nil {
+	if _, err := tx.ExecContext(context.Background(), viewsSQL()); err != nil {
 		return fmt.Errorf("views: %w", err)
 	}
 	return tx.Commit()

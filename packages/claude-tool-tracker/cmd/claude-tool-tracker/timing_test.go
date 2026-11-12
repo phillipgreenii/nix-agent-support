@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,7 @@ func (a *app) timingCall(session, tu, cwd, command, class, outcome string, dur i
 func gitRepo(t *testing.T, name string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
-	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "git", "init", "-q", dir).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	return dir

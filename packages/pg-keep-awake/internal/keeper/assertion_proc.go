@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -51,7 +52,7 @@ func (o *OSProcs) Start(argv []string) (int, error) {
 	if len(argv) == 0 || argv[0] == "" {
 		return 0, errors.New("keeper: empty argv")
 	}
-	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // argv is built by the keeper, never from a lease file
+	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...) //nolint:gosec // argv is built by the keeper, never from a lease file
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("keeper: start %s: %w", argv[0], err)

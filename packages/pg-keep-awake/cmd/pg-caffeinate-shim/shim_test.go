@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestVersionFlag(t *testing.T) {
-	out, err := exec.Command(shimBin, "--version").Output()
+	out, err := exec.CommandContext(context.Background(), shimBin, "--version").Output()
 	if err != nil || !strings.HasPrefix(string(out), "pg-caffeinate-shim ") {
 		t.Fatalf("--version = %q, %v", out, err)
 	}
@@ -141,7 +142,7 @@ func TestSignalIgnoredAtStartGetsNoHandler(t *testing.T) {
 	xdg := t.TempDir()
 	// sh ignores INT and HUP, then execs the shim: ignored dispositions survive
 	// exec, as for a non-interactive background job.
-	cmd := exec.Command("sh", "-c", `trap '' INT HUP; exec "$0" "$@"`, shimBin, "-t", "60")
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", `trap '' INT HUP; exec "$0" "$@"`, shimBin, "-t", "60")
 	cmd.Env = shimEnv(xdg)
 	p := start(t, cmd)
 	waitForLease(t, xdg, p)
@@ -177,7 +178,7 @@ func TestWatchRecordsPidAndEndsWhenProcessExits(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			xdg := t.TempDir()
-			helper := start(t, exec.Command("sleep", tc.helper))
+			helper := start(t, exec.CommandContext(context.Background(), "sleep", tc.helper))
 			hpid := helper.cmd.Process.Pid
 			href, err := lease.Ref(hpid)
 			if err != nil {

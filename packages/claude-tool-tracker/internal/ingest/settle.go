@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"database/sql"
 	"time"
 )
@@ -138,7 +139,7 @@ FROM calls c WHERE c.call_id = ?`
 // every call in touched and every call still pending (or never derived), so a
 // later session_end or the passing of the quiet period is picked up.
 func settleCalls(db *sql.DB, touched map[int64]bool, now time.Time) error {
-	rows, err := db.Query(`SELECT c.call_id FROM calls c LEFT JOIN call_settlement s ON s.call_id = c.call_id
+	rows, err := db.QueryContext(context.Background(), `SELECT c.call_id FROM calls c LEFT JOIN call_settlement s ON s.call_id = c.call_id
 		WHERE s.call_id IS NULL OR s.settlement IS NULL OR s.settlement = 'pending'`)
 	if err != nil {
 		return err
@@ -160,7 +161,7 @@ func settleCalls(db *sql.DB, touched map[int64]bool, now time.Time) error {
 	}
 	rows.Close()
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return err
 	}
@@ -171,7 +172,7 @@ func settleCalls(db *sql.DB, touched map[int64]bool, now time.Time) error {
 		var session string
 		var ended bool
 		var lastTS int64
-		if err := tx.QueryRow(settleSelect, id).Scan(&callID, &session, &in.checkDecision, &in.engine,
+		if err := tx.QueryRowContext(context.Background(), settleSelect, id).Scan(&callID, &session, &in.checkDecision, &in.engine,
 			&in.delivered, &in.mode, &in.outcome, &ended, &in.denied, &lastTS); err != nil {
 			return err
 		}
@@ -187,7 +188,7 @@ func settleCalls(db *sql.DB, touched map[int64]bool, now time.Time) error {
 		if r.failed.Valid {
 			failed = r.failed.Bool
 		}
-		if _, err := tx.Exec(`INSERT INTO call_settlement(call_id, settled_by, settlement, converted_ask, failed_timing)
+		if _, err := tx.ExecContext(context.Background(), `INSERT INTO call_settlement(call_id, settled_by, settlement, converted_ask, failed_timing)
 			VALUES (?,?,?,?,?) ON CONFLICT(call_id) DO UPDATE SET settled_by=excluded.settled_by,
 			settlement=excluded.settlement, converted_ask=excluded.converted_ask, failed_timing=excluded.failed_timing`,
 			callID, by, st, r.convertedAsk, failed); err != nil {

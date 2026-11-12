@@ -123,7 +123,7 @@ func Open(path string) (*Store, error) {
 	// handle other processes.
 	db.SetMaxOpenConns(1)
 	s := &Store{sql: db, path: path}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, mapErr(err))
 	}

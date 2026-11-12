@@ -269,7 +269,7 @@ func runUtility(req shimargs.Request, args []string, stderr io.Writer) result {
 	if _, err := exec.LookPath(name); err != nil {
 		return startFailure(name, err, stderr)
 	}
-	cmd := exec.Command(name, req.Utility[1:]...)
+	cmd := exec.CommandContext(context.Background(), name, req.Utility[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 
 	sigs, stop := subscribe()

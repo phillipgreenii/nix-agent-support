@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,7 +45,7 @@ func TestMain(m *testing.M) {
 			return 1
 		}
 		shimBin = filepath.Join(dir, "pg-caffeinate-shim")
-		build := exec.Command(goTool, "build", "-o", shimBin, ".")
+		build := exec.CommandContext(context.Background(), goTool, "build", "-o", shimBin, ".")
 		if out, err := build.CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "building the shim: %v\n%s", err, out)
 			return 1
@@ -125,7 +126,7 @@ func start(t *testing.T, cmd *exec.Cmd) *proc {
 // startShim starts the shim binary with a hermetic environment.
 func startShim(t *testing.T, xdg string, args ...string) *proc {
 	t.Helper()
-	cmd := exec.Command(shimBin, args...)
+	cmd := exec.CommandContext(context.Background(), shimBin, args...)
 	cmd.Env = shimEnv(xdg)
 	return start(t, cmd)
 }

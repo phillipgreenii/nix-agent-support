@@ -4,6 +4,7 @@ package keeper
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -54,7 +55,7 @@ func copyTestBinary(t *testing.T, dir, name string) string {
 // child is cafeinateBin run as `caffeinate -i -t 300`.
 func spawnInhibitorTree(t *testing.T, parentBin, parentArgv0, caffeinateBin string) inhibitorTree {
 	t.Helper()
-	cmd := exec.Command(parentBin)
+	cmd := exec.CommandContext(context.Background(), parentBin)
 	cmd.Args = []string{parentArgv0}
 	cmd.Env = append(os.Environ(), "KEEPER_TEST_HELPER=parent:"+caffeinateBin)
 	out, err := cmd.StdoutPipe()

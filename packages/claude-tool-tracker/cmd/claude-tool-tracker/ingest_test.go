@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"os/exec"
@@ -74,7 +75,7 @@ func (a *app) open() *sql.DB {
 func scalar[T any](t *testing.T, db *sql.DB, q string, args ...any) T {
 	t.Helper()
 	var v T
-	if err := db.QueryRow(q, args...).Scan(&v); err != nil {
+	if err := db.QueryRowContext(context.Background(), q, args...).Scan(&v); err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
 	return v
@@ -111,7 +112,7 @@ func TestIngestFlagsCallWithoutCallStart(t *testing.T) {
 	type flags struct{ seen, missing int }
 	get := func(session, tu string) flags {
 		var f flags
-		if err := db.QueryRow("SELECT tracker_seen, missing_call_start FROM tool_calls WHERE session_id=? AND tool_use_id=?", session, tu).Scan(&f.seen, &f.missing); err != nil {
+		if err := db.QueryRowContext(context.Background(), "SELECT tracker_seen, missing_call_start FROM tool_calls WHERE session_id=? AND tool_use_id=?", session, tu).Scan(&f.seen, &f.missing); err != nil {
 			t.Fatalf("%s: %v", tu, err)
 		}
 		return f
@@ -164,7 +165,7 @@ func TestIngestBuildsViewsAndCountsSkips(t *testing.T) {
 	var tool, verdict, hook, reason, mode, agentType, result, errText, denial any
 	var dur, isErr, sandbox, runningTS, endTS any
 	var engine, delivered, settledBy any
-	err := db.QueryRow(`SELECT tool_name, verdict, deciding_hook, reason, permission_mode, agent_type, result, error_text,
+	err := db.QueryRowContext(context.Background(), `SELECT tool_name, verdict, deciding_hook, reason, permission_mode, agent_type, result, error_text,
 		duration_ms, is_error, denial_reason, sandbox_enabled, engine_verdict, delivered_verdict, running_ts, call_end_ts, settled_by
 		FROM tool_calls WHERE session_id='sess1' AND tool_use_id='tu1'`).
 		Scan(&tool, &verdict, &hook, &reason, &mode, &agentType, &result, &errText, &dur, &isErr, &denial, &sandbox, &engine, &delivered, &runningTS, &endTS, &settledBy)
@@ -193,7 +194,7 @@ func TestIngestBuildsViewsAndCountsSkips(t *testing.T) {
 	// Skipped-line view carries the run time.
 	var s, bad, miss, noCall int
 	var runMS int64
-	if err := db.QueryRow(`SELECT ingest_ms, skipped_total, skipped_invalid_json, skipped_missing_field, events_without_call
+	if err := db.QueryRowContext(context.Background(), `SELECT ingest_ms, skipped_total, skipped_invalid_json, skipped_missing_field, events_without_call
 		FROM ingest_skips WHERE file='tool-events.sess1.tracker.jsonl'`).Scan(&runMS, &s, &bad, &miss, &noCall); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +212,7 @@ func TestIngestBuildsViewsAndCountsSkips(t *testing.T) {
 	// Span: overall and per source.
 	var lo, hi int64
 	var sessions, calls int
-	if err := db.QueryRow("SELECT earliest_ts, latest_ts, sessions, calls FROM event_span WHERE scope='all'").Scan(&lo, &hi, &sessions, &calls); err != nil {
+	if err := db.QueryRowContext(context.Background(), "SELECT earliest_ts, latest_ts, sessions, calls FROM event_span WHERE scope='all'").Scan(&lo, &hi, &sessions, &calls); err != nil {
 		t.Fatal(err)
 	}
 	if lo != 1700000000000 || hi != 1700000001000 || sessions != 2 || calls != 2 {
@@ -302,7 +303,7 @@ func TestIngestMapsWorktreeToMainRepoName(t *testing.T) {
 	db := a.open()
 	repoOf := func(tu string) sql.NullString {
 		var r sql.NullString
-		if err := db.QueryRow("SELECT repo FROM tool_calls WHERE tool_use_id=?", tu).Scan(&r); err != nil {
+		if err := db.QueryRowContext(context.Background(), "SELECT repo FROM tool_calls WHERE tool_use_id=?", tu).Scan(&r); err != nil {
 			t.Fatal(err)
 		}
 		return r
@@ -352,7 +353,7 @@ func TestViewsDocumentMatchesDatabase(t *testing.T) {
 			t.Errorf("view %s is not documented in docs/views.md", view)
 			continue
 		}
-		rows, err := db.Query("SELECT * FROM " + view)
+		rows, err := db.QueryContext(context.Background(), "SELECT * FROM "+view)
 		if err != nil {
 			t.Fatalf("select from %s: %v", view, err)
 		}
@@ -365,7 +366,7 @@ func TestViewsDocumentMatchesDatabase(t *testing.T) {
 		}
 	}
 	// The database really is read-only for readers.
-	if _, err := db.Exec("DELETE FROM events"); err == nil {
+	if _, err := db.ExecContext(context.Background(), "DELETE FROM events"); err == nil {
 		t.Error("read-only handle accepted a write")
 	}
 }
@@ -397,7 +398,7 @@ func TestIngestUsageAndMissingDirectory(t *testing.T) {
 // gitFixture runs git in dir with a scrubbed environment.
 func gitFixture(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(gitFixtureEnv(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@localhost", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@localhost")

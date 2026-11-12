@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ func TestShimDependsOnNeitherConfigNorTelemetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the go tool is not on PATH: %v", err)
 	}
-	out, err := exec.Command(goTool, "list", "-deps", ".").Output()
+	out, err := exec.CommandContext(context.Background(), goTool, "list", "-deps", ".").Output()
 	if err != nil {
 		t.Fatalf("go list -deps: %v", err)
 	}

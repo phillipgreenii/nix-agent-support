@@ -180,7 +180,7 @@ func runScript(s script) int {
 		}
 	}
 	if s.Spawn != "" {
-		cmd := exec.Command(os.Args[0])
+		cmd := exec.CommandContext(context.Background(), os.Args[0])
 		cmd.Env = []string{envFakeGen + "=holder", envFakeFIFO + "=" + os.Getenv(envFakeFIFO)}
 		if s.Spawn == "hold_pipe" {
 			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

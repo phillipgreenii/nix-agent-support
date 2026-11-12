@@ -118,7 +118,10 @@ func (r *Runner) Exec(ctx context.Context, spec ExecSpec) ExecResult {
 	stdout := &capWriter{max: StdoutCap, onOverflow: func() { overflowed.Do(cancel) }}
 	stderr := &tailWriter{keep: StderrKeep}
 
-	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
+	// The context is detached on purpose: cancellation is handled below by a
+	// graceful SIGTERM then SIGKILL of the process group, which CommandContext
+	// would pre-empt with an immediate kill of the leader.
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), spec.Argv[0], spec.Argv[1:]...)
 	cmd.Dir = spec.Dir
 	cmd.Env = spec.Env
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
