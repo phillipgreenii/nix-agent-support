@@ -71,6 +71,10 @@ type Config struct {
 	// Zero means one minute; only tests set it, to see the window slide
 	// without waiting a real minute.
 	Window time.Duration
+	// Now reports the current time for the measurement of Slot.Waited. Nil
+	// means time.Now; only tests set it, to pin the measured wait. The
+	// wait bound and polling still run on real time.
+	Now func() time.Time
 }
 
 // Budget hands out slots of one semaphore.
@@ -102,6 +106,14 @@ func New(cfg Config) (*Budget, error) {
 		dir = DefaultStateDir(cfg.Group)
 	}
 	return &Budget{cfg: cfg, dir: dir}, nil
+}
+
+// now is the clock Slot.Waited is measured on.
+func (b *Budget) now() time.Time {
+	if b.cfg.Now != nil {
+		return b.cfg.Now()
+	}
+	return time.Now()
 }
 
 // Dir is the slot directory this budget uses.
@@ -168,8 +180,8 @@ func (s *Slot) Release() {
 // denied call takes no window entry and holds no slot. An unusable state
 // directory yields a fail-open slot and no error.
 func (b *Budget) Acquire(ctx context.Context, write bool) (*Slot, error) {
-	start := time.Now()
-	deadline := start.Add(b.cfg.WaitBound)
+	start := b.now()
+	deadline := time.Now().Add(b.cfg.WaitBound)
 	slot, err := b.acquireSlot(ctx, write, start, deadline)
 	if err != nil || slot.failedOpen || b.cfg.MaxPerMinute == 0 {
 		return slot, err
@@ -186,7 +198,7 @@ func (b *Budget) Acquire(ctx context.Context, write bool) (*Slot, error) {
 		slot.Release()
 		return nil, ErrDenied
 	}
-	slot.waited = time.Since(start)
+	slot.waited = b.now().Sub(start)
 	return slot, nil
 }
 
@@ -227,7 +239,7 @@ func (b *Budget) acquireSlot(ctx context.Context, write bool, start, deadline ti
 						_ = other.Close()
 					}
 				}
-				return &Slot{file: f, waited: time.Since(start)}, nil
+				return &Slot{file: f, waited: b.now().Sub(start)}, nil
 			}
 			if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
 				closeAll()

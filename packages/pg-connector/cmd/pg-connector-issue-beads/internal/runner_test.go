@@ -752,7 +752,13 @@ func (s *lineSink) WriteProgress(evlog.ProgressEvent) {}
 
 func TestCLIRunner_Event_NoBudgetNoWaitNoKillLeavesFieldsAbsent(t *testing.T) {
 	fakeBD(t)
-	r := budgetRunner(t, budget.Config{MaxConcurrent: 2, WaitBound: time.Second})
+	// A frozen budget clock pins the measured slot wait to zero: the slot is
+	// free, so any real elapsed time under host load is not a wait.
+	frozen := time.Now()
+	r := budgetRunner(t, budget.Config{
+		MaxConcurrent: 2, WaitBound: time.Second,
+		Now: func() time.Time { return frozen },
+	})
 	got, err := runInstrumented(t, func(ctx context.Context) error {
 		_, err := r.Run(ctx, "show", "--json")
 		return err
