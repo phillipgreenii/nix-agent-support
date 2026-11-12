@@ -378,6 +378,7 @@ func TestEvictedIssueListedAgainIsAFirstObservationWithOneAddedRow(t *testing.T)
 		t.Fatalf("watched after the eviction = %v, want the flag gone with the row", got)
 	}
 
+	h.quiesce() // no flight from before the eviction may answer the next fetch
 	h.fake.setIssue("A-1", "indeterminate")
 	h.fake.list(jqlMine, "A-1", "A-2")
 	h.fetch("mine")

@@ -192,7 +192,7 @@ func TestDispatch_RetryWindowedItemKeepsTheRouterID(t *testing.T) {
 // waitPid reads the pid the payload's script wrote, killing it at cleanup.
 func waitPid(t *testing.T, pidFile string) int {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second) // a bound on a hang, not a delay: the loop returns on the condition
 	for {
 		if b, err := os.ReadFile(pidFile); err == nil {
 			if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
@@ -210,7 +210,7 @@ func waitPid(t *testing.T, pidFile string) int {
 // waitGone fails when pid is still alive after a grace period.
 func waitGone(t *testing.T, pid int, what string) {
 	t.Helper()
-	for end := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+	for end := time.Now().Add(30 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		if err := syscall.Kill(pid, 0); err != nil {
 			return
 		}

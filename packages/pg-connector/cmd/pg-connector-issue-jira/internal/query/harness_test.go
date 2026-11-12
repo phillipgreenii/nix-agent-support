@@ -233,10 +233,32 @@ func (h *harness) watched() []string {
 	return out
 }
 
+// quiesce waits until the scheduler has no batch in flight and no due task
+// queued, so a later Fetch cannot join a flight that began before the test
+// changed the fake (SubmitInteractive shares a running or queued flight). It
+// waits on that condition, not a delay; the deadline only bounds a hang.
+func (h *harness) quiesce() {
+	h.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		st := h.sched.State()
+		idle := st.Running == 0
+		for _, c := range st.Classes {
+			idle = idle && c.Backlog == 0
+		}
+		if idle {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	h.t.Fatal("scheduler did not go idle")
+}
+
 // settle ends every pending change row now, as the settle lifecycle does at its
 // deadline.
 func (h *harness) settle() {
 	h.t.Helper()
+	h.quiesce()
 	l := &engine.Lifecycle{Engine: h.eng.Engine, Store: h.st, Clock: h.clk}
 	if _, err := l.FlushAll(context.Background()); err != nil {
 		h.t.Fatal(err)
