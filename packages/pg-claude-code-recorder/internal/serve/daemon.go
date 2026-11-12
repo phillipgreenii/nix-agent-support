@@ -698,7 +698,7 @@ func (d *Daemon) parseLoop() {
 
 // drainParsed is one parser_drain pass: it parses every dirty file.
 func (d *Daemon) drainParsed() {
-	if err := d.runLoop(obs.LoopParserDrain, d.prs.Drain); err != nil {
+	if err := d.runLoop(obs.LoopParserDrain, func() error { return d.prs.DrainUntil(d.stop) }); err != nil && !errors.Is(err, parser.ErrParseStopped) {
 		d.obs.Log.Warn("parse_failed", "err", err.Error())
 		d.noteNoSpace(obs.OpParseIndex, err)
 	}

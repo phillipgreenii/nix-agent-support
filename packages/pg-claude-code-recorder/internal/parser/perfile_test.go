@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store/countdriver"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
@@ -130,5 +131,71 @@ func TestParseAllUntilStopsAndLeavesStaleGenerations(t *testing.T) {
 	}
 	if k.Count(`SELECT COUNT(*) FROM parse_state WHERE version=0`) == 0 {
 		t.Fatal("a stopped parse re-parsed anyway")
+	}
+}
+
+// DrainUntil gives up mid-pass once stop closes: what it parsed is committed
+// whole, the files it was given go back into the pending set, and a later drain
+// (or a restart) finishes them with no record lost or doubled.
+func TestDrainUntilStopsMidPassAndKeepsTheRestPending(t *testing.T) {
+	k := testkit.New(t)
+	var ids []int64
+	for f := 0; f < 10; f++ {
+		ids = append(ids, k.Add("example-proj", fmt.Sprintf("example-session-%d.jsonl", f), strings.Repeat(crashLine(f, 0, 0), 3)))
+	}
+	p := parser.New(parser.Config{Store: k.Store, Sources: sources.All(), ClaudeDir: testkit.ClaudeDir, BatchRecords: 5, ChunkBytes: 600})
+	stop := make(chan struct{})
+	wrote := 0
+	k.Store.OnWrite(func() {
+		wrote++
+		if wrote == 1 {
+			close(stop)
+		}
+	})
+	for _, id := range ids {
+		p.Notify(id)
+	}
+	if err := p.DrainUntil(stop); !errors.Is(err, parser.ErrParseStopped) {
+		t.Fatalf("err = %v, want ErrParseStopped", err)
+	}
+	if wrote != 1 {
+		t.Fatalf("a stopped pass committed %d transactions, want only the one in flight", wrote)
+	}
+	got := k.Count(`SELECT COUNT(*) FROM records`)
+	if got == 0 || got >= 60 {
+		t.Fatalf("records after the stopped pass = %d, want some but not all 60", got)
+	}
+
+	// The store is consistent: reopened, the committed part is intact.
+	k.Reopen()
+	if n := k.Count(`SELECT COUNT(*) FROM records`); n != got {
+		t.Fatalf("records after reopen = %d, want %d", n, got)
+	}
+
+	// A restart's parse finishes the rest exactly once.
+	k.Parse()
+	if n := k.Count(`SELECT COUNT(*) FROM records`); n != 60 {
+		t.Fatalf("records after the restart parse = %d, want 60", n)
+	}
+}
+
+// The files a stopped pass did not reach stay pending in the same process.
+func TestDrainUntilPutsUnvisitedFilesBackIntoPending(t *testing.T) {
+	k := testkit.New(t)
+	id := k.Add("example-proj", "example-session-0.jsonl", crashLine(0, 0, 0))
+	k.Parser.Notify(id)
+	stop := make(chan struct{})
+	close(stop)
+	if err := k.Parser.DrainUntil(stop); !errors.Is(err, parser.ErrParseStopped) {
+		t.Fatalf("err = %v, want ErrParseStopped", err)
+	}
+	if n := k.Count(`SELECT COUNT(*) FROM records`); n != 0 {
+		t.Fatalf("a pass stopped before it began parsed %d records", n)
+	}
+	if err := k.Parser.Drain(); err != nil {
+		t.Fatal(err)
+	}
+	if n := k.Count(`SELECT COUNT(*) FROM records`); n != 2 {
+		t.Fatalf("records after the next drain = %d, want 2", n)
 	}
 }

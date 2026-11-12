@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
 )
@@ -126,7 +127,7 @@ func (d *Daemon) runLoop(name string, step func() error) error {
 	err = step()
 	end := d.clock.Now()
 	outcome := obs.OutcomeOK
-	if err != nil && !errors.Is(err, watcher.ErrSweepAborted) {
+	if err != nil && !errors.Is(err, watcher.ErrSweepAborted) && !errors.Is(err, parser.ErrParseStopped) {
 		// An abort is a shutdown, recorded as ok (the label set is closed).
 		outcome = obs.OutcomeError
 	}

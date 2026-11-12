@@ -193,7 +193,17 @@ func (p *Parser) Notify(file int64) {
 func (p *Parser) Wake() <-chan struct{} { return p.wake }
 
 // Drain parses every pending file now.
-func (p *Parser) Drain() error {
+func (p *Parser) Drain() error { return p.DrainUntil(nil) }
+
+// DrainUntil is Drain that gives up once stop closes, so a daemon being closed
+// does not wait out a long pass. The stop is checked before each file is
+// fetched and before each chunk is parsed; the chunks already parsed commit with
+// their parse offsets (the transaction is never left half written), and a
+// stopped pass returns ErrParseStopped with every file it was given put back
+// into the pending set. A file that was already parsed to its end is a no-op
+// the next time, and an unparsed byte stays behind its parse offset for the
+// next start. A nil stop never fires.
+func (p *Parser) DrainUntil(stop <-chan struct{}) error {
 	p.drain.Lock()
 	defer p.drain.Unlock()
 	p.pmu.Lock()
@@ -204,8 +214,25 @@ func (p *Parser) Drain() error {
 	p.pending = map[int64]bool{}
 	p.pmu.Unlock()
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	_, err := p.parseFiles(ids)
+	_, err := p.parseFiles(ids, stop)
+	if errors.Is(err, ErrParseStopped) {
+		p.pmu.Lock()
+		for _, id := range ids {
+			p.pending[id] = true
+		}
+		p.pmu.Unlock()
+	}
 	return err
+}
+
+// stopped reports whether stop has closed (a nil stop never has).
+func stopped(stop <-chan struct{}) bool {
+	select {
+	case <-stop:
+		return true
+	default:
+		return false
+	}
 }
 
 // Coalesce is called after a wake-up and returns once the wake-ups have settled:
@@ -394,7 +421,7 @@ func (p *Parser) Reparse(sourceName string, files ...int64) error {
 
 // ParseFile parses the unparsed bytes of every generation of a file and
 // returns the number of records committed.
-func (p *Parser) ParseFile(file int64) (int, error) { return p.parseFiles([]int64{file}) }
+func (p *Parser) ParseFile(file int64) (int, error) { return p.parseFiles([]int64{file}, nil) }
 
 // genWork is one generation with bytes to parse: everything a transaction needs
 // to continue it from start.
@@ -417,12 +444,15 @@ type genWork struct {
 // parseFiles parses the unparsed bytes of every generation of the files, in one
 // group-commit transaction per batch budget (a snapshot file keeps its own
 // transactions), and returns the number of records committed.
-func (p *Parser) parseFiles(ids []int64) (int, error) {
+func (p *Parser) parseFiles(ids []int64, stop <-chan struct{}) (int, error) {
 	p.run.Lock()
 	defer p.run.Unlock()
 	var files []store.File
 	var first error
 	for _, id := range ids {
+		if stopped(stop) {
+			return 0, ErrParseStopped
+		}
 		f, err := p.cfg.Store.File(id)
 		if err != nil {
 			if first == nil {
@@ -432,7 +462,7 @@ func (p *Parser) parseFiles(ids []int64) (int, error) {
 		}
 		files = append(files, f)
 	}
-	return p.parseStored(files, first)
+	return p.parseStored(files, first, stop)
 }
 
 // parseLoaded is ParseFile for a File the caller already holds (ParseAll got it
@@ -440,13 +470,13 @@ func (p *Parser) parseFiles(ids []int64) (int, error) {
 func (p *Parser) parseLoaded(f store.File) (int, error) {
 	p.run.Lock()
 	defer p.run.Unlock()
-	return p.parseStored([]store.File{f}, nil)
+	return p.parseStored([]store.File{f}, nil, nil)
 }
 
 // parseStored is the body of parseFiles for files already fetched; first is an
 // error from fetching them. The caller holds p.run. Generations are read here,
 // after any ReparseGen the caller ran, and never cached across it.
-func (p *Parser) parseStored(files []store.File, first error) (int, error) {
+func (p *Parser) parseStored(files []store.File, first error, stop <-chan struct{}) (int, error) {
 	var work []*genWork
 	defer func() {
 		for _, w := range work {
@@ -503,11 +533,14 @@ func (p *Parser) parseStored(files []store.File, first error) (int, error) {
 			work = append(work, w)
 		}
 	}
-	n, err := p.runWork(work)
+	n, err := p.runWork(work, stop)
 	for _, w := range work {
 		p.noteFile(w)
 	}
 	total += n
+	if errors.Is(err, ErrParseStopped) {
+		return total, err
+	}
 	if err != nil && first == nil {
 		first = err
 	}
@@ -531,9 +564,9 @@ func (p *Parser) prepGen(f store.File, src source.Source, g store.Generation, re
 // runWork parses the generations in group-commit transactions. When a
 // multi-generation transaction fails it retries each generation alone, so one
 // bad file cannot hold the others back.
-func (p *Parser) runWork(work []*genWork) (int, error) {
-	n, err := p.runBatches(work)
-	if err == nil || len(work) < 2 {
+func (p *Parser) runWork(work []*genWork, stop <-chan struct{}) (int, error) {
+	n, err := p.runBatches(work, stop)
+	if err == nil || len(work) < 2 || errors.Is(err, ErrParseStopped) {
 		return n, err
 	}
 	var first error
@@ -541,8 +574,11 @@ func (p *Parser) runWork(work []*genWork) (int, error) {
 		if w.start >= w.end {
 			continue
 		}
-		m, err := p.runBatches([]*genWork{w})
+		m, err := p.runBatches([]*genWork{w}, stop)
 		n += m
+		if errors.Is(err, ErrParseStopped) {
+			return n, err
+		}
 		if err != nil && first == nil {
 			first = err
 		}
@@ -555,7 +591,7 @@ func (p *Parser) runWork(work []*genWork) (int, error) {
 // until it holds BatchRecords records or BatchBytes parsed bytes, then writes
 // the parse offsets and parse state of what it touched, bumps parse_seq ONCE and
 // commits.
-func (p *Parser) runBatches(work []*genWork) (int, error) {
+func (p *Parser) runBatches(work []*genWork, stop <-chan struct{}) (int, error) {
 	total := 0
 	next := make([]int64, len(work))
 	for {
@@ -567,6 +603,9 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 		}
 		if !pending {
 			return total, nil
+		}
+		if stopped(stop) {
+			return total, ErrParseStopped
 		}
 		cnt := 0
 		var bytes int64
@@ -585,6 +624,11 @@ func (p *Parser) runBatches(work []*genWork) (int, error) {
 				cur := w.start
 				for cur < w.end {
 					if cnt >= p.cfg.BatchRecords || bytes >= p.cfg.BatchBytes {
+						break
+					}
+					// A stop ends the batch like a spent budget: what was
+					// parsed commits, and the loop top returns ErrParseStopped.
+					if stopped(stop) {
 						break
 					}
 					if err := p.genReset(tx, w.f, w.src, w.g, cur); err != nil {

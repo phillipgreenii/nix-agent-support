@@ -321,7 +321,7 @@ Shutdown overrun: when a stop does not finish before its deadline the daemon log
 ## Shutdown
 
 The contract: a stop (SIGTERM or SIGINT) finishes within 8 seconds or the daemon hard-exits. A sweep in flight aborts
-rather than running to its end, the stores close, the lock is released and `serve` exits 0. The launchd job gets
+rather than running to its end, a parser drain pass stops between chunks (what it parsed commits, the rest stays pending for the next start), the stores close, the lock is released and `serve` exits 0. The launchd job gets
 `ExitTimeOut = 15` (the 8 s deadline plus a 7 s margin, under launchd's silent 60 s clamp), so launchd's SIGKILL never
 races a normal shutdown.
 
