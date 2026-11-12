@@ -125,13 +125,11 @@ func pullLevelSource(ctx context.Context, env query.Env, s query.Source, lv *lev
 	}
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	lines := 0
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
 		}
-		lines++
 		outcome, reason, ierr := lv.ingest.IngestJSON(line)
 		switch {
 		case ierr != nil:
@@ -146,9 +144,10 @@ func pullLevelSource(ctx context.Context, env query.Env, s query.Source, lv *lev
 	}
 	if serr := sc.Err(); serr != nil {
 		fail(PullFailMalformed, fmt.Errorf("read level answers: %w", serr))
-	} else if lines == 0 {
-		fail(PullFailMalformed, errors.New("the sensor printed no level answer"))
 	}
+	// A successful pull that printed no line is an empty answer: the sensor
+	// has no reading for any resource. It is not a failure; the last levels
+	// stay and age under the staleness rule.
 	return nil
 }
 

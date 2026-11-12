@@ -223,7 +223,8 @@ func TestLevelPuller_hungProbeDelaysNoOtherSensor(t *testing.T) {
 }
 
 // A non-zero exit, a malformed answer and a rejected one each count under their
-// own reason and do not stop another sensor.
+// own reason and do not stop another sensor. A successful pull that prints no
+// line (an empty answer) records no failure at all.
 func TestLevelPuller_failureReasons(t *testing.T) {
 	cmd := &levelCmd{fn: map[string]func(context.Context, []string) ([]byte, error){
 		"exit":      func(context.Context, []string) ([]byte, error) { return nil, errors.New("exit status 1") },
@@ -240,11 +241,14 @@ func TestLevelPuller_failureReasons(t *testing.T) {
 	p.PullAll(context.Background())
 	p.Wait()
 	f := p.Failures()
-	want := map[string]string{"s-exit": PullFailExit, "s-mal": PullFailMalformed, "s-empty": PullFailMalformed, "s-rej": PullFailRejected}
+	want := map[string]string{"s-exit": PullFailExit, "s-mal": PullFailMalformed, "s-rej": PullFailRejected}
 	for sensor, reason := range want {
 		if f[sensor][reason] != 1 || len(f[sensor]) != 1 {
 			t.Errorf("failures[%s] = %v, want one %s", sensor, f[sensor], reason)
 		}
+	}
+	if len(f["s-empty"]) != 0 {
+		t.Errorf("an empty successful answer recorded a failure: %v", f["s-empty"])
 	}
 	if len(f["s-good"]) != 0 {
 		t.Errorf("the good sensor failed: %v", f["s-good"])

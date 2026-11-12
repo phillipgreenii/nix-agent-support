@@ -752,7 +752,8 @@ A sensor is a level source. It reuses the event-source transport: a **pull** is 
 - **`INV-SEN-1`** <!-- uuid: 03f4ed95-5826-4dcc-91ba-3a6875fa65a8 --> — **A sensor is minimally constrained.** The core **MUST NOT**
   require a sensor to be a daemon, to run checks in any order or concurrency, to keep state, or to
   answer every resource at once, and assumes no ordering among sensors or among one sensor's
-  resources. The only top-down timing is the query period and deadline.
+  resources. A successful pull that answers no resource at all (exit zero, no answer line) is an
+  empty answer, not a pull failure (`INV-SEN-5`). The only top-down timing is the query period and deadline.
 - **`INV-SEN-2`** <!-- uuid: b8413a41-65d0-4f04-b4d0-2f9c77cd757f --> — **A sensor MAY answer from a cache;** freshness is judged
   by `observed_at` (`INV-STALE-1`), never by when the core asked.
 - **`INV-SEN-3`** <!-- uuid: c381ca92-658f-436c-a2ef-d46513251a09 --> — **A sensor owns its thresholds.** It answers with a level
@@ -764,7 +765,9 @@ A sensor is a level source. It reuses the event-source transport: a **pull** is 
   another resource's level reads it from the core as published (a missing level reads `unknown`).
 - **`INV-SEN-5`** <!-- uuid: fe615e24-845a-4deb-8543-ab3075452185 --> — **A pull failure keeps the last level.** A deadline
   overrun, non-zero exit or malformed answer is a pull failure: the core keeps the last level, counts
-  the failure and applies `INV-STALE-1`; one sensor's failure never blocks another.
+  the failure and applies `INV-STALE-1`; one sensor's failure never blocks another. An empty
+  successful answer (exit zero, no answer line) is **not** a pull failure and is not counted: the
+  resources it left unanswered keep their last level and age under `INV-STALE-1` exactly as after a failure.
 - **`INV-SEN-6`** <!-- uuid: d2488498-dd96-4347-a8da-4662c8536727 --> — **The operator can override a level.** `level set
 <resource> <LEVEL>` with a duration or `--until-cleared` pushes an `operator` level that wins while
   fresh; on expiry or `level clear` the sensor's value returns, and the sensor's record stays stored
