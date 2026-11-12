@@ -164,8 +164,6 @@ func TestExhaustiveSmallUniverse(t *testing.T) {
 	}
 }
 
-func st(_ string, _ []State, snap Snapshot, res string) State { return snap.Levels[res].State }
-
 func TestAbsentLevelReadsUnknown(t *testing.T) {
 	now := time.Now()
 	snap := Snapshot{Now: now}

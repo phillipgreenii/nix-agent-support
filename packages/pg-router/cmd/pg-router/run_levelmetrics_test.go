@@ -145,7 +145,7 @@ func TestBootCore_levelObserverAndLevelGaugesAreWired(t *testing.T) {
 func attrString(kvs []attribute.KeyValue) string {
 	parts := make([]string, 0, len(kvs))
 	for _, kv := range kvs {
-		parts = append(parts, string(kv.Key)+"="+kv.Value.Emit())
+		parts = append(parts, string(kv.Key)+"="+kv.Value.String())
 	}
 	slices.Sort(parts)
 	return strings.Join(parts, ",")

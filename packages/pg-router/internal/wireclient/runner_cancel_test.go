@@ -41,7 +41,7 @@ func waitForFile(t *testing.T, path string) {
 // runUntilCancelled starts OSRunner.Run on stub, waits for ready, cancels the
 // context and returns Run's exit code and error and how long Run took to return
 // after the cancel.
-func runUntilCancelled(t *testing.T, stub, ready string) (int, error, time.Duration) {
+func runUntilCancelled(t *testing.T, stub, ready string) (int, time.Duration, error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -59,10 +59,10 @@ func runUntilCancelled(t *testing.T, stub, ready string) (int, error, time.Durat
 	cancel()
 	select {
 	case r := <-done:
-		return r.code, r.err, time.Since(start)
+		return r.code, time.Since(start), r.err
 	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not return after cancel")
-		return 0, nil, 0
+		return 0, 0, nil
 	}
 }
 
@@ -73,7 +73,7 @@ func TestOSRunner_cancelSendsSIGTERMFirst(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "term-seen")
 	stub, ready := cancelStub(t, "trap ': > "+marker+"; exit 0' TERM")
 
-	_, err, _ := runUntilCancelled(t, stub, ready)
+	_, _, err := runUntilCancelled(t, stub, ready)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
@@ -91,7 +91,7 @@ func TestOSRunner_cancelKillsAHandlerThatIgnoresTERM(t *testing.T) {
 	t.Cleanup(func() { runWaitDelay = old })
 
 	stub, ready := cancelStub(t, "trap '' TERM")
-	code, err, took := runUntilCancelled(t, stub, ready)
+	code, took, err := runUntilCancelled(t, stub, ready)
 	// A handler killed by a signal is reported as exit code -1 with a nil error
 	// (Run hands the exit code to the caller), never as a clean exit 0.
 	if code != -1 || err != nil {

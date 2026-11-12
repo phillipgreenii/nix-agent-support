@@ -128,7 +128,7 @@ func TestLevelProj_acceptedAppendsAndSnapshots(t *testing.T) {
 
 func TestLevelProj_snapshotAccessorSignature(t *testing.T) {
 	f := newProj(t)
-	var _ func() levels.Snapshot = f.p.Snapshot
+	_ = func() levels.Snapshot { return f.p.Snapshot() }
 }
 
 func TestLevelProj_rejectionReasons(t *testing.T) {

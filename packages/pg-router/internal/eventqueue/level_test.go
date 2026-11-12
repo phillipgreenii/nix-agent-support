@@ -81,7 +81,7 @@ func TestLevel_replayRebuildsLevelsWithTheLiveSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !(seqCPU < seqNet && seqNet < seqOv) {
+	if seqCPU >= seqNet || seqNet >= seqOv {
 		t.Fatalf("receipt sequences not increasing: %d %d %d", seqCPU, seqNet, seqOv)
 	}
 	_ = fs.Close()

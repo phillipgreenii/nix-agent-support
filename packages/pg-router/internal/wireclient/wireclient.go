@@ -223,8 +223,8 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 		if perr != nil {
 			return nil, 0, fmt.Errorf("wireclient: parent-death pipe: %w", perr)
 		}
-		defer pw.Close()
-		defer pr.Close()
+		defer func() { _ = pw.Close() }()
+		defer func() { _ = pr.Close() }()
 		cmd.ExtraFiles = []*os.File{pr}
 		cmd.Env = append(os.Environ(), ParentDeathFDEnv+"=3")
 	}
