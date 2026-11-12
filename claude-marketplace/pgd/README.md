@@ -228,8 +228,15 @@ facade's `env.awsProfile()`. Pressing it opens the Assume modal.
   variables are set only when the profile has a `region` key. A denied set leaves the stored role as
   it was. The operator's verification found the AWS CLI authenticates with the profile and the two
   region variables alone, and that a model-run Bash call sees values set this way.
-- Clear: sets the four variables to empty strings (the host has no unset) and clears the stored role
-  and expiry.
+- Clear: the host has no unset, and the aws CLI reads an empty `AWS_PROFILE` as a profile named
+  `""` (every call fails with "The config profile () could not be found"). So when the AWS config
+  has a `[default]` section, Clear sets `AWS_PROFILE` to `default` and both region variables to that
+  section's `region` (empty when it has none). When it has no `[default]`, no value is safe (the CLI
+  also rejects `AWS_PROFILE=default` there, checked against the real CLI), so all three are set to
+  empty strings and `aws` needs `--profile` (or an Apply) until a role is applied. `GRANTED_COMMAND`
+  is always set to an empty string. The stored role and expiry are cleared either way, and the band
+  button reads `Assume` (dim) as before. Decision: the session's starting profile is not restored,
+  because it may itself be a role (for example prod), which Clear exists to drop.
 - Expiry source: the `Expiration` field of `aws configure export-credentials --profile NAME --format
 process`, run once after each Apply. Only that field is read; the credentials are never stored or
   logged. The call runs with a five-minute timeout, because a lapsed SSO login can open a keychain

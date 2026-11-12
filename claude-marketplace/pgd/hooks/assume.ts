@@ -17,7 +17,13 @@ import type { ModApi, PgdOptions } from './types'
 //  - Apply: sets AWS_PROFILE, AWS_REGION, AWS_DEFAULT_REGION and GRANTED_COMMAND through four
 //    facade closures (fixed literal names), never runs assume. The region variables are set only
 //    when the profile has a region key in the config.
-//  - Clear: sets the four variables to empty strings and clears the stored role and expiry.
+//  - Clear: the host cannot unset a variable and the aws CLI reads an empty AWS_PROFILE as a profile
+//    named "" (every call fails), so when the config has a [default] section AWS_PROFILE becomes
+//    "default" and the region variables take that section's region (empty when it has none);
+//    without a [default] section no value is safe (AWS_PROFILE=default also fails there), so all
+//    four are set to empty strings and aws needs --profile or an Apply. GRANTED_COMMAND is always
+//    emptied. The stored role and expiry are cleared either way. The session's starting profile is
+//    not restored: it may itself be a role (prod), which Clear exists to drop.
 //  - Expiry: the Expiration of `aws configure export-credentials --profile NAME --format process`,
 //    run once after each Apply with a five-minute timeout (a lapsed SSO login can open a keychain
 //    prompt and a browser window, which does not fit the 30-second default). Only the Expiration
@@ -224,10 +230,13 @@ async function apply(host: ModApi): Promise<void> {
 }
 
 async function clear(host: ModApi): Promise<void> {
+  await loadConfig(host)
+  const hasDefault = config.roles.includes('default')
+  const region = hasDefault ? (config.regions.default ?? '') : ''
   try {
-    await host.env.setAwsProfile('')
-    await host.env.setAwsRegion('')
-    await host.env.setAwsDefaultRegion('')
+    await host.env.setAwsProfile(hasDefault ? 'default' : '')
+    await host.env.setAwsRegion(region)
+    await host.env.setAwsDefaultRegion(region)
     await host.env.setGrantedCommand('')
   } catch {
     return

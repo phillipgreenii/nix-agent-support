@@ -363,6 +363,15 @@ place the profile is shown; there is no profile alert.
   the session started or by Apply. It MUST read it at session start through
   `$.env.get('AWS_PROFILE')` (a literal name, through one facade closure) and MUST
   update the cached value when Apply or Clear sets it.
+- Clear MUST leave the aws CLI usable where the host allows. The host cannot unset a
+  variable and the aws CLI treats an empty `AWS_PROFILE` as a profile named "" (every
+  call fails), so when the AWS config has a `[default]` section Clear MUST set
+  `AWS_PROFILE` to `default` and both region variables to that section's region (empty
+  when it has none). When the config has no `[default]` section no safe value exists
+  (`AWS_PROFILE=default` also fails), and Clear sets the three to empty strings; `aws`
+  then needs `--profile` until a role is applied. `GRANTED_COMMAND` is set to an empty
+  string. Clear MUST NOT restore the session's starting profile, which may itself be a
+  role. The button still reads `Assume` (dim) after Clear.
 - Label: `Assume` when the variable is unset or empty; otherwise the profile name.
 - Color, matching the profile name ignoring case: unset or empty is dim; a name
   containing `prod` is red; otherwise a name containing `dev` is green; any other

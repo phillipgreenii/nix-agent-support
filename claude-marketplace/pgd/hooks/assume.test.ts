@@ -268,9 +268,23 @@ test('Apply with nothing chosen and no listed current role does nothing', async 
   expect(sh.envSets).toEqual([])
 })
 
-test('Clear sets the four names to empty strings and clears the stored role and expiry', async () => {
+test('Clear points AWS_PROFILE at default (with its region) so the aws CLI still works, and clears the role and expiry', async () => {
   const { sh } = await modalWorld('example-dev')
   setValue('assume', { role: 'example-dev', expiresAt: 5 })
+  pressAction('assume', 'clear')
+  await settle()
+  expect(sh.envSets).toEqual([
+    { name: 'AWS_PROFILE', value: 'default' },
+    { name: 'AWS_REGION', value: 'us-west-2' },
+    { name: 'AWS_DEFAULT_REGION', value: 'us-west-2' },
+    { name: 'GRANTED_COMMAND', value: '' },
+  ])
+  expect(readCached('assume')).toEqual({})
+  expect(button()).toEqual({ id: 'assume', label: 'Assume', level: 'dim', action: 'assume' })
+})
+
+test('Clear without a default profile in the config sets all four names to empty strings (no safe value exists)', async () => {
+  const { sh } = await modalWorld('example-dev', only, '[profile example-dev]\nregion = us-east-1\n')
   pressAction('assume', 'clear')
   await settle()
   expect(sh.envSets).toEqual([
@@ -280,7 +294,6 @@ test('Clear sets the four names to empty strings and clears the stored role and 
     { name: 'GRANTED_COMMAND', value: '' },
   ])
   expect(readCached('assume')).toEqual({})
-  expect(button()).toEqual({ id: 'assume', label: 'Assume', level: 'dim', action: 'assume' })
 })
 
 test('the assume expired alert shows only once an expiry has passed', async () => {
