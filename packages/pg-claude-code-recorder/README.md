@@ -27,6 +27,7 @@ the `-linux-cross-compile` check (`GOOS=linux CGO_ENABLED=0 go vet ./...`) keeps
 | `integration` | daemon, subprocess, real external tool                                                                         | `pg-claude-code-recorder-integration-tests` (on demand, `-race`, 60m timeout) |
 | `faults`      | fault injection                                                                                                | guarded by `-integration-tests-gating`                                        |
 | `soak`        | soak (`checks.<system>.pg-claude-code-recorder-soak`, budgets in `internal/parser/testdata/soak-budgets.json`) | guarded by `-integration-tests-gating`                                        |
+| `crashsweep`  | crash injection after every file-system operation of the settle scenarios (`internal/settle`)                  | `pg-claude-code-recorder-crashsweep-tests` (on demand, 30m timeout)           |
 
 The `ablation` tag is a development measurement harness for the rebuild's write path, not a tier
 and not a check: it is never part of a gate, and its build is only vetted by the gating check

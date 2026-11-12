@@ -86,6 +86,12 @@ type env struct {
 	// after, when set, is the allowed stray-quarantine exception for invariants.
 	allowQuarantine bool
 	extra           func(*Config)
+
+	// innerFS, when set, is the file system the recorder wraps (the crash sweep
+	// puts its fault-injecting wrapper here); commitHook runs after every store
+	// commit, so a sweep can count and crash at one.
+	innerFS    fsx.FS
+	commitHook func()
 }
 
 func newEnv(t *testing.T, cloneMode bool) *env { return newEnvWith(t, cloneMode, nil) }
@@ -129,14 +135,19 @@ func (e *env) open() {
 		// A restart: the previous instance releases the state directory.
 		_ = e.st.Close()
 	}
-	e.rec = fsx.NewRecorder(nil)
+	e.rec = fsx.NewRecorder(e.innerFS)
 	e.rec.SoftFullSync = true
 	e.obs = obs.New(nil)
 	st, err := store.Open(e.state, store.Options{FS: e.rec, Obs: e.obs})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	st.OnCommit(func() { e.rec.Mark("commit") })
+	st.OnCommit(func() {
+		e.rec.Mark("commit")
+		if e.commitHook != nil {
+			e.commitHook()
+		}
+	})
 	e.st = st
 	var pol copier.ClonePolicy = e.clone
 	if e.policy != nil {
