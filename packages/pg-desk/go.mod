@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk
 
-go 1.26.0
+go 1.26.8
 
 require (
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0

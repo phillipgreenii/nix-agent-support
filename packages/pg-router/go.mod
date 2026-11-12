@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/pg-router
 
-go 1.25.9
+go 1.26.8
 
 require github.com/phillipgreenii/claude-transcript v0.0.0
 

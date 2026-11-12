@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/pb
 
-go 1.25.9
+go 1.26.8
 
 require (
 	github.com/phillipgreenii/x v0.0.0-20261007115411-386c14bc447d

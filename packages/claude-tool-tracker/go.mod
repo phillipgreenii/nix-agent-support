@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/claude-tool-tracker
 
-go 1.25.0
+go 1.26.8
 
 require modernc.org/sqlite v1.59.0
 

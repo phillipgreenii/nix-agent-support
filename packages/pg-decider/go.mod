@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/pg-decider
 
-go 1.25.9
+go 1.26.8
 
 require (
 	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
