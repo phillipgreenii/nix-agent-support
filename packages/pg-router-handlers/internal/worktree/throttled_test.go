@@ -1,9 +1,11 @@
 package worktree
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -380,4 +382,27 @@ func hermeticGit(dir string, args ...string) *exec.Cmd {
 		}
 	}
 	return cmd
+}
+
+// A drain cut short by its budget is the designed hand-off to the janitor sweep,
+// so a normal teardown of a tree bigger than the budget logs at INFO, not WARN.
+func TestRemoveTree_budgetCutIsLoggedAtInfoNotWarn(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	root := filepath.Join(t.TempDir(), "wt")
+	makeTree(t, root, 3, 4)
+	rec := &recorder{failAt: 1} // the first pause ends the drain, as an expired budget does
+	if err := rec.removal(2, time.Millisecond).RemoveTree(t.Context(), root); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "handed to the janitor sweep") {
+		t.Errorf("want the INFO hand-off line, got %q", out)
+	}
+	if strings.Contains(out, "level=WARN") {
+		t.Errorf("a budget cut must not warn, got %q", out)
+	}
 }

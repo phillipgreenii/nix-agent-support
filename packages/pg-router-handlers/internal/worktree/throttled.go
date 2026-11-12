@@ -62,7 +62,14 @@ type Removal struct {
 
 // Defaults: at most DefaultBatchSize/DefaultPause = 2,000 removal events per
 // second of pause time (the unthrottled delete measured about 11,000 per
-// second), and a budget that covers a 100,000-file worktree.
+// second). The budget is deliberately SHORT of a whole monorepo worktree: a real
+// one is about 230,000 to 240,000 entries and the paced drain measured about
+// 1,000 ops per second under load (180,000 ops in the 3 minutes), so an inline
+// drain of one never finishes. That is by design: the inline drain bounds how
+// long a teardown holds its caller, and the janitor sweep (the designed
+// finisher) purges the rest. The expected log line for that hand-off is the INFO
+// "paced delete of the trash entry handed to the janitor sweep"; a WARN means a
+// real error.
 const (
 	DefaultBatchSize = 500
 	DefaultPause     = 250 * time.Millisecond
@@ -264,8 +271,8 @@ func (r Removal) drainTrash(ctx context.Context, trash string) error {
 		slog.Warn("worktree: paced delete of the trash entry hit an error (the janitor sweep retries)",
 			"trash", trash, "ops", st.Ops, "err", err)
 	case !st.Done:
-		slog.Warn("worktree: paced delete of the trash entry left unfinished (the janitor sweep finishes it)",
-			"trash", trash, "ops", st.Ops, "batches", st.Batches)
+		slog.Info("worktree: paced delete of the trash entry handed to the janitor sweep (budget used up; the sweep finishes it)",
+			"trash", trash, "ops", st.Ops, "batches", st.Batches, "budget", r.budget().String())
 	default:
 		slog.Info("worktree: trash entry deleted in paced batches", "trash", trash, "ops", st.Ops, "batches", st.Batches)
 	}
