@@ -47,7 +47,7 @@ func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
 	if err != nil {
 		return ExitErrorf(exitcode.Ledger, "%v", err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout(), Evidence: runner.EvidenceStage{}}
 	runner.RegisterCcpool(d)
 	if runnerHook != nil {

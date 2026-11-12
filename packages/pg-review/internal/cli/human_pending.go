@@ -115,7 +115,7 @@ func newHumanPendingCmd() *cobra.Command {
 			if err != nil {
 				return mapHumanError(err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			out := cmd.OutOrStdout()
 			jsonOut := false
 			if f, err := OutputFormat(cmd); err != nil {

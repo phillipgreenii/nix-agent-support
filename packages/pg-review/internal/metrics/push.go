@@ -123,7 +123,7 @@ func (p *Pusher) pushOTLP(ctx context.Context, endpoint string, gauges []Gauge) 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("endpoint answered %s", resp.Status)

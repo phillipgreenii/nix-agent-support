@@ -107,7 +107,7 @@ func (l *Ledger) labelCounts(ctx context.Context, q string) ([]LabelCount, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []LabelCount
 	for rows.Next() {
 		var c LabelCount
@@ -127,7 +127,7 @@ func (l *Ledger) runCounts(ctx context.Context) ([]RunCount, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []RunCount
 	for rows.Next() {
 		var c RunCount
@@ -149,7 +149,7 @@ func (l *Ledger) latestRuns(ctx context.Context) ([]LatestRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []LatestRun
 	for rows.Next() {
 		var r LatestRun
@@ -175,7 +175,7 @@ func (l *Ledger) scheduleStates(ctx context.Context) ([]ScheduleState, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ScheduleState
 	var cur *ScheduleState
 	for rows.Next() {

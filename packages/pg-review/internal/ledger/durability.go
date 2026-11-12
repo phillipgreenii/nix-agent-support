@@ -18,7 +18,7 @@ func (l *Ledger) IntegrityCheck(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrIntegrity, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var msgs []string
 	for rows.Next() {
 		var m string
@@ -48,7 +48,7 @@ func (l *Ledger) Export(ctx context.Context, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func exportTable(ctx context.Context, conn *sql.Conn, enc *json.Encoder, table s
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	cols, err := rows.Columns()
 	if err != nil {
 		return err
@@ -127,7 +127,7 @@ func (l *Ledger) ExportFile(ctx context.Context, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err

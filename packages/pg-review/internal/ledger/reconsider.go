@@ -174,7 +174,7 @@ func (l *Ledger) TopicEvents(ctx context.Context, topicID string) ([]TopicEvent,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []TopicEvent
 	for rows.Next() {
 		var e TopicEvent

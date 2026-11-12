@@ -25,7 +25,7 @@ func newJobResumeCmd() *cobra.Command {
 			if err != nil {
 				return ExitErrorf(exitcode.Ledger, "%v", err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			lenses, err := l.Lenses(ctx)
 			if err != nil {
 				return mapHumanError(err)

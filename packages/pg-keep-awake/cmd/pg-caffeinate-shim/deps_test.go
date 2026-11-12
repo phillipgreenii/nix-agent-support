@@ -2,8 +2,6 @@ package main
 
 import (
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,7 +12,7 @@ import (
 func TestShimDependsOnNeitherConfigNorTelemetry(t *testing.T) {
 	goTool, err := exec.LookPath("go")
 	if err != nil {
-		goTool = filepath.Join(runtime.GOROOT(), "bin", "go")
+		t.Fatalf("the go tool is not on PATH: %v", err)
 	}
 	out, err := exec.Command(goTool, "list", "-deps", ".").Output()
 	if err != nil {

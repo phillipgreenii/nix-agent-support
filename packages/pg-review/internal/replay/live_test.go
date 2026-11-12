@@ -33,7 +33,7 @@ func (a *liveAnalyst) Analyse(ctx context.Context, promptText string, ev []valid
 	}
 	// Detached from ctx on purpose: the session must still be closed when ctx
 	// was cancelled (a timeout or an interrupted replay).
-	defer a.client.Close(context.WithoutCancel(ctx), id, "replay")
+	defer func() { _ = a.client.Close(context.WithoutCancel(ctx), id, "replay") }()
 	var rows string
 	for _, r := range ev {
 		rows += fmt.Sprintf("%s | %s | %s | %v | %s\n", r.ID, r.SubjectKey, r.Kind, r.Metrics, r.DefinedIn)

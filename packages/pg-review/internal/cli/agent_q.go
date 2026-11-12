@@ -73,7 +73,7 @@ with exit 4 (refused or over budget) or 7 (provider failure).`,
 			if err != nil {
 				return err
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			res, err := broker.Query(cmd.Context(), broker.Deps{Cfg: cfg, Ledger: l}, runID, rest[0], rest[1:])
 			if err != nil {
 				return brokerError(cmd, err)
@@ -94,7 +94,7 @@ with exit 4 (refused or over budget) or 7 (provider failure).`,
 
 // brokerError prints the JSON error and maps it to its exit code.
 func brokerError(cmd *cobra.Command, err error) error {
-	code := exitcode.Failure
+	var code int
 	var re *broker.RefusedError
 	var pe *broker.ProviderError
 	switch {

@@ -56,7 +56,7 @@ func newAgentContextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			run, err := l.GetRun(cmd.Context(), runID)
 			if err != nil {
 				return mapFileError(err)

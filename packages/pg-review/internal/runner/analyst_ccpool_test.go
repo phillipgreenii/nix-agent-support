@@ -515,7 +515,7 @@ func TestPlantedSecretInFinalMessageIsRedactedBeforeStorage(t *testing.T) {
 				t.Errorf("table %s stores the planted secret", tb)
 			}
 		}
-		r.Close()
+		_ = r.Close()
 	}
 }
 

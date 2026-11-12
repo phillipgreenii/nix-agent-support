@@ -20,8 +20,6 @@ type ProcInspector interface {
 // resolution, local time).
 type PSInspector struct{}
 
-const lstartLayout = "Mon Jan _2 15:04:05 2006"
-
 // StartTime implements ProcInspector.
 func (PSInspector) StartTime(pid int) (time.Time, bool) {
 	if pid <= 0 {

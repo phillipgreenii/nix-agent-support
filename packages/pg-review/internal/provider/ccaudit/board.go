@@ -19,15 +19,14 @@ const (
 type key struct{ kind, subject string }
 
 type acc struct {
-	typ      string
-	query    string
-	qidx     int
-	metrics  map[string]float64
-	first    time.Time
-	last     time.Time
-	head     string
-	samples  map[string]bool
-	costOnly bool
+	typ     string
+	query   string
+	qidx    int
+	metrics map[string]float64
+	first   time.Time
+	last    time.Time
+	head    string
+	samples map[string]bool
 }
 
 type board struct {

@@ -373,9 +373,7 @@ func (c *checker) rawAndCopies(i int, f Finding, fl field) {
 func commands(text string) []string {
 	var cands []string
 	for _, m := range fence.FindAllStringSubmatch(text, -1) {
-		for _, ln := range strings.Split(m[1], "\n") {
-			cands = append(cands, ln)
-		}
+		cands = append(cands, strings.Split(m[1], "\n")...)
 	}
 	text = fence.ReplaceAllString(text, "")
 	for _, m := range backtickRe.FindAllStringSubmatch(text, -1) {

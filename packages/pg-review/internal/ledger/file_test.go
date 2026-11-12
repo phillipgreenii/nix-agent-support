@@ -251,7 +251,7 @@ func TestTwoConcurrentFileProcessesAreConsistent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer func() { _ = other.Close() }()
 	rows := []validate.EvidenceRow{evidence("x", nil, "")}
 	r1, r2 := startRun(t, l, "l", "s1"), startRun(t, l, "l", "s2")
 	var wg sync.WaitGroup
@@ -348,7 +348,6 @@ func TestReconsiderationTriggersFireAndDoNot(t *testing.T) {
 		name, cond, rate string
 		fire, hold       []validate.EvidenceRow
 		advance          time.Duration
-		versionSensitive bool
 	}
 	m := func(kv map[string]float64, seen string) []validate.EvidenceRow {
 		return []validate.EvidenceRow{evidence("x", kv, seen)}

@@ -21,8 +21,7 @@ const fakeSecret = "sk-ABCDEFGHIJKLMNOPQRSTUVWX"
 
 type evEnv struct {
 	*env
-	dir     string // holds the fake providers and their rows
-	staging []string
+	dir string // holds the fake providers and their rows
 }
 
 // setupEvidence builds a hermetic run environment whose lens agent-workflow

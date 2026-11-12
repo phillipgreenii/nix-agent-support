@@ -126,7 +126,7 @@ func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(scratch)
+	defer func() { _ = os.RemoveAll(scratch) }()
 	g, err := newGuard(scratch, d.Cfg.Env.Dir(), s.Run.StagingPath)
 	if err != nil {
 		return err
@@ -193,7 +193,6 @@ func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 		if perr != nil {
 			failures = parseFailure(perr)
 		} else {
-			failures = nil
 			_, ferr := ledger.FileFindings(ctx, d.Ledger, d.Cfg, runID, raw, true)
 			var ve *validate.Error
 			switch {

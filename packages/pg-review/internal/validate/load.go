@@ -26,7 +26,7 @@ func Load(evidenceDir, stagingPath string) (Input, error) {
 	if err != nil {
 		return in, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	for sc.Scan() {

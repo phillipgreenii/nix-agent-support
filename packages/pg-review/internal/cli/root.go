@@ -163,12 +163,6 @@ func asUsage(err error) error {
 	return &usageError{err: err}
 }
 
-// notImplemented is what every stub command returns: "not implemented" on
-// stderr and exit 1.
-func notImplemented() error {
-	return ExitErrorf(exitcode.Failure, "not implemented")
-}
-
 // ExitCode maps the error a command returned to the process exit status: the
 // code of an exitError, Usage for a usageError, Failure for anything else.
 func ExitCode(err error) int {

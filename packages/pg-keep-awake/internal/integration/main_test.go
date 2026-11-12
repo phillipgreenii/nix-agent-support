@@ -61,10 +61,11 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 		goTool, err := exec.LookPath("go")
 		if err != nil {
-			goTool = filepath.Join(runtime.GOROOT(), "bin", "go")
+			fmt.Fprintf(os.Stderr, "the go tool is not on PATH: %v\n", err)
+			return 1
 		}
 		keepAwakeBin = filepath.Join(dir, "pg-keep-awake")
 		shimBin = filepath.Join(dir, "pg-caffeinate-shim")

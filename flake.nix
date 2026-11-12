@@ -7502,6 +7502,8 @@
                 pname = "pg-review-go-tests";
                 src = lib.cleanSource ./packages/pg-review; # matches default.nix
                 gomod2nixToml = ./packages/pg-review/gomod2nix.toml;
+                # internal/runner tests create real git repos and worktrees.
+                testDeps = [ pkgs.git ];
               };
 
               # pg-review HM module: renders config.toml (validated by the real

@@ -333,7 +333,7 @@ func (e *Effective) merge(raw rawFile) {
 			e.problem("tracker", r.Prefix, "a [[tracker.repo]] entry needs both prefix and label")
 			continue
 		}
-		e.Tracker.Repos = append(e.Tracker.Repos, TrackerRepo{Prefix: r.Prefix, Label: r.Label})
+		e.Tracker.Repos = append(e.Tracker.Repos, TrackerRepo(r))
 	}
 
 	names := make([]string, 0, len(raw.Profile))

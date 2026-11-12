@@ -65,7 +65,7 @@ since it last changed, else the command exits 6.
 			if err != nil {
 				return mapHumanError(err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			reqs := make([]ledger.RuleRequest, 0, len(ids))
 			for _, id := range ids {
 				rq := ledger.RuleRequest{Number: id, Ruling: ruling, Rationale: note, ReconsiderWhen: when, Useful: useful}

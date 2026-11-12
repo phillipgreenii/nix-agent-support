@@ -359,11 +359,6 @@ func TestRunPromotesWaitingTopicsAtStart(t *testing.T) {
 	}
 }
 
-type failStage struct{}
-
-func (failStage) Name() string                      { return "boom" }
-func (failStage) Run(context.Context, *State) error { return errors.New("boom") }
-
 func TestStageErrorFailsRunAndCleansUp(t *testing.T) {
 	e := setup(t)
 	staging := filepath.Join(evidenceRoot(e.d.Cfg.Env.CacheHome), "stage")

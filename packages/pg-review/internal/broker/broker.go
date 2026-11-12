@@ -339,7 +339,7 @@ func appendLog(dir string, entry map[string]any) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, err = f.Write(append(b, '\n'))
 	return err
 }

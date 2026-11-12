@@ -82,7 +82,7 @@ func (l *Ledger) PendingItems(ctx context.Context) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Item
 	for rows.Next() {
 		it, err := scanItem(rows)
@@ -126,7 +126,7 @@ func (l *Ledger) DecidedItems(ctx context.Context) ([]DecidedEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []DecidedEntry
 	for rows.Next() {
 		var e DecidedEntry
@@ -323,7 +323,7 @@ func (l *Ledger) StaleLenses(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type key struct{ lens, sched string }
 	type last struct {
 		window time.Duration
@@ -378,7 +378,7 @@ func (l *Ledger) LastRuns(ctx context.Context) ([]LastRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []LastRun
 	for rows.Next() {
 		var r LastRun
@@ -398,7 +398,7 @@ func (l *Ledger) Lenses(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var s string

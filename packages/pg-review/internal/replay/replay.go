@@ -186,7 +186,7 @@ func Run(ctx context.Context, f Fixture, a Analyst, ledgerPath string) (Outcome,
 	if err != nil {
 		return out, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	var run ledger.Run
 	err = l.WithTx(ctx, func(tx *ledger.Tx) error {
 		var e error

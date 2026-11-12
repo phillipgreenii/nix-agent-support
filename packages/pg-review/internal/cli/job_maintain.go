@@ -28,7 +28,7 @@ func newJobMaintainCmd() *cobra.Command {
 			if err != nil {
 				return ExitErrorf(exitcode.Ledger, "%v", err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout()}
 			runner.RegisterCcpool(d)
 			if runnerHook != nil {

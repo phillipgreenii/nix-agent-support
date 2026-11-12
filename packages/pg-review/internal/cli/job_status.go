@@ -173,7 +173,7 @@ func newJobStatusCmd() *cobra.Command {
 			if err != nil {
 				return ExitErrorf(exitcode.Ledger, "%v", err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			s, err := buildStatus(cmd, l, cfg)
 			if err != nil {
 				return mapHumanError(err)

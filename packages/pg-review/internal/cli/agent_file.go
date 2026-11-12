@@ -53,7 +53,7 @@ func newAgentFileCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			res, err := ledger.FileFindings(cmd.Context(), l, cfg, runID, raw, dry)
 			if err != nil {
 				return mapFileError(err)

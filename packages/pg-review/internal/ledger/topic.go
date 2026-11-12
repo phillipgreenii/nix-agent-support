@@ -424,7 +424,7 @@ func (l *Ledger) TopicsForLens(ctx context.Context, lens string) ([]Topic, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Topic
 	for rows.Next() {
 		var tp Topic

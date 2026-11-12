@@ -167,7 +167,7 @@ func (l *Ledger) Locks(ctx context.Context) ([]Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Lock
 	for rows.Next() {
 		var k Lock
@@ -213,7 +213,7 @@ func (l *Ledger) RunsInStates(ctx context.Context, states ...string) ([]Run, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Run
 	for rows.Next() {
 		r, err := scanRun(rows)

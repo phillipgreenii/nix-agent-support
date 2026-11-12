@@ -31,7 +31,7 @@ func newHumanShowCmd() *cobra.Command {
 			if err != nil {
 				return mapHumanError(err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			items, err := l.ShowItems(ctx, ids)
 			if err != nil {
 				return mapHumanError(err)

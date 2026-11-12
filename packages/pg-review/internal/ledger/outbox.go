@@ -115,7 +115,7 @@ func (l *Ledger) DueBeadDecisions(ctx context.Context) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	now := l.now()
 	var ids []int64
 	for rows.Next() {

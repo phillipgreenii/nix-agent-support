@@ -45,7 +45,7 @@ func TestOpenModesWALAndDefaultPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if l.Path() != filepath.Join(dir, "ledger.db") {
 		t.Fatalf("path %s", l.Path())
 	}
@@ -83,7 +83,7 @@ func TestNoQuestionOrOutboxTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	have := map[string]bool{}
 	for rows.Next() {
 		var n string
@@ -108,7 +108,7 @@ func TestRunTableColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	have := map[string]bool{}
 	for rows.Next() {
 		var cid int
@@ -511,7 +511,7 @@ func TestIntegrityCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	cl := &Ledger{db: db, path: bad, now: time.Now}
 	if err := cl.IntegrityCheck(ctx); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("want ErrIntegrity, got %v", err)
@@ -572,7 +572,7 @@ func TestBackupIsReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 	if g, err := b.GetTopic(ctx, tp.ID); err != nil || g.SubjectKey != "s" {
 		t.Fatalf("%+v %v", g, err)
 	}

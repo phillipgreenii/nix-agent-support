@@ -324,9 +324,7 @@ func golden(t *testing.T, id string) string {
 // below is made on the rule lines only.
 func ruleLines(text string) []string {
 	var out []string
-	for _, m := range ruleLineRe.FindAllString(text, -1) {
-		out = append(out, m)
-	}
+	out = append(out, ruleLineRe.FindAllString(text, -1)...)
 	return out
 }
 

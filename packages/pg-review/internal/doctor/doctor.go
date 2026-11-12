@@ -155,7 +155,7 @@ func checkLedger(ctx context.Context, d *Deps) Result {
 	if err != nil {
 		return fail(CheckLedger, exitcode.Ledger, "open: %v", err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if err := l.IntegrityCheck(ctx); err != nil {
 		return fail(CheckLedger, exitcode.Ledger, "%v", err)
 	}
@@ -256,7 +256,7 @@ func checkHook(ctx context.Context, d *Deps) Result {
 	if err != nil {
 		return fail(CheckHook, exitcode.Provider, "%v", err)
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	ti, _ := json.Marshal(map[string]string{"command": HookSample})
 	payload, _ := json.Marshal(map[string]any{
 		"session_id": "pg-review-doctor", "transcript_path": filepath.Join(tmp, "t.jsonl"),

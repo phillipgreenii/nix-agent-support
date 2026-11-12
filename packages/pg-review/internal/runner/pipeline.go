@@ -186,7 +186,7 @@ func finishFailed(ctx context.Context, d *Deps, s *State, err error) error {
 	}
 	cur, gerr := d.Ledger.GetRun(bg, s.Run.ID)
 	if gerr == nil {
-		d.cleanupRun(bg, cur)
+		_ = d.cleanupRun(bg, cur)
 	}
 	if eerr := endRun(bg, d, s.Run.ID, state, reason); eerr != nil {
 		return fmt.Errorf("%w (also failed to record the end of the run: %v)", err, eerr)

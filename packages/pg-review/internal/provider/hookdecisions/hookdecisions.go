@@ -363,7 +363,7 @@ func isEnvAssign(w string) bool {
 		return false
 	}
 	for _, c := range w[:eq] {
-		if !(c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+		if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') {
 			return false
 		}
 	}
@@ -375,7 +375,7 @@ func isSubcommand(w string) bool {
 		return false
 	}
 	for _, c := range w {
-		if !(c == '-' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+		if c != '-' && (c < 'a' || c > 'z') && (c < '0' || c > '9') {
 			return false
 		}
 	}

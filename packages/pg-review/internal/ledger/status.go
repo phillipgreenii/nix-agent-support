@@ -22,7 +22,7 @@ func (l *Ledger) LastRunsByScope(ctx context.Context) ([]ScopeRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ScopeRun
 	for rows.Next() {
 		var r ScopeRun

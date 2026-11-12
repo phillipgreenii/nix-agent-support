@@ -34,7 +34,7 @@ func newJobShowRunCmd() *cobra.Command {
 			if err != nil {
 				return ExitErrorf(exitcode.Ledger, "%v", err)
 			}
-			defer l.Close()
+			defer func() { _ = l.Close() }()
 			r, err := l.GetRun(cmd.Context(), id)
 			if errors.Is(err, ledger.ErrNotFound) {
 				return ExitErrorf(exitcode.ValidationRejected, "run %d not found", id)
