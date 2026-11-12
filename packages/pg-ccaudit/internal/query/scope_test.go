@@ -55,7 +55,7 @@ func buildScopeDB(t *testing.T) *sql.DB {
 	}
 	exec := func(q string, args ...any) {
 		t.Helper()
-		if _, err := w.Exec(q, args...); err != nil {
+		if _, err := w.ExecContext(context.Background(), q, args...); err != nil {
 			t.Fatalf("exec %q: %v", q, err)
 		}
 	}
@@ -259,7 +259,7 @@ func TestWorktreeSessionCwdIsRecordedVerbatimAndMatched(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	var cwd string
-	if err := db.QueryRow(`SELECT cwd FROM events WHERE session_id='S-WT' ORDER BY seq LIMIT 1`).Scan(&cwd); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT cwd FROM events WHERE session_id='S-WT' ORDER BY seq LIMIT 1`).Scan(&cwd); err != nil {
 		t.Fatal(err)
 	}
 	if cwd != "/w/repo/.worktrees/feat" {

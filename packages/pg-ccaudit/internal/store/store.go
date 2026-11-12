@@ -42,6 +42,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -252,7 +253,7 @@ func Open(path string, withThinking bool) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(Schema); err != nil {
+	if _, err := db.ExecContext(context.Background(), Schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
@@ -261,12 +262,12 @@ func Open(path string, withThinking bool) (*sql.DB, error) {
 		return nil, err
 	}
 	if withThinking {
-		if _, err := db.Exec(ThinkingSchema); err != nil {
+		if _, err := db.ExecContext(context.Background(), ThinkingSchema); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("apply thinking schema: %w", err)
 		}
 	}
-	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
+	if _, err := db.ExecContext(context.Background(), fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set user_version: %w", err)
 	}
@@ -275,7 +276,7 @@ func Open(path string, withThinking bool) (*sql.DB, error) {
 
 func userVersion(db *sql.DB) (int, error) {
 	var v int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+	if err := db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&v); err != nil {
 		return 0, fmt.Errorf("read user_version: %w", err)
 	}
 	return v, nil
@@ -320,7 +321,7 @@ func migrate(db *sql.DB, prior int, withThinking bool) error {
 		stmts = append([]string{`DELETE FROM thinking`}, stmts...)
 	}
 	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := db.ExecContext(context.Background(), s); err != nil {
 			return fmt.Errorf("migrate schema %d -> %d (%s): %w", prior, SchemaVersion, s, err)
 		}
 	}
@@ -352,7 +353,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(1)
 	var queryOnly int
-	if err := db.QueryRow("PRAGMA query_only").Scan(&queryOnly); err != nil {
+	if err := db.QueryRowContext(context.Background(), "PRAGMA query_only").Scan(&queryOnly); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("verify query_only: %w", err)
 	}
@@ -366,7 +367,8 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 // HasThinkingTable reports whether the optional T-16 thinking table exists.
 func HasThinkingTable(db *sql.DB) (bool, error) {
 	var n int
-	err := db.QueryRow(
+	err := db.QueryRowContext(
+		context.Background(),
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='thinking'`,
 	).Scan(&n)
 	if err != nil {

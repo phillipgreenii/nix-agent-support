@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,11 +34,11 @@ func TestSchemaUpgradeForcesAFullReIngest(t *testing.T) {
 		{`INSERT INTO user_text (path, seq, text_len, text, interrupted) VALUES ('/t/a.jsonl', 3, 4, 'typed', 0)`},
 	}
 	for _, s := range seed {
-		if _, err := db.Exec(s[0].(string)); err != nil {
+		if _, err := db.ExecContext(context.Background(), s[0].(string)); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	if _, err := db.Exec("PRAGMA user_version = 1"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "PRAGMA user_version = 1"); err != nil {
 		t.Fatalf("stamp old version: %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -53,7 +54,7 @@ func TestSchemaUpgradeForcesAFullReIngest(t *testing.T) {
 
 	for _, table := range CanonicalTables {
 		var n int
-		if err := db2.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+		if err := db2.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+table).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", table, err)
 		}
 		if n != 0 {
@@ -61,7 +62,7 @@ func TestSchemaUpgradeForcesAFullReIngest(t *testing.T) {
 		}
 	}
 	var v int
-	if err := db2.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+	if err := db2.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatalf("read user_version: %v", err)
 	}
 	if v != SchemaVersion {
@@ -79,11 +80,11 @@ func TestMigrationClearsFilesNotJustOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO files (path, project_dir, size, mtime, resume_offset, complete, lines_ok, lines_bad, ingested_at)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO files (path, project_dir, size, mtime, resume_offset, complete, lines_ok, lines_bad, ingested_at)
 	                      VALUES ('/t/a.jsonl', 'p', 100, 1, 100, 1, 2, 0, 1)`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := db.Exec("PRAGMA user_version = 1"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "PRAGMA user_version = 1"); err != nil {
 		t.Fatalf("stamp: %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -95,7 +96,7 @@ func TestMigrationClearsFilesNotJustOffsets(t *testing.T) {
 	}
 	defer func() { _ = db2.Close() }()
 	var n int
-	if err := db2.QueryRow(`SELECT COUNT(*) FROM files WHERE path = '/t/a.jsonl'`).Scan(&n); err != nil {
+	if err := db2.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM files WHERE path = '/t/a.jsonl'`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -111,7 +112,7 @@ func TestOpenAtCurrentVersionPreservesData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO files (path, project_dir, size, mtime, resume_offset, complete, lines_ok, lines_bad, ingested_at)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO files (path, project_dir, size, mtime, resume_offset, complete, lines_ok, lines_bad, ingested_at)
 	                      VALUES ('/t/a.jsonl', 'p', 100, 1, 100, 1, 2, 0, 1)`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestOpenAtCurrentVersionPreservesData(t *testing.T) {
 			t.Fatalf("re-Open %d: %v", i, err)
 		}
 		var n int
-		if err := again.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&n); err != nil {
+		if err := again.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM files`).Scan(&n); err != nil {
 			t.Fatalf("count: %v", err)
 		}
 		if n != 1 {
@@ -156,7 +157,8 @@ func TestFreshDatabaseIsNotMigrated(t *testing.T) {
 func TestUserTextIsCanonical(t *testing.T) {
 	_, db := tempDB(t, false)
 	var n int
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='user_text'`,
 	).Scan(&n); err != nil {
 		t.Fatalf("query: %v", err)
@@ -183,7 +185,8 @@ func TestUserTextIsCanonical(t *testing.T) {
 func TestToolCallsHasAPathSeqIndex(t *testing.T) {
 	_, db := tempDB(t, false)
 	var n int
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_calls_pathseq'`,
 	).Scan(&n); err != nil {
 		t.Fatalf("query: %v", err)
@@ -192,7 +195,7 @@ func TestToolCallsHasAPathSeqIndex(t *testing.T) {
 		t.Error("idx_calls_pathseq is missing; the Tier 1 candidate queries degrade to full table scans")
 	}
 	var plan string
-	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT MAX(seq) FROM tool_calls WHERE path = 'x' AND seq < 10`)
+	rows, err := db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT MAX(seq) FROM tool_calls WHERE path = 'x' AND seq < 10`)
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}

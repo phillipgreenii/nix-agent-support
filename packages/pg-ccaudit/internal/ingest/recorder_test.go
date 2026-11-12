@@ -36,7 +36,7 @@ func openDB(t *testing.T) *sql.DB {
 func rowCount(t *testing.T, db *sql.DB, q string, args ...any) int {
 	t.Helper()
 	var n int
-	if err := db.QueryRow(q, args...).Scan(&n); err != nil {
+	if err := db.QueryRowContext(context.Background(), q, args...).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -71,16 +71,16 @@ func TestRecorderIngestSnapshotThenOnlyNewRecords(t *testing.T) {
 	// Error body and signature come from the recorder's copy; the success body
 	// is never stored, its length is.
 	var content, sig sql.NullString
-	if err := db.QueryRow(`SELECT content, signature FROM tool_results WHERE tool_use_id='tu_1'`).Scan(&content, &sig); err != nil || content.String != "rtk: command not found" || sig.String == "" {
+	if err := db.QueryRowContext(context.Background(), `SELECT content, signature FROM tool_results WHERE tool_use_id='tu_1'`).Scan(&content, &sig); err != nil || content.String != "rtk: command not found" || sig.String == "" {
 		t.Fatalf("error row: %v %v %v", content, sig, err)
 	}
 	var okContent sql.NullString
 	var okLen int
-	if err := db.QueryRow(`SELECT content, content_len FROM tool_results WHERE tool_use_id='tu_2'`).Scan(&okContent, &okLen); err != nil || okContent.Valid || okLen == 0 {
+	if err := db.QueryRowContext(context.Background(), `SELECT content, content_len FROM tool_results WHERE tool_use_id='tu_2'`).Scan(&okContent, &okLen); err != nil || okContent.Valid || okLen == 0 {
 		t.Fatalf("success row: %v %d %v", okContent, okLen, err)
 	}
 	var lead sql.NullString
-	if err := db.QueryRow(`SELECT lead_cmd FROM tool_calls WHERE tool_use_id='tu_1'`).Scan(&lead); err != nil || lead.String != "rtk" {
+	if err := db.QueryRowContext(context.Background(), `SELECT lead_cmd FROM tool_calls WHERE tool_use_id='tu_1'`).Scan(&lead); err != nil || lead.String != "rtk" {
 		t.Fatalf("lead_cmd=%v err=%v", lead, err)
 	}
 
@@ -143,7 +143,7 @@ func TestRecorderIngestResyncsOnAnExpiredCursor(t *testing.T) {
 	db := openDB(t)
 	c := env.Dial(context.Background())
 	recSweep(t, db, c)
-	if _, err := db.Exec(`UPDATE feed_cursors SET cursor = '999:1'`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `UPDATE feed_cursors SET cursor = '999:1'`); err != nil {
 		t.Fatal(err)
 	}
 	st := recSweep(t, db, c)
@@ -201,22 +201,22 @@ func TestRecorderIngestFillsEveryKindOfRow(t *testing.T) {
 	}
 	var txt, src string
 	var ln int
-	if err := db.QueryRow(`SELECT text, text_len FROM user_text`).Scan(&txt, &ln); err != nil || txt != "please list the example files" {
+	if err := db.QueryRowContext(context.Background(), `SELECT text, text_len FROM user_text`).Scan(&txt, &ln); err != nil || txt != "please list the example files" {
 		t.Fatalf("user_text: %q %v", txt, err)
 	}
-	if err := db.QueryRow(`SELECT prompt_source FROM events WHERE uuid='u1'`).Scan(&src); err != nil || src != "typed" {
+	if err := db.QueryRowContext(context.Background(), `SELECT prompt_source FROM events WHERE uuid='u1'`).Scan(&src); err != nil || src != "typed" {
 		t.Fatalf("prompt_source=%q err=%v", src, err)
 	}
-	if err := db.QueryRow(`SELECT text FROM assistant_text`).Scan(&txt); err != nil || txt != "Sure, listing now." {
+	if err := db.QueryRowContext(context.Background(), `SELECT text FROM assistant_text`).Scan(&txt); err != nil || txt != "Sure, listing now." {
 		t.Fatalf("assistant_text without a tool call: %q %v", txt, err)
 	}
 	var hc int
 	var he string
-	if err := db.QueryRow(`SELECT hook_count, hook_errors FROM events WHERE uuid='s1'`).Scan(&hc, &he); err != nil || hc != 3 || he != `["example hook failed"]` {
+	if err := db.QueryRowContext(context.Background(), `SELECT hook_count, hook_errors FROM events WHERE uuid='s1'`).Scan(&hc, &he); err != nil || hc != 3 || he != `["example hook failed"]` {
 		t.Fatalf("hook keys: %d %q %v", hc, he, err)
 	}
 	var ts string
-	if err := db.QueryRow(`SELECT ts FROM events WHERE uuid='a0'`).Scan(&ts); err != nil || ts != "2026-10-29T19:59:59.000Z" {
+	if err := db.QueryRowContext(context.Background(), `SELECT ts FROM events WHERE uuid='a0'`).Scan(&ts); err != nil || ts != "2026-10-29T19:59:59.000Z" {
 		t.Fatalf("ts=%q err=%v", ts, err)
 	}
 	// Per-file order is the record offset: a line's seq grows with its position.
@@ -236,12 +236,12 @@ func TestRecorderIngestRerunKeepsRawDerivedColumns(t *testing.T) {
 	db := openDB(t)
 	c := env.Dial(context.Background())
 	recSweep(t, db, c)
-	if _, err := db.Exec(`UPDATE feed_cursors SET cursor = '999:1' WHERE name = 'lines'`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `UPDATE feed_cursors SET cursor = '999:1' WHERE name = 'lines'`); err != nil {
 		t.Fatal(err)
 	}
 	recSweep(t, db, c) // the lines subscription resyncs and upserts every event again
 	var src string
-	if err := db.QueryRow(`SELECT prompt_source FROM events WHERE uuid='u1'`).Scan(&src); err != nil || src != "typed" {
+	if err := db.QueryRowContext(context.Background(), `SELECT prompt_source FROM events WHERE uuid='u1'`).Scan(&src); err != nil || src != "typed" {
 		t.Fatalf("a replayed line event dropped prompt_source: %q %v", src, err)
 	}
 }
@@ -278,7 +278,7 @@ func TestRecorderIngestResumesASnapshotAfterADeadline(t *testing.T) {
 		t.Fatalf("events=%d after two committed pages, want 2", n)
 	}
 	var pos string
-	if err := db.QueryRow(`SELECT cursor FROM feed_cursors WHERE name = 'lines.snapshot'`).Scan(&pos); err != nil || pos == "" {
+	if err := db.QueryRowContext(context.Background(), `SELECT cursor FROM feed_cursors WHERE name = 'lines.snapshot'`).Scan(&pos); err != nil || pos == "" {
 		t.Fatalf("no snapshot position kept: %q %v", pos, err)
 	}
 
@@ -313,7 +313,7 @@ func TestRecorderIngestRestartsASnapshotWithAnExpiredPosition(t *testing.T) {
 	env.Write(rel, callOne+resErr)
 	env.Settle()
 	db := openDB(t)
-	if _, err := db.Exec(`INSERT INTO feed_cursors (name, cursor) VALUES ('lines.snapshot', '999:1|r1')`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO feed_cursors (name, cursor) VALUES ('lines.snapshot', '999:1|r1')`); err != nil {
 		t.Fatal(err)
 	}
 	st := recSweep(t, db, env.Dial(context.Background()))

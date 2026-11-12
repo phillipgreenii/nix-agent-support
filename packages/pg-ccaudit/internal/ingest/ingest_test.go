@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -61,7 +62,8 @@ func TestMalformedLinesSkipPerLineNotPerFile(t *testing.T) {
 
 	bad := filepath.Join(root, "projB", "sess-bad.jsonl")
 	var linesOK, linesBad int64
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT lines_ok, lines_bad FROM files WHERE path = ?`, bad,
 	).Scan(&linesOK, &linesBad); err != nil {
 		t.Fatalf("read sess-bad row: %v", err)
@@ -97,7 +99,8 @@ func TestIsErrorIsPresentAndTrueOnly(t *testing.T) {
 		var contentLen int64
 		var content sql.NullString
 		var sig sql.NullString
-		if err := db.QueryRow(
+		if err := db.QueryRowContext(
+			context.Background(),
 			`SELECT is_error, content_len, content, signature FROM tool_results WHERE tool_use_id = ?`,
 			id,
 		).Scan(&isErr, &contentLen, &content, &sig); err != nil {
@@ -134,7 +137,8 @@ func TestErrorBodiesStoredInFullWithSignature(t *testing.T) {
 
 	var content, sig string
 	var contentLen int64
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT content, content_len, signature FROM tool_results WHERE tool_use_id = 'toolu_C1'`,
 	).Scan(&content, &contentLen, &sig); err != nil {
 		t.Fatalf("read toolu_C1: %v", err)
@@ -160,7 +164,8 @@ func TestToolInputsStoredUntruncated(t *testing.T) {
 
 	var input string
 	var lead sql.NullString
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT input_json, lead_cmd FROM tool_calls WHERE tool_use_id = 'toolu_A4'`,
 	).Scan(&input, &lead); err != nil {
 		t.Fatalf("read toolu_A4: %v", err)
@@ -173,7 +178,8 @@ func TestToolInputsStoredUntruncated(t *testing.T) {
 	}
 	// lead_cmd is Bash-only.
 	var readLead sql.NullString
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT lead_cmd FROM tool_calls WHERE tool_use_id = 'toolu_A3'`,
 	).Scan(&readLead); err != nil {
 		t.Fatalf("read toolu_A3: %v", err)
@@ -194,7 +200,7 @@ func TestEventsRetainEveryRequiredField(t *testing.T) {
 		uuid, parent, session, ts, typ, cwd, branch, mode, promptSrc, userType, srcTool, entry sql.NullString
 		sidechain                                                                              sql.NullInt64
 	)
-	err := db.QueryRow(`
+	err := db.QueryRowContext(context.Background(), `
 		SELECT uuid, parent_uuid, session_id, ts, type, is_sidechain, cwd, git_branch,
 		       permission_mode, prompt_source, user_type, source_tool_assistant_uuid, entrypoint
 		FROM events WHERE path = ? AND seq = 1`, mainTranscript(root)).Scan(
@@ -238,7 +244,8 @@ func TestEventsRetainEveryRequiredField(t *testing.T) {
 	// T-5 fields present on the system event that carries them.
 	var duration, hookCount sql.NullInt64
 	var hookErrors sql.NullString
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT duration_ms, hook_count, hook_errors FROM events WHERE path = ? AND seq = 7`,
 		mainTranscript(root),
 	).Scan(&duration, &hookCount, &hookErrors); err != nil {
@@ -256,7 +263,8 @@ func TestEventsRetainEveryRequiredField(t *testing.T) {
 	// An EMPTY hookErrors array is a real observation and is stored, so
 	// "rejected nothing" stays distinguishable from "no hook data".
 	var emptyHooks sql.NullString
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT hook_errors FROM events WHERE path = ? AND seq = 7`,
 		filepath.Join(root, "projB", "sess-bad.jsonl"),
 	).Scan(&emptyHooks); err != nil {
@@ -364,7 +372,7 @@ func TestShrunkFileIsReingestedFromZero(t *testing.T) {
 	// Every record class from the old content must be gone.
 	for _, tbl := range []string{"tool_calls", "tool_results", "assistant_text"} {
 		var n int64
-		if err := db.QueryRow(`SELECT COUNT(*) FROM `+tbl+` WHERE path = ?`, path).Scan(&n); err != nil {
+		if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+tbl+` WHERE path = ?`, path).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", tbl, err)
 		}
 		wantN := int64(0)
@@ -407,7 +415,7 @@ func TestCorruptResumeOffsetForcesReingest(t *testing.T) {
 
 	path := mainTranscript(root)
 	// Poison the offset so it points mid-line, then make the file look grown.
-	if _, err := db.Exec(`UPDATE files SET resume_offset = 17, mtime = mtime - 1000000000 WHERE path = ?`, path); err != nil {
+	if _, err := db.ExecContext(context.Background(), `UPDATE files SET resume_offset = 17, mtime = mtime - 1000000000 WHERE path = ?`, path); err != nil {
 		t.Fatalf("poison offset: %v", err)
 	}
 	// Its size must still match so `decide` chooses resume, not reingest.
@@ -453,7 +461,8 @@ func TestTornTrailingLineIsNotConsumedAndFileStaysOpen(t *testing.T) {
 		t.Errorf("lines_bad = %d, want 0 — a torn write is not malformed input", stats.LinesBad)
 	}
 	var offset, complete int64
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT resume_offset, complete FROM files WHERE path = ?`, path,
 	).Scan(&offset, &complete); err != nil {
 		t.Fatalf("read files row: %v", err)
@@ -558,7 +567,7 @@ func TestThinkingCaptureIsOptOut(t *testing.T) {
 			t.Errorf("thinking captured = %d, want 1", stats.Thinking)
 		}
 		var text string
-		if err := db.QueryRow(`SELECT text FROM thinking WHERE path = ?`, path).Scan(&text); err != nil {
+		if err := db.QueryRowContext(context.Background(), `SELECT text FROM thinking WHERE path = ?`, path).Scan(&text); err != nil {
 			t.Fatalf("read thinking: %v", err)
 		}
 		if text != "pondering" {
@@ -675,7 +684,8 @@ func TestReplayingABytesRangeDoesNotDuplicate(t *testing.T) {
 	// keeps this a realistic state rather than an impossible one (they are
 	// written in the same transaction, so they never disagree in practice).
 	// mtime is set behind the on-disk value so the file is classified as grown.
-	if _, err := db.Exec(
+	if _, err := db.ExecContext(
+		context.Background(),
 		`UPDATE files SET resume_offset = 0, lines_ok = 0, lines_bad = 0, mtime = mtime - 1000000000
 		 WHERE path = ?`, path,
 	); err != nil {
@@ -752,7 +762,7 @@ func TestProjectDirRecorded(t *testing.T) {
 	_, db := openTestDB(t, false)
 	sweep(t, db, root)
 	var dir string
-	if err := db.QueryRow(`SELECT project_dir FROM files WHERE path = ?`, mainTranscript(root)).Scan(&dir); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT project_dir FROM files WHERE path = ?`, mainTranscript(root)).Scan(&dir); err != nil {
 		t.Fatalf("read project_dir: %v", err)
 	}
 	if dir != "projA" {

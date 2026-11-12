@@ -23,7 +23,7 @@ func seedFile(t *testing.T, db *sql.DB, path, ts string, ingestedAt int64) {
 			`INSERT INTO events (path, seq, ts, type) VALUES ('`+path+`', 2, '`+ts+`', 'assistant')`)
 	}
 	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := db.ExecContext(context.Background(), s); err != nil {
 			t.Fatalf("seed %q: %v", s, err)
 		}
 	}
@@ -32,7 +32,7 @@ func seedFile(t *testing.T, db *sql.DB, path, ts string, ingestedAt int64) {
 func countRows(t *testing.T, db *sql.DB, table string) int {
 	t.Helper()
 	var n int
-	if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -50,7 +50,7 @@ func TestPruneRemovesOnlyFilesWhoseNewestEventIsOlderThanCutoff(t *testing.T) {
 	// No events, long untouched: removed. No events, just touched: kept.
 	seedFile(t, db, "empty-stale/g1", "", now.AddDate(0, 0, -200).Unix())
 	seedFile(t, db, "empty-fresh/g1", "", now.Unix())
-	if _, err := db.Exec(`INSERT INTO feed_cursors (name, cursor) VALUES ('c', '42')`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO feed_cursors (name, cursor) VALUES ('c', '42')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,7 +81,7 @@ func TestPruneRemovesOnlyFilesWhoseNewestEventIsOlderThanCutoff(t *testing.T) {
 		}
 	}
 	var left int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM files WHERE path IN ('straddle/g1','empty-fresh/g1')`).Scan(&left); err != nil || left != 2 {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM files WHERE path IN ('straddle/g1','empty-fresh/g1')`).Scan(&left); err != nil || left != 2 {
 		t.Fatalf("kept the wrong files: %d, %v", left, err)
 	}
 
@@ -96,7 +96,7 @@ func TestPruneCoversTheOptionalThinkingTable(t *testing.T) {
 	_, db := tempDB(t, true)
 	now := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	seedFile(t, db, "old/g1", now.AddDate(0, 0, -200).Format(TSLayout), now.Unix())
-	if _, err := db.Exec(`INSERT INTO thinking (path, seq, text) VALUES ('old/g1', 9, 't')`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO thinking (path, seq, text) VALUES ('old/g1', 9, 't')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Prune(context.Background(), db, now.AddDate(0, 0, -90), false); err != nil {

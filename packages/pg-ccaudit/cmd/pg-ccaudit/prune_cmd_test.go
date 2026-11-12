@@ -22,7 +22,7 @@ func TestPruneCommandDryRunThenYes(t *testing.T) {
 		`INSERT INTO files (path, project_dir, size, mtime, lines_ok, lines_bad, ingested_at) VALUES ('a/g1', '', 0, 0, 1, 0, 1)`,
 		`INSERT INTO events (path, seq, ts, type) VALUES ('a/g1', 1, '` + old + `', 'user')`,
 	} {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := db.ExecContext(context.Background(), s); err != nil {
 			t.Fatal(err)
 		}
 	}

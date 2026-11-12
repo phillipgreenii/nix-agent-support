@@ -125,7 +125,7 @@ func sweepWith(t *testing.T, db *sql.DB, opt Options) Stats {
 func countRows(t *testing.T, db *sql.DB, query string, args ...any) int64 {
 	t.Helper()
 	var n int64
-	if err := db.QueryRow(query, args...).Scan(&n); err != nil {
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&n); err != nil {
 		t.Fatalf("%s: %v", query, err)
 	}
 	return n

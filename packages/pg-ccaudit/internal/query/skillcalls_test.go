@@ -30,7 +30,7 @@ func buildSkillDB(t *testing.T, calls []skillCall) *sql.DB {
 	}
 	exec := func(q string, args ...any) {
 		t.Helper()
-		if _, err := w.Exec(q, args...); err != nil {
+		if _, err := w.ExecContext(context.Background(), q, args...); err != nil {
 			t.Fatalf("exec %q: %v", q, err)
 		}
 	}

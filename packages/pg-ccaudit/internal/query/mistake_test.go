@@ -618,7 +618,7 @@ func TestUserTextAppliesTheT3aRule(t *testing.T) {
 		interrupted int64
 		promptSrc   sql.NullString
 	}
-	rows, err := db.Query(`
+	rows, err := db.QueryContext(context.Background(), `
 		SELECT u.seq, u.text_len, u.text, u.interrupted, e.prompt_source
 		FROM user_text u JOIN events e ON e.path = u.path AND e.seq = u.seq
 		WHERE u.path LIKE '%sess-m.jsonl' ORDER BY u.seq`)

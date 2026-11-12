@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -25,7 +26,8 @@ func tempDB(t *testing.T, withThinking bool) (string, *sql.DB) {
 
 func tableNames(t *testing.T, db *sql.DB) []string {
 	t.Helper()
-	rows, err := db.Query(
+	rows, err := db.QueryContext(
+		context.Background(),
 		`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`,
 	)
 	if err != nil {
@@ -98,7 +100,8 @@ func TestMandatoryCorrectedColumnsPresent(t *testing.T) {
 		{"tool_results", "content"},     // FIX 2 (T-3a): NULLable
 	} {
 		var n int
-		err := db.QueryRow(
+		err := db.QueryRowContext(
+			context.Background(),
 			`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, tc.table, tc.column,
 		).Scan(&n)
 		if err != nil {
@@ -111,7 +114,8 @@ func TestMandatoryCorrectedColumnsPresent(t *testing.T) {
 	// content MUST be nullable (a successful result stores no body) and
 	// content_len MUST NOT be (it is always populated).
 	var contentNotNull, lenNotNull int
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT "notnull" FROM pragma_table_info('tool_results') WHERE name='content'`,
 	).Scan(&contentNotNull); err != nil {
 		t.Fatalf("content notnull: %v", err)
@@ -119,7 +123,8 @@ func TestMandatoryCorrectedColumnsPresent(t *testing.T) {
 	if contentNotNull != 0 {
 		t.Error("tool_results.content must be NULLable (T-3a): a successful body is never stored")
 	}
-	if err := db.QueryRow(
+	if err := db.QueryRowContext(
+		context.Background(),
 		`SELECT "notnull" FROM pragma_table_info('tool_results') WHERE name='content_len'`,
 	).Scan(&lenNotNull); err != nil {
 		t.Fatalf("content_len notnull: %v", err)
@@ -132,7 +137,7 @@ func TestMandatoryCorrectedColumnsPresent(t *testing.T) {
 func TestWALEnabled(t *testing.T) {
 	_, db := tempDB(t, false)
 	var mode string
-	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+	if err := db.QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil {
 		t.Fatalf("journal_mode: %v", err)
 	}
 	if mode != "wal" {
@@ -158,7 +163,8 @@ func TestOpenIsIdempotent(t *testing.T) {
 // and timestamp-for-timestamp untouched — not on which pragma achieved it.
 func TestOpenReadOnlyRefusesWritesAndLeavesFileUntouched(t *testing.T) {
 	path, db := tempDB(t, false)
-	if _, err := db.Exec(
+	if _, err := db.ExecContext(
+		context.Background(),
 		`INSERT INTO files (path, project_dir, size, mtime, lines_ok, lines_bad, ingested_at)
 		 VALUES ('/x', 'p', 1, 1, 1, 0, 1)`,
 	); err != nil {
@@ -166,7 +172,7 @@ func TestOpenReadOnlyRefusesWritesAndLeavesFileUntouched(t *testing.T) {
 	}
 	// Checkpoint so the row is in the main database file rather than the WAL,
 	// making the mtime comparison below meaningful.
-	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		t.Fatalf("checkpoint: %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -185,13 +191,13 @@ func TestOpenReadOnlyRefusesWritesAndLeavesFileUntouched(t *testing.T) {
 	defer func() { _ = ro.Close() }()
 
 	var n int
-	if err := ro.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&n); err != nil {
+	if err := ro.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM files`).Scan(&n); err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if n != 1 {
 		t.Fatalf("read %d rows, want 1", n)
 	}
-	if _, err := ro.Exec(`DELETE FROM files`); err == nil {
+	if _, err := ro.ExecContext(context.Background(), `DELETE FROM files`); err == nil {
 		t.Fatal("a write succeeded on the read-only handle; the query path must not be able to mutate the index")
 	}
 
