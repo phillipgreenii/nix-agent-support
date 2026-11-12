@@ -37,7 +37,7 @@ metrics backend, …) define their own terms in their own behavior sets.
 - **Operator override** — an `operator` level that wins while fresh; the sensor's value returns on
   expiry or `level clear` (`INV-SEN-6`).
 - **Level owner** — the identity that reported a level (`operator`, or a sensor's own name); a typo
-  guard, not a trust boundary (`INV-LVL-2`).
+  guard, not a trust boundary (`INV-LVL-2`). The owner `operator` is reserved for the operator verbs and `level-ingest` rejects it.
 - **Probe versus sensor** — a **probe** files issues (it acts on an alert); a **sensor** only reports
   a level and never files or changes anything.
   **Debug-only**: it has no behavioral effect, is overwritten on re-set, and is shown on inspection
@@ -56,6 +56,8 @@ metrics backend, …) define their own terms in their own behavior sets.
   never the decline's reason (`INV-FAIL-1`, `INV-OBS-3`).
 - **Progress gauges** — the three per-role gauges the core exports: the age since the role last made
   progress, and the counts of busy and of unsuccessful outcomes since it did (`INV-OBS-3`).
+- **Capped means rejected** — a value over a cap, such as a `--for` over 24 hours, is refused with an error and never silently clamped to the cap.
+- **Denylist** — the machine-local employer-name token file read by the public-repo check, never committed to any repo.
 
 ## Events and matching
 

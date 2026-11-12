@@ -527,19 +527,20 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   replaces the retired gate metrics, so levels and the readings behind them can be watched over time
   (the code constant omits `_total`; the exporter adds it):
 
-  | Metric                                                                                           | Labels                                                |
-  | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-  | `pg_router_resource_level` (gauge, 0 = best) and `pg_router_resource_scale_size`                 | resource                                              |
-  | `pg_router_resource_level_age_seconds`, `_lease_remaining_seconds`, `_stale`, `_override_active` | resource                                              |
-  | `pg_router_resource_level_seconds` (counter)                                                     | resource, level                                       |
-  | `pg_router_resource_changes`                                                                     | resource, to                                          |
-  | `pg_router_resource_level_source`                                                                | resource, source = sensor / operator / grace_fallback |
-  | `pg_router_resource_reading` (gauge, numeric)                                                    | resource, unit                                        |
-  | `pg_router_sensor_pull_seconds`, `_pull`, `_pull_failures`, `_last_observed_age_seconds`         | sensor                                                |
-  | `pg_router_level_events_rejected`                                                                | reason                                                |
-  | `pg_router_role_paused` (0/1)                                                                    | role                                                  |
-  | `pg_router_requirement_blocked`                                                                  | role, resource, kind (the 64-value fold applies)      |
-  | `pg_router_requirement_drops`                                                                    | event type, role, resource                            |
+  | Metric                                                                                           | Labels                                                                                                              |
+  | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+  | `pg_router_resource_level` (gauge, 0 = best) and `pg_router_resource_scale_size`                 | resource                                                                                                            |
+  | `pg_router_resource_level_age_seconds`, `_lease_remaining_seconds`, `_stale`, `_override_active` | resource                                                                                                            |
+  | `pg_router_resource_level_seconds` (counter)                                                     | resource, level                                                                                                     |
+  | `pg_router_resource_changes`                                                                     | resource, to                                                                                                        |
+  | `pg_router_resource_level_source`                                                                | resource, source = sensor / operator / grace_fallback                                                               |
+  | `pg_router_resource_reading` (gauge, numeric)                                                    | resource, unit                                                                                                      |
+  | `pg_router_sensor_pull_seconds`, `_pull`, `_last_observed_age_seconds`                           | sensor                                                                                                              |
+  | `pg_router_sensor_pull_failures`                                                                 | sensor, reason (deadline, exit, malformed, rejected)                                                                |
+  | `pg_router_level_events_rejected`                                                                | reason                                                                                                              |
+  | `pg_router_role_paused` (0/1)                                                                    | role                                                                                                                |
+  | `pg_router_requirement_blocked`                                                                  | role, resource, kind (the 64-value fold applies; kind is level, unknown or stale, no longer dispatch, poll or pull) |
+  | `pg_router_requirement_drops`                                                                    | event type, role, resource                                                                                          |
 
   `resource_scale_size` lets an alert tell "below best" from "worst" on any scale (a two-level
   scale's 1 is the worst; a graded scale's 1 is `OK`, which is normal). Mapping from the retired
@@ -548,7 +549,7 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   the counters of gates placed, cleared and expired become `resource_changes`; the gate-drops counter becomes
   `requirement_drops`. The log lines (one JSON line, key `resource_level`) are `level_changed`,
   `level_grace_expired`, `level_override_set`, `level_override_expired`, `level_event_rejected`,
-  `role_paused`, `role_resumed` (per transition, not per tick) and `legacy_gate_dropped` at startup.
+  `role_paused`, `role_resumed` (per transition, not per tick) and `legacy_gate_dropped` by the compaction pass, once per dropped active legacy gate.
 
 - **`INV-OBS-2`** <!-- uuid: 83a98350-7344-4e10-a911-8f1bcccb340c --> — **Per-participant inspection.**
   Beyond the aggregate metric catalog (`INV-OBS-1`), the core's inspection surface (`INTF-CLI`) **MUST**
@@ -761,8 +762,9 @@ A sensor is a level source. It reuses the event-source transport: a **pull** is 
 - **`INV-SEN-6`** <!-- uuid: d2488498-dd96-4347-a8da-4662c8536727 --> — **The operator can override a level.** `level set
 <resource> <LEVEL>` with a duration or `--until-cleared` pushes an `operator` level that wins while
   fresh; on expiry or `level clear` the sensor's value returns, and the sensor's record stays stored
-  beneath it (`INV-LVL-6`). Every override other than `--until-cleared` is capped at 24 hours, shown
-  in inspection with its expiry, and logged at set and expiry. A planned outage of a tracker's server
+  beneath it (`INV-LVL-6`). A duration override longer than 24 hours is rejected, never clamped (`--until-cleared` is the
+  alternative); `--for` takes a plain Go duration with no day form. Every override is shown in
+  inspection with its expiry, and logged at set and expiry. A planned outage of a tracker's server
   is held with an `--until-cleared` level on that tracker's resource, set before the server stops and
   cleared last.
 - **`INV-SEN-7`** <!-- uuid: e9b95723-7e91-4f0d-b459-d3bd51824317 --> — **An operator can refresh a level.** `level refresh
@@ -830,7 +832,7 @@ A sensor is a level source. It reuses the event-source transport: a **pull** is 
   `router` and cannot declare requirements. A legacy gate record in the log is ignored on replay and
   dropped by compaction; because startup compaction runs before replay, an active legacy gate (a
   latest record that is a set with no expiry or an unlapsed expiry) is deleted on the first start,
-  and the core logs every dropped active legacy gate at startup with its type, owner and expiry. No
+  and the compaction pass logs every dropped active legacy gate once, whether or not compaction on start is enabled, with its type, owner and expiry. No
   translation of a legacy gate into a level is built (`DEC-LEVEL-6`).
 - **`INV-ALR-1`** <!-- uuid: de90efaf-b7b8-4de6-9745-e7bf12c4c2cb --> — **Every consumer of a gate name is converted, and a check
   enforces it.** A search of every workspace repository for the retired gate names, the retired gate

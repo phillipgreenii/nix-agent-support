@@ -84,17 +84,16 @@ refresh record every `valid_for_s / 2`.
 
 **Decided** (delegated, 2026-11-10). One schema serves a pull answer and a push: `resource`,
 `level`, optional `reading` (`{ value: number, unit: string }`), `observed_at`, `valid_for_s` and
-`owner`; ONE JSON Schema file validates it. A pull answer is JSONL, one record per resource, diverted
-to level ingest (`INV-LVL-4`); a push is the `level-ingest` socket verb carrying the same record in
-the usual `schemaVersion` envelope. The outcomes are `accepted`, `idempotent` (same owner, resource,
-level and `observed_at`) and a rejection with a reason (`conflict`: same owner, resource and
-`observed_at` with a different level; `older_than_held`; skew ahead of now; unknown resource or
+`owner`; ONE JSON Schema file defines it, and the push request schema $refs it, so one schema validates both. The owner length 1 to 64 is the pattern `^.{1,64}$` (the schema validator has no minLength). Field names are snake_case on this wire although the other schemas are camelCase; that is accepted. A pull answer is JSONL, one record per resource, diverted
+to level ingest (`INV-LVL-4`); a push is the `level-ingest`socket verb carrying the same record in
+the usual`schemaVersion`envelope. The outcomes are`accepted`, `idempotent`(same owner, resource,
+level and`observed_at`) and a rejection with a reason (`conflict`: same owner, resource and
+`observed_at`with a different level;`older_than_held`; skew ahead of now; unknown resource or
 level; owner not the resource's sensor or `operator`; malformed), each counted
-(`pg_router_level_events_rejected`). The receipt sequence is the append order in the durable log; no
+(`pg_router_level_events_rejected`). `level-ingest`rejects an owner of`operator`with reason`not_registered_sensor`; any custom owner given to `level-set` counts as an operator source for precedence and compaction. The receipt sequence is the append order in the durable log; no
 second counter is added. Staleness is strict (`INV-STALE-1`): stale when the evaluation time is
-strictly after `expires_at`, or when `received_at - observed_at` is strictly greater than
-`valid_for_s`; a held level past `expires_at` stays in force until `expires_at` plus the grace
-(factor x `valid_for_s`), then reads `unknown`. The answer schema version and the default period and
+strictly after `expires_at`, or when `received_at - observed_at`is strictly greater than`valid_for_s`; a held level past `expires_at`stays in force until`expires_at`plus the grace
+(factor x`valid_for_s`), then reads `unknown`. The answer schema version and the default period and
 deadline per sensor remain tunable (open item).
 
 ### `DEC-LEVEL-4` — the sensors module layout and invocation <!-- uuid: 62f7f98c-4f73-424b-b48b-300ddec7d6e7 -->
@@ -105,11 +104,11 @@ deployment name). The module directory is `packages/pg-router-sensors`, the Go m
 `github.com/phillipgreenii/pg-router-sensors`, the binary `pg-router-sensors` and the check
 `pg-router-sensors-go-tests`; it mirrors the handlers and heartbeat modules.
 
-Invocation: `pg-router-sensors <subcommand> [--config FILE] [--state-dir DIR] [--only RESOURCE]`,
+Invocation: `pg-router-sensors <subcommand> [--config FILE] [--state-dir DIR] [--resource RESOURCE]`,
 the subcommand one of `host-sensor` (resources `cpu`, `disk`, `ram`, `network`), `vpn-sensor`,
 `git-auth-sensor`, `beads-sensor`, `claude-sensor`; an unknown or missing subcommand prints usage to
-stderr and exits 2. One invocation answers all the resources of that sensor, one JSONL line per
-resource on stdout and diagnostics on stderr; `--only` limits it to one resource. `--config` is a
+stderr and exits 2, and a configuration file that cannot be loaded exits 2 with the cause on stderr. One invocation answers all the resources of that sensor, one JSONL line per
+resource on stdout and diagnostics on stderr; `--resource` limits it to one resource (not `--only`, which clashes with pg-router's own `--only <kind>:<name>`). `--config` is a
 TOML file (absent means built-in defaults); `--state-dir` defaults to
 `$XDG_STATE_HOME/pg-router-sensors`, and the dwell state is `<state-dir>/<subcommand>.state.json`.
 Exit 0 when at least one resource was answered, 1 when none could be measured (a pull failure for the
@@ -139,15 +138,16 @@ the age, lease, stale and override gauges, `resource_level_source` (sensor, oper
 counter. Log lines carry the key `resource_level` (never `level`). Every alert, rule test, dashboard
 panel and runbook that named a gate metric is converted in the same landing and a check enforces it
 (`INV-ALR-1`): global-pause suppression keys only on the `router` resource at `PAUSED`, per-role
-suppression on the role-paused metric.
+suppression on the role-paused metric. The `kind` label of the `requirement_blocked` series changes meaning from `dispatch`, `poll` or `pull` to `level`, `unknown` or `stale`; a dashboard or alert that groups or filters on it breaks and must be rewritten in the same landing. `sensor_pull_failures` keeps labels `sensor` and `reason` (`deadline`, `exit`, `malformed`, `rejected`; this is the pull-failure list, not the ingest-reject list). Gauge and counter constants omit the unit and `_total`; the exporter adds `_seconds` and `_total`.
 
 ### `DEC-LEVEL-6` — legacy gates at upgrade <!-- uuid: 86ef6b4c-0487-405a-abef-6b3dcbfcd094 -->
 
 **Decided** (operator, Phillip, 2026-11-10, "approved as recommended"). The records the retired Gate
 Registry wrote are ignored on replay and dropped by compaction; startup compaction runs before
-replay, so an ACTIVE legacy gate (a latest record that is a set with no expiry or an unlapsed
-expiry) is deleted on the first start, and the core logs one `legacy_gate_dropped` line for each,
-carrying its type, owner and expiry. There is NO translation code (R-14): the landing runbook
+replay, so replay never sees a legacy gate record; the compaction pass (or a scan immediately before
+it) logs `legacy_gate_dropped` once per dropped ACTIVE gate (a latest record that is a set with no
+expiry or an unlapsed expiry), carrying its type, owner and expiry, tied to the drop itself because
+compaction on start is optional. There is NO translation code (R-14): the landing runbook
 requires the list of active gates (read with the retired listing verb before it goes) to be empty, or recorded and re-applied as a `level set`, BEFORE the apply.
 **Rejected:** translating a legacy gate into a level at replay, because the gate TYPEs have no
 resource to map to and a compatibility path is exactly what the one-landing rule forbids.

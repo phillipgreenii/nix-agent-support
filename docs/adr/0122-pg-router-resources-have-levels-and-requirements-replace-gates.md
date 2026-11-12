@@ -59,7 +59,7 @@ change. The durable home of the design is this record and those invariants.
 - The levels and the readings behind them are metrics, so the thresholds can be tuned over time and a
   sensor that goes silent is itself alertable.
 - The change is breaking for every consumer of a gate name, so it lands as one coordinated set across
-  the workspace repositories. An ACTIVE legacy gate in the log at the first start is deleted and logged
+  the workspace repositories. An ACTIVE legacy gate in the log at the first start is deleted and logged by the compaction pass
   (`DEC-LEVEL-6`); the operator lists and records any gate before the apply.
 - A level can be minutes stale at best; the router pulls before its first dispatch and after a wake
   from sleep, and the grace period bounds how long a silent sensor is believed.
