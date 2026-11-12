@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
@@ -36,7 +37,8 @@ const (
 	gaugeJanitorPhase      = "ccpool_janitor_phase_seconds"
 	gaugeJanitorOldestAge  = "ccpool_janitor_oldest_unexamined_age_seconds"
 
-	gaugeEmitTimeout = 10 * time.Second
+	gaugeEmitTimeout  = 10 * time.Second
+	gaugeBatchTimeout = 30 * time.Second
 )
 
 // gaugeEmitFn emits one gauge point; nil disables emission (tests).
@@ -47,6 +49,57 @@ func ccpoolGaugeEmit(ctx context.Context, name string, value float64, labels map
 	ctx, cancel := context.WithTimeout(ctx, gaugeEmitTimeout)
 	defer cancel()
 	return ccpool.NewCLIRunner(config.Default()).EmitGauge(ctx, name, value, labels)
+}
+
+// gaugeBatch collects a run's gauges and publishes them with ONE
+// `ccpool emit-gauge` call. Emitting each point through its own subprocess made
+// a run spawn dozens of ccpool processes, each dialing the collector and
+// flushing on exit; under load every one outlived its timeout and was killed,
+// so no gauge ever arrived.
+type gaugeBatch struct {
+	mu     sync.Mutex
+	points []ccpool.GaugePoint
+	send   func(ctx context.Context, points []ccpool.GaugePoint) error
+}
+
+func newGaugeBatch() *gaugeBatch {
+	return &gaugeBatch{send: func(ctx context.Context, pts []ccpool.GaugePoint) error {
+		return ccpool.NewCLIRunner(config.Default()).EmitGauges(ctx, pts)
+	}}
+}
+
+// Emit is a gaugeEmitFn: it only buffers, so it never blocks or fails.
+func (b *gaugeBatch) Emit(_ context.Context, name string, value float64, labels map[string]string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.points = append(b.points, ccpool.GaugePoint{Name: name, Value: value, Labels: labels})
+	return nil
+}
+
+// Flush sends and clears the buffered points under one bounded call. It runs on
+// a context detached from ctx's cancellation so a run that ended at its
+// deadline still publishes the heartbeat that says so.
+func (b *gaugeBatch) Flush(ctx context.Context) error {
+	b.mu.Lock()
+	pts := b.points
+	b.points = nil
+	b.mu.Unlock()
+	if len(pts) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gaugeBatchTimeout)
+	defer cancel()
+	return b.send(ctx, pts)
+}
+
+// flushGauges publishes the buffered gauges, logging (never returning) a failure.
+func flushGauges(ctx context.Context, flush func(context.Context) error) {
+	if flush == nil {
+		return
+	}
+	if err := flush(ctx); err != nil {
+		slog.Warn("janitor: gauge batch emit failed", "err", err)
+	}
 }
 
 // allJanitorPasses is every pass name, so a pass that did not run still reports

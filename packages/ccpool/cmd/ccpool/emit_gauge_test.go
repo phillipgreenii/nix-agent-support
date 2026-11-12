@@ -82,3 +82,31 @@ func TestRunEmitGauge_noEndpointIsSilentNoop(t *testing.T) {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 }
+
+func TestEmitGauge_pointsRecordEveryPointInOrder(t *testing.T) {
+	spy := &gaugeSpy{}
+	code := emitGauge([]string{
+		"--point", `{"name":"a","value":1}`,
+		"--point", `{"name":"b","value":2.5,"labels":{"role":"r"}}`,
+	}, spy.record, devNull(t))
+	if code != 0 || !reflect.DeepEqual(spy.names, []string{"a", "b"}) || !reflect.DeepEqual(spy.values, []float64{1, 2.5}) {
+		t.Fatalf("code=%d names=%v values=%v", code, spy.names, spy.values)
+	}
+	if want := map[string]string{"role": "r"}; !reflect.DeepEqual(spy.labels[1], want) {
+		t.Errorf("labels = %v, want %v", spy.labels[1], want)
+	}
+}
+
+func TestEmitGauge_badPointsExit2AndRecordNothing(t *testing.T) {
+	for _, args := range [][]string{
+		{"--point", "notjson"},
+		{"--point", `{"value":1}`},
+		{"--point", `{"name":"a","value":1}`, "--name", "m", "--value", "1"},
+		{"--point", `{"name":"a","value":1}`, "--point", "{"},
+	} {
+		spy := &gaugeSpy{}
+		if code := emitGauge(args, spy.record, devNull(t)); code != 2 || len(spy.names) != 0 {
+			t.Errorf("args %q: code=%d calls=%d, want 2/0", args, code, len(spy.names))
+		}
+	}
+}

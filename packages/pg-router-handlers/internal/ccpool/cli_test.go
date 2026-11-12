@@ -946,3 +946,25 @@ func TestReplyTimeout_marginCoversTwoRecorderQueries(t *testing.T) {
 		t.Errorf("margin over the confirm window = %v, want at least two recorder queries plus delivery", margin)
 	}
 }
+
+// EmitGauges execs ONE `ccpool emit-gauge` carrying every point as JSON.
+func TestCLI_EmitGaugesOneCall(t *testing.T) {
+	cli, argv, _ := newSpy()
+	err := cli.EmitGauges(context.Background(), []GaugePoint{
+		{Name: "ccpool_x", Value: 1.5, Labels: map[string]string{"role": "r"}},
+		{Name: "ccpool_y", Value: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*argv) != 1 {
+		t.Fatalf("calls = %d, want 1", len(*argv))
+	}
+	want := `emit-gauge --point {"name":"ccpool_x","value":1.5,"labels":{"role":"r"}} --point {"name":"ccpool_y","value":2}`
+	if got := strings.Join((*argv)[0], " "); got != want {
+		t.Fatalf("argv = %q, want %q", got, want)
+	}
+	if err := cli.EmitGauges(context.Background(), nil); err != nil || len(*argv) != 1 {
+		t.Fatalf("empty batch must not exec: err=%v calls=%d", err, len(*argv))
+	}
+}

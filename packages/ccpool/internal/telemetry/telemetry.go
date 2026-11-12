@@ -49,6 +49,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	otlploggrpc "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	otlploghttp "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -62,6 +63,12 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
+
+// ShutdownTimeout bounds the final flush of a short-lived CLI. The OTLP gRPC
+// exporter retries a failing export for up to a minute, and a shutdown with an
+// unbounded context waits through all of it; callers pass a context with this
+// timeout so a slow collector costs at most this long.
+const ShutdownTimeout = 5 * time.Second
 
 // serviceNameValue is hardcoded — see package doc. Never read from
 // OTEL_SERVICE_NAME, unlike the pg-router/pg-desk precedent this package

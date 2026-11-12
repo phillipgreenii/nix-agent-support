@@ -86,6 +86,8 @@ type janitorPasses struct {
 	lockGC      func(deps executor.Deps) int
 	// emit publishes the run's heartbeat gauges; nil (a test) emits nothing.
 	emit gaugeEmitFn
+	// flush, when set, publishes what emit buffered (one call per run).
+	flush func(context.Context) error
 	// ccpoolVersion reads `ccpool version` for the build_info gauge; nil
 	// reports unknown.
 	ccpoolVersion func(ctx context.Context) (string, error)
@@ -107,6 +109,7 @@ func (p janitorPasses) clock() time.Time {
 // prodJanitorPasses wires the passes of sweeps.go with the same arguments
 // runSweeps passes them.
 func prodJanitorPasses() janitorPasses {
+	gb := newGaugeBatch()
 	return janitorPasses{
 		closedBead: func(ctx context.Context, _ roles.Role, cfg config.Config, deps executor.Deps) int {
 			return reconcileClosedBeadSessions(ctx, deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
@@ -124,7 +127,8 @@ func prodJanitorPasses() janitorPasses {
 			return sweepLeakedWorktrees(ctx, role, deps, orphanEnv{open: worktree.GitOpener, cwds: processCWDs, lockDir: deps.LockDir})
 		},
 		lockGC: sweepStaleLocks,
-		emit:   ccpoolGaugeEmit,
+		emit:   gb.Emit,
+		flush:  gb.Flush,
 		ccpoolVersion: func(ctx context.Context) (string, error) {
 			return ccpool.NewCLIRunner(config.Default()).Version(ctx)
 		},
@@ -409,6 +413,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		emitBuildInfo(ctx, passes)
 		emitCensus(ctx, passes, jroles, passes.clock().Sub(clockStart))
 	}
+	flushGauges(ctx, passes.flush)
 	return conformance.ExitOK
 }
 

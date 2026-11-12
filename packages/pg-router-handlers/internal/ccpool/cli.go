@@ -360,6 +360,32 @@ func (c *CLIRunner) EmitGauge(ctx context.Context, name string, value float64, l
 	return err
 }
 
+// GaugePoint is one point of a batched EmitGauges call.
+type GaugePoint struct {
+	Name   string            `json:"name"`
+	Value  float64           `json:"value"`
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
+// EmitGauges runs ONE `ccpool emit-gauge --point JSON...` for every point, so a
+// whole janitor run pays one process start, one exporter dial and one flush
+// instead of one per gauge. Points keep their order. No points is a no-op.
+func (c *CLIRunner) EmitGauges(ctx context.Context, points []GaugePoint) error {
+	if len(points) == 0 {
+		return nil
+	}
+	args := []string{"emit-gauge"}
+	for _, p := range points {
+		b, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		args = append(args, "--point", string(b))
+	}
+	_, err := c.ccpool(ctx, quickCallTimeout, args...)
+	return err
+}
+
 // Version runs `ccpool version` and returns the trimmed bare version.
 func (c *CLIRunner) Version(ctx context.Context) (string, error) {
 	out, err := c.ccpool(ctx, quickCallTimeout, "version")

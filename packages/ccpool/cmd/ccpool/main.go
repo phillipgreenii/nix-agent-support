@@ -59,7 +59,13 @@ func run() int {
 	// invocation with no OTLP env set), and a bad endpoint logs one stderr
 	// warning and continues.
 	shutdown := telemetry.Init(context.Background())
-	defer func() { _ = shutdown(context.Background()) }()
+	defer func() {
+		// Bounded: an unreachable or slow collector must not keep a
+		// short-lived CLI alive through the exporter's own retry window.
+		ctx, cancel := context.WithTimeout(context.Background(), telemetry.ShutdownTimeout)
+		defer cancel()
+		_ = shutdown(ctx)
+	}()
 	slog.SetDefault(slog.New(telemetry.Fanout(
 		slog.NewTextHandler(os.Stderr, nil),
 		telemetry.NewSlogHandler(),
