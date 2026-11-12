@@ -71,6 +71,10 @@ cachePackages = [
     version = 'v1.1.0'
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
+  [mod.'github.com/petermattis/goid']
+    version = 'v0.0.0-20250813065127-a731cc31b4fe'
+    hash = 'sha256-67f5PY1iAwKwnX7EeNkNoLlh01FAqXILXwxeScsCvNc='
+
   [mod.'github.com/phillipgreenii/x']
     version = 'v0.0.0-20261027205228-76ab0ad829aa'
     hash = 'sha256-qzb1/GN2YpSGIo1JNrSZa3VY+Zv9ASJ7QAox4cgS2bM='
@@ -78,6 +82,10 @@ cachePackages = [
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
     hash = 'sha256-vYmpyCE37eBYP/navhaLV4oX4/nu0Z/StAocLIFqrmM='
+
+  [mod.'github.com/sasha-s/go-deadlock']
+    version = 'v0.3.9'
+    hash = 'sha256-eH87hn1sP9O8BEHt3M899Cw2HYFNuzRXdYlnJQJfdsI='
 
   [mod.'go.uber.org/goleak']
     version = 'v1.3.0'

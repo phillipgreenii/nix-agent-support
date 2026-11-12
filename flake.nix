@@ -7704,6 +7704,48 @@
                     '';
                   });
 
+              # pg-claude-code-recorder LOCK-ORDER tier. ON DEMAND ONLY: build it by hand
+              # (`nix build .#checks.<system>.pg-claude-code-recorder-lockorder-tests -L`). It MUST
+              # NOT be wired into any hook, run-unit-tests, pre-land or land gate (V-4;
+              # phillipg-nix-repo-base ADR 0024). The `lockorder` build tag swaps the settler's run
+              # lock and the copier lock for go-deadlock's Mutex (internal/lockcheck; a build
+              # without the tag never links go-deadlock). Runs the `//go:build lockorder`
+              # TestLockOrder* in internal/settle with -race: the lock order run lock then copier
+              # lock, Dirty and LiveChanged never taking the run lock, and no lock held so long
+              # that a waiter stalls. Fails when a check fails or does not report PASS, or when a
+              # test is skipped.
+              pg-claude-code-recorder-lockorder-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-claude-code-recorder-lockorder-tests";
+                  src = ./packages/pg-claude-code-recorder;
+                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/lockorder.log"
+                      if ! go test -race -tags lockorder -run 'TestLockOrder' -count=1 -v -timeout 10m ./internal/settle/ > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-claude-code-recorder-lockorder-tests: a lock-order check FAILED" >&2
+                        exit 1
+                      fi
+                      for n in TestLockOrderRunThenCopierAndNoStall TestLockOrderDirtyAndLiveChangedTakeNoRunLock; do
+                        grep -q -- "^--- PASS: $n " "$log" || {
+                          cat "$log"
+                          echo "pg-claude-code-recorder-lockorder-tests: $n did not report PASS" >&2
+                          exit 1
+                        }
+                      done
+                      if grep -q -- '--- SKIP' "$log"; then
+                        echo "pg-claude-code-recorder-lockorder-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-claude-code-recorder LOAD tier (bead pg2-yme5i5; phillipg-nix-repo-base ADR
               # 0024, V-4). ON DEMAND ONLY: build it by hand
               # (`nix build .#checks.<system>.pg-claude-code-recorder-load-tests -L`). It MUST

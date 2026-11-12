@@ -21,13 +21,14 @@ the `-linux-cross-compile` check (`GOOS=linux CGO_ENABLED=0 go vet ./...`) keeps
 
 ## Build tags and checks
 
-| Tag           | Tier                                                                                                           | Check                                                                         |
-| ------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| none          | unit (fast, hermetic, `-timeout 120s` per package)                                                             | `pg-claude-code-recorder-go-tests`                                            |
-| `integration` | daemon, subprocess, real external tool                                                                         | `pg-claude-code-recorder-integration-tests` (on demand, `-race`, 60m timeout) |
-| `faults`      | fault injection                                                                                                | guarded by `-integration-tests-gating`                                        |
-| `soak`        | soak (`checks.<system>.pg-claude-code-recorder-soak`, budgets in `internal/parser/testdata/soak-budgets.json`) | guarded by `-integration-tests-gating`                                        |
-| `crashsweep`  | crash injection after every file-system operation of the settle scenarios (`internal/settle`)                  | `pg-claude-code-recorder-crashsweep-tests` (on demand, 30m timeout)           |
+| Tag           | Tier                                                                                                                | Check                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| none          | unit (fast, hermetic, `-timeout 120s` per package)                                                                  | `pg-claude-code-recorder-go-tests`                                            |
+| `integration` | daemon, subprocess, real external tool                                                                              | `pg-claude-code-recorder-integration-tests` (on demand, `-race`, 60m timeout) |
+| `faults`      | fault injection                                                                                                     | guarded by `-integration-tests-gating`                                        |
+| `soak`        | soak (`checks.<system>.pg-claude-code-recorder-soak`, budgets in `internal/parser/testdata/soak-budgets.json`)      | guarded by `-integration-tests-gating`                                        |
+| `crashsweep`  | crash injection after every file-system operation of the settle scenarios (`internal/settle`)                       | `pg-claude-code-recorder-crashsweep-tests` (on demand, 30m timeout)           |
+| `lockorder`   | go-deadlock lock-order checks on the settler run lock and the copier lock (`internal/settle`, `internal/lockcheck`) | `pg-claude-code-recorder-lockorder-tests` (on demand, `-race`, 10m timeout)   |
 
 The `ablation` tag is a development measurement harness for the rebuild's write path, not a tier
 and not a check: it is never part of a gate, and its build is only vetted by the gating check

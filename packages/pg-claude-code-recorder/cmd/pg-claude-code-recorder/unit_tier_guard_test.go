@@ -30,7 +30,7 @@ var unitExecAllowed = map[string]bool{"git": true, "diff": true, "sh": true, "ba
 var goMetaSubcommands = map[string]bool{"list": true, "env": true, "version": true}
 
 // nonUnitTags are the build tags that keep a file out of the unit tier.
-var nonUnitTags = []string{"integration", "faults", "soak", "crashsweep"}
+var nonUnitTags = []string{"integration", "faults", "soak", "crashsweep", "lockorder"}
 
 // daemonPackages are the package directories (relative to the module package
 // root) whose untagged test files MUST NOT start a whole daemon. Other
