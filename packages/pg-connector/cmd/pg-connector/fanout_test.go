@@ -53,20 +53,29 @@ func settleGoroutines(base int) int {
 
 func TestFanOutEach_ResultsInRegistrationOrderUnderReversedCompletion(t *testing.T) {
 	names := fanOutTestNames(4)
-	// Earlier-registered backends finish LATER.
-	delays := map[string]time.Duration{
-		"b0": 160 * time.Millisecond,
-		"b1": 100 * time.Millisecond,
-		"b2": 50 * time.Millisecond,
-		"b3": 0,
+	// Reversed completion is forced with a chain of channels, not timing:
+	// backend bi returns only after b(i+1) has finished, so completion is
+	// always b3, b2, b1, b0. The default concurrency (8) exceeds the backend
+	// count, so every backend is running at once and the chain cannot stall.
+	done := make([]chan struct{}, len(names))
+	for i := range done {
+		done[i] = make(chan struct{})
 	}
 	var mu sync.Mutex
 	var completion []string
 	got := fanOutEach(context.Background(), nil, names, func(_ context.Context, b string) string {
-		time.Sleep(delays[b])
+		var i int
+		if _, err := fmt.Sscanf(b, "b%d", &i); err != nil {
+			t.Errorf("unexpected backend name %q", b)
+			return ""
+		}
+		if i+1 < len(names) {
+			<-done[i+1]
+		}
 		mu.Lock()
 		completion = append(completion, b)
 		mu.Unlock()
+		close(done[i])
 		return "v-" + b
 	})
 	for i, b := range names {
