@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -251,20 +250,6 @@ func (r *rig) rowWords() []string {
 	for _, row := range r.logRows() {
 		out = append(out, row.ID+":"+strings.Join(row.Kinds, ","))
 	}
-	return out
-}
-
-func (r *rig) watched() []string {
-	r.t.Helper()
-	rows, err := r.st.ListWatched(context.Background(), groups.EntityKind)
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	var out []string
-	for _, e := range rows {
-		out = append(out, e.ID)
-	}
-	sort.Strings(out)
 	return out
 }
 

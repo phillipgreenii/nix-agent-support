@@ -220,7 +220,7 @@ type raceStore struct {
 func (r *raceStore) PutGroupIfThen(ctx context.Context, g store.GroupRow, expect int64, then func(tx *store.Tx) error) (bool, error) {
 	if !r.bumped {
 		r.bumped = true
-		if _, err := r.Store.BumpGroup(ctx, g.Kind, g.ID, g.Group, time.Time{}); err != nil {
+		if _, err := r.BumpGroup(ctx, g.Kind, g.ID, g.Group, time.Time{}); err != nil {
 			return false, err
 		}
 	}

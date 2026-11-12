@@ -73,5 +73,5 @@ func (e *Engine) DetectSummary(ctx context.Context, tx *store.Tx, prev *groups.S
 			return fmt.Errorf("changes: encode summary of %s: %w", c.ID, err)
 		}
 	}
-	return e.Engine.DetectPrimary(ctx, tx, c)
+	return e.DetectPrimary(ctx, tx, c)
 }

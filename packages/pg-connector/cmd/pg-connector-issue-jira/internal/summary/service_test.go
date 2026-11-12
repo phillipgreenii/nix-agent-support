@@ -20,8 +20,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 )
 
-const text429 = "pjira search: status 429 Too Many Requests"
-
 var quotedKey = regexp.MustCompile(`"([^"]+)"`)
 
 // fakePjira is the inner internal.Runner of the harness: it answers a
@@ -84,12 +82,6 @@ func (f *fakePjira) set(key, category string, commentCreated ...string) {
 		f.issues = map[string]string{}
 	}
 	f.issues[key] = pj(key, category, commentCreated...)
-}
-
-func (f *fakePjira) remove(key string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.issues, key)
 }
 
 // pj is the JSON of one pjira issue.

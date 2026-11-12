@@ -642,7 +642,7 @@ func TestTheEngineIsAnOriginHintsReceiverAndTheSpecIsStillValid(t *testing.T) {
 	} = (*Engine)(nil)
 	_ = hints
 	var _ Observer = (*recorder)(nil)
-	var _ registry.Spec = testSpec()
+	_ = testSpec()
 	if err := testSpec().Validate(); err != nil {
 		t.Error(err)
 	}

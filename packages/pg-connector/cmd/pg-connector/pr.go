@@ -201,7 +201,7 @@ type prListOutcome struct {
 	Fingerprints map[string]string `json:"fingerprints,omitempty"`
 }
 
-// fanOutPRList queries "list" against every backend in backends (design
+// fanOutPRListFresh queries "list" against every backend in backends (design
 // 's request shape: {"query": query, "cursor": null, "ids_only":
 // idsOnly}), concatenating their matched entities and building one
 // sources[] row per backend queried. A backend answering
@@ -221,13 +221,10 @@ type prListOutcome struct {
 // Puts every returned entity into that backend's own cache
 // (putLiveEntity) so the cache stays current for the next unavailable
 // window.
-func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints bool) prListOutcome {
-	return fanOutPRListFresh(ctx, reg, backends, query, idsOnly, bounds, fingerprints, false)
-}
-
-// fanOutPRListFresh is fanOutPRList with --fresh: with fresh set, the list
-// request to each backend that declares cache_opt_out carries fresh: true, and
-// the request to every other backend is exactly what fanOutPRList sends.
+//
+// With fresh set (--fresh), the list request to each backend that declares
+// cache_opt_out carries fresh: true; the request to every other backend is
+// unchanged.
 func fanOutPRListFresh(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints, fresh bool) prListOutcome {
 	// Entities and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that

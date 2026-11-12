@@ -215,12 +215,12 @@ func queryName(query string) json.RawMessage {
 // Any other kind yields the zero Result.
 func MembershipResult(roles registry.Roles, kind, query string) Result {
 	name := queryName(query)
-	switch {
-	case kind == "":
+	switch kind {
+	case "":
 		return Result{}
-	case kind == roles.EnteredQuery:
+	case roles.EnteredQuery:
 		return Result{Kinds: []string{kind}, Fields: []Field{{Name: QueryFieldPrefix + query, After: name}}}
-	case kind == roles.LeftQuery:
+	case roles.LeftQuery:
 		return Result{Kinds: []string{kind}, Fields: []Field{{Name: QueryFieldPrefix + query, Before: name}}}
 	}
 	return Result{}

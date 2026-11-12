@@ -195,7 +195,7 @@ func TestAZeroSettleTimeoutTakesTheConfigDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	clk := governor.NewManualClock(t0)
 	e, err := New(Config{Clock: clk})
 	if err != nil {

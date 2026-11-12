@@ -13,7 +13,6 @@ import (
 var (
 	buildMu   sync.Mutex
 	buildRoot string
-	buildDirs = map[string]string{}
 )
 
 // removeBuilds deletes the built binaries; TestMain calls it after the run.

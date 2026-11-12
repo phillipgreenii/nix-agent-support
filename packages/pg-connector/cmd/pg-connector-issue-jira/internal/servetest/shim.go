@@ -183,7 +183,6 @@ type Shim struct {
 
 	mu     sync.Mutex
 	issues map[string]Issue
-	seq    int
 }
 
 func newShim(t testing.TB, dir string) *Shim {
@@ -516,7 +515,7 @@ func (s *Shim) WaitQuiet(t testing.TB, quiet, max time.Duration, kinds ...string
 func Sanitize(jql string) string {
 	b := []byte(jql)
 	for i, c := range b {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
 			b[i] = '_'
 		}
 	}

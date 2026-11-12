@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/servetest"
@@ -27,24 +25,6 @@ func TestMain(m *testing.M) {
 	removeBuilds()
 	servetest.RemoveBuilds()
 	os.Exit(code)
-}
-
-// syncBuffer is a goroutine-safe stderr.
-type syncBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
 }
 
 func TestSplitConfigFlag(t *testing.T) {

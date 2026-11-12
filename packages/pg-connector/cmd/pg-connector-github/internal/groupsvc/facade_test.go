@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -135,7 +133,10 @@ func TestNewAppliesTheDefaultsTheGitHubEngineAlwaysApplied(t *testing.T) {
 // (the unedited changes tests import this package while query imports changes):
 // go list -deps of the facade lists neither.
 func TestTheFacadeImportsNeitherTheChangesNorTheQueryPackage(t *testing.T) {
-	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("go tool not on PATH: %v", err)
+	}
 	out, err := exec.CommandContext(context.Background(), goBin, "list", "-deps", ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list -deps: %v\n%s", err, out)

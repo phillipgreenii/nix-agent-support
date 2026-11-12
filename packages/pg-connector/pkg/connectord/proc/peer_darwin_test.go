@@ -35,7 +35,7 @@ func connectedPair(t *testing.T) (client, server net.Conn) {
 		t.Fatal(err)
 	}
 	server = <-accepted
-	t.Cleanup(func() { client.Close(); server.Close() })
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
 	return client, server
 }
 

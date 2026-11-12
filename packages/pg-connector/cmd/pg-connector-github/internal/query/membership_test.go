@@ -30,7 +30,6 @@ var (
 	memA = mem{"PR_a", "Acme-Org/Widget", 3}
 	memB = mem{"PR_b", "acme-org/gadget", 7}
 	memC = mem{"PR_c", "Acme-Org/Widget", 1}
-	memD = mem{"PR_d", "Acme-Org/Widget", 9}
 )
 
 // listBody is the search answer for ms; a listing that is not complete reports
@@ -78,12 +77,6 @@ func (c *fakeConfirmer) set(node string, conf Confirmation) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.by[node] = conf
-}
-
-func (c *fakeConfirmer) setErr(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.err = err
 }
 
 // logs captures the runner's log events.
