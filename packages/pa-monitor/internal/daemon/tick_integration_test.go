@@ -17,6 +17,8 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/block"
 	"github.com/phillipgreenii/pa-monitor/internal/core/caffeinate"
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
+	"github.com/phillipgreenii/pa-monitor/internal/core/corpus/corpustest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/poller"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
@@ -40,6 +42,20 @@ import (
 // TMPDIR=/tmp/pg-test-runner.XXXXXX).
 func claudeSlug(cwd string) string {
 	return regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(cwd, "-")
+}
+
+// newFixtureMonitor builds the corpus Monitor the poller reads: a real recorder
+// mirrors the on-disk registry and Claude-home fixtures (the current process is
+// the only live pid), and the Monitor carries the same observers production wires.
+func newFixtureMonitor(t *testing.T, sessionsDir, claudeHome string) *corpus.Monitor {
+	t.Helper()
+	m := corpustest.StartMirror(t, sessionsDir, claudeHome, func(pid int) bool { return pid == os.Getpid() })
+	mon := corpus.New(m.Facts, m.Discovery())
+	mon.Register(corpus.NewSessionSnapshotObserver())
+	mon.Register(corpus.NewSubagentErrorObserver())
+	mon.Register(corpus.NewUsagePricingObserver(usage.PriceTable{Default: usage.ModelPrices{InputPerMTok: 5, OutputPerMTok: 25}}))
+	mon.Register(corpus.NewLimitsObserver())
+	return mon
 }
 
 func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
@@ -425,12 +441,10 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// --- real *poller.Poller wired with DB and WriteService. The poller lazily
-	// builds a corpus Monitor over SessionsDir/ClaudeHome (buildPoller wires one in
+	// reads a corpus Monitor over the fixture directories (buildPoller wires one in
 	// production); the block comes from that Monitor, not an injected pricer. ---
 	p := &poller.Poller{
-		SessionsDir:  sessDir,
-		ClaudeHome:   dir,
-		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
+		Monitor:      newFixtureMonitor(t, sessDir, dir),
 		Now:          time.Now,
 		WriteService: ws,
 		DB:           db,

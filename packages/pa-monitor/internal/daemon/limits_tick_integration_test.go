@@ -87,9 +87,7 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &poller.Poller{
-		SessionsDir:  sessDir,
-		ClaudeHome:   dir,
-		PidAlive:     func(pid int) bool { return pid == os.Getpid() },
+		Monitor:      newFixtureMonitor(t, sessDir, dir),
 		Now:          time.Now,
 		WriteService: ws,
 		DB:           db,
