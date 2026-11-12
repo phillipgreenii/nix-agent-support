@@ -220,28 +220,57 @@ func TestOSGitRun_ignoresLeakedGitDir(t *testing.T) {
 	}
 }
 
-// wedgeCompletionMarker returns the path writeWedgedGit's wrapper script
-// touches ONLY if its sleep runs for the full wedgeSleepDuration (i.e. the
-// process was never killed). A caller checks this marker's ABSENCE after a
-// bounded call returns to prove the wedged process was actually killed by
-// gitCallTimeout, not merely outrun by coincidence -- without this, an
-// elapsed-time bound alone cannot distinguish "bounded" from "happened to
-// be fast" (pg2-rz5ud).
-func wedgeCompletionMarker(wedgedGitPath string) string {
-	return filepath.Join(filepath.Dir(wedgedGitPath), "wedge-completed")
+// wedgePIDFile returns the path writeWedgedGit's wrapper script records the
+// wedged process's PID in. A caller proves the wedge was KILLED (not merely
+// outrun) after a bounded call returns by asserting that process is gone,
+// via assertWedgeKilled.
+func wedgePIDFile(wedgedGitPath string) string {
+	return filepath.Join(filepath.Dir(wedgedGitPath), "wedge.pid")
+}
+
+// assertWedgeKilled fails t unless the wedged git started by writeWedgedGit
+// really began its sleep AND is no longer running.
+//
+// Mechanism note (why not a completion marker): an earlier version had the
+// wrapper run `sleep 30; touch <marker>` under /bin/sh and asserted the
+// marker's absence. That flaked once under heavy host load (load average
+// 45): the marker existed after a 10.66s test although a 30s sleep cannot
+// complete in 10s, so the sleep child ended early (by error or stray signal
+// from outside the test) without ending the shell, which then fell through
+// to `touch`. The exact trigger was NOT reproduced (about 70 wedged calls
+// at load average 50 to 120 never flaked), but the structure is the
+// defect: a shell step trailing the sleep turns the marker into a function
+// of anything that ends the sleep early, so it cannot prove the kill. The
+// wrapper now records its PID and `exec`s sleep, so the PID is the sleep
+// process itself and no shell step can follow it; the assertion is only
+// "that PID is gone", which holds when gitCallTimeout's process-group kill
+// removed it (the callers' elapsed ceiling rules out the sleep's natural
+// end). A PID that now names a different command (PID reuse) counts as
+// gone.
+func assertWedgeKilled(t *testing.T, wedgedGitPath string) {
+	t.Helper()
+	raw, err := os.ReadFile(wedgePIDFile(wedgedGitPath))
+	if err != nil {
+		t.Fatalf("wedged git never started its wedge (no pid file): %v", err)
+	}
+	pid := strings.TrimSpace(string(raw))
+	out, _ := exec.Command("ps", "-o", "command=", "-p", pid).Output()
+	if strings.Contains(string(out), "sleep") {
+		t.Errorf("wedged git process %s is still running (%q): it was not killed by gitCallTimeout", pid, strings.TrimSpace(string(out)))
+	}
 }
 
 // writeWedgedGit writes a `git` wrapper script at a fresh temp dir that
-// sleeps wedgeSleepDuration -- far longer than any bound asserted below --
-// when invoked with exactly verb as its first two arguments (e.g. "reset
-// --hard" or "rev-parse --show-toplevel"), and execs the REAL git (resolved
-// via exec.LookPath before this helper runs) for every other invocation --
-// notably a client's own construction-time validation probe (`rev-parse
-// --path-format=absolute --git-common-dir`), which must stay fast so the
-// client this wrapper backs can still be constructed. If the sleep ever
-// runs to completion (the process was NOT killed), the script touches
-// wedgeCompletionMarker(<returned path>) before exec'ing the real git.
-// Returns the wrapper's absolute path, for gitclient.WithGit.
+// records its PID in wedgePIDFile and then `exec`s sleep for
+// wedgeSleepDuration -- far longer than any bound asserted below -- when
+// invoked with exactly verb as its first two arguments (e.g. "reset
+// --hard" or "rev-parse --show-toplevel"), and execs the REAL git
+// (resolved via exec.LookPath before this helper runs) for every other
+// invocation -- notably a client's own construction-time validation probe
+// (`rev-parse --path-format=absolute --git-common-dir`), which must stay
+// fast so the client this wrapper backs can still be constructed. Callers
+// verify the kill with assertWedgeKilled. Returns the wrapper's absolute
+// path, for gitclient.WithGit.
 func writeWedgedGit(t *testing.T, verb string) string {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -250,10 +279,9 @@ func writeWedgedGit(t *testing.T, verb string) string {
 	}
 	dir := t.TempDir()
 	script := filepath.Join(dir, "git")
-	marker := wedgeCompletionMarker(script)
 	content := fmt.Sprintf(
-		"#!/bin/sh\nif [ \"$1 $2\" = \"%s\" ]; then sleep %d; touch \"%s\"; fi\nexec \"%s\" \"$@\"\n",
-		verb, int(wedgeSleepDuration.Seconds()), marker, realGit,
+		"#!/bin/sh\nif [ \"$1 $2\" = \"%s\" ]; then echo $$ > \"%s\"; exec sleep %d; fi\nexec \"%s\" \"$@\"\n",
+		verb, wedgePIDFile(script), int(wedgeSleepDuration.Seconds()), realGit,
 	)
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatalf("writing wedged git wrapper: %v", err)
@@ -296,11 +324,9 @@ func TestSafeToReset_boundsWedgedToplevelProbe(t *testing.T) {
 	if elapsed > boundedCallElapsedCeiling {
 		t.Errorf("safeToReset did not bound the wedged toplevel probe: took %s (want well under the %s wedge)", elapsed, wedgeSleepDuration)
 	}
-	// Outcome: the wedge must have been KILLED mid-sleep, not merely
-	// outrun -- see wedgeCompletionMarker's doc comment.
-	if _, err := os.Stat(wedgeCompletionMarker(wedged)); err == nil {
-		t.Error("safeToReset: wedged toplevel probe ran to completion instead of being killed by gitCallTimeout")
-	}
+	// Outcome: the wedge must have been KILLED, not merely outrun -- see
+	// assertWedgeKilled.
+	assertWedgeKilled(t, wedged)
 }
 
 // TestTerminal_boundsWedgedReset is TestSafeToReset_boundsWedgedToplevelProbe's
@@ -339,11 +365,9 @@ func TestTerminal_boundsWedgedReset(t *testing.T) {
 	if elapsed > boundedCallElapsedCeiling {
 		t.Errorf("terminal did not bound a wedged reset --hard: took %s (want well under the %s wedge)", elapsed, wedgeSleepDuration)
 	}
-	// Outcome: the wedged reset --hard must have been KILLED mid-sleep, not
-	// merely outrun -- see wedgeCompletionMarker's doc comment.
-	if _, err := os.Stat(wedgeCompletionMarker(wedged)); err == nil {
-		t.Error("terminal: wedged reset --hard ran to completion instead of being killed by gitCallTimeout")
-	}
+	// Outcome: the wedged reset --hard must have been KILLED, not merely
+	// outrun -- see assertWedgeKilled.
+	assertWedgeKilled(t, wedged)
 	if !bd.has("update zr-1 --status=open --assignee=") {
 		t.Errorf("terminal must still reach bd unclaim despite a wedged reset --hard: calls=%v", bd.calls)
 	}
