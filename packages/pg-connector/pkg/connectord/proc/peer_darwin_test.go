@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,7 +20,7 @@ func TestDarwinSeamLimitIs104(t *testing.T) {
 func connectedPair(t *testing.T) (client, server net.Conn) {
 	t.Helper()
 	path := filepath.Join(shortDir(t), "s")
-	ln, err := net.Listen("unix", path)
+	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +30,7 @@ func connectedPair(t *testing.T) (client, server net.Conn) {
 		c, _ := ln.Accept()
 		accepted <- c
 	}()
-	client, err = net.Dial("unix", path)
+	client, err = new(net.Dialer).DialContext(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}

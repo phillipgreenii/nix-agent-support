@@ -79,12 +79,13 @@ func TestGenerateFixture(t *testing.T) {
 		`INSERT INTO posted_review (owner, repo, number, state, updated_at)
 		 VALUES ('org', 'repo', 1, '{"version":1,"fingerprints":["0123456789abcdef"],"body_heads":[]}', 1760000008000)`,
 	} {
-		if _, err := s.DB().Exec(q); err != nil {
+		if _, err := s.DB().ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, k := range fixtureWatchedConsumers() {
-		if _, err := s.DB().Exec(
+		if _, err := s.DB().ExecContext(
+			context.Background(),
 			`INSERT INTO consumer (consumer, feed_view, scope, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
 			k.Consumer, k.View, k.Scope, k.AckedSeq, k.SeenAt.UnixMilli(),
 		); err != nil {
@@ -94,7 +95,7 @@ func TestGenerateFixture(t *testing.T) {
 	// The record rung 6 leaves for a consumer that held several rows: the
 	// post-collapse state the version 5 fixture reaches (see
 	// fixtureCollapsedRecord).
-	if _, err := s.DB().Exec(`INSERT INTO store_meta (key, value) VALUES (?, ?)`,
+	if _, err := s.DB().ExecContext(context.Background(), `INSERT INTO store_meta (key, value) VALUES (?, ?)`,
 		ConsumerCollapsedPrefix+"example-multi", fixtureCollapsedRecord); err != nil {
 		t.Fatal(err)
 	}

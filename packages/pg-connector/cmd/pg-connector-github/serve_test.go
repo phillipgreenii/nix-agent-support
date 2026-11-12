@@ -61,7 +61,7 @@ func TestServeDrainsOnContextCancelInProcess(t *testing.T) {
 	go func() { done <- serveWith(ctx, cfg, &stderr) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if c, err := net.Dial("unix", cfg.SocketPath); err == nil {
+		if c, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath); err == nil {
 			_ = c.Close()
 			break
 		}

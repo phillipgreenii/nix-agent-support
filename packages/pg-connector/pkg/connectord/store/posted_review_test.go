@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -29,7 +30,7 @@ func TestPostedReviewTableShape(t *testing.T) {
 		t.Errorf("columns = %v, want %v", got, want)
 	}
 	var sqlText string
-	if err := s.DB().QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'posted_review'`).Scan(&sqlText); err != nil {
+	if err := s.DB().QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'posted_review'`).Scan(&sqlText); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"PRIMARY KEY (owner, repo, number)", "WITHOUT ROWID"} {
@@ -38,10 +39,10 @@ func TestPostedReviewTableShape(t *testing.T) {
 		}
 	}
 	insert := `INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('o', 'r', 1, '{}', 1)`
-	if _, err := s.DB().Exec(insert); err != nil {
+	if _, err := s.DB().ExecContext(context.Background(), insert); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec(insert); err == nil {
+	if _, err := s.DB().ExecContext(context.Background(), insert); err == nil {
 		t.Error("a second row for the same (owner, repo, number) must be refused")
 	}
 }
@@ -60,7 +61,7 @@ func TestOpenFromOlderFixturesAddsAnEmptyPostedReviewTable(t *testing.T) {
 				t.Fatalf("result = %+v, want ToVersion %d", res, SchemaVersion)
 			}
 			var n int
-			if err := s.DB().QueryRow(`SELECT count(*) FROM posted_review`).Scan(&n); err != nil {
+			if err := s.DB().QueryRowContext(context.Background(), `SELECT count(*) FROM posted_review`).Scan(&n); err != nil {
 				t.Fatal(err)
 			}
 			want := 0

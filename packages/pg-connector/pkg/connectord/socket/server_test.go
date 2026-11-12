@@ -85,7 +85,7 @@ func (s *stubDispatcher) count() int {
 // exchange sends one raw line to path and returns the decoded reply frame.
 func exchange(t *testing.T, path, line string) (ReplyFrame, scriptout.Response) {
 	t.Helper()
-	conn, err := net.DialTimeout("unix", path, 2*time.Second)
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,13 +266,13 @@ func TestServerWithTheRealRouter(t *testing.T) {
 func TestServerClientThatLeavesWithoutAFrameIsHarmless(t *testing.T) {
 	d := &stubDispatcher{}
 	path := startDaemon(t, Handler(d, ServerConfig{Build: "d", ReadTimeout: 200 * time.Millisecond}))
-	conn, err := net.Dial("unix", path)
+	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = conn.Close()
 	// A client that connects and says nothing is dropped at the read timeout.
-	idle, err := net.Dial("unix", path)
+	idle, err := new(net.Dialer).DialContext(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}

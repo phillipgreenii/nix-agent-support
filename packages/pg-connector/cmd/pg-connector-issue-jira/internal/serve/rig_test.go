@@ -199,7 +199,7 @@ func (r *rig) call(instance, op string, args any) (scriptout.Response, error) {
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	conn, err := net.DialTimeout("unix", r.cfg.SocketPath, 2*time.Second)
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(context.Background(), "unix", r.cfg.SocketPath)
 	if err != nil {
 		return scriptout.Response{}, err
 	}
@@ -288,7 +288,7 @@ func (r *rig) count(query string) int {
 	}
 	defer func() { _ = db.Close() }()
 	var n int
-	if err := db.QueryRow(query).Scan(&n); err != nil {
+	if err := db.QueryRowContext(context.Background(), query).Scan(&n); err != nil {
 		r.t.Fatalf("%s: %v", query, err)
 	}
 	return n

@@ -19,7 +19,7 @@ const aliasFoldVersion = 8
 // newlines.
 func queryPlan(t *testing.T, s *Store, query string, args ...any) string {
 	t.Helper()
-	rows, err := s.DB().Query("EXPLAIN QUERY PLAN "+query, args...)
+	rows, err := s.DB().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestAliasFoldLookupsSearchTheIndexAndDoNotScan(t *testing.T) {
 // dropped the same statements scan the table, so the plan check above can fail.
 func TestAliasFoldPlanWithoutTheIndexScans(t *testing.T) {
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
-	if _, err := s.DB().Exec(`DROP INDEX alias_ref_fold`); err != nil {
+	if _, err := s.DB().ExecContext(context.Background(), `DROP INDEX alias_ref_fold`); err != nil {
 		t.Fatal(err)
 	}
 	plan := queryPlan(t, s, aliasesByFoldedRefsSQL(3), "a", "b", "c")
@@ -123,7 +123,8 @@ func TestOpenFromOlderFixturesAddsTheAliasFoldIndexAndKeepsRows(t *testing.T) {
 				t.Fatalf("result = %+v, want migrated to %d", res, SchemaVersion)
 			}
 			var idx int
-			if err := s.DB().QueryRow(
+			if err := s.DB().QueryRowContext(
+				context.Background(),
 				`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'alias_ref_fold'`,
 			).Scan(&idx); err != nil || idx != 1 {
 				t.Errorf("alias_ref_fold index count = %d err=%v, want 1", idx, err)
@@ -131,7 +132,7 @@ func TestOpenFromOlderFixturesAddsTheAliasFoldIndexAndKeepsRows(t *testing.T) {
 			// The fixture's one alias row, read raw, is what both fold lookups must
 			// answer for the upper-cased reference.
 			var node, ref string
-			if err := s.DB().QueryRow(`SELECT node_id, ref FROM alias`).Scan(&node, &ref); err != nil {
+			if err := s.DB().QueryRowContext(context.Background(), `SELECT node_id, ref FROM alias`).Scan(&node, &ref); err != nil {
 				t.Fatal(err)
 			}
 			a, ok, err := s.AliasByRefFold(ctx, strings.ToUpper(ref))
@@ -178,7 +179,7 @@ func BenchmarkAliasesByRefFold(b *testing.B) {
 				}
 			}
 			if !indexed {
-				if _, err := s.DB().Exec(`DROP INDEX alias_ref_fold`); err != nil {
+				if _, err := s.DB().ExecContext(context.Background(), `DROP INDEX alias_ref_fold`); err != nil {
 					b.Fatal(err)
 				}
 			}

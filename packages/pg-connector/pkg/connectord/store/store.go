@@ -45,6 +45,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -342,7 +343,7 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Checkpoint folds the WAL into the main file and truncates it. The daemon
 // registers it as the last drain hook, before Close.
 func (s *Store) Checkpoint() error {
-	if _, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+	if _, err := s.db.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 		return fmt.Errorf("store: checkpoint %s: %w", s.path, err)
 	}
 	return nil

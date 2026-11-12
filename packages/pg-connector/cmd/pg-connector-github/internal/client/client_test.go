@@ -321,7 +321,7 @@ func TestBudgetFollowsTheBackendDeadlines(t *testing.T) {
 func TestADaemonThatNeverAnswersIsUnavailableAtTheBudget(t *testing.T) {
 	dir := shortTempDir(t)
 	path := filepath.Join(dir, "s")
-	ln, err := net.Listen("unix", path)
+	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}

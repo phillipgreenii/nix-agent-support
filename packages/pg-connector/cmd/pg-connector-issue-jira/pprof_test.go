@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -52,7 +53,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("no listening line: %q", line)
 	}
 	addr := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	resp, err := getURL(http.DefaultClient, "http://"+addr+"/debug/pprof/")
 	if err != nil {
 		stop()
 		t.Fatalf("GET: %v", err)
@@ -63,7 +64,7 @@ func TestStartPprofFromEnvLoopbackServesAndStops(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	stop()
-	if _, err := http.Get("http://" + addr + "/debug/pprof/"); err == nil {
+	if _, err := getURL(http.DefaultClient, "http://"+addr+"/debug/pprof/"); err == nil {
 		t.Error("the listener must be closed after stop")
 	}
 }
@@ -81,4 +82,14 @@ func TestStartPprofFromEnvCreatesTheSocketParentDirectory(t *testing.T) {
 	if fi, err := os.Stat(filepath.Dir(sock)); err != nil || fi.Mode().Perm() != 0o700 {
 		t.Errorf("parent directory: %v %v, want 0700 (output: %q)", fi, err, out.String())
 	}
+}
+
+// getURL issues a GET through c with a background context, so the request
+// has a context to carry.
+func getURL(c *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.Do(req)
 }

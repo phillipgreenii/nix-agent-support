@@ -87,7 +87,7 @@ func TestSaveReplacesTheRecordAndStampsUpdatedAt(t *testing.T) {
 		t.Fatalf("got %+v %v, want the second save", got, err)
 	}
 	var n, at int64
-	if err := st.DB().QueryRow(`SELECT count(*), max(updated_at) FROM posted_review`).Scan(&n, &at); err != nil || n != 1 || at != 1760000001000 {
+	if err := st.DB().QueryRowContext(context.Background(), `SELECT count(*), max(updated_at) FROM posted_review`).Scan(&n, &at); err != nil || n != 1 || at != 1760000001000 {
 		t.Fatalf("rows = %d updated_at = %d err = %v", n, at, err)
 	}
 }
@@ -95,7 +95,8 @@ func TestSaveReplacesTheRecordAndStampsUpdatedAt(t *testing.T) {
 func TestCorruptRowWrapsErrCorruptAndStays(t *testing.T) {
 	ctx := context.Background()
 	s, st := openSidecar(t)
-	if _, err := st.DB().Exec(
+	if _, err := st.DB().ExecContext(
+		context.Background(),
 		`INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('foo', 'bar', 1, '{not json', 1)`,
 	); err != nil {
 		t.Fatal(err)
@@ -104,11 +105,11 @@ func TestCorruptRowWrapsErrCorruptAndStays(t *testing.T) {
 		t.Fatalf("err = %v, want ErrCorrupt", err)
 	}
 	var text string
-	if err := st.DB().QueryRow(`SELECT state FROM posted_review WHERE owner='foo' AND repo='bar' AND number=1`).Scan(&text); err != nil || text != "{not json" {
+	if err := st.DB().QueryRowContext(context.Background(), `SELECT state FROM posted_review WHERE owner='foo' AND repo='bar' AND number=1`).Scan(&text); err != nil || text != "{not json" {
 		t.Fatalf("the corrupt row must stay: %q %v", text, err)
 	}
 	// The operator's repost lever is a raw DELETE; the record then reads empty.
-	if _, err := st.DB().Exec(`DELETE FROM posted_review WHERE owner = ? AND repo = ? AND number = ?`, "foo", "bar", 1); err != nil {
+	if _, err := st.DB().ExecContext(context.Background(), `DELETE FROM posted_review WHERE owner = ? AND repo = ? AND number = ?`, "foo", "bar", 1); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.Load(ctx, "foo", "bar", 1); err != nil || len(got.Fingerprints) != 0 {

@@ -25,7 +25,7 @@ func rawEntities(t *testing.T, s *Store) []string {
 			cols = append(cols, "ifnull("+c+", 'NULL')")
 		}
 	}
-	rows, err := s.DB().Query(`SELECT ` + strings.Join(cols, " || '|' || ") + ` FROM entity ORDER BY kind, id`)
+	rows, err := s.DB().QueryContext(context.Background(), `SELECT `+strings.Join(cols, " || '|' || ")+` FROM entity ORDER BY kind, id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,10 +105,11 @@ func TestOpenFromOlderFixturesAddsClosedAtAndKeepsRows(t *testing.T) {
 				t.Errorf("change head/log = %d %+v, want %d %+v", head, log, headBefore, logBefore)
 			}
 			var closed, idx int
-			if err := s.DB().QueryRow(`SELECT count(*) FROM entity WHERE closed_at IS NOT NULL`).Scan(&closed); err != nil || closed != 0 {
+			if err := s.DB().QueryRowContext(context.Background(), `SELECT count(*) FROM entity WHERE closed_at IS NOT NULL`).Scan(&closed); err != nil || closed != 0 {
 				t.Errorf("closed entity count = %d err=%v, want 0", closed, err)
 			}
-			if err := s.DB().QueryRow(
+			if err := s.DB().QueryRowContext(
+				context.Background(),
 				`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'entity_closed_at'`,
 			).Scan(&idx); err != nil || idx != 1 {
 				t.Errorf("entity_closed_at index count = %d err=%v, want 1", idx, err)
@@ -133,7 +134,7 @@ func TestVersion7FixtureCarriesTheClosedEntity(t *testing.T) {
 		t.Fatalf("result = %+v, want migrated %d -> %d", res, closedAtVersion, SchemaVersion)
 	}
 	var kind, id string
-	if err := s.DB().QueryRow(`SELECT kind, id FROM entity WHERE closed_at IS NOT NULL`).Scan(&kind, &id); err != nil {
+	if err := s.DB().QueryRowContext(context.Background(), `SELECT kind, id FROM entity WHERE closed_at IS NOT NULL`).Scan(&kind, &id); err != nil {
 		t.Fatal(err)
 	}
 	e, ok, err := s.GetEntity(ctx, kind, id)
@@ -168,7 +169,7 @@ func TestSetClosedAtSetsClearsAndTouchesNothingElse(t *testing.T) {
 		t.Errorf("after set: %+v, want %+v", got, want)
 	}
 	var stored int64
-	if err := s.DB().QueryRow(`SELECT closed_at FROM entity WHERE kind = ? AND id = ?`, row.Kind, row.ID).Scan(&stored); err != nil || stored != 1760000009000 {
+	if err := s.DB().QueryRowContext(context.Background(), `SELECT closed_at FROM entity WHERE kind = ? AND id = ?`, row.Kind, row.ID).Scan(&stored); err != nil || stored != 1760000009000 {
 		t.Errorf("closed_at column = %d err=%v, want Unix milliseconds 1760000009000", stored, err)
 	}
 
@@ -176,7 +177,7 @@ func TestSetClosedAtSetsClearsAndTouchesNothingElse(t *testing.T) {
 		t.Fatal(err)
 	}
 	var isNull bool
-	if err := s.DB().QueryRow(`SELECT closed_at IS NULL FROM entity WHERE kind = ? AND id = ?`, row.Kind, row.ID).Scan(&isNull); err != nil || !isNull {
+	if err := s.DB().QueryRowContext(context.Background(), `SELECT closed_at IS NULL FROM entity WHERE kind = ? AND id = ?`, row.Kind, row.ID).Scan(&isNull); err != nil || !isNull {
 		t.Errorf("closed_at IS NULL = %v err=%v after a zero time, want true", isNull, err)
 	}
 	got, _, err = s.GetEntity(ctx, row.Kind, row.ID)

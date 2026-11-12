@@ -2,6 +2,7 @@ package servetest
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -90,7 +91,7 @@ func (d *Daemon) ChangeLog(t *testing.T) []ChangeLogRow {
 	t.Helper()
 	db := d.readDB(t)
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query(`SELECT seq, kind, id, version, head_sha, kinds, origin FROM change_log ORDER BY seq`)
+	rows, err := db.QueryContext(context.Background(), `SELECT seq, kind, id, version, head_sha, kinds, origin FROM change_log ORDER BY seq`)
 	if err != nil {
 		t.Fatalf("servetest: read the change log: %v", err)
 	}
@@ -116,7 +117,7 @@ func (d *Daemon) PendingRows(t *testing.T) []PendingRow {
 	t.Helper()
 	db := d.readDB(t)
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query(`SELECT kind, id, kinds, awaited, head_sha, origin, deadline FROM pending_change ORDER BY kind, id`)
+	rows, err := db.QueryContext(context.Background(), `SELECT kind, id, kinds, awaited, head_sha, origin, deadline FROM pending_change ORDER BY kind, id`)
 	if err != nil {
 		t.Fatalf("servetest: read the pending rows: %v", err)
 	}
@@ -156,7 +157,7 @@ func (d *Daemon) EntityVersion(t *testing.T, kind, id string) int64 {
 	db := d.readDB(t)
 	defer func() { _ = db.Close() }()
 	var v int64
-	err := db.QueryRow(`SELECT version FROM entity WHERE kind = ? AND id = ?`, kind, id).Scan(&v)
+	err := db.QueryRowContext(context.Background(), `SELECT version FROM entity WHERE kind = ? AND id = ?`, kind, id).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0
 	}
@@ -174,7 +175,7 @@ func (d *Daemon) Group(t *testing.T, nodeID, group string) GroupState {
 	var g GroupState
 	var fresh sql.NullInt64
 	var content []byte
-	err := db.QueryRow(`SELECT fresh_until, last_error, content, generation FROM entity_group WHERE kind = 'pr' AND id = ? AND group_name = ?`,
+	err := db.QueryRowContext(context.Background(), `SELECT fresh_until, last_error, content, generation FROM entity_group WHERE kind = 'pr' AND id = ? AND group_name = ?`,
 		nodeID, group).Scan(&fresh, &g.LastError, &content, &g.Generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GroupState{}
@@ -204,7 +205,7 @@ func (d *Daemon) RunClient(t *testing.T, instance string, req scriptout.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(d.bin, "--config", d.ConfigPath, instance)
+	cmd := exec.CommandContext(context.Background(), d.bin, "--config", d.ConfigPath, instance)
 	cmd.Dir = "/"
 	cmd.Env = []string{}
 	cmd.Stdin = bytes.NewReader(raw)

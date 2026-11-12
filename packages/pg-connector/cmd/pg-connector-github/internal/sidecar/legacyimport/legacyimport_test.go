@@ -38,7 +38,7 @@ func legacyHome(t *testing.T, files map[string]string) string {
 func stateOf(t *testing.T, st *store.Store, owner, repo string, n int) (string, bool) {
 	t.Helper()
 	var text string
-	err := st.DB().QueryRow(`SELECT state FROM posted_review WHERE owner=? AND repo=? AND number=?`, owner, repo, n).Scan(&text)
+	err := st.DB().QueryRowContext(context.Background(), `SELECT state FROM posted_review WHERE owner=? AND repo=? AND number=?`, owner, repo, n).Scan(&text)
 	if err != nil {
 		return "", false
 	}
@@ -136,7 +136,7 @@ func TestImportBringsLegacyFilesInOnceAndLeavesThemUntouched(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "posted", "foo__bar__3.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`DELETE FROM posted_review WHERE number = 1`); err != nil {
+	if _, err := st.DB().ExecContext(context.Background(), `DELETE FROM posted_review WHERE number = 1`); err != nil {
 		t.Fatal(err)
 	}
 	res, err = Import(ctx, st, home)
@@ -153,7 +153,8 @@ func TestImportBringsLegacyFilesInOnceAndLeavesThemUntouched(t *testing.T) {
 
 func TestImportStoreWinsOverLegacy(t *testing.T) {
 	st := openStore(t)
-	if _, err := st.DB().Exec(
+	if _, err := st.DB().ExecContext(
+		context.Background(),
 		`INSERT INTO posted_review (owner, repo, number, state, updated_at) VALUES ('foo', 'bar', 1, '{"from":"store"}', 1)`,
 	); err != nil {
 		t.Fatal(err)

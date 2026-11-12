@@ -41,7 +41,7 @@ func fileHash(t *testing.T, path string) [32]byte {
 func userVersionOf(t *testing.T, s *Store) int {
 	t.Helper()
 	var v int
-	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+	if err := s.DB().QueryRowContext(context.Background(), `PRAGMA user_version`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
 	return v
@@ -251,7 +251,7 @@ func TestBackupThatReportsAnotherVersionIsRejectedAndDeleted(t *testing.T) {
 			return err
 		}
 		defer func() { _ = db.Close() }()
-		_, err = db.Exec(`CREATE TABLE t (x INTEGER)`)
+		_, err = db.ExecContext(context.Background(), `CREATE TABLE t (x INTEGER)`)
 		return err
 	}
 

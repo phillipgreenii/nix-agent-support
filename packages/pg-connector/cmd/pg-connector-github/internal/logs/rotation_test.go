@@ -2,6 +2,7 @@ package logs
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -243,7 +244,7 @@ func TestConcurrentClientProcessesRotateTheClientLogOnce(t *testing.T) {
 	cmds := make([]*exec.Cmd, procs)
 	outs := make([]*bytes.Buffer, procs)
 	for i := range cmds {
-		cmds[i] = exec.Command(os.Args[0], "-test.run=^TestHelperClientProcess$")
+		cmds[i] = exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestHelperClientProcess$")
 		cmds[i].Env = append(os.Environ(), "LOGS_TEST_HELPER_DIR="+dir, fmt.Sprintf("LOGS_TEST_HELPER_OP=op%d", i))
 		outs[i] = &bytes.Buffer{}
 		cmds[i].Stdout, cmds[i].Stderr = outs[i], outs[i]

@@ -246,7 +246,7 @@ func Start(cfg Config) (*Server, error) {
 	if err := removeStaleSocket(cfg.SocketPath, log); err != nil {
 		return fail(err)
 	}
-	ln, err := net.Listen("unix", cfg.SocketPath)
+	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		return fail(fmt.Errorf("listen on %s: %w", cfg.SocketPath, err))
 	}

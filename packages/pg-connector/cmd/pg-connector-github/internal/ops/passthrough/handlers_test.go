@@ -117,7 +117,7 @@ func TestGolden_AnswersEqualTheOldBackends(t *testing.T) {
 // dumpTables renders every table of the store: name, columns and every row.
 func dumpTables(t *testing.T, db *sql.DB) string {
 	t.Helper()
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	rows, err := db.QueryContext(context.Background(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func dumpTables(t *testing.T, db *sql.DB) string {
 	var b strings.Builder
 	for _, n := range names {
 		fmt.Fprintf(&b, "table %s\n", n)
-		r, err := db.Query("SELECT * FROM " + n)
+		r, err := db.QueryContext(context.Background(), "SELECT * FROM "+n)
 		if err != nil {
 			t.Fatal(err)
 		}

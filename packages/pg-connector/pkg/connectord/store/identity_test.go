@@ -80,7 +80,7 @@ func TestIdentityIsCreatedForAPopulatedV3StoreAtItsFirstOpen(t *testing.T) {
 
 func TestIdentityErrorsWhenTheRowIsAbsent(t *testing.T) {
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
-	if _, err := s.DB().Exec(`DELETE FROM store_meta WHERE key = ?`, StoreIDKey); err != nil {
+	if _, err := s.DB().ExecContext(context.Background(), `DELETE FROM store_meta WHERE key = ?`, StoreIDKey); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Identity(context.Background()); !errors.Is(err, ErrNoIdentity) {
@@ -93,7 +93,7 @@ func TestRungFourKeepsAnExistingIdentityAndAddsNoDDL(t *testing.T) {
 	// and replayed through the rung) keeps it: the rung is INSERT OR IGNORE.
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
 	id := mustIdentity(t, s)
-	tx, err := s.DB().Begin()
+	tx, err := s.DB().BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestAMovedAsideStoreGetsANewIdentity(t *testing.T) {
 	}
 	defer func() { _ = old.Close() }()
 	var got string
-	if err := old.QueryRow(`SELECT value FROM store_meta WHERE key = ?`, StoreIDKey).Scan(&got); err != nil || got != oldID {
+	if err := old.QueryRowContext(context.Background(), `SELECT value FROM store_meta WHERE key = ?`, StoreIDKey).Scan(&got); err != nil || got != oldID {
 		t.Errorf("moved-aside identity = %q err=%v, want %q", got, err, oldID)
 	}
 }

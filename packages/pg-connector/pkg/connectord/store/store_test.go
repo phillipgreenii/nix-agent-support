@@ -48,7 +48,7 @@ func mustOpen(t *testing.T, path string, opts Options) (*Store, Result) {
 
 func tableNames(t *testing.T, s *Store) []string {
 	t.Helper()
-	rows, err := s.DB().Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	rows, err := s.DB().QueryContext(context.Background(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func tableNames(t *testing.T, s *Store) []string {
 
 func columnNames(t *testing.T, s *Store, table string) []string {
 	t.Helper()
-	rows, err := s.DB().Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	rows, err := s.DB().QueryContext(context.Background(), fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 		t.Errorf("Version/Path = %d %q", s.Version(), s.Path())
 	}
 	var userVersion int
-	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&userVersion); err != nil || userVersion != wantVersion {
+	if err := s.DB().QueryRowContext(context.Background(), `PRAGMA user_version`).Scan(&userVersion); err != nil || userVersion != wantVersion {
 		t.Errorf("user_version = %d err=%v, want %d", userVersion, err, wantVersion)
 	}
 
@@ -186,7 +186,7 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 	}
 
 	var mode string
-	if err := s.DB().QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+	if err := s.DB().QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil {
 		t.Fatal(err)
 	}
 	if mode != "wal" {
@@ -308,7 +308,7 @@ func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 		Version: scratch, Name: "add scratch table",
 		Apply: func(tx *sql.Tx, report func(string)) error {
 			ran++
-			_, err := tx.Exec(`CREATE TABLE scratch (x INTEGER)`)
+			_, err := tx.ExecContext(context.Background(), `CREATE TABLE scratch (x INTEGER)`)
 			return err
 		},
 	})
@@ -329,7 +329,7 @@ func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 		t.Errorf("step %d did not create its table", scratch)
 	}
 	var v int
-	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != scratch {
+	if err := s.DB().QueryRowContext(context.Background(), `PRAGMA user_version`).Scan(&v); err != nil || v != scratch {
 		t.Errorf("user_version = %d err=%v, want %d", v, err, scratch)
 	}
 
@@ -362,7 +362,7 @@ func TestNewerSchemaRefusedAndFileUntouched(t *testing.T) {
 				`INSERT INTO future VALUES ('from the newer binary')`,
 				fmt.Sprintf(`PRAGMA user_version = %d`, found),
 			} {
-				if _, err := raw.Exec(q); err != nil {
+				if _, err := raw.ExecContext(context.Background(), q); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -503,7 +503,7 @@ func TestFailedMigrationMovesStoreAside(t *testing.T) {
 	ladder := append(slices.Clone(builtinMigrations), Migration{
 		Version: failing, Name: "fails halfway once",
 		Apply: func(tx *sql.Tx, report func(string)) error {
-			if _, err := tx.Exec(`CREATE TABLE half_done (x INTEGER)`); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `CREATE TABLE half_done (x INTEGER)`); err != nil {
 				return err
 			}
 			if failures == 0 {
@@ -538,14 +538,14 @@ func TestFailedMigrationMovesStoreAside(t *testing.T) {
 	}
 	defer func() { _ = old.Close() }()
 	var n, v int
-	if err := old.QueryRow(`SELECT count(*) FROM alias`).Scan(&n); err != nil || n != 1 {
+	if err := old.QueryRowContext(context.Background(), `SELECT count(*) FROM alias`).Scan(&n); err != nil || n != 1 {
 		t.Errorf("moved-aside alias rows = %d err=%v", n, err)
 	}
-	if err := old.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != SchemaVersion {
+	if err := old.QueryRowContext(context.Background(), `PRAGMA user_version`).Scan(&v); err != nil || v != SchemaVersion {
 		t.Errorf("moved-aside user_version = %d err=%v, want %d", v, err, SchemaVersion)
 	}
 	var half int
-	if err := old.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = 'half_done'`).Scan(&half); err != nil || half != 0 {
+	if err := old.QueryRowContext(context.Background(), `SELECT count(*) FROM sqlite_master WHERE name = 'half_done'`).Scan(&half); err != nil || half != 0 {
 		t.Errorf("the failed step was not rolled back (half_done present=%d err=%v)", half, err)
 	}
 }
@@ -673,7 +673,7 @@ func testLadder(n int) []Migration {
 		l = append(l, Migration{
 			Version: v, Name: fmt.Sprintf("test step %d", v),
 			Apply: func(tx *sql.Tx, _ func(string)) error {
-				_, err := tx.Exec(fmt.Sprintf(`CREATE TABLE test_step_%d (x INTEGER)`, v))
+				_, err := tx.ExecContext(context.Background(), fmt.Sprintf(`CREATE TABLE test_step_%d (x INTEGER)`, v))
 				return err
 			},
 		})
@@ -687,7 +687,7 @@ func testLadder(n int) []Migration {
 // does not depend on host load.
 func runCrashWriter(t *testing.T, path string, ladder int) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestCrashWriterHelper$", "-test.v")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestCrashWriterHelper$", "-test.v")
 	cmd.Env = append(os.Environ(), crashEnv+"="+path)
 	if ladder > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s_LADDER=%d", crashEnv, ladder))
@@ -817,7 +817,7 @@ func TestMigratingIsObservableWhileASlowMigrationRuns(t *testing.T) {
 			report("copying row 7 of 100")
 			close(entered)
 			<-release
-			_, err := tx.Exec(`CREATE TABLE slow (x INTEGER)`)
+			_, err := tx.ExecContext(context.Background(), `CREATE TABLE slow (x INTEGER)`)
 			return err
 		},
 	}

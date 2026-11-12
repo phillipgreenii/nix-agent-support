@@ -119,7 +119,7 @@ func TestSecondStartOnTheSameStateDirRefusesNamingTheLock(t *testing.T) {
 		t.Error("the refusal must be logged as lock_held")
 	}
 	// The refused attempt must not have disturbed the first instance's socket.
-	if c, err := net.Dial("unix", cfg.SocketPath); err != nil {
+	if c, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath); err != nil {
 		t.Errorf("first instance's socket is gone: %v", err)
 	} else {
 		_ = c.Close()
@@ -265,7 +265,7 @@ func TestServeAcceptsAPeerWithTheDaemonsUID(t *testing.T) {
 		got <- p
 		_, _ = c.Write([]byte("hi"))
 	}, nil)
-	conn, err := net.Dial("unix", cfg.SocketPath)
+	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestServeRejectsAPeerWhoseUIDDiffersAndLogsIt(t *testing.T) {
 	called := make(chan struct{}, 1)
 	stop := serveAsync(t, s, func(context.Context, net.Conn, Peer) { called <- struct{}{} }, nil)
 
-	conn, err := net.Dial("unix", cfg.SocketPath)
+	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestServeRejectsAPeerWhoseCredentialsCannotBeRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := serveAsync(t, s, func(context.Context, net.Conn, Peer) { t.Error("handler ran") }, nil)
-	conn, err := net.Dial("unix", cfg.SocketPath)
+	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestDrainLetsInFlightHandlersFinishThenRunsHooksInOrderThenReleasesTheLock(
 		note("handler-done")
 	}, hooks)
 
-	conn, err := net.Dial("unix", cfg.SocketPath)
+	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestDrainLetsInFlightHandlersFinishThenRunsHooksInOrderThenReleasesTheLock(
 		t.Fatal("drain finished while a handler was in flight")
 	case <-time.After(300 * time.Millisecond):
 	}
-	if c, err := net.DialTimeout("unix", cfg.SocketPath, time.Second); err == nil {
+	if c, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", cfg.SocketPath); err == nil {
 		// The kernel may complete the dial against a closed listener's
 		// backlog on some systems; it must at least not be served.
 		_ = c.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
@@ -424,7 +424,7 @@ func TestDrainTimeoutCancelsAStuckHandlerAndStillRunsHooks(t *testing.T) {
 		close(entered)
 		<-ctx.Done() // cancelled only when the drain gives up
 	}, hooks)
-	conn, err := net.Dial("unix", cfg.SocketPath)
+	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestRunIsStartThenServe(t *testing.T) {
 	go func() { done <- Run(ctx, cfg, func(context.Context, net.Conn, Peer) {}, nil) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if c, err := net.Dial("unix", cfg.SocketPath); err == nil {
+		if c, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath); err == nil {
 			_ = c.Close()
 			break
 		}
@@ -673,7 +673,7 @@ func TestWatchdogCountsInFlightHandlers(t *testing.T) {
 		close(entered)
 		<-release
 	}, nil)
-	conn, err := net.Dial("unix", cfg.SocketPath)
+	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatal(err)
 	}

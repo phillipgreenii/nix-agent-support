@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/binary"
 	"errors"
@@ -122,7 +123,7 @@ func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration, ba
 	latest := len(ladder)
 
 	var from int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&from); err != nil {
+	if err := db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&from); err != nil {
 		return 0, fmt.Errorf("store: read schema version of %s: %w", path, err)
 	}
 	if from > latest {
@@ -155,7 +156,7 @@ func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration, ba
 }
 
 func applyOne(db *sql.DB, m Migration, p *Progress) (err error) {
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return err
 	}
@@ -168,14 +169,14 @@ func applyOne(db *sql.DB, m Migration, p *Progress) (err error) {
 		return err
 	}
 	// PRAGMA does not take bound parameters; Version is an int we control.
-	if _, err = tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", m.Version)); err != nil {
+	if _, err = tx.ExecContext(context.Background(), fmt.Sprintf("PRAGMA user_version = %d", m.Version)); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func quickCheck(db *sql.DB) error {
-	rows, err := db.Query("PRAGMA quick_check")
+	rows, err := db.QueryContext(context.Background(), "PRAGMA quick_check")
 	if err != nil {
 		return err
 	}

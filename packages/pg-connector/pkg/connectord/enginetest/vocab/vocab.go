@@ -23,6 +23,7 @@
 package vocab
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"testing"
@@ -111,7 +112,7 @@ func RerunUnderSecond(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locate the test binary: %v", err)
 	}
-	cmd := exec.Command(exe, "-test.run=.", "-test.count=1", "-test.skip=^"+t.Name()+"$")
+	cmd := exec.CommandContext(context.Background(), exe, "-test.run=.", "-test.count=1", "-test.skip=^"+t.Name()+"$")
 	cmd.Env = append(os.Environ(), Env+"="+Second)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

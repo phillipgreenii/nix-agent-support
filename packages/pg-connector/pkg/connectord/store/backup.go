@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -24,7 +25,7 @@ var backupStore = vacuumInto
 // is an SQL expression, so it is bound as a parameter, never spliced into the
 // statement.
 func vacuumInto(db *sql.DB, target string) error {
-	_, err := db.Exec("VACUUM INTO ?", target)
+	_, err := db.ExecContext(context.Background(), "VACUUM INTO ?", target)
 	return err
 }
 
@@ -74,7 +75,7 @@ func verifyBackup(path string, want int) error {
 	}
 	defer func() { _ = cp.Close() }()
 	var got int
-	if err := cp.QueryRow("PRAGMA user_version").Scan(&got); err != nil {
+	if err := cp.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&got); err != nil {
 		return err
 	}
 	if got != want {

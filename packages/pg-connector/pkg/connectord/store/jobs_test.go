@@ -27,7 +27,7 @@ func sameJobRow(a, b JobRow) bool {
 func jobRowCount(t *testing.T, s *Store) int {
 	t.Helper()
 	var n int
-	if err := s.DB().QueryRow(`SELECT count(*) FROM job`).Scan(&n); err != nil {
+	if err := s.DB().QueryRowContext(context.Background(), `SELECT count(*) FROM job`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -203,7 +203,7 @@ func TestAnEmptyJobListIsAFetchedRowNotAMissingOne(t *testing.T) {
 		t.Errorf("Jobs = %#v, want an empty, non-nil list", got.Jobs)
 	}
 	var raw string
-	if err := s.DB().QueryRow(`SELECT jobs FROM job WHERE run_id = '300'`).Scan(&raw); err != nil || raw != "[]" {
+	if err := s.DB().QueryRowContext(context.Background(), `SELECT jobs FROM job WHERE run_id = '300'`).Scan(&raw); err != nil || raw != "[]" {
 		t.Errorf("stored jobs text = %q err=%v, want []", raw, err)
 	}
 }
@@ -252,7 +252,7 @@ func TestPruneJobsBeforeDeletesOnlyOlderRowsAndCountsThem(t *testing.T) {
 func TestGetJobsReportsAMalformedJobsColumnAsAnError(t *testing.T) {
 	ctx := context.Background()
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
-	if _, err := s.DB().Exec(`INSERT INTO job (run_id, attempt, jobs, fetched_at) VALUES ('400', 1, 'not json', 1)`); err != nil {
+	if _, err := s.DB().ExecContext(context.Background(), `INSERT INTO job (run_id, attempt, jobs, fetched_at) VALUES ('400', 1, 'not json', 1)`); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := s.GetJobs(ctx, "400", 1)

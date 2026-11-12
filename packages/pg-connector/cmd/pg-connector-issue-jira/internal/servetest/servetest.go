@@ -18,6 +18,7 @@ package servetest
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -241,7 +242,7 @@ func (d *Daemon) start(t *testing.T, wait bool) {
 			t.Fatal("servetest: the daemon is already running")
 		}
 	}
-	cmd := exec.Command(d.bin, "--config", d.ConfigPath, "serve")
+	cmd := exec.CommandContext(context.Background(), d.bin, "--config", d.ConfigPath, "serve")
 	cmd.Dir = "/"
 	cmd.Env = []string{}
 	for k, v := range d.opts.Env {
@@ -470,7 +471,7 @@ func Op(op, args string) scriptout.Request {
 
 // Raw sends one frame as given and returns the reply frame.
 func (d *Daemon) Raw(frame socket.RequestFrame) (socket.ReplyFrame, error) {
-	conn, err := net.DialTimeout("unix", d.Socket, 5*time.Second)
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(context.Background(), "unix", d.Socket)
 	if err != nil {
 		return socket.ReplyFrame{}, err
 	}
@@ -535,7 +536,7 @@ func (d *Daemon) Client(t testing.TB, request string) ClientResult {
 // stdin as given, and decodes its stdout as a response when it is one.
 func RunBinary(t testing.TB, bin, stdin string, env []string, args ...string) ClientResult {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(context.Background(), bin, args...)
 	cmd.Dir = "/"
 	cmd.Env = append([]string{}, env...)
 	cmd.Stdin = strings.NewReader(stdin)
@@ -685,7 +686,7 @@ func build(t testing.TB, ldflags string) string {
 		args = append(args, "-ldflags", ldflags)
 	}
 	args = append(args, "./cmd/pg-connector-issue-jira")
-	cmd := exec.Command(goBin, args...)
+	cmd := exec.CommandContext(context.Background(), goBin, args...)
 	cmd.Dir = moduleRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("servetest: go build: %v\n%s", err, out)

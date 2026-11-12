@@ -136,7 +136,7 @@ func TestNewAppliesTheDefaultsTheGitHubEngineAlwaysApplied(t *testing.T) {
 // go list -deps of the facade lists neither.
 func TestTheFacadeImportsNeitherTheChangesNorTheQueryPackage(t *testing.T) {
 	goBin := filepath.Join(runtime.GOROOT(), "bin", "go")
-	out, err := exec.Command(goBin, "list", "-deps", ".").CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), goBin, "list", "-deps", ".").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list -deps: %v\n%s", err, out)
 	}

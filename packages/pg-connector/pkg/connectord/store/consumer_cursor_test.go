@@ -36,7 +36,7 @@ type rawConsumer struct {
 // after it.
 func rawConsumers(t *testing.T, db *sql.DB, viewCol, scopeCol string) []rawConsumer {
 	t.Helper()
-	rows, err := db.Query(fmt.Sprintf(
+	rows, err := db.QueryContext(context.Background(), fmt.Sprintf(
 		`SELECT consumer, %s, %s, acked_seq, seen_at FROM consumer ORDER BY consumer, %s, %s`,
 		viewCol, scopeCol, viewCol, scopeCol,
 	))
@@ -206,7 +206,7 @@ func openVersion5With(t *testing.T, seed []rawConsumer) string {
 		t.Fatal(err)
 	}
 	for _, c := range seed {
-		if _, err := s.DB().Exec(`INSERT INTO consumer (consumer, kind, query, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
+		if _, err := s.DB().ExecContext(context.Background(), `INSERT INTO consumer (consumer, kind, query, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
 			c.Consumer, c.View, c.Scope, c.AckedSeq, c.SeenAt); err != nil {
 			t.Fatal(err)
 		}
@@ -294,7 +294,7 @@ func TestRung6OnAnEmptyConsumerTableLeavesTheCurrentShape(t *testing.T) {
 		t.Errorf("consumers = %+v err=%v, want one row bound to scope b", list, err)
 	}
 	var idx int
-	if err := s.DB().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'consumer_seen_at'`).Scan(&idx); err != nil || idx != 1 {
+	if err := s.DB().QueryRowContext(context.Background(), `SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'consumer_seen_at'`).Scan(&idx); err != nil || idx != 1 {
 		t.Errorf("index consumer_seen_at present = %d err=%v, want 1", idx, err)
 	}
 }

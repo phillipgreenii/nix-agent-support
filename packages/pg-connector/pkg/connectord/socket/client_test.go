@@ -73,7 +73,7 @@ func TestCallRetriesARefusedConnection(t *testing.T) {
 	// A socket file nothing listens on: connect is refused, not absent.
 	dir := shortTempDir(t)
 	path := filepath.Join(dir, "s")
-	ln, err := net.Listen("unix", path)
+	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestCallDoesNotRetryAPermissionRefusal(t *testing.T) {
 	}
 	dir := shortTempDir(t)
 	path := filepath.Join(dir, "s")
-	ln, err := net.Listen("unix", path)
+	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}

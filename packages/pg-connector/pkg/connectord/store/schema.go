@@ -104,7 +104,7 @@ CREATE INDEX budget_bucket_at ON budget (bucket, at);
 
 func migrateV1(tx *sql.Tx, report func(string)) error {
 	report("creating the version 1 tables")
-	if _, err := tx.Exec(schemaV1); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV1); err != nil {
 		return fmt.Errorf("create version 1 schema: %w", err)
 	}
 	return nil
@@ -129,7 +129,7 @@ CREATE INDEX job_fetched_at ON job (fetched_at);
 
 func migrateV2(tx *sql.Tx, report func(string)) error {
 	report("creating the job table")
-	if _, err := tx.Exec(schemaV2); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV2); err != nil {
 		return fmt.Errorf("create version 2 schema: %w", err)
 	}
 	return nil
@@ -208,7 +208,7 @@ ALTER TABLE query ADD COLUMN baseline_at INTEGER;
 
 func migrateV3(tx *sql.Tx, report func(string)) error {
 	report("creating the change log, pending change, consumer and meta tables")
-	if _, err := tx.Exec(schemaV3); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV3); err != nil {
 		return fmt.Errorf("create version 3 schema: %w", err)
 	}
 	return nil
@@ -229,7 +229,7 @@ func migrateV4(tx *sql.Tx, report func(string)) error {
 	if _, err := rand.Read(b); err != nil {
 		return fmt.Errorf("create version 4 store identity: %w", err)
 	}
-	if _, err := tx.Exec(schemaV4, hex.EncodeToString(b)); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV4, hex.EncodeToString(b)); err != nil {
 		return fmt.Errorf("create version 4 store identity: %w", err)
 	}
 	return nil
@@ -251,7 +251,7 @@ CREATE INDEX entity_watched ON entity (kind, watched_at) WHERE watched_at IS NOT
 
 func migrateV5(tx *sql.Tx, report func(string)) error {
 	report("adding the watched flag and the log snapshot")
-	if _, err := tx.Exec(schemaV5); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV5); err != nil {
 		return fmt.Errorf("create version 5 schema: %w", err)
 	}
 	return nil
@@ -295,7 +295,7 @@ type v5ConsumerRow struct {
 
 func migrateV6(tx *sql.Tx, report func(string)) error {
 	report("rebuilding the consumer table with one cursor per consumer")
-	rows, err := tx.Query(`SELECT consumer, kind, query, acked_seq, seen_at FROM consumer ORDER BY consumer, kind, query`)
+	rows, err := tx.QueryContext(context.Background(), `SELECT consumer, kind, query, acked_seq, seen_at FROM consumer ORDER BY consumer, kind, query`)
 	if err != nil {
 		return fmt.Errorf("create version 6 schema: read consumers: %w", err)
 	}
@@ -323,7 +323,7 @@ func migrateV6(tx *sql.Tx, report func(string)) error {
 		return fmt.Errorf("create version 6 schema: read consumers: %w", err)
 	}
 
-	if _, err := tx.Exec(schemaV6Table); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV6Table); err != nil {
 		return fmt.Errorf("create version 6 schema: %w", err)
 	}
 	sort.Strings(names)
@@ -342,7 +342,8 @@ func migrateV6(tx *sql.Tx, report func(string)) error {
 			}
 		}
 		kept := group[keep]
-		if _, err := tx.Exec(
+		if _, err := tx.ExecContext(
+			context.Background(),
 			`INSERT INTO consumer_v6 (consumer, feed_view, scope, acked_seq, seen_at) VALUES (?, ?, ?, ?, ?)`,
 			name, kept.kind, kept.query, kept.ackedSeq, maxSeen,
 		); err != nil {
@@ -370,7 +371,7 @@ func migrateV6(tx *sql.Tx, report func(string)) error {
 		`ALTER TABLE consumer_v6 RENAME TO consumer`,
 		`CREATE INDEX consumer_seen_at ON consumer (seen_at)`,
 	} {
-		if _, err := tx.Exec(stmt); err != nil {
+		if _, err := tx.ExecContext(context.Background(), stmt); err != nil {
 			return fmt.Errorf("create version 6 schema: %w", err)
 		}
 	}
@@ -389,7 +390,7 @@ CREATE INDEX entity_closed_at ON entity (kind, closed_at) WHERE closed_at IS NOT
 
 func migrateV7(tx *sql.Tx, report func(string)) error {
 	report("adding the entity closed-at stamp")
-	if _, err := tx.Exec(schemaV7); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV7); err != nil {
 		return fmt.Errorf("create version 7 schema: %w", err)
 	}
 	return nil
@@ -410,7 +411,7 @@ CREATE INDEX alias_ref_fold ON alias (lower(ref));
 
 func migrateV8(tx *sql.Tx, report func(string)) error {
 	report("indexing the alias table by folded reference")
-	if _, err := tx.Exec(schemaV8); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV8); err != nil {
 		return fmt.Errorf("create version 8 schema: %w", err)
 	}
 	return nil
@@ -437,7 +438,7 @@ CREATE TABLE posted_review (
 
 func migrateV9(tx *sql.Tx, report func(string)) error {
 	report("creating the posted-review table")
-	if _, err := tx.Exec(schemaV9); err != nil {
+	if _, err := tx.ExecContext(context.Background(), schemaV9); err != nil {
 		return fmt.Errorf("create version 9 schema: %w", err)
 	}
 	return nil

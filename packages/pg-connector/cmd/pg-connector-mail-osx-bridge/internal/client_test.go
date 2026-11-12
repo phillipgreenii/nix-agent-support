@@ -33,7 +33,7 @@ func startFakeSocket(t *testing.T, handle func(req map[string]any) any) (sockPat
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	sockPath = filepath.Join(dir, "s.sock")
-	ln, err := net.Listen("unix", sockPath)
+	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", sockPath)
 	if err != nil {
 		t.Fatalf("listen on %s: %v", sockPath, err)
 	}

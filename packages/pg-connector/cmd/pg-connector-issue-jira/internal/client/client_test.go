@@ -513,7 +513,7 @@ func TestAWriteSendsWriteBeginThenInvalidateAroundTheOriginCall(t *testing.T) {
 func TestAWriteWithADaemonThatNeverAnswersWriteBeginStillHappensAndSkipsInvalidate(t *testing.T) {
 	cfg := testConfig(t)
 	ev := &events{}
-	ln, err := net.Listen("unix", cfg.SocketPath)
+	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
