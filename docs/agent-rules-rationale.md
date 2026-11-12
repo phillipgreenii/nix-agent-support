@@ -150,6 +150,20 @@ values mirror those: 10 matches `niceLevel`; 4 is a bit over a third of the core
 parallelises. L-4 is deliberately NOT a claim budget or admission gate: the drain loop is endless by
 design (operator ruling), so the lever is making each run cheaper to the host, not running fewer.
 
+L-5 (shared `GOCACHE` corruption, observed 2026-11-11 during the contextcheck burn-down at host load
+70-190: "not in std", "cannot open file ... -d", missing `go-build` entries, failed commit hooks):
+the cause was not reproduced. Go's cache is safe for concurrent `go` processes that only add to it
+(entries are written atomically and keyed by content); what it does not survive is something else
+removing or trimming entries underneath a running build. The suspects on this machine, in order:
+(1) `pg-disk-reclaimer`'s `go-build-cache` item (aggressiveness 3 in the nix-ziprecruiter machine
+config) runs `go clean -cache`, which deletes the whole tree under every live `go` process; (2) disk
+pressure (the shared cache was 17 GB at measurement, and writes fail when the volume fills); (3) the
+`go` auto-trim of entries unused for about 5 days, racing a 190-load run that is slow enough to
+reread them. Agents had already worked around it with private `GOCACHE` directories, so L-5 makes
+that the convention. A private cache costs a cold first build (minutes at this load) and is
+removable with its session; sharing `GOMODCACHE` keeps downloads shared. The reclaimer item
+itself lives in another repository and is the place to add a "no `go` process running" guard.
+
 ## Scratch / Payload File Writes (V-1, V-2)
 
 Observed 2026-07-30: 125 of 134 Write errors in the 3-month census were "File has not been read

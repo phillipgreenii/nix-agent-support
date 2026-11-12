@@ -51,6 +51,7 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 - **L-2** After a timeout, MUST NOT re-issue the SAME command unchanged; re-run in the background or with a larger timeout, narrowed if possible.
 - **L-3** A subagent brief instructing a build, check, or full test run MUST state the timeout or say to run in the background.
 - **L-4** A direct agent `go test` (one that does not go through `pg-test-runner`, which already queues for a host-wide slot and runs niced) MUST run as `nice -n 10 go test -p 4 ...`, so a burst of agent test runs cannot saturate the host.
+- **L-5** A direct agent `go test`/`go build`/`golangci-lint` run MUST NOT share the default `GOCACHE` (`~/Library/Caches/go-build`) when it can take a per-session one: set `GOCACHE="${TMPDIR:-/tmp}/go-build-<session-id>"` (create it; keep `GOMODCACHE` shared and read-only). MUST NOT run `go clean -cache` or delete any shared `GOCACHE` itself. On "not in std", "cannot open file ... -d" or missing `go-build` entries, MUST re-run once with a fresh private `GOCACHE` instead of retrying on the shared one. `pg-test-runner` and the commit hooks are outside this rule's reach.
 
 #### Scratch / Payload File Writes
 
