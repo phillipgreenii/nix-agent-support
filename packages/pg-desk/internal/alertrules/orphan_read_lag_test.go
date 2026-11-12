@@ -13,7 +13,21 @@ const orphanReadLagUID = "pg-desk-issue-orphan-read-lag"
 
 // wantOrphanReadLagExpr MUST equal the expr of rule pg-desk-issue-orphan-read-lag
 // (the approach of watched_source_observed_test.go).
-const wantOrphanReadLagExpr = `max by (backend) (pg_desk_oldest_orphan_read_age_seconds)` + outcomeGuard
+const wantOrphanReadLagExpr = `(max by (backend) (pg_desk_oldest_orphan_read_age_seconds) unless on() (` + orphanBackoffRecent + `)) or (vector(0) and on() (` + orphanBackoffRecent + `))` + outcomeGuard
+
+// orphanBackoffRecent is true while pg-router's host-load backoff gauge was set
+// at any point in the last 10 minutes.
+const orphanBackoffRecent = `max_over_time(pg_router_producer_load_backoff[10m]) > 0`
+
+// evalOrphanExpr models the rule's expression: during a recent backoff the
+// per-backend series is dropped and a label-less 0 answers (never NoData);
+// otherwise it is evalOutcomeExpr.
+func evalOrphanExpr(series []outcomeSample, livenessUp, backoffRecent bool) outcomeResult {
+	if backoffRecent {
+		return outcomeResult{values: map[string]float64{"": 0}}
+	}
+	return evalOutcomeExpr(series, livenessUp)
+}
 
 // orphanReadLagBoundSeconds is the rule's fixed threshold: 6 polls of 5 minutes.
 const orphanReadLagBoundSeconds = 1800
@@ -117,4 +131,28 @@ func TestOrphanReadLagRuleAgreesWithTheEmittedSeries(t *testing.T) {
 
 func TestOrphanReadLagUIDIsRegisteredWithTheRouterProbe(t *testing.T) {
 	assertProbeRegistered(t, orphanReadLagUID)
+}
+
+// TestOrphanReadLagIgnoresAgeGrownUnderRouterBackoff replays the 2026-11-12 episode:
+// the age passed the bound only because the router skipped every producer tick.
+func TestOrphanReadLagIgnoresAgeGrownUnderRouterBackoff(t *testing.T) {
+	nd := outcomeNoDataState(t, orphanReadLagUID)
+	grown := []outcomeSample{{"pg-desk", "a", 2759}}
+	got, noData := outcomeFiring(evalOrphanExpr(grown, true, true), orphanReadLagBoundSeconds, nd)
+	if len(got) != 0 || noData {
+		t.Errorf("backoff-only stall fired %v (noData alert %v), want quiet", got, noData)
+	}
+	// A backoff with no orphan series at all must not turn into NoData either.
+	got, noData = outcomeFiring(evalOrphanExpr(nil, true, true), orphanReadLagBoundSeconds, nd)
+	if len(got) != 0 || noData {
+		t.Errorf("backoff without series fired %v (noData alert %v), want quiet", got, noData)
+	}
+	// No backoff in the window: a failing orphan still fires, and the series
+	// missing while pg-desk is up still alerts.
+	if got, _ := outcomeFiring(evalOrphanExpr(grown, true, false), orphanReadLagBoundSeconds, nd); len(got) != 1 {
+		t.Errorf("failing orphan without backoff: firing = %v, want one backend", got)
+	}
+	if _, noData := outcomeFiring(evalOrphanExpr(nil, true, false), orphanReadLagBoundSeconds, nd); !noData {
+		t.Error("series missing with pg-desk up and no backoff did not alert")
+	}
 }

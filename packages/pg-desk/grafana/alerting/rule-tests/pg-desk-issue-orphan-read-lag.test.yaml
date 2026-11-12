@@ -112,11 +112,56 @@ tests:
       - series: pg_desk_liveness{job="pg-desk"}
         values: "1x30 _x30"
     promql_expr_test:
-      - expr: max by (backend) (pg_desk_oldest_orphan_read_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+      - expr: (max by (backend) (pg_desk_oldest_orphan_read_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))
         eval_time: 10m
         exp_samples: []
-      - expr: max by (backend) (pg_desk_oldest_orphan_read_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+      - expr: (max by (backend) (pg_desk_oldest_orphan_read_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))
         eval_time: 50m
         exp_samples:
           - labels: "{}"
             value: 0
+
+  # The age grows 1 s per second while pg-router skips every producer tick (host-load
+  # backoff, gauge 1 from minute 5 to 40), nothing failed. Quiet throughout, and the
+  # exemption never reads as NoData (promql_expr_test shows a label-less 0).
+  - name: an age grown only under a router backoff does not fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_oldest_orphan_read_age_seconds{backend="a",job="pg-desk"}
+        values: "0+60x60"
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x4 1x36 0x20"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-issue-orphan-read-lag
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-issue-orphan-read-lag
+        exp_alerts: []
+    promql_expr_test:
+      - expr: (max by (backend) (pg_desk_oldest_orphan_read_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))
+        eval_time: 35m
+        exp_samples:
+          - labels: "{}"
+            value: 0
+
+  # The backoff ended long ago and the orphan is still unread: fires again.
+  - name: a failing orphan fires once the backoff window has passed
+    interval: 1m
+    input_series:
+      - series: pg_desk_oldest_orphan_read_age_seconds{backend="a",job="pg-desk"}
+        values: "2400x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "1x5 0x55"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-issue-orphan-read-lag
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-issue-orphan-read-lag
+        exp_alerts:
+          - exp_labels:
+              backend: a
+              severity: warning

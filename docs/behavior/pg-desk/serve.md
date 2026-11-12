@@ -216,8 +216,13 @@ The Grafana rule `pg-desk-issue-orphan-read-lag` fires per `backend` while
 `pg_desk_oldest_orphan_read_age_seconds` is over `1800` seconds (30 minutes: 6 polls of 5 minutes, the
 longest an orphan waits under the recommended `hydration.orphan_max_per_poll` cap), held for
 `for: 10m`, severity `warning`. It carries `noDataState: Alerting` guarded by pg-desk liveness with the
-same expression tail as `pg-desk-ingest-failed-old`
-(`max by (backend) (pg_desk_oldest_orphan_read_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))`),
+same expression tail as `pg-desk-ingest-failed-old`. It is also exempt while pg-router's host-load backoff
+was set at any point in the last 10 minutes (`pg_router_producer_load_backoff`): an orphan is read only
+inside an issue poll, so while the router skips every producer tick the age grows with no read having
+failed. In that window the per-backend series is replaced by a label-less `0` (never an empty result, which
+would alert under `noDataState`); the backoff itself is reported once by `pg-router-producer-load-backoff`,
+and an absent backoff gauge exempts nothing. The expression is
+(`(max by (backend) (pg_desk_oldest_orphan_read_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))`),
 so it is quiet while pg-desk is down and alerts while pg-desk is up and the series is missing; it has no
 router-pause guard. Its uid is registered with the router probe, it is modelled in
 `internal/alertrules`, has a promtool case file under `grafana/alerting/rule-tests/`, and has its
