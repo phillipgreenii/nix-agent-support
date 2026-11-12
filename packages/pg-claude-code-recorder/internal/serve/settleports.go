@@ -30,10 +30,10 @@ type DirtySink interface {
 // the held list, where a Session stands, and the Remove and Extract actions.
 type OpsPort interface {
 	HeldCtx(ctx context.Context) ([]settle.HeldRow, error)
-	RecheckHeld() ([]settle.Outcome, error)
+	RecheckHeldCtx(ctx context.Context) ([]settle.Outcome, error)
 	WhereCtx(ctx context.Context, session string) (settle.WhereInfo, error)
-	Remove(opt settle.RemoveOptions) (settle.RemoveReport, error)
-	Extract(session, to string) (settle.ExtractResult, error)
+	RemoveCtx(ctx context.Context, opt settle.RemoveOptions) (settle.RemoveReport, error)
+	ExtractCtx(ctx context.Context, session, to string) (settle.ExtractResult, error)
 }
 
 // DoctorPort is the part of the settle stage the daemon's doctor loop, status
@@ -41,7 +41,7 @@ type OpsPort interface {
 // and the backfill read.
 type DoctorPort interface {
 	Doctor() (settle.DoctorResult, error)
-	DoctorRun() (settle.DoctorAnswer, error)
+	DoctorRunCtx(ctx context.Context) (settle.DoctorAnswer, error)
 	DoctorTick() error
 	DoctorProjection() (int64, time.Duration, error)
 	LowSpace() bool
