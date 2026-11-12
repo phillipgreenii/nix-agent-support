@@ -1,5 +1,6 @@
 ---
 name: plan-sanity-check
+user-invocable: false
 description: >-
   Use INLINE (never as a separate agent dispatch) as the shared, cheap "is this plan text
   well-formed enough to act on" guard that `plan-decompose`, `epic-decompose`, and

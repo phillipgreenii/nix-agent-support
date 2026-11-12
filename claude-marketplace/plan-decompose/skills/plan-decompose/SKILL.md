@@ -1,5 +1,6 @@
 ---
 name: plan-decompose
+user-invocable: false
 description: >-
   Use to turn an APPROVED design or plan into curated, SELF-CONTAINED implementation issues
   (work packets) that an agent can execute without reading the full design — plus to check

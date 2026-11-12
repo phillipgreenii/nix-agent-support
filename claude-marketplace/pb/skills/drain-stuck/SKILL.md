@@ -1,5 +1,6 @@
 ---
 name: drain-stuck
+user-invocable: false
 description: Disposition a claimed drain-beads bead that cannot complete — run the freshness probes, then escalate it to the escalation-triager (label `escalated`; never `human` directly), close it as moot, convert its blockers into bd dependencies, or defer it on a live external event. Invoked by /drain-beads or a drain worker (through pb:drain-one) with the bead id, session actor id, worktree/branch location, and what was tried. Do NOT use outside a drain session.
 ---
 

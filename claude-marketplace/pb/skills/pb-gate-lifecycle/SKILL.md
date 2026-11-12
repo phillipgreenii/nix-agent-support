@@ -1,5 +1,6 @@
 ---
 name: pb-gate-lifecycle
+user-invocable: false
 description: Gate a follow-up bead so it stays out of `bd ready` until a `pn workspace apply` actually applies the change it depends on. Use after you finish a unit of work and COMMIT it, when there is post-deploy follow-up (canonically "verify the code works") that MUST NOT be picked up by another agent until the change ships. Triggers: "this needs to be verified after it's applied", "don't let anyone work this until it's deployed", "gate this on apply", filing a verify/follow-up bead after committing. Do NOT use to create ordinary blockers between beads (use `bd dep`), or before you have committed the change (the gate keys on the commit's patch-id).
 ---
 

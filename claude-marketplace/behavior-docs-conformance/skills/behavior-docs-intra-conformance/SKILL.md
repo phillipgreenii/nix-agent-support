@@ -1,5 +1,6 @@
 ---
 name: behavior-docs-intra-conformance
+user-invocable: false
 description: The INTRA third of the behavior-docs conformance family — review, or apply mechanical fixes to, ONE behavior-docs set against the method's own invariant rules (the conformance/drift pass). Use when asked to check, review, audit, or "run the conformance pass" on a behavior docs set (a `docs/behavior` directory), or to reconcile drift between a set and the method. Checks scope-explicitness, actor/interface definitions, story/journey coverage of every invariant, ID uniqueness, per-element traceability (no untraced/dangling refs), glossary-term reuse, self-consistency, cross-set citation resolution, intended-behavior-only content (nothing below the floor), and a well-formed realization-gap register. Reports ranked findings citing the invariant each breaks; apply mode fixes only mechanical/format issues, leaving intended-behavior to a human. The other two thirds: `behavior-docs-inter-conformance` (across a seam) and `behavior-docs-impl-conformance` (implementation vs. its own set). Do NOT use to author a new set, for a cross-set seam, or for non-behavior-docs markdown.
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: integrate-branch
+user-invocable: false
 description: Use when integrating/landing completed work on the current branch — runs integrate-branch-support, then delegates to the right handler (ff-merge-to-main / pull-request / a declared custom handler). Adapts to the repo automatically.
 ---
 

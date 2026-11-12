@@ -1,5 +1,6 @@
 ---
 name: go-test-gaps
+user-invocable: false
 description: Use ONLY when the operator explicitly asks to run mutation testing or a test-gap analysis on a named Go package; or, while changing the mutation tooling itself (pg-go-mutate, pg-go-mutate-tui), to run it against a small synthetic fixture project only. It is a slow, intensive, deliberate analysis whose output is a triage bead of areas to improve. Do NOT use in implementation, planning, review, validation or landing work; do NOT use when working a go-test-gaps triage bead (it carries its own instructions), writing or strengthening tests, closing the gaps a past analysis found, improving coverage, or deciding what to test; do NOT use for non-Go code or for a coverage or mutation score.
 ---
 

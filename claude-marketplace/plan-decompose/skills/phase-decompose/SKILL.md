@@ -1,5 +1,6 @@
 ---
 name: phase-decompose
+user-invocable: false
 description: >-
   Use when a claimed phase-trigger bead is ready to run: verifies the paired phase bead's
   design text against what actually landed from its upstream phases, escalates to a human on

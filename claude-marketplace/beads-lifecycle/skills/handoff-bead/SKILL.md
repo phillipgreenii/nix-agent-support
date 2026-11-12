@@ -1,5 +1,6 @@
 ---
 name: handoff-bead
+user-invocable: false
 description: >-
   Use when a bead you are about to read, claim, work, or close is of type `handoff` (or is
   unmistakably a handoff of a previous session), and before creating a handoff bead at the end of a

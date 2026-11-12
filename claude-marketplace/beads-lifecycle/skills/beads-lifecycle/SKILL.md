@@ -1,5 +1,6 @@
 ---
 name: beads-lifecycle
+user-invocable: false
 description: >-
   Use before any `bd` command that creates, updates, closes, or adds a dependency to an
   issue; before parking, re-parking, escalating, releasing, or accepting a bead whose

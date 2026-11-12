@@ -1,5 +1,6 @@
 ---
 name: bash-scripting
+user-invocable: false
 description: Use when creating, modifying, reviewing, or deleting bash scripts (.sh, .bash), bats tests, completions, tldr pages, or mkBashScript/mkBashLibrary/mkBashModule nix packaging in this workspace. Authoritative reference for the mkBashBuilders framework.
 ---
 

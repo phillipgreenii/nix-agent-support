@@ -1,5 +1,6 @@
 ---
 name: ff-merge-to-main
+user-invocable: false
 description: Local rebase-then-fast-forward-merge landing handler. Delegates to `pg-git-lander land` (and `pg-git-lander rebase` for catching a branch up). Invoked by the `integrate-branch` skill as its `ff-merge-to-main` handler when the resolved strategy is "ff-merge-to-main" — not normally invoked directly.
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: plan-decompose-beads
+user-invocable: false
 description: >-
   The beads (bd) medium binding for the plan-decompose skill — maps its abstract operations
   (find-docket, create-docket, create-packet, wire-ordering, read-packet/read-docket-design,

@@ -1,5 +1,6 @@
 ---
 name: drain-one
+user-invocable: false
 description: The shared per-bead protocol for draining ONE already-claimed bead — container probe, understand, isolate, delegate to an implementation subagent, validate, land via a lander subagent, finish, and route a bead that cannot complete to pb:drain-stuck. Applied by /drain-beads and by the pg-router drain workers. Do NOT use to select or claim a bead.
 ---
 
