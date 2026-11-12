@@ -36,10 +36,12 @@ tests:
         alertname: pg-router-resource-held-nonbest
         exp_alerts: []
 
-  - name: a monitor-only resource held at its worst level never fires, while a real resource still does
+  - name: monitor-only resources (network_zr_trust, aws_sso_zr) held at their worst level never fire, while a real resource still does
     interval: 1m
     input_series:
       - series: pg_router_resource_level{resource="network_zr_trust",job="pg-router"}
+        values: "1x500"
+      - series: pg_router_resource_level{resource="aws_sso_zr",job="pg-router"}
         values: "1x500"
       - series: pg_router_resource_level{resource="disk",job="pg-router"}
         values: "1x500"

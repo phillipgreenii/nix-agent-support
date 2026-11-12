@@ -2337,8 +2337,8 @@ groups:
       # a registration is blocked by it (pg-router-gate-held covers the blocked case after
       # 30 minutes).
       #
-      # MONITOR-ONLY resources are excluded by the resource!~"..." matcher in refId A
-      # below: a resource that no role requires (a deployment watches it over time before
+      # MONITOR-ONLY resources (today `network_zr_trust` and `aws_sso_zr`) are excluded by the
+      # resource!~"..." matcher in refId A below: a resource that no role requires (a deployment watches it over time before
       # deciding to gate on it) must not page. To add one, append its name to that
       # alternation (`network_zr_trust|aws_sso_zr`; Prometheus regex matchers are fully
       # anchored) and add a case to rule-tests/pg-router-resource-held-nonbest.test.yaml.
@@ -2365,7 +2365,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max by (resource)(last_over_time(pg_router_resource_level{resource!~"network_zr_trust"}[10m]) > 0)'
+              expr: 'max by (resource)(last_over_time(pg_router_resource_level{resource!~"network_zr_trust|aws_sso_zr"}[10m]) > 0)'
           - refId: B
             datasourceUid: __expr__
             model:
