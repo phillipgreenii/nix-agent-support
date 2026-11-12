@@ -2125,6 +2125,9 @@
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
 
+              # Every Go module's go.mod MUST also carry `go <pkgs.go.version>` (the
+              # locked nixpkgs Go that builds the deployed binaries); the check is
+              # red on any other directive.
               # Every Go module (packages/*/gomod2nix.toml) MUST be refreshed by
               # update-locks.sh, MUST have the thin update-deps.sh wrapper, and the
               # shared updater MUST run `generate --with-deps` at the gomod2nix rev
@@ -2153,9 +2156,37 @@
                   };
                 in
                 pkgs.runCommand "go-deps-wired" { nativeBuildInputs = [ pkgs.jq ]; } ''
-                  bash ${goDepsWiredSrc}/scripts/check-go-deps-wired.sh ${goDepsWiredSrc}
+                  bash ${goDepsWiredSrc}/scripts/check-go-deps-wired.sh ${goDepsWiredSrc} ${pkgs.go.version}
                   touch $out
                 '';
+
+              # Regression guard for go-deps-wired's go-directive assertion: the real
+              # script against throwaway trees (tests/check-go-deps-wired.bats).
+              go-deps-wired-directive =
+                pkgs.runCommand "check-go-deps-wired-directive"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.jq
+                    ];
+                  }
+                  ''
+                    export HOME="$TMPDIR/home"; mkdir -p "$HOME"
+                    cp -r ${
+                      lib.fileset.toSource {
+                        root = ./.;
+                        fileset = lib.fileset.unions [
+                          ./flake.lock
+                          ./scripts/check-go-deps-wired.sh
+                          ./packages/update-gomod2nix-deps.sh
+                          ./tests/check-go-deps-wired.bats
+                        ];
+                      }
+                    } src
+                    chmod -R u+w src
+                    bats src/tests/check-go-deps-wired.bats
+                    touch $out
+                  '';
 
               # `prevent-main-rebase` pre-rebase hook's safe-case auto-allow
               # (pg2-i5t0k). Builds the EXACT SAME `prevent-main-rebase-hook-script`

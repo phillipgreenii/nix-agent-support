@@ -5,12 +5,18 @@
 # gomod2nix rev flake.lock locks (phillipg-nix-repo-base ADR 0031: a toml
 # without `cachePackages` leaves every Go build compiling cold).
 #
-# Usage: check-go-deps-wired.sh <repo-root>
+# Every packages/*/go.mod MUST carry the same `go` directive. With the optional
+# second argument (the flake passes pkgs.go.version) that directive MUST equal
+# `go <version>`, so modules are judged by the same compiler that builds the
+# deployed binaries; without it the modules must only agree with each other.
+#
+# Usage: check-go-deps-wired.sh <repo-root> [expected-go-version]
 #
 # Exits 0 when everything is wired; exits 1 after listing EVERY problem.
 set -euo pipefail
 
-root="${1:?usage: check-go-deps-wired.sh <repo-root>}"
+root="${1:?usage: check-go-deps-wired.sh <repo-root> [expected-go-version]}"
+expected_go="${2:-}"
 problems=()
 
 # Module dirs that have a gomod2nix.toml (the source of truth for "is a Go module").
@@ -47,6 +53,26 @@ for mod in "${wired[@]}"; do
     problems+=("${mod}: wired in update-locks.sh but has no packages/${mod}/gomod2nix.toml")
   fi
 done
+
+# One go directive everywhere (and the pinned one when the caller names it).
+declare -A directives=()
+for gomod in "${root}"/packages/*/go.mod; do
+  [ -e "${gomod}" ] || continue
+  mod="$(basename "$(dirname "${gomod}")")"
+  directive="$(sed -n 's/^go[[:space:]][[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${gomod}" | head -n 1)"
+  directives["${mod}"]="${directive}"
+  if [ -z "${directive}" ]; then
+    problems+=("${mod}: packages/${mod}/go.mod has no go directive")
+  elif [ -n "${expected_go}" ] && [ "${directive}" != "${expected_go}" ]; then
+    problems+=("${mod}: go.mod says go ${directive}, expected go ${expected_go} (the locked pkgs.go)")
+  fi
+done
+if [ -z "${expected_go}" ]; then
+  distinct="$(printf '%s\n' "${directives[@]}" | sort -u | grep -c . || true)"
+  if [ "${distinct}" -gt 1 ]; then
+    problems+=("go.mod files disagree on the go directive: $(printf '%s\n' "${directives[@]}" | sort | uniq -c | tr -s ' ' | tr '\n' ';')")
+  fi
+fi
 
 # The shared updater: --with-deps and a pin equal to the locked gomod2nix rev.
 updater="${root}/packages/update-gomod2nix-deps.sh"
