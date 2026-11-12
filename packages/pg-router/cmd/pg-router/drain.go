@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/config"
@@ -48,11 +49,44 @@ func warnDroppedRoleEnv() {
 // environment from its own allowlist, so this call site needs no explicit
 // hermetic-env helper of its own anymore (pg2-a8bhp).
 func warnTrackedConfig(ctx context.Context, cfg config.Config) {
-	client, err := gitclient.New(ctx, cfg.RepoRoot)
+	warnTrackedConfigWith(ctx, cfg, trackedConfigTimeout, isConfigTracked)
+}
+
+// trackedConfigTimeout bounds the advisory tracked-config check: the two git
+// calls it makes must never hold daemon startup.
+const trackedConfigTimeout = 5 * time.Second
+
+// isConfigTracked is the real git probe behind warnTrackedConfig.
+func isConfigTracked(ctx context.Context, repoRoot string) (bool, error) {
+	client, err := gitclient.New(ctx, repoRoot)
 	if err != nil {
+		return false, err
+	}
+	return client.IsTracked(ctx, ".pg-router/config.toml")
+}
+
+// warnTrackedConfigWith runs check under a hard timeout. On timeout it logs a
+// warning and returns without waiting for check (advisory: never block).
+func warnTrackedConfigWith(ctx context.Context, cfg config.Config, timeout time.Duration, check func(context.Context, string) (bool, error)) {
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	type result struct {
+		tracked bool
+		err     error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		t, e := check(tctx, cfg.RepoRoot)
+		ch <- result{t, e}
+	}()
+	var r result
+	select {
+	case r = <-ch:
+	case <-tctx.Done():
+		slog.Warn("tracked-config git check timed out; continuing startup", "repo", cfg.RepoRoot, "timeout", timeout)
 		return
 	}
-	tracked, err := client.IsTracked(ctx, ".pg-router/config.toml")
+	tracked, err := r.tracked, r.err
 	if err == nil && tracked {
 		slog.Warn("`.pg-router/config.toml` is tracked by git; prompts may be committed — add `.pg-router/` to .git/info/exclude", "repo", cfg.RepoRoot)
 	}

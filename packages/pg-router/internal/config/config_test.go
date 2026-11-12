@@ -1891,3 +1891,37 @@ func TestLoadBackoffThreshold(t *testing.T) {
 		t.Errorf("LoadBackoffThreshold = %v, want 72.5 from env", c.LoadBackoffThreshold)
 	}
 }
+
+func TestLoadWith_noGitProbeWhenConfigEnvSet(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	src := fakeSources(map[string]string{"PG_ROUTER_CONFIG": cfgPath, "HOME": t.TempDir()}, "")
+	src.GitCommonDir = func(context.Context, string) (string, error) { calls++; return "", errors.New("x") }
+	if _, err := LoadWith(context.Background(), src); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Fatalf("GitCommonDir called %d times with PG_ROUTER_CONFIG set, want 0", calls)
+	}
+}
+
+func TestResolveConfigPath_hungGitFallsBackWithinBound(t *testing.T) {
+	old := gitProbeTimeout
+	gitProbeTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { gitProbeTimeout = old })
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	src := fakeSources(nil, "")
+	src.GitCommonDir = func(context.Context, string) (string, error) { <-release; return "/never", nil }
+	start := time.Now()
+	got := src.resolveConfigPath(context.Background(), "/repo")
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %v, want about 50ms", d)
+	}
+	if want := filepath.Join("/repo", ".pg-router", "config.toml"); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

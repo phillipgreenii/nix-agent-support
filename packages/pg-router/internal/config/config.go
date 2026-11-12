@@ -455,7 +455,13 @@ func loadWith(ctx context.Context, src Sources, loc CommandLocator) (Config, err
 		return Config{}, fmt.Errorf("stat %s: %w", globalPath, statErr)
 	}
 
-	path := src.envStr("PG_ROUTER_CONFIG", src.resolveConfigPath(ctx, c.RepoRoot))
+	// Resolve the default location (a git child process) ONLY when
+	// PG_ROUTER_CONFIG is unset: evaluating it eagerly ran git against the
+	// repo root on every daemon start even though the daemon sets the var.
+	path, ok := src.Getenv("PG_ROUTER_CONFIG")
+	if !ok {
+		path = src.resolveConfigPath(ctx, c.RepoRoot)
+	}
 	c.ConfigPath = path
 	reg := NewRegistry()
 	if _, statErr := os.Stat(path); statErr == nil {
@@ -493,6 +499,10 @@ func loadWith(ctx context.Context, src Sources, loc CommandLocator) (Config, err
 	return c, nil
 }
 
+// gitProbeTimeout bounds the startup git-common-dir probe (a var so tests can
+// shorten it).
+var gitProbeTimeout = 5 * time.Second
+
 // resolveConfigPath resolves the DEFAULT .pg-router/config.toml location for
 // repoRoot: <canonical-clone-root>/.pg-router/config.toml, found by running
 // `git rev-parse --git-common-dir` FROM repoRoot (pg2-xl659 design decision,
@@ -516,8 +526,28 @@ func loadWith(ctx context.Context, src Sources, loc CommandLocator) (Config, err
 // too.
 func (s Sources) resolveConfigPath(ctx context.Context, repoRoot string) string {
 	naive := filepath.Join(repoRoot, ".pg-router", "config.toml")
-	commonDir, err := s.GitCommonDir(ctx, repoRoot)
-	if err != nil {
+	// Bounded: a wedged git (heavy host load, huge repo) must not hold daemon
+	// startup; on timeout fall back to the naive path like any git error.
+	type result struct {
+		dir string
+		err error
+	}
+	tctx, cancel := context.WithTimeout(ctx, gitProbeTimeout)
+	defer cancel()
+	ch := make(chan result, 1)
+	go func() {
+		d, e := s.GitCommonDir(tctx, repoRoot)
+		ch <- result{d, e}
+	}()
+	var commonDir string
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			return naive
+		}
+		commonDir = r.dir
+	case <-tctx.Done():
+		slog.Warn("git common-dir lookup timed out; using the repo-local config path", "repo", repoRoot, "timeout", gitProbeTimeout)
 		return naive
 	}
 	return filepath.Join(filepath.Dir(commonDir), ".pg-router", "config.toml")

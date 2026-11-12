@@ -1229,6 +1229,23 @@ type preparedRun struct {
 // before: applySelectors' own doc comment (selectors.go) explains why a
 // re-Validate against the run-scoped subset would produce false findings —
 // nothing past this point may call Validate() again.
+// slowStartupStep is the duration past which a prepareRun step is logged.
+const slowStartupStep = 1 * time.Second
+
+// startupStepTimer returns a func that, called at the end of each startup
+// step with its name, logs the step's name and duration when it took longer
+// than threshold, so a startup stall names the blocking call.
+func startupStepTimer(l *slog.Logger, threshold time.Duration) func(name string) {
+	last := time.Now()
+	return func(name string) {
+		now := time.Now()
+		if d := now.Sub(last); d > threshold {
+			l.Warn("slow startup step", "step", name, "duration", d)
+		}
+		last = now
+	}
+}
+
 func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	// Fan the default slog logger out to the OTLP bridge (design section 5.2):
 	// stderr output is kept and every record from this point on — including
@@ -1260,14 +1277,19 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 		telemetry.NewSlogHandler(),
 	)))
 
+	step := startupStepTimer(slog.Default(), slowStartupStep)
 	cfg, err := config.LoadContext(ctx)
+	step("load config")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return preparedRun{}, exitPrecheck
 	}
 	warnDroppedRoleEnv()
+	step("warn dropped role env")
 	warnTrackedConfig(ctx, cfg)
+	step("warn tracked config")
 	warnStubQueries(cfg)
+	step("warn stub queries")
 
 	slog.Info("starting", "repo", cfg.RepoRoot, "config", cfg.ConfigPath, "roles", len(cfg.Roles))
 

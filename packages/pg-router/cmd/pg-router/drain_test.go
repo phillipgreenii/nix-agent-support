@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/x/gitfixture"
@@ -62,5 +63,38 @@ func TestWarnTrackedConfig_ignoresLeakedGitDir(t *testing.T) {
 
 	if strings.Contains(buf.String(), "tracked by git") {
 		t.Fatalf("warnTrackedConfig warned that target's config.toml is tracked, but target's own copy is untracked -- a leaked GIT_DIR/GIT_WORK_TREE answered about the LEAKED repo instead of %s:\n%s", target.Dir, buf.String())
+	}
+}
+
+func TestWarnTrackedConfigWith_hungGitDoesNotBlockStartup(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	start := time.Now()
+	// The check ignores its context entirely, like a wedged git child.
+	warnTrackedConfigWith(context.Background(), config.Config{RepoRoot: "/x"}, 50*time.Millisecond,
+		func(context.Context, string) (bool, error) { <-release; return false, nil })
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("returned after %v, want about the 50ms bound", d)
+	}
+	if !strings.Contains(buf.String(), "timed out") {
+		t.Fatalf("no timeout warning logged:\n%s", buf.String())
+	}
+}
+
+func TestStartupStepTimer_logsOnlySlowSteps(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(slog.NewTextHandler(&buf, nil))
+	step := startupStepTimer(l, 20*time.Millisecond)
+	step("fast")
+	time.Sleep(40 * time.Millisecond)
+	step("slowone")
+	out := buf.String()
+	if strings.Contains(out, "fast") || !strings.Contains(out, "slowone") || !strings.Contains(out, "duration") {
+		t.Fatalf("unexpected log:\n%s", out)
 	}
 }
