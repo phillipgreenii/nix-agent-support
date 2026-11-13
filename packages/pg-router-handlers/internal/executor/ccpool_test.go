@@ -327,12 +327,12 @@ func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-w --add-label human --remove-label escalated --status=open --assignee=") {
 		t.Errorf("worker done-without-close must add human; updates=%v", bd.Updates)
 	}
-	// sessionState (edge check) + active() each call List once, then closeReason
+	// The poll's single list serves the edge check and active(), then closeReason
 	// (INV-CCH-7) calls List twice more (its own bounded re-read, since this
-	// session's CloseReason is unset/present) — 4 List calls on the single
+	// session's CloseReason is unset/present) — 3 List calls on the single
 	// stopping poll proves the loop stopped immediately (not looped to MaxWait).
-	if cc.ListIdx != 4 {
-		t.Errorf("done must stop on first poll (listIdx=4: sessionState+active+closeReason's 2), got %d (looped to MaxWait?)", cc.ListIdx)
+	if cc.ListIdx != 3 {
+		t.Errorf("done must stop on first poll (listIdx=3: poll list+closeReason's 2), got %d (looped to MaxWait?)", cc.ListIdx)
 	}
 }
 
@@ -348,10 +348,10 @@ func TestWaitDone_feedbackDoneStopsFast_unclaims(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-c --status=open --assignee=") {
 		t.Errorf("feedback done-without-close must unclaim; updates=%v", bd.Updates)
 	}
-	// See TestWaitDone_workerDoneStopsFast_failure's comment: sessionState +
-	// active() + closeReason's own bounded re-read = 4 List calls.
-	if cc.ListIdx != 4 {
-		t.Errorf("done must stop on first poll (listIdx=4), got %d", cc.ListIdx)
+	// See TestWaitDone_workerDoneStopsFast_failure's comment: the poll's list +
+	// closeReason's own bounded re-read = 3 List calls.
+	if cc.ListIdx != 3 {
+		t.Errorf("done must stop on first poll (listIdx=3), got %d", cc.ListIdx)
 	}
 }
 
@@ -454,9 +454,9 @@ func TestWaitDone_usesDerivedWaitAndReportsIt(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantText) {
 				t.Fatalf("error must contain %q, got %v", tc.wantText, err)
 			}
-			// Each poll reads the session list twice (the liveness checks), so
-			// the list count bounds the polls made before the deadline.
-			if cc.ListIdx < 2*tc.minPolls || cc.ListIdx > 2*tc.maxPolls+2 {
+			// Each poll reads the session list once, so the list count bounds
+			// the polls made before the deadline.
+			if cc.ListIdx < tc.minPolls || cc.ListIdx > tc.maxPolls+1 {
 				t.Errorf("listIdx=%d, want the loop to run to the derived deadline (%d-%d polls)", cc.ListIdx, tc.minPolls, tc.maxPolls)
 			}
 		})
@@ -479,7 +479,7 @@ func TestActive_stateMapping(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newExec(&dtest.FakeCC{ListSeq: [][]ccpool.Session{tc.sess}}, &dtest.ScriptBD{}, fastCfg())
-			if got := e.active(context.Background(), "s"); got != tc.want {
+			if got := e.activeIn(e.pollSessions(context.Background()), "s"); got != tc.want {
 				t.Errorf("active(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
@@ -500,7 +500,7 @@ func TestSessionState_lookup(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newExec(&dtest.FakeCC{ListSeq: [][]ccpool.Session{tc.sess}}, &dtest.ScriptBD{}, fastCfg())
-			gotState, gotOK := e.sessionState(context.Background(), "s")
+			gotState, gotOK := stateIn(e.pollSessions(context.Background()), "s")
 			if gotState != tc.wantState || gotOK != tc.wantOK {
 				t.Errorf("sessionState(%s) = (%q, %v), want (%q, %v)", tc.name, gotState, gotOK, tc.wantState, tc.wantOK)
 			}
@@ -2228,7 +2228,6 @@ func TestDispatch_redeliveryAfterSettle_launchesFreshSession(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
 		{}, // the FIRST dispatch's prior-session check: nothing yet
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}}, // the nudge's liveness check
-		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		// att-1 has settled (idle) when its own finishWait runs: cleanupWorktree's

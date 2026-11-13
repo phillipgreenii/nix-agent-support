@@ -59,6 +59,9 @@ type ccpoolRun struct {
 	// fetched, so it adds no ccpool call.
 	row   ccpool.Session
 	rowOK bool
+	// lightUnsupported: this dispatch's ccpool rejected list --no-facets, so the
+	// wait poll uses the plain List (touched only by the wait loop's goroutine).
+	lightUnsupported bool
 
 	// The outcome record state (INV-CCH-35), touched only by the dispatch's own
 	// goroutine. started: dispatch_start was written (the dispatch is accepted),
@@ -1636,8 +1639,11 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		// Edge-detect needs_input and alert the operator exactly once. Pure
 		// observation: it does not affect the terminal decision below (active()
 		// still treats needs_input as keep-waiting, bounded by MaxWait).
+		// ONE facet-free list per poll feeds both this edge check and the active
+		// read below (the loop reads only state, live and transcript_path).
+		poll := r.pollSessions(ctx)
 		if !alertedNeedsInput {
-			if st, ok := r.sessionState(ctx, name); ok && st == ccpool.StateNeedsInput {
+			if st, ok := stateIn(poll, name); ok && st == ccpool.StateNeedsInput {
 				r.alertNeedsInput(name, d.Item.ID)
 				alertedNeedsInput = true
 			}
@@ -1657,7 +1663,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		// keeps waiting. Every other mode treats !active as the end, as before.
 		// active is read once per poll, ahead of the end test, because the stall
 		// bound below reads the row that read observed.
-		isActive := r.active(ctx, name)
+		isActive := r.activeIn(poll, name)
 		// An unanswered Bash call inside its declared timeout is activity too
 		// (pg2-r4ig2): a subagent in one long hook run writes nothing until it
 		// returns, and closing the pane would kill the call and park the bead.
@@ -2123,13 +2129,12 @@ func (r *ccpoolRun) escalateEviction(ctx context.Context, beadID string) bool {
 // session FACTS, not work judgments — on !active the caller re-reads the BEAD to
 // decide success vs failure (ADR 0015). A list error is treated as active (can't
 // tell ⇒ keep waiting; MaxWait bounds us).
-func (r *ccpoolRun) active(ctx context.Context, externalID string) bool {
-	sessions, err := r.deps.CC.List(ctx)
-	if err != nil {
+func (r *ccpoolRun) activeIn(p sessionPoll, externalID string) bool {
+	if p.err != nil {
 		r.clearRow() // an unreadable poll must not leave the previous poll's row for the stall bound
 		return true  // can't tell ⇒ assume active; the deadline still bounds us
 	}
-	for _, s := range sessions {
+	for _, s := range p.sessions {
 		if s.ExternalID == externalID {
 			r.noteSession(s)
 			return s.Live && s.State != ccpool.StateErrored && s.State != ccpool.StateIdle
@@ -2147,19 +2152,42 @@ func (r *ccpoolRun) sessionLive(ctx context.Context, externalID string) bool {
 	return ccpool.SessionLive(ctx, r.deps.CC, externalID)
 }
 
-// sessionState returns the current ccpool state of the session addressed by
-// externalID and whether it was present in the list. Unlike active() (which
-// collapses state to a keep-waiting bool), this preserves the raw state so the
-// caller can detect the EDGE into needs_input. A list error returns ("", false)
-// — can't tell ⇒ no edge fires this poll (the next poll retries).
-func (r *ccpoolRun) sessionState(ctx context.Context, externalID string) (ccpool.SessionState, bool) {
-	sessions, err := r.deps.CC.List(ctx)
-	if err != nil {
+// sessionPoll is the result of the one session list a wait poll makes.
+type sessionPoll struct {
+	sessions []ccpool.Session
+	err      error
+}
+
+// pollSessions reads the pool once for a wait poll. It asks for the facet-free
+// list when the runner offers one (the wait loop never reads cwd or the git
+// facets, and resolving them costs a process launch per live row). When the
+// ccpool in use rejects --no-facets (an older binary), it logs once, remembers
+// that for the rest of this dispatch and falls back to the plain List, which
+// returns the same fields the loop reads.
+func (r *ccpoolRun) pollSessions(ctx context.Context) sessionPoll {
+	if ll, ok := r.deps.CC.(ccpool.LightLister); ok && !r.lightUnsupported {
+		s, err := ll.ListLight(ctx)
+		if err == nil || !errors.Is(err, ccpool.ErrNoFacetsUnsupported) {
+			return sessionPoll{s, err}
+		}
+		r.lightUnsupported = true
+		slog.Warn("ccpool list --no-facets is not supported by this ccpool; falling back to the full list for the wait poll", "err", err)
+	}
+	s, err := r.deps.CC.List(ctx)
+	return sessionPoll{s, err}
+}
+
+// stateIn returns the ccpool state of the session addressed by externalID in the
+// poll and whether it was present. Unlike activeIn (which collapses state to a
+// keep-waiting bool), this preserves the raw state so the caller can detect the
+// EDGE into needs_input. A list error returns ("", false) — can't tell ⇒ no edge
+// fires this poll (the next poll retries).
+func stateIn(p sessionPoll, externalID string) (ccpool.SessionState, bool) {
+	if p.err != nil {
 		return "", false
 	}
-	for _, s := range sessions {
+	for _, s := range p.sessions {
 		if s.ExternalID == externalID {
-			r.noteSession(s)
 			return s.State, true
 		}
 	}

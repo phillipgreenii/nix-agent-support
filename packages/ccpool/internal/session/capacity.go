@@ -52,8 +52,9 @@ func (s *Service) Capacity(ctx context.Context, maxSessions int) (Capacity, erro
 		return Capacity{}, err
 	}
 	var live []store.Session
+	isLive := s.liveLookup()
 	for _, r := range rows {
-		if s.d.Tmux.HasSession(TmuxName(s.d.Prefix, r.ExternalID)) {
+		if isLive(TmuxName(s.d.Prefix, r.ExternalID)) {
 			live = append(live, r)
 		}
 	}
@@ -64,4 +65,17 @@ func (s *Service) Capacity(ctx context.Context, maxSessions int) (Capacity, erro
 		c.Free = 0
 	}
 	return c, nil
+}
+
+// liveLookup answers "is this tmux session live" for a whole scan with ONE
+// tmux launch (ListPanes) instead of two per row. When the batch read fails it
+// falls back to a per-row HasSession, so a tmux hiccup degrades to the old cost
+// rather than to a wrong answer. A lookup is a snapshot: a decision made under
+// a per-row lock MUST call Tmux.HasSession afresh instead.
+func (s *Service) liveLookup() func(name string) bool {
+	panes, err := s.d.Tmux.ListPanes()
+	if err != nil {
+		return s.d.Tmux.HasSession
+	}
+	return func(name string) bool { return panes[name].Live }
 }

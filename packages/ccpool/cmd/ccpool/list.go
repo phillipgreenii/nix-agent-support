@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -63,6 +64,7 @@ func runList(args []string) int {
 	stateFilter := fs.String("state", "", "only show rows in this state")
 	jsonOut := fs.Bool("json", false, "emit a JSON array of sessions instead of the text table")
 	pathsOnly := fs.Bool("paths", false, "print only each visible session's launch directory (worktree path), one per line, no header, no other fields — combine with --state needs_input to get a comm/grep -v-able skip list before a manual worktree cleanup sweep (ADR 0037)")
+	noFacets := fs.Bool("no-facets", false, "with --json, skip the live pane path and git lookups: cwd is the launch dir and git_repo_root/worktree/branch are null (liveness is still read); for pollers that read only state, live and transcript_path")
 	filters := filterFlag{}
 	fs.Var(filters, "filter", "only show sessions whose metadata matches key=value (repeatable, AND-combined)")
 	_ = fs.Parse(args)
@@ -126,13 +128,27 @@ func runList(args []string) int {
 		return m
 	}
 
+	// One tmux launch answers liveness and the live pane path for every row (a
+	// per-row read cost three launches per live row). A failed batch read falls
+	// back to the per-row calls inside batchedTmux.
+	liveFn, pathFn := tmux.HasSession, tmux.PaneCurrentPath // never called with no rows
+	if len(rows) > 0 {
+		liveFn, pathFn = batchedTmux(cfg.Tmux.Socket)
+	}
+
 	if *jsonOut {
-		// cwd is the LIVE pane current path (tmux display-message), falling back
-		// to the launch cwd when the session is not live; the git facets resolve
-		// against that cwd (fail-soft to null outside a repo). Resolvers are
+		// cwd is the LIVE pane current path (tmux), falling back to the launch
+		// cwd when the session is not live; the git facets resolve against that
+		// cwd (fail-soft to null outside a repo), memoized per effective cwd for
+		// this call. --no-facets skips both: cwd is the launch dir and the git
+		// facets are null, with no pane-path or git launch at all. Resolvers are
 		// injected so the renderer stays pure (pg2-gxxl).
+		gitFn := memoizedGit(gitfacet.Resolve)
+		if *noFacets {
+			pathFn, gitFn = noPaneCwd, noGitFacets
+		}
 		out, err := renderListJSON(rows, *all, *stateFilter,
-			tmux.HasSession, tmux.PaneCurrentPath, gitfacet.Resolve, metaFn, cfg.Tmux.Socket,
+			liveFn, pathFn, gitFn, metaFn, cfg.Tmux.Socket,
 			time.Now(), time.Duration(cfg.List.DoneTTL), time.Duration(cfg.List.FailedTTL))
 		if err != nil {
 			slog.Error("list: json render failed", "err", err)
@@ -142,10 +158,55 @@ func runList(args []string) int {
 		return 0
 	}
 
-	out := renderList(rows, *all, *stateFilter, tmux.HasSession, cfg.Tmux.Socket,
+	out := renderList(rows, *all, *stateFilter, liveFn, cfg.Tmux.Socket,
 		time.Now(), time.Duration(cfg.List.DoneTTL), time.Duration(cfg.List.FailedTTL))
 	fmt.Print(out)
 	return 0
+}
+
+// batchedTmux reads every session's liveness and live pane path with one tmux
+// launch and returns the two lookups the renderers take. The lookups are
+// snapshots of that read. When the batch read fails (anything but "no server",
+// which is an empty answer) they degrade to the per-row calls, so a tmux hiccup
+// costs launches, never correctness.
+func batchedTmux(socket string) (liveFn func(socket, target string) bool, pathFn func(socket, target string) (string, error)) {
+	panes, err := tmux.NewClient(socket).ListPanes()
+	if err != nil {
+		slog.Warn("list: batched tmux read failed; falling back to per-session calls", "err", err)
+		return tmux.HasSession, tmux.PaneCurrentPath
+	}
+	return func(_, target string) bool { return panes[target].Live },
+		func(_, target string) (string, error) {
+			p, ok := panes[target]
+			if !ok || !p.Live {
+				return "", fmt.Errorf("session %q is not live", target)
+			}
+			return p.Path, nil
+		}
+}
+
+// noPaneCwd is --no-facets' path resolver: it always errors, so the renderer
+// keeps cwd == launch_dir.
+func noPaneCwd(_, _ string) (string, error) { return "", errNoFacets }
+
+// noGitFacets is --no-facets' git resolver: no git process, all facets null.
+func noGitFacets(string) gitfacet.Facets { return gitfacet.Facets{} }
+
+var errNoFacets = errors.New("facets disabled by --no-facets")
+
+// memoizedGit wraps a git resolver so rows that share an effective cwd (the
+// common case: several sessions in one worktree) resolve once per list call. The
+// memo lives only as long as the returned func; there is no cross-call cache.
+func memoizedGit(resolve func(cwd string) gitfacet.Facets) func(cwd string) gitfacet.Facets {
+	memo := map[string]gitfacet.Facets{}
+	return func(cwd string) gitfacet.Facets {
+		if f, ok := memo[cwd]; ok {
+			return f
+		}
+		f := resolve(cwd)
+		memo[cwd] = f
+		return f
+	}
 }
 
 // liveRow pairs a store row with its reconciled liveness for rendering.

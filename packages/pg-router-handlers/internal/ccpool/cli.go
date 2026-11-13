@@ -397,7 +397,28 @@ func (c *CLIRunner) Version(ctx context.Context) (string, error) {
 
 // List: ccpool list --all --json.
 func (c *CLIRunner) List(ctx context.Context) ([]Session, error) {
-	out, err := c.ccpool(ctx, quickCallTimeout, "list", "--all", "--json")
+	return c.list(ctx, "list", "--all", "--json")
+}
+
+// ListLight: ccpool list --all --json --no-facets. The same rows and order as
+// List, with cwd equal to the launch dir and the git facets null, and without the
+// per-row pane-path and git lookups. For callers that read only state, live and
+// transcript_path (the wait poll). An older ccpool that does not know the flag
+// rejects it at flag parsing; that comes back wrapped in ErrNoFacetsUnsupported
+// so the caller can fall back to List.
+func (c *CLIRunner) ListLight(ctx context.Context) ([]Session, error) {
+	s, err := c.list(ctx, "list", "--all", "--json", "--no-facets")
+	if err != nil && strings.Contains(err.Error(), noFacetsRejection) {
+		return nil, fmt.Errorf("%w: %w", ErrNoFacetsUnsupported, err)
+	}
+	return s, err
+}
+
+// noFacetsRejection is what Go's flag package prints for an unknown flag.
+const noFacetsRejection = "flag provided but not defined: -no-facets"
+
+func (c *CLIRunner) list(ctx context.Context, args ...string) ([]Session, error) {
+	out, err := c.ccpool(ctx, quickCallTimeout, args...)
 	if err != nil {
 		return nil, err
 	}

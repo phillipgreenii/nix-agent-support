@@ -81,7 +81,12 @@ type FakeCC struct {
 	// ListSeq, and only later ones fail (0, the default, fails every call). It
 	// lets a test read the pool once at the start of a dispatch and then fail.
 	ListErrFrom int
-	listCalls   int
+	listCalls   int // List plus ListLight calls that reached the sequence
+	plainCalls  int // List calls
+	lightCalls  int // ListLight calls
+	// LightErr, when set, makes every ListLight call fail with it before the
+	// sequence is touched.
+	LightErr error
 	// Cap/CapErr script Capacity(). Leaving BOTH unset (the zero Capacity{}
 	// and a nil CapErr) defaults to MaxSessions:1, Free:1 — "unset means
 	// free" — so the many pre-existing tests that never set Cap still
@@ -158,6 +163,39 @@ func (f *FakeCC) Capacity(_ context.Context) (ccpool.Capacity, error) {
 func (f *FakeCC) List(_ context.Context) ([]ccpool.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.plainCalls++
+	return f.nextListLocked()
+}
+
+// ListLight is the facet-free list the wait poll uses. It consumes ListSeq like
+// List (so a scripted sequence serves either), counts separately, and returns
+// LightErr without consuming anything while that is set (a ccpool that rejects
+// --no-facets).
+func (f *FakeCC) ListLight(_ context.Context) ([]ccpool.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lightCalls++
+	if f.LightErr != nil {
+		return nil, f.LightErr
+	}
+	return f.nextListLocked()
+}
+
+// PlainListCalls is how many times List ran; LightListCalls how many times
+// ListLight ran.
+func (f *FakeCC) PlainListCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.plainCalls
+}
+
+func (f *FakeCC) LightListCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lightCalls
+}
+
+func (f *FakeCC) nextListLocked() ([]ccpool.Session, error) {
 	f.listCalls++
 	if f.ListErr != nil && f.listCalls > f.ListErrFrom {
 		return nil, f.ListErr

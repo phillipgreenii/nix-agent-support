@@ -118,8 +118,9 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	var deadKept []store.Session // not live, but not a phantom either (resumable / fresh)
 	// One availability decision per pass for the recorder-backed originals probe.
 	gate := &probeGate{}
+	isLive := s.liveLookup()
 	for _, r := range rows {
-		if s.d.Tmux.HasSession(TmuxName(s.d.Prefix, r.ExternalID)) {
+		if isLive(TmuxName(s.d.Prefix, r.ExternalID)) {
 			live = append(live, r)
 			continue
 		}

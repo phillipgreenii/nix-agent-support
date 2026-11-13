@@ -277,6 +277,40 @@ func TestCancelCloseList_argv(t *testing.T) {
 	}
 }
 
+// ListLight asks for the facet-free list and decodes the same rows as List.
+func TestListLight_argvAndDecode(t *testing.T) {
+	cli, got, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"s","state":"working","live":true,"transcript_path":"/t/x.jsonl"}]`))
+	sessions, err := cli.ListLight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual((*got)[0], []string{"list", "--all", "--json", "--no-facets"}) {
+		t.Errorf("list-light argv = %v", (*got)[0])
+	}
+	if len(sessions) != 1 || sessions[0].ExternalID != "s" || !sessions[0].Live || sessions[0].TranscriptPath != "/t/x.jsonl" {
+		t.Errorf("parsed = %+v", sessions)
+	}
+}
+
+// An older ccpool rejects the unknown flag at flag parsing; that must surface as
+// ErrNoFacetsUnsupported so the caller can fall back. Any other failure must not.
+func TestListLight_flagRejectionIsRecognised(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("flag provided but not defined: -no-facets\nUsage of list:\n"), errors.New("exit status 2")
+	}
+	if _, err := cli.ListLight(context.Background()); !errors.Is(err, ErrNoFacetsUnsupported) {
+		t.Errorf("err = %v, want ErrNoFacetsUnsupported", err)
+	}
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("config load failed\n"), errors.New("exit status 1")
+	}
+	if _, err := cli.ListLight(context.Background()); err == nil || errors.Is(err, ErrNoFacetsUnsupported) {
+		t.Errorf("err = %v, want a plain failure that is not ErrNoFacetsUnsupported", err)
+	}
+}
+
 // Close without purge omits the --purge flag but still carries --reason handler.
 func TestClose_noPurge_argv(t *testing.T) {
 	cli, got, _ := newSpy()

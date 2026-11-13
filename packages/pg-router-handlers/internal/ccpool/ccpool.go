@@ -156,6 +156,18 @@ const (
 // (bead pg2-kqegi, INV-CCH-20): a non-purge Close first, the purge only once the
 // worktree is removed, so an interrupted removal never strands a worktree no row
 // leads to. Cancel is present only as a chunk-B seam (90/100% budget cancels).
+// ErrNoFacetsUnsupported marks a ListLight failure caused by a ccpool that does
+// not know --no-facets (an older binary during a staggered deploy). The caller
+// falls back to List.
+var ErrNoFacetsUnsupported = errors.New("ccpool: list --no-facets not supported by this ccpool")
+
+// LightLister is the optional facet-free list a Runner MAY offer. It is a
+// separate interface (not a Runner method) so only the wait poll opts in; every
+// other caller keeps List, which still carries the live cwd and git facets.
+type LightLister interface {
+	ListLight(ctx context.Context) ([]Session, error)
+}
+
 type Runner interface {
 	Ensure(ctx context.Context, externalID, name, cwd string, env, meta map[string]string) error
 	Send(ctx context.Context, externalID, prompt string, mode SendMode) error

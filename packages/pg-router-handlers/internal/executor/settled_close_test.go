@@ -70,6 +70,10 @@ func (c *settleCC) Close(ctx context.Context, externalID string, purge bool) err
 	return err
 }
 
+// ListLight answers like List: the embedded FakeCC's promoted ListLight would
+// bypass this fake's scripted rows.
+func (c *settleCC) ListLight(ctx context.Context) ([]ccpool.Session, error) { return c.List(ctx) }
+
 func (c *settleCC) List(context.Context) ([]ccpool.Session, error) {
 	c.mu.Lock()
 	closed := c.closed
@@ -435,6 +439,8 @@ func TestSettledClose_closesOnlyItsOwnRow(t *testing.T) {
 }
 
 type twoRowCC struct{ *dtest.FakeCC }
+
+func (c *twoRowCC) ListLight(ctx context.Context) ([]ccpool.Session, error) { return c.List(ctx) }
 
 func (c *twoRowCC) List(context.Context) ([]ccpool.Session, error) {
 	return []ccpool.Session{

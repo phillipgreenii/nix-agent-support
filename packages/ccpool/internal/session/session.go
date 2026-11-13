@@ -21,6 +21,7 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/notify"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/telemetry"
+	"github.com/phillipgreenii/ccpool/internal/tmux"
 	"github.com/phillipgreenii/ccpool/internal/wait"
 )
 
@@ -98,6 +99,10 @@ var ErrNoPluginDir = errors.New("ccpool: no plugin dir configured (claude.plugin
 
 type Tmux interface {
 	HasSession(name string) bool
+	// ListPanes reads every session's liveness and live cwd in one tmux launch
+	// (see tmux.Client.ListPanes). Used only by the list-shaped scans (capacity,
+	// the reap scan); a per-row decision under a lock still calls HasSession.
+	ListPanes() (map[string]tmux.PaneInfo, error)
 	NewSession(name, cwd string, env map[string]string, argv []string) error
 	SendKeys(name string, keys ...string) error
 	Paste(name, body string) error

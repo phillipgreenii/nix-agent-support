@@ -253,6 +253,70 @@ func (c *Client) PaneCurrentPath(name string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
+// PaneInfo is one session's liveness and live cwd as read by ListPanes.
+type PaneInfo struct {
+	// Live is HasSession's answer: the session exists and its active pane's
+	// process is still running (pane_dead != 1).
+	Live bool
+	// Path is the active pane's pane_current_path, the PaneCurrentPath answer.
+	Path string
+}
+
+// listPanesFormat is one record per pane, fields separated by ":". NOT a tab:
+// when the tmux client is not running in a UTF-8 locale (a launchd job or a
+// handler subprocess with no LANG), tmux prints every control character in a
+// format result as "_", so a tab separator silently collapses the record
+// (observed against tmux 3.7b). ":" is safe for the name field because tmux
+// itself rewrites ":" and "." in a session name to "_". The path is LAST because
+// it is the only field that can contain the separator or spaces; the parse splits
+// into at most five fields so the rest of the line is the path.
+const (
+	listPanesFormat = "#{session_name}:#{window_active}:#{pane_active}:#{pane_dead}:#{pane_current_path}"
+	listPanesSep    = ":"
+)
+
+// ListPanes reads every session's liveness and active-pane path in ONE tmux
+// launch (`list-panes -a -F`), instead of HasSession's two plus
+// PaneCurrentPath's one per session. A session has several windows and panes;
+// the record kept per session is the pane with pane_active=1 in the window with
+// window_active=1, which is the pane `display-message -t <session>` resolves,
+// so the result equals what the per-session calls return. Sessions are keyed by
+// exact session_name (a prefix never matches), and an absent session has no
+// entry (the equivalent of HasSession false). A socket with no server running
+// yields an empty map and no error, as every HasSession there is false; any
+// other failure returns the error so the caller can fall back to per-session
+// calls.
+func (c *Client) ListPanes() (map[string]PaneInfo, error) {
+	out, err := c.tmux("list-panes", "-a", "-F", listPanesFormat)
+	if err != nil {
+		if noServer(out) {
+			return map[string]PaneInfo{}, nil
+		}
+		return nil, err
+	}
+	return parseListPanes(string(out)), nil
+}
+
+// noServer reports whether tmux's output says no server answers on the socket.
+func noServer(out []byte) bool {
+	s := string(out)
+	return strings.Contains(s, "no server running") || strings.Contains(s, "error connecting to")
+}
+
+// parseListPanes folds listPanesFormat records into one PaneInfo per session,
+// keeping only the active pane of the active window.
+func parseListPanes(out string) map[string]PaneInfo {
+	res := map[string]PaneInfo{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.SplitN(line, listPanesSep, 5)
+		if len(f) != 5 || f[0] == "" || f[1] != "1" || f[2] != "1" {
+			continue
+		}
+		res[f[0]] = PaneInfo{Live: f[3] != "1", Path: f[4]}
+	}
+	return res
+}
+
 // Paste delivers body to the session's input via bracketed paste, so multi-line
 // and special-char prompts arrive as a single message. Verified against Claude
 // Code 2.1.170: a pasted multi-line prompt produced ONE turn / one Stop, whereas

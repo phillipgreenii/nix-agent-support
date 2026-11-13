@@ -121,6 +121,8 @@ func (c *storeCC) Close(ctx context.Context, id string, purge bool) error {
 	return c.FakeCC.Close(ctx, id, purge)
 }
 
+func (c *storeCC) ListLight(ctx context.Context) ([]ccpool.Session, error) { return c.List(ctx) }
+
 func (c *storeCC) List(context.Context) ([]ccpool.Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
