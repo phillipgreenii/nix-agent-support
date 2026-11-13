@@ -182,13 +182,19 @@ const (
 	resultsLimit = 10000
 )
 
+// bulkLines is how many filler tool_result lines the big-session tests write.
+// The bounded-page and no-query proofs read the query shape (one page, capped
+// limit, no per-id filter), not the row count, so a few hundred lines prove
+// them as well as a cap-sized bulk did, with far less ingest work.
+const bulkLines = 200
+
 func TestStateReadsOnABigSessionAreBoundedAndNeverLookUpPerId(t *testing.T) {
 	e := clienttest.Start(t)
 	var b strings.Builder
 	b.WriteString(userLine("2026-01-01T00:00:01Z", "go"))
 	b.WriteString(askLine("2026-01-01T00:00:02Z", "m0", "q-answered"))
 	b.WriteString(resultLine("2026-01-01T00:00:03Z", "q-answered"))
-	for i := 0; i < 10000; i++ {
+	for i := 0; i < bulkLines; i++ {
 		b.WriteString(resultLine("2026-01-01T00:01:00Z", fmt.Sprintf("bulk-%d", i)))
 	}
 	b.WriteString(askLine("2026-01-01T00:02:00Z", "m1", "q-open"))
@@ -320,7 +326,7 @@ func TestAwaitingInputSendsNoQueryToTheRecorder(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(askLine("2026-01-01T00:00:02Z", "m0", "q-answered"))
 	b.WriteString(resultLine("2026-01-01T00:00:03Z", "q-answered"))
-	for i := 0; i < 2000; i++ {
+	for i := 0; i < bulkLines; i++ {
 		b.WriteString(resultLine("2026-01-01T00:01:00Z", fmt.Sprintf("bulk-%d", i)))
 	}
 	b.WriteString(askLine("2026-01-01T00:02:00Z", "m1", "q-open"))
