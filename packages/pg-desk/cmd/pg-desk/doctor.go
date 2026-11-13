@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/beadref"
@@ -110,7 +111,7 @@ const doctorWorkBeadsQuery = "work-beads"
 // doctorLookPath/doctorConfigValidate/doctorServeReachable above) so tests
 // can exercise doctorStrandedCycles without a real pg-connector binary.
 // Mirrors internal/gather/gather.go's own run/fanOutCall exactly, scoped
-// down to this one call: exit 0 or 2 both return stdout as-is (a fan-out
+// down to this one call: exit 0 or 5 (Degraded) both return stdout as-is (a fan-out
 // op's own per-source degradation detail lives in its "sources[]", which
 // this check does not re-inspect); any other outcome is an error. Uses
 // cfg's configured beads_dir the same way internal/gather's Gatherer and
@@ -128,7 +129,7 @@ var doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byt
 		return stdout.Bytes(), nil
 	}
 	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 5 { // Degraded (x/exitcode.Degraded)
+	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == exitcode.Degraded {
 		return stdout.Bytes(), nil // partial degradation; stdout is still usable
 	}
 	if errors.As(runErr, &exitErr) {
