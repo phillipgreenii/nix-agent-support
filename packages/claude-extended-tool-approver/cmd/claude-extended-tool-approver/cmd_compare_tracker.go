@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -12,6 +11,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/trackeradapter"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/trackercompare"
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,19 @@ func (e exitCodeError) Error() string { return fmt.Sprintf("exit status %d", e.c
 
 // compareTrackerExitDifferences is the exit code when the report found
 // differences (0 is a clean report, 1 an error).
-const compareTrackerExitDifferences = 2
+const compareTrackerExitDifferences = exitcode.Degraded
+
+// usageError marks a command-line mistake (a bad flag value, an unknown flag,
+// stray arguments); main exits exitcode.Usage for it and still prints the
+// message.
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+func (e usageError) Unwrap() error { return e.err }
+
+func usageErrorf(format string, a ...any) error {
+	return usageError{err: fmt.Errorf(format, a...)}
+}
 
 func newCompareTrackerCmd() *cobra.Command {
 	var since, until, format, trackerDB string
@@ -70,11 +82,17 @@ Output (--format): table (default) or json (the full report).
 
 Exit codes: 0 clean report, 2 differences found (anything listed above except
 the skipped-line counts), 1 error.`,
-		Args: cobra.NoArgs,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := cobra.NoArgs(cmd, args); err != nil {
+				return usageError{err: err}
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCompareTracker(cmd.OutOrStdout(), since, until, format, trackerDB, time.Now())
 		},
 	}
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err: err} })
 	cmd.Flags().StringVar(&since, "since", "48h", "Window start: RFC 3339 timestamp, YYYY-MM-DD date, or duration before now (e.g. 48h)")
 	cmd.Flags().StringVar(&until, "until", "", "Window end, exclusive (same forms as --since; default: unbounded)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table|json")
@@ -84,24 +102,24 @@ the skipped-line counts), 1 error.`,
 
 func runCompareTracker(out io.Writer, since, until, format, trackerDB string, now time.Time) error {
 	if format != "table" && format != "json" {
-		return fmt.Errorf("--format must be table or json, got %q", format)
+		return usageErrorf("--format must be table or json, got %q", format)
 	}
 	var win trackercompare.Window
 	if since != "" {
 		t, err := trackercompare.ParseTime(since, now)
 		if err != nil {
-			return fmt.Errorf("--since %w", err)
+			return usageErrorf("--since %w", err)
 		}
 		win.SinceMs = t.UnixMilli()
 	}
 	if until != "" {
 		t, err := trackercompare.ParseTime(until, now)
 		if err != nil {
-			return fmt.Errorf("--until %w", err)
+			return usageErrorf("--until %w", err)
 		}
 		win.UntilMs = t.UnixMilli()
 		if win.UntilMs <= win.SinceMs {
-			return errors.New("--until must be after --since")
+			return usageErrorf("--until must be after --since")
 		}
 	}
 

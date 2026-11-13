@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/sandboxdetect"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/setup"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/toolevents"
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 )
 
@@ -118,6 +119,16 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
+// cliErrorExitCode maps a CLI-mode error to a process exit code: exitcode.Usage
+// for a command-line mistake, exitcode.Error for anything else.
+func cliErrorExitCode(err error) int {
+	var ue usageError
+	if errors.As(err, &ue) {
+		return exitcode.Usage
+	}
+	return exitcode.Error
+}
+
 func main() {
 	// CLI mode: dispatch to cobra when the first argument looks like a
 	// subcommand or a help flag. Otherwise fall through to hook mode.
@@ -129,7 +140,7 @@ func main() {
 					os.Exit(ee.code)
 				}
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
+				os.Exit(cliErrorExitCode(err))
 			}
 			return
 		}

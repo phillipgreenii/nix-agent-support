@@ -13,6 +13,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/trackercompare"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // The tracker side is the real-ingest fixture internal/trackeradapter/testdata/tracker.sql
@@ -111,8 +112,8 @@ func TestCompareTracker_OnlyOneSide(t *testing.T) {
 		 VALUES (9,'sess-a','/x','Bash','tu-zz','h9','{}','allow','approved','`+ctCreated+`')`,
 		`DELETE FROM tool_decisions WHERE tool_use_id = 'tu-b2'`)
 	rep, err := ctRun(t)
-	if ctExit(t, err) != 2 {
-		t.Fatalf("want exit 2, got %v", err)
+	if ctExit(t, err) != exitcode.Degraded {
+		t.Fatalf("want exit 5 (degraded), got %v", err)
 	}
 	if len(rep.OnlyCeta) != 1 || rep.OnlyCeta[0].ToolUseID != "tu-zz" || rep.OnlyCeta[0].CetaID != 9 {
 		t.Errorf("only ceta: %+v", rep.OnlyCeta)
@@ -149,8 +150,8 @@ func TestCompareTracker_EachDifferenceCategory(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctSeed(t, tc.mutate)
 			rep, err := ctRun(t)
-			if ctExit(t, err) != 2 {
-				t.Fatalf("want exit 2, got %v", err)
+			if ctExit(t, err) != exitcode.Degraded {
+				t.Fatalf("want exit 5 (degraded), got %v", err)
 			}
 			if len(rep.Differences) != 1 {
 				t.Fatalf("want exactly one difference, got %+v", rep.Differences)
@@ -189,8 +190,8 @@ func TestCompareTracker_SessionWithoutTrackerFile(t *testing.T) {
 		 VALUES (10,'sess-z','/x','Bash','tu-z1','h10','{}','allow','approved','`+ctCreated+`'),
 		        (11,'sess-z','/x','Bash','tu-z2','h11','{}','allow','approved','`+ctCreated+`')`)
 	rep, err := ctRun(t)
-	if ctExit(t, err) != 2 {
-		t.Fatalf("want exit 2, got %v", err)
+	if ctExit(t, err) != exitcode.Degraded {
+		t.Fatalf("want exit 5 (degraded), got %v", err)
 	}
 	want := []trackercompare.SessionNoTracker{{SessionID: "sess-c", CetaRows: 1}, {SessionID: "sess-z", CetaRows: 2}}
 	if len(rep.SessionsWithoutTracker) != 2 || rep.SessionsWithoutTracker[0] != want[0] || rep.SessionsWithoutTracker[1] != want[1] {
@@ -217,8 +218,8 @@ func TestCompareTracker_DuplicateAndUnkeyedCetaRows(t *testing.T) {
 		`INSERT INTO tool_decisions (id,session_id,cwd,tool_name,tool_use_id,tool_input_hash,tool_input_json,hook_decision,outcome,created_at)
 		 VALUES (10,'sess-a','/x','Bash',NULL,'h10','{}','allow','approved','`+ctCreated+`')`)
 	rep, err := ctRun(t)
-	if ctExit(t, err) != 2 {
-		t.Fatalf("want exit 2, got %v", err)
+	if ctExit(t, err) != exitcode.Degraded {
+		t.Fatalf("want exit 5 (degraded), got %v", err)
 	}
 	if len(rep.Duplicates) != 1 || rep.Duplicates[0] != (trackercompare.Duplicate{Side: "ceta", SessionID: "sess-a", ToolUseID: "tu-a1", Count: 2}) {
 		t.Errorf("duplicates = %+v", rep.Duplicates)
@@ -286,7 +287,7 @@ func TestCompareTracker_IngestSkippedCountsForTheWindow(t *testing.T) {
 func TestCompareTracker_TableOutputNamesTheDifferences(t *testing.T) {
 	ctSeed(t, `UPDATE tool_decisions SET hook_decision='deny' WHERE tool_use_id='tu-a1'`)
 	out, err := ctRunRaw(t)
-	if ctExit(t, err) != 2 {
+	if ctExit(t, err) != exitcode.Degraded {
 		t.Fatalf("want exit 2: %v", err)
 	}
 	for _, want := range []string{
@@ -356,5 +357,41 @@ func TestCompareTracker_DurationSince(t *testing.T) {
 	got, err := trackercompare.ParseTime("48h", time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC))
 	if err != nil || !got.Equal(time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)) {
 		t.Errorf("48h: %v %v", got, err)
+	}
+}
+
+// Usage mistakes of compare-tracker exit exitcode.Usage (2), which is no
+// longer the "differences found" code (exitcode.Degraded, 5).
+func TestCompareTracker_UsageErrorsExitUsage(t *testing.T) {
+	ctSeed(t)
+	cases := map[string][]string{
+		"bad format":         {"--format", "xml"},
+		"bad since":          {"--since", "last tuesday"},
+		"bad until":          {"--until", "nonsense"},
+		"until before since": {"--since", "2026-09-22", "--until", "2026-09-21"},
+		"unknown flag":       {"--no-such-flag"},
+		"stray argument":     {"extra"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ctRunRaw(t, args...)
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if got := cliErrorExitCode(err); got != exitcode.Usage {
+				t.Errorf("exit %d, want %d (usage): %v", got, exitcode.Usage, err)
+			}
+			if ctExit2(err) {
+				t.Errorf("usage error must not carry the differences exit code: %v", err)
+			}
+		})
+	}
+	// a runtime failure stays a generic error, never Usage
+	err := errors.New("boom")
+	if got := cliErrorExitCode(err); got != exitcode.Error {
+		t.Errorf("generic error exit %d, want %d", got, exitcode.Error)
+	}
+	if compareTrackerExitDifferences != 5 {
+		t.Errorf("differences exit %d, want 5", compareTrackerExitDifferences)
 	}
 }
