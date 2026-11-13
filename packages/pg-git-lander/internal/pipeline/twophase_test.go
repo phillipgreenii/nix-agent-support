@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/locks"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/outcome"
@@ -155,9 +158,12 @@ func TestMovedMainWithDisjointFilesReusesTheHookResultUnderPaths(t *testing.T) {
 	if n := hookRuns(evs, "before_move"); n != 1 {
 		t.Fatalf("before_move ran %d times, want 1 (the result is reused)", n)
 	}
-	rr := lastEvent(evs, "race_retry")
-	if rr == nil || rr["reused"] != true || rr["revalidate"] != "paths" || rr["old_target_tip"] == rr["new_target_tip"] {
-		t.Fatalf("race_retry = %v", rr)
+	rr := lastEvent(evs, "revalidate_reuse")
+	if rr == nil || rr["revalidate"] != "paths" || rr["old_target_tip"] == rr["new_target_tip"] {
+		t.Fatalf("revalidate_reuse = %v", rr)
+	}
+	if n := countEvents(evs, "race_retry"); n != 0 {
+		t.Fatalf("%d race_retry events: a reuse is not a retry", n)
 	}
 	if out.Stats.RaceRetries != 0 || out.PathTaken != outcome.PathRebase {
 		t.Fatalf("stats %+v path %s", out.Stats, out.PathTaken)
@@ -194,7 +200,7 @@ func TestMovedMainWithOverlappingFilesRerunsTheHooksOutsideTheLock(t *testing.T)
 		t.Fatalf("before_move ran %d times, want 2", n)
 	}
 	rr := lastEvent(evs, "race_retry")
-	if rr == nil || rr["reused"] != false || rr["attempt"].(float64) != 1 {
+	if rr == nil || rr["attempt"].(float64) != 1 || countEvents(evs, "revalidate_reuse") != 0 {
 		t.Fatalf("race_retry = %v", rr)
 	}
 	if got := f.read(seen); strings.Contains(got, locks.BranchRef(f.main)) || strings.Contains(got, locks.WorktreeRef("_main")) {
@@ -219,8 +225,8 @@ func TestMovedMainWithNoneReusesEvenForOverlappingFiles(t *testing.T) {
 	if n := hookRuns(f.events(), "before_move"); n != 1 {
 		t.Fatalf("before_move ran %d times, want 1", n)
 	}
-	if rr := lastEvent(f.events(), "race_retry"); rr == nil || rr["reused"] != true || rr["revalidate"] != "none" {
-		t.Fatalf("race_retry = %v", rr)
+	if rr := lastEvent(f.events(), "revalidate_reuse"); rr == nil || rr["revalidate"] != "none" || countEvents(f.events(), "race_retry") != 0 {
+		t.Fatalf("revalidate_reuse = %v", rr)
 	}
 	f.untouched()
 }
@@ -252,7 +258,7 @@ func TestMovedMainWithFullRevalidateRerunsEvenWhenDisjoint(t *testing.T) {
 	if n := hookRuns(f.events(), "before_move"); n != 2 {
 		t.Fatalf("before_move ran %d times, want 2", n)
 	}
-	if rr := lastEvent(f.events(), "race_retry"); rr == nil || rr["reused"] != false || rr["revalidate"] != "full" {
+	if rr := lastEvent(f.events(), "race_retry"); rr == nil || rr["revalidate"] != "full" {
 		t.Fatalf("race_retry = %v", rr)
 	}
 	f.untouched()
@@ -383,4 +389,223 @@ func TestResumeAtStageMovingTakesTargetAndDestinationBack(t *testing.T) {
 	// test), where a stop before the lock phase would not.
 	f.foreignLock(locks.WorktreeRef("_main"), "worktree")
 	want(t, f.resume(outcome.FlagContinue), outcome.Busy, 9)
+}
+
+// failGitAfter makes every git sub-command sub fail once marker exists (the moving
+// hook creates it), standing in for a git error while the operation holds
+// TARGET and the destination worktree at a stage before the move.
+func (f *fx) failGitAfter(marker, sub string) {
+	f.g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		if _, err := os.Stat(marker); err == nil && len(c.Args) > 0 {
+			for _, a := range c.Args {
+				if a == sub {
+					return cmdrun.Result{Code: 1, Stderr: []byte("fatal: injected git failure\n")}
+				}
+			}
+		}
+		return cmdrun.Exec(ctx, c)
+	}
+}
+
+// A stop while phase two is held, at a stage before the move, leaves the
+// operation's own stopped destination record; --continue must take it back
+// instead of waiting on itself.
+func TestContinueAfterAStopHoldingPhaseTwoBeforeTheMoveDoesNotWaitOnItself(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	marker := filepath.Join(t.TempDir(), "moved")
+	hook := f.hookScript(`if [ -e ` + marker + ` ]; then exit 0; fi
+touch ` + marker + `
+printf 'm\n' > "$PG_GIT_LANDER_DESTINATION_WORKTREE/m.txt"
+git -C "$PG_GIT_LANDER_DESTINATION_WORKTREE" add m.txt
+git -c user.name=t -c user.email=t@example.invalid -C "$PG_GIT_LANDER_DESTINATION_WORKTREE" commit -qm "moved m.txt"`)
+	f.twoPhaseXDG(`revalidate = "paths"`, hook)
+	realRunner := f.g.Runner
+	f.failGitAfter(marker, "diff")
+	out := f.run(f.land())
+	if out.Outcome != outcome.Stopped {
+		t.Fatalf("outcome = %s %s (%s)", out.Outcome, out.Reason, out.Message)
+	}
+	if r := f.record(locks.WorktreeRef("_main")); r["state"] != "stopped" {
+		t.Fatalf("destination record = %v, want the stopped record of the failed phase two", r)
+	}
+	f.g.Runner = realRunner
+
+	var slept time.Duration
+	d := f.deps(owner(50001, "r1"))
+	d.Sleep = func(_ context.Context, dur time.Duration) error { slept += dur; f.clock.Advance(dur); return nil }
+	o, err := pipeline.Resume(f.t.Context(), d, f.resumeReq(outcome.FlagContinue, "land", "feature/x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want(t, o, outcome.Landed, 0)
+	if slept != 0 {
+		t.Errorf("the resume waited %v on its own stopped record", slept)
+	}
+	if f.mainFile("x.txt") != "x" || f.mainFile("m.txt") != "m" {
+		t.Errorf("feature/x did not land")
+	}
+	if refs := f.lockRefs(); strings.Contains(refs, "locks/") {
+		t.Errorf("lock refs left:\n%s", refs)
+	}
+	f.untouched()
+}
+
+// A lock lost after phase two began still closes the TARGET hold account.
+func TestLockLostAfterPhaseTwoBeganRecordsTheHoldTime(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	var once sync.Once
+	f.g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		args := strings.Join(c.Args, " ")
+		if strings.Contains(args, "merge --ff-only") ||
+			(strings.Contains(args, "update-ref --stdin") && strings.Contains(string(c.Stdin), "refs/heads/"+f.main)) {
+			once.Do(func() {
+				// TARGET has been held since phase two began; swap BRANCH's
+				// record out from under the operation, five seconds later.
+				f.clock.Advance(5 * time.Second)
+				b := cmdrun.Exec(ctx, cmdrun.Call{Name: "git", Args: []string{"-C", f.repo.Dir, "hash-object", "-w", "--stdin"}, Stdin: []byte("{}\n")})
+				f.git(f.repo.Dir, "update-ref", locks.BranchRef("feature/x"), strings.TrimSpace(string(b.Stdout)))
+			})
+		}
+		return cmdrun.Exec(ctx, c)
+	}
+	out := f.run(f.land())
+	if out.Outcome != outcome.Stopped || out.Reason != string(outcome.StopLockLost) {
+		t.Fatalf("outcome = %s %s (%s)", out.Outcome, out.Reason, out.Message)
+	}
+	st := f.stats(out)
+	if held, _ := st["target_lock_held_ms"].(float64); held < 5000 {
+		t.Fatalf("target_lock_held_ms = %v on a lock-lost stop, want at least 5000", st["target_lock_held_ms"])
+	}
+}
+
+// onceHook is a before_move hook that runs body in the destination worktree
+// the first time only (the later run, after a race return, passes).
+func (f *fx) onceHook(body string) string {
+	marker := filepath.Join(f.t.TempDir(), "moved")
+	return f.hookScript(`if [ -e ` + marker + ` ]; then exit 0; fi
+touch ` + marker + `
+cd "$PG_GIT_LANDER_DESTINATION_WORKTREE"
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
+` + body)
+}
+
+func TestContinueAfterTargetBusyThenMovedMainTakesTheFullRaceReturn(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	script, seen := f.recordLocksHook("")
+	f.twoPhaseXDG("", script)
+	f.foreignLock(locks.BranchRef(f.main), "target")
+	out := f.run(f.land())
+	if out.Outcome != outcome.Stopped || out.Reason != string(outcome.StopTargetBusy) {
+		t.Fatalf("outcome = %s %s (%s)", out.Outcome, out.Reason, out.Message)
+	}
+	hooksBefore := strings.Count(f.read(seen), "\n")
+	// The holder goes away and main moves before the resume.
+	f.git(f.repo.Dir, "update-ref", "-d", locks.BranchRef(f.main))
+	f.commit(f.repo.Dir, "m.txt", "m\n")
+
+	o := f.resume(outcome.FlagContinue)
+	want(t, o, outcome.Landed, 0)
+	evs := f.events()
+	if rr := lastEvent(evs, "race_retry"); rr == nil || rr["attempt"].(float64) != 1 {
+		t.Fatalf("race_retry = %v", rr)
+	}
+	if n := strings.Count(f.read(seen), "\n"); n <= hooksBefore {
+		t.Errorf("the hooks did not run again after the moved main (lines %d, before %d)", n, hooksBefore)
+	}
+	for _, ref := range strings.Fields(f.read(seen))[hooksBefore:] {
+		if ref == locks.BranchRef(f.main) || ref == locks.WorktreeRef("_main") {
+			t.Fatalf("a rerun hook held %s", ref)
+		}
+	}
+	if f.mainFile("x.txt") != "x" || f.mainFile("m.txt") != "m" {
+		t.Fatal("the landed history lacks a file")
+	}
+	f.untouched()
+}
+
+// pathsReuse runs a land with revalidate = paths whose before_move hook moves
+// main with body, after setup; it returns the outcome.
+func (f *fx) pathsLand(body string) *outcome.Outcome {
+	f.t.Helper()
+	f.twoPhaseXDG(`revalidate = "paths"`, f.onceHook(body))
+	return f.run(f.land())
+}
+
+func TestPathsRevalidateCountsBothNamesOfARenamedFile(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.commit(f.repo.Dir, "a.txt", "1\n2\n3\n")
+	f.feature()
+	f.commit(f.wt, "a.txt", "1\n2\n3 branch\n")
+	o := f.pathsLand("git mv a.txt b.txt\ngit commit -qm rename")
+	want(t, o, outcome.Landed, 0)
+	evs := f.events()
+	if n := hookRuns(evs, "before_move"); n != 2 {
+		t.Fatalf("before_move ran %d times, want 2: the old name of the rename overlaps the branch", n)
+	}
+	if countEvents(evs, "revalidate_reuse") != 0 {
+		t.Error("a rename was reused as if disjoint")
+	}
+	f.untouched()
+}
+
+func TestPathsRevalidateReusesAcrossAMergeCommitInTheMovedRange(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	o := f.pathsLand("git switch -q -c side\nprintf 's\\n' > s.txt\ngit add s.txt\ngit commit -qm side\ngit switch -q " + f.main + "\ngit merge -q --no-ff -m merge side")
+	want(t, o, outcome.Landed, 0)
+	evs := f.events()
+	if n := hookRuns(evs, "before_move"); n != 1 || countEvents(evs, "revalidate_reuse") != 1 {
+		t.Fatalf("before_move ran %d times, reuse events %d, want 1 and 1", n, countEvents(evs, "revalidate_reuse"))
+	}
+	if f.mainFile("x.txt") != "x" || f.mainFile("s.txt") != "s" {
+		t.Fatal("the landed history lacks a file")
+	}
+	// Only the moved range's own merge: the tool made none.
+	if got := len(strings.Fields(f.git(f.repo.Dir, "rev-list", "--merges", f.main))); got != 1 {
+		t.Fatalf("%d merge commits on main, want only the moved range's own", got)
+	}
+	f.untouched()
+}
+
+func TestPathsRevalidateRerunsWhenTheConfigurationChangedInTheMovedRange(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	o := f.pathsLand("printf 'max_race_retries = 7\\n' > .pg-git-lander.toml\ngit add .pg-git-lander.toml\ngit commit -qm cfg")
+	want(t, o, outcome.Landed, 0)
+	evs := f.events()
+	if n := hookRuns(evs, "before_move"); n != 2 {
+		t.Fatalf("before_move ran %d times, want 2: the digest changed", n)
+	}
+	if countEvents(evs, "revalidate_reuse") != 0 {
+		t.Error("a changed configuration was reused")
+	}
+	f.untouched()
+}
+
+func TestPathsRevalidateWithAnEmptyBranchDiffReusesTheHookResult(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	p := filepath.Join(f.repo.Root(), "wt-x")
+	f.git(f.repo.Dir, "worktree", "add", "-q", "-b", "feature/x", p)
+	f.wt, _ = filepath.EvalSymlinks(p)
+	f.git(f.wt, "commit", "-q", "--allow-empty", "-m", "empty")
+	o := f.pathsLand("printf 'm\\n' > m.txt\ngit add m.txt\ngit commit -qm moved")
+	want(t, o, outcome.Landed, 0)
+	evs := f.events()
+	if n := hookRuns(evs, "before_move"); n != 1 || countEvents(evs, "revalidate_reuse") != 1 {
+		t.Fatalf("before_move ran %d times, reuse events %d, want 1 and 1", n, countEvents(evs, "revalidate_reuse"))
+	}
+	if f.mainFile("m.txt") != "m" {
+		t.Fatal("main lost the moved commit")
+	}
+	f.untouched()
 }

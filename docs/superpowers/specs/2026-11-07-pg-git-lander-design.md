@@ -752,12 +752,15 @@ itself still refuses a stopped record at once and stays free of pipeline code.
    stop is retryable and young and its owner is on this host: reason `transient` at any stage, or `lock-lost` at stage
    `cleanup` (the move already succeeded). Young means `stop.at` is less than `YoungStop` ago, a constant of 2
    minutes (not a setting). The owner is expected to run `--continue` within seconds; the stopping process itself has
-   usually exited by then, so its pid is not tested. A record that is already `running` again (a resume taking its
+   usually exited by then, so its pid is not tested: the wait is bounded only by "young" (`YoungStop`) and `--wait`, never
+   by the owner being alive. A record that is already `running` again (a resume taking its
    records back one by one) is waited for as well.
 3. **Abort** it, through the same code as `--abort`, when its reason is `holder-died`, its owner is on this host with
    its pid gone, and the operation had not reached the move (`stop.moved_already` false and stage before `moving`).
-4. **Finish** it, through the same code as `--continue`, when the owner died as in 3 and `moved_already` is true or the
-   stage is `moving`, `after` or `cleanup`: the resume detects that the move happened and runs only the clean-up.
+4. **Finish** it, through the same code as `--continue`, only when the owner died as in 3 and the move already happened:
+   `stop.moved_already` is true, the stage is `after` or `cleanup`, or the target tip equals (or contains) the recorded
+   `expected_result`. The resume runs only the clean-up. A dead owner at stage `moving` whose move did NOT happen is
+   aborted, never continued: a waiter MUST NOT move someone else's branch onto the target.
 5. **Refuse** at once for everything else: a stop that needs its owner's decision (conflict, hook failure, resolve or
    commit failures, anything not retryable), an old stop, an owner on another host or of unknown liveness (counted as
    alive and old), and a stop this very process made. The refusal (or the `target-busy` stop of the second phase) names
@@ -773,6 +776,13 @@ itself still refuses a stopped record at once and stays free of pipeline code.
    longer shows an empty stage.
 9. Agents (the `ff-merge-to-main` skill) MUST NOT leave a stop of their own unresolved: track the problem and run
    `--abort` so others can land.
+10. A finish or abort that does not complete (the resumed operation stops again, or is refused) is not retried and not
+    swallowed: the waiter ends with `target-busy` (or the first-phase refusal) whose message says it tried to finish or
+    abort the other operation, naming its branch, op id and the reason of the new stop, and emits a `settle` event with
+    action `settle-failed`. The stop that resume writes is NOT retryable (the waiter marks it so), so a later waiter
+    refuses it at once instead of waiting on a dead process until `YoungStop` runs out.
+11. Every decision emits a `settle` event (section 14.6) with action `wait`, `abort`, `finish`, `lost-to-concurrent`,
+    `settle-failed` or `refuse`.
 
 ```mermaid
 flowchart TD
@@ -784,7 +794,7 @@ flowchart TD
   C -->|no| D{"stop.reason = holder-died?"}
   D -->|yes| E{"owner pid gone?"}
   E -->|no| R
-  E -->|yes| F{"moved_already, or stage<br/>moving / after / cleanup?"}
+  E -->|yes| F{"move happened: moved_already, stage<br/>after / cleanup, or target at expected_result?"}
   F -->|yes| G["finish: --continue logic,<br/>clean-up only"]
   F -->|no| H["abort: --abort logic"]
   D -->|no| I{"retryable, younger than 2 min,<br/>transient or lock-lost at cleanup?"}
@@ -1363,16 +1373,18 @@ file opened with `O_APPEND`. The tool rotates the file at 20 MB, keeping one arc
 lock ref `refs/pg-git-lander/locks/admin/events`; a writer that raced the rename appends to the archive, which is
 harmless.
 
-| Event              | Fields                                                                                                                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `op_start`         | `context`, the worktrees with roles and starting states, `work_branch`, `placeholder_branch`, `keep`, `config_digest`                                                                                                   |
-| `stage`            | `stage`, `previous_stage`, `duration_ms` of the previous stage                                                                                                                                                          |
-| `lock_wait`        | `lock`, `holder` (`op_id`, `stage`), `waited_ms`, `result` (`acquired`, `busy`)                                                                                                                                         |
-| `race_retry`       | `attempt`, `old_target_tip`, `new_target_tip`, `revalidate` (the configured mode), `reused` (true: the hook result was kept after a clean rebase under the lock; `attempt` is then the unchanged count of full returns) |
-| `hook`             | `point`, `index`, `argv0`, `exit`, `duration_ms`, `result` (`pass`, `skipped`, `autofix`, `failed`)                                                                                                                     |
-| `holder_converted` | `lock`, `previous_owner`, `why` (`dead`, `expired`)                                                                                                                                                                     |
-| `conflict`         | `paths`, `rule`, `result`                                                                                                                                                                                               |
-| `op_end`           | `outcome`, `reason`, `retryable`, `stage`, `path_taken`, `stats`, `branch_fate`, `worktree_fate`, `restored`, `warnings`                                                                                                |
+| Event              | Fields                                                                                                                                                                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `op_start`         | `context`, the worktrees with roles and starting states, `work_branch`, `placeholder_branch`, `keep`, `config_digest`                                                                                                                                                 |
+| `stage`            | `stage`, `previous_stage`, `duration_ms` of the previous stage                                                                                                                                                                                                        |
+| `lock_wait`        | `lock`, `holder` (`op_id`, `stage`), `waited_ms`, `result` (`acquired`, `busy`)                                                                                                                                                                                       |
+| `race_retry`       | `attempt`, `old_target_tip`, `new_target_tip`, `revalidate` (the configured mode): a real return to the rebase and the hooks                                                                                                                                          |
+| `revalidate_reuse` | `old_target_tip`, `new_target_tip`, `revalidate`: TARGET moved and the hook result was kept after a clean rebase under the lock (not a retry; never counted in `race_retry`)                                                                                          |
+| `settle`           | `action` (`wait`, `abort`, `finish`, `lost-to-concurrent`, `settle-failed`, `refuse`), `stopped_op_id`, `stopped_branch`, `stage`, `stop_reason`, `holder_state`, `holder_age_s`, `detail`: what a waiter decided about the stopped operation holding a lock it needs |
+| `hook`             | `point`, `index`, `argv0`, `exit`, `duration_ms`, `result` (`pass`, `skipped`, `autofix`, `failed`)                                                                                                                                                                   |
+| `holder_converted` | `lock`, `previous_owner`, `why` (`dead`, `expired`)                                                                                                                                                                                                                   |
+| `conflict`         | `paths`, `rule`, `result`                                                                                                                                                                                                                                             |
+| `op_end`           | `outcome`, `reason`, `retryable`, `stage`, `path_taken`, `stats`, `branch_fate`, `worktree_fate`, `restored`, `warnings`                                                                                                                                              |
 
 `op_end`'s `stats` carries `duration_ms`, `rebased_commits`, `autofix_commits`, `conflict_rounds`, `race_retries`,
 `target_lock_wait_ms` (time spent taking the second lock phase) and `target_lock_held_ms` (time TARGET and the
@@ -1644,7 +1656,14 @@ FF-1b and FF-1c move into a repo's `before_move` hooks (section 12.6). Where tha
   therefore `full`, repos opt in, and the repo's post-land verification on the main line remains the backstop.
   `none` drops even the proxy and is for repos whose checks are known to be independent of each other.
 - **Deadlock.** Phase two is one `Acquire` in ascending ref order; nothing acquires TARGET while waiting on another
-  lock of the set, and phase one is complete before the hooks run (section 8.5).
+  lock of the set, and phase one is complete before the hooks run (section 8.5). Ordering is NOT ascending across the
+  phases: phase two takes TARGET while the operation holds its `branches/<branch>` locks. That cannot deadlock
+  indefinitely: it needs a cycle of lands each of whose TARGET is another in-flight land's branch (A lands onto B while
+  B lands onto A), and every wait is bounded by `--wait`, ending in the retryable stop `target-busy`, after which the
+  stopped operation holds no TARGET.
+- **The `after` hook and the clean-up hold TARGET and the destination worktree.** Both run before step 13 releases the
+  second phase, so a slow `after` hook extends the hold (`target_lock_held_ms`) and every land onto the same TARGET
+  waits for it. `after` hooks SHOULD be short; background work belongs in a process the hook starts and detaches.
 - **Stopped records.** A stop before phase two leaves TARGET and the main worktree unlocked and untouched; the stopped
   BRANCH and worktree records name only branch-side locks. A stop at or after phase two is as before (TARGET record
   deleted, the destination record stopped), and a resume at `moving`, `after` or `cleanup` takes them back.

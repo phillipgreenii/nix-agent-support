@@ -141,6 +141,22 @@ func (f *fx) wantTargetBusy(o *outcome.Outcome) {
 	}
 }
 
+// wantSettle asserts the events file carries a settle event of action about
+// the stopped feature/x, with its op id, stage, reason and holder state.
+func (f *fx) wantSettle(action, stage string) {
+	f.t.Helper()
+	for _, e := range f.events() {
+		if e["event"] == "settle" && e["action"] == action {
+			if e["stopped_branch"] != "feature/x" || e["stopped_op_id"] == "" || e["stage"] != stage ||
+				e["stop_reason"] == "" || e["holder_state"] != "stopped" || e["branch"] != "feature/y" {
+				f.t.Errorf("settle %s = %v", action, e)
+			}
+			return
+		}
+	}
+	f.t.Fatalf("no settle event with action %s in %v", action, f.events())
+}
+
 func (f *fx) wantLanded(branch string) {
 	f.t.Helper()
 	if !strings.Contains(f.git(f.repo.Dir, "log", "--format=%s", f.main), "add "+strings.TrimPrefix(branch, "feature/")+".txt") {
@@ -173,6 +189,7 @@ func TestWaiterWaitsForAYoungRetryableStopAndLandsAfterTheOwnerResumes(t *testin
 			if *sleeps < 2 || !strings.Contains(out.String(), "waiting for stopped land feature/x") {
 				t.Errorf("sleeps = %d, messages = %q", *sleeps, out.String())
 			}
+			f.wantSettle("wait", c.stage)
 			f.wantLanded("feature/x")
 			f.wantLanded("feature/y")
 			if f.refExists(locks.WorktreeRef("_main")) {
@@ -290,6 +307,7 @@ func TestWaiterAbortsAStopWhoseOwnerDiedBeforeTheMove(t *testing.T) {
 	if !strings.Contains(out.String(), "aborting it") {
 		t.Errorf("messages = %q", out.String())
 	}
+	f.wantSettle("abort", "before_move")
 }
 
 func TestWaiterFinishesAStopWhoseOwnerDiedAtOrAfterTheMove(t *testing.T) {
@@ -310,7 +328,72 @@ func TestWaiterFinishesAStopWhoseOwnerDiedAtOrAfterTheMove(t *testing.T) {
 			if !strings.Contains(out.String(), "finishing it") {
 				t.Errorf("messages = %q", out.String())
 			}
+			f.wantSettle("finish", stage)
 		})
+	}
+}
+
+// A dead owner's stop at stage moving whose move did NOT happen is aborted:
+// finishing it would move someone else's branch onto the target.
+func TestWaiterAbortsADeadOwnersStopAtMovingWhenTheMoveDidNotHappen(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.stoppedHoldingMain(holdSpec{stage: "moving", reason: "holder-died", retryable: true, age: time.Hour})
+	wt := f.branchWorktree("feature/y")
+	d, _, out := f.countingDeps(owner(50002, "w1"), nil)
+	o := f.waiterRun(d, f.landOf("feature/y", wt))
+	want(t, o, outcome.Landed, 0)
+	f.wantLanded("feature/y")
+	if strings.Contains(f.git(f.repo.Dir, "log", "--format=%s", f.main), "add x.txt") {
+		t.Error("the waiter moved the dead owner's branch onto main")
+	}
+	if !strings.Contains(out.String(), "aborting it") {
+		t.Errorf("messages = %q", out.String())
+	}
+	f.wantSettle("abort", "moving")
+}
+
+// When the finish of a dead owner's stop stops again, the waiter says so
+// (branch, op id, reason) and leaves a record no later waiter waits on.
+func TestWaiterReportsAFailedFinishAndLeavesNothingYoungToWaitOn(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.stoppedHoldingMain(holdSpec{stage: "cleanup", reason: "holder-died", retryable: true, moved: true, age: time.Hour})
+	opID := f.record(locks.BranchRef("feature/x"))["op_id"].(string)
+	// The clean-up stops again: deleting the work branch fails.
+	f.g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		if strings.Contains(strings.Join(c.Args, " "), "branch -D") {
+			return cmdrun.Result{Code: 1, Stderr: []byte("error: injected\n")}
+		}
+		return cmdrun.Exec(ctx, c)
+	}
+	wt := f.branchWorktree("feature/y")
+	d, _, _ := f.countingDeps(owner(50002, "w1"), nil)
+	o := f.waiterRun(d, f.landOf("feature/y", wt))
+	f.wantTargetBusy(o)
+	for _, w := range []string{"tried to finish", "feature/x", opID, "stopped again", "git-error"} {
+		if !strings.Contains(o.Message, w) {
+			t.Errorf("message lacks %q: %s", w, o.Message)
+		}
+	}
+	f.wantSettle("settle-failed", "cleanup")
+	rec := f.record(locks.BranchRef("feature/x"))
+	if rec["state"] != "stopped" || rec["stop"].(map[string]any)["retryable"] != false {
+		t.Fatalf("record after the failed finish = %v", rec)
+	}
+
+	// A second waiter, even one that finds the stop young and transient,
+	// refuses at once instead of waiting on a dead process.
+	f.forge(func(r map[string]any) {
+		r["stop"].(map[string]any)["reason"] = "transient"
+		r["stop"].(map[string]any)["at"] = f.clock.Now().UTC().Format("2006-01-02T15:04:05Z")
+	})
+	d2, sleeps, _ := f.countingDeps(owner(50003, "w2"), nil)
+	wt2 := f.branchWorktree("feature/z")
+	o2 := f.waiterRun(d2, f.landOf("feature/z", wt2))
+	f.wantTargetBusy(o2)
+	if *sleeps != 0 {
+		t.Errorf("the second waiter slept %d times on a record whose finish already failed", *sleeps)
 	}
 }
 

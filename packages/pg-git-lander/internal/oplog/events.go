@@ -23,6 +23,8 @@ const (
 	EvStage           = "stage"
 	EvLockWait        = "lock_wait"
 	EvRaceRetry       = "race_retry"
+	EvRevalidateReuse = "revalidate_reuse"
+	EvSettle          = "settle"
 	EvHook            = "hook"
 	EvHolderConverted = "holder_converted"
 	EvConflict        = "conflict"
@@ -162,14 +164,44 @@ func (e *Events) LockWait(ctx context.Context, w locks.LockWait) error {
 	})
 }
 
-// RaceRetry emits race_retry: TARGET moved between the snapshot and the move.
-// revalidate is the configured mode and reused is true when the hook result
-// was kept (a rebase under the TARGET lock, no new hook run); attempt is then
-// the number of full race returns so far, unchanged.
-func (e *Events) RaceRetry(ctx context.Context, attempt int, oldTargetTip, newTargetTip, revalidate string, reused bool) error {
+// RaceRetry emits race_retry: TARGET moved between the snapshot and the move
+// and the operation returns to the rebase (the hooks run again). attempt is
+// the number of full race returns so far; revalidate is the configured mode.
+func (e *Events) RaceRetry(ctx context.Context, attempt int, oldTargetTip, newTargetTip, revalidate string) error {
 	return e.Emit(ctx, EvRaceRetry, map[string]any{
 		"attempt": attempt, "old_target_tip": oldTargetTip, "new_target_tip": newTargetTip,
-		"revalidate": revalidate, "reused": reused,
+		"revalidate": revalidate,
+	})
+}
+
+// RevalidateReuse emits revalidate_reuse: TARGET moved, and the hook result
+// was kept after a clean rebase under the TARGET lock (no new hook run, no
+// race return). It is not a retry, so it never counts as race_retry.
+func (e *Events) RevalidateReuse(ctx context.Context, oldTargetTip, newTargetTip, revalidate string) error {
+	return e.Emit(ctx, EvRevalidateReuse, map[string]any{
+		"old_target_tip": oldTargetTip, "new_target_tip": newTargetTip, "revalidate": revalidate,
+	})
+}
+
+// Settle is the payload of settle: what a waiter decided about the stopped
+// operation that holds a lock it needs.
+type Settle struct {
+	// Action is wait, abort, finish, lost-to-concurrent or refuse.
+	Action                     string
+	StoppedOpID, Branch, Stage string
+	StopReason                 string
+	HolderState                string
+	HolderAgeS                 int64
+	// Detail is a short reason (for example why a finish did not complete).
+	Detail string
+}
+
+// Settle emits settle.
+func (e *Events) Settle(ctx context.Context, st Settle) error {
+	return e.Emit(ctx, EvSettle, map[string]any{
+		"action": st.Action, "stopped_op_id": st.StoppedOpID, "stopped_branch": st.Branch,
+		"stage": st.Stage, "stop_reason": st.StopReason, "holder_state": st.HolderState,
+		"holder_age_s": st.HolderAgeS, "detail": st.Detail,
 	})
 }
 

@@ -69,6 +69,10 @@ type Deps struct {
 	// Wait, when non-nil, replaces the configured lock.wait for this
 	// invocation (the --wait flag).
 	Wait *time.Duration
+	// Settling is set on the Deps a waiter hands to the resume that finishes
+	// or aborts another operation: a stop that resume writes is not
+	// retryable, so a later waiter refuses it instead of waiting.
+	Settling bool
 }
 
 // Request is one operation, with its flags already resolved against the PGL_*
@@ -530,7 +534,7 @@ func (s *session) lock(ctx context.Context, sel *worktrees.Selection) (*Result, 
 			specs = p.Layer.LandBranchLocks(rec)
 		}
 		var set *locks.Set
-		err := s.d.acquireSettled(ctx, p.Layer, s.pre.Lock.Wait, s.req.RepoFlag, func(ctx context.Context) error {
+		err := s.d.acquireSettled(ctx, p.Layer, p.Events, s.pre.Lock.Wait, s.req.RepoFlag, func(ctx context.Context) error {
 			var aerr error
 			set, aerr = p.Layer.Acquire(ctx, specs...)
 			return aerr
@@ -578,6 +582,10 @@ func (s *session) lockFailure(err error) (*Result, error) {
 	case errors.As(err, &ref):
 		o := s.base(ref.Outcome(string(s.req.Operation), s.req.Branch, s.req.RepoFlag))
 		o.Message = ref.Error()
+		var sf *SettleFailedError
+		if errors.As(err, &sf) {
+			o.Message = sf.Message
+		}
 		if h := ref.Holder; h.OpID != "" {
 			o.Holder = &h
 			info := outcome.Refusals[ref.Reason]
@@ -587,6 +595,9 @@ func (s *session) lockFailure(err error) (*Result, error) {
 			}
 			o.Message = fmt.Sprintf("%s is held by a stopped %s of %s (op %s, pid %d on %s); its owner must resume or abort it",
 				ref.Ref, h.Operation, h.Branch, h.OpID, h.PID, h.Host)
+			if sf != nil {
+				o.Message = sf.Message
+			}
 			next := outcome.NextCommands(h.Operation, h.Branch, s.req.RepoFlag, flags)
 			o.BlockingOp = []outcome.BlockingOp{{
 				OpID: h.OpID, Operation: h.Operation, Branch: h.Branch, Reason: string(ref.Reason), Next: next,

@@ -136,8 +136,17 @@ func Begin(ctx context.Context, l *locks.Layer, p Params, rnd io.Reader) (*Op, e
 // returns the locks newly taken.
 func (o *Op) AcquireTarget(ctx context.Context) ([]*locks.Held, error) {
 	var specs []locks.Spec
-	for _, sp := range o.Layer.LandTargetLocks(o.Branch.Record()) {
+	rec := o.Branch.Record()
+	for _, sp := range o.Layer.LandTargetLocks(rec) {
 		if o.Set.ByRef(sp.Ref) == nil {
+			// A stop while phase two was held (a failure before the move)
+			// left this operation's own destination and TARGET records
+			// stopped, and a resume at that stage does not take them back.
+			// Taking back by compare-and-swap, restricted to this op id, is
+			// the least surprising fix: it needs no extra clean-up pass and
+			// still refuses every other operation's stopped record, which
+			// the waiter logic (not this call) decides about.
+			sp.TakeBack = rec.OpID
 			specs = append(specs, sp)
 		}
 	}

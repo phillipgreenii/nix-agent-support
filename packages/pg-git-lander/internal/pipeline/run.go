@@ -257,7 +257,7 @@ func (s *runner) lockTarget(ctx context.Context) (*stopSpec, error) {
 	p := s.p
 	start := p.d.Clock.Now()
 	var held []*locks.Held
-	err := p.d.acquireSettled(ctx, p.Layer, p.Pre.Lock.Wait, p.Request.RepoFlag, func(ctx context.Context) error {
+	err := p.d.acquireSettled(ctx, p.Layer, p.Events, p.Pre.Lock.Wait, p.Request.RepoFlag, func(ctx context.Context) error {
 		var aerr error
 		held, aerr = p.Op.AcquireTarget(ctx)
 		return aerr
@@ -270,7 +270,12 @@ func (s *runner) lockTarget(ctx context.Context) (*stopSpec, error) {
 		case errors.As(err, &busy):
 			return &stopSpec{reason: outcome.StopTargetBusy, message: s.busyMessage(ctx, busy.Ref, busy.Holder)}, nil
 		case errors.As(err, &ref):
-			return &stopSpec{reason: outcome.StopTargetBusy, message: s.stoppedHolderMessage(ctx, ref)}, nil
+			msg := s.stoppedHolderMessage(ctx, ref)
+			var sf *SettleFailedError
+			if errors.As(err, &sf) {
+				msg = sf.Message
+			}
+			return &stopSpec{reason: outcome.StopTargetBusy, message: msg}, nil
 		}
 		return nil, err
 	}
@@ -362,7 +367,7 @@ func (s *runner) raceReturn(ctx context.Context) (*outcome.Outcome, *stopSpec, e
 		return nil, nil, err, true
 	}
 	s.stats.RaceRetries++
-	if err := p.Events.RaceRetry(ctx, s.stats.RaceRetries, old, p.Tips.Target, p.Config.Revalidate, false); err != nil {
+	if err := p.Events.RaceRetry(ctx, s.stats.RaceRetries, old, p.Tips.Target, p.Config.Revalidate); err != nil {
 		return nil, nil, err, true
 	}
 	cur, err := s.workTip(ctx)
@@ -441,7 +446,7 @@ func (s *runner) reuseHooks(ctx context.Context, mode, cur string) (bool, *outco
 	if err := p.Resnapshot(ctx); err != nil {
 		return false, nil, nil, err
 	}
-	if err := p.Events.RaceRetry(ctx, s.stats.RaceRetries, old, cur, mode, true); err != nil {
+	if err := p.Events.RevalidateReuse(ctx, old, cur, mode); err != nil {
 		return false, nil, nil, err
 	}
 	p.Log.Line("REVALIDATE", fmt.Sprintf("%s: %s moved %s to %s, hook result reused", mode, p.Request.Target, old, cur))
@@ -998,6 +1003,7 @@ func (s *runner) pathTaken() string {
 // opEnd emits the closing op_end event and the log's OUTCOME line.
 func (s *runner) opEnd(ctx context.Context, o *outcome.Outcome) {
 	p := s.p
+	s.targetEnd() // every exit path, a lost lock included, closes the hold account
 	var words []string
 	for _, w := range o.Warnings {
 		words = append(words, string(w.Warning))
@@ -1046,7 +1052,12 @@ func (s *runner) stop(ctx context.Context, sp *stopSpec) (*outcome.Outcome, erro
 		_ = p.Op.SetAttempts(ctx, func(a *locks.Attempts) {
 			a.ConflictRounds, a.RaceRetries = s.stats.ConflictRounds, s.stats.RaceRetries
 		})
-		serr = p.Op.Stop(ctx, oprecord.StopInfo{Reason: sp.reason, Message: sp.message, Paths: sp.paths, MovedAlready: s.moved})
+		info := oprecord.StopInfo{Reason: sp.reason, Message: sp.message, Paths: sp.paths, MovedAlready: s.moved}
+		if p.d.Settling {
+			no := false
+			info.Retryable = &no
+		}
+		serr = p.Op.Stop(ctx, info)
 		s.targetEnd() // a stop deletes the TARGET record
 		if errors.Is(serr, locks.ErrLockLost) {
 			// The records changed hands while this stop was written: that is

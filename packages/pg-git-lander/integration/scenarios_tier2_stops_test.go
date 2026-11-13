@@ -106,7 +106,7 @@ func checkEventsShape(t *testing.T, evs []map[string]any) {
 	}
 	known := map[string]bool{
 		"op_start": true, "stage": true, "lock_wait": true, "race_retry": true,
-		"hook": true, "holder_converted": true, "conflict": true, "op_end": true,
+		"revalidate_reuse": true, "settle": true, "hook": true, "holder_converted": true, "conflict": true, "op_end": true,
 	}
 	for i, e := range evs {
 		typ, _ := e["event"].(string)

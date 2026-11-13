@@ -115,7 +115,10 @@ at the tip the work branch was rebased onto, the tool fast-forwards. If it moved
 result is reused after a clean rebase under the lock or the rebase and hooks run again; the number of such returns is
 bounded by `max_race_retries` (then `race`, without having held TARGET). A TARGET still locked by another landing after
 `lock.wait` ends the operation with the retryable stop `target-busy` (`--continue` goes straight to the lock step).
-The tool keeps no queue: queuing is the caller's. `op_end` events carry `target_lock_wait_ms` and `target_lock_held_ms`.
+The tool keeps no queue: queuing is the caller's. `op_end` events carry `target_lock_wait_ms` and `target_lock_held_ms` (recorded on every exit, lock-lost stops
+included). The `after` hook and the clean-up still run holding TARGET and the destination worktree, so a slow `after`
+hook extends the hold: `after` hooks SHOULD be short. A reuse of the hook result emits `revalidate_reuse` (not
+`race_retry`), and a waiter's decision about a stopped operation emits `settle`.
 
 ## A stopped operation that holds the main worktree
 
@@ -123,10 +126,13 @@ A stopped land keeps its worktree records, and one stopped at or after the move 
 worktree record. A waiter that finds such a record acts on it (design section 8.10); there is no queue and no setting:
 
 - a young (under 2 minutes) retryable stop, `transient` or `lock-lost` at `cleanup`, with its owner on this host: the
-  waiter waits, up to `--wait`, for the owner's `--continue`;
-- a `holder-died` stop whose owner process is gone: the waiter aborts it when the target had not moved, or finishes its
-  clean-up when the move had happened (taking the record back by compare-and-swap; a waiter that loses goes back to
-  waiting), then takes the lock;
+  waiter waits, up to `--wait`, for the owner's `--continue` (it does not check that the owner is alive; the wait is
+  bounded by "young" and `--wait`);
+- a `holder-died` stop whose owner process is gone: the waiter aborts it when the target had not moved (including a
+  stop at `moving` whose move did not happen: it never moves someone else's branch), or finishes its clean-up when the
+  move had happened (taking the record back by compare-and-swap; a waiter that loses goes back to waiting), then
+  takes the lock; if that finish or abort stops again the waiter says so (branch, op id, reason) and ends
+  `target-busy`, leaving a non-retryable stop that later waiters refuse at once;
 - anything else (conflict, hook failure, an old stop, an owner on another host): refused at once, naming the owner's
   operation, branch, stage and age and the commands that resolve it.
 

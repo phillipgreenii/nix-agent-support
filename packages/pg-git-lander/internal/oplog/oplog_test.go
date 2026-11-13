@@ -198,14 +198,16 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 	must(f.ev.OpStart(ctx, map[string]any{"ticket": "X-1"}, []locks.WorktreeEntry{{Admin: "_main", Path: "/r", Roles: []string{"destination"}, Start: locks.Start{Branch: "main"}}}, "work", "placeholder", locks.Keep{SourceBranch: true}, "digest"))
 	must(f.ev.Stage(ctx, "rebasing", "locked", 1500*time.Millisecond))
 	must(f.ev.LockWait(ctx, locks.LockWait{Lock: "refs/l", Holder: holder("h-op", "rebasing"), Waited: 2 * time.Second, Result: locks.WaitBusy}))
-	must(f.ev.RaceRetry(ctx, 2, "aaa", "bbb", "paths", true))
+	must(f.ev.RaceRetry(ctx, 2, "aaa", "bbb", "paths"))
+	must(f.ev.RevalidateReuse(ctx, "aaa", "bbb", "paths"))
+	must(f.ev.Settle(ctx, Settle{Action: "wait", StoppedOpID: "o2", Branch: "feature/y", Stage: "cleanup", StopReason: "transient", HolderState: "stopped", HolderAgeS: 7}))
 	must(f.ev.Hook(ctx, hooks.CommandRecord{Point: "before", Index: 1, Argv0: "check", Code: 3, Duration: 40 * time.Millisecond, Result: "failed"}))
 	must(f.ev.HolderConverted(ctx, locks.Conversion{Lock: "refs/l", PreviousOwner: locks.Owner{Host: "h", PID: 9}, Why: locks.WhyExpired}))
 	must(f.ev.Conflict(ctx, []string{"a.txt"}, "union", "resolved"))
 	must(f.ev.OpEnd(ctx, OpEnd{Outcome: "landed", Reason: "", Retryable: false, Stage: "done", PathTaken: "fast", Stats: map[string]any{"commits": 2}, BranchFate: "deleted", WorktreeFate: "kept"}))
 
 	got := f.lines(f.ev.Path)
-	if len(got) != 8 {
+	if len(got) != 10 {
 		t.Fatalf("%d lines", len(got))
 	}
 	common := []string{"ts", "repo", "host", "pid", "tool_version", "op_id", "operation", "branch", "target"}
@@ -213,7 +215,9 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 		EvOpStart:         {"context", "worktrees", "work_branch", "placeholder_branch", "keep", "config_digest"},
 		EvStage:           {"stage", "previous_stage", "duration_ms"},
 		EvLockWait:        {"lock", "holder", "waited_ms", "result"},
-		EvRaceRetry:       {"attempt", "old_target_tip", "new_target_tip", "revalidate", "reused"},
+		EvRaceRetry:       {"attempt", "old_target_tip", "new_target_tip", "revalidate"},
+		EvRevalidateReuse: {"old_target_tip", "new_target_tip", "revalidate"},
+		EvSettle:          {"action", "stopped_op_id", "stopped_branch", "stage", "stop_reason", "holder_state", "holder_age_s", "detail"},
 		EvHook:            {"point", "index", "argv0", "exit", "duration_ms", "result"},
 		EvHolderConverted: {"lock", "previous_owner", "why"},
 		EvConflict:        {"paths", "rule", "result"},
@@ -241,14 +245,14 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 			t.Errorf("%s common values = %v", typ, m)
 		}
 	}
-	if len(seen) != 8 {
+	if len(seen) != 10 {
 		t.Errorf("event types seen = %v", seen)
 	}
 	if h := got[2]["holder"].(map[string]any); h["op_id"] != "h-op" || h["stage"] != "rebasing" || got[2]["waited_ms"] != float64(2000) || got[2]["result"] != "busy" {
 		t.Errorf("lock_wait = %v", got[2])
 	}
-	if got[1]["duration_ms"] != float64(1500) || got[4]["exit"] != float64(3) || got[5]["why"] != "expired" {
-		t.Errorf("values: %v %v %v", got[1], got[4], got[5])
+	if got[1]["duration_ms"] != float64(1500) || got[6]["exit"] != float64(3) || got[7]["why"] != "expired" {
+		t.Errorf("values: %v %v %v", got[1], got[6], got[7])
 	}
 }
 
