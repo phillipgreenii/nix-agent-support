@@ -156,6 +156,18 @@ CREATE INDEX IF NOT EXISTS idx_res_err     ON tool_results(is_error, signature);
 CREATE INDEX IF NOT EXISTS idx_events_side ON events(is_sidechain, type);
 CREATE INDEX IF NOT EXISTS idx_events_src  ON events(prompt_source);
 CREATE INDEX IF NOT EXISTS idx_user_int    ON user_text(interrupted);
+-- Session-scope queries (--cwd-prefix / --exclude-cwd-prefix) must find the
+-- sessions with an event in the query window (idx_events_ts) and then read only
+-- those sessions' events to learn each first cwd (idx_events_session). Without
+-- them each scoped query scanned and sorted every row of events (measured: 15.5M
+-- rows, tens of seconds per scan). The indexes are created by IF NOT EXISTS, so
+-- an existing database gets them the next time the ingester opens it, with no
+-- schema-version bump and no re-ingest; until then the queries are correct but
+-- slow. Cost: roughly 0.6 GB (ts) plus 0.8 GB (session_id, seq) on a 6 GB
+-- database, one build pass while the first writer open holds the write lock, and
+-- two extra b-tree inserts per ingested event.
+CREATE INDEX IF NOT EXISTS idx_events_ts      ON events(ts);
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);
 `
 
 // ThinkingSchema is created ONLY when ingest runs with thinking capture enabled

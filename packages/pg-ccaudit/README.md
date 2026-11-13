@@ -162,11 +162,20 @@ is unchanged. Each of the seven queries' versions was bumped by one when the
 filter was added (`cost-by-signature` went 2 to 3), and the version, as ever, is
 printed with the result.
 
-- A session is in scope when the cwd of its FIRST event (lowest `seq`, earliest
-  `ts` breaking a tie, then file path) is under any `--cwd-prefix` (several
-  prefixes are an OR). Later events that wander out of the prefix do not matter.
-- A session whose first recorded cwd is NULL (and an event with no session id)
-  is never matched by `--cwd-prefix`; `--exclude-cwd-prefix` does not drop it.
+- A session's first cwd is the first NON-NULL cwd among its events (lowest `seq`,
+  earliest `ts` breaking a tie, then file path); the first event of most
+  sessions records no cwd, so it is skipped. A session is in scope when its first
+  cwd is under any `--cwd-prefix` (several prefixes are an OR). Later events
+  that wander out of the prefix do not matter.
+- A session with no cwd on any event (and an event with no session id) is never
+  matched by `--cwd-prefix`; `--exclude-cwd-prefix` does not drop it.
+- Cost follows the query window, not the table: the first cwd is looked up only
+  for sessions with an event in `--since`/`--until`, through `idx_events_ts` and
+  `idx_events_session`. The ingester creates both indexes (`CREATE INDEX IF NOT
+EXISTS`, no schema-version bump, no re-ingest) the next time it opens the
+  database; until then scoped queries are correct but scan the whole table. The
+  indexes add roughly 1.4 GB to a 6 GB database and two b-tree inserts per
+  ingested event.
 - Matching is by whole path component and case-sensitive: `/a/b` matches `/a/b`
   and `/a/b/c`, not `/a/bc`. A trailing slash on a prefix is ignored.
 - Only `events.cwd` is used; `files.project_dir` is empty on the recorder feed

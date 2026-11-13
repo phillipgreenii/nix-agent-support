@@ -55,18 +55,32 @@ const windowClause = `(:since = '' OR %[1]s.ts >= :since) AND (:until = '' OR %[
 
 func win(alias string) string { return fmt.Sprintf(windowClause, alias) }
 
-// firstCwdSessions is one row per session_id with the working directory of the
-// session's FIRST event: lowest seq, earliest ts breaking a tie, then path so
-// the choice is deterministic. The first event is taken whether or not its cwd
-// is NULL, so a session whose first recorded cwd is NULL has a NULL cwd here and
-// matches no prefix. events.project_dir is deliberately not used (empty on the
-// recorder feed path, lossy elsewhere). Events with no session_id belong to no
-// session and are never in scope when a prefix filter is active.
+// firstCwdSessions is one row per session_id with the session's first cwd: the
+// first NON-NULL cwd by lowest seq, earliest ts breaking a tie, then path so the
+// choice is deterministic. NULL cwds are skipped because the first event of most
+// sessions is a bookkeeping line that records none; taking the first event's cwd
+// verbatim left nearly every session unmatched. A session with no cwd on any
+// event has no row here. events.project_dir is deliberately not used (empty on
+// the recorder feed path, lossy elsewhere). Events with no session_id belong to
+// no session and are never in scope when an include prefix is active.
+//
+// The lookup is restricted to sessions with at least one event in the query
+// window (:since inclusive, :until exclusive, either empty = unbounded), so its
+// cost follows the window instead of the table: sessions are found through
+// idx_events_ts and their events read through idx_events_session. The
+// constant-false guard on the second branch keeps the whole-table fallback (no
+// window at all, which also admits rows with a NULL ts) out of a windowed
+// statement.
 const firstCwdSessions = `(
   SELECT s.session_id AS session_id, s.cwd AS cwd
   FROM (SELECT session_id, cwd,
                ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq, ts, path) AS rn
-        FROM events WHERE session_id IS NOT NULL) s
+        FROM events
+        WHERE cwd IS NOT NULL
+          AND session_id IN (
+            SELECT session_id FROM events WHERE ts >= :since AND (:until = '' OR ts < :until)
+            UNION ALL
+            SELECT session_id FROM events WHERE :since = '' AND :until = '')) s
   WHERE s.rn = 1)`
 
 // Matching is by whole path components ('/a/b' matches '/a/b' and '/a/b/c',
@@ -75,15 +89,23 @@ const firstCwdSessions = `(
 //
 // scopeClause restricts rows to sessions whose first cwd is under any
 // :cwd_prefixes entry and not under any :exclude_cwd_prefixes entry. With both
-// arrays empty it is vacuously true, so an unfiltered run is unchanged. The
-// qualifying-session sets are uncorrelated subqueries, so each is computed once
-// per statement rather than once per row.
-const scopeClause = `(:cwd_prefixes = '[]' OR %[1]s.session_id IN (
-    SELECT fs.session_id FROM ` + firstCwdSessions + ` fs WHERE ` + `EXISTS (SELECT 1 FROM json_each(:cwd_prefixes) p
-          WHERE fs.cwd = p.value OR substr(fs.cwd, 1, length(p.value) + 1) = p.value || '/')))
-  AND (:exclude_cwd_prefixes = '[]' OR %[1]s.session_id IS NULL OR %[1]s.session_id NOT IN (
-    SELECT fs.session_id FROM ` + firstCwdSessions + ` fs WHERE ` + `EXISTS (SELECT 1 FROM json_each(:exclude_cwd_prefixes) p
-          WHERE fs.cwd = p.value OR substr(fs.cwd, 1, length(p.value) + 1) = p.value || '/')))`
+// arrays empty it is vacuously true, so an unfiltered run is unchanged. Exactly
+// one first-cwd subquery is evaluated per statement whatever the flags: with an
+// include prefix it yields the sessions that match it and not the exclude
+// prefixes; with only an exclude prefix it yields the sessions to drop (a session
+// with no cwd, or with no session_id, is kept). Each subquery is uncorrelated, so
+// it runs once per statement, not once per row.
+const scopeClause = `((:cwd_prefixes = '[]' AND :exclude_cwd_prefixes = '[]')
+  OR (:cwd_prefixes <> '[]' AND %[1]s.session_id IN (
+    SELECT fs.session_id FROM ` + firstCwdSessions + ` fs
+    WHERE EXISTS (SELECT 1 FROM json_each(:cwd_prefixes) p
+          WHERE fs.cwd = p.value OR substr(fs.cwd, 1, length(p.value) + 1) = p.value || '/')
+      AND (:exclude_cwd_prefixes = '[]' OR NOT EXISTS (SELECT 1 FROM json_each(:exclude_cwd_prefixes) p
+          WHERE fs.cwd = p.value OR substr(fs.cwd, 1, length(p.value) + 1) = p.value || '/'))))
+  OR (:cwd_prefixes = '[]' AND (%[1]s.session_id IS NULL OR %[1]s.session_id NOT IN (
+    SELECT fs.session_id FROM ` + firstCwdSessions + ` fs
+    WHERE EXISTS (SELECT 1 FROM json_each(:exclude_cwd_prefixes) p
+          WHERE fs.cwd = p.value OR substr(fs.cwd, 1, length(p.value) + 1) = p.value || '/')))))`
 
 // scoped is win plus the session-scope filter, for the queries marked Scoped.
 func scoped(alias string) string {
@@ -200,7 +222,7 @@ var registry = func() map[string]Query {
 	qs := []Query{
 		{
 			Name:    "error-rate-by-tool",
-			Version: 2,
+			Version: 3,
 			Scoped:  true,
 			Doc:     "Per-tool error counts WITH denominators, in one query.",
 			Notes: "The denominator is every tool CALL, including calls whose result was never " +
@@ -221,7 +243,7 @@ ORDER BY errors DESC, calls DESC, tool_name`,
 		},
 		{
 			Name:    "top-signatures",
-			Version: 2,
+			Version: 3,
 			Scoped:  true,
 			Doc:     "Ranked normalized error signatures.",
 			Notes: "signature is normalized AT INGEST (T-6), so grouping is stable across runs; " +
@@ -409,7 +431,7 @@ SELECT (SELECT COUNT(*) FROM hits)                                        AS tot
 		},
 		{
 			Name:    "retry-chains",
-			Version: 2,
+			Version: 3,
 			Scoped:  true,
 			Doc:     "A failed call followed by the same tool being re-called within N line ordinals.",
 			Notes: "N defaults to 6. A retry cycle is at minimum [tool_use] -> [tool_result] -> " +
@@ -508,7 +530,7 @@ ORDER BY total DESC, signature`,
 		},
 		{
 			Name:    "cost-by-signature",
-			Version: 3,
+			Version: 4,
 			Scoped:  true,
 			Doc:     "Measured cost per error signature, with idle/human-wait time flagged out and the spread (p50/max) beside the sum.",
 			Notes: "READ THIS BEFORE QUOTING A NUMBER. Two cost columns are reported because the " +
@@ -789,7 +811,7 @@ ORDER BY t.path, t.seq`,
 		},
 		{
 			Name:    "interruptions",
-			Version: 2,
+			Version: 3,
 			Scoped:  true,
 			Doc:     "Interruption sentinels, with the tool call the person cut short.",
 			Notes: "`interrupted` is set AT INGEST by prefix-matching Claude Code's sentinel, which " +
@@ -829,7 +851,7 @@ ORDER BY m.path, m.seq`,
 		},
 		{
 			Name:    "denied-tool-calls",
-			Version: 2,
+			Version: 3,
 			Scoped:  true,
 			Doc:     "Tool calls a PERSON or the permission layer refused, split by who refused.",
 			Notes: "The agent attempted something it was not allowed to do, which is a mistake whose " +
@@ -874,7 +896,7 @@ ORDER BY r.path, r.seq`,
 		},
 		{
 			Name:    "hook-refusals-in-body",
-			Version: 2,
+			Version: 3,
 			Scoped:  true,
 			Doc:     "Hook- and guard-authored refusals recovered from the tool_result BODY, which is where they actually land.",
 			Params:  []Param{{Name: "head", Doc: "how many characters of the body's opening the marker must appear in", Default: "200", Numeric: true}},
@@ -1375,7 +1397,7 @@ ORDER BY a.path, a.seq`,
 		},
 		{
 			Name:    "skill-calls",
-			Version: 1,
+			Version: 2,
 			Scoped:  true,
 			Doc:     "How often each skill was invoked through the Skill tool.",
 			Notes: "One row per skill: skill is the Skill tool call's input field `skill` " +

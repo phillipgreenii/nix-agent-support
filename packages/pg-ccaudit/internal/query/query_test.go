@@ -407,11 +407,11 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 	// Seven lens queries are at +1 (cost-by-signature 2 -> 3): each gained the
 	// optional --cwd-prefix / --exclude-cwd-prefix session-scope filter.
 	want := map[string]int{
-		"error-rate-by-tool":    2,
-		"top-signatures":        2,
+		"error-rate-by-tool":    3,
+		"top-signatures":        3,
 		"bash-by-lead-cmd":      1,
 		"session-concentration": 1,
-		"retry-chains":          2,
+		"retry-chains":          3,
 		// pg2-z38lk item 4: the +1 line adjacency broke on intervening `system`
 		// (harness-injected) lines, which happen far more often in a main-loop
 		// transcript than a sidechain one; v2 skips over them.
@@ -420,20 +420,20 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		// pg2-z38lk items 5 and 6: idle/human-wait time flagged out of
 		// elapsed_ms_sum/mean (idle_calls/idle_ms_sum added), plus p50/max beside
 		// the existing sum/mean.
-		"cost-by-signature": 3,
+		"cost-by-signature": 4,
 		"hook-rejections":   1,
 		"first-seen":        1,
 		"last-seen":         1,
 		"coverage":          1,
 		// The Skill-tool call census: which skills are used, scoped like the lens queries.
-		"skill-calls": 1,
+		"skill-calls": 2,
 		// pg2-oisvb: the mistake census. Tier 1's eight structural detectors plus the
 		// per-signature runaway discount the ranked report applies to every finding.
 		"concentration-by-signature": 1,
 		"human-turns":                1,
 		"typed-turn-candidates":      1,
-		"interruptions":              2,
-		"denied-tool-calls":          2,
+		"interruptions":              3,
+		"denied-tool-calls":          3,
 		"undo-signatures":            1,
 		"file-churn":                 1,
 		"escaping-retries":           1,
@@ -442,7 +442,7 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		// BODY. It is an ADDITION, not a replacement — hook-rejections stays at v1 with
 		// its SQL untouched, because it is the durable reading if the structured payload
 		// ever arrives.
-		"hook-refusals-in-body": 2,
+		"hook-refusals-in-body": 3,
 		// pg2-hyn34: the fabricated-absolute-root class top-signatures cannot isolate
 		// because T-6 collapses every path to 'PATH' by design. Reads input_json
 		// directly, alongside the normalizer, rather than weakening it.

@@ -33,9 +33,9 @@ type scopeSession struct {
 func sp(s string) *string { return &s }
 
 // scopeFixtureSessions: alpha starts under /w/a and later leaves it (still in
-// scope); beta's first recorded cwd is NULL (never in scope, even though a later
-// event is under /w/a); gamma sits beside /w/a as /w/ab (a component-boundary
-// trap); delta is a worktree-style path under /w/b.
+// scope); beta's first event has a NULL cwd, so its first NON-NULL cwd (/w/a/x,
+// from the next event) decides its scope; gamma sits beside /w/a as /w/ab (a
+// component-boundary trap); delta is a worktree-style path under /w/b.
 var scopeFixtureSessions = []scopeSession{
 	{"alpha", sp("/w/a/proj"), "/elsewhere"},
 	{"beta", nil, "/w/a/x"},
@@ -143,15 +143,16 @@ func TestScopeFilterOnEverySevenQueries(t *testing.T) {
 		want []string
 	}{
 		{"none unchanged", nil, nil, all},
-		{"one prefix, first cwd in scope though later cwd leaves it", []string{"/w/a"}, nil, []string{"alpha"}},
-		{"trailing slash ignored", []string{"/w/a/"}, nil, []string{"alpha"}},
+		{"one prefix, first cwd in scope though later cwd leaves it; NULL-first session matched by its first non-NULL cwd", []string{"/w/a"}, nil, []string{"alpha", "beta"}},
+		{"trailing slash ignored", []string{"/w/a/"}, nil, []string{"alpha", "beta"}},
 		{"component boundary: /w/a is not /w/ab", []string{"/w/ab"}, nil, []string{"gamma"}},
-		{"two prefixes OR", []string{"/w/a", "/w/b"}, nil, []string{"alpha", "delta"}},
+		{"two prefixes OR", []string{"/w/a", "/w/b"}, nil, []string{"alpha", "beta", "delta"}},
 		{"worktree-style path under prefix", []string{"/w/b"}, nil, []string{"delta"}},
 		{"exact-equal prefix", []string{"/w/b/.worktrees/feat"}, nil, []string{"delta"}},
 		{"case-sensitive", []string{"/W/A"}, nil, nil},
-		{"exclude drops matching, keeps NULL-first", nil, []string{"/w/a"}, []string{"beta", "delta", "gamma"}},
-		{"include and exclude combine", []string{"/w/a", "/w/b"}, []string{"/w/b"}, []string{"alpha"}},
+		{"exclude drops matching, including the NULL-first session's first non-NULL cwd", nil, []string{"/w/a"}, []string{"delta", "gamma"}},
+		{"include and exclude combine", []string{"/w/a", "/w/b"}, []string{"/w/b"}, []string{"alpha", "beta"}},
+		{"include and exclude on the same session", []string{"/w/a"}, []string{"/w/a/x"}, []string{"alpha"}},
 	}
 	for _, name := range scopedQueryNames {
 		for _, c := range cases {
@@ -274,5 +275,184 @@ func TestWorktreeSessionCwdIsRecordedVerbatimAndMatched(t *testing.T) {
 		if len(res.Rows) != wantRows {
 			t.Errorf("prefix %s: %d rows, want %d", prefix, len(res.Rows), wantRows)
 		}
+	}
+}
+
+// firstCwdOf evaluates the first-cwd subquery alone over the fixture and returns
+// session -> first cwd for the given window.
+func firstCwdOf(t *testing.T, db *sql.DB, since, until string) map[string]string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(),
+		"SELECT session_id, cwd FROM "+firstCwdSessions,
+		sql.Named("since", since), sql.Named("until", until))
+	if err != nil {
+		t.Fatalf("first-cwd subquery: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]string{}
+	for rows.Next() {
+		var s, c string
+		if err := rows.Scan(&s, &c); err != nil {
+			t.Fatal(err)
+		}
+		out[s] = c
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// The first cwd is the first NON-NULL cwd by (seq, ts, path): beta's NULL first
+// event is skipped, and for every other session it is the first event's cwd,
+// exactly what the previous definition returned.
+func TestFirstCwdIsFirstNonNullByOrder(t *testing.T) {
+	db := buildScopeDB(t)
+	want := map[string]string{"alpha": "/w/a/proj", "beta": "/w/a/x", "gamma": "/w/ab", "delta": "/w/b/.worktrees/feat"}
+	if got := firstCwdOf(t, db, "", ""); !reflect.DeepEqual(got, want) {
+		t.Errorf("unwindowed first cwd = %v, want %v", got, want)
+	}
+}
+
+// A session whose cwd is NULL on every event has no first cwd: it never appears
+// in the subquery, so an include prefix cannot match it and an exclude prefix
+// cannot drop it.
+func TestSessionWithNoCwdAtAll(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "nocwd.db")
+	w, err := store.Open(dbPath, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := w.ExecContext(context.Background(), q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`INSERT INTO files (path, project_dir, size, mtime, lines_ok, lines_bad, ingested_at) VALUES ('/t/a.jsonl', '', 0, 0, 1, 0, 0)`)
+	mustExec(`INSERT INTO files (path, project_dir, size, mtime, lines_ok, lines_bad, ingested_at) VALUES ('/t/b.jsonl', '', 0, 0, 1, 0, 0)`)
+	// Two files of one session tie on seq 1: the earlier ts decides.
+	mustExec(`INSERT INTO events (path, seq, session_id, ts, type, is_sidechain, cwd) VALUES ('/t/a.jsonl', 1, 'tie', '2026-07-22T10:00:09.000Z', 'user', 0, '/w/late')`)
+	mustExec(`INSERT INTO events (path, seq, session_id, ts, type, is_sidechain, cwd) VALUES ('/t/b.jsonl', 1, 'tie', '2026-07-22T10:00:01.000Z', 'user', 0, '/w/early')`)
+	mustExec(`INSERT INTO events (path, seq, session_id, ts, type, is_sidechain, cwd) VALUES ('/t/a.jsonl', 2, 'none', '2026-07-22T10:00:02.000Z', 'user', 0, NULL)`)
+	mustExec(`INSERT INTO events (path, seq, session_id, ts, type, is_sidechain, cwd) VALUES ('/t/a.jsonl', 3, NULL, '2026-07-22T10:00:03.000Z', 'user', 0, '/w/orphan')`)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.OpenReadOnly(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	want := map[string]string{"tie": "/w/early"}
+	if got := firstCwdOf(t, db, "", ""); !reflect.DeepEqual(got, want) {
+		t.Errorf("first cwd = %v, want %v (no-cwd session absent, NULL session_id absent, tie by ts)", got, want)
+	}
+}
+
+// A window with no events returns no rows, with or without scope flags.
+func TestEmptyWindowReturnsNoRows(t *testing.T) {
+	db := buildScopeDB(t)
+	if got := firstCwdOf(t, db, "2030-01-01", "2030-01-02"); len(got) != 0 {
+		t.Errorf("first cwd over an empty window = %v, want none", got)
+	}
+	for _, name := range scopedQueryNames {
+		q, err := Lookup(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sc := range []struct{ in, ex []string }{{nil, nil}, {[]string{"/w/a"}, nil}, {nil, []string{"/w/a"}}, {[]string{"/w/a"}, []string{"/w/b"}}} {
+			res, err := Run(context.Background(), db, Request{Query: q, Since: "2030-01-01", Until: "2030-01-02", CwdPrefixes: sc.in, ExcludeCwdPrefixes: sc.ex})
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if name == "error-rate-by-tool" {
+				continue // an aggregate may render a zero row; covered by the call count below
+			}
+			if len(res.Rows) != 0 {
+				t.Errorf("%s over an empty window (in=%v ex=%v) returned %d rows", name, sc.in, sc.ex, len(res.Rows))
+			}
+		}
+	}
+}
+
+// The first-cwd lookup is bounded by the window: sessions with no event in it
+// are never read. The proof is twofold. Behaviour: out-of-window sessions are
+// absent from the subquery. Plan: SQLite reaches events only through indexes
+// (the window by ts, the sessions by session_id), never by a table scan.
+func TestFirstCwdLookupIsRestrictedToTheWindow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "many.db")
+	w, err := store.Open(dbPath, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := w.ExecContext(context.Background(), q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	mustExec(`INSERT INTO files (path, project_dir, size, mtime, lines_ok, lines_bad, ingested_at) VALUES ('/t/f.jsonl', '', 0, 0, 1, 0, 0)`)
+	tx, err := w.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ins, err := tx.PrepareContext(context.Background(), `INSERT INTO events (path, seq, session_id, ts, type, is_sidechain, cwd) VALUES ('/t/f.jsonl', ?, ?, ?, 'user', 0, '/w/old')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := 0
+	for i := 0; i < 300; i++ { // many sessions, all before the window
+		seq++
+		if _, err := ins.ExecContext(context.Background(), seq, fmt.Sprintf("old%03d", i), "2026-01-01T00:00:00.000Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seq++
+	if _, err := tx.ExecContext(context.Background(), `INSERT INTO events (path, seq, session_id, ts, type, is_sidechain, cwd) VALUES ('/t/f.jsonl', ?, 'live', '2026-07-22T10:00:00.000Z', 'user', 0, '/w/live')`, seq); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.OpenReadOnly(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if got := firstCwdOf(t, db, "2026-07-22", "2026-07-23"); !reflect.DeepEqual(got, map[string]string{"live": "/w/live"}) {
+		t.Errorf("windowed first cwd = %v, want only the in-window session", got)
+	}
+	if got := firstCwdOf(t, db, "", ""); len(got) != 301 {
+		t.Errorf("unwindowed first cwd has %d sessions, want 301", len(got))
+	}
+
+	rows, err := db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN SELECT session_id, cwd FROM "+firstCwdSessions,
+		sql.Named("since", "2026-07-22"), sql.Named("until", "2026-07-23"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	joined := strings.Join(plan, "\n")
+	if !strings.Contains(joined, "idx_events_ts") || !strings.Contains(joined, "idx_events_session") {
+		t.Errorf("plan does not use both events indexes:\n%s", joined)
+	}
+	// The unwindowed fallback branch (guarded by a constant-false term when a
+	// window is given) is the only place a table scan of events may appear.
+	if n := strings.Count(joined, "SCAN events"); n > 1 {
+		t.Errorf("plan scans events %d times, want at most the one guarded fallback:\n%s", n, joined)
 	}
 }
