@@ -35,7 +35,13 @@ func TestSpool_DrainReplaysWithOriginalTimeAndTrace(t *testing.T) {
 		Decision: hookio.Approve, Reason: "r",
 		Trace: []hookio.TraceEntry{{RuleName: "rule-a", Decision: hookio.Approve, Reason: "x"}},
 	}
-	if err := AppendToSpool(db, spoolInputFor("tu1"), res, &sandbox, "test"); err != nil {
+	// Stamp the spool entry an hour in the past instead of sleeping past
+	// RFC3339's 1 s resolution.
+	realClock := clock
+	clock = func() time.Time { return realClock().Add(-time.Hour) }
+	err := AppendToSpool(db, spoolInputFor("tu1"), res, &sandbox, "test")
+	clock = realClock
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got := SpoolLen(db); got != 1 {
@@ -46,7 +52,6 @@ func TestSpool_DrainReplaysWithOriginalTimeAndTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	time.Sleep(1100 * time.Millisecond) // RFC3339 has 1 s resolution
 	n, err := s.DrainSpool(db, 10)
 	if err != nil || n != 1 {
 		t.Fatalf("drain = %d, %v", n, err)
@@ -101,10 +106,13 @@ func TestSpool_DrainDedupesAndKeepsOverflow(t *testing.T) {
 }
 
 func TestRunWithin_TimesOutAndPassesErrors(t *testing.T) {
-	start := time.Now()
-	err := RunWithin(50*time.Millisecond, func() error { time.Sleep(2 * time.Second); return nil })
-	if !errors.Is(err, ErrBudgetExceeded) || time.Since(start) > time.Second {
-		t.Fatalf("err=%v elapsed=%v", err, time.Since(start))
+	// fn blocks on a channel (not a sleep) until the test releases it, so the
+	// budget timer is the only thing that can end RunWithin.
+	release := make(chan struct{})
+	defer close(release)
+	err := RunWithin(10*time.Millisecond, func() error { <-release; return nil })
+	if !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("err=%v, want ErrBudgetExceeded", err)
 	}
 	want := errors.New("boom")
 	if got := RunWithin(time.Second, func() error { return want }); got != want {

@@ -15,8 +15,12 @@ func inputHash(toolInput json.RawMessage) string {
 	return fmt.Sprintf("%x", h)
 }
 
+// clock is the time source for recorded timestamps; tests replace it to move
+// time without sleeping.
+var clock = time.Now
+
 func nowISO() string {
-	return time.Now().UTC().Format(time.RFC3339)
+	return clock().UTC().Format(time.RFC3339)
 }
 
 func hookDecisionString(d hookio.Decision) string {

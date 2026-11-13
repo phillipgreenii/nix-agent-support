@@ -5,11 +5,11 @@ package inputproc
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // TestKillProcessGroup_ExitedUnreapedGroup_IsProcessDone pins the darwin quirk
@@ -32,12 +32,22 @@ func TestKillProcessGroup_ExitedUnreapedGroup_IsProcessDone(t *testing.T) {
 	}
 	cmd := exec.CommandContext(context.Background(), truePath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// The child's stdout is the write end of a pipe the parent does not
+	// hold: reading to EOF returns exactly when the child has exited, while
+	// it stays an unreaped zombie (no Wait yet). This replaces a sleep.
+	pr, pw, perr := os.Pipe()
+	if perr != nil {
+		t.Fatalf("pipe: %v", perr)
+	}
+	defer func() { _ = pr.Close() }()
+	cmd.Stdout = pw
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	_ = pw.Close()
 	defer func() { _ = cmd.Wait() }()
 
-	time.Sleep(300 * time.Millisecond) // let it exit; it stays a zombie until Wait
+	_, _ = io.Copy(io.Discard, pr) // EOF: the child has exited; it stays a zombie until Wait
 
 	err := killProcessGroup(cmd.Process.Pid)
 	if err != nil && !errors.Is(err, os.ErrProcessDone) {
