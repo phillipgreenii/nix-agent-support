@@ -450,7 +450,9 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     that is closed and no longer live does not protect it;
   - no live process on the machine has it, or a directory inside it, as its working directory,
     whichever role, pool or handler owns that process; a process listing that cannot be read keeps
-    every worktree;
+    every worktree. Every probe that gates a removal runs fresh and is never served from a cache;
+    only the pass pre-filter listing is shared, so a sweep with N removable candidates takes
+    exactly 1 + N listings;
   - its working tree is clean, and its branch holds no commit the canonical clone's `HEAD` lacks;
     an unreadable status or commit count keeps it, and so does a git refusal. The one exception is
     an interrupted checkout: a worktree whose git admin directory holds a zero-byte index lock file

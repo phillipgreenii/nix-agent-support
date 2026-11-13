@@ -26,6 +26,16 @@ const Timeout = 30 * time.Second
 // Probe returns the working directory of every process the caller can see.
 type Probe func(ctx context.Context) ([]string, error)
 
+// Freshness rule: a probe that gates a removal (the sweep's under-lock probe,
+// the admission leaked-worktree reclaim, the leftover-directory reclaim, the
+// purge_pending retry and the dispatch worktree cleanup) MUST run fresh and
+// MUST NOT be served from a cache: a process can enter a directory at any
+// moment, and a stale listing would remove a directory that is now in use.
+// The floor is therefore 1 + N probes for N removable candidates in one sweep
+// (one pass pre-filter probe shared by all candidates, then one fresh probe per
+// candidate under its lock). Only that pre-filter probe is shared, and it is
+// already one probe per pass. Do not add a cache here.
+//
 // CWDs is the production Probe: `lsof -d cwd` over all processes. lsof exits
 // non-zero when it cannot inspect some process (another user's, a zombie) while
 // still printing the rest, so a non-empty listing is trusted whatever the exit

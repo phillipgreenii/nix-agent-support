@@ -74,6 +74,16 @@ func TestHelperHoldWorktreeLock(t *testing.T) {
 	select {} // until killed
 }
 
+// realLsofPollInterval spaces the polls of the real probe: every poll launches
+// lsof over all processes, which endpoint inspection makes expensive per launch.
+const realLsofPollInterval = 250 * time.Millisecond
+
+func TestRealLsofPollIntervalIsSlow(t *testing.T) {
+	if realLsofPollInterval < 250*time.Millisecond {
+		t.Errorf("realLsofPollInterval = %v, want >= 250ms", realLsofPollInterval)
+	}
+}
+
 // End to end with the production probe: a REAL process whose working directory is
 // the worktree (what the spared claude is), found by the real lsof. Reclaimed
 // once the process is gone.
@@ -108,7 +118,7 @@ func TestSweep_realProcessInTheWorktreeIsFoundByLsof(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Skip("lsof did not report the child's working directory (restricted environment)")
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(realLsofPollInterval)
 	}
 
 	if got := h.sweep(); got != 0 {

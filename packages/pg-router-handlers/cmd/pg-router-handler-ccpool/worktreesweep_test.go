@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -569,6 +570,61 @@ func TestSweep_processAppearingBeforeTheLockKeepsTheWorktree(t *testing.T) {
 		t.Errorf("probe called %d times, want 2 (pre-filter and under the lock)", calls)
 	}
 	h.wantKept(path, "zr-k")
+}
+
+// Freshness floor: a sweep with N removable candidates takes exactly 1 + N
+// probes (one pre-filter for the pass, one fresh probe per candidate under its
+// lock). A probe served from a cache under the lock would drop the count.
+func TestSweep_probeCountIsOnePlusNRemovableCandidates(t *testing.T) {
+	for _, n := range []int{1, 3} {
+		t.Run(fmt.Sprintf("N=%d", n), func(t *testing.T) {
+			h := newSweepHarness(t)
+			var paths []string
+			for i := 0; i < n; i++ {
+				paths = append(paths, h.leak(fmt.Sprintf("zr-k%d", i)))
+			}
+			calls := 0
+			h.env.cwds = func(context.Context) ([]string, error) {
+				calls++
+				return []string{"/"}, nil
+			}
+			if got := h.sweep(); got != n {
+				t.Fatalf("removed %d, want %d", got, n)
+			}
+			if calls != 1+n {
+				t.Errorf("probe called %d times, want %d (1 pre-filter + 1 fresh per candidate)", calls, 1+n)
+			}
+			for _, p := range paths {
+				if h.exists(p) {
+					t.Errorf("%s should be reclaimed", p)
+				}
+			}
+		})
+	}
+}
+
+// A process enters ONE of several candidates after the pre-filter probe: the
+// fresh under-lock probe keeps exactly that directory and the others go.
+func TestSweep_processEnteringOneOfSeveralCandidatesAfterPrefilterKeepsOnlyThatOne(t *testing.T) {
+	h := newSweepHarness(t)
+	a := h.leak("zr-a")
+	b := h.leak("zr-b")
+	c := h.leak("zr-c")
+	calls := 0
+	h.env.cwds = func(context.Context) ([]string, error) {
+		calls++
+		if calls == 1 {
+			return []string{"/"}, nil
+		}
+		return []string{b}, nil
+	}
+	if got := h.sweep(); got != 2 {
+		t.Fatalf("removed %d, want 2", got)
+	}
+	if h.exists(a) || h.exists(c) {
+		t.Errorf("unused worktrees must be reclaimed: a exists=%v c exists=%v", h.exists(a), h.exists(c))
+	}
+	h.wantKept(b, "zr-b")
 }
 
 func TestParseLsofCWDs(t *testing.T) {
