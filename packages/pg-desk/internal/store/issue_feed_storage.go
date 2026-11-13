@@ -58,6 +58,12 @@ var ingestFailedAddedColumns = []struct{ name, decl string }{
 // early for every version at or above NewSchemaVersion). It is idempotent,
 // and tolerates a concurrent opener that added a column first. A file with
 // no entity table at all (nothing migrated) is left alone.
+// entityFlowIndexDDL is the covering index behind ListEntityFlow: every column
+// that query returns, so SQLite answers it from the index alone and never reads
+// the entity rows (whose facts dominate the table).
+const entityFlowIndexDDL = `CREATE INDEX IF NOT EXISTS entity_flow ON entity(
+  entity_type, entity_id, repo, active, watched, backend, hydrated_at, first_seen_at, read_attempt_at, read_ok_at)`
+
 func ensureIssueFeedStorage(s *Store) error {
 	have, err := s.tableColumns("entity")
 	if err != nil {
@@ -78,6 +84,9 @@ func ensureIssueFeedStorage(s *Store) error {
 				return fmt.Errorf("add entity.%s: %w", col.name, err)
 			}
 		}
+	}
+	if _, err := s.sql.ExecContext(context.Background(), entityFlowIndexDDL); err != nil {
+		return fmt.Errorf("create entity_flow index: %w", err)
 	}
 	if _, err := s.sql.ExecContext(context.Background(), ingestFailedDDL); err != nil {
 		return fmt.Errorf("create ingest_failed: %w", err)

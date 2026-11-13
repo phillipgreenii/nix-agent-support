@@ -77,7 +77,7 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 	if version < store.NewSchemaVersion {
 		return Flow{}, nil
 	}
-	entities, err := st.ListEntitiesNoFacts()
+	entities, err := st.ListEntityFlow()
 	if err != nil {
 		return Flow{}, err
 	}
@@ -137,11 +137,13 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 		return a.Seq < b.Seq
 	})
 	maxSeq := map[string]int64{}
+	kinds, err := st.ChangeKindCountsAll()
+	if err != nil {
+		return Flow{}, err
+	}
 	for _, t := range types {
-		counts, top, err := st.ChangeKindCounts(t)
-		if err != nil {
-			return Flow{}, err
-		}
+		ks := kinds[t]
+		counts, top := ks.Counts, ks.MaxSeq
 		maxSeq[t] = top
 
 		stats, err := ReadHydrationStats(st, t)

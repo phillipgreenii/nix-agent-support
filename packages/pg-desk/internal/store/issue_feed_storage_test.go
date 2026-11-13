@@ -187,6 +187,7 @@ func legacyCutoverStore(t *testing.T) (string, int) {
 	}
 	for _, stmt := range []string{
 		`DROP TABLE ingest_failed`,
+		`DROP INDEX IF EXISTS entity_flow`,
 		`ALTER TABLE entity DROP COLUMN backend`,
 		`ALTER TABLE entity DROP COLUMN watched`,
 		`ALTER TABLE entity DROP COLUMN read_attempt_at`,

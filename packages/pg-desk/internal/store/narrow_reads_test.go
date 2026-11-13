@@ -2,26 +2,59 @@ package store
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
 
-func TestListEntitiesNoFactsMatchesListEntitiesWithoutFacts(t *testing.T) {
+func TestListEntityFlowMatchesListEntitiesFlowColumns(t *testing.T) {
 	st := OpenForTest(t)
 	st.SeedLiveSizeForTest(t, 40, 200, 10)
 	full, err := st.ListEntities()
 	if err != nil {
 		t.Fatal(err)
 	}
-	narrow, err := st.ListEntitiesNoFacts()
+	flow, err := st.ListEntityFlow()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range full {
-		full[i].Facts = ""
+	if len(flow) != len(full) {
+		t.Fatalf("%d flow rows, %d entities", len(flow), len(full))
 	}
-	if !reflect.DeepEqual(full, narrow) {
-		t.Fatalf("narrow rows differ from full rows with Facts blanked")
+	byID := map[string]Entity{}
+	for _, e := range full {
+		byID[e.Repo+"|"+e.EntityType+"|"+e.EntityID] = e
+	}
+	for _, f := range flow {
+		e := byID[f.Repo+"|"+f.EntityType+"|"+f.EntityID]
+		keep := Entity{
+			Repo: e.Repo, EntityType: e.EntityType, EntityID: e.EntityID, HydratedAt: e.HydratedAt, Inactive: e.Inactive,
+			FirstSeenAt: e.FirstSeenAt, Backend: e.Backend, Watched: e.Watched, ReadAttemptAt: e.ReadAttemptAt, ReadOKAt: e.ReadOKAt,
+		}
+		if !reflect.DeepEqual(f, keep) {
+			t.Fatalf("flow row %+v, want %+v", f, keep)
+		}
+	}
+}
+
+func TestListEntityFlowIsServedFromTheCoveringIndex(t *testing.T) {
+	st := OpenForTest(t)
+	rows, err := st.sql.Query(`EXPLAIN QUERY PLAN SELECT repo, entity_type, entity_id, hydrated_at, active, first_seen_at, backend, watched, read_attempt_at, read_ok_at FROM entity ORDER BY entity_type, entity_id, repo`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan string
+	for rows.Next() {
+		var a, b, c int
+		var d string
+		if err := rows.Scan(&a, &b, &c, &d); err != nil {
+			t.Fatal(err)
+		}
+		plan += d + "\n"
+	}
+	if !strings.Contains(plan, "COVERING INDEX entity_flow") {
+		t.Fatalf("plan does not use the covering index:\n%s", plan)
 	}
 }
 
@@ -44,10 +77,11 @@ func TestChangeKindCountsMatchesListChangesAfter(t *testing.T) {
 				want[key{k, r.Origin}]++
 			}
 		}
-		got, gotTop, err := st.ChangeKindCounts(typ)
+		all, err := st.ChangeKindCountsAll()
 		if err != nil {
 			t.Fatal(err)
 		}
+		got, gotTop := all[typ].Counts, all[typ].MaxSeq
 		if gotTop != top {
 			t.Fatalf("%s: max seq %d, want %d", typ, gotTop, top)
 		}
@@ -105,13 +139,11 @@ func TestLiveSizeNarrowReadsMoveNoFactsAndAreFast(t *testing.T) {
 	t.Logf("fixture built in %v", time.Since(start))
 	st, cnt := base.WithCounterForTest(t)
 	start = time.Now()
-	if _, err := st.ListEntitiesNoFacts(); err != nil {
+	if _, err := st.ListEntityFlow(); err != nil {
 		t.Fatal(err)
 	}
-	for _, typ := range []string{"issue", "pr", "thread"} {
-		if _, _, err := st.ChangeKindCounts(typ); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := st.ChangeKindCountsAll(); err != nil {
+		t.Fatal(err)
 	}
 	t.Logf("narrow reads took %v, %d bytes", time.Since(start), cnt.Bytes())
 	if cnt.Bytes() > 2<<20 {

@@ -45,7 +45,7 @@ type WatchedEntitiesFunc func() ([]WatchedEntityCount, error)
 func WatchedEntitiesFromStore(st *store.Store) WatchedEntitiesFunc {
 	type key struct{ typ, backend string }
 	return func() ([]WatchedEntityCount, error) {
-		all, err := st.ListEntitiesNoFacts()
+		all, err := st.ListEntityFlow()
 		if err != nil {
 			return nil, err
 		}

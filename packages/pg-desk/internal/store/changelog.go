@@ -373,44 +373,52 @@ type ChangeKindCount struct {
 	Count  int64
 }
 
-// ChangeKindCounts aggregates, inside SQLite, the change_log records of
-// entityType by (kind, origin) and returns the highest seq of the type (0 when
-// it has no record). It is ListChangesAfter(entityType, 0, 0) reduced to what
-// the change-flow observation needs, without loading every row. The counts are
-// sorted by (kind, origin).
-func (s *Store) ChangeKindCounts(entityType string) (counts []ChangeKindCount, maxSeq int64, err error) {
+// ChangeKindStats is one entity type's change_log summary: its records counted
+// by (kind, origin), sorted by (kind, origin), and its highest seq.
+type ChangeKindStats struct {
+	Counts []ChangeKindCount
+	MaxSeq int64
+}
+
+// ChangeKindCountsAll aggregates, inside SQLite and in ONE pass over the log,
+// the change_log records of every entity type by (kind, origin) and the highest
+// seq of each type. It is ListChangesAfter(type, 0, 0) for every type reduced to
+// what the change-flow observation needs, without loading a single row. A type
+// with no record is absent from the map.
+func (s *Store) ChangeKindCountsAll() (map[string]ChangeKindStats, error) {
 	if err := s.RequireNewSchema(); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
 		context.Background(),
-		`SELECT j.value, c.origin, COUNT(*)
+		`SELECT c.entity_type, j.value, c.origin, COUNT(*), MAX(c.seq)
 		 FROM change_log c, json_each(c.kinds) j
-		 WHERE c.entity_type = ?
-		 GROUP BY j.value, c.origin
-		 ORDER BY j.value, c.origin`,
-		entityType,
+		 GROUP BY c.entity_type, j.value, c.origin
+		 ORDER BY c.entity_type, j.value, c.origin`,
 	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("store: count change_log kinds: %w", err)
+		return nil, fmt.Errorf("store: count change_log kinds: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	out := map[string]ChangeKindStats{}
 	for rows.Next() {
+		var typ string
 		var k ChangeKindCount
-		if err := rows.Scan(&k.Kind, &k.Origin, &k.Count); err != nil {
-			return nil, 0, fmt.Errorf("store: scan change_log kind count: %w", err)
+		var top int64
+		if err := rows.Scan(&typ, &k.Kind, &k.Origin, &k.Count, &top); err != nil {
+			return nil, fmt.Errorf("store: scan change_log kind count: %w", err)
 		}
-		counts = append(counts, k)
+		st := out[typ]
+		st.Counts = append(st.Counts, k)
+		if top > st.MaxSeq {
+			st.MaxSeq = top
+		}
+		out[typ] = st
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("store: count change_log kinds: %w", err)
+		return nil, fmt.Errorf("store: count change_log kinds: %w", err)
 	}
-	var top sql.NullInt64
-	if err := s.sql.QueryRowContext(context.Background(),
-		`SELECT MAX(seq) FROM change_log WHERE entity_type = ?`, entityType).Scan(&top); err != nil {
-		return nil, 0, fmt.Errorf("store: max change_log seq: %w", err)
-	}
-	return counts, top.Int64, nil
+	return out, nil
 }
 
 // ListEntityHistory returns one entity's change_log records, newest first,

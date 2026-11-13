@@ -68,6 +68,8 @@ var (
 	// scrape, for the poll interval of the sweep sizing bound behind the
 	// pg_desk_sweep_bound_violated metric (pg-desk does not own the interval).
 	serveRouterConfig string
+	// serveSnapshotInterval is the background /metrics snapshot period.
+	serveSnapshotInterval time.Duration
 )
 
 // serveCmd implements `pg-desk serve`: the soak-port-only HTTP server
@@ -93,6 +95,7 @@ var serveCmd = &cobra.Command{
 }
 
 func init() {
+	serveCmd.Flags().DurationVar(&serveSnapshotInterval, "metrics-snapshot-interval", 30*time.Second, "how often the background /metrics snapshot is rebuilt (30s to 60s is the intended range); /metrics only serves the last snapshot")
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "", "listen address (host:port); overrides serve.addr from config")
 	serveCmd.Flags().StringVar(&servePort, "port", "", "listen port only, binding 127.0.0.1 (a convenience alias for --addr; mutually exclusive with it)")
 	serveCmd.Flags().StringVar(&serveRouterConfig, "router-config", "", "path to the pg-router config (read as a file on every scrape; env PG_DESK_ROUTER_CONFIG when unset): supplies the poll interval for the pg_desk_sweep_bound_violated metric. Without it the metric reports no verdict")
@@ -175,7 +178,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if routerPath == "" {
 		routerPath = os.Getenv("PG_DESK_ROUTER_CONFIG")
 	}
-	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()))
+	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval))
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}

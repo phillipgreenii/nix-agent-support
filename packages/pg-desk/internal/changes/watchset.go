@@ -110,7 +110,7 @@ func OwningEntityIDs(st *store.Store, entityType string, owning map[string]bool)
 	if len(owning) == 0 {
 		return watched, all
 	}
-	rows, err := st.ListEntitiesNoFacts()
+	rows, err := st.ListEntityFlow()
 	if err != nil {
 		return watched, all
 	}

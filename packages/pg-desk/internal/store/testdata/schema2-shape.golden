@@ -48,6 +48,7 @@ table entity
   col stale INTEGER notnull=1 default=0 pk=0
   col version INTEGER notnull=1 default=0 pk=0
   col watched INTEGER notnull=0 default=<none> pk=0
+  index entity_flow unique=0 origin=c (entity_type,entity_id,repo,active,watched,backend,hydrated_at,first_seen_at,read_attempt_at,read_ok_at)
   index <auto> unique=1 origin=pk (repo,entity_type,entity_id)
 
 table focus_draft

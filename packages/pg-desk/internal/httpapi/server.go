@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/attention"
@@ -430,6 +431,8 @@ type PollIntervalFunc func(entityType string) (interval time.Duration, ok bool)
 type options struct {
 	pollInterval PollIntervalFunc
 	snapshotCtx  context.Context
+	// snapshotEvery overrides snapshotInterval when positive.
+	snapshotEvery time.Duration
 }
 
 // Option customises NewHandler.
@@ -452,6 +455,13 @@ func WithMetricsSnapshot(ctx context.Context) Option {
 	return func(o *options) { o.snapshotCtx = ctx }
 }
 
+// WithMetricsSnapshotInterval sets how often the background snapshot is
+// rebuilt (default snapshotInterval, 30 s). Only meaningful with
+// WithMetricsSnapshot; a non-positive value keeps the default.
+func WithMetricsSnapshotInterval(d time.Duration) Option {
+	return func(o *options) { o.snapshotEvery = d }
+}
+
 // NewHandler returns the pg-desk serve HTTP handler: GET /api/v1/dashboard
 // and GET /metrics, both gated behind the same 503-until-first-interpretation
 // check. It returns an error only if constructing the OTel metrics catalog
@@ -463,7 +473,7 @@ func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handl
 	for _, opt := range opts {
 		opt(&o)
 	}
-	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval, o.snapshotCtx)
+	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval, o.snapshotCtx, o.snapshotEvery)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: new handler: %w", err)
 	}
@@ -476,16 +486,24 @@ func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handl
 // readyGate implements the Binding decisions section's "503 for every route
 // until the interpretation table has ≥1 row" — it wraps every route this
 // package registers, including /metrics.
+//
+// Once the table has been seen non-empty the answer is remembered for the life
+// of the handler (a store does not go back to having no interpretation), so a
+// /metrics scrape after that point performs no database query at all.
 func readyGate(st *store.Store, next http.Handler) http.Handler {
+	var sawReady atomic.Bool
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ready, err := st.HasAnyInterpretation()
-		if err != nil {
-			http.Error(w, `{"error":"store read failed"}`, http.StatusInternalServerError)
-			return
-		}
-		if !ready {
-			http.Error(w, `{"error":"no interpretation yet"}`, http.StatusServiceUnavailable)
-			return
+		if !sawReady.Load() {
+			ready, err := st.HasAnyInterpretation()
+			if err != nil {
+				http.Error(w, `{"error":"store read failed"}`, http.StatusInternalServerError)
+				return
+			}
+			if !ready {
+				http.Error(w, `{"error":"no interpretation yet"}`, http.StatusServiceUnavailable)
+				return
+			}
+			sawReady.Store(true)
 		}
 		next.ServeHTTP(w, r)
 	})

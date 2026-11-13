@@ -164,47 +164,52 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	return out, nil
 }
 
-// ListEntitiesNoFacts is ListEntities without the facts column: every other
-// field is populated, Facts is always "". The facts column is nearly all of
-// the entity table's bytes (about 100 MB of a 103 MB table on a live store,
-// pull-request rows holding most of it), so a reader that never looks at the
-// facts (the metrics snapshot, status, doctor's change-flow block, the orphan
-// and watch-set derivations) uses this and reads none of them. The rows come
-// in the same order as ListEntities.
-func (s *Store) ListEntitiesNoFacts() ([]Entity, error) {
+// ListEntityFlow returns the entity table's flow columns only: Repo,
+// EntityType, EntityID, Inactive, Watched, Backend, HydratedAt, FirstSeenAt,
+// ReadAttemptAt and ReadOKAt. Every other field (Facts, AsOf, Stale,
+// ContentHash, HeadSHA, Version, ListFP) is left zero.
+//
+// It is the reader of the change-flow observation, the watched and orphan
+// derivations and the metrics snapshot, none of which looks at the facts. The
+// facts column is nearly all of the table's bytes (about 100 MB of 103 MB on a
+// live store), and a row's later columns sit behind its facts, so even a
+// SELECT that skips the column walks every facts overflow chain. This query
+// therefore reads the covering index entity_flow (created by
+// ensureIssueFeedStorage) and never touches the table rows. On a store opened
+// without that index it still answers, from the table. Rows come in index
+// order: (entity_type, entity_id, repo).
+func (s *Store) ListEntityFlow() ([]Entity, error) {
 	feedCols, err := s.issueFeedSelect()
 	if err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
 		context.Background(),
-		`SELECT repo, entity_type, entity_id, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, `+feedCols+`
-		 FROM entity ORDER BY repo, entity_type, entity_id`,
+		`SELECT repo, entity_type, entity_id, hydrated_at, active, first_seen_at, `+feedCols+`
+		 FROM entity ORDER BY entity_type, entity_id, repo`,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("store: list entities (no facts): %w", err)
+		return nil, fmt.Errorf("store: list entity flow: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	var out []Entity
 	for rows.Next() {
 		var e Entity
-		var headSHA, hydratedAt, listFP, firstSeenAt, backend, readAttempt, readOK sql.NullString
+		var hydratedAt, firstSeenAt, backend, readAttempt, readOK sql.NullString
 		var watched sql.NullInt64
 		var active int
-		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched, &readAttempt, &readOK); err != nil {
-			return nil, fmt.Errorf("store: scan entity row (no facts): %w", err)
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &hydratedAt, &active, &firstSeenAt, &backend, &watched, &readAttempt, &readOK); err != nil {
+			return nil, fmt.Errorf("store: scan entity flow row: %w", err)
 		}
-		e.HeadSHA = headSHA.String
 		e.HydratedAt = hydratedAt.String
 		e.Inactive = active == 0
-		e.ListFP = listFP.String
 		e.FirstSeenAt = firstSeenAt.String
 		applyIssueFeedColumns(&e, backend, watched, readAttempt, readOK)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list entities (no facts): %w", err)
+		return nil, fmt.Errorf("store: list entity flow: %w", err)
 	}
 	return out, nil
 }

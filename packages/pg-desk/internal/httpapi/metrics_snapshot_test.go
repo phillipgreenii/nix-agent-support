@@ -116,7 +116,7 @@ func TestSnapshotGatherer_FailingRefreshKeepsSnapshotAndShowsAge(t *testing.T) {
 		if v, _ := gaugeVal(t, g, "pg_desk_metrics_snapshot_age_seconds"); v != 46 {
 			t.Fatalf("age=%v want 46", v)
 		}
-		if v, _ := gaugeVal(t, g, "pg_desk_metrics_snapshot_refresh_errors_total"); v != 3 {
+		if v, _ := gaugeVal(t, g, "pg_desk_metrics_snapshot_errors_total"); v != 3 {
 			t.Fatalf("errors=%v want 3", v)
 		}
 		cancel()
@@ -158,4 +158,44 @@ func TestNewHandler_WithMetricsSnapshotServesCachedCatalog(t *testing.T) {
 	if !strings.Contains(body, "pg_desk_metrics_snapshot_age_seconds") {
 		t.Fatalf("missing age gauge:\n%s", body)
 	}
+}
+
+func TestSnapshotGatherer_AgeRisesOnFailureAndResetsAfterSuccess(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &fakeSource{}
+		g := newSnapshotGatherer(src, 30*time.Second, 5*time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		g.Start(ctx)
+		synctest.Wait()
+		src.fail.Store(true)
+		time.Sleep(61 * time.Second) // ticks at 30 and 60 fail
+		synctest.Wait()
+		if v, _ := gaugeVal(t, g, "pg_desk_metrics_snapshot_age_seconds"); v != 61 {
+			t.Fatalf("age=%v want 61 while failing", v)
+		}
+		if v, _ := gaugeVal(t, g, "pg_desk_metrics_snapshot_errors_total"); v != 2 {
+			t.Fatalf("errors=%v want 2", v)
+		}
+		src.fail.Store(false)
+		time.Sleep(30 * time.Second) // tick at 90 succeeds
+		synctest.Wait()
+		if v, _ := gaugeVal(t, g, "pg_desk_metrics_snapshot_age_seconds"); v != 1 {
+			t.Fatalf("age=%v want 1 after a good build", v)
+		}
+		if v, _ := gaugeVal(t, g, "pg_desk_test_gen"); v != 4 {
+			t.Fatalf("gen=%v want the fresh snapshot (4)", v)
+		}
+		fams, _ := g.Gather()
+		found := false
+		for _, f := range fams {
+			if f.GetName() == "pg_desk_metrics_snapshot_compute_duration_seconds" && f.GetMetric()[0].GetHistogram().GetSampleCount() == 4 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("compute-duration histogram missing or not observing every build")
+		}
+		cancel()
+		synctest.Wait()
+	})
 }

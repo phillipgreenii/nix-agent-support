@@ -33,7 +33,31 @@ import (
 // fresh per test (and once per real serve invocation), and a shared
 // global registry would make repeated construction within one test binary
 // collide with "duplicate metrics collector registration attempted".
-func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, snapshotCtx context.Context) (http.Handler, error) {
+func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, snapshotCtx context.Context, every time.Duration) (http.Handler, error) {
+	registry, err := newMetricsRegistry(st, cfg, pollInterval)
+	if err != nil {
+		return nil, err
+	}
+	var gatherer prometheus.Gatherer = registry
+	if snapshotCtx != nil {
+		if every <= 0 {
+			every = snapshotInterval
+		}
+		sg := newSnapshotGatherer(registry, every, snapshotFirstWait)
+		sg.Start(snapshotCtx)
+		gatherer = sg
+	}
+	return scrapeHandler(gatherer, scrapeTimeout), nil
+}
+
+// newMetricsRegistry builds the live catalog: every collect of the returned
+// registry reads the store. The scrape handler never collects it directly when
+// a snapshot is configured; the snapshotter does, off the request path.
+func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, opts ...registryOption) (*prometheus.Registry, error) {
+	var ro registryOptions
+	for _, o := range opts {
+		o(&ro)
+	}
 	registry := prometheus.NewRegistry()
 	// WithoutScopeInfo: without it every catalog member would carry extra
 	// otel_scope_name/otel_scope_version labels and the exporter would add
@@ -115,8 +139,10 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	focusFn := metrics.CachedFocus(func() (focus.Health, error) {
 		return focus.ComputeHealth(st, cfg, nowUTC())
 	}, focusHealthTTL)
-	if err := metrics.RegisterFocus(mp, focusFn); err != nil {
-		return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
+	if !ro.noFocus {
+		if err := metrics.RegisterFocus(mp, focusFn); err != nil {
+			return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
+		}
 	}
 
 	// The PR lane families (PR lane refactor, P0b): the configured lane mode
@@ -189,13 +215,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		return nil, fmt.Errorf("httpapi: register pr anchor metrics: %w", err)
 	}
 
-	var gatherer prometheus.Gatherer = registry
-	if snapshotCtx != nil {
-		sg := newSnapshotGatherer(registry, snapshotInterval, snapshotFirstWait)
-		sg.Start(snapshotCtx)
-		gatherer = sg
-	}
-	return scrapeHandler(gatherer, scrapeTimeout), nil
+	return registry, nil
 }
 
 // sourceAges projects the payload's sources[] to the gauge's input: a
@@ -254,3 +274,12 @@ func scrapeHandler(reg prometheus.Gatherer, timeout time.Duration) http.Handler 
 		Timeout:        timeout,
 	})
 }
+
+// registryOptions are test seams of newMetricsRegistry.
+type registryOptions struct{ noFocus bool }
+
+type registryOption func(*registryOptions)
+
+// withoutFocus leaves the focus families out of the catalog (tests that measure
+// the rest of the compute).
+func withoutFocus(o *registryOptions) { o.noFocus = true }

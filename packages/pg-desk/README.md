@@ -5,13 +5,21 @@ that serves the triage payload and `/metrics`.
 
 ## /metrics snapshot
 
-`/metrics` does not collect on a scrape. `pg-desk serve` rebuilds the whole catalog in the background
-every 15 seconds and the handler serves the last snapshot, so scrape latency does not depend on host
-load. Staleness is visible in `pg_desk_metrics_snapshot_age_seconds` (seconds since the served
-snapshot was built; it grows while rebuilds are slow or failing, and the last good snapshot keeps
-being served), `pg_desk_metrics_snapshot_refresh_duration_seconds` and
-`pg_desk_metrics_snapshot_refresh_errors_total`. A scrape arriving before the first snapshot exists
-waits at most 5 seconds, then returns only the snapshot-state families (no age series yet).
+`/metrics` does not collect, and performs no database query, on a scrape. `pg-desk serve` rebuilds the
+whole catalog in a background goroutine every 30 seconds (`--metrics-snapshot-interval`, intended range
+30 to 60 seconds), one build at a time, and publishes the result through an atomic pointer; the handler
+serves the last snapshot, so scrape latency does not depend on host load or on the poller and writers
+sharing the database. A failed build keeps the last good snapshot and lets its age grow. Staleness is
+visible in `pg_desk_metrics_snapshot_age_seconds` (seconds since the served snapshot was built),
+`pg_desk_metrics_snapshot_compute_duration_seconds` (a histogram of build times) and
+`pg_desk_metrics_snapshot_errors_total`. A scrape arriving before the first snapshot exists waits at
+most 5 seconds, then returns only the snapshot-state families (no age series yet).
+
+The build reads narrow data: `Store.ListEntityFlow` (the flow columns, served from the covering index
+`entity_flow`, never the facts column, which is nearly all of the table), `Store.ChangeKindCountsAll`
+(one SQL aggregate instead of loading every `change_log` row) and `Store.ListHiddenWIP` (one query for
+all hidden and wip annotations). `status` and `doctor` read the same `changes.Observe`, so they report the
+same values.
 
 ## Profiling
 

@@ -27,7 +27,7 @@ import (
 // instance, and that are absent from every change_flow.watchset.issue.<query>
 // set. It only reads the store; the order is the store's.
 func OrphanEntities(st *store.Store, cfg *config.Config) ([]store.Entity, error) {
-	all, err := st.ListEntitiesNoFacts()
+	all, err := st.ListEntityFlow()
 	if err != nil {
 		return nil, fmt.Errorf("changes: list entities: %w", err)
 	}
