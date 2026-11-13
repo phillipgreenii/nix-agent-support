@@ -1,6 +1,9 @@
 {
   "bundles": {
-    "Safety": ["pg-claude-extended-tool-approver"],
+    "Safety": [
+      "pg-claude-extended-tool-approver",
+      "pg-claude-extended-tool-approver-recording"
+    ],
     "Tracking": ["pg-claude-tool-tracker"],
     "Control": ["pg-claude-control"],
     "Display": ["pgd"],
