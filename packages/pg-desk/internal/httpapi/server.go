@@ -23,6 +23,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -423,6 +424,7 @@ type PollIntervalFunc func(entityType string) (interval time.Duration, ok bool)
 
 type options struct {
 	pollInterval PollIntervalFunc
+	snapshotCtx  context.Context
 }
 
 // Option customises NewHandler.
@@ -436,6 +438,15 @@ func WithPollInterval(fn PollIntervalFunc) Option {
 	return func(o *options) { o.pollInterval = fn }
 }
 
+// WithMetricsSnapshot makes /metrics serve a cached snapshot of the whole
+// catalog, rebuilt in the background every snapshotInterval until ctx ends,
+// instead of collecting on every scrape. Scrape latency then no longer depends
+// on host load; a snapshot that is too old shows in
+// pg_desk_metrics_snapshot_age_seconds. Without it every scrape collects live.
+func WithMetricsSnapshot(ctx context.Context) Option {
+	return func(o *options) { o.snapshotCtx = ctx }
+}
+
 // NewHandler returns the pg-desk serve HTTP handler: GET /api/v1/dashboard
 // and GET /metrics, both gated behind the same 503-until-first-interpretation
 // check. It returns an error only if constructing the OTel metrics catalog
@@ -447,7 +458,7 @@ func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handl
 	for _, opt := range opts {
 		opt(&o)
 	}
-	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval)
+	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval, o.snapshotCtx)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: new handler: %w", err)
 	}

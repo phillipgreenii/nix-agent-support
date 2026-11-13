@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -32,7 +33,7 @@ import (
 // fresh per test (and once per real serve invocation), and a shared
 // global registry would make repeated construction within one test binary
 // collide with "duplicate metrics collector registration attempted".
-func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc) (http.Handler, error) {
+func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, snapshotCtx context.Context) (http.Handler, error) {
 	registry := prometheus.NewRegistry()
 	// WithoutScopeInfo: without it every catalog member would carry extra
 	// otel_scope_name/otel_scope_version labels and the exporter would add
@@ -188,7 +189,13 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		return nil, fmt.Errorf("httpapi: register pr anchor metrics: %w", err)
 	}
 
-	return scrapeHandler(registry, scrapeTimeout), nil
+	var gatherer prometheus.Gatherer = registry
+	if snapshotCtx != nil {
+		sg := newSnapshotGatherer(registry, snapshotInterval, snapshotFirstWait)
+		sg.Start(snapshotCtx)
+		gatherer = sg
+	}
+	return scrapeHandler(gatherer, scrapeTimeout), nil
 }
 
 // sourceAges projects the payload's sources[] to the gauge's input: a

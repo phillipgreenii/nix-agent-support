@@ -175,7 +175,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if routerPath == "" {
 		routerPath = os.Getenv("PG_DESK_ROUTER_CONFIG")
 	}
-	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)))
+	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()))
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}

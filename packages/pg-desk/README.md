@@ -3,6 +3,16 @@
 `pg-desk serve` is the long-running pg-desk daemon: an HTTP server (a launchd user agent on darwin)
 that serves the triage payload and `/metrics`.
 
+## /metrics snapshot
+
+`/metrics` does not collect on a scrape. `pg-desk serve` rebuilds the whole catalog in the background
+every 15 seconds and the handler serves the last snapshot, so scrape latency does not depend on host
+load. Staleness is visible in `pg_desk_metrics_snapshot_age_seconds` (seconds since the served
+snapshot was built; it grows while rebuilds are slow or failing, and the last good snapshot keeps
+being served), `pg_desk_metrics_snapshot_refresh_duration_seconds` and
+`pg_desk_metrics_snapshot_refresh_errors_total`. A scrape arriving before the first snapshot exists
+waits at most 5 seconds, then returns only the snapshot-state families (no age series yet).
+
 ## Profiling
 
 `pg-desk serve` (and no other subcommand) can expose Go's runtime profiler (`net/http/pprof`) for
