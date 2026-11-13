@@ -281,7 +281,8 @@ Home-Manager (`home/programs/pa-monitor/default.nix`; no new import in `home/def
   `cfg.enable` when `swiftbar.enable` is set (the wrapper bakes in `${cfg.package}/bin/pa-monitor`).
 - `home.file."${cfg.swiftbar.pluginDir}/pa-monitor.30s.sh".source` = the generated wrapper (an
   executable `writeTextFile` store file).
-- Generated wrapper: `#!/usr/bin/env bash`; one `# <xbar.*>` / `# <swiftbar.*>` tag per line (title,
+- Generated wrapper: `#!${pkgs.bash}/bin/bash` (the store bash, so SwiftBar does not launch
+  `/usr/bin/env` first); one `# <xbar.*>` / `# <swiftbar.*>` tag per line (title,
   version, author = the operator's own identity only, desc, dependencies, hide Run-in-Terminal /
   Disable / SwiftBar); PATH prelude
   (`/etc/profiles/per-user/$(id -un)/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin:$PATH`);

@@ -45,7 +45,7 @@ let
     }:
     let
       text = ''
-        #!/usr/bin/env bash
+        #!${pkgs.bash}/bin/bash
         ${lib.concatMapStringsSep "\n" (t: "# <${t}>${tags.${t}}</${t}>") tagOrder}
         # SwiftBar runs plugins with a minimal environment; put the per-user, the
         # nix-profile and the system bins ahead of whatever it provides.
@@ -76,6 +76,11 @@ let
     { script, paMonitor }:
     let
       wrapper = mkPluginWrapper { inherit script paMonitor; };
+      stub = pkgs.writeShellScriptBin "pa-monitor-swiftbar" "echo stub-output";
+      stubbed = mkPluginWrapper {
+        script = stub;
+        paMonitor = stub;
+      };
     in
     pkgs.runCommand "test-pa-monitor-swiftbar-plugin" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
       w=${wrapper}
@@ -83,7 +88,18 @@ let
 
       [ -f "$w" ] || fail "wrapper is not a regular file"
       [ -x "$w" ] || fail "wrapper store file lacks the executable bit"
-      [ "$(head -n1 "$w")" = '#!/usr/bin/env bash' ] || fail "bad shebang"
+      # Pin the exact store-bash line (no prefix match), so SwiftBar does not
+      # launch /usr/bin/env before bash on every run.
+      check_shebang() { [ "$(head -n1 "$1")" = '#!${pkgs.bash}/bin/bash' ]; }
+      check_shebang "$w" || fail "bad shebang: $(head -n1 "$w")"
+      # Negative control: the old env form must be rejected by the same check.
+      printf '#!/usr/bin/env bash\n' > old-shebang
+      if check_shebang old-shebang; then fail "shebang check accepted #!/usr/bin/env bash"; fi
+
+      # The wrapper still runs: execute a stub-backed wrapper under env -i and
+      # see the stub's output (the behaviour under test is the wrapper's own
+      # exec and PATH handling).
+      [ "$(env -i ${stubbed})" = stub-output ] || fail "wrapper did not exec the stub under env -i"
 
       ${lib.concatMapStringsSep "\n" (t: ''
         v=$(sed -n 's|^# <${t}>\(.*\)</${t}>$|\1|p' "$w")
