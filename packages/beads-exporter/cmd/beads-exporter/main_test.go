@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 const queuesPath = "../../../../claude-marketplace/pb/queues.json"
@@ -57,24 +59,24 @@ func runCmd(args ...string) (int, string, string) {
 func TestCheckConfigAcceptsAValidFileWithoutTouchingTheFilesystem(t *testing.T) {
 	// Every path in the file is nonexistent: the check must be schema-only.
 	code, out, errs := runCmd("-check-config", writeConfig(t, nil))
-	if code != exitOK || strings.TrimSpace(out) != "ok" || errs != "" {
+	if code != exitcode.OK || strings.TrimSpace(out) != "ok" || errs != "" {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 }
 
 func TestCheckConfigRejectsBadFiles(t *testing.T) {
 	code, _, errs := runCmd("-check-config", writeConfig(t, func(m map[string]any) { m["port"] = 0 }))
-	if code != exitConfig || !strings.Contains(errs, "port") {
+	if code != exitcode.Config || !strings.Contains(errs, "port") {
 		t.Fatalf("code=%d err=%q", code, errs)
 	}
 	code, _, errs = runCmd("-check-config", writeConfig(t, func(m map[string]any) {
 		m["queues"] = []map[string]any{{"name": "bad", "args": []string{"--claim"}}}
 	}))
-	if code != exitConfig || !strings.Contains(errs, "--claim") {
+	if code != exitcode.Config || !strings.Contains(errs, "--claim") {
 		t.Fatalf("code=%d err=%q", code, errs)
 	}
 	code, _, _ = runCmd("-check-config", filepath.Join(t.TempDir(), "missing.json"))
-	if code != exitConfig {
+	if code != exitcode.Config {
 		t.Fatalf("missing file code = %d", code)
 	}
 }
@@ -84,28 +86,28 @@ func TestVersionAndUsage(t *testing.T) {
 	Version = "0.0.0-abcdef01"
 	defer func() { Version = old }()
 	code, out, _ := runCmd("--version")
-	if code != exitOK || strings.TrimSpace(out) != "0.0.0-abcdef01" {
+	if code != exitcode.OK || strings.TrimSpace(out) != "0.0.0-abcdef01" {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 	code, _, errs := runCmd()
-	if code != exitUsage || !strings.Contains(errs, "usage") {
+	if code != exitcode.Usage || !strings.Contains(errs, "usage") {
 		t.Fatalf("no-args code=%d err=%q", code, errs)
 	}
 	code, _, _ = runCmd("-bogus")
-	if code != exitUsage {
+	if code != exitcode.Usage {
 		t.Fatalf("bad flag code = %d", code)
 	}
 }
 
 func TestRunWithABadConfigExitsWithConfigCode(t *testing.T) {
 	code, _, errs := runCmd("-config", writeConfig(t, func(m map[string]any) { m["labelCap"] = 0 }))
-	if code != exitConfig || !strings.Contains(errs, "labelCap") {
+	if code != exitcode.Config || !strings.Contains(errs, "labelCap") {
 		t.Fatalf("code=%d err=%q", code, errs)
 	}
 }
 
-func TestExitCodesKeepOneForUnexpectedErrors(t *testing.T) {
-	if exitInternal != 1 || exitUsage < 2 || exitConfig < 2 || exitConfig == exitUsage {
-		t.Fatal("exit codes: 1 is the generic error; specific meanings must be >= 2 and distinct")
+func TestExitCodesUseTheSharedTable(t *testing.T) {
+	if exitcode.Error != 1 || exitcode.Usage != 2 || exitcode.Config != 7 {
+		t.Fatal("exit codes: 1 generic error, 2 usage, 7 invalid configuration (the shared table)")
 	}
 }

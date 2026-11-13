@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/beads-exporter/internal/bd"
 	"github.com/phillipgreenii/beads-exporter/internal/collect"
 	"github.com/phillipgreenii/beads-exporter/internal/config"
@@ -31,14 +33,6 @@ import (
 // Version is stamped by the build (-X main.Version=...).
 var Version = "dev"
 
-// Exit codes. 1 is reserved for unexpected errors; 2 and above carry meaning.
-const (
-	exitOK       = 0
-	exitInternal = 1
-	exitUsage    = 2
-	exitConfig   = 3
-)
-
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -50,29 +44,29 @@ func run(args []string, stdout, stderr io.Writer) int {
 	checkPath := fs.String("check-config", "", "validate the configuration file's schema and exit; touches no database or bd binary")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
-		return exitUsage
+		return exitcode.Usage
 	}
 
 	switch {
 	case *showVersion:
 		fmt.Fprintln(stdout, Version)
-		return exitOK
+		return exitcode.OK
 	case *checkPath != "":
 		if _, err := config.Load(*checkPath); err != nil {
 			fmt.Fprintln(stderr, err)
-			return exitConfig
+			return exitcode.Config
 		}
 		fmt.Fprintln(stdout, "ok")
-		return exitOK
+		return exitcode.OK
 	case *configPath == "":
 		fmt.Fprintln(stderr, "usage: beads-exporter -config <file> | -check-config <file> | -version")
-		return exitUsage
+		return exitcode.Usage
 	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return exitConfig
+		return exitcode.Config
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -83,9 +77,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	log := logx.New(stdout, slog.LevelInfo)
 	if err := serve(ctx, cfg, log); err != nil {
 		log.Error("exporter stopped", "error", err.Error())
-		return exitInternal
+		return exitcode.Error
 	}
-	return exitOK
+	return exitcode.OK
 }
 
 // serve runs the pollers and the HTTP listener until ctx is cancelled.

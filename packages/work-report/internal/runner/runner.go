@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/config"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Runner runs generators. The exported fields are the test seams; the zero
@@ -267,8 +268,8 @@ func (r *Runner) Run(ctx context.Context, req Request) Outcome {
 			return st.fail(KindCancelled, "the run was cancelled")
 		case res.ExitCode == nil:
 			return st.fail(KindExitNonzero, fmt.Sprintf("generator was terminated by %s", res.Signal))
-		case *res.ExitCode == 3:
-			return st.fail(KindConfigInvalid, withStderr("generator rejected its config (exit 3)", res.Stderr))
+		case *res.ExitCode == exitcode.Config:
+			return st.fail(KindConfigInvalid, withStderr("generator rejected its config (exit 7)", res.Stderr))
 		case *res.ExitCode != 0:
 			return st.fail(KindExitNonzero, withStderr(fmt.Sprintf("generator exited with status %d", *res.ExitCode), res.Stderr))
 		}

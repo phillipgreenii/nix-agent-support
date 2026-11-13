@@ -17,6 +17,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/runner"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // connectorBinary is the one external program work-report execs.
@@ -525,7 +526,7 @@ func validateOne(ctx context.Context, rn *runner.Runner, p config.Preset, g conf
 		out = append(out, problem(problemValidateFailed, "generator %q: validate mode was cancelled", g.Name))
 	case r.ExitCode == nil:
 		out = append(out, problem(problemValidateFailed, "generator %q was terminated by %s in validate mode", g.Name, r.Signal))
-	case *r.ExitCode == 3:
+	case *r.ExitCode == exitcode.Config:
 		out = append(out, problem(problemConfigInvalid, "generator %q config invalid: %s", g.Name, reasons(r.Stderr)))
 	case *r.ExitCode != 0:
 		out = append(out, problem(problemValidateFailed, "generator %q exited with status %d in validate mode: %s", g.Name, *r.ExitCode, reasons(r.Stderr)))

@@ -434,14 +434,14 @@ func TestReportGeneratorAdHoc(t *testing.T) {
 	}
 }
 
-// A generator that needs config exits 3 ad hoc and the outcome says to define
+// A generator that needs config exits 7 ad hoc and the outcome says to define
 // a preset with a config.
 func TestReportGeneratorRejectingEmptyConfigGetsPresetHint(t *testing.T) {
 	f := newReportFixture(t)
 	// The fake picks its behavior from config["fake"]; an ad hoc run has an
 	// empty config, so use a script that always asks for config.
 	script := filepath.Join(t.TempDir(), "needy.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\necho 'model is required' >&2\nexit 3\n"), 0o700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\necho 'model is required' >&2\nexit 7\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	body := fmt.Sprintf("generators:\n  needy:\n    command: [%q]\n", script)

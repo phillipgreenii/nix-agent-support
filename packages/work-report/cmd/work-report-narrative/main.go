@@ -12,7 +12,7 @@
 //
 // Exit codes follow the generator table: 0 success, 1 unexpected failure, 2
 // usage error (malformed envelope, unknown mode, unsupported contract
-// version), 3 invalid config.
+// version), 7 invalid config (the shared Config code).
 package main
 
 import (

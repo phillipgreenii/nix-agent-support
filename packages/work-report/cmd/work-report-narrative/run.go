@@ -13,14 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-)
 
-// Generator exit codes (contract version 1).
-const (
-	exitOK      = 0
-	exitFailure = 1
-	exitUsage   = 2
-	exitConfig  = 3
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 const (
@@ -72,16 +66,16 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintf(stderr, "work-report-narrative: reading the envelope: %v\n", err)
-		return exitFailure
+		return exitcode.Error
 	}
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		fmt.Fprintf(stderr, "work-report-narrative: the envelope is not valid JSON: %v\n", err)
-		return exitUsage
+		return exitcode.Usage
 	}
 	if env.ContractVersion != contractVersion {
 		fmt.Fprintf(stderr, "work-report-narrative: unsupported contract_version %d (this generator speaks %d)\n", env.ContractVersion, contractVersion)
-		return exitUsage
+		return exitcode.Usage
 	}
 
 	switch env.Mode {
@@ -91,16 +85,16 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) int {
 		return generate(ctx, env, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "work-report-narrative: unknown mode %q (want generate or validate)\n", env.Mode)
-		return exitUsage
+		return exitcode.Usage
 	}
 }
 
-// reportProblems prints one reason per problem and returns exitConfig.
+// reportProblems prints one reason per problem and returns exitcode.Config.
 func reportProblems(stderr io.Writer, problems []string) int {
 	for _, p := range problems {
 		fmt.Fprintf(stderr, "work-report-narrative: invalid config: %s\n", p)
 	}
-	return exitConfig
+	return exitcode.Config
 }
 
 // validate checks the config only: no files are written and no external
@@ -109,7 +103,7 @@ func validate(env envelope, stderr io.Writer) int {
 	if _, problems := parseConfig(env.Config); len(problems) > 0 {
 		return reportProblems(stderr, problems)
 	}
-	return exitOK
+	return exitcode.OK
 }
 
 func generate(ctx context.Context, env envelope, stdout, stderr io.Writer) int {
@@ -119,7 +113,7 @@ func generate(ctx context.Context, env envelope, stdout, stderr io.Writer) int {
 	}
 	if !filepath.IsAbs(env.OutputDir) {
 		fmt.Fprintf(stderr, "work-report-narrative: output_dir %q is not an absolute path\n", env.OutputDir)
-		return exitUsage
+		return exitcode.Usage
 	}
 
 	var body string
@@ -130,22 +124,22 @@ func generate(ctx context.Context, env envelope, stdout, stderr io.Writer) int {
 		body = emptyReport(env.Range)
 	case env.Baseline == nil:
 		fmt.Fprintln(stderr, "work-report-narrative: the envelope has no baseline text; register this generator with inputs: [baseline]")
-		return exitFailure
+		return exitcode.Error
 	case len(*env.Baseline) > maxBaselineBytes:
 		fmt.Fprintf(stderr, "work-report-narrative: the baseline text is %d bytes, over the %d byte limit; narrow the range\n", len(*env.Baseline), maxBaselineBytes)
-		return exitFailure
+		return exitcode.Error
 	default:
 		out, err := callClaude(ctx, cfg, *env.Baseline)
 		if err != nil {
 			fmt.Fprintf(stderr, "work-report-narrative: %v\n", err)
-			return exitFailure
+			return exitcode.Error
 		}
 		body = out
 	}
 
 	if err := os.WriteFile(filepath.Join(env.OutputDir, reportFile), []byte(body), 0o600); err != nil {
 		fmt.Fprintf(stderr, "work-report-narrative: writing %s: %v\n", reportFile, err)
-		return exitFailure
+		return exitcode.Error
 	}
 	n := len(env.Entries)
 	noun := "entries"
@@ -159,9 +153,9 @@ func generate(ctx context.Context, env envelope, stdout, stderr io.Writer) int {
 	}
 	if err := json.NewEncoder(stdout).Encode(m); err != nil {
 		fmt.Fprintf(stderr, "work-report-narrative: writing the manifest: %v\n", err)
-		return exitFailure
+		return exitcode.Error
 	}
-	return exitOK
+	return exitcode.OK
 }
 
 // emptyReport is the fixed plain-text report for a range with no entries.

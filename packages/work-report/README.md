@@ -85,7 +85,7 @@ environment allowlist as a real run.
 - The generator's environment is an allowlist (`PATH`, `HOME`, `USER`, `LANG`, `TMPDIR`, the XDG
   state, config and cache directories, the names in the generator's `env` list, and
   `WORK_REPORT_CONTRACT` and `WORK_REPORT_MODE`), never the caller's environment.
-- Generator exit codes: 0 success, 1 unexpected failure, 2 usage error, 3 invalid generator config.
+- Generator exit codes: 0 success, 1 unexpected failure, 2 usage error, 7 invalid generator config (the shared Config code).
 - The timeout covers the whole run. On expiry the process group gets `SIGTERM`, then `SIGKILL`.
 
 The full envelope, the manifest rules, the outcome kinds and the run record are in ADR 0102.

@@ -77,7 +77,7 @@ beads-exporter -version               print the version (0.0.0-<8 hex digits>)
 The exporter listens on `127.0.0.1:<port>` and serves `GET /metrics`. Logs are JSON lines on
 stdout (`time` in UTC RFC 3339, lowercase `level`, `msg`, `service`).
 
-Exit codes: `0` success, `1` unexpected error, `2` usage, `3` configuration invalid.
+Exit codes: `0` success, `1` unexpected error, `2` usage, `7` configuration invalid (the shared Config code).
 
 `-check-config` validates the schema only. It never stats a beads directory or the bd binary and
 never spawns a process, because it runs in the nix build sandbox where neither exists.

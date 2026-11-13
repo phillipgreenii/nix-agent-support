@@ -4,6 +4,7 @@ go 1.26.8
 
 require (
 	github.com/spf13/cobra v1.10.2
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	golang.org/x/text v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.59.0

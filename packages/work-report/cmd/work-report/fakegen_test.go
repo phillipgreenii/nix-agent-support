@@ -56,14 +56,14 @@ func fakeGenMain() int {
 	case "reject":
 		fmt.Fprintln(os.Stderr, "promptFile: cannot read /nonexistent/addendum.txt")
 		fmt.Fprintln(os.Stderr, "model: unknown")
-		return 3
+		return 7
 	case "crash":
 		fmt.Fprintln(os.Stderr, "boom: entry text echoed")
 		return 1
 	case "needsconfig":
 		if len(cfg) == 0 {
 			fmt.Fprintln(os.Stderr, "model is required")
-			return 3
+			return 7
 		}
 	case "hang":
 		time.Sleep(time.Minute)

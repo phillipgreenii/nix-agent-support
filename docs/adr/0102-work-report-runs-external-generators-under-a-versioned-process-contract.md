@@ -154,11 +154,11 @@ directory that the manifest does not list are left in place and not reported. Co
 | 0              | Success; stdout is a valid manifest                      |
 | 1              | Unexpected failure; stderr carries the reason            |
 | 2              | Usage error                                              |
-| 3              | Invalid generator config; stderr carries one reason each |
+| 7              | Invalid generator config; stderr carries one reason each |
 | other          | Failure; stderr carries the reason                       |
 
 `outcome_kind` is the closed set `ok`, `timeout`, `cancelled`, `exit_nonzero`, `config_invalid`,
-`invalid_manifest`, `not_found`, `contract_version`, `stdout_cap`, `output_dir_unwritable`. Exit 3 is
+`invalid_manifest`, `not_found`, `contract_version`, `stdout_cap`, `output_dir_unwritable`. Exit 7 (the shared Config code) is
 `config_invalid`; any other non-zero exit, and a death by a signal that work-report did not send, is
 `exit_nonzero`.
 

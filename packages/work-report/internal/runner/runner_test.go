@@ -301,7 +301,7 @@ func TestExitCodesMapToOutcomeKinds(t *testing.T) {
 	cases := []struct {
 		exit int
 		kind string
-	}{{1, KindExitNonzero}, {2, KindExitNonzero}, {3, KindConfigInvalid}, {7, KindExitNonzero}}
+	}{{1, KindExitNonzero}, {2, KindExitNonzero}, {3, KindExitNonzero}, {7, KindConfigInvalid}}
 	for _, c := range cases {
 		fx := newFixture(t)
 		out := fx.run(fx.gen(script{Stderr: "model: unknown option\n", Exit: c.exit}))
