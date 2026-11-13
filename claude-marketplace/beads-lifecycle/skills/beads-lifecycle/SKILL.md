@@ -371,6 +371,13 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   test for it — a bead of this same shape that has never yet been ruled on must still route here
   on its FIRST park, not only after a person has said so once. `pb:drain-stuck`'s DEFER-ON-EVENT
   exit is the operational form of this rule.
+  Finished work that is committed but unlanded is NEVER a defer reason, under D-10 or any other rule
+  (operator ruling, Phillip, 2026-11-11: "don't defer beads which need to be landed ... the
+  alternative should be to create a child bead which blocks the parent which describes that it needs
+  to be landed."). A persistent landing obstacle (repeated lost fast-forward races, host load, a
+  hook timeout) is not a live external event: file ONE separate landing bead joined by a `blocks`
+  edge (not parent-child, D-9) via `pb:drain-stuck`'s CONVERT-LANDING-TO-BEAD, and release the
+  parent open with no defer.
 
 ## Escalation and Operator-Attention Labels (LV-1 to LV-7)
 

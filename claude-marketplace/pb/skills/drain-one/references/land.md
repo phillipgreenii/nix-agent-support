@@ -189,10 +189,12 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
    advanced local main first), that is TRANSIENT: re-dispatch the lander at most
    ONCE more (to `pb:drain-lander`, per the "Which agent receives a drain dispatch" rule) (the handler already made its own 2 attempts internally, per
    FF-3); a second failure is a GENUINE
-   stop → STUCK. The `pull-request` analogue is a REJECTED NON-FAST-FORWARD PUSH (a
+   stop → STUCK, whose CONVERT-LANDING-TO-BEAD exit files a blocking landing bead (never a defer)
+   because the work is finished and committed. The `pull-request` analogue is a REJECTED NON-FAST-FORWARD PUSH (a
    peer advanced the remote `<work-branch>`): also TRANSIENT — rebase onto the
    UPDATED REMOTE branch and re-dispatch the lander at most ONCE more (same rule "Which agent receives a drain dispatch"; it already
-   made its own 2 attempts internally, per PR-1); a second failure is a GENUINE stop → STUCK. Only route
+   made its own 2 attempts internally, per PR-1); a second failure is a GENUINE stop → STUCK (same exit). A pre-land hook failure that re-runs
+   green when run alone also ends in the landing bead, not a defer. Only route
    to STUCK for a GENUINE stop (rebase-conflict, `stopped:ambiguous-remote`,
    `stopped:no-pr-host`, or a canonical off-primary/dirty halt — the latter
    only for a canonical-ADVANCING strategy: `pull-request`'s PR-0 surfaces it

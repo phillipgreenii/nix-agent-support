@@ -208,7 +208,10 @@ and the container's own priority, then:
      returns `released`; release policy `park` ESCALATES it through `pb:drain-stuck`.
    - VERIFY the reported verdict with one observation before recording it.
    - A lost fast-forward race or a rejected non-fast-forward push is TRANSIENT:
-     re-dispatch at most once more. A genuine `stopped:` routes to STUCK.
+     re-dispatch at most once more. A genuine `stopped:` routes to STUCK. When the work is
+     finished and committed and the stop is a landing obstacle (a second lost race, a hook
+     failure that re-runs green alone, host load), STUCK takes its CONVERT-LANDING-TO-BEAD exit:
+     a blocking landing bead, never a defer.
    - PUSH AUTHORITY (default policy, no tracker section): under `pull-request` you
      MAY push `<work-branch>` and create or update its DRAFT PR without asking; you
      MUST NOT merge it, enable automerge, or push a primary branch (drain policy,
@@ -266,7 +269,8 @@ GENUINE lander `stopped:<reason>` (not a transient ff-race/rejected push);
 `pb gate attach-verified-child` exited 3 or 4; repeated failed attempts.
 NOT a trigger: "another bead has to land first" (that is a dependency); a
 curated packet's stamp refusal (step 4's STAMP REFUSAL — deferred, claim
-released, no label).
+released, no label; a different case from a landing obstacle because no work exists
+to land, so it keeps its defer unchanged).
 
 Invoke the `pb:drain-stuck` skill with: the bead id, your actor ID, the
 worktree/branch location (`<work-branch>`), and what you tried. Follow it exactly — it runs the
@@ -275,9 +279,11 @@ EMPTY isolation (clean tree, zero commits) is removed and the bead noted while a
 anything is kept, and exits by exactly one of ESCALATE (labeled `escalated`
 with the findings in a comment, claim released in the same update; never `human`,
 which only the escalation-triager hands on), CLOSE-AS-MOOT (with extraction), CONVERT-TO-DEPENDENCY
-(edges wired, claim released, no label), or DEFER-ON-EVENT (deferred, claim
+(edges wired, claim released, no label), CONVERT-LANDING-TO-BEAD (finished work that cannot
+be landed: ONE separate landing bead joined by a `blocks` edge, claim released open and
+unassigned, NO defer), or DEFER-ON-EVENT (deferred, claim
 released, no label — a live external event, not a person or a bead, is the
-blocker). Then return to the caller with outcome `released` (`closed` after CLOSE-AS-MOOT).
+blocker; never for committed-unlanded work). Then return to the caller with outcome `released` (`closed` after CLOSE-AS-MOOT).
 
 ## CLOSE-WITH-ABSORPTION-TRACE (a handoff bead)
 

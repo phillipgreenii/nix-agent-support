@@ -128,6 +128,25 @@ plan-decompose/agents/phase-plan-verifier.md:1"
   [ "$status" -eq 1 ]
 }
 
+@test "finished-unlanded work exits by CONVERT-LANDING-TO-BEAD: blocks edge, no defer, never DEFER-ON-EVENT" {
+  s="$(stuck)"
+  grep -q '^## CONVERT-LANDING-TO-BEAD' "$s"
+  grep -qF 'bd dep add <id> --blocked-by <landing-bead>' "$s"
+  sec="$(sed -n '/^## CONVERT-LANDING-TO-BEAD/,/^## DEFER-ON-EVENT/p' "$s")"
+  [[ "$sec" == *"NOT a parent-child link"* ]]
+  [[ "$sec" == *"patch-id --stable"* ]]
+  [[ "$sec" == *'bd update <id> --remove-label human --status open --assignee "" --actor "ID"'* ]]
+  run grep -F -- '--defer' <<<"$(printf '%s\n' "$sec" | grep -F 'bd update')"
+  [ "$status" -eq 1 ]
+  # the step-3 branch precedes the live-external-event branch
+  c="$(grep -n '\*\*CONVERT-LANDING-TO-BEAD\*\*' "$s" | head -1 | cut -d: -f1)"
+  e="$(grep -n 'go to \*\*DEFER-ON-EVENT\*\*' "$s" | head -1 | cut -d: -f1)"
+  [ -n "$c" ] && [ -n "$e" ] && [ "$c" -lt "$e" ]
+  grep -q 'CONVERT-LANDING-TO-BEAD' "$work/mp/pb/skills/drain-one/SKILL.md"
+  grep -q 'CONVERT-LANDING-TO-BEAD' "$work/mp/pb/skills/drain-one/references/land.md"
+  grep -q "NEVER a defer reason" "$work/mp/beads-lifecycle/skills/beads-lifecycle/SKILL.md"
+}
+
 @test "ESCALATE is ONE update that adds escalated and releases the claim (B-1..B-3)" {
   s="$(stuck)"
   grep -qF 'bd update <id> --add-label escalated --status open --assignee "" --actor "ID"' "$s"
