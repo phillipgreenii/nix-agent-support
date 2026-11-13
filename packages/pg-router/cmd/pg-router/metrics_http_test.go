@@ -197,7 +197,11 @@ func forceFlush(ctx context.Context, mp metric.MeterProvider) error {
 // failing the test on any transport error or non-200 status.
 func scrape(t *testing.T, url string) string {
 	t.Helper()
-	resp, err := http.Get(url) //nolint:gosec,noctx // test-local loopback URL, no untrusted input
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build request %s: %v", url, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
