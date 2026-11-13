@@ -10,6 +10,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"testing"
@@ -22,15 +23,22 @@ import (
 // backend process: it runs one bd call through a budgeted CLIRunner.
 const budgetHelperEnv = "PG_ISSUE_BEADS_BUDGET_HELPER_DIR"
 
-// TestHelperBudgetedRunnerProcess is not a test: it is the backend stand-in.
-func TestHelperBudgetedRunnerProcess(t *testing.T) {
-	stateDir := os.Getenv(budgetHelperEnv)
-	if stateDir == "" {
-		t.Skip("helper process only")
+// TestMain turns the re-executed test binary into the backend stand-in when
+// budgetHelperEnv is set; it is not a Test function, so the integration check
+// (which wants every listed test to pass) never sees a skipped helper.
+func TestMain(m *testing.M) {
+	if stateDir := os.Getenv(budgetHelperEnv); stateDir != "" {
+		runBudgetedRunnerHelper(stateDir)
+		os.Exit(0)
 	}
+	os.Exit(m.Run())
+}
+
+func runBudgetedRunnerHelper(stateDir string) {
 	b, err := budget.New(budget.Config{MaxConcurrent: 1, StateDir: stateDir, WaitBound: time.Second})
 	if err != nil {
-		t.Fatal(err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 	r := &CLIRunner{Dir: os.Getenv("FAKE_BD_STARTED"), Budget: b}
 	// Blocks until the fake bd exits; the parent kills this process first.
@@ -48,7 +56,7 @@ func TestCLIRunner_Budget_SlotHeldAfterBackendSIGKILL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	helper := exec.Command(exe, "-test.run=^TestHelperBudgetedRunnerProcess$")
+	helper := exec.Command(exe, "-test.run=^$")
 	helper.Env = append(os.Environ(), budgetHelperEnv+"="+stateDir)
 	if err := helper.Start(); err != nil {
 		t.Fatal(err)
