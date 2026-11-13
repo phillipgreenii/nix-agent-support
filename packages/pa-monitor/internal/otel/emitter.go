@@ -323,7 +323,7 @@ func (e *Emitter) registerMetrics(ctx context.Context, mp *sdkmetric.MeterProvid
 		return err
 	}
 	// Independent alert signal: 1 while pg-keep-awake status --check says the
-	// keeper is running (exit 0 or 6), 0 when it is down (exit 5) or cannot be
+	// keeper is running (exit 0 or 5), 0 when it is down (exit 3) or cannot be
 	// asked. Prometheus name: pa_monitor_keep_awake_keeper_up.
 	keeperUpGauge, err := meter.Int64ObservableGauge("pa_monitor.keep_awake.keeper_up")
 	if err != nil {
@@ -681,7 +681,7 @@ func (e *Emitter) RecordCaffeinateActive(active bool, process string, graceRemai
 
 // RecordKeepAwakeKeeperUp sets the pa_monitor.keep_awake.keeper_up gauge: up is
 // true while pg-keep-awake status --check reports the keeper running (exit 0 or
-// 6). nil-safe. Mirrors RecordCaffeinateActive: pushed each tick by the daemon
+// 5). nil-safe. Mirrors RecordCaffeinateActive: pushed each tick by the daemon
 // and observed only after the first push.
 func (e *Emitter) RecordKeepAwakeKeeperUp(up bool, attrs map[string]string) {
 	if e == nil {

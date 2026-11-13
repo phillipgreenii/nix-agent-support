@@ -17,7 +17,7 @@ type commandHelp struct {
 
 // Exit codes (ADR 0042) as one help paragraph, shared by the top-level help
 // and the commands whose codes go beyond 0, 1 and 2.
-const exitCodesNote = "Exit codes: 0 ok, 1 unexpected failure, 2 usage error, 3 state directory unwritable, 4 config invalid, 5 keeper down (status --check), 6 degraded (status --check)."
+const exitCodesNote = "Exit codes: 0 ok, 1 unexpected failure, 2 usage error, 8 state directory unwritable, 7 config invalid, 3 keeper down (status --check), 5 degraded (status --check)."
 
 // Notes that label the two long-running commands a person does not run by
 // hand.
@@ -73,7 +73,7 @@ var commandHelps = map[string]commandHelp{
 		usage:   "usage: pg-keep-awake config check [--config PATH]",
 		notes: []string{
 			"Without --config it checks the keeper's own config.toml; an absent file is valid there (the built-in defaults apply). An explicit --config PATH that does not exist is invalid.",
-			"Exit 0 when valid, 4 when invalid.",
+			"Exit 0 when valid, 7 when invalid.",
 		},
 	},
 	"keeper": {

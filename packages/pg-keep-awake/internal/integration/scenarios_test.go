@@ -567,8 +567,8 @@ func TestS12StoppedClientHoldingLock(t *testing.T) {
 		t.Error("acquire under a held lock did not return within 8s (the lock wait is unbounded)")
 		r = result{code: -1, took: 8 * time.Second}
 	}
-	if r.code != -1 && (r.code != 3 || r.took > 4*time.Second || !strings.Contains(r.stderr, "leases/.lock")) {
-		t.Errorf("acquire under a held lock: exit %d after %v, stderr %q; want exit 3 within 4s naming leases/.lock",
+	if r.code != -1 && (r.code != 8 || r.took > 4*time.Second || !strings.Contains(r.stderr, "leases/.lock")) {
+		t.Errorf("acquire under a held lock: exit %d after %v, stderr %q; want exit 8 within 4s naming leases/.lock",
 			r.code, r.took, r.stderr)
 	}
 

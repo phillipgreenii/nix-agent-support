@@ -336,7 +336,7 @@ func TestMissingExecutableIsStateError(t *testing.T) {
 	}
 }
 
-// TestDegradedKeeperIsStateError: status --check exiting 6 (a live lease, the
+// TestDegradedKeeperIsStateError: status --check exiting 5 (a live lease, the
 // keeper running, nothing held) maps to StateError (process=error), and
 // recovers when the keeper holds again.
 func TestDegradedKeeperIsStateError(t *testing.T) {
@@ -353,7 +353,7 @@ func TestDegradedKeeperIsStateError(t *testing.T) {
 		t.Errorf("SpawnErr = %v, want ErrKeeperDegraded", r.m.SpawnErr())
 	}
 	if !r.m.KeeperUp() {
-		t.Error("KeeperUp = false for a degraded keeper; degraded is still up (exit 6)")
+		t.Error("KeeperUp = false for a degraded keeper; degraded is still up (exit 5)")
 	}
 	keepertest.SimulateKeeper(t, r.stateDir, keepertest.KeeperState{Held: true})
 	r.advance(time.Second)
@@ -363,12 +363,12 @@ func TestDegradedKeeperIsStateError(t *testing.T) {
 	}
 }
 
-// TestKeeperUpFollowsStatusCheckExitCode: 0 and 6 are up, 5 is down.
+// TestKeeperUpFollowsStatusCheckExitCode: 0 and 5 are up, 3 is down.
 func TestKeeperUpFollowsStatusCheckExitCode(t *testing.T) {
 	r := newRig(t)
 	r.m.Tick(false) // toggle off: the keeper is still observed
 	if r.m.KeeperUp() {
-		t.Error("KeeperUp = true with no keeper ever started (status --check exit 5)")
+		t.Error("KeeperUp = true with no keeper ever started (status --check exit 3)")
 	}
 	keepertest.SimulateKeeper(t, r.stateDir, keepertest.KeeperState{})
 	r.m.Tick(false)
@@ -378,6 +378,6 @@ func TestKeeperUpFollowsStatusCheckExitCode(t *testing.T) {
 	keepertest.StopKeeper(t, r.stateDir)
 	r.m.Tick(false)
 	if r.m.KeeperUp() || r.m.obs.Health != HealthDown {
-		t.Errorf("KeeperUp=%v health=%v, want down (exit 5)", r.m.KeeperUp(), r.m.obs.Health)
+		t.Errorf("KeeperUp=%v health=%v, want down (exit 3)", r.m.KeeperUp(), r.m.obs.Health)
 	}
 }

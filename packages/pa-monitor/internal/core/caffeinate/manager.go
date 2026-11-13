@@ -97,7 +97,7 @@ func (m *Manager) GraceRemaining() time.Duration {
 func (m *Manager) Held() bool { return m.obs.StatusKnown && m.obs.Held }
 
 // KeeperUp reports whether `pg-keep-awake status --check` found the keeper
-// running (exit 0 or 6). False when it is down (exit 5) or the check could not
+// running (exit 0 or 5). False when it is down (exit 3) or the check could not
 // run. Meaningful after the first Tick.
 func (m *Manager) KeeperUp() bool { return m.obs.Health.Up() }
 
@@ -180,7 +180,7 @@ func (m *Manager) Tick(keepAwake bool) {
 	m.applyDegraded()
 }
 
-// applyDegraded maps a degraded keeper (status --check exit 6) to StateError.
+// applyDegraded maps a degraded keeper (status --check exit 5) to StateError.
 func (m *Manager) applyDegraded() {
 	if m.obs.Health != HealthDegraded {
 		return

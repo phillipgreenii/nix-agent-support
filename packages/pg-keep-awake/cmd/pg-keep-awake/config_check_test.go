@@ -36,9 +36,9 @@ func TestConfigCheckExitCodes(t *testing.T) {
 		want int
 	}{
 		{"valid", []string{"config", "check", "--config", valid}, 0},
-		{"malformed", []string{"config", "check", "--config", malformed}, 4},
-		{"inverted battery", []string{"config", "check", "--config", inverted}, 4},
-		{"explicit missing file", []string{"config", "check", "--config", missing}, 4},
+		{"malformed", []string{"config", "check", "--config", malformed}, 7},
+		{"inverted battery", []string{"config", "check", "--config", inverted}, 7},
+		{"explicit missing file", []string{"config", "check", "--config", missing}, 7},
 		{"unknown flag", []string{"config", "check", "--bogus"}, 2},
 		{"stray argument", []string{"config", "check", "extra"}, 2},
 		{"no subcommand", []string{"config"}, 2},
@@ -50,7 +50,7 @@ func TestConfigCheckExitCodes(t *testing.T) {
 			if code != tc.want {
 				t.Fatalf("exit = %d, want %d (stderr %q)", code, tc.want, stderr)
 			}
-			if tc.want == 4 && !strings.Contains(stderr, "pg-keep-awake:") {
+			if tc.want == 7 && !strings.Contains(stderr, "pg-keep-awake:") {
 				t.Fatalf("invalid config gave no diagnostic: %q", stderr)
 			}
 		})
@@ -74,8 +74,8 @@ func TestConfigCheckDefaultPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("XDG_CONFIG_HOME", xdg)
-		if code, _, _ := runCLI(t, "config", "check"); code != 4 {
-			t.Fatalf("exit = %d, want 4", code)
+		if code, _, _ := runCLI(t, "config", "check"); code != 7 {
+			t.Fatalf("exit = %d, want 7", code)
 		}
 	})
 }

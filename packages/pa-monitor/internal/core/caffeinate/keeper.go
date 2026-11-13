@@ -24,8 +24,11 @@ const KeeperBinary = "pg-keep-awake"
 
 // Exit codes of `pg-keep-awake status --check`.
 const (
-	exitKeeperDown = 5
-	exitDegraded   = 6
+	// exitKeeperDown equals exitcode.Unavailable and exitDegraded equals
+	// exitcode.Degraded in x/exitcode (the pinned x revision lacks that
+	// package).
+	exitKeeperDown = 3
+	exitDegraded   = 5
 )
 
 // DefaultCallTimeout bounds one pg-keep-awake invocation. Every command only
@@ -47,9 +50,9 @@ const (
 	HealthUnknown Health = iota
 	// HealthOK: exit 0, the keeper is healthy.
 	HealthOK
-	// HealthDown: exit 5, the keeper is not running.
+	// HealthDown: exit 3, the keeper is not running.
 	HealthDown
-	// HealthDegraded: exit 6, the keeper runs but is not holding for live leases.
+	// HealthDegraded: exit 5, the keeper runs but is not holding for live leases.
 	HealthDegraded
 )
 

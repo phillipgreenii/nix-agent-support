@@ -57,7 +57,7 @@ Extensions:
   usage line and exits 1 (`INV-SHIM-4`).
 - 1b. The caller passes `-u`. The shim rejects it with a message and exits 1 (`INV-SHIM-3`).
 - 1c. The shim cannot record the lease because the state is unwritable. The pure form prints one line and
-  exits 3; the utility form warns and runs the command anyway (`INV-SHIM-11`).
+  exits 8; the utility form warns and runs the command anyway (`INV-SHIM-11`).
 - 1d. The keeper is down. The shim records the lease and holds silently; the status view shows the keeper
   down (`INV-SHIM-11`).
 - 3a. The shim is killed without warning. Its lease stays until the keeper reaps it (`INV-SHIM-9`).
@@ -115,7 +115,7 @@ Extensions:
   MUST keep the lease's `expires_at` equal to the wall time at which the awake budget runs out, so the
   keeper does not reap the lease early. _(Design section 7, rule 5.)_
 - **`INV-SHIM-11`** <!-- uuid: 68f2b0c5-a4d3-4e97-a5b1-81c9e7d03f4a --> — When the shim cannot record its lease, the pure form MUST print one line on
-  standard error and exit 3, and the utility form MUST warn on standard error, still run the utility and
+  standard error and exit 8, and the utility form MUST warn on standard error, still run the utility and
   exit with the utility's status. When the keeper is down the shim MUST still record its lease and hold
   silently, and MUST NOT fall back to starting a real `caffeinate`. _(Design section 7 (failure policy)
   and 3 (R5); O3.)_

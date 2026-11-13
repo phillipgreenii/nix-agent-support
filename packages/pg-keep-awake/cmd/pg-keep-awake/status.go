@@ -18,8 +18,10 @@ import (
 // Exit codes of `status --check` (ADR 0042); the shared codes live in
 // config_check.go and state.go.
 const (
-	exitKeeperDown = 5
-	exitDegraded   = 6
+	// exitKeeperDown equals exitcode.Unavailable and exitDegraded equals
+	// exitcode.Degraded in x/exitcode.
+	exitKeeperDown = 3
+	exitDegraded   = 5
 )
 
 const (
@@ -88,7 +90,7 @@ type checkInputs struct {
 func runStatus(args []string, stdout, stderr io.Writer) int {
 	set := newFlagSet("status", stderr)
 	asJSON := set.Bool("json", false, "print exactly one JSON object")
-	check := set.Bool("check", false, "exit 5 when the keeper is down, 6 when degraded")
+	check := set.Bool("check", false, "exit 3 when the keeper is down, 5 when degraded")
 	if exit, done := parseFlags(set, args, stdout); done {
 		return exit
 	}
@@ -318,8 +320,8 @@ func (r *statusReport) liveLeases() int {
 	return n
 }
 
-// checkExit evaluates --check: 5 when the keeper is down or never started,
-// 6 when degraded, else 0. Exit 5 wins over 6.
+// checkExit evaluates --check: 3 when the keeper is down or never started,
+// 5 when degraded, else 0. Exit 3 wins over 5.
 func (r *statusReport) checkExit(now time.Time) int {
 	if r.Keeper.State != keeperUp {
 		return exitKeeperDown

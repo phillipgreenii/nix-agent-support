@@ -147,7 +147,7 @@ The invariants are numbered by area, in RFC 2119 language:
 | Logging and metrics follow the existing OTel pattern (R11)                                                                                | `INV-KEEP-10`                              |
 | Tick 10 s and watchdog 10 min (O1, confirmed 2026-10-15)                                                                                  | `INV-KEEP-2`, `INV-BATT-9`                 |
 | The shim rejects `-u` (O2, confirmed 2026-10-15)                                                                                          | `INV-SHIM-3`                               |
-| The shim failure policy: pure form exits 3, utility form warns and runs (O3, confirmed 2026-10-15)                                        | `INV-SHIM-11`                              |
+| The shim failure policy: pure form exits 8, utility form warns and runs (O3, confirmed 2026-10-15)                                        | `INV-SHIM-11`                              |
 | The keep-awake Claude Code starts for itself is stopped under the low-battery rule (operator, 2026-10-22, "(a) then (b)", bead pg2-0n6og) | `INV-BATT-13`, `INV-BATT-10`               |
 | Linger of 30 seconds, configurable (O4, confirmed 2026-10-15)                                                                             | `INV-KEEP-3`, `INV-KEEP-9`                 |
 | Pause, resume and release of every lease of an owner (O5, confirmed 2026-10-15)                                                           | `INV-KCLI-4`, `INV-KCLI-13`                |

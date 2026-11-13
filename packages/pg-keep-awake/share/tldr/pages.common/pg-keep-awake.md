@@ -29,7 +29,7 @@
 
 `pg-keep-awake status`
 
-- Print the same as one JSON object, or check keeper health (exit 5 keeper down, 6 degraded):
+- Print the same as one JSON object, or check keeper health (exit 3 keeper down, 5 degraded):
 
 `pg-keep-awake status --json`
 
@@ -43,6 +43,6 @@
 
 `pg-keep-awake resume`
 
-- Validate a configuration file without changing anything (exit 4 when invalid):
+- Validate a configuration file without changing anything (exit 7 when invalid):
 
 `pg-keep-awake config check --config {{path/to/config.toml}}`

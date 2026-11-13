@@ -83,10 +83,10 @@ otherwise (ADR 0100 decision 8). No other holder is ever stopped.
 | 0    | Success.                                          |
 | 1    | Unexpected failure.                               |
 | 2    | Usage error (nothing was written).                |
-| 3    | The state directory cannot be written.            |
-| 4    | A configuration file is invalid (`config check`). |
-| 5    | The keeper is down (`status --check`).            |
-| 6    | The keeper is degraded (`status --check`).        |
+| 3    | The keeper is down (`status --check`).            |
+| 5    | The keeper is degraded (`status --check`).        |
+| 7    | A configuration file is invalid (`config check`). |
+| 8    | The state directory cannot be written.            |
 
 `run` is the exception: it passes through the command's own exit status, gives 128 plus the signal
 number for a command killed by a signal, and 127 for a command that is not found.

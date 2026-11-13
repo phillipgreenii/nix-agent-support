@@ -9,10 +9,11 @@ import (
 
 // Exit codes (ADR 0042) used by the config subcommand.
 const (
-	exitOK            = 0
-	exitUnexpected    = 1
-	exitUsage         = 2
-	exitConfigInvalid = 4
+	exitOK         = 0
+	exitUnexpected = 1
+	exitUsage      = 2
+	// exitConfigInvalid equals exitcode.Config in x/exitcode.
+	exitConfigInvalid = 7
 )
 
 // runConfig dispatches `pg-keep-awake config <subcommand>`.
@@ -28,7 +29,7 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 	return runConfigCheck(args[1:], stdout, stderr)
 }
 
-// runConfigCheck validates a config file: exit 0 when it is valid, 4 when it
+// runConfigCheck validates a config file: exit 0 when it is valid, 7 when it
 // is not, 2 for a usage error. Without --config it checks the default path,
 // where an absent file is valid (it means the built-in defaults); an explicit
 // --config PATH that does not exist is invalid.

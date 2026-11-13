@@ -78,7 +78,7 @@ type KeeperState struct {
 	OnBattery bool
 	Percent   int // default 64
 	// UnexplainedTicks > 1 with a live lease and nothing held is what makes the
-	// real `status --check` exit 6 (degraded).
+	// real `status --check` exit 5 (degraded).
 	UnexplainedTicks int
 }
 
@@ -127,7 +127,7 @@ func SimulateKeeper(t testing.TB, stateDir string, k KeeperState) {
 }
 
 // StopKeeper removes the keeper's heartbeat and status, so the real `status
-// --check` exits 5 (keeper down or never started).
+// --check` exits 3 (keeper down or never started).
 func StopKeeper(t testing.TB, stateDir string) {
 	t.Helper()
 	for _, f := range []string{"keeper.heartbeat", "status.json"} {

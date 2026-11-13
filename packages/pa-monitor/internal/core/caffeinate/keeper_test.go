@@ -157,3 +157,15 @@ func TestAcquireResolvesTheCLIWithoutALoginPATH(t *testing.T) {
 		t.Errorf("negative control (no configured path, PATH=/usr/bin:/bin): %q, want a not-found error; otherwise the test proves nothing about PATH independence", got)
 	}
 }
+
+// TestStatusCheckExitCodes pins the codes of `pg-keep-awake status --check`:
+// 3 keeper down, 5 degraded. They equal exitcode.Unavailable and
+// exitcode.Degraded in x/exitcode (the pinned x revision lacks that package).
+func TestStatusCheckExitCodes(t *testing.T) {
+	if exitKeeperDown != 3 {
+		t.Errorf("exitKeeperDown = %d, want 3", exitKeeperDown)
+	}
+	if exitDegraded != 5 {
+		t.Errorf("exitDegraded = %d, want 5", exitDegraded)
+	}
+}

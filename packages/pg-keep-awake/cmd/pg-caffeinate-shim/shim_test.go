@@ -346,11 +346,11 @@ func unwritableXDG(t *testing.T) string {
 	return xdg
 }
 
-func TestUnwritableStateDirPureFormExits3WithOneLine(t *testing.T) {
+func TestUnwritableStateDirPureFormExits8WithOneLine(t *testing.T) {
 	requireDarwin(t)
 	xdg := unwritableXDG(t)
 	p := startShim(t, xdg, "-t", "30")
-	if ws := p.wait(t, 10*time.Second); !exitedWith(ws, 3) {
+	if ws := p.wait(t, 10*time.Second); !exitedWith(ws, 8) {
 		t.Fatalf("unwritable state dir: %s", describe(ws))
 	}
 	if got := p.stderr.String(); strings.Count(got, "\n") != 1 || !strings.HasSuffix(got, "\n") {

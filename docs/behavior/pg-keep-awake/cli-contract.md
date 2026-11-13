@@ -87,19 +87,19 @@ _Requires:_ `INV-KCLI-10`, `INV-KCLI-11`, `INV-KCLI-12`, `INV-KCLI-14`. _Include
 
 1. A client runs a command with a mistake in it. It exits 2 with a usage message on standard error and
    writes nothing (`INV-KCLI-11`).
-2. The state directory belongs to someone else, or cannot be written. The command exits 3 and says why;
+2. The state directory belongs to someone else, or cannot be written. The command exits 8 and says why;
    it does not change the directory's permissions (`INV-KCLI-12`).
 3. A watcher runs the health check. The keeper has not proven it is alive for twice its interval, so
-   the check exits 5 (`INV-KCLI-10`).
+   the check exits 3 (`INV-KCLI-10`).
 4. Later the keeper is up but leases are live and no assertion is held, with nothing to explain it. The
-   check exits 6 (`INV-KCLI-10`).
-5. The configurer checks a configuration file before shipping it. A bad value exits 4 and names the
+   check exits 5 (`INV-KCLI-10`).
+5. The configurer checks a configuration file before shipping it. A bad value exits 7 and names the
    problem; nothing is changed (`INV-KCLI-14`).
 
 Extensions:
 
 - 3a. The state directory does not exist. The status view says the keeper never started and exits 0;
-  the health check exits 5 (`INV-KCLI-10`).
+  the health check exits 3 (`INV-KCLI-10`).
 - 4a. A pause, the gate, or the linger window explains the missing assertion. The check does not report
   degraded (`INV-KCLI-10`).
 
@@ -144,27 +144,27 @@ Extensions:
   as unreadable and MUST NOT be deleted. An empty system MUST print one line saying there are no leases,
   no assertion and the keeper's state, and a state directory that does not exist MUST print that the
   keeper never started and exit 0. _(Design sections 5, 6 and 12; O6.)_
-- **`INV-KCLI-10`** <!-- uuid: 5a91e6c2-4f08-4b3d-86a7-12d0c8b5e9f7 --> — `status --check` MUST exit 0 when the keeper is healthy, 5 when the
-  keeper is down (no heartbeat for twice its interval, or never started) and 6 when it is degraded:
+- **`INV-KCLI-10`** <!-- uuid: 5a91e6c2-4f08-4b3d-86a7-12d0c8b5e9f7 --> — `status --check` MUST exit 0 when the keeper is healthy, 3 when the
+  keeper is down (no heartbeat for twice its interval, or never started) and 5 when it is degraded:
   leases are live and no assertion is held, and none of the gate, a pause or the linger window explains
   it, for more than one tick. It MUST NOT report degraded for a state those three explain. _(Design
   section 6; R10.)_
 - **`INV-KCLI-11`** <!-- uuid: c47d3b80-e1a6-4952-9f0c-8d6a2e5b7134 --> — Exit codes MUST follow the repository's exit-code convention: 0 success, 1
-  an unexpected error, 2 a usage error, 3 the state directory is unwritable, 4 the configuration is
-  invalid (`config check` only), 5 the keeper is down (`status --check` only) and 6 degraded
+  an unexpected error, 2 a usage error, 8 the state directory is unwritable, 7 the configuration is
+  invalid (`config check` only), 3 the keeper is down (`status --check` only) and 5 degraded
   (`status --check` only). This catalog is the interface's and no command MAY use a code for another
   meaning. _(Design section 6; ADR 0042.)_
 - **`INV-KCLI-12`** <!-- uuid: 1f8c6a49-b3d7-4e05-a92e-6b0d4c7e8a31 --> — The state directory MUST be private to the current user. A writer MUST
   create it private and MUST, on finding one that is owned by someone else or open to the group or
-  others, exit 3 and say why, and MUST NOT change that directory's permissions. A command that cannot
-  take the state's lock within a short bound MUST treat the state as unwritable and exit 3. _(Design
+  others, exit 8 and say why, and MUST NOT change that directory's permissions. A command that cannot
+  take the state's lock within a short bound MUST treat the state as unwritable and exit 8. _(Design
   sections 5 and 5.4.)_
 - **`INV-KCLI-13`** <!-- uuid: e0b29d57-6c14-4a8f-b3e1-95a7d28c0f6b --> — `pause` MUST make the keeper drop the assertion while leaving every lease
   untouched, with an optional `--for` duration after which the pause ends by itself; a pause with no
   duration lasts until `resume`. `resume` MUST end a pause at once. While paused, `status` MUST show the
   pause. _(Design sections 5.3 and 6; O5.)_
 - **`INV-KCLI-14`** <!-- uuid: 72a4f5c1-d80b-4396-8e9a-b1c3e60d7f48 --> — `config check` MUST validate a configuration file (the default
-  location, or one named by `--config`), exit 4 and name each problem when it is invalid, and change
+  location, or one named by `--config`), exit 7 and name each problem when it is invalid, and change
   nothing. The two long-running modes, `keeper` and `anchor`, are not part of the client contract. _(Design
   sections 6 and 11.)_
 - **`INV-KCLI-15`** <!-- uuid: 0d65b8e3-a2f9-4c71-95b4-e8c0a37d1f26 --> — pa-monitor MUST enable and disable its hold through `acquire` and

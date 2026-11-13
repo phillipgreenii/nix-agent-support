@@ -117,8 +117,8 @@ func TestStatusMissingStateDirectory(t *testing.T) {
 	if code != 0 || strings.TrimSpace(stdout) != "keeper: never started" || stderr != "" {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
-	if code, _, _ := runCLI(t, "status", "--check"); code != 5 {
-		t.Errorf("--check exit = %d, want 5", code)
+	if code, _, _ := runCLI(t, "status", "--check"); code != 3 {
+		t.Errorf("--check exit = %d, want 3", code)
 	}
 	code, stdout, _ = runCLI(t, "status", "--json")
 	if code != 0 {
@@ -258,18 +258,18 @@ func TestStatusJSONIsOneObjectOnStdout(t *testing.T) {
 	}
 }
 
-func TestStatusCheckExit5HeartbeatStale(t *testing.T) {
+func TestStatusCheckExit3HeartbeatStale(t *testing.T) {
 	cases := []struct {
 		name string
 		f    statusFixture
 		want int
 	}{
 		{"fresh", statusFixture{heartbeatAgeS: 3}, 0},
-		{"older than twice the default interval", statusFixture{heartbeatAgeS: 25}, 5},
+		{"older than twice the default interval", statusFixture{heartbeatAgeS: 25}, 3},
 		{"younger than twice the default interval", statusFixture{heartbeatAgeS: 15}, 0},
 		{"status.json interval widens the limit", statusFixture{heartbeatAgeS: 25, heartbeatIntervalS: 30}, 0},
-		{"status.json interval narrows the limit", statusFixture{heartbeatAgeS: 15, heartbeatIntervalS: 5}, 5},
-		{"written long ago", statusFixture{heartbeatAgeS: 3, writtenAgo: 5 * time.Minute}, 5},
+		{"status.json interval narrows the limit", statusFixture{heartbeatAgeS: 15, heartbeatIntervalS: 5}, 3},
+		{"written long ago", statusFixture{heartbeatAgeS: 3, writtenAgo: 5 * time.Minute}, 3},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -290,8 +290,8 @@ func TestStatusCheckHeartbeatFileIsTheContract(t *testing.T) {
 	s := newStateFixture(t)
 	// status.json alone says the keeper is long gone ...
 	s.status(statusFixture{heartbeatAgeS: 3, writtenAgo: 10 * time.Minute})
-	if code, _, _ := runCLI(t, "status", "--check"); code != 5 {
-		t.Fatalf("without a heartbeat file: exit = %d, want 5", code)
+	if code, _, _ := runCLI(t, "status", "--check"); code != 3 {
+		t.Fatalf("without a heartbeat file: exit = %d, want 3", code)
 	}
 	// ... but a freshly touched keeper.heartbeat says otherwise.
 	s.write("keeper.heartbeat", "")
@@ -302,29 +302,29 @@ func TestStatusCheckHeartbeatFileIsTheContract(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(s.dir, "keeper.heartbeat"), old, old); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, _ := runCLI(t, "status", "--check"); code != 5 {
-		t.Errorf("with a stale heartbeat file: exit = %d, want 5", code)
+	if code, _, _ := runCLI(t, "status", "--check"); code != 3 {
+		t.Errorf("with a stale heartbeat file: exit = %d, want 3", code)
 	}
 }
 
-func TestStatusCheckExit6Degraded(t *testing.T) {
+func TestStatusCheckExit5Degraded(t *testing.T) {
 	cases := []struct {
 		name string
 		f    statusFixture
 		want int
 	}{
-		{"live leases, no assertion, nothing explains it", statusFixture{heartbeatAgeS: 3, unexplainedTicks: 2}, 6},
-		{"long-running degradation", statusFixture{heartbeatAgeS: 3, unexplainedTicks: 9}, 6},
+		{"live leases, no assertion, nothing explains it", statusFixture{heartbeatAgeS: 3, unexplainedTicks: 2}, 5},
+		{"long-running degradation", statusFixture{heartbeatAgeS: 3, unexplainedTicks: 9}, 5},
 		{"an assertion is held", statusFixture{heartbeatAgeS: 3, held: true, unexplainedTicks: 2}, 0},
 		{"gate no_spawn explains it", statusFixture{heartbeatAgeS: 3, gate: "no_spawn", unexplainedTicks: 2}, 0},
 		{"gate released explains it", statusFixture{heartbeatAgeS: 3, gate: "released", unexplainedTicks: 2}, 0},
-		{"gate unknown does not explain it", statusFixture{heartbeatAgeS: 3, gate: "unknown", unexplainedTicks: 2}, 6},
+		{"gate unknown does not explain it", statusFixture{heartbeatAgeS: 3, gate: "unknown", unexplainedTicks: 2}, 5},
 		{"a pause explains it", statusFixture{heartbeatAgeS: 3, paused: true, unexplainedTicks: 2}, 0},
 		{"the linger window explains it", statusFixture{heartbeatAgeS: 3, lingerFor: 20 * time.Second, unexplainedTicks: 2}, 0},
-		{"a linger window that ended does not", statusFixture{heartbeatAgeS: 3, lingerFor: -time.Second, unexplainedTicks: 2}, 6},
+		{"a linger window that ended does not", statusFixture{heartbeatAgeS: 3, lingerFor: -time.Second, unexplainedTicks: 2}, 5},
 		{"one tick is not enough", statusFixture{heartbeatAgeS: 3, unexplainedTicks: 1}, 0},
 		{"no tick yet", statusFixture{heartbeatAgeS: 3}, 0},
-		{"keeper down wins over degraded", statusFixture{heartbeatAgeS: 60, unexplainedTicks: 5}, 5},
+		{"keeper down wins over degraded", statusFixture{heartbeatAgeS: 60, unexplainedTicks: 5}, 3},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -429,8 +429,8 @@ func TestStatusPauseFileExplainsDegradation(t *testing.T) {
 	s := newStateFixture(t)
 	s.status(statusFixture{heartbeatAgeS: 3, unexplainedTicks: 4})
 	s.timerLease("pa-monitor", "default", time.Hour)
-	if code, _, _ := runCLI(t, "status", "--check"); code != 6 {
-		t.Fatalf("before pause: exit = %d, want 6", code)
+	if code, _, _ := runCLI(t, "status", "--check"); code != 5 {
+		t.Fatalf("before pause: exit = %d, want 5", code)
 	}
 	if code, _, _ := runCLI(t, "pause", "--for", "30m"); code != 0 {
 		t.Fatal("pause failed")
@@ -516,7 +516,7 @@ func TestStatusUsageErrorsExit2(t *testing.T) {
 	}
 }
 
-func TestStatusUnusableStateDirectoryExits3(t *testing.T) {
+func TestStatusUnusableStateDirectoryExits8(t *testing.T) {
 	sd := useStateDir(t)
 	if err := os.MkdirAll(sd, 0o755); err != nil {
 		t.Fatal(err)
@@ -524,8 +524,8 @@ func TestStatusUnusableStateDirectoryExits3(t *testing.T) {
 	if err := os.Chmod(sd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, _ := runCLI(t, "status"); code != 3 {
-		t.Errorf("exit = %d, want 3", code)
+	if code, _, _ := runCLI(t, "status"); code != 8 {
+		t.Errorf("exit = %d, want 8", code)
 	}
 }
 
@@ -563,8 +563,8 @@ func TestStatusLeasesWithoutAKeeperAreStillListed(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "keeper   never started") || !strings.Contains(stdout, "pa-monitor") {
 		t.Errorf("exit %d:\n%s", code, stdout)
 	}
-	if code, _, _ := runCLI(t, "status", "--check"); code != 5 {
-		t.Errorf("--check exit = %d, want 5", code)
+	if code, _, _ := runCLI(t, "status", "--check"); code != 3 {
+		t.Errorf("--check exit = %d, want 3", code)
 	}
 	if !fileExists(filepath.Join(sd, "leases", "pa-monitor.default.json")) {
 		t.Error("status removed the lease")

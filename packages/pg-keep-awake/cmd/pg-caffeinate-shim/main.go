@@ -53,7 +53,7 @@ func (r result) finish() {
 
 // Exit codes beyond caffeinate's own 0 and 1.
 const (
-	exitLeaseWrite = 3   // the pure form could not write its lease
+	exitLeaseWrite = 8   // exitcode.Denied in x/exitcode; the pure form could not write its lease
 	exitNotFound   = 127 // utility not found (shell convention)
 	exitNotRunable = 126 // utility found but not executable
 )

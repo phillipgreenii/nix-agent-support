@@ -14,7 +14,9 @@ import (
 
 // exitStateDir is ADR 0042's "state directory unwritable" code. The other
 // codes live in config_check.go.
-const exitStateDir = 3
+// exitStateDir equals exitcode.Denied in x/exitcode (the pinned x revision
+// does not yet carry that package).
+const exitStateDir = 8
 
 // defaultKey is the lease key used when --key is not given.
 const defaultKey = "default"
@@ -113,7 +115,7 @@ func isStateDirFailure(err error) bool {
 		errors.Is(err, syscall.EROFS)
 }
 
-// failState prints err and returns exit 3 for an unwritable state directory
+// failState prints err and returns exit 8 for an unwritable state directory
 // and exit 1 for anything else.
 func failState(stderr io.Writer, cmd string, err error) int {
 	fmt.Fprintf(stderr, "pg-keep-awake: %s: %v\n", cmd, err)

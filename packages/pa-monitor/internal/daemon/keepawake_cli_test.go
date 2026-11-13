@@ -32,7 +32,7 @@ const (
 // pa-monitor's lease; pa_monitor.caffeinate.active follows the keeper's
 // assertion.held from status --json, not pa-monitor's own idea of what it asked
 // for; pa_monitor.keep_awake.keeper_up follows status --check (1 for exit 0, 0
-// for exit 5); and the retired battery counter is never emitted.
+// for exit 3); and the retired battery counter is never emitted.
 func TestRunWith_KeeperDrivesCaffeinateMetrics(t *testing.T) {
 	bin := keepertest.Bin(t)
 	stateDir := keepertest.UseStateDir(t)
@@ -55,7 +55,7 @@ func TestRunWith_KeeperDrivesCaffeinateMetrics(t *testing.T) {
 	leaseFile := filepath.Join(stateDir, "leases", caffeinate.Owner+".default.json")
 
 	// No keeper yet: the lease is written (acquire never waits on the keeper),
-	// nothing is held, and the keeper is reported down (status --check exit 5).
+	// nothing is held, and the keeper is reported down (status --check exit 3).
 	collectUntil(t, reader, 5*time.Second, func(rm metricdata.ResourceMetrics) bool {
 		up, upOK := metricInt64(rm, keeperUpMetric, "", "")
 		a, aOK := metricInt64(rm, activeMetric, "", "")

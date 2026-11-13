@@ -35,8 +35,8 @@ func TestUnwritableStateDirExits3(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(xdg, 0o700) })
-			if code, _, stderr := runCLI(t, args...); code != 3 {
-				t.Fatalf("exit = %d, want 3 (stderr %q)", code, stderr)
+			if code, _, stderr := runCLI(t, args...); code != 8 {
+				t.Fatalf("exit = %d, want 8 (stderr %q)", code, stderr)
 			}
 		})
 		t.Run("read-only state dir/"+name, func(t *testing.T) {
@@ -51,14 +51,14 @@ func TestUnwritableStateDirExits3(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 			}
-			if code, _, stderr := runCLI(t, args...); code != 3 {
-				t.Fatalf("exit = %d, want 3 (stderr %q)", code, stderr)
+			if code, _, stderr := runCLI(t, args...); code != 8 {
+				t.Fatalf("exit = %d, want 8 (stderr %q)", code, stderr)
 			}
 		})
 	}
 }
 
-func TestStateDirWithOpenModeExits3(t *testing.T) {
+func TestStateDirWithOpenModeExits8(t *testing.T) {
 	sd := useStateDir(t)
 	if err := os.MkdirAll(sd, 0o755); err != nil {
 		t.Fatal(err)
@@ -66,8 +66,8 @@ func TestStateDirWithOpenModeExits3(t *testing.T) {
 	if err := os.Chmod(sd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, stderr := runCLI(t, "acquire", "--owner", "t", "--for", "1m"); code != 3 {
-		t.Fatalf("exit = %d, want 3 (stderr %q)", code, stderr)
+	if code, _, stderr := runCLI(t, "acquire", "--owner", "t", "--for", "1m"); code != 8 {
+		t.Fatalf("exit = %d, want 8 (stderr %q)", code, stderr)
 	}
 }
 
@@ -83,8 +83,8 @@ func TestLockHeldTooLongExits3(t *testing.T) {
 	}
 	defer func() { _ = lk.Unlock() }()
 	start := time.Now()
-	if code, _, stderr := runCLI(t, "acquire", "--owner", "t", "--for", "1m"); code != 3 {
-		t.Fatalf("exit = %d, want 3 (stderr %q)", code, stderr)
+	if code, _, stderr := runCLI(t, "acquire", "--owner", "t", "--for", "1m"); code != 8 {
+		t.Fatalf("exit = %d, want 8 (stderr %q)", code, stderr)
 	}
 	if took := time.Since(start); took < lease.LockTimeout || took > lease.LockTimeout+3*time.Second {
 		t.Errorf("gave up after %v, want about the %v lock bound", took, lease.LockTimeout)
