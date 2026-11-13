@@ -32,6 +32,7 @@ mkGoApp {
       ./internal
       ./cmd/pg-desk-attention
       ../pg-connector
+      ../pg-sqlite
     ];
   };
   modRoot = "pg-desk";

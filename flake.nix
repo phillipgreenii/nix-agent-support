@@ -7023,6 +7023,16 @@
                 gomod2nixToml = ./packages/claude-transcript/gomod2nix.toml;
               };
 
+              # pg-sqlite: the shared sqlite-open helper (sqliteopen), imported by
+              # pg-desk via local replace (ADR 0125). A Pattern-A library with no
+              # binary, same shape as claude-transcript-go-tests above; its tests run
+              # real SQLite against temp files.
+              pg-sqlite-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-sqlite-go-tests";
+                src = ./packages/pg-sqlite;
+                gomod2nixToml = ./packages/pg-sqlite/gomod2nix.toml;
+              };
+
               # pg-failsig: shared failure-signature table and credential redaction,
               # imported by pg-router-handlers (and, later, pg-origin-guard) via local
               # replace. Stdlib-only Pattern-A library, no binary, same shape as
@@ -8412,6 +8422,7 @@
                     fileset = lib.fileset.unions [
                       ./packages/pg-desk
                       ./packages/pg-connector
+                      ./packages/pg-sqlite
                     ];
                   };
                   modRoot = "pg-desk";
@@ -10370,6 +10381,7 @@
                     fileset = lib.fileset.unions [
                       ./packages/pg-desk
                       ./packages/pg-connector
+                      ./packages/pg-sqlite
                       # internal/alertrules tests read pg-router-probe's
                       # cmd/pg-router-probe/run.go by relative path.
                       ./packages/pg-router-probe
@@ -10403,6 +10415,7 @@
                     fileset = lib.fileset.unions [
                       ./packages/pg-desk
                       ./packages/pg-connector
+                      ./packages/pg-sqlite
                       ./packages/pg-router-probe
                     ];
                   };

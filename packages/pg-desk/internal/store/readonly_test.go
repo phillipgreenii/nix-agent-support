@@ -64,3 +64,70 @@ func TestOpenReadOnlyEmptyFileFailsOnFirstRead(t *testing.T) {
 		}
 	}
 }
+
+// The writer and every connection of the read-only pool carry the standard
+// pragma set (the shared helper's, proven field by field in its own tests); this
+// proves pg-desk's opens apply it, on real SQLite, and that a read pass on the
+// pool is not blocked by an open writer transaction.
+func TestWriterAndReadPoolCarryTheStandardPragmas(t *testing.T) {
+	// Other tests switch fsync off for speed; this one needs the production value.
+	prev := synchronousPragma
+	SetSynchronousForTests("")
+	t.Cleanup(func() { SetSynchronousForTests(prev) })
+	w, err := Open(filepath.Join(t.TempDir(), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	w.SeedLiveSizeForTest(t, 20, 100, 5)
+	rd, err := OpenReadPool(w.Path(), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rd.Close() }()
+
+	check := func(name string, s *Store, wantQueryOnly bool, wantJournal string) {
+		t.Helper()
+		var cache, temp, qo int
+		var mmap int64
+		var journal string
+		for q, dst := range map[string]any{
+			"PRAGMA cache_size": &cache, "PRAGMA temp_store": &temp, "PRAGMA mmap_size": &mmap,
+			"PRAGMA query_only": &qo, "PRAGMA journal_mode": &journal,
+		} {
+			if err := s.sql.QueryRow(q).Scan(dst); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if cache != -65536 || temp != 2 || mmap != 256<<20 || (qo == 1) != wantQueryOnly || journal != wantJournal {
+			t.Fatalf("%s: cache=%d temp_store=%d mmap=%d query_only=%d journal=%s", name, cache, temp, mmap, qo, journal)
+		}
+	}
+	check("writer", w, false, "wal")
+	check("read pool", rd, true, "wal")
+	var sync, fk int
+	if err := w.sql.QueryRow("PRAGMA synchronous").Scan(&sync); err != nil || sync != 1 {
+		t.Fatalf("writer synchronous = %d, %v; want NORMAL (1)", sync, err)
+	}
+	if err := w.sql.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("writer foreign_keys = %d, %v", fk, err)
+	}
+	if rd.sql.Stats().MaxOpenConnections != 3 {
+		t.Fatalf("read pool size = %d", rd.sql.Stats().MaxOpenConnections)
+	}
+	if err := rd.UpsertEntity(Entity{Repo: "o/r", EntityType: "pr", EntityID: "x", Facts: "{}", AsOf: "x"}); err == nil {
+		t.Fatal("write through the read pool succeeded")
+	}
+	// An open write transaction on the writer does not block a read on the pool.
+	tx, err := w.sql.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE entity SET stale = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := rd.CountEntities(); err != nil || n != 20 {
+		t.Fatalf("read pool during a writer transaction: %d, %v", n, err)
+	}
+}

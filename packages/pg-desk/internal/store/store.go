@@ -31,7 +31,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	_ "modernc.org/sqlite" // pure-Go SQLite driver (no cgo)
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 )
 
 // busyTimeoutMillis is the SQLite busy_timeout applied on every connection,
@@ -126,15 +126,14 @@ func openDB(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: create dir for %s: %w", path, err)
 	}
 
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
-		path, busyTimeoutMillis)
-	sqlDB, err := sql.Open("sqlite", dsn)
+	// The shared helper applies the standard pragma set (ADR 0125) to every
+	// connection and caps the writer pool at one connection: modernc serializes
+	// writes correctly with a single connection, so WAL writers do not
+	// contend within one process.
+	sqlDB, err := sqliteopen.Open(sqliteopen.Standard(path))
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
-	// modernc serializes writes correctly with a single connection; cap the
-	// pool so WAL writers don't contend within one process.
-	sqlDB.SetMaxOpenConns(1)
 	if synchronousPragma != "" {
 		if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA synchronous="+synchronousPragma); err != nil {
 			_ = sqlDB.Close()
@@ -199,17 +198,25 @@ func OpenRaw(path string) (*Store, error) {
 // an error. It exists for the read-only verbs (`links`), whose contract is
 // that they MUST NOT write the store.
 func OpenReadOnly(path string) (*Store, error) {
+	return openReadOnly(path, 1)
+}
+
+// OpenReadPool is OpenReadOnly with a pool of conns connections (0 means the
+// helper's default of 3), for a reader that runs long passes (the /metrics
+// snapshot, the dashboard) beside the writer's single connection: its
+// statements use their own connections and no longer queue behind the
+// writer's. Every connection carries the standard read pragma set. The handle
+// rejects every write.
+func OpenReadPool(path string, conns int) (*Store, error) {
+	return openReadOnly(path, conns)
+}
+
+func openReadOnly(path string, conns int) (*Store, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
 	}
-	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(%d)&_pragma=query_only(ON)", path, busyTimeoutMillis)
-	sqlDB, err := sql.Open("sqlite", dsn)
+	sqlDB, err := sqliteopen.Open(sqliteopen.ReadOnly(path, conns))
 	if err != nil {
-		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-	if err := sqlDB.PingContext(context.Background()); err != nil {
-		_ = sqlDB.Close()
 		return nil, fmt.Errorf("store: open read-only %s: %w", path, err)
 	}
 	return &Store{sql: sqlDB, path: path}, nil

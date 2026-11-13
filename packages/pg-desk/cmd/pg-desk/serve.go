@@ -173,12 +173,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	installIssueGate(st, cfg)
 	defer func() { _ = st.Close() }()
+	// A read-only pool for /metrics, the dashboard and the ready gate, so a long
+	// read pass never queues behind the writer's one connection. Opened after
+	// store.Open, which creates the file and brings the schema up to date.
+	readPool, err := store.OpenReadPool(store.DefaultPath(), 3)
+	if err != nil {
+		return fmt.Errorf("serve: open read pool: %w", err)
+	}
+	defer func() { _ = readPool.Close() }()
 
 	routerPath := serveRouterConfig
 	if routerPath == "" {
 		routerPath = os.Getenv("PG_DESK_ROUTER_CONFIG")
 	}
-	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval))
+	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval), httpapi.WithReadStore(readPool))
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}

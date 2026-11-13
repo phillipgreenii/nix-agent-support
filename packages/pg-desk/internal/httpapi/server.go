@@ -431,6 +431,8 @@ type PollIntervalFunc func(entityType string) (interval time.Duration, ok bool)
 type options struct {
 	pollInterval PollIntervalFunc
 	snapshotCtx  context.Context
+	// readStore, when set, is the read-only pool every handler reads through.
+	readStore *store.Store
 	// snapshotEvery overrides snapshotInterval when positive.
 	snapshotEvery time.Duration
 }
@@ -462,6 +464,15 @@ func WithMetricsSnapshotInterval(d time.Duration) Option {
 	return func(o *options) { o.snapshotEvery = d }
 }
 
+// WithReadStore makes the handler read through rd, a read-only pool on the same
+// database (store.OpenReadPool), instead of through the writer handle: the
+// /metrics snapshot build, the dashboard and the ready gate then use their own
+// connections and no longer queue behind the writer's single one. rd MUST
+// reject writes; nothing on these paths writes.
+func WithReadStore(rd *store.Store) Option {
+	return func(o *options) { o.readStore = rd }
+}
+
 // NewHandler returns the pg-desk serve HTTP handler: GET /api/v1/dashboard
 // and GET /metrics, both gated behind the same 503-until-first-interpretation
 // check. It returns an error only if constructing the OTel metrics catalog
@@ -472,6 +483,9 @@ func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handl
 	var o options
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.readStore != nil {
+		st = o.readStore
 	}
 	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval, o.snapshotCtx, o.snapshotEvery)
 	if err != nil {

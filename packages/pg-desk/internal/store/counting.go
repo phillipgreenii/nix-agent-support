@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 )
 
 // QueryCounter counts what a store handle sends to SQLite: statements run
@@ -152,7 +153,7 @@ func (s *Store) WithCounterForTest(t testT) (*Store, *QueryCounter) {
 	drv := probe.Driver()
 	_ = probe.Close()
 	c := &QueryCounter{}
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)", s.path, busyTimeoutMillis)
+	dsn := sqliteopen.DSN(sqliteopen.Standard(s.path))
 	db := sql.OpenDB(&countingConnector{dsn: dsn, drv: drv, c: c})
 	db.SetMaxOpenConns(1)
 	cs := &Store{sql: db, path: s.path}

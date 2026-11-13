@@ -38,7 +38,14 @@ func TestMetricsScrapePerformsZeroDatabaseQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = scrapeBody(t, h) // first scrape: waits for the first snapshot (and the ready check)
+	// A first scrape waits at most the first-snapshot bound (5 s), which a loaded
+	// or -race host can exceed, so wait until the snapshot is really published.
+	deadline := time.Now().Add(2 * time.Minute)
+	for !strings.Contains(scrapeBody(t, h), "pg_desk_metrics_snapshot_age_seconds") {
+		if time.Now().After(deadline) {
+			t.Fatal("no snapshot published")
+		}
+	}
 	before := cnt.Queries()
 	for i := 0; i < 20; i++ {
 		body := scrapeBody(t, h)
@@ -105,4 +112,34 @@ func TestPayloadQueriesAreConstantInRowCount(t *testing.T) {
 		t.Fatalf("queries depend on row count: 10 rows %d, 1000 rows %d", counts[10], counts[1000])
 	}
 	t.Logf("buildPayload: %d queries at both sizes", counts[10])
+}
+
+// The whole handler answers through a read-only pool: no handler path writes.
+func TestHandlerServesThroughTheReadOnlyPool(t *testing.T) {
+	setClock(t, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
+	w, err := store.Open(t.TempDir() + "/rp.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	w.SeedLiveSizeForTest(t, 50, 100, 20)
+	mustUpsertInterpretation(t, w, store.Interpretation{Repo: "o/r", EntityType: "issue", EntityID: "id-1", Panel: PanelMineAwaitingMe, AsOf: "2026-11-01T00:00:00Z"})
+	rd, err := store.OpenReadPool(w.Path(), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rd.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h, err := NewHandler(w, testConfig(), WithMetricsSnapshot(ctx), WithReadStore(rd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := scrapeBody(t, h)
+	if !strings.Contains(body, "pg_desk_watched_entities") || !strings.Contains(body, "pg_desk_metrics_snapshot_age_seconds") {
+		t.Fatalf("catalog incomplete through the read pool:\n%s", body)
+	}
+	if strings.Contains(body, "snapshot_errors_total 1") {
+		t.Fatalf("the snapshot build reported an error through the read pool:\n%s", body)
+	}
 }

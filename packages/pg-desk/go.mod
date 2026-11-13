@@ -4,6 +4,7 @@ go 1.26.8
 
 require (
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
+	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0
 	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
@@ -62,3 +63,6 @@ require (
 // pattern packages/pg-router-handlers's go.mod already uses for its
 // own sibling-module dependencies (phillipg-nix-repo-base ADR 0008).
 replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector => ../pg-connector
+
+// pg-sqlite is the shared sqlite-open helper (ADR 0125), resolved by a local replace like pg-connector.
+replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite => ../pg-sqlite

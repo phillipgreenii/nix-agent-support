@@ -21,6 +21,7 @@ mkGoApp {
     fileset = lib.fileset.unions [
       ./.
       ../pg-connector
+      ../pg-sqlite
     ];
   };
   modRoot = "pg-desk";
