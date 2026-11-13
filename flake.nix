@@ -10340,6 +10340,11 @@
               test-pg-desk-composition-rule =
                 let
                   stubPgConnector = pkgs.writeShellScriptBin "pg-connector" ''
+                    # Record every invocation so the test can prove the wrapper
+                    # (not ambient PATH) is what reached this stub.
+                    if [ -n "''${PG_CONNECTOR_STUB_LOG:-}" ]; then
+                      printf '%s\n' "$*" >> "$PG_CONNECTOR_STUB_LOG"
+                    fi
                     if [ "$1" = "pr" ] && [ "$2" = "show" ]; then
                       printf '%s\n' '{"result":{"repo":"phillipgreenii/example-repo","number":1,"state":"open","merged":false,"head_sha":"deadbeef","as_of":"2026-09-16T00:00:00Z"}}'
                       exit 0
@@ -18907,7 +18912,7 @@
                     for bad in ${r.live.uncheckedBadWatchdog} ${r.live.uncheckedBadRelease} "$PWD/invalid.toml" "$PWD/unknown-key.toml"; do
                       rc=0
                       pg-keep-awake config check --config "$bad" >out.txt 2>&1 || rc=$?
-                      [ "$rc" = 4 ] || { echo "FAIL: config check on $bad exited $rc, want 4:" >&2; cat out.txt >&2; exit 1; }
+                      [ "$rc" = 7 ] || { echo "FAIL: config check on $bad exited $rc, want 7 (exitcode.Config):" >&2; cat out.txt >&2; exit 1; }
                     done
 
                     # The hash is a function of the rendered config: it differs between two

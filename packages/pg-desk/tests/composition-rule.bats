@@ -59,15 +59,21 @@ teardown() {
 }
 
 @test "nix-wrapped pg-desk resolves pg-connector via the wrapper's PATH injection, not ambient PATH" {
+  # `pr refresh` hydrates through pg-connector. The stub answers only `pr show`,
+  # so the hydration may end degraded (non-zero); what this test proves is that
+  # the wrapper's PATH injection let pg-desk reach the stub at all.
+  local stub_log="$WORK_DIR/stub-calls.log"
   run env -i PG_DESK_CONFIG="$CONFIG_FILE" XDG_STATE_HOME="$XDG_STATE_HOME" \
-    "$PG_DESK_STUB_WRAPPED" run pr 1
+    PG_CONNECTOR_STUB_LOG="$stub_log" \
+    "$PG_DESK_STUB_WRAPPED" pr refresh 1
   echo "output: $output"
-  [ "$status" -eq 0 ]
+  [ -f "$stub_log" ]
+  grep -q '^pr show ' "$stub_log"
 }
 
 @test "unwrapped pg-desk binary fails under env -i with no pg-connector on PATH" {
   run env -i PG_DESK_CONFIG="$CONFIG_FILE" XDG_STATE_HOME="$XDG_STATE_HOME" \
-    "$PG_DESK_UNWRAPPED" run pr 1
+    "$PG_DESK_UNWRAPPED" pr refresh 1
   echo "output: $output"
   [ "$status" -ne 0 ]
   [[ "$output" == *"pg-connector"* ]]

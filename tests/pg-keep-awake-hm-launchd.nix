@@ -208,6 +208,7 @@ let
       builtins.attrNames e.serviceConfig == [
         "AbandonProcessGroup"
         "EnvironmentVariables"
+        "ExitTimeOut"
         "StandardErrorPath"
         "StandardOutPath"
       ];

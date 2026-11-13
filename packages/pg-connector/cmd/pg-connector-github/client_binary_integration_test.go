@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,28 @@ const (
 	exitVersionMismatch = exitcode.Conflict
 	exitInvalidArgument = exitcode.Usage
 )
+
+// buildDirs maps an -ldflags value to its built binary (guarded by buildMu,
+// declared in client_binary_test.go).
+var buildDirs = map[string]string{}
+
+// lockedBuf is a strings.Builder safe to read while the child process writes.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
 
 // buildClient builds cmd/pg-connector-github with the given -ldflags and
 // returns the binary. One build per distinct flag set per test process.
