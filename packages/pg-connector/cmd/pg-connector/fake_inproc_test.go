@@ -68,7 +68,7 @@ func appendLine(t *testing.T, path, line string) {
 		t.Errorf("open request log: %v", err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(line + "\n"); err != nil {
 		t.Errorf("write request log: %v", err)
 	}
