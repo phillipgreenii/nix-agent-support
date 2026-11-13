@@ -265,6 +265,9 @@ func TestSnapshot_DialFailureTriggersRediscoverAtMostOnce(t *testing.T) {
 }
 
 func TestSnapshot_DeadlineCutoff(t *testing.T) {
+	prev := pollerRPCDeadline
+	pollerRPCDeadline = 200 * time.Millisecond // a real wait on a silent core; keep it short
+	t.Cleanup(func() { pollerRPCDeadline = prev })
 	logDir := shortTestDir(t)
 	socketPath := core.SocketPath(logDir)
 	startFakeCore(t, socketPath, nil) // never replies

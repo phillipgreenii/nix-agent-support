@@ -27,8 +27,11 @@ import (
 const (
 	pollerBackoffInitial = 1 * time.Second
 	pollerBackoffCap     = 5 * time.Second
-	pollerRPCDeadline    = 5 * time.Second
 )
+
+// pollerRPCDeadline is a variable only so a test can shrink the real wait
+// against a core that never replies.
+var pollerRPCDeadline = 5 * time.Second
 
 // ErrBusy is Snapshot's typed sentinel for an exit-9 (conformance.ExitBusy)
 // reply: the core is momentarily saturated, not actually failing. It

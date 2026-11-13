@@ -16,7 +16,9 @@ import (
 
 // flashTTL bounds how long a footer flash stays visible -- pa-monitor's
 // own nudgeFlashTTL constant, reused verbatim [design: Task 4.8 Step 4].
-const flashTTL = 5 * time.Second
+//
+// It is a variable only so a test can shrink the real timer wait.
+var flashTTL = 5 * time.Second
 
 // FlashLevel selects a flash's render style [design: Task 4.8 Interfaces].
 // FlashInfo is a neutral confirmation (e.g. a successful gate toggle);

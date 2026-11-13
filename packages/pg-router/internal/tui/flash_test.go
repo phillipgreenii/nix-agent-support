@@ -121,6 +121,9 @@ func TestUpdate_FlashClearMsgRoutesToApplyFlashClear(t *testing.T) {
 // actually produce a flashClearMsg when invoked (Update only reacts to
 // that concrete type).
 func TestFlashClearCmd_ProducesFlashClearMsg(t *testing.T) {
+	prev := flashTTL
+	flashTTL = time.Millisecond // flashClearCmd is a real timer; do not wait the full TTL
+	t.Cleanup(func() { flashTTL = prev })
 	m := newTestModel(nil)
 	msg := m.flashClearCmd()()
 	if _, ok := msg.(flashClearMsg); !ok {
