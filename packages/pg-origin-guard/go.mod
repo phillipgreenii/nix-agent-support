@@ -14,4 +14,6 @@ require (
 
 require github.com/creack/pty v1.1.24
 
+require github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
+
 replace github.com/phillipgreenii/pg-failsig => ../pg-failsig
