@@ -19,6 +19,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Version is stamped by mkGoApp's default ldflag target (-X main.Version=...).
@@ -53,9 +55,9 @@ func (r result) finish() {
 
 // Exit codes beyond caffeinate's own 0 and 1.
 const (
-	exitLeaseWrite = 8   // exitcode.Denied in x/exitcode; the pure form could not write its lease
-	exitNotFound   = 127 // utility not found (shell convention)
-	exitNotRunable = 126 // utility found but not executable
+	exitLeaseWrite = exitcode.Denied // the pure form could not write its lease
+	exitNotFound   = 127             // utility not found (shell convention)
+	exitNotRunable = 126             // utility found but not executable
 )
 
 // run is the whole program, with its stderr injected.

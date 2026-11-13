@@ -5,15 +5,15 @@ import (
 	"io"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/config"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Exit codes (ADR 0042) used by the config subcommand.
 const (
-	exitOK         = 0
-	exitUnexpected = 1
-	exitUsage      = 2
-	// exitConfigInvalid equals exitcode.Config in x/exitcode.
-	exitConfigInvalid = 7
+	exitOK            = exitcode.OK
+	exitUnexpected    = exitcode.Error
+	exitUsage         = exitcode.Usage
+	exitConfigInvalid = exitcode.Config
 )
 
 // runConfig dispatches `pg-keep-awake config <subcommand>`.

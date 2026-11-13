@@ -4,6 +4,7 @@ go 1.26.8
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.23.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0

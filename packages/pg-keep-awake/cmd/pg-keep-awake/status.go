@@ -13,15 +13,14 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/lease"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Exit codes of `status --check` (ADR 0042); the shared codes live in
 // config_check.go and state.go.
 const (
-	// exitKeeperDown equals exitcode.Unavailable and exitDegraded equals
-	// exitcode.Degraded in x/exitcode.
-	exitKeeperDown = 3
-	exitDegraded   = 5
+	exitKeeperDown = exitcode.Unavailable
+	exitDegraded   = exitcode.Degraded
 )
 
 const (

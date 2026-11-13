@@ -10,13 +10,12 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/lease"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // exitStateDir is ADR 0042's "state directory unwritable" code. The other
 // codes live in config_check.go.
-// exitStateDir equals exitcode.Denied in x/exitcode (the pinned x revision
-// does not yet carry that package).
-const exitStateDir = 8
+const exitStateDir = exitcode.Denied
 
 // defaultKey is the lease key used when --key is not given.
 const defaultKey = "default"
