@@ -18992,12 +18992,12 @@
                     ' default.json >/dev/null || { echo "unexpected rendered config:" >&2; cat default.json >&2; exit 1; }
 
                     # the negative control: the build-time check's command REJECTS a bad
-                    # duration (usage error, exit 2), so the check is not vacuous
+                    # duration (config error, exit 7), so the check is not vacuous
                     export HOME=$TMPDIR
                     rc=0
                     ${bin} status --json --config ${r.live.uncheckedBadDuration} \
                       --socket "$TMPDIR/absent.sock" >out.txt 2>&1 || rc=$?
-                    [ "$rc" = 2 ] || { echo "FAIL: a bad duration exited $rc, want 2:" >&2; cat out.txt >&2; exit 1; }
+                    [ "$rc" = 7 ] || { echo "FAIL: a bad duration exited $rc, want 7:" >&2; cat out.txt >&2; exit 1; }
 
                     # ---- the live trigger: the rendered command, under env -i
                     w=$TMPDIR/w

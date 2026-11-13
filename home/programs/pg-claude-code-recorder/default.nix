@@ -39,7 +39,7 @@
 # later phase owns (remove.*, held.*, feed.*, wait.*), so the check
 # runs the real `pg-claude-code-recorder status --json --config <file>` offline
 # against a socket that does not exist. A malformed file or a bad duration is a
-# usage error (exit 2); a loadable file answers "daemon offline" (exit 3).
+# config error (exit 7); a loadable file answers "daemon offline" (exit 3).
 # Later-phase keys are therefore accepted now and validated when the phase that
 # reads them lands.
 
