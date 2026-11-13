@@ -136,7 +136,7 @@ func TestProbeRealLocalRemote(t *testing.T) {
 		{"init", "-q", src},
 		{"-C", src, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "init"},
 	} {
-		cmd := exec.Command("git", args...)
+		cmd := exec.CommandContext(context.Background(), "git", args...)
 		cmd.Env = Hermetic(os.Environ())
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)

@@ -37,7 +37,7 @@ func TestReadOnlyPoolPragmasOnEveryConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	if _, err := w.Exec(`CREATE TABLE t (x INTEGER)`); err != nil {
+	if _, err := w.ExecContext(context.Background(), `CREATE TABLE t (x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	ro, err := Open(ReadOnly(path, 3))
@@ -71,15 +71,15 @@ func TestReadOnlyPoolPragmasOnEveryConnection(t *testing.T) {
 	for _, c := range held {
 		_ = c.Close()
 	}
-	if _, err := ro.Exec(`INSERT INTO t VALUES (1)`); err == nil {
+	if _, err := ro.ExecContext(context.Background(), `INSERT INTO t VALUES (1)`); err == nil {
 		t.Fatal("write through the read-only pool succeeded")
 	}
 	// A reader and the writer coexist: the writer commits while a read pool is open.
-	if _, err := w.Exec(`INSERT INTO t VALUES (2)`); err != nil {
+	if _, err := w.ExecContext(context.Background(), `INSERT INTO t VALUES (2)`); err != nil {
 		t.Fatalf("writer blocked by the read pool: %v", err)
 	}
 	var n int
-	if err := ro.QueryRow(`SELECT COUNT(*) FROM t`).Scan(&n); err != nil || n != 1 {
+	if err := ro.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM t`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("read pool count = %d, %v", n, err)
 	}
 }

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,7 +96,7 @@ func TestWriterAndReadPoolCarryTheStandardPragmas(t *testing.T) {
 			"PRAGMA cache_size": &cache, "PRAGMA temp_store": &temp, "PRAGMA mmap_size": &mmap,
 			"PRAGMA query_only": &qo, "PRAGMA journal_mode": &journal,
 		} {
-			if err := s.sql.QueryRow(q).Scan(dst); err != nil {
+			if err := s.sql.QueryRowContext(context.Background(), q).Scan(dst); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -106,10 +107,10 @@ func TestWriterAndReadPoolCarryTheStandardPragmas(t *testing.T) {
 	check("writer", w, false, "wal")
 	check("read pool", rd, true, "wal")
 	var sync, fk int
-	if err := w.sql.QueryRow("PRAGMA synchronous").Scan(&sync); err != nil || sync != 1 {
+	if err := w.sql.QueryRowContext(context.Background(), "PRAGMA synchronous").Scan(&sync); err != nil || sync != 1 {
 		t.Fatalf("writer synchronous = %d, %v; want NORMAL (1)", sync, err)
 	}
-	if err := w.sql.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
+	if err := w.sql.QueryRowContext(context.Background(), "PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 1 {
 		t.Fatalf("writer foreign_keys = %d, %v", fk, err)
 	}
 	if rd.sql.Stats().MaxOpenConnections != 3 {
@@ -119,12 +120,12 @@ func TestWriterAndReadPoolCarryTheStandardPragmas(t *testing.T) {
 		t.Fatal("write through the read pool succeeded")
 	}
 	// An open write transaction on the writer does not block a read on the pool.
-	tx, err := w.sql.Begin()
+	tx, err := w.sql.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`UPDATE entity SET stale = 1`); err != nil {
+	if _, err := tx.ExecContext(context.Background(), `UPDATE entity SET stale = 1`); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := rd.CountEntities(); err != nil || n != 20 {

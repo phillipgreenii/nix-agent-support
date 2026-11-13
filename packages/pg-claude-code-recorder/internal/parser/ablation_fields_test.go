@@ -3,6 +3,7 @@
 package parser_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -118,7 +119,7 @@ func abFieldsBatching(t *testing.T, files []abFile, work, out, run string) {
 			t.Fatal(err)
 		}
 		db.SetMaxOpenConns(1)
-		if _, err := db.Exec(abFieldsDDL); err != nil {
+		if _, err := db.ExecContext(context.Background(), abFieldsDDL); err != nil {
 			t.Fatal(err)
 		}
 		probe := abStart(t, "", filepath.Join(out, "V7."+mode+"."+run+".cpu.pb.gz"))
@@ -127,18 +128,18 @@ func abFieldsBatching(t *testing.T, files []abFile, work, out, run string) {
 		buf := make([]any, 0, 5*600)
 		for r0 := 0; r0 < nrec; r0 += recsPerTx {
 			r1 := min(r0+recsPerTx, nrec)
-			tx, err := db.Begin()
+			tx, err := db.BeginTx(context.Background(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			switch mode {
 			case "A_per_row_prepared":
-				st, err := tx.Prepare(`INSERT INTO fields(rec_id,name_id,s,n,f) VALUES(?,?,?,?,?)` + abUpsert)
+				st, err := tx.PrepareContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s,n,f) VALUES(?,?,?,?,?)`+abUpsert)
 				if err != nil {
 					t.Fatal(err)
 				}
 				for _, r := range rows[recStart[r0]:recStart[r1]] {
-					if _, err := st.Exec(r.rec, r.name, r.s, r.n, r.f); err != nil {
+					if _, err := st.ExecContext(context.Background(), r.rec, r.name, r.s, r.n, r.f); err != nil {
 						t.Fatal(err)
 					}
 					stmts++
@@ -153,13 +154,13 @@ func abFieldsBatching(t *testing.T, files []abFile, work, out, run string) {
 					}
 					st := cache[len(rs)]
 					if st == nil {
-						if st, err = tx.Prepare(abMultiSQL(len(rs))); err != nil {
+						if st, err = tx.PrepareContext(context.Background(), abMultiSQL(len(rs))); err != nil {
 							t.Fatal(err)
 						}
 						cache[len(rs)] = st
 					}
 					buf = abArgs(rs, buf)
-					if _, err := st.Exec(buf...); err != nil {
+					if _, err := st.ExecContext(context.Background(), buf...); err != nil {
 						t.Fatal(err)
 					}
 					stmts++
@@ -169,7 +170,7 @@ func abFieldsBatching(t *testing.T, files []abFile, work, out, run string) {
 				}
 			case "C_multi_row_500":
 				all := rows[recStart[r0]:recStart[r1]]
-				full, err := tx.Prepare(abMultiSQL(500))
+				full, err := tx.PrepareContext(context.Background(), abMultiSQL(500))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -177,9 +178,9 @@ func abFieldsBatching(t *testing.T, files []abFile, work, out, run string) {
 					n := min(500, len(all))
 					buf = abArgs(all[:n], buf)
 					if n == 500 {
-						_, err = full.Exec(buf...)
+						_, err = full.ExecContext(context.Background(), buf...)
 					} else {
-						_, err = tx.Exec(abMultiSQL(n), buf...)
+						_, err = tx.ExecContext(context.Background(), abMultiSQL(n), buf...)
 					}
 					if err != nil {
 						t.Fatal(err)
@@ -197,7 +198,7 @@ func abFieldsBatching(t *testing.T, files []abFile, work, out, run string) {
 		var res abResult
 		probe.end(&res)
 		var cnt int64
-		_ = db.QueryRow(`SELECT COUNT(*) FROM fields`).Scan(&cnt)
+		_ = db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM fields`).Scan(&cnt)
 		_ = db.Close()
 		res.Variant, res.Run, res.Files = "V7", run, len(files)
 		res.Records, res.ParseSec, res.TotalSec = int64(nrec), sec, sec

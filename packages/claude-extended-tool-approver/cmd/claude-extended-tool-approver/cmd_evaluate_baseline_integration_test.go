@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -36,7 +37,7 @@ func setupBaselineFlipDB(t *testing.T) (dataDir, cwd string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary, hook_decision, outcome, created_at)
 		VALUES
 		 (1,'s',?,'Bash','h1','{"command":"ls"}','ls','allow','approved','2026-01-01T00:00:00Z'),
@@ -70,7 +71,7 @@ func writeRulesJSON(t *testing.T, configHome string) {
 // on success, matching the raw code on a non-zero exit).
 func runEvaluateWithConfig(t *testing.T, dataDir, configHome string, args ...string) (output string, exitCode int) {
 	t.Helper()
-	cmd := exec.Command(testBinary(t), append([]string{"evaluate"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), testBinary(t), append([]string{"evaluate"}, args...)...)
 	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+dataDir, "XDG_CONFIG_HOME="+configHome)
 	out, err := cmd.CombinedOutput()
 	if err == nil {

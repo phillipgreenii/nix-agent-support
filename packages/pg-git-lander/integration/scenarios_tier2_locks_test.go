@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -314,7 +315,7 @@ func TestTier2StaleTargetRoleLockTakenOver(t *testing.T) {
 	// worktree, so no destination worktree is locked: the dead holder leaves a stale TARGET record that a waiter may take over.
 	h.mustGit(h.repo, "switch", "-q", "--detach")
 	spare := h.wtPath("spare")
-	cmd := exec.Command(toolBinary, "land", "feature/x", "--json")
+	cmd := exec.CommandContext(context.Background(), toolBinary, "land", "feature/x", "--json")
 	cmd.Dir, cmd.Env = spare, h.env
 	p := &proc{cmd: cmd, out: new(bytes.Buffer), errb: new(bytes.Buffer), done: make(chan struct{})}
 	cmd.Stdout, cmd.Stderr = p.out, p.errb

@@ -3,6 +3,7 @@
 package lifecycle
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 // detail column of every plan row.
 func (f *cwdFixture) planOf(q string, args ...any) []string {
 	f.t.Helper()
-	rows, err := f.db.Query("EXPLAIN QUERY PLAN "+q, args...)
+	rows, err := f.db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+q, args...)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestLoadQueryPlansUseTheSourceIndex(t *testing.T) {
 		}
 		f.rec(fmt.Sprintf("s%d", i%40), src, int64(i), fs...)
 	}
-	if _, err := f.db.Exec(`UPDATE records SET type='registry' WHERE source='session-registry' AND id%2=0;
+	if _, err := f.db.ExecContext(context.Background(), `UPDATE records SET type='registry' WHERE source='session-registry' AND id%2=0;
 UPDATE records SET type='registry_deleted' WHERE source='session-registry' AND id%2=1`); err != nil {
 		t.Fatal(err)
 	}

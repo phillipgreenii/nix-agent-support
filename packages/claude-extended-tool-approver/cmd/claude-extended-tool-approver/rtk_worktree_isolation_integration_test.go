@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -89,7 +90,7 @@ func TestIntegration_InputProcessor_RtkRewriteDroppedInLinkedWorktree(t *testing
 
 	// Precondition, asserted directly so a future rtk change cannot make the
 	// cases below vacuous: under this HOME rtk rewrites `git commit -m x`.
-	pre := exec.Command(rtk, "rewrite", "git commit -m x")
+	pre := exec.CommandContext(context.Background(), rtk, "rewrite", "git commit -m x")
 	pre.Dir = primary
 	pre.Env = os.Environ()
 	out, err := pre.Output()

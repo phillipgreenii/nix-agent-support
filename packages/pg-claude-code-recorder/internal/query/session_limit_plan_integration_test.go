@@ -3,6 +3,7 @@
 package query
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func TestSessionFilteredLimitQuerySearchesTheSessionIndex(t *testing.T) {
 			        CASE WHEN i%1000=1 THEN 1 ELSE i%999+2 END FROM n`,
 			`INSERT INTO fields(rec_id,name_id,s) SELECT id,1,'m' FROM records WHERE type='assistant'`,
 		} {
-			if _, err := tx.Exec(q); err != nil {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}
@@ -70,7 +71,7 @@ func TestSessionFilteredLimitQuerySearchesTheSessionIndex(t *testing.T) {
 		}
 		q := "SELECT r.id," + c.expr + base(false) + " " + strings.Join(b.joins, " ") + " WHERE " + cond + " ORDER BY r.id LIMIT ?"
 		args := append(append(append([]any{}, b.joinArgs...), wargs...), 2)
-		rows, err := st.Read().Query("EXPLAIN QUERY PLAN "+q, args...)
+		rows, err := st.Read().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+q, args...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,7 +90,7 @@ func TestSessionFilteredLimitQuerySearchesTheSessionIndex(t *testing.T) {
 			t.Errorf("%s: records is not searched through the session_ref index:\n%s", f, p)
 		}
 		start := time.Now()
-		rs, err := st.Read().Query(q, args...)
+		rs, err := st.Read().QueryContext(context.Background(), q, args...)
 		if err != nil {
 			t.Fatal(err)
 		}

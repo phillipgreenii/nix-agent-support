@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -302,7 +303,7 @@ func TestTier1AlreadyMerged(t *testing.T) {
 // the directory itself decides which worktree is the source.
 func runFrom(t *testing.T, h *harness, dir string, args ...string) *result {
 	t.Helper()
-	cmd := exec.Command(toolBinary, append(h.expandAll(args), "--json")...)
+	cmd := exec.CommandContext(context.Background(), toolBinary, append(h.expandAll(args), "--json")...)
 	cmd.Dir, cmd.Env = dir, h.env
 	p := &proc{cmd: cmd, out: new(bytes.Buffer), errb: new(bytes.Buffer), done: make(chan struct{})}
 	cmd.Stdout, cmd.Stderr = p.out, p.errb

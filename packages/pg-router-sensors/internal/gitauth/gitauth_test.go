@@ -2,6 +2,7 @@ package gitauth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -21,7 +22,7 @@ import (
 // keygen runs the real ssh-keygen in dir (fixture helper).
 func keygen(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("ssh-keygen", args...)
+	cmd := exec.CommandContext(context.Background(), "ssh-keygen", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TZ=UTC")
 	out, err := cmd.CombinedOutput()
@@ -78,7 +79,7 @@ func (f *fixture) cert(id, principal, validity string) string {
 
 // describe is what `ssh-add -L | ssh-keygen -L -f -` prints for the lines.
 func (f *fixture) describe(lines ...string) string {
-	cmd := exec.Command("ssh-keygen", "-L", "-f", "-")
+	cmd := exec.CommandContext(context.Background(), "ssh-keygen", "-L", "-f", "-")
 	cmd.Env = append(os.Environ(), "TZ=UTC")
 	cmd.Stdin = strings.NewReader(strings.Join(lines, ""))
 	out, _ := cmd.CombinedOutput() // the exit status is not usable

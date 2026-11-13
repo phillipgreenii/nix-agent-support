@@ -3,6 +3,7 @@
 package parser_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -155,7 +156,7 @@ func TestSoakFirstRunParse(t *testing.T) {
 func trigramBytes(t *testing.T, k *testkit.Kit) int64 {
 	t.Helper()
 	var n int64
-	if err := k.Store.Read().QueryRow(`SELECT COALESCE(SUM(pgsize),0) FROM dbstat WHERE name LIKE 'fts_tri%'`).Scan(&n); err == nil && n > 0 {
+	if err := k.Store.Read().QueryRowContext(context.Background(), `SELECT COALESCE(SUM(pgsize),0) FROM dbstat WHERE name LIKE 'fts_tri%'`).Scan(&n); err == nil && n > 0 {
 		return n
 	}
 	// dbstat is not compiled in: fall back to the whole database size.

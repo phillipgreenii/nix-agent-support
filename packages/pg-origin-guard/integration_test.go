@@ -9,6 +9,7 @@ package originguard
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -38,7 +39,7 @@ func TestMain(m *testing.M) {
 	guardBin = filepath.Join(dir, "pg-origin-guard")
 	fakeBin = filepath.Join(dir, "fakeproxy")
 	for out, pkg := range map[string]string{guardBin: "./cmd/pg-origin-guard", fakeBin: "./testdata/fakeproxy"} {
-		if b, err := exec.Command("go", "build", "-o", out, pkg).CombinedOutput(); err != nil {
+		if b, err := exec.CommandContext(context.Background(), "go", "build", "-o", out, pkg).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "build %s: %v\n%s", pkg, err, b)
 			os.Exit(1)
 		}
@@ -128,7 +129,7 @@ func (r *itRig) writePresence(state string) {
 
 func (r *itRig) sh(name string, args ...string) {
 	r.t.Helper()
-	c := exec.Command(name, args...)
+	c := exec.CommandContext(context.Background(), name, args...)
 	c.Env = append(os.Environ(), "SSH_AUTH_SOCK="+r.sock)
 	if b, err := c.CombinedOutput(); err != nil {
 		r.t.Fatalf("%s %v: %v\n%s", name, args, err, b)
@@ -140,7 +141,7 @@ func (r *itRig) sh(name string, args ...string) {
 // one that is already expired, which ssh-add ignores, so the agent is empty.
 func (r *itRig) startAgent(validCert bool) {
 	t := r.t
-	agent := exec.Command("ssh-agent", "-D", "-a", r.sock)
+	agent := exec.CommandContext(context.Background(), "ssh-agent", "-D", "-a", r.sock)
 	agent.Env = os.Environ()
 	if err := agent.Start(); err != nil {
 		t.Skipf("no ssh-agent: %v", err)
@@ -158,7 +159,7 @@ func (r *itRig) startAgent(validCert bool) {
 		validity = "-1h:+1h"
 	}
 	r.sh("ssh-keygen", "-q", "-s", filepath.Join(keys, "ca"), "-I", "test", "-n", "user", "-V", validity, filepath.Join(keys, "user.pub"))
-	c := exec.Command("ssh-add", filepath.Join(keys, "user"))
+	c := exec.CommandContext(context.Background(), "ssh-add", filepath.Join(keys, "user"))
 	c.Env = append(os.Environ(), "SSH_AUTH_SOCK="+r.sock)
 	_ = c.Run() // an expired certificate makes ssh-add complain; the agent stays empty of user certs
 }
@@ -204,7 +205,7 @@ func (r *itRig) wrapperArgs(extra []string, fp ...string) []string {
 
 // pipes starts the wrapper with no controlling terminal (a new session) and pipes.
 func (r *itRig) pipes(extra []string, fp ...string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
-	c := exec.Command(guardBin, r.wrapperArgs(extra, fp...)...)
+	c := exec.CommandContext(context.Background(), guardBin, r.wrapperArgs(extra, fp...)...)
 	c.Env = r.env
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	var out, errb bytes.Buffer
@@ -258,7 +259,7 @@ func onPTY(t *testing.T, c *exec.Cmd) *ptyRun {
 }
 
 func (r *itRig) ptyWrapper(extra []string, fp ...string) *ptyRun {
-	c := exec.Command(guardBin, r.wrapperArgs(extra, fp...)...)
+	c := exec.CommandContext(context.Background(), guardBin, r.wrapperArgs(extra, fp...)...)
 	c.Env = r.env
 	return onPTY(r.t, c)
 }
@@ -287,7 +288,7 @@ func (r *itRig) gitSSH(c *exec.Cmd, fp string) {
 
 func TestRealGitSSHPipesAsleepIsRefused(t *testing.T) {
 	r := newITRig(t, itOpts{presence: "asleep"})
-	c := exec.Command("git")
+	c := exec.CommandContext(context.Background(), "git")
 	r.gitSSH(c, "exit")
 	c.Path, _ = exec.LookPath("git")
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -306,7 +307,7 @@ func TestRealGitSSHPipesAsleepIsRefused(t *testing.T) {
 
 func TestRealGitSSHPTYRunsTheCommand(t *testing.T) {
 	r := newITRig(t, itOpts{presence: "asleep"})
-	c := exec.Command("git")
+	c := exec.CommandContext(context.Background(), "git")
 	r.gitSSH(c, "exit")
 	c.Path, _ = exec.LookPath("git")
 	p := onPTY(t, c)
@@ -321,7 +322,7 @@ func TestRealGitSSHPTYRunsTheCommand(t *testing.T) {
 
 func TestRealGitSSHValidCertRunsWithoutTerminal(t *testing.T) {
 	r := newITRig(t, itOpts{presence: "asleep", validCert: true})
-	c := exec.Command("git")
+	c := exec.CommandContext(context.Background(), "git")
 	r.gitSSH(c, "exit")
 	c.Path, _ = exec.LookPath("git")
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -417,7 +418,7 @@ func TestTerminalLessAttemptTimeoutKillsTheWholeGroup(t *testing.T) {
 	waitFor(t, "port content", func() bool { b, _ := os.ReadFile(r.portfile); return len(b) > 0 })
 	b, _ := os.ReadFile(r.portfile)
 	addr := "127.0.0.1:" + strings.TrimSpace(string(b))
-	if conn, err := net.DialTimeout("tcp", addr, time.Second); err != nil {
+	if conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "tcp", addr); err != nil {
 		t.Fatalf("grandchild should be listening: %v", err)
 	} else {
 		_ = conn.Close()
@@ -426,7 +427,7 @@ func TestTerminalLessAttemptTimeoutKillsTheWholeGroup(t *testing.T) {
 		t.Fatalf("exit = %d, want 143; stderr %q", code, errb.String())
 	}
 	waitFor(t, "port released by the group kill", func() bool {
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		conn, err := (&net.Dialer{Timeout: 500 * time.Millisecond}).DialContext(context.Background(), "tcp", addr)
 		if err == nil {
 			_ = conn.Close()
 			return false

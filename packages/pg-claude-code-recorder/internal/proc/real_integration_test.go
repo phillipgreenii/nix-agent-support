@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ import (
 
 func child(t *testing.T, env ...string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command("sleep", "60")
+	cmd := exec.CommandContext(context.Background(), "sleep", "60")
 	cmd.Env = append(os.Environ(), env...)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -112,7 +113,7 @@ func TestRealStartTimeAgreesWithPsAndTheRegistryFormatAndAReusedPidIsDead(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	ps := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	ps := exec.CommandContext(context.Background(), "ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
 	ps.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
 	out, err := ps.Output()
 	if err != nil {

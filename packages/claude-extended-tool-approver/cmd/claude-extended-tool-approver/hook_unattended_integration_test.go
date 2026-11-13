@@ -26,6 +26,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -110,7 +111,7 @@ func runPreToolUse(t *testing.T, payload preToolUsePayload, envOverrides ...stri
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	cmd := exec.Command(testBinary(t))
+	cmd := exec.CommandContext(context.Background(), testBinary(t))
 	cmd.Env = hermeticEnv(t, envOverrides...)
 	cmd.Stdin = bytes.NewReader(body)
 	var stdout, stderr bytes.Buffer

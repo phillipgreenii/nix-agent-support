@@ -17,6 +17,7 @@ package parser_test
 // counter; darwin reads libproc through python3, linux /proc/self/io, else 0).
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,7 +43,7 @@ func diskWriteBytes() int64 {
 class R(ctypes.Structure):
     _fields_=[("uuid",ctypes.c_ubyte*16)]+[(n,ctypes.c_uint64) for n in "user sys idle_wake int_wake pgins wired resident phys_footprint proc_start abstime_ignored child_user child_sys child_idle child_int child_pgins child_ignored diskio_read diskio_write".split()]
 r=R();ctypes.CDLL("/usr/lib/libproc.dylib").proc_pid_rusage(int(sys.argv[1]),2,ctypes.byref(r));print(r.diskio_write)`
-	out, err := exec.Command("python3", "-I", "-c", py, strconv.Itoa(os.Getpid())).Output()
+	out, err := exec.CommandContext(context.Background(), "python3", "-I", "-c", py, strconv.Itoa(os.Getpid())).Output()
 	if err != nil {
 		return 0
 	}

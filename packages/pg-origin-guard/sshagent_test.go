@@ -19,7 +19,7 @@ import (
 func startAgent(t *testing.T) (string, agent.Agent) {
 	t.Helper()
 	sock := filepath.Join(t.TempDir(), "a.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}

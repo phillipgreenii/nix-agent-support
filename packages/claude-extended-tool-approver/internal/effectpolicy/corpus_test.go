@@ -23,6 +23,7 @@
 package effectpolicy
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -187,7 +188,7 @@ func openCorpusDB(t *testing.T, dbPath string) *sql.DB {
 	t.Cleanup(func() { _ = db.Close() })
 	// Verify read-only-ness mechanically rather than trusting the DSN: a
 	// no-op write against a real table must be rejected by the driver.
-	if _, err := db.Exec(`DELETE FROM tool_decisions WHERE 1 = 0`); err == nil {
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM tool_decisions WHERE 1 = 0`); err == nil {
 		t.Fatal("corpus db connection is NOT read-only (a no-op DELETE succeeded) — refusing to proceed")
 	}
 	return db
@@ -200,7 +201,7 @@ func openCorpusDB(t *testing.T, dbPath string) *sql.DB {
 // hookio.HookInput.BashCommand() itself extracts it in production.
 func distinctBashCommands(t *testing.T, db *sql.DB) []string {
 	t.Helper()
-	rows, err := db.Query(`SELECT tool_input_json FROM tool_decisions WHERE tool_name = 'Bash'`)
+	rows, err := db.QueryContext(context.Background(), `SELECT tool_input_json FROM tool_decisions WHERE tool_name = 'Bash'`)
 	if err != nil {
 		t.Fatalf("query tool_decisions: %v", err)
 	}

@@ -283,7 +283,7 @@ func TestReconcile_RealBD_BlockedAlertStillClosesAndLeavesItsBlocker(t *testing.
 	f.bd("dep", "add", alert, fix) // alert depends on (is blocked by) fix
 
 	// Guard the premise against the real tool: without force, bd refuses.
-	refusal := exec.Command(f.bdPath, "close", alert, "--reason", "premise probe")
+	refusal := exec.CommandContext(context.Background(), f.bdPath, "close", alert, "--reason", "premise probe")
 	refusal.Dir, refusal.Env = f.dir, f.env
 	if out, err := refusal.CombinedOutput(); err == nil {
 		t.Fatalf("bd closed a blocked bead without --force; this bd no longer exhibits the refusal this test guards:\n%s", out)

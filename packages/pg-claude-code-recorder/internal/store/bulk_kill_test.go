@@ -3,6 +3,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -25,14 +26,14 @@ func TestKilledBulkRebuildLeavesAFileTheNextStartRefuses(t *testing.T) {
 		}
 		s.BulkBegin()
 		_ = s.WithWrite("", func(tx *sql.Tx) error {
-			_, err := tx.Exec(`INSERT INTO meta(key,value) VALUES('half','1')`)
+			_, err := tx.ExecContext(context.Background(), `INSERT INTO meta(key,value) VALUES('half','1')`)
 			return err
 		})
 		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
 		select {}
 	}
 	dir := seededDir(t)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestKilledBulkRebuildLeavesAFileTheNextStartRefuses$")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestKilledBulkRebuildLeavesAFileTheNextStartRefuses$")
 	cmd.Env = append(os.Environ(), bulkKillEnv+"="+dir)
 	err := cmd.Run()
 	var ee *exec.ExitError

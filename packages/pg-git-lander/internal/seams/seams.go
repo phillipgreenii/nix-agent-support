@@ -5,6 +5,7 @@
 package seams
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,7 +62,7 @@ type procLiveness struct{}
 func ProcLiveness() Liveness { return procLiveness{} }
 
 func (procLiveness) StartTime(pid int) (string, error) {
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return "", err
 	}
@@ -73,7 +74,7 @@ func (procLiveness) StartTime(pid int) (string, error) {
 }
 
 func isZombie(pid int) bool {
-	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
 	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
 

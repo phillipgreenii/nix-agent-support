@@ -3,6 +3,7 @@
 package parser_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -69,7 +70,7 @@ func TestKillNineAfterCommitsReopensConsistentAndResumes(t *testing.T) {
 	}
 	want := referenceDump(t)
 	dir := t.TempDir()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestKillNineAfterCommitsReopensConsistentAndResumes$")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestKillNineAfterCommitsReopensConsistentAndResumes$")
 	cmd.Env = append(os.Environ(), killDirEnv+"="+dir)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	err := cmd.Run()
@@ -79,7 +80,7 @@ func TestKillNineAfterCommitsReopensConsistentAndResumes(t *testing.T) {
 	}
 	k := testkit.NewInDir(t, dir, nil)
 	var ok string
-	if err := k.Store.Read().QueryRow(`PRAGMA integrity_check`).Scan(&ok); err != nil || ok != "ok" {
+	if err := k.Store.Read().QueryRowContext(context.Background(), `PRAGMA integrity_check`).Scan(&ok); err != nil || ok != "ok" {
 		t.Fatalf("integrity_check = %q, %v", ok, err)
 	}
 	// Parsed so far: every file's parse offset is behind its copy offset by the

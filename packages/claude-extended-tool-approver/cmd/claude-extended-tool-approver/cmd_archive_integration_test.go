@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,13 +33,13 @@ func seedIntegrationRow(t *testing.T, store *asklog.Store, id int, createdAt str
 	hash := fmt.Sprintf("h%d", id)
 	var err error
 	if correctDecision == nil {
-		_, err = store.DB().Exec(`INSERT INTO tool_decisions
+		_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, outcome, created_at)
 			VALUES (?, 'sess1', '/tmp', 'Bash', ?, '{"command":"ls"}', 'ls', 'allow', 'approved', ?)`,
 			id, hash, createdAt)
 	} else {
-		_, err = store.DB().Exec(`INSERT INTO tool_decisions
+		_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, outcome, created_at, correct_hook_decision, correct_hook_decision_explanation)
 			VALUES (?, 'sess1', '/tmp', 'Bash', ?, '{"command":"rm -rf /"}', 'rm -rf /', 'allow', 'approved', ?, ?, ?)`,
@@ -198,7 +199,7 @@ func TestArchive_RealRun_SamplesDeletesAndVacuums(t *testing.T) {
 	}
 
 	var integrityResult string
-	if err := verify.DB().QueryRow("PRAGMA integrity_check").Scan(&integrityResult); err != nil {
+	if err := verify.DB().QueryRowContext(context.Background(), "PRAGMA integrity_check").Scan(&integrityResult); err != nil {
 		t.Fatalf("integrity_check: %v", err)
 	}
 	if integrityResult != "ok" {

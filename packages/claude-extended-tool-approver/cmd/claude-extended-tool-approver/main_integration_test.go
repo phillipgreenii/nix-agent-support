@@ -83,7 +83,7 @@ func testBinary(t *testing.T) string {
 			return
 		}
 		path := filepath.Join(binDir, "claude-extended-tool-approver")
-		build := exec.Command("go", "build", "-o", path, "./cmd/claude-extended-tool-approver")
+		build := exec.CommandContext(context.Background(), "go", "build", "-o", path, "./cmd/claude-extended-tool-approver")
 		build.Dir = root
 		if out, err := build.CombinedOutput(); err != nil {
 			buildErr = fmt.Errorf("build failed: %w\n%s", err, out)
@@ -166,7 +166,7 @@ func runHook(t *testing.T, input string) map[string]any {
 // own diagnosis was being discarded.
 func runHookOnce(t *testing.T, input string) (map[string]any, string) {
 	t.Helper()
-	cmd := exec.Command(testBinary(t))
+	cmd := exec.CommandContext(context.Background(), testBinary(t))
 	cmd.Env = os.Environ()
 	cmd.Stdin = bytes.NewBufferString(input)
 	var stdout, stderr bytes.Buffer
@@ -216,7 +216,7 @@ func TestIntegration_UnknownCommand(t *testing.T) {
 }
 
 func TestIntegration_BadJSON(t *testing.T) {
-	cmd := exec.Command(testBinary(t))
+	cmd := exec.CommandContext(context.Background(), testBinary(t))
 	cmd.Env = os.Environ()
 	cmd.Stdin = bytes.NewBufferString("not json")
 	out, err := cmd.Output()
@@ -608,7 +608,7 @@ func TestIntegration_SessionEnd_ReturnsEmpty(t *testing.T) {
 
 func runBinaryCLI(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
-	cmd := exec.Command(testBinary(t), args...)
+	cmd := exec.CommandContext(context.Background(), testBinary(t), args...)
 	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -672,7 +672,7 @@ func TestCLI_Evaluate_JSON_ApprovalSourceAndFilter(t *testing.T) {
 	// cwd must exist so rows are not classified stale-cwd. Row 1 is an auto-mode
 	// classifier denial: CETA abstained (hook_decision 'abstain', no prompt), so
 	// it buckets as "auto"; a CETA 'allow' would bucket as "hook" (ApprovalSource).
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 		 hook_decision, outcome, created_at,
 		 permission_mode, agent_type, outcome_notes, tool_response, prompt_id)

@@ -12,6 +12,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -271,7 +272,7 @@ func toolArgs(h *harness, args []string) []string {
 }
 
 func (h *harness) startTool(args []string) (*proc, error) {
-	return h.startCmd(exec.Command(toolBinary, toolArgs(h, args)...))
+	return h.startCmd(exec.CommandContext(context.Background(), toolBinary, toolArgs(h, args)...))
 }
 
 func (h *harness) startCmd(cmd *exec.Cmd) (*proc, error) {
@@ -358,7 +359,7 @@ func (h *harness) runSteps() error {
 			}
 		case st.StartGit != nil:
 			var p *proc
-			if p, err = h.startCmd(exec.Command("git", h.expandAll(st.StartGit)...)); err == nil {
+			if p, err = h.startCmd(exec.CommandContext(context.Background(), "git", h.expandAll(st.StartGit)...)); err == nil {
 				h.procs[st.Name] = p
 			}
 		case st.Wait:
@@ -723,7 +724,7 @@ func (h *harness) postCondition() []string {
 		}
 		return nil
 	})
-	cmd := exec.Command("git", "fsck", "--no-dangling")
+	cmd := exec.CommandContext(context.Background(), "git", "fsck", "--no-dangling")
 	cmd.Dir, cmd.Env = h.repo, h.env
 	out, err := cmd.CombinedOutput()
 	if err != nil || len(bytes.TrimSpace(out)) != 0 {

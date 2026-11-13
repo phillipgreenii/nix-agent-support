@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,7 +42,7 @@ func runMain(m *testing.M) int {
 	toolBinary = os.Getenv("PG_GIT_LANDER_BIN")
 	if toolBinary == "" {
 		toolBinary = filepath.Join(root, "pg-git-lander")
-		cmd := exec.Command("go", "build", "-o", toolBinary, "../cmd/pg-git-lander")
+		cmd := exec.CommandContext(context.Background(), "go", "build", "-o", toolBinary, "../cmd/pg-git-lander")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "building pg-git-lander: %v\n%s", err, out)
 			return 2

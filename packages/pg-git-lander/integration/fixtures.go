@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -179,7 +180,7 @@ const globalConfigText = `[user]
 // runGit runs git in dir under env and returns stdout; a failure is an error
 // carrying stderr.
 func runGit(env []string, dir string, stdin []byte, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	if stdin != nil {
@@ -268,7 +269,7 @@ func copyTree(src, dst string) error {
 	var last error
 	for _, a := range attempts {
 		_ = os.RemoveAll(dst)
-		if out, err := exec.Command("cp", a...).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(context.Background(), "cp", a...).CombinedOutput(); err != nil {
 			last = fmt.Errorf("cp %s: %v: %s", strings.Join(a, " "), err, out)
 			continue
 		}

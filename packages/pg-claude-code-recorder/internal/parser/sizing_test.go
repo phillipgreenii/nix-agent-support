@@ -11,6 +11,7 @@ package parser_test
 // packages/pg-claude-code-recorder/docs/investigations/2026-11-03-index-db-size.md.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -197,7 +198,7 @@ type objSize struct {
 
 func dbstatObjects(t *testing.T, k *testkit.Kit) []objSize {
 	t.Helper()
-	rows, err := k.Store.Read().Query(`SELECT name, COUNT(*), SUM(pgsize), SUM(payload), SUM(unused), SUM(ncell) FROM dbstat GROUP BY name ORDER BY SUM(pgsize) DESC`)
+	rows, err := k.Store.Read().QueryContext(context.Background(), `SELECT name, COUNT(*), SUM(pgsize), SUM(payload), SUM(unused), SUM(ncell) FROM dbstat GROUP BY name ORDER BY SUM(pgsize) DESC`)
 	if err != nil {
 		t.Fatalf("dbstat not available: %v", err)
 	}
@@ -260,7 +261,7 @@ func TestSizingFixture(t *testing.T) {
 	fmt.Printf("SIZING records=%d fields=%d texts=%d fields_per_record=%.2f texts_per_record=%.3f opaque_texts=%d\n",
 		records, fields, texts, float64(fields)/float64(records), float64(texts)/float64(records), len(opaque))
 	var wordBytes, triBytes int64
-	_ = k.Store.Read().QueryRow(`SELECT COALESCE(SUM(length(n.name)+length(COALESCE(f.s,''))),0) FROM fields f JOIN field_names n ON n.id=f.name_id`).Scan(&fields)
+	_ = k.Store.Read().QueryRowContext(context.Background(), `SELECT COALESCE(SUM(length(n.name)+length(COALESCE(f.s,''))),0) FROM fields f JOIN field_names n ON n.id=f.name_id`).Scan(&fields)
 	for _, b := range opaque {
 		triBytes += int64(len(b))
 	}
@@ -268,7 +269,7 @@ func TestSizingFixture(t *testing.T) {
 	_ = wordBytes
 
 	// Field-name census.
-	rows, err := k.Store.Read().Query(`SELECT n.name, COUNT(*), SUM(length(n.name)), SUM(length(COALESCE(f.s,''))) FROM fields f JOIN field_names n ON n.id=f.name_id GROUP BY n.name ORDER BY COUNT(*) DESC`)
+	rows, err := k.Store.Read().QueryContext(context.Background(), `SELECT n.name, COUNT(*), SUM(length(n.name)), SUM(length(COALESCE(f.s,''))) FROM fields f JOIN field_names n ON n.id=f.name_id GROUP BY n.name ORDER BY COUNT(*) DESC`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,13 +293,13 @@ func TestSizingFixture(t *testing.T) {
 			`CREATE INDEX alt_fields_partial_name_n ON fields(name_id, n) WHERE n IS NOT NULL`,
 		}
 		for _, s := range stmts {
-			if _, err := tx.Exec(s); err != nil {
+			if _, err := tx.ExecContext(context.Background(), s); err != nil {
 				return fmt.Errorf("%s: %w", s, err)
 			}
 		}
 		for i, b := range opaque {
 			for _, tbl := range []string{"alt_tri_nocolsize", "alt_tri_detailcol", "alt_tri_nocase", "alt_word_opaque", "alt_word_opaque_detailnone"} {
-				if _, err := tx.Exec(`INSERT INTO `+tbl+`(rowid, body) VALUES(?,?)`, i+1, b); err != nil {
+				if _, err := tx.ExecContext(context.Background(), `INSERT INTO `+tbl+`(rowid, body) VALUES(?,?)`, i+1, b); err != nil {
 					return err
 				}
 			}
@@ -311,12 +312,12 @@ func TestSizingFixture(t *testing.T) {
 	// Does a quoted substring query still work with detail=column?
 	for _, tbl := range []string{"fts_tri", "alt_tri_detailcol"} {
 		var n int
-		err := k.Store.Read().QueryRow(`SELECT COUNT(*) FROM ` + tbl + ` WHERE ` + tbl + ` MATCH '"example/work"'`).Scan(&n)
+		err := k.Store.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+tbl+` WHERE `+tbl+` MATCH '"example/work"'`).Scan(&n)
 		fmt.Printf("SIZING substring_query table=%s hits=%d err=%v\n", tbl, n, err)
 	}
 	var pageCount, pageSize int64
-	_ = k.Store.Read().QueryRow(`PRAGMA page_count`).Scan(&pageCount)
-	_ = k.Store.Read().QueryRow(`PRAGMA page_size`).Scan(&pageSize)
+	_ = k.Store.Read().QueryRowContext(context.Background(), `PRAGMA page_count`).Scan(&pageCount)
+	_ = k.Store.Read().QueryRowContext(context.Background(), `PRAGMA page_size`).Scan(&pageSize)
 	fmt.Printf("SIZING page_size=%d page_count=%d\n", pageSize, pageCount)
 	objs := dbstatObjects(t, k)
 	sort.Slice(objs, func(i, j int) bool { return objs[i].bytes > objs[j].bytes })

@@ -56,7 +56,7 @@ func httpDo(t *testing.T, sock, method, path, body string) (int, map[string]any)
 		var d net.Dialer
 		return d.DialContext(c, "unix", sock)
 	}, DisableKeepAlives: true}, Timeout: 15 * time.Second}
-	req, _ := http.NewRequest(method, "http://recorder"+path, bytes.NewReader([]byte(body)))
+	req, _ := http.NewRequestWithContext(context.Background(), method, "http://recorder"+path, bytes.NewReader([]byte(body)))
 	resp, err := hc.Do(req)
 	if err != nil {
 		t.Fatal(err)

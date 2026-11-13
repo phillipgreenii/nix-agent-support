@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"os/exec"
@@ -21,7 +22,7 @@ func permissionRequestRows(t *testing.T, switchValue string) int {
 	p.HookEventName = "PermissionRequest"
 	body, _ := json.Marshal(p)
 	env := hermeticEnv(t, "CETA_TRACKER_CUTOVER="+switchValue)
-	cmd := exec.Command(testBinary(t))
+	cmd := exec.CommandContext(context.Background(), testBinary(t))
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(body)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -39,7 +40,7 @@ func permissionRequestRows(t *testing.T, switchValue string) int {
 	}
 	defer func() { _ = db.Close() }()
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM tool_decisions`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM tool_decisions`).Scan(&n); err != nil {
 		return 0 // no database at all: nothing was recorded
 	}
 	return n

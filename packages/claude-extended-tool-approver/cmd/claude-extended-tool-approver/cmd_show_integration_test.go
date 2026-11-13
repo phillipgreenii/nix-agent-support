@@ -13,6 +13,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -37,7 +38,7 @@ func setupShowTestDB(t *testing.T) string {
 		`INSERT INTO tool_decisions (id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary, hook_decision, hook_reason, outcome, created_at)
 		 VALUES (2, 'sess1', '/tmp', 'Bash', 'h2', '{"command":"rm -rf /"}', 'rm -rf /', 'deny', 'dangerous', 'denied', '2026-03-01T00:00:00Z')`,
 	} {
-		if _, err := store.DB().Exec(q); err != nil {
+		if _, err := store.DB().ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -47,7 +48,7 @@ func setupShowTestDB(t *testing.T) string {
 
 func runSubcommand(t *testing.T, dataDir string, args ...string) ([]byte, error) {
 	t.Helper()
-	cmd := exec.Command(testBinary(t), args...)
+	cmd := exec.CommandContext(context.Background(), testBinary(t), args...)
 	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+dataDir)
 	return cmd.CombinedOutput()
 }
@@ -108,7 +109,7 @@ func setupShowTestDBWithTrace(t *testing.T) string {
 		`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason)
 		 VALUES (1, 2, 'git', 'ask', 'force push detected')`,
 	} {
-		if _, err := store.DB().Exec(q); err != nil {
+		if _, err := store.DB().ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -198,7 +199,7 @@ func setupCommandGroupingDB(t *testing.T) string {
 		`INSERT INTO tool_decisions (id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary, hook_decision, hook_reason, outcome, created_at)
 		 VALUES (2, 'sess1', '/tmp', 'Bash', 'h2', '{"command":"cd /tmp\nls -la"}', 'cd /tmp', 'allow', 'r', 'approved', '2026-03-01T00:00:00Z')`,
 	} {
-		if _, err := store.DB().Exec(q); err != nil {
+		if _, err := store.DB().ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}

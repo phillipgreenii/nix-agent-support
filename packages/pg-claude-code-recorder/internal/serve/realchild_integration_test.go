@@ -23,7 +23,7 @@ func TestCrashQueryAgainstARealChildProcess(t *testing.T) {
 	e := clienttest.Start(t, clienttest.Options{RealProcs: true})
 	real := proc.NewReal()
 	spawn := func(session string) (*exec.Cmd, string) {
-		cmd := exec.Command("sleep", "60")
+		cmd := exec.CommandContext(context.Background(), "sleep", "60")
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}

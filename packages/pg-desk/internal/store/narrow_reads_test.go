@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func TestListEntityFlowMatchesListEntitiesFlowColumns(t *testing.T) {
 
 func TestListEntityFlowIsServedFromTheCoveringIndex(t *testing.T) {
 	st := OpenForTest(t)
-	rows, err := st.sql.Query(`EXPLAIN QUERY PLAN SELECT repo, entity_type, entity_id, hydrated_at, active, first_seen_at, backend, watched, read_attempt_at, read_ok_at FROM entity ORDER BY entity_type, entity_id, repo`)
+	rows, err := st.sql.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT repo, entity_type, entity_id, hydrated_at, active, first_seen_at, backend, watched, read_attempt_at, read_ok_at FROM entity ORDER BY entity_type, entity_id, repo`)
 	if err != nil {
 		t.Fatal(err)
 	}

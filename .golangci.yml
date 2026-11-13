@@ -11,6 +11,9 @@ linters:
     # depguard: import-boundary rules (see settings.depguard below). It is not
     # in "standard", so it must be enabled explicitly.
     - depguard
+    # noctx: flags database/sql, net/http and os/exec calls that use the
+    # non-Context form. Not in "standard".
+    - noctx
   settings:
     errcheck:
       # Writes to stdout/stderr via fmt.Fprint* essentially never fail in a CLI,

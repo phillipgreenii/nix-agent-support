@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -36,7 +37,7 @@ func setupOutcomeSplitDB(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 		 hook_decision, outcome, outcome_notes, created_at)
 		VALUES
@@ -119,7 +120,7 @@ func setupAttributionDB(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 		 hook_decision, hook_reason, outcome, created_at)
 		VALUES
@@ -145,7 +146,7 @@ func setupAttributionDB(t *testing.T) string {
 // which module is credited.
 func runSubcommandNoConsumerConfig(t *testing.T, dataDir string, args ...string) ([]byte, error) {
 	t.Helper()
-	cmd := exec.Command(testBinary(t), args...)
+	cmd := exec.CommandContext(context.Background(), testBinary(t), args...)
 	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+dataDir, "XDG_CONFIG_HOME="+t.TempDir())
 	return cmd.CombinedOutput()
 }
@@ -279,7 +280,7 @@ func setupRetiredRootDB(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 		 hook_decision, outcome, created_at)
 		VALUES

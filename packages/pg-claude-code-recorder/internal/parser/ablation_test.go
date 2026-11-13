@@ -18,6 +18,7 @@ package parser_test
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -242,7 +243,7 @@ func abCountRows(path string) map[string]int64 {
 		return nil
 	}
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'`)
+	rows, err := db.QueryContext(context.Background(), `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'`)
 	if err != nil {
 		return nil
 	}
@@ -260,7 +261,7 @@ func abCountRows(path string) map[string]int64 {
 			continue
 		}
 		var c int64
-		if db.QueryRow(`SELECT COUNT(*) FROM "`+n+`"`).Scan(&c) == nil && c > 0 {
+		if db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM "`+n+`"`).Scan(&c) == nil && c > 0 {
 			out[n] = c
 		}
 	}
@@ -375,7 +376,7 @@ func TestAblation(t *testing.T) {
 		}
 		ddl = append(ddl, v.setup...)
 		for _, q := range ddl {
-			if _, err := db.Exec(q); err != nil {
+			if _, err := db.ExecContext(context.Background(), q); err != nil {
 				t.Fatalf("%s: %v", q, err)
 			}
 		}

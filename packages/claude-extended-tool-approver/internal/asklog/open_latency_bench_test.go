@@ -3,6 +3,7 @@
 package asklog
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -75,7 +76,7 @@ func TestLockedWriteLatency(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = l.Close() }()
-	tx, err := l.db.Begin() // BEGIN IMMEDIATE (txlock=immediate)
+	tx, err := l.db.BeginTx(context.Background(), nil) // BEGIN IMMEDIATE (txlock=immediate)
 	if err != nil {
 		t.Fatal(err)
 	}

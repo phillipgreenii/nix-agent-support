@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,7 @@ func TestEvaluate_HeredocFileWriteReplay(t *testing.T) {
 	}
 	for _, r := range rows {
 		in, _ := json.Marshal(map[string]string{"command": r.command})
-		if _, err := store.DB().Exec(`INSERT INTO tool_decisions
+		if _, err := store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, hook_reason, outcome, created_at)
 			VALUES (?,'s',?,'Bash',?,?,?,'abstain','','approved','2026-01-01T00:00:00Z')`,

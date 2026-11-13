@@ -26,10 +26,10 @@ import (
 // which makes it integration tier (V-4).
 func TestBinaryPrintsVersion(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "pg-claude-code-recorder")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	out, err := exec.Command(bin, "--version").CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), bin, "--version").CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
@@ -68,7 +68,7 @@ func recorderBinary(t *testing.T) string {
 			return
 		}
 		builtPath = filepath.Join(dir, "pg-claude-code-recorder")
-		if out, err := exec.Command("go", "build", "-tags", "faults", "-o", builtPath, ".").CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(context.Background(), "go", "build", "-tags", "faults", "-o", builtPath, ".").CombinedOutput(); err != nil {
 			builtErr = fmt.Errorf("go build: %v\n%s", err, out)
 		}
 	})
@@ -146,7 +146,7 @@ func launch(t *testing.T, cmd *exec.Cmd) *proc {
 // start launches serve (extra env entries override) and returns the process.
 func (d *daemonEnv) start(t *testing.T, extraEnv ...string) *proc {
 	t.Helper()
-	cmd := exec.Command(recorderBinary(t), "serve", "--config", d.cfg)
+	cmd := exec.CommandContext(context.Background(), recorderBinary(t), "serve", "--config", d.cfg)
 	cmd.Env = append(append([]string{}, d.env...), extraEnv...)
 	return launch(t, cmd)
 }
@@ -154,7 +154,7 @@ func (d *daemonEnv) start(t *testing.T, extraEnv ...string) *proc {
 // cli runs a recorder subcommand against this daemon.
 func (d *daemonEnv) cli(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	cmd := exec.Command(recorderBinary(t), append(args, "--config", d.cfg)...)
+	cmd := exec.CommandContext(context.Background(), recorderBinary(t), append(args, "--config", d.cfg)...)
 	cmd.Env = d.env
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
@@ -405,7 +405,7 @@ func TestClientNameIsLoggedAndPprofSocketAnswers(t *testing.T) {
 	if err := os.WriteFile(d.transcript(), []byte("{\"n\":0}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := exec.Command(recorderBinary(t), "serve", "--config", d.cfg, "--pprof")
+	c := exec.CommandContext(context.Background(), recorderBinary(t), "serve", "--config", d.cfg, "--pprof")
 	c.Env = d.env
 	launch(t, c)
 	d.waitCaughtUp(t)
@@ -423,7 +423,11 @@ func TestClientNameIsLoggedAndPprofSocketAnswers(t *testing.T) {
 		var nd net.Dialer
 		return nd.DialContext(ctx, "unix", pprofSock)
 	}}}
-	resp, err := hc.Get("http://pprof/debug/pprof/goroutine?debug=1")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://pprof/debug/pprof/goroutine?debug=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

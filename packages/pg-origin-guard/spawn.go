@@ -1,6 +1,7 @@
 package originguard
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -57,7 +58,7 @@ func (ExecSpawner) Start(spec ChildSpec) (Child, error) {
 	if len(spec.Argv) == 0 {
 		return nil, errors.New("no command")
 	}
-	cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
+	cmd := exec.CommandContext(context.Background(), spec.Argv[0], spec.Argv[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -115,7 +116,7 @@ type OSProcs struct{}
 
 // Token returns `ps -o lstart=` of pid.
 func (OSProcs) Token(pid int) string {
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return ""
 	}

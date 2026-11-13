@@ -11,6 +11,7 @@ package settle
 // granularity, so an early wake is never later than the scan).
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -177,7 +178,10 @@ func (o *oracle) buildFixture(e *env) {
 		case cHeldUnparsed:
 			oSeed(e, i, 3, old)
 			id := oFileID(e, i)
-			if err := e.st.WithWrite("", func(tx *sql.Tx) error { _, err := tx.Exec(`DELETE FROM parse_state WHERE file_id = ?`, id); return err }); err != nil {
+			if err := e.st.WithWrite("", func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(context.Background(), `DELETE FROM parse_state WHERE file_id = ?`, id)
+				return err
+			}); err != nil {
 				e.t.Fatal(err)
 			}
 		case cHeldTorn: // a torn tail past maxLineBytes (64 here)

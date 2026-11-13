@@ -14,6 +14,7 @@ package store
 // lower bound and directional only.
 
 import (
+	"context"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -36,7 +37,7 @@ func writtenBytes() int64 {
 class R(ctypes.Structure):
     _fields_=[("uuid",ctypes.c_ubyte*16)]+[(n,ctypes.c_uint64) for n in "user sys idle_wake int_wake pgins wired resident phys_footprint proc_start abstime_ignored child_user child_sys child_idle child_int child_pgins child_ignored diskio_read diskio_write".split()]
 r=R();ctypes.CDLL("/usr/lib/libproc.dylib").proc_pid_rusage(int(sys.argv[1]),2,ctypes.byref(r));print(r.diskio_write)`
-	out, err := exec.Command("python3", "-I", "-c", py, strconv.Itoa(os.Getpid())).Output()
+	out, err := exec.CommandContext(context.Background(), "python3", "-I", "-c", py, strconv.Itoa(os.Getpid())).Output()
 	if err != nil {
 		return 0
 	}
@@ -58,7 +59,7 @@ func TestMeasureDeferredIndexes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.wdb.Exec(`PRAGMA cache_size=-4096`); err != nil {
+		if _, err := s.wdb.ExecContext(context.Background(), `PRAGMA cache_size=-4096`); err != nil {
 			t.Fatal(err)
 		}
 		if inline {
@@ -68,21 +69,21 @@ func TestMeasureDeferredIndexes(t *testing.T) {
 		}
 		rng := rand.New(rand.NewSource(1))
 		b0, t0 := writtenBytes(), time.Now()
-		tx, err := s.wdb.Begin()
+		tx, err := s.wdb.BeginTx(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < rows; i++ {
-			res, err := tx.Exec(`INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(?,1,?,0,10,'s',?,1,?,?)`,
+			res, err := tx.ExecContext(context.Background(), `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns) VALUES(?,1,?,0,10,'s',?,1,?,?)`,
 				i%500, i, "t"+strconv.Itoa(rng.Intn(8)), "sess-"+strconv.Itoa(rng.Intn(5000)), rng.Int63())
 			if err != nil {
 				t.Fatal(err)
 			}
 			id, _ := res.LastInsertId()
-			if _, err := tx.Exec(`INSERT INTO fields(rec_id,name_id,s,n) VALUES(?,?,NULL,?)`, id, 1+rng.Intn(3), rng.Int63n(1<<40)); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s,n) VALUES(?,?,NULL,?)`, id, 1+rng.Intn(3), rng.Int63n(1<<40)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tx.Exec(`INSERT INTO texts(rec_id,field,kind) VALUES(?,'body','text')`, id); err != nil {
+			if _, err := tx.ExecContext(context.Background(), `INSERT INTO texts(rec_id,field,kind) VALUES(?,'body','text')`, id); err != nil {
 				t.Fatal(err)
 			}
 		}
