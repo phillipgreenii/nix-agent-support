@@ -112,6 +112,31 @@ func scoped(alias string) string {
 	return win(alias) + "\n  AND " + fmt.Sprintf(scopeClause, alias)
 }
 
+// windowEvents is the events rows inside the query window, written so that
+// SQLite makes the window the OUTER loop of a join. Written as a plain
+// `win("e")` predicate it cannot: the `:since = ”` escape hatch hides the range
+// from idx_events_ts, so a query that starts at tool_calls (or any other table
+// with its own index) reads every row of that table and probes events for each,
+// whatever the window. Here the first branch is a plain range on ts (an empty
+// :since is the lower bound ”, which every non-NULL ts satisfies) and the second
+// branch re-admits NULL-ts rows only for the fully unbounded window, exactly as
+// windowClause does. The branches are disjoint (ts NULL or not), so no row
+// repeats. Join it as `FROM ` + windowEvents + ` e CROSS JOIN tool_calls c ON
+// c.path = e.path AND c.seq = e.seq`; CROSS JOIN pins the order (left table
+// outer): without it SQLite scans tool_calls and builds a throwaway index on
+// this subquery instead. It already applies the window, so pair it with
+// scopeOnly, not scoped.
+const windowEvents = `(
+  SELECT path, seq, session_id, ts, is_sidechain FROM events
+   WHERE ts >= :since AND (:until = '' OR ts < :until)
+  UNION ALL
+  SELECT path, seq, session_id, ts, is_sidechain FROM events
+   WHERE ts IS NULL AND :since = '' AND :until = '')`
+
+// scopeOnly is the session-scope filter alone, for a statement whose window is
+// already applied by windowEvents.
+func scopeOnly(alias string) string { return fmt.Sprintf(scopeClause, alias) }
+
 // prevToolAgg is one row per assistant LINE that issued tool calls, not per call.
 //
 // The distinction is load-bearing for every "what did the agent do just before
@@ -123,7 +148,14 @@ func scoped(alias string) string {
 // the line up first keeps the identity "one candidate per turn" true, and reports
 // the batch's shape (how many calls, which tools, how many failed) instead of
 // silently picking one of them.
-const prevToolAgg = `
+var prevToolAgg = prevToolAggOver("tool_calls c")
+
+// prevToolAggOver is prevToolAgg over the tool calls named by from (which must
+// alias tool_calls as c). A caller that needs the roll-up only for a few lines
+// passes a join that restricts them, so the roll-up is not computed for every
+// call in the table.
+func prevToolAggOver(from string) string {
+	return `
 prev_lines AS (
   SELECT c.path                                                      AS path,
          c.seq                                                       AS seq,
@@ -132,10 +164,11 @@ prev_lines AS (
          group_concat(DISTINCT c.lead_cmd)                           AS lead_cmds,
          SUM(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END)             AS errors,
          MAX(CASE WHEN r.is_error = 1 THEN r.signature END)          AS signature
-  FROM tool_calls c
+  FROM ` + from + `
   LEFT JOIN tool_results r ON r.tool_use_id = c.tool_use_id
   GROUP BY c.path, c.seq
 )`
+}
 
 // rootExtraction is the "which absolute ROOT did this failing call reference"
 // CTE chain shared by failed-reads-by-root and root-first-last-seen (pg2-z38lk
@@ -222,7 +255,7 @@ var registry = func() map[string]Query {
 	qs := []Query{
 		{
 			Name:    "error-rate-by-tool",
-			Version: 3,
+			Version: 4,
 			Scoped:  true,
 			Doc:     "Per-tool error counts WITH denominators, in one query.",
 			Notes: "The denominator is every tool CALL, including calls whose result was never " +
@@ -234,10 +267,10 @@ SELECT c.tool_name                                                             A
        COUNT(*)                                                                AS calls,
        SUM(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END)                         AS errors,
        ROUND(100.0 * SUM(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END) / COUNT(*), 3) AS error_pct
-FROM tool_calls c
-JOIN events e ON e.path = c.path AND e.seq = c.seq
+FROM ` + windowEvents + ` e
+CROSS JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq
 LEFT JOIN tool_results r ON r.tool_use_id = c.tool_use_id
-WHERE ` + scoped("e") + `
+WHERE ` + scopeOnly("e") + `
 GROUP BY c.tool_name
 ORDER BY errors DESC, calls DESC, tool_name`,
 		},
@@ -811,7 +844,7 @@ ORDER BY t.path, t.seq`,
 		},
 		{
 			Name:    "interruptions",
-			Version: 3,
+			Version: 4,
 			Scoped:  true,
 			Doc:     "Interruption sentinels, with the tool call the person cut short.",
 			Notes: "`interrupted` is set AT INGEST by prefix-matching Claude Code's sentinel, which " +
@@ -822,8 +855,7 @@ ORDER BY t.path, t.seq`,
 				"count against the previous run before concluding interruptions stopped.",
 			Window: true,
 			SQL: `
-WITH ` + prevToolAgg + `,
-marks AS (
+WITH marks AS MATERIALIZED (
   SELECT e.path AS path, e.seq AS seq, e.session_id AS session_id,
          COALESCE(e.is_sidechain, 0) AS is_sidechain, e.ts AS ts, u.text AS text,
          (SELECT MAX(c.seq) FROM tool_calls c
@@ -831,7 +863,8 @@ marks AS (
   FROM user_text u
   JOIN events e ON e.path = u.path AND e.seq = u.seq
   WHERE u.interrupted = 1 AND ` + scoped("e") + `
-)
+),` + prevToolAggOver(`(SELECT DISTINCT path, prev_seq AS seq FROM marks) k
+  CROSS JOIN tool_calls c ON c.path = k.path AND c.seq = k.seq`) + `
 SELECT m.session_id                  AS session_id,
        m.is_sidechain                AS is_sidechain,
        m.path                        AS path,

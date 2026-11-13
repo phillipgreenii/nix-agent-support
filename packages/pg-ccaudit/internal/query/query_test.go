@@ -407,7 +407,7 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 	// Seven lens queries are at +1 (cost-by-signature 2 -> 3): each gained the
 	// optional --cwd-prefix / --exclude-cwd-prefix session-scope filter.
 	want := map[string]int{
-		"error-rate-by-tool":    3,
+		"error-rate-by-tool":    4,
 		"top-signatures":        3,
 		"bash-by-lead-cmd":      1,
 		"session-concentration": 1,
@@ -432,7 +432,7 @@ func TestRegistryVersionsArePinned(t *testing.T) {
 		"concentration-by-signature": 1,
 		"human-turns":                1,
 		"typed-turn-candidates":      1,
-		"interruptions":              3,
+		"interruptions":              4,
 		"denied-tool-calls":          3,
 		"undo-signatures":            1,
 		"file-churn":                 1,

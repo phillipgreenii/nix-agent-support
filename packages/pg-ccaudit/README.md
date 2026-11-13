@@ -176,6 +176,13 @@ EXISTS`, no schema-version bump, no re-ingest) the next time it opens the
   database; until then scoped queries are correct but scan the whole table. The
   indexes add roughly 1.4 GB to a 6 GB database and two b-tree inserts per
   ingested event.
+- The window also drives the OUTER query of `error-rate-by-tool` and
+  `interruptions` (both v4): `error-rate-by-tool` reads the in-window events
+  through `idx_events_ts` and searches `tool_calls` by `(path, seq)`, instead of
+  scanning every tool call and probing `events` for each; `interruptions` rolls up
+  the previous tool line only for the interrupted turns, not for every call. An
+  unbounded run of `error-rate-by-tool` therefore walks the whole `ts` index and
+  can be slower than before; pass `--since`.
 - Matching is by whole path component and case-sensitive: `/a/b` matches `/a/b`
   and `/a/b/c`, not `/a/bc`. A trailing slash on a prefix is ignored.
 - Only `events.cwd` is used; `files.project_dir` is empty on the recorder feed
