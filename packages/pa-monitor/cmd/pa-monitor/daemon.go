@@ -57,7 +57,7 @@ func runDaemon(args []string) {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: resolve paths: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitGeneric)
 	}
 
 	cfg, err := config.Load(config.DefaultPath())
@@ -89,7 +89,7 @@ func runDaemon(args []string) {
 		time.Duration(*tickS)*time.Second, *disablePoller)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: build run options: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitGeneric)
 	}
 	defer cleanup()
 	opts.Shutdown = shutTracker
@@ -113,7 +113,7 @@ func runDaemon(args []string) {
 
 	if err := daemon.RunWith(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
-		os.Exit(1)
+		os.Exit(exitGeneric)
 	}
 }
 

@@ -11,9 +11,10 @@ import (
 )
 
 // TestExitCodeContract exercises the REAL binary and pins the exit-code
-// contract of exitcodes.go (bead pg2-xrmfng, operator ruling on pg2-9jk3g5):
-// usage is 2, a missing daemon is 6, the all-idle / timeout / no-match codes are
-// distinct (>= 3), and exit 1 is reserved for a generic, unplanned error.
+// contract of exitcodes.go: usage is 2, a missing daemon is the shared
+// Unavailable 3, no-match is the shared NotFound 4, all-idle is the app code
+// 20, and exit 1 is reserved for a generic, unplanned error. The cases use
+// literal numbers so a renumbering of the constants cannot pass unnoticed.
 //
 // HOME and the XDG dirs are a temp dir with no daemon socket, so every
 // daemon-bound subcommand sees "daemon unavailable".
@@ -40,9 +41,9 @@ func TestExitCodeContract(t *testing.T) {
 		want int
 	}{
 		{"info without selector is usage", []string{"info"}, filepath.Join(home, ".config"), exitUsage},
-		{"agents-busy-check without a daemon is daemon-unavailable", []string{"agents-busy-check"}, filepath.Join(home, ".config"), exitDaemonUnavailable},
+		{"agents-busy-check without a daemon is daemon-unavailable (3)", []string{"agents-busy-check"}, filepath.Join(home, ".config"), 3},
 		{"agents-busy-check treating a down daemon as busy exits 0", []string{"agents-busy-check", "--consider-daemon-down-as-busy"}, filepath.Join(home, ".config"), 0},
-		{"info without a daemon is daemon-unavailable", []string{"info", "session:abc"}, filepath.Join(home, ".config"), exitDaemonUnavailable},
+		{"info without a daemon is daemon-unavailable (3)", []string{"info", "session:abc"}, filepath.Join(home, ".config"), 3},
 		{"an unplanned internal error (unreadable config) is generic exit 1", []string{"sessions"}, badCfg, exitGeneric},
 	}
 	for _, tc := range cases {
@@ -69,23 +70,28 @@ func TestExitCodeContract(t *testing.T) {
 	}
 }
 
-// TestExitCodeConstantsAreDistinct guards the contract's shape: 1 generic,
-// 2 usage, and every specific condition a distinct code >= 3.
-func TestExitCodeConstantsAreDistinct(t *testing.T) {
-	if exitGeneric != 1 || exitUsage != 2 {
-		t.Fatalf("exitGeneric=%d exitUsage=%d, want 1 and 2", exitGeneric, exitUsage)
+// TestExitCodeConstantsArePinned pins each code's number and the contract's
+// shape: 1 generic, 2 usage, the shared codes 3 and 4, and the single app code
+// in the 20..63 range, never a reserved value.
+func TestExitCodeConstantsArePinned(t *testing.T) {
+	want := map[string][2]int{
+		"exitGeneric":           {exitGeneric, 1},
+		"exitUsage":             {exitUsage, 2},
+		"exitDaemonUnavailable": {exitDaemonUnavailable, 3},
+		"exitNoMatch":           {exitNoMatch, 4},
+		"exitNotBusy":           {exitNotBusy, 20},
 	}
 	seen := map[int]string{}
-	for name, c := range map[string]int{
-		"exitNotBusy": exitNotBusy,
-		"exitNoMatch": exitNoMatch, "exitDaemonUnavailable": exitDaemonUnavailable,
-	} {
-		if c < 3 {
-			t.Errorf("%s = %d, want >= 3", name, c)
+	for name, c := range want {
+		if c[0] != c[1] {
+			t.Errorf("%s = %d, want %d", name, c[0], c[1])
 		}
-		if prev, dup := seen[c]; dup {
-			t.Errorf("%s and %s share exit code %d", name, prev, c)
+		if prev, dup := seen[c[0]]; dup {
+			t.Errorf("%s and %s share exit code %d", name, prev, c[0])
 		}
-		seen[c] = name
+		seen[c[0]] = name
+	}
+	if exitNotBusy < 20 || exitNotBusy > 63 {
+		t.Errorf("exitNotBusy = %d, want within the app range 20..63", exitNotBusy)
 	}
 }

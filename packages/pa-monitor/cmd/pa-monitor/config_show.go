@@ -13,7 +13,7 @@ func runConfigShow(args []string) {
 	cfg, err := configLoad()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config show: %v\n", err)
-		os.Exit(2)
+		os.Exit(exitUsage)
 	}
 	fmt.Printf("plan_tier:                 %s\n", cfg.PlanTier)
 	fmt.Printf("burn_window_short:         %s\n", cfg.BurnWindowShort)

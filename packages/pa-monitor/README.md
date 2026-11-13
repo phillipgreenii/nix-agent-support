@@ -23,7 +23,7 @@ pa-monitor status
 
 # Block-style "is any agent actively running a turn right now?"
 # (NOT "is any work pending" — see Busy/idle gate below)
-# (exit 0 = busy, 3 = all idle, 6 = daemon unreachable; 1 is a generic error)
+# (exit 0 = busy, 20 = all idle, 3 = daemon unreachable; 1 is a generic error)
 if pa-monitor agents-busy-check; then echo "busy"; fi
 
 # Toggle caffeinate (persists across daemon restarts)
@@ -55,7 +55,7 @@ pa-monitor config show
 | `auto-resume on\|off\|toggle`                        | Drive the auto-resume setting (the TUI's `[R]` key).         |
 | `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
 | `info <selector>`                                    | Print session or directory details.                          |
-| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff busy; 3 all idle; 6 daemon down (see caveat).     |
+| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff busy; 20 all idle; 3 daemon down (see caveat).    |
 | `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. |
 | `config show`                                        | Print loaded config (read-only).                             |
 
@@ -201,25 +201,30 @@ finished?". Per `docs/adr/0024-pa-monitor-session-status-blocker-model.md` R3, t
 `blocker = usage_limit`, i.e. a session that still has work but is waiting out the 5h/weekly usage
 window — is **not** counted as busy and is indistinguishable from `idle` at this gate.
 
-The exit-code contract follows the workspace Exit Codes rule: **1 is the generic/unplanned error
-and carries no branchable meaning**, 2 is a usage error, and each specific condition has its own
-distinct code >= 3. Callers MUST NOT branch on exit 1. Exit 4 is retired (it was the timeout of the
-removed `wait-until-agents-finished` subcommand) and MUST NOT be reused.
+The exit-code contract follows the shared exit codes (`x/exitcode`) and the workspace Exit Codes
+rule: **1 is the generic/unplanned error and carries no branchable meaning**, 2 is a usage error,
+3 and 4 are shared codes, and the one app-specific code lives in the range 20 to 63. Callers MUST
+NOT branch on exit 1. Exit 4 was previously retired here (it was the timeout of the removed
+`wait-until-agents-finished` subcommand); it is now the shared `NotFound` code.
 
-| Exit | `agents-busy-check`                                          |
-| ---- | ------------------------------------------------------------ |
-| 0    | daemon up and ≥1 session `working`                           |
-| 1    | generic/unplanned error (do not branch on it)                |
-| 2    | usage error                                                  |
-| 3    | daemon up and no session `working` (prints `all idle`)       |
-| 6    | daemon unreachable (0 with `--consider-daemon-down-as-busy`) |
+| Exit | `agents-busy-check`                                                            |
+| ---- | ------------------------------------------------------------------------------ |
+| 0    | daemon up and ≥1 session `working`                                             |
+| 1    | generic/unplanned error (do not branch on it)                                  |
+| 2    | usage error                                                                    |
+| 3    | daemon unreachable or the RPC failed (0 with `--consider-daemon-down-as-busy`) |
+| 20   | daemon up and no session `working` (prints `all idle`)                         |
 
-The other daemon-bound subcommands share the same codes: exit 6 when the daemon is unreachable or an
-RPC fails, exit 2 for a usage error, and (for `info`) exit 5 when the selector matches nothing.
+Exit 3 changed meaning: it used to be "all idle" and is now the shared `Unavailable` code, and the
+old daemon-unreachable code 6 is gone. "All idle" is exit 20, an answer rather than a failure.
+
+The other daemon-bound subcommands share the same codes: exit 3 when the daemon is unreachable or an
+RPC fails, exit 2 for a usage error, and (for `info`) exit 4 when the selector matches nothing
+(previously 5).
 
 Callers MUST read these codes as statements about **activity**, not about **completion**:
 
-- `agents-busy-check` exit 3 (`all idle`) MUST NOT be read as "no work is pending". It is reported
+- `agents-busy-check` exit 20 (`all idle`) MUST NOT be read as "no work is pending". It is reported
   while sessions are blocked on a usage window with work still queued.
 - A caller that MUST NOT proceed until pending work is genuinely done MUST NOT rely on this gate
   alone. It SHOULD additionally check for `blocked` sessions — `pa-monitor status` prints a
