@@ -129,6 +129,8 @@ type Daemon struct {
 
 	// seen is the last observation of each path (sweep_files_total).
 	seen sweepSeen
+	// liveSizes replaces the store read in countSweepFiles when set (tests).
+	liveSizes func() (map[store.FileIdentity]int64, error)
 	// seenDB persists the caught-up observations (the seen table).
 	seenDB *seenStore
 	// forcePending asks the next sweep to empty the skip caches first; the

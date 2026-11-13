@@ -8,6 +8,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/copier"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/watcher"
 )
 
@@ -62,16 +63,18 @@ func (d *Daemon) noteSeen(e watcher.Event) {
 // size. It only counts; skipUnchanged takes the saving.
 // It runs before the sweep's own events.
 func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
+	// The table is read before d.seen.mu is taken: the lock covers only the
+	// comparison, so a watcher event's noteSeen never waits on the read.
+	read := d.st.LiveFileSizes
+	if d.liveSizes != nil {
+		read = d.liveSizes
+	}
+	last, err := read()
+	if err != nil {
+		last = nil
+	}
 	d.seen.mu.Lock()
 	defer d.seen.mu.Unlock()
-	last := map[copier.Identity]int64{}
-	if all, err := d.st.AllFiles(); err == nil {
-		for _, f := range all {
-			if f.State != "deleted" {
-				last[copier.Identity{Dev: f.Dev, Ino: f.Ino, Birth: f.Birth}] = f.LastSize
-			}
-		}
-	}
 	candidates := 0
 	next := make(map[string]seenFile, len(files))
 	for _, fi := range files {
@@ -86,7 +89,7 @@ func (d *Daemon) countSweepFiles(files []watcher.FileInfo) {
 			d.obs.Reg.Add(obs.MSweepChanged, map[string]string{"reason": "not_cached"}, 1)
 		}
 		birth := cur.birthNS
-		if sz, ok := last[copier.Identity{Dev: fi.Dev, Ino: fi.Ino, Birth: birth}]; ok && sz == fi.Size {
+		if sz, ok := last[store.FileIdentity{Dev: fi.Dev, Ino: fi.Ino, Birth: birth}]; ok && sz == fi.Size {
 			candidates++
 		}
 	}

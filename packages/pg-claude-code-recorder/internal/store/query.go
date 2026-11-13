@@ -143,6 +143,33 @@ func (s *Reader) AllFiles() ([]File, error) {
 	return out, err
 }
 
+// FileIdentity is a file's device, inode and birth time: the key the
+// recorder uses to tell one file from another across renames.
+type FileIdentity struct {
+	Dev, Ino uint64
+	Birth    int64
+}
+
+// LiveFileSizes returns last_size of every file whose state is not deleted,
+// keyed by identity. It reads only the four columns it needs, so the caller
+// never holds a full []File.
+func (s *Reader) LiveFileSizes() (map[FileIdentity]int64, error) {
+	rows, err := s.q.Query(`SELECT dev,ino,birth_ns,last_size FROM files WHERE state != 'deleted'`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[FileIdentity]int64{}
+	for rows.Next() {
+		var dev, ino, birth, size int64
+		if err := rows.Scan(&dev, &ino, &birth, &size); err != nil {
+			return nil, err
+		}
+		out[FileIdentity{Dev: uint64(dev), Ino: uint64(ino), Birth: birth}] = size
+	}
+	return out, rows.Err()
+}
+
 // DeletedSnapshotFiles returns only the snapshot-mode files whose state is
 // deleted, ordered by id. A sweep with nothing deleted reads no whole table.
 func (s *Reader) DeletedSnapshotFiles() ([]File, error) {
