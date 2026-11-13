@@ -56,9 +56,9 @@ shape of the service around it:
    except the two offline checks (`check`, `config check`), which exist for the case when the daemon will
    not start. Every client verb has `--json`; its output validates against `schemas/cli.schema.json`,
    which is derived from the API document by a test that fails when they drift. Exit codes are the
-   repository's: 1 is the generic error, and each specific condition has its own value of 2 or more (usage
-   2, unreachable 3, refused 4, store did not take it 5, not ready 6, serve failed to start 7, check
-   found a problem 8).
+   shared codes of `x/exitcode` for the generic outcomes (usage 2, daemon unreachable or not ready 3,
+   serve failed to start 7) and app-specific codes for the rest (refused 20, store did not take it 21,
+   check found a problem 22); 1 is the generic error.
 5. **Home-manager scope for the daemon, darwin scope for the registrations.** This repository's guidance
    prefers the HM-scoped launchd pattern (`phillipgreenii-nix-personal` ADR 0055, as pa-monitor does) over
    a darwin module (as pg-desk-serve does). The daemon's enable flag, its rendered configuration and its

@@ -23,10 +23,10 @@ func newRoot(ctx context.Context, s *state) *cobra.Command {
 every other verb talks to it over loopback HTTP (127.0.0.1:49210 unless --addr or
 PG_TASK_FOCUS_ADDR says otherwise). Every client verb takes --json.
 
-Exit codes: 0 success; 1 an unexpected error; 2 a bad flag or argument; 3 the daemon is
-not reachable; 4 the daemon refused the request; 5 the store did not take the change
-(read-only mode, or an unknown outcome); 6 the daemon is starting and not ready; 7 serve
-could not start; 8 check found a problem.`,
+Exit codes: 0 success; 1 an unexpected error; 2 a bad flag or argument; 3 the daemon is not
+reachable or is starting and not ready; 7 serve could not start (its configuration or log was
+refused); 20 the daemon refused the request; 21 the store did not take the change (read-only
+mode, or an unknown outcome); 22 check found a problem.`,
 		Version: s.app.Version,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			return s.checkClient()

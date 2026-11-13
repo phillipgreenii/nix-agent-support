@@ -20,20 +20,23 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/wire"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/zone"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// The exit codes. 1 is the generic error and carries no branchable meaning;
-// every specific condition has its own value of 2 or more.
+// The exit codes. The generic outcomes are the shared codes of
+// github.com/phillipgreenii/x/exitcode; the conditions only this tool has are
+// app-specific codes in 20 to 63. 1 is the generic error and carries no
+// branchable meaning.
 const (
-	ExitOK          = 0
-	ExitError       = 1 // an unexpected error
-	ExitUsage       = 2 // a bad flag or argument
-	ExitUnreachable = 3 // the daemon could not be reached
-	ExitRefused     = 4 // the daemon refused the request with a problem
-	ExitStore       = 5 // store_unavailable: read-only mode, or an unknown outcome
-	ExitNotReady    = 6 // the daemon is starting and answered not_ready
-	ExitStartFailed = 7 // serve could not start
-	ExitCheckFailed = 8 // check found a problem in the log or the configuration
+	ExitOK          = exitcode.OK
+	ExitError       = exitcode.Error
+	ExitUsage       = exitcode.Usage       // a bad flag or argument
+	ExitUnreachable = exitcode.Unavailable // the daemon could not be reached
+	ExitNotReady    = exitcode.Unavailable // the daemon is starting and answered not_ready
+	ExitStartFailed = exitcode.Config      // serve could not start: configuration or log refused
+	ExitRefused     = 20                   // the daemon refused the request with a problem
+	ExitStore       = 21                   // store_unavailable: read-only mode, or an unknown outcome
+	ExitCheckFailed = 22                   // check found a problem in the log or the configuration
 )
 
 // App is what a command needs from its surroundings; tests replace them.

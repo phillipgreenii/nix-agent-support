@@ -103,7 +103,7 @@ func (s *state) checkCmd(ctx context.Context) *cobra.Command {
 		Short: "Verify an event log offline, without the daemon and without changing anything",
 		Long: `Read the log (the data directory or the events.jsonl file; default the data directory)
 and replay its committed events. It takes no lock, so it works while the daemon runs. Exit 0
-means a daemon would start on the log; exit 8 means it would refuse, and the output says why,
+means a daemon would start on the log; exit 22 means it would refuse, and the output says why,
 with the line number.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
