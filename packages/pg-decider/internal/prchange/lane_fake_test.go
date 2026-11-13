@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -43,7 +42,7 @@ func buildFakeBD(t *testing.T) string {
 	t.Helper()
 	goBin, err := exec.LookPath("go")
 	if err != nil {
-		goBin = filepath.Join(runtime.GOROOT(), "bin", "go")
+		t.Fatalf("go toolchain not on PATH: %v", err)
 	}
 	out := filepath.Join(t.TempDir(), "bd")
 	cmd := exec.CommandContext(t.Context(), goBin, "build", "-o", out, "github.com/phillipgreenii/pg-decider/internal/fakebd/cmd/fake-bd")

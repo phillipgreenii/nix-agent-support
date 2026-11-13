@@ -555,7 +555,7 @@ func (r *run) mapDecide(res Result) int {
 	// An apply's stdout is its --json plan, which the run record consumes; only a
 	// plan's own output is the command's stdout.
 	if len(res.Stdout) > 0 && r.o.Mode != ModeApply {
-		r.o.Stdout.Write(res.Stdout)
+		_, _ = r.o.Stdout.Write(res.Stdout)
 	}
 	switch {
 	case res.StartErr != nil:

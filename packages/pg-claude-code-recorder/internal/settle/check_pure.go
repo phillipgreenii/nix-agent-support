@@ -76,7 +76,7 @@ type tornVerdict struct {
 // is behind the copy. A tail of maxLine bytes or more is too long to wait for;
 // a shorter one is parsed once the Conversation is quiet.
 func tornTail(tornLen, parseOffset, copyOffset int64, maxLine int, quiet bool) tornVerdict {
-	if !(tornLen > 0 && parseOffset < copyOffset) {
+	if tornLen <= 0 || parseOffset >= copyOffset {
 		return tornVerdict{}
 	}
 	v := tornVerdict{pending: true}

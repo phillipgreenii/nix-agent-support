@@ -18,11 +18,10 @@ import (
 // bgRun is the composed command started in its own process group, so a test can
 // let it run on while it does something else, or end the whole group.
 type bgRun struct {
-	cmd         *exec.Cmd
-	out, errb   bytes.Buffer
-	done        chan struct{}
-	exitErr     error
-	killedGroup bool
+	cmd       *exec.Cmd
+	out, errb bytes.Buffer
+	done      chan struct{}
+	exitErr   error
 }
 
 // startChange starts the real composed command with args, in its own process

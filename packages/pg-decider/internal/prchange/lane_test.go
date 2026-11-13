@@ -59,7 +59,7 @@ func laneCalls(t *testing.T, s *script) []laneInput {
 // `plan --json` reads), with their standard input.
 func deciderCalls(s *script) (calls, inputs []string) {
 	for i, c := range s.calls {
-		if strings.HasPrefix(c, "pg-decider ") && !(strings.HasPrefix(c, "pg-decider plan pr ") && strings.HasSuffix(c, " --json")) {
+		if strings.HasPrefix(c, "pg-decider ") && (!strings.HasPrefix(c, "pg-decider plan pr ") || !strings.HasSuffix(c, " --json")) {
 			calls, inputs = append(calls, c), append(inputs, s.inputs[i])
 		}
 	}

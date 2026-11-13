@@ -150,7 +150,6 @@ type fakeChange struct {
 	script map[string]func(mode string) recLine // pr -> record to write
 	calls  []string
 	exit   map[string]int // pr -> exit code (default 0)
-	stderr string
 }
 
 func (f *fakeChange) run(_ context.Context, c Call) Result {

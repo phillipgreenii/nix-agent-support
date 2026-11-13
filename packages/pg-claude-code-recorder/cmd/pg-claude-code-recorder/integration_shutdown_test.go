@@ -45,7 +45,7 @@ func (d *daemonEnv) logEvents(name string) []map[string]any {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []map[string]any
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -72,7 +72,7 @@ func (d *daemonEnv) lockFree(t *testing.T) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return false
 	}
@@ -122,7 +122,7 @@ func TestSIGTERMMidSweepExitsCleanlyWithinTheDeadline(t *testing.T) {
 	for _, ev := range d.logEvents("shutdown_phase") {
 		t.Logf("rehearsal shutdown_phase %v duration_ms=%v", ev["phase"], ev["duration_ms"])
 		var ms float64
-		fmt.Sscan(fmt.Sprint(ev["duration_ms"]), &ms)
+		_, _ = fmt.Sscan(fmt.Sprint(ev["duration_ms"]), &ms)
 		sum += ms
 	}
 	if len(d.logEvents("shutdown_done")) != 1 || len(d.logEvents("shutdown_overrun")) != 0 {

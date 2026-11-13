@@ -462,8 +462,7 @@ func TestRouterCreatesDuringThePassDoNotChangeTheCount(t *testing.T) {
 	f := newFake(t, rec)
 	// The router writes a create for a set PR in the middle of the pass.
 	inner := f.run
-	var o RunOptions
-	o = newRun(t, ModeApply, testSet("o/r#1", "o/r#2"), rec, f, &fakeRate{vals: []int{9000}})
+	o := newRun(t, ModeApply, testSet("o/r#1", "o/r#2"), rec, f, &fakeRate{vals: []int{9000}})
 	o.Runner = func(ctx context.Context, c Call) Result {
 		r := inner(ctx, c)
 		if c.Args[len(c.Args)-1] == "o/r#1" {

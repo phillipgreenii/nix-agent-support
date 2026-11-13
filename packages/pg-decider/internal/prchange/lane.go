@@ -130,7 +130,7 @@ func (r *run) laneInput(code int) laneInput {
 		in.LastOutcome = r.failStage + "." + r.failClass
 	}
 	for _, d := range r.decisions {
-		in.Decisions = append(in.Decisions, laneDecision{Rule: d.Rule, Action: d.Action, Outcome: d.Outcome, Reason: d.Reason, Count: d.Count})
+		in.Decisions = append(in.Decisions, laneDecision(d))
 	}
 	return in
 }

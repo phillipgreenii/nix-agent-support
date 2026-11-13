@@ -312,7 +312,7 @@ func (s suite) TestWedgedGitIsKilledAndQuarantined() {
 	if d := time.Since(start); d > 10*time.Second {
 		t.Errorf("reset took %s; the timeout did not bound it", d)
 	}
-	QuarantineIfWedged(h, err)
+	_ = QuarantineIfWedged(h, err)
 	if got := h.Record().State; got != pool.Quarantined {
 		t.Errorf("state %s, want quarantined", got)
 	}

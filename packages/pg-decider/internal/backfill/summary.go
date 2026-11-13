@@ -81,8 +81,8 @@ func Summarize(lg *Log, set *Set, mode string, maxAge time.Duration, now time.Ti
 		}
 		s.WithRecord++
 		if mode == ModeApply {
-			switch {
-			case r.Residual == nil:
+			switch r.Residual {
+			case nil:
 				s.Residuals[e.PR] = -1
 				s.Problems = append(s.Problems, fmt.Sprintf("%s: the apply record has no residual (%s)", e.PR, firstNonEmpty(r.ResidualError, "not recorded")))
 			default:

@@ -648,7 +648,7 @@ func (a *app) reap(args []string) int {
 		// A leased slot is reaped once expired (plus grace). A resetting slot
 		// whose lock was free was interrupted, whatever its expiry says.
 		expired := !rec.Expiry.IsZero() && a.clock.Now().After(rec.Expiry.Add(*grace))
-		if !(rec.State == pool.Resetting || (rec.State == pool.Leased && expired)) {
+		if rec.State != pool.Resetting && (rec.State != pool.Leased || !expired) {
 			h.Unlock()
 			continue
 		}
