@@ -30,7 +30,7 @@ look (for example follow-ups discovered by a worker). Reads <workdir>/export.jso
 and writes <workdir>/batches/<name> plus <workdir>/facts/<name>.json. Every id
 MUST be present in the export; --ids is a comma-separated list.
 
-Exit codes: 0 ok; 1 usage, IO or unknown-id error.`,
+Exit codes: 0 ok; 1 IO or unknown-id error; 2 usage error.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w, err := requireWorkdir(workdir)
@@ -38,10 +38,10 @@ Exit codes: 0 ok; 1 usage, IO or unknown-id error.`,
 				return err
 			}
 			if name == "" {
-				return fmt.Errorf("--name is required")
+				return usageErrorf("--name is required")
 			}
 			if len(ids) == 0 {
-				return fmt.Errorf("--ids is required (comma-separated bead ids)")
+				return usageErrorf("--ids is required (comma-separated bead ids)")
 			}
 			rows, err := unstick.ReadExportFile(w.Join(unstick.ExportFile))
 			if err != nil {

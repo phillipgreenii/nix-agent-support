@@ -129,10 +129,10 @@ Read the JSON summary and record it in `progress.txt`. Its fields:
   status themselves;
 - `warnings` and `written`.
 
-**Exit codes** (`prepare`, `batch`, `report`): `0` ok; `1` usage, IO or internal error
+**Exit codes** (`prepare`, `batch`, `report`): `0` ok; `1` IO or internal error
 (including a broken triage partition or batch coverage, which means a pb bug: STOP and
-report it); `2` a `bd` call failed (STOP and report; do not retry blindly). `pb unstick marker
---check` exits `1` when anything does not conform.
+report it); `2` usage error (a bad flag: fix the call); `3` a `bd` call failed (STOP and report; do not retry blindly). `pb unstick marker
+--check` exits `22` when anything does not conform.
 
 ### Reference — what `prepare` computes (the WHY; never recompute it)
 
@@ -287,7 +287,7 @@ When the last worker hands back, check `followups.txt`:
    between this sweep and peers, markers added by outcome, closed beads (id plus close
    reason), undeferred / de-labelled / retargeted beads, claims released, new beads, the
    epic line `epic candidates N = closed a + unchanged b + needs-children c + marker-skipped d`
-   (plus any unresolved candidates), and the `OPERATOR:` / `FOLLOWUP:` lines grouped. Exit `2`
+   (plus any unresolved candidates), and the `OPERATOR:` / `FOLLOWUP:` lines grouped. Exit `3`
    means the post-sweep export failed; a
    missing post-sweep ready list is only a warning.
 3. **Attribution is a HEURISTIC.** bd records no closer, so a bead is attributed to this sweep

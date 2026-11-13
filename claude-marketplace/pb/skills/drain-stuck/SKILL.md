@@ -304,7 +304,7 @@ bead isolated as a set.
   real work is never touched.
 - A non-zero exit MUST NOT block the release: exit 1 means the worktree is still in place (for
   example `wtdone` refused because a process is anchored in it) and no note was written, so
-  carry on and mention it in the return; exit 4 means the worktree WAS removed but the note failed,
+  carry on and mention it in the return; exit 20 means the worktree WAS removed but the note failed,
   so post the note text from the error with `bd comment <id> "<note>" --actor "ID"`.
 
 ## CLOSE-AS-MOOT (STUCK step 2 disproved the premise)

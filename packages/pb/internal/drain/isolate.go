@@ -20,7 +20,7 @@ import (
 
 // ErrConflict: the isolation state on disk contradicts the request (the
 // worktree path holds another branch, or drain/<id> is checked out elsewhere).
-// Never resolved by force — the caller routes the bead to STUCK. CLI exit 3.
+// Never resolved by force — the caller routes the bead to STUCK. CLI exit 11 (Conflict).
 var ErrConflict = errors.New("conflicting isolation state")
 
 type Params struct {

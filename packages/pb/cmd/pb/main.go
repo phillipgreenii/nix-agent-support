@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +25,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return newExitError(exitUsage, err) })
 	root.AddCommand(newGateCmd())
 	root.AddCommand(newDrainCmd())
 	root.AddCommand(newUnstickCmd())
@@ -31,10 +34,20 @@ func newRootCmd() *cobra.Command {
 }
 
 // Process exit codes. Commands that need a code other than the default return
-// an error built with newExitError; everything else exits exitGeneric.
+// an error built with newExitError; everything else exits exitGeneric. The
+// shared codes come from x/exitcode; the app-specific ones sit in its 20-63 range.
 const (
-	exitGeneric = 1 // usage, IO or internal error
-	exitBD      = 2 // a bd call failed (pb unstick)
+	exitGeneric     = exitcode.Error       // IO or internal error
+	exitUsage       = exitcode.Usage       // bad flag, argument or flag combination
+	exitBD          = exitcode.Unavailable // a bd call failed (pb unstick)
+	exitConflict    = exitcode.Conflict    // pb drain isolate: conflicting isolation state
+	exitGateSkipped = exitcode.Degraded    // pb gate check: some gate was undeterminable
+	exitGatingPart  = exitcode.Degraded    // pb gate attach-verified-child: child left deferred, gating incomplete
+
+	// App-specific codes (exitcode.AppMin to exitcode.AppMax).
+	exitNoteFailed         = 20 // pb drain reclaim: worktree removed, bead note not written
+	exitChildMayBeWorkable = 21 // pb gate attach-verified-child: child not proven un-workable
+	exitNonConforming      = 22 // pb unstick marker --check: a marker does not conform
 )
 
 // exitError carries a specific process exit code through the error return path.
@@ -48,6 +61,23 @@ func (e *exitError) Unwrap() error { return e.err }
 
 func newExitError(code int, err error) error { return &exitError{code: code, err: err} }
 
+// usageErrorf builds a usage error (exit 2) for a bad flag value or combination.
+func usageErrorf(format string, a ...any) error {
+	return newExitError(exitUsage, fmt.Errorf(format, a...))
+}
+
+// isCobraUsageError reports whether err is one of cobra's own argument
+// complaints (unknown command, missing required flag, wrong argument count).
+// Flag-parse errors are routed through SetFlagErrorFunc instead.
+func isCobraUsageError(err error) bool {
+	m := err.Error()
+	return strings.HasPrefix(m, "unknown command ") ||
+		strings.HasPrefix(m, "required flag(s) ") ||
+		strings.HasPrefix(m, "accepts ") ||
+		strings.HasPrefix(m, "unknown flag") ||
+		strings.Contains(m, " arg(s), received ")
+}
+
 // exitCodeFor maps an error to its process exit code (0 for nil).
 func exitCodeFor(err error) int {
 	if err == nil {
@@ -56,6 +86,9 @@ func exitCodeFor(err error) int {
 	var ee *exitError
 	if errors.As(err, &ee) {
 		return ee.code
+	}
+	if isCobraUsageError(err) {
+		return exitUsage
 	}
 	return exitGeneric
 }

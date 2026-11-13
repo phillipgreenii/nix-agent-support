@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pb/internal/gate"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func TestParseGateSpecs(t *testing.T) {
@@ -132,8 +133,8 @@ func TestAttachExitCode(t *testing.T) {
 		want int
 	}{
 		{errors.New("bead not found"), 1},
-		{fmt.Errorf("%w: gate for r@c: x", gate.ErrGatingIncomplete), 3},
-		{fmt.Errorf("%w: child: x", gate.ErrChildMayBeWorkable), 4},
+		{fmt.Errorf("%w: gate for r@c: x", gate.ErrGatingIncomplete), exitcode.Degraded},
+		{fmt.Errorf("%w: child: x", gate.ErrChildMayBeWorkable), 21},
 	} {
 		if got := attachExitCode(tt.err); got != tt.want {
 			t.Errorf("attachExitCode(%v) = %d, want %d", tt.err, got, tt.want)

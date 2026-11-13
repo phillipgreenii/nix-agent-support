@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -44,26 +43,26 @@ func newUnstickMarkerCmd(env unstickEnv) *cobra.Command {
 (newline included), backtick, $, quotes or the substring "; recheck-when:".
 --recheck-when is YYYY-MM-DD, "<bead-id> closes" or "on-change".
 
---check: reads marker lines from stdin (blank lines ignored) and exits non-zero
+--check: reads marker lines from stdin (blank lines ignored) and exits 22
 if any does not conform. With --export FILE it also scans the notes and
 comments of every NON-CLOSED bead in that export and lists the beads carrying a
 malformed marker (for example a date-only timestamp); those count as
 non-conforming too.
 
-Exit codes: 0 ok; 1 usage error or non-conforming input.`,
+Exit codes: 0 ok; 2 usage error; 22 non-conforming input (--check).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if check {
 				if outcome != "" || reason != "" || recheck != "" {
-					return errors.New("--check cannot be combined with --outcome, --reason or --recheck-when")
+					return usageErrorf("--check cannot be combined with --outcome, --reason or --recheck-when")
 				}
 				return runMarkerCheck(cmd, export, asJSON)
 			}
 			if export != "" {
-				return errors.New("--export is only valid with --check")
+				return usageErrorf("--export is only valid with --check")
 			}
 			if outcome == "" || reason == "" || recheck == "" {
-				return errors.New("--outcome, --reason and --recheck-when are all required (or use --check)")
+				return usageErrorf("--outcome, --reason and --recheck-when are all required (or use --check)")
 			}
 			t, err := now.resolve(env)
 			if err != nil {
@@ -71,7 +70,7 @@ Exit codes: 0 ok; 1 usage error or non-conforming input.`,
 			}
 			m, err := unstick.NewMarker(t, outcome, reason, recheck)
 			if err != nil {
-				return err
+				return newExitError(exitUsage, err) // a bad flag value
 			}
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), map[string]string{"marker": m.String()})
@@ -147,7 +146,7 @@ func runMarkerCheck(cmd *cobra.Command, export string, asJSON bool) error {
 		}
 	}
 	if bad > 0 {
-		return fmt.Errorf("%d non-conforming marker(s) found", bad)
+		return newExitError(exitNonConforming, fmt.Errorf("%d non-conforming marker(s) found", bad))
 	}
 	return nil
 }

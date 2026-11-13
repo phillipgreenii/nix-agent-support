@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -61,7 +60,8 @@ func newUnstickCmdWith(env unstickEnv) *cobra.Command {
 (prepare), follow-up batches (batch), sweep markers (marker) and the closing
 report (report). Per-bead judgement stays with the batch workers.
 
-Exit codes: 0 ok; 1 usage, IO or internal error; 2 a bd call failed.`,
+Exit codes: 0 ok; 1 IO or internal error; 2 usage error; 3 a bd call failed; 22 marker --check found a
+non-conforming marker.`,
 	}
 	cmd.AddCommand(newUnstickPrepareCmd(env))
 	cmd.AddCommand(newUnstickBatchCmd(env))
@@ -84,7 +84,7 @@ func (n *nowFlag) resolve(env unstickEnv) (time.Time, error) {
 	}
 	t, err := unstick.ParseTime(n.raw)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("--now: %w", err)
+		return time.Time{}, usageErrorf("--now: %w", err)
 	}
 	return t.Truncate(time.Second), nil
 }
@@ -93,7 +93,7 @@ func (n *nowFlag) resolve(env unstickEnv) (time.Time, error) {
 func resolveRoot(env unstickEnv, flag string) (string, error) {
 	if flag != "" {
 		if !filepath.IsAbs(flag) {
-			return "", fmt.Errorf("--root must be an absolute path, got %q", flag)
+			return "", usageErrorf("--root must be an absolute path, got %q", flag)
 		}
 		return flag, nil
 	}
@@ -107,13 +107,13 @@ func resolveRoot(env unstickEnv, flag string) (string, error) {
 // requireWorkdir checks that --workdir names an existing sweep directory.
 func requireWorkdir(path string) (unstick.Workdir, error) {
 	if path == "" {
-		return unstick.Workdir{}, fmt.Errorf("--workdir is required")
+		return unstick.Workdir{}, usageErrorf("--workdir is required")
 	}
 	if !filepath.IsAbs(path) {
-		return unstick.Workdir{}, fmt.Errorf("--workdir must be an absolute path, got %q", path)
+		return unstick.Workdir{}, usageErrorf("--workdir must be an absolute path, got %q", path)
 	}
 	if fi, err := os.Stat(path); err != nil || !fi.IsDir() {
-		return unstick.Workdir{}, fmt.Errorf("--workdir %q is not an existing directory", path)
+		return unstick.Workdir{}, usageErrorf("--workdir %q is not an existing directory", path)
 	}
 	return unstick.Workdir{Path: path}, nil
 }
@@ -125,7 +125,7 @@ func cmdCtx(cmd *cobra.Command) context.Context {
 	return context.Background()
 }
 
-// bdFailure marks err as a failed bd call (exit 2).
+// bdFailure marks err as a failed bd call (exit 3, Unavailable).
 func bdFailure(err error) error { return newExitError(exitBD, err) }
 
 func writeJSON(w io.Writer, v any) error {

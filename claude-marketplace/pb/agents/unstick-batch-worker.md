@@ -148,7 +148,7 @@ already cached in `WORKDIR/probes/gate-check.json`.
 
      It prints exactly one line of the form
      `[unstick YYYY-MM-DDTHH:MM:SSZ] <outcome>: <reason>; recheck-when: <recheck>`. A bad
-     value exits non-zero with the reason (exit 1) and prints no marker: fix the argument and
+     value exits non-zero with the reason (exit 2) and prints no marker: fix the argument and
      rerun. `<outcome>` matches `[a-z][a-z-]*` (for example `unchanged`, `undeferred`,
      `retargeted`, `deps-fixed`, `unlabelled`, `released`, `needs-children`).
 

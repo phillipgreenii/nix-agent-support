@@ -74,7 +74,8 @@ Rules (RFC 2119):
   plugin is default-on, so the plugin can exist without the CLI, and the command MUST NOT fall back
   to hand-computed stages.
 - The orchestrator MUST NOT hand-compute triage, batches, fact sheets, counts or attribution.
-- `pb unstick` commands MUST exit `0` ok, `1` usage, IO or internal error, `2` a `bd` call failed.
+- `pb unstick` commands MUST exit `0` ok, `1` IO or internal error, `2` usage error, `3` a `bd` call failed (the shared
+  `Usage` and `Unavailable` codes), and `22` for `marker --check` finding a non-conforming marker.
 - Outputs MUST be deterministic: sorted by id, and the same export with the same clock MUST yield
   byte-identical files. The clock is injected, never read inside pure logic.
 - Domain packages MUST import `internal/bd`, and `internal/bd` MUST NOT import a domain package

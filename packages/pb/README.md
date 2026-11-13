@@ -124,7 +124,7 @@ pb gate check [--dry-run] [--strict] [--last-n N] [--stale-handler convert-to-hu
   gates are UNDETERMINABLE (unknown repo, scan failure, dirty under `--strict`, an apply
   that recorded no locked rev for an input it consumes).
 - **Best-effort:** undeterminable gates are skipped and reported; the command exits
-  non-zero if anything was skipped.
+  with the shared `Degraded` code `5` if anything was skipped.
 
 ## `pb gate attach-verified-child`
 
@@ -167,16 +167,17 @@ pb gate attach-verified-child --impl <beadid> --title <t> --gate <repo>=<sha> [-
     with nothing created.
 - Human output: `child=<id> gates=<n>`. `--json` emits the `AttachResult` envelope
   (`child`, `gates`, `comment_failed`) instead. Either form is printed only once the child
-  exists, so exit `3` and `4` still report the child and the gates created so far; a failure
+  exists, so exit `5` and `21` still report the child and the gates created so far; a failure
   before the child exists (exit `1`) prints **nothing** on stdout and the reason on stderr,
   never a `{"child":""}` object that looks like a success shape.
 
-| Exit | Meaning                                                                                                                  |
-| ---- | ------------------------------------------------------------------------------------------------------------------------ |
-| `0`  | Fully gated: child created, gated, un-deferred, and proven absent from `bd ready`.                                       |
-| `1`  | Generic failure (e.g. bad flags, `pn`/`bd` unreachable) — nothing to clean up.                                           |
-| `3`  | Gating incomplete; the child was **left deferred** — safe, no peer can claim it. Route the impl bead to STUCK and retry. |
-| `4`  | The child could **not be proven un-workable** — do **NOT** close the impl bead until this is resolved by hand.           |
+| Exit | Meaning                                                                                                                               |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Fully gated: child created, gated, un-deferred, and proven absent from `bd ready`.                                                    |
+| `1`  | Generic failure (e.g. `pn`/`bd` unreachable, a bad `--title` or `--body-file`) — nothing to clean up.                                 |
+| `2`  | Usage: a missing required flag or a malformed `--gate`. Nothing was created.                                                          |
+| `5`  | Gating incomplete (`Degraded`); the child was **left deferred** — safe, no peer can claim it. Route the impl bead to STUCK and retry. |
+| `21` | The child could **not be proven un-workable** — do **NOT** close the impl bead until this is resolved by hand.                        |
 
 ```bash
 pb gate attach-verified-child \
@@ -223,7 +224,7 @@ pb drain isolate --bead <id> --repo <abs-path> [--json] [--git-timeout <duration
   (default `5m0s`). On expiry isolate removes **only** the worktree (and the `drain/<bead>` branch,
   only when this same call created it with `-b`) that the timed-out call left half-created, leaves any
   pre-existing isolation (other beads' worktrees, a parked branch) alone, prints an error naming
-  fsmonitor/fseventsd contention, and exits `1`. Exit codes `0`/`3` and the output line are unchanged.
+  fsmonitor/fseventsd contention, and exits `1`. Exit codes and the output line are unchanged.
 - Read-only canonical-clone diagnosis: when the canonical clone's `.git/config` carries a stray
   `core.worktree` (or `git rev-parse --show-toplevel` disagrees with `--repo`), isolate still
   succeeds (exit `0`) but prints `pb: warning: core.worktree set in canonical config ...` to
@@ -231,11 +232,12 @@ pb drain isolate --bead <id> --repo <abs-path> [--json] [--git-timeout <duration
   the canonical clone) only surfaces later as a phantom dirty tree halting the land at FF-0a
   (`pg2-4c4nv`). `pb` never clears the key (R-3); the operator unsets it.
 
-| Exit | Meaning                                                                                                                                                  |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Isolated (worktree created, or an existing worktree/branch reused).                                                                                      |
-| `1`  | Generic failure (bad flags, git unreachable, a git call timed out after `--git-timeout`, etc).                                                           |
-| `3`  | Conflicting isolation state — the worktree path holds another branch, or `drain/<bead>` is checked out elsewhere. Never forced; route the bead to STUCK. |
+| Exit | Meaning                                                                                                                                                               |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Isolated (worktree created, or an existing worktree/branch reused).                                                                                                   |
+| `1`  | Generic failure (git unreachable, a git call timed out after `--git-timeout`, etc).                                                                                   |
+| `2`  | Usage: a bad flag value (`--repo` not absolute, `--bead` not an id, `--git-timeout` not positive).                                                                    |
+| `11` | Conflicting isolation state (`Conflict`) — the worktree path holds another branch, or `drain/<bead>` is checked out elsewhere. Never forced; route the bead to STUCK. |
 
 ```bash
 pb drain isolate --bead pg2-1qcro.7 --repo "$PN_WORKSPACE_ROOT/nix-repo-base"
@@ -280,11 +282,12 @@ flowchart TD
 - Output: `outcome=<removed|none|kept-dirty|kept-commits> worktree=<abs> branch=<b> [reason=...]`;
   `--json` adds the `note` text for `removed`.
 
-| Exit | Meaning                                                                                                           |
-| ---- | ----------------------------------------------------------------------------------------------------------------- |
-| `0`  | Handled: removed, or deliberately left alone (see `outcome`).                                                     |
-| `1`  | Failure (bad flags, unreadable state, `wtdone` refused). The worktree is left in place and the bead gets NO note. |
-| `4`  | The worktree WAS removed but `bd comment` failed; the error carries the note text for the caller to post.         |
+| Exit | Meaning                                                                                                   |
+| ---- | --------------------------------------------------------------------------------------------------------- |
+| `0`  | Handled: removed, or deliberately left alone (see `outcome`).                                             |
+| `1`  | Failure (unreadable state, `wtdone` refused). The worktree is left in place and the bead gets NO note.    |
+| `2`  | Usage: a bad flag value (`--repo`, `--bead`, `--actor`, `--git-timeout`). Nothing was touched.            |
+| `20` | The worktree WAS removed but `bd comment` failed; the error carries the note text for the caller to post. |
 
 ```bash
 pb drain reclaim --bead pg2-1qcro.7 --repo "$PN_WORKSPACE_ROOT/nix-repo-base" --actor "$CLAUDE_SESSION_ID-drain"
@@ -433,11 +436,13 @@ marker; closing the epic writes none (the close reason is the record) and is lis
 
 ### Exit codes
 
-| Code | Meaning                                                                                                                |
-| ---- | ---------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success.                                                                                                               |
-| `1`  | Usage, IO or internal error (including a broken triage partition or batch coverage). `marker --check`: non-conforming. |
-| `2`  | A `bd` call failed (`prepare` export or ready, `report` export).                                                       |
+| Code | Meaning                                                                          |
+| ---- | -------------------------------------------------------------------------------- |
+| `0`  | Success.                                                                         |
+| `1`  | IO or internal error (including a broken triage partition or batch coverage).    |
+| `2`  | Usage: a bad flag, flag value or flag combination (`Usage`).                     |
+| `3`  | A `bd` call failed (`prepare` export or ready, `report` export) (`Unavailable`). |
+| `22` | `marker --check`: at least one marker does not conform.                          |
 
 ### Work directory
 

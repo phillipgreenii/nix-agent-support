@@ -102,7 +102,7 @@ and not to the gate (bead `tc-6fw03`).
   `convert-to-human` (adds the `human` label → surfaces in `bd human list`) or `close`
   (resolves it, unblocking the bead).
 - **Best-effort:** undeterminable gates are skipped and reported; the command exits
-  non-zero iff anything was skipped.
+  `5` (the shared `Degraded` code) iff anything was skipped.
 
 ### Patch-id inputs must be driver-free
 

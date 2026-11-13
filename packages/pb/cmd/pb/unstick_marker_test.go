@@ -71,8 +71,8 @@ func TestMarker_generateRejectsBadInput(t *testing.T) {
 	cases["bad --now"] = append([]string{"marker"}, cases["bad --now"]...)
 	for name, args := range cases {
 		out, _, err := execUnstick(testEnv(run.NewFakeRunner()), "", args...)
-		if err == nil || exitCodeFor(err) != 1 {
-			t.Errorf("%s: want exit 1, got %d (%v)", name, exitCodeFor(err), err)
+		if err == nil || exitCodeFor(err) != 2 {
+			t.Errorf("%s: want exit 2, got %d (%v)", name, exitCodeFor(err), err)
 		}
 		if out != "" {
 			t.Errorf("%s: wrote output %q on failure", name, out)
@@ -92,7 +92,7 @@ func TestMarker_check(t *testing.T) {
 		"[unstick 2026-10-10] unchanged: date only; recheck-when: on-change\n" +
 		"[unstick 2026-10-10T12:00:00Z] unchanged: no recheck\n"
 	out, _, err = execUnstick(env, bad, "marker", "--check")
-	if err == nil || exitCodeFor(err) != 1 || !strings.Contains(err.Error(), "2 non-conforming") {
+	if err == nil || exitCodeFor(err) != 22 || !strings.Contains(err.Error(), "2 non-conforming") {
 		t.Errorf("bad input: exit %d, err %v", exitCodeFor(err), err)
 	}
 	if !strings.Contains(out, "line 2:") || !strings.Contains(out, "line 3:") || strings.Contains(out, "line 1:") {
@@ -120,7 +120,7 @@ func TestMarker_checkExportListsMalformedBeads(t *testing.T) {
 	w := preparedWorkdir(t)
 	export := filepath.Join(w, "export.jsonl")
 	out, _, err := execUnstick(testEnv(run.NewFakeRunner()), "", "marker", "--check", "--export", export)
-	if err == nil || exitCodeFor(err) != 1 {
+	if err == nil || exitCodeFor(err) != 22 {
 		t.Fatalf("a malformed marker in the export must fail: %v", err)
 	}
 	if !strings.Contains(out, "1 bead(s) with a malformed marker") || !strings.Contains(out, "a-6") || strings.Contains(out, "  a-5\n") {

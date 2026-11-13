@@ -37,7 +37,7 @@ integrate-branch-support --facts, from "pg-hooks status --porcelain") and
 writes NO file into the worktree: git runs the bundle's hooks from the shared
 common dir. An absent pg-hooks or an unrecognized state reports missing.
 
-Exit codes: 0 isolated (created or reused); 1 generic failure; 3 conflicting
+Exit codes: 0 isolated (created or reused); 1 generic failure; 2 usage error; 11 conflicting
 isolation state (the worktree path holds another branch, or drain/<bead> is
 checked out elsewhere) — never forced; route the bead to STUCK.
 
@@ -58,20 +58,20 @@ Without the warning, git's lie surfaces only later as a phantom dirty tree
 halting the land at FF-0a.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !filepath.IsAbs(repo) {
-				return fmt.Errorf("--repo must be an absolute path, got %q", repo)
+				return usageErrorf("--repo must be an absolute path, got %q", repo)
 			}
 			if bead == "." || bead == ".." || !beadIDRe.MatchString(bead) {
-				return fmt.Errorf("--bead %q: want a bead id (letters, digits, dot, dash, underscore)", bead)
+				return usageErrorf("--bead %q: want a bead id (letters, digits, dot, dash, underscore)", bead)
 			}
 			if gitTimeout <= 0 {
-				return fmt.Errorf("--git-timeout must be positive, got %s", gitTimeout)
+				return usageErrorf("--git-timeout must be positive, got %s", gitTimeout)
 			}
 			out, err := drain.Isolate(context.Background(), run.CLIRunner{},
 				drain.Params{RepoPath: repo, BeadID: bead, GitTimeout: gitTimeout})
 			if err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "pb:", err)
 				if errors.Is(err, drain.ErrConflict) {
-					os.Exit(3)
+					os.Exit(exitConflict)
 				}
 				os.Exit(1)
 			}

@@ -14,9 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// exitNoteFailed: the worktree WAS removed but the bead note could not be written.
-const exitNoteFailed = 4
-
 func newDrainReclaimCmd() *cobra.Command {
 	var (
 		bead, repo, branch, actor string
@@ -40,7 +37,7 @@ no worktree at all is left exactly as found and the bead gets NO note.
 
 Exit codes: 0 handled (removed, or left alone: see the outcome field); 1 failure,
 worktree left in place and NO note written (for example wtdone refused because a
-process is anchored in the worktree); 4 the worktree WAS removed but the bead
+process is anchored in the worktree); 2 usage error; 20 the worktree WAS removed but the bead
 note could not be written (post the note field's text yourself).
 
 Output: outcome=<removed|none|kept-dirty|kept-commits> worktree=<abs> branch=<b>
@@ -48,16 +45,16 @@ Output: outcome=<removed|none|kept-dirty|kept-commits> worktree=<abs> branch=<b>
 place and carry on.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !filepath.IsAbs(repo) {
-				return fmt.Errorf("--repo must be an absolute path, got %q", repo)
+				return usageErrorf("--repo must be an absolute path, got %q", repo)
 			}
 			if bead == "." || bead == ".." || !beadIDRe.MatchString(bead) {
-				return fmt.Errorf("--bead %q: want a bead id (letters, digits, dot, dash, underscore)", bead)
+				return usageErrorf("--bead %q: want a bead id (letters, digits, dot, dash, underscore)", bead)
 			}
 			if strings.TrimSpace(actor) == "" {
-				return fmt.Errorf("--actor must not be empty")
+				return usageErrorf("--actor must not be empty")
 			}
 			if gitTimeout <= 0 {
-				return fmt.Errorf("--git-timeout must be positive, got %s", gitTimeout)
+				return usageErrorf("--git-timeout must be positive, got %s", gitTimeout)
 			}
 			out, err := drain.Reclaim(context.Background(), run.CLIRunner{},
 				drain.ReclaimParams{RepoPath: repo, BeadID: bead, Branch: branch, Actor: actor, GitTimeout: gitTimeout})

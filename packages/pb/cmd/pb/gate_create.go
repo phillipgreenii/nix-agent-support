@@ -28,10 +28,10 @@ func newGateCreateCmd() *cobra.Command {
 		Short: "Create pn:applied gate(s) blocking a bead until a change is applied",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if blocks == "" {
-				return fmt.Errorf("--blocks <beadid> is required")
+				return usageErrorf("--blocks <beadid> is required")
 			}
 			if repo == "" {
-				return fmt.Errorf("--repo <repo> is required")
+				return usageErrorf("--repo <repo> is required")
 			}
 			if reason == "" {
 				reason = "pn:applied gate"

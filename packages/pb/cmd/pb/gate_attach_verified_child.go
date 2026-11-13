@@ -22,7 +22,7 @@ func parseGateSpecs(raw []string) ([]gate.GateSpec, error) {
 	for _, s := range raw {
 		repo, sha, ok := strings.Cut(s, "=")
 		if !ok || repo == "" || sha == "" {
-			return nil, fmt.Errorf("--gate %q: want <repo-key>=<sha>", s)
+			return nil, usageErrorf("--gate %q: want <repo-key>=<sha>", s)
 		}
 		specs = append(specs, gate.GateSpec{Repo: repo, Commit: sha})
 	}
@@ -65,16 +65,16 @@ exit 1 before anything is created. Keep it a short summary and put the long
 check list in --body-file (or a bd comment on the child). An unreadable or empty
 --body-file is rejected with exit 1, also before anything is created.
 
-Exit codes: 0 fully gated; 1 generic failure; 3 gating incomplete and the
-child was LEFT DEFERRED (safe — route the impl bead to STUCK); 4 the child
-could not be proven un-workable (do NOT close the impl bead).`, strings.Join(gate.WorkflowStateLabels, ", "))
+Exit codes: 0 fully gated; 1 generic failure; 2 usage error; 5 gating incomplete
+and the child was LEFT DEFERRED (safe — route the impl bead to STUCK); 21 the
+child could not be proven un-workable (do NOT close the impl bead).`, strings.Join(gate.WorkflowStateLabels, ", "))
 }
 
 // writeAttachResult prints the result of an attach run to w. Nothing is
 // printed when no child exists: a failure before the child was created has
 // nothing to report, and under --json a {"child":"","gates":null} object would
 // look like a success shape to a caller that parses stdout first (pg2-0jt3s).
-// Every partial failure (exit 3 or 4) has a child id, so its result, the child
+// Every partial failure (exit 5 or 21) has a child id, so its result, the child
 // and the gates created so far, still prints.
 func writeAttachResult(w io.Writer, out gate.AttachResult, asJSON bool) {
 	if out.ChildID == "" {
@@ -87,14 +87,14 @@ func writeAttachResult(w io.Writer, out gate.AttachResult, asJSON bool) {
 	fmt.Fprintf(w, "child=%s gates=%d\n", out.ChildID, len(out.Gates))
 }
 
-// attachExitCode maps an Attach error to the documented exit code: 4 the child
-// could not be proven un-workable, 3 gating incomplete, 1 anything else.
+// attachExitCode maps an Attach error to the documented exit code: 21 the child
+// could not be proven un-workable, 5 (Degraded) gating incomplete, 1 anything else.
 func attachExitCode(err error) int {
 	switch {
 	case errors.Is(err, gate.ErrChildMayBeWorkable):
-		return 4
+		return exitChildMayBeWorkable
 	case errors.Is(err, gate.ErrGatingIncomplete):
-		return 3
+		return exitGatingPart
 	}
 	return 1
 }

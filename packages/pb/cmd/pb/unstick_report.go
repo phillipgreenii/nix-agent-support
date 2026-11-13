@@ -32,7 +32,7 @@ sweep start, or was closed and is listed as "closed <id>" in results/*.md.
 A failed post-sweep ready fetch is not fatal: the report is produced without
 the ready-based figures and a warning goes to stderr.
 
-Exit codes: 0 ok; 1 usage, IO or internal error; 2 the bd export failed.`,
+Exit codes: 0 ok; 1 IO or internal error; 2 usage error; 3 the bd export failed.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			w, err := requireWorkdir(workdir)

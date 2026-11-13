@@ -140,9 +140,16 @@ func TestExitCodeFor(t *testing.T) {
 	}{
 		{"nil", nil, 0},
 		{"plain error", plain, 1},
-		{"bd failure", bdFailure(plain), 2},
-		{"wrapped bd failure", fmt.Errorf("ctx: %w", bdFailure(plain)), 2},
+		{"bd failure", bdFailure(plain), 3},
+		{"wrapped bd failure", fmt.Errorf("ctx: %w", bdFailure(plain)), 3},
 		{"explicit code", newExitError(7, plain), 7},
+		{"usage", usageErrorf("--x is required"), 2},
+		{"cobra unknown flag", errors.New("unknown flag: --bogus"), 2},
+		{"cobra required flag", errors.New(`required flag(s) "impl" not set`), 2},
+		{"note failed is an app code", newExitError(exitNoteFailed, plain), 20},
+		{"child may be workable is an app code", newExitError(exitChildMayBeWorkable, plain), 21},
+		{"non-conforming marker is an app code", newExitError(exitNonConforming, plain), 22},
+		{"isolate conflict", newExitError(exitConflict, plain), 11},
 	}
 	for _, c := range cases {
 		if got := exitCodeFor(c.err); got != c.want {

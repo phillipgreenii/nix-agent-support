@@ -13,11 +13,11 @@ import (
 var (
 	// ErrGatingIncomplete: the child exists but is not fully gated; it was LEFT
 	// DEFERRED, so no peer can claim it. Safe to retry; the impl bead must not
-	// be closed. The CLI maps this to exit 3.
+	// be closed. The CLI maps this to exit 5 (Degraded).
 	ErrGatingIncomplete = errors.New("gating incomplete; child left deferred")
 	// ErrChildMayBeWorkable: the child could not be proven absent from bd ready.
 	// A peer draining the queue could claim it and "verify" unapplied code. The
-	// CLI maps this to exit 4; the impl bead must NOT be closed.
+	// CLI maps this to exit 21; the impl bead must NOT be closed.
 	ErrChildMayBeWorkable = errors.New("child may be workable")
 )
 
@@ -125,7 +125,7 @@ func Attach(ctx context.Context, d CreateDeps, p AttachParams) (AttachResult, er
 	}
 	// Fail on a bad --gate repo key BEFORE the child exists: gate.Create would
 	// catch it per gate, but only after CreateBead — turning an invocation typo
-	// into a STUCK-routed exit 3.
+	// into a STUCK-routed exit 5.
 	for _, g := range p.Gates {
 		if _, ok := info.RepoByName(g.Repo); !ok {
 			return AttachResult{}, fmt.Errorf("repo %q is not in workspace %q", g.Repo, info.Root)

@@ -84,8 +84,8 @@ batches/E<NN>, the matching facts/*.json and prepare.json. A gate
 check that skipped gates is reported as gate_check "partial", one that failed
 outright as "unavailable"; neither is fatal.
 
-Exit codes: 0 ok; 1 usage, IO or internal error (including a broken triage
-partition); 2 a bd call failed.`,
+Exit codes: 0 ok; 1 IO or internal error (including a broken triage
+partition); 2 usage error; 3 a bd call failed.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			t, err := now.resolve(env)
@@ -97,7 +97,7 @@ partition); 2 a bd call failed.`,
 				return err
 			}
 			if workdir != "" && !filepath.IsAbs(workdir) {
-				return fmt.Errorf("--workdir must be an absolute path, got %q", workdir)
+				return usageErrorf("--workdir must be an absolute path, got %q", workdir)
 			}
 			var w unstick.Workdir
 			if workdir != "" {

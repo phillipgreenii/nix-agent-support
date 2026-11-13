@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/pb/internal/run"
 	"github.com/phillipgreenii/pb/internal/unstick"
 )
@@ -66,9 +68,16 @@ func TestBatch_validation(t *testing.T) {
 		{"no export in workdir", []string{"batch", "--workdir", empty, "--name", "N", "--ids", "a-1"}, "export.jsonl"},
 	}
 	for _, c := range cases {
+		// Flag problems are usage errors (2); a bad batch name, an unknown id or a
+		// missing export is an input/state failure (1).
+		wantExit := exitcode.Usage
+		switch c.name {
+		case "path-shaped name", "unknown id", "no export in workdir":
+			wantExit = exitcode.Error
+		}
 		_, _, err := execUnstick(testEnv(run.NewFakeRunner()), "", c.args...)
-		if err == nil || exitCodeFor(err) != 1 || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: exit %d, err = %v; want exit 1 mentioning %q", c.name, exitCodeFor(err), err, c.want)
+		if err == nil || exitCodeFor(err) != wantExit || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: exit %d, err = %v; want exit %d mentioning %q", c.name, exitCodeFor(err), err, wantExit, c.want)
 		}
 	}
 	// A rejected batch leaves nothing behind.

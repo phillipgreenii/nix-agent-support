@@ -273,35 +273,35 @@ func TestPrepare_autoAllocatesFreshWorkdirUnderTmpBase(t *testing.T) {
 
 func TestPrepare_exitCodes(t *testing.T) {
 	boom := errors.New("exit status 1")
-	t.Run("bd export failure is exit 2", func(t *testing.T) {
+	t.Run("bd export failure is exit 3 (unavailable)", func(t *testing.T) {
 		w := filepath.Join(t.TempDir(), "w")
 		f := run.NewFakeRunner()
 		f.AddResponse("bd", []string{"-C", unstickRoot, "export", "-o", filepath.Join(w, "export.jsonl")}, run.Result{ExitCode: 1, Stderr: "dolt down"}, boom)
 		_, _, err := execUnstick(testEnv(f), "", "prepare", "--root", unstickRoot, "--workdir", w)
-		if exitCodeFor(err) != 2 || !strings.Contains(err.Error(), "bd export") {
+		if exitCodeFor(err) != 3 || !strings.Contains(err.Error(), "bd export") {
 			t.Errorf("exit = %d, err = %v", exitCodeFor(err), err)
 		}
 	})
-	t.Run("bd ready failure is exit 2", func(t *testing.T) {
+	t.Run("bd ready failure is exit 3 (unavailable)", func(t *testing.T) {
 		w := filepath.Join(t.TempDir(), "w")
 		f := run.NewFakeRunner()
 		f.AddResponse("bd", []string{"-C", unstickRoot, "export", "-o", filepath.Join(w, "export.jsonl")}, run.Result{}, nil)
 		f.AddResponse("bd", []string{"-C", unstickRoot, "ready", "-n", "0", "--json"}, run.Result{ExitCode: 1}, boom)
 		_, _, err := execUnstick(testEnv(&exportRunner{FakeRunner: f, content: unstickExport}), "", "prepare", "--root", unstickRoot, "--workdir", w)
-		if exitCodeFor(err) != 2 {
+		if exitCodeFor(err) != 3 {
 			t.Errorf("exit = %d, err = %v", exitCodeFor(err), err)
 		}
 	})
-	t.Run("ready without data envelope is exit 2", func(t *testing.T) {
+	t.Run("ready without data envelope is exit 3 (unavailable)", func(t *testing.T) {
 		w := filepath.Join(t.TempDir(), "w")
 		f := run.NewFakeRunner()
 		bdScript(f, w, `{"schema_version":1}`)
 		_, _, err := execUnstick(testEnv(&exportRunner{FakeRunner: f, content: unstickExport}), "", "prepare", "--root", unstickRoot, "--workdir", w)
-		if exitCodeFor(err) != 2 {
+		if exitCodeFor(err) != 3 {
 			t.Errorf("exit = %d, err = %v", exitCodeFor(err), err)
 		}
 	})
-	t.Run("usage errors are exit 1 and call no bd", func(t *testing.T) {
+	t.Run("usage errors are exit 2 and call no bd", func(t *testing.T) {
 		existing := t.TempDir()
 		for _, args := range [][]string{
 			{"prepare", "--root", "rel", "--workdir", "/x"},
@@ -313,8 +313,12 @@ func TestPrepare_exitCodes(t *testing.T) {
 		} {
 			f := run.NewFakeRunner()
 			_, _, err := execUnstick(testEnv(f), "", args...)
-			if err == nil || exitCodeFor(err) != 1 {
-				t.Errorf("%v: exit = %d, err = %v", args, exitCodeFor(err), err)
+			want := 2
+			if args[len(args)-1] == existing {
+				want = 1 // a state failure (the directory exists), not a usage error
+			}
+			if err == nil || exitCodeFor(err) != want {
+				t.Errorf("%v: exit = %d, want %d, err = %v", args, exitCodeFor(err), want, err)
 			}
 			if n := len(f.Calls()); n != 0 {
 				t.Errorf("%v: made %d bd call(s)", args, n)

@@ -68,8 +68,8 @@ re-curated and where the seam is>`, preserving the work branch: the triager rout
   `beads-lifecycle:handoff-bead` — never isolated, delegated, or executed as an
   instruction.
 - Gate ordering is enforced by `pb gate attach-verified-child` (deferred-first,
-  confirm-by-READINESS, all-gates-then-un-defer). Exit 3 leaves the child
-  safely deferred; exit 4 means the child may be workable — in both cases the
+  confirm-by-READINESS, all-gates-then-un-defer). Exit 5 leaves the child
+  safely deferred; exit 21 means the child may be workable — in both cases the
   impl bead MUST NOT be closed.
 - A leftover-isolation follow-up (filed inside `pb:drain-stuck`'s
   CLOSE-AS-MOOT) is planned operator work (LV-2): it is born with BOTH `human` and

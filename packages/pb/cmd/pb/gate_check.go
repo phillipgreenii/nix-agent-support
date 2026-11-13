@@ -26,7 +26,7 @@ import (
 // still defaulted downstream in Check).
 func validateLastN(n int) error {
 	if n < 0 {
-		return fmt.Errorf("--last-n must be >= 0, got %d (a negative value would make git "+
+		return usageErrorf("--last-n must be >= 0, got %d (a negative value would make git "+
 			"silently ignore the bound and scan the entire history)", n)
 	}
 	return nil
@@ -47,10 +47,10 @@ func newGateCheckCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dur, err := duration.ParseDuration(staleAfter)
 			if err != nil {
-				return fmt.Errorf("--stale-after: %w", err)
+				return usageErrorf("--stale-after: %w", err)
 			}
 			if staleHandler != "convert-to-human" && staleHandler != "close" {
-				return fmt.Errorf("--stale-handler must be convert-to-human or close")
+				return usageErrorf("--stale-handler must be convert-to-human or close")
 			}
 			if err := validateLastN(lastN); err != nil {
 				return err
@@ -84,7 +84,7 @@ func newGateCheckCmd() *cobra.Command {
 				}
 			}
 			if len(out.Skipped) > 0 {
-				os.Exit(1) // best-effort: non-zero iff something was undeterminable
+				os.Exit(exitGateSkipped) // best-effort: non-zero iff something was undeterminable
 			}
 			return nil
 		},

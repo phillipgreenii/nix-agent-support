@@ -158,7 +158,7 @@ and the container's own priority, then:
      (the stubs print one `pg-hooks:` notice and exit 0), so tell the
      implementation subagent the commit gate is not in force rather than let
      it report hooks as passed. Exit 0 → proceed
-     (the output line names the worktree). Exit 3 → conflicting isolation state
+     (the output line names the worktree). Exit 11 → conflicting isolation state
      (someone else's checkout) — do NOT force anything; route to STUCK. Any
      other failure → transient-vs-genuine per the Rules. A git timeout
      (exit 1, message naming fsmonitor/fseventsd contention; pb already removed
@@ -256,17 +256,17 @@ and the container's own priority, then:
      `pn-workspace-rules:cleanup-workforest`), then
      `bd close <id> --reason "<short note>" --actor "ID"`.
    - `done-pending-apply-verification`: run `pb gate attach-verified-child` per
-     **POST-DEPLOY VERIFICATION GATE** (`references/post-deploy-gate.md`); exit 0 → cleanup + close; exit 3/4
+     **POST-DEPLOY VERIFICATION GATE** (`references/post-deploy-gate.md`); exit 0 → cleanup + close; exit 5/21
      → do NOT close, route to STUCK.
 
 8. Return to the caller with the outcome (see "Outcomes").
 
 ## STUCK — cannot complete a claimed bead
 
-Triggers: underspecified / needs a human decision; `pb drain isolate` exited 3
+Triggers: underspecified / needs a human decision; `pb drain isolate` exited 11
 (conflicting isolation state); pre-apply gates that cannot be made to pass; a
 GENUINE lander `stopped:<reason>` (not a transient ff-race/rejected push);
-`pb gate attach-verified-child` exited 3 or 4; repeated failed attempts.
+`pb gate attach-verified-child` exited 5 or 21; repeated failed attempts.
 NOT a trigger: "another bead has to land first" (that is a dependency); a
 curated packet's stamp refusal (step 4's STAMP REFUSAL — deferred, claim
 released, no label; a different case from a landing obstacle because no work exists

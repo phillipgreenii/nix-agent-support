@@ -135,16 +135,16 @@ func TestReport_postReadyFailureDegrades(t *testing.T) {
 }
 
 func TestReport_exitCodes(t *testing.T) {
-	t.Run("export failure is exit 2", func(t *testing.T) {
+	t.Run("export failure is exit 3 (unavailable)", func(t *testing.T) {
 		w := preparedWorkdir(t)
 		f := run.NewFakeRunner()
 		f.AddResponse("bd", []string{"-C", unstickRoot, "export", "-o", filepath.Join(w, "export.post.jsonl")}, run.Result{ExitCode: 1}, errors.New("exit status 1"))
 		_, _, err := execUnstick(testEnv(f), "", "report", "--workdir", w, "--root", unstickRoot)
-		if exitCodeFor(err) != 2 {
+		if exitCodeFor(err) != 3 {
 			t.Errorf("exit = %d, err = %v", exitCodeFor(err), err)
 		}
 	})
-	t.Run("usage errors are exit 1 and call no bd", func(t *testing.T) {
+	t.Run("usage errors are exit 2 and call no bd", func(t *testing.T) {
 		w := preparedWorkdir(t)
 		bare := t.TempDir() // a directory without prepare.json
 		for name, args := range map[string][]string{
@@ -156,8 +156,12 @@ func TestReport_exitCodes(t *testing.T) {
 		} {
 			f := run.NewFakeRunner()
 			_, _, err := execUnstick(testEnv(f), "", args...)
-			if err == nil || exitCodeFor(err) != 1 {
-				t.Errorf("%s: exit %d, err %v", name, exitCodeFor(err), err)
+			want := 2 // usage; "not prepared" is a state failure
+			if name == "not prepared" {
+				want = 1
+			}
+			if err == nil || exitCodeFor(err) != want {
+				t.Errorf("%s: exit %d, want %d, err %v", name, exitCodeFor(err), want, err)
 			}
 			if len(f.Calls()) != 0 {
 				t.Errorf("%s: made bd calls", name)

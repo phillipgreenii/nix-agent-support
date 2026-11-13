@@ -55,11 +55,13 @@ have advanced either). Branch on the exit code:
   record it yourself —
   `bd comment <impl-id> "post-deploy verification gated as <child> (pn:applied)." --actor "ID"`
   — before closing.
-- `3` → gating INCOMPLETE and the child was left DEFERRED (safe — no peer can
+- `5` → gating INCOMPLETE and the child was left DEFERRED (safe — no peer can
   claim it). Do NOT close the impl bead; route it to STUCK naming the child.
-- `4` → the child could NOT be proven un-workable. Do NOT close the impl bead;
+- `21` → the child could NOT be proven un-workable. Do NOT close the impl bead;
   route it to STUCK and say so in the park comment — a peer could otherwise
   claim the child and "verify" unapplied code.
+- `2` → a malformed `--gate` (not `<repo-key>=<sha>`) or a missing required flag: fix the
+  call and re-run (nothing was created).
 - `1` with `is not in workspace` in the error → an INVOCATION mistake, not a
   transient: a mistyped `--gate` repo key (fix it and re-run — nothing was
   created), or a repo genuinely outside the workspace (take the FALLBACK below
