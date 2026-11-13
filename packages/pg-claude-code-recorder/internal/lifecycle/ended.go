@@ -50,6 +50,7 @@ func prefilter(q EndQuery) ConversationFilter {
 		f.Since = q.Since.UTC().Format(time.RFC3339Nano)
 	}
 	if q.Suspected {
+		f.Suspected = true
 		return f
 	}
 	switch q.Label {

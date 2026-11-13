@@ -185,7 +185,12 @@ type ConversationFilter struct {
 	ClearEntry               *bool  `json:"clear_entry,omitempty"`
 	ExitEntry                *bool  `json:"exit_entry,omitempty"`
 	RegistryStaleAtDiscovery *bool  `json:"registry_stale_at_discovery,omitempty"`
-	Limit                    int    `json:"limit,omitempty"` // default 1000, at most 100000
+	// Suspected keeps only the rows of the --suspected-crash list (crashed, or
+	// unknown with a stale registry file). It is an exact evidence test made before
+	// any transcript read, so the list costs one pass over the model, not one
+	// transcript query set per ended Conversation.
+	Suspected bool `json:"suspected,omitempty"`
+	Limit     int  `json:"limit,omitempty"` // default 1000, at most 100000
 }
 
 // ConversationList is the conversation.list answer, newest first.

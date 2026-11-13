@@ -581,7 +581,8 @@ func (f ConversationFilter) evidenceMatch(c *Conversation) bool {
 	return (f.State == "" || f.State == c.State) && okBool(f.Ended, c.Ended) &&
 		okBool(f.RegistryPresentAtExit, c.RegistryPresentAtExit) && okBool(f.ExitObserved, c.ExitObserved) &&
 		okBool(f.ClearEntry, c.ClearEntry) && okBool(f.ExitEntry, c.ExitEntry) &&
-		okBool(f.RegistryStaleAtDiscovery, c.RegistryStaleAtDiscovery)
+		okBool(f.RegistryStaleAtDiscovery, c.RegistryStaleAtDiscovery) &&
+		(!f.Suspected || Suspected(c.Evidence))
 }
 
 // DefaultLimit and MaxLimit bound conversation.list.
