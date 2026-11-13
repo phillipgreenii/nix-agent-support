@@ -295,9 +295,10 @@ func TestIntegration_RedirectTargetApproveOnlyWhenStaticallyResolvable(t *testin
 		{"var prefix of basename", "echo pwned > $f.graphql", hookio.NoOpinion},
 		{"append operator", `echo pwned >> "$TARGET"`, hookio.NoOpinion},
 		{"stderr redirect", `cmd 2> "$TARGET"`, hookio.NoOpinion},
-		// Arithmetic expansion IN THE TARGET is dynamic too; abstaining is
-		// intentional (the target is not knowable here).
-		{"arithmetic in target", "echo hi > out$((n)).txt", hookio.NoOpinion},
+		// Arithmetic over a variable IN THE TARGET evaluates its value, which can run a
+		// command substitution; the evaluating-expansion floor rejects it (see
+		// evaluatingExpansionFloor), so it never reaches the dynamic-target abstain.
+		{"arithmetic in target", "echo hi > out$((n)).txt", hookio.Reject},
 		// READ direction: an unresolvable source is no more knowable than an
 		// unresolvable sink.
 		{"stdin from var", `cat < "$SRC"`, hookio.NoOpinion},

@@ -23,6 +23,18 @@ type replayFixture struct {
 // the shapes.jsonl for it through the real shapes command.
 func newReplayFixture(t *testing.T) replayFixture {
 	t.Helper()
+	// The replay's filesystem twin builds its empty project under os.TempDir();
+	// inside a nix build sandbox that is under /nix, which the evaluator treats
+	// as read-only, so every in-project write in the twin would flip. /var/tmp
+	// is neither /tmp nor /nix.
+	if tmp := os.TempDir(); tmp == "/nix" || strings.HasPrefix(tmp, "/nix/") {
+		dir, err := os.MkdirTemp("/var/tmp", "ceta-replay-test-tmp-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		t.Setenv("TMPDIR", dir)
+	}
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	root := t.TempDir()
 	proj := filepath.Join(root, "proj")
