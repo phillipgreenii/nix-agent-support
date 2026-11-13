@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // pgDeskBinary is the ambient $PATH name this adapter execs.
@@ -36,12 +37,12 @@ func runPgDesk(ctx context.Context, args []string) (pgDeskResult, error) {
 
 // classifyExit translates pg-desk's `changes` exit codes into what
 // pg-router's command-query runner expects of a source (it discards a
-// source's WHOLE output on any non-zero exit): 0 (all sources ok) and 2
-// (partial: records written, cursor advanced) -> ok, so every record is
-// emitted with the degraded detail folded into item metadata; 3 (total
-// failure: nothing logged, cursor not advanced) and anything else
-// -> not ok. Mirroring 2 would make pg-router drop records pg-desk has
-// already advanced past.
+// source's WHOLE output on any non-zero exit): 0 (all sources ok) and 5
+// (exitcode.Degraded, partial: records written, cursor advanced) -> ok, so
+// every record is emitted with the degraded detail folded into item metadata;
+// 3 (exitcode.Unavailable, total failure: nothing logged, cursor not
+// advanced) and anything else -> not ok. Mirroring 5 would make pg-router drop
+// records pg-desk has already advanced past.
 func classifyExit(exitCode int) bool {
-	return exitCode == 0 || exitCode == 2
+	return exitCode == exitcode.OK || exitCode == exitcode.Degraded
 }

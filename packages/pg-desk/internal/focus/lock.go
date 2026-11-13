@@ -7,6 +7,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -29,21 +31,21 @@ import (
 // transaction, finalized by the verb) and the annotation's change_log record.
 
 // Exit codes of the focus scheme (docs/behavior/pg-desk/focus.md, "Exit
-// codes"; INV-FOCUS-3). 1 is the generic, unexpected error: it carries no
-// branchable meaning, so no specific outcome is ever given it. 2 is usage, as
-// for every tool of the workspace (ADR 0042). The specific outcomes sit at 3
-// and up: 3 total failure, 6 period closed, 8 partial. 4 (head-check's), 5
-// (a retired multi-candidate code) and 7 (removed by ruling RV-A) are never
-// used by a focus verb. Before the 2026-10-28 migration (bead pg2-rfxl3y)
-// usage was 1 and partial 2; store.FocusExitScheme tells the two apart in a
-// stored run record.
+// codes"; INV-FOCUS-3), scheme 3. The shared codes come from the workspace's
+// exitcode package: 1 is the generic, unexpected error and carries no
+// branchable meaning, so no specific outcome is ever given it; 2 is usage; 3
+// total failure (unavailable); 5 partial (degraded: the rows committed but an
+// annotation write failed). Period closed is app-specific, 20. 4, 6, 7 and 8
+// are never used by a focus verb. Earlier schemes (store.FocusExitScheme tells
+// them apart in a stored run record): scheme 1 had usage 1, partial 2; scheme
+// 2 had usage 2, total 3, period closed 6, partial 8.
 const (
-	ExitOK           = 0
-	ExitUnexpected   = 1
-	ExitUsage        = 2
-	ExitTotal        = 3
-	ExitPeriodClosed = 6
-	ExitPartial      = 8
+	ExitOK           = exitcode.OK
+	ExitUnexpected   = exitcode.Error
+	ExitUsage        = exitcode.Usage
+	ExitTotal        = exitcode.Unavailable
+	ExitPartial      = exitcode.Degraded
+	ExitPeriodClosed = exitcode.AppMin
 )
 
 // Outcome words of LockResult.Outcome (the vocabulary of the run statistics).
@@ -71,7 +73,7 @@ const annotationOrigin = "pg-desk"
 
 var (
 	// ErrPeriodClosed reports a lock or repair-free write on a closed period
-	// (exit 6).
+	// (exit 20).
 	ErrPeriodClosed = errors.New("focus: period is closed")
 	// ErrPlanChanged reports that the plan or the stored draft changed
 	// between the caller's read and the lock transaction (a concurrent lock,
@@ -237,9 +239,9 @@ func decideFirstLock(firstLock, nonEmpty bool, key, today string, otherHolds boo
 //
 // Errors carry the exit code through LockResult.ExitCode: a *UsageError is 2
 // (a first lock for an earlier or a future period; no selection state
-// changed), ErrPeriodClosed is 6, ErrPlanChanged is returned with nothing
+// changed), ErrPeriodClosed is 20, ErrPlanChanged is returned with nothing
 // written and ExitCode 0 for the caller to retry, any other error is 3 (the
-// transaction rolled back). A nil error with ExitCode 8 is partial: the rows
+// transaction rolled back). A nil error with ExitCode 5 is partial: the rows
 // committed but some annotation writes failed.
 func Lock(ctx context.Context, d LockDeps, in LockInput) (LockResult, error) {
 	res := LockResult{RunID: in.RunID}

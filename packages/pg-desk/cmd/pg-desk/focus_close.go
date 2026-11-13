@@ -27,7 +27,7 @@ import (
 //
 // Idempotence: closing an already-closed period with an IDENTICAL summary is
 // exit 0 (reported "already closed"; the run record is still written, nothing
-// else changes); with a DIFFERENT summary it is exit 6, the recorded summary
+// else changes); with a DIFFERENT summary it is exit 20, the recorded summary
 // is kept and the message names the recorded close time. A closed day cannot
 // be amended or reopened this phase.
 //
@@ -71,14 +71,14 @@ write. Append them first with the connector's issue comment, refresh each bead
 with pg-desk issue refresh, and only then call close.
 
 Closing an already-closed period with an identical summary is a success
-("already closed"). With a different summary it is exit 6: the recorded summary
+("already closed"). With a different summary it is exit 20: the recorded summary
 is kept and the message names when the day was closed. A closed day cannot be
 amended or reopened. --dry-run reports the resolved close_note and writes
 nothing, not even the period row.
 
 Exit codes: 0 closed (or already closed with the same summary), 1 an
 unexpected error, 2 usage (malformed stdin, a --date later than today, a store
-not yet migrated), 3 a store write failed, 6 already closed with a different
+not yet migrated), 3 a store write failed, 20 already closed with a different
 summary.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusClose(cmd) },
@@ -98,7 +98,7 @@ type closeRun struct {
 }
 
 // finish ends the run with err's exit code when the write path did not: a
-// writing run still writes its focus_run row (exit 2, 3 and 6 are counted by
+// writing run still writes its focus_run row (exit 2, 3 and 20 are counted by
 // the run statistics), then prints the stderr line.
 func (c *closeRun) finish(err error) error {
 	if c.done {
@@ -182,7 +182,7 @@ func (c *closeRun) readState() (closeState, error) {
 	return closeState{closed: found && p.ClosedAt != "", closedAt: p.ClosedAt, note: p.CloseNote}, nil
 }
 
-// refusal is exit 6 for a different summary: the recorded one is kept and the
+// refusal is exit 20 for a different summary: the recorded one is kept and the
 // message names the recorded close time.
 func closeRefusal(period string, st closeState) error {
 	return &focusError{

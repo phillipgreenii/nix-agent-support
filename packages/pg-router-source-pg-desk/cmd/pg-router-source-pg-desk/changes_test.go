@@ -31,7 +31,7 @@ var wantMetadataKeys = []string{"degraded_sources", "entity_id", "entity_type", 
 // Golden: envelope fixture -> exact items array (one per entity, in order of
 // first record; a record with no kinds still yields its entity, kinds []).
 func TestEnvelopeToItemsGolden(t *testing.T) {
-	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2")
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=5")
 	stdout, stderr, code := runCLI(t, "widget", "--consumer", "router")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr)
@@ -90,7 +90,7 @@ func TestAllOkEnvelopeHasEmptyDegradedSources(t *testing.T) {
 
 // A failed source counts as degraded detail, in envelope order.
 func TestFailedSourceIsListedInDegradedSources(t *testing.T) {
-	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_failed_source.json"), "GO_HELPER_EXIT=2")
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_failed_source.json"), "GO_HELPER_EXIT=5")
 	stdout, _, code := runCLI(t, "widget", "--consumer", "router")
 	if code != 0 {
 		t.Fatalf("exit = %d", code)
@@ -113,12 +113,12 @@ func TestZeroRecordEnvelopeYieldsEmptyArray(t *testing.T) {
 	}
 }
 
-// The operator-ruled translation: pg-desk 2 (partial, cursor advanced) ->
+// The operator-ruled translation: pg-desk 5 (Degraded: partial, cursor advanced) ->
 // adapter 0 with every record emitted and degraded_sources set; pg-desk 3
 // (nothing logged) -> adapter 1 with empty stdout.
 func TestAdapterTranslatesPgDeskExitCodesForPgRouter(t *testing.T) {
-	t.Run("pg-desk 2 -> adapter 0, every record, degraded_sources set", func(t *testing.T) {
-		withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2")
+	t.Run("pg-desk 5 -> adapter 0, every record, degraded_sources set", func(t *testing.T) {
+		withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=5")
 		stdout, _, code := runCLI(t, "widget", "--consumer", "router")
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0", code)
@@ -158,7 +158,7 @@ func TestUnparseableStdoutFailsClosed(t *testing.T) {
 }
 
 func TestUnexpectedPgDeskExitCodeFailsClosed(t *testing.T) {
-	for _, exit := range []string{"1", "4", "99"} {
+	for _, exit := range []string{"1", "2", "4", "99"} {
 		t.Run("exit "+exit, func(t *testing.T) {
 			withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_all_ok.json"), "GO_HELPER_STDERR=boom\n", "GO_HELPER_EXIT="+exit)
 			stdout, stderr, code := runCLI(t, "widget", "--consumer", "router")
@@ -334,7 +334,7 @@ func pinPollTime(t *testing.T) {
 func TestRetryWindowOffLeavesOutputUnchanged(t *testing.T) {
 	pinPollTime(t)
 	for _, extra := range [][]string{nil, {"--retry-window", "0"}, {"--retry-window", "0s"}} {
-		fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2")
+		fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=5")
 		args := append([]string{"widget", "--consumer", "router"}, extra...)
 		stdout, stderr, code := runCLI(t, args...)
 		if code != 0 {
@@ -359,7 +359,7 @@ func TestRetryWindowOffLeavesOutputUnchanged(t *testing.T) {
 // are unchanged, and the flag is not passed to pg-desk.
 func TestRetryWindowStampsAtAndExpiresAt(t *testing.T) {
 	pinPollTime(t)
-	fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2")
+	fake := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=5")
 	stdout, stderr, code := runCLI(t, "widget", "--consumer", "router", "--retry-window", "10m")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr=%q", code, stderr)

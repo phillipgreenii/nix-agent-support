@@ -137,7 +137,7 @@ call) and "expiresAt" (at + D), so pg-router re-offers a failed dispatch until
 the window ends. A negative D exits 1 before pg-desk is run. A router role must
 also opt in with max_dispatch_retries to re-run a handler that failed.
 
-Exit codes (translated, not mirrored): pg-desk 0 or 2 -> 0 with every entity
+Exit codes (translated, not mirrored): pg-desk 0 or 5 -> 0 with every entity
 emitted (degraded detail in metadata.degraded_sources); pg-desk 3, any other
 pg-desk exit code, an unparseable envelope, or pg-desk not startable -> 1 with
 nothing on stdout and the diagnostic on stderr.`

@@ -46,7 +46,7 @@ metadata). --json prints the pg-desk.view/v1 contract.
 --refresh first hydrates the %[1]s and then each directly linked entity that has a
 stored row; a linked entity that fails to hydrate does not fail the command.
 If the %[1]s's own hydration fails or degrades, the stored view is still printed
-(marked stale) and the command then exits as refresh does: 2 when degraded, 3
+(marked stale) and the command then exits as refresh does: 5 when degraded, 3
 when it failed entirely.`, entityType),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -438,7 +438,7 @@ func runTypedShow(cmd *cobra.Command, entityType, ref string, f typedShowFlags) 
 
 // refreshForShow hydrates the entity and then each directly linked entity
 // that has a stored row, all through refreshEntity. Only the primary entity's
-// outcome is returned (as an exit error carrying refresh's codes: 2 degraded,
+// outcome is returned (as an exit error carrying refresh's codes: 5 degraded,
 // 3 failed); a linked entity that fails is reported on stderr and ignored.
 func refreshForShow(cmd *cobra.Command, cfg *config.Config, st *store.Store, repo, entityType, id string) error {
 	var primary error

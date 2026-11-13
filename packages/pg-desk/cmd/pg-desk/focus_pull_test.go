@@ -344,14 +344,14 @@ func TestPullUsageCheckRunsInsideTheTransaction(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-34: a pull into a closed period is exit 6.
-func TestPullIntoClosedPeriodExitsSix(t *testing.T) {
+// Traces INV-FOCUS-34: a pull into a closed period is exit 20.
+func TestPullIntoClosedPeriodExitsTwenty(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	f.closePeriod(t, showToday)
 	for _, args := range [][]string{{"--top", "1"}, {"o/r#1"}, {"--top", "1", "--dry-run"}, {}} {
 		_, _, err := pull(t, args...)
-		assertFocusExit(t, err, 6, "use --date <tomorrow>")
+		assertFocusExit(t, err, 20, "use --date <tomorrow>")
 	}
 	if f.count(t, "focus_selection") != 0 {
 		t.Errorf("rows were written into a closed period")
@@ -437,14 +437,14 @@ func TestPullAnnotationIsTheMaxPeriodKeyAndARerunIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestPullPartialAnnotationFailureIsExitEightAndTheRowsStay(t *testing.T) {
+func TestPullPartialAnnotationFailureIsExitFiveAndTheRowsStay(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	f.pr(t, 2, "bravo", "2026-10-09T09:00:00Z")
 	f.useAnnotator(t, func(a focus.Annotator) focus.Annotator { return failingFor{inner: a, id: "o/r#2"} })
 
 	_, _, err := pull(t, "--top", "2")
-	assertFocusExit(t, err, 8, "select --repair")
+	assertFocusExit(t, err, 5, "select --repair")
 	if len(f.plan(t, showToday)) != 2 {
 		t.Fatalf("the rows did not commit")
 	}
@@ -452,8 +452,8 @@ func TestPullPartialAnnotationFailureIsExitEightAndTheRowsStay(t *testing.T) {
 		t.Errorf("the failed entity was annotated: %q", got)
 	}
 	r := f.lastRun(t)
-	if !r.Exit.Valid || r.Exit.Int64 != 8 {
-		t.Fatalf("run exit = %+v, want 8", r.Exit)
+	if !r.Exit.Valid || r.Exit.Int64 != 5 {
+		t.Fatalf("run exit = %+v, want 5", r.Exit)
 	}
 	// The repair mends it.
 	f.useAnnotator(t, nil)
@@ -560,7 +560,7 @@ func TestPullExitCodes(t *testing.T) {
 		{name: "total: no named key has an entity row", args: []string{"o/r#99"}, code: 3, want: "none of the named keys has an entity row"},
 		{
 			name: "period closed", args: []string{"--top", "1"},
-			prep: func(t *testing.T, f *selFixture) { f.closePeriod(t, showToday) }, code: 6, want: "use --date <tomorrow>",
+			prep: func(t *testing.T, f *selFixture) { f.closePeriod(t, showToday) }, code: 20, want: "use --date <tomorrow>",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -584,7 +584,7 @@ func TestPullExitCodes(t *testing.T) {
 // TestPullHelpNamesTheRulesAndTheExitCodes keeps the verb's help honest.
 func TestPullHelpNamesTheRulesAndTheExitCodes(t *testing.T) {
 	c := newFocusPullCmd()
-	for _, want := range []string{"--top", "--dry-run", "ALWAYS a key", "lock today's plan first", "2 usage", "3 a store", "6 period closed", "8 rows"} {
+	for _, want := range []string{"--top", "--dry-run", "ALWAYS a key", "lock today's plan first", "2 usage", "3 a store", "20 period closed", "5 rows"} {
 		if !strings.Contains(c.Long+c.Use, want) {
 			t.Errorf("pull help lacks %q", want)
 		}

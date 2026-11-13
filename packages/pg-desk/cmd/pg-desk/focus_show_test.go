@@ -775,8 +775,8 @@ func TestShowTruncatesAndFootnotesWithoutAll(t *testing.T) {
 }
 
 // TestFocusExitCodesShowAndReplan covers the show exit-code rows of the spec: coverage
-// complete 0, a degraded or failed listing 8, a backlog above
-// focus.coverage_backlog_max 8, no candidates computable 3, unmigrated 2.
+// complete 0, a degraded or failed listing 5, a backlog above
+// focus.coverage_backlog_max 5, no candidates computable 3, unmigrated 2.
 //
 // Traces INV-FOCUS-17: the exit codes of show and replan.
 func TestFocusExitCodesShowAndReplan(t *testing.T) {
@@ -796,13 +796,13 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 	}{
 		{"complete", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "ok") }, 0, ""},
 		{"empty set with ok listings", func(t *testing.T, f *showFixture) { setListing(t, f, "mine", "ok") }, 0, ""},
-		{"degraded listing", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "degraded") }, 8, "coverage incomplete"},
-		{"failed listing with candidates", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "failed") }, 8, "coverage incomplete"},
+		{"degraded listing", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "degraded") }, 5, "coverage incomplete"},
+		{"failed listing with candidates", func(t *testing.T, f *showFixture) { f.pr(t, 1, "a", showAt); setListing(t, f, "mine", "failed") }, 5, "coverage incomplete"},
 		{"unknown listing", func(t *testing.T, f *showFixture) {
 			f.pr(t, 1, "a", showAt)
 			f.cfg.Watch.Issue.Queries = []string{"never-ran"}
 			// A query with no recorded status is a real gap.
-		}, 8, "never-ran"},
+		}, 5, "never-ran"},
 		{"backlog above the bound", func(t *testing.T, f *showFixture) {
 			// The issues are watched and were never hydrated: two pending
 			// hydrations against a bound of 1. The PR is shown in the table; it
@@ -819,7 +819,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			setListing(t, f, "mine", "ok")
 			n := 1
 			f.cfg.Focus.CoverageBacklogMax = &n
-		}, 8, "backlog"},
+		}, 5, "backlog"},
 		{"old hydrated issues are no backlog", func(t *testing.T, f *showFixture) {
 			// With no age sweep for issue, an entity hydrated long ago is not
 			// owed a hydration: coverage reads complete however old it is.
@@ -859,7 +859,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			if tc.code != 0 {
 				assertFocusExit(t, err, tc.code, tc.want)
 			}
-			if tc.code == 8 {
+			if tc.code == 5 {
 				mustContain(t, out, "coverage: INCOMPLETE", "o/r#1") // shown, never silently omitted
 			}
 			if got := f.snapshot(t); got != before {
@@ -872,7 +872,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 		f.pr(t, 1, "a", showAt)
 		setListing(t, f, "mine", "degraded")
 		_, _, err := replan(t)
-		assertFocusExit(t, err, 8, "coverage incomplete")
+		assertFocusExit(t, err, 5, "coverage incomplete")
 		if _, found := f.draftRow(t); !found {
 			t.Errorf("replan with incomplete coverage must still store its draft")
 		}

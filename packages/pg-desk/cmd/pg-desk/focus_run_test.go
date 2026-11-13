@@ -100,17 +100,17 @@ func TestRunRowExitCodeFinalisedLast(t *testing.T) {
 		t.Fatalf("Finish: %v", err)
 	}
 	if got := runStat(t, st, "select", "partial"); got != 1 {
-		t.Errorf("after Finish(8): runs{select,partial} = %d, want 1", got)
+		t.Errorf("after Finish(5): runs{select,partial} = %d, want 1", got)
 	}
 	if got := runStat(t, st, "select", "total"); got != 0 {
-		t.Errorf("after Finish(8): runs{select,total} = %d, want 0", got)
+		t.Errorf("after Finish(5): runs{select,total} = %d, want 0", got)
 	}
 	var rec map[string]any
 	if err := json.Unmarshal(stderr.Bytes(), &rec); err != nil {
 		t.Fatalf("stderr line: %v", err)
 	}
-	if rec["exit_code"] != float64(8) {
-		t.Errorf("stderr exit_code = %v, want 8", rec["exit_code"])
+	if rec["exit_code"] != float64(5) {
+		t.Errorf("stderr exit_code = %v, want 5", rec["exit_code"])
 	}
 	// A second Finish neither rewrites the row nor reprints.
 	n := stderr.Len()
@@ -132,9 +132,9 @@ func TestFocusRunOutcomeWordsFollowTheExitCode(t *testing.T) {
 		{0, focusVerbPull, "ok"},
 		{1, focusVerbSelect, "total"}, // unexpected: a failure, never usage
 		{2, focusVerbClose, "usage"},
-		{8, focusVerbRepair, "partial"},
+		{5, focusVerbRepair, "partial"},
 		{3, focusVerbPull, "total"},
-		{6, focusVerbClose, "period_closed"},
+		{20, focusVerbClose, "period_closed"},
 	} {
 		run := newFocusRun(&bytes.Buffer{}, tc.verb, focusPeriod{Type: "day", Key: "2026-10-10"}, "a", false, focusFixedNow)
 		if err := run.Start(st); err != nil {
@@ -215,7 +215,7 @@ func TestSelectStderrLineIsParseableJSON(t *testing.T) {
 	}
 	if rec["contract"] != "pg-desk.focus-select/v1" || rec["verb"] != "select" ||
 		rec["period"] != "2026-10-10" || rec["actor"] != "tester" ||
-		rec["dry_run"] != false || rec["exit_code"] != float64(8) || rec["exit_scheme"] != float64(2) {
+		rec["dry_run"] != false || rec["exit_code"] != float64(5) || rec["exit_scheme"] != float64(3) {
 		t.Errorf("header members wrong: %v", rec)
 	}
 	if id, _ := rec["run_id"].(string); id != run.RunID() || len(id) != 26 {
@@ -272,8 +272,8 @@ func TestFocusCountsJSONNeverOmitsAbsentCounts(t *testing.T) {
 			t.Errorf("%s = %s, want []", k, m[k])
 		}
 	}
-	if string(m["exit_scheme"]) != "2" {
-		t.Errorf("exit_scheme = %s, want 2 (the exit-code scheme of bead pg2-rfxl3y)", m["exit_scheme"])
+	if string(m["exit_scheme"]) != "3" {
+		t.Errorf("exit_scheme = %s, want 3 (the current exit-code scheme)", m["exit_scheme"])
 	}
 	if !strings.Contains(string(m["coverage"]), `"reasons":[]`) {
 		t.Errorf("coverage = %s, want reasons []", m["coverage"])

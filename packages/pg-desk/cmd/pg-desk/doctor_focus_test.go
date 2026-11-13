@@ -553,7 +553,7 @@ func TestStatusFocusBlockOnAStoreWithNoSchema(t *testing.T) {
 
 // Doctor and `focus show` read the same persisted listing status of a watched
 // query through focus.QueryListings, so they agree on it at every step: unknown
-// while nothing was recorded (show exits 8, incomplete), ok after a listing is
+// while nothing was recorded (show exits 5, incomplete), ok after a listing is
 // recorded (show exits 0). There is no PR input (the daemon is the PR feed): a
 // stale watch.pr.queries key is not read, so no pr line appears in either.
 // Runs against a real schema-2 store; only the pg-connector probe is stubbed.
@@ -576,7 +576,7 @@ func TestDoctorAndFocusShowAgreeOnAWatchedQueryListingStatus(t *testing.T) {
 	}
 
 	step("nothing recorded", `mine unknown (no listing status recorded)`,
-		`issue "mine": ok (probe), listing unknown (no listing status recorded)`, 8)
+		`issue "mine": ok (probe), listing unknown (no listing status recorded)`, 5)
 
 	if err := w.st.SetMeta("change_flow.listing.issue.mine", `{"status":"ok","reason":"","at":"`+showAt+`"}`); err != nil {
 		t.Fatal(err)

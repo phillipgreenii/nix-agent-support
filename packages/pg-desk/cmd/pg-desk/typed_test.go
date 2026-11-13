@@ -58,13 +58,16 @@ func TestExitCodeFor(t *testing.T) {
 		want int
 	}{
 		{"plain error", base, 1},
-		{"partial", newExitError(exitPartial, base), 2},
+		{"partial", newExitError(exitPartial, base), 5},
 		{"total", newExitError(exitTotal, base), 3},
-		{"wrapped partial", fmt.Errorf("changes: %w", newExitError(exitPartial, base)), 2},
+		{"wrapped partial", fmt.Errorf("changes: %w", newExitError(exitPartial, base)), 5},
 	} {
 		if got := exitCodeFor(tc.err); got != tc.want {
 			t.Errorf("%s: exitCodeFor = %d, want %d", tc.name, got, tc.want)
 		}
+	}
+	if exitPartial != 5 || exitTotal != 3 {
+		t.Errorf("exitPartial = %d, exitTotal = %d; want the shared Degraded 5 and Unavailable 3", exitPartial, exitTotal)
 	}
 	e := newExitError(exitTotal, base)
 	if !errors.Is(e, base) {

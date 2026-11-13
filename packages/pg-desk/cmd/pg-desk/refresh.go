@@ -59,15 +59,15 @@ first row is delivered (a backend that keeps no store, such as beads, is not
 asked: the hydration write alone marks the entity watched and appends one
 added row); without it an unwatched issue is hydrated and appends no row.
 
-Exit codes: 0 hydrated; 2 hydration degraded (the previous snapshot is kept
+Exit codes: 0 hydrated; 5 hydration degraded (the previous snapshot is kept
 and the entity stays due); 3 hydration failed entirely (previous snapshot
 kept, entity stays due), including an entity that is not found.
 
-On exit 2 and 3 a line "class=<class>" is printed on standard output, so a
+On exit 5 and 3 a line "class=<class>" is printed on standard output, so a
 caller can tell the failures apart without reading the message text. The class
 is one of: not_found (the source says the entity is absent), transient (the
 source or the connector failed in a way a later attempt may clear),
-unauthenticated (the source refused the credentials), degraded (exit 2: part
+unauthenticated (the source refused the credentials), degraded (exit 5: part
 of the read failed) or hydrate_error (any other failure).`, entityType),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

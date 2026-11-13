@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -14,9 +15,9 @@ import (
 
 // exitHeadMoved is `pg-desk pr head-check`'s exit code for "the PR's head is
 // no longer the head you asked about". It is distinct from 0 (still current)
-// and 1 (the lookup itself failed) so a caller can branch on it; 4 mirrors
-// pg-connector's targeted "well-formed negative answer" code.
-const exitHeadMoved = 4
+// and 1 (the lookup itself failed) so a caller can branch on it; 11 is the shared Conflict code of the exitcode
+// package.
+const exitHeadMoved = exitcode.Conflict
 
 // headCheckHead reads the PR's head commit as of now; a test seam. Production
 // goes through gather's single pg-connector exec chokepoint.
@@ -34,7 +35,7 @@ func init() {
 // that its head moved is refused at submit and everything it spent is lost
 // (the 72h trigger trace found one 16 minute review wasted that way), so the
 // review prompt calls this at its mid-point, and again before it starts
-// posting, and stops early on exit 4.
+// posting, and stops early on exit 11.
 func newHeadCheckCmd() *cobra.Command {
 	var headSHA string
 	c := &cobra.Command{
@@ -44,10 +45,10 @@ func newHeadCheckCmd() *cobra.Command {
 with --head-sha, the commit the review was started on. Nothing is stored and
 no entity is hydrated.
 
-Exit codes: 0 the head is unchanged, the review may continue; 4 the head
+Exit codes: 0 the head is unchanged, the review may continue; 11 the head
 moved, the review is stale and SHOULD stop now (the new head is printed);
 1 the lookup failed (nothing is known about the head; the caller decides
-whether to continue); 2 and 3 are not used.`,
+whether to continue); 2, 3 and 5 are not used.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHeadCheck(cmd, args[0], headSHA)

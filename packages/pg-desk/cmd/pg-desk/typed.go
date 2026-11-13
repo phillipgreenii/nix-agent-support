@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -46,13 +47,14 @@ func init() {
 	}
 }
 
-// Typed-verb exit codes [design 9.12]: 0 ok (no error), 1 any other error,
-// 2 partial (at least one watched query or hydration failed), 3 total
-// failure (nothing logged, cursor not advanced). pg-desk keeps its own
-// scheme; it is not bound to pg-router's.
+// Typed-verb exit codes [design 9.12], the shared codes of the exitcode
+// package: 0 ok (no error), 1 any other error, 5 partial (Degraded: at least
+// one watched query or hydration failed), 3 total failure (Unavailable:
+// nothing logged, cursor not advanced). A caller branches on these the same
+// way as on any other workspace tool.
 const (
-	exitPartial = 2
-	exitTotal   = 3
+	exitPartial = exitcode.Degraded
+	exitTotal   = exitcode.Unavailable
 )
 
 // exitError carries a process exit code alongside the error to report.

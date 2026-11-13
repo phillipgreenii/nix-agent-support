@@ -90,12 +90,15 @@ func TestHeadCheck_UnchangedExitsZero(t *testing.T) {
 	}
 }
 
-func TestHeadCheck_MovedExitsFour(t *testing.T) {
+func TestHeadCheck_MovedExitsConflict(t *testing.T) {
 	withHeadCheckConfig(t)
 	fakeShow(t, headCheckNew, 0)
 	_, err, code := runHeadCheckCmd(t, "5", "--head-sha", headCheckOld)
 	if err == nil || code != exitHeadMoved {
 		t.Fatalf("err = %v, code = %d; want exit %d", err, code, exitHeadMoved)
+	}
+	if code != 11 {
+		t.Errorf("head moved exits %d, want 11 (the shared Conflict code)", code)
 	}
 	for _, want := range []string{"head moved", headCheckOld, headCheckNew, "stale"} {
 		if !strings.Contains(err.Error(), want) {

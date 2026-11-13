@@ -245,6 +245,14 @@ func firstLine(s string) string {
 	return ""
 }
 
+// The exit codes of `pg-desk pr refresh` the decider branches on: the shared
+// Degraded (part of the read failed, the stale detail kept) and Unavailable
+// (the read failed entirely) codes of the workspace's exit-code package.
+const (
+	refreshExitDegraded    = 5
+	refreshExitUnavailable = 3
+)
+
 func (r *run) refreshCmd() string { return "pg-desk pr refresh " + r.id }
 func (r *run) showCmd() string    { return "pg-desk pr show " + r.id + " --json" }
 func (r *run) planCmd() string    { return "pg-decider plan pr " + r.id }
@@ -272,7 +280,7 @@ func (r *run) hydrate() (int, bool) {
 		}
 	case res.Code == 1:
 		return r.fail(StageHydrate, ClassHydrateError, "refresh failed", firstLine(string(res.Stderr)+"\n"+string(res.Stdout)), r.refreshCmd()), true
-	case res.Code == 2 || res.Code == 3:
+	case res.Code == refreshExitDegraded || res.Code == refreshExitUnavailable:
 		return r.refreshFailed(res), true
 	default:
 		return r.fail(StageHydrate, ClassHydrateError, "refresh failed",
@@ -286,7 +294,7 @@ func (r *run) hydrate() (int, bool) {
 	return code, stop
 }
 
-// refreshClass reads the one `class=<class>` line pg-desk prints on exit 2 and
+// refreshClass reads the one `class=<class>` line pg-desk prints on exit 5 and
 // 3. A missing or unknown class is "" (the caller picks the safe default).
 func refreshClass(stdout string) string {
 	for _, l := range strings.Split(stdout, "\n") {
@@ -302,7 +310,7 @@ func refreshClass(stdout string) string {
 	return ""
 }
 
-// refreshFailed maps a refresh exit of 2 or 3 to its failure. The decider
+// refreshFailed maps a refresh exit of 5 or 3 to its failure. The decider
 // never runs after one.
 func (r *run) refreshFailed(res Result) int {
 	detail := firstLine(string(res.Stderr))
@@ -311,10 +319,10 @@ func (r *run) refreshFailed(res Result) int {
 	}
 	class := refreshClass(string(res.Stdout))
 	if class == "" {
-		// An older pg-desk prints no class. Exit 2 is always a degraded read; an
+		// An older pg-desk prints no class. Exit 5 is always a degraded read; an
 		// exit 3 whose cause is unknown is never read as not found.
 		class = ClassHydrateError
-		if res.Code == 2 {
+		if res.Code == refreshExitDegraded {
 			class = ClassDegraded
 		}
 	}

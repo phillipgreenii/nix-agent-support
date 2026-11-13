@@ -13,11 +13,11 @@ import (
 	"testing"
 )
 
-// The seam end to end with the real runner: a real child that exits 2 with a
+// The seam end to end with the real runner: a real child that exits 5 with a
 // body on stdout is classified like pg-desk's partial result.
 func TestRunPgDeskThroughExecUsesTheRealPath(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(dir+"/pg-desk", []byte("#!/bin/sh\nprintf '%s' \"$*\"\nexit 2\n"), 0o755); err != nil {
+	if err := os.WriteFile(dir+"/pg-desk", []byte("#!/bin/sh\nprintf '%s' \"$*\"\nexit 5\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+":/usr/bin:/bin")
@@ -25,7 +25,7 @@ func TestRunPgDeskThroughExecUsesTheRealPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.exitCode != 2 || !classifyExit(res.exitCode) || !strings.Contains(string(res.stdout), "widget changes") {
+	if res.exitCode != 5 || !classifyExit(res.exitCode) || !strings.Contains(string(res.stdout), "widget changes") {
 		t.Errorf("exit=%d stdout=%q", res.exitCode, res.stdout)
 	}
 }

@@ -27,8 +27,8 @@ import (
 // table and reads no reply.
 //
 // Check order (the exit code a run takes is the first failing check): usage
-// and flag errors (exit 2), period closed (6), reply (2), the first-lock rule
-// (2), hand-add hydration (2), then the writes (3, 8 partial, 0).
+// and flag errors (exit 2), period closed (20), reply (2), the first-lock rule
+// (2), hand-add hydration (2), then the writes (3, 5 partial, 0).
 //
 // Output (spec section 7.2 step 7): a preview prints the draft and then the
 // CHANGES block (focus.RenderChanges) and nothing else; --dry-run and --apply
@@ -105,8 +105,8 @@ Exit codes:
   2  usage (including a malformed reply and a first lock for an earlier or a
      future period) or a store not yet migrated
   3  a write failed outright
-  6  period closed
-  8  rows committed but an annotation write failed (run select --repair)`,
+  5  rows committed but an annotation write failed (run select --repair)
+  20  period closed`,
 		Example: `  # preview what an accepting reply would lock; nothing is written
   echo ok | pg-desk focus select --dry-run
 
@@ -116,7 +116,7 @@ Exit codes:
   # strike one entity, add another, and keep the first 4 rows
   echo "ok -1234 +ZZ-9 cap=4" | pg-desk focus select --apply
 
-  # re-write missing focus_selected annotations after exit 8
+  # re-write missing focus_selected annotations after exit 5
   pg-desk focus select --repair`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusSelect(cmd) },
@@ -195,7 +195,7 @@ type selectRun struct {
 }
 
 // finishEarly ends the run with err's exit code when no row-writing path did:
-// a non-dry run still writes its focus_run row (exit 2, 3 and 6 are counted by
+// a non-dry run still writes its focus_run row (exit 2, 3 and 20 are counted by
 // the run statistics), then prints the stderr line.
 func (s *selectRun) finishEarly(err error) error {
 	if s.done {

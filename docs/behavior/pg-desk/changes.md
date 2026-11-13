@@ -578,7 +578,7 @@ reverse-edge index (`dependency.IssueDependents`, INV-CHANGES-17):
   poll's own hydrations (the closed issue's read, every orphan read and every listed hydration), and
   stops when the budget is spent or the backend is degraded. The cut is reported like any budget
   cut: the watched queries are marked `degraded` with reason `hydration_budget` and the call exits
-  `2`.
+  `5`.
 - **Accepted loss path.** pg-desk keeps no retry counter, deferral queue or timer, so a dependant
   the budget cuts is NOT retried: it is seen at its next change. A failed re-hydration of a dependant
   is likewise not retried.
@@ -598,7 +598,7 @@ blocker's closure"). A `--reset` replay is exempt (see `--reset`).
 - When the budget runs out, or the backend answers degraded three hydrations in a row, the
   remaining hydrations are left for the next call, never retried inline. Every watched query that
   listed a left-over entity is marked `degraded` with reason `hydration_budget` (or
-  `hydration_backend_degraded`). The call exits `2`.
+  `hydration_backend_degraded`). The call exits `5`.
 - Nothing is queued. A left-over added/changed entity still differs from its stored fingerprint, so
   the next call's diff finds it again in the same order; a hydration that FAILED wrote nothing and
   is found the same way, on every call, with no counter and no give-up.
@@ -671,13 +671,13 @@ the daemon's own kinds apply.
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Every watched query listed and every reported entity hydrated cleanly.                                                                                                            |
 | `1`  | Any other error: bad flags, an unknown `--query`, no watched query, a store on the retired schema 1, a store or config error.                                                     |
-| `2`  | Partial: at least one watched query or hydration failed or degraded. The envelope still carries the records, and the cursor advanced past what was delivered.                     |
+| `5`  | Partial: at least one watched query or hydration failed or degraded. The envelope still carries the records, and the cursor advanced past what was delivered.                     |
 | `3`  | Total failure: every watched query failed. The envelope is printed with `failed` sources and no records; nothing was logged and the cursor did not move (`seen_at` is still set). |
 
 - A degraded, truncated or failed source never yields `removed`/`closed` for an entity it failed to
   list; the entity stays as it was and is retried on a later poll.
 - A detail read failing for one entity keeps that entity's previous snapshot and stored
-  fingerprint, logs nothing for it and marks the listing query's source `degraded` (exit `2`). The
+  fingerprint, logs nothing for it and marks the listing query's source `degraded` (exit `5`). The
   entity still differs on the next call, so it is hydrated again then (see the hydration budget). A
   feed row that fails to hydrate is recorded in the failed-ingest table and retried at every call.
 - Each hydration is counted in the store's `meta` table (`change_flow.hydrations.<type>`,

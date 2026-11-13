@@ -206,7 +206,7 @@ If the entity's own hydration fails or degrades, the stored view is still printe
 | ---- | --------------------------------------------------------------------------------------------------- |
 | `0`  | Printed (and, with `--refresh`, hydrated).                                                          |
 | `1`  | Any other error: bad arguments, an unresolvable id, a store on the retired schema 1, a store error. |
-| `2`  | The entity's hydration degraded; the stale detail is printed.                                       |
+| `5`  | The entity's hydration degraded; the stale detail is printed.                                       |
 | `3`  | The entity's hydration failed entirely; the stored view, if any, is printed.                        |
 
 ## Invariants

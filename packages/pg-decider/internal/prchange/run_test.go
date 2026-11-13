@@ -113,14 +113,15 @@ func TestRefreshExitsNeverRunTheDecider(t *testing.T) {
 		stderr string // a substring the failure line must carry
 	}{
 		{"exit 1", exit(1, "", "old-schema store"), ExitHydrateError, ClassHydrateError, false, "old-schema store"},
-		{"exit 2 degraded", exit(2, "class=degraded\n", "files failed"), ExitHydrateDegraded, ClassDegraded, true, "files failed"},
-		{"exit 2 no class", exit(2, "", "files failed"), ExitHydrateDegraded, ClassDegraded, true, "files failed"},
+		{"exit 5 degraded", exit(5, "class=degraded\n", "files failed"), ExitHydrateDegraded, ClassDegraded, true, "files failed"},
+		{"exit 5 no class", exit(5, "", "files failed"), ExitHydrateDegraded, ClassDegraded, true, "files failed"},
 		{"exit 3 transient", exit(3, "class=transient\n", "502"), ExitHydrateTransient, ClassTransient, true, "502"},
 		{"exit 3 unauthenticated", exit(3, "class=unauthenticated\n", "bad credential"), ExitHydrateUnauthenticated, ClassUnauthenticated, false, "pg-connector auth status"},
 		{"exit 3 hydrate_error", exit(3, "class=hydrate_error\n", "undecodable"), ExitHydrateError, ClassHydrateError, false, "undecodable"},
 		{"exit 3 no class is never not found", exit(3, "", "something"), ExitHydrateError, ClassHydrateError, false, "something"},
 		{"exit 3 unknown class", exit(3, "class=bogus\n", "x"), ExitHydrateError, ClassHydrateError, false, "x"},
 		{"exit 4", exit(4, "", ""), ExitHydrateError, ClassHydrateError, false, "exited 4"},
+		{"exit 2 is no longer degraded", exit(2, "", "x"), ExitHydrateError, ClassHydrateError, false, "exited 2"},
 		{"killed", Result{Code: -1, Signal: "killed"}, ExitHydrateTransient, ClassTransient, true, "signal: killed"},
 		{"cannot start", Result{Code: -1, StartErr: fmt.Errorf("executable file not found")}, ExitHydrateError, ClassHydrateError, false, "not found"},
 	}

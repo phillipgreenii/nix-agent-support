@@ -26,10 +26,10 @@ import (
 // and what is left to pull, nothing written). Pull is uncapped.
 //
 // Check order (the exit code a run takes is the first failing check): usage
-// and flag errors (exit 2), period closed (6), a pull into a future period or
+// and flag errors (exit 2), period closed (20), a pull into a future period or
 // into a period that has no rows while another period holds rows (2; the same
 // checks run again inside the pull's transaction), the request (3 when no
-// named key has an entity row at all), then the writes (3, 8 partial, 0).
+// named key has an entity row at all), then the writes (3, 5 partial, 0).
 //
 // Output: the CHANGES block of select (focus.RenderChanges) over the rows
 // selected; each routine skip is one stderr line `skip <key>: <reason>`;
@@ -79,7 +79,7 @@ select --apply), and so is a pull into a future period.
 
 Exit codes: 0 done (including nothing left to pull and routine skips), 1 an
 unexpected error, 2 usage or the no-plan and future-period cases, 3 a store
-write failed or no named key has an entity row, 6 period closed, 8 rows
+write failed or no named key has an entity row, 20 period closed, 5 rows
 committed but an annotation write failed (run select --repair).`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusPull(cmd, args) },
@@ -103,7 +103,7 @@ type pullRun struct {
 }
 
 // finish ends the run with err's exit code when no row-writing path did: a
-// writing run still writes its focus_run row (exit 2, 3 and 6 are counted by
+// writing run still writes its focus_run row (exit 2, 3 and 20 are counted by
 // the run statistics), then prints the stderr line.
 func (p *pullRun) finish(err error) error {
 	if p.done {

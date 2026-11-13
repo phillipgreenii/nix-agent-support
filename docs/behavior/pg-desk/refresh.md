@@ -64,10 +64,10 @@ entity.
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | The entity was hydrated.                                                                                                                                                                                  |
 | `1`  | Any other error: bad arguments, an unresolvable reference, an `issue` id served by watched queries of two different backends (nothing is read), a store on the retired schema 1, a store or config error. |
-| `2`  | Hydration degraded for this entity: part of the detail read failed. The stale detail is kept.                                                                                                             |
+| `5`  | Hydration degraded for this entity: part of the detail read failed. The stale detail is kept.                                                                                                             |
 | `3`  | Hydration failed entirely, including an entity that is not found. The previous snapshot is kept.                                                                                                          |
 
-- On exit `2` and `3` the verb prints one line `class=<class>` on standard output (nothing else is
+- On exit `5` and `3` the verb prints one line `class=<class>` on standard output (nothing else is
   written to standard output on those exits; the error text goes to standard error as before). The
   class is machine-readable, so a caller never has to read message text to tell the failures apart:
 
@@ -76,7 +76,7 @@ entity.
   | `not_found`       | The source says the entity is absent (the connector's exit 4 or its `not_found` code).                                                                                                                                                                                           |
   | `transient`       | The source or the connector failed in a way a later attempt may clear: the connector's `unavailable` code (a forge 5xx), its `invalid_argument` answer for a config hash mismatch (an apply restarting the daemon onto a new config), a killed or timed-out child, a busy store. |
   | `unauthenticated` | The source refused the credentials (the connector's `unauthenticated` code); it needs a person.                                                                                                                                                                                  |
-  | `degraded`        | Exit `2` only: part of the read failed and the previous detail is kept.                                                                                                                                                                                                          |
+  | `degraded`        | Exit `5` only: part of the read failed and the previous detail is kept.                                                                                                                                                                                                          |
   | `hydrate_error`   | Any other failure: another connector code, an undecodable answer, a store or interpretation error.                                                                                                                                                                               |
 
   The connector's own wire code decides first, because its message text can say anything: a
@@ -90,7 +90,7 @@ entity.
   Exit `3` therefore still covers both a missing entity and a transient failure, and the class is how
   they are told apart. An `issue` whose backend's daemon answers `unavailable` (during the read or the
   probe of the owning backends that `--watch` makes for an id nothing names) is therefore exit `3` with
-  class `transient`: nothing is written and the next run retries, with no retry loop in the command. Refresh defines only the exits `0` to `3`.
+  class `transient`: nothing is written and the next run retries, with no retry loop in the command. Refresh defines only the exits `0`, `1`, `3` and `5`.
 
 - A failed or degraded refresh writes nothing: the previous snapshot stands, `hydrated_at` is
   unchanged, and the entity stays active and due, so a later refresh or sweep retries it (for `issue`,
@@ -120,7 +120,7 @@ On a store left on the retired schema 1 `refresh` refuses with the store's retir
 - **INV-REFRESH-7.** <!-- uuid: f504e2ba-921f-4271-9e1f-ac6654df44a5 --> `refresh --watch` MUST mark exactly the one named `issue` entity watched in its hydration write,
   and a refresh of an `issue` MUST pin the backend it reads from, taking it from the entity's stored
   `backend` or, when that is NULL, from the configured watched queries.
-- **INV-REFRESH-8.** <!-- uuid: 864c3767-48b4-4073-bd5e-0078c8290687 --> On exit `2` and `3` a refresh MUST print exactly one `class=<class>` line on standard output, the class
+- **INV-REFRESH-8.** <!-- uuid: 864c3767-48b4-4073-bd5e-0078c8290687 --> On exit `5` and `3` a refresh MUST print exactly one `class=<class>` line on standard output, the class
   MUST be one of `not_found`, `transient`, `unauthenticated`, `degraded` and `hydrate_error`, and a failure
   carrying the connector's `unavailable` code MUST be `transient` whatever its message says.
 

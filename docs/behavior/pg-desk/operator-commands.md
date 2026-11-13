@@ -112,7 +112,7 @@ moved" check. It reads the PR's head commit now with one `pg-connector pr show <
 compares it with `--head-sha` (the commit the review started on), and exits:
 
 - `0` — the head is unchanged; the review may continue.
-- `4` — the head moved: the review is stale and SHOULD stop now. The error names the reviewed head
+- `11` — the head moved (the shared Conflict code): the review is stale and SHOULD stop now. The error names the reviewed head
   and the new one. (Without this check a review learns the head moved only when its submit is
   refused, after all of its work is spent.)
 - `1` — the lookup failed (including a PR pg-connector does not know); nothing is known about the
@@ -121,7 +121,7 @@ compares it with `--head-sha` (the commit the review started on), and exits:
 An abbreviated `--head-sha` of at least 7 characters matches by prefix. The verb reads and writes
 nothing in the store, and issues the one `pg-connector` call named above.
 A review prompt SHOULD run it at the review's mid-point (about 10 minutes in) and again immediately
-before it submits, and stop early on exit `4`; the next review request, for the new head, is
+before it submits, and stop early on exit `11`; the next review request, for the new head, is
 created by the PR lane once that head settles. The prompt belongs to the
 deployment that runs the review, not to this repo.
 

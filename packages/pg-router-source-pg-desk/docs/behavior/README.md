@@ -56,9 +56,9 @@ flowchart LR
   A poll with no records prints `[]`, never `null`.
 
 - **Exit codes.** The adapter's own exit scheme is two values. pg-desk exit `0` (every source ok)
-  and `2` (some sources degraded, records written, cursor advanced) both end as `0` with every
+  and `5` (the shared Degraded code: some sources degraded, records written, cursor advanced) both end as `0` with every
   entity emitted, the degraded detail carried in `metadata.degraded_sources`, because pg-router
-  discards a source's whole output on any non-zero exit and mirroring `2` would drop records that
+  discards a source's whole output on any non-zero exit and mirroring `5` would drop records that
   pg-desk has already advanced past. pg-desk exit `3`, any other exit code, an envelope that is not
   decodable and a pg-desk that cannot be started all end as `1` with nothing on stdout; pg-desk's
   own stderr, when it wrote any, and a one-line diagnostic go to this adapter's stderr.

@@ -559,7 +559,7 @@ func TestSelectAnnotationFailureExitsEightAndRepairMendsIt(t *testing.T) {
 	f.useAnnotator(t, func(a focus.Annotator) focus.Annotator { return failingFor{inner: a, id: "o/r#2"} })
 
 	_, _, err := sel(t, "ok", "--apply")
-	assertFocusExit(t, err, 8, "select --repair")
+	assertFocusExit(t, err, 5, "select --repair")
 	if len(f.plan(t, showToday)) != 2 {
 		t.Fatalf("the rows did not commit")
 	}
@@ -567,8 +567,8 @@ func TestSelectAnnotationFailureExitsEightAndRepairMendsIt(t *testing.T) {
 		t.Fatalf("the failed entity was annotated: %q", got)
 	}
 	r := f.lastRun(t)
-	if !r.Exit.Valid || r.Exit.Int64 != 8 {
-		t.Fatalf("run exit = %+v, want 8 recorded as partial", r.Exit)
+	if !r.Exit.Valid || r.Exit.Int64 != 5 {
+		t.Fatalf("run exit = %+v, want 5 recorded as partial", r.Exit)
 	}
 	failed := 0
 	for _, a := range r.Counts["annotations"].([]any) {
@@ -704,7 +704,7 @@ func TestLockOverDegradedSourceRecordsCoverage(t *testing.T) {
 	if err := f.st.SetMeta("change_flow.listing.issue.mine", string(v)); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _ = show(t) // exit 8: coverage incomplete, the draft is still stored
+	_, _, _ = show(t) // exit 5: coverage incomplete, the draft is still stored
 	_, _, err := sel(t, "ok", "--apply")
 	mustOK(t, err)
 	cov, _ := f.lastRun(t).Counts["coverage"].(map[string]any)
@@ -723,9 +723,9 @@ func TestCheckOrderIsUsageThenClosedThenReplyThenHydrationThenWrite(t *testing.T
 	h := &writingHydrator{st: f.st}
 	withHydrator(t, h)
 
-	// A malformed reply over a closed period is exit 6, not 2.
+	// A malformed reply over a closed period is exit 20, not 2.
 	_, _, err := sel(t, "bogus", "--apply", "--date", "2026-10-09")
-	assertFocusExit(t, err, 6, "period 2026-10-09 is closed")
+	assertFocusExit(t, err, 20, "period 2026-10-09 is closed")
 	// Over an open period the malformed reply is a usage error.
 	_, _, err = sel(t, "bogus", "--apply")
 	assertFocusExit(t, err, 2, "unrecognized token")
@@ -741,8 +741,8 @@ func TestCheckOrderIsUsageThenClosedThenReplyThenHydrationThenWrite(t *testing.T
 	for _, r := range f.runs(t) {
 		outcomes[r.Exit.Int64]++
 	}
-	if outcomes[6] != 1 || outcomes[2] != 2 {
-		t.Errorf("recorded exits = %v, want one 6 and two 2", outcomes)
+	if outcomes[20] != 1 || outcomes[2] != 2 {
+		t.Errorf("recorded exits = %v, want one 20 and two 2", outcomes)
 	}
 	if got := f.count(t, "focus_selection"); got != 0 {
 		t.Errorf("a doomed run wrote %d rows", got)

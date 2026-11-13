@@ -28,20 +28,20 @@ func mustHaveAll(t *testing.T, what, text string, phrases ...string) {
 	}
 }
 
-// Traces INV-FOCUS-47: select help documents the grammar, the exit codes 0, 1, 2, 3, 6 and 8, and --dry-run.
+// Traces INV-FOCUS-47: select help documents the grammar, the exit codes 0, 1, 2, 3, 5 and 20, and --dry-run.
 func TestFocusSelectHelpDocumentsReplyGrammarExitCodesAndDryRun(t *testing.T) {
 	out, _, err := runFocusCmd(t, newFocusSelectCmd, "--help")
 	mustOK(t, err)
 	// The reply grammar: every token with its meaning, and examples.
 	mustHaveAll(t, "select --help", out, "Reply grammar", "ok", "-<key>", "+<key>", "cap=N")
 	mustHaveAll(t, "select --help examples", out, "Examples:", "| pg-desk focus select --dry-run", "| pg-desk focus select --apply", "cap=4")
-	// The exit codes, one line each: 0 1 2 3 6 8 and no other.
-	for _, code := range []string{"0", "1", "2", "3", "6", "8"} {
+	// The exit codes, one line each: 0 1 2 3 5 20 and no other.
+	for _, code := range []string{"0", "1", "2", "3", "5", "20"} {
 		if !regexp.MustCompile(`(?m)^  ` + code + `  \S`).MatchString(out) {
 			t.Errorf("select --help has no exit-code line for %s:\n%s", code, out)
 		}
 	}
-	for _, code := range []string{"4", "5", "7"} {
+	for _, code := range []string{"4", "6", "7", "8"} {
 		if regexp.MustCompile(`(?m)^  ` + code + `  \S`).MatchString(out) {
 			t.Errorf("select --help documents the unused exit code %s:\n%s", code, out)
 		}

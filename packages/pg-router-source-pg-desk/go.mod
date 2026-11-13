@@ -3,7 +3,7 @@ module github.com/phillipgreenii/pg-router-source-pg-desk
 go 1.26.8
 
 require (
-	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	github.com/spf13/cobra v1.8.1
 )
 

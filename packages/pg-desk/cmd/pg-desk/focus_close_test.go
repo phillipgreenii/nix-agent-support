@@ -150,14 +150,14 @@ func TestCloseIdempotentWithSameSummary(t *testing.T) {
 	}
 }
 
-// Traces INV-FOCUS-38: a different summary on a closed period is exit 6.
-func TestCloseWithADifferentSummaryExitsSixAndKeepsTheFirst(t *testing.T) {
+// Traces INV-FOCUS-38: a different summary on a closed period is exit 20.
+func TestCloseWithADifferentSummaryExitsTwentyAndKeepsTheFirst(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, summaryJSON(t, "first"))
 	mustOK(t, err)
 	before := f.tables(t, "focus_period", "focus_selection", "focus_draft")
 	_, _, err = closeVerb(t, summaryJSON(t, "second"))
-	assertFocusExit(t, err, 6, closeNow)
+	assertFocusExit(t, err, 20, closeNow)
 	if !strings.Contains(err.Error(), "--date <tomorrow>") || !strings.Contains(err.Error(), "different summary") {
 		t.Errorf("message = %q, want the recorded time, the different summary and the way out", err)
 	}
@@ -167,8 +167,8 @@ func TestCloseWithADifferentSummaryExitsSixAndKeepsTheFirst(t *testing.T) {
 	if p, _ := f.period(t, showToday); p.CloseNote != "first" {
 		t.Errorf("close_note = %q, want the recorded one", p.CloseNote)
 	}
-	if r := f.lastRun(t); r.Verb != "close" || !r.Exit.Valid || r.Exit.Int64 != 6 {
-		t.Errorf("run = %+v, want exit 6 recorded", r)
+	if r := f.lastRun(t); r.Verb != "close" || !r.Exit.Valid || r.Exit.Int64 != 20 {
+		t.Errorf("run = %+v, want exit 20 recorded", r)
 	}
 }
 
@@ -241,7 +241,7 @@ func TestCloseDryRunOfAClosedDayReportsTheRefusalAndWritesNothing(t *testing.T) 
 	mustOK(t, err)
 	before := f.snapshot(t)
 	_, _, err = closeVerb(t, summaryJSON(t, "second"), "--dry-run")
-	assertFocusExit(t, err, 6, "")
+	assertFocusExit(t, err, 20, "")
 	if _, _, err := closeVerb(t, summaryJSON(t, "first"), "--dry-run"); err != nil {
 		t.Errorf("dry-run of the identical summary: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestFocusExitCodesClose(t *testing.T) {
 		_, _, err := closeVerb(t, summaryJSON(t, "x"))
 		mustOK(t, err)
 		_, _, err = closeVerb(t, summaryJSON(t, "y"))
-		assertFocusExit(t, err, 6, "use --date <tomorrow>")
+		assertFocusExit(t, err, 20, "use --date <tomorrow>")
 	})
 	t.Run("total: a store write failure", func(t *testing.T) {
 		f := newSelFixture(t)
@@ -395,13 +395,13 @@ func TestCloseIsAtomicWithTheDraftDeletion(t *testing.T) {
 	}
 }
 
-func TestCloseSelectAndPullOnAClosedDayExitSix(t *testing.T) {
+func TestCloseSelectAndPullOnAClosedDayExitTwenty(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	_, _, err := closeVerb(t, summaryJSON(t, "done"))
 	mustOK(t, err)
 	_, _, err = pull(t, "--top", "1")
-	assertFocusExit(t, err, 6, "period 2026-10-10 is closed; use --date <tomorrow>")
+	assertFocusExit(t, err, 20, "period 2026-10-10 is closed; use --date <tomorrow>")
 	_, _, err = sel(t, "ok", "--apply")
-	assertFocusExit(t, err, 6, "period 2026-10-10 is closed; use --date <tomorrow>")
+	assertFocusExit(t, err, 20, "period 2026-10-10 is closed; use --date <tomorrow>")
 }

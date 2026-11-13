@@ -36,7 +36,7 @@ flowchart TD
     A["pg-pr-change MODE ID"] --> L{"per-PR lock free within the wait?"}
     L -->|"no"| E40["exit 40: stage lock, class transient"]
     L -->|"yes"| H["pg-desk pr refresh ID"]
-    H -->|"exit 1, 2 or 3"| F["no decide: class and exit code of the stage hydrate"]
+    H -->|"exit 1, 3 or 5"| F["no decide: class and exit code of the stage hydrate"]
     H -->|"exit 0, also no change"| V{"stored view at version 0 or stale?"}
     V -->|"yes"| U["exit 25: class unhydrated, no decide"]
     V -->|"no"| D["pg-decider MODE pr ID"]
@@ -112,7 +112,7 @@ flowchart LR
 ## Hydrate, then decide
 
 1. **Refresh.** `pg-desk pr refresh <id>`. The decider is NOT run after a refresh that exits `1`,
-   `2` or `3`. A refresh that exits `0` always leads to the decider, including when it reports "no
+   `3` or `5`. A refresh that exits `0` always leads to the decider, including when it reports "no
    change": a retry after a decider failure sees no change because the first attempt already
    hydrated, an operator annotation changes the decider's input without any change on the forge,
    and a work item closed by an agent changes what should exist. The decider is idempotent, so a
@@ -296,7 +296,7 @@ to the command, so the command cannot know that a run is the last attempt.
 Refresh exit `3` covers both a missing PR and a transient failure; the machine-readable class that
 refresh prints (see `refresh.md` of the set `phillipgreenii-nix-agent-support · docs/behavior/pg-desk`) tells them apart, so a
 transient failure is never escalated as not found. A refresh that prints no class is never read as
-`not_found`: exit `2` is `degraded` and any other exit is `hydrate_error`.
+`not_found`: exit `5` is `degraded` and any other exit is `hydrate_error`.
 
 ### The failure line
 
@@ -375,7 +375,7 @@ in `apply` mode.
 - **INV-PRCHANGE-1.** <!-- uuid: 32cdf748-c087-4a1a-af34-5a282c6d9e23 --> The command MUST run `pg-desk pr refresh <id>` and then `pg-decider` (`plan` or `apply`,
   as the mode argument says) for the same PR, in that order, and MUST run the decider after every
   refresh that exits `0`, including one that reports "no change".
-- **INV-PRCHANGE-2.** <!-- uuid: e4c1e1de-89ea-4bce-9fce-7da70f810300 --> The command MUST NOT run the decider after a refresh that exits `1`, `2` or `3`, and MUST
+- **INV-PRCHANGE-2.** <!-- uuid: e4c1e1de-89ea-4bce-9fce-7da70f810300 --> The command MUST NOT run the decider after a refresh that exits `1`, `3` or `5`, and MUST
   NOT run it on a stored view whose version is `0` or that is marked stale.
 - **INV-PRCHANGE-3.** <!-- uuid: 577d7c69-d98d-4eb4-94fb-4cfe457f94ba --> The command MUST hold an exclusive per-PR lock, keyed by the normalized PR id so that
   `<repo>#<n>` and `<entity>@<12 hex>` take the same lock, for the whole run (a skipped own-origin

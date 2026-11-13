@@ -36,7 +36,7 @@ func TestMainExitsWithTypedVerbCode(t *testing.T) {
 		main()
 		os.Exit(0)
 	}
-	for mode, want := range map[string]int{"partial": 2, "total": 3, "plain": 1} {
+	for mode, want := range map[string]int{"partial": 5, "total": 3, "plain": 1} {
 		cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestMainExitsWithTypedVerbCode$")
 		cmd.Env = append(os.Environ(), "PG_DESK_TEST_EXIT_PROBE="+mode)
 		out, err := cmd.CombinedOutput()

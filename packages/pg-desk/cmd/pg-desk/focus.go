@@ -27,11 +27,10 @@ import (
 // of their own; the run record (focus_run row plus one structured stderr
 // line) is the whole of what a verb leaves behind (see focus_run.go).
 
-// The focus exit codes are the focus.Exit* constants (internal/focus/lock.go):
-// 0 ok, 1 an unexpected error (no branchable meaning), 2 usage, 3 total
-// failure, 6 period closed, 8 partial. 4 (head-check's), 5 (the retired
-// df-pull code) and 7 (removed by ruling RV-A) are never used by a focus verb.
-// The focus scheme is not the typed verbs' (typed.go): their partial is 2.
+// The focus exit codes are the focus.Exit* constants (internal/focus/lock.go),
+// built on the shared codes of the exitcode package: 0 ok, 1 an unexpected
+// error (no branchable meaning), 2 usage, 3 total failure, 5 partial, 20
+// period closed. The typed verbs (typed.go) use the same shared codes.
 const exitPeriodClosed = focus.ExitPeriodClosed
 
 // focusContract is the contract string every focus --json output carries in
@@ -80,7 +79,7 @@ period (a day), kept in the pg-desk store.
 
 Every verb addresses ONE period: --date, else today in focus.time_zone. The
 exit codes: 0 ok, 1 unexpected error, 2 usage error or a store not yet
-migrated, 3 total failure, 6 period closed, 8 partial. Every non-zero exit
+migrated, 3 total failure, 5 partial, 20 period closed. Every non-zero exit
 prints a one-line remedy on stderr. --json (or PG_DESK_OUTPUT=json) prints one
 object whose contract member is "` + focusContract + `".
 
@@ -149,7 +148,7 @@ func focusUsageError(msg, remedy string) error {
 	return &focusError{code: focus.ExitUsage, msg: msg, remedy: remedy}
 }
 
-// focusPartialError is exit 8 and focusTotalError exit 3, with a remedy.
+// focusPartialError is exit 5 and focusTotalError exit 3, with a remedy.
 func focusPartialError(msg, remedy string) error {
 	return &focusError{code: focus.ExitPartial, msg: msg, remedy: remedy}
 }
@@ -179,7 +178,7 @@ func focusUsageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
 	}
 }
 
-// focusPeriodClosedError is exit 6: the addressed period is closed. The
+// focusPeriodClosedError is exit 20: the addressed period is closed. The
 // wording is the spec's: a closed day cannot be amended or reopened this
 // phase, so the remedy is to address a later one.
 func focusPeriodClosedError(periodKey string) error {
@@ -257,7 +256,7 @@ func (e *focusEnv) Close() {
 // order (section 7, "Exit codes"): usage and flag errors (--period, --date),
 // then the unmigrated-store refusal. A verb that writes (writing true) and
 // addresses a day other than today prints the NOTE line on stderr. The
-// caller MUST Close the returned env. Period-closed (exit 6) and everything
+// caller MUST Close the returned env. Period-closed (exit 20) and everything
 // after it is the verb's own business: CheckPeriodClosed is the helper.
 func openFocusEnv(cmd *cobra.Command, writing bool) (*focusEnv, error) {
 	now := focusNow()
@@ -296,7 +295,7 @@ func printFocusNote(w io.Writer, p focusPeriod) {
 	_, _ = fmt.Fprintf(w, "NOTE: writing into period %s, not today\n", p.Key)
 }
 
-// CheckPeriodClosed is the period-closed check (exit 6) of the spec's check
+// CheckPeriodClosed is the period-closed check (exit 20) of the spec's check
 // order: nil when the addressed period is open or has no row yet.
 func (e *focusEnv) CheckPeriodClosed() error {
 	closed, err := focusPeriodIsClosed(e.Store, e.Period)

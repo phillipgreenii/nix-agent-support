@@ -649,11 +649,10 @@ type FocusRunStats struct {
 // FocusRunStats reads the run statistics (spec section 8.2). The outcome
 // word is derived from each focus_run row: exit_code 0 is ok, except a select
 // whose counts_json.selected is 0 and whose counts_json.removed counts are all
-// zero, which is empty; 2 is usage; 8 is partial; 6 is period_closed; 3, 1 (an
+// zero, which is empty; 2 is usage; 5 is partial; 20 is period_closed; 3, 1 (an
 // unexpected error) or NULL (a crash left the run unfinalised) is total. A row
-// finalized before the exit-code migration (no counts_json.exit_scheme, see
-// FocusExitScheme) is read under the old scheme, where 1 was usage and 2
-// partial. Any other code is counted as total (fail closed). A row is written
+// finalized under an older scheme (see FocusExitScheme) is read under that
+// scheme's table. Any other code is counted as total (fail closed). A row is written
 // only by a non-dry-run, so every row counts.
 func (s *Store) FocusRunStats() (FocusRunStats, error) {
 	out := FocusRunStats{ByVerbOutcome: map[[2]string]int{}}
@@ -699,13 +698,16 @@ func (s *Store) FocusRunStats() (FocusRunStats, error) {
 
 // FocusExitScheme is the version of the focus exit-code scheme a run record
 // was finalized under, written as counts_json member FocusExitSchemeMember
-// by every finalize. Scheme 2 (bead pg2-rfxl3y): 0 ok, 1 unexpected, 2 usage,
-// 3 total, 6 period closed, 8 partial. A row without the member predates it
-// and was written under scheme 1: 0 ok, 1 usage, 2 partial, 3 total, 6
-// period closed. The codes are the focus package's focus.Exit* constants
-// (this package cannot import it).
+// by every finalize. Scheme 3: 0 ok, 1 unexpected, 2 usage, 3 total, 5
+// partial, 20 period closed (the shared codes of the exitcode package, plus
+// the app-specific 20). Scheme 2: 0 ok, 1 unexpected, 2 usage, 3 total, 6
+// period closed, 8 partial. A row without the member predates scheme 2 and was
+// written under scheme 1: 0 ok, 1 usage, 2 partial, 3 total, 6 period closed.
+// The readers of schemes 1 and 2 are kept so a stored row keeps its outcome.
+// The codes are the focus package's focus.Exit* constants (this package cannot
+// import it).
 const (
-	FocusExitScheme       = 2
+	FocusExitScheme       = 3
 	FocusExitSchemeMember = "exit_scheme"
 )
 
@@ -721,7 +723,8 @@ func focusRunOutcome(r FocusRun) string {
 		}
 		return "ok"
 	}
-	if focusRunExitScheme(r.CountsJSON) < FocusExitScheme {
+	switch focusRunExitScheme(r.CountsJSON) {
+	case 1:
 		switch code {
 		case 1:
 			return "usage"
@@ -731,13 +734,23 @@ func focusRunOutcome(r FocusRun) string {
 			return "period_closed"
 		}
 		return "total" // 3 and any code outside scheme 1
+	case 2:
+		switch code {
+		case 2:
+			return "usage"
+		case 8:
+			return "partial"
+		case 6:
+			return "period_closed"
+		}
+		return "total" // 3, 1 (unexpected) and any code outside scheme 2
 	}
 	switch code {
 	case 2:
 		return "usage"
-	case 8:
+	case 5:
 		return "partial"
-	case 6:
+	case 20:
 		return "period_closed"
 	}
 	return "total" // 3, 1 (unexpected) and any code outside the scheme
