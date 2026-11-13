@@ -331,13 +331,28 @@ func TestServeWithMeterProviderRecordsRPCDuration(t *testing.T) {
 		t.Fatalf("Ping: %v", err)
 	}
 
-	var rm metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &rm); err != nil {
-		t.Fatalf("Collect: %v", err)
-	}
-	dp, ok := findServerCallDurationDataPoint(&rm)
-	if !ok {
-		t.Fatalf("rpc.server.call.duration histogram not found in collected metrics: %+v", rm.ScopeMetrics)
+	// The otelgrpc stats handler records rpc.server.call.duration on the
+	// server-side End event, which runs after the response is written. The
+	// client's Ping can therefore return before the histogram is recorded
+	// (observed under heavy host load), so poll Collect until the data point
+	// appears rather than collecting once.
+	var (
+		rm metricdata.ResourceMetrics
+		dp metricdata.HistogramDataPoint[float64]
+		ok bool
+	)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if err := reader.Collect(context.Background(), &rm); err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		if dp, ok = findServerCallDurationDataPoint(&rm); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rpc.server.call.duration histogram not found in collected metrics after 10s: %+v", rm.ScopeMetrics)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	if dp.Count < 1 {
 		t.Errorf("rpc.server.call.duration data point Count = %d, want >= 1", dp.Count)
