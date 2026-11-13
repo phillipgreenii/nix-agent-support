@@ -75,7 +75,15 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    (all-succeeded / degraded-partial / total-failure); a **targeted** op (resolves to exactly one
    backend) reports `0`/`4`/`1` (success / `not_found` — a well-formed negative, not a failure /
    any other error). Every multi-source response carries a `sources[]` row per backend actually
-   queried, never collapsed into one pass/fail signal.
+   queried, never collapsed into one pass/fail signal. (Amendment, 2026-11-12, operator ruling of
+   Phillip, 2026-11-11 on the shared exit codes: "it is ok to break contracts, just make sure both
+   sides are included in the specific landing of a change." The wire protocol's process exit is no
+   longer a plain `0`/`1`. A backend now exits `0` on success and otherwise with the shared
+   `x/exitcode` value of the error's category: `not_found` 4, `unauthenticated` 8, `unavailable` 3,
+   `unknown_op` 20 (app-specific), `version_mismatch` 11, `invalid_argument` and
+   `query_not_recognized` 2. The wire `error.code` names and the separation of layers are
+   unchanged, and the umbrella still reads the JSON body, not the backend's exit code. The
+   umbrella's own `0`/`2`/`3`/`4`/`1` above is a separate decision.)
 5. **A Tier-2 backend MUST resolve a cross-capability data need through its own direct, already-
    declared system access, and MUST NOT execute the `pg-connector` umbrella or a sibling Tier-2
    backend binary to satisfy its own op.** This reverses this repo's own first cut at the CI

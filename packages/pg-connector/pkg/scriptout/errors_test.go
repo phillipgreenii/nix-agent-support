@@ -3,6 +3,8 @@ package scriptout
 import (
 	"errors"
 	"testing"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func TestWrapError_ErrorsIs(t *testing.T) {
@@ -115,9 +117,37 @@ func TestExitCodeForError_UnwrappedFallsBackToUnavailablesCode(t *testing.T) {
 	}
 }
 
+// TestExitCodeForCode_PinsTheSharedExitCodes pins each wire code to its
+// x/exitcode value (and unknown_op to the first app-specific code), so a
+// renumbering is a deliberate, visible change. No code is 1 or in a range the
+// workspace reserves (64-78, 124, 126, 127, 128+n, 255).
+func TestExitCodeForCode_PinsTheSharedExitCodes(t *testing.T) {
+	want := map[string]int{
+		"not_found":            exitcode.NotFound,
+		"unauthenticated":      exitcode.Denied,
+		"unavailable":          exitcode.Unavailable,
+		"unknown_op":           20,
+		"version_mismatch":     exitcode.Conflict,
+		"invalid_argument":     exitcode.Usage,
+		"query_not_recognized": exitcode.Usage,
+	}
+	literal := map[string]int{"not_found": 4, "unauthenticated": 8, "unavailable": 3, "unknown_op": 20, "version_mismatch": 11, "invalid_argument": 2, "query_not_recognized": 2}
+	for code, w := range want {
+		if got := ExitCodeForCode(code); got != w || got != literal[code] {
+			t.Errorf("ExitCodeForCode(%q) = %d, want %d", code, got, w)
+		}
+		if got := ExitCodeForCode(code); got == 1 || (got >= 64 && got <= 78) || got == 124 || got == 126 || got == 127 || got > 128 {
+			t.Errorf("ExitCodeForCode(%q) = %d is reserved", code, got)
+		}
+	}
+	if ExitUnknownOp != exitcode.AppMin || !exitcode.IsAppSpecific(ExitUnknownOp) {
+		t.Errorf("ExitUnknownOp = %d, want the first app-specific code", ExitUnknownOp)
+	}
+}
+
 // TestExitCodeForCode_UnknownCodeReturnsZero proves an unrecognized code
 // string (should not occur against the closed six-value taxonomy) returns
-// the zero value rather than colliding with a real assignment (1-7).
+// the zero value rather than colliding with a real assignment.
 func TestExitCodeForCode_UnknownCodeReturnsZero(t *testing.T) {
 	if got := ExitCodeForCode("something_new"); got != 0 {
 		t.Fatalf("ExitCodeForCode(unknown) = %d, want 0", got)

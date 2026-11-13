@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
@@ -27,10 +29,10 @@ import (
 )
 
 const (
-	exitUnavailable     = 4 // scriptout.ExitCodeForCode("unavailable")
-	exitUnknownOp       = 5
-	exitVersionMismatch = 6
-	exitInvalidArgument = 7
+	exitUnavailable     = exitcode.Unavailable
+	exitUnknownOp       = scriptout.ExitUnknownOp
+	exitVersionMismatch = exitcode.Conflict
+	exitInvalidArgument = exitcode.Usage
 )
 
 // buildClient builds cmd/pg-connector-github with the given -ldflags and

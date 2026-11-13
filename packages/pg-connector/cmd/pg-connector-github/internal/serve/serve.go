@@ -14,7 +14,7 @@
 //  3. The router's gate is closed: every op answers unavailable with a
 //     "migrating:" message, and the socket server starts accepting.
 //  4. The store is opened and migrated. A schema NEWER than this binary refuses
-//     to start (a log line, exit 5, the file untouched); a corrupt store or a
+//     to start (a log line, exit 3, the file untouched); a corrupt store or a
 //     failed migration is moved aside with a timestamp, logged, and the daemon
 //     starts empty (the governor's caps are what limit the refill). While a
 //     migration runs the gate's message carries its progress.
@@ -131,16 +131,20 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// Exit codes of Run. 1 stays reserved for unexpected errors and 2 for usage.
+// Exit codes of Run, the shared x/exitcode values. 1 stays reserved for
+// unexpected errors and 2 for usage.
 const (
 	// ExitOK is a clean drain.
 	ExitOK = 0
 	// ExitRefused is a serve that refused to start or failed while draining:
 	// the lock is held, the socket path is too long, the state directory is
-	// unusable, the store is newer than this binary, a drain hook failed.
-	ExitRefused = 5
+	// unusable, the store is newer than this binary, a drain hook failed. It is
+	// exitcode.Unavailable: the daemon is not serving, and starting it after
+	// fixing the cause (or waiting for the lock holder) may succeed.
+	ExitRefused = exitcode.Unavailable
 )
 
 // Instances are the instance names the daemon serves.

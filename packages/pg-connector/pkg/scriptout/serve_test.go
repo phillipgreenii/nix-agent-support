@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func runServeLoop(t *testing.T, table DispatchTable, requestJSON string) (int, map[string]any) {
@@ -191,7 +193,9 @@ func TestServeLoop_ExitCodeMatchesErrorCode_AllSevenSentinels(t *testing.T) {
 		if code < 2 {
 			t.Fatalf("%s: exit code = %d, want >=2 (a specific branchable meaning)", c.code, code)
 		}
-		if prior, dup := seen[code]; dup {
+		// invalid_argument and query_not_recognized deliberately share Usage:
+		// both mean the request itself is wrong. Every other code is distinct.
+		if prior, dup := seen[code]; dup && !(code == exitcode.Usage && (prior == "invalid_argument" || c.code == "invalid_argument") && (prior == "query_not_recognized" || c.code == "query_not_recognized")) {
 			t.Fatalf("exit code %d assigned to both %q and %q, want each code distinct", code, prior, c.code)
 		}
 		seen[code] = c.code

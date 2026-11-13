@@ -4,7 +4,7 @@ go 1.26.8
 
 require (
 	github.com/gofrs/flock v0.13.1
-	github.com/phillipgreenii/x v0.0.0-20261031153131-4d4b0696f49b
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	go.opentelemetry.io/otel v1.47.0

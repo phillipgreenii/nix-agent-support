@@ -33,20 +33,21 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Version is stamped at build time (mkGoApp's default versionPath,
 // mirroring every existing Tier-2 backend's own convention).
 var Version = "dev"
 
-// Exit codes of the process itself that precede any request. 1 is reserved for
-// unexpected errors; a client mode's own codes are the scriptout taxonomy's.
+// Exit codes of the process itself that precede any request, the shared
+// x/exitcode values. 1 is reserved for unexpected errors; a client mode's own
+// codes are the scriptout taxonomy's.
 const (
 	// exitUsage is a command line the binary does not accept.
-	exitUsage = 2
-	// exitConfig is a config file that cannot be loaded; it shares the value 4
-	// with unavailable on purpose: both mean "this backend cannot be used".
-	exitConfig = 4
+	exitUsage = exitcode.Usage
+	// exitConfig is a config file that cannot be loaded.
+	exitConfig = exitcode.Config
 )
 
 // The modes selected by what follows --config.
@@ -70,7 +71,7 @@ func main() {
 //
 //	serve                  the daemon
 //	--instance <name>      the client: one request on stdin, one response on stdout
-//	status [--json]        the health report (exit 0 healthy, 2 degraded, 3 down)
+//	status [--json]        the health report (exit 0 healthy, 5 degraded, 3 down)
 //
 // and any other --config form is a usage error. An --instance that differs from
 // the config's instance exits 4, like a config that cannot be loaded.
@@ -140,7 +141,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 const usage = `usage: pg-connector-issue-jira                                    (the stateless backend: one request on stdin)
        pg-connector-issue-jira --config <path> serve              (the daemon)
        pg-connector-issue-jira --config <path> --instance <name>  (client: one request on stdin)
-       pg-connector-issue-jira --config <path> status [--json]    (health report: exit 0 healthy, 2 degraded, 3 down)
+       pg-connector-issue-jira --config <path> status [--json]    (health report: exit 0 healthy, 5 degraded, 3 down)
        pg-connector-issue-jira --version
 `
 

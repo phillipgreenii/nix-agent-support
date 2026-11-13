@@ -69,7 +69,7 @@ func TestRateLimitBlock_BelowTheFloorIsDegradedAndNamed(t *testing.T) {
 	if !rl.BelowFloor || *rl.Headroom != -16 || rl.Reason != "jira-burst-based" || rl.ResetAt == nil || !rl.ResetAt.Equal(time.Date(2026, 10, 24, 12, 0, 11, 0, time.UTC)) {
 		t.Fatalf("rate_limit = %+v", rl)
 	}
-	if rep.Health != Degraded || rep.Exit() != 2 {
+	if rep.Health != Degraded || rep.Exit() != 5 {
 		t.Fatalf("health = %s", rep.Health)
 	}
 	if !hasReason(rep, "below the floor", "4 requests remaining", "floor 20", "5s old") {

@@ -230,8 +230,8 @@ func TestRealClientWriteNoticesBracketTheOriginCall(t *testing.T) {
 func TestRealClientReadWithNoDaemonIsUnavailableAndLogsIt(t *testing.T) {
 	r := newClientRig(t)
 	code, out, _ := r.runBinary(t, `{"op":"show","args":{"id":"ABC-7"}}`, r.clientArgs()...)
-	if code != 4 {
-		t.Fatalf("exit %d, want 4 (unavailable): %s", code, out)
+	if code != 3 {
+		t.Fatalf("exit %d, want 3 (unavailable): %s", code, out)
 	}
 	var resp scriptout.Response
 	if err := json.Unmarshal([]byte(out), &resp); err != nil || resp.Error == nil || resp.Error.Code != "unavailable" {
@@ -257,8 +257,8 @@ func TestRealClientReadWithNoDaemonIsUnavailableAndLogsIt(t *testing.T) {
 func TestRealClientInstanceThatDiffersFromTheConfigsExitsFour(t *testing.T) {
 	r := newClientRig(t)
 	code, out, errs := r.runBinary(t, `{"op":"capabilities"}`, "--config", r.cfg, "--instance", "someone-else")
-	if code != 4 || out != "" || !strings.Contains(errs, "someone-else") {
-		t.Errorf("exit %d stdout=%q stderr=%q, want 4 naming the instance", code, out, errs)
+	if code != 7 || out != "" || !strings.Contains(errs, "someone-else") {
+		t.Errorf("exit %d stdout=%q stderr=%q, want 7 naming the instance", code, out, errs)
 	}
 	code, _, errs = r.runBinary(t, "", "--config", r.cfg, "--instance")
 	if code != 2 || !strings.Contains(errs, "usage:") {

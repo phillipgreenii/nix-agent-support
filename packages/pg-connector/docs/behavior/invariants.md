@@ -27,9 +27,12 @@ distinction come from the behavior-docs method
   `{protocolVersion, schemaVersion, error: {code, message}}` on failure. A response carrying
   **neither** `result` nor `error` is a **protocol violation, never a success** — a backend
   answering "nothing to report" MUST send `"result": null` explicitly rather than omit `result`.
-  Exit codes at this wire layer stay a plain `0` (well-formed envelope, `result` set) / `1`
-  (anything else); classification of what went wrong lives entirely in the JSON `error.code`
-  (`INV-ERR-1`), never in a wider wire-level exit-code scheme.
+  A backend's process exit is `0` when the envelope carries a `result` and otherwise the shared
+  exit code (`x/exitcode`) of the `error.code`: `not_found` 4, `unauthenticated` 8, `unavailable`
+  3, `unknown_op` 20 (app-specific), `version_mismatch` 11, `invalid_argument` and
+  `query_not_recognized` 2; `1` stays only for a failure with no classifiable error. The JSON
+  `error.code` (`INV-ERR-1`) remains the contract a caller reads; the exit code is a parse-free
+  hint that never disagrees with it.
 - **`INV-WIRE-2`** <!-- uuid: db5f232e-084d-4efd-ab8c-7a6de399a643 --> — The `capabilities` op is
   the one exception to `INV-WIRE-1`'s envelope: on success its response is the bespoke top-level
   shape `{protocolVersion, schemaVersions, ops, vocabulary}`, never nested inside `result`. On
@@ -498,8 +501,8 @@ status`/`config validate`.
 
 - **`INV-EXIT-1`** <!-- uuid: e804ff39-e941-4a3f-b754-d16a114eea9d --> — pg-connector's own CLI
   exit code MUST be computed from exactly one of two schemes, chosen by the invoked op's shape,
-  and this scheme MUST NOT be built from, or confused with, `INTF-WIRE`'s plain `0`/`1`
-  (`INV-WIRE-1`):
+  and this scheme MUST NOT be built from, or confused with, `INTF-WIRE`'s per-error exit
+  codes (`INV-WIRE-1`):
   - **Fan-out** (queries every backend registered for a type/capability — `ci list`,
     `auth status`, `config validate`, `attention list`, `search`): `0` every queried backend
     succeeded (no degraded/failed row); `2` degraded/partial (at least one backend succeeded and

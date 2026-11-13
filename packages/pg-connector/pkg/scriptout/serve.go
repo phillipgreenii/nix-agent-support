@@ -39,7 +39,7 @@ type dispatchEnv struct {
 // ServeLoop reads exactly one JSON request from stdin, dispatches it
 // through table, and writes exactly one JSON response to stdout. It
 // returns the process exit code main() should use: 0 on success, or on
-// failure the taxonomy-specific code ExitCodeForError computes (2-7),
+// failure the taxonomy-specific code ExitCodeForError computes (see errors.go),
 // falling back to the generic 1 only for a wire-level failure with no
 // classifiable error at all (e.g. a failure to write the response itself)
 // [bead pg2-7vgn5]. The JSON error body's Code field always carries the
@@ -240,7 +240,7 @@ func writeJSON(w io.Writer, v any) error {
 
 // writeErrorResponse writes a Response carrying a wire-taxonomy error
 // derived from err, and returns the matching backend-process exit code via
-// ExitCodeForError (2-7, one per wire-taxonomy code — see errors.go;
+// ExitCodeForError (one per wire-taxonomy code — see errors.go;
 // bead pg2-7vgn5). The returned exit code and the JSON body's error.code
 // always agree, since both derive from the same codeForError
 // classification.

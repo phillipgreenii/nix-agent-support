@@ -215,13 +215,13 @@ func TestStatusSubcommandAgainstALiveAndAStoppedDaemon(t *testing.T) {
 	}
 }
 
-func TestStatusSubcommandExitsTwoWhenDegraded(t *testing.T) {
+func TestStatusSubcommandExitsDegradedCode(t *testing.T) {
 	bin := fastClient(t)
 	cfg, _, _ := clientSetup(t)
 	startStatusDaemon(t, cfg, statusDaemonOpts{paused: true})
 	res := runBinary(t, bin, "", "--config", cfg, "status", "--json")
-	if res.code != 2 {
-		t.Fatalf("exit %d, want 2 (degraded)\n%s %s", res.code, res.stdout, res.stderr)
+	if res.code != 5 {
+		t.Fatalf("exit %d, want 5 (degraded)\n%s %s", res.code, res.stdout, res.stderr)
 	}
 	r := decodeReport(t, res)
 	if r.Health != status.Degraded || len(r.Reasons) != 1 || !strings.Contains(r.Reasons[0], "paused") {

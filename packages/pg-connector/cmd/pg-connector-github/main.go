@@ -5,7 +5,7 @@
 //	pg-connector-github [--config <path>] pr      client mode for the pr instance
 //	pg-connector-github [--config <path>] ci      client mode for the ci instance
 //	pg-connector-github [--config <path>] status [--json]
-//	                                              the health report; exit 0 healthy, 2 degraded, 3 down
+//	                                              the health report; exit 0 healthy, 5 degraded, 3 down
 //
 // --config is a global flag (accepted before or after the mode word) naming the
 // rendered config file (see internal/config); when absent,
@@ -32,6 +32,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/status"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Version is stamped at build time (mkGoApp's versionPath, `main.Version`,
@@ -46,15 +47,14 @@ var Version = "dev"
 // variables are the only ones this binary reads.
 var clientBudgetOverride = ""
 
-// Exit codes of the process itself. 1 is reserved for unexpected errors and 2
-// is a usage error. A client mode's own exit codes are the scriptout taxonomy's
-// (2 to 8, see scriptout.ExitCodeForCode) once it has a request to answer, so
-// exitConfig, which precedes any request, shares the value 4 with
-// unavailable on purpose: both mean "this backend cannot be used".
+// Exit codes of the process itself, the shared x/exitcode values. 1 is reserved
+// for unexpected errors. A client mode's own exit codes are the scriptout
+// taxonomy's (see scriptout.ExitCodeForCode) once it has a request to answer;
+// exitConfig, which precedes any request, is exitcode.Config.
 const (
-	exitOK     = 0
-	exitUsage  = 2
-	exitConfig = 4
+	exitOK     = exitcode.OK
+	exitUsage  = exitcode.Usage
+	exitConfig = exitcode.Config
 )
 
 // The three modes, selected by the first non-flag word.
@@ -122,7 +122,7 @@ modes:
   serve   run the daemon
   pr      client mode, pr instance
   ci      client mode, ci instance
-  status  the health report (exit 0 healthy, 2 degraded, 3 down); --json for the document
+  status  the health report (exit 0 healthy, 5 degraded, 3 down); --json for the document
 
 --config <path> names the rendered config file; PG_CONNECTOR_GITHUB_CONFIG is
 used only when the flag is absent.

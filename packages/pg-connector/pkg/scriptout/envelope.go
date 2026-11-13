@@ -13,16 +13,18 @@
 //
 //	stdin:  {"op": "<name>", "args": {...}}
 //	stdout: {"protocolVersion": N, "schemaVersion": M, "result": ...}                    on success (exit 0)
-//	stdout: {"protocolVersion": N, "schemaVersion": M, "error": {"code": "...", "message": "..."}}  on failure (exit 1, or 2-7 -- see below)
+//	stdout: {"protocolVersion": N, "schemaVersion": M, "error": {"code": "...", "message": "..."}}  on failure (a shared x/exitcode value or 20 -- see below)
 //
 // The capabilities op is the one exception to this shape: its response is
 // the bespoke CapabilitiesResponse object, not the Result/Error envelope
 // above — see CapabilitiesResponse's doc comment.
 //
 // This wire level's own exit code is 0 on success. On failure it is
-// errors.go's ExitCodeForError(err): one of 2 (not_found), 3
-// (unauthenticated), 4 (unavailable), 5 (unknown_op), 6 (version_mismatch),
-// or 7 (invalid_argument) — the same classification the JSON error body's
+// errors.go's ExitCodeForError(err): one of the shared
+// x/exitcode values (NotFound 4 for not_found, Denied 8 for unauthenticated,
+// Unavailable 3 for unavailable, Conflict 11 for version_mismatch, Usage 2
+// for invalid_argument and query_not_recognized) or the app-specific 20 for
+// unknown_op — the same classification the JSON error body's
 // Code field carries — or a plain 1 for the rare wire-level failure that
 // never reached a classifiable error at all (e.g. a failure to write the
 // response itself). Per this workspace's code-file-standards exit-code
@@ -30,9 +32,9 @@
 // specific branchable meaning; every code that does carry one here is >=2
 // (bead pg2-7vgn5). This numbering is a different, lower layer than
 // pg-connector's own CLI exit codes (built by cmd/pg-connector's
-// outcome-reporting helper) — the two ranges happen to overlap (2-7 here
-// vs. 0-4 there) but classify entirely different things, and MUST NOT be
-// confused with, or built from, one another.
+// outcome-reporting helper) — both draw on the shared x/exitcode values
+// but classify different things (a backend's reply versus a fan-out's
+// outcome), and MUST NOT be built from one another.
 //
 // pkg/scriptout/schemas and pkg/scriptout/conformance (bead pg2-7vgn5) are
 // this wire level's schemas/goldens/conformance suite: JSON Schema

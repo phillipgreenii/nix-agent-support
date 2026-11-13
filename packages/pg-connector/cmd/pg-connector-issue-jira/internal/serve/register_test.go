@@ -16,8 +16,8 @@ func TestInstanceIsIssueAndExitCodesArePinned(t *testing.T) {
 	if serve.Instance != "issue" {
 		t.Errorf("Instance = %q, want issue", serve.Instance)
 	}
-	if serve.ExitOK != 0 || serve.ExitRefused != 5 {
-		t.Errorf("exit codes = %d, %d, want 0 and 5", serve.ExitOK, serve.ExitRefused)
+	if serve.ExitOK != 0 || serve.ExitRefused != 3 {
+		t.Errorf("exit codes = %d, %d, want 0 and 3", serve.ExitOK, serve.ExitRefused)
 	}
 }
 

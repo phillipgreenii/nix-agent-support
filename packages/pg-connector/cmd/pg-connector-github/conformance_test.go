@@ -317,8 +317,8 @@ func TestConformanceDaemonDownIsUnavailableNeverFromACache(t *testing.T) {
 		} {
 			r := invoke(t, b, req)
 			r.wantError(t, inst.name+" "+req, "unavailable")
-			if r.exit != 4 {
-				t.Errorf("%s %s: exit %d, want 4", inst.name, req, r.exit)
+			if r.exit != 3 {
+				t.Errorf("%s %s: exit %d, want 3", inst.name, req, r.exit)
 			}
 			if strings.Contains(string(r.stdout), "served_from") || strings.Contains(string(r.stdout), "cache") {
 				t.Errorf("%s %s: a down daemon never answers from a cache: %s", inst.name, req, r.stdout)

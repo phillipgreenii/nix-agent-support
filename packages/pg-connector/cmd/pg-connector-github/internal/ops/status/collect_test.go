@@ -84,7 +84,7 @@ func TestCollectFromALiveDaemon(t *testing.T) {
 		t.Errorf("build difference: %+v", r)
 	}
 
-	// A degraded daemon is a report with exit code 2.
+	// A degraded daemon is a report with exit code 5.
 	paused := healthyBudgets()
 	paused.Buckets[0].Paused, paused.Buckets[0].PauseReason, paused.Buckets[0].PausedUntil = true, "secondary rate limit", t0.Add(time.Minute)
 	cfg2, _ := testConfig(t)
@@ -94,7 +94,7 @@ func TestCollectFromALiveDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	sock2, _ := serveDaemon(t, rt2, cfg2.BuildID)
-	if r := collector(sock2, cfg2.Static).Collect(context.Background()); r.Health != Degraded || r.Health.ExitCode() != 2 || r.Source != SourceDaemon {
+	if r := collector(sock2, cfg2.Static).Collect(context.Background()); r.Health != Degraded || r.Health.ExitCode() != 5 || r.Source != SourceDaemon {
 		t.Errorf("%+v", r)
 	}
 }

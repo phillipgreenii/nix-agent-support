@@ -14,7 +14,7 @@
 //  3. The router's gate is closed: every op answers unavailable with a
 //     "migrating:" message, and the socket server starts accepting.
 //  4. The store is opened and migrated. A schema NEWER than this binary refuses
-//     to start (a log line, exit 5, the file untouched); a corrupt store or a
+//     to start (a log line, exit 3, the file untouched); a corrupt store or a
 //     failed migration is moved aside with a timestamp, logged, and the daemon
 //     starts empty. While a migration runs the gate's message carries its
 //     progress.

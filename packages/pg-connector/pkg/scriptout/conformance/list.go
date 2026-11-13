@@ -14,7 +14,7 @@
 // through InvokeList against its real production DispatchTable (via
 // TableBackend, no subprocess needed): a recognized query name with
 // cursor: null (a success), an unrecognized query name (query_not_
-// recognized, exit 8), and a query name whose config.queries value is a
+// recognized, exit 2), and a query name whose config.queries value is a
 // LIST of expressions (design's "union results deduplicated by id"
 // rule) — design's acceptance-criteria block, first bullet.
 package conformance

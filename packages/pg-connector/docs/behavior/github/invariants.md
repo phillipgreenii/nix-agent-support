@@ -311,8 +311,8 @@ restated.
 
 - **`INV-GH-DIAG-1`** <!-- uuid: aa40c5a9-849d-4e52-b478-f68f013c6d4e --> — The backend MUST offer `status` (`INTF-GH-STATUS`).
   When the daemon is down it MUST still report the supervisor probe's answer, the socket path, the
-  store file's size and age, and the log paths. Its exit code MUST follow `INV-EXIT-1`: 0 healthy, 2
-  degraded, 3 down.
+  store file's size and age, and the log paths. Its exit code MUST be: 0 healthy, 5
+  degraded, 3 down (the shared `x/exitcode` values).
 - **`INV-GH-DIAG-2`** <!-- uuid: 74d55235-019d-44ad-babd-91f3de1ac04f --> — `explain`, through
   `pr explain <id>` and `ci explain <pr-id>`, MUST answer why an entity is stale: per group its fetch
   time, freshness end, hard-age end and last error, the head and base it was fetched for, its queue

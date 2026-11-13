@@ -255,8 +255,8 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
 ## Outcome reporting and CLI exit codes
 
 - **pg-connector's own CLI exit code** — the exit code the `pg-connector` process itself returns to
-  its own caller; a layer separate from, and never built from, the wire protocol's plain `0`/`1`
-  (`INV-EXIT-1`).
+  its own caller; a layer separate from, and never built from, the wire protocol's per-error exit
+  codes (`INV-EXIT-1`).
 - **Targeted op** — an op that resolves to exactly one registered backend by id (e.g. `show`,
   `files`, `get_logs`); uses the `0`/`4`/`1` exit-code scheme.
 - **Fan-out op** — an op that queries every backend registered for a type/capability at once (e.g.

@@ -66,7 +66,7 @@
 // # What makes the report degraded
 //
 // The report is "down" when no daemon answered (Static). Otherwise it is
-// "degraded" (exit 2) when ANY of these holds and "healthy" (exit 0) when none
+// "degraded" (exit 5) when ANY of these holds and "healthy" (exit 0) when none
 // does:
 //
 //   - an origin pause is in force (a 429 holds the background classes);

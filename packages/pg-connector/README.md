@@ -223,8 +223,8 @@ Wanting a PR checked out for review composes two calls rather than one command d
 
 Every Tier-2 backend speaks one small protocol: JSON on stdin (`{"op": "...", "args": {...}}`),
 JSON on stdout (`{"protocolVersion", "schemaVersion", "result": ...}` on success, or
-`{"protocolVersion", "schemaVersion", "error": {"code", "message"}}` on failure), plain `0`/`1`
-process exit. `error.code` is drawn from a closed six-value taxonomy — `not_found`,
+`{"protocolVersion", "schemaVersion", "error": {"code", "message"}}` on failure), and a process exit of `0` on
+success or, on failure, the shared exit code for the error's category (see the next section). `error.code` is drawn from a closed six-value taxonomy — `not_found`,
 `unauthenticated`, `unavailable`, `unknown_op`, `version_mismatch`, `invalid_argument` — each
 mapped to a Go sentinel error (`pkg/scriptout`) so a caller uses `errors.Is` rather than
 substring-matching a message. Two independent version numbers travel on every response
@@ -236,9 +236,32 @@ unrelated capability's schema break never forces every backend to redeploy toget
 its own op** — a cross-capability data need is resolved through that backend's own direct system
 access instead. See [`docs/behavior/invariants.md`](docs/behavior/invariants.md)'s `INV-COMP-1`.
 
+## Backend process exit codes
+
+A backend's process exit comes from the workspace's shared exit codes (`github.com/phillipgreenii/x/exitcode`,
+inventory in that repo's `docs/exit-codes.md`). The wire `error.code` names do not change; only the process exit
+for each does. A backend exits `1` only for a failure with no classifiable error (such as a failed response write).
+
+| Wire `error.code`      | Exit | Shared name | Notes                                                         |
+| ---------------------- | ---- | ----------- | ------------------------------------------------------------- |
+| (success)              | 0    | OK          |                                                               |
+| `not_found`            | 4    | NotFound    |                                                               |
+| `unauthenticated`      | 8    | Denied      |                                                               |
+| `unavailable`          | 3    | Unavailable |                                                               |
+| `unknown_op`           | 20   | app         | `scriptout.ExitUnknownOp`: this backend does not know the op  |
+| `version_mismatch`     | 11   | Conflict    |                                                               |
+| `invalid_argument`     | 2    | Usage       |                                                               |
+| `query_not_recognized` | 2    | Usage       | shares the code with `invalid_argument`: the request is wrong |
+
+Process-level codes that precede any request, on `pg-connector-github` and `pg-connector-issue-jira`: a command
+line the binary does not accept exits 2 (Usage); a config that cannot be loaded, or an `--instance` that differs from
+the config's, exits 7 (Config); a `serve` that refuses to start or fails while draining exits 3 (Unavailable);
+the shutdown watchdog exits 10 (ShutdownOverrun). The `status` subcommand exits 0 healthy, 5 (Degraded) degraded,
+3 (Unavailable) down. The umbrella does not branch on a backend's exit code; it reads the JSON body.
+
 ## pg-connector's own CLI exit codes
 
-A different, higher layer than the wire protocol's plain `0`/`1` above — pg-connector's own
+A different, higher layer than the backend process exit codes above — pg-connector's own
 process exit code is never built from it. It splits by whether the invoked op is a **fan-out**
 (queries every registered backend of a type) or **targeted** (resolves to one backend):
 
@@ -579,12 +602,12 @@ the alerts and the checks are in the repository's `CLAUDE.md`
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pg-connector-issue-jira --config <file> serve`           | The daemon. Takes the single-instance lock, opens the socket, opens and migrates the store, then serves until SIGTERM (a drain).               |
 | `pg-connector-issue-jira --config <file> --instance <n>`  | The client the umbrella execs: one request on stdin, one response on stdout.                                                                   |
-| `pg-connector-issue-jira --config <file> status [--json]` | The health report. Exit 0 healthy, 2 degraded, 3 down (the static report is printed when the daemon is down).                                  |
+| `pg-connector-issue-jira --config <file> status [--json]` | The health report. Exit 0 healthy, 5 degraded, 3 down (the static report is printed when the daemon is down).                                  |
 | `pg-connector-issue-jira` with no `--config`              | The old stateless backend, unchanged, kept until the registry flip. Any other argument without `--config` is ignored by it, exactly as before. |
 
 `--version` and `--help` work in every form. An `--instance` that differs from the config's `instance`, and a config
-that cannot be loaded, exit 4; a `serve` that refuses to start (lock held, socket path too long, store newer than the
-binary) exits 5; any other `--config` form is a usage error (exit 2).
+that cannot be loaded, exit 7 (Config); a `serve` that refuses to start (lock held, socket path too long, store newer than the
+binary) exits 3 (Unavailable); any other `--config` form is a usage error (exit 2).
 
 The client answers `capabilities` itself from compiled-in values plus the config, never from the daemon (the umbrella
 fails open when `capabilities` fails, so a forwarded call to a down daemon would silently re-enable its cache). The
@@ -713,7 +736,7 @@ launchd entry sets it to `<state_dir>/pprof.sock` unless `jira.pprof.enable` is 
   unwatched to watched therefore emits one `added` row per member already known to be open (the late-watch burst), so
   read the known open members of a query (`list`) BEFORE flipping it, and be ready for that burst on the feed.
 - **A moved-aside store loses flags and baselines.** A corrupt store, or one whose migration fails, is moved aside with a
-  timestamp and the daemon starts empty; a store newer than the binary is refused (exit 5) and left untouched. Nothing
+  timestamp and the daemon starts empty; a store newer than the binary is refused (exit 3) and left untouched. Nothing
   restores watched flags: the members of a watched query become watched again at that query's next run, as a baseline
   run, and a one-off `watch` is not restored. The store identity changes, so every cursor's first poll answers
   `cursor_expired:`.

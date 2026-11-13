@@ -312,7 +312,7 @@ _Requires:_ `INV-JIRA-DIAG-1`, `INV-JIRA-DIAG-2`, `INV-JIRA-CHG-10`, `INV-EXIT-1
    queue depth and the oldest overdue task by class, per-query last success and error,
    authentication state, the change log's head, pending settle rows, per-consumer positions, the
    tracked and watched counts and the supervisor. It reports no issue content.
-3. The exit code is 0 for healthy, 2 for degraded, 3 for down.
+3. The exit code is 0 for healthy, 5 for degraded, 3 for down.
 4. For one issue the operator runs `explain` and reads each group's age, freshness end and last
    error, whether the issue is tracked and watched and why, its queue position, any pending row and
    the last change rows.

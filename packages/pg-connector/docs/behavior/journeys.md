@@ -724,15 +724,10 @@ flowchart TD
 
 ## Open questions
 
-- **`OQ-EXIT-1`** <!-- uuid: 8f72c935-6feb-473d-a73f-ee1e02b3ca48 --> — `INTF-WIRE`'s own
-  exit codes stay a plain `0`/`1` (`INV-WIRE-1`), which does not meet this workspace's own
-  code-file convention that a branchable meaning uses a distinct exit code ≥ 2, with `1` reserved
-  for a generic/unexpected error. Is this an accepted, deliberate exemption — because
-  classification already lives entirely in the JSON `error.code` (`INV-ERR-1`), and the wire
-  layer's exit code genuinely carries no branchable meaning of its own beyond "did a well-formed
-  envelope come back" — or should `INTF-WIRE` widen its own exit-code scheme to satisfy that
-  convention directly? Unresolved as of this writing; not blocking, since every consumer today
-  already reads the JSON body rather than branching on the wire-level exit code.
+- **`OQ-EXIT-1`** <!-- uuid: 8f72c935-6feb-473d-a73f-ee1e02b3ca48 --> — **Settled
+  (2026-11-12, operator ruling of 2026-11-11 on the shared exit codes).** `INTF-WIRE`'s exit codes
+  widened from a plain `0`/`1` to the shared `x/exitcode` values per `error.code` (`INV-WIRE-1`).
+  The JSON body stays the contract; no consumer branches on the wire-level exit code.
 
 - **`OQ-REVHEAD-1`** <!-- uuid: 61b91b5b-82ce-4904-bbba-a8036d1e02a7 --> — **Settled
   (2026-10-08, live introspection and the real verb against a scratch repository).** Is the host

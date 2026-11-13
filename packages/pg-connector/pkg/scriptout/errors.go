@@ -3,6 +3,8 @@ package scriptout
 import (
 	"errors"
 	"fmt"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // The Err* sentinels are the Go-side mapping of the wire protocol's closed
@@ -134,27 +136,34 @@ func ErrorResponse(err error) *Response {
 	}
 }
 
+// ExitUnknownOp is the backend-process exit code of the unknown_op wire code.
+// No shared x/exitcode value means "this backend does not implement that op",
+// so it takes the first app-specific code (exitcode.AppMin).
+const ExitUnknownOp = exitcode.AppMin
+
 // exitCodeForCode maps each wire-taxonomy code to the backend process's own
-// exit code (bead pg2-7vgn5). Values start at 2, per this workspace's
-// code-file-standards exit-code convention: exit 1 is the
-// generic/catch-all failure and MUST NOT be given a specific branchable
-// meaning, so every code that DOES carry one here is >=2. The specific
-// assignment (not_found=2 .. invalid_argument=7) follows codeToSentinel's
-// own declared order — there is no severity ranking among the six original
-// wire codes to assign by, so the order is simply "the one place the
-// taxonomy is already enumerated," keeping this table and codeToSentinel
-// trivially comparable. query_not_recognized=8 was appended by bead
-// pg2-2j5ac.28.1 as the taxonomy's seventh member, extending
-// the table in declaration order rather than renumbering or reordering the
-// original six.
+// exit code, drawn from the workspace's shared exit codes (x/exitcode; the
+// inventory is x/docs/exit-codes.md). The wire error names are unchanged;
+// only the process exit differs:
+//
+//	not_found            NotFound 4
+//	unauthenticated      Denied 8
+//	unavailable          Unavailable 3
+//	unknown_op           ExitUnknownOp 20 (app-specific)
+//	version_mismatch     Conflict 11
+//	invalid_argument     Usage 2
+//	query_not_recognized Usage 2 (the request named a query the backend does
+//	                     not know, a request-shape problem like invalid_argument)
+//
+// No value is 1: exit 1 stays the generic failure with no branchable meaning.
 var exitCodeForCode = map[string]int{
-	"not_found":            2,
-	"unauthenticated":      3,
-	"unavailable":          4,
-	"unknown_op":           5,
-	"version_mismatch":     6,
-	"invalid_argument":     7,
-	"query_not_recognized": 8,
+	"not_found":            exitcode.NotFound,
+	"unauthenticated":      exitcode.Denied,
+	"unavailable":          exitcode.Unavailable,
+	"unknown_op":           ExitUnknownOp,
+	"version_mismatch":     exitcode.Conflict,
+	"invalid_argument":     exitcode.Usage,
+	"query_not_recognized": exitcode.Usage,
 }
 
 // ExitCodeForError returns the backend-process-level exit code
@@ -189,7 +198,7 @@ func ExitCodeForError(err error) int {
 // live backend's reply with no Go error value to classify) can compute the
 // expected exit code without one. An unrecognized code (should not happen
 // against a well-behaved backend) returns 0 — the zero value, distinguishable
-// from every real assignment (1-7) a well-formed error response can produce.
+// from every real assignment (non-zero) a well-formed error response can produce.
 func ExitCodeForCode(code string) int {
 	return exitCodeForCode[code]
 }

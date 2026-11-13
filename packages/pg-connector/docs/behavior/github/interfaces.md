@@ -197,7 +197,7 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-GH-ERR-1`
   carries the same values. The tracked, watched and backlog counts are exported as metrics
   (`INV-GH-DIAG-5`) and read per pull request with `inspect` (`INV-GH-DIAG-4`).
 - **What must hold.** The report is produced even with the daemon down (`INV-GH-DIAG-1`). Its exit
-  code follows the parent's `INV-EXIT-1`: 0 healthy, 2 degraded, 3 down.
+  code uses the shared exit codes: 0 healthy, 5 degraded, 3 down.
 - **How agreement is confirmed.** Actor: the definition is the agreement; the conformance suite
   asserts the down-daemon report.
 

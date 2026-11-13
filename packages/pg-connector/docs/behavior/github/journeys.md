@@ -305,7 +305,7 @@ _Requires:_ `INV-GH-DIAG-1`, `INV-GH-DIAG-2`, `INV-GH-FRESH-10`, `INV-EXIT-1`.
 2. The daemon reports version, uptime, store size, each bucket's spend and any pause, queue depth and
    the oldest overdue task by class, per-query last success and error, authentication state, the
    change log's head, pending settle rows, per-consumer positions and the supervisor.
-3. The exit code is 0 for healthy, 2 for degraded, 3 for down.
+3. The exit code is 0 for healthy, 5 for degraded, 3 for down.
 4. For one entity the operator runs `pr explain <id>` (or `ci explain <pr-id>` for the CI view) and reads each group's
    age and freshness end, last error, the head and base it was fetched for, its queue position, any
    pending row and the last change rows.

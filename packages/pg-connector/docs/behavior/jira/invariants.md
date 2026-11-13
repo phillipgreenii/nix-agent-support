@@ -285,8 +285,8 @@ different meaning for a shared term it takes a different name (`INV-20`).
 
 - **`INV-JIRA-DIAG-1`** <!-- uuid: 33da41fe-4347-40bd-a941-bd80a3d42c0e --> — The backend MUST offer `status` (`INTF-JIRA-STATUS`).
   When the daemon is down it MUST still report the supervisor probe's answer, the socket path, the
-  store file's size and age and the log paths. Its exit code MUST follow `INV-EXIT-1`: 0 healthy, 2
-  degraded, 3 down. It reports **counts only**: the tracked and watched counts, the per-query last
+  store file's size and age and the log paths. Its exit code MUST be: 0 healthy, 5
+  degraded, 3 down (the shared `x/exitcode` values). It reports **counts only**: the tracked and watched counts, the per-query last
   whole-query success and last error, the per-consumer positions and the pause state, and no issue
   content (`INV-GH-DIAG-1`).
 - **`INV-JIRA-DIAG-2`** <!-- uuid: 3d2299e3-b09c-493a-93f3-cb59f42c82e3 --> — `explain` MUST answer why an issue is stale or

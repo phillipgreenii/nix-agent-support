@@ -49,7 +49,7 @@ func TestRealProcessClientModesAnswerUnderEmptyEnvironment(t *testing.T) {
 		// Nothing on stdin: the client answers an unavailable error body and
 		// exits with that code, it does not panic or hang.
 		code, out, errs := runReal(t, "--config", abs, mode)
-		if code != 4 || !strings.Contains(out, `"code":"unavailable"`) {
+		if code != 3 || !strings.Contains(out, `"code":"unavailable"`) {
 			t.Errorf("%s: exit=%d stdout=%q stderr=%q", mode, code, out, errs)
 		}
 		if strings.Contains(errs, "panic") || strings.Contains(errs, "goroutine") {

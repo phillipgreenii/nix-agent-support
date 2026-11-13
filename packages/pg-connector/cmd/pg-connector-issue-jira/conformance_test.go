@@ -495,7 +495,7 @@ func TestConformanceClientAcceptsAReplyOneProtocolOffAndRefusesTwo(t *testing.T)
 }
 
 // TestConformanceDaemonDownIsUnavailableNeverFromACache: a read with the daemon
-// absent answers unavailable (exit 4) naming the socket path and the
+// absent answers unavailable (exit 3) naming the socket path and the
 // supervisor's restart hint, and never "served_from: cache".
 func TestConformanceDaemonDownIsUnavailableNeverFromACache(t *testing.T) {
 	d := confDaemon(t)
@@ -516,8 +516,8 @@ func TestConformanceDaemonDownIsUnavailableNeverFromACache(t *testing.T) {
 	} {
 		r := invoke(t, b, req)
 		r.wantError(t, req, "unavailable")
-		if r.exit != 4 {
-			t.Errorf("%s: exit %d, want 4", req, r.exit)
+		if r.exit != 3 {
+			t.Errorf("%s: exit %d, want 3", req, r.exit)
 		}
 		if strings.Contains(string(r.stdout), "served_from") || strings.Contains(string(r.stdout), "cache") {
 			t.Errorf("%s: a down daemon never answers from a cache: %s", req, r.stdout)

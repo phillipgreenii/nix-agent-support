@@ -234,8 +234,8 @@ func TestAPauseInForceIsDegradedWithItsReasonAndEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep := r.collect()
-	if rep.Exit() != 2 || rep.Health != Degraded {
-		t.Fatalf("health = %s exit %d, want degraded 2", rep.Health, rep.Exit())
+	if rep.Exit() != 5 || rep.Health != Degraded {
+		t.Fatalf("health = %s exit %d, want degraded 5", rep.Health, rep.Exit())
 	}
 	if rep.Pause == nil || rep.Pause.Reason != "jira answered 429" || !rep.Pause.Until.Equal(t0.Add(10*time.Minute)) {
 		t.Fatalf("pause = %+v", rep.Pause)
@@ -249,8 +249,8 @@ func TestAQueryWithALastErrorIsDegradedAndNamed(t *testing.T) {
 	r := newRig(t)
 	r.putQuery("other", func(q *store.QueryRow) { q.LastError = "jql rejected" })
 	rep := r.collect()
-	if rep.Exit() != 2 {
-		t.Fatalf("exit = %d, want 2", rep.Exit())
+	if rep.Exit() != 5 {
+		t.Fatalf("exit = %d, want 5", rep.Exit())
 	}
 	if !hasReason(rep, "query other", "jql rejected") || hasReason(rep, "query mine") {
 		t.Errorf("reasons = %v", rep.Reasons)
@@ -262,7 +262,7 @@ func TestAQueryWithNoSuccessWithinThreeTTLsIsDegraded(t *testing.T) {
 	// ttl 10m: 31 minutes of silence is past three TTLs, 29 is not.
 	r.putQuery("mine", func(q *store.QueryRow) { q.LastSuccessAt = t0.Add(-31 * time.Minute) })
 	rep := r.collect()
-	if rep.Exit() != 2 || !hasReason(rep, "query mine", "no whole-query success") {
+	if rep.Exit() != 5 || !hasReason(rep, "query mine", "no whole-query success") {
 		t.Fatalf("exit %d reasons %v", rep.Exit(), rep.Reasons)
 	}
 	r.putQuery("mine", func(q *store.QueryRow) { q.LastSuccessAt = t0.Add(-29 * time.Minute) })
@@ -275,7 +275,7 @@ func TestAQueryTTLOverrideSetsTheThreshold(t *testing.T) {
 	r := newRig(t)
 	r.dcfg.QueryTTL = map[string]config.Duration{"mine": config.Duration(time.Minute)}
 	r.putQuery("mine", func(q *store.QueryRow) { q.LastSuccessAt = t0.Add(-4 * time.Minute) })
-	if rep := r.collect(); rep.Exit() != 2 || !hasReason(rep, "query mine") {
+	if rep := r.collect(); rep.Exit() != 5 || !hasReason(rep, "query mine") {
 		t.Fatalf("exit %d reasons %v", rep.Exit(), rep.Reasons)
 	}
 }
@@ -300,7 +300,7 @@ func TestANeverSucceededQueryIsDegradedOnlyAfterThreeTTLsOfUptime(t *testing.T) 
 		t.Errorf("never-run query = %+v, want no success, no baseline and a baseline-open age of 300", other)
 	}
 	r.cfg.Started = t0.Add(-31 * time.Minute)
-	if rep := r.collect(); rep.Exit() != 2 || !hasReason(rep, "query other") {
+	if rep := r.collect(); rep.Exit() != 5 || !hasReason(rep, "query other") {
 		t.Fatalf("old daemon: exit %d reasons %v", rep.Exit(), rep.Reasons)
 	}
 }
@@ -318,7 +318,7 @@ func TestFailingAuthenticationIsDegraded(t *testing.T) {
 	r := newRig(t)
 	r.auth.bad, r.auth.err = true, errors.New("pjira: 401")
 	rep := r.collect()
-	if rep.Exit() != 2 || rep.Auth.State != AuthUnauthenticated || rep.Auth.Detail != "pjira: 401" || !hasReason(rep, "unauthenticated") {
+	if rep.Exit() != 5 || rep.Auth.State != AuthUnauthenticated || rep.Auth.Detail != "pjira: 401" || !hasReason(rep, "unauthenticated") {
 		t.Fatalf("exit %d auth %+v reasons %v", rep.Exit(), rep.Auth, rep.Reasons)
 	}
 }
@@ -332,7 +332,7 @@ func TestASettleTimeoutOrFailureInTheLastHourIsDegraded(t *testing.T) {
 			r := newRig(t)
 			r.settle.stats = stats
 			rep := r.collect()
-			if rep.Exit() != 2 || !hasReason(rep, "settle") {
+			if rep.Exit() != 5 || !hasReason(rep, "settle") {
 				t.Fatalf("exit %d reasons %v", rep.Exit(), rep.Reasons)
 			}
 			if rep.Changes.SettleTimeoutsLastHour != stats.Timeouts || rep.Changes.SettleFailuresLastHour != stats.Failures {
@@ -361,7 +361,7 @@ func TestAConsumerFarBehindTheHeadIsDegraded(t *testing.T) {
 			r := newRig(t)
 			r.feed.pos = []feed.Position{p}
 			rep := r.collect()
-			if rep.Exit() != 2 || !hasReason(rep, "consumer slow") {
+			if rep.Exit() != 5 || !hasReason(rep, "consumer slow") {
 				t.Fatalf("exit %d reasons %v", rep.Exit(), rep.Reasons)
 			}
 		})
@@ -537,7 +537,7 @@ func TestRenderIsStableForEqualInputAndAgreesWithTheJSON(t *testing.T) {
 }
 
 func TestExitCodes(t *testing.T) {
-	for h, want := range map[Health]int{Healthy: 0, Degraded: 2, Down: 3, "": 3, "weird": 3} {
+	for h, want := range map[Health]int{Healthy: 0, Degraded: 5, Down: 3, "": 3, "weird": 3} {
 		if got := (Report{Health: h}).Exit(); got != want {
 			t.Errorf("Exit(%q) = %d, want %d", h, got, want)
 		}

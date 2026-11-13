@@ -195,7 +195,7 @@ Every failure is answered from the parent's seven-value taxonomy (`INV-JIRA-ERR-
   hour, per-consumer positions, the tracked count by class and the watched count, and the
   supervisor. A `--json` form carries the same values. It carries counts, never issue content.
 - **What must hold.** The report is produced even with the daemon down (`INV-JIRA-DIAG-1`). Its exit
-  code follows the parent's `INV-EXIT-1`: 0 healthy, 2 degraded, 3 down.
+  code uses the shared exit codes: 0 healthy, 5 degraded, 3 down.
 - **How agreement is confirmed.** Actor: the definition is the agreement; the conformance suite
   asserts the down-daemon report.
 

@@ -221,7 +221,7 @@ func TestForwardsUnlistedOpsAndRelaysTheDaemonsAnswer(t *testing.T) {
 	// Exit codes follow the response's error code, for a relayed daemon error too.
 	r.SetMigrating(true, "")
 	res = run(t, opts(PR(), path), `{"op":"list"}`)
-	if e := errCode(t, res.out); !strings.HasPrefix(e.Message, "migrating:") || res.code != 4 {
+	if e := errCode(t, res.out); !strings.HasPrefix(e.Message, "migrating:") || res.code != 3 {
 		t.Errorf("migrating relay: %+v exit %d", e, res.code)
 	}
 }

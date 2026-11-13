@@ -152,7 +152,7 @@ func TestAFailingChangeSourceCostsTheSectionAndOneReasonNotTheVerdict(t *testing
 	src.err = map[string]error{"log": errors.New("boom")}
 	cfg.Changes = src
 	r := build(t, cfg)
-	if r.Health != Degraded || r.Health.ExitCode() != 2 || len(r.Reasons) != 2 {
+	if r.Health != Degraded || r.Health.ExitCode() != 5 || len(r.Reasons) != 2 {
 		t.Errorf("%q %v", r.Health, r.Reasons)
 	}
 }
@@ -200,7 +200,7 @@ func TestTheDegradedLocalReportHasNoChangesSection(t *testing.T) {
 	if strings.Contains(js.String(), "changes") {
 		t.Errorf("the local report carries no changes:\n%s", js.String())
 	}
-	if u := Unhealthy(testStatic(proc.SupervisorRunning, KindLaunchd), t0, "migrating"); u.Changes != nil || u.Health.ExitCode() != 2 {
+	if u := Unhealthy(testStatic(proc.SupervisorRunning, KindLaunchd), t0, "migrating"); u.Changes != nil || u.Health.ExitCode() != 5 {
 		t.Errorf("%+v", u)
 	}
 }

@@ -166,8 +166,8 @@ func TestRestartRefusesAStoreNewerThanTheBinaryAndNeverTouchesIt(t *testing.T) {
 	was := digest()
 
 	d.StartNoWait(t)
-	if code := d.Wait(t, 30*time.Second); code != 5 {
-		t.Errorf("exit = %d, want 5 (refused); output: %s", code, d.Stderr())
+	if code := d.Wait(t, 30*time.Second); code != 3 {
+		t.Errorf("exit = %d, want 3 (refused); output: %s", code, d.Stderr())
 	}
 	if out := d.Stderr(); !strings.Contains(out, "9999") || !strings.Contains(out, "refusing to open") || !strings.Contains(out, "untouched") {
 		t.Errorf("the refusal must say the store is newer than the binary and left untouched: %q", out)
@@ -197,7 +197,7 @@ func TestRestartMigratingWindowAnswersUnavailableMigrating(t *testing.T) {
 			}
 			// The same through the real client.
 			res := d.Client(t, `{"op":"show","args":{"id":"EXA-1"}}`)
-			if res.Exit != 4 || res.Resp.Error == nil || !strings.Contains(res.Resp.Error.Message, "migrating:") {
+			if res.Exit != 3 || res.Resp.Error == nil || !strings.Contains(res.Resp.Error.Message, "migrating:") {
 				t.Errorf("the client's answer while migrating: exit %d %s", res.Exit, res.Stdout)
 			}
 		}

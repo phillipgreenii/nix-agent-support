@@ -84,7 +84,7 @@ func TestStatusModeAgainstALiveAndAStoppedDaemon(t *testing.T) {
 }
 
 // TestStatusModeExitsTwoWhileTheOriginPausesTheDaemon: an origin that answers 429
-// pauses the background work; the report is degraded, exit 2, and names the pause.
+// pauses the background work; the report is degraded, exit 5, and names the pause.
 func TestStatusModeExitsTwoWhileTheOriginPausesTheDaemon(t *testing.T) {
 	d := servetest.StartDaemon(t, servetest.Options{Hooks: "poll_interval=50ms", Config: map[string]any{"default_pause": "10m"}})
 	d.Shim.Fail(429)
@@ -94,8 +94,8 @@ func TestStatusModeExitsTwoWhileTheOriginPausesTheDaemon(t *testing.T) {
 		t.Fatalf("show of an unstored issue answered %s while the origin refuses", resp.Result)
 	}
 	res := statusRun(t, d, "--json")
-	if res.Exit != 2 {
-		t.Fatalf("exit %d, want 2 (degraded)\n%s %s", res.Exit, res.Stdout, res.Stderr)
+	if res.Exit != 5 {
+		t.Fatalf("exit %d, want 5 (degraded)\n%s %s", res.Exit, res.Stdout, res.Stderr)
 	}
 	r := decodeStatus(t, res)
 	if r.Health != status.Degraded || r.Pause == nil || !strings.Contains(r.Pause.Reason, "429") {

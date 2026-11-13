@@ -125,16 +125,16 @@ func TestRealProcessAnyOtherConfigFormIsAUsageErrorAndABadConfigExitsFour(t *tes
 		{"--config", filepath.Join(shortTempDir(t), "missing.json"), "serve"},
 	} {
 		code, _, errs := runReal(t, "", nil, args...)
-		if code != 4 || !strings.Contains(errs, "read config") {
-			t.Errorf("%v: exit=%d stderr=%q, want exit 4 naming the config", args, code, errs)
+		if code != 7 || !strings.Contains(errs, "read config") {
+			t.Errorf("%v: exit=%d stderr=%q, want exit 7 naming the config", args, code, errs)
 		}
 	}
 	bad := filepath.Join(shortTempDir(t), "bad.json")
 	if err := os.WriteFile(bad, []byte(`{"state_dir":"relative"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, errs := runReal(t, "", nil, "--config", bad, "serve"); code != 4 {
-		t.Errorf("an invalid config: exit=%d stderr=%q, want 4", code, errs)
+	if code, _, errs := runReal(t, "", nil, "--config", bad, "serve"); code != 7 {
+		t.Errorf("an invalid config: exit=%d stderr=%q, want 7", code, errs)
 	}
 }
 

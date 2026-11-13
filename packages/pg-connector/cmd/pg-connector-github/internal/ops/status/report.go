@@ -57,7 +57,7 @@
 // # What makes the report degraded
 //
 // The report is "down" when no daemon answered. Otherwise it is "degraded"
-// (exit 2) when ANY of these holds, and "healthy" (exit 0) when none does:
+// (exit 5) when ANY of these holds, and "healthy" (exit 0) when none does:
 //
 //   - a budget bucket is paused (a secondary limit holds the background);
 //   - the daemon is unauthenticated (GitHub rejects the token), or the viewer
@@ -83,6 +83,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Health is the report's verdict.
@@ -94,11 +95,12 @@ const (
 	Down     Health = "down"
 )
 
-// Exit codes of the status subcommand (INV-EXIT-1).
+// Exit codes of the status subcommand, the shared x/exitcode values: healthy
+// OK, degraded Degraded, down Unavailable.
 const (
-	ExitHealthy  = 0
-	ExitDegraded = 2
-	ExitDown     = 3
+	ExitHealthy  = exitcode.OK
+	ExitDegraded = exitcode.Degraded
+	ExitDown     = exitcode.Unavailable
 )
 
 // ExitCode is the process exit code of the verdict.

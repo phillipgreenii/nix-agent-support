@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Health is the report's verdict.
@@ -15,11 +17,12 @@ const (
 	Down     Health = "down"
 )
 
-// Exit codes of the status mode, the workspace taxonomy.
+// Exit codes of the status mode, the shared x/exitcode values: healthy OK,
+// degraded Degraded, down Unavailable.
 const (
-	ExitHealthy  = 0
-	ExitDegraded = 2
-	ExitDown     = 3
+	ExitHealthy  = exitcode.OK
+	ExitDegraded = exitcode.Degraded
+	ExitDown     = exitcode.Unavailable
 )
 
 // The degraded thresholds beyond those the design names; doc.go records them.
@@ -85,7 +88,7 @@ type Report struct {
 	Tracked   *Tracked   `json:"tracked,omitempty"`
 }
 
-// Exit is the process exit code of the verdict: 0 healthy, 2 degraded, 3 down.
+// Exit is the process exit code of the verdict: 0 healthy, 5 degraded, 3 down.
 // Anything that is neither healthy nor degraded is down.
 func (r Report) Exit() int {
 	switch r.Health {

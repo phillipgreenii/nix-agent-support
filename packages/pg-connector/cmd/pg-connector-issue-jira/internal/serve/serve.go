@@ -34,6 +34,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/x/exitcode"
 
 	opsfeed "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/ops/feed"
 )
@@ -42,14 +43,17 @@ import (
 // backend (reads, notices, feed, status, explain) is registered under it.
 const Instance = "issue"
 
-// Exit codes of Run. 1 stays reserved for unexpected errors and 2 for usage.
+// Exit codes of Run, the shared x/exitcode values. 1 stays reserved for
+// unexpected errors and 2 for usage.
 const (
 	// ExitOK is a clean drain.
 	ExitOK = 0
 	// ExitRefused is a serve that refused to start or failed while draining:
 	// the lock is held, the socket path is too long, the state directory is
-	// unusable, the store is newer than this binary, a drain hook failed.
-	ExitRefused = 5
+	// unusable, the store is newer than this binary, a drain hook failed. It is
+	// exitcode.Unavailable: the daemon is not serving, and starting it after
+	// fixing the cause (or waiting for the lock holder) may succeed.
+	ExitRefused = exitcode.Unavailable
 )
 
 // Options configure Run.

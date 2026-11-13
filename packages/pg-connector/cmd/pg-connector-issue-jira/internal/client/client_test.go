@@ -449,14 +449,14 @@ func TestStatusCollect(t *testing.T) {
 		t.Errorf("healthy report %+v", r)
 	}
 	health = status.Degraded
-	if r := CollectStatus(context.Background(), o); r.Exit() != 2 {
+	if r := CollectStatus(context.Background(), o); r.Exit() != 5 {
 		t.Errorf("degraded report %+v", r)
 	}
 
 	// A migrating daemon answers an error: the static report, degraded.
 	rt.SetMigrating(true, "")
 	r = CollectStatus(context.Background(), o)
-	if r.Health != status.Degraded || r.Exit() != 2 || !strings.Contains(r.Reasons[0], "migrating") {
+	if r.Health != status.Degraded || r.Exit() != 5 || !strings.Contains(r.Reasons[0], "migrating") {
 		t.Errorf("migrating report %+v", r)
 	}
 }

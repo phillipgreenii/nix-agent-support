@@ -248,20 +248,20 @@ func TestHealthRule(t *testing.T) {
 		wantReason string
 	}{
 		{"nothing wrong", func(*Config) {}, Healthy, 0, ""},
-		{"a paused governor bucket", func(c *Config) { c.Budgets = fakeBudgets{paused} }, Degraded, 2, "rest_core is paused: secondary rate limit"},
+		{"a paused governor bucket", func(c *Config) { c.Budgets = fakeBudgets{paused} }, Degraded, 5, "rest_core is paused: secondary rate limit"},
 		{"unauthenticated", func(c *Config) {
 			c.Identity = fakeIdentity{identity.Snapshot{Login: "phillipgreenii", Unauthenticated: true, AuthError: "bad credentials"}}
-		}, Degraded, 2, "unauthenticated: unauthenticated: bad credentials"},
+		}, Degraded, 5, "unauthenticated: unauthenticated: bad credentials"},
 		{"a configured query with a last_error", func(c *Config) {
 			q := okQueries()
 			row := q["team"]
 			row.LastError = "search failed: HTTP 502"
 			q["team"] = row
 			c.Queries = q
-		}, Degraded, 2, "query team last_error: search failed: HTTP 502"},
+		}, Degraded, 5, "query team last_error: search failed: HTTP 502"},
 		{"the viewer was never resolved and refresh fails", func(c *Config) {
 			c.Identity = fakeIdentity{identity.Snapshot{LastError: "gh: not logged in"}}
-		}, Degraded, 2, "viewer not resolved: gh: not logged in"},
+		}, Degraded, 5, "viewer not resolved: gh: not logged in"},
 		{"the viewer is not resolved yet (a fresh start)", func(c *Config) { c.Identity = fakeIdentity{identity.Snapshot{}} }, Healthy, 0, ""},
 		{"an overdue queue and a missing store are reported, not judged", func(c *Config) {
 			st := queueState()
@@ -284,8 +284,8 @@ func TestHealthRule(t *testing.T) {
 			}
 		})
 	}
-	if Down.ExitCode() != 3 || Degraded.ExitCode() != 2 || Healthy.ExitCode() != 0 {
-		t.Error("exit codes are 0 healthy, 2 degraded, 3 down (INV-EXIT-1)")
+	if Down.ExitCode() != 3 || Degraded.ExitCode() != 5 || Healthy.ExitCode() != 0 {
+		t.Error("exit codes are 0 healthy, 5 degraded, 3 down (x/exitcode)")
 	}
 }
 

@@ -60,11 +60,12 @@ Every op, on every capability, shares this shape (`INV-WIRE-1`):
   "Watching — the caller-facing `capabilities` verb and the `--watch` option on `show`").
 - **A wire-level failure's `error.code` MUST be drawn from a closed seven-value taxonomy** —
   `INV-ERR-1` below.
-- **Exit codes at this wire layer stay a plain `0`/`1`** (`0` the op ran and produced a
-  well-formed envelope with `result` set; `1` anything else, including a malformed request, a
-  crash, or a well-formed `error` envelope). Classification of _what_ went wrong lives entirely in
-  the JSON `error.code`, never in a wider exit-code scheme at this layer — that richer
-  classification is `INTF-CLI`'s own, a separate layer (`INV-EXIT-1`).
+- **Exit codes at this wire layer are `0` on success and otherwise the shared exit code
+  (`x/exitcode`) of the `error.code`** (`not_found` 4, `unauthenticated` 8, `unavailable` 3,
+  `unknown_op` 20 app-specific, `version_mismatch` 11, `invalid_argument` and
+  `query_not_recognized` 2); `1` stays for a failure with no classifiable error (a failed response
+  write). The JSON `error.code` remains the contract; the exit code never disagrees with it.
+  `INTF-CLI`'s own fan-out classification is a separate layer (`INV-EXIT-1`).
 
 ```mermaid
 sequenceDiagram
@@ -1142,7 +1143,7 @@ detect`; against a daemon-backed backend also `pr explain`, `ci explain`,
   fan-out queries its backends concurrently and still reports them in registration order
   (`INV-FANOUT-1`); the id-keyed try-each resolution above is sequential by design. These are
   pg-connector's **own** CLI exit codes, a layer distinct from — and never built from —
-  `INTF-WIRE`'s plain `0`/`1`.
+  `INTF-WIRE`'s per-error exit codes.
 - **Output mode.** `--output` defaults to `json` — the same stable, machine-readable envelope
   pg-connector has always printed, so an existing JSON-consuming script keeps working unchanged
   with no flag added. `--output human` renders the already-decoded typed result as readable text
@@ -1327,7 +1328,5 @@ status, version, truncated}` shape with no `reason` field, unlike `list`'s `sour
   reconciled by each backend's own unit tests against the shared `pkg/schema`/`pkg/provider`
   contracts it imports, not by a verbatim peer cross-check. No dedicated conformance suite exists
   yet for `INTF-WIRE` itself — tracked in the [README](README.md)'s realization-gap register.
-- **Open questions** (tracked in [journeys](journeys.md)): `OQ-EXIT-1` (whether `INTF-WIRE`'s
-  plain `0`/`1` wire-level exit codes should widen to satisfy this workspace's own exit-code
-  convention that a branchable meaning uses a distinct code ≥ 2, or stay as designed because
-  classification already lives in the JSON body).
+- **Open questions** (tracked in [journeys](journeys.md)): `OQ-EXIT-1` (settled: `INTF-WIRE`'s
+  wire-level exit codes widened to the shared `x/exitcode` values).
