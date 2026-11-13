@@ -44,6 +44,10 @@ type Cache struct {
 	FetchRepoLabel func(cwd string) (string, bool)
 	PRBackend      func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
 	PRPrune        func(live map[string]bool)
+
+	// SubshellTTL bounds how long a transcript-less session's subshell count is
+	// reused. New sets SubshellTTLDefault (5 s); 0 disables the cache.
+	SubshellTTL time.Duration
 }
 
 // UnknownProbeMin and UnknownProbeMax bound the exponential backoff between
@@ -70,6 +74,10 @@ type sessionNode struct {
 	subMtime      time.Time
 	subCount      int
 	subValid      bool
+	// TTL cache for transcript-less sessions (path == "").
+	subTTLAt    time.Time
+	subTTLCount int
+	subTTLValid bool
 }
 
 // cwdNode holds the workspace-lifecycle lookups for one cwd.
@@ -92,6 +100,8 @@ func New(now func() time.Time) *Cache {
 		bySession:  map[string]*sessionNode{},
 		byCwd:      map[string]*cwdNode{},
 		prLiveKeys: map[string]bool{},
+
+		SubshellTTL: SubshellTTLDefault,
 	}
 }
 
