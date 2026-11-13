@@ -29,10 +29,10 @@ pg-origin-guard proxy --realm R -- CMD ARGS...
 | Code | Meaning                                                                                                       |
 | ---- | ------------------------------------------------------------------------------------------------------------- |
 | 0    | available (`check`), or CMD's own status (`proxy`)                                                            |
-| 75   | unavailable or refused; the reason is in the output (a caller MUST NOT count it as a failure of its own work) |
-| 64   | usage error                                                                                                   |
-| 78   | config error                                                                                                  |
-| 70   | internal fault                                                                                                |
+| 3    | unavailable or refused; the reason is in the output (a caller MUST NOT count it as a failure of its own work) |
+| 2    | usage error                                                                                                   |
+| 7    | config error                                                                                                  |
+| 1    | internal fault (carries no branchable meaning)                                                                |
 
 Only 0 means go ahead. Reasons: `ok`, `ignored`, `cert-expired`, `cert-missing`, `agent-unreachable`,
 `no-human`, `backoff`, `attempting`, `auth-rejected`, `network`, `timeout`, `unknown`, `mount-missing`.
@@ -66,7 +66,7 @@ attempt_timeout = "3m"
 backoff = ["5m", "10m", "30m"]
 ```
 
-Unknown keys, a bad realm name (lowercase letters, digits, `_`, `-`) and out-of-range values exit 78.
+Unknown keys, a bad realm name (lowercase letters, digits, `_`, `-`) and out-of-range values exit 7.
 
 ## State layout
 

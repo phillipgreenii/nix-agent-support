@@ -14,15 +14,17 @@ import (
 	"time"
 )
 
-// Exit codes of the CLI. A caller MUST treat only ExitOK as "go ahead" and
-// MUST NOT count ExitUnavailable as a failure of its own work. Exit 1 is
-// reserved.
+// Exit codes of the CLI, the shared codes of the workspace x/exitcode
+// package (the pinned module cannot import it offline, so each literal equals
+// exitcode.<Name> and a test pins the values). A caller MUST treat only
+// ExitOK as "go ahead" and MUST NOT count ExitUnavailable as a failure of its
+// own work. ExitInternal (1) carries no branchable meaning.
 const (
-	ExitOK          = 0
-	ExitUnavailable = 75
-	ExitUsage       = 64
-	ExitConfig      = 78
-	ExitInternal    = 70
+	ExitOK          = 0 // exitcode.OK
+	ExitInternal    = 1 // exitcode.Error
+	ExitUsage       = 2 // exitcode.Usage
+	ExitUnavailable = 3 // exitcode.Unavailable
+	ExitConfig      = 7 // exitcode.Config
 )
 
 // Reason is the closed set of verdict reasons.

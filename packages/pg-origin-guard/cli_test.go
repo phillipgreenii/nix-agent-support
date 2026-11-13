@@ -64,7 +64,7 @@ func TestCLIExitCodes(t *testing.T) {
 		args []string
 		want int
 	}{
-		{"no command", nil, ExitUsage},
+		{"no command", nil, 2},
 		{"unknown command", []string{"bogus"}, ExitUsage},
 		{"help", []string{"help"}, ExitOK},
 		{"check available", []string{"check", "--realm", "zr"}, ExitOK},
@@ -86,16 +86,16 @@ func TestCLIExitCodes(t *testing.T) {
 	}
 }
 
-func TestCLICheckUnavailableIs75(t *testing.T) {
+func TestCLICheckUnavailableIs3(t *testing.T) {
 	r := newCLIRig(t, cliCfg)
 	r.agent["/env.sock"] = nil
-	if got := r.run("check", "--realm", "zr"); got != ExitUnavailable {
+	if got := r.run("check", "--realm", "zr"); got != 3 {
 		t.Fatalf("exit = %d", got)
 	}
 	if !strings.Contains(r.out.String(), "unavailable realm=zr reason=cert-missing") {
 		t.Fatalf("out = %q", r.out.String())
 	}
-	if got := r.run("check", "--realm", "zr", "--json"); got != ExitUnavailable {
+	if got := r.run("check", "--realm", "zr", "--json"); got != 3 {
 		t.Fatalf("json exit = %d", got)
 	}
 	var res resultJSON
@@ -104,9 +104,9 @@ func TestCLICheckUnavailableIs75(t *testing.T) {
 	}
 }
 
-func TestCLIConfigErrorIs78(t *testing.T) {
+func TestCLIConfigErrorIs7(t *testing.T) {
 	r := newCLIRig(t, "[realm.zr\n")
-	if got := r.run("check", "--realm", "zr"); got != ExitConfig {
+	if got := r.run("check", "--realm", "zr"); got != 7 {
 		t.Fatalf("exit = %d", got)
 	}
 }
@@ -126,7 +126,7 @@ func TestCLIIgnoreAndUnignore(t *testing.T) {
 	if got := r.run("unignore", "zr"); got != ExitOK {
 		t.Fatal("unignore")
 	}
-	if got := r.run("check", "--realm", "zr"); got != ExitUnavailable {
+	if got := r.run("check", "--realm", "zr"); got != 3 {
 		t.Fatalf("exit after unignore = %d", got)
 	}
 }
@@ -154,7 +154,7 @@ func TestCLIProxyRunsThroughGuard(t *testing.T) {
 	r := newCLIRig(t, cliCfg)
 	r.agent["/env.sock"] = nil
 	r.d.Presence = fakePresence{state: PresenceAsleep}
-	if got := r.run("proxy", "--realm", "zr", "--", "step", "ssh"); got != ExitUnavailable {
+	if got := r.run("proxy", "--realm", "zr", "--", "step", "ssh"); got != 3 {
 		t.Fatalf("exit = %d", got)
 	}
 	if got := r.errb.String(); got != "pg-origin-guard: refused (no-human)\n" {

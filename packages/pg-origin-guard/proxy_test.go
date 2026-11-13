@@ -326,7 +326,7 @@ func TestProxyStartupFailuresOpenBreakerAndTrial(t *testing.T) {
 		t.Fatalf("trial caller must run, exit = %d stderr=%q st=%+v", got, r.stderr.String(), st)
 	}
 	n := r.spawner.count()
-	if got := result(t, r.run()); got != ExitUnavailable {
+	if got := result(t, r.run()); got != 3 {
 		t.Fatalf("second caller must be refused, exit = %d", got)
 	}
 	if r.spawner.count() != n {
@@ -385,7 +385,7 @@ func TestProxyTerminalLessAsleepRefusedWithoutSpawning(t *testing.T) {
 		r := newProxyRig(t)
 		r.expire()
 		r.pres.state = state
-		if got := result(t, r.run()); got != ExitUnavailable {
+		if got := result(t, r.run()); got != 3 {
 			t.Fatalf("%s: exit = %d", state, got)
 		}
 		if r.spawner.count() != 0 {
@@ -412,7 +412,7 @@ func TestProxyTerminalLessPresentRunsInOwnGroupUnderTimeout(t *testing.T) {
 	}
 
 	// a second caller sees the login in flight
-	if got := result(t, r.run()); got != ExitUnavailable {
+	if got := result(t, r.run()); got != 3 {
 		t.Fatalf("second caller exit = %d", got)
 	}
 	if want := "refused (attempting)"; !bytes.Contains([]byte(r.stderr.String()), []byte(want)) {
@@ -440,7 +440,7 @@ func TestProxyTerminalLessPresentRunsInOwnGroupUnderTimeout(t *testing.T) {
 	}
 
 	// within backoff a terminal-less caller is refused, a terminal one is not
-	if got := result(t, r.run()); got != ExitUnavailable {
+	if got := result(t, r.run()); got != 3 {
 		t.Fatalf("backoff exit = %d", got)
 	}
 	if want := "refused (backoff)"; !bytes.Contains([]byte(r.stderr.String()), []byte(want)) {

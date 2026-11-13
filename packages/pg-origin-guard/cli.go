@@ -56,7 +56,7 @@ const usageText = `usage: pg-origin-guard <command>
   unignore REALM
   proxy --realm R -- CMD ARGS...
 
-exit: 0 available, 75 unavailable or refused, 64 usage, 78 config, 70 internal
+exit: 0 available, 3 unavailable or refused, 2 usage, 7 config, 1 internal
 `
 
 // RunCLI runs one command line (args without the program name) and returns

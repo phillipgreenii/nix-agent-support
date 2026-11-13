@@ -143,12 +143,14 @@ func TestLoadReadsFile(t *testing.T) {
 func TestExitCodesAreDistinct(t *testing.T) {
 	seen := map[int]bool{}
 	for _, c := range []int{ExitOK, ExitUnavailable, ExitUsage, ExitConfig, ExitInternal} {
-		if seen[c] || c == 1 {
-			t.Errorf("exit code %d duplicated or reserved", c)
+		if seen[c] {
+			t.Errorf("exit code %d duplicated", c)
 		}
 		seen[c] = true
 	}
-	if ExitUnavailable != 75 || ExitInternal != 70 {
-		t.Error("75 (refused) and 70 (fault) must stay separate")
+	// Literal values on purpose: these equal the shared x/exitcode codes.
+	if ExitOK != 0 || ExitInternal != 1 || ExitUsage != 2 || ExitUnavailable != 3 || ExitConfig != 7 {
+		t.Errorf("exit codes = %d %d %d %d %d, want 0 1 2 3 7",
+			ExitOK, ExitInternal, ExitUsage, ExitUnavailable, ExitConfig)
 	}
 }

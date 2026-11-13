@@ -49,13 +49,13 @@ flowchart TD
     K -- no --> C{"cert in agent valid now?"}
     C -- valid --> B{"breaker open and caller has no terminal?"}
     B -- no --> RUN["run CMD, record startup outcome"]
-    B -- yes --> FF1["exit 75: refused (network / timeout / unknown)"]
+    B -- yes --> FF1["exit 3: refused (network / timeout / unknown)"]
     C -- "invalid: cert-expired / cert-missing / agent-unreachable" --> T{"caller has a terminal?"}
     T -- yes --> L1["wait for realm login lock (status line, 30 s bound, then preempt); run CMD with no timeout"]
     T -- no --> P{"presence: asleep or away?"}
-    P -- yes --> FF2["exit 75: refused (no-human), no window"]
+    P -- yes --> FF2["exit 3: refused (no-human), no window"]
     P -- "present, idle, or unknown" --> L2{"login lock free and backoff elapsed?"}
-    L2 -- no --> FF3["exit 75: refused (backoff or attempting)"]
+    L2 -- no --> FF3["exit 3: refused (backoff or attempting)"]
     L2 -- yes --> L3["take lock; run CMD in its own process group under attempt timeout"]
 ```
 
@@ -72,7 +72,7 @@ Rules (RFC 2119):
   window is `cert-expired`. Any user certificate valid now counts (no principal matching in v1).
 - **W2** `caller-has-terminal` is true when the wrapper's stderr is a terminal OR `/dev/tty` opens. Such a
   caller is human-initiated: it MUST NOT be refused for presence, backoff or an open breaker.
-- **W3** A caller without a terminal and with an invalid cert MUST be refused (exit 75) only when presence says
+- **W3** A caller without a terminal and with an invalid cert MUST be refused (exit 3) only when presence says
   `asleep` or `away`. `present`, `idle`, and a missing, stale (older than `max(60 s, 2 x the writer's
 refreshSeconds)`), unparsable, symlinked, foreign-owned or group/world-writable presence file all mean
   "assume human".
@@ -104,7 +104,7 @@ refreshSeconds)`), unparsable, symlinked, foreign-owned or group/world-writable 
 - **W9** Breaker (startup failures only): with a valid cert, `failure_threshold` (default 2) consecutive
   non-auth startup failures open the realm for `open_duration` (default 60 s); during it terminal-less callers
   are refused and one caller per window is let through as a trial; the first `ok` closes it.
-- **W10** The wrapper MUST pass CMD's exit status through unchanged, except its own refusals (exit 75, with the
+- **W10** The wrapper MUST pass CMD's exit status through unchanged, except its own refusals (exit 3, with the
   stderr line `pg-origin-guard: refused (<reason>)`) and faults (it runs CMD unchanged and emits `guard_fault`).
   The refusal token MUST be added to the shared failure-signature table as its own signature, so the handler
   never classifies a refusal as a network failure.
@@ -136,9 +136,16 @@ wrapped command), `Clock`, `StateStore`, `AgentDialer`, `PresenceSource`, `Event
 
 CLI: `check (--realm R | --remote URL | --repo PATH) [--json]`; `status [--json]`; `ignore REALM` and
 `unignore REALM` (marker file; unknown realm is a usage error); `proxy --realm R -- CMD ARGS...`. Exit codes:
-`0` available; `75` unavailable or refused (reason in the output); `64` usage; `78` config; `70` internal
-fault; exit 1 reserved. A caller MUST treat only `0` as "go ahead" and MUST NOT count `75` as a failure of its
-own work.
+`0` available; `3` unavailable or refused (reason in the output); `2` usage; `7` config; `1` internal
+fault (no branchable meaning). These are the shared x/exitcode codes. A caller MUST treat only `0` as "go
+ahead" and MUST NOT count `3` as a failure of its own work.
+
+Decision (ssh ProxyCommand wrapper): `proxy` relays CMD's own exit status (W10), so a refusal exit `3`
+collides with a wrapped command that itself exits `3`. The collision is accepted: the exit status alone cannot
+distinguish them. From `proxy` exit `3` a caller can conclude only "either the guard refused or CMD exited 3";
+it cannot conclude that CMD never ran. To tell them apart it MUST read stderr for the
+`pg-origin-guard: refused (<reason>)` line (or use `check`, which never runs CMD). Exit `0` still means CMD ran
+and succeeded. The guard's own usage, config and fault codes (`2`, `7`, `1`) collide with CMD's the same way.
 
 Reasons (closed set): `ok`, `ignored`, `cert-expired`, `cert-missing`, `agent-unreachable`, `no-human`,
 `backoff`, `attempting`, `auth-rejected`, `network`, `timeout`, `unknown`, `mount-missing`.
@@ -222,7 +229,7 @@ unparsable, symlink, foreign owner, group-writable); an in-process agent from `g
 holding a real certificate with expiry driven by the injected clock; terminal detection through an `IsTTY`
 seam; state races between goroutines on real `flock`; corrupt state; redaction (a fake step printing a login
 URL with `state`, `code_challenge` and `code`; a credential split at the 300-byte boundary); exit-code
-separation (75 versus 70); event pruning by date; heartbeat timing; the stale-"attempting" case.
+separation (3 versus 1); event pruning by date; heartbeat timing; the stale-"attempting" case.
 
 Integration tier (build tag `integration`, its own nix check, never in the unit gate): the real OpenSSH
 `ssh-agent` and `ssh-keygen` with a throwaway CA in a temp dir (no network); the real `proxy` binary under real

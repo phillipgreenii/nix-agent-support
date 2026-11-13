@@ -60,7 +60,7 @@ let
   configUnchecked = tomlFormat.generate "pg-origin-guard-config-unchecked.toml" settings;
 
   # Validated at BUILD time by the package's own config loader: `status` loads
-  # the config first and exits 78 on a bad one (any other exit means it loaded).
+  # the config first and exits 7 on a bad one (any other exit means it loaded).
   # HOME and the state base point at a scratch dir so nothing real is read.
   configFile =
     pkgs.runCommand "pg-origin-guard-config.toml"
@@ -73,7 +73,7 @@ let
         cp ${configUnchecked} "$XDG_CONFIG_HOME/pg-origin-guard/config.toml"
         rc=0
         pg-origin-guard status >out.txt 2>&1 || rc=$?
-        if [ "$rc" = 78 ]; then
+        if [ "" = 7 ]; then
           echo "pg-origin-guard config rejected:" >&2
           cat out.txt >&2
           exit 1

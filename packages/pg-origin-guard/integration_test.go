@@ -455,7 +455,7 @@ func TestLoginLockRaceAdmitsExactlyOneAttempt(t *testing.T) {
 	}
 	refused := 0
 	for _, c := range codes {
-		if c == ExitUnavailable {
+		if c == 3 {
 			refused++
 		}
 	}
