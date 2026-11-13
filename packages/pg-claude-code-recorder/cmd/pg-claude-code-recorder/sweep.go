@@ -29,7 +29,7 @@ func (a *app) sweep(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var ans serve.SweepAnswer
 	if err := cl.Post(a.ctx, "sweep", serve.SweepRequest{Force: true}, &ans); err != nil {

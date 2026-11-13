@@ -493,11 +493,12 @@ in
             # The whole command; the config's store path carries the config hash,
             # so a changed config or binary changes the job and restarts it.
             #
-            # `serve` exits 8 (refused) with a schema_rebuild_required event when
+            # `serve` exits 20 (schema_rebuild_required, an app code outside the
+            # shared range so a bad config file, Config 7, is NOT swallowed) with a schema_rebuild_required event when
             # index.db has an older schema than the binary needs; only an operator
             # `pg-claude-code-recorder rebuild` clears that, so restarting it is a
             # loop. launchd's KeepAlive dictionary cannot key on one exit code, so
-            # the script turns exit 8 into exit 0 and keepAlive restarts only after
+            # the script turns exit 20 into exit 0 and keepAlive restarts only after
             # an unsuccessful exit. SIGTERM and SIGINT are forwarded to the daemon
             # (it exits 0 on them, as before). After the operator's rebuild, start
             # the job again (`launchctl kickstart gui/$(id -u)/<label>`).
@@ -512,7 +513,7 @@ in
                 rc=0
                 wait "$pid" || rc=$?
               fi
-              if [ "$rc" -eq 8 ]; then
+              if [ "$rc" -eq 20 ]; then
                 exit 0
               fi
               exit "$rc"

@@ -24,7 +24,7 @@ Usage:
   pg-claude-code-recorder where    <session> [--json]   its stage, blocked_by, next eligible time and the command that clears it
   pg-claude-code-recorder remove   [<session>...] [--dry-run] [--yes] [--all-eligible] [--json]
   pg-claude-code-recorder extract  <session> [--to DIR] [--json]   restore a removed Conversation (claude --resume works)
-  pg-claude-code-recorder doctor   [--json]   compare every copy with its Claude file by full hash (rolling slices of doctor.bytes_per_slice; a run during a cycle completes it); exit 9 on a mismatch (notices such as out_of_scope_after_cleanup, copy_unrecoverable and copy_restored_from_source are non-critical and do not set it)
+  pg-claude-code-recorder doctor   [--json]   compare every copy with its Claude file by full hash (rolling slices of doctor.bytes_per_slice; a run during a cycle completes it); exit 11 on a mismatch (notices such as out_of_scope_after_cleanup, copy_unrecoverable and copy_restored_from_source are non-critical and do not set it)
   pg-claude-code-recorder sweep    --force [--wait] [--json]   empty the skip cache and the seen table and ingest every file now (the full verification; it never runs on a timer)
   pg-claude-code-recorder version
 
@@ -83,10 +83,10 @@ automatic removal later: the daemon-down alert is registered, doctor has run cle
 daemon, doctor.interval), pa-monitor sessions and ccpool resume have moved to the recorder, the state directory
 is backed up, and remove --dry-run prints what would go and how many GB. remove acts on the named Conversations
 or, with --all-eligible, on every settled one older than remove.after; it never bypasses the age. Without --yes
-it asks when run interactively and exits 2 when not. extract refuses (exit 8) when the session id exists under any
-project directory or a live Process holds it; --to DIR never touches the Claude directory.
+it asks when run interactively and exits 2 when not. extract refuses when the session id exists under any
+project directory (exit 11) or a live Process holds it (exit 9); --to DIR never touches the Claude directory.
 A cursor is <epoch>:<sequence>. feed exits 6 when its wait ended with nothing (the answer's next_cursor
-still advances), and 7 (cursor_expired) when the cursor is from an old epoch, below the retention floor or
+still advances), and 11 (cursor_expired) when the cursor is from an old epoch, below the retention floor or
 beyond the head: take a snapshot and tail from its cursor. Delivery is at least once; de-duplicate by record id.
 
 Config keys for the doctor, WAL and read pool: doctor.bytes_per_slice (256 MiB of the copy per slice; the budget counts
@@ -110,10 +110,12 @@ const exitTable = `  0  success
   4  not found
   5  degraded or behind (the answer is partial)
   6  a wait timed out
-  7  cursor expired
-  8  refused: a precondition failed (removal disabled, the extract target exists or a live Process holds it, or serve found an older index.db schema and needs the rebuild command)
-  9  doctor found a mismatch
+  7  config error: the config file could not be loaded or is invalid
+  8  denied: the operation is switched off (removal disabled)
+  9  busy: a live Process holds the session (extract), or the daemon answered busy
   10 serve hard-exited because shutdown outlasted its 8 s deadline (shutdown_overrun in the log; the launch agent restarts it)
+  11 conflict: the cursor expired (feed), the extract target exists, or doctor found a mismatch
+  20 serve refused to start because index.db has an older schema and needs the rebuild command (schema_rebuild_required; the launch agent does not restart it)
 `
 
 const stageTable = `

@@ -278,8 +278,11 @@ below 10% once the parser and feed run (re-measure, not derived).
 
 ### Exit codes and errors
 
-0 success, 1 unexpected, 2 usage, 3 daemon offline, 4 not found, 5 degraded or behind, 6 wait
-timed out, 7 cursor expired, 8 refused, 9 doctor mismatch (`--help` prints the table). Without
+The codes are the shared ones of `x/exitcode` plus one app code: 0 success, 1 unexpected, 2 usage,
+3 daemon offline, 4 not found, 5 degraded or behind, 6 wait timed out, 7 config error (a config file
+that does not load), 8 denied (removal disabled), 9 busy (a live Process holds the session), 10 shutdown
+overrun, 11 conflict (cursor expired, extract target exists, doctor mismatch), 20 schema rebuild
+required (`serve` only) (`--help` prints the table). Without
 `--json` stderr gets `error: <name>` and one actionable line; with `--json` one
 `{"error","exit","message"}` object. `status` always answers: offline it prints the socket path,
 launch agent state (`launchctl list <label>`, label from `PG_CLAUDE_CODE_RECORDER_LAUNCH_LABEL`,
@@ -291,7 +294,7 @@ state directory size read from disk, and exits 3.
 Decision: when `index.db` carries an older `schema_version` than the binary needs, `serve` refuses to start
 (option b) rather than rebuilding on its own (option a). It logs one `schema_rebuild_required` error event
 (`found`, `known`, `command`), prints `error: schema_rebuild_required` with the rebuild steps, leaves `index.db`
-untouched and exits 8 (refused). A newer `schema_version` and other open failures keep the generic `open_failed`
+untouched and exits 20 (an app-specific code, not the shared Config 7, so the launcher can tell it from a bad config file). A newer `schema_version` and other open failures keep the generic `open_failed`
 path.
 
 Rationale: a full rebuild is not bounded in any useful way (4758 s for 17.0M records on 2026-11-04, and it grows
@@ -303,7 +306,7 @@ and is safe to run (`index.db.pre-rebuild` keeps the old file).
 Operator steps: stop the launch agent, run `pg-claude-code-recorder rebuild`, start the launch agent
 (`launchctl kickstart gui/$(id -u)/com.phillipg.pg-claude-code-recorder`).
 
-Launch agent: the agent's script runs `serve` and turns exit 8 into exit 0, and its `KeepAlive` is
+Launch agent: the agent's script runs `serve` and turns exit 20 into exit 0, and its `KeepAlive` is
 `{ SuccessfulExit = false; }` (launchd's dictionary cannot key on one exit code), so a refused start runs once
 and stays stopped instead of looping, while a crash (any other non-zero exit) is still restarted. SIGTERM and
 SIGINT are forwarded to the daemon. A start after the next login or boot runs once more and refuses again until
@@ -333,7 +336,7 @@ Events in the log, in order:
 - `shutdown_done` (field `total_ms`): a clean stop; `serve` exits 0.
 - `shutdown_overrun` (error; fields `phase`, `phase_elapsed_ms`, `in_flight`, `total_ms`): the deadline passed first.
   `phase` is the step in progress and `in_flight` names the goroutines still running with their age. `serve` exits 10
-  and the launch agent restarts it (the launcher turns only exit 8 into success).
+  and the launch agent restarts it (the launcher turns only exit 20 into success).
 - `sweep_aborted`: a sweep was cut short by the stop (counters `walked`, `skipped`). Expected on a stop during a sweep.
 
 Reading a slow shutdown: find the last `shutdown_started`, then list the `shutdown_phase` lines after it; the largest
@@ -510,7 +513,7 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   answers `entries`, `next_cursor` (advanced even when nothing matched), `more` and `timed_out`.
   A reset is delivered to every feed whose filter could match any record of that file (judged from the
   file's source and record types).
-- **cursor_expired** (HTTP 410, exit 7) carries `cursor`, the head to resync from: the cursor is from
+- **cursor_expired** (HTTP 410, exit 11) carries `cursor`, the head to resync from: the cursor is from
   an old epoch (a rebuild bumps it), older than `feed.retention` (default 14 days of commit time, kept
   as `feed_marks` rows written with each parse commit), or beyond the head. Resync with `snapshot`:
   pages of the state at a cursor (pass the first answer's `cursor` as `at` and `next_page` as `page`),
@@ -723,7 +726,7 @@ pg-claude-code-recorder remove --dry-run                 # works while removal i
 pg-claude-code-recorder where <session>                  # stage, blocked_by, next_eligible, clear
 pg-claude-code-recorder held [--retry]                   # reason codes with a remedy line each
 pg-claude-code-recorder extract <session> [--to DIR]     # byte-exact, mtime now; prints the claude --resume line
-pg-claude-code-recorder doctor                           # exit 9 on a mismatch; writes doctor.json
+pg-claude-code-recorder doctor                           # exit 11 on a mismatch; writes doctor.json
 ```
 
 ### Doctor
@@ -741,7 +744,7 @@ selects the old synchronous doctor.
 Non-critical notices. A settled snapshot file whose stored bytes are missing (`store: not found`) is not a mismatch.
 Doctor decides per file, and lists it under `notices` in `doctor.json` (and in the `--json` answer) instead of
 `mismatches`; a notice does not count in `mismatch_files`, does not raise the `doctor-mismatch` alert and does not make
-the CLI exit 9:
+the CLI exit 11:
 
 - `out_of_scope_after_cleanup`: the current ingest allowlist (`scope.Match`) rejects the path. A store cleanup removed
   the stored copy on purpose, so doctor never stores it again (that would re-add data the cleanup removed).

@@ -286,9 +286,9 @@ let
     command = hasInfixCtx "${binary} serve --config ${(opts on).configFile} --pprof &\n" e.script;
     commandWithoutPprof = hasInfixCtx "${binary} serve --config ${(opts onNoPprof).configFile} &\n" (entryOf agent onNoPprof)
     .script;
-    # exit 8 (schema_rebuild_required) is turned into exit 0 by the script, so KeepAlive restarts only after an unsuccessful exit
+    # exit 20 (schema_rebuild_required) is turned into exit 0 by the script, so KeepAlive restarts only after an unsuccessful exit
     keepAliveOnlyAfterFailure = e.keepAlive == { SuccessfulExit = false; };
-    scriptTurnsRefusalIntoCleanExit = hasInfixCtx "if [ \"$rc\" -eq 8 ]; then\n  exit 0\nfi\nexit \"$rc\"" e.script;
+    scriptTurnsRefusalIntoCleanExit = hasInfixCtx "if [ \"$rc\" -eq 20 ]; then\n  exit 0\nfi\nexit \"$rc\"" e.script;
     runAtLoad = e.runAtLoad == true;
     noExecPath = e.execPath == null;
     manageLogsDefault = e.manageLogs.enable == true;

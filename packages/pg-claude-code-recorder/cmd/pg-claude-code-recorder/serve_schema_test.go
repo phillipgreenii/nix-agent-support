@@ -16,7 +16,7 @@ import (
 )
 
 // serve on a state directory whose index.db has an older schema_version refuses
-// to start (it does not begin a rebuild that runs for hours): exit 8, a
+// to start (it does not begin a rebuild that runs for hours): exit 20, a
 // schema_rebuild_required log event and a message naming the rebuild command,
 // and index.db is left untouched.
 func TestServeRefusesAnOlderIndexSchemaAndNamesTheRebuildCommand(t *testing.T) {
@@ -44,8 +44,8 @@ func TestServeRefusesAnOlderIndexSchemaAndNamesTheRebuildCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, _, errw := testApp(map[string]string{config.EnvConfig: cfgPath})
-	if code := a.run([]string{"serve"}); code != wire.ExitRefused {
-		t.Fatalf("exit %d, want %d: %s", code, wire.ExitRefused, errw.String())
+	if code := a.run([]string{"serve"}); code != wire.ExitSchemaRebuild {
+		t.Fatalf("exit %d, want %d: %s", code, wire.ExitSchemaRebuild, errw.String())
 	}
 	var ev map[string]any
 	for _, m := range jsonLogLines(t, errw.String()) {

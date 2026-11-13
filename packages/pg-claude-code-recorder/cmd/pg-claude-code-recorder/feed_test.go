@@ -134,7 +134,7 @@ func TestSnapshotAllFollowsEveryPageAndRawPrintsTheBytes(t *testing.T) {
 func TestRebuildRefusesWhileADaemonAnswers(t *testing.T) {
 	sock, _ := feedDaemon(t, func(int) (any, *wire.Error) { return map[string]any{}, nil })
 	a, _, errw := testApp(nil)
-	if code := a.run([]string{"rebuild", "--socket", sock}); code != wire.ExitDegraded || !strings.Contains(errw.String(), "stop it first") {
+	if code := a.run([]string{"rebuild", "--socket", sock}); code != wire.ExitBusy || !strings.Contains(errw.String(), "stop it first") {
 		t.Fatalf("exit %d %q", code, errw.String())
 	}
 }

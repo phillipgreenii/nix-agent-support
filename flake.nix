@@ -19049,14 +19049,14 @@
                     wait "$pid" || rc=$?
                     [ "$rc" = 0 ] || { echo "SIGTERM exit = $rc" >&2; cat "$w/daemon.out" >&2; exit 1; }
 
-                    # ---- the refusal: an older index.db schema makes `serve` exit 8
+                    # ---- the refusal: an older index.db schema makes `serve` exit 20
                     # (schema_rebuild_required); the rendered command must then exit 0 so
                     # KeepAlive = { SuccessfulExit = false; } does not restart it
                     sqlite3 "$w/state/index.db" "UPDATE meta SET value = CAST(value AS INTEGER) - 1 WHERE key = 'schema_version'" \
                       || { echo "cannot age the index.db schema" >&2; ls -R "$w/state" >&2; exit 1; }
                     rc=0
                     ( cd / && exec env -i "''${envs[@]}" ${bin} serve --config "$w/config.toml" ) >"$w/refused.out" 2>&1 || rc=$?
-                    [ "$rc" = 8 ] || { echo "serve on an older schema exited $rc, want 8:" >&2; cat "$w/refused.out" >&2; exit 1; }
+                    [ "$rc" = 20 ] || { echo "serve on an older schema exited $rc, want 20:" >&2; cat "$w/refused.out" >&2; exit 1; }
                     grep -q schema_rebuild_required "$w/refused.out" \
                       || { echo "no schema_rebuild_required event:" >&2; cat "$w/refused.out" >&2; exit 1; }
                     rc=0

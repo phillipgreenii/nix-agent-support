@@ -141,13 +141,13 @@ func TestWaitCaughtUpFollowsTheFirstRunAndTimesOutWithExit6(t *testing.T) {
 	}
 }
 
-func TestBadFlagIsAUsageErrorAndBadConfigToo(t *testing.T) {
+func TestBadFlagIsAUsageErrorAndBadConfigIsConfigError(t *testing.T) {
 	a, _, errw := testApp(nil)
 	if code := a.run([]string{"status", "--nope"}); code != 2 || !strings.HasPrefix(errw.String(), "error: usage") {
 		t.Fatalf("%d %q", code, errw)
 	}
 	a, _, _ = testApp(nil)
-	if code := a.run([]string{"coverage", "--config", "/nonexistent/example.toml"}); code != 2 {
+	if code := a.run([]string{"coverage", "--config", "/nonexistent/example.toml"}); code != 7 {
 		t.Fatalf("missing explicit config: %d", code)
 	}
 }
@@ -219,5 +219,20 @@ func TestStatusAnswersFastWhenTheCrashQueriesAreSlow(t *testing.T) {
 	}
 	if st.StatusAgeS != 2 {
 		t.Fatalf("the cached figures were lost: %+v", st)
+	}
+}
+
+// A config file that does not load exits 7 (Config), not 2 (usage), from a
+// client command and from serve.
+func TestBadConfigExitsConfig(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "bad.toml")
+	if err := os.WriteFile(bad, []byte("this is = = not toml\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"status", "--config", bad}, {"serve", "--config", bad}} {
+		a, _, errw := testApp(nil)
+		if code := a.run(args); code != 7 || !strings.HasPrefix(errw.String(), "error: bad_config\n") {
+			t.Fatalf("%v: exit %d stderr %q", args, code, errw)
+		}
 	}
 }

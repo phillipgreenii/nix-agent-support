@@ -23,7 +23,7 @@ import (
 const Deadline = 8 * time.Second
 
 // ExitCode is the process exit status of a hard exit. The launcher turns only
-// exit 8 into success, so exit 10 restarts the job.
+// exit 20 into success, so exit 10 restarts the job.
 const ExitCode = wire.ExitShutdownOverrun
 
 // EvOverrun is the log event of a hard exit.

@@ -10,7 +10,7 @@ require (
 require (
 	github.com/gofrs/flock v0.13.0
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder v0.0.0-00010101000000-000000000000
-	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.22.0
@@ -23,7 +23,11 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.46.0
 )
 
-require golang.org/x/sync v0.24.0 // indirect
+require (
+	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
+	github.com/sasha-s/go-deadlock v0.3.9 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+)
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

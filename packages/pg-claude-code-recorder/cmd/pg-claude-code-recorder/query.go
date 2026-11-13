@@ -56,7 +56,7 @@ func (a *app) request(op string, args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var ans map[string]any
 	if err := cl.Post(a.ctx, op, req, &ans); err != nil {
@@ -115,7 +115,7 @@ func (a *app) find(args []string) int {
 	arg := fs.Arg(0)
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var q map[string]any
 	q1 := map[string]any{

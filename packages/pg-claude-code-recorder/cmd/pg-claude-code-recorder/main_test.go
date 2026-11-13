@@ -55,7 +55,7 @@ func TestHelpCarriesExamplesExitTableAndStageTable(t *testing.T) {
 	if code := a.run([]string{"--help"}); code != 0 {
 		t.Fatal(code)
 	}
-	for _, want := range []string{"Examples:", "status --short", "9  doctor found a mismatch", "removal_pending", "State machine:", "--client NAME"} {
+	for _, want := range []string{"Examples:", "status --short", "11 conflict", "removal_pending", "State machine:", "--client NAME"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("help lacks %q", want)
 		}

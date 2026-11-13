@@ -24,7 +24,7 @@ func (a *app) coverage(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, timeout)
 	defer cancel()

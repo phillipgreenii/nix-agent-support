@@ -92,7 +92,7 @@ func (a *app) feed(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	cl.HTTP.Timeout = wait + 30*time.Second
 	var ans map[string]any
@@ -131,7 +131,7 @@ func (a *app) snapshot(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var merged map[string]any
 	for {
@@ -197,7 +197,7 @@ func (a *app) raw(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var ans map[string]any
 	if err := cl.Post(a.ctx, "raw", req, &ans); err != nil {
@@ -235,7 +235,7 @@ func (a *app) rebuild(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var h wire.Hello
 	if cl.Do(a.ctx, "GET", "/v1/hello", nil, &h) == nil {

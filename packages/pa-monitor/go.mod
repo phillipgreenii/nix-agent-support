@@ -26,7 +26,11 @@ require (
 	modernc.org/sqlite v1.61.1
 )
 
-require golang.org/x/sync v0.24.0 // indirect
+require (
+	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
+	github.com/sasha-s/go-deadlock v0.3.9 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+)
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func TestExitForFollowsTheDocumentedMapping(t *testing.T) {
 	for name, want := range map[string]int{
 		ErrBadRequest: 2, ErrUsage: 2, ErrUnavailable: 3, ErrDaemonOffline: 3, ErrNotFound: 4,
-		ErrBusy: 5, ErrBehind: 5, ErrWaitTimeout: 6, ErrQueryTimeout: 6, ErrCursorExpired: 7,
-		ErrRemovalDisabled: 8, ErrTargetExists: 8, ErrHeldByLive: 8, ErrSchemaRebuildRequired: 8,
+		ErrBehind: 5, ErrWaitTimeout: 6, ErrQueryTimeout: 6, ErrBadConfig: 7,
+		ErrRemovalDisabled: 8, ErrBusy: 9, ErrHeldByLive: 9,
+		ErrCursorExpired: 11, ErrTargetExists: 11, ErrSchemaRebuildRequired: 20,
 		ErrInternal: 1, "something_new": 1,
 	} {
 		if got := ExitFor(name); got != want {
@@ -90,5 +93,24 @@ func TestFromErrMapsCancelledApartFromTimeout(t *testing.T) {
 	}
 	if ExitFor(ErrCancelled) == ExitTimeout {
 		t.Fatal("cancelled must not exit like a timeout")
+	}
+}
+
+func TestExitCodesAreSharedOrAppRange(t *testing.T) {
+	if ExitMismatch != 11 || ExitCursor != 11 || ExitShutdownOverrun != 10 {
+		t.Fatalf("mismatch %d cursor %d overrun %d", ExitMismatch, ExitCursor, ExitShutdownOverrun)
+	}
+	if !exitcode.IsAppSpecific(ExitSchemaRebuild) {
+		t.Fatalf("ExitSchemaRebuild %d is outside the app range", ExitSchemaRebuild)
+	}
+	for _, name := range []string{
+		ErrBadRequest, ErrUsage, ErrUnavailable, ErrDaemonOffline, ErrNotFound, ErrBusy, ErrBehind,
+		ErrWaitTimeout, ErrQueryTimeout, ErrCursorExpired, ErrRemovalDisabled, ErrTargetExists, ErrHeldByLive,
+		ErrSchemaRebuildRequired, ErrBadConfig, ErrInternal, ErrCancelled,
+	} {
+		c := ExitFor(name)
+		if c >= 64 && c <= 78 || c == 124 || c == 126 || c == 127 || c == 255 || exitcode.IsSignal(c) {
+			t.Errorf("ExitFor(%s) = %d is reserved", name, c)
+		}
 	}
 }

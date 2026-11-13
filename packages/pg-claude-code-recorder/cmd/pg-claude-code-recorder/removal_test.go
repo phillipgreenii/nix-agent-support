@@ -219,15 +219,16 @@ func TestExtractPrintsPathsAndResumeLineAndMapsExit8(t *testing.T) {
 		t.Fatalf("--to: %d %s", code, out.String())
 	}
 	for session, name := range map[string]string{"exists": "target_exists", "live": "held_by_live_process"} {
+		wantExit := map[string]int{"target_exists": 11, "held_by_live_process": 9}[name]
 		a, _, errw := testApp(nil)
-		if code := runCLI(t, a, "extract", session, "--json", "--socket", d.sock); code != 8 {
-			t.Fatalf("%s: exit %d", name, code)
+		if code := runCLI(t, a, "extract", session, "--json", "--socket", d.sock); code != wantExit {
+			t.Fatalf("%s: exit %d, want %d", name, code, wantExit)
 		}
 		var e struct {
 			Error string `json:"error"`
 			Exit  int    `json:"exit"`
 		}
-		if err := json.Unmarshal(errw.Bytes(), &e); err != nil || e.Error != name || e.Exit != 8 {
+		if err := json.Unmarshal(errw.Bytes(), &e); err != nil || e.Error != name || e.Exit != wantExit {
 			t.Fatalf("%s: stderr %q", name, errw.String())
 		}
 	}
@@ -244,7 +245,7 @@ func TestDoctorExit9OnAMismatchAndZeroWhenClean(t *testing.T) {
 		Mismatches: []settle.DoctorMismatch{{Kind: settle.MismatchCopy, File: 1, Path: "/example/x.jsonl", Detail: "the first 9 bytes differ", Repaired: true}},
 	})
 	a, out, _ = testApp(nil)
-	if code := runCLI(t, a, "doctor", "--socket", d.sock); code != 9 || !strings.Contains(out.String(), "copy_differs_from_original") {
+	if code := runCLI(t, a, "doctor", "--socket", d.sock); code != 11 || !strings.Contains(out.String(), "copy_differs_from_original") {
 		t.Fatalf("%d %s", code, out.String())
 	}
 }

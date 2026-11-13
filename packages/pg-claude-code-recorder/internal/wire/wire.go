@@ -9,6 +9,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // ProtocolVersion is the wire protocol version reported by status and hello.
@@ -26,20 +28,35 @@ const DeadlineHeader = "X-Recorder-Deadline-Ms"
 // MinDeadline is the floor of an accepted DeadlineHeader.
 const MinDeadline = time.Second
 
-// Exit codes of the recorder command (independent of the control command's).
+// Exit codes of the recorder command: the shared codes of x/exitcode, plus one
+// app-specific code. The names stay; the values come from exitcode.
 const (
-	ExitOK         = 0
-	ExitUnexpected = 1
-	ExitUsage      = 2
-	ExitOffline    = 3
-	ExitNotFound   = 4
-	ExitDegraded   = 5
-	ExitTimeout    = 6
-	ExitCursor     = 7
-	ExitRefused    = 8
-	ExitMismatch   = 9
+	ExitOK         = exitcode.OK
+	ExitUnexpected = exitcode.Error
+	ExitUsage      = exitcode.Usage
+	ExitOffline    = exitcode.Unavailable
+	ExitNotFound   = exitcode.NotFound
+	ExitDegraded   = exitcode.Degraded
+	ExitTimeout    = exitcode.Timeout
+	// ExitConfig: the config file could not be loaded or is invalid.
+	ExitConfig = exitcode.Config
+	// ExitDenied: a precondition forbids the action (removal disabled).
+	ExitDenied = exitcode.Denied
+	// ExitBusy: the target is held by a live process, or the daemon answered busy.
+	ExitBusy = exitcode.Busy
+	// ExitConflict: the request clashes with current state (the extract target
+	// exists, a cursor is expired or beyond the head, doctor found a mismatch).
+	ExitConflict = exitcode.Conflict
+	ExitCursor   = exitcode.Conflict
+	ExitMismatch = exitcode.Conflict
 	// ExitShutdownOverrun is serve's hard exit when shutdown outlasts its deadline.
-	ExitShutdownOverrun = 10
+	ExitShutdownOverrun = exitcode.ShutdownOverrun
+	// ExitSchemaRebuild is serve's exit when index.db was written by an older
+	// schema and an operator must run rebuild. It is an app-specific code, not
+	// Config 7: the launch agent turns exactly this code into a clean exit so
+	// launchd does not restart-loop, and a real config error must still restart
+	// loudly (or at least not be swallowed as success).
+	ExitSchemaRebuild = 20
 )
 
 // Stable error names. The wire names are the daemon's; daemon_offline is the
@@ -54,13 +71,15 @@ const (
 	ErrInternal      = "internal"
 	ErrDaemonOffline = "daemon_offline"
 	ErrUsage         = "usage"
-	ErrWaitTimeout   = "wait_timeout"
+	// ErrBadConfig: the config file could not be loaded or is invalid (exit 7).
+	ErrBadConfig   = "bad_config"
+	ErrWaitTimeout = "wait_timeout"
 	// ErrQueryTimeout: a read hit the daemon deadline (query.timeout); retry, ideally narrower.
 	ErrQueryTimeout = "query_timeout"
 	// ErrCancelled: the request was cancelled (the client went away). It is not a
 	// timeout and not an internal failure.
 	ErrCancelled = "cancelled"
-	// Exit 8 preconditions.
+	// Preconditions: removal_disabled exits 8, held_by_live_process 9, target_exists 11.
 	ErrRemovalDisabled = "removal_disabled"
 	ErrTargetExists    = "target_exists"
 	ErrHeldByLive      = "held_by_live_process"
@@ -80,12 +99,18 @@ func ExitFor(name string) int {
 		return ExitOffline
 	case ErrNotFound:
 		return ExitNotFound
-	case ErrBusy, ErrBehind:
+	case ErrBehind:
 		return ExitDegraded
-	case ErrCursorExpired:
-		return ExitCursor
-	case ErrRemovalDisabled, ErrTargetExists, ErrHeldByLive, ErrSchemaRebuildRequired:
-		return ExitRefused
+	case ErrBusy, ErrHeldByLive:
+		return ExitBusy
+	case ErrCursorExpired, ErrTargetExists:
+		return ExitConflict
+	case ErrRemovalDisabled:
+		return ExitDenied
+	case ErrSchemaRebuildRequired:
+		return ExitSchemaRebuild
+	case ErrBadConfig:
+		return ExitConfig
 	}
 	return ExitUnexpected
 }

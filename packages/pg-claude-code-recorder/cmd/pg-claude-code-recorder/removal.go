@@ -40,7 +40,7 @@ func (a *app) held(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var ans serve.HeldAnswer
 	if err := cl.Post(a.ctx, "held", serve.HeldRequest{Retry: retry}, &ans); err != nil {
@@ -84,7 +84,7 @@ func (a *app) where(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	var w settle.WhereInfo
 	if err := cl.Post(a.ctx, "where", serve.WhereRequest{Session: fs.Arg(0)}, &w); err != nil {
@@ -180,7 +180,7 @@ func (a *app) remove(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	longRequest(cl)
 	var rep settle.RemoveReport
@@ -251,7 +251,7 @@ func (a *app) extract(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	longRequest(cl)
 	var res settle.ExtractResult
@@ -308,7 +308,7 @@ func (a *app) doctor(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	longRequest(cl)
 	var res settle.DoctorAnswer

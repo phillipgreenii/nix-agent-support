@@ -60,7 +60,7 @@ func (a *app) status(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	for {
 		code, caught := a.statusOnce(cfg, cl, &c, short)

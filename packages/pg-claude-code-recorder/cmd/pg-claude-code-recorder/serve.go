@@ -40,7 +40,7 @@ func (a *app) serve(args []string) int {
 	}
 	cfg, err := config.Load(path, must, a.getenv)
 	if err != nil {
-		return a.emitError(false, wire.ErrUsage, err.Error())
+		return a.emitError(false, wire.ErrBadConfig, err.Error())
 	}
 	logw := io.Writer(a.errw)
 	if cfg.LogFile != "" {

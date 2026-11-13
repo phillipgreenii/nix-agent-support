@@ -103,7 +103,7 @@ func (a *app) conversations(args []string) int {
 	q.Since = t
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	res, err := lifecycle.QueryEnded(a.ctx, cl, q)
 	if err != nil {
@@ -172,7 +172,7 @@ func (a *app) processes(args []string) int {
 	}
 	cfg, cl, err := a.resolve(&c)
 	if err != nil {
-		return a.emitError(c.jsonOut, wire.ErrUsage, err.Error())
+		return a.emitError(c.jsonOut, wire.ErrBadConfig, err.Error())
 	}
 	if pid > 0 {
 		var p lifecycle.Process
