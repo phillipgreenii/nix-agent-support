@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 const goldenDir = "../../testdata/review-item"
@@ -103,7 +104,7 @@ func TestAgentFileFilesAndReplays(t *testing.T) {
 	alt, _ := json.Marshal(doc)
 	p := filepath.Join(t.TempDir(), "alt.json")
 	_ = os.WriteFile(p, alt, 0o600)
-	if code, _, _ := run(t, "agent", "file", p, "--run", rid); code != exitcode.ValidationRejected {
+	if code, _, _ := run(t, "agent", "file", p, "--run", rid); code != appcode.Validation {
 		t.Errorf("different second batch: exit %d, want 4", code)
 	}
 }
@@ -115,7 +116,7 @@ func TestAgentFileRejectsAndFailsRunWithoutStoring(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "bad.json")
 	_ = os.WriteFile(p, []byte(bad), 0o600)
 	code, _, stderr := run(t, "agent", "file", p, "--run", strconv.FormatInt(id, 10))
-	if code != exitcode.ValidationRejected || !strings.Contains(stderr, "unknown-kind") {
+	if code != appcode.Validation || !strings.Contains(stderr, "unknown-kind") {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	if count(t, l, "topic") != 0 {
@@ -140,7 +141,7 @@ func TestAgentFileRunResolution(t *testing.T) {
 	if code, _, stderr := run(t, "agent", "file", findingsPath(), "--dry-run"); code != exitcode.OK {
 		t.Errorf("env run: exit %d %s", code, stderr)
 	}
-	if code, _, _ := run(t, "agent", "file", findingsPath(), "--run", "9999"); code != exitcode.ValidationRejected {
+	if code, _, _ := run(t, "agent", "file", findingsPath(), "--run", "9999"); code != exitcode.NotFound {
 		t.Errorf("unknown run: exit %d, want 4", code)
 	}
 }
@@ -175,7 +176,7 @@ func TestAgentFileRefusesOnIntegrityFailure(t *testing.T) {
 	_ = os.Remove(path + "-wal")
 	_ = os.Remove(path + "-shm")
 	code, _, _ := run(t, "agent", "file", findingsPath(), "--run", strconv.FormatInt(id, 10))
-	if code != exitcode.Ledger && code != exitcode.Failure {
+	if code != appcode.Ledger && code != exitcode.Error {
 		t.Fatalf("exit %d", code)
 	}
 }

@@ -5,10 +5,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/runner"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func init() { registerCommand(groupJob, newJobMaintainCmd) }
@@ -26,7 +27,7 @@ func newJobMaintainCmd() *cobra.Command {
 			}
 			l, err := ledger.Open(ctx)
 			if err != nil {
-				return ExitErrorf(exitcode.Ledger, "%v", err)
+				return ExitErrorf(appcode.Ledger, "%v", err)
 			}
 			defer func() { _ = l.Close() }()
 			d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout()}
@@ -46,7 +47,7 @@ func newJobMaintainCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "maintain step %s failed: %v\n", s.Name, s.Err)
 			}
 			if len(failed) > 0 {
-				return ExitErrorf(exitcode.Failure, "maintain: %d step(s) failed", len(failed))
+				return ExitErrorf(exitcode.Error, "maintain: %d step(s) failed", len(failed))
 			}
 			return nil
 		},

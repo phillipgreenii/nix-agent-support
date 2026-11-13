@@ -7,15 +7,15 @@ configuration check alone and nothing else.
 
 | Check       | What it proves                                                                                          | Exit on failure |
 | ----------- | ------------------------------------------------------------------------------------------------------- | --------------- |
-| `config`    | The effective configuration (built-ins merged with `config.toml`) has no validation problem.            | 4               |
-| `ledger`    | The ledger opens and `PRAGMA integrity_check` returns `ok`.                                             | 6               |
-| `providers` | Every provider command of the effective configuration is on PATH and answers `--help` (10 s).           | 7               |
-| `recorder`  | `pg-ccaudit status --json` succeeds and reports at least one indexed file.                              | 7               |
-| `ccpool`    | `ccpool` is on PATH.                                                                                    | 7               |
-| `hook`      | The approval hook approves `pg-review agent q ccaudit error-rate-by-tool`.                              | 7               |
-| `session`   | `PG_REVIEW_RUN` and `pg-review` are both visible inside a session started the way the runner starts it. | 7               |
+| `config`    | The effective configuration (built-ins merged with `config.toml`) has no validation problem.            | 7               |
+| `ledger`    | The ledger opens and `PRAGMA integrity_check` returns `ok`.                                             | 22              |
+| `providers` | Every provider command of the effective configuration is on PATH and answers `--help` (10 s).           | 23              |
+| `recorder`  | `pg-ccaudit status --json` succeeds and reports at least one indexed file.                              | 23              |
+| `ccpool`    | `ccpool` is on PATH.                                                                                    | 23              |
+| `hook`      | The approval hook approves `pg-review agent q ccaudit error-rate-by-tool`.                              | 23              |
+| `session`   | `PG_REVIEW_RUN` and `pg-review` are both visible inside a session started the way the runner starts it. | 23              |
 
-When several checks fail the highest exit code wins. A failing check never
+The exit codes are the shared config code (7) and the pg-review ledger (22) and provider (23) codes. When several checks fail the highest exit code wins. A failing check never
 stops the others.
 
 The config and providers checks use the effective configuration, so with no

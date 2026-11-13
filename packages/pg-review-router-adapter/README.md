@@ -38,14 +38,13 @@ several `TZ` values to prove it.
 
 ## Exit codes
 
-| `pg-review` exit | adapter exit | note                                        |
-| ---------------- | ------------ | ------------------------------------------- |
-| 0                | 0            |                                             |
-| 3                | 0            | skipped or already done; one log line       |
-| 5                | 0            | run lock busy; one log line                 |
-| 4, 6, 7, others  | unchanged    | the router treats them as handler errors    |
-| 9                | 1            | never passed on: the router reads 9 as busy |
-| killed by signal | 1            |                                             |
+| `pg-review` exit | adapter exit | note                                      |
+| ---------------- | ------------ | ----------------------------------------- |
+| 0                | 0            |                                           |
+| 20               | 0            | skipped or already done; one log line     |
+| 9                | 0            | run lock busy (shared Busy); one log line |
+| others           | unchanged    | the router treats them as handler errors  |
+| killed by signal | 1            |                                           |
 
 A usage error (wrong arguments, bad timestamp or window) exits 2; a missing
 `pg-review` exits 1.

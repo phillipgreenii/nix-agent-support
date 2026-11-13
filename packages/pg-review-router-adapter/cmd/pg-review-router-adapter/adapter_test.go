@@ -202,14 +202,25 @@ func TestUsageErrorsExit2(t *testing.T) {
 	}
 }
 
+// TestSkippedCodePinned pins the duplicated value of pg-review's skipped code.
+func TestSkippedCodePinned(t *testing.T) {
+	if exitSkipped != 20 || exitBusyDecline != 9 {
+		t.Errorf("exitSkipped %d, exitBusyDecline %d, want 20 and 9", exitSkipped, exitBusyDecline)
+	}
+}
+
 func TestExitCodeMapping(t *testing.T) {
 	cases := []struct {
 		child, want int
 		logged      bool
 	}{
 		{0, 0, false},
-		{3, 0, true},
-		{5, 0, true},
+		{20, 0, true},
+		{9, 0, true},
+		// 3 and 5 meant skipped and busy before the shared exit codes; they
+		// are now Unavailable and Degraded and pass through as failures.
+		{3, 3, false},
+		{5, 5, false},
 		{4, 4, false},
 		{6, 6, false},
 		{7, 7, false},
@@ -217,7 +228,9 @@ func TestExitCodeMapping(t *testing.T) {
 		{1, 1, false},
 		{2, 2, false},
 		{42, 42, false},
-		{9, 1, true},
+		{21, 21, false},
+		{22, 22, false},
+		{23, 23, false},
 	}
 	for _, c := range cases {
 		for _, sub := range [][]string{
@@ -239,10 +252,10 @@ func TestExitCodeMapping(t *testing.T) {
 			if !c.logged && n != 0 {
 				t.Errorf("%s child %d: unexpected mapping line in %q", sub[0], c.child, errOut)
 			}
-			if c.child == 3 && !strings.Contains(errOut, "skipped or already done") {
+			if c.child == 20 && !strings.Contains(errOut, "skipped or already done") {
 				t.Errorf("skip reason missing: %q", errOut)
 			}
-			if c.child == 5 && !strings.Contains(errOut, "run lock busy") {
+			if c.child == 9 && !strings.Contains(errOut, "run lock busy") {
 				t.Errorf("lock reason missing: %q", errOut)
 			}
 		}
@@ -279,8 +292,8 @@ func TestMissingPgReview(t *testing.T) {
 // signalling the child ourselves, once), and must see exactly one signal.
 func TestSIGTERMWaitsForChildAndForwardsNothing(t *testing.T) {
 	// The child blocks in a short sleep loop until its TERM trap fires, and
-	// exits 3 (skipped) so the mapped result is observable.
-	_, sigFile := fakePgReview(t, 3, "while :; do sleep 0.05; done\n")
+	// exits 20 (skipped) so the mapped result is observable.
+	_, sigFile := fakePgReview(t, 20, "while :; do sleep 0.05; done\n")
 	pidFile := filepath.Join(filepath.Dir(sigFile), "pid")
 	sigs := make(chan os.Signal, 4)
 	var o bytes.Buffer
@@ -312,7 +325,7 @@ func TestSIGTERMWaitsForChildAndForwardsNothing(t *testing.T) {
 	if got := readLines(t, sigFile); len(got) != 0 {
 		t.Fatalf("child received a signal from the adapter: %q", got)
 	}
-	// The child receives its own (process-group) SIGTERM and exits 3.
+	// The child receives its own (process-group) SIGTERM and exits 20.
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}

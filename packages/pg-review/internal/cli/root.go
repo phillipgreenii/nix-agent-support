@@ -22,7 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Group names and their default --output formats.
@@ -177,7 +177,7 @@ func ExitCode(err error) int {
 	if errors.As(err, &ue) {
 		return exitcode.Usage
 	}
-	return exitcode.Failure
+	return exitcode.Error
 }
 
 // Execute runs the CLI with args (without the program name) and returns the

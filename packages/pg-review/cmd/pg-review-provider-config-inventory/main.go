@@ -11,8 +11,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/provider/configinventory"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Version is set at build time via -ldflags (mkGoApp's default target).
@@ -56,7 +56,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if errors.Is(err, configinventory.ErrUsage) {
 			return exitcode.Usage
 		}
-		return exitcode.Failure
+		return exitcode.Error
 	}
 	return exitcode.OK
 }

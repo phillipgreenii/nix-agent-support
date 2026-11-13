@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 )
 
@@ -171,7 +171,7 @@ func newJobStatusCmd() *cobra.Command {
 			}
 			l, err := ledger.Open(cmd.Context())
 			if err != nil {
-				return ExitErrorf(exitcode.Ledger, "%v", err)
+				return ExitErrorf(appcode.Ledger, "%v", err)
 			}
 			defer func() { _ = l.Close() }()
 			s, err := buildStatus(cmd, l, cfg)

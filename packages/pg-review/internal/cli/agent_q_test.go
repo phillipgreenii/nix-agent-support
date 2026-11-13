@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/schema"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // brokerEnv builds a hermetic run whose provider "fake" is a shell script that
@@ -164,7 +165,7 @@ func TestAgentQBudgetAndRunFlag(t *testing.T) {
 		}
 	}
 	code, out, _ := run(t, "agent", "q", "fake", "by-tool", "--run="+rid)
-	if code != exitcode.ValidationRejected || !strings.Contains(errorOf(t, out), "budget") {
+	if code != appcode.Validation || !strings.Contains(errorOf(t, out), "budget") {
 		t.Fatalf("over budget: %d %s", code, out)
 	}
 	if r, _ := l.GetRun(context.Background(), mustInt(rid)); r.QueryCount != 2 {
@@ -190,7 +191,7 @@ func TestAgentQRefusals(t *testing.T) {
 	}
 	for name, a := range cases {
 		code, out, _ := run(t, append([]string{"agent", "q"}, a...)...)
-		if code != exitcode.ValidationRejected {
+		if code != appcode.Validation {
 			t.Errorf("%s: exit %d, want 4: %s", name, code, out)
 			continue
 		}
@@ -208,7 +209,7 @@ func TestAgentQProviderFailureCountsAndExits7(t *testing.T) {
 	rid, ev, l := brokerEnv(t)
 	t.Setenv(RunEnv, rid)
 	code, out, _ := run(t, "agent", "q", "fake", "boom")
-	if code != exitcode.Provider {
+	if code != appcode.Provider {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	if msg := errorOf(t, out); strings.Contains(msg, "/Users/") {
@@ -227,7 +228,7 @@ func TestAgentQNeedsRunAndLiveRun(t *testing.T) {
 	if code, _, _ := run(t, "agent", "q", "fake", "by-tool"); code != exitcode.Usage {
 		t.Errorf("no run: exit %d, want 2", code)
 	}
-	if code, out, _ := run(t, "agent", "q", "fake", "by-tool", "--run", "9999"); code != exitcode.ValidationRejected {
+	if code, out, _ := run(t, "agent", "q", "fake", "by-tool", "--run", "9999"); code != appcode.Validation {
 		t.Errorf("unknown run: %d %s", code, out)
 	}
 	err := l.WithTx(context.Background(), func(tx *ledger.Tx) error {
@@ -238,7 +239,7 @@ func TestAgentQNeedsRunAndLiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, out, _ := run(t, "agent", "q", "fake", "by-tool", "--run", rid); code != exitcode.ValidationRejected {
+	if code, out, _ := run(t, "agent", "q", "fake", "by-tool", "--run", rid); code != appcode.Validation {
 		t.Errorf("filed run: %d %s", code, out)
 	}
 }

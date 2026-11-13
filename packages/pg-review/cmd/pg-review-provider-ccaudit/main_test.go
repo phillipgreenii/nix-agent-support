@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/schema"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func stubOnPath(t *testing.T, exit string) {
@@ -45,7 +45,7 @@ func TestRunUsageAndFailureExits(t *testing.T) {
 	}
 	stubOnPath(t, "exit 1\n")
 	out.Reset()
-	if c := run(context.Background(), []string{"--since", "2026-01-01T00:00:00Z", "--until", "2026-01-02T00:00:00Z", "--scope", "demo"}, &out, &errb); c != exitcode.Failure || out.Len() != 0 {
-		t.Errorf("failing query: exit %d stdout %q, want %d and empty", c, out.String(), exitcode.Failure)
+	if c := run(context.Background(), []string{"--since", "2026-01-01T00:00:00Z", "--until", "2026-01-02T00:00:00Z", "--scope", "demo"}, &out, &errb); c != exitcode.Error || out.Len() != 0 {
+		t.Errorf("failing query: exit %d stdout %q, want %d and empty", c, out.String(), exitcode.Error)
 	}
 }

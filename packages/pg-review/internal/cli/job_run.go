@@ -6,10 +6,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/runner"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func init() { registerCommand(groupJob, newJobRunCmd) }
@@ -45,7 +46,7 @@ func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
 	}
 	l, err := ledger.Open(ctx)
 	if err != nil {
-		return ExitErrorf(exitcode.Ledger, "%v", err)
+		return ExitErrorf(appcode.Ledger, "%v", err)
 	}
 	defer func() { _ = l.Close() }()
 	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout(), Evidence: runner.EvidenceStage{}}
@@ -69,11 +70,11 @@ func defaultRunJob(cmd *cobra.Command, o *RunOptions) error {
 	case errors.As(err, &ue):
 		return usageErrorf("%s", ue.Msg)
 	case errors.As(err, &af):
-		return ExitErrorf(exitcode.Skipped, "%v", af)
+		return ExitErrorf(appcode.Skipped, "%v", af)
 	case errors.As(err, &sk):
-		return ExitErrorf(exitcode.Skipped, "run %d skipped: %s", sk.RunID, sk.Reason)
+		return ExitErrorf(appcode.Skipped, "run %d skipped: %s", sk.RunID, sk.Reason)
 	case errors.As(err, &pe):
-		return ExitErrorf(exitcode.Provider, "%v", pe)
+		return ExitErrorf(appcode.Provider, "%v", pe)
 	case errors.Is(err, ledger.ErrLockBusy):
 		return ExitErrorf(exitcode.Busy, "another run holds the lock for lens %s and scope %s", o.Lens, o.Scope)
 	}

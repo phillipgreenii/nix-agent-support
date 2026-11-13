@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/metrics"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 const scenarioConfig = "schema_version = 1\n[[scope]]\nname = \"demo\"\nprefixes = [\"/work/demo\"]\n[[lens]]\nid = \"agent-workflow\"\nproviders = []\n"

@@ -10,13 +10,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 const (
-	exitUsage = 2
+	exitUsage = exitcode.Usage
 	// exitBusyDecline is the code the router reads as "busy, decline": the
-	// adapter never produces it.
-	exitBusyDecline = 9
+	// adapter never produces it. It is also the shared Busy code pg-review
+	// exits with when its run lock is held, which the adapter turns into 0.
+	exitBusyDecline = exitcode.Busy
+	// exitSkipped is pg-review's skipped-or-already-done code, the first code
+	// of the shared app range. pg-review is a separate module, so the value is
+	// duplicated here and pinned by a test.
+	exitSkipped = exitcode.AppMin
 	// pgReview is looked up on PATH at run time.
 	pgReview = "pg-review"
 )
@@ -130,13 +137,12 @@ func mapExit(code int) (mapped int, reason string) {
 	switch code {
 	case 0:
 		return 0, ""
-	case 3:
+	case exitSkipped:
 		return 0, "skipped or already done"
-	case 5:
-		return 0, "run lock busy"
 	case exitBusyDecline:
-		// 9 would read as a busy decline to the router.
-		return 1, "pg-review exit 9 is never passed on"
+		// A held run lock is not a failure, and a passed-on 9 would read as
+		// a busy decline to the router.
+		return 0, "run lock busy"
 	default:
 		return code, ""
 	}
@@ -150,7 +156,7 @@ func runChild(argv []string, stdout, stderr io.Writer, sigs <-chan os.Signal) in
 	path, err := exec.LookPath(pgReview)
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-review-router-adapter: %v\n", err)
-		return 1
+		return exitcode.Error
 	}
 	// Deliberately not a cancellable context: the child must outlive the
 	// adapter's own SIGTERM (see below).
@@ -159,7 +165,7 @@ func runChild(argv []string, stdout, stderr io.Writer, sigs <-chan os.Signal) in
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(stderr, "pg-review-router-adapter: start %s: %v\n", pgReview, err)
-		return 1
+		return exitcode.Error
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -180,12 +186,12 @@ wait:
 			code = ee.ExitCode() // -1 when killed by a signal
 		} else {
 			fmt.Fprintf(stderr, "pg-review-router-adapter: wait: %v\n", waitErr)
-			return 1
+			return exitcode.Error
 		}
 	}
 	if code < 0 {
 		fmt.Fprintf(stderr, "pg-review-router-adapter: %s terminated by a signal\n", pgReview)
-		return 1
+		return exitcode.Error
 	}
 	mapped, reason := mapExit(code)
 	if reason != "" {

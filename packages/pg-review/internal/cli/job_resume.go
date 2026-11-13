@@ -6,9 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func init() { registerCommand(groupJob, newJobResumeCmd) }
@@ -23,7 +24,7 @@ func newJobResumeCmd() *cobra.Command {
 			lens := args[0]
 			l, err := ledger.Open(ctx)
 			if err != nil {
-				return ExitErrorf(exitcode.Ledger, "%v", err)
+				return ExitErrorf(appcode.Ledger, "%v", err)
 			}
 			defer func() { _ = l.Close() }()
 			lenses, err := l.Lenses(ctx)
@@ -44,11 +45,11 @@ func newJobResumeCmd() *cobra.Command {
 				}
 			}
 			if !known {
-				return ExitErrorf(exitcode.ValidationRejected, "unknown lens %q", lens)
+				return ExitErrorf(exitcode.NotFound, "unknown lens %q", lens)
 			}
 			if err := l.WithTx(ctx, func(t *ledger.Tx) error { return t.RecordResume(ctx, lens) }); err != nil {
 				if errors.Is(err, ledger.ErrNotFound) {
-					return ExitErrorf(exitcode.ValidationRejected, "unknown lens %q", lens)
+					return ExitErrorf(exitcode.NotFound, "unknown lens %q", lens)
 				}
 				return mapHumanError(err)
 			}

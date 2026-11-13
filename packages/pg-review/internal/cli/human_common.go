@@ -6,9 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/render"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // parseIDs reads positive integer item ids.
@@ -31,14 +32,14 @@ func mapHumanError(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, ledger.ErrNotFound):
-		return ExitErrorf(exitcode.ValidationRejected, "%v", err)
+		return ExitErrorf(exitcode.NotFound, "%v", err)
 	case errors.Is(err, ledger.ErrNotShown), errors.Is(err, ledger.ErrStaleView), errors.Is(err, ledger.ErrNotRulable),
 		errors.Is(err, ledger.ErrIntegrity), errors.Is(err, ledger.ErrInvalid), errors.Is(err, ledger.ErrSchemaTooNew),
 		errors.Is(err, ledger.ErrDuplicate):
-		return ExitErrorf(exitcode.Ledger, "%v", err)
+		return ExitErrorf(appcode.Ledger, "%v", err)
 	}
 	if s := err.Error(); strings.Contains(s, "database is locked") || strings.Contains(s, "SQLITE_BUSY") {
-		return ExitErrorf(exitcode.Ledger, "ledger busy: %v", err)
+		return ExitErrorf(appcode.Ledger, "ledger busy: %v", err)
 	}
 	return err
 }

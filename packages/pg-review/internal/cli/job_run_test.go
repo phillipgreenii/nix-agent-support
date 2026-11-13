@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // jobEnv points the tool at throwaway XDG directories; scope true writes a
@@ -73,7 +74,7 @@ func TestJobRunRunKeyAndShowRun(t *testing.T) {
 	if code != exitcode.OK || !strings.Contains(out, "run 1 Filed") {
 		t.Fatalf("exit %d %q %s", code, out, stderr)
 	}
-	if code, _, _ := run(t, args...); code != exitcode.Skipped {
+	if code, _, _ := run(t, args...); code != appcode.Skipped {
 		t.Errorf("repeat exit %d", code)
 	}
 	// A manual run over the same window runs.
@@ -93,7 +94,7 @@ func TestJobRunRunKeyAndShowRun(t *testing.T) {
 			t.Errorf("show-run lacks %q:\n%s", want, out)
 		}
 	}
-	if code, _, stderr := run(t, "job", "show-run", "99"); code != exitcode.ValidationRejected || !strings.Contains(stderr, "not found") {
+	if code, _, stderr := run(t, "job", "show-run", "99"); code != exitcode.NotFound || !strings.Contains(stderr, "not found") {
 		t.Errorf("unknown id: %d %s", code, stderr)
 	}
 	if code, _, _ := run(t, "job", "show-run", "abc"); code != exitcode.Usage {
@@ -118,7 +119,7 @@ func TestShowRunExpiredPrintsDateAndExits4(t *testing.T) {
 	}
 	_ = l.Close()
 	code, _, stderr := run(t, "job", "show-run", "1")
-	if code != exitcode.ValidationRejected || !strings.Contains(stderr, "expired on 2020-01-15") {
+	if code != exitcode.NotFound || !strings.Contains(stderr, "expired on 2020-01-15") {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 }
@@ -140,7 +141,7 @@ func TestJobRunSkippedExits3(t *testing.T) {
 	}
 	_ = l.Close()
 	code, _, stderr := run(t, "job", "run", "agent-workflow", "--scope", "demo", "--duration", "1h")
-	if code != exitcode.Skipped || !strings.Contains(stderr, "pending cap") {
+	if code != appcode.Skipped || !strings.Contains(stderr, "pending cap") {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 }

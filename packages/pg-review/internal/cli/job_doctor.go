@@ -12,8 +12,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ccpool"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/doctor"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // assetsFS supplies the embedded assets the config check looks prompt files up
@@ -48,14 +48,14 @@ func doctorConfigOnly(cmd *cobra.Command) error {
 	eff, err := config.Load(config.EnvFromOS(), assetsFS())
 	if err != nil {
 		fmt.Fprintf(out, "config %q: %v\n", "config.toml", err)
-		return ExitErrorf(exitcode.ValidationRejected, "configuration is invalid")
+		return ExitErrorf(exitcode.Config, "configuration is invalid")
 	}
 	probs := eff.Validate()
 	for _, p := range probs {
 		fmt.Fprintln(out, p.String())
 	}
 	if len(probs) > 0 {
-		return ExitErrorf(exitcode.ValidationRejected, "configuration is invalid: %d problem(s)", len(probs))
+		return ExitErrorf(exitcode.Config, "configuration is invalid: %d problem(s)", len(probs))
 	}
 	for _, w := range eff.Warnings() {
 		fmt.Fprintln(out, w)

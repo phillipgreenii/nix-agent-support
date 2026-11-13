@@ -15,9 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ccpool"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Check names, in the order they run and print.
@@ -137,7 +138,7 @@ func ExitCode(rs []Result) int {
 
 func checkConfig(d *Deps) Result {
 	if d.ConfigErr != nil || d.Config == nil {
-		return fail(CheckConfig, exitcode.ValidationRejected, "%v", d.ConfigErr)
+		return fail(CheckConfig, exitcode.Config, "%v", d.ConfigErr)
 	}
 	probs := d.Config.Validate()
 	if len(probs) == 0 {
@@ -147,17 +148,17 @@ func checkConfig(d *Deps) Result {
 	for i, p := range probs {
 		parts[i] = p.String()
 	}
-	return fail(CheckConfig, exitcode.ValidationRejected, "%d problem(s): %s", len(probs), strings.Join(parts, "; "))
+	return fail(CheckConfig, exitcode.Config, "%d problem(s): %s", len(probs), strings.Join(parts, "; "))
 }
 
 func checkLedger(ctx context.Context, d *Deps) Result {
 	l, err := d.OpenLedger(ctx)
 	if err != nil {
-		return fail(CheckLedger, exitcode.Ledger, "open: %v", err)
+		return fail(CheckLedger, appcode.Ledger, "open: %v", err)
 	}
 	defer func() { _ = l.Close() }()
 	if err := l.IntegrityCheck(ctx); err != nil {
-		return fail(CheckLedger, exitcode.Ledger, "%v", err)
+		return fail(CheckLedger, appcode.Ledger, "%v", err)
 	}
 	return pass(CheckLedger)
 }
@@ -176,7 +177,7 @@ const flagUsageExit = 2
 
 func checkProviders(ctx context.Context, d *Deps) Result {
 	if d.Config == nil {
-		return fail(CheckProviders, exitcode.ValidationRejected, "no effective configuration")
+		return fail(CheckProviders, exitcode.Config, "no effective configuration")
 	}
 	var bad []string
 	for _, p := range d.Config.Providers {
@@ -197,7 +198,7 @@ func checkProviders(ctx context.Context, d *Deps) Result {
 		}
 	}
 	if len(bad) > 0 {
-		return fail(CheckProviders, exitcode.Provider, "%s", strings.Join(bad, "; "))
+		return fail(CheckProviders, appcode.Provider, "%s", strings.Join(bad, "; "))
 	}
 	return pass(CheckProviders)
 }
@@ -212,30 +213,30 @@ func checkRecorder(ctx context.Context, d *Deps) Result {
 	}
 	path, err := d.LookPath(cmd)
 	if err != nil {
-		return fail(CheckRecorder, exitcode.Provider, "%q not found on PATH", cmd)
+		return fail(CheckRecorder, appcode.Provider, "%q not found on PATH", cmd)
 	}
 	out, code, err := d.run(ctx, path, []string{"status", "--json"}, "", nil, "")
 	if err != nil {
-		return fail(CheckRecorder, exitcode.Provider, "%s status: %v", cmd, err)
+		return fail(CheckRecorder, appcode.Provider, "%s status: %v", cmd, err)
 	}
 	if code != 0 {
-		return fail(CheckRecorder, exitcode.Provider, "%s status exited %d", cmd, code)
+		return fail(CheckRecorder, appcode.Provider, "%s status exited %d", cmd, code)
 	}
 	var st struct {
 		FilesIndexed *int `json:"files_indexed"`
 	}
 	if err := json.Unmarshal([]byte(out), &st); err != nil || st.FilesIndexed == nil {
-		return fail(CheckRecorder, exitcode.Provider, "%s status: unreadable output", cmd)
+		return fail(CheckRecorder, appcode.Provider, "%s status: unreadable output", cmd)
 	}
 	if *st.FilesIndexed <= 0 {
-		return fail(CheckRecorder, exitcode.Provider, "the index holds no data (files_indexed is %d)", *st.FilesIndexed)
+		return fail(CheckRecorder, appcode.Provider, "the index holds no data (files_indexed is %d)", *st.FilesIndexed)
 	}
 	return pass(CheckRecorder)
 }
 
 func checkCcpool(d *Deps) Result {
 	if _, err := d.LookPath("ccpool"); err != nil {
-		return fail(CheckCcpool, exitcode.Provider, "ccpool not found on PATH")
+		return fail(CheckCcpool, appcode.Provider, "ccpool not found on PATH")
 	}
 	return pass(CheckCcpool)
 }
@@ -250,11 +251,11 @@ func checkHook(ctx context.Context, d *Deps) Result {
 	}
 	path, err := d.LookPath(bin)
 	if err != nil {
-		return fail(CheckHook, exitcode.Provider, "%q not found on PATH", bin)
+		return fail(CheckHook, appcode.Provider, "%q not found on PATH", bin)
 	}
 	tmp, err := os.MkdirTemp("", "pg-review-doctor-")
 	if err != nil {
-		return fail(CheckHook, exitcode.Provider, "%v", err)
+		return fail(CheckHook, appcode.Provider, "%v", err)
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 	ti, _ := json.Marshal(map[string]string{"command": HookSample})
@@ -268,10 +269,10 @@ func checkHook(ctx context.Context, d *Deps) Result {
 		"XDG_CACHE_HOME="+filepath.Join(tmp, "k"))
 	out, code, err := d.run(ctx, path, nil, string(payload), env, tmp)
 	if err != nil {
-		return fail(CheckHook, exitcode.Provider, "%s: %v", bin, err)
+		return fail(CheckHook, appcode.Provider, "%s: %v", bin, err)
 	}
 	if code != 0 {
-		return fail(CheckHook, exitcode.Provider, "%s exited %d", bin, code)
+		return fail(CheckHook, appcode.Provider, "%s exited %d", bin, code)
 	}
 	var o struct {
 		Hook struct {
@@ -285,7 +286,7 @@ func checkHook(ctx context.Context, d *Deps) Result {
 		if got == "" {
 			got = "no decision"
 		}
-		return fail(CheckHook, exitcode.Provider, "the approval hook did not approve %q (got %s)", HookSample, got)
+		return fail(CheckHook, appcode.Provider, "the approval hook did not approve %q (got %s)", HookSample, got)
 	}
 	return pass(CheckHook)
 }
@@ -308,17 +309,17 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 		return Result{Name: CheckSession, Status: Skip}
 	}
 	if d.Config == nil || d.Ccpool == nil {
-		return fail(CheckSession, exitcode.ValidationRejected, "no effective configuration or ccpool client")
+		return fail(CheckSession, exitcode.Config, "no effective configuration or ccpool client")
 	}
 	cp, err := d.Ccpool.Capacity(ctx)
 	if err != nil {
-		return fail(CheckSession, exitcode.Provider, "ccpool capacity: %v", err)
+		return fail(CheckSession, appcode.Provider, "ccpool capacity: %v", err)
 	}
 	if cp.UsageLimit != nil {
-		return fail(CheckSession, exitcode.Provider, "ccpool usage limit reached (%s window); rerun later or skip with --skip-session-check", cp.UsageLimit.Window)
+		return fail(CheckSession, appcode.Provider, "ccpool usage limit reached (%s window); rerun later or skip with --skip-session-check", cp.UsageLimit.Window)
 	}
 	if cp.Free < 1 {
-		return fail(CheckSession, exitcode.Provider, "ccpool has no free slot; rerun later or skip with --skip-session-check")
+		return fail(CheckSession, appcode.Provider, "ccpool has no free slot; rerun later or skip with --skip-session-check")
 	}
 
 	token := fmt.Sprintf("doctor-%d", d.Now().UnixNano())
@@ -342,20 +343,20 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 		},
 	}
 	if err := d.Ccpool.Start(ctx, opts); err != nil {
-		return fail(CheckSession, exitcode.Provider, "ccpool new: %v", err)
+		return fail(CheckSession, appcode.Provider, "ccpool new: %v", err)
 	}
 	defer func() {
 		// Detached: the session must be closed even when ctx is already cancelled.
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := d.Ccpool.Close(cctx, extID, sessionCloseReason); err != nil && res.Status == Pass {
-			res = fail(CheckSession, exitcode.Provider, "the session resolved but could not be closed: %v", err)
+			res = fail(CheckSession, appcode.Provider, "the session resolved but could not be closed: %v", err)
 		}
 	}()
 
 	turn, err := d.Ccpool.Reply(ctx, extID, sessionPrompt)
 	if err != nil {
-		return fail(CheckSession, exitcode.Provider, "ccpool reply: %v", err)
+		return fail(CheckSession, appcode.Provider, "ccpool reply: %v", err)
 	}
 	timeout, poll := d.SessionTimeout, d.PollInterval
 	if timeout <= 0 {
@@ -368,20 +369,20 @@ func checkSession(ctx context.Context, d *Deps) (res Result) {
 	for {
 		text, st, err := d.Ccpool.Result(ctx, turn)
 		if err != nil {
-			return fail(CheckSession, exitcode.Provider, "ccpool result: %v", err)
+			return fail(CheckSession, appcode.Provider, "ccpool result: %v", err)
 		}
 		if st == ccpool.ResultDone {
 			if strings.TrimSpace(text) == "" {
-				return fail(CheckSession, exitcode.Provider, "the session finished with an empty reply (%s); its shell commands were probably denied or never ran", d.sessionState(ctx, extID))
+				return fail(CheckSession, appcode.Provider, "the session finished with an empty reply (%s); its shell commands were probably denied or never ran", d.sessionState(ctx, extID))
 			}
 			return judgeSession(text, token)
 		}
 		if !d.Now().Before(deadline) {
-			return fail(CheckSession, exitcode.Provider, "no reply from the session within %s", timeout)
+			return fail(CheckSession, appcode.Provider, "no reply from the session within %s", timeout)
 		}
 		d.Sleep(ctx, poll)
 		if ctx.Err() != nil {
-			return fail(CheckSession, exitcode.Provider, "interrupted: %v", ctx.Err())
+			return fail(CheckSession, appcode.Provider, "interrupted: %v", ctx.Err())
 		}
 	}
 }
@@ -417,7 +418,7 @@ func judgeSession(text, token string) Result {
 		missing = append(missing, "pg-review")
 	}
 	if len(missing) > 0 {
-		return fail(CheckSession, exitcode.Provider, "not visible inside the session: %s (reply: %q)", strings.Join(missing, ", "), truncate(text, 200))
+		return fail(CheckSession, appcode.Provider, "not visible inside the session: %s (reply: %q)", strings.Join(missing, ", "), truncate(text, 200))
 	}
 	return pass(CheckSession)
 }

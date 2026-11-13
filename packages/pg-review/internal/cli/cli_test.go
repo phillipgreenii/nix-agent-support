@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func run(t *testing.T, args ...string) (code int, stdout, stderr string) {
@@ -201,7 +201,7 @@ func TestDoctorConfigOnlyRejections(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			doctorEnv(t, c.cfg, allProviderStubs...)
 			code, out, _ := run(t, "job", "doctor", "--config-only")
-			if code != exitcode.ValidationRejected || !strings.Contains(out, c.want) {
+			if code != exitcode.Config || !strings.Contains(out, c.want) {
 				t.Errorf("exit %d, want 4 with %q:\n%s", code, c.want, out)
 			}
 		})
@@ -211,7 +211,7 @@ func TestDoctorConfigOnlyRejections(t *testing.T) {
 func TestDoctorConfigOnlyMissingBuiltinProviderCommand(t *testing.T) {
 	doctorEnv(t, "", "pg-review-provider-ccaudit", "pg-review-provider-hook-decisions")
 	code, out, _ := run(t, "job", "doctor", "--config-only")
-	if code != exitcode.ValidationRejected || !strings.Contains(out, `provider "config-inventory"`) {
+	if code != exitcode.Config || !strings.Contains(out, `provider "config-inventory"`) {
 		t.Errorf("exit %d:\n%s", code, out)
 	}
 }

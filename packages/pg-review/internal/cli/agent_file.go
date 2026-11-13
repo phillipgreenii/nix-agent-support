@@ -11,12 +11,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/runner"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/validate"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // RunEnv is the environment variable the runner sets to name the run of a
@@ -95,19 +96,19 @@ func mapFileError(err error) error {
 	var ve *validate.Error
 	switch {
 	case errors.As(err, &ve):
-		return ExitErrorf(exitcode.ValidationRejected, "%s", ve.Error())
+		return ExitErrorf(appcode.Validation, "%s", ve.Error())
 	case errors.Is(err, ledger.ErrNotFound):
-		return ExitErrorf(exitcode.ValidationRejected, "run not found")
+		return ExitErrorf(exitcode.NotFound, "run not found")
 	case errors.Is(err, ledger.ErrBatchConflict):
-		return ExitErrorf(exitcode.ValidationRejected, "%v", err)
+		return ExitErrorf(appcode.Validation, "%v", err)
 	case errors.Is(err, ledger.ErrIntegrity), errors.Is(err, ledger.ErrRunState),
 		errors.Is(err, ledger.ErrDuplicate), errors.Is(err, ledger.ErrInvalid),
 		errors.Is(err, ledger.ErrSchemaTooNew):
-		return ExitErrorf(exitcode.Ledger, "%v", err)
+		return ExitErrorf(appcode.Ledger, "%v", err)
 	}
 	// A concurrent filer holding the write lock past the busy timeout.
 	if s := err.Error(); strings.Contains(s, "database is locked") || strings.Contains(s, "SQLITE_BUSY") {
-		return ExitErrorf(exitcode.Ledger, "ledger busy: %v", err)
+		return ExitErrorf(appcode.Ledger, "ledger busy: %v", err)
 	}
 	return err
 }

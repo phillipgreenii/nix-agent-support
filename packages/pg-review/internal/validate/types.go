@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 )
 
 // Document is a decoded findings document (the analyst's final message).
@@ -165,7 +165,7 @@ func (e *Error) Error() string {
 }
 
 // ExitCode is the exit status of a rejected batch.
-func (e *Error) ExitCode() int { return exitcode.ValidationRejected }
+func (e *Error) ExitCode() int { return appcode.Validation }
 
 // Rule names.
 const (

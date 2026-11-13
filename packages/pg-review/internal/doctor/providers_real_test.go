@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 )
 
 // buildProvider compiles a real built-in provider into dir and returns dir.
@@ -54,7 +54,7 @@ func TestRealFlagProviderPassesProvidersCheck(t *testing.T) {
 
 func TestRealProviderCheckStillFailsOnMissingCommand(t *testing.T) {
 	r := checkProviders(context.Background(), realProviderDeps(t.TempDir(), "pg-review-provider-ccaudit"))
-	if r.Status != Fail || r.Code != exitcode.Provider || !strings.Contains(r.Reason, "not found") {
+	if r.Status != Fail || r.Code != appcode.Provider || !strings.Contains(r.Reason, "not found") {
 		t.Fatalf("got %+v, want not-found failure", r)
 	}
 }

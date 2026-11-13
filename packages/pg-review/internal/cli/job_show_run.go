@@ -9,9 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func init() { registerCommand(groupJob, newJobShowRunCmd) }
@@ -32,12 +33,12 @@ func newJobShowRunCmd() *cobra.Command {
 			}
 			l, err := ledger.Open(cmd.Context())
 			if err != nil {
-				return ExitErrorf(exitcode.Ledger, "%v", err)
+				return ExitErrorf(appcode.Ledger, "%v", err)
 			}
 			defer func() { _ = l.Close() }()
 			r, err := l.GetRun(cmd.Context(), id)
 			if errors.Is(err, ledger.ErrNotFound) {
-				return ExitErrorf(exitcode.ValidationRejected, "run %d not found", id)
+				return ExitErrorf(exitcode.NotFound, "run %d not found", id)
 			}
 			if err != nil {
 				return err
@@ -49,7 +50,7 @@ func newJobShowRunCmd() *cobra.Command {
 			}
 			expiry := base.AddDate(0, 0, ttl)
 			if !time.Now().Before(expiry) {
-				return ExitErrorf(exitcode.ValidationRejected, "run %d expired on %s", id, expiry.Format("2006-01-02"))
+				return ExitErrorf(exitcode.NotFound, "run %d expired on %s", id, expiry.Format("2006-01-02"))
 			}
 			return printJSONOrText(cmd, r, showRunText(r, expiry, ttl))
 		},

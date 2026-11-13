@@ -4,6 +4,7 @@ go 1.26.8
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/text v0.43.0

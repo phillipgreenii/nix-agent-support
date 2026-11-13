@@ -8,10 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/validate"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // seedFindings files synthetic findings through the real ledger and returns
@@ -171,7 +172,7 @@ func TestShowRecordsViewAndStrips(t *testing.T) {
 	if n := count(t, l, "view"); n != 1 {
 		t.Errorf("views %d", n)
 	}
-	if code, _, _ := run(t, "human", "show", "9999"); code != exitcode.ValidationRejected {
+	if code, _, _ := run(t, "human", "show", "9999"); code != exitcode.NotFound {
 		t.Errorf("unknown id exit %d", code)
 	}
 	if code, _, _ := run(t, "human", "show", "zero"); code != exitcode.Usage {
@@ -183,7 +184,7 @@ func TestRuleWithoutShowExitsSix(t *testing.T) {
 	_, l := hermetic(t)
 	ids := seedFindings(t, l, syn("a", "Should a?", "E-a"))
 	code, _, stderr := run(t, "human", "rule", fmt.Sprint(ids[0]), "rejected")
-	if code != exitcode.Ledger || !strings.Contains(stderr, "show it first") {
+	if code != appcode.Ledger || !strings.Contains(stderr, "show it first") {
 		t.Fatalf("exit %d %q", code, stderr)
 	}
 	if n := count(t, l, "decision"); n != 0 {
@@ -200,7 +201,7 @@ func TestRuleAfterItemChangedExitsSix(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, _, stderr := run(t, "human", "rule", id, "rejected")
-	if code != exitcode.Ledger || !strings.Contains(stderr, "show it again") {
+	if code != appcode.Ledger || !strings.Contains(stderr, "show it again") {
 		t.Fatalf("exit %d %q", code, stderr)
 	}
 }

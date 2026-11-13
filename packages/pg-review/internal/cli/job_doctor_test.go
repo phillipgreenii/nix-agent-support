@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // doctorStubs installs executable stubs on a private PATH: the three built-in
@@ -58,7 +59,7 @@ func TestDoctorAllPassSkippingSession(t *testing.T) {
 func TestDoctorBuiltInProviderAbsentFailsWithoutConfigToml(t *testing.T) {
 	doctorStubs(t, "pg-review-provider-hook-decisions")
 	code, out, _ := run(t, "job", "doctor", "--skip-session-check")
-	if code != exitcode.Provider {
+	if code != appcode.Provider {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 	if !strings.Contains(out, "FAIL providers: hook-decisions:") {
@@ -69,7 +70,7 @@ func TestDoctorBuiltInProviderAbsentFailsWithoutConfigToml(t *testing.T) {
 func TestDoctorCcpoolAbsentIsProviderCode(t *testing.T) {
 	doctorStubs(t, "ccpool")
 	code, out, _ := run(t, "job", "doctor", "--skip-session-check")
-	if code != exitcode.Provider || !strings.Contains(out, "FAIL ccpool:") {
+	if code != appcode.Provider || !strings.Contains(out, "FAIL ccpool:") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
@@ -84,7 +85,7 @@ func TestDoctorBadConfigIsCode4(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, _ := run(t, "job", "doctor", "--skip-session-check")
-	if code != exitcode.ValidationRejected || !strings.Contains(out, "FAIL config:") {
+	if code != exitcode.Config || !strings.Contains(out, "FAIL config:") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
@@ -99,7 +100,7 @@ func TestDoctorCorruptLedgerIsCode6(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, _ := run(t, "job", "doctor", "--skip-session-check")
-	if code != exitcode.Ledger || !strings.Contains(out, "FAIL ledger:") {
+	if code != appcode.Ledger || !strings.Contains(out, "FAIL ledger:") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }

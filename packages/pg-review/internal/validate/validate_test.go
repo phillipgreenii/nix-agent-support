@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/schema"
 )
 
@@ -46,7 +46,7 @@ func expect(t *testing.T, in Input, rule string) []Failure {
 	if !errors.As(err, &ve) {
 		t.Fatalf("want a rejection for %s, got %v", rule, err)
 	}
-	if ve.ExitCode() != exitcode.ValidationRejected {
+	if ve.ExitCode() != appcode.Validation {
 		t.Errorf("exit code = %d, want 4", ve.ExitCode())
 	}
 	for _, f := range ve.Failures {

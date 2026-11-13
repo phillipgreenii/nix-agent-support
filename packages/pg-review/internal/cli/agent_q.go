@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/broker"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 )
 
@@ -99,9 +99,9 @@ func brokerError(cmd *cobra.Command, err error) error {
 	var pe *broker.ProviderError
 	switch {
 	case errors.As(err, &re):
-		code = exitcode.ValidationRejected
+		code = appcode.Validation
 	case errors.As(err, &pe):
-		code = exitcode.Provider
+		code = appcode.Provider
 	default:
 		return err
 	}

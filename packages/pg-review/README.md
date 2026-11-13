@@ -19,9 +19,10 @@ The CLI is grouped by audience:
 
 `--output text|json` overrides the default; there is no terminal detection.
 
-Exit codes (`internal/exitcode`): 0 ok, 2 usage, 3 skipped or already done, 4 validation rejected
-or not found, 5 run lock busy, 6 ledger error or state conflict, 7 provider failure or timeout, 8
-reserved, 9 never used. A command that is not implemented yet prints `not implemented` and exits
+Exit codes (shared table `github.com/phillipgreenii/x/exitcode`, plus the app codes in `internal/appcode`): 0 ok, 1 unexpected failure, 2 usage,
+4 not found (an unknown or expired id, an unknown lens), 7 configuration rejected, 9 run lock busy, 20 skipped or already
+done, 21 validation rejected (findings, a batch, a broker request), 22 ledger error or state conflict, 23 provider
+failure or timeout. A command that is not implemented yet prints `not implemented` and exits
 
 1.
 
@@ -50,7 +51,7 @@ $ pg-review human rule 3 4 5 rejected --note "known and accepted"
 - `pending` starts with a banner (counts, oldest age, held lenses, stale lenses), then one line per
   item with its impact.
 - `show` records which revision of the item you saw. `rule` needs that record: ruling an item you
-  have not shown exits 6 with "show it first", and it also exits 6 if the item changed since.
+  have not shown exits 22 with "show it first", and it also exits 22 if the item changed since.
   Show every id you intend to rule, or run `show 3 4 5` with several ids.
 - Rulings are `adopted`, `deferred`, `rejected` and `reopen`. A missing fact is a `deferred`
   ruling whose `--note` names it and whose `--reconsider-when` is concrete. `adopted` files one
@@ -129,7 +130,7 @@ The tool has no router, event or schedule concepts. Recurring reviews run throug
 [pg-review-router-adapter](../pg-review-router-adapter/README.md), which a pg-router command role
 calls with the item timestamp and the schedule's static metadata. The adapter computes the
 explicit window, builds the run key `<lens>/<scope>/<window>/<window end>`, passes `--run-key`,
-and maps exit codes to router semantics (3 and 5 become 0; it never exits 9). The schedule
+and maps exit codes to router semantics (20 skipped and 9 busy become 0; it never exits 9). The schedule
 entries themselves live in the router configuration, not in `config.toml`. See section 5.10 of
 [docs/design.md](docs/design.md).
 

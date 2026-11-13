@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/builtin"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ccpool"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 type fakeLedger struct{ err error }
@@ -184,27 +185,27 @@ func TestEachCheckFailingAlone(t *testing.T) {
 		want   string
 		break_ func(h *harness)
 	}{
-		{"config load", CheckConfig, exitcode.ValidationRejected, "boom", func(h *harness) { h.d.Config, h.d.ConfigErr = nil, errors.New("boom") }},
-		{"config problem", CheckConfig, exitcode.ValidationRejected, "problem", func(h *harness) { h.d.Config.Ccpool.ReadTools = nil; h.d.Config.Profiles[0].Effort = "bogus" }},
-		{"ledger open", CheckLedger, exitcode.Ledger, "open: nope", func(h *harness) {
+		{"config load", CheckConfig, exitcode.Config, "boom", func(h *harness) { h.d.Config, h.d.ConfigErr = nil, errors.New("boom") }},
+		{"config problem", CheckConfig, exitcode.Config, "problem", func(h *harness) { h.d.Config.Ccpool.ReadTools = nil; h.d.Config.Profiles[0].Effort = "bogus" }},
+		{"ledger open", CheckLedger, appcode.Ledger, "open: nope", func(h *harness) {
 			h.d.OpenLedger = func(context.Context) (IntegrityLedger, error) { return nil, errors.New("nope") }
 		}},
-		{"ledger integrity", CheckLedger, exitcode.Ledger, "corrupt", func(h *harness) {
+		{"ledger integrity", CheckLedger, appcode.Ledger, "corrupt", func(h *harness) {
 			h.d.OpenLedger = func(context.Context) (IntegrityLedger, error) { return fakeLedger{errors.New("corrupt")}, nil }
 		}},
-		{"provider absent", CheckProviders, exitcode.Provider, "pg-review-provider-hook-decisions", func(h *harness) { h.missing["pg-review-provider-hook-decisions"] = true }},
-		{"provider help fails", CheckProviders, exitcode.Provider, "--help exited 3", func(h *harness) { h.exit["pg-review-provider-ccaudit"] = 3 }},
-		{"recorder status fails", CheckRecorder, exitcode.Provider, "exited 1", func(h *harness) { h.exit["pg-ccaudit"] = 1 }},
-		{"recorder index empty", CheckRecorder, exitcode.Provider, "no data", func(h *harness) { h.out["pg-ccaudit"] = `{"files_indexed": 0}` }},
-		{"recorder missing", CheckRecorder, exitcode.Provider, "not found", func(h *harness) { h.missing["pg-ccaudit"] = true }},
-		{"ccpool absent", CheckCcpool, exitcode.Provider, "ccpool not found", func(h *harness) { h.missing["ccpool"] = true }},
-		{"hook asks", CheckHook, exitcode.Provider, "got ask", func(h *harness) {
+		{"provider absent", CheckProviders, appcode.Provider, "pg-review-provider-hook-decisions", func(h *harness) { h.missing["pg-review-provider-hook-decisions"] = true }},
+		{"provider help fails", CheckProviders, appcode.Provider, "--help exited 3", func(h *harness) { h.exit["pg-review-provider-ccaudit"] = 3 }},
+		{"recorder status fails", CheckRecorder, appcode.Provider, "exited 1", func(h *harness) { h.exit["pg-ccaudit"] = 1 }},
+		{"recorder index empty", CheckRecorder, appcode.Provider, "no data", func(h *harness) { h.out["pg-ccaudit"] = `{"files_indexed": 0}` }},
+		{"recorder missing", CheckRecorder, appcode.Provider, "not found", func(h *harness) { h.missing["pg-ccaudit"] = true }},
+		{"ccpool absent", CheckCcpool, appcode.Provider, "ccpool not found", func(h *harness) { h.missing["ccpool"] = true }},
+		{"hook asks", CheckHook, appcode.Provider, "got ask", func(h *harness) {
 			h.out["claude-extended-tool-approver"] = `{"hookSpecificOutput":{"permissionDecision":"ask"}}`
 		}},
-		{"hook abstains", CheckHook, exitcode.Provider, "no decision", func(h *harness) { h.out["claude-extended-tool-approver"] = `{}` }},
-		{"session cannot start", CheckSession, exitcode.Provider, "ccpool new", func(h *harness) { h.cp.startErr = errors.New("x") }},
-		{"session usage limit", CheckSession, exitcode.Provider, "usage limit", func(h *harness) { h.cp.cap.UsageLimit = &ccpool.UsageLimit{Window: "5h"} }},
-		{"session no slot", CheckSession, exitcode.Provider, "no free slot", func(h *harness) { h.cp.cap.Free = 0 }},
+		{"hook abstains", CheckHook, appcode.Provider, "no decision", func(h *harness) { h.out["claude-extended-tool-approver"] = `{}` }},
+		{"session cannot start", CheckSession, appcode.Provider, "ccpool new", func(h *harness) { h.cp.startErr = errors.New("x") }},
+		{"session usage limit", CheckSession, appcode.Provider, "usage limit", func(h *harness) { h.cp.cap.UsageLimit = &ccpool.UsageLimit{Window: "5h"} }},
+		{"session no slot", CheckSession, appcode.Provider, "no free slot", func(h *harness) { h.cp.cap.Free = 0 }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -307,7 +308,7 @@ func TestHighestCodeWins(t *testing.T) {
 	h.d.Config, h.d.ConfigErr = nil, errors.New("bad")
 	h.d.OpenLedger = func(context.Context) (IntegrityLedger, error) { return nil, errors.New("bad") }
 	h.missing["ccpool"] = true
-	if c := ExitCode(Run(context.Background(), h.d)); c != exitcode.Provider {
+	if c := ExitCode(Run(context.Background(), h.d)); c != appcode.Provider {
 		t.Errorf("exit %d", c)
 	}
 }

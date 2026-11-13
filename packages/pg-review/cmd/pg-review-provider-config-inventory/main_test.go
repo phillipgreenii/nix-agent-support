@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/schema"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // stubOnPath puts a fake pg-ccaudit on PATH that records its arguments and
@@ -80,7 +80,7 @@ func TestRunUsageAndFailureExits(t *testing.T) {
 	}
 	stubOnPath(t, "exit 1\n")
 	out.Reset()
-	if c := run(context.Background(), baseArgs(t), &out, &errb); c != exitcode.Failure || out.Len() != 0 {
-		t.Errorf("failing query: exit %d stdout %q, want %d and empty", c, out.String(), exitcode.Failure)
+	if c := run(context.Background(), baseArgs(t), &out, &errb); c != exitcode.Error || out.Len() != 0 {
+		t.Errorf("failing query: exit %d stdout %q, want %d and empty", c, out.String(), exitcode.Error)
 	}
 }

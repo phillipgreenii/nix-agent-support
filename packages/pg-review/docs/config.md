@@ -51,7 +51,7 @@ A provider accepts an optional `args_style`: `cwd-prefix` (the default, and the 
 
 Validates the effective configuration (built-ins merged with `config.toml`) and exits 0
 when valid. Otherwise it prints one line per problem, in the form
-`<table> "<id>": <message>`, and exits 4. It rejects: a lens with an unknown provider or
+`<table> "<id>": <message>`, and exits 7. It rejects: a lens with an unknown provider or
 profile or an empty kind list; a provider whose command is missing or not found (an
 absolute executable path or on `PATH`); a scope with no prefix; duplicate ids within a
 table; a prompt file that does not exist; a profile with no model; an effort outside

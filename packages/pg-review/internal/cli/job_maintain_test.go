@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/exitcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // hermeticQuiet is hermetic with the seeded run ended, so the reaper has no
@@ -56,7 +56,7 @@ func TestMaintainFailingStepExitsOneAndReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs := run(t, "job", "maintain")
-	if code != exitcode.Failure || !strings.Contains(errs, "maintain step backup failed") {
+	if code != exitcode.Error || !strings.Contains(errs, "maintain step backup failed") {
 		t.Fatalf("exit %d stderr %q", code, errs)
 	}
 	if !strings.Contains(out, "heartbeat: ok") {
@@ -183,7 +183,7 @@ func TestLensPausesAfterThreeAllRejectedRuns(t *testing.T) {
 
 func TestResumeUnknownLensExitsFour(t *testing.T) {
 	hermetic(t)
-	if code, _, errs := run(t, "job", "resume", "no-such-lens"); code != exitcode.ValidationRejected || !strings.Contains(errs, "unknown lens") {
+	if code, _, errs := run(t, "job", "resume", "no-such-lens"); code != exitcode.NotFound || !strings.Contains(errs, "unknown lens") {
 		t.Errorf("exit %d %q", code, errs)
 	}
 }

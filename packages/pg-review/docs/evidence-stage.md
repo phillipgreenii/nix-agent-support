@@ -7,7 +7,7 @@ The evidence stage (`internal/runner/evidence.go`) runs between the gate and the
   `--exclude-cwd-prefix`; `inventory`: `--scope-prefix`, `--layer`, `--exclude-cwd-prefix`), then
   `--since`, `--until` (UTC, `Z` suffix) and `--scope`. `--exclude-cwd-prefix` is omitted when
   `[ccpool].neutral_dir` is empty. A non-zero exit, a timeout (`timeout_seconds`, default 300) or
-  output that fails the `evidence-rows` schema is a provider error: exit 7 and a Failed run. A
+  output that fails the `evidence-rows` schema is a provider error: exit 23 and a Failed run. A
   timeout kills the provider's whole process group.
 - **Merge**: rows are redacted (paths under the scope's first prefix become relative), sorted
   byte-wise by (kind, subject key), ties in provider order, and numbered `E-001` onward.
