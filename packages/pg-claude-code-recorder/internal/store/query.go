@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 )
 
 // File is a row of the files table.
@@ -65,8 +66,53 @@ func scanFile(sc interface{ Scan(...any) error }) (File, error) {
 	var dev, ino, fh int64
 	err := sc.Scan(&f.ID, &f.Source, &f.Mode, &dev, &ino, &f.Birth, &fh, &f.Link, &f.State, &f.FirstSeen, &f.LastSize, &f.CurGen, &f.DeletedNS)
 	f.Dev, f.Ino, f.FirstHash = uint64(dev), uint64(ino), uint64(fh)
+	f.Source, f.Mode, f.State = canonSource(f.Source), canonMode(f.Mode), canonState(f.State)
 	return f, err
 }
+
+// canonSource, canonMode and canonState return the package's one copy of a
+// known value, so a retained File slice shares those strings instead of holding
+// one driver-allocated copy per row. An unknown value passes through unchanged.
+// A plain switch needs no lock and no table.
+func canonSource(s string) string {
+	switch s {
+	case "claude-transcript":
+		return "claude-transcript"
+	case "claude-tool-result-body":
+		return "claude-tool-result-body"
+	case "session-registry":
+		return "session-registry"
+	}
+	return s
+}
+
+func canonMode(s string) string {
+	switch s {
+	case "append":
+		return "append"
+	case "snapshot":
+		return "snapshot"
+	case "link":
+		return "link"
+	}
+	return s
+}
+
+func canonState(s string) string {
+	switch s {
+	case "ok":
+		return "ok"
+	case "copy_mismatch":
+		return "copy_mismatch"
+	case "deleted":
+		return "deleted"
+	}
+	return s
+}
+
+// allFilesHint is the row count of the last AllFiles result, the capacity hint
+// for the next one. It is a hint only, so a racy or stale value is harmless.
+var allFilesHint atomic.Int64
 
 // File returns the file with the given id.
 func (s *Reader) File(id int64) (File, error) {
@@ -80,32 +126,41 @@ func (s *Reader) File(id int64) (File, error) {
 // FilesByIdentity returns the files with the given device and inode, newest
 // first. The caller applies the birth-time and first-bytes rules.
 func (s *Reader) FilesByIdentity(dev, ino uint64) ([]File, error) {
-	return s.files(`SELECT `+fileCols+` FROM files WHERE dev=? AND ino=? ORDER BY id DESC`, int64(dev), int64(ino))
+	return s.files(0, `SELECT `+fileCols+` FROM files WHERE dev=? AND ino=? ORDER BY id DESC`, int64(dev), int64(ino))
 }
 
 // FilesByCurrentPath returns the files whose current path is path.
 func (s *Reader) FilesByCurrentPath(path string) ([]File, error) {
-	return s.files(`SELECT `+fileCols+` FROM files WHERE id IN (SELECT file_id FROM paths WHERE path=? AND closed_ns IS NULL) ORDER BY id DESC`, path)
+	return s.files(0, `SELECT `+fileCols+` FROM files WHERE id IN (SELECT file_id FROM paths WHERE path=? AND closed_ns IS NULL) ORDER BY id DESC`, path)
 }
 
 // AllFiles returns every file ordered by id.
 func (s *Reader) AllFiles() ([]File, error) {
-	return s.files(`SELECT ` + fileCols + ` FROM files ORDER BY id`)
+	out, err := s.files(int(allFilesHint.Load()), `SELECT `+fileCols+` FROM files ORDER BY id`)
+	if err == nil {
+		allFilesHint.Store(int64(len(out)))
+	}
+	return out, err
 }
 
 // DeletedSnapshotFiles returns only the snapshot-mode files whose state is
 // deleted, ordered by id. A sweep with nothing deleted reads no whole table.
 func (s *Reader) DeletedSnapshotFiles() ([]File, error) {
-	return s.files(`SELECT ` + fileCols + ` FROM files WHERE mode='snapshot' AND state='deleted' ORDER BY id`)
+	return s.files(0, `SELECT `+fileCols+` FROM files WHERE mode='snapshot' AND state='deleted' ORDER BY id`)
 }
 
-func (s *Reader) files(q string, args ...any) ([]File, error) {
+// files runs a file query; hint is the expected row count (0 when unknown), the
+// initial capacity of the result so a large result does not grow by doubling.
+func (s *Reader) files(hint int, q string, args ...any) ([]File, error) {
 	rows, err := s.q.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []File
+	if hint > 0 {
+		out = make([]File, 0, hint)
+	}
 	for rows.Next() {
 		f, err := scanFile(rows)
 		if err != nil {
@@ -635,7 +690,7 @@ func (s *Reader) FilesByIDs(ids []int64) ([]File, error) {
 		n := min(len(ids), idChunk)
 		ph, args := idArgs(ids[:n])
 		ids = ids[n:]
-		fs, err := s.files(`SELECT `+fileCols+` FROM files WHERE id IN (`+ph+`)`, args...)
+		fs, err := s.files(0, `SELECT `+fileCols+` FROM files WHERE id IN (`+ph+`)`, args...)
 		if err != nil {
 			return nil, err
 		}
