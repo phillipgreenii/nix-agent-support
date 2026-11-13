@@ -16,11 +16,15 @@
 
 `pg-git-lander land {{feature-branch}} --keep-source-branch`
 
+- Land from outside any repository, naming a worktree (its clone is used; all worktree flags MUST be in one clone):
+
+`pg-git-lander land {{feature-branch}} --source-worktree {{path/to/worktree}}`
+
 - Rebase a branch onto a commit:
 
 `pg-git-lander rebase {{feature-branch}} --onto {{origin/main}}`
 
-- Resume, skip a commit of, abort or quit a stopped operation:
+- Resume, skip a commit of, abort or quit a stopped operation (no worktree flags: run inside the repository or pass `--repo`):
 
 `pg-git-lander land --continue`
 

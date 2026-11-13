@@ -114,9 +114,12 @@ func newToken() string {
 }
 
 func dispatch(ctx context.Context, env *Env, c *Command) (*outcome.Outcome, error) {
-	dir := c.Repo
-	if dir == "" {
-		dir = env.Cwd
+	dir, msg := repoDir(ctx, env.Deps.Git, c, env.Cwd)
+	if msg != "" {
+		o := outcome.New(outcome.UsageError)
+		o.Operation, o.Branch, o.Repo = string(c.Kind), c.Branch, c.Repo
+		o.Message = msg
+		return o, nil
 	}
 	deps := env.Deps
 	deps.Out = env.Stderr

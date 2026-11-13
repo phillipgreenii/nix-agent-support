@@ -36,6 +36,13 @@ the placeholder:
   It is a parking branch based on TARGET: nobody works in it, and it MAY be
   deleted.
 
+repository: --repo PATH, else the clone containing the worktrees named by
+  --target-worktree, --source-worktree and --work-worktree (or the variables
+  below), else the current directory. All named paths MUST be in ONE clone
+  (same git common directory); two repositories or two clones are a usage
+  error. The resume flags take no worktree flags: pass --repo or run from
+  inside the repository.
+
 environment: PGL_TARGET_WORKTREE, PGL_SOURCE_WORKTREE and PGL_WORK_WORKTREE
   supply the worktree flags when they are absent.
 

@@ -20,7 +20,7 @@ pg-git-lander log    OP_ID | BRANCH [--tail N]
 pg-git-lander config check [--file PATH] [--json]
 ```
 
-- Every form accepts `--repo PATH`: any path inside the clone or one of its worktrees (default: the current directory).
+- Every form accepts `--repo PATH`: any path inside the clone or one of its worktrees. Without it, land and rebase use the clone that contains the worktrees named by `--target-worktree`, `--source-worktree` and `--work-worktree` (or `PGL_TARGET_WORKTREE`, `PGL_SOURCE_WORKTREE`, `PGL_WORK_WORKTREE`), so they work from a directory outside any repository; with no worktree flag the default is the current directory. Every named path (and `--repo`, and a current directory inside a repository) MUST be in ONE git clone, compared by git common directory: two repositories, or two clones of one repository, are a usage error naming each path and its clone, before any lock is taken. A nonexistent path, or one outside a repository, is a usage error naming it. The resume flags take no worktree flags, so they need `--repo` or a current directory inside the repository.
 - BRANCH and TARGET are local branch names. BRANCH equal to TARGET is a usage error.
 - `--onto REF` names the commit to replay BRANCH onto, like the argument of `git rebase REF` (git's `<upstream>`), not
   like git's own `--onto` option. It accepts any commit-ish and is resolved once.

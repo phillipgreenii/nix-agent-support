@@ -151,6 +151,9 @@ func Resume(ctx context.Context, d Deps, req ResumeRequest) (*outcome.Outcome, e
 		o := outcome.New(outcome.UsageError)
 		o.Operation, o.Branch, o.Repo = op, req.Branch, req.RepoFlag
 		o.Message = fmt.Sprintf("%s is not inside a git repository", req.Dir)
+		if req.RepoFlag == "" {
+			o.Message += ": resume flags take no worktree flags, so pass --repo or run from inside the repository"
+		}
 		return o, nil
 	}
 	// Resume flags need only the built-in lock defaults and the XDG file, so
