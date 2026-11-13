@@ -230,9 +230,13 @@ func TestLandFastForwardPreparesWorkBranchAndRecords(t *testing.T) {
 	if rec.WorkBranch != p.WorkBranch || len(rec.Worktrees) != 2 {
 		t.Fatalf("record worktrees/work branch: %+v", rec)
 	}
-	// Locks: TARGET, BRANCH and both worktrees.
-	if n := strings.Count(f.lockRefs(), "\n") + 1; n != 4 {
+	// Locks, first phase only: BRANCH and the feature worktree. TARGET and the
+	// main worktree (destination only) are taken after the hooks.
+	if n := strings.Count(f.lockRefs(), "\n") + 1; n != 2 {
 		t.Fatalf("%d lock refs:\n%s", n, f.lockRefs())
+	}
+	if f.refExists(locks.BranchRef(f.main)) || f.refExists(locks.WorktreeRef("_main")) {
+		t.Fatalf("TARGET or the destination worktree is locked before the hooks:\n%s", f.lockRefs())
 	}
 	if p.Stage != "preparing" {
 		t.Fatalf("stage = %s", p.Stage)

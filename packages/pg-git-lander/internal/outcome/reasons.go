@@ -86,6 +86,7 @@ const (
 	StopTimeout           StopReason = "timeout"
 	StopInterrupted       StopReason = "interrupted"
 	StopRace              StopReason = "race"
+	StopTargetBusy        StopReason = "target-busy"
 	StopBranchMoved       StopReason = "branch-moved"
 	StopCheckoutChanged   StopReason = "checkout-changed"
 	StopMoveUnverified    StopReason = "move-unverified"
@@ -101,6 +102,7 @@ const (
 	StageAfterRebase = "after_rebase"
 	StageBeforeMove  = "before_move"
 	StageMoving      = "moving"
+	StageCleanup     = "cleanup"
 	StageAny         = "any"
 )
 
@@ -125,6 +127,7 @@ var Stops = map[StopReason]StopInfo{
 	StopTimeout:           {[]string{StageAny}, true, []string{FlagContinue, FlagAbort}},
 	StopInterrupted:       {[]string{StageAny}, true, []string{FlagContinue, FlagAbort}},
 	StopRace:              {[]string{StageMoving}, true, []string{FlagContinue, FlagAbort}},
+	StopTargetBusy:        {[]string{StageBeforeMove, StageCleanup}, true, []string{FlagContinue, FlagAbort}},
 	StopBranchMoved:       {[]string{StageMoving}, false, []string{FlagAbort}},
 	StopCheckoutChanged:   {[]string{StageMoving}, true, []string{FlagContinue, FlagAbort}},
 	StopMoveUnverified:    {[]string{StageMoving}, false, []string{FlagAbort}},
@@ -145,7 +148,7 @@ var (
 	}
 	AllStops = []StopReason{
 		StopConflict, StopResolveFailed, StopMaxConflictRounds, StopHookFailed, StopCommitRejected,
-		StopTransient, StopTimeout, StopInterrupted, StopRace, StopBranchMoved, StopCheckoutChanged,
+		StopTransient, StopTimeout, StopInterrupted, StopRace, StopTargetBusy, StopBranchMoved, StopCheckoutChanged,
 		StopMoveUnverified, StopLockLost, StopHolderDied, StopGitError, StopInternalError,
 	}
 )

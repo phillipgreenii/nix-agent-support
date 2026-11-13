@@ -108,8 +108,10 @@ type Op struct {
 func (o *Op) now() time.Time { return o.Layer.Clock.Now().UTC().Truncate(time.Second) }
 
 // Begin creates the BRANCH record and takes the operation's locks together:
-// the land set (TARGET, BRANCH and each distinct worktree) for a land, the
-// rebase set otherwise. The record is the BRANCH lock's own record.
+// the whole land set (TARGET, BRANCH and each distinct worktree) for a land,
+// the rebase set otherwise. The record is the BRANCH lock's own record. The
+// pipeline itself takes a land's locks in two phases (LandBranchLocks, then
+// AcquireTarget); Begin is the single-phase form.
 func Begin(ctx context.Context, l *locks.Layer, p Params, rnd io.Reader) (*Op, error) {
 	id, err := NewOpID(l.Clock.Now(), rnd)
 	if err != nil {
@@ -125,6 +127,61 @@ func Begin(ctx context.Context, l *locks.Layer, p Params, rnd io.Reader) (*Op, e
 		return nil, err
 	}
 	return &Op{Layer: l, Set: set, Branch: set.ByRef(locks.BranchRef(p.Branch))}, nil
+}
+
+// AcquireTarget is the second lock phase of a land: it takes TARGET and every
+// worktree whose only role is destination, in one all-or-nothing Acquire in
+// ascending ref order, and adds them to the set. A lock the set already holds
+// (a resume that took them back) is skipped, so the call is idempotent. It
+// returns the locks newly taken.
+func (o *Op) AcquireTarget(ctx context.Context) ([]*locks.Held, error) {
+	var specs []locks.Spec
+	for _, sp := range o.Layer.LandTargetLocks(o.Branch.Record()) {
+		if o.Set.ByRef(sp.Ref) == nil {
+			specs = append(specs, sp)
+		}
+	}
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	set, err := o.Layer.Acquire(ctx, specs...)
+	if err != nil {
+		return nil, err
+	}
+	o.Set.Locks = append(o.Set.Locks, set.Locks...)
+	return set.Locks, nil
+}
+
+// TargetLocks returns the held locks of the second phase (TARGET and the
+// destination-only worktrees).
+func (o *Op) TargetLocks() []*locks.Held {
+	var out []*locks.Held
+	for _, sp := range o.Layer.LandTargetLocks(o.Branch.Record()) {
+		if h := o.Set.ByRef(sp.Ref); h != nil {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// ReleaseTarget releases the second-phase locks and removes them from the
+// set. The caller stops their renewal first.
+func (o *Op) ReleaseTarget(ctx context.Context) error {
+	held := o.TargetLocks()
+	drop := map[*locks.Held]bool{}
+	var errs []error
+	for i := len(held) - 1; i >= 0; i-- {
+		drop[held[i]] = true
+		errs = append(errs, held[i].Release(ctx))
+	}
+	kept := o.Set.Locks[:0:0]
+	for _, h := range o.Set.Locks {
+		if !drop[h] {
+			kept = append(kept, h)
+		}
+	}
+	o.Set.Locks = kept
+	return errors.Join(errs...)
 }
 
 // Record returns a copy of the current BRANCH record.
@@ -258,27 +315,44 @@ func TakeBack(ctx context.Context, l *locks.Layer, branch string, owner locks.Ow
 // in running.
 func (r *Resumed) SwapBack(ctx context.Context) error { return r.Op.Set.Undo(ctx) }
 
+// TakesTargetLocks reports whether a resume of a stopped record at stage
+// takes TARGET and the destination-only worktrees: only from stage moving on.
+// An earlier stage takes them at the lock point of the run, like a fresh one.
+func TakesTargetLocks(stage string) bool {
+	switch stage {
+	case StageMoving, StageAfter, StageCleanup:
+		return true
+	}
+	return false
+}
+
 // TakeOtherLocks takes the operation's other locks after the BRANCH take-back:
-// its own stopped worktree records by compare-and-swap and, for a land, TARGET
-// by re-acquisition, in ascending ref order with the wait of the lock layer.
-// When any stays busy past the wait (or is refused) everything, BRANCH
-// included, is swapped back to stopped and the error is returned (*locks.
-// BusyError: the caller exits busy).
+// its own stopped worktree records by compare-and-swap and, for a land at
+// stage moving or later, TARGET by re-acquisition (a worktree whose only role
+// is destination is taken back at the same stages and left alone before), in
+// ascending ref order with the wait of the lock layer. When any stays busy
+// past the wait (or is refused) everything, BRANCH included, is swapped back
+// to stopped and the error is returned (*locks.BusyError: the caller exits
+// busy).
 func (r *Resumed) TakeOtherLocks(ctx context.Context) error {
 	rec := r.Op.Branch.Record()
 	var specs []locks.Spec
 	seen := map[string]bool{}
+	withTarget := rec.Operation == OperationLand && TakesTargetLocks(rec.Stage)
 	for _, w := range rec.Worktrees {
 		if seen[w.Admin] {
 			continue
 		}
 		seen[w.Admin] = true
+		if rec.Operation == OperationLand && !withTarget && len(w.Roles) == 1 && w.Roles[0] == "destination" {
+			continue
+		}
 		specs = append(specs, locks.Spec{
 			Ref: locks.WorktreeRef(w.Admin), Role: locks.RoleWorktree,
 			Rec: rec.Short(locks.RoleWorktree), TakeBack: rec.OpID,
 		})
 	}
-	if rec.Operation == OperationLand {
+	if withTarget {
 		specs = append(specs, locks.Spec{Ref: locks.BranchRef(rec.Target), Role: locks.RoleTarget, Rec: rec.Short(locks.RoleTarget)})
 	}
 	sort.SliceStable(specs, func(i, j int) bool { return specs[i].Ref < specs[j].Ref })

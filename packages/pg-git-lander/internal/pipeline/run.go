@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/branchmove"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/cleanup"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/conflict"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/hooks"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/landmove"
@@ -49,6 +51,12 @@ type runner struct {
 	moved     bool
 	landed    string
 	cres      *cleanup.Result
+	// targetWait is the time spent taking the second lock phase (TARGET and the
+	// destination worktree); targetHeld the time they were held, over every
+	// phase this run took; targetSince is when the current hold began (zero
+	// when not held).
+	targetWait, targetHeld time.Duration
+	targetSince            time.Time
 	// ctx is the operation's context: a signal cancels it, and lostCheck turns
 	// that into an interrupted stop at the next step boundary.
 	ctx context.Context
@@ -104,6 +112,9 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 	}
 	s.stats.ConflictRounds = plan.conflictRounds
 	s.rebased = plan.rebased
+	if p.Operation == worktrees.Land && p.Op.Set.ByRef(locks.BranchRef(p.Request.Target)) != nil {
+		s.targetSince = p.d.Clock.Now() // taken back by a resume at stage moving or later
+	}
 	switch plan.entry {
 	case entryCleanup:
 		s.moved, s.landed = plan.moved, plan.landed
@@ -122,6 +133,13 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 		entry := entryNormal
 		if first {
 			entry = plan.entry
+		}
+		if entry == entryNormal {
+			// Hooks and a rebase never run under TARGET: give back what a
+			// resume at stage moving took.
+			if err := s.releaseTarget(ctx); err != nil {
+				return nil, nil, err
+			}
 		}
 		s.baseMoved = entry == entryRebased || entry == entryAfterRebase || (entry == entryBeforeMove && plan.baseMoved)
 		switch {
@@ -146,13 +164,26 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 			}
 			return s.cleanup(ctx, false)
 		}
-		if s.baseMoved && entry != entryBeforeMove {
-			if sp, err := s.hookPoint(ctx, hooks.PointAfterRebase, oprecord.StageAfterRebase); sp != nil || err != nil {
+		if entry != entryMove {
+			if s.baseMoved && entry != entryBeforeMove {
+				if sp, err := s.hookPoint(ctx, hooks.PointAfterRebase, oprecord.StageAfterRebase); sp != nil || err != nil {
+					return nil, sp, err
+				}
+			}
+			if sp, err := s.hookPoint(ctx, hooks.PointBeforeMove, oprecord.StageBeforeMove); sp != nil || err != nil {
 				return nil, sp, err
 			}
 		}
-		if sp, err := s.hookPoint(ctx, hooks.PointBeforeMove, oprecord.StageBeforeMove); sp != nil || err != nil {
-			return nil, sp, err
+		if p.Operation == worktrees.Land {
+			// The second lock phase: only now, with the hooks done, are TARGET
+			// and the destination worktree taken.
+			act, out, sp, err := s.enterMain(ctx)
+			switch {
+			case sp != nil || err != nil || out != nil:
+				return out, sp, err
+			case act == mainRetry:
+				continue
+			}
 		}
 		status, sp, err := s.move(ctx)
 		if sp != nil || err != nil {
@@ -161,39 +192,279 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 		if status != landmove.TargetMoved {
 			break
 		}
-		// TARGET moved since tips.target: return to step 3.
-		if s.stats.RaceRetries >= p.Config.MaxRaceRetries {
-			return nil, &stopSpec{
-				reason:  outcome.StopRace,
-				message: fmt.Sprintf("%s moved %d times while the operation ran", p.Request.Target, s.stats.RaceRetries+1),
-			}, nil
-		}
-		old := p.Tips.Target
-		if err := p.Op.Branch.Update(ctx, func(r *locks.Record) { r.Move = locks.Move{} }); err != nil {
-			return nil, nil, err
-		}
-		if err := p.Resnapshot(ctx); err != nil {
-			return nil, nil, err
-		}
-		s.stats.RaceRetries++
-		if err := p.Events.RaceRetry(ctx, s.stats.RaceRetries, old, p.Tips.Target); err != nil {
-			return nil, nil, err
-		}
-		cur, err := s.workTip(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		if p.Path, err = p.Decide(ctx, cur); err != nil {
-			return nil, nil, err
-		}
-		if p.Path == rebase.NothingToLand {
-			if err := s.setResult(ctx, cur); err != nil {
-				return nil, nil, err
-			}
-			return s.cleanup(ctx, false)
+		// TARGET moved after the check, under the lock (a writer that does not
+		// use this tool): the full return to step 3.
+		if out, sp, err, done := s.raceReturn(ctx); done || sp != nil || err != nil {
+			return out, sp, err
 		}
 	}
 	return s.afterAndCleanup(ctx)
+}
+
+// mainAction is what enterMain decided.
+type mainAction int
+
+const (
+	// mainMove: TARGET and the destination worktree are held and TARGET is at
+	// the recorded base tip (or the result was rebased onto its new tip with
+	// the hook result reused): the move may run.
+	mainMove mainAction = iota
+	// mainRetry: the locks are released and the run starts over at step 3.
+	mainRetry
+)
+
+// enterMain takes TARGET and the destination worktree (phase two) and
+// validates the result against TARGET's present tip. When TARGET still is at
+// tips.target the result is ready to fast-forward. When it moved, the revalidate
+// setting decides: reuse the hook result (rebase under the locks) or return to
+// the rebase with the hooks to run again, outside the lock.
+func (s *runner) enterMain(ctx context.Context) (mainAction, *outcome.Outcome, *stopSpec, error) {
+	p := s.p
+	if sp, err := s.lockTarget(ctx); sp != nil || err != nil {
+		return 0, nil, sp, err
+	}
+	cur, err := p.revParse(ctx, "refs/heads/"+p.Request.Target)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if cur == p.Tips.Target {
+		return mainMove, nil, nil, nil
+	}
+	mode := p.Config.Revalidate
+	if mode != config.RevalidateNone && mode != config.RevalidatePaths {
+		mode = config.RevalidateFull
+	}
+	if mode != config.RevalidateFull {
+		reused, out, sp, err := s.reuseHooks(ctx, mode, cur)
+		if err != nil || out != nil || sp != nil {
+			return 0, out, sp, err
+		}
+		if reused {
+			return mainMove, nil, nil, nil
+		}
+	}
+	out, sp, err, done := s.raceReturn(ctx)
+	if done || sp != nil || err != nil {
+		return 0, out, sp, err
+	}
+	return mainRetry, nil, nil, nil
+}
+
+// lockTarget takes the second lock phase. A busy or refused lock stops the
+// operation with target-busy: it holds only the BRANCH-side locks, so TARGET
+// stays free.
+func (s *runner) lockTarget(ctx context.Context) (*stopSpec, error) {
+	p := s.p
+	start := p.d.Clock.Now()
+	held, err := p.Op.AcquireTarget(ctx)
+	s.targetWait += p.d.Clock.Since(start)
+	if err != nil {
+		var busy *locks.BusyError
+		var ref *locks.RefusedError
+		switch {
+		case errors.As(err, &busy):
+			return &stopSpec{reason: outcome.StopTargetBusy, message: s.busyMessage(ctx, busy.Ref, busy.Holder)}, nil
+		case errors.As(err, &ref):
+			return &stopSpec{reason: outcome.StopTargetBusy, message: s.busyMessage(ctx, ref.Ref, ref.Holder) + " (" + string(ref.Reason) + ")"}, nil
+		}
+		return nil, err
+	}
+	if len(held) > 0 {
+		s.targetSince = p.d.Clock.Now()
+		p.renewMore(ctx, held)
+	}
+	return nil, nil
+}
+
+// busyMessage names the holder of a lock of the second phase with its stage
+// and how long its operation has run (read from its BRANCH record).
+func (s *runner) busyMessage(ctx context.Context, ref string, h outcome.Holder) string {
+	p := s.p
+	stage, age := h.Stage, time.Duration(h.AgeS)*time.Second
+	if st, err := p.Layer.Read(ctx, locks.BranchRef(h.Branch)); err == nil && st.Rec != nil && st.Rec.OpID == h.OpID {
+		stage = st.Rec.Stage
+		if !st.Rec.StartedAt.IsZero() {
+			age = p.d.Clock.Now().Sub(st.Rec.StartedAt)
+		}
+	}
+	if stage == "" {
+		stage = "unknown"
+	}
+	return fmt.Sprintf("%s is held by %s %s (op %s, pid %d on %s) at stage %s for %s; wait for it and run --continue",
+		ref, h.Operation, h.Branch, h.OpID, h.PID, h.Host, stage, age.Truncate(time.Second))
+}
+
+// releaseTarget gives back the second-phase locks (a no-op when not held) and
+// closes the hold-time account.
+func (s *runner) releaseTarget(ctx context.Context) error {
+	p := s.p
+	if p.Operation != worktrees.Land {
+		return nil
+	}
+	held := p.Op.TargetLocks()
+	if len(held) == 0 {
+		return nil
+	}
+	p.stopRenewalOf(held)
+	err := p.Op.ReleaseTarget(context.WithoutCancel(ctx))
+	s.targetEnd()
+	return err
+}
+
+// targetEnd adds the current hold to the account.
+func (s *runner) targetEnd() {
+	if !s.targetSince.IsZero() {
+		s.targetHeld += s.p.d.Clock.Since(s.targetSince)
+		s.targetSince = time.Time{}
+	}
+}
+
+// raceReturn is the return to step 3 after TARGET moved, with the hooks to
+// run again: it counts a race retry (the bound stops with race, with TARGET
+// and the destination worktree given back first), releases the second phase,
+// re-snapshots and decides the path anew. done is true when the operation
+// ended here (a stop, or nothing left to land and the clean-up ran); false
+// means the loop starts over.
+func (s *runner) raceReturn(ctx context.Context) (*outcome.Outcome, *stopSpec, error, bool) {
+	p := s.p
+	if s.stats.RaceRetries >= p.Config.MaxRaceRetries {
+		if err := s.releaseTarget(ctx); err != nil {
+			return nil, nil, err, true
+		}
+		tip, err := s.workTip(ctx)
+		if err != nil {
+			return nil, nil, err, true
+		}
+		if err := p.EnterStage(ctx, oprecord.StageMoving, &tip); err != nil {
+			return nil, nil, err, true
+		}
+		return nil, &stopSpec{
+			reason:  outcome.StopRace,
+			message: fmt.Sprintf("%s moved %d times while the operation ran", p.Request.Target, s.stats.RaceRetries+1),
+		}, nil, true
+	}
+	if err := s.releaseTarget(ctx); err != nil {
+		return nil, nil, err, true
+	}
+	old := p.Tips.Target
+	if err := p.Op.Branch.Update(ctx, func(r *locks.Record) { r.Move = locks.Move{} }); err != nil {
+		return nil, nil, err, true
+	}
+	if err := p.Resnapshot(ctx); err != nil {
+		return nil, nil, err, true
+	}
+	s.stats.RaceRetries++
+	if err := p.Events.RaceRetry(ctx, s.stats.RaceRetries, old, p.Tips.Target, p.Config.Revalidate, false); err != nil {
+		return nil, nil, err, true
+	}
+	cur, err := s.workTip(ctx)
+	if err != nil {
+		return nil, nil, err, true
+	}
+	if p.Path, err = p.Decide(ctx, cur); err != nil {
+		return nil, nil, err, true
+	}
+	if p.Path == rebase.NothingToLand {
+		if err := s.setResult(ctx, cur); err != nil {
+			return nil, nil, err, true
+		}
+		out, sp, err := s.cleanup(ctx, false)
+		return out, sp, err, true
+	}
+	return nil, nil, nil, false
+}
+
+// reuseHooks is the revalidate shortcut under the TARGET lock: TARGET moved
+// from tips.target to cur while the hooks ran. With revalidate = paths the
+// hook result is kept only when the commits TARGET gained touch no file the
+// branch changes; with none, whenever the rebase onto cur is clean. The
+// rebase runs now, under the locks (a few commits); a conflict is undone and
+// the caller takes the full return. out is non-nil when the rebase left
+// nothing to land and the clean-up ran.
+func (s *runner) reuseHooks(ctx context.Context, mode, cur string) (bool, *outcome.Outcome, *stopSpec, error) {
+	p := s.p
+	work := p.Selection.Work.Path
+	old := p.Tips.Target
+	// The hook result is only valid under the same configuration.
+	if cfg, err := p.Pre.Load(ctx, cur); err != nil || cfg.Digest != p.Config.Digest {
+		return false, nil, nil, nil
+	}
+	if r := p.d.Git.Run(ctx, p.Repo, "merge-base", "--is-ancestor", old, cur); !r.OK() {
+		return false, nil, nil, nil // TARGET was rewritten, not advanced
+	}
+	tip, err := s.workTip(ctx)
+	if err != nil {
+		return false, nil, nil, err
+	}
+	if mode == config.RevalidatePaths {
+		gained, err := s.changedFiles(ctx, old, cur)
+		if err != nil {
+			return false, nil, nil, err
+		}
+		mine, err := s.changedFiles(ctx, old, tip)
+		if err != nil {
+			return false, nil, nil, err
+		}
+		for f := range mine {
+			if gained[f] {
+				return false, nil, nil, nil
+			}
+		}
+	}
+	if err := p.EnterStage(ctx, oprecord.StageRebasing, &tip); err != nil {
+		return false, nil, nil, err
+	}
+	rb := &rebase.Rebaser{Git: p.d.Git}
+	res, err := rb.Rebase(ctx, work, cur)
+	if err != nil {
+		return false, nil, nil, err
+	}
+	if !res.Finished {
+		if in, ierr := rb.InProgress(ctx, work); ierr == nil && in {
+			if _, aerr := p.git(ctx, work, "rebase", "--abort"); aerr != nil {
+				return false, nil, nil, aerr
+			}
+		}
+		return false, nil, nil, nil
+	}
+	s.rebased = true
+	s.dropped = append(s.dropped, res.Dropped...)
+	s.stats.RebasedCommits += len(res.Replayed)
+	if err := p.Resnapshot(ctx); err != nil {
+		return false, nil, nil, err
+	}
+	if err := p.Events.RaceRetry(ctx, s.stats.RaceRetries, old, cur, mode, true); err != nil {
+		return false, nil, nil, err
+	}
+	p.Log.Line("REVALIDATE", fmt.Sprintf("%s: %s moved %s to %s, hook result reused", mode, p.Request.Target, old, cur))
+	if res.Tip == cur {
+		// Every commit is already upstream: nothing is left to land.
+		if err := s.setResult(ctx, res.Tip); err != nil {
+			return false, nil, nil, err
+		}
+		out, sp, err := s.cleanup(ctx, false)
+		return true, out, sp, err
+	}
+	if err := s.setResult(ctx, res.Tip); err != nil {
+		return false, nil, nil, err
+	}
+	return true, nil, nil, nil
+}
+
+// changedFiles lists the paths that differ between from and to (a rename is a
+// delete and an add, so both names count).
+func (s *runner) changedFiles(ctx context.Context, from, to string) (map[string]bool, error) {
+	out, err := s.p.git(ctx, s.p.Repo, "diff", "--no-ext-diff", "--name-only", "--no-renames", "-z", from, to)
+	if err != nil {
+		return nil, err
+	}
+	files := map[string]bool{}
+	for _, f := range strings.Split(out, "\x00") {
+		if f = strings.TrimSpace(f); f != "" {
+			files[f] = true
+		}
+	}
+	return files, nil
 }
 
 // afterAndCleanup is step 12, the after hook, and step 13.
@@ -600,6 +871,12 @@ func (s *runner) cleanup(ctx context.Context, nothing bool) (*outcome.Outcome, *
 	if sp := s.lostCheck(); sp != nil {
 		return nil, sp, nil
 	}
+	if p.Operation == worktrees.Land {
+		// Step 13 needs TARGET and the destination worktree held.
+		if sp, err := s.lockTarget(ctx); sp != nil || err != nil {
+			return nil, sp, err
+		}
+	}
 	if err := p.EnterStage(ctx, oprecord.StageCleanup, nil); err != nil {
 		return nil, nil, err
 	}
@@ -614,6 +891,7 @@ func (s *runner) cleanup(ctx context.Context, nothing bool) (*outcome.Outcome, *
 	if err := p.Release(ctx); err != nil {
 		return nil, nil, err
 	}
+	s.targetEnd()
 
 	word := outcome.Landed
 	switch {
@@ -720,6 +998,7 @@ func (s *runner) opEnd(ctx context.Context, o *outcome.Outcome) {
 		Stats: map[string]any{
 			"duration_ms": st.DurationMS, "rebased_commits": st.RebasedCommits,
 			"autofix_commits": st.AutofixCommits, "conflict_rounds": st.ConflictRounds, "race_retries": st.RaceRetries,
+			"target_lock_wait_ms": s.targetWait.Milliseconds(), "target_lock_held_ms": s.targetHeld.Milliseconds(),
 		},
 		BranchFate: o.BranchFate, Restored: o.Restored, Warnings: words,
 	}
@@ -754,6 +1033,7 @@ func (s *runner) stop(ctx context.Context, sp *stopSpec) (*outcome.Outcome, erro
 			a.ConflictRounds, a.RaceRetries = s.stats.ConflictRounds, s.stats.RaceRetries
 		})
 		serr = p.Op.Stop(ctx, oprecord.StopInfo{Reason: sp.reason, Message: sp.message, Paths: sp.paths, MovedAlready: s.moved})
+		s.targetEnd() // a stop deletes the TARGET record
 		if errors.Is(serr, locks.ErrLockLost) {
 			// The records changed hands while this stop was written: that is
 			// a lost lock (exit 4), not an internal error.
@@ -797,6 +1077,9 @@ const (
 	entryRebased
 	entryAfterRebase
 	entryBeforeMove
+	// entryMove: the hooks passed before the stop (target-busy); take the
+	// second lock phase and move without running them again.
+	entryMove
 	// entryAfterHook: the move happened; run the after hook, then clean up.
 	entryAfterHook
 	// entryCleanup runs the clean-up only.

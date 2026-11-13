@@ -107,8 +107,8 @@ func TestReasonTablesComplete(t *testing.T) {
 	if len(AllRefusals) != 22 || len(Refusals) != 22 {
 		t.Errorf("refusals: %d listed, %d in table, want 22", len(AllRefusals), len(Refusals))
 	}
-	if len(AllStops) != 16 || len(Stops) != 16 {
-		t.Errorf("stops: %d listed, %d in table, want 16", len(AllStops), len(Stops))
+	if len(AllStops) != 17 || len(Stops) != 17 {
+		t.Errorf("stops: %d listed, %d in table, want 17", len(AllStops), len(Stops))
 	}
 	for _, r := range AllRefusals {
 		if _, ok := Refusals[r]; !ok {
@@ -137,6 +137,7 @@ func TestStopTable(t *testing.T) {
 		{StopTimeout, true, []string{"--continue", "--abort"}},
 		{StopInterrupted, true, []string{"--continue", "--abort"}},
 		{StopRace, true, []string{"--continue", "--abort"}},
+		{StopTargetBusy, true, []string{"--continue", "--abort"}},
 		{StopBranchMoved, false, []string{"--abort"}},
 		{StopCheckoutChanged, true, []string{"--continue", "--abort"}},
 		{StopMoveUnverified, false, []string{"--abort"}},

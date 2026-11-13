@@ -141,6 +141,8 @@ type Prepared struct {
 	plan *resumePlan
 
 	d         Deps
+	lostCh    chan error
+	renewals  map[*locks.Held]func()
 	stopRenew func()
 	opStarted bool
 	released  bool
@@ -505,7 +507,8 @@ func (s *session) params(sel *worktrees.Selection) oprecord.Params {
 	}
 }
 
-// lock is step 2. It takes the locks, re-runs the cascade and the checks of
+// lock is step 2. It takes the first phase of the locks (design section 8.1),
+// re-runs the cascade and the checks of
 // section 11.1 once they are held, and starts over (releasing everything
 // first) when the selection changed in between. On success s.p.Selection and
 // s.p.Op are set and (nil, nil) is returned.
@@ -516,7 +519,10 @@ func (s *session) lock(ctx context.Context, sel *worktrees.Selection) (*Result, 
 		rec := oprecord.NewRecord(params, p.OpID, s.d.Clock.Now())
 		specs := p.Layer.RebaseLocks(rec)
 		if s.req.Operation == worktrees.Land {
-			specs = p.Layer.LandLocks(rec)
+			// The first phase: BRANCH and the worktrees, never TARGET or a
+			// worktree that is only the destination. The run takes those
+			// (the second phase) when the hooks have passed.
+			specs = p.Layer.LandBranchLocks(rec)
 		}
 		set, err := p.Layer.Acquire(ctx, specs...)
 		if err != nil {
@@ -584,23 +590,47 @@ func (s *session) targetName() string {
 // startRenewal keeps every held lease fresh from here on.
 func (s *session) startRenewal(ctx context.Context) { s.p.startRenewal(ctx) }
 
+// maxHeldLocks bounds the lost-lease channel: every lock of an operation, both
+// phases, can report one failed renewal without blocking.
+const maxHeldLocks = 64
+
 // startRenewal keeps every held lease fresh from here on.
 func (p *Prepared) startRenewal(ctx context.Context) {
-	lost := make(chan error, len(p.Op.Set.Locks))
-	var stops []func()
-	for _, h := range p.Op.Set.Locks {
+	lost := make(chan error, maxHeldLocks)
+	p.lostCh, p.Lost = lost, lost
+	p.renewals = map[*locks.Held]func(){}
+	p.stopRenew = func() {
+		for h, stop := range p.renewals {
+			stop()
+			delete(p.renewals, h)
+		}
+	}
+	p.renewMore(ctx, p.Op.Set.Locks)
+}
+
+// renewMore starts the lease renewal of locks taken after startRenewal (the
+// second phase), reporting on the same lost-lease channel.
+func (p *Prepared) renewMore(ctx context.Context, held []*locks.Held) {
+	for _, h := range held {
 		stop, ch := h.RunRenewal(ctx)
-		stops = append(stops, stop)
+		p.renewals[h] = stop
 		go func() {
 			if err := <-ch; err != nil {
-				lost <- err
+				select {
+				case p.lostCh <- err:
+				default:
+				}
 			}
 		}()
 	}
-	p.Lost = lost
-	p.stopRenew = func() {
-		for _, stop := range stops {
+}
+
+// stopRenewalOf stops the renewal of held (before they are released).
+func (p *Prepared) stopRenewalOf(held []*locks.Held) {
+	for _, h := range held {
+		if stop, ok := p.renewals[h]; ok {
 			stop()
+			delete(p.renewals, h)
 		}
 	}
 }
@@ -611,7 +641,9 @@ func (s *session) fail(ctx context.Context, o *outcome.Outcome) *Result {
 	p := s.p
 	o.OpID, o.Log = p.OpID, p.Log.Path
 	if p.opStarted {
-		stats := map[string]any{"duration_ms": s.d.Clock.Since(p.Started).Milliseconds()}
+		stats := map[string]any{
+			"duration_ms": s.d.Clock.Since(p.Started).Milliseconds(), "target_lock_wait_ms": 0, "target_lock_held_ms": 0,
+		}
 		_ = p.Events.OpEnd(ctx, oplog.OpEnd{
 			Outcome: string(o.Outcome), Reason: o.Reason, Stage: p.Stage, Stats: stats,
 			Restored: []outcome.Restored{}, Warnings: warningWords(p.Warnings),

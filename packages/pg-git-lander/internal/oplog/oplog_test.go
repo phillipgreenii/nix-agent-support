@@ -198,7 +198,7 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 	must(f.ev.OpStart(ctx, map[string]any{"ticket": "X-1"}, []locks.WorktreeEntry{{Admin: "_main", Path: "/r", Roles: []string{"destination"}, Start: locks.Start{Branch: "main"}}}, "work", "placeholder", locks.Keep{SourceBranch: true}, "digest"))
 	must(f.ev.Stage(ctx, "rebasing", "locked", 1500*time.Millisecond))
 	must(f.ev.LockWait(ctx, locks.LockWait{Lock: "refs/l", Holder: holder("h-op", "rebasing"), Waited: 2 * time.Second, Result: locks.WaitBusy}))
-	must(f.ev.RaceRetry(ctx, 2, "aaa", "bbb"))
+	must(f.ev.RaceRetry(ctx, 2, "aaa", "bbb", "paths", true))
 	must(f.ev.Hook(ctx, hooks.CommandRecord{Point: "before", Index: 1, Argv0: "check", Code: 3, Duration: 40 * time.Millisecond, Result: "failed"}))
 	must(f.ev.HolderConverted(ctx, locks.Conversion{Lock: "refs/l", PreviousOwner: locks.Owner{Host: "h", PID: 9}, Why: locks.WhyExpired}))
 	must(f.ev.Conflict(ctx, []string{"a.txt"}, "union", "resolved"))
@@ -213,7 +213,7 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 		EvOpStart:         {"context", "worktrees", "work_branch", "placeholder_branch", "keep", "config_digest"},
 		EvStage:           {"stage", "previous_stage", "duration_ms"},
 		EvLockWait:        {"lock", "holder", "waited_ms", "result"},
-		EvRaceRetry:       {"attempt", "old_target_tip", "new_target_tip"},
+		EvRaceRetry:       {"attempt", "old_target_tip", "new_target_tip", "revalidate", "reused"},
 		EvHook:            {"point", "index", "argv0", "exit", "duration_ms", "result"},
 		EvHolderConverted: {"lock", "previous_owner", "why"},
 		EvConflict:        {"paths", "rule", "result"},

@@ -162,10 +162,14 @@ func (e *Events) LockWait(ctx context.Context, w locks.LockWait) error {
 	})
 }
 
-// RaceRetry emits race_retry.
-func (e *Events) RaceRetry(ctx context.Context, attempt int, oldTargetTip, newTargetTip string) error {
+// RaceRetry emits race_retry: TARGET moved between the snapshot and the move.
+// revalidate is the configured mode and reused is true when the hook result
+// was kept (a rebase under the TARGET lock, no new hook run); attempt is then
+// the number of full race returns so far, unchanged.
+func (e *Events) RaceRetry(ctx context.Context, attempt int, oldTargetTip, newTargetTip, revalidate string, reused bool) error {
 	return e.Emit(ctx, EvRaceRetry, map[string]any{
 		"attempt": attempt, "old_target_tip": oldTargetTip, "new_target_tip": newTargetTip,
+		"revalidate": revalidate, "reused": reused,
 	})
 }
 

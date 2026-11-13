@@ -579,7 +579,7 @@ func TestRunSwappedLockRecordGivesLockLost(t *testing.T) {
 	f.feature()
 	mainTip, featTip := f.tip(f.main), f.tip("feature/x")
 	hook := f.hookScript(`b=$(printf '{}' | git hash-object -w --stdin)
-git update-ref ` + locks.BranchRef(f.main) + ` "$b"`)
+git update-ref ` + locks.BranchRef("feature/x") + ` "$b"`)
 	f.hooksXDG("land", map[string]string{"before_move": hook}, "")
 	o := f.run(f.land())
 	want(t, o, outcome.Stopped, 21)
@@ -589,7 +589,7 @@ git update-ref ` + locks.BranchRef(f.main) + ` "$b"`)
 	if f.tip(f.main) != mainTip || f.tip("feature/x") != featTip {
 		t.Fatal("a move went ahead on a swapped lock record")
 	}
-	if !strings.Contains(o.Message, locks.BranchRef(f.main)) {
+	if !strings.Contains(o.Message, locks.BranchRef("feature/x")) {
 		t.Errorf("message = %q", o.Message)
 	}
 }

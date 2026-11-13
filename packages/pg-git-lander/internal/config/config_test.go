@@ -113,7 +113,8 @@ func TestNoConfigurationMeansDefaults(t *testing.T) {
 		t.Fatalf("expected no rules or hooks: %+v", c)
 	}
 	if c.Lock.LeaseTTL != 30*time.Second || c.Lock.Wait != 60*time.Second || !c.RunGitHooks ||
-		c.MaxRaceRetries != 2 || c.MaxConflictRounds != 10 || c.AutofixAttempts != 2 {
+		c.MaxRaceRetries != 2 || c.MaxConflictRounds != 10 || c.AutofixAttempts != 2 ||
+		c.Revalidate != config.RevalidateFull {
 		t.Fatalf("defaults wrong: %+v", c)
 	}
 	if c.TrustRepoConfig || c.IgnoreRepoConfig || c.Primary != "" {
@@ -559,4 +560,38 @@ func TestMissingRepoFileAndBadRef(t *testing.T) {
 	if _, err := f.load("refs/heads/does-not-exist"); err == nil {
 		t.Fatal("an unreadable tip must be an error, not silently no config")
 	}
+}
+
+func TestRevalidateKey(t *testing.T) {
+	for _, v := range []string{"none", "paths", "full"} {
+		f := newFx(t)
+		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = \"" + v + "\"\n"})
+		if c := f.mustLoad(land); c.Revalidate != v {
+			t.Fatalf("revalidate = %q, want %q", c.Revalidate, v)
+		}
+	}
+	t.Run("an unknown value is a repo config error naming the key", func(t *testing.T) {
+		f := newFx(t)
+		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = \"sometimes\"\n"})
+		ce := asErr(t, mustFail(t, f, land))
+		if ce.Reason != outcome.RefRepoConfigError || ce.Loc == nil || ce.Loc.Key != "revalidate" {
+			t.Fatalf("got %+v", ce)
+		}
+	})
+	t.Run("a non-string value is refused", func(t *testing.T) {
+		f := newFx(t)
+		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = 3\n"})
+		asErr(t, mustFail(t, f, land))
+	})
+	t.Run("the repo file beats the XDG defaults", func(t *testing.T) {
+		f := newFx(t)
+		f.xdgFor("[defaults]\nrevalidate = \"none\"\n", "")
+		if c := f.mustLoad(land); c.Revalidate != config.RevalidateNone {
+			t.Fatalf("revalidate = %q", c.Revalidate)
+		}
+		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = \"paths\"\n"})
+		if c := f.mustLoad(land); c.Revalidate != config.RevalidatePaths {
+			t.Fatalf("revalidate = %q", c.Revalidate)
+		}
+	})
 }

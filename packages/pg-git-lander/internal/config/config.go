@@ -31,12 +31,26 @@ const (
 	DefaultLeaseTTL          = 30 * time.Second
 	DefaultLockWait          = 60 * time.Second
 	DefaultMaxRaceRetries    = 2
+	DefaultRevalidate        = RevalidateFull
 	DefaultMaxConflictRounds = 10
 	DefaultAutofixAttempts   = 2
 	FallbackPrimary          = "main"
 
 	XDGFileName  = "config.toml"
 	RepoFileName = ".pg-git-lander.toml"
+)
+
+// Revalidate modes (the revalidate key): what a land does when TARGET moved
+// while its hooks ran outside the TARGET lock.
+const (
+	// RevalidateNone reuses the hook result whenever the rebase onto the new
+	// TARGET tip is clean.
+	RevalidateNone = "none"
+	// RevalidatePaths reuses it only when the commits TARGET gained touch no
+	// file the branch changes, and the rebase is clean.
+	RevalidatePaths = "paths"
+	// RevalidateFull always returns to the rebase and reruns the hooks.
+	RevalidateFull = "full"
 )
 
 // Source names one place configuration came from.
@@ -77,6 +91,7 @@ type Config struct {
 	Lock              Lock                         `json:"lock"`
 	RunGitHooks       bool                         `json:"run_git_hooks"`
 	MaxRaceRetries    int                          `json:"max_race_retries"`
+	Revalidate        string                       `json:"revalidate"`
 	MaxConflictRounds int                          `json:"max_conflict_rounds"`
 	AutofixAttempts   int                          `json:"autofix_attempts"`
 	Hooks             map[string]map[string][]Hook `json:"hooks"`
@@ -340,6 +355,7 @@ func (p *Pre) layer(cfg *Config, file *vals) {
 	cfg.Lock = p.Lock
 	cfg.RunGitHooks = true
 	cfg.MaxRaceRetries = DefaultMaxRaceRetries
+	cfg.Revalidate = DefaultRevalidate
 	cfg.MaxConflictRounds = DefaultMaxConflictRounds
 	cfg.AutofixAttempts = DefaultAutofixAttempts
 	cfg.Hooks = map[string]map[string][]Hook{}
@@ -357,6 +373,9 @@ func (p *Pre) layer(cfg *Config, file *vals) {
 		}
 		if v.maxRace != nil {
 			cfg.MaxRaceRetries = *v.maxRace
+		}
+		if v.revalidate != nil {
+			cfg.Revalidate = *v.revalidate
 		}
 		if v.maxConflict != nil {
 			cfg.MaxConflictRounds = *v.maxConflict

@@ -200,6 +200,7 @@ every change of BRANCH, by ancestry or because the rebase dropped every commit a
 | `timeout`             | any after `before` (at `before` it is `before-hook-refused`) | yes       | `--continue` later, or `--abort`            |
 | `interrupted`         | any                                                          | yes       | `--continue`, `--abort`                     |
 | `race`                | `moving`                                                     | yes       | `--continue`, `--abort`                     |
+| `target-busy`         | `before_move`, `cleanup` (phase two, section 7.1 step 10a)   | yes       | `--continue`, `--abort`                     |
 | `branch-moved`        | `moving` (`rebase` only)                                     | no        | `--abort`                                   |
 | `checkout-changed`    | `moving`                                                     | yes       | `--continue`, `--abort`                     |
 | `move-unverified`     | `moving`                                                     | no        | `--abort`                                   |
@@ -242,10 +243,10 @@ send these signals at all.
 ```mermaid
 flowchart TD
   A["rebase BRANCH --onto REF, or land BRANCH"] --> B["1 resolve repo, XDG config, BRANCH, TARGET or ONTO"]
-  B --> C{"2 all locks within the wait?"}
+  B --> C{"2 BRANCH, SW and WW locks within the wait? a land does NOT take TARGET or a destination-only worktree here"}
   C -->|"no"| X1["exit busy, nothing changed"]
   C -->|"a needed record is dead or stopped"| X2["exit refused"]
-  C -->|"yes, leases renewed from here on"| D["3 snapshot tips, load repo config"]
+  C -->|"yes, leases renewed from here on"| D["3 snapshot tips, load repo config; tips.target is the base tip"]
   D --> E{"4 preconditions hold?"}
   E -->|"no"| X3["release locks, exit refused"]
   E -->|"yes"| F{"5 HOOK before"}
@@ -254,22 +255,30 @@ flowchart TD
   G --> H{"7 which path?"}
   H -->|"nothing to do"| CL
   H -->|"BRANCH already contains the base"| BM
-  H -->|"rebase needed"| R["8 git rebase, git merge drivers run inside it"]
+  H -->|"rebase needed"| R["8 git rebase onto tips.target, git merge drivers run inside it"]
   R --> RC{"conflict?"}
   RC -->|"yes"| CR["section 10: rules, resolve, verify, commit with hooks, continue"]
   CR -->|"cannot resolve"| S["STOP"]
   CR --> RC
-  RC -->|"no"| AR["9 HOOK after_rebase"]
-  AR --> BM["10 HOOK before_move"]
-  BM --> MV["11 fenced move"]
-  MV -->|"TARGET moved, within max_race_retries"| D2["3 again: re-read TARGET, reload repo config, no before hook, no new work branch"]
+  RC -->|"no"| AR["9 HOOK after_rebase, no TARGET lock held"]
+  AR --> BM["10 HOOK before_move, no TARGET lock held"]
+  BM --> L2{"second lock phase: TARGET and the destination-only worktree in one Acquire within the wait?"}
+  L2 -->|"busy or refused"| SB["STOP target-busy, main was never locked"]
+  L2 -->|"yes"| TC{"TARGET still at tips.target?"}
+  TC -->|"yes"| MV["11 fenced fast-forward, seconds"]
+  TC -->|"no, revalidate = paths or none: disjoint if paths, and the rebase onto the new tip is clean"| RB["rebase under the locks, skip the hooks, keep the result"]
+  RB --> MV
+  TC -->|"no, revalidate = full, overlap, or a conflict: within max_race_retries"| D2["release TARGET and the destination, 3 again: re-read TARGET, reload repo config, no before hook, no new work branch"]
   D2 --> H
-  MV -->|"TARGET moved too often"| S
+  TC -->|"no, max_race_retries reached"| SR["STOP race, main released first"]
+  MV -->|"TARGET moved under the lock"| D2
   MV --> AF["12 HOOK after, failures are warnings"]
   AF --> CL["13 clean up: source worktree, BRANCH, other worktrees, work branch, records, locks; exit 0"]
   AR -->|"fails after autofix"| S
   BM -->|"fails after autofix"| S
   S --> X4["BRANCH and worktree records become stopped, TARGET record deleted, exit stopped"]
+  SB --> X4
+  SR --> X4
 ```
 
 ### 7.1 Steps
@@ -280,7 +289,9 @@ flowchart TD
    tool's namespace is refused with `namespace-collision` here, because that refusal needs no lock. ONTO MUST be
    resolved once, here. The three worktree roles are chosen now (section 11.1) and the fail-fast check of section 11.3 runs, because
    the worktrees' locks are part of step 2.
-2. **Lock.** The tool takes the operation's locks (section 8.5). A lock that stays held by a live, fresh holder for the
+2. **Lock (first phase).** The tool takes the operation's first-phase locks (section 8.5): for a `land`, BRANCH and each
+   distinct SW and WW (and a DW that is also the SW or WW), never TARGET and never a worktree whose only role is
+   destination; for a `rebase`, its whole set. A lock that stays held by a live, fresh holder for the
    whole wait ends in `busy`. A needed lock whose record is `stopped` ends in `stopped-pending` or `target-stopped`; one whose holder is dead or expired is converted (section 8.6) and ends in `holder-died`. From here a
    renewal loop keeps every lease fresh.
 3. **Snapshot and configure.** Under the locks the tool records `tips.branch` (BRANCH's tip, the only content the
@@ -311,15 +322,35 @@ flowchart TD
    outcome's `dropped_commits`.
 9. **Hook `after_rebase`.** Runs only when step 8 replayed at least one commit onto a base that differs from BRANCH's
    merge base.
-10. **Hook `before_move`.** Runs for every operation that will move a ref, including the fast-forward path.
+10. **Hook `before_move`.** Runs for every operation that will move a ref, including the fast-forward path. For a `land`
+    it runs with no TARGET lock and no destination-only worktree lock held (operator ruling, Phillip, 2026-11-13, to
+    "run the pre-land hooks outside the main lock", validate and then fast-forward under the lock for seconds: "yes,
+    this is how it should have been done."). This replaces the 2026-11-07 decision that a hook point holds every lock
+    of the operation.
+    10a. **Lock (second phase), a `land` only.** With the hooks passed, the tool takes TARGET and each worktree whose only
+    role is destination in one all-or-nothing `Acquire`, in ascending ref order, and adds them to the operation's lock
+    set (their leases are renewed from here on and the fence of section 8.8 covers them). A lock still held after the
+    wait, or a refused one, stops the operation with `target-busy` (retryable; the message names the holder, its stage
+    and its elapsed time); the operation then holds only the first-phase locks, so TARGET and the main worktree were
+    never locked and a stop leaves them free. The tool then compares TARGET with `tips.target`, the base the work
+    branch was rebased onto: - equal: continue to step 11 (the fast-forward); - moved, `revalidate = "paths"`: if the commits TARGET gained (`tips.target..<new tip>`, TARGET having only
+    advanced) touch no path that the work branch changes (`git diff --name-only --no-renames`, a rename counting as
+    both names), and the repo configuration at the new tip has the same digest, the tool rebases the work branch
+    onto the new tip under the locks, and when that rebase is clean skips both rebase-side hooks and goes to step 11
+    with the hook result reused. A conflict is undone with `git rebase --abort`; - moved, `revalidate = "none"`: the same, without the disjointness test (any clean rebase reuses the result); - moved, `revalidate = "full"` (the default), an overlap, a conflicting rebase, a rewritten TARGET or a changed
+    configuration: the tool releases TARGET and the destination worktree, counts a race retry and returns to step 3
+    as in step 11. It runs the rebase and the hooks again outside the lock. After `max_race_retries` returns it
+    stops with `race` without holding TARGET.
 11. **Move** (section 8.8). The tool first writes the intent marker and `expected_result` to the record (section 8.2).
     For a `rebase`, BRANCH moves to the result (the work branch's tip) by the mechanism of section 11.3. For a `land`,
     TARGET fast-forwards to the result: when TARGET is checked out nowhere and the result descends from TARGET's current
     tip, by `git update-ref refs/heads/<TARGET> <result> <old>` with no worktree (the proof is the ancestry check plus the
-    compare-and-swap on `<old>`, section 8.8); otherwise through the destination worktree. BRANCH and the source worktree are disposed of in step 13 (section 7.2). If
-    TARGET moved since `tips.target`, the tool returns to step 3: it re-reads TARGET, reloads the repo file, and rebases
+    compare-and-swap on `<old>`, section 8.8); otherwise through the destination worktree. BRANCH and the source worktree are disposed of in step 13 (section 7.2). The
+    move runs with TARGET and the destination worktree held (step 10a). If TARGET moved since `tips.target` and the
+    hook result is not reused (step 10a), or moves after the check (a writer that does not use this tool), the tool
+    releases TARGET and the destination worktree and returns to step 3: it re-reads TARGET, reloads the repo file, and rebases
     the current work branch (not `tips.branch`, so resolutions made so far are kept) onto the new tip, then runs
-    `after_rebase` and `before_move` again (not `before`, which step 5 ran once, and not step 6). After `max_race_retries` such returns (default 2) it stops with `race`. A `git merge --ff-only` that
+    `after_rebase` and `before_move` again outside the lock (not `before`, which step 5 ran once, and not step 6). After `max_race_retries` such returns (default 2) it stops with `race`, holding no TARGET lock. A `git merge --ff-only` that
     fails while TARGET still equals `tips.target` is not a race (an untracked-file collision, a git hook): the tool
     re-reads TARGET to tell the two apart, does not count it as `race`, and stops with `git-error`. For a `rebase`, a
     BRANCH that no longer equals `tips.branch` stops with `branch-moved`.
@@ -327,7 +358,8 @@ flowchart TD
     `after-hook-failed`.
 13. **Clean up.** The tool disposes of the source worktree, then BRANCH, restores every other switched worktree and
     deletes the work branch (section 7.2 gives the order and the rule that retires BRANCH), deletes the operation's
-    records and then releases every lock. The locks stay held until here because cleanup runs after the `after` hooks and
+    records and then releases every lock. For a `land`, step 13 needs TARGET and the destination worktree: a path that
+    reaches it without a move (nothing to land) takes the second lock phase first. The locks stay held until here because cleanup runs after the `after` hooks and
     needs them.
 
 At every stage boundary the tool records `stage`, `stage_started_at` and `tips.result` (the work branch's tip) in
@@ -379,7 +411,7 @@ the commits; no ref keeps it, operator ruling 2026-11-10: "the work is done") an
 Every resume flag, `--quit` included, first takes the stopped BRANCH record back by compare-and-swap (`stopped` to
 `running`, with itself as the owner). If another invocation took it first, the resume is refused with
 `lost-to-concurrent`. `--quit` stops after this step: with the record taken it deletes the operation's records (the
-worktree records are `stopped` and held by nobody). The other flags then take the operation's other locks; if they are
+worktree records are `stopped` and held by nobody). The other flags then take the operation's other locks (TARGET and a worktree whose only role is destination only when the stopped stage is `moving`, `after` or `cleanup`); if they are
 busy past the wait, the flag swaps the record back to its stopped state and exits `busy`, so a resume never strands a
 record in `running`. Resume flags need only the built-in lock defaults and the XDG file, so `--abort` and `--quit` work
 even when the repo file is broken.
@@ -402,8 +434,8 @@ roles, the keep flags and the context.
 | `rebasing`, no rebase in progress, the work branch contains the base and differs from `tips.branch`                                     | The caller finished the rebase with git by hand: the tool records `tips.result` and continues at `after_rebase`.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `rebasing`, anything else                                                                                                               | Refused `cannot-resume` (`rebase-state-missing`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `locked`, `preparing`                                                                                                                   | Only stops that leave a record reach these stages (`interrupted`, `lock-lost`, `holder-died`, `git-error`, `internal-error`, and `timeout` of a git command at `preparing`). `before-hook-refused` and `switch-refused` are refusals that leave no record, so there is nothing to resume: run the operation again. At `locked`, `--continue` repeats steps 3 to 5 (snapshot, preconditions, the `before` hook); at `preparing`, it removes a half-created work branch, if any, and repeats steps 6 and 7.                                                             |
-| `after_rebase`, `before_move`                                                                                                           | The work branch tip MUST equal `tips.result` or descend from it (the caller committed a fix), else `cannot-resume` (`worktree-mismatch`). The hook point runs again from its first hook.                                                                                                                                                                                                                                                                                                                                                                              |
-| `moving`, any `--continue`-able stop before the move (`race`, `lock-lost`, `interrupted`, `holder-died`, `checkout-changed`, `timeout`) | If TARGET already equals the record's `expected_result` (section 8.2), the move happened before the crash: continue as for `moving` after the move. Otherwise back to step 3 with the work branch tip as the content to land.                                                                                                                                                                                                                                                                                                                                         |
+| `after_rebase`, `before_move`                                                                                                           | The work branch tip MUST equal `tips.result` or descend from it (the caller committed a fix), else `cannot-resume` (`worktree-mismatch`). The hook point runs again from its first hook, except after `target-busy`, where the hooks had passed and the resume goes straight to the second lock phase. A resume at these stages takes no TARGET or destination-only lock; the run takes them at step 10a.                                                                                                                                                             |
+| `moving`, any `--continue`-able stop before the move (`race`, `lock-lost`, `interrupted`, `holder-died`, `checkout-changed`, `timeout`) | If TARGET already equals the record's `expected_result` (section 8.2), the move happened before the crash: continue as for `moving` after the move. Otherwise back to step 3 with the work branch tip as the content to land. A resume at `moving`, `after` or `cleanup` takes TARGET and the destination-only worktree back at the resume (earlier stages leave them to step 10a); a return to step 3 gives them back before the rebase and the hooks.                                                                                                               |
 | `moving` after the move, `after`, `cleanup`                                                                                             | The tool runs the remaining `after` hooks and the cleanup of section 7.2, skipping what is already done.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 A `git rebase` step that was killed is counted as done by `git rebase --continue`, so a resume at `rebasing` after a
@@ -591,17 +623,26 @@ remove one under `refs/heads/`; `status` reports both kinds.
 
 ### 8.5 Which locks an operation takes
 
-| Operation                  | Locks                                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `rebase BRANCH --onto REF` | BRANCH and each distinct SW and WW. REF is read once and never locked.                                                 |
-| `land BRANCH`              | TARGET, BRANCH and each distinct SW, DW and WW the operation uses (the DW is locked when it is a root or is switched). |
+| Operation                  | Locks                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rebase BRANCH --onto REF` | BRANCH and each distinct SW and WW. REF is read once and never locked.                                                                           |
+| `land BRANCH`, phase one   | BRANCH and each distinct SW and WW the operation uses (a DW that is also the SW or WW is among them). Taken at step 2.                           |
+| `land BRANCH`, phase two   | TARGET and each worktree whose only role is destination (the DW is locked when it is a root or is switched). Taken at step 10a, after the hooks. |
+
+Phase two is one `Acquire` in ascending ref order, all or nothing, added to the operation's set. The tool MUST NOT wait
+on any lock of the operation's set while holding TARGET alone, and MUST NOT start phase two while another acquisition is
+pending: phase one is complete before the hooks run, so no operation holds a main-line lock while waiting for a
+branch-side lock, which rules out deadlock; a phase-two conflict releases what that `Acquire` took and retries within
+the wait. Leases of the phase-two locks are renewed from the moment they are taken, and the fence of section 8.8 lists
+every held lock of both phases. A stop before phase two leaves TARGET and the main worktree unlocked and never touched;
+a stop after it deletes the TARGET record and turns the destination record `stopped`, as before.
 
 The tool takes its locks in ascending ref-name order (worktree locks by admin name), all or nothing, and re-runs the
 cascade and the dirty and is-a-worktree checks of section 11.1 once it holds them, before any switch: when one is held, it releases those it holds,
 waits a random 0 to 500 ms, and tries again until the wait runs out. Acquiring in one global order is what rules out
 deadlock between, for example, landing X into `main` and rebasing `main`; the release-and-retry bounds live-lock.
 
-So two landings onto `main` take turns; a landing onto `main`, a rebase of an unrelated branch and a landing onto
+So two landings onto `main` take turns for the seconds of phase two only (their hooks run in parallel); a landing onto `main`, a rebase of an unrelated branch and a landing onto
 `release` run in parallel; and a landing of X and a rebase of X take turns because both lock X. A stopped `rebase` of
 `main` holds `main`'s lock in the BRANCH role, so landings onto `main` are refused with `target-stopped` until it is
 resolved.
@@ -968,21 +1009,22 @@ too-new repo file on TARGET would otherwise block every landing, including the o
 
 ### 12.4 Keys
 
-| Key                         | Where     | Type                                                    | Default                             | Meaning                                                                                                     |
-| --------------------------- | --------- | ------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `root`                      | XDG entry | path                                                    | required                            | Any path inside the clone.                                                                                  |
-| `trust_repo_config`         | XDG entry | bool                                                    | `false`                             | Run commands named in the repo file.                                                                        |
-| `ignore_repo_config`        | XDG entry | bool                                                    | `false`                             | Skip the repo file entirely.                                                                                |
-| `primary`                   | XDG       | branch                                                  | `origin/HEAD`'s branch, else `main` | The default TARGET.                                                                                         |
-| `lock.lease_ttl`            | XDG       | duration                                                | `30s`                               | Lease length; the holder renews every third of it.                                                          |
-| `lock.wait`                 | XDG       | duration                                                | `60s`                               | How long a waiter waits for a live holder before `busy`.                                                    |
-| `run_git_hooks`             | all       | bool                                                    | `true`                              | Commits the tool makes run git's commit hooks; `false` passes `--no-verify` to the tool's own commits only. |
-| `max_race_retries`          | all       | int                                                     | `2`                                 | Returns to step 3 after TARGET moved.                                                                       |
-| `max_conflict_rounds`       | all       | int                                                     | `10`                                | Conflict stops allowed in one operation.                                                                    |
-| `autofix.attempts`          | all       | int                                                     | `2`                                 | Runs per hook (or tries per commit) before a stop; 2 means one fix commit and one more run that must pass.  |
-| `hooks.<operation>.<point>` | all       | list of hook entries                                    | empty                               | `<operation>` is `rebase` or `land`; `<point>` is `before`, `after_rebase`, `before_move` or `after`.       |
-| `[[conflict]]`              | all       | rule: `glob`, `run_per`, `resolve`, `verify`, `timeout` | none                                | Conflict rules (section 10).                                                                                |
-| `conflict_default`          | all       | rule without `glob`                                     | none                                | Used for any conflicted path no rule matches.                                                               |
+| Key                         | Where     | Type                                                    | Default                             | Meaning                                                                                                                                                                                                                                                                                    |
+| --------------------------- | --------- | ------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `root`                      | XDG entry | path                                                    | required                            | Any path inside the clone.                                                                                                                                                                                                                                                                 |
+| `trust_repo_config`         | XDG entry | bool                                                    | `false`                             | Run commands named in the repo file.                                                                                                                                                                                                                                                       |
+| `ignore_repo_config`        | XDG entry | bool                                                    | `false`                             | Skip the repo file entirely.                                                                                                                                                                                                                                                               |
+| `primary`                   | XDG       | branch                                                  | `origin/HEAD`'s branch, else `main` | The default TARGET.                                                                                                                                                                                                                                                                        |
+| `lock.lease_ttl`            | XDG       | duration                                                | `30s`                               | Lease length; the holder renews every third of it.                                                                                                                                                                                                                                         |
+| `lock.wait`                 | XDG       | duration                                                | `60s`                               | How long a waiter waits for a live holder before `busy`.                                                                                                                                                                                                                                   |
+| `run_git_hooks`             | all       | bool                                                    | `true`                              | Commits the tool makes run git's commit hooks; `false` passes `--no-verify` to the tool's own commits only.                                                                                                                                                                                |
+| `max_race_retries`          | all       | int                                                     | `2`                                 | Returns to step 3 after TARGET moved.                                                                                                                                                                                                                                                      |
+| `revalidate`                | all       | `none`, `paths` or `full`                               | `full`                              | What a land does when TARGET moved while its hooks ran outside the lock (section 7.1 step 10a): reuse the hook result when the rebase is clean (`none`), only when the moved range is file-disjoint from the branch and the rebase is clean (`paths`), or always rerun the hooks (`full`). |
+| `max_conflict_rounds`       | all       | int                                                     | `10`                                | Conflict stops allowed in one operation.                                                                                                                                                                                                                                                   |
+| `autofix.attempts`          | all       | int                                                     | `2`                                 | Runs per hook (or tries per commit) before a stop; 2 means one fix commit and one more run that must pass.                                                                                                                                                                                 |
+| `hooks.<operation>.<point>` | all       | list of hook entries                                    | empty                               | `<operation>` is `rebase` or `land`; `<point>` is `before`, `after_rebase`, `before_move` or `after`.                                                                                                                                                                                      |
+| `[[conflict]]`              | all       | rule: `glob`, `run_per`, `resolve`, `verify`, `timeout` | none                                | Conflict rules (section 10).                                                                                                                                                                                                                                                               |
+| `conflict_default`          | all       | rule without `glob`                                     | none                                | Used for any conflicted path no rule matches.                                                                                                                                                                                                                                              |
 
 A hook entry is `{ run = [argv], timeout = duration, skip_exit_codes = [int], cwd = "worktree" | "repo", env = { } }`.
 `cwd` defaults to `worktree` (the WW), except at `before`, which runs before the work branch exists and defaults to
@@ -1059,17 +1101,21 @@ fires only for conflicts that driver leaves behind (section 16 covers `flake.loc
 
 ### 13.1 Hook points
 
-| Point          | Runs                                                                                                                                                        | Locks held                                                                           | Typical use                                    | A non-zero exit               |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------- | ----------------------------- |
-| `before`       | At the start, after the preconditions, before any worktree is switched and before the work branch is created; once per operation, not again on a race retry | all                                                                                  | Repair the hook bundle; refuse by local policy | refusal `before-hook-refused` |
-| `after_rebase` | After a rebase that replayed commits onto a moved base; never on the fast-forward path                                                                      | all                                                                                  | Checks that matter only when the base moved    | autofix, else stop            |
-| `before_move`  | Immediately before the move, on every path that moves a ref                                                                                                 | all, including TARGET's                                                              | The repo's land-time checks (FF-1b, FF-1c)     | autofix, else stop            |
-| `after`        | After the move                                                                                                                                              | all, released at step 13 of section 7.1 (cleanup runs after the hook and needs them) | Refresh the hook bundle, notify                | warning `after-hook-failed`   |
+| Point          | Runs                                                                                                                                                        | Locks held                                                                                        | Typical use                                    | A non-zero exit               |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------- |
+| `before`       | At the start, after the preconditions, before any worktree is switched and before the work branch is created; once per operation, not again on a race retry | BRANCH, SW, WW (no TARGET)                                                                        | Repair the hook bundle; refuse by local policy | refusal `before-hook-refused` |
+| `after_rebase` | After a rebase that replayed commits onto a moved base; never on the fast-forward path                                                                      | BRANCH, SW, WW (no TARGET)                                                                        | Checks that matter only when the base moved    | autofix, else stop            |
+| `before_move`  | Immediately before the move, on every path that moves a ref                                                                                                 | BRANCH, SW, WW (no TARGET, no destination-only worktree)                                          | The repo's land-time checks (FF-1b, FF-1c)     | autofix, else stop            |
+| `after`        | After the move                                                                                                                                              | all, both phases, released at step 13 of section 7.1 (cleanup runs after the hook and needs them) | Refresh the hook bundle, notify                | warning `after-hook-failed`   |
 
-Hooks run in list order. A hook point holds every lock of the operation while its hooks run, so a `land`'s
-`before_move` serialises landings onto the same TARGET for the hooks' duration (operator ruling, 2026-11-07: accepted
-for version 1). Other landings onto that TARGET wait for at most their wait and then exit `busy`; they see the holder's
-operation and stage on stderr and in the `busy` outcome.
+Hooks run in list order. `before`, `after_rebase` and `before_move` run while the operation holds only its first-phase
+locks (section 8.5), so the repo's checks, which can take many minutes, no longer serialise landings onto the same
+TARGET. Operator ruling (Phillip, 2026-11-13): "yes, this is how it should have been done." (to running the pre-land
+hooks outside the main lock, then validating and fast-forwarding under the lock for seconds), and "i think long wait and
+proper locking of main will be sufficient. i would rather queuing be external to the tool itself." The tool therefore
+adds no queue and no fairness mechanism: landings onto the same TARGET wait for phase two for at most `lock.wait`
+and then stop with `target-busy`; the wait message shows the holder's operation and stage. The `after` hook runs while
+TARGET is still held, because cleanup needs it.
 
 ### 13.2 The command environment
 
@@ -1230,16 +1276,21 @@ file opened with `O_APPEND`. The tool rotates the file at 20 MB, keeping one arc
 lock ref `refs/pg-git-lander/locks/admin/events`; a writer that raced the rename appends to the archive, which is
 harmless.
 
-| Event              | Fields                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `op_start`         | `context`, the worktrees with roles and starting states, `work_branch`, `placeholder_branch`, `keep`, `config_digest`    |
-| `stage`            | `stage`, `previous_stage`, `duration_ms` of the previous stage                                                           |
-| `lock_wait`        | `lock`, `holder` (`op_id`, `stage`), `waited_ms`, `result` (`acquired`, `busy`)                                          |
-| `race_retry`       | `attempt`, `old_target_tip`, `new_target_tip`                                                                            |
-| `hook`             | `point`, `index`, `argv0`, `exit`, `duration_ms`, `result` (`pass`, `skipped`, `autofix`, `failed`)                      |
-| `holder_converted` | `lock`, `previous_owner`, `why` (`dead`, `expired`)                                                                      |
-| `conflict`         | `paths`, `rule`, `result`                                                                                                |
-| `op_end`           | `outcome`, `reason`, `retryable`, `stage`, `path_taken`, `stats`, `branch_fate`, `worktree_fate`, `restored`, `warnings` |
+| Event              | Fields                                                                                                                                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `op_start`         | `context`, the worktrees with roles and starting states, `work_branch`, `placeholder_branch`, `keep`, `config_digest`                                                                                                   |
+| `stage`            | `stage`, `previous_stage`, `duration_ms` of the previous stage                                                                                                                                                          |
+| `lock_wait`        | `lock`, `holder` (`op_id`, `stage`), `waited_ms`, `result` (`acquired`, `busy`)                                                                                                                                         |
+| `race_retry`       | `attempt`, `old_target_tip`, `new_target_tip`, `revalidate` (the configured mode), `reused` (true: the hook result was kept after a clean rebase under the lock; `attempt` is then the unchanged count of full returns) |
+| `hook`             | `point`, `index`, `argv0`, `exit`, `duration_ms`, `result` (`pass`, `skipped`, `autofix`, `failed`)                                                                                                                     |
+| `holder_converted` | `lock`, `previous_owner`, `why` (`dead`, `expired`)                                                                                                                                                                     |
+| `conflict`         | `paths`, `rule`, `result`                                                                                                                                                                                               |
+| `op_end`           | `outcome`, `reason`, `retryable`, `stage`, `path_taken`, `stats`, `branch_fate`, `worktree_fate`, `restored`, `warnings`                                                                                                |
+
+`op_end`'s `stats` carries `duration_ms`, `rebased_commits`, `autofix_commits`, `conflict_rounds`, `race_retries`,
+`target_lock_wait_ms` (time spent taking the second lock phase) and `target_lock_held_ms` (time TARGET and the
+destination worktree were held, summed over every hold; 0 when never taken), so lock hold per landed or stopped
+operation can be measured from the events file alone.
 
 The events are the per-operation record a caller MAY ship to a log pipeline.
 
@@ -1498,6 +1549,23 @@ FF-1b and FF-1c move into a repo's `before_move` hooks (section 12.6). Where tha
   branch inside its own worktree (section 11.3). Every other ref write is a compare-and-swap.
 - Lock refs can be written by any process with write access to the repo, which is the same trust the repo itself needs.
 
+### 7.4 Risks of the two lock phases
+
+- **File disjointness is a proxy, not proof.** `revalidate = "paths"` assumes that when the commits TARGET gained touch
+  no file the branch changes, a check that passed on the branch alone still passes on the combination. Two branches
+  that each pass alone can combine badly (a renamed symbol, a changed flake input, a version pin). The default is
+  therefore `full`, repos opt in, and the repo's post-land verification on the main line remains the backstop.
+  `none` drops even the proxy and is for repos whose checks are known to be independent of each other.
+- **Deadlock.** Phase two is one `Acquire` in ascending ref order; nothing acquires TARGET while waiting on another
+  lock of the set, and phase one is complete before the hooks run (section 8.5).
+- **Stopped records.** A stop before phase two leaves TARGET and the main worktree unlocked and untouched; the stopped
+  BRANCH and worktree records name only branch-side locks. A stop at or after phase two is as before (TARGET record
+  deleted, the destination record stopped), and a resume at `moving`, `after` or `cleanup` takes them back.
+- **Starvation.** A landing that keeps finding `main` busy stops with `target-busy` after the wait. The tool keeps no
+  queue; a caller retries (`--continue` goes straight to phase two, because the hooks passed).
+- **Config on the new tip.** The hook result is reused only when the repo file at the new TARGET tip has the same
+  digest, so a landing that changed the hooks never lets an older result stand.
+
 ## 19. Operator rulings that shaped this design
 
 Rulings are cited where they apply; the header lists the sections that carry them. Nothing further is recorded here.
@@ -1520,7 +1588,11 @@ is pending.
   Not adopted (operator rulings, 2026-11-10): edits are lost on `--abort`, and no old-tip ref is kept after a land.
 - **Inheriting all of the user's git configuration.** rerere and rebase settings would make resolutions no configured
   command made; replaced by the pinned options of section 9.1.
-- **Running `before_move` checks while holding only BRANCH's lock, then re-checking TARGET.** Allows parallel checks but
-  re-runs them under heavy churn; deferred past version 1.
+- **Running `before_move` checks under TARGET's lock.** Replaced by the two lock phases of section 7.1 (operator
+  ruling, Phillip, 2026-11-13, see section 13.1): measured on 2026-11-13, 93.1% of the time `main`'s lock was held went
+  to `before_move` hooks, and a replay of 476 landings with hooks outside the lock found `main` moved during a 480 s
+  window for 38.7% of landings, of which 88% were file-disjoint with the intervening landings.
+- **A queue or fairness mechanism inside the tool.** Not adopted (operator ruling, Phillip, 2026-11-13: "i would rather
+  queuing be external to the tool itself.").
 - **A trust or allow subcommand** (for example `pg-git-lander trust`) that writes `trust_repo_config = true` for a repo.
   Deferred future option, not in version 1; the allow process is the Nix-managed XDG entry of section 12.3.

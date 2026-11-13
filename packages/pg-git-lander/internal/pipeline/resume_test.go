@@ -545,35 +545,28 @@ func TestResumeContinueAfterAHolderDiedAtPreparing(t *testing.T) {
 	f.untouched()
 }
 
+// A resume at stage moving takes the destination worktree back at the
+// resume: a holder of it is a busy exit, and the record stays stopped.
 func TestResumeContinueAfterABusyResume(t *testing.T) {
 	f := newFx(t)
-	f.conflicting()
+	f.feature()
+	f.writeXDG("[defaults]\nmax_race_retries = 0\n[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.before_move = [{ run = ['" + f.raceHook(true) + "'] }]\n")
 	stopped := f.run(f.land())
-	f.wantStopped(stopped, outcome.StopConflict)
-	work := stopped.WorkWorktree.Path
-	if err := os.WriteFile(filepath.Join(work, "x.txt"), []byte("ok\n"), 0o644); err != nil {
-		t.Fatal(err)
+	f.wantStopped(stopped, outcome.StopRace)
+	if stopped.Stage != "moving" {
+		t.Fatalf("stage = %s", stopped.Stage)
 	}
-	f.git(work, "add", "x.txt")
 	oid := f.branchOID()
 
 	// Somebody holds the main worktree (the destination) with a live lease.
-	f.live.SetAlive(777, "1794132898")
-	rec := map[string]any{
-		"schema": 1, "role": "worktree", "state": "running", "op_id": "other", "branch": "other",
-		"owner": map[string]any{"host": thisHost, "pid": 777, "pid_start": 1794132898, "token": "x", "tool_version": "t"},
-		"lease": map[string]any{"renewed_at": f.clock.Now().UTC().Format("2006-01-02T15:04:05Z"), "ttl_s": 600},
-	}
-	b, _ := json.Marshal(rec)
-	h := f.g.RunInput(t.Context(), f.repo.Dir, append(b, '\n'), "hash-object", "-w", "--stdin")
-	hold := strings.TrimSpace(string(h.Stdout))
-	f.git(f.repo.Dir, "update-ref", locks.WorktreeRef("_main"), hold)
+	f.foreignLock(locks.WorktreeRef("_main"), "worktree")
 
 	o := f.resume(outcome.FlagContinue)
 	want(t, o, outcome.Busy, 9)
 	f.wantStillStopped(oid) // a resume never strands a record in running
 
 	f.git(f.repo.Dir, "update-ref", "-d", locks.WorktreeRef("_main"))
+	f.writeXDG("[defaults.lock]\nwait = \"3s\"\n")
 	want(t, f.resume(outcome.FlagContinue), outcome.Landed, 0)
 	f.untouched()
 }

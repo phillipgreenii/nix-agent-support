@@ -282,10 +282,12 @@ func TestStopIsAtomicWhenARecordChangedHands(t *testing.T) {
 	}
 }
 
-func (f *fx) stopped(reason outcome.StopReason) {
+func (f *fx) stopped(reason outcome.StopReason) { f.stoppedAt(reason, StageRebasing) }
+
+func (f *fx) stoppedAt(reason outcome.StopReason, stage string) {
 	f.t.Helper()
 	op := f.begin()
-	if err := op.SetStage(f.t.Context(), StageRebasing, nil); err != nil {
+	if err := op.SetStage(f.t.Context(), stage, nil); err != nil {
 		f.t.Fatal(err)
 	}
 	if err := op.Stop(f.t.Context(), StopInfo{Reason: reason}); err != nil {
@@ -295,13 +297,13 @@ func (f *fx) stopped(reason outcome.StopReason) {
 
 func TestTakeBackThenResumeLocksThenFinish(t *testing.T) {
 	f := newFx(t)
-	f.stopped(outcome.StopConflict)
+	f.stoppedAt(outcome.StopRace, StageMoving)
 	ctx := t.Context()
 	res, err := TakeBack(ctx, f.l, "feature/x", owner("bbbb"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Stopped.Stop == nil || res.Stopped.Stop.Reason != "conflict" {
+	if res.Stopped.Stop == nil || res.Stopped.Stop.Reason != "race" {
 		t.Errorf("stopped record: %+v", res.Stopped)
 	}
 	r := f.read(locks.BranchRef("feature/x")).Rec
@@ -323,6 +325,89 @@ func TestTakeBackThenResumeLocksThenFinish(t *testing.T) {
 		if !f.read(ref).Absent {
 			t.Errorf("%s left behind", ref)
 		}
+	}
+}
+
+// An earlier stage takes only the branch-side locks; TARGET and a worktree
+// whose only role is destination are left to the run's lock point.
+func TestResumeBeforeStageMovingLeavesTargetAndDestinationAlone(t *testing.T) {
+	for _, c := range []struct {
+		stage string
+		takes bool
+	}{
+		{StageLocked, false},
+		{StagePreparing, false},
+		{StageRebasing, false},
+		{StageAfterRebase, false},
+		{StageBeforeMove, false},
+		{StageMoving, true},
+		{StageAfter, true},
+		{StageCleanup, true},
+	} {
+		t.Run(c.stage, func(t *testing.T) {
+			f := newFx(t)
+			f.stoppedAt(outcome.StopConflict, c.stage)
+			ctx := t.Context()
+			res, err := TakeBack(ctx, f.l, "feature/x", owner("bbbb"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := res.TakeOtherLocks(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if f.read(locks.WorktreeRef("feature-x")).Rec.State != locks.StateRunning {
+				t.Error("the source and work worktree must always be taken back")
+			}
+			for _, ref := range []string{locks.WorktreeRef("_main"), locks.BranchRef("main")} {
+				st := f.read(ref)
+				if c.takes && (st.Absent || st.Rec.State != locks.StateRunning) {
+					t.Errorf("%s not taken back at stage %s", ref, c.stage)
+				}
+				// The fixture took every lock at once (Begin), so a record that was
+				// not taken back is still the stopped one; the pipeline's own first
+				// phase never creates it.
+				if !c.takes && !st.Absent && st.Rec.State != locks.StateStopped {
+					t.Errorf("%s was taken back at stage %s", ref, c.stage)
+				}
+			}
+			if TakesTargetLocks(c.stage) != c.takes {
+				t.Errorf("TakesTargetLocks(%s) = %v", c.stage, !c.takes)
+			}
+		})
+	}
+}
+
+func TestAcquireTargetIsIdempotentAndReleaseTargetGivesBackOnlyThoseLocks(t *testing.T) {
+	f := newFx(t)
+	ctx := t.Context()
+	p := params()
+	rec := NewRecord(p, "20261113T000000Z-aaaaaa", f.clock.Now())
+	set, err := f.l.Acquire(ctx, f.l.LandBranchLocks(rec)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := &Op{Layer: f.l, Set: set, Branch: set.ByRef(locks.BranchRef("feature/x"))}
+	if !f.read(locks.BranchRef("main")).Absent || !f.read(locks.WorktreeRef("_main")).Absent {
+		t.Fatal("phase one took TARGET or the destination worktree")
+	}
+	held, err := op.AcquireTarget(ctx)
+	if err != nil || len(held) != 2 {
+		t.Fatalf("held %d, err %v", len(held), err)
+	}
+	if again, err := op.AcquireTarget(ctx); err != nil || len(again) != 0 {
+		t.Fatalf("second call took %d, err %v", len(again), err)
+	}
+	if len(op.Set.Locks) != 4 {
+		t.Fatalf("set holds %d locks", len(op.Set.Locks))
+	}
+	if err := op.ReleaseTarget(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(op.Set.Locks) != 2 || !f.read(locks.BranchRef("main")).Absent || !f.read(locks.WorktreeRef("_main")).Absent {
+		t.Fatalf("set holds %d locks after the release", len(op.Set.Locks))
+	}
+	if f.read(locks.BranchRef("feature/x")).Absent || f.read(locks.WorktreeRef("feature-x")).Absent {
+		t.Fatal("the branch-side locks were released with the second phase")
 	}
 }
 
@@ -375,7 +460,7 @@ func TestTakeBackRefusals(t *testing.T) {
 
 func TestBusyLocksAfterTakeBackSwapEverythingBackToStopped(t *testing.T) {
 	f := newFx(t)
-	f.stopped(outcome.StopConflict)
+	f.stoppedAt(outcome.StopRace, StageMoving)
 	ctx := t.Context()
 	// another operation now holds TARGET (main)
 	rec := NewRecord(Params{Operation: "rebase", Branch: "other", Owner: owner("zzzz")}, "OTHER-OP", f.clock.Now())
@@ -402,7 +487,7 @@ func TestBusyLocksAfterTakeBackSwapEverythingBackToStopped(t *testing.T) {
 		}
 	}
 	after := f.read(locks.BranchRef("feature/x"))
-	if after.Rec.Stop == nil || after.Rec.Stop.Reason != "conflict" || after.Rec.Owner.Token != before.Rec.Owner.Token {
+	if after.Rec.Stop == nil || after.Rec.Stop.Reason != "race" || after.Rec.Owner.Token != before.Rec.Owner.Token {
 		t.Errorf("stopped record not restored: %+v", after.Rec)
 	}
 	// the other operation's lock is untouched

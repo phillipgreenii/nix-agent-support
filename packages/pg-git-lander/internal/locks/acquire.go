@@ -334,6 +334,47 @@ func (l *Layer) LandLocks(op Record) []Spec {
 	return append(specs, l.worktreeSpecs(op, map[string]bool{})...)
 }
 
+// roleDestination is the worktree role name of a destination worktree.
+const roleDestination = "destination"
+
+// destinationOnly reports whether the worktree's only role is destination.
+func destinationOnly(w WorktreeEntry) bool {
+	return len(w.Roles) == 1 && w.Roles[0] == roleDestination
+}
+
+// LandBranchLocks is the first lock phase of a land: BRANCH and each distinct
+// worktree except one whose only role is destination. Nothing here is the
+// repository's main line, so a land holds this set while its hooks run.
+func (l *Layer) LandBranchLocks(op Record) []Spec {
+	op.Role = RoleBranch
+	specs := []Spec{{Ref: BranchRef(op.Branch), Role: RoleBranch, Rec: op}}
+	seen := map[string]bool{}
+	for _, w := range op.Worktrees {
+		if destinationOnly(w) || seen[w.Admin] {
+			continue
+		}
+		seen[w.Admin] = true
+		specs = append(specs, shortSpec(RoleWorktree, WorktreeRef(w.Admin), op))
+	}
+	return specs
+}
+
+// LandTargetLocks is the second lock phase of a land: TARGET and each
+// worktree whose only role is destination. They are taken together, in
+// ascending ref order, only when the hooks have passed.
+func (l *Layer) LandTargetLocks(op Record) []Spec {
+	specs := []Spec{shortSpec(RoleTarget, BranchRef(op.Target), op)}
+	seen := map[string]bool{}
+	for _, w := range op.Worktrees {
+		if !destinationOnly(w) || seen[w.Admin] {
+			continue
+		}
+		seen[w.Admin] = true
+		specs = append(specs, shortSpec(RoleWorktree, WorktreeRef(w.Admin), op))
+	}
+	return specs
+}
+
 // StaleLock is a ref .lock file left by a killed git process.
 type StaleLock struct {
 	Path string

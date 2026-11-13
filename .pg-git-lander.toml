@@ -4,12 +4,22 @@
 # A branch that edits this file is processed under the OLD rules; the new ones apply from
 # the next land.
 
+# The before_move hooks below run OUTSIDE the lock on TARGET: the tool rebases onto
+# TARGET's tip, runs the hooks holding only the branch-side locks, then takes TARGET's lock
+# for a few seconds to fast-forward. If TARGET moved meanwhile, `paths` keeps the hook
+# result when the commits TARGET gained touch no file this branch changes and the rebase
+# onto the new tip is clean; any other case runs the hooks again. File-disjointness is a
+# proxy for check independence, not proof: two branches that each pass alone may combine
+# badly, so reuse is opt-in per repo and the post-land verification on main stays the
+# backstop. Remove this line (the default is `full`) to rerun the hooks on every move.
+revalidate = "paths"
+
 [hooks.land]
 before_move = [
   # The repo's pre-land hooks over the diff from TARGET's tip (the tool rebases first, so
   # the hooks must see the rebased result). `sh -c` because hook argv has no shell
-  # expansion. Exit 13 (no hook bundle) and 127 (pg-hooks not installed) skip; 75 (host
-  # load) stops the land as a retryable `transient`.
+  # expansion. Exit 13 (no hook bundle) and 127 (pg-hooks not installed) skip; 75 (a test timeout
+  # or no free runner slot) stops the land as a retryable `transient`.
   { run = ["sh", "-c", "exec pg-hooks run pre-land --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
   # The eval-only gate: every flake output must still evaluate.
   { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m" },

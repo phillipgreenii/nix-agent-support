@@ -712,6 +712,10 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 		plan.entry, plan.baseMoved = entryAfterRebase, true
 		if stage == oprecord.StageBeforeMove {
 			plan.entry, plan.baseMoved = entryBeforeMove, baseMoved
+			if rs.prior.Stop != nil && rs.prior.Stop.Reason == string(outcome.StopTargetBusy) {
+				// The hooks had passed: only the second lock phase is left.
+				plan.entry = entryMove
+			}
 		}
 
 	case oprecord.StageMoving:
@@ -800,7 +804,8 @@ func (rs *resumer) enter(ctx context.Context, rec locks.Record, plan *resumePlan
 	p := rs.p
 	p.plan = plan
 	if plan.entry == entryAfterHook || plan.entry == entryCleanup || plan.entry == entryContinueConflict ||
-		plan.entry == entrySkipConflict || plan.entry == entryRebased || plan.entry == entryAfterRebase || plan.entry == entryBeforeMove {
+		plan.entry == entrySkipConflict || plan.entry == entryRebased || plan.entry == entryAfterRebase || plan.entry == entryBeforeMove ||
+		plan.entry == entryMove {
 		// A stage entered again: the counters of a race and of autofix start over.
 		if err := p.Op.SetAttempts(ctx, func(a *locks.Attempts) { a.RaceRetries, a.Autofix = 0, map[string]int{} }); err != nil {
 			return rs.failed(ctx, nil, err)
@@ -930,7 +935,12 @@ func (rs *resumer) undo(ctx context.Context, s *runner) (*outcome.Outcome, error
 	missing := map[string]bool{}
 	var restored []outcome.Restored
 	rb := &rebase.Rebaser{Git: rs.d.Git}
+	locked := oprecord.TakesTargetLocks(p.Op.Record().Stage)
 	for _, c := range sel.Worktrees {
+		if p.Operation == worktrees.Land && !locked && len(c.Roles) == 1 && c.Has(worktrees.Destination) {
+			// Not locked at this stage and never changed by the operation.
+			continue
+		}
 		if gone(findListed(wts, c.Path)) {
 			missing[c.Path] = true
 			// Forget the vanished worktree, as git worktree prune does for it

@@ -63,6 +63,7 @@ type vals struct {
 	leaseTTL, wait                *time.Duration
 	runGitHooks                   *bool
 	maxRace, maxConflict, autofix *int
+	revalidate                    *string
 	hooks                         map[string]map[string][]Hook
 	rules                         []Rule
 	conflictDefault               *Rule
@@ -213,7 +214,7 @@ func (p *parser) argv(tbl map[string]any, base, k string) ([]string, bool) {
 	return out, true
 }
 
-var commonKeys = []string{"run_git_hooks", "max_race_retries", "max_conflict_rounds", "autofix", "hooks", "conflict", "conflict_default"}
+var commonKeys = []string{"run_git_hooks", "max_race_retries", "revalidate", "max_conflict_rounds", "autofix", "hooks", "conflict", "conflict_default"}
 
 // common parses the keys every layer may set. withXDG adds primary and lock.
 func (p *parser) common(tbl map[string]any, base string, withXDG bool, extra ...string) *vals {
@@ -227,6 +228,14 @@ func (p *parser) common(tbl map[string]any, base string, withXDG bool, extra ...
 	v.runGitHooks = p.boolean(tbl, base, "run_git_hooks")
 	v.maxRace = p.integer(tbl, base, "max_race_retries", 0)
 	v.maxConflict = p.integer(tbl, base, "max_conflict_rounds", 0)
+	if s, ok := p.str(tbl, base, "revalidate"); ok {
+		switch s {
+		case RevalidateNone, RevalidatePaths, RevalidateFull:
+			v.revalidate = &s
+		default:
+			p.fail(join(base, "revalidate"), "must be \"none\", \"paths\" or \"full\"")
+		}
+	}
 
 	if raw, ok := tbl["autofix"]; ok {
 		if t, ok := p.table(raw, join(base, "autofix")); ok {

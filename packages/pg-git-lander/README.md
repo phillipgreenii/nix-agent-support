@@ -2,7 +2,7 @@
 
 A lock-safe rebase and land tool. `pg-git-lander rebase` replays a branch onto a commit; `pg-git-lander land` rebases a
 branch onto its target (by default the primary branch) and fast-forwards the target to the result. Both hold the
-repository's locks for the whole operation, so concurrent runs queue (and report `busy`) instead of colliding, and both
+repository's locks, so concurrent runs wait (and report `busy`) instead of colliding, and both
 leave every worktree the tool switched in its starting state.
 
 ## Synopsis
@@ -79,21 +79,22 @@ every change of BRANCH, by ancestry or because the rebase dropped every commit a
 The XDG file is `$XDG_CONFIG_HOME/pg-git-lander/config.toml` (default `~/.config/pg-git-lander/config.toml`); a repo
 file `.pg-git-lander.toml` is read from the tip of the relevant ref. Validate either with `pg-git-lander config check`.
 
-| Key                         | Where     | Default                             | Meaning                                                                       |
-| --------------------------- | --------- | ----------------------------------- | ----------------------------------------------------------------------------- |
-| `root`                      | XDG entry | required                            | Any path inside the clone.                                                    |
-| `trust_repo_config`         | XDG entry | `false`                             | Run commands named in the repo file.                                          |
-| `ignore_repo_config`        | XDG entry | `false`                             | Skip the repo file entirely.                                                  |
-| `primary`                   | XDG       | `origin/HEAD`'s branch, else `main` | The default TARGET.                                                           |
-| `lock.lease_ttl`            | XDG       | `30s`                               | Lease length; the holder renews every third of it.                            |
-| `lock.wait`                 | XDG       | `60s`                               | How long a waiter waits for a live holder before `busy`.                      |
-| `run_git_hooks`             | all       | `true`                              | The tool's own commits run git's commit hooks; `false` passes `--no-verify`.  |
-| `max_race_retries`          | all       | `2`                                 | Returns to the rebase after TARGET moved.                                     |
-| `max_conflict_rounds`       | all       | `10`                                | Conflict stops allowed in one operation.                                      |
-| `autofix.attempts`          | all       | `2`                                 | Runs per hook before a stop; 2 means one fix commit and one more passing run. |
-| `hooks.<operation>.<point>` | all       | empty                               | `<operation>` is `rebase` or `land`; `<point>` is listed below.               |
-| `[[conflict]]`              | all       | none                                | Conflict rules: `glob`, `run_per`, `resolve`, `verify`, `timeout`.            |
-| `conflict_default`          | all       | none                                | A conflict rule without `glob`, for any path no rule matches.                 |
+| Key                         | Where     | Default                             | Meaning                                                                                                                                                                                                                                                         |
+| --------------------------- | --------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `root`                      | XDG entry | required                            | Any path inside the clone.                                                                                                                                                                                                                                      |
+| `trust_repo_config`         | XDG entry | `false`                             | Run commands named in the repo file.                                                                                                                                                                                                                            |
+| `ignore_repo_config`        | XDG entry | `false`                             | Skip the repo file entirely.                                                                                                                                                                                                                                    |
+| `primary`                   | XDG       | `origin/HEAD`'s branch, else `main` | The default TARGET.                                                                                                                                                                                                                                             |
+| `lock.lease_ttl`            | XDG       | `30s`                               | Lease length; the holder renews every third of it.                                                                                                                                                                                                              |
+| `lock.wait`                 | XDG       | `60s`                               | How long a waiter waits for a live holder before `busy`.                                                                                                                                                                                                        |
+| `run_git_hooks`             | all       | `true`                              | The tool's own commits run git's commit hooks; `false` passes `--no-verify`.                                                                                                                                                                                    |
+| `max_race_retries`          | all       | `2`                                 | Returns to the rebase after TARGET moved.                                                                                                                                                                                                                       |
+| `revalidate`                | all       | `full`                              | `none`, `paths` or `full`: what a land does when TARGET moved while its hooks ran. `paths` keeps the hook result when the moved range touches no file the branch changes and the rebase is clean; `none` keeps it on any clean rebase; `full` reruns the hooks. |
+| `max_conflict_rounds`       | all       | `10`                                | Conflict stops allowed in one operation.                                                                                                                                                                                                                        |
+| `autofix.attempts`          | all       | `2`                                 | Runs per hook before a stop; 2 means one fix commit and one more passing run.                                                                                                                                                                                   |
+| `hooks.<operation>.<point>` | all       | empty                               | `<operation>` is `rebase` or `land`; `<point>` is listed below.                                                                                                                                                                                                 |
+| `[[conflict]]`              | all       | none                                | Conflict rules: `glob`, `run_per`, `resolve`, `verify`, `timeout`.                                                                                                                                                                                              |
+| `conflict_default`          | all       | none                                | A conflict rule without `glob`, for any path no rule matches.                                                                                                                                                                                                   |
 
 A hook entry is `{ run = [argv], timeout = duration, skip_exit_codes = [int], cwd = "worktree" | "repo", env = { } }`.
 `cwd` defaults to `worktree`, except at `before`, which defaults to `repo`. A missing `timeout` is 10 minutes.
@@ -107,8 +108,14 @@ A hook entry is `{ run = [argv], timeout = duration, skip_exit_codes = [int], cw
 | `before_move`  | Immediately before the move, on every path that moves a ref                           | autofix, else stop            |
 | `after`        | After the move                                                                        | warning `after-hook-failed`   |
 
-Hooks run in list order and hold every lock of the operation while they run, so a `land`'s `before_move` serialises
-landings onto the same TARGET for the hooks' duration.
+Hooks run in list order. A land takes only BRANCH and the source and work worktree locks while `before`,
+`after_rebase` and `before_move` run; TARGET and the destination worktree (the main worktree) are locked afterwards,
+for the few seconds of the fast-forward, so a long check does not hold up other landings onto TARGET. If TARGET is still
+at the tip the work branch was rebased onto, the tool fast-forwards. If it moved, `revalidate` decides whether the hook
+result is reused after a clean rebase under the lock or the rebase and hooks run again; the number of such returns is
+bounded by `max_race_retries` (then `race`, without having held TARGET). A TARGET still locked by another landing after
+`lock.wait` ends the operation with the retryable stop `target-busy` (`--continue` goes straight to the lock step).
+The tool keeps no queue: queuing is the caller's. `op_end` events carry `target_lock_wait_ms` and `target_lock_held_ms`.
 
 ## The outcome object
 
