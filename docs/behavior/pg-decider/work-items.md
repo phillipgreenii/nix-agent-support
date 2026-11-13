@@ -264,6 +264,11 @@ Notes on the rule:
   and be offered again. It is closed as superseded by the item at the current head (as a merged PR
   closes every open review item, `INV-DECIDER-31`), and the close is re-checked live like the
   refresh.
+  The rule runs whenever the PR is evaluated, not only on a `pr.changed` event, so a PR that went quiet
+  before the retirement existed keeps such an item until something evaluates it again. The router owns
+  every clock and the decider has no timer of its own; the catch-up is one `pg-pr-backfill run --mode
+apply` pass (see [`backfill.md`](backfill.md)), which re-evaluates every followed PR and retires the
+  item with no other manual step.
 - **A claimed item for an older head is left alone.** Its reviewer is refused at submit when the head
   moved, and the new item lets the next reviewer start without waiting. A deferred or blocked item
   is left alone too and does not block the item for the new head.

@@ -130,7 +130,7 @@ run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt
   [[ $args == *"./internal/prchange/"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/go-pwd")" = "$(cd "$MODULE" && pwd -P)" ]
   [ "$(cat "$BATS_TEST_TMPDIR/go-require")" = 1 ]
-  [[ $output == *"soak suite: 26 scenarios, each with a PASS line, none skipped"* ]]
+  [[ $output == *"soak suite: 27 scenarios, each with a PASS line, none skipped"* ]]
 }
 
 @test "the fast suite runs only TestLaneFake, untagged, with a missing binary made fatal" {
@@ -143,7 +143,7 @@ run_gate() { run --separate-stderr env PATH="$SHIM" "$BASH" "$SCRIPT" --prebuilt
   [[ $args == *"./internal/prchange/"* ]]
   [[ $args != *"-tags"* ]]
   [ "$(cat "$BATS_TEST_TMPDIR/go-require")" = 1 ]
-  [[ $output == *"fake suite: 25 scenarios, each with a PASS line, none skipped"* ]]
+  [[ $output == *"fake suite: 26 scenarios, each with a PASS line, none skipped"* ]]
 }
 
 @test "without --prebuilt it builds the six binaries before the run" {

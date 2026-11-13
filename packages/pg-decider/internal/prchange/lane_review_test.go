@@ -403,6 +403,40 @@ func reviewScenarios(l *laneRun) {
 		}
 	})
 
+	// A PR that went quiet before the supersede rule was deployed keeps its
+	// unclaimed older-head item until something re-evaluates the PR. The
+	// backfill driver's apply pass is exactly that: the composed command run
+	// once more over the PR with no new event and no change of head.
+	run("a-quiet-pr-keeps-a-superseded-older-head-item-until-a-re-run-retires-it", func(t *testing.T) {
+		w, id := freshWorld(t, tools, sha('a'), false)
+		w.apply(id)
+		old := w.onlyReview()
+		w.claim(old.id)
+		w.setHead(id, sha('b'))
+		w.apply(id) // the head moved: a claimed item is left alone, a new one is created
+		// The reviewer died; its claim was later released. The PR is now quiet.
+		w.tr.run("update", old.id, "--status", "open", "--assignee", "")
+		w.feed(old.id)
+		if got := w.reviewByID(old.id); got.status != "open" || got.assignee != "" || got.head != sha('a') {
+			t.Fatalf("the fixture is not the shape under test: %+v", got)
+		}
+		w.apply(id) // the backfill pass: same head, no new event
+		if got := w.reviewByID(old.id); got.status != "closed" {
+			t.Errorf("the superseded older-head item is %s after the re-run, want closed", got.status)
+		}
+		open := 0
+		for _, r := range w.reviews() {
+			if r.status == "open" {
+				open++
+				w.wantReviewAt(r, sha('b'))
+			}
+		}
+		if open != 1 {
+			t.Errorf("%d open review items after the re-run, want exactly the one at the current head: %+v", open, w.reviews())
+		}
+		w.keysAreUnique()
+	})
+
 	run("legacy-suffix-less-open-and-closed-review-items-are-recognized", func(t *testing.T) {
 		w, id := freshWorld(t, tools, sha('b'), false)
 		legacy := func(head string) string {

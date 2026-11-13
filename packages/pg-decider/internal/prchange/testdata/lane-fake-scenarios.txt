@@ -14,6 +14,7 @@ the-drift-check-fails-on-a-decider-value-pg-desk-lacks-and-on-the-reverse
 a-burst-of-pushes-yields-one-review-item-for-the-head-the-burst-ended-on
 a-claimed-review-item-at-the-current-head-blocks-a-second
 an-item-created-at-one-head-updated-to-another-and-closed-blocks-a-re-create
+a-quiet-pr-keeps-a-superseded-older-head-item-until-a-re-run-retires-it
 legacy-suffix-less-open-and-closed-review-items-are-recognized
 force-review-with-only-a-claimed-or-closed-same-head-item-creates-one-new-item-and-consumes-the-flag-only-on-success
 a-claim-that-lands-between-the-listing-and-the-update-leaves-the-item-unchanged

@@ -4,7 +4,7 @@
 [`pr-change.md`](pr-change.md)) once in `plan` mode, so an operator can read what the PR lane would
 do, and once in `apply` mode, the first apply. The first apply needs an explicit pass because
 nothing re-drives a PR that never changes again: changing the role's mode decides nothing for a quiet
-PR. The driver is a packaged, tested binary of this repo, an operator-started batch that runs to
+PR. The same pass is the catch-up for any rule whose effect only an evaluation delivers (for example the older-head review item retirement, which a PR with no new event would otherwise never see). The driver is a packaged, tested binary of this repo, an operator-started batch that runs to
 completion and resumes. It is not a scheduled job: the router owns every clock, and the only wait in
 the driver is the pace between two PRs.
 
