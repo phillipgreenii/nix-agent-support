@@ -28,6 +28,11 @@ func (s slowCapacityCC) Capacity(ctx context.Context) (ccpool.Capacity, error) {
 // holds up the failure.
 func TestDispatch_unexplainedDeath_logsUsageLimitReading(t *testing.T) {
 	resets := time.Date(2026, 10, 8, 18, 0, 0, 0, time.UTC)
+	// The hanging-read case waits out this bound for real; shrink it so the
+	// case takes milliseconds instead of the production 5 s.
+	prev := deathUsageLimitTimeout
+	deathUsageLimitTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { deathUsageLimitTimeout = prev })
 	for _, tc := range []struct {
 		name     string
 		cap      ccpool.Capacity

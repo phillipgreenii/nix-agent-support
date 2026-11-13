@@ -937,8 +937,9 @@ const closeSettledSessionTimeout = time.Minute
 
 // deathUsageLimitTimeout bounds the usage-limit reading logOnDeath takes on the
 // unexplained-death path: short, because the reading is evidence only and must
-// never hold up the failure it accompanies.
-const deathUsageLimitTimeout = 5 * time.Second
+// never hold up the failure it accompanies. A var so a test can shrink it;
+// nothing else assigns it.
+var deathUsageLimitTimeout = 5 * time.Second
 
 // closeSettledSession closes (non-purge, --reason handler) the session name
 // that this dispatch launched or absorbed, once the dispatch has reached a

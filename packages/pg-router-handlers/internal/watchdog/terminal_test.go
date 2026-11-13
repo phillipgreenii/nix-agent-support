@@ -24,11 +24,23 @@ import (
 const wedgeSleepDuration = 30 * time.Second
 
 // boundedCallMargin is subtracted from wedgeSleepDuration to build
-// boundedCallElapsedCeiling below. It is derived from gitCallTimeout (the
-// actual bound under test, defined in terminal.go) rather than a bare
-// literal, so the ceiling tracks gitCallTimeout instead of silently
-// diverging from it if that constant ever changes.
-const boundedCallMargin = gitCallTimeout / 3
+// boundedCallElapsedCeiling below. It is a fixed fraction of the wedge, since
+// the wedged tests shrink gitCallTimeout (see shrinkGitCallTimeout).
+const boundedCallMargin = wedgeSleepDuration / 3
+
+// wedgedCallTimeout replaces gitCallTimeout for the wedged-git tests: the kill
+// path is the same at any bound, and the production 10 s would make each of
+// them wait out a real ten seconds. Not smaller than a few seconds: on a loaded
+// host the wrapper shell can take over a second to start and write its pid
+// file, and a bound that fires before that fails the test for the wrong reason.
+const wedgedCallTimeout = 3 * time.Second
+
+func shrinkGitCallTimeout(t *testing.T) {
+	t.Helper()
+	prev := gitCallTimeout
+	gitCallTimeout = wedgedCallTimeout
+	t.Cleanup(func() { gitCallTimeout = prev })
+}
 
 // boundedCallElapsedCeiling is the ceiling TestSafeToReset_boundsWedgedToplevelProbe
 // and TestTerminal_boundsWedgedReset assert elapsed time against: any value
@@ -299,6 +311,7 @@ func writeWedgedGit(t *testing.T, verb string) string {
 // must fall back to its safe default (false) rather than hang the hard-stop
 // sequence.
 func TestSafeToReset_boundsWedgedToplevelProbe(t *testing.T) {
+	shrinkGitCallTimeout(t)
 	wedged := writeWedgedGit(t, "rev-parse --show-toplevel")
 
 	restore := openGit
@@ -338,6 +351,7 @@ func TestSafeToReset_boundsWedgedToplevelProbe(t *testing.T) {
 // comment/unclaim steps, rather than hang the hard-stop sequence
 // indefinitely (pg2-yy42).
 func TestTerminal_boundsWedgedReset(t *testing.T) {
+	shrinkGitCallTimeout(t)
 	wedged := writeWedgedGit(t, "reset --hard")
 
 	restore := openGit

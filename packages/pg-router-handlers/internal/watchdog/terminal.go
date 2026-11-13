@@ -26,7 +26,9 @@ import (
 // (safeToReset), and is newly applied to the mutating reset/clean calls in
 // terminal, which previously had no bound of their own and relied solely
 // on the caller's ambient ctx (pg2-ljyaj).
-const gitCallTimeout = 10 * time.Second
+//
+// A var only so the wedged-git tests can shrink it; nothing else assigns it.
+var gitCallTimeout = 10 * time.Second
 
 // gitLocatorCleaner is the composite role this file needs from x/gitclient
 // at a given anchor directory: Locator.Toplevel backs safeToReset's

@@ -306,6 +306,14 @@ func TestWaitDoneRelease_idleButSubagentRunningIsNotEnded(t *testing.T) {
 	e := newExec(cc, bd, cfg)
 	// A subagent keeps writing: the newest activity is always "now".
 	e.deps.LatestActivity = func(string) (time.Time, bool) { return e.deps.Now(), true }
+	// No unanswered Bash call: the default probe would glob and stat the real
+	// filesystem on every poll of this simulated-time loop.
+	e.deps.InFlight = func(string, time.Time) bool { return false }
+	// The release role's time budget makes the wait horizon minutes of simulated
+	// time; step the manual clock 1000x per poll so the loop is tens of
+	// iterations instead of hundreds of thousands (slow under -race).
+	tick := e.deps.Tick
+	e.deps.Tick = func(ctx context.Context, d time.Duration) error { return tick(ctx, 1000*d) }
 	err := e.waitDone(context.Background(), nil, releaseDispatch(cfg), relSession)
 	if err == nil {
 		t.Fatal("a bare idle with a subagent still writing must not complete a close-or-release dispatch")
@@ -320,6 +328,7 @@ func TestWaitDoneRelease_idleButSubagentRunningIsNotEnded(t *testing.T) {
 	}
 	e = newExec(&dtest.FakeCC{ListSeq: [][]ccpool.Session{{row}}}, bd, cfg)
 	e.deps.LatestActivity = func(string) (time.Time, bool) { return time.Unix(0, 0).Add(-time.Hour), true }
+	e.deps.InFlight = func(string, time.Time) bool { return false }
 	if err := e.waitDone(context.Background(), nil, releaseDispatch(cfg), relSession); err != nil {
 		t.Fatalf("a quiet idle session with the bead handed back is done: %v", err)
 	}
