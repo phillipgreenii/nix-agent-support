@@ -73,7 +73,7 @@ func newApp(stdout, stderr io.Writer, clock pool.Clock) *app {
 		},
 		sleep:     time.Sleep,
 		freeBytes: statfsFree,
-		daemons:   metrics.CountDaemons,
+		daemons:   metrics.NewDaemonCounter().CountDaemons,
 		pid:       os.Getpid,
 	}
 }
