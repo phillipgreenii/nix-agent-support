@@ -50,17 +50,6 @@ type TickContext struct {
 	// disjunct uses). Nil means "assume a surface is present" so tests and
 	// early-startup paths that don't wire a resolver keep their prior behavior.
 	HasSurface func(pid int) bool
-
-	// HasUnsubmittedInput reports whether pid's terminal surface currently
-	// shows composed-but-not-yet-submitted text (a half-typed prompt).
-	// AutoSessionWrapUpProducer's unsubmitted-input guard (bead tc-m08w3,
-	// safety-critical): injecting a directive via send-keys+Enter while the
-	// user is mid-compose would splice into their half-typed line and
-	// force-submit a corrupted message. A nil predicate defaults to false
-	// (assume no unsubmitted input) so callers that do not wire a resolver —
-	// tests, and any surface type without an inspector — are unaffected. The
-	// daemon wires this from signal.HasUnsubmittedInput over its signaler set.
-	HasUnsubmittedInput func(pid int) bool
 }
 
 // hasSurface reports whether pid has a deliverable surface per the HasSurface
@@ -71,16 +60,6 @@ func (ctx TickContext) hasSurface(pid int) bool {
 		return true
 	}
 	return ctx.HasSurface(pid)
-}
-
-// hasUnsubmittedInput reports whether pid's surface currently shows
-// composed-but-not-yet-submitted input, per the HasUnsubmittedInput
-// predicate. A nil predicate defaults to false (assume clear to send).
-func (ctx TickContext) hasUnsubmittedInput(pid int) bool {
-	if ctx.HasUnsubmittedInput == nil {
-		return false
-	}
-	return ctx.HasUnsubmittedInput(pid)
 }
 
 // WatermarkView is the nudger state visible to producers. Producers may

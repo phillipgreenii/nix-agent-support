@@ -869,9 +869,6 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				// cmux (ADR 0022). Deeper fix complementing pg2-2o0p7's
 				// dispatcher-side suppress-and-drop backstop.
 				HasSurface: surf.HasSurface,
-				// Unsubmitted-input guard (bead tc-m08w3, safety-critical): see
-				// signal.HasUnsubmittedInput's doc for the fail-closed rationale.
-				HasUnsubmittedInput: surf.HasUnsubmittedInput,
 			}
 			n.Reconcile(tctx)
 			// Annotate sessions BEFORE dispatch so clients see what's queued.

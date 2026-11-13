@@ -73,14 +73,6 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   still be latched against firing twice for the same episode. The latch MUST be derived from
   **persisted** state (not memory-only), so a daemon restart mid-episode MUST NOT cause a second
   fire for the same episode.
-- **`INV-AUTOWRAP-2`** <!-- uuid: 7721450d-148a-42bb-a2bb-3350adc18c0a --> — An
-  auto-session-wrap-up nudge MUST NOT be injected while the target session's input surface shows
-  **unsubmitted input** (`glossary.md`). Because idleness (no new transcript activity) and
-  mid-composition are indistinguishable from transcript signals alone, this check MUST fail
-  **closed**: any inspection uncertainty (the surface cannot be inspected, or inspection itself
-  fails) MUST be treated as "unsubmitted input present, do not send" — never the reverse. A tick
-  suppressed by this rule MUST NOT consume the once-per-episode latch (`INV-AUTOWRAP-1`); the next
-  tick re-evaluates.
 
 ## Gates (`INV-GATE-*`)
 

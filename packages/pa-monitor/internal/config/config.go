@@ -67,9 +67,7 @@ type Config struct {
 	// AutoSessionWrapUp is the [auto_session_wrap_up] block (bead tc-m08w3):
 	// nudges an idle-but-live session to run session-wrapup:wrap-up-session
 	// before its prompt cache expires. Enable defaults to false — this ships
-	// inert until an operator opts in, since the unsubmitted-input guard's
-	// heuristic (internal/signal.TmuxSignaler.HasUnsubmittedInput) has not yet
-	// been validated against a live Claude Code TUI capture.
+	// inert until an operator opts in.
 	AutoSessionWrapUp AutoSessionWrapUpConfig
 	// FirstPromptMaxChars is the rune count the `sessions` subcommand truncates
 	// each session's first_prompt to. Sourced from the top-level

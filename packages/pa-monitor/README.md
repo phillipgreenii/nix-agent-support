@@ -268,17 +268,6 @@ still alive in its terminal. **Off by default** (`auto_session_wrap_up.enable = 
   episode was last nudged, so a daemon restart mid-episode cannot re-fire it. A missed nudge costs
   nothing extra; a duplicate one burns tokens for no benefit, so the producer is biased toward
   under-firing.
-- **Unsubmitted-input guard (safety-critical).** Idle (no new transcript activity) is
-  indistinguishable from a session mid-composition — a long paste, or a thinking-pause, writes
-  nothing to the transcript until submitted. Before enqueueing, the producer checks whether the
-  target's terminal surface currently shows composed-but-not-yet-submitted input
-  (`internal/signal.HasUnsubmittedInput`) and skips that tick (without consuming the episode) if so.
-  This check **fails closed** on any uncertainty — a capture-pane error, no recognizable input-box
-  line, or a Signaler with no inspection capability (cmux today — see the function's doc for why) all
-  count as "unsubmitted input present, do not send." The practical effect: until
-  `TmuxSignaler.HasUnsubmittedInput`'s heuristic is validated against a live Claude Code TUI capture,
-  this guard may make the feature functionally inert (safe) rather than incorrect. Validate with a
-  real idle tmux-hosted session before relying on this in production.
 - Delivery reuses the existing `Signaler.Send` / cmux-bridge path like every other nudge source (see
   [Nudge delivery](#nudge-delivery) above) — no tmux/cmux special-casing at the producer layer. The
   directive text is a small template file

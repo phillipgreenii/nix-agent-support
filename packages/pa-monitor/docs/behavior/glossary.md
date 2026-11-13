@@ -59,10 +59,6 @@ Vocabulary for pa-monitor's CLI and daemon. cmux-bridge and the TUI are named bo
   episode, and MUST NOT retry or escalate within it (`INV-AUTOWRAP-1`). A missed nudge costs
   nothing extra; a duplicate one burns tokens for no benefit — the latch is deliberately biased
   toward under-firing.
-- **Unsubmitted input** — composed-but-not-yet-submitted text sitting in a session's own input
-  surface (a half-typed prompt). Indistinguishable from idleness by transcript signals alone, so a
-  nudge MUST NOT be injected while it is present (`INV-AUTOWRAP-2`) — doing so would splice into
-  the user's own words and force-submit a corrupted message.
 
 ## The gates
 

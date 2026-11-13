@@ -92,39 +92,30 @@ func TestAutoSessionWrapUpProducerBlockedNeverFires(t *testing.T) {
 	}
 }
 
-// TestAutoSessionWrapUpProducerUnsubmittedInputGuard covers verification item
-// 1's unsubmitted-input-guard bullet: a non-empty captured pane input line
-// suppresses send for that tick WITHOUT consuming the episode — a later
-// empty-input tick still fires.
-func TestAutoSessionWrapUpProducerUnsubmittedInputGuard(t *testing.T) {
+// TestAutoSessionWrapUpProducerIdleWithSurfaceEnqueues: an idle session whose
+// episode is past the threshold, with a deliverable surface and no other
+// guard, enqueues the wrap-up intent and records the episode latch. Delivery
+// goes through the control mod, whose submit leaves a half-typed draft intact,
+// so the producer does not inspect the input box.
+func TestAutoSessionWrapUpProducerIdleWithSurfaceEnqueues(t *testing.T) {
 	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
-	episodeStart := now.Add(-autoWrapThreshold)
+	episodeStart := now.Add(-autoWrapThreshold - time.Minute)
 	p := &AutoSessionWrapUpProducer{}
 	wm := wmStub{autoWrapNudgedFor: map[string]time.Time{}}
 
 	sv := newIdleSV("sid-1", 1001, episodeStart)
 	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{{Sessions: []*aggregate.SessionView{sv}}}}
 
-	// Tick 1: composing (non-empty pane input) -> must NOT enqueue, must NOT
-	// consume the episode watermark.
 	store := NewPendingStore()
 	ctx := autoWrapCtx(now, tree, wm)
-	ctx.HasUnsubmittedInput = func(pid int) bool { return true }
+	ctx.HasSurface = func(pid int) bool { return true }
 	p.Reconcile(ctx, store)
-	if store.HasAny("sid-1") {
-		t.Fatal("intent enqueued despite unsubmitted (composing) input")
-	}
-	if _, wrote := wm.autoWrapNudgedFor["sid-1"]; wrote {
-		t.Fatal("episode watermark consumed on a tick that was suppressed by the unsubmitted-input guard")
-	}
 
-	// Tick 2 (a moment later, input now clear): must fire.
-	now2 := now.Add(5 * time.Second)
-	ctx2 := autoWrapCtx(now2, tree, wm)
-	ctx2.HasUnsubmittedInput = func(pid int) bool { return false }
-	p.Reconcile(ctx2, store)
 	if !store.HasAny("sid-1") {
-		t.Error("intent not enqueued once unsubmitted input cleared")
+		t.Fatal("idle session past threshold with a surface was not enqueued")
+	}
+	if got := wm.autoWrapNudgedFor["sid-1"]; !got.Equal(episodeStart) {
+		t.Errorf("episode latch = %v, want %v", got, episodeStart)
 	}
 }
 

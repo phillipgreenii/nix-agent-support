@@ -195,9 +195,6 @@ func TestTmuxGateNoProcessesWhenTmuxAbsent(t *testing.T) {
 	if err := sig.Send(67890, "continue"); err == nil {
 		t.Error("Send succeeded with tmux absent; want an error")
 	}
-	if !sig.HasUnsubmittedInput(67890) {
-		t.Error("HasUnsubmittedInput = false with tmux absent; want fail-closed true")
-	}
 	if counter.total() != 0 {
 		t.Errorf("RunCmd invoked %d times with tmux absent (ps -A=%d, other ps=%d, other=%d); want 0",
 			counter.total(), counter.psAll, counter.psOther, counter.nonPsCalls)

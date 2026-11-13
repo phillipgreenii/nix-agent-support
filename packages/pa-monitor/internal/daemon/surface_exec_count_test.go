@@ -119,14 +119,14 @@ func newShimWorld() (*recordingPS, []*session.Session) {
 	return r, sessions
 }
 
-type tickCounts struct{ refine, surface, unsubmitted int }
+type tickCounts struct{ refine, surface int }
 
 // runTicks simulates n daemon ticks over the 22 sessions with the production
 // signalers and a real provider.Cache. Per tick it mirrors, in order: the
 // poller's cached host lookup + cmux refine walk (refineCmuxTerminalHost calls
-// FindCmuxServerAncestor), then the nudger's HasSurface and HasUnsubmittedInput
+// FindCmuxServerAncestor), then the nudger's HasSurface
 // for each session through resolve. resolve is the code under test.
-func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tree *aggregate.Tree) (hasSurface, hasUnsubmitted func(int) bool)) ([]tickCounts, *recordingPS) {
+func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tree *aggregate.Tree) func(int) bool) ([]tickCounts, *recordingPS) {
 	r, sessions := newShimWorld()
 	clock := time.Unix(1_000_000, 0)
 	cmux := &signal.CmuxSignaler{RunCmd: r.run}
@@ -156,38 +156,32 @@ func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tr
 		cache.Reconcile(sessions)
 		tc.refine = r.snapshot() - start
 
-		hasSurface, hasUnsub := resolve(signalers, &aggregate.Tree{Dirs: []*aggregate.Directory{dir}})
+		hasSurface := resolve(signalers, &aggregate.Tree{Dirs: []*aggregate.Directory{dir}})
 		start = r.snapshot()
 		for _, s := range sessions {
 			hasSurface(s.PID)
 		}
 		tc.surface = r.snapshot() - start
-		start = r.snapshot()
-		for _, s := range sessions {
-			hasUnsub(s.PID)
-		}
-		tc.unsubmitted = r.snapshot() - start
 		out = append(out, tc)
 		clock = clock.Add(5 * time.Second)
 	}
 	return out, r
 }
 
-func legacyResolve(signalers []signal.Signaler, _ *aggregate.Tree) (func(int) bool, func(int) bool) {
-	return func(pid int) bool { return signal.ResolveSignaler(signalers, pid) != nil },
-		func(pid int) bool { return signal.HasUnsubmittedInput(signalers, pid) }
+func legacyResolve(signalers []signal.Signaler, _ *aggregate.Tree) func(int) bool {
+	return func(pid int) bool { return signal.ResolveSignaler(signalers, pid) != nil }
 }
 
-func productionResolve(signalers []signal.Signaler, tree *aggregate.Tree) (func(int) bool, func(int) bool) {
+func productionResolve(signalers []signal.Signaler, tree *aggregate.Tree) func(int) bool {
 	r := newSurfaceResolver(signalers, tree)
-	return r.HasSurface, r.HasUnsubmittedInput
+	return r.HasSurface
 }
 
 // TestSurfaceExecCount_PerTick_22Sessions proves the per-tick ancestry exec
 // count with NON-VACUOUS lower bounds. The legacy path (no process table) MUST
 // reproduce the spike's baseline (63 refine execs + 168 resolution execs), so
 // the "before" is measured by the same shim. With the shared snapshot table the
-// whole tick (refine walk + HasSurface + HasUnsubmittedInput for 22 sessions)
+// whole tick (refine walk + HasSurface for 22 sessions)
 // MUST cost exactly one ids-only snapshot exec and zero per-hop walks.
 func TestSurfaceExecCount_PerTick_22Sessions(t *testing.T) {
 	const ticks = 12
@@ -196,11 +190,11 @@ func TestSurfaceExecCount_PerTick_22Sessions(t *testing.T) {
 
 	for i := 1; i < ticks; i++ { // tick 0 is cold
 		b, a := before[i], after[i]
-		t.Logf("tick %d: ancestry execs before=%d after=%d", i, b.refine+b.surface+b.unsubmitted, a.refine+a.surface+a.unsubmitted)
+		t.Logf("tick %d: ancestry execs before=%d after=%d", i, b.refine+b.surface, a.refine+a.surface)
 		if b.refine < 3*nCmuxSessions || b.surface < 168 {
 			t.Fatalf("tick %d: legacy baseline not reproduced: refine=%d (want >= %d) surface=%d (want >= 168)", i, b.refine, 3*nCmuxSessions, b.surface)
 		}
-		if got := a.refine + a.surface + a.unsubmitted; got > 1 {
+		if got := a.refine + a.surface; got > 1 {
 			t.Errorf("tick %d: ancestry execs after = %d, want <= 1", i, got)
 		}
 	}

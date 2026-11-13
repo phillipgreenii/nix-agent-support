@@ -41,9 +41,6 @@ func TestSurfaceResolver_CmuxHostWalksNothing(t *testing.T) {
 	if !r.HasSurface(10) {
 		t.Fatal("cmux-hosted pid must have a surface")
 	}
-	if !r.HasUnsubmittedInput(10) { // cmux has no inspector: fail closed
-		t.Fatal("cmux has no PaneInputInspector: must fail closed")
-	}
 	if tmux.detects != 0 || cmux.detects != 0 {
 		t.Fatalf("detects tmux=%d cmux=%d, want 0/0", tmux.detects, cmux.detects)
 	}

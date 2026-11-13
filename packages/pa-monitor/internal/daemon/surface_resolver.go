@@ -5,8 +5,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
-// surfaceResolver answers the nudger's per-pid questions (HasSurface,
-// HasUnsubmittedInput) for one tick. It is built from the tick's tree and
+// surfaceResolver answers the nudger's per-pid questions (HasSurface) for one tick. It is built from the tick's tree and
 // resolves each pid through the terminal host the poller already cached on the
 // session (provider.Cache.TerminalHost), so a cmux-hosted session never pays
 // the tmux ancestry walk, and a cached cmux host costs no walk at all
@@ -46,10 +45,4 @@ func newSurfaceResolver(signalers []signal.Signaler, tree *aggregate.Tree) *surf
 // HasSurface reports whether pid has a deliverable terminal surface.
 func (r *surfaceResolver) HasSurface(pid int) bool {
 	return signal.ResolveSignalerForHost(r.signalers, r.hostByPID[pid], pid) != nil
-}
-
-// HasUnsubmittedInput reports whether pid's surface shows composed-but-not-
-// submitted input (fail-closed; see signal.HasUnsubmittedInput).
-func (r *surfaceResolver) HasUnsubmittedInput(pid int) bool {
-	return signal.HasUnsubmittedInputForHost(r.signalers, r.hostByPID[pid], pid)
 }

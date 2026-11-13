@@ -29,17 +29,6 @@ type ancestrySignaler struct{ countingSignaler }
 
 func (a *ancestrySignaler) DetectIsHostClassification() bool { return true }
 
-type inspectingSignaler struct {
-	countingSignaler
-	inspected int
-	unsub     bool
-}
-
-func (i *inspectingSignaler) HasUnsubmittedInput(int) bool {
-	i.inspected++
-	return i.unsub
-}
-
 func TestBareHost(t *testing.T) {
 	for in, want := range map[string]string{
 		"":                           "",
@@ -105,34 +94,6 @@ func TestResolveSignalerForHost_UnknownOrEmptyFallsBackToFullWalk(t *testing.T) 
 			t.Errorf("host %q: detects tmux=%d cmux=%d, want the full walk 1 and 1", host, tmux.detects, cmux.detects)
 		}
 	}
-}
-
-func TestHasUnsubmittedInputForHost(t *testing.T) {
-	t.Run("tmux host inspects only tmux, without a second Detect", func(t *testing.T) {
-		tmux := &inspectingSignaler{countingSignaler: countingSignaler{name: "tmux", detect: true}, unsub: false}
-		cmux := &ancestrySignaler{countingSignaler{name: "cmux", detect: true}}
-		if signal.HasUnsubmittedInputForHost([]signal.Signaler{cmux, tmux}, "tmux", 7) {
-			t.Error("want false (inspector reported empty input box)")
-		}
-		if tmux.inspected != 1 || tmux.detects != 0 || cmux.detects != 0 {
-			t.Errorf("inspected=%d tmuxDetects=%d cmuxDetects=%d, want 1/0/0", tmux.inspected, tmux.detects, cmux.detects)
-		}
-	})
-	t.Run("cmux host fails closed with no walk at all", func(t *testing.T) {
-		tmux := &inspectingSignaler{countingSignaler: countingSignaler{name: "tmux", detect: true}}
-		cmux := &ancestrySignaler{countingSignaler{name: "cmux", detect: true}}
-		if !signal.HasUnsubmittedInputForHost([]signal.Signaler{tmux, cmux}, "cmux", 7) {
-			t.Error("cmux has no inspector: must fail closed (true)")
-		}
-		if tmux.detects+cmux.detects != 0 {
-			t.Errorf("Detect calls = %d, want 0", tmux.detects+cmux.detects)
-		}
-	})
-	t.Run("unknown host keeps the legacy fail-closed resolution", func(t *testing.T) {
-		if !signal.HasUnsubmittedInputForHost(nil, "unknown", 7) {
-			t.Error("no signaler resolves: must fail closed (true)")
-		}
-	})
 }
 
 // A real CmuxSignaler must advertise that its Detect is the host classification

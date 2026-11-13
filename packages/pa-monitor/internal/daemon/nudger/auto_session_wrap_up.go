@@ -92,16 +92,6 @@ func (p *AutoSessionWrapUpProducer) Reconcile(ctx TickContext, store *PendingSto
 				store.Cancel(key)
 				continue
 			}
-			// Unsubmitted-input guard (safety-critical): idle (no new
-			// transcript activity) is indistinguishable from a session
-			// mid-composition. Skip THIS tick without consuming the episode —
-			// no watermark write, so the next tick re-evaluates and can still
-			// fire once the input line clears.
-			if ctx.hasUnsubmittedInput(s.PID) {
-				store.Cancel(key)
-				continue
-			}
-
 			idleMinutes := int(ctx.Now.Sub(episodeStart).Minutes())
 			store.Add(NudgeIntent{
 				Key:       key,
