@@ -59,6 +59,11 @@ var Exempt = map[string]bool{
 	// help text to hash. The spec models only -h/--help (see
 	// cmddesc.uuidgenSchema).
 	"uuidgen": true,
+	// ping is BSD (macOS /sbin/ping) on darwin and iputils on linux, with
+	// unrelated --help text and option sets, and neither is put on the check
+	// sandbox PATH; like uuidgen there is no ONE pinned help text to hash. The
+	// spec models only the bounded forms cited in data/ping.json.
+	"ping": true,
 }
 
 // ScriptSuffix marks a spec whose command is a plugin HELPER SCRIPT resolved

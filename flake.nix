@@ -7284,6 +7284,8 @@
                       # pg2-33slg: pa-monitor (status / info, the audit-worktrees liveness
                       # check) is this repo's own overlay package (packages/pa-monitor).
                       pkgs.pa-monitor
+                      # data/pg-claude-code-recorder.json: this repo's own overlay package.
+                      pkgs.pg-claude-code-recorder
                       # No top-level bd/rtk overlay attr in THIS standalone flake --
                       # resolve them the same way pb-contract (above) already does.
                       (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
@@ -7349,6 +7351,13 @@
               #     models it.
               #   - `bgrun "pre-land-eval-` (ff-merge-to-main): bgrun wraps
               #     `pre-land-eval`, which no rule classifies.
+              #   - `bgrun "pgl-land-` and `pg-git-lander rebase`
+              #     (ff-merge-to-main): pg-git-lander has no ceta rule.
+              #   - `claude-tool-tracker ingest` (identify-hook-misses): the
+              #     tracker's own ingest CLI, which no rule models.
+              #   - `claude-extended-tool-approver evaluate $SRC`
+              #     (identify-hook-misses): piped into a `sed -n '/re/,$p'`
+              #     whose address is read as an unknown path.
               # `--type=task` (identify-slow-tools) is an extraction artifact:
               # the continuation fragment of a multi-line `bd create`.
               plugin-conformance = pkgs.runCommand "check-plugin-conformance" { } ''
@@ -7369,6 +7378,10 @@
                   --allow "jq -s --slurpfile specs" \
                   --allow "claude-tool-tracker timing" \
                   --allow "bgrun \"pre-land-eval-" \
+                  --allow "bgrun \"pgl-land-" \
+                  --allow "pg-git-lander rebase" \
+                  --allow "claude-tool-tracker ingest" \
+                  --allow "claude-extended-tool-approver evaluate \$SRC" \
                   --allow "--type=task" \
                   ${./claude-marketplace}
                 touch $out
@@ -7434,6 +7447,7 @@
                   --allow-reason "env assignments only" \
                   --allow-reason "has a dynamically-expanded path arg" \
                   --allow-reason "references unknown path" \
+                  --allow "pg-tempo-search --lookback" \
                   ${phillipgreenii-nix-base}/pn-workspace-rules \
                   ${phillipgreenii-nix-base}/capability-model
                 touch $out

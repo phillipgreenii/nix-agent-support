@@ -210,6 +210,9 @@ func TestIsExemptByPlatform(t *testing.T) {
 		// GNU coreutils everywhere the check runs and is hashed.
 		{"linux", "uuidgen", true},
 		{"darwin", "uuidgen", true},
+		// ping is BSD on darwin and iputils on linux: exempt on both.
+		{"linux", "ping", true},
+		{"darwin", "ping", true},
 		{"linux", "tr", false},
 		{"darwin", "tr", false},
 		{"darwin", "man", true},

@@ -153,16 +153,16 @@
         "provenance": "pg-router --help, explain <role>: the current admission decision of one role, read from the RUNNING core",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: \"explain <role> [--socket <path>] [--token <tok>]  say whether the role is paused by levels RIGHT NOW and why\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: explain takes the role as an argument and reads no stdin"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: explain prints the paused-role line naming each failing requirement, or reports the role as not paused (content)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: explain lists only [--socket <path>] [--token <tok>] beyond <role>; any other flag is unmodeled and insufficient"
           }
         },
         "positionals": {
@@ -175,7 +175,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: \"explain <role> [--socket <path>] [--token <tok>]\"; the role is a name, not a path (\"An unknown role exits 1 with \\\"unknown role <name>\\\"\")"
           }
         },
         "stdin": "never",
@@ -223,16 +223,16 @@
         "provenance": "pg-router --help, level (list [--json] | set ... | clear ... | refresh ...)",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help usage line: \"level (list [--json] | set <resource> <LEVEL> ... | clear ... | refresh ...)\""
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: no level subcommand reads stdin"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: \"level list [--json]  list every resource with the level in force\"; set, clear and refresh report the applied state (content)"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help: level subcommands list only their own flags plus [--socket <path>] [--token <tok>]; any other flag is unmodeled and insufficient"
           }
         },
         "positionals": {
@@ -245,7 +245,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+            "source": "pg-router --help usage line: \"level (list [--json] | set <resource> <LEVEL> ... | clear (<resource> | --all) ... | refresh [<resource>...] ...)\"; operands are resource names and levels, never paths"
           }
         },
         "stdin": "never",
@@ -258,16 +258,16 @@
             "provenance": "pg-router --help, level list [--json]: list every resource with the level in force",
             "citations": {
               "provenance": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+                "source": "pg-router --help: \"level list [--json]  list every resource with the level in force (source, owner, age, any override)\""
               },
               "stdin": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+                "source": "pg-router --help: level list reads no stdin"
               },
               "stdout": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+                "source": "pg-router --help: \"level list [--json]  list every resource with the level in force (source, owner, age, any override)\" (content)"
               },
               "unknownFlag": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+                "source": "pg-router --help: level list lists only [--json] (plus the shared --socket/--token); any other flag is unmodeled and insufficient"
               }
             },
             "flags": {
@@ -280,7 +280,7 @@
                   "kind": "none"
                 },
                 "citation": {
-                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+                  "source": "pg-router --help: \"level list [--json]\"; with --json the listing is machine-readable JSON instead of text"
                 }
               }
             },
@@ -294,7 +294,7 @@
                 }
               },
               "citation": {
-                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-router\"]"
+                "source": "pg-router --help: \"level list [--json]\" takes no operands"
               }
             },
             "stdin": "never",
