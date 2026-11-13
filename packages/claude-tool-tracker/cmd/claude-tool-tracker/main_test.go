@@ -26,7 +26,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
-	os.RemoveAll(dir)
+	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
 
@@ -206,7 +206,7 @@ func TestHookModeExitsZeroWhenDirUnwritable(t *testing.T) {
 	if err := os.Chmod(state, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(state, 0o700)
+	defer func() { _ = os.Chmod(state, 0o700) }()
 	out, errOut, code := run(t, state, preTool, "hook")
 	if code != 0 || out != "" || errOut != "" {
 		t.Fatalf("code %d stdout %q stderr %q", code, out, errOut)
@@ -222,7 +222,7 @@ func TestAppendFailsWhenDirUnwritable(t *testing.T) {
 	}
 	state := t.TempDir()
 	_ = os.Chmod(state, 0o500)
-	defer os.Chmod(state, 0o700)
+	defer func() { _ = os.Chmod(state, 0o700) }()
 	if _, _, code := run(t, state, "{}", "append", "--session-id", "s", "--source", "tracker", "--kind", "tracker.session_end"); code == 0 {
 		t.Fatal("append should report the failure")
 	}

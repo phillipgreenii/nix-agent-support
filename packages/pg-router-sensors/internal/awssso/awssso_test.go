@@ -2,6 +2,7 @@ package awssso
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -247,7 +248,7 @@ func TestSecretsNeverPrinted(t *testing.T) {
 			// Returned structs: measure directly and render with %+v.
 			s := New()
 			s.CacheDir = r.cache
-			obs, err := s.Measure(nil, sensorcli.Env{Now: t0, Stderr: &r.errb, Getenv: func(string) string { return "" }}) //nolint:staticcheck // ctx unused
+			obs, err := s.Measure(context.TODO(), sensorcli.Env{Now: t0, Stderr: &r.errb, Getenv: func(string) string { return "" }}) //nolint:staticcheck // ctx unused
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -273,7 +274,7 @@ func TestHomeDefault(t *testing.T) {
 	}
 	s := New()
 	var errb bytes.Buffer
-	obs, err := s.Measure(nil, sensorcli.Env{Now: t0, Stderr: &errb, Getenv: func(k string) string {
+	obs, err := s.Measure(context.TODO(), sensorcli.Env{Now: t0, Stderr: &errb, Getenv: func(k string) string {
 		if k == "HOME" {
 			return home
 		}
@@ -325,7 +326,7 @@ func TestResourceFilterAndBands(t *testing.T) {
 	if len(s.Bands()) != 1 {
 		t.Errorf("bands %v", s.Bands())
 	}
-	if _, err := s.Measure(nil, sensorcli.Env{Resource: "other"}); err == nil { //nolint:staticcheck // ctx unused
+	if _, err := s.Measure(context.TODO(), sensorcli.Env{Resource: "other"}); err == nil { //nolint:staticcheck // ctx unused
 		t.Error("other resource must not be measured")
 	}
 }
@@ -343,7 +344,7 @@ func TestDirectoryNamedJSONIgnored(t *testing.T) {
 func TestRefreshBypassesDwell(t *testing.T) {
 	s := New()
 	s.CacheDir = t.TempDir()
-	obs, _ := s.Measure(nil, sensorcli.Env{Now: t0, Refresh: true, Stderr: &bytes.Buffer{}, Getenv: func(string) string { return "" }}) //nolint:staticcheck // ctx unused
+	obs, _ := s.Measure(context.TODO(), sensorcli.Env{Now: t0, Refresh: true, Stderr: &bytes.Buffer{}, Getenv: func(string) string { return "" }}) //nolint:staticcheck // ctx unused
 	if !obs[0].BypassDwell {
 		t.Error("refresh must bypass the dwell")
 	}

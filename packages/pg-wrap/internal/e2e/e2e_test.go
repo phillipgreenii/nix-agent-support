@@ -357,7 +357,7 @@ func TestExecPassesArgsIntactIncludingALeadingRunOrCheck(t *testing.T) {
 			t.Fatalf("args %q: exit=%d stderr=%q", args, o.exit, o.stderr)
 		}
 		got := f.argv()
-		if !reflect.DeepEqual(got, args) && !(len(got) == 0 && len(args) == 0) {
+		if !reflect.DeepEqual(got, args) && (len(got) != 0 || len(args) != 0) {
 			t.Fatalf("args %q arrived as %q", args, got)
 		}
 	}

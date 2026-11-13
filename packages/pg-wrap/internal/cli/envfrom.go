@@ -74,7 +74,7 @@ func classifyEnv(s *spec.Spec, names []string) (kept, dropped []string, err erro
 		}
 	}
 	for _, n := range names {
-		if carried[n] && !(s.StrictEnv && n == "PATH") {
+		if carried[n] && (!s.StrictEnv || n != "PATH") {
 			kept = append(kept, n)
 		} else {
 			dropped = append(dropped, n)

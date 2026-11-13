@@ -270,7 +270,7 @@ func Append(e *Envelope) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := f.Chmod(fileMode); err != nil {
 		return "", err
 	}

@@ -47,7 +47,7 @@ func runIngest(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "claude-tool-tracker ingest:", err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	res, err := ingest.Run(db, *dir, time.Now())
 	var total ingest.FileResult

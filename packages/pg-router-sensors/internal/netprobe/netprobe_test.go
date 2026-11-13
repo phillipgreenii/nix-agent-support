@@ -17,7 +17,7 @@ import (
 func status(code int) *httptest.Server {
 	return httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {
-			http.Error(w, "want HEAD", 405)
+			http.Error(w, "want HEAD", http.StatusMethodNotAllowed)
 			return
 		}
 		if code/100 == 3 {

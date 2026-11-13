@@ -181,9 +181,8 @@ func buildChain(t *testing.T, o runOpts) *chain {
 // result is one finished run.
 type result struct {
 	*chain
-	exit     int // -1 when the chain did not exit normally
-	startErr error
-	rep      *report
+	exit int // -1 when the chain did not exit normally
+	rep  *report
 }
 
 func exitCode(err error) int {

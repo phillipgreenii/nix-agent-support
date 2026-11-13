@@ -204,7 +204,7 @@ func Load(db *sql.DB) ([]Call, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading tool_calls: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Call
 	for rows.Next() {
 		var c Call

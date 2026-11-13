@@ -56,7 +56,7 @@ func (a *app) writeRaw(name, content string) {
 	if err != nil {
 		a.t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(content); err != nil {
 		a.t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func (a *app) open() *sql.DB {
 	if err != nil {
 		a.t.Fatal(err)
 	}
-	a.t.Cleanup(func() { db.Close() })
+	a.t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -360,7 +360,7 @@ func TestViewsDocumentMatchesDatabase(t *testing.T) {
 		cols, _ := rows.Columns()
 		for rows.Next() {
 		}
-		rows.Close()
+		_ = rows.Close()
 		if strings.Join(cols, ",") != strings.Join(documented, ",") {
 			t.Errorf("view %s columns\n  db:   %v\n  docs: %v", view, cols, documented)
 		}

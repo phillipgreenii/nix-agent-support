@@ -120,14 +120,14 @@ func win(pct float64, resets time.Time) *WindowJSON {
 
 func ts(d time.Duration) string { return now.Add(d).Format(time.RFC3339) }
 
-func measure(t *testing.T, s *Sensor, out cmdrun.Result, resource string) ([]levels.Observation, error, string) {
+func measure(t *testing.T, s *Sensor, out cmdrun.Result, resource string) ([]levels.Observation, string, error) {
 	t.Helper()
 	f := cmdruntest.New(t)
 	f.On(cmdruntest.Match("pa-monitor", "status", "--rate-limits")).Return(out)
 	s.Run = f.Runner()
 	var eb bytes.Buffer
 	o, err := s.Measure(context.Background(), sensorcli.Env{Now: now, Resource: resource, Stderr: &eb})
-	return o, err, eb.String()
+	return o, eb.String(), err
 }
 
 func one(t *testing.T, obs []levels.Observation, res string) levels.Observation {
@@ -143,7 +143,7 @@ func one(t *testing.T, obs []levels.Observation, res string) levels.Observation 
 
 func TestMeasureBothWindows(t *testing.T) {
 	b := doc(win(50, resetsFor(DefaultBlock, 0.5)), win(10, resetsFor(DefaultWeek, 0.05)), ts(-time.Minute))
-	obs, err, _ := measure(t, New(), cmdruntest.Out(string(b)), "")
+	obs, _, err := measure(t, New(), cmdruntest.Out(string(b)), "")
 	if err != nil || len(obs) != 2 {
 		t.Fatalf("%v %+v", err, obs)
 	}
@@ -191,12 +191,12 @@ func TestFloor(t *testing.T) {
 func TestMissingResetsAt(t *testing.T) {
 	pct := 96.0
 	b := doc(&WindowJSON{UsedPct: &pct}, nil, ts(-time.Minute))
-	obs, err, _ := measure(t, New(), cmdruntest.Out(string(b)), "")
+	obs, _, err := measure(t, New(), cmdruntest.Out(string(b)), "")
 	if err != nil || len(obs) != 1 || obs[0].Level != "TIGHT" || obs[0].Reading != nil {
 		t.Errorf("floor only: %v %+v", err, obs)
 	}
 	pct = 50
-	obs, err, se := measure(t, New(), cmdruntest.Out(string(b[:0])+string(doc(&WindowJSON{UsedPct: &pct}, nil, ts(-time.Minute)))), "")
+	obs, se, err := measure(t, New(), cmdruntest.Out(string(b[:0])+string(doc(&WindowJSON{UsedPct: &pct}, nil, ts(-time.Minute)))), "")
 	if err != nil || len(obs) != 0 || !strings.Contains(se, "no reading") {
 		t.Errorf("below floor, no resets: %v %+v %q", err, obs, se)
 	}
@@ -224,7 +224,7 @@ func TestUnknownCases(t *testing.T) {
 	}
 	for name, b := range cases {
 		t.Run(name, func(t *testing.T) {
-			obs, err, _ := measure(t, New(), cmdruntest.Out(string(b)), Resource5h)
+			obs, _, err := measure(t, New(), cmdruntest.Out(string(b)), Resource5h)
 			if err != nil || len(obs) != 0 {
 				t.Errorf("want no line and no error, got %v %+v", err, obs)
 			}
@@ -296,13 +296,13 @@ func TestFailedCall(t *testing.T) {
 	}
 	for name, res := range cases {
 		t.Run(name, func(t *testing.T) {
-			obs, err, _ := measure(t, New(), res, "")
+			obs, _, err := measure(t, New(), res, "")
 			if err == nil || len(obs) != 0 {
 				t.Errorf("want an error, got %v %+v", err, obs)
 			}
 		})
 	}
-	_, err, _ := measure(t, New(), cmdruntest.Fail(3, "daemon down"), "")
+	_, _, err := measure(t, New(), cmdruntest.Fail(3, "daemon down"), "")
 	if !strings.Contains(err.Error(), "daemon down") {
 		t.Errorf("cause lost: %v", err)
 	}

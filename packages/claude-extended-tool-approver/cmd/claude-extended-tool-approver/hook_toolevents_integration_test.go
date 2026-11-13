@@ -21,7 +21,7 @@ func readCetaEvents(t *testing.T, state, session string) []map[string]any {
 	if err != nil {
 		t.Fatalf("no ceta event file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []map[string]any
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {

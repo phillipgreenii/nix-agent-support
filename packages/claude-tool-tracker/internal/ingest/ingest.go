@@ -91,7 +91,7 @@ func ingestFile(db *sql.DB, runID int64, dir, name string, repoCache map[string]
 	if err != nil {
 		return fr, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil {
 		return fr, err

@@ -110,7 +110,7 @@ func renderAlertContext(f finding) string {
 		b.WriteString("  (none)\n")
 	}
 	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("  %s: %s\n", k, f.Annotations[k]))
+		fmt.Fprintf(&b, "  %s: %s\n", k, f.Annotations[k])
 	}
 	if f.Values != "" {
 		b.WriteString("Current value: " + f.Values + "\n")
@@ -121,7 +121,7 @@ func renderAlertContext(f finding) string {
 		b.WriteString("Log query: " + f.Context.LogQuery + "\n")
 	}
 	if len(f.Context.Logs) > 0 {
-		b.WriteString(fmt.Sprintf("Recent logs (last %d):\n", len(f.Context.Logs)))
+		fmt.Fprintf(&b, "Recent logs (last %d):\n", len(f.Context.Logs))
 		for _, l := range f.Context.Logs {
 			b.WriteString("  " + l + "\n")
 		}

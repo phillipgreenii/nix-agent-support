@@ -151,7 +151,7 @@ func settleCalls(db *sql.DB, touched map[int64]bool, now time.Time) error {
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		ids[id] = true
@@ -159,7 +159,7 @@ func settleCalls(db *sql.DB, touched map[int64]bool, now time.Time) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {

@@ -40,7 +40,7 @@ func runTiming(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "claude-tool-tracker timing:", err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	calls, err := timing.Load(db)
 	if err != nil {
 		fmt.Fprintln(stderr, "claude-tool-tracker timing:", err)
@@ -77,7 +77,7 @@ func writeTimingTable(w io.Writer, rep *timing.Report, top int) {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%d\t%d\n", g.Tool, dash(g.Class), g.Repo, g.Runs, g.TotalMS,
 				fmtMedian(g.MedianMS), g.P90MS, g.MaxMS)
 		}
-		tw.Flush()
+		_ = tw.Flush()
 	}
 	section("by total time", rep.ByTotal)
 	section("by p90 (median beside it)", rep.ByP90)
