@@ -3,7 +3,8 @@ cachePackages = [
   'github.com/BurntSushi/toml',
   'github.com/phillipgreenii/pg-router/schemas',
   'github.com/phillipgreenii/x/cmdrun',
-  'github.com/phillipgreenii/x/cmdruntest'
+  'github.com/phillipgreenii/x/cmdruntest',
+  'golang.org/x/sys/unix'
 ]
 
 [mod]
@@ -14,3 +15,7 @@ cachePackages = [
   [mod.'github.com/phillipgreenii/x']
     version = 'v0.0.0-20261112162938-c45c22ca2076'
     hash = 'sha256-hkeXFrYPpIFJPwrzK5x5xkG7cZvKCSmZlSJcAPyOtx4='
+
+  [mod.'golang.org/x/sys']
+    version = 'v0.47.0'
+    hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='

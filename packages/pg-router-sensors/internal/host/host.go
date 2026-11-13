@@ -10,6 +10,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -86,6 +87,10 @@ func Defaults() Thresholds {
 type Sensor struct {
 	// Run is the command seam (production: cmdrun.Exec).
 	Run cmdrun.Runner
+	// Native reads sysctl keys in-process when set (production on darwin); a
+	// key it does not serve (ErrNotNative) goes through Run. Nil means every
+	// key goes through Run.
+	Native Native
 	// Statfs is the filesystem seam.
 	Statfs Statfs
 	// Paths are the filesystems whose lowest free space is the disk reading.
@@ -105,7 +110,7 @@ type Sensor struct {
 // and thresholds.
 func New() *Sensor {
 	return &Sensor{
-		Run: cmdrun.Exec, Statfs: SystemStatfs, Paths: []string{"/"}, T: Defaults(),
+		Run: cmdrun.Exec, Native: SystemNative, Statfs: SystemStatfs, Paths: []string{"/"}, T: Defaults(),
 		Net: &netprobe.Prober{}, NetTargets: netprobe.DefaultTargets, NetThreshold: netprobe.DefaultThreshold,
 	}
 }
@@ -297,6 +302,15 @@ func ParsePressure(out string) (string, error) {
 }
 
 func (s *Sensor) sysctl(ctx context.Context, key string) (string, error) {
+	if s.Native != nil {
+		out, err := s.Native(key)
+		if err == nil {
+			return out, nil
+		}
+		if !errors.Is(err, ErrNotNative) {
+			return "", fmt.Errorf("sysctl %s: %w", key, err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	res := s.Run(ctx, cmdrun.Call{Name: SysctlName, Args: []string{"-n", key}})

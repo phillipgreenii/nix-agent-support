@@ -9,6 +9,8 @@ require (
 
 require github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 
+require golang.org/x/sys v0.47.0
+
 replace github.com/phillipgreenii/pg-router => ../pg-router
 
 replace github.com/phillipgreenii/claude-transcript => ../claude-transcript
