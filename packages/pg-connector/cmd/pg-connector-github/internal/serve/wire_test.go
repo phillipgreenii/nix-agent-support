@@ -139,8 +139,8 @@ func TestErrorTable_SocketPathTooLong_TheDaemonRefusesAndSaysSo(t *testing.T) {
 		d.Rewrite(map[string]any{"socket_path": long})
 	}})
 	d.Start(t)
-	if code := d.Wait(t, 20*time.Second); code != 5 {
-		t.Fatalf("exit = %d, want 5; output: %s", code, d.Stderr())
+	if code := d.Wait(t, 20*time.Second); code != serve.ExitRefused {
+		t.Fatalf("exit = %d, want %d; output: %s", code, serve.ExitRefused, d.Stderr())
 	}
 	if !strings.Contains(d.Stderr(), "sun_path limit") {
 		t.Errorf("the refusal must name the limit: %q", d.Stderr())

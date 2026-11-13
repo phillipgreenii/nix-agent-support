@@ -14,6 +14,7 @@ import (
 
 	_ "modernc.org/sqlite" // writes a store from a newer binary
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/serve"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/servetest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -113,8 +114,8 @@ func TestErrorTable_StoreNewerThanTheBinary_RefusesToStartAndNeverMovesTheFile(t
 	}})
 	d.Start(t)
 
-	if code := d.Wait(t, 20*time.Second); code != 5 {
-		t.Fatalf("serve exit = %d, want 5; output: %s", code, d.Stderr())
+	if code := d.Wait(t, 20*time.Second); code != serve.ExitRefused {
+		t.Fatalf("serve exit = %d, want %d; output: %s", code, serve.ExitRefused, d.Stderr())
 	}
 	if !strings.Contains(d.Stderr(), "schema version 99") || !strings.Contains(d.Stderr(), "downgrade") {
 		t.Errorf("stderr must say why: %q", d.Stderr())

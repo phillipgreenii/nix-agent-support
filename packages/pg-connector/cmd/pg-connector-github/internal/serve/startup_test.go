@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/serve"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/servetest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -122,8 +123,8 @@ func TestServeRefusesASecondInstance(t *testing.T) {
 	}})
 	second.Start(t)
 	code := second.Wait(t, 15*time.Second)
-	if code != 5 {
-		t.Errorf("second serve exit = %d, want 5; output: %s", code, second.Stderr())
+	if code != serve.ExitRefused {
+		t.Errorf("second serve exit = %d, want %d; output: %s", code, serve.ExitRefused, second.Stderr())
 	}
 	if !strings.Contains(second.Stderr(), "daemon.lock") {
 		t.Errorf("the refusal must name the lock: %q", second.Stderr())
