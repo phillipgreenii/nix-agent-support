@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Owner is the lease owner pa-monitor uses with pg-keep-awake. One owner, one
@@ -24,11 +26,8 @@ const KeeperBinary = "pg-keep-awake"
 
 // Exit codes of `pg-keep-awake status --check`.
 const (
-	// exitKeeperDown equals exitcode.Unavailable and exitDegraded equals
-	// exitcode.Degraded in x/exitcode (the pinned x revision lacks that
-	// package).
-	exitKeeperDown = 3
-	exitDegraded   = 5
+	exitKeeperDown = exitcode.Unavailable
+	exitDegraded   = exitcode.Degraded
 )
 
 // DefaultCallTimeout bounds one pg-keep-awake invocation. Every command only

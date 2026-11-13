@@ -159,8 +159,8 @@ func TestAcquireResolvesTheCLIWithoutALoginPATH(t *testing.T) {
 }
 
 // TestStatusCheckExitCodes pins the codes of `pg-keep-awake status --check`:
-// 3 keeper down, 5 degraded. They equal exitcode.Unavailable and
-// exitcode.Degraded in x/exitcode (the pinned x revision lacks that package).
+// 3 keeper down, 5 degraded. They are exitcode.Unavailable and
+// exitcode.Degraded from x/exitcode; the literals here pin the contract.
 func TestStatusCheckExitCodes(t *testing.T) {
 	if exitKeeperDown != 3 {
 		t.Errorf("exitKeeperDown = %d, want 3", exitKeeperDown)
