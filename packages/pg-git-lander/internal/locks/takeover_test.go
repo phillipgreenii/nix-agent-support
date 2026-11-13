@@ -321,7 +321,7 @@ func TestDeadBranchRecordIsConvertedInOneTransaction(t *testing.T) {
 	if !errors.As(err, &rf) || rf.Reason != outcome.RefHolderDied || rf.Holder.OpID != deadOpID {
 		t.Fatalf("err = %v", err)
 	}
-	if o := rf.Outcome("rebase", otherBranch, ""); o.Exit != 5 || o.Reason != "holder-died" || len(o.Next) != 2 {
+	if o := rf.Outcome("rebase", otherBranch, ""); o.Exit != 22 || o.Reason != "holder-died" || len(o.Next) != 2 {
 		t.Errorf("outcome = %+v", o)
 	}
 	if n := len(f.rec.matching("update-ref", "--stdin")) - before; n != 1 {

@@ -194,13 +194,13 @@ before_move = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 		Hooks: map[string]string{"gate": `[ -e "$PGL_MARKERS/fixed" ]`},
 	})
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "hook-failed")
+	expect(t, r, 21, "stopped", "hook-failed")
 	wantNext(t, r, "--continue", "--abort", "--quit")
 	keysPresent(t, r, "schema", "op_id", "operation", "branch", "target", "reason", "detail", "retryable", "stage", "next",
 		"hint", "log", "log_tail", "work_branch", "tips")
 	checkNow(t, h, r, Expected{
 		Outcome: map[string]any{
-			"schema": 1, "exit": 4, "operation": "land", "branch": "feature/x", "target": "main",
+			"schema": 1, "exit": 21, "operation": "land", "branch": "feature/x", "target": "main",
 			"stage": "before_move", "retryable": false,
 		},
 		Snapshot: Snapshot{Refs: startRefs()},
@@ -262,7 +262,7 @@ func TestTier2ObservabilityBusy(t *testing.T) {
 	h.await("up")
 
 	r := h.run("land", "other", "--wait", "1s")
-	expect(t, r, 3, "busy", "")
+	expect(t, r, 9, "busy", "")
 	keysPresent(t, r, "schema", "op_id", "operation", "branch", "target", "holder", "hint")
 	holder, _ := r.json["holder"].(map[string]any)
 	if holder == nil || holder["branch"] != "feature/x" || holder["op_id"] == "" {
@@ -298,7 +298,7 @@ git -C "$PGL_REPO" update-ref refs/heads/main "$c"
 `},
 	})
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "race")
+	expect(t, r, 21, "stopped", "race")
 	keysPresent(t, r, "schema", "op_id", "reason", "retryable", "stage", "next", "work_branch", "tips")
 	wantNext(t, r, "--continue", "--abort")
 	checkNow(t, h, r, Expected{
@@ -339,7 +339,7 @@ func TestTier2MainWorktreeRemoval(t *testing.T) {
 	t.Run("refused", func(t *testing.T) {
 		h := setup(t)
 		r := h.run("land", "feature/x")
-		expect(t, r, 5, "refused", "main-worktree-removal")
+		expect(t, r, 22, "refused", "main-worktree-removal")
 		if hint, _ := r.json["hint"].(string); !strings.Contains(hint, "--keep-source-worktree") {
 			t.Errorf("the refusal does not name --keep-source-worktree: %s", r.stdout)
 		}
@@ -401,7 +401,7 @@ git -C "$PGL_REPO" update-ref refs/heads/feature/x "$c"
 `},
 	})
 	r := h.run("rebase", "feature/x", "--onto", "main")
-	expect(t, r, 4, "stopped", "branch-moved")
+	expect(t, r, 21, "stopped", "branch-moved")
 	moved := h.mustGit(h.repo, "rev-parse", "feature/x")
 	if moved == shapes[ShapeDiverged].facts.Tips["feature/x"] {
 		t.Fatal("the hook did not move BRANCH")
@@ -469,7 +469,7 @@ func TestTier2CheckoutChangedAtDestination(t *testing.T) {
 				Config: beforeMoveConfig("disturb"), Hooks: map[string]string{"disturb": tc.hook},
 			})
 			r := h.run("land", "feature/x")
-			expect(t, r, 4, "stopped", "checkout-changed")
+			expect(t, r, 21, "stopped", "checkout-changed")
 			wantMain := WorktreeState{Head: "branch:main", CheckStatus: true, Status: "M README.md"}
 			if tc.fix == "switch" {
 				wantMain = WorktreeState{Head: "detached:" + tipMain(), CheckStatus: true}
@@ -519,7 +519,7 @@ echo changed > README.md
 `},
 	})
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "checkout-changed")
+	expect(t, r, 21, "stopped", "checkout-changed")
 	wb, _ := r.json["work_branch"].(string)
 	if wb == "" {
 		t.Fatalf("the stop names no work branch: %s", r.stdout)
@@ -555,7 +555,7 @@ func TestTier2MoveUnverifiedAtDestination(t *testing.T) {
 		Hooks:  map[string]string{"post-merge": hookGit + "git reset -q --hard HEAD~1\n"},
 	})
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "move-unverified")
+	expect(t, r, 21, "stopped", "move-unverified")
 	back := h.mustGit(h.repo, "rev-parse", "main")
 	wantNext(t, r, "--abort")
 	checkNow(t, h, r, Expected{
@@ -667,7 +667,7 @@ func TestTier2WorktreeMismatchRefusals(t *testing.T) {
 	t.Run("target-worktree-mismatch", func(t *testing.T) {
 		h := newTier2(t, Scenario{Shape: ShapeAhead, Layout: layout})
 		r := h.run("land", "feature/x", "--target-worktree", "{wt:spare}")
-		expect(t, r, 5, "refused", "target-worktree-mismatch")
+		expect(t, r, 22, "refused", "target-worktree-mismatch")
 		exp := untouched
 		exp.Outcome = map[string]any{"role": "destination", "path": h.wtPath("spare")}
 		done(t, h, r, exp)
@@ -679,7 +679,7 @@ func TestTier2WorktreeMismatchRefusals(t *testing.T) {
 	t.Run("source-worktree-mismatch", func(t *testing.T) {
 		h := newTier2(t, Scenario{Shape: ShapeAhead, Layout: layout})
 		r := h.run("land", "feature/x", "--source-worktree", "{wt:spare}")
-		expect(t, r, 5, "refused", "source-worktree-mismatch")
+		expect(t, r, 22, "refused", "source-worktree-mismatch")
 		exp := untouched
 		exp.Outcome = map[string]any{"role": "source", "path": h.wtPath("spare")}
 		done(t, h, r, exp)

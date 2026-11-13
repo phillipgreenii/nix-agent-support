@@ -368,7 +368,7 @@ func TestTakeBackRefusals(t *testing.T) {
 	if !errors.As(err, &ref) || ref.Reason != outcome.RefLostToConcurrent {
 		t.Fatalf("running: %v", err)
 	}
-	if o := ref.Outcome("continue", "feature/x", ""); o.Exit != 5 || o.Reason != "lost-to-concurrent" {
+	if o := ref.Outcome("continue", "feature/x", ""); o.Exit != 22 || o.Reason != "lost-to-concurrent" {
 		t.Errorf("outcome %+v", o)
 	}
 }
@@ -392,7 +392,7 @@ func TestBusyLocksAfterTakeBackSwapEverythingBackToStopped(t *testing.T) {
 	if !errors.As(err, &busy) {
 		t.Fatalf("err = %v, want busy", err)
 	}
-	if o := busy.Outcome("continue", "feature/x", "main"); o.Exit != 3 {
+	if o := busy.Outcome("continue", "feature/x", "main"); o.Exit != 9 {
 		t.Errorf("exit %d", o.Exit)
 	}
 	for _, ref := range []string{locks.BranchRef("feature/x"), locks.WorktreeRef("feature-x"), locks.WorktreeRef("_main")} {

@@ -78,7 +78,7 @@ func TestLostLockWhenEveryRecordIsStillOurs(t *testing.T) {
 	if len(res.NotOwned) != 0 || len(res.Swapped) != 4 {
 		t.Errorf("result = %+v", res)
 	}
-	if o := res.Outcome; o.Exit != 4 || o.Outcome != outcome.Stopped || o.Reason != "lock-lost" || o.Stage != "locked" {
+	if o := res.Outcome; o.Exit != 21 || o.Outcome != outcome.Stopped || o.Reason != "lock-lost" || o.Stage != "locked" {
 		t.Errorf("outcome = %+v", o)
 	}
 }
@@ -107,7 +107,7 @@ func TestLostLockSwapsOnlyWhatIsStillItsOwn(t *testing.T) {
 	if len(res.NotOwned) != 2 || !want[res.NotOwned[0]] || !want[res.NotOwned[1]] {
 		t.Errorf("not owned = %v", res.NotOwned)
 	}
-	if o := res.Outcome; o.Exit != 4 || !strings.Contains(o.Message, locks.BranchRef("feature/x")) || !strings.Contains(o.Message, locks.BranchRef("main")) {
+	if o := res.Outcome; o.Exit != 21 || !strings.Contains(o.Message, locks.BranchRef("feature/x")) || !strings.Contains(o.Message, locks.BranchRef("main")) {
 		t.Errorf("outcome must name the records no longer owned: %+v", o)
 	}
 }

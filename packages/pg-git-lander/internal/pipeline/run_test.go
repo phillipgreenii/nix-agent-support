@@ -86,7 +86,7 @@ func want(t *testing.T, o *outcome.Outcome, w outcome.Word, exit int) {
 
 func (f *fx) wantStopped(o *outcome.Outcome, reason outcome.StopReason) {
 	f.t.Helper()
-	want(f.t, o, outcome.Stopped, 4)
+	want(f.t, o, outcome.Stopped, 21)
 	if o.Reason != string(reason) {
 		f.t.Fatalf("reason = %s (%s), want %s", o.Reason, o.Message, reason)
 	}
@@ -582,7 +582,7 @@ func TestRunSwappedLockRecordGivesLockLost(t *testing.T) {
 git update-ref ` + locks.BranchRef(f.main) + ` "$b"`)
 	f.hooksXDG("land", map[string]string{"before_move": hook}, "")
 	o := f.run(f.land())
-	want(t, o, outcome.Stopped, 4)
+	want(t, o, outcome.Stopped, 21)
 	if o.Reason != string(outcome.StopLockLost) {
 		t.Fatalf("reason = %s (%s)", o.Reason, o.Message)
 	}
@@ -601,7 +601,7 @@ func TestRunStaleRenewalGivesLockLost(t *testing.T) {
 	p := f.prepared(f.land())
 	f.clock.Advance(config.DefaultLeaseTTL) // no renewal has happened since
 	o := f.complete(p)
-	want(t, o, outcome.Stopped, 4)
+	want(t, o, outcome.Stopped, 21)
 	if o.Reason != string(outcome.StopLockLost) {
 		t.Fatalf("reason = %s (%s)", o.Reason, o.Message)
 	}

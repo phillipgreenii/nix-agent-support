@@ -85,7 +85,7 @@ func goldenJSON(t *testing.T, name string, o *Outcome) {
 func TestExitCodes(t *testing.T) {
 	want := map[Word]int{
 		Landed: 0, Rebased: 0, UpToDate: 0, NothingToLand: 0, Aborted: 0, Quit: 0, Status: 0, Log: 0, ConfigOK: 0,
-		InternalError: 1, UsageError: 2, ConfigError: 2, Busy: 3, Stopped: 4, Refused: 5,
+		InternalError: 1, UsageError: 2, ConfigError: 7, Busy: 9, Stopped: 21, Refused: 22,
 	}
 	if len(want) != len(AllWords) {
 		t.Fatalf("test covers %d words, AllWords has %d", len(want), len(AllWords))

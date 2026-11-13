@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "outcome": "stopped",
-  "exit": 4,
+  "exit": 21,
   "op_id": "",
   "operation": "land",
   "branch": "feature/x",

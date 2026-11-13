@@ -210,7 +210,7 @@ func TestTier2SourceWorktreeButBranchElsewhere(t *testing.T) {
 		Layout: []Worktree{{Name: "src", Branch: "feature/x"}, {Name: "spare", Detach: true}},
 		Steps:  []Step{{Run: []string{"land", "feature/x", "--source-worktree", "{wt:spare}"}}},
 		Expected: Expected{
-			Outcome: map[string]any{"outcome": "refused", "exit": 5, "reason": "source-worktree-mismatch"},
+			Outcome: map[string]any{"outcome": "refused", "exit": 22, "reason": "source-worktree-mismatch"},
 			Snapshot: Snapshot{
 				Refs: map[string]string{"refs/heads/main": "@main", "refs/heads/feature/x": "@feature/x"},
 				Worktrees: map[string]WorktreeState{
@@ -235,7 +235,7 @@ func TestTier2BranchInToolNamespace(t *testing.T) {
 			h := newHarness(t, Scenario{Shape: ShapeAhead})
 			h.mustGit(h.repo, "branch", "pg-git-lander/foo", "feature/x")
 			r := h.run(args...)
-			expect(t, r, 5, "refused", "namespace-collision")
+			expect(t, r, 22, "refused", "namespace-collision")
 			h.mustGit(h.repo, "branch", "-q", "-D", "pg-git-lander/foo")
 			checkExpected(t, h, Expected{Snapshot: unchangedAhead()})
 		})
@@ -244,7 +244,7 @@ func TestTier2BranchInToolNamespace(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeAhead})
 		h.mustGit(h.repo, "branch", "pg-git-lander/t", "main")
 		r := h.run("land", "feature/x", "--into", "pg-git-lander/t")
-		expect(t, r, 5, "refused", "namespace-collision")
+		expect(t, r, 22, "refused", "namespace-collision")
 		h.mustGit(h.repo, "branch", "-q", "-D", "pg-git-lander/t")
 		checkExpected(t, h, Expected{Snapshot: unchangedAhead()})
 	})
@@ -281,7 +281,7 @@ func TestTier2UnsupportedLayoutsAndNoIdentity(t *testing.T) {
 		bare := filepath.Join(h.dir, "bare.git")
 		h.mustGit(h.dir, "clone", "-q", "--bare", h.repo, bare)
 		r := h.run("land", "feature/x", "--repo", bare)
-		expect(t, r, 5, "refused", "unsupported-layout")
+		expect(t, r, 22, "refused", "unsupported-layout")
 		if r.json["detail"] != "bare" {
 			t.Errorf("detail = %v, want bare: %s", r.json["detail"], r.stdout)
 		}
@@ -295,7 +295,7 @@ func TestTier2UnsupportedLayoutsAndNoIdentity(t *testing.T) {
 		h.mustGit(h.repo, "config", "--local", "core.worktree", h.repo)
 		r := h.run("land", "feature/x")
 		h.mustGit(h.repo, "config", "--local", "--unset", "core.worktree")
-		expect(t, r, 5, "refused", "unsupported-layout")
+		expect(t, r, 22, "refused", "unsupported-layout")
 		if r.json["detail"] != "core.worktree" {
 			t.Errorf("detail = %v, want core.worktree: %s", r.json["detail"], r.stdout)
 		}
@@ -313,7 +313,7 @@ func TestTier2UnsupportedLayoutsAndNoIdentity(t *testing.T) {
 			"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=user.useConfigOnly", "GIT_CONFIG_VALUE_0=true")
 		r := h.run("land", "feature/x")
 		h.env = toolEnv
-		expect(t, r, 5, "refused", "no-git-identity")
+		expect(t, r, 22, "refused", "no-git-identity")
 		checkExpected(t, h, Expected{Snapshot: unchangedAhead()})
 	})
 }

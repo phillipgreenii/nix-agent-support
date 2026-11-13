@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "outcome": "refused",
-  "exit": 5,
+  "exit": 22,
   "op_id": "",
   "operation": "land",
   "branch": "feature/x",

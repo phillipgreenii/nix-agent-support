@@ -242,7 +242,7 @@ func TestEightProcessesLandIntoOneTarget(t *testing.T) {
 					return
 				}
 				results[i-1] = r
-				if r.exit != 3 { // busy is always retryable
+				if r.exit != 9 { // busy is always retryable
 					return
 				}
 			}
@@ -340,7 +340,7 @@ func TestSigkillHolderMidRebase(t *testing.T) {
 	}
 
 	r := h.run("land", "feature/x", "--wait", "10s")
-	expect(t, r, 5, "refused", "holder-died")
+	expect(t, r, 22, "refused", "holder-died")
 
 	r = h.run("land", "feature/x", "--abort")
 	expect(t, r, 0, "aborted", "")
@@ -393,13 +393,13 @@ func TestSigstopHolderPastItsLease(t *testing.T) {
 	// The stopped holder renews nothing; the waiter watches the record stay
 	// unchanged for a lease, then converts it.
 	r := h.run("land", "y", "--wait", "30s")
-	expect(t, r, 5, "refused", "holder-died")
+	expect(t, r, 22, "refused", "holder-died")
 	if err := holder.cmd.Process.Signal(syscall.SIGCONT); err != nil {
 		t.Fatal(err)
 	}
 	h.release("go") // the hook ends; the holder must then find its records gone
 	r = h.wait("holder")
-	expect(t, r, 4, "stopped", "lock-lost")
+	expect(t, r, 21, "stopped", "lock-lost")
 	if got := h.mustGit(h.repo, "rev-parse", "main"); got != startMain {
 		t.Fatalf("main moved to %s from %s", got, startMain)
 	}
@@ -409,7 +409,7 @@ func TestSigstopHolderPastItsLease(t *testing.T) {
 
 // TestSigstopHolderLosesLockMidHook: SIGSTOP the holder past its lease and
 // SIGCONT it while its hook is still blocked, and never release the hook. The
-// holder must kill the hook's process group at once and end with exit 4 and
+// holder must kill the hook's process group at once and end with exit 21 and
 // lock-lost, long before the hook's 60 second timeout (design section 8.7).
 func TestSigstopHolderLosesLockMidHook(t *testing.T) {
 	h := newHarness(t, Scenario{
@@ -427,14 +427,14 @@ func TestSigstopHolderLosesLockMidHook(t *testing.T) {
 	if err := holder.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, h.run("land", "y", "--wait", "30s"), 5, "refused", "holder-died")
+	expect(t, h.run("land", "y", "--wait", "30s"), 22, "refused", "holder-died")
 	resumed := time.Now()
 	if err := holder.cmd.Process.Signal(syscall.SIGCONT); err != nil {
 		t.Fatal(err)
 	}
 	// The go fifo is never written: only the lost lock can end the hook.
 	r := h.wait("holder")
-	expect(t, r, 4, "stopped", "lock-lost")
+	expect(t, r, 21, "stopped", "lock-lost")
 	if took := time.Since(resumed); took > 20*time.Second {
 		t.Errorf("the holder took %v after SIGCONT, it waited for the hook", took)
 	}
@@ -465,7 +465,7 @@ func TestSigtermDuringLongHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := h.wait("holder")
-	expect(t, r, 4, "stopped", "interrupted")
+	expect(t, r, 21, "stopped", "interrupted")
 	if !gone(hookPid) {
 		t.Fatalf("the hook (pid %d) survived SIGTERM of the tool", hookPid)
 	}
@@ -504,7 +504,7 @@ wait
 `},
 	})
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "timeout")
+	expect(t, r, 21, "stopped", "timeout")
 	for _, f := range []string{"hook.pid", "grandchild.pid"} {
 		if pid := h.readPid(f); !gone(pid) {
 			t.Errorf("%s (pid %d) survived the hook timeout", f, pid)
@@ -562,7 +562,7 @@ root = "{repo}"
 before_move = [{ run = ["{hooks}/missing"] }]
 `,
 	})
-	expect(t, h.run("land", "feature/x"), 4, "stopped", "hook-failed")
+	expect(t, h.run("land", "feature/x"), 21, "stopped", "hook-failed")
 	expect(t, h.run("land", "feature/x", "--abort"), 0, "aborted", "")
 	h.noProblems()
 }
@@ -699,10 +699,10 @@ before_move = [{ run = ["{hooks}/flaky"], timeout = "60s" }]
 // second gets lost-to-concurrent and only the winner acts.
 func TestContinueAndAbortRaceOnOneStoppedOperation(t *testing.T) {
 	h := newHarness(t, resumeRaceScenario("continue-vs-abort", true))
-	expect(t, h.run("land", "feature/x"), 4, "stopped", "hook-failed")
+	expect(t, h.run("land", "feature/x"), 21, "stopped", "hook-failed")
 	h.start("continue", "land", "feature/x", "--continue")
 	h.await("up") // --continue holds the record as running, inside the hook
-	expect(t, h.run("land", "feature/x", "--abort"), 5, "refused", "lost-to-concurrent")
+	expect(t, h.run("land", "feature/x", "--abort"), 22, "refused", "lost-to-concurrent")
 	h.release("go")
 	expect(t, h.wait("continue"), 0, "landed", "")
 	h.noProblems()
@@ -715,12 +715,12 @@ func TestContinueAndAbortRaceOnOneStoppedOperation(t *testing.T) {
 func TestContinueAndAbortStartedTogether(t *testing.T) {
 	h := newHarness(t, resumeRaceScenario("continue-with-abort", false))
 	startMain := h.mustGit(h.repo, "rev-parse", "main")
-	expect(t, h.run("land", "feature/x"), 4, "stopped", "hook-failed")
+	expect(t, h.run("land", "feature/x"), 21, "stopped", "hook-failed")
 	h.start("continue", "land", "feature/x", "--continue")
 	h.start("abort", "land", "feature/x", "--abort")
 	c, a := h.wait("continue"), h.wait("abort")
 	losers := func(r *result) bool {
-		return r.exit == 5 && (r.json["reason"] == "lost-to-concurrent" || r.json["reason"] == "nothing-stopped")
+		return r.exit == 22 && (r.json["reason"] == "lost-to-concurrent" || r.json["reason"] == "nothing-stopped")
 	}
 	switch {
 	case c.exit == 0 && c.json["outcome"] == "landed" && losers(a):

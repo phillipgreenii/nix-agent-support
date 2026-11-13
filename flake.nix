@@ -18945,7 +18945,7 @@
                     grep -q '^root = ""$' bad/pg-git-lander/config.toml
                     rc=0
                     (cd repo && XDG_CONFIG_HOME="$PWD/../bad" pg-git-lander config check) >out.txt 2>&1 || rc=$?
-                    [ "$rc" = 2 ] || { echo "FAIL: config check on an empty root exited $rc, want 2:" >&2; cat out.txt >&2; exit 1; }
+                    [ "$rc" = 7 ] || { echo "FAIL: config check on an empty root exited $rc, want 7:" >&2; cat out.txt >&2; exit 1; }
                     touch $out
                   '';
 

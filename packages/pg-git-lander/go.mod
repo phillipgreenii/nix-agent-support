@@ -4,5 +4,5 @@ go 1.26.8
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/phillipgreenii/x v0.0.0-20261106202408-ba17082cdd30
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 )

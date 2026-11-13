@@ -342,7 +342,7 @@ func TestTier1RebaseBranchNowhereNoFlag(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeDiverged})
 		// The .git directory is inside the clone but is not a worktree.
 		r := runFrom(t, h, filepath.Join(h.repo, ".git"), "rebase", "feature/x", "--onto", "main")
-		expect(t, r, 5, "refused", "no-worktree")
+		expect(t, r, 22, "refused", "no-worktree")
 		for ref, want := range map[string]string{
 			"refs/heads/main":      shapes[ShapeDiverged].facts.Tips["main"],
 			"refs/heads/feature/x": shapes[ShapeDiverged].facts.Tips["feature/x"],

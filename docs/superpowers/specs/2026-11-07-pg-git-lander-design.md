@@ -146,16 +146,21 @@ Every invocation ends with exactly one outcome. With `--json` the tool prints on
 | ---- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 0    | `landed`, `rebased`, `up-to-date`, `nothing-to-land`, `aborted`, `quit`, `status`, `log`, `config-ok` | Done. No record of this operation remains (after `quit` the worktree and the work branch remain).                                                                                                |
 | 1    | `internal-error`                                                                                      | Unexpected failure before any lock was taken. Exit 1 never carries a branchable meaning.                                                                                                         |
-| 2    | `usage-error`, `config-error`                                                                         | Bad arguments, or the XDG configuration (or `config check`'s file) is invalid. Nothing changed.                                                                                                  |
-| 3    | `busy`                                                                                                | A lock was not obtained within the wait. Nothing changed. The JSON names the holder. Always retryable.                                                                                           |
-| 4    | `stopped`                                                                                             | The operation stopped and its record is `stopped` (section 6.3). An unexpected failure after locking is a stop with reason `internal-error`, never exit 1, so a record never dangles unreported. |
-| 5    | `refused`                                                                                             | A precondition failed (section 6.2). No ref, worktree or record changed, except for `holder-died`.                                                                                               |
+| 2    | `usage-error`                                                                                         | Bad arguments. Nothing changed.                                                                                                                                                                  |
+| 7    | `config-error`                                                                                        | The XDG configuration (or `config check`'s file) is invalid. Nothing changed.                                                                                                                    |
+| 9    | `busy`                                                                                                | A lock was not obtained within the wait. Nothing changed. The JSON names the holder. Always retryable.                                                                                           |
+| 21   | `stopped`                                                                                             | The operation stopped and its record is `stopped` (section 6.3). An unexpected failure after locking is a stop with reason `internal-error`, never exit 1, so a record never dangles unreported. |
+| 22   | `refused`                                                                                             | A precondition failed (section 6.2). No ref, worktree or record changed, except for `holder-died`.                                                                                               |
+
+The codes 0, 1, 2, 7 and 9 are the shared values of the workspace `x/exitcode` package; 21 (`stopped`) and 22 (`refused`)
+are app-specific codes in its 20 to 63 range. Hook statuses 75, 126 and 127 (section 13.3) are statuses of child
+commands, not exit codes of the tool.
 
 `up-to-date` is a `rebase` whose BRANCH already contains ONTO. `nothing-to-land` is a `land` where TARGET already holds
 every change of BRANCH, by ancestry or because the rebase dropped every commit as already upstream (the outcome's
 `dropped_commits` lists them).
 
-### 6.2 Refusal reasons (exit 5)
+### 6.2 Refusal reasons (exit 22)
 
 | Reason                     | When                                                                                                                                                                                                                                                                                                                                                                                                                                                | Next                                                                                                                                                           |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -182,7 +187,7 @@ every change of BRANCH, by ancestry or because the rebase dropped every commit a
 | `cannot-resume`            | `--continue` cannot proceed; the outcome's `detail` says why: `unresolved` (unmerged paths in the work worktree), `markers-left` (a staged or committed resolution still holds conflict markers), `rebase-state-missing` (git's rebase is neither in progress nor finished in a way the record can account for) or `worktree-mismatch` (the work worktree is missing, belongs to another operation, or its HEAD is not one the record can explain). | For `unresolved` and `markers-left`, resolve and `git add` the paths, then `--continue`; otherwise `--abort` (which tolerates a missing worktree) or `--quit`. |
 | `lost-to-concurrent`       | A concurrent `--continue`, `--skip`, `--abort` or `--quit` took the stopped record first.                                                                                                                                                                                                                                                                                                                                                           | None; read that invocation's outcome.                                                                                                                          |
 
-### 6.3 Stop reasons (exit 4)
+### 6.3 Stop reasons (exit 21)
 
 | Reason                | Stages                                                       | Retryable | Valid next                                  |
 | --------------------- | ------------------------------------------------------------ | --------- | ------------------------------------------- |
@@ -226,7 +231,7 @@ On SIGINT, SIGTERM or SIGHUP the tool MUST:
 1. let a fenced ref transaction or a `git merge --ff-only` that has already started finish (these take milliseconds);
 2. otherwise send SIGTERM to the current step's process group, then SIGKILL after 5 seconds;
 3. release the locks as in section 8.7 steps 2 and 3, with reason `interrupted`;
-4. print the outcome and exit 4.
+4. print the outcome and exit 21.
 
 A second signal makes the tool exit at once; its record stays `running`, and the next tool run converts it
 (`holder-died`). Section 17 tells agents to run long landings detached so that a tool timeout in the agent does not
@@ -625,7 +630,7 @@ once:
 2. swap its BRANCH record and its worktree records to `stopped` with reason `lock-lost` (reason `interrupted` when the
    cause is a signal, section 6.4), each only if it is still its own;
 3. delete its TARGET record, if it is still its own;
-4. exit 4. The outcome says which records it no longer owned.
+4. exit 21. The outcome says which records it no longer owned.
 
 ### 8.8 Fencing the move
 

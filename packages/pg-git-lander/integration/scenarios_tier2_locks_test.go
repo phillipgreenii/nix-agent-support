@@ -116,7 +116,7 @@ func TestTier2TargetMovesOnEveryTry(t *testing.T) {
 		Hooks:  map[string]string{"mover": moveTargetAlways},
 	})
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "race")
+	expect(t, r, 21, "stopped", "race")
 	// Three tries (the first and two retries), each moved TARGET once: only
 	// the hook moved main, and BRANCH is where the fixture put it.
 	if got := h.mustGit(h.repo, "rev-list", "--count", "main"); got != "4" {
@@ -174,7 +174,7 @@ func TestTier2TwoLandsIntoOneTarget(t *testing.T) {
 					return
 				}
 				results[i] = r
-				if r.exit != 3 { // busy is retryable
+				if r.exit != 9 { // busy is retryable
 					return
 				}
 			}
@@ -253,7 +253,7 @@ func TestTier2KillNineThenResume(t *testing.T) {
 		if !groupGone(pgid) {
 			t.Fatal("git did not finish after the holder was killed")
 		}
-		expect(t, h.run("land", "feature/x", "--wait", "10s"), 5, "refused", "holder-died")
+		expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
 		done(t, h, h.run("land", "feature/x", "--abort"), Expected{
 			Outcome: map[string]any{"outcome": "aborted", "exit": 0},
 			Snapshot: Snapshot{
@@ -268,7 +268,7 @@ func TestTier2KillNineThenResume(t *testing.T) {
 	})
 	t.Run("at-before-move", func(t *testing.T) {
 		h := crashedLand(t, "before_move")
-		expect(t, h.run("land", "feature/x", "--wait", "10s"), 5, "refused", "holder-died")
+		expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
 		done(t, h, h.run("land", "feature/x", "--continue"), Expected{
 			Outcome: map[string]any{"outcome": "landed", "exit": 0, "branch_fate": "deleted"},
 			Snapshot: Snapshot{
@@ -287,7 +287,7 @@ func TestTier2KillNineThenResume(t *testing.T) {
 		}
 		// Not nothing-to-land: the record says the move happened here.
 		r := h.run("land", "feature/x", "--wait", "10s")
-		expect(t, r, 5, "refused", "holder-died")
+		expect(t, r, 22, "refused", "holder-died")
 		done(t, h, h.run("land", "feature/x", "--continue"), Expected{
 			Outcome: map[string]any{"outcome": "landed", "exit": 0},
 			Snapshot: Snapshot{
@@ -338,7 +338,7 @@ func TestTier2StaleTargetRoleLockTakenOver(t *testing.T) {
 		t.Errorf("TARGET's stale record is still there: %s", refs)
 	}
 	// What remains is the dead holder's own operation.
-	expect(t, runFrom(t, h, spare, "land", "feature/x", "--wait", "10s"), 5, "refused", "holder-died")
+	expect(t, runFrom(t, h, spare, "land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
 	expect(t, runFrom(t, h, spare, "land", "feature/x", "--abort"), 0, "aborted", "")
 	h.noProblems()
 }
@@ -383,7 +383,7 @@ func TestTier2StaleBranchRoleLockConverted(t *testing.T) {
 		h := crashedLand(t, "before_move")
 		// The waiter is a rebase of the very branch the dead holder was landing.
 		r := h.run("rebase", "feature/x", "--onto", "main", "--wait", "10s")
-		expect(t, r, 5, "refused", "holder-died")
+		expect(t, r, 22, "refused", "holder-died")
 		if bo := r.json["blocking_op"]; bo == nil {
 			t.Errorf("the refusal does not name blocking_op: %s", r.stdout)
 		}
@@ -430,15 +430,15 @@ func TestTier2StoppedPendingAndTargetStopped(t *testing.T) {
 	h.addBranch("y")
 	// main (in the main worktree) is replayed onto feature/x and conflicts.
 	r := h.run("rebase", "main", "--onto", "feature/x")
-	expect(t, r, 4, "stopped", "conflict")
+	expect(t, r, 21, "stopped", "conflict")
 
 	r = h.run("land", "y", "--wait", "1s")
-	expect(t, r, 5, "refused", "target-stopped")
+	expect(t, r, 22, "refused", "target-stopped")
 	if r.json["blocking_op"] == nil {
 		t.Errorf("target-stopped does not name blocking_op: %s", r.stdout)
 	}
 	r = h.run("land", "main", "--into", "y", "--wait", "1s")
-	expect(t, r, 5, "refused", "stopped-pending")
+	expect(t, r, 22, "refused", "stopped-pending")
 	if r.json["blocking_op"] == nil {
 		t.Errorf("stopped-pending does not name blocking_op: %s", r.stdout)
 	}
@@ -448,7 +448,7 @@ func TestTier2StoppedPendingAndTargetStopped(t *testing.T) {
 	expect(t, h.run("rebase", "main", "--continue"), 0, "rebased", "")
 	// y was cut from the old main, so its own land stops at a conflict with
 	// the rewritten main: a stop of its own, no longer a refusal.
-	expect(t, h.run("land", "y"), 4, "stopped", "conflict")
+	expect(t, h.run("land", "y"), 21, "stopped", "conflict")
 	expect(t, h.run("land", "y", "--abort"), 0, "aborted", "")
 	h.addBranch("z")
 	expect(t, h.run("land", "z"), 0, "landed", "")
@@ -460,7 +460,7 @@ func TestTier2StoppedPendingAndTargetStopped(t *testing.T) {
 func afterHookCrash(t *testing.T) *harness {
 	t.Helper()
 	h := crashedLand(t, "after")
-	expect(t, h.run("land", "feature/x", "--wait", "10s"), 5, "refused", "holder-died")
+	expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
 	return h
 }
 
@@ -502,7 +502,7 @@ func TestTier2AbortAfterMoveAndContinueWithoutSourceWorktree(t *testing.T) {
 func quitStopped(t *testing.T, block bool) *harness {
 	t.Helper()
 	h := newHarness(t, resumeRaceScenario("quit", block))
-	expect(t, h.run("land", "feature/x"), 4, "stopped", "hook-failed")
+	expect(t, h.run("land", "feature/x"), 21, "stopped", "hook-failed")
 	return h
 }
 
@@ -535,7 +535,7 @@ func TestTier2QuitTakesTheStoppedRecord(t *testing.T) {
 		h := quitStopped(t, true)
 		h.start("continue", "land", "feature/x", "--continue")
 		h.await("up") // --continue holds the record as running, inside the hook
-		expect(t, h.run("land", "feature/x", "--quit"), 5, "refused", "lost-to-concurrent")
+		expect(t, h.run("land", "feature/x", "--quit"), 22, "refused", "lost-to-concurrent")
 		h.release("go")
 		expect(t, h.wait("continue"), 0, "landed", "")
 		h.noProblems()
@@ -544,7 +544,7 @@ func TestTier2QuitTakesTheStoppedRecord(t *testing.T) {
 		h := quitStopped(t, false)
 		expect(t, h.run("land", "feature/x", "--quit"), 0, "quit", "")
 		// The record is gone, so a later resume has nothing to take.
-		expect(t, h.run("land", "feature/x", "--continue"), 5, "refused", "nothing-stopped")
+		expect(t, h.run("land", "feature/x", "--continue"), 22, "refused", "nothing-stopped")
 		quitLeft(t, h)
 	})
 	t.Run("two-quits-started-together", func(t *testing.T) {
@@ -554,7 +554,7 @@ func TestTier2QuitTakesTheStoppedRecord(t *testing.T) {
 		a, b := h.wait("q1"), h.wait("q2")
 		wins := func(r *result) bool { return r.exit == 0 && r.json["outcome"] == "quit" }
 		loses := func(r *result) bool {
-			return r.exit == 5 && (r.json["reason"] == "lost-to-concurrent" || r.json["reason"] == "nothing-stopped")
+			return r.exit == 22 && (r.json["reason"] == "lost-to-concurrent" || r.json["reason"] == "nothing-stopped")
 		}
 		if !(wins(a) && loses(b)) && !(wins(b) && loses(a)) {
 			t.Fatalf("exactly one --quit must win:\nq1: exit %d %s\nq2: exit %d %s", a.exit, a.stdout, b.exit, b.stdout)

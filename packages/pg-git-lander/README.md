@@ -58,17 +58,18 @@ TARGET: nobody works in it, and it MAY be deleted.
 
 ## Outcomes and exit codes
 
-Every invocation ends with exactly one outcome. With `--json` the tool prints one JSON object on stdout; otherwise one
+Every invocation ends with exactly one outcome. The codes 0, 1, 2, 7 and 9 are the shared values of `x/exitcode`; 21 and 22 are app-specific. With `--json` the tool prints one JSON object on stdout; otherwise one
 line, plus the exact next commands after a stop or refusal. Progress goes to stderr.
 
 | Exit | Outcomes                                                                                              | Meaning                                                                                       |
 | ---- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | 0    | `landed`, `rebased`, `up-to-date`, `nothing-to-land`, `aborted`, `quit`, `status`, `log`, `config-ok` | Done. No record of this operation remains (after `quit` the worktree and work branch remain). |
 | 1    | `internal-error`                                                                                      | Unexpected failure before any lock was taken. Exit 1 never carries a branchable meaning.      |
-| 2    | `usage-error`, `config-error`                                                                         | Bad arguments, or the XDG configuration (or `config check`'s file) is invalid. No change.     |
-| 3    | `busy`                                                                                                | A lock was not obtained within the wait. Nothing changed. Always retryable.                   |
-| 4    | `stopped`                                                                                             | The operation stopped and its record is `stopped`; resume with the printed next commands.     |
-| 5    | `refused`                                                                                             | A precondition failed. No ref, worktree or record changed, except for `holder-died`.          |
+| 2    | `usage-error`                                                                                         | Bad arguments. No change.                                                                     |
+| 7    | `config-error`                                                                                        | The XDG configuration (or `config check`'s file) is invalid. No change.                       |
+| 9    | `busy`                                                                                                | A lock was not obtained within the wait. Nothing changed. Always retryable.                   |
+| 21   | `stopped`                                                                                             | The operation stopped and its record is `stopped`; resume with the printed next commands.     |
+| 22   | `refused`                                                                                             | A precondition failed. No ref, worktree or record changed, except for `holder-died`.          |
 
 `up-to-date` is a `rebase` whose BRANCH already contains ONTO. `nothing-to-land` is a `land` where TARGET already holds
 every change of BRANCH, by ancestry or because the rebase dropped every commit as already upstream.

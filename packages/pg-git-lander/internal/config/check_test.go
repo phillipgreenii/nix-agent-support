@@ -69,7 +69,7 @@ func TestCheckXDGErrorsNameFileLineKeyAndLayer(t *testing.T) {
 			f.writeXDG(c.body)
 			o := f.check("")
 			ce := o.ConfigError
-			if o.Outcome != outcome.ConfigError || o.Exit != 2 || ce == nil {
+			if o.Outcome != outcome.ConfigError || o.Exit != 7 || ce == nil {
 				t.Fatalf("want config-error, got %+v", o)
 			}
 			if ce.File != filepath.Join(f.xdg, "config.toml") || ce.Line != c.line || ce.Layer != "xdg" {
@@ -113,7 +113,7 @@ func TestCheckRepoFileErrorIsRepoConfigErrorWithLocation(t *testing.T) {
 	f.commit("cfg", map[string]string{".pg-git-lander.toml": "max_race_retries = 1\nmax_conflict_rounds = \"x\"\n"})
 	o := f.check("")
 	ce := o.ConfigError
-	if o.Outcome != outcome.ConfigError || o.Exit != 2 || o.Reason != "repo-config-error" || ce == nil {
+	if o.Outcome != outcome.ConfigError || o.Exit != 7 || o.Reason != "repo-config-error" || ce == nil {
 		t.Fatalf("got %+v", o)
 	}
 	if ce.Layer != config.LayerRepoFile || ce.Key != "max_conflict_rounds" || ce.Line != 2 || !strings.HasSuffix(ce.File, ":.pg-git-lander.toml") {

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/x/cmdrun"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/outcome"
 )
 
 // This file is the signal handling of a running operation (design section
@@ -23,7 +25,7 @@ import (
 const DefaultGrace = 5 * time.Second
 
 // SecondSignalExit is the exit code of a run that got a second signal.
-const SecondSignalExit = 4
+const SecondSignalExit = outcome.ExitStopped
 
 // ErrInterrupted is the cause of a context cancelled by a signal.
 var ErrInterrupted = errors.New("interrupted by a signal")

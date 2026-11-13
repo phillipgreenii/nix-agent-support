@@ -199,7 +199,7 @@ func TestConfigCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = f.cli(f.repo.Dir, "config", "check", "--file", bad, "--json")
-	if r.code != 2 || f.jsonOutcome(r)["outcome"] != "config-error" {
+	if r.code != 7 || f.jsonOutcome(r)["outcome"] != "config-error" {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -284,7 +284,7 @@ func (f *fx) conflict(repoFlag ...string) (work string, stop map[string]any) {
 	args := append([]string{"land", "feature/x", "--json"}, repoFlag...)
 	r := f.cli(f.repo.Dir, args...)
 	stop = f.jsonOutcome(r)
-	if r.code != 4 || stop["outcome"] != "stopped" {
+	if r.code != 21 || stop["outcome"] != "stopped" {
 		f.t.Fatalf("%+v", r)
 	}
 	ww := stop["work_worktree"].(map[string]any)
@@ -320,7 +320,7 @@ func TestHumanStopPrintsNextCommands(t *testing.T) {
 	f.feature()
 	f.commit(f.repo.Dir, "x.txt", "main\n")
 	r := f.cli(f.repo.Dir, "land", "feature/x", "--repo", f.repo.Dir)
-	if r.code != 4 || !strings.HasPrefix(r.stdout, "stopped:") || !strings.Contains(r.stdout, "pg-git-lander land feature/x --abort --repo "+f.repo.Dir) {
+	if r.code != 21 || !strings.HasPrefix(r.stdout, "stopped:") || !strings.Contains(r.stdout, "pg-git-lander land feature/x --abort --repo "+f.repo.Dir) {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -344,7 +344,7 @@ func TestResumeWithBranchOmittedOutsideTheWorkWorktreeIsNothingStopped(t *testin
 	f.conflict()
 	r := f.cli(f.repo.Dir, "land", "--abort", "--json")
 	m := f.jsonOutcome(r)
-	if r.code != 5 || m["reason"] != string(outcome.RefNothingStopped) {
+	if r.code != 22 || m["reason"] != string(outcome.RefNothingStopped) {
 		t.Fatalf("%+v %v", r, m)
 	}
 }
@@ -354,7 +354,7 @@ func TestResumeOperationMismatch(t *testing.T) {
 	work, _ := f.conflict()
 	r := f.cli(work, "rebase", "--abort", "--json")
 	m := f.jsonOutcome(r)
-	if r.code != 5 || m["reason"] != string(outcome.RefOperationMismatch) {
+	if r.code != 22 || m["reason"] != string(outcome.RefOperationMismatch) {
 		t.Fatalf("%+v %v", r, m)
 	}
 }

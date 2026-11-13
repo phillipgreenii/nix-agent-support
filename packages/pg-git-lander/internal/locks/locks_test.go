@@ -348,7 +348,7 @@ func TestBusyNamesHolderAndMessagesEveryTenSeconds(t *testing.T) {
 		t.Errorf("messages = %q", lines)
 	}
 	o := busy.Outcome("land", "feature/x", "main")
-	if o.Outcome != outcome.Busy || o.Exit != 3 || o.Holder.OpID != h.OpID {
+	if o.Outcome != outcome.Busy || o.Exit != 9 || o.Holder.OpID != h.OpID {
 		t.Errorf("outcome = %+v", o)
 	}
 }
@@ -710,7 +710,7 @@ func TestStoppedRecordRefusals(t *testing.T) {
 	if !errors.As(err, &ref) || ref.Reason != outcome.RefStoppedPending {
 		t.Fatalf("branch: %v", err)
 	}
-	if o := ref.Outcome("rebase", "main", ""); o.Exit != 5 || o.Reason != "stopped-pending" {
+	if o := ref.Outcome("rebase", "main", ""); o.Exit != 22 || o.Reason != "stopped-pending" {
 		t.Errorf("outcome = %+v", o)
 	}
 	// TARGET role -> target-stopped, and the lock set is released

@@ -3,6 +3,8 @@
 // object (JSON schema 1) and its human rendering.
 package outcome
 
+import "github.com/phillipgreenii/x/exitcode"
+
 // Schema is the JSON outcome schema version. A change that removes or renames
 // a field MUST bump it.
 const Schema = 1
@@ -35,14 +37,16 @@ var AllWords = []Word{
 	InternalError, UsageError, ConfigError, Busy, Stopped, Refused,
 }
 
-// Exit codes.
+// Exit codes. The shared outcomes use x/exitcode; stopped and refused are
+// app-specific codes in the app range.
 const (
-	ExitOK       = 0
-	ExitInternal = 1
-	ExitUsage    = 2
-	ExitBusy     = 3
-	ExitStopped  = 4
-	ExitRefused  = 5
+	ExitOK       = exitcode.OK
+	ExitInternal = exitcode.Error
+	ExitUsage    = exitcode.Usage
+	ExitConfig   = exitcode.Config
+	ExitBusy     = exitcode.Busy
+	ExitStopped  = exitcode.AppMin + 1 // 21
+	ExitRefused  = exitcode.AppMin + 2 // 22
 )
 
 // ExitCode maps an outcome word to its exit code (design section 6.1). An
@@ -53,8 +57,10 @@ func ExitCode(w Word) int {
 		return ExitOK
 	case InternalError:
 		return ExitInternal
-	case UsageError, ConfigError:
+	case UsageError:
 		return ExitUsage
+	case ConfigError:
+		return ExitConfig
 	case Busy:
 		return ExitBusy
 	case Stopped:

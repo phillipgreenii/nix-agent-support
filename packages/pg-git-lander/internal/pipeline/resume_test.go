@@ -570,7 +570,7 @@ func TestResumeContinueAfterABusyResume(t *testing.T) {
 	f.git(f.repo.Dir, "update-ref", locks.WorktreeRef("_main"), hold)
 
 	o := f.resume(outcome.FlagContinue)
-	want(t, o, outcome.Busy, 3)
+	want(t, o, outcome.Busy, 9)
 	f.wantStillStopped(oid) // a resume never strands a record in running
 
 	f.git(f.repo.Dir, "update-ref", "-d", locks.WorktreeRef("_main"))

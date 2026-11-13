@@ -63,7 +63,7 @@ func TestTier2ResolverFailsOrLeavesMarkers(t *testing.T) {
 				Hooks:  map[string]string{"resolver": tc.resolver, "verify": "exit 1"},
 			})
 			r := h.run("land", "feature/x")
-			expect(t, r, 4, "stopped", "resolve-failed")
+			expect(t, r, 21, "stopped", "resolve-failed")
 			checkNow(t, h, r, Expected{
 				Outcome:  map[string]any{"stage": "rebasing", "detail": tc.detail, "retryable": false},
 				Snapshot: Snapshot{Refs: startRefs()},
@@ -164,7 +164,7 @@ func TestTier2RepoConfigTrust(t *testing.T) {
 	t.Run("untrusted-is-refused", func(t *testing.T) {
 		h := setup(t, entry(""))
 		r := h.run("land", "feature/x")
-		expect(t, r, 5, "refused", "untrusted-config")
+		expect(t, r, 22, "refused", "untrusted-config")
 		done(t, h, r, Expected{Snapshot: Snapshot{
 			Refs:      map[string]string{"refs/heads/feature/x": "@feature/x"},
 			Worktrees: map[string]WorktreeState{"main": {Head: "branch:main", CheckStatus: true}, "src": {Head: "branch:feature/x", CheckStatus: true}},
@@ -209,7 +209,7 @@ func TestTier2MaxConflictRoundsAndSkip(t *testing.T) {
 		cfg := "[[repo]]\nroot = \"{repo}\"\nmax_conflict_rounds = 1\n\n[[repo.conflict]]\nglob = \"*.txt\"\nresolve = [\"{hooks}/resolver\"]\n"
 		h := twoConflictSetup(t, cfg)
 		r := h.run("land", "feature/x")
-		expect(t, r, 4, "stopped", "max-conflict-rounds")
+		expect(t, r, 21, "stopped", "max-conflict-rounds")
 		checkNow(t, h, r, Expected{
 			Outcome: map[string]any{"stage": "rebasing", "retryable": false, "stats": map[string]any{"conflict_rounds": 2}},
 			Stopped: true,
@@ -224,7 +224,7 @@ func TestTier2MaxConflictRoundsAndSkip(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeConflict, Layout: srcOnBr})
 		commitIn(t, h, h.wtPath("src"), "x2.txt", "two\n", "feature two")
 		r := h.run("land", "feature/x")
-		expect(t, r, 4, "stopped", "conflict")
+		expect(t, r, 21, "stopped", "conflict")
 		r = h.run("land", "feature/x", "--skip")
 		done(t, h, r, Expected{
 			Outcome: map[string]any{"outcome": "landed", "exit": 0, "branch_fate": "deleted"},
@@ -252,13 +252,13 @@ func TestTier2CannotResumeDetails(t *testing.T) {
 	stopped := func(t *testing.T) (*harness, *result) {
 		h := newHarness(t, Scenario{Shape: ShapeConflict, Layout: srcOnBr})
 		r := h.run("land", "feature/x")
-		expect(t, r, 4, "stopped", "conflict")
+		expect(t, r, 21, "stopped", "conflict")
 		return h, r
 	}
 	refusal := func(t *testing.T, h *harness, r *result, detail string) {
 		t.Helper()
 		before := stopRefs(h)
-		expect(t, r, 5, "refused", "cannot-resume")
+		expect(t, r, 22, "refused", "cannot-resume")
 		if r.json["detail"] != detail {
 			t.Errorf("detail = %v, want %s: %s", r.json["detail"], detail, r.stdout)
 		}
@@ -304,7 +304,7 @@ func TestTier2CannotResumeDetails(t *testing.T) {
 		h, _ := stopped(t)
 		before := stopRefs(h)
 		r := h.run("rebase", "feature/x", "--continue")
-		expect(t, r, 5, "refused", "operation-mismatch")
+		expect(t, r, 22, "refused", "operation-mismatch")
 		if after := stopRefs(h); after != before {
 			t.Errorf("the stopped record changed:\nbefore %s\nafter  %s", before, after)
 		}
@@ -324,7 +324,7 @@ func TestTier2TransientExit75(t *testing.T) {
 			Hooks:  map[string]string{"resolver": `exit 75`},
 		})
 		r := h.run("land", "feature/x")
-		expect(t, r, 4, "stopped", "transient")
+		expect(t, r, 21, "stopped", "transient")
 		checkNow(t, h, r, Expected{Outcome: map[string]any{"retryable": true, "stage": "rebasing"}, Snapshot: Snapshot{Refs: startRefs()}, Stopped: true})
 		resolveByHand(t, h, h.wtPath("src"))
 		r = h.run("land", "feature/x", "--continue")
@@ -345,7 +345,7 @@ func TestTier2TransientExit75(t *testing.T) {
 			Hooks:  map[string]string{"gate": `[ -e "$PGL_MARKERS/fixed" ] || exit 75`},
 		})
 		r := h.run("land", "feature/x")
-		expect(t, r, 4, "stopped", "transient")
+		expect(t, r, 21, "stopped", "transient")
 		checkNow(t, h, r, Expected{
 			Outcome:  map[string]any{"retryable": true, "stage": "before_move"},
 			Snapshot: Snapshot{Refs: startRefs(), TargetTree: "@tree:main"},
@@ -370,7 +370,7 @@ func TestTier2TransientExit75(t *testing.T) {
 			Hooks:  map[string]string{"gate": `exit 75`},
 		})
 		r := h.run("land", "feature/x")
-		expect(t, r, 5, "refused", "before-hook-refused")
+		expect(t, r, 22, "refused", "before-hook-refused")
 		done(t, h, r, Expected{Snapshot: Snapshot{
 			Refs: startRefs(),
 			Worktrees: map[string]WorktreeState{
@@ -391,7 +391,7 @@ func TestTier2Warnings(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeConflict, Layout: srcOnBr})
 		writeFile(t, filepath.Join(h.repo, ".git", "info", "attributes"), "app.txt merge=nosuchdriver\n")
 		r := h.run("land", "feature/x")
-		expect(t, r, 4, "stopped", "conflict")
+		expect(t, r, 21, "stopped", "conflict")
 		if !hasWarning(r, "undefined-merge-driver") {
 			t.Errorf("no undefined-merge-driver warning on the conflict stop: %s", r.stdout)
 		}
@@ -407,7 +407,7 @@ func TestTier2Warnings(t *testing.T) {
 			Config: "[[repo]]\nroot = \"{repo}\"\ntrust_repo_config = true\n",
 		})
 		r := h.run("land", "feature/x")
-		expect(t, r, 4, "stopped", "conflict")
+		expect(t, r, 21, "stopped", "conflict")
 		resolveByHand(t, h, h.wtPath("src"))
 		// The configuration in effect changes while the operation is stopped.
 		cfg := filepath.Join(h.dir, "home", ".config", "pg-git-lander", "config.toml")

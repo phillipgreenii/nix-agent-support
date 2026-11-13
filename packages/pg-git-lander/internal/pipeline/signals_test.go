@@ -151,7 +151,7 @@ func TestSignalWhileTheMoveTransactionStartsLetsItFinish(t *testing.T) {
 	if f.tip(f.main) != featTip {
 		t.Fatalf("the in-flight move did not finish: %s, want %s", f.tip(f.main), featTip)
 	}
-	want(t, out, outcome.Stopped, 4)
+	want(t, out, outcome.Stopped, 21)
 	if out.Reason != string(outcome.StopInterrupted) || out.MovedAlready == nil || !*out.MovedAlready {
 		t.Fatalf("outcome = %s (%s) moved_already %v", out.Reason, out.Message, out.MovedAlready)
 	}

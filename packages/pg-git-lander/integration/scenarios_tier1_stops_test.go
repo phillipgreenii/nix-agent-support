@@ -60,7 +60,7 @@ func resolveByHand(t *testing.T, h *harness, wt string) {
 func conflictStop(t *testing.T, h *harness) {
 	t.Helper()
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "conflict")
+	expect(t, r, 21, "stopped", "conflict")
 	checkNow(t, h, r, Expected{Outcome: map[string]any{"stage": "rebasing"}, Snapshot: Snapshot{Refs: startRefs()}})
 }
 
@@ -227,7 +227,7 @@ before_move = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 		Hooks: map[string]string{"gate": `[ -e "$PGL_MARKERS/fixed" ]`},
 	})
 	r := h.run("land", "feature/x")
-	expect(t, r, 4, "stopped", "hook-failed")
+	expect(t, r, 21, "stopped", "hook-failed")
 	checkNow(t, h, r, Expected{
 		Outcome: map[string]any{"stage": "before_move"},
 		Snapshot: Snapshot{
@@ -303,7 +303,7 @@ func TestTier1FailFastDerivedSourceIsCwd(t *testing.T) {
 	refused := func(t *testing.T, h *harness, cwd string) {
 		t.Helper()
 		r := runFrom(t, h, cwd, "land", "feature/x")
-		expect(t, r, 5, "refused", "cwd-would-be-removed")
+		expect(t, r, 22, "refused", "cwd-would-be-removed")
 		msg, _ := r.json["message"].(string)
 		for _, fix := range []string{"another path", "--source-worktree", "--keep-source-worktree"} {
 			if !strings.Contains(msg, fix) {
@@ -381,7 +381,7 @@ func TestTier1DirtyAndNotAWorktreeRefusals(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeAhead, Layout: srcOnBr})
 		writeFile(t, filepath.Join(h.wtPath("src"), "x1.txt"), "changed\n")
 		r := h.run("land", "feature/x")
-		expect(t, r, 5, "refused", "dirty")
+		expect(t, r, 22, "refused", "dirty")
 		checkNow(t, h, r, Expected{
 			Outcome: map[string]any{"role": "source"},
 			Snapshot: Snapshot{
@@ -399,7 +399,7 @@ func TestTier1DirtyAndNotAWorktreeRefusals(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeAhead, Layout: srcOnBr})
 		writeFile(t, filepath.Join(h.repo, "README.md"), "changed\n")
 		r := h.run("land", "feature/x")
-		expect(t, r, 5, "refused", "dirty")
+		expect(t, r, 22, "refused", "dirty")
 		checkNow(t, h, r, Expected{
 			Outcome: map[string]any{"role": "destination"},
 			Snapshot: Snapshot{
@@ -417,7 +417,7 @@ func TestTier1DirtyAndNotAWorktreeRefusals(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeAhead})
 		notWT := filepath.Join(h.dir, "home")
 		r := h.run("land", "feature/x", "--source-worktree", notWT)
-		expect(t, r, 5, "refused", "not-a-worktree")
+		expect(t, r, 22, "refused", "not-a-worktree")
 		done(t, h, r, Expected{
 			Outcome: map[string]any{"role": "source"},
 			Snapshot: Snapshot{
@@ -445,7 +445,7 @@ func TestTier1BusyWhileLockHeldByLiveProcess(t *testing.T) {
 	h.await("up") // the holder is inside before_move, holding main's lock
 
 	r := h.run("land", "other", "--wait", "1s")
-	expect(t, r, 3, "busy", "")
+	expect(t, r, 9, "busy", "")
 	holder, _ := r.json["holder"].(map[string]any)
 	if holder == nil || holder["branch"] != "feature/x" {
 		t.Errorf("busy does not name the holder: %s", r.stdout)
