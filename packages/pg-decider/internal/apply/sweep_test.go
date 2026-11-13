@@ -130,7 +130,7 @@ func TestTerminalSweepFallsBackToPlannedClosesWhenTheChildrenReadFails(t *testin
 	if !strings.Contains(errBuf.String(), "closing only the planned items") {
 		t.Errorf("stderr: %q", errBuf.String())
 	}
-	if r.ExitCode != 2 || len(b.closes) != 0 {
+	if r.ExitCode != 5 || len(b.closes) != 0 {
 		t.Errorf("without the live read the pre-sweep behavior stands (bd refuses both): exit %d closes %v", r.ExitCode, b.closes)
 	}
 }

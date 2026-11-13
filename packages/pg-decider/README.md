@@ -48,7 +48,7 @@ behavior lives in `docs/behavior/pg-decider/`; this page covers building and tes
   force-reviewed items, a claim landing between the listing and the update, a reopened PR), two
   concurrent composed runs for one PR (one anchor with the lock, two with a double that skips it, the
   interleaving forced by the fake forge's `block` control and a create barrier), a duplicate delivery,
-  a kill between a tracker create and its audit comment, a decider run that exits 2 through a
+  a kill between a tracker create and its audit comment, a decider run that exits 5 through a
   passthrough shim over `bd` that fails the Nth write, the rollback drill of the first apply, and the
   drift check of pg-desk's zero-filled `pg_decider_decisions_total` rule and reason labels against the
   decider's own lists (a change to `internal/action` reasons or to a registered rule needs
@@ -64,7 +64,7 @@ PR id: a per-PR lock, `pg-desk pr refresh`, a fail-closed view check, then `pg-d
 (with the delivery key in apply mode), and a record of the run: one JSON line in the run record
 (`$XDG_STATE_HOME/pg-pr-change/pr-change-runs.jsonl`) and the lane state through `pg-desk pr lane-record`.
 It ships in this package's output beside `pg-decider`, with `pg-desk`, `pg-connector` and the sibling
-`pg-decider` on its `PATH`. Exit codes, failure classes, the delivery key, the run record and the not-found escalation are in
+`pg-decider` on its `PATH`. All three commands (`pg-decider`, `pg-pr-change`, `pg-pr-backfill`) exit with the shared codes of the workspace's exit-code package (`2` usage, `3` unavailable, `5` degraded) plus app codes in its 20-63 band (the decider's `20` untrusted lookup and `21` permanent partial failure, the backfill driver's `50`, `51`, `52`). Exit codes, failure classes, the delivery key, the run record and the not-found escalation are in
 `docs/behavior/pg-decider/pr-change.md`.
 
 `--origin=<text>` is the origin of the annotation change that produced the delivery (the item's

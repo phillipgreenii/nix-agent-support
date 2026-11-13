@@ -289,7 +289,7 @@ func TestFocusApplyChildrenReadFailsClosed(t *testing.T) {
 			if got := focusUpdates(d); len(got) != 0 {
 				t.Fatalf("the hold must not be written: %q", got)
 			}
-			if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 2 {
+			if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 5 {
 				t.Fatalf("a failed children read counts failed (exit 2): %v exit %d", outcomes(r), r.ExitCode)
 			}
 			if err := r.Events[0].Err; err == nil || !strings.Contains(err.Error(), c.want) {
@@ -335,7 +335,7 @@ func TestFocusWriteFailureIsAFailedActionWithNoRestore(t *testing.T) {
 		respRule{Match: "pg-connector issue update", Exit: 1, Stdout: `{"error":{"code":"unavailable","message":"down"}}`},
 	)
 	r := focusRun(t, d, nil, nil, nil, focusHoldAction("hold"))
-	if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 2 {
+	if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 5 {
 		t.Fatalf("outcomes %v exit %d", outcomes(r), r.ExitCode)
 	}
 	if got := focusLines(d, "pg-connector issue show"); len(got) != 1 {
@@ -407,7 +407,7 @@ func TestFocusHoldReReadsAfterWriteAndRestoresClaim(t *testing.T) {
 			respRule{Match: "--status in_progress", Exit: 1, Stdout: `{"error":{"code":"unavailable","message":"down"}}`},
 		)
 		r := focusRun(t, d, nil, nil, nil, focusHoldAction("hold"))
-		if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 2 {
+		if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 5 {
 			t.Fatalf("a stranded claim that cannot be restored is a failure: %v exit %d", outcomes(r), r.ExitCode)
 		}
 		if err := r.Events[0].Err; err == nil || !strings.Contains(err.Error(), "stranded a claim") {
@@ -542,7 +542,7 @@ func TestFocusCreateWithoutAFocusBeadsQueryFailsClosed(t *testing.T) {
 		if len(d.calls()) != 0 {
 			t.Fatalf("nothing may be exec'd, not even a work-beads fallback: %q", d.lines())
 		}
-		if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 2 {
+		if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 5 {
 			t.Fatalf("outcomes %v exit %d", outcomes(r), r.ExitCode)
 		}
 		if err := r.Events[0].Err; err == nil || !strings.Contains(err.Error(), "focus_beads_query") {

@@ -57,7 +57,7 @@ var applyHooks = func(v *view.View, typ, id string, it *item.Routed, skipped []a
 // the actions from the view with the decide core and executes them. It
 // returns the process exit code. With asJSON it prints the plan it applied
 // (the same object `plan --json` prints) on out once the run has finished, on
-// exit 0 and on exit 2 alike; a run that fails before applying prints nothing.
+// exit 0 and on exit 5 alike; a run that fails before applying prints nothing.
 var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, it *item.Routed, asJSON bool) int {
 	v := viewFromContext(ctx)
 	if v == nil {
@@ -81,7 +81,7 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 		return exitcode.ViewUnreadable
 	}
 	// A pr run reads the all-status work-item lookup ONCE, before any rule runs,
-	// and fails closed (exit 4, nothing written) when it cannot be trusted. It
+	// and fails closed (exit 20, nothing written) when it cannot be trusted. It
 	// goes through the very same steps as plan (planFn): the rules decide from
 	// the view plus the PR's listed items, and a create the listing already
 	// holds is not planned, so apply executes exactly the actions plan lists.
@@ -123,9 +123,10 @@ func newApplyCmd() *cobra.Command {
 			"calls for. --from-item names the routed pg-router item that triggered the run\n" +
 			"(a file path, or - for stdin); it only identifies the trigger and never\n" +
 			"decides what is applied. Exit 0 when all actions are applied or none are\n" +
-			"needed, 2 when some failed, 5 when every failure is one a retry cannot clear, 3 when the view is unreadable (nothing applied).\n" +
+			"needed, 5 when some failed, 21 when every failure is one a retry cannot clear, 3 when the view is unreadable (nothing applied),\n" +
+			"20 when the work-item lookup cannot be trusted, 2 on a usage error.\n" +
 			"--json prints the plan that was applied (the same object `plan --json` prints)\n" +
-			"on stdout when the run finished, on exit 0 and on exit 2.",
+			"on stdout when the run finished, on exit 0 and on exit 5.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			typ, id := args[0], args[1]
@@ -136,7 +137,8 @@ func newApplyCmd() *cobra.Command {
 			if cmd.Flags().Changed("from-item") {
 				var err error
 				if it, err = item.Read(fromItem); err != nil {
-					return err
+					fmt.Fprintln(cmd.ErrOrStderr(), err)
+					return errExit{exitcode.Failure}
 				}
 			}
 			ctx, ok := readView(cmd.Context(), cmd.ErrOrStderr(), typ, id)

@@ -13,7 +13,7 @@ import (
 const DefaultMaxPlanAge = 48 * time.Hour
 
 // ExitSummaryFailed is the exit code of `summary` when a check does not hold
-// (0 when every check holds). The driver's own codes are 0, 10, 11, 12 and 64.
+// (0 when every check holds). The driver's own codes are 0, 2, 50, 51 and 52.
 const ExitSummaryFailed = 20
 
 // The operations of the per-kind counts. `adopt` is an adoption rule's action

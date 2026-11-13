@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/view"
+	xexit "github.com/phillipgreenii/x/exitcode"
 )
 
 // DefaultLockWait bounds the wait for the per-PR lock.
@@ -249,8 +250,8 @@ func firstLine(s string) string {
 // Degraded (part of the read failed, the stale detail kept) and Unavailable
 // (the read failed entirely) codes of the workspace's exit-code package.
 const (
-	refreshExitDegraded    = 5
-	refreshExitUnavailable = 3
+	refreshExitDegraded    = xexit.Degraded
+	refreshExitUnavailable = xexit.Unavailable
 )
 
 func (r *run) refreshCmd() string { return "pg-desk pr refresh " + r.id }
@@ -278,7 +279,7 @@ func (r *run) hydrate() (int, bool) {
 		if s := strings.TrimSpace(string(res.Stdout)); s != "" {
 			fmt.Fprintln(r.o.Stdout, s)
 		}
-	case res.Code == 1:
+	case res.Code == xexit.Error:
 		return r.fail(StageHydrate, ClassHydrateError, "refresh failed", firstLine(string(res.Stderr)+"\n"+string(res.Stdout)), r.refreshCmd()), true
 	case res.Code == refreshExitDegraded || res.Code == refreshExitUnavailable:
 		return r.refreshFailed(res), true
@@ -428,9 +429,9 @@ func (r *run) readPlan() (*action.PlanResult, string) {
 
 // appliedPlan reads the plan the apply printed (`apply --json`). The error text
 // is non-empty when there is none: the apply failed outright (any exit but 0 and
-// 2) or its output is not readable JSON.
+// the decider's Partial) or its output is not readable JSON.
 func (r *run) appliedPlan(res Result) (*action.PlanResult, string) {
-	if res.Code != 0 && res.Code != 2 {
+	if res.Code != 0 && res.Code != exitcode.Partial {
 		return nil, fmt.Sprintf("pg-decider apply --json exited %d: %s", res.Code, firstLine(string(res.Stderr)))
 	}
 	p, err := parsePlanJSON(string(res.Stdout))
@@ -477,7 +478,7 @@ func (r *run) decide() int {
 		// nothing, so the residual is 0 by definition: skip the lookup-heavy re-plan.
 		n := 0
 		r.residual = &n
-	case r.o.Mode == ModeApply && (res.Code == 0 || res.Code == 2 || res.Code == exitcode.PartialPermanent):
+	case r.o.Mode == ModeApply && (res.Code == 0 || res.Code == exitcode.Partial || res.Code == exitcode.PartialPermanent):
 		// The residual after an apply: a read-only plan, never a recorded run.
 		residualStart := r.o.Clock()
 		post, msg := r.readPlan()
@@ -577,7 +578,7 @@ func (r *run) mapDecide(res Result) int {
 		// truncated one, which a retry cannot clear.
 		return r.fail(StageDecide, ClassTransient, "the decider's work-item lookup could not be read", detail, r.planCmd())
 	}
-	if res.Code == 2 {
+	if res.Code == exitcode.Partial {
 		return r.fail(StageDecide, ClassDecidePartial, "the decider applied only part of its plan", detail, r.planCmd())
 	}
 	if res.Code == exitcode.PartialPermanent {

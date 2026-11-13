@@ -295,16 +295,16 @@ func TestDeciderExitMapping(t *testing.T) {
 		code  int
 		retry bool
 	}{
-		{"exit 2 is partial and retryable", exit(2, "", "rule x failed: Service Unavailable\n"+counters+"\n"), ExitDecidePartial, true},
-		{"exit 5 is partial but permanent, so not retried", exit(5, "", "close wb-1: failed: pg-connector issue close wb-1: exit 1: invalid_argument: cannot close wb-1: assignee is \"a\", actor is \"b\"; Service Unavailable\n"+counters+"\n"), ExitDecidePartial, false},
+		{"exit 5 is partial and retryable", exit(5, "", "rule x failed: Service Unavailable\n"+counters+"\n"), ExitDecidePartial, true},
+		{"exit 21 is partial but permanent, so not retried", exit(21, "", "close wb-1: failed: pg-connector issue close wb-1: exit 1: invalid_argument: cannot close wb-1: assignee is \"a\", actor is \"b\"; Service Unavailable\n"+counters+"\n"), ExitDecidePartial, false},
 		{"exit 3 is failed", exit(3, "", "cannot read the view: signal: killed\n"), ExitDecideFailed, false},
 		{"exit 1 is failed", exit(1, "", "bad config: deadline exceeded"), ExitDecideFailed, false},
 		{"exit 1 no text", exit(1, "", ""), ExitDecideFailed, false},
 		{"killed is partial", Result{Code: -1, Signal: "killed"}, ExitDecidePartial, true},
-		{"exit 4 with an unavailable lookup is transient and retryable", exit(4, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup is unavailable: down\n"+lookupCounters("lookup-unavailable")+"\n"), ExitDecideUnavailable, true},
-		{"exit 4 inconsistent is failed", exit(4, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup: the per-PR answer lacks a work item\n"+lookupCounters("lookup-inconsistent")+"\n"), ExitDecideFailed, false},
-		{"exit 4 truncated is failed", exit(4, "", "pg-decider: work-item lookup: truncated\n"+lookupCounters("lookup-truncated")+"\n"), ExitDecideFailed, false},
-		{"exit 4 with no counters line is failed", exit(4, "", "pg-decider: work-item lookup is unavailable: down\n"), ExitDecideFailed, false},
+		{"exit 20 with an unavailable lookup is transient and retryable", exit(20, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup is unavailable: down\n"+lookupCounters("lookup-unavailable")+"\n"), ExitDecideUnavailable, true},
+		{"exit 20 inconsistent is failed", exit(20, "", "pg-decider: cannot apply pr acme/api#7: work-item lookup: the per-PR answer lacks a work item\n"+lookupCounters("lookup-inconsistent")+"\n"), ExitDecideFailed, false},
+		{"exit 20 truncated is failed", exit(20, "", "pg-decider: work-item lookup: truncated\n"+lookupCounters("lookup-truncated")+"\n"), ExitDecideFailed, false},
+		{"exit 20 with no counters line is failed", exit(20, "", "pg-decider: work-item lookup is unavailable: down\n"), ExitDecideFailed, false},
 		{"exit 1 naming an unavailable lookup is failed", exit(1, "", "x\n"+lookupCounters("lookup-unavailable")+"\n"), ExitDecideFailed, false},
 		{"cannot start", Result{Code: -1, StartErr: fmt.Errorf("not found in PATH")}, ExitDecideFailed, false},
 	}
@@ -457,7 +457,12 @@ func TestTableHasNoReservedCodesAndDistinctRows(t *testing.T) {
 			t.Errorf("%s retryable = %v", k, r.Retryable)
 		}
 	}
-	if ExitUsage == 1 || ExitUsage == 9 {
-		t.Error("usage code is reserved")
+	if ExitUsage != 2 {
+		t.Errorf("usage code = %d, want the shared 2", ExitUsage)
+	}
+	for _, r := range Table {
+		if r.Code < 20 || r.Code > 63 {
+			t.Errorf("%s/%s exit %d is outside the app band 20-63", r.Stage, r.Class, r.Code)
+		}
 	}
 }

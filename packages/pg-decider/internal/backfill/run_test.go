@@ -33,14 +33,17 @@ func TestRunStopsAtTheFloorAndReportsFLOORWithItsOwnExitCode(t *testing.T) {
 	}
 }
 
-func TestRunExitCodesAreDistinctAndNeverOneOrNine(t *testing.T) {
+func TestRunExitCodesAreSharedOrInTheAppBand(t *testing.T) {
 	codes := map[int]string{ExitDone: "DONE", ExitFloor: "FLOOR", ExitFailed: "FAILED", ExitStopped: "FAILED-stopped", ExitUsage: "usage", ExitSummaryFailed: "summary"}
 	if len(codes) != 6 {
 		t.Fatalf("two outcomes share an exit code: %v", codes)
 	}
+	if ExitDone != 0 || ExitUsage != 2 || ExitFloor != 50 || ExitFailed != 51 || ExitStopped != 52 || ExitSummaryFailed != 20 {
+		t.Fatalf("the driver's exit codes drifted: %v", codes)
+	}
 	for c := range codes {
-		if c == 1 || c == 9 {
-			t.Fatalf("exit code %d is reserved", c)
+		if c != 0 && c != 2 && (c < 20 || c > 63) {
+			t.Fatalf("exit code %d is neither a shared code the driver uses nor in the app band 20-63", c)
 		}
 	}
 }

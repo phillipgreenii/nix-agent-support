@@ -172,7 +172,7 @@ func TestAGarbageSequenceIsAUsageErrorBeforeAnyWork(t *testing.T) {
 func TestApplyRecordsOneRunAndPersistsTheResidualAfterTheApply(t *testing.T) {
 	s := hydrated().
 		on("pg-decider plan pr acme/api#7 --json", ok(`{"actions":[{"op":"create","kind":"review-pr","target":null,"fields":{},"rule":"review.head-advanced"}],"skipped":[]}`)).
-		on("pg-decider apply", exit(2, planWithWork, applyCounters+"\nrule review.head-advanced failed\n"))
+		on("pg-decider apply", exit(5, planWithWork, applyCounters+"\nrule review.head-advanced failed\n"))
 	o, _, _ := opts(t, ModeApply, s)
 	o.RunRecordPath = filepath.Join(t.TempDir(), RunRecordFileName)
 	o.Seq = "17"
@@ -216,7 +216,7 @@ func TestApplyRecordsOneRunAndPersistsTheResidualAfterTheApply(t *testing.T) {
 	if r.Residual == nil || *r.Residual != 1 || r.Mode != "apply" || r.Entity != testID || r.EventID != testID || r.Seq != 17 || r.SeqSource != KeySourceSequence {
 		t.Fatalf("record = %+v", r)
 	}
-	if r.ErrorClass != ClassDecidePartial || r.FailingStage != StageDecide || r.ExitCode != ExitDecidePartial || r.Decide == nil || r.Decide.ExitCode != 2 {
+	if r.ErrorClass != ClassDecidePartial || r.FailingStage != StageDecide || r.ExitCode != ExitDecidePartial || r.Decide == nil || r.Decide.ExitCode != 5 {
 		t.Fatalf("record failure fields = %+v / %+v", r, r.Decide)
 	}
 	if r.Decide.ByKind["review-pr"] != 1 || r.Decide.ByKind["anchor"] != 1 || r.Decide.ByKind["annotation"] != 1 || len(r.Decide.Actions) != 3 {
@@ -523,7 +523,7 @@ func TestApplyModeForwardsTheFiguresOfTheCountersLine(t *testing.T) {
 	figures(t, laneCalls(t, s)[0], 3443)
 }
 
-// A decider that failed closed on the lookup (exit 4) still reports the figures
+// A decider that failed closed on the lookup (exit 20) still reports the figures
 // in its failure line, and the composed command persists them on that path: the
 // run is classed decide_failed and the gauges keep following the lane.
 func TestAFailedClosedLookupIsDecideFailedAndStillForwardsTheFigures(t *testing.T) {
@@ -532,8 +532,8 @@ func TestAFailedClosedLookupIsDecideFailedAndStillForwardsTheFigures(t *testing.
 	for _, mode := range []string{ModePlan, ModeApply} {
 		t.Run(mode, func(t *testing.T) {
 			s := hydrated().
-				on("pg-decider plan pr", Result{Code: 4, Stderr: []byte("pg-decider: cannot plan pr acme/api#7: work-item lookup: truncated\n" + failLine + "\n")}).
-				on("pg-decider apply", Result{Code: 4, Stderr: []byte("pg-decider: cannot apply pr acme/api#7: work-item lookup: truncated\n" + failLine + "\n")})
+				on("pg-decider plan pr", Result{Code: 20, Stderr: []byte("pg-decider: cannot plan pr acme/api#7: work-item lookup: truncated\n" + failLine + "\n")}).
+				on("pg-decider apply", Result{Code: 20, Stderr: []byte("pg-decider: cannot apply pr acme/api#7: work-item lookup: truncated\n" + failLine + "\n")})
 			o, _, errb := opts(t, mode, s)
 			got := Run(context.Background(), o)
 			if got != ExitDecideFailed {

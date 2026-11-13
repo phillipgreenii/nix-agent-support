@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	xexit "github.com/phillipgreenii/x/exitcode"
 )
 
 // The two modes of the composed command, the same words the decider's
@@ -49,13 +51,12 @@ const (
 )
 
 // Exit codes of the composed command (published in
-// docs/behavior/pg-decider/pr-change.md). None is 1 (reserved for unexpected
-// errors) or 9 (the router's "busy, retry" code); the failing stage and class
-// are named by the code.
+// docs/behavior/pg-decider/pr-change.md): 0, the shared Usage 2 and app codes in
+// the 20-63 band; the failing stage and class are named by the code.
 const (
-	ExitOK = 0
+	ExitOK = xexit.OK
 	// ExitUsage: bad arguments or an id that is neither accepted form.
-	ExitUsage = 64
+	ExitUsage = xexit.Usage
 
 	// Stage lock.
 	ExitLockTimeout = 40 // transient: the per-PR lock was not free within the wait
@@ -73,7 +74,7 @@ const (
 	ExitDecidePartial = 30
 	ExitDecideFailed  = 31
 	// ExitDecideUnavailable: the decider failed closed because its work-item
-	// lookup was unavailable (exit 4, reason lookup-unavailable); nothing was
+	// lookup was unavailable (exit 20, reason lookup-unavailable); nothing was
 	// written and a later attempt may clear it.
 	ExitDecideUnavailable = 32
 )

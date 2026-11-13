@@ -392,7 +392,7 @@ func TestAHookOverAnApplyRunCountsTheRunsFailureOnce(t *testing.T) {
 			{Op: action.OpUpdate, Rule: "r.fail", Target: &tgt, Fields: action.Fields{Title: "b"}},
 		},
 	})
-	if res.ExitCode != 2 {
+	if res.ExitCode != 5 {
 		t.Fatalf("exit %d", res.ExitCode)
 	}
 	n := 0

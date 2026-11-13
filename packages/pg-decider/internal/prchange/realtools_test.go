@@ -557,7 +557,7 @@ func TestPRChangeRealTools(t *testing.T) {
 		}
 		a, p := recs[0], recs[1]
 		if a.Mode != "apply" || a.Entity != id11 || a.Seq != 3 || a.SeqSource != KeySourceSequence || a.ExitCode != ExitDecidePartial || a.ErrorClass != ClassDecidePartial ||
-			a.Hydrate.Result != hydrateOK || a.Decide == nil || a.Decide.ExitCode != 2 || len(a.Decide.Actions) == 0 || a.Residual == nil || *a.Residual != len(plan.Actions) || a.Lane.Result != laneRecorded {
+			a.Hydrate.Result != hydrateOK || a.Decide == nil || a.Decide.ExitCode != 5 || len(a.Decide.Actions) == 0 || a.Residual == nil || *a.Residual != len(plan.Actions) || a.Lane.Result != laneRecorded {
 			t.Errorf("apply record = %+v / %+v", a, a.Decide)
 		}
 		if p.Mode != "plan" || p.ExitCode != 0 || p.Decide == nil || p.Decide.ExitCode != 0 || len(p.Decide.Rules) == 0 || p.Adoption == nil {

@@ -7,7 +7,7 @@
 // The comment is an extra write after the action's own write. A failure to post
 // it never rolls the action back (tracker writes are never rolled back); it is
 // returned as the hook's error, which apply reports on stderr and turns into
-// exit 2, because the next idempotent run will not re-derive a lost comment.
+// exit 5 (degraded), because the next idempotent run will not re-derive a lost comment.
 // Deduped, failed and skipped-dependency outcomes and annotate actions write no
 // comment (annotations go through pg-desk, whose change log already records
 // origin and actor). The comment is not a work-item write that needs a

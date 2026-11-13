@@ -78,8 +78,9 @@ func newRootCmd() *cobra.Command {
 
 // run executes the CLI with args, writing to stdout/stderr (threaded
 // explicitly so tests can capture them), and returns the process exit code:
-// 0 all applied or none needed, 1 usage/other error, 2 some actions failed,
-// 3 view unreadable (nothing applied).
+// 0 all applied or none needed, 1 error, 2 usage, 3 view unreadable (nothing
+// applied), 5 some actions failed (retried), 20 the work-item lookup could not
+// be trusted, 21 every failed action was a refusal a retry cannot clear.
 func run(args []string, stdout, stderr io.Writer) int {
 	root := newRootCmd()
 	root.SetOut(stdout)
@@ -94,10 +95,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if errors.As(err, &ee) {
 		return ee.code
 	}
-	if !errors.Is(err, errFailed) {
-		fmt.Fprintln(stderr, err)
+	if errors.Is(err, errFailed) {
+		return exitcode.Failure
 	}
-	return exitcode.Failure
+	// Every other error is one cobra or checkType raised about the arguments
+	// (a wrong count, an unknown flag or command, an unknown entity type).
+	fmt.Fprintln(stderr, err)
+	return exitcode.Usage
 }
 
 func main() {

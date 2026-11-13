@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	xexit "github.com/phillipgreenii/x/exitcode"
 )
 
 // The three endings of `run`, the first word of its last line, and the exit code
@@ -17,17 +19,18 @@ import (
 // "busy, retry" code). A FAILED that stopped at once (a create limit, a run
 // that ended `unauthenticated` or `decide_failed`, an unreadable rate signal) has
 // its own exit code, so the operator's script can tell "run it again" from "stop
-// and roll back". ExitUsage is a bad invocation, before anything ran.
+// and roll back". ExitUsage is a bad invocation, before anything ran. The
+// codes are the shared ones (0 and Usage 2) and app codes in the 20-63 band.
 const (
 	OutcomeDone   = "DONE"
 	OutcomeFloor  = "FLOOR"
 	OutcomeFailed = "FAILED"
 
-	ExitDone    = 0
-	ExitFloor   = 10
-	ExitFailed  = 11
-	ExitStopped = 12
-	ExitUsage   = 64
+	ExitDone    = xexit.OK
+	ExitFloor   = 50
+	ExitFailed  = 51
+	ExitStopped = 52
+	ExitUsage   = xexit.Usage
 )
 
 // ExitClass is how the driver reads one exit code of the composed command
@@ -43,18 +46,18 @@ type ExitClass struct {
 // does. A code not in the table is a failure of class `unknown` that the run
 // records and continues past; 0 is success.
 var ExitClasses = map[int]ExitClass{
-	20: {Class: "transient"},
-	21: {Class: "degraded"},
-	22: {Class: "not_found", Final: true},
-	23: {Class: "unauthenticated", Stop: true},
-	24: {Class: "hydrate_error"},
-	25: {Class: "unhydrated"},
-	30: {Class: "decide_partial"},
-	31: {Class: "decide_failed", Stop: true},
-	32: {Class: "transient"},
-	40: {Class: "transient"},
-	41: {Class: "hydrate_error"},
-	64: {Class: "usage", Stop: true},
+	20:          {Class: "transient"},
+	21:          {Class: "degraded"},
+	22:          {Class: "not_found", Final: true},
+	23:          {Class: "unauthenticated", Stop: true},
+	24:          {Class: "hydrate_error"},
+	25:          {Class: "unhydrated"},
+	30:          {Class: "decide_partial"},
+	31:          {Class: "decide_failed", Stop: true},
+	32:          {Class: "transient"},
+	40:          {Class: "transient"},
+	41:          {Class: "hydrate_error"},
+	xexit.Usage: {Class: "usage", Stop: true},
 }
 
 // DefaultPace is the wait between two PRs of one pass.

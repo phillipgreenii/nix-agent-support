@@ -136,7 +136,7 @@ func TestCreateDecodesWireEnvelopeListOutput(t *testing.T) {
 func TestCreateWhenTheLookupFailsIsAFailedActionAndCreatesNothing(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Exit: 1, Stdout: `{"error":{"code":"unavailable","message":"down"}}`})
 	r := run(t, d, nil, []action.Action{create("review-pr", "t", "pr:"+prID+":review-pr", nil)})
-	if r.ExitCode != 2 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.Events[0].Err == nil {
+	if r.ExitCode != 5 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.Events[0].Err == nil {
 		t.Fatalf("result: %+v", r)
 	}
 	if len(d.calls()) != 1 {
@@ -147,7 +147,7 @@ func TestCreateWhenTheLookupFailsIsAFailedActionAndCreatesNothing(t *testing.T) 
 func TestListDegradedSourceIsNotTrustedForDedup(t *testing.T) {
 	d := newDouble(t, respRule{Match: "issue list", Exit: 2, Stdout: `{"entities":[],"present_ids":[],"sources":[]}`})
 	r := run(t, d, nil, []action.Action{create("review-pr", "t", "pr:"+prID+":review-pr", nil)})
-	if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 2 {
+	if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || r.ExitCode != 5 {
 		t.Fatalf("result: %+v", r)
 	}
 }
@@ -206,7 +206,7 @@ func TestFailedAnchorSkipsChildrenButLaterIndependentActionsRun(t *testing.T) {
 	})
 	r := run(t, d, nil, acts)
 	want := []Outcome{OutcomeFailed, OutcomeSkippedDependency, OutcomeApplied}
-	if !reflect.DeepEqual(outcomes(r), want) || r.ExitCode != 2 {
+	if !reflect.DeepEqual(outcomes(r), want) || r.ExitCode != 5 {
 		t.Fatalf("outcomes %v exit %d, want %v exit 2", outcomes(r), r.ExitCode, want)
 	}
 	for _, l := range d.lines() {
@@ -269,7 +269,7 @@ func TestTargetlessUpdateReopenCloseFail(t *testing.T) {
 	r := run(t, d, nil, []action.Action{
 		{Op: action.OpUpdate, Rule: "r"}, {Op: action.OpReopen, Rule: "r"}, {Op: action.OpClose, Rule: "r"},
 	})
-	if r.ExitCode != 2 || len(d.calls()) != 0 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed, OutcomeFailed, OutcomeFailed}) {
+	if r.ExitCode != 5 || len(d.calls()) != 0 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed, OutcomeFailed, OutcomeFailed}) {
 		t.Fatalf("outcomes %v calls %q", outcomes(r), d.lines())
 	}
 }
@@ -322,7 +322,7 @@ func TestClearOfAnyOtherKeyIsAFailedAction(t *testing.T) {
 	r := run(t, d, nil, []action.Action{
 		{Op: action.OpAnnotate, Rule: "r", Target: str("hidden"), Fields: action.Fields{Clear: true}},
 	})
-	if r.ExitCode != 2 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || len(d.calls()) != 0 {
+	if r.ExitCode != 5 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed}) || len(d.calls()) != 0 {
 		t.Fatalf("result %+v calls %q", r, d.lines())
 	}
 }
@@ -343,7 +343,7 @@ func TestAnnotationFailureIsAFailedAction(t *testing.T) {
 	r := run(t, d, nil, []action.Action{
 		{Op: action.OpAnnotate, Rule: "r", Target: str("k"), Fields: action.Fields{Value: str("v")}},
 	})
-	if r.ExitCode != 2 || r.Events[0].Outcome != OutcomeFailed || !strings.Contains(r.Events[0].Err.Error(), "boom") {
+	if r.ExitCode != 5 || r.Events[0].Outcome != OutcomeFailed || !strings.Contains(r.Events[0].Err.Error(), "boom") {
 		t.Fatalf("result: %+v", r)
 	}
 }
@@ -452,7 +452,7 @@ func TestRequiresPrior(t *testing.T) {
 		d := newDouble(t, respRule{Match: "issue update wb-1", Exit: 1, Stdout: `{"error":{"code":"unavailable","message":"x"}}`})
 		r := run(t, d, nil, mk())
 		want := []Outcome{OutcomeFailed, OutcomeApplied, OutcomeSkippedDependency}
-		if !reflect.DeepEqual(outcomes(r), want) || r.ExitCode != 2 {
+		if !reflect.DeepEqual(outcomes(r), want) || r.ExitCode != 5 {
 			t.Fatalf("outcomes %v exit %d", outcomes(r), r.ExitCode)
 		}
 		for _, l := range d.lines() {
@@ -522,7 +522,7 @@ func TestExitCodes(t *testing.T) {
 			{Op: action.OpClose, Rule: "r", Target: str("wb-1")},
 			{Op: action.OpClose, Rule: "r", Target: str("wb-2")},
 		})
-		if r.ExitCode != 2 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed, OutcomeApplied}) {
+		if r.ExitCode != 5 || !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeFailed, OutcomeApplied}) {
 			t.Fatalf("result %+v", r)
 		}
 	})
@@ -545,7 +545,7 @@ func TestExitCodes(t *testing.T) {
 			for _, id := range order {
 				acts = append(acts, action.Action{Op: action.OpClose, Rule: "r", Target: str(id)})
 			}
-			if r := run(t, d, nil, acts); r.ExitCode != 2 {
+			if r := run(t, d, nil, acts); r.ExitCode != 5 {
 				t.Fatalf("%s: exit %d, want 2", name, r.ExitCode)
 			}
 		}
@@ -553,7 +553,7 @@ func TestExitCodes(t *testing.T) {
 	t.Run("not found is an error", func(t *testing.T) {
 		d := newDouble(t, respRule{Match: "issue close", Exit: 4, Stdout: `{"error":{"code":"not_found","message":"gone"}}`})
 		r := run(t, d, nil, []action.Action{{Op: action.OpClose, Rule: "r", Target: str("wb-1")}})
-		if r.ExitCode != 2 || !strings.Contains(r.Events[0].Err.Error(), "not_found") {
+		if r.ExitCode != 5 || !strings.Contains(r.Events[0].Err.Error(), "not_found") {
 			t.Fatalf("result %+v", r)
 		}
 	})
@@ -629,7 +629,7 @@ func TestHookErrorIsReportedOnStderrAndMakesTheRunExit2(t *testing.T) {
 				Type: "pr", ID: prID, View: prView(), Env: env, Hooks: []Hook{h},
 				Actions: []action.Action{{Op: action.OpClose, Rule: "r", Target: str("wb-1")}},
 			})
-			if r.ExitCode != 2 || !strings.Contains(stderr.String(), "audit write failed") {
+			if r.ExitCode != 5 || !strings.Contains(stderr.String(), "audit write failed") {
 				t.Fatalf("exit %d stderr %q", r.ExitCode, stderr.String())
 			}
 			if r.Events[0].Outcome != OutcomeApplied {
@@ -686,7 +686,7 @@ func TestMissingCommandFactoryDefaultsToExec(t *testing.T) {
 		Type: "pr", ID: prID, View: prView(), Env: Env{Config: &config.Config{}},
 		Actions: []action.Action{{Op: action.OpAnnotate, Rule: "r", Target: str("k"), Fields: action.Fields{Value: str("v")}}},
 	})
-	if r.ExitCode != 2 || r.Events[0].Outcome != OutcomeFailed {
+	if r.ExitCode != 5 || r.Events[0].Outcome != OutcomeFailed {
 		t.Fatalf("result: %+v", r)
 	}
 }

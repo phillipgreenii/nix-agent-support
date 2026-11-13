@@ -17,7 +17,7 @@ nothing else: the decider reads no tracker or forge data directly.
 flowchart TD
     V["read view: pg-desk TYPE show ID --json"] -->|"unreadable"| X3["exit 3, nothing applied"]
     V -->|"pr only"| L["read the all-status work-item listing, once"]
-    L -->|"truncated or unavailable"| X4["exit 4, nothing written"]
+    L -->|"truncated or unavailable"| X4["exit 20, nothing written"]
     L --> D
     V --> D["decide: rules over the view plus the listed items of the PR"]
     D --> PL["plan: print actions and skipped rules"]
@@ -84,10 +84,10 @@ issue-change feed, and widening it would pull every closed work item into the is
 - **Consistent with the view (per-PR form only).** Every work item the decider's own index of the
   view owns or adopts (keyed items, and keyless ones adopted by title, anchor prefix or `node_id`)
   MUST appear in the per-PR answer. A per-PR query is a narrower read, so an owned item it fails to
-  return means the answer cannot be trusted: the run FAILS CLOSED (exit `4`, nothing written, reason
+  return means the answer cannot be trusted: the run FAILS CLOSED (exit `20`, nothing written, reason
   `lookup-inconsistent`) rather than mint the missing item again. A PR identified only by `node_id`
   (no `repo`/`pr_number` metadata and no title match) therefore fails permanently, by design.
-- **Trusted, not size-bounded.** The run FAILS CLOSED, exiting `4` with nothing written (and, for
+- **Trusted, not size-bounded.** The run FAILS CLOSED, exiting `20` with nothing written (and, for
   `plan`, nothing printed as a plan), when the connector reports the listing truncated, when the call
   fails or its answer is unreadable, when any queried source did not succeed (a degraded or cached
   answer is not trusted), and when `work_items_query` is unset. There is no limit on the number of
@@ -197,8 +197,8 @@ stdout unless `--json` is given; diagnostics go to stderr.
 `--json` prints, once the run has finished, the plan the run applied: the same object `plan --json`
 prints (`actions`, each with its `op`, `kind`, `rule` and `facts`, and `skipped`, the rules that
 produced no action and why; for a `pr` also `lookup_items`). It is printed on
-exit `0` and on exit `2` (a partial failure), so a caller learns what was attempted. A run that
-fails before it applies anything (exit `1`, `3` or `4`) prints nothing. The run counters line on
+exit `0` and on exit `5` (a partial failure), so a caller learns what was attempted. A run that
+fails before it applies anything (exit `1`, `2`, `3` or `20`) prints nothing. The run counters line on
 stderr is unchanged. The composed command reads the plan from this result rather than from a
 separate `plan --json` call before the apply, which cannot differ from what the apply saw.
 
@@ -277,17 +277,21 @@ before anything else happens.
 
 ### Exit codes
 
+The codes are the shared ones of the workspace's exit-code package (`0` ok, `1` error, `2` usage, `3`
+unavailable, `5` degraded) and two app codes in its 20-63 band (`20`, `21`).
+
 | Code | Meaning                                                                                                                                                                                                                                                                                                                           |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                                                                                                                                                                                                                                          |
-| `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config                                                                                                                                                                                                                      |
-| `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run                                                                                                                                                                                                                      |
+| `1`  | Error: no decider for the type, unreadable item or config, a plan that cannot be printed                                                                                                                                                                                                                                          |
+| `2`  | Usage: bad arguments, an unknown flag or command, an unknown entity type                                                                                                                                                                                                                                                          |
 | `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                                                                                                                                                                                                                                            |
-| `5`  | Every failed action was a refusal a retry cannot clear: the connector answered `invalid_argument` (for example another actor holds the item's claim, so a close is refused); nothing is rolled back. A run that also has a retryable failure, a skipped action with no such failure behind it, or a failed hook exits `2` instead |
-| `4`  | A `pr` run's work-item lookup could not be trusted (truncated, unavailable, inconsistent with the view, or its query unset); nothing was written                                                                                                                                                                                  |
+| `5`  | Degraded: some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run                                                                                                                                                                                                            |
+| `20` | A `pr` run's work-item lookup could not be trusted (truncated, unavailable, inconsistent with the view, or its query unset); nothing was written                                                                                                                                                                                  |
+| `21` | Every failed action was a refusal a retry cannot clear: the connector answered `invalid_argument` (for example another actor holds the item's claim, so a close is refused); nothing is rolled back. A run that also has a retryable failure, a skipped action with no such failure behind it, or a failed hook exits `5` instead |
 
-`plan` uses `0`, `1`, `3` and `4` the same way; it never exits `2` or `5` because it executes nothing. The
-composed command maps exit `5` to the class `decide_partial` with a failure line the router does not retry (see `pr-change.md`), and exit `4` to the class `decide_failed`, except a run whose counters line names the reason
+`plan` uses `0`, `1`, `2`, `3` and `20` the same way; it never exits `5` or `21` because it executes nothing. The
+composed command maps exit `21` to the class `decide_partial` with a failure line the router does not retry (see `pr-change.md`), and exit `20` to the class `decide_failed`, except a run whose counters line names the reason
 `lookup-unavailable`, which it maps to the retryable class `transient` (see `pr-change.md`). A view of
 an entity type the `focus.item` rule serves (`pr` or `issue`) whose `annotations` carries no
 `focus_selected` member at all fails the run closed with exit `3` before any rule or hook runs (see
@@ -325,7 +329,7 @@ abandoned (`skipped-stale`) writes no comment.
 A comment is written for an applied `create`, `update`, `reopen` or `close`. None is written for a
 `deduped`, `failed`, `skipped-dependency` or `skipped-stale` action, nor for an `annotate` (pg-desk's change log
 already records its origin and actor). If posting the comment fails, the tracker write stands, the
-comment is not retried, and the run exits `2`, because the next idempotent run will not re-derive a
+comment is not retried, and the run exits `5`, because the next idempotent run will not re-derive a
 comment whose write has already happened.
 
 ### Force-review consumption
@@ -342,7 +346,7 @@ head moved. The review rule consumes it in a fixed order, once per request:
 3. the clear of the `force_review` flag.
 
 Steps 2 and 3 run only if every earlier action of the rule succeeded. Otherwise each is reported as
-`skipped-dependency` (exit `2`) and the flag stays set, so the next run repeats the whole sequence.
+`skipped-dependency` (exit `5`) and the flag stays set, so the next run repeats the whole sequence.
 Clearing last means a failed run never loses the request.
 
 ### Failure escalation
@@ -363,7 +367,7 @@ A rule that keeps failing is escalated to a person rather than retried forever.
   naming the rule, the entity and the last error, parented under the anchor when the view links
   one. It then marks the streak escalated, and a persistently failing rule is not rewritten or
   re-escalated on every poll until a successful run resets it.
-- **Retry of a failed escalation.** If the create fails, the error is reported, the run exits `2`
+- **Retry of a failed escalation.** If the create fails, the error is reported, the run exits `5`
   and the streak stays unescalated, so the next failing run tries again. A known residual risk: if
   the escalation create succeeds but the annotation that marks it fails, the next failing run
   creates a second item.
@@ -458,7 +462,7 @@ focus activity keeps the shape above.
   work-item lookup"); it is omitted for a run that made no lookup, and a zero count is printed. A run
   that failed closed because of the lookup prints one line with `"rules":{}`, a `failures` reason
   (`lookup-truncated`, `lookup-unavailable`, `lookup-query-absent`, `lookup-pr-identity-absent` or
-  `lookup-inconsistent`) and the item count when a listing was read; the exit code is `4` and nothing
+  `lookup-inconsistent`) and the item count when a listing was read; the exit code is `20` and nothing
   was written. The former `lookup_ceiling` member and the reasons `lookup-above-ceiling` and
   `lookup-ceiling-absent` are retired (pg2-eclw3j.9). `plan` prints the same line on stderr.
 
@@ -502,7 +506,7 @@ change rate of the watched issues and not their number.
   work item it wrote, carrying the rule id, the facts, the routed `seq` and a timestamp. No other
   outcome MAY write one, `skipped-stale` included.
 - **INV-DECIDER-17.** <!-- uuid: c19408e0-7f51-4dfb-865e-52a8bf6bcab2 --> The exit code MUST be `0` when all actions applied (or were deduped or
-  `skipped-stale`) or none were needed, `2`
+  `skipped-stale`) or none were needed, `5`
   when some failed, were skipped for a dependency or a hook failed, and `3` when the view was
   unreadable and nothing was applied.
 - **INV-DECIDER-18.** <!-- uuid: eec3f550-fab4-4f41-89e0-d117cb504999 --> A rule that fails on K consecutive runs, counted once per routed `seq`, MUST be
@@ -523,7 +527,7 @@ change rate of the watched issues and not their number.
   so a terminal PR with no anchor and no work items MUST yield no action, and no work item or
   annotation MUST be created, reopened or updated for it.
 - **INV-DECIDER-27.** <!-- uuid: 864ba3c1-5491-47e7-ad55-50aca0b97e63 --> A `pr` `plan` or `apply` MUST read the all-status work-item listing named by
-  `work_items_query` exactly once per run, before any rule runs, and MUST fail closed (exit `4`,
+  `work_items_query` exactly once per run, before any rule runs, and MUST fail closed (exit `20`,
   nothing written, no plan printed) when the listing reports itself truncated, is unavailable or
   unreadable, has a source that did not succeed, or when `work_items_query` is unset; it MUST NOT
   fail for the size of the listing (the ceiling was retired, pg2-eclw3j.9). When `work_items_query_params` is set the run MUST send the viewed PR's identity as

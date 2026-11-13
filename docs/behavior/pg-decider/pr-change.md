@@ -41,11 +41,11 @@ flowchart TD
     V -->|"yes"| U["exit 25: class unhydrated, no decide"]
     V -->|"no"| D["pg-decider MODE pr ID"]
     D -->|"exit 0"| OK["exit 0"]
-    D -->|"exit 2"| P["exit 30: class decide_partial"]
-    D -->|"exit 5"| PP["exit 30: class decide_partial, line not retried"]
+    D -->|"exit 5"| P["exit 30: class decide_partial"]
+    D -->|"exit 21"| PP["exit 30: class decide_partial, line not retried"]
     D -->|"exit 1 or 3"| DF["exit 31: class decide_failed"]
-    D -->|"exit 4, lookup unavailable"| DU["exit 32: class transient"]
-    D -->|"exit 4, any other reason"| DF
+    D -->|"exit 20, lookup unavailable"| DU["exit 32: class transient"]
+    D -->|"exit 20, any other reason"| DF
 ```
 
 ## The id
@@ -63,7 +63,7 @@ one. The key is the lower-cased normalized id, so the bare form and the retry-wi
 same lock. The kernel releases the lock when its holder ends, so a killed holder releases it.
 
 A caller that cannot get the lock within a bounded wait (`--lock-wait`, default `30s`) exits with
-the transient class (stage `lock`, exit `40`), never `1` or `9`, so the router re-runs it. The lock
+the transient class (stage `lock`, exit `40`), so the router re-runs it. The lock
 directory is `--lock-dir`, else the environment variable `PG_PR_CHANGE_LOCK_DIR`, else
 `$XDG_STATE_HOME/pg-pr-change/locks`.
 
@@ -178,7 +178,7 @@ and so is a suffix of twelve zeros. `<seq>` that is empty or reads `<no value>`,
 (what a template renders for a missing key) is absent. The router renders a JSON number it decoded
 into an untyped value, so a sequence of 1,000,000 or more arrives in exponent form (for example
 `1.234567e+06`); the command parses it. Text that is no whole, non-negative number is a usage error
-(exit `64`), never read as "no sequence".
+(exit `2`), never read as "no sequence".
 
 The decider's audit comment names the delivery key, NOT a change sequence: its `seq:` line holds the
 sequence when the item carried one and otherwise the value of the id suffix, and `none` for a run with
@@ -255,7 +255,7 @@ only: the lane-level counter of skips, and no run state. The decider's work-item
 `lookup_items` from the decider's run counters line (an `apply`, and a run that
 failed closed on the lookup, whose line carries the count when a listing was read), or, for a `plan` run, from the
 read-only `plan --json` it makes after the plan. A run that failed closed on the lookup (the decider
-exits `4`) is the class `decide_failed`, or the retryable class `transient` (exit `32`) when the
+exits `20`) is the class `decide_failed`, or the retryable class `transient` (exit `32`) when the
 lookup was unavailable, and still forwards the count, so the gauge that
 exports it keeps following the lane at the moment it stops; a decider that reports none leaves it
 out and the store keeps what it has. The run record's per-stage timings (lock wait, hydrate, view read,
@@ -272,8 +272,8 @@ run again without the decisions and says so in the run record (`dropped_decision
 
 ## Exit codes and failure classes
 
-No exit code is `1` (reserved for unexpected errors) or `9` (the router's "busy, retry" code). The
-code names the failing stage and the class; `0` is success and `64` is a usage or configuration
+The codes are `0`, the shared usage code `2` and app codes in the 20-63 band of the workspace's
+exit-code package. The code names the failing stage and the class; `0` is success and `2` is a usage or configuration
 error (a bad mode or id, an unknown flag, a decider configuration file that cannot be read).
 
 | Code | Stage     | Class             | Retried by the router | Meaning                                                                                                                                                   |
@@ -284,9 +284,9 @@ error (a bad mode or id, an unknown flag, a decider configuration file that cann
 | `23` | `hydrate` | `unauthenticated` | no                    | A missing or invalid credential; needs a person                                                                                                           |
 | `24` | `hydrate` | `hydrate_error`   | no                    | Refresh exit `1`, or any other failure that is not one of the classes above                                                                               |
 | `25` | `hydrate` | `unhydrated`      | no                    | The stored view is at version `0` or marked stale, so the decider was not run                                                                             |
-| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `2`: some actions failed or were skipped; captured and retried (an exit `5` also maps here, but its line is not retried)               |
+| `30` | `decide`  | `decide_partial`  | yes                   | The decider exited `5` (degraded): some actions failed or were skipped; captured and retried (an exit `21` also maps here, but its line is not retried)   |
 | `31` | `decide`  | `decide_failed`   | no                    | The decider exited `1` or `3`, or could not be started                                                                                                    |
-| `32` | `decide`  | `transient`       | yes                   | The decider exited `4` because its work-item lookup was unavailable; nothing was written                                                                  |
+| `32` | `decide`  | `transient`       | yes                   | The decider exited `20` because its work-item lookup was unavailable; nothing was written                                                                 |
 | `40` | `lock`    | `transient`       | yes                   | The per-PR lock was not free within the wait                                                                                                              |
 | `41` | `lock`    | `hydrate_error`   | no                    | The lock file could not be created or opened                                                                                                              |
 
@@ -320,7 +320,7 @@ The router re-runs a failed dispatch only when the failure text carries one of i
 while the event carries a future `expiresAt`, and only if the role opts in with
 `max_dispatch_retries`. Therefore:
 
-- a decider exit `5` (every failed action was a refusal a retry cannot clear, such as a close that
+- a decider exit `21` (every failed action was a refusal a retry cannot clear, such as a close that
   another actor's claim blocks) exits `30` with class `decide_partial`, but its line carries none of
   the retry words, so the router does not re-run the delivery;
 - every other run of a retryable class (`transient`, `degraded`, `decide_partial`) writes a failure line that
@@ -328,8 +328,8 @@ while the event carries a future `expiresAt`, and only if the role opts in with
 - the failure line of every other class carries none of the three words, including when it re-wraps
   upstream text: the command rewrites each of them in the upstream text before it is quoted;
 - a failure that the router does not retry is never re-run, so every transient condition is marked
-  retryable: a transient or degraded hydrate, a lock wait that ran out, a decider exit `2`, a decider
-  exit `4` whose lookup was unavailable (a truncated one, an inconsistent one or an unset
+  retryable: a transient or degraded hydrate, a lock wait that ran out, a decider exit `5`, a decider
+  exit `20` whose lookup was unavailable (a truncated one, an inconsistent one or an unset
   query stays `decide_failed`: a retry cannot clear it), and
   every step of the not-found handling below that cannot be trusted.
 
@@ -382,7 +382,7 @@ in `apply` mode.
   delivery, INV-SKIP-2, is not a run and takes none). A holder that is
   killed MUST release it, and a caller that cannot get it within the bounded wait MUST exit with the
   transient class.
-- **INV-PRCHANGE-4.** <!-- uuid: 2e3c14ef-a56c-4f0a-9460-496bc9c8b00d --> The command's exit code MUST name the failing stage and class, MUST NOT be `1` or `9`, and
+- **INV-PRCHANGE-4.** <!-- uuid: 2e3c14ef-a56c-4f0a-9460-496bc9c8b00d --> The command's exit code MUST name the failing stage and class, MUST be `0`, the shared usage code `2` or an app code in the 20-63 band, and
   the table above MUST list every code the command can exit with.
 - **INV-PRCHANGE-5.** <!-- uuid: 2c56647c-cb0a-4fca-9c00-6aba13553119 --> Every failure MUST write one line ending with the next command to run. The line of a
   retryable class MUST carry the router's `unavailable` word, and the line of every other class MUST
@@ -415,9 +415,9 @@ in `apply` mode.
   not as a run, and MUST NOT change its exit code because the lane write path failed.
 - **INV-PRCHANGE-13.** <!-- uuid: fb5e3dd5-6ec3-4f8b-8504-654d9061d887 --> The audit comment of an applied action names the delivery key, not a change sequence; a
   failure note MUST NOT carry any of the router's retry words after a failure that is not retryable.
-- **INV-PRCHANGE-14.** <!-- uuid: 5b0f0c7e-3d0e-4f6a-9a53-7c2d1e8b4a16 --> A decider exit `4` whose run counters line names the failed-closed reason
+- **INV-PRCHANGE-14.** <!-- uuid: 5b0f0c7e-3d0e-4f6a-9a53-7c2d1e8b4a16 --> A decider exit `20` whose run counters line names the failed-closed reason
   `lookup-unavailable` MUST end the delivery in the retryable class `transient` (exit `32`), with a
-  failure line that carries the router's `unavailable` word; every other exit `4` MUST stay
+  failure line that carries the router's `unavailable` word; every other exit `20` MUST stay
   `decide_failed`.
 - **INV-SKIP-1.** <!-- uuid: 3cf2a556-a8b3-45d8-ac5d-b3ecba34d466 --> No decider rule may require being re-woken by an annotation the decider itself
   wrote. A rule that needs that MUST compute the result in the same run, or the own-origin guard MUST

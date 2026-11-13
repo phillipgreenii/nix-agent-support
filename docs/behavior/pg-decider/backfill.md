@@ -89,9 +89,9 @@ The last line is `DONE`, `FLOOR` or `FAILED` with the counts (`open_anchors=`, `
 | Last line | Exit | Meaning                                                                                                                    |
 | --------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
 | `DONE`    | `0`  | every target was marked and refreshed and the watched count equals the open-anchor count                                   |
-| `FLOOR`   | `10` | the budget fell under the floor: wait for the window and run again; the step is idempotent                                 |
-| `FAILED`  | `11` | some reads or refreshes failed (named by `failed_prs=`), or the inspection could not run: run it again                     |
-| `FAILED`  | `12` | stopped at once (`stop=` says why): an `unauthenticated` read, a command that cannot be started, an unreadable rate signal |
+| `FLOOR`   | `50` | the budget fell under the floor: wait for the window and run again; the step is idempotent                                 |
+| `FAILED`  | `51` | some reads or refreshes failed (named by `failed_prs=`), or the inspection could not run: run it again                     |
+| `FAILED`  | `52` | stopped at once (`stop=` says why): an `unauthenticated` read, a command that cannot be started, an unreadable rate signal |
 | `FAILED`  | `20` | every PR was marked but the count check does not hold (`check=` says how), or there was nothing to mark                    |
 | none      | `30` | the enumeration failed closed (the same causes as `enumerate`); nothing was marked                                         |
 
@@ -121,13 +121,13 @@ The last line is one of `DONE`, `FLOOR` or `FAILED`, with the counts, and the ex
 | Last line | Exit | Meaning                                                                                                                                                       |
 | --------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DONE`    | `0`  | every PR of the set has a final result of the mode                                                                                                            |
-| `FLOOR`   | `10` | the budget fell under the floor: wait for the window, run again; the run resumes                                                                              |
-| `FAILED`  | `11` | some PRs ended in a failure the run recorded and went on past; they are named by class (`transient=`, `degraded=` and the others): run again, the run resumes |
-| `FAILED`  | `12` | the run stopped at once (`stop=` says why): do not run again, go to the rollback                                                                              |
-| none      | `64` | a usage or configuration error; nothing ran                                                                                                                   |
+| `FLOOR`   | `50` | the budget fell under the floor: wait for the window, run again; the run resumes                                                                              |
+| `FAILED`  | `51` | some PRs ended in a failure the run recorded and went on past; they are named by class (`transient=`, `degraded=` and the others): run again, the run resumes |
+| `FAILED`  | `52` | the run stopped at once (`stop=` says why): do not run again, go to the rollback                                                                              |
+| none      | `2`  | a usage or configuration error; nothing ran                                                                                                                   |
 
 Exit `20` is `summary` (a check does not hold) and the count check of `mark-watched`, and `30` and
-`31` are `enumerate` (and the enumeration inside `mark-watched`) and the marker failing to write. None of the driver's exit codes is `1` or `9`.
+`31` are `enumerate` (and the enumeration inside `mark-watched`) and the marker failing to write. The driver's codes are `0`, the shared usage code `2` and app codes in the 20-63 band; none is `1` or `9`.
 
 A run that ends `transient` or `degraded` is not a stop. A run that ends `unauthenticated` or
 `decide_failed`, a command that cannot be started, an unreadable rate signal and a create limit that

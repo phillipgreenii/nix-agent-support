@@ -96,7 +96,7 @@ set instead. It needs the same `rate_source` as `run`.
 
 ```bash
 pg-pr-backfill mark-watched                 # exit 0 and a last line DONE watched=N expected=N, N non-zero
-pg-pr-backfill mark-watched                 # idempotent: run again after a FLOOR or a FAILED 11
+pg-pr-backfill mark-watched                 # idempotent: run again after a FLOOR or a FAILED 51
 ```
 
 Read the lines before the last one: `UNMAPPED anchor <id> "<title>"` is an open anchor whose title names
@@ -111,10 +111,10 @@ tracker listed no open anchor with a PR: the step refuses to pass at zero equals
 | Last line, exit | Do                                                                                                                                                                                                                                                                    |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DONE`, 0       | Next step.                                                                                                                                                                                                                                                            |
-| `FLOOR`, 10     | Wait for the GraphQL window to reset (read the newest `graphql_remaining` first), run again.                                                                                                                                                                          |
-| `FAILED`, 11    | The PRs it names (`transient=`, `degraded=`, others) failed and the run went on. Run again; it resumes and skips the finished ones. If the same PRs fail again, read their failure line with `pg-pr-change plan <id>` by hand.                                        |
-| `FAILED`, 12    | `stop=` says why. A create limit exceeded or an `unauthenticated` or `decide_failed` run in an apply pass is a stop of the first apply: do not run again; follow the rollback of the first-apply runbook. An unreadable rate signal: fix `rate_source` and run again. |
-| (none), 64      | A usage or configuration error; nothing ran. The message names it.                                                                                                                                                                                                    |
+| `FLOOR`, 50     | Wait for the GraphQL window to reset (read the newest `graphql_remaining` first), run again.                                                                                                                                                                          |
+| `FAILED`, 51    | The PRs it names (`transient=`, `degraded=`, others) failed and the run went on. Run again; it resumes and skips the finished ones. If the same PRs fail again, read their failure line with `pg-pr-change plan <id>` by hand.                                        |
+| `FAILED`, 52    | `stop=` says why. A create limit exceeded or an `unauthenticated` or `decide_failed` run in an apply pass is a stop of the first apply: do not run again; follow the rollback of the first-apply runbook. An unreadable rate signal: fix `rate_source` and run again. |
+| (none), 2       | A usage or configuration error; nothing ran. The message names it.                                                                                                                                                                                                    |
 
 ## Failure modes
 

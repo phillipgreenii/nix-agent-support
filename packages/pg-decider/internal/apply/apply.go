@@ -74,11 +74,11 @@ func Run(ctx context.Context, in Input) Result {
 
 	res.ExitCode = 0
 	if hookFailed {
-		res.ExitCode = 2
+		res.ExitCode = exitcode.Partial
 	}
-	// Exit 5 (PartialPermanent) when every failure is one a retry cannot clear;
+	// Exit 21 (PartialPermanent) when every failure is one a retry cannot clear;
 	// any other failure, a skip with no failure behind it, or a failed hook
-	// keeps exit 2, so a mixed run is still retried.
+	// keeps exit 5 (Partial), so a mixed run is still retried.
 	for _, ev := range res.Events {
 		switch {
 		case ev.Outcome == OutcomeFailed && permanentFailure(ev.Err):
@@ -89,7 +89,7 @@ func Run(ctx context.Context, in Input) Result {
 			if ev.Outcome == OutcomeSkippedDependency && res.ExitCode == exitcode.PartialPermanent {
 				continue
 			}
-			res.ExitCode = 2
+			res.ExitCode = exitcode.Partial
 		}
 	}
 	return res

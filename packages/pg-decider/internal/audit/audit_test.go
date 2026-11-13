@@ -204,7 +204,7 @@ func TestApplyWritesExactlyOneAuditComment(t *testing.T) {
 		}
 	}
 	// The failed update is the only reason for exit 2; no comment mentions it.
-	if res.ExitCode != 2 || strings.Contains(stderr, "audit") {
+	if res.ExitCode != 5 || strings.Contains(stderr, "audit") {
 		t.Fatalf("exit %d stderr %q", res.ExitCode, stderr)
 	}
 	for _, c := range cs {
@@ -243,7 +243,7 @@ func TestAFailedAuditCommentKeepsTheWriteReportsOnStderrAndExits2(t *testing.T) 
 		Item: routed(7), Env: env, Hooks: []apply.Hook{New()},
 	})
 	stderr := env.Stderr.(*bytes.Buffer).String()
-	if res.ExitCode != 2 {
+	if res.ExitCode != 5 {
 		t.Fatalf("exit %d", res.ExitCode)
 	}
 	if !strings.Contains(stderr, "audit comment") || !strings.Contains(stderr, "wb-c") || !strings.Contains(stderr, "r.close") {

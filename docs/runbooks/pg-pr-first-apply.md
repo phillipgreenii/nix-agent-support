@@ -55,7 +55,7 @@ pg-pr-backfill run --mode plan                # paced; the last line is DONE, FL
 ```
 
 Run `run --mode plan` again after `FLOOR` (wait for the GraphQL window) or after `FAILED` with exit
-`11`; it resumes and skips finished PRs. Go on when it prints `DONE`. When the daemon's marking step
+`51`; it resumes and skips finished PRs. Go on when it prints `DONE`. When the daemon's marking step
 has landed, `mark-watched` ran then and is not repeated here. The meaning of each last line and exit
 code is in [`pg-pr-backfill.md`](pg-pr-backfill.md).
 
@@ -133,11 +133,11 @@ pg-pr-backfill run --mode apply --max-creates <kind>=<n>,<kind>=<n>
 ```
 
 with the numbers recorded in step 3 (for example `anchor=12,review-pr=9`; a kind not named has the
-limit 0). The limits count only the creates this pass makes, not those of live router runs. Run it again after `FLOOR` or after `FAILED` with exit `11` until `DONE`; a run that ends
+limit 0). The limits count only the creates this pass makes, not those of live router runs. Run it again after `FLOOR` or after `FAILED` with exit `51` until `DONE`; a run that ends
 `transient` or `degraded` is not a stop. A PR that is merged or closed is handled by the normal closure
 rules in this pass.
 
-**Stop at once, and go to step 8, when** the driver ends `FAILED` with exit `12` (`stop=` says why: a
+**Stop at once, and go to step 8, when** the driver ends `FAILED` with exit `52` (`stop=` says why: a
 create limit exceeded, a run that ended `unauthenticated` or `decide_failed`, an unreadable rate
 signal). Do not run it again.
 
@@ -205,7 +205,7 @@ is no size ceiling and nothing to raise or compact for it: the decider's `work_i
 limit that stops the lane is worse than a large listing). The decider reports the item count of each
 run as `lookup_items`, in the run counters line and the run record, and `pg_desk_pr_lane_lookup_items`
 exports the last one, so an abnormal count is visible without blocking a run. A run still fails closed
-(exit 4, nothing written) when the answer is truncated, unavailable or inconsistent with the view, and
+(exit 20, nothing written) when the answer is truncated, unavailable or inconsistent with the view, and
 that is a different problem: read the failure line's reason (`lookup-truncated`, `lookup-unavailable`,
 `lookup-inconsistent`). Deleting a closed review item of a PR that is still open lets the lane create a
 review item for the same head again, so if closed items are ever compacted with the tracker's own

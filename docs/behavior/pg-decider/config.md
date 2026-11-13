@@ -102,7 +102,7 @@ no such lookup and needs neither.
 | `work_items_query`        | string          | empty   | The name of the pg-connector named query that lists the work items of all six PR kinds (`merge-request`, `process-feedback`, `review-pr`, `fix-ci`, `resolve-conflict`, `focus-item`) in EVERY status, closed included, with no result cap. It MUST NOT be a feed name the work-bead feeds share                                                                       |
 | `work_items_query_params` | list of strings | empty   | The parameter names of `work_items_query` when it is the per-PR query: each of `repo` and `pr_number` (at most once) is sent as `--param name=value` from the viewed PR. Unset means the query takes none and lists the whole tracker (the rollback form), and the consistency check against the view does not run. A name other than those two makes the file invalid |
 
-`work_items_query` is required for a `pr` run: with it unset the run fails closed (exit `4`, nothing
+`work_items_query` is required for a `pr` run: with it unset the run fails closed (exit `20`, nothing
 written) with a message naming the missing key, and it never falls back to the gather's work-beads
 query. An `issue` run, and any run with no `pr`, is unaffected.
 

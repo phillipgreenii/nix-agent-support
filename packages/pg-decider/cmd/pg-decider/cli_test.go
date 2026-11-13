@@ -162,9 +162,10 @@ func TestUsageErrors(t *testing.T) {
 		{"plan", "bogus", "x"},
 		{"apply", "pr"},
 		{"nope"},
+		{"apply", "pr", "x", "--no-such-flag"},
 	} {
 		_, errOut, code := runCLI(t, args...)
-		if code != 1 || errOut == "" {
+		if code != exitcode.Usage || errOut == "" {
 			t.Errorf("%v: code=%d err=%q", args, code, errOut)
 		}
 	}

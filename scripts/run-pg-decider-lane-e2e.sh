@@ -23,7 +23,7 @@
 # the drift check of pg-desk's decision labels against the decider's lists, the
 # review rule, two concurrent composed runs with and without the lock, a duplicate
 # delivery, a kill between a create and its audit comment, a decider run that exits
-# 2 through a failing passthrough over bd, and the rollback drill of the first
+# 5 through a failing passthrough over bd, and the rollback drill of the first
 # apply).
 #
 # What it asserts about the run (a real-binary gate that could pass by running

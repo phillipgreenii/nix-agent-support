@@ -27,15 +27,15 @@ import (
 // "main.Version").
 var Version = "dev"
 
-// Exit codes beyond the ones of internal/backfill (0, 10, 11, 12, 20 and 64): none
-// is 1 or 9.
+// Exit codes beyond the ones of internal/backfill (0, 2, 20, 50, 51 and 52): all
+// are app codes in the 20-63 band of the shared exit-code package.
 const (
 	exitEnumerateFailed = 30
 	exitMarkerFailed    = 31
 	exitSnapshotFailed  = 32
 	exitRollbackRefused = 33
 	exitRollbackFailed  = 34
-	exitCommentFailed   = 14
+	exitCommentFailed   = 35
 	exitNothingToList   = 20
 )
 
@@ -62,9 +62,10 @@ The PR lane backfill driver (docs/behavior/pg-decider/backfill.md).
 
 Common flags: --config FILE (env ` + backfill.ConfigEnv + `), --run-record FILE, --set FILE.
 "run" and "mark-watched" end with one last line starting DONE, FLOOR or FAILED; exit
-0, 10, 11 (FAILED: run it again) or 12 (FAILED and stopped at once: for "run", go to
+0, 50, 51 (FAILED: run it again) or 52 (FAILED and stopped at once: for "run", go to
 the rollback). "mark-watched" also exits 20 when every PR was marked but the count
-check does not hold. 64 is a usage error. None of the exit codes is 1 or 9.
+check does not hold. 2 is a usage error. The codes other than 0 and 2 are app codes
+(20-63) of the shared exit-code package.
 `
 
 type common struct {

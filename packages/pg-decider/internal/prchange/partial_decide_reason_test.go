@@ -25,7 +25,7 @@ const failedUpdateLine = "pg-decider: update bd-7a (rule anchor.backfill): faile
 func partialDecideScript(stderr string) *script {
 	return hydrated().
 		on("pg-decider plan pr", ok(planWithWork)).
-		on("pg-decider apply", exit(2, "", applyCounters+"\n"+stderr))
+		on("pg-decider apply", exit(5, "", applyCounters+"\n"+stderr))
 }
 
 func TestAPartialDecideFailureLineNamesTheFailingActionAndItsError(t *testing.T) {

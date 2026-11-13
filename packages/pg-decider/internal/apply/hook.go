@@ -68,7 +68,7 @@ type Event struct {
 // Hook observes a run. The audit and failure packets implement it.
 type Hook interface {
 	// After is called synchronously, in order, after every action. An error is
-	// reported on stderr and makes the run exit 2.
+	// reported on stderr and makes the run exit 5 (Partial).
 	After(ctx context.Context, env Env, ev Event) error
 	// Finish is called once after the last action; same error rule.
 	Finish(ctx context.Context, env Env, evs []Event) error

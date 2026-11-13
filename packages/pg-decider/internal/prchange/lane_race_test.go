@@ -235,7 +235,7 @@ func failureScenarios(l *laneRun) {
 		}
 	})
 
-	run("a-decider-run-that-exits-2-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-bd", func(t *testing.T) {
+	run("a-decider-run-that-exits-5-converges-on-rerun-with-the-failure-injected-by-a-passthrough-over-bd", func(t *testing.T) {
 		w, id := freshWorld(t, tools, sha('a'), true)
 		// The first apply writes the anchor (create, audit comment) and then the
 		// review item (create, audit comment): the third write is the review
@@ -250,8 +250,8 @@ func failureScenarios(l *laneRun) {
 		if len(log) < 3 || log[2] != "3 create FAILED" {
 			t.Fatalf("the injected failure was not the third write, a create: %v", log)
 		}
-		if rec := w.lastRecord(); rec.Decide == nil || rec.Decide.ExitCode != 2 {
-			t.Fatalf("the run record does not show a decider exit of 2: %+v", rec.Decide)
+		if rec := w.lastRecord(); rec.Decide == nil || rec.Decide.ExitCode != 5 {
+			t.Fatalf("the run record does not show a decider exit of 5: %+v", rec.Decide)
 		}
 		if n := len(w.anchors()); n != 1 {
 			t.Fatalf("the partial run left %d anchors, want the one it created", n)

@@ -34,7 +34,7 @@
 // streak is not yet escalated, one human-labeled task is created naming the
 // rule, the entity and the last error, parented under the entity's anchor when
 // the view links one, and escalated.<rule id> is set to 1. If the create fails
-// the error is returned (apply exits 2) and escalated stays 0, so the next
+// the error is returned (apply exits 5) and escalated stays 0, so the next
 // failing run retries it.
 //
 // The tracker is the source of truth and nothing here is rolled back. The one

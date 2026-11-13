@@ -115,7 +115,7 @@ func TestUnreadableApplyResultSetsPlanErrorAndStillReadsTheResidual(t *testing.T
 func TestApplyExit2UsesItsOwnPlanAndStillReadsTheResidual(t *testing.T) {
 	s := hydrated().
 		on("pg-decider plan pr acme/api#7 --json", ok(planWithWork)).
-		on("pg-decider apply", exit(2, planEmpty, "rule x failed\n"))
+		on("pg-decider apply", exit(5, planEmpty, "rule x failed\n"))
 	_, rec := runApplyForResidual(t, s)
 	if got := planCalls(s); got != 1 {
 		t.Fatalf("%d plan reads, want 1", got)
@@ -132,9 +132,9 @@ func TestApplyExit2UsesItsOwnPlanAndStillReadsTheResidual(t *testing.T) {
 // no residual.
 func TestApplyThatFailsOutrightRecordsAPlanError(t *testing.T) {
 	s := hydrated().
-		on("pg-decider apply", exit(4, "", "lookup untrusted\n"))
+		on("pg-decider apply", exit(20, "", "lookup untrusted\n"))
 	_, rec := runApplyForResidual(t, s)
-	if rec.Decide == nil || !strings.Contains(rec.Decide.PlanError, "exited 4") {
+	if rec.Decide == nil || !strings.Contains(rec.Decide.PlanError, "exited 20") {
 		t.Fatalf("decide = %+v", rec.Decide)
 	}
 	if planCalls(s) != 0 {

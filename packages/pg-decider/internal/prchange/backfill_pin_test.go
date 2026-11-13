@@ -23,7 +23,7 @@ func TestTheBackfillDriverReadsTheRunRecordThisPackageWrites(t *testing.T) {
 		Entity: "acme/api#7", EventID: "acme/api#7", Mode: ModeApply, ExitCode: ExitDecidePartial, ErrorClass: ClassDecidePartial, FailingStage: StageDecide,
 		Hydrate: HydrateRecord{Result: "ok"},
 		Decide: &DecideRecord{
-			ExitCode: 2,
+			ExitCode: 5,
 			Rules:    []RuleOutcome{{Rule: "anchor.lazy", Outcome: "applied", Counts: map[string]int{"planned": 2, "applied": 1}}, {Rule: "adoption", Outcome: "skipped", Reason: "not matched"}},
 			Actions:  []PlannedAction{{Rule: "anchor.lazy", Kind: "anchor", Op: "create"}, {Rule: "adoption", Kind: "anchor", Op: "update"}},
 			ByKind:   map[string]int{"anchor": 2},
@@ -52,7 +52,7 @@ func TestTheBackfillDriverReadsTheRunRecordThisPackageWrites(t *testing.T) {
 	if got.Residual == nil || *got.Residual != residual {
 		t.Errorf("residual %v", got.Residual)
 	}
-	if got.Decide == nil || got.Decide.ExitCode != 2 || got.Decide.ByKind["anchor"] != 2 || len(got.Decide.Actions) != 2 ||
+	if got.Decide == nil || got.Decide.ExitCode != 5 || got.Decide.ByKind["anchor"] != 2 || len(got.Decide.Actions) != 2 ||
 		got.Decide.Actions[0] != (backfill.Planned{Rule: "anchor.lazy", Kind: "anchor", Op: "create"}) ||
 		got.Decide.Rules[0].Counts["applied"] != 1 || got.Decide.Rules[1].Reason != "not matched" {
 		t.Errorf("decide: %+v", got.Decide)
@@ -93,11 +93,14 @@ func TestTheBackfillDriverReadsTheComposedCommandsExitCodesTheWayTheyAreMeant(t 
 	if c := backfill.ExitClasses[ExitUsage]; !c.Stop {
 		t.Error("a usage error must stop the run")
 	}
-	// The driver's own exit codes never collide with 1 or 9.
+	// The driver's own exit codes are 0, the shared usage code 2 or app codes (20-63).
 	for _, c := range []int{backfill.ExitDone, backfill.ExitFloor, backfill.ExitFailed, backfill.ExitStopped, backfill.ExitUsage, backfill.ExitSummaryFailed} {
-		if c == 1 || c == 9 {
+		if c != 0 && c != 2 && (c < 20 || c > 63) {
 			t.Errorf("exit code %d", c)
 		}
+	}
+	if backfill.ExitUsage != ExitUsage {
+		t.Errorf("the driver reads usage as %d, the command writes %d", backfill.ExitUsage, ExitUsage)
 	}
 }
 
