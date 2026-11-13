@@ -16,7 +16,7 @@
 // it as unknown, the best level): an absent window key, an absent used_pct, a
 // missing, future, too old or too early captured_at. When resets_at is absent
 // only the floor applies. A failed pa-monitor call writes the cause to stderr
-// and exits 1 (the router keeps the last level); a successful call with no
+// and exits 3 (the router keeps the last level); a successful call with no
 // readable window exits 0 with no lines (EmptyOK).
 //
 // Config keys (all optional): command (default pa-monitor), timeout (default

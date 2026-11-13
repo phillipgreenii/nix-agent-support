@@ -372,9 +372,9 @@ func TestDispatch(t *testing.T) {
 	if code != 0 || out != "" {
 		t.Errorf("empty: %d %q", code, out)
 	}
-	// A failed call: exit 1 with the cause on stderr.
+	// A failed call: exit 3 with the cause on stderr.
 	code, out, se := run(t, "", cmdruntest.Fail(2, "boom"))
-	if code != 1 || out != "" || !strings.Contains(se, "boom") {
+	if code != 3 || out != "" || !strings.Contains(se, "boom") {
 		t.Errorf("failed: %d %q %q", code, out, se)
 	}
 	// --bands prints both resources.

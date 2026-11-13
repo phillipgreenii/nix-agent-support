@@ -282,7 +282,7 @@ func TestRunExitCodes(t *testing.T) {
 		var out, errb bytes.Buffer
 		return sensorcli.Run(append([]string{"beads-sensor"}, args...), reg, sensorcli.IO{Stdout: &out, Stderr: &errb, Getenv: func(string) string { return "" }})
 	}
-	if c := run("--config", cfg, "--raw"); c != 1 {
+	if c := run("--config", cfg, "--raw"); c != 3 {
 		t.Errorf("non-200: exit %d", c)
 	}
 	if c := run("--config", cfg, "--raw", "--resource", "beads_other"); c != 2 {

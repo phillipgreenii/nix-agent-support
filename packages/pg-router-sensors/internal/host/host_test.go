@@ -203,8 +203,8 @@ func TestDiskIsLowestOverConfiguredPathsAndSkipsUnreadable(t *testing.T) {
 		t.Errorf("skipped path not reported: %s", r.errb.String())
 	}
 	r.free = map[string]float64{}
-	if code, _ := r.run(t, "--raw", "--resource", "disk"); code != 1 {
-		t.Errorf("no readable path: exit %d, want 1", code)
+	if code, _ := r.run(t, "--raw", "--resource", "disk"); code != 3 {
+		t.Errorf("no readable path: exit %d, want 3", code)
 	}
 }
 
@@ -231,13 +231,13 @@ func TestCPUBandsAndLoadPerCore(t *testing.T) {
 func TestCPUUnreadableOmitted(t *testing.T) {
 	r := newRig(t)
 	r.load = "garbage"
-	if code, _ := r.run(t, "--raw", "--resource", "cpu"); code != 1 {
-		t.Errorf("exit %d, want 1", code)
+	if code, _ := r.run(t, "--raw", "--resource", "cpu"); code != 3 {
+		t.Errorf("exit %d, want 3", code)
 	}
 	r.load = "{ 1 1 1 }\n"
 	r.ncpu = "0\n"
-	if code, _ := r.run(t, "--raw", "--resource", "cpu"); code != 1 {
-		t.Errorf("zero cores: exit %d, want 1", code)
+	if code, _ := r.run(t, "--raw", "--resource", "cpu"); code != 3 {
+		t.Errorf("zero cores: exit %d, want 3", code)
 	}
 }
 
@@ -288,7 +288,7 @@ func TestRAMPartialAndMissingReadings(t *testing.T) {
 	r3 := newRig(t)
 	r3.press = "7\n"
 	r3.swapRaw = "nonsense"
-	if code, _ := r3.run(t, "--raw", "--resource", "ram"); code != 1 {
+	if code, _ := r3.run(t, "--raw", "--resource", "ram"); code != 3 {
 		t.Errorf("no readable component must emit no ram answer, exit %d", code)
 	}
 }
@@ -454,8 +454,8 @@ func TestProbeFailureModes(t *testing.T) {
 		r := newRig(t)
 		res := res
 		r.sysctlFail = &res
-		if code, _ := r.run(t, "--raw", "--resource", "cpu"); code != 1 {
-			t.Errorf("%s: exit %d, want 1", name, code)
+		if code, _ := r.run(t, "--raw", "--resource", "cpu"); code != 3 {
+			t.Errorf("%s: exit %d, want 3", name, code)
 		}
 	}
 }

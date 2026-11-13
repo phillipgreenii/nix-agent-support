@@ -8,8 +8,9 @@
 // supplies only its probes, its band tables and its configuration keys.
 //
 // Exit status: 0 when at least one resource was answered (or --bands printed);
-// 1 when none could be measured (a pull failure for the router); 2 for a usage
-// or configuration error.
+// 3 (3) when none could be measured (a pull failure for the
+// router, which treats any non-zero exit alike); 2 for a usage or configuration
+// error.
 package sensorcli
 
 import (
@@ -28,12 +29,14 @@ import (
 	"github.com/phillipgreenii/pg-router-sensors/internal/levels"
 )
 
-// Exit codes.
+// Exit codes. ExitUnavailable and ExitUsage equal exitcode.Unavailable and
+// exitcode.Usage of github.com/phillipgreenii/x/exitcode; they are literals
+// here until the module pins an x revision that carries that package.
 const (
-	ExitOK     = 0
-	ExitNone   = 1
-	ExitUsage  = 2
-	refreshEnv = "PG_ROUTER_LEVEL_REFRESH"
+	ExitOK          = 0
+	ExitUnavailable = 3
+	ExitUsage       = 2
+	refreshEnv      = "PG_ROUTER_LEVEL_REFRESH"
 )
 
 // Env is what a sensor's Measure receives.
@@ -173,7 +176,7 @@ func Run(args []string, reg Registry, sio IO) int {
 	})
 	if err != nil {
 		fmt.Fprintf(sio.Stderr, "pg-router-sensors %s: %v\n", name, err)
-		return ExitNone
+		return ExitUnavailable
 	}
 
 	printer := answer.Printer{W: sio.Stdout}
@@ -210,14 +213,14 @@ func Run(args []string, reg Registry, sio IO) int {
 	}
 	if answered == 0 && !emptyOK(sensor) {
 		fmt.Fprintf(sio.Stderr, "pg-router-sensors %s: no resource could be answered\n", name)
-		return ExitNone
+		return ExitUnavailable
 	}
 	return ExitOK
 }
 
 // EmptyOK is an optional interface of a sensor whose successful measurement
 // with nothing to answer exits 0 with no lines (claude-sensor); a measurement
-// error still exits 1.
+// error still exits 3.
 type EmptyOK interface{ EmptyOK() bool }
 
 func emptyOK(s Sensor) bool {
@@ -236,7 +239,7 @@ func printBands(stdout, stderr io.Writer, s Sensor, only string) int {
 		}
 		if err := enc.Encode(info); err != nil {
 			fmt.Fprintf(stderr, "pg-router-sensors: %v\n", err)
-			return ExitNone
+			return ExitUnavailable
 		}
 	}
 	return ExitOK

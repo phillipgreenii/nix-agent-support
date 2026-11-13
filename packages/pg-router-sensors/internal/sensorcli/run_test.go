@@ -363,15 +363,15 @@ func TestRun_resourceFlagLimitsTheAnswer(t *testing.T) {
 	}
 }
 
-func TestRun_exit1WhenNothingCouldBeMeasured(t *testing.T) {
+func TestRun_exit3WhenNothingCouldBeMeasured(t *testing.T) {
 	h := newHarness(t)
 	h.f.failWith = errors.New("probe exploded")
-	if code := h.run("host-sensor", "--state-dir", h.dir); code != ExitNone || !strings.Contains(h.stderr.String(), "probe exploded") || h.stdout.Len() != 0 {
+	if code := h.run("host-sensor", "--state-dir", h.dir); code != 3 || !strings.Contains(h.stderr.String(), "probe exploded") || h.stdout.Len() != 0 {
 		t.Fatalf("exit %d stderr %q", code, h.stderr.String())
 	}
 	h.f.failWith = nil
 	h.f.omitBeta = true
-	if code := h.run("host-sensor", "--state-dir", h.dir, "--resource", "beta"); code != ExitNone || !strings.Contains(h.stderr.String(), "no resource could be answered") {
+	if code := h.run("host-sensor", "--state-dir", h.dir, "--resource", "beta"); code != 3 || !strings.Contains(h.stderr.String(), "no resource could be answered") {
 		t.Fatalf("filtered-out answer: exit %d stderr %q", code, h.stderr.String())
 	}
 	// One resource unanswered is still exit 0.
@@ -380,10 +380,10 @@ func TestRun_exit1WhenNothingCouldBeMeasured(t *testing.T) {
 	}
 }
 
-func TestRun_exit1WhenAnswerIsRejectedBySchema(t *testing.T) {
+func TestRun_exit3WhenAnswerIsRejectedBySchema(t *testing.T) {
 	h := newHarness(t)
 	h.reg["host-sensor"] = &badName{}
-	if code := h.run("host-sensor", "--state-dir", h.dir); code != ExitNone || !strings.Contains(h.stderr.String(), "Bad Name") {
+	if code := h.run("host-sensor", "--state-dir", h.dir); code != 3 || !strings.Contains(h.stderr.String(), "Bad Name") {
 		t.Fatalf("exit %d stderr %q", code, h.stderr.String())
 	}
 }
@@ -447,9 +447,9 @@ type errWriter struct{}
 
 func (errWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
 
-func TestPrintBands_writeErrorExits1(t *testing.T) {
+func TestPrintBands_writeErrorExits3(t *testing.T) {
 	var e bytes.Buffer
-	if code := printBands(errWriter{}, &e, &fake{}, ""); code != ExitNone || !strings.Contains(e.String(), "closed") {
+	if code := printBands(errWriter{}, &e, &fake{}, ""); code != 3 || !strings.Contains(e.String(), "closed") {
 		t.Fatalf("exit %d stderr %q", code, e.String())
 	}
 }
