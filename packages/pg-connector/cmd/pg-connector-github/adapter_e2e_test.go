@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/servetest"
 )
 
@@ -34,7 +36,7 @@ import (
 // The scenario is the one an operator meets: an unscoped consumer (no query)
 // polls through the adapter, the daemon's store is replaced by a file that is
 // not a database (the daemon moves it aside and starts empty), the consumer's
-// cursor is then expired, the adapter surfaces that as exit 1, an empty stdout
+// cursor is then expired, the adapter surfaces that as exit 3 (Unavailable), an empty stdout
 // and a cursor_expired line on stderr, and the umbrella's --reset recovers it.
 
 const (
@@ -184,14 +186,14 @@ func TestAdapterE2E_AnUnscopedConsumersCursorExpiredReachesTheAdapterAndResetRec
 	// The adapter fails the call, prints nothing on stdout and names the cause
 	// on stderr, where pg-router counts it as a source failure.
 	res := poll()
-	if res.exit != 1 || res.stdout != "" {
-		t.Fatalf("after a moved-aside store: exit=%d stdout=%q stderr=%q, want exit 1 and an empty stdout", res.exit, res.stdout, res.stderr)
+	if res.exit != exitcode.Unavailable || res.stdout != "" {
+		t.Fatalf("after a moved-aside store: exit=%d stdout=%q stderr=%q, want exit 3 and an empty stdout", res.exit, res.stdout, res.stderr)
 	}
 	if want := adapterE2EBackend + ": cursor_expired:"; !strings.Contains(res.stderr, want) {
 		t.Fatalf("stderr = %q, want a line containing %q", res.stderr, want)
 	}
 	// The failure is stable: the adapter does not advance or reset the cursor.
-	if again := poll(); again.exit != 1 || again.stdout != "" || !strings.Contains(again.stderr, "cursor_expired:") {
+	if again := poll(); again.exit != exitcode.Unavailable || again.stdout != "" || !strings.Contains(again.stderr, "cursor_expired:") {
 		t.Fatalf("a second poll: exit=%d stdout=%q stderr=%q, want the same failure", again.exit, again.stdout, again.stderr)
 	}
 
