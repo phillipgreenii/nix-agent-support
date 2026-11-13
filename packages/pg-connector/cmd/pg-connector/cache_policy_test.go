@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,77 +42,9 @@ type scriptedBackend struct {
 func newScriptedBackend(t *testing.T, name string) *scriptedBackend {
 	t.Helper()
 	dir := t.TempDir()
-	script := `#!/bin/sh
-D="` + dir + `"
-req=$(cat)
-op=$(printf '%s' "$req" | sed -n 's/.*"op":"\([a-z_]*\)".*/\1/p')
-id=$(printf '%s' "$req" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-echo "$op $id" >> "$D/calls.log"
-case "$op" in
-capabilities)
-  if [ -f "$D/caps-fail" ]; then
-    printf 'not a capabilities answer\n'
-  elif [ -f "$D/cache-opt-out" ]; then
-    printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"],"vocabulary":{"owns_changes":false,"cache_opt_out":true}}\n'
-  elif [ -f "$D/show_many-enabled" ]; then
-    printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list","show_many"]}\n'
-  else
-    printf '{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"]}\n'
-  fi
-  ;;
-show_many)
-  # n is this call's 1-based number. The request is kept whole so a test can
-  # read which refs were asked for; the answer is show_many-error-<n> (an error
-  # code), show_many-<n>.json, or show_many.json, in that order, else unknown_op.
-  n=$(grep -c '^show_many ' "$D/calls.log")
-  printf '%s\n' "$req" >> "$D/show_many.requests"
-  if [ -f "$D/show_many-error-$n" ]; then
-    printf '{"protocolVersion":1,"schemaVersion":13,"error":{"code":"%s","message":"scripted"}}\n' "$(cat "$D/show_many-error-$n")"
-  elif [ -f "$D/show_many-$n.json" ]; then
-    cat "$D/show_many-$n.json"
-  elif [ -f "$D/show_many.json" ]; then
-    cat "$D/show_many.json"
-  else
-    printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unknown_op","message":"no"}}\n'
-  fi
-  ;;
-show)
-  [ -f "$D/delay" ] && sleep "$(cat "$D/delay")"
-  if [ -f "$D/show-error" ]; then
-    printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"%s","message":"scripted"}}\n' "$(cat "$D/show-error")"
-  elif [ -f "$D/show-$id.json" ]; then
-    cat "$D/show-$id.json"
-  else
-    printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"gone"}}\n'
-  fi
-  ;;
-list)
-  if printf '%s' "$req" | grep -q '"ids_only":true'; then cat "$D/list-ids.json"; else cat "$D/list-full.json"; fi
-  ;;
-comment|transition|update|close|review_submit)
-  # A write op: write-error makes it fail; otherwise it succeeds and, when
-  # after-<id>.json exists, swaps that in as the entity the next show reports.
-  if [ -f "$D/write-error" ]; then
-    printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"%s","message":"scripted"}}\n' "$(cat "$D/write-error")"
-  else
-    [ -f "$D/after-$id.json" ] && cp "$D/after-$id.json" "$D/show-$id.json"
-    if [ "$op" = review_submit ]; then
-      printf '{"protocolVersion":1,"schemaVersion":1,"result":{"status":"posted","review_id":"r1","state":"pending","head_sha":"abc","as_of":"2026-01-01T00:00:00Z"}}\n'
-    else
-      printf '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"%s","state":"open","as_of":"2026-01-01T00:00:00Z"}}\n' "$id"
-    fi
-  fi
-  ;;
-*)
-  printf '{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unknown_op","message":"no"}}\n'
-  ;;
-esac
-`
-	if err := installExec(filepath.Join(dir, name), script); err != nil {
-		t.Fatalf("write scripted backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return &scriptedBackend{dir: dir, name: name}
+	b := &scriptedBackend{dir: dir, name: name}
+	registerFake(t, name, b.answer)
+	return b
 }
 
 func (b *scriptedBackend) set(t *testing.T, file, content string) {
@@ -500,4 +433,103 @@ func TestAcquireShowFlight_LocksAndReleases(t *testing.T) {
 	if matches, _ := filepath.Glob(filepath.Join(dir, "flight", "pr__*.lock")); len(matches) == 0 {
 		t.Fatalf("no flight lock file under %s", dir)
 	}
+}
+
+var (
+	scriptedOpRE = regexp.MustCompile(`.*"op":"([a-z_]*)"`)
+	scriptedIDRE = regexp.MustCompile(`.*"id":"([^"]*)"`)
+)
+
+const scriptedUnknownOp = `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unknown_op","message":"no"}}`
+
+// answer is the in-process equivalent of the shell script this fake used to
+// be: the same files drive the same answers.
+func (b *scriptedBackend) answer(req string) string {
+	req = strings.TrimRight(req, "\n")
+	has := func(f string) bool { _, err := os.Stat(filepath.Join(b.dir, f)); return err == nil }
+	read := func(f string) string { d, _ := os.ReadFile(filepath.Join(b.dir, f)); return string(d) }
+	scriptedErr := func(schema, code string) string {
+		return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":%s,"error":{"code":"%s","message":"scripted"}}`+"\n", schema, code)
+	}
+	var op, id string
+	if m := scriptedOpRE.FindStringSubmatch(req); m != nil {
+		op = m[1]
+	}
+	if m := scriptedIDRE.FindStringSubmatch(req); m != nil {
+		id = m[1]
+	}
+	f, err := os.OpenFile(filepath.Join(b.dir, "calls.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err == nil {
+		_, _ = f.WriteString(op + " " + id + "\n")
+		_ = f.Close()
+	}
+	switch op {
+	case "capabilities":
+		switch {
+		case has("caps-fail"):
+			return "not a capabilities answer\n"
+		case has("cache-opt-out"):
+			return `{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"],"vocabulary":{"owns_changes":false,"cache_opt_out":true}}` + "\n"
+		case has("show_many-enabled"):
+			return `{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list","show_many"]}` + "\n"
+		}
+		return `{"protocolVersion":1,"schemaVersions":{"pr":1,"issue":1},"ops":["capabilities","show","list"]}` + "\n"
+	case "show_many":
+		// n is this call's 1-based number. The request is kept whole so a test
+		// can read which refs were asked for; the answer is show_many-error-<n>
+		// (an error code), show_many-<n>.json, or show_many.json, in that
+		// order, else unknown_op.
+		n := 0
+		for _, line := range strings.Split(read("calls.log"), "\n") {
+			if strings.HasPrefix(line, "show_many ") {
+				n++
+			}
+		}
+		if f, err := os.OpenFile(filepath.Join(b.dir, "show_many.requests"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			_, _ = f.WriteString(req + "\n")
+			_ = f.Close()
+		}
+		switch {
+		case has(fmt.Sprintf("show_many-error-%d", n)):
+			return scriptedErr("13", strings.TrimRight(read(fmt.Sprintf("show_many-error-%d", n)), "\n"))
+		case has(fmt.Sprintf("show_many-%d.json", n)):
+			return read(fmt.Sprintf("show_many-%d.json", n))
+		case has("show_many.json"):
+			return read("show_many.json")
+		}
+		return scriptedUnknownOp + "\n"
+	case "show":
+		if has("delay") {
+			if secs, err := strconv.ParseFloat(strings.TrimSpace(read("delay")), 64); err == nil {
+				time.Sleep(time.Duration(secs * float64(time.Second)))
+			}
+		}
+		switch {
+		case has("show-error"):
+			return scriptedErr("1", strings.TrimRight(read("show-error"), "\n"))
+		case has("show-" + id + ".json"):
+			return read("show-" + id + ".json")
+		}
+		return `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"gone"}}` + "\n"
+	case "list":
+		if strings.Contains(req, `"ids_only":true`) {
+			return read("list-ids.json")
+		}
+		return read("list-full.json")
+	case "comment", "transition", "update", "close", "review_submit":
+		// A write op: write-error makes it fail; otherwise it succeeds and, when
+		// after-<id>.json exists, swaps that in as the entity the next show
+		// reports.
+		if has("write-error") {
+			return scriptedErr("1", strings.TrimRight(read("write-error"), "\n"))
+		}
+		if has("after-" + id + ".json") {
+			_ = os.WriteFile(filepath.Join(b.dir, "show-"+id+".json"), []byte(read("after-"+id+".json")), 0o644)
+		}
+		if op == "review_submit" {
+			return `{"protocolVersion":1,"schemaVersion":1,"result":{"status":"posted","review_id":"r1","state":"pending","head_sha":"abc","as_of":"2026-01-01T00:00:00Z"}}` + "\n"
+		}
+		return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":{"id":"%s","state":"open","as_of":"2026-01-01T00:00:00Z"}}`+"\n", id)
+	}
+	return scriptedUnknownOp + "\n"
 }
