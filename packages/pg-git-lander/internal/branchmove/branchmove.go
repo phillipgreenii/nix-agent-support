@@ -169,7 +169,7 @@ func (m *Mover) moveByUpdateRef(ctx context.Context, in Input) Result {
 	if m.BeforeWrite != nil {
 		m.BeforeWrite()
 	}
-	tr := m.transaction(ctx, in.Dir, in.Fence.Locks, &[3]string{branchRef(in.Branch), in.Result, in.TipsBranch})
+	tr := m.transaction(ctx, in.Dir, in.Fence.Checks(), &[3]string{branchRef(in.Branch), in.Result, in.TipsBranch})
 	if !tr.OK() {
 		if tr.TimedOut {
 			return stop(outcome.StopGitError, "git update-ref: %v", gitexec.ErrTimeout)
@@ -177,7 +177,7 @@ func (m *Mover) moveByUpdateRef(ctx context.Context, in Input) Result {
 		if cur, err := m.tip(ctx, in.Dir, in.Branch); err == nil && cur != in.TipsBranch {
 			return fail(in, outcome.StopBranchMoved, "%s moved from %s to %s", in.Branch, in.TipsBranch, cur)
 		}
-		if m.locksChanged(ctx, in.Dir, in.Fence.Locks) {
+		if m.locksChanged(ctx, in.Dir, in.Fence.Checks()) {
 			return stop(outcome.StopLockLost, "a lock record changed")
 		}
 		return fail(in, outcome.StopCheckoutChanged, "git update-ref failed (exit %d): %s", tr.Code, strings.TrimSpace(string(tr.Stderr)))
@@ -187,7 +187,7 @@ func (m *Mover) moveByUpdateRef(ctx context.Context, in Input) Result {
 
 func (m *Mover) moveInHolder(ctx context.Context, in Input) Result {
 	h := in.Holder
-	if m.locksChanged(ctx, in.Dir, in.Fence.Locks) {
+	if m.locksChanged(ctx, in.Dir, in.Fence.Checks()) {
 		return stop(outcome.StopLockLost, "a lock record changed")
 	}
 	s := m.Git.Run(ctx, h.Path, "status", "--porcelain", "--untracked-files=no")

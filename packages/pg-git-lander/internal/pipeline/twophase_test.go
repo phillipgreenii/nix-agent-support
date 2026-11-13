@@ -82,6 +82,7 @@ func (f *fx) stats(o *outcome.Outcome) map[string]any {
 }
 
 func TestHooksRunWithoutTargetOrDestinationLocksAndUnmovedMainFastForwards(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	featTip := f.tip("feature/x")
@@ -112,6 +113,7 @@ func TestHooksRunWithoutTargetOrDestinationLocksAndUnmovedMainFastForwards(t *te
 }
 
 func TestOpEndCarriesTheTimeTargetWasHeld(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	d := f.deps(owner(41721, "t1"))
@@ -143,6 +145,7 @@ git -c user.name=t -c user.email=t@example.invalid -C "$PG_GIT_LANDER_DESTINATIO
 }
 
 func TestMovedMainWithDisjointFilesReusesTheHookResultUnderPaths(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.twoPhaseXDG(`revalidate = "paths"`, f.movingHook("m.txt", "m\\n"))
@@ -178,6 +181,7 @@ func (f *fx) overlapping() {
 }
 
 func TestMovedMainWithOverlappingFilesRerunsTheHooksOutsideTheLock(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.overlapping()
 	moving := f.movingHook("shared.txt", "1 main\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n")
@@ -206,6 +210,7 @@ func TestMovedMainWithOverlappingFilesRerunsTheHooksOutsideTheLock(t *testing.T)
 }
 
 func TestMovedMainWithNoneReusesEvenForOverlappingFiles(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.overlapping()
 	f.twoPhaseXDG(`revalidate = "none"`, f.movingHook("shared.txt", "1 main\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n"))
@@ -221,6 +226,7 @@ func TestMovedMainWithNoneReusesEvenForOverlappingFiles(t *testing.T) {
 }
 
 func TestMovedMainWithAConflictingRebaseFallsBackToTheFullReturn(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	// Same file, same line: not disjoint is not even needed under none, the
@@ -237,6 +243,7 @@ func TestMovedMainWithAConflictingRebaseFallsBackToTheFullReturn(t *testing.T) {
 }
 
 func TestMovedMainWithFullRevalidateRerunsEvenWhenDisjoint(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.twoPhaseXDG(`revalidate = "full"`, f.movingHook("m.txt", "m\\n"))
@@ -252,6 +259,7 @@ func TestMovedMainWithFullRevalidateRerunsEvenWhenDisjoint(t *testing.T) {
 }
 
 func TestRaceBoundStopsRaceWithoutEverHoldingMain(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.twoPhaseXDG("max_race_retries = 0", f.raceHook(true))
@@ -272,6 +280,7 @@ func TestRaceBoundStopsRaceWithoutEverHoldingMain(t *testing.T) {
 }
 
 func TestBusyTargetAfterTheHooksStopsTargetBusyAndLeavesMainFree(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	featTip, mainTip := f.tip("feature/x"), f.tip(f.main)
@@ -333,6 +342,7 @@ func TestBusyTargetAfterTheHooksStopsTargetBusyAndLeavesMainFree(t *testing.T) {
 }
 
 func TestResumeOfAStopBeforeTheLockPhaseDoesNotTakeTargetOrDestination(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	failing := f.hookScript("exit 1")
@@ -363,6 +373,7 @@ func TestResumeOfAStopBeforeTheLockPhaseDoesNotTakeTargetOrDestination(t *testin
 }
 
 func TestResumeAtStageMovingTakesTargetAndDestinationBack(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.twoPhaseXDG("max_race_retries = 0", f.raceHook(true))

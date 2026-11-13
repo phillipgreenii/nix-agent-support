@@ -563,3 +563,45 @@ func TestLockRecordCheckedInTheDelete(t *testing.T) {
 		t.Fatalf("result = %+v feat=%s", r, g.ref("feat"))
 	}
 }
+
+// A holder renews its lease while the clean-up works (removing the worktree
+// takes seconds), and each renewal rewrites the lock record. A fence that
+// carries the oids read before the clean-up started then fails the verify in
+// the BRANCH delete with lock-lost although the lock never changed hands;
+// Fence.Current re-reads them at the delete.
+func TestRenewalDuringCleanupDoesNotLoseTheLock(t *testing.T) {
+	ref := "refs/pg-git-lander/lock/one"
+	setup := func() (*fx, string, func() string) {
+		f := newFx(t)
+		p := filepath.Join(f.repo.Root(), "blob")
+		write := func(s string) string {
+			f.write(f.repo.Root(), "blob", s)
+			oid := f.git(f.repo.Dir, "hash-object", "-w", p)
+			f.git(f.repo.Dir, "update-ref", ref, oid)
+			return oid
+		}
+		first := write("renewed at 0")
+		return f, first, func() string { return write("renewed at 10") }
+	}
+
+	// Reproduction: the oids snapshotted before the renewal are stale.
+	f, first, renew := setup()
+	in := f.input()
+	in.Fence.Locks = []landmove.LockCheck{{Ref: ref, Oid: first}}
+	renew()
+	r := f.c.Run(t.Context(), in)
+	if r.Stop == nil || r.Stop.Reason != outcome.StopLockLost {
+		t.Fatalf("a stale snapshot must reproduce lock-lost, got %+v", r)
+	}
+
+	// Fix: the same renewal with the oids read at the delete.
+	g, first, renew := setup()
+	cur := first
+	in = g.input()
+	in.Fence.Locks = []landmove.LockCheck{{Ref: ref, Oid: first}}
+	in.Fence.Current = func() []landmove.LockCheck { return []landmove.LockCheck{{Ref: ref, Oid: cur}} }
+	cur = renew()
+	if r := g.c.Run(t.Context(), in); r.Stop != nil || r.BranchFate != outcome.BranchDeleted {
+		t.Fatalf("result %+v", r)
+	}
+}

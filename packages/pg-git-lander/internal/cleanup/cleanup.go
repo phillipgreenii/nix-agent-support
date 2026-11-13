@@ -432,7 +432,7 @@ func (c *Cleaner) retire(ctx context.Context, in Input, cur string, res *Result)
 	}
 	var b strings.Builder
 	b.WriteString("start\n")
-	for _, l := range in.Fence.Locks {
+	for _, l := range in.Fence.Checks() {
 		fmt.Fprintf(&b, "verify %s %s\n", l.Ref, l.Oid)
 	}
 	fmt.Fprintf(&b, "delete %s %s\nprepare\ncommit\n", branchRef(in.Branch), in.Tips.Branch)
@@ -453,10 +453,10 @@ func (c *Cleaner) retire(ctx context.Context, in Input, cur string, res *Result)
 			return keep(outcome.NotDeletedMoved, fmt.Sprintf("%s moved from %s to %s", in.Branch, in.Tips.Branch, now))
 		}
 	}
-	if len(in.Fence.Locks) > 0 {
+	if checks := in.Fence.Checks(); len(checks) > 0 {
 		var v strings.Builder
 		v.WriteString("start\n")
-		for _, l := range in.Fence.Locks {
+		for _, l := range checks {
 			fmt.Fprintf(&v, "verify %s %s\n", l.Ref, l.Oid)
 		}
 		v.WriteString("prepare\ncommit\n")

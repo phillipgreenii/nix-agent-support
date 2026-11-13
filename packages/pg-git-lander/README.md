@@ -117,6 +117,23 @@ bounded by `max_race_retries` (then `race`, without having held TARGET). A TARGE
 `lock.wait` ends the operation with the retryable stop `target-busy` (`--continue` goes straight to the lock step).
 The tool keeps no queue: queuing is the caller's. `op_end` events carry `target_lock_wait_ms` and `target_lock_held_ms`.
 
+## A stopped operation that holds the main worktree
+
+A stopped land keeps its worktree records, and one stopped at or after the move keeps the main (destination)
+worktree record. A waiter that finds such a record acts on it (design section 8.10); there is no queue and no setting:
+
+- a young (under 2 minutes) retryable stop, `transient` or `lock-lost` at `cleanup`, with its owner on this host: the
+  waiter waits, up to `--wait`, for the owner's `--continue`;
+- a `holder-died` stop whose owner process is gone: the waiter aborts it when the target had not moved, or finishes its
+  clean-up when the move had happened (taking the record back by compare-and-swap; a waiter that loses goes back to
+  waiting), then takes the lock;
+- anything else (conflict, hook failure, an old stop, an owner on another host): refused at once, naming the owner's
+  operation, branch, stage and age and the commands that resolve it.
+
+`busy` and the stopped refusals carry `holder.stage`, `holder.state` and `holder.age_s` (seconds since the holder
+entered its stage, or since it stopped). An agent that stops a land and cannot resolve it promptly MUST record the
+problem and run `--abort` so others can land.
+
 ## The outcome object
 
 With `--json` every outcome has every field, `null` or empty when it does not apply, so a caller parses one shape. The

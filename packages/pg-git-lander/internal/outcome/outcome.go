@@ -12,15 +12,23 @@ type Worktree struct {
 	Missing bool   `json:"missing"`
 }
 
-// Holder is the lock holder named by a busy outcome.
+// Holder is the lock holder named by a busy or refused outcome.
 type Holder struct {
 	OpID      string `json:"op_id"`
 	Operation string `json:"operation"`
 	Branch    string `json:"branch"`
-	Stage     string `json:"stage"`
-	PID       int    `json:"pid"`
-	Host      string `json:"host"`
-	AgeS      int64  `json:"age_s"`
+	// Stage is the stage of the holder's operation, read from its BRANCH
+	// record.
+	Stage string `json:"stage"`
+	// State is "running" or "stopped".
+	State string `json:"state"`
+	PID   int    `json:"pid"`
+	Host  string `json:"host"`
+	// AgeS is the seconds the holder has been in its present state: since its
+	// stage began (stage_started_at) while running, since it stopped
+	// (stop.at) once stopped; the operation's start or the last lease
+	// renewal when those are not recorded.
+	AgeS int64 `json:"age_s"`
 }
 
 // BlockingOp is an operation in the way of a refusal.

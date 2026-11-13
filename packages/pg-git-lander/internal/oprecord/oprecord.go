@@ -364,6 +364,40 @@ func (r *Resumed) TakeOtherLocks(ctx context.Context) error {
 	return nil
 }
 
+// DropStragglers deletes the stopped worktree records of this operation that
+// the resume did not take back: a destination worktree record left stopped by
+// an operation that died or stopped before the move, which no resume takes at
+// that stage. Each is deleted by compare-and-swap against its stopped value;
+// one that is held by this resume, changed hands or is gone is left alone.
+func (r *Resumed) DropStragglers(ctx context.Context) error {
+	l := r.Op.Layer
+	rec := r.Op.Branch.Record()
+	var errs []error
+	seen := map[string]bool{}
+	for _, w := range rec.Worktrees {
+		if seen[w.Admin] {
+			continue
+		}
+		seen[w.Admin] = true
+		ref := locks.WorktreeRef(w.Admin)
+		if r.Op.Set.ByRef(ref) != nil {
+			continue
+		}
+		st, err := l.Read(ctx, ref)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if st.Rec == nil || st.Rec.OpID != rec.OpID || st.Rec.State != locks.StateStopped {
+			continue
+		}
+		if err := l.DeleteIf(ctx, ref, st.OID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Quit deletes the operation's records (--quit): the BRANCH record already
 // taken back is released, and the worktree records, stopped and held by
 // nobody, are deleted by compare-and-swap against their stopped value.

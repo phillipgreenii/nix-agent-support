@@ -292,7 +292,7 @@ flowchart TD
 2. **Lock (first phase).** The tool takes the operation's first-phase locks (section 8.5): for a `land`, BRANCH and each
    distinct SW and WW (and a DW that is also the SW or WW), never TARGET and never a worktree whose only role is
    destination; for a `rebase`, its whole set. A lock that stays held by a live, fresh holder for the
-   whole wait ends in `busy`. A needed lock whose record is `stopped` ends in `stopped-pending` or `target-stopped`; one whose holder is dead or expired is converted (section 8.6) and ends in `holder-died`. From here a
+   whole wait ends in `busy`. A needed lock whose record is `stopped` is judged by section 8.10: a young retryable stop is waited for, a stop whose owner died is finished or aborted, and any other ends in `stopped-pending` or `target-stopped`; a lock whose holder is dead or expired is converted (section 8.6) and then judged the same way. From here a
    renewal loop keeps every lease fresh.
 3. **Snapshot and configure.** Under the locks the tool records `tips.branch` (BRANCH's tip, the only content the
    operation lands) and, for a `land`, `tips.target` (TARGET's tip). It then loads the repo file from `tips.target` for a
@@ -601,7 +601,7 @@ answered with the refusal `unreadable-lock`.
   | `running`, owner on this host, pid gone or now with a different start time (a zombie counts as gone)              | converts or takes over at once (section 8.6)                                              |
   | `running`, and this waiter has seen the same record oid unchanged for `lock.lease_ttl` on its own monotonic clock | treats the lease as expired: converts or takes over                                       |
   | `running`, otherwise                                                                                              | keeps waiting; prints the holder's operation, stage and elapsed time to stderr every 10 s |
-  | `stopped`                                                                                                         | refuses (`stopped-pending` or `target-stopped`)                                           |
+  | `stopped`                                                                                                         | decides by the stopped record (section 8.10): waits, finishes, aborts or refuses          |
 
   Expiry is judged by watching, not by comparing `renewed_at` with the waiter's wall clock, so a wall-clock step, a
   host that slept (holders and waiters wake together, and holders renew within a third of the lease), or a holder on
@@ -718,12 +718,99 @@ worktree (section 11.3). A fast-forward-only move still refuses a
 result that does not descend from TARGET, so a stale holder cannot overwrite newer commits. It can only add a
 descendant.
 
+The lock record oids a fence verifies are read at the moment of each verification, not when the clean-up starts: a
+holder renews every third of the lease and each renewal rewrites its records, so oids read before the clean-up removes
+the worktrees (seconds) were stale by the time BRANCH was retired, which the audit of 2026-11-13 saw as a spurious
+`lock-lost` at stage `cleanup` after a successful move (12 of 123 landings).
+
 ### 8.9 Cost and hygiene
 
 Each renewal writes one small blob, which becomes unreachable at the next renewal and is pruned by `git gc` after
 `gc.pruneExpire`. An operation that takes seconds renews at most once or twice. Lock refs live outside `refs/heads` and
 `refs/tags`, so default refspecs never push them and `git branch` never shows them; `git push --mirror` and mirror
 backups do copy them (section 4).
+
+### 8.10 A waiter that finds a stopped record
+
+Operator rulings (Phillip, 2026-11-13), verbatim: "yes the sopped-record bead should be created."; "i think i mostly
+agree with this, provide a diagram and provide examples of how things work in different situations."; "agents should
+not leave the main blocked, so the skills should ensure they should track the problem and then use --abort so others
+can land."; "i would rather queuing be external to the tool itself."
+
+Why. A stopped operation keeps its worktree records, and a land that was stopped at or after the move keeps the
+destination (`_main`) worktree record, with no expiry. Before this section every later land into the main worktree was
+refused `stopped-pending` at once, whatever `--wait` said; the audit of 2026-11-13 (24.7 h, 248 land jobs) found 41
+stops, all resumed or aborted within 3 to 44 s, and 9 land jobs refused only because they arrived in that window.
+
+Rules. There is no queue, no fairness and no new setting: the waiter only acts on the record it finds, and ordering
+between callers is left to them. Everything below runs where a lock step is refused by a stopped record (the first
+lock phase and the TARGET and destination phase, section 7.1), by `acquireSettled` in the pipeline; the lock layer
+itself still refuses a stopped record at once and stays free of pipeline code.
+
+1. The waiter reads the stopped operation's BRANCH record (the worktree and TARGET records carry no stage or stop).
+2. **Wait**, polling once a second up to `--wait` (then it ends `busy`, or `target-busy` in the second phase), when the
+   stop is retryable and young and its owner is on this host: reason `transient` at any stage, or `lock-lost` at stage
+   `cleanup` (the move already succeeded). Young means `stop.at` is less than `YoungStop` ago, a constant of 2
+   minutes (not a setting). The owner is expected to run `--continue` within seconds; the stopping process itself has
+   usually exited by then, so its pid is not tested. A record that is already `running` again (a resume taking its
+   records back one by one) is waited for as well.
+3. **Abort** it, through the same code as `--abort`, when its reason is `holder-died`, its owner is on this host with
+   its pid gone, and the operation had not reached the move (`stop.moved_already` false and stage before `moving`).
+4. **Finish** it, through the same code as `--continue`, when the owner died as in 3 and `moved_already` is true or the
+   stage is `moving`, `after` or `cleanup`: the resume detects that the move happened and runs only the clean-up.
+5. **Refuse** at once for everything else: a stop that needs its owner's decision (conflict, hook failure, resolve or
+   commit failures, anything not retryable), an old stop, an owner on another host or of unknown liveness (counted as
+   alive and old), and a stop this very process made. The refusal (or the `target-busy` stop of the second phase) names
+   the owner's operation, branch, stage, state and age, and the commands that resolve it.
+6. Finishing or aborting takes the record back by compare-and-swap (`TakeBack`). A waiter that loses it
+   (`lost-to-concurrent`) goes back to waiting; the winner is the only finisher. One waiter settles at most 3
+   operations per lock step.
+7. An abort before the move also deletes the destination-worktree record the stopped operation left (no resume takes
+   it back at that stage); without that a dead owner would still block every land.
+8. `holder.age_s` is the time in the holder's present state: since `stop.at` for a stopped holder, since
+   `stage_started_at` for a running one (falling back to `started_at`, then the last renewal). `holder.stage` and
+   `holder.operation` are read from the operation's BRANCH record, so a busy outcome on a worktree or TARGET lock no
+   longer shows an empty stage.
+9. Agents (the `ff-merge-to-main` skill) MUST NOT leave a stop of their own unresolved: track the problem and run
+   `--abort` so others can land.
+
+```mermaid
+flowchart TD
+  A["lock step refused:<br/>a stopped record holds the lock"] --> B{"BRANCH record of the holder<br/>(same op id) readable?"}
+  B -->|no| R["refuse: stopped-pending / target-stopped<br/>name owner, branch, stage, age, commands"]
+  B -->|"yes, state running"| W["wait: a resume is in progress"]
+  B -->|"yes, stopped"| C{"stopped by this process,<br/>no stop object, or owner on another host?"}
+  C -->|yes| R
+  C -->|no| D{"stop.reason = holder-died?"}
+  D -->|yes| E{"owner pid gone?"}
+  E -->|no| R
+  E -->|yes| F{"moved_already, or stage<br/>moving / after / cleanup?"}
+  F -->|yes| G["finish: --continue logic,<br/>clean-up only"]
+  F -->|no| H["abort: --abort logic"]
+  D -->|no| I{"retryable, younger than 2 min,<br/>transient or lock-lost at cleanup?"}
+  I -->|yes| W
+  I -->|no| R
+  W --> J{"--wait used up?"}
+  J -->|no| K["sleep 1 s, try the lock again"]
+  J -->|yes| L["busy (target-busy in phase two)"]
+  G --> M{"TakeBack won?"}
+  H --> M
+  M -->|"lost-to-concurrent"| W
+  M -->|yes| K
+  K --> A
+```
+
+Examples (lander A holds a stop; waiter W lands into the same main worktree):
+
+| Situation                                                                         | What W does                                                                                                                   | Result for W                                          |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| A stopped `transient` (exit 75) 5 s ago at `cleanup`; A's agent will `--continue` | waits, polling each second                                                                                                    | lands once A finished (or `busy` after `--wait`)      |
+| A stopped `lock-lost` at `cleanup` 5 s ago, after a successful move               | waits as above                                                                                                                | lands after A's `--continue`                          |
+| A stopped `conflict` or `hook-failed`                                             | refuses at once; names A's operation, branch, stage, age and `--continue` / `--abort` commands                                | refused `stopped-pending` (or `target-busy` stop)     |
+| A stopped `transient` 3 minutes ago                                               | refuses at once (old: it needs a decision)                                                                                    | as above                                              |
+| A's process died before the move (`holder-died`, stage `before_move`)             | aborts A, then takes the lock                                                                                                 | lands; A's branch and worktrees are back as they were |
+| A's process died at or after the move (`holder-died`, stage `moving` or later)    | finishes A's clean-up, then takes the lock                                                                                    | lands on top of A's landed commit                     |
+| Two waiters W1 and W2 meet the same dead-owner stop                               | both judge "finish"; one wins the compare-and-swap and finishes; the other gets `lost-to-concurrent` and goes back to waiting | both land, A is finished once                         |
 
 ## 9. Running git
 
@@ -1191,7 +1278,7 @@ carries `schema` (1); a change that removes or renames a field MUST bump it.
 | `reason`, `detail`, `retryable`, `stage`                   | For a stop or refusal (sections 6.2 and 6.3); `detail` only for `resolve-failed`, `cannot-resume` and `dirty`      |
 | `next`                                                     | The exact commands that are valid now, with `--repo` when it was given                                             |
 | `hint`                                                     | One sentence: what to do                                                                                           |
-| `holder`                                                   | For `busy`: `op_id`, `operation`, `branch`, `stage`, `pid`, `host`, `age_s`                                        |
+| `holder`                                                   | For `busy` and the stopped refusals: `op_id`, `operation`, `branch`, `stage`, `state`, `pid`, `host`, `age_s`      |
 | `blocking_op`                                              | For `stopped-pending`, `target-stopped`, `holder-died`: the operation(s) in the way, with reason and next commands |
 | `paths`                                                    | Conflicted paths, for a conflict stop                                                                              |
 | `source_worktree`, `destination_worktree`, `work_worktree` | Each: `name`, `path`, `missing` (`destination_worktree` is null for a `rebase`)                                    |

@@ -914,6 +914,12 @@ func (rs *resumer) abort(ctx context.Context) (*outcome.Outcome, error) {
 		p.stopRenew()
 		p.stopRenew = nil
 	}
+	// A destination worktree record left stopped before the move is no one's
+	// to take back; leaving it would block every later land into the main
+	// worktree.
+	if err := rs.resumed.DropStragglers(ctx); err != nil {
+		return o, err
+	}
 	if err := p.Release(ctx); err != nil {
 		return o, err
 	}

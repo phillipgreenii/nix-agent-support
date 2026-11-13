@@ -256,7 +256,12 @@ func (s *runner) enterMain(ctx context.Context) (mainAction, *outcome.Outcome, *
 func (s *runner) lockTarget(ctx context.Context) (*stopSpec, error) {
 	p := s.p
 	start := p.d.Clock.Now()
-	held, err := p.Op.AcquireTarget(ctx)
+	var held []*locks.Held
+	err := p.d.acquireSettled(ctx, p.Layer, p.Pre.Lock.Wait, p.Request.RepoFlag, func(ctx context.Context) error {
+		var aerr error
+		held, aerr = p.Op.AcquireTarget(ctx)
+		return aerr
+	})
 	s.targetWait += p.d.Clock.Since(start)
 	if err != nil {
 		var busy *locks.BusyError
@@ -265,7 +270,7 @@ func (s *runner) lockTarget(ctx context.Context) (*stopSpec, error) {
 		case errors.As(err, &busy):
 			return &stopSpec{reason: outcome.StopTargetBusy, message: s.busyMessage(ctx, busy.Ref, busy.Holder)}, nil
 		case errors.As(err, &ref):
-			return &stopSpec{reason: outcome.StopTargetBusy, message: s.busyMessage(ctx, ref.Ref, ref.Holder) + " (" + string(ref.Reason) + ")"}, nil
+			return &stopSpec{reason: outcome.StopTargetBusy, message: s.stoppedHolderMessage(ctx, ref)}, nil
 		}
 		return nil, err
 	}
@@ -277,21 +282,24 @@ func (s *runner) lockTarget(ctx context.Context) (*stopSpec, error) {
 }
 
 // busyMessage names the holder of a lock of the second phase with its stage
-// and how long its operation has run (read from its BRANCH record).
-func (s *runner) busyMessage(ctx context.Context, ref string, h outcome.Holder) string {
-	p := s.p
-	stage, age := h.Stage, time.Duration(h.AgeS)*time.Second
-	if st, err := p.Layer.Read(ctx, locks.BranchRef(h.Branch)); err == nil && st.Rec != nil && st.Rec.OpID == h.OpID {
-		stage = st.Rec.Stage
-		if !st.Rec.StartedAt.IsZero() {
-			age = p.d.Clock.Now().Sub(st.Rec.StartedAt)
-		}
-	}
+// and how long it has been in it (Holder.AgeS, see outcome.Holder).
+func (s *runner) busyMessage(_ context.Context, ref string, h outcome.Holder) string {
+	stage := h.Stage
 	if stage == "" {
 		stage = "unknown"
 	}
 	return fmt.Sprintf("%s is held by %s %s (op %s, pid %d on %s) at stage %s for %s; wait for it and run --continue",
-		ref, h.Operation, h.Branch, h.OpID, h.PID, h.Host, stage, age.Truncate(time.Second))
+		ref, h.Operation, h.Branch, h.OpID, h.PID, h.Host, stage, (time.Duration(h.AgeS) * time.Second).Truncate(time.Second))
+}
+
+// stoppedHolderMessage is the target-busy message when a stopped operation
+// holds the second-phase lock and needs its owner's decision: it names the
+// owner's operation and branch and the commands that resolve it.
+func (s *runner) stoppedHolderMessage(ctx context.Context, ref *locks.RefusedError) string {
+	h := ref.Holder
+	cmds := outcome.NextCommands(h.Operation, h.Branch, s.p.Request.RepoFlag, []string{outcome.FlagContinue, outcome.FlagAbort})
+	return fmt.Sprintf("%s (%s): its owner must resolve it with `%s` or `%s`",
+		strings.TrimSuffix(s.busyMessage(ctx, ref.Ref, h), "; wait for it and run --continue"), ref.Reason, cmds[0], cmds[1])
 }
 
 // releaseTarget gives back the second-phase locks (a no-op when not held) and
@@ -540,13 +548,19 @@ func (s *runner) setResult(ctx context.Context, tip string) error {
 // before each move, after the record writes that change the oids.
 func (s *runner) fence() landmove.Fence {
 	p := s.p
-	var lc []landmove.LockCheck
-	for _, h := range p.Op.Set.Locks {
-		lc = append(lc, landmove.LockCheck{Ref: h.Ref, Oid: h.OID()})
-	}
 	held := append([]*locks.Held(nil), p.Op.Set.Locks...)
+	checks := func() []landmove.LockCheck {
+		var lc []landmove.LockCheck
+		for _, h := range held {
+			lc = append(lc, landmove.LockCheck{Ref: h.Ref, Oid: h.OID()})
+		}
+		return lc
+	}
 	ttl := p.Layer.Config.LeaseTTL
-	return landmove.Fence{Locks: lc, RenewalFresh: func() bool {
+	// Current re-reads the oids at each verification: a renewal rewrites the
+	// lock record, so oids taken here go stale while the clean-up removes
+	// worktrees (seconds) before it retires BRANCH.
+	return landmove.Fence{Locks: checks(), Current: checks, RenewalFresh: func() bool {
 		for _, h := range held {
 			if h.RenewAge() >= ttl*2/3 {
 				return false

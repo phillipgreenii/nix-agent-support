@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,6 +202,7 @@ func (f *fx) wantRefused(res *pipeline.Result, reason outcome.RefusalReason) *ou
 }
 
 func TestLandFastForwardPreparesWorkBranchAndRecords(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	branchTip := f.git(f.repo.Dir, "rev-parse", "feature/x")
@@ -244,6 +246,7 @@ func TestLandFastForwardPreparesWorkBranchAndRecords(t *testing.T) {
 }
 
 func TestEventsAndLogOfSteps1To7(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.git(f.repo.Dir, "config", "merge.zdriver.driver", "true")
@@ -294,6 +297,7 @@ func TestEventsAndLogOfSteps1To7(t *testing.T) {
 }
 
 func TestLandPaths(t *testing.T) {
+	t.Parallel()
 	t.Run("rebase when both sides moved", func(t *testing.T) {
 		f := newFx(t)
 		f.feature()
@@ -306,6 +310,7 @@ func TestLandPaths(t *testing.T) {
 }
 
 func TestNothingToLandAndUpToDateKeepLocksForCleanup(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.git(f.repo.Dir, "worktree", "add", "-q", "-b", "feature/x", filepath.Join(f.repo.Root(), "wt-x"))
 	f.wt, _ = filepath.EvalSymlinks(filepath.Join(f.repo.Root(), "wt-x"))
@@ -334,6 +339,7 @@ func TestNothingToLandAndUpToDateKeepLocksForCleanup(t *testing.T) {
 }
 
 func TestRebasePathAndOntoResolvedOnce(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	oldMain := f.git(f.repo.Dir, "rev-parse", f.main)
@@ -362,6 +368,7 @@ func TestRebasePathAndOntoResolvedOnce(t *testing.T) {
 }
 
 func TestLandWithoutTargetUsesThePrimaryBranch(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	p := f.prepared(pipeline.Request{Operation: worktrees.Land, Branch: "feature/x", Dir: f.repo.Dir})
@@ -371,6 +378,7 @@ func TestLandWithoutTargetUsesThePrimaryBranch(t *testing.T) {
 }
 
 func TestUsageErrorsTakeNoLock(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	cases := map[string]pipeline.Request{
@@ -397,6 +405,7 @@ func TestUsageErrorsTakeNoLock(t *testing.T) {
 }
 
 func TestNamespaceCollisionNeedsNoLock(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	for _, req := range []pipeline.Request{
@@ -413,6 +422,7 @@ func TestNamespaceCollisionNeedsNoLock(t *testing.T) {
 }
 
 func TestDirtyWorktreeRefusedBeforeAnyLockOrEvent(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	if err := os.WriteFile(filepath.Join(f.wt, "x.txt"), []byte("changed\n"), 0o644); err != nil {
@@ -429,6 +439,7 @@ func TestDirtyWorktreeRefusedBeforeAnyLockOrEvent(t *testing.T) {
 }
 
 func TestNoGitIdentityRefusedAfterSnapshotAndReleasesLocks(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.git(f.repo.Dir, "config", "--unset", "user.email")
@@ -452,6 +463,7 @@ func TestNoGitIdentityRefusedAfterSnapshotAndReleasesLocks(t *testing.T) {
 }
 
 func TestRepoFileRefusals(t *testing.T) {
+	t.Parallel()
 	t.Run("untrusted", func(t *testing.T) {
 		f := newFx(t)
 		f.feature()
@@ -501,6 +513,7 @@ func (f *fx) beforeHook(script, extra string) {
 }
 
 func TestBeforeHookRunsOnceWithTipsAndWorktreesBeforeAnySwitch(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	out := filepath.Join(t.TempDir(), "hook.out")
@@ -553,6 +566,7 @@ echo "on=$(git -C "$PG_GIT_LANDER_WORK_WORKTREE" branch --show-current)"
 }
 
 func TestBeforeHookRefusals(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, body, extra, detail string
 	}{
@@ -582,6 +596,7 @@ func TestBeforeHookRefusals(t *testing.T) {
 }
 
 func TestSwitchRefusedWhenUntrackedFileCollides(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	// BRANCH is checked out in wt; make the work worktree a different one
@@ -599,6 +614,7 @@ func TestSwitchRefusedWhenUntrackedFileCollides(t *testing.T) {
 }
 
 func TestBusyNamesTheHolderAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.live.SetAlive(41721, "1794132898")
@@ -624,49 +640,57 @@ func TestBusyNamesTheHolderAndChangesNothing(t *testing.T) {
 	}
 }
 
-func TestDeadHolderIsConvertedAndRefusedAsHolderDied(t *testing.T) {
+// convertDeadHolder makes a lock layer wait on feature/x's BRANCH lock, whose
+// holder (pid 41721) is not alive: the record is converted to stopped and the
+// layer is refused with holder-died.
+func (f *fx) convertDeadHolder() *locks.RefusedError {
+	f.t.Helper()
+	l := &locks.Layer{
+		Git: f.g, Clock: f.clock, Dir: f.repo.Dir, Config: locks.Config{LeaseTTL: 30 * time.Second},
+		Liveness: f.live, Host: seamstest.Host(thisHost),
+	}
+	_, err := l.Acquire(f.t.Context(), locks.Spec{
+		Ref: locks.BranchRef("feature/x"), Role: locks.RoleBranch,
+		Rec: locks.Record{Schema: 1, Role: locks.RoleBranch, OpID: "w", Operation: "rebase", Branch: "feature/x", Owner: owner(7, "t2")},
+	})
+	var ref *locks.RefusedError
+	if !errors.As(err, &ref) || ref.Reason != outcome.RefHolderDied {
+		f.t.Fatalf("err = %v", err)
+	}
+	return ref
+}
+
+func TestDeadHolderIsConvertedToStopped(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	f.prepared(f.land()) // pid 41721 is not alive in the fake
+	ref := f.convertDeadHolder()
+	if h := ref.Holder; h.Operation != "land" || h.Branch != "feature/x" || h.Stage != "preparing" || h.State != "stopped" {
+		t.Fatalf("holder = %+v", h)
+	}
+	st, err := (&locks.Layer{Git: f.g, Clock: f.clock, Dir: f.repo.Dir}).Read(t.Context(), locks.BranchRef("feature/x"))
+	if err != nil || st.Rec == nil || st.Rec.State != locks.StateStopped || st.Rec.Stop.Reason != "holder-died" {
+		t.Fatalf("record not converted to stopped: %+v %v", st, err)
+	}
+}
+
+// A waiter that finds a converted (dead owner) operation that never moved the
+// target aborts it and goes on, instead of refusing.
+func TestWaiterAbortsADeadHolderOfItsOwnBranchAndGoesOn(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.prepared(f.land()) // pid 41721 is not alive in the fake
 
 	d := f.deps(owner(7, "t2"))
-	res, err := pipeline.Start(t.Context(), d, pipeline.Request{Operation: worktrees.Rebase, Branch: "feature/x", Onto: f.main, Dir: f.wt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	o := f.wantRefused(res, outcome.RefHolderDied)
-	if len(o.BlockingOp) != 1 || o.BlockingOp[0].Branch != "feature/x" || len(o.Next) != 2 {
-		t.Fatalf("outcome = %+v", o)
-	}
-	st, err := (&locks.Layer{Git: f.g, Clock: f.clock, Dir: f.repo.Dir}).Read(t.Context(), locks.BranchRef("feature/x"))
-	if err != nil || st.Rec == nil || st.Rec.State != locks.StateStopped {
-		t.Fatalf("record not converted to stopped: %+v %v", st, err)
-	}
-	if strings.Contains(strings.Join(o.Next, " "), "--repo") {
-		t.Errorf("next carries --repo without the flag: %v", o.Next)
-	}
-}
-
-func TestNextCommandsRepeatRepoFlagWhenUsed(t *testing.T) {
-	f := newFx(t)
-	f.feature()
-	f.prepared(f.land())
-	d := f.deps(owner(7, "t2"))
-	res, err := pipeline.Start(t.Context(), d, pipeline.Request{
-		Operation: worktrees.Rebase, Branch: "feature/x", Onto: f.main, Dir: f.wt, RepoFlag: f.repo.Dir,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	o := f.wantRefused(res, outcome.RefHolderDied)
-	for _, n := range o.Next {
-		if !strings.HasSuffix(n, "--repo "+f.repo.Dir) {
-			t.Errorf("next %q lacks --repo", n)
-		}
-	}
+	o := f.waiterRun(d, pipeline.Request{Operation: worktrees.Rebase, Branch: "feature/x", Onto: f.main, Dir: f.wt})
+	want(t, o, outcome.UpToDate, 0)
+	f.untouched()
 }
 
 func TestResnapshotRereadsTargetAndReloadsRepoFile(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	p := f.prepared(f.land())
@@ -695,6 +719,7 @@ func TestResnapshotRereadsTargetAndReloadsRepoFile(t *testing.T) {
 }
 
 func TestLeaseIsRenewedFromTheLockStepOn(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	d := f.deps(owner(41721, "t1"))

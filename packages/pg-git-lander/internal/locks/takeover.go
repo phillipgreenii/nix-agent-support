@@ -189,7 +189,8 @@ func (l *Layer) takeOver(ctx context.Context, s Spec, st ReadState) (*Held, erro
 		if !done {
 			return nil, nil
 		}
-		h, _ := l.holderOf(st.Rec)
+		h, _ := l.holderOf(ctx, st.Rec)
+		h.State = string(StateStopped) // converted just now
 		return nil, &RefusedError{Ref: s.Ref, Reason: outcome.RefHolderDied, Holder: h}
 	}
 	return nil, nil
@@ -343,3 +344,11 @@ func (l *Layer) planConversion(ctx context.Context, trigger ReadState, why Why) 
 	}
 	return edits, nil
 }
+
+// OwnerGone reports whether the owner process of rec is known to be gone: rec
+// is from this host and its pid is dead, reused or a zombie. An owner on
+// another host, or a Layer without the liveness seams, is never judged gone.
+func (l *Layer) OwnerGone(rec *Record) bool { return l.pidGone(rec) }
+
+// OnThisHost reports whether rec's owner ran on this host.
+func (l *Layer) OnThisHost(rec *Record) bool { return l.sameHost(rec) }

@@ -52,7 +52,7 @@ func (o *Outcome) Human() string {
 	case Busy:
 		fmt.Fprintf(&b, "busy: %s is held by", o.Target)
 		if h := o.Holder; h != nil {
-			fmt.Fprintf(&b, " %s %s (%s, pid %d, %s)", h.Operation, h.Branch, h.Stage, h.PID, fmtAge(h.AgeS))
+			fmt.Fprintf(&b, " %s", h.describe())
 		}
 		b.WriteString("; nothing changed")
 	case Stopped:
@@ -69,6 +69,9 @@ func (o *Outcome) Human() string {
 			msg = o.Reason
 		}
 		fmt.Fprintf(&b, "refused: %s: %s", op, msg)
+		if h := o.Holder; h != nil && h.OpID != "" {
+			fmt.Fprintf(&b, "\n  held by %s", h.describe())
+		}
 		if o.Hint != "" {
 			fmt.Fprintf(&b, "\n  %s", o.Hint)
 		}
@@ -97,6 +100,22 @@ func (o *Outcome) Human() string {
 		}
 	}
 	return b.String()
+}
+
+// describe renders the holder: the operation and branch, its stage, how long
+// it has been in its state (running: in the stage; stopped: since the stop) and
+// the owner process.
+func (h *Holder) describe() string {
+	stage := h.Stage
+	if stage == "" {
+		stage = "unknown stage"
+	}
+	state := "for"
+	if h.State == "stopped" {
+		state = "stopped"
+		return fmt.Sprintf("%s %s (%s, %s %s ago, pid %d on %s)", h.Operation, h.Branch, stage, state, fmtAge(h.AgeS), h.PID, h.Host)
+	}
+	return fmt.Sprintf("%s %s (%s %s %s, pid %d, %s)", h.Operation, h.Branch, stage, state, fmtAge(h.AgeS), h.PID, h.Host)
 }
 
 func writeWorkWorktree(b *strings.Builder, o *Outcome) {

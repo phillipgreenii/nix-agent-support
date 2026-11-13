@@ -869,3 +869,44 @@ func TestOnWaitSilentWithoutWaiting(t *testing.T) {
 		t.Error("OnWait fired for an uncontended acquire")
 	}
 }
+
+// A TARGET or worktree record carries no operation or stage: the holder of one
+// is described from the operation's BRANCH record (the stage and its age), and a
+// stopped holder's age runs from its stop.
+func TestHolderOfShortRecordReadsTheBranchRecord(t *testing.T) {
+	f := newFx(t)
+	br := branchRec("feature/y", "main", "op-y", "wt-y")
+	br.Stage = "before_move"
+	br.StartedAt = f.clock.Now().Add(-10 * time.Minute).UTC()
+	br.StageStartedAt = f.clock.Now().Add(-90 * time.Second).UTC()
+	f.plant(BranchRef("feature/y"), br)
+	f.plant(BranchRef("main"), br.Short(RoleTarget))
+	f.l.Config.Wait = 0
+
+	_, err := f.l.Acquire(t.Context(), Spec{Ref: BranchRef("main"), Role: RoleTarget, Rec: branchRec("feature/x", "main", "me").Short(RoleTarget)})
+	var busy *BusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("err = %v", err)
+	}
+	h := busy.Holder
+	if h.Operation != "land" || h.Stage != "before_move" || h.State != "running" || h.AgeS != 90 || h.Branch != "feature/y" {
+		t.Errorf("running holder = %+v (age is the time in the stage, not since the start or the renewal)", h)
+	}
+
+	st := br.Clone()
+	st.State = StateStopped
+	st.Stage = "cleanup"
+	st.Stop = &Stop{Reason: "lock-lost", Retryable: true, At: f.clock.Now().Add(-12 * time.Second).UTC(), Stage: "cleanup"}
+	f.plant(BranchRef("feature/y"), st)
+	stShort := st.Short(RoleTarget)
+	stShort.State = StateStopped
+	f.plant(BranchRef("main"), stShort)
+	_, err = f.l.Acquire(t.Context(), Spec{Ref: BranchRef("main"), Role: RoleTarget, Rec: branchRec("feature/x", "main", "me").Short(RoleTarget)})
+	var ref *RefusedError
+	if !errors.As(err, &ref) || ref.Reason != outcome.RefTargetStopped {
+		t.Fatalf("err = %v", err)
+	}
+	if h := ref.Holder; h.State != "stopped" || h.Stage != "cleanup" || h.AgeS != 12 || h.Operation != "land" {
+		t.Errorf("stopped holder = %+v", h)
+	}
+}

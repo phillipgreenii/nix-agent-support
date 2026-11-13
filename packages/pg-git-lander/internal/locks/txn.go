@@ -102,7 +102,7 @@ func (l *Layer) TakeBack(ctx context.Context, ref string, mutate func(*Record)) 
 		case st.Absent:
 			return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefNothingStopped}
 		case st.Rec.State != StateStopped:
-			holder, _ := l.holderOf(st.Rec)
+			holder, _ := l.holderOf(ctx, st.Rec)
 			return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefLostToConcurrent, Holder: holder}
 		}
 		prior := st.Rec.Clone()

@@ -90,6 +90,7 @@ func (f *fx) wantStartState() {
 }
 
 func TestResumeAbortBeforeTheMoveRestoresTheStartState(t *testing.T) {
+	t.Parallel()
 	failing := func(f *fx, point string, body string) {
 		f.hooksXDG("land", map[string]string{point: f.hookScript(body)}, "")
 	}
@@ -141,6 +142,7 @@ func TestResumeAbortBeforeTheMoveRestoresTheStartState(t *testing.T) {
 }
 
 func TestResumeAbortRepeatsRepoFlagInNothingNext(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	req := f.land()
@@ -197,6 +199,7 @@ func (f *fx) failingBeforeMove(marker string) {
 }
 
 func TestResumeAbortAfterTheMoveOnlyFinishesTheCleanup(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"moving", "after", "cleanup"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newFx(t)
@@ -221,6 +224,7 @@ func TestResumeAbortAfterTheMoveOnlyFinishesTheCleanup(t *testing.T) {
 }
 
 func TestResumeAbortOfMoveUnverifiedLeavesTheBranch(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.failingBeforeMove(filepath.Join(t.TempDir(), "never"))
@@ -245,6 +249,7 @@ func TestResumeAbortOfMoveUnverifiedLeavesTheBranch(t *testing.T) {
 }
 
 func TestResumeContinueAfterTheMoveRunsTheAfterHookAndCleansUp(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"moving", "after", "cleanup"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newFx(t)
@@ -270,6 +275,7 @@ func TestResumeContinueAfterTheMoveRunsTheAfterHookAndCleansUp(t *testing.T) {
 }
 
 func TestResumeContinueWithTheSourceWorktreeAlreadyRemoved(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("exit 1")}, "")
@@ -284,6 +290,7 @@ func TestResumeContinueWithTheSourceWorktreeAlreadyRemoved(t *testing.T) {
 }
 
 func TestResumeQuitDeletesTheRecordsAndLeavesEverythingElse(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	stopped := f.run(f.land())
@@ -323,6 +330,7 @@ func TestResumeQuitDeletesTheRecordsAndLeavesEverythingElse(t *testing.T) {
 // the record exactly as the winner wrote it, so the next flag meets the same
 // state. (Four fixtures cost four full land runs for no extra coverage.)
 func TestResumeEveryFlagTakesTheRecordByCompareAndSwap(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	f.wantStopped(f.run(f.land()), outcome.StopConflict)
@@ -342,6 +350,7 @@ func TestResumeEveryFlagTakesTheRecordByCompareAndSwap(t *testing.T) {
 }
 
 func TestResumeNothingStoppedAndOperationMismatch(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	o := f.resumeWith(f.resumeReq(outcome.FlagContinue, worktrees.Land, "feature/x"))
@@ -361,6 +370,7 @@ func TestResumeNothingStoppedAndOperationMismatch(t *testing.T) {
 }
 
 func TestFindStoppedByBranchAndByWorkWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	stopped := f.run(f.land())
@@ -384,6 +394,7 @@ func TestFindStoppedByBranchAndByWorkWorktree(t *testing.T) {
 }
 
 func TestResumeContinueAfterAManualResolution(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	stopped := f.run(f.land())
@@ -406,6 +417,7 @@ func TestResumeContinueAfterAManualResolution(t *testing.T) {
 }
 
 func TestResumeContinueAfterTheCallerRanGitByHand(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	stopped := f.run(f.land())
@@ -426,6 +438,7 @@ func TestResumeContinueAfterTheCallerRanGitByHand(t *testing.T) {
 }
 
 func TestResumeContinueCannotResumeUnresolvedAndMarkersLeft(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	stopped := f.run(f.land())
@@ -455,6 +468,7 @@ func TestResumeContinueCannotResumeUnresolvedAndMarkersLeft(t *testing.T) {
 }
 
 func TestResumeContinueRebaseStateMissingAndRestartedRebase(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	stopped := f.run(f.land())
@@ -494,6 +508,7 @@ func TestResumeContinueRebaseStateMissingAndRestartedRebase(t *testing.T) {
 }
 
 func TestResumeContinueWorktreeMismatchAndAFixOnTop(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	marker := filepath.Join(t.TempDir(), "fixed")
@@ -523,17 +538,12 @@ func TestResumeContinueWorktreeMismatchAndAFixOnTop(t *testing.T) {
 }
 
 func TestResumeContinueAfterAHolderDiedAtPreparing(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	featTip := f.tip("feature/x")
 	f.prepared(f.land()) // pid 41721 is not alive: another run converts it
-	res, err := pipeline.Start(t.Context(), f.deps(owner(7, "t2")), pipeline.Request{
-		Operation: worktrees.Rebase, Branch: "feature/x", Onto: f.main, Dir: f.wt,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.wantRefused(res, outcome.RefHolderDied)
+	f.convertDeadHolder()
 	if r := f.record(locks.BranchRef("feature/x")); r["stage"] != "preparing" {
 		t.Fatalf("stage = %v", r["stage"])
 	}
@@ -548,6 +558,7 @@ func TestResumeContinueAfterAHolderDiedAtPreparing(t *testing.T) {
 // A resume at stage moving takes the destination worktree back at the
 // resume: a holder of it is a busy exit, and the record stays stopped.
 func TestResumeContinueAfterABusyResume(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.writeXDG("[defaults]\nmax_race_retries = 0\n[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.before_move = [{ run = ['" + f.raceHook(true) + "'] }]\n")
@@ -572,6 +583,7 @@ func TestResumeContinueAfterABusyResume(t *testing.T) {
 }
 
 func TestResumeSkipDropsTheReplayedCommit(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	mainTip, _ := f.conflicting()
 	stopped := f.run(f.land())
@@ -589,6 +601,7 @@ func TestResumeSkipDropsTheReplayedCommit(t *testing.T) {
 }
 
 func TestResumeSkipIsOnlyValidWithGitsRebaseInProgress(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("exit 1")}, "")
@@ -599,6 +612,7 @@ func TestResumeSkipIsOnlyValidWithGitsRebaseInProgress(t *testing.T) {
 }
 
 func TestResumeAbortWithABrokenRepoFileAndAMissingWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, featTip := f.conflicting()
 	stopped := f.run(f.rebaseReq())
@@ -631,6 +645,7 @@ func TestResumeAbortWithABrokenRepoFileAndAMissingWorktree(t *testing.T) {
 }
 
 func TestResumeEmitsStageAndOpEndEvents(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	stopped := f.run(f.land())

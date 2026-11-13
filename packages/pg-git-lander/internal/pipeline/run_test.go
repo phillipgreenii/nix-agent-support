@@ -129,6 +129,7 @@ func countEvents(evs []map[string]any, name string) int {
 }
 
 func TestRunLandFastForwardNeverMakesAMergeCommit(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	featTip := f.tip("feature/x")
@@ -153,6 +154,7 @@ func TestRunLandFastForwardNeverMakesAMergeCommit(t *testing.T) {
 }
 
 func TestRunLandRebasesOntoAMovedTarget(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	featTip := f.tip("feature/x")
@@ -175,6 +177,7 @@ func TestRunLandRebasesOntoAMovedTarget(t *testing.T) {
 }
 
 func TestRunRebaseMovesBranchToTheResult(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	old := f.tip("feature/x")
@@ -201,6 +204,7 @@ func TestRunRebaseMovesBranchToTheResult(t *testing.T) {
 }
 
 func TestRunNothingToLandAndUpToDate(t *testing.T) {
+	t.Parallel()
 	t.Run("nothing-to-land", func(t *testing.T) {
 		f := newFx(t)
 		f.feature()
@@ -227,6 +231,7 @@ func TestRunNothingToLandAndUpToDate(t *testing.T) {
 }
 
 func TestRunRebaseDroppingEverythingIsNothingToLand(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	featCommit := f.tip("feature/x")
@@ -255,6 +260,7 @@ func (f *fx) conflicting() (mainTip, featTip string) {
 }
 
 func TestRunConflictWithNoRuleStopsAndRecordsStopped(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	mainTip, featTip := f.conflicting()
 	req := f.land()
@@ -291,6 +297,7 @@ func (f *fx) resolver() {
 }
 
 func TestRunConflictResolvedByAConfiguredResolver(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	f.resolver()
@@ -308,6 +315,7 @@ func TestRunConflictResolvedByAConfiguredResolver(t *testing.T) {
 }
 
 func TestRunBeforeMoveHookFailureLeavesBranchAndTargetUntouched(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	mainTip, featTip := f.tip(f.main), f.tip("feature/x")
@@ -329,6 +337,7 @@ func TestRunBeforeMoveHookFailureLeavesBranchAndTargetUntouched(t *testing.T) {
 }
 
 func TestRunTransientHookIsAStop(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("exit 75")}, "")
@@ -336,6 +345,7 @@ func TestRunTransientHookIsAStop(t *testing.T) {
 }
 
 func TestRunHookPointsRunOnlyWhereTheyApply(t *testing.T) {
+	t.Parallel()
 	marks := func(f *fx) (string, map[string]string) {
 		dir := t.TempDir()
 		pts := map[string]string{}
@@ -397,6 +407,7 @@ func TestRunHookPointsRunOnlyWhereTheyApply(t *testing.T) {
 }
 
 func TestRunAutofixCommitIsInTheResult(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("echo fixed > x.txt")}, "")
@@ -425,6 +436,7 @@ git -c user.name=t -c user.email=t@example.invalid -C "$PG_GIT_LANDER_DESTINATIO
 }
 
 func TestRunTargetMovedOnceRetriesAndKeepsResolutions(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflicting()
 	res := f.hookScript(`printf 'merged\n' > "$PG_GIT_LANDER_PATH"`)
@@ -462,6 +474,7 @@ func TestRunTargetMovedOnceRetriesAndKeepsResolutions(t *testing.T) {
 }
 
 func TestRunTargetMovingOnEveryTryStopsWithRace(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	featTip := f.tip("feature/x")
@@ -485,6 +498,7 @@ func TestRunTargetMovingOnEveryTryStopsWithRace(t *testing.T) {
 }
 
 func TestRunKeepFlagsKeepTheSourceWorktreeAndMoveTheBranch(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.commit(f.repo.Dir, "m.txt", "m\n")
@@ -508,6 +522,7 @@ func TestRunKeepFlagsKeepTheSourceWorktreeAndMoveTheBranch(t *testing.T) {
 }
 
 func TestRunRemovesTheSourceWorktreeByDefault(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	out := f.run(f.land())
@@ -521,6 +536,7 @@ func TestRunRemovesTheSourceWorktreeByDefault(t *testing.T) {
 }
 
 func TestRunWorkInDestinationWarningIsAttached(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.git(f.repo.Dir, "worktree", "remove", f.wt) // BRANCH is checked out nowhere
@@ -540,6 +556,7 @@ func TestRunWorkInDestinationWarningIsAttached(t *testing.T) {
 }
 
 func TestRunGitErrorOfTheRebaseIsAStop(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.commit(f.repo.Dir, "m.txt", "m\n")
@@ -551,6 +568,7 @@ func TestRunGitErrorOfTheRebaseIsAStop(t *testing.T) {
 }
 
 func TestRunRebaseBranchMovedDuringTheOperationIsAStop(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	mainTip := f.commit(f.repo.Dir, "m.txt", "m\n")
@@ -564,6 +582,7 @@ func TestRunRebaseBranchMovedDuringTheOperationIsAStop(t *testing.T) {
 }
 
 func TestRunUnexpectedFailureAfterLockingIsAnInternalErrorStop(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.hooksXDG("land", map[string]string{"before_move": f.hookScript(`rm -rf "$PG_GIT_LANDER_WORK_WORKTREE"`)}, "")
@@ -575,6 +594,7 @@ func TestRunUnexpectedFailureAfterLockingIsAnInternalErrorStop(t *testing.T) {
 }
 
 func TestRunSwappedLockRecordGivesLockLost(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	mainTip, featTip := f.tip(f.main), f.tip("feature/x")
@@ -595,6 +615,7 @@ git update-ref ` + locks.BranchRef("feature/x") + ` "$b"`)
 }
 
 func TestRunStaleRenewalGivesLockLost(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	mainTip := f.tip(f.main)
@@ -614,6 +635,7 @@ func TestRunStaleRenewalGivesLockLost(t *testing.T) {
 }
 
 func TestRunEventsOfALandedRun(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.commit(f.repo.Dir, "m.txt", "m\n")
@@ -653,6 +675,7 @@ func TestRunEventsOfALandedRun(t *testing.T) {
 }
 
 func TestRunDoneOutcomeSurvivesJSON(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	out := f.run(f.land())

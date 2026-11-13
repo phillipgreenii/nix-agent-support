@@ -1,1 +1,1 @@
-busy: main is held by land feature/y (before_move, pid 41730, 2m10s); nothing changed
+busy: main is held by land feature/y (before_move for 2m10s, pid 41730, h); nothing changed

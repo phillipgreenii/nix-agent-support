@@ -61,6 +61,11 @@ type Deps struct {
 	// nil is os.Chdir. Tests that must not move the test process inject a
 	// no-op.
 	Chdir func(string) error
+	// BeforeSettle, when non-nil, is called after a waiter has judged the
+	// stopped record that blocks it and before it finishes or aborts that
+	// operation (action is "wait", "abort" or "finish"). A test seam that
+	// orders two waiters.
+	BeforeSettle func(action string)
 	// Wait, when non-nil, replaces the configured lock.wait for this
 	// invocation (the --wait flag).
 	Wait *time.Duration
@@ -524,7 +529,12 @@ func (s *session) lock(ctx context.Context, sel *worktrees.Selection) (*Result, 
 			// (the second phase) when the hooks have passed.
 			specs = p.Layer.LandBranchLocks(rec)
 		}
-		set, err := p.Layer.Acquire(ctx, specs...)
+		var set *locks.Set
+		err := s.d.acquireSettled(ctx, p.Layer, s.pre.Lock.Wait, s.req.RepoFlag, func(ctx context.Context) error {
+			var aerr error
+			set, aerr = p.Layer.Acquire(ctx, specs...)
+			return aerr
+		})
 		if err != nil {
 			return s.lockFailure(err)
 		}
@@ -554,6 +564,8 @@ func (s *session) lock(ctx context.Context, sel *worktrees.Selection) (*Result, 
 	}
 }
 
+func req0(s *session) string { return s.req.RepoFlag }
+
 func (s *session) lockFailure(err error) (*Result, error) {
 	var busy *locks.BusyError
 	var ref *locks.RefusedError
@@ -569,7 +581,13 @@ func (s *session) lockFailure(err error) (*Result, error) {
 		if h := ref.Holder; h.OpID != "" {
 			o.Holder = &h
 			info := outcome.Refusals[ref.Reason]
-			next := outcome.NextCommands(h.Operation, h.Branch, s.req.RepoFlag, info.NextFlags)
+			flags := info.NextFlags
+			if len(flags) == 0 && ref.Reason == outcome.RefTargetStopped {
+				flags = outcome.Refusals[outcome.RefStoppedPending].NextFlags
+			}
+			o.Message = fmt.Sprintf("%s is held by a stopped %s of %s (op %s, pid %d on %s); its owner must resume or abort it",
+				ref.Ref, h.Operation, h.Branch, h.OpID, h.PID, h.Host)
+			next := outcome.NextCommands(h.Operation, h.Branch, s.req.RepoFlag, flags)
 			o.BlockingOp = []outcome.BlockingOp{{
 				OpID: h.OpID, Operation: h.Operation, Branch: h.Branch, Reason: string(ref.Reason), Next: next,
 			}}

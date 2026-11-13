@@ -142,13 +142,33 @@ type conflict struct {
 	since  time.Time
 }
 
-func (l *Layer) holderOf(rec *Record) (outcome.Holder, time.Time) {
-	h := outcome.Holder{
-		OpID: rec.OpID, Operation: rec.Operation, Branch: rec.Branch, Stage: rec.Stage,
-		PID: rec.Owner.PID, Host: rec.Owner.Host,
+// holderOf describes the holder of a lock record for the busy and refusal
+// outcomes. TARGET and worktree records carry no operation or stage, so the
+// operation's BRANCH record (same op id) is read for them. Stage is the BRANCH
+// record's stage. The returned time is the start of the age: for a stopped
+// holder when it stopped (stop.at), else when its current stage began
+// (stage_started_at), else when the operation started, else the last lease
+// renewal. Holder.AgeS is the time since then.
+func (l *Layer) holderOf(ctx context.Context, rec *Record) (outcome.Holder, time.Time) {
+	br := rec
+	if rec.Role != RoleBranch && rec.Branch != "" {
+		if st, err := l.Read(ctx, BranchRef(rec.Branch)); err == nil && st.Rec != nil && st.Rec.Role == RoleBranch && st.Rec.OpID == rec.OpID {
+			br = st.Rec
+		}
 	}
-	since := rec.StartedAt
-	if since.IsZero() && rec.Lease != nil {
+	h := outcome.Holder{
+		OpID: rec.OpID, Operation: br.Operation, Branch: rec.Branch, Stage: br.Stage,
+		PID: rec.Owner.PID, Host: rec.Owner.Host, State: string(rec.State),
+	}
+	var since time.Time
+	switch {
+	case br.State == StateStopped && br.Stop != nil && !br.Stop.At.IsZero():
+		since = br.Stop.At
+	case !br.StageStartedAt.IsZero():
+		since = br.StageStartedAt
+	case !br.StartedAt.IsZero():
+		since = br.StartedAt
+	case rec.Lease != nil:
 		since = rec.Lease.RenewedAt
 	}
 	if !since.IsZero() {
@@ -194,10 +214,10 @@ func (l *Layer) tryOnce(ctx context.Context, s Spec) (*Held, *conflict, error) {
 			if held != nil {
 				return held, nil, nil
 			}
-			h, since := l.holderOf(st.Rec)
+			h, since := l.holderOf(ctx, st.Rec)
 			return nil, &conflict{kind: conflictRunning, holder: h, since: since}, nil
 		case !st.Absent:
-			h, since := l.holderOf(st.Rec)
+			h, since := l.holderOf(ctx, st.Rec)
 			k := conflictRunning
 			if st.Rec.State == StateStopped {
 				k = conflictStopped

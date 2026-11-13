@@ -202,7 +202,7 @@ func landedOutcome() *Outcome {
 
 func busyOutcome() *Outcome {
 	return NewBusy("land", "feature/x", "main", Holder{
-		OpID: "op1", Operation: "land", Branch: "feature/y", Stage: "before_move", PID: 41730, Host: "h", AgeS: 130,
+		OpID: "op1", Operation: "land", Branch: "feature/y", Stage: "before_move", State: "running", PID: 41730, Host: "h", AgeS: 130,
 	})
 }
 
@@ -221,7 +221,7 @@ func TestHumanExamples(t *testing.T) {
 		want string
 	}{
 		{"landed", landedOutcome(), "landed feature/x into main at 9b3f2c1 (rebased 3 commits, 1 autofix commit, 6.2 s)"},
-		{"busy", busyOutcome(), "busy: main is held by land feature/y (before_move, pid 41730, 2m10s); nothing changed"},
+		{"busy", busyOutcome(), "busy: main is held by land feature/y (before_move for 2m10s, pid 41730, h); nothing changed"},
 		{"stopped", stoppedOutcome(), strings.Join([]string{
 			"stopped: land feature/x: conflict in docs/guide.md, no conflict rule matches",
 			"  work worktree: /src/example/.worktrees/feature-x   (work branch pg-git-lander/20261107T101500Z-3f9c2a)",
@@ -238,6 +238,30 @@ func TestHumanExamples(t *testing.T) {
 		}
 		golden(t, "human-"+c.name+".txt", []byte(got+"\n"))
 	}
+}
+
+func stoppedPendingOutcome() *Outcome {
+	o := NewRefused(RefStoppedPending, "land", "feature/x", "")
+	o.Holder = &Holder{
+		OpID: "op1", Operation: "land", Branch: "feature/y", Stage: "cleanup", State: "stopped", PID: 41730, Host: "h", AgeS: 12,
+	}
+	o.Message = "main is held by a stopped land of feature/y"
+	return o
+}
+
+// The busy and stopped-pending outcomes name the holder with its stage and
+// elapsed time, in the JSON and in the human text.
+func TestHolderStageAndAgeRendered(t *testing.T) {
+	goldenJSON(t, "busy-holder", busyOutcome())
+	o := stoppedPendingOutcome()
+	goldenJSON(t, "refusal-stopped-pending-holder", o)
+	got := o.Human()
+	for _, s := range []string{"held by land feature/y (cleanup, stopped 12s ago, pid 41730 on h)", "pg-git-lander land feature/x --abort"} {
+		if !strings.Contains(got, s) {
+			t.Errorf("missing %q in\n%s", s, got)
+		}
+	}
+	golden(t, "human-stopped-pending.txt", []byte(got+"\n"))
 }
 
 func TestHumanRefusedNamesNextCommand(t *testing.T) {

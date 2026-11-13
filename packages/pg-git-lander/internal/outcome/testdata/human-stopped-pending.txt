@@ -1,0 +1,7 @@
+refused: land feature/x: main is held by a stopped land of feature/y
+  held by land feature/y (cleanup, stopped 12s ago, pid 41730 on h)
+  Run --continue, --skip, --abort or --quit on the stopped operation.
+  resolve and `git add` the files there, then:  pg-git-lander land feature/x --continue
+  drop the replayed commit instead:             pg-git-lander land feature/x --skip
+  give up:                                      pg-git-lander land feature/x --abort
+  keep the worktree and work branch, stop tracking: pg-git-lander land feature/x --quit

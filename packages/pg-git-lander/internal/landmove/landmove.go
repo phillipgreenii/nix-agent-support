@@ -27,10 +27,26 @@ type Fence struct {
 	// the move (or in a verify-only transaction before a merge --ff-only).
 	// Empty means nothing to verify.
 	Locks []LockCheck
+	// Current, when set, replaces Locks: it returns the lock records as they
+	// are at the moment of the call. A holder renews its leases while the
+	// operation runs, and each renewal rewrites the lock record, so oids taken
+	// once go stale during a long step (the clean-up removes worktrees for
+	// seconds before it retires BRANCH). Callers evaluate it as late as
+	// possible, through Checks.
+	Current func() []LockCheck
 	// RenewalFresh reports whether the holder's last successful renewal is
 	// less than two thirds of lease_ttl old (monotonic clock). Nil means
 	// always fresh. It runs before any ref moves.
 	RenewalFresh func() bool
+}
+
+// Checks returns the lock records to verify now: Current's when set, else
+// Locks.
+func (f Fence) Checks() []LockCheck {
+	if f.Current != nil {
+		return f.Current()
+	}
+	return f.Locks
 }
 
 // Status is the kind of a Result.
@@ -174,11 +190,11 @@ func (m *Mover) moveByUpdateRef(ctx context.Context, dir string, in Input) (Resu
 	if m.BeforeWrite != nil {
 		m.BeforeWrite()
 	}
-	tr := m.transaction(ctx, dir, in.Fence.Locks, &[3]string{targetRef(in.Target), in.Result, old})
+	tr := m.transaction(ctx, dir, in.Fence.Checks(), &[3]string{targetRef(in.Target), in.Result, old})
 	if tr.OK() {
 		return m.confirm(ctx, dir, in), true
 	}
-	return m.classifyFailure(ctx, dir, in, "update-ref", tr, len(in.Fence.Locks) > 0), true
+	return m.classifyFailure(ctx, dir, in, "update-ref", tr, len(in.Fence.Checks()) > 0), true
 }
 
 // classifyFailure decides what a failed write was: a changed lock record
@@ -191,7 +207,7 @@ func (m *Mover) classifyFailure(ctx context.Context, dir string, in Input, what 
 	if err == nil && cur != in.TipsTarget {
 		return Result{Status: TargetMoved, Detail: fmt.Sprintf("%s moved from %s to %s", in.Target, in.TipsTarget, cur)}
 	}
-	if hadLocks && m.locksChanged(ctx, dir, in.Fence.Locks) {
+	if hadLocks && m.locksChanged(ctx, dir, in.Fence.Checks()) {
 		return stop(outcome.StopLockLost, "a lock record changed")
 	}
 	return stop(outcome.StopGitError, "git %s failed (exit %d): %s", what, tr.Code, strings.TrimSpace(string(tr.Stderr)))
@@ -231,7 +247,7 @@ func (m *Mover) moveThroughDW(ctx context.Context, dir string, in Input) Result 
 		return stop(outcome.StopGitError, "TARGET %s needs a destination worktree and none was found", in.Target)
 	}
 	// Step 1: verify the lock records.
-	if err := m.verifyLocks(ctx, dir, in.Fence.Locks); err != nil {
+	if err := m.verifyLocks(ctx, dir, in.Fence.Checks()); err != nil {
 		return stop(outcome.StopLockLost, "%v", err)
 	}
 	// Step 2: the renewal check.
