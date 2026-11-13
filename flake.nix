@@ -7762,7 +7762,8 @@
               # wired into any hook, run-unit-tests, pre-land or land gate (V-4). Runs the
               # `//go:build soak` tests (a generated tree: first-run parse throughput, memory
               # ceiling, WAL growth, trigram index size) and fails when a measure exceeds 1.5
-              # times the baseline committed in internal/parser/testdata/soak-budgets.json.
+              # times the baseline committed in internal/parser/testdata/soak-budgets.json (parse time is
+              # budgeted as process CPU time, not wall clock; see the comment in soak_test.go).
               pg-claude-code-recorder-soak =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-soak";

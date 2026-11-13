@@ -1,5 +1,6 @@
 {
   "seconds": 12.58,
+  "cpu_seconds": 4.06,
   "peak_heap_bytes": 5079040,
   "wal_bytes": 8264752,
   "trigram_bytes": 5791744,

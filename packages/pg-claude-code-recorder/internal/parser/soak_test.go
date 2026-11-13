@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,6 +25,18 @@ import (
 // Budgets live in testdata/soak-budgets.json. They are the baseline of the
 // first run, and a run fails at 1.5 times that baseline. Set
 // PG_CCREC_SOAK_BASELINE=1 to write the file from this run (first run only).
+//
+// Time budget: the parse budget is process CPU time (user + system, from
+// getrusage RUSAGE_SELF, all threads, so parser goroutines, SQLite and GC
+// workers are all counted), not wall clock. Decision: the parse is CPU-bound
+// work, and wall clock also counts time spent waiting for a CPU. Under a host
+// load of 60 to 80 the wall time measured 31 s against a 12.6 s baseline
+// although the parse worked. CPU time ignores that scheduling delay yet still
+// rises when the parser does more work per record (a real slowdown still
+// fails). A quiet-host-only rule was rejected: it would make the check
+// unreliable on the shared machine and need a load probe of its own. Wall
+// seconds are still recorded and logged for information, but not enforced.
+// The "cpu_seconds" baseline is measured under the same conditions as the run.
 
 const (
 	soakFiles    = 40
@@ -33,6 +46,7 @@ const (
 
 type soakResult struct {
 	Seconds      float64 `json:"seconds"`
+	CPUSeconds   float64 `json:"cpu_seconds"`
 	PeakHeap     int64   `json:"peak_heap_bytes"`
 	WALBytes     int64   `json:"wal_bytes"`
 	TrigramBytes int64   `json:"trigram_bytes"`
@@ -44,6 +58,18 @@ func soakLine(f, i int) string {
 	pad := strings.Repeat(fmt.Sprintf("example output line %d of file %d. ", i, f), 6)
 	return fmt.Sprintf(`{"type":"assistant","uuid":"u-%d-%d","parentUuid":"u-%d-%d","sessionId":"example-session-%d","timestamp":"2026-10-29T20:%02d:%02dZ","message":{"id":"m-%d-%d","model":"example-model-a","role":"assistant","usage":{"input_tokens":%d,"output_tokens":%d},"content":[{"type":"text","text":"reply %d number %d with words to index"},{"type":"tool_use","id":"tu-%d-%d","name":"Bash","input":{"command":"echo %s"}}]}}`+"\n",
 		f, i, f, i-1, f, (i/60)%60, i%60, f, i, i%97, i%53, f, i, f, i, pad)
+}
+
+// cpuSeconds returns the user plus system CPU time consumed so far by every
+// thread of this process.
+func cpuSeconds(t *testing.T) float64 {
+	t.Helper()
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
+		t.Fatal(err)
+	}
+	tv := func(v syscall.Timeval) float64 { return float64(v.Sec) + float64(v.Usec)/1e6 }
+	return tv(ru.Utime) + tv(ru.Stime)
 }
 
 func TestSoakFirstRunParse(t *testing.T) {
@@ -80,18 +106,20 @@ func TestSoakFirstRunParse(t *testing.T) {
 		}
 	}()
 	start := time.Now()
+	cpu0 := cpuSeconds(t)
 	k.Parse()
+	cpu := cpuSeconds(t) - cpu0
 	secs := time.Since(start).Seconds()
 	close(stop)
 	<-done
-	res := soakResult{Seconds: secs, PeakHeap: peak.Load(), WALBytes: walMax.Load(), InputBytes: in}
+	res := soakResult{Seconds: secs, CPUSeconds: cpu, PeakHeap: peak.Load(), WALBytes: walMax.Load(), InputBytes: in}
 	res.Records = int64(k.Count(`SELECT COUNT(*) FROM records`))
 	if res.Records != int64(soakFiles*soakLines*3) {
 		t.Fatalf("records %d, want %d", res.Records, soakFiles*soakLines*3)
 	}
 	res.TrigramBytes = trigramBytes(t, k)
-	t.Logf("soak: parsed %d bytes into %d records in %.2fs (%.1f MB/s); peak heap %d; WAL max %d; trigram index %d bytes",
-		in, res.Records, secs, float64(in)/1e6/secs, res.PeakHeap, res.WALBytes, res.TrigramBytes)
+	t.Logf("soak: parsed %d bytes into %d records in %.2fs wall, %.2fs CPU (%.1f MB/s wall); peak heap %d; WAL max %d; trigram index %d bytes",
+		in, res.Records, secs, cpu, float64(in)/1e6/secs, res.PeakHeap, res.WALBytes, res.TrigramBytes)
 
 	path := filepath.Join("testdata", "soak-budgets.json")
 	if os.Getenv("PG_CCREC_SOAK_BASELINE") == "1" {
@@ -112,10 +140,13 @@ func TestSoakFirstRunParse(t *testing.T) {
 	}
 	check := func(name string, got, want float64) {
 		if want > 0 && got > want*budgetFactor {
-			t.Errorf("%s %.0f exceeds 1.5 x baseline %.0f", name, got, want)
+			t.Errorf("%s %.4g exceeds 1.5 x baseline %.4g", name, got, want)
 		}
 	}
-	check("seconds", res.Seconds, base.Seconds)
+	if base.CPUSeconds <= 0 {
+		t.Fatalf("baseline has no cpu_seconds: re-record with PG_CCREC_SOAK_BASELINE=1")
+	}
+	check("cpu seconds", res.CPUSeconds, base.CPUSeconds)
 	check("peak heap bytes", float64(res.PeakHeap), float64(base.PeakHeap))
 	check("WAL bytes", float64(res.WALBytes), float64(base.WALBytes))
 	check("trigram index bytes", float64(res.TrigramBytes), float64(base.TrigramBytes))
