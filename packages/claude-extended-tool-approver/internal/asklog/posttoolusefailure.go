@@ -1,6 +1,10 @@
 package asklog
 
-import "github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+import (
+	"context"
+
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+)
 
 // RecordPostToolUseFailure records the PostToolUseFailure hook event: the
 // tool call was approved and ran, but Claude Code reports that the call
@@ -32,7 +36,8 @@ func RecordPostToolUseFailure(s *Store, input *hookio.HookInput) error {
 	respHash, respSize, respExitCode, respExcerpt := summarizeToolResponse(input.ToolResponse)
 
 	if input.ToolUseID != "" {
-		res, err := s.db.Exec(
+		res, err := s.db.ExecContext(
+			context.Background(),
 			`
 			UPDATE tool_decisions
 			SET outcome = 'failed', resolved_at = ?, outcome_notes = ?,
@@ -51,7 +56,8 @@ func RecordPostToolUseFailure(s *Store, input *hookio.HookInput) error {
 	}
 
 	hash := inputHash(input.ToolInput)
-	res, err := s.db.Exec(
+	res, err := s.db.ExecContext(
+		context.Background(),
 		`
 		UPDATE tool_decisions
 		SET outcome = 'failed', resolved_at = ?, outcome_notes = ?,
@@ -76,7 +82,8 @@ func RecordPostToolUseFailure(s *Store, input *hookio.HookInput) error {
 	// (e.g. it was already resolved/swept before the failure event arrived).
 	// Mirrors RecordPermissionDenied's INSERT fallback so the failure is
 	// never silently dropped.
-	_, err = s.db.Exec(
+	_, err = s.db.ExecContext(
+		context.Background(),
 		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,

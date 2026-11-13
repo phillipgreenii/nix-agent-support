@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -121,7 +122,7 @@ func TestShapeCommandWritesArtifactAndNeverTouchesTheAskLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 		 hook_decision, outcome, created_at)
 		VALUES

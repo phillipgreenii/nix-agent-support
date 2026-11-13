@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ func TestNewReadOnlyStore_ReadsExistingRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	if _, err := w.db.Exec(`INSERT INTO tool_decisions
+	if _, err := w.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
 		VALUES ('s', '/tmp', 'Bash', 'h1', '{}', 'pending', '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("seed row: %v", err)
@@ -108,7 +109,7 @@ func TestNewReadOnlyStore_WriteFailsAndLeavesFileAndSidecarsUntouched(t *testing
 	}
 	defer func() { _ = w.Close() }()
 
-	if _, err := w.db.Exec(`INSERT INTO tool_decisions
+	if _, err := w.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
 		VALUES ('s', '/tmp', 'Bash', 'h1', '{}', 'pending', '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("seed row: %v", err)
@@ -124,7 +125,7 @@ func TestNewReadOnlyStore_WriteFailsAndLeavesFileAndSidecarsUntouched(t *testing
 	// with only one connection attached and no concurrent writer, merges
 	// everything; the -wal/-shm files stay present (just idle) because `w`
 	// remains open, which is what this test needs them to do.
-	if _, err := w.db.Exec("PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
+	if _, err := w.db.ExecContext(context.Background(), "PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
 		t.Fatalf("checkpoint: %v", err)
 	}
 
@@ -144,7 +145,7 @@ func TestNewReadOnlyStore_WriteFailsAndLeavesFileAndSidecarsUntouched(t *testing
 
 	// Reading must still work.
 	var count int
-	if err := r.db.QueryRow("SELECT COUNT(*) FROM tool_decisions").Scan(&count); err != nil {
+	if err := r.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM tool_decisions").Scan(&count); err != nil {
 		t.Fatalf("read through NewReadOnlyStore: %v", err)
 	}
 	if count != 1 {
@@ -152,7 +153,7 @@ func TestNewReadOnlyStore_WriteFailsAndLeavesFileAndSidecarsUntouched(t *testing
 	}
 
 	// Writing must fail loudly, not succeed silently.
-	_, writeErr := r.db.Exec("UPDATE tool_decisions SET excluded = 1 WHERE id = 1")
+	_, writeErr := r.db.ExecContext(context.Background(), "UPDATE tool_decisions SET excluded = 1 WHERE id = 1")
 	if writeErr == nil {
 		t.Fatal("write through NewReadOnlyStore succeeded; it must be rejected")
 	}
@@ -181,7 +182,7 @@ func TestNewReadOnlyStore_WriteFailsAndLeavesFileAndSidecarsUntouched(t *testing
 	// UPDATE truly never landed (not merely that it errored on a
 	// disconnected view).
 	var excluded int
-	if err := w.db.QueryRow("SELECT excluded FROM tool_decisions WHERE id = 1").Scan(&excluded); err != nil {
+	if err := w.db.QueryRowContext(context.Background(), "SELECT excluded FROM tool_decisions WHERE id = 1").Scan(&excluded); err != nil {
 		t.Fatalf("re-read via write store: %v", err)
 	}
 	if excluded != 0 {
@@ -211,7 +212,7 @@ func TestNewReadOnlyStore_DoesNotMigrate(t *testing.T) {
 	}
 	defer func() { _ = r.Close() }()
 
-	_, err = r.db.Exec("SELECT 1 FROM tool_decisions")
+	_, err = r.db.ExecContext(context.Background(), "SELECT 1 FROM tool_decisions")
 	if err == nil {
 		t.Fatal("querying tool_decisions on an unmigrated file succeeded; NewReadOnlyStore must not have migrated it")
 	}

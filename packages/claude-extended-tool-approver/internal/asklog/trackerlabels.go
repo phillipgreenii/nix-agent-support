@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -29,7 +30,7 @@ type TrackerLabel struct {
 // exclusion on the same call.
 func (s *Store) SetTrackerCorrectDecision(keys []CallKey, decision, explanation string) error {
 	for _, k := range keys {
-		_, err := s.db.Exec(`INSERT INTO tracker_labels
+		_, err := s.db.ExecContext(context.Background(), `INSERT INTO tracker_labels
 			(session_id, tool_use_id, correct_hook_decision, correct_hook_decision_explanation)
 			VALUES (?, ?, ?, ?)
 			ON CONFLICT(session_id, tool_use_id) DO UPDATE SET
@@ -47,7 +48,7 @@ func (s *Store) SetTrackerCorrectDecision(keys []CallKey, decision, explanation 
 // twin of MarkExcluded). It keeps any existing correct-decision label.
 func (s *Store) MarkTrackerExcluded(keys []CallKey, reason string) error {
 	for _, k := range keys {
-		_, err := s.db.Exec(`INSERT INTO tracker_labels
+		_, err := s.db.ExecContext(context.Background(), `INSERT INTO tracker_labels
 			(session_id, tool_use_id, excluded, excluded_reason)
 			VALUES (?, ?, 1, ?)
 			ON CONFLICT(session_id, tool_use_id) DO UPDATE SET
@@ -67,7 +68,7 @@ func (s *Store) TrackerLabels() (map[CallKey]TrackerLabel, error) {
 	out := map[CallKey]TrackerLabel{}
 	err := s.withTornReadRetry(func() error {
 		clear(out)
-		rows, err := s.db.Query(`SELECT session_id, tool_use_id, correct_hook_decision,
+		rows, err := s.db.QueryContext(context.Background(), `SELECT session_id, tool_use_id, correct_hook_decision,
 			COALESCE(correct_hook_decision_explanation, ''), excluded, COALESCE(excluded_reason, '')
 			FROM tracker_labels`)
 		if err != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,7 +42,7 @@ func newLabelFixture(t *testing.T) labelFixture {
 	cmds := map[int]string{1: "ls -la", 2: "ls -la", 3: "ls -la", 4: "echo hi", 5: "echo hi", 6: "pwd"}
 	for id := 1; id <= 6; id++ {
 		in, _ := json.Marshal(map[string]string{"command": cmds[id]})
-		_, err := store.DB().Exec(`INSERT INTO tool_decisions
+		_, err := store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, outcome, created_at, permission_mode)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
@@ -87,7 +88,7 @@ func (f labelFixture) state(t *testing.T) map[int]rowState {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	rs, err := store.DB().Query(`SELECT id, COALESCE(correct_hook_decision,''),
+	rs, err := store.DB().QueryContext(context.Background(), `SELECT id, COALESCE(correct_hook_decision,''),
 		COALESCE(correct_hook_decision_explanation,''), excluded FROM tool_decisions`)
 	if err != nil {
 		t.Fatal(err)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -156,7 +157,7 @@ func TestSkillMissingSpecsQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := exec.Command("jq", "-sc", "--slurpfile", "specs", specs, program, rowsFile).Output()
+	out, err := exec.CommandContext(context.Background(), "jq", "-sc", "--slurpfile", "specs", specs, program, rowsFile).Output()
 	if err != nil {
 		t.Fatalf("jq failed: %v\n%s", err, out)
 	}

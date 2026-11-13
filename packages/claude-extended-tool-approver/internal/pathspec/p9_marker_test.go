@@ -70,7 +70,7 @@ func TestP9Marker(t *testing.T) {
 		if err != nil {
 			t.Skipf("git not on PATH: %v", err)
 		}
-		ctl := exec.Command(realGit, "-C", root, "status", "--porcelain=v1")
+		ctl := exec.CommandContext(context.Background(), realGit, "-C", root, "status", "--porcelain=v1")
 		ctl.Env = hermeticGitEnviron()
 		if out, err := ctl.CombinedOutput(); err != nil {
 			t.Fatalf("control git status: %v\n%s", err, out)
@@ -212,7 +212,7 @@ func gitVersion() string {
 	if err != nil {
 		return "(none)"
 	}
-	out, err := exec.Command(p, "--version").CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), p, "--version").CombinedOutput()
 	if err != nil {
 		return "(unknown)"
 	}

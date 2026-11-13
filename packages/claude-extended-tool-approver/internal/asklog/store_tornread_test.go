@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,7 +124,7 @@ func seedRowsAndLocateLeafPage(t *testing.T, dbPath string, n int) (pageSize, pg
 	}
 
 	for i := 0; i < n; i++ {
-		if _, err := w.db.Exec(`INSERT INTO tool_decisions
+		if _, err := w.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
 			VALUES (?, '/tmp/pg2-do92x', 'Bash', ?, '{}', 'pending', '2026-01-01T00:00:00Z')`,
 			fmt.Sprintf("s%d", i), fmt.Sprintf("h%d", i)); err != nil {
@@ -131,13 +132,14 @@ func seedRowsAndLocateLeafPage(t *testing.T, dbPath string, n int) (pageSize, pg
 		}
 	}
 
-	if err := w.db.QueryRow("PRAGMA page_size").Scan(&pageSize); err != nil {
+	if err := w.db.QueryRowContext(context.Background(), "PRAGMA page_size").Scan(&pageSize); err != nil {
 		t.Fatalf("PRAGMA page_size: %v", err)
 	}
-	if _, err := w.db.Exec("PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
+	if _, err := w.db.ExecContext(context.Background(), "PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
 		t.Fatalf("checkpoint: %v", err)
 	}
-	if err := w.db.QueryRow(
+	if err := w.db.QueryRowContext(
+		context.Background(),
 		"SELECT pageno FROM dbstat WHERE name='tool_decisions' AND pagetype='leaf' ORDER BY pageno LIMIT 1",
 	).Scan(&pgno); err != nil {
 		t.Fatalf("locate tool_decisions leaf page via dbstat: %v", err)
@@ -356,7 +358,7 @@ func TestQueryRows_FallsBackToWALSnapshotWhenImmutableKeepsTearing(t *testing.T)
 		t.Fatalf("NewStore: %v", err)
 	}
 	defer func() { _ = w.Close() }()
-	if _, err := w.db.Exec(`INSERT INTO tool_decisions
+	if _, err := w.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
 		VALUES ('late', '/tmp', 'Bash', 'hlate', '{}', 'pending', '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("insert into WAL: %v", err)

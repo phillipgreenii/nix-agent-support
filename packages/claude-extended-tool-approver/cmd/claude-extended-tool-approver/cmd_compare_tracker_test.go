@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -33,20 +34,20 @@ func ctSeed(t *testing.T, mutate ...string) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_use_id, tool_input_hash, tool_input_json,
 		 hook_decision, outcome, outcome_notes, permission_mode, sandbox_enabled, tool_response_exit_code, created_at)
 		VALUES
-		 (1,'sess-a','/x','Bash','tu-a1','h1','{}','allow','approved',NULL,'default',1,0,'` + ctCreated + `'),
-		 (2,'sess-a','/x','Bash','tu-a2','h2','{}','ask','failed','tool_failure: boom','default',0,1,'` + ctCreated + `'),
-		 (3,'sess-b','/x','Bash','tu-b1','h3','{}','deny','rejected',NULL,'dontAsk',1,NULL,'` + ctCreated + `'),
-		 (4,'sess-b','/x','Write','tu-b2','h4','{}',NULL,'approved',NULL,'default',NULL,NULL,'` + ctCreated + `'),
-		 (5,'sess-d','/x','Bash','tu-d1','h5','{}','allow','approved',NULL,'default',1,0,'` + ctCreated + `')`)
+		 (1,'sess-a','/x','Bash','tu-a1','h1','{}','allow','approved',NULL,'default',1,0,'`+ctCreated+`'),
+		 (2,'sess-a','/x','Bash','tu-a2','h2','{}','ask','failed','tool_failure: boom','default',0,1,'`+ctCreated+`'),
+		 (3,'sess-b','/x','Bash','tu-b1','h3','{}','deny','rejected',NULL,'dontAsk',1,NULL,'`+ctCreated+`'),
+		 (4,'sess-b','/x','Write','tu-b2','h4','{}',NULL,'approved',NULL,'default',NULL,NULL,'`+ctCreated+`'),
+		 (5,'sess-d','/x','Bash','tu-d1','h5','{}','allow','approved',NULL,'default',1,0,'`+ctCreated+`')`)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	for _, q := range mutate {
-		if _, err := store.DB().Exec(q); err != nil {
+		if _, err := store.DB().ExecContext(context.Background(), q); err != nil {
 			t.Fatalf("mutate %q: %v", q, err)
 		}
 	}

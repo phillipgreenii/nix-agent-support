@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -34,7 +35,7 @@ func testInput(sessionID, toolName, toolUseID string, toolInput json.RawMessage)
 func countRows(t *testing.T, s *Store, where string) int {
 	t.Helper()
 	var n int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM tool_decisions WHERE " + where).Scan(&n)
+	err := s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM tool_decisions WHERE "+where).Scan(&n)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -44,7 +45,7 @@ func countRows(t *testing.T, s *Store, where string) int {
 func getOutcome(t *testing.T, s *Store, sessionID string) string {
 	t.Helper()
 	var outcome string
-	err := s.db.QueryRow("SELECT outcome FROM tool_decisions WHERE session_id=? ORDER BY id DESC LIMIT 1", sessionID).Scan(&outcome)
+	err := s.db.QueryRowContext(context.Background(), "SELECT outcome FROM tool_decisions WHERE session_id=? ORDER BY id DESC LIMIT 1", sessionID).Scan(&outcome)
 	if err != nil {
 		t.Fatalf("getOutcome: %v", err)
 	}
@@ -56,7 +57,8 @@ func getOutcome(t *testing.T, s *Store, sessionID string) string {
 func querySandboxEnabled(t *testing.T, s *Store, sessionID string) *int {
 	t.Helper()
 	var v *int
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(
+		context.Background(),
 		"SELECT sandbox_enabled FROM tool_decisions WHERE session_id=? ORDER BY id DESC LIMIT 1",
 		sessionID,
 	).Scan(&v)
@@ -125,7 +127,7 @@ func TestRecordPreToolDecision_Deny(t *testing.T) {
 	}
 
 	var hookDec, reason string
-	_ = s.db.QueryRow("SELECT hook_decision, hook_reason FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &reason)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT hook_decision, hook_reason FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &reason)
 	if hookDec != "deny" {
 		t.Errorf("hook_decision = %q, want deny", hookDec)
 	}
@@ -149,7 +151,7 @@ func TestRecordPreToolDecision_Ask(t *testing.T) {
 	}
 
 	var toolUseID string
-	_ = s.db.QueryRow("SELECT tool_use_id FROM tool_decisions WHERE session_id='sess1'").Scan(&toolUseID)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT tool_use_id FROM tool_decisions WHERE session_id='sess1'").Scan(&toolUseID)
 	if toolUseID != "tool-2" {
 		t.Errorf("tool_use_id = %q, want tool-2", toolUseID)
 	}
@@ -170,7 +172,7 @@ func TestRecordPreToolDecision_Approve(t *testing.T) {
 	}
 
 	var hookDec string
-	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != "allow" {
 		t.Errorf("hook_decision = %q, want allow", hookDec)
 	}
@@ -191,7 +193,7 @@ func TestRecordPreToolDecision_Abstain(t *testing.T) {
 	}
 
 	var hookDec string
-	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != "abstain" {
 		t.Errorf("hook_decision = %q, want abstain", hookDec)
 	}
@@ -237,7 +239,7 @@ func TestRecordPermissionRequest_NewBuiltinASK(t *testing.T) {
 	}
 
 	var hookDec *string
-	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != nil {
 		t.Errorf("hook_decision = %v, want NULL for built-in ASK", *hookDec)
 	}
@@ -259,7 +261,7 @@ func TestRecordPermissionRequest_ExistingPreToolRow(t *testing.T) {
 	}
 
 	var suggestions string
-	_ = s.db.QueryRow("SELECT permission_suggestions FROM tool_decisions WHERE session_id='sess1'").Scan(&suggestions)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT permission_suggestions FROM tool_decisions WHERE session_id='sess1'").Scan(&suggestions)
 	if suggestions != `[{"type":"toolAlwaysAllow"}]` {
 		t.Errorf("permission_suggestions = %q", suggestions)
 	}
@@ -281,7 +283,7 @@ func TestResolveApproved_ByToolUseID(t *testing.T) {
 	}
 
 	var resolvedAt string
-	_ = s.db.QueryRow("SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
 	if resolvedAt == "" {
 		t.Error("resolved_at should be set")
 	}
@@ -385,7 +387,8 @@ func TestResolveUnresolvedAll_LeavesAlreadyResolvedRowsAlone(t *testing.T) {
 		{"tool-aba", "unresolved"},
 	} {
 		var got string
-		if err := s.db.QueryRow(
+		if err := s.db.QueryRowContext(
+			context.Background(),
 			"SELECT outcome FROM tool_decisions WHERE tool_use_id=?", tc.toolUseID,
 		).Scan(&got); err != nil {
 			t.Fatalf("read outcome for %s: %v", tc.toolUseID, err)
@@ -568,7 +571,7 @@ func TestFullLifecycle_BuiltinASK_Approved(t *testing.T) {
 	}
 
 	var hookDec *string
-	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != nil {
 		t.Errorf("hook_decision = %v, want NULL", *hookDec)
 	}
@@ -595,7 +598,7 @@ func TestRecordPermissionDenied_UpdatesExistingPendingRow(t *testing.T) {
 	}
 
 	var outcome, outcomeNotes string
-	_ = s.db.QueryRow("SELECT outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome, &outcomeNotes)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome, &outcomeNotes)
 	if outcome != "denied" {
 		t.Errorf("outcome = %q, want denied", outcome)
 	}
@@ -604,7 +607,7 @@ func TestRecordPermissionDenied_UpdatesExistingPendingRow(t *testing.T) {
 	}
 
 	var resolvedAt string
-	_ = s.db.QueryRow("SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
 	if resolvedAt == "" {
 		t.Error("resolved_at should be set")
 	}
@@ -630,7 +633,7 @@ func TestRecordPermissionDenied_UpdatesByHashWhenNoToolUseID(t *testing.T) {
 	}
 
 	var outcome string
-	_ = s.db.QueryRow("SELECT outcome FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT outcome FROM tool_decisions WHERE session_id='sess1'").Scan(&outcome)
 	if outcome != "denied" {
 		t.Errorf("outcome = %q, want denied", outcome)
 	}
@@ -652,7 +655,7 @@ func TestRecordPermissionDenied_InsertsWhenNoPendingRow(t *testing.T) {
 
 	var outcome, outcomeNotes string
 	var hookDec *string
-	_ = s.db.QueryRow("SELECT hook_decision, outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &outcome, &outcomeNotes)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT hook_decision, outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec, &outcome, &outcomeNotes)
 	if hookDec != nil {
 		t.Errorf("hook_decision = %v, want NULL", *hookDec)
 	}
@@ -688,7 +691,7 @@ func TestRecordPreToolDecision_WithTrace(t *testing.T) {
 	}
 
 	var decID int
-	_ = s.db.QueryRow("SELECT id FROM tool_decisions WHERE session_id='sess1'").Scan(&decID)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT id FROM tool_decisions WHERE session_id='sess1'").Scan(&decID)
 
 	entries, err := s.QueryTraceByDecisionID(decID)
 	if err != nil {
@@ -721,7 +724,7 @@ func TestRecordPreToolDecision_NilTrace_NoTraceEntries(t *testing.T) {
 	}
 
 	var count int
-	_ = s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries").Scan(&count)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM decision_trace_entries").Scan(&count)
 	if count != 0 {
 		t.Errorf("trace entries = %d, want 0 (tracing disabled)", count)
 	}
@@ -731,7 +734,8 @@ func TestRecordPreToolDecision_NilTrace_NoTraceEntries(t *testing.T) {
 // the given session as *string (nil = SQL NULL).
 func queryHookContext(t *testing.T, s *Store, sessionID string) (permMode, promptID, transcript, toolResp *string) {
 	t.Helper()
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(
+		context.Background(),
 		`SELECT permission_mode, prompt_id, transcript_path, tool_response
 		 FROM tool_decisions WHERE session_id=? ORDER BY id DESC LIMIT 1`, sessionID,
 	).Scan(&permMode, &promptID, &transcript, &toolResp)
@@ -746,7 +750,8 @@ func queryHookContext(t *testing.T, s *Store, sessionID string) (permMode, promp
 // most recent row in the given session.
 func queryToolResponseSummary(t *testing.T, s *Store, sessionID string) (hash, excerpt *string, size, exitCode *int) {
 	t.Helper()
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(
+		context.Background(),
 		`SELECT tool_response_hash, tool_response_excerpt, tool_response_size, tool_response_exit_code
 		 FROM tool_decisions WHERE session_id=? ORDER BY id DESC LIMIT 1`, sessionID,
 	).Scan(&hash, &excerpt, &size, &exitCode)
@@ -788,7 +793,7 @@ func TestRecordPreToolDecision_PersistsHookContext(t *testing.T) {
 				t.Errorf("transcript_path = %v, want /x/t.jsonl", tp)
 			}
 			var agentType *string
-			_ = s.db.QueryRow("SELECT agent_type FROM tool_decisions WHERE session_id='hc'").Scan(&agentType)
+			_ = s.db.QueryRowContext(context.Background(), "SELECT agent_type FROM tool_decisions WHERE session_id='hc'").Scan(&agentType)
 			if agentType == nil || *agentType != "Explore" {
 				t.Errorf("agent_type = %v, want Explore", agentType)
 			}
@@ -935,7 +940,7 @@ func TestRecordPermissionDenied_FallbackSetsPermissionModeAndAgentType(t *testin
 		t.Errorf("permission_mode = %v, want auto (else auto-denials derive to unknown)", pm)
 	}
 	var at *string
-	_ = s.db.QueryRow("SELECT agent_type FROM tool_decisions WHERE session_id='den'").Scan(&at)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT agent_type FROM tool_decisions WHERE session_id='den'").Scan(&at)
 	if at == nil || *at != "general-purpose" {
 		t.Errorf("agent_type = %v, want general-purpose", at)
 	}
@@ -964,7 +969,7 @@ func TestRecordPermissionRequest_FallbackSetsPermissionMode(t *testing.T) {
 		t.Errorf("prompt_id = %v, want prompt-2", pid)
 	}
 	var at *string
-	_ = s.db.QueryRow("SELECT agent_type FROM tool_decisions WHERE session_id='req'").Scan(&at)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT agent_type FROM tool_decisions WHERE session_id='req'").Scan(&at)
 	if at == nil || *at != "Explore" {
 		t.Errorf("agent_type = %v, want Explore", at)
 	}
@@ -985,7 +990,7 @@ func TestFullLifecycle_Abstain_ThenPermissionDenied(t *testing.T) {
 	}
 
 	var hookDec string
-	_ = s.db.QueryRow("SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT hook_decision FROM tool_decisions WHERE session_id='sess1'").Scan(&hookDec)
 	if hookDec != "abstain" {
 		t.Errorf("hook_decision = %q, want abstain (original hook decision preserved)", hookDec)
 	}

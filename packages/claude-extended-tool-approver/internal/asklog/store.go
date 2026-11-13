@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -309,11 +310,11 @@ func openReadOnlyConn(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(readOnlyCacheSizePragma); err != nil {
+	if _, err := db.ExecContext(context.Background(), readOnlyCacheSizePragma); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set cache_size: %w", err)
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -330,11 +331,11 @@ func openWALAwareReadConn(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(readOnlyCacheSizePragma); err != nil {
+	if _, err := db.ExecContext(context.Background(), readOnlyCacheSizePragma); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set cache_size: %w", err)
 	}
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -608,7 +609,7 @@ func (s *Store) queryRowsOnce(sinceDate string) ([]DecisionRow, error) {
 	}
 	query += " ORDER BY id"
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(context.Background(), query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +691,7 @@ func (s *Store) queryRowsByIDsOnce(ids []int) ([]ShowRow, error) {
 	}
 	query += ") ORDER BY id"
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.QueryContext(context.Background(), query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -714,7 +715,8 @@ func (s *Store) queryRowsByIDsOnce(ids []int) ([]ShowRow, error) {
 // MarkExcluded sets the excluded flag on the given row IDs.
 func (s *Store) MarkExcluded(ids []int, reason string) error {
 	for _, id := range ids {
-		_, err := s.db.Exec(
+		_, err := s.db.ExecContext(
+			context.Background(),
 			`UPDATE tool_decisions SET excluded = 1, excluded_reason = ? WHERE id = ?`,
 			reason, id,
 		)
@@ -728,7 +730,8 @@ func (s *Store) MarkExcluded(ids []int, reason string) error {
 // SetCorrectDecision sets the correct_hook_decision on the given row IDs.
 func (s *Store) SetCorrectDecision(ids []int, decision, explanation string) error {
 	for _, id := range ids {
-		_, err := s.db.Exec(
+		_, err := s.db.ExecContext(
+			context.Background(),
 			`UPDATE tool_decisions SET correct_hook_decision = ?, correct_hook_decision_explanation = ? WHERE id = ?`,
 			decision, explanation, id,
 		)
@@ -768,7 +771,7 @@ func (s *Store) QueryTraceByDecisionID(decisionID int) ([]TraceRow, error) {
 
 // queryTraceByDecisionIDOnce is QueryTraceByDecisionID's single-attempt body.
 func (s *Store) queryTraceByDecisionIDOnce(decisionID int) ([]TraceRow, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.db.QueryContext(context.Background(), `
 		SELECT rule_order, rule_name, decision, reason
 		FROM decision_trace_entries
 		WHERE tool_decision_id = ?
@@ -1098,7 +1101,7 @@ var migrations = []migration{
 // whose ADD COLUMN statements must tolerate being re-applied (SQLite has no
 // `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, unlike CREATE TABLE/INDEX).
 func existingColumns(tx *sql.Tx, table string) (map[string]bool, error) {
-	rows, err := tx.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	rows, err := tx.QueryContext(context.Background(), fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return nil, fmt.Errorf("read table_info(%s): %w", table, err)
 	}
@@ -1151,13 +1154,13 @@ func migrate(db *sql.DB) error {
 	// unmodified by this change and must keep passing.
 	if want := latestMigrationVersion(); want > 0 {
 		var have int
-		row := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`)
+		row := db.QueryRowContext(context.Background(), `SELECT COALESCE(MAX(version), 0) FROM schema_version`)
 		if err := row.Scan(&have); err == nil && have >= want {
 			return nil
 		}
 	}
 
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
 		return fmt.Errorf("create schema_version: %w", err)
 	}
 
@@ -1176,13 +1179,13 @@ func migrate(db *sql.DB) error {
 	// up-to-date version and compute an empty (or smaller) pending list.
 	// See pg2-5lkyp; regression coverage in
 	// TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows.
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin migrations: %w", err)
 	}
 
 	var currentVersion int
-	row := tx.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+	row := tx.QueryRowContext(context.Background(), "SELECT COALESCE(MAX(version), 0) FROM schema_version")
 	if err := row.Scan(&currentVersion); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("read schema version: %w", err)
@@ -1224,7 +1227,7 @@ func migrate(db *sql.DB) error {
 			_ = tx.Rollback()
 			return fmt.Errorf("migration %d: %w", m.version, err)
 		}
-		if _, err := tx.Exec("INSERT INTO schema_version (version) VALUES (?)", m.version); err != nil {
+		if _, err := tx.ExecContext(context.Background(), "INSERT INTO schema_version (version) VALUES (?)", m.version); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("record version %d: %w", m.version, err)
 		}

@@ -82,6 +82,7 @@
 package trackeradapter
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -157,7 +158,7 @@ func Open(path string) (*Adapter, error) {
 	sort.Strings(names)
 	for _, name := range names {
 		q := fmt.Sprintf("SELECT %s FROM %s LIMIT 0", strings.Join(views[name], ", "), name)
-		rows, err := db.Query(q)
+		rows, err := db.QueryContext(context.Background(), q)
 		if err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("tracker database %s is not shaped as expected (view %s): %w; run claude-tool-tracker ingest to (re)create the views", path, name, err)
@@ -253,7 +254,7 @@ func (a *Adapter) RowsByIDs(ids []int, labels map[asklog.CallKey]asklog.TrackerL
 // Key resolves a call_id to the call's lasting identity.
 func (a *Adapter) Key(callID int) (asklog.CallKey, bool, error) {
 	var k asklog.CallKey
-	err := a.db.QueryRow(`SELECT session_id, tool_use_id FROM tool_calls WHERE call_id = ?`, callID).Scan(&k.SessionID, &k.ToolUseID)
+	err := a.db.QueryRowContext(context.Background(), `SELECT session_id, tool_use_id FROM tool_calls WHERE call_id = ?`, callID).Scan(&k.SessionID, &k.ToolUseID)
 	if err == sql.ErrNoRows {
 		return k, false, nil
 	}
@@ -273,7 +274,7 @@ func parseSince(s string) (time.Time, error) {
 }
 
 func (a *Adapter) query(q string, args []any, labels map[asklog.CallKey]asklog.TrackerLabel) ([]Row, error) {
-	rows, err := a.db.Query(q, args...)
+	rows, err := a.db.QueryContext(context.Background(), q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("tracker database: %w", err)
 	}
@@ -423,7 +424,7 @@ func (a *Adapter) Traces(callIDs []int) (map[int][]TraceEntry, error) {
 		marks[i] = "?"
 		args[i] = id
 	}
-	rows, err := a.db.Query(`SELECT call_id, data FROM annotations WHERE kind = 'ceta.trace' AND call_id IN (`+
+	rows, err := a.db.QueryContext(context.Background(), `SELECT call_id, data FROM annotations WHERE kind = 'ceta.trace' AND call_id IN (`+
 		strings.Join(marks, ",")+`) ORDER BY ts, event_id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("tracker database: %w", err)
@@ -464,7 +465,7 @@ type SkipCounts struct {
 // SkippedCounts sums the ingest_skips rows with fromMs <= ingest_ms <= toMs.
 func (a *Adapter) SkippedCounts(fromMs, toMs int64) (SkipCounts, error) {
 	var c SkipCounts
-	err := a.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(lines_read),0), COALESCE(SUM(events_new),0),
+	err := a.db.QueryRowContext(context.Background(), `SELECT COUNT(*), COALESCE(SUM(lines_read),0), COALESCE(SUM(events_new),0),
 		COALESCE(SUM(events_duplicate),0), COALESCE(SUM(skipped_invalid_json),0),
 		COALESCE(SUM(skipped_missing_field),0), COALESCE(SUM(skipped_total),0),
 		COALESCE(SUM(events_without_call),0)
@@ -514,7 +515,7 @@ func scanSources(rows *sql.Rows) ([]SessionSource, error) {
 
 // SessionSources lists every session with at least one event file.
 func (a *Adapter) SessionSources() ([]SessionSource, error) {
-	rows, err := a.db.Query(sourcesSelect + " ORDER BY session_id")
+	rows, err := a.db.QueryContext(context.Background(), sourcesSelect+" ORDER BY session_id")
 	if err != nil {
 		return nil, fmt.Errorf("tracker database: %w", err)
 	}
@@ -523,7 +524,7 @@ func (a *Adapter) SessionSources() ([]SessionSource, error) {
 
 // SourcesFor answers, for one session, which sources have event files.
 func (a *Adapter) SourcesFor(sessionID string) (SessionSource, bool, error) {
-	rows, err := a.db.Query(sourcesSelect+" WHERE session_id = ?", sessionID)
+	rows, err := a.db.QueryContext(context.Background(), sourcesSelect+" WHERE session_id = ?", sessionID)
 	if err != nil {
 		return SessionSource{}, false, fmt.Errorf("tracker database: %w", err)
 	}

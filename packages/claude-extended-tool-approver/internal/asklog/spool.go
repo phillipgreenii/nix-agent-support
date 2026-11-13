@@ -2,6 +2,7 @@ package asklog
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -229,7 +230,8 @@ func (s *Store) DrainSpool(dbPath string, max int) (int, error) {
 func (s *Store) replaySpooled(e *spoolEntry) (bool, error) {
 	if e.Input.ToolUseID != "" {
 		var n int
-		if err := s.db.QueryRow(
+		if err := s.db.QueryRowContext(
+			context.Background(),
 			`SELECT COUNT(*) FROM tool_decisions WHERE session_id = ? AND tool_use_id = ?`,
 			e.Input.SessionID, e.Input.ToolUseID,
 		).Scan(&n); err != nil {

@@ -2,6 +2,7 @@ package bgkill
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,7 +39,7 @@ func DefaultDir() string {
 }
 
 func currentUserName() string {
-	out, err := exec.Command("id", "-un").Output()
+	out, err := exec.CommandContext(context.Background(), "id", "-un").Output()
 	if err != nil {
 		return ""
 	}
@@ -113,7 +114,7 @@ func launcherAlive(pid int, recordedStart string) bool {
 }
 
 func psField(pid int, field string) (string, error) {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", field).Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-p", strconv.Itoa(pid), "-o", field).Output()
 	if err != nil {
 		return "", err
 	}

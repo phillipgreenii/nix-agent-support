@@ -1,6 +1,7 @@
 package bgkill
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 // replaces it), and reaps it on cleanup.
 func startProc(t *testing.T, tag string) int {
 	t.Helper()
-	cmd := exec.Command("bash", "-c", "sleep 60; :", tag)
+	cmd := exec.CommandContext(context.Background(), "bash", "-c", "sleep 60; :", tag)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestFileStore_Job(t *testing.T) {
 	liveStart := startOf(t, live)
 	notBgrun := startProc(t, "something-else")
 	// A real pid that is certainly dead: started and reaped.
-	dead := exec.Command("true")
+	dead := exec.CommandContext(context.Background(), "true")
 	if err := dead.Run(); err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@
 package inputproc
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -29,7 +30,7 @@ func TestKillProcessGroup_ExitedUnreapedGroup_IsProcessDone(t *testing.T) {
 	if lerr != nil {
 		t.Skipf("no `true` executable on PATH: %v", lerr)
 	}
-	cmd := exec.Command(truePath)
+	cmd := exec.CommandContext(context.Background(), truePath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)

@@ -1,6 +1,7 @@
 package pathspec
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,7 +164,7 @@ func TestGitDirProtection(t *testing.T) {
 			t.Skip("git not on PATH")
 		}
 		root := patheval.ResolveRealPath(temproottest.TempDir(t))
-		cmd := exec.Command(git, "-C", root, "init", "-q")
+		cmd := exec.CommandContext(context.Background(), git, "-C", root, "init", "-q")
 		cmd.Env = []string{"HOME=" + root, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git init: %v: %s", err, out)

@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -54,12 +55,13 @@ func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.Ru
 	}
 
 	if result.Trace != nil {
-		tx, err := s.db.Begin()
+		tx, err := s.db.BeginTx(context.Background(), nil)
 		if err != nil {
 			return fmt.Errorf("begin tx: %w", err)
 		}
 
-		res, err := tx.Exec(
+		res, err := tx.ExecContext(
+			context.Background(),
 			`
 			INSERT INTO tool_decisions
 				(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
@@ -90,7 +92,8 @@ func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.Ru
 		}
 
 		for i, entry := range result.Trace {
-			_, err := tx.Exec(
+			_, err := tx.ExecContext(
+				context.Background(),
 				`
 				INSERT INTO decision_trace_entries
 					(tool_decision_id, rule_order, rule_name, decision, reason)
@@ -108,7 +111,8 @@ func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.Ru
 	}
 
 	// Non-trace path: single INSERT
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(
+		context.Background(),
 		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
@@ -133,7 +137,8 @@ func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.Ru
 func RecordPermissionRequest(s *Store, input *hookio.HookInput, permissionSuggestions string) error {
 	hash := inputHash(input.ToolInput)
 
-	res, err := s.db.Exec(
+	res, err := s.db.ExecContext(
+		context.Background(),
 		`
 		UPDATE tool_decisions
 		SET permission_suggestions = ?
@@ -154,7 +159,8 @@ func RecordPermissionRequest(s *Store, input *hookio.HookInput, permissionSugges
 		return nil
 	}
 
-	_, err = s.db.Exec(
+	_, err = s.db.ExecContext(
+		context.Background(),
 		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name,
@@ -197,7 +203,8 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 	respHash, respSize, respExitCode, respExcerpt := summarizeToolResponse(input.ToolResponse)
 
 	if input.ToolUseID != "" {
-		res, err := s.db.Exec(
+		res, err := s.db.ExecContext(
+			context.Background(),
 			`
 			UPDATE tool_decisions
 			SET outcome = 'approved', resolved_at = ?, outcome_notes = ?,
@@ -216,7 +223,8 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 	}
 
 	hash := inputHash(input.ToolInput)
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(
+		context.Background(),
 		`
 		UPDATE tool_decisions
 		SET outcome = 'approved', resolved_at = ?, outcome_notes = ?,
@@ -249,7 +257,8 @@ func ResolveApproved(s *Store, input *hookio.HookInput, outcomeNotes string) err
 // write the non-committal outcome. Real declines arrive through
 // RecordPermissionDenied, which correlates by tool_use_id/hash.
 func ResolveUnresolvedAll(s *Store, sessionID string) error {
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(
+		context.Background(),
 		`
 		UPDATE tool_decisions
 		SET outcome = 'unresolved', resolved_at = ?
@@ -271,7 +280,8 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 	notes := "auto_mode_classifier: " + input.Reason
 
 	if input.ToolUseID != "" {
-		res, err := s.db.Exec(
+		res, err := s.db.ExecContext(
+			context.Background(),
 			`
 			UPDATE tool_decisions
 			SET outcome = 'denied', resolved_at = ?, outcome_notes = ?
@@ -287,7 +297,8 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 	}
 
 	hash := inputHash(input.ToolInput)
-	res, err := s.db.Exec(
+	res, err := s.db.ExecContext(
+		context.Background(),
 		`
 		UPDATE tool_decisions
 		SET outcome = 'denied', resolved_at = ?, outcome_notes = ?
@@ -306,7 +317,8 @@ func RecordPermissionDenied(s *Store, input *hookio.HookInput) error {
 	// row. This is the primary auto-denial calibration signal, so it MUST capture
 	// permission_mode (and agent_type) — otherwise the denial would derive to an
 	// approval_source of "unknown", defeating the calibration.
-	_, err = s.db.Exec(
+	_, err = s.db.ExecContext(
+		context.Background(),
 		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,

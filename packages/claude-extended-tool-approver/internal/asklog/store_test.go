@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io/fs"
@@ -156,7 +157,7 @@ func TestNewStore_WALMode(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	var mode string
-	err = s.db.QueryRow("PRAGMA journal_mode").Scan(&mode)
+	err = s.db.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&mode)
 	if err != nil {
 		t.Fatalf("PRAGMA journal_mode: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestNewStore_TableExists(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	var count int
-	err = s.db.QueryRow("SELECT COUNT(*) FROM tool_decisions").Scan(&count)
+	err = s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM tool_decisions").Scan(&count)
 	if err != nil {
 		t.Fatalf("table tool_decisions should exist: %v", err)
 	}
@@ -214,7 +215,7 @@ func TestNewStore_SchemaVersion(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	var version int
-	err = s.db.QueryRow("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
+	err = s.db.QueryRowContext(context.Background(), "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestNewStore_Migration2_NewColumns(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	// Verify new columns exist by inserting a row that uses them
-	_, err = s.db.Exec(`INSERT INTO tool_decisions
+	_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at,
 		 excluded, excluded_reason, correct_hook_decision, correct_hook_decision_explanation)
 		VALUES ('s1', '/tmp', 'Bash', 'hash1', '{}', '2026-01-01T00:00:00Z',
@@ -243,7 +244,7 @@ func TestNewStore_Migration2_NewColumns(t *testing.T) {
 
 	var excluded int
 	var excludedReason, correctDecision, correctExplanation string
-	err = s.db.QueryRow(`SELECT excluded, excluded_reason, correct_hook_decision, correct_hook_decision_explanation
+	err = s.db.QueryRowContext(context.Background(), `SELECT excluded, excluded_reason, correct_hook_decision, correct_hook_decision_explanation
 		FROM tool_decisions WHERE session_id = 's1'`).Scan(&excluded, &excludedReason, &correctDecision, &correctExplanation)
 	if err != nil {
 		t.Fatalf("query new columns: %v", err)
@@ -271,7 +272,7 @@ func TestNewStore_Migration5_NewColumns(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	// The v5 columns are writable and round-trip verbatim.
-	_, err = s.db.Exec(`INSERT INTO tool_decisions
+	_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at,
 		 permission_mode, prompt_id, tool_response, transcript_path)
 		VALUES ('v5', '/tmp', 'Bash', 'h1', '{}', '2026-01-01T00:00:00Z',
@@ -281,7 +282,7 @@ func TestNewStore_Migration5_NewColumns(t *testing.T) {
 	}
 
 	var permMode, promptID, toolResp, transcript string
-	err = s.db.QueryRow(`SELECT permission_mode, prompt_id, tool_response, transcript_path
+	err = s.db.QueryRowContext(context.Background(), `SELECT permission_mode, prompt_id, tool_response, transcript_path
 		FROM tool_decisions WHERE session_id = 'v5'`).Scan(&permMode, &promptID, &toolResp, &transcript)
 	if err != nil {
 		t.Fatalf("query v5 columns: %v", err)
@@ -300,14 +301,14 @@ func TestNewStore_Migration5_NewColumns(t *testing.T) {
 	}
 
 	// A row inserted WITHOUT the new columns (an old row) leaves them NULL and readable.
-	_, err = s.db.Exec(`INSERT INTO tool_decisions
+	_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at)
 		VALUES ('v5-null', '/tmp', 'Bash', 'h2', '{}', '2026-01-01T00:00:00Z')`)
 	if err != nil {
 		t.Fatalf("insert without v5 columns: %v", err)
 	}
 	var pm, pid, tr, tp *string
-	err = s.db.QueryRow(`SELECT permission_mode, prompt_id, tool_response, transcript_path
+	err = s.db.QueryRowContext(context.Background(), `SELECT permission_mode, prompt_id, tool_response, transcript_path
 		FROM tool_decisions WHERE session_id = 'v5-null'`).Scan(&pm, &pid, &tr, &tp)
 	if err != nil {
 		t.Fatalf("query null v5 columns: %v", err)
@@ -334,10 +335,10 @@ func TestNewStore_Migration7_SplitsDeniedByProvenance(t *testing.T) {
 		}
 		defer func() { _ = s.Close() }()
 		// Force the store back to v6 so migration 7 re-runs over the seed rows.
-		if _, err := s.db.Exec("DELETE FROM schema_version WHERE version >= 7"); err != nil {
+		if _, err := s.db.ExecContext(context.Background(), "DELETE FROM schema_version WHERE version >= 7"); err != nil {
 			t.Fatalf("reset schema_version: %v", err)
 		}
-		_, err = s.db.Exec(`INSERT INTO tool_decisions
+		_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(session_id, cwd, tool_name, tool_use_id, tool_input_hash, tool_input_json,
 			 hook_decision, outcome, outcome_notes, created_at, resolved_at)
 			VALUES
@@ -384,7 +385,8 @@ func TestNewStore_Migration7_SplitsDeniedByProvenance(t *testing.T) {
 	}
 	for id, wantOutcome := range want {
 		var got string
-		if err := s.db.QueryRow(
+		if err := s.db.QueryRowContext(
+			context.Background(),
 			"SELECT outcome FROM tool_decisions WHERE tool_use_id = ?", id,
 		).Scan(&got); err != nil {
 			t.Fatalf("read outcome for %s: %v", id, err)
@@ -396,13 +398,13 @@ func TestNewStore_Migration7_SplitsDeniedByProvenance(t *testing.T) {
 
 	// Exactly one row may still say 'denied' — the one somebody actually declined.
 	var denied int
-	_ = s.db.QueryRow("SELECT COUNT(*) FROM tool_decisions WHERE outcome = 'denied'").Scan(&denied)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM tool_decisions WHERE outcome = 'denied'").Scan(&denied)
 	if denied != 1 {
 		t.Errorf("remaining 'denied' rows = %d, want 1 (only the real decline)", denied)
 	}
 
 	// Idempotent: re-running the migration must be a no-op.
-	if _, err := s.db.Exec("DELETE FROM schema_version WHERE version >= 7"); err != nil {
+	if _, err := s.db.ExecContext(context.Background(), "DELETE FROM schema_version WHERE version >= 7"); err != nil {
 		t.Fatalf("reset schema_version: %v", err)
 	}
 	_ = s.Close()
@@ -413,7 +415,8 @@ func TestNewStore_Migration7_SplitsDeniedByProvenance(t *testing.T) {
 	defer func() { _ = s2.Close() }()
 	for id, wantOutcome := range want {
 		var got string
-		if err := s2.db.QueryRow(
+		if err := s2.db.QueryRowContext(
+			context.Background(),
 			"SELECT outcome FROM tool_decisions WHERE tool_use_id = ?", id,
 		).Scan(&got); err != nil {
 			t.Fatalf("re-read outcome for %s: %v", id, err)
@@ -432,7 +435,7 @@ func TestNewStore_Migration2_ExcludedDefaultsToZero(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	_, err = s.db.Exec(`INSERT INTO tool_decisions
+	_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at)
 		VALUES ('s1', '/tmp', 'Bash', 'hash1', '{}', '2026-01-01T00:00:00Z')`)
 	if err != nil {
@@ -440,7 +443,7 @@ func TestNewStore_Migration2_ExcludedDefaultsToZero(t *testing.T) {
 	}
 
 	var excluded int
-	_ = s.db.QueryRow("SELECT excluded FROM tool_decisions WHERE session_id = 's1'").Scan(&excluded)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT excluded FROM tool_decisions WHERE session_id = 's1'").Scan(&excluded)
 	if excluded != 0 {
 		t.Errorf("excluded default = %d, want 0", excluded)
 	}
@@ -455,9 +458,9 @@ func TestNewStore_Migration2_UpgradeFromV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	_, _ = db.Exec(`CREATE TABLE schema_version (version INTEGER NOT NULL)`)
-	_, _ = db.Exec(`INSERT INTO schema_version (version) VALUES (1)`)
-	_, _ = db.Exec(`CREATE TABLE tool_decisions (
+	_, _ = db.ExecContext(context.Background(), `CREATE TABLE schema_version (version INTEGER NOT NULL)`)
+	_, _ = db.ExecContext(context.Background(), `INSERT INTO schema_version (version) VALUES (1)`)
+	_, _ = db.ExecContext(context.Background(), `CREATE TABLE tool_decisions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id TEXT NOT NULL, cwd TEXT NOT NULL,
 		agent_id TEXT, agent_type TEXT,
@@ -469,7 +472,7 @@ func TestNewStore_Migration2_UpgradeFromV1(t *testing.T) {
 		created_at TEXT NOT NULL, resolved_at TEXT
 	)`)
 	// Insert a pre-existing row
-	_, _ = db.Exec(`INSERT INTO tool_decisions
+	_, _ = db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, created_at)
 		VALUES ('old-sess', '/tmp', 'Bash', 'h1', '{}', '2026-01-01T00:00:00Z')`)
 	_ = db.Close()
@@ -483,14 +486,14 @@ func TestNewStore_Migration2_UpgradeFromV1(t *testing.T) {
 
 	// Verify schema version is now 3
 	var version int
-	_ = s.db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT MAX(version) FROM schema_version").Scan(&version)
 	if version != 10 {
 		t.Errorf("schema_version = %d, want 10", version)
 	}
 
 	// Verify old row has excluded = 0 (default)
 	var excluded int
-	_ = s.db.QueryRow("SELECT excluded FROM tool_decisions WHERE session_id = 'old-sess'").Scan(&excluded)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT excluded FROM tool_decisions WHERE session_id = 'old-sess'").Scan(&excluded)
 	if excluded != 0 {
 		t.Errorf("existing row excluded = %d, want 0", excluded)
 	}
@@ -504,7 +507,7 @@ func TestNewStore_UpgradeFromUnversioned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	_, err = db.Exec(`CREATE TABLE tool_decisions (
+	_, err = db.ExecContext(context.Background(), `CREATE TABLE tool_decisions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		session_id TEXT NOT NULL,
 		cwd TEXT NOT NULL,
@@ -535,7 +538,7 @@ func TestNewStore_UpgradeFromUnversioned(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	var version int
-	err = s.db.QueryRow("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
+	err = s.db.QueryRowContext(context.Background(), "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").Scan(&version)
 	if err != nil {
 		t.Fatalf("query schema_version: %v", err)
 	}
@@ -561,7 +564,7 @@ func TestNewStore_IdempotentMigration(t *testing.T) {
 	defer func() { _ = s2.Close() }()
 
 	var count int
-	_ = s2.db.QueryRow("SELECT COUNT(*) FROM schema_version").Scan(&count)
+	_ = s2.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_version").Scan(&count)
 	if count != 10 {
 		t.Errorf("schema_version rows = %d, want 10", count)
 	}
@@ -603,7 +606,7 @@ func TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed NewStore: %v", err)
 	}
-	if _, err := seed.db.Exec(`DELETE FROM schema_version WHERE version > 6`); err != nil {
+	if _, err := seed.db.ExecContext(context.Background(), `DELETE FROM schema_version WHERE version > 6`); err != nil {
 		t.Fatalf("rearm schema_version: %v", err)
 	}
 	if err := seed.Close(); err != nil {
@@ -643,7 +646,7 @@ func TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	rows, err := db.Query(`SELECT version, COUNT(*) AS n FROM schema_version GROUP BY version HAVING COUNT(*) > 1 ORDER BY version`)
+	rows, err := db.QueryContext(context.Background(), `SELECT version, COUNT(*) AS n FROM schema_version GROUP BY version HAVING COUNT(*) > 1 ORDER BY version`)
 	if err != nil {
 		t.Fatalf("query duplicates: %v", err)
 	}
@@ -665,7 +668,7 @@ func TestMigrate_ConcurrentOpeners_NoDuplicateVersionRows(t *testing.T) {
 	}
 
 	var total int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_version`).Scan(&total); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM schema_version`).Scan(&total); err != nil {
 		t.Fatalf("count schema_version rows: %v", err)
 	}
 	if total != len(migrations) {
@@ -691,7 +694,7 @@ func setupTestDB(t *testing.T) *Store {
 		`INSERT INTO tool_decisions (id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary, hook_decision, hook_reason, outcome, created_at, excluded)
 		 VALUES (3, 'sess1', '/tmp', 'Bash', 'h3', '{"command":"ls"}', 'ls', 'allow', 'safecmd', 'approved', '2026-03-01T00:00:00Z', 1)`,
 	} {
-		if _, err := store.db.Exec(q); err != nil {
+		if _, err := store.db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -763,7 +766,7 @@ func TestStore_ForeignKeysEnabled(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	var fkEnabled int
-	err = s.db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled)
+	err = s.db.QueryRowContext(context.Background(), "PRAGMA foreign_keys").Scan(&fkEnabled)
 	if err != nil {
 		t.Fatalf("PRAGMA foreign_keys: %v", err)
 	}
@@ -780,7 +783,7 @@ func TestStore_TraceTableExists(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	var name string
-	err = s.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='decision_trace_entries'").Scan(&name)
+	err = s.db.QueryRowContext(context.Background(), "SELECT name FROM sqlite_master WHERE type='table' AND name='decision_trace_entries'").Scan(&name)
 	if err != nil {
 		t.Fatalf("decision_trace_entries table should exist: %v", err)
 	}
@@ -793,7 +796,7 @@ func TestStore_CascadeDelete(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	res, err := s.db.Exec(`INSERT INTO tool_decisions
+	res, err := s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
 		VALUES ('sess1', '/tmp', 'Bash', 'h1', '{}', 'pending', '2026-01-01T00:00:00Z')`)
 	if err != nil {
@@ -802,7 +805,7 @@ func TestStore_CascadeDelete(t *testing.T) {
 	decID, _ := res.LastInsertId()
 
 	for i := 1; i <= 3; i++ {
-		_, err := s.db.Exec(`INSERT INTO decision_trace_entries
+		_, err := s.db.ExecContext(context.Background(), `INSERT INTO decision_trace_entries
 			(tool_decision_id, rule_order, rule_name, decision, reason)
 			VALUES (?, ?, ?, 'abstain', 'test')`, decID, i, fmt.Sprintf("rule-%d", i))
 		if err != nil {
@@ -811,17 +814,17 @@ func TestStore_CascadeDelete(t *testing.T) {
 	}
 
 	var count int
-	_ = s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
 	if count != 3 {
 		t.Fatalf("trace entries = %d, want 3", count)
 	}
 
-	_, err = s.db.Exec("DELETE FROM tool_decisions WHERE id = ?", decID)
+	_, err = s.db.ExecContext(context.Background(), "DELETE FROM tool_decisions WHERE id = ?", decID)
 	if err != nil {
 		t.Fatalf("delete tool_decisions: %v", err)
 	}
 
-	_ = s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = ?", decID).Scan(&count)
 	if count != 0 {
 		t.Errorf("trace entries after cascade = %d, want 0", count)
 	}
@@ -834,7 +837,7 @@ func TestStore_QueryTraceByDecisionID(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	res, err := s.db.Exec(`INSERT INTO tool_decisions
+	res, err := s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at)
 		VALUES ('sess1', '/tmp', 'Bash', 'h1', '{}', 'pending', '2026-01-01T00:00:00Z')`)
 	if err != nil {
@@ -842,8 +845,8 @@ func TestStore_QueryTraceByDecisionID(t *testing.T) {
 	}
 	decID, _ := res.LastInsertId()
 
-	_, _ = s.db.Exec(`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 1, 'envvars', 'abstain', 'not relevant')`, decID)
-	_, _ = s.db.Exec(`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 2, 'git', 'allow', 'safe command')`, decID)
+	_, _ = s.db.ExecContext(context.Background(), `INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 1, 'envvars', 'abstain', 'not relevant')`, decID)
+	_, _ = s.db.ExecContext(context.Background(), `INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason) VALUES (?, 2, 'git', 'allow', 'safe command')`, decID)
 
 	entries, err := s.QueryTraceByDecisionID(int(decID))
 	if err != nil {
@@ -924,7 +927,7 @@ func TestQueryRows_ExposesRawFieldsAndAgentTypeSegmentation(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	// A subagent row (agent_type set) auto-approved under bypassPermissions.
-	_, err = s.db.Exec(`INSERT INTO tool_decisions
+	_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at,
 		 permission_mode, agent_type, outcome_notes, tool_response, prompt_id)
 		VALUES (1,'s','/tmp','Bash','h1','{}','approved','2026-01-01T00:00:00Z',
@@ -933,7 +936,7 @@ func TestQueryRows_ExposesRawFieldsAndAgentTypeSegmentation(t *testing.T) {
 		t.Fatalf("insert subagent row: %v", err)
 	}
 	// A main-agent row (agent_type NULL) DENIED under auto mode.
-	_, err = s.db.Exec(`INSERT INTO tool_decisions
+	_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, outcome, created_at,
 		 permission_mode, agent_type, outcome_notes, tool_response, prompt_id)
 		VALUES (2,'s','/tmp','Bash','h2','{}','denied','2026-01-01T00:00:00Z',

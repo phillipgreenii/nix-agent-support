@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -32,7 +33,8 @@ func TestRecordPostToolUseFailure_UpdatesExistingPendingRow(t *testing.T) {
 	var outcome, outcomeNotes string
 	var exitCode *int
 	var excerpt *string
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(
+		context.Background(),
 		"SELECT outcome, outcome_notes, tool_response_exit_code, tool_response_excerpt FROM tool_decisions WHERE session_id='sess1'",
 	).Scan(&outcome, &outcomeNotes, &exitCode, &excerpt); err != nil {
 		t.Fatalf("query: %v", err)
@@ -51,7 +53,7 @@ func TestRecordPostToolUseFailure_UpdatesExistingPendingRow(t *testing.T) {
 	}
 
 	var resolvedAt string
-	_ = s.db.QueryRow("SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
+	_ = s.db.QueryRowContext(context.Background(), "SELECT resolved_at FROM tool_decisions WHERE session_id='sess1'").Scan(&resolvedAt)
 	if resolvedAt == "" {
 		t.Error("resolved_at should be set")
 	}
@@ -97,7 +99,8 @@ func TestRecordPostToolUseFailure_InsertsWhenNoPendingRow(t *testing.T) {
 
 	var hookDec *string
 	var outcome, outcomeNotes string
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(
+		context.Background(),
 		"SELECT hook_decision, outcome, outcome_notes FROM tool_decisions WHERE session_id='sess1'",
 	).Scan(&hookDec, &outcome, &outcomeNotes); err != nil {
 		t.Fatalf("query: %v", err)

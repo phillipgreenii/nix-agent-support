@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
@@ -52,7 +53,7 @@ func TestTrackerLabels_AbsentTableMeansNoLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec(`DROP TABLE tracker_labels`); err != nil {
+	if _, err := s.DB().ExecContext(context.Background(), `DROP TABLE tracker_labels`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()

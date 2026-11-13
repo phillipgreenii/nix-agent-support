@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -20,7 +21,7 @@ func spoolInputFor(id string) *hookio.HookInput {
 func spoolCountRows(t *testing.T, s *Store, where string, args ...any) int {
 	t.Helper()
 	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tool_decisions WHERE `+where, args...).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM tool_decisions WHERE `+where, args...).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -52,7 +53,7 @@ func TestSpool_DrainReplaysWithOriginalTimeAndTrace(t *testing.T) {
 	var created string
 	var sb int
 	var traces int
-	if err := s.db.QueryRow(`SELECT created_at, sandbox_enabled, (SELECT COUNT(*) FROM decision_trace_entries) FROM tool_decisions WHERE tool_use_id='tu1'`).Scan(&created, &sb, &traces); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), `SELECT created_at, sandbox_enabled, (SELECT COUNT(*) FROM decision_trace_entries) FROM tool_decisions WHERE tool_use_id='tu1'`).Scan(&created, &sb, &traces); err != nil {
 		t.Fatal(err)
 	}
 	if created == nowISO() || sb != 1 || traces != 1 {

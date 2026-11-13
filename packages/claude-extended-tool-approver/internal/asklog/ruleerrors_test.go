@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -32,7 +33,7 @@ func TestRecordRuleErrors_PersistsOneRowPerRule(t *testing.T) {
 		t.Fatalf("RecordRuleErrors: %v", err)
 	}
 
-	rows, err := s.db.Query(`SELECT rule_name, error_count, error_sample, session_id, cwd, tool_name
+	rows, err := s.db.QueryContext(context.Background(), `SELECT rule_name, error_count, error_sample, session_id, cwd, tool_name
 		FROM rule_errors ORDER BY rule_name`)
 	if err != nil {
 		t.Fatalf("query: %v", err)
@@ -84,7 +85,7 @@ func TestRecordRuleErrors_EmptySnapshotWritesNothing(t *testing.T) {
 		t.Fatalf("RecordRuleErrors: %v", err)
 	}
 	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM rule_errors`).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM rule_errors`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -131,7 +132,7 @@ func TestRuleErrorsSurvivesReopen(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 	var total int
-	if err := s.db.QueryRow(`SELECT SUM(error_count) FROM rule_errors WHERE rule_name = 'gh'`).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), `SELECT SUM(error_count) FROM rule_errors WHERE rule_name = 'gh'`).Scan(&total); err != nil {
 		t.Fatalf("sum: %v", err)
 	}
 	if total != 2 {

@@ -1,6 +1,7 @@
 package trackeradapter
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -33,7 +34,7 @@ func fixtureCopy(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(string(dump)); err != nil {
+	if _, err := db.ExecContext(context.Background(), string(dump)); err != nil {
 		t.Fatalf("load %s: %v", name, err)
 	}
 	if err := db.Close(); err != nil {
@@ -182,7 +183,7 @@ func TestOpen_RefusesMissingAndMisshapenDatabases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TABLE unrelated (x INTEGER)`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE unrelated (x INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()
@@ -196,7 +197,7 @@ func TestOpen_RefusesMissingAndMisshapenDatabases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP VIEW session_sources; CREATE VIEW session_sources AS SELECT 'x' AS session_id`); err != nil {
+	if _, err := db.ExecContext(context.Background(), `DROP VIEW session_sources; CREATE VIEW session_sources AS SELECT 'x' AS session_id`); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()
@@ -216,7 +217,7 @@ func TestAdapter_IsReadOnly(t *testing.T) {
 		`CREATE TABLE intruder (x INTEGER)`,
 		`DROP VIEW tool_calls`,
 	} {
-		if _, err := a.db.Exec(stmt); err == nil {
+		if _, err := a.db.ExecContext(context.Background(), stmt); err == nil {
 			t.Errorf("write through the adapter succeeded: %s", stmt)
 		} else if !strings.Contains(strings.ToLower(err.Error()), "readonly") && !strings.Contains(strings.ToLower(err.Error()), "read-only") {
 			t.Errorf("%s: unexpected error %v", stmt, err)
@@ -386,7 +387,7 @@ func TestRows_HookRanAndErrorTextDistinguishCallsRefusedBeforeAnyHook(t *testing
 		`INSERT INTO events VALUES('e02','sess-e','tracker','tracker.call_end',1790000000302,'tu-e1',NULL,'{"outcome":"error","error":"<tool_use_error>File has not been read yet.</tool_use_error>"}','f')`,
 		`INSERT INTO calls VALUES(30,'sess-e','tu-e1')`,
 	} {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}

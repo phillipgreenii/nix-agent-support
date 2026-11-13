@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -29,7 +30,8 @@ func RecordRuleErrors(s *Store, input *hookio.HookInput, snapshot []metrics.Rule
 	}
 	now := nowISO()
 	for _, e := range snapshot {
-		if _, err := s.db.Exec(
+		if _, err := s.db.ExecContext(
+			context.Background(),
 			`
 			INSERT INTO rule_errors
 				(session_id, cwd, tool_name, rule_name, error_count, error_sample, created_at)

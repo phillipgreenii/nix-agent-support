@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -81,7 +82,7 @@ func dumpRows(t *testing.T, dbPath string) string {
 	defer func() { _ = db.Close() }()
 	var b strings.Builder
 	for _, table := range []string{"tool_decisions", "decision_trace_entries", "rule_errors", "background_shells"} {
-		rows, err := db.Query("SELECT * FROM " + table + " ORDER BY 1")
+		rows, err := db.QueryContext(context.Background(), "SELECT * FROM "+table+" ORDER BY 1")
 		if err != nil {
 			t.Fatalf("%s: %v", table, err)
 		}

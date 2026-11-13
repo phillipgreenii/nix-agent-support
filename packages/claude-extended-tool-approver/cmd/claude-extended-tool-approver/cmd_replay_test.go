@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -68,7 +69,7 @@ func newReplayFixture(t *testing.T) replayFixture {
 		if r.permissionMode != "" {
 			mode = r.permissionMode
 		}
-		_, err := store.DB().Exec(`INSERT INTO tool_decisions
+		_, err := store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, outcome, created_at, permission_mode)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?)`,

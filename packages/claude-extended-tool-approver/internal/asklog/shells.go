@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -11,7 +12,8 @@ import (
 // erroring. Follows the same persistence store as the ask-log (no parallel
 // mechanism) — see internal/asklog/store.go migration 6.
 func (s *Store) RegisterBackgroundShell(shellID, sessionID string) error {
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(
+		context.Background(),
 		`INSERT INTO background_shells (shell_id, session_id, creator, created_at)
 		 VALUES (?, ?, 'agent', ?)
 		 ON CONFLICT(shell_id) DO UPDATE SET session_id = excluded.session_id, created_at = excluded.created_at`,
@@ -24,7 +26,8 @@ func (s *Store) RegisterBackgroundShell(shellID, sessionID string) error {
 // exists. It satisfies the killshell.ShellStore interface.
 func (s *Store) ShellOwner(shellID string) (string, bool) {
 	var creator string
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(
+		context.Background(),
 		`SELECT creator FROM background_shells WHERE shell_id = ?`, shellID,
 	).Scan(&creator); err != nil {
 		return "", false

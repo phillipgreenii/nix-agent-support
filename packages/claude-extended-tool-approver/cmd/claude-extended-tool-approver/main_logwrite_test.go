@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
@@ -21,7 +22,7 @@ func logTestInput(id string) *hookio.HookInput {
 func rowCount(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM tool_decisions`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM tool_decisions`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -115,5 +116,5 @@ func sqlQueryRow(t *testing.T, dbPath string, n *int) error {
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	return db.QueryRow(`SELECT COUNT(*) FROM tool_decisions`).Scan(n)
+	return db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM tool_decisions`).Scan(n)
 }

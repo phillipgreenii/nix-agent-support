@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 )
@@ -51,7 +52,7 @@ type ArchiveRow struct {
 // DeleteRowsBefore with the same threshold, or the rows it would have
 // captured are gone.
 func (s *Store) QueryRowsBefore(before string) ([]ArchiveRow, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.db.QueryContext(context.Background(), `
 		SELECT id, session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
 			tool_input_hash, tool_input_json, tool_summary, hook_decision, hook_reason,
 			permission_suggestions, outcome, outcome_notes, created_at, resolved_at,
@@ -96,7 +97,7 @@ func (s *Store) QueryRowsBefore(before string) ([]ArchiveRow, error) {
 // when its anchoring decision row never existed), so archiving
 // tool_decisions does not obsolete it.
 func (s *Store) DeleteRowsBefore(before string) (int64, error) {
-	res, err := s.db.Exec(`DELETE FROM tool_decisions WHERE created_at < ?`, before)
+	res, err := s.db.ExecContext(context.Background(), `DELETE FROM tool_decisions WHERE created_at < ?`, before)
 	if err != nil {
 		return 0, fmt.Errorf("delete rows before %s: %w", before, err)
 	}
@@ -113,6 +114,6 @@ func (s *Store) DeleteRowsBefore(before string) (int64, error) {
 // before deciding VACUUM must only run as part of this ceremony, never
 // unconditionally).
 func (s *Store) Vacuum() error {
-	_, err := s.db.Exec("VACUUM")
+	_, err := s.db.ExecContext(context.Background(), "VACUUM")
 	return err
 }

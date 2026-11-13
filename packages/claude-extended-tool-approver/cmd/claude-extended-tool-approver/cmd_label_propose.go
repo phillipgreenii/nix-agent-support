@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -212,7 +213,7 @@ func (t *labelTarget) existing(ids []int) (map[int]rowLabel, error) {
 			marks = append(marks, "?")
 			args = append(args, id)
 		}
-		rs, err := store.DB().Query(`SELECT id, COALESCE(correct_hook_decision,''),
+		rs, err := store.DB().QueryContext(context.Background(), `SELECT id, COALESCE(correct_hook_decision,''),
 			COALESCE(correct_hook_decision_explanation,'') FROM tool_decisions WHERE id IN (`+
 			strings.Join(marks, ",")+`)`, args...)
 		if err != nil {

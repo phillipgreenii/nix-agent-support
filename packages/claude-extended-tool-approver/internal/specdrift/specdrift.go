@@ -1,6 +1,7 @@
 package specdrift
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -170,7 +171,7 @@ var captureEnv = []string{
 // (cd, export) must never reach this function — callers check Exempt
 // first.
 func CaptureHelp(name string) (string, error) {
-	cmd := exec.Command(name, "--help")
+	cmd := exec.CommandContext(context.Background(), name, "--help")
 	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, captureEnv...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

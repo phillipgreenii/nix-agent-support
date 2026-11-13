@@ -1,6 +1,7 @@
 package asklog
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
@@ -14,13 +15,13 @@ func seedArchiveRow(t *testing.T, s *Store, id int, createdAt string, correctDec
 	t.Helper()
 	var err error
 	if correctDecision == nil {
-		_, err = s.db.Exec(`INSERT INTO tool_decisions
+		_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, outcome, created_at)
 			VALUES (?, 'sess1', '/tmp', 'Bash', ?, '{"command":"ls"}', 'ls', 'allow', 'approved', ?)`,
 			id, "h"+createdAt, createdAt)
 	} else {
-		_, err = s.db.Exec(`INSERT INTO tool_decisions
+		_, err = s.db.ExecContext(context.Background(), `INSERT INTO tool_decisions
 			(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 			 hook_decision, outcome, created_at, correct_hook_decision, correct_hook_decision_explanation)
 			VALUES (?, 'sess1', '/tmp', 'Bash', ?, '{"command":"ls"}', 'ls', 'allow', 'approved', ?, ?, ?)`,
@@ -122,14 +123,14 @@ func TestDeleteRowsBefore_OnlyDeletesOldRows(t *testing.T) {
 	}
 
 	var remaining int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM tool_decisions").Scan(&remaining); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM tool_decisions").Scan(&remaining); err != nil {
 		t.Fatalf("count remaining: %v", err)
 	}
 	if remaining != 1 {
 		t.Fatalf("remaining rows = %d, want 1 (only id 3, the one at/after the threshold)", remaining)
 	}
 	var remainingID int
-	if err := s.db.QueryRow("SELECT id FROM tool_decisions").Scan(&remainingID); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), "SELECT id FROM tool_decisions").Scan(&remainingID); err != nil {
 		t.Fatalf("select remaining id: %v", err)
 	}
 	if remainingID != 3 {
@@ -158,7 +159,7 @@ func TestDeleteRowsBefore_CascadesTraceEntries(t *testing.T) {
 		`INSERT INTO decision_trace_entries (tool_decision_id, rule_order, rule_name, decision, reason)
 		 VALUES (2, 1, 'safecmds', 'allow', 'r2')`,
 	} {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(context.Background(), q); err != nil {
 			t.Fatalf("seed trace: %v", err)
 		}
 	}
@@ -172,7 +173,7 @@ func TestDeleteRowsBefore_CascadesTraceEntries(t *testing.T) {
 	}
 
 	var traceCount int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = 1").Scan(&traceCount); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = 1").Scan(&traceCount); err != nil {
 		t.Fatalf("count trace for deleted decision: %v", err)
 	}
 	if traceCount != 0 {
@@ -180,7 +181,7 @@ func TestDeleteRowsBefore_CascadesTraceEntries(t *testing.T) {
 	}
 
 	var survivingTraceCount int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = 2").Scan(&survivingTraceCount); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM decision_trace_entries WHERE tool_decision_id = 2").Scan(&survivingTraceCount); err != nil {
 		t.Fatalf("count trace for surviving decision: %v", err)
 	}
 	if survivingTraceCount != 1 {
@@ -210,7 +211,7 @@ func TestVacuum_SucceedsAfterDelete(t *testing.T) {
 	}
 
 	var integrityResult string
-	if err := s.db.QueryRow("PRAGMA integrity_check").Scan(&integrityResult); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), "PRAGMA integrity_check").Scan(&integrityResult); err != nil {
 		t.Fatalf("integrity_check: %v", err)
 	}
 	if integrityResult != "ok" {
@@ -218,7 +219,7 @@ func TestVacuum_SucceedsAfterDelete(t *testing.T) {
 	}
 
 	var remaining int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM tool_decisions").Scan(&remaining); err != nil {
+	if err := s.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM tool_decisions").Scan(&remaining); err != nil {
 		t.Fatalf("count after vacuum: %v", err)
 	}
 	if remaining != 0 {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"flag"
@@ -68,7 +69,7 @@ func seedCetaHistory(t *testing.T) string {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	_, err = store.DB().Exec(`INSERT INTO tool_decisions
+	_, err = store.DB().ExecContext(context.Background(), `INSERT INTO tool_decisions
 		(id, session_id, cwd, tool_name, tool_input_hash, tool_input_json, tool_summary,
 		 hook_decision, outcome, outcome_notes, permission_mode, created_at)
 		VALUES
@@ -144,7 +145,7 @@ func trackerFixture(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(string(dump)); err != nil {
+	if _, err := db.ExecContext(context.Background(), string(dump)); err != nil {
 		t.Fatalf("load %s: %v", name, err)
 	}
 	if err := db.Close(); err != nil {

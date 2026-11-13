@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -166,7 +167,7 @@ func lookupRepRows(o replayOpts, ids []int) (map[int]repRow, error) {
 		}
 		q := `SELECT id, tool_name, tool_input_json, cwd, permission_mode FROM tool_decisions WHERE id IN (` +
 			strings.Join(marks, ",") + `)`
-		rs, err := store.DB().Query(q, args...)
+		rs, err := store.DB().QueryContext(context.Background(), q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("representative-row lookup: %w", err)
 		}

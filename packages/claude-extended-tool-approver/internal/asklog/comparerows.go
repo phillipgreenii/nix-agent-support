@@ -1,6 +1,9 @@
 package asklog
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 // CompareRow is one ask-log row as compare-tracker reads it: the lasting
 // join key (session_id + tool_use_id) and the fields the comparison checks.
@@ -41,7 +44,7 @@ func (s *Store) QueryCompareRows() ([]CompareRow, error) {
 }
 
 func (s *Store) queryCompareRowsOnce() ([]CompareRow, error) {
-	rows, err := s.db.Query(`SELECT id, session_id, COALESCE(tool_use_id, ''), tool_name,
+	rows, err := s.db.QueryContext(context.Background(), `SELECT id, session_id, COALESCE(tool_use_id, ''), tool_name,
 		hook_decision, outcome, outcome_notes, permission_mode, agent_type, sandbox_enabled,
 		tool_response_exit_code, created_at
 		FROM tool_decisions ORDER BY id`)

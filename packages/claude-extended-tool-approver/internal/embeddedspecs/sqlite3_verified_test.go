@@ -1,6 +1,7 @@
 package embeddedspecs
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,7 +115,7 @@ func realSqlite3(t *testing.T) string {
 
 func runSqlite3(t *testing.T, bin, dir string, args ...string) (string, int) {
 	t.Helper()
-	c := exec.Command(bin, args...)
+	c := exec.CommandContext(context.Background(), bin, args...)
 	c.Dir = dir
 	c.Env = []string{"HOME=" + dir, "PATH=/usr/bin:/bin", "TMPDIR=" + dir}
 	out, err := c.CombinedOutput()
