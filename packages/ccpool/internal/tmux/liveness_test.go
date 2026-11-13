@@ -1,13 +1,11 @@
 package tmux
 
 import (
-	"context"
+	"errors"
+	"fmt"
 	"os/exec"
 	"testing"
 )
-
-// uses a throwaway -L socket so it never touches the user's tmux.
-const testSocket = "ccpool-livetest"
 
 func tmuxAvailable(t *testing.T) {
 	t.Helper()
@@ -16,23 +14,37 @@ func tmuxAvailable(t *testing.T) {
 	}
 }
 
+// TestHasSession_trueForLive_falseAfterKill drives Client.HasSession against a
+// stateful fake runner standing in for a tmux server, so no real tmux starts.
 func TestHasSession_trueForLive_falseAfterKill(t *testing.T) {
-	tmuxAvailable(t)
-	// ensure clean server
-	_ = exec.CommandContext(t.Context(), "tmux", "-L", testSocket, "kill-server").Run()
-	t.Cleanup(func() { _ = exec.CommandContext(context.Background(), "tmux", "-L", testSocket, "kill-server").Run() })
+	live := false
+	c := &Client{Socket: "ccpool-livetest", run: func(args ...string) ([]byte, error) {
+		switch args[2] {
+		case "has-session":
+			if !live {
+				return nil, errors.New("can't find session: cc-live")
+			}
+			return nil, nil
+		case "display-message":
+			return []byte("0\n"), nil
+		case "kill-session":
+			live = false
+			return nil, nil
+		}
+		return nil, fmt.Errorf("unexpected tmux call %v", args)
+	}}
 
-	if HasSession(testSocket, "cc-live") {
+	if c.HasSession("cc-live") {
 		t.Fatal("HasSession true before creation")
 	}
-	if err := exec.CommandContext(t.Context(), "tmux", "-L", testSocket, "new-session", "-d", "-s", "cc-live", "sleep", "30").Run(); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	if !HasSession(testSocket, "cc-live") {
+	live = true
+	if !c.HasSession("cc-live") {
 		t.Fatal("HasSession false for a live session")
 	}
-	_ = exec.CommandContext(t.Context(), "tmux", "-L", testSocket, "kill-session", "-t", "cc-live").Run()
-	if HasSession(testSocket, "cc-live") {
+	if _, err := c.tmux("kill-session", "-t", "cc-live"); err != nil {
+		t.Fatal(err)
+	}
+	if c.HasSession("cc-live") {
 		t.Fatal("HasSession true after kill")
 	}
 }
