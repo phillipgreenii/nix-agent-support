@@ -96,7 +96,7 @@ in the foreground and never polling with `sleep`, `date`, `tail` or repeated
 
 ```bash
 OLD_PRIMARY=$(git -C "$CC" rev-parse "$PRIMARY")
-bgrun "pgl-land-$(basename "$CC")-$FB" -- pg-git-lander land "$FB" --source-worktree "$WT" --json
+bgrun "pgl-land-$(basename "$CC")-$FB" -- pg-git-lander land "$FB" --repo "$CC" --source-worktree "$WT" --wait 20m --json
 bgwait "pgl-land-$(basename "$CC")-$FB" --timeout 540   # Bash timeout: 600000; exit 2 = still running, call it again
 ```
 
@@ -104,6 +104,47 @@ bgwait "pgl-land-$(basename "$CC")-$FB" --timeout 540   # Bash timeout: 600000; 
 which holds the outcome JSON. Branch on the exit code and the outcome, never on
 `bgrun`'s own exit status. A caller killed anyway produces an `interrupted` stop,
 which `--continue` resumes.
+
+**Name the repository on every command.** `land`, `rebase` and every resume flag
+(`--continue`, `--skip`, `--abort`, `--quit`) MUST carry `--repo <repo-root>`
+(here `--repo "$CC"`), including under `bgrun`: a detached job does not inherit
+the caller's directory, and a job started from a non-repository directory exits 2
+with "not inside a git repository". Running from the repository directory (a
+worktree, or `env -C <repo-root>`) is only the fallback when `--repo` is
+unavailable, never the first choice (operator ruling, Phillip, 2026-11-13: "if
+something is to be specific about the repo, then --repo is the better option").
+The working recipe is:
+
+```bash
+bgrun NAME -- pg-git-lander land <branch> --repo <repo-root> --source-worktree <worktree> --json
+```
+
+**One long wait for a busy target.** Landings onto one target are serial. The
+tool's own default wait stays 60 seconds; this handler passes `--wait 20m` (or a
+different value it chose) so a land queues behind the one in front of it instead of
+retrying by hand. The wait is bounded by `bgrun`/`bgwait`, so no foreground
+command waits for it (operator ruling, Phillip, 2026-11-13: "wait vs
+retry-twice-then-ask is better"). The wait covers a `busy` target only: a
+`stopped-pending` or `target-stopped` refusal is a different outcome that `--wait`
+may not cover, and the handler reports it to the caller as such rather than
+waiting on it.
+
+**Never leave a land stopped.** A stopped land holds the target's `_main`
+worktree lock and blocks every other land into that target (operator ruling,
+Phillip, 2026-11-13: "agents should not leave the main blocked"). When a land
+stops for any reason the agent cannot resolve promptly (host-load exit 75, a hook
+failure, a timeout, a conflict it will not fix now), the agent MUST first track
+the problem, by filing or refreshing the issue tracker's bead for the branch with
+the stop reason and the command output, and then MUST run
+`pg-git-lander land <branch> --abort --repo <repo-root>` so others can land.
+`--continue` is allowed only for a stop the agent will resolve right away.
+
+**Launcher `PATH`.** `pg-git-lander` is on the user `PATH` so a person can use it
+(operator ruling, Phillip, 2026-11-13: "pg-git-lander should be on the user PATH
+because it can be used by a person"). A non-interactive launcher (a `ccpool` role,
+a daemon, a `pg-wrap` spec) replaces the inherited `PATH`, so it MUST list
+`pg-git-lander` explicitly alongside `integrate-branch-support`, `bgrun`,
+`bgwait` and `pg-hooks`.
 
 The four things the tool deliberately does not enforce, and that this handler (and
 any agent that calls the tool) MUST do:
@@ -195,25 +236,26 @@ The tool prints one outcome. With `--json` it is an object with `outcome`, `exit
 Exit codes (the shared `x/exitcode` values plus two app codes): 0 done, 1 internal
 error, 2 usage error, 7 config error, 9 `busy`, 21 `stopped`, 22 `refused`.
 
-| Outcome                                                                                                                                       | Handler action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `landed` (0)                                                                                                                                  | Continue to "After landing". Report `landed`. Relay each `warnings` entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `nothing-to-land` (0)                                                                                                                         | Report `landed` noting nothing was left to land (the target already held every change); the tool's branch and worktree handling still applies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `busy` (9)                                                                                                                                    | Retryable, nothing changed. Run again after a short pause, at most twice; then stop and ask (R-7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `stopped`, reason `conflict` or `resolve-failed` (21)                                                                                         | The operation waits in the work worktree (the outcome's `next` and `paths` name it). Resolve in that worktree, `git add` the paths, and run `pg-git-lander land "$FB" --continue` (or `--skip`); when not confident in the resolution, run `--abort` and report `stopped:rebase-conflict` with the conflicted paths. Summarize every confident resolution to the user. Never hand-resolve `flake.lock` JSON: a repository that wants it merged mechanically declares a `[[conflict]]` rule for it, and an unresolved one is a stop.                                                                                                   |
-| `stopped`, reason `hook-failed` at `before_move` (21)                                                                                         | Read `log_tail` for which hook failed. The pre-land hook run failing: report `stopped:precommit-branch-diff-failed` with the repo, the failing hook(s) and their output; the handler does not fix a hook violation itself (operator-decided); `--abort`. The evaluation check failing: report `stopped:eval-failed`, naming the failing output and the reproduce command `pre-land-eval "$WT" "$FB"` (or `pn workspace flake-check --no-build --rev "$FB" "$WT"`); this is **agent-fixable** (AGENT-FIXABLE): `--abort`, fix the evaluation error in `<WT>`, commit, and re-invoke `integrate-branch`. The two MUST NOT be conflated. |
-| `stopped`, retryable reason (`transient`, `timeout`, `interrupted`, `race`, `lock-lost`, `holder-died`, `checkout-changed`) (21)              | `--continue` after a pause, or `--abort`. The tool already retries a lost fast-forward race `max_race_retries` times; a persistent `race` after that is a stop-and-ask (R-7).                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `stopped`, any other reason (`max-conflict-rounds`, `branch-moved`, `move-unverified`, `commit-rejected`, `git-error`, `internal-error`) (21) | `--abort` (or `--quit` where only that is valid), and report the reason and `log_tail` verbatim. Do not map it onto a nearer reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `refused` (22)                                                                                                                                | Nothing changed (except `holder-died`, which converted a record to `stopped`). Report `stopped:<reason>` using the tool's own reason. For a dirty `<WT>` report `stopped:worktree-dirty` with `git -C "$WT" status --porcelain`; for a foreign rebase in `<WT>` report `stopped:rebase-in-progress`; the operator commits, stashes, finishes or aborts, then re-invokes. For `stopped-pending` or `target-stopped`, resolve or `--abort` that operation first. The handler MUST NOT perform the disposition itself.                                                                                                                   |
-| `config-error` (7), `usage-error` (2)                                                                                                         | The invocation or configuration is wrong; the fix is the command or the file, not the code. Report the message verbatim.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| exit 127 (command not installed)                                                                                                              | `pg-git-lander not installed on this machine; ask the operator to run pn workspace apply`: halt and report; the handler MUST NOT fall back to a hand-rolled rebase and merge.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Outcome                                                                                                                                       | Handler action                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `landed` (0)                                                                                                                                  | Continue to "After landing". Report `landed`. Relay each `warnings` entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `nothing-to-land` (0)                                                                                                                         | Report `landed` noting nothing was left to land (the target already held every change); the tool's branch and worktree handling still applies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `busy` (9)                                                                                                                                    | Nothing changed. The `--wait 20m` already queued behind the holder; a `busy` after it is a stop: track it, report `busy`, and ask (R-7). Do not retry in a loop.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `stopped`, reason `conflict` or `resolve-failed` (21)                                                                                         | The operation waits in the work worktree (the outcome's `next` and `paths` name it). Resolve in that worktree right away, `git add` the paths, and run `pg-git-lander land "$FB" --continue --repo "$CC"` (or `--skip --repo "$CC"`); when not confident in the resolution or not resolving it now, track the problem and run `pg-git-lander land "$FB" --abort --repo "$CC"`, then report `stopped:rebase-conflict` with the conflicted paths. Summarize every confident resolution to the user. Never hand-resolve `flake.lock` JSON: a repository that wants it merged mechanically declares a `[[conflict]]` rule for it, and an unresolved one is a stop. |
+| `stopped`, reason `hook-failed` at `before_move` (21)                                                                                         | Read `log_tail` for which hook failed. The pre-land hook run failing: report `stopped:precommit-branch-diff-failed` with the repo, the failing hook(s) and their output; the handler does not fix a hook violation itself (operator-decided); `--abort`. The evaluation check failing: report `stopped:eval-failed`, naming the failing output and the reproduce command `pre-land-eval "$WT" "$FB"` (or `pn workspace flake-check --no-build --rev "$FB" "$WT"`); this is **agent-fixable** (AGENT-FIXABLE): `--abort`, fix the evaluation error in `<WT>`, commit, and re-invoke `integrate-branch`. The two MUST NOT be conflated.                          |
+| `stopped`, retryable reason (`transient`, `timeout`, `interrupted`, `race`, `lock-lost`, `holder-died`, `checkout-changed`) (21)              | `--continue --repo "$CC"` right away, otherwise track the problem and `--abort --repo "$CC"`; never leave it stopped. The tool already retries a lost fast-forward race `max_race_retries` times; a persistent `race` after that is a track, `--abort`, then ask (R-7).                                                                                                                                                                                                                                                                                                                                                                                        |
+| `stopped`, any other reason (`max-conflict-rounds`, `branch-moved`, `move-unverified`, `commit-rejected`, `git-error`, `internal-error`) (21) | Track the problem, then `--abort --repo "$CC"` (or `--quit --repo "$CC"` where only that is valid), and report the reason and `log_tail` verbatim. Do not map it onto a nearer reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `refused` (22)                                                                                                                                | Nothing changed (except `holder-died`, which converted a record to `stopped`). Report `stopped:<reason>` using the tool's own reason. For a dirty `<WT>` report `stopped:worktree-dirty` with `git -C "$WT" status --porcelain`; for a foreign rebase in `<WT>` report `stopped:rebase-in-progress`; the operator commits, stashes, finishes or aborts, then re-invokes. For `stopped-pending` or `target-stopped`, which `--wait` may not cover, report it to the caller as that outcome; the stopped operation's owner resolves or `--abort`s it first. The handler MUST NOT perform the disposition itself.                                                 |
+| `config-error` (7), `usage-error` (2)                                                                                                         | The invocation or configuration is wrong; the fix is the command or the file, not the code. Report the message verbatim.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| exit 127 (command not installed)                                                                                                              | `pg-git-lander not installed on this machine; ask the operator to run pn workspace apply`: halt and report; the handler MUST NOT fall back to a hand-rolled rebase and merge.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 Each `stopped:<reason>` reported MUST be the reason matching the state actually
 observed. The handler MUST NOT map an unenumerated state onto the nearest existing
 reason; consumers key their operator advice on the string.
 
 A resumed operation (`--continue`, `--skip`, `--abort`, `--quit`) keeps its original
-context, roles and flags and accepts no worktree or keep flags. The operation word
+context, roles and flags and accepts no worktree or keep flags, but it still takes
+`--repo <repo-root>`, which MUST be passed. The operation word
 MUST match the stopped operation (`land`).
 
 ## Bringing a branch up to date — `pg-git-lander rebase`
@@ -223,12 +265,12 @@ primary branch without landing it (for example to resolve a conflict early or af
 a `race`), use the tool, never a hand-run `git rebase`:
 
 ```bash
-pg-git-lander rebase "$FB" --onto "$PRIMARY" --source-worktree "$WT" --json
+pg-git-lander rebase "$FB" --onto "$PRIMARY" --repo "$CC" --source-worktree "$WT" --json
 ```
 
 `<FB>` ends equal to the result, left on the branch, clean. The same stop handling
 as above applies to its outcome. To pull the primary branch from its remote:
-`git fetch`, then `pg-git-lander rebase "$PRIMARY" --onto "origin/$PRIMARY"` (an
+`git fetch`, then `pg-git-lander rebase "$PRIMARY" --onto "origin/$PRIMARY" --repo "$CC"` (an
 ordinary rebase of a checked-out branch whose source and work worktree is the main
 worktree, which MUST be clean; see "Pull" above for the conflict-stop hazard).
 A direct `git rebase` of the primary branch is refused by the repository's
@@ -273,18 +315,18 @@ gone.
 flowchart TD
     A["agent in WT on FB"] --> F0{"FF-0: CC on primary, clean, no core.worktree?"}
     F0 -->|No| S0["STOP: R-3/R-8, report"]
-    F0 -->|Yes| L["bgrun + bgwait: pg-git-lander land FB --source-worktree WT --json"]
+    F0 -->|Yes| L["bgrun + bgwait: pg-git-lander land FB --repo CC --source-worktree WT --wait 20m --json"]
     L --> O{"outcome"}
     O -->|"landed / nothing-to-land"| R["bundle refresh (reported, never fails the land), cd to CC, report landed"]
-    O -->|"busy"| B["pause and run again, at most twice, then ask"]
+    O -->|"busy after the wait"| B["track, report busy, ask"]
     O -->|"stopped: conflict"| C{"confident in the resolution?"}
     C -->|Yes| CC["resolve in the work worktree, add, land FB --continue"]
-    C -->|No| AB["land FB --abort, report stopped:rebase-conflict"]
+    C -->|No| AB["track the problem, land FB --abort --repo CC, report stopped:rebase-conflict"]
     O -->|"stopped: hook-failed at before_move"| H{"which hook?"}
-    H -->|"pre-land hook run"| S1["abort, report stopped:precommit-branch-diff-failed"]
-    H -->|"evaluation check"| S2["abort, report stopped:eval-failed, agent fixes and re-invokes"]
-    O -->|"stopped: retryable"| T["land FB --continue after a pause, or abort"]
-    O -->|"stopped: other"| S3["abort, report the reason verbatim"]
+    H -->|"pre-land hook run"| S1["track, abort, report stopped:precommit-branch-diff-failed"]
+    H -->|"evaluation check"| S2["track, abort, report stopped:eval-failed, agent fixes and re-invokes"]
+    O -->|"stopped: retryable"| T["continue right away, else track and abort"]
+    O -->|"stopped: other"| S3["track, abort, report the reason verbatim"]
     O -->|"refused"| S4["report stopped:reason, operator disposes, re-invoke"]
 ```
 
@@ -339,5 +381,12 @@ resolved. Its `<reason>` values, and what the operator does next:
 - The handler MUST NOT remove, reset, or otherwise mutate `<CC>` beyond what the
   tool does and the bundle refresh (which writes only under `<CC>`'s
   `.git/pg-hooks`).
-- The handler MUST bound its retries and stop and ask after the second consecutive
-  `busy` or `race` (R-7) rather than retry indefinitely.
+- The handler MUST pass `--repo <repo-root>` on `land`, `rebase` and every resume
+  flag, and MUST wait with one `--wait 20m` under `bgrun`/`bgwait` rather than
+  retrying a busy target by hand; it MUST stop and ask (R-7) after a `busy` or
+  `race` that outlasts the wait.
+- The handler MUST NOT leave a land stopped: it MUST first track the problem in
+  the issue tracker (the bead for the branch) and then run
+  `pg-git-lander land <branch> --abort --repo <repo-root>`, unless it resolves the stop right away with `--continue`.
+- A non-interactive launcher that runs this handler MUST list `pg-git-lander` on
+  its `PATH` explicitly.

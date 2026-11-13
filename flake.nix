@@ -2403,6 +2403,24 @@
                     touch $out
                   '';
 
+              # The ff-merge-to-main skill pins its landing recipe text: --repo on every
+              # pg-git-lander command, the single --wait 20m, the never-leave-a-land-stopped
+              # rule and the launcher PATH statement (operator rulings, 2026-11-13).
+              test-ff-merge-to-main-skill =
+                pkgs.runCommand "test-ff-merge-to-main-skill"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export FFS_SKILL="${./claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md}"
+                    bats --verbose-run ${./tests/ff-merge-to-main-skill.bats}
+                    touch $out
+                  '';
+
               # Named drain subagents (pg2-5ggo5o, ADR 0113): the pb drain agents pin model and
               # effort in frontmatter and every drain-one dispatch site points at the one rule that
               # names them, so a drain session's own model never decides its subagents'.
