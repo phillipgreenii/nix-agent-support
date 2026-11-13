@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
@@ -44,6 +45,10 @@ type Reporter interface {
 	Push(s Snapshot)
 	Notify(title, body string)
 	Clear()
+	// Reset forgets what the reporter remembers having pushed, so the next Push
+	// re-sends everything. The bridge calls it before each (re)connect because
+	// cmux may have lost its sidebar state meanwhile.
+	Reset()
 }
 
 // Options configures NewReporter. RunCmd and LookupEnv are injectable for tests;
@@ -90,6 +95,7 @@ type noop struct{}
 func (noop) Push(Snapshot)         {}
 func (noop) Notify(string, string) {}
 func (noop) Clear()                {}
+func (noop) Reset()                {}
 
 // cmuxReporter speaks to cmux via subprocesses. Method implementations land in
 // Tasks 3 and 4; for now they are empty stubs so Task 2's gating tests can pass.
@@ -103,6 +109,28 @@ type cmuxReporter struct {
 	// synchronization is needed.
 	colorEmitted       bool
 	lastWorkspaceColor string
+
+	// mu guards the remembered set-status / set-progress tuples below. Push runs
+	// on one goroutine (the async worker or the caller) while Reset/Clear run on
+	// another, so the dedup state needs a lock. It is held only around the state
+	// reads/writes, never across a cmux subprocess call.
+	mu sync.Mutex
+	// statusKey / progressKey are the rendered tuples last pushed successfully;
+	// the matching *Sent flag says whether one is remembered. A call is skipped
+	// when its tuple equals the remembered one (rendered strings, not the
+	// Snapshot, so e.g. PausedResetAt noise never defeats the dedup).
+	statusKey    string
+	statusSent   bool
+	progressKey  string
+	progressSent bool
+}
+
+// Reset forgets the remembered set-status and set-progress tuples.
+func (c *cmuxReporter) Reset() {
+	c.mu.Lock()
+	c.statusSent = false
+	c.progressSent = false
+	c.mu.Unlock()
 }
 
 func (c *cmuxReporter) run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -148,9 +176,20 @@ func (c *cmuxReporter) log(msg string) {
 // short-circuit subsequent calls.
 func (c *cmuxReporter) Push(s Snapshot) {
 	value, icon, color := pillContent(s)
-	if _, err := c.runCall("cmux", "set-status", "claude-agents", value,
-		"--icon", icon, "--color", color); err != nil {
-		c.log(fmt.Sprintf("cmux set-status claude-agents: %v", err))
+	statusKey := value + "\x00" + icon + "\x00" + color
+	c.mu.Lock()
+	statusSkip := c.statusSent && c.statusKey == statusKey
+	c.mu.Unlock()
+	if !statusSkip {
+		if _, err := c.runCall("cmux", "set-status", "claude-agents", value,
+			"--icon", icon, "--color", color); err != nil {
+			c.log(fmt.Sprintf("cmux set-status claude-agents: %v", err))
+		} else {
+			// Remember only after success so a failed call is retried.
+			c.mu.Lock()
+			c.statusKey, c.statusSent = statusKey, true
+			c.mu.Unlock()
+		}
 	}
 
 	if s.HasProgress {
@@ -161,12 +200,23 @@ func (c *cmuxReporter) Push(s Snapshot) {
 		if v > 1 {
 			v = 1
 		}
-		args := []string{"set-progress", fmt.Sprintf("%.2f", v)}
+		formatted := fmt.Sprintf("%.2f", v)
+		args := []string{"set-progress", formatted}
 		if s.ProgressLabel != "" {
 			args = append(args, "--label", s.ProgressLabel)
 		}
-		if _, err := c.runCall("cmux", args...); err != nil {
-			c.log(fmt.Sprintf("cmux set-progress: %v", err))
+		progressKey := formatted + "\x00" + s.ProgressLabel
+		c.mu.Lock()
+		progressSkip := c.progressSent && c.progressKey == progressKey
+		c.mu.Unlock()
+		if !progressSkip {
+			if _, err := c.runCall("cmux", args...); err != nil {
+				c.log(fmt.Sprintf("cmux set-progress: %v", err))
+			} else {
+				c.mu.Lock()
+				c.progressKey, c.progressSent = progressKey, true
+				c.mu.Unlock()
+			}
 		}
 	}
 
@@ -249,4 +299,6 @@ func (c *cmuxReporter) Clear() {
 	}
 	c.colorEmitted = true
 	c.lastWorkspaceColor = ""
+	// The sidebar entries are gone, so the next Push must re-send them.
+	c.Reset()
 }

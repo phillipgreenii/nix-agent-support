@@ -295,6 +295,7 @@ func (f *fakeReporter) Notify(title, body string) {
 	f.notifies = append(f.notifies, [2]string{title, body})
 }
 func (f *fakeReporter) Clear() { f.clears++ }
+func (f *fakeReporter) Reset() {}
 
 func TestModelPushesEveryNTicks(t *testing.T) {
 	fr := &fakeReporter{}

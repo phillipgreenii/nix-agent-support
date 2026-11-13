@@ -404,6 +404,7 @@ type noopReporter struct{}
 func (noopReporter) Push(cmuxstatus.Snapshot) {}
 func (noopReporter) Notify(string, string)    {}
 func (noopReporter) Clear()                   {}
+func (noopReporter) Reset()                   {}
 
 // buildSidebarSnapshot collects current TUI state into a Snapshot for push.
 func (m *Model) buildSidebarSnapshot() cmuxstatus.Snapshot {

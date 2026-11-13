@@ -86,3 +86,9 @@ func (a *asyncReporter) Clear() {
 		a.inner.Clear()
 	})
 }
+
+// Reset forwards to the inner reporter, which owns the remembered state; the
+// async layer keeps no copy of it.
+func (a *asyncReporter) Reset() {
+	a.inner.Reset()
+}

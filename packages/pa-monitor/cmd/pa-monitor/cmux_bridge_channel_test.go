@@ -155,6 +155,7 @@ func (r *fakeReporter) Push(s cmuxstatus.Snapshot) {
 }
 func (r *fakeReporter) Notify(string, string) {}
 func (r *fakeReporter) Clear()                {}
+func (r *fakeReporter) Reset()                {}
 func (r *fakeReporter) pushCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

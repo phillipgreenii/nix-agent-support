@@ -46,6 +46,8 @@ func (b *blockingReporter) Clear() {
 	b.mu.Unlock()
 }
 
+func (b *blockingReporter) Reset() {}
+
 func (b *blockingReporter) snapshots() []Snapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()

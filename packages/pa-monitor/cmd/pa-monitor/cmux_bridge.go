@@ -431,6 +431,9 @@ func runCmuxBridge(args []string) {
 	}
 
 	for {
+		// cmux may have lost its sidebar state while disconnected: forget what the
+		// reporter believes it pushed so the new session repaints everything.
+		reporter.Reset()
 		err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer, cfg.StaleAfter, opts)
 		switch classifyBridgeResult(err, ctx.Err()) {
 		case bridgeStop:
