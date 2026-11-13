@@ -14,11 +14,12 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/orphan"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/tmpldata"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// exitFailed is the generic handler failure. A handler MUST NOT let a usage
-// error leak exit 2, which the wrapper reads as "declined".
-const exitFailed = 1
+// exitFailed is the generic handler failure. Any code outside the handler
+// contract table (0, 23, 24) is read by the wrapper as "failed".
+const exitFailed = exitcode.Error
 
 // rescueLabel names this handler's label on every item it files.
 const rescueLabel = "pg-rescue"

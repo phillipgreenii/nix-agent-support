@@ -48,7 +48,7 @@ func TestCheckExit1WhenABinaryIsMissing(t *testing.T) {
 func TestCheckExit70OnConfigError(t *testing.T) {
 	h := newHarness(t, "[handler.h]\n")
 	code, stdout, stderr := h.run("check", "--config", h.cfgPath)
-	if code != 70 || stdout != "" {
+	if code != 20 || stdout != "" {
 		t.Errorf("code=%d stdout=%q", code, stdout)
 	}
 	contains(t, "stderr", stderr, "pg-rescue: ", "[handler.h]", `missing required key "command"`)
@@ -61,7 +61,7 @@ func TestCheckExit70OnMissingConfigAndBadArgs(t *testing.T) {
 		"bad flag":     {"check", "--nope"},
 		"positional":   {"check", "sync"},
 	} {
-		if code, stdout, _ := h.run(args...); code != 70 || stdout != "" {
+		if code, stdout, _ := h.run(args...); code != 20 || stdout != "" {
 			t.Errorf("%s: code=%d stdout=%q", name, code, stdout)
 		}
 	}
@@ -83,7 +83,7 @@ func TestCheckChainFilterListsOnlyThatChain(t *testing.T) {
 func TestCheckUnknownChainListsValidOnes(t *testing.T) {
 	h := newHarness(t, goodConfig)
 	code, stdout, stderr := h.run("check", "--config", h.cfgPath, "--chain", "snyc")
-	if code != 70 || stdout != "" {
+	if code != 20 || stdout != "" {
 		t.Errorf("code=%d stdout=%q", code, stdout)
 	}
 	contains(t, "stderr", stderr, `unknown chain "snyc" in --chain; configured: sync`)

@@ -75,7 +75,7 @@ func TestNewFillsEveryField(t *testing.T) {
 		Exit:        1,
 		OutputTail:  "error: could not apply 1a2b3c4... update flake.lock\nCONFLICT (content): Merge conflict in flake.lock\nCONFLICT (content): Merge conflict in README.md\n",
 		Attempts: []Attempt{
-			{Handler: "flake-lock-conflict", Position: 1, Outcome: "declined", Reason: "exit 2", Summary: "Conflict spans source files, not just flake.lock"},
+			{Handler: "flake-lock-conflict", Position: 1, Outcome: "declined", Reason: "exit 23", Summary: "Conflict spans source files, not just flake.lock"},
 			{
 				Handler: "fix-small", Position: 2, Outcome: "failed", Reason: "resolved → verify failed (exit 128)",
 				Summary: "Resolved the conflict markers and continued the rebase",

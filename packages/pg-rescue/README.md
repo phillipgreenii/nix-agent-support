@@ -2,7 +2,7 @@
 
 `pg-rescue` wraps a command. When the command fails, it runs a named chain of failure handlers. A
 handler is an independent executable behind one contract: it reads the failure report from
-`$PG_RESCUE_REPORT`, logs to stderr, and answers with an exit code (`0` resolved, `2` declined, `3`
+`$PG_RESCUE_REPORT`, logs to stderr, and answers with an exit code (`0` resolved, `23` declined, `24`
 deferred, anything else failed) plus an optional result JSON object on stdout.
 
 The design of record is under `docs/superpowers/specs/` at the repo root. This README documents
@@ -43,20 +43,33 @@ pg-rescue check [--chain NAME] [--config PATH]
   handler.
 - `--stdin` treats stdin as the failure output instead of running a command. `--verify` is required.
 - `--result-file F` writes the run's [run log](#run-log) line to `F` as one JSON object. It tells a
-  reserved exit code (`70`, `75`) apart from a command that exited with the same number. If `F`
+  reserved exit code (`20`, `21`, `22`) apart from a command that exited with the same number. If `F`
   cannot be written, a warning is printed (not under `-q`) and the exit code is unchanged.
 - `-q`, `-v`, `-vv` set the [display](#display) level.
 
 ### Exit codes
 
-| Situation                                                        | Exit                                                                                                          |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Command succeeded                                                | `0`                                                                                                           |
-| A handler returned `resolved` and verify passed                  | `0`                                                                                                           |
-| A handler returned `deferred`                                    | `75`                                                                                                          |
-| Every handler declined or failed                                 | the command's own code; `128+signo` if a signal it did not get from the wrapper killed it; `1` with `--stdin` |
-| Wrapper error (CLI, config, run directory, spawning the command) | `70`, before the command runs                                                                                 |
-| The wrapper received `SIGINT`, `SIGTERM` or `SIGHUP`             | `130`, `143` or `129`; the chain stops                                                                        |
+The wrapper's own codes are app codes (20 to 63) of the shared exit-code table (`x/exitcode`): `20`
+wrapper error, `21` deferred, `22` `--stdin` mode where no handler resolved or deferred the failure.
+The handler contract uses `23` declined and `24` deferred. Codes 64 to 78 (sysexits), 124, 126, 127,
+128+n and 255 are never assigned by pg-rescue.
+
+Collision story: the wrapper passes the wrapped command's own exit code through when nothing handled
+the failure, so a command that itself exits `20`, `21` or `22` looks like the wrapper's code. The
+run log (`--result-file`) tells them apart: its `result` field is `error`, `deferred` or
+`unhandled`, and `exit` holds the command's own code. A caller that needs to branch MUST read the
+run log, not the exit code alone; callers that only act on `0` and `21` accept that a command with
+that exact code is misread. Both sides of the old contract (70, 75, handler 2 and 3) changed in the
+same landing.
+
+| Situation                                                        | Exit                                                                                                           |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Command succeeded                                                | `0`                                                                                                            |
+| A handler returned `resolved` and verify passed                  | `0`                                                                                                            |
+| A handler returned `deferred`                                    | `21`                                                                                                           |
+| Every handler declined or failed                                 | the command's own code; `128+signo` if a signal it did not get from the wrapper killed it; `22` with `--stdin` |
+| Wrapper error (CLI, config, run directory, spawning the command) | `20`, before the command runs                                                                                  |
+| The wrapper received `SIGINT`, `SIGTERM` or `SIGHUP`             | `130`, `143` or `129`; the chain stops                                                                         |
 
 Writing the display, the run log, `display.log` or `--result-file` never changes the exit code.
 
@@ -68,8 +81,8 @@ on `/dev/null`, in its own process group, and kills what is left of that group w
 | Handler exit                                      | Outcome    | Chain             |
 | ------------------------------------------------- | ---------- | ----------------- |
 | `0`                                               | `resolved` | stop, then verify |
-| `2`                                               | `declined` | continue          |
-| `3`                                               | `deferred` | stop              |
+| `23`                                              | `declined` | continue          |
+| `24`                                              | `deferred` | stop              |
 | anything else (timeout, signal, spawn failure...) | `failed`   | continue          |
 
 The handler reads the failure report at `$PG_RESCUE_REPORT` and may print one JSON object on stdout:
@@ -116,7 +129,7 @@ wrapper.
 | `-vv`   | passed through | the `-v` output, plus each handler's argv, exit code, duration, timeout, `description`, `meta` and stderr              |
 
 `-q` silences pg-rescue's own text, warnings included. It does not silence a wrapper error (exit
-`70`), which is printed before anything runs.
+`20`), which is printed before anything runs.
 
 Whatever the level, whenever a handler ran, the display rendered at `-vv` is also written to
 `<run-dir>/display.log` (without the leading blank line), so "what happened in run X" can always be
@@ -129,7 +142,7 @@ A run with the design's example chain looks like this at the default level:
 
 == pg-rescue: `git pull --rebase` exited 1 · chain sync ==
 
-== [1/5] flake-lock-conflict: declined (exit 2) ==
+== [1/5] flake-lock-conflict: declined (exit 23) ==
 Conflict spans source files, not just flake.lock
 
 == [2/5] fix-small: failed (verify failed: exit 128) ==
@@ -143,7 +156,7 @@ Finished the half-continued rebase; kept both sides of the README conflict
 ```
 
 The footer names the deciding handler and the run id, and the exit code when it is not `0`:
-`deferred by H · exit 75 · working copy left as-is`, `unhandled · exit N`, and
+`deferred by H · exit 21 · working copy left as-is`, `unhandled · exit N`, and
 `interrupted during H · working copy may be mid-change · exit 130`. With `--handlers` the header
 reads `handlers a,b,c` where a chain reads `chain NAME`; with `--stdin` it reads `stdin input`. The
 golden files under `internal/runner/testdata/golden/` show every result at every level.
@@ -152,7 +165,7 @@ golden files under `internal/runner/testdata/golden/` show every result at every
 
 Lookup order: `--config PATH`, then `$PG_RESCUE_CONFIG`, then
 `${XDG_CONFIG_HOME:-~/.config}/pg-rescue/config.toml`. The whole file is validated at every start; a
-config error exits `70` before the command runs and names the file, the table and the key.
+config error exits `20` before the command runs and names the file, the table and the key.
 
 ```toml
 redact = ['ghp_[A-Za-z0-9]{36}', 'Authorization: \S+']
@@ -179,7 +192,7 @@ handlers = ["flake-lock-conflict", "fix-small", "p1-later", "notify"]
 | `chain.NAME.handlers`      | non-empty list of instance names                                                                       |
 
 `pg-rescue check` validates the config the same way and lists every handler with its resolved
-`command[0]` or `NOT FOUND`; it exits `1` if a binary is missing and `70` on a config error.
+`command[0]` or `NOT FOUND`; it exits `1` if a binary is missing and `20` on a config error.
 
 ## Run directory
 
@@ -190,7 +203,7 @@ handlers = ["flake-lock-conflict", "fix-small", "p1-later", "notify"]
   `0600`, whatever the user's umask.
 - The run id is a UTC timestamp and 32 random bits, `20261002T140311Z-7f3a9c2e`. The directory is
   made with `mkdir` and a new id is drawn on collision. If it cannot be created the wrapper exits
-  `70` before the command runs.
+  `20` before the command runs.
 - The running wrapper holds an `flock` on `<run-dir>/.lock`.
 - The directory is removed on the happy path (and after a wrapper error) and kept when a handler ran
   or the run was interrupted.
@@ -454,7 +467,7 @@ with `--time-limit` and, if wanted, `--claude-arg --max-budget-usd --claude-arg 
 
 1. The final message is `structured_output` when the CLI reports one, otherwise `.result`.
 2. It is parsed as the result object: exactly one JSON object naming an `outcome` of `resolved`,
-   `declined` or `deferred`. The handler exits `0`, `2` or `3` accordingly and prints
+   `declined` or `deferred`. The handler exits `0`, `23` or `24` accordingly and prints
    `{outcome, summary, details, meta}`. A message wrapped whole in one code fence is accepted.
 3. `meta` is taken from the CLI's JSON: `session_id`, `total_cost_usd`, `num_turns`, `usage` and
    `model`. Only fields the CLI reported appear. The CLI JSON has no top-level `model`; the handler
@@ -625,7 +638,7 @@ instance depends on the failing command's repo.
 - `--annotate-from-env NAME` is `--annotate` with the item id read from the environment variable
   `NAME` instead of the command line, for a chain handler whose argv is static while the id is known
   only at dispatch time (the role shim exports it, `PG_ROUTER_ITEM_ID`, which pg-router exports to every command role). It takes
-  `--add-label` exactly as `--annotate` does, exits `3` (deferred) on success, and is mutually
+  `--add-label` exactly as `--annotate` does, exits `24` (deferred) on success, and is mutually
   exclusive with `--annotate` and `--dedup-query`. An unset, empty or whitespace-only variable is a
   usage error and exits `1`; a non-empty value is passed to the tracker as-is, unvalidated.
 - A malformed entry (no `=`, an empty `REPO`, an empty `INSTANCE`) is a usage error and exits `1`.
@@ -676,7 +689,7 @@ origin and two clones), with only `nix`, `claude` and `pg-connector` faked:
 - A lock-only conflict is resolved by `flake-lock-conflict` and exits `0`. No agent runs and nothing
   is filed.
 - A source-file conflict is declined by `flake-lock-conflict` and by `fix-small` (the fake `claude`
-  answers `declined`), then deferred by `p1-later`: the run exits `75`, the repository is left
+  answers `declined`), then deferred by `p1-later`: the run exits `21`, the repository is left
   mid-rebase, and the run log records `declined, declined, deferred`.
 
 They run in their own check, `nix build .#checks.<system>.pg-rescue-integration-tests`, so they stay
@@ -735,7 +748,7 @@ precedent. It needs network access, a logged-in `claude`, and `nix`.
 
 4. Source conflict. Edit the same line of `flake.nix` in `other` and `work`, push `other`, then run
    the same command. Expect `fix-small` to run the real `claude`, the run to finish `resolved`
-   (the agent fixed it and verify passed) or `deferred` (exit `75`, a bead in the scratch tracker,
+   (the agent fixed it and verify passed) or `deferred` (exit `21`, a bead in the scratch tracker,
    the repository left mid-rebase). Either is a pass; what you are checking is that the verdict, the
    run log and the tracker agree:
 

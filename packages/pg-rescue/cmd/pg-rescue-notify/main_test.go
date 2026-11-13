@@ -107,8 +107,8 @@ func withSummary(t *testing.T, summary string) string {
 
 func assertDeclined(t *testing.T, res contracttest.Result) {
 	t.Helper()
-	if res.Exit != 2 || res.Outcome != contract.Declined {
-		t.Fatalf("exit=%d outcome=%s reason=%q stderr=%q; want exit 2 declined", res.Exit, res.Outcome, res.Reason, res.Stderr)
+	if res.Exit != contract.ExitDeclined || res.Outcome != contract.Declined {
+		t.Fatalf("exit=%d outcome=%s reason=%q stderr=%q; want exit 23 declined", res.Exit, res.Outcome, res.Reason, res.Stderr)
 	}
 }
 

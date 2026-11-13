@@ -30,8 +30,8 @@
       "position": 1,
       "tags": ["deterministic"],
       "outcome": "declined",
-      "reason": "exit 2",
-      "exit": 2,
+      "reason": "exit 23",
+      "exit": 23,
       "duration_ms": 310,
       "stderr_file": "/abs/run-dir/attempt-1.stderr.log",
       "reported": {

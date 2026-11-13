@@ -41,7 +41,7 @@ func TestSignalBetweenHandlersStopsTheChain(t *testing.T) {
 	second := filepath.Join(dir, "second-ran")
 	e := newE2E(t, "", []hd{
 		{name: "first", argv: helperArgv("result", "outcome=declined", "touch="+done)},
-		{name: "second", argv: helperArgv("ran", "file="+second, "code=2")},
+		{name: "second", argv: helperArgv("ran", "file="+second, "code=23")},
 	}, chainOf("first", "second"))
 	e.signalOnceFileExists(done, syscall.SIGTERM)
 	code, _, _ := e.wrap("first,second", helperArgv("exit", "code=1"))
@@ -103,7 +103,7 @@ func TestCommandAndVerifyStayInTheWrappersProcessGroup(t *testing.T) {
 func TestGrandchildThatIgnoresTermIsKilledAfterTheGrace(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
-	e := newE2E(t, "", []hd{{name: "h", argv: helperArgv("grandchild", "child=ignore-term", "ready="+pidFile+".ready", "pid="+pidFile, "code=2")}}, chainOf("h"))
+	e := newE2E(t, "", []hd{{name: "h", argv: helperArgv("grandchild", "child=ignore-term", "ready="+pidFile+".ready", "pid="+pidFile, "code=23")}}, chainOf("h"))
 	e.wrap("h", helperArgv("exit", "code=1"))
 	pid, _ := strconv.Atoi(waitForFile(t, pidFile))
 	if !eventuallyDead(pid) {
@@ -116,7 +116,7 @@ func TestEscapedPipeHolderCannotWedgeTheWrapper(t *testing.T) {
 	// handler's pipes open; the wrapper's wait for them is bounded.
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
-	e := newE2E(t, "", []hd{{name: "h", argv: helperArgv("grandchild", "hold=1", "setsid=1", "secs=6", "pid="+pidFile, "code=2")}}, chainOf("h"))
+	e := newE2E(t, "", []hd{{name: "h", argv: helperArgv("grandchild", "hold=1", "setsid=1", "secs=6", "pid="+pidFile, "code=23")}}, chainOf("h"))
 	start := time.Now()
 	code, _, _ := e.wrap("h", helperArgv("exit", "code=1"))
 	took := time.Since(start)
@@ -152,7 +152,7 @@ func TestAttemptWithoutDetailsHasNoDetailsFile(t *testing.T) {
 
 func TestReportWriteFailureFailsOnlyThatAttempt(t *testing.T) {
 	e := newE2E(t, "", []hd{
-		{name: "locks", argv: helperArgv("chmod-rundir", "mode=500", "code=2")},
+		{name: "locks", argv: helperArgv("chmod-rundir", "mode=500", "code=23")},
 		result("blocked", "declined"),
 	}, chainOf("locks", "blocked"))
 	t.Cleanup(func() {
@@ -172,7 +172,7 @@ func TestReportWriteFailureFailsOnlyThatAttempt(t *testing.T) {
 
 func TestStderrFileThatCannotBeCreatedFailsTheAttempt(t *testing.T) {
 	e := newE2E(t, "", []hd{
-		{name: "squats", argv: helperArgv("exit", "code=2", "touch={rundir}/attempt-2.stderr.log")},
+		{name: "squats", argv: helperArgv("exit", "code=23", "touch={rundir}/attempt-2.stderr.log")},
 		result("blocked", "declined"),
 	}, chainOf("squats", "blocked"))
 	e.wrap("squats,blocked", helperArgv("exit", "code=3"))
@@ -232,7 +232,7 @@ func TestUnspawnableCommandIsAWrapperError(t *testing.T) {
 		"relative missing":  {"./no-such-script"},
 	} {
 		code, stdout, stderr := e.wrap("h", cmd)
-		if code != 70 || stdout != "" || !strings.HasPrefix(stderr, "pg-rescue: cannot run") {
+		if code != 20 || stdout != "" || !strings.HasPrefix(stderr, "pg-rescue: cannot run") {
 			t.Errorf("%s: exit=%d stdout=%q stderr=%q", name, code, stdout, stderr)
 		}
 		if r := e.result(); r.Kind != runner.KindError {
@@ -268,7 +268,7 @@ func params(t *testing.T, cfgText string, opts *cli.Options) runner.Params {
 }
 
 func TestRunWithEveryDefault(t *testing.T) {
-	p := params(t, "[handler.h]\ncommand = [\"sh\", \"-c\", \"exit 2\"]\n", &cli.Options{Argv: []string{"sh", "-c", "echo out; echo err >&2; exit 1"}})
+	p := params(t, "[handler.h]\ncommand = [\"sh\", \"-c\", \"exit 23\"]\n", &cli.Options{Argv: []string{"sh", "-c", "echo out; echo err >&2; exit 1"}})
 	p.Handlers = []string{"h"}
 	var so, se bytes.Buffer
 	p.Stdout, p.Stderr = &so, &se
@@ -296,7 +296,7 @@ func TestRunSurvivesNilStreamsAndABrokenStdout(t *testing.T) {
 
 	// A broken passthrough neither fails the run nor stops the capture, and
 	// is written to only once.
-	p2 := params(t, "[handler.h]\ncommand = [\"sh\", \"-c\", \"exit 2\"]\n", &cli.Options{Argv: []string{"sh", "-c", "i=0; while [ $i -lt 50 ]; do echo line$i; i=$((i+1)); done; exit 7"}})
+	p2 := params(t, "[handler.h]\ncommand = [\"sh\", \"-c\", \"exit 23\"]\n", &cli.Options{Argv: []string{"sh", "-c", "i=0; while [ $i -lt 50 ]; do echo line$i; i=$((i+1)); done; exit 7"}})
 	p2.Handlers = []string{"h"}
 	fw := &failingWriter{}
 	p2.Stdout, p2.Stderr = fw, fw
@@ -310,10 +310,10 @@ func TestRunSurvivesNilStreamsAndABrokenStdout(t *testing.T) {
 }
 
 func TestStdinModeWithNoStdinIsEmptyInput(t *testing.T) {
-	p := params(t, "[handler.h]\ncommand = [\"sh\", \"-c\", \"exit 2\"]\n", &cli.Options{Stdin: true, HasVerify: true, Verify: "true"})
+	p := params(t, "[handler.h]\ncommand = [\"sh\", \"-c\", \"exit 23\"]\n", &cli.Options{Stdin: true, HasVerify: true, Verify: "true"})
 	p.Handlers = []string{"h"}
 	r := runner.Run(p)
-	if r.ExitCode != 1 || r.Report == nil || r.Report.OutputTail != "" {
+	if r.ExitCode != 22 || r.Report == nil || r.Report.OutputTail != "" {
 		t.Errorf("result=%+v", r)
 	}
 }
@@ -324,7 +324,7 @@ func TestOutputLogThatCannotBeCreatedIsAWrapperError(t *testing.T) {
 	var se bytes.Buffer
 	p.Stderr = &se
 	r := runner.Run(p)
-	if r.ExitCode != 70 || r.Kind != runner.KindError || !strings.Contains(se.String(), "cannot create the output log") {
+	if r.ExitCode != 20 || r.Kind != runner.KindError || !strings.Contains(se.String(), "cannot create the output log") {
 		t.Errorf("result=%+v stderr=%q", r, se.String())
 	}
 }

@@ -9,7 +9,7 @@ func TestOutcomeExitCodes(t *testing.T) {
 	for _, tc := range []struct {
 		o    Outcome
 		code int
-	}{{Resolved, 0}, {Declined, 2}, {Deferred, 3}} {
+	}{{Resolved, 0}, {Declined, 23}, {Deferred, 24}} {
 		got, ok := tc.o.ExitCode()
 		if !ok || got != tc.code {
 			t.Errorf("%s.ExitCode() = %d,%v; want %d,true", tc.o, got, ok, tc.code)
@@ -21,7 +21,7 @@ func TestOutcomeExitCodes(t *testing.T) {
 	if _, ok := Failed.ExitCode(); ok {
 		t.Error("Failed must not be reportable by a handler")
 	}
-	for _, code := range []int{1, 4, 70, 75, 126, 127, 130, -1} {
+	for _, code := range []int{1, 2, 3, 4, 20, 21, 70, 75, 126, 127, 130, -1} {
 		if got := OutcomeForExit(code); got != Failed {
 			t.Errorf("OutcomeForExit(%d) = %s; want failed", code, got)
 		}

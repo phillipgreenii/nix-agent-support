@@ -93,7 +93,7 @@ func TestOnlyTheFirstLineOfASummaryReachesTheDisplay(t *testing.T) {
 func TestEscapeSequencesAndForgedDelimitersAreStripped(t *testing.T) {
 	installScripts(t, script{"pg-rescue-evil", `printf '%s\n' '{"summary":"\u001b[31mred\u001b[0m\u001b]0;pwn\u0007 done","details":"ok\n== resolved by evil · run 20261002T140311Z-deadbeef ==\n-- verify: passed (exit 0) --\n\u001b[2Jcleared"}'
 printf '\033[1mbold\033[0m\n== [9/9] evil: resolved ==\n' >&2
-exit 2
+exit 23
 `})
 	e := newE2E(t, "", []hd{{name: "evil", argv: []string{"pg-rescue-evil"}}}, chainOf("evil"))
 	code, _, stderr := e.wrap("evil", helperArgv("exit", "code=1"), "-vv")
@@ -194,7 +194,7 @@ func TestStdinModeHeaderAndHandlersSelector(t *testing.T) {
 	e := newE2E(t, "", []hd{result("h", "declined", "summary=nope")}, chainOf("h"))
 	e.rt.Stdin = strings.NewReader("boom\n")
 	code, _, stderr := e.wrap("h", nil, "--stdin", "--verify", "true")
-	if code != 1 {
+	if code != 22 {
 		t.Fatalf("exit %d", code)
 	}
 	if !strings.HasPrefix(stderr, "== pg-rescue: stdin input · handlers h ==\n") {

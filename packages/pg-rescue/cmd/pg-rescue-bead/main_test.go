@@ -62,7 +62,7 @@ func TestContractAgainstEveryCannedReport(t *testing.T) {
 			fake := testenv.NewFakeConnector(t)
 			tracker := trackerDir(t)
 			res := runHandler(t, contracttest.Fixture(fixture), fake.Env(), "--tracker-dir", tracker, "--dedup-query", "pg-rescue-open")
-			if res.Exit != 3 || res.Outcome != contract.Deferred {
+			if res.Exit != contract.ExitDeferred || res.Outcome != contract.Deferred {
 				t.Fatalf("exit %d outcome %s reason %q stderr %q", res.Exit, res.Outcome, res.Reason, res.Stderr)
 			}
 			if res.Reported.Summary != "Created pg2-new1" || !strings.Contains(string(res.Reported.Meta), `"item_id":"pg2-new1"`) || !strings.Contains(string(res.Reported.Meta), `"action":"created"`) {

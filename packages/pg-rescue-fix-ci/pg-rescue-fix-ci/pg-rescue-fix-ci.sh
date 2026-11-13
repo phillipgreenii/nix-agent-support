@@ -35,7 +35,7 @@ For the item ID the tool, in order:
   4. otherwise runs  pg-rescue --chain fix-ci -C <state-dir> ... -- pg-rescue-fix-ci step ...
      with PG_ROUTER_ITEM_ID=ID, BEADS_DIR=<tracker-dir>/.beads and
      BEADS_ACTOR=pg-rescue/<run-id> exported;
-  5. on pg-rescue exit 0 or 75 (the chain gave up; its give-up handler set the
+  5. on pg-rescue exit 0 or 21 (the chain gave up; its give-up handler set the
      marker) exits 0; a passed-through 9 becomes 1; any other code is unchanged;
   6. on every path releases the claim (the item stays open; it is never closed).
      A run that ends in outcome failed adds 1 to script_failures in the same
@@ -424,7 +424,7 @@ if [[ $failures -ge $SCRIPT_MAX_FAILURES ]]; then
     --result-file "$result_file" \
     -- false >&2 || rescue_rc=$?
   case $rescue_rc in
-  0 | 75)
+  0 | 21)
     outcome=gave-up
     exit 0
     ;;
@@ -450,7 +450,7 @@ case $rescue_rc in
   outcome=ok
   exit 0
   ;;
-75)
+21)
   # The chain gave up and its handler set the marker; the claim is released by
   # cleanup. The step's exit 1 that hands the item to the worker is not a
   # counted failure.

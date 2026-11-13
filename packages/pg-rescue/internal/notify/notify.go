@@ -1,6 +1,6 @@
 // Package notify is pg-rescue-notify: the reference handler that posts a
 // macOS notification about a failure and handles nothing. It always declines
-// (exit 2) so the chain continues, and exits 1 if the notification cannot be
+// (exit 23) so the chain continues, and exits 1 if the notification cannot be
 // posted.
 //
 // The notification is posted over the pg-osx-notifier daemon's Unix socket
@@ -28,6 +28,7 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/orphan"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/tmpldata"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Handler exit codes. Declined is the contract's code for "I did nothing to
@@ -35,7 +36,7 @@ import (
 // a handler MUST NOT leak 2 from a usage error, which would read as declined).
 const (
 	ExitDeclined = contract.ExitDeclined
-	ExitFailed   = 1
+	ExitFailed   = exitcode.Error
 )
 
 // Default templates (design section 8.4).
@@ -61,7 +62,7 @@ const usage = `usage: pg-rescue-notify [--title-template TEXT | --title-template
        pg-rescue-notify --print-default-template
 
 Posts a macOS notification about the failure in $PG_RESCUE_REPORT and always
-declines (exit 2), so the chain continues. Exits 1 if posting fails.
+declines (exit 23), so the chain continues. Exits 1 if posting fails.
 `
 
 // Runtime holds the outside dependencies tests inject. DefaultRuntime is the

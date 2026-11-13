@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Outcome is the verdict of one handler attempt.
@@ -27,11 +29,14 @@ const (
 	Failed Outcome = "failed"
 )
 
-// Handler exit codes that map to an outcome. Anything else is Failed.
+// Handler exit codes that map to an outcome. Anything else is Failed. Declined
+// and deferred are app codes (23 and 24) of x/exitcode's 20-63 range, so a
+// handler's usage error (exit 2) or generic failure (exit 1) can never be
+// read as an outcome.
 const (
-	ExitResolved = 0
-	ExitDeclined = 2
-	ExitDeferred = 3
+	ExitResolved = exitcode.OK
+	ExitDeclined = exitcode.AppMin + 3
+	ExitDeferred = exitcode.AppMin + 4
 )
 
 // Reportable lists the outcomes a handler may name, in documentation order.

@@ -79,7 +79,7 @@ func TestSuccessLine(t *testing.T) {
 
 func attemptsReport() (*report.Report, []string) {
 	return &report.Report{Attempts: []report.Attempt{
-		{Handler: "a", Position: 1, Tags: []string{"deterministic"}, Outcome: contract.Declined, Reason: "exit 2", Exit: 2, DurationMS: 310},
+		{Handler: "a", Position: 1, Tags: []string{"deterministic"}, Outcome: contract.Declined, Reason: "exit 23", Exit: 23, DurationMS: 310},
 		{
 			Handler: "b", Position: 2, Tags: []string{"agent"}, Outcome: contract.Failed, Reason: "resolved → verify failed (exit 128)",
 			Exit: 0, DurationMS: 41200, VerifyMS: ptr(int64(900)),
@@ -103,8 +103,8 @@ func TestEveryResultValue(t *testing.T) {
 		},
 		{
 			"deferred",
-			runner.Result{Kind: runner.KindDeferred, DeferredBy: "b", ExitCode: 75, Report: rep, Binaries: bins, CommandExit: 1},
-			map[string]any{"result": "deferred", "deferred_by": "b", "final_exit": float64(75)},
+			runner.Result{Kind: runner.KindDeferred, DeferredBy: "b", ExitCode: 21, Report: rep, Binaries: bins, CommandExit: 1},
+			map[string]any{"result": "deferred", "deferred_by": "b", "final_exit": float64(21)},
 		},
 		{
 			"unhandled",
@@ -113,8 +113,8 @@ func TestEveryResultValue(t *testing.T) {
 		},
 		{
 			"error",
-			runner.Result{Kind: runner.KindError, ExitCode: 70, CommandExit: -1},
-			map[string]any{"result": "error", "final_exit": float64(70), "exit": nil},
+			runner.Result{Kind: runner.KindError, ExitCode: 20, CommandExit: -1},
+			map[string]any{"result": "error", "final_exit": float64(20), "exit": nil},
 		},
 		{
 			"interrupted in a handler",
@@ -158,8 +158,8 @@ func TestAttemptsCarryTagsBinaryAndMeta(t *testing.T) {
 		t.Fatalf("attempts = %v", atts)
 	}
 	a1 := atts[0].(map[string]any)
-	if a1["handler"] != "a" || a1["position"] != float64(1) || a1["outcome"] != "declined" || a1["reason"] != "exit 2" ||
-		a1["exit"] != float64(2) || a1["duration_ms"] != float64(310) || a1["binary"] != "/nix/store/x/bin/a" || a1["meta"] != nil {
+	if a1["handler"] != "a" || a1["position"] != float64(1) || a1["outcome"] != "declined" || a1["reason"] != "exit 23" ||
+		a1["exit"] != float64(23) || a1["duration_ms"] != float64(310) || a1["binary"] != "/nix/store/x/bin/a" || a1["meta"] != nil {
 		t.Errorf("attempt 1 = %v", a1)
 	}
 	if _, has := a1["verify_ms"]; has {

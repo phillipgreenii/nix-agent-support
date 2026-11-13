@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-rescue/internal/contract"
 	"github.com/phillipgreenii/pg-rescue/internal/tmpldata"
 	"github.com/phillipgreenii/x/gitfixture"
 	"github.com/phillipgreenii/x/gittest"
@@ -73,7 +74,7 @@ func TestFilingWritesTheLiveStateSnapshotFromARealStoppedRebase(t *testing.T) {
 	rt := s.runtime()
 	rt.Env = tmpldata.DefaultEnv()
 	var out, errb bytes.Buffer
-	if code := Main(rt, nil, &out, &errb); code != 3 {
+	if code := Main(rt, nil, &out, &errb); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	m := metadataOf(t, only(t, s.fake.Calls(), "create").Values("metadata"))
@@ -108,7 +109,7 @@ func TestDedupHitAppendsAFreshStateBlock(t *testing.T) {
 	rt := s.runtime()
 	rt.Env = tmpldata.DefaultEnv()
 	var out, errb bytes.Buffer
-	if code := Main(rt, []string{"--dedup-query", "q"}, &out, &errb); code != 3 {
+	if code := Main(rt, []string{"--dedup-query", "q"}, &out, &errb); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	body := only(t, s.fake.Calls(), "comment").Value("body")

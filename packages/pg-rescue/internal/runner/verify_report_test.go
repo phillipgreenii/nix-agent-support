@@ -320,7 +320,7 @@ func TestReportFactsAndSchemaShape(t *testing.T) {
 		rep.StartedAt.Format(time.RFC3339) != "2026-10-02T14:03:11Z" || rep.Depth != 1 || rep.ParentRunID != nil {
 		t.Errorf("report = %+v", rep)
 	}
-	if a := rep.Attempts[0]; a.Handler != "d" || a.Position != 1 || len(a.Tags) != 1 || a.Tags[0] != "deterministic" || a.Exit != 2 ||
+	if a := rep.Attempts[0]; a.Handler != "d" || a.Position != 1 || len(a.Tags) != 1 || a.Tags[0] != "deterministic" || a.Exit != 23 ||
 		a.Outcome != contract.Declined || a.StderrFile == "" {
 		t.Errorf("attempt = %+v", a)
 	}

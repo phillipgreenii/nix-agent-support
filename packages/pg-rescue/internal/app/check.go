@@ -14,7 +14,7 @@ import (
 // run would, then lists every handler (with command[0] resolved on PATH, or
 // NOT FOUND) and every chain, or only --chain NAME. It exits 0 when the
 // config is valid and every binary resolves, 1 when any binary is missing
-// and 70 on a config error.
+// and 20 (ExitWrapperError) on a config error.
 //
 // Output, on stdout:
 //

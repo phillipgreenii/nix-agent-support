@@ -64,7 +64,7 @@ NIX
   if [ "$4" = --details-file ]; then sed 's/^/details: /' "$5"; fi
 } >>"$RESULT_LOG"
 echo "{\"outcome\":\"$2\"}"
-case "$2" in resolved) exit 0 ;; declined) exit 2 ;; *) exit 3 ;; esac
+case "$2" in resolved) exit 0 ;; declined) exit 23 ;; *) exit 24 ;; esac
 RESCUE
   chmod +x "$STUB_DIR/nix" "$STUB_DIR/pg-rescue"
 
@@ -112,7 +112,7 @@ make_conflict() {
   [[ $output == *"Usage: pg-rescue-flake-lock-conflict"* ]]
 }
 
-@test "an unexpected argument exits 1, never 2 (which would read as declined)" {
+@test "an unexpected argument exits 1, never 23 (which would read as declined)" {
   run "${HANDLER[@]}" nonsense
   [ "$status" -eq 1 ]
 }
@@ -121,7 +121,7 @@ make_conflict() {
   mkdir -p "$TEST_DIR/plain"
   cd "$TEST_DIR/plain"
   run "${HANDLER[@]}"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 23 ]
   grep -qx 'outcome=declined' "$RESULT_LOG"
 }
 
@@ -132,7 +132,7 @@ make_conflict() {
   g commit -q -m seed
   cd "$REPO"
   run "${HANDLER[@]}"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 23 ]
   grep -qx 'summary=No rebase is in progress' "$RESULT_LOG"
   [ ! -e "$NIX_LOG" ]
 }
@@ -161,7 +161,7 @@ make_conflict() {
   make_conflict readme
   cd "$REPO"
   run "${HANDLER[@]}"
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 23 ]
   grep -qx 'summary=Conflict spans source files, not just flake.lock' "$RESULT_LOG"
   grep -q 'details: README.md' "$RESULT_LOG"
   [ ! -e "$NIX_LOG" ]

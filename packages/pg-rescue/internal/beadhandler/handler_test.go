@@ -147,7 +147,7 @@ func only(t *testing.T, calls []testenv.Call, verb string) testenv.Call {
 func TestCreateExits3WithMeta(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	code, stdout, stderr := s.run()
-	if code != 3 {
+	if code != contract.ExitDeferred {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
 	outcome, rep := resultOf(t, code, stdout)
@@ -167,7 +167,7 @@ func TestCreateExits3WithMeta(t *testing.T) {
 
 func TestEveryCallIsPinnedToTheBeadsBackendAsJSON(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--dedup-query", "q"); code != 3 {
+	if code, _, e := s.run("--dedup-query", "q"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	calls := s.fake.Calls()
@@ -183,7 +183,7 @@ func TestEveryCallIsPinnedToTheBeadsBackendAsJSON(t *testing.T) {
 
 func TestBackendFlagOverridesThePinnedBackend(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--dedup-query", "q", "--backend", "pg-connector-issue-beads-zr"); code != 3 {
+	if code, _, e := s.run("--dedup-query", "q", "--backend", "pg-connector-issue-beads-zr"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	calls := s.fake.Calls()
@@ -238,7 +238,7 @@ func TestBackendMapPicksTheBackendForTheFailingRepo(t *testing.T) {
 			s := newScene(t, "first-attempt")
 			// The dedup query makes the run two calls (list, create), so
 			// "every call" is checked, not just the one that files the item.
-			if code, _, e := s.run(append([]string{"--dedup-query", "q"}, tc.args...)...); code != 3 {
+			if code, _, e := s.run(append([]string{"--dedup-query", "q"}, tc.args...)...); code != contract.ExitDeferred {
 				t.Fatalf("exit %d: %s", code, e)
 			}
 			calls := s.fake.Calls()
@@ -256,7 +256,7 @@ func TestBackendMapPicksTheBackendForTheFailingRepo(t *testing.T) {
 
 func TestBackendMapAppliesToAnnotate(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--annotate", "pg2-abc", "--add-label", "x", "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+	if code, _, e := s.run("--annotate", "pg2-abc", "--add-label", "x", "--backend-map", "the-repo="+instanceAlpha); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	calls := s.fake.Calls()
@@ -273,7 +273,7 @@ func TestBackendMapAppliesToAnnotate(t *testing.T) {
 func TestBackendMapNeedsAGitToplevel(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.top = ""
-	if code, _, e := s.run("--tracker-dir", s.repo, "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+	if code, _, e := s.run("--tracker-dir", s.repo, "--backend-map", "the-repo="+instanceAlpha); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if got := only(t, s.fake.Calls(), "create").Value("backend"); got != "pg-connector-issue-beads" {
@@ -295,7 +295,7 @@ func TestBackendMapResolvesTheRepoFromTheGitToplevel(t *testing.T) {
 	rt.Env = tmpldata.DefaultEnv()
 	var out, errb bytes.Buffer
 	args := []string{"--backend-map", "deep=" + instanceBeta, "--backend-map", filepath.Base(repo) + "=" + instanceAlpha}
-	if code := Main(rt, args, &out, &errb); code != 3 {
+	if code := Main(rt, args, &out, &errb); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	if got := only(t, s.fake.Calls(), "create").Value("backend"); got != instanceAlpha {
@@ -321,7 +321,7 @@ func TestBackendMapAndTheRepoLabelAreIndependent(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newScene(t, "first-attempt")
-			if code, _, e := s.run(tc.args...); code != 3 {
+			if code, _, e := s.run(tc.args...); code != contract.ExitDeferred {
 				t.Fatalf("exit %d: %s", code, e)
 			}
 			c := only(t, s.fake.Calls(), "create")
@@ -381,7 +381,7 @@ func TestBackendMapEntriesAreParsed(t *testing.T) {
 
 func TestBodyIsSelfContained(t *testing.T) {
 	s := newScene(t, "three-prior-attempts")
-	if code, _, e := s.run(); code != 3 {
+	if code, _, e := s.run(); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	body := only(t, s.fake.Calls(), "create").Value("description")
@@ -410,7 +410,7 @@ func TestBodyIsSelfContained(t *testing.T) {
 
 func TestBodyFencesUntrustedText(t *testing.T) {
 	s := newScene(t, "three-prior-attempts")
-	if code, _, e := s.run(); code != 3 {
+	if code, _, e := s.run(); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	body := only(t, s.fake.Calls(), "create").Value("description")
@@ -453,7 +453,7 @@ func fenced(body, span string) bool {
 func TestStdinModeBody(t *testing.T) {
 	s := newScene(t, "stdin-mode")
 	s.rep.Command = nil
-	if code, _, e := s.run("--tracker-dir", s.repo); code != 3 {
+	if code, _, e := s.run("--tracker-dir", s.repo); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	c := only(t, s.fake.Calls(), "create")
@@ -471,7 +471,7 @@ func TestStdinModeBody(t *testing.T) {
 
 func TestDefaultTitle(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run(); code != 3 {
+	if code, _, e := s.run(); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	c := only(t, s.fake.Calls(), "create")
@@ -490,7 +490,7 @@ func TestDefaultTitle(t *testing.T) {
 
 func TestTitleNewlinesStripped(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--title-template", "line one\nline two\r\nline three {{.Repo}}\n"); code != 3 {
+	if code, _, e := s.run("--title-template", "line one\nline two\r\nline three {{.Repo}}\n"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if got := only(t, s.fake.Calls(), "create").Value("title"); got != "line one line two line three the-repo" {
@@ -517,7 +517,7 @@ func TestTemplateFilesAndAppendedInstructions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if code, _, e := s.run("--title-template-file", tf, "--body-template-file", bf, "--append-instructions-file", af); code != 3 {
+	if code, _, e := s.run("--title-template-file", tf, "--body-template-file", bf, "--append-instructions-file", af); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	c := only(t, s.fake.Calls(), "create")
@@ -532,7 +532,7 @@ func TestTemplateFilesAndAppendedInstructions(t *testing.T) {
 
 func TestInlineAppendInstructions(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--append-instructions", "Please triage."); code != 3 {
+	if code, _, e := s.run("--append-instructions", "Please triage."); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if body := only(t, s.fake.Calls(), "create").Value("description"); !strings.HasSuffix(body, "\n\nPlease triage.") {
@@ -543,7 +543,7 @@ func TestInlineAppendInstructions(t *testing.T) {
 func TestOutputTailLines(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.rep.OutputTail = "one\ntwo\nthree\nfour\n"
-	if code, _, e := s.run("--output-tail-lines", "2"); code != 3 {
+	if code, _, e := s.run("--output-tail-lines", "2"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	body := only(t, s.fake.Calls(), "create").Value("description")
@@ -555,7 +555,7 @@ func TestOutputTailLines(t *testing.T) {
 func TestOversizedBodyShrinksTheTailToFit(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.rep.OutputTail = strings.Repeat(strings.Repeat("x", 99)+"\n", 900) // ~90 KB
-	if code, _, e := s.run("--output-tail-lines", "1000"); code != 3 {
+	if code, _, e := s.run("--output-tail-lines", "1000"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	body := only(t, s.fake.Calls(), "create").Value("description")
@@ -570,7 +570,7 @@ func TestOversizedBodyShrinksTheTailToFit(t *testing.T) {
 func TestBodyThatCannotShrinkIsClamped(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.rep.Context = strings.Repeat("é", 40000) // 80 KB of two-byte runes, not in the tail
-	if code, _, e := s.run(); code != 3 {
+	if code, _, e := s.run(); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	body := only(t, s.fake.Calls(), "create").Value("description")
@@ -598,7 +598,7 @@ func TestLabels(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newScene(t, "first-attempt")
-			if code, _, e := s.run(tc.args...); code != 3 {
+			if code, _, e := s.run(tc.args...); code != contract.ExitDeferred {
 				t.Fatalf("exit %d: %s", code, e)
 			}
 			got := only(t, s.fake.Calls(), "create").Values("labels")
@@ -612,7 +612,7 @@ func TestLabels(t *testing.T) {
 func TestNoRepoLabelWhenNotInAGitRepo(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.top = ""
-	if code, _, e := s.run("--tracker-dir", s.repo, "--repo-label-map", "the-repo=tr"); code != 3 {
+	if code, _, e := s.run("--tracker-dir", s.repo, "--repo-label-map", "the-repo=tr"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if got := only(t, s.fake.Calls(), "create").Values("labels"); strings.Join(got, "|") != "pg-rescue" {
@@ -622,7 +622,7 @@ func TestNoRepoLabelWhenNotInAGitRepo(t *testing.T) {
 
 func TestCreateFlags(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--priority", "1", "--issue-type", "bug"); code != 3 {
+	if code, _, e := s.run("--priority", "1", "--issue-type", "bug"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	c := only(t, s.fake.Calls(), "create")
@@ -640,7 +640,7 @@ func TestCreateFlags(t *testing.T) {
 
 func TestDefaultsAreP2Task(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run(); code != 3 {
+	if code, _, e := s.run(); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	c := only(t, s.fake.Calls(), "create")
@@ -653,7 +653,7 @@ func TestChildEnvironment(t *testing.T) {
 	t.Setenv("PG_CONNECTOR_ISSUE_BEADS_DIR", "/wrong/tracker")
 	t.Setenv("PG_CONNECTOR_ISSUE_BEADS_ACTOR", "someone-else")
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--dedup-query", "q"); code != 3 {
+	if code, _, e := s.run("--dedup-query", "q"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	for _, c := range s.fake.Calls() {
@@ -669,7 +669,7 @@ func TestChildEnvironment(t *testing.T) {
 func TestTrackerDirOverridesTheDerivedTracker(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	elsewhere := t.TempDir()
-	if code, _, e := s.run("--tracker-dir", elsewhere); code != 3 {
+	if code, _, e := s.run("--tracker-dir", elsewhere); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if got := only(t, s.fake.Calls(), "create").TrackerDir; got != elsewhere {
@@ -698,7 +698,7 @@ func TestMappedRepoNeedsNoTrackerAndHandsTheBackendNone(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if code, _, e := s.run("--dedup-query", "q", "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+			if code, _, e := s.run("--dedup-query", "q", "--backend-map", "the-repo="+instanceAlpha); code != contract.ExitDeferred {
 				t.Fatalf("exit %d: %s", code, e)
 			}
 			calls := s.fake.Calls()
@@ -720,7 +720,7 @@ func TestMappedRepoNeedsNoTrackerAndHandsTheBackendNone(t *testing.T) {
 func TestMappedRepoStillHonorsAnExplicitTrackerDir(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	elsewhere := t.TempDir()
-	if code, _, e := s.run("--tracker-dir", elsewhere, "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+	if code, _, e := s.run("--tracker-dir", elsewhere, "--backend-map", "the-repo="+instanceAlpha); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	c := only(t, s.fake.Calls(), "create")
@@ -796,7 +796,7 @@ func TestRealGitToplevelDerivation(t *testing.T) {
 	rt := s.runtime()
 	rt.Env = tmpldata.DefaultEnv()
 	var out, errb bytes.Buffer
-	if code := Main(rt, []string{"--repo-label-map", filepath.Base(repo) + "=mapped"}, &out, &errb); code != 3 {
+	if code := Main(rt, []string{"--repo-label-map", filepath.Base(repo) + "=mapped"}, &out, &errb); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
 	c := only(t, s.fake.Calls(), "create")
@@ -819,7 +819,7 @@ func TestDedupMatchCommentsAndReportsUpdated(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.fake.Respond("list", listOf(item("pg2-other", "open", "sha256:other"), item("pg2-hit", "in_progress", s.rep.Fingerprint)))
 	code, stdout, stderr := s.run("--dedup-query", "pg-rescue-open")
-	if code != 3 {
+	if code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	_, rep := resultOf(t, code, stdout)
@@ -842,7 +842,7 @@ func TestDedupClosedMatchIsIgnored(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.fake.Respond("list", listOf(item("pg2-old", "closed", s.rep.Fingerprint), item("pg2-old2", "Closed", s.rep.Fingerprint)))
 	code, stdout, stderr := s.run("--dedup-query", "q")
-	if code != 3 {
+	if code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	_, rep := resultOf(t, code, stdout)
@@ -855,7 +855,7 @@ func TestDedupClosedMatchIsIgnored(t *testing.T) {
 func TestDedupNoMatchCreates(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.fake.Respond("list", listOf(item("pg2-x", "open", "sha256:different"), `{"id":"pg2-bare","state":"open"}`))
-	if code, _, e := s.run("--dedup-query", "q"); code != 3 {
+	if code, _, e := s.run("--dedup-query", "q"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	calls := s.fake.Calls()
@@ -868,7 +868,7 @@ func TestNoDedupQueryMeansNoListAndNoDedup(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.fake.Respond("list", listOf(item("pg2-hit", "open", s.rep.Fingerprint)))
 	code, stdout, e := s.run()
-	if code != 3 {
+	if code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	_, rep := resultOf(t, code, stdout)
@@ -888,7 +888,7 @@ func TestDedupFingerprintComesFromTheEnvironment(t *testing.T) {
 	rt := s.runtime()
 	s.env["PG_RESCUE_FINGERPRINT"] = "sha256:from-env"
 	var out, errb bytes.Buffer
-	if code := Main(rt, []string{"--dedup-query", "q"}, &out, &errb); code != 3 || !strings.Contains(out.String(), "Updated pg2-env") {
+	if code := Main(rt, []string{"--dedup-query", "q"}, &out, &errb); code != contract.ExitDeferred || !strings.Contains(out.String(), "Updated pg2-env") {
 		t.Errorf("code=%d out=%q err=%q", code, out.String(), errb.String())
 	}
 }
@@ -908,7 +908,7 @@ func TestDedupListFailureExits1WithoutCreating(t *testing.T) {
 func TestAnnotateCommentsAndLabels(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	code, stdout, stderr := s.run("--annotate", "pg2-abc", "--add-label", "needs-triage", "--add-label", "pg-rescue-seen")
-	if code != 3 {
+	if code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	_, rep := resultOf(t, code, stdout)
@@ -934,7 +934,7 @@ func TestAnnotateCommentsAndLabels(t *testing.T) {
 
 func TestAnnotateWithoutLabelsOnlyComments(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, _, e := s.run("--annotate", "pg2-abc"); code != 3 {
+	if code, _, e := s.run("--annotate", "pg2-abc"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if calls := s.fake.Calls(); len(calls) != 1 || calls[0].Verb() != "comment" {
@@ -1090,7 +1090,7 @@ func TestDefaultBodyTemplateOnlyUsesKnownFields(t *testing.T) {
 		if fixture == "stdin-mode" {
 			s.rep.Command = nil
 		}
-		if code, _, e := s.run("--tracker-dir", s.repo); code != 3 {
+		if code, _, e := s.run("--tracker-dir", s.repo); code != contract.ExitDeferred {
 			t.Errorf("%s: exit %d: %s", fixture, code, e)
 		}
 	}
@@ -1223,7 +1223,7 @@ func TestAnnotateFromEnv(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.env["PG_RESCUE_ITEM_ID"] = "pg2-env1"
 	code, stdout, stderr := s.run("--annotate-from-env", "PG_RESCUE_ITEM_ID", "--add-label", "script-gave-up", "--add-label", "x")
-	if code != 3 {
+	if code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	_, rep := resultOf(t, code, stdout)
@@ -1245,7 +1245,7 @@ func TestAnnotateFromEnv(t *testing.T) {
 func TestAnnotateFromEnvWithoutLabelsOnlyComments(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.env["ITEM"] = "pg2-env2"
-	if code, _, e := s.run("--annotate-from-env", "ITEM"); code != 3 {
+	if code, _, e := s.run("--annotate-from-env", "ITEM"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if calls := s.fake.Calls(); len(calls) != 1 || calls[0].Verb() != "comment" || calls[0].Args[2] != "pg2-env2" {
@@ -1256,7 +1256,7 @@ func TestAnnotateFromEnvWithoutLabelsOnlyComments(t *testing.T) {
 func TestAnnotateFromEnvPassesTheIdAsIs(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.env["ITEM"] = " odd id "
-	if code, _, e := s.run("--annotate-from-env", "ITEM"); code != 3 {
+	if code, _, e := s.run("--annotate-from-env", "ITEM"); code != contract.ExitDeferred {
 		t.Fatalf("exit %d: %s", code, e)
 	}
 	if calls := s.fake.Calls(); len(calls) != 1 || calls[0].Args[2] != " odd id " {

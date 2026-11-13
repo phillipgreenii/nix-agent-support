@@ -6,7 +6,7 @@
 # the REAL pg-rescue binary with fixture handlers in a test config, the REAL
 # pg-rescue-push-branch and the REAL bd (an embedded throwaway database, see
 # test-support/bd_fixture.bash: no dolt server, never the shared tracker). The
-# one stub is a pg-rescue that exits 9 or 75, used only to prove the exit
+# one stub is a pg-rescue that exits 9 or 21, used only to prove the exit
 # mapping. Revision 2 (design D4, D5, D9): a stale head and a rejected push
 # lease close the item, handlers cannot push, PUSH_AGENT_RESOLVED, the sweep,
 # the failure cap and the run log.
@@ -71,7 +71,7 @@ teardown() {
 # ---------------------------------------------------------------- fixtures
 
 # write_handlers: the fixture handler scripts (pg-rescue design 3.2: exit 0
-# resolved, 2 declined, 3 deferred, anything else failed). They log to files,
+# resolved, 23 declined, 24 deferred, anything else failed). They log to files,
 # never to stdout (handler stdout must be empty or one JSON object).
 write_handlers() {
   cat >"$HANDLERS/resolve.sh" <<EOF
@@ -96,7 +96,7 @@ set -eu
 touch "$HLOG/give-up.ran"
 printf '%s\n' "\$PG_ROUTER_ITEM_ID" >"$HLOG/give-up.item"
 bd update "\$PG_ROUTER_ITEM_ID" --add-label script-gave-up >&2
-exit 3
+exit 24
 EOF
   cat >"$HANDLERS/decline.sh" <<EOF
 #!/usr/bin/env bash
@@ -535,7 +535,7 @@ EOF
   [ "$(awk '{print $2}' "$(outcome_file)")" = "failed" ]
 }
 
-@test "a config with no conflict chain (pg-rescue exit 70) is a failure: exit 1, claim released" {
+@test "a config with no conflict chain (pg-rescue exit 20) is a failure: exit 1, claim released" {
   make_pr clean
   ITEM=$(new_item)
   cat >"$PG_RESCUE_CONFIG" <<EOF
@@ -821,10 +821,10 @@ EOF
   [ "$(awk '{print $2}' "$(outcome_file)")" = "failed" ]
 }
 
-@test "pg-rescue exit 75 maps to 0; the claim is released, nothing is pushed, no marker is added by the shim" {
+@test "pg-rescue exit 21 maps to 0; the claim is released, nothing is pushed, no marker is added by the shim" {
   make_pr clean
   ITEM=$(new_item)
-  stub_pg_rescue 75
+  stub_pg_rescue 21
   run_shim
   [ "$status" -eq 0 ]
   assert_released
@@ -846,7 +846,7 @@ EOF
 @test "the pg-rescue invocation carries --chain conflict, -C <worktree>, the verify, the result file and the rebase argv" {
   make_pr clean
   ITEM=$(new_item)
-  stub_pg_rescue 75
+  stub_pg_rescue 21
   run_shim
   [ "$status" -eq 0 ]
   args=$(cat "$STUB_LOG")

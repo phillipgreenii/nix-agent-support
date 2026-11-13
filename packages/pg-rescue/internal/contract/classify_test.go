@@ -56,7 +56,7 @@ func TestClassifyExitCodeTable(t *testing.T) {
 	for _, row := range []struct {
 		exit int
 		want Outcome
-	}{{0, Resolved}, {2, Declined}, {3, Deferred}} {
+	}{{0, Resolved}, {23, Declined}, {24, Deferred}} {
 		cases = append(
 			cases,
 			classifyCase{name: "bare " + string(row.want), exit: row.exit, outcome: row.want, reason: reasonExit(row.exit), reasonExact: true},
@@ -66,7 +66,7 @@ func TestClassifyExitCodeTable(t *testing.T) {
 			},
 		)
 	}
-	for _, code := range []int{1, 4, 70, 75, 126, 127, 128, 130, 255, -1} {
+	for _, code := range []int{1, 2, 3, 4, 20, 21, 70, 75, 126, 127, 128, 130, 255, -1} {
 		cases = append(cases, classifyCase{name: "other " + reasonExit(code), exit: code, outcome: Failed, reason: reasonExit(code), reasonExact: true})
 	}
 	runClassify(t, cases)
@@ -78,8 +78,8 @@ func reasonExit(code int) string { return "exit " + strconv.Itoa(code) }
 func TestClassifyEmptyStdout(t *testing.T) {
 	runClassify(t, []classifyCase{
 		{name: "empty", exit: 0, stdout: "", outcome: Resolved, reason: "exit 0", reasonExact: true},
-		{name: "newline only", exit: 3, stdout: "\n", outcome: Deferred, reason: "exit 3", reasonExact: true},
-		{name: "mixed whitespace", exit: 2, stdout: " \t\r\n ", outcome: Declined, reason: "exit 2", reasonExact: true},
+		{name: "newline only", exit: 24, stdout: "\n", outcome: Deferred, reason: "exit 24", reasonExact: true},
+		{name: "mixed whitespace", exit: 23, stdout: " \t\r\n ", outcome: Declined, reason: "exit 23", reasonExact: true},
 	})
 }
 
@@ -91,14 +91,14 @@ func TestClassifyOneObjectPlusWhitespace(t *testing.T) {
 		{name: "trailing newline", exit: 0, stdout: "{\"summary\":\"a\"}\n", outcome: Resolved, reason: "exit 0", reasonExact: true, summary: "a"},
 		{name: "trailing mixed whitespace", exit: 0, stdout: "{\"summary\":\"a\"} \t\r\n\n", outcome: Resolved, reason: "exit 0", reasonExact: true, summary: "a"},
 		{name: "leading whitespace", exit: 0, stdout: "\n  {\"summary\":\"a\"}", outcome: Resolved, reason: "exit 0", reasonExact: true, summary: "a"},
-		{name: "empty object", exit: 2, stdout: `{}`, outcome: Declined, reason: "exit 2", reasonExact: true},
+		{name: "empty object", exit: 23, stdout: `{}`, outcome: Declined, reason: "exit 23", reasonExact: true},
 		{
 			name: "two objects", exit: 0, stdout: `{"summary":"a"}{"summary":"b"}`, outcome: Failed,
 			reason: `stdout has data after the JSON object (starts "{\"summary\":\"a\"}{\"summary\":\"b\"}"); handlers must print exactly one object and log to stderr`, reasonExact: true,
 		},
 		{name: "two objects on two lines", exit: 0, stdout: "{}\n{}\n", outcome: Failed, reason: "data after the JSON object"},
 		{name: "trailing junk", exit: 0, stdout: `{"summary":"a"} done`, outcome: Failed, reason: "data after the JSON object"},
-		{name: "trailing junk on a deferred exit", exit: 3, stdout: `{} x`, outcome: Failed, reason: "data after the JSON object"},
+		{name: "trailing junk on a deferred exit", exit: 24, stdout: `{} x`, outcome: Failed, reason: "data after the JSON object"},
 		{name: "junk before the object", exit: 0, stdout: `done {"summary":"a"}`, outcome: Failed, reason: "stdout is not JSON"},
 		{
 			name: "array", exit: 0, stdout: `[{"summary":"a"}]`, outcome: Failed,
@@ -163,7 +163,7 @@ func TestClassifyDuplicateKeys(t *testing.T) {
 			name: "same key in sibling objects is fine", exit: 0, stdout: `{"meta":{"a":{"x":1},"b":{"x":2}}}`, outcome: Resolved, reason: "exit 0", reasonExact: true,
 			meta: `{"a":{"x":1},"b":{"x":2}}`,
 		},
-		{name: "duplicate key still fails a deferred exit", exit: 3, stdout: `{"summary":"a","summary":"b"}`, outcome: Failed, reason: "duplicate key"},
+		{name: "duplicate key still fails a deferred exit", exit: 24, stdout: `{"summary":"a","summary":"b"}`, outcome: Failed, reason: "duplicate key"},
 	})
 }
 
@@ -184,14 +184,14 @@ func TestClassifyWrongFieldTypes(t *testing.T) {
 		{name: "meta null", exit: 0, stdout: `{"meta":null}`, outcome: Failed, reason: `field "meta" must be an object, not null`},
 		{name: "meta number", exit: 0, stdout: `{"meta":0}`, outcome: Failed, reason: `field "meta" must be an object, not a number`},
 		{name: "good fields do not rescue a bad one", exit: 0, stdout: `{"summary":"ok","details":3}`, outcome: Failed, reason: `field "details"`},
-		{name: "wrong type fails a deferred exit too", exit: 3, stdout: `{"summary":3}`, outcome: Failed, reason: `field "summary"`},
+		{name: "wrong type fails a deferred exit too", exit: 24, stdout: `{"summary":3}`, outcome: Failed, reason: `field "summary"`},
 	})
 }
 
 func TestClassifyUnknownFieldsAreIgnored(t *testing.T) {
 	runClassify(t, []classifyCase{
 		{name: "unknown scalar", exit: 0, stdout: `{"summary":"a","future":1}`, outcome: Resolved, reason: "exit 0", reasonExact: true, summary: "a"},
-		{name: "unknown with odd types", exit: 2, stdout: `{"x":null,"y":[1,{"z":2}],"details":"d"}`, outcome: Declined, reason: "exit 2", reasonExact: true, details: "d"},
+		{name: "unknown with odd types", exit: 23, stdout: `{"x":null,"y":[1,{"z":2}],"details":"d"}`, outcome: Declined, reason: "exit 23", reasonExact: true, details: "d"},
 		{name: "case differs so it is unknown", exit: 0, stdout: `{"Summary":"a","OUTCOME":"declined"}`, outcome: Resolved, reason: "exit 0", reasonExact: true},
 		{name: "unknown field on an unlisted exit code", exit: 1, stdout: `{"future":true,"summary":"s"}`, outcome: Failed, reason: "exit 1", reasonExact: true, summary: "s"},
 	})
@@ -206,9 +206,9 @@ func TestClassifyPassesFieldsThrough(t *testing.T) {
 		},
 		{name: "empty strings", exit: 0, stdout: `{"summary":"","details":""}`, outcome: Resolved, reason: "exit 0", reasonExact: true},
 		{
-			name: "meta verbatim keeps order, spacing and big numbers", exit: 3,
+			name: "meta verbatim keeps order, spacing and big numbers", exit: 24,
 			stdout:  `{"meta": { "z":1,  "a":[1, 2.50, 12345678901234567890], "s":"é\/" } }`,
-			outcome: Deferred, reason: "exit 3", reasonExact: true,
+			outcome: Deferred, reason: "exit 24", reasonExact: true,
 			meta: `{ "z":1,  "a":[1, 2.50, 12345678901234567890], "s":"é\/" }`,
 		},
 		{name: "empty meta object", exit: 0, stdout: `{"meta":{}}`, outcome: Resolved, reason: "exit 0", reasonExact: true, meta: `{}`},
@@ -240,7 +240,7 @@ func TestClassifyOutcomeField(t *testing.T) {
 		},
 		{name: "unknown name", exit: 0, stdout: `{"outcome":"ok"}`, outcome: Failed, reason: `unknown outcome "ok"`},
 		{name: "wrong case", exit: 0, stdout: `{"outcome":"Resolved"}`, outcome: Failed, reason: `unknown outcome "Resolved"`},
-		{name: "empty name", exit: 2, stdout: `{"outcome":""}`, outcome: Failed, reason: `unknown outcome ""`},
+		{name: "empty name", exit: 23, stdout: `{"outcome":""}`, outcome: Failed, reason: `unknown outcome ""`},
 		{
 			name: "unknown name on an unlisted exit code is ignored with a note", exit: 1, stdout: `{"outcome":"bogus","summary":"s"}`, outcome: Failed,
 			reason: `exit 1; stdout ignored: stdout JSON: unknown outcome "bogus"`,
@@ -252,8 +252,8 @@ func TestClassifyOutcomeField(t *testing.T) {
 func TestClassifyMismatchedOutcome(t *testing.T) {
 	runClassify(t, []classifyCase{
 		{
-			name: "resolved claimed on declined exit", exit: 2, stdout: `{"outcome":"resolved","summary":"s"}`, outcome: Failed,
-			reason: `stdout outcome "resolved" disagrees with exit code 2 (declined)`, reasonExact: true, summary: "s",
+			name: "resolved claimed on declined exit", exit: 23, stdout: `{"outcome":"resolved","summary":"s"}`, outcome: Failed,
+			reason: `stdout outcome "resolved" disagrees with exit code 23 (declined)`, reasonExact: true, summary: "s",
 		},
 		{
 			name: "declined claimed on resolved exit", exit: 0, stdout: `{"outcome":"declined"}`, outcome: Failed,
@@ -264,8 +264,8 @@ func TestClassifyMismatchedOutcome(t *testing.T) {
 			reason: `stdout outcome "deferred" disagrees with exit code 0 (resolved)`, reasonExact: true, details: "d",
 		},
 		{
-			name: "resolved claimed on deferred exit", exit: 3, stdout: `{"outcome":"resolved","meta":{"a":1}}`, outcome: Failed,
-			reason: `stdout outcome "resolved" disagrees with exit code 3 (deferred)`, reasonExact: true, meta: `{"a":1}`,
+			name: "resolved claimed on deferred exit", exit: 24, stdout: `{"outcome":"resolved","meta":{"a":1}}`, outcome: Failed,
+			reason: `stdout outcome "resolved" disagrees with exit code 24 (deferred)`, reasonExact: true, meta: `{"a":1}`,
 		},
 	})
 }
@@ -311,8 +311,8 @@ func TestClassifyTruncatedFlag(t *testing.T) {
 			name: "truncated resolved", exit: 0, stdout: `{"summary":"a"}`, truncated: true, outcome: Failed,
 			reason: "stdout is larger than 1048576 bytes (1 MiB cap) and was cut off", reasonExact: true,
 		},
-		{name: "truncated declined", exit: 2, stdout: ``, truncated: true, outcome: Failed, reason: "1 MiB cap"},
-		{name: "truncated deferred", exit: 3, stdout: `{"outcome":"deferred"}`, truncated: true, outcome: Failed, reason: "1 MiB cap"},
+		{name: "truncated declined", exit: 23, stdout: ``, truncated: true, outcome: Failed, reason: "1 MiB cap"},
+		{name: "truncated deferred", exit: 24, stdout: `{"outcome":"deferred"}`, truncated: true, outcome: Failed, reason: "1 MiB cap"},
 		{
 			name: "truncated on an unlisted exit code", exit: 1, stdout: `{"summary":"a"}`, truncated: true, outcome: Failed,
 			reason: "exit 1; stdout ignored: stdout is larger than 1048576 bytes (1 MiB cap) and was cut off", reasonExact: true,

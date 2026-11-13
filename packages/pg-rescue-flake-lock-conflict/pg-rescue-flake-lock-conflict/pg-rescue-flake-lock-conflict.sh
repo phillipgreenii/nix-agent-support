@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
     exit 0
     ;;
   *)
-    # Exit 1, not 2: 2 would be read by the wrapper as `declined`.
+    # Exit 1, not 23: 23 is read by the wrapper as `declined`.
     echo "pg-rescue-flake-lock-conflict: unexpected argument: $1" >&2
     exit 1
     ;;

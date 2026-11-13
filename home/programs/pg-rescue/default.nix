@@ -166,8 +166,8 @@ let
     };
     # The last rung of the script-first chains below. The handler's argv is
     # static, so the item id comes from the environment variable the role shim
-    # exports (`--annotate-from-env`). pg-rescue-bead exits 3 (deferred) after
-    # annotating, so a run whose chain reaches give-up exits 75. A deployment
+    # exports (`--annotate-from-env`). pg-rescue-bead exits 24 (deferred) after
+    # annotating, so a run whose chain reaches give-up exits 21. A deployment
     # overrides `command` to add `--backend` and `--tracker-dir` so the label
     # lands in the tracker that holds the item.
     give-up = {

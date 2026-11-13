@@ -23,7 +23,7 @@ every repo is rebased (or a handler resolved the conflict), runs
 
 The loop STOPS before the push, leaving the working copy as-is, on the first
 repo whose pg-rescue run does not exit 0:
-  75      a handler deferred the work (a follow-up item exists)
+  21      a handler deferred the work (a follow-up item exists)
   other   the failure was not handled; pg-rescue's own exit code is passed on
 The script exits with that code. Repos after the failing one are not touched.
 

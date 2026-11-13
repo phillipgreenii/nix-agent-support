@@ -6,7 +6,7 @@
 # embedded throwaway database, see test-support/bd_fixture.bash: no dolt server,
 # never the shared tracker). Two stubs only: a pg-connector test double that
 # records its argv (the one external tool the shim calls with fixed argv), and a
-# pg-rescue that exits 9, 75 or 70, used only to prove the exit mapping and the
+# pg-rescue that exits 9, 21 or 20, used only to prove the exit mapping and the
 # failure counter.
 #
 # failing_builds and ci_rerun_of use the REAL encoding: a comma-separated
@@ -126,7 +126,7 @@ EOF
   : >"$CONNECTOR_SEEN"
 }
 
-# The fixture give-up handler (pg-rescue design 3.2: exit 3 is deferred). It
+# The fixture give-up handler (pg-rescue design 3.2: exit 24 is deferred). It
 # adds the marker and logs the item id it was handed; handlers log to files,
 # never to stdout.
 write_handlers() {
@@ -139,7 +139,7 @@ printf '%s\n' "\$BEADS_DIR" >"$HLOG/give-up.beads-dir"
 printf '%s\n' "\$BEADS_ACTOR" >"$HLOG/give-up.actor"
 pwd -P >"$HLOG/give-up.cwd"
 bd update "\$PG_ROUTER_ITEM_ID" --add-label script-gave-up >&2
-exit 3
+exit 24
 EOF
   chmod +x "$HANDLERS/give-up.sh"
 }
@@ -465,16 +465,16 @@ signal_hung_shim() {
   [ -s "$(printf '%s\n' "$STATE_DIR"/*.result.json | head -1)" ]
 }
 
-@test "a passed-through pg-rescue exit 9 is remapped to 1 and pg-rescue exit 75 to 0, the claim released each time" {
+@test "a passed-through pg-rescue exit 9 is remapped to 1 and pg-rescue exit 21 to 0, the claim released each time" {
   ITEM=$(new_item)
-  stub_pg_rescue 9 75
+  stub_pg_rescue 9 21
   run_shim
   [ "$status" -eq 1 ]
   assert_released
   assert_unmarked
   [ "$(connector_calls)" = "0" ]
   [ "$(last_outcome)" = "failed" ]
-  # The second call of the stub exits 75: the chain gave up, the shim exits 0
+  # The second call of the stub exits 21: the chain gave up, the shim exits 0
   # and adds no marker itself.
   run_shim
   [ "$status" -eq 0 ]
@@ -483,18 +483,18 @@ signal_hung_shim() {
   [ "$(last_outcome)" = "gave-up" ]
 }
 
-@test "pg-rescue exit 70 (a wrapper error) is unchanged: the shim exits 70 and releases the claim" {
+@test "pg-rescue exit 20 (a wrapper error) is unchanged: the shim exits 20 and releases the claim" {
   ITEM=$(new_item)
-  stub_pg_rescue 70
+  stub_pg_rescue 20
   run_shim
-  [ "$status" -eq 70 ]
+  [ "$status" -eq 20 ]
   assert_released
   [ "$(last_outcome)" = "failed" ]
 }
 
 @test "the pg-rescue invocation carries --chain fix-ci, -C <state-dir>, the result file and this tool's absolute path as the step" {
   ITEM=$(new_item)
-  stub_pg_rescue 75
+  stub_pg_rescue 21
   run_shim
   [ "$status" -eq 0 ]
   args=$(cat "$STUB_LOG")
@@ -502,7 +502,7 @@ signal_hung_shim() {
   [[ $args == *"--result-file $LAST_STATE/"*".result.json -- /"*" step --item-id $ITEM --repo acme/widget --pr-number 7 --tracker-dir $TDIR --state-dir $LAST_STATE" ]]
 }
 
-@test "a config with no fix-ci chain (pg-rescue exit 70) is a failure: the claim is released and nothing is marked" {
+@test "a config with no fix-ci chain (pg-rescue exit 20) is a failure: the claim is released and nothing is marked" {
   ITEM=$(new_item)
   cat >"$PG_RESCUE_CONFIG" <<EOF
 [handler.give-up]
@@ -674,10 +674,10 @@ EOF
 
 @test "a failed run adds one to script_failures in the releasing call, and the cap is then reached" {
   ITEM=$(new_item)
-  stub_pg_rescue 70
+  stub_pg_rescue 20
   : >"$BD_CALL_LOG"
   run_shim
-  [ "$status" -eq 70 ]
+  [ "$status" -eq 20 ]
   [ "$(item_meta script_failures)" = "1" ]
   assert_released
   # One call releases the claim and carries the counter.
@@ -708,12 +708,12 @@ EOF
 
 @test "the shim's stderr is kept in <run-id>.log" {
   ITEM=$(new_item)
-  stub_pg_rescue 70
+  stub_pg_rescue 20
   run_shim
-  [ "$status" -eq 70 ]
-  [[ "$stderr" == *"pg-rescue exited 70"* ]]
+  [ "$status" -eq 20 ]
+  [[ "$stderr" == *"pg-rescue exited 20"* ]]
   [ "$(printf '%s\n' "$LAST_STATE"/*.log | wc -l)" -eq 1 ]
-  grep -q "pg-rescue exited 70" "$LAST_STATE"/*.log
+  grep -q "pg-rescue exited 20" "$LAST_STATE"/*.log
 }
 
 @test "PG_ROUTER_ITEM_ID reaches the handler and PG_RESCUE_ITEM_ID appears nowhere in the shim" {

@@ -29,15 +29,22 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/cli"
 	"github.com/phillipgreenii/pg-rescue/internal/config"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// Exit codes owned by the wrapper (mirrored by package app).
+// Exit codes owned by the wrapper (mirrored by package app). They are app
+// codes in the 20-63 range of x/exitcode; the wrapper otherwise passes the
+// wrapped command's own exit code through, so a command that exits with one
+// of these numbers is indistinguishable from the wrapper reporting it (the
+// run log's result field tells them apart).
 const (
-	ExitWrapperError = 70
-	ExitDeferred     = 75
+	// ExitWrapperError: a CLI, config, run-directory or spawn problem.
+	ExitWrapperError = exitcode.AppMin
+	// ExitDeferred: a handler deferred the failure.
+	ExitDeferred = exitcode.AppMin + 1
 	// ExitStdinUnhandled is the exit code in --stdin mode when no handler
 	// resolved or deferred the failure.
-	ExitStdinUnhandled = 1
+	ExitStdinUnhandled = exitcode.AppMin + 2
 )
 
 // Kind is the run's overall result, in the words of the run log.

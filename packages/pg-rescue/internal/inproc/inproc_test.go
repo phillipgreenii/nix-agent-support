@@ -55,10 +55,10 @@ func TestRunSetsCwdAndEnvForTheCallAndRestoresThem(t *testing.T) {
 		sawEnv = os.Getenv("INPROC_KEEP")
 		sawReport = os.Getenv("PG_RESCUE_REPORT")
 		_, _ = io.WriteString(stdout, `{"outcome":"declined","summary":"s"}`)
-		return 2
+		return contract.ExitDeclined
 	}
 	res := Run(t, entry, nil, contracttest.Fixture("stdin-mode"), []string{"INPROC_KEEP=inner"})
-	if res.Exit != 2 || res.Outcome != contract.Declined {
+	if res.Exit != contract.ExitDeclined || res.Outcome != contract.Declined {
 		t.Fatalf("result = %+v", res)
 	}
 	if sawEnv != "inner" || sawReport != res.ReportPath {

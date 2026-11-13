@@ -28,6 +28,7 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/orphan"
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/tmpldata"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Defaults of the documented arguments.
@@ -40,7 +41,7 @@ const (
 
 // exitFailed is the handler's generic failure code. It is outside the outcome
 // table, so the wrapper records the attempt as failed.
-const exitFailed = 1
+const exitFailed = exitcode.Error
 
 // maxEnvelopeBytes caps what is read from the CLI's stdout. A result object is
 // small; this only stops a runaway process from filling memory.

@@ -19,6 +19,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/phillipgreenii/pg-rescue/internal/contract"
 )
 
 func main() {
@@ -234,9 +236,9 @@ func helperMain(args []string) {
 		if _, ok := kv["code"]; !ok {
 			switch kv["outcome"] {
 			case "declined":
-				code = 2
+				code = contract.ExitDeclined
 			case "deferred":
-				code = 3
+				code = contract.ExitDeferred
 			}
 		}
 		os.Exit(code)

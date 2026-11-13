@@ -142,10 +142,10 @@ pull
   [ ! -e "$GIT_LOG" ]
 }
 
-@test "a repo that defers (75) stops the loop, exits 75 and pushes nothing" {
-  printf '%s 75\n' "$REPO_B" >"$RC_FILE"
+@test "a repo that defers (21) stops the loop, exits 21 and pushes nothing" {
+  printf '%s 21\n' "$REPO_B" >"$RC_FILE"
   run "${SYNC[@]}"
-  [ "$status" -eq 75 ]
+  [ "$status" -eq 21 ]
   # repo-c is never reached.
   [ "$(rescued_repos)" = "$REPO_A
 $REPO_B" ]

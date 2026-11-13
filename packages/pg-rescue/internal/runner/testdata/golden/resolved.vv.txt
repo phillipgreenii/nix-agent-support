@@ -2,7 +2,7 @@ CONFLICT (content): Merge conflict in README.md
 
 == pg-rescue: `git pull --rebase` exited 1 · chain sync ==
 
-== [1/5] flake-lock-conflict: declined (exit 2, <DUR>, timeout 2m) ==
+== [1/5] flake-lock-conflict: declined (exit 23, <DUR>, timeout 2m) ==
 Conflict spans source files, not just flake.lock
 -- argv --
 pg-rescue-flake-lock-conflict

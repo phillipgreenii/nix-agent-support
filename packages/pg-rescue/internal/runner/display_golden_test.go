@@ -87,7 +87,7 @@ var gitScript = script{"git", "echo 'Auto-merging README.md'\necho 'CONFLICT (co
 var flakeDeclines = script{
 	"pg-rescue-flake-lock-conflict",
 	`printf '%s\n' '{"summary":"Conflict spans source files, not just flake.lock"}'
-exit 2
+exit 23
 `,
 }
 
@@ -106,19 +106,19 @@ touch "$PG_RESCUE_RUN_DIR/fixed"
 printf '%s\n' '{"outcome":"resolved","summary":"Finished the half-continued rebase; kept both sides of the README conflict","details":"fix-small edit left README.md unstaged.\nRe-staged README.md and ran git rebase --continue; 2 commits replayed cleanly.","meta":{"session_id":"sess-large","total_cost_usd":0.31,"num_turns":14,"model":"sonnet"}}'
 exit 0`
 	smallDeclines = `printf '%s\n' '{"summary":"Conflict needs a design decision between two rewrites of the same function"}'
-exit 2`
-	largeDeclines = `exit 2`
+exit 23`
+	largeDeclines = `exit 23`
 	largeHangs    = `sleep 30`
 )
 
 var (
 	p1Defers = script{"pg-rescue-bead", `printf '%s\n' '{"summary":"Filed pg2-abc12 (P1): pg-rescue: git pull --rebase failed in demo-repo","meta":{"item_id":"pg2-abc12","action":"created"}}'
-exit 3
+exit 24
 `}
 	p1Fails   = script{"pg-rescue-bead", "echo 'tracker unreachable' >&2\nexit 1\n"}
-	p1Unused  = script{"pg-rescue-bead", "exit 2\n"}
-	notifyOK  = script{"pg-rescue-notify", `printf '%s\n' '{"summary":"Posted a notification"}'` + "\nexit 2\n"}
-	notifyBad = script{"pg-rescue-notify", "exit 2\n"}
+	p1Unused  = script{"pg-rescue-bead", "exit 23\n"}
+	notifyOK  = script{"pg-rescue-notify", `printf '%s\n' '{"summary":"Posted a notification"}'` + "\nexit 23\n"}
+	notifyBad = script{"pg-rescue-notify", "exit 23\n"}
 )
 
 type scenarioSpec struct {
@@ -141,7 +141,7 @@ func scenarios() []scenarioSpec {
 			name:     "deferred",
 			config:   scenarioConfig("1s"),
 			scripts:  []script{gitScript, flakeDeclines, claudeScript(smallDeclines, largeHangs), p1Defers, notifyBad},
-			wantExit: 75,
+			wantExit: 21,
 		},
 		{
 			name:     "unhandled",

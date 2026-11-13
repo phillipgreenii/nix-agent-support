@@ -1,7 +1,7 @@
 // Package app wires the pg-rescue entry points together: it parses the
 // command line, loads and validates the config, resolves the handler list,
 // creates the run directory and hands a Plan to an Executor. Everything that
-// can go wrong before the command runs is a wrapper error and exits 70.
+// can go wrong before the command runs is a wrapper error and exits 20 (ExitWrapperError).
 package app
 
 import (
@@ -16,15 +16,18 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/cli"
 	"github.com/phillipgreenii/pg-rescue/internal/config"
 	"github.com/phillipgreenii/pg-rescue/internal/rundir"
+	"github.com/phillipgreenii/pg-rescue/internal/runner"
 )
 
 // Exit codes owned by the wrapper.
 const (
-	// ExitWrapperError is EX_SOFTWARE: a CLI, config, run-directory or spawn
-	// problem, always reported before the command runs.
-	ExitWrapperError = 70
-	// ExitDeferred is EX_TEMPFAIL: a handler deferred the failure.
-	ExitDeferred = 75
+	// ExitWrapperError is an app code (20): a CLI, config, run-directory or
+	// spawn problem, always reported before the command runs. It is not a
+	// shared code because the wrapper also passes the command's own codes
+	// through, and a shared code (1, 2, 7) would be ambiguous with them.
+	ExitWrapperError = runner.ExitWrapperError
+	// ExitDeferred is an app code (21): a handler deferred the failure.
+	ExitDeferred = runner.ExitDeferred
 )
 
 // DefaultKillGrace is the SIGTERM-to-SIGKILL grace period.

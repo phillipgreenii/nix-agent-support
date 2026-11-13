@@ -367,7 +367,7 @@ func TestLockOnlyConflictIsResolvedByFlakeLockConflict(t *testing.T) {
 
 // TestSourceConflictIsDeclinedThenDeferred: both sides edit README.md, so the
 // deterministic handler declines (a source file conflicts), the agent
-// (fix-small) declines too, and p1-later files a deferral. The run exits 75
+// (fix-small) declines too, and p1-later files a deferral. The run exits 21
 // and leaves the repository mid-rebase for whoever picks the item up.
 func TestSourceConflictIsDeclinedThenDeferred(t *testing.T) {
 	r := newRig(t)
@@ -376,8 +376,8 @@ func TestSourceConflictIsDeclinedThenDeferred(t *testing.T) {
 	r.commit(r.work, "local: edit readme", map[string]string{"README.md": "local\n"})
 
 	code, stderr := r.pull()
-	if code != 75 {
-		t.Fatalf("exit = %d; want 75 (deferred); stderr:\n%s", code, stderr)
+	if code != 21 {
+		t.Fatalf("exit = %d; want 21 (deferred); stderr:\n%s", code, stderr)
 	}
 	if !r.midRebase() {
 		t.Error("a deferral must leave the repository mid-rebase")
@@ -410,8 +410,8 @@ func TestSourceConflictIsDeclinedThenDeferred(t *testing.T) {
 	}
 
 	e := r.runLog()
-	if e.Result != "deferred" || str(e.DeferredBy) != "p1-later" || e.FinalExit != 75 {
-		t.Errorf("run log: result=%q deferred_by=%s final_exit=%d; want deferred by p1-later, exit 75", e.Result, str(e.DeferredBy), e.FinalExit)
+	if e.Result != "deferred" || str(e.DeferredBy) != "p1-later" || e.FinalExit != 21 {
+		t.Errorf("run log: result=%q deferred_by=%s final_exit=%d; want deferred by p1-later, exit 21", e.Result, str(e.DeferredBy), e.FinalExit)
 	}
 	if e.Exit == nil || *e.Exit == 0 {
 		t.Errorf("run log exit = %v; want the failed command's own non-zero exit", e.Exit)

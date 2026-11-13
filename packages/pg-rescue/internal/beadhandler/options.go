@@ -71,8 +71,7 @@ type options struct {
 var errHelp = pflag.ErrHelp
 
 // parseOptions parses args. Every error other than errHelp is a usage error,
-// which the handler reports as exit 1: exit 2 would be read by the wrapper as
-// "declined", so a usage error must never use pflag's customary 2.
+// which the handler reports as exit 1 (a failed attempt to the wrapper).
 func parseOptions(args []string) (*options, error) {
 	o := &options{}
 	var repoLabelMap, backendMap []string

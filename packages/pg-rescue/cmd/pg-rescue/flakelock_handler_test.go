@@ -239,7 +239,7 @@ func TestFlakeLockHandlerDeclinesWhenAnotherFileConflicts(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit = %d; want the command's own code, 1; stderr:\n%s", code, stderr)
 	}
-	for _, w := range []string{"flock: declined (exit 2)", "Conflict spans source files, not just flake.lock", "README.md"} {
+	for _, w := range []string{"flock: declined (exit 23)", "Conflict spans source files, not just flake.lock", "README.md"} {
 		if !strings.Contains(stderr, w) {
 			t.Errorf("stderr lacks %q:\n%s", w, stderr)
 		}
@@ -268,7 +268,7 @@ func TestFlakeLockHandlerDeclinesWhenRebaseStopsAgain(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit = %d; want 1; stderr:\n%s", code, stderr)
 	}
-	for _, w := range []string{"flock: declined (exit 2)", "Rebase stopped again at ", "local:_rev_beta"} {
+	for _, w := range []string{"flock: declined (exit 23)", "Rebase stopped again at ", "local:_rev_beta"} {
 		if !strings.Contains(stderr, w) {
 			t.Errorf("stderr lacks %q:\n%s", w, stderr)
 		}

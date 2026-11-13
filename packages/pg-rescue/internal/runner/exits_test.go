@@ -31,20 +31,20 @@ func TestExitCodeTable(t *testing.T) {
 	rows := []row{
 		{name: "command succeeded", handlers: []hd{resolves}, cmd: helperArgv("exit", "code=0"), want: 0, kind: runner.KindSuccess},
 		{name: "resolved and verify passed", handlers: []hd{resolves}, cmd: nil, want: 0, kind: runner.KindResolved},
-		{name: "deferred", handlers: []hd{declines, defers}, cmd: helperArgv("exit", "code=4"), want: 75, kind: runner.KindDeferred},
+		{name: "deferred", handlers: []hd{declines, defers}, cmd: helperArgv("exit", "code=4"), want: 21, kind: runner.KindDeferred},
 		{name: "every handler declined: the command's own code", handlers: []hd{declines, declines}, cmd: helperArgv("exit", "code=4"), want: 4, kind: runner.KindUnhandled},
 		{name: "every handler failed: the command's own code", handlers: []hd{fails, fails}, cmd: helperArgv("exit", "code=9"), want: 9, kind: runner.KindUnhandled},
 		{name: "mixed declined and failed", handlers: []hd{declines, fails}, cmd: helperArgv("exit", "code=3"), want: 3, kind: runner.KindUnhandled},
-		{name: "the command's own 70 passes through when unhandled", handlers: []hd{declines}, cmd: helperArgv("exit", "code=70"), want: 70, kind: runner.KindUnhandled},
-		{name: "the command's own 75 passes through when unhandled", handlers: []hd{declines}, cmd: helperArgv("exit", "code=75"), want: 75, kind: runner.KindUnhandled},
+		{name: "the command's own 20 passes through when unhandled", handlers: []hd{declines}, cmd: helperArgv("exit", "code=20"), want: 20, kind: runner.KindUnhandled},
+		{name: "the command's own 21 passes through when unhandled", handlers: []hd{declines}, cmd: helperArgv("exit", "code=21"), want: 21, kind: runner.KindUnhandled},
 		{name: "128+signo passthrough: killed by SIGTERM it was not sent by the wrapper", handlers: []hd{declines}, cmd: helperArgv("selfkill", "sig=15"), want: 143, kind: runner.KindUnhandled},
 		{name: "128+signo passthrough: SIGKILL", handlers: []hd{declines}, cmd: helperArgv("selfkill", "sig=9"), want: 137, kind: runner.KindUnhandled},
-		{name: "--stdin, every handler declined: 1", handlers: []hd{declines}, opts: []string{"--stdin", "--verify", "true"}, stdin: "boom\n", want: 1, kind: runner.KindUnhandled},
-		{name: "--stdin, handlers failed: 1", handlers: []hd{fails}, opts: []string{"--stdin", "--verify", "true"}, stdin: "boom\n", want: 1, kind: runner.KindUnhandled},
-		{name: "--stdin, deferred: 75", handlers: []hd{defers}, opts: []string{"--stdin", "--verify", "true"}, stdin: "boom\n", want: 75, kind: runner.KindDeferred},
+		{name: "--stdin, every handler declined: 22", handlers: []hd{declines}, opts: []string{"--stdin", "--verify", "true"}, stdin: "boom\n", want: 22, kind: runner.KindUnhandled},
+		{name: "--stdin, handlers failed: 22", handlers: []hd{fails}, opts: []string{"--stdin", "--verify", "true"}, stdin: "boom\n", want: 22, kind: runner.KindUnhandled},
+		{name: "--stdin, deferred: 21", handlers: []hd{defers}, opts: []string{"--stdin", "--verify", "true"}, stdin: "boom\n", want: 21, kind: runner.KindDeferred},
 		{name: "--stdin, resolved and verified: 0", handlers: []hd{resolves}, opts: []string{"--stdin", "--verify", "true"}, stdin: "boom\n", want: 0, kind: runner.KindResolved},
 		{name: "resolved but verify failed, nothing else: the command's code", handlers: []hd{resolves}, cmd: helperArgv("exit", "code=6"), opts: []string{"--verify", "exit 1"}, want: 6, kind: runner.KindUnhandled},
-		{name: "--stdin, verify failed: 1", handlers: []hd{resolves}, opts: []string{"--stdin", "--verify", "exit 3"}, stdin: "boom\n", want: 1, kind: runner.KindUnhandled},
+		{name: "--stdin, verify failed: 22", handlers: []hd{resolves}, opts: []string{"--stdin", "--verify", "exit 3"}, stdin: "boom\n", want: 22, kind: runner.KindUnhandled},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {

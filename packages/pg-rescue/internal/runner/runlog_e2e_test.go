@@ -75,7 +75,7 @@ func TestRunLogResultValues(t *testing.T) {
 			"deferred",
 			[]hd{defers},
 			helperArgv("exit", "code=1"), nil,
-			map[string]any{"result": "deferred", "exit": 1.0, "final_exit": 75.0, "deferred_by": "h"},
+			map[string]any{"result": "deferred", "exit": 1.0, "final_exit": 21.0, "deferred_by": "h"},
 		},
 		{
 			"unhandled",
@@ -88,7 +88,7 @@ func TestRunLogResultValues(t *testing.T) {
 			[]hd{declines},
 			[]string{"no-such-command-xyz"},
 			nil,
-			map[string]any{"result": "error", "exit": nil, "final_exit": 70.0},
+			map[string]any{"result": "error", "exit": nil, "final_exit": 20.0},
 		},
 	}
 	for _, c := range cases {
@@ -165,7 +165,7 @@ func TestRunLogFieldsAndAttempts(t *testing.T) {
 		t.Fatalf("attempts = %v", atts)
 	}
 	a1, a2 := atts[0].(map[string]any), atts[1].(map[string]any)
-	if a1["handler"] != "det" || a1["outcome"] != "declined" || a1["exit"] != 2.0 || a1["position"] != 1.0 ||
+	if a1["handler"] != "det" || a1["outcome"] != "declined" || a1["exit"] != 23.0 || a1["position"] != 1.0 ||
 		a1["tags"].([]any)[0] != "deterministic" || a1["meta"].(map[string]any)["why"] != "x" {
 		t.Errorf("attempt 1 = %v", a1)
 	}
@@ -184,7 +184,7 @@ func TestRunLogHandlersSelectorAndStdinMode(t *testing.T) {
 	e.wrap("h", nil, "--stdin", "--verify", "true", "--context", "ctx")
 	row := e.onlyRow()
 	if row["mode"] != "stdin" || row["chain"] != nil || row["cmd"] != nil || row["exit"] != nil ||
-		row["result"] != "unhandled" || row["final_exit"] != 1.0 || row["context"] != "ctx" {
+		row["result"] != "unhandled" || row["final_exit"] != 22.0 || row["context"] != "ctx" {
 		t.Errorf("stdin row = %v", row)
 	}
 	if hs := row["handlers"].([]any); len(hs) != 1 || hs[0] != "h" {
@@ -297,15 +297,15 @@ func TestAFailedRunLogWriteNeverChangesTheExitCode(t *testing.T) {
 
 func TestResultFile(t *testing.T) {
 	t.Run("holds the run log line, and tells reserved exit codes apart", func(t *testing.T) {
-		// The command's own 75 and a deferral's 75 are the same exit code; the
+		// The command's own 21 and a deferral's 21 are the same exit code; the
 		// result file says which it was.
 		e := newE2E(t, "", []hd{result("d", "deferred"), result("n", "declined")}, map[string][]string{"def": {"d"}, "dec": {"n"}})
 		f1 := filepath.Join(e.root, "own75.json")
 		f2 := filepath.Join(e.root, "deferred75.json")
-		c1, _, _ := e.run(append([]string{"--config", e.cfgPath, "--chain", "dec", "-C", e.cwd, "--result-file", f1, "--"}, helperArgv("exit", "code=75")...)...)
+		c1, _, _ := e.run(append([]string{"--config", e.cfgPath, "--chain", "dec", "-C", e.cwd, "--result-file", f1, "--"}, helperArgv("exit", "code=21")...)...)
 		c2, _, _ := e.run(append([]string{"--config", e.cfgPath, "--chain", "def", "-C", e.cwd, "--result-file", f2, "--"}, helperArgv("exit", "code=1")...)...)
-		if c1 != 75 || c2 != 75 {
-			t.Fatalf("exits %d %d; want 75 75", c1, c2)
+		if c1 != 21 || c2 != 21 {
+			t.Fatalf("exits %d %d; want 21 21", c1, c2)
 		}
 		read := func(p string) map[string]any {
 			b, err := os.ReadFile(p)
@@ -322,8 +322,8 @@ func TestResultFile(t *testing.T) {
 			return m
 		}
 		r1, r2 := read(f1), read(f2)
-		if r1["result"] != "unhandled" || r1["final_exit"] != 75.0 || r2["result"] != "deferred" || r2["final_exit"] != 75.0 {
-			t.Errorf("own 75: %v / deferred 75: %v", r1, r2)
+		if r1["result"] != "unhandled" || r1["final_exit"] != 21.0 || r2["result"] != "deferred" || r2["final_exit"] != 21.0 {
+			t.Errorf("own 21: %v / deferred 21: %v", r1, r2)
 		}
 		// It is the run log line, byte for byte.
 		rows := e.runLog()
@@ -371,8 +371,8 @@ func TestRunDirectoryCreationFailureExitsSeventyBeforeTheCommandRuns(t *testing.
 	e.env["XDG_STATE_HOME"] = blocker
 	marker := filepath.Join(e.root, "ran")
 	code, stdout, stderr := e.wrap("h", helperArgv("ran", "file="+marker, "code=0"))
-	if code != 70 {
-		t.Errorf("exit = %d; want 70", code)
+	if code != 20 {
+		t.Errorf("exit = %d; want 20", code)
 	}
 	if exists(marker) {
 		t.Error("the command ran although the run directory could not be created")

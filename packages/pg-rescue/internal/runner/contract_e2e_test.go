@@ -22,7 +22,7 @@ import (
 func recorders(dir string, n int) []hd {
 	var hs []hd
 	for i := 1; i <= n; i++ {
-		hs = append(hs, hd{name: "r" + strconv.Itoa(i), argv: helperArgv("record", "dest="+dir+"/rec-{pos}", "code=2")})
+		hs = append(hs, hd{name: "r" + strconv.Itoa(i), argv: helperArgv("record", "dest="+dir+"/rec-{pos}", "code=23")})
 	}
 	return hs
 }
@@ -88,7 +88,7 @@ func TestStdinModeLeavesCmdAndExitEmpty(t *testing.T) {
 	_, _ = in.WriteString("saved failure\n")
 	_, _ = in.Seek(0, 0)
 	e.rt.Stdin = in
-	if code, _, stderr := e.wrap("r1", nil, "--stdin", "--verify", "true", "--context", "c"); code != 1 {
+	if code, _, stderr := e.wrap("r1", nil, "--stdin", "--verify", "true", "--context", "c"); code != 22 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	env := readRecord(t, filepath.Join(dir, "rec-1")).Env
@@ -273,7 +273,7 @@ func TestGrandchildrenAreKilledWhenTheHandlerExits(t *testing.T) {
 			dir := t.TempDir()
 			pidFile := filepath.Join(dir, "gc-pid")
 			e := newE2E(t, "", []hd{
-				{name: "leaves-child", argv: helperArgv("grandchild", "pid="+pidFile, "hold="+hold, "code=2")},
+				{name: "leaves-child", argv: helperArgv("grandchild", "pid="+pidFile, "hold="+hold, "code=23")},
 				result("next", "declined"),
 			}, chainOf("leaves-child", "next"))
 			done := make(chan int, 1)
@@ -306,8 +306,8 @@ func TestGrandchildIsGoneBeforeTheNextHandlerStarts(t *testing.T) {
 	// The second handler checks, as its first act, whether the first
 	// handler's grandchild is still alive.
 	e := newE2E(t, "", []hd{
-		{name: "leaves-child", argv: helperArgv("grandchild", "pid="+pidFile, "code=2")},
-		{name: "probe", argv: helperArgv("probe-pid", "pidfile="+pidFile, "dest="+probe, "code=2")},
+		{name: "leaves-child", argv: helperArgv("grandchild", "pid="+pidFile, "code=23")},
+		{name: "probe", argv: helperArgv("probe-pid", "pidfile="+pidFile, "dest="+probe, "code=23")},
 	}, chainOf("leaves-child", "probe"))
 	e.wrap("leaves-child,probe", helperArgv("exit", "code=1"))
 	if got := waitForFile(t, probe); got != "dead" {
@@ -327,7 +327,7 @@ func TestResultStdoutSizeBoundaries(t *testing.T) {
 		{"5 MiB, far past the cap", 5 * mib, contract.Failed},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			e := newE2E(t, "", []hd{{name: "big", argv: helperArgv("bigout", "size="+strconv.Itoa(c.size), "code=2"), timeout: "20s"}}, chainOf("big"))
+			e := newE2E(t, "", []hd{{name: "big", argv: helperArgv("bigout", "size="+strconv.Itoa(c.size), "code=23"), timeout: "20s"}}, chainOf("big"))
 			start := time.Now()
 			e.wrap("big", helperArgv("exit", "code=1"))
 			if time.Since(start) > 15*time.Second {
@@ -355,12 +355,12 @@ func TestHandlerResultMapping(t *testing.T) {
 		reason  string
 		summary string
 	}{
-		{"bare exit 2", hd{argv: helperArgv("exit", "code=2")}, contract.Declined, "exit 2", ""},
-		{"bare exit 3", hd{argv: helperArgv("exit", "code=3")}, contract.Deferred, "exit 3", ""},
+		{"bare exit 23", hd{argv: helperArgv("exit", "code=23")}, contract.Declined, "exit 23", ""},
+		{"bare exit 24", hd{argv: helperArgv("exit", "code=24")}, contract.Deferred, "exit 24", ""},
 		{"bare exit 1", hd{argv: helperArgv("exit", "code=1")}, contract.Failed, "exit 1", ""},
-		{"json agrees", result("", "declined", "summary=nope"), contract.Declined, "exit 2", "nope"},
-		{"json outcome mismatch", hd{argv: helperArgv("result", "outcome=resolved", "code=2")}, contract.Failed, `stdout outcome "resolved" disagrees with exit code 2 (declined)`, ""},
-		{"stdout is not json", hd{argv: helperArgv("result", "raw=Successfully rebased", "code=2")}, contract.Failed, "handlers must log to stderr", ""},
+		{"json agrees", result("", "declined", "summary=nope"), contract.Declined, "exit 23", "nope"},
+		{"json outcome mismatch", hd{argv: helperArgv("result", "outcome=resolved", "code=23")}, contract.Failed, `stdout outcome "resolved" disagrees with exit code 23 (declined)`, ""},
+		{"stdout is not json", hd{argv: helperArgv("result", "raw=Successfully rebased", "code=23")}, contract.Failed, "handlers must log to stderr", ""},
 		{"json on an exit outside the table keeps the claims", hd{argv: helperArgv("result", "summary=hint", `meta={"a":1}`, "code=5")}, contract.Failed, "exit 5", "hint"},
 	}
 	for _, c := range cases {
@@ -411,7 +411,7 @@ func TestAttemptsGrowByExactlyOnePerHandler(t *testing.T) {
 
 func TestAHandlerOverwritingReportJSONDoesNotChangeWhatTheNextSees(t *testing.T) {
 	dir := t.TempDir()
-	hs := append([]hd{{name: "vandal", argv: helperArgv("overwrite-report", "code=2")}}, recorders(dir, 1)...)
+	hs := append([]hd{{name: "vandal", argv: helperArgv("overwrite-report", "code=23")}}, recorders(dir, 1)...)
 	e := newE2E(t, "", hs, chainOf("vandal", "r1"))
 	e.wrap("vandal,r1", helperArgv("exit", "code=1"))
 	r := readRecord(t, filepath.Join(dir, "rec-2"))
@@ -430,7 +430,7 @@ func TestReportJSONSymlinkIsReplacedNotFollowed(t *testing.T) {
 	if err := os.WriteFile(target, []byte("sentinel"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	hs := append([]hd{{name: "linker", argv: helperArgv("symlink-report", "target="+target, "code=2")}}, recorders(dir, 1)...)
+	hs := append([]hd{{name: "linker", argv: helperArgv("symlink-report", "target="+target, "code=23")}}, recorders(dir, 1)...)
 	e := newE2E(t, "", hs, chainOf("linker", "r1"))
 	e.wrap("linker,r1", helperArgv("exit", "code=1"))
 	if b, _ := os.ReadFile(target); string(b) != "sentinel" {
@@ -488,11 +488,11 @@ func TestEnvPrecedenceAndEnvFileErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := hd{
-		name: "h", argv: helperArgv("record", "dest="+dir+"/rec", "code=2"),
+		name: "h", argv: helperArgv("record", "dest="+dir+"/rec", "code=23"),
 		env:     map[string]string{"XT_A": "env", "XT_B": "env", "PG_RESCUE_HANDLER": "evil"},
 		envFile: envFile,
 	}
-	missing := hd{name: "missing", argv: helperArgv("exit", "code=2"), envFile: filepath.Join(dir, "absent.env")}
+	missing := hd{name: "missing", argv: helperArgv("exit", "code=23"), envFile: filepath.Join(dir, "absent.env")}
 	e := newE2E(t, "", []hd{h, missing}, chainOf("h", "missing"))
 	e.env["XT_A"] = "wrapper"
 	e.env["XT_D"] = "wrapper"

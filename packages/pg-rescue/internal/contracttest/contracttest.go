@@ -52,7 +52,7 @@ func Fixture(name string) string {
 // on PATH or override anything.
 //
 // Run fails t if the handler cannot be started or times out. It also fails t
-// when the handler exits with a code in the outcome table (0, 2, 3) but
+// when the handler exits with a code in the outcome table (0, 23, 24) but
 // contract.Classify does not accept its stdout, which is the contract
 // violation every handler test exists to catch. What the outcome SHOULD be is
 // the caller's to assert on the returned Result: a handler that rightly exits 1

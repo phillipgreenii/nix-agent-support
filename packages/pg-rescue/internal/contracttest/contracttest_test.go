@@ -98,7 +98,7 @@ func TestRunAcceptsAHandlerThatRefusesAnUnknownSchemaVersion(t *testing.T) {
 }
 
 func TestRunMapsBareExitCodes(t *testing.T) {
-	for code, want := range map[string]contract.Outcome{"0": contract.Resolved, "2": contract.Declined, "3": contract.Deferred, "1": contract.Failed, "75": contract.Failed} {
+	for code, want := range map[string]contract.Outcome{"0": contract.Resolved, "23": contract.Declined, "24": contract.Deferred, "1": contract.Failed, "2": contract.Failed, "3": contract.Failed, "75": contract.Failed} {
 		res := Run(t, fake("exit", code), Fixture("first-attempt"), helperEnv)
 		if res.Outcome != want || res.Reason != "exit "+code {
 			t.Errorf("exit %s: %+v; want outcome %s", code, res, want)
@@ -112,8 +112,8 @@ func TestRunReportsClassifyRejections(t *testing.T) {
 		want string
 	}{
 		"log text on stdout":  {fake("exit", "0", "Successfully rebased"), "handlers must log to stderr"},
-		"disagreeing outcome": {fake("exit", "2", `{"outcome":"resolved"}`), `disagrees with exit code 2`},
-		"two objects":         {fake("exit", "3", `{} {}`), "data after the JSON object"},
+		"disagreeing outcome": {fake("exit", "23", `{"outcome":"resolved"}`), `disagrees with exit code 23`},
+		"two objects":         {fake("exit", "24", `{} {}`), "data after the JSON object"},
 		"oversized result":    {fake("big"), "1 MiB cap"},
 	} {
 		t.Run(name, func(t *testing.T) {

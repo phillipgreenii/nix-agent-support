@@ -61,7 +61,7 @@ func runMainProc(t *testing.T, env []string, args ...string) (code int, stdout, 
 }
 
 func TestResultExitCodes(t *testing.T) {
-	for outcome, want := range map[string]int{"resolved": 0, "declined": 2, "deferred": 3} {
+	for outcome, want := range map[string]int{"resolved": 0, "declined": 23, "deferred": 24} {
 		code, stdout, _ := runMain(t, nil, "result", outcome, "s")
 		if code != want || !strings.Contains(stdout, `"outcome":"`+outcome+`"`) {
 			t.Errorf("%s: code=%d stdout=%q", outcome, code, stdout)
@@ -71,7 +71,7 @@ func TestResultExitCodes(t *testing.T) {
 
 func TestWrapperErrorExit70(t *testing.T) {
 	code, stdout, stderr := runMain(t, nil, "--", "true")
-	if code != 70 || stdout != "" || !strings.Contains(stderr, "pg-rescue: ") {
+	if code != 20 || stdout != "" || !strings.Contains(stderr, "pg-rescue: ") {
 		t.Errorf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }

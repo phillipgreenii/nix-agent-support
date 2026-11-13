@@ -21,7 +21,7 @@ func TestResultExitCodesAndShape(t *testing.T) {
 	tests := []struct {
 		outcome string
 		code    int
-	}{{"resolved", 0}, {"deferred", 3}, {"declined", 2}}
+	}{{"resolved", 0}, {"deferred", 24}, {"declined", 23}}
 	for _, tc := range tests {
 		t.Run(tc.outcome, func(t *testing.T) {
 			code, stdout, stderr := runResultCmd(t, tc.outcome, "one line summary")
@@ -52,7 +52,7 @@ func TestResultExitCodesAndShape(t *testing.T) {
 
 func TestResultSummaryIsOptional(t *testing.T) {
 	code, stdout, _ := runResultCmd(t, "declined")
-	if code != 2 || stdout != `{"outcome":"declined"}`+"\n" {
+	if code != 23 || stdout != `{"outcome":"declined"}`+"\n" {
 		t.Errorf("code=%d stdout=%q", code, stdout)
 	}
 	// An explicitly empty summary is the same as none.
@@ -150,7 +150,7 @@ func TestResultFlagsMayPrecedeThePositionals(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, stdout, _ := runResultCmd(t, "--meta-file", meta, "deferred", "filed")
-	if code != 3 || !strings.Contains(stdout, `"meta":{"a":1}`) {
+	if code != 24 || !strings.Contains(stdout, `"meta":{"a":1}`) {
 		t.Errorf("code=%d stdout=%q", code, stdout)
 	}
 }
@@ -184,7 +184,7 @@ func TestResultErrorsExit70WithEmptyStdout(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			code, stdout, stderr := runResultCmd(t, tc.args...)
-			if code != 70 || stdout != "" {
+			if code != 20 || stdout != "" {
 				t.Errorf("code=%d stdout=%q", code, stdout)
 			}
 			contains(t, "stderr", stderr, "pg-rescue: ", tc.want)

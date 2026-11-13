@@ -123,7 +123,7 @@ func wrapperErrorCases(t *testing.T) []wrapperErrCase {
 }
 
 // TestWrapperErrorsExit70BeforeTheCommandRuns covers every case in the
-// "wrapper errors" list: each must exit 70 and the Executor (the only thing
+// "wrapper errors" list: each must exit 20 and the Executor (the only thing
 // that would spawn the command) must never be reached.
 func TestWrapperErrorsExit70BeforeTheCommandRuns(t *testing.T) {
 	cases := wrapperErrorCases(t)
@@ -141,8 +141,8 @@ func TestWrapperErrorsExit70BeforeTheCommandRuns(t *testing.T) {
 				c.prep(h)
 			}
 			code, stdout, stderr := h.run(c.args(h)...)
-			if code != 70 {
-				t.Errorf("exit = %d; want 70\nstderr: %s", code, stderr)
+			if code != 20 {
+				t.Errorf("exit = %d; want 20\nstderr: %s", code, stderr)
 			}
 			if n := len(h.rec.calls); n != 0 {
 				t.Errorf("the command was reached %d time(s); a wrapper error must come first", n)
@@ -161,7 +161,7 @@ func TestWrapperErrorsExit70BeforeTheCommandRuns(t *testing.T) {
 func TestNoArgumentsPrintsUsageAndExits70(t *testing.T) {
 	h := newHarness(t, goodConfig)
 	code, _, stderr := h.run()
-	if code != 70 || !strings.Contains(stderr, "usage:") || len(h.rec.calls) != 0 {
+	if code != 20 || !strings.Contains(stderr, "usage:") || len(h.rec.calls) != 0 {
 		t.Errorf("code=%d calls=%d stderr=%q", code, len(h.rec.calls), stderr)
 	}
 }

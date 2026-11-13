@@ -183,8 +183,8 @@ func TestFootersAndHeaders(t *testing.T) {
 	}
 	t.Run("deferred", func(t *testing.T) {
 		in, files := base()
-		in.Result.Kind, in.Result.DeferredBy, in.Result.ExitCode = runner.KindDeferred, "p1-later", 75
-		want := "== deferred by p1-later · exit 75 · working copy left as-is · run 20261002T140311Z-7f3a9c2e ==\n"
+		in.Result.Kind, in.Result.DeferredBy, in.Result.ExitCode = runner.KindDeferred, "p1-later", 21
+		want := "== deferred by p1-later · exit 21 · working copy left as-is · run 20261002T140311Z-7f3a9c2e ==\n"
 		if got := render(t, in, files, cli.Normal); !strings.HasSuffix(got, want) {
 			t.Errorf("footer:\n%s", got)
 		}

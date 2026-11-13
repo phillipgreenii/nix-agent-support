@@ -41,7 +41,7 @@ func swapCommand(args, cmd []string) []string {
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // TestEveryWrapperErrorNeverSpawnsTheCommand proves, end to end with the real
-// executor, that every wrapper-error case exits 70 and the command never
+// executor, that every wrapper-error case exits 20 and the command never
 // started: the fake command leaves a marker file if it ever runs.
 func TestEveryWrapperErrorNeverSpawnsTheCommand(t *testing.T) {
 	for _, c := range wrapperErrorCases(t) {
@@ -59,8 +59,8 @@ func TestEveryWrapperErrorNeverSpawnsTheCommand(t *testing.T) {
 			}
 			marker := filepath.Join(h.root, "command-ran")
 			code, stdout, stderr := h.run(swapCommand(c.args(h), markerCommand(marker))...)
-			if code != 70 {
-				t.Errorf("exit = %d; want 70\nstderr: %s", code, stderr)
+			if code != 20 {
+				t.Errorf("exit = %d; want 20\nstderr: %s", code, stderr)
 			}
 			if fileExists(marker) {
 				t.Error("the command was spawned; a wrapper error must come first")
@@ -93,7 +93,7 @@ func TestMissingWorkingDirectoryIsAWrapperError(t *testing.T) {
 		return append([]string{"--config", h.cfgPath, "--handlers", "notify", "-C", dir, "--"}, markerCommand(marker)...)
 	}
 	code, _, stderr := h.run(args(filepath.Join(h.root, "no-such-dir"))...)
-	if code != 70 || fileExists(marker) || !strings.Contains(stderr, "cannot run in") {
+	if code != 20 || fileExists(marker) || !strings.Contains(stderr, "cannot run in") {
 		t.Errorf("exit=%d marker=%v stderr=%s", code, fileExists(marker), stderr)
 	}
 	// A file is not a directory either.
@@ -101,7 +101,7 @@ func TestMissingWorkingDirectoryIsAWrapperError(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code, _, stderr := h.run(args(file)...); code != 70 || fileExists(marker) {
+	if code, _, stderr := h.run(args(file)...); code != 20 || fileExists(marker) {
 		t.Errorf("exit=%d stderr=%s", code, stderr)
 	}
 }
@@ -115,7 +115,7 @@ func TestUnspawnableCommandIsAWrapperError(t *testing.T) {
 		"relative missing":  {"./no-such-script"},
 	} {
 		code, stdout, stderr := h.run(append([]string{"--config", h.cfgPath, "--handlers", "notify", "--"}, cmd...)...)
-		if code != 70 || stdout != "" || !strings.HasPrefix(stderr, "pg-rescue: cannot run") {
+		if code != 20 || stdout != "" || !strings.HasPrefix(stderr, "pg-rescue: cannot run") {
 			t.Errorf("%s: exit=%d stdout=%q stderr=%q", name, code, stdout, stderr)
 		}
 		if ex.Last == nil || ex.Last.Kind != runner.KindError {

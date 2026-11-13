@@ -43,7 +43,7 @@ For the item ID the tool, in order:
   4. on pg-rescue exit 0 pushes with pg-rescue-push-branch --expected-sha SHA
      (a push lease pinned to SHA) and closes the item, naming the run id in the
      reason; a rejected push lease closes the item as stale (exit 0);
-  5. on pg-rescue exit 75 (the chain gave up; its give-up handler set the
+  5. on pg-rescue exit 21 (the chain gave up; its give-up handler set the
      marker) pushes nothing and releases the claim;
   6. on any other pg-rescue exit counts a failure (script_failures on the
      item), releases the claim and exits 1;
@@ -397,14 +397,14 @@ close_item() {
 }
 
 # run_give_up RESULT_FILE CONTEXT: only `pg-rescue --chain give-up`, whose
-# handler labels the item and hands it to the worker. Exit 75 (or 0) is the
+# handler labels the item and hands it to the worker. Exit 21 (or 0) is the
 # expected end; any other exit is a failed run.
 run_give_up() {
   local rc=0
   bg_run timeout "$RESCUE_TIMEOUT" pg-rescue --chain give-up -C "$state_dir" \
     --context "$2" --verify true --result-file "$1" -- false >&2 || rc=$?
   case $rc in
-  0 | 75) outcome=gave-up ;;
+  0 | 21) outcome=gave-up ;;
   *) fail "pg-rescue --chain give-up exited $rc" ;;
   esac
 }
@@ -509,7 +509,7 @@ bg_run env "GIT_CONFIG_COUNT=$((git_cfg_n + 1))" \
 
 case $rescue_rc in
 0) ;;
-75)
+21)
   # The chain gave up and its handler set the marker; the claim is released by
   # cleanup, nothing is pushed.
   outcome=gave-up

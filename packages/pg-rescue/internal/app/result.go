@@ -14,9 +14,9 @@ import (
 )
 
 // runResult implements `pg-rescue result`: it prints exactly one valid result
-// JSON object on stdout and exits with the code matching the outcome (0, 3 or
-// 2). It is meant to be the last command of a handler. Any problem with its
-// own arguments exits 70 and prints nothing on stdout.
+// JSON object on stdout and exits with the code matching the outcome (0, 24 or
+// 23). It is meant to be the last command of a handler. Any problem with its
+// own arguments exits 20 and prints nothing on stdout.
 func runResult(args []string, stdout, stderr io.Writer) int {
 	opts, err := cli.ParseResult(args)
 	if errors.Is(err, cli.ErrHelp) {

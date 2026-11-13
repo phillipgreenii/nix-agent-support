@@ -1,7 +1,7 @@
 # pg-rescue
 
 > Wrap a command and, when it fails, try an ordered chain of named failure handlers.
-> Exit codes: 0 resolved (or the command succeeded), 75 deferred, 70 wrapper error, otherwise the command's own code.
+> Exit codes: 0 resolved (or the command succeeded), 21 deferred, 20 wrapper error, 22 --stdin unhandled, otherwise the command's own code (a command that itself exits 20, 21 or 22 is ambiguous; read the run log).
 > More information: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/tree/main/packages/pg-rescue>.
 
 - Run a command, trying the handlers of a configured chain if it fails:

@@ -366,7 +366,7 @@ func TestDefaultPromptRendersPriorAttempts(t *testing.T) {
 	prompt := r.read("stdin")
 	for _, w := range []string{
 		"### Attempt 1: handler flake-lock-conflict",
-		"Facts recorded by pg-rescue: outcome declined; reason: exit 2",
+		"Facts recorded by pg-rescue: outcome declined; reason: exit 23",
 		"### Attempt 2: handler fix-small",
 		"outcome failed; reason: resolved → verify failed (exit 128)",
 		"### Attempt 3: handler fix-large",
@@ -572,12 +572,12 @@ func TestAgentOutcomeMapsToExitCode(t *testing.T) {
 		outcome  contract.Outcome
 	}{
 		{"resolved", nil, `{"outcome":"resolved","summary":"done","details":"line1\nline2"}`, 0, contract.Resolved},
-		{"declined", nil, `{"outcome":"declined","summary":"not mine"}`, 2, contract.Declined},
-		{"deferred", nil, `{"outcome":"deferred","summary":"later","details":"why"}`, 3, contract.Deferred},
-		{"fenced reply", nil, "```json\n{\"outcome\":\"deferred\",\"summary\":\"fenced\"}\n```", 3, contract.Deferred},
+		{"declined", nil, `{"outcome":"declined","summary":"not mine"}`, 23, contract.Declined},
+		{"deferred", nil, `{"outcome":"deferred","summary":"later","details":"why"}`, 24, contract.Deferred},
+		{"fenced reply", nil, "```json\n{\"outcome\":\"deferred\",\"summary\":\"fenced\"}\n```", 24, contract.Deferred},
 		{"structured output", func(m string) map[string]any {
 			return success("", map[string]any{"structured_output": json.RawMessage(m)})
-		}, `{"outcome":"declined","summary":"structured"}`, 2, contract.Declined},
+		}, `{"outcome":"declined","summary":"structured"}`, 23, contract.Declined},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t)
@@ -603,7 +603,7 @@ func TestStructuredOutputWinsOverResult(t *testing.T) {
 	r := newRig(t)
 	env := success(`{"outcome":"resolved","summary":"from result"}`, map[string]any{"structured_output": map[string]any{"outcome": "deferred", "summary": "from structured"}})
 	res := r.run(contracttest.Fixture("first-attempt"), r.envelope(env))
-	if res.Exit != 3 || res.Reported.Summary != "from structured" {
+	if res.Exit != contract.ExitDeferred || res.Reported.Summary != "from structured" {
 		t.Errorf("exit=%d summary=%q", res.Exit, res.Reported.Summary)
 	}
 }
