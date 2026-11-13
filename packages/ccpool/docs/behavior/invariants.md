@@ -25,6 +25,13 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   errored), oldest-activity first, and MUST leave the pool above its cap when only spared or
   still-working sessions remain (ADR 0072). A session belonging to a run that no longer exists
   MUST NOT accumulate across restarts; the next sweep MUST reclaim it.
+- **`INV-POOL-12`** <!-- uuid: 3d7a9c52-6b1e-4f08-8a47-c2e5b9d01f36 --> — **A closed session that
+  is still running MUST be closed again by the next sweep.** When a live row is already closed (its
+  close time is at or after its last activity) and its turn has ended (`idle` or `errored`), the
+  sweep MUST finish the close at once, keeping the row's close reason, instead of waiting for the
+  idle timeout; this covers a close that was interrupted after the exit was delivered. A
+  `needs_input` row (`INV-POOL-3`), and a starting, ready or working row, MUST NOT be closed by
+  this rule, and a row with activity after the close is not closed.
 - **`INV-POOL-9`** <!-- uuid: 5c0e0d3a-8f4b-4f0e-9a52-3b7c1d6e2a91 --> — **A closed session record
   MUST NOT be kept forever.** "Closed" is derived: a record is closed when its close time is at or
   after its last activity, and reap MUST NOT rewrite any stored state to say so (ADR 0015, ADR

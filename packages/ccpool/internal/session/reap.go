@@ -169,9 +169,20 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// reason label (design D6/D11); a bare bool cannot distinguish the two
 	// passes.
 	toClose := map[string]string{}
+	// Pass 1a: a live row whose close was already decided (close_reason stamped,
+	// nothing since) but whose session survived an interrupted close is finished
+	// now, not after idle_ttl. See staleClosedLive.
+	for _, r := range live {
+		if staleClosedLive(r) {
+			toClose[r.ExternalID] = reasonClosedStillLive
+		}
+	}
 	// Pass 1: idle past TTL, sparing sessions parked for a human (ADR 0037).
 	for _, r := range live {
 		if preservedForHuman(r) {
+			continue
+		}
+		if _, ok := toClose[r.ExternalID]; ok {
 			continue
 		}
 		if idleTTL > 0 && now.Sub(time.Unix(r.LastActivityAt, 0)) > idleTTL {
@@ -237,7 +248,25 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 const (
 	reasonIdleTTL     = "idle_ttl"
 	reasonCapEviction = "cap_eviction"
+	// reasonClosedStillLive labels the metric and log line of Pass 1a, which
+	// re-closes a row that already carries a close reason. It is never stamped
+	// on a row (the existing close_reason is kept), so it is not in
+	// store.CloseReasons.
+	reasonClosedStillLive = "closed_still_live"
 )
+
+// staleClosedLive reports whether a LIVE row was already closed (close_reason
+// stamped, no activity since) yet its session is still running: a close that
+// was interrupted (for example the caller's time bound killed `ccpool close`
+// after /exit was delivered and before the force kill). The close was already
+// decided, so the next sweep finishes it instead of waiting for idle_ttl.
+// Only a row whose turn has ended (idle or errored) qualifies: needs_input is
+// spared (preservedForHuman, ADR 0037) and a starting, ready or working row is
+// never closed by a sweep (ADR 0072); activity after the close makes
+// closedSinceActivity false.
+func staleClosedLive(r store.Session) bool {
+	return r.CloseReason != "" && closedSinceActivity(r) && evictable(r)
+}
 
 // stillQualifiesForReap re-applies, to a row re-read under the lock, the
 // predicate of the pass that chose it: a needs_input row is always spared, an
@@ -248,6 +277,8 @@ func stillQualifiesForReap(r store.Session, reason string, now time.Time, idleTT
 		return false
 	}
 	switch reason {
+	case reasonClosedStillLive:
+		return staleClosedLive(r)
 	case reasonIdleTTL:
 		return idleTTL > 0 && now.Sub(time.Unix(r.LastActivityAt, 0)) > idleTTL
 	case reasonCapEviction:
@@ -275,7 +306,13 @@ func (s *Service) closeRevalidated(ctx context.Context, externalID, reason strin
 		// process: reap touches sessions with different roles).
 		attrs := s.metricAttrs(externalID)
 		logArgs := append([]any{"reason", reason}, sessionLogArgs(externalID)...)
-		if err := s.closeLocked(ctx, externalID, reason, false); err != nil {
+		// Pass 1a keeps the reason the row already carries; its own label is
+		// for the metric and log only.
+		stamp := reason
+		if reason == reasonClosedStillLive {
+			stamp = cur.CloseReason
+		}
+		if err := s.closeLocked(ctx, externalID, stamp, false); err != nil {
 			return err
 		}
 		recordReapClosure(reason, attrs)

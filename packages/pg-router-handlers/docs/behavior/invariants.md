@@ -355,8 +355,16 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   watchdog, an external idle-timeout, eviction or operator close), and any dispatch ended by daemon
   shutdown are exempt; the closed-bead reconcile owns that teardown. A session that is not yet quiet is
   left open and the deferral is logged. A failed close MUST NOT change the dispatch's outcome; it
-  is logged and the session is left to the closed-bead reconcile (`INV-CCH-41`) and `ccpool`'s idle
-  timeout. A settled session's row, whether
+  is logged and the session is left to the closed-bead reconcile (`INV-CCH-41`) and `ccpool`'s next
+  reap sweep. A close the handler's one-minute bound cuts off after the close reason is stamped
+  leaves a row that reads closed while its session still runs; the handler does not retry it,
+  because it skips a row that already carries a close reason. `ccpool`'s reap finishes it instead:
+  a live `idle` or `errored` row that is already closed with no activity since is closed again on
+  the next sweep (reason kept), not after the idle timeout (`INV-POOL-12` in `ccpool`'s behavior
+  docs). That option was chosen over raising the handler's bound or retrying from the
+  handler because the sweep already runs on a timer for every pool, needs no new handler state, and
+  bounds the stall to one sweep interval whatever the host load. The exemptions above stay: reap
+  never closes `needs_input`, starting, ready or working rows. A settled session's row, whether
   this close reached it or not, MUST NOT be absorbed by a later dispatch, whatever its event id,
   head or outcome, and whoever closed it: while its handler still holds its lease a later dispatch
   declines, and after that the later dispatch runs in a fresh session of its own (`INV-CCH-30`).
