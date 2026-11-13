@@ -59,7 +59,7 @@ func newListCmd() *cobra.Command {
 		for _, p := range excludeTitlePrefixes {
 			if p == "" {
 				fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector list: --exclude-title-prefix must not be empty (it would match every title)")
-				return errFailed
+				return errUsage
 			}
 		}
 		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(),

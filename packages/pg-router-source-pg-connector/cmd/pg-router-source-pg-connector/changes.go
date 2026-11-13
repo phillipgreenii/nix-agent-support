@@ -214,7 +214,7 @@ func newChangesCmd() *cobra.Command {
 		}
 		if retryWindow < 0 {
 			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: --retry-window must not be negative")
-			return errFailed
+			return errUsage
 		}
 		changesArgs := []string{entityType, "changes"}
 		if query != "" {

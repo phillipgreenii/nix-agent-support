@@ -77,6 +77,14 @@ func (r reply) result() cmdrun.Result {
 
 // helperRun answers one Call as pg-connector would for behavior.
 func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
+	// "<behavior>_exit5" is the same answer with the shared exitcode.Degraded
+	// (5) a new pg-connector fan-out uses for "some source degraded", where
+	// the unsuffixed fixtures still use the legacy 2.
+	if base, found := strings.CutSuffix(behavior, "_exit5"); found {
+		r := helperRun(base, s, c)
+		r.Code = 5
+		return r
+	}
 	childArgs := c.Args
 	ok := func(stdout string) reply { return reply{Stdout: stdout} }
 
@@ -204,6 +212,9 @@ func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 		// changes, nothing acknowledged, exit 3.
 		return reply{Code: 3, Stdout: `{"sources":[{"backend":"pg-connector-github","status":"degraded","version":1,"truncated":false,` +
 			`"reason":"unavailable: deadline exceeded after 29s (limit 28.999s) in op=changes: changes: query: run still in progress at the deadline"}],"changes":[]}`}
+	case "unauthenticated":
+		// pg-connector's shared exitcode.Denied (8).
+		return reply{Code: 8, Stderr: "pg-connector: unauthenticated: token expired\n"}
 	case "invalid_argument":
 		return reply{
 			Code:   1,

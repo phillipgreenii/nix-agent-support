@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/x/cmdrun"
 )
 
@@ -189,10 +191,11 @@ func TestChanges_TotalFailure_ExitsNonZeroPrintingNothingOnStdout(t *testing.T) 
 	if !strings.Contains(stderr, "total failure: no backend succeeded") {
 		t.Fatalf("stderr = %q, want pg-connector's own stderr copied through", stderr)
 	}
-	// pg-connector's own exit code (3) must never surface as this
-	// adapter's own exit code.
-	if code == 3 {
-		t.Fatalf("exit code = 3, this adapter MUST NOT propagate pg-connector's own exit code as its own")
+	// The adapter reports its own shared exitcode.Unavailable for a total
+	// failure; that it equals pg-connector's own 3 is the shared code's
+	// doing, not a propagation of the child's status.
+	if code != exitcode.Unavailable {
+		t.Fatalf("exit code = %d, want exitcode.Unavailable (%d)", code, exitcode.Unavailable)
 	}
 }
 
@@ -368,8 +371,8 @@ func TestChanges_CursorExpired_FailsTheCallAndCarriesTheReasonToStderr(t *testin
 	} {
 		withFactory(t, "changes_cursor_expired")
 		stdout, stderr, code := runCLI(t, args...)
-		if code != 1 {
-			t.Fatalf("args %v: exit code = %d, want 1 (stdout=%q)", args, code, stdout)
+		if code != exitcode.Unavailable {
+			t.Fatalf("args %v: exit code = %d, want exitcode.Unavailable (stdout=%q)", args, code, stdout)
 		}
 		if stdout != "" {
 			t.Fatalf("args %v: stdout = %q, want nothing", args, stdout)
@@ -382,7 +385,7 @@ func TestChanges_CursorExpired_FailsTheCallAndCarriesTheReasonToStderr(t *testin
 }
 
 // A changes call that ran out its deadline under host load fails the whole call
-// (exit 1, nothing on stdout, the daemon's deadline text on stderr) and the
+// (exit 3, nothing on stdout, the daemon's deadline text on stderr) and the
 // adapter sends no acknowledgement of its own: it makes exactly one
 // pg-connector call and that call is the changes poll, never a changes-ack. The
 // daemon's cursor therefore stays where it was and the next tick re-polls from
@@ -390,8 +393,8 @@ func TestChanges_CursorExpired_FailsTheCallAndCarriesTheReasonToStderr(t *testin
 func TestChanges_DeadlineExceeded_FailsTheCallAndSendsNoAckOfItsOwn(t *testing.T) {
 	fake := withFactory(t, "changes_deadline_exceeded")
 	stdout, stderr, code := runCLI(t, "changes", "pr", "--consumer", "pr-changes", "--retry-window", "6h")
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (stdout=%q)", code, stdout)
+	if code != exitcode.Unavailable {
+		t.Fatalf("exit code = %d, want exitcode.Unavailable (stdout=%q)", code, stdout)
 	}
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want nothing: a timed-out poll must not read as an empty change list", stdout)
@@ -944,5 +947,75 @@ func TestChanges_RetryWindow_AddedRowWithRevisionIgnoresEmitTime(t *testing.T) {
 	row := `{"change":"added","source":"gh","entity":{"id":"o/r#1","head_sha":"h1"}}`
 	if a, b := polledID(t, 0, row), polledID(t, time.Hour, row); a != b {
 		t.Fatalf("ids %q and %q differ for an added row with head_sha", a, b)
+	}
+}
+
+// The shared exitcode.Degraded (5) a new pg-connector fan-out answers with
+// is accepted exactly like the legacy 2: exit 0 with the degraded source named.
+func TestChanges_DegradedOutcome_SharedDegradedExit5IsAlsoOK(t *testing.T) {
+	withFactory(t, "changes_degraded_exit5")
+	stdout, stderr, code := runCLI(t, "changes", "issue", "feedback-ready", "--consumer", "c1")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	items := mustUnmarshalItems(t, stdout)
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	if ds := metadataStrings(t, items[0], "degraded_sources"); len(ds) != 1 || ds[0] != "b2" {
+		t.Fatalf("degraded_sources = %v, want [b2]", ds)
+	}
+}
+
+func TestChanges_Unauthenticated_ExitsDenied(t *testing.T) {
+	withFactory(t, "unauthenticated")
+	stdout, stderr, code := runCLI(t, "changes", "issue", "q", "--consumer", "c1")
+	if code != exitcode.Denied {
+		t.Fatalf("exit code = %d, want exitcode.Denied (%d) (stderr=%q)", code, exitcode.Denied, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "token expired") {
+		t.Fatalf("stdout = %q stderr = %q, want nothing and the child's stderr", stdout, stderr)
+	}
+}
+
+func TestUsageErrors_ExitUsage(t *testing.T) {
+	for _, args := range [][]string{
+		{"bogus"},
+		{"changes"},
+		{"changes", "issue"},
+		{"changes", "issue", "--consumer", "c1", "--retry-window=-1s"},
+		{"changes", "issue", "--consumer", "c1", "--no-such-flag"},
+		{"sweep"},
+		{"sweep", "issue"},
+		{"list", "issue", "q"},
+		{"list", "issue", "q", "--backend", "b", "--exclude-title-prefix", ""},
+	} {
+		withFactory(t, "changes_degraded")
+		stdout, stderr, code := runCLI(t, args...)
+		if code != exitcode.Usage {
+			t.Fatalf("args %v: exit code = %d, want exitcode.Usage (%d) (stdout=%q stderr=%q)", args, code, exitcode.Usage, stdout, stderr)
+		}
+		if stdout != "" || stderr == "" {
+			t.Fatalf("args %v: stdout = %q stderr = %q, want a diagnostic on stderr only", args, stdout, stderr)
+		}
+	}
+}
+
+func TestMissingPgConnector_ExitsUnavailable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	orig := connectorRunner
+	connectorRunner = nil
+	t.Cleanup(func() { connectorRunner = orig })
+	_, _, code := runCLI(t, "changes", "issue", "q", "--consumer", "c1")
+	if code != exitcode.Unavailable {
+		t.Fatalf("exit code = %d, want exitcode.Unavailable (%d)", code, exitcode.Unavailable)
+	}
+}
+
+func TestClassifyExit_AcceptsSharedAndLegacyDegraded(t *testing.T) {
+	for code, want := range map[int]bool{0: true, 2: true, 5: true, 1: false, 3: false, 4: false, 8: false} {
+		if got := classifyExit(code); got != want {
+			t.Errorf("classifyExit(%d) = %v, want %v", code, got, want)
+		}
 	}
 }

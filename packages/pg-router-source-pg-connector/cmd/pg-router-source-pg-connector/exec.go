@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // pgConnectorBinary is the ambient $PATH name this adapter execs. Never a
@@ -71,26 +72,47 @@ func runPgConnector(ctx context.Context, args []string, extraEnv []string) (pgCo
 	return pgConnectorResult{stdout: r.Stdout, stderr: r.Stderr, exitCode: r.Code}, nil
 }
 
-// classifyExit maps pg-connector's own CLI exit-code taxonomy (its
-// --help's documented Fan-out 0/2/3 and Targeted 0/1/4 schemes) onto this
-// adapter's own distinct 2-value scheme [design: section 6.1, this
-// packet's own "Outcome classification" Contract bullet]: exit 0 or 2 ->
-// ok=true (the caller parses stdout and prints items, folding any
-// degraded backend into the printed items' own metadata); exit 1 or 3 ->
-// ok=false (print nothing on this adapter's own stdout; the caller
-// copies pg-connector's own captured stderr to this adapter's stderr for
-// diagnosis instead). pg-connector's exit 4 (not_found) is reserved for
-// TARGETED ops resolving to exactly one backend (e.g. "pr show") and never
-// appears on the fan-out "changes"/"list" verbs this adapter invokes, so
-// this classification does not need a case for it; any exit code besides
-// 0/1/2/3 is conservatively classified as a failure, the same side
-// pg-connector's own exit 1 ("any other error") falls on.
+// classifyExit maps pg-connector's own CLI exit-code taxonomy onto this
+// adapter's own scheme [design: section 6.1, this packet's own "Outcome
+// classification" Contract bullet]: exit 0 (complete) or Degraded (some
+// source degraded) -> ok=true (the caller parses stdout and prints items,
+// folding any degraded backend into the printed items' own metadata);
+// anything else -> ok=false (print nothing on this adapter's own stdout;
+// the caller copies pg-connector's own captured stderr to this adapter's
+// stderr for diagnosis instead).
+//
+// Degraded is accepted as BOTH exitcode.Degraded (5) and the legacy 2:
+// pg-connector's fan-out used 2 for "at least one source degraded" and
+// moved it to the shared Degraded 5 (2 is now the shared Usage code), and
+// this adapter and that umbrella may land in either order. A usage exit 2
+// from a new pg-connector is also accepted here, which is harmless: it
+// carries no items JSON on stdout, so the caller's decode fails and the
+// adapter exits non-zero. Drop the legacy 2 once the umbrella is deployed.
+// pg-connector's not_found exit (4) is reserved for TARGETED ops and never
+// appears on the fan-out "changes"/"list" verbs this adapter invokes.
 func classifyExit(exitCode int) bool {
 	switch exitCode {
-	case 0, 2:
+	case exitcode.OK, exitcode.Degraded, legacyDegradedExit:
 		return true
 	default:
 		return false
+	}
+}
+
+// legacyDegradedExit is pg-connector's pre-exitcode "degraded" fan-out exit.
+const legacyDegradedExit = 2
+
+// failureExit maps a failed pg-connector exit onto this adapter's own
+// exit: pg-connector's total failure (3, exitcode.Unavailable) stays
+// Unavailable, its unauthenticated exit (exitcode.Denied) stays Denied,
+// and anything else is the generic exitcode.Error. pg-router reads only
+// 0 and 9 specially, so any non-zero value here is a failed source to it.
+func failureExit(exitCode int) int {
+	switch exitCode {
+	case exitcode.Unavailable, exitcode.Denied:
+		return exitCode
+	default:
+		return exitcode.Error
 	}
 }
 
@@ -121,7 +143,9 @@ func invokeOrFail(ctx context.Context, stderr io.Writer, args []string, extraEnv
 	res, err := runPgConnector(ctx, args, extraEnv)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return nil, errFailed
+		// pg-connector could not even be started: the dependency is
+		// unavailable.
+		return nil, failWith(exitcode.Unavailable)
 	}
 	if !classifyExit(res.exitCode) {
 		reasons := failureReasons(res.stdout)
@@ -135,7 +159,7 @@ func invokeOrFail(ctx context.Context, stderr io.Writer, args []string, extraEnv
 		if len(reasons) > 0 {
 			fmt.Fprintln(stderr, strings.Join(reasons, "; "))
 		}
-		return nil, errFailed
+		return nil, failWith(failureExit(res.exitCode))
 	}
 	return res.stdout, nil
 }

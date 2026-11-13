@@ -46,13 +46,13 @@ flowchart LR
   fell outside retention, for example after a store was moved aside), the umbrella answers with one
   degraded source whose reason is that message and no change, and acknowledges nothing. With a
   single owning backend (the unscoped consumer's case) that is a total failure: this adapter exits
-  1, prints nothing on stdout, and writes `<backend>: cursor_expired: <message>` to stderr, so the
+  3, prints nothing on stdout, and writes `<backend>: cursor_expired: <message>` to stderr, so the
   producer tick of pg-router logs it and counts it as a failed source (`pg_router_source_failures_total`,
   the series the `pg-router-source-failure-rate` alert rule reads).
   The adapter never turns it into an empty list, which would read as "nothing changed". The
   recovery is a reset of the consumer (`--reset` on the umbrella call), which is the operator's
   step and not this adapter's. When another backend of the same call is healthy the outcome is
-  degraded (exit 2) instead, and the reason travels in `metadata.degraded_reasons` of the printed
+  degraded (exit 5, legacy 2) instead, and the reason travels in `metadata.degraded_reasons` of the printed
   items, as for any degraded source. Every printed item's `metadata.entity_id` is the
   bare entity id (always, bead `pg2-1ldvy`), and its `metadata.degraded_sources`
   names every backend that answered degraded on that ONE invocation (the same list on every item,
@@ -187,13 +187,23 @@ adapter has no allowlist of types. What a type can do is decided by pg-connector
 
 ## Exit codes
 
-This binary's own exit-code scheme is deliberately just two values, never pg-connector's own
-0/1/2/3/4 taxonomy re-emitted as its own:
+This binary's own exit codes are the shared workspace codes of `x/exitcode`
+(`github.com/phillipgreenii/x/exitcode`), never pg-connector's own codes re-emitted as its own.
+pg-router's command-query runner treats `0` as success, `9` as busy and every other code as a
+failed source, so the distinct failure codes are for operators and scripts:
 
-| pg-connector's own CLI exit                     | This adapter's own exit | What happens                                                                                                                                                                                                                                                                 |
-| ----------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 (complete) or 2 (degraded)                    | 0                       | stdout JSON parsed; rawItems printed (degraded backends, and any reason they reported, named in the items)                                                                                                                                                                   |
-| 1 (invalid_argument/other) or 3 (total failure) | 1                       | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis, and any `sources[].reason` pg-connector's own stdout carries (a `cursor_expired:` reason included) is appended too (bead `pg2-wa5uk`) |
+| pg-connector's own CLI exit                                           | This adapter's own exit | What happens                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 (complete) or 5 `Degraded` (a legacy 2 is accepted too)             | 0                       | stdout JSON parsed; rawItems printed (degraded backends, and any reason they reported, named in the items)                                                                                                                                                |
+| 3 `Unavailable` (total failure), or pg-connector could not be started | 3 `Unavailable`         | nothing printed on this adapter's own stdout; pg-connector's own captured stderr is copied to this adapter's own stderr for diagnosis, and any `sources[].reason` pg-connector's own stdout carries (a `cursor_expired:` reason included) is appended too |
+| 8 `Denied` (unauthenticated)                                          | 8 `Denied`              | as for 3                                                                                                                                                                                                                                                  |
+| 1 (invalid_argument/other) or any other code                          | 1 `Error`               | as for 3                                                                                                                                                                                                                                                  |
+| (none: this adapter's own command line is wrong)                      | 2 `Usage`               | an unknown verb or flag, a missing required flag, a wrong argument count, a negative `--retry-window`, an empty `--exclude-title-prefix`, or `sweep` with no query name; the diagnostic is on stderr and pg-connector is never run                        |
+
+The legacy `2` for degraded is the umbrella's pre-shared-code value (2 is now the shared usage
+code and degraded moved to 5). The adapter accepts both so it and the umbrella can land in either
+order; a new umbrella's usage exit 2 carries no items JSON on stdout, so it still ends as a
+failure here.
 
 A pinned poll (`--backend <binary>`) against a beads backend can find the backend's own `bd`
 budget with no free slot within its wait bound: pg-connector then reports `unavailable`, which is
@@ -210,7 +220,7 @@ tick. The decision, with the options it was weighed against:
   only when pg-connector's own failed call reported at least one `sources[]` reason and EVERY
   reason carries the marker text `bd budget denied (retryable)`. A genuine `bd` failure (a crash, a
   timeout, an auth error), a degraded row with any other reason, a failure with no reason, and a
-  mixture of a denial with any other reason are all still failures with exit 1.
+  mixture of a denial with any other reason are all still failures (exit 3 for pg-connector's total failure).
 - **Rejected: raise the budget's wait bound.** The bound MUST stay shorter than the shortest pinned
   poll interval (10 seconds) so a denied poll ends before the next starts; a bound of about 15
   seconds breaks that, and a longer wait does not stop a denial when the budget stays full, it only

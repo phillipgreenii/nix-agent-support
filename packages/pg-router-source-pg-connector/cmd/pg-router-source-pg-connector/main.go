@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 )
 
@@ -32,9 +33,27 @@ var Version = "dev"
 // and is printed there instead. Mirrors
 // packages/pg-connector/cmd/pg-connector/main.go's own
 // exitError-vs-plain-error split, collapsed to this adapter's own
-// 2-value (0/1) exit scheme [design: section 6.1, "MUST NOT propagate a
-// pg-connector CLI exit code as its own"].
+// shared-exit-code scheme (x/exitcode; see exitError) [design: section
+// 6.1, "MUST NOT propagate a pg-connector CLI exit code as its own"].
 var errFailed = errors.New("pg-router-source-pg-connector: command failed")
+
+// exitError is an errFailed that carries this adapter's own exit code from
+// the shared x/exitcode set (Usage, Unavailable, Denied, ...). It matches
+// errFailed under errors.Is, so run() still prints nothing further for it
+// (its diagnostic is already on stderr), and run() returns its code.
+// errFailed itself, unwrapped, is the generic exitcode.Error.
+type exitError struct{ code int }
+
+func (e *exitError) Error() string { return errFailed.Error() }
+
+func (e *exitError) Is(target error) bool { return target == errFailed }
+
+// failWith returns an exitError for code.
+func failWith(code int) error { return &exitError{code: code} }
+
+// errUsage is returned by a verb's RunE for a usage error its own
+// validation caught after cobra's own parsing succeeded (exitcode.Usage).
+var errUsage = failWith(exitcode.Usage)
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -63,14 +82,35 @@ func run(args []string, stdout, stderr io.Writer) int {
 	root.SetErr(stderr)
 	root.SetArgs(args)
 
+	// A verb's RunE runs only after cobra has resolved the verb and
+	// validated its flags, required flags and argument count, so an error
+	// reaching run() before any RunE started is cobra's own usage rejection
+	// (unknown verb or flag, missing required flag, wrong argument count).
+	validated := false
+	for _, c := range root.Commands() {
+		inner := c.RunE
+		c.RunE = func(cmd *cobra.Command, args []string) error {
+			validated = true
+			return inner(cmd, args)
+		}
+	}
+
 	err := root.Execute()
 	if err == nil {
-		return 0
+		return exitcode.OK
 	}
 	if !errors.Is(err, errFailed) {
 		fmt.Fprintln(stderr, err)
 	}
-	return 1
+	var ee *exitError
+	switch {
+	case errors.As(err, &ee):
+		return ee.code
+	case !validated:
+		return exitcode.Usage
+	default:
+		return exitcode.Error
+	}
 }
 
 func main() {

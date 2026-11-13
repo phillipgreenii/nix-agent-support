@@ -42,7 +42,7 @@ func newSweepCmd() *cobra.Command {
 		queries := args[1:]
 		if len(queries) == 0 {
 			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector sweep: at least one query name is required")
-			return errFailed
+			return errUsage
 		}
 
 		env := beadsDirEnv(beadsDir)
