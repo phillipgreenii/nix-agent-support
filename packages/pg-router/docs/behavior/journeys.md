@@ -855,7 +855,7 @@ Extensions:
 **Intent:** judge the **whole** configuration valid or invalid **before running**, and report the
 result (`INV-WORKFLOW-1`). This checks the routing graph's flat wiring **only** — never
 workflow-completeness or sequencing.
-_Requires:_ `INV-DISP-3`, `INV-EVT-4`, `INV-EVT-6`, `INV-ROLE-5`, `INV-WORKFLOW-1`.
+_Requires:_ `INV-DISP-3`, `INV-EVT-4`, `INV-EVT-6`, `INV-REQ-1`, `INV-ROLE-5`, `INV-WORKFLOW-1`.
 
 **Calendar queries.** The check also rejects a **calendar trigger** whose schedule cannot be evaluated
 or that uses a fixed offset (`INV-EVT-6`), and prints each calendar query's **resolved schedule and
@@ -1072,6 +1072,9 @@ clearing one is an ordinary call to the running core.
 **Intent:** halt, then release, the registrations that require a named resource, reversibly and
 without touching configuration (`INV-LIFE-2`).
 _Requires:_ `INV-LIFE-2`, `INV-LIFE-1` (reachability in both run modes).
+_Requires:_ `INV-LVL-1`, `INV-LVL-2`, `INV-LVL-3`, `INV-LVL-4`, `INV-LVL-5`, `INV-LVL-6`, `INV-SEN-1`,
+`INV-SEN-2`, `INV-SEN-3`, `INV-SEN-4`, `INV-SEN-5`, `INV-SEN-6`, `INV-SEN-7`, `INV-ADM-1`, `INV-ADM-2`,
+`INV-ADM-3`, `INV-ADM-4`, `INV-ADM-5`, `INV-ADM-6`, `INV-ADM-7`, `INV-ADM-8`, `INV-STALE-1`.
 _Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is paused by levels or quiescent).
 
 **Flow.** `pause` sets the `router` resource to `PAUSED` and `resume` clears it; `level set RESOURCE
