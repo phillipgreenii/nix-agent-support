@@ -193,6 +193,9 @@ func TestWaitLog_ExitCodes(t *testing.T) {
 	if exitTimeout == exitError || exitTimeout == exitUsage || exitTimeout == exitRefused || exitTimeout == exitOK {
 		t.Error("timeout exit code is not distinct")
 	}
+	if exitTimeout != 6 || exitRefused != 8 {
+		t.Errorf("shared codes moved: timeout %d refused %d, want 6 and 8", exitTimeout, exitRefused)
+	}
 }
 
 func TestWaitLog_RefusesOutsideRootsAndUsage(t *testing.T) {

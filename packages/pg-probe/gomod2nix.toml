@@ -1,3 +1,7 @@
 schema = 3
+cachePackages = [ 'github.com/phillipgreenii/x/exitcode' ]
 
 [mod]
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261112162938-c45c22ca2076'
+    hash = 'sha256-hkeXFrYPpIFJPwrzK5x5xkG7cZvKCSmZlSJcAPyOtx4='

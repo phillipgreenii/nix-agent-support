@@ -4,7 +4,7 @@
 > It is not a generic curl or unix-socket client: only a fixed set of `/debug/pprof` paths is reachable, and only with GET.
 > More information: `pg-probe --help`.
 
-- List the pprof paths it will fetch (every other path, and any method but GET, is refused with exit 3):
+- List the pprof paths it will fetch (every other path, and any method but GET, is refused with exit 8):
 
 `pg-probe pprof list`
 
@@ -20,7 +20,7 @@
 
 `pg-probe pprof profile --seconds {{30}} > {{/tmp/cpu.pb.gz}}`
 
-- Print the first line of a log that matches a regex, waiting up to 60 seconds (exit 124 on timeout):
+- Print the first line of a log that matches a regex, waiting up to 60 seconds (exit 6 on timeout):
 
 `pg-probe wait-log {{/tmp/job.log}} '{{listening on}}'`
 

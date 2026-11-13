@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-probe/internal/pprofget"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-probe/internal/waitlog"
 )
@@ -33,16 +35,15 @@ import (
 // Version is stamped by mkGoApp's default ldflag target (-X main.Version=...).
 var Version = "dev"
 
-// Exit codes. 1 is reserved for generic runtime errors; every branchable
-// meaning is a distinct value >= 2.
+// Exit codes are the shared ones from x/exitcode: 1 stays reserved for
+// generic runtime errors, a refusal by policy is Denied and wait-log's
+// deadline is Timeout.
 const (
-	exitOK      = 0
-	exitError   = 1
-	exitUsage   = 2
-	exitRefused = 3
-	// exitTimeout is wait-log's deadline, matching timeout(1) so a script that
-	// used `timeout N tail -f | grep -m1` keeps its meaning.
-	exitTimeout = 124
+	exitOK      = exitcode.OK
+	exitError   = exitcode.Error
+	exitUsage   = exitcode.Usage
+	exitRefused = exitcode.Denied
+	exitTimeout = exitcode.Timeout
 )
 
 const usageText = `pg-probe: read-only probes for unattended sessions
@@ -56,15 +57,15 @@ Usage:
 pprof: GET one allowlisted /debug/pprof path over the pa-monitor pprof socket
 and write the body to stdout (redirect it yourself for a binary profile).
 TARGET is a name such as heap, goroutine, profile or index, or a full allowed
-path. Anything else, and any method but GET, is refused (exit 3).
+path. Anything else, and any method but GET, is refused (exit 8).
 Socket: $PG_PROBE_PPROF_SOCKET, else $XDG_STATE_HOME/pa-monitor/pprof.sock.
 
 wait-log: print the first line of FILE (existing last --lines, default 10,
 then new ones; --from-start for the whole file) matching the RE2 REGEX. FILE
-MUST resolve to a regular file under an allowed log root (exit 3 otherwise).
+MUST resolve to a regular file under an allowed log root (exit 8 otherwise).
 Roots: $PG_PROBE_WAIT_LOG_ROOTS (colon list), else a built-in list.
 
-Exit codes: 0 ok, 1 error, 2 usage, 3 refused by policy, 124 wait-log timeout.
+Exit codes: 0 ok, 1 error, 2 usage, 6 wait-log timeout, 8 refused by policy.
 `
 
 func main() {
@@ -225,7 +226,7 @@ func waitLogRoots(getenv func(string) string) []string {
 
 func runWaitLog(ctx context.Context, args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := newFlagSet("pg-probe wait-log", stderr)
-	timeout := fs.Duration("timeout", 60*time.Second, "give up after this long (exit 124); max 1h")
+	timeout := fs.Duration("timeout", 60*time.Second, "give up after this long (exit 6); max 1h")
 	lines := fs.Int("lines", 10, "existing trailing lines to test first, as tail -n; 0 = only new lines")
 	fromStart := fs.Bool("from-start", false, "test the whole existing file first")
 	poll := fs.Duration("poll", 100*time.Millisecond, "how often to re-read the file")

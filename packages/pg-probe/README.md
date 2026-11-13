@@ -36,10 +36,10 @@ socket:
 
 | Rule                                                                                                         | Refusal                                   |
 | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| The path MUST equal an allowlisted path (no cleaning, no prefix match, no query or fragment in it).          | exit 3                                    |
-| The method MUST be GET (`-X` exists only so a `curl` habit gets a clear refusal).                            | exit 3                                    |
-| `--seconds` (1 to 300) applies to `profile` and `trace` only; `--debug` (0 to 2) to the named profiles only. | exit 3                                    |
-| The socket MUST be an absolute path named `pprof.sock` that is a unix socket.                                | exit 3 (a `docker.sock` is never dialled) |
+| The path MUST equal an allowlisted path (no cleaning, no prefix match, no query or fragment in it).          | exit 8                                    |
+| The method MUST be GET (`-X` exists only so a `curl` habit gets a clear refusal).                            | exit 8                                    |
+| `--seconds` (1 to 300) applies to `profile` and `trace` only; `--debug` (0 to 2) to the named profiles only. | exit 8                                    |
+| The socket MUST be an absolute path named `pprof.sock` that is a unix socket.                                | exit 8 (a `docker.sock` is never dialled) |
 | A redirect is never followed.                                                                                | exit 1 (HTTP 3xx reported as an error)    |
 
 The socket is `$PG_PROBE_PPROF_SOCKET` when set (tests use it), else
@@ -56,7 +56,7 @@ follows the file; `--lines N` changes that (`0` means only lines written from no
 survives truncation and rotation (a new file under the same name is read from its start).
 
 `--timeout` defaults to 60 seconds, MUST be positive and is capped at one hour. On timeout it exits
-**124**, the same code as `timeout(1)`, which no other path of `pg-probe` uses.
+**6** (`Timeout`, the shared code from `x/exitcode`), which no other path of `pg-probe` uses.
 
 `FILE` MUST resolve (through symlinks) to a regular file under an allowed log root, or the command exits 3
 without opening it. The roots are `$PG_PROBE_WAIT_LOG_ROOTS` (a colon-separated list; tests use it)
