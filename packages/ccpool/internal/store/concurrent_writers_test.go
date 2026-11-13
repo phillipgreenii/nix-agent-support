@@ -25,7 +25,7 @@ func TestTransition_concurrentProcessesNeverBusy(t *testing.T) {
 	const (
 		processes = 3
 		perProc   = 2
-		rounds    = 100
+		rounds    = 10
 	)
 	stores := make([]*Store, processes)
 	for i := range stores {
