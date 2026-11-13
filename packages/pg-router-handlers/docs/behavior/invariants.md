@@ -374,11 +374,11 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   stamped when the session's row is created, before the launch wait (`ccpool new --meta` writes the
   dispatch's metadata at row insert, not once the session is ready; the initial lease covers the
   whole launch wait plus one TTL, so a session still starting, or what a failed launch leaves
-  behind, is never mistaken for an orphan and carries its dispatch tags), refreshed on every poll for as long as the dispatch
+  behind, is never mistaken for an orphan and carries its dispatch tags), refreshed every quarter of the lease TTL (not on every poll) for as long as the dispatch
   runs, and covers the wait, the budget watchdog, the worktree cleanup and the close of the settled
   session. A failure to refresh the lease MUST NOT fail the dispatch; it is logged, and repeated
   consecutive failures are logged at error level so a live handler whose lease is lapsing is
-  visible. The lease TTL is configurable and MUST be at least ten poll intervals. A session of a
+  visible. The lease TTL is configurable and MUST be at least ten poll intervals and at least one minute, so four refresh ticks fit in one TTL and a few missed ticks never expire a live handler's lease. A session of a
   role's own pool that carries that role's tags and an expired lease is an **orphan**; a session
   with no lease at all (launched before leases existed or before `ccpool` applied `--meta` at row
   insert, or by a handler whose lease TTL is not positive) is never an orphan, and neither is a

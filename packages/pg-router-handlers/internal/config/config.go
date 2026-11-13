@@ -76,10 +76,11 @@ type Config struct {
 	WatchdogPoll time.Duration
 	// LeaseTTL is the supervision-lease TTL (bead pg2-g2u9m, INV-CCH-18): the
 	// handler stamps pgrouter.lease_until = now + LeaseTTL on its session every
-	// PollInterval, and an expired lease means nobody is supervising the session
-	// (the handler died). Default 2m; validated at load to be at least
-	// LeaseTTLMinPolls x PollInterval so a few missed refreshes never expire a
-	// live handler's lease.
+	// LeaseRefreshInterval (LeaseTTL / LeaseRefreshDivisor, 30 s at the default),
+	// and an expired lease means nobody is supervising the session (the handler
+	// died). Default 2m; validated at load to be at least LeaseTTLMinPolls x
+	// PollInterval and at least LeaseTTLFloor, so a few missed refreshes (and
+	// the bd-show lag while a row is active) never expire a live handler's lease.
 	LeaseTTL time.Duration
 	// NeedsInputStall is the stall bound for an unattended drain session (a ccpool
 	// role whose completion is close-or-release, INV-CCH-29, bead pg2-zybju): how
@@ -512,9 +513,27 @@ const DefaultMinFreeBytes int64 = 40 << 30
 const DefaultDeclineReconcileMinInterval = 30 * time.Second
 
 // LeaseTTLMinPolls is the smallest LeaseTTL, in PollInterval units, Validate
-// accepts: the lease is refreshed once per poll, so a TTL below this many polls
-// could expire on a live handler after a couple of slow or failed refreshes.
+// accepts, so a TTL below this many polls could expire on a live handler after
+// a couple of slow or failed refreshes.
 const LeaseTTLMinPolls = 10
+
+// LeaseRefreshDivisor is how many refresh ticks fit in one LeaseTTL: the lease
+// is refreshed every LeaseTTL / LeaseRefreshDivisor (30 s of the default 2m),
+// decoupled from PollInterval. At most three consecutive ticks can fail before
+// the lease lapses.
+const LeaseRefreshDivisor = 4
+
+// LeaseTTLFloor is the smallest LeaseTTL Validate accepts regardless of
+// PollInterval: 60 s keeps the refresh tick at 15 s or more, and covers the 30 s
+// window in which the wait loop may leave the bead unread while a row is active
+// plus a couple of missed refreshes.
+const LeaseTTLFloor = time.Minute
+
+// LeaseRefreshInterval is how often the handler refreshes the supervision lease:
+// LeaseTTL / LeaseRefreshDivisor.
+func (c Config) LeaseRefreshInterval() time.Duration {
+	return c.LeaseTTL / LeaseRefreshDivisor
+}
 
 // DefaultNeedsInputStall is the default stall bound for an unattended drain
 // session parked in needs_input (operator ruling, Phillip, 2026-10-12, bead
@@ -577,13 +596,17 @@ func (c Config) ValidateQuietWindowOverride(window time.Duration) error {
 	return nil
 }
 
-// validateLease enforces LeaseTTL >= LeaseTTLMinPolls x PollInterval (bead
-// pg2-g2u9m). A zero PollInterval is not this check's concern (it is not a
-// valid runtime value either way); only a positive one bounds the TTL.
+// validateLease enforces LeaseTTL >= LeaseTTLMinPolls x PollInterval and
+// LeaseTTL >= LeaseTTLFloor. A zero PollInterval is not this check's concern
+// (it is not a valid runtime value either way); only a positive one bounds the
+// TTL by polls.
 func (c Config) validateLease() error {
 	min := LeaseTTLMinPolls * c.PollInterval
 	if c.LeaseTTL <= 0 || c.LeaseTTL < min {
 		return fmt.Errorf("invalid leaseTTL %v: must be >= %d x pollInterval (%v)", c.LeaseTTL, LeaseTTLMinPolls, min)
+	}
+	if c.LeaseTTL < LeaseTTLFloor {
+		return fmt.Errorf("invalid leaseTTL %v: must be >= %v", c.LeaseTTL, LeaseTTLFloor)
 	}
 	return nil
 }

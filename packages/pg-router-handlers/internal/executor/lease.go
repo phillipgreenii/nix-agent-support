@@ -17,7 +17,7 @@ import (
 // terminal cleanup all die with it (daemon restart, crash, or giving up at
 // MaxWait). To let a LATER dispatch tell a supervised session from an orphan,
 // the handler stamps pgrouter.lease_until = now + LeaseTTL on the session's
-// metadata every PollInterval for as long as the dispatch is alive; an expired
+// metadata every LeaseRefreshInterval (LeaseTTL / 4) for as long as the dispatch is alive; an expired
 // lease means nobody is supervising the session. The initial value is written
 // atomically by `ccpool new --meta` (ccpool.DispatchMeta). ccpool applies it
 // when it inserts the session's row, before the launch wait (bead pg2-7139f), so
@@ -79,7 +79,8 @@ func (l *leaseRefresher) refresh(ctx context.Context) {
 
 // startLease starts the background lease refresh for session name and returns
 // its stop function (idempotent; it waits for the loop to exit). It writes once
-// immediately, then every PollInterval, until stop is called or ctx ends. A
+// immediately, then every LeaseTTL / 4 (not every wait poll: the lease needs far
+// fewer process launches than the poll), until stop is called or ctx ends. A
 // non-positive LeaseTTL disables the lease (stop is a no-op), which is also how
 // a session launched without lease metadata stays unleased. Call it from Ensure
 // success (or absorb) and defer the stop so the lease covers Send, the wait, the
@@ -88,23 +89,20 @@ func (r *ccpoolRun) startLease(ctx context.Context, name string) (stop func()) {
 	if r.deps.Cfg.LeaseTTL <= 0 {
 		return func() {}
 	}
-	poll := r.deps.Cfg.PollInterval
-	if poll <= 0 {
-		poll = 10 * time.Second
-	}
+	every := r.deps.Cfg.LeaseRefreshInterval()
 	lctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	l := &leaseRefresher{r: r, name: name}
 	go func() {
 		defer close(done)
 		l.refresh(lctx)
-		t := time.NewTicker(poll)
-		defer t.Stop()
+		tick, stopTick := r.deps.newTicker(every)
+		defer stopTick()
 		for {
 			select {
 			case <-lctx.Done():
 				return
-			case <-t.C:
+			case <-tick:
 				l.refresh(lctx)
 			}
 		}

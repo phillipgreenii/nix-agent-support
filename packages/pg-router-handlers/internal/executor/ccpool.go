@@ -1623,6 +1623,16 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		}
 		return tr.Done(completion, obs, err == nil, ended), obs, err == nil
 	}
+	// While the session row is active the bead is re-read at most every
+	// showWindow (30 s at the default poll; a completion may lag by that much); a
+	// non-active row, the first poll and the deadline's final check read it every poll.
+	showWindow := beadShowWindow(r.deps.Cfg.PollInterval)
+	var (
+		lastShow   time.Time
+		lastObs    complete.Observation
+		haveShow   bool
+		prevActive bool
+	)
 	// won reports whether this loop owns the single terminal outcome.
 	won := func() bool { return claimTerminal == nil || claimTerminal() }
 	// lose is the loser's exit: take NO bead action, wait for the orchestrator to
@@ -1649,7 +1659,16 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			}
 		}
 		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
-		done, obs, _ := check(false)
+		var (
+			done bool
+			obs  complete.Observation
+		)
+		if now := r.deps.clock(); !haveShow || !prevActive || now.Sub(lastShow) >= showWindow {
+			done, obs, _ = check(false)
+			lastShow, lastObs, haveShow = now, obs, true
+		} else {
+			obs = lastObs
+		}
 		if done {
 			if won() {
 				return nil
@@ -1664,6 +1683,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		// active is read once per poll, ahead of the end test, because the stall
 		// bound below reads the row that read observed.
 		isActive := r.activeIn(poll, name)
+		prevActive = isActive
 		// An unanswered Bash call inside its declared timeout is activity too
 		// (pg2-r4ig2): a subagent in one long hook run writes nothing until it
 		// returns, and closing the pane would kill the call and park the bead.
@@ -1782,6 +1802,23 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			return err
 		}
 	}
+}
+
+// beadShowActiveEvery is the longest the wait loop leaves the bead unread while
+// the session row is active (3 polls at the default 10 s): completion detection
+// may lag by this much, in exchange for two thirds fewer `bd show` launches.
+// A shorter poll shortens the window to beadShowActivePolls polls (never more
+// than this cap), so a fast-polling handler keeps its detection latency in polls.
+const beadShowActiveEvery = 30 * time.Second
+
+// beadShowActivePolls is the window, in polls, between bead reads while the row
+// is active.
+const beadShowActivePolls = 3
+
+// beadShowWindow is the bead-read window for an active row: the lesser of
+// beadShowActiveEvery and beadShowActivePolls x PollInterval.
+func beadShowWindow(poll time.Duration) time.Duration {
+	return min(beadShowActiveEvery, beadShowActivePolls*poll)
 }
 
 // beadsDirFor returns the workspace dir whose .beads holds the role's items:

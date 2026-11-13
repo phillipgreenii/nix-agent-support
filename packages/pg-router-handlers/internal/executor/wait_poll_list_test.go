@@ -33,6 +33,9 @@ func pollWorkingCC(extra func(*dtest.FakeCC)) *dtest.FakeCC {
 func pollsUntilClosed(t *testing.T, cc *dtest.FakeCC) {
 	t.Helper()
 	cfg := fastCfg()
+	// A poll as long as the active-row bead-read window, so every poll reads the
+	// bead (see TestWaitShow_*): four reads are four polls.
+	cfg.PollInterval = beadShowActiveEvery
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "in_progress", "in_progress", "closed"}}}
 	e := newExec(cc, bd, cfg)
 	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}

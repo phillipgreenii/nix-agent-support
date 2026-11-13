@@ -20,9 +20,11 @@ import (
 )
 
 // Supervision lease (bead pg2-g2u9m, INV-CCH-18): the dispatching handler
-// stamps pgrouter.lease_until at launch and refreshes it every PollInterval
-// until Dispatch returns, so a later dispatch can tell a supervised session
-// from an orphan.
+// stamps pgrouter.lease_until at launch and refreshes it on its own cadence
+// (LeaseTTL / 4, not the wait poll) until Dispatch returns, so a later dispatch
+// can tell a supervised session from an orphan. These tests inject a fast ticker
+// (fastLeaseTicker) in place of the 30 s production one; the cadence itself is
+// pinned in lease_cadence_test.go.
 
 const (
 	leaseSess = "sess-1"
@@ -31,7 +33,7 @@ const (
 
 func leaseCfg() config.Config {
 	cfg := fastCfg()
-	cfg.PollInterval = 5 * time.Millisecond // the real lease ticker period
+	cfg.PollInterval = 5 * time.Millisecond
 	cfg.LeaseTTL = leaseTTL
 	cfg.WorktreeQuietWindow = time.Minute
 	return cfg
@@ -92,6 +94,13 @@ func waitMoreLeaseWrites(t *testing.T, cc *dtest.FakeCC, phase string, n int) {
 	}
 }
 
+// fastLeaseTicker is the injected lease ticker of the phase tests: a real 5 ms
+// tick, whatever period the handler asks for.
+func fastLeaseTicker(time.Duration) (<-chan time.Time, func()) {
+	t := time.NewTicker(5 * time.Millisecond)
+	return t.C, t.Stop
+}
+
 func leaseDeps(t *testing.T, cc ccpool.Runner, bd interface {
 	Run(context.Context, ...string) (string, error)
 }, cfg config.Config, clk *dtest.ManualClock,
@@ -103,6 +112,7 @@ func leaseDeps(t *testing.T, cc ccpool.Runner, bd interface {
 	deps.BD = bd
 	deps.ExternalID = leaseSess
 	deps.Now, deps.Tick = clk.Now, clk.TickAdvancing()
+	deps.NewTicker = fastLeaseTicker
 	deps.Git = &dtest.NoopGit{}
 	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	return deps

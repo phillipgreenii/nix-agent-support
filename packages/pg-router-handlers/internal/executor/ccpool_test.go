@@ -2216,6 +2216,7 @@ func TestDispatch_redeliveryDuringTurn_absorbsIntoExistingSession(t *testing.T) 
 // row is never adopted.
 func TestDispatch_redeliveryAfterSettle_launchesFreshSession(t *testing.T) {
 	cfg := fastCfg()
+	cfg.PollInterval = beadShowActiveEvery // every poll reads the bead, so the scripted lists below line up
 	cfg.WorktreeDir = t.TempDir()
 	role := feedbackRole(cfg)
 	display := role.DisplayName(cfg.SessionPrefix, "zr-c")

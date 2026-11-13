@@ -103,6 +103,28 @@ func TestValidate_leaseTTL(t *testing.T) {
 	}
 }
 
+// TestValidate_leaseTTLFloor: independent of PollInterval, a TTL below
+// LeaseTTLFloor is rejected (negative control for a too-short TTL), the floor
+// itself and the default are accepted, and the refresh cadence is a quarter TTL.
+func TestValidate_leaseTTLFloor(t *testing.T) {
+	c := Default()
+	c.PollInterval = time.Second // so the poll-based floor (10 s) is not what rejects
+	if err := c.Validate(); err != nil {
+		t.Fatalf("the default lease TTL must validate: %v", err)
+	}
+	if got := c.LeaseRefreshInterval(); got != 30*time.Second {
+		t.Errorf("default LeaseRefreshInterval = %v, want 30s (2m / 4)", got)
+	}
+	c.LeaseTTL = LeaseTTLFloor
+	if err := c.Validate(); err != nil {
+		t.Errorf("TTL == the floor must validate: %v", err)
+	}
+	c.LeaseTTL = LeaseTTLFloor - time.Second
+	if err := c.Validate(); err == nil {
+		t.Error("a TTL under the floor must be rejected even when it exceeds 10 x pollInterval")
+	}
+}
+
 // bead pg2-uyahp, INV-CCH-23: the per-role worktree quiet-window override.
 func TestValidateQuietWindowOverride(t *testing.T) {
 	c := Default() // poll 10s, window 2m, quiet max 10m

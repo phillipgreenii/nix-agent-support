@@ -60,14 +60,17 @@ type Executor interface {
 // per-attempt ExternalID is resolved ONCE by the orchestrator (so the same id is
 // reused for the deferred teardown Close); the executor never re-stamps.
 type Deps struct {
-	CC          ccpool.Runner
-	BD          beads.Runner
-	Cmd         query.Commander
-	Log         *eventlog.Writer // may be nil (no-op)
-	Cfg         config.Config
-	Now         func() time.Time                           // clock seam; nil ⇒ time.Now
-	Tick        func(context.Context, time.Duration) error // cancellable wait; nil ⇒ select poll
-	UsageReader usage.Reader                               // nil ⇒ usage.ReaderFor(CC) (ccpool consumption)
+	CC   ccpool.Runner
+	BD   beads.Runner
+	Cmd  query.Commander
+	Log  *eventlog.Writer // may be nil (no-op)
+	Cfg  config.Config
+	Now  func() time.Time                           // clock seam; nil ⇒ time.Now
+	Tick func(context.Context, time.Duration) error // cancellable wait; nil ⇒ select poll
+	// NewTicker is the lease-refresh ticker seam: it returns the tick channel and
+	// its stop func (nil ⇒ time.NewTicker). Tests drive the lease cadence with it.
+	NewTicker   func(time.Duration) (<-chan time.Time, func())
+	UsageReader usage.Reader // nil ⇒ usage.ReaderFor(CC) (ccpool consumption)
 	// FirstTurn reports whether the model has taken a turn in a transcript (the
 	// nudge gate); nil ⇒ the recorder's fact.
 	FirstTurn  func(transcriptPath string) bool
@@ -196,6 +199,14 @@ func (d Deps) commander() query.Commander {
 		return d.Cmd
 	}
 	return query.OSCommander{}
+}
+
+func (d Deps) newTicker(dur time.Duration) (<-chan time.Time, func()) {
+	if d.NewTicker != nil {
+		return d.NewTicker(dur)
+	}
+	t := time.NewTicker(dur)
+	return t.C, t.Stop
 }
 
 func (d Deps) waitPoll(ctx context.Context, dur time.Duration) error {
