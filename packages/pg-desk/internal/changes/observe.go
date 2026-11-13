@@ -77,7 +77,7 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 	if version < store.NewSchemaVersion {
 		return Flow{}, nil
 	}
-	entities, err := st.ListEntities()
+	entities, err := st.ListEntitiesNoFacts()
 	if err != nil {
 		return Flow{}, err
 	}
@@ -138,20 +138,9 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 	})
 	maxSeq := map[string]int64{}
 	for _, t := range types {
-		records, err := st.ListChangesAfter(t, 0, 0)
+		counts, top, err := st.ChangeKindCounts(t)
 		if err != nil {
 			return Flow{}, err
-		}
-		type key struct{ kind, origin string }
-		counts := map[key]int64{}
-		var top int64
-		for _, r := range records {
-			if r.Seq > top {
-				top = r.Seq
-			}
-			for _, k := range r.Kinds {
-				counts[key{k, r.Origin}]++
-			}
 		}
 		maxSeq[t] = top
 
@@ -167,15 +156,9 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 			Stats:    stats,
 			Repeated: RepeatedDegraded(stats),
 		}
-		for k, n := range counts {
-			tf.Records = append(tf.Records, RecordCount{Kind: k.kind, Origin: k.origin, Count: n})
+		for _, k := range counts { // already sorted by (kind, origin)
+			tf.Records = append(tf.Records, RecordCount{Kind: k.Kind, Origin: k.Origin, Count: k.Count})
 		}
-		sort.Slice(tf.Records, func(i, j int) bool {
-			if tf.Records[i].Kind != tf.Records[j].Kind {
-				return tf.Records[i].Kind < tf.Records[j].Kind
-			}
-			return tf.Records[i].Origin < tf.Records[j].Origin
-		})
 		flow.Types = append(flow.Types, tf)
 	}
 	for _, c := range consumers {

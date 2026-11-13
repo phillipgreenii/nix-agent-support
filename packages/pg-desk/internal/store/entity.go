@@ -164,6 +164,51 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	return out, nil
 }
 
+// ListEntitiesNoFacts is ListEntities without the facts column: every other
+// field is populated, Facts is always "". The facts column is nearly all of
+// the entity table's bytes (about 100 MB of a 103 MB table on a live store,
+// pull-request rows holding most of it), so a reader that never looks at the
+// facts (the metrics snapshot, status, doctor's change-flow block, the orphan
+// and watch-set derivations) uses this and reads none of them. The rows come
+// in the same order as ListEntities.
+func (s *Store) ListEntitiesNoFacts() ([]Entity, error) {
+	feedCols, err := s.issueFeedSelect()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.sql.QueryContext(
+		context.Background(),
+		`SELECT repo, entity_type, entity_id, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, `+feedCols+`
+		 FROM entity ORDER BY repo, entity_type, entity_id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list entities (no facts): %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Entity
+	for rows.Next() {
+		var e Entity
+		var headSHA, hydratedAt, listFP, firstSeenAt, backend, readAttempt, readOK sql.NullString
+		var watched sql.NullInt64
+		var active int
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP, &firstSeenAt, &backend, &watched, &readAttempt, &readOK); err != nil {
+			return nil, fmt.Errorf("store: scan entity row (no facts): %w", err)
+		}
+		e.HeadSHA = headSHA.String
+		e.HydratedAt = hydratedAt.String
+		e.Inactive = active == 0
+		e.ListFP = listFP.String
+		e.FirstSeenAt = firstSeenAt.String
+		applyIssueFeedColumns(&e, backend, watched, readAttempt, readOK)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list entities (no facts): %w", err)
+	}
+	return out, nil
+}
+
 // nullableString maps an empty Go string to a SQL NULL, so optional
 // TEXT columns (e.g. entity.head_sha) round-trip as NULL rather than "".
 func nullableString(v string) any {

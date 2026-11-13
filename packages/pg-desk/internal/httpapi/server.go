@@ -277,13 +277,18 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 		PanelMineAwaitingTeam:  &p.MineAwaitingTeam,
 	}
 
+	// One batched read of every hidden/wip annotation, instead of two
+	// annotation reads per interpretation row.
+	hiddenWIP, herr := st.ListHiddenWIP()
+	if herr != nil {
+		hiddenWIP = nil // fail open toward visible, as a per-row error did
+	}
+
 	for _, interp := range interps {
 		row := buildRow(interp)
 
-		hidden, _, _, aerr := st.PRHiddenWIP(interp.Repo, interp.EntityType, interp.EntityID)
-		if aerr != nil {
-			hidden = false
-		}
+		hw := hiddenWIP[store.HiddenWIPKey{Repo: interp.Repo, EntityType: interp.EntityType, EntityID: interp.EntityID}]
+		hidden := hw.Hidden && hw.Err == nil
 		// An annotation-read error is treated as "not hidden" (fail open
 		// toward visible, not silently dropped): a store read glitch must
 		// never disappear a row from the operator's triage board.

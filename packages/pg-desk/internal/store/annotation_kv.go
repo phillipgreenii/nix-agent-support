@@ -310,3 +310,71 @@ func (s *Store) PRHiddenWIP(repo, entityType, entityID string) (hidden bool, rea
 	}
 	return hidden, reason, found && w.Value == "true", nil
 }
+
+// HiddenWIP is the hidden flag, hidden reason and wip flag of one entity.
+type HiddenWIP struct {
+	Hidden bool
+	Reason string
+	WIP    bool
+	// Err is set when the entity's hidden annotation did not decode; the
+	// other fields then hold what did decode (nothing for hidden).
+	Err error
+}
+
+// HiddenWIPKey identifies an entity in the map ListHiddenWIP returns.
+type HiddenWIPKey struct {
+	Repo, EntityType, EntityID string
+}
+
+// ListHiddenWIP reads the hidden and wip annotations of every entity in ONE
+// query and returns them keyed by entity: PRHiddenWIP for all rows at once, so
+// a caller that needs the answer for many entities issues a constant number
+// of queries instead of two per entity. An entity with no hidden and no wip
+// annotation is absent from the map (not hidden, not wip). A hidden value that
+// does not decode is recorded in that entity's Err, not returned as an error,
+// so one bad row cannot fail the others.
+func (s *Store) ListHiddenWIP() (map[HiddenWIPKey]HiddenWIP, error) {
+	if err := s.RequireNewSchema(); err != nil {
+		return nil, err
+	}
+	rows, err := s.sql.QueryContext(
+		context.Background(),
+		`SELECT repo, entity_type, entity_id, key, value FROM annotation WHERE key IN (?, ?)`,
+		AnnotationHidden, AnnotationWIP,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list hidden/wip annotations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[HiddenWIPKey]HiddenWIP{}
+	for rows.Next() {
+		var k HiddenWIPKey
+		var key, value string
+		if err := rows.Scan(&k.Repo, &k.EntityType, &k.EntityID, &key, &value); err != nil {
+			return nil, fmt.Errorf("store: scan hidden/wip annotation: %w", err)
+		}
+		hw := out[k]
+		switch key {
+		case AnnotationHidden:
+			var v struct {
+				Value  bool    `json:"value"`
+				Reason *string `json:"reason"`
+			}
+			if err := json.Unmarshal([]byte(value), &v); err != nil {
+				hw.Err = fmt.Errorf("store: decode hidden annotation (%s,%s,%s): %w", k.Repo, k.EntityType, k.EntityID, err)
+			} else {
+				hw.Hidden = v.Value
+				if v.Reason != nil {
+					hw.Reason = *v.Reason
+				}
+			}
+		case AnnotationWIP:
+			hw.WIP = value == "true"
+		}
+		out[k] = hw
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list hidden/wip annotations: %w", err)
+	}
+	return out, nil
+}

@@ -365,6 +365,54 @@ func (s *Store) ListChangesAfter(entityType string, afterSeq int64, limit int) (
 	)
 }
 
+// ChangeKindCount is the number of change_log records of one (kind, origin)
+// pair; a record carrying several kinds counts once under each.
+type ChangeKindCount struct {
+	Kind   string
+	Origin string
+	Count  int64
+}
+
+// ChangeKindCounts aggregates, inside SQLite, the change_log records of
+// entityType by (kind, origin) and returns the highest seq of the type (0 when
+// it has no record). It is ListChangesAfter(entityType, 0, 0) reduced to what
+// the change-flow observation needs, without loading every row. The counts are
+// sorted by (kind, origin).
+func (s *Store) ChangeKindCounts(entityType string) (counts []ChangeKindCount, maxSeq int64, err error) {
+	if err := s.RequireNewSchema(); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.sql.QueryContext(
+		context.Background(),
+		`SELECT j.value, c.origin, COUNT(*)
+		 FROM change_log c, json_each(c.kinds) j
+		 WHERE c.entity_type = ?
+		 GROUP BY j.value, c.origin
+		 ORDER BY j.value, c.origin`,
+		entityType,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("store: count change_log kinds: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var k ChangeKindCount
+		if err := rows.Scan(&k.Kind, &k.Origin, &k.Count); err != nil {
+			return nil, 0, fmt.Errorf("store: scan change_log kind count: %w", err)
+		}
+		counts = append(counts, k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("store: count change_log kinds: %w", err)
+	}
+	var top sql.NullInt64
+	if err := s.sql.QueryRowContext(context.Background(),
+		`SELECT MAX(seq) FROM change_log WHERE entity_type = ?`, entityType).Scan(&top); err != nil {
+		return nil, 0, fmt.Errorf("store: max change_log seq: %w", err)
+	}
+	return counts, top.Int64, nil
+}
+
 // ListEntityHistory returns one entity's change_log records, newest first,
 // at most limit of them (limit <= 0 means no limit).
 func (s *Store) ListEntityHistory(repo, entityType, entityID string, limit int) ([]ChangeRecord, error) {

@@ -117,3 +117,36 @@ func OpenRetiredSchemaForTest(t testT) *Store {
 	}
 	return s
 }
+
+// SeedLiveSizeForTest fills a schema-2 store with a fixture the size of a live
+// store, in pure SQL so it takes well under a second: entities rows of about
+// factsBytes of facts each (the first quarter pull-request rows, the rest
+// issue rows, a third of the issues watched), changeRows change_log rows
+// spread over the pr and issue types, and one interpretation-free hidden
+// annotation per hundredth entity. It exists so a test can prove a read path
+// moves no facts bytes.
+func (s *Store) SeedLiveSizeForTest(t seedT, entities, factsBytes, changeRows int) {
+	t.Helper()
+	if err := s.RequireNewSchema(); err != nil {
+		t.Fatalf("SeedLiveSizeForTest: %v", err)
+	}
+	s.ExecForTest(t, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < ?)
+		INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, stale, content_hash, version, hydrated_at, active, first_seen_at, backend, watched)
+		SELECT 'o/r', CASE WHEN i % 4 = 0 THEN 'pr' ELSE 'issue' END, 'id-' || i,
+		       replace(hex(zeroblob(?)), '00', 'ab'), '2026-11-01T00:00:00Z', 0, 'h', 1,
+		       CASE WHEN i % 5 = 0 THEN NULL ELSE '2026-11-01T00:00:00Z' END,
+		       CASE WHEN i % 7 = 0 THEN 0 ELSE 1 END, '2026-11-01T00:00:00Z',
+		       CASE WHEN i % 4 = 0 THEN NULL ELSE 'beads-a' END,
+		       CASE WHEN i % 3 = 0 THEN 1 ELSE NULL END
+		FROM n`, entities, factsBytes/2)
+	s.ExecForTest(t, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < ?)
+		INSERT INTO change_log (repo, entity_type, entity_id, version, kinds, origin, at)
+		SELECT 'o/r', CASE WHEN i % 2 = 0 THEN 'pr' ELSE 'issue' END, 'id-' || (i % ?), 1,
+		       CASE WHEN i % 3 = 0 THEN '["created","labels"]' ELSE '["reconcile"]' END,
+		       CASE WHEN i % 5 = 0 THEN 'sweep' ELSE 'poll' END, '2026-11-01T00:00:00Z'
+		FROM n`, changeRows, entities)
+	s.ExecForTest(t, `WITH RECURSIVE n(i) AS (SELECT 100 UNION ALL SELECT i+100 FROM n WHERE i+100 <= ?)
+		INSERT INTO annotation (repo, entity_type, entity_id, key, value, origin, set_by, set_at)
+		SELECT 'o/r', CASE WHEN i % 4 = 0 THEN 'pr' ELSE 'issue' END, 'id-' || i, 'hidden', '{"value":true,"reason":"r"}', 'cli', 'me', '2026-11-01T00:00:00Z'
+		FROM n`, entities)
+}
