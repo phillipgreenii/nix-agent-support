@@ -851,6 +851,13 @@ at 4 MiB.
   write is: safe per key, visible within about 100 ms (F15).
 - The git-lock impact of `gh pr view`: none when branch and repository are
   passed (F14).
+- `reviewDecision` from `gh pr view` on a real PR: verified 2026-11-12 with
+  `gh pr view <n> --json number,state,reviewDecision` on open and closed pull
+  requests in the approved scratch repository. The field exists and returns
+  the empty string where no review is required or given, the "empty
+  `reviewDecision`" case the plugin already handles. A non-empty value
+  (`APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`) was not seen, since that
+  repository has no review requirement; the git-lock impact is none (F14).
 - The recorder's title field: not needed (D10).
 - Whether a rename can refresh the name on demand: the registry entry is
   rewritten on a name change (F17); the button re-reads it after each turn.
@@ -860,11 +867,15 @@ at 4 MiB.
 Items the 2026-11-06 review closed are listed under "Open items closed by this
 review".
 
-- `reviewDecision` from `gh pr view` on a real PR (its git-lock impact is none,
-  F14).
 - Whether a contributed button press can run an action (data cannot carry a
   callback; a command name or event may be needed).
-- A model-run Bash call seeing a variable from `$.env.set`.
+- A model-run Bash call seeing a variable from `$.env.set` (not driven as of
+  2026-11-12: an agent session could not start tmux or `claude`).
+- That `$.ui.status(undefined)` clears the row, and that tabs from two
+  different plugins coexist (same reason).
+- The 200k marker and limit colors at a real reading of 80 percent or more
+  (need a real session over that size), and a real drain-beads run showing its
+  mode button (spans many turns).
 - Whether OTLP over `$.http.fetch` is allowed under the managed web policy, and
   what first-class mod telemetry would take.
 - Whether the `PromptHint` or `SessionMode` sites accept a colored multi-row

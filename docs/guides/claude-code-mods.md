@@ -152,7 +152,6 @@ These are carried forward from the design and MUST stay here until a spike or a 
 them.
 
 - Whether `$.fs` reads `.git/HEAD` and the `.git` worktree pointer file as expected.
-- `reviewDecision` from `gh pr view` on a real PR, and its git-lock impact.
 - Whether a contributed button press can run an action (data cannot carry a callback; a command name
   or event may be needed).
 - A model-run Bash call seeing a variable from `$.env.set`.
@@ -168,6 +167,13 @@ them.
 - The assume expiry source and whether the four variables suffice, the wrap-up command text, and the
   alert thresholds. The plugin name `pgd` (operator ruling 2026-11-06) is accepted for now and MAY
   change later; bead links are deferred until a target exists.
+
+Still unverified live as of 2026-11-12 (an agent session could not start tmux or `claude`, so none of
+these was driven): `$.ui.status(undefined)` clearing the row, a model-run Bash call seeing
+`$.env.set`, cross-plugin tabs, and OTLP to a non-loopback endpoint. The 200k marker and limit
+colors at a real reading of 80 percent or more need a real session over that size, and a real
+drain-beads run showing its mode button spans many turns; neither is something a throwaway session
+reproduces.
 
 ## Spike results
 
