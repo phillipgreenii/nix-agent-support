@@ -16,6 +16,8 @@ package main
 import (
 	"errors"
 
+	"github.com/phillipgreenii/x/exitcode"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -51,18 +53,23 @@ type FanOutOutcome struct {
 	Sources []SourceResult `json:"sources"`
 }
 
-// Process exit codes of pg-connector's own CLI. Each equals the same-named
-// constant in github.com/phillipgreenii/x/exitcode; they are literals here
-// because the x revision this module pins does not carry that package and a
-// bump needs a regenerated gomod2nix.toml.
-const (
-	exitOK          = 0 // exitcode.OK
-	exitUsage       = 2 // exitcode.Usage
-	exitUnavailable = 3 // exitcode.Unavailable
-	exitNotFound    = 4 // exitcode.NotFound
-	exitDegraded    = 5 // exitcode.Degraded
-	exitDenied      = 8 // exitcode.Denied
-)
+// configError marks a failure to load or validate the pg-connector config
+// (no file found, unreadable, unparseable, an unrecognised key, or a failed
+// Validate). It classifies as exitcode.Config (7) in TargetedExitCode and in
+// run(); dispatch-level failures (no backend registered, ambiguous
+// registration) are not config load/validation failures and stay generic.
+type configError struct{ err error }
+
+func (e *configError) Error() string { return e.err.Error() }
+func (e *configError) Unwrap() error { return e.err }
+
+// asConfigError wraps err as a *configError (nil stays nil).
+func asConfigError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &configError{err: err}
+}
 
 // ExitCode returns this outcome's pg-connector CLI exit code: 0 (all
 // healthy — succeeded or disabled), 5 (Degraded — at least one source is
@@ -88,11 +95,11 @@ func (o FanOutOutcome) ExitCode() int {
 	}
 	switch {
 	case failed == 0 && healthy > 0:
-		return exitOK
+		return exitcode.OK
 	case healthy == 0:
-		return exitUnavailable
+		return exitcode.Unavailable
 	default:
-		return exitDegraded
+		return exitcode.Degraded
 	}
 }
 
@@ -100,21 +107,31 @@ func (o FanOutOutcome) ExitCode() int {
 // op (one that resolves to a single registered backend) from the raw
 // per-call error: 0 (success), 4 NotFound (not_found, a well-formed negative
 // answer), 8 Denied (unauthenticated), 3 Unavailable (unavailable), 2 Usage
-// (invalid_argument, query_not_recognized), or 1 (any other error, or a
+// (invalid_argument, query_not_recognized), 7 Config (config load or
+// validation failure), or 1 (any other error, or a
 // CLI-level failure before a well-formed response was produced). The wire
 // error names are unchanged; only the process exit code is classified.
 func TargetedExitCode(err error) int {
 	switch {
 	case err == nil:
-		return exitOK
+		return exitcode.OK
+	case isConfigError(err):
+		return exitcode.Config
 	case errors.Is(err, scriptout.ErrNotFound):
-		return exitNotFound
+		return exitcode.NotFound
 	case errors.Is(err, scriptout.ErrUnauthenticated):
-		return exitDenied
+		return exitcode.Denied
 	case errors.Is(err, scriptout.ErrUnavailable):
-		return exitUnavailable
+		return exitcode.Unavailable
 	case errors.Is(err, scriptout.ErrInvalidArgument), errors.Is(err, scriptout.ErrQueryNotRecognized):
-		return exitUsage
+		return exitcode.Usage
 	}
-	return 1
+	return exitcode.Error
+}
+
+// isConfigError reports whether err is (or wraps) a config load/validation
+// failure.
+func isConfigError(err error) bool {
+	var ce *configError
+	return errors.As(err, &ce)
 }

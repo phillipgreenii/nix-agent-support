@@ -73,8 +73,10 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    and MUST NOT be built from or confused with it.** They split by op shape: a **fan-out** op
    (queries every backend registered for a type/capability) reports `0`/`5`/`3`
    (all-succeeded / Degraded / Unavailable, the total failure); a **targeted** op (resolves to exactly one
-   backend) reports `0`/`4`/`8`/`3`/`2`/`1` (success / `not_found` — a well-formed negative, not a failure /
-   `unauthenticated` / `unavailable` / `invalid_argument` and `query_not_recognized` / any other error).
+   backend) reports `0`/`4`/`8`/`3`/`2`/`7`/`1` (success / `not_found` — a well-formed negative, not a failure /
+   `unauthenticated` / `unavailable` / `invalid_argument` and `query_not_recognized` / a config load or
+   validation failure (Config) / any other error). A config load or validation failure exits `7` for every
+   op shape, fan-out included, because it happens before any response exists.
    The numbers are the shared exit codes of the workspace's `exitcode` package. Every multi-source response carries a `sources[]` row per backend actually
    queried, never collapsed into one pass/fail signal. (Amendment, 2026-11-12, operator ruling of
    Phillip, 2026-11-11 on the shared exit codes: "it is ok to break contracts, just make sure both

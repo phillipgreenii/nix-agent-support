@@ -265,10 +265,13 @@ A different, higher layer than the backend process exit codes above — pg-conne
 process exit code is never built from it. It splits by whether the invoked op is a **fan-out**
 (queries every registered backend of a type) or **targeted** (resolves to one backend):
 
-| Op shape | `0`                  | Other codes                                                                                                                                |
-| -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Fan-out  | every source healthy | `5` Degraded (some healthy, some not); `3` Unavailable, total failure (none healthy, including zero registered)                            |
-| Targeted | success              | `4` NotFound; `8` Denied (`unauthenticated`); `3` Unavailable; `2` Usage (`invalid_argument`, `query_not_recognized`); `1` any other error |
+| Op shape | `0`                  | Other codes                                                                                                                                            |
+| -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fan-out  | every source healthy | `5` Degraded (some healthy, some not); `3` Unavailable, total failure (none healthy, including zero registered)                                        |
+| Targeted | success              | `4` NotFound; `8` Denied (`unauthenticated`); `3` Unavailable; `2` Usage (`invalid_argument`, `query_not_recognized`); `7` Config; `1` any other error |
+
+`7` Config is the one code shared by both shapes: a config file that cannot be found, read, parsed or validated
+exits `7` before any op runs (a missing backend registration or an ambiguous one stays `1`).
 
 Every fan-out response also carries a `sources[]` row per backend actually queried
 (`{source, status, count, reason}`) — never collapsed into one pass/fail signal, and never

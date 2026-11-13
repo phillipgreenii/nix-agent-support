@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // writeMultiEntityConfigFor writes a connector.<type> registry exercising
@@ -79,16 +81,16 @@ func TestConfigShow_Human_ReportsResolvedPathAndBackends(t *testing.T) {
 func TestConfigShow_NoConfigFound_ReturnsCLIError(t *testing.T) {
 	// A misconfigured host (no $PG_PR_CONFIG, no XDG/home candidate) must
 	// surface loadRegistryFromEnv's own ErrNoConfig as a CLI-level failure
-	// (exit 1) — the same failure mode "config show" shares with every
+	// (exit 7, Config) — the same failure mode "config show" shares with every
 	// other fan-out-shaped verb's own un-wrapped LoadRegistry error
 	// (auth.go/config_validate.go's own RunE bodies; see
-	// TestRun_AuthStatus_NoConfigIsGenericFailure in main_test.go for the
+	// TestRun_AuthStatus_NoConfigIsConfigError in main_test.go for the
 	// existing precedent this mirrors: exit code only, not stdout content,
 	// since a raw returned error never reaches cobra's own SilenceErrors:
 	// true output — only main's real run() prints it, on stderr).
 	t.Setenv("PG_PR_CONFIG", "/does/not/exist/config.yaml")
-	if code := run([]string{"config", "show"}); code != 1 {
-		t.Fatalf("run(config show) = %d, want 1", code)
+	if code := run([]string{"config", "show"}); code != exitcode.Config {
+		t.Fatalf("run(config show) = %d, want %d", code, exitcode.Config)
 	}
 }
 
@@ -310,5 +312,21 @@ func TestConfigShowAndValidate_RejectMalformedEntries(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRun_ConfigValidate_UnparseableConfigIsConfigError(t *testing.T) {
+	// A typo'd connector key is rejected at load time (bug A16); that is a
+	// config failure (exit 7), not the generic exit 1.
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfg, []byte("connector:\n  prs:\n    - x\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+	if code := run([]string{"config", "validate"}); code != exitcode.Config {
+		t.Fatalf("run(config validate) = %d, want %d", code, exitcode.Config)
+	}
+	if code := run([]string{"config", "show"}); code != exitcode.Config {
+		t.Fatalf("run(config show) = %d, want %d", code, exitcode.Config)
 	}
 }

@@ -292,7 +292,7 @@ func newConfigValidateCmd() *cobra.Command {
 				return err
 			}
 			if err := reg.Validate(); err != nil {
-				return err
+				return asConfigError(err)
 			}
 			backends, err := reg.AllBackends()
 			if err != nil {

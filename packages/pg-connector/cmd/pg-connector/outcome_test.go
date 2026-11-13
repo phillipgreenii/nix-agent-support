@@ -2,7 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/phillipgreenii/x/exitcode"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -135,5 +138,23 @@ func TestTargetedExitCode_ClassifiesByWireError(t *testing.T) {
 	}
 	if code := TargetedExitCode(errors.New("plain failure")); code != 1 {
 		t.Errorf("TargetedExitCode(unclassified) = %d, want 1", code)
+	}
+}
+
+func TestTargetedExitCode_ConfigError_IsConfig7(t *testing.T) {
+	cause := errors.New("registry: parse x: bad key")
+	for name, err := range map[string]error{
+		"direct":  asConfigError(cause),
+		"wrapped": fmt.Errorf("outer: %w", asConfigError(cause)),
+	} {
+		if code := TargetedExitCode(err); code != exitcode.Config {
+			t.Errorf("%s: TargetedExitCode = %d, want %d", name, code, exitcode.Config)
+		}
+	}
+	if code := TargetedExitCode(cause); code != exitcode.Error {
+		t.Errorf("plain error: TargetedExitCode = %d, want %d", code, exitcode.Error)
+	}
+	if asConfigError(nil) != nil {
+		t.Error("asConfigError(nil) must stay nil")
 	}
 }

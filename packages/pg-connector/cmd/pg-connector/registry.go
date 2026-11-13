@@ -118,9 +118,10 @@ func ResolveConfigPath() (string, error) {
 func loadRegistryFromEnv(env envSource) (*Registry, error) {
 	path, err := resolveConfigPath(env)
 	if err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
-	return loadRegistryFile(path)
+	reg, err := loadRegistryFile(path)
+	return reg, asConfigError(err)
 }
 
 // resolveConfigPath is loadRegistryFromEnv's own path-resolution step,

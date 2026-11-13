@@ -57,43 +57,43 @@ type ConfigShowResult struct {
 func buildConfigShowResult(withQueries bool) (*ConfigShowResult, error) {
 	path, err := ResolveConfigPath()
 	if err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	reg, err := loadRegistryFile(path)
 	if err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	// Surface a malformed entry anywhere (including attention/search/
 	// activity sources, which no connector fan-out exercises) instead of
 	// letting it pass silently.
 	if err := reg.Validate(); err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	pr, err := reg.List("pr")
 	if err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	issue, err := reg.List("issue")
 	if err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	ci, err := reg.List("ci")
 	if err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	scm, err := reg.Single("scm")
 	if err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	result := &ConfigShowResult{ConfigPath: path, PR: pr, Issue: issue, CI: ci, Scm: scm}
 	if result.Attention, err = reg.AttentionSources(); err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	if result.Search, err = reg.SearchSources(); err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	if result.Activity, err = reg.ActivitySources(); err != nil {
-		return nil, err
+		return nil, asConfigError(err)
 	}
 	if commands := reg.Explicit(); len(commands) > 0 {
 		result.Commands = commands
@@ -107,7 +107,7 @@ func buildConfigShowResult(withQueries bool) (*ConfigShowResult, error) {
 				}
 				names, namesErr := reg.BackendQueryNames(b)
 				if namesErr != nil {
-					return nil, namesErr
+					return nil, asConfigError(namesErr)
 				}
 				result.Queries[b] = names
 			}

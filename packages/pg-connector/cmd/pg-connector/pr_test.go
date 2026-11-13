@@ -15,6 +15,7 @@ import (
 	prprov "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // executePr runs the root command with args, capturing stdout and stderr in
@@ -277,8 +278,8 @@ func TestRun_PrShow_ConfigFileDoesNotExist_EmitsJSONEnvelope(t *testing.T) {
 	t.Setenv("PG_PR_CONFIG", t.TempDir()+"/does-not-exist.yaml")
 
 	stdout, _, code := executePr(t, []string{"pr", "show", "pr-1"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != exitcode.Config {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitcode.Config, stdout)
 	}
 	var resp scriptout.Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {

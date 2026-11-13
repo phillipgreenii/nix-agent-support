@@ -514,7 +514,10 @@ status`/`config validate`.
     `branch detect`): `0` the operation completed and produced a well-formed response (including
     a successful write); `4` NotFound (`not_found`) — a well-formed negative answer, MUST NOT share a code
     with an actual failure; `8` Denied (`unauthenticated`); `3` Unavailable (`unavailable`); `2`
-    Usage (`invalid_argument`, `query_not_recognized`); `1` any other error (`unknown_op`/
+    Usage (`invalid_argument`, `query_not_recognized`); `7` Config — the config could not be loaded
+    or validated (no config file found, unreadable, unparseable, an unrecognised key, or a failed
+    `config validate`/`config show` validation); this applies to a fan-out op too, since it fails
+    before any response exists; `1` any other error (`unknown_op`/
     `version_mismatch`, or a CLI-level failure before any well-formed response was produced at
     all — no backend registered, an ambiguous multi-backend registration (`INV-REG-2`)). The wire
     error names are unchanged; only the process exit code is classified. Every code equals the

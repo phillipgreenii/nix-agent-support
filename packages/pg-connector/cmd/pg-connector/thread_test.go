@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // writeThreadConfigFor writes a connector.thread registry config naming
@@ -139,7 +140,7 @@ func TestRun_ThreadShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 	}
 }
 
-// TestRun_ThreadList_ConfigLoadFailure_IsGenericFailureViaJSONEnvelope is
+// TestRun_ThreadList_ConfigLoadFailure_IsConfigErrorViaJSONEnvelope is
 // this packet's own required "every error path routes through
 // writeTargetedResult/writeFanOutResult, never a bare return err"
 // acceptance criterion, applied to "thread list"'s own LoadRegistry
@@ -149,12 +150,12 @@ func TestRun_ThreadShow_NoBackendRegistered_IsGenericFailure(t *testing.T) {
 // packet does not reintroduce that gap). A bare `return err` here would
 // print bare stderr prose with an EMPTY stdout (never a JSON envelope) —
 // this proves stdout instead carries a well-formed wire error envelope.
-func TestRun_ThreadList_ConfigLoadFailure_IsGenericFailureViaJSONEnvelope(t *testing.T) {
+func TestRun_ThreadList_ConfigLoadFailure_IsConfigErrorViaJSONEnvelope(t *testing.T) {
 	t.Setenv("PG_PR_CONFIG", "/does/not/exist/config.yaml")
 
 	stdout, stderr, code := executePr(t, []string{"thread", "list", "--query", "mine"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+	if code != exitcode.Config {
+		t.Fatalf("exit code = %d, want %d; stdout=%s stderr=%s", code, exitcode.Config, stdout, stderr)
 	}
 	var resp scriptout.Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {

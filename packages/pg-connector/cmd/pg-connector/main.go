@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // exitError carries a specific process exit code without printing anything
@@ -26,7 +28,7 @@ func run(args []string) int {
 
 	err := root.Execute()
 	if err == nil {
-		return 0
+		return exitcode.OK
 	}
 
 	var ee *exitError
@@ -35,5 +37,8 @@ func run(args []string) int {
 	}
 
 	fmt.Fprintln(os.Stderr, err)
-	return 1
+	if isConfigError(err) {
+		return exitcode.Config
+	}
+	return exitcode.Error
 }

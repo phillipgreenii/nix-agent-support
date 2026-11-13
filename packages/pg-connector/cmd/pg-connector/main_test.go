@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // captureRealStdio redirects the REAL os.Stdout/os.Stderr (not cobra's own
@@ -98,13 +99,13 @@ func TestRun_AuthStatus_ExitCodeMatchesOutcome(t *testing.T) {
 	}
 }
 
-func TestRun_AuthStatus_NoConfigIsGenericFailure(t *testing.T) {
+func TestRun_AuthStatus_NoConfigIsConfigError(t *testing.T) {
 	t.Setenv("PG_PR_CONFIG", "/does/not/exist.yaml")
 	// A missing/invalid config is a CLI-level failure before any
-	// well-formed fan-out response was produced — the generic exit-1
-	// path, never one of the fan-out/targeted taxonomy codes.
-	if code := run([]string{"auth", "status"}); code != 1 {
-		t.Fatalf("run(auth status) = %d, want 1", code)
+	// well-formed fan-out response was produced; a config load failure
+	// is exit 7 (Config), never a fan-out/targeted taxonomy code.
+	if code := run([]string{"auth", "status"}); code != exitcode.Config {
+		t.Fatalf("run(auth status) = %d, want %d", code, exitcode.Config)
 	}
 }
 
