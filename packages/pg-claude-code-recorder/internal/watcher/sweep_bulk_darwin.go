@@ -59,15 +59,16 @@ type bulkEntry struct {
 // returns a whole directory's names and attributes in one call.
 func platformSweep(root string, descend func(dir string) bool) ([]FileInfo, error) {
 	var out []FileInfo
-	if err := bulkWalk(root, descend, &out); err != nil {
+	buf := make([]byte, bulkBufSize) // one buffer per walk, reused for every directory
+	if err := bulkWalk(root, descend, buf, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func bulkWalk(dir string, descend func(dir string) bool, out *[]FileInfo) error {
+func bulkWalk(dir string, descend func(dir string) bool, buf []byte, out *[]FileInfo) error {
 	noteDirRead(dir)
-	entries, err := bulkReadDir(dir)
+	entries, err := bulkReadDir(dir, buf)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return err
@@ -84,7 +85,7 @@ func bulkWalk(dir string, descend func(dir string) bool, out *[]FileInfo) error 
 			if descend != nil && !descend(path) {
 				continue
 			}
-			if err := bulkWalk(path, descend, out); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := bulkWalk(path, descend, buf, out); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 		}
@@ -92,7 +93,9 @@ func bulkWalk(dir string, descend func(dir string) bool, out *[]FileInfo) error 
 	return nil
 }
 
-func bulkReadDir(dir string) ([]bulkEntry, error) {
+// bulkReadDir fills buf (owned by the caller, never retained) once per
+// getattrlistbulk call.
+func bulkReadDir(dir string, buf []byte) ([]bulkEntry, error) {
 	cdir := C.CString(dir)
 	defer C.free(unsafe.Pointer(cdir))
 	fd, err := C.ccrec_bulk_open(cdir)
@@ -100,7 +103,6 @@ func bulkReadDir(dir string) ([]bulkEntry, error) {
 		return nil, err
 	}
 	defer C.close(fd)
-	buf := make([]byte, bulkBufSize)
 	var all []bulkEntry
 	for {
 		n, err := C.ccrec_bulk_read(fd, unsafe.Pointer(&buf[0]), C.size_t(len(buf)))
@@ -110,17 +112,17 @@ func bulkReadDir(dir string) ([]bulkEntry, error) {
 		if n == 0 {
 			return all, nil
 		}
-		ents, perr := parseBulk(buf, int(n))
+		var perr error
+		all, perr = parseBulk(all, buf, int(n))
 		if perr != nil {
 			return nil, perr
 		}
-		all = append(all, ents...)
 	}
 }
 
-// parseBulk decodes count records from buf.
-func parseBulk(buf []byte, count int) ([]bulkEntry, error) {
-	var out []bulkEntry
+// parseBulk appends count records decoded from buf to out. Names are copied,
+// so nothing retains buf.
+func parseBulk(out []bulkEntry, buf []byte, count int) ([]bulkEntry, error) {
 	off := 0
 	for i := 0; i < count; i++ {
 		if off+4 > len(buf) {
