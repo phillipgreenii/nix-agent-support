@@ -1,7 +1,7 @@
 // exitcode.go: the exit-code carrier this binary's own RunE bodies use to
 // signal one of the three non-zero, non-generic exit codes the design's
-// own "Exit codes" paragraph specifies (2 usage error, 3 total failure, 4
-// partial) — see main.go's run() for how it is unwrapped. 0 is always a
+// own "Exit codes" paragraph specifies (2 usage error, 3 total failure, 5
+// degraded) — see main.go's run() for how it is unwrapped. 0 is always a
 // nil error; there is no exitCodeError for it.
 package main
 
@@ -30,6 +30,10 @@ func totalFailureErrorf(format string, args ...any) error {
 	return &exitCodeError{code: 3, msg: fmt.Sprintf(format, args...)}
 }
 
+// exitDegraded equals exitcode.Degraded in x/exitcode; the pinned x revision
+// lacks that package, so the value is a literal here.
+const exitDegraded = 5
+
 func partialErrorf(format string, args ...any) error {
-	return &exitCodeError{code: 4, msg: fmt.Sprintf(format, args...)}
+	return &exitCodeError{code: exitDegraded, msg: fmt.Sprintf(format, args...)}
 }

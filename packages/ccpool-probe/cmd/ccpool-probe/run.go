@@ -15,7 +15,7 @@
 //	                 unreachable (neither produced a result); this run
 //	                 writes nothing at all -- no snapshot update, no bd
 //	                 call [design: "Exit codes" paragraph].
-//	4 partial     -- at least one sub-check was attempted and actually
+//	5 partial     -- at least one sub-check was attempted and actually
 //	                 degraded (its ccpool dependency was unreachable for
 //	                 --degraded-threshold CONSECUTIVE runs, the
 //	                 pg-connector dedup query itself failed, a bd write
@@ -40,7 +40,7 @@
 //	                 baseline is rolled back to the previous run's, and the
 //	                 next run derives the finding again.
 //
-// A single ccpool failure is NOT enough for exit 4 (pg2-zzf54): a killed call
+// A single ccpool failure is NOT enough for exit 5 (pg2-zzf54): a killed call
 // is retried once, and a sub-check that still fails is logged to stderr and
 // counted in the snapshot (snapshot.Degraded). Only a sub-check that has
 // failed --degraded-threshold runs in a row degrades the exit code. The
@@ -142,7 +142,7 @@ func defaultRunDeps(backend string) runDeps {
 }
 
 // defaultDegradedThreshold is the --degraded-threshold default: three
-// consecutive degraded runs of the same sub-check before exit 4.
+// consecutive degraded runs of the same sub-check before exit 5.
 const defaultDegradedThreshold = 3
 
 // needsInputKey and zombieDriftKey name a per-pool sub-check in
@@ -221,9 +221,9 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	}
 
 	var findings []finding
-	// degraded holds failures that exit 4 immediately (snapshot persist,
+	// degraded holds failures that exit 5 immediately (snapshot persist,
 	// dedup query). failures holds the per-pool ccpool sub-check failures,
-	// which exit 4 only once their consecutive count reaches the threshold;
+	// which exit 5 only once their consecutive count reaches the threshold;
 	// those that have are collected in persistent.
 	var degraded, persistent []string
 	type subcheckFailure struct{ key, msg string }
@@ -349,7 +349,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		snapSaved = false
 		// A snapshot that cannot be persisted silently disables the drift
 		// and never-prompted checks (every later run sees "no baseline";
-		// pg2-d845f), so it is a degraded sub-check: exit 4 after the
+		// pg2-d845f), so it is a degraded sub-check: exit 5 after the
 		// findings are filed (their bodies carry this note), not merely a
 		// stderr warning nobody reads. Appended BEFORE skippedNote is
 		// computed so the filed bodies mention it.

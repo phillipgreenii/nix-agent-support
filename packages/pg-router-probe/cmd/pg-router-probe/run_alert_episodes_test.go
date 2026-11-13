@@ -232,9 +232,9 @@ func TestFailedRecurrenceCommentIsRetried(t *testing.T) {
 	later := started.Add(time.Hour)
 	spy := episodeSpy(later, "B=5", []connectorIssue{openBead("zr-1")}, nil)
 	spy.commentErr = errUnreachable
-	// A failed write is a partial run (exit 4), not a silent exit 0 (pg2-a7pz9).
-	if err := tick(t, opts, spy, t0); exitCodeOf(t, err) != 4 {
-		t.Fatalf("failed recurrence comment: err = %v, want exit 4", err)
+	// A failed write is a partial run (exit 5), not a silent exit 0 (pg2-a7pz9).
+	if err := tick(t, opts, spy, t0); exitCodeOf(t, err) != 5 {
+		t.Fatalf("failed recurrence comment: err = %v, want exit 5", err)
 	}
 	if len(spy.updated) != 0 {
 		t.Fatalf("metadata must not be bumped when the comment failed: %+v", spy.updated)
@@ -295,7 +295,7 @@ func TestOpenMatchWinsOverClosedMatch(t *testing.T) {
 	}
 }
 
-// A closed-query failure degrades to exit 4 and still files the new bead,
+// A closed-query failure degrades to exit 5 and still files the new bead,
 // without the reference.
 func TestClosedQueryFailureDegradesButStillFilesBead(t *testing.T) {
 	opts := episodeOpts(t)
@@ -311,8 +311,8 @@ func TestClosedQueryFailureDegradesButStillFilesBead(t *testing.T) {
 		return base(ctx, query, warn)
 	}
 	err := runProbe(cmd, opts, deps)
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (degraded), got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (degraded), got %v", err)
 	}
 	if len(spy.created) != 1 {
 		t.Fatalf("the bead must still be filed, got %+v", spy.created)

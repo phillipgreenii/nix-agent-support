@@ -249,8 +249,8 @@ func TestRunProbePartialWhenOneSubcheckFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (partial), got err=%v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (partial), got err=%v", err)
 	}
 	// binary-hash was never configured either, but the run still proceeded
 	// on the queue/backlog reading that DID run (it counts as a sub-check
@@ -319,8 +319,8 @@ func TestRunProbeBacklogFromStatusFailureIsDegraded(t *testing.T) {
 	opts.binaryPath = os.Args[0] // a readable file so one sub-check succeeds
 	spy := &spyDeps{backlogErr: errUnreachable}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (partial), got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (partial), got %v", err)
 	}
 }
 
@@ -659,7 +659,7 @@ func TestReplayPhaseLockedSweepEveryTickDoesNotEscalate(t *testing.T) {
 	}
 }
 
-// A snapshot that cannot be persisted is a degraded run (exit 4), not just a
+// A snapshot that cannot be persisted is a degraded run (exit 5), not just a
 // stderr warning: it silently disables the drift checks (pg2-3gqtw).
 func TestRunProbePersistFailureIsDegraded(t *testing.T) {
 	cmd, stderr := testCmd()
@@ -672,8 +672,8 @@ func TestRunProbePersistFailureIsDegraded(t *testing.T) {
 	opts.backlogFromStatus = true
 	spy := &spyDeps{backlogResult: 3}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (partial) on a persist failure, got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (partial) on a persist failure, got %v", err)
 	}
 	if !strings.Contains(stderr.String(), "failed to persist snapshot") {
 		t.Fatalf("expected the persist warning on stderr, got %q", stderr.String())
@@ -833,8 +833,8 @@ func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
 		}
 	}
 	_, err := runWithGrafanaErr(t, opts, errUnreachable)
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("threshold-th consecutive failure must exit 4, got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("threshold-th consecutive failure must exit 5, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "grafana-alerts") || !strings.Contains(err.Error(), "degraded 3 runs in a row") {
 		t.Fatalf("exit error must name the sub-check and its streak, got %v", err)
@@ -885,8 +885,8 @@ func TestRunProbeDegradedThresholdOneReportsImmediately(t *testing.T) {
 	opts := baseOpts(t)
 	opts.degradedThreshold = 1
 	_, err := runWithGrafanaErr(t, opts, errUnreachable)
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("--degraded-threshold 1 must keep the immediate exit 4, got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("--degraded-threshold 1 must keep the immediate exit 5, got %v", err)
 	}
 }
 
@@ -1022,8 +1022,8 @@ func TestRunProbePersistFailureIgnoresThreshold(t *testing.T) {
 	opts.backlogFromStatus = true
 	cmd, _ := testCmd()
 	spy := &spyDeps{}
-	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected immediate exit 4, got %v", err)
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected immediate exit 5, got %v", err)
 	}
 }
 

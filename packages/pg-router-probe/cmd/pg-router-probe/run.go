@@ -17,7 +17,7 @@
 //	                 of them produced a result); this run writes
 //	                 nothing at all (no bd issue is filed on a
 //	                 total-failure run) [design: "Exit codes" paragraph].
-//	4 partial     -- at least one CONFIGURED sub-check was attempted and
+//	5 partial     -- at least one CONFIGURED sub-check was attempted and
 //	                 actually degraded (its dependency was unreachable for
 //	                 --degraded-threshold CONSECUTIVE runs, or the
 //	                 snapshot/dedup query failed, or a bd create/update/
@@ -28,7 +28,7 @@
 //	                 which sub-check(s) were skipped or degraded [design:
 //	                 same paragraph].
 //
-// A single sub-check failure is NOT enough for exit 4 (pg2-zzf54): a
+// A single sub-check failure is NOT enough for exit 5 (pg2-zzf54): a
 // timed-out Grafana/status call is retried once, and a sub-check that still
 // fails is logged to stderr and counted in the snapshot (snapshot.Degraded).
 // Only a sub-check that has failed --degraded-threshold runs in a row
@@ -39,7 +39,7 @@
 // A failed bd write for a finding (create, metadata update or comment) is
 // immediate too (pg2-a7pz9): pg-router discards a role's stderr on exit 0,
 // so a stderr warning alone loses the escalation this probe exists to file.
-// The run ends through partialErrorf (exit 4). For the edge-triggered
+// The run ends through partialErrorf (exit 5). For the edge-triggered
 // binary-hash finding the persisted baseline additionally stays at the
 // PREVIOUS hash/path when a write for it failed, so the next run derives the
 // finding again instead of comparing the new hash with itself.
@@ -379,7 +379,7 @@ func defaultRunDeps(backend string) runDeps {
 }
 
 // defaultDegradedThreshold is the --degraded-threshold default: three
-// consecutive degraded runs of the same sub-check before exit 4.
+// consecutive degraded runs of the same sub-check before exit 5.
 const defaultDegradedThreshold = 3
 
 // Sub-check keys in snapshot.Degraded.
@@ -446,7 +446,7 @@ never closes beads; close one once its alert clears after remediation.`,
 	cmd.Flags().StringVar(&opts.binaryPath, "binary-path", "", "path to the daemon/handler binary to hash; unset skips the binary hash sanity sub-check")
 	cmd.Flags().StringVar(&opts.deployRecordPath, "deploy-record-file", "", "optional file of known-expected binary hashes, one per line")
 	cmd.Flags().StringVar(&opts.dedupQuery, "dedup-query", opts.dedupQuery, "named pg-connector query listing every non-closed escalated bead (open, in_progress, blocked, deferred, human-labeled) for the dedup check; MUST NOT be the ready-only triager dispatch query")
-	cmd.Flags().StringVar(&opts.closedDedupQuery, "closed-dedup-query", opts.closedDedupQuery, "named pg-connector query listing recently CLOSED escalated beads; a new bead for a re-firing alert whose only match is closed references the newest one. Unset disables the lookup; a failing query degrades the run (exit 4) but the bead is still filed")
+	cmd.Flags().StringVar(&opts.closedDedupQuery, "closed-dedup-query", opts.closedDedupQuery, "named pg-connector query listing recently CLOSED escalated beads; a new bead for a re-firing alert whose only match is closed references the newest one. Unset disables the lookup; a failing query degrades the run (exit 5) but the bead is still filed")
 	cmd.Flags().DurationVar(&opts.stillFiringInterval, "still-firing-interval", opts.stillFiringInterval, "minimum time between still-firing comments on an open bead for an alert that has not changed episode")
 	cmd.Flags().StringVar(&opts.connectorBackend, "connector-backend", opts.connectorBackend, "pg-connector backend instance name passed as --backend on every pg-connector call (a suffixed registration of the beads backend, e.g. pg-connector-issue-beads-zr, once the unsuffixed one is dropped)")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
@@ -505,7 +505,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 
 	var findings []finding
 	var skipped []string
-	// degraded holds failures that exit 4 immediately (snapshot persist,
+	// degraded holds failures that exit 5 immediately (snapshot persist,
 	// dedup query) plus, once counted below, sub-check failures that reached
 	// the consecutive threshold. failures are this run's sub-check failures
 	// still to be counted against the threshold.
@@ -650,7 +650,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		persistFailed = true
 		// A snapshot that cannot be persisted silently disables the drift
 		// checks (every later run sees "no baseline"; pg2-3gqtw), so this
-		// is a degraded sub-check -- exit 4 after the run's findings are
+		// is a degraded sub-check -- exit 5 after the run's findings are
 		// filed -- not merely a stderr warning nobody reads.
 		warn(fmt.Sprintf("failed to persist snapshot: %v", err))
 		degraded = append(degraded, fmt.Sprintf("snapshot-persist: %v", err))
@@ -685,7 +685,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 
 		// Closed predecessors are looked up lazily, at most once, and only
 		// when some finding is about to create a bead. A failure degrades
-		// the run (exit 4) but never blocks the create: the bead is filed
+		// the run (exit 5) but never blocks the create: the bead is filed
 		// without the reference.
 		var closed []connectorIssue
 		closedLoaded := false
@@ -717,7 +717,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		// baseline so the next run re-derives the finding.
 		holdBinaryBaseline := false
 		// writeFailed records a failed bd write for f: warn, degrade the
-		// run (exit 4), and hold the binary-hash baseline if f is that
+		// run (exit 5), and hold the binary-hash baseline if f is that
 		// finding.
 		writeFailed := func(f finding, msg string, err error) {
 			warn(fmt.Sprintf("%s: %v", msg, err))

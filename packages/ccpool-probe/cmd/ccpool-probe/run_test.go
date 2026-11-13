@@ -298,8 +298,8 @@ func TestRunProbePartialWhenNeedsInputSubcheckDegrades(t *testing.T) {
 		allPoolRows:   []ccpoolSessionRow{{ExternalID: "s1", State: "working"}, {ExternalID: "s2", State: "working"}},
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (partial), got err=%v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (partial), got err=%v", err)
 	}
 	if len(spy.created) != 1 {
 		t.Fatalf("expected the zombie-drift sub-check to still produce a finding, got %d", len(spy.created))
@@ -317,8 +317,8 @@ func TestRunProbeDedupQueryFailureIsPartial(t *testing.T) {
 		listEscalatedErr: errConnectorFailed,
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (partial), got err=%v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (partial), got err=%v", err)
 	}
 	if len(spy.created) != 0 {
 		t.Fatalf("expected no create when the dedup query itself fails")
@@ -425,7 +425,7 @@ func TestRunProbeNeverPromptedNeedsTwoConsecutiveRuns(t *testing.T) {
 }
 
 // TestRunProbeFailedPoolKeepsReadyClockAndBaseline: one pool's listing
-// failing makes the run partial (exit 4), must not reset that pool's
+// failing makes the run partial (exit 5), must not reset that pool's
 // never-prompted clock, and must not overwrite the zombie baseline with a
 // partial sum.
 func TestRunProbeFailedPoolKeepsReadyClockAndBaseline(t *testing.T) {
@@ -453,8 +453,8 @@ func TestRunProbeFailedPoolKeepsReadyClockAndBaseline(t *testing.T) {
 	// failure is reported; threshold 1 makes the first failure report.
 	opts.degradedThreshold = 1
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (partial), got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (partial), got %v", err)
 	}
 	if len(spy.created) != 0 {
 		t.Fatalf("drift must be skipped when any pool's list failed, got findings: %+v", spy.created)
@@ -585,7 +585,7 @@ func TestRunProbeDeadRowsAreNotZombiesAndNotStuck(t *testing.T) {
 // TestRunProbeSnapshotSaveFailureIsPartialButStillFiles forces the write
 // error portably by making the snapshot's parent a regular file. The run
 // must still file its findings (bodies carry the degraded note), print the
-// persist failure on stderr, and exit 4 -- the handler discards stderr on
+// persist failure on stderr, and exit 5 -- the handler discards stderr on
 // exit 0, so a swallowed warning is invisible (pg2-d845f).
 func TestRunProbeSnapshotSaveFailureIsPartialButStillFiles(t *testing.T) {
 	cmd, stderr := testCmd()
@@ -599,8 +599,8 @@ func TestRunProbeSnapshotSaveFailureIsPartialButStillFiles(t *testing.T) {
 		needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", Name: "worker", State: "needs_input", Live: true}},
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected exit 4 (partial) on snapshot save failure, got err=%v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected exit 5 (partial) on snapshot save failure, got err=%v", err)
 	}
 	wantStderr := "ccpool-probe: failed to persist snapshot " + opts.snapshotPath + ": "
 	if !strings.Contains(stderr.String(), wantStderr) {
@@ -651,8 +651,8 @@ func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
 	}
 
 	_, err := degradedRun(t, opts, errCcpoolFailed)
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("threshold-th consecutive failure must exit 4, got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("threshold-th consecutive failure must exit 5, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "degraded 3 runs in a row") || !strings.Contains(err.Error(), key) {
 		t.Fatalf("exit error must name the sub-check and its streak, got %v", err)
@@ -687,8 +687,8 @@ func TestRunProbeDegradedThresholdOneReportsImmediately(t *testing.T) {
 	opts := baseOpts(t)
 	opts.degradedThreshold = 1
 	_, err := degradedRun(t, opts, errCcpoolFailed)
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("--degraded-threshold 1 must keep the old immediate exit 4, got %v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("--degraded-threshold 1 must keep the old immediate exit 5, got %v", err)
 	}
 }
 
@@ -803,8 +803,8 @@ func TestRunProbeSnapshotPersistFailureIgnoresThreshold(t *testing.T) {
 	opts.snapshotPath = filepath.Join(blocker, "snapshot.json")
 	cmd, _ := testCmd()
 	spy := &spyDeps{}
-	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); exitCodeOf(t, err) != 4 {
-		t.Fatalf("expected immediate exit 4, got %v", err)
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); exitCodeOf(t, err) != 5 {
+		t.Fatalf("expected immediate exit 5, got %v", err)
 	}
 }
 

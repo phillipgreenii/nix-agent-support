@@ -460,7 +460,7 @@ to reconsider isolating it.
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Probe's external call hangs                             | Probe MUST own an explicit timeout on every external call; no pg-router watchdog exists for command-type roles                                         |
 | Probe's `tick-item` command fails                       | Now alerted via the new `pg-router-source-failure-rate` rule                                                                                           |
-| Probe partial failure (one sub-check down)              | Exit `4`, proceed with what succeeded, note the gap in any resulting bead                                                                              |
+| Probe partial failure (one sub-check down)              | Exit `5`, proceed with what succeeded, note the gap in any resulting bead                                                                              |
 | Probe total failure                                     | Exit `3`, write nothing                                                                                                                                |
 | `pg-connector` call fails (create/update/comment/close) | Probe/triager logs and does not retry indefinitely; a persistent failure here would itself eventually be visible as a repeat finding on the next cycle |
 | Triager dispatch fails                                  | `onDispatchFail = "leave"`; `onFailure = "add-human"` (mirrors `worker`/`review`)                                                                      |

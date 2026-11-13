@@ -11,7 +11,7 @@
 // subcommand list].
 //
 // Like pg-router-probe, this binary needs the distinct exit-code scheme (0
-// clean / 2 usage error / 3 total failure / 4 partial), not the generic
+// clean / 2 usage error / 3 total failure / 5 partial), not the generic
 // 0/1 cobra-failure split most sibling adapters use — see exitcode.go's
 // exitCodeError and this file's run().
 package main
@@ -52,7 +52,7 @@ func newRootCmd() *cobra.Command {
 //
 // Exit-code mapping: nil error -> 0. An *exitCodeError (returned only by
 // this binary's own RunE bodies, via runProbe) carries its own explicit
-// code (2/3/4) and, if non-empty, a message printed to stderr before
+// code (2/3/5) and, if non-empty, a message printed to stderr before
 // returning it. Any OTHER error reaching here is a cobra-level failure
 // that never even called RunE — a missing required flag, a bad arg count,
 // an unrecognized flag — which is definitionally a usage error, so it maps

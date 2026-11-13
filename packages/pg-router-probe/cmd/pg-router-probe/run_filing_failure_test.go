@@ -8,7 +8,7 @@ import (
 )
 
 // Subject: a failed bd write for a finding (create, metadata update, comment)
-// ends the run through the partial contract (exit 4) instead of a stderr
+// ends the run through the partial contract (exit 5) instead of a stderr
 // warning plus exit 0, and a failed binary-hash write keeps the snapshot
 // baseline at the previous hash so the finding is derived again (pg2-a7pz9).
 
@@ -44,7 +44,7 @@ func TestFailedBinaryHashCreateIsPartialAndRetriedNextRun(t *testing.T) {
 	failing := &spyDeps{createErr: errBdWrite}
 	cmd, _ := testCmd()
 	err := runProbe(cmd, opts, failing.toRunDeps(time.Now()))
-	if got := exitCodeOf(t, err); got != 4 {
+	if got := exitCodeOf(t, err); got != 5 {
 		t.Fatalf("failed create: exit %d (err=%v), want 4", got, err)
 	}
 	if len(failing.created) != 1 {
@@ -78,7 +78,7 @@ func TestFailedBinaryHashCreateIsPartialAndRetriedNextRun(t *testing.T) {
 }
 
 // An open bead whose recorded hash differs gets an update + comment
-// (actionUpdate); either write failing is exit 4 and holds the baseline.
+// (actionUpdate); either write failing is exit 5 and holds the baseline.
 func TestFailedBinaryHashUpdateWritesArePartial(t *testing.T) {
 	cases := []struct {
 		name string
@@ -98,7 +98,7 @@ func TestFailedBinaryHashUpdateWritesArePartial(t *testing.T) {
 			}}
 			cmd, _ := testCmd()
 			err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-			if got := exitCodeOf(t, err); got != 4 {
+			if got := exitCodeOf(t, err); got != 5 {
 				t.Fatalf("exit %d (err=%v), want 4", got, err)
 			}
 			if len(spy.updated) != 1 || len(spy.commented) != 1 {
@@ -112,7 +112,7 @@ func TestFailedBinaryHashUpdateWritesArePartial(t *testing.T) {
 	}
 }
 
-// A failed create for a Grafana finding is exit 4 too (it is retried anyway,
+// A failed create for a Grafana finding is exit 5 too (it is retried anyway,
 // since no episode is recorded).
 func TestFailedGrafanaCreateIsPartial(t *testing.T) {
 	opts := episodeOpts(t)
@@ -120,7 +120,7 @@ func TestFailedGrafanaCreateIsPartial(t *testing.T) {
 	spy := episodeSpy(started, "B=5", nil, nil)
 	spy.createErr = errBdWrite
 	err := tick(t, opts, spy, t0)
-	if got := exitCodeOf(t, err); got != 4 {
+	if got := exitCodeOf(t, err); got != 5 {
 		t.Fatalf("exit %d (err=%v), want 4", got, err)
 	}
 }

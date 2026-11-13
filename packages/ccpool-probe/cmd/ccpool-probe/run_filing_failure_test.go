@@ -7,7 +7,7 @@ import (
 )
 
 // A bd write that fails for a finding means the finding was not filed, so
-// the run must exit 4 (the handler discards stderr on exit 0), and the
+// the run must exit 5 (the handler discards stderr on exit 0), and the
 // edge-triggered zombie-drift finding must be derived again next run.
 
 var (
@@ -44,8 +44,8 @@ func TestRunProbeZombieDriftCreateFailureIsPartialAndRederivedNextRun(t *testing
 	cmd2, stderr2 := testCmd()
 	spy2 := &spyDeps{allPoolRows: twoZombies, createErr: errConnectorFailed}
 	err := runProbe(cmd2, opts, spy2.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("failed create must exit 4 (partial), got err=%v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("failed create must exit 5 (partial), got err=%v", err)
 	}
 	if !strings.Contains(err.Error(), "create bd issue for zombie-count:+100%") {
 		t.Fatalf("exit error must name the failed create, got %v", err)
@@ -91,8 +91,8 @@ func TestRunProbeZombieDriftDedupQueryFailureKeepsBaseline(t *testing.T) {
 
 	cmd2, _ := testCmd()
 	spy2 := &spyDeps{allPoolRows: twoZombies, listEscalatedErr: errConnectorFailed}
-	if exitCodeOf(t, runProbe(cmd2, opts, spy2.toRunDeps(time.Now()))) != 4 {
-		t.Fatalf("dedup query failure must exit 4")
+	if exitCodeOf(t, runProbe(cmd2, opts, spy2.toRunDeps(time.Now()))) != 5 {
+		t.Fatalf("dedup query failure must exit 5")
 	}
 
 	cmd3, _ := testCmd()
@@ -114,8 +114,8 @@ func TestRunProbeUpdateMetadataFailureIsPartial(t *testing.T) {
 		updateErr:           errConnectorFailed,
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("failed metadata update must exit 4 (partial), got err=%v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("failed metadata update must exit 5 (partial), got err=%v", err)
 	}
 	if !strings.Contains(err.Error(), "update bd issue zr-1 for needs-input:sess-1") {
 		t.Fatalf("exit error must name the failed update, got %v", err)
@@ -137,8 +137,8 @@ func TestRunProbeCommentFailureIsPartial(t *testing.T) {
 		commentErr:          errConnectorFailed,
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
-	if exitCodeOf(t, err) != 4 {
-		t.Fatalf("failed comment must exit 4 (partial), got err=%v", err)
+	if exitCodeOf(t, err) != 5 {
+		t.Fatalf("failed comment must exit 5 (partial), got err=%v", err)
 	}
 	if !strings.Contains(err.Error(), "comment on bd issue zr-1 for needs-input:sess-1") {
 		t.Fatalf("exit error must name the failed comment, got %v", err)
