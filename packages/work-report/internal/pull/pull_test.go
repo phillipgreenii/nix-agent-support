@@ -527,7 +527,7 @@ func holdWriteLock(t *testing.T, path string) {
 func TestLockedStoreDegradesTheWholePull(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.db")
-	st, err := store.Open(path)
+	st, err := store.Open(path, store.WithBusyTimeout(100*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestLockedStoreDegradesTheWholePull(t *testing.T) {
 
 	deps := pull.Deps{Cfg: config.Config{}, Store: st, Conn: pgconn.NewExec(), Log: telemetry.New(filepath.Join(dir, "state"))}
 	fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
-	res, err := pull.Run(context.Background(), deps, pull.Opts{Range: rng, Now: now}) // waits out the store's busy timeout
+	res, err := pull.Run(context.Background(), deps, pull.Opts{Range: rng, Now: now}) // waits out the (shortened) busy timeout
 	if err != nil {
 		t.Fatal(err)
 	}

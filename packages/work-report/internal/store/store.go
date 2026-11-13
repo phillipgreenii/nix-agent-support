@@ -104,17 +104,30 @@ type Store struct {
 	path string
 }
 
+// Option adjusts Open. It exists so a caller (a test of lock handling) can
+// shorten the busy timeout without waiting out the production five seconds.
+type Option func(busyMillis *int)
+
+// WithBusyTimeout sets the SQLite busy_timeout Open applies.
+func WithBusyTimeout(d time.Duration) Option {
+	return func(busyMillis *int) { *busyMillis = int(d.Milliseconds()) }
+}
+
 // Open opens (creating if absent, with its parent directories) the SQLite
 // database at path, enables WAL, sets a busy timeout and applies the
 // migration ladder. A busy database surfaces as ErrLocked.
-func Open(path string) (*Store, error) {
+func Open(path string, opts ...Option) (*Store, error) {
+	busy := busyTimeoutMillis
+	for _, o := range opts {
+		o(&busy)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("store: create dir for %s: %w", path, err)
 	}
 	// _txlock=immediate makes every transaction take the write lock at BEGIN,
 	// so the busy timeout (not a mid-transaction SQLITE_BUSY) governs waits.
 	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
-		path, busyTimeoutMillis)
+		path, busy)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
