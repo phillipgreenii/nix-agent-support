@@ -19215,6 +19215,92 @@
                   touch $out
                 '';
 
+              # pgd opt-in e2e and multi-process checks. Operator standard V-4 applies: both
+              # spawn real claude processes, so neither is in the unit gate (test-pgd-mod skips
+              # *.multiprocess.test.ts) nor in any commit or pre-land hook; each runs only when
+              # built by name: `nix build .#checks.<system>.test-pgd-links-e2e` (or
+              # `.test-pgd-multiprocess`). The real claude binary talks to a local stub Messages
+              # API server (scripts/pgd-stub-messages-server.mjs) on 127.0.0.1, so no credential
+              # and no outside network is involved.
+              test-pgd-links-e2e =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace/pgd
+                      ./scripts/run-pgd-links-e2e.sh
+                      ./scripts/pgd-stub-messages-server.mjs
+                    ];
+                  };
+                  claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+                in
+                pkgs.runCommand "test-pgd-links-e2e"
+                  {
+                    nativeBuildInputs = [
+                      claude
+                      pkgs.nodejs
+                      pkgs.tmux
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.gawk
+                      pkgs.procps
+                      pkgs.bash
+                    ];
+                    __darwinAllowLocalNetworking = true;
+                  }
+                  ''
+                    set -euo pipefail
+                    export HOME="$TMPDIR/home" TMUX_TMPDIR="$TMPDIR"
+                    mkdir -p "$HOME"
+                    PGD_E2E=1 bash ${src}/scripts/run-pgd-links-e2e.sh
+                    touch $out
+                  '';
+
+              test-pgd-multiprocess =
+                let
+                  src = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace/pgd
+                      ./scripts/run-pgd-multiprocess-check.sh
+                      ./scripts/pgd-stub-messages-server.mjs
+                    ];
+                  };
+                  claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+                in
+                pkgs.runCommand "test-pgd-multiprocess"
+                  {
+                    nativeBuildInputs = [
+                      claude
+                      pkgs.nodejs
+                      pkgs.coreutils
+                      pkgs.gnused
+                      pkgs.bash
+                    ];
+                    __darwinAllowLocalNetworking = true;
+                  }
+                  ''
+                    set -euo pipefail
+                    export HOME="$TMPDIR/home"
+                    mkdir -p "$HOME"
+                    node ${src}/scripts/pgd-stub-messages-server.mjs >stub.out 2>stub.err &
+                    stub=$!
+                    trap 'kill $stub 2>/dev/null || true' EXIT
+                    port=""
+                    for _ in $(seq 1 50); do
+                      port="$(sed -n 's/^PORT //p' stub.out)"
+                      [ -n "$port" ] && break
+                      sleep 0.2
+                    done
+                    [ -n "$port" ] || { echo "FAIL: stub did not start" >&2; cat stub.err >&2; exit 1; }
+                    export ANTHROPIC_BASE_URL="http://127.0.0.1:$port" ANTHROPIC_API_KEY=sk-ant-pgd-mp-stub-key-0001
+                    export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+                    export CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1
+                    PGD_MULTIPROCESS=1 bash ${src}/scripts/run-pgd-multiprocess-check.sh
+                    touch $out
+                  '';
+
               # pg2-klusl: every `*-go-tests` check goes through the load-bounded mkGoTest
               # wrapper in the overlay (`loadBoundedMkGoTest`). Pure eval guard that the
               # wrapper's bounds are really on a built check and are additive to the

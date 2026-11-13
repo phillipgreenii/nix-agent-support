@@ -512,3 +512,19 @@ Each is covered by a test in `hooks/focus-pane.test.ts`.
 | Open action id       | `open:<contribution id>`. It runs from the button press, never from a draw, and re-reads the item so a removed item opens nothing.                                        |
 | What open does       | Runs `open <url>` (macOS), then `xdg-open <url>` if that fails, through `host.process.run`; only `http` and `https` urls are opened.                                      |
 | Empty state          | One row with an empty kind and the text `Nothing tracked for this session.`                                                                                               |
+
+## Opt-in end-to-end and multi-process checks
+
+Two suites spawn real `claude` processes, so they are not in the unit gate (`test-pgd-mod`) and not in any
+commit or pre-land hook (V-4). Each has its own named nix check, built only on request. Both talk to a local stub
+Messages API server (`scripts/pgd-stub-messages-server.mjs`) on 127.0.0.1, so no credential or outside network is
+needed:
+
+- `test-pgd-links-e2e` runs `scripts/run-pgd-links-e2e.sh` (`PGD_E2E=1`): the real `claude` in a private tmux with the
+  mod loaded, asserting the OSC 8 transcript links.
+- `test-pgd-multiprocess` runs `scripts/run-pgd-multiprocess-check.sh` (`PGD_MULTIPROCESS=1`): several headless
+  `claude -p` sessions sharing `$.store`.
+
+Run one with `nix build .#checks.<system>.test-pgd-links-e2e -L` (or `.test-pgd-multiprocess`), in the background.
+By hand, set the switch and run the script (the e2e needs `tmux`, `node` and `claude` on PATH; the multi-process one
+needs `claude` and credentials).

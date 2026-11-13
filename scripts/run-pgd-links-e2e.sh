@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Opt-in end-to-end test of the pgd transcript links with the real Claude Code binary.
 #
-# NOT a flake check and NOT a commit or pre-land hook: a check runs in a sandbox with no tmux, no
-# claude binary and no network, and this run starts a real terminal UI. It runs only when
-# PGD_E2E=1 is set; without it the script prints a SKIP line and exits 0. Run it by hand:
+# Opt-in (operator standard V-4): NOT a commit or pre-land hook; it has its own named nix check,
+# test-pgd-links-e2e. It runs only when PGD_E2E=1 is set; without it the script prints a SKIP line
+# and exits 0. Run it by hand:
 #
 #   PGD_E2E=1 scripts/run-pgd-links-e2e.sh
 #
@@ -96,45 +96,12 @@ mkdir -p "$scratch/home" "$scratch/cfg" "$scratch/work"
 # The engine writes a tsconfig.json into a plugin directory it loads, so load a scratch copy and
 # leave the repository untouched.
 cp -R "$plugin_dir" "$scratch/plugin"
+chmod -R u+w "$scratch/plugin" # a copy of read-only (nix store) files must stay removable
 plugin_dir="$scratch/plugin"
 
 # The stub: every POST /v1/messages answers the fixed reply (streamed or not).
-cat >"$scratch/stub.mjs" <<'JS'
-import http from 'node:http'
-import fs from 'node:fs'
-const text = fs.readFileSync(process.argv[2], 'utf8')
-const srv = http.createServer((req, res) => {
-  let body = ''
-  req.on('data', c => (body += c))
-  req.on('end', () => {
-    if (req.url.startsWith('/v1/messages/count_tokens')) {
-      res.setHeader('content-type', 'application/json')
-      return res.end('{"input_tokens":10}')
-    }
-    if (!req.url.startsWith('/v1/messages')) {
-      res.statusCode = 404
-      return res.end('{}')
-    }
-    let stream = false
-    try { stream = JSON.parse(body).stream } catch {}
-    const msg = { id: 'msg_stub', type: 'message', role: 'assistant', model: 'claude-stub', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } }
-    if (!stream) {
-      res.setHeader('content-type', 'application/json')
-      return res.end(JSON.stringify({ ...msg, content: [{ type: 'text', text }], stop_reason: 'end_turn' }))
-    }
-    res.writeHead(200, { 'content-type': 'text/event-stream' })
-    const ev = (n, d) => res.write(`event: ${n}\ndata: ${JSON.stringify({ type: n, ...d })}\n\n`)
-    ev('message_start', { message: msg })
-    ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } })
-    ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } })
-    ev('content_block_stop', { index: 0 })
-    ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 20 } })
-    ev('message_stop', {})
-    res.end()
-  })
-})
-srv.listen(0, '127.0.0.1', () => console.log('PORT ' + srv.address().port))
-JS
+#   (the server lives in scripts/pgd-stub-messages-server.mjs, shared with the multi-process check)
+cp "$here/pgd-stub-messages-server.mjs" "$scratch/stub.mjs"
 
 cat >"$scratch/reply.txt" <<'TXT'
 Matched: acme/widgets#5 and ABC-123 and src/main.go:42 and REQ-77.
