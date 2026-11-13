@@ -24,26 +24,37 @@ import (
 // ancestor walks (the `.git` search and the workspace-marker search), which
 // were the next-largest source of per-Evaluate stat calls.
 var realPathMemo struct {
-	mu     sync.Mutex
-	m      map[string]string // nil while the memo is off
-	exists map[string]bool
+	mu      sync.Mutex
+	m       map[string]string // nil while the memo is off
+	exists  map[string]bool
+	holders int // number of live MemoizeRealPaths holders
 }
 
-// MemoizeRealPaths turns the realpath and existence memos on (with empty
-// tables) and returns a function that turns them off and drops the tables. The
-// caller MUST guarantee that the filesystem it resolves against does not
-// change while the memo is on. It is a test seam; it is not safe to nest or to
-// overlap with another holder.
+// MemoizeRealPaths turns the realpath and existence memos on and returns a
+// function that releases the caller's hold. Holds nest (a package-wide TestMain
+// hold plus a test's own): the tables are created, empty, by the first holder
+// and dropped when the last holder restores. The caller MUST guarantee that
+// the filesystem it resolves against does not change while the memo is on. It
+// is a test seam.
 func MemoizeRealPaths() (restore func()) {
 	realPathMemo.mu.Lock()
-	realPathMemo.m = map[string]string{}
-	realPathMemo.exists = map[string]bool{}
+	if realPathMemo.holders == 0 {
+		realPathMemo.m = map[string]string{}
+		realPathMemo.exists = map[string]bool{}
+	}
+	realPathMemo.holders++
 	realPathMemo.mu.Unlock()
+	var once sync.Once
 	return func() {
-		realPathMemo.mu.Lock()
-		realPathMemo.m = nil
-		realPathMemo.exists = nil
-		realPathMemo.mu.Unlock()
+		once.Do(func() {
+			realPathMemo.mu.Lock()
+			realPathMemo.holders--
+			if realPathMemo.holders == 0 {
+				realPathMemo.m = nil
+				realPathMemo.exists = nil
+			}
+			realPathMemo.mu.Unlock()
+		})
 	}
 }
 

@@ -56,7 +56,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "patheval TestMain: "+err.Error())
 		os.Exit(1)
 	}
+	suiteMemo.hold()
 	code := m.Run()
+	suiteMemo.release()
 	restore()
 	os.Exit(code)
 }
@@ -152,4 +154,26 @@ func underTmpRoot(path string) bool {
 		}
 	}
 	return false
+}
+
+// suiteMemo is the test binary's hold on MemoizeRealPaths: resolving the
+// reference paths with lstat chains on every New is blocking filesystem
+// latency, not CPU, and dominated the package's wall time under host load.
+// Fixtures live under per-test t.TempDir() paths, so sharing the memo across
+// tests is safe. Tests that assert memo-off behaviour call suspend.
+var suiteMemo suiteMemoHold
+
+type suiteMemoHold struct{ restore func() }
+
+func (h *suiteMemoHold) hold() { h.restore = MemoizeRealPaths() }
+
+func (h *suiteMemoHold) release() { h.restore() }
+
+// suspend drops the suite hold for the rest of the test and re-takes it on
+// cleanup. Tests are not parallel in this package, so no other test observes
+// the gap.
+func (h *suiteMemoHold) suspend(t *testing.T) {
+	t.Helper()
+	h.release()
+	t.Cleanup(h.hold)
 }

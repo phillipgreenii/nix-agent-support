@@ -99,6 +99,7 @@ func touch(t *testing.T, root string, files ...string) {
 // Deletable (and everything inside them); src/ is Silent; without the
 // marker the same relative paths are Silent.
 func TestGradleKind(t *testing.T) {
+	suiteMemo.suspend(t) // removes and re-adds a marker mid-test
 	clearZoneEnv(t)
 	root := scratchOutsideTemp(t)
 	mkdirs(t, root, "build/classes", ".gradle/caches", "src/main")

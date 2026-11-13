@@ -9,6 +9,7 @@ import (
 // The memo is opt-in: with it off, a changed filesystem is seen at once; with
 // it on, the first answer is served until restore (pg2-1w4c4n).
 func TestMemoizeRealPaths_OffByDefaultAndScopedToRestore(t *testing.T) {
+	suiteMemo.suspend(t) // asserts memo-off behaviour
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +59,7 @@ func TestMemoizeRealPaths_OffByDefaultAndScopedToRestore(t *testing.T) {
 }
 
 func TestExists_MemoizedOnlyWhileOn(t *testing.T) {
+	suiteMemo.suspend(t) // asserts memo-off behaviour
 	dir := t.TempDir()
 	p := filepath.Join(dir, "marker")
 	if Exists(p) {
