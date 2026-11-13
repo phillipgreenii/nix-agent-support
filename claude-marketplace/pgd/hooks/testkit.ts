@@ -53,7 +53,7 @@ export interface StubHost {
   host: any
   calls: string[]
   files: Map<string, string>
-  state: { cwd: string; model: string; id: string; stateHome?: string; awsProfile?: string; awsConfigFile?: string; claudeConfigDir?: string }
+  state: { cwd: string; model: string; id: string; stateHome?: string; awsProfile?: string; awsConfigFile?: string; ssoSession?: string; ssoCacheDir?: string; claudeConfigDir?: string }
   // Every fs.write as { path, text }, in order.
   writes: Array<{ path: string; text: string }>
   // Every env.set closure call as { name, value }, in order; set envSetFail to make them throw.
@@ -170,6 +170,8 @@ export function stubHost(files: Record<string, string> = {}): StubHost {
         return state.awsProfile
       },
       awsConfigFile: async () => state.awsConfigFile,
+      ssoSession: async () => state.ssoSession,
+      ssoCacheDir: async () => state.ssoCacheDir,
       setAwsProfile: async (v: string) => setEnv('AWS_PROFILE', v),
       setAwsRegion: async (v: string) => setEnv('AWS_REGION', v),
       setAwsDefaultRegion: async (v: string) => setEnv('AWS_DEFAULT_REGION', v),

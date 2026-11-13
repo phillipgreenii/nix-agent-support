@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 import { bandHook, bandLabels, clearBandButtons } from './band'
 import { registerComponents } from './components'
-import { assumeLevel, assumeSpec, parseAwsConfig, parseExpiration, setAssumeClock } from './assume'
+import { assumeLevel, assumeSpec, parseAwsConfig, parseSsoLogin, setAssumeClock, sha1Hex } from './assume'
 import { alertRow, resetAlertState } from './alerts'
 import { pressAction, resetModals } from './modal'
 import { setOptions } from './options'
@@ -117,13 +117,20 @@ const CONFIG = [
 ].join('\n')
 const CONFIG_PATH = '/cfg/aws-config'
 
-async function modalWorld(profile?: string, options = only, config = CONFIG) {
+// The token cache file of the default sso-session (zip) under the stub's home, as the CLI names it.
+const CACHE_FILE = `/home/u/.aws/sso/cache/${sha1Hex('zip')}.json`
+const FAR = '2999-01-01T00:00:00Z'
+const SECRET = 'SECRET-TOKEN-VALUE-do-not-leak'
+const HEALTHY = { expiresAt: FAR, accessToken: SECRET, refreshToken: SECRET }
+const cacheFile = (o: Record<string, unknown>) => JSON.stringify(o)
+
+async function modalWorld(profile?: string, options = only, config = CONFIG, files: Record<string, string> = {}) {
   resetModals()
   resetAlertState()
   clearBandButtons()
   const clock = fakeClock()
   setAssumeClock(clock.now)
-  const sh = stubHost({ [CONFIG_PATH]: config })
+  const sh = stubHost({ [CONFIG_PATH]: config, [CACHE_FILE]: cacheFile(HEALTHY), ...files })
   sh.state.awsProfile = profile
   sh.state.awsConfigFile = CONFIG_PATH
   initSources(sh.host, clock)
@@ -139,9 +146,6 @@ const actionIds = (): string[] => {
   return [...spec.items.flatMap(i => (i.action ? [i.action.id] : [])), ...spec.actions.map(a => a.id)]
 }
 
-const credentials = (expiration: string) =>
-  JSON.stringify({ Version: 1, AccessKeyId: 'AKIAEXAMPLE', Expiration: expiration, SecretAccessKey: 'x', SessionToken: 'y' })
-
 test('parseAwsConfig keeps default and profile sections and their region, nothing else', () => {
   expect(parseAwsConfig(CONFIG)).toEqual({
     roles: ['default', 'example-dev', 'example-prod'],
@@ -150,11 +154,41 @@ test('parseAwsConfig keeps default and profile sections and their region, nothin
   expect(parseAwsConfig('')).toEqual({ roles: [], regions: {} })
 })
 
-test('parseExpiration reads only a valid Expiration field', () => {
-  expect(parseExpiration(credentials('2026-11-09T23:11:19-05:00'))).toBe(Date.parse('2026-11-09T23:11:19-05:00'))
-  expect(parseExpiration('{}')).toBe(undefined)
-  expect(parseExpiration('not json')).toBe(undefined)
-  expect(parseExpiration('{"Expiration":"soon"}')).toBe(undefined)
+test('sha1Hex matches the digest the CLI uses to name the cache file', () => {
+  expect(sha1Hex('zip')).toBe('f13e27693c85aed522df8c3fcb0bb0110ca54e14')
+  expect(sha1Hex('')).toBe('da39a3ee5e6b4b0d3255bfef95601890afd80709')
+  expect(sha1Hex('a'.repeat(100))).toBe('7f9000257a4918d7072655ea468540cdcbd42e0c')
+})
+
+const NOW = Date.parse('2026-11-12T12:00:00Z')
+
+test('parseSsoLogin: healthy refreshable session is valid', () => {
+  expect(parseSsoLogin(cacheFile({ ...HEALTHY, expiresAt: '2026-11-12T12:30:00Z' }), NOW)).toBe('valid')
+})
+
+test('parseSsoLogin: expired access token with no refresh token is expired-unrefreshable', () => {
+  expect(parseSsoLogin(cacheFile({ expiresAt: '2026-11-12T11:00:00Z', accessToken: SECRET }), NOW)).toBe('expired-unrefreshable')
+  expect(parseSsoLogin(cacheFile({ expiresAt: '2026-11-12T11:00:00Z', accessToken: SECRET, refreshToken: '' }), NOW)).toBe('expired-unrefreshable')
+})
+
+test('parseSsoLogin: access token expired but refreshable is expired-refreshable', () => {
+  expect(parseSsoLogin(cacheFile({ ...HEALTHY, expiresAt: '2026-11-12T11:00:00Z' }), NOW)).toBe('expired-refreshable')
+})
+
+test('parseSsoLogin: a valid access token without a refresh token is still valid (the sensor reads it so)', () => {
+  expect(parseSsoLogin(cacheFile({ expiresAt: '2026-11-12T12:30:00Z', accessToken: SECRET }), NOW)).toBe('valid')
+})
+
+test('parseSsoLogin: unparseable text, missing expiresAt or accessToken, a bad date are missing', () => {
+  expect(parseSsoLogin('not json', NOW)).toBe('missing')
+  expect(parseSsoLogin('{}', NOW)).toBe('missing')
+  expect(parseSsoLogin(cacheFile({ accessToken: SECRET }), NOW)).toBe('missing')
+  expect(parseSsoLogin(cacheFile({ expiresAt: '2026-11-12T12:30:00Z' }), NOW)).toBe('missing')
+  expect(parseSsoLogin(cacheFile({ expiresAt: 'soon', accessToken: SECRET }), NOW)).toBe('missing')
+})
+
+test('parseSsoLogin reads a timezone-less expiresAt as UTC, like the sensor', () => {
+  expect(parseSsoLogin(cacheFile({ ...HEALTHY, expiresAt: '2026-11-12T12:30:00' }), NOW)).toBe('valid')
 })
 
 test('the button now opens the assume modal, and the label and level are unchanged', async () => {
@@ -199,10 +233,6 @@ test('choosing a role marks it current in the modal', async () => {
 
 test('Apply sets exactly the four names, with the profile region, and never runs assume', async () => {
   const { sh } = await modalWorld()
-  sh.host.process.run = async (argv: string[]) => {
-    sh.calls.push(`run ${argv.join(' ')}`)
-    return { exitCode: 0, stdout: credentials('2026-11-10T12:00:00Z') }
-  }
   pressAction('assume', 'role:example-dev')
   pressAction('assume', 'apply')
   await settle()
@@ -212,10 +242,9 @@ test('Apply sets exactly the four names, with the profile region, and never runs
     { name: 'AWS_DEFAULT_REGION', value: 'us-east-1' },
     { name: 'GRANTED_COMMAND', value: 'example-dev' },
   ])
-  const runs = sh.calls.filter(c => c.startsWith('run '))
-  expect(runs).toEqual(['run aws configure export-credentials --profile example-dev --format process'])
-  expect(runs.some(c => c.includes('assume example'))).toBe(false)
-  expect(readCached('assume')).toEqual({ role: 'example-dev', expiresAt: Date.parse('2026-11-10T12:00:00Z') })
+  // nothing is run: no assume, no aws call (Apply never logs in)
+  expect(sh.calls.some(c => c === 'process.run' || c.startsWith('run '))).toBe(false)
+  expect(readCached('assume')).toEqual({ role: 'example-dev', login: 'valid' })
 })
 
 test('Apply on a profile without a region sets only the profile and the granted command', async () => {
@@ -224,32 +253,7 @@ test('Apply on a profile without a region sets only the profile and the granted 
   pressAction('assume', 'apply')
   await settle()
   expect(sh.envSets.map(e => e.name)).toEqual(['AWS_PROFILE', 'GRANTED_COMMAND'])
-  expect(readCached('assume')).toEqual({ role: 'example-prod' })
-})
-
-test('the expiry lookup runs with an explicit timeout well above 30 seconds', async () => {
-  const { sh } = await modalWorld()
-  let seen: unknown
-  sh.host.process.run = async (_argv: string[], init: unknown) => {
-    seen = init
-    return { exitCode: 0, stdout: '{}' }
-  }
-  pressAction('assume', 'role:example-dev')
-  pressAction('assume', 'apply')
-  await settle()
-  expect((seen as { timeoutMs: number }).timeoutMs > 30_000).toBe(true)
-})
-
-test('a failed expiry lookup leaves the role without an expiry, and no alert', async () => {
-  const { sh } = await modalWorld()
-  sh.host.process.run = async () => {
-    throw new Error('timed out')
-  }
-  pressAction('assume', 'role:example-dev')
-  pressAction('assume', 'apply')
-  await settle()
-  expect(readCached('assume')).toEqual({ role: 'example-dev' })
-  expect(alertRow()).toBe('')
+  expect(readCached('assume')).toEqual({ role: 'example-prod', login: 'valid' })
 })
 
 test('a denied env.set leaves the stored role as it was', async () => {
@@ -258,7 +262,7 @@ test('a denied env.set leaves the stored role as it was', async () => {
   pressAction('assume', 'role:example-prod')
   pressAction('assume', 'apply')
   await settle()
-  expect(readCached('assume')).toEqual({ role: 'example-dev' })
+  expect(readCached('assume')).toEqual({ role: 'example-dev', login: 'valid' })
 })
 
 test('Apply with nothing chosen and no listed current role does nothing', async () => {
@@ -268,9 +272,9 @@ test('Apply with nothing chosen and no listed current role does nothing', async 
   expect(sh.envSets).toEqual([])
 })
 
-test('Clear points AWS_PROFILE at default (with its region) so the aws CLI still works, and clears the role and expiry', async () => {
+test('Clear points AWS_PROFILE at default (with its region) so the aws CLI still works, and clears the role', async () => {
   const { sh } = await modalWorld('example-dev')
-  setValue('assume', { role: 'example-dev', expiresAt: 5 })
+  setValue('assume', { role: 'example-dev', login: 'valid' })
   pressAction('assume', 'clear')
   await settle()
   expect(sh.envSets).toEqual([
@@ -279,7 +283,7 @@ test('Clear points AWS_PROFILE at default (with its region) so the aws CLI still
     { name: 'AWS_DEFAULT_REGION', value: 'us-west-2' },
     { name: 'GRANTED_COMMAND', value: '' },
   ])
-  expect(readCached('assume')).toEqual({})
+  expect(readCached('assume')).toEqual({ login: 'valid' })
   expect(button()).toEqual({ id: 'assume', label: 'Assume', level: 'dim', action: 'assume' })
 })
 
@@ -293,31 +297,103 @@ test('Clear without a default profile in the config sets all four names to empty
     { name: 'AWS_DEFAULT_REGION', value: '' },
     { name: 'GRANTED_COMMAND', value: '' },
   ])
-  expect(readCached('assume')).toEqual({})
+  expect(readCached('assume')).toEqual({ login: 'valid' })
 })
 
-test('the assume expired alert shows only once an expiry has passed', async () => {
-  await modalWorld()
-  const now = Date.now()
-  setValue('assume', { role: 'example-dev', expiresAt: now + 60_000 })
-  expect(alertRow()).toBe('')
-  setValue('assume', { role: 'example-dev', expiresAt: now - 1 })
-  expect(alertRow()).toBe('assume expired')
-  setValue('assume', { role: 'example-dev' })
-  expect(alertRow()).toBe('')
+const LOGIN_STATES: Array<[string, Record<string, unknown> | undefined, string, string]> = [
+  ['healthy refreshable session', HEALTHY, 'valid', ''],
+  ['expired session', { expiresAt: '2000-01-01T00:00:00Z', accessToken: SECRET }, 'expired-unrefreshable', 'login expired'],
+  ['access token expired but refreshable', { ...HEALTHY, expiresAt: '2000-01-01T00:00:00Z' }, 'expired-refreshable', ''],
+  ['missing refresh token on an expired token', { expiresAt: '2000-01-01T00:00:00Z', accessToken: SECRET }, 'expired-unrefreshable', 'login expired'],
+  ['missing cache file', undefined, 'missing', 'login expired'],
+]
+
+test('the login expired alert follows the SSO cache file: healthy and refreshable stay quiet, expired or missing raise it', async () => {
+  for (const [name, file, login, row] of LOGIN_STATES) {
+    resetAlertState()
+    const { sh, clock } = await modalWorld('example-dev')
+    setAssumeClock(() => Date.now())
+    if (file) sh.files.set(CACHE_FILE, cacheFile(file))
+    else sh.files.delete(CACHE_FILE)
+    await clock.advance(60_000)
+    expect([name, (readCached('assume') as { login?: string }).login, alertRow()]).toEqual([name, login, row])
+  }
 })
 
-test('the one-minute check asks for one redraw when the expiry passes, and not again', async () => {
-  const { sh, clock } = await modalWorld('example-dev')
-  setValue('assume', { role: 'example-dev', expiresAt: clock.now() + 90_000 })
+test('a healthy session more than an hour after Apply raises no alert (the role credentials renew on their own)', async () => {
+  const { clock } = await modalWorld('example-dev')
+  pressAction('assume', 'role:example-dev')
+  pressAction('assume', 'apply')
   await settle()
+  await clock.advance(3 * 3_600_000)
+  expect(alertRow()).toBe('')
+})
+
+test('the one-minute check asks for one redraw when the login state changes, and not again', async () => {
+  const { sh, clock } = await modalWorld('example-dev')
   const invalidates = () => sh.calls.filter(c => c === 'ui.invalidate').length
   await clock.advance(60_000)
+  await settle()
   const before = invalidates()
   await clock.advance(60_000)
+  await settle()
+  expect(invalidates()).toBe(before)
+  sh.files.set(CACHE_FILE, cacheFile({ expiresAt: '1970-01-01T00:00:00Z', accessToken: SECRET }))
+  await clock.advance(60_000)
+  await settle()
   expect(invalidates()).toBe(before + 1)
-  await clock.advance(180_000)
+  await clock.advance(60_000)
+  await settle()
   expect(invalidates()).toBe(before + 1)
+})
+
+test('the session name and cache directory come from ZR_SSO_SESSION and AWS_SSO_CACHE_DIR when set', async () => {
+  resetModals()
+  clearBandButtons()
+  const clock = fakeClock()
+  const path = `/c/${sha1Hex('corp-2')}.json`
+  const sh = stubHost({ [path]: cacheFile(HEALTHY) })
+  sh.state.ssoSession = 'corp-2'
+  sh.state.ssoCacheDir = '/c'
+  initSources(sh.host, clock)
+  setOptions(only)
+  registerComponents(only, sh.host)
+  await clock.advance(0)
+  expect(sh.calls).toContain(`fs.read ${path}`)
+  expect((readCached('assume') as { login?: string }).login).toBe('valid')
+})
+
+test('an invalid session name is missing and no file is read', async () => {
+  resetModals()
+  clearBandButtons()
+  const clock = fakeClock()
+  const sh = stubHost()
+  sh.state.ssoSession = '../etc'
+  initSources(sh.host, clock)
+  setOptions(only)
+  registerComponents(only, sh.host)
+  await clock.advance(0)
+  expect(sh.calls.some(c => c.startsWith('fs.read /home/u/.aws/sso'))).toBe(false)
+  expect((readCached('assume') as { login?: string }).login).toBe('missing')
+})
+
+test('token values are never stored, shown in the modal or logged', async () => {
+  const logged: string[] = []
+  const spies = ['log', 'info', 'warn', 'error', 'debug'] as const
+  const saved = spies.map(k => console[k])
+  for (const k of spies) console[k] = (...a: unknown[]) => void logged.push(a.map(String).join(' '))
+  try {
+    const { sh } = await modalWorld('example-dev')
+    pressAction('assume', 'role:example-dev')
+    pressAction('assume', 'apply')
+    await settle()
+    const seen = JSON.stringify([readCached('assume'), assumeSpec(), alertRow(), sh.calls, sh.writes, sh.envSets, logged])
+    expect(seen.includes(SECRET)).toBe(false)
+    expect(seen.includes('accessToken') || seen.includes('refreshToken')).toBe(false)
+    expect(Object.keys(readCached('assume') as object).sort()).toEqual(['login', 'role'])
+  } finally {
+    spies.forEach((k, i) => (console[k] = saved[i]))
+  }
 })
 
 test('with components.assume off there is no modal, alert, source, timer or $.env.set call', async () => {

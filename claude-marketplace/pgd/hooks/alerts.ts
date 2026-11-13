@@ -5,12 +5,13 @@ import type { Usage } from './usage'
 import { timedDraw } from './metrics'
 import { isWrapUp } from './session-mode'
 import { listContributions } from './contributions'
+import { loginNeedsAction, type SsoLogin } from './assume'
 
 // The alert row (the status line): one aggregated row listing only the alerts whose condition is
 // true, highest priority first. The engine prefixes the row with a warning glyph and the plugin
 // name (pgd) and cuts a long row mid-word, so fitAlerts drops the lowest-priority items itself
 // when the width runs out. Priorities (larger is higher): wrapping up 100 (session-mode
-// packet), dolt unavailable 80, rate limit near cap 70, context excessive 60, assume expired 50
+// packet), dolt unavailable 80, rate limit near cap 70, context excessive 60, login expired 50
 // (assume packet); a later packet adds its entry to ALERT_ITEMS. Every item states a true
 // condition; an absent thing is never a "no X" item. contextWarn plays no role in this row.
 export interface AlertInputs {
@@ -18,7 +19,7 @@ export interface AlertInputs {
   dolt?: boolean
   thresholds: AlertThresholds
   mode?: unknown
-  assume?: { role?: string; expiresAt?: number }
+  assume?: { role?: string; login?: SsoLogin }
   now: number
 }
 
@@ -70,11 +71,12 @@ export const ALERT_ITEMS: AlertItem[] = [
     text: v => `context ${Math.round(v.usage?.contextPercent ?? 0)}%`,
   },
   {
-    // a missing expiry never raises it
-    id: 'assume-expired',
+    // the SSO login is expired and cannot refresh, or its cache file is missing; an unread state
+    // (no poll yet) and a refreshable one never raise it
+    id: 'login-expired',
     priority: 50,
-    condition: v => v.assume?.expiresAt !== undefined && v.assume.expiresAt <= v.now,
-    text: () => 'assume expired',
+    condition: v => loginNeedsAction(v.assume?.login),
+    text: () => 'login expired',
   },
 ].sort((a, b) => b.priority - a.priority)
 
@@ -134,7 +136,7 @@ export function alertRow(): string {
     usage: readCached<Usage>('usage'),
     dolt: options.components.beads ? readCached<boolean>('dolt') : undefined,
     mode: options.components.sessionMode ? readCached('sessionMode') : undefined,
-    assume: options.components.assume ? readCached<{ role?: string; expiresAt?: number }>('assume') : undefined,
+    assume: options.components.assume ? readCached<{ role?: string; login?: SsoLogin }>('assume') : undefined,
     thresholds: options.alerts.thresholds,
     now: Date.now(),
   }

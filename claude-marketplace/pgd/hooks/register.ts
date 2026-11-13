@@ -109,6 +109,9 @@ export const register: Register = on => {
         stateHome: () => $.env.get('XDG_STATE_HOME'),
         awsProfile: () => $.env.get('AWS_PROFILE'),
         awsConfigFile: () => $.env.get('AWS_CONFIG_FILE'),
+        // Read-only: where the SSO login state is read from (Assume component).
+        ssoSession: () => $.env.get('ZR_SSO_SESSION'),
+        ssoCacheDir: () => $.env.get('AWS_SSO_CACHE_DIR'),
         // The four names Apply and Clear set: each its own literal (the engine refuses a generic
         // variable-name forwarder). Used only by the Assume component.
         setAwsProfile: (v: string) => $.env.set('AWS_PROFILE', v),

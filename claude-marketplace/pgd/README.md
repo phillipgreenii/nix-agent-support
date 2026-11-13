@@ -210,13 +210,17 @@ facade's `env.awsProfile()`. Pressing it opens the Assume modal.
 - Colour, matching the name ignoring case: unset or empty is dim; a name containing `prod` is red;
   otherwise a name containing `dev` is green; any other value is yellow. `prod` is checked first,
   so a name containing both is red.
-- Source: `assume`, value `{ role?, expiresAt? }` (epoch milliseconds), polled once a minute
+- Source: `assume`, value `{ role?, login? }` (`login` is the SSO login state, see "Alert" below), polled once a minute
   (`intervalMs` 60000, feeds the band and the alert); Apply and Clear update it directly.
-- Modal `assume`: the current role and its expiry when known, one `role:<name>` row per profile (alphabetical, ignoring case), and
+- Modal `assume`: the current role and the login state when known, one `role:<name>` row per profile (alphabetical, ignoring case), and
   the actions `apply` and `clear`. Choosing a role only marks it; Apply uses the marked
   role (else the current role when the config lists it).
-- Alert `assume expired` (priority 50): true when a stored expiry has passed. A missing expiry never
-  raises it.
+- Alert `login expired` (priority 50): true when the SSO login is expired and cannot refresh (state
+  `expired-unrefreshable`) or its token cache file is missing or unreadable (state `missing`). The
+  fix is `aws sso login` (this mod never runs it). A healthy login, and an access token that has
+  expired but can be refreshed (`expired-refreshable`, renewed by the next AWS call), never raise it,
+  and neither does a state that has not been read yet. The role credentials' own expiry (hours, renewed in
+  process) plays no part.
 
 ### Choices the design left to the builder
 
@@ -235,17 +239,27 @@ facade's `env.awsProfile()`. Pressing it opens the Assume modal.
   section's `region` (empty when it has none). When it has no `[default]`, no value is safe (the CLI
   also rejects `AWS_PROFILE=default` there, checked against the real CLI), so all three are set to
   empty strings and `aws` needs `--profile` (or an Apply) until a role is applied. `GRANTED_COMMAND`
-  is always set to an empty string. The stored role and expiry are cleared either way, and the band
+  is always set to an empty string. The stored role is cleared either way, and the band
   button reads `Assume` (dim) as before. Decision: the session's starting profile is not restored,
   because it may itself be a role (for example prod), which Clear exists to drop.
-- Expiry source: the `Expiration` field of `aws configure export-credentials --profile NAME --format
-process`, run once after each Apply. Only that field is read; the credentials are never stored or
-  logged. The call runs with a five-minute timeout, because a lapsed SSO login can open a keychain
-  prompt and a browser window, which does not fit the 30-second default. A failed or timed out
-  lookup leaves no expiry (button and modal work, no alert). A profile that was already set when the
-  session started has no expiry either; applying it again records one.
-- Check: the one-minute poll returns the stored value and asks for one redraw when the expiry has
-  just passed, so the alert row appears without another event.
+- Login state source: each poll reads the SSO token cache file of the sso-session through
+  `host.fs.read`: `<AWS_SSO_CACHE_DIR, else ~/.aws/sso/cache>/<sha1 of the session name>.json`, the
+  session name being `ZR_SSO_SESSION`, else `zip` (the CLI names an sso-session's file after the sha1
+  of its name; no other file counts). Only `expiresAt` and whether `accessToken` and `refreshToken`
+  are present are looked at; the states are `valid` (`expiresAt` in the future), `expired-refreshable`
+  (past, a refresh token exists), `expired-unrefreshable` (past, none) and `missing` (no file, not
+  JSON, or no `expiresAt` or `accessToken`). Token values are never stored, shown or logged; the
+  stored value keeps only the state word. This is the same rule as the expired-auth sensor that feeds
+  the monorepo laptop's "SSO login expired and cannot refresh" Grafana alert (the sensor emits metrics
+  and a pgd hook cannot read them, so the hook mirrors the sensor's rule with a read of the same file,
+  never of anything else). Nothing here logs in, runs `aws` or contacts the network. The earlier design
+  stored the `Expiration` of `aws configure export-credentials` once after Apply; that is the role
+  credentials' expiry (hours, renewed on its own), so it fired on healthy sessions, and with
+  it went the five-minute timeout (a lapsed login used to open a browser; with Granted's auto-login
+  off the call failed fast anyway). Apply and Clear no longer run any command.
+- Check: the one-minute poll reads the cache file and returns the stored role with the login state;
+  when the state changes the source layer asks for one redraw, so the alert row appears or goes
+  without another event.
 
 Known limit: a profile exported inside a `!` command or a Bash call changes only that child shell,
 so the button does not show it.
