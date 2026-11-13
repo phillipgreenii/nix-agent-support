@@ -394,7 +394,7 @@ func writeConfigGatedFakeBackend(t *testing.T, name, marker, ok string) {
 		"  *'" + marker + "'*)\ncat <<'FAKE_BACKEND_EOF'\n" + ok + "\nFAKE_BACKEND_EOF\n;;\n" +
 		"  *)\nprintf '{\"protocolVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"backend config block not forwarded\"}}\\n'\n;;\n" +
 		"esac\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+	if err := installExec(script, content); err != nil {
 		t.Fatalf("write config-gated fake backend: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

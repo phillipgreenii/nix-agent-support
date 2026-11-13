@@ -124,7 +124,7 @@ func slackE2EFakeClaude(t *testing.T, dir, listEnvelope, showEnvelope string) st
 		"pwd -P > '" + rec + "/cwd.'$$\n" +
 		"if grep -q 'look up the Slack thread' '" + rec + "/prompt.'$$; then cat '" + dir + "/show.json'; else cat '" + dir + "/list.json'; fi\n"
 	path := filepath.Join(dir, "claude")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := installExec(path, script); err != nil {
 		t.Fatalf("write fake claude: %v", err)
 	}
 	return path

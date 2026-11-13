@@ -107,7 +107,7 @@ comment|transition|update|close|review_submit)
   ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+	if err := installExec(filepath.Join(dir, name), script); err != nil {
 		t.Fatalf("write scripted backend: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

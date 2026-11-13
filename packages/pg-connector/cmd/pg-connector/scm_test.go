@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,13 +16,9 @@ import (
 // scm backend (that's the sibling "pg-connector-scm-git" packet's job).
 func writeCwdEchoingBackend(t *testing.T, name string) {
 	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, name)
-	content := "#!/bin/sh\nreq=$(cat)\nprintf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":%s}' \"$req\"\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
-		t.Fatalf("write fake backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, func(req string) string {
+		return `{"protocolVersion":1,"schemaVersion":1,"result":` + strings.TrimRight(req, "\n") + "}"
+	})
 }
 
 // writeScmConfigFor writes a connector.scm config pointing at backend — a

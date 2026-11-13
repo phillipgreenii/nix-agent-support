@@ -248,7 +248,7 @@ func TestHealthRows_StatusRequestCarriesRegisteredConfigAndNoArgs(t *testing.T) 
 	script := "#!/bin/sh\nreq=$(cat)\n" +
 		"if echo \"$req\" | grep -q '\"op\":\"status\"' && echo \"$req\" | grep -q '\"k\":\"v\"' && ! echo \"$req\" | grep -q '\"args\"'; then\n" +
 		"cat <<'EOF_FAKE'\n" + statusHealthyDoc + "\nEOF_FAKE\nelse\ncat <<'EOF_FAKE'\n" + statusUnknownOp + "\nEOF_FAKE\nfi\n"
-	if err := os.WriteFile(filepath.Join(dir, "cfg-a"), []byte(script), 0o755); err != nil {
+	if err := installExec(filepath.Join(dir, "cfg-a"), script); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

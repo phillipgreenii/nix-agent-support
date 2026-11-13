@@ -235,7 +235,7 @@ func writeSlowFakeBackend(t *testing.T, name, delaySeconds, stdout string) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, name)
 	content := "#!/bin/sh\ncat >/dev/null\nsleep " + delaySeconds + "\ncat <<'FAKE_BACKEND_EOF'\n" + stdout + "\nFAKE_BACKEND_EOF\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+	if err := installExec(script, content); err != nil {
 		t.Fatalf("write slow fake backend: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -262,7 +262,7 @@ func writeGatedFakeBackend(t *testing.T, name, dir string, waitFor []string, okO
 		"sleep " + postSleep + "\n" +
 		`touch "` + dir + `/` + name + `.done"` + "\n" +
 		"if [ \"$ok\" = 1 ]; then\ncat <<'FAKE_BACKEND_EOF'\n" + okOut + "\nFAKE_BACKEND_EOF\nelse\ncat <<'FAKE_BACKEND_EOF'\n" + timeoutOut + "\nFAKE_BACKEND_EOF\nfi\n"
-	if err := os.WriteFile(filepath.Join(scriptDir, name), []byte(content), 0o755); err != nil {
+	if err := installExec(filepath.Join(scriptDir, name), content); err != nil {
 		t.Fatalf("write gated fake backend: %v", err)
 	}
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))

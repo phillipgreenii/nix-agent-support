@@ -48,22 +48,14 @@ func newFreshFakeBackend(t *testing.T, name string, optOut, notFound bool) *fres
 		"list_runs":      `{"protocolVersion":1,"schemaVersion":1,"result":[{"id":"run-1","name":"build","status":"completed","conclusion":"success","url":"u","provider":"p","head_sha":"deadbeef","pr_id":"pr-1"}]}`,
 	}
 	asOf := time.Now().UTC().Format(time.RFC3339)
-	var sb strings.Builder
-	sb.WriteString("#!/bin/sh\nreq=$(cat)\nprintf '%s\\n' \"$req\" >> '" + filepath.Join(dir, "requests.log") + "'\n")
-	sb.WriteString("case \"$req\" in\n")
-	fmt.Fprintf(&sb, "*'\"op\":\"capabilities\"'*) cat <<'FAKE_EOF'\n%s\nFAKE_EOF\n;;\n", caps)
+	byOp := map[string]string{"capabilities": caps}
 	for op, ans := range answers {
 		// AS_OF is the fixture's creation time: recent enough to sit inside the
 		// umbrella's read-through window, and constant across calls so two runs
 		// of one verb compare equal.
-		ans = strings.ReplaceAll(ans, "AS_OF", asOf)
-		fmt.Fprintf(&sb, "*'\"op\":\"%s\"'*) cat <<'FAKE_EOF'\n%s\nFAKE_EOF\n;;\n", op, ans)
+		byOp[op] = strings.ReplaceAll(ans, "AS_OF", asOf)
 	}
-	sb.WriteString("esac\n")
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(sb.String()), 0o755); err != nil {
-		t.Fatalf("write fake backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, fakeAnswers(t, filepath.Join(dir, "requests.log"), byOp, ""))
 	return &freshFakeBackend{dir: dir, name: name}
 }
 

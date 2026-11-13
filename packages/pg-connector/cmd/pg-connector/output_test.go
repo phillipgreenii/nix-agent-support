@@ -77,7 +77,7 @@ func TestRun_InvalidOutputFlag_WriteOp_NoSideEffect(t *testing.T) {
 	backendDir := t.TempDir()
 	script := filepath.Join(backendDir, "backend-side-effecting")
 	content := "#!/bin/sh\ncat >/dev/null\ntouch " + sideEffect + "\ncat <<'FAKE_BACKEND_EOF'\n{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":{\"id\":\"issue-1\",\"state\":\"done\"}}\nFAKE_BACKEND_EOF\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+	if err := installExec(script, content); err != nil {
 		t.Fatalf("write fake backend: %v", err)
 	}
 	t.Setenv("PATH", backendDir+string(os.PathListSeparator)+os.Getenv("PATH"))

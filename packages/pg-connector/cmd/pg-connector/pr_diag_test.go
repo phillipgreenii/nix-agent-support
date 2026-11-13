@@ -65,17 +65,7 @@ func newDiagBackend(t *testing.T, name string, answers map[string]string) *diagB
 		ops = append(ops, op)
 	}
 	sort.Strings(ops)
-	var sb strings.Builder
-	sb.WriteString("#!/bin/sh\nreq=$(cat)\nprintf '%s\\n' \"$req\" >> '" + filepath.Join(dir, "requests.log") + "'\n")
-	sb.WriteString("case \"$req\" in\n")
-	for _, op := range ops {
-		sb.WriteString("*'\"op\":\"" + op + "\"'*) cat <<'DIAG_EOF'\n" + answers[op] + "\nDIAG_EOF\n;;\n")
-	}
-	sb.WriteString("*) cat <<'DIAG_EOF'\n" + diagUnknownOp + "\nDIAG_EOF\n;;\nesac\n")
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(sb.String()), 0o755); err != nil {
-		t.Fatalf("write fake backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, fakeAnswers(t, filepath.Join(dir, "requests.log"), answers, diagUnknownOp))
 	return &diagBackend{dir: dir, name: name}
 }
 

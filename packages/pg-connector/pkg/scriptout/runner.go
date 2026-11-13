@@ -97,3 +97,15 @@ func (r Runner) do(ctx context.Context, c Call) Result {
 	}
 	return r(ctx, c)
 }
+
+// SwapRunner replaces the runner that every backend invocation uses and returns
+// a function that restores the previous one. It exists so the umbrella's
+// tests can answer a backend call in process (a fake backend registered by
+// name) instead of writing, and then exec'ing, a script per test. It MUST be
+// called before any goroutine invokes a backend (a test package's TestMain),
+// because the runner variable is not synchronised.
+func SwapRunner(r Runner) (restore func()) {
+	prev := execRunner
+	execRunner = r
+	return func() { execRunner = prev }
+}

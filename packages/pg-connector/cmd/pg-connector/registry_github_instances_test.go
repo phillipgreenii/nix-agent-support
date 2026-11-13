@@ -131,7 +131,7 @@ case "$req" in
   *) printf '%s\n' '{"protocolVersion":1,"schemaVersion":1,"result":{"ok":true}}' ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(dir, "pg-connector-github"), []byte(script), 0o755); err != nil {
+	if err := installExec(filepath.Join(dir, "pg-connector-github"), script); err != nil {
 		t.Fatalf("write fake pg-connector-github: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

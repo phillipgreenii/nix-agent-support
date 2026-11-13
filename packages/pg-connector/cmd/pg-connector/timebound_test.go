@@ -190,12 +190,12 @@ func writeBackendsConfig(t *testing.T, entityType, backend, blockJSON string) {
 // request it received to capturePath and replies with stdout.
 func writeCapturingFakeBackend(t *testing.T, name, capturePath, stdout string) {
 	t.Helper()
-	dir := t.TempDir()
-	content := "#!/bin/sh\ncat > '" + capturePath + "'\ncat <<'FAKE_BACKEND_EOF'\n" + stdout + "\nFAKE_BACKEND_EOF\n"
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
-		t.Fatalf("write capturing backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, func(req string) string {
+		if err := os.WriteFile(capturePath, []byte(req), 0o644); err != nil {
+			t.Errorf("capture request: %v", err)
+		}
+		return stdout + "\n"
+	})
 }
 
 // capturedConfig decodes the "config" member of the request a capturing

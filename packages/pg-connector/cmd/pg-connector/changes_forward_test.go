@@ -38,18 +38,7 @@ func fwdErrorEnvelope(code, message string) string {
 // is both logged and visibly wrong.
 func writeRecordingBackend(t *testing.T, name, logPath string, byOp map[string]string) {
 	t.Helper()
-	dir := t.TempDir()
-	var sb strings.Builder
-	sb.WriteString("#!/bin/sh\nreq=$(cat)\nprintf '%s\\n' \"$req\" >> '" + logPath + "'\n")
-	sb.WriteString("case \"$req\" in\n")
-	for op, resp := range byOp {
-		fmt.Fprintf(&sb, "*'\"op\":\"%s\"'*) cat <<'FAKE_BACKEND_EOF'\n%s\nFAKE_BACKEND_EOF\n;;\n", op, resp)
-	}
-	fmt.Fprintf(&sb, "*) cat <<'FAKE_BACKEND_EOF'\n%s\nFAKE_BACKEND_EOF\n;;\nesac\n", fwdErrorEnvelope("unavailable", "unexpected op"))
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(sb.String()), 0o755); err != nil {
-		t.Fatalf("write recording backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, fakeAnswers(t, logPath, byOp, fwdErrorEnvelope("unavailable", "unexpected op")))
 }
 
 // recordedRequest is one line of the request log: a backend request, or the

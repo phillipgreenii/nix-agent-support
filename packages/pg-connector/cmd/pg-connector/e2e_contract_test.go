@@ -109,6 +109,7 @@ func TestMain(m *testing.M) {
 	contractBinDir = dir
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+	removeExecCache()
 	os.Exit(code)
 }
 

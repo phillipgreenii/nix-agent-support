@@ -54,7 +54,7 @@ func healthFailingBackend(t *testing.T, name string) (logPath string) {
 	dir := t.TempDir()
 	logPath = filepath.Join(t.TempDir(), name+".log")
 	script := fmt.Sprintf("#!/bin/sh\nreq=$(cat)\nprintf '%%s\\n' \"$req\" >> '%s'\necho 'status exploded' >&2\nexit 7\n", logPath)
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+	if err := installExec(filepath.Join(dir, name), script); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

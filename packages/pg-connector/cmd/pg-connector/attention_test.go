@@ -204,7 +204,7 @@ func TestFanOutAttentionList_AttachesBackendConfig(t *testing.T) {
 		"  *attention_threshold*72h*) printf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":[{\"type\":\"pr\",\"id\":\"1\",\"summary\":\"s\"}]}\\n' ;;\n" +
 		"  *) printf '{\"protocolVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"config missing\"}}\\n' ;;\n" +
 		"esac\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+	if err := installExec(script, content); err != nil {
 		t.Fatalf("write backend: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

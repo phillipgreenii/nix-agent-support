@@ -25,7 +25,7 @@ func writeMarkerBackend(t *testing.T, name, markerPath string) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, name)
 	content := "#!/bin/sh\nreq=$(cat)\ncase \"$req\" in *'\"op\":\"capabilities\"'*) ;; *) echo invoked >>" + markerPath + " ;; esac\nprintf '{\"protocolVersion\":1,\"schemaVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"must not be called\"}}\\n'\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+	if err := installExec(script, content); err != nil {
 		t.Fatalf("write marker backend: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -495,7 +495,7 @@ func writeTrackerAwareFakeIssueBackend(t *testing.T, name string) {
 		"else\n" +
 		"  printf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":{\"entities\":[],\"present_ids\":[],\"cursor\":null,\"truncated\":false}}\\n'\n" +
 		"fi\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+	if err := installExec(script, content); err != nil {
 		t.Fatalf("write tracker-aware fake backend: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

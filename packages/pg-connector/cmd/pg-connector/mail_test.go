@@ -40,16 +40,7 @@ func writeMailRecordingBackend(t *testing.T, name string, byOp map[string]string
 	t.Helper()
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, name+".log")
-	var sb strings.Builder
-	sb.WriteString("#!/bin/sh\nreq=$(cat)\nprintf '%s\\n' \"$req\" >> '" + logPath + "'\n")
-	for op, resp := range byOp {
-		sb.WriteString("if echo \"$req\" | grep -q '\"op\":\"" + op + "\"'; then cat <<'FAKE_BACKEND_EOF'\n" + resp + "\nFAKE_BACKEND_EOF\nexit 0\nfi\n")
-	}
-	sb.WriteString("cat <<'FAKE_BACKEND_EOF'\n{\"protocolVersion\":1,\"schemaVersion\":1,\"error\":{\"code\":\"unknown_op\",\"message\":\"unknown op\"}}\nFAKE_BACKEND_EOF\n")
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(sb.String()), 0o755); err != nil {
-		t.Fatalf("write recording backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, fakeAnswers(t, logPath, byOp, `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`))
 	return logPath
 }
 

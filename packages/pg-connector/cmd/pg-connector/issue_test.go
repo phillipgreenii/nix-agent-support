@@ -183,7 +183,7 @@ func TestRun_IssueUpdate_StatusAndClearAssigneeReachWire(t *testing.T) {
 	script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
 		`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
 	path := filepath.Join(dir, "backend-issue-reopen")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := installExec(path, script); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -221,7 +221,7 @@ func TestRun_IssueUpdate_ClearDeferReachesWire(t *testing.T) {
 			script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
 				`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
 			path := filepath.Join(dir, "backend-issue-defer")
-			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			if err := installExec(path, script); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -259,7 +259,7 @@ func TestRun_IssueUpdate_ReleaseExpiredClaimReachesWire(t *testing.T) {
 			script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
 				`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
 			path := filepath.Join(dir, "backend-issue-release")
-			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			if err := installExec(path, script); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
