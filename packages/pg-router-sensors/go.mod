@@ -7,7 +7,7 @@ require (
 	github.com/phillipgreenii/pg-router v0.0.0
 )
 
-require github.com/phillipgreenii/x v0.0.0-20261106202408-ba17082cdd30
+require github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 
 replace github.com/phillipgreenii/pg-router => ../pg-router
 

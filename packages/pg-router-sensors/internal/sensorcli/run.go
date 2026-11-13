@@ -8,7 +8,7 @@
 // supplies only its probes, its band tables and its configuration keys.
 //
 // Exit status: 0 when at least one resource was answered (or --bands printed);
-// 3 (3) when none could be measured (a pull failure for the
+// 3 (exitcode.Unavailable) when none could be measured (a pull failure for the
 // router, which treats any non-zero exit alike); 2 for a usage or configuration
 // error.
 package sensorcli
@@ -27,15 +27,14 @@ import (
 
 	"github.com/phillipgreenii/pg-router-sensors/internal/answer"
 	"github.com/phillipgreenii/pg-router-sensors/internal/levels"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// Exit codes. ExitUnavailable and ExitUsage equal exitcode.Unavailable and
-// exitcode.Usage of github.com/phillipgreenii/x/exitcode; they are literals
-// here until the module pins an x revision that carries that package.
+// Exit codes, the shared values of github.com/phillipgreenii/x/exitcode.
 const (
-	ExitOK          = 0
-	ExitUnavailable = 3
-	ExitUsage       = 2
+	ExitOK          = exitcode.OK
+	ExitUnavailable = exitcode.Unavailable
+	ExitUsage       = exitcode.Usage
 	refreshEnv      = "PG_ROUTER_LEVEL_REFRESH"
 )
 
