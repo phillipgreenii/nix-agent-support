@@ -14,7 +14,8 @@ setup() {
 @test "land recipe names the repo with --repo" {
   grep -qF 'pg-git-lander land <branch> --repo <repo-root> --source-worktree <worktree> --json' "$SKILL"
   grep -qF -- '--wait 20m' "$SKILL"
-  grep -qF 'pg-git-lander land "$FB" --repo "$CC"' "$SKILL" || grep -qF -- '--repo "$CC" --source-worktree "$WT"' "$SKILL"
+  grep -qF 'pg-git-lander land "$FB" --repo "$CC" --source-worktree "$WT" --wait 20m --json' "$SKILL"
+  grep -qF 'pg-git-lander land FB --repo CC --source-worktree WT --wait 20m --json' "$SKILL"
 }
 
 @test "rebase names the repo with --repo" {
@@ -53,4 +54,19 @@ setup() {
 
 @test "no bead ids in the skill" {
   ! grep -qE '\bpg2-[a-z0-9]+' "$SKILL"
+}
+
+@test "no command line in the skill uses a resume flag without --repo" {
+  # A line that runs pg-git-lander with a resume flag (or a table/diagram cell that names the
+  # command with one) MUST also carry --repo, or CC in the diagram.
+  run bash -c 'grep -nE -- "pg-git-lander [a-z]+ .*--(continue|skip|abort|quit)|land (\"\\\$FB\"|FB) --(continue|skip|abort|quit)" "$1" | grep -vE -- "--repo|CC"' _ "$SKILL"
+  [ -z "$output" ] || {
+    echo "resume flag without --repo:" >&2
+    echo "$output" >&2
+    return 1
+  }
+}
+
+@test "exit 75 is never described as host load" {
+  ! grep -qiE 'host.load|load average' "$SKILL"
 }
