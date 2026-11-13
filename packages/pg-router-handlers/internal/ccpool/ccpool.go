@@ -64,20 +64,20 @@ func SessionLive(ctx context.Context, r Runner, externalID string) bool {
 	return false
 }
 
-// ErrUsageLimited mirrors ccpool's exit code 8: `ccpool new`/`reply` declined to
+// ErrUsageLimited mirrors ccpool's exit code 20: `ccpool new`/`reply` declined to
 // accept work because an account usage window (5-hour block or weekly limit) is
 // at its limit. It is the race backstop for the capacity pre-check (the window
 // can fill between that check and the launch): a caller treats it as "not right
 // now", never as a launch failure.
 var ErrUsageLimited = errors.New("ccpool: usage limit hit")
 
-// IsUsageLimited reports whether err is (or wraps) a ccpool exit-code-8 outcome.
+// IsUsageLimited reports whether err is (or wraps) a ccpool exit-code-20 outcome.
 func IsUsageLimited(err error) bool {
 	if errors.Is(err, ErrUsageLimited) {
 		return true
 	}
 	var ec exitCoder
-	return errors.As(err, &ec) && ec.ExitCode() == 8
+	return errors.As(err, &ec) && ec.ExitCode() == 20
 }
 
 // SessionState mirrors ccpool's store states — observed session FACTS only, not

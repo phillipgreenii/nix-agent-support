@@ -33,7 +33,7 @@ pa-monitor already holds the authoritative reading (ADR 0021): the status-line's
 3. **The pg-router handler keeps its single busy decline.** A usage limit surfaces as the same
    `at-capacity` busy reason (not a new one): it is routine, hours-long backpressure, and the
    failure-rate alert deliberately excludes that reason. The handler logs which window and until
-   when. If the window fills between the capacity check and `ccpool new` (exit 8), the handler
+   when. If the window fills between the capacity check and `ccpool new` (exit 20), the handler
    treats it as the same decline: it reclaims the abandoned session and worktree and does NOT stamp
    `pool-launch-fail` or escalate the bead to `human`. _Superseded by 0103
    (`0103-wrapping-is-a-standalone-tool-and-a-pre-ready-failure-is-a-decline.md`) for failures before

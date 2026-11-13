@@ -375,7 +375,7 @@ func TestCLI_CapacityDecodesUsageLimit(t *testing.T) {
 	}
 }
 
-// ccpool exit 8 (usage limit hit) is recognized whether it arrives as the typed
+// ccpool exit 20 (usage limit hit) is recognized whether it arrives as the typed
 // sentinel or as a raw exit status, and nothing else is mistaken for it.
 func TestIsUsageLimited(t *testing.T) {
 	for _, tc := range []struct {
@@ -385,7 +385,8 @@ func TestIsUsageLimited(t *testing.T) {
 	}{
 		{"sentinel", ErrUsageLimited, true},
 		{"wrapped sentinel", fmt.Errorf("ccpool new: %w", ErrUsageLimited), true},
-		{"raw exit 8", fmt.Errorf("ccpool new: %w", &fakeExit{code: 8}), true},
+		{"raw exit 20", fmt.Errorf("ccpool new: %w", &fakeExit{code: 20}), true},
+		{"old exit 8 is not it", &fakeExit{code: 8}, false},
 		{"exit 7 is not it", &fakeExit{code: 7}, false},
 		{"exit 1 is not it", &fakeExit{code: 1}, false},
 		{"nil", nil, false},

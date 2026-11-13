@@ -17,7 +17,7 @@ import (
 // generic error; 5, 6 and 7 are reply's busy, cancel-unconfirmed and
 // prompt-not-ingested) so a caller can branch on "not right now, try after the
 // reset" without parsing stderr. The refusal line names the window and its reset.
-const exitUsageLimited = 8
+const exitUsageLimited = 20
 
 // newUsageChecker builds the Checker for a pool's [usage_gate] config. It is a
 // package-level indirection (the same seam style as recordRetry) so tests inject

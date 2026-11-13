@@ -448,7 +448,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
 		if ccpool.IsUsageLimited(err) {
 			// ccpool declined the launch because the account's usage window filled
-			// between the capacity pre-check and `new` (exit 8). That is "not right
+			// between the capacity pre-check and `new` (exit 20). That is "not right
 			// now", never a defect of THIS bead: no launch-failure label, no
 			// escalation to human. The abandoned session and worktree are already
 			// reclaimed above; the busy decline re-offers the event with backoff.

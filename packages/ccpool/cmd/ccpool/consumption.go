@@ -12,11 +12,12 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/consumption"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // exitNoSuchSession is the documented exit code of `ccpool consumption` for an
 // unknown session (exit 1 stays generic; `state` uses 1 for this).
-const exitNoSuchSession = 8
+const exitNoSuchSession = exitcode.NotFound
 
 // runConsumption prints one session's consumption reading (INV-METER-1): the
 // model, token totals and an estimated cost in integer USD cents at API list

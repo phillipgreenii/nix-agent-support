@@ -141,7 +141,7 @@ type Retry struct {
 
 // UsageGate configures the account usage-window gate (the 5-hour block and the
 // weekly limit): while either window is at its limit, ccpool refuses to accept
-// new work — `ccpool new` and `ccpool reply` exit 8, and `ccpool capacity`
+// new work — `ccpool new` and `ccpool reply` exit 20, and `ccpool capacity`
 // reports zero free slots plus the limit that is hit — regardless of which
 // caller (a person, pg-router's handler, a script) invoked it. The reading comes
 // from the co-resident monitor's `status --json` (its rate_limits object).

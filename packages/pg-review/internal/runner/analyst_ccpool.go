@@ -239,7 +239,7 @@ func (a *CcpoolAnalyst) send(ctx context.Context, s *State, id, text string) (st
 	return turn, nil
 }
 
-// refusal maps a usage-limit (exit 8) or busy (exit 5) refusal to a Skipped
+// refusal maps a usage-limit (exit 20) or busy (exit 5) refusal to a Skipped
 // run, and anything else to nil.
 func refusal(runID int64, err error) *SkippedError {
 	switch {

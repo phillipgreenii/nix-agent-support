@@ -62,8 +62,8 @@ func captureStdout(t *testing.T, fn func() int) (string, int) {
 func TestUsageGate_exitCodeIsDistinctFromReplysOwn(t *testing.T) {
 	// 1 generic, 2 usage, 3 errored, 4 timed out, 5 busy, 6 cancel unconfirmed,
 	// 7 prompt not ingested: the usage-limit refusal must not collide with any.
-	if exitUsageLimited != 8 {
-		t.Fatalf("exitUsageLimited = %d, want 8", exitUsageLimited)
+	if exitUsageLimited != 20 {
+		t.Fatalf("exitUsageLimited = %d, want 20", exitUsageLimited)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestProductionUsageChecker(t *testing.T) {
 	}
 }
 
-// TestRunNew_refusesWhileUsageLimitHit: `ccpool new` exits 8 and launches
+// TestRunNew_refusesWhileUsageLimitHit: `ccpool new` exits 20 and launches
 // NOTHING — no store row, no trust write, no tmux server — whoever called it.
 func TestRunNew_refusesWhileUsageLimitHit(t *testing.T) {
 	a := armedLaunchEnv(t)
@@ -139,7 +139,7 @@ func TestRunNew_refusesWhileUsageLimitHit(t *testing.T) {
 
 // TestRunNew_usageLimitNotHitIsNotRefused: with no limit hit the same invocation
 // gets past the gate (it then stops at the armed config's unlaunchable claude,
-// which is NOT exit 8).
+// which is NOT exit 20).
 func TestRunNew_usageLimitNotHitIsNotRefused(t *testing.T) {
 	a := armedLaunchEnv(t)
 	c := &fakeChecker{}

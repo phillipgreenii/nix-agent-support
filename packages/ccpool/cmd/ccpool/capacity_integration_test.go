@@ -99,7 +99,7 @@ func installFakePAMonitor(t *testing.T, bin, doc string) string {
 
 // TestUsageGate_endToEndRefusesWhileWindowHit drives the REAL ccpool binary
 // against a fake monitor: while the 5-hour window is hit, `capacity --json`
-// reports free=0 plus the limit, and `new` and `reply` exit 8 without touching
+// reports free=0 plus the limit, and `new` and `reply` exit 20 without touching
 // the pool; once the window's reset passes (or the reading clears), the same
 // commands stop refusing. Nothing here launches a session or needs tmux.
 func TestUsageGate_endToEndRefusesWhileWindowHit(t *testing.T) {
@@ -154,8 +154,8 @@ func TestUsageGate_endToEndRefusesWhileWindowHit(t *testing.T) {
 
 	for _, args := range [][]string{{"new", "alpha"}, {"reply", "alpha", "hello", "--no-wait"}} {
 		_, errOut, code := run(args...)
-		if code != 8 {
-			t.Errorf("ccpool %v exited %d, want 8; stderr: %s", args, code, errOut)
+		if code != 20 {
+			t.Errorf("ccpool %v exited %d, want 20; stderr: %s", args, code, errOut)
 		}
 		if !strings.Contains(errOut, "five_hour") {
 			t.Errorf("ccpool %v stderr %q must name the window", args, errOut)

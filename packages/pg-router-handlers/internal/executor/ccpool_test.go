@@ -2032,7 +2032,7 @@ func TestRun_usageLimitDeclinesBusyWithoutMutation(t *testing.T) {
 }
 
 // TestRun_usageLimitAtLaunchDeclinesBusyNoEscalation: the window can fill between
-// the capacity pre-check and `ccpool new` (which then exits 8). That is a busy
+// the capacity pre-check and `ccpool new` (which then exits 20). That is a busy
 // decline, never a launch failure: no pool-launch-fail label, no human escalation,
 // and the abandoned session is still purged.
 func TestRun_usageLimitAtLaunchDeclinesBusyNoEscalation(t *testing.T) {

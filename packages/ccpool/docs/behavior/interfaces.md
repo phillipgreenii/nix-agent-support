@@ -50,7 +50,7 @@ flowchart LR
   ccpool stores and returns them uninterpreted.
 - **In/Out, consumption** — the caller reads a session's consumption on demand: model, token
   totals and an estimated cost in integer USD cents (`INV-METER-1`); ccpool never pushes it and
-  applies no cap. `ccpool consumption <external_id> --json`; an unknown session exits 8.
+  applies no cap. `ccpool consumption <external_id> --json`; an unknown session exits 4 (NotFound).
 - **Out (ccpool → caller), usage-limit refusal** — a dispatch, or a launch of a new session, while
   the account's usage window is at its limit is refused with its own outcome naming the window and
   its reset; the capacity read then reports no free slot plus the limit (`INV-POOL-4`).

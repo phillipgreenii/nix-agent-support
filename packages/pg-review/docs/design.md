@@ -30,7 +30,7 @@ operator's rulings on it (2026-11-06):
 - RULED, verbatim: "if the work is ready, then let the drain agents work on them" (no value
   checkpoint before the scheduling packets).
 - FIXED from the code: the run key carries the window length (5.14); the pre-start usage check
-  reads `ccpool capacity --json`, which never exits 8 (C4, 5.1, 5.14); every Skipped run exits 3
+  reads `ccpool capacity --json`, which never exits 20 (C4, 5.1, 5.14); every Skipped run exits 3
   and exit 5 is the run lock only (5.14, Appendix E); the router allows 5 seconds between SIGTERM
   and SIGKILL (C11, 5.10); a hand-written router role needs an absolute handler path (5.13); the
   repair reply lists the validator's failures (5.7); the "lens not running" and "runs failing"
@@ -247,13 +247,13 @@ flowchart LR
   unreadable) or `ccpool state <id> --json`. Both need the recorder daemon, so exit 1 from
   `result` MUST NOT be treated as terminal on its own: it can be a transient daemon outage.
   `ccpool tail` never exits and MUST NOT be used for completion. `reply` exit codes: 0 idle, 2
-  needs input, 3 errored, 4 timed out, 5 busy, 6 cancel unconfirmed, 7 not ingested, 8 usage
+  needs input, 3 errored, 4 timed out, 5 busy, 6 cancel unconfirmed, 7 not ingested, 20 usage
   limited, 9 ingest unknown.
-- C4. ccpool `new` and `reply` exit 8 when the usage-limit gate refuses (window and reset on
+- C4. ccpool `new` and `reply` exit 20 when the usage-limit gate refuses (window and reset on
   stderr; the gate fails open when its monitor is down; `ccpool/cmd/ccpool/usage_gate.go`). No
-  other command exits 8: `ccpool capacity --json` always exits 0 and, when a usage window is at
+  other command exits 20: `ccpool capacity --json` always exits 0 and, when a usage window is at
   its limit, reports `free` as 0 with a `usage_limit` field (`ccpool/cmd/ccpool/capacity.go`).
-  The runner reads `capacity --json` before starting a session and also treats exit 8 from `new`
+  The runner reads `capacity --json` before starting a session and also treats exit 20 from `new`
   or `reply` as the same refusal; either records a Skipped run. A `reply` exit 5 (busy turn, not
   expected on a fresh session) also records a Skipped run.
 - C5. `ccpool result` prints only the LAST assistant message's text blocks (`LastAssistantText`).
@@ -428,7 +428,7 @@ sequenceDiagram
   R->>R: stage in a new /tmp directory, redact, record the prompt hash
   R->>C: capacity --json
   alt usage limit reached
-    C-->>R: free is 0 with a usage limit (or later, exit 8 from new or reply)
+    C-->>R: free is 0 with a usage limit (or later, exit 20 from new or reply)
     R->>L: run state skipped, with reason
   else capacity available
     R->>C: new session, dontAsk, read-only allowlist, neutral directory
@@ -855,8 +855,8 @@ ccpool ships its meter (C6).
     not mistaken for the original process.
   - `TestTimeLimitCancelsRunAndClosesSession`: when `minutes` elapses the session is closed, the
     run is Failed, and staging is deleted.
-  - `TestUsageLimitGateExit8RecordsSkippedRun`: when `ccpool capacity --json` reports `free` 0
-    with a usage limit, and separately when `ccpool new` exits 8, the run is recorded as skipped
+  - `TestUsageLimitGateExit20RecordsSkippedRun`: when `ccpool capacity --json` reports `free` 0
+    with a usage limit, and separately when `ccpool new` exits 20, the run is recorded as skipped
     with the reason, nothing is analysed, `pg-review` exits 3, and the adapter maps the run to 0.
   - `TestAutoDeferAfterThirtyDays`: an item Pending for 31 days is deferred with the stated note.
   - `TestConfigFromHandWrittenFile`: the tool runs a full review with only a hand-written
@@ -1307,7 +1307,7 @@ providers that nothing built in supplied, so with no `config.toml` no built-in l
 - **Testability.** The runner takes an injectable clock and a fake ccpool seam (an interface with
   `capacity`, `start`, `reply`, `result`, `close`), which the time-based and usage-limit tests in
   5.9 use. The fake's `capacity` behaves as `ccpool capacity --json` does: it returns free slots
-  and any usage limit and never exits 8; the fake's `start` and `reply` can exit 8.
+  and any usage limit and never exits 20; the fake's `start` and `reply` can exit 20.
   `TestDeferredBackoffIs30Then60Then120Days` means: first return after 30 days, second return 60
   days after the first, third 120 days after the second. Auto-defer is evaluated by `maintain` and
   by `pending`.

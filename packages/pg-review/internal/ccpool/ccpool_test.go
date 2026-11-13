@@ -115,10 +115,10 @@ func TestStartFlags(t *testing.T) {
 }
 
 func TestExitCodesAreTyped(t *testing.T) {
-	fakeCLI(t, "new_exit=8\nreply_exit=5\n")
+	fakeCLI(t, "new_exit=20\nreply_exit=5\n")
 	c := CLI{}
 	if err := c.Start(bg, StartOpts{ExternalID: "1"}); !IsUsageLimited(err) {
-		t.Errorf("new exit 8: %v", err)
+		t.Errorf("new exit 20: %v", err)
 	}
 	if _, err := c.Reply(bg, "1", "p"); !IsBusy(err) {
 		t.Errorf("reply exit 5: %v", err)

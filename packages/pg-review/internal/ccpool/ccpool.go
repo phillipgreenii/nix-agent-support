@@ -6,7 +6,7 @@
 // takes no prompt), the prompt is a separate `reply --no-wait` that prints a
 // turn id, `result <turn-id>` exits 0 (done), 2 (pending) or 1 (unknown or
 // unreadable, which can be a transient daemon outage and so is not terminal),
-// and only `new` and `reply` ever exit 8 (usage limit refused). There is no
+// and only `new` and `reply` ever exit 20 (usage limit refused). There is no
 // wait or kill: a session is stopped with `close` and a turn is interrupted
 // with `cancel`.
 package ccpool
@@ -25,7 +25,7 @@ import (
 
 // Exit codes of the ccpool CLI that the runner distinguishes.
 const (
-	ExitUsageLimited = 8
+	ExitUsageLimited = 20
 	ExitBusy         = 5
 )
 
@@ -61,7 +61,7 @@ func ExitCode(err error) (int, bool) {
 	return 0, false
 }
 
-// IsUsageLimited reports whether err is the usage-limit refusal (exit 8).
+// IsUsageLimited reports whether err is the usage-limit refusal (exit 20).
 func IsUsageLimited(err error) bool { c, ok := ExitCode(err); return ok && c == ExitUsageLimited }
 
 // IsBusy reports whether err is a busy-turn refusal (exit 5).
@@ -105,7 +105,7 @@ const (
 	ResultUnknown
 )
 
-// Client is the ccpool seam. Capacity never exits 8; Start and Reply can.
+// Client is the ccpool seam. Capacity never exits 20; Start and Reply can.
 type Client interface {
 	Capacity(ctx context.Context) (Capacity, error)
 	Start(ctx context.Context, o StartOpts) error

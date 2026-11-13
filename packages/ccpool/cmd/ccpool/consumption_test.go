@@ -62,9 +62,9 @@ func TestConsumption_noTranscriptYetReadsZeros(t *testing.T) {
 	}
 }
 
-func TestConsumption_unknownSessionExits8(t *testing.T) {
-	if _, code := captureStderr(t, func() int { return runConsumption([]string{"cons-nope"}) }); code != exitNoSuchSession {
-		t.Fatalf("exit = %d, want %d", code, exitNoSuchSession)
+func TestConsumption_unknownSessionExitsNotFound(t *testing.T) {
+	if _, code := captureStderr(t, func() int { return runConsumption([]string{"cons-nope"}) }); code != 4 {
+		t.Fatalf("exit = %d, want 4 (exitcode.NotFound)", code)
 	}
 }
 

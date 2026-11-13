@@ -60,7 +60,7 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// fakeCcpool is the seam fake. Its capacity never exits 8; start and reply
+// fakeCcpool is the seam fake. Its capacity never exits 20; start and reply
 // can.
 type fakeCcpool struct {
 	capacity   ccpool.Capacity
@@ -394,12 +394,12 @@ func (s stageSpy) Run(ctx context.Context, st *State) error {
 	return nil
 }
 
-func TestUsageLimitGateExit8RecordsSkippedRun(t *testing.T) {
+func TestUsageLimitGateExit20RecordsSkippedRun(t *testing.T) {
 	limit := &ccpool.UsageLimit{Window: "5h", UsedPct: 100, ResetsAt: t0.Add(2 * time.Hour)}
 	cases := map[string]func(f *fakeCcpool){
 		"capacity free 0 with a usage limit": func(f *fakeCcpool) { f.capacity = ccpool.Capacity{Free: 0, UsageLimit: limit} },
-		"new exits 8":                        func(f *fakeCcpool) { f.startErr = &ccpool.ExitError{Cmd: "new", Code: 8} },
-		"reply exits 8":                      func(f *fakeCcpool) { f.replyErrs = []error{&ccpool.ExitError{Cmd: "reply", Code: 8}} },
+		"new exits 20":                       func(f *fakeCcpool) { f.startErr = &ccpool.ExitError{Cmd: "new", Code: 20} },
+		"reply exits 20":                     func(f *fakeCcpool) { f.replyErrs = []error{&ccpool.ExitError{Cmd: "reply", Code: 20}} },
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
