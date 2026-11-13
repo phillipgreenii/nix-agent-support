@@ -8,7 +8,7 @@
 # ~/.local/state/pg-claude-control. The inbox is <state>/inbox (mode 0700, user-owned, never a
 # symbolic link); the FIFO is mode 0600; payloads/ is mode 0700 (its files are 0600).
 #
-# Exit 78: the inbox directory was refused (the mod does not respawn). File identity uses `test
+# Exit 20 (an app code, not a sysexits one): the inbox directory was refused (the mod does not respawn). File identity uses `test
 # -ef`, never BSD `stat -f`: the PATH here resolves stat to GNU coreutils.
 set -u
 umask 077
@@ -20,7 +20,7 @@ fifo=$inbox/$parent.fifo
 
 refuse() {
   printf 'inbox_dir_refused: %s\n' "$1" >&2
-  exit 78
+  exit 20
 }
 
 prepare_dir() { # <dir>

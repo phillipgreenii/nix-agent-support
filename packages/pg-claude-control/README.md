@@ -34,13 +34,18 @@ every write and every signal, so a reused pid never receives a request or a SIGT
 | 0    |                     | The line was written (not that it took effect)                        |
 | 1    | `internal`          | Reserved for unexpected errors                                        |
 | 2    | `usage`             | Usage error, or a client-side refusal (`/` text, non-allowlisted run) |
-| 3    | `no_such_process`   | Not a running Claude                                                  |
-| 4    | `no_control_mod`    | No inbox after the `--wait` retry: the Claude has no mod              |
-| 5    | `mod_not_accepting` | The FIFO has no reader, or its buffer is full                         |
-| 6    | `refused_by_mod`    | The mod refused a request that carried a reply path                   |
-| 7    | `ambiguous_target`  | A name or session id matches several Claudes (candidates listed)      |
-| 8    | `no_reply`          | No reply within `--timeout`                                           |
-| 9    | `session_stayed`    | `stop` without `--escalate`: still running `--timeout` after `exit`   |
+| 3    | `no_control_mod`    | Unavailable: no inbox after the `--wait` retry, the Claude has no mod |
+| 4    | `no_such_process`   | NotFound: not a running Claude                                        |
+| 6    | `no_reply`          | Timeout: no reply within `--timeout`                                  |
+| 9    | `mod_not_accepting` | Busy: the FIFO has no reader, or its buffer is full                   |
+| 20   | `session_stayed`    | `stop` without `--escalate`: still running `--timeout` after `exit`   |
+| 21   | `refused_by_mod`    | The mod refused a request that carried a reply path                   |
+| 22   | `ambiguous_target`  | A name or session id matches several Claudes (candidates listed)      |
+
+Codes 3, 4, 6 and 9 are the shared codes of `x/exitcode`; 20 to 22 are this command's own. Before
+the shared codes `no_such_process` was 3, `no_control_mod` 4, `mod_not_accepting` 5, `refused_by_mod`
+6, `ambiguous_target` 7, `no_reply` 8 and `session_stayed` 9; callers (ccpool, the plugin README)
+changed with it.
 
 Without `--json` an error prints `error: <name>` then the message on standard error; with `--json` one
 object `{"error","exit","message"}` goes there instead.
@@ -54,7 +59,7 @@ object `{"error","exit","message"}` goes there instead.
 - `stop` sends `interrupt`, then `run exit`; `--escalate <d>` follows with SIGTERM if the Claude is still
   alive after `d`; `--signal` sends SIGTERM at once and works without the mod. SIGKILL is never sent.
   A session with scheduled or background tasks makes Claude ask whether to exit and stop the tasks or
-  stay; the mod does not answer that prompt, so plain `stop` then exits 9 (`session_stayed`) once
+  stay; the mod does not answer that prompt, so plain `stop` then exits 20 (`session_stayed`) once
   `--timeout` passes with the Claude alive, and the caller escalates with `--escalate` or `--signal`.
 - Settings are shared with the mod: `PG_CLAUDE_CONTROL_STATE_DIR` (default
   `$XDG_STATE_HOME/pg-claude-control`, else `~/.local/state/pg-claude-control`) and

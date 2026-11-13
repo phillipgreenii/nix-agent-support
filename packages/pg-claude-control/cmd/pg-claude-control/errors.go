@@ -3,20 +3,26 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// Exit codes: this table is the control command's own; the recorder command's differ.
+// Exit codes: the shared x/exitcode codes where the meaning is generic, app codes 20 to 63 for the
+// rest. Before the shared codes: no_such_process was 3, no_control_mod 4, mod_not_accepting 5,
+// refused_by_mod 6, ambiguous_target 7, no_reply 8 and session_stayed 9.
 const (
-	exitOK           = 0
-	exitInternal     = 1 // reserved for unexpected errors
-	exitUsage        = 2
-	exitNoProcess    = 3
-	exitNoControlMod = 4
-	exitNotAccepting = 5
-	exitRefused      = 6
-	exitAmbiguous    = 7
-	exitNoReply      = 8
-	exitStayed       = 9
+	exitOK           = exitcode.OK
+	exitInternal     = exitcode.Error // reserved for unexpected errors
+	exitUsage        = exitcode.Usage
+	exitNoProcess    = exitcode.NotFound    // not a running Claude
+	exitNoControlMod = exitcode.Unavailable // the Claude has no control mod
+	exitNotAccepting = exitcode.Busy        // the inbox has no reader, or its buffer is full
+	exitNoReply      = exitcode.Timeout     // no reply within --timeout
+
+	// App-specific codes (range 20 to 63).
+	exitStayed    = 20 // stop: exit was sent but the Claude is still running
+	exitRefused   = 21 // the mod refused a request that carried a reply path
+	exitAmbiguous = 22 // a name or session id matches several Claudes
 )
 
 // Stable error names (the --json "error" field; scripts match on these).

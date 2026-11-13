@@ -67,15 +67,29 @@ func TestControlClientSessionStayedMapping(t *testing.T) {
 	var calls []ctlCall
 	err := fakeControl(ctlSessionStayed, nil, &calls).Stop(ctx, "s")
 	if !errors.Is(err, session.ErrSessionStayed) {
-		t.Fatalf("exit 9: err = %v; want ErrSessionStayed", err)
+		t.Fatalf("exit 20: err = %v; want ErrSessionStayed", err)
 	}
 	if errors.Is(err, session.ErrNoControl) {
-		t.Errorf("exit 9 must not map to ErrNoControl: %v", err)
+		t.Errorf("exit 20 must not map to ErrNoControl: %v", err)
 	}
 	for _, exit := range []int{ctlNoSuchProcess, ctlNoControlMod, ctlNotAccepting} {
 		err := fakeControl(exit, nil, &calls).Stop(ctx, "s")
 		if !errors.Is(err, session.ErrNoControl) || errors.Is(err, session.ErrSessionStayed) {
 			t.Errorf("exit %d: err = %v; want ErrNoControl only", exit, err)
+		}
+	}
+}
+
+// The pg-claude-control exit codes are a contract with that command: pin the literals.
+func TestControlExitCodeValues(t *testing.T) {
+	for name, c := range map[string][2]int{
+		"no_such_process":   {ctlNoSuchProcess, 4},
+		"no_control_mod":    {ctlNoControlMod, 3},
+		"mod_not_accepting": {ctlNotAccepting, 9},
+		"session_stayed":    {ctlSessionStayed, 20},
+	} {
+		if c[0] != c[1] {
+			t.Errorf("%s = %d; want %d", name, c[0], c[1])
 		}
 	}
 }

@@ -60,7 +60,7 @@ is valid.
 { "ok": false, "reason": "command not in run.allow: foo" }
 ```
 
-`ok: false` is a refusal by the mod (the command's exit code 6 carries `reason`).
+`ok: false` is a refusal by the mod (the command's exit code 21 carries `reason`).
 
 ## End file
 

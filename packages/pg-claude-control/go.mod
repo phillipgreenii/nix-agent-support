@@ -2,4 +2,4 @@ module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-cl
 
 go 1.26.8
 
-require github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
+require github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076

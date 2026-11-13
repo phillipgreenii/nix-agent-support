@@ -167,7 +167,7 @@ export interface Io {
   pause?: (point: string) => Promise<void>
 }
 
-/** Reply JSON, fixed for the command packet (exit 6 is `ok: false` with the mod's reason). */
+/** Reply JSON, fixed for the command packet (exit 21 is `ok: false` with the mod's reason). */
 export type Reply = { ok: true; result?: Record<string, unknown> } | { ok: false; reason: string }
 
 export class Controller {

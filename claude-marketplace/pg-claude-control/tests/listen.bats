@@ -66,11 +66,11 @@ mode_of() { ls -ld "$1" | cut -c1-10; }
 }
 
 # bats test_tags=fast
-@test "a symbolic link as the inbox directory is refused with exit 78 and an event" {
+@test "a symbolic link as the inbox directory is refused with exit 20 and an event" {
   mkdir -p "$STATE/elsewhere"
   ln -s "$STATE/elsewhere" "$STATE/inbox"
   run bash "$LISTEN"
-  [ "$status" -eq 78 ]
+  [ "$status" -eq 20 ]
   [[ "$output" == *"inbox_dir_refused"* ]]
 }
 
@@ -78,7 +78,7 @@ mode_of() { ls -ld "$1" | cut -c1-10; }
 @test "a directory owned by someone else is refused" {
   [ ! -O / ] || skip "the root directory is ours"
   PG_CLAUDE_CONTROL_STATE_DIR=/ run bash "$LISTEN"
-  [ "$status" -eq 78 ]
+  [ "$status" -eq 20 ]
   [[ "$output" == *"not owned"* ]]
 }
 

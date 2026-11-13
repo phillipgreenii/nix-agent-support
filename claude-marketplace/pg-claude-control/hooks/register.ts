@@ -80,7 +80,7 @@ export const register: Register = on => {
         } catch (err2) {
           await c.event(io, 'listener_error', { error: String(err2) })
         }
-        if (refused || code === 78) return // inbox directory refused: nothing to respawn into
+        if (refused || code === 20) return // inbox directory refused: nothing to respawn into
         const d = c.respawn.onExit((await io.now()) - t0)
         if (d.giveUp) {
           await c.event(io, 'listener.gave_up', { tries: d.consecutive })

@@ -223,12 +223,12 @@ func TestExitCodes(t *testing.T) {
 		{"usage: missing target", "", []string{"interrupt"}, 2, "usage"},
 		{"usage: bad flag", "", []string{"interrupt", "4242", "--nope"}, 2, "usage"},
 		{"usage: signal and escalate", "", []string{"stop", "4242", "--signal", "--escalate", "1s"}, 2, "exclude"},
-		{"3: unknown pid", "x", []string{"submit", "999"}, 3, "pid 999 is not a running Claude"},
-		{"3: unknown name", "x", []string{"submit", "ghost"}, 3, "no running Claude"},
-		{"4: no inbox", "x", []string{"submit", "4400", "--wait", "120ms"}, 4, "waiting for inbox"},
-		{"5: nobody reading", "x", []string{"submit", "4500"}, 5, "stop pid:4500 --escalate"},
-		{"7: ambiguous name", "x", []string{"submit", "dup"}, 7, "pid 4300"},
-		{"7: ambiguous name lists both", "x", []string{"submit", "name:dup"}, 7, "pid 4301"},
+		{"not found: unknown pid", "x", []string{"submit", "999"}, exitNoProcess, "pid 999 is not a running Claude"},
+		{"not found: unknown name", "x", []string{"submit", "ghost"}, exitNoProcess, "no running Claude"},
+		{"unavailable: no inbox", "x", []string{"submit", "4400", "--wait", "120ms"}, exitNoControlMod, "waiting for inbox"},
+		{"busy: nobody reading", "x", []string{"submit", "4500"}, exitNotAccepting, "stop pid:4500 --escalate"},
+		{"ambiguous: name", "x", []string{"submit", "dup"}, exitAmbiguous, "pid 4300"},
+		{"ambiguous: name lists both", "x", []string{"submit", "name:dup"}, exitAmbiguous, "pid 4301"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -251,7 +251,7 @@ func TestExit4MessageNamesStopAndMod(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4400, uuid1, "nomod", startA)
 	w.stdin = "x"
-	if rc := w.run("submit", "4400", "--wait", "100ms"); rc != 4 {
+	if rc := w.run("submit", "4400", "--wait", "100ms"); rc != exitNoControlMod {
 		t.Fatalf("rc=%d", rc)
 	}
 	e := w.errb.String()
@@ -287,14 +287,14 @@ func TestExit4RetriesUntilTheFifoAppears(t *testing.T) {
 	}
 }
 
-func TestExit4WaitIsCountedInRetrySteps(t *testing.T) {
+func TestNoControlModWaitIsCountedInRetrySteps(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)
 	a := w.app()
 	var total time.Duration
 	a.sleep = func(d time.Duration) { total += d }
 	a.stdin = strings.NewReader("x")
-	if rc := a.run([]string{"submit", "4242"}); rc != 4 {
+	if rc := a.run([]string{"submit", "4242"}); rc != exitNoControlMod {
 		t.Fatalf("rc=%d", rc)
 	}
 	if total != defaultWait {
@@ -309,7 +309,7 @@ func TestFifoWithoutReaderIsExit5NotRetried(t *testing.T) {
 	a := w.app()
 	a.sleep = func(time.Duration) { t.Fatal("ENXIO must not be retried") }
 	a.stdin = strings.NewReader("x")
-	if rc := a.run([]string{"submit", "4242"}); rc != 5 {
+	if rc := a.run([]string{"submit", "4242"}); rc != exitNotAccepting {
 		t.Fatalf("rc=%d", rc)
 	}
 }
@@ -332,7 +332,7 @@ func TestExit5FullBuffer(t *testing.T) {
 	}
 	_ = syscall.Close(fd)
 	w.stdin = "x"
-	if rc := w.run("submit", "4242"); rc != 5 {
+	if rc := w.run("submit", "4242"); rc != exitNotAccepting {
 		t.Fatalf("rc=%d err=%s", rc, w.errb.String())
 	}
 }
@@ -346,7 +346,7 @@ func TestExit6RefusedAndRepliesCarryResults(t *testing.T) {
 		}
 		return `{"ok":false,"reason":"command not in run.allow: compact"}` + "\n"
 	})
-	if rc := w.run("run", "--reply", "4242", "compact"); rc != 6 {
+	if rc := w.run("run", "--reply", "4242", "compact"); rc != exitRefused {
 		t.Fatalf("rc=%d", rc)
 	}
 	if !strings.Contains(w.errb.String(), "command not in run.allow") || !strings.Contains(w.errb.String(), "refused_by_mod") {
@@ -377,7 +377,7 @@ func TestExit8NoReply(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)
 	w.inbox(4242, nil)
-	if rc := w.run("read", "4242", "--timeout", "150ms", "--json"); rc != 8 {
+	if rc := w.run("read", "4242", "--timeout", "150ms", "--json"); rc != exitNoReply {
 		t.Fatalf("rc=%d", rc)
 	}
 	var e struct {
@@ -385,7 +385,7 @@ func TestExit8NoReply(t *testing.T) {
 		Exit  int
 	}
 	must(t, json.Unmarshal(w.errb.Bytes(), &e))
-	if e.Error != "no_reply" || e.Exit != 8 {
+	if e.Error != "no_reply" || e.Exit != exitNoReply {
 		t.Fatalf("err %s", w.errb.String())
 	}
 }
@@ -429,7 +429,7 @@ func TestTargetReadings(t *testing.T) {
 	send("example-one") // anything else is a name
 	next(t, ch42)
 	w.stdin = "t"
-	if rc := w.run("submit", "name:"+uuid1); rc != 3 { // forced name: no Claude is named that
+	if rc := w.run("submit", "name:"+uuid1); rc != exitNoProcess { // forced name: no Claude is named that
 		t.Fatalf("rc=%d", rc)
 	}
 }
@@ -443,7 +443,7 @@ func TestReusedPidNothingWrittenOrSignalled(t *testing.T) {
 	w.mu.Unlock()
 	w.stdin = "x"
 	for _, args := range [][]string{{"submit", "4242"}, {"interrupt", "4242"}, {"stop", "4242", "--signal"}, {"stop", "4242"}, {"run", "4242", "exit"}} {
-		if rc := w.run(args...); rc != 3 {
+		if rc := w.run(args...); rc != exitNoProcess {
 			t.Fatalf("%v: rc=%d err=%s", args, rc, w.errb.String())
 		}
 	}
@@ -458,7 +458,7 @@ func TestDeadPid(t *testing.T) {
 	w.claude(4242, uuid1, "example-one", startA)
 	w.die(4242)
 	w.stdin = "x"
-	if rc := w.run("submit", "4242"); rc != 3 {
+	if rc := w.run("submit", "4242"); rc != exitNoProcess {
 		t.Fatalf("rc=%d", rc)
 	}
 }
@@ -546,7 +546,7 @@ func TestStopSignalWorksWithoutTheMod(t *testing.T) {
 func TestStopWithoutModSuggestsSignal(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)
-	if rc := w.run("stop", "4242", "--wait", "50ms"); rc != 4 {
+	if rc := w.run("stop", "4242", "--wait", "50ms"); rc != exitNoControlMod {
 		t.Fatalf("rc=%d", rc)
 	}
 	if !strings.Contains(w.errb.String(), "stop pid:4242 --signal") {
@@ -595,7 +595,7 @@ func TestStopReportsSessionStayedWhenTheClaudeStaysAlive(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)
 	w.inbox(4242, func(string) string { return `{"ok":true}` + "\n" }) // exit asked, Claude stays
-	if rc := w.run("stop", "4242", "--timeout", "150ms"); rc != 9 {
+	if rc := w.run("stop", "4242", "--timeout", "150ms"); rc != exitStayed {
 		t.Fatalf("rc=%d err=%s", rc, w.errb.String())
 	}
 	for _, want := range []string{"error: session_stayed", "stop pid:4242 --signal"} {
@@ -612,7 +612,7 @@ func TestStopPrintsTheModsRefusal(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)
 	w.inbox(4242, func(string) string { return `{"ok":false,"reason":"command not in run.allow: exit"}` + "\n" })
-	if rc := w.run("stop", "4242", "--escalate", "5s"); rc != 6 {
+	if rc := w.run("stop", "4242", "--escalate", "5s"); rc != exitRefused {
 		t.Fatalf("rc=%d", rc)
 	}
 	if !strings.Contains(w.errb.String(), "command not in run.allow: exit") {
@@ -655,7 +655,7 @@ func TestJSONErrorShape(t *testing.T) {
 	w.claude(4300, uuid2, "dup", startA)
 	w.claude(4301, uuid1, "dup", startA)
 	w.stdin = "x"
-	if rc := w.run("submit", "dup", "--json"); rc != 7 {
+	if rc := w.run("submit", "dup", "--json"); rc != exitAmbiguous {
 		t.Fatalf("rc=%d", rc)
 	}
 	var e struct {
@@ -664,7 +664,7 @@ func TestJSONErrorShape(t *testing.T) {
 		Message string
 	}
 	must(t, json.Unmarshal(w.errb.Bytes(), &e))
-	if e.Error != "ambiguous_target" || e.Exit != 7 || strings.Count(e.Message, "\npid ") != 2 {
+	if e.Error != "ambiguous_target" || e.Exit != exitAmbiguous || strings.Count(e.Message, "\npid ") != 2 {
 		t.Fatalf("err %+v", e)
 	}
 }
@@ -679,5 +679,22 @@ func TestStateDirResolution(t *testing.T) {
 	a = &app{getenv: func(k string) string { return map[string]string{"HOME": "/example/home"}[k] }}
 	if d, _ := a.stateDir(); d != "/example/home/.local/state/pg-claude-control" {
 		t.Fatal(d)
+	}
+}
+
+// The wire values are a contract with callers (ccpool, scripts): pin the literals.
+func TestExitCodeValues(t *testing.T) {
+	for name, c := range map[string][2]int{
+		"no_such_process":   {exitFor[errNoProcess], 4},
+		"no_control_mod":    {exitFor[errNoControlMod], 3},
+		"mod_not_accepting": {exitFor[errNotAccepting], 9},
+		"no_reply":          {exitFor[errNoReply], 6},
+		"session_stayed":    {exitFor[errStayed], 20},
+		"refused_by_mod":    {exitFor[errRefused], 21},
+		"ambiguous_target":  {exitFor[errAmbiguous], 22},
+	} {
+		if c[0] != c[1] {
+			t.Errorf("%s exits %d; want %d", name, c[0], c[1])
+		}
 	}
 }

@@ -10,17 +10,19 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/session"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // controlBin is the pg-claude-control command (found on PATH).
 const controlBin = "pg-claude-control"
 
-// pg-claude-control exit codes ccpool branches on (the command's own table).
+// pg-claude-control exit codes ccpool branches on: the shared x/exitcode codes plus the command's
+// own app code (its README table). Before the shared codes these were 3, 4, 5 and 9.
 const (
-	ctlNoSuchProcess = 3 // not a running Claude
-	ctlNoControlMod  = 4 // the Claude has no control mod
-	ctlNotAccepting  = 5 // the inbox has no reader, or its buffer is full
-	ctlSessionStayed = 9 // stop: exit was sent but the process is still running
+	ctlNoSuchProcess = exitcode.NotFound    // not a running Claude
+	ctlNoControlMod  = exitcode.Unavailable // the Claude has no control mod
+	ctlNotAccepting  = exitcode.Busy        // the inbox has no reader, or its buffer is full
+	ctlSessionStayed = 20                   // stop: exit was sent but the process is still running
 )
 
 // controlRunFunc runs the control command and reports its exit code and stderr.

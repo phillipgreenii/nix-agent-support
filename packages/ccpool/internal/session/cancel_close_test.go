@@ -355,7 +355,7 @@ func TestClose_forceKillsWhenSessionStayedAfterExit(t *testing.T) {
 	st := newMemStore(t)
 	_ = st.Insert(ctx, store.Session{ExternalID: "a", ClaudeSessionID: "csid", State: store.Ready, TmuxSession: "cc-a"})
 	tm := &closeTmux{live: true} // stays live after /exit
-	ctl := &fakeControl{err: fmt.Errorf("pg-claude-control stop: exit 9: %w", ErrSessionStayed)}
+	ctl := &fakeControl{err: fmt.Errorf("pg-claude-control stop: exit 20: %w", ErrSessionStayed)}
 	s := New(Deps{Tmux: tm, Trust: &fakeTrust{}, Store: st, Control: ctl, Prefix: "cc-", Now: func() time.Time { return time.Unix(1, 0) }})
 
 	if err := s.Close(ctx, "a", false); err != nil {
