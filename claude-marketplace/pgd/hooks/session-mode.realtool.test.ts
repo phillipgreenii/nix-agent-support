@@ -21,7 +21,7 @@ import { DEFAULT_OPTIONS, type PgdOptions } from './types'
 import { fakeClock, settle, stubHost } from './testkit'
 
 const T = DEFAULT_OPTIONS.alerts.thresholds
-const only: PgdOptions = { ...DEFAULT_OPTIONS, components: { ...DEFAULT_OPTIONS.components, beads: false, prStatus: false } }
+const only: PgdOptions = { ...DEFAULT_OPTIONS, components: { ...DEFAULT_OPTIONS.components, beads: false, assume: false, prStatus: false } }
 
 type Answer = { exitCode: number; stdout?: string } | Error
 interface Call {

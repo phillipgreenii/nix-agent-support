@@ -75,6 +75,7 @@ let
         wtaudit.enable = lib.mkEnableOption "wtaudit (stub)";
         pb.enable = lib.mkEnableOption "pb (stub)";
         beads.enable = lib.mkEnableOption "beads (stub)";
+        pg-git-lander.enable = lib.mkEnableOption "pg-git-lander (stub)";
         session-mode.enable = fromClaude;
         handoff-create.enable = fromClaude;
         integrate-branch-support.enable = fromClaude;
@@ -116,7 +117,6 @@ let
     "pg-router"
     "pa-monitor"
     "pg-keep-awake"
-    "pg-git-lander"
     "agentsview"
   ];
 
@@ -143,9 +143,10 @@ let
               enable = claudeCode;
               marketplaces.nixProvided = [ marketplace ];
             };
-            # pb and beads are on, so only the worktree tools decide the three plugins
+            # pb, beads and pg-git-lander are on, so only the worktree tools decide the three plugins
             pb.enable = true;
             beads.enable = true;
+            pg-git-lander.enable = true;
           }
           // lib.mapAttrs (_: v: { enable = v; }) tools
           // lib.optionalAttrs (toggle != null) { worktree-tools.enable = toggle; };

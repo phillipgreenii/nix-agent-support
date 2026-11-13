@@ -2383,6 +2383,7 @@
                       ./claude-marketplace/plan-decompose/agents/packet-implementer.md
                       ./claude-marketplace/plan-decompose/skills/plan-decompose/references/reconcile.md
                       ./claude-marketplace/bead-grooming
+                      ./claude-marketplace/beads-lifecycle/skills/beads-lifecycle/SKILL.md
                     ];
                   };
                 in
