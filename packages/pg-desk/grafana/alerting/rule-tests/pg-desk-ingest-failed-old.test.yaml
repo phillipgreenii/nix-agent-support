@@ -112,11 +112,57 @@ tests:
       - series: pg_desk_liveness{job="pg-desk"}
         values: "1x30 _x30"
     promql_expr_test:
-      - expr: max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+      - expr: (max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))
         eval_time: 10m
         exp_samples: []
-      - expr: max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+      - expr: (max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))
         eval_time: 50m
         exp_samples:
           - labels: "{}"
             value: 0
+
+  # The age grows 1 s per second while pg-router skips every producer tick (host-load
+  # backoff, gauge 1 from minute 4 to 39), so no retry ran and nothing failed. Without the
+  # exemption the age passes 1800 at minute 30 and the alert fires at minute 41; with it the
+  # rule stays quiet through minute 49 and the exemption is a label-less 0, never NoData.
+  - name: an age grown only under a router backoff does not fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_ingest_failed_oldest_age_seconds{backend="jira-a",job="pg-desk"}
+        values: "0+60x60"
+      - series: pg_desk_liveness{job="pg-desk"}
+        values: "1x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x4 1x36 0x20"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-ingest-failed-old
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-desk-ingest-failed-old
+        exp_alerts: []
+    promql_expr_test:
+      - expr: (max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))
+        eval_time: 45m
+        exp_samples:
+          - labels: "{}"
+            value: 0
+
+  # The backoff ended long ago and the entry is still failing: a genuinely stuck entry fires.
+  - name: a stuck entry fires once the backoff window has passed
+    interval: 1m
+    input_series:
+      - series: pg_desk_ingest_failed_oldest_age_seconds{backend="jira-a",job="pg-desk"}
+        values: "2400x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "1x5 0x55"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-ingest-failed-old
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-ingest-failed-old
+        exp_alerts:
+          - exp_labels:
+              backend: jira-a
+              severity: warning

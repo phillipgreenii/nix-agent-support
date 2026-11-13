@@ -1,0 +1,81 @@
+# promtool unit tests for the pg-desk-focus-pending-beads-age alert, covering its pg-router
+# host-load backoff exemption. Run by the flake check test-pg-desk-alert-rules through
+# grafana/check-alert-rules.sh, which generates rules.yml next to this file: the Grafana rule's
+# refId A wrapped as `alert: <uid>` with `expr: (<A>) > 1800`, the rule's `for: 10m` and labels.
+#
+# Time model: 1m series. The oldest unminted focus row older than 1800s for 10m fires while the PR
+# lane is in apply mode; the decider reacts to change events that come from producer polls, so a
+# backoff set in the last 10m exempts it.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an old unminted row fires in apply mode
+    interval: 1m
+    input_series:
+      - series: pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted",job="pg-desk"}
+        values: "2400x60"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-desk-focus-pending-beads-age
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-desk-focus-pending-beads-age
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: outside apply mode it is quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted",job="pg-desk"}
+        values: "2400x60"
+      - series: pg_desk_pr_lane_mode{mode="plan",job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-focus-pending-beads-age
+        exp_alerts: []
+
+  # The age grows 60 s per minute while no poll runs (backoff gauge 1 from minute 4 to 39).
+  # Without the exemption it passes 1800 at minute 30 and the alert fires at minute 41; with it
+  # the rule is quiet through minute 49.
+  - name: an age grown only under a router backoff does not fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted",job="pg-desk"}
+        values: "0+60x60"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x4 1x36 0x20"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-desk-focus-pending-beads-age
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-desk-focus-pending-beads-age
+        exp_alerts: []
+
+  - name: a row still unminted once the backoff window has passed fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted",job="pg-desk"}
+        values: "2400x60"
+      - series: pg_desk_pr_lane_mode{mode="apply",job="pg-desk"}
+        values: "1x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "1x5 0x55"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-focus-pending-beads-age
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-focus-pending-beads-age
+        exp_alerts:
+          - exp_labels:
+              severity: warning

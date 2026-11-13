@@ -114,6 +114,15 @@ groups:
       #     that into Normal, so an Alerting/Pending instance resolves when the
       #     pause begins. After the pause clears, the `for: 10m` window
       #     restarts, giving the heartbeat time to resume before it can fire.
+      # Backoff exemption (decision: exempt): pg-router's host-load backoff skips the
+      # producer tick, and the desk-heartbeat query is a polled trigger, so under a
+      # sustained backoff meta.last_heartbeat stops advancing and the snapshot goes
+      # stale with nothing wrong in pg-desk. The series is dropped
+      # (`unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)`)
+      # while the gauge was set at any point in the last 10m; the stall itself is
+      # reported once by pg-router-producer-load-backoff. An absent gauge exempts
+      # nothing, and a stale snapshot still alerts for 10m after the backoff ends.
+      # The router pause guard stays the tail of the expression.
       - uid: pg-desk-sync-stale
         title: pg-desk-serve dashboard snapshot is stale
         condition: C
@@ -124,7 +133,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-desk-serve's dashboard snapshot has been stale for over 10 minutes"
-          description: 'pg_desk_dashboard_stale has reported 1 for over 10 minutes -- the served snapshot has not been refreshed within its configured staleAfterSeconds bound. See pg_desk_dashboard_age_seconds for the actual age in seconds. This rule is suppressed while a pg-router router pause is active (pg_router_resource_level{resource="router"} == 1), because a pause deliberately stops the desk-heartbeat dispatch; if it fires, no router pause was in force.'
+          description: 'pg_desk_dashboard_stale has reported 1 for over 10 minutes -- the served snapshot has not been refreshed within its configured staleAfterSeconds bound. See pg_desk_dashboard_age_seconds for the actual age in seconds. This rule is suppressed while a pg-router router pause is active (pg_router_resource_level{resource="router"} == 1), because a pause deliberately stops the desk-heartbeat dispatch, and while a pg-router host-load backoff (pg_router_producer_load_backoff) was set in the last 10 minutes, because the skipped producer ticks stop the heartbeat too; if it fires, neither was in force.'
         data:
           - refId: A
             relativeTimeRange:
@@ -135,7 +144,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_desk_dashboard_stale unless on() (pg_router_resource_level{resource="router"} == 1)
+              expr: pg_desk_dashboard_stale unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0) unless on() (pg_router_resource_level{resource="router"} == 1)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -164,6 +173,11 @@ groups:
       # counted. Same router pause suppression as pg-desk-sync-stale (a pause
       # stops the connector polls, so sources age by design); noDataState: OK
       # for the same reasons (absence is covered by the liveness rule).
+      # Backoff exemption (decision: exempt): every source is refreshed by a producer
+      # poll, and a backoff skips them all, so every source ages together with no
+      # fetch having failed. Same backoff exemption as pg-desk-sync-stale; a source
+      # that is still stale 10m after the backoff ends alerts as before. The router
+      # pause guard stays the tail of the expression.
       - uid: pg-desk-sources-stale
         title: pg-desk has stale sources
         condition: C
@@ -174,7 +188,7 @@ groups:
           severity: warning
         annotations:
           summary: "One or more pg-desk sources have been stale for over 10 minutes"
-          description: "pg_desk_sources_stale has reported at least 1 for over 10 minutes -- a source has no successful origin fetch within its stale-after bound, or has never succeeded. See pg_desk_source_age_seconds{source} for ages (a never-succeeded source has no series) and `pg-desk freshness` for the per-source report. Retired/abandoned ghost rows are not counted. Suppressed while a pg-router router pause is active."
+          description: "pg_desk_sources_stale has reported at least 1 for over 10 minutes -- a source has no successful origin fetch within its stale-after bound, or has never succeeded. See pg_desk_source_age_seconds{source} for ages (a never-succeeded source has no series) and `pg-desk freshness` for the per-source report. Retired/abandoned ghost rows are not counted. Suppressed while a pg-router router pause is active, and while a pg-router host-load backoff was set in the last 10 minutes (no poll ran)."
         data:
           - refId: A
             relativeTimeRange:
@@ -185,7 +199,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: pg_desk_sources_stale unless on() (pg_router_resource_level{resource="router"} == 1)
+              expr: pg_desk_sources_stale unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0) unless on() (pg_router_resource_level{resource="router"} == 1)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -303,6 +317,15 @@ groups:
       # worth hearing about. `for: 10m` rides out one slow poll; warning,
       # because the feed is acknowledged past a row only after it is recorded,
       # so nothing is lost while the alert is open.
+      # Backoff exemption (decision: exempt): the age counts from the entry's first
+      # failure and a failed entry is retried only inside a poll, so a backoff that
+      # outlasts the bound leaves a freshly failed entry over 30 minutes old without
+      # a single retry having run. While pg_router_producer_load_backoff was set in
+      # the last 10m the per-backend series is replaced by a label-less 0 (never an
+      # empty result, which would alert under noDataState), the same shape as
+      # pg-desk-issue-orphan-read-lag. A genuinely stuck entry is hidden for at most
+      # the backoff plus the 10m window and then alerts after `for: 10m`: it fails
+      # its retries once polls resume. Absent gauge exempts nothing.
       - uid: pg-desk-ingest-failed-old
         title: pg-desk has a failed-ingest entry older than 30 minutes
         condition: C
@@ -313,7 +336,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-desk backend {{ $labels.backend }} has a failed-ingest entry older than 30 minutes, or cannot count its entries"
-          description: "pg_desk_ingest_failed_oldest_age_seconds has read over 1800 seconds for backend {{ $labels.backend }} for over 10 minutes (the oldest feed row pg-desk could not hydrate is still failing every retry), or the series is missing while pg-desk is up (the store cannot answer). Run `pg-desk doctor` for the entries and their last errors; pg_desk_ingest_failed counts them. The threshold is fixed at 1800 seconds; hydration.ingest_failed_max_age governs doctor only."
+          description: "pg_desk_ingest_failed_oldest_age_seconds has read over 1800 seconds for backend {{ $labels.backend }} for over 10 minutes (the oldest feed row pg-desk could not hydrate is still failing every retry), or the series is missing while pg-desk is up (the store cannot answer). Run `pg-desk doctor` for the entries and their last errors; pg_desk_ingest_failed counts them. The threshold is fixed at 1800 seconds; hydration.ingest_failed_max_age governs doctor only. A pg-router host-load backoff in the last 10 minutes exempts the rule, because no retry ran."
         data:
           - refId: A
             relativeTimeRange:
@@ -324,7 +347,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))
+              expr: (max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -541,6 +564,13 @@ groups:
       # unless pg_desk_pr_lane_mode reads 1 on apply (`and on()` drops the whole
       # result otherwise, and an absent gauge, a store below schema 2, drops it
       # too).
+      # Backoff exemption (decision: exempt): the decider mints a focus bead when it
+      # reacts to a change event, and the events come from producer polls, so a
+      # sustained backoff leaves a selected row unminted with the decider healthy.
+      # `unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)` drops
+      # the result (NoData, which noDataState: OK maps to Normal) while the gauge was
+      # set in the last 10m; a decider that is unbound or failing still alerts once
+      # polls have resumed.
       - uid: pg-desk-focus-pending-beads-age
         title: pg-desk focus rows have waited too long for their bead
         condition: C
@@ -551,7 +581,7 @@ groups:
           severity: warning
         annotations:
           summary: "A selected focus row has had no bead for over 30 minutes"
-          description: "The PR lane is in apply mode, and the oldest focus row that is selected, live and has no bead (reason=unminted) has waited over 1800 seconds for 10 minutes. The decider role that mints focus beads is unbound, still in plan mode, or failing. Run `pg-desk doctor` for the focus block, then check the router's focus role binding and mode."
+          description: "The PR lane is in apply mode, and the oldest focus row that is selected, live and has no bead (reason=unminted) has waited over 1800 seconds for 10 minutes. The decider role that mints focus beads is unbound, still in plan mode, or failing. Run `pg-desk doctor` for the focus block, then check the router's focus role binding and mode. Exempt while a pg-router host-load backoff was set in the last 10 minutes (no poll ran, so no change event reached the decider)."
         data:
           - refId: A
             relativeTimeRange:
@@ -562,7 +592,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"}) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)
+              expr: max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"}) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -824,6 +854,11 @@ groups:
                     type: gt
                     params: [0]
 
+      # Backoff exemption (decision: exempt): the issue consumer's cursor advances only
+      # when the issue change feed is polled, so under a sustained host-load backoff
+      # the lag grows with the consumer healthy. Same exemption as
+      # pg-desk-focus-pending-beads-age (NoData maps to Normal); a lag that stays over
+      # 500 after the backoff ends still alerts after `for: 30m`.
       - uid: pg-desk-focus-consumer-lag
         title: pg-desk focus issue consumer is lagging
         condition: C
@@ -834,7 +869,7 @@ groups:
           severity: warning
         annotations:
           summary: "The focus role's issue.changed consumer is over 500 changes behind"
-          description: "The lag of the pg-router issue change-log consumer (highest issue change sequence minus the consumer cursor) has exceeded 500 for over 30 minutes, so the focus decider is not keeping up with issue changes. The 500 threshold is provisional: the operator checkpoint sets the final budget from the measured decider cost."
+          description: "The lag of the pg-router issue change-log consumer (highest issue change sequence minus the consumer cursor) has exceeded 500 for over 30 minutes, so the focus decider is not keeping up with issue changes. The 500 threshold is provisional: the operator checkpoint sets the final budget from the measured decider cost. Exempt while a pg-router host-load backoff was set in the last 10 minutes (the feed was not polled)."
         data:
           - refId: A
             relativeTimeRange:
@@ -845,7 +880,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max(pg_desk_consumer_lag{type="issue",consumer="pg-router"})
+              expr: max(pg_desk_consumer_lag{type="issue",consumer="pg-router"}) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -874,6 +909,11 @@ groups:
       # many pr rows are hydrations. The threshold (50) is PROVISIONAL, a sustained backlog rather
       # than one scrape that caught a row between a poll and the scrape. While a pg-router
       # router pause blocks the query the lag grows on purpose, so the rule is suppressed.
+      # Backoff exemption (decision: exempt): the annotation feed's cursor advances
+      # only when the desk-pr-annotations query is polled, which a host-load backoff
+      # skips, so the lag grows like it does under a router pause. The exemption sits
+      # before the pause guard; a feed that is still behind after the backoff ends
+      # alerts after `for: 30m`.
       - uid: pg-desk-pr-annotation-consumer-lag
         title: pg-desk pr annotation feed is lagging
         condition: C
@@ -884,7 +924,7 @@ groups:
           severity: warning
         annotations:
           summary: "The pr annotation feed (consumer annotations:pr-lane) is over 50 changes behind"
-          description: "pg_desk_consumer_lag for type pr and consumer annotations:pr-lane (highest pr change sequence minus the consumer cursor) has exceeded 50 for over 30 minutes, so annotation changes (hide, unhide, wip, annotate, suppress, feedback, force-review) are not reaching the pr-change role: the desk-pr-annotations query is failing or never runs. An empty poll is a success to the router source alerts, so this lag is the only signal of a stuck feed. The verb advances its cursor past the rows it scanned, so a feed that runs keeps the lag near 0 even when most pr rows are hydrations. The 50 threshold is provisional. Suppressed while a pg-router router pause is active (the query does not run then, so lag grows on purpose)."
+          description: "pg_desk_consumer_lag for type pr and consumer annotations:pr-lane (highest pr change sequence minus the consumer cursor) has exceeded 50 for over 30 minutes, so annotation changes (hide, unhide, wip, annotate, suppress, feedback, force-review) are not reaching the pr-change role: the desk-pr-annotations query is failing or never runs. An empty poll is a success to the router source alerts, so this lag is the only signal of a stuck feed. The verb advances its cursor past the rows it scanned, so a feed that runs keeps the lag near 0 even when most pr rows are hydrations. The 50 threshold is provisional. Suppressed while a pg-router router pause is active (the query does not run then, so lag grows on purpose), and while a pg-router host-load backoff was set in the last 10 minutes (the poll was skipped)."
         data:
           - refId: A
             relativeTimeRange:
@@ -895,7 +935,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane"}) unless on() (pg_router_resource_level{resource="router"} == 1)'
+              expr: 'max(pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane"}) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:

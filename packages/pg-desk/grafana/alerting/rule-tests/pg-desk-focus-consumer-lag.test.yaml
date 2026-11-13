@@ -1,0 +1,75 @@
+# promtool unit tests for the pg-desk-focus-consumer-lag alert, covering its pg-router host-load
+# backoff exemption. Run by the flake check test-pg-desk-alert-rules through
+# grafana/check-alert-rules.sh, which generates rules.yml next to this file: the Grafana rule's
+# refId A wrapped as `alert: <uid>` with `expr: (<A>) > 500`, the rule's `for: 30m` and labels.
+#
+# Time model: 1m series. The issue consumer `pg-router` lag above 500 for 30m fires; the lag grows
+# without any fault while pg-router skips every producer tick under host load, so a backoff set in
+# the last 10m exempts it (the result is empty, which noDataState: OK maps to Normal).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a stuck consumer fires after 30m, not before
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="issue",consumer="pg-router",job="pg-desk"}
+        values: "900x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-desk-focus-consumer-lag
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-focus-consumer-lag
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: another consumer or another type is out of scope
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="issue",consumer="scratch",job="pg-desk"}
+        values: "900x120"
+      - series: pg_desk_consumer_lag{type="pr",consumer="pg-router",job="pg-desk"}
+        values: "900x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-focus-consumer-lag
+        exp_alerts: []
+
+  # The lag grows 100 per minute while the feed is not polled (backoff gauge 1 from minute 4 to
+  # 39). Without the exemption the lag passes 500 at minute 5 and the alert fires at minute 36;
+  # with it the rule is quiet through minute 49.
+  - name: a lag grown only under a router backoff does not fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="issue",consumer="pg-router",job="pg-desk"}
+        values: "0+100x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x4 1x36 0x20"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-focus-consumer-lag
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-desk-focus-consumer-lag
+        exp_alerts: []
+
+  - name: a stuck consumer fires once the backoff window has passed
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="issue",consumer="pg-router",job="pg-desk"}
+        values: "900x120"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "1x5 0x115"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-focus-consumer-lag
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-desk-focus-consumer-lag
+        exp_alerts:
+          - exp_labels:
+              severity: warning

@@ -1,0 +1,76 @@
+# promtool unit tests for the pg-desk-sources-stale alert, covering its pg-router host-load backoff
+# exemption and the existing router pause guard. Run by the flake check test-pg-desk-alert-rules
+# through grafana/check-alert-rules.sh, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) >= 1`, the rule's `for: 10m` and labels.
+#
+# Time model: 1m series. pg_desk_sources_stale at 1 for 10m fires; a router pause or a backoff
+# set in the last 10m drops it (every source is refreshed by a producer poll).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a stale source fires after 10m
+    interval: 1m
+    input_series:
+      - series: pg_desk_sources_stale{job="pg-desk"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-desk-sources-stale
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: pg-desk-sources-stale
+        exp_alerts:
+          - exp_labels:
+              job: pg-desk
+              severity: warning
+
+  - name: a router pause suppresses it
+    interval: 1m
+    input_series:
+      - series: pg_desk_sources_stale{job="pg-desk"}
+        values: "1x60"
+      - series: pg_router_resource_level{resource="router",job="pg-router"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-sources-stale
+        exp_alerts: []
+
+  # The count reaches 1 at minute 8 because no source was polled
+  # (backoff gauge 1 from minute 4 to 39). Without the exemption it fires at minute 18; with it the
+  # rule is quiet through minute 49.
+  - name: a source stale only under a router backoff does not fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_sources_stale{job="pg-desk"}
+        values: "0x7 1x53"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x4 1x36 0x20"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-sources-stale
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-desk-sources-stale
+        exp_alerts: []
+
+  - name: a source still stale once the backoff window has passed fires
+    interval: 1m
+    input_series:
+      - series: pg_desk_sources_stale{job="pg-desk"}
+        values: "1x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "1x5 0x55"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-desk-sources-stale
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-desk-sources-stale
+        exp_alerts:
+          - exp_labels:
+              job: pg-desk
+              severity: warning

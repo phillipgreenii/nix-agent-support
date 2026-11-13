@@ -79,3 +79,39 @@ tests:
       - eval_time: 40m
         alertname: pg-desk-pr-annotation-consumer-lag
         exp_alerts: []
+
+  # The lag grows 10 per minute while pg-router skips every producer tick (host-load backoff,
+  # gauge 1 from minute 4 to 39) and the feed is not polled. Without the exemption the lag passes
+  # 50 at minute 5 and the alert fires at minute 36; with it the rule is quiet through minute 49.
+  - name: a lag grown only under a router backoff does not fire
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane",job="pg-desk"}
+        values: "0+10x60"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "0x4 1x36 0x20"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+
+  # A lag still over the bound long after the backoff ended is a stuck feed: fires.
+  - name: a stuck feed fires once the backoff window has passed
+    interval: 1m
+    input_series:
+      - series: pg_desk_consumer_lag{type="pr",consumer="annotations:pr-lane",job="pg-desk"}
+        values: "800x120"
+      - series: pg_router_producer_load_backoff{job="pg-router"}
+        values: "1x5 0x115"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-desk-pr-annotation-consumer-lag
+        exp_alerts:
+          - exp_labels:
+              severity: warning

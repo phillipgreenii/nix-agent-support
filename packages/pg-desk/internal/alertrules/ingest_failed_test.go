@@ -19,7 +19,7 @@ import (
 // wantIngestFailedExpr MUST equal the expr of rule pg-desk-ingest-failed-old.
 // The semantics are modelled below and the YAML is pinned to this exact text
 // (the approach of sweep_bound_test.go).
-const wantIngestFailedExpr = `max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) or (vector(0) and on() absent(pg_desk_liveness == 1))`
+const wantIngestFailedExpr = `(max by (backend) (pg_desk_ingest_failed_oldest_age_seconds) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)) or (vector(0) and on() absent(pg_desk_liveness == 1))`
 
 // ingestFailedBoundSeconds is the rule's FIXED threshold: the documented
 // default (30 minutes) of hydration.ingest_failed_max_age, which governs

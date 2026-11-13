@@ -104,7 +104,7 @@ func laneIsApply(in []focusSample) bool {
 var focusRules = []focusRule{
 	{
 		uid:       "pg-desk-focus-pending-beads-age",
-		expr:      `max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"}) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1)`,
+		expr:      `max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"}) and on() (pg_desk_pr_lane_mode{mode="apply"} == 1) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)`,
 		forText:   "10m",
 		forDur:    10 * time.Minute,
 		threshold: 1800,
@@ -192,7 +192,7 @@ var focusRules = []focusRule{
 		uid: "pg-desk-focus-consumer-lag",
 		// The threshold is PROVISIONAL: the operator checkpoint sets the final
 		// budget from the measured decider cost (serve.md says so too).
-		expr:      `max(pg_desk_consumer_lag{type="issue",consumer="pg-router"})`,
+		expr:      `max(pg_desk_consumer_lag{type="issue",consumer="pg-router"}) unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0)`,
 		forText:   "30m",
 		forDur:    30 * time.Minute,
 		threshold: 500,

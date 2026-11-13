@@ -15,7 +15,7 @@ import (
 // wantSourcesExpr MUST equal the expr of rule pg-desk-sources-stale. It reuses
 // the `unless on()` router pause suppression of pg-desk-sync-stale, so
 // evalStaleRule models it too.
-const wantSourcesExpr = `pg_desk_sources_stale unless on() (pg_router_resource_level{resource="router"} == 1)`
+const wantSourcesExpr = `pg_desk_sources_stale unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0) unless on() (pg_router_resource_level{resource="router"} == 1)`
 
 func sourcesRuleBlock(t *testing.T) string {
 	t.Helper()

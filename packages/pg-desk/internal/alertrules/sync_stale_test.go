@@ -16,7 +16,7 @@ import (
 )
 
 // wantExpr MUST equal the expr of rule pg-desk-sync-stale.
-const wantExpr = `pg_desk_dashboard_stale unless on() (pg_router_resource_level{resource="router"} == 1)`
+const wantExpr = `pg_desk_dashboard_stale unless on() (max_over_time(pg_router_producer_load_backoff[10m]) > 0) unless on() (pg_router_resource_level{resource="router"} == 1)`
 
 // series is one sample of an instant vector: the job label (only used to show
 // that label sets differing between the two sides do not matter) and its value.
