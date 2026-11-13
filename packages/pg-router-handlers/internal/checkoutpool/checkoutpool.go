@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Binary is the command name looked up on PATH.
@@ -21,18 +23,18 @@ const Binary = "pg-checkout-pool"
 
 // Exit codes of the pg-checkout-pool command that the handler distinguishes.
 const (
-	exitExhausted = 3
-	exitLowDisk   = 4
-	exitNoLease   = 8
+	exitExhausted = 20
+	exitLowDisk   = 21
+	exitNoLease   = exitcode.NotFound
 )
 
 // Sentinel errors, each wrapped with the command's own stderr text.
 var (
-	// ErrExhausted: every slot is leased and the pool is at its cap (exit 3).
+	// ErrExhausted: every slot is leased and the pool is at its cap (exit 20).
 	ErrExhausted = errors.New("checkout pool exhausted")
-	// ErrLowDisk: the pool would not grow because free space is below its floor (exit 4).
+	// ErrLowDisk: the pool would not grow because free space is below its floor (exit 21).
 	ErrLowDisk = errors.New("checkout pool: low disk space")
-	// ErrNoLease: no active lease has that id (exit 8); on release this means
+	// ErrNoLease: no active lease has that id (exit 4); on release this means
 	// the lease is already gone (released or reaped), which is the goal state.
 	ErrNoLease = errors.New("checkout pool: no such lease")
 )

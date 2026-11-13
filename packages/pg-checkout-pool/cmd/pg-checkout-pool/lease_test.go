@@ -594,3 +594,19 @@ func TestLeaseReuseReturnsOwnersLiveLease(t *testing.T) {
 		t.Errorf("lease id reused after release: %s", fresh.LeaseID)
 	}
 }
+
+// The numbers are a contract with callers (the router handler branches on
+// them), so pin them literally rather than through the constants.
+func TestExitCodeValuesArePinned(t *testing.T) {
+	for name, tc := range map[string][2]int{
+		"internal": {exitInternal, 1}, "usage": {exitUsage, 2}, "no lease": {exitNoLease, 4},
+		"busy": {exitBusy, 9}, "owner has lease": {exitOwnerHasLease, 11},
+		"exhausted": {exitExhausted, 20}, "low disk": {exitLowDisk, 21},
+		"ref unresolved": {exitRefUnresolved, 22}, "quarantine only": {exitQuarantineOnly, 23},
+		"wedged": {exitWedged, 24},
+	} {
+		if tc[0] != tc[1] {
+			t.Errorf("%s = %d, want %d", name, tc[0], tc[1])
+		}
+	}
+}

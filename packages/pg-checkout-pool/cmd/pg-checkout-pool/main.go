@@ -57,16 +57,16 @@ commands:
 
 serve opens the opt-in pprof endpoint only when ` + pprofEnv + ` is set (absolute unix-socket path or loopback host:port).
 every command takes --root DIR (env ` + rootEnv + `). Output is JSON except status and metrics.
-exit codes: 0 ok; 2 usage; 3 pool-exhausted; 4 low-disk; 5 ref-unresolvable;
-6 quarantine-only; 7 git-wedged; 8 lease-not-found; 9 internal error;
-10 slot-busy; 11 owner-already-leases (lease --reuse returns the owner's live lease instead)`
+exit codes: 0 ok; 1 internal error; 2 usage; 4 lease-not-found; 9 slot-busy;
+11 owner-already-leases (lease --reuse returns the owner's live lease instead);
+20 pool-exhausted; 21 low-disk; 22 ref-unresolvable; 23 quarantine-only; 24 git-wedged`
 
 func (a *app) run(args []string) int {
 	stderr, stdout, clock := a.stderr, a.stdout, a.clock
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprintln(stderr, usage)
 		if len(args) == 0 {
-			return 2
+			return exitUsage
 		}
 		return 0
 	}
@@ -94,7 +94,7 @@ func (a *app) run(args []string) int {
 		return a.revalidate(args[1:])
 	}
 	fmt.Fprintf(stderr, "pg-checkout-pool: unknown command %q\n", args[0])
-	return 2
+	return exitUsage
 }
 
 func status(args []string, stdout, stderr io.Writer, clock pool.Clock) int {
@@ -103,7 +103,7 @@ func status(args []string, stdout, stderr io.Writer, clock pool.Clock) int {
 	root := fs.String("root", defaultRoot(), "pool state directory (env "+rootEnv+")")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
 	sts, err := pool.NewStore(*root, clock).Status()
 	if err != nil {

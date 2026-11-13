@@ -16,20 +16,23 @@ import (
 	"github.com/phillipgreenii/pg-checkout-pool/internal/metrics"
 	"github.com/phillipgreenii/pg-checkout-pool/internal/pool"
 	"github.com/phillipgreenii/pg-checkout-pool/internal/provision"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// Exit codes. 0 is success; 1 is never emitted; every failure is 2 or more.
+// Exit codes. 0 is success; the generic outcomes use the shared codes of
+// x/exitcode (internal error 1, usage 2, no such lease 4, busy 9, owner already
+// leases 11); the pool's own refusals are app codes in the 20 to 63 range.
 const (
-	exitUsage          = 2
-	exitExhausted      = 3
-	exitLowDisk        = 4
-	exitRefUnresolved  = 5
-	exitQuarantineOnly = 6
-	exitWedged         = 7
-	exitNoLease        = 8
-	exitInternal       = 9
-	exitBusy           = 10
-	exitOwnerHasLease  = 11
+	exitUsage          = exitcode.Usage
+	exitInternal       = exitcode.Error
+	exitNoLease        = exitcode.NotFound
+	exitBusy           = exitcode.Busy
+	exitOwnerHasLease  = exitcode.Conflict
+	exitExhausted      = 20
+	exitLowDisk        = 21
+	exitRefUnresolved  = 22
+	exitQuarantineOnly = 23
+	exitWedged         = 24
 )
 
 // Errors raised by the command layer.

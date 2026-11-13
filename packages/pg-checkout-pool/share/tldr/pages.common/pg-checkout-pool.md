@@ -2,7 +2,7 @@
 
 > Lease reusable, already-warm checkouts of a repository to agent sessions.
 > A lease is keyed on the owner session id; the work item id is only an affinity hint.
-> Every command prints JSON; failures exit 2 or more (3 pool-exhausted, 4 low-disk, 5 ref-unresolvable, 6 quarantine-only, 7 git-wedged, 8 lease-not-found, 10 slot-busy, 11 owner-already-leases).
+> Every command prints JSON; failures exit non-zero (1 internal, 2 usage, 4 lease-not-found, 9 slot-busy, 11 owner-already-leases, 20 pool-exhausted, 21 low-disk, 22 ref-unresolvable, 23 quarantine-only, 24 git-wedged).
 > More information: `pg-checkout-pool --help`.
 
 - Lease a checkout of a ref for a session (prefers the slot last used for the work item):

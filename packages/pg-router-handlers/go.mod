@@ -6,7 +6,7 @@ require (
 	github.com/phillipgreenii/ccpool v0.0.0
 	github.com/phillipgreenii/pg-failsig v0.0.0
 	github.com/phillipgreenii/pg-router v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261027205228-76ab0ad829aa
+	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 )
 
 require (

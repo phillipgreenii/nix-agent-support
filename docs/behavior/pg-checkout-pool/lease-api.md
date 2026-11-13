@@ -118,7 +118,7 @@ Extensions:
   `release` (lease id, disposition `reset`, `keep` or `quarantine`; default `reset`), `status` and `reap`
   (with a dry-run mode). What crosses out: for a lease, the lease id, slot, path, branch, resolved
   commit, expiry, the milliseconds the reset took and whether the slot is warm or cold, as one JSON
-  document; for a refusal, a distinct exit code of 2 or more for each of `pool-exhausted`, `low-disk`,
+  document; for a refusal, a distinct app exit code (20 and up, outside the shared codes) for each of `pool-exhausted`, `low-disk`,
   `ref-unresolvable`, `quarantine-only` and `git-wedged`. The lease record holds the lease id, owner
   session id, owner process and its start time, work item hint, repository, commit, branch, acquired,
   heartbeat and expiry times, and the slot state (`warm-free`, `leased`, `resetting`, `quarantined` or

@@ -39,7 +39,7 @@ func TestExitCodesMapToSentinels(t *testing.T) {
 	for _, tc := range []struct {
 		code int
 		want error
-	}{{3, ErrExhausted}, {4, ErrLowDisk}, {8, ErrNoLease}} {
+	}{{20, ErrExhausted}, {21, ErrLowDisk}, {4, ErrNoLease}} {
 		var calls []call
 		c := CLI{Exec: fakeExec("", "boom", tc.code, &calls)}
 		_, err := c.Lease(t.Context(), LeaseRequest{Repo: "/r", Ref: "x", Owner: "o"})
@@ -48,9 +48,13 @@ func TestExitCodesMapToSentinels(t *testing.T) {
 		}
 	}
 	var calls []call
-	err := CLI{Exec: fakeExec("", "x", 9, &calls)}.Release(t.Context(), "L")
-	if err == nil || errors.Is(err, ErrNoLease) || errors.Is(err, ErrExhausted) {
-		t.Fatalf("exit 9 err = %v", err)
+	// The old meanings (3 exhausted, 8 no-lease) and the shared Busy 9 and
+	// Error 1 must not be mistaken for a sentinel.
+	for _, code := range []int{1, 3, 8, 9} {
+		err := CLI{Exec: fakeExec("", "x", code, &calls)}.Release(t.Context(), "L")
+		if err == nil || errors.Is(err, ErrNoLease) || errors.Is(err, ErrExhausted) || errors.Is(err, ErrLowDisk) {
+			t.Fatalf("exit %d err = %v", code, err)
+		}
 	}
 }
 
