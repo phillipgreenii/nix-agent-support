@@ -1,6 +1,9 @@
 package interpret
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // Feedback disposition verdicts — the section 7.7 vocabulary
 // (`pg-desk feedback set <pr> <comment-id> --disposition open|will-fix|
@@ -13,8 +16,8 @@ const (
 )
 
 // computeDispositions evaluates the base disposition rule set over every
-// comment and thread of the PR (top-level comments plus every review's
-// inline comments) — "live recompute, idempotent" per the design's Interpret
+// comment and thread of the PR (top-level comments, every review's
+// inline comments, and each submitted review's non-empty body) — "live recompute, idempotent" per the design's Interpret
 // bullet. There is no Go source in this repo to port "df-feedback's rule
 // set" from (see interpret.go's package doc) — this is a documented, cited
 // deviation, not a port: a comment/thread the code host has already marked
@@ -43,12 +46,39 @@ func computeDispositions(pr prShow) []Disposition {
 		add(c)
 	}
 	for _, r := range pr.Reviews {
+		if v, ok := reviewBodyVerdict(pr, r); ok {
+			out = append(out, Disposition{CommentID: r.ID, Verdict: v})
+		}
 		for _, c := range r.Comments {
 			add(c)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CommentID < out[j].CommentID })
 	return out
+}
+
+// reviewBodyVerdict decides whether a review's own body is a feedback item,
+// keyed by the review id. Only a SUBMITTED review with a non-blank body counts:
+// a PENDING review (the reviewer's unsubmitted draft, including the review-pr
+// role's own) and a review with an empty body (the usual APPROVED case) yield
+// no item, and neither does a review by the PR's own author. A DISMISSED
+// review's body is DispositionNoAction; every other state (COMMENTED,
+// CHANGES_REQUESTED, APPROVED with a body) is DispositionOpen. A review has no
+// resolved flag, so it stays open until an override dispositions it.
+func reviewBodyVerdict(pr prShow, r prReview) (string, bool) {
+	if r.ID == "" || strings.TrimSpace(r.Body) == "" {
+		return "", false
+	}
+	if strings.EqualFold(r.State, "PENDING") {
+		return "", false
+	}
+	if r.Author != "" && strings.EqualFold(r.Author, pr.Author) {
+		return "", false
+	}
+	if strings.EqualFold(r.State, "DISMISSED") {
+		return DispositionNoAction, true
+	}
+	return DispositionOpen, true
 }
 
 // ApplyDispositionOverrides merges recorded operator/agent overrides

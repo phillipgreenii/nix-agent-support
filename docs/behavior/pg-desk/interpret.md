@@ -37,7 +37,11 @@ gives the same row.
   separately) — only the Jira half is in scope this phase.
 - **Category** — a ranked classification over a configured vocabulary.
 - **Feedback dispositions** — evaluated over every comment and thread of the PR on every run (a
-  live, idempotent recompute, never cached). A disposition an operator or agent recorded through
+  live, idempotent recompute, never cached). Each submitted review with a non-blank body is also
+  its own item, keyed by the review id, open until dispositioned, in addition to one item per
+  inline comment; so a body-only review is never invisible. A PENDING (unsubmitted) review, a
+  review with an empty or whitespace-only body (e.g. a plain approval), and a review by the PR's
+  own author produce no item; a DISMISSED review's body is `no-action`. A disposition an operator or agent recorded through
   `feedback set` (see [`feedback.md`](feedback.md)) is an override this step MUST honor over its
   own verdict, on every later run.
 - **Approvals, gate state, and waiting-on-me** — the last computed from the bead facts gather

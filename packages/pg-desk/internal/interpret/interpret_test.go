@@ -780,6 +780,34 @@ func TestComputeDispositions(t *testing.T) {
 	}
 }
 
+func TestComputeDispositionsReviewBodies(t *testing.T) {
+	pr := prShow{
+		Author: "example-author",
+		Reviews: []prReview{
+			{ID: "PRR_body_only", Author: "example-reviewer", State: "COMMENTED", Body: "please rename this"},
+			{
+				ID: "PRR_changes", Author: "example-reviewer", State: "CHANGES_REQUESTED", Body: "see notes",
+				Comments: []prComment{{ID: "c1"}},
+			},
+			{ID: "PRR_approved_empty", Author: "example-reviewer", State: "APPROVED", Body: "  \n"},
+			{ID: "PRR_approved_body", Author: "example-reviewer", State: "APPROVED", Body: "LGTM with a nit"},
+			{ID: "PRR_pending", Author: "example-reviewer", State: "PENDING", Body: "draft"},
+			{ID: "PRR_own", Author: "Example-Author", State: "COMMENTED", Body: "reply to myself"},
+			{ID: "PRR_dismissed", Author: "example-reviewer", State: "DISMISSED", Body: "stale"},
+		},
+	}
+	want := []Disposition{
+		{CommentID: "PRR_approved_body", Verdict: DispositionOpen},
+		{CommentID: "PRR_body_only", Verdict: DispositionOpen},
+		{CommentID: "PRR_changes", Verdict: DispositionOpen},
+		{CommentID: "PRR_dismissed", Verdict: DispositionNoAction},
+		{CommentID: "c1", Verdict: DispositionOpen},
+	}
+	if got := computeDispositions(pr); !reflect.DeepEqual(got, want) {
+		t.Fatalf("computeDispositions = %+v; want %+v", got, want)
+	}
+}
+
 // TestDispositionOverrideSurvivesRerun is this packet's own pinned
 // acceptance criterion: "A disposition recorded through pg-desk feedback
 // set ... is an override the rule set MUST honor over its own verdict" and
