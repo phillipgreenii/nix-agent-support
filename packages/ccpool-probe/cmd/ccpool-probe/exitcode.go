@@ -6,7 +6,11 @@
 // pg-router-probe's own exitcode.go.
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/phillipgreenii/x/exitcode"
+)
 
 // exitCodeError carries an explicit process exit code plus an optional
 // message already meant for stderr (main.go's run() prints it verbatim,
@@ -24,17 +28,13 @@ func (e *exitCodeError) Error() string {
 }
 
 func usageErrorf(format string, args ...any) error {
-	return &exitCodeError{code: 2, msg: fmt.Sprintf(format, args...)}
+	return &exitCodeError{code: exitcode.Usage, msg: fmt.Sprintf(format, args...)}
 }
 
 func totalFailureErrorf(format string, args ...any) error {
-	return &exitCodeError{code: 3, msg: fmt.Sprintf(format, args...)}
+	return &exitCodeError{code: exitcode.Unavailable, msg: fmt.Sprintf(format, args...)}
 }
 
-// exitDegraded equals exitcode.Degraded in x/exitcode; the pinned x revision
-// lacks that package, so the value is a literal here.
-const exitDegraded = 5
-
 func partialErrorf(format string, args ...any) error {
-	return &exitCodeError{code: exitDegraded, msg: fmt.Sprintf(format, args...)}
+	return &exitCodeError{code: exitcode.Degraded, msg: fmt.Sprintf(format, args...)}
 }

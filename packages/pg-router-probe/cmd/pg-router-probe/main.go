@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +64,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	err := root.Execute()
 	if err == nil {
-		return 0
+		return exitcode.OK
 	}
 	var ece *exitCodeError
 	if errors.As(err, &ece) {
@@ -73,7 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return ece.code
 	}
 	fmt.Fprintln(stderr, err)
-	return 2
+	return exitcode.Usage
 }
 
 func main() {
