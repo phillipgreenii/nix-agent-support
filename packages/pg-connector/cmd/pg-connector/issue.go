@@ -5,7 +5,7 @@
 // surface — issue is one of its verb groups, never a separate binary.
 //
 // Each of these four verbs is a targeted op and uses the Tier-1
-// targeted-op exit-code scheme (0/4/1) via outcome.go's TargetedExitCode —
+// targeted-op exit-code scheme (0/4/8/3/2/1) via outcome.go's TargetedExitCode —
 // this file calls the dispatcher and hands TargetedExitCode the raw
 // per-call result/error it got back; it never decides the exit code
 // itself. comment/transition are id-keyed and dispatch via dispatch.go's

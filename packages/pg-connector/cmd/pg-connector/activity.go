@@ -70,7 +70,7 @@ func (o ActivityOutcome) fanOutOutcome() FanOutOutcome {
 	return out
 }
 
-// ExitCode returns the fan-out scheme's 0/2/3.
+// ExitCode returns the fan-out scheme's 0/5/3.
 func (o ActivityOutcome) ExitCode() int { return o.fanOutOutcome().ExitCode() }
 
 // resolveActivityBackends returns the sources an "activity list" call

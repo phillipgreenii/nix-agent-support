@@ -22,12 +22,12 @@
 //
 //   - list and search are FAN-OUT ops over every registered mail backend
 //     (or the one --backend pins), reporting each backend's health as one
-//     sources[] row (INV-OUT-1) under the ordinary 0/2/3 scheme
+//     sources[] row (INV-OUT-1) under the ordinary 0/5/3 scheme
 //     (outcome.go's FanOutOutcome.ExitCode).
 //   - show, mark-read, mark-unread, archive, unarchive and attachment
 //     fetch are id-keyed TARGETED ops resolved by DispatchTargeted (try
 //     each registered backend, stop at the first non-not_found answer;
-//     --backend pins one) under the targeted 0/4/1 scheme
+//     --backend pins one) under the targeted 0/4/8/3/2/1 scheme
 //     (outcome.go's TargetedExitCode).
 //
 // This file imports only pkg/schema and pkg/scriptout, never
@@ -217,7 +217,7 @@ func newMailShowCmd() *cobra.Command {
 
 // newMailIDOnlyCmd builds one of the four id-keyed, no-result mutating
 // verbs (mark-read, mark-unread, archive, unarchive): a targeted op over
-// the wire op named wireOp, answering the targeted 0/4/1 exit scheme.
+// the wire op named wireOp, answering the targeted 0/4/8/3/2/1 exit scheme.
 // done is the past-tense phrase the human rendering uses.
 func newMailIDOnlyCmd(verb, wireOp, short, done string) *cobra.Command {
 	cmd := &cobra.Command{

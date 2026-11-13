@@ -235,8 +235,8 @@ func TestQuerylessChanges_NonOwningBackend_IsInvalidArgument_ForPrIssueAndCi(t *
 			writeRecordingBackend(t, name, logPath, map[string]string{"capabilities": qlCapsPlain})
 
 			stdout, code := runTypedChanges(t, logPath, entityType)
-			if code != 1 {
-				t.Fatalf("exit code = %d, want 1 (invalid_argument); stdout=%s", code, stdout)
+			if code != 2 {
+				t.Fatalf("exit code = %d, want 2 (invalid_argument); stdout=%s", code, stdout)
 			}
 			var env struct {
 				Error struct{ Code, Message string } `json:"error"`

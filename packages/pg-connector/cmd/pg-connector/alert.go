@@ -3,7 +3,7 @@
 //
 // connector.alert is list-valued (several alert backends may be registered at
 // once, like pr/issue/ci/thread/calendar). "list" and "history" are fan-outs
-// using the ordinary 0/2/3 exit scheme; "show" is a targeted op.
+// using the ordinary 0/5/3 exit scheme; "show" is a targeted op.
 //
 // Alerts are deliberately NOT cache-backed (INV-ALERT-5): a cached alert list
 // would render a stale "all clear" or stale firing set as current, so there

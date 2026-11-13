@@ -1048,7 +1048,7 @@ through `activity list`'s own `sources[]` rows, never through `auth status`/`con
   answers `truncated: true` has that flag surfaced on that source's own `sources[]` row; a
   truncated source is still a succeeded one, so truncation never changes the exit code.
 - **Exit codes.** `activity list` follows the fan-out scheme (`INV-EXIT-1`): `0` when every
-  queried source succeeded, `2` when some succeeded and some degraded, `3` when none succeeded
+  queried source succeeded, `5` when some succeeded and some degraded, `3` when none succeeded
   (including zero registered sources), with one `sources[]` row per source queried (`INV-OUT-1`).
 - **Attribution.** An implementing backend MUST scope `list_activity` to the operator's own
   identity. When it cannot establish that identity, it answers `unavailable` and the error names
@@ -1129,7 +1129,7 @@ detect`; against a daemon-backed backend also `pr explain`, `ci explain`,
   backend — forwarded `changes`, acknowledgement, freshness and `unavailable`").
 - **A daemon-backed backend's outcomes.** A call against a backend whose daemon cannot be reached
   ends as the ordinary `unavailable` failure, with a message naming the socket and the restart
-  hint: exit `1` for a targeted call, a `degraded` `sources[]` row for a fan-out call, and a
+  hint: exit `3` (Unavailable) for a targeted call, a `degraded` `sources[]` row for a fan-out call, and a
   forwarded `changes` source delivers nothing and moves no position (`INV-CACHE-9`, `INV-EXIT-1`).
   A caller MUST treat that `unavailable` as retryable. `auth status` and `config validate` carry the
   backend's own health as rows from its `status` op, and that op reports even when the daemon is down.
@@ -1163,14 +1163,14 @@ sequenceDiagram
         Reg-->>Umb: zero backends is a CLI-level error; >1 resolves via --backend or try-each (INV-REG-2)
         Umb->>BE: INTF-WIRE: one op request
         BE-->>Umb: one result or error
-        Umb-->>Op: rendered result; exit 0 / 4 / 1 (INV-EXIT-1)
+        Umb-->>Op: rendered result; exit 0 / 4 / 8 / 3 / 2 / 1 (INV-EXIT-1)
     else fan-out op
         Reg-->>Umb: every registered backend of the type, or exactly one if --backend pins it
         loop each backend
             Umb->>BE: INTF-WIRE: one op request
             BE-->>Umb: one result or error
         end
-        Umb-->>Op: rendered sources[] + merged result; exit 0 / 2 / 3 (INV-EXIT-1, INV-OUT-1)
+        Umb-->>Op: rendered sources[] + merged result; exit 0 / 5 / 3 (INV-EXIT-1, INV-OUT-1)
     end
 ```
 

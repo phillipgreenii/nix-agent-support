@@ -505,18 +505,20 @@ status`/`config validate`.
   codes (`INV-WIRE-1`):
   - **Fan-out** (queries every backend registered for a type/capability — `ci list`,
     `auth status`, `config validate`, `attention list`, `search`): `0` every queried backend
-    succeeded (no degraded/failed row); `2` degraded/partial (at least one backend succeeded and
-    at least one did not); `3` total failure (every backend failed, including the case of zero
+    succeeded (no degraded/failed row); `5` Degraded (at least one backend succeeded and
+    at least one did not); `3` Unavailable, the total failure (every backend failed, including the case of zero
     backends registered — a misconfigured host has nothing to report as success).
   - **Targeted** (resolves to exactly one backend — `show`, `files`, `commits`,
     `review submit`, `review pending`,
     `create`, `comment`, `transition`, `get_logs`, `rerun-failed`, `worktree add`/`remove`/`list`,
     `branch detect`): `0` the operation completed and produced a well-formed response (including
-    a successful write); `4` `not_found` — a well-formed negative answer, MUST NOT share a code
-    with an actual failure; `1` any other error (`unauthenticated`/`unavailable`/`unknown_op`/
-    `version_mismatch`/`invalid_argument`, or a CLI-level failure before any well-formed response
-    was produced at all — no backend registered, an ambiguous multi-backend registration
-    (`INV-REG-2`), a bad flag).
+    a successful write); `4` NotFound (`not_found`) — a well-formed negative answer, MUST NOT share a code
+    with an actual failure; `8` Denied (`unauthenticated`); `3` Unavailable (`unavailable`); `2`
+    Usage (`invalid_argument`, `query_not_recognized`); `1` any other error (`unknown_op`/
+    `version_mismatch`, or a CLI-level failure before any well-formed response was produced at
+    all — no backend registered, an ambiguous multi-backend registration (`INV-REG-2`)). The wire
+    error names are unchanged; only the process exit code is classified. Every code equals the
+    same-numbered shared code of the workspace's `exitcode` package.
 
   A targeted op that reports a well-formed outcome in its `result` body, including one that did
   not do what was asked (for example `review submit`'s `no_change`, where nothing needed to be
@@ -531,11 +533,14 @@ status`/`config validate`.
       call["operator invokes a verb"] --> shape{"fan-out or targeted?"}
       shape -->|fan-out| fo{"how many backends succeeded / degraded?"}
       fo -->|"all succeeded"| e0a["exit 0"]
-      fo -->|"some succeeded, some degraded"| e2["exit 2 (degraded/partial)"]
-      fo -->|"none succeeded (incl. zero registered)"| e3["exit 3 (total failure)"]
+      fo -->|"some succeeded, some degraded"| e5["exit 5 (Degraded)"]
+      fo -->|"none succeeded (incl. zero registered)"| e3["exit 3 (Unavailable, total failure)"]
       shape -->|targeted| tg{"outcome?"}
       tg -->|success| e0b["exit 0"]
       tg -->|"not_found"| e4["exit 4 (well-formed negative)"]
+      tg -->|"unauthenticated"| e8["exit 8 (Denied)"]
+      tg -->|"unavailable"| e3t["exit 3 (Unavailable)"]
+      tg -->|"invalid_argument or query_not_recognized"| e2t["exit 2 (Usage)"]
       tg -->|"any other error, or a CLI-level failure before a response existed"| e1["exit 1"]
   ```
 

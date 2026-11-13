@@ -95,7 +95,7 @@ func TestRun_AlertList_QueryNotRecognizedByAll_IsInvalidArgument(t *testing.T) {
 	}, `{}`)
 	writeAlertConfigFor(t, "backend-alert-noq")
 	stdout, _, code := executePr(t, []string{"alert", "list", "--query", "bogus"})
-	if code != 1 {
+	if code != 2 {
 		t.Fatalf("exit=%d stdout=%s", code, stdout)
 	}
 	var resp scriptout.Response

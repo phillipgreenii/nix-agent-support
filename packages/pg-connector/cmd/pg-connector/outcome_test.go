@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -21,8 +22,8 @@ func TestFanOutOutcome_ExitCode_Degraded(t *testing.T) {
 		{Source: "a", Status: SourceSucceeded},
 		{Source: "b", Status: SourceDegraded},
 	}}
-	if code := o.ExitCode(); code != 2 {
-		t.Fatalf("ExitCode = %d, want 2", code)
+	if code := o.ExitCode(); code != 5 {
+		t.Fatalf("ExitCode = %d, want 5", code)
 	}
 }
 
@@ -72,8 +73,8 @@ func TestFanOutOutcome_ExitCode_DegradedPlusDisabled_IsPartialNotTotalFailure(t 
 		{Source: "a", Status: SourceDegraded},
 		{Source: "b", Status: SourceDisabled},
 	}}
-	if code := o.ExitCode(); code != 2 {
-		t.Fatalf("ExitCode = %d, want 2", code)
+	if code := o.ExitCode(); code != 5 {
+		t.Fatalf("ExitCode = %d, want 5", code)
 	}
 }
 
@@ -112,16 +113,27 @@ func TestTargetedExitCode_NotFound(t *testing.T) {
 	}
 }
 
-func TestTargetedExitCode_OtherErrorsAreOne(t *testing.T) {
-	for _, sentinel := range []error{
-		scriptout.ErrUnauthenticated,
-		scriptout.ErrUnavailable,
-		scriptout.ErrUnknownOp,
-		scriptout.ErrVersionMismatch,
+func TestTargetedExitCode_ClassifiesByWireError(t *testing.T) {
+	// Pinned literals equal x/exitcode: Usage 2, Unavailable 3, NotFound 4,
+	// Denied 8.
+	for _, tc := range []struct {
+		sentinel error
+		want     int
+	}{
+		{scriptout.ErrNotFound, 4},
+		{scriptout.ErrUnauthenticated, 8},
+		{scriptout.ErrUnavailable, 3},
+		{scriptout.ErrInvalidArgument, 2},
+		{scriptout.ErrQueryNotRecognized, 2},
+		{scriptout.ErrUnknownOp, 1},
+		{scriptout.ErrVersionMismatch, 1},
 	} {
-		err := scriptout.WrapError(sentinel, "detail")
-		if code := TargetedExitCode(err); code != 1 {
-			t.Errorf("TargetedExitCode(%v) = %d, want 1", sentinel, code)
+		err := scriptout.WrapError(tc.sentinel, "detail")
+		if code := TargetedExitCode(err); code != tc.want {
+			t.Errorf("TargetedExitCode(%v) = %d, want %d", tc.sentinel, code, tc.want)
 		}
+	}
+	if code := TargetedExitCode(errors.New("plain failure")); code != 1 {
+		t.Errorf("TargetedExitCode(unclassified) = %d, want 1", code)
 	}
 }

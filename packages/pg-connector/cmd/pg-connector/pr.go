@@ -11,7 +11,7 @@
 // registration order, stopping at the first non-not_found answer) but
 // additionally falls back to this docket's umbrella entity cache on a
 // per-backend "unavailable" answer, and uses the Tier-1 targeted-op
-// exit-code scheme (0/4/1) via outcome.go's TargetedExitCode — this file calls the dispatcher and
+// exit-code scheme (0/4/8/3/2/1) via outcome.go's TargetedExitCode — this file calls the dispatcher and
 // hands TargetedExitCode the raw per-call result/error it got back; it
 // never decides the exit code itself (INV-EXIT-1). show also takes --watch
 // (INTF-WIRE-WATCH-1): forwarded as watch: true in the show request, and a show

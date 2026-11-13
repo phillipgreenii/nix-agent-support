@@ -99,8 +99,8 @@ func TestHealthRows_DegradedStatusIsDegradedRowWithReasonsAndExit2(t *testing.T)
 			if out.Sources[0].Status != SourceSucceeded || out.Sources[2].Source != "plain-b" || out.Sources[2].Status != SourceSucceeded {
 				t.Fatalf("other rows changed: %+v", out.Sources)
 			}
-			if got := out.ExitCode(); got != 2 {
-				t.Fatalf("ExitCode = %d, want 2 (another backend is healthy)", got)
+			if got := out.ExitCode(); got != 5 {
+				t.Fatalf("ExitCode = %d, want 5 (another backend is healthy)", got)
 			}
 		})
 	}
@@ -132,8 +132,8 @@ func TestHealthRows_DownLocalReportShowsSupervisorSocketAndStoreAge(t *testing.T
 			// With another backend healthy the same outcome exits 2.
 			writeStatusBackend(t, "plain-b", authOKAnswer, "")
 			out = v.run([]string{"daemon-a", "plain-b"})
-			if got := out.ExitCode(); got != 2 {
-				t.Fatalf("ExitCode = %d, want 2 (another backend is healthy)", got)
+			if got := out.ExitCode(); got != 5 {
+				t.Fatalf("ExitCode = %d, want 5 (another backend is healthy)", got)
 			}
 		})
 	}

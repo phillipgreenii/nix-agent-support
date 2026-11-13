@@ -115,8 +115,8 @@ flowchart TD
     impl["backend implementer builds a Tier-2 backend (USECASE-CREATE-BACKEND)"] --> reg["operator registers it under connector.<type> (USECASE-REGISTER-BACKEND)"]
     reg --> invoke["operator invokes a pg-connector verb"]
     invoke --> shape{"targeted or fan-out op?"}
-    shape -->|targeted| tgt["resolve exactly one registered backend (INV-REG-2), dispatch, report 0/4/1 (USECASE-TARGETED-CALL)"]
-    shape -->|fan-out| fan["dispatch to every registered backend of the type, build sources[], report 0/2/3 (USECASE-FANOUT-CALL)"]
+    shape -->|targeted| tgt["resolve exactly one registered backend (INV-REG-2), dispatch, report 0/4/8/3/2/1 (USECASE-TARGETED-CALL)"]
+    shape -->|fan-out| fan["dispatch to every registered backend of the type, build sources[], report 0/5/3 (USECASE-FANOUT-CALL)"]
     tgt --> render["render per --output json|human (USECASE-CHOOSE-OUTPUT)"]
     fan --> render
 ```
@@ -248,14 +248,16 @@ flowchart TD
     tryeach --> outcome
     outcome -->|"result set"| e0["exit 0"]
     outcome -->|"error.code == not_found"| e4["exit 4 - well-formed negative (INV-ERR-2)"]
+    outcome -->|"unauthenticated"| e8["exit 8 - Denied"]
+    outcome -->|"unavailable"| e3b["exit 3 - Unavailable"]
+    outcome -->|"invalid_argument, query_not_recognized"| e2b["exit 2 - Usage"]
     outcome -->|"any other error.code"| e1b["exit 1"]
 ```
 
 Extensions:
 
-- The reply's `error.code` is `invalid_argument`: the request itself was malformed — exit `1`,
-  identical to every other non-`not_found` error, since sharpening `invalid_argument` from
-  `unavailable` is a wire-body precision, not a new CLI exit-code bucket (`INV-ERR-2`,
+- The reply's `error.code` is `invalid_argument`: the request itself was malformed — exit `2`
+  (Usage), the same code as `query_not_recognized` and the shared usage code (`INV-ERR-2`,
   `INV-EXIT-1`).
 - The op is an id-less write (`issue create`) and more than one backend is registered with no
   `--backend` pin: the umbrella fails before any wire call at all, rather than trying each as the
@@ -278,8 +280,8 @@ _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 (concatenating results across backends for `ci list`; combining two checks — `auth_status` and
 `capabilities` — into one row per backend for `config validate`), builds one `sources[]` row per
 backend queried (`succeeded`/`degraded`/`disabled`, never collapsed), and computes its own exit
-code from those rows: `0` if none are `degraded`; `2` if at least one is `degraded` and at least
-one is healthy (`succeeded` or `disabled`); `3` if none are healthy at all, including the
+code from those rows: `0` if none are `degraded`; `5` (Degraded) if at least one is `degraded` and at least
+one is healthy (`succeeded` or `disabled`); `3` (Unavailable) if none are healthy at all, including the
 zero-backends-registered case. A `disabled` row (a backend correctly answering "not applicable" —
 e.g. no `AuthChecker` implemented) counts as healthy, never as a failure (`INV-EXIT-2`). For
 `config validate` specifically, a `capabilities` response's self-declared `schemaVersions` is also
@@ -296,7 +298,7 @@ flowchart TD
     list --> loop["dispatch INTF-WIRE to each; build one sources[] row per backend (INV-OUT-1)"]
     loop --> tally{"tally rows"}
     tally -->|"none degraded"| e0["exit 0"]
-    tally -->|"some healthy, some degraded"| e2["exit 2"]
+    tally -->|"some healthy, some degraded"| e5["exit 5"]
     tally -->|"none healthy (incl. zero backends)"| e3["exit 3"]
 ```
 
@@ -341,8 +343,8 @@ flowchart TD
     ok --> tally{"every queried backend answered query_not_recognized?"}
     degraded --> tally
     disabled --> tally
-    tally -->|yes| einval["exit 1 - umbrella-level invalid_argument (INV-ERR-3)"]
-    tally -->|no| fanexit["ordinary fan-out exit code 0/2/3 (INV-EXIT-1)"]
+    tally -->|yes| einval["exit 2 - umbrella-level invalid_argument (INV-ERR-3)"]
+    tally -->|no| fanexit["ordinary fan-out exit code 0/5/3 (INV-EXIT-1)"]
 ```
 
 Extensions:
@@ -385,7 +387,7 @@ flowchart TD
     loop --> agg{"which capability?"}
     agg -->|"attention"| dedup["dedup by type+id, rank by severity (INV-ATTN-1)"]
     agg -->|"search"| group["group by source, registration order, no merge (INV-SEARCH-1)"]
-    dedup --> exit["fan-out exit code 0/2/3 (INV-EXIT-1)"]
+    dedup --> exit["fan-out exit code 0/5/3 (INV-EXIT-1)"]
     group --> exit
 ```
 
@@ -419,7 +421,7 @@ _Includes:_ `USECASE-FANOUT-CALL`, `USECASE-CROSSCUT-FANOUT-CALL`.
 across `connector.alert` and concatenate (no cross-source dedup); `alert show ID` is targeted.
 `attention list` reads `attention.sources`, where an alert backend answers `list_attention`
 itself (`INV-ALERT-7`). Reachable with nothing firing is `succeeded`, `count: 0`, exit `0`; an
-unreachable backend is `degraded` (exit `2` with surviving sources, `3` when none survive) and a
+unreachable backend is `degraded` (exit `5` with surviving sources, `3` when none survive) and a
 consumer MUST read that as UNKNOWN, never as an empty list (`INV-ALERT-5`).
 
 Each backend maps its source's own severity onto the attention severity scale itself and omits a
@@ -512,7 +514,7 @@ _Includes:_ `USECASE-TARGETED-CALL`, `USECASE-FANOUT-CALL`.
 opted out of the cache. The read is forwarded; the backend retries a refused connection for part of
 the request's deadline, then answers `unavailable` with a message naming the socket path and the
 supervisor's restart hint. The umbrella holds no cache entry for this backend and so serves nothing
-in its place (`INV-CACHE-9`): a targeted read exits `1`, and a fan-out read reports the source
+in its place (`INV-CACHE-9`): a targeted read exits `3` (Unavailable), and a fan-out read reports the source
 `degraded` (`INV-EXIT-1`, `INV-OUT-1`). The caller treats `unavailable` as retryable, retries after
 a short wait, and gets a normal answer once the supervisor has restarted the daemon. The operator
 who needs the cause reads the backend's own `status`, which still reports the supervisor probe's

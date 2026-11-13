@@ -55,7 +55,7 @@ func helperRun(behavior string, c cmdrun.Call) cmdrun.Result {
 			`{"id":"zr-2","labels":["escalated"],"metadata":{"pg_router_escalation_fingerprint":"fp2"}}` +
 			`],"present_ids":["zr-1","zr-2"],"sources":[{"source":"pg-connector-issue-beads","status":"succeeded","count":2}]}`)
 	case "list_degraded_empty":
-		return cmdrun.Result{Code: 2, Stdout: []byte(`{"entities":[],"present_ids":[],"sources":[{"source":"pg-connector-issue-beads","status":"degraded","reason":"timeout"}]}`)}
+		return cmdrun.Result{Code: 5, Stdout: []byte(`{"entities":[],"present_ids":[],"sources":[{"source":"pg-connector-issue-beads","status":"degraded","reason":"timeout"}]}`)}
 	case "list_total_failure":
 		return cmdruntest.Fail(3, "pg-connector: total failure: no backend succeeded\n")
 	case "slow":

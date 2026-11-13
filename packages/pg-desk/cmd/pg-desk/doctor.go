@@ -128,7 +128,7 @@ var doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byt
 		return stdout.Bytes(), nil
 	}
 	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 2 {
+	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 5 { // Degraded (x/exitcode.Degraded)
 		return stdout.Bytes(), nil // partial degradation; stdout is still usable
 	}
 	if errors.As(runErr, &exitErr) {

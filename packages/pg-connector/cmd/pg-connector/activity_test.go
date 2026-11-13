@@ -99,8 +99,8 @@ func TestActivityList_FanOutMixedSources_ConfigOrderAndRows(t *testing.T) {
 	writeActivityListConfig(t, []string{"act-a", "act-b", "act-c", "act-d"}, nil)
 
 	stdout, _, code := executePr(t, []string{"activity", "list", "--since", "24h"})
-	if code != 2 {
-		t.Fatalf("exit = %d, want 2 (one degraded, others healthy); stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("exit = %d, want 5 (one degraded, others healthy); stdout=%s", code, stdout)
 	}
 	o := decodeActivityOut(t, stdout)
 	if len(o.Sources) != 4 {
@@ -403,7 +403,7 @@ func TestActivityOutcome_ExitCodeMatchesFanOutScheme(t *testing.T) {
 		{"all succeeded", []activitySourceRow{row(SourceSucceeded, false)}, 0},
 		{"truncated never changes it", []activitySourceRow{row(SourceSucceeded, true)}, 0},
 		{"disabled counts healthy", []activitySourceRow{row(SourceDisabled, false)}, 0},
-		{"degraded among healthy", []activitySourceRow{row(SourceSucceeded, false), row(SourceDegraded, false)}, 2},
+		{"degraded among healthy", []activitySourceRow{row(SourceSucceeded, false), row(SourceDegraded, false)}, 5},
 		{"all degraded", []activitySourceRow{row(SourceDegraded, false)}, 3},
 	}
 	for _, tt := range tests {

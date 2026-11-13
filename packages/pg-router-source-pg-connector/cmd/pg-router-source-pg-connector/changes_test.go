@@ -111,7 +111,7 @@ func TestChanges_DegradedOutcome_ExitsZeroWithDegradedSourcesNamed(t *testing.T)
 	}
 }
 
-// bead pg2-wa5uk: the partial-degraded (exit 2) path now also forwards
+// bead pg2-wa5uk: the partial-degraded (exit 5) path now also forwards
 // each degraded backend's own real reason into degraded_reasons,
 // alongside the pre-existing degraded_sources name list.
 func TestChanges_DegradedOutcomeWithReason_ForwardsReasonInMetadata(t *testing.T) {

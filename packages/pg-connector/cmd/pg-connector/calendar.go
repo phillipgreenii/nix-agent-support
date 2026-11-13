@@ -11,8 +11,8 @@
 // calendar backends, matching pr/issue/ci/thread's own convention — never
 // scm's single-valued one) [mirrors thread's own pg2-2j5ac.40.3
 // precedent, same file (registry.go), same list]. Both verbs below use
-// the ordinary fan-out exit-code scheme (0/2/3) via outcome.go's
-// FanOutOutcome.ExitCode — never the targeted 0/4/1 scheme — since
+// the ordinary fan-out exit-code scheme (0/5/3) via outcome.go's
+// FanOutOutcome.ExitCode — never the targeted 0/4/8/3/2/1 scheme — since
 // connector.calendar is list-valued.
 //
 // "calendar list" is a fan-out-BY-PARAMETER op (a time range, never a
@@ -80,7 +80,7 @@ type calendarListOutcome struct {
 	Sources    []SourceResult         `json:"sources"`
 }
 
-// exitCode delegates to the shared fan-out scheme (0/2/3) — the exact
+// exitCode delegates to the shared fan-out scheme (0/5/3) — the exact
 // same classification logic ciListOutcome.exitCode/FanOutOutcome.ExitCode
 // use, applied to calendarListOutcome's own Sources rows.
 func (o calendarListOutcome) exitCode() int {

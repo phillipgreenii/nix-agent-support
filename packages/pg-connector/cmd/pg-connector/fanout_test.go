@@ -372,8 +372,8 @@ func TestActivityList_ErrorIsolation(t *testing.T) {
 	writeActivityListConfig(t, []string{"iso-a", "iso-b", "iso-c", "iso-d"}, nil)
 
 	stdout, _, code := executePr(t, []string{"activity", "list", "--since", "24h"})
-	if code != 2 {
-		t.Fatalf("exit = %d, want 2; stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("exit = %d, want 5; stdout=%s", code, stdout)
 	}
 	o := decodeActivityOut(t, stdout)
 	var got []string

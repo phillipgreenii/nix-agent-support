@@ -9,13 +9,13 @@
 // FAN-OUT op — it queries every registered ci backend and concatenates
 // their runs (the design's explicit "runs concatenates" merge strategy for
 // the CI fan-out (INV-OUT-1)) — and uses the fan-out exit-code scheme
-// (0/2/3) via outcome.go's FanOutOutcome.ExitCode. "ci logs" and
+// (0/5/3) via outcome.go's FanOutOutcome.ExitCode. "ci logs" and
 // "ci rerun-failed" are TARGETED, id-keyed ops dispatched via
 // dispatch.go's DispatchTargeted, which implements this docket's
 // multi-instance resolution policy across every backend registered under
 // connector.ci (try each in registration order, stopping at the first
 // non-not_found answer) — mirroring pr.go's own targeted-op dispatch —
-// and use the targeted exit-code scheme (0/4/1) via outcome.go's
+// and use the targeted exit-code scheme (0/4/8/3/2/1) via outcome.go's
 // TargetedExitCode (INV-EXIT-1). This file calls the dispatcher/fan-out
 // helpers and hands their raw per-call result/error to outcome.go; it
 // never decides the exit code itself.
@@ -55,7 +55,7 @@ type ciListOutcome struct {
 	Sources []SourceResult `json:"sources"`
 }
 
-// exitCode delegates to the shared fan-out scheme (0/2/3) — the exact same
+// exitCode delegates to the shared fan-out scheme (0/5/3) — the exact same
 // classification logic auth.go/config_validate.go's fan-outs use, applied
 // to ciListOutcome's own Sources rows.
 func (o ciListOutcome) exitCode() int {

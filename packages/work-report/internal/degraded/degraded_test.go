@@ -528,3 +528,28 @@ func TestOverriddenBackendIsPassedOnEveryCall(t *testing.T) {
 		t.Errorf("issue verbs exercised = %v; want list, comment, create and close", seen)
 	}
 }
+
+// The `config validate` fan-out exits 5 (Degraded) when some backend is
+// degraded; that is a usable answer, while the old degraded code 2 (now
+// Usage) is a failure whose body is never read.
+func TestConfigValidateExitCodes(t *testing.T) {
+	for _, tc := range []struct {
+		exit       int
+		wantReason bool
+	}{{5, true}, {2, false}} {
+		t.Setenv("PG_CONNECTOR_ISSUE_BEADS_DIR", t.TempDir())
+		route := fake.ConfigValidateRoute(fake.ConfigRow{Source: "backend-a", Status: "degraded", Count: 1, Reason: "auth_status: token expired"})
+		route.Exit = tc.exit
+		rec := fake.Install(t, fake.IssueListRoute(), route, fake.IssueCreateRoute("bd-1"))
+		if _, err := reconcile(t, degradedRow("backend-a")); err != nil {
+			t.Fatalf("exit %d: %v", tc.exit, err)
+		}
+		create := find(rec.Calls(), "issue", "create")
+		if len(create) != 1 {
+			t.Fatalf("exit %d: create calls = %v", tc.exit, create)
+		}
+		if got := strings.Contains(strings.Join(create[0], " "), "token expired"); got != tc.wantReason {
+			t.Errorf("exit %d: reason in create argv = %v, want %v (%q)", tc.exit, got, tc.wantReason, create[0])
+		}
+	}
+}

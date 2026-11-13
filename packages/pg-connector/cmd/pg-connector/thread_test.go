@@ -272,8 +272,8 @@ func TestRun_ThreadList_AllQueryNotRecognized_Exit1(t *testing.T) {
 	writeThreadConfigFor(t, "backend-thread-list-badquery")
 
 	stdout, _, code := executePr(t, []string{"thread", "list", "--query", "bogus"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stdout=%s", code, stdout)
 	}
 	var resp scriptout.Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {

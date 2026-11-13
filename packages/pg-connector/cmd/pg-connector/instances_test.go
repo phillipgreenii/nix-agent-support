@@ -163,8 +163,8 @@ func TestInstances_OneUnreachableInstanceDegradesOnlyThatRow(t *testing.T) {
 				"    - {name: inst-zr, command: [inst-bin, --beads-dir, "+tc.zr+"]}\n")
 
 			stdout, _, code := executePr(t, []string{"activity", "list", "--since", "7d"})
-			if code != 2 {
-				t.Fatalf("exit = %d, want 2 (one source degraded); stdout=%s", code, stdout)
+			if code != 5 {
+				t.Fatalf("exit = %d, want 5 (one source degraded); stdout=%s", code, stdout)
 			}
 			o := decodeActivityOut(t, stdout)
 			status := map[string]string{}

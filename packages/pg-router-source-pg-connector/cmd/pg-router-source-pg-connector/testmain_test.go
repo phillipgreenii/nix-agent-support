@@ -93,7 +93,7 @@ func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 		// One succeeded backend, one degraded, one disabled — proving
 		// degraded_sources names only the degraded one, never the
 		// succeeded or disabled ones [design: section 6.1].
-		return reply{Code: 2, Stdout: `{"sources":[` +
+		return reply{Code: 5, Stdout: `{"sources":[` +
 			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},` +
 			`{"backend":"b2","status":"degraded","version":2,"truncated":false},` +
 			`{"backend":"b3","status":"disabled","version":0,"truncated":false}` +
@@ -149,7 +149,7 @@ func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 		// own changesSourceRow does since bead pg2-unqcn) — proving this
 		// adapter now forwards it into each printed item's own
 		// degraded_reasons metadata, keyed by backend name.
-		return reply{Code: 2, Stdout: `{"sources":[` +
+		return reply{Code: 5, Stdout: `{"sources":[` +
 			`{"backend":"b1","status":"succeeded","version":1,"truncated":false},` +
 			`{"backend":"b2","status":"degraded","version":2,"truncated":false,"reason":"rate limited: too many requests"},` +
 			`{"backend":"b3","status":"disabled","version":0,"truncated":false}` +

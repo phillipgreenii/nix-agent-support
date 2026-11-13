@@ -101,8 +101,8 @@ func TestRun_CiList_FanOut_PartialFailure_Exit2(t *testing.T) {
 	writeCiConfigFor(t, "backend-ci-ok", "backend-ci-down")
 
 	stdout, _, code := executePr(t, []string{"ci", "list", "pr-1"})
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2 (degraded/partial); stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5 (degraded/partial); stdout=%s", code, stdout)
 	}
 
 	var outcome ciListOutcome
@@ -548,8 +548,8 @@ func TestRun_CiLogs_MultipleBackends_FirstError_ShortCircuits(t *testing.T) {
 	writeCiConfigFor(t, "backend-ci-multi-err-a", "backend-ci-multi-err-b")
 
 	stdout, _, code := executePr(t, []string{"ci", "logs", "run-1"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (non-not_found error is the generic failure code); stdout=%s", code, stdout)
+	if code != 8 {
+		t.Fatalf("exit code = %d, want 8 (non-not_found error is the generic failure code); stdout=%s", code, stdout)
 	}
 	var resp scriptout.Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {

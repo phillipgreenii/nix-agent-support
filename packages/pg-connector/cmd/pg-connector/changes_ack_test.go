@@ -218,7 +218,7 @@ func TestAckChangesAck_TwoBackendsAndNoBackendFlag_FailsInvalidArgumentWithNoWir
 	logB := ackOwningBackend(t, "backend-ack-two-b", map[string]string{"changes_ack": ackAnswer})
 
 	stdout, _, code := runAck(t, "issue", "changes-ack", "--consumer", "c1", "--query", "mine", "--next-seq", "5")
-	if code != 1 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, "--backend") {
+	if code != 2 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, "--backend") {
 		t.Fatalf("code=%d stdout=%s", code, stdout)
 	}
 	for _, p := range []string{logA, logB} {
@@ -244,7 +244,7 @@ func TestAckChangesAck_NonOwningBackend_FailsInvalidArgumentNamingTheInstance_No
 	writeRecordingBackend(t, "backend-ack-plain", logPath, map[string]string{"capabilities": ackCapsPlain})
 
 	stdout, _, code := runAck(t, "issue", "changes-ack", "--consumer", "c1", "--query", "mine", "--next-seq", "5")
-	if code != 1 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, `backend-ack-plain`) || !strings.Contains(stdout, "does not own changes") {
+	if code != 2 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, `backend-ack-plain`) || !strings.Contains(stdout, "does not own changes") {
 		t.Fatalf("code=%d stdout=%s", code, stdout)
 	}
 	if ops := opsOf(readRequestLog(t, logPath)); len(ops) != 1 || ops[0] != "capabilities" {
@@ -273,7 +273,7 @@ func TestAckChangesAck_NextSeqNotANonNegativeInteger_FailsInvalidArgumentWithNoW
 	logPath := ackOwningBackend(t, "backend-ack-badseq", map[string]string{"changes_ack": ackAnswer})
 	for _, bad := range []string{"-1", "abc", "1.5", ""} {
 		stdout, _, code := runAck(t, "issue", "changes-ack", "--consumer", "c1", "--query", "mine", "--next-seq", bad)
-		if code != 1 || !strings.Contains(stdout, "invalid_argument") {
+		if code != 2 || !strings.Contains(stdout, "invalid_argument") {
 			t.Fatalf("--next-seq %q: code=%d stdout=%s", bad, code, stdout)
 		}
 	}

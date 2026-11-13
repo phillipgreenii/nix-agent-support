@@ -183,8 +183,8 @@ func TestCiChanges_NonOwningBackend_IsInvalidArgument_NamesInstance_SendsNothing
 	writeRecordingBackend(t, "backend-ci-plain", logPath, map[string]string{"capabilities": ciCapsPlain})
 
 	stdout, _, code := runCiChanges(t, logPath)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 (invalid_argument); stdout=%s", code, stdout)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2 (invalid_argument); stdout=%s", code, stdout)
 	}
 	var env struct {
 		Error struct{ Code, Message string } `json:"error"`
@@ -208,7 +208,7 @@ func TestCiChanges_FailedCapabilities_CountsAsNotOwning_ReasonCarriesTheError(t 
 		"capabilities": fwdErrorEnvelope("unavailable", "no capabilities here"),
 	})
 	stdout, _, code := runCiChanges(t, logPath)
-	if code != 1 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, "no capabilities here") || !strings.Contains(stdout, "does not own changes") {
+	if code != 2 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, "no capabilities here") || !strings.Contains(stdout, "does not own changes") {
 		t.Fatalf("code=%d stdout=%s", code, stdout)
 	}
 	if ops := backendOps(readRequestLog(t, logPath)); len(ops) != 1 || ops[0] != "capabilities" {
@@ -273,7 +273,7 @@ func TestCiChanges_BackendPin_OfANonOwningBackend_FailsTheWholeCall(t *testing.T
 	writeRecordingBackend(t, "backend-ci-pin-owning", logOwning, map[string]string{"capabilities": ciCapsOwning, "changes": ciAnswer(nil, 1, `[]`), "changes_ack": fwdAckOK})
 	writeRecordingBackend(t, "backend-ci-pin-plain", logPlain, map[string]string{"capabilities": ciCapsPlain})
 	stdout, _, code := runCiChanges(t, logPlain, "--backend", "backend-ci-pin-plain")
-	if code != 1 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, `\"backend-ci-pin-plain\"`) {
+	if code != 2 || !strings.Contains(stdout, "invalid_argument") || !strings.Contains(stdout, `\"backend-ci-pin-plain\"`) {
 		t.Fatalf("code=%d stdout=%s", code, stdout)
 	}
 	if reqs := readRequestLog(t, logOwning); len(reqs) != 0 {
@@ -383,7 +383,7 @@ func TestCiChanges_SinceAndBeforeAreRefused(t *testing.T) {
 	writeRecordingBackend(t, "backend-ci-refuse-flags", logPath, map[string]string{"capabilities": ciCapsOwning})
 	for _, flag := range []string{"--since", "--before"} {
 		stdout, _, code := runCiChanges(t, logPath, flag, "24h")
-		if code != 1 || !strings.Contains(stdout, "invalid_argument") {
+		if code != 2 || !strings.Contains(stdout, "invalid_argument") {
 			t.Fatalf("%s: code=%d stdout=%s", flag, code, stdout)
 		}
 	}

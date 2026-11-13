@@ -69,12 +69,13 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    `protocolVersion` for the envelope shape itself, and one `schemaVersion` per schema-bearing
    capability, so a breaking change to one capability's schema never forces every unrelated backend
    to redeploy in lockstep.
-4. **pg-connector's own CLI exit codes are a layer separate from the wire protocol's plain `0`/`1`,
+4. **pg-connector's own CLI exit codes are a layer separate from the wire protocol's per-error process exit,
    and MUST NOT be built from or confused with it.** They split by op shape: a **fan-out** op
-   (queries every backend registered for a type/capability) reports `0`/`2`/`3`
-   (all-succeeded / degraded-partial / total-failure); a **targeted** op (resolves to exactly one
-   backend) reports `0`/`4`/`1` (success / `not_found` — a well-formed negative, not a failure /
-   any other error). Every multi-source response carries a `sources[]` row per backend actually
+   (queries every backend registered for a type/capability) reports `0`/`5`/`3`
+   (all-succeeded / Degraded / Unavailable, the total failure); a **targeted** op (resolves to exactly one
+   backend) reports `0`/`4`/`8`/`3`/`2`/`1` (success / `not_found` — a well-formed negative, not a failure /
+   `unauthenticated` / `unavailable` / `invalid_argument` and `query_not_recognized` / any other error).
+   The numbers are the shared exit codes of the workspace's `exitcode` package. Every multi-source response carries a `sources[]` row per backend actually
    queried, never collapsed into one pass/fail signal. (Amendment, 2026-11-12, operator ruling of
    Phillip, 2026-11-11 on the shared exit codes: "it is ok to break contracts, just make sure both
    sides are included in the specific landing of a change." The wire protocol's process exit is no
@@ -83,7 +84,8 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    `unknown_op` 20 (app-specific), `version_mismatch` 11, `invalid_argument` and
    `query_not_recognized` 2. The wire `error.code` names and the separation of layers are
    unchanged, and the umbrella still reads the JSON body, not the backend's exit code. The
-   umbrella's own `0`/`2`/`3`/`4`/`1` above is a separate decision.)
+   umbrella's own codes above use the same shared values for the same categories, but they are
+   computed by the umbrella from the response, not copied from a backend's process exit.)
 5. **A Tier-2 backend MUST resolve a cross-capability data need through its own direct, already-
    declared system access, and MUST NOT execute the `pg-connector` umbrella or a sibling Tier-2
    backend binary to satisfy its own op.** This reverses this repo's own first cut at the CI

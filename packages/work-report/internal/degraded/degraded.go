@@ -308,8 +308,8 @@ func compactJSON(raw json.RawMessage) (json.RawMessage, error) {
 
 var (
 	okTargeted = map[int]bool{0: true}
-	// okFanOut accepts the fan-out scheme: 0 ok, 2 degraded but usable.
-	okFanOut = map[int]bool{0: true, 2: true}
+	// okFanOut accepts the fan-out scheme: 0 ok, 5 Degraded (x/exitcode.Degraded) but usable.
+	okFanOut = map[int]bool{0: true, 5: true}
 )
 
 // call runs pg-connector and returns stdout when the exit code is in ok. A

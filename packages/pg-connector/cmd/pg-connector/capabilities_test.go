@@ -195,8 +195,8 @@ func TestCapabilities_FailedBackend_IsDegradedRowWithoutBackendsEntry_ExitCodeFo
 	capsBackend(t, "backend-caps-bad", "this is not a capabilities answer")
 
 	stdout, _, code := runCapsArgs(t, []string{"issue", "capabilities"})
-	if code != 2 {
-		t.Fatalf("partial failure exit code = %d, want 2; stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("partial failure exit code = %d, want 5; stdout=%s", code, stdout)
 	}
 	w := decodeCapsWire(t, stdout)
 	if len(w.Sources) != 2 || w.Sources[0].Status != "succeeded" || w.Sources[1].Source != "backend-caps-bad" ||
@@ -248,8 +248,8 @@ func TestCapabilities_UnknownBackend_FailsInvalidArgument_NoBackendCall(t *testi
 	log1 := capsBackend(t, "backend-caps-u1", capsAnswerWithQueries)
 
 	stdout, _, code := runCapsArgs(t, []string{"issue", "capabilities", "--backend", "no-such-backend"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stdout=%s", code, stdout)
 	}
 	if !strings.Contains(stdout, "invalid_argument") {
 		t.Fatalf("want an invalid_argument error: %s", stdout)
@@ -264,8 +264,8 @@ func TestCapabilities_EmptyRegistry_FailsInvalidArgument(t *testing.T) {
 	capsConfig(t, "pr", "", "backend-caps-other")
 
 	stdout, _, code := runCapsArgs(t, []string{"issue", "capabilities"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stdout=%s", code, stdout)
 	}
 	if !strings.Contains(stdout, "invalid_argument") {
 		t.Fatalf("want an invalid_argument error: %s", stdout)

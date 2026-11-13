@@ -72,7 +72,7 @@ func classifyListSource(backend string, err error) SourceResult {
 // allQueryNotRecognized reports whether sources is non-empty and EVERY
 // row is specifically a query_not_recognized disabled row — the one case
 // design has the umbrella deviate from the ordinary fan-out
-// exit-code scheme (0/2/3, INV-EXIT-1) to fail the whole call as
+// exit-code scheme (0/5/3, INV-EXIT-1) to fail the whole call as
 // invalid_argument instead ("If EVERY registered backend of that type
 // answers query_not_recognized, the umbrella fails the whole call with
 // invalid_argument"). A zero-backend result (nothing registered at all)

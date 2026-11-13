@@ -9,7 +9,7 @@
 // Neither verb here ever dispatches to a backend — both operate purely
 // on the local on-disk ledger state ledger.go's own loadLedger/
 // deleteLedger/ListLedgerKeys already provide — so there is no
-// SourceResult/fan-out exit-code scheme to reuse (outcome.go's 0/2/3
+// SourceResult/fan-out exit-code scheme to reuse (outcome.go's 0/5/3
 // applies to a BACKEND health outcome; there is no such outcome here). A
 // well-formed call always reports its result at exit 0; a filter that
 // matches zero ledgers is not an error (an empty result list), matching

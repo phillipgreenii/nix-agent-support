@@ -379,8 +379,8 @@ func TestPRDiag_UnavailableIsTheOrdinaryTargetedFailureWithItsMessage(t *testing
 			b := newDiagBackend(t, "diag-down", map[string]string{v.op: diagDown})
 			writeDiagConfig(t, b)
 			stdout, _, code := executePr(t, v.cmd)
-			if code != 1 {
-				t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+			if code != 3 {
+				t.Fatalf("exit code = %d, want 3; stdout=%s", code, stdout)
 			}
 			var resp scriptout.Response
 			if err := json.Unmarshal([]byte(stdout), &resp); err != nil || resp.Error == nil {

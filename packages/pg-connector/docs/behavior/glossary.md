@@ -258,7 +258,7 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   its own caller; a layer separate from, and never built from, the wire protocol's per-error exit
   codes (`INV-EXIT-1`).
 - **Targeted op** — an op that resolves to exactly one registered backend by id (e.g. `show`,
-  `files`, `get_logs`); uses the `0`/`4`/`1` exit-code scheme.
+  `files`, `get_logs`); uses the `0`/`4`/`8`/`3`/`2`/`1` exit-code scheme.
 - **Fan-out op** — an op that queries every backend registered for a type/capability at once (e.g.
   `ci list`, `auth status`, `config validate`); uses the `0`/`2`/`3` exit-code scheme, and its
   response carries a `sources[]` outcome row per backend queried (`INV-OUT-1`).

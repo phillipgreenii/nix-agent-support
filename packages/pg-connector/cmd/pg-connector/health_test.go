@@ -189,8 +189,8 @@ func TestHealth_FailedBackend_IsDegradedRowWithoutBackendsEntry_ExitCodeFollowsF
 	healthFailingBackend(t, "backend-health-bad")
 
 	stdout, _, code := runCapsArgs(t, []string{"issue", "health"})
-	if code != 2 {
-		t.Fatalf("partial failure exit code = %d, want 2; stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("partial failure exit code = %d, want 5; stdout=%s", code, stdout)
 	}
 	w := decodeHealthWire(t, stdout)
 	if len(w.Sources) != 2 || w.Sources[0].Status != "succeeded" || w.Sources[1].Source != "backend-health-bad" ||
@@ -244,8 +244,8 @@ func TestHealth_UnknownBackend_FailsInvalidArgument_NoBackendCall(t *testing.T) 
 	log1 := healthStatusBackend(t, "backend-health-u1", healthDocStoredBaseline)
 
 	stdout, _, code := runCapsArgs(t, []string{"issue", "health", "--backend", "no-such-backend"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stdout=%s", code, stdout)
 	}
 	if !strings.Contains(stdout, "invalid_argument") {
 		t.Fatalf("want an invalid_argument error: %s", stdout)

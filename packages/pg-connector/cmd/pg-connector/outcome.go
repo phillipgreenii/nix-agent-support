@@ -3,7 +3,7 @@
 // This is where pg-connector's CLI exit code is computed. A capability's
 // own CLI verb group (e.g. a sibling packet's pr verb group) supplies this
 // helper with the raw per-call result or error (including which sentinel
-// it was, if any); it does not independently decide 0/4/1 or 0/2/3 itself
+// it was, if any); it does not independently decide 0/4/8/3/2/1 or 0/5/3 itself
 // — that classification logic lives exactly once, here, so every
 // capability's verbs get identical exit-code behaviour for identical
 // outcomes.
@@ -51,9 +51,22 @@ type FanOutOutcome struct {
 	Sources []SourceResult `json:"sources"`
 }
 
+// Process exit codes of pg-connector's own CLI. Each equals the same-named
+// constant in github.com/phillipgreenii/x/exitcode; they are literals here
+// because the x revision this module pins does not carry that package and a
+// bump needs a regenerated gomod2nix.toml.
+const (
+	exitOK          = 0 // exitcode.OK
+	exitUsage       = 2 // exitcode.Usage
+	exitUnavailable = 3 // exitcode.Unavailable
+	exitNotFound    = 4 // exitcode.NotFound
+	exitDegraded    = 5 // exitcode.Degraded
+	exitDenied      = 8 // exitcode.Denied
+)
+
 // ExitCode returns this outcome's pg-connector CLI exit code: 0 (all
-// healthy — succeeded or disabled), 2 (degraded/partial — at least one
-// source is degraded, but at least one is healthy), or 3 (total failure —
+// healthy — succeeded or disabled), 5 (Degraded — at least one source is
+// degraded, but at least one is healthy), or 3 (Unavailable, total failure —
 // no healthy source, including the case of zero sources queried). 1 is
 // never returned here — it is reserved for the CLI's own
 // generic/unexpected-failure path outside this helper.
@@ -75,25 +88,33 @@ func (o FanOutOutcome) ExitCode() int {
 	}
 	switch {
 	case failed == 0 && healthy > 0:
-		return 0
+		return exitOK
 	case healthy == 0:
-		return 3
+		return exitUnavailable
 	default:
-		return 2
+		return exitDegraded
 	}
 }
 
 // TargetedExitCode computes pg-connector's own CLI exit code for a targeted
 // op (one that resolves to a single registered backend) from the raw
-// per-call error: 0 (success), 4 (not_found — a well-formed negative
-// answer), or 1 (any other error, or a CLI-level failure before a
-// well-formed response was produced).
+// per-call error: 0 (success), 4 NotFound (not_found, a well-formed negative
+// answer), 8 Denied (unauthenticated), 3 Unavailable (unavailable), 2 Usage
+// (invalid_argument, query_not_recognized), or 1 (any other error, or a
+// CLI-level failure before a well-formed response was produced). The wire
+// error names are unchanged; only the process exit code is classified.
 func TargetedExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if errors.Is(err, scriptout.ErrNotFound) {
-		return 4
+	switch {
+	case err == nil:
+		return exitOK
+	case errors.Is(err, scriptout.ErrNotFound):
+		return exitNotFound
+	case errors.Is(err, scriptout.ErrUnauthenticated):
+		return exitDenied
+	case errors.Is(err, scriptout.ErrUnavailable):
+		return exitUnavailable
+	case errors.Is(err, scriptout.ErrInvalidArgument), errors.Is(err, scriptout.ErrQueryNotRecognized):
+		return exitUsage
 	}
 	return 1
 }

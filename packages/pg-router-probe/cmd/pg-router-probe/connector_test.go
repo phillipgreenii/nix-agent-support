@@ -86,9 +86,9 @@ func TestListEscalatedOK(t *testing.T) {
 	}
 }
 
-// TestListEscalatedDegradedStillOK proves the fan-out exit code 2
+// TestListEscalatedDegradedStillOK proves the fan-out exit code 5
 // ("degraded but usable") is treated as success here, mirroring
-// pg-router-source-pg-connector's own classifyExit(0,2) convention for
+// pg-router-source-pg-connector's own classifyExit(0,5) convention for
 // the same "issue list" fan-out op.
 func TestListEscalatedDegradedStillOK(t *testing.T) {
 	withFactory(t, "list_degraded_empty")

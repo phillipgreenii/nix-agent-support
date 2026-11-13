@@ -147,7 +147,7 @@ const defaultDedupQuery = "escalated-all"
 // ..., never bd search/bd list directly"]. query is the dedup query name
 // (defaultDedupQuery unless overridden), see its doc comment for the
 // required semantics. issue list's own exit-code
-// scheme is the fan-out scheme (0 ok, 2 degraded-but-usable) -- mirroring
+// scheme is the fan-out scheme (0 ok, 5 Degraded but usable) -- mirroring
 // pg-router-source-pg-connector's own classifyExit for the same reason:
 // list is a fan-out op, unlike create/update/comment below.
 func listEscalated(ctx context.Context, backend, query string, warn func(string)) ([]connectorIssue, error) {
@@ -156,7 +156,7 @@ func listEscalated(ctx context.Context, backend, query string, warn func(string)
 		"--query", query,
 		"--backend", backend,
 		"--output", "json",
-	}, map[int]bool{0: true, 2: true}, warn)
+	}, map[int]bool{0: true, 5: true}, warn)
 	if err != nil {
 		return nil, err
 	}

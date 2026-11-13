@@ -34,7 +34,7 @@ func newPrReviewCmd() *cobra.Command {
 // write (DispatchTargeted, never Dispatch, so INV-REG-2's try-each policy
 // and --backend pinning apply). The 9.1 request body is JSON, read from stdin
 // or, with --from-file, from the named file (the two are mutually exclusive);
-// the exit code follows INV-EXIT-1's Targeted scheme (0/4/1) via
+// the exit code follows INV-EXIT-1's Targeted scheme (0/4/8/3/2/1) via
 // writeTargetedResult. Every status the op reports (posted, append, no_change)
 // is a well-formed result and so exits 0: a caller MUST read the output's
 // status, never infer what was written from the exit code. A run in which some
@@ -163,7 +163,7 @@ func humanizeReviewSubmit(raw json.RawMessage) (string, error) {
 // apply). It takes no stdin. The default (JSON) output is the wire envelope:
 // a result that is either the structured record or the explicit none result
 // ("pending": false), or an error. Exit codes follow INV-EXIT-1's Targeted
-// scheme (0/4/1) via writeTargetedResult: "no pending review" exits 0 (a
+// scheme (0/4/8/3/2/1) via writeTargetedResult: "no pending review" exits 0 (a
 // well-formed answer), a failed lookup exits non-zero with an error.
 func newPrReviewPendingCmd() *cobra.Command {
 	cmd := &cobra.Command{

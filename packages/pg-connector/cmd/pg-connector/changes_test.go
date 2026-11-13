@@ -238,7 +238,7 @@ func TestFanOutChanges_CrashBetweenFlushAndAdvance_ReproducesDuplicateDelivery(t
 }
 
 // TestRun_PrChanges_FanOutExitCode_DegradedAndTotalFailure covers "changes
-// 's own fan-out exit code matches list's existing scheme (0/2/3) ... on a
+// 's own fan-out exit code matches list's existing scheme (0/5/3) ... on a
 // synthetic degraded/total-failure backend set."
 func TestRun_PrChanges_FanOutExitCode_DegradedAndTotalFailure(t *testing.T) {
 	dir := t.TempDir()
@@ -257,8 +257,8 @@ func TestRun_PrChanges_FanOutExitCode_DegradedAndTotalFailure(t *testing.T) {
 	t.Setenv("PG_PR_CONFIG", cfg)
 
 	stdout, _, code := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2 (degraded: one healthy, one failed); stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5 (degraded: one healthy, one failed); stdout=%s", code, stdout)
 	}
 	w := decodeChangesWire(t, stdout)
 	if len(w.Sources) != 2 {
@@ -298,8 +298,8 @@ func TestRun_PrChanges_DegradedReason_SurfacesInJSONAndHuman(t *testing.T) {
 	t.Setenv("PG_PR_CONFIG", cfg)
 
 	stdout, _, code := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2 (degraded); stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5 (degraded); stdout=%s", code, stdout)
 	}
 	w := decodeChangesWire(t, stdout)
 	if len(w.Sources) != 2 {
@@ -316,8 +316,8 @@ func TestRun_PrChanges_DegradedReason_SurfacesInJSONAndHuman(t *testing.T) {
 	}
 
 	stdoutHuman, _, codeHuman := executePr(t, []string{"--output", "human", "pr", "changes", "--query", "mine", "--consumer", "c1"})
-	if codeHuman != 2 {
-		t.Fatalf("human exit code = %d, want 2; stdout=%s", codeHuman, stdoutHuman)
+	if codeHuman != 5 {
+		t.Fatalf("human exit code = %d, want 5; stdout=%s", codeHuman, stdoutHuman)
 	}
 	if !strings.Contains(stdoutHuman, "rate limit") {
 		t.Fatalf("human output missing the real reason; stdout=%s", stdoutHuman)

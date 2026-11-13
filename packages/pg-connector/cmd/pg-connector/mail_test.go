@@ -275,7 +275,7 @@ func TestRun_MailSearch_RequiresQuery(t *testing.T) {
 	}
 }
 
-// TestRun_MailList_FanOutExitCodes pins the ordinary 0/2/3 scheme and the
+// TestRun_MailList_FanOutExitCodes pins the ordinary 0/5/3 scheme and the
 // one-sources[]-row-per-backend rule across two registered backends.
 func TestRun_MailList_FanOutExitCodes(t *testing.T) {
 	t.Run("one degraded -> exit 2 with a row per backend", func(t *testing.T) {
@@ -286,8 +286,8 @@ func TestRun_MailList_FanOutExitCodes(t *testing.T) {
 		writeMailConfigFor(t, "backend-mail-ok", "backend-mail-down")
 
 		stdout, _, code := executePr(t, []string{"mail", "list"})
-		if code != 2 {
-			t.Fatalf("exit code = %d, want 2; stdout=%s", code, stdout)
+		if code != 5 {
+			t.Fatalf("exit code = %d, want 5; stdout=%s", code, stdout)
 		}
 		var outcome mailListOutcome
 		if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
@@ -436,7 +436,7 @@ func TestRun_MailShow_HumanOutput(t *testing.T) {
 
 // TestRun_MailTargetedVerbs_WireOpsAndExitCodes covers every id-keyed verb:
 // the exact wire op name and {id} arg, exit 0 on success, exit 4 on
-// not_found (the targeted 0/4/1 scheme).
+// not_found (the targeted 0/4/8/3/2/1 scheme).
 func TestRun_MailTargetedVerbs_WireOpsAndExitCodes(t *testing.T) {
 	cases := []struct {
 		verb   string
@@ -475,8 +475,8 @@ func TestRun_MailTargetedVerbs_WireOpsAndExitCodes(t *testing.T) {
 				tc.wireOp: `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"bridge down"}}`,
 			})
 			writeMailConfigFor(t, "backend-mail-err-"+tc.verb)
-			if _, _, code := executePr(t, []string{"mail", tc.verb, "<m1@example.test>"}); code != 1 {
-				t.Fatalf("exit code = %d, want 1", code)
+			if _, _, code := executePr(t, []string{"mail", tc.verb, "<m1@example.test>"}); code != 3 {
+				t.Fatalf("exit code = %d, want 3", code)
 			}
 		})
 		t.Run(tc.verb+"/requires_id", func(t *testing.T) {

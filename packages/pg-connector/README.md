@@ -265,10 +265,10 @@ A different, higher layer than the backend process exit codes above — pg-conne
 process exit code is never built from it. It splits by whether the invoked op is a **fan-out**
 (queries every registered backend of a type) or **targeted** (resolves to one backend):
 
-| Op shape | `0`                  | Other codes                                                                                                |
-| -------- | -------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Fan-out  | every source healthy | `2` degraded/partial (some healthy, some not); `3` total failure (none healthy, including zero registered) |
-| Targeted | success              | `4` `not_found` (a well-formed negative, not a failure); `1` any other error                               |
+| Op shape | `0`                  | Other codes                                                                                                                                |
+| -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fan-out  | every source healthy | `5` Degraded (some healthy, some not); `3` Unavailable, total failure (none healthy, including zero registered)                            |
+| Targeted | success              | `4` NotFound; `8` Denied (`unauthenticated`); `3` Unavailable; `2` Usage (`invalid_argument`, `query_not_recognized`); `1` any other error |
 
 Every fan-out response also carries a `sources[]` row per backend actually queried
 (`{source, status, count, reason}`) — never collapsed into one pass/fail signal, and never
@@ -828,7 +828,7 @@ launchd entry sets it to `<state_dir>/pprof.sock` unless `jira.pprof.enable` is 
 This is the record of the caller audit the client package doc (`cmd/pg-connector-issue-jira/internal/client/doc.go`)
 points at. Scope: every caller in this repository of the umbrella's `issue` verbs, of the adapters that wrap them, and
 of the prompts and skills that name them; callers in other repositories were read only. The wire code reaches a caller
-as exit `1` plus an `error.code` in the body on a targeted verb, and as a `degraded` `sources[]` row (exit `2` or `3`)
+as an exit code classified by the wire error (`3` for `unavailable`) plus an `error.code` in the body on a targeted verb, and as a `degraded` `sources[]` row (exit `5` or `3`)
 on a fan-out verb, so a caller MUST read the body, not the exit code, to tell it from other failures.
 
 **Retryable as built (no change needed).**

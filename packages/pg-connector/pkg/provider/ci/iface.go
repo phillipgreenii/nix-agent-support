@@ -25,10 +25,10 @@ import (
 // (INV-REG-1), and a CI run query is naturally "every backend that might
 // have a run for this PR," not "the one backend for this id"
 // (INV-EXIT-1) — so cmd/pg-connector's own "ci list" verb queries
-// every registered ci backend and uses the fan-out exit scheme (0/2/3),
+// every registered ci backend and uses the fan-out exit scheme (0/5/3),
 // unlike GetLogs/RerunFailed below, which are targeted ops (resolve to the
 // one backend that owns the given id) using the targeted exit scheme
-// (0/4/1) (INV-EXIT-1).
+// (0/4/8/3/2/1) (INV-EXIT-1).
 //
 // The method set carries over the shape of the retired PR tool's existing
 // the retired PR tool's pkg/provider/cicd.Provider{ListRuns, GetLogs, RerunFailed}

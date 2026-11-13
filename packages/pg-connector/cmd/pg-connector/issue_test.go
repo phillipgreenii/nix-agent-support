@@ -463,8 +463,8 @@ func TestRun_IssueTransition_VocabularyMismatch_PassesToBackendAndIsGenericFailu
 	writeIssueConfigFor(t, "backend-issue-transition-vocab")
 
 	stdout, _, code := executePr(t, []string{"issue", "transition", "issue-1", "--state", "bogus"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3; stdout=%s", code, stdout)
 	}
 	var resp scriptout.Response
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {

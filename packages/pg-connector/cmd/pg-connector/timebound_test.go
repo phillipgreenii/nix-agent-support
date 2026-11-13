@@ -302,8 +302,8 @@ func TestList_InvalidBound_IsInvalidArgumentBeforeAnyDispatch(t *testing.T) {
 			writeCapturingFakeBackend(t, "be-never-called", capture, emptyPRListResp)
 			writeBackendsConfig(t, tc.args[0], "be-never-called", "")
 			stdout, _, code := executePr(t, tc.args)
-			if code != 1 {
-				t.Fatalf("exit = %d, want 1; stdout=%s", code, stdout)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2; stdout=%s", code, stdout)
 			}
 			if !strings.Contains(stdout, `"invalid_argument"`) {
 				t.Fatalf("stdout = %s, want an invalid_argument error envelope", stdout)
@@ -357,8 +357,8 @@ func TestChanges_RejectsTimeBounds(t *testing.T) {
 			writeCapturingFakeBackend(t, "be-changes-never-called", capture, emptyPRListResp)
 			writeBackendsConfig(t, tc.args[0], "be-changes-never-called", "")
 			stdout, _, code := executePr(t, tc.args)
-			if code != 1 {
-				t.Fatalf("exit = %d, want 1; stdout=%s", code, stdout)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2; stdout=%s", code, stdout)
 			}
 			if !strings.Contains(stdout, `"invalid_argument"`) || !strings.Contains(stdout, "tombstone") {
 				t.Fatalf("stdout = %s, want an invalid_argument envelope explaining the tombstone hazard", stdout)
@@ -439,8 +439,8 @@ func TestSearch_InvalidBound_IsInvalidArgument(t *testing.T) {
 	writeCapturingFakeBackend(t, "be-search-never", capture, `{"protocolVersion":1,"schemaVersion":1,"result":[]}`)
 	writeBackendsConfig(t, "search", "be-search-never", "")
 	stdout, _, code := executePr(t, []string{"search", "flaky", "--since", "soon"})
-	if code != 1 || !strings.Contains(stdout, `"invalid_argument"`) {
-		t.Fatalf("exit = %d, stdout=%s; want 1 + invalid_argument", code, stdout)
+	if code != 2 || !strings.Contains(stdout, `"invalid_argument"`) {
+		t.Fatalf("exit = %d, stdout=%s; want 2 + invalid_argument", code, stdout)
 	}
 	if _, err := os.Stat(capture); err == nil {
 		t.Fatal("search invoked a backend despite an invalid bound")

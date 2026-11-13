@@ -557,8 +557,8 @@ func TestPrListCacheFallback_DegradedSourceServesStaleEntities(t *testing.T) {
 	}})
 
 	stdout, _, code := executePr(t, []string{"pr", "list", "--query", "mine"})
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2 (degraded: one healthy, one fallback-served-but-still-degraded); stdout=%s", code, stdout)
+	if code != 5 {
+		t.Fatalf("exit code = %d, want 5 (degraded: one healthy, one fallback-served-but-still-degraded); stdout=%s", code, stdout)
 	}
 	var outcome prListOutcome
 	if err := json.Unmarshal([]byte(stdout), &outcome); err != nil {
@@ -634,8 +634,8 @@ func TestReviewSubmitBadStdinExits1(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-rs-bad", map[string]string{"review_submit": reviewSubmitOKResp}, `{}`)
 	writeConfigFor(t, "backend-rs-bad")
 	_, _, code := executePrWithStdin(t, `nope`, []string{"pr", "review", "submit", "pr-1"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
 	}
 }
 
@@ -783,8 +783,8 @@ func TestReviewSubmitFromFileInvalidArgument(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-rs-ffbad", map[string]string{"review_submit": reviewSubmitOKResp}, `{}`)
 	writeConfigFor(t, "backend-rs-ffbad")
 	stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc"}`, []string{"pr", "review", "submit", "pr-1", "--from-file", good})
-	if code != 1 {
-		t.Fatalf("both sources: exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != 2 {
+		t.Fatalf("both sources: exit code = %d, want 2; stdout=%s", code, stdout)
 	}
 	if !strings.Contains(stdout, "invalid_argument") {
 		t.Errorf("both sources must be invalid_argument: %s", stdout)
@@ -806,8 +806,8 @@ func TestReviewSubmitInvalidArgumentExits1(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-rs-ia")
 	_, _, code := executePrWithStdin(t, `{"head_sha":"old","body":"b"}`, []string{"pr", "review", "submit", "pr-1"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1", code)
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
 	}
 }
 
@@ -873,8 +873,8 @@ func TestReviewPendingLookupFailureExitsNonZeroWithError(t *testing.T) {
 	}, `{}`)
 	writeConfigFor(t, "backend-rp-fail")
 	stdout, _, code := executePrWithStdin(t, ``, []string{"pr", "review", "pending", "pr-1"})
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1; stdout=%s", code, stdout)
+	if code != 3 {
+		t.Fatalf("exit code = %d, want 3; stdout=%s", code, stdout)
 	}
 	if !strings.Contains(stdout, "detection_failed") || strings.Contains(stdout, `"pending"`) {
 		t.Fatalf("stdout must carry the error and no pending result; got %s", stdout)

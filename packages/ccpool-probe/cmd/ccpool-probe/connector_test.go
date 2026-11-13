@@ -84,7 +84,7 @@ func TestListEscalatedOK(t *testing.T) {
 	}
 }
 
-// TestListEscalatedDegradedStillOK proves the fan-out exit code 2
+// TestListEscalatedDegradedStillOK proves the fan-out exit code 5
 // ("degraded but usable") is treated as success here, mirroring
 // pg-router-probe's own connector.go for the same reason: list is a
 // fan-out op.
