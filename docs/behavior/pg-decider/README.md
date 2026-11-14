@@ -107,3 +107,12 @@ Out of scope for the whole set:
 - The pg-desk annotation verbs and the composite view contract; see
   `annotate.md` and `show.md` of the set `phillipgreenii-nix-agent-support · docs/behavior/pg-desk`.
 - The deployment wiring that binds pg-router to the decider and renders its configuration file.
+
+## External references
+
+Every element this set cites from outside it is declared here. The owner UUID is the authority;
+the link is a convenience.
+
+| Name        | What it is                                                                | Owner set-path                                                                                           | Owner UUID                                                                                                                                                                              |
+| ----------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-CMA-3` | an optional action report on the last line of a command's standard output | `phillipgreenii-nix-agent-support · packages/pg-router-handlers/docs/behavior/pg-router-handler-command` | [dfb4ba05-d86c-48ff-8494-1f0397734515](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-router-handlers/docs/behavior/pg-router-handler-command/invariants.md) |

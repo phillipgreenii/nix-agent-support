@@ -109,7 +109,7 @@ issue-change feed, and widening it would pull every closed work item into the is
   reason `already handled`, its facts naming the operation, the kind, the `dedup_key` and the work
   item that holds it, and a child parented at a removed anchor `create` is parented at the work item
   that holds it. `apply` removes the same creates before it executes, so `plan` and `apply` agree
-  per kind and operation on the same state: what `plan` lists is what `apply` then writes.
+  per kind and operation on the same state, so what `plan` lists is what `apply` then writes.
 - **Reported.** The listing's size is reported as `lookup_items`, once per `pr` run: in the plan
   `--json` (after `skipped`), in a `lookup:` line of the text plan, and in the run counters line (see
   "Run counters"), including the line of a run that failed closed after a listing was read, so an

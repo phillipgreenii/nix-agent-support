@@ -16,7 +16,7 @@ pg-pr-change [--lock-dir DIR] [--lock-wait DURATION] [--run-record FILE] [--orig
 **What triggers it.** The `pr-change` role binds `pr.changed`. Three things produce that event: a change
 of a watched PR (the connector daemon's feed), a change of one of the PR's pg-desk annotations (the
 pg-desk annotation feed, `pg-desk pr annotation-items`, see
-[`annotation-items.md`](../pg-desk/annotation-items.md); its items carry `metadata.origin`, which the role
+`annotation-items.md` of `phillipgreenii-nix-agent-support · docs/behavior/pg-desk`; its items carry `metadata.origin`, which the role
 renders into `--origin`; the same feed also delivers a `work_changed` or `link_changed` record of a PR
 whose lane row still holds a residual, so a residual cleared out of band re-runs the lane and returns to
 zero), and the selection announcement of `pg-desk focus select`

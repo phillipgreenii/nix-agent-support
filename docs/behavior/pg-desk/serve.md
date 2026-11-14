@@ -277,7 +277,7 @@ before any run, so the first event is not lost to `increase()`:
   every retry). Every stage and class pair is emitted.
 - `pg_desk_pr_lane_skips_total{reason}` — the deliveries `pg-pr-change` ended before the lock because
   the decider itself wrote the annotation that caused them (`reason` `own-origin`; see
-  [`../pg-decider/pr-change.md`](../pg-decider/pr-change.md), "Own-origin deliveries are skipped"). A skip
+  `pr-change.md` of `phillipgreenii-nix-agent-support · docs/behavior/pg-decider`, "Own-origin deliveries are skipped"). A skip
   is not a run and is in no other lane family. A skip rate far above the run rate signals a loop or an
   impersonated origin.
 - `pg_decider_decisions_total{rule,action,outcome,reason}` — the decider's per-rule results. `action`
@@ -475,7 +475,7 @@ deferred-registration allowlist names them.
 | `pg-desk-pr-hydrate-dead-man`     | `pr-change` dispatches (`pg_router_throughput_total{role="pr-change"}`) in an hour with no increase of `pg_desk_hydrations_total{type="pr"}` | `> 0`      | `15m` | the role is dispatched but its hydrate stage never ran                                                                         |
 
 `pg-desk-pr-hydrate-dead-man` counts `pr-change` dispatches as throughput, and an own-origin skip (see
-[`../pg-decider/pr-change.md`](../pg-decider/pr-change.md), "Own-origin deliveries are skipped") is a
+`pr-change.md` of `phillipgreenii-nix-agent-support · docs/behavior/pg-decider`, "Own-origin deliveries are skipped") is a
 dispatch without a hydration. That is safe today because each skip follows a run that hydrated the PR
 (the decider's own write is made by such a run); it stops being true if a deployment ever skips
 deliveries no run preceded.

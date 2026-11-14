@@ -96,7 +96,7 @@ row, so `issue` and `thread` never deliver them.
 
 A decider's own annotation writes come back through this feed. The loop is closed in the decider's
 composed command, not here: the feed reports who wrote each change, and a delivery whose origin is the
-decider's own is skipped before the lock (see [`pr-change.md`](../pg-decider/pr-change.md), "Own-origin
+decider's own is skipped before the lock (see `pr-change.md` of `phillipgreenii-nix-agent-support · docs/behavior/pg-decider`, "Own-origin
 deliveries are skipped"). An annotation write that does not change the stored value appends no record
 (see [`annotate.md`](annotate.md)), so a re-run of a verb is not a trigger.
 
