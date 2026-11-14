@@ -92,7 +92,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 		}, nil
 	}
 
-	if err := metrics.New(mp, snapshotFn); err != nil {
+	if err := metrics.New(mp, newBounded("dashboard", snapshotFn)); err != nil {
 		return nil, fmt.Errorf("httpapi: new metrics emitter: %w", err)
 	}
 
@@ -115,15 +115,15 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 		}
 		return changes.EvaluateSweepBound(changes.SweepInputsForTier(cfg, tf, tier), poll, known)
 	}
-	if err := metrics.RegisterChangeFlow(mp, flowFn, metrics.WithSweepBound(sweepBound),
-		metrics.WithIngestFailed(metrics.IngestFailedFromStore(st, cfg.OwningInstances(changes.EntityTypeIssue),
-			func() time.Time { return nowUTC() })),
-		metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedForConfig(st, cfg,
-			func() time.Time { return nowUTC() })),
-		metrics.WithUnflaggedMembers(metrics.UnflaggedMembersForConfig(st, cfg)),
-		metrics.WithWatchedEntities(metrics.WatchedEntitiesFromStore(st)),
-		metrics.WithOldestOrphanReadAge(metrics.OldestOrphanReadAgeFromStore(st, cfg,
-			func() time.Time { return nowUTC() }))); err != nil {
+	if err := metrics.RegisterChangeFlow(mp, newBounded("changeflow", flowFn), metrics.WithSweepBound(sweepBound),
+		metrics.WithIngestFailed(newBounded("ingest_failed", metrics.IngestFailedFromStore(st, cfg.OwningInstances(changes.EntityTypeIssue),
+			func() time.Time { return nowUTC() }))),
+		metrics.WithWatchedSourceObserved(newBounded("watched_source", metrics.WatchedSourceObservedForConfig(st, cfg,
+			func() time.Time { return nowUTC() }))),
+		metrics.WithUnflaggedMembers(newBounded("unflagged", metrics.UnflaggedMembersForConfig(st, cfg))),
+		metrics.WithWatchedEntities(newBounded("watched_entities", metrics.WatchedEntitiesFromStore(st))),
+		metrics.WithOldestOrphanReadAge(newBounded("orphan_age", metrics.OldestOrphanReadAgeFromStore(st, cfg,
+			func() time.Time { return nowUTC() })))); err != nil {
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
 
@@ -140,7 +140,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 		return focus.ComputeHealth(st, cfg, nowUTC())
 	}, focusHealthTTL)
 	if !ro.noFocus {
-		if err := metrics.RegisterFocus(mp, focusFn); err != nil {
+		if err := metrics.RegisterFocus(mp, newBounded("focus", focusFn)); err != nil {
 			return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
 		}
 	}
@@ -163,7 +163,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 		}
 		return metrics.PRUnhydratedSnapshot{Count: u.Count, OldestAgeSeconds: u.OldestAgeSeconds}, true, nil
 	}
-	if err := metrics.RegisterPRLane(mp, cfg.PRLaneMode, unhydratedFn); err != nil {
+	if err := metrics.RegisterPRLane(mp, cfg.PRLaneMode, newBounded3("pr_unhydrated", unhydratedFn)); err != nil {
 		return nil, fmt.Errorf("httpapi: register pr lane metrics: %w", err)
 	}
 
@@ -185,7 +185,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 		}
 		return snap, true, nil
 	}
-	if err := metrics.RegisterPRLaneState(mp, laneStateFn); err != nil {
+	if err := metrics.RegisterPRLaneState(mp, newBounded3("pr_lane_state", laneStateFn)); err != nil {
 		return nil, fmt.Errorf("httpapi: register pr lane state metrics: %w", err)
 	}
 
@@ -211,7 +211,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 			OldestHydrationAgeSeconds: a.OldestHydrationAgeSeconds,
 		}, true, nil
 	}
-	if err := metrics.RegisterPRAnchors(mp, anchorsFn); err != nil {
+	if err := metrics.RegisterPRAnchors(mp, newBounded3("pr_anchors", anchorsFn)); err != nil {
 		return nil, fmt.Errorf("httpapi: register pr anchor metrics: %w", err)
 	}
 
