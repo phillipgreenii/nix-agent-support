@@ -274,7 +274,18 @@ func TestChain_DecliningMiddlePassesThrough(t *testing.T) {
 // not abort the chain — it is skipped (treated as a decline) and the chain
 // continues with the text as it stood before that processor ran.
 func TestChain_TimedOutProcessorSkipped_ContinuesWithPriorText(t *testing.T) {
-	withTimeout(t, 300*time.Millisecond)
+	// Only the sleeping processor gets a short budget; every other processor
+	// keeps the package's generous testTimeout. Under load the fast "second"
+	// processor therefore cannot miss its own deadline, so exactly one
+	// timeout is deterministic rather than a race against process spawn time.
+	prevBudget := budgetFor
+	budgetFor = func(procCmd string) time.Duration {
+		if strings.Contains(procCmd, "sleep") {
+			return 300 * time.Millisecond
+		}
+		return testTimeout
+	}
+	t.Cleanup(func() { budgetFor = prevBudget })
 	// Both processors are STOCK system binaries, never a freshly written
 	// /bin/sh script: a brand-new executable at a fresh t.TempDir() path pays
 	// a first-exec scan cost (SentinelOne/EDR) that can itself exceed a

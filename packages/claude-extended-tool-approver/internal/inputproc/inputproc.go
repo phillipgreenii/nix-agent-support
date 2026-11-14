@@ -62,6 +62,12 @@ const (
 // still defaultTimeout.
 var timeout = defaultTimeout
 
+// budgetFor returns the exec deadline for one processor command. Production
+// always answers timeout; it is a var solely so a test can give one processor a
+// short budget while every other processor in the same chain keeps a generous
+// one, making "exactly one processor times out" independent of machine load.
+var budgetFor = func(string) time.Duration { return timeout }
+
 // payloadEnvKeys are the four CETA_* variables ceta exports into every
 // processor's environment (bead tc-7m85u item 2), taken from the hook payload
 // ceta already parsed — nothing else from the payload, and no other channel:
@@ -210,7 +216,8 @@ func processChain(command string, payload Payload) (string, bool, []error) {
 // including the process-group isolation and the WaitDelay backstop — is
 // unchanged.
 func runOneProcessor(procCmd, command string, payload Payload) (string, bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	budget := budgetFor(procCmd)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
 	parts := strings.Fields(procCmd)
@@ -239,7 +246,7 @@ func runOneProcessor(procCmd, command string, payload Payload) (string, bool, er
 		// code -1, but ctx.Err() is the only signal that names the CAUSE. The
 		// bare error reads "signal: killed", which says nothing about why.
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return command, false, fmt.Errorf("%w after %s: %w", ctxErr, timeout, err)
+			return command, false, fmt.Errorf("%w after %s: %w", ctxErr, budget, err)
 		}
 		// The processor finished inside its budget and something it forked was
 		// still holding the pipe when waitGrace expired, so the read was cut
