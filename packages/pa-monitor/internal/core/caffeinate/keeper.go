@@ -97,6 +97,8 @@ type CLI struct {
 	Configured string
 	// Timeout bounds one invocation; zero means DefaultCallTimeout.
 	Timeout time.Duration
+	// Clock supplies "now" for the in-process heartbeat age; nil means time.Now.
+	Clock func() time.Time
 }
 
 // Locate resolves the pg-keep-awake executable. A configured path MUST be
@@ -194,10 +196,24 @@ type statusJSON struct {
 	} `json:"battery"`
 }
 
-// Observe runs `pg-keep-awake status --json --check` once: stdout carries the
-// status object and the exit code carries the health, so both come from one
-// process and cannot disagree.
+// Observe reads the keeper without launching it when status.json and
+// keeper.heartbeat show it down or up-idle (see peekKeeper), and otherwise
+// asks the binary (ObserveViaBinary).
 func (c *CLI) Observe() Observation {
+	now := time.Now
+	if c.Clock != nil {
+		now = c.Clock
+	}
+	if obs, ok := peekKeeper(now()); ok {
+		return obs
+	}
+	return c.ObserveViaBinary()
+}
+
+// ObserveViaBinary runs `pg-keep-awake status --json --check` once: stdout
+// carries the status object and the exit code carries the health, so both come
+// from one process and cannot disagree.
+func (c *CLI) ObserveViaBinary() Observation {
 	out, exit, stderr, err := c.run("status", "--json", "--check")
 	if err != nil {
 		return Observation{Health: HealthUnknown, Err: err}
