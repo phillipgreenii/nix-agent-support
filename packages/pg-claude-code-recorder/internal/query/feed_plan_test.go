@@ -12,8 +12,9 @@ import (
 )
 
 // The snapshot page of a subscriber that filters on source and item and projects
-// many fields must walk the record id range and stop at its limit. The store has
-// no sqlite_stat1, and the planner then prefers records_source_type for the
+// many fields must walk the record id range and stop at its limit. The test
+// database is unanalyzed (the live store is analyzed daily; the next test
+// holds the plan with statistics), and the planner then prefers records_source_type for the
 // source test, which reads every record of the source and sorts them by id
 // before the limit applies: the first page costs the whole table and outruns the
 // query deadline on a large store.

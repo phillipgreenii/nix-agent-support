@@ -17,7 +17,8 @@ func typedBuilder() *builder {
 	return b
 }
 
-// The store has no sqlite_stat1, so every join the typed paths add must be a
+// The test database is unanalyzed (the live store is analyzed daily, and the
+// plan must hold with and without stats), so every join the typed paths add must be a
 // key seek: the lookup table by its id or its unique value, the extension table
 // by rec_id. A scan of either would be read once per candidate row.
 func TestTypedStoragePlansSeekTheLookupAndExtensionTables(t *testing.T) {

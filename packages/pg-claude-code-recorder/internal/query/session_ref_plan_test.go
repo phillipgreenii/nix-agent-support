@@ -9,7 +9,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
-// The store has no sqlite_stat1, so a session filter over session_ref must
+// The test database is unanalyzed (the live store is analyzed daily, and the
+// plan must hold with and without stats), so a session filter over session_ref must
 // resolve the id to its reference once and then search records through the
 // session_ref index; it must not walk the table or read every row's session id.
 func TestSessionFilterPlanSearchesTheSessionRefIndex(t *testing.T) {

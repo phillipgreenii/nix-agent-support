@@ -17,7 +17,8 @@ import (
 // TestRegistryQueryPlansStartFromTheSessionIndex guards the three reads that
 // filter records by session AND source. records_source_type exists for the
 // lifecycle engine's source-only scans; for these a session is far more
-// selective, and the planner (the store has no sqlite_stat1) would prefer the
+// selective, and the planner (on an unanalyzed test database; the live store is analyzed daily
+// and the plans must hold either way) would prefer the
 // source index and walk every registry record. The plans must start from
 // records_session and never scan records or fields.
 func TestRegistryQueryPlansStartFromTheSessionIndex(t *testing.T) {

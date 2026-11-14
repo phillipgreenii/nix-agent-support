@@ -14,7 +14,8 @@ import (
 )
 
 // A row query orders by r.id and takes a limit. With a session filter plus a
-// filter on type (and no sqlite_stat1) the planner used to pick records_type,
+// filter on type (on an unanalyzed database; the live store is analyzed daily)
+// the planner used to pick records_type,
 // which yields rows in id order with no sort, and then walk every row of that
 // type looking for the one session: seconds on a large store when the session
 // has no match. The session index must serve the lookup instead.

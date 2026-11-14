@@ -15,7 +15,8 @@ import (
 // single-row query: the transcript source, user or assistant turns, a main-thread
 // test on the is_sidechain field, the session pinned, order by time, limit 1.
 // The is_sidechain test reads a LEFT JOINed fields row; written as an equality
-// it rejects the unmatched rows, so the planner (the store has no sqlite_stat1)
+// it rejects the unmatched rows, so the planner (this test database is unanalyzed; the live store is analyzed daily
+// and the plan must hold either way)
 // drove the query from fields_name_n over every main-thread record of the store
 // and filtered by session afterwards: 23 s for a session of 381 records on a 15 GB
 // store. The session index must drive it and fields must be probed per record.
