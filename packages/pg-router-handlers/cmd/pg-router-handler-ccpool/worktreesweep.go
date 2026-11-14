@@ -136,7 +136,10 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 	if len(entries) == 0 {
 		return 0
 	}
-	sessions, err := deps.CC.List(ctx)
+	// Only bead, close reason, liveness and launch cwd are read, so the
+	// facet-free list suffices; a live pane that drifted into a candidate
+	// worktree is still protected by the lsof working-directory probe.
+	sessions, err := ccpool.ListPreferLight(ctx, deps.CC)
 	if err != nil {
 		slog.Warn("worktree sweep: session list failed; no action", "role", role.Name, "err", err)
 		return 0
@@ -347,7 +350,7 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	// Re-read everything under the lock: a dispatch that started after the
 	// caller's list now either holds the shared lock (we would not be here) or
 	// has already created its row.
-	sessions, err := deps.CC.List(ctx)
+	sessions, err := ccpool.ListPreferLight(ctx, deps.CC)
 	if err != nil {
 		slog.Warn("worktree sweep: re-list under lock failed; no action", "bead", c.bead, "err", err)
 		return false, didGit, false

@@ -178,6 +178,21 @@ type LightLister interface {
 	ListLight(ctx context.Context) ([]Session, error)
 }
 
+// ListPreferLight reads the pool for a caller that needs only the bead,
+// close reason, liveness and launch directory of each row (the worktree
+// sweep). It uses the facet-free list when the runner offers one and falls
+// back to List when the runner has none or its ccpool rejects --no-facets.
+// Any other ListLight failure is returned as is, never retried with List.
+func ListPreferLight(ctx context.Context, r Runner) ([]Session, error) {
+	if ll, ok := r.(LightLister); ok {
+		s, err := ll.ListLight(ctx)
+		if err == nil || !errors.Is(err, ErrNoFacetsUnsupported) {
+			return s, err
+		}
+	}
+	return r.List(ctx)
+}
+
 type Runner interface {
 	Ensure(ctx context.Context, externalID, name, cwd string, env, meta map[string]string) error
 	Send(ctx context.Context, externalID, prompt string, mode SendMode) error

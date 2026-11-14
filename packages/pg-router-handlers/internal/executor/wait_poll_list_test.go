@@ -102,8 +102,8 @@ func TestWaitPoll_otherLightErrorIsAnUnreadablePoll(t *testing.T) {
 	}
 }
 
-// ListLight is used at exactly one place in the module's production code: the
-// wait poll (which serves both of its former sites). Every other reader of the
+// ListLight is used at exactly two places in the module's production code: the
+// wait poll and ccpool.ListPreferLight (the worktree sweep). Every other reader of the
 // pool still calls List, because they read cwd or the git facets.
 func TestListLight_usedOnlyByTheWaitPoll(t *testing.T) {
 	root := filepath.Join("..", "..")
@@ -140,7 +140,15 @@ func TestListLight_usedOnlyByTheWaitPoll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sites) != 1 || !strings.HasSuffix(sites[0].file, "internal/executor/ccpool.go") || sites[0].fn != "pollSessions" {
-		t.Fatalf("ListLight call sites = %v, want exactly one, in executor/ccpool.go's pollSessions", sites)
+	// The wait poll, plus the shared ListPreferLight helper the worktree sweep
+	// uses (it reads only bead, close reason, liveness and launch cwd).
+	ok := len(sites) == 2
+	for _, st := range sites {
+		isPoll := strings.HasSuffix(st.file, "internal/executor/ccpool.go") && st.fn == "pollSessions"
+		isHelper := strings.HasSuffix(st.file, "internal/ccpool/ccpool.go") && st.fn == "ListPreferLight"
+		ok = ok && (isPoll || isHelper)
+	}
+	if !ok {
+		t.Fatalf("ListLight call sites = %v, want exactly pollSessions and ccpool.ListPreferLight", sites)
 	}
 }
