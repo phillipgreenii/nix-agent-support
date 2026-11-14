@@ -10,7 +10,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/reexec"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 type reexecCall struct {
@@ -118,7 +117,6 @@ func TestBridgeChannelReexecSentinelPropagates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sig := &signal.CmuxSignaler{RunCmd: (&fakeCmux{}).run}
 	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg, 8)}
 
 	gaveUp, base := false, 0
@@ -127,7 +125,7 @@ func TestBridgeChannelReexecSentinelPropagates(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{DaemonVersion: "NEW"}}}
@@ -153,7 +151,6 @@ func TestBridgeChannelReexecExhaustedKeepsServing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sig := &signal.CmuxSignaler{RunCmd: (&fakeCmux{}).run}
 	rep := &fakeReporter{}
 	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg, 8)}
 
@@ -163,7 +160,7 @@ func TestBridgeChannelReexecExhaustedKeepsServing(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{DaemonVersion: "NEW"}}}

@@ -2,7 +2,6 @@ package nudger
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,34 +14,18 @@ import (
 
 // isNoCmuxSurface reports whether a delivery error means the target pid has no
 // cmux surface (its pane closed / the process detached from cmux). Matched by
-// string, not errors.As, because the signal layer's *signal.NoCmuxSurfaceError
-// crosses the cmux-bridge as a plain string in DeliverResult.Error, so the type
-// is not recoverable on the daemon side.
+// string, not errors.As, so the check works on any Deliverer's error text.
 func isNoCmuxSurface(err error) bool {
 	if err == nil {
 		return false
 	}
 	// Cover the same three phrasings internal/signal's classifyCmuxText treats as
 	// no-surface, so the two classifiers can't silently drift if the error text
-	// changes. Substring (not errors.As) because the error crosses the bridge as
-	// a plain string (DeliverResult.Error), losing the *NoCmuxSurfaceError type.
+	// changes.
 	s := err.Error()
 	return strings.Contains(s, "no cmux surface") ||
 		strings.Contains(s, "no surface") ||
 		strings.Contains(s, "surface not found")
-}
-
-// noBridgeDropWindow bounds how long a nudge intent is retried against
-// ErrNoBridge before the dispatcher gives up and drops it. Chosen so a
-// transiently-disconnected cmux-bridge (e.g. a brief reconnect) doesn't lose
-// a nudge, while a target that never comes back online doesn't retry
-// forever.
-const noBridgeDropWindow = 60 * time.Second
-
-// Signaler delivers a nudge text to a process by PID. Wraps the existing
-// signal layer (tmux/cmux/ghostty/vscode).
-type Signaler interface {
-	Send(pid int, text string) error
 }
 
 // Recorder receives observability + persistence signals from the
@@ -81,12 +64,6 @@ type Recorder interface {
 	// newly-added intent. Called by Nudger.Reconcile after diffing the
 	// pre/post pending-store key sets.
 	RecordQueued(sid string, source Source)
-	// RecordDroppedNoBridge reports that a group of intents for sid was
-	// dropped because Deliverer.Deliver kept returning ErrNoBridge for longer
-	// than noBridgeDropWindow — there was never a live cmux-bridge to retry
-	// against. Distinct from RecordSendFailed: this is a permanent give-up,
-	// not a per-attempt failure.
-	RecordDroppedNoBridge(sid string, sources []Source)
 }
 
 // NudgeRecorder is the persistence hook for the dispatcher. The daemon
@@ -217,39 +194,16 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 		err := d.Deliverer.Deliver(goCtx, view.PID, text)
 		if hasLimitPause {
 			// Advance-on-ATTEMPT: mark the single per-window limit-pause attempt
-			// immediately after Deliver returns, for ANY outcome (ErrNoBridge,
-			// other error, or success). See the post-loop advance for WHY this
+			// immediately after Deliver returns, for ANY outcome (error or
+			// success). See the post-loop advance for WHY this
 			// diverges from window-reset's success-only advance.
 			limitPauseAttempted = true
 		}
 		if err != nil {
-			if errors.Is(err, ErrNoBridge) {
-				// No live cmux-bridge for this target. Record the disrupt
-				// attempt watermark as usual (an attempt was made even though
-				// it couldn't be delivered), then decide drop-vs-retry by the
-				// age of the OLDEST intent in the group: give the bridge
-				// noBridgeDropWindow to reconnect before giving up.
-				if hasDisrupt {
-					d.Recorder.RecordDisruptAttempt(sid, ctx.Now)
-				}
-				oldest := oldestEmittedAt(group)
-				if ctx.Now.Sub(oldest) > noBridgeDropWindow {
-					d.Recorder.RecordDroppedNoBridge(sid, sources)
-					d.recordHistory(goCtx, RecordEvent{
-						SessionID: sid, Text: text, Result: "dropped", ErrorText: "no_bridge",
-						CausedByErrorAt: causeAt, Escalated: escalated, FiredAt: ctx.Now, Sources: sourceStrings(sources),
-					})
-					store.RemoveKeys(observedKeys)
-				}
-				// Else: still within the window — leave the intents queued
-				// (no RemoveKeys) to retry next tick.
-				continue
-			}
 			if isNoCmuxSurface(err) {
 				// The target pid has no cmux surface (pane closed / process
 				// detached from cmux). Unlike a transient error this will not
-				// heal by retrying, and unlike ErrNoBridge the bridge IS
-				// connected — so leaving the intent queued spams
+				// heal by retrying — so leaving the intent queued spams
 				// signal_send_failures_total forever (bead pg2-2o0p7: one ghost
 				// session drove ~61 failures/15min). Record it as a SUPPRESSION
 				// (not a failure) and drop the intent. NOTE: this stops the
@@ -311,10 +265,10 @@ func (d *Dispatcher) Dispatch(goCtx context.Context, ctx TickContext, store *Pen
 	// whose intent this dispatcher RETAINS to retry) re-nudge every tick forever.
 	// One attempt per window is the requirement, so the latch advances as soon as
 	// a delivery has been attempted, regardless of outcome. This deliberately
-	// includes ErrNoBridge: rather than lean on the 60s no-bridge retry window, a
-	// limit-pause target consumes its window on the first attempt — a transient
-	// bridge blip costs at most one 5h window's probe (immaterial for a monthly
-	// cap that will not clear at a 5h reset anyway) and avoids re-arm churn.
+	// includes a transient delivery error: a limit-pause target consumes its
+	// window on the first attempt — a blip costs at most one 5h window's probe
+	// (immaterial for a monthly cap that will not clear at a 5h reset anyway)
+	// and avoids re-arm churn.
 	if limitPauseAttempted && !ctx.Tree.FiveHourResetsAt.IsZero() {
 		d.Recorder.AdvanceLimitPauseFiredFor(ctx.Tree.FiveHourResetsAt)
 	}
@@ -353,19 +307,6 @@ func indexSessions(tree *aggregate.Tree) map[string]*aggregate.SessionView {
 		}
 	}
 	return out
-}
-
-// oldestEmittedAt returns the earliest EmittedAt among group. group is
-// assumed non-empty — Dispatch only builds bySession entries from at least
-// one observed intent.
-func oldestEmittedAt(group []NudgeIntent) time.Time {
-	oldest := group[0].EmittedAt
-	for _, in := range group[1:] {
-		if in.EmittedAt.Before(oldest) {
-			oldest = in.EmittedAt
-		}
-	}
-	return oldest
 }
 
 // resolveText picks the text to send: manual overrides win, else the

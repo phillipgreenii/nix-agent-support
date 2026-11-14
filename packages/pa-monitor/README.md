@@ -237,18 +237,23 @@ for pa-monitor's behavior docs, not something to change here.
 
 ## Nudge delivery
 
-The daemon never invokes `cmux`: cmux's control socket is only usable from a process
-inside the cmux process tree, and the daemon runs as a LaunchAgent (not a cmux
-descendant). Instead, each cmux workspace runs a `cmux-bridge` (a cmux descendant) that
-opens a bidirectional `BridgeChannel` gRPC stream to the daemon. To nudge a session the
-daemon resolves the owning cmux **server PID** (via ancestry from one shared ids-only `ps -ax -o pid=,ppid=,lstart=` snapshot per tick, bounded reuse of the previous snapshot when it fails, unknown rather than invented past that bound — socket-free) and
-pushes a `Deliver{pid}` command down that bridge's stream; the bridge resolves the surface
-locally and runs `cmux send`/`send-key`, replying with an ack. The daemon keeps a
-per-server bridge registry maintained by a periodic reaper (dead bridges pruned). If no
-live bridge exists for a target, the nudge waits briefly in the pending queue and is then
-dropped (`pa_monitor.nudge.dropped_no_bridge_total`). Non-cmux terminals
-(tmux/ghostty/vscode) are still delivered directly by the daemon. See
-`docs/adr/0022-nudge-delivery-via-cmux-bridge.md`.
+Nudges are delivered through the control mod only: the daemon runs `pg-claude-control submit
+pid:N`, which queues the text in the control mod's inbox for that session. The daemon never
+injects keystrokes into a terminal and never invokes `tmux send-keys` or `cmux send`, for any
+terminal host. The `cmux-bridge` (one per cmux workspace, a cmux descendant) still opens a
+bidirectional `BridgeChannel` gRPC stream to the daemon, but only to receive `DaemonState`
+snapshots for the cmux sidebar and to register itself: the daemon keeps a per-server bridge
+registry, maintained by a periodic reaper (dead bridges pruned), so the poller can label a
+session's terminal host as `cmux`, `cmux (no bridge)` or `cmux (bridge disconnected)`. The
+daemon resolves the owning cmux **server PID** via ancestry from one shared ids-only
+`ps -ax -o pid=,ppid=,lstart=` snapshot per tick (bounded reuse of the previous snapshot when
+it fails, unknown rather than invented past that bound — socket-free). The
+`pa_monitor.nudge.dropped_no_bridge_total` counter stays registered but nothing increments it
+any more.
+
+`PA_MONITOR_NO_NUDGE=1` (the old opt-out ccpool set on pool sessions) is no longer read by
+pa-monitor: its only reader was the tmux send path, which is gone, and the control delivery path
+never read it.
 
 ### AutoSessionWrapUp: nudging idle-but-live sessions before the cache expires
 
@@ -268,13 +273,12 @@ still alive in its terminal. **Off by default** (`auto_session_wrap_up.enable = 
   episode was last nudged, so a daemon restart mid-episode cannot re-fire it. A missed nudge costs
   nothing extra; a duplicate one burns tokens for no benefit, so the producer is biased toward
   under-firing.
-- Delivery reuses the existing `Signaler.Send` / cmux-bridge path like every other nudge source (see
-  [Nudge delivery](#nudge-delivery) above) — no tmux/cmux special-casing at the producer layer. The
+- Delivery goes through the control mod like every other nudge source (see
+  [Nudge delivery](#nudge-delivery) above) — no terminal special-casing at the producer layer. The
   directive text is a small template file
   (`internal/daemon/nudger/auto_session_wrap_up_directive.txt`) opening with a provenance tag
   (`[auto-nudge: pa-monitor, idle Nm]`) so a later reader can tell it was injected, not typed by the
-  user — delivery is literal typed input via `send-keys`/paste, so the directive becomes an ordinary
-  user turn in the session's own transcript.
+  user — the control mod submits it as an ordinary user turn in the session's own transcript.
 
 ## OpenTelemetry
 

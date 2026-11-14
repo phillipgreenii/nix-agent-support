@@ -3,17 +3,14 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/cmuxstatus"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/tui"
 
 	"google.golang.org/grpc"
@@ -63,16 +60,6 @@ func (f *fakeBridgeStream) sentMsgs() []*pb.BridgeMsg {
 	return out
 }
 
-func (f *fakeBridgeStream) results() []*pb.DeliverResult {
-	var out []*pb.DeliverResult
-	for _, m := range f.sentMsgs() {
-		if r := m.GetResult(); r != nil {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
 func (f *fakeBridgeStream) firstRegister() *pb.Register {
 	for _, m := range f.sentMsgs() {
 		if r := m.GetRegister(); r != nil {
@@ -80,66 +67,6 @@ func (f *fakeBridgeStream) firstRegister() *pb.Register {
 		}
 	}
 	return nil
-}
-
-// fakeSurf is one (workspace, surface, tty-pids) triple for the cmux fake.
-type fakeSurf struct {
-	ws      string
-	surface string
-	pids    []int
-}
-
-// fakeCmux is a thread-safe cmux CLI stand-in. It answers
-// `cmux --json top --processes` with a synthesized envelope built from
-// surfaces and records `cmux send`/`send-key` argv under a mutex, so the
-// concurrent deliver handler goroutine and the test goroutine can share it
-// under -race.
-type fakeCmux struct {
-	surfaces []fakeSurf // read-only after construction
-
-	mu    sync.Mutex
-	calls []string
-}
-
-func (f *fakeCmux) run(_ context.Context, name string, args ...string) ([]byte, error) {
-	if name != "cmux" {
-		return nil, fmt.Errorf("unexpected command: %s", name)
-	}
-	if len(args) >= 3 && args[0] == "--json" && args[1] == "top" && args[2] == "--processes" {
-		return f.topJSON(), nil
-	}
-	if len(args) >= 1 && (args[0] == "send" || args[0] == "send-key") {
-		f.mu.Lock()
-		f.calls = append(f.calls, "cmux "+strings.Join(args, " "))
-		f.mu.Unlock()
-		return []byte(""), nil
-	}
-	return nil, fmt.Errorf("unexpected cmux args: %v", args)
-}
-
-func (f *fakeCmux) topJSON() []byte {
-	var wsObjs []string
-	for i, s := range f.surfaces {
-		pidParts := make([]string, len(s.pids))
-		for j, p := range s.pids {
-			pidParts[j] = fmt.Sprintf("%d", p)
-		}
-		pane := fmt.Sprintf(
-			`{"ref":"pane:%d","surfaces":[{"ref":%q,"type":"terminal","tty":"ttysX","tty_process_pids":[%s]}]}`,
-			i, s.surface, strings.Join(pidParts, ","),
-		)
-		wsObjs = append(wsObjs, fmt.Sprintf(`{"ref":%q,"panes":[%s]}`, s.ws, pane))
-	}
-	body := fmt.Sprintf(`{"windows":[{"ref":"window:1","workspaces":[%s]}]}`, strings.Join(wsObjs, ","))
-	return []byte(body)
-}
-
-func (f *fakeCmux) sentCalls() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]string, len(f.calls))
-	copy(out, f.calls)
-	return out
 }
 
 // fakeReporter records Push snapshots under a mutex.
@@ -219,13 +146,11 @@ func TestBridgeChannelSendsRegisterFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	fc := &fakeCmux{}
-	sig := &signal.CmuxSignaler{RunCmd: fc.run}
 	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg, 8)}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	waitFor(t, 2*time.Second, func() bool { return stream.firstRegister() != nil })
@@ -246,110 +171,18 @@ func TestBridgeChannelSendsRegisterFirst(t *testing.T) {
 	}
 }
 
-// TestBridgeChannelDeliverSuccess feeds a Deliver whose target pid resolves to
-// a cmux surface: the bridge must run cmux send + send-key against that surface
-// and reply with DeliverResult{ok:true, id}.
-func TestBridgeChannelDeliverSuccess(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	fc := &fakeCmux{surfaces: []fakeSurf{{ws: "workspace:1", surface: "surface:4", pids: []int{4321}}}}
-	sig := &signal.CmuxSignaler{RunCmd: fc.run}
-	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg, 8)}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
-	}()
-
-	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c1", TargetPid: 4321, Text: "continue"}}}
-
-	waitFor(t, 3*time.Second, func() bool {
-		return len(fc.sentCalls()) >= 2 && len(stream.results()) >= 1
-	})
-
-	calls := fc.sentCalls()
-	if len(calls) < 2 {
-		t.Fatalf("expected 2 cmux calls (send + send-key), got %d: %v", len(calls), calls)
-	}
-	if !strings.Contains(calls[0], "send --workspace workspace:1 --surface surface:4 continue") {
-		t.Errorf("call[0] = %q, want cmux send to workspace:1/surface:4 with text", calls[0])
-	}
-	if !strings.Contains(calls[1], "send-key --workspace workspace:1 --surface surface:4 enter") {
-		t.Errorf("call[1] = %q, want cmux send-key enter to workspace:1/surface:4", calls[1])
-	}
-
-	res := stream.results()
-	if len(res) != 1 {
-		t.Fatalf("expected exactly 1 DeliverResult, got %d: %v", len(res), res)
-	}
-	if res[0].GetId() != "c1" || !res[0].GetOk() || res[0].GetError() != "" {
-		t.Errorf("DeliverResult = %+v, want {id:c1 ok:true error:\"\"}", res[0])
-	}
-
-	cancel()
-	if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
-		t.Errorf("runBridgeChannel returned %v", err)
-	}
-}
-
-// TestBridgeChannelDeliverFailure feeds a Deliver whose target pid resolves to
-// no surface: the bridge must reply DeliverResult{ok:false} with a non-empty
-// error and must not have run any cmux send.
-func TestBridgeChannelDeliverFailure(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	fc := &fakeCmux{surfaces: []fakeSurf{{ws: "workspace:1", surface: "surface:4", pids: []int{100, 200}}}}
-	sig := &signal.CmuxSignaler{RunCmd: fc.run}
-	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg, 8)}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
-	}()
-
-	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{Id: "c2", TargetPid: 9999, Text: "continue"}}}
-
-	waitFor(t, 3*time.Second, func() bool { return len(stream.results()) >= 1 })
-
-	res := stream.results()
-	if len(res) != 1 {
-		t.Fatalf("expected exactly 1 DeliverResult, got %d: %v", len(res), res)
-	}
-	if res[0].GetId() != "c2" {
-		t.Errorf("DeliverResult.Id = %q, want c2", res[0].GetId())
-	}
-	if res[0].GetOk() {
-		t.Errorf("DeliverResult.Ok = true, want false for unresolved pid")
-	}
-	if res[0].GetError() == "" {
-		t.Errorf("DeliverResult.Error is empty, want a resolution error")
-	}
-	if calls := fc.sentCalls(); len(calls) != 0 {
-		t.Errorf("expected no cmux send calls on resolution failure, got %v", calls)
-	}
-
-	cancel()
-	if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
-		t.Errorf("runBridgeChannel returned %v", err)
-	}
-}
-
 // TestBridgeChannelSnapshotDrivesReporterPush asserts a DaemonMsg.snapshot
 // still drives reporter.Push exactly as the old WatchState path did.
 func TestBridgeChannelSnapshotDrivesReporterPush(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	fc := &fakeCmux{}
-	sig := &signal.CmuxSignaler{RunCmd: fc.run}
 	rep := &fakeReporter{}
 	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg, 8)}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{
@@ -384,15 +217,13 @@ func TestBridgeChannelWatchdogTeardownReturns(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	fc := &fakeCmux{}
-	sig := &signal.CmuxSignaler{RunCmd: fc.run}
 	// Never fed: with no inbound message, the ~4s push-budget watchdog trips
 	// and drives teardown. Recv blocks on ctx.Done until teardown cancels ctx.
 	stream := &fakeBridgeStream{ctx: ctx, inbound: make(chan *pb.DaemonMsg)}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, sig, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(300*time.Millisecond))
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(300*time.Millisecond))
 	}()
 
 	// The watchdog budget here is 300ms; give generous margin under -race. A hang

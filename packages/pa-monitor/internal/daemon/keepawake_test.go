@@ -11,15 +11,13 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
-// detectSignaler is a fake signal.Signaler whose Detect verdict and Send
-// behavior are configurable. Used to exercise the keep-awake signaler gate.
+// detectSignaler is a fake signal.Signaler whose Detect verdict is configurable. Used to exercise the keep-awake signaler gate.
 type detectSignaler struct {
 	detect bool
 }
 
-func (d detectSignaler) Name() string           { return "fake" }
-func (d detectSignaler) Detect(int) bool        { return d.detect }
-func (d detectSignaler) Send(int, string) error { return nil }
+func (d detectSignaler) Name() string    { return "fake" }
+func (d detectSignaler) Detect(int) bool { return d.detect }
 
 func svWithError(sid string, pid int, le *transcript.ErrorRecord) *aggregate.SessionView {
 	return &aggregate.SessionView{

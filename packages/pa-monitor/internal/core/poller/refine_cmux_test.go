@@ -96,7 +96,7 @@ func TestRefineCmuxTerminalHost_NoBridgeRegistered_ReturnsCmuxNoBridge(t *testin
 
 func TestRefineCmuxTerminalHost_RegisteredAndAlive_ReturnsCmux(t *testing.T) {
 	br := bridge.NewRegistry(30 * time.Second)
-	br.AttachStream(5000 /*server pid*/, 5001 /*bridge pid*/, nil)
+	br.AttachStream(5000 /*server pid*/, 5001 /*bridge pid*/)
 	sigs := cmuxSignalerWith(procsForCmuxSession())
 	got := refineCmuxTerminalHost(context.Background(), sigs, br, 5002)
 	if got != "cmux" {
@@ -108,7 +108,7 @@ func TestRefineCmuxTerminalHost_RegisteredButStale_ReturnsBridgeDisconnected(t *
 	now := time.Unix(1_700_000_000, 0)
 	br := bridge.NewRegistry(30 * time.Second)
 	br.SetNowForTest(func() time.Time { return now })
-	br.AttachStream(5000, 5001, nil)
+	br.AttachStream(5000, 5001)
 	br.SetNowForTest(func() time.Time { return now.Add(31 * time.Second) })
 
 	sigs := cmuxSignalerWith(procsForCmuxSession())

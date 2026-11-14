@@ -3,8 +3,6 @@ package bridge
 import (
 	"testing"
 	"time"
-
-	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
 func TestRegistry_UnknownByDefault(t *testing.T) {
@@ -18,7 +16,7 @@ func TestRegistry_StaleAfterCutoff(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
-	r.AttachStream(4000, 100, nil)
+	r.AttachStream(4000, 100)
 
 	r.now = func() time.Time { return now.Add(31 * time.Second) }
 	if got := r.StatusForServer(4000); got != Stale {
@@ -35,14 +33,14 @@ func TestRegistry_ReAttachRefreshesLastSeen(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
-	r.AttachStream(4000, 100, nil)
+	r.AttachStream(4000, 100)
 
 	r.now = func() time.Time { return now.Add(45 * time.Second) }
 	if got := r.StatusForServer(4000); got != Stale {
 		t.Fatalf("precondition: should be stale at 45s; got %v", got)
 	}
 
-	r.AttachStream(4000, 100, nil)
+	r.AttachStream(4000, 100)
 	if got := r.StatusForServer(4000); got != Alive {
 		t.Errorf("after re-attach: got %v, want Alive", got)
 	}
@@ -52,10 +50,10 @@ func TestRegistry_DistinctServersTrackedIndependently(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
-	r.AttachStream(4000, 100, nil)
+	r.AttachStream(4000, 100)
 
 	r.now = func() time.Time { return now.Add(40 * time.Second) }
-	r.AttachStream(5000, 200, nil)
+	r.AttachStream(5000, 200)
 
 	if got := r.StatusForServer(4000); got != Stale {
 		t.Errorf("ws-A at t=40s: got %v, want Stale", got)
@@ -70,42 +68,23 @@ func TestRegistry_AttachStreamRetainsMultipleBridgesPerServer(t *testing.T) {
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
 
-	sendCalls := map[int]int{}
-	send := func(pid int) func(*pb.DaemonMsg) error {
-		return func(*pb.DaemonMsg) error {
-			sendCalls[pid]++
-			return nil
-		}
-	}
-	r.AttachStream(4000, 100, send(100))
-	r.AttachStream(4000, 200, send(200))
+	r.AttachStream(4000, 100)
+	r.AttachStream(4000, 200)
 
-	live, ok := r.LiveBridge(4000)
-	if !ok {
-		t.Fatalf("LiveBridge(4000): got !ok, want a live member")
-	}
-	if live.send == nil {
-		t.Fatalf("LiveBridge(4000): send hook is nil")
-	}
-	if live.BridgePID != 100 && live.BridgePID != 200 {
-		t.Errorf("LiveBridge(4000).BridgePID = %d, want 100 or 200", live.BridgePID)
+	if got := r.BridgePIDs(4000); len(got) != 2 {
+		t.Fatalf("BridgePIDs(4000) = %v, want both 100 and 200", got)
 	}
 
-	// Both bridges retained: deregistering one leaves the other still
-	// discoverable through the registry itself (not just the local
-	// closures), proving both were actually tracked as set members.
+	// Both bridges retained: deregistering one leaves the other tracked as a
+	// set member.
 	r.Deregister(4000, 100)
-	live, ok = r.LiveBridge(4000)
-	if !ok {
-		t.Fatalf("LiveBridge(4000) after deregistering 100: got !ok, want ok (200 survives)")
-	}
-	if live.BridgePID != 200 {
-		t.Errorf("LiveBridge(4000) after deregistering 100: BridgePID = %d, want 200", live.BridgePID)
+	if got := r.BridgePIDs(4000); len(got) != 1 || got[0] != 200 {
+		t.Errorf("BridgePIDs(4000) after deregistering 100 = %v, want [200]", got)
 	}
 
 	r.Deregister(4000, 200)
-	if _, ok := r.LiveBridge(4000); ok {
-		t.Errorf("LiveBridge(4000) after deregistering both: got ok, want !ok")
+	if got := r.BridgePIDs(4000); got != nil {
+		t.Errorf("BridgePIDs(4000) after deregistering both = %v, want nil", got)
 	}
 }
 
@@ -114,11 +93,10 @@ func TestRegistry_StatusForServerStaleOverSetOfBridges(t *testing.T) {
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
 
-	noop := func(*pb.DaemonMsg) error { return nil }
-	r.AttachStream(4000, 100, noop)
+	r.AttachStream(4000, 100)
 
 	r.now = func() time.Time { return now.Add(10 * time.Second) }
-	r.AttachStream(4000, 200, noop)
+	r.AttachStream(4000, 200)
 
 	// Freshest member (bridgePID 200) is 10s old; still Alive.
 	r.now = func() time.Time { return now.Add(20 * time.Second) }
@@ -138,8 +116,7 @@ func TestRegistry_HeartbeatRefreshesMember(t *testing.T) {
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
 
-	noop := func(*pb.DaemonMsg) error { return nil }
-	r.AttachStream(4000, 100, noop)
+	r.AttachStream(4000, 100)
 
 	r.Heartbeat(4000, 100, now.Add(45*time.Second))
 	r.now = func() time.Time { return now.Add(50 * time.Second) }
@@ -153,12 +130,11 @@ func TestRegistry_DeregisterRemovesMember(t *testing.T) {
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
 
-	noop := func(*pb.DaemonMsg) error { return nil }
-	r.AttachStream(4000, 100, noop)
+	r.AttachStream(4000, 100)
 	r.Deregister(4000, 100)
 
-	if _, ok := r.LiveBridge(4000); ok {
-		t.Errorf("LiveBridge(4000) after Deregister: got ok, want !ok")
+	if got := r.BridgePIDs(4000); got != nil {
+		t.Errorf("BridgePIDs(4000) after Deregister = %v, want nil", got)
 	}
 	if got := r.StatusForServer(4000); got != Unknown {
 		t.Errorf("StatusForServer(4000) after Deregister of only member: got %v, want Unknown", got)
@@ -170,57 +146,27 @@ func TestRegistry_PruneDropsDeadBridgePIDs(t *testing.T) {
 	r := NewRegistry(30 * time.Second)
 	r.now = func() time.Time { return now }
 
-	noop := func(*pb.DaemonMsg) error { return nil }
-	r.AttachStream(4000, 100, noop)
-	r.AttachStream(4000, 200, noop)
+	r.AttachStream(4000, 100)
+	r.AttachStream(4000, 200)
 
 	alive := map[int]bool{200: true}
 	r.Prune(func(pid int) bool { return alive[pid] })
 
-	live, ok := r.LiveBridge(4000)
-	if !ok {
-		t.Fatalf("LiveBridge(4000) after Prune: got !ok, want ok (200 survives)")
-	}
-	if live.BridgePID != 200 {
-		t.Errorf("LiveBridge(4000) after Prune: BridgePID = %d, want 200", live.BridgePID)
+	if got := r.BridgePIDs(4000); len(got) != 1 || got[0] != 200 {
+		t.Errorf("BridgePIDs(4000) after Prune = %v, want [200]", got)
 	}
 }
 
-func TestRegistry_LiveBridgeSkipsStaleMember(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
+func TestRegistry_BridgePIDsSortedAndEmptyWhenNone(t *testing.T) {
 	r := NewRegistry(30 * time.Second)
-	r.now = func() time.Time { return now }
-
-	noop := func(*pb.DaemonMsg) error { return nil }
-	r.AttachStream(4000, 100, noop)
-
-	// Just under staleAfter: the member is fresh and must be returned.
-	r.now = func() time.Time { return now.Add(29 * time.Second) }
-	if _, ok := r.LiveBridge(4000); !ok {
-		t.Errorf("LiveBridge(4000) at 29s (fresh, non-nil send): got !ok, want ok")
+	if got := r.BridgePIDs(4000); got != nil {
+		t.Errorf("BridgePIDs(4000) with no members = %v, want nil", got)
 	}
-
-	// At/after staleAfter: the send hook is still non-nil (process alive but
-	// wedged — cmux socket still open, not reaped) yet lastSeen has gone
-	// stale, so LiveBridge must NOT return it. This is what drives the daemon
-	// to ErrNoBridge → clean no-bridge drop instead of retrying Delivers that
-	// time out every tick forever.
-	r.now = func() time.Time { return now.Add(31 * time.Second) }
-	if _, ok := r.LiveBridge(4000); ok {
-		t.Errorf("LiveBridge(4000) at 31s (stale, non-nil send): got ok, want !ok")
-	}
-}
-
-func TestRegistry_LiveBridgeIgnoresSendlessMember(t *testing.T) {
-	now := time.Unix(1_700_000_000, 0)
-	r := NewRegistry(30 * time.Second)
-	r.now = func() time.Time { return now }
-
-	// A member attached without a send hook counts toward StatusForServer
-	// liveness but must never be returned by LiveBridge, since it cannot
-	// receive Deliver pushes.
-	r.AttachStream(4000, 100, nil)
-	if _, ok := r.LiveBridge(4000); ok {
-		t.Errorf("LiveBridge(4000) with only a sendless member: got ok, want !ok")
+	r.AttachStream(4000, 300)
+	r.AttachStream(4000, 100)
+	r.AttachStream(5000, 900)
+	got := r.BridgePIDs(4000)
+	if len(got) != 2 || got[0] != 100 || got[1] != 300 {
+		t.Errorf("BridgePIDs(4000) = %v, want [100 300]", got)
 	}
 }

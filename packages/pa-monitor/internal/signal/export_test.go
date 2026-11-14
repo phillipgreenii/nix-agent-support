@@ -59,8 +59,8 @@ func CachedCmuxServerPIDsForTest(c *CmuxSignaler) ([]int, error) {
 }
 
 // TTLs exposes the cache TTL constants so tests can pin their relationship.
-func TTLs() (surface, serverPID, tmux time.Duration) {
-	return surfaceCacheTTL, serverPIDCacheTTL, tmuxCacheTTL
+func TTLs() (serverPID, tmux time.Duration) {
+	return serverPIDCacheTTL, tmuxCacheTTL
 }
 
 // ParentPIDWithTimeoutForTest exposes parentPID with an injectable timeout.

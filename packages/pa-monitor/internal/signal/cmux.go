@@ -3,7 +3,6 @@ package signal
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -13,26 +12,13 @@ import (
 	"time"
 )
 
-// surfaceCacheTTL is how long a cmux --json top --processes result stays fresh.
-// Within one signalNonWorking pass we want a single enumeration to serve every
-// per-pid Detect, but we also want fresh data between user-triggered nudges.
-//
-// This TTL MUST stay short and MUST NOT be merged with serverPIDCacheTTL:
-// CmuxSignaler.Send resolves its target through cachedSurfaces, so a stale map
-// misses a newly created surface, findSurfaceForPID returns NoCmuxSurfaceError,
-// and the dispatcher treats that as non-retryable (it records the attempt,
-// suppresses with "no_surface" and removes the pending key) - the nudge is
-// DROPPED, not merely delayed.
-const surfaceCacheTTL = 2 * time.Second
-
 // serverPIDCacheTTL is how long the cmux server-PID list (`ps -A -o pid,comm`)
 // stays fresh. Server PIDs only change when the cmux app starts or stops, so
-// this is deliberately much longer than surfaceCacheTTL: the whole-table ps is
-// the expensive, security-logged (process discovery) call this cache exists to
-// ration. Worst-case staleness is this TTL plus up to one daemon tick (5 s).
+// the whole-table ps is the expensive, security-logged (process discovery) call
+// this cache exists to ration. Worst-case staleness is this TTL plus up to one daemon tick (5 s).
 const serverPIDCacheTTL = 10 * time.Second
 
-// CmuxSignaler sends keys to the cmux surface hosting a process.
+// CmuxSignaler detects whether a process runs under a cmux server.
 // RunCmd and LookupEnv are injectable for tests; nil values fall back to
 // exec.CommandContext and os.LookupEnv respectively.
 type CmuxSignaler struct {
@@ -43,15 +29,10 @@ type CmuxSignaler struct {
 	// process snapshot instead of one `ps -o ppid=` exec per hop.
 	Procs ProcessTable
 
-	cacheMu   sync.Mutex
-	cacheAt   time.Time
-	cacheLocs map[int]surfaceLoc
-	cacheErr  error
+	cacheMu sync.Mutex
 
-	// Independent cache for cmux server PIDs (used by ancestry-based Detect).
-	// Refreshed on the slower serverPIDCacheTTL cadence (the surface map keeps
-	// the short surfaceCacheTTL) and kept separate so the two enumeration
-	// commands stay independent.
+	// Cache for cmux server PIDs (used by ancestry-based Detect), refreshed on
+	// the serverPIDCacheTTL cadence.
 	serverCacheAt   time.Time
 	serverCachePids []int
 	serverCacheErr  error
@@ -68,37 +49,11 @@ func (c *CmuxSignaler) clock() time.Time {
 	return time.Now()
 }
 
-// surfaceLoc identifies a cmux surface by its enclosing workspace and surface ref.
-type surfaceLoc struct {
-	workspaceRef string
-	surfaceRef   string
-}
-
-// cmuxTopOutput models the subset of `cmux --json top --processes` fields used
-// to map a pid to its hosting surface. Fields not consumed here are deliberately
-// omitted; encoding/json ignores unknown keys, so any unrelated schema additions
-// in cmux are non-breaking.
-type cmuxTopOutput struct {
-	Windows []struct {
-		Workspaces []struct {
-			Ref   string `json:"ref"`
-			Panes []struct {
-				Surfaces []struct {
-					Ref            string `json:"ref"`
-					Type           string `json:"type"`
-					Tty            string `json:"tty"`
-					TtyProcessPids []int  `json:"tty_process_pids"`
-				} `json:"surfaces"`
-			} `json:"panes"`
-		} `json:"workspaces"`
-	} `json:"windows"`
-}
-
 func (c *CmuxSignaler) Name() string { return "cmux" }
 
-// RequiredBinaries reports the executables CmuxSignaler shells out to. Detect
-// works via ps ancestry without it, but surface enumeration and Send call the
-// `cmux` CLI — so a missing binary breaks cmux auto-resume delivery silently.
+// RequiredBinaries reports the executables the cmux integration needs. Detect
+// itself works via ps ancestry without it; the `cmux` CLI is run by the cmux
+// status reporter (through RunCmux).
 func (c *CmuxSignaler) RequiredBinaries() []string { return []string{"cmux"} }
 
 func (c *CmuxSignaler) run(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -111,9 +66,8 @@ func (c *CmuxSignaler) run(ctx context.Context, name string, args ...string) ([]
 // RunCmux is the single cmux-CLI exec seam: it runs the subprocess, returns its
 // stdout, and augments a failure with the captured stderr (enrichCmdErr) so a
 // failing `cmux` surfaces its cause instead of a bare "exit status N". Both the
-// CmuxSignaler delivery path and the cmuxstatus reporter route their default
-// (non-injected) subprocess calls through it, so neither duplicates the exec
-// nor drops the stderr enrichment (pg2-p1q00).
+// CmuxSignaler's default subprocess calls and the cmuxstatus reporter route
+// through it, so neither duplicates the exec nor drops the stderr enrichment.
 func RunCmux(ctx context.Context, name string, args ...string) ([]byte, error) {
 	out, err := exec.CommandContext(ctx, name, args...).Output()
 	return out, enrichCmdErr(err)
@@ -121,9 +75,8 @@ func RunCmux(ctx context.Context, name string, args ...string) ([]byte, error) {
 
 // enrichCmdErr augments an *exec.ExitError with the subprocess's captured
 // stderr. exec.ExitError.Error() renders only "exit status N" and drops
-// Stderr, so a failing `cmux --json top --processes` surfaced as a bare
-// "exit status 1" with no clue why (see pg2-il6j: enumerate is the dominant
-// nudge Send failure and its cause was undiagnosable from the error string).
+// Stderr, so a failing `cmux` call surfaced as a bare "exit status 1" with no
+// clue why.
 // .Output() populates ExitError.Stderr, so we fold it into the message.
 // Non-ExitError errors (context timeout, binary-not-found) pass through.
 func enrichCmdErr(err error) error {
@@ -261,110 +214,4 @@ func (c *CmuxSignaler) parentPID(ctx context.Context, pid int) (int, error) {
 		return 0, err
 	}
 	return ppid, nil
-}
-
-// cachedSurfaces returns the surface map, caching for surfaceCacheTTL so that a
-// single signalNonWorking pass over N sessions runs the enumeration once, not N
-// times. Both Detect and Send go through this helper. Errors are cached for the
-// same window so a transient cmux failure doesn't fan out into N error reports.
-func (c *CmuxSignaler) cachedSurfaces(ctx context.Context) (map[int]surfaceLoc, error) {
-	c.cacheMu.Lock()
-	defer c.cacheMu.Unlock()
-	if c.cacheAt != (time.Time{}) && c.clock().Sub(c.cacheAt) < surfaceCacheTTL {
-		return c.cacheLocs, c.cacheErr
-	}
-	// Cached and shared by later callers: detach from this caller's
-	// cancellation (values kept) and bound it instead.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	locs, err := c.enumerateSurfaces(ctx)
-	c.cacheLocs, c.cacheErr, c.cacheAt = locs, err, c.clock()
-	return locs, err
-}
-
-// Send injects text followed by Enter into the cmux surface hosting pid.
-//
-// Steps:
-//  1. Reuse the cached surface enumeration (or refresh it).
-//  2. Look up pid in the surface map; if the agent pid isn't directly in any
-//     surface's tty_process_pids (common when the agent is a child of a shell
-//     under the cmux pane), walk ancestors until a match is found. Mirrors
-//     the Detect-via-ancestry behavior in FindCmuxServerAncestor — otherwise
-//     Detect would return true while Send returned "no cmux surface found".
-//  3. cmux send + cmux send-key enter against the matched workspace+surface.
-func (c *CmuxSignaler) Send(pid int, text string) error {
-	return c.SendContext(context.Background(), pid, text)
-}
-
-// SendContext is Send under the caller's context (cancellation and values).
-func (c *CmuxSignaler) SendContext(ctx context.Context, pid int, text string) error {
-	locs, err := c.cachedSurfaces(ctx)
-	if err != nil {
-		return fmt.Errorf("cmux enumerate: %w", err)
-	}
-	loc, ok := c.findSurfaceForPID(ctx, locs, pid)
-	if !ok {
-		return &NoCmuxSurfaceError{PID: pid}
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if _, err := c.runCmux(ctx, CmuxSend, "send", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, text); err != nil {
-		return fmt.Errorf("cmux send: %w", err)
-	}
-	if _, err := c.runCmux(ctx, CmuxSendKey, "send-key", "--workspace", loc.workspaceRef, "--surface", loc.surfaceRef, "enter"); err != nil {
-		return fmt.Errorf("cmux send-key: %w", err)
-	}
-	return nil
-}
-
-// findSurfaceForPID returns the surfaceLoc whose tty_process_pids contains
-// pid or one of pid's ancestors. Walks parents until the cmux server PID is
-// hit or no further parent is available, mirroring the ancestry approach
-// used by Detect. Returns (zero, false) if no surface matches.
-func (c *CmuxSignaler) findSurfaceForPID(ctx context.Context, locs map[int]surfaceLoc, pid int) (surfaceLoc, bool) {
-	seen := map[int]bool{}
-	for {
-		if pid < 1 || seen[pid] {
-			return surfaceLoc{}, false
-		}
-		seen[pid] = true
-		if loc, ok := locs[pid]; ok {
-			return loc, true
-		}
-		ppid, err := c.parentPID(ctx, pid)
-		if err != nil || ppid < 1 || ppid == pid {
-			return surfaceLoc{}, false
-		}
-		pid = ppid
-	}
-}
-
-// enumerateSurfaces returns a flat map keyed by every pid in any surface's
-// tty_process_pids, so a target pid resolves directly to the surface that
-// hosts it. Non-terminal surfaces and surfaces without a tty are skipped.
-func (c *CmuxSignaler) enumerateSurfaces(ctx context.Context) (map[int]surfaceLoc, error) {
-	out, err := c.runCmux(ctx, CmuxEnumerate, "--json", "top", "--processes")
-	if err != nil {
-		return nil, fmt.Errorf("cmux --json top --processes: %w", err)
-	}
-	var parsed cmuxTopOutput
-	if err := json.Unmarshal(out, &parsed); err != nil {
-		return nil, fmt.Errorf("parse cmux top: %w", err)
-	}
-	result := map[int]surfaceLoc{}
-	for _, w := range parsed.Windows {
-		for _, ws := range w.Workspaces {
-			for _, p := range ws.Panes {
-				for _, s := range p.Surfaces {
-					if s.Type != "terminal" || s.Tty == "" {
-						continue
-					}
-					for _, pid := range s.TtyProcessPids {
-						result[pid] = surfaceLoc{workspaceRef: ws.Ref, surfaceRef: s.Ref}
-					}
-				}
-			}
-		}
-	}
-	return result, nil
 }

@@ -77,9 +77,8 @@ type PaMonitorClient interface {
 	// the same cmux workspace.
 	RegisterBridge(ctx context.Context, in *RegisterBridgeRequest, opts ...grpc.CallOption) (*RegisterBridgeResponse, error)
 	// BridgeChannel is a bidirectional stream between a cmux-bridge and the
-	// daemon: the bridge sends Register/Heartbeat/DeliverResult messages, and
-	// the daemon pushes DaemonState snapshots and Deliver (nudge delivery)
-	// requests.
+	// daemon: the bridge sends Register/Heartbeat messages, and the daemon
+	// pushes DaemonState snapshots.
 	BridgeChannel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[BridgeMsg, DaemonMsg], error)
 }
 
@@ -267,9 +266,8 @@ type PaMonitorServer interface {
 	// the same cmux workspace.
 	RegisterBridge(context.Context, *RegisterBridgeRequest) (*RegisterBridgeResponse, error)
 	// BridgeChannel is a bidirectional stream between a cmux-bridge and the
-	// daemon: the bridge sends Register/Heartbeat/DeliverResult messages, and
-	// the daemon pushes DaemonState snapshots and Deliver (nudge delivery)
-	// requests.
+	// daemon: the bridge sends Register/Heartbeat messages, and the daemon
+	// pushes DaemonState snapshots.
 	BridgeChannel(grpc.BidiStreamingServer[BridgeMsg, DaemonMsg]) error
 	mustEmbedUnimplementedPaMonitorServer()
 }

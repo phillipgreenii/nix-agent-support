@@ -5,10 +5,9 @@
 package bridge
 
 import (
+	"sort"
 	"sync"
 	"time"
-
-	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
 // Status reports the daemon's view of a cmux-bridge for a given cmux
@@ -31,13 +30,8 @@ const (
 // bridge processes may register against the same cmux server PID (e.g.
 // across bridge restarts or concurrent connections); each gets its own
 // entry keyed by its own PID.
-//
-// send may be nil for a member attached without a stream send hook; LiveBridge
-// skips such members because they cannot receive Deliver pushes, while
-// StatusForServer still counts them toward liveness.
 type BridgeEntry struct {
 	BridgePID int
-	send      func(*pb.DaemonMsg) error
 	lastSeen  time.Time
 }
 
@@ -62,16 +56,16 @@ func NewRegistry(staleAfter time.Duration) *Registry {
 	}
 }
 
-// AttachStream adds or updates a live-bridge set member carrying a stream
-// send hook, refreshing its lastSeen to now.
-func (r *Registry) AttachStream(serverPID, bridgePID int, send func(*pb.DaemonMsg) error) {
+// AttachStream adds or updates a live-bridge set member, refreshing its
+// lastSeen to now.
+func (r *Registry) AttachStream(serverPID, bridgePID int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.attachLocked(serverPID, bridgePID, send, r.now())
+	r.attachLocked(serverPID, bridgePID, r.now())
 }
 
 // attachLocked inserts or refreshes a member. Callers must hold r.mu.
-func (r *Registry) attachLocked(serverPID, bridgePID int, send func(*pb.DaemonMsg) error, at time.Time) {
+func (r *Registry) attachLocked(serverPID, bridgePID int, at time.Time) {
 	members := r.byServer[serverPID]
 	if members == nil {
 		members = map[int]*BridgeEntry{}
@@ -82,13 +76,10 @@ func (r *Registry) attachLocked(serverPID, bridgePID int, send func(*pb.DaemonMs
 		e = &BridgeEntry{BridgePID: bridgePID}
 		members[bridgePID] = e
 	}
-	if send != nil {
-		e.send = send
-	}
 	e.lastSeen = at
 }
 
-// Heartbeat refreshes a member's lastSeen without touching its send hook.
+// Heartbeat refreshes a member's lastSeen.
 // A no-op if the member does not exist.
 func (r *Registry) Heartbeat(serverPID, bridgePID int, at time.Time) {
 	r.mu.Lock()
@@ -136,57 +127,22 @@ func (r *Registry) Prune(isAlive func(pid int) bool) {
 	}
 }
 
-// LiveBridge returns a set member for serverPID that carries a non-nil send
-// hook AND whose lastSeen is still fresh within staleAfter, preferring the
-// freshest such member. Returns false if no such member exists (including
-// when the only members carry no send hook, or when every send-carrying member
-// has gone stale). Filtering by staleAfter — the same cutoff StatusForServer
-// uses — is what lets a wedged-but-alive bridge (process up, cmux socket open
-// so it is not reaped, but lastSeen no longer refreshing) degrade to
-// ErrNoBridge and a clean no-bridge drop, instead of the daemon pushing
-// Deliver commands that time out and retry every tick forever.
-func (r *Registry) LiveBridge(serverPID int) (*BridgeEntry, bool) {
+// BridgePIDs returns the bridge PIDs currently registered for serverPID, in
+// ascending order (nil when there are none). It reports membership only, not
+// freshness; StatusForServer reports liveness.
+func (r *Registry) BridgePIDs(serverPID int) []int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	members := r.byServer[serverPID]
-	if members == nil {
-		return nil, false
-	}
-	now := r.now()
-	var best *BridgeEntry
-	for _, e := range members {
-		if e.send == nil {
-			continue
-		}
-		if now.Sub(e.lastSeen) >= r.staleAfter {
-			continue
-		}
-		if best == nil || e.lastSeen.After(best.lastSeen) {
-			best = e
-		}
-	}
-	if best == nil {
-		return nil, false
-	}
-	// Return a copy rather than the map-owned pointer: the original struct
-	// is mutated in place under the write lock by attachLocked and
-	// Heartbeat, and returning the live pointer would let a caller race
-	// those writes after this read lock is released.
-	best2 := *best
-	return &best2, true
-}
-
-// Send pushes a DaemonMsg to this bridge via its attached stream send hook.
-// It returns nil for a member with no send hook (nil send). The backpressure
-// policy — dropping snapshots and returning an error when the outbound queue
-// is full for deliveries — is owned by the BridgeChannel handler that attached
-// the hook. Callers (e.g. the delivery dispatcher) use this to push a Deliver
-// to a live bridge obtained via LiveBridge.
-func (e *BridgeEntry) Send(m *pb.DaemonMsg) error {
-	if e == nil || e.send == nil {
+	if len(members) == 0 {
 		return nil
 	}
-	return e.send(m)
+	pids := make([]int, 0, len(members))
+	for pid := range members {
+		pids = append(pids, pid)
+	}
+	sort.Ints(pids)
+	return pids
 }
 
 // SetNowForTest overrides the clock used by the registry. Whitebox test

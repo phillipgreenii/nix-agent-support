@@ -290,7 +290,7 @@ func TestServeNilMeterProviderStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := newSharedState()
-	_, stop := serve(lis, st, "test", "", "", nil, nil, time.Second, nil, nil, nil)
+	_, stop := serve(lis, st, "test", "", "", nil, nil, time.Second, nil)
 	defer stop()
 
 	conn := dialTCP(t, lis.Addr().String())
@@ -320,7 +320,7 @@ func TestServeWithMeterProviderRecordsRPCDuration(t *testing.T) {
 	defer func() { _ = mp.Shutdown(context.Background()) }()
 
 	st := newSharedState()
-	_, stop := serve(lis, st, "test", "", "", nil, nil, time.Second, nil, nil, mp)
+	_, stop := serve(lis, st, "test", "", "", nil, nil, time.Second, mp)
 	defer stop()
 
 	conn := dialTCP(t, lis.Addr().String())
@@ -388,9 +388,8 @@ func findServerCallDurationDataPoint(rm *metricdata.ResourceMetrics) (metricdata
 // noopSignaler is a Signaler that does nothing. Satisfies signal.Signaler.
 type noopSignaler struct{}
 
-func (noopSignaler) Name() string               { return "noop" }
-func (noopSignaler) Detect(_ int) bool          { return true }
-func (noopSignaler) Send(_ int, _ string) error { return nil }
+func (noopSignaler) Name() string      { return "noop" }
+func (noopSignaler) Detect(_ int) bool { return true }
 
 var _ signal.Signaler = noopSignaler{}
 
@@ -454,10 +453,7 @@ func newTestServerWithNudger(t *testing.T, sid string) *server {
 	if err != nil {
 		t.Fatalf("NewWatermarkStore: %v", err)
 	}
-	// noopSignaler is wrapped in inDaemonDeliverer (not nudger's unexported
-	// signalerDeliverer, which is inaccessible from this package) since New
-	// now takes a Deliverer directly.
-	n := nudger.New(sigDeliverer{noopSignaler{}}, wm, nil, nil)
+	n := nudger.New(noopDeliverer{}, wm, nil, nil)
 
 	state := newSharedState()
 	state.mu.Lock()
@@ -784,10 +780,7 @@ func TestServerSetAutoResumePersistsToToggleStore(t *testing.T) {
 	}
 }
 
-// sigDeliverer adapts a signal.Signaler to nudger.Deliverer for tests that need
-// a Deliverer with no transport behind it.
-type sigDeliverer struct{ sig nudger.Signaler }
+// noopDeliverer is a nudger.Deliverer with no transport behind it.
+type noopDeliverer struct{}
 
-func (d sigDeliverer) Deliver(_ context.Context, targetPID int, text string) error {
-	return d.sig.Send(targetPID, text)
-}
+func (noopDeliverer) Deliver(_ context.Context, _ int, _ string) error { return nil }

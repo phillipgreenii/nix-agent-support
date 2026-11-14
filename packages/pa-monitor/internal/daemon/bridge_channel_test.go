@@ -74,17 +74,6 @@ func (f *fakeBridgeStream) sentSnapshotCount() int {
 	return n
 }
 
-func (f *fakeBridgeStream) sawDeliver(id string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, m := range f.sent {
-		if d := m.GetDeliver(); d != nil && d.GetId() == id {
-			return true
-		}
-	}
-	return false
-}
-
 // waitFor polls cond until it is true or timeout elapses.
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) bool {
 	t.Helper()
@@ -108,12 +97,16 @@ func newBridgeTestServer(t *testing.T) *server {
 	return srv
 }
 
-// TestBridgeChannelRegisterPushesSnapshotAndDelivers covers the core happy
-// path: Register attaches a live bridge, snapshots are pushed to the client,
-// and a Deliver enqueued through the registry entry's send hook reaches the
-// client's Send side. Cancelling the context tears the stream down and
-// deregisters the bridge.
-func TestBridgeChannelRegisterPushesSnapshotAndDelivers(t *testing.T) {
+// bridgeLive reports whether the server's registry holds a fresh bridge member
+// for serverPID.
+func bridgeLive(srv *server, serverPID int) bool {
+	return srv.bridges.StatusForServer(serverPID) == bridge.Alive
+}
+
+// TestBridgeChannelRegisterPushesSnapshot covers the core happy path: Register
+// attaches a live bridge and snapshots are pushed to the client. Cancelling the
+// context tears the stream down and deregisters the bridge.
+func TestBridgeChannelRegisterPushesSnapshot(t *testing.T) {
 	srv := newBridgeTestServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -130,15 +123,8 @@ func TestBridgeChannelRegisterPushesSnapshotAndDelivers(t *testing.T) {
 	}}}
 
 	// (a) registry gains a live bridge.
-	var entry *bridge.BridgeEntry
-	if !waitFor(t, 2*time.Second, func() bool {
-		e, ok := srv.bridges.LiveBridge(serverPID)
-		if ok {
-			entry = e
-		}
-		return ok
-	}) {
-		t.Fatalf("LiveBridge(%d) never became live", serverPID)
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, serverPID) }) {
+		t.Fatalf("bridge %d never became live", serverPID)
 	}
 
 	// (b) a snapshot reaches the client's Send side (immediate-on-register
@@ -151,24 +137,9 @@ func TestBridgeChannelRegisterPushesSnapshotAndDelivers(t *testing.T) {
 		t.Fatalf("snapshot ticker did not keep pushing (got %d)", fake.sentSnapshotCount())
 	}
 
-	// (c) a Deliver pushed via the entry's send hook reaches Send.
-	if err := entry.Send(&pb.DaemonMsg{Kind: &pb.DaemonMsg_Deliver{Deliver: &pb.Deliver{
-		Id:        "cmd-1",
-		TargetPid: 9999,
-		Text:      "continue",
-	}}}); err != nil {
-		t.Fatalf("entry.Send(deliver): %v", err)
-	}
-	if !waitFor(t, 2*time.Second, func() bool { return fake.sawDeliver("cmd-1") }) {
-		t.Fatalf("Deliver did not reach Send")
-	}
-
 	// Teardown via ctx cancel deregisters the bridge and returns.
 	cancel()
-	if !waitFor(t, 2*time.Second, func() bool {
-		_, ok := srv.bridges.LiveBridge(serverPID)
-		return !ok
-	}) {
+	if !waitFor(t, 2*time.Second, func() bool { return !bridgeLive(srv, serverPID) }) {
 		t.Fatalf("bridge not deregistered after ctx cancel")
 	}
 	select {
@@ -192,10 +163,7 @@ func TestBridgeChannelHeartbeatRefreshesMember(t *testing.T) {
 	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
 		BridgePid: bridgePID, ServerPid: serverPID, WorkspaceId: "ws-hb",
 	}}}
-	if !waitFor(t, 2*time.Second, func() bool {
-		_, ok := srv.bridges.LiveBridge(serverPID)
-		return ok
-	}) {
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, serverPID) }) {
 		t.Fatalf("bridge never became live")
 	}
 	// A Heartbeat should be accepted without error and keep the member alive.
@@ -204,70 +172,15 @@ func TestBridgeChannelHeartbeatRefreshesMember(t *testing.T) {
 	}}}
 	// Give the reader a moment to process, then confirm still live.
 	time.Sleep(50 * time.Millisecond)
-	if _, ok := srv.bridges.LiveBridge(serverPID); !ok {
+	if !bridgeLive(srv, serverPID) {
 		t.Fatalf("bridge not live after heartbeat")
 	}
 }
 
-// TestBridgeChannelDeliverResultInvokesCallback verifies a DeliverResult from
-// the bridge is routed to the server's onDeliverResult callback.
-func TestBridgeChannelDeliverResultInvokesCallback(t *testing.T) {
+// TestBridgeChannelCtxCancelDeregisters verifies teardown on context
+// cancellation: the bridge is deregistered and the handler returns.
+func TestBridgeChannelCtxCancelDeregisters(t *testing.T) {
 	srv := newBridgeTestServer(t)
-
-	var mu sync.Mutex
-	var (
-		gotID, gotErr, gotReason string
-		gotOK, gotTimed, called  bool
-	)
-	srv.onDeliverResult = func(id string, ok bool, errStr, reason string, timedOut bool) {
-		mu.Lock()
-		gotID, gotOK, gotErr, gotReason, gotTimed, called = id, ok, errStr, reason, timedOut, true
-		mu.Unlock()
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fake := newFakeBridgeStream(ctx)
-	go func() { _ = srv.BridgeChannel(fake) }()
-
-	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Result{Result: &pb.DeliverResult{
-		Id:       "cmd-9",
-		Ok:       false,
-		Error:    "boom",
-		Reason:   "send_key",
-		TimedOut: true,
-	}}}
-
-	if !waitFor(t, 2*time.Second, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return called
-	}) {
-		t.Fatalf("onDeliverResult never fired")
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if gotID != "cmd-9" || gotOK != false || gotErr != "boom" || gotReason != "send_key" || !gotTimed {
-		t.Fatalf("onDeliverResult got (%q,%v,%q,%q,%v), want (cmd-9,false,boom,send_key,true)", gotID, gotOK, gotErr, gotReason, gotTimed)
-	}
-}
-
-// TestBridgeChannelCtxCancelNotifiesStreamClosed verifies teardown on context
-// cancellation: the bridge is deregistered and onStreamClosed fires with the
-// stream's server PID.
-func TestBridgeChannelCtxCancelNotifiesStreamClosed(t *testing.T) {
-	srv := newBridgeTestServer(t)
-
-	var mu sync.Mutex
-	var (
-		closedPID    int
-		closedCalled bool
-	)
-	srv.onStreamClosed = func(serverPID int) {
-		mu.Lock()
-		closedPID, closedCalled = serverPID, true
-		mu.Unlock()
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	fake := newFakeBridgeStream(ctx)
@@ -278,33 +191,14 @@ func TestBridgeChannelCtxCancelNotifiesStreamClosed(t *testing.T) {
 	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
 		BridgePid: 7001, ServerPid: serverPID, WorkspaceId: "ws-x",
 	}}}
-	if !waitFor(t, 2*time.Second, func() bool {
-		_, ok := srv.bridges.LiveBridge(serverPID)
-		return ok
-	}) {
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, serverPID) }) {
 		t.Fatalf("bridge never became live")
 	}
 
 	cancel()
 
-	if !waitFor(t, 2*time.Second, func() bool {
-		_, ok := srv.bridges.LiveBridge(serverPID)
-		return !ok
-	}) {
+	if !waitFor(t, 2*time.Second, func() bool { return !bridgeLive(srv, serverPID) }) {
 		t.Fatalf("bridge not deregistered after ctx cancel")
-	}
-	if !waitFor(t, 2*time.Second, func() bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return closedCalled
-	}) {
-		t.Fatalf("onStreamClosed never fired")
-	}
-	mu.Lock()
-	pid := closedPID
-	mu.Unlock()
-	if pid != serverPID {
-		t.Fatalf("onStreamClosed(serverPID) = %d, want %d", pid, serverPID)
 	}
 	select {
 	case <-errCh:
@@ -361,7 +255,7 @@ func TestBridgeChannelSkipsInvalidRegister(t *testing.T) {
 	// Nothing should ever register under any server PID; sample the invalid
 	// key after a short settle.
 	time.Sleep(80 * time.Millisecond)
-	if _, ok := srv.bridges.LiveBridge(0); ok {
+	if bridgeLive(srv, 0) {
 		t.Fatalf("invalid Register (server_pid=0) attached a live bridge")
 	}
 }

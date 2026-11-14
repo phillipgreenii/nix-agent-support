@@ -21,7 +21,6 @@ func (c *countingSignaler) Detect(int) bool {
 	c.detects++
 	return c.detect
 }
-func (c *countingSignaler) Send(int, string) error { return nil }
 
 // ancestrySignaler is a countingSignaler whose Detect is exactly the ancestry
 // predicate that classifies the host (as CmuxSignaler's is).

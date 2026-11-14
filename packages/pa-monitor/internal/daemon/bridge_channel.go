@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"errors"
 	"time"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
@@ -16,19 +15,10 @@ const (
 	// WatchState push cadence for cmux-bridge subscribers.
 	defaultBridgeSnapshotInterval = 2 * time.Second
 	// bridgeSendBuffer bounds the per-stream outbound queue. A short bridge
-	// stall must not block the delivery dispatcher (Deliver) nor the snapshot
-	// ticker: the send hook is non-blocking and applies backpressure instead.
+	// stall must not block the snapshot ticker: the send hook is non-blocking
+	// and drops a snapshot when the queue is full.
 	bridgeSendBuffer = 16
 )
-
-// errBridgeSendQueueFull is returned by the send hook when a Deliver cannot be
-// enqueued because the bounded outbound queue is full. Snapshots are dropped
-// silently in this case rather than surfacing an error.
-var errBridgeSendQueueFull = errors.New("bridge send queue full")
-
-// errBridgeStreamClosed is returned by the send hook when the stream is tearing
-// down and no further messages can be enqueued.
-var errBridgeStreamClosed = errors.New("bridge stream closed")
 
 // BridgeChannel is the daemon side of the cmux-bridge bidirectional stream.
 //
@@ -39,21 +29,19 @@ var errBridgeStreamClosed = errors.New("bridge stream closed")
 //     snapshot ticker, the reader's exit, and the stream context. This keeps
 //     Send single-goroutine as gRPC requires.
 //   - A READER goroutine loops on stream.Recv and dispatches inbound BridgeMsgs
-//     (Register / Heartbeat / DeliverResult). Recv is interruptible by context
+//     (Register / Heartbeat). Recv is interruptible by context
 //     cancellation, so the reader always terminates on teardown — unlike Send,
 //     which may block on a slow client until the handler returns and gRPC
 //     cancels the context.
-//   - The send hook (handed to Registry.AttachStream and used by the delivery
-//     dispatcher) is non-blocking: it enqueues onto out, returning an error for
-//     a full-queue Deliver and dropping a full-queue snapshot. It never sends
-//     on a closed channel — out is never closed; a done signal only makes the
-//     hook stop enqueuing.
+//   - The send hook is non-blocking: it enqueues a snapshot onto out and drops
+//     it when the queue is full. It never sends on a closed channel — out is
+//     never closed; a done signal only makes the hook stop enqueuing.
 //
 // Teardown ordering: main breaks its select on ctx.Done(), the server-shutdown
 // signal (s.shutdown), the reader's exit, or a Send error; it stops the ticker,
 // closes done (so the hook stops enqueuing), and returns. It does NOT join the
 // reader — the reader owns the registration lifecycle and deregisters the
-// bridge (and invokes onStreamClosed) in its own defer, which runs when its
+// bridge in its own defer, which runs when its
 // ctx-interruptible Recv unblocks (on client disconnect, or when the handler's
 // return cancels the stream context on a server-shutdown exit). Not joining is
 // what lets the handler return promptly on shutdown (bead pg2-fcjpr): the
@@ -81,27 +69,15 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 		return &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: s.buildState(ctx)}}
 	}
 
-	// send enqueues a DaemonMsg for delivery. Non-blocking: snapshots are
-	// dropped when the queue is full (a fresher one follows on the next tick);
-	// deliveries return an error so the dispatcher can react. A closed done
-	// makes both cases stop enqueuing.
-	send := func(msg *pb.DaemonMsg) error {
-		if _, isSnapshot := msg.GetKind().(*pb.DaemonMsg_Snapshot); isSnapshot {
-			select {
-			case out <- msg:
-			case <-done:
-			default:
-				// Queue full — drop this snapshot.
-			}
-			return nil
-		}
+	// send enqueues a snapshot. Non-blocking: a snapshot is dropped when the
+	// queue is full (a fresher one follows on the next tick). A closed done
+	// stops enqueuing.
+	send := func(msg *pb.DaemonMsg) {
 		select {
 		case out <- msg:
-			return nil
 		case <-done:
-			return errBridgeStreamClosed
 		default:
-			return errBridgeSendQueueFull
+			// Queue full — drop this snapshot.
 		}
 	}
 
@@ -123,9 +99,6 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 		defer func() {
 			if registered {
 				s.bridges.Deregister(regServerPID, regBridgePID)
-				if s.onStreamClosed != nil {
-					s.onStreamClosed(regServerPID)
-				}
 			}
 			close(readerDone)
 		}()
@@ -144,17 +117,16 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 					continue
 				}
 				bridgePID := int(r.GetBridgePid())
-				// AttachStream replaces any prior send hook for this
-				// (serverPID, bridgePID) key, so a re-register on the same key
-				// swaps the writer in place; distinct bridge PIDs on one server
-				// PID coexist.
-				s.bridges.AttachStream(serverPID, bridgePID, send)
+				// AttachStream refreshes an existing (serverPID, bridgePID)
+				// member in place; distinct bridge PIDs on one server PID
+				// coexist.
+				s.bridges.AttachStream(serverPID, bridgePID)
 				registered = true
 				regServerPID = serverPID
 				regBridgePID = bridgePID
 				// Push an immediate snapshot so the bridge renders the roster
 				// without waiting a full tick.
-				_ = send(snapshotMsg())
+				send(snapshotMsg())
 			case *pb.BridgeMsg_Heartbeat:
 				if regServerPID < 1 {
 					// No registration yet — nothing to refresh.
@@ -165,11 +137,6 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 				// message claims, so stream identity stays consistent with
 				// teardown's Deregister(regServerPID, regBridgePID).
 				s.bridges.Heartbeat(regServerPID, regBridgePID, time.Now())
-			case *pb.BridgeMsg_Result:
-				if s.onDeliverResult != nil {
-					res := k.Result
-					s.onDeliverResult(res.GetId(), res.GetOk(), res.GetError(), res.GetReason(), res.GetTimedOut())
-				}
 			}
 		}
 	}()
@@ -195,7 +162,7 @@ loop:
 			// Enqueue a snapshot via the same non-blocking hook so its
 			// drop-on-full policy applies uniformly; the queued copy is drained
 			// by the out case below.
-			_ = send(snapshotMsg())
+			send(snapshotMsg())
 		case msg := <-out:
 			if err := stream.Send(msg); err != nil {
 				sendErr = err
@@ -207,7 +174,7 @@ loop:
 	// Teardown: stop the ticker and signal the send hook to stop enqueuing, then
 	// return. We do NOT join the reader — returning cancels the stream context,
 	// which unblocks the reader's ctx-interruptible Recv, and the reader's defer
-	// then deregisters the bridge and invokes onStreamClosed (bead pg2-fcjpr).
+	// then deregisters the bridge (bead pg2-fcjpr).
 	ticker.Stop()
 	close(done)
 	return sendErr

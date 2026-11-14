@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 //   - `ps -A -o pid,comm,args`            -> psListAll output
 //   - `ps -o ppid=,comm= -p <pid>`        -> processTree[<pid>]
 //   - `tmux -L <name> list-panes -a -F …` -> panesBySocket[<name>] (no entry = error)
-//   - `tmux -L <name> send-keys …`        -> records to sentKeys (always succeeds)
 //
 // processTree maps pid -> [ppid, comm]. panesBySocket maps socket name to the
 // stdout body of list-panes (one line per pane: "<pane_pid> <pane_id>").
@@ -24,7 +22,6 @@ func fakeMultiSocketRun(
 	psListAll string,
 	processTree map[int][2]string,
 	panesBySocket map[string]string,
-	sentKeys *[]string,
 ) func(context.Context, string, ...string) ([]byte, error) {
 	return func(_ context.Context, name string, args ...string) ([]byte, error) {
 		switch name {
@@ -32,12 +29,6 @@ func fakeMultiSocketRun(
 			// Multi-socket survey: ps -A -o pid,comm,args
 			if len(args) >= 1 && args[0] == "-A" {
 				return []byte(psListAll), nil
-			}
-			// Pane env read: ps eww -p <pid> -o command=. Default fake returns
-			// an empty env (no PA_MONITOR_NO_NUDGE marker) so Send delivers
-			// normally; the marker-skip path has its own fake below.
-			if len(args) >= 1 && args[0] == "eww" {
-				return []byte(""), nil
 			}
 			// Ancestry walk: ps -o ppid=,comm= -p <pid>
 			pidStr := args[len(args)-1]
@@ -54,12 +45,6 @@ func fakeMultiSocketRun(
 				}
 				return []byte(body), nil
 			}
-			if len(args) >= 3 && args[0] == "-L" && args[2] == "send-keys" {
-				if sentKeys != nil {
-					*sentKeys = append(*sentKeys, "tmux "+strings.Join(args, " "))
-				}
-				return []byte(""), nil
-			}
 			return nil, fmt.Errorf("tmux: unexpected args %v", args)
 		}
 		return nil, fmt.Errorf("unexpected command: %s", name)
@@ -71,13 +56,13 @@ func TestTmuxDetectReturnsFalseWhenNoTmuxAncestor(t *testing.T) {
 		1000: {"500", "claude"},
 		500:  {"1", "bash"},
 	}
-	sig := &signal.TmuxSignaler{RunCmd: fakeMultiSocketRun(psNoTmuxServers, tree, map[string]string{}, nil)}
+	sig := &signal.TmuxSignaler{RunCmd: fakeMultiSocketRun(psNoTmuxServers, tree, map[string]string{})}
 	if sig.Detect(1000) {
 		t.Error("Detect = true, want false when no tmux ancestor")
 	}
 }
 
-func TestTmuxSendKeysFindsPaneByAncestor(t *testing.T) {
+func TestTmuxDetectFindsPaneByAncestor(t *testing.T) {
 	tree := map[int][2]string{
 		1000: {"500", "claude"},
 		500:  {"100", "bash"},
@@ -85,22 +70,15 @@ func TestTmuxSendKeysFindsPaneByAncestor(t *testing.T) {
 	panes := map[string]string{
 		"default": "100 main:0.0\n200 main:0.1\n",
 	}
-	var sent []string
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, &sent),
+		RunCmd: fakeMultiSocketRun(psSampleDefaultOnly, tree, panes),
 	}
-	if err := sig.Send(1000, "continue"); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 send-keys call, got %d: %v", len(sent), sent)
-	}
-	if !strings.Contains(sent[0], "tmux -L default send-keys -t main:0.0 continue Enter") {
-		t.Errorf("send call = %q, want -L default + -t main:0.0", sent[0])
+	if !sig.Detect(1000) {
+		t.Error("Detect(1000) = false, want true (ancestor 100 is a pane shell pid)")
 	}
 }
 
-func TestTmuxSendErrorsWhenNoPaneFound(t *testing.T) {
+func TestTmuxDetectFalseWhenNoPaneFound(t *testing.T) {
 	tree := map[int][2]string{
 		1000: {"500", "claude"},
 		500:  {"1", "bash"},
@@ -109,67 +87,10 @@ func TestTmuxSendErrorsWhenNoPaneFound(t *testing.T) {
 		"default": "999 other:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, nil),
+		RunCmd: fakeMultiSocketRun(psSampleDefaultOnly, tree, panes),
 	}
-	err := sig.Send(1000, "continue")
-	if err == nil {
-		t.Error("Send should return error when no pane found for PID")
-	}
-}
-
-func TestTmuxSendSkippedWhenNoNudgeMarkerPresent(t *testing.T) {
-	// agent 1000 -> bash 500 -> shell 100, pane default:main:0.0 (pane_pid 100).
-	// The pane process env carries PA_MONITOR_NO_NUDGE=1 (a ccpool-managed pool
-	// session), so Send must NOT issue a send-keys call (spec §16.9).
-	tree := map[int][2]string{
-		1000: {"500", "claude"},
-		500:  {"100", "bash"},
-	}
-	panes := map[string]string{
-		"default": "100 main:0.0\n",
-	}
-	var sent []string
-	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, &sent)
-	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		// Intercept the pane env read for pane_pid 100 and return the marker.
-		if name == "ps" && len(args) >= 3 && args[0] == "eww" && args[2] == "100" {
-			return []byte("/bin/bash PA_MONITOR_NO_NUDGE=1 TERM=xterm"), nil
-		}
-		return base(ctx, name, args...)
-	}
-	sig := &signal.TmuxSignaler{RunCmd: run}
-	if err := sig.Send(1000, "continue"); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if len(sent) != 0 {
-		t.Errorf("send-keys issued %d time(s) %v; want 0 (PA_MONITOR_NO_NUDGE=1 must skip)", len(sent), sent)
-	}
-}
-
-func TestTmuxSendDeliversWhenMarkerAbsent(t *testing.T) {
-	// Same topology, but the pane env has no PA_MONITOR_NO_NUDGE marker, so the
-	// nudge is delivered normally.
-	tree := map[int][2]string{
-		1000: {"500", "claude"},
-		500:  {"100", "bash"},
-	}
-	panes := map[string]string{
-		"default": "100 main:0.0\n",
-	}
-	var sent []string
-	base := fakeMultiSocketRun(psSampleDefaultOnly, tree, panes, &sent)
-	run := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		if name == "ps" && len(args) >= 3 && args[0] == "eww" && args[2] == "100" {
-			return []byte("/bin/bash TERM=xterm SHLVL=1"), nil
-		}
-		return base(ctx, name, args...)
-	}
-	sig := &signal.TmuxSignaler{RunCmd: run}
-	if err := sig.Send(1000, "continue"); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 send-keys call (no marker), got %d: %v", len(sent), sent)
+	if sig.Detect(1000) {
+		t.Error("Detect should be false when no pane lists PID or an ancestor")
 	}
 }
 
@@ -181,7 +102,7 @@ func TestResolveSignalerReturnsFirstMatch(t *testing.T) {
 		"alt": "1 mayor:0.0\n",
 	}
 	always := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes, nil),
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes),
 	}
 	never := &signal.CmuxSignaler{}
 	got := signal.ResolveSignaler([]signal.Signaler{never, always}, 1)
@@ -209,35 +130,9 @@ func countCmux(sigs []signal.Signaler) int {
 	return n
 }
 
-// TestWithoutCmuxExcludesCmuxSignaler is the structural ADR-0022 guarantee for
-// the delivery path: WithoutCmux drops every *CmuxSignaler, keeps the rest in
-// order, and does not mutate its input (the D5 keep-awake path shares that
-// slice and MUST still see cmux). So the in-daemon delivery SignalerAdapter,
-// built over WithoutCmux(...), can never resolve a cmux signaler — the daemon
-// cannot exec cmux because the type isn't in the slice at all.
-func TestWithoutCmuxExcludesCmuxSignaler(t *testing.T) {
-	tmux := &signal.TmuxSignaler{}
-	cmux := &signal.CmuxSignaler{}
-	in := []signal.Signaler{tmux, cmux}
-
-	out := signal.WithoutCmux(in)
-
-	if countCmux(out) != 0 {
-		t.Error("WithoutCmux left a *CmuxSignaler in the delivery slice (ADR 0022: daemon MUST NOT execute cmux)")
-	}
-	if len(out) != 1 || out[0] != tmux {
-		t.Errorf("WithoutCmux = %v, want [tmux] (non-cmux signalers preserved in order)", out)
-	}
-	// Input is not mutated: the shared D5 keep-awake slice must retain cmux.
-	if countCmux(in) != 1 {
-		t.Error("WithoutCmux mutated its input; the shared D5 keep-awake slice lost its CmuxSignaler")
-	}
-}
-
-// TestDefaultSignalersRetainsCmuxForKeepAwake anchors that the source slice the
-// daemon feeds BOTH paths still carries cmux, so filtering it out of delivery
-// does not also remove it from the D5 keep-awake predicate (which resolves
-// cmux-hosted disrupts to hold the Mac awake).
+// TestDefaultSignalersRetainsCmuxForKeepAwake anchors that the default slice
+// still carries cmux, which the D5 keep-awake predicate needs to resolve
+// cmux-hosted disrupts and hold the Mac awake.
 func TestDefaultSignalersRetainsCmuxForKeepAwake(t *testing.T) {
 	if countCmux(signal.DefaultSignalers()) == 0 {
 		t.Error("DefaultSignalers() must contain a CmuxSignaler for the D5 keep-awake path")
@@ -298,7 +193,7 @@ func TestTmuxDetectReturnsFalseForLookalikeComm(t *testing.T) {
 		500:  {"100", "bash"},
 		100:  {"1", "tmuxinator"},
 	}
-	sig := &signal.TmuxSignaler{RunCmd: fakeMultiSocketRun(psNoTmuxServers, tree, map[string]string{}, nil)}
+	sig := &signal.TmuxSignaler{RunCmd: fakeMultiSocketRun(psNoTmuxServers, tree, map[string]string{})}
 	if sig.Detect(1000) {
 		t.Error("Detect = true for tmuxinator ancestor; want false (must match pane, not just comm)")
 	}
@@ -325,7 +220,7 @@ func TestTmuxEnumerateSingleServer(t *testing.T) {
 		"alt": "100 mayor:0.0\n200 mayor:0.1\n",
 	}
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes, nil),
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, nil, panes),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -347,7 +242,7 @@ func TestTmuxEnumerateTwoServers(t *testing.T) {
 		"work": "300 dev:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleTwoServers, nil, panes, nil),
+		RunCmd: fakeMultiSocketRun(psSampleTwoServers, nil, panes),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -370,7 +265,7 @@ func TestTmuxEnumerationSkipsDeadSocket(t *testing.T) {
 		"alt": "100 mayor:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleTwoServers, nil, panes, nil),
+		RunCmd: fakeMultiSocketRun(psSampleTwoServers, nil, panes),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -393,7 +288,7 @@ func TestTmuxEnumerateDefaultSocketWhenNoDashL(t *testing.T) {
 		"default": "500 mysession:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psNoDashL, nil, panes, nil),
+		RunCmd: fakeMultiSocketRun(psNoDashL, nil, panes),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -416,7 +311,7 @@ func TestTmuxDetectReturnsTrueOnlyWhenPidInPane(t *testing.T) {
 		"alt": "100 mayor:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil),
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes),
 	}
 	if !sig.Detect(1000) {
 		t.Error("Detect(1000) = false, want true (pid in pane alt:mayor:0.0 via ancestor 100)")
@@ -435,14 +330,14 @@ func TestTmuxDetectReturnsFalseWhenPidNotInAnyPane(t *testing.T) {
 		"alt": "999 mayor:0.0\n",
 	}
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil),
+		RunCmd: fakeMultiSocketRun(psSampleSingleServer, tree, panes),
 	}
 	if sig.Detect(1000) {
 		t.Error("Detect(1000) = true, want false (no pane has 1000's ancestors)")
 	}
 }
 
-func TestTmuxSendFindsPaneOnNonDefaultSocket(t *testing.T) {
+func TestTmuxDetectFindsPaneOnNonDefaultSocket(t *testing.T) {
 	// agent 2000 -> bash 600 -> shell 300 (which is pane work:dev:0.0)
 	tree := map[int][2]string{
 		2000: {"600", "claude"},
@@ -452,18 +347,11 @@ func TestTmuxSendFindsPaneOnNonDefaultSocket(t *testing.T) {
 		"alt":  "100 mayor:0.0\n",
 		"work": "300 dev:0.0\n",
 	}
-	var sent []string
 	sig := &signal.TmuxSignaler{
-		RunCmd: fakeMultiSocketRun(psSampleTwoServers, tree, panes, &sent),
+		RunCmd: fakeMultiSocketRun(psSampleTwoServers, tree, panes),
 	}
-	if err := sig.Send(2000, "continue"); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if len(sent) != 1 {
-		t.Fatalf("expected 1 send-keys call, got %d: %v", len(sent), sent)
-	}
-	if !strings.Contains(sent[0], "tmux -L work send-keys -t dev:0.0 continue Enter") {
-		t.Errorf("send call = %q, want -L work + -t dev:0.0 with Enter", sent[0])
+	if !sig.Detect(2000) {
+		t.Error("Detect(2000) = false, want true (pane on the non-default work socket)")
 	}
 }
 

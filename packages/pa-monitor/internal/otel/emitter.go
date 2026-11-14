@@ -931,10 +931,9 @@ func (e *Emitter) RecordNudgeSuppressed(attrs map[string]string) {
 }
 
 // RecordNudgeDroppedNoBridge increments pa_monitor.nudge.dropped_no_bridge_total
-// and emits the nudge.dropped_no_bridge log event. Fired when a group of
-// no-bridge intents ages past the dispatcher's noBridgeDropWindow with no live
-// cmux-bridge to retry against — a permanent give-up, distinct from the sent/
-// suppressed/send-failed outcomes. nil-safe.
+// and emits the nudge.dropped_no_bridge log event. No daemon path fires it any
+// more (delivery goes through the control mod, which has no bridge concept); the
+// counter stays registered so the dashboard series keeps resolving. nil-safe.
 func (e *Emitter) RecordNudgeDroppedNoBridge(attrs map[string]string) {
 	// Called from the nudger.Recorder interface, which carries no context.
 	ctx := context.Background()

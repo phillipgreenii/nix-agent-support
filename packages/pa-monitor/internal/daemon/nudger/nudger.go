@@ -22,11 +22,8 @@ type Nudger struct {
 // is surfaced to a durable local sink instead of being silently discarded (see
 // Dispatcher.HistoryErrLog). Pass nil to disable (early-startup / tests).
 //
-// New takes a Deliverer directly: the caller (lifecycle.go) is responsible for
-// composing the right Deliverer — a compositeDeliverer that routes cmux-hosted
-// targets through a cmux-bridge stream and everything else through the
-// existing in-daemon signal layer. See signalerDeliverer below for adapting a
-// plain Signaler where a Deliverer is required (e.g. in tests).
+// New takes a Deliverer directly: the caller (lifecycle.go) supplies the
+// control-mod deliverer.
 func New(deliverer Deliverer, recorder Recorder, nudgeRecorder NudgeRecorder, historyErrLog func(msg string)) *Nudger {
 	return &Nudger{
 		store:          NewPendingStore(),
@@ -37,21 +34,6 @@ func New(deliverer Deliverer, recorder Recorder, nudgeRecorder NudgeRecorder, hi
 		manualProd:     &ManualProducer{},
 		autoWrapProd:   &AutoSessionWrapUpProducer{},
 	}
-}
-
-// signalerDeliverer adapts a synchronous Signaler to the Deliverer interface.
-// New itself no longer uses this shim (it takes a Deliverer directly), but
-// tests in this package construct a Dispatcher/Nudger from a plain
-// Signaler-shaped fake and need a Deliverer to hand it — signalerDeliverer is
-// kept for that purpose.
-type signalerDeliverer struct{ sig Signaler }
-
-// Deliver satisfies Deliverer by delegating to the wrapped Signaler.Send. It
-// never returns ErrNoBridge — the synchronous signal layer has no bridge
-// concept — so the no-bridge drop-after-window path in Dispatch is inert
-// until a real async Deliverer is wired in.
-func (s signalerDeliverer) Deliver(_ context.Context, pid int, text string) error {
-	return s.sig.Send(pid, text)
 }
 
 // snapshotKeySet captures the current set of intent keys in the store.

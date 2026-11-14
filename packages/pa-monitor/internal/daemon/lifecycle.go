@@ -333,12 +333,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 
 	// bridgeReg is the single bridge.Registry instance shared by the gRPC
-	// server (BridgeChannel attaches live bridge streams to it), the
-	// delivery path's bridgeDeliverer (looks up a live stream to push a
-	// Deliver), and the reaper (prunes members whose process has died).
-	// Defaulting to a fresh registry when BridgeRegistry is unset keeps
-	// bridgeDeliverer's reg field always non-nil; the bridge route is simply
-	// unreachable in that configuration.
+	// server (BridgeChannel attaches live bridge streams to it) and the reaper
+	// (prunes members whose process has died). Defaulting to a fresh registry
+	// when BridgeRegistry is unset keeps it always non-nil.
 	// Connection-timing windows. Both derive from the same base cadences (see
 	// internal/timing), so the registry stale cutoff and the per-bridge snapshot
 	// push interval cannot drift into an inversion. Zero opts values fall back to
@@ -357,21 +354,16 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if bridgeReg == nil {
 		bridgeReg = bridge.NewRegistry(staleAfter)
 	}
-	// tr correlates in-flight bridge deliveries to their DeliverResult acks
-	// (see delivery.go). It must exist before serve() (which wires
-	// tr.resolve/tr.failServer into the BridgeChannel handler's inbound
-	// hooks) and before bridgeDel (which blocks on it per delivery).
-	tr := newTracker()
 
 	version := opts.Version
 	if version == "" {
 		version = "dev"
 	}
-	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, bridgeReg, snapshotInterval, tr.resolve, tr.failServer, opts.Emitter.MeterProvider())
+	_, stop := serve(lis, state, version, opts.PlanTier, opts.AutoResumeMessage, opts.WriteService, bridgeReg, snapshotInterval, opts.Emitter.MeterProvider())
 	defer stop()
 
 	// Reap bridge members whose process has died, against the same registry
-	// instance the gRPC server and delivery path use.
+	// instance the gRPC server uses.
 	go RunReaper(ctx, bridgeReg, 30*time.Second, pidAlive)
 
 	defer func() {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/bridge"
-	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 )
 
 // TestReapOnce_PrunesDeadBridge verifies that reapOnce delegates to the
@@ -18,19 +17,14 @@ func TestReapOnce_PrunesDeadBridge(t *testing.T) {
 	reg := bridge.NewRegistry(30 * time.Second)
 	reg.SetNowForTest(func() time.Time { return now })
 
-	noop := func(*pb.DaemonMsg) error { return nil }
-	reg.AttachStream(4000, 100, noop) // will report dead
-	reg.AttachStream(4000, 200, noop) // will report alive
+	reg.AttachStream(4000, 100) // will report dead
+	reg.AttachStream(4000, 200) // will report alive
 
 	alive := map[int]bool{200: true}
 	reapOnce(reg, func(pid int) bool { return alive[pid] })
 
-	live, ok := reg.LiveBridge(4000)
-	if !ok {
-		t.Fatalf("LiveBridge(4000) after reapOnce: got !ok, want ok (200 survives)")
-	}
-	if live.BridgePID != 200 {
-		t.Errorf("LiveBridge(4000) after reapOnce: BridgePID = %d, want 200", live.BridgePID)
+	if got := reg.BridgePIDs(4000); len(got) != 1 || got[0] != 200 {
+		t.Errorf("BridgePIDs(4000) after reapOnce = %v, want [200]", got)
 	}
 }
 
@@ -43,8 +37,7 @@ func TestReapOnce_PrunesAllDeadLeavesServerUnknown(t *testing.T) {
 	reg := bridge.NewRegistry(30 * time.Second)
 	reg.SetNowForTest(func() time.Time { return now })
 
-	noop := func(*pb.DaemonMsg) error { return nil }
-	reg.AttachStream(5000, 300, noop)
+	reg.AttachStream(5000, 300)
 
 	reapOnce(reg, func(pid int) bool { return false })
 
@@ -62,8 +55,7 @@ func TestRunReaper_TicksAndPrunesUntilCancelled(t *testing.T) {
 	reg := bridge.NewRegistry(30 * time.Second)
 	reg.SetNowForTest(func() time.Time { return now })
 
-	noop := func(*pb.DaemonMsg) error { return nil }
-	reg.AttachStream(6000, 400, noop)
+	reg.AttachStream(6000, 400)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

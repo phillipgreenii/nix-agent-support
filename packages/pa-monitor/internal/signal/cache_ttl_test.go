@@ -57,22 +57,14 @@ func (p *psCallCounter) run(ctx context.Context, name string, args ...string) ([
 
 func (p *psCallCounter) total() int { return p.psAll + p.psOther + p.nonPsCalls }
 
-// TestTTLConstantsStaySplit guards against re-merging the two TTLs: the
-// surface map must stay short (a stale map drops a nudge for a newly created
-// surface), while both whole-table ps enumerations use the long TTL.
-func TestTTLConstantsStaySplit(t *testing.T) {
-	surface, serverPID, tmux := signal.TTLs()
-	if surface != 2*time.Second {
-		t.Errorf("surface cache TTL = %v, want 2s (stale surface map drops nudges)", surface)
-	}
+// TestTTLConstants pins both whole-table ps enumerations to the long TTL.
+func TestTTLConstants(t *testing.T) {
+	serverPID, tmux := signal.TTLs()
 	if serverPID != 10*time.Second {
 		t.Errorf("server-PID cache TTL = %v, want 10s", serverPID)
 	}
 	if tmux != 10*time.Second {
 		t.Errorf("tmux pane cache TTL = %v, want 10s", tmux)
-	}
-	if surface >= serverPID {
-		t.Errorf("surface TTL %v must be shorter than server-PID TTL %v", surface, serverPID)
 	}
 }
 
@@ -143,7 +135,7 @@ func TestCmuxFindServerAncestorReusesServerPIDCache(t *testing.T) {
 func TestTmuxPaneCacheOnePsPerTTLWindow(t *testing.T) {
 	tree := map[int][2]string{}
 	panes := map[string]string{"alt": "100 mayor:0.0\n"}
-	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil)}
+	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes)}
 	clock := newFakeClock()
 	sig := &signal.TmuxSignaler{RunCmd: counter.run}
 	signal.SetClockForTest(sig, clock.Now)
@@ -168,15 +160,14 @@ func TestTmuxPaneCacheOnePsPerTTLWindow(t *testing.T) {
 
 // TestTmuxGateNoProcessesWhenTmuxAbsent: with tmux not resolvable on PATH the
 // signaler makes ZERO invocations through RunCmd (no ps -A, no ancestor walk,
-// no tmux), and Detect is false. This must hold for Send and the input guard
-// too (the five DefaultSignalers() call sites reach those).
+// no tmux), and Detect is false.
 func TestTmuxGateNoProcessesWhenTmuxAbsent(t *testing.T) {
 	tree := map[int][2]string{
 		67890: {"12345", "claude"},
 		12345: {"100", "zsh"},
 	}
 	panes := map[string]string{"alt": "100 mayor:0.0\n"}
-	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil)}
+	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes)}
 	lookups := 0
 	sig := &signal.TmuxSignaler{
 		RunCmd: counter.run,
@@ -192,9 +183,6 @@ func TestTmuxGateNoProcessesWhenTmuxAbsent(t *testing.T) {
 	if sig.Detect(67890) {
 		t.Error("Detect = true with tmux absent; want false")
 	}
-	if err := sig.Send(67890, "continue"); err == nil {
-		t.Error("Send succeeded with tmux absent; want an error")
-	}
 	if counter.total() != 0 {
 		t.Errorf("RunCmd invoked %d times with tmux absent (ps -A=%d, other ps=%d, other=%d); want 0",
 			counter.total(), counter.psAll, counter.psOther, counter.nonPsCalls)
@@ -204,16 +192,15 @@ func TestTmuxGateNoProcessesWhenTmuxAbsent(t *testing.T) {
 	}
 }
 
-// TestTmuxGateOpenWhenTmuxResolvable: with tmux resolvable, Detect and Send
-// behave exactly as before the gate existed.
+// TestTmuxGateOpenWhenTmuxResolvable: with tmux resolvable, Detect behaves
+// exactly as before the gate existed.
 func TestTmuxGateOpenWhenTmuxResolvable(t *testing.T) {
 	tree := map[int][2]string{
 		67890: {"12345", "claude"},
 		12345: {"100", "zsh"},
 	}
 	panes := map[string]string{"alt": "100 mayor:0.0\n"}
-	var sent []string
-	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes, &sent)}
+	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes)}
 	sig := &signal.TmuxSignaler{
 		RunCmd:   counter.run,
 		LookPath: func(string) (string, error) { return "/usr/bin/tmux", nil },
@@ -221,14 +208,11 @@ func TestTmuxGateOpenWhenTmuxResolvable(t *testing.T) {
 	if !sig.Detect(67890) {
 		t.Fatal("Detect = false with tmux resolvable; want true")
 	}
-	if err := sig.Send(67890, "continue"); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if len(sent) != 1 {
-		t.Fatalf("send-keys calls = %d (%v); want 1", len(sent), sent)
+	if !sig.Detect(67890) {
+		t.Fatal("second Detect = false with tmux resolvable; want true")
 	}
 	if counter.psAll != 1 {
-		t.Errorf("ps -A ran %d times; want 1 (cached across Detect+Send)", counter.psAll)
+		t.Errorf("ps -A ran %d times; want 1 (cached across Detect calls)", counter.psAll)
 	}
 }
 
@@ -237,7 +221,7 @@ func TestTmuxGateOpenWhenTmuxResolvable(t *testing.T) {
 func TestTmuxGateAbsentIsNotCached(t *testing.T) {
 	tree := map[int][2]string{100: {"1", "zsh"}}
 	panes := map[string]string{"alt": "100 mayor:0.0\n"}
-	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes, nil)}
+	counter := &psCallCounter{inner: fakeMultiSocketRun(psSampleSingleServer, tree, panes)}
 	present := false
 	sig := &signal.TmuxSignaler{
 		RunCmd: counter.run,

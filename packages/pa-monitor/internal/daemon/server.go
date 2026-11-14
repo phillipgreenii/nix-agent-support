@@ -76,19 +76,8 @@ type server struct {
 	writeService *service.WriteService
 	// bridges tracks cmux-bridge registrations (self-reported via
 	// BridgeChannel's Register message) so the poller can refine "cmux"
-	// terminal-host labels with bridge status, and so the delivery path can
-	// look up a live stream to push a Deliver over.
+	// terminal-host labels with bridge status.
 	bridges *bridge.Registry
-	// onDeliverResult, when non-nil, is invoked by the BridgeChannel handler
-	// when a cmux-bridge reports the outcome of a Deliver (DeliverResult). A
-	// later task wires this to the delivery tracker; it defaults nil so the
-	// handler is a no-op for results until then.
-	onDeliverResult func(id string, ok bool, errStr, reason string, timedOut bool)
-	// onStreamClosed, when non-nil, is invoked by the BridgeChannel handler
-	// after a registered stream is deregistered on teardown, keyed by the
-	// stream's cmux server PID. A later task wires this to fail any in-flight
-	// deliveries for that stream; it defaults nil.
-	onStreamClosed func(serverPID int)
 	// bridgeSnapshotInterval overrides the per-stream roster push cadence used
 	// by BridgeChannel. Zero selects the default (defaultBridgeSnapshotInterval);
 	// tests set a small value to exercise the ticker quickly.
@@ -514,17 +503,14 @@ func (s *server) buildState(ctx context.Context) *pb.DaemonState {
 //
 // bridges is optional; when nil, BridgeChannel rejects with
 // FailedPrecondition and poller-side cmux refinement falls back to a bare
-// "cmux" label. onDeliverResult/onStreamClosed are the BridgeChannel
-// handler's inbound hooks into the delivery tracker (see delivery.go); both
-// are nil-safe (BridgeChannel checks before calling), so callers that don't
-// wire the delivery path may pass nil for either. mp is the emitter's
+// "cmux" label. mp is the emitter's
 // *sdkmetric.MeterProvider (see internal/otel.Emitter.MeterProvider, nil-safe);
 // when non-nil, an otelgrpc stats handler is installed so gRPC server RPCs
 // emit the rpc.server.call.duration histogram on the same provider as the
 // rest of pa-monitor's OTel metrics. When nil (OTEL disabled), no handler is
 // installed — otelgrpc.NewServerHandler(otelgrpc.WithMeterProvider(nil)) would
 // nil-deref internally, so the install is strictly conditional.
-func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, snapshotInterval time.Duration, onDeliverResult func(id string, ok bool, errStr, reason string, timedOut bool), onStreamClosed func(serverPID int), mp *sdkmetric.MeterProvider) (*grpc.Server, func()) {
+func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMessage string, writeService *service.WriteService, bridges *bridge.Registry, snapshotInterval time.Duration, mp *sdkmetric.MeterProvider) (*grpc.Server, func()) {
 	var gsOpts []grpc.ServerOption
 	if mp != nil {
 		gsOpts = append(gsOpts, grpc.StatsHandler(otelgrpc.NewServerHandler(
@@ -544,8 +530,6 @@ func serve(lis net.Listener, state *sharedState, version, planTier, autoResumeMe
 	srv.writeService = writeService
 	srv.bridges = bridges
 	srv.bridgeSnapshotInterval = snapshotInterval
-	srv.onDeliverResult = onDeliverResult
-	srv.onStreamClosed = onStreamClosed
 	// shutdown tells the long-lived stream handlers (WatchState, BridgeChannel)
 	// to return when stop() runs, so GracefulStop does not block on a live
 	// client (bead pg2-fcjpr).

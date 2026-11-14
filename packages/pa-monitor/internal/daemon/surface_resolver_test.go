@@ -22,7 +22,6 @@ func (h *hostSignaler) Detect(int) bool {
 	h.detects++
 	return h.detect
 }
-func (h *hostSignaler) Send(int, string) error { return nil }
 
 type classifierSignaler struct{ hostSignaler }
 

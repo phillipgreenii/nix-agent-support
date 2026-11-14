@@ -434,7 +434,7 @@ func runCmuxBridge(args []string) {
 		// cmux may have lost its sidebar state while disconnected: forget what the
 		// reporter believes it pushed so the new session repaints everything.
 		reporter.Reset()
-		err := streamOnce(ctx, ws, serverPID, cmuxSig, reporter, log, announcer, cfg.StaleAfter, opts)
+		err := streamOnce(ctx, ws, serverPID, reporter, log, announcer, cfg.StaleAfter, opts)
 		switch classifyBridgeResult(err, ctx.Err()) {
 		case bridgeStop:
 			return
@@ -547,7 +547,7 @@ type bridgeStreamOpts struct {
 // unblocks Recv on every exit path (watchdog, Send-error, Recv-error, or an
 // outer ctx cancel). The defer here is the backstop for the dial/open error
 // returns above, which never reach runBridgeChannel.
-func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.CmuxSignaler, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer, staleAfter time.Duration, opts bridgeStreamOpts) error {
+func streamOnce(ctx context.Context, ws string, serverPID int, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer, staleAfter time.Duration, opts bridgeStreamOpts) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -562,7 +562,7 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 		return err
 	}
 
-	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, cmuxSig, reporter, log, announcer, staleAfter, opts)
+	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, reporter, log, announcer, staleAfter, opts)
 }
 
 // runBridgeChannel runs the BridgeChannel message loop over an established
@@ -573,26 +573,19 @@ func streamOnce(ctx context.Context, ws string, serverPID int, cmuxSig *signal.C
 // internal/daemon/bridge_channel.go):
 //
 //   - A single SENDER goroutine is the sole caller of stream.Send. It sends the
-//     initial Register, then funnels periodic Heartbeats and per-delivery
-//     DeliverResults — the latter arriving over the outbound channel — so
-//     stream.Send is never called concurrently, as gRPC requires.
+//     initial Register, then periodic Heartbeats, so stream.Send is never
+//     called concurrently, as gRPC requires.
 //   - A single RECEIVER goroutine is the sole caller of stream.Recv, forwarding
 //     each (msg, err) to the main loop. Recv is bound to the context the stream
 //     was created from, so it only unblocks when THAT context is cancelled;
 //     teardown does so by invoking the cancel func the caller (streamOnce)
 //     threaded in for exactly this purpose.
 //   - The MAIN loop consumes received messages: a snapshot drives reporter.Push
-//     (exactly as the old WatchState path did); a Deliver is dispatched to its
-//     own HANDLER goroutine so a slow cmux send never head-of-line-blocks
-//     snapshot handling or other deliveries.
-//   - HANDLER goroutines resolve + send locally via cmuxSig, then enqueue their
-//     DeliverResult onto the outbound channel.
+//     (exactly as the old WatchState path did).
 //
 // Teardown: the main loop breaks, then calls cancel — the CancelFunc for the
-// context the stream was created from — which stops the sender, unblocks the
-// receiver's Recv, and releases any handler blocked enqueuing a result. Every
-// goroutine is joined before returning. The outbound channel is never closed,
-// so no goroutine can send on a closed channel. cancel MUST be the stream's
+// context the stream was created from — which stops the sender and unblocks the
+// receiver's Recv. Every goroutine is joined before returning. cancel MUST be the stream's
 // cancel (not a fresh child): a child cancel would leave Recv, bound to the
 // parent, blocked forever and deadlock the join on recvDone.
 func runBridgeChannel(
@@ -601,18 +594,12 @@ func runBridgeChannel(
 	stream pb.PaMonitor_BridgeChannelClient,
 	ws string,
 	serverPID int,
-	cmuxSig *signal.CmuxSignaler,
 	reporter cmuxstatus.Reporter,
 	log *bridgeLogger,
 	announcer *connAnnouncer,
 	staleAfter time.Duration,
 	opts bridgeStreamOpts,
 ) error {
-	// outbound funnels every non-Register stream.Send through the sole sender
-	// goroutine. Buffered so a delivery handler rarely blocks enqueuing a
-	// result. Never closed — teardown is signalled by cancelling ctx.
-	outbound := make(chan *pb.BridgeMsg, 16)
-
 	// sendErrCh reports the first stream.Send failure (buffered, non-blocking
 	// write) so the main loop can surface it as the return error.
 	sendErrCh := make(chan error, 1)
@@ -653,12 +640,6 @@ func runBridgeChannel(
 					cancel()
 					return
 				}
-			case msg := <-outbound:
-				if err := stream.Send(msg); err != nil {
-					reportSendErr(err)
-					cancel()
-					return
-				}
 			}
 		}
 	}()
@@ -684,9 +665,6 @@ func runBridgeChannel(
 			}
 		}
 	}()
-
-	// Delivery handlers run concurrently; joined at teardown.
-	var handlerWG sync.WaitGroup
 
 	// Diff state is owned by the caller (runCmuxBridge) and PERSISTS across
 	// reconnects via opts.prev / opts.prevSessions, so "initial state" is logged
@@ -745,22 +723,13 @@ loop:
 				reporter.Push(snapshotForWorkspace(snap, ws, time.Now(), staleAfter))
 				continue
 			}
-			if d := r.msg.GetDeliver(); d != nil {
-				handlerWG.Add(1)
-				go func(d *pb.Deliver) {
-					defer handlerWG.Done()
-					deliverLocally(ctx, cmuxSig, d, outbound, log)
-				}(d)
-			}
 		}
 	}
 
 	// Teardown: signal all goroutines, then join before returning so no
-	// goroutine outlives this call. Handlers blocked enqueuing a result unblock
-	// via ctx.Done; the sender exits on ctx.Done; the receiver's Recv is
-	// unblocked by the cancelled stream context.
+	// goroutine outlives this call. The sender exits on ctx.Done; the
+	// receiver's Recv is unblocked by the cancelled stream context.
 	cancel()
-	handlerWG.Wait()
 	senderWG.Wait()
 	<-recvDone
 
@@ -774,42 +743,6 @@ loop:
 	default:
 	}
 	return loopErr
-}
-
-// deliverLocally resolves the cmux surface hosting d.TargetPid and injects
-// d.Text, then enqueues a DeliverResult reflecting the outcome. It runs on a
-// per-delivery handler goroutine; the outbound enqueue is abandoned if ctx is
-// cancelled (teardown) so it never blocks on a drained sender.
-func deliverLocally(ctx context.Context, cmuxSig *signal.CmuxSignaler, d *pb.Deliver, outbound chan<- *pb.BridgeMsg, log *bridgeLogger) {
-	err := cmuxSig.SendContext(ctx, int(d.GetTargetPid()), d.GetText())
-	errStr, reason := "", ""
-	timedOut := false
-	if err != nil {
-		errStr = err.Error()
-		// Classify the failure HERE, where the typed *CmuxError is still in hand,
-		// and carry the result across the gRPC boundary (DeliverResult.reason/
-		// timed_out) so the daemon need not re-parse the error text (pg2-p1q00).
-		r, t := signal.ClassifyCmuxFailure(err)
-		reason, timedOut = string(r), t
-		log.Detail(ctx, "bridge.deliver_failed", map[string]string{
-			"id":         d.GetId(),
-			"target_pid": fmt.Sprintf("%d", d.GetTargetPid()),
-			"error":      errStr,
-			"reason":     reason,
-			"timed_out":  fmt.Sprintf("%t", timedOut),
-		})
-	}
-	res := &pb.BridgeMsg{Kind: &pb.BridgeMsg_Result{Result: &pb.DeliverResult{
-		Id:       d.GetId(),
-		Ok:       err == nil,
-		Error:    errStr,
-		Reason:   reason,
-		TimedOut: timedOut,
-	}}}
-	select {
-	case outbound <- res:
-	case <-ctx.Done():
-	}
 }
 
 // snapshotForWorkspace filters daemon state down to sessions whose
