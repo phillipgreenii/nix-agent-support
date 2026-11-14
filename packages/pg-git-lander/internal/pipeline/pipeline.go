@@ -756,6 +756,17 @@ func (s *session) stepsThreeToFive(ctx context.Context) (*Result, error) {
 	p, req := s.p, s.req
 	sel := p.Selection
 
+	// A waiter that settled a dead owner's stop of this very branch (it
+	// finished the land) finds the branch gone once it holds the locks: say so,
+	// as the start of a land does, rather than failing a rev-parse.
+	if !s.resumed {
+		if _, ok := s.resolve(ctx, "refs/heads/"+req.Branch); !ok {
+			o := s.base(outcome.New(outcome.UsageError))
+			o.Message = fmt.Sprintf("BRANCH %s does not exist", req.Branch)
+			return s.fail(ctx, o), nil
+		}
+	}
+
 	// Step 3: snapshot and configure.
 	cfgErr, err := p.snapshot(ctx, true)
 	if err != nil {
