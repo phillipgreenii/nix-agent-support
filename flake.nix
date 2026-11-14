@@ -1590,6 +1590,23 @@
       # stamp already covers.
       phillipgreenii.pre-commit = {
         bundle.enable = true;
+        # Every extraHooks entry above only verifies (none rewrites the tree), so
+        # all are `check`. pg-connector-filesets is check-only too: its
+        # regeneration is the `fixers` entry below, which is not a prek hook.
+        hookKinds = {
+          ceta-agreement-test = "check";
+          ceta-depguard = "check";
+          go-local-replace-build = "check";
+          identifier-allowlist = "check";
+          no-reexec-test-doubles = "check";
+          pg-connector-filesets = "check";
+          pg-desk-alert-rules-test = "check";
+          pg-disk-reclaimer-pty-test = "check";
+          pg-disk-reclaimer-tmp-sweep-test = "check";
+          prevent-main-rebase = "check";
+          run-unit-tests = "check";
+          section-sign-citations = "check";
+        };
         # `pg-hooks fix` regenerates the pg-connector filesets after `git add`
         # (the hook above only checks). Uses the `go` on PATH, GOTOOLCHAIN=local.
         fixers = [
