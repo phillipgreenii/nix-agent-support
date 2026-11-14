@@ -811,3 +811,131 @@ func TestReclaimIdleOrphan_unattributableClaimKeptWhileLivePeerWorksBead(t *test
 		})
 	}
 }
+
+// releaseUpdates returns the bd writes that hand a bead back (status=open).
+func releaseUpdates(h *orphanHarness) []string {
+	var out []string
+	for _, w := range h.bd.writes() {
+		if strings.HasPrefix(w, "update ") && strings.Contains(w, "--status=open") {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// setSession edits the one row under the fake pool's lock, as ccpool changing
+// under the reconcile would.
+func (c *orphanCC) setSession(mut func(*ccpool.Session)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	mut(&c.sessions[0])
+}
+
+// Actor shapes the dispatcher cannot attribute from the string alone.
+var dispatcherKeyedActors = []string{"-worker", "review-zr-w", "zr-w-feedback"}
+
+// End to end: a session started for a bead claims it under an actor with no
+// session id; while the session is alive (lease in the future) nothing is
+// released, and once the session is killed and its lease lapses the claim is
+// released with a guarded update, exactly once.
+func TestOrphanClaimThenKill_releasesGuardedOnlyAfterSessionDies(t *testing.T) {
+	for _, actor := range dispatcherKeyedActors {
+		t.Run(actor, func(t *testing.T) {
+			row := orphanRow(ccpool.StateWorking)
+			row.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(time.Minute).Format(time.RFC3339)
+			h := newOrphanHarness(t, row)
+			role := orphanRole(roles.CloseOnly, 0)
+			h.bd.issues["zr-w"] = inProgressBy(actor) // the session claims the bead
+
+			// Alive: the lease is current, so the session is not an orphan.
+			if r, s := h.run(role); r != 0 || s != 0 || len(releaseUpdates(h)) != 0 || len(h.cc.closed()) != 0 {
+				t.Fatalf("a live session must be left alone; r=%d s=%d writes=%v closes=%v", r, s, h.bd.writes(), h.cc.closed())
+			}
+
+			// Killed: the process dies, the pane errors, and the lease lapses.
+			h.cc.setSession(func(s *ccpool.Session) { s.Live, s.State = false, ccpool.StateErrored })
+			now := orphanNowT.Add(2 * time.Minute)
+			h.deps.Now = func() time.Time { return now }
+			if r, _ := h.run(role); r != 1 {
+				t.Fatalf("reclaimed=%d, want 1", r)
+			}
+			want := "update zr-w --status=open --assignee= --if-assignee " + actor + " --if-status in_progress"
+			if got := releaseUpdates(h); len(got) != 1 || got[0] != want {
+				t.Errorf("releases = %v, want [%s]", got, want)
+			}
+			if r, _ := h.run(role); r != 0 || len(releaseUpdates(h)) != 1 {
+				t.Errorf("the release must happen once; r=%d releases=%v", r, releaseUpdates(h))
+			}
+		})
+	}
+}
+
+// Router or pool restart: the handler is gone and the session was still
+// starting, ready or working. It goes through the hard stop once over its time
+// budget, which releases the claim under any actor shape with the observed
+// holder as the guard; with a current lease nothing is released.
+func TestStopActiveOrphan_restartReleasesClaimGuardedUnderAnyActor(t *testing.T) {
+	for _, actor := range dispatcherKeyedActors {
+		for _, st := range []ccpool.SessionState{ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking} {
+			t.Run(actor+"/"+string(st), func(t *testing.T) {
+				row := orphanRow(st)
+				row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
+				row.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(time.Minute).Format(time.RFC3339)
+				h := newOrphanHarness(t, row)
+				h.bd.issues["zr-w"] = inProgressBy(actor)
+				role := orphanRole(roles.CloseOnly, 25*time.Minute)
+				role.CCPool.BudgetStopEscalateAfter = 3
+
+				// Supervised: current lease, so no orphan and no release.
+				if _, s := h.run(role); s != 0 || len(releaseUpdates(h)) != 0 {
+					t.Fatalf("a supervised session must not be released; s=%d writes=%v", s, h.bd.writes())
+				}
+
+				// Handler lost: the lease lapses.
+				h.cc.setSession(func(s *ccpool.Session) {
+					s.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(-time.Minute).Format(time.RFC3339)
+				})
+				if _, s := h.run(role); s != 1 {
+					t.Fatalf("stopped=%d, want 1", s)
+				}
+				want := "update zr-w --status=open --assignee= --if-assignee " + actor + " --if-status in_progress"
+				if got := releaseUpdates(h); len(got) != 1 || got[0] != want {
+					t.Errorf("releases = %v, want [%s]", got, want)
+				}
+			})
+		}
+	}
+}
+
+// An unsupervised active orphan still under its time budget is left alone, and
+// its claim with it.
+func TestStopActiveOrphan_restartUnderBudgetKeepsClaim(t *testing.T) {
+	h := newOrphanHarness(t, orphanRow(ccpool.StateWorking)) // launched 10m ago
+	h.bd.issues["zr-w"] = inProgressBy("review-zr-w")
+	if r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r != 0 || s != 0 {
+		t.Fatalf("r=%d s=%d, want 0/0", r, s)
+	}
+	if len(h.bd.writes()) != 0 || len(h.cc.closed()) != 0 {
+		t.Errorf("an under-budget orphan keeps its claim; writes=%v closes=%v", h.bd.writes(), h.cc.closed())
+	}
+}
+
+// Eviction: a row the pool closed (cap_eviction, idle_ttl, operator) is never
+// an orphan, even with a lapsed lease; the orphan pass writes nothing to its
+// bead (the dispatch that owned it releases the claim on its death branch).
+func TestReconcileOrphans_evictedRowIsNotReclaimed(t *testing.T) {
+	for _, reason := range []string{"cap_eviction", "idle_ttl", "operator"} {
+		t.Run(reason, func(t *testing.T) {
+			row := orphanRow(ccpool.StateIdle)
+			row.Live, row.CloseReason = false, reason
+			h := newOrphanHarness(t, row)
+			h.bd.issues["zr-w"] = inProgressBy("review-zr-w")
+			if r, s := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || s != 0 {
+				t.Fatalf("r=%d s=%d, want 0/0", r, s)
+			}
+			if len(h.bd.writes()) != 0 || len(h.cc.closed()) != 0 {
+				t.Errorf("an evicted row is not the orphan pass's; writes=%v closes=%v", h.bd.writes(), h.cc.closed())
+			}
+		})
+	}
+}
