@@ -160,22 +160,12 @@ func TestTier2TwoLandsIntoOneTarget(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for attempt := 0; attempt < 20; attempt++ {
-				p, err := h.startTool([]string{"land", name, "--wait", "60s"})
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				r, err := h.finish(p)
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				results[i] = r
-				if r.exit != 9 { // busy is retryable
-					return
-				}
+			r, err := h.landRetrying(name)
+			if err != nil {
+				t.Error(err)
+				return
 			}
+			results[i] = r
 		}()
 	}
 	wg.Wait()

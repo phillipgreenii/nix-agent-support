@@ -216,8 +216,34 @@ fi
 exit 0
 `
 
+// landRetrying lands branch name, as a caller that keeps no queue does: busy
+// (exit 9) is retried as it is, and the retryable race stop (TARGET moved under
+// the land more often than max_race_retries allows, which concurrent landings
+// into one TARGET make likely) is resumed with --continue.
+func (h *harness) landRetrying(name string) (*result, error) {
+	args := []string{"land", name, "--wait", "60s"}
+	var r *result
+	for attempt := 0; attempt < 20; attempt++ {
+		p, err := h.startTool(args)
+		if err != nil {
+			return nil, err
+		}
+		if r, err = h.finish(p); err != nil {
+			return nil, err
+		}
+		switch {
+		case r.exit == 9: // busy is always retryable
+		case r.exit == 21 && r.json != nil && r.json["reason"] == "race":
+			args = []string{"land", name, "--continue", "--wait", "60s"}
+		default:
+			return r, nil
+		}
+	}
+	return r, nil
+}
+
 // TestEightProcessesLandIntoOneTarget: eight real processes land eight
-// branches into one TARGET at once, retrying busy.
+// branches into one TARGET at once, retrying busy and resuming a race stop.
 func TestEightProcessesLandIntoOneTarget(t *testing.T) {
 	h := newHarness(t, Scenario{Name: "eight-landings", Shape: ShapeAhead})
 	const n = 8
@@ -230,22 +256,12 @@ func TestEightProcessesLandIntoOneTarget(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for attempt := 0; attempt < 20; attempt++ {
-				p, err := h.startTool([]string{"land", fmt.Sprintf("b%d", i), "--wait", "60s"})
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				r, err := h.finish(p)
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				results[i-1] = r
-				if r.exit != 9 { // busy is always retryable
-					return
-				}
+			r, err := h.landRetrying(fmt.Sprintf("b%d", i))
+			if err != nil {
+				t.Error(err)
+				return
 			}
+			results[i-1] = r
 		}()
 	}
 	wg.Wait()
