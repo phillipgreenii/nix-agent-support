@@ -181,8 +181,13 @@ EXISTS`, no schema-version bump, no re-ingest) the next time it opens the
   through `idx_events_ts` and searches `tool_calls` by `(path, seq)`, instead of
   scanning every tool call and probing `events` for each; `interruptions` rolls up
   the previous tool line only for the interrupted turns, not for every call. An
-  unbounded run of `error-rate-by-tool` therefore walks the whole `ts` index and
-  can be slower than before; pass `--since`.
+  unbounded run (neither `--since` nor `--until`) of `error-rate-by-tool` would
+  walk the whole `ts` index and probe `tool_calls` per event, so it runs the
+  previous statement (`UnboundedSQL`, tool-call driven) instead; the rows are
+  identical, and a test compares both statements, NULL-`ts` events included.
+  Measured on the 2M-event synthetic fixture (opt-in, `PG_CCAUDIT_BIGFIXTURE=1`,
+  scoped by `--cwd-prefix`/`--exclude-cwd-prefix`, cold): previous statement
+  13.7 s, window-driven statement 24.5 s, dispatched unbounded run 10.3 s.
 - Matching is by whole path component and case-sensitive: `/a/b` matches `/a/b`
   and `/a/b/c`, not `/a/bc`. A trailing slash on a prefix is ignored.
 - Only `events.cwd` is used; `files.project_dir` is empty on the recorder feed

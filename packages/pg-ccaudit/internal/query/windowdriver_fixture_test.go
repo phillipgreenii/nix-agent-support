@@ -88,6 +88,16 @@ FROM events WHERE seq % 16 = 2`)
 	exec(`INSERT INTO user_text (path, seq, text_len, text, interrupted)
 SELECT path, seq, 30, '[Request interrupted by user]', ((seq / 16) % 2 = 0)
 FROM events WHERE seq % 16 = 5`)
+	// The awkward rows, applied last so tool calls, results and interruption
+	// lines exist on them. Each touches a few percent of the lines:
+	//   - NULL ts: tool-call, result and interruption lines in lines 16k..16k+15
+	//     with k mod 13 = 0 (only an unbounded window admits these);
+	//   - NULL session_id: the same lines where k mod 11 = 1 (they belong to no
+	//     session, so no include prefix matches them);
+	//   - no cwd at all: every event of each session whose number is 5 mod 13.
+	exec(`UPDATE events SET ts = NULL WHERE seq % 16 IN (1, 2, 5) AND (seq / 16) % 13 = 0`)
+	exec(`UPDATE events SET session_id = NULL WHERE seq % 16 IN (1, 2, 5) AND (seq / 16) % 11 = 1`)
+	exec(`UPDATE events SET cwd = NULL WHERE CAST(substr(path, 5, 5) AS INTEGER) % 13 = 5`)
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}

@@ -111,6 +111,9 @@ func TestWindowDrivenQueriesEqualTheirOldSQL(t *testing.T) {
 		}
 		oldQ := newQ
 		oldQ.SQL = oldSQL[name]
+		// The windowed statement itself, even for an unbounded run (Run swaps in
+		// UnboundedSQL there, which would make the unbounded case trivial).
+		newQ.UnboundedSQL = ""
 		for _, w := range windowCases {
 			for _, f := range flagCases {
 				t.Run(name+"/"+w.name+"/"+f.name, func(t *testing.T) {
@@ -124,6 +127,77 @@ func TestWindowDrivenQueriesEqualTheirOldSQL(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// The fixture carries the rows the equality test exists to cover: calls and
+// interruptions with a NULL ts, events with no session, and sessions with no cwd.
+func TestFixtureHasNullTsNullSessionAndNoCwdRows(t *testing.T) {
+	db := smallFixture(t)
+	for name, q := range map[string]string{
+		"NULL-ts tool call":              `SELECT COUNT(*) FROM events e JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq WHERE e.ts IS NULL`,
+		"NULL-ts interruption":           `SELECT COUNT(*) FROM events e JOIN user_text u ON u.path = e.path AND u.seq = e.seq WHERE u.interrupted = 1 AND e.ts IS NULL`,
+		"NULL-session tool call":         `SELECT COUNT(*) FROM events e JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq WHERE e.session_id IS NULL`,
+		"NULL-session interruption":      `SELECT COUNT(*) FROM events e JOIN user_text u ON u.path = e.path AND u.seq = e.seq WHERE u.interrupted = 1 AND e.session_id IS NULL`,
+		"session with no cwd, with call": `SELECT COUNT(*) FROM events e JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq WHERE e.session_id IS NOT NULL AND e.session_id NOT IN (SELECT session_id FROM events WHERE cwd IS NOT NULL AND session_id IS NOT NULL)`,
+	} {
+		var n int
+		if err := db.QueryRow(q).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if n == 0 {
+			t.Errorf("fixture has no %s rows", name)
+		}
+	}
+}
+
+// Windowed runs drop NULL-ts calls and unbounded runs keep them, on both the
+// windowed statement and the unbounded one, so the NULL-ts branch of
+// windowEvents is what the unbounded equality cases exercise.
+func TestNullTsCallsAreCountedOnlyWhenUnbounded(t *testing.T) {
+	db := smallFixture(t)
+	q, _ := Lookup("error-rate-by-tool")
+	total := func(q Query, w windowCase) (n int64) {
+		for _, r := range runWith(t, db, q, w, flagCases[0]) {
+			n += r[1].(int64)
+		}
+		return n
+	}
+	windowedOnly := q
+	windowedOnly.UnboundedSQL = ""
+	var allCalls, nullTs int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tool_calls`).Scan(&allCalls); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events e JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq WHERE e.ts IS NULL`).Scan(&nullTs); err != nil {
+		t.Fatal(err)
+	}
+	for name, qq := range map[string]Query{"dispatched": q, "windowed statement": windowedOnly} {
+		if got := total(qq, windowCases[0]); got != allCalls {
+			t.Errorf("%s, unbounded: %d calls, want all %d", name, got, allCalls)
+		}
+		since := total(qq, windowCase{since: "2000-01-01T00:00:00.000Z"})
+		if since != allCalls-nullTs {
+			t.Errorf("%s, since only: %d calls, want %d (all %d minus %d NULL-ts)", name, since, allCalls-nullTs, allCalls, nullTs)
+		}
+	}
+}
+
+// An unbounded error-rate-by-tool starts at tool_calls (the statement it had
+// before the window drove the outer loop); a bounded one does not.
+func TestUnboundedErrorRateByToolUsesTheToolCallDrivenPlan(t *testing.T) {
+	db := smallFixture(t)
+	q, _ := Lookup("error-rate-by-tool")
+	if q.UnboundedSQL == "" {
+		t.Fatal("error-rate-by-tool has no unbounded statement")
+	}
+	u := q
+	u.SQL = q.UnboundedSQL
+	plan := planOf(t, db, u, windowCases[0], flagCases[1])
+	top := topLevel(plan)
+	if len(top) < 2 || !strings.Contains(top[0], "SCAN c USING INDEX idx_calls_name") ||
+		!strings.Contains(top[1], "SEARCH e USING INDEX sqlite_autoindex_events_1 (path=? AND seq=?)") {
+		t.Errorf("unbounded statement is not tool_calls then an events search:\n%s", plan)
 	}
 }
 
@@ -305,6 +379,17 @@ func TestWindowDrivenQueryTimingsOnBigFixture(t *testing.T) {
 				dNew := time.Since(t0)
 				equal := reflect.DeepEqual(rOld, rNew)
 				t.Logf("%s | %s | %s: old %v new %v rows %d equal %v", name, w.name, pass, dOld, dNew, len(rNew), equal)
+				if w.name == "unbounded" && newQ.UnboundedSQL != "" {
+					// What the unbounded run would cost without the dispatch.
+					wq := newQ
+					wq.UnboundedSQL = ""
+					t0 = time.Now()
+					rWin := runWith(t, db, wq, w, f)
+					t.Logf("%s | unbounded | %s: windowed statement (no dispatch) %v, dispatched %v, old %v", name, pass, time.Since(t0), dNew, dOld)
+					if !reflect.DeepEqual(rOld, rWin) {
+						t.Errorf("windowed statement rows differ")
+					}
+				}
 				if !equal {
 					t.Errorf("rows differ")
 				}

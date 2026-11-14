@@ -129,7 +129,11 @@ func Run(ctx context.Context, db *sql.DB, req Request) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, req.Query.SQL, args...)
+	stmt := req.Query.SQL
+	if req.Query.UnboundedSQL != "" && req.Since == "" && req.Until == "" {
+		stmt = req.Query.UnboundedSQL
+	}
+	rows, err := db.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query %s v%d: %w", req.Query.Name, req.Query.Version, err)
 	}

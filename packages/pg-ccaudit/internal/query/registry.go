@@ -44,6 +44,11 @@ type Query struct {
 	// :cwd_prefixes and :exclude_cwd_prefixes (JSON arrays of path prefixes).
 	// Only these queries accept --cwd-prefix / --exclude-cwd-prefix.
 	Scoped bool
+	// UnboundedSQL, when set, replaces SQL for a run with neither --since nor
+	// --until. It MUST return exactly the rows SQL returns. It exists for a
+	// statement whose windowed plan (window as the outer loop) is slower than the
+	// table-driven one when the window is the whole table.
+	UnboundedSQL string
 }
 
 // windowClause is spelled so the DEFAULT (empty) window includes rows whose ts
@@ -248,6 +253,25 @@ roots AS (
   FROM bounded
 )`
 
+// errorRateByToolUnbounded is error-rate-by-tool for a run with no window. With
+// the whole table as the window, driving the join from events walks every row of
+// idx_events_ts and probes tool_calls for each (about 3x slower than starting at
+// tool_calls, measured on the synthetic fixture), so the unbounded run starts at
+// tool_calls and probes events by (path, seq), as the statement did before the
+// window drove the outer loop. Its rows are identical to the windowed statement
+// with an empty window, NULL-ts events included.
+var errorRateByToolUnbounded = `
+SELECT c.tool_name                                                             AS tool_name,
+       COUNT(*)                                                                AS calls,
+       SUM(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END)                         AS errors,
+       ROUND(100.0 * SUM(CASE WHEN r.is_error = 1 THEN 1 ELSE 0 END) / COUNT(*), 3) AS error_pct
+FROM tool_calls c
+JOIN events e ON e.path = c.path AND e.seq = c.seq
+LEFT JOIN tool_results r ON r.tool_use_id = c.tool_use_id
+WHERE ` + scoped("e") + `
+GROUP BY c.tool_name
+ORDER BY errors DESC, calls DESC, tool_name`
+
 // registry is the canned-query set. Every row of the bead's query table is
 // present; `coverage` is an addition that makes T-2's provable coverage a query
 // rather than a manual SELECT.
@@ -261,7 +285,8 @@ var registry = func() map[string]Query {
 			Notes: "The denominator is every tool CALL, including calls whose result was never " +
 				"recorded (LEFT JOIN) — an abandoned call still cost something. errors counts " +
 				"only results whose is_error is present AND true (T-9).",
-			Window: true,
+			Window:       true,
+			UnboundedSQL: errorRateByToolUnbounded,
 			SQL: `
 SELECT c.tool_name                                                             AS tool_name,
        COUNT(*)                                                                AS calls,
