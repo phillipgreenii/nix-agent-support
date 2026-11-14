@@ -150,6 +150,7 @@ slot_acquire() {
 }
 
 # Releases the slot only if it is still ours (a reclaimer may have taken it).
+# shellcheck disable=SC2329 # invoked indirectly through trap
 slot_release() {
   local target stamp
   [[ -n $SLOT_HELD ]] || return 0
@@ -161,6 +162,7 @@ slot_release() {
 }
 
 CHILD=""
+# shellcheck disable=SC2329 # invoked indirectly through trap
 forward_signal() {
   [[ -z $CHILD ]] || kill -s "$1" "$CHILD" 2>/dev/null || true
 }
