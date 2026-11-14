@@ -154,6 +154,7 @@ func (e *SchemaOlderError) Error() string {
 // Store is an open state directory.
 type Store struct {
 	dirLock      *os.File // flock on the state directory, held until Close
+	replayOnly   bool     // scratch comparison store: Close skips the statistics pass
 	driverName   string   // database/sql driver name (Options.DriverName)
 	journalLimit int      // journal_size_limit in bytes
 	readTO       time.Duration
@@ -303,7 +304,7 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 	if opt.V3Layout {
 		opt.NoTrigramIndex, opt.ExtensionTables = true, true
 	}
-	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, readMaxOpen: opt.ReadMaxOpenConns, journalLimit: opt.JournalSizeLimit}
+	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, readMaxOpen: opt.ReadMaxOpenConns, journalLimit: opt.JournalSizeLimit, replayOnly: opt.ReplayOnly}
 	if s.stepClock = opt.StepClock; s.stepClock == nil {
 		s.stepClock = monotonicNow
 	}
@@ -1394,7 +1395,7 @@ func (s *Store) CloseCtx(ctx context.Context) error {
 	if s.cdb != nil {
 		// Keep sqlite_stat1 current: a due collection runs here, bounded, on the
 		// checkpoint connection; a cut-short pass resumes at the next one.
-		if s.wdb != nil && s.CollectStatsDue(time.Now(), StatsEvery) {
+		if s.wdb != nil && !s.replayOnly && s.CollectStatsDue(time.Now(), StatsEvery) {
 			ctx, cancel := context.WithTimeout(ctx, closeStatsWait)
 			_, _ = s.collectStats(ctx, s.cdb, DefaultAnalysisLimit, time.Now(), 0)
 			cancel()
