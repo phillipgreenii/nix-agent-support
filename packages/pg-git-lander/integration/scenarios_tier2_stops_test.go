@@ -153,7 +153,7 @@ pre-merge-verify = [{ run = ["{hooks}/ok"], timeout = "60s" }]
 		Snapshot: Snapshot{Worktrees: cleanMain, NoWorktrees: []string{"src"}},
 	})
 	keysPresent(t, r, "op_id", "tips", "landed_commit", "path_taken", "stats", "dropped_commits", "resolved",
-		"autofix", "skipped_hooks", "warnings", "branch_fate", "worktree_fate", "work_branch")
+		"autofix", "skipped_hooks", "verify_skipped", "warnings", "branch_fate", "worktree_fate", "work_branch")
 
 	evs := h.events()
 	checkEventsShape(t, evs)
@@ -164,7 +164,7 @@ pre-merge-verify = [{ run = ["{hooks}/ok"], timeout = "60s" }]
 	if last["event"] != "op_end" || last["outcome"] != "landed" || last["path_taken"] != "rebase" {
 		t.Errorf("the last event = %v, want op_end landed by rebase", last)
 	}
-	if got := strings.Join(stageNames(evs), ","); !strings.HasPrefix(got, "locked,preparing,rebasing") || !strings.HasSuffix(got, "moving,after,cleanup") {
+	if got := strings.Join(stageNames(evs), ","); !strings.HasPrefix(got, "locked,preparing,rebasing") || !strings.HasSuffix(got, "moving,cleanup") {
 		t.Errorf("stages = %s", got)
 	}
 	hooks := eventsOfType(evs, "hook")
@@ -175,6 +175,33 @@ pre-merge-verify = [{ run = ["{hooks}/ok"], timeout = "60s" }]
 		if e["op_id"] != r.json["op_id"] {
 			t.Errorf("event %v carries op_id %v, want %v", e["event"], e["op_id"], r.json["op_id"])
 		}
+	}
+}
+
+// A fast-forward land runs pre-merge-verify and not post-rebase-fix: the event
+// list shows the one and not the other.
+func TestTier2FastForwardRunsVerifyNotPostRebaseFix(t *testing.T) {
+	h := newTier2(t, Scenario{
+		Shape:  ShapeAhead,
+		Layout: srcOnBr,
+		Config: `
+[[repo]]
+root = "{repo}"
+
+[repo.hooks.land]
+post-rebase-fix = [{ run = ["{hooks}/ok"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/ok"], timeout = "60s" }]
+`,
+		Hooks: map[string]string{"ok": "true"},
+	})
+	r := h.run("land", "feature/x")
+	done(t, h, r, Expected{
+		Outcome:  map[string]any{"outcome": "landed", "exit": 0, "path_taken": "fast-forward"},
+		Snapshot: Snapshot{Worktrees: cleanMain, NoWorktrees: []string{"src"}},
+	})
+	hooks := eventsOfType(h.events(), "hook")
+	if len(hooks) != 1 || hooks[0]["point"] != "pre-merge-verify" {
+		t.Errorf("hook events = %v, want only the pre-merge-verify run", hooks)
 	}
 }
 

@@ -249,19 +249,19 @@ pre-merge-verify = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 	})
 }
 
-// Scenario 16: a hook that rewrites a tracked file (a formatter) and fails is
+// Scenario 16: a post-rebase-fix hook that rewrites a tracked file (a formatter) and fails is
 // autofixed: the tool commits the change and runs the hook again, and the fix
 // commit is part of the result.
 func TestTier1HookAutofix(t *testing.T) {
 	h := newHarness(t, Scenario{
-		Shape:  ShapeAhead,
+		Shape:  ShapeDiverged,
 		Layout: srcOnBr,
 		Config: `
 [[repo]]
 root = "{repo}"
 
 [repo.hooks.land]
-pre-merge-verify = [{ run = ["{hooks}/format"], timeout = "60s" }]
+post-rebase-fix = [{ run = ["{hooks}/format"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"format": `
 if grep -q formatted x1.txt; then exit 0; fi
@@ -284,15 +284,15 @@ exit 1
 	if af, _ := r.json["autofix"].([]any); len(af) != 1 {
 		t.Errorf("autofix lists %d entries, want 1: %s", len(af), r.stdout)
 	}
-	if got := h.mustGit(h.repo, "log", "-1", "--format=%s", "main"); !strings.HasPrefix(got, "style: apply pre-merge-verify fixes made during land") {
+	if got := h.mustGit(h.repo, "log", "-1", "--format=%s", "main"); !strings.HasPrefix(got, "style: apply post-rebase-fix fixes made during land") {
 		t.Errorf("main's tip is %q, want the autofix commit", got)
 	}
 	if got := h.mustGit(h.repo, "show", "main:x1.txt"); got != "one\nformatted" {
 		t.Errorf("main:x1.txt = %q, want the autofixed content", got)
 	}
-	// Both of BRANCH's own commits are below the autofix commit.
-	if got := h.mustGit(h.repo, "rev-parse", "main~1"); got != shapes[ShapeAhead].facts.Tips["feature/x"] {
-		t.Errorf("main~1 = %s, want BRANCH's original tip", got)
+	// BRANCH's own commit is below the autofix commit.
+	if got := h.mustGit(h.repo, "log", "-1", "--format=%s", "main~1"); got != featMsg1 {
+		t.Errorf("main~1 is %q, want BRANCH's own commit %q", got, featMsg1)
 	}
 }
 

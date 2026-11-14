@@ -11,7 +11,7 @@ import (
 )
 
 // Tier 2 scenarios 26, 27, 28, 35, 47, 48, 49 and 50 of section 15.3:
-// resolver failures, a real mergiraf merge driver, a failing after hook, the
+// resolver failures, a real mergiraf merge driver, the removed hook keys, the
 // trust rules for the repo file, max-conflict-rounds and --skip, the details
 // of cannot-resume, transient stops, and the warnings. Each runs the real
 // binary against real git; the outcome subset, the snapshot and the
@@ -111,30 +111,48 @@ func TestTier2RealMergirafDriver(t *testing.T) {
 	}
 }
 
-// Scenario 28: an after hook that fails never stops a land that already moved
-// TARGET: it lands with the warning after-hook-failed.
-func TestTier2AfterHookFailsLandsWithWarning(t *testing.T) {
-	h := newHarness(t, Scenario{
-		Shape:  ShapeAhead,
-		Layout: srcOnBr,
-		Config: "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\nafter = [{ run = [\"{hooks}/after\"], timeout = \"60s\" }]\n",
-		Hooks:  map[string]string{"after": `echo ran > "$PGL_MARKERS/after-ran"; echo boom >&2; exit 1`},
-	})
-	r := h.run("land", "feature/x")
-	done(t, h, r, Expected{
-		Outcome: map[string]any{"outcome": "landed", "exit": 0, "branch_fate": "deleted"},
-		Snapshot: Snapshot{
-			Refs:        mainMoveTo,
-			Worktrees:   cleanMain,
-			NoWorktrees: []string{"src"},
-			TargetTree:  "@tree:feature/x",
-		},
-	})
-	if !hasWarning(r, "after-hook-failed") {
-		t.Errorf("the outcome carries no after-hook-failed warning: %s", r.stdout)
-	}
-	if _, err := os.Stat(filepath.Join(h.marks, "after-ran")); err != nil {
-		t.Errorf("the after hook did not run: %v", err)
+// Scenario 28: a removed hook key (after, before, after_rebase, before_move)
+// is a configuration error in the XDG file and in the repo file; nothing
+// changes and the error names the replacement or the removal.
+func TestTier2RemovedHookKeysAreConfigErrors(t *testing.T) {
+	for _, c := range []struct{ key, want string }{
+		{"after", "removed"},
+		{"before", "removed"},
+		{"after_rebase", "post-rebase-fix"},
+		{"before_move", "pre-merge-verify"},
+	} {
+		t.Run("xdg-"+c.key, func(t *testing.T) {
+			h := newHarness(t, Scenario{
+				Shape:  ShapeAhead,
+				Layout: srcOnBr,
+				Config: "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\n" + c.key + " = [{ run = [\"{hooks}/gate\"], timeout = \"60s\" }]\n",
+				Hooks:  map[string]string{"gate": `exit 1`},
+			})
+			r := h.run("land", "feature/x")
+			expect(t, r, 7, "config-error", "")
+			if msg, _ := r.json["message"].(string); !strings.Contains(msg, c.want) {
+				t.Errorf("the message does not say %q: %s", c.want, r.stdout)
+			}
+			if !strings.Contains(r.stdout, "config.toml") {
+				t.Errorf("the error does not name the file: %s", r.stdout)
+			}
+			h.noProblems()
+		})
+		t.Run("repo-"+c.key, func(t *testing.T) {
+			h := newHarness(t, Scenario{
+				Shape:  ShapeAhead,
+				Layout: srcOnBr,
+				Config: "[[repo]]\nroot = \"{repo}\"\ntrust_repo_config = true\n",
+				Hooks:  map[string]string{"gate": `exit 1`},
+			})
+			commitIn(t, h, h.repo, ".pg-git-lander.toml", "[hooks.land]\n"+c.key+" = [{ run = [\"true\"] }]\n", "add repo config")
+			r := h.run("land", "feature/x")
+			expect(t, r, 22, "refused", "repo-config-error")
+			if !strings.Contains(r.stdout, ".pg-git-lander.toml:2") || !strings.Contains(r.stdout, c.want) {
+				t.Errorf("the refusal does not name the file and line, or %q: %s", c.want, r.stdout)
+			}
+			h.noProblems()
+		})
 	}
 }
 
@@ -313,8 +331,7 @@ func TestTier2CannotResumeDetails(t *testing.T) {
 }
 
 // Scenario 49: exit 75 is a retryable transient stop from a resolver and from
-// a hook, and --continue later resumes; at the before hook it is the refusal
-// before-hook-refused.
+// a hook, and --continue later resumes.
 func TestTier2TransientExit75(t *testing.T) {
 	t.Run("resolver", func(t *testing.T) {
 		h := newHarness(t, Scenario{
@@ -361,24 +378,6 @@ func TestTier2TransientExit75(t *testing.T) {
 				TargetTree:  "@tree:feature/x",
 			},
 		})
-	})
-	t.Run("before-hook", func(t *testing.T) {
-		h := newHarness(t, Scenario{
-			Shape:  ShapeAhead,
-			Layout: srcOnBr,
-			Config: "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\nbefore = [{ run = [\"{hooks}/gate\"], timeout = \"60s\" }]\n",
-			Hooks:  map[string]string{"gate": `exit 75`},
-		})
-		r := h.run("land", "feature/x")
-		expect(t, r, 22, "refused", "before-hook-refused")
-		done(t, h, r, Expected{Snapshot: Snapshot{
-			Refs: startRefs(),
-			Worktrees: map[string]WorktreeState{
-				"main": {Head: "branch:main", CheckStatus: true},
-				"src":  {Head: "branch:feature/x", CheckStatus: true},
-			},
-			TargetTree: "@tree:main",
-		}})
 	})
 }
 

@@ -758,10 +758,10 @@ exit 0
 root = "{repo}"
 
 [repo.hooks.land]
-before = [{ run = ["{hooks}/rendezvous"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/rendezvous"], timeout = "60s" }]
 
 [repo.hooks.rebase]
-before = [{ run = ["{hooks}/rendezvous"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/rendezvous"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"rendezvous": hook},
 	})

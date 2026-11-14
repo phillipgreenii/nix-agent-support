@@ -220,15 +220,25 @@ func crashHolder(t *testing.T, h *harness, p *proc) {
 	}
 }
 
+// afterTheMove is the crash point of crashedLand right after the move: there
+// is no hook point after the move, so the blocker is git's own post-merge
+// hook, run by the final merge --ff-only once TARGET has moved.
+const afterTheMove = "after-the-move"
+
 // crashedLand starts a land of feature/x whose hook at point blocks on its
 // first run and crashes the tool there.
 func crashedLand(t *testing.T, point string) *harness {
 	t.Helper()
-	h := newHarness(t, Scenario{
+	sc := Scenario{
 		Shape: ShapeAhead, Fifos: []string{"up", "go"}, Layout: srcOnBr,
 		Config: crashConfig(point),
 		Hooks:  map[string]string{"blocker": blockingHook},
-	})
+	}
+	if point == afterTheMove {
+		sc.Config = ""
+		sc.Hooks = map[string]string{"post-merge": blockingHook}
+	}
+	h := newHarness(t, sc)
 	p := h.start("holder", "land", "feature/x")
 	h.await("up")
 	crashHolder(t, h, p)
@@ -281,7 +291,7 @@ func TestTier2KillNineThenResume(t *testing.T) {
 		})
 	})
 	t.Run("right-after-the-move", func(t *testing.T) {
-		h := crashedLand(t, "after")
+		h := crashedLand(t, afterTheMove)
 		// The move happened: main holds BRANCH's commits already.
 		if got := h.mustGit(h.repo, "rev-parse", "main"); got != shapes[ShapeAhead].facts.Tips["feature/x"] {
 			t.Fatalf("main = %s, want the moved result", got)
@@ -456,11 +466,11 @@ func TestTier2StoppedPendingAndTargetStopped(t *testing.T) {
 	h.noProblems()
 }
 
-// afterHookCrash crashes a land of feature/x right after the move (inside its
-// after hook) and converts the dead holder's record to stopped with a waiter.
+// afterHookCrash crashes a land of feature/x right after the move (inside git's
+// post-merge hook) and converts the dead holder's record to stopped with a waiter.
 func afterHookCrash(t *testing.T) *harness {
 	t.Helper()
-	h := crashedLand(t, "after")
+	h := crashedLand(t, afterTheMove)
 	expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
 	return h
 }
