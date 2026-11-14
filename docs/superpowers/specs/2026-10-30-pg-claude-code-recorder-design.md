@@ -111,6 +111,14 @@ typed `/exit` did the same with an entry; SIGKILL left both files behind, and th
 76 seconds (what removed them, and when, was not observed), which is why the recorder checks the
 file at the moment the Process exits and does not rescan for a leftover.
 
+Measured 2026-11-14 (throwaway Claude, one run per path, daemon live): `conversation_end_total` moved
+by exactly one in one series per path. A typed `/exit`, and `/exit` after `claude --resume`:
+`exit_entry=true, exit_observed=true, registry_present=false` (label `exited`). Ctrl-D (twice), SIGTERM,
+SIGHUP and a killed terminal: `exit_entry=false, exit_observed=true, registry_present=false`
+(label `closed normally`). No clean path produced `registry_present=true`, so none was classified
+`crashed`. The series increment can land more than 12 seconds after the exit (one SIGHUP run showed no
+delta at 12 s and one at 25 s), so a check should wait before it reads the counter. Logout was not measured.
+
 The label is derived from registry and history evidence alone, so it does not depend on the control mod; the mod's `end_reason` is extra detail. Precedence, first match wins:
 
 1. A `/clear` entry for the session made while this Process lived, with the registry now naming a new session id: **cleared** (the Process lives on, so this needs no exit watch). A registry successor with no `/clear` entry (an in-process `/resume`) is not cleared and falls through.
