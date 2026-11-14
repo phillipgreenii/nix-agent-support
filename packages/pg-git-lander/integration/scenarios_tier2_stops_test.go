@@ -271,16 +271,18 @@ func TestTier2ObservabilityBusy(t *testing.T) {
 		Shape:  ShapeAhead,
 		Fifos:  []string{"up", "go"},
 		Layout: srcOnBr,
-		// A long lease keeps a heartbeat starved by host load from expiring the
-		// holder's lock, which would turn the busy refusal into a takeover.
+		// The harness's long fixture lease keeps a heartbeat starved by host
+		// load from expiring the holder's lock, which would turn the busy
+		// refusal into a takeover.
 		Config: crashConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
-	h.addBranch("other")
 	h.start("holder", "land", "feature/x")
 	h.await("up")
 
-	r := h.run("land", "other", "--wait", "1s")
+	// Busy is the outcome of a first-phase lock (BRANCH, the source and work
+	// worktrees); TARGET is locked only for the fast-forward.
+	r := h.run("land", "feature/x", "--wait", "1s")
 	expect(t, r, 9, "busy", "")
 	keysPresent(t, r, "schema", "op_id", "operation", "branch", "target", "holder", "hint")
 	holder, _ := r.json["holder"].(map[string]any)

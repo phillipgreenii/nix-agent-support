@@ -3,10 +3,7 @@
 package integration
 
 import (
-	"bytes"
-	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -264,23 +261,28 @@ func TestTier2KillNineThenResume(t *testing.T) {
 		if !groupGone(pgid) {
 			t.Fatal("git did not finish after the holder was killed")
 		}
-		expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
-		done(t, h, h.run("land", "feature/x", "--abort"), Expected{
-			Outcome: map[string]any{"outcome": "aborted", "exit": 0},
-			Snapshot: Snapshot{
-				Refs: startRefs(),
-				Worktrees: map[string]WorktreeState{
-					"main": {Head: "branch:main", CheckStatus: true},
-					"src":  {Head: "branch:feature/x", CheckStatus: true},
-				},
-				TargetTree: "@tree:main",
-			},
-		})
+		// The waiter settles the dead owner's stop (aborts it: the move never
+		// happened) and lands afresh (the merge driver blocks only on its first run).
+		r := h.run("land", "feature/x", "--wait", "10s")
+		if !strings.Contains(r.stderr, "aborting it") {
+			t.Errorf("the waiter did not say it aborted the dead owner's stop; stderr: %q", r.stderr)
+		}
+		expect(t, r, 0, "landed", "")
+		if refs := h.lockRefs(); refs != "" {
+			t.Errorf("locks or records left behind: %s", refs)
+		}
+		h.noProblems()
 	})
+	// A plain land by a waiter settles the dead owner's stop: the move never
+	// happened, so the stop is aborted and the land runs afresh (the blocking
+	// hook only blocks its first run).
 	t.Run("at-before-move", func(t *testing.T) {
 		h := crashedLand(t, "pre-merge-verify")
-		expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
-		done(t, h, h.run("land", "feature/x", "--continue"), Expected{
+		r := h.run("land", "feature/x", "--wait", "10s")
+		if !strings.Contains(r.stderr, "aborting it") {
+			t.Errorf("the waiter did not say it aborted the dead owner's stop; stderr: %q", r.stderr)
+		}
+		done(t, h, r, Expected{
 			Outcome: map[string]any{"outcome": "landed", "exit": 0, "branch_fate": "deleted"},
 			Snapshot: Snapshot{
 				Refs:        mainMoveTo,
@@ -311,46 +313,31 @@ func TestTier2KillNineThenResume(t *testing.T) {
 	})
 }
 
-// Scenario 24: a TARGET-role lock left by a dead holder. The next land of
-// another branch takes the TARGET record over at once and finishes; the dead
-// holder's own operation is then resolved by an abort.
+// Scenario 24: a TARGET-role lock left by a dead holder. TARGET is locked only
+// for the fast-forward, so the dead holder here crashed right after the move
+// (inside git's post-merge hook) and left TARGET, BRANCH and the worktrees
+// locked. The next land of another branch settles the dead holder's stop
+// (finishing its clean-up, as the move had happened), takes TARGET and lands.
 func TestTier2StaleTargetRoleLockTakenOver(t *testing.T) {
-	h := newHarness(t, Scenario{
-		Shape: ShapeAhead, Fifos: []string{"up", "go"},
-		Layout: []Worktree{{Name: "src", Branch: "feature/x"}, {Name: "spare", Detach: true}},
-		Config: crashConfig("pre-merge-verify"),
-		Hooks:  map[string]string{"blocker": blockingHook},
-	})
-	// TARGET is checked out nowhere and the holder starts in the spare
-	// worktree, so no destination worktree is locked: the dead holder leaves a stale TARGET record that a waiter may take over.
-	h.mustGit(h.repo, "switch", "-q", "--detach")
-	spare := h.wtPath("spare")
-	cmd := exec.CommandContext(context.Background(), toolBinary, "land", "feature/x", "--json")
-	cmd.Dir, cmd.Env = spare, h.env
-	p := &proc{cmd: cmd, out: new(bytes.Buffer), errb: new(bytes.Buffer), done: make(chan struct{})}
-	cmd.Stdout, cmd.Stderr = p.out, p.errb
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	go func() { _ = cmd.Wait(); close(p.done) }()
-	h.procs["holder"] = p
-	h.await("up")
-	crashHolder(t, h, p)
+	h := crashedLand(t, afterTheMove)
 	if refs := h.lockRefs(); !strings.Contains(refs, "locks/heads/main") {
 		t.Fatalf("the crash should leave TARGET's record behind: %s", refs)
 	}
 	h.addBranch("other")
-	r := h.run("land", "other", "--wait", "10s") // from the main worktree: the dead holder's spare is not needed
+	r := h.run("land", "other", "--wait", "10s")
+	if !strings.Contains(r.stderr, "finishing it") {
+		t.Errorf("the waiter did not say it finished the dead owner's stop; stderr: %q", r.stderr)
+	}
 	expect(t, r, 0, "landed", "")
 	if got := h.mustGit(h.repo, "log", "--format=%s", "-1", "main"); got != "add other" {
 		t.Errorf("main's tip is %q, want the landed other", got)
 	}
-	if refs := h.lockRefs(); strings.Contains(refs, "locks/heads/main") {
-		t.Errorf("TARGET's stale record is still there: %s", refs)
+	if got := h.mustGit(h.repo, "rev-parse", "main~1"); got != shapes[ShapeAhead].facts.Tips["feature/x"] {
+		t.Errorf("main~1 = %s, want the dead holder's moved result", got)
 	}
-	// What remains is the dead holder's own operation.
-	expect(t, runFrom(t, h, spare, "land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
-	expect(t, runFrom(t, h, spare, "land", "feature/x", "--abort"), 0, "aborted", "")
+	if refs := h.lockRefs(); refs != "" {
+		t.Errorf("locks or records left behind: %s", refs)
+	}
 	h.noProblems()
 }
 
@@ -386,49 +373,28 @@ func TestTier2QuitAfterConflict(t *testing.T) {
 }
 
 // Scenario 42: a BRANCH-role lock left by a dead holder, and a waiter that
-// needs the branch. The record is converted to stopped and the waiter is
-// refused holder-died, naming the operation in the way; then --continue or
-// --abort on the converted operation works.
+// needs the branch. The waiter converts the record to stopped and settles it
+// (the move never happened, so it is aborted) and goes on. --continue and
+// --abort cannot reach a dead owner's record before a waiter converts it (the
+// record still reads as running: lost-to-concurrent); the conversion without a
+// settle, for an owner that is stopped but alive, is covered by
+// TestSigstopHolderPastItsLease.
 func TestTier2StaleBranchRoleLockConverted(t *testing.T) {
-	setup := func(t *testing.T) *harness {
+	t.Run("waiter-settles", func(t *testing.T) {
 		h := crashedLand(t, "pre-merge-verify")
 		// The waiter is a rebase of the very branch the dead holder was landing.
 		r := h.run("rebase", "feature/x", "--onto", "main", "--wait", "10s")
-		expect(t, r, 22, "refused", "holder-died")
-		if bo := r.json["blocking_op"]; bo == nil {
-			t.Errorf("the refusal does not name blocking_op: %s", r.stdout)
+		expect(t, r, 0, "up-to-date", "")
+		if !strings.Contains(r.stderr, "converted to stopped") || !strings.Contains(r.stderr, "aborting it") {
+			t.Errorf("the waiter did not say it converted and aborted the dead owner's record; stderr: %q", r.stderr)
 		}
-		st := h.run("status")
-		if st.json == nil || len(strs(st.json["stopped"])) != 1 {
-			t.Errorf("the record should now be a stopped operation: %s", st.stdout)
+		if st := h.run("status"); st.json == nil || len(strs(st.json["stopped"])) != 0 {
+			t.Errorf("no stopped operation should remain: %s", st.stdout)
 		}
-		return h
-	}
-	t.Run("continue", func(t *testing.T) {
-		h := setup(t)
-		done(t, h, h.run("land", "feature/x", "--continue"), Expected{
-			Outcome: map[string]any{"outcome": "landed", "exit": 0},
-			Snapshot: Snapshot{
-				Refs:        mainMoveTo,
-				Worktrees:   cleanMain,
-				NoWorktrees: []string{"src"},
-				TargetTree:  "@tree:feature/x",
-			},
-		})
-	})
-	t.Run("abort", func(t *testing.T) {
-		h := setup(t)
-		done(t, h, h.run("land", "feature/x", "--abort"), Expected{
-			Outcome: map[string]any{"outcome": "aborted", "exit": 0},
-			Snapshot: Snapshot{
-				Refs: startRefs(),
-				Worktrees: map[string]WorktreeState{
-					"main": {Head: "branch:main", CheckStatus: true},
-					"src":  {Head: "branch:feature/x", CheckStatus: true},
-				},
-				TargetTree: "@tree:main",
-			},
-		})
+		if refs := h.lockRefs(); refs != "" {
+			t.Errorf("locks or records left behind: %s", refs)
+		}
+		h.noProblems()
 	})
 }
 
@@ -443,11 +409,15 @@ func TestTier2StoppedPendingAndTargetStopped(t *testing.T) {
 	r := h.run("rebase", "main", "--onto", "feature/x")
 	expect(t, r, 21, "stopped", "conflict")
 
+	// TARGET is locked only for the fast-forward, so the land runs its hooks and
+	// meets the stopped rebase there: a retryable target-busy stop of its own
+	// whose message names the stopped operation and how to resolve it.
 	r = h.run("land", "y", "--wait", "1s")
-	expect(t, r, 22, "refused", "target-stopped")
-	if r.json["blocking_op"] == nil {
-		t.Errorf("target-stopped does not name blocking_op: %s", r.stdout)
+	expect(t, r, 21, "stopped", "target-busy")
+	if msg, _ := r.json["message"].(string); !strings.Contains(msg, "target-stopped") || !strings.Contains(msg, "rebase main") || !strings.Contains(msg, "--abort") {
+		t.Errorf("target-busy does not name the stopped rebase and how to resolve it: %s", r.stdout)
 	}
+	expect(t, h.run("land", "y", "--abort"), 0, "aborted", "")
 	r = h.run("land", "main", "--into", "y", "--wait", "1s")
 	expect(t, r, 22, "refused", "stopped-pending")
 	if r.json["blocking_op"] == nil {

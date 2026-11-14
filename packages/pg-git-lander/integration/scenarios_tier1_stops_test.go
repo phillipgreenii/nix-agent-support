@@ -434,48 +434,82 @@ func TestTier1DirtyAndNotAWorktreeRefusals(t *testing.T) {
 	})
 }
 
-// Scenario 19: a lock held by a live process: a second landing into the same
-// TARGET is busy and changes nothing; the holder then finishes normally.
+// Scenario 19: a lock held by a live process. A land of the same branch is busy
+// and changes nothing; a land into the same TARGET, which is locked only for
+// the fast-forward, runs its hooks and then stops with the retryable
+// target-busy; the holder finishes normally either way.
 func TestTier1BusyWhileLockHeldByLiveProcess(t *testing.T) {
-	h := newHarness(t, Scenario{
-		Shape:  ShapeAhead,
-		Fifos:  []string{"up", "go"},
-		Layout: srcOnBr,
-		Config: crashConfig("pre-merge-verify"),
-		Hooks:  map[string]string{"blocker": blockingHook},
-	})
-	other := h.addBranch("other")
-	otherTip := h.mustGit(h.repo, "rev-parse", "other")
+	t.Run("branch-held", func(t *testing.T) {
+		h := newHarness(t, Scenario{
+			Shape:  ShapeAhead,
+			Fifos:  []string{"up", "go"},
+			Layout: srcOnBr,
+			Config: crashConfig("pre-merge-verify"),
+			Hooks:  map[string]string{"blocker": blockingHook},
+		})
+		h.start("holder", "land", "feature/x")
+		h.await("up") // the holder is inside pre-merge-verify, holding BRANCH's lock
 
-	h.start("holder", "land", "feature/x")
-	h.await("up") // the holder is inside pre-merge-verify, holding main's lock
-
-	r := h.run("land", "other", "--wait", "1s")
-	expect(t, r, 9, "busy", "")
-	holder, _ := r.json["holder"].(map[string]any)
-	if holder == nil || holder["branch"] != "feature/x" {
-		t.Errorf("busy does not name the holder: %s", r.stdout)
-	}
-	checkNow(t, h, r, Expected{
-		Snapshot: Snapshot{
-			Refs: map[string]string{"refs/heads/main": "@main", "refs/heads/other": otherTip},
-			Worktrees: map[string]WorktreeState{
-				"main": {Head: "branch:main"},
+		r := h.run("land", "feature/x", "--wait", "1s")
+		expect(t, r, 9, "busy", "")
+		holder, _ := r.json["holder"].(map[string]any)
+		if holder == nil || holder["branch"] != "feature/x" {
+			t.Errorf("busy does not name the holder: %s", r.stdout)
+		}
+		checkNow(t, h, r, Expected{
+			Snapshot: Snapshot{
+				Refs: map[string]string{"refs/heads/main": "@main", "refs/heads/feature/x": "@feature/x"},
+				Worktrees: map[string]WorktreeState{
+					"main": {Head: "branch:main"},
+				},
 			},
-		},
-	})
-	if st := h.mustGit(other, "status", "--porcelain"); st != "" {
-		t.Errorf("the other worktree is dirty: %s", st)
-	}
-	if _, err := os.Stat(other); err != nil {
-		t.Errorf("the other worktree is gone: %v", err)
-	}
+		})
 
-	h.release("go")
-	done(t, h, h.wait("holder"), Expected{
-		Outcome: map[string]any{"outcome": "landed", "exit": 0},
-		Snapshot: Snapshot{
-			Refs: map[string]string{"refs/heads/main": "@feature/x", "refs/heads/other": otherTip},
-		},
+		h.release("go")
+		done(t, h, h.wait("holder"), Expected{
+			Outcome: map[string]any{"outcome": "landed", "exit": 0},
+			Snapshot: Snapshot{
+				Refs: map[string]string{"refs/heads/main": "@feature/x"},
+			},
+		})
+	})
+	t.Run("target-held", func(t *testing.T) {
+		// TARGET is held only for the fast-forward: git's post-merge hook runs
+		// inside it, so blocking there holds TARGET with a live process.
+		h := newHarness(t, Scenario{
+			Shape:  ShapeAhead,
+			Fifos:  []string{"up", "go"},
+			Layout: srcOnBr,
+			Hooks:  map[string]string{"post-merge": blockingHook},
+		})
+		other := h.addBranch("other")
+		otherTip := h.mustGit(h.repo, "rev-parse", "other")
+
+		h.start("holder", "land", "feature/x")
+		h.await("up") // the holder is inside the fast-forward, holding main's lock
+
+		r := h.run("land", "other", "--wait", "1s")
+		expect(t, r, 21, "stopped", "target-busy")
+		if r.json["retryable"] != true {
+			t.Errorf("target-busy should be retryable: %s", r.stdout)
+		}
+		if msg, _ := r.json["message"].(string); !strings.Contains(msg, "feature/x") {
+			t.Errorf("target-busy does not name the holder's branch: %s", r.stdout)
+		}
+		if st := h.mustGit(other, "status", "--porcelain"); st != "" {
+			t.Errorf("the other worktree is dirty: %s", st)
+		}
+
+		h.release("go")
+		expect(t, h.wait("holder"), 0, "landed", "")
+		if got, want := h.mustGit(h.repo, "rev-parse", "main"), shapes[ShapeAhead].facts.Tips["feature/x"]; got != want {
+			t.Errorf("main = %s, want the holder's result %s", got, want)
+		}
+		if got := h.mustGit(h.repo, "rev-parse", "other"); got != otherTip {
+			t.Errorf("other moved to %s from %s", got, otherTip)
+		}
+		// The stopped land goes straight to the lock step once TARGET is free.
+		expect(t, h.run("land", "other", "--continue"), 0, "landed", "")
+		h.noProblems()
 	})
 }

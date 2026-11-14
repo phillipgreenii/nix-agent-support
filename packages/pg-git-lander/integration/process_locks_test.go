@@ -316,13 +316,13 @@ func (h *harness) plantSlowDriver() {
 }
 
 // TestSigkillHolderMidRebase: SIGKILL the holder in the middle of a rebase and
-// reap it; the next invocation reports holder-died and --abort restores the
-// start state.
+// reap it; the next land of the branch is a waiter that settles the dead
+// owner's stop (the move never happened, so it aborts it, restoring the start
+// state) and then lands afresh (the merge driver blocks only on its first run).
 func TestSigkillHolderMidRebase(t *testing.T) {
 	h := newHarness(t, Scenario{Name: "sigkill-mid-rebase", Shape: ShapeLockfile, Fifos: []string{"up", "go"}, Layout: []Worktree{{Name: "src", Branch: "feature/x"}}})
 	h.plantSlowDriver()
 	startMain := h.mustGit(h.repo, "rev-parse", "main")
-	startFeat := h.mustGit(h.repo, "rev-parse", "feature/x")
 
 	p := h.start("holder", "land", "feature/x")
 	h.await("up") // the merge driver is running inside git's rebase
@@ -340,15 +340,16 @@ func TestSigkillHolderMidRebase(t *testing.T) {
 	}
 
 	r := h.run("land", "feature/x", "--wait", "10s")
-	expect(t, r, 22, "refused", "holder-died")
-
-	r = h.run("land", "feature/x", "--abort")
-	expect(t, r, 0, "aborted", "")
-	if got := h.mustGit(h.repo, "rev-parse", "main"); got != startMain {
-		t.Errorf("main = %s, want the start state %s", got, startMain)
+	if !strings.Contains(r.stderr, "aborting it") {
+		t.Errorf("the waiter did not say it aborted the dead owner's stop; stderr: %q", r.stderr)
 	}
-	if got := h.mustGit(h.repo, "rev-parse", "feature/x"); got != startFeat {
-		t.Errorf("feature/x = %s, want the start state %s", got, startFeat)
+	// The driver blocks only on its first run, so the fresh land goes through.
+	expect(t, r, 0, "landed", "")
+	if got := h.mustGit(h.repo, "rev-parse", "main"); got == startMain {
+		t.Errorf("main did not move from %s", startMain)
+	}
+	if refs := h.lockRefs(); refs != "" {
+		t.Errorf("locks or records left behind: %s", refs)
 	}
 	h.noProblems()
 }
@@ -382,17 +383,18 @@ func TestSigstopHolderPastItsLease(t *testing.T) {
 		Config: blockingConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
-	h.addBranch("y")
 	startMain := h.mustGit(h.repo, "rev-parse", "main")
 
 	holder := h.start("holder", "land", "feature/x")
-	h.await("up") // the holder is inside pre-merge-verify with every lock held
+	h.await("up") // the holder is inside pre-merge-verify with its BRANCH and worktree locks held
 	if err := holder.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
-	// The stopped holder renews nothing; the waiter watches the record stay
-	// unchanged for a lease, then converts it.
-	r := h.run("land", "y", "--wait", "30s")
+	// The stopped holder renews nothing; the waiter (a land of the same branch,
+	// the only thing that needs the holder's locks: TARGET is taken only for the
+	// fast-forward) watches the record stay unchanged for a lease, then converts
+	// it. The holder's process is alive, so the stop is not settled for it.
+	r := h.run("land", "feature/x", "--wait", "30s")
 	expect(t, r, 22, "refused", "holder-died")
 	if err := holder.cmd.Process.Signal(syscall.SIGCONT); err != nil {
 		t.Fatal(err)
@@ -418,7 +420,6 @@ func TestSigstopHolderLosesLockMidHook(t *testing.T) {
 		Config: blockingConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
-	h.addBranch("y")
 	startMain := h.mustGit(h.repo, "rev-parse", "main")
 
 	holder := h.start("holder", "land", "feature/x")
@@ -427,7 +428,7 @@ func TestSigstopHolderLosesLockMidHook(t *testing.T) {
 	if err := holder.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, h.run("land", "y", "--wait", "30s"), 22, "refused", "holder-died")
+	expect(t, h.run("land", "feature/x", "--wait", "30s"), 22, "refused", "holder-died")
 	resumed := time.Now()
 	if err := holder.cmd.Process.Signal(syscall.SIGCONT); err != nil {
 		t.Fatal(err)
