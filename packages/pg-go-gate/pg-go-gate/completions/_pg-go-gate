@@ -1,0 +1,10 @@
+#compdef pg-go-gate
+
+_arguments \
+  '(-h --help)'{-h,--help}'[Show help message]' \
+  '(-v --version)'{-v,--version}'[Show version information]' \
+  '(-s --slots)'{-s,--slots}'[Number of slots (default 3)]:slots:' \
+  '(-w --wait)'{-w,--wait}'[Seconds to wait for a slot (default 600)]:seconds:' \
+  '(-n --nice)'{-n,--nice}'[Nice level 0-10 (default 10)]:level:' \
+  '(-d --dir)'{-d,--dir}'[Lock root]:directory:_files -/' \
+  '*:: :_normal'

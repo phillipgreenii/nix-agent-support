@@ -573,6 +573,14 @@
               pkgs = final;
               inherit bashBuilders;
             }).pg-disk-reclaimer.script;
+          # pg-go-gate: host-wide 3-slot gate for agent go test/build/install, run
+          # under nice 10. Single mkBashScript tool, so it takes
+          # `result.pg-go-gate.script` directly, like wtdone below.
+          pg-go-gate =
+            (import ./packages/pg-go-gate {
+              pkgs = final;
+              inherit bashBuilders;
+            }).pg-go-gate.script;
           # wtnew (bead pg2-jhv50): fresh-worktree setup helper filling the
           # MANUAL/non-drain gap next to integrate-branch-support (`pb drain
           # isolate` owns the automated /drain-beads path). Single
@@ -20647,6 +20655,12 @@
             # takes only the script derivation, so without this the suite
             # would run in no gate at all.
             // (import ./packages/pg-disk-reclaimer {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
+            # test-pg-go-gate. Same one-line idiom as wtnew below: without
+            # this the suite would run in no gate at all.
+            // (import ./packages/pg-go-gate {
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks

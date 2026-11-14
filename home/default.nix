@@ -64,6 +64,7 @@
     ./programs/tmp-sweep
     ./programs/host-forensics
     ./programs/wtnew
+    ./programs/pg-go-gate
     ./programs/wtdone
     ./programs/wtaudit
     ./programs/pg-wi-flow
