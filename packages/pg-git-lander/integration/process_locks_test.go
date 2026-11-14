@@ -47,7 +47,7 @@ func newHarness(t *testing.T, sc Scenario) *harness {
 	}
 	t.Cleanup(func() {
 		for _, p := range h.procs {
-			if p.cmd.ProcessState == nil {
+			if !p.exited() {
 				_ = p.cmd.Process.Signal(syscall.SIGCONT)
 				_ = p.cmd.Process.Kill()
 			}

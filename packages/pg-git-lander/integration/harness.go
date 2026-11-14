@@ -157,6 +157,18 @@ type proc struct {
 	killed bool
 }
 
+// exited reports whether cmd.Wait has returned. Reading cmd.ProcessState is only
+// safe after done is closed (the waiter goroutine writes it before the close),
+// so callers MUST use this instead of reading ProcessState directly.
+func (p *proc) exited() bool {
+	select {
+	case <-p.done:
+		return true
+	default:
+		return false
+	}
+}
+
 // stepTimeout only bounds a hang: a tool run or a rendezvous that never ends.
 // It is not an assertion about speed, so it is generous enough for a host
 // under heavy load, where eight concurrent landers each take many seconds.
@@ -452,7 +464,7 @@ func execScenario(t testing.TB, sc Scenario) []string {
 	}
 	defer func() {
 		for _, p := range h.procs {
-			if p.cmd.ProcessState == nil {
+			if !p.exited() {
 				_ = p.cmd.Process.Kill()
 			}
 		}
