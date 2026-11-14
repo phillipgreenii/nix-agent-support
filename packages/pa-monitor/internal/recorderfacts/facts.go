@@ -39,6 +39,82 @@ type Facts struct {
 	// endedPending holds ended session ids whose registry lookup failed.
 	endedPending map[string]bool
 	live, ended  []*session.Session
+
+	// The discovery gate (see SetDiscoveryHeartbeat). heartbeat <= 0 means no
+	// gate: every Registrations call reads the recorder.
+	heartbeat    time.Duration
+	now          func() time.Time
+	regCursor    string    // position in the session-registry feed
+	lastFetch    time.Time // when the last successful full discovery ran
+	fetchFailed  bool      // the last full discovery failed: retry on the next call
+	haveSnapshot bool
+}
+
+// DefaultDiscoveryHeartbeat is how long a quiet registry feed may go before
+// discovery runs anyway (a process can start or exit without a registry write).
+const DefaultDiscoveryHeartbeat = 60 * time.Second
+
+// SetDiscoveryHeartbeat turns on the registry-change gate: Registrations then
+// re-runs process.list and the per-session registry lookups only when the
+// session-registry feed shows a new record, when d has passed since the last
+// successful discovery, or when the previous discovery failed; otherwise it
+// returns the previous answer after one cheap feed read. d <= 0 turns the gate
+// off. Call it before the first Registrations.
+func (f *Facts) SetDiscoveryHeartbeat(d time.Duration) {
+	f.scanMu.Lock()
+	f.heartbeat = d
+	f.scanMu.Unlock()
+}
+
+func (f *Facts) clock() time.Time {
+	if f.now != nil {
+		return f.now()
+	}
+	return time.Now()
+}
+
+// registryFeedPage is how many registry feed entries one gate read asks for.
+const registryFeedPage = 1000
+
+// registryChanged reads the session-registry feed (a second cursor, separate
+// from the transcript drain: only registry records, no bodies) and reports
+// whether anything arrived since the last read. The first read, and a read
+// after a feed error, only seeds the cursor and reports true. A feed error is
+// reported as a change so the caller falls back to a full discovery.
+func (f *Facts) registryChanged(ctx context.Context, c *client.Client) (bool, error) {
+	where := &client.Filter{Field: "source", Eq: json.RawMessage(`"session-registry"`)}
+	changed := f.regCursor == ""
+	for {
+		ans, err := c.FeedPage(ctx, where, f.regCursor, []string{"source"}, registryFeedPage, 0)
+		if err != nil {
+			f.regCursor = ""
+			if isOffline(err) {
+				return true, f.wrapScan(err)
+			}
+			return true, nil
+		}
+		if len(ans.Entries) > 0 {
+			changed = true
+		}
+		if ans.NextCursor != "" {
+			f.regCursor = ans.NextCursor
+		}
+		if !ans.More {
+			return changed, nil
+		}
+	}
+}
+
+// cachedRegistrations is the previous discovery answer, copied.
+func (f *Facts) cachedRegistrations() []*session.Session {
+	out := make([]*session.Session, 0, len(f.live)+len(f.ended))
+	for _, l := range [][]*session.Session{f.live, f.ended} {
+		for _, s := range l {
+			cp := *s
+			out = append(out, &cp)
+		}
+	}
+	return out
 }
 
 // New returns a reader that discovers the daemon's socket from opts (the
@@ -143,6 +219,26 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 		f.resetEnded()
 		return nil, err
 	}
+	if f.heartbeat > 0 {
+		changed, err := f.registryChanged(ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		if f.haveSnapshot && !f.fetchFailed && !changed && f.clock().Sub(f.lastFetch) < f.heartbeat {
+			return f.cachedRegistrations(), nil
+		}
+	}
+	out, err := f.discover(ctx, c)
+	if err != nil {
+		f.fetchFailed = true
+		return nil, err
+	}
+	f.fetchFailed, f.haveSnapshot, f.lastFetch = false, true, f.clock()
+	return out, nil
+}
+
+// discover is one full discovery: process.list and the registry lookups.
+func (f *Facts) discover(ctx context.Context, c *client.Client) ([]*session.Session, error) {
 	yes, no := true, false
 	alive, err := c.ProcessList(ctx, client.ProcessFilter{Alive: &yes, Limit: 1000})
 	if err != nil {
@@ -254,12 +350,14 @@ func (f *Facts) retryEndedPending(ctx context.Context, c *client.Client, ended [
 // a caller that knows a Process came and went between two Scans.
 func (f *Facts) ResyncEnded() {
 	f.scanMu.Lock()
+	f.haveSnapshot = false
 	f.endedSeeded = false
 	f.scanMu.Unlock()
 }
 
 func (f *Facts) resetEnded() {
 	f.endedSeeded = false
+	f.haveSnapshot, f.regCursor = false, ""
 	f.live, f.ended = nil, nil
 }
 

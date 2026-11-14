@@ -15,13 +15,16 @@ import (
 )
 
 type Config struct {
-	PlanTier         string
-	BurnWindowShort  time.Duration
-	BurnWindowLong   time.Duration
-	RefreshInterval  time.Duration
-	CaffeinateGrace  time.Duration
-	WorkingThreshold time.Duration
-	IdleThreshold    time.Duration
+	PlanTier        string
+	BurnWindowShort time.Duration
+	BurnWindowLong  time.Duration
+	RefreshInterval time.Duration
+	// DiscoveryHeartbeat is how long a quiet session registry may go before
+	// discovery re-reads the recorder anyway (0 turns the registry-change gate off).
+	DiscoveryHeartbeat time.Duration
+	CaffeinateGrace    time.Duration
+	WorkingThreshold   time.Duration
+	IdleThreshold      time.Duration
 	// WaitingFreshWindow bounds how far the transcript may have advanced past
 	// the registry's statusUpdatedAt before a "waiting" flag is treated as
 	// stale (and ignored, falling through to Idle). See the registry-driven
@@ -162,6 +165,7 @@ type tomlConfig struct {
 	BurnWindowShortS         *int    `toml:"burn_window_short_s"`
 	BurnWindowLongS          *int    `toml:"burn_window_long_s"`
 	RefreshIntervalMS        *int    `toml:"refresh_interval_ms"`
+	DiscoveryHeartbeatS      *int    `toml:"discovery_heartbeat_s"`
 	CaffeinateGraceS         *int    `toml:"caffeinate_grace_s"`
 	WorkingThresholdS        *int    `toml:"working_threshold_s"`
 	IdleThresholdS           *int    `toml:"idle_threshold_s"`
@@ -234,12 +238,13 @@ type tomlOTel struct {
 
 func defaults() Config {
 	return Config{
-		PlanTier:         "max_5x",
-		BurnWindowShort:  60 * time.Second,
-		BurnWindowLong:   300 * time.Second,
-		RefreshInterval:  1 * time.Second,
-		CaffeinateGrace:  60 * time.Second,
-		WorkingThreshold: 30 * time.Second,
+		PlanTier:           "max_5x",
+		BurnWindowShort:    60 * time.Second,
+		BurnWindowLong:     300 * time.Second,
+		RefreshInterval:    1 * time.Second,
+		DiscoveryHeartbeat: 60 * time.Second,
+		CaffeinateGrace:    60 * time.Second,
+		WorkingThreshold:   30 * time.Second,
 		// Governs the idle->dormant (long-idle) age refinement, NOT the
 		// working->idle transition (that's the registry activity verdict). 20m so
 		// a briefly-quiet session is not prematurely marked dormant. Kept in sync
@@ -335,6 +340,9 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.RefreshIntervalMS != nil {
 		cfg.RefreshInterval = time.Duration(*raw.RefreshIntervalMS) * time.Millisecond
+	}
+	if raw.DiscoveryHeartbeatS != nil {
+		cfg.DiscoveryHeartbeat = time.Duration(*raw.DiscoveryHeartbeatS) * time.Second
 	}
 	if raw.CaffeinateGraceS != nil {
 		cfg.CaffeinateGrace = time.Duration(*raw.CaffeinateGraceS) * time.Second

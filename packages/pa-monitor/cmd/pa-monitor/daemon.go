@@ -413,6 +413,7 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cac
 	// The recorder is the one source of registrations and liveness: no
 	// ~/.claude/sessions read and no pid probe, and no fallback to them.
 	facts := recorderfacts.New(client.Options{Name: "pa-monitor-daemon"})
+	facts.SetDiscoveryHeartbeat(cfg.DiscoveryHeartbeat)
 
 	// Bound the file-backed PR cache (15m found-TTL) and time the gh spawn inside
 	// LookupFn so the pr_lookup subprocess metric fires ONLY on a real fetch
