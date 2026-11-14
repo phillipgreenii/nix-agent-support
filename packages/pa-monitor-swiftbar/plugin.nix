@@ -41,6 +41,10 @@ let
     {
       script,
       paMonitor,
+      # The login name baked into the PATH line at build time: SwiftBar's minimal
+      # environment may lack $USER, and a runtime `id -un` is one more process
+      # launch on every refresh. The Home-Manager module passes config.home.username.
+      userName ? "tester",
       staleAfterS ? 600,
     }:
     let
@@ -49,7 +53,7 @@ let
         ${lib.concatMapStringsSep "\n" (t: "# <${t}>${tags.${t}}</${t}>") tagOrder}
         # SwiftBar runs plugins with a minimal environment; put the per-user, the
         # nix-profile and the system bins ahead of whatever it provides.
-        export PATH="/etc/profiles/per-user/$(id -un)/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin:$PATH"
+        export PATH="/etc/profiles/per-user/${userName}/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin:$PATH"
         # The pa-monitor client must match the running daemon, so the Nix build bakes it in.
         export PA_MONITOR_BIN=${lib.escapeShellArg "${paMonitor}/bin/pa-monitor"}
         export PA_SWIFTBAR_STALE_AFTER_S=${lib.escapeShellArg (toString staleAfterS)}
@@ -119,6 +123,10 @@ let
       [ "$export_line" -lt "$exec_line" ] || fail "PA_MONITOR_BIN export must precede exec"
       grep -qF 'export PA_MONITOR_BIN=${paMonitor}/bin/pa-monitor' "$w" || fail "PA_MONITOR_BIN not baked to the pa-monitor package"
       grep -q '^export PA_SWIFTBAR_STALE_AFTER_S=600$' "$w" || fail "default stale threshold not baked"
+
+      # The PATH line is built from the fixed userName: no runtime id lookup.
+      grep -qxF 'export PATH="/etc/profiles/per-user/tester/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin:$PATH"' "$w" || fail "PATH line not built from the fixed userName"
+      if grep -q 'id -un' "$w"; then fail "wrapper still launches id -un"; fi
 
       # The Title toggle row re-invokes the renderer through this exported path:
       # it must be the renderer store path, whitespace-free, set before the exec.

@@ -64,8 +64,10 @@ HELP
 # output string. All time math and local clock text happen here. A parse or
 # evaluation failure makes jq exit non-zero and the caller degrades to the
 # "no data" state rather than showing an error.
-PA_SWIFTBAR_JQ_PROGRAM=$(
-  cat <<'JQ'
+#
+# `read -d ''` is a builtin (no `cat` launch per refresh); it returns 1 at EOF,
+# hence the `|| true`.
+IFS= read -r -d '' PA_SWIFTBAR_JQ_PROGRAM <<'JQ' || true
 def num: if type == "number" then . else null end;
 def ts: if type == "string" then (try fromdateiso8601 catch null) else null end;
 
@@ -229,7 +231,6 @@ if type != "object" then error("status is not an object") else . end
   end
 | .[]
 JQ
-)
 
 # Title-width setting (beads pg2-fiw4h, pg2-ogkx1x): `wide` (the default),
 # `narrow` or `auto`, one file per plugin holding the word plus a newline. A
@@ -383,7 +384,7 @@ main() {
   esac
 
   now=${PA_SWIFTBAR_NOW:-}
-  [[ $now =~ ^[0-9]+$ ]] || now=$(date +%s)
+  [[ $now =~ ^[0-9]+$ ]] || printf -v now '%(%s)T' -1
   stale_after=${PA_SWIFTBAR_STALE_AFTER_S:-600}
   [[ $stale_after =~ ^[0-9]+$ ]] || stale_after=600
   # Bound on each external call. A fixed 5 s is right for a menu bar refresh on

@@ -285,7 +285,9 @@ Home-Manager (`home/programs/pa-monitor/default.nix`; no new import in `home/def
   `/usr/bin/env` first); one `# <xbar.*>` / `# <swiftbar.*>` tag per line (title,
   version, author = the operator's own identity only, desc, dependencies, hide Run-in-Terminal /
   Disable / SwiftBar); PATH prelude
-  (`/etc/profiles/per-user/$(id -un)/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin:$PATH`);
+  (`/etc/profiles/per-user/<userName>/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin:$PATH`,
+  where `<userName>` is the build-time `userName` argument, `config.home.username` in the HM module, so
+  no `id -un` runs on a refresh);
   `export PA_MONITOR_BIN=${cfg.package}/bin/pa-monitor`; `export PA_SWIFTBAR_STALE_AFTER_S=…`; then
   `exec <store>/bin/pa-monitor-swiftbar "$@"`.
 - Wrapper check (flake check) asserts: shebang, every tag present and non-empty, hide tags true, tag

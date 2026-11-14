@@ -19598,13 +19598,20 @@
                     {
                       options = {
                         phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
-                        home.packages = lib.mkOption {
-                          type = lib.types.listOf lib.types.anything;
-                          default = [ ];
-                        };
-                        home.file = lib.mkOption {
-                          type = lib.types.attrsOf lib.types.anything;
-                          default = { };
+                        home = {
+                          packages = lib.mkOption {
+                            type = lib.types.listOf lib.types.anything;
+                            default = [ ];
+                          };
+                          file = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.anything;
+                            default = { };
+                          };
+                          # The wrapper bakes the login name into its PATH line.
+                          username = lib.mkOption {
+                            type = lib.types.str;
+                            default = "tester";
+                          };
                         };
                         xdg.configFile = lib.mkOption {
                           type = lib.types.attrsOf lib.types.anything;
@@ -19706,6 +19713,7 @@
                 assert builtins.attrNames enabled.home.file == [ pluginPath ];
                 assert has "export PA_MONITOR_BIN=${pkgs.pa-monitor}/bin/pa-monitor" (textOf enabled pluginPath);
                 assert has "export PA_SWIFTBAR_STALE_AFTER_S=600\n" (textOf enabled pluginPath);
+                assert has "export PATH=\"/etc/profiles/per-user/tester/bin:" (textOf enabled pluginPath);
                 assert has "export PA_SWIFTBAR_SELF=${pkgs.pa-monitor-swiftbar}/bin/pa-monitor-swiftbar\n" (
                   textOf enabled pluginPath
                 );

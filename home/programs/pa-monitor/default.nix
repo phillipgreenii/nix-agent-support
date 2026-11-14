@@ -285,6 +285,7 @@ in
           {
             script = cfg.swiftbar.package;
             paMonitor = cfg.package;
+            userName = config.home.username;
             staleAfterS = cfg.swiftbar.staleAfterS;
           };
     })

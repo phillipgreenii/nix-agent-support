@@ -1351,3 +1351,78 @@ parity_render() {
   [ "$status" -eq 0 ]
   [[ $output == *"PA_SWIFTBAR_TIMEOUT_S"* ]]
 }
+
+# --- process launches per refresh -------------------------------------------
+#
+# SentinelOne inspects every process launch, so a refresh launches only the
+# renderer itself, pa-monitor status --json, jq and timeout. A recording shim dir
+# goes first on PATH under env -i: each shim logs its name, then execs the real
+# tool, so a stray launch of any shimmed command shows up in the log.
+
+SHIMMED_TOOLS=(id date cat sed grep head tail tr basename dirname mkdir sleep jq timeout)
+
+# make_shims DIR LOG -> one recording shim per tool in SHIMMED_TOOLS.
+make_shims() {
+  local dir=$1 log=$2 tool real
+  local bash_bin
+  bash_bin="$(command -v bash)"
+  mkdir -p "$dir"
+  : >"$log"
+  for tool in "${SHIMMED_TOOLS[@]}"; do
+    real="$(command -v "$tool")" || continue
+    printf '#!%s\nprintf "%%s\\n" %s >>%s\nexec %s "$@"\n' \
+      "$bash_bin" "$tool" "$log" "$real" >"$dir/$tool"
+    chmod +x "$dir/$tool"
+  done
+}
+
+# A pa-monitor stub that launches nothing external (builtins only).
+make_quiet_stub() {
+  local stub=$1
+  printf '#!%s\nprintf "%%s" "$(<%s)"\n' "$(command -v bash)" "$TEST_DIR/status.json" >"$stub"
+  chmod +x "$stub"
+}
+
+@test "one refresh launches only the allowed set: no id, date or cat" {
+  local scripts_dir="${SCRIPTS_DIR:-}"
+  [[ -n $scripts_dir ]] || scripts_dir="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+  local log="$TEST_DIR/launches.log" quiet="$TEST_DIR/quiet-pa-monitor"
+  make_shims "$TEST_DIR/shims" "$log"
+  make_quiet_stub "$quiet"
+  status '.rate_limits.five_hour = {used_pct: 40, resets_at: "'"$(at 6720)"'"}'
+
+  # No PA_SWIFTBAR_NOW: the renderer takes the time itself (the date-free path).
+  run env -i PATH="$TEST_DIR/shims" HOME="$HOME" TZ=EST5 \
+    XDG_STATE_HOME="$XDG_STATE_HOME" PA_SWIFTBAR_TIMEOUT_S=120 \
+    PA_MONITOR_BIN="$quiet" "$(command -v bash)" "$scripts_dir/pa-monitor-swiftbar.sh"
+  [ "$status" -eq 0 ]
+  [[ $output == *"---"* ]]
+
+  # The shims were in effect: the allowed external tools were launched.
+  grep -qx jq "$log"
+  grep -qx timeout "$log"
+  # And nothing else was.
+  run grep -vxE 'jq|timeout' "$log"
+  [ "$status" -eq 1 ] || {
+    echo "unexpected launches:" >&2
+    echo "$output" >&2
+    return 1
+  }
+}
+
+@test "launch recorder negative control: the pre-change constructs log id, date and cat" {
+  local log="$TEST_DIR/launches.log"
+  make_shims "$TEST_DIR/shims" "$log"
+  # The constructs the renderer and wrapper used before: a command substitution
+  # around cat for the jq program, date +%s for the clock, id -un for the PATH.
+  # shellcheck disable=SC2016
+  local legacy='p=$(cat <<EOT
+x
+EOT
+); now=$(date +%s); u=$(id -un)'
+  run env -i PATH="$TEST_DIR/shims" "$(command -v bash)" -c "$legacy"
+  [ "$status" -eq 0 ]
+  grep -qx id "$log"
+  grep -qx date "$log"
+  grep -qx cat "$log"
+}
