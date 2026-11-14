@@ -25,11 +25,11 @@ type Facts struct {
 	WorkWorktree        string
 	SourceWorktree      string
 	DestinationWorktree string // land only
-	WorkBranch          string // empty at before
+	WorkBranch          string
 	Branch, BranchTip   string
 	Target, TargetTip   string // land only
 	Onto                string
-	Result              string // after_rebase, before_move and after
+	Result              string // post-rebase-fix and pre-merge-verify
 	BaseMoved           bool
 	Context             []ContextPair
 }
@@ -66,14 +66,12 @@ func (f Facts) Vars(point string) map[string]string {
 		"BRANCH_START":    f.BranchTip,
 		"ONTO":            f.Onto,
 		"BASE_MOVED":      boolWord(f.BaseMoved),
+		"RESULT":          f.Result,
 	}
 	if f.Operation == "land" {
 		v["DESTINATION_WORKTREE"] = f.DestinationWorktree
 		v["TARGET"] = f.Target
 		v["TARGET_TIP"] = f.TargetTip
-	}
-	if point != PointBefore {
-		v["RESULT"] = f.Result
 	}
 	out := make(map[string]string, len(v)+len(f.Context))
 	for k, val := range v {

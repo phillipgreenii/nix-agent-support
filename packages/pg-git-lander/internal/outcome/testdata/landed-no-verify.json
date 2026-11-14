@@ -1,18 +1,18 @@
 {
   "schema": 1,
-  "outcome": "refused",
-  "exit": 22,
+  "outcome": "landed",
+  "exit": 0,
   "op_id": "",
   "operation": "land",
   "branch": "feature/x",
-  "target": "",
+  "target": "main",
   "onto": "",
-  "reason": "before-hook-refused",
+  "reason": "",
   "detail": "",
   "retryable": null,
   "stage": "",
   "next": [],
-  "hint": "As the hook's output says.",
+  "hint": "",
   "message": "",
   "holder": null,
   "blocking_op": [],
@@ -30,14 +30,34 @@
   "old_branch_tip": "",
   "restored": [],
   "tips": null,
-  "landed_commit": "",
+  "landed_commit": "9b3f2c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "path_taken": "",
-  "stats": null,
+  "stats": {
+    "duration_ms": 6200,
+    "rebased_commits": 3,
+    "autofix_commits": 1,
+    "conflict_rounds": 0,
+    "race_retries": 0
+  },
   "dropped_commits": [],
   "resolved": [],
   "autofix": [],
   "skipped_hooks": [],
-  "warnings": [],
+  "verify_skipped": [
+    {
+      "point": "pre-merge-verify",
+      "index": 0,
+      "run": "pg-hooks run pre-land --only check",
+      "tip": "9b3f2c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "warnings": [
+    {
+      "warning": "verify-skipped",
+      "reason": "no-verify",
+      "detail": "1 pre-merge-verify entries skipped at 9b3f2c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
   "moved_already": null,
   "config_changed": null,
   "log": "",

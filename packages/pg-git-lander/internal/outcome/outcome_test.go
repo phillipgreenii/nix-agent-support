@@ -104,8 +104,8 @@ func TestExitCodes(t *testing.T) {
 }
 
 func TestReasonTablesComplete(t *testing.T) {
-	if len(AllRefusals) != 22 || len(Refusals) != 22 {
-		t.Errorf("refusals: %d listed, %d in table, want 22", len(AllRefusals), len(Refusals))
+	if len(AllRefusals) != 21 || len(Refusals) != 21 {
+		t.Errorf("refusals: %d listed, %d in table, want 21", len(AllRefusals), len(Refusals))
 	}
 	if len(AllStops) != 17 || len(Stops) != 17 {
 		t.Errorf("stops: %d listed, %d in table, want 17", len(AllStops), len(Stops))
@@ -202,8 +202,42 @@ func landedOutcome() *Outcome {
 
 func busyOutcome() *Outcome {
 	return NewBusy("land", "feature/x", "main", Holder{
-		OpID: "op1", Operation: "land", Branch: "feature/y", Stage: "before_move", State: "running", PID: 41730, Host: "h", AgeS: 130,
+		OpID: "op1", Operation: "land", Branch: "feature/y", Stage: "pre-merge-verify", State: "running", PID: 41730, Host: "h", AgeS: 130,
 	})
+}
+
+func landedNoVerifyOutcome() *Outcome {
+	o := landedOutcome()
+	o.VerifySkipped = []VerifySkip{{Point: "pre-merge-verify", Index: 0, Run: "pg-hooks run pre-land --only check", Tip: "9b3f2c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+	o.Warnings = []WarningEntry{{Warning: WarnVerifySkipped, Reason: ReasonNoVerify, Detail: "1 pre-merge-verify entries skipped at 9b3f2c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+	return o
+}
+
+// A --no-verify land names the skipped entries in the JSON and shows the
+// warning on the one human line.
+func TestVerifySkippedIsRenderedInJSONAndHumanText(t *testing.T) {
+	o := landedNoVerifyOutcome()
+	goldenJSON(t, "landed-no-verify", o)
+	if h := o.Human(); !strings.Contains(h, "warning: verify-skipped") {
+		t.Errorf("human line lacks the warning:\n%s", h)
+	}
+	b, err := landedOutcome().JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"verify_skipped":[]`) {
+		t.Errorf("verify_skipped must always be rendered: %s", b)
+	}
+}
+
+// A busy line whose holder record was written by a former version (stage
+// before_move) still prints.
+func TestBusyLineForAFormerVersionStageName(t *testing.T) {
+	o := busyOutcome()
+	o.Holder.Stage = "before_move"
+	if got, want := o.Human(), "busy: main is held by land feature/y (before_move for 2m10s, pid 41730, h); nothing changed"; got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
 }
 
 func stoppedOutcome() *Outcome {
@@ -221,7 +255,7 @@ func TestHumanExamples(t *testing.T) {
 		want string
 	}{
 		{"landed", landedOutcome(), "landed feature/x into main at 9b3f2c1 (rebased 3 commits, 1 autofix commit, 6.2 s)"},
-		{"busy", busyOutcome(), "busy: main is held by land feature/y (before_move for 2m10s, pid 41730, h); nothing changed"},
+		{"busy", busyOutcome(), "busy: main is held by land feature/y (pre-merge-verify for 2m10s, pid 41730, h); nothing changed"},
 		{"stopped", stoppedOutcome(), strings.Join([]string{
 			"stopped: land feature/x: conflict in docs/guide.md, no conflict rule matches",
 			"  work worktree: /src/example/.worktrees/feature-x   (work branch pg-git-lander/20261107T101500Z-3f9c2a)",

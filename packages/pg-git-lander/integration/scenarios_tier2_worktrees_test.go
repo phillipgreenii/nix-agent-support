@@ -183,7 +183,7 @@ func TestTier2BranchCheckedOutElsewhereMoveNeeded(t *testing.T) {
 		h := newHarness(t, Scenario{
 			Shape:  ShapeDiverged,
 			Layout: layout,
-			Config: "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\nbefore_move = [{ run = [\"{hooks}/dirty\"], timeout = \"60s\" }]\n",
+			Config: "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\npre-merge-verify = [{ run = [\"{hooks}/dirty\"], timeout = \"60s\" }]\n",
 			Hooks:  map[string]string{"dirty": `echo changed >> "{wt:src}/README.md"`},
 		})
 		r := h.run("land", "feature/x", "--source-worktree", h.wtPath("src"), keepBranchWorkSpare, h.wtPath("spare"),
@@ -319,11 +319,11 @@ func TestTier2UnsupportedLayoutsAndNoIdentity(t *testing.T) {
 }
 
 // Scenario 40: a commit is added to BRANCH from another worktree while the
-// operation runs (a before_move hook): BRANCH is kept at its new tip with the
+// operation runs (a pre-merge-verify hook): BRANCH is kept at its new tip with the
 // warning branch-not-deleted (reason moved), the outcome is landed and the
 // source worktree is removed or parked as the flags say.
 func TestTier2CommitAddedToBranchDuringLand(t *testing.T) {
-	const cfg = "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\nbefore_move = [{ run = [\"{hooks}/extra\"], timeout = \"60s\" }]\n"
+	const cfg = "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\npre-merge-verify = [{ run = [\"{hooks}/extra\"], timeout = \"60s\" }]\n"
 	// The hook runs in the work worktree (the source worktree, now on the work
 	// branch), so BRANCH is checked out nowhere; the commit is made from the
 	// worktree "other".

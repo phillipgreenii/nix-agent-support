@@ -139,7 +139,7 @@ func TestTier2ObservabilityLanded(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/ok"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/ok"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"ok": "true"},
 	})
@@ -168,8 +168,8 @@ before_move = [{ run = ["{hooks}/ok"], timeout = "60s" }]
 		t.Errorf("stages = %s", got)
 	}
 	hooks := eventsOfType(evs, "hook")
-	if len(hooks) != 1 || hooks[0]["point"] != "before_move" || hooks[0]["exit"] != float64(0) {
-		t.Errorf("hook events = %v, want the one before_move run", hooks)
+	if len(hooks) != 1 || hooks[0]["point"] != "pre-merge-verify" || hooks[0]["exit"] != float64(0) {
+		t.Errorf("hook events = %v, want the one pre-merge-verify run", hooks)
 	}
 	for _, e := range evs {
 		if e["op_id"] != r.json["op_id"] {
@@ -189,7 +189,7 @@ func TestTier2ObservabilityStoppedAndStatus(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/gate"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"gate": `[ -e "$PGL_MARKERS/fixed" ]`},
 	})
@@ -201,7 +201,7 @@ before_move = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 	checkNow(t, h, r, Expected{
 		Outcome: map[string]any{
 			"schema": 1, "exit": 21, "operation": "land", "branch": "feature/x", "target": "main",
-			"stage": "before_move", "retryable": false,
+			"stage": "pre-merge-verify", "retryable": false,
 		},
 		Snapshot: Snapshot{Refs: startRefs()},
 		Stopped:  true,
@@ -210,8 +210,8 @@ before_move = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 	evs := h.events()
 	checkEventsShape(t, evs)
 	last := evs[len(evs)-1]
-	if last["event"] != "op_end" || last["outcome"] != "stopped" || last["reason"] != "hook-failed" || last["stage"] != "before_move" {
-		t.Errorf("the last event = %v, want op_end stopped hook-failed at before_move", last)
+	if last["event"] != "op_end" || last["outcome"] != "stopped" || last["reason"] != "hook-failed" || last["stage"] != "pre-merge-verify" {
+		t.Errorf("the last event = %v, want op_end stopped hook-failed at pre-merge-verify", last)
 	}
 	if hooks := eventsOfType(evs, "hook"); len(hooks) != 1 || hooks[0]["exit"] == float64(0) {
 		t.Errorf("hook events = %v, want one failing run", hooks)
@@ -226,7 +226,7 @@ before_move = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 		t.Fatalf("status lists %d stopped operations, want 1: %s", len(stopped), st.stdout)
 	}
 	s0, _ := stopped[0].(map[string]any)
-	if s0["op_id"] != r.json["op_id"] || s0["reason"] != "hook-failed" || s0["branch"] != "feature/x" || s0["stage"] != "before_move" {
+	if s0["op_id"] != r.json["op_id"] || s0["reason"] != "hook-failed" || s0["branch"] != "feature/x" || s0["stage"] != "pre-merge-verify" {
 		t.Errorf("status shows the stopped operation as %v, want the op %v", s0, r.json["op_id"])
 	}
 	var orphans []string
@@ -254,7 +254,7 @@ func TestTier2ObservabilityBusy(t *testing.T) {
 		Layout: srcOnBr,
 		// A long lease keeps a heartbeat starved by host load from expiring the
 		// holder's lock, which would turn the busy refusal into a takeover.
-		Config: crashConfig("before_move"),
+		Config: crashConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	h.addBranch("other")
@@ -276,7 +276,7 @@ func TestTier2ObservabilityBusy(t *testing.T) {
 	done(t, h, h.wait("holder"), Expected{Outcome: map[string]any{"outcome": "landed", "exit": 0}})
 }
 
-// Scenario 36, race: TARGET moves under the land at before_move on every try,
+// Scenario 36, race: TARGET moves under the land at pre-merge-verify on every try,
 // so the retries run out; the golden stop is race and the events record each
 // retry.
 func TestTier2ObservabilityRace(t *testing.T) {
@@ -289,7 +289,7 @@ root = "{repo}"
 max_race_retries = 1
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/bump"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/bump"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"bump": hookGit + `
 t=$(git -C "$PGL_REPO" rev-parse 'main^{tree}')
@@ -380,7 +380,7 @@ func TestTier2MainWorktreeRemoval(t *testing.T) {
 }
 
 // Scenario 45: a commit is added to BRANCH from another path during a rebase
-// (at after_rebase). The move stops with branch-moved, --abort is the only
+// (at post-rebase-fix). The move stops with branch-moved, --abort is the only
 // next step, and it restores everything: BRANCH keeps the commit someone else
 // made.
 func TestTier2BranchMovedDuringRebase(t *testing.T) {
@@ -392,7 +392,7 @@ func TestTier2BranchMovedDuringRebase(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.rebase]
-after_rebase = [{ run = ["{hooks}/bump"], timeout = "60s" }]
+post-rebase-fix = [{ run = ["{hooks}/bump"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"bump": hookGit + `
 t=$(git -C "$PGL_REPO" rev-parse 'feature/x^{tree}')
@@ -433,7 +433,7 @@ git -C "$PGL_REPO" update-ref refs/heads/feature/x "$c"
 	h.noProblems()
 }
 
-// dirtyOnce is a before_move hook that, the first time it runs, changes a
+// dirtyOnce is a pre-merge-verify hook that, the first time it runs, changes a
 // tracked file of the main worktree (the destination worktree).
 const dirtyOnce = `
 [ -e "$PGL_MARKERS/once" ] && exit 0
@@ -441,7 +441,7 @@ touch "$PGL_MARKERS/once"
 echo changed > "$PGL_REPO/README.md"
 `
 
-// detachOnce is a before_move hook that, the first time it runs, detaches the
+// detachOnce is a pre-merge-verify hook that, the first time it runs, detaches the
 // main worktree (the destination worktree) from TARGET.
 const detachOnce = hookGit + `
 [ -e "$PGL_MARKERS/once" ] && exit 0
@@ -450,7 +450,7 @@ git -C "$PGL_REPO" switch -q --detach
 `
 
 func beforeMoveConfig(script string) string {
-	return "\n[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\nbefore_move = [{ run = [\"{hooks}/" + script + "\"], timeout = \"60s\" }]\n"
+	return "\n[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\npre-merge-verify = [{ run = [\"{hooks}/" + script + "\"], timeout = \"60s\" }]\n"
 }
 
 // Scenario 46, checkout-changed: the destination worktree's tree or HEAD

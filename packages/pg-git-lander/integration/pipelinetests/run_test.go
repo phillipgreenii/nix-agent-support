@@ -316,15 +316,15 @@ func TestRunConflictResolvedByAConfiguredResolver(t *testing.T) {
 	}
 }
 
-func TestRunBeforeMoveHookFailureLeavesBranchAndTargetUntouched(t *testing.T) {
+func TestRunPreMergeVerifyHookFailureLeavesBranchAndTargetUntouched(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	mainTip, featTip := f.tip(f.main), f.tip("feature/x")
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("echo nope >&2\nexit 1")}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("echo nope >&2\nexit 1")}, "")
 	out := f.run(f.land())
 	f.wantStopped(out, outcome.StopHookFailed)
-	if out.Stage != "before_move" {
+	if out.Stage != "pre-merge-verify" {
 		t.Errorf("stage = %s", out.Stage)
 	}
 	if f.tip(f.main) != mainTip || f.tip("feature/x") != featTip {
@@ -333,7 +333,7 @@ func TestRunBeforeMoveHookFailureLeavesBranchAndTargetUntouched(t *testing.T) {
 	if strings.Contains(strings.Join(out.LogTail, "\n"), "nope") == false {
 		t.Errorf("log tail = %v", out.LogTail)
 	}
-	if h := lastEvent(f.events(), "hook"); h == nil || h["point"] != "before_move" {
+	if h := lastEvent(f.events(), "hook"); h == nil || h["point"] != "pre-merge-verify" {
 		t.Fatalf("hook event = %v", h)
 	}
 }
@@ -342,7 +342,7 @@ func TestRunTransientHookIsAStop(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("exit 75")}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("exit 75")}, "")
 	f.wantStopped(f.run(f.land()), outcome.StopTransient)
 }
 
@@ -351,20 +351,20 @@ func TestRunHookPointsRunOnlyWhereTheyApply(t *testing.T) {
 	marks := func(f *fx) (string, map[string]string) {
 		dir := t.TempDir()
 		pts := map[string]string{}
-		for _, p := range []string{"after_rebase", "before_move", "after"} {
+		for _, p := range []string{"post-rebase-fix", "pre-merge-verify"} {
 			pts[p] = f.hookScript("touch " + filepath.Join(dir, p))
 		}
 		return dir, pts
 	}
 	exists := func(dir, p string) bool { _, err := os.Stat(filepath.Join(dir, p)); return err == nil }
 
-	t.Run("fast-forward skips after_rebase", func(t *testing.T) {
+	t.Run("fast-forward skips post-rebase-fix", func(t *testing.T) {
 		f := newFx(t)
 		f.feature()
 		dir, pts := marks(f)
 		f.hooksXDG("land", pts, "")
 		want(t, f.run(f.land()), outcome.Landed, 0)
-		if exists(dir, "after_rebase") || !exists(dir, "before_move") || !exists(dir, "after") {
+		if exists(dir, "post-rebase-fix") || !exists(dir, "pre-merge-verify") {
 			t.Fatal("wrong hook points ran")
 		}
 	})
@@ -375,36 +375,22 @@ func TestRunHookPointsRunOnlyWhereTheyApply(t *testing.T) {
 		dir, pts := marks(f)
 		f.hooksXDG("land", pts, "")
 		want(t, f.run(f.land()), outcome.Landed, 0)
-		for _, p := range []string{"after_rebase", "before_move", "after"} {
+		for _, p := range []string{"post-rebase-fix", "pre-merge-verify"} {
 			if !exists(dir, p) {
 				t.Errorf("%s did not run", p)
 			}
 		}
 	})
-	t.Run("after_rebase failure stops there", func(t *testing.T) {
+	t.Run("post-rebase-fix failure stops there", func(t *testing.T) {
 		f := newFx(t)
 		f.feature()
 		f.commit(f.repo.Dir, "m.txt", "m\n")
-		f.hooksXDG("land", map[string]string{"after_rebase": f.hookScript("exit 1")}, "")
+		f.hooksXDG("land", map[string]string{"post-rebase-fix": f.hookScript("exit 1")}, "")
 		o := f.run(f.land())
 		f.wantStopped(o, outcome.StopHookFailed)
-		if o.Stage != "after_rebase" {
+		if o.Stage != "post-rebase-fix" {
 			t.Errorf("stage = %s", o.Stage)
 		}
-	})
-	t.Run("an after hook failure is only a warning", func(t *testing.T) {
-		f := newFx(t)
-		f.feature()
-		f.hooksXDG("land", map[string]string{"after": f.hookScript("exit 1")}, "")
-		o := f.run(f.land())
-		want(t, o, outcome.Landed, 0)
-		if len(o.Warnings) != 1 || o.Warnings[0].Warning != outcome.WarnAfterHookFailed {
-			t.Fatalf("warnings = %+v", o.Warnings)
-		}
-		if f.tip(f.main) != o.LandedCommit {
-			t.Fatal("the move did not happen")
-		}
-		f.untouched()
 	})
 }
 
@@ -412,7 +398,8 @@ func TestRunAutofixCommitIsInTheResult(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("echo fixed > x.txt")}, "")
+	f.commit(f.repo.Dir, "m.txt", "m\n") // the base moved: post-rebase-fix applies
+	f.hooksXDG("land", map[string]string{"post-rebase-fix": f.hookScript("echo fixed > x.txt")}, "")
 	out := f.run(f.land())
 	want(t, out, outcome.Landed, 0)
 	if f.mainFile("x.txt") != "fixed" || f.tip(f.main) != out.LandedCommit {
@@ -421,7 +408,7 @@ func TestRunAutofixCommitIsInTheResult(t *testing.T) {
 	if len(out.Autofix) != 1 || len(out.Autofix[0].Files) != 1 || out.Autofix[0].Files[0] != "x.txt" || out.Stats.AutofixCommits != 1 {
 		t.Fatalf("autofix = %+v stats %+v", out.Autofix, out.Stats)
 	}
-	if got := f.git(f.repo.Dir, "log", "-1", "--format=%s", f.main); got != "style: apply before_move fixes made during land" {
+	if got := f.git(f.repo.Dir, "log", "-1", "--format=%s", f.main); got != "style: apply post-rebase-fix fixes made during land" {
 		t.Fatalf("subject = %q", got)
 	}
 }
@@ -443,7 +430,7 @@ func TestRunTargetMovedOnceRetriesAndKeepsResolutions(t *testing.T) {
 	f.conflicting()
 	res := f.hookScript(`printf 'merged\n' > "$PG_GIT_LANDER_PATH"`)
 	hook := f.raceHook(false)
-	f.cfgXDG("[defaults.hooks]\nland.before_move = [{ run = ['" + hook + "'] }]\n[[defaults.conflict]]\nglob = \"x.txt\"\nresolve = ['" + res + "']\n")
+	f.cfgXDG("[defaults.hooks]\nland.pre-merge-verify = [{ run = ['" + hook + "'] }]\n[[defaults.conflict]]\nglob = \"x.txt\"\nresolve = ['" + res + "']\n")
 	out := f.run(f.land())
 	want(t, out, outcome.Landed, 0)
 	if out.Stats.RaceRetries != 1 || out.Stats.ConflictRounds != 1 || len(out.Resolved) != 1 {
@@ -463,12 +450,12 @@ func TestRunTargetMovedOnceRetriesAndKeepsResolutions(t *testing.T) {
 	}
 	hooks := 0
 	for _, e := range evs {
-		if e["event"] == "hook" && e["point"] == "before_move" {
+		if e["event"] == "hook" && e["point"] == "pre-merge-verify" {
 			hooks++
 		}
 	}
 	if hooks != 2 {
-		t.Errorf("before_move ran %d times, want 2", hooks)
+		t.Errorf("pre-merge-verify ran %d times, want 2", hooks)
 	}
 	if e := lastEvent(evs, "op_end"); e == nil || e["outcome"] != "landed" {
 		t.Fatalf("op_end = %v", e)
@@ -480,7 +467,7 @@ func TestRunTargetMovingOnEveryTryStopsWithRace(t *testing.T) {
 	f := newFx(t)
 	f.feature()
 	featTip := f.tip("feature/x")
-	f.hooksXDG("land", map[string]string{"before_move": f.raceHook(true)}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.raceHook(true)}, "")
 	out := f.run(f.land())
 	f.wantStopped(out, outcome.StopRace)
 	if out.Stats.RaceRetries != config.DefaultMaxRaceRetries {
@@ -575,7 +562,7 @@ func TestRunRebaseBranchMovedDuringTheOperationIsAStop(t *testing.T) {
 	f.feature()
 	mainTip := f.commit(f.repo.Dir, "m.txt", "m\n")
 	hook := f.hookScript(`git update-ref refs/heads/feature/x ` + mainTip)
-	f.hooksXDG("rebase", map[string]string{"before_move": hook}, "")
+	f.hooksXDG("rebase", map[string]string{"pre-merge-verify": hook}, "")
 	o := f.run(f.rebaseReq())
 	f.wantStopped(o, outcome.StopBranchMoved)
 	if f.tip("feature/x") != mainTip {
@@ -587,7 +574,7 @@ func TestRunUnexpectedFailureAfterLockingIsAnInternalErrorStop(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript(`rm -rf "$PG_GIT_LANDER_WORK_WORKTREE"`)}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript(`rm -rf "$PG_GIT_LANDER_WORK_WORKTREE"`)}, "")
 	o := f.run(f.land())
 	f.wantStopped(o, outcome.StopInternalError)
 	if len(o.Next) != 1 || o.Next[0] != "pg-git-lander land feature/x --abort" {
@@ -602,7 +589,7 @@ func TestRunSwappedLockRecordGivesLockLost(t *testing.T) {
 	mainTip, featTip := f.tip(f.main), f.tip("feature/x")
 	hook := f.hookScript(`b=$(printf '{}' | git hash-object -w --stdin)
 git update-ref ` + locks.BranchRef("feature/x") + ` "$b"`)
-	f.hooksXDG("land", map[string]string{"before_move": hook}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": hook}, "")
 	o := f.run(f.land())
 	want(t, o, outcome.Stopped, 21)
 	if o.Reason != string(outcome.StopLockLost) {
@@ -643,9 +630,8 @@ func TestRunEventsOfALandedRun(t *testing.T) {
 	f.commit(f.repo.Dir, "m.txt", "m\n")
 	dir := t.TempDir()
 	f.hooksXDG("land", map[string]string{
-		"after_rebase": f.hookScript("touch " + filepath.Join(dir, "a")),
-		"before_move":  f.hookScript("true"),
-		"after":        f.hookScript("true"),
+		"post-rebase-fix":  f.hookScript("touch " + filepath.Join(dir, "a")),
+		"pre-merge-verify": f.hookScript("true"),
 	}, "")
 	want(t, f.run(f.land()), outcome.Landed, 0)
 	evs := f.events()
@@ -659,10 +645,10 @@ func TestRunEventsOfALandedRun(t *testing.T) {
 			hookPoints[e["point"].(string)] = true
 		}
 	}
-	if got := strings.Join(stages, ","); got != "locked,preparing,rebasing,after_rebase,before_move,moving,after,cleanup" {
+	if got := strings.Join(stages, ","); got != "locked,preparing,rebasing,post-rebase-fix,pre-merge-verify,moving,cleanup" {
 		t.Fatalf("stages = %s", got)
 	}
-	for _, p := range []string{"after_rebase", "before_move", "after"} {
+	for _, p := range []string{"post-rebase-fix", "pre-merge-verify"} {
 		if !hookPoints[p] {
 			t.Errorf("no hook event for %s", p)
 		}
@@ -696,4 +682,200 @@ func TestRunDoneOutcomeSurvivesJSON(t *testing.T) {
 	}
 	_ = context.Background
 	_ = time.Second
+}
+
+// A pre-merge-verify entry that changes a tracked file stops the land with
+// hook-failed / verify-modified-tree and leaves the work worktree clean, so
+// --continue re-enters clean. An entry that only creates untracked or ignored
+// files passes.
+func TestRunVerifyThatModifiesTheTreeStopsAndRestoresIt(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	mainTip := f.tip(f.main)
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("echo dirty >> x.txt")}, "")
+	out := f.run(f.land())
+	f.wantStopped(out, outcome.StopHookFailed)
+	if out.Detail != "verify-modified-tree" || out.Stage != "pre-merge-verify" {
+		t.Fatalf("detail %q stage %q", out.Detail, out.Stage)
+	}
+	if f.tip(f.main) != mainTip {
+		t.Fatal("TARGET moved")
+	}
+	work := out.WorkWorktree.Path
+	if got := f.git(work, "status", "--porcelain"); got != "" {
+		t.Fatalf("the work worktree is not clean:\n%s", got)
+	}
+}
+
+func TestRunVerifyThatMovesHeadStops(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript(`git -c user.name=t -c user.email=t@example.invalid commit --allow-empty -qm sneaky`)}, "")
+	out := f.run(f.land())
+	f.wantStopped(out, outcome.StopHookFailed)
+	if out.Detail != "verify-modified-tree" {
+		t.Fatalf("detail %q", out.Detail)
+	}
+	for _, s := range f.logSubjects(out.WorkBranch) {
+		if s == "sneaky" {
+			t.Fatal("the work branch kept the commit")
+		}
+	}
+}
+
+func TestRunVerifyFailingAndModifyingNamesBothFacts(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("echo dirty >> x.txt; exit 3")}, "")
+	out := f.run(f.land())
+	f.wantStopped(out, outcome.StopHookFailed)
+	if !strings.Contains(out.Detail, "exit-3") || !strings.Contains(out.Detail, "verify-modified-tree") {
+		t.Fatalf("detail %q names only one fact", out.Detail)
+	}
+}
+
+func TestRunVerifyThatCreatesUntrackedAndIgnoredFilesPasses(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	body := `echo build.out >> "$(git rev-parse --git-path info/exclude)"; echo x > build.out; echo y > scratch.txt`
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript(body)}, "")
+	want(t, f.run(f.land()), outcome.Landed, 0)
+}
+
+// pre-merge-verify runs on a fast-forward and post-rebase-fix does not; both
+// are visible in the event list.
+func TestRunFastForwardRunsVerifyNotPostRebaseFix(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	f.hooksXDG("land", map[string]string{
+		"post-rebase-fix":  f.hookScript("true"),
+		"pre-merge-verify": f.hookScript("true"),
+	}, "")
+	out := f.run(f.land())
+	want(t, out, outcome.Landed, 0)
+	if out.PathTaken != "fast-forward" {
+		t.Fatalf("path = %s", out.PathTaken)
+	}
+	evs := f.events()
+	if hookRuns(evs, "post-rebase-fix") != 0 || hookRuns(evs, "pre-merge-verify") != 1 {
+		t.Fatalf("post-rebase-fix ran %d times, pre-merge-verify %d", hookRuns(evs, "post-rebase-fix"), hookRuns(evs, "pre-merge-verify"))
+	}
+}
+
+// --no-verify lands past a failing pre-merge-verify entry, still runs
+// post-rebase-fix, and says so in the outcome, the log and the events.
+func TestRunNoVerifyLandsPastAFailingVerifyAndStillRunsPostRebaseFix(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	f.commit(f.repo.Dir, "m.txt", "m\n")
+	fixMark := filepath.Join(t.TempDir(), "fix-ran")
+	f.hooksXDG("land", map[string]string{
+		"post-rebase-fix":  f.hookScript("touch " + fixMark),
+		"pre-merge-verify": f.hookScript("exit 1"),
+	}, "")
+	req := f.land()
+	req.NoVerify = true
+	out := f.run(req)
+	want(t, out, outcome.Landed, 0)
+	if _, err := os.Stat(fixMark); err != nil {
+		t.Fatal("post-rebase-fix did not run under --no-verify")
+	}
+	var w *outcome.WarningEntry
+	for i := range out.Warnings {
+		if out.Warnings[i].Warning == outcome.WarnVerifySkipped {
+			w = &out.Warnings[i]
+		}
+	}
+	if w == nil || w.Reason != "no-verify" || !strings.Contains(w.Detail, "1 pre-merge-verify entries skipped at ") {
+		t.Fatalf("warnings = %+v", out.Warnings)
+	}
+	if len(out.VerifySkipped) != 1 || out.VerifySkipped[0].Index != 0 || out.VerifySkipped[0].Tip == "" || out.VerifySkipped[0].Run == "" {
+		t.Fatalf("verify_skipped = %+v", out.VerifySkipped)
+	}
+	if hookRuns(f.events(), "pre-merge-verify") != 0 {
+		t.Fatal("a pre-merge-verify entry ran")
+	}
+	if ev := lastEvent(f.events(), "verify_skipped"); ev == nil || ev["count"] != float64(1) {
+		t.Fatalf("verify_skipped event = %v", ev)
+	}
+	b, err := os.ReadFile(out.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "VERIFY") || !strings.Contains(string(b), "--no-verify") {
+		t.Errorf("the log does not record the skip:\n%s", b)
+	}
+	if !strings.Contains(out.Human(), "warning: verify-skipped") {
+		t.Errorf("human line lacks the warning:\n%s", out.Human())
+	}
+}
+
+// With no pre-merge-verify entry at all, --no-verify still says so.
+func TestRunNoVerifyWithoutVerifyEntriesStillWarns(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	req := f.land()
+	req.NoVerify = true
+	out := f.run(req)
+	want(t, out, outcome.Landed, 0)
+	if !hasWarning(out, outcome.WarnVerifySkipped) || len(out.VerifySkipped) != 0 {
+		t.Fatalf("warnings %+v verify_skipped %+v", out.Warnings, out.VerifySkipped)
+	}
+	if !strings.Contains(out.Warnings[0].Detail, "0 pre-merge-verify entries skipped") {
+		t.Fatalf("detail = %q", out.Warnings[0].Detail)
+	}
+}
+
+// Without --no-verify the outcome carries neither.
+func TestRunWithoutNoVerifyHasNoVerifySkippedWarning(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	out := f.run(f.land())
+	want(t, out, outcome.Landed, 0)
+	if hasWarning(out, outcome.WarnVerifySkipped) || len(out.VerifySkipped) != 0 {
+		t.Fatalf("warnings %+v", out.Warnings)
+	}
+}
+
+// --no-verify also keeps the tool's own git calls clear of git's hooks: a
+// planted pre-rebase hook (the initial rebase) and a planted pre-commit hook
+// (an autofix commit) run without the flag and not with it.
+func TestRunNoVerifySkipsGitHooksOfTheToolsOwnCommands(t *testing.T) {
+	t.Parallel()
+	for _, noVerify := range []bool{false, true} {
+		t.Run(map[bool]string{false: "verify", true: "no-verify"}[noVerify], func(t *testing.T) {
+			f := newFx(t)
+			f.feature()
+			f.commit(f.repo.Dir, "m.txt", "m\n")
+			marks := t.TempDir()
+			hooksDir := filepath.Join(f.repo.Root(), "hooks")
+			if got := f.git(f.repo.Dir, "config", "core.hooksPath"); got != hooksDir {
+				t.Fatalf("core.hooksPath = %q, want %q", got, hooksDir)
+			}
+			for name := range map[string]bool{"pre-rebase": true, "pre-commit": true} {
+				body := "#!/bin/sh\ntouch " + filepath.Join(marks, name) + "\nexit 0\n"
+				if err := os.WriteFile(filepath.Join(hooksDir, name), []byte(body), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.hooksXDG("land", map[string]string{"post-rebase-fix": f.hookScript("grep -q fixed x.txt || echo fixed >> x.txt")}, "")
+			req := f.land()
+			req.NoVerify = noVerify
+			want(t, f.run(req), outcome.Landed, 0)
+			for _, name := range []string{"pre-rebase", "pre-commit"} {
+				_, err := os.Stat(filepath.Join(marks, name))
+				if ran := err == nil; ran == noVerify {
+					t.Errorf("%s ran = %v with noVerify = %v", name, ran, noVerify)
+				}
+			}
+		})
+	}
 }

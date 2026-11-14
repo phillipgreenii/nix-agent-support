@@ -286,7 +286,7 @@ func TestFirstPhaseRefusalNamesOwnerBranchStageAndCommand(t *testing.T) {
 func TestWaiterAbortsAStopWhoseOwnerDiedBeforeTheMove(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
-	f.stoppedHoldingMain(holdSpec{stage: "before_move", reason: "holder-died", retryable: true, age: time.Hour})
+	f.stoppedHoldingMain(holdSpec{stage: "pre-merge-verify", reason: "holder-died", retryable: true, age: time.Hour})
 	tipX := f.tip("feature/x")
 	mainBefore := f.tip(f.main)
 	wt := f.branchWorktree("feature/y")
@@ -309,7 +309,7 @@ func TestWaiterAbortsAStopWhoseOwnerDiedBeforeTheMove(t *testing.T) {
 	if !strings.Contains(out.String(), "aborting it") {
 		t.Errorf("messages = %q", out.String())
 	}
-	f.wantSettle("abort", "before_move")
+	f.wantSettle("abort", "pre-merge-verify")
 }
 
 func TestWaiterFinishesAStopWhoseOwnerDiedAtOrAfterTheMove(t *testing.T) {

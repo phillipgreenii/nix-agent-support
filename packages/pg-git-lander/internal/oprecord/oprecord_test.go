@@ -139,7 +139,7 @@ func TestBeginWritesEveryFieldOfTheExampleRecord(t *testing.T) {
 	for _, k := range []string{
 		"schema", "role", "state", "op_id", "operation", "branch", "target", "owner", "lease", "worktrees",
 		"work_branch", "placeholder_branch", "keep", "move", "started_at", "stage", "stage_started_at", "current_command",
-		"tips", "attempts", "config_digest", "context", "stop",
+		"tips", "attempts", "config_digest", "context", "no_verify", "stop",
 	} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("record lacks %q", k)
@@ -150,6 +150,37 @@ func TestBeginWritesEveryFieldOfTheExampleRecord(t *testing.T) {
 		if s := f.read(ref); s.Rec == nil || s.Rec.OpID != r.OpID || s.Rec.Branch != "feature/x" {
 			t.Errorf("%s: %+v", ref, s.Rec)
 		}
+	}
+}
+
+func TestCanonicalMapsTheStageNamesOfAFormerVersion(t *testing.T) {
+	for in, want := range map[string]string{
+		"after_rebase": StagePostRebaseFix, "before_move": StagePreMergeVerify, "after": StageCleanup,
+		"rebasing": StageRebasing, "moving": StageMoving, "cleanup": StageCleanup,
+		StagePostRebaseFix: StagePostRebaseFix, StagePreMergeVerify: StagePreMergeVerify,
+	} {
+		if got := Canonical(in); got != want {
+			t.Errorf("Canonical(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestNoVerifyIsRecordedAndSticky(t *testing.T) {
+	f := newFx(t)
+	op := f.begin()
+	if f.read(locks.BranchRef("feature/x")).Rec.NoVerify {
+		t.Fatal("no_verify set without the flag")
+	}
+	p := params()
+	p.NoVerify = true
+	if rec := NewRecord(p, "20261107T101500Z-aaaaaa", f.clock.Now()); !rec.NoVerify {
+		t.Error("Params.NoVerify not carried into the record")
+	}
+	if err := op.SetNoVerify(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !f.read(locks.BranchRef("feature/x")).Rec.NoVerify {
+		t.Error("SetNoVerify was not written to the record")
 	}
 }
 
@@ -170,12 +201,12 @@ func TestEachStageIsWrittenWithTipsResult(t *testing.T) {
 			t.Errorf("%s: stage_started_at %v not after started_at %v", stage, r.StageStartedAt, r.StartedAt)
 		}
 	}
-	want := []string{"locked", "preparing", "rebasing", "after_rebase", "before_move", "moving", "after", "cleanup"}
+	want := []string{"locked", "preparing", "rebasing", "post-rebase-fix", "pre-merge-verify", "moving", "cleanup"}
 	if strings.Join(Stages, ",") != strings.Join(want, ",") {
 		t.Errorf("stage names: %v", Stages)
 	}
 	// a stage write without a tip leaves tips.result alone
-	if err := op.SetStage(t.Context(), StageAfter, nil); err != nil {
+	if err := op.SetStage(t.Context(), StageCleanup, nil); err != nil {
 		t.Fatal(err)
 	}
 	if r := f.read(locks.BranchRef("feature/x")).Rec; r.Tips.Result == nil {
@@ -338,10 +369,10 @@ func TestResumeBeforeStageMovingLeavesTargetAndDestinationAlone(t *testing.T) {
 		{StageLocked, false},
 		{StagePreparing, false},
 		{StageRebasing, false},
-		{StageAfterRebase, false},
-		{StageBeforeMove, false},
+		{StagePostRebaseFix, false},
+		{StagePreMergeVerify, false},
 		{StageMoving, true},
-		{StageAfter, true},
+		{"after", true}, // a record of a former version
 		{StageCleanup, true},
 	} {
 		t.Run(c.stage, func(t *testing.T) {

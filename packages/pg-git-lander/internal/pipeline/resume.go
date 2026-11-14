@@ -43,6 +43,9 @@ type ResumeRequest struct {
 	// RepoFlag is the --repo value, repeated in next commands; empty when the
 	// invocation did not use it.
 	RepoFlag string
+	// NoVerify is --no-verify on --continue or --skip; the flag is sticky, so a
+	// record that already carries it keeps it either way.
+	NoVerify bool
 }
 
 // StoppedOp is a stopped operation found by FindStopped.
@@ -391,7 +394,8 @@ func (rs *resumer) build(ctx context.Context, common string) error {
 			Operation: worktrees.Operation(rec.Operation), Branch: rec.Branch, Target: rec.Target,
 			Onto: deref(rec.Tips.Onto), Dir: rs.req.Dir, RepoFlag: rs.req.RepoFlag,
 			KeepSourceWorktree: rec.Keep.SourceWorktree, KeepSourceBranch: rec.Keep.SourceBranch,
-			Context: contextPairs(rec.Context),
+			NoVerify: rec.NoVerify || rs.req.NoVerify,
+			Context:  contextPairs(rec.Context),
 		},
 		Operation: worktrees.Operation(rec.Operation), OpID: rec.OpID, Repo: rs.pre.Repo, CommonDir: common,
 		Selection: sel, Layer: rs.resumed.Op.Layer, Op: rs.resumed.Op, Pre: rs.pre,
@@ -508,7 +512,7 @@ func (rs *resumer) checkRoles(ctx context.Context, rec locks.Record) (*outcome.O
 		return nil, err
 	}
 	sel := p.Selection
-	late := stageIndex(rec.Stage) >= stageIndex(oprecord.StageAfter)
+	late := stageIndex(oprecord.Canonical(rec.Stage)) >= stageIndex(oprecord.StageCleanup)
 	sx := &worktrees.Selector{Git: rs.d.Git}
 
 	ww := findListed(wts, sel.Work.Path)
@@ -606,6 +610,11 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 	rec := p.Op.Record()
 	rb := &rebase.Rebaser{Git: rs.d.Git}
 
+	if rs.req.NoVerify && !rec.NoVerify {
+		if err := p.Op.SetNoVerify(ctx); err != nil {
+			return rs.failed(ctx, nil, err)
+		}
+	}
 	if o, err := rs.reloadConfig(ctx, rec); o != nil || err != nil {
 		return rs.failed(ctx, o, err)
 	}
@@ -632,7 +641,7 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 		return rs.failed(ctx, nil, err)
 	}
 	plan := &resumePlan{conflictRounds: rec.Attempts.ConflictRounds}
-	stage := rec.Stage
+	stage := oprecord.Canonical(rec.Stage)
 	if skip && (stage != oprecord.StageRebasing || !inProgress) {
 		return rs.failed(ctx, rs.cannotResume(outcome.DetailRebaseStateMissing,
 			"--skip is valid only at stage rebasing with git's rebase in progress (stage %s)", stage), nil)
@@ -702,16 +711,16 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 				"git's rebase is neither in progress nor finished in a way the record can account for"), nil)
 		}
 
-	case oprecord.StageAfterRebase, oprecord.StageBeforeMove:
+	case oprecord.StagePostRebaseFix, oprecord.StagePreMergeVerify:
 		if inProgress || workTip == "" || !onWorkBranch() {
 			return mismatch("the work worktree %s is not on the work branch %s", work, p.WorkBranch)
 		}
 		if p.Tips.Result == "" || !rs.isAncestor(ctx, p.Tips.Result, workTip) {
 			return mismatch("the work branch tip %s is not the recorded result %s or a descendant", workTip, p.Tips.Result)
 		}
-		plan.entry, plan.baseMoved = entryAfterRebase, true
-		if stage == oprecord.StageBeforeMove {
-			plan.entry, plan.baseMoved = entryBeforeMove, baseMoved
+		plan.entry, plan.baseMoved = entryPostRebaseFix, true
+		if stage == oprecord.StagePreMergeVerify {
+			plan.entry, plan.baseMoved = entryPreMergeVerify, baseMoved
 			if rs.prior.Stop != nil && rs.prior.Stop.Reason == string(outcome.StopTargetBusy) {
 				// The hooks had passed: only the second lock phase is left.
 				plan.entry = entryMove
@@ -721,7 +730,7 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 	case oprecord.StageMoving:
 		done, exp := rs.moved(ctx, rec)
 		if done {
-			plan.entry, plan.landed, plan.rebased = entryAfterHook, exp, baseMoved
+			plan.entry, plan.moved, plan.landed, plan.rebased = entryCleanup, true, exp, baseMoved
 			break
 		}
 		if inProgress || workTip == "" || !onWorkBranch() {
@@ -760,13 +769,6 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 			plan.entry = entryNormal
 		}
 
-	case oprecord.StageAfter:
-		_, exp := rs.moved(ctx, rec)
-		if exp == "" {
-			exp = p.Tips.Result
-		}
-		plan.entry, plan.landed, plan.rebased = entryAfterHook, exp, baseMoved
-
 	case oprecord.StageCleanup:
 		done, exp := rs.moved(ctx, rec)
 		if rec.Move.Intent != nil {
@@ -803,8 +805,8 @@ func (rs *resumer) failed(ctx context.Context, o *outcome.Outcome, err error) (*
 func (rs *resumer) enter(ctx context.Context, rec locks.Record, plan *resumePlan) (*outcome.Outcome, error) {
 	p := rs.p
 	p.plan = plan
-	if plan.entry == entryAfterHook || plan.entry == entryCleanup || plan.entry == entryContinueConflict ||
-		plan.entry == entrySkipConflict || plan.entry == entryRebased || plan.entry == entryAfterRebase || plan.entry == entryBeforeMove ||
+	if plan.entry == entryCleanup || plan.entry == entryContinueConflict ||
+		plan.entry == entrySkipConflict || plan.entry == entryRebased || plan.entry == entryPostRebaseFix || plan.entry == entryPreMergeVerify ||
 		plan.entry == entryMove {
 		// A stage entered again: the counters of a race and of autofix start over.
 		if err := p.Op.SetAttempts(ctx, func(a *locks.Attempts) { a.RaceRetries, a.Autofix = 0, map[string]int{} }); err != nil {

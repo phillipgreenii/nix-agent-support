@@ -196,3 +196,31 @@ func TestEnvNamesAvoidTheHookPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestNoVerifyIsAcceptedWithLandRebaseContinueAndSkip(t *testing.T) {
+	for _, args := range [][]string{
+		{"land", "b", "--no-verify"},
+		{"rebase", "b", "--onto", "main", "--no-verify"},
+		{"land", "b", "--continue", "--no-verify"},
+		{"land", "--skip", "--no-verify"},
+		{"rebase", "b", "--no-verify", "--continue"},
+	} {
+		if c := mustParse(t, args...); !c.NoVerify {
+			t.Errorf("%v: NoVerify not set: %+v", args, c)
+		}
+	}
+	if c := mustParse(t, "land", "b"); c.NoVerify {
+		t.Error("NoVerify set without the flag")
+	}
+}
+
+func TestNoVerifyIsAUsageErrorWithAbortAndQuitAndOnOtherCommands(t *testing.T) {
+	wantUsage(t, "--no-verify has no meaning with --abort", "land", "b", "--abort", "--no-verify")
+	wantUsage(t, "--no-verify has no meaning with --quit", "rebase", "--quit", "--no-verify")
+	wantUsage(t, "does not take the flag --no-verify", "status", "--no-verify")
+	wantUsage(t, "does not take the flag --no-verify", "config", "check", "--no-verify")
+}
+
+func TestNoVerifyValueIsRejected(t *testing.T) {
+	wantUsage(t, "takes no value", "land", "b", "--no-verify=1")
+}

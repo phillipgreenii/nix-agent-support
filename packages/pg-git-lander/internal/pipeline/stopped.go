@@ -120,8 +120,7 @@ func (d Deps) moveHappened(ctx context.Context, layer *locks.Layer, rec *locks.R
 	if rec.Stop != nil && rec.Stop.MovedAlready {
 		return true
 	}
-	switch rec.Stage {
-	case oprecord.StageAfter, oprecord.StageCleanup:
+	if oprecord.Canonical(rec.Stage) == oprecord.StageCleanup {
 		return true
 	}
 	if rec.Operation != oprecord.OperationLand || rec.Move.Intent == nil || rec.Move.ExpectedResult == nil {

@@ -61,7 +61,7 @@ func TestCheckXDGErrorsNameFileLineKeyAndLayer(t *testing.T) {
 		{"unknown key", "[defaults]\nrun_git_hooks = true\nbogus = 1\n", "defaults.bogus", 3},
 		{"malformed glob", "[defaults]\n[[defaults.conflict]]\nglob = \"[\"\nresolve = [\"sh\"]\n", "defaults.conflict[0].glob", 3},
 		{"malformed duration", "[defaults.lock]\nwait = \"soon\"\n", "defaults.lock.wait", 2},
-		{"empty run argv", "[defaults.hooks]\n[[defaults.hooks.land.before]]\nrun = []\n", "defaults.hooks.land.before[0].run", 3},
+		{"empty run argv", "[defaults.hooks]\n[[defaults.hooks.land.pre-merge-verify]]\nrun = []\n", "defaults.hooks.land.pre-merge-verify[0].run", 3},
 		{"empty resolve argv", "[[defaults.conflict]]\nglob = \"*.lock\"\nresolve = []\n", "defaults.conflict[0].resolve", 3},
 	}
 	for _, c := range cases {
@@ -222,10 +222,10 @@ func assertUnrunnable(t *testing.T, o *outcome.Outcome, cmd, key, file string) {
 
 func TestCheckPathMissInRepoHookIsUnrunnable(t *testing.T) {
 	f := newFx(t)
-	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.before_move]]\nrun = [\"no-such-tool-xyzzy\"]\n"})
+	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.pre-merge-verify]]\nrun = [\"no-such-tool-xyzzy\"]\n"})
 	onlyGitOnPath(t)
 	o := f.check("")
-	assertUnrunnable(t, o, "no-such-tool-xyzzy", "hooks.land.before_move[0].run", ".pg-git-lander.toml")
+	assertUnrunnable(t, o, "no-such-tool-xyzzy", "hooks.land.pre-merge-verify[0].run", ".pg-git-lander.toml")
 }
 
 func TestCheckPathMissInXDGFileIsUnrunnable(t *testing.T) {
@@ -239,17 +239,17 @@ func TestCheckPathMissInXDGFileIsUnrunnable(t *testing.T) {
 func TestCheckPathMissInFileFlagIsUnrunnable(t *testing.T) {
 	f := newFx(t)
 	file := filepath.Join(t.TempDir(), "next.toml")
-	if err := os.WriteFile(file, []byte("[[hooks.land.before_move]]\nrun = [\"no-such-tool-xyzzy\"]\n"), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte("[[hooks.land.pre-merge-verify]]\nrun = [\"no-such-tool-xyzzy\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	onlyGitOnPath(t)
 	o := f.check(file)
-	assertUnrunnable(t, o, "no-such-tool-xyzzy", "hooks.land.before_move[0].run", file)
+	assertUnrunnable(t, o, "no-such-tool-xyzzy", "hooks.land.pre-merge-verify[0].run", file)
 }
 
 func TestCheckAllCommandsPresentIsOK(t *testing.T) {
 	f := newFx(t)
-	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.before_move]]\nrun = [\"git\", \"status\"]\n"})
+	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.pre-merge-verify]]\nrun = [\"git\", \"status\"]\n"})
 	onlyGitOnPath(t)
 	o := f.check("")
 	if o.Outcome != outcome.ConfigOK || o.Exit != 0 || len(o.Warnings) != 0 {
@@ -259,7 +259,7 @@ func TestCheckAllCommandsPresentIsOK(t *testing.T) {
 
 func TestCheckRelativeCommandPathStaysWarning(t *testing.T) {
 	f := newFx(t)
-	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.before_move]]\nrun = [\"./x.sh\"]\n", "x.sh": "#!/bin/sh\n"})
+	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.pre-merge-verify]]\nrun = [\"./x.sh\"]\n", "x.sh": "#!/bin/sh\n"})
 	o := f.check("")
 	if o.Outcome != outcome.ConfigOK || o.Exit != 0 || !hasWarn(o, outcome.WarnRelativeCommandPath, "x.sh") {
 		t.Fatalf("got %+v", o)
@@ -304,4 +304,63 @@ func TestCheckLossyDriverRecognisedByItsCommand(t *testing.T) {
 	if o := f.check(""); !hasWarn(o, outcome.WarnLossyMergeDriver, "merge.mine.driver") {
 		t.Fatalf("got %+v", o.Warnings)
 	}
+}
+
+// An old hook key is a configuration error naming the replacement or the
+// removal, with file and line, in the repo file and in the XDG file.
+func TestOldHookKeysAreConfigErrors(t *testing.T) {
+	cases := []struct {
+		old, want string
+	}{
+		{"before", "removed"},
+		{"after_rebase", "post-rebase-fix"},
+		{"before_move", "pre-merge-verify"},
+		{"after", "removed"},
+	}
+	for _, c := range cases {
+		t.Run("repo file "+c.old, func(t *testing.T) {
+			f := newFx(t)
+			f.commit("cfg", map[string]string{".pg-git-lander.toml": "[hooks.land]\n" + c.old + " = [{ run = [\"x\"] }]\n"})
+			o := f.check("")
+			ce := o.ConfigError
+			if o.Outcome != outcome.ConfigError || ce == nil {
+				t.Fatalf("want config-error, got %+v", o)
+			}
+			if ce.Key != "hooks.land."+c.old || ce.Line != 2 || ce.Layer != "repo-file" || !strings.Contains(o.Message, c.want) {
+				t.Fatalf("got %+v", ce)
+			}
+		})
+		t.Run("xdg "+c.old, func(t *testing.T) {
+			f := newFx(t)
+			f.writeXDG("[defaults.hooks.rebase]\n" + c.old + " = [{ run = [\"x\"] }]\n")
+			o := f.check("")
+			ce := o.ConfigError
+			if o.Outcome != outcome.ConfigError || ce == nil {
+				t.Fatalf("want config-error, got %+v", o)
+			}
+			if !strings.HasSuffix(ce.Key, "hooks.rebase."+c.old) || ce.Line != 2 || ce.Layer != "xdg" ||
+				ce.File != filepath.Join(f.xdg, "config.toml") || !strings.Contains(o.Message, c.want) {
+				t.Fatalf("got %+v", ce)
+			}
+		})
+	}
+	t.Run("an old and a new key in one table name both", func(t *testing.T) {
+		f := newFx(t)
+		f.commit("cfg", map[string]string{".pg-git-lander.toml": "[hooks.land]\npre-merge-verify = [{ run = [\"y\"] }]\nbefore_move = [{ run = [\"x\"] }]\n"})
+		o := f.check("")
+		ce := o.ConfigError
+		if ce == nil || ce.Key != "hooks.land.before_move" || ce.Line != 3 ||
+			!strings.Contains(o.Message, "before_move") || !strings.Contains(o.Message, "pre-merge-verify") {
+			t.Fatalf("got %+v", ce)
+		}
+	})
+	t.Run("an old key is not also an unknown-key warning", func(t *testing.T) {
+		f := newFx(t)
+		f.commit("cfg", map[string]string{".pg-git-lander.toml": "[hooks.land]\nafter = [{ run = [\"x\"] }]\n"})
+		for _, w := range f.check("").Warnings {
+			if w.Warning == outcome.WarnUnknownRepoConfigKey {
+				t.Fatalf("duplicate report: %+v", w)
+			}
+		}
+	})
 }

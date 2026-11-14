@@ -123,7 +123,7 @@ func TestNoConfigurationMeansDefaults(t *testing.T) {
 	if len(c.Sources) != 2 || c.Sources[0].Present || c.Sources[1].Present {
 		t.Fatalf("sources: %+v", c.Sources)
 	}
-	if c.HooksFor("land", "before_move") != nil {
+	if c.HooksFor("land", "pre-merge-verify") != nil {
 		t.Fatal("hooks for an unset point must be empty")
 	}
 }
@@ -142,7 +142,7 @@ wait = "2m"
 [defaults.autofix]
 attempts = 3
 [defaults.hooks]
-land.before = [{ run = ["a"] }]
+land.pre-merge-verify = [{ run = ["a"] }]
 [[defaults.conflict]]
 glob = "x"
 resolve = ["r"]
@@ -154,7 +154,7 @@ resolve = ["d"]
 		c.AutofixAttempts != 3 || c.Lock.LeaseTTL != 45*time.Second || c.Lock.Wait != 2*time.Minute {
 		t.Fatalf("keys: %+v", c)
 	}
-	if h := c.HooksFor("land", "before"); len(h) != 1 || h[0].Cwd != "repo" || h[0].Timeout != config.DefaultTimeout {
+	if h := c.HooksFor("land", "pre-merge-verify"); len(h) != 1 || h[0].Cwd != "worktree" || h[0].Timeout != config.DefaultTimeout {
 		t.Fatalf("hook defaults: %+v", h)
 	}
 	if len(c.Rules) != 1 || c.Rules[0].ID != "xdg-defaults:1:x" || c.Rules[0].RunPer != "file" || c.ConflictDefault == nil {
@@ -167,7 +167,7 @@ func TestLayeringKeyByKeyAndHookListReplacedWhole(t *testing.T) {
 	f.xdgFor(`trust_repo_config = true
 max_conflict_rounds = 4
 [repo.hooks]
-land.after = [{ run = ["entry-after"] }]
+land.post-rebase-fix = [{ run = ["entry-fix"] }]
 `, `
 [defaults]
 run_git_hooks = false
@@ -176,15 +176,15 @@ max_conflict_rounds = 6
 [defaults.autofix]
 attempts = 9
 [defaults.hooks]
-land.before_move = [{ run = ["d1"] }, { run = ["d2"] }]
-land.after = [{ run = ["d-after"] }]
-rebase.after_rebase = [{ run = ["d-rebase"] }]
+land.pre-merge-verify = [{ run = ["d1"] }, { run = ["d2"] }]
+land.post-rebase-fix = [{ run = ["d-fix"] }]
+rebase.post-rebase-fix = [{ run = ["d-rebase"] }]
 `)
 	f.commit("cfg", map[string]string{config.RepoFileName: `
 max_race_retries = 3
 [hooks.land]
-before_move = [{ run = ["r1"], timeout = "20m", skip_exit_codes = [13, 127], cwd = "repo", env = { A = "b" } }]
-after = [{ run = ["repo-after"] }]
+pre-merge-verify = [{ run = ["r1"], timeout = "20m", skip_exit_codes = [13, 127], cwd = "repo", env = { A = "b" } }]
+post-rebase-fix = [{ run = ["repo-fix"] }]
 `})
 	c := f.mustLoad(land)
 	if c.RunGitHooks { // only the defaults set it
@@ -199,15 +199,15 @@ after = [{ run = ["repo-after"] }]
 	if c.AutofixAttempts != 9 {
 		t.Fatalf("autofix = %d", c.AutofixAttempts)
 	}
-	bm := c.HooksFor("land", "before_move")
+	bm := c.HooksFor("land", "pre-merge-verify")
 	if len(bm) != 1 || bm[0].Run[0] != "r1" || bm[0].Timeout != 20*time.Minute ||
 		len(bm[0].SkipExitCodes) != 2 || bm[0].Cwd != "repo" || bm[0].Env["A"] != "b" {
 		t.Fatalf("repo list must replace the defaults list whole: %+v", bm)
 	}
-	if a := c.HooksFor("land", "after"); len(a) != 1 || a[0].Run[0] != "entry-after" {
+	if a := c.HooksFor("land", "post-rebase-fix"); len(a) != 1 || a[0].Run[0] != "entry-fix" {
 		t.Fatalf("entry list must replace the repo list: %+v", a)
 	}
-	if r := c.HooksFor("rebase", "after_rebase"); len(r) != 1 || r[0].Run[0] != "d-rebase" {
+	if r := c.HooksFor("rebase", "post-rebase-fix"); len(r) != 1 || r[0].Run[0] != "d-rebase" {
 		t.Fatalf("an untouched point keeps the defaults list: %+v", r)
 	}
 }
@@ -253,7 +253,7 @@ timeout = "3m"
 }
 
 func TestTrust(t *testing.T) {
-	cmds := map[string]string{config.RepoFileName: "[hooks.land]\nafter = [{ run = [\"x\"] }]\n"}
+	cmds := map[string]string{config.RepoFileName: "[hooks.land]\npre-merge-verify = [{ run = [\"x\"] }]\n"}
 
 	t.Run("untrusted repo naming commands refuses with the XDG line", func(t *testing.T) {
 		f := newFx(t)
@@ -299,13 +299,13 @@ func TestTrust(t *testing.T) {
 		f.xdgFor("trust_repo_config = true\n", "")
 		f.commit("cfg", cmds)
 		c := f.mustLoad(land)
-		if !c.TrustRepoConfig || len(c.HooksFor("land", "after")) != 1 {
+		if !c.TrustRepoConfig || len(c.HooksFor("land", "pre-merge-verify")) != 1 {
 			t.Fatalf("got %+v", c)
 		}
 	})
 	t.Run("an empty hook list names no commands", func(t *testing.T) {
 		f := newFx(t)
-		f.commit("cfg", map[string]string{config.RepoFileName: "[hooks.land]\nafter = []\n"})
+		f.commit("cfg", map[string]string{config.RepoFileName: "[hooks.land]\npost-rebase-fix = []\n"})
 		f.mustLoad(land)
 	})
 }
@@ -323,7 +323,7 @@ func TestIgnoreRepoConfigSkipsTheFileEntirely(t *testing.T) {
 	f := newFx(t)
 	f.xdgFor("ignore_repo_config = true\n", "")
 	// Broken and command-naming: neither matters.
-	f.commit("cfg", map[string]string{config.RepoFileName: "max_race_retries = \"x\"\n[hooks.land]\nafter = [{ run = [\"x\"] }]\n"})
+	f.commit("cfg", map[string]string{config.RepoFileName: "max_race_retries = \"x\"\n[hooks.land]\npre-merge-verify = [{ run = [\"x\"] }]\n"})
 	c := f.mustLoad(land)
 	if !c.IgnoreRepoConfig || c.MaxRaceRetries != 2 || len(c.Hooks) != 0 {
 		t.Fatalf("got %+v", c)
@@ -397,9 +397,9 @@ func TestRepoConfigErrorNamesFileLineKeyLayer(t *testing.T) {
 		line            int
 	}{
 		{"wrong type", "# c\nmax_race_retries = \"x\"\n", "max_race_retries", 2},
-		{"bad duration", "[hooks.land]\nafter = [{ run = [\"x\"], timeout = \"soon\" }]\n", "hooks.land.after[0].timeout", 2},
-		{"bad cwd", "[hooks.land]\nafter = [{ run = [\"x\"], cwd = \"elsewhere\" }]\n", "hooks.land.after[0].cwd", 2},
-		{"empty argv", "\n\n[hooks.land]\nafter = [{ run = [] }]\n", "hooks.land.after[0].run", 4},
+		{"bad duration", "[hooks.land]\npre-merge-verify = [{ run = [\"x\"], timeout = \"soon\" }]\n", "hooks.land.pre-merge-verify[0].timeout", 2},
+		{"bad cwd", "[hooks.land]\npre-merge-verify = [{ run = [\"x\"], cwd = \"elsewhere\" }]\n", "hooks.land.pre-merge-verify[0].cwd", 2},
+		{"empty argv", "\n\n[hooks.land]\npre-merge-verify = [{ run = [] }]\n", "hooks.land.pre-merge-verify[0].run", 4},
 		{"bad run_per", "[[conflict]]\nglob = \"a\"\nresolve = [\"x\"]\nrun_per = \"all\"\n", "conflict[0].run_per", 4},
 		{"bad glob", "[[conflict]]\nglob = \"[a\"\nresolve = [\"x\"]\n", "conflict[0].glob", 2},
 		{"negative", "max_conflict_rounds = -1\n", "max_conflict_rounds", 1},

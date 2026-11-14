@@ -34,6 +34,9 @@ const (
 // Rebaser runs git for the rebase mechanics.
 type Rebaser struct {
 	Git *gitexec.Git
+	// NoVerify passes --no-verify to the initial git rebase (--no-verify of
+	// the tool). git rebase --continue and --skip cannot carry it.
+	NoVerify bool
 }
 
 // contains reports whether tip a contains tip b (b is an ancestor of a).
@@ -106,7 +109,7 @@ type Result struct {
 	// Dropped lists the old commits dropped as already upstream.
 	Dropped []string
 	// BaseMoved is true when at least one commit was replayed onto a base that
-	// differs from the branch's merge base (the after_rebase trigger).
+	// differs from the branch's merge base (the post-rebase-fix trigger).
 	BaseMoved bool
 	// AutoMerged lists paths git reported as auto-merged.
 	AutoMerged []string
@@ -144,7 +147,11 @@ func (r *Rebaser) Rebase(ctx context.Context, dir, base string) (*Result, error)
 		return nil, err
 	}
 
-	res := r.Git.Run(ctx, dir, "rebase", base)
+	args := []string{"rebase"}
+	if r.NoVerify {
+		args = append(args, "--no-verify") // skips only git's pre-rebase hook
+	}
+	res := r.Git.Run(ctx, dir, append(args, base)...)
 	out := string(res.Stdout) + string(res.Stderr)
 	auto := AutoMergedPaths(out)
 	if both, err := r.touchedBothSides(ctx, dir, mb, base, oldTip); err == nil {

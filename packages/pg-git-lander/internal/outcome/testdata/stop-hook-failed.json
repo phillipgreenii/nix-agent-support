@@ -10,7 +10,7 @@
   "reason": "hook-failed",
   "detail": "",
   "retryable": false,
-  "stage": "after_rebase",
+  "stage": "post-rebase-fix",
   "next": [
     "pg-git-lander land feature/x --continue",
     "pg-git-lander land feature/x --abort",
@@ -41,6 +41,7 @@
   "resolved": [],
   "autofix": [],
   "skipped_hooks": [],
+  "verify_skipped": [],
   "warnings": [],
   "moved_already": null,
   "config_changed": null,

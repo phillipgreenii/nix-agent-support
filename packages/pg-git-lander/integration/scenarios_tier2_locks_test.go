@@ -52,7 +52,7 @@ const beforeMoveHookConfig = `
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/mover"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/mover"], timeout = "60s" }]
 `
 
 const resolverBeforeMoveConfig = `
@@ -64,10 +64,10 @@ glob = "app.txt"
 resolve = ["{hooks}/resolver"]
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/mover"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/mover"], timeout = "60s" }]
 `
 
-// Scenario 20: TARGET moves once during before_move. The tool returns to the
+// Scenario 20: TARGET moves once during pre-merge-verify. The tool returns to the
 // rebase for one retry, keeps the resolution made so far (the resolver is not
 // asked a second time) and lands on top of the commit that moved TARGET.
 func TestTier2TargetMovedOnceDuringBeforeMove(t *testing.T) {
@@ -235,7 +235,7 @@ func crashedLand(t *testing.T, point string) *harness {
 	return h
 }
 
-// Scenario 23: kill -9 at rebasing, at before_move and right after the move,
+// Scenario 23: kill -9 at rebasing, at pre-merge-verify and right after the move,
 // then resume. Each completes or aborts cleanly, and a land whose move
 // happened is never reported as nothing-to-land.
 func TestTier2KillNineThenResume(t *testing.T) {
@@ -268,7 +268,7 @@ func TestTier2KillNineThenResume(t *testing.T) {
 		})
 	})
 	t.Run("at-before-move", func(t *testing.T) {
-		h := crashedLand(t, "before_move")
+		h := crashedLand(t, "pre-merge-verify")
 		expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
 		done(t, h, h.run("land", "feature/x", "--continue"), Expected{
 			Outcome: map[string]any{"outcome": "landed", "exit": 0, "branch_fate": "deleted"},
@@ -308,7 +308,7 @@ func TestTier2StaleTargetRoleLockTakenOver(t *testing.T) {
 	h := newHarness(t, Scenario{
 		Shape: ShapeAhead, Fifos: []string{"up", "go"},
 		Layout: []Worktree{{Name: "src", Branch: "feature/x"}, {Name: "spare", Detach: true}},
-		Config: crashConfig("before_move"),
+		Config: crashConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	// TARGET is checked out nowhere and the holder starts in the spare
@@ -381,7 +381,7 @@ func TestTier2QuitAfterConflict(t *testing.T) {
 // --abort on the converted operation works.
 func TestTier2StaleBranchRoleLockConverted(t *testing.T) {
 	setup := func(t *testing.T) *harness {
-		h := crashedLand(t, "before_move")
+		h := crashedLand(t, "pre-merge-verify")
 		// The waiter is a rebase of the very branch the dead holder was landing.
 		r := h.run("rebase", "feature/x", "--onto", "main", "--wait", "10s")
 		expect(t, r, 22, "refused", "holder-died")

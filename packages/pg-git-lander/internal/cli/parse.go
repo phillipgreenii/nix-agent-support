@@ -29,13 +29,14 @@ const (
 
 // Synopsis is the usage text of section 5.1.
 const Synopsis = `usage:
-  pg-git-lander rebase BRANCH --onto REF [--source-worktree PATH] [--work-worktree PATH]
+  pg-git-lander rebase BRANCH --onto REF [--source-worktree PATH] [--work-worktree PATH] [--no-verify]
                        [--wait DURATION] [--context KEY=VALUE]... [--json]
   pg-git-lander land   BRANCH [--into TARGET] [--target-worktree PATH] [--source-worktree PATH] [--work-worktree PATH]
-                       [--keep-source-worktree] [--keep-source-branch]
+                       [--keep-source-worktree] [--keep-source-branch] [--no-verify]
                        [--wait DURATION] [--context KEY=VALUE]... [--json]
-  pg-git-lander rebase [BRANCH] --continue | --skip | --abort | --quit [--wait DURATION] [--json]
-  pg-git-lander land   [BRANCH] --continue | --skip | --abort | --quit [--wait DURATION] [--json]
+  pg-git-lander rebase [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
+  pg-git-lander land   [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
+  pg-git-lander rebase|land [BRANCH] --abort | --quit [--wait DURATION] [--json]
   pg-git-lander status [BRANCH] [--json]
   pg-git-lander log    OP_ID | BRANCH [--tail N]
   pg-git-lander config check [--file PATH] [--json]
@@ -60,8 +61,10 @@ type Command struct {
 
 	TargetWorktree, SourceWorktree, WorkWorktree string
 	KeepSourceWorktree, KeepSourceBranch         bool
-	Wait                                         *time.Duration
-	Context                                      []hooks.ContextPair
+	// NoVerify is --no-verify: skip pre-merge-verify hooks and git's own hooks.
+	NoVerify bool
+	Wait     *time.Duration
+	Context  []hooks.ContextPair
 
 	// File is config check's --file; Tail is log's --tail (-1 when absent).
 	File string
@@ -105,6 +108,7 @@ var flagSpecs = map[string]flagSpec{
 	"--work-worktree":        {value: true, fresh: true, kinds: kinds(KindRebase, KindLand)},
 	"--keep-source-worktree": {fresh: true, kinds: kinds(KindLand)},
 	"--keep-source-branch":   {fresh: true, kinds: kinds(KindLand)},
+	"--no-verify":            {kinds: kinds(KindRebase, KindLand)}, // not fresh: a resume may carry it
 	"--context":              {value: true, fresh: true, kinds: kinds(KindRebase, KindLand)},
 	"--continue":             {kinds: kinds(KindRebase, KindLand)},
 	"--skip":                 {kinds: kinds(KindRebase, KindLand)},
@@ -211,6 +215,9 @@ func parse(args []string) (*Command, *UsageError) {
 	}
 	if len(resumeFlags) == 1 {
 		c.Resume = resumeFlags[0]
+		if c.NoVerify && (c.Resume == outcome.FlagAbort || c.Resume == outcome.FlagQuit) {
+			return nil, usagef("--no-verify has no meaning with %s", c.Resume)
+		}
 		if len(freshFlags) > 0 {
 			return nil, usagef("%s is not accepted with %s: a resumed operation keeps its original context, roles and flags", freshFlags[0], c.Resume)
 		}
@@ -292,6 +299,8 @@ func (c *Command) set(name, val string) *UsageError {
 		c.KeepSourceWorktree = true
 	case "--keep-source-branch":
 		c.KeepSourceBranch = true
+	case "--no-verify":
+		c.NoVerify = true
 	case "--context":
 		k, v, ok := strings.Cut(val, "=")
 		if !ok || k == "" {

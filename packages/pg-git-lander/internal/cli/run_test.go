@@ -203,7 +203,7 @@ func TestConfigCheck(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	missing := filepath.Join(t.TempDir(), "unrunnable.toml")
-	if err := os.WriteFile(missing, []byte("[[hooks.land.before_move]]\nrun = [\"/no/such/abs/tool\"]\n"), 0o600); err != nil {
+	if err := os.WriteFile(missing, []byte("[[hooks.land.pre-merge-verify]]\nrun = [\"/no/such/abs/tool\"]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	r = f.cli(f.repo.Dir, "config", "check", "--file", missing, "--json")

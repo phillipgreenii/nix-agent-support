@@ -140,7 +140,7 @@ func dispatch(ctx context.Context, env *Env, c *Command) (*outcome.Outcome, erro
 		if c.Resume != "" {
 			return pipeline.Resume(ctx, deps, pipeline.ResumeRequest{
 				Flag: c.Resume, Operation: worktrees.Operation(c.Kind), Branch: c.Branch,
-				Dir: dir, RepoFlag: c.Repo,
+				Dir: dir, RepoFlag: c.Repo, NoVerify: c.NoVerify,
 			})
 		}
 		return start(ctx, deps, c, dir)
@@ -168,7 +168,8 @@ func start(ctx context.Context, deps pipeline.Deps, c *Command, dir string) (*ou
 		Dir: dir, RepoFlag: c.Repo,
 		TargetWorktree: c.TargetWorktree, SourceWorktree: c.SourceWorktree, WorkWorktree: c.WorkWorktree,
 		KeepSourceWorktree: c.KeepSourceWorktree, KeepSourceBranch: c.KeepSourceBranch,
-		Context: append([]hooks.ContextPair(nil), c.Context...),
+		NoVerify: c.NoVerify,
+		Context:  append([]hooks.ContextPair(nil), c.Context...),
 	}
 	res, err := pipeline.Start(ctx, deps, req)
 	if err != nil {

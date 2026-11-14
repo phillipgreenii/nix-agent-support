@@ -1,6 +1,7 @@
 package conflict_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -599,4 +600,47 @@ func contains(s []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// git rebase --continue and --skip never carry --no-verify: git does not
+// accept the flag there. The resolution commit is the only call that does when
+// git hooks are off, which is what the tool's --no-verify sets.
+func TestRebaseContinueAndSkipArgvCarryNoNoVerify(t *testing.T) {
+	for _, skip := range []bool{false, true} {
+		f := newFx(t)
+		var calls []string
+		f.g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+			calls = append(calls, strings.Join(append([]string{c.Name}, c.Args...), " "))
+			return cmdrun.Exec(ctx, c)
+		}
+		s := f.script("r.sh", `echo merged > "$PG_GIT_LANDER_PATH"`)
+		if skip {
+			s = f.script("keep-onto.sh", `cp "$PG_GIT_LANDER_ONTO_FILE" "$PG_GIT_LANDER_PATH"`)
+		}
+		f.cfg.Rules = []config.Rule{rule("r", "*", "file", s)}
+		f.conflicting("f.txt")
+		res := f.resolve(f.resolver(false), 0, nil, nil) // run_git_hooks off, as --no-verify sets it
+		if !res.Finished {
+			t.Fatalf("skip=%v: %+v", skip, res.Stop)
+		}
+		want, other := " rebase --continue", " rebase --skip" // git puts its -c options first
+		if skip {
+			want, other = other, want
+		}
+		var sawWant bool
+		for _, c := range calls {
+			if strings.HasSuffix(c, want) {
+				sawWant = true
+			}
+			if strings.HasSuffix(c, other) {
+				t.Errorf("skip=%v: unexpected %q", skip, other)
+			}
+			if strings.Contains(c, " rebase ") && strings.Contains(c, "--no-verify") {
+				t.Errorf("skip=%v: a rebase call carries --no-verify", skip)
+			}
+		}
+		if !sawWant {
+			t.Errorf("skip=%v: no call ending in %q", skip, want)
+		}
+	}
 }

@@ -18,7 +18,6 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/gitexec"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/hooks"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/locks"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/oplog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/outcome"
@@ -252,12 +251,12 @@ func TestEventsAndLogOfSteps1To7(t *testing.T) {
 	f := newFx(t)
 	f.feature()
 	f.git(f.repo.Dir, "config", "merge.zdriver.driver", "true")
-	f.writeXDG("[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.before = [{ run = [\"true\"] }]\n")
+	f.writeXDG("[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.pre-merge-verify = [{ run = [\"true\"] }]\n")
 	p := f.prepared(f.land())
 
 	evs := f.events()
 	names := eventNames(evs)
-	want := []string{"op_start", "stage", "hook", "stage"}
+	want := []string{"op_start", "stage", "stage"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("events = %v, want %v", names, want)
 	}
@@ -272,11 +271,8 @@ func TestEventsAndLogOfSteps1To7(t *testing.T) {
 	if evs[1]["stage"] != "locked" || evs[1]["previous_stage"] != "" {
 		t.Fatalf("first stage = %v", evs[1])
 	}
-	if evs[2]["point"] != "before" || evs[2]["result"] != "pass" || evs[2]["argv0"] != "true" {
-		t.Fatalf("hook = %v", evs[2])
-	}
-	if evs[3]["stage"] != "preparing" || evs[3]["previous_stage"] != "locked" {
-		t.Fatalf("second stage = %v", evs[3])
+	if evs[2]["stage"] != "preparing" || evs[2]["previous_stage"] != "locked" {
+		t.Fatalf("second stage = %v", evs[2])
 	}
 
 	// The log names BRANCH, TARGET and the op_id on its first line, and holds
@@ -469,7 +465,7 @@ func TestRepoFileRefusals(t *testing.T) {
 	t.Run("untrusted", func(t *testing.T) {
 		f := newFx(t)
 		f.feature()
-		f.commit(f.repo.Dir, config.RepoFileName, "[hooks.land]\nbefore = [{ run = [\"true\"] }]\n")
+		f.commit(f.repo.Dir, config.RepoFileName, "[hooks.land]\npre-merge-verify = [{ run = [\"true\"] }]\n")
 		f.wantRefused(f.start(f.land()), outcome.RefUntrustedConfig)
 		f.untouched()
 	})
@@ -510,90 +506,19 @@ func (f *fx) hookScript(body string) string {
 	return p
 }
 
-func (f *fx) beforeHook(script, extra string) {
-	f.writeXDG("[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.before = [{ run = ['" + script + "']" + extra + " }]\n")
-}
-
-func TestBeforeHookRunsOnceWithTipsAndWorktreesBeforeAnySwitch(t *testing.T) {
+// A return to step 3 repeats no preparation: the work branch is the same.
+func TestResnapshotKeepsTheWorkBranch(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
-	out := filepath.Join(t.TempDir(), "hook.out")
-	f.beforeHook(f.hookScript(`{
-echo "branch_start=$PG_GIT_LANDER_BRANCH_START"
-echo "target_tip=$PG_GIT_LANDER_TARGET_TIP"
-echo "work_worktree=$PG_GIT_LANDER_WORK_WORKTREE"
-echo "source_worktree=$PG_GIT_LANDER_SOURCE_WORKTREE"
-echo "destination_worktree=$PG_GIT_LANDER_DESTINATION_WORKTREE"
-echo "work_branch=$PG_GIT_LANDER_WORK_BRANCH"
-echo "op_id=$PG_GIT_LANDER_OP_ID"
-echo "hook=$PG_GIT_LANDER_HOOK"
-echo "ctx=$PG_GIT_LANDER_CONTEXT_REQUEST_ID"
-echo "on=$(git -C "$PG_GIT_LANDER_WORK_WORKTREE" branch --show-current)"
-} >> `+out), "")
-	req := f.land()
-	req.Context = []hooks.ContextPair{{Key: "request-id", Value: "R-17"}}
-	p := f.prepared(req)
-
-	b, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(b)
-	if strings.Count(got, "hook=before") != 1 {
-		t.Fatalf("hook ran %d times:\n%s", strings.Count(got, "hook=before"), got)
-	}
-	for _, w := range []string{
-		"branch_start=" + p.Tips.Branch, "target_tip=" + p.Tips.Target,
-		"work_worktree=" + f.wt, "source_worktree=" + f.wt, "destination_worktree=" + f.repo.Dir,
-		"work_branch=\n", "op_id=" + p.OpID, "ctx=R-17", "on=feature/x",
-	} {
-		if !strings.Contains(got, w) {
-			t.Errorf("hook output lacks %q:\n%s", w, got)
-		}
-	}
-	// A return to step 3 repeats neither the hook nor the preparation.
+	p := f.prepared(f.land())
 	f.commit(f.repo.Dir, "m.txt", "m\n")
 	before := f.workBranches()
 	if err := p.Resnapshot(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	b2, _ := os.ReadFile(out)
-	if string(b2) != got {
-		t.Fatalf("hook ran again:\n%s", b2)
-	}
 	if f.workBranches() != before {
 		t.Fatal("work branch changed by Resnapshot")
-	}
-}
-
-func TestBeforeHookRefusals(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name, body, extra, detail string
-	}{
-		{"non-zero", "echo nope >&2; exit 3", "", "exit-3"},
-		{"exit 75", "exit 75", "", "transient"},
-		{"timeout", "sleep 30", ", timeout = \"300ms\"", "timeout"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			f := newFx(t)
-			f.feature()
-			f.beforeHook(f.hookScript(c.body), c.extra)
-			o := f.wantRefused(f.start(f.land()), outcome.RefBeforeHookRefused)
-			if o.Detail != c.detail {
-				t.Errorf("detail = %q, want %q", o.Detail, c.detail)
-			}
-			f.untouched()
-			if got := f.git(f.wt, "branch", "--show-current"); got != "feature/x" {
-				t.Fatalf("worktree switched to %s", got)
-			}
-			names := eventNames(f.events())
-			if strings.Join(names, ",") != "op_start,stage,hook,op_end" {
-				t.Fatalf("events = %v", names)
-			}
-		})
 	}
 }
 

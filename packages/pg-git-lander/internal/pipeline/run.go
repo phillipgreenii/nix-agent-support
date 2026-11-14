@@ -24,9 +24,9 @@ import (
 )
 
 // This file is steps 8 to 13 of the pipeline (design section 7.1): the rebase
-// with the conflict loop, the after_rebase and before_move hooks, the fenced
-// move with its race return, the after hook, the clean-up and the creation of
-// a stopped operation.
+// with the conflict loop, the post-rebase-fix and pre-merge-verify hooks, the
+// fenced move with its race return, the clean-up and the creation of a stopped
+// operation.
 
 // stopSpec is a stop in the making.
 type stopSpec struct {
@@ -41,16 +41,21 @@ type stopSpec struct {
 type runner struct {
 	p *Prepared
 
-	stats     outcome.Stats
-	resolved  []outcome.Resolution
-	autofix   []outcome.Autofix
-	dropped   []string
-	entries   []outcome.WarningEntry
-	rebased   bool
-	baseMoved bool
-	moved     bool
-	landed    string
-	cres      *cleanup.Result
+	stats    outcome.Stats
+	resolved []outcome.Resolution
+	autofix  []outcome.Autofix
+	dropped  []string
+	// verifySkipped lists the pre-merge-verify entries --no-verify skipped.
+	verifySkipped []outcome.VerifySkip
+	// verifyTip and verifyCount describe the last pass over the point.
+	verifyTip   string
+	verifyCount int
+	entries     []outcome.WarningEntry
+	rebased     bool
+	baseMoved   bool
+	moved       bool
+	landed      string
+	cres        *cleanup.Result
 	// targetWait is the time spent taking the second lock phase (TARGET and the
 	// destination worktree); targetHeld the time they were held, over every
 	// phase this run took; targetSince is when the current hold began (zero
@@ -119,9 +124,6 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 	case entryCleanup:
 		s.moved, s.landed = plan.moved, plan.landed
 		return s.cleanup(ctx, plan.nothing)
-	case entryAfterHook:
-		s.moved, s.landed = true, plan.landed
-		return s.afterAndCleanup(ctx)
 	}
 	if p.Done() {
 		return s.cleanup(ctx, true)
@@ -141,7 +143,7 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 				return nil, nil, err
 			}
 		}
-		s.baseMoved = entry == entryRebased || entry == entryAfterRebase || (entry == entryBeforeMove && plan.baseMoved)
+		s.baseMoved = entry == entryRebased || entry == entryPostRebaseFix || (entry == entryPreMergeVerify && plan.baseMoved)
 		switch {
 		case entry == entryContinueConflict || entry == entrySkipConflict:
 			if sp, err := s.continueRebase(ctx, entry == entrySkipConflict); sp != nil || err != nil {
@@ -165,12 +167,12 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 			return s.cleanup(ctx, false)
 		}
 		if entry != entryMove {
-			if s.baseMoved && entry != entryBeforeMove {
-				if sp, err := s.hookPoint(ctx, hooks.PointAfterRebase, oprecord.StageAfterRebase); sp != nil || err != nil {
+			if s.baseMoved && entry != entryPreMergeVerify {
+				if sp, err := s.hookPoint(ctx, hooks.PointPostRebaseFix, oprecord.StagePostRebaseFix); sp != nil || err != nil {
 					return nil, sp, err
 				}
 			}
-			if sp, err := s.hookPoint(ctx, hooks.PointBeforeMove, oprecord.StageBeforeMove); sp != nil || err != nil {
+			if sp, err := s.verifyPoint(ctx); sp != nil || err != nil {
 				return nil, sp, err
 			}
 		}
@@ -198,7 +200,7 @@ func (s *runner) run(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
 			return out, sp, err
 		}
 	}
-	return s.afterAndCleanup(ctx)
+	return s.cleanup(ctx, false)
 }
 
 // mainAction is what enterMain decided.
@@ -427,7 +429,7 @@ func (s *runner) reuseHooks(ctx context.Context, mode, cur string) (bool, *outco
 	if err := p.EnterStage(ctx, oprecord.StageRebasing, &tip); err != nil {
 		return false, nil, nil, err
 	}
-	rb := &rebase.Rebaser{Git: p.d.Git}
+	rb := &rebase.Rebaser{Git: p.d.Git, NoVerify: p.Request.NoVerify}
 	res, err := rb.Rebase(ctx, work, cur)
 	if err != nil {
 		return false, nil, nil, err
@@ -478,25 +480,6 @@ func (s *runner) changedFiles(ctx context.Context, from, to string) (map[string]
 		}
 	}
 	return files, nil
-}
-
-// afterAndCleanup is step 12, the after hook, and step 13.
-func (s *runner) afterAndCleanup(ctx context.Context) (*outcome.Outcome, *stopSpec, error) {
-	// Step 12: the after hook; a failure is a warning, the move happened.
-	if sp := s.lostCheck(); sp != nil {
-		return nil, sp, nil
-	}
-	f, err := s.runHook(ctx, hooks.PointAfter, oprecord.StageAfter)
-	if err != nil {
-		return nil, nil, err
-	}
-	if f != nil {
-		s.entries = append(s.entries, outcome.WarningEntry{
-			Warning: outcome.WarnAfterHookFailed, Reason: hookDetail(f),
-			Detail: fmt.Sprintf("the after hook (entry %d) %s", f.Index, hookWhy(f)),
-		})
-	}
-	return s.cleanup(ctx, false)
 }
 
 // lostCause is the cancellation cause of a context ended by a lost lease.
@@ -577,7 +560,9 @@ func (s *runner) fence() landmove.Fence {
 
 func (s *runner) hookRunner() *hooks.Runner {
 	p := s.p
-	return &hooks.Runner{Git: p.d.Git, AutofixAttempts: p.Config.AutofixAttempts, RunGitHooks: p.Config.RunGitHooks}
+	// --no-verify implies run_git_hooks = false for the run: the tool's own
+	// commits (autofix, conflict resolution) skip git's hooks too.
+	return &hooks.Runner{Git: p.d.Git, AutofixAttempts: p.Config.AutofixAttempts, RunGitHooks: p.Config.RunGitHooks && !p.Request.NoVerify}
 }
 
 // doRebase is step 8, with the conflict loop of section 10.
@@ -595,7 +580,7 @@ func (s *runner) doRebase(ctx context.Context) (*stopSpec, error) {
 	if p.Operation == worktrees.Rebase {
 		base = p.Tips.Onto
 	}
-	rb := &rebase.Rebaser{Git: p.d.Git}
+	rb := &rebase.Rebaser{Git: p.d.Git, NoVerify: p.Request.NoVerify}
 	res, err := rb.Rebase(ctx, work, base)
 	if err != nil {
 		return nil, err
@@ -708,8 +693,42 @@ func (s *runner) conflictEvents(ctx context.Context, cr *conflict.Result) error 
 	return nil
 }
 
-// hookPoint runs the after_rebase or before_move hook and turns a failure
-// into the stop its effect names.
+// verifyPoint is the pre-merge-verify point. Under --no-verify it runs no
+// entry: it records the skipped entries (outcome, log and events) and moves
+// on; every race retry and --continue that reaches the point does so again.
+func (s *runner) verifyPoint(ctx context.Context) (*stopSpec, error) {
+	p := s.p
+	if !p.Request.NoVerify {
+		return s.hookPoint(ctx, hooks.PointPreMergeVerify, oprecord.StagePreMergeVerify)
+	}
+	if sp := s.lostCheck(); sp != nil {
+		return sp, nil
+	}
+	tip, err := s.workTip(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.EnterStage(ctx, oprecord.StagePreMergeVerify, &tip); err != nil {
+		return nil, err
+	}
+	var argv0s []string
+	s.verifyTip, s.verifyCount = tip, 0
+	for i, h := range p.Config.HooksFor(string(p.Operation), hooks.PointPreMergeVerify) {
+		s.verifySkipped = append(s.verifySkipped, outcome.VerifySkip{
+			Point: hooks.PointPreMergeVerify, Index: i, Run: strings.Join(h.Run, " "), Tip: tip,
+		})
+		argv0s = append(argv0s, h.Run[0])
+		s.verifyCount++
+	}
+	p.Log.Line("VERIFY", fmt.Sprintf("--no-verify: %d %s entries skipped at %s", len(argv0s), hooks.PointPreMergeVerify, tip))
+	if err := p.Events.VerifySkipped(context.WithoutCancel(ctx), len(argv0s), argv0s, tip); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// hookPoint runs the post-rebase-fix or pre-merge-verify hook and turns a
+// failure into the stop its effect names.
 func (s *runner) hookPoint(ctx context.Context, point, stage string) (*stopSpec, error) {
 	if sp := s.lostCheck(); sp != nil {
 		return sp, nil
@@ -718,11 +737,7 @@ func (s *runner) hookPoint(ctx context.Context, point, stage string) (*stopSpec,
 	if err != nil || f == nil {
 		return nil, err
 	}
-	eff := f.Effect()
-	reason := outcome.StopHookFailed
-	if eff.Stop != nil {
-		reason = *eff.Stop
-	}
+	reason := *f.Effect().Stop
 	return &stopSpec{
 		reason: reason, message: fmt.Sprintf("the %s hook (entry %d) %s", f.Point, f.Index, hookFailWhy(f)),
 		detail: hookDetail(f), logTail: f.LogTail,
@@ -966,7 +981,11 @@ func (s *runner) fill(o *outcome.Outcome) {
 	for _, k := range p.SkippedHooks {
 		o.SkippedHooks = append(o.SkippedHooks, outcome.SkippedHook{Point: k.Point, Index: k.Index, Exit: k.Code, StderrTail: k.StderrTail})
 	}
+	o.VerifySkipped = s.verifySkipped
 	o.Warnings = s.entries
+	if req.NoVerify {
+		o.Warnings = append(append([]outcome.WarningEntry(nil), o.Warnings...), s.verifySkippedWarning())
+	}
 	if sel := p.Selection; sel != nil {
 		o.SourceWorktree, o.WorkWorktree = outcomeWT(sel.Source), outcomeWT(sel.Work)
 		o.DestinationWorktree = outcomeWT(sel.Destination)
@@ -980,6 +999,23 @@ func (s *runner) fill(o *outcome.Outcome) {
 			f := c.WorktreeFate
 			o.WorktreeFate = &f
 		}
+	}
+}
+
+// verifySkippedWarning is the warning every outcome of a --no-verify run
+// carries, also when no pre-merge-verify entry was configured: it counts the
+// entries skipped at the tip of the last pass over the point.
+func (s *runner) verifySkippedWarning() outcome.WarningEntry {
+	tip, n := s.verifyTip, s.verifyCount
+	if tip == "" {
+		tip = s.p.Tips.Result
+	}
+	if tip == "" {
+		tip = deref(s.p.Op.Record().Tips.Branch)
+	}
+	return outcome.WarningEntry{
+		Warning: outcome.WarnVerifySkipped, Reason: outcome.ReasonNoVerify,
+		Detail: fmt.Sprintf("%d %s entries skipped at %s", n, hooks.PointPreMergeVerify, tip),
 	}
 }
 
@@ -1098,15 +1134,13 @@ const (
 	entryContinueConflict
 	entrySkipConflict
 	// entryRebased: the caller finished the rebase by hand; continue at
-	// after_rebase.
+	// post-rebase-fix.
 	entryRebased
-	entryAfterRebase
-	entryBeforeMove
+	entryPostRebaseFix
+	entryPreMergeVerify
 	// entryMove: the hooks passed before the stop (target-busy); take the
 	// second lock phase and move without running them again.
 	entryMove
-	// entryAfterHook: the move happened; run the after hook, then clean up.
-	entryAfterHook
 	// entryCleanup runs the clean-up only.
 	entryCleanup
 )
@@ -1114,8 +1148,8 @@ const (
 // resumePlan is what --continue hands to the runner.
 type resumePlan struct {
 	entry resumeEntry
-	// baseMoved says whether the after_rebase hook applied (for the before_move
-	// hook's BASE_MOVED).
+	// baseMoved says whether the post-rebase-fix hook applied (for the
+	// pre-merge-verify hook's BASE_MOVED).
 	baseMoved bool
 	// moved, landed and rebased restore the facts of the move that happened.
 	moved, rebased bool

@@ -24,12 +24,12 @@ import (
 // destination worktree are taken afterwards, for the move.
 
 // twoPhaseXDG writes the XDG config with top-level keys (revalidate,
-// max_race_retries) and a before_move hook script.
+// max_race_retries) and a pre-merge-verify hook script.
 func (f *fx) twoPhaseXDG(top, beforeMove string) {
 	f.t.Helper()
 	s := "[defaults]\n" + top + "\n[defaults.lock]\nwait = \"3s\"\n"
 	if beforeMove != "" {
-		s += "[defaults.hooks]\nland.before_move = [{ run = ['" + beforeMove + "'] }]\n"
+		s += "[defaults.hooks]\nland.pre-merge-verify = [{ run = ['" + beforeMove + "'] }]\n"
 	}
 	f.writeXDG(s)
 }
@@ -92,7 +92,7 @@ func TestHooksRunWithoutTargetOrDestinationLocksAndUnmovedMainFastForwards(t *te
 	f.feature()
 	featTip := f.tip("feature/x")
 	script, seen := f.recordLocksHook("")
-	f.hooksXDG("land", map[string]string{"before_move": script}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": script}, "")
 	out := f.run(f.land())
 	want(t, out, outcome.Landed, 0)
 	got := f.read(seen)
@@ -157,8 +157,8 @@ func TestMovedMainWithDisjointFilesReusesTheHookResultUnderPaths(t *testing.T) {
 	out := f.run(f.land())
 	want(t, out, outcome.Landed, 0)
 	evs := f.events()
-	if n := hookRuns(evs, "before_move"); n != 1 {
-		t.Fatalf("before_move ran %d times, want 1 (the result is reused)", n)
+	if n := hookRuns(evs, "pre-merge-verify"); n != 1 {
+		t.Fatalf("pre-merge-verify ran %d times, want 1 (the result is reused)", n)
 	}
 	rr := lastEvent(evs, "revalidate_reuse")
 	if rr == nil || rr["revalidate"] != "paths" || rr["old_target_tip"] == rr["new_target_tip"] {
@@ -198,8 +198,8 @@ func TestMovedMainWithOverlappingFilesRerunsTheHooksOutsideTheLock(t *testing.T)
 	out := f.run(f.land())
 	want(t, out, outcome.Landed, 0)
 	evs := f.events()
-	if n := hookRuns(evs, "before_move"); n != 2 {
-		t.Fatalf("before_move ran %d times, want 2", n)
+	if n := hookRuns(evs, "pre-merge-verify"); n != 2 {
+		t.Fatalf("pre-merge-verify ran %d times, want 2", n)
 	}
 	rr := lastEvent(evs, "race_retry")
 	if rr == nil || rr["attempt"].(float64) != 1 || countEvents(evs, "revalidate_reuse") != 0 {
@@ -224,8 +224,8 @@ func TestMovedMainWithNoneReusesEvenForOverlappingFiles(t *testing.T) {
 	f.twoPhaseXDG(`revalidate = "none"`, f.movingHook("shared.txt", "1 main\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n"))
 	out := f.run(f.land())
 	want(t, out, outcome.Landed, 0)
-	if n := hookRuns(f.events(), "before_move"); n != 1 {
-		t.Fatalf("before_move ran %d times, want 1", n)
+	if n := hookRuns(f.events(), "pre-merge-verify"); n != 1 {
+		t.Fatalf("pre-merge-verify ran %d times, want 1", n)
 	}
 	if rr := lastEvent(f.events(), "revalidate_reuse"); rr == nil || rr["revalidate"] != "none" || countEvents(f.events(), "race_retry") != 0 {
 		t.Fatalf("revalidate_reuse = %v", rr)
@@ -242,8 +242,8 @@ func TestMovedMainWithAConflictingRebaseFallsBackToTheFullReturn(t *testing.T) {
 	f.twoPhaseXDG(`revalidate = "none"`, f.movingHook("x.txt", "main\\n"))
 	out := f.run(f.land())
 	f.wantStopped(out, outcome.StopConflict)
-	if n := hookRuns(f.events(), "before_move"); n != 1 {
-		t.Errorf("before_move ran %d times before the conflict", n)
+	if n := hookRuns(f.events(), "pre-merge-verify"); n != 1 {
+		t.Errorf("pre-merge-verify ran %d times before the conflict", n)
 	}
 	if got := f.git(f.wt, "status", "--porcelain=v1"); got != "" && !strings.Contains(got, "x.txt") {
 		t.Errorf("status = %q", got)
@@ -257,8 +257,8 @@ func TestMovedMainWithFullRevalidateRerunsEvenWhenDisjoint(t *testing.T) {
 	f.twoPhaseXDG(`revalidate = "full"`, f.movingHook("m.txt", "m\\n"))
 	out := f.run(f.land())
 	want(t, out, outcome.Landed, 0)
-	if n := hookRuns(f.events(), "before_move"); n != 2 {
-		t.Fatalf("before_move ran %d times, want 2", n)
+	if n := hookRuns(f.events(), "pre-merge-verify"); n != 2 {
+		t.Fatalf("pre-merge-verify ran %d times, want 2", n)
 	}
 	if rr := lastEvent(f.events(), "race_retry"); rr == nil || rr["revalidate"] != "full" {
 		t.Fatalf("race_retry = %v", rr)
@@ -293,7 +293,7 @@ func TestBusyTargetAfterTheHooksStopsTargetBusyAndLeavesMainFree(t *testing.T) {
 	f.feature()
 	featTip, mainTip := f.tip("feature/x"), f.tip(f.main)
 	script, seen := f.recordLocksHook("")
-	f.hooksXDG("land", map[string]string{"before_move": script}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": script}, "")
 	// Another landing holds main for the whole wait. The first phase does not
 	// need it, so the hooks still run.
 	f.foreignLock(locks.BranchRef(f.main), "target")
@@ -354,7 +354,7 @@ func TestResumeOfAStopBeforeTheLockPhaseDoesNotTakeTargetOrDestination(t *testin
 	f := newFx(t)
 	f.feature()
 	failing := f.hookScript("exit 1")
-	f.hooksXDG("land", map[string]string{"before_move": failing}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": failing}, "")
 	f.wantStopped(f.run(f.land()), outcome.StopHookFailed)
 	if f.refExists(locks.WorktreeRef("_main")) || f.refExists(locks.BranchRef(f.main)) {
 		t.Fatalf("a stop before the lock phase left a main-line lock:\n%s", f.lockRefs())
@@ -362,7 +362,7 @@ func TestResumeOfAStopBeforeTheLockPhaseDoesNotTakeTargetOrDestination(t *testin
 
 	// A holder of both main-line locks does not block the resume itself.
 	script, seen := f.recordLocksHook("")
-	f.hooksXDG("land", map[string]string{"before_move": script}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": script}, "")
 	var during []string
 	d := f.deps(owner(50001, "r1"))
 	d.Sleep = func(_ context.Context, dur time.Duration) error { f.clock.Advance(dur); return nil }
@@ -484,7 +484,7 @@ func TestLockLostAfterPhaseTwoBeganRecordsTheHoldTime(t *testing.T) {
 	}
 }
 
-// onceHook is a before_move hook that runs body in the destination worktree
+// onceHook is a pre-merge-verify hook that runs body in the destination worktree
 // the first time only (the later run, after a race return, passes).
 func (f *fx) onceHook(body string) string {
 	marker := filepath.Join(f.t.TempDir(), "moved")
@@ -531,7 +531,7 @@ func TestContinueAfterTargetBusyThenMovedMainTakesTheFullRaceReturn(t *testing.T
 	f.untouched()
 }
 
-// pathsReuse runs a land with revalidate = paths whose before_move hook moves
+// pathsReuse runs a land with revalidate = paths whose pre-merge-verify hook moves
 // main with body, after setup; it returns the outcome.
 func (f *fx) pathsLand(body string) *outcome.Outcome {
 	f.t.Helper()
@@ -548,8 +548,8 @@ func TestPathsRevalidateCountsBothNamesOfARenamedFile(t *testing.T) {
 	o := f.pathsLand("git mv a.txt b.txt\ngit commit -qm rename")
 	want(t, o, outcome.Landed, 0)
 	evs := f.events()
-	if n := hookRuns(evs, "before_move"); n != 2 {
-		t.Fatalf("before_move ran %d times, want 2: the old name of the rename overlaps the branch", n)
+	if n := hookRuns(evs, "pre-merge-verify"); n != 2 {
+		t.Fatalf("pre-merge-verify ran %d times, want 2: the old name of the rename overlaps the branch", n)
 	}
 	if countEvents(evs, "revalidate_reuse") != 0 {
 		t.Error("a rename was reused as if disjoint")
@@ -564,8 +564,8 @@ func TestPathsRevalidateReusesAcrossAMergeCommitInTheMovedRange(t *testing.T) {
 	o := f.pathsLand("git switch -q -c side\nprintf 's\\n' > s.txt\ngit add s.txt\ngit commit -qm side\ngit switch -q " + f.main + "\ngit merge -q --no-ff -m merge side")
 	want(t, o, outcome.Landed, 0)
 	evs := f.events()
-	if n := hookRuns(evs, "before_move"); n != 1 || countEvents(evs, "revalidate_reuse") != 1 {
-		t.Fatalf("before_move ran %d times, reuse events %d, want 1 and 1", n, countEvents(evs, "revalidate_reuse"))
+	if n := hookRuns(evs, "pre-merge-verify"); n != 1 || countEvents(evs, "revalidate_reuse") != 1 {
+		t.Fatalf("pre-merge-verify ran %d times, reuse events %d, want 1 and 1", n, countEvents(evs, "revalidate_reuse"))
 	}
 	if f.mainFile("x.txt") != "x" || f.mainFile("s.txt") != "s" {
 		t.Fatal("the landed history lacks a file")
@@ -584,8 +584,8 @@ func TestPathsRevalidateRerunsWhenTheConfigurationChangedInTheMovedRange(t *test
 	o := f.pathsLand("printf 'max_race_retries = 7\\n' > .pg-git-lander.toml\ngit add .pg-git-lander.toml\ngit commit -qm cfg")
 	want(t, o, outcome.Landed, 0)
 	evs := f.events()
-	if n := hookRuns(evs, "before_move"); n != 2 {
-		t.Fatalf("before_move ran %d times, want 2: the digest changed", n)
+	if n := hookRuns(evs, "pre-merge-verify"); n != 2 {
+		t.Fatalf("pre-merge-verify ran %d times, want 2: the digest changed", n)
 	}
 	if countEvents(evs, "revalidate_reuse") != 0 {
 		t.Error("a changed configuration was reused")
@@ -603,8 +603,8 @@ func TestPathsRevalidateWithAnEmptyBranchDiffReusesTheHookResult(t *testing.T) {
 	o := f.pathsLand("printf 'm\\n' > m.txt\ngit add m.txt\ngit commit -qm moved")
 	want(t, o, outcome.Landed, 0)
 	evs := f.events()
-	if n := hookRuns(evs, "before_move"); n != 1 || countEvents(evs, "revalidate_reuse") != 1 {
-		t.Fatalf("before_move ran %d times, reuse events %d, want 1 and 1", n, countEvents(evs, "revalidate_reuse"))
+	if n := hookRuns(evs, "pre-merge-verify"); n != 1 || countEvents(evs, "revalidate_reuse") != 1 {
+		t.Fatalf("pre-merge-verify ran %d times, reuse events %d, want 1 and 1", n, countEvents(evs, "revalidate_reuse"))
 	}
 	if f.mainFile("m.txt") != "m" {
 		t.Fatal("main lost the moved commit")

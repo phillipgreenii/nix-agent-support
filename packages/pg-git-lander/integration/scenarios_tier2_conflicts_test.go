@@ -142,7 +142,7 @@ func TestTier2AfterHookFailsLandsWithWarning(t *testing.T) {
 // trusted, applied when the XDG entry trusts it, and skipped entirely under
 // ignore_repo_config.
 func TestTier2RepoConfigTrust(t *testing.T) {
-	repoFile := "[hooks.land]\nbefore_move = [{ run = [\"sh\", \"-c\", \"echo ran > \\\"$PGL_MARKERS/repo-hook\\\"\"] }]\n"
+	repoFile := "[hooks.land]\npre-merge-verify = [{ run = [\"sh\", \"-c\", \"echo ran > \\\"$PGL_MARKERS/repo-hook\\\"\"] }]\n"
 	entry := func(extra string) string { return "[[repo]]\nroot = \"{repo}\"\n" + extra }
 	setup := func(t *testing.T, cfg string) *harness {
 		h := newHarness(t, Scenario{Shape: ShapeAhead, Layout: srcOnBr, Config: cfg})
@@ -341,13 +341,13 @@ func TestTier2TransientExit75(t *testing.T) {
 		h := newHarness(t, Scenario{
 			Shape:  ShapeAhead,
 			Layout: srcOnBr,
-			Config: "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\nbefore_move = [{ run = [\"{hooks}/gate\"], timeout = \"60s\" }]\n",
+			Config: "[[repo]]\nroot = \"{repo}\"\n\n[repo.hooks.land]\npre-merge-verify = [{ run = [\"{hooks}/gate\"], timeout = \"60s\" }]\n",
 			Hooks:  map[string]string{"gate": `[ -e "$PGL_MARKERS/fixed" ] || exit 75`},
 		})
 		r := h.run("land", "feature/x")
 		expect(t, r, 21, "stopped", "transient")
 		checkNow(t, h, r, Expected{
-			Outcome:  map[string]any{"retryable": true, "stage": "before_move"},
+			Outcome:  map[string]any{"retryable": true, "stage": "pre-merge-verify"},
 			Snapshot: Snapshot{Refs: startRefs(), TargetTree: "@tree:main"},
 			Stopped:  true,
 		})

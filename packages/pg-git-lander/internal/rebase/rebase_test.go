@@ -351,3 +351,30 @@ func TestCheckAttrsNoPathsIsNoop(t *testing.T) {
 		t.Fatalf("err=%v lines=%d", err, len(d.Lines))
 	}
 }
+
+// NoVerify passes --no-verify to the initial git rebase, which skips git's
+// pre-rebase hook; without it the planted hook runs and refuses the rebase.
+func TestNoVerifySkipsTheGitPreRebaseHook(t *testing.T) {
+	for _, noVerify := range []bool{false, true} {
+		f := newFx(t)
+		mainTip, _ := f.diverge("m", "1\n", "w", "1\n")
+		marker := filepath.Join(f.repo.Root(), "pre-rebase-ran")
+		hook := "#!/bin/sh\ntouch " + marker + "\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(f.repo.Root(), "hooks", "pre-rebase"), []byte(hook), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		f.r.NoVerify = noVerify
+		res, err := f.r.Rebase(t.Context(), f.repo.Dir, mainTip)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, statErr := os.Stat(marker)
+		ran := statErr == nil
+		if noVerify && (!res.Finished || ran) {
+			t.Errorf("noVerify: finished=%v hook ran=%v res=%+v", res.Finished, ran, res)
+		}
+		if !noVerify && (res.Finished || !ran || res.Stop == nil) {
+			t.Errorf("verify: finished=%v hook ran=%v res=%+v", res.Finished, ran, res)
+		}
+	}
+}

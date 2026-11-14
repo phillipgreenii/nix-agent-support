@@ -37,6 +37,7 @@
   "resolved": [],
   "autofix": [],
   "skipped_hooks": [],
+  "verify_skipped": [],
   "warnings": [],
   "moved_already": null,
   "config_changed": null,

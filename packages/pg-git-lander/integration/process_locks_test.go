@@ -379,14 +379,14 @@ func TestSigstopHolderPastItsLease(t *testing.T) {
 	h := newHarness(t, Scenario{
 		Name: "sigstop-past-lease", Shape: ShapeAhead, Fifos: []string{"up", "go"},
 		Layout: []Worktree{{Name: "src", Branch: "feature/x"}},
-		Config: blockingConfig("before_move"),
+		Config: blockingConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	h.addBranch("y")
 	startMain := h.mustGit(h.repo, "rev-parse", "main")
 
 	holder := h.start("holder", "land", "feature/x")
-	h.await("up") // the holder is inside before_move with every lock held
+	h.await("up") // the holder is inside pre-merge-verify with every lock held
 	if err := holder.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +415,7 @@ func TestSigstopHolderLosesLockMidHook(t *testing.T) {
 	h := newHarness(t, Scenario{
 		Name: "sigstop-lock-lost-mid-hook", Shape: ShapeAhead, Fifos: []string{"up", "go"},
 		Layout: []Worktree{{Name: "src", Branch: "feature/x"}},
-		Config: blockingConfig("before_move"),
+		Config: blockingConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	h.addBranch("y")
@@ -448,14 +448,14 @@ func TestSigstopHolderLosesLockMidHook(t *testing.T) {
 	h.noProblems()
 }
 
-// TestSigtermDuringLongHook: SIGTERM during a long before_move hook; the
+// TestSigtermDuringLongHook: SIGTERM during a long pre-merge-verify hook; the
 // hook's process group dies, the record is stopped with interrupted, TARGET's
 // lock is released, and --continue then lands.
 func TestSigtermDuringLongHook(t *testing.T) {
 	h := newHarness(t, Scenario{
 		Name: "sigterm-long-hook", Shape: ShapeAhead, Fifos: []string{"up", "go"},
 		Layout: []Worktree{{Name: "src", Branch: "feature/x"}},
-		Config: crashConfig("before_move"),
+		Config: crashConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	holder := h.start("holder", "land", "feature/x")
@@ -494,7 +494,7 @@ func TestGrandchildPastHookTimeout(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/spawn"], timeout = "1s" }]
+pre-merge-verify = [{ run = ["{hooks}/spawn"], timeout = "1s" }]
 `,
 		Hooks: map[string]string{"spawn": `
 echo $$ > "$PGL_MARKERS/hook.pid"
@@ -526,7 +526,7 @@ func TestMissingAndNonExecutableCommandsMatchSkipExitCodes(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [
+pre-merge-verify = [
   { run = ["{hooks}/missing"], skip_exit_codes = [127] },
   { run = ["{hooks}/not-executable"], skip_exit_codes = [126] },
   { run = ["no-such-command-pgl-integration"], skip_exit_codes = [127] },
@@ -559,7 +559,7 @@ func TestMissingCommandWithoutSkipFails(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/missing"] }]
+pre-merge-verify = [{ run = ["{hooks}/missing"] }]
 `,
 	})
 	expect(t, h.run("land", "feature/x"), 21, "stopped", "hook-failed")
@@ -584,7 +584,7 @@ func TestRealEnvironmentReachesHooksResolversAndGitChildren(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/record", "hook"] }]
+pre-merge-verify = [{ run = ["{hooks}/record", "hook"] }]
 
 [[repo.conflict]]
 glob = "flake.lock"
@@ -688,7 +688,7 @@ func resumeRaceScenario(name string, block bool) Scenario {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/flaky"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/flaky"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"flaky": resumeRaceHook(block)},
 	}

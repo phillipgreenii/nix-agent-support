@@ -102,16 +102,16 @@ func TestResumeAbortBeforeTheMoveRestoresTheStartState(t *testing.T) {
 		setup  func(f *fx)
 	}{
 		{"conflict", outcome.StopConflict, func(f *fx) { f.conflicting() }},
-		{"hook-failed at before_move", outcome.StopHookFailed, func(f *fx) { f.feature(); failing(f, "before_move", "exit 1") }},
-		{"hook-failed at after_rebase", outcome.StopHookFailed, func(f *fx) {
+		{"hook-failed at pre-merge-verify", outcome.StopHookFailed, func(f *fx) { f.feature(); failing(f, "pre-merge-verify", "exit 1") }},
+		{"hook-failed at post-rebase-fix", outcome.StopHookFailed, func(f *fx) {
 			f.feature()
 			f.commit(f.repo.Dir, "m.txt", "m\n")
-			failing(f, "after_rebase", "exit 1")
+			failing(f, "post-rebase-fix", "exit 1")
 		}},
-		{"transient", outcome.StopTransient, func(f *fx) { f.feature(); failing(f, "before_move", "exit 75") }},
+		{"transient", outcome.StopTransient, func(f *fx) { f.feature(); failing(f, "pre-merge-verify", "exit 75") }},
 		{"race", outcome.StopRace, func(f *fx) {
 			f.feature()
-			f.hooksXDG("land", map[string]string{"before_move": f.raceHook(true)}, "")
+			f.hooksXDG("land", map[string]string{"pre-merge-verify": f.raceHook(true)}, "")
 		}},
 	}
 	for _, c := range cases {
@@ -195,7 +195,7 @@ func (f *fx) landWithWork() pipeline.Request {
 }
 
 func (f *fx) failingBeforeMove(marker string) {
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript(
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript(
 		`if [ ! -e ` + marker + ` ]; then exit 1; fi`,
 	)}, "")
 }
@@ -250,26 +250,23 @@ func TestResumeAbortOfMoveUnverifiedLeavesTheBranch(t *testing.T) {
 	f.wantStartState()
 }
 
-func TestResumeContinueAfterTheMoveRunsTheAfterHookAndCleansUp(t *testing.T) {
+// A record at stage "after", written by a version that still had the after
+// hook, resumes as cleanup: the move already happened and no hook runs.
+func TestResumeContinueAfterTheMoveCleansUp(t *testing.T) {
 	t.Parallel()
 	for _, stage := range []string{"moving", "after", "cleanup"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newFx(t)
 			f.feature()
-			mark := filepath.Join(t.TempDir(), "after-ran")
+			mark := filepath.Join(t.TempDir(), "verify-ran")
 			f.hooksXDG("land", map[string]string{
-				"before_move": f.hookScript("exit 1"),
-				"after":       f.hookScript("touch " + mark),
+				"pre-merge-verify": f.hookScript("touch " + mark + "; exit 1"),
 			}, "")
 			result := f.afterTheMove(stage)
 			o := f.resume(outcome.FlagContinue)
 			want(t, o, outcome.Landed, 0)
 			if o.LandedCommit != result || f.tip(f.main) != result {
 				t.Fatalf("landed %s, main %s, want %s", o.LandedCommit, f.tip(f.main), result)
-			}
-			_, err := os.Stat(mark)
-			if ran := err == nil; ran != (stage != "cleanup") {
-				t.Errorf("after hook ran = %v at stage %s", ran, stage)
 			}
 			f.untouched()
 		})
@@ -280,7 +277,7 @@ func TestResumeContinueWithTheSourceWorktreeAlreadyRemoved(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("exit 1")}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("exit 1")}, "")
 	result := f.afterTheMove("after")
 	f.git(f.repo.Dir, "worktree", "remove", "--force", f.wt) // the source worktree: already gone
 	o := f.resume(outcome.FlagContinue)
@@ -563,7 +560,7 @@ func TestResumeContinueAfterABusyResume(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
-	f.writeXDG("[defaults]\nmax_race_retries = 0\n[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.before_move = [{ run = ['" + f.raceHook(true) + "'] }]\n")
+	f.writeXDG("[defaults]\nmax_race_retries = 0\n[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.pre-merge-verify = [{ run = ['" + f.raceHook(true) + "'] }]\n")
 	stopped := f.run(f.land())
 	f.wantStopped(stopped, outcome.StopRace)
 	if stopped.Stage != "moving" {
@@ -606,7 +603,7 @@ func TestResumeSkipIsOnlyValidWithGitsRebaseInProgress(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
 	f.feature()
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("exit 1")}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("exit 1")}, "")
 	f.wantStopped(f.run(f.land()), outcome.StopHookFailed)
 	oid := f.branchOID()
 	f.wantRefusedOutcome(f.resume(outcome.FlagSkip), outcome.RefCannotResume, outcome.DetailRebaseStateMissing)
@@ -667,4 +664,110 @@ func TestResumeEmitsStageAndOpEndEvents(t *testing.T) {
 		t.Errorf("no stage events in %v", eventNames(evs))
 	}
 	_ = context.Background
+}
+
+// A record written by a version that still named the stages after_rebase and
+// before_move resumes under the new names.
+func TestResumeRecordWithFormerStageNames(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		old   string
+		point string
+		setup func(f *fx)
+	}{
+		{"before_move", "pre-merge-verify", func(f *fx) { f.feature() }},
+		{"after_rebase", "post-rebase-fix", func(f *fx) { f.feature(); f.commit(f.repo.Dir, "m.txt", "m\n") }},
+	}
+	for _, c := range cases {
+		t.Run(c.old, func(t *testing.T) {
+			f := newFx(t)
+			c.setup(f)
+			marker := filepath.Join(t.TempDir(), "fixed")
+			f.hooksXDG("land", map[string]string{c.point: f.hookScript(`if [ ! -e ` + marker + ` ]; then exit 1; fi`)}, "")
+			stopped := f.run(f.land())
+			f.wantStopped(stopped, outcome.StopHookFailed)
+			if stopped.Stage != c.point {
+				t.Fatalf("stage = %q, want %q", stopped.Stage, c.point)
+			}
+			f.forge(func(r map[string]any) { r["stage"] = c.old })
+			if err := os.WriteFile(marker, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			want(t, f.resume(outcome.FlagContinue), outcome.Landed, 0)
+			f.untouched()
+		})
+	}
+}
+
+// --no-verify on --continue lands past a failed pre-merge-verify (and past a
+// timed-out one), records the flag, and carries the verify-skipped warning.
+func TestResumeContinueWithNoVerifyLandsPastAFailedGate(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, body, extra string
+		reason            outcome.StopReason
+	}{
+		{"failure", "exit 1", "", outcome.StopHookFailed},
+		{"timeout", "sleep 30", ", timeout = \"300ms\"", outcome.StopTimeout},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFx(t)
+			f.feature()
+			f.writeXDG("[defaults.lock]\nwait = \"3s\"\n[defaults.hooks]\nland.pre-merge-verify = [{ run = ['" + f.hookScript(c.body) + "']" + c.extra + " }]\n")
+			f.wantStopped(f.run(f.land()), c.reason)
+			if f.record(locks.BranchRef("feature/x"))["no_verify"] != false {
+				t.Fatal("no_verify set without the flag")
+			}
+			req := f.resumeReq(outcome.FlagContinue, worktrees.Land, "feature/x")
+			req.NoVerify = true
+			o := f.resumeWith(req)
+			want(t, o, outcome.Landed, 0)
+			if !hasWarning(o, outcome.WarnVerifySkipped) || len(o.VerifySkipped) != 1 || o.VerifySkipped[0].Point != "pre-merge-verify" || o.VerifySkipped[0].Index != 0 {
+				t.Fatalf("warnings %+v verify_skipped %+v", o.Warnings, o.VerifySkipped)
+			}
+			if got := lastEvent(f.events(), "verify_skipped"); got == nil || got["count"] != float64(1) {
+				t.Fatalf("verify_skipped event = %v", got)
+			}
+			f.untouched()
+		})
+	}
+}
+
+// A land started with --no-verify keeps the flag across a stop: a plain
+// --continue still skips pre-merge-verify. The record carries it.
+func TestNoVerifyIsStickyAcrossAConflictStop(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.conflicting()
+	mark := filepath.Join(t.TempDir(), "verify-ran")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("touch " + mark + "; exit 1")}, "")
+	req := f.land()
+	req.NoVerify = true
+	stopped := f.run(req)
+	f.wantStopped(stopped, outcome.StopConflict)
+	if f.record(locks.BranchRef("feature/x"))["no_verify"] != true {
+		t.Fatalf("record = %v", f.record(locks.BranchRef("feature/x")))
+	}
+	work := stopped.WorkWorktree.Path
+	if err := os.WriteFile(filepath.Join(work, "x.txt"), []byte("by hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.git(work, "add", "x.txt")
+	o := f.resume(outcome.FlagContinue) // no --no-verify here
+	want(t, o, outcome.Landed, 0)
+	if _, err := os.Stat(mark); err == nil {
+		t.Fatal("pre-merge-verify ran on the plain --continue")
+	}
+	if !hasWarning(o, outcome.WarnVerifySkipped) {
+		t.Fatalf("warnings = %+v", o.Warnings)
+	}
+}
+
+func hasWarning(o *outcome.Outcome, w outcome.Warning) bool {
+	for _, e := range o.Warnings {
+		if e.Warning == w {
+			return true
+		}
+	}
+	return false
 }

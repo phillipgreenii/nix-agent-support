@@ -10,7 +10,7 @@
   "reason": "target-busy",
   "detail": "",
   "retryable": true,
-  "stage": "before_move",
+  "stage": "pre-merge-verify",
   "next": [
     "pg-git-lander land feature/x --continue",
     "pg-git-lander land feature/x --abort"
@@ -40,6 +40,7 @@
   "resolved": [],
   "autofix": [],
   "skipped_hooks": [],
+  "verify_skipped": [],
   "warnings": [],
   "moved_already": null,
   "config_changed": null,

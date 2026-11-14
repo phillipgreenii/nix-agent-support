@@ -101,6 +101,15 @@ type SkippedHook struct {
 	StderrTail string `json:"stderr_tail"`
 }
 
+// VerifySkip is a pre-merge-verify entry that --no-verify skipped; Tip is the
+// work branch tip the land went on with.
+type VerifySkip struct {
+	Point string `json:"point"`
+	Index int    `json:"index"`
+	Run   string `json:"run"`
+	Tip   string `json:"tip"`
+}
+
 // WarningEntry is a warning word with its details.
 type WarningEntry struct {
 	Warning Warning `json:"warning"`
@@ -161,6 +170,7 @@ type Outcome struct {
 	Resolved      []Resolution   `json:"resolved"`
 	Autofix       []Autofix      `json:"autofix"`
 	SkippedHooks  []SkippedHook  `json:"skipped_hooks"`
+	VerifySkipped []VerifySkip   `json:"verify_skipped"`
 	Warnings      []WarningEntry `json:"warnings"`
 	MovedAlready  *bool          `json:"moved_already"`
 	ConfigChanged *bool          `json:"config_changed"`
@@ -252,6 +262,9 @@ func (o *Outcome) JSON() ([]byte, error) {
 	}
 	if c.SkippedHooks == nil {
 		c.SkippedHooks = []SkippedHook{}
+	}
+	if c.VerifySkipped == nil {
+		c.VerifySkipped = []VerifySkip{}
 	}
 	if c.Warnings == nil {
 		c.Warnings = []WarningEntry{}

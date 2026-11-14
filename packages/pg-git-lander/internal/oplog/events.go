@@ -26,6 +26,7 @@ const (
 	EvRevalidateReuse = "revalidate_reuse"
 	EvSettle          = "settle"
 	EvHook            = "hook"
+	EvVerifySkipped   = "verify_skipped"
 	EvHolderConverted = "holder_converted"
 	EvConflict        = "conflict"
 	EvOpEnd           = "op_end"
@@ -211,6 +212,18 @@ func (e *Events) Hook(ctx context.Context, rec hooks.CommandRecord) error {
 	return e.Emit(ctx, EvHook, map[string]any{
 		"point": rec.Point, "index": rec.Index, "argv0": rec.Argv0, "exit": rec.Code,
 		"duration_ms": rec.Duration.Milliseconds(), "result": rec.Result,
+	})
+}
+
+// VerifySkipped emits verify_skipped: --no-verify skipped count pre-merge-verify
+// entries (possibly none) with the work branch at tip. argv0s names the
+// entries' commands, in order.
+func (e *Events) VerifySkipped(ctx context.Context, count int, argv0s []string, tip string) error {
+	if argv0s == nil {
+		argv0s = []string{}
+	}
+	return e.Emit(ctx, EvVerifySkipped, map[string]any{
+		"point": hooks.PointPreMergeVerify, "count": count, "argv0": argv0s, "tip": tip,
 	})
 }
 

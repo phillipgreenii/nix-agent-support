@@ -16,8 +16,18 @@ const DefaultTimeout = 10 * time.Minute
 // Hook operations and points (design section 12.4).
 var (
 	operations = []string{"rebase", "land"}
-	points     = []string{"before", "after_rebase", "before_move", "after"}
+	points     = []string{"post-rebase-fix", "pre-merge-verify"}
 )
+
+// oldPoints maps each removed hook key to what replaces it ("" with a
+// removal note when nothing does). An old key is a configuration error, never
+// mapped (no deprecation window).
+var oldPoints = []struct{ key, replacement, note string }{
+	{"before", "", "the before hook point was removed"},
+	{"after_rebase", "post-rebase-fix", "renamed to post-rebase-fix"},
+	{"before_move", "pre-merge-verify", "renamed to pre-merge-verify (it is read-only now; move autofixers to post-rebase-fix)"},
+	{"after", "", "the after hook point was removed"},
+}
 
 // Hook is one hook entry.
 type Hook struct {
@@ -303,7 +313,12 @@ func (p *parser) hooks(raw any, base string) map[string]map[string][]Hook {
 		if !ok {
 			continue
 		}
-		p.checkKeys(ot, ob, points...)
+		p.checkOldPoints(ot, ob)
+		allowed := append([]string{}, points...)
+		for _, o := range oldPoints {
+			allowed = append(allowed, o.key) // reported by checkOldPoints, not as unknown
+		}
+		p.checkKeys(ot, ob, allowed...)
 		for _, pt := range points {
 			rawPt, ok := ot[pt]
 			if !ok {
@@ -317,7 +332,7 @@ func (p *parser) hooks(raw any, base string) map[string]map[string][]Hook {
 			}
 			hooks := []Hook{}
 			for i, e := range list {
-				if h := p.hook(e, fmt.Sprintf("%s[%d]", key, i), pt); h != nil {
+				if h := p.hook(e, fmt.Sprintf("%s[%d]", key, i)); h != nil {
 					hooks = append(hooks, *h)
 				}
 			}
@@ -330,12 +345,28 @@ func (p *parser) hooks(raw any, base string) map[string]map[string][]Hook {
 	return out
 }
 
-func (p *parser) hook(e map[string]any, key, point string) *Hook {
+// checkOldPoints fails each removed hook key present in ot, naming the
+// replacement (or the removal). A table that sets an old key and its
+// replacement is named in both.
+func (p *parser) checkOldPoints(ot map[string]any, ob string) {
+	for _, o := range oldPoints {
+		if _, ok := ot[o.key]; !ok {
+			continue
+		}
+		key := join(ob, o.key)
+		if o.replacement != "" {
+			if _, both := ot[o.replacement]; both {
+				p.fail(key, "%s: the table sets both %s and %s; keep only %s", o.note, o.key, o.replacement, o.replacement)
+				continue
+			}
+		}
+		p.fail(key, "%s", o.note)
+	}
+}
+
+func (p *parser) hook(e map[string]any, key string) *Hook {
 	p.checkKeys(e, key, "run", "timeout", "skip_exit_codes", "cwd", "env")
 	h := &Hook{Timeout: DefaultTimeout, Cwd: "worktree", Env: map[string]string{}, Key: key, Line: lineFor(p.lines, key)}
-	if point == "before" {
-		h.Cwd = "repo"
-	}
 	n := len(p.errs)
 	if _, ok := e["run"]; !ok {
 		p.fail(key, "a hook entry needs run")

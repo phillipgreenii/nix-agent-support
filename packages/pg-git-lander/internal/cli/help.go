@@ -23,6 +23,27 @@ resuming a stopped operation:
   They accept no context, worktree or keep flags: a resumed operation keeps
   the ones it started with.
 
+--no-verify (rebase, land, --continue, --skip; not --abort or --quit):
+  skip pre-merge-verify hooks and git's own hooks for this run; recorded in the
+  outcome (warning verify-skipped); do not use unless the operator asked.
+  It skips every pre-merge-verify entry, on every race retry and every
+  --continue. The tool's own commits (autofix, conflict resolution) and its
+  initial git rebase skip git's hooks too, as run_git_hooks = false does.
+  post-rebase-fix hooks, conflict rules and their verify, and the built-in
+  preconditions still run. The flag is remembered by a stopped operation:
+  pass it again on --continue only to turn it on; --abort ends it.
+
+hooks (configuration, the same names under hooks.land and hooks.rebase):
+  post-rebase-fix   runs only after a rebase; may change the tree (autofix
+                    commits)
+  pre-merge-verify  runs on every path before the branch moves, in a
+                    fast-forward too; read-only: a change to a tracked file or
+                    a moved HEAD stops the operation (hook-failed,
+                    verify-modified-tree)
+  Every post-rebase-fix entry runs before any pre-merge-verify entry. The
+  former keys before, after_rebase, before_move and after are configuration
+  errors.
+
 keep flags (land):
   none                          BRANCH deleted, source worktree removed
   --keep-source-worktree        BRANCH deleted, source worktree parked on the

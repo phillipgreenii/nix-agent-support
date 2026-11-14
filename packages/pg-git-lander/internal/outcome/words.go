@@ -79,7 +79,6 @@ type Warning string
 
 // Warning words (design section 6.3).
 const (
-	WarnAfterHookFailed         Warning = "after-hook-failed"
 	WarnBranchNotDeleted        Warning = "branch-not-deleted"
 	WarnBranchNotMoved          Warning = "branch-not-moved"
 	WarnSourceWorktreeNotRemove Warning = "source-worktree-not-removed"
@@ -90,6 +89,7 @@ const (
 	WarnLossyMergeDriver        Warning = "lossy-merge-driver"
 	WarnRelativeCommandPath     Warning = "relative-command-path"
 	WarnCommandNotFound         Warning = "command-not-found"
+	WarnVerifySkipped           Warning = "verify-skipped"
 )
 
 // Detail values of branch-not-deleted.
@@ -107,6 +107,8 @@ const (
 	DetailUnresolved         = "unresolved"
 	DetailRebaseStateMissing = "rebase-state-missing"
 	DetailWorktreeMismatch   = "worktree-mismatch"
+	// ReasonNoVerify is the reason of the verify-skipped warning.
+	ReasonNoVerify = "no-verify"
 )
 
 // Worktree roles for dirty and not-a-worktree.

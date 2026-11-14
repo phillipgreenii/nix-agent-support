@@ -20,13 +20,17 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/outcome"
 )
 
-// Hook points (design section 13.1).
+// Hook points: post-rebase-fix runs only after a rebase and may change the
+// tree (autofix commits); pre-merge-verify runs on every path that moves the
+// branch and must not change it.
 const (
-	PointBefore      = "before"
-	PointAfterRebase = "after_rebase"
-	PointBeforeMove  = "before_move"
-	PointAfter       = "after"
+	PointPostRebaseFix  = "post-rebase-fix"
+	PointPreMergeVerify = "pre-merge-verify"
 )
+
+// VerifyModifiedDetail is the detail of a hook-failed stop whose
+// pre-merge-verify entry changed tracked files or moved HEAD.
+const VerifyModifiedDetail = "verify-modified-tree"
 
 // Exit codes of the contract (design section 13.3).
 const (
@@ -92,6 +96,9 @@ const (
 	TimedOut
 	AutofixExhausted // autofix.attempts runs without a clean pass
 	CommitRejected   // an autofix commit a git commit hook kept rejecting
+	// VerifyModified: a pre-merge-verify entry exited cleanly (or was
+	// skipped) but changed tracked files or moved HEAD.
+	VerifyModified
 )
 
 // Failure is a hook failure; Effect says what the pipeline does with it.
@@ -104,27 +111,23 @@ type Failure struct {
 	// LogTail is the last 50 lines of the failing run's output, without git's
 	// hint: lines.
 	LogTail string
+	// Modified is set when a pre-merge-verify entry changed tracked files or
+	// moved HEAD (alone, or on top of its own failure of Kind).
+	Modified bool
 }
 
-// Effect is what a failure means at its point.
+// Effect is what a failure means at its point: always a stop.
 type Effect struct {
-	// Exactly one is set.
-	Refusal *outcome.RefusalReason
-	Stop    *outcome.StopReason
-	Warning *outcome.Warning
+	Stop *outcome.StopReason
 }
 
-// Effect applies design sections 13.1 and 13.3.
+// Effect applies design section 13.3. A tree change by a verify entry is
+// hook-failed whatever else the entry did.
 func (f *Failure) Effect() Effect {
-	switch f.Point {
-	case PointBefore:
-		r := outcome.RefBeforeHookRefused
-		return Effect{Refusal: &r}
-	case PointAfter:
-		w := outcome.WarnAfterHookFailed
-		return Effect{Warning: &w}
-	}
 	s := outcome.StopHookFailed
+	if f.Modified {
+		return Effect{Stop: &s}
+	}
 	switch f.Kind {
 	case Transient:
 		s = outcome.StopTransient
@@ -171,11 +174,11 @@ type PointInput struct {
 // failure.
 func (r *Runner) RunPoint(ctx context.Context, in PointInput) (PointResult, error) {
 	switch in.Point {
-	case PointBefore, PointAfterRebase, PointBeforeMove, PointAfter:
+	case PointPostRebaseFix, PointPreMergeVerify:
 	default:
 		return PointResult{}, fmt.Errorf("hooks: unknown hook point %q", in.Point)
 	}
-	autofix := in.Point == PointAfterRebase || in.Point == PointBeforeMove
+	autofix := in.Point == PointPostRebaseFix
 	var res PointResult
 	for i, h := range in.Hooks {
 		if err := r.runEntry(ctx, in, i, h, autofix, &res); err != nil {
@@ -189,6 +192,9 @@ func (r *Runner) RunPoint(ctx context.Context, in PointInput) (PointResult, erro
 }
 
 func (r *Runner) runEntry(ctx context.Context, in PointInput, idx int, h config.Hook, autofix bool, res *PointResult) error {
+	if in.Point == PointPreMergeVerify {
+		return r.runVerifyEntry(ctx, in, idx, h, res)
+	}
 	attempts := r.AutofixAttempts
 	if attempts < 1 {
 		attempts = 1
@@ -257,6 +263,56 @@ func FixMessage(point, operation string) string {
 	return fmt.Sprintf("style: apply %s fixes made during %s", point, operation)
 }
 
+// runVerifyEntry runs one pre-merge-verify entry. The point is read-only: after
+// the entry, any change to a tracked file (staged or unstaged) or a moved HEAD
+// is a failure, and the work worktree is put back at the tip it had before the
+// entry so a resume re-enters clean. Untracked and ignored files are left
+// alone (build outputs are normal).
+func (r *Runner) runVerifyEntry(ctx context.Context, in PointInput, idx int, h config.Hook, res *PointResult) error {
+	dir := in.Facts.WorkWorktree
+	head := func() (string, error) {
+		g := r.Git.Run(ctx, dir, "rev-parse", "HEAD")
+		if !g.OK() {
+			return "", fmt.Errorf("git rev-parse HEAD: exit %d: %s", g.Code, strings.TrimSpace(string(g.Stderr)))
+		}
+		return strings.TrimSpace(string(g.Stdout)), nil
+	}
+	before, err := head()
+	if err != nil {
+		return err
+	}
+	rec, fail := r.runOnce(ctx, in, idx, h)
+	res.Records = append(res.Records, rec)
+	if rec.Result == ResultSkipped {
+		res.Skipped = append(res.Skipped, Skipped{Point: in.Point, Index: idx, Code: rec.Code, StderrTail: Tail(rec.Stderr, SkippedTailLines)})
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	changed, untracked, err := r.status(ctx, dir, false)
+	if err != nil {
+		return err
+	}
+	res.Untracked = appendUnique(res.Untracked, untracked)
+	after, err := head()
+	if err != nil {
+		return err
+	}
+	if !changed && after == before {
+		res.Failure = fail
+		return nil
+	}
+	if fail == nil {
+		fail = r.failureFrom(rec, VerifyModified)
+	}
+	fail.Modified = true
+	if g := r.Git.Run(ctx, dir, "reset", "--hard", "-q", before); !g.OK() {
+		return fmt.Errorf("git reset --hard %s: exit %d: %s", before, g.Code, strings.TrimSpace(string(g.Stderr)))
+	}
+	res.Failure = fail
+	return nil
+}
+
 // runOnce runs the hook command once and classifies it.
 func (r *Runner) runOnce(ctx context.Context, in PointInput, idx int, h config.Hook) (CommandRecord, *Failure) {
 	rec := CommandRecord{Point: in.Point, Index: idx}
@@ -270,11 +326,7 @@ func (r *Runner) runOnce(ctx context.Context, in PointInput, idx int, h config.H
 		timeout = DefaultTimeout
 	}
 	dir := in.Facts.WorkWorktree
-	cwd := h.Cwd
-	if cwd == "" && in.Point == PointBefore {
-		cwd = "repo"
-	}
-	if cwd == "repo" {
+	if h.Cwd == "repo" {
 		dir = in.Facts.Repo
 	}
 	env, added := BuildEnv(r.Git.Env.Environ(), in.Facts.Vars(in.Point), h.Env)

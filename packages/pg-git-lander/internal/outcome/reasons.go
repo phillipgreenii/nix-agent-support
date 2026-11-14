@@ -30,7 +30,6 @@ const (
 	RefNoGitIdentity       RefusalReason = "no-git-identity"
 	RefUntrustedConfig     RefusalReason = "untrusted-config"
 	RefRepoConfigError     RefusalReason = "repo-config-error"
-	RefBeforeHookRefused   RefusalReason = "before-hook-refused"
 	RefNothingStopped      RefusalReason = "nothing-stopped"
 	RefOperationMismatch   RefusalReason = "operation-mismatch"
 	RefCannotResume        RefusalReason = "cannot-resume"
@@ -65,7 +64,6 @@ var Refusals = map[RefusalReason]RefusalInfo{
 	RefNoGitIdentity:       {"Configure user.name and user.email for the environment the tool runs in.", nil},
 	RefUntrustedConfig:     {"Trust the repo in the XDG file, or set ignore_repo_config = true.", nil},
 	RefRepoConfigError:     {"Fix the file on TARGET (land) or on the primary branch (rebase), or set ignore_repo_config = true for the repo.", nil},
-	RefBeforeHookRefused:   {"As the hook's output says.", nil},
 	RefNothingStopped:      {"None.", nil},
 	RefOperationMismatch:   {"Use the stopped operation's word.", nil},
 	RefCannotResume:        {"For unresolved and markers-left, resolve and git add the paths, then --continue; otherwise --abort or --quit.", nil},
@@ -98,12 +96,12 @@ const (
 
 // Stages of a stopped operation.
 const (
-	StageRebasing    = "rebasing"
-	StageAfterRebase = "after_rebase"
-	StageBeforeMove  = "before_move"
-	StageMoving      = "moving"
-	StageCleanup     = "cleanup"
-	StageAny         = "any"
+	StageRebasing       = "rebasing"
+	StagePostRebaseFix  = "post-rebase-fix"
+	StagePreMergeVerify = "pre-merge-verify"
+	StageMoving         = "moving"
+	StageCleanup        = "cleanup"
+	StageAny            = "any"
 )
 
 // StopInfo describes a stop reason.
@@ -121,13 +119,13 @@ var Stops = map[StopReason]StopInfo{
 	StopConflict:          {[]string{StageRebasing}, false, []string{FlagContinue, FlagSkip, FlagAbort, FlagQuit}},
 	StopResolveFailed:     {[]string{StageRebasing}, false, []string{FlagContinue, FlagSkip, FlagAbort, FlagQuit}},
 	StopMaxConflictRounds: {[]string{StageRebasing}, false, []string{FlagAbort, FlagQuit}},
-	StopHookFailed:        {[]string{StageAfterRebase, StageBeforeMove}, false, []string{FlagContinue, FlagAbort, FlagQuit}},
-	StopCommitRejected:    {[]string{StageRebasing, StageAfterRebase, StageBeforeMove}, false, []string{FlagContinue, FlagAbort, FlagQuit}},
-	StopTransient:         {[]string{StageRebasing, StageAfterRebase, StageBeforeMove}, true, []string{FlagContinue, FlagAbort}},
+	StopHookFailed:        {[]string{StagePostRebaseFix, StagePreMergeVerify}, false, []string{FlagContinue, FlagAbort, FlagQuit}},
+	StopCommitRejected:    {[]string{StageRebasing, StagePostRebaseFix, StagePreMergeVerify}, false, []string{FlagContinue, FlagAbort, FlagQuit}},
+	StopTransient:         {[]string{StageRebasing, StagePostRebaseFix, StagePreMergeVerify}, true, []string{FlagContinue, FlagAbort}},
 	StopTimeout:           {[]string{StageAny}, true, []string{FlagContinue, FlagAbort}},
 	StopInterrupted:       {[]string{StageAny}, true, []string{FlagContinue, FlagAbort}},
 	StopRace:              {[]string{StageMoving}, true, []string{FlagContinue, FlagAbort}},
-	StopTargetBusy:        {[]string{StageBeforeMove, StageCleanup}, true, []string{FlagContinue, FlagAbort}},
+	StopTargetBusy:        {[]string{StagePreMergeVerify, StageCleanup}, true, []string{FlagContinue, FlagAbort}},
 	StopBranchMoved:       {[]string{StageMoving}, false, []string{FlagAbort}},
 	StopCheckoutChanged:   {[]string{StageMoving}, true, []string{FlagContinue, FlagAbort}},
 	StopMoveUnverified:    {[]string{StageMoving}, false, []string{FlagAbort}},
@@ -143,7 +141,7 @@ var (
 		RefStoppedPending, RefTargetStopped, RefHolderDied, RefUnreadableLock, RefNoWorktree,
 		RefNotAWorktree, RefDirty, RefTargetWTMismatch, RefSourceWTMismatch, RefCwdWouldBeRemoved,
 		RefMainWorktreeRemoval, RefNamespaceCollision, RefSwitchRefused, RefUnsupportedLayout,
-		RefNoGitIdentity, RefUntrustedConfig, RefRepoConfigError, RefBeforeHookRefused,
+		RefNoGitIdentity, RefUntrustedConfig, RefRepoConfigError,
 		RefNothingStopped, RefOperationMismatch, RefCannotResume, RefLostToConcurrent,
 	}
 	AllStops = []StopReason{

@@ -211,7 +211,7 @@ resolve = ["{hooks}/resolver"]
 	})
 }
 
-// Scenario 15: a before_move hook fails; BRANCH and TARGET are untouched at
+// Scenario 15: a pre-merge-verify hook fails; BRANCH and TARGET are untouched at
 // the failure; after the fix --continue lands.
 func TestTier1HookFailsAtBeforeMoveThenContinue(t *testing.T) {
 	h := newHarness(t, Scenario{
@@ -222,14 +222,14 @@ func TestTier1HookFailsAtBeforeMoveThenContinue(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/gate"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/gate"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"gate": `[ -e "$PGL_MARKERS/fixed" ]`},
 	})
 	r := h.run("land", "feature/x")
 	expect(t, r, 21, "stopped", "hook-failed")
 	checkNow(t, h, r, Expected{
-		Outcome: map[string]any{"stage": "before_move"},
+		Outcome: map[string]any{"stage": "pre-merge-verify"},
 		Snapshot: Snapshot{
 			Refs:       startRefs(),
 			TargetTree: "@tree:main",
@@ -261,7 +261,7 @@ func TestTier1HookAutofix(t *testing.T) {
 root = "{repo}"
 
 [repo.hooks.land]
-before_move = [{ run = ["{hooks}/format"], timeout = "60s" }]
+pre-merge-verify = [{ run = ["{hooks}/format"], timeout = "60s" }]
 `,
 		Hooks: map[string]string{"format": `
 if grep -q formatted x1.txt; then exit 0; fi
@@ -284,7 +284,7 @@ exit 1
 	if af, _ := r.json["autofix"].([]any); len(af) != 1 {
 		t.Errorf("autofix lists %d entries, want 1: %s", len(af), r.stdout)
 	}
-	if got := h.mustGit(h.repo, "log", "-1", "--format=%s", "main"); !strings.HasPrefix(got, "style: apply before_move fixes made during land") {
+	if got := h.mustGit(h.repo, "log", "-1", "--format=%s", "main"); !strings.HasPrefix(got, "style: apply pre-merge-verify fixes made during land") {
 		t.Errorf("main's tip is %q, want the autofix commit", got)
 	}
 	if got := h.mustGit(h.repo, "show", "main:x1.txt"); got != "one\nformatted" {
@@ -435,14 +435,14 @@ func TestTier1BusyWhileLockHeldByLiveProcess(t *testing.T) {
 		Shape:  ShapeAhead,
 		Fifos:  []string{"up", "go"},
 		Layout: srcOnBr,
-		Config: crashConfig("before_move"),
+		Config: crashConfig("pre-merge-verify"),
 		Hooks:  map[string]string{"blocker": blockingHook},
 	})
 	other := h.addBranch("other")
 	otherTip := h.mustGit(h.repo, "rev-parse", "other")
 
 	h.start("holder", "land", "feature/x")
-	h.await("up") // the holder is inside before_move, holding main's lock
+	h.await("up") // the holder is inside pre-merge-verify, holding main's lock
 
 	r := h.run("land", "other", "--wait", "1s")
 	expect(t, r, 9, "busy", "")

@@ -201,13 +201,14 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 	must(f.ev.RaceRetry(ctx, 2, "aaa", "bbb", "paths"))
 	must(f.ev.RevalidateReuse(ctx, "aaa", "bbb", "paths"))
 	must(f.ev.Settle(ctx, Settle{Action: "wait", StoppedOpID: "o2", Branch: "feature/y", Stage: "cleanup", StopReason: "transient", HolderState: "stopped", HolderAgeS: 7}))
-	must(f.ev.Hook(ctx, hooks.CommandRecord{Point: "before", Index: 1, Argv0: "check", Code: 3, Duration: 40 * time.Millisecond, Result: "failed"}))
+	must(f.ev.Hook(ctx, hooks.CommandRecord{Point: "pre-merge-verify", Index: 1, Argv0: "check", Code: 3, Duration: 40 * time.Millisecond, Result: "failed"}))
 	must(f.ev.HolderConverted(ctx, locks.Conversion{Lock: "refs/l", PreviousOwner: locks.Owner{Host: "h", PID: 9}, Why: locks.WhyExpired}))
 	must(f.ev.Conflict(ctx, []string{"a.txt"}, "union", "resolved"))
+	must(f.ev.VerifySkipped(ctx, 2, []string{"pg-hooks", "pre-land-eval"}, "abc"))
 	must(f.ev.OpEnd(ctx, OpEnd{Outcome: "landed", Reason: "", Retryable: false, Stage: "done", PathTaken: "fast", Stats: map[string]any{"commits": 2}, BranchFate: "deleted", WorktreeFate: "kept"}))
 
 	got := f.lines(f.ev.Path)
-	if len(got) != 10 {
+	if len(got) != 11 {
 		t.Fatalf("%d lines", len(got))
 	}
 	common := []string{"ts", "repo", "host", "pid", "tool_version", "op_id", "operation", "branch", "target"}
@@ -221,6 +222,7 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 		EvHook:            {"point", "index", "argv0", "exit", "duration_ms", "result"},
 		EvHolderConverted: {"lock", "previous_owner", "why"},
 		EvConflict:        {"paths", "rule", "result"},
+		EvVerifySkipped:   {"point", "count", "argv0", "tip"},
 		EvOpEnd:           {"outcome", "reason", "retryable", "stage", "path_taken", "stats", "branch_fate", "worktree_fate", "restored", "warnings"},
 	}
 	seen := map[string]bool{}
@@ -245,7 +247,7 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 			t.Errorf("%s common values = %v", typ, m)
 		}
 	}
-	if len(seen) != 10 {
+	if len(seen) != 11 {
 		t.Errorf("event types seen = %v", seen)
 	}
 	if h := got[2]["holder"].(map[string]any); h["op_id"] != "h-op" || h["stage"] != "rebasing" || got[2]["waited_ms"] != float64(2000) || got[2]["result"] != "busy" {
@@ -403,7 +405,7 @@ func TestHookEnvValuesNeverReachLogOrEvents(t *testing.T) {
 	repoDir, _ := filepath.EvalSymlinks(f.repo.Dir)
 	r := &hooks.Runner{Git: f.layer.Git, AutofixAttempts: 1, RunGitHooks: true}
 	res, err := r.RunPoint(ctx, hooks.PointInput{
-		Point: hooks.PointBefore,
+		Point: hooks.PointPreMergeVerify,
 		Hooks: []config.Hook{{Run: []string{script}, Timeout: time.Minute, Cwd: "repo", Env: map[string]string{"MY_API_TOKEN": secret}}},
 		Facts: hooks.Facts{Operation: "land", OpID: "op-1", Repo: repoDir, GitCommonDir: f.common, WorkWorktree: repoDir, SourceWorktree: repoDir, Branch: "feature/x", Target: "main"},
 	})
@@ -610,4 +612,26 @@ func asBusy(err error, target **locks.BusyError) bool {
 		*target = b
 	}
 	return ok
+}
+
+// events.jsonl written by a version with the old hook names stays readable
+// line by line, and new events append after it.
+func TestEventsFileWithFormerVersionLinesStaysAppendable(t *testing.T) {
+	f := newFx(t)
+	ctx := t.Context()
+	old := `{"ts":"2026-11-01T00:00:00Z","event":"hook","point":"before_move","index":0,"argv0":"pg-hooks","exit":0,"duration_ms":5,"result":"pass"}` + "\n" +
+		`{"ts":"2026-11-01T00:00:01Z","event":"stage","stage":"after_rebase","previous_stage":"rebasing","duration_ms":9}` + "\n"
+	if err := os.MkdirAll(filepath.Dir(f.ev.Path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.ev.Path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ev.VerifySkipped(ctx, 0, nil, "abc"); err != nil {
+		t.Fatal(err)
+	}
+	got := f.lines(f.ev.Path)
+	if len(got) != 3 || got[0]["point"] != "before_move" || got[1]["stage"] != "after_rebase" || got[2]["event"] != EvVerifySkipped {
+		t.Fatalf("lines = %v", got)
+	}
 }

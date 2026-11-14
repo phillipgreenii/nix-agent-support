@@ -92,7 +92,9 @@ type Request struct {
 
 	TargetWorktree, SourceWorktree, WorkWorktree string
 	KeepSourceWorktree, KeepSourceBranch         bool
-	Context                                      []hooks.ContextPair
+	// NoVerify is --no-verify; a resume carries it from the record.
+	NoVerify bool
+	Context  []hooks.ContextPair
 }
 
 // Result is what Start returns.
@@ -512,7 +514,8 @@ func (s *session) params(sel *worktrees.Selection) oprecord.Params {
 			SourceWorktree: s.req.KeepSourceWorktree, SourceBranch: s.req.KeepSourceBranch,
 			RemovalConsent: sel.SourceExplicit,
 		},
-		Context: s.contextMap(),
+		Context:  s.contextMap(),
+		NoVerify: s.req.NoVerify,
 	}
 }
 
@@ -776,29 +779,6 @@ func (s *session) stepsThreeToFive(ctx context.Context) (*Result, error) {
 		p.Log.MergeDriver(l)
 	}
 
-	// Step 5: the before hook, once per operation.
-	runner := &hooks.Runner{Git: s.d.Git, AutofixAttempts: p.Config.AutofixAttempts, RunGitHooks: p.Config.RunGitHooks}
-	hr, err := runner.RunPoint(ctx, hooks.PointInput{
-		Point: hooks.PointBefore, Hooks: p.Config.HooksFor(string(req.Operation), hooks.PointBefore), Facts: p.Facts,
-	})
-	for _, rec := range hr.Records {
-		p.Log.Command("hook", rec)
-		_ = p.Events.Hook(ctx, rec)
-	}
-	if err != nil {
-		return nil, err
-	}
-	p.SkippedHooks = hr.Skipped
-	if f := hr.Failure; f != nil {
-		o := s.base(outcome.NewRefused(outcome.RefBeforeHookRefused, string(req.Operation), req.Branch, req.RepoFlag))
-		o.Message = fmt.Sprintf("the before hook (entry %d) %s", f.Index, hookWhy(f))
-		o.Detail = hookDetail(f)
-		if f.LogTail != "" {
-			o.LogTail = strings.Split(f.LogTail, "\n")
-		}
-		return s.fail(ctx, o), nil
-	}
-
 	return s.prepare(ctx)
 }
 
@@ -843,23 +823,39 @@ func (s *session) prepare(ctx context.Context) (*Result, error) {
 }
 
 func hookWhy(f *hooks.Failure) string {
+	var why string
 	switch f.Kind {
 	case hooks.TimedOut:
-		return "timed out"
+		why = "timed out"
 	case hooks.Transient:
-		return fmt.Sprintf("exited %d (transient)", f.Code)
+		why = fmt.Sprintf("exited %d (transient)", f.Code)
+	case hooks.VerifyModified:
+		return "changed tracked files or moved HEAD (a pre-merge-verify hook must be read-only); the work tree was restored"
+	default:
+		why = fmt.Sprintf("exited %d", f.Code)
 	}
-	return fmt.Sprintf("exited %d", f.Code)
+	if f.Modified {
+		why += " and changed tracked files or moved HEAD (a pre-merge-verify hook must be read-only); the work tree was restored"
+	}
+	return why
 }
 
 func hookDetail(f *hooks.Failure) string {
+	var base string
 	switch f.Kind {
 	case hooks.TimedOut:
-		return "timeout"
+		base = "timeout"
 	case hooks.Transient:
-		return "transient"
+		base = "transient"
+	case hooks.VerifyModified:
+		return hooks.VerifyModifiedDetail
+	default:
+		base = fmt.Sprintf("exit-%d", f.Code)
 	}
-	return fmt.Sprintf("exit-%d", f.Code)
+	if f.Modified {
+		return base + "+" + hooks.VerifyModifiedDetail
+	}
+	return base
 }
 
 // CurrentOwner builds the Owner of this process for the lock records.

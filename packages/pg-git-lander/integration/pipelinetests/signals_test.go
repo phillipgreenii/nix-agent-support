@@ -53,10 +53,10 @@ func gone(pid int) bool {
 
 func newSignals() chan os.Signal { return make(chan os.Signal, 4) }
 
-// blockingHook is a before_move hook that starts a grandchild, records the
+// blockingHook is a pre-merge-verify hook that starts a grandchild, records the
 // grandchild's pid and waits.
 func (f *fx) blockingHook(pidFile, prefix string) {
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript(
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript(
 		prefix + "\nsleep 120 &\necho $! > " + pidFile + "\nwait",
 	)}, "")
 }
@@ -208,7 +208,7 @@ func TestSecondSignalExitsAtOnceLeavingTheRecordRunning(t *testing.T) {
 func TestSignalDuringContinueEndsAsInterruptedStop(t *testing.T) {
 	f := newFx(t)
 	f.feature()
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("exit 1")}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("exit 1")}, "")
 	f.wantStopped(f.run(f.land()), outcome.StopHookFailed)
 	f.graceful(5 * time.Second)
 	pidFile := filepath.Join(t.TempDir(), "pid")
@@ -230,6 +230,6 @@ func TestSignalDuringContinueEndsAsInterruptedStop(t *testing.T) {
 		t.Fatal("the resumed hook's group survived")
 	}
 	// The interrupted resume is itself resumable.
-	f.hooksXDG("land", map[string]string{"before_move": f.hookScript("true")}, "")
+	f.hooksXDG("land", map[string]string{"pre-merge-verify": f.hookScript("true")}, "")
 	want(t, f.resume(outcome.FlagContinue), outcome.Landed, 0)
 }

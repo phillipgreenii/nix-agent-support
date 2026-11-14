@@ -174,7 +174,10 @@ type Record struct {
 	Attempts          Attempts        `json:"attempts"`
 	ConfigDigest      string          `json:"config_digest"`
 	Context           map[string]any  `json:"context"`
-	Stop              *Stop           `json:"stop"`
+	// NoVerify is --no-verify, sticky across --continue and --skip; only
+	// --abort ends it. An older tool ignores the field (and runs verify).
+	NoVerify bool  `json:"no_verify"`
+	Stop     *Stop `json:"stop"`
 }
 
 type fullRecord Record

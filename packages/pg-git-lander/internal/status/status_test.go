@@ -458,3 +458,31 @@ func TestStatusSkipsALockReleasedBetweenListingAndRead(t *testing.T) {
 		t.Fatalf("released lock reported: %+v", rep)
 	}
 }
+
+// A log written by a version that still had the hook points before_move and
+// after_rebase prints as written.
+func TestLogOfAFormerVersionPrintsUnchanged(t *testing.T) {
+	f := newFx(t)
+	opID := "20261110T110000Z-cccccc"
+	lg, err := oplog.Open(f.common, opID, "feature/c", "main", f.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lg.Line("STAGE", "after_rebase")
+	lg.Line("STAGE", "before_move")
+	lg.Line("STAGE", "after")
+	_ = lg.Close()
+	_, path, err := status.ResolveLog(t.Context(), f.g, f.repo.Dir, "feature/c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := status.PrintLog(&out, path, -1); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"STAGE after_rebase", "STAGE before_move", "STAGE after"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, out.String())
+		}
+	}
+}

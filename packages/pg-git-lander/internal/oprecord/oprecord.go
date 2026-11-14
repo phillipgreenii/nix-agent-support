@@ -23,18 +23,41 @@ import (
 
 // Stages of an operation (design section 7.1, the stage table).
 const (
-	StageLocked      = "locked"
-	StagePreparing   = "preparing"
-	StageRebasing    = "rebasing"
-	StageAfterRebase = "after_rebase"
-	StageBeforeMove  = "before_move"
-	StageMoving      = "moving"
-	StageAfter       = "after"
-	StageCleanup     = "cleanup"
+	StageLocked         = "locked"
+	StagePreparing      = "preparing"
+	StageRebasing       = "rebasing"
+	StagePostRebaseFix  = "post-rebase-fix"
+	StagePreMergeVerify = "pre-merge-verify"
+	StageMoving         = "moving"
+	StageCleanup        = "cleanup"
+)
+
+// Names of stages a former version wrote into records and logs. A record that
+// carries one still resumes: see Canonical.
+const (
+	legacyStageAfterRebase = "after_rebase"
+	legacyStageBeforeMove  = "before_move"
+	legacyStageAfter       = "after"
 )
 
 // Stages lists the stages in order.
-var Stages = []string{StageLocked, StagePreparing, StageRebasing, StageAfterRebase, StageBeforeMove, StageMoving, StageAfter, StageCleanup}
+var Stages = []string{StageLocked, StagePreparing, StageRebasing, StagePostRebaseFix, StagePreMergeVerify, StageMoving, StageCleanup}
+
+// Canonical maps a stage name read from a persisted record to the current
+// stage table: after_rebase is post-rebase-fix, before_move is
+// pre-merge-verify, and the removed stage after (the move already happened)
+// is cleanup. Any other name is returned unchanged.
+func Canonical(stage string) string {
+	switch stage {
+	case legacyStageAfterRebase:
+		return StagePostRebaseFix
+	case legacyStageBeforeMove:
+		return StagePreMergeVerify
+	case legacyStageAfter:
+		return StageCleanup
+	}
+	return stage
+}
 
 // MoveIntentMoving is the intent written before the move (step 11).
 const MoveIntentMoving = "moving"
@@ -69,6 +92,8 @@ type Params struct {
 	ConfigDigest      string
 	// Tips are the known starting tips (Branch, Target); nil fields stay null.
 	Tips locks.Tips
+	// NoVerify is --no-verify.
+	NoVerify bool
 }
 
 // NewRecord builds the BRANCH record of a new operation in stage locked: every
@@ -91,6 +116,7 @@ func NewRecord(p Params, opID string, now time.Time) locks.Record {
 		Attempts:          locks.Attempts{Autofix: map[string]int{}},
 		ConfigDigest:      p.ConfigDigest,
 		Context:           p.Context,
+		NoVerify:          p.NoVerify,
 	}
 	if r.Context == nil {
 		r.Context = map[string]any{}
@@ -230,6 +256,12 @@ func (o *Op) SetCurrentCommand(ctx context.Context, cc *locks.CurrentCommand) er
 	return o.Branch.Update(ctx, func(r *locks.Record) { r.CurrentCommand = cc })
 }
 
+// SetNoVerify records --no-verify in the BRANCH record (it is sticky: only
+// --abort, which deletes the record, ends it).
+func (o *Op) SetNoVerify(ctx context.Context) error {
+	return o.Branch.Update(ctx, func(r *locks.Record) { r.NoVerify = true })
+}
+
 // SetAttempts writes the retry counters through mutate.
 func (o *Op) SetAttempts(ctx context.Context, mutate func(*locks.Attempts)) error {
 	return o.Branch.Update(ctx, func(r *locks.Record) {
@@ -328,8 +360,8 @@ func (r *Resumed) SwapBack(ctx context.Context) error { return r.Op.Set.Undo(ctx
 // takes TARGET and the destination-only worktrees: only from stage moving on.
 // An earlier stage takes them at the lock point of the run, like a fresh one.
 func TakesTargetLocks(stage string) bool {
-	switch stage {
-	case StageMoving, StageAfter, StageCleanup:
+	switch Canonical(stage) {
+	case StageMoving, StageCleanup:
 		return true
 	}
 	return false

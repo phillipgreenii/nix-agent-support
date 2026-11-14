@@ -1,6 +1,7 @@
 package landmove_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -365,5 +366,40 @@ func TestIntentErrorStopsBeforeAnyMove(t *testing.T) {
 	wantStop(t, r, outcome.StopInternalError)
 	if f.ref("main") != f.base {
 		t.Fatal("TARGET moved")
+	}
+}
+
+// The final merge --ff-only never carries --no-verify, whatever the run was
+// started with: the tool's --no-verify has no meaning for it.
+func TestFinalMergeFFOnlyArgvCarriesNoNoVerify(t *testing.T) {
+	f := newFx(t)
+	var calls [][]string
+	f.g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		calls = append(calls, append([]string{c.Name}, c.Args...))
+		return cmdrun.Exec(ctx, c)
+	}
+	result := f.commitOn("pg-git-lander/"+opID, f.base, "a.txt")
+	lref, loid := f.lock("one", "rec")
+	r := f.m.Move(t.Context(), landmove.Input{
+		OpID: opID, Target: "main", TipsTarget: f.base, Result: result,
+		DW: f.chosen(f.repo.Dir), TargetCheckedOut: true,
+		Fence:  landmove.Fence{Locks: []landmove.LockCheck{{Ref: lref, Oid: loid}}},
+		Intent: func(string) error { return nil },
+	})
+	if r.Status != landmove.Moved {
+		t.Fatalf("result %+v", r)
+	}
+	merges := 0
+	for _, c := range calls {
+		joined := strings.Join(c, " ")
+		if strings.Contains(joined, "--no-verify") {
+			t.Errorf("a call carries --no-verify: %s", joined)
+		}
+		if strings.Contains(joined, "merge --ff-only") {
+			merges++
+		}
+	}
+	if merges != 1 {
+		t.Fatalf("%d merge --ff-only calls in %v", merges, calls)
 	}
 }

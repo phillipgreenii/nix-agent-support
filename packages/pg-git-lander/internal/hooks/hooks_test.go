@@ -101,11 +101,11 @@ func TestEnvironmentGolden(t *testing.T) {
 	f := newFx(t, 2)
 	facts := f.facts()
 	facts.Context = []hooks.ContextPair{{Key: "ticket-id", Value: "X-1"}, {Key: "a.b c", Value: "v"}}
-	got := facts.Vars(hooks.PointBeforeMove)
+	got := facts.Vars(hooks.PointPreMergeVerify)
 	want := map[string]string{
 		"PG_GIT_LANDER_OPERATION":            "land",
 		"PG_GIT_LANDER_OP_ID":                "op1",
-		"PG_GIT_LANDER_HOOK":                 "before_move",
+		"PG_GIT_LANDER_HOOK":                 "pre-merge-verify",
 		"PG_GIT_LANDER_REPO":                 facts.Repo,
 		"PG_GIT_LANDER_GIT_COMMON_DIR":       facts.GitCommonDir,
 		"PG_GIT_LANDER_WORK_WORKTREE":        f.work,
@@ -131,16 +131,19 @@ func TestEnvironmentGolden(t *testing.T) {
 		}
 	}
 
-	// rebase: no land-only variables; before: no RESULT, WORK_BRANCH empty.
-	facts.Operation, facts.WorkBranch = "rebase", ""
-	b := facts.Vars(hooks.PointBefore)
-	for _, k := range []string{"DESTINATION_WORKTREE", "TARGET", "TARGET_TIP", "RESULT"} {
+	// rebase: no land-only variables; RESULT is still set.
+	facts.Operation = "rebase"
+	b := facts.Vars(hooks.PointPostRebaseFix)
+	for _, k := range []string{"DESTINATION_WORKTREE", "TARGET", "TARGET_TIP"} {
 		if _, ok := b[hooks.EnvPrefix+k]; ok {
-			t.Errorf("%s set for a rebase at before", k)
+			t.Errorf("%s set for a rebase", k)
 		}
 	}
-	if v, ok := b["PG_GIT_LANDER_WORK_BRANCH"]; !ok || v != "" {
-		t.Errorf("WORK_BRANCH = %q, %v; want set and empty", v, ok)
+	if v, ok := b["PG_GIT_LANDER_RESULT"]; !ok || v != "ccc" {
+		t.Errorf("RESULT = %q, %v; want ccc", v, ok)
+	}
+	if v := b["PG_GIT_LANDER_HOOK"]; v != "post-rebase-fix" {
+		t.Errorf("HOOK = %q", v)
 	}
 }
 
@@ -153,12 +156,12 @@ func TestHookSeesEnvironmentAndRunsInListOrder(t *testing.T) {
 	h1.Env = map[string]string{"EXTRA": "e"}
 	facts := f.facts()
 	facts.Context = []hooks.ContextPair{{Key: "k", Value: "v"}}
-	res, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: hooks.PointAfterRebase, Hooks: []config.Hook{h1, hk(second)}, Facts: facts})
+	res, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: hooks.PointPostRebaseFix, Hooks: []config.Hook{h1, hk(second)}, Facts: facts})
 	if err != nil || !res.Pass() {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	b, _ := os.ReadFile(out)
-	if string(b) != "first after_rebase v e land\nsecond\n" {
+	if string(b) != "first post-rebase-fix v e land\nsecond\n" {
 		t.Fatalf("out = %q", b)
 	}
 	if len(res.Records) != 2 || res.Records[0].Argv0 != first || res.Records[0].Result != hooks.ResultPass {
@@ -176,7 +179,7 @@ func TestHookEnvValuesNeverReachALogLine(t *testing.T) {
 	h.Env = map[string]string{"API_TOKEN": "s3cr3t-value"}
 	facts := f.facts()
 	facts.Context = []hooks.ContextPair{{Key: "who", Value: "ctx-secret"}}
-	res, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: hooks.PointAfter, Hooks: []config.Hook{h}, Facts: facts})
+	res, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: hooks.PointPreMergeVerify, Hooks: []config.Hook{h}, Facts: facts})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +228,7 @@ func TestExitCodeContract(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			start := time.Now()
-			res := f.run(hooks.PointBeforeMove, c.h)
+			res := f.run(hooks.PointPreMergeVerify, c.h)
 			if time.Since(start) > 20*time.Second {
 				t.Fatal("did not stop at the timeout")
 			}
@@ -238,7 +241,7 @@ func TestExitCodeContract(t *testing.T) {
 					t.Fatalf("failure = %+v", res.Failure)
 				}
 				if c.result == hooks.ResultSkipped {
-					if len(res.Skipped) != 1 || res.Skipped[0].Code != c.code || res.Skipped[0].Point != hooks.PointBeforeMove || res.Skipped[0].Index != 0 {
+					if len(res.Skipped) != 1 || res.Skipped[0].Code != c.code || res.Skipped[0].Point != hooks.PointPreMergeVerify || res.Skipped[0].Index != 0 {
 						t.Fatalf("skipped = %+v", res.Skipped)
 					}
 				}
@@ -257,7 +260,7 @@ func TestExitCodeContract(t *testing.T) {
 	}
 
 	t.Run("skipped carries the stderr tail", func(t *testing.T) {
-		res := f.run(hooks.PointAfter, skip3)
+		res := f.run(hooks.PointPreMergeVerify, skip3)
 		if len(res.Skipped) != 1 || res.Skipped[0].StderrTail != "line1\nline2" {
 			t.Fatalf("skipped = %+v", res.Skipped)
 		}
@@ -271,35 +274,20 @@ func TestFailureEffectByPoint(t *testing.T) {
 	slow := hk(f.script("slow", "sleep 30"))
 	slow.Timeout = 200 * time.Millisecond
 
-	refused := func(e hooks.Effect) bool {
-		return e.Refusal != nil && *e.Refusal == outcome.RefBeforeHookRefused && e.Stop == nil
-	}
 	stop := func(want outcome.StopReason) func(hooks.Effect) bool {
-		return func(e hooks.Effect) bool {
-			return e.Stop != nil && *e.Stop == want && e.Refusal == nil && e.Warning == nil
-		}
+		return func(e hooks.Effect) bool { return e.Stop != nil && *e.Stop == want }
 	}
-	warn := func(e hooks.Effect) bool {
-		return e.Warning != nil && *e.Warning == outcome.WarnAfterHookFailed && e.Stop == nil
-	}
-
 	cases := []struct {
 		point string
 		h     config.Hook
 		ok    func(hooks.Effect) bool
 	}{
-		{hooks.PointBefore, fail, refused},
-		{hooks.PointBefore, trans, refused},
-		{hooks.PointBefore, slow, refused},
-		{hooks.PointAfterRebase, fail, stop(outcome.StopHookFailed)},
-		{hooks.PointAfterRebase, trans, stop(outcome.StopTransient)},
-		{hooks.PointAfterRebase, slow, stop(outcome.StopTimeout)},
-		{hooks.PointBeforeMove, fail, stop(outcome.StopHookFailed)},
-		{hooks.PointBeforeMove, trans, stop(outcome.StopTransient)},
-		{hooks.PointBeforeMove, slow, stop(outcome.StopTimeout)},
-		{hooks.PointAfter, fail, warn},
-		{hooks.PointAfter, trans, warn},
-		{hooks.PointAfter, slow, warn},
+		{hooks.PointPostRebaseFix, fail, stop(outcome.StopHookFailed)},
+		{hooks.PointPostRebaseFix, trans, stop(outcome.StopTransient)},
+		{hooks.PointPostRebaseFix, slow, stop(outcome.StopTimeout)},
+		{hooks.PointPreMergeVerify, fail, stop(outcome.StopHookFailed)},
+		{hooks.PointPreMergeVerify, trans, stop(outcome.StopTransient)},
+		{hooks.PointPreMergeVerify, slow, stop(outcome.StopTimeout)},
 	}
 	for _, c := range cases {
 		res := f.run(c.point, c.h)
@@ -312,6 +300,98 @@ func TestFailureEffectByPoint(t *testing.T) {
 	}
 }
 
+func TestOldPointNamesAreRejectedByTheRunner(t *testing.T) {
+	f := newFx(t, 2)
+	for _, p := range []string{"before", "after_rebase", "before_move", "after"} {
+		if _, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: p, Facts: f.facts()}); err == nil {
+			t.Errorf("point %q accepted", p)
+		}
+	}
+}
+
+// A pre-merge-verify entry is read-only: a change to a tracked file or a moved
+// HEAD fails the point and the work worktree is put back where it was.
+func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
+	head := func(f *fx) string { return f.git(f.work, "rev-parse", "HEAD") }
+	t.Run("modifies a tracked file", func(t *testing.T) {
+		f := newFx(t, 2)
+		before := head(f)
+		res := f.run(hooks.PointPreMergeVerify, hk(f.script("dirty", "echo more >> f.txt")))
+		if res.Failure == nil || res.Failure.Kind != hooks.VerifyModified || !res.Failure.Modified {
+			t.Fatalf("res = %+v", res)
+		}
+		if e := res.Failure.Effect(); e.Stop == nil || *e.Stop != outcome.StopHookFailed {
+			t.Fatalf("effect %+v", e)
+		}
+		if f.git(f.work, "status", "--porcelain") != "" || head(f) != before {
+			t.Fatal("the work worktree was not restored")
+		}
+	})
+	t.Run("stages a change", func(t *testing.T) {
+		f := newFx(t, 2)
+		res := f.run(hooks.PointPreMergeVerify, hk(f.script("stage", "echo more >> f.txt; git add f.txt")))
+		if res.Failure == nil || !res.Failure.Modified {
+			t.Fatalf("res = %+v", res)
+		}
+		if f.git(f.work, "status", "--porcelain") != "" {
+			t.Fatal("the index was not restored")
+		}
+	})
+	t.Run("moves HEAD", func(t *testing.T) {
+		f := newFx(t, 2)
+		before := head(f)
+		res := f.run(hooks.PointPreMergeVerify, hk(f.script("commit", "git commit --allow-empty -q -m sneaky")))
+		if res.Failure == nil || !res.Failure.Modified {
+			t.Fatalf("res = %+v", res)
+		}
+		if head(f) != before {
+			t.Fatal("HEAD was not put back")
+		}
+	})
+	t.Run("fails and modifies", func(t *testing.T) {
+		f := newFx(t, 2)
+		res := f.run(hooks.PointPreMergeVerify, hk(f.script("both", "echo more >> f.txt; exit 7")))
+		if res.Failure == nil || !res.Failure.Modified || res.Failure.Kind != hooks.FailedExit || res.Failure.Code != 7 {
+			t.Fatalf("res = %+v", res)
+		}
+		if e := res.Failure.Effect(); e.Stop == nil || *e.Stop != outcome.StopHookFailed {
+			t.Fatalf("effect %+v", e)
+		}
+	})
+	t.Run("a transient failure that modified is hook-failed", func(t *testing.T) {
+		f := newFx(t, 2)
+		res := f.run(hooks.PointPreMergeVerify, hk(f.script("both75", "echo more >> f.txt; exit 75")))
+		if res.Failure == nil || !res.Failure.Modified {
+			t.Fatalf("res = %+v", res)
+		}
+		if e := res.Failure.Effect(); e.Stop == nil || *e.Stop != outcome.StopHookFailed {
+			t.Fatalf("effect %+v", e)
+		}
+	})
+	t.Run("untracked and ignored files pass", func(t *testing.T) {
+		f := newFx(t, 2)
+		body := `echo out.bin >> "$(git rev-parse --git-path info/exclude)"; echo x > out.bin; echo y > untracked.txt`
+		res := f.run(hooks.PointPreMergeVerify, hk(f.script("build", body)))
+		if !res.Pass() {
+			t.Fatalf("res = %+v", res)
+		}
+		if len(res.Untracked) != 1 || res.Untracked[0] != "untracked.txt" {
+			t.Fatalf("untracked = %v", res.Untracked)
+		}
+	})
+	t.Run("a later entry does not run after a modification", func(t *testing.T) {
+		f := newFx(t, 2)
+		marker := filepath.Join(f.scripts, "later-marker")
+		res := f.run(hooks.PointPreMergeVerify, hk(f.script("dirty", "echo more >> f.txt")), hk(f.script("later", "touch "+marker)))
+		if res.Failure == nil {
+			t.Fatalf("res = %+v", res)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatal("a later entry ran")
+		}
+	})
+}
+
 func TestUnknownPointIsRejected(t *testing.T) {
 	f := newFx(t, 2)
 	if _, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: "during", Facts: f.facts()}); err == nil {
@@ -322,7 +402,7 @@ func TestUnknownPointIsRejected(t *testing.T) {
 func TestFailureStopsLaterHooks(t *testing.T) {
 	f := newFx(t, 2)
 	marker := filepath.Join(f.scripts, "later-ran")
-	res := f.run(hooks.PointBefore, hk(f.script("bad", "exit 1")), hk(f.script("later", "touch "+marker)))
+	res := f.run(hooks.PointPreMergeVerify, hk(f.script("bad", "exit 1")), hk(f.script("later", "touch "+marker)))
 	if res.Failure == nil || len(res.Records) != 1 {
 		t.Fatalf("res = %+v", res)
 	}
@@ -348,10 +428,10 @@ func TestCwdDefaults(t *testing.T) {
 		}
 	}
 	facts := f.facts()
-	check(hooks.PointBefore, "", facts.Repo)
-	check(hooks.PointAfterRebase, "", f.work)
-	check(hooks.PointAfterRebase, "repo", facts.Repo)
-	check(hooks.PointBefore, "worktree", f.work)
+	check(hooks.PointPreMergeVerify, "", f.work)
+	check(hooks.PointPostRebaseFix, "", f.work)
+	check(hooks.PointPostRebaseFix, "repo", facts.Repo)
+	check(hooks.PointPreMergeVerify, "worktree", f.work)
 	if hooks.DefaultTimeout != 10*time.Minute || config.DefaultTimeout != hooks.DefaultTimeout {
 		t.Fatalf("default timeout = %v / %v", hooks.DefaultTimeout, config.DefaultTimeout)
 	}
@@ -367,7 +447,7 @@ func TestAutofixCommitsAndRunsAgain(t *testing.T) {
 	f := newFx(t, 2)
 	facts := f.facts()
 	facts.Context = []hooks.ContextPair{{Key: "ticket", Value: "TICKET-77"}}
-	res, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: hooks.PointAfterRebase, Hooks: []config.Hook{hk(f.script("fmt", formatter))}, Facts: facts})
+	res, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: hooks.PointPostRebaseFix, Hooks: []config.Hook{hk(f.script("fmt", formatter))}, Facts: facts})
 	if err != nil || !res.Pass() {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
@@ -375,7 +455,7 @@ func TestAutofixCommitsAndRunsAgain(t *testing.T) {
 		t.Fatalf("records = %+v", res.Records)
 	}
 	log := f.log()
-	if log != "style: apply after_rebase fixes made during land" {
+	if log != "style: apply post-rebase-fix fixes made during land" {
 		t.Fatalf("log = %q", log)
 	}
 	if strings.Contains(f.git(f.work, "log", "-1", "--format=%B"), "TICKET-77") {
@@ -390,7 +470,7 @@ func TestAutofixIsBoundedByAttempts(t *testing.T) {
 	for _, n := range []int{1, 2, 3} {
 		f := newFx(t, n)
 		always := f.script("always", `echo more >> f.txt; exit 0`)
-		res := f.run(hooks.PointBeforeMove, hk(always))
+		res := f.run(hooks.PointPostRebaseFix, hk(always))
 		if res.Failure == nil || res.Failure.Kind != hooks.AutofixExhausted || len(res.Records) != n {
 			t.Fatalf("n=%d: res = %+v", n, res)
 		}
@@ -405,7 +485,7 @@ func TestAutofixIsBoundedByAttempts(t *testing.T) {
 
 func TestFailingHookThatChangesNothingStopsAtOnce(t *testing.T) {
 	f := newFx(t, 5)
-	res := f.run(hooks.PointAfterRebase, hk(f.script("bad", "exit 1")))
+	res := f.run(hooks.PointPostRebaseFix, hk(f.script("bad", "exit 1")))
 	if res.Failure == nil || res.Failure.Kind != hooks.FailedExit || len(res.Records) != 1 {
 		t.Fatalf("res = %+v", res)
 	}
@@ -414,23 +494,10 @@ func TestFailingHookThatChangesNothingStopsAtOnce(t *testing.T) {
 	}
 }
 
-func TestAutofixOnlyAtAfterRebaseAndBeforeMove(t *testing.T) {
-	for _, point := range []string{hooks.PointBefore, hooks.PointAfter} {
-		f := newFx(t, 2)
-		res := f.run(point, hk(f.script("fmt", formatter)))
-		if res.Failure == nil || len(res.Records) != 1 {
-			t.Fatalf("%s: res = %+v", point, res)
-		}
-		if f.log() != "" {
-			t.Fatalf("%s: autofix committed", point)
-		}
-	}
-}
-
 func TestAutofixLeavesUntrackedUncommitted(t *testing.T) {
 	f := newFx(t, 2)
 	h := hk(f.script("mk", `touch new.txt; grep -q fixed f.txt || { echo fixed >> f.txt; }`))
-	res := f.run(hooks.PointBeforeMove, h)
+	res := f.run(hooks.PointPostRebaseFix, h)
 	if !res.Pass() || len(res.Untracked) != 1 || res.Untracked[0] != "new.txt" {
 		t.Fatalf("res = %+v", res)
 	}
@@ -443,7 +510,7 @@ func TestAutofixAfterAPassingHookAndASkippedOne(t *testing.T) {
 	f := newFx(t, 2)
 	skip := hk(f.script("fmt-skip", `grep -q fixed f.txt || { echo fixed >> f.txt; exit 4; }`))
 	skip.SkipExitCodes = []int{4}
-	res := f.run(hooks.PointAfterRebase, skip)
+	res := f.run(hooks.PointPostRebaseFix, skip)
 	if !res.Pass() || len(res.Records) != 2 || len(res.Skipped) != 1 || res.Records[0].Result != hooks.ResultAutofix {
 		t.Fatalf("res = %+v", res)
 	}
@@ -523,7 +590,7 @@ func TestCommitSkipsGitHooksWhenConfiguredOff(t *testing.T) {
 func TestAutofixCommitRejectedByGitHook(t *testing.T) {
 	f := newFx(t, 2)
 	f.plantCommitHook(`echo again >> f.txt; exit 1`)
-	res := f.run(hooks.PointAfterRebase, hk(f.script("always", `echo more >> f.txt`)))
+	res := f.run(hooks.PointPostRebaseFix, hk(f.script("always", `echo more >> f.txt`)))
 	if res.Failure == nil || res.Failure.Kind != hooks.CommitRejected {
 		t.Fatalf("res = %+v", res)
 	}
