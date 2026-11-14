@@ -71,13 +71,22 @@ type renewProbe struct {
 	clk *dtest.ManualClock
 	mu  sync.Mutex
 	at  []time.Time
+	// done receives one value per Renew, after its clock reading is recorded.
+	// Renew is the last clock read of a lease refresh, so a receive means that
+	// refresh has finished with the clock.
+	done chan struct{}
 }
 
 func (p *renewProbe) Renew(ctx context.Context, id string) error {
 	p.mu.Lock()
 	p.at = append(p.at, p.clk.Now())
 	p.mu.Unlock()
-	return p.fakePool.Renew(ctx, id)
+	err := p.fakePool.Renew(ctx, id)
+	select {
+	case p.done <- struct{}{}:
+	default:
+	}
+	return err
 }
 
 // runLease starts the lease refresh on a fake clock, fires ticks every `step`
@@ -87,17 +96,30 @@ func runLease(t *testing.T, cc *leaseProbeCC, clk *dtest.ManualClock, total time
 	t.Helper()
 	cfg := leaseCfg()
 	mt := newManualTicker()
-	pool := &renewProbe{fakePool: &fakePool{}, clk: clk}
+	pool := &renewProbe{fakePool: &fakePool{}, clk: clk, done: make(chan struct{}, 1024)}
 	r := &ccpoolRun{deps: Deps{CC: cc, Cfg: cfg, Now: clk.Now, NewTicker: mt.factory, Pool: pool}, lease: "lease-1"}
 	stop := r.startLease(context.Background(), leaseSess)
 	// The first write happens inline on the loop goroutine before it reads ticks:
 	// the first send below synchronizes with it.
 	<-mt.ready
+	// Wait for each refresh to finish before moving the fake clock: the send
+	// below returns once the loop has TAKEN the tick, not once its refresh has
+	// read the clock, so advancing straight away lets a slow loop goroutine (a
+	// loaded host) stamp the write with a later tick's time.
+	refreshed := func() {
+		select {
+		case <-pool.done:
+		case <-time.After(30 * time.Second): // a hang guard, not a pacing delay
+			t.Fatal("lease refresh did not finish")
+		}
+	}
+	refreshed() // the inline first write
 	start := clk.Now()
 	advance := clk.TickAdvancing()
 	for clk.Now().Sub(start) < total {
 		_ = advance(context.Background(), mt.every)
 		mt.ch <- clk.Now()
+		refreshed()
 	}
 	stop()
 	cc.mu.Lock()
