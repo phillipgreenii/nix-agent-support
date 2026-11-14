@@ -358,8 +358,9 @@ func TestSettleManifestRecordsTheStoredSizeOfASnapshotWhoseRowRecordsMore(t *tes
 		t.Fatalf("last_size %v", mf.LastSize)
 	}
 	// The change check still sees the row's size, so the settle is not repeated.
+	// (The change check itself is the table in changed_against_test.go.)
 	b, _ := json.Marshal(m)
-	if changedAgainst(store.Settled{Manifest: b}, c, func(store.File) (int64, bool) { return 0, false }) {
+	if changedAgainst(store.Settled{Manifest: b}, c, nil) {
 		t.Fatal("an unchanged snapshot file reads as changed")
 	}
 }

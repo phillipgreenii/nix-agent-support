@@ -1079,64 +1079,34 @@ func (s *Settler) clearStage(ctx context.Context, session, reason string, now ti
 // evaluate runs one Conversation through the stage machine. force skips the
 // held.recheck wait.
 func (s *Settler) evaluate(ctx context.Context, c *conv, live bool, now time.Time, force bool) (Outcome, error) {
-	out := Outcome{Session: c.session, Stage: StageQuiet}
 	row, hasRow, err := s.st.Stage(c.session)
 	if err != nil {
-		return out, err
+		return Outcome{Session: c.session, Stage: StageQuiet}, err
 	}
-	if live {
-		// Settled to Live and Held to Live: a Process holds it again.
-		out.Stage, out.Skipped = StageLive, "live process"
-		if hasRow {
-			return out, s.clearStage(ctx, c.session, "process", now)
-		}
-		return out, nil
-	}
-	switch {
-	case hasRow && row.Stage == store.StageRemoved:
-		// Removed to Quiet: a removed path reappeared (the Conversation has files
-		// with current paths again).
-		if err := s.clearStage(ctx, c.session, "path_reappeared", now); err != nil {
-			return out, err
-		}
-		hasRow = false
-	case hasRow && (row.Stage == store.StageRemovalPending || row.Stage == store.StageExtracting):
-		out.Stage, out.Skipped = row.Stage, "removal or extract in progress"
-		return out, nil
-	}
-	if hasRow && row.Stage == StageSettled {
-		if !s.changedSinceSettle(c) {
-			out.Stage, out.Skipped = StageSettled, "settled"
-			return out, nil
-		}
-		// Settled to Quiet: new writes.
-		if err := s.clearStage(ctx, c.session, "new_writes", now); err != nil {
-			return out, err
-		}
-		hasRow = false
-	}
-	newest := s.newest(ctx, c)
-	if hasRow && row.Stage == StageHeld {
-		if heldHasNewWrites(newest, row.SinceNS) {
-			// Held to Quiet: a file was written after the hold.
-			if err := s.clearStage(ctx, c.session, "new_writes", now); err != nil {
-				return out, err
-			}
-			hasRow = false
-		} else {
+	d := decideStage(c.session, stageFacts{
+		Live:               live,
+		HasRow:             hasRow,
+		Row:                row,
+		Force:              force,
+		Now:                now,
+		After:              s.cfg.After,
+		Recheck:            s.cfg.Recheck,
+		ChangedSinceSettle: func() bool { return s.changedSinceSettle(c) },
+		Newest:             func() time.Time { return s.newest(ctx, c) },
+		CheckedAt: func() time.Time {
 			s.mu.Lock()
-			at := s.checkedAt[c.session]
-			s.mu.Unlock()
-			if heldRecheckNotDue(force, at, now, s.cfg.Recheck) {
-				out.Stage, out.Skipped, out.Reason = StageHeld, "held, recheck not due", row.Reason
-				return out, nil
-			}
+			defer s.mu.Unlock()
+			return s.checkedAt[c.session]
+		},
+		LowSpace: s.LowSpace,
+	})
+	if d.Clear != "" {
+		if err := s.clearStage(ctx, c.session, d.Clear, now); err != nil {
+			return d.Out, err
 		}
 	}
-	gate := quietAgeReached(now, newest, s.cfg.After)
-	if !gate && !s.LowSpace() {
-		out.Skipped = "quiet age below settle.after"
-		return out, nil
+	if !d.Proceed {
+		return d.Out, nil
 	}
 	s.mu.Lock()
 	s.checkedAt[c.session] = now
@@ -1145,7 +1115,7 @@ func (s *Settler) evaluate(ctx context.Context, c *conv, live bool, now time.Tim
 	var res Outcome
 	err = s.cfg.Copier.WithLock(func() error {
 		var e error
-		res, e = s.settleLocked(ctx, c, now, hasRow && row.Stage == StageHeld)
+		res, e = s.settleLocked(ctx, c, now, d.WasHeld)
 		return e
 	})
 	if res.Session == "" {
