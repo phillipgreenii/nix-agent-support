@@ -26,15 +26,18 @@ const (
 	InternalError Word = "internal-error"
 	UsageError    Word = "usage-error"
 	ConfigError   Word = "config-error"
-	Busy          Word = "busy"
-	Stopped       Word = "stopped"
-	Refused       Word = "refused"
+	// ConfigUnrunnable is config check's failure: a configured command is
+	// not on PATH or is a missing absolute path. It shares exit 7.
+	ConfigUnrunnable Word = "config-unrunnable"
+	Busy             Word = "busy"
+	Stopped          Word = "stopped"
+	Refused          Word = "refused"
 )
 
 // AllWords lists every outcome word.
 var AllWords = []Word{
 	Landed, Rebased, UpToDate, NothingToLand, Aborted, Quit, Status, Log, ConfigOK,
-	InternalError, UsageError, ConfigError, Busy, Stopped, Refused,
+	InternalError, UsageError, ConfigError, ConfigUnrunnable, Busy, Stopped, Refused,
 }
 
 // Exit codes. The shared outcomes use x/exitcode; stopped and refused are
@@ -59,7 +62,7 @@ func ExitCode(w Word) int {
 		return ExitInternal
 	case UsageError:
 		return ExitUsage
-	case ConfigError:
+	case ConfigError, ConfigUnrunnable:
 		return ExitConfig
 	case Busy:
 		return ExitBusy

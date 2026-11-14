@@ -52,7 +52,10 @@ exit codes:
   0  done: landed, rebased, up-to-date, nothing-to-land, aborted, quit,
      status, log, config-ok
   1  internal-error, before any lock was taken
-  2  usage-error or config-error; nothing changed
-  3  busy: a lock was not obtained within the wait; always retryable
-  4  stopped: the operation stopped; the output names the next commands
-  5  refused: a precondition failed; nothing changed (except holder-died)`
+  2  usage-error: bad arguments; nothing changed
+  7  config-error: a configuration file is invalid; nothing changed
+     config-unrunnable: config check found a configured hook or conflict
+     command that is not on this process's PATH or is a missing absolute path
+  9  busy: a lock was not obtained within the wait; always retryable
+  21 stopped: the operation stopped; the output names the next commands
+  22 refused: a precondition failed; nothing changed (except holder-died)`

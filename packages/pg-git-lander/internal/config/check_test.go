@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,24 +157,15 @@ func TestCheckRelativeAndMissingCommands(t *testing.T) {
 [[conflict]]
 glob = "*.lock"
 resolve = ["./update-deps.sh"]
-verify = ["no-such-command-xyzzy"]
-
-[[hooks.land.before]]
-run = ["sh", "-c", "true"]
 `})
+	// A repo-relative script missing from the repo stays a warning.
 	o := f.check("")
-	if o.Outcome != outcome.ConfigOK {
+	if o.Outcome != outcome.ConfigOK || o.Exit != 0 {
 		t.Fatalf("got %+v", o)
 	}
 	if !hasWarn(o, outcome.WarnRelativeCommandPath, "update-deps.sh") ||
-		!hasWarn(o, outcome.WarnCommandNotFound, "./update-deps.sh") ||
-		!hasWarn(o, outcome.WarnCommandNotFound, "no-such-command-xyzzy") {
+		!hasWarn(o, outcome.WarnCommandNotFound, "./update-deps.sh") {
 		t.Fatalf("warnings = %+v", o.Warnings)
-	}
-	for _, w := range o.Warnings {
-		if strings.Contains(w.Detail, "sh -c") || (w.Warning == outcome.WarnCommandNotFound && strings.Contains(w.Detail, " sh ")) {
-			t.Fatalf("sh is on PATH: %+v", w)
-		}
 	}
 	// Once the script exists on the primary branch, only the relative-path
 	// warning remains for it.
@@ -191,7 +183,85 @@ func TestCheckXDGCommandsAreChecked(t *testing.T) {
 	f := newFx(t)
 	f.writeXDG("[[defaults.conflict]]\nglob = \"*.lock\"\nresolve = [\"/no/such/absolute/tool\"]\n")
 	o := f.check("")
-	if o.Outcome != outcome.ConfigOK || !hasWarn(o, outcome.WarnCommandNotFound, "/no/such/absolute/tool") {
+	if o.Outcome != outcome.ConfigUnrunnable || o.Exit != 7 || !hasWarn(o, outcome.WarnCommandNotFound, "/no/such/absolute/tool") {
+		t.Fatalf("got %+v", o)
+	}
+	if !strings.Contains(o.Message, "/no/such/absolute/tool (key") || !strings.Contains(o.Message, "config.toml:") {
+		t.Fatalf("message = %q", o.Message)
+	}
+}
+
+// onlyGitOnPath points this process's PATH at a temp dir holding only git,
+// so every other bare command is "not on PATH".
+func onlyGitOnPath(t *testing.T) {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not found")
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(git, filepath.Join(dir, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+}
+
+func assertUnrunnable(t *testing.T, o *outcome.Outcome, cmd, key, file string) {
+	t.Helper()
+	if o.Outcome != outcome.ConfigUnrunnable || o.Exit != 7 {
+		t.Fatalf("want config-unrunnable exit 7, got %+v", o)
+	}
+	if !strings.Contains(o.Message, cmd+" (key "+key+", ") || !strings.Contains(o.Message, file+":") ||
+		!strings.Contains(o.Message, "is not on PATH") {
+		t.Fatalf("message = %q", o.Message)
+	}
+	if !strings.Contains(o.Hint, "PATH") || !hasWarn(o, outcome.WarnCommandNotFound, cmd) {
+		t.Fatalf("hint/warnings: %+v", o)
+	}
+}
+
+func TestCheckPathMissInRepoHookIsUnrunnable(t *testing.T) {
+	f := newFx(t)
+	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.before_move]]\nrun = [\"no-such-tool-xyzzy\"]\n"})
+	onlyGitOnPath(t)
+	o := f.check("")
+	assertUnrunnable(t, o, "no-such-tool-xyzzy", "hooks.land.before_move[0].run", ".pg-git-lander.toml")
+}
+
+func TestCheckPathMissInXDGFileIsUnrunnable(t *testing.T) {
+	f := newFx(t)
+	f.writeXDG("[[defaults.conflict]]\nglob = \"*.lock\"\nresolve = [\"no-such-tool-xyzzy\"]\n")
+	onlyGitOnPath(t)
+	o := f.check("")
+	assertUnrunnable(t, o, "no-such-tool-xyzzy", "defaults.conflict[0].resolve", "config.toml")
+}
+
+func TestCheckPathMissInFileFlagIsUnrunnable(t *testing.T) {
+	f := newFx(t)
+	file := filepath.Join(t.TempDir(), "next.toml")
+	if err := os.WriteFile(file, []byte("[[hooks.land.before_move]]\nrun = [\"no-such-tool-xyzzy\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	onlyGitOnPath(t)
+	o := f.check(file)
+	assertUnrunnable(t, o, "no-such-tool-xyzzy", "hooks.land.before_move[0].run", file)
+}
+
+func TestCheckAllCommandsPresentIsOK(t *testing.T) {
+	f := newFx(t)
+	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.before_move]]\nrun = [\"git\", \"status\"]\n"})
+	onlyGitOnPath(t)
+	o := f.check("")
+	if o.Outcome != outcome.ConfigOK || o.Exit != 0 || len(o.Warnings) != 0 {
+		t.Fatalf("got %+v", o)
+	}
+}
+
+func TestCheckRelativeCommandPathStaysWarning(t *testing.T) {
+	f := newFx(t)
+	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.before_move]]\nrun = [\"./x.sh\"]\n", "x.sh": "#!/bin/sh\n"})
+	o := f.check("")
+	if o.Outcome != outcome.ConfigOK || o.Exit != 0 || !hasWarn(o, outcome.WarnRelativeCommandPath, "x.sh") {
 		t.Fatalf("got %+v", o)
 	}
 }

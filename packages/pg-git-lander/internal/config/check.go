@@ -24,7 +24,9 @@ type CheckOptions struct {
 }
 
 // Check validates the XDG file and the repo file as the next operation
-// would read them and returns the config-ok outcome with its warnings, or a
+// would read them and returns the config-ok outcome with its warnings, a
+// config-unrunnable outcome (same warnings) when a configured command is
+// not on this process's PATH or is a missing absolute path, or a
 // config-error outcome naming the file, line, key and layer. The returned
 // error is for failures that are not about the configuration (RepoDir is
 // not a repository, say).
@@ -84,6 +86,18 @@ func (l *Loader) Check(ctx context.Context, opts CheckOptions) (*outcome.Outcome
 	warns = append(warns, l.lossyDriverWarnings(ctx, pre)...)
 
 	o := outcome.New(outcome.ConfigOK)
+	var unrunnable []string
+	for _, w := range warns {
+		if w.unrunnable {
+			unrunnable = append(unrunnable, fmt.Sprintf("%s (key %s, %s:%d) %s", w.cmd, w.Key, w.File, w.Line, w.problem))
+		}
+	}
+	if len(unrunnable) > 0 {
+		o = outcome.New(outcome.ConfigUnrunnable)
+		o.Reason = string(outcome.WarnCommandNotFound)
+		o.Message = strings.Join(unrunnable, "; ")
+		o.Hint = "PATH here means this process's PATH: run config check under the PATH the land will use."
+	}
 	for _, w := range warns {
 		o.Warnings = append(o.Warnings, outcome.WarningEntry{
 			Warning: w.Word, Reason: w.Key,
@@ -197,7 +211,10 @@ func (l *Loader) commandWarnings(v *vals, file, repo string) []Warning {
 		switch {
 		case filepath.IsAbs(cmd):
 			if !isFile(cmd) {
-				out = append(out, Warning{Word: outcome.WarnCommandNotFound, File: file, Line: line, Key: key, detail: cmd + " does not exist"})
+				out = append(out, Warning{
+					Word: outcome.WarnCommandNotFound, File: file, Line: line, Key: key, detail: cmd + " does not exist",
+					unrunnable: true, cmd: cmd, problem: "does not exist",
+				})
 			}
 		case strings.Contains(cmd, "/"):
 			out = append(out, Warning{
@@ -209,7 +226,10 @@ func (l *Loader) commandWarnings(v *vals, file, repo string) []Warning {
 			}
 		default:
 			if _, err := exec.LookPath(cmd); err != nil {
-				out = append(out, Warning{Word: outcome.WarnCommandNotFound, File: file, Line: line, Key: key, detail: cmd + " is not on PATH"})
+				out = append(out, Warning{
+					Word: outcome.WarnCommandNotFound, File: file, Line: line, Key: key, detail: cmd + " is not on PATH",
+					unrunnable: true, cmd: cmd, problem: "is not on PATH",
+				})
 			}
 		}
 	}

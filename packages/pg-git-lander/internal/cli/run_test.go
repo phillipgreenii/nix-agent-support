@@ -202,6 +202,15 @@ func TestConfigCheck(t *testing.T) {
 	if r.code != 7 || f.jsonOutcome(r)["outcome"] != "config-error" {
 		t.Fatalf("%+v", r)
 	}
+	missing := filepath.Join(t.TempDir(), "unrunnable.toml")
+	if err := os.WriteFile(missing, []byte("[[hooks.land.before_move]]\nrun = [\"/no/such/abs/tool\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r = f.cli(f.repo.Dir, "config", "check", "--file", missing, "--json")
+	m := f.jsonOutcome(r)
+	if r.code != 7 || m["outcome"] != "config-unrunnable" || m["warnings"] == nil {
+		t.Fatalf("%+v", r)
+	}
 }
 
 func TestStatusPrintsItsOwnJSONObjectAndExitsZero(t *testing.T) {

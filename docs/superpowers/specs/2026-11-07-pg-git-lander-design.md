@@ -147,7 +147,7 @@ Every invocation ends with exactly one outcome. With `--json` the tool prints on
 | 0    | `landed`, `rebased`, `up-to-date`, `nothing-to-land`, `aborted`, `quit`, `status`, `log`, `config-ok` | Done. No record of this operation remains (after `quit` the worktree and the work branch remain).                                                                                                |
 | 1    | `internal-error`                                                                                      | Unexpected failure before any lock was taken. Exit 1 never carries a branchable meaning.                                                                                                         |
 | 2    | `usage-error`                                                                                         | Bad arguments. Nothing changed.                                                                                                                                                                  |
-| 7    | `config-error`                                                                                        | The XDG configuration (or `config check`'s file) is invalid. Nothing changed.                                                                                                                    |
+| 7    | `config-error`, `config-unrunnable`                                                                   | The configuration is invalid, or `config check` found an unrunnable command (section 12.5). Nothing changed.                                                                                     |
 | 9    | `busy`                                                                                                | A lock was not obtained within the wait. Nothing changed. The JSON names the holder. Always retryable.                                                                                           |
 | 21   | `stopped`                                                                                             | The operation stopped and its record is `stopped` (section 6.3). An unexpected failure after locking is a stop with reason `internal-error`, never exit 1, so a record never dangles unreported. |
 | 22   | `refused`                                                                                             | A precondition failed (section 6.2). No ref, worktree or record changed, except for `holder-died`.                                                                                               |
@@ -1137,8 +1137,15 @@ the layer.
   argv, and a `root` that is not inside a git clone.
 - In the repo file, unknown keys are warnings (`unknown-repo-config-key`), so a file written for a newer tool version
   does not block landings; every other error is the refusal `repo-config-error` at run time.
-- It MUST warn about a relative command path (`relative-command-path`, section 18) and a configured command not found
-  on PATH (`command-not-found`).
+- It MUST warn about a relative command path (`relative-command-path`, section 18).
+- It MUST fail with the outcome `config-unrunnable` (exit 7, the code of `config-error`) when a configured hook or
+  conflict command (`run`, `resolve`, `verify`) from the XDG file, the repo file or `--file` is not found on this
+  process's PATH or is a missing absolute path. The message reads `<cmd> (key <key>, <file>:<line>) is not on PATH`, the
+  hint says PATH means this process's PATH, so run it under the PATH the land will use, and `warnings[]` still carries
+  every `command-not-found` warning. A repo-relative script missing from the repo stays a warning (`--file` may name an
+  uncommitted file whose script is not on the primary branch yet), as do `relative-command-path`,
+  `lossy-merge-driver` and `unknown-repo-config-key`. There is no opt-out flag; a caller that wants the old behavior
+  reads `warnings[]`.
 - It MUST warn (`lossy-merge-driver`) when a `merge.*.driver` setting or a `merge=` attribute names a driver that keeps
   one side whole (a keep-ours driver such as `flake-lock-keep-ours`), because during a rebase "ours" is the upstream and
   the branch's own change to that file is dropped without a conflict stop (section 16).

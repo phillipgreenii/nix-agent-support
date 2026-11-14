@@ -75,6 +75,12 @@ type Warning struct {
 	File   string          `json:"file"`
 	Line   int             `json:"line"`
 	Key    string          `json:"key"`
+
+	// unrunnable marks a command that cannot run under this process's PATH
+	// (not on PATH, or a missing absolute path); config check fails on it.
+	unrunnable bool
+	cmd        string
+	problem    string
 }
 
 // Lock holds lock.* keys.

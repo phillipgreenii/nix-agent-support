@@ -42,6 +42,6 @@
 
 `pg-git-lander log {{op_id|branch}} --tail {{50}}`
 
-- Validate the configuration:
+- Validate the configuration (exit 7 when a configured command is not on this process's PATH):
 
 `pg-git-lander config check --file {{path/to/config.toml}}`
