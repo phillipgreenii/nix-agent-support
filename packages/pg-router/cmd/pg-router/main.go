@@ -43,9 +43,9 @@ func run() int {
 		printUsageErr(r.msg)
 		return exitUsage
 	case routeRun:
-		return runRun(r.only, r.disable, r.metricsAddr)
+		return runRun(r.only, r.disable, r.metricsAddr, r.shutdownDeadline)
 	case routeRunUntilIdle:
-		return runRunUntilIdle(r.only, r.disable)
+		return runRunUntilIdle(r.only, r.disable, r.shutdownDeadline)
 	case routeRunRole:
 		return runRunRole(r.role, r.eventJSON, r.json)
 	case routeRunQuery:

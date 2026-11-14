@@ -32,6 +32,7 @@ cachePackages = [
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
+  'github.com/phillipgreenii/x/lifecycle',
   'github.com/phillipgreenii/x/pprofserver',
   'github.com/prometheus/client_golang/prometheus',
   'github.com/prometheus/client_golang/prometheus/promhttp',
@@ -80,6 +81,7 @@ cachePackages = [
   'golang.org/x/net/http2/hpack',
   'golang.org/x/net/idna',
   'golang.org/x/net/trace',
+  'golang.org/x/sync/errgroup',
   'golang.org/x/sys/unix',
   'golang.org/x/text/secure/bidirule',
   'golang.org/x/text/transform',
@@ -244,8 +246,8 @@ cachePackages = [
     hash = 'sha256-79URDDFenmGc9JZu+5AXHToMrtTREHb3BC84b/gym9Q='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261015022436-7b4c351b3c34'
-    hash = 'sha256-IgDjbWSCmJEBqaZMa86YVkEXAwWR6M5R6wRvwH3uCRw='
+    version = 'v0.0.0-20261112162533-9b4111e32302'
+    hash = 'sha256-7ciam77rn54KRghpM8M7my2Koo4KEBn4kI1nHPn7Og4='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'
@@ -326,6 +328,10 @@ cachePackages = [
   [mod.'golang.org/x/net']
     version = 'v0.58.0'
     hash = 'sha256-fDOkQJXURrbq2dBGa91bCUsXknCZlo3ru2JIofSOGRo='
+
+  [mod.'golang.org/x/sync']
+    version = 'v0.24.0'
+    hash = 'sha256-gViyLpsZFBKTEUtK6Li3m6plz5J/VCAcpTLymQVRpj4='
 
   [mod.'golang.org/x/sys']
     version = 'v0.47.0'

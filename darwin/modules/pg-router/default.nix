@@ -101,7 +101,16 @@ let
   # backend might need — naming no specific tool here, only the profile
   # location itself.
   hmProfileBin = if primaryUser != null then "/etc/profiles/per-user/${primaryUser}/bin" else null;
+
+  # The one shutdown deadline, in seconds. It is passed to the daemon
+  # (`--shutdown-deadline`) and launchd's ExitTimeOut is derived from it, so the
+  # daemon's own watchdog always fires before launchd's SIGKILL.
+  shutdownDeadlineSeconds = 53;
+  exitTimeOutMarginSeconds = 7;
+  exitTimeOutSeconds = shutdownDeadlineSeconds + exitTimeOutMarginSeconds;
 in
+assert lib.assertMsg (exitTimeOutSeconds <= 60)
+  "pg-router: shutdown deadline (${toString shutdownDeadlineSeconds}s) plus margin (${toString exitTimeOutMarginSeconds}s) exceeds launchd's 60s ExitTimeOut clamp";
 {
   config = lib.mkMerge [
     (lib.mkIf (obs.enable or false) {
@@ -148,7 +157,7 @@ in
           ${lib.optionalString (
             daemonCfg.metricsAddr != null
           ) "export PG_ROUTER_METRICS_ADDR=${lib.escapeShellArg daemonCfg.metricsAddr}"}
-          exec ${pkg}/bin/pg-router run
+          exec ${pkg}/bin/pg-router run --shutdown-deadline ${toString shutdownDeadlineSeconds}s
         '';
         runAtLoad = true;
         keepAlive = true;
@@ -182,47 +191,28 @@ in
             // lib.optionalAttrs daemonCfg.pprof.enable {
               PG_ROUTER_PPROF_ADDR = "${stateHome}/pg-router/pprof.sock";
             };
-          # ExitTimeOut (pg2-asr8z stopgap; no prior precedent for this key
-          # anywhere in this pn-workspace — searched, none found): launchd's
-          # own default is 5s, which SIGKILLed this daemon mid-shutdown
-          # before preShutdownAll (cmd/pg-router/run.go) could finish its
-          # ccpool-handler sweep even once — direct log evidence in pg2-asr8z.
-          # 30s is deliberately generous, not tightly fitted: pg2-asr8z's own
-          # de-dup fix (preShutdownAll now calls the sweep exactly once, not
-          # once per enabled role) already removes the O(roles) multiplier
-          # that caused the timeout; this value is a safety margin over ONE
-          # completed sweep of the current ~25-session backlog (each
-          # `ccpool list --all` alone measured ~0.74s, plus per-session
-          # close/worktree-removal work), with headroom for the backlog to
-          # keep growing before the dedup fix's own effect and pg2-5sirm
-          # (tracked separately, out of scope here) catch up.
-          #
-          # pg2-euh4f raised 30 -> 60: shutdown now first drains in-flight
-          # dispatches for up to shutdownDrainTimeout (20s,
-          # cmd/pg-router/run.go) BEFORE the sweep, so the budget is
-          # drain (20s) + the 30s sweep allowance above + the 5s
-          # inFlightDrainTimeout tail = 55s, leaving 5s margin. Keep in step
-          # with those. The preShutdown hooks are now bounded at 5s (preShutdownTimeout)
-          # and an overall watchdog (shutdownWatchdogDeadline, 53s) logs
-          # shutdown_overrun and exits 10 before launchd's SIGKILL; keep that
-          # deadline at ExitTimeOut minus 7s.
-          #
-          # 60 is launchd's HARD CAP, not a tuning choice (pg2-s3fzr,
-          # measured 2026-10-03 on macOS 26 / Darwin 25.6.0 with a throwaway
-          # `sleep` job): launchd silently clamps ExitTimeOut to 60 --
-          # 61, 90 and 120 all print `exit timeout = 60` in `launchctl
-          # print`, while 45 prints 45. pg2-euh4f first set 90, which the
-          # plist carried faithfully but launchd ignored above 60. Do NOT
-          # raise this past 60; shrink shutdownDrainTimeout instead.
-          ExitTimeOut = 60;
-          # AbandonProcessGroup (pg2-e5u06): launchd.plist(5) says that when
+          # ExitTimeOut is DERIVED from the shutdown deadline this module also
+          # passes to the daemon (`--shutdown-deadline`, see shutdownDeadlineSeconds
+          # above): deadline plus a 7 s margin. The daemon splits that one
+          # deadline between its shutdown phases (drain of in-flight
+          # dispatches, preShutdown hooks, in-flight tail, flush; see
+          # cmd/pg-router/shutdown_budget.go) and hard-exits with a logged
+          # shutdown_overrun when the deadline passes, so launchd's SIGKILL
+          # (ExitTimeOut after SIGTERM) can never be the first to fire and the
+          # two numbers cannot drift: change the deadline here, never
+          # ExitTimeOut alone. launchd silently clamps ExitTimeOut to 60 (61,
+          # 90 and 120 all print `exit timeout = 60` in `launchctl print`;
+          # measured 2026-10-03 on macOS 26 / Darwin 25.6.0), so the module
+          # asserts deadline plus margin stays within 60.
+          ExitTimeOut = exitTimeOutSeconds;
+          # AbandonProcessGroup: launchd.plist(5) says that when
           # a job dies launchd kills any remaining processes with the same
           # process group ID as the job unless this key is true. Observed
           # live (2026-10-04): the daemon is its own process-group leader
           # (ppid 1, pgid == pid) and every handler child shares that pgid,
           # so without this key launchd group-kills whatever is still
           # running at daemon exit -- after the graceful drain
-          # (shutdownDrainTimeout) and inside ExitTimeOut -- which defeats
+          # (the drain phase) and inside ExitTimeOut -- which defeats
           # the drain design (pg2-euh4f, pg2-s3fzr, pg2-vu2zc).
           #
           # Chosen over the alternative (per-handler Setpgid/Setsid in
@@ -232,8 +222,8 @@ in
           # reaching them and puts them in a background group for any TTY
           # use), and it needs no Go change. Trade-off, accepted: a hung
           # group member is no longer reaped by launchd (it is reaped
-          # only by its own exit). ExitTimeOut is unchanged (60, the
-          # launchd hard cap, see above).
+          # only by its own exit). ExitTimeOut is derived from the
+          # shutdown deadline, see above.
           #
           # pg2-dtigc (ADR 0085): this key is now LOAD-BEARING for the
           # restart requirement ("restarts MUST NOT kill existing

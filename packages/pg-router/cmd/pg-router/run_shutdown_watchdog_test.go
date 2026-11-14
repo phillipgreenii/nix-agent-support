@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/config"
@@ -20,6 +24,31 @@ import (
 // Tests for the shutdown watchdog and the shutdown_* events of
 // runLongRunningBody: an overall deadline once the signal context ends, a
 // bounded preShutdown sweep, and the started/phase/done log events.
+
+// init starts the os/signal runtime goroutine outside any synctest bubble: it
+// is created by the first signal.Notify, and a bubble that triggers that
+// first call aborts with "select on synctest channel from outside bubble".
+func init() {
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGUSR2)
+}
+
+// stallRunner is a shutdownRunner whose preShutdown hook ignores context
+// cancellation and blocks until released. Every other shutdown phase is
+// clamped to the time left before the deadline, so a stall inside one of them
+// ends at the same instant as the watchdog (a tie in fake time); only a hook
+// that outlives its context can be ended by the watchdog alone.
+type stallRunner struct {
+	*shutdownRunner
+	unstall chan struct{}
+}
+
+func (s stallRunner) Run(ctx context.Context, argv []string, in []byte) ([]byte, int, error) {
+	if argv[len(argv)-1] == "preShutdown" {
+		<-s.unstall
+		return []byte(`{"schemaVersion":"1","id":"x","outcome":"ok"}`), 0, nil
+	}
+	return s.shutdownRunner.Run(ctx, argv, in)
+}
 
 type lockedBuf struct {
 	mu sync.Mutex
@@ -88,103 +117,86 @@ func startWatchdogRun(t *testing.T, r wireclient.Runner, started <-chan struct{}
 }
 
 func TestRunLongRunning_watchdogExitsWhenShutdownStalls(t *testing.T) {
-	r := newShutdownRunner()
-	exited := make(chan int, 1)
-	// The dispatch never finishes and the drain budget is a minute, so the
-	// drain phase outlives the 150ms watchdog.
-	signal, done, logs := startWatchdogRun(t, r, r.started, time.Minute, 150*time.Millisecond,
-		func(c int) {
-			select {
-			case exited <- c:
-			default:
+	synctest.Test(t, func(t *testing.T) {
+		r := newShutdownRunner()
+		unstall := make(chan struct{})
+		exited := make(chan int, 1)
+		// The preShutdown hook never returns until released, so the shutdown
+		// outlives the 150ms watchdog.
+		signal, done, logs := startWatchdogRun(t, stallRunner{r, unstall}, r.started, time.Minute, 150*time.Millisecond,
+			func(c int) {
+				select {
+				case exited <- c:
+				default:
+				}
+			})
+		// The dispatch finishes at once, so the drain ends well inside the
+		// deadline and the stall is in the preShutdown hook alone.
+		close(r.release)
+		signal()
+		select {
+		case code := <-exited:
+			if code != 10 {
+				t.Fatalf("watchdog exit code = %d, want 10", code)
 			}
-		})
-	signal()
-	select {
-	case code := <-exited:
-		if code != 10 {
-			t.Fatalf("watchdog exit code = %d, want 10", code)
+		case <-time.After(20 * time.Second):
+			t.Fatal("the watchdog never fired although the shutdown stalled")
 		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("the watchdog never fired although the shutdown stalled")
-	}
-	out := logs.String()
-	for _, want := range []string{"shutdown_started", "shutdown_overrun", "phase=drain"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("log missing %q:\n%s", want, out)
+		out := logs.String()
+		for _, want := range []string{"shutdown_signal", "shutdown_overrun", "phase=pre_shutdown"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("log missing %q:\n%s", want, out)
+			}
 		}
-	}
-	// Unblock the body so its goroutine ends.
-	close(r.release)
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		t.Fatal("run did not exit after release")
-	}
-	if strings.Contains(logs.String(), "shutdown_done") {
-		t.Fatalf("shutdown_done logged after an overrun:\n%s", logs.String())
-	}
+		// Unblock the body so its goroutine ends.
+		close(unstall)
+		select {
+		case <-done:
+		case <-time.After(20 * time.Second):
+			t.Fatal("run did not exit after release")
+		}
+		if strings.Contains(logs.String(), "shutdown_complete") {
+			t.Fatalf("shutdown_complete logged after an overrun:\n%s", logs.String())
+		}
+	})
 }
 
 func TestRunLongRunning_emitsShutdownEventsAndBoundsPreShutdown(t *testing.T) {
-	sr := newShutdownRunner()
-	r := &deadlineRunner{shutdownRunner: sr}
-	signal, done, logs := startWatchdogRun(t, r, sr.started, time.Minute, time.Minute, func(int) { t.Error("watchdog must not fire on a prompt shutdown") })
-	signal()
-	close(sr.release)
-	select {
-	case code := <-done:
-		if code != exitOK {
-			t.Fatalf("exit = %d, want %d", code, exitOK)
-		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("run did not exit")
-	}
-	out := logs.String()
-	last := -1
-	for _, want := range []string{"shutdown_started", "phase=drain", "phase=metrics_flush", "phase=accept_close", "phase=pre_shutdown", "phase=store_close", "shutdown_done"} {
-		i := strings.Index(out, want)
-		if i < 0 || i < last {
-			t.Fatalf("event %q missing or out of order (after offset %d):\n%s", want, last, out)
-		}
-		last = i
-	}
-	if strings.Contains(out, "shutdown_overrun") {
-		t.Fatalf("unexpected overrun:\n%s", out)
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.preHasDeadline || r.preRemaining <= 0 || r.preRemaining > preShutdownTimeout {
-		t.Fatalf("preShutdown ctx deadline = (%v, remaining %v), want one within %v", r.preHasDeadline, r.preRemaining, preShutdownTimeout)
-	}
-}
-
-func TestShutdownWatchdogBudget(t *testing.T) {
-	// launchd's ExitTimeOut clamp is 60s; keep a 7s margin over the deadline,
-	// and the deadline over the sum of the bounded phases.
-	const exitTimeOut = 60 * time.Second
-	const flushAllowance = 3 * time.Second // metrics flush, accept-loop close, store close
-	for _, tc := range []struct {
-		name  string
-		total time.Duration
-		limit time.Duration
-	}{
-		{"deadline plus 7s margin under ExitTimeOut", shutdownWatchdogDeadline + 7*time.Second, exitTimeOut},
-		{"bounded phases under the watchdog deadline", shutdownDrainTimeout + preShutdownTimeout + inFlightDrainTimeout, shutdownWatchdogDeadline},
-		{"bounded phases plus flush allowance under the watchdog deadline", shutdownDrainTimeout + preShutdownTimeout + inFlightDrainTimeout + flushAllowance, shutdownWatchdogDeadline},
-		{"bounded phases plus flush allowance under ExitTimeOut", shutdownDrainTimeout + preShutdownTimeout + inFlightDrainTimeout + flushAllowance, exitTimeOut},
-		{"watchdog deadline under ExitTimeOut", shutdownWatchdogDeadline, exitTimeOut},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.total > tc.limit {
-				t.Fatalf("total %v exceeds %v", tc.total, tc.limit)
+	synctest.Test(t, func(t *testing.T) {
+		sr := newShutdownRunner()
+		r := &deadlineRunner{shutdownRunner: sr}
+		signal, done, logs := startWatchdogRun(t, r, sr.started, time.Minute, time.Minute, func(int) { t.Error("watchdog must not fire on a prompt shutdown") })
+		signal()
+		close(sr.release)
+		select {
+		case code := <-done:
+			if code != exitOK {
+				t.Fatalf("exit = %d, want %d", code, exitOK)
 			}
-			if tc.name == "bounded phases under the watchdog deadline" && tc.total >= tc.limit {
-				t.Fatalf("total %v must be strictly under %v", tc.total, tc.limit)
+		case <-time.After(20 * time.Second):
+			t.Fatal("run did not exit")
+		}
+		out := logs.String()
+		last := -1
+		for _, want := range []string{"shutdown_phase phase=drain", "phase=metrics_flush", "phase=accept_close", "phase=pre_shutdown", "phase=store_close", "shutdown_complete"} {
+			i := strings.Index(out, want)
+			if i < 0 || i < last {
+				t.Fatalf("event %q missing or out of order (after offset %d):\n%s", want, last, out)
 			}
-		})
-	}
-	if preShutdownTimeout > 10*time.Second {
-		t.Fatalf("preShutdownTimeout %v: the ccpool preShutdown answers at once, so the allowance must stay small", preShutdownTimeout)
-	}
+			last = i
+		}
+		// The signal line is emitted by a watcher goroutine concurrently with the
+		// drain phase line, so only its presence is asserted, not its order.
+		if !strings.Contains(out, "shutdown_signal") {
+			t.Fatalf("shutdown_signal missing:\n%s", out)
+		}
+		if strings.Contains(out, "shutdown_overrun") {
+			t.Fatalf("unexpected overrun:\n%s", out)
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if !r.preHasDeadline || r.preRemaining <= 0 || r.preRemaining > newShutdownBudget(time.Minute).PreShutdown {
+			t.Fatalf("preShutdown ctx deadline = (%v, remaining %v), want one within %v", r.preHasDeadline, r.preRemaining, newShutdownBudget(time.Minute).PreShutdown)
+		}
+	})
 }

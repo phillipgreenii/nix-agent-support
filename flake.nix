@@ -11394,15 +11394,26 @@
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.script;
                 # pg2-e5u06: the plist MUST NOT let launchd group-kill a
                 # handler that outlives the daemon -- AbandonProcessGroup =
-                # true -- and ExitTimeOut MUST stay at launchd's 60s hard
+                # true -- and ExitTimeOut MUST stay within launchd's 60s hard
                 # cap (pg2-s3fzr). serviceConfig passes through verbatim
                 # into the generated launchd plist.
                 assert
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.AbandonProcessGroup
                   == true;
+                # nix owns the shutdown deadline: the daemon is started with
+                # `--shutdown-deadline <N>s` and ExitTimeOut is that N plus a
+                # 7s margin, so the daemon's own watchdog fires before
+                # launchd's SIGKILL and the two cannot drift. The deadline is
+                # read back out of the rendered script, not restated here.
                 assert
-                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.ExitTimeOut
-                  == 60;
+                  let
+                    ua = darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon;
+                    m = builtins.match ".*pg-router run --shutdown-deadline ([0-9]+)s.*" ua.script;
+                    deadline = if m == null then null else lib.toInt (builtins.head m);
+                  in
+                  deadline != null
+                  && ua.serviceConfig.ExitTimeOut == deadline + 7
+                  && ua.serviceConfig.ExitTimeOut <= 60;
                 # pg2-zuc5x: restart semantics of the daemon LaunchAgent are
                 # pinned. KeepAlive = true makes launchd respawn the job after
                 # ANY exit while it stays loaded, including a clean exit 0

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/phillipgreenii/x/lifecycle"
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/phillipgreenii/pg-router/conformance"
@@ -29,7 +30,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
-	"github.com/phillipgreenii/pg-router/internal/shutdown"
+
 	"github.com/phillipgreenii/pg-router/internal/telemetry"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
@@ -57,70 +58,28 @@ import (
 // listener.
 const idleDrainTick = 500 * time.Millisecond
 
-// inFlightDrainTimeout bounds runRun's/runRunUntilIdle's shutdown-ordering
-// wait (this package's design doc's "shutdown ordering" note) for every
-// Kick()-launched offer still outstanding on q to settle before the durable
-// store closes underneath it. By the time this runs, the dispatch context has
-// already been cancelled (runRun: after shutdownDrainTimeout's grace; run-
-// until-idle: on SIGINT/SIGTERM) -- which is what unsticks a genuinely-stuck
-// subprocess call via wireclient's exec.CommandContext -- so this bound only
-// needs to cover that unwind's own tail latency, never a fresh MaxWait
-// window. That tail is wireclient's SIGTERM to the handler plus its WaitDelay (8s:
-// the command adapter's 5s payload cancel grace and a reply margin), so this
-// bound is 8s, taken from preShutdownTimeout.
-const inFlightDrainTimeout = 8 * time.Second
-
-// shutdownDrainTimeout bounds how long runRun, after SIGINT/SIGTERM, lets
-// the dispatches already in flight finish before it cancels their context
-// (and, only then, runs preShutdownAll). Without
-// it a pn workspace apply that reloads the launchd agent (~2.5x/day) SIGKILLed
-// a running handler ("role desk-pr exited -1") and left a transient pg-desk
-// sync_error row.
+// The shutdown phases (drain, preShutdown hooks, in-flight tail, flush) have no
+// constants of their own: shutdown_budget.go splits ONE deadline between them,
+// and that deadline is the --shutdown-deadline flag the deployment passes (the
+// nix module derives launchd's ExitTimeOut from the same number). The phases
+// the daemon runs once its signal context ends are, in order:
 //
-// Sizing evidence (bead pg2-euh4f, from events.jsonl): desk-pr dispatch
-// durations have median ~19s, p90 ~31s, p99 ~50s (a loose upper bound); the
-// two killed dispatches ran <= 15s. 20s comfortably covers those and the
-// median; it does NOT cover the p90 (~31s), which is the price of fitting the
-// launchd budget: launchd clamps ExitTimeOut at 60s (pg2-s3fzr, measured),
-// so drain (20s) + the preShutdown allowance (preShutdownTimeout, 5s) +
-// inFlightDrainTimeout's 8s tail = 33s (plus ~3s of flush/close) must stay under the 60s ExitTimeOut in
-// darwin/modules/pg-router/default.nix with margin -- keep the two in step,
-// and never raise this without shrinking another term. A drain that times out
-// cancels the dispatch context and kills the handler as before, but the
-// cancelled offer is then handed back un-accepted (roleListener.Offer, bead
-// pg2-bn5io) rather than recorded as a handler error, so the next daemon
-// re-offers the event instead of leaving it to a sweep.
+//   - drain: in-flight dispatches of roles that do not survive shutdown finish,
+//     then their context is cancelled (a cut offer is re-offered by the next
+//     daemon). A role with survivesShutdown is neither waited on nor cancelled
+//     (ADR 0085).
+//   - metrics_flush, accept_close: final metrics snapshot, socket closed.
+//   - pre_shutdown: the handlers' preShutdown hooks, bounded.
+//   - store_close: cancelled dispatches unwind (the tail), then the store closes.
 //
-// This budget applies only to roles that do NOT declare survivesShutdown
-// (bead pg2-dtigc, ADR 0085). A ccpool-backed role's dispatch lasts far longer
-// than any budget launchd allows, so the daemon neither waits for it nor
-// cancels it: its handler keeps running and the next daemon adopts the session.
-const shutdownDrainTimeout = 20 * time.Second
-
-// preShutdownTimeout bounds preShutdownAll's handler hooks (it used to run on
-// an unbounded context). The ccpool adapter's preShutdown now answers at once
-// (its session sweep moved to the scheduled janitor), so this allowance is only a
-// ceiling for a slow or hung hook: 5s, down from 22s, which leaves the whole
-// shutdown (drain 20s + 5s + in-flight tail 8s = 33s) well inside the watchdog
-// deadline below. TestShutdownWatchdogBudget pins the sum.
-const preShutdownTimeout = 5 * time.Second
-
-// shutdownWatchdogDeadline is the overall shutdown deadline the S5 watchdog
-// enforces once the signal context ends. Worst case of the existing phases:
-// drain shutdownDrainTimeout (20s) + preShutdownTimeout (5s) +
-// inFlightDrainTimeout (8s) = 33s, plus ~3s for the metrics flush, accept-loop
-// close and store close = 36s. The deadline is not derived from that sum;
-// deadline + 7s must stay at or under launchd's 60s
-// ExitTimeOut clamp (darwin/modules/pg-router/default.nix), so 53s. A shutdown
-// still running at this point logs shutdown_overrun naming the phase in flight
-// and exits 10, rather than being SIGKILLed with the store lock held.
-const shutdownWatchdogDeadline = 53 * time.Second
+// A phase runs under min(its share, what is left of the deadline), so an
+// earlier overrun shrinks later phases instead of pushing past the watchdog.
 
 // inFlightDrainPollInterval is WaitForInFlightDrain's poll cadence during
-// the wait inFlightDrainTimeout bounds.
+// the tail wait.
 const inFlightDrainPollInterval = 100 * time.Millisecond
 
-// drainThenCloseStore waits (bounded by inFlightDrainTimeout) for every
+// drainThenCloseStore waits (bounded by timeout, the tail share of the deadline) for every
 // Kick()-launched offer still outstanding on q to settle, then closes the
 // durable store regardless of whether the wait actually drained everything.
 // This ordering is required now that Kick()'s launched goroutines are
@@ -141,14 +100,14 @@ const inFlightDrainPollInterval = 100 * time.Millisecond
 // running past this process (ADR 0085); they never settle here, so they are
 // neither waited on nor reported as lost -- their events stay un-accepted in
 // the durable log and the next process re-offers them.
-func drainThenCloseStore(ctx context.Context, q *eventqueue.Queue, storeClose func() error, survives func(listenerID string) bool) {
+func drainThenCloseStore(ctx context.Context, q *eventqueue.Queue, storeClose func() error, timeout time.Duration, survives func(listenerID string) bool) {
 	// ctx is typically already cancelled (the signal that began shutdown); the drain
 	// must outlive that cancellation, so it keeps only ctx's values.
-	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inFlightDrainTimeout)
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if !q.WaitForInFlightDrainExcept(drainCtx, inFlightDrainPollInterval, survives) {
 		slog.Error("shutdown: in-flight dispatch offer(s) did not drain before the timeout; closing the durable store anyway -- any still-outstanding offer's durable write will be lost",
-			"timeout", inFlightDrainTimeout, "sessionsInFlight", q.SessionsInFlight())
+			"timeout", timeout, "sessionsInFlight", q.SessionsInFlight())
 	}
 	_ = storeClose()
 }
@@ -1206,12 +1165,11 @@ type preparedRun struct {
 	cfg     config.Config
 	o       *orchestrator.Orchestrator
 	cleanup func() // closes the eventlog writer, if one was opened
-	// Shutdown watchdog seams (runLongRunningBody only); zero values select the
-	// production defaults: stderr logger, shutdownWatchdogDeadline, os.Exit.
+	// Shutdown seams (the lifecycle group and its budget); zero values select the
+	// production defaults: stderr logger, defaultShutdownDeadline, os.Exit.
 	shutdownLog      *slog.Logger
 	shutdownDeadline time.Duration
 	shutdownExit     func(code int)
-	tracker          *shutdown.Tracker // set by runLongRunningBody; nil is a no-op
 	// declaredRoles/excluded are Task 4.1's own captures (Binding Decision
 	// 4): the FULL, pre-selector role list and the run-scoped exclusions
 	// applySelectors computed at its own decision point — both threaded
@@ -1647,16 +1605,30 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 // only/disable are this invocation's --only/--disable flag occurrences
 // (STORY-OP-3, DEC-CLI-1), as parsed by parseRunLikeArgs; resolveSelectors
 // folds in PG_ROUTER_ONLY/PG_ROUTER_DISABLE before prepareRun applies them.
-func runRunUntilIdle(only, disable []string) int {
-	ctx, stop := armRunSignals()
-	defer stop()
-
-	pr, code := prepareRun(ctx, resolveSelectors(only, disable))
+func runRunUntilIdle(only, disable []string, shutdownDeadline time.Duration) int {
+	g := lifecycle.New(context.Background(), runGroupOptions(shutdownDeadline, nil, nil))
+	pr, code := prepareRun(g.Context(), resolveSelectors(only, disable))
 	if code != exitOK {
+		_ = g.Run()
 		return code
 	}
 	defer pr.cleanup()
-	return runUntilIdleBody(ctx, pr)
+	pr.shutdownDeadline = shutdownDeadline
+	return runInGroup(g, "run-until-idle", func(ctx context.Context) int { return runUntilIdleBody(ctx, pr) })
+}
+
+// runInGroup runs body as the one loop of g and returns its exit code once the
+// group has finished. The group owns the signal context (a second signal kills
+// the process) and the shutdown watchdog: a body still running when the
+// deadline passes after the first signal is cut by a logged hard exit.
+func runInGroup(g *lifecycle.Group, name string, body func(ctx context.Context) int) int {
+	var code int
+	g.Go(name, func(ctx context.Context) error {
+		code = body(ctx)
+		return nil
+	})
+	_ = g.Run()
+	return code
 }
 
 // runUntilIdleBody is runRunUntilIdle's boot-to-exit body over an already
@@ -1672,6 +1644,8 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// request (bead pg2-ag31a).
 	stopChaining := context.AfterFunc(ctx, q.StopChaining)
 	defer stopChaining()
+	budget := newShutdownBudget(pr.shutdownDeadline)
+	clk := newShutdownClock(ctx, budget.Deadline)
 	validateRolesAtStartup(ctx, pr.o, pr.cfg)
 	postStartupAll(ctx, pr.o, pr.cfg)
 	// Ordering considered and accepted (review of this bead's design doc,
@@ -1688,12 +1662,16 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// deliberately: reordering would make metrics.Flush wait on the SAME
 	// bounded drain this defer performs, which is a real behavior change,
 	// not a comment-only fix.
-	defer drainThenCloseStore(ctx, q, storeClose, nil)
+	defer func() { drainThenCloseStore(ctx, q, storeClose, clk.Within(budget.Tail), nil) }()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
 	// Shutdown work runs after ctx (the signal) is cancelled, so it must not inherit the cancellation.
-	defer preShutdownAll(context.WithoutCancel(ctx), pr.o, pr.cfg)
+	defer func() {
+		preCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clk.Within(budget.PreShutdown))
+		defer cancel()
+		preShutdownAll(preCtx, pr.o, pr.cfg)
+	}()
 	defer func() {
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
@@ -1865,15 +1843,15 @@ func resolveMetricsAddr(flagAddr string, cfg config.Config) string {
 // bootCore runs, so resolveMeterProvider's cfg.MeterProvider-set branch —
 // the "deployment-bound-backend" case its own doc comment already
 // anticipated — resolves to it.
-func runRun(only, disable []string, metricsAddr string) int {
-	ctx, stop := armRunSignals()
-	defer stop()
-
-	pr, code := prepareRun(ctx, resolveSelectors(only, disable))
+func runRun(only, disable []string, metricsAddr string, shutdownDeadline time.Duration) int {
+	g := lifecycle.New(context.Background(), runGroupOptions(shutdownDeadline, nil, nil))
+	pr, code := prepareRun(g.Context(), resolveSelectors(only, disable))
 	if code != exitOK {
+		_ = g.Run()
 		return code
 	}
 	defer pr.cleanup()
+	pr.shutdownDeadline = shutdownDeadline
 
 	// Opt-in pprof endpoint (PG_ROUTER_PPROF_ADDR): `run` only, never
 	// run-until-idle or another subcommand. Reports go to stderr.
@@ -1895,7 +1873,7 @@ func runRun(only, disable []string, metricsAddr string) int {
 		}()
 	}
 
-	return runLongRunningBody(ctx, pr, shutdownDrainTimeout)
+	return runInGroup(g, "daemon", func(ctx context.Context) int { return runDaemon(ctx, g, pr, 0) })
 }
 
 // runLongRunningBody is runRun's boot-to-exit body over an already prepared
@@ -1906,25 +1884,24 @@ func runRun(only, disable []string, metricsAddr string) int {
 // (drainThenCancelDispatch), so a SIGTERM lets in-flight handlers finish
 // instead of SIGKILLing them (bead pg2-euh4f).
 func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.Duration) int {
-	// S5/S7: once ctx ends the shutdown has shutdownWatchdogDeadline to finish
-	// or the watchdog logs shutdown_overrun and exits 10. Registered first so it
-	// is disarmed last, after the store lock is released. The raw stderr logger
-	// keeps a hung telemetry path from blocking the overrun line.
-	shutLog := pr.shutdownLog
-	if shutLog == nil {
-		shutLog = slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// The group owns the signal context and the shutdown watchdog: once ctx ends
+	// the shutdown has pr.shutdownDeadline to finish or the watchdog logs
+	// shutdown_overrun naming the phase in flight and exits 10. A caller's ctx
+	// ending stands in for the first signal.
+	g := lifecycle.New(ctx, runGroupOptions(pr.shutdownDeadline, pr.shutdownLog, pr.shutdownExit))
+	return runInGroup(g, "daemon", func(ctx context.Context) int { return runDaemon(ctx, g, pr, drainTimeout) })
+}
+
+// runDaemon is the daemon loop: boot, tick, and on ctx ending (the first
+// signal) drain and tear down in the phases shutdown_budget.go budgets. g
+// receives the phase names so an overrun report says where shutdown hung. A
+// zero drainTimeout selects the budget's drain share.
+func runDaemon(ctx context.Context, g *lifecycle.Group, pr preparedRun, drainTimeout time.Duration) int {
+	budget := newShutdownBudget(pr.shutdownDeadline)
+	clk := newShutdownClock(ctx, budget.Deadline)
+	if drainTimeout <= 0 {
+		drainTimeout = budget.Drain
 	}
-	deadline := pr.shutdownDeadline
-	if deadline <= 0 {
-		deadline = shutdownWatchdogDeadline
-	}
-	pr.tracker = shutdown.NewTracker(shutLog)
-	watchdog := shutdown.Watch(ctx, shutdown.Options{Deadline: deadline, Log: shutLog, Tracker: pr.tracker, Exit: pr.shutdownExit})
-	defer func() {
-		if watchdog.Disarm() {
-			pr.tracker.Done()
-		}
-	}()
 	// Dispatches run decoupled from the signal context so SIGTERM does not cancel them.
 	dispatchCtx, cancelDispatch := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelDispatch()
@@ -1958,20 +1935,20 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	survivors := survivingRoles(pr.cfg)
 	survives := func(listenerID string) bool { return survivors[listenerID] }
 	defer func() {
-		pr.tracker.Phase("store_close")
-		drainThenCloseStore(ctx, q, storeClose, survives)
+		g.SetPhase("store_close")
+		drainThenCloseStore(ctx, q, storeClose, clk.Within(budget.Tail), survives)
 	}()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
 	defer func() {
-		pr.tracker.Phase("pre_shutdown")
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), preShutdownTimeout)
+		g.SetPhase("pre_shutdown")
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clk.Within(budget.PreShutdown))
 		defer cancel()
 		preShutdownAll(ctx, pr.o, pr.cfg)
 	}()
 	defer func() {
-		pr.tracker.Phase("accept_close")
+		g.SetPhase("accept_close")
 		_ = svc.Close()
 		if err := <-accepted; err != nil {
 			slog.Warn("core accept loop exited with an error", "err", err)
@@ -1991,7 +1968,7 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// final-snapshot limitation, not a new regression — see that defer's own
 	// comment for the full reasoning.
 	defer func() {
-		pr.tracker.Phase("metrics_flush")
+		g.SetPhase("metrics_flush")
 		if err := metrics.Flush(context.WithoutCancel(ctx), mp); err != nil {
 			slog.Warn("run: metrics flush failed", "err", err)
 		}
@@ -2026,10 +2003,10 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 		select {
 		case <-ctx.Done():
 			slog.Info("run: shutdown requested")
-			pr.tracker.Phase("drain")
+			g.SetPhase("drain")
 			// Drain BEFORE returning: the deferred preShutdownAll (the ccpool
 			// session sweep) must not run while a dispatch is still in flight.
-			drainThenCancelDispatch(ctx, q, cancelDispatch, drainTimeout, survives)
+			drainThenCancelDispatch(ctx, q, cancelDispatch, clk.Within(drainTimeout), survives)
 			return exitOK
 		case <-ticker.C:
 		}

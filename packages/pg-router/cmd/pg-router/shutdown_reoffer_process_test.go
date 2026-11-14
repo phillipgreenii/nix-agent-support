@@ -29,8 +29,8 @@ import (
 //
 // Choice made for the bead's design question (longer drain for command roles, or
 // re-offer a dispatch cancelled by shutdown): re-offer. The drain budget cannot
-// grow: shutdownDrainTimeout (20s) + the 30s session-sweep allowance +
-// inFlightDrainTimeout (5s) already fill launchd's 60s ExitTimeOut, and desk-pr
+// grow: the drain share of the shutdown deadline (about 20s) + the 30s session-sweep allowance +
+// the in-flight tail (about 8s) already fill launchd's 60s ExitTimeOut, and desk-pr
 // runs are 20 to 160 s. roleListener.Offer therefore hands a dispatch that was
 // cut short by the cancelled run context back as a pre-accept decline
 // (orchestrator.DeclineDetailShutdown): nothing durable is written, the event
@@ -350,9 +350,9 @@ func TestShutdownReoffer_RealRouterProcess(t *testing.T) {
 		t.Fatalf("first router exit = %d, want %d\nstderr:\n%s", code, exitOK, r1.stderr.String())
 	}
 	// The handler outlives the drain budget, so the stop only completes after
-	// shutdownDrainTimeout and then cancels it: this is the C6 situation.
-	if took < shutdownDrainTimeout-2*time.Second {
-		t.Fatalf("router stopped after %v, want about the %v drain budget: the dispatch was not actually in flight at shutdown", took, shutdownDrainTimeout)
+	// the drain share and then cancels it: this is the C6 situation.
+	if took < newShutdownBudget(defaultShutdownDeadline).Drain-2*time.Second {
+		t.Fatalf("router stopped after %v, want about the %v drain budget: the dispatch was not actually in flight at shutdown", took, newShutdownBudget(defaultShutdownDeadline).Drain)
 	}
 
 	stderr1 := r1.stderr.String()

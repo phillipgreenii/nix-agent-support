@@ -5,10 +5,13 @@ import (
 	"flag"
 	"io"
 	"strings"
+	"time"
+
+	"github.com/phillipgreenii/x/lifecycle"
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] | run-until-idle [--only <selector>]... [--disable <selector>]... | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check [--offline]) | doctor [--socket <path>] [--token <tok>] | doctor --clauses | explain <role> [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] [--shutdown-deadline <dur>] | run-until-idle [--only <selector>]... [--disable <selector>]... [--shutdown-deadline <dur>] | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check [--offline]) | doctor [--socket <path>] [--token <tok>] | doctor --clauses | explain <role> [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -306,6 +309,12 @@ type routeResult struct {
 	// when kind == routeRun — passing it to run-until-idle is therefore an
 	// unknown-flag usage error, not a silently-ignored one.
 	metricsAddr string
+	// shutdownDeadline is the --shutdown-deadline occurrence of run and
+	// run-until-idle: the one hard deadline for a graceful shutdown, split
+	// between the shutdown phases (shutdown_budget.go). Zero (omitted) selects
+	// defaultShutdownDeadline. The deployment passes it and derives the
+	// launchd ExitTimeOut from it.
+	shutdownDeadline time.Duration
 }
 
 // route inspects the full argv and decides what to do, without side effects. No
@@ -420,6 +429,7 @@ func parseRunLikeArgs(kind routeKind, args []string) routeResult {
 	if kind == routeRun {
 		fs.StringVar(&metricsAddr, "metrics-addr", "", "listen address (host:port) for the OTel Prometheus /metrics endpoint; disabled by default")
 	}
+	shutdownDeadline := lifecycle.DeadlineFlag(fs, "shutdown-deadline", 0)
 	pos, err := parseInterspersed(fs, args)
 	switch {
 	case errors.Is(err, flag.ErrHelp):
@@ -434,7 +444,7 @@ func parseRunLikeArgs(kind routeKind, args []string) routeResult {
 	case len(pos) > 0:
 		return routeResult{kind: routeUsageErr, msg: "unexpected argument: " + pos[0]}
 	}
-	return routeResult{kind: kind, only: only.values, disable: disable.values, metricsAddr: metricsAddr}
+	return routeResult{kind: kind, only: only.values, disable: disable.values, metricsAddr: metricsAddr, shutdownDeadline: *shutdownDeadline}
 }
 
 // parseRunRoleArgs validates `run-role [--json] <role> <json>`. Pure: it
