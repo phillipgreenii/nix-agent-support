@@ -429,7 +429,7 @@ func TestUsageLimitGateExit20RecordsSkippedRun(t *testing.T) {
 
 func TestBusyReplyRecordsSkippedRun(t *testing.T) {
 	e := setupCcpool(t, ccCfg, 0)
-	e.fake.replyErrs = []error{&ccpool.ExitError{Cmd: "reply", Code: 5}}
+	e.fake.replyErrs = []error{&ccpool.ExitError{Cmd: "reply", Code: ccpool.ExitBusy}}
 	_, err := e.runLens(t)
 	var sk *SkippedError
 	if !errors.As(err, &sk) || sk.Reason != "ccpool busy" {

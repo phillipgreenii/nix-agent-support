@@ -56,6 +56,16 @@ flowchart LR
   its reset; the capacity read then reports no free slot plus the limit (`INV-POOL-4`).
 - **Guarantee** — a dispatch aimed at a `working` session is refused, never queued or dropped
   silently (`INV-SESS-2`).
+- **Exit codes** — the CLI reports these outcomes as exit codes, using the shared codes of the
+  workspace `exitcode` package where one fits and app codes in 20 to 63 otherwise; 1 stays the
+  generic error and 2 the usage error. `reply` on a waiting dispatch: 0 reply printed, 6 timed out
+  (shared Timeout), 21 the turn stopped for human input, 22 the turn failed. `reply` refusals and
+  delivery outcomes: 20 usage window at its limit (also `new`), 23 the target session is working
+  (busy), 24 an interrupt could not be confirmed (also `cancel`), 25 the prompt was confirmed
+  dropped (`--confirm-ingest` window elapsed with no model turn), 26 the recorder could not say
+  whether the prompt was ingested (the prompt was delivered and the model may be working). `result`
+  reports 27 for a turn not yet completed. No ccpool outcome uses the shared Busy code 9. Callers
+  (the router handler and the review runner) branch on these numbers, so a change lands with both.
 
 ## `INTF-AGENTSIGNAL` — the agent's own turn signals <!-- uuid: fb46d848-2b9f-4ef7-ad59-e9f9dac57256 -->
 

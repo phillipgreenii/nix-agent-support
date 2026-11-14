@@ -183,7 +183,7 @@ func TestSend_modes(t *testing.T) {
 
 // pg2-yukh #1: a worker's initial fire-and-forget nudge (ModeNoWait) must forward
 // --confirm-ingest <dur> when a confirm window is configured, so ccpool can detect
-// a dropped prompt and exit 7. A queued budget message (ModeQueue) must NOT carry
+// a dropped prompt and exit 25. A queued budget message (ModeQueue) must NOT carry
 // it (the model is already mid-turn by then).
 func TestSend_forwardsConfirmIngest(t *testing.T) {
 	cli, got, _ := newSpy()
@@ -225,14 +225,14 @@ func TestSend_notIngestedExit7(t *testing.T) {
 	cli := NewCLIRunner(config.Default())
 	cli.ConfirmIngest = 90 * time.Second
 	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
-		return nil, []byte("prompt not ingested"), &fakeExit{code: 7}
+		return nil, []byte("prompt not ingested"), &fakeExit{code: 25}
 	}
 	err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait)
 	if !errors.Is(err, ErrPromptNotIngested) {
-		t.Errorf("exit 7 should map to ErrPromptNotIngested, got %v", err)
+		t.Errorf("exit 25 should map to ErrPromptNotIngested, got %v", err)
 	}
 	if !IsNotIngested(err) {
-		t.Errorf("IsNotIngested must report true for a code-7 send error; got %v", err)
+		t.Errorf("IsNotIngested must report true for a code-25 send error; got %v", err)
 	}
 }
 
@@ -240,11 +240,11 @@ func TestSend_ingestUnknownExit9(t *testing.T) {
 	cli := NewCLIRunner(config.Default())
 	cli.ConfirmIngest = 90 * time.Second
 	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
-		return nil, []byte("could not confirm"), &fakeExit{code: 9}
+		return nil, []byte("could not confirm"), &fakeExit{code: 26}
 	}
 	err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait)
 	if !errors.Is(err, ErrIngestUnknown) || !IsIngestUnknown(err) {
-		t.Errorf("exit 9 should map to ErrIngestUnknown, got %v", err)
+		t.Errorf("exit 26 should map to ErrIngestUnknown, got %v", err)
 	}
 	if IsNotIngested(err) {
 		t.Errorf("an unknown ingestion must not read as a definitive not-ingested; got %v", err)
@@ -387,7 +387,7 @@ func TestIsUsageLimited(t *testing.T) {
 		{"wrapped sentinel", fmt.Errorf("ccpool new: %w", ErrUsageLimited), true},
 		{"raw exit 20", fmt.Errorf("ccpool new: %w", &fakeExit{code: 20}), true},
 		{"old exit 8 is not it", &fakeExit{code: 8}, false},
-		{"exit 7 is not it", &fakeExit{code: 7}, false},
+		{"exit 25 is not it", &fakeExit{code: 25}, false},
 		{"exit 1 is not it", &fakeExit{code: 1}, false},
 		{"nil", nil, false},
 	} {
@@ -457,11 +457,11 @@ func TestList_parsesIdleErroredStates(t *testing.T) {
 func TestCancel_unconfirmedExit6(t *testing.T) {
 	cli := NewCLIRunner(config.Default())
 	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
-		return nil, []byte("cancel may not have landed"), &fakeExit{code: 6}
+		return nil, []byte("cancel may not have landed"), &fakeExit{code: 24}
 	}
 	err := cli.Cancel(context.Background(), "s")
 	if !errors.Is(err, ErrCancelUnconfirmed) {
-		t.Errorf("exit 6 should map to ErrCancelUnconfirmed, got %v", err)
+		t.Errorf("exit 24 should map to ErrCancelUnconfirmed, got %v", err)
 	}
 }
 
@@ -972,7 +972,7 @@ func TestConsumption_badJSONIsAnError(t *testing.T) {
 // The reply call does a cold resume, a pre-delivery feed Mark and a post-window
 // probe Mark besides the confirm wait; each recorder query can run to its own
 // 30s deadline under load. The call bound MUST leave room for both queries so a
-// slow recorder ends the call as exit 9 instead of the handler killing it
+// slow recorder ends the call as exit 26 instead of the handler killing it
 // (a 30s margin was killed at 2m0s with the recorder up).
 func TestReplyTimeout_marginCoversTwoRecorderQueries(t *testing.T) {
 	const recorderQueryDeadline = 30 * time.Second
@@ -1001,5 +1001,26 @@ func TestCLI_EmitGaugesOneCall(t *testing.T) {
 	}
 	if err := cli.EmitGauges(context.Background(), nil); err != nil || len(*argv) != 1 {
 		t.Fatalf("empty batch must not exec: err=%v calls=%d", err, len(*argv))
+	}
+}
+
+// The ccpool exit codes are a contract with the ccpool CLI (which pins the same
+// numbers): app codes in 20..63, never the shared Busy code 9.
+func TestExitCodeContract(t *testing.T) {
+	for name, c := range map[string][2]int{
+		"usage_limited":     {ExitUsageLimited, 20},
+		"cancel_unconfirm":  {ExitCancelUnconfirmed, 24},
+		"prompt_not_ingest": {ExitPromptNotIngested, 25},
+		"ingest_unknown":    {ExitIngestUnknown, 26},
+	} {
+		if c[0] != c[1] {
+			t.Errorf("%s = %d, want %d", name, c[0], c[1])
+		}
+	}
+	// Old numbers must no longer be read as these outcomes.
+	for _, old := range []int{6, 7, 9} {
+		if _, ok := map[int]bool{ExitCancelUnconfirmed: true, ExitPromptNotIngested: true, ExitIngestUnknown: true}[old]; ok {
+			t.Errorf("old code %d still mapped", old)
+		}
 	}
 }

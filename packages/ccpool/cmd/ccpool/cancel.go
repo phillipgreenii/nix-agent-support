@@ -46,16 +46,15 @@ func runCancel(args []string) int {
 	return 0
 }
 
-// cancelExitCode maps a cancel error to its CLI exit code. 6 is the shared
-// "cancel could not be confirmed" code (replyExitCode uses the same number for
-// the --interrupt case); 1 stays the generic catch-all, so any distinguishable
-// outcome gets its own code >= 2.
+// cancelExitCode maps a cancel error to its CLI exit code. exitCancelUnconfirmed
+// is the "cancel could not be confirmed" code (replyExitCode uses the same one
+// for the --interrupt case); 1 stays the generic catch-all.
 func cancelExitCode(err error) int {
 	switch {
 	case err == nil:
 		return 0
 	case errors.Is(err, session.ErrCancelUnconfirmed):
-		return 6
+		return exitCancelUnconfirmed
 	default:
 		return 1
 	}

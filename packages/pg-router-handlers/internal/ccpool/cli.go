@@ -16,7 +16,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 )
 
-// ErrCancelUnconfirmed is returned by Cancel when `ccpool cancel` exits 6
+// ErrCancelUnconfirmed is returned by Cancel when `ccpool cancel` exits 24
 // (the interrupt could not be confirmed — the turn may still be running).
 var ErrCancelUnconfirmed = errors.New("ccpool cancel unconfirmed")
 
@@ -56,7 +56,7 @@ type CLIRunner struct {
 	AllowedTools   string // claude --allowed-tools allowlist; emitted on `ccpool new` when non-empty
 	// ConfirmIngest is the post-delivery ingestion-guard window forwarded as
 	// `ccpool reply --confirm-ingest` on the worker's initial fire-and-forget nudge
-	// (ModeNoWait). >0 makes ccpool exit 7 when the model never starts a turn (a
+	// (ModeNoWait). >0 makes ccpool exit 25 when the model never starts a turn (a
 	// dropped nudge); 0 keeps the old fire-and-forget behavior (pg2-yukh #1).
 	ConfirmIngest time.Duration
 	Autonomous    bool   // emits --autonomous on `ccpool new` when true (block AskUserQuestion)
@@ -262,14 +262,14 @@ func (c *CLIRunner) Send(ctx context.Context, externalID, prompt string, mode Se
 	}
 	_, err := c.ccpool(ctx, replyTimeout(c.ConfirmIngest, mode), args...)
 	if err != nil {
-		// Surface a confirmed dropped nudge (exit 7) as ErrPromptNotIngested so the
+		// Surface a confirmed dropped nudge (exit 25) as ErrPromptNotIngested so the
 		// executor can fail-fast and hand the bead back (mirror Cancel's code-6 wrap).
 		var ec exitCoder
-		if errors.As(err, &ec) && ec.ExitCode() == 7 {
+		if errors.As(err, &ec) && ec.ExitCode() == ExitPromptNotIngested {
 			return fmt.Errorf("%w: %s", ErrPromptNotIngested, externalID)
 		}
-		// Exit 9: the recorder could not say whether the prompt was ingested.
-		if errors.As(err, &ec) && ec.ExitCode() == 9 {
+		// Exit 26: the recorder could not say whether the prompt was ingested.
+		if errors.As(err, &ec) && ec.ExitCode() == ExitIngestUnknown {
 			return fmt.Errorf("%w: %s", ErrIngestUnknown, externalID)
 		}
 		return err
@@ -281,7 +281,7 @@ func (c *CLIRunner) Cancel(ctx context.Context, externalID string) error {
 	_, err := c.ccpool(ctx, quickCallTimeout, "cancel", externalID)
 	if err != nil {
 		var ec exitCoder
-		if errors.As(err, &ec) && ec.ExitCode() == 6 {
+		if errors.As(err, &ec) && ec.ExitCode() == ExitCancelUnconfirmed {
 			return fmt.Errorf("%w: %s", ErrCancelUnconfirmed, externalID)
 		}
 		return err

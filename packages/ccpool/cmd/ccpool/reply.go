@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 func runReply(args []string) int {
@@ -20,7 +21,7 @@ func runReply(args []string) int {
 	noWait := fs.Bool("no-wait", false, "deliver and return immediately")
 	queue := fs.Bool("queue-message", false, "deliver into Claude's native queue (fire-and-forget)")
 	interrupt := fs.Bool("interrupt", false, "cancel the current turn, then deliver")
-	confirmIngest := fs.Duration("confirm-ingest", 0, "after a fire-and-forget delivery, confirm the model started a turn within this window; exit 7 if not, exit 9 if the recorder could not say (0 = no check)")
+	confirmIngest := fs.Duration("confirm-ingest", 0, "after a fire-and-forget delivery, confirm the model started a turn within this window; exit 25 if not, exit 26 if the recorder could not say (0 = no check)")
 	pos := parseInterspersed(fs, args) // flags may follow the positional external_id/prompt
 	if len(pos) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: ccpool reply <external_id> <prompt> [--no-wait] [--queue-message] [--interrupt] [--confirm-ingest dur]")
@@ -106,34 +107,33 @@ func runReply(args []string) int {
 		return 0
 	case store.NeedsInput:
 		fmt.Fprintln(os.Stderr, "needs input — attach with: ccpool attach", externalID)
-		return 2
+		return exitNeedsInput
 	case store.Errored:
 		fmt.Fprintln(os.Stderr, "turn failed")
-		return 3
+		return exitTurnFailed
 	}
 	if res.TimedOut {
 		fmt.Fprintln(os.Stderr, "timed out")
-		return 4
+		return exitcode.Timeout
 	}
 	return 0
 }
 
-// replyExitCode maps a Send error to reply's CLI exit code. ErrBusy -> 5;
-// ErrCancelUnconfirmed -> 6 (the `--interrupt`-could-not-confirm case — sendLocked
-// wraps it as "interrupt: %w", so errors.Is sees through the wrap). 1 stays the
-// generic catch-all: exit code 1 must not carry a specific meaning, so a
-// distinguishable outcome gets its own code >=2 (mirrors standalone cancel's 6).
+// replyExitCode maps a Send error to reply's CLI exit code (see exitcodes.go).
+// ErrCancelUnconfirmed is the `--interrupt`-could-not-confirm case; sendLocked
+// wraps it as "interrupt: %w", so errors.Is sees through the wrap. 1 stays the
+// generic catch-all.
 func replyExitCode(err error) int {
 	switch {
 	case errors.Is(err, session.ErrBusy):
-		return 5
+		return exitSessionBusy
 	case errors.Is(err, session.ErrCancelUnconfirmed):
-		return 6
+		return exitCancelUnconfirmed
 	case errors.Is(err, session.ErrPromptNotIngested):
-		return 7
+		return exitPromptNotIngested
 	case errors.Is(err, session.ErrIngestUnknown):
-		return 9
+		return exitIngestUnknown
 	default:
-		return 1
+		return exitcode.Error
 	}
 }

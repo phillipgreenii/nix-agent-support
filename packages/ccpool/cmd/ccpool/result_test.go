@@ -46,8 +46,8 @@ func TestResultForTurn_pending(t *testing.T) {
 
 	var out, errBuf bytes.Buffer
 	code := resultForTurn(ctx, st, fakeTranscript{}, "t-1", &out, &errBuf)
-	if code != 2 {
-		t.Fatalf("code = %d, want 2 (pending)", code)
+	if code != 27 {
+		t.Fatalf("code = %d, want 27 (pending)", code)
 	}
 	if out.Len() != 0 {
 		t.Errorf("stdout = %q, want empty on pending", out.String())

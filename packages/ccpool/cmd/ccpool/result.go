@@ -28,8 +28,8 @@ type replyResolver interface {
 //
 //	0 — resolved; the reply is on stdout.
 //	1 — unknown turn-id, or resolved-but-unreadable transcript (generic error).
-//	2 — pending (turn not yet completed); "pending" on stderr. Distinct non-zero,
-//	    mirroring reply's "needs input" code so callers can poll on 2.
+//	27 — pending (turn not yet completed); "pending" on stderr. Distinct from the
+//	     shared usage code 2 so callers can poll on 27 (exitResultPending).
 func runResult(args []string) int {
 	fs := flag.NewFlagSet("result", flag.ExitOnError)
 	_ = fs.Parse(args)
@@ -78,7 +78,7 @@ func resultForTurn(ctx context.Context, st *store.Store, rr replyResolver, turnI
 	if t.Status != store.TurnResolved {
 		// Not yet completed; the Stop hook hasn't stamped a transcript anchor.
 		fmt.Fprintln(stderr, "pending")
-		return 2
+		return exitResultPending
 	}
 	if t.TranscriptPath == "" {
 		fmt.Fprintf(stderr, "result: turn %s resolved without a transcript anchor\n", turnID)

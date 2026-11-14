@@ -459,7 +459,7 @@ func TestDispatch_readyLaunchIsAcceptedAndReachesCompletion(t *testing.T) {
 // failure the core records (error reply, exit 1) after the handler has handed the
 // bead back, never a pre-accept decline the core would re-offer.
 func TestDispatch_failureAfterReadyStaysAccepted(t *testing.T) {
-	cfgPath, callLog := readyLaunchStubs(t, 7)
+	cfgPath, callLog := readyLaunchStubs(t, 25)
 	name, cfg := workerRole("", "")
 	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
 	if code == conformance.ExitBusy {

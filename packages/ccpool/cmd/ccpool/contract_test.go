@@ -130,7 +130,7 @@ func TestContract_Send_BusyRefused(t *testing.T) {
 	sb.ccp("reply", "b", thinkingPrompt, "--no-wait")
 	sb.waitForThinking("b", 30*time.Second)
 	_, code := sb.ccp("reply", "b", "second message") // no flags -> ModeRefuseIfBusy
-	baseline(t, "n/a", "reply on busy session exit code", code, 5)
+	baseline(t, "n/a", "reply on busy session exit code", code, 23)
 }
 
 func TestContract_Send_NoWaitReturnsImmediately(t *testing.T) {

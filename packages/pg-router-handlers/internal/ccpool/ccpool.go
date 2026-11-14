@@ -17,32 +17,42 @@ import (
 	"time"
 )
 
-// ErrPromptNotIngested mirrors ccpool's exit code 7: a fire-and-forget delivery
-// whose model never started a turn within the confirm window (a dropped nudge).
+// The ccpool CLI exit codes this handler branches on: app codes in the shared
+// 20..63 range (see the exitcode package and the ccpool behavior docs). A refusal
+// is never the shared Busy code 9; the two ingest outcomes are distinct.
+const (
+	ExitUsageLimited      = 20
+	ExitCancelUnconfirmed = 24
+	ExitPromptNotIngested = 25
+	ExitIngestUnknown     = 26
+)
+
+// ErrPromptNotIngested mirrors ccpool's exit code 25 (ExitPromptNotIngested): a
+// fire-and-forget delivery whose model never started a turn within the confirm window (a dropped nudge).
 var ErrPromptNotIngested = errors.New("ccpool: prompt not ingested")
 
-// IsNotIngested reports whether err is (or wraps) a ccpool exit-code-7 outcome.
+// IsNotIngested reports whether err is (or wraps) a ccpool exit-code-25 outcome.
 func IsNotIngested(err error) bool {
 	if errors.Is(err, ErrPromptNotIngested) {
 		return true
 	}
 	var ec exitCoder
-	return errors.As(err, &ec) && ec.ExitCode() == 7
+	return errors.As(err, &ec) && ec.ExitCode() == ExitPromptNotIngested
 }
 
-// ErrIngestUnknown mirrors ccpool's exit code 9: a fire-and-forget delivery whose
+// ErrIngestUnknown mirrors ccpool's exit code 26 (ExitIngestUnknown): a fire-and-forget delivery whose
 // ingestion the recorder could not confirm or refute (feed failed, or the
 // recorder did not answer once the window passed). The prompt was delivered and
 // the model may be working, so it is NOT a dropped nudge.
 var ErrIngestUnknown = errors.New("ccpool: prompt ingestion unknown")
 
-// IsIngestUnknown reports whether err is (or wraps) a ccpool exit-code-9 outcome.
+// IsIngestUnknown reports whether err is (or wraps) a ccpool exit-code-26 outcome.
 func IsIngestUnknown(err error) bool {
 	if errors.Is(err, ErrIngestUnknown) {
 		return true
 	}
 	var ec exitCoder
-	return errors.As(err, &ec) && ec.ExitCode() == 9
+	return errors.As(err, &ec) && ec.ExitCode() == ExitIngestUnknown
 }
 
 // SessionLive reports whether the session addressed by externalID is present in
@@ -64,7 +74,7 @@ func SessionLive(ctx context.Context, r Runner, externalID string) bool {
 	return false
 }
 
-// ErrUsageLimited mirrors ccpool's exit code 20: `ccpool new`/`reply` declined to
+// ErrUsageLimited mirrors ccpool's exit code 20 (ExitUsageLimited): `ccpool new`/`reply` declined to
 // accept work because an account usage window (5-hour block or weekly limit) is
 // at its limit. It is the race backstop for the capacity pre-check (the window
 // can fill between that check and the launch): a caller treats it as "not right
@@ -77,7 +87,7 @@ func IsUsageLimited(err error) bool {
 		return true
 	}
 	var ec exitCoder
-	return errors.As(err, &ec) && ec.ExitCode() == 20
+	return errors.As(err, &ec) && ec.ExitCode() == ExitUsageLimited
 }
 
 // SessionState mirrors ccpool's store states — observed session FACTS only, not

@@ -4,7 +4,7 @@
 //
 // Facts the implementation relies on: a session is created with `new` (which
 // takes no prompt), the prompt is a separate `reply --no-wait` that prints a
-// turn id, `result <turn-id>` exits 0 (done), 2 (pending) or 1 (unknown or
+// turn id, `result <turn-id>` exits 0 (done), 27 (pending) or 1 (unknown or
 // unreadable, which can be a transient daemon outage and so is not terminal),
 // and only `new` and `reply` ever exit 20 (usage limit refused). There is no
 // wait or kill: a session is stopped with `close` and a turn is interrupted
@@ -25,8 +25,9 @@ import (
 
 // Exit codes of the ccpool CLI that the runner distinguishes.
 const (
-	ExitUsageLimited = 20
-	ExitBusy         = 5
+	ExitUsageLimited  = 20
+	ExitBusy          = 23
+	ExitResultPending = 27
 )
 
 // PoolEnv is the environment variable that selects a ccpool pool.
@@ -64,7 +65,7 @@ func ExitCode(err error) (int, bool) {
 // IsUsageLimited reports whether err is the usage-limit refusal (exit 20).
 func IsUsageLimited(err error) bool { c, ok := ExitCode(err); return ok && c == ExitUsageLimited }
 
-// IsBusy reports whether err is a busy-turn refusal (exit 5).
+// IsBusy reports whether err is a busy-turn refusal (exit 23).
 func IsBusy(err error) bool { c, ok := ExitCode(err); return ok && c == ExitBusy }
 
 // UsageLimit is a hit account usage window.
@@ -96,7 +97,7 @@ type StartOpts struct {
 type ResultStatus int
 
 const (
-	// ResultPending: the turn has not completed (exit 2).
+	// ResultPending: the turn has not completed (exit 27).
 	ResultPending ResultStatus = iota
 	// ResultDone: the turn completed and Text holds its last message (exit 0).
 	ResultDone
@@ -219,7 +220,7 @@ func (c CLI) Result(ctx context.Context, turnID string) (string, ResultStatus, e
 	}
 	if code, ok := ExitCode(err); ok {
 		switch code {
-		case 2:
+		case ExitResultPending:
 			return "", ResultPending, nil
 		case 1:
 			return "", ResultUnknown, nil

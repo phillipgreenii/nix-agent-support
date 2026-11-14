@@ -115,18 +115,18 @@ func TestStartFlags(t *testing.T) {
 }
 
 func TestExitCodesAreTyped(t *testing.T) {
-	fakeCLI(t, "new_exit=20\nreply_exit=5\n")
+	fakeCLI(t, "new_exit=20\nreply_exit=23\n")
 	c := CLI{}
 	if err := c.Start(bg, StartOpts{ExternalID: "1"}); !IsUsageLimited(err) {
 		t.Errorf("new exit 20: %v", err)
 	}
 	if _, err := c.Reply(bg, "1", "p"); !IsBusy(err) {
-		t.Errorf("reply exit 5: %v", err)
+		t.Errorf("reply exit 23: %v", err)
 	}
 }
 
 func TestResultExitCodes(t *testing.T) {
-	for exit, want := range map[string]ResultStatus{"0": ResultDone, "2": ResultPending, "1": ResultUnknown} {
+	for exit, want := range map[string]ResultStatus{"0": ResultDone, "27": ResultPending, "1": ResultUnknown} {
 		fakeCLI(t, "result_exit="+exit+"\n")
 		_, st, err := CLI{}.Result(bg, "t")
 		if err != nil || st != want {
@@ -140,5 +140,21 @@ func TestCapacityReportsUsageLimit(t *testing.T) {
 	c, err := CLI{}.Capacity(bg)
 	if err != nil || c.Free != 0 || c.UsageLimit == nil || c.UsageLimit.Window != "5h" {
 		t.Fatalf("%+v %v", c, err)
+	}
+}
+
+// A shared usage error (2) from result is not "pending": pending is the app
+// code 27, and the old shared-clashing numbers must not read as outcomes.
+func TestExitCodeContract(t *testing.T) {
+	if ExitUsageLimited != 20 || ExitBusy != 23 || ExitResultPending != 27 {
+		t.Fatalf("codes = %d/%d/%d, want 20/23/27", ExitUsageLimited, ExitBusy, ExitResultPending)
+	}
+	fakeCLI(t, "result_exit=2\n")
+	if _, st, err := (CLI{}).Result(bg, "t"); err == nil && st == ResultPending {
+		t.Errorf("exit 2 (usage) must not read as pending")
+	}
+	fakeCLI(t, "reply_exit=5\n")
+	if _, err := (CLI{}).Reply(bg, "1", "p"); IsBusy(err) {
+		t.Errorf("old busy code 5 must not read as busy")
 	}
 }
