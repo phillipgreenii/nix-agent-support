@@ -167,8 +167,18 @@ in
           # daemon creates the socket's directory and ignores a bad value.
           # Absent when daemon.pprof.enable is false. Capture recipe:
           # docs/go-daemon-profiling-runbook.md in nix-repo-base.
+          #
+          # GOFLAGS=-p=3 bounds the Go build parallelism of the agent sessions
+          # this daemon starts under tmux. The Go env file written by the
+          # home-manager go-env module already carries it; this is insurance
+          # for a session whose HOME or Go env file is not the usual one. An
+          # environment GOFLAGS replaces the file value, so this stays the
+          # same value as the file's.
           EnvironmentVariables =
             emitterEnv
+            // {
+              GOFLAGS = "-p=3";
+            }
             // lib.optionalAttrs daemonCfg.pprof.enable {
               PG_ROUTER_PPROF_ADDR = "${stateHome}/pg-router/pprof.sock";
             };

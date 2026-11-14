@@ -59,6 +59,7 @@
     ./programs/rtk
     ./programs/pg-disk-reclaimer
     ./programs/build-tmp
+    ./programs/go-env
     ./programs/claude-code-tmp
     ./programs/tmp-sweep
     ./programs/host-forensics

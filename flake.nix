@@ -11346,7 +11346,13 @@
                   );
                 assert
                   darwinPprofOff.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables
-                  == { };
+                  == {
+                    GOFLAGS = "-p=3";
+                  };
+                # Go build parallelism bound for the agent sessions the daemon starts.
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.GOFLAGS
+                  == "-p=3";
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 # alertRuleFiles (pg2-02n5o): registered whenever obs.enable,
                 # independent of daemonEnable -- both darwinWithDaemon and
@@ -14089,6 +14095,26 @@
                   else
                     ''
                       echo "host-forensics eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
+                      exit 1
+                    ''
+                );
+
+              # test-go-env-eval: home/default.nix imports the go-env module and, run
+              # against the real home-manager programs.go module, it renders
+              # GOFLAGS=-p=3 into the Go env file (tests/go-env-eval.nix).
+              test-go-env-eval =
+                let
+                  r = import ./tests/go-env-eval.nix {
+                    inherit lib pkgs;
+                    inherit (inputs) home-manager;
+                  };
+                in
+                pkgs.runCommand "test-go-env-eval" { } (
+                  if r.failures == [ ] then
+                    "touch $out"
+                  else
+                    ''
+                      echo "go-env eval cases failed: ${lib.concatStringsSep "; " r.failures}" >&2
                       exit 1
                     ''
                 );
