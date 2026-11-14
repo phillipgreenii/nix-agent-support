@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // setupBaselineFlipDB seeds three rows whose replay verdict is driven purely
@@ -113,7 +114,7 @@ func decodeJSONValue(t *testing.T, out string, v interface{}) {
 // twice, with a config-only change in between standing in for "the rule
 // change". It must report the ls row (allow -> deny) as more-restrictive, the
 // `cat .env` row (ask -> allow) as less-restrictive, leave the unmoved row out
-// of the delta, and exit non-zero (2) because a less-restrictive move exists —
+// of the delta, and exit Degraded (5) because a less-restrictive move exists —
 // the invariant the ceta beads recite ("no row moves in the less-restrictive
 // direction") failing loudly rather than silently.
 func TestEvaluateBaseline_CaptureThenCompare_EndToEnd(t *testing.T) {
@@ -141,8 +142,8 @@ func TestEvaluateBaseline_CaptureThenCompare_EndToEnd(t *testing.T) {
 
 	// AFTER: same invocation, same baseline path — now compares.
 	out, code = runEvaluateWithConfig(t, dataDir, configHome, "--format=json", "--baseline="+baselinePath)
-	if code != 2 {
-		t.Fatalf("compare run exited %d, want 2 (a less-restrictive move exists)\noutput: %s", code, out)
+	if code != exitcode.Degraded {
+		t.Fatalf("compare run exited %d, want %d (Degraded: a less-restrictive move exists)\noutput: %s", code, exitcode.Degraded, out)
 	}
 	var report evaluateReport
 	decodeJSONValue(t, out, &report)

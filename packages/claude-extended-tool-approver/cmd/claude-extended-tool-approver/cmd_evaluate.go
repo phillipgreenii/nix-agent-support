@@ -133,7 +133,9 @@ less-restrictive and attributed to the deciding rule:
   claude-extended-tool-approver evaluate --format json --baseline base.json   # compare
 
 A baseline captured under different filters (--days/--since/--approval-source/
---misses-only/--settings) is refused rather than silently diffed. The default
+--misses-only/--settings) is refused rather than silently diffed. A compare that finds any row moved
+less-restrictive exits 5 (exitcode.Degraded); a usage error exits 2; any other
+failure exits 1. The default
 bare-array --format json shape (and the jq recipe above) is unchanged when
 --baseline is not given.
 

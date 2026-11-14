@@ -9,7 +9,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/x/exitcode"
 )
+
+// evaluateBaselineExitLessRestrictive is the exit code when a baseline compare
+// finds a row that moved less-restrictive (0 is a clean compare, 1 an error,
+// exitcode.Usage a command-line mistake). It is exitcode.Degraded, not 2, so a
+// caller can tell "moved less-restrictive" from a usage error.
+const evaluateBaselineExitLessRestrictive = exitcode.Degraded
 
 // --- --baseline: fold a decision-delta report into `evaluate` ---
 //
@@ -230,7 +238,7 @@ func mismatchedFilters(loaded, current evaluateFilters) []string {
 // Exit codes follow this repo's convention that 1 is reserved for a generic/
 // unexpected error: a bad baseline file or a filter mismatch is a generic
 // usage error (1), while "the replay found a less-restrictive move" is the
-// one branchable, automation-relevant signal and gets its own code (2) so a
+// one branchable, automation-relevant signal and gets its own code (Degraded, 5) so a
 // CI-style caller can distinguish "broken invocation" from "found the thing
 // the gate exists to catch."
 func runEvaluateBaseline(baselinePath, format string, filters evaluateFilters, totals map[string]int, results []evalResult) {
@@ -281,7 +289,7 @@ func runEvaluateBaseline(baselinePath, format string, filters evaluateFilters, t
 
 	for _, m := range delta.Moved {
 		if m.Direction == "less-restrictive" {
-			os.Exit(2)
+			os.Exit(evaluateBaselineExitLessRestrictive)
 		}
 	}
 }
