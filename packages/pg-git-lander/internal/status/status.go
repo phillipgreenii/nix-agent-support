@@ -175,6 +175,10 @@ func Collect(ctx context.Context, in Input) (*Report, error) {
 		if err != nil {
 			return nil, err
 		}
+		if st.Absent {
+			// Released between the listing and this read: not a lock any more.
+			continue
+		}
 		if st.Rec != nil {
 			if st.Rec.WorkBranch != "" {
 				named[st.Rec.WorkBranch] = true

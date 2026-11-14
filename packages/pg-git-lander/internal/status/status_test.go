@@ -2,11 +2,13 @@ package status_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -422,5 +424,37 @@ func TestLogByOpIDAndByBranchWithTail(t *testing.T) {
 	// the logs directory.
 	if _, _, err := status.ResolveLog(t.Context(), f.g, f.repo.Dir, "../../config"); !errors.Is(err, status.ErrNoLog) {
 		t.Fatalf("%v", err)
+	}
+}
+
+// A lock released between the listing and the read must not panic the report
+// and must not appear in it.
+func TestStatusSkipsALockReleasedBetweenListingAndRead(t *testing.T) {
+	f := newFx(t)
+	ref := locks.BranchRef("feature/gone")
+	f.plantRecord(ref, locks.Record{
+		Role: locks.RoleBranch, Branch: "feature/gone", Operation: "land", State: locks.StateRunning,
+		Owner: owner(4242, thisHost),
+	})
+	in := f.input("")
+	real := f.g.Runner
+	released := false
+	in.Git = &gitexec.Git{Env: f.g.Env, Runner: func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		res := real(ctx, c)
+		if !released && slices.Contains(c.Args, "for-each-ref") && !slices.Contains(c.Args, "--format=%(refname) %(objectname) %(objecttype)") {
+			released = true
+			f.git(f.repo.Dir, "update-ref", "-d", ref)
+		}
+		return res
+	}}
+	rep, err := status.Collect(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !released {
+		t.Fatal("test never released the ref")
+	}
+	if len(rep.Locks) != 0 || len(rep.Stopped) != 0 {
+		t.Fatalf("released lock reported: %+v", rep)
 	}
 }
