@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -322,8 +323,8 @@ var (
 func logPreToolDecision(store *asklog.Store, dbPath, openCause string, input *hookio.HookInput, result hookio.RuleResult, sandboxOn bool) {
 	cause := openCause
 	if store != nil {
-		err := asklog.RunWithin(askLogWriteBudget, func() error {
-			if err := asklog.RecordPreToolDecision(store, input, result); err != nil {
+		err := asklog.RunWithinCtx(askLogWriteBudget, func(ctx context.Context) error {
+			if err := asklog.RecordPreToolDecisionCtx(ctx, store, input, result); err != nil {
 				return err
 			}
 			// FLUSH the per-rule GENUINE-failure window (ADR 0043). The engine counted

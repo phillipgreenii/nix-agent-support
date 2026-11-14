@@ -75,6 +75,36 @@ func RunWithin(budget time.Duration, fn func() error) error {
 	}
 }
 
+// ctxGrace bounds how long RunWithinCtx waits, after cancelling, for fn to stop.
+// A variable so tests can make the wait effectively unbounded.
+var ctxGrace = 1 * time.Second
+
+// RunWithinCtx is RunWithin for work that honours a context. On a budget miss
+// it cancels the context and waits up to ctxGrace for fn to stop, so a write
+// still waiting on a database lock is abandoned instead of committing later
+// (which would duplicate a row the caller then spools).
+func RunWithinCtx(budget time.Duration, fn func(ctx context.Context) error) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := make(chan error, 1)
+	go func() { ch <- fn(ctx) }()
+	t := time.NewTimer(budget)
+	defer t.Stop()
+	select {
+	case err := <-ch:
+		return err
+	case <-t.C:
+		cancel()
+		g := time.NewTimer(ctxGrace)
+		defer g.Stop()
+		select {
+		case <-ch:
+		case <-g.C:
+		}
+		return ErrBudgetExceeded
+	}
+}
+
 type spoolEntry struct {
 	At             string       `json:"at"`
 	Cause          string       `json:"cause"`
@@ -257,7 +287,7 @@ func (s *Store) replaySpooled(e *spoolEntry) (bool, error) {
 	prev := s.sandboxEnabled
 	s.sandboxEnabled = e.SandboxEnabled
 	defer func() { s.sandboxEnabled = prev }()
-	if err := recordPreToolDecisionAt(s, in, res, e.At); err != nil {
+	if err := recordPreToolDecisionAt(context.Background(), s, in, res, e.At); err != nil {
 		return false, err
 	}
 	return true, nil

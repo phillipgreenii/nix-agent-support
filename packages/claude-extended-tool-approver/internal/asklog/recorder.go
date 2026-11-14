@@ -35,13 +35,20 @@ func hookDecisionString(d hookio.Decision) string {
 }
 
 func RecordPreToolDecision(s *Store, input *hookio.HookInput, result hookio.RuleResult) error {
-	return recordPreToolDecisionAt(s, input, result, nowISO())
+	return recordPreToolDecisionAt(context.Background(), s, input, result, nowISO())
+}
+
+// RecordPreToolDecisionCtx is RecordPreToolDecision bound to ctx: cancelling it
+// abandons a write still waiting on a database lock so it cannot commit later
+// (see RunWithinCtx).
+func RecordPreToolDecisionCtx(ctx context.Context, s *Store, input *hookio.HookInput, result hookio.RuleResult) error {
+	return recordPreToolDecisionAt(ctx, s, input, result, nowISO())
 }
 
 // recordPreToolDecisionAt is RecordPreToolDecision with the row's timestamp
 // supplied by the caller, so a spooled record replayed later keeps the time
 // the verdict was actually rendered.
-func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.RuleResult, now string) error {
+func recordPreToolDecisionAt(ctx context.Context, s *Store, input *hookio.HookInput, result hookio.RuleResult, now string) error {
 	hookDec := hookDecisionString(result.Decision)
 	outcome := OutcomePending
 	var resolvedAt *string
@@ -55,13 +62,13 @@ func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.Ru
 	}
 
 	if result.Trace != nil {
-		tx, err := s.db.BeginTx(context.Background(), nil)
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin tx: %w", err)
 		}
 
 		res, err := tx.ExecContext(
-			context.Background(),
+			ctx,
 			`
 			INSERT INTO tool_decisions
 				(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,
@@ -93,7 +100,7 @@ func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.Ru
 
 		for i, entry := range result.Trace {
 			_, err := tx.ExecContext(
-				context.Background(),
+				ctx,
 				`
 				INSERT INTO decision_trace_entries
 					(tool_decision_id, rule_order, rule_name, decision, reason)
@@ -112,7 +119,7 @@ func recordPreToolDecisionAt(s *Store, input *hookio.HookInput, result hookio.Ru
 
 	// Non-trace path: single INSERT
 	_, err := s.db.ExecContext(
-		context.Background(),
+		ctx,
 		`
 		INSERT INTO tool_decisions
 			(session_id, cwd, agent_id, agent_type, tool_name, tool_use_id,

@@ -2,6 +2,7 @@ package asklog
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -117,4 +118,49 @@ func TestOpenWithin_NormalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = s.Close()
+}
+
+// A write that misses its budget while another connection holds the database
+// write lock must not commit once the lock is released: the caller spools that
+// record, so a late commit would duplicate the row. Uses the real SQLite lock.
+func TestRunWithinCtx_BudgetMissedWriteNeverCommits(t *testing.T) {
+	old := ctxGrace
+	ctxGrace = 30 * time.Second // wait for the cancelled write to stop; returns as soon as it does
+	defer func() { ctxGrace = old }()
+
+	db := filepath.Join(t.TempDir(), "asks.db")
+	s, err := NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	locker, err := sql.Open("sqlite", db+"?_busy_timeout=100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = locker.Close() }()
+	conn, err := locker.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(t.Context(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RunWithinCtx(100*time.Millisecond, func(ctx context.Context) error {
+		return RecordPreToolDecisionCtx(ctx, s, spoolInputFor("tu1"), hookio.RuleResult{Decision: hookio.Approve})
+	})
+	if !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("err = %v, want ErrBudgetExceeded", err)
+	}
+	if _, err := conn.ExecContext(t.Context(), `ROLLBACK`); err != nil {
+		t.Fatal(err)
+	}
+	// The write's own busy timeout (3 s) has not elapsed; were it still
+	// waiting it would take the lock now. Give it the chance, then count.
+	time.Sleep(500 * time.Millisecond)
+	if n := spoolCountRows(t, s, `tool_use_id = ?`, "tu1"); n != 0 {
+		t.Fatalf("budget-missed write committed %d row(s) after the lock was released", n)
+	}
 }
