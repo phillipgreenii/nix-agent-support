@@ -38,8 +38,8 @@ func TestOpenCreatesTheSeenTableOnAnExistingStore(t *testing.T) {
 	if n, err := s.SeenCount(); err != nil || n != 0 {
 		t.Fatalf("seen after open: %d, %v", n, err)
 	}
-	if s.SchemaVersion() != SchemaVersion || SchemaVersion != 4 {
-		t.Fatalf("schema_version %d, constant %d, want 4", s.SchemaVersion(), SchemaVersion)
+	if s.SchemaVersion(t.Context()) != SchemaVersion || SchemaVersion != 4 {
+		t.Fatalf("schema_version %d, constant %d, want 4", s.SchemaVersion(t.Context()), SchemaVersion)
 	}
 }
 

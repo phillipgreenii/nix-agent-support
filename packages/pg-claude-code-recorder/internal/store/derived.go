@@ -192,7 +192,11 @@ SELECT source,rtype,path,SUM(count) FROM unknown_keys GROUP BY source,rtype,path
 // before the commit, so a test can crash exactly there; a panic or an error
 // rolls the transaction back.
 func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
-	ctx := context.Background()
+	return s.WithWriteCtx(context.Background(), point, fn)
+}
+
+// WithWriteCtx is WithWrite with the transaction and its statements under ctx.
+func (s *Store) WithWriteCtx(ctx context.Context, point string, fn func(tx *sql.Tx) error) (err error) {
 	s.lockWrite()
 	defer s.mu.Unlock()
 	if s.batching {

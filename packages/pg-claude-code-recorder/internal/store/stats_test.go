@@ -29,7 +29,7 @@ func TestCollectStatsCreatesStat1AndGates(t *testing.T) {
 	}
 	seedRecords(t, s)
 	now := time.Now()
-	if !s.CollectStatsDue(now, StatsEvery) {
+	if !s.CollectStatsDue(t.Context(), now, StatsEvery) {
 		t.Fatal("never collected, yet not due")
 	}
 	n, err := s.CollectStats(context.Background(), 400, now)
@@ -43,10 +43,10 @@ func TestCollectStatsCreatesStat1AndGates(t *testing.T) {
 	if err := s.Read().QueryRowContext(context.Background(), `SELECT count(*) FROM sqlite_stat1 WHERE tbl='records' AND idx='records_time'`).Scan(&idx); err != nil || idx != 1 {
 		t.Fatalf("no records_time row: n=%d err=%v", idx, err)
 	}
-	if s.CollectStatsDue(now.Add(time.Hour), StatsEvery) {
+	if s.CollectStatsDue(t.Context(), now.Add(time.Hour), StatsEvery) {
 		t.Fatal("due again an hour after a collection")
 	}
-	if !s.CollectStatsDue(now.Add(StatsEvery+time.Second), StatsEvery) {
+	if !s.CollectStatsDue(t.Context(), now.Add(StatsEvery+time.Second), StatsEvery) {
 		t.Fatal("not due after the interval")
 	}
 	if err := s.Close(); err != nil {
@@ -74,7 +74,7 @@ func TestCloseCollectsStats(t *testing.T) {
 	if statRows(t, s) == 0 {
 		t.Fatal("sqlite_stat1 is missing or empty after Close")
 	}
-	if s.CollectStatsDue(time.Now(), StatsEvery) {
+	if s.CollectStatsDue(t.Context(), time.Now(), StatsEvery) {
 		t.Fatal("Close did not stamp the collection")
 	}
 }
@@ -117,14 +117,14 @@ func TestCollectStatsSkipsSlowStepWithoutStamping(t *testing.T) {
 	if !errors.Is(err, ErrStatsSkipped) {
 		t.Fatalf("err=%v, want ErrStatsSkipped", err)
 	}
-	if !s.CollectStatsDue(now, StatsEvery) {
+	if !s.CollectStatsDue(t.Context(), now, StatsEvery) {
 		t.Fatal("a pass that skipped steps stamped the gate")
 	}
 	statsStepTimeout = old
 	if _, err := s.CollectStats(context.Background(), 400, now); err != nil {
 		t.Fatalf("retry with a normal budget: %v", err)
 	}
-	if s.CollectStatsDue(now, StatsEvery) {
+	if s.CollectStatsDue(t.Context(), now, StatsEvery) {
 		t.Fatal("completed retry did not stamp")
 	}
 }

@@ -419,7 +419,7 @@ func (d *Daemon) opStatus(ctx context.Context, _ []byte) (any, *wire.Error) {
 		FreeBytes:      free,
 		StageCounts:    counts,
 		ParserVersions: map[string]int{},
-		SchemaVersion:  d.st.SchemaVersion(),
+		SchemaVersion:  d.st.SchemaVersion(ctx),
 		ProtocolVer:    wire.ProtocolVersion,
 		CaughtUp:       caughtUp,
 		Backfill:       d.backfillProgress(),

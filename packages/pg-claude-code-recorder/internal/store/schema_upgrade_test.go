@@ -67,8 +67,8 @@ func TestOpenReplacesFullFieldsIndexWithPartialOne(t *testing.T) {
 	if err := s.Read().QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
 		t.Fatalf("a full fields_name_n survived open: %q, %v", def, err)
 	}
-	if s.SchemaVersion() != SchemaVersion {
-		t.Fatalf("schema_version %d", s.SchemaVersion())
+	if s.SchemaVersion(t.Context()) != SchemaVersion {
+		t.Fatalf("schema_version %d", s.SchemaVersion(t.Context()))
 	}
 }
 
@@ -116,8 +116,8 @@ func TestOlderSchemaIsRefusedUntouchedAndRebuildKeepsTheOldFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.SchemaVersion() != SchemaVersion {
-		t.Fatalf("rebuilt schema_version %d, want %d", s.SchemaVersion(), SchemaVersion)
+	if s.SchemaVersion(t.Context()) != SchemaVersion {
+		t.Fatalf("rebuilt schema_version %d, want %d", s.SchemaVersion(t.Context()), SchemaVersion)
 	}
 	var n int
 	if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM pragma_table_info('fields') WHERE name='name_id'`).Scan(&n); err != nil || n != 1 {
@@ -204,8 +204,8 @@ func TestOpenAddsTheSessionTablesAndColumnToAnExistingStore(t *testing.T) {
 		if s.SessionRefReady() {
 			t.Fatalf("open %d: a store with unreferenced older rows is marked ready", i)
 		}
-		if s.SchemaVersion() != SchemaVersion {
-			t.Fatalf("schema_version %d, the session tables must not change it", s.SchemaVersion())
+		if s.SchemaVersion(t.Context()) != SchemaVersion {
+			t.Fatalf("schema_version %d, the session tables must not change it", s.SchemaVersion(t.Context()))
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
@@ -336,8 +336,8 @@ func TestOpenAddsTheLookupColumnsAndTablesToAnExistingStore(t *testing.T) {
 		if err := s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('lk_cwd','lk_branch','lk_version','lk_entrypoint','lk_user_type')`).Scan(&tables); err != nil || tables != 5 {
 			t.Fatalf("open %d: %d lookup tables, %v", i, tables, err)
 		}
-		if s.SchemaVersion() != SchemaVersion {
-			t.Fatalf("schema_version %d, the lookup tables must not change it", s.SchemaVersion())
+		if s.SchemaVersion(t.Context()) != SchemaVersion {
+			t.Fatalf("schema_version %d, the lookup tables must not change it", s.SchemaVersion(t.Context()))
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
@@ -434,8 +434,8 @@ INSERT INTO commits VALUES(?,1,1,0,5,40),(?,1,2,5,9,70)`, a, a); err != nil {
 		if err := s.Read().QueryRowContext(context.Background(), `SELECT last_copy_ns FROM files WHERE id=?`, b).Scan(&gb); err != nil || gb != 0 {
 			t.Fatalf("open %d: file b last_copy_ns %d, %v; want 0", i, gb, err)
 		}
-		if s.SchemaVersion() != SchemaVersion {
-			t.Fatalf("schema_version %d, the column must not change it", s.SchemaVersion())
+		if s.SchemaVersion(t.Context()) != SchemaVersion {
+			t.Fatalf("schema_version %d, the column must not change it", s.SchemaVersion(t.Context()))
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)

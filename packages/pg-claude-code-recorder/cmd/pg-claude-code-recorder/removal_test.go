@@ -82,7 +82,7 @@ func newOpsDaemon(t *testing.T, enabled bool, doctor any) *opsDaemon {
 		return res, nil
 	})
 	s.Register("doctor", server.KindQuery, func(context.Context, []byte) (any, *wire.Error) { return doctor, nil })
-	if err := s.Listen(d.sock); err != nil {
+	if err := s.Listen(t.Context(), d.sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })
@@ -286,7 +286,7 @@ func TestSweepForceStartsAndWaitsUntilTheDaemonReportsCompletion(t *testing.T) {
 		polls++
 		return serve.SweepAnswer{Running: polls < 3, Completed: map[bool]int64{true: 1}[polls >= 3]}, nil
 	})
-	if err := s.Listen(sock); err != nil {
+	if err := s.Listen(t.Context(), sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })

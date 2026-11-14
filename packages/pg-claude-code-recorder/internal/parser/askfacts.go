@@ -96,46 +96,46 @@ func (p *Parser) BackfillAskFacts(ctx context.Context) (done bool, err error) {
 	if st.AskFactsComplete() {
 		return true, nil
 	}
-	if !st.FileFactsComplete() {
+	if !st.FileFactsComplete(ctx) {
 		return false, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	state := st.AskBackfill()
-	err = st.WithWrite("", func(tx *sql.Tx) error {
+	err = st.WithWriteCtx(ctx, "", func(tx *sql.Tx) error {
 		if state.AsksEnd == 0 {
 			var m sql.NullInt64
-			if err := tx.QueryRowContext(context.Background(), `SELECT MAX(id) FROM records`).Scan(&m); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT MAX(id) FROM records`).Scan(&m); err != nil {
 				return err
 			}
 			if !m.Valid {
-				return st.MarkAskFactsComplete(tx)
+				return st.MarkAskFactsComplete(ctx, tx)
 			}
 			state.AsksEnd = m.Int64
-			if err := st.SetAskAsksEnd(tx, state.AsksEnd); err != nil {
+			if err := st.SetAskAsksEnd(ctx, tx, state.AsksEnd); err != nil {
 				return err
 			}
 		}
 		if state.AsksCursor < state.AsksEnd {
 			to := min(state.AsksCursor+askBackSpan, state.AsksEnd)
-			if _, err := tx.ExecContext(context.Background(), askBackfillQuestions, state.AsksCursor, to); err != nil {
+			if _, err := tx.ExecContext(ctx, askBackfillQuestions, state.AsksCursor, to); err != nil {
 				return err
 			}
-			return st.SetAskAsksCursor(tx, to)
+			return st.SetAskAsksCursor(ctx, tx, to)
 		}
 		var maxID int64
-		if err := tx.QueryRowContext(context.Background(), `SELECT COALESCE(MAX(id),0) FROM records`).Scan(&maxID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM records`).Scan(&maxID); err != nil {
 			return err
 		}
 		to := min(state.AnswersCursor+askBackSpan, maxID)
-		if _, err := tx.ExecContext(context.Background(), askBackfillAnswers, state.AnswersCursor, to); err != nil {
+		if _, err := tx.ExecContext(ctx, askBackfillAnswers, state.AnswersCursor, to); err != nil {
 			return err
 		}
 		if to >= maxID {
-			return st.MarkAskFactsComplete(tx)
+			return st.MarkAskFactsComplete(ctx, tx)
 		}
-		return st.SetAskAnswersCursor(tx, to)
+		return st.SetAskAnswersCursor(ctx, tx, to)
 	})
 	if err != nil {
 		return false, err

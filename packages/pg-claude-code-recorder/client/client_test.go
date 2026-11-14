@@ -57,7 +57,7 @@ func newFake(t *testing.T, proto int) *fake {
 			return nil, wire.Errf(op+"_fails", "scripted")
 		})
 	}
-	if err := s.Listen(f.sock); err != nil {
+	if err := s.Listen(t.Context(), f.sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })

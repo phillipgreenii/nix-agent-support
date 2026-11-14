@@ -434,7 +434,7 @@ func (d *Doctor) runSlice(ctx context.Context, cur *DoctorCursor, budget int64) 
 		d.doctorJournal(ctx, add)
 		cur.Phase = phaseArchives
 	}
-	sessions, serr := d.settledSessions()
+	sessions, serr := d.settledSessions(ctx)
 	if serr != nil {
 		_ = d.sliceEnd(cur)
 		return false, res, serr

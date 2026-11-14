@@ -163,7 +163,7 @@ func (d *Doctor) doctorFull(ctx context.Context) (DoctorResult, error) {
 		return res, err
 	}
 	d.doctorJournal(ctx, add)
-	if err := d.doctorArchives(&res, add); err != nil {
+	if err := d.doctorArchives(ctx, &res, add); err != nil {
 		return res, err
 	}
 	res.Mismatches, res.Notices = splitNotices(res.Mismatches)
@@ -252,8 +252,8 @@ func (d *Doctor) doctorJournal(ctx context.Context, add func(DoctorMismatch)) {
 // doctorArchives checks each settled Conversation's archive against its
 // manifest: the manifest file on disk equals the committed one and every file's
 // bytes, read through the archive, hash to the manifest's hash.
-func (d *Doctor) doctorArchives(res *DoctorResult, add func(DoctorMismatch)) error {
-	sessions, err := d.settledSessions()
+func (d *Doctor) doctorArchives(ctx context.Context, res *DoctorResult, add func(DoctorMismatch)) error {
+	sessions, err := d.settledSessions(ctx)
 	if err != nil {
 		return err
 	}
@@ -267,8 +267,8 @@ func (d *Doctor) doctorArchives(res *DoctorResult, add func(DoctorMismatch)) err
 }
 
 // settledSessions lists the settled Conversations in session order.
-func (d *Doctor) settledSessions() ([]string, error) {
-	rows, err := d.st.Read().QueryContext(context.Background(), `SELECT session FROM settled ORDER BY session`)
+func (d *Doctor) settledSessions(ctx context.Context) ([]string, error) {
+	rows, err := d.st.Read().QueryContext(ctx, `SELECT session FROM settled ORDER BY session`)
 	if err != nil {
 		return nil, err
 	}

@@ -399,14 +399,14 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 			return nil, err
 		}
 	}
-	s.lastSeq = s.metaInt(context.Background(), "last_seq")
+	s.lastSeq = s.metaInt(ctx, "last_seq")
 	if dbExisted && s.lastSeq == 0 && len(recs) > 0 {
 		// A database that applied nothing of a non-empty journal is a rebuild
 		// that was interrupted before it committed: it is still a rebuild (the
 		// epoch must bump so clients resync).
 		dbExisted = false
 	}
-	if v := s.metaInt(context.Background(), "schema_version"); v > SchemaVersion {
+	if v := s.metaInt(ctx, "schema_version"); v > SchemaVersion {
 		_ = s.CloseCtx(ctx)
 		return nil, &SchemaNewerError{Found: int(v), Known: SchemaVersion}
 	}
@@ -430,7 +430,7 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 	}
 	s.jf = jf
 	if !opt.ReplayOnly {
-		if cur := s.metaInt(context.Background(), "epoch"); cur == 0 || s.Rebuilt {
+		if cur := s.metaInt(ctx, "epoch"); cur == 0 || s.Rebuilt {
 			if err := s.CommitCtx(ctx, &Rec{T: TEpoch, At: time.Now().UnixNano(), Epoch: int(cur) + 1}); err != nil {
 				_ = s.CloseCtx(ctx)
 				return nil, err
@@ -881,12 +881,12 @@ func (s *Store) bumpLive() {
 // LastSeq returns the last journal sequence applied to the database.
 func (s *Store) LastSeq() int64 { return s.metaInt(context.Background(), "last_seq") }
 
-// SchemaVersion returns the schema_version recorded in index.db.
 // HasTrigram reports whether this index.db has the trigram table fts_tri. When
 // it does not, opaque fields are indexed in the word index.
 func (s *Store) HasTrigram() bool { return s.trigram }
 
-func (s *Store) SchemaVersion() int { return int(s.metaInt(context.Background(), "schema_version")) }
+// SchemaVersion returns the schema_version recorded in index.db.
+func (s *Store) SchemaVersion(ctx context.Context) int { return int(s.metaInt(ctx, "schema_version")) }
 
 // OnCommit registers a hook called after each successful database commit (the
 // recording file-system wrapper observes the commit through it).
@@ -1459,7 +1459,7 @@ func (s *Store) CloseCtx(ctx context.Context) error {
 	if s.cdb != nil {
 		// Keep sqlite_stat1 current: a due collection runs here, bounded, on the
 		// checkpoint connection; a cut-short pass resumes at the next one.
-		if s.wdb != nil && !s.replayOnly && s.CollectStatsDue(time.Now(), StatsEvery) {
+		if s.wdb != nil && !s.replayOnly && s.CollectStatsDue(ctx, time.Now(), StatsEvery) {
 			ctx, cancel := context.WithTimeout(ctx, closeStatsWait)
 			_, _ = s.collectStats(ctx, s.cdb, DefaultAnalysisLimit, time.Now(), 0)
 			cancel()

@@ -30,7 +30,7 @@ func (d *Daemon) statsLoop() {
 			return
 		case <-fire:
 			now := d.clock.Now()
-			if d.st.CollectStatsDue(now, store.StatsEvery) {
+			if d.st.CollectStatsDue(d.rootCtx(), now, store.StatsEvery) {
 				if n, err := d.st.CollectStats(d.rootCtx(), store.DefaultAnalysisLimit, now); err != nil {
 					d.obs.Log.Warn("stats_collect_failed", "err", err.Error(), "statements", n)
 				} else {

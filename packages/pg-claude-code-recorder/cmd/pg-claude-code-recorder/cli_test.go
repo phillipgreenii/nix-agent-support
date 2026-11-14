@@ -31,7 +31,7 @@ func fakeDaemon(t *testing.T, status func() wire.Status, cov func() wire.Coverag
 	s := server.New(obs.New(nil), nil, func() any { return map[string]any{} })
 	s.Register("status", server.KindQuery, func(context.Context, []byte) (any, *wire.Error) { return status(), nil })
 	s.Register("coverage", server.KindQuery, func(context.Context, []byte) (any, *wire.Error) { return cov(), nil })
-	if err := s.Listen(sock); err != nil {
+	if err := s.Listen(t.Context(), sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })
@@ -195,7 +195,7 @@ func TestStatusAnswersFastWhenTheCrashQueriesAreSlow(t *testing.T) {
 		}
 		return map[string]any{}, nil
 	})
-	if err := s.Listen(sock); err != nil {
+	if err := s.Listen(t.Context(), sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })

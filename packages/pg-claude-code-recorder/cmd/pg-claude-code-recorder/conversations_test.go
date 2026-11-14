@@ -28,7 +28,7 @@ func fakeList(t *testing.T, ans lifecycle.ConversationList) *clienttest.Env {
 	sock := shortDir(t) + "/r.sock"
 	s := server.New(obs.New(nil), nil, func() any { return map[string]any{} })
 	s.Register("conversation.list", server.KindQuery, func(context.Context, []byte) (any, *wire.Error) { return ans, nil })
-	if err := s.Listen(sock); err != nil {
+	if err := s.Listen(t.Context(), sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })

@@ -43,11 +43,11 @@ func TestRenderPrefixesSeriesAndRegistersReasonsAtZero(t *testing.T) {
 
 func TestStartRefusesNonLoopbackAndServesMetrics(t *testing.T) {
 	o := obs.New(nil)
-	if _, err := Start("0.0.0.0:0", o.Reg, nil); err == nil {
+	if _, err := Start(t.Context(), "0.0.0.0:0", o.Reg, nil); err == nil {
 		t.Fatal("wildcard address accepted")
 	}
 	refreshed := 0
-	s, err := Start("127.0.0.1:0", o.Reg, func() { refreshed++ })
+	s, err := Start(t.Context(), "127.0.0.1:0", o.Reg, func() { refreshed++ })
 	if err != nil {
 		t.Fatal(err)
 	}

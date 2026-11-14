@@ -16,7 +16,7 @@ func TestCloseDropsAScrapeShutdownCouldNotDrain(t *testing.T) {
 	o := obs.New(nil)
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	s, err := Start("127.0.0.1:0", o.Reg, func() { close(entered); <-release })
+	s, err := Start(t.Context(), "127.0.0.1:0", o.Reg, func() { close(entered); <-release })
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,7 +36,7 @@ func feedDaemon(t *testing.T, feedAns func(n int) (any, *wire.Error)) (string, *
 		seen = append(seen, "raw "+string(b))
 		return map[string]any{"file": "f_1", "gen": 1, "offset": 0, "length": 3, "encoding": "utf8", "data": "abc"}, nil
 	})
-	if err := s.Listen(sock); err != nil {
+	if err := s.Listen(t.Context(), sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })

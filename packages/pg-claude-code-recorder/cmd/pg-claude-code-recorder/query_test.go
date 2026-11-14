@@ -36,7 +36,7 @@ func queryDaemon(t *testing.T, hasSession bool, hasText bool) (string, *[]string
 		}
 		return map[string]any{"as_of": "1:2", "hits": hits, "more": false}, nil
 	})
-	if err := s.Listen(sock); err != nil {
+	if err := s.Listen(t.Context(), sock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })

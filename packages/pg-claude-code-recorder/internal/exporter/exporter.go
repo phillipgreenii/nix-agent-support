@@ -140,7 +140,7 @@ type Server struct {
 }
 
 // Start listens on addr (host:port, loopback only) and serves reg.
-func Start(addr string, reg *obs.Registry, refresh func()) (*Server, error) {
+func Start(ctx context.Context, addr string, reg *obs.Registry, refresh func()) (*Server, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("metrics address %q: %w", addr, err)
@@ -149,7 +149,7 @@ func Start(addr string, reg *obs.Registry, refresh func()) (*Server, error) {
 		return nil, fmt.Errorf("metrics address %q: only a loopback host is accepted", addr)
 	}
 	var lc net.ListenConfig
-	ln, err := lc.Listen(context.Background(), "tcp", addr)
+	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}

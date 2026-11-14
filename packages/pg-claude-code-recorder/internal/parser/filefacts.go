@@ -86,10 +86,10 @@ func recomputeFileFact(tx *pstx, file int64) error {
 // does nothing and reports done.
 func (p *Parser) BackfillFileFacts(ctx context.Context, limit int) (done bool, n int, err error) {
 	st := p.cfg.Store
-	if st.FileFactsComplete() {
+	if st.FileFactsComplete(ctx) {
 		return true, 0, nil
 	}
-	ids, err := st.FileIDsAfter(ctx, st.FileFactsCursor(), limit)
+	ids, err := st.FileIDsAfter(ctx, st.FileFactsCursor(ctx), limit)
 	if err != nil {
 		return false, 0, err
 	}
@@ -101,12 +101,12 @@ func (p *Parser) BackfillFileFacts(ctx context.Context, limit int) (done bool, n
 			return false, n, err
 		}
 		n++
-		if err := st.SetFileFactsCursor(id); err != nil {
+		if err := st.SetFileFactsCursor(ctx, id); err != nil {
 			return false, n, err
 		}
 	}
 	if len(ids) < limit {
-		return true, n, st.MarkFileFactsComplete()
+		return true, n, st.MarkFileFactsComplete(ctx)
 	}
 	return false, n, nil
 }
@@ -139,8 +139,8 @@ func (p *Parser) backfillOne(ctx context.Context, file int64) error {
 		return err
 	}
 	project, session, agentID := p.factsOf(file)
-	return p.cfg.Store.WithWrite("", func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(context.Background(), upsertFileFact, file, nullable(project), nullable(session), nullable(agentID), last)
+	return p.cfg.Store.WithWriteCtx(ctx, "", func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, upsertFileFact, file, nullable(project), nullable(session), nullable(agentID), last)
 		return err
 	})
 }
@@ -162,7 +162,7 @@ type FileFactDrift struct {
 // facts are not complete yet (backfill running) is skipped.
 func (p *Parser) CheckFileFacts(ctx context.Context, after int64, limit int, repair bool) (drifts []FileFactDrift, next int64, err error) {
 	st := p.cfg.Store
-	if !st.FileFactsComplete() {
+	if !st.FileFactsComplete(ctx) {
 		return nil, 0, nil
 	}
 	ids, err := st.FileIDsAfter(ctx, after, limit)
@@ -192,8 +192,8 @@ func (p *Parser) CheckFileFacts(ctx context.Context, after int64, limit int, rep
 		drifts = append(drifts, *d)
 		if repair {
 			project, session, agentID := p.factsOf(id)
-			if err := st.WithWrite("", func(tx *sql.Tx) error {
-				_, err := tx.ExecContext(context.Background(), `INSERT INTO file_facts(file_id,project,file_session,agent_id,last_time_ns) VALUES(?,?,?,?,?)
+			if err := st.WithWriteCtx(ctx, "", func(tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, `INSERT INTO file_facts(file_id,project,file_session,agent_id,last_time_ns) VALUES(?,?,?,?,?)
 ON CONFLICT(file_id) DO UPDATE SET last_time_ns=excluded.last_time_ns`, id, nullable(project), nullable(session), nullable(agentID), computed)
 				return err
 			}); err != nil {

@@ -347,7 +347,7 @@ func TestSettleManifestRecordsTheStoredSizeOfASnapshotWhoseRowRecordsMore(t *tes
 	f, content := e.snapshotSettledFile()
 	f.LastSize = 1022927
 	c := &conv{session: sess, files: []store.File{f}, rel: map[int64]string{f.ID: "projects/x.json"}}
-	m, err := e.sett.manifest(c, "clone", e.clk.Now())
+	m, err := e.sett.manifest(t.Context(), c, "clone", e.clk.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

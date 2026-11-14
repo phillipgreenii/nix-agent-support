@@ -54,8 +54,8 @@ func TestVersionTwoStoreIsRefusedAndRebuildsIntoTheVersionThreeLayout(t *testing
 	_ = s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM pragma_table_info('records') WHERE name='session'`).Scan(&sessionCol)
 	_ = s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE name='fts_tri'`).Scan(&tri)
 	_ = s.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE name='ext_assistant_usage'`).Scan(&ext)
-	if sessionCol != 0 || tri != 0 || ext != 1 || s.HasSessionText() || !s.SessionRefReady() || s.SchemaVersion() != SchemaVersion {
-		t.Fatalf("not the v3 layout: session col %d, fts_tri %d, ext %d, ready %v, version %d", sessionCol, tri, ext, s.SessionRefReady(), s.SchemaVersion())
+	if sessionCol != 0 || tri != 0 || ext != 1 || s.HasSessionText() || !s.SessionRefReady() || s.SchemaVersion(t.Context()) != SchemaVersion {
+		t.Fatalf("not the v3 layout: session col %d, fts_tri %d, ext %d, ready %v, version %d", sessionCol, tri, ext, s.SessionRefReady(), s.SchemaVersion(t.Context()))
 	}
 	for _, ix := range []string{"records_session", "records_session_source_time"} {
 		if hasIndex(t, s, ix) {

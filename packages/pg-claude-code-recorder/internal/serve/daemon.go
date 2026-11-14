@@ -635,7 +635,7 @@ func (d *Daemon) StartCtx(ctx context.Context) error {
 	d.srv.SetQueryTimeout(d.cfg.QueryTimeout)
 	d.registerOps()
 	endPhase := d.su.begin("listener_bind", false)
-	if err := d.srv.Listen(d.cfg.Socket); err != nil {
+	if err := d.srv.Listen(ctx, d.cfg.Socket); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
 	endPhase()
@@ -645,7 +645,7 @@ func (d *Daemon) StartCtx(ctx context.Context) error {
 	}
 	if addr != "" {
 		endPhase = d.su.begin("metrics_listen", false)
-		exp, err := exporter.Start(addr, d.obs.Reg, d.scrapeRefresh)
+		exp, err := exporter.Start(ctx, addr, d.obs.Reg, d.scrapeRefresh)
 		if err != nil {
 			d.obs.Log.Warn("metrics_exporter_failed", "err", err.Error())
 		} else {
@@ -1071,7 +1071,7 @@ func (d *Daemon) fileFactsLoop() {
 // fileFactsPass runs one backfill batch or one drift-check slice and returns
 // the wait before the next.
 func (d *Daemon) fileFactsPass(ctx context.Context, after *int64) time.Duration {
-	if !d.st.FileFactsComplete() {
+	if !d.st.FileFactsComplete(ctx) {
 		done, n, err := d.prs.BackfillFileFacts(ctx, fileFactsBackfillStep)
 		if err != nil {
 			d.obs.Log.Warn("file_facts_backfill_failed", "err", err.Error())
@@ -1262,7 +1262,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 func (d *Daemon) hello() any {
 	return wire.Hello{
 		Service: serviceName, Version: d.opt.Version, ProtocolVersion: wire.ProtocolVersion,
-		SchemaVersion: d.st.SchemaVersion(), Epoch: d.st.Epoch(), Capabilities: d.srv.Operations(),
+		SchemaVersion: d.st.SchemaVersion(d.rootCtx()), Epoch: d.st.Epoch(), Capabilities: d.srv.Operations(),
 		CaughtUp: d.backfillDone.Load(), Degraded: !d.backfillDone.Load(),
 	}
 }

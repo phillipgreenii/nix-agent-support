@@ -162,7 +162,7 @@ func TestFileFactsMaintainedAndSurviveRebuild(t *testing.T) {
 	if got := factsDump(t, k2); got != before {
 		t.Fatalf("rebuilt table differs:\n%s\nvs\n%s", got, before)
 	}
-	if !k2.Store.FileFactsComplete() {
+	if !k2.Store.FileFactsComplete(t.Context()) {
 		t.Fatal("a database created empty is not marked complete")
 	}
 }
@@ -202,7 +202,7 @@ func TestFileFactsBackfillOfAnOlderDatabase(t *testing.T) {
 	if got := factsDump(t, k); got != want {
 		t.Fatalf("backfilled table differs:\n%s\nvs\n%s", got, want)
 	}
-	if !k.Store.FileFactsComplete() {
+	if !k.Store.FileFactsComplete(t.Context()) {
 		t.Fatal("not marked complete")
 	}
 }

@@ -62,12 +62,12 @@ func readSessionFacts(t *testing.T, st *store.Store) sessionReads {
 	s := &Settler{st: st}
 	out := sessionReads{Versions: map[string][]store.ManifestRegistry{}, Names: map[string]bool{}, Info: map[string]WhereInfo{}, OfFile: map[int64][]string{}}
 	for _, id := range []string{"example-a", "example-b", "absent"} {
-		v, err := s.registryVersions(id)
+		v, err := s.registryVersions(t.Context(), id)
 		if err != nil {
 			t.Fatal(err)
 		}
 		out.Versions[id] = v
-		out.Names[id] = s.registryNames(id)
+		out.Names[id] = s.registryNames(t.Context(), id)
 		var info WhereInfo
 		s.fillVersions(&st.Reader, &info, id)
 		out.Info[id] = info

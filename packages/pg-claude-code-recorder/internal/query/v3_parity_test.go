@@ -82,8 +82,8 @@ func hasIndex(k *testkit.Kit, name string) bool {
 // The differences are exactly the ones the design lists, asserted below.
 func TestV3RebuildHoldsTheSameRecordsFactsAndAnswersAsV2(t *testing.T) {
 	v2, v3 := parityKits(t)
-	if v2.Store.SchemaVersion() != store.SchemaVersion || v3.Store.SchemaVersion() != store.SchemaVersion {
-		t.Fatalf("schema versions %d and %d", v2.Store.SchemaVersion(), v3.Store.SchemaVersion())
+	if v2.Store.SchemaVersion(t.Context()) != store.SchemaVersion || v3.Store.SchemaVersion(t.Context()) != store.SchemaVersion {
+		t.Fatalf("schema versions %d and %d", v2.Store.SchemaVersion(t.Context()), v3.Store.SchemaVersion(t.Context()))
 	}
 	if v2.Store.HasSessionText() == v3.Store.HasSessionText() {
 		t.Fatal("the two stores are not in different layouts")

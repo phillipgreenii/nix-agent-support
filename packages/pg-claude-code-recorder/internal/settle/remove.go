@@ -336,7 +336,7 @@ func (s *Settler) blockers(ctx context.Context, c *conv, row store.StageRow, has
 	if live {
 		out = append(out, BlockLive)
 	}
-	if s.registryNames(c.session) {
+	if s.registryNames(ctx, c.session) {
 		out = append(out, BlockRegistry)
 	}
 	switch {
@@ -361,18 +361,18 @@ func (s *Settler) blockers(ctx context.Context, c *conv, row store.StageRow, has
 
 // registryNames reports whether a registry file that is still present names the
 // session (a Process may still be running it, or just left it behind).
-func (s *Settler) registryNames(session string) bool {
+func (s *Settler) registryNames(ctx context.Context, session string) bool {
 	var one int
-	err := s.st.Read().QueryRowContext(context.Background(), pick(s.st.SessionRefReady(), registryNamesQuery, registryNamesQueryRef), session).Scan(&one)
+	err := s.st.Read().QueryRowContext(ctx, pick(s.st.SessionRefReady(), registryNamesQuery, registryNamesQueryRef), session).Scan(&one)
 	return err == nil
 }
 
-func (s *Settler) holdsSession(session string) string {
+func (s *Settler) holdsSession(ctx context.Context, session string) string {
 	live, err := s.cfg.Live()
 	if err != nil || live[session] {
 		return BlockLive
 	}
-	if s.registryNames(session) {
+	if s.registryNames(ctx, session) {
 		return BlockRegistry
 	}
 	return ""
@@ -595,7 +595,7 @@ func (s *Settler) runPending(ctx context.Context, pl *pendingList, now time.Time
 			pf.State = fsUnlinked
 			continue
 		case atPath:
-			if why := s.holdsSession(pl.Session); why != "" {
+			if why := s.holdsSession(ctx, pl.Session); why != "" {
 				s.skipFile(why)
 				return s.abortPending(ctx, pl, now, why)
 			}
@@ -638,7 +638,7 @@ func (s *Settler) runPending(ctx context.Context, pl *pendingList, now time.Time
 		default:
 			// A quarantined file with no file at its path: the registry and live
 			// check again, then the same holder listing and re-hash.
-			if why := s.holdsSession(pl.Session); why != "" {
+			if why := s.holdsSession(ctx, pl.Session); why != "" {
 				s.skipFile(why)
 				return s.abortPending(ctx, pl, now, why)
 			}

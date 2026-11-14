@@ -45,7 +45,7 @@ var cancelExempt = map[string]string{
 }
 
 func post(d *Daemon, ctx context.Context, op, body string) (int, string) {
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/"+op, strings.NewReader(body)).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/"+op, strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	d.srv.Handler().ServeHTTP(rec, req)
 	return rec.Code, rec.Body.String()

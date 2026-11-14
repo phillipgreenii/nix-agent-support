@@ -50,8 +50,8 @@ func TestOpenCreatesLayoutWALAndSchemaVersion(t *testing.T) {
 	if err := s.rdb.QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal_mode %q %v", mode, err)
 	}
-	if s.SchemaVersion() != SchemaVersion || s.Epoch() != 1 {
-		t.Fatalf("schema %d epoch %d", s.SchemaVersion(), s.Epoch())
+	if s.SchemaVersion(t.Context()) != SchemaVersion || s.Epoch() != 1 {
+		t.Fatalf("schema %d epoch %d", s.SchemaVersion(t.Context()), s.Epoch())
 	}
 }
 
@@ -278,8 +278,8 @@ func TestNewerSchemaSaysHowToProceedAndRebuildIsThatWay(t *testing.T) {
 		t.Fatalf("--rebuild is the way past it: %v", err)
 	}
 	defer func() { _ = s2.Close() }()
-	if s2.SchemaVersion() != SchemaVersion || s2.Epoch() != epoch+1 || !s2.Rebuilt {
-		t.Fatalf("schema %d epoch %d rebuilt %v", s2.SchemaVersion(), s2.Epoch(), s2.Rebuilt)
+	if s2.SchemaVersion(t.Context()) != SchemaVersion || s2.Epoch() != epoch+1 || !s2.Rebuilt {
+		t.Fatalf("schema %d epoch %d rebuilt %v", s2.SchemaVersion(t.Context()), s2.Epoch(), s2.Rebuilt)
 	}
 	if _, err := s2.File(id); err != nil {
 		t.Fatalf("the journal's observations came back: %v", err)
@@ -486,8 +486,8 @@ func TestFeedMarksAtIndexIsCreatedByOpenAndGainedByAnOlderDatabase(t *testing.T)
 	if !hasIndex(t, s, "feed_marks_at") {
 		t.Fatal("reopening a database without the index did not create it")
 	}
-	if s.SchemaVersion() != SchemaVersion {
-		t.Fatalf("schema version %d, want %d", s.SchemaVersion(), SchemaVersion)
+	if s.SchemaVersion(t.Context()) != SchemaVersion {
+		t.Fatalf("schema version %d, want %d", s.SchemaVersion(t.Context()), SchemaVersion)
 	}
 }
 

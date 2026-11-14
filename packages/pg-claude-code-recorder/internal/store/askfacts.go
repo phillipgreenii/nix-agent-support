@@ -166,21 +166,21 @@ func (s *Store) AskBackfill() AskBackfillState {
 }
 
 // SetAskAsksEnd freezes the record id the question pass runs up to.
-func (s *Store) SetAskAsksEnd(tx *sql.Tx, end int64) error {
-	return setMeta(context.Background(), tx, metaAskAsksEnd, strconv.FormatInt(end, 10))
+func (s *Store) SetAskAsksEnd(ctx context.Context, tx *sql.Tx, end int64) error {
+	return setMeta(ctx, tx, metaAskAsksEnd, strconv.FormatInt(end, 10))
 }
 
 // SetAskAsksCursor saves the question pass position inside tx.
-func (s *Store) SetAskAsksCursor(tx *sql.Tx, id int64) error {
-	return setMeta(context.Background(), tx, metaAskAsksCursor, strconv.FormatInt(id, 10))
+func (s *Store) SetAskAsksCursor(ctx context.Context, tx *sql.Tx, id int64) error {
+	return setMeta(ctx, tx, metaAskAsksCursor, strconv.FormatInt(id, 10))
 }
 
 // SetAskAnswersCursor saves the answer pass position inside tx.
-func (s *Store) SetAskAnswersCursor(tx *sql.Tx, id int64) error {
-	return setMeta(context.Background(), tx, metaAskAnswersCursor, strconv.FormatInt(id, 10))
+func (s *Store) SetAskAnswersCursor(ctx context.Context, tx *sql.Tx, id int64) error {
+	return setMeta(ctx, tx, metaAskAnswersCursor, strconv.FormatInt(id, 10))
 }
 
 // MarkAskFactsComplete records that the backfill is done, inside tx.
-func (s *Store) MarkAskFactsComplete(tx *sql.Tx) error {
-	return setMeta(context.Background(), tx, MetaAskFactsComplete, "1")
+func (s *Store) MarkAskFactsComplete(ctx context.Context, tx *sql.Tx) error {
+	return setMeta(ctx, tx, MetaAskFactsComplete, "1")
 }

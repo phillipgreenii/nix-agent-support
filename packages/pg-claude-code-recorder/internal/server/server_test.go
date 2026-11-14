@@ -39,7 +39,7 @@ func newServer(t *testing.T) (*Server, *obs.Obs, string) {
 		return nil, wire.Errf(wire.ErrNotFound, "no such thing")
 	})
 	p := sockPath(t)
-	if err := s.Listen(p); err != nil {
+	if err := s.Listen(t.Context(), p); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })
@@ -51,7 +51,7 @@ func newServer(t *testing.T) (*Server, *obs.Obs, string) {
 func TestListenCreatesMissingSocketDirectory(t *testing.T) {
 	p := filepath.Join(filepath.Dir(sockPath(t)), "state", "pg-claude-code-recorder", "recorder.sock")
 	s := New(obs.New(nil), nil, func() any { return nil })
-	if err := s.Listen(p); err != nil {
+	if err := s.Listen(t.Context(), p); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })
@@ -119,12 +119,12 @@ func TestStaleSocketIsReplacedAndLiveOneIsRefused(t *testing.T) {
 	}
 	_ = ln.Close() // leaves the socket file behind: a stale socket
 	s := New(obs.New(nil), nil, func() any { return nil })
-	if err := s.Listen(p); err != nil {
+	if err := s.Listen(t.Context(), p); err != nil {
 		t.Fatalf("stale socket not replaced: %v", err)
 	}
 	defer s.Close(context.Background())
 	s2 := New(obs.New(nil), nil, func() any { return nil })
-	if err := s2.Listen(p); err == nil {
+	if err := s2.Listen(t.Context(), p); err == nil {
 		t.Fatal("a live daemon's socket was taken over")
 	}
 }
@@ -134,7 +134,7 @@ func TestRegularFileAtTheSocketPathIsNeverRemoved(t *testing.T) {
 	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := New(obs.New(nil), nil, func() any { return nil }).Listen(p); err == nil {
+	if err := New(obs.New(nil), nil, func() any { return nil }).Listen(t.Context(), p); err == nil {
 		t.Fatal("regular file replaced")
 	}
 	if _, err := os.Stat(p); err != nil {

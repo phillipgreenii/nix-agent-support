@@ -339,7 +339,7 @@ func sanitize(s string) string {
 
 // Listen binds the Unix socket at path with mode 0600, replacing a stale
 // socket but refusing when a live daemon answers on it.
-func (s *Server) Listen(path string) error {
+func (s *Server) Listen(ctx context.Context, path string) error {
 	// The socket may sit in a directory nothing else has created yet (the
 	// state home).
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -349,7 +349,7 @@ func (s *Server) Listen(path string) error {
 		if fi.Mode()&os.ModeSocket == 0 {
 			return fmt.Errorf("%s exists and is not a socket", path)
 		}
-		if c, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", path); err == nil {
+		if c, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", path); err == nil {
 			_ = c.Close()
 			return fmt.Errorf("another recorder is already listening on %s", path)
 		}
@@ -358,7 +358,7 @@ func (s *Server) Listen(path string) error {
 		}
 	}
 	var lc net.ListenConfig
-	ln, err := lc.Listen(context.Background(), "unix", path)
+	ln, err := lc.Listen(ctx, "unix", path)
 	if err != nil {
 		return err
 	}

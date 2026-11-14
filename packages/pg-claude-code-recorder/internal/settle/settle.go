@@ -1286,9 +1286,9 @@ func lastNewline(p *store.Pointer, n int64) (int64, error) {
 	return 0, nil
 }
 
-func (s *Settler) parsedState(file int64, gen int) bool {
+func (s *Settler) parsedState(ctx context.Context, file int64, gen int) bool {
 	var v int
-	return s.st.Read().QueryRowContext(context.Background(), `SELECT version FROM parse_state WHERE file_id=? AND gen=?`, file, gen).Scan(&v) == nil
+	return s.st.Read().QueryRowContext(ctx, `SELECT version FROM parse_state WHERE file_id=? AND gen=?`, file, gen).Scan(&v) == nil
 }
 
 // check runs the settle check over every file. Each clause is an independent
@@ -1403,7 +1403,7 @@ func (s *Settler) checkAppend(ctx context.Context, c *conv, f store.File, rel st
 		if parseBehindFailure(g.ParseOffset, g.CopyOffset, nl, tornLen, s.cfg.MaxLineBytes) {
 			add(ReasonParseBehind, fmt.Sprintf("parse offset %d, last newline at %d", g.ParseOffset, nl))
 		}
-		if !s.parsedState(f.ID, g.Gen) {
+		if !s.parsedState(ctx, f.ID, g.Gen) {
 			add(ReasonUnparsed, "no record of a parse of this generation")
 		}
 	}
@@ -1504,8 +1504,8 @@ func (s *Settler) hold(ctx context.Context, c *conv, fails []Failure, now time.T
 
 // registryVersions returns the registry file versions whose records name the
 // session.
-func (s *Settler) registryVersions(session string) ([]store.ManifestRegistry, error) {
-	rows, err := s.st.Read().QueryContext(context.Background(), pick(s.st.SessionRefReady(), registryVersionsQuery, registryVersionsQueryRef), session)
+func (s *Settler) registryVersions(ctx context.Context, session string) ([]store.ManifestRegistry, error) {
+	rows, err := s.st.Read().QueryContext(ctx, pick(s.st.SessionRefReady(), registryVersionsQuery, registryVersionsQueryRef), session)
 	if err != nil {
 		return nil, err
 	}
@@ -1521,9 +1521,9 @@ func (s *Settler) registryVersions(session string) ([]store.ManifestRegistry, er
 	return out, rows.Err()
 }
 
-func (s *Settler) manifest(c *conv, method string, now time.Time) (store.Manifest, error) {
+func (s *Settler) manifest(ctx context.Context, c *conv, method string, now time.Time) (store.Manifest, error) {
 	m := store.Manifest{Session: c.session, SettledAt: now.UnixNano(), Method: method}
-	if rv, err := s.registryVersions(c.session); err == nil {
+	if rv, err := s.registryVersions(ctx, c.session); err == nil {
 		m.Registry = rv
 	}
 	ids := map[string]bool{}
@@ -1618,7 +1618,7 @@ func (s *Settler) writeManifestFile(session string, b []byte) error {
 // settleBytes compresses the Conversation's copies into a new archive segment,
 // commits "settled" and deletes the covered copy bytes.
 func (s *Settler) settleBytes(ctx context.Context, c *conv, now time.Time) (bool, error) {
-	m, err := s.manifest(c, "bytes", now)
+	m, err := s.manifest(ctx, c, "bytes", now)
 	if err != nil {
 		return false, err
 	}
@@ -1842,7 +1842,7 @@ func (s *Settler) settleClone(ctx context.Context, c *conv, now time.Time) (bool
 		s.cfg.Obs.Event(obs.EvSettleClonePriv, "session", c.session, "file", strconv.FormatInt(x.f.ID, 10),
 			"before_bytes", strconv.FormatInt(x.privBefore, 10), "after_bytes", strconv.FormatInt(x.privAfter, 10))
 	}
-	m, err := s.manifest(c, "clone", now)
+	m, err := s.manifest(ctx, c, "clone", now)
 	if err != nil {
 		return false, err
 	}
