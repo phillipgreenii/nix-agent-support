@@ -10,15 +10,26 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// liveSizeStore builds a store the size of the live one (about 2,700
-// entities, 100 MB of facts, 40,000 change_log rows) with an interpretation
-// row per entity, then returns a second handle on the same file whose driver
-// connection counts statements and bytes read.
+// Fixture size of the cost tests. The facts alone (300 x 37,000 bytes, about
+// 11 MB) are far above the 4 MB a snapshot compute may read, so a compute that
+// reads facts fails the byte bound; the statement bounds are constants. The
+// size is deliberately not the live store's (about 2,700 entities, 100 MB):
+// the per-entity interpretation writes of a live-size fixture took minutes on
+// a loaded host under -race and proved nothing more.
+const (
+	costEntities   = 300
+	costFactsBytes = 37000
+	costChangeRows = 4000
+)
+
+// liveSizeStore builds a store of costEntities entities with a fixture facts
+// size and an interpretation row per entity, then returns a second handle on
+// the same file whose driver connection counts statements and bytes read.
 func liveSizeStore(t *testing.T) (*store.Store, *store.QueryCounter) {
 	t.Helper()
 	base := store.OpenForTest(t)
-	base.SeedLiveSizeForTest(t, 2700, 37000, 40000)
-	for i := 1; i <= 2700; i++ {
+	base.SeedLiveSizeForTest(t, costEntities, costFactsBytes, costChangeRows)
+	for i := 1; i <= costEntities; i++ {
 		typ := "issue"
 		if i%4 == 0 {
 			typ = "pr"
@@ -59,7 +70,7 @@ func TestMetricsScrapePerformsZeroDatabaseQueries(t *testing.T) {
 }
 
 // One snapshot compute on the live-size fixture reads no facts bytes (the
-// facts are 100 MB; everything the compute reads is small) and is fast on a
+// facts are 11 MB; everything the compute reads is small) and is fast on a
 // warm cache. The focus families are deliberately left out: focus.ComputeHealth
 // is a separate, already-cached computation that ranks every entity from its
 // facts, so it is outside this change.
@@ -81,7 +92,7 @@ func TestSnapshotComputeOnLiveSizeFixtureReadsNoFacts(t *testing.T) {
 	d := time.Since(start)
 	t.Logf("snapshot compute: %v, %d queries, %d bytes", d, cnt.Queries()-q0, cnt.Bytes()-b0)
 	if got := cnt.Bytes() - b0; got > 4<<20 {
-		t.Fatalf("compute read %d bytes; facts (100 MB) must not be read", got)
+		t.Fatalf("compute read %d bytes; facts (11 MB) must not be read", got)
 	}
 	// The criterion is 100 ms on a warm cache (measured about 120 ms on a host
 	// at load 50, without -race). A wall-clock bound would fail on a loaded host
