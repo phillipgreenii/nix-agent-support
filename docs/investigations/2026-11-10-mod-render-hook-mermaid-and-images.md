@@ -82,6 +82,28 @@ Further observations:
   (**docs only**: the tmux behaviour; kitty Unicode placeholders are the documented way to make
   placement follow text).
 
+### The engine leg (verified live, 2026-11-14)
+
+Setup: a throwaway mod (not a copy of pgd: a one-hook module with the same registration shape, so
+pgd's many components could not interfere) loaded with `claude --plugin-dir <scratch>/mod
+--setting-sources local --strict-mcp-config --model haiku` in a fresh scratch directory, in an
+interactive Claude Code 2.1.318 session inside a detached tmux 3.7b pane on a private socket with
+`allow-passthrough on`, and a pty client recording the bytes tmux sent to the outer terminal. The
+mod's `AssistantMessage` render hook appended `ESC P tmux; ESC ESC _ G ... ESC ESC \ ESC \` (the
+wrapped kitty form, 1x1 PNG) to `e.props.text`. One real haiku turn.
+
+- Result: **the engine refuses it**. The transcript shows the original message unchanged plus the
+  engine notice `spikemod: ui.render hook skipped: threw spikemod: next() passed an argument with a
+props.text with a control character (an escape sequence the terminal would...`. A hook cannot
+  pass a graphics sequence through `props.text`: the engine validates the string and drops the
+  hook's output for that draw.
+- The recorded client byte stream held no `_Ga=` and no `iVBORw0`, and neither the pane text nor the
+  client stream held the marker words placed around the sequence: nothing was forwarded, nothing was
+  mangled, no stray characters appeared (the only extra output is the one-line engine notice).
+- Consequence: route 1 through `props.text` is closed by the engine itself, independent of
+  Ghostty. Only a different channel (an engine image/raw component, which the shipped typings do not
+  have) could change that. Scroll and resize behaviour is moot.
+
 ### The Ghostty leg (not observed)
 
 Whether Ghostty draws a kitty image here, whether it accepts the iTerm2 sequence at all, whether cmux
@@ -157,9 +179,17 @@ definition so it cannot disagree with the protected-span pass about where a fenc
 At string level an unterminated fence is "protected to end of text", so a link rule never rewrites the
 growing fence. A mermaid claimer MUST therefore require a CLOSED fence before it replaces anything;
 otherwise a half-written diagram would be replaced by a partial or invalid render on every token and
-flash garbage. Until the closing line arrives, the source text shows as written. Whether the engine
-calls the render hook with partial text mid-stream, and how often, is **not observed** (the string
-level behaviour above is verified live; the engine behaviour is not).
+flash garbage. Until the closing line arrives, the source text shows as written. Engine behaviour
+(**verified live**, 2026-11-14, same scratch setup as "The engine leg", a hook that wrote one file per
+call recording timestamp, text length, open-fence flag and the last 20 characters): one haiku turn
+asking for a long reply (eight paragraphs and a mermaid fence, 3734 characters) produced exactly
+**2 `AssistantMessage` render-hook calls for the message, 0 carrying partial text**: both calls
+carried the complete final text (length 3734, fence closed), 39 ms apart. An earlier shorter turn
+(1311 characters, a fence included) also gave 2 calls, both with the full text, 66 ms apart. So the
+streaming text is not drawn through this component: the hook sees only the finished message, and a
+half-written fence is never presented to it. The closed-fence requirement stays as a safeguard but
+no mid-stream flashing was observed. Limit: two turns, one model, a reply that took a few seconds;
+a much longer or tool-interleaved message was not measured.
 
 ## Recommendation
 
