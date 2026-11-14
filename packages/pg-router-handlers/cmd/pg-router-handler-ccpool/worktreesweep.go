@@ -317,9 +317,22 @@ func worktreeHeldByRow(sessions []ccpool.Session, c leakedWorktree) bool {
 // reclaimLeakedWorktree re-checks c under the exclusive per-bead lock and
 // removes it (worktree, then anchor branch) when every guard holds. The second
 // result reports whether it spent git work (status / commit count) on c, which
-// is what the examined cap counts; the third that the keep cache answered, so
-// no guard beyond the cheap ones ran.
+// is what the examined cap counts; the third that the keep cache answered, which
+// is checked before the lock, so a cached candidate takes no lock, no re-list and
+// no process probe.
 func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, c leakedWorktree) (removed, didGit, cached bool) {
+	// Keep cache first: a worktree kept recently for uncommitted changes or
+	// unpushed commits is not re-examined until the TTL passes or its HEAD, index
+	// or branch tip changes. A hit never leads to a removal, so it answers before
+	// the lock, the re-list and the full-machine process probe, none of which could
+	// change the outcome. A candidate that misses runs every guard as before.
+	now := orphanNow(deps)
+	sig := keepSignature(c)
+	if keepCached(env.lockDir, c, sig, now) {
+		slog.Info("worktree sweep: kept recently (dirty or unpushed) and unchanged; skipping the re-examination", "bead", c.bead, "worktree", c.path)
+		return false, false, true
+	}
+
 	lock, err := sessionlock.TryLock(env.lockDir, sessionlock.WorktreeKey(c.bead))
 	if err != nil {
 		if errors.Is(err, sessionlock.ErrHeld) {
@@ -362,15 +375,6 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 		return false, didGit, false
 	}
 
-	// Keep cache: a worktree kept recently for uncommitted changes or unpushed
-	// commits is not re-examined until the TTL passes or its HEAD, index or branch
-	// tip changes. Everything above is cheap and has already run.
-	now := orphanNow(deps)
-	sig := keepSignature(c)
-	if keepCached(env.lockDir, c, sig, now) {
-		slog.Info("worktree sweep: kept recently (dirty or unpushed) and unchanged; skipping the re-examination", "bead", c.bead, "worktree", c.path)
-		return false, false, true
-	}
 	didGit = true
 
 	branch := "pg-router/" + c.bead

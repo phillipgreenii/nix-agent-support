@@ -11,7 +11,9 @@ import (
 
 	"github.com/phillipgreenii/x/gitclient"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
+	"github.com/phillipgreenii/pg-router-handlers/internal/sessionlock"
 )
 
 // Worktree keep cache, examined cap and sweep deadline (bead pg2-fx5x0l.2,
@@ -372,4 +374,86 @@ func TestKeepCache_otherBranchKeepIsCachedSoEveryCandidateIsReached(t *testing.T
 	for i, p := range paths {
 		h.wantKept(p, fmt.Sprintf("zr-%02d", i))
 	}
+}
+
+// listCountCC counts List calls on the harness session client.
+type listCountCC struct {
+	*orphanCC
+	lists atomic.Int64
+}
+
+func (c *listCountCC) List(ctx context.Context) ([]ccpool.Session, error) {
+	c.lists.Add(1)
+	return c.orphanCC.List(ctx)
+}
+
+// A cached candidate costs no per-candidate re-list and no per-candidate process
+// probe: a pass over it takes exactly the pass-level list and the pass-level
+// pre-filter probe, and nothing more.
+func TestKeepCache_cachedCandidateSkipsReListAndProbe(t *testing.T) {
+	h := newSweepHarness(t)
+	cc := &listCountCC{orphanCC: h.cc}
+	h.deps.CC = cc
+	var probes atomic.Int64
+	h.env.cwds = func(context.Context) ([]string, error) {
+		probes.Add(1)
+		return nil, nil
+	}
+	path := h.leak("zr-k")
+	h.makeDirty(path)
+
+	if got := h.sweep(); got != 0 {
+		t.Fatalf("pass 1 removed %d, want 0 (dirty)", got)
+	}
+	if cc.lists.Load() != 2 || probes.Load() != 2 {
+		t.Fatalf("an uncached candidate: lists=%d probes=%d, want 2 and 2 (pass-level plus one under the lock)", cc.lists.Load(), probes.Load())
+	}
+
+	cc.lists.Store(0)
+	probes.Store(0)
+	counts := &passCounts{Pass: passWorktree, Role: "a"}
+	ctx := withCounts(context.Background(), counts)
+	if got := sweepLeakedWorktrees(ctx, h.role, h.deps, h.env); got != 0 {
+		t.Fatalf("pass 2 removed %d, want 0", got)
+	}
+	if cc.lists.Load() != 1 || probes.Load() != 1 {
+		t.Errorf("a cached candidate: lists=%d probes=%d, want 1 and 1 (pass-level only, none per candidate)", cc.lists.Load(), probes.Load())
+	}
+	counts.finish(0)
+	if counts.Candidates != 1 || counts.Cached != 1 || counts.Examined != 0 || counts.Unexamined != 0 {
+		t.Errorf("counters candidates=%d cached=%d examined=%d unexamined=%d, want 1, 1, 0, 0",
+			counts.Candidates, counts.Cached, counts.Examined, counts.Unexamined)
+	}
+	if counts.OldestUnexaminedID != "" {
+		t.Errorf("a cached candidate must not be reported as the oldest unexamined, got %q", counts.OldestUnexaminedID)
+	}
+	h.wantKept(path, "zr-k")
+}
+
+// An uncached candidate still takes the lock, so a dispatch holding it keeps the
+// worktree and the candidate counts as examined, not cached.
+func TestKeepCache_uncachedCandidateStillHonoursTheDispatchLock(t *testing.T) {
+	h := newSweepHarness(t)
+	cc := &listCountCC{orphanCC: h.cc}
+	h.deps.CC = cc
+	path := h.leak("zr-k")
+	lock, err := sessionlock.TryLock(h.lockDir, sessionlock.WorktreeKey("zr-k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Unlock()
+
+	counts := &passCounts{Pass: passWorktree, Role: "a"}
+	ctx := withCounts(context.Background(), counts)
+	if got := sweepLeakedWorktrees(ctx, h.role, h.deps, h.env); got != 0 {
+		t.Fatalf("removed %d, want 0", got)
+	}
+	counts.finish(0)
+	if counts.Cached != 0 || counts.Examined != 1 {
+		t.Errorf("cached=%d examined=%d, want 0 and 1", counts.Cached, counts.Examined)
+	}
+	if cc.lists.Load() != 1 {
+		t.Errorf("lists=%d, want 1 (the lock is taken first and fails, so no re-list)", cc.lists.Load())
+	}
+	h.wantKept(path, "zr-k")
 }
