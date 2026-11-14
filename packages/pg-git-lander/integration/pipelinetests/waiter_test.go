@@ -1,4 +1,6 @@
-package pipeline_test
+//go:build integration
+
+package pipelinetests
 
 import (
 	"bytes"
