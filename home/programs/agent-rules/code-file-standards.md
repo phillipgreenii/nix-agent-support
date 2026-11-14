@@ -35,6 +35,10 @@ branch on it), it MUST be a distinct value >= 2, with 1 reserved for generic/une
 MUST be isolated; if they modify files directly, the test MUST generate the scenario in a temp
 directory.
 
+Go tests of time-dependent code MUST follow the time convention in `docs/go-testing-time.md` of
+`phillipg-nix-repo-base` (`testing/synctest` first, an injected clock only for persisted or
+cross-process time).
+
 ### Speed And Scope: What Counts As A Unit Test
 
 A unit test MUST need minimal setup and fixtures, MUST pass in any order, and MUST NOT depend on
