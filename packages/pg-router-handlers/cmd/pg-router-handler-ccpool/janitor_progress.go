@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"hash/fnv"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -45,6 +46,38 @@ type passCounts struct {
 	// OldestUnexaminedAgeSeconds is the age of the longest-waiting candidate this
 	// pass did not reach (worktree_sweep only; zero when it reached them all).
 	OldestUnexaminedAgeSeconds float64 `json:"oldest_unexamined_age_seconds"`
+	// OldestUnexaminedID is the id (the worktree's bead name) of that
+	// longest-waiting candidate, empty when the pass reached them all; the
+	// gauge carries its stable hash.
+	OldestUnexaminedID string `json:"oldest_unexamined_id,omitempty"`
+	// Pool is the role's pool key; the list numbers below belong to it.
+	Pool string `json:"pool,omitempty"`
+	// ListCalls, ListTimeouts and ListWallMS count the `ccpool list` calls this
+	// pass made, how many the per-call timeout killed, and their wall time.
+	ListCalls    int   `json:"list_calls"`
+	ListTimeouts int   `json:"list_timeouts"`
+	ListWallMS   int64 `json:"list_wall_ms"`
+}
+
+// listCall records one `ccpool list` call of d wall time; timedOut says the
+// per-call timeout killed it.
+func (c *passCounts) listCall(d time.Duration, timedOut bool) {
+	if c == nil {
+		return
+	}
+	c.ListCalls++
+	c.ListWallMS += d.Milliseconds()
+	if timedOut {
+		c.ListTimeouts++
+	}
+}
+
+// idHash is a stable numeric hash of a candidate id, small enough to be exact
+// as a gauge value.
+func idHash(id string) float64 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(id))
+	return float64(h.Sum32())
 }
 
 type countsKey struct{}
@@ -114,17 +147,20 @@ func (c *passCounts) finish(removed int) {
 func trackUnexamined(counts *passCounts, lockDir string, now time.Time, candidates []leakedWorktree, reached map[string]bool) {
 	counts.seen(len(candidates))
 	var oldest time.Duration
+	var oldestID string
 	for _, c := range candidates {
 		if reached[c.bead] {
 			clearFirstSeen(lockDir, c)
 			continue
 		}
-		if age := noteFirstSeen(lockDir, c, now); age > oldest {
-			oldest = age
+		age := noteFirstSeen(lockDir, c, now)
+		if age > oldest || oldestID == "" {
+			oldest, oldestID = age, c.bead
 		}
 	}
 	if counts != nil {
 		counts.OldestUnexaminedAgeSeconds = oldest.Seconds()
+		counts.OldestUnexaminedID = oldestID
 	}
 }
 

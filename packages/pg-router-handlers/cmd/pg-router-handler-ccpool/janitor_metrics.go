@@ -36,6 +36,13 @@ const (
 	gaugeJanitorUnexamined = "ccpool_janitor_unexamined"
 	gaugeJanitorPhase      = "ccpool_janitor_phase_seconds"
 	gaugeJanitorOldestAge  = "ccpool_janitor_oldest_unexamined_age_seconds"
+	// List-call gauges: calls and timeouts per pass and role, wall time per
+	// pass, role and pool, and a stable hash of the oldest unexamined candidate
+	// per pass and role (the janitor_run row carries the id itself).
+	gaugeJanitorListCalls    = "ccpool_janitor_list_calls"
+	gaugeJanitorListTimeouts = "ccpool_janitor_list_timeouts"
+	gaugeJanitorListSeconds  = "ccpool_janitor_list_seconds"
+	gaugeJanitorOldestHash   = "ccpool_janitor_oldest_unexamined_id_hash"
 
 	gaugeEmitTimeout  = 10 * time.Second
 	gaugeBatchTimeout = 30 * time.Second
@@ -173,6 +180,12 @@ func emitJanitorProgressGauges(ctx context.Context, emit gaugeEmitFn, counts []*
 			if ms != nil {
 				put(gaugeJanitorPhase, float64(*ms)/1000, map[string]string{"pass": c.Pass, "role": c.Role, "phase": phase})
 			}
+		}
+		put(gaugeJanitorListCalls, float64(c.ListCalls), l)
+		put(gaugeJanitorListTimeouts, float64(c.ListTimeouts), l)
+		put(gaugeJanitorListSeconds, float64(c.ListWallMS)/1000, map[string]string{"pass": c.Pass, "role": c.Role, "pool": c.Pool})
+		if c.OldestUnexaminedID != "" {
+			put(gaugeJanitorOldestHash, idHash(c.OldestUnexaminedID), l)
 		}
 		if c.OldestUnexaminedAgeSeconds > oldest[c.Pass] {
 			oldest[c.Pass] = c.OldestUnexaminedAgeSeconds

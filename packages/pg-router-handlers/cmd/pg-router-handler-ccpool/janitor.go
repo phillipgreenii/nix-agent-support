@@ -141,6 +141,12 @@ type janitorOptions struct {
 	roleFiles []string
 	deadline  time.Duration
 	dryRun    bool
+	// listDiag switches the bounded slow-list diagnostic (janitor_listdiag.go);
+	// listDiagAfter is its threshold and listDiagUntil its expiry (zero selects
+	// the built-in expiry).
+	listDiag      bool
+	listDiagAfter time.Duration
+	listDiagUntil string
 }
 
 // runJanitor implements the `janitor` subcommand: not part of the wire
@@ -157,10 +163,19 @@ func runJanitor(args []string) int {
 	fs.Var(&files, "role-file", "a ccpool role's rendered role file ({\"role\":{\"name\",\"config\"}}); repeatable, one per ccpool role")
 	fs.DurationVar(&opts.deadline, "deadline", defaultJanitorDeadline, "wall-clock bound of the whole run, shared out per role")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "list what each pass would reclaim; reclaim nothing, take no lock, record no event")
+	fs.BoolVar(&opts.listDiag, "list-diag", true, "sample the process tree when a ccpool list call is slow (bounded; stops at its expiry)")
+	fs.DurationVar(&opts.listDiagAfter, "list-diag-after", defaultListDiagThreshold, "how long a ccpool list call runs before it is sampled")
+	fs.StringVar(&opts.listDiagUntil, "list-diag-until", "", "RFC 3339 time after which the list diagnostic stops (default "+defaultListDiagExpiry.Format(time.RFC3339)+")")
 	if exit, done := parseFlagsNoStdin("janitor", fs, args); done {
 		return exit
 	}
 	opts.roleFiles = files
+	if opts.listDiagUntil != "" {
+		if _, err := time.Parse(time.RFC3339, opts.listDiagUntil); err != nil {
+			fmt.Fprintln(os.Stderr, "janitor: --list-diag-until must be an RFC 3339 time:", err)
+			return conformance.ExitUsage
+		}
+	}
 	if opts.cfgPath == "" {
 		fmt.Fprintln(os.Stderr, "janitor: --config (or "+rolefile.EnvConfig+") is required")
 		return conformance.ExitUsage
@@ -254,6 +269,35 @@ type janitorRun struct {
 	// counts is each role-level pass's progress counters, in run order
 	// (INV-CCH-41, design D2).
 	counts []*passCounts
+	// pool is the pool key of the role whose passes are running, stamped on
+	// their counters so the list numbers can be read per pool.
+	pool string
+}
+
+// listStats are the list-call numbers of a run or of one pool.
+type listStats struct {
+	Calls    int   `json:"calls"`
+	Timeouts int   `json:"timeouts"`
+	WallMS   int64 `json:"wall_ms"`
+}
+
+// listTotals sums the counters' list numbers over the run and per pool.
+func listTotals(counts []*passCounts) (total listStats, byPool map[string]*listStats) {
+	byPool = map[string]*listStats{}
+	for _, c := range counts {
+		total.Calls += c.ListCalls
+		total.Timeouts += c.ListTimeouts
+		total.WallMS += c.ListWallMS
+		st := byPool[c.Pool]
+		if st == nil {
+			st = &listStats{}
+			byPool[c.Pool] = st
+		}
+		st.Calls += c.ListCalls
+		st.Timeouts += c.ListTimeouts
+		st.WallMS += c.ListWallMS
+	}
+	return total, byPool
 }
 
 // runPass runs one pass under ctx, timing it and recording its count and error
@@ -264,7 +308,7 @@ func (j *janitorRun) runPass(ctx context.Context, name, role string, deps execut
 		st = &passStat{}
 		j.stats[name] = st
 	}
-	counts := &passCounts{Pass: name, Role: role}
+	counts := &passCounts{Pass: name, Role: role, Pool: j.pool}
 	start := time.Now()
 	n, err := func() (n int, err error) {
 		defer func() {
@@ -338,6 +382,15 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	}
 	defer lock.Unlock()
 
+	// Count every session list of the role passes and, while the bounded
+	// diagnostic is on, sample a slow one.
+	diag := newListDiag(opts, stateDir, log)
+	for i := range jroles {
+		if jroles[i].deps.CC != nil {
+			jroles[i].deps.CC = &listObserver{Runner: jroles[i].deps.CC, diag: diag}
+		}
+	}
+
 	startIdx := nextRotation(stateDir, len(jroles))
 	run := &janitorRun{passes: passes, stats: map[string]*passStat{}}
 	runCtx, cancel := context.WithTimeout(ctx, opts.deadline)
@@ -359,6 +412,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		share := time.Until(deadlineOf(runCtx)) / time.Duration(len(jroles)-i)
 		rctx, rcancel := context.WithTimeout(runCtx, share)
 		name := jr.role.Name
+		run.pool = jr.pool
 		// Pool-level passes: once per distinct pool however many roles share it.
 		if !poolDone[jr.pool] {
 			poolDone[jr.pool] = true
@@ -392,7 +446,12 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	for _, st := range run.stats {
 		reclaimed += st.Reclaimed
 	}
+	listTotal, listByPool := listTotals(run.counts)
 	fields := map[string]any{
+		"list_calls":    listTotal.Calls,
+		"list_timeouts": listTotal.Timeouts,
+		"list_wall_ms":  listTotal.WallMS,
+		"list_by_pool":  listByPool,
 		"outcome":       outcome,
 		"elapsed_ms":    elapsed.Milliseconds(),
 		"deadline_ms":   opts.deadline.Milliseconds(),

@@ -20,6 +20,17 @@ import (
 // (the interrupt could not be confirmed — the turn may still be running).
 var ErrCancelUnconfirmed = errors.New("ccpool cancel unconfirmed")
 
+// ErrCallTimeout is matched (errors.Is) by the error of a ccpool call the
+// per-call timeout killed, so a caller can count timeouts without parsing text.
+var ErrCallTimeout = errors.New("ccpool call timed out")
+
+// callTimeoutError keeps the original error text and adds ErrCallTimeout.
+type callTimeoutError struct{ err error }
+
+func (e *callTimeoutError) Error() string        { return e.err.Error() }
+func (e *callTimeoutError) Unwrap() error        { return e.err }
+func (e *callTimeoutError) Is(target error) bool { return target == ErrCallTimeout }
+
 // exitCoder is satisfied by *exec.ExitError (and test fakes).
 type exitCoder interface{ ExitCode() int }
 
@@ -164,7 +175,7 @@ func (c *CLIRunner) ccpool(ctx context.Context, timeout time.Duration, args ...s
 	// failure; name the timeout rather than leak a bare "context deadline
 	// exceeded". tctx (not the parent ctx) carries the WithTimeout deadline.
 	if errors.Is(tctx.Err(), context.DeadlineExceeded) {
-		return stdout, fmt.Errorf("ccpool %s timed out after %s: %w", argSummary(args), timeout, err)
+		return stdout, fmt.Errorf("ccpool %s timed out after %s: %w", argSummary(args), timeout, &callTimeoutError{err})
 	}
 	if se := bytes.TrimSpace(stderr); len(se) > 0 {
 		return stdout, fmt.Errorf("ccpool %s: %w (%s)", argSummary(args), err, se)

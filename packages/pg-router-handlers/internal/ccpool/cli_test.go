@@ -674,6 +674,13 @@ func TestCCpool_timeoutNamesTheTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "timed out after") {
 		t.Fatalf("timeout should be named in the error, got %v", err)
 	}
+	if !errors.Is(err, ErrCallTimeout) {
+		t.Fatalf("a killed call must match ErrCallTimeout, got %v", err)
+	}
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) { return nil, nil, errors.New("boom") }
+	if _, err := cli.ccpool(context.Background(), time.Second, "list"); err == nil || errors.Is(err, ErrCallTimeout) {
+		t.Fatalf("an ordinary failure must not match ErrCallTimeout, got %v", err)
+	}
 }
 
 // review follow-up: long positionals (the full reply prompt) must be elided in
