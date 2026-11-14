@@ -1577,8 +1577,12 @@ changes a core gate or `INV-LIFE-2`.
     candidate worktree, beside the keep cache and shared by all roles, forgotten when any pass
     reaches the candidate or stops seeing it as one, and publish the age of the longest-waiting
     candidate it did not reach (`ccpool_janitor_oldest_unexamined_age_seconds` by pass; reported
-    only for a pass that ran). A fourth alert fires when that age stays above six hours, whatever
-    the cause of the pass not advancing.
+    only for a pass that ran). A fourth alert fires when that age stays above two hours, whatever
+    the cause of the pass not advancing. A fifth alert fires when, for one pass and role, at least
+    six runs in a row over two hours saw candidates and examined or skipped none of them, and a
+    sixth when more than a quarter of the sweeps over six hours spent 55 seconds or more in the
+    list phase (the session list is killed at 60 seconds). Their thresholds and the steps to take
+    are in `docs/runbooks/ccpool-janitor-progress-alerts.md` of the repository.
   - **Self-description.** The janitor also publishes information about the handler's own system,
     through the same gauge emitter and best effort. (1) **Worktree census.** After a run's outcome,
     duration and heartbeat gauges are settled, the janitor MUST scan the handler's worktree

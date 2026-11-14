@@ -2047,8 +2047,13 @@ groups:
                     params: [0]
 
       # pg-router-ccpool-janitor-stagnant: a candidate the janitor has seen but not reached
-      # for more than 6 hours (36 intervals), whatever the cause (a role timer that keeps
-      # cutting the pass, a per-run examination cap, a slow scan). The handler keeps one
+      # for more than 2 hours (12 intervals), whatever the cause (a role timer that keeps
+      # cutting the pass, a per-run examination cap, a slow scan). The bound was 6 hours and
+      # never fired; it is 2 hours from the measurements of 2026-11-13 (janitor_run rows, 7
+      # days): healthy peak of the age 4550 s (1.3 h) in the last 24 h, and 13904 s (3.86 h)
+      # only in the stall of 2026-11-11T23:36Z to 2026-11-12T03:25Z, so 7200 s sits above the
+      # healthy peak with margin and fires inside the stall (the age passes 7200 s at
+      # about 01:33Z, the alert 30 minutes later). The handler keeps one
       # first-seen time per worktree and publishes the age of the longest-waiting one
       # (ccpool_janitor_oldest_unexamined_age_seconds{pass}); it reports the gauge only for
       # a pass that ran, so a janitor that stops running is the stale rule's business, and a
@@ -2067,8 +2072,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "the ccpool handler's janitor has left a candidate unexamined for more than 6 hours"
-          description: "ccpool_janitor_oldest_unexamined_age_seconds is above 21600 (6 hours) for a pass: some candidate, for example a leaked worktree, was seen and has not been examined since, so cleanup is not reaching it. First check the counters of the janitor_run rows in the handler's events.jsonl (candidates, examined, cached, unexamined per pass and role, and list_ms, probe_ms, scan_ms for worktree_sweep) to see whether runs are cut by a timer, held to the examination cap or slow in one phase, then the ccpool_janitor_unexamined and ccpool_janitor_phase_seconds gauges by pass and role, then run the janitor by hand."
+          summary: "the ccpool handler's janitor has left a candidate unexamined for more than 2 hours"
+          description: "ccpool_janitor_oldest_unexamined_age_seconds is above 7200 (2 hours) for a pass: some candidate, for example a leaked worktree, was seen and has not been examined since, so cleanup is not reaching it. First check the counters of the janitor_run rows in the handler's events.jsonl (candidates, examined, cached, unexamined per pass and role, and list_ms, probe_ms, scan_ms for worktree_sweep) to see whether runs are cut by a timer, held to the examination cap or slow in one phase, then the ccpool_janitor_unexamined and ccpool_janitor_phase_seconds gauges by pass and role, then run the janitor by hand."
         data:
           - refId: A
             relativeTimeRange:
@@ -2079,7 +2084,121 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max by (pass) (last_over_time(ccpool_janitor_oldest_unexamined_age_seconds[35m])) > 21600
+              expr: max by (pass) (last_over_time(ccpool_janitor_oldest_unexamined_age_seconds[35m])) > 7200
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-ccpool-janitor-no-progress: a pass that SEES candidates but, for at least 6
+      # runs in a row, neither examines nor skips one as cached ("running but making no
+      # progress"). Read from the progress gauges the handler pushes each run per pass and
+      # role: over the last 2 hours and for the same pass and role the rule needs (1) at
+      # least 6 samples (so at least 6 runs, whatever their spacing), (2) candidates above 0
+      # in every one, and (3) examined and cached at 0 in every one. Counting samples rather
+      # than minutes matters: a run cut by its deadline comes round only every 19 minutes or
+      # so, so a short clock window sized for 10 minute runs would never hold 6 samples
+      # during the very stall it should catch. Data behind the 6 runs and 2 hours
+      # (janitor_run rows, measured 2026-11-13, worktree_sweep): over 7 days the longest
+      # healthy stretch of consecutive runs reaching nothing was 5, while the stall of
+      # 2026-11-11T23:36Z to 2026-11-12T03:25Z went 16 runs (6 by 01:13Z), so 6 sits just
+      # above the healthy maximum and well inside the stall. A role that did not run in a
+      # run has no sample for it and cannot raise this alert (the stale and deadline rules
+      # watch that). `for: 10m` only absorbs an evaluation edge. First check: the janitor_run
+      # rows in the handler's events.jsonl for the pass and role, then the runbook
+      # docs/runbooks/ccpool-janitor-progress-alerts.md. Annotations are STATIC.
+      - uid: pg-router-ccpool-janitor-no-progress
+        title: ccpool janitor sees candidates but reaches none
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a ccpool janitor pass has seen candidates but examined none for at least 6 runs"
+          description: "For a pass and role (labels pass, role), every sample of the last 2 hours, at least 6 runs, shows ccpool_janitor_candidates above 0 while ccpool_janitor_examined and ccpool_janitor_cached stay 0: the janitor runs but reaches nothing, so leaked worktrees or sessions of that role pile up. The threshold comes from the 2026-11-13 measurement: healthy runs never went more than 5 in a row without reaching anything, the 2026-11-11 stall went 16. First check the janitor_run rows in the handler's events.jsonl for that pass and role (list_ms, probe_ms, scan_ms of worktree_sweep, whether the run outcome is deadline), then the ccpool_janitor_phase_seconds gauge, then run the janitor by hand; the steps are in docs/runbooks/ccpool-janitor-progress-alerts.md."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (min_over_time(ccpool_janitor_candidates[2h]) > 0) and ((max_over_time(ccpool_janitor_examined[2h]) + max_over_time(ccpool_janitor_cached[2h])) == 0) and (count_over_time(ccpool_janitor_candidates[2h]) >= 6)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # pg-router-ccpool-janitor-list-timeout: the worktree sweep's first phase lists the
+      # worktree directory and then the pool's sessions (`ccpool list --all --json`, killed
+      # at 60 s). A sustained share of sweeps whose list phase reached 55 s means the list is
+      # hanging (the kill is at 60 s, so 55 s counts a list that only just finished too).
+      # This rule is built on the existing ccpool_janitor_phase_seconds{phase="list"} gauge,
+      # NOT on a per-pool list timing metric: that metric (filed with the hang-capture work)
+      # does not exist yet, so replace the expression when it lands. Threshold from the
+      # janitor_run rows measured 2026-11-13 (7 days): 132 of 1557 sweeps that recorded a list
+      # phase (8.5%) took 55 s or more, the same order as the 9.4% of 1398 list calls that hit
+      # the kill and the 4.9% seen even at load under 20. Over 240 six-hour windows of that
+      # data the share passed 20% in 17 windows (7%), 25% in 7 (3%) and 30% in 4, so 25%
+      # (three times the baseline) fires on a clearly worse than usual spell and not on the
+      # known background rate. A 6 hour window holds about 140 samples (4 pools, 10 minute
+      # runs); at least 24 are required so a quiet host cannot fire on a handful. `for: 1h`
+      # asks for the spell to persist. The subquery steps every minute so each pushed sample
+      # counts for the same number of steps. First check: pg-router-ccpool-janitor-no-progress
+      # and -stagnant, then docs/runbooks/ccpool-janitor-progress-alerts.md.
+      - uid: pg-router-ccpool-janitor-list-timeout
+        title: ccpool janitor session list keeps timing out
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "more than 25% of the ccpool janitor's worktree sweeps spent 55 seconds or more listing, over 6 hours"
+          description: "ccpool_janitor_phase_seconds (pass worktree_sweep, phase list) was 55 seconds or more in over 25% of the samples of the last 6 hours (at least 24 samples): the session list is hitting its 60 second kill, the usual baseline being about 8.5% of sweeps. A killed list makes the sweep act on nothing for that role in that run, so candidates wait longer. First check host load and which child is stuck (tmux, the ccpool sqlite store or git on a live checkout) by running `ccpool --pool <pool> list --all --json` by hand and timing it, then the steps in docs/runbooks/ccpool-janitor-progress-alerts.md."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (avg by (pass) (avg_over_time((ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"} >= bool 55)[6h:1m])) > 0.25) and on (pass) (sum by (pass) (count_over_time(ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"}[6h])) >= 24)
           - refId: B
             datasourceUid: __expr__
             model:

@@ -1,0 +1,536 @@
+# Replay of recorded ccpool janitor data through the progress alerts. Run by the flake check
+# test-pg-router-alert-rules (check-alert-rules.sh), which wraps each rule's refId A as an
+# `alert:` rule.
+#
+# The series below are the janitor_run rows of the handler's events.jsonl (counters per pass and
+# role, the per-pass oldest unexamined age and the worktree_sweep list phase in seconds),
+# one gauge sample per run, placed on a 5 minute grid by run time (`_` = no run in that slot;
+# a run that did not reach a role leaves no sample for it, as in production). Only pass/role
+# pairs that ever had candidates are kept. Regenerate with jq over the handler's events.jsonl
+# (`select(.kind == "janitor_run")`, fields counters[].{pass,role,candidates,examined,cached,
+# list_ms,oldest_unexamined_age_seconds}).
+#
+# Expectations, from the measurement of 2026-11-13: the stall of 2026-11-11T23:36Z to
+# 2026-11-12T03:25Z must fire the no-progress alert (for drain-zr, whose six runs without
+# reaching anything are complete by 01:13Z) and the stagnant alert (age over 2 hours); the 24
+# hours ending 2026-11-13T14:32Z must fire none of the three janitor progress alerts.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: replay of the 2026-11-11T22:30Z to 2026-11-12T05:00Z stall fires no-progress and stagnant
+    interval: 5m
+    input_series:
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="drain-pg2"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="feedback"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="pg2-escalation-triager"}
+        values: "_x9 0 _x3 0 _x3 0 _x2 0 _x19 0 _x4 0 _x2 0 _x3 0 _x16 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="pg2-split-triager"}
+        values: "_x2 0 _x21 0 _x30 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="review"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="worker"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="zr-escalation-triager"}
+        values: "_x4 0 _ 0 _x21 0 _x3 0 _x3 0 _x22 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="orphan_reconcile",role="feedback"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="orphan_reconcile",role="pg2-escalation-triager"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="orphan_reconcile",role="review"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="drain-zr"}
+        values: "_x2 5 _ 5 _ 5 _x2 5 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 4 _x2 5 _x2 5 _x3 6 _x2 2 _x2 6"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="feedback"}
+        values: "_x2 5 _ 5 _ 5 _x2 5 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 5 _x2 5 _x2 6 _x3 6 _x2 6 _x2 6"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="review"}
+        values: "_x2 1 _ 4 _ 5 _x2 5 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 5 _x2 6 _x3 6 _x2 6 _x2 6"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="worker"}
+        values: "_x2 5 _ 5 _ 5 _x2 5 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 5 _x2 6 _x3 6 _x2 6 _x2 6"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="drain-pg2"}
+        values: "_x2 22 _ 22 _ 22 _x2 24 _x3 23 _x3 22 _x2 23 _x3 23 _x3 23 _x3 23 _x3 23 _x3 22 _x4 22 _x2 21 _x3 21 _x2 21 _x3 22 _x2 23 _x2 22 _x3 22 _x2 22 _x2 22"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="feedback"}
+        values: "_x2 0 _ 0 _ 0 _x2 1 _x3 1 _x3 1 _x2 1 _x3 1 _x3 1 _x3 2 _x3 2 _x3 2 _x4 3 _x2 3 _x3 4 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="pg2-escalation-triager"}
+        values: "_x9 1 _x3 1 _x3 3 _x2 2 _x19 5 _x4 5 _x2 5 _x3 5 _x16 5 _x2 5 _x2 5"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="pg2-split-triager"}
+        values: "_x2 0 _x21 3 _x30 5"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="review"}
+        values: "_x2 2 _ 2 _ 2 _x2 2 _x3 2 _x3 3 _x2 3 _x3 2 _x3 2 _x3 2 _x3 2 _x3 2 _x4 2 _x2 2 _x3 2 _x2 2 _x3 2 _x2 2 _x2 3 _x3 3 _x2 4 _x2 4"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="worker"}
+        values: "_x2 16 _ 16 _ 16 _x2 17 _x3 17 _x3 16 _x2 16 _x3 17 _x3 17 _x3 16 _x3 16 _x3 15 _x4 15 _x2 15 _x3 15 _x2 15 _x3 15 _x2 16 _x2 17 _x3 17 _x2 17 _x2 17"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="zr-escalation-triager"}
+        values: "_x4 0 _ 0 _x21 3 _x3 5 _x3 5 _x22 5 _x2 5 _x2 5"
+      - series: ccpool_janitor_candidates{pass="orphan_reconcile",role="feedback"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 1 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_candidates{pass="orphan_reconcile",role="pg2-escalation-triager"}
+        values: "_x2 0 _ 0 _ 0 _x2 1 _x3 1 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_candidates{pass="orphan_reconcile",role="review"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 1 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="drain-zr"}
+        values: "_x2 10 _ 10 _ 10 _x2 9 _x3 11 _x3 10 _x2 12 _x3 10 _x3 11 _x3 10 _x3 10 _x3 13 _x4 13 _x2 12 _x3 12 _x2 12 _x3 10 _x2 10 _x2 11 _x3 11 _x2 11 _x2 11"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="feedback"}
+        values: "_x2 10 _ 10 _ 10 _x2 10 _x3 11 _x3 11 _x2 12 _x3 10 _x3 11 _x3 10 _x3 10 _x3 12 _x4 0 _x2 12 _x3 11 _x2 12 _x3 10 _x2 10 _x2 11 _x3 11 _x2 11 _x2 11"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="review"}
+        values: "_x2 10 _ 10 _ 10 _x2 10 _x3 11 _x3 0 _x2 12 _x3 11 _x3 11 _x3 10 _x3 10 _x3 0 _x4 0 _x2 12 _x3 12 _x2 12 _x3 12 _x2 10 _x2 11 _x3 11 _x2 11 _x2 11"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="worker"}
+        values: "_x2 10 _ 10 _ 10 _x2 10 _x3 11 _x3 11 _x2 11 _x3 10 _x3 11 _x3 10 _x3 10 _x3 0 _x4 0 _x2 12 _x3 12 _x2 0 _x3 10 _x2 10 _x2 11 _x3 11 _x2 11 _x2 11"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="drain-pg2"}
+        values: "_x2 22 _ 22 _ 22 _x2 24 _x3 23 _x3 22 _x2 23 _x3 23 _x3 23 _x3 23 _x3 23 _x3 22 _x4 22 _x2 21 _x3 21 _x2 21 _x3 22 _x2 23 _x2 22 _x3 22 _x2 22 _x2 22"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="feedback"}
+        values: "_x2 0 _ 0 _ 0 _x2 1 _x3 1 _x3 1 _x2 1 _x3 1 _x3 1 _x3 2 _x3 2 _x3 2 _x4 3 _x2 3 _x3 4 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="pg2-escalation-triager"}
+        values: "_x9 1 _x3 1 _x3 3 _x2 2 _x19 5 _x4 5 _x2 5 _x3 5 _x16 5 _x2 5 _x2 5"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="pg2-split-triager"}
+        values: "_x2 0 _x21 3 _x30 5"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="review"}
+        values: "_x2 2 _ 2 _ 2 _x2 2 _x3 2 _x3 3 _x2 3 _x3 2 _x3 2 _x3 2 _x3 2 _x3 2 _x4 2 _x2 2 _x3 2 _x2 2 _x3 2 _x2 2 _x2 3 _x3 3 _x2 4 _x2 4"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="worker"}
+        values: "_x2 16 _ 16 _ 16 _x2 17 _x3 17 _x3 16 _x2 16 _x3 17 _x3 17 _x3 16 _x3 16 _x3 15 _x4 15 _x2 15 _x3 15 _x2 15 _x3 15 _x2 16 _x2 17 _x3 17 _x2 17 _x2 17"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="zr-escalation-triager"}
+        values: "_x4 0 _ 0 _x21 3 _x3 5 _x3 5 _x22 5 _x2 5 _x2 5"
+      - series: ccpool_janitor_examined{pass="orphan_reconcile",role="feedback"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 1 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_examined{pass="orphan_reconcile",role="pg2-escalation-triager"}
+        values: "_x2 0 _ 0 _ 0 _x2 1 _x3 1 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_examined{pass="orphan_reconcile",role="review"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 1 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="drain-zr"}
+        values: "_x2 5 _ 5 _ 5 _x2 4 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 6 _x2 5 _x2 6 _x3 5 _x2 9 _x2 5"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="feedback"}
+        values: "_x2 5 _ 5 _ 5 _x2 5 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 1 _x2 0 _x3 5 _x2 5 _x2 5 _x3 5 _x2 5 _x2 5"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="review"}
+        values: "_x2 9 _ 6 _ 5 _x2 5 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 5 _x2 5 _x3 5 _x2 5 _x2 5"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="worker"}
+        values: "_x2 5 _ 5 _ 5 _x2 5 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 5 _x2 5 _x2 5 _x3 5 _x2 5 _x2 5"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="closed_bead_reconcile"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="default_pool"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="orphan_reconcile"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x3 0 _x4 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="worktree_sweep"}
+        values: "_x2 0 _ 0 _ 0 _x2 0 _x3 235 _x3 1362 _x2 2518 _x3 3700 _x3 4818 _x3 6024 _x3 7236 _x3 8087 _x4 9376 _x2 10823 _x3 12001 _x2 13027 _x3 13904 _x2 0 _x2 0 _x3 0 _x2 0 _x2 0"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="drain-zr",phase="list"}
+        values: "_x2 0.021 _ 0.02 _ 0.04 _x2 0.094 _x3 59.305 _x3 60.013 _x2 60.099 _x3 60.13 _x3 45.137 _x3 59.202 _x3 60.061 _x3 58.858 _x4 51.348 _x2 60.139 _x3 60.23 _x2 57.027 _x3 0.148 _x2 0.12 _x2 0.089 _x3 0.333 _x2 0.063 _x2 0.085"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="feedback",phase="list"}
+        values: "_x2 0.08 _ 0.022 _ 0.026 _x2 0.147 _x3 59.01 _x3 56.639 _x2 60.131 _x3 60.073 _x3 42.877 _x3 51.423 _x3 60.037 _x3 49.594 _x7 55.912 _x3 31.866 _x2 60.035 _x3 0.146 _x2 0.181 _x2 0.12 _x3 0.13 _x2 0.617 _x2 0.092"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="review",phase="list"}
+        values: "_x2 0.105 _ 0.053 _ 0.161 _x2 0.164 _x3 60.06 _x6 60.037 _x3 60.053 _x3 37.176 _x3 60.038 _x3 60.028 _x11 60.024 _x3 60.543 _x2 25.849 _x3 32.532 _x2 0.589 _x2 0.164 _x3 0.387 _x2 0.202 _x2 0.169"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="worker",phase="list"}
+        values: "_x2 0.132 _ 0.098 _ 0.117 _x2 0.269 _x3 60.021 _x3 31.475 _x2 60.212 _x3 57.728 _x3 18.776 _x3 52.672 _x3 60.16 _x11 60.129 _x3 60.077 _x6 5.228 _x2 1.157 _x2 0.318 _x3 1.277 _x2 0.294 _x2 0.239"
+    alert_rule_test:
+      # 01:00Z: no role has six runs without progress inside the last 2 hours yet.
+      - eval_time: 2h30m
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      # 03:00Z: inside the stall.
+      - eval_time: 4h30m
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pass: worktree_sweep
+              role: drain-zr
+      - eval_time: 4h30m
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pass: worktree_sweep
+      # 05:00Z: runs reach candidates again from 03:25Z, so the 2 hour window holds progress.
+      - eval_time: 6h30m
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 6h30m
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+
+  - name: replay of the 24 hours ending 2026-11-13T14:32Z (healthy janitor) fires none of the progress alerts
+    interval: 5m
+    input_series:
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="drain-pg2"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="feedback"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="pg2-escalation-triager"}
+        values: "_x10 0 _x3 0 _x2 0 _x4 0 _x15 0 _x2 0 _x2 0 _x18 0 _x3 0 _x2 0 _x3 0 _x17 0 _x3 0 _x3 0 _x2 0 _x15 0 _x2 0 _x2 0 _x2 0 _x14 0 0 _x2 0 _x2 0 _x16 0 _x3 0 _x3 0 _x2 0 _x13 0 _x2 0 _x2 0 _x2 0 _x12 0 _x2 0 _x2 0 _ 0 _x16 0 _x2 0 _ 0 _ 0 _x21 0 _x3 0 _x2 0 _x3 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="pg2-split-triager"}
+        values: "_x26 0 _x21 0 _x29 0 _x28 0 _x23 0 _x21 0 _x27 0 _x22 0 _x20 0 _x33 0 _x23 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="review"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="worker"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="closed_bead_reconcile",role="zr-escalation-triager"}
+        values: "_ 0 _x3 0 _x25 0 _x3 0 _x16 0 _x3 0 _x3 0 _x20 0 _x3 0 _x3 0 _x20 0 _x2 0 _x2 0 _x17 0 _x2 0 _x2 0 _x16 0 _x2 0 _x3 0 _x19 0 _ 0 _x2 0 _x16 0 _x2 0 _x2 0 _x15 0 _x6 0 _ 0 _x23 0 _ 0 _x2 0 _x19 0"
+      - series: ccpool_janitor_cached{pass="orphan_reconcile",role="feedback"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="orphan_reconcile",role="pg2-escalation-triager"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="drain-zr"}
+        values: "_ 3 _x3 1 _x4 4 _x3 2 _x2 5 _x4 0 _x3 2 _x4 0 _x3 3 _x2 0 _x2 4 _x2 5 _x3 5 _x3 5 _x3 3 _x3 0 _x2 3 _x3 5 _x2 5 _x3 3 _x3 3 _x2 5 _x3 5 _x3 0 _x2 2 _x3 5 _x3 3 _x2 5 _x3 5 _x2 5 _x2 5 _x2 5 _x2 1 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 4 _x2 4 _x2 3 3 _x2 5 _x2 5 _x2 5 _x3 2 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 6 _x2 3 _x2 6 _ 5 _x2 6 _x2 6 _x2 6 _x2 4 _x2 6 _x2 6 _ 6 _x2 6 _x2 6 _ 6 _x2 6 _x2 6 _ 6 _x2 6 _x2 6 _x6 6 _ 2 _ 6 _x2 4 _ 6 _ 6 _x12 6 _ 6 _ 6 _x2 6 _ 6 _x3 0 _x2 6 _x3 6 _x3 6 _x2 6"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="feedback"}
+        values: "_ 4 _x3 5 _x4 5 _x3 2 _x2 0 _x4 4 _x3 1 _x4 2 _x3 0 _x2 0 _x2 4 _x2 3 _x3 5 _x3 5 _x3 5 _x3 3 _x2 4 _x3 5 _x2 3 _x3 3 _x3 4 _x2 5 _x3 5 _x3 3 _x2 4 _x3 5 _x3 0 _x2 5 _x3 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 4 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 4 5 _x2 5 _x2 5 _x2 5 _x3 5 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 5 _x2 6 _x2 6 _ 6 _x2 5 _x2 6 _x2 6 _x2 6 _x2 6 _x2 6 _ 6 _x2 6 _x2 6 _ 5 _x2 4 _x2 3 _ 6 _x2 6 _x2 6 _x6 6 _ 6 _ 6 _x2 6 _ 6 _ 6 _x12 6 _ 6 _ 6 _x2 6 _ 6 _x3 6 _x2 6 _x3 6 _x3 6 _x2 6"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="review"}
+        values: "_ 0 _x3 5 _x4 5 _x3 5 _x2 2 _x4 0 _x3 0 _x4 2 _x3 0 _x2 0 _x2 5 _x2 5 _x3 5 _x3 1 _x3 5 _x3 2 _x2 0 _x3 5 _x2 5 _x3 0 _x3 3 _x2 4 _x3 5 _x3 0 _x2 4 _x3 5 _x3 1 _x2 3 _x3 2 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 3 _x2 5 _x2 5 _x2 5 _x2 3 5 _x2 5 _x2 5 _x2 4 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 4 _x2 0 _x2 6 _ 4 _x2 3 _x2 6 _x2 6 _x2 6 _x2 2 _x2 4 _ 6 _x2 6 _x2 6 _ 4 _x2 6 _x2 6 _ 6 _x2 5 _x2 4 _x6 6 _ 6 _ 6 _x2 6 _ 6 _ 6 _x12 0 _ 6 _ 6 _x2 6 _ 6 _x3 2 _x2 6 _x3 0 _x3 2 _x2 0"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="worker"}
+        values: "_ 0 _x3 0 _x4 0 _x3 5 _x2 5 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 4 _x2 5 _x3 5 _x3 0 _x3 0 _x3 3 _x2 3 _x3 5 _x2 5 _x3 0 _x3 0 _x2 5 _x3 3 _x3 0 _x2 5 _x3 5 _x3 2 _x2 4 _x3 5 _x2 5 _x2 4 _x2 3 _x2 5 _x2 5 _x2 5 _x2 5 _x2 4 _x2 5 _x2 0 _x2 5 _x2 5 5 _x2 5 _x2 5 _x2 5 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 6 _x2 0 _x2 6 _ 6 _x2 6 _x2 6 _x2 3 _x2 6 _x2 6 _x2 6 _ 3 _x2 6 _x2 6 _ 6 _x2 6 _x2 6 _ 6 _x2 6 _x2 6 _x6 6 _ 6 _ 6 _x2 6 _ 6 _ 6 _x12 6 _ 6 _ 6 _x2 6 _ 6 _x3 6 _x2 6 _x3 5 _x3 6 _x2 4"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="drain-pg2"}
+        values: "_ 22 _x3 22 _x4 22 _x3 22 _x2 22 _x4 22 _x3 22 _x4 22 _x3 22 _x2 22 _x2 22 _x2 22 _x3 22 _x3 23 _x3 24 _x3 25 _x2 26 _x3 26 _x2 27 _x3 28 _x3 30 _x2 29 _x3 29 _x3 30 _x2 31 _x3 31 _x3 31 _x2 32 _x3 30 _x2 30 _x2 31 _x2 29 _x2 30 _x2 31 _x2 31 _x2 32 _x2 32 _x2 32 _x2 31 _x2 31 _x2 31 31 _x2 31 _x2 30 _x2 31 _x3 32 _x2 34 _x3 34 _x2 34 _x3 34 _x3 34 _x2 34 _x2 34 _x2 33 _ 32 _x2 32 _x2 32 _x2 32 _x2 32 _x2 32 _x2 33 _ 34 _x2 34 _x2 36 _ 36 _x2 37 _x2 36 _ 37 _x2 37 _x2 37 _x6 37 _ 37 _ 37 _x2 37 _ 37 _ 37 _x12 37 _ 37 _ 37 _x2 37 _ 37 _x3 37 _x2 37 _x3 37 _x3 37 _x2 37"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="feedback"}
+        values: "_ 1 _x3 1 _x4 1 _x3 1 _x2 1 _x4 1 _x3 1 _x4 1 _x3 1 _x2 1 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 1 _x3 0 _x2 0 _x3 1 _x2 0 _x3 0 _x3 0 _x2 1 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="pg2-escalation-triager"}
+        values: "_x10 28 _x3 26 _x2 27 _x4 27 _x15 28 _x2 28 _x2 29 _x18 29 _x3 27 _x2 28 _x3 28 _x17 27 _x3 27 _x3 28 _x2 29 _x15 35 _x2 36 _x2 39 _x2 40 _x14 45 46 _x2 48 _x2 48 _x16 52 _x3 54 _x3 54 _x2 54 _x13 55 _x2 55 _x2 57 _x2 58 _x12 58 _x2 58 _x2 62 _ 63 _x16 64 _x2 64 _ 64 _ 64 _x21 64 _x3 64 _x2 64 _x3 64"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="pg2-split-triager"}
+        values: "_x26 27 _x21 28 _x29 28 _x28 29 _x23 42 _x21 49 _x27 55 _x22 58 _x20 64 _x33 64 _x23 64"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="review"}
+        values: "_ 4 _x3 4 _x4 4 _x3 4 _x2 4 _x4 4 _x3 4 _x4 2 _x3 3 _x2 3 _x2 3 _x2 3 _x3 3 _x3 3 _x3 3 _x3 3 _x2 3 _x3 3 _x2 3 _x3 3 _x3 3 _x2 3 _x3 3 _x3 3 _x2 3 _x3 3 _x3 3 _x2 3 _x3 3 _x2 3 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 4 _x2 4 _x2 4 _x2 4 _x3 4 _x2 4 _x3 4 _x2 4 _x3 4 _x3 4 _x2 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _x6 4 _ 4 _ 4 _x2 4 _ 4 _ 4 _x12 4 _ 4 _ 4 _x2 4 _ 4 _x3 4 _x2 4 _x3 4 _x3 4 _x2 4"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="worker"}
+        values: "_ 16 _x3 16 _x4 16 _x3 16 _x2 16 _x4 16 _x3 16 _x4 16 _x3 16 _x2 16 _x2 16 _x2 16 _x3 16 _x3 16 _x3 16 _x3 16 _x2 16 _x3 16 _x2 16 _x3 16 _x3 13 _x2 9 _x3 9 _x3 9 _x2 9 _x3 9 _x3 9 _x2 9 _x3 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 9 _x2 9 _x2 9 _x2 9 _x3 9 _x2 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _x2 11 _x2 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _x6 11 _ 11 _ 11 _x2 11 _ 11 _ 11 _x12 11 _ 11 _ 11 _x2 11 _ 11 _x3 11 _x2 11 _x3 11 _x3 11 _x2 11"
+      - series: ccpool_janitor_candidates{pass="closed_bead_reconcile",role="zr-escalation-triager"}
+        values: "_ 28 _x3 28 _x25 27 _x3 27 _x16 28 _x3 28 _x3 28 _x20 27 _x3 29 _x3 28 _x20 31 _x2 33 _x2 33 _x17 43 _x2 43 _x2 43 _x16 50 _x2 51 _x3 51 _x19 55 _ 55 _x2 55 _x16 56 _x2 56 _x2 58 _x15 64 _x6 64 _ 64 _x23 64 _ 64 _x2 64 _x19 64"
+      - series: ccpool_janitor_candidates{pass="orphan_reconcile",role="feedback"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 1 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_candidates{pass="orphan_reconcile",role="pg2-escalation-triager"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 1 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="drain-zr"}
+        values: "_ 10 _x3 10 _x4 10 _x3 10 _x2 10 _x4 10 _x3 10 _x4 10 _x3 10 _x2 10 _x2 10 _x2 10 _x3 10 _x3 10 _x3 10 _x3 10 _x2 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x2 9 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 10 _x2 10 _x2 10 _x2 10 _x3 10 _x2 13 _x3 13 _x2 11 _x3 11 _x3 11 _x2 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _x2 11 _x2 11 _x2 10 _x2 11 _ 10 _x2 11 _x2 11 _ 10 _x2 11 _x2 10 _ 11 _x2 11 _x2 11 _x6 11 _ 11 _ 11 _x2 11 _ 11 _ 11 _x12 11 _ 11 _ 11 _x2 11 _ 11 _x3 11 _x2 11 _x3 11 _x3 11 _x2 11"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="feedback"}
+        values: "_ 10 _x3 10 _x4 10 _x3 10 _x2 10 _x4 10 _x3 10 _x4 10 _x3 0 _x2 10 _x2 10 _x2 10 _x3 10 _x3 10 _x3 10 _x3 10 _x2 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x2 9 _x2 10 _x2 10 _x2 9 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 10 _x2 10 _x2 10 _x2 10 _x3 10 _x2 13 _x3 13 _x2 11 _x3 11 _x3 12 _x2 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _x2 11 _x2 11 _x2 10 _x2 11 _ 10 _x2 11 _x2 11 _ 11 _x2 11 _x2 10 _ 11 _x2 11 _x2 11 _x6 11 _ 11 _ 11 _x2 11 _ 11 _ 11 _x12 11 _ 11 _ 11 _x2 11 _ 11 _x3 11 _x2 11 _x3 11 _x3 11 _x2 11"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="review"}
+        values: "_ 0 _x3 10 _x4 10 _x3 10 _x2 10 _x4 10 _x3 0 _x4 10 _x3 10 _x2 10 _x2 10 _x2 10 _x3 10 _x3 10 _x3 10 _x3 10 _x2 0 _x3 10 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x3 0 _x2 9 _x3 10 _x3 10 _x2 10 _x3 10 _x2 10 _x2 10 _x2 9 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 _x2 10 10 _x2 10 _x2 10 _x2 10 _x3 10 _x2 13 _x3 11 _x2 11 _x3 11 _x3 11 _x2 11 _x2 11 _x2 11 _ 11 _x2 10 _x2 11 _x2 11 _x2 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 10 _ 11 _x2 10 _x2 11 _ 11 _x2 10 _x2 11 _x6 11 _ 11 _ 11 _x2 11 _ 11 _ 11 _x12 11 _ 11 _ 11 _x2 11 _ 11 _x3 11 _x2 11 _x3 0 _x3 11 _x2 11"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="worker"}
+        values: "_ 10 _x3 0 _x4 10 _x3 10 _x2 10 _x4 10 _x3 0 _x4 10 _x3 10 _x2 10 _x2 10 _x2 10 _x3 10 _x3 10 _x3 0 _x3 10 _x2 10 _x3 10 _x2 10 _x3 10 _x3 0 _x2 10 _x3 10 _x3 0 _x2 10 _x3 10 _x3 10 _x2 10 _x3 10 _x2 9 _x2 10 _x2 10 _x2 9 _x2 10 _x2 9 _x2 10 _x2 10 _x2 10 _x2 0 _x2 10 _x2 9 10 _x2 10 _x2 10 _x2 10 _x3 10 _x2 13 _x3 12 _x2 11 _x3 11 _x3 12 _x2 10 _x2 11 _x2 10 _ 11 _x2 11 _x2 11 _x2 11 _x2 10 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _x6 11 _ 11 _ 11 _x2 11 _ 11 _ 11 _x12 11 _ 11 _ 11 _x2 11 _ 11 _x3 11 _x2 11 _x3 11 _x3 11 _x2 11"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="drain-pg2"}
+        values: "_ 22 _x3 22 _x4 22 _x3 22 _x2 22 _x4 22 _x3 22 _x4 22 _x3 22 _x2 22 _x2 22 _x2 22 _x3 22 _x3 23 _x3 24 _x3 25 _x2 26 _x3 26 _x2 27 _x3 28 _x3 30 _x2 29 _x3 29 _x3 30 _x2 31 _x3 31 _x3 31 _x2 32 _x3 30 _x2 30 _x2 31 _x2 29 _x2 30 _x2 31 _x2 31 _x2 32 _x2 32 _x2 32 _x2 31 _x2 31 _x2 31 31 _x2 31 _x2 30 _x2 31 _x3 32 _x2 34 _x3 34 _x2 34 _x3 34 _x3 34 _x2 34 _x2 34 _x2 33 _ 32 _x2 32 _x2 32 _x2 32 _x2 32 _x2 32 _x2 33 _ 34 _x2 34 _x2 36 _ 36 _x2 37 _x2 36 _ 37 _x2 37 _x2 37 _x6 37 _ 37 _ 37 _x2 37 _ 37 _ 37 _x12 37 _ 37 _ 37 _x2 37 _ 37 _x3 37 _x2 37 _x3 37 _x3 37 _x2 37"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="feedback"}
+        values: "_ 1 _x3 1 _x4 1 _x3 1 _x2 1 _x4 1 _x3 1 _x4 1 _x3 1 _x2 1 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 1 _x3 0 _x2 0 _x3 1 _x2 0 _x3 0 _x3 0 _x2 1 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="pg2-escalation-triager"}
+        values: "_x10 28 _x3 26 _x2 27 _x4 27 _x15 28 _x2 28 _x2 29 _x18 29 _x3 27 _x2 28 _x3 28 _x17 27 _x3 27 _x3 28 _x2 29 _x15 35 _x2 36 _x2 39 _x2 40 _x14 45 46 _x2 48 _x2 48 _x16 52 _x3 54 _x3 54 _x2 54 _x13 55 _x2 55 _x2 57 _x2 58 _x12 58 _x2 58 _x2 62 _ 63 _x16 64 _x2 64 _ 64 _ 64 _x21 64 _x3 64 _x2 64 _x3 64"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="pg2-split-triager"}
+        values: "_x26 27 _x21 28 _x29 28 _x28 29 _x23 42 _x21 49 _x27 55 _x22 58 _x20 64 _x33 64 _x23 64"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="review"}
+        values: "_ 4 _x3 4 _x4 4 _x3 4 _x2 4 _x4 4 _x3 4 _x4 2 _x3 3 _x2 3 _x2 3 _x2 3 _x3 3 _x3 3 _x3 3 _x3 3 _x2 3 _x3 3 _x2 3 _x3 3 _x3 3 _x2 3 _x3 3 _x3 3 _x2 3 _x3 3 _x3 3 _x2 3 _x3 3 _x2 3 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 4 _x2 4 _x2 4 _x2 4 _x3 4 _x2 4 _x3 4 _x2 4 _x3 4 _x3 4 _x2 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _ 4 _x2 4 _x2 4 _x6 4 _ 4 _ 4 _x2 4 _ 4 _ 4 _x12 4 _ 4 _ 4 _x2 4 _ 4 _x3 4 _x2 4 _x3 4 _x3 4 _x2 4"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="worker"}
+        values: "_ 16 _x3 16 _x4 16 _x3 16 _x2 16 _x4 16 _x3 16 _x4 16 _x3 16 _x2 16 _x2 16 _x2 16 _x3 16 _x3 16 _x3 16 _x3 16 _x2 16 _x3 16 _x2 16 _x3 16 _x3 13 _x2 9 _x3 9 _x3 9 _x2 9 _x3 9 _x3 9 _x2 9 _x3 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 _x2 9 9 _x2 9 _x2 9 _x2 9 _x3 9 _x2 10 _x3 10 _x2 10 _x3 10 _x3 10 _x2 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _x2 11 _x2 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _ 11 _x2 11 _x2 11 _x6 11 _ 11 _ 11 _x2 11 _ 11 _ 11 _x12 11 _ 11 _ 11 _x2 11 _ 11 _x3 11 _x2 11 _x3 11 _x3 11 _x2 11"
+      - series: ccpool_janitor_examined{pass="closed_bead_reconcile",role="zr-escalation-triager"}
+        values: "_ 28 _x3 28 _x25 27 _x3 27 _x16 28 _x3 28 _x3 28 _x20 27 _x3 29 _x3 28 _x20 31 _x2 33 _x2 33 _x17 43 _x2 43 _x2 43 _x16 50 _x2 51 _x3 51 _x19 55 _ 55 _x2 55 _x16 56 _x2 56 _x2 58 _x15 64 _x6 64 _ 64 _x23 64 _ 64 _x2 64 _x19 64"
+      - series: ccpool_janitor_examined{pass="orphan_reconcile",role="feedback"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 1 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_examined{pass="orphan_reconcile",role="pg2-escalation-triager"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 1 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="drain-zr"}
+        values: "_ 5 _x3 7 _x4 3 _x3 1 _x2 5 _x4 1 _x3 1 _x4 4 _x3 7 _x2 0 _x2 6 _x2 5 _x3 5 _x3 5 _x3 4 _x3 1 _x2 1 _x3 5 _x2 5 _x3 6 _x3 7 _x2 5 _x3 5 _x3 1 _x2 8 _x3 5 _x3 5 _x2 5 _x3 5 _x2 4 _x2 5 _x2 5 _x2 9 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 6 _x2 6 _x2 7 7 _x2 5 _x2 5 _x2 5 _x3 8 _x2 0 _x3 0 _x2 0 _x3 0 _x3 5 _x2 5 _x2 8 _x2 5 _ 6 _x2 5 _x2 5 _x2 5 _x2 7 _x2 4 _x2 5 _ 4 _x2 5 _x2 5 _ 4 _x2 5 _x2 4 _ 5 _x2 5 _x2 5 _x6 5 _ 9 _ 5 _x2 7 _ 5 _ 5 _x12 5 _ 5 _ 5 _x2 5 _ 5 _x3 11 _x2 5 _x3 5 _x3 5 _x2 5"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="feedback"}
+        values: "_ 1 _x3 5 _x4 5 _x3 1 _x2 2 _x4 2 _x3 1 _x4 4 _x3 0 _x2 0 _x2 6 _x2 7 _x3 5 _x3 5 _x3 5 _x3 3 _x2 1 _x3 5 _x2 3 _x3 1 _x3 5 _x2 5 _x3 5 _x3 1 _x2 6 _x3 5 _x3 1 _x2 5 _x3 5 _x2 4 _x2 5 _x2 5 _x2 4 _x2 5 _x2 6 _x2 5 _x2 5 _x2 5 _x2 5 _x2 5 _x2 6 5 _x2 5 _x2 5 _x2 5 _x3 5 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 6 _x2 5 _x2 5 _ 5 _x2 6 _x2 5 _x2 5 _x2 5 _x2 4 _x2 5 _ 4 _x2 5 _x2 5 _ 6 _x2 7 _x2 7 _ 5 _x2 5 _x2 5 _x6 5 _ 5 _ 5 _x2 5 _ 5 _ 5 _x12 5 _ 5 _ 5 _x2 5 _ 5 _x3 5 _x2 5 _x3 5 _x3 5 _x2 5"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="review"}
+        values: "_ 0 _x3 5 _x4 5 _x3 5 _x2 8 _x4 1 _x3 0 _x4 4 _x3 0 _x2 0 _x2 5 _x2 5 _x3 5 _x3 1 _x3 2 _x3 7 _x2 0 _x3 5 _x2 5 _x3 2 _x3 6 _x2 2 _x3 5 _x3 0 _x2 5 _x3 5 _x3 2 _x2 2 _x3 8 _x2 5 _x2 5 _x2 4 _x2 5 _x2 5 _x2 5 _x2 5 _x2 7 _x2 5 _x2 5 _x2 5 _x2 7 5 _x2 5 _x2 5 _x2 6 _x3 1 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 7 _x2 0 _x2 5 _ 7 _x2 7 _x2 5 _x2 5 _x2 5 _x2 9 _x2 7 _ 5 _x2 5 _x2 4 _ 7 _x2 4 _x2 5 _ 5 _x2 5 _x2 7 _x6 5 _ 5 _ 5 _x2 5 _ 5 _ 5 _x12 11 _ 5 _ 5 _x2 5 _ 5 _x3 1 _x2 5 _x3 0 _x3 1 _x2 5"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="worker"}
+        values: "_ 1 _x3 0 _x4 1 _x3 5 _x2 5 _x4 1 _x3 0 _x4 2 _x3 0 _x2 0 _x2 6 _x2 5 _x3 5 _x3 0 _x3 0 _x3 2 _x2 1 _x3 4 _x2 5 _x3 1 _x3 0 _x2 5 _x3 6 _x3 0 _x2 5 _x3 5 _x3 1 _x2 6 _x3 5 _x2 4 _x2 6 _x2 7 _x2 4 _x2 5 _x2 4 _x2 5 _x2 6 _x2 5 _x2 0 _x2 5 _x2 4 5 _x2 5 _x2 5 _x2 5 _x3 1 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 4 _x2 0 _x2 4 _ 5 _x2 5 _x2 5 _x2 8 _x2 4 _x2 5 _x2 5 _ 8 _x2 5 _x2 5 _ 5 _x2 5 _x2 5 _ 5 _x2 5 _x2 5 _x6 5 _ 5 _ 5 _x2 5 _ 5 _ 5 _x12 5 _ 5 _ 5 _x2 5 _ 5 _x3 5 _x2 5 _x3 1 _x3 5 _x2 7"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="closed_bead_reconcile"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="default_pool"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="orphan_reconcile"}
+        values: "_ 0 _x3 0 _x4 0 _x3 0 _x2 0 _x4 0 _x3 0 _x4 0 _x3 0 _x2 0 _x2 0 _x2 0 _x3 0 _x3 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 0 _x2 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="worktree_sweep"}
+        values: "_ 180 _x3 1229 _x4 0 _x3 884 _x2 0 _x4 336 _x3 1648 _x4 2603 _x3 69 _x2 1050 _x2 0 _x2 0 _x3 0 _x3 248 _x3 0 _x3 971 _x2 1114 _x3 0 _x2 885 _x3 69 _x3 0 _x2 0 _x3 0 _x3 59 _x2 0 _x3 0 _x3 212 _x2 1003 _x3 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 0 _x2 0 _x2 0 _x2 0 _x3 363 _x2 250 _x3 1335 _x2 2371 _x3 3411 _x3 4550 _x2 0 _x2 810 _x2 0 _ 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _ 0 _x2 0 _x2 0 _x6 0 _ 0 _ 0 _x2 0 _ 0 _ 0 _x12 0 _ 0 _ 0 _x2 0 _ 0 _x3 0 _x2 0 _x3 0 _x3 0 _x2 0"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="drain-zr",phase="list"}
+        values: "_ 0.499 _x3 0.489 _x4 1.371 _x3 1.788 _x2 0.559 _x4 10.264 _x3 10.715 _x4 3.399 _x3 0.139 _x2 60.089 _x2 43.428 _x2 0.087 _x3 0.273 _x3 5.472 _x3 1.109 _x3 5.244 _x2 5.343 _x3 1.647 _x2 0.588 _x3 0.981 _x3 0.173 _x2 0.128 _x3 1.455 _x3 0.591 _x2 0.621 _x3 0.177 _x3 1.086 _x2 3.497 _x3 0.099 _x2 0.132 _x2 0.085 _x2 0.077 _x2 0.375 _x2 0.1 _x2 0.043 _x2 0.033 _x2 0.047 _x2 0.052 _x2 0.103 _x2 0.175 _x2 0.141 0.06 _x2 0.158 _x2 0.139 _x2 0.233 _x3 0.152 _x2 60.34 _x3 60.062 _x2 60.031 _x3 59.799 _x3 12.144 _x2 0.125 _x2 25.607 _x2 0.068 _ 0.336 _x2 0.065 _x2 0.096 _x2 0.047 _x2 0.439 _x2 0.075 _x2 0.153 _ 0.052 _x2 0.055 _x2 0.052 _ 0.129 _x2 0.281 _x2 0.071 _ 0.519 _x2 0.111 _x2 0.032 _x6 0.027 _ 0.038 _ 0.039 _x2 0.037 _ 0.028 _ 0.027 _x12 0.021 _ 0.038 _ 0.03 _x2 0.039 _ 0.041 _x3 0.076 _x2 0.215 _x3 0.285 _x3 0.115 _x2 0.327"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="feedback",phase="list"}
+        values: "_ 0.442 _x3 0.169 _x4 1.931 _x3 0.752 _x2 0.695 _x4 5.286 _x3 10.295 _x4 0.833 _x6 60.449 _x2 0.107 _x2 0.119 _x3 4.128 _x3 0.765 _x3 3.531 _x3 5.159 _x2 5.719 _x3 0.489 _x2 0.551 _x3 1.21 _x3 5.152 _x2 1.537 _x3 0.158 _x3 1.21 _x2 2.586 _x3 0.151 _x3 6.301 _x2 1.337 _x3 0.363 _x2 0.974 _x2 0.089 _x2 0.098 _x2 0.523 _x2 0.077 _x2 2.516 _x2 0.068 _x2 0.133 _x2 0.068 _x2 0.165 _x2 0.098 _x2 0.196 0.047 _x2 0.067 _x2 0.068 _x2 0.181 _x3 0.248 _x2 60.025 _x3 37.361 _x2 60.024 _x3 59.568 _x3 59.774 _x2 0.214 _x2 0.197 _x2 0.079 _ 0.11 _x2 0.296 _x2 0.141 _x2 0.112 _x2 0.075 _x2 0.095 _x2 0.114 _ 0.076 _x2 0.049 _x2 0.121 _ 0.081 _x2 0.075 _x2 0.077 _ 0.095 _x2 0.183 _x2 0.029 _x6 0.026 _ 0.033 _ 0.026 _x2 0.028 _ 0.043 _ 0.026 _x12 0.027 _ 0.028 _ 0.038 _x2 0.033 _ 0.027 _x3 0.042 _x2 0.102 _x3 0.163 _x3 0.523 _x2 0.119"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="review",phase="list"}
+        values: "_x5 2.337 _x4 0.351 _x3 0.502 _x2 0.195 _x4 3.508 _x8 0.864 _x3 52.52 _x2 60.032 _x2 0.166 _x2 0.158 _x3 0.416 _x3 5.975 _x3 5.35 _x3 0.627 _x6 0.448 _x2 0.939 _x3 0.35 _x3 0.646 _x2 1.914 _x3 0.48 _x6 0.187 _x3 3.206 _x3 7.375 _x2 2.204 _x3 0.169 _x2 0.182 _x2 1.933 _x2 1.924 _x2 0.476 _x2 0.131 _x2 0.137 _x2 0.168 _x2 0.432 _x2 0.217 _x2 0.164 _x2 0.088 _x2 0.127 0.188 _x2 0.065 _x2 0.332 _x2 0.236 _x3 0.315 _x2 60.038 _x3 60.034 _x2 60.037 _x3 25.767 _x3 55.329 _x2 0.067 _x2 51.677 _x2 0.136 _ 0.041 _x2 0.146 _x2 0.457 _x2 0.244 _x2 0.357 _x2 0.247 _x2 0.075 _ 0.086 _x2 0.222 _x2 0.224 _ 5.082 _x2 0.067 _x2 0.145 _ 0.083 _x2 0.43 _x2 0.042 _x6 0.33 _ 0.05 _ 0.052 _x2 0.047 _ 0.052 _ 0.06 _x12 0.046 _ 0.047 _ 0.257 _x2 0.045 _ 0.048 _x3 1.15 _x2 0.355 _x7 0.87 _x2 0.202"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="worker",phase="list"}
+        values: "_ 0.697 _x8 0.865 _x3 0.469 _x2 0.481 _x4 13.129 _x8 1.847 _x3 59.36 _x2 60.017 _x2 0.279 _x2 0.706 _x3 0.346 _x3 3.456 _x7 5.658 _x2 3.61 _x3 1.614 _x2 0.897 _x3 0.293 _x6 1.81 _x3 3.297 _x6 0.608 _x3 2.861 _x3 6.137 _x2 0.405 _x3 0.396 _x2 0.449 _x2 0.404 _x2 4.816 _x2 1.009 _x2 0.186 _x2 0.434 _x2 0.242 _x2 0.157 _x2 0.223 _x5 0.156 _x2 0.162 0.131 _x2 0.118 _x2 0.158 _x2 0.285 _x3 0.443 _x2 48.111 _x3 60.041 _x2 60.022 _x3 60.062 _x3 60.211 _x2 0.162 _x2 59.419 _x2 0.444 _ 0.589 _x2 0.07 _x2 0.063 _x2 0.12 _x2 0.323 _x2 0.16 _x2 0.249 _ 0.05 _x2 0.055 _x2 0.35 _ 3.62 _x2 0.09 _x2 0.054 _ 0.058 _x2 1.174 _x2 0.038 _x6 0.041 _ 0.028 _ 0.03 _x2 0.029 _ 0.026 _ 0.03 _x12 0.03 _ 0.029 _ 0.052 _x2 0.026 _ 0.027 _x3 0.717 _x2 0.192 _x3 1.76 _x3 1.037 _x2 0.115"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 5h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 5h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 5h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 9h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 9h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 9h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 10h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 10h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 10h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 11h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 11h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 11h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 12h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 12h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 12h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 13h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 13h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 13h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 15h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 15h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 15h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 16h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 16h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 16h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 17h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 17h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 17h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 18h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 18h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 18h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 19h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 19h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 19h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 20h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 20h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 20h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 21h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 21h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 21h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 22h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 22h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 22h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 23h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 23h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 23h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+      - eval_time: 24h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 24h
+        alertname: pg-router-ccpool-janitor-stagnant
+        exp_alerts: []
+      - eval_time: 24h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+
+  - name: list-timeout fires when a third of the sweeps hit the list kill for hours, not at the 8.5 percent baseline or with too few samples
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="a",phase="list"}
+        values: "60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="b",phase="list"}
+        values: "1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60 1 1 60"
+      - series: ccpool_janitor_phase_seconds{pass="orphan_reconcile",role="a",phase="list"}
+        values: "60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60"
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pass: worktree_sweep
+
+  - name: list-timeout stays quiet at the measured baseline share and when fewer than 24 samples exist
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="a",phase="list"}
+        values: "1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="b",phase="list"}
+        values: "1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60 1 1 1 1 1 1 1 1 1 1 1 60"
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+
+  - name: list-timeout stays quiet with fewer than 24 samples in 6h even when all are long
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="a",phase="list"}
+        values: "60 60 60 60 60 60 60 60 60 60 60 60 _x48"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+
+  - name: no-progress needs six runs, candidates in every one, and ignores a pass that reaches some
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="five"}
+        values: "3x34"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="five"}
+        values: "0x4 1x30"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="five"}
+        values: "0x35"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="idle"}
+        values: "0x35"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="idle"}
+        values: "0x35"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="idle"}
+        values: "0x35"
+      - series: ccpool_janitor_candidates{pass="worktree_sweep",role="cached"}
+        values: "4x35"
+      - series: ccpool_janitor_examined{pass="worktree_sweep",role="cached"}
+        values: "0x35"
+      - series: ccpool_janitor_cached{pass="worktree_sweep",role="cached"}
+        values: "0x4 2x30"
+    alert_rule_test:
+      # role five: 5 stalled runs then progress; role idle: no candidates; role cached: progress via the cache.
+      # 40m: five stalled samples only, below the six-run bar.
+      - eval_time: 40m
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: pg-router-ccpool-janitor-no-progress
+        exp_alerts: []

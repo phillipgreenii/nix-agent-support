@@ -11,7 +11,11 @@ const (
 	wantJanitorStaleExpr    = `(time() - max(last_over_time(ccpool_janitor_last_success_timestamp_seconds[7d]) or last_over_time(ccpool_janitor_role_last_success_timestamp_seconds[7d]))) > 1800`
 	wantJanitorDeadlineExpr = `(min_over_time(ccpool_janitor_deadline_hit[35m]) == 1) and (count_over_time(ccpool_janitor_deadline_hit[35m]) >= 3)`
 	wantJanitorIdleExpr     = `((min_over_time(ccpool_janitor_pass_errors[35m]) > 0) and (count_over_time(ccpool_janitor_pass_errors[35m]) >= 3)) or ((count(count_over_time(ccpool_janitor_reclaimed[6h]) >= 30)) and on() (sum(max_over_time(ccpool_janitor_reclaimed[6h])) == 0) and on() (max(min_over_time(ccpool_pool_capacity{dim="free"}[6h])) == 0))`
-	wantJanitorStagnantExpr = `max by (pass) (last_over_time(ccpool_janitor_oldest_unexamined_age_seconds[35m])) > 21600`
+	wantJanitorStagnantExpr = `max by (pass) (last_over_time(ccpool_janitor_oldest_unexamined_age_seconds[35m])) > 7200`
+	// No progress: at least 6 runs in 2 hours, candidates always above 0, nothing examined or cached.
+	wantJanitorNoProgressExpr = `(min_over_time(ccpool_janitor_candidates[2h]) > 0) and ((max_over_time(ccpool_janitor_examined[2h]) + max_over_time(ccpool_janitor_cached[2h])) == 0) and (count_over_time(ccpool_janitor_candidates[2h]) >= 6)`
+	// List timeout: more than 25% of 6 hours of sweeps with a list phase of 55 s or more, from 24 samples.
+	wantJanitorListTimeoutExpr = `(avg by (pass) (avg_over_time((ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"} >= bool 55)[6h:1m])) > 0.25) and on (pass) (sum by (pass) (count_over_time(ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"}[6h])) >= 24)`
 )
 
 func TestCcpoolJanitorRules(t *testing.T) {
@@ -22,6 +26,8 @@ func TestCcpoolJanitorRules(t *testing.T) {
 		{"pg-router-ccpool-janitor-deadline", wantJanitorDeadlineExpr, "for: 10m"},
 		{"pg-router-ccpool-janitor-idle", wantJanitorIdleExpr, "for: 30m"},
 		{"pg-router-ccpool-janitor-stagnant", wantJanitorStagnantExpr, "for: 30m"},
+		{"pg-router-ccpool-janitor-no-progress", wantJanitorNoProgressExpr, "for: 10m"},
+		{"pg-router-ccpool-janitor-list-timeout", wantJanitorListTimeoutExpr, "for: 1h"},
 	} {
 		r := ruleBlock(t, tc.uid)
 		if got := ruleExpr(t, r); got != tc.expr {
