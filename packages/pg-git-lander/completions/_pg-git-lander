@@ -34,6 +34,7 @@ _pg_git_lander() {
         '--onto=[commit to replay onto]:ref' \
         '--source-worktree=[worktree that holds BRANCH]:path:_files -/' \
         '--work-worktree=[worktree to do the work in]:path:_files -/' \
+        '(--abort --quit)--no-verify[skip pre-merge-verify hooks and git hooks for this run; only when the operator asked]' \
         '*--context=[context for the hooks]:key=value' \
         '1:branch:__pg_git_lander_branches'
       ;;
@@ -45,6 +46,7 @@ _pg_git_lander() {
         '--work-worktree=[worktree to do the work in]:path:_files -/' \
         '--keep-source-worktree[park the source worktree on the placeholder]' \
         '--keep-source-branch[move BRANCH to the result instead of deleting it]' \
+        '(--abort --quit)--no-verify[skip pre-merge-verify hooks and git hooks for this run; only when the operator asked]' \
         '*--context=[context for the hooks]:key=value' \
         '1:branch:__pg_git_lander_branches'
       ;;

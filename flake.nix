@@ -5855,7 +5855,7 @@
                   fi
 
                   ff="$surface/claude-marketplace/integrate-branch/skills/ff-merge-to-main/SKILL.md"
-                  for want in 'pg-git-lander land' 'pg-git-lander rebase' 'pg-hooks run pre-land' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule' '## FF-1b and FF-1c are before_move hooks' 'stopped:eval-failed' 'pre-land-eval "$WT" "$FB"' 'bgwait "pgl-land-' 'AGENT-FIXABLE' 'pgii-integrate-branch.preLandEval' 'pn workspace flake-check --no-build' 'MUST NOT be made to pass by relocking' 'unchanged hoping for a different answer' '--source-worktree' '--keep-source-worktree' 'pg-git-lander/idle/'; do
+                  for want in 'pg-git-lander land' 'pg-git-lander rebase' 'pg-hooks run pre-land' 'integrate-branch-support --bundle-refresh' 'stopped:precommit-branch-diff-failed' 'overrides any older rule' '## FF-1b and FF-1c are pre-merge-verify hooks' 'stopped:eval-failed' 'pre-land-eval "$WT" "$FB"' 'bgwait "pgl-land-' 'AGENT-FIXABLE' 'pgii-integrate-branch.preLandEval' 'pn workspace flake-check --no-build' 'MUST NOT be made to pass by relocking' 'unchanged hoping for a different answer' '--source-worktree' '--keep-source-worktree' 'pg-git-lander/idle/'; do
                     if ! grep -qF -- "$want" "$ff"; then
                       echo "FAIL: ff-merge-to-main SKILL.md lost the FF-1b/FF-4 pg-hooks text: $want" >&2
                       exit 1

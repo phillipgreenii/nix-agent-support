@@ -11,10 +11,10 @@ _pg_git_lander() {
   cmd="${COMP_WORDS[1]}"
   case "$cmd" in
   rebase)
-    mapfile -t COMPREPLY < <(compgen -W "--onto --source-worktree --work-worktree --wait --context --json --continue --skip --abort --quit --repo --help" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--onto --source-worktree --work-worktree --no-verify --wait --context --json --continue --skip --abort --quit --repo --help" -- "$cur")
     ;;
   land)
-    mapfile -t COMPREPLY < <(compgen -W "--into --target-worktree --source-worktree --work-worktree --keep-source-worktree --keep-source-branch --wait --context --json --continue --skip --abort --quit --repo --help" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--into --target-worktree --source-worktree --work-worktree --keep-source-worktree --keep-source-branch --no-verify --wait --context --json --continue --skip --abort --quit --repo --help" -- "$cur")
     ;;
   status)
     mapfile -t COMPREPLY < <(compgen -W "--json --repo --help" -- "$cur")

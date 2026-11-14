@@ -88,8 +88,8 @@ continue or abort on the caller's behalf (see "Handling the outcome").
 
 Capture the primary branch's tip first (the bundle refresh below diffs from it),
 then run the tool **detached** and wait for its outcome. A repository's
-`before_move` hooks (the hook run and the evaluation check; see "FF-1b and FF-1c
-are before_move hooks") can run for minutes, longer than a foreground command
+`post-rebase-fix` and `pre-merge-verify` hooks (the hook run and the evaluation
+check; see "FF-1b and FF-1c are pre-merge-verify hooks") can run for minutes, longer than a foreground command
 timeout, so the handler MUST run it through `bgrun` and wait with `bgwait`, never
 in the foreground and never polling with `sleep`, `date`, `tail` or repeated
 `bgcheck`:
@@ -185,19 +185,24 @@ land. The author MAY, and SHOULD when the change touched shared infrastructure,
 build targeted checks (`nix build .#checks.<system>.<name>`, in the background)
 before invoking `integrate-branch`; that is not a step of this handler.
 
-## FF-1b and FF-1c are before_move hooks
+## FF-1b and FF-1c are pre-merge-verify hooks
 
 The consolidated hook run over the branch diff (FF-1b) and the eval-only check
-(FF-1c) are no longer steps of this skill. A repository declares them as
-`before_move` hooks in its own `.pg-git-lander.toml`, which the tool runs under the
-target's lock, in the work worktree, on the rebased result. Per-repository hook
-configuration is written in that file, not here. The hook entries are, for
-example:
+(FF-1c) are no longer steps of this skill. A repository declares them in its own
+`.pg-git-lander.toml`: the fixers as a `post-rebase-fix` hook (runs only after a
+rebase, may change the tree) and the checks as `pre-merge-verify` hooks (run on every
+path before the branch moves, in the work worktree, on the rebased result; read-only:
+a tracked change or a moved HEAD is a `hook-failed` stop with detail
+`verify-modified-tree`). Per-repository hook configuration is written in that file,
+not here. The hook entries are, for example:
 
 ```toml
 [hooks.land]
-before_move = [
-  { run = ["sh", "-c", "exec pg-hooks run pre-land --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
+post-rebase-fix = [
+  { run = ["sh", "-c", "exec pg-hooks run pre-land --only fix --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
+]
+pre-merge-verify = [
+  { run = ["sh", "-c", "exec pg-hooks run pre-land --only check --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
   { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m" },
 ]
 ```
@@ -223,8 +228,14 @@ What differs from the old steps, and what the handler MUST keep in mind:
   (operator ruling, Phillip, 2026-10-23); FF-1c
   MUST NOT be made to pass by relocking, has no inconclusive outcome, and the handler MUST NOT re-run the
   command unchanged hoping for a different answer.
-- A fixer that rewrites a file during the hook run is committed by the tool's
-  autofix and the hook re-runs; an exhausted autofix is a `hook-failed` stop.
+- A fixer (a `post-rebase-fix` entry) that rewrites a file during the hook run is
+  committed by the tool's autofix and the hook re-runs; an exhausted autofix is a
+  `hook-failed` stop. A `pre-merge-verify` entry never autofixes: it is read-only.
+- **`--no-verify`.** The handler MUST NOT pass `--no-verify` to `pg-git-lander`
+  (it skips every `pre-merge-verify` entry and git's own hooks for the run, and the
+  outcome carries the warning `verify-skipped`) unless the operator said explicitly,
+  for that land, to use it, just as with `git`'s own `--no-verify`. A failed or flaky
+  gate is reported and tracked, not bypassed.
 - The hooks run in the caller's environment, so the caller's `PATH` MUST carry
   `bd`, `go`, `pg-test-runner` and the rest the hooks use (`pg-git-lander config
 check` warns about a missing command). Landings onto one target are serial for
@@ -245,7 +256,7 @@ error, 2 usage error, 7 config error, 9 `busy`, 21 `stopped`, 22 `refused`.
 | `nothing-to-land` (0)                                                                                                                           | Report `landed` noting nothing was left to land (the target already held every change); the tool's branch and worktree handling still applies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `busy` (9)                                                                                                                                      | Nothing changed. The `--wait 20m` already queued behind the holder; a `busy` after it is a stop: track it, report `busy`, and ask (R-7). Do not retry in a loop.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `stopped`, reason `conflict` or `resolve-failed` (21)                                                                                           | The operation waits in the work worktree (the outcome's `next` and `paths` name it). Resolve in that worktree right away, `git add` the paths, and run `pg-git-lander land "$FB" --continue --repo "$CC"` (or `--skip --repo "$CC"`); when not confident in the resolution or not resolving it now, track the problem and run `pg-git-lander land "$FB" --abort --repo "$CC"`, then report `stopped:rebase-conflict` with the conflicted paths. Summarize every confident resolution to the user. Never hand-resolve `flake.lock` JSON: a repository that wants it merged mechanically declares a `[[conflict]]` rule for it, and an unresolved one is a stop.                                                                                               |
-| `stopped`, reason `hook-failed` at `before_move` (21)                                                                                           | Read `log_tail` for which hook failed. The pre-land hook run failing: report `stopped:precommit-branch-diff-failed` with the repo, the failing hook(s) and their output; the handler does not fix a hook violation itself (operator-decided); track the problem, then `--abort --repo ""`. The evaluation check failing: report `stopped:eval-failed`, naming the failing output and the reproduce command `pre-land-eval "$WT" "$FB"` (or `pn workspace flake-check --no-build --rev "$FB" "$WT"`); this is **agent-fixable** (AGENT-FIXABLE): `--abort --repo ""` (no bead is needed, because the agent fixes it now and re-invokes at once), fix the evaluation error in `<WT>`, commit, and re-invoke `integrate-branch`. The two MUST NOT be conflated. |
+| `stopped`, reason `hook-failed` at `post-rebase-fix` or `pre-merge-verify` (21)                                                                 | Read `log_tail` for which hook failed. The pre-land hook run failing: report `stopped:precommit-branch-diff-failed` with the repo, the failing hook(s) and their output; the handler does not fix a hook violation itself (operator-decided); track the problem, then `--abort --repo ""`. The evaluation check failing: report `stopped:eval-failed`, naming the failing output and the reproduce command `pre-land-eval "$WT" "$FB"` (or `pn workspace flake-check --no-build --rev "$FB" "$WT"`); this is **agent-fixable** (AGENT-FIXABLE): `--abort --repo ""` (no bead is needed, because the agent fixes it now and re-invokes at once), fix the evaluation error in `<WT>`, commit, and re-invoke `integrate-branch`. The two MUST NOT be conflated. |
 | `stopped`, retryable reason (`transient`, `timeout`, `interrupted`, `race`, `lock-lost`, `holder-died`, `checkout-changed`, `target-busy`) (21) | `--continue --repo ""` right away; a `transient` (exit 75) or `timeout` stop is retried at most once, and a `lock-lost` or `holder-died` stop is never worth a retry, so otherwise track the problem and `--abort --repo ""`; never leave it stopped. The tool already retries a lost fast-forward race `max_race_retries` times; a persistent `race` after that is a track, `--abort`, then ask (R-7).                                                                                                                                                                                                                                                                                                                                                      |
 | `stopped`, any other reason (`max-conflict-rounds`, `branch-moved`, `move-unverified`, `commit-rejected`, `git-error`, `internal-error`) (21)   | Track the problem, then `--abort --repo "$CC"` (or `--quit --repo "$CC"` where only that is valid), and report the reason and `log_tail` verbatim. Do not map it onto a nearer reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `refused` (22)                                                                                                                                  | Nothing changed (except `holder-died`, which converted a record to `stopped`). Report `stopped:<reason>` using the tool's own reason. For a dirty `<WT>` report `stopped:worktree-dirty` with `git -C "$WT" status --porcelain`; for a foreign rebase in `<WT>` report `stopped:rebase-in-progress`; the operator commits, stashes, finishes or aborts, then re-invokes. For `stopped-pending` or `target-stopped`, which `--wait` may not cover, report it to the caller as that outcome; the stopped operation's owner resolves or `--abort`s it first. The handler MUST NOT perform the disposition itself.                                                                                                                                               |
@@ -325,7 +336,7 @@ flowchart TD
     O -->|"stopped: conflict"| C{"confident in the resolution?"}
     C -->|Yes| CC["resolve in the work worktree, add, land FB --continue --repo CC"]
     C -->|No| AB["track the problem, land FB --abort --repo CC, report stopped:rebase-conflict"]
-    O -->|"stopped: hook-failed at before_move"| H{"which hook?"}
+    O -->|"stopped: hook-failed at pre-merge-verify"| H{"which hook?"}
     H -->|"pre-land hook run"| S1["track, abort, report stopped:precommit-branch-diff-failed"]
     H -->|"evaluation check"| S2["abort --repo CC (no bead needed), report stopped:eval-failed, agent fixes and re-invokes"]
     O -->|"stopped: retryable"| T["continue --repo CC right away, else track and abort --repo CC"]
@@ -342,18 +353,18 @@ the `pull-request` handler). A `landed` report MUST include the tool's warnings,
 printed (verbatim, so the skip is visible), and a line for each conflict the agent
 resolved. Its `<reason>` values, and what the operator does next:
 
-| `<reason>`                     | Raised by        | What the operator does next                                               |
-| ------------------------------ | ---------------- | ------------------------------------------------------------------------- |
-| detached `HEAD`                | Step 0           | check out the feature branch                                              |
-| canonical off-primary or dirty | FF-0             | Tier R guidance — never reset the canonical (R-3/R-8)                     |
-| `core.worktree` in canonical   | FF-0             | operator unsets the key in the canonical `.git/config`; never the handler |
-| `worktree-dirty`               | tool refusal     | commit or stash in `<WT>`, then re-invoke                                 |
-| `rebase-in-progress`           | tool refusal     | finish or abort **that** rebase in `<WT>`, then re-invoke                 |
-| `rebase-conflict`              | conflict stop    | resolve the conflict, then re-invoke                                      |
-| `precommit-branch-diff-failed` | before_move hook | fix the hook violation (every repo with a hook bundle), then re-invoke    |
-| `eval-failed`                  | before_move hook | agent-fixable: fix the evaluation error in `<WT>`, commit, then re-invoke |
-| tool reason (any other)        | the tool         | as the outcome's `hint` and `next` say                                    |
-| `busy` or race retry limit hit | the tool         | re-run once concurrent landings settle                                    |
+| `<reason>`                     | Raised by             | What the operator does next                                               |
+| ------------------------------ | --------------------- | ------------------------------------------------------------------------- |
+| detached `HEAD`                | Step 0                | check out the feature branch                                              |
+| canonical off-primary or dirty | FF-0                  | Tier R guidance — never reset the canonical (R-3/R-8)                     |
+| `core.worktree` in canonical   | FF-0                  | operator unsets the key in the canonical `.git/config`; never the handler |
+| `worktree-dirty`               | tool refusal          | commit or stash in `<WT>`, then re-invoke                                 |
+| `rebase-in-progress`           | tool refusal          | finish or abort **that** rebase in `<WT>`, then re-invoke                 |
+| `rebase-conflict`              | conflict stop         | resolve the conflict, then re-invoke                                      |
+| `precommit-branch-diff-failed` | pre-merge-verify hook | fix the hook violation (every repo with a hook bundle), then re-invoke    |
+| `eval-failed`                  | pre-merge-verify hook | agent-fixable: fix the evaluation error in `<WT>`, commit, then re-invoke |
+| tool reason (any other)        | the tool              | as the outcome's `hint` and `next` say                                    |
+| `busy` or race retry limit hit | the tool              | re-run once concurrent landings settle                                    |
 
 ## Rules this handler enforces (Tier R, RFC 2119)
 

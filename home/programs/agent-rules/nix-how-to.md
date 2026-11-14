@@ -88,7 +88,7 @@ prek run --last-commit                        # shorthand for --from-ref HEAD~1 
 This still only touches files the range actually changed (same cost profile as `--files`, not
 `--all-files`) — it just computes the file list from git instead of you enumerating it. This is
 what `ff-merge-to-main` runs automatically at land time, for every repo that configures it
-(a `before_move` hook of `pg-git-lander land` running `pg-hooks run pre-land`),
+(a `post-rebase-fix` and a `pre-merge-verify` hook of `pg-git-lander land` running `pg-hooks run pre-land`),
 verifying the branch's cumulative diff in one pass rather than trusting that each commit's own
 per-commit run summed to the same thing. Reach for the same form yourself whenever you need to
 validate more than one commit's combined changes ad hoc (e.g. after an interactive rebase, or
@@ -104,9 +104,10 @@ committing. The gates are:
 1. **The commit's own hook run** — the hooks on the staged files (see the `--all-files`
    prohibition above), including the commit-time `run-unit-tests` hook (`pg-test-runner`, touched
    projects only).
-2. **At land, the repo's `before_move` hooks** — `ff-merge-to-main` lands through
-   `pg-git-lander land`, which runs the repo's `before_move` hooks (its `.pg-git-lander.toml`) on the
-   rebased result, under the target's lock. The first is the old FF-1b: `pg-hooks run pre-land`
+2. **At land, the repo's `pre-merge-verify` hooks** — `ff-merge-to-main` lands through
+   `pg-git-lander land`, which runs the repo's `post-rebase-fix` hooks (fixers, after a rebase only)
+   and `pre-merge-verify` hooks (read-only checks, on every path; its `.pg-git-lander.toml`) on the
+   rebased result, before the branch moves. The first is the old FF-1b: `pg-hooks run pre-land`
    (the commit-range check above) over the whole branch diff. `pg-hooks` resolves the clone's hook
    bundle itself. Two cases skip the check with a notice instead of failing the land (the hook
    declares `skip_exit_codes = [13, 127]`), and the land records the notice line verbatim in its
@@ -119,7 +120,7 @@ committing. The gates are:
    hook failure (exit `10`) or any other non-zero exit stops the land and is reported as
    `stopped:precommit-branch-diff-failed`.
 
-3. **The second `before_move` hook (the old FF-1c)** — the eval-only `pre-land-eval` check, a caller of
+3. **The second `pre-merge-verify` hook (the old FF-1c)** — the eval-only `pre-land-eval` check, a caller of
    `pn workspace flake-check --no-build` (it evaluates a flake's `checks`, `packages` and `devShells`
    derivation paths at the commit being landed, against the local workspace siblings, and builds none
    of them; it is NOT a full `nix flake check` and NOT nix's own `--no-build`; no land step relocks to
@@ -141,7 +142,7 @@ ran, and several concurrent sessions each running one saturated the machine.
 Repos with cloud CI (`phillipg-nix-repo-base`, `phillipgreenii-nix-support-apps`, `phillipgreenii-nix-personal`, `nix-overlay`) keep CI as
 the whole-repo gate. Accepted interim risk: `phillipgreenii-nix-agent-support` and
 `phillipg-nix-ziprecruiter` have no CI, so their only automatic test runners are the commit-time
-`run-unit-tests` hook plus the land's `before_move` `pg-hooks run pre-land` over the branch diff (and the eval-only check where the repo configures it) — the whole-repo `checks.*`
+`run-unit-tests` hook plus the land's `pre-merge-verify` `pg-hooks run pre-land` over the branch diff (and the eval-only check where the repo configures it) — the whole-repo `checks.*`
 derivations (`checks.pre-commit`, every `*-go-tests`, golangci lint, spec-drift) run only when an
 agent builds them. If that lets problems through, that is the signal to bring CI back.
 

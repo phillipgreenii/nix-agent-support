@@ -34,6 +34,10 @@
 
 `pg-git-lander rebase --quit`
 
+- Land past a failed or flaky `pre-merge-verify` gate, ONLY when the operator said to (it skips those hooks and git's own hooks for the run, and the outcome says so):
+
+`pg-git-lander land {{feature-branch}} --continue --no-verify`
+
 - Show the operations in this repository, as JSON:
 
 `pg-git-lander status --json`

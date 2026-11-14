@@ -8,13 +8,14 @@ leave every worktree the tool switched in its starting state.
 ## Synopsis
 
 ```text
-pg-git-lander rebase BRANCH --onto REF [--source-worktree PATH] [--work-worktree PATH]
+pg-git-lander rebase BRANCH --onto REF [--source-worktree PATH] [--work-worktree PATH] [--no-verify]
                      [--wait DURATION] [--context KEY=VALUE]... [--json]
 pg-git-lander land   BRANCH [--into TARGET] [--target-worktree PATH] [--source-worktree PATH] [--work-worktree PATH]
-                     [--keep-source-worktree] [--keep-source-branch]
+                     [--keep-source-worktree] [--keep-source-branch] [--no-verify]
                      [--wait DURATION] [--context KEY=VALUE]... [--json]
-pg-git-lander rebase [BRANCH] --continue | --skip | --abort | --quit [--wait DURATION] [--json]
-pg-git-lander land   [BRANCH] --continue | --skip | --abort | --quit [--wait DURATION] [--json]
+pg-git-lander rebase [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
+pg-git-lander land   [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
+pg-git-lander rebase|land [BRANCH] --abort | --quit [--wait DURATION] [--json]
 pg-git-lander status [BRANCH] [--json]
 pg-git-lander log    OP_ID | BRANCH [--tail N]
 pg-git-lander config check [--file PATH] [--json]
@@ -87,7 +88,7 @@ file `.pg-git-lander.toml` is read from the tip of the relevant ref. Validate ei
 | `primary`                   | XDG       | `origin/HEAD`'s branch, else `main` | The default TARGET.                                                                                                                                                                                                                                             |
 | `lock.lease_ttl`            | XDG       | `30s`                               | Lease length; the holder renews every third of it.                                                                                                                                                                                                              |
 | `lock.wait`                 | XDG       | `60s`                               | How long a waiter waits for a live holder before `busy`.                                                                                                                                                                                                        |
-| `run_git_hooks`             | all       | `true`                              | The tool's own commits run git's commit hooks; `false` passes `--no-verify`.                                                                                                                                                                                    |
+| `run_git_hooks`             | all       | `true`                              | The tool's own commits run git's commit hooks; `false` passes `--no-verify` to them (and `--no-verify` of the tool implies it for one run).                                                                                                                     |
 | `max_race_retries`          | all       | `2`                                 | Returns to the rebase after TARGET moved.                                                                                                                                                                                                                       |
 | `revalidate`                | all       | `full`                              | `none`, `paths` or `full`: what a land does when TARGET moved while its hooks ran. `paths` keeps the hook result when the moved range touches no file the branch changes and the rebase is clean; `none` keeps it on any clean rebase; `full` reruns the hooks. |
 | `max_conflict_rounds`       | all       | `10`                                | Conflict stops allowed in one operation.                                                                                                                                                                                                                        |
@@ -97,28 +98,67 @@ file `.pg-git-lander.toml` is read from the tip of the relevant ref. Validate ei
 | `conflict_default`          | all       | none                                | A conflict rule without `glob`, for any path no rule matches.                                                                                                                                                                                                   |
 
 A hook entry is `{ run = [argv], timeout = duration, skip_exit_codes = [int], cwd = "worktree" | "repo", env = { } }`.
-`cwd` defaults to `worktree`, except at `before`, which defaults to `repo`. A missing `timeout` is 10 minutes.
+`cwd` defaults to `worktree`. A missing `timeout` is 10 minutes.
 
 ### Hook points
 
-| Point          | Runs                                                                                  | A non-zero exit               |
-| -------------- | ------------------------------------------------------------------------------------- | ----------------------------- |
-| `before`       | At the start, after the preconditions, before any worktree is switched; once only     | refusal `before-hook-refused` |
-| `after_rebase` | After a rebase that replayed commits onto a moved base; never on the fast-forward way | autofix, else stop            |
-| `before_move`  | Immediately before the move, on every path that moves a ref                           | autofix, else stop            |
-| `after`        | After the move                                                                        | warning `after-hook-failed`   |
+The same two names exist under `hooks.land` and `hooks.rebase`. Names say when and what:
 
-Hooks run in list order. A land takes only BRANCH and the source and work worktree locks while `before`,
-`after_rebase` and `before_move` run; TARGET and the destination worktree (the main worktree) are locked afterwards,
+| Point              | Runs                                                                                                                                                          | May change the tree                                                                          | A non-zero exit    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------ |
+| `post-rebase-fix`  | Only after a rebase that replayed commits onto a moved base; never on the fast-forward way                                                                    | Yes: autofix commits (a failing entry that changed tracked files is committed and run again) | autofix, else stop |
+| `pre-merge-verify` | Immediately before the branch ref moves, on every path that moves a ref: after a rebase, on the fast-forward way, on each race retry and on each `--continue` | No: read-only                                                                                | stop               |
+
+Every `post-rebase-fix` entry runs before any `pre-merge-verify` entry. For `rebase` (which merges nothing)
+`pre-merge-verify` runs immediately before BRANCH moves to the result.
+
+`pre-merge-verify` is read-only, and the tool enforces it: after each entry it checks git status over tracked files
+(staged or unstaged) and HEAD. A tracked change or a moved HEAD stops the operation with `hook-failed` and detail
+`verify-modified-tree`; if the entry also failed, the stop is `hook-failed` and the detail names both facts (for
+example `exit-1+verify-modified-tree`). Before stopping, the tool restores the tracked files of its own work worktree
+(`git reset --hard` to the tip the entry started from), so `--continue` re-enters clean. Untracked and ignored files
+are ignored: build outputs are normal.
+
+The environment variable `PG_GIT_LANDER_HOOK` carries the point name, and an autofix commit message reads
+`style: apply post-rebase-fix fixes made during <operation>`; both take the new names only. Stop records and `--json`
+name the stage `post-rebase-fix` or `pre-merge-verify`; a record written by an older version (stages `after_rebase`,
+`before_move`, `after`) still resumes (`after` as clean-up: the move had already happened), and `status` and `log`
+still read old events and logs.
+
+The former keys `before`, `after_rebase`, `before_move` and `after` are configuration errors in the repo file and in
+the XDG file, naming the replacement (`after_rebase` is `post-rebase-fix`, `before_move` is `pre-merge-verify`) or the
+removal (`before`, `after`), the file and the line; a table that sets an old key and its replacement is an error naming
+both. There is no mapping and no deprecation window: `config check` shows the error, and a land in a repo whose file
+still has an old key is refused as `repo-config-error`.
+
+Hooks run in list order. A land takes only BRANCH and the source and work worktree locks while `post-rebase-fix`
+and `pre-merge-verify` run; TARGET and the destination worktree (the main worktree) are locked afterwards,
 for the few seconds of the fast-forward, so a long check does not hold up other landings onto TARGET. If TARGET is still
 at the tip the work branch was rebased onto, the tool fast-forwards. If it moved, `revalidate` decides whether the hook
 result is reused after a clean rebase under the lock or the rebase and hooks run again; the number of such returns is
 bounded by `max_race_retries` (then `race`, without having held TARGET). A TARGET still locked by another landing after
 `lock.wait` ends the operation with the retryable stop `target-busy` (`--continue` goes straight to the lock step).
 The tool keeps no queue: queuing is the caller's. `op_end` events carry `target_lock_wait_ms` and `target_lock_held_ms` (recorded on every exit, lock-lost stops
-included). The `after` hook and the clean-up still run holding TARGET and the destination worktree, so a slow `after`
-hook extends the hold: `after` hooks SHOULD be short. A reuse of the hook result emits `revalidate_reuse` (not
+included). The clean-up runs holding TARGET and the destination worktree. A reuse of the hook result emits `revalidate_reuse` (not
 `race_retry`), and a waiter's decision about a stopped operation emits `settle`.
+
+## `--no-verify`
+
+`--no-verify` skips every `pre-merge-verify` entry, on every race retry and every `--continue` of the run, and, for
+that run, the tool's own commits (autofix, conflict resolution) and its initial `git rebase` skip git's hooks too
+(`git rebase --no-verify` skips only the pre-rebase hook). It does NOT skip `post-rebase-fix`, the conflict rules and
+their `verify` commands, or the built-in preconditions and move verification. `git rebase --continue`, `--skip` and the
+final `git merge --ff-only` cannot carry the flag and do not get it.
+
+| Matter          | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Accepted with   | `land` and `rebase` BRANCH, `--continue` and `--skip`. `--abort` and `--quit` reject it (usage error). It is not a "fresh" flag: a stopped land (which refuses a plain re-run) accepts `--continue --no-verify`.                                                                                                                                                                                                                                                                   |
+| Remembered      | In the BRANCH lock record (field `no_verify`) and the operation record; sticky: a later `--continue` without the flag keeps it, and only `--abort` ends it. The record's schema number is unchanged: an older tool ignores the field and runs verify, which fails safe.                                                                                                                                                                                                            |
+| `run_git_hooks` | `--no-verify` implies `run_git_hooks = false` for that run. `pre-merge-verify` hooks are not "git hooks" and are skipped by the flag, not by `run_git_hooks`.                                                                                                                                                                                                                                                                                                                      |
+| Recorded        | Every outcome of the run carries the warning `verify-skipped` (reason `no-verify`, detail `N pre-merge-verify entries skipped at <tip>`, also with N = 0), which the one human line prints. The JSON field `verify_skipped` lists `{point, index, run, tip}` for each skipped entry (`skipped_hooks` is a different thing: `skip_exit_codes` skips). The log and `events.jsonl` get a `verify_skipped` event for each pass over the point (each race retry and each `--continue`). |
+
+An agent MUST NOT pass `--no-verify` unless the operator explicitly said to for that land, just as with `git`'s own
+`--no-verify`. This is policy; the tool does not refuse agents.
 
 ## A stopped operation that holds the main worktree
 
@@ -145,7 +185,8 @@ problem and run `--abort` so others can land.
 With `--json` every outcome has every field, `null` or empty when it does not apply, so a caller parses one shape. The
 object carries `schema` (1), `outcome` and `exit`, the operation (`op_id`, `operation`, `branch`, `target`, `onto`),
 for a stop or refusal `reason`, `detail`, `retryable`, `stage`, `next` and `hint`, for `busy` the `holder`, the worktree
-records, `branch_fate`, `worktree_fate`, `tips`, `landed_commit`, `path_taken`, `stats`, `warnings` and `log_tail`.
+records, `branch_fate`, `worktree_fate`, `tips`, `landed_commit`, `path_taken`, `stats`, `skipped_hooks`,
+`verify_skipped`, `warnings` and `log_tail`.
 `pg-git-lander log OP_ID` prints the full log.
 
 ## Installed extras

@@ -422,3 +422,21 @@ func TestVersionAndHelp(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// --help documents --no-verify, what it skips and what it keeps, and the two
+// hook names.
+func TestHelpDocumentsNoVerifyAndTheHookNames(t *testing.T) {
+	f := newFx(t)
+	r := f.cli(f.repo.Dir, "land", "--help")
+	if r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	for _, want := range []string{
+		"--no-verify", "skip pre-merge-verify hooks and git's own hooks for this run", "do not use unless the operator asked",
+		"post-rebase-fix", "pre-merge-verify", "verify-modified-tree", "--abort or --quit",
+	} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("--help lacks %q:\n%s", want, r.stdout)
+		}
+	}
+}
