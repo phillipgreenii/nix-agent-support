@@ -562,6 +562,8 @@ var pluginForms = []pluginForm{
 	{"pb", "pg-claude-code-recorder status", evalcontract.Approve, ""},
 	{"pb", "pg-claude-code-recorder status --json", evalcontract.Approve, ""},
 	{"pb", "pg-claude-code-recorder status --short", evalcontract.Approve, ""},
+	{"pb", "pg-claude-code-recorder conversations --suspected-crash --since 7d --json", evalcontract.Approve, ""},
+	{"pb", "pg-claude-code-recorder conversations --crashed --socket /tmp/x.sock", evalcontract.Abstain, "--socket is unmodeled"},
 	{"pb", "pg-claude-code-recorder status --watch", evalcontract.Abstain, "--watch polls until caught up; unmodeled"},
 	{"pb", "pg-claude-code-recorder serve", evalcontract.Abstain, "starts the recorder daemon"},
 	{"pb", "pg-claude-code-recorder remove", evalcontract.Abstain, "removes recorded data"},

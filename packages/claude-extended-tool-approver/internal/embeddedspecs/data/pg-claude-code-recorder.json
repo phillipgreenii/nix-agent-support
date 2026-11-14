@@ -63,6 +63,139 @@
     "unknownFlag": "insufficient",
     "endOfOptions": true,
     "subcommands": {
+      "conversations": {
+        "name": "conversations",
+        "provenance": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go conversations, this repo 2026-11-14",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+          }
+        },
+        "flags": {
+          "--allow-partial": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          },
+          "--crashed": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          },
+          "--ended": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          },
+          "--limit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          },
+          "--suspected-crash": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "pg-claude-code-recorder",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
       "status": {
         "name": "status",
         "provenance": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/status.go status, this repo 2026-11-04",

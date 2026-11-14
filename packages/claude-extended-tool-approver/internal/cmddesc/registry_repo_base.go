@@ -409,7 +409,7 @@ var paMonitorSchema = CommandSchema{
 	},
 }
 
-// recorderSchema: ONLY the read-only `pg-claude-code-recorder status` query
+// recorderSchema: ONLY the read-only `pg-claude-code-recorder status` and `conversations` queries
 // (the recorder's post-apply verify beads run it). Source:
 // packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/status.go: it
 // asks the daemon over its socket, else reads the offline answer from disk, and
@@ -427,6 +427,25 @@ var recorderSchema = CommandSchema{
 			Name:            "status",
 			Provenance:      "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/status.go status, this repo 2026-11-04",
 			Flags:           map[string]FlagSpec{"--json": inert, "--short": inert, "--allow-partial": inert},
+			Positionals:     PositionalSpec{Rest: Unmodeled},
+			ImplicitEffects: []ImplicitEffect{{Role: Remote("read"), Target: "pg-claude-code-recorder"}},
+			Stdin:           StdinNever,
+			Stdout:          StdoutContent,
+			UnknownFlag:     UnknownFlagInsufficient,
+			EndOfOptions:    true,
+		},
+		// conversations sends conversation.list to the daemon and prints rows
+		// (lifecycle.go conversations): a read. --cwd (a path filter) and the
+		// --socket/--config/--client flags are NOT modeled, so they abstain.
+		"conversations": {
+			Name:       "conversations",
+			Provenance: "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go conversations, this repo 2026-11-14",
+			Flags: map[string]FlagSpec{
+				"--json": inert, "--crashed": inert, "--suspected-crash": inert, "--allow-partial": inert,
+				"--ended": {Arity: ArityOne, Operand: Literal},
+				"--since": {Arity: ArityOne, Operand: Literal},
+				"--limit": {Arity: ArityOne, Operand: Literal},
+			},
 			Positionals:     PositionalSpec{Rest: Unmodeled},
 			ImplicitEffects: []ImplicitEffect{{Role: Remote("read"), Target: "pg-claude-code-recorder"}},
 			Stdin:           StdinNever,

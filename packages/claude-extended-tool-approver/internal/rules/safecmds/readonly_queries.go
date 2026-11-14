@@ -21,7 +21,9 @@ import "strings"
 //
 // A flag outside the surface (status --watch, --socket, --config), an extra or
 // missing positional, a glued --flag=value, a value that opens with "-", or any
-// word carrying a live shell expansion is refused. serve, remove, coverage,
+// word carrying a live shell expansion is refused. conversations --cwd is left
+// out (a path-valued filter the approver conventions do not settle), as are
+// --socket, --config and --client. serve, remove, coverage,
 // the other pa-monitor subcommands and pg-claude-control are never approved.
 type readOnlyQuerySpec struct {
 	bools  map[string]bool
@@ -33,6 +35,10 @@ type readOnlyQuerySpec struct {
 var readOnlyQueries = map[string]readOnlyQuerySpec{
 	"pg-claude-code-recorder status": {
 		bools: map[string]bool{"--json": true, "--short": true, "--allow-partial": true},
+	},
+	"pg-claude-code-recorder conversations": {
+		bools:  map[string]bool{"--json": true, "--crashed": true, "--suspected-crash": true, "--allow-partial": true},
+		values: map[string]bool{"--ended": true, "--since": true, "--limit": true},
 	},
 	"pa-monitor sessions": {
 		bools:  map[string]bool{"--json": true, "--stats": true},
