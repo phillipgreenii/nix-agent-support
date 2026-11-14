@@ -14,6 +14,10 @@ linters:
     # noctx: flags database/sql, net/http and os/exec calls that use the
     # non-Context form. Not in "standard".
     - noctx
+    # contextcheck: flags functions that receive a context.Context but call a
+    # callee with a fresh context.Background()/TODO() instead of passing it on.
+    # Not in "standard".
+    - contextcheck
   settings:
     errcheck:
       # Writes to stdout/stderr via fmt.Fprint* essentially never fail in a CLI,
