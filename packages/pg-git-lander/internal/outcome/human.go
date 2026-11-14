@@ -61,6 +61,14 @@ func (o *Outcome) Human() string {
 			msg = o.Reason
 		}
 		fmt.Fprintf(&b, "stopped: %s: %s", op, msg)
+		// A generic message (for example "the clean-up stopped") says nothing
+		// on its own: name the reason and the detail when they add to it.
+		if o.Reason != "" && o.Reason != msg && o.Detail != "" {
+			fmt.Fprintf(&b, " (%s)", o.Reason)
+		}
+		if o.Detail != "" && o.Detail != msg {
+			fmt.Fprintf(&b, ": %s", o.Detail)
+		}
 		writeWorkWorktree(&b, o)
 		writeNext(&b, o)
 	case Refused:

@@ -77,7 +77,7 @@ func TestBuiltBinarySmokeRebaseAndLand(t *testing.T) {
 		cmd := exec.CommandContext(context.Background(), bin, args...)
 		cmd.Dir, cmd.Env = repo.Dir, env
 		var out bytes.Buffer
-		cmd.Stdout = &out
+		cmd.Stdout, cmd.Stderr = &out, &out
 		err := cmd.Run()
 		code := 0
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -94,9 +94,31 @@ func TestBuiltBinarySmokeRebaseAndLand(t *testing.T) {
 	}
 	out, code = run("land", "feature/x", "--into", mainBranch)
 	if code != 0 || !strings.HasPrefix(out, "landed feature/x into "+mainBranch) {
+		dumpStateDir(t, repo.Dir)
 		t.Fatalf("land: exit %d: %s", code, out)
 	}
 	if got := git(repo.Dir, "ls-tree", "--name-only", mainBranch, "x.txt"); got != "x.txt" {
 		t.Fatalf("x.txt not on %s: %q", mainBranch, got)
 	}
+}
+
+// dumpStateDir logs the event log and every operation log the binary wrote,
+// so a stop in a slow environment carries its own timeline.
+func dumpStateDir(t *testing.T, repoDir string) {
+	t.Helper()
+	state := filepath.Join(repoDir, ".git", "pg-git-lander")
+	_ = filepath.WalkDir(state, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		b, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return nil
+		}
+		if len(b) > 20000 {
+			b = b[len(b)-20000:]
+		}
+		t.Logf("--- %s\n%s", p, b)
+		return nil
+	})
 }

@@ -290,3 +290,15 @@ func TestHumanSingularPlural(t *testing.T) {
 		t.Errorf("got %s", got)
 	}
 }
+
+// A stop with a generic message still names its reason and detail in the
+// human text.
+func TestHumanStoppedNamesReasonAndDetail(t *testing.T) {
+	o := NewStopped(StopLockLost, "land", "feature/x", StageCleanup, "")
+	o.Message = "the clean-up stopped"
+	o.Detail = "the lock was lost"
+	want := "stopped: land feature/x: the clean-up stopped (" + string(StopLockLost) + "): the lock was lost"
+	if got, _, _ := strings.Cut(o.Human(), "\n"); got != want {
+		t.Errorf("want %q, got %q", want, got)
+	}
+}
