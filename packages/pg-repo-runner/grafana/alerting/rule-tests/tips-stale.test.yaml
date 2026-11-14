@@ -46,3 +46,58 @@ tests:
       - eval_time: 35m
         alertname: pg-repo-runner-tips-stale
         exp_alerts: []
+
+  # Suppression while pg-router holds the repo-tip-source-<repo> registration behind a
+  # resource level. The router accrues pg_router_requirement_blocked_seconds_total{role}
+  # (role is the registration name, emitters included) every tick while the poll is blocked.
+  - name: a repo held by a level stays quiet while its runs are stale
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
+        values: "0+60x10"
+      - series: 'pg_router_requirement_blocked_seconds_total{role="repo-tip-source-alpha",resource="disk_usage",sole="true",steps_below="1"}'
+        values: "0+60x100"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []
+
+  - name: a repo admitted by pg-router but not running fires while another repo is held
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
+        values: "0+60x10"
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="beta"}'
+        values: "0+60x10"
+      - series: 'pg_router_requirement_blocked_seconds_total{role="repo-tip-source-alpha",resource="disk_usage",sole="true",steps_below="1"}'
+        values: "0+60x100"
+      - series: 'pg_router_requirement_blocked_seconds_total{role="repo-tip-source-beta",resource="disk_usage",sole="true",steps_below="1"}'
+        values: "0+60x10 600x90"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts:
+          - exp_labels:
+              severity: error
+              repo: beta
+
+  - name: a hold that ended resumes alerting once the 10 minute window drains
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
+        values: "0+60x10"
+      - series: 'pg_router_requirement_blocked_seconds_total{role="repo-tip-source-alpha",resource="disk_usage",sole="true",steps_below="1"}'
+        values: "0+60x20 1200x80"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts:
+          - exp_labels:
+              severity: error
+              repo: alpha

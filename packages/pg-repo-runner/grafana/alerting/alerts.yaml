@@ -83,7 +83,7 @@ groups:
           severity: error
         annotations:
           summary: "pg-repo-runner has not run for a repo for over 30 minutes"
-          description: "More than 30 minutes have passed since pg_repo_runner_tips_last_run_timestamp_seconds for this repo (the runner runs every 5 minutes; this reads the last known run, so it resolves after a day without any run). Check the pg-router daemon (`pg-router status --json`, gates) and the runner's run log."
+          description: "More than 30 minutes have passed since pg_repo_runner_tips_last_run_timestamp_seconds for this repo (the runner runs every 5 minutes; this reads the last known run, so it resolves after a day without any run). It stays quiet for a repo while pg-router holds that repo's repo-tip-source-<repo> registration behind a resource level (pg_router_requirement_blocked_seconds_total accrued in the last 10 minutes): a hold is the cause, not a runner defect, so read pg-router-gate-held (and pg-router-resource-held-nonbest) instead, and `pg-router level list` / `pg-router explain` for the resource. Firing here means pg-router admits the poll but the runner has not run: check the pg-router daemon (`pg-router status --json`) and the runner's run log."
         data:
           - refId: A
             relativeTimeRange:
@@ -94,7 +94,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "time() - max by (repo) (max_over_time(pg_repo_runner_tips_last_run_timestamp_seconds[1d]))"
+              expr: 'time() - max by (repo) (max_over_time(pg_repo_runner_tips_last_run_timestamp_seconds[1d])) unless on(repo) label_replace(sum by (role) (increase(pg_router_requirement_blocked_seconds_total{role=~"repo-tip-source-.+"}[10m])) > 0, "repo", "$1", "role", "repo-tip-source-(.+)")'
           - refId: B
             datasourceUid: __expr__
             model:
