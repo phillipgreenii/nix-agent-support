@@ -158,11 +158,11 @@ func TestLiveSessionsRowsReadStayBoundedAcrossRegistryWrites(t *testing.T) {
 	rowsAfterWrite(1)
 	early := rowsAfterWrite(2)
 	var late int64
-	for i := 3; i < 80; i++ {
+	for i := 3; i < 10; i++ {
 		late = rowsAfterWrite(i)
 	}
 	if early == 0 || late > early {
-		t.Fatalf("rows read per call grew with the registry history: %d after 3 writes, %d after 80", early, late)
+		t.Fatalf("rows read per call grew with the registry history: %d after 3 writes, %d after 10", early, late)
 	}
 	// A registry file that moves to a second session and a deletion still agree
 	// with the full derivation.

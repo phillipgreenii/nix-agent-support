@@ -58,14 +58,22 @@ func TestProcessListReadsOnlyNewRegistryRecords(t *testing.T) {
 		}
 		return rows
 	}
-	for i := 0; i < 60; i++ {
+	var early, late int64
+	for i := 0; i < 10; i++ {
 		v.k.AddRegistry("73291", liveRegistry(73291, liveSessA, []string{"idle", "busy"}[i%2]))
 		v.k.AddRegistry("73292", liveRegistry(73292, liveSessB, "busy"))
 		v.k.Parse()
-		if i == 59 {
+		if i == 9 {
 			break
 		}
-		check("registry write")
+		rows := check("registry write")
+		if i == 2 {
+			early = rows
+		}
+		late = rows
+	}
+	if early == 0 || late > early {
+		t.Fatalf("rows read per list grew with the registry history: %d after 3 writes, %d after 9", early, late)
 	}
 	// Rows read by a list after one more registry write, against after a
 	// history-only write (no registry row at all).
