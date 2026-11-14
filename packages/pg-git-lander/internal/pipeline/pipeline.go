@@ -710,8 +710,25 @@ func (s *session) configOutcome(e *config.Error) *outcome.Outcome {
 	return o
 }
 
+// A waiter that finished a dead owner's stop of this very BRANCH (after the
+// move) did so while acquiring the locks: the finish deleted BRANCH, so there
+// is nothing left to land. Without this check the snapshot below ran
+// rev-parse on the vanished branch and ended internal-error.
+func (s *session) branchGoneAfterSettle(ctx context.Context) *Result {
+	if _, ok := s.resolve(ctx, "refs/heads/"+s.req.Branch); ok {
+		return nil
+	}
+	o := s.base(outcome.New(outcome.NothingToLand))
+	o.OpID, o.Log, o.PathTaken = s.p.OpID, s.p.Log.Path, string(outcome.PathNothing)
+	o.Message = fmt.Sprintf("BRANCH %s was landed and deleted by the stopped operation of a dead owner that this invocation finished", s.req.Branch)
+	return &Result{Outcome: o}
+}
+
 // afterLock runs steps 3 to 7. Locks are held when it is called.
 func (s *session) afterLock(ctx context.Context) (*Result, error) {
+	if r := s.branchGoneAfterSettle(ctx); r != nil {
+		return r, nil
+	}
 	s.initFacts()
 	s.p.Stage, s.p.StageStarted = oprecord.StageLocked, s.d.Clock.Now()
 	return s.stepsThreeToFive(ctx)

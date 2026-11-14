@@ -288,11 +288,13 @@ func TestTier2KillNineThenResume(t *testing.T) {
 		if got := h.mustGit(h.repo, "rev-parse", "main"); got != shapes[ShapeAhead].facts.Tips["feature/x"] {
 			t.Fatalf("main = %s, want the moved result", got)
 		}
-		// Not nothing-to-land: the record says the move happened here.
+		// The waiter finishes the dead owner's clean-up of the very branch it was
+		// asked to land; that deleted the branch, so it reports nothing-to-land
+		// (it used to end internal-error on the vanished branch).
 		r := h.run("land", "feature/x", "--wait", "10s")
-		expect(t, r, 22, "refused", "holder-died")
-		done(t, h, h.run("land", "feature/x", "--continue"), Expected{
-			Outcome: map[string]any{"outcome": "landed", "exit": 0},
+		expect(t, r, 0, "nothing-to-land", "")
+		done(t, h, r, Expected{
+			Outcome: map[string]any{"outcome": "nothing-to-land", "exit": 0},
 			Snapshot: Snapshot{
 				Refs:        mainMoveTo,
 				Worktrees:   cleanMain,
@@ -426,45 +428,42 @@ func TestTier2StoppedPendingAndTargetStopped(t *testing.T) {
 	h.noProblems()
 }
 
-// afterHookCrash crashes a land of feature/x right after the move (inside git's
-// post-merge hook) and converts the dead holder's record to stopped with a waiter.
-func afterHookCrash(t *testing.T) *harness {
+// settledAfterHookCrash crashes a land of feature/x right after the move (inside
+// git's post-merge hook), and runs a
+// waiter that lands the SAME branch. The waiter converts the dead holder's
+// record to stopped and finishes it (the move happened), which deletes the
+// branch; it ends nothing-to-land and leaves no stop to resume.
+func settledAfterHookCrash(t *testing.T) *harness {
 	t.Helper()
 	h := crashedLand(t, afterTheMove)
-	expect(t, h.run("land", "feature/x", "--wait", "10s"), 22, "refused", "holder-died")
+	expect(t, h.run("land", "feature/x", "--wait", "10s"), 0, "nothing-to-land", "")
 	return h
 }
 
-// Scenario 51: --abort after the move reached expected_result only finishes
-// the cleanup and reports moved_already, leaving TARGET at the result;
-// --continue with the source worktree already removed counts it as done and
-// finishes.
+// Scenario 51: after a crash right after the move, a waiter landing the SAME
+// branch finishes the dead owner's clean-up itself (settled waiter semantics),
+// so there is no stop left for --abort or --continue: both are refused
+// nothing-stopped and TARGET stays at the result. The finish also removed the
+// source worktree.
 func TestTier2AbortAfterMoveAndContinueWithoutSourceWorktree(t *testing.T) {
+	settled := Expected{
+		Outcome: map[string]any{"outcome": "refused", "exit": 22, "reason": "nothing-stopped"},
+		Snapshot: Snapshot{
+			Refs:        mainMoveTo,
+			Worktrees:   cleanMain,
+			NoWorktrees: []string{"src"},
+			TargetTree:  "@tree:feature/x",
+		},
+	}
 	t.Run("abort-after-the-move", func(t *testing.T) {
-		h := afterHookCrash(t)
-		r := h.run("land", "feature/x", "--abort")
-		done(t, h, r, Expected{
-			Outcome: map[string]any{"outcome": "aborted", "exit": 0, "moved_already": true},
-			Snapshot: Snapshot{
-				Refs:       map[string]string{"refs/heads/main": "@feature/x"},
-				Worktrees:  cleanMain,
-				TargetTree: "@tree:feature/x",
-			},
-		})
+		h := settledAfterHookCrash(t)
+		done(t, h, h.run("land", "feature/x", "--abort"), settled)
 	})
 	t.Run("continue-without-the-source-worktree", func(t *testing.T) {
-		h := afterHookCrash(t)
-		h.mustGit(h.repo, "worktree", "remove", h.wtPath("src"))
-		r := h.run("land", "feature/x", "--continue")
-		done(t, h, r, Expected{
-			Outcome: map[string]any{"outcome": "landed", "exit": 0},
-			Snapshot: Snapshot{
-				Refs:        mainMoveTo,
-				Worktrees:   cleanMain,
-				NoWorktrees: []string{"src"},
-				TargetTree:  "@tree:feature/x",
-			},
-		})
+		// The waiter's finish already removed the source worktree (the snapshot
+		// has no src), so a later --continue finds nothing to resume.
+		h := settledAfterHookCrash(t)
+		done(t, h, h.run("land", "feature/x", "--continue"), settled)
 	})
 }
 
