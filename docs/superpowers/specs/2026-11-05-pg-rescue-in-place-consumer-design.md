@@ -55,8 +55,8 @@ Recommendation: a **triage role** (a command role under pg-router, following the
 two stages.
 
 1. **Verify** (read-only, section 5). Always runs. Its outcome picks a branch.
-2. **Act** (only on a path where in-place work is permitted, section 6). Otherwise **Hand over**: the
-   role comments its diagnosis on the item and moves it to the person-only queue.
+2. **Hand over**: the role comments its diagnosis on the item and moves it to the person-only queue.
+   The role performs no in-place operation on any location class (operator ruling, section 6).
 
 The role is a Strategy over the location class of the state, so adding a class later changes one
 table row and not the role.
@@ -67,9 +67,7 @@ flowchart TD
     B --> C["Verify live state, read-only"]
     C -->|"state gone or changed"| D["Comment evidence and close as moot"]
     C -->|"cannot reach the host or path"| E["Comment and release unchanged"]
-    C -->|"state intact, non-canonical location"| F["Act in place, bounded by the item's scope"]
-    C -->|"state intact, canonical clone"| G["Hand over to the person-only queue with diagnosis"]
-    F --> H["Re-verify, comment result, close or hand over"]
+    C -->|"state intact, any location"| G["Hand over to the person-only queue with diagnosis"]
 ```
 
 ## 4. Question B: how the consumer recognises an item
@@ -138,16 +136,24 @@ reset, re-checkout, stash or workaround. Read literally, a consumer that repairs
 a canonical clone breaks R-3. So the rule for the consumer is a table keyed by the location class
 recorded in `pg_rescue_state_kind`:
 
-| Location class    | Consumer MAY act in place?         | Basis                                                                                                                          |
-| ----------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `worktree`        | Yes, after `intact`                | R-3 and R-2 govern the canonical clone. A linked worktree is the agent's own working area, and R-4 already directs work there. |
-| `other-dir`       | Yes, after `intact`                | Not a canonical clone. The item's scope still bounds the action.                                                               |
-| `not-a-repo`      | Verify only, then hand over        | No git probe can prove it is unchanged beyond existence.                                                                       |
-| `canonical-clone` | **No. Open question (section 7).** | Acting is exactly what R-3 forbids.                                                                                            |
+| Location class    | Consumer MAY act in place?         | Basis                                                                                       |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| `worktree`        | No: verify, then hand over         | R-3 does not forbid it, but the operator ruling below allows no in-place operation for now. |
+| `other-dir`       | No: verify, then hand over         | Not a canonical clone, but the operator ruling below allows no in-place operation for now.  |
+| `not-a-repo`      | Verify only, then hand over        | No git probe can prove it is unchanged beyond existence.                                    |
+| `canonical-clone` | **No. Open question (section 7).** | Acting is exactly what R-3 forbids.                                                         |
 
 For a `canonical-clone` item the recommended behaviour inside R-3 is: verify, then hand over with a
 diagnosis, and never mutate the clone. What the diagnosis can contain without touching the clone is
 part of the open question.
+
+**Operator ruling (Phillip, 2026-11-11).** Asked to pick one of four options for an in-place
+operation on an `intact` item, the operator replied "1", which is option 1, "None for now". The
+pg-rescue triage role therefore runs NO in-place operation on an `intact` worktree or other-dir
+deferral item. It verifies, then hands the item over with a diagnosis (option A of section 7). The
+earlier options are rejected for now: re-running the deterministic handlers, `rebase --abort` or
+`merge --abort`, and a trivial `rebase --continue`. The `worktree` and `other-dir` rows above
+follow from this ruling.
 
 ## 7. Open question for the operator (single, labelled)
 
@@ -200,8 +206,8 @@ Ordering is as listed; items 1 and 2 are independent of the open question.
    comments the outcome, closes `resolved` items, releases `unreachable` items and hands over
    `drifted`, `not-a-repo` and unverifiable items. It behaves as option A for `canonical-clone`.
    Depends on 1 and 2.
-4. **Act path for non-canonical locations.** The `worktree` and `other-dir` rows of section 6,
-   with the check-then-act guard. Depends on 3.
+4. (Removed: the act path for non-canonical locations, rejected by the operator ruling in section 6.
+   Numbering is kept so the later rows keep their numbers.)
 5. **Queue exclusion.** Confirm and, if needed, change the drain queue selector so canonical-clone
    `pg-rescue` items are not claimed by a general worker. Depends on 1.
 6. **Operator decision on section 7.** Depends on nothing; gates any canonical-clone act or prepare
