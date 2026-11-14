@@ -21,7 +21,7 @@ requires and includes (`INV-22`).
 **Level:** user-goal.
 **Preconditions:** the role names this adapter as its `handler`.
 _Requires:_ `INTF-HANDLER`, `INV-CMA-1`, `INV-CMA-2`, `INV-CMA-3`, `INV-CMA-4`, `INV-CMA-5`,
-`INV-CMA-6`, `INV-CMA-8`, `INV-CMA-9`, `INV-CMA-10`.
+`INV-CMA-6`, `INV-CMA-8`, `INV-CMA-9`, `INV-CMA-10`, `INV-CMA-11`.
 _Includes:_ `INTF-CMA-PAYLOAD`.
 
 1. The core dispatches one event, with the role object, under one tracking id.

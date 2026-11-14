@@ -297,7 +297,7 @@ Extensions:
 **Preconditions:** none; it works with the daemon down.
 **Intent:** find out whether the daemon is healthy, how fresh its data is and what it is spending, and
 why one entity is stale.
-_Requires:_ `INV-GH-DIAG-1`, `INV-GH-DIAG-2`, `INV-GH-FRESH-10`, `INV-EXIT-1`.
+_Requires:_ `INV-GH-DIAG-1`, `INV-GH-DIAG-2`, `INV-GH-DIAG-4`, `INV-GH-DIAG-5`, `INV-GH-FRESH-10`, `INV-EXIT-1`.
 
 **Main success scenario.**
 

@@ -11,7 +11,7 @@ repo's `behavior-docs` method (no separate actors, journeys or interfaces regist
 has no interface surface of its own beyond the two contracts above, both owned and documented
 elsewhere (pg-desk's own `docs/behavior`, pg-router's own `internal/query/command.go` rawItem
 shape). It is a pure translation layer between them, and it is the sibling of
-[pg-router-source-pg-connector](../../../pg-router-source-pg-connector/docs/behavior/README.md),
+the set `phillipgreenii-nix-agent-support · packages/pg-router-source-pg-connector/docs/behavior`,
 which does the same for pg-connector.
 
 Where this document says **intended**, the behavior is stated ahead of the code and is listed in
@@ -72,7 +72,7 @@ flowchart LR
 
 pg-router retries a failed dispatch of an event only while the event has not expired, and an event
 whose `expiresAt` is absent is born expired, so an item without an expiry is offered once and then
-dropped (`INV-EVT-4`, [the router's invariants](../../../pg-router/docs/behavior/invariants.md)). A
+dropped (`INV-EVT-4`, `phillipgreenii-nix-agent-support · packages/pg-router/docs/behavior`). A
 poll that carries a pg-desk issue therefore never reaches the router's retry for a transient
 dispatch failure unless the flag is on. `--retry-window` gives each item the expiry that turns retry on.
 
@@ -109,7 +109,7 @@ dispatch failure unless the flag is on. `--retry-window` gives each item the exp
 - **The flag alone does not enable router retry.** The window only gives each event time to be
   re-offered. A role that should retry a dispatch that failed with a transient class MUST also opt
   in itself with `max_dispatch_retries` on that role, which defaults to `0` (no re-run) and is
-  capped (`DEC-RETRY-2`, [the router's decisions](../../../pg-router/docs/decisions/retry.md)). It
+  capped (`DEC-RETRY-2`, `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions`). It
   is a deployment setting, and a re-run is never made past `expiresAt`. Without the opt-in the
   window still bounds how long a busy handler's decline is re-offered (`INV-FAIL-1`, `INV-EVT-4`),
   but a handler that was dispatched and failed is not re-run.

@@ -206,7 +206,7 @@ question MAY still separately enter `needs_input` afterward for a reason unrelat
 **Level:** summary.
 **Intent:** tell the whole arc once — the pool stays bounded on its own, sparing anyone waiting on
 a person, without an operator managing it by hand.
-_Requires:_ `INV-POOL-2`, `INV-POOL-3`, `INV-POOL-5`, `INV-POOL-9`, `INV-POOL-10`.
+_Requires:_ `INV-POOL-2`, `INV-POOL-3`, `INV-POOL-5`, `INV-POOL-9`, `INV-POOL-10`, `INV-POOL-11`.
 _Includes:_ `USECASE-CCP-ATTEND`, `USECASE-CCP-CLOSE`.
 
 ```mermaid

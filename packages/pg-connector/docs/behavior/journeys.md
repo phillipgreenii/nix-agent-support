@@ -448,7 +448,7 @@ flowchart TD
 `--consumer` name and a `--query` the backend recognizes.
 **Intent:** learn every change to the entities of one query, at least once and in order, without
 the umbrella deciding what changed, so a crash between receiving and acting loses nothing.
-_Requires:_ `INV-CACHE-9`, `INV-LEDGER-FRESH-5`, `INV-LEDGER-FRESH-2`, `INV-EXIT-1`, `INV-OUT-1`,
+_Requires:_ `INV-CACHE-9`, `INV-LEDGER-FRESH-5`, `INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-7`, `INV-EXIT-1`, `INV-OUT-1`,
 `INV-ERR-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
@@ -550,7 +550,7 @@ answer whether it came from the origin or from a cache entry and how old it is, 
 passes stale content off as current.
 _Requires:_ `INV-CACHE-1`, `INV-CACHE-2`, `INV-CACHE-3`, `INV-CACHE-4`, `INV-CACHE-5`,
 `INV-CACHE-6`, `INV-CACHE-7`, `INV-CACHE-8`, `INV-CACHE-10`, `INV-LEDGER-FRESH-1`,
-`INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`, `INV-ASOF-1`, `INV-ASOF-2`,
+`INV-LEDGER-FRESH-2`, `INV-LEDGER-FRESH-3`, `INV-LEDGER-FRESH-4`, `INV-LEDGER-FRESH-6`, `INV-ASOF-1`, `INV-ASOF-2`,
 `INV-EXIT-1`, `INV-OUT-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
