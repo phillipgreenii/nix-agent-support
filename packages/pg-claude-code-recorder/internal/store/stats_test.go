@@ -131,15 +131,23 @@ func TestCollectStatsSkipsSlowStepWithoutStamping(t *testing.T) {
 
 // A first collection on a store without sqlite_stat1, with the writer running
 // concurrently: no write fails and no single write waits near the busy_timeout.
+// This is the small smoke version; the load-shaped one (30,000 rows, which is
+// what makes an unbounded ANALYZE hold the write lock long enough to show) is
+// TestSoakFirstCollectionDoesNotBlockWriterNearBusyTimeout behind the soak tag.
 func TestFirstCollectionDoesNotBlockWriterNearBusyTimeout(t *testing.T) {
+	firstCollectionWriterWait(t, 1000)
+}
+
+func firstCollectionWriterWait(t *testing.T, rows int) {
+	t.Helper()
 	s, err := Open(t.TempDir(), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
 	if _, err := s.wdb.ExecContext(context.Background(), `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
-		WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<30000)
-		SELECT 1,1,i,0,10,'s','t',1,'sess'||(i%50),i FROM n`); err != nil {
+		WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?)
+		SELECT 1,1,i,0,10,'s','t',1,'sess'||(i%50),i FROM n`, rows); err != nil {
 		t.Fatal(err)
 	}
 	stop := make(chan struct{})
