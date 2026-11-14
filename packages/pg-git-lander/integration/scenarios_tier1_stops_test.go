@@ -415,7 +415,13 @@ func TestTier1DirtyAndNotAWorktreeRefusals(t *testing.T) {
 	})
 	t.Run("not-a-worktree", func(t *testing.T) {
 		h := newHarness(t, Scenario{Shape: ShapeAhead})
-		notWT := filepath.Join(h.dir, "home")
+		// A directory inside the clone that is not a worktree root: a path
+		// outside any repository is a usage error instead (exit 2, the
+		// worktree flags must name the clone), so it cannot stand in here.
+		notWT := filepath.Join(h.repo, "not-a-worktree-dir")
+		if err := os.Mkdir(notWT, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		r := h.run("land", "feature/x", "--source-worktree", notWT)
 		expect(t, r, 22, "refused", "not-a-worktree")
 		done(t, h, r, Expected{

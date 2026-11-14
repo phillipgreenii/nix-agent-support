@@ -252,16 +252,35 @@ func (h *harness) setup() error {
 			return err
 		}
 	}
-	if h.sc.Config != "" {
-		cfgDir := filepath.Join(h.dir, "home", ".config", "pg-git-lander")
-		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(h.expand(h.sc.Config)), 0o644); err != nil {
-			return err
-		}
+	cfgDir := filepath.Join(h.dir, "home", ".config", "pg-git-lander")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(h.expand(withFixtureLease(h.sc.Config))), 0o644); err != nil {
+		return err
 	}
 	return nil
+}
+
+// fixtureLease is the lease every fixture's user config carries unless the
+// scenario sets its own [defaults.lock]. The product default (30 s, which real
+// users keep) is renewed every third of itself and abandoned at two thirds, so
+// on a host with a load average in the tens a healthy holder or a blocked hook
+// outlives it and the lock-timing scenarios flip between busy, holder-died and
+// lock-lost for reasons unrelated to what they test. Giving the fixtures a
+// lease no loaded host can exhaust removes the dependence on renewal timing
+// without touching the production default. Scenarios that exercise lease
+// expiry itself (a stopped holder that must lapse) set a short lease of their
+// own, and a crashed holder on this host is recognised by its dead pid at once.
+const fixtureLease = "[defaults.lock]\nlease_ttl = \"10m\"\n"
+
+// withFixtureLease prepends fixtureLease to a scenario config that does not
+// configure the lock itself.
+func withFixtureLease(cfg string) string {
+	if strings.Contains(cfg, "[defaults.lock]") {
+		return cfg
+	}
+	return fixtureLease + cfg
 }
 
 func toolArgs(h *harness, args []string) []string {

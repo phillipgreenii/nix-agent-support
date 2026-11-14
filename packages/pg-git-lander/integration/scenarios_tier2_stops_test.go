@@ -23,17 +23,9 @@ import (
 // tool exports for its children.
 const hookGit = "unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n"
 
-// slowLease gives a scenario a lease long enough that a heavily loaded host
-// cannot make a healthy holder look stale (lock-lost); scenarios that test the
-// lease itself set their own.
-const slowLease = "[defaults.lock]\nlease_ttl = \"10m\"\n"
-
-// newTier2 is newHarness with the long lease in the user config.
+// newTier2 is newHarness; the harness gives every fixture the long lease.
 func newTier2(t *testing.T, sc Scenario) *harness {
 	t.Helper()
-	if !strings.Contains(sc.Config, "[defaults.lock]") {
-		sc.Config = slowLease + sc.Config
-	}
 	return newHarness(t, sc)
 }
 

@@ -582,9 +582,9 @@ func (h *harness) noFsckProblems() {
 	h.noProblems()
 }
 
-// crashConfig is blockingConfig with the default lease: a crashed holder on
+// crashConfig is blockingConfig without the short lease: a crashed holder on
 // this host is recognised by its dead pid at once, so these scenarios need no
-// short lease, and a long one keeps a loaded host from expiring a live holder.
+// short lease, and the harness gives them its long fixture lease.
 func crashConfig(point string) string {
 	return `
 [[repo]]
