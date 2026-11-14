@@ -80,6 +80,9 @@ let
       label,
       path,
       vars,
+      # variable name -> path RELATIVE to the root (e.g. GOCACHE = "shared/go-build"):
+      # exported as <root>/<relative>, under the same existence guard.
+      subVars ? { },
     }:
     let
       root = lib.escapeShellArg path;
@@ -87,7 +90,11 @@ let
     ''
       # ${label} (pg2-2qirl): export only when the directory exists and is writable.
       if [ -d ${root} ] && [ -w ${root} ] && [ -x ${root} ]; then
-      ${lib.concatMapStringsSep "\n" (v: "  export ${v}=${root}") vars}
+      ${lib.concatMapStringsSep "\n" (v: "  export ${v}=${root}") vars}${
+        lib.concatMapStrings (n: "\n  export ${n}=${lib.escapeShellArg "${path}/${subVars.${n}}"}") (
+          lib.attrNames subVars
+        )
+      }
       fi
     '';
 
@@ -105,6 +112,10 @@ let
       summary,
       # variables the root is exported as, given the module's own cfg
       envVars,
+      # variables exported as a path UNDER the root (name -> relative path); see
+      # mkEnvSnippet. The relative path MUST be exempt from the idle sweep when it
+      # holds state that must outlive the cutoff (the sweep exempts `shared`).
+      subPathVars ? { },
       # extra options (e.g. exportTmpdir) merged into the option set
       extraOptions ? { },
       level1Default,
@@ -141,6 +152,7 @@ let
         label = name;
         path = rootPath;
         vars = envVars cfg;
+        subVars = subPathVars;
       };
 
       # The sweep library, sourced by ABSOLUTE store path (launchd has no per-user

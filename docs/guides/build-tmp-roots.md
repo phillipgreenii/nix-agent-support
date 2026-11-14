@@ -6,7 +6,10 @@ Two sibling home-manager modules, `phillipgreenii.programs.build-tmp` and
 temp root on a machine-specific volume and point tools at it:
 
 - `build_tmp` holds Go build/test temp output (`GOTMPDIR`, the pg-test-runner
-  root, and `TMPDIR` only when `exportTmpdir` is set).
+  root, `GOCACHE` as the shared Go build cache `build_tmp/shared/go-build`, and `TMPDIR`
+  only when `exportTmpdir` is set). The sweep never judges the top-level `shared` entry,
+  so the idle cache is not removed (operator ruling, Phillip, 2026-11-12: "if a shared
+  GOCACHE is ok, then do it, but keep it some where under /Volumes/gitrepos/build_tmp/").
 - `claude_code_tmp` holds Claude Code's own temp tree (`CLAUDE_CODE_TMPDIR`).
 
 The modules create the directory, the guarded environment and the CETA contribution

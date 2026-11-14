@@ -28,8 +28,9 @@
 #   permanent leak). A unit is IDLE when nothing under it, and not the unit
 #   itself, has an mtime newer than the cutoff (find -mmin -N, no -type filter):
 #   the whole unit is removed or kept. Symlinks are never followed and never
-#   removed (a symlink unit is skipped). The root's marker and every .sweeping.*
-#   name are never candidates. At depth 1 every top-level claude-* entry is also
+#   removed (a symlink unit is skipped). The root's marker, every .sweeping.*
+#   name and the top-level `shared` entry (the shared GOCACHE) are never
+#   candidates, at either depth. At depth 1 every top-level claude-* entry is also
 #   skipped (D9a safeguard, in case Claude's tree is ever pointed here).
 #
 #   REMOVAL. capture liveness data once, check, rename the unit to
@@ -468,6 +469,9 @@ pgdr_tmp_sweep() {
     # Exempt at every depth: the root's marker and the quarantine names.
     case "${k1##*/}" in .sweeping.*) continue ;; esac
     [ "${k1##*/}" != "$marker" ] || continue
+    # The top-level `shared` entry holds state meant to outlive the idle cutoff
+    # (the build-tmp module's shared GOCACHE, shared/go-build): never a candidate.
+    [ "${k1##*/}" != shared ] || continue
     if [ "$depth" = 1 ]; then
       # D9a safeguard: Claude's own per-user tree is never swept by this item.
       case "${k1##*/}" in claude-*) continue ;; esac

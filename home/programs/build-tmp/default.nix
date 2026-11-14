@@ -31,6 +31,13 @@
     ]
     ++ lib.optional cfg.exportTmpdir "TMPDIR";
 
+  # One shared Go build cache for every agent and shell on the host (operator
+  # ruling, Phillip, 2026-11-12: "if a shared GOCACHE is ok, then do it, but keep
+  # it some where under /Volumes/gitrepos/build_tmp/"). Go's cache is safe for
+  # concurrent use. It lives under the `shared` top-level entry, which the idle
+  # sweep never judges (pgdr-tmp-sweep.bash), so an idle cache is not swept.
+  subPathVars.GOCACHE = "shared/go-build";
+
   extraOptions.exportTmpdir = lib.mkOption {
     type = lib.types.bool;
     default = false;

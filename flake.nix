@@ -13853,6 +13853,7 @@
                       pkgs.gnugrep
                       pkgs.gnused
                       pkgs.diffutils
+                      pkgs.go
                     ];
                     SNIPPET_BUILD = r.artifacts.buildSnippet;
                     SNIPPET_BUILD_TMPDIR = r.artifacts.buildSnippetTmpdir;

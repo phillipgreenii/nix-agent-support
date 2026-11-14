@@ -343,6 +343,13 @@ let
         && !(has "CLAUDE_CODE_TMPDIR" (zshOf buildOnlyEval));
     }
     {
+      name = "build-tmp snippet exports GOCACHE under the shared entry of the root, claude-code-tmp does not";
+      ok =
+        has "/build_tmp/shared/go-build" (zshOf buildOnlyEval)
+        && has "export GOCACHE=" (zshOf buildOnlyEval)
+        && !(has "GOCACHE" (zshOf claudeOnlyEval));
+    }
+    {
       name = "build-tmp exportTmpdir = true renders the TMPDIR line";
       ok = has "export TMPDIR=" (zshOf tmpdirEval) && has "export GOTMPDIR=" (zshOf tmpdirEval);
     }

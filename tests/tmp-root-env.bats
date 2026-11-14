@@ -52,6 +52,7 @@ source_in() {
     [ "$status" -eq 0 ]
     grep -Fx "GOTMPDIR=$BUILD_ROOT" <<<"$output"
     grep -Fx "PG_TEST_RUNNER_TMP_ROOT=$BUILD_ROOT" <<<"$output"
+    grep -Fx "GOCACHE=$BUILD_ROOT/shared/go-build" <<<"$output"
     grep -Fx "TMPDIR=/orig/tmp" <<<"$output"
     ! grep -q '^CLAUDE_CODE_TMPDIR=' <<<"$output"
   done
@@ -76,6 +77,7 @@ source_in() {
     grep -Fx "CLAUDE_CODE_TMPDIR=$CLAUDE_ROOT" <<<"$output"
     grep -Fx "TMPDIR=/orig/tmp" <<<"$output"
     ! grep -q '^GOTMPDIR=' <<<"$output"
+    ! grep -q '^GOCACHE=' <<<"$output"
     ! grep -q '^PG_TEST_RUNNER_TMP_ROOT=' <<<"$output"
   done
 }
@@ -86,7 +88,7 @@ source_in() {
       run source_in "$sh" "$VOL/$snippet"
       [ "$status" -eq 0 ]
       grep -Fx "TMPDIR=/orig/tmp" <<<"$output"
-      ! grep -Eq '^(GOTMPDIR|PG_TEST_RUNNER_TMP_ROOT|CLAUDE_CODE_TMPDIR)=' <<<"$output"
+      ! grep -Eq '^(GOTMPDIR|GOCACHE|PG_TEST_RUNNER_TMP_ROOT|CLAUDE_CODE_TMPDIR)=' <<<"$output"
     done
   done
 }
@@ -99,7 +101,7 @@ source_in() {
       run source_in "$sh" "$VOL/$snippet"
       [ "$status" -eq 0 ]
       grep -Fx "TMPDIR=/orig/tmp" <<<"$output"
-      ! grep -Eq '^(GOTMPDIR|PG_TEST_RUNNER_TMP_ROOT|CLAUDE_CODE_TMPDIR)=' <<<"$output"
+      ! grep -Eq '^(GOTMPDIR|GOCACHE|PG_TEST_RUNNER_TMP_ROOT|CLAUDE_CODE_TMPDIR)=' <<<"$output"
     done
   done
 }
@@ -109,7 +111,7 @@ source_in() {
   for sh in $SHELLS; do
     run source_in "$sh" "$VOL/build.sh"
     [ "$status" -eq 0 ]
-    ! grep -Eq '^(GOTMPDIR|PG_TEST_RUNNER_TMP_ROOT)=' <<<"$output"
+    ! grep -Eq '^(GOTMPDIR|GOCACHE|PG_TEST_RUNNER_TMP_ROOT)=' <<<"$output"
   done
 }
 
@@ -144,4 +146,50 @@ source_in() {
     after="$(compgen -A function)"
     [ "$before" = "$after" ]' _ "$VOL/build.sh"
   [ "$status" -eq 0 ]
+}
+
+# ----- the shared GOCACHE, with the real go toolchain --------------------------
+
+# go_env SHELL...: run a command under the exact environment the snippet leaves.
+go_run() {
+  env -i PATH="$PATH" HOME="$VOL" bash --noprofile --norc -c '. "$1"; shift; exec "$@"' _ "$VOL/build.sh" "$@"
+}
+
+@test "go env GOCACHE resolves to the shared path under the snippet's environment" {
+  command -v go >/dev/null 2>&1 || { echo "go is required" >&2; return 1; }
+  mkdir -m 0700 "$BUILD_ROOT"
+  run go_run go env GOCACHE
+  [ "$status" -eq 0 ]
+  [ "$output" = "$BUILD_ROOT/shared/go-build" ]
+}
+
+@test "two concurrent go test runs against the shared GOCACHE both succeed and fill that cache" {
+  command -v go >/dev/null 2>&1 || { echo "go is required" >&2; return 1; }
+  mkdir -m 0700 "$BUILD_ROOT"
+  local d
+  for d in one two; do
+    mkdir -p "$VOL/mod-$d"
+    printf 'module example.com/%s\n\ngo 1.21\n' "$d" >"$VOL/mod-$d/go.mod"
+    printf 'package %s\n\nfunc Add(a, b int) int { return a + b }\n' "$d" >"$VOL/mod-$d/lib.go"
+    printf 'package %s\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal("bad sum")\n\t}\n}\n' "$d" >"$VOL/mod-$d/lib_test.go"
+  done
+  local pids=() rcs=() i
+  for d in one two; do
+    (
+      cd "$VOL/mod-$d" &&
+        go_run env GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY=off GOPATH="$VOL/gopath" GO111MODULE=on \
+          nice -n 10 go test -p 4 -count=1 ./... >"$VOL/out-$d.log" 2>&1
+    ) &
+    pids+=("$!")
+  done
+  for i in 0 1; do
+    wait "${pids[$i]}" && rcs+=(0) || rcs+=($?)
+  done
+  cat "$VOL/out-one.log" "$VOL/out-two.log"
+  [ "${rcs[0]}" -eq 0 ]
+  [ "${rcs[1]}" -eq 0 ]
+  grep -q '^ok' "$VOL/out-one.log"
+  grep -q '^ok' "$VOL/out-two.log"
+  [ -d "$BUILD_ROOT/shared/go-build" ]
+  [ -n "$(ls "$BUILD_ROOT/shared/go-build")" ]
 }

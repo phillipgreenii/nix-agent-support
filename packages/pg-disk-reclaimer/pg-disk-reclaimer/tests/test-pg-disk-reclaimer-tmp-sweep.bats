@@ -246,6 +246,49 @@ uuid() { printf '%08x-0000-4000-8000-%012x\n' "$1" "$1"; }
   done
 }
 
+# ----- the shared GOCACHE exemption --------------------------------------------
+
+@test "build-tmp: the shared GOCACHE under the top-level shared entry survives an idle sweep at both levels while an ordinary idle sibling goes" {
+  need_ps
+  local minutes
+  for minutes in 1440 60; do
+    rm -rf "$FX/build_tmp"
+    mkroot
+    mkdir -p "$ROOT/shared/go-build/ab" "$ROOT/sibling"
+    : >"$ROOT/shared/go-build/ab/entry-a"
+    : >"$ROOT/shared/go-build/README"
+    : >"$ROOT/sibling/f"
+    age "$ROOT/shared" 100000
+    age "$ROOT/sibling" 100000
+    bsweep dry "$minutes"
+    [ "$status" -eq 0 ]
+    listed "$ROOT/sibling"
+    refute grep -F "shared" <<<"$output"
+    bsweep apply "$minutes"
+    [ "$status" -eq 0 ]
+    [ ! -e "$ROOT/sibling" ]
+    [ -f "$ROOT/shared/go-build/ab/entry-a" ]
+    [ -f "$ROOT/shared/go-build/README" ]
+  done
+}
+
+@test "build-tmp: only the top-level entry named shared is exempt, a nested or look-alike name is swept" {
+  need_ps
+  mkroot
+  mkdir -p "$ROOT/other/shared" "$ROOT/shared2" "$ROOT/shared/go-build"
+  : >"$ROOT/other/shared/f"
+  : >"$ROOT/shared2/f"
+  : >"$ROOT/shared/go-build/keep"
+  age "$ROOT/other" 100000
+  age "$ROOT/shared2" 100000
+  age "$ROOT/shared" 100000
+  bsweep apply 60
+  [ "$status" -eq 0 ]
+  [ ! -e "$ROOT/other" ]
+  [ ! -e "$ROOT/shared2" ]
+  [ -f "$ROOT/shared/go-build/keep" ]
+}
+
 # ----- build-tmp keeps --------------------------------------------------------
 
 @test "build-tmp: an entry holding one fresh file is kept whole, and so is an entry whose own mtime is fresh" {
