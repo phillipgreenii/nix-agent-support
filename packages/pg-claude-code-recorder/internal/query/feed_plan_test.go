@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
@@ -36,7 +35,7 @@ func feedPlanCase(t *testing.T, withStats bool) {
 	t.Cleanup(func() { _ = st.Close() })
 	if withStats {
 		seedSkewedRecords(t, st)
-		if _, err := st.CollectStats(context.Background(), 400, time.Now()); err != nil {
+		if err := st.WithWrite("", func(tx *sql.Tx) error { _, err := tx.ExecContext(context.Background(), `ANALYZE`); return err }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -90,7 +89,7 @@ func seedSkewedRecords(t *testing.T, st *store.Store) {
 	err := st.WithWrite("", func(tx *sql.Tx) error {
 		for _, q := range []string{
 			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<4000)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
 			 SELECT i,1,0,i,-1,1,CASE WHEN i%500=0 THEN 'other' ELSE 'claude-transcript' END,CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
 		} {

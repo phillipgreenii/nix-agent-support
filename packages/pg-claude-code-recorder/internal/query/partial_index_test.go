@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -40,21 +39,18 @@ func partialStore(t *testing.T, full bool) *store.Store {
 				return err
 			}
 		}
-		for i := 1; i <= 3000; i++ {
-			if _, err := tx.ExecContext(context.Background(), `INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns) VALUES(?,1,0,?,0,1,'claude-transcript','assistant',1,?)`, i, i, i); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s) VALUES(?,2,?)`, i, fmt.Sprint("l", i%7)); err != nil {
-				return err
-			}
-			var err error
-			switch i % 3 {
-			case 0:
-				_, err = tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,n) VALUES(?,1,?)`, i, i%100)
-			case 1:
-				_, err = tx.ExecContext(context.Background(), `INSERT INTO fields(rec_id,name_id,s) VALUES(?,1,'none')`, i)
-			}
-			if err != nil {
+		// Set-based inserts: the same 3000 rows as one statement each, without
+		// thousands of parameter-bound round trips per store.
+		for _, q := range []string{
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000)
+			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns)
+			 SELECT i,1,0,i,0,1,'claude-transcript','assistant',1,i FROM n`,
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000)
+			 INSERT INTO fields(rec_id,name_id,s) SELECT i,2,'l'||(i%7) FROM n`,
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000)
+			 INSERT INTO fields(rec_id,name_id,n,s) SELECT i,1,CASE WHEN i%3=0 THEN i%100 END,CASE WHEN i%3=1 THEN 'none' END FROM n WHERE i%3<2`,
+		} {
+			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
 			}
 		}

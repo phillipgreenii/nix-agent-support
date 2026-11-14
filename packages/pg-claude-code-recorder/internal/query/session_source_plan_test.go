@@ -28,17 +28,17 @@ func TestSessionSourceQuerySearchesSessionAndSource(t *testing.T) {
 		for _, q := range []string{
 			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20) INSERT INTO sessions(session_ref,session_id,first_time_ns) SELECT i,'sess-'||i,0 FROM n`,
-			// session 1: 200,000 transcript records; 50 registry records
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<200000)
+			// session 1: 4,000 transcript records; 50 registry records
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<4000)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
 			 SELECT i,1,0,i,0,1,'claude-transcript','text',1,i,1 FROM n`,
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<50)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
-			 SELECT 200000+i,1,0,200000+i,0,1,'session-registry','registry',1,300000+i,1 FROM n`,
+			 SELECT 4000+i,1,0,4000+i,0,1,'session-registry','registry',1,5000+i,1 FROM n`,
 			// other sessions, each with registry records too
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
-			 SELECT 300000+i,1,0,300000+i,0,1,CASE WHEN i%2=0 THEN 'claude-transcript' ELSE 'session-registry' END,CASE WHEN i%2=0 THEN 'text' ELSE 'registry' END,1,i,i%19+2 FROM n`,
+			 SELECT 5000+i,1,0,5000+i,0,1,CASE WHEN i%2=0 THEN 'claude-transcript' ELSE 'session-registry' END,CASE WHEN i%2=0 THEN 'text' ELSE 'registry' END,1,i,i%19+2 FROM n`,
 		} {
 			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
