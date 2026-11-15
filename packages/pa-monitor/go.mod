@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/gofrs/flock v0.13.1
 	github.com/phillipgreenii/claude-transcript v0.0.0
+	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0
 	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0
 	go.opentelemetry.io/otel v1.47.0
@@ -73,3 +74,6 @@ require (
 replace github.com/phillipgreenii/claude-transcript => ../claude-transcript
 
 replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder => ../pg-claude-code-recorder
+
+// pg-sqlite is the shared sqlite-open helper (ADR 0125), resolved by a local replace like claude-transcript.
+replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite => ../pg-sqlite

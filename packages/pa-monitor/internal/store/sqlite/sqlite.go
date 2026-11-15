@@ -1,48 +1,22 @@
 // Package sqlite is the SQLite implementation of the store interfaces.
-// All connections open with WAL journal mode + foreign keys on so the
-// schema's invariants (cascade deletes) actually fire.
+// All connections open through the shared sqliteopen helper, with WAL journal
+// mode + foreign keys on so the schema's invariants (cascade deletes) actually
+// fire.
 package sqlite
 
 import (
-	"context"
 	"database/sql"
-	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
 
-	_ "modernc.org/sqlite"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 )
 
-// Open returns a *sql.DB pointing at dbPath, with WAL mode, foreign keys,
-// and a 5-second busy timeout. The parent directory is created if missing.
+// Open returns a *sql.DB pointing at dbPath, opened through the shared
+// sqliteopen helper so it carries the repository's standard pragma set (WAL,
+// synchronous NORMAL, 5-second busy timeout, foreign keys on, 64 MiB page
+// cache, mmap, in-memory temp store, journal size limit). The parent
+// directory is created if missing.
 //
-// dbPath of ":memory:" yields an in-memory DB (used by tests). For
-// in-memory the directory creation step is skipped.
+// dbPath of ":memory:" yields an in-memory DB (used by tests).
 func Open(dbPath string) (*sql.DB, error) {
-	if dbPath != ":memory:" {
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-			return nil, fmt.Errorf("mkdir db parent: %w", err)
-		}
-	}
-
-	// modernc.org/sqlite honours PRAGMAs passed as DSN query params via _pragma.
-	dsn := dbPath + "?" + url.Values{
-		"_pragma": []string{
-			"journal_mode(WAL)",
-			"foreign_keys(ON)",
-			"busy_timeout(5000)",
-			"synchronous(NORMAL)",
-		},
-	}.Encode()
-
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("sql.Open: %w", err)
-	}
-	if err := db.PingContext(context.Background()); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("ping: %w", err)
-	}
-	return db, nil
+	return sqliteopen.Open(sqliteopen.Standard(dbPath))
 }

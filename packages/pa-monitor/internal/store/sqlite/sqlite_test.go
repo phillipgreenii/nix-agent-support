@@ -4,6 +4,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 )
 
 func TestOpen_WALModeAndForeignKeys(t *testing.T) {
@@ -47,5 +49,34 @@ func TestOpen_BusyTimeout(t *testing.T) {
 	}
 	if ms < 1000 {
 		t.Errorf("busy_timeout = %d ms, want >= 1000", ms)
+	}
+}
+
+// A pa-monitor database opened the way the daemon opens it carries the whole
+// standard pragma set of the shared sqliteopen helper, on a real SQLite file.
+func TestOpen_EffectiveStandardPragmas(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "nested", "pragmas.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	got, err := sqliteopen.Effective(context.Background(), db)
+	if err != nil {
+		t.Fatalf("Effective: %v", err)
+	}
+	want := sqliteopen.Pragmas{
+		JournalMode:      "wal",
+		Synchronous:      1, // NORMAL
+		BusyTimeout:      5000,
+		CacheSize:        -65536,
+		MmapSize:         256 << 20,
+		JournalSizeLimit: 64 << 20,
+		TempStore:        2, // MEMORY
+		ForeignKeys:      true,
+		QueryOnly:        false,
+	}
+	if got != want {
+		t.Errorf("effective pragmas = %+v, want %+v", got, want)
 	}
 }

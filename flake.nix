@@ -2094,6 +2094,7 @@
                     fileset = lib.fileset.unions [
                       ./packages/pa-monitor
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
                     ];
                   };
@@ -2196,6 +2197,7 @@
                     fileset = lib.fileset.unions [
                       ./packages/pa-monitor
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
                     ];
                   };
@@ -10793,6 +10795,7 @@
                     ./packages/pa-monitor
                     ./packages/claude-transcript
                     ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
                   ];
                 };
                 modRoot = "pa-monitor";
