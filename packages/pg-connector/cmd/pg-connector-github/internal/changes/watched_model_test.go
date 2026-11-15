@@ -21,8 +21,22 @@ import (
 // one nothing; the flag, once set, stays until the entity is evicted, and an
 // evicted PR that comes back is unwatched again.
 
+// The unit loop is small (each step is a real store transaction); the large
+// run (many seeds, long sequences) is the integration-tagged
+// TestModel_..._Large in watched_model_large_test.go.
+const (
+	modelUnitSeeds = 4
+	modelUnitSteps = 30
+)
+
 func TestModel_AnUnwatchedPRNeverEmitsAndTheFlagIsStickyUntilEviction(t *testing.T) {
-	for seed := int64(1); seed <= 25; seed++ {
+	runWatchedModel(t, modelUnitSeeds, modelUnitSteps)
+}
+
+// runWatchedModel runs the model for seeds 1..seeds, steps steps each.
+func runWatchedModel(t *testing.T, seeds int64, steps int) {
+	t.Helper()
+	for seed := int64(1); seed <= seeds; seed++ {
 		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
 			rng := rand.New(rand.NewSource(seed))
 			r := newRigWithSpec(t, Spec())
@@ -32,7 +46,7 @@ func TestModel_AnUnwatchedPRNeverEmitsAndTheFlagIsStickyUntilEviction(t *testing
 				wantRows int  // the model's row count
 				trail    []string
 			)
-			for step := 0; step < 120; step++ {
+			for step := 0; step < steps; step++ {
 				switch op := rng.Intn(10); {
 				case op < 5: // a content change of the summary
 					r.clk.Advance(time.Second)
