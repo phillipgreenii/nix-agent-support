@@ -57,6 +57,11 @@ type Config struct {
 	// MaxConnections is query.max_connections: the read pool's open-connection
 	// bound (at least 2; 0 means unbounded).
 	MaxConnections int
+	// MemoryLimitMiB is memory.limit_mib: the soft Go runtime memory limit
+	// (debug.SetMemoryLimit) in MiB. 0 leaves the runtime default (no limit).
+	// It counts Go-runtime memory only; SQLite's allocator and file mappings
+	// are outside it. It MUST sit above the live heap or the GC thrashes.
+	MemoryLimitMiB int
 	FeedRetention  time.Duration
 	RemoveAfter    time.Duration
 	RemoveEnable   bool
@@ -165,6 +170,9 @@ type file struct {
 		ReadMmapMiB    *int   `toml:"readMmapMiB"`
 		MaxConnections *int   `toml:"max_connections"`
 	} `toml:"query"`
+	Memory struct {
+		LimitMiB *int `toml:"limit_mib"`
+	} `toml:"memory"`
 	Feed struct {
 		Retention string `toml:"retention"`
 	} `toml:"feed"`
@@ -223,6 +231,14 @@ type file struct {
 // settle age is 24 h, so a stage change is late by at most one tick against a
 // day-scale threshold; the removal gauges refresh on a 5 minute cadence of their
 // own, so a shorter tick would only repeat the cheap evaluation.
+// The accepted range of memory.limit_mib (0 keeps the runtime default). The
+// floor keeps the limit above any plausible live heap so the GC cannot thrash;
+// the ceiling is 1 TiB.
+const (
+	MinMemoryLimitMiB = 64
+	MaxMemoryLimitMiB = 1 << 20
+)
+
 const DefaultSettleTick = 5 * time.Minute
 
 // The accepted range of sweep.interval.
@@ -420,6 +436,12 @@ func apply(c *Config, f file) error {
 			return fmt.Errorf("query.max_connections must be at least 2 (0 means unbounded)")
 		}
 		c.MaxConnections = *f.Query.MaxConnections
+	}
+	if f.Memory.LimitMiB != nil {
+		if n := *f.Memory.LimitMiB; n != 0 && (n < MinMemoryLimitMiB || n > MaxMemoryLimitMiB) {
+			return fmt.Errorf("memory.limit_mib must be 0 (runtime default) or between %d and %d", MinMemoryLimitMiB, MaxMemoryLimitMiB)
+		}
+		c.MemoryLimitMiB = *f.Memory.LimitMiB
 	}
 	if n := f.Sweep.MaxFilesPerSecond; n != nil {
 		if *n < 0 || *n > 1_000_000 {

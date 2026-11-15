@@ -99,6 +99,7 @@ let
     };
     query.max_connections = cfg.query.maxConnections;
     query.timeout = cfg.query.timeout;
+    memory.limit_mib = cfg.memory.limitMiB;
     held = {
       recheck = cfg.held.recheck;
       alertAfter = cfg.held.alertAfter;
@@ -383,6 +384,22 @@ in
         `query.max_connections`). Readers beyond it queue on the pool, so the
         memory of the read connections stops growing with the number of
         concurrent readers. At least 2; 0 means unbounded (the way back).
+      '';
+    };
+
+    memory.limitMiB = lib.mkOption {
+      type = lib.types.addCheck lib.types.int (n: n == 0 || (n >= 64 && n <= 1048576));
+      default = 512;
+      description = ''
+        Soft Go runtime memory limit in MiB (config key `memory.limit_mib`,
+        applied with `debug.SetMemoryLimit` at start-up), so the scavenger
+        returns freed heap to the OS. 0 keeps the runtime default (no limit);
+        otherwise 64 to 1048576. The limit counts Go-runtime memory only:
+        SQLite's allocator and file mappings are not covered, so it cannot
+        squeeze them. The default MUST exceed the live heap (about 180 MB
+        before the churn fixes, expected to fall), or the garbage collector
+        thrashes. Judge it by RSS or `phys_footprint` from `vmmap -summary`,
+        not by `HeapReleased`.
       '';
     };
 

@@ -560,6 +560,12 @@ Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_vers
   ceiling. Read connections are recycled rarely (6 hours, 30 minutes idle) so the cache survives. A
   multi-statement read (coverage, the settle pass over settled Conversations, the lifecycle load) runs in one
   read transaction: one WAL read-lock round trip and one snapshot instead of one transaction per statement.
+- **Memory limit**: `memory.limit_mib` sets the soft Go runtime memory limit (`debug.SetMemoryLimit`) at start-up so the
+  scavenger returns freed heap to the OS. Valid values are 0 (the runtime default, no limit; also the daemon's default
+  when the key is unset) and 64 to 1048576; the Home Manager module renders 512. The limit counts Go-runtime memory only:
+  SQLite's allocator and file mappings are not covered, so it cannot squeeze them. It MUST stay above the live heap
+  (about 180 MB before the churn fixes, expected to fall), or the garbage collector thrashes. Judge it by RSS or
+  `phys_footprint` from `vmmap -summary`, not by `HeapReleased`, which is a Go-side statistic.
 - **Filter field census**: each query, search or feed request whose filter compiled counts the catalogued
   field names its filter leaves named in `query_filter_fields_total{op,field}` (op is query, search or
   feed) and logs one `query_filter_fields` info line (`op`, `fields` as `name=count,...`). Names and

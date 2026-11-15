@@ -127,6 +127,33 @@ func TestQueryMaxConnectionsDefaultAndValidation(t *testing.T) {
 	}
 }
 
+func TestMemoryLimitDefaultAndValidation(t *testing.T) {
+	if c := Defaults(env(map[string]string{"HOME": "/h"})); c.MemoryLimitMiB != 0 {
+		t.Fatalf("default %d, want 0 (runtime default)", c.MemoryLimitMiB)
+	}
+	load := func(body string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p, true, env(map[string]string{"HOME": "/h"}))
+	}
+	if c, err := load("[memory]\n"); err != nil || c.MemoryLimitMiB != 0 {
+		t.Fatalf("unset: %d, %v", c.MemoryLimitMiB, err)
+	}
+	for _, v := range []string{"-1", "1", "63", "1048577"} {
+		if _, err := load("[memory]\nlimit_mib = " + v + "\n"); err == nil {
+			t.Fatalf("memory.limit_mib = %s accepted", v)
+		}
+	}
+	for v, want := range map[string]int{"0": 0, "64": 64, "512": 512, "1048576": 1 << 20} {
+		c, err := load("[memory]\nlimit_mib = " + v + "\n")
+		if err != nil || c.MemoryLimitMiB != want {
+			t.Fatalf("memory.limit_mib = %s: %d, %v", v, c.MemoryLimitMiB, err)
+		}
+	}
+}
+
 func TestSweepPacingKeysDefaultsAndValidation(t *testing.T) {
 	c := Defaults(env(map[string]string{"HOME": "/h"}))
 	if c.MaxFilesPerSecond != 100 {

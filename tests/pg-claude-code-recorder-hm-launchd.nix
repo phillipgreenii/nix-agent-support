@@ -199,6 +199,16 @@ let
     query.maxConnections = 0;
   } osWithObs;
 
+  onMemLimit = case darwin {
+    daemon.enable = true;
+    memory.limitMiB = 1024;
+  } osWithObs;
+
+  onMemUnlimited = case darwin {
+    daemon.enable = true;
+    memory.limitMiB = 0;
+  } osWithObs;
+
   # the control module coupling
   controlCoupled =
     case
@@ -416,6 +426,19 @@ let
       (opts on).query.maxConnections == 8 && (data on).query.max_connections == 8;
     queryTimeoutDefaultRendered = (opts on).query.timeout == "25s" && (data on).query.timeout == "25s";
     queryTimeoutOverrideRendered = (data onQueryTimeout).query.timeout == "10s";
+    memoryLimitDefaultRendered = (opts on).memory.limitMiB == 512 && (data on).memory.limit_mib == 512;
+    memoryLimitOverrideRendered =
+      (data onMemLimit).memory.limit_mib == 1024 && (data onMemUnlimited).memory.limit_mib == 0;
+    # an out-of-range value is rejected by the option type
+    memoryLimitRejectsOutOfRange =
+      let
+        tooLowCase = case darwin {
+          daemon.enable = true;
+          memory.limitMiB = 1;
+        } osWithObs;
+        tooLow = builtins.tryEval (opts tooLowCase).memory.limitMiB;
+      in
+      !tooLow.success;
     maxConnectionsOverrideRendered =
       (data onSettings).query.max_connections == 8 && (data onMaxConn).query.max_connections == 0;
     settingsMerge =
