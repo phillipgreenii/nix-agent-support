@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -21,4 +22,13 @@ func registerCommonSignals(mp metric.MeterProvider) *otelsetup.CommonSignals {
 		return nil
 	}
 	return sig
+}
+
+// observeShutdown records one finished shutdown on sig: the time since the
+// clock's context ended, marked as an overrun when it passed the deadline. It
+// does nothing while the context has not ended.
+func observeShutdown(ctx context.Context, sig *otelsetup.CommonSignals, clk *shutdownClock) {
+	if d, ok := clk.Elapsed(); ok {
+		sig.ObserveShutdown(ctx, d, d > clk.deadline)
+	}
 }
