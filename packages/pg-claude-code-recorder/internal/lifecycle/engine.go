@@ -611,6 +611,12 @@ func (e *Engine) List(ctx context.Context, f ConversationFilter) ([]Conversation
 		if !ok || !f.evidenceMatch(&c) {
 			continue
 		}
+		// A row whose end time the model already knows and that ended before since
+		// is dropped without a transcript read: reading the transcript of every
+		// ended Conversation made a label query outlast the client timeout.
+		if since > 0 && c.EndTime != nil && c.sortTime() < since {
+			continue
+		}
 		if err := e.transcriptFacts(ctx, &c); err != nil {
 			return nil, err
 		}
