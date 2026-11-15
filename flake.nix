@@ -11189,22 +11189,12 @@
                   testFlags = [
                     "-coverprofile=cover.out"
                     "-covermode=atomic"
-                    # `-short` (beads tc-6l70b, pg2-0w1pc): internal/eventqueue's
-                    # TestDispatchOverheadUnderRingReader self-skips under
-                    # -short — see its own doc comment in perf_test.go. It is a
-                    # host wall-clock gate, which a hermetic check should not
-                    # depend on. Its coverage path is INTENDED to be the
-                    # commit-time / pre-land hook runner (pg-test-runner's Go
-                    # unit run does not pass -short), not this check; the
-                    # allocation-budget tests still run here. (The original
-                    # ~472s runtime that motivated this flag is obsolete after
-                    # pg2-pv7ai: ~8s now.) `-short` is additive here: it does not remove
-                    # any currently-enforced coverage, since the only other
-                    # testing.Short()-gated file in this fileset
-                    # (cmd/pg-router/e2e_test.go) already skips in this
-                    # sandbox regardless, for lack of `bd` on testDeps'
-                    # PATH.
-                    "-short"
+                    # No `-short`: the wall-clock perf gates in internal/eventqueue
+                    # (TestDispatchOverheadUnderRingReader, TestCompactLiveShapedReplayPerf)
+                    # carry `//go:build perf` and run only in `pg-router-perf-tests`, so
+                    # this check, the commit-time run-unit-tests hook and pre-land all
+                    # agree: none of them runs them (V-4). The allocation-budget tests
+                    # stay in the unit tier.
                   ];
                   # internal/config's git-common-dir tests (pg2-xl659) build a real throwaway
                   # canonical repo + linked worktree via the `git` binary rather than skipping
@@ -11311,6 +11301,61 @@
                         exit 1
                       fi
                       echo "pg-router-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # pg-router PERF tier (`//go:build perf`, V-4: never in the unit gate).
+              # ON DEMAND ONLY: build it by hand
+              # (`nix build .#checks.<system>.pg-router-perf-tests -L`). It MUST NOT be
+              # wired into any hook, run-unit-tests, pre-land or land gate, and the
+              # package test timeout is NOT raised for it. Runs the wall-clock gates in
+              # internal/eventqueue: TestDispatchOverheadUnderRingReader (Dispatch
+              # overhead of a ring-backed observer under a 4 Hz reader, at most 40%) and
+              # TestCompactLiveShapedReplayPerf (replay of a ~180k-record log is at least
+              # 5x faster after compaction). Fails when either does not report PASS or
+              # when a test is skipped, so a gate that silently ran nothing cannot pass.
+              # Wall time depends on the builder, so a miss on a loaded host is a re-run,
+              # not necessarily a regression.
+              pg-router-perf-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-router-perf-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
+                      ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                  modRoot = "pg-router";
+                  gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/perf.log"
+                      names="TestDispatchOverheadUnderRingReader TestCompactLiveShapedReplayPerf"
+                      regex="^($(echo "$names" | tr ' ' '|'))\$"
+                      if ! go test -tags perf -count=1 -v -timeout 30m -run "$regex" ./internal/eventqueue/ > "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-router-perf-tests: a perf gate FAILED" >&2
+                        exit 1
+                      fi
+                      cat "$log"
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          echo "pg-router-perf-tests: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        echo "pg-router-perf-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-router-perf-tests: both wall-clock gates passed"
                       runHook postBuild
                     '';
                   });

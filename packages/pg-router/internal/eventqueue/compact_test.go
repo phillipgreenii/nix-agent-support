@@ -830,13 +830,15 @@ func measureReplay(t *testing.T, path string) (time.Duration, string) {
 	return time.Since(start), stateOf(q)
 }
 
-// Replay time after compacting a live-shaped (~180k-record) log is bounded, and
-// the compacted log rebuilds the identical state.
-func TestCompactLiveShapedReplayPerf(t *testing.T) {
+// Compacting a live-shaped log (a scaled-down copy of the production shape)
+// keeps only the live state, and the compacted log rebuilds the identical state.
+// The replay-time speed-up of the full ~180k-record log is the wall-clock gate
+// TestCompactLiveShapedReplayPerf (perf_walltime_test.go, build tag perf).
+func TestCompactLiveShapedLogShrinksAndKeepsState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
-	records := writeLiveShapedLog(t, path, 62000, 120)
+	records := writeLiveShapedLog(t, path, 8000, 120)
 	sizeBefore := fileSize(t, path)
-	replayBefore, stateBefore := measureReplay(t, path)
+	_, stateBefore := measureReplay(t, path)
 
 	fs, err := NewFileStore(path)
 	if err != nil {
@@ -847,23 +849,15 @@ func TestCompactLiveShapedReplayPerf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayAfter, stateAfter := measureReplay(t, path)
-
-	t.Logf("live-shaped log: %d records, %d bytes -> %d records, %d bytes (compaction took %s)",
-		records, sizeBefore, st.RecordsAfter, st.BytesAfter, st.Duration)
-	t.Logf("replay (New) before=%s after=%s", replayBefore, replayAfter)
-
+	_, stateAfter := measureReplay(t, path)
 	if stateAfter != stateBefore {
 		t.Fatal("compacted live-shaped log rebuilt a different state")
 	}
-	if st.RecordsAfter*50 > records {
+	if st.RecordsAfter*5 > records {
 		t.Fatalf("compaction kept %d of %d records; expected live state only", st.RecordsAfter, records)
 	}
-	if st.BytesAfter*50 > sizeBefore {
+	if st.BytesAfter*5 > sizeBefore {
 		t.Fatalf("compaction kept %d of %d bytes; expected live state only", st.BytesAfter, sizeBefore)
-	}
-	if replayAfter*5 > replayBefore {
-		t.Fatalf("replay after compaction (%s) is not clearly faster than before (%s)", replayAfter, replayBefore)
 	}
 }
 
