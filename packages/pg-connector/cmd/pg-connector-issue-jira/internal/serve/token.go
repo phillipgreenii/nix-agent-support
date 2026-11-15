@@ -177,7 +177,7 @@ func (d *daemon) startToken(ctx context.Context) origin.Refresher {
 	// keychain read and writes the file and the link.
 	th.guard.Start(ctx)
 
-	kctx, cancel := context.WithCancel(context.Background())
+	kctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	th.cancel = cancel
 	th.wg.Add(1)
 	go func() {

@@ -2,6 +2,7 @@ package logs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,7 +54,7 @@ var _ connectord.Logger = (*StructuredLog)(nil)
 // NewStructuredLog returns the structured log inside stateDir, rotating at
 // DaemonMaxBytes.
 func NewStructuredLog(stateDir, version string) *StructuredLog {
-	return &StructuredLog{Path: DaemonLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version}
+	return &StructuredLog{Path: DaemonLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version, out: sink{ctx: context.Background()}}
 }
 
 func (l *StructuredLog) now() time.Time {

@@ -196,6 +196,11 @@ type Server struct {
 // Start prepares the process shell: path check, state directory, lock, stale
 // socket removal, listen, socket mode. On any error nothing is left held.
 func Start(cfg Config) (*Server, error) {
+	return StartCtx(context.Background(), cfg)
+}
+
+// StartCtx is Start with the socket bound under ctx.
+func StartCtx(ctx context.Context, cfg Config) (*Server, error) {
 	log := cfg.Logger
 	if log == nil {
 		log = connectord.NopLogger
@@ -246,7 +251,7 @@ func Start(cfg Config) (*Server, error) {
 	if err := removeStaleSocket(cfg.SocketPath, log); err != nil {
 		return fail(err)
 	}
-	ln, err := new(net.ListenConfig).Listen(context.Background(), "unix", cfg.SocketPath)
+	ln, err := new(net.ListenConfig).Listen(ctx, "unix", cfg.SocketPath)
 	if err != nil {
 		return fail(fmt.Errorf("listen on %s: %w", cfg.SocketPath, err))
 	}
@@ -491,7 +496,7 @@ func (s *Server) verify(conn net.Conn) (Peer, bool) {
 
 // Run is Start followed by Serve. hooks MAY be nil.
 func Run(ctx context.Context, cfg Config, handler Handler, hooks *Hooks) error {
-	s, err := Start(cfg)
+	s, err := StartCtx(ctx, cfg)
 	if err != nil {
 		return err
 	}

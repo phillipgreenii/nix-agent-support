@@ -119,11 +119,11 @@ func (p *Progress) finish() {
 // ladder's top is copied first (see backupBeforeMigrating); the copy's path is
 // stored in *backup as soon as it is verified, so a caller sees it even when a
 // later rung fails.
-func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration, backup *string) (int, error) {
+func runMigrations(ctx context.Context, db *sql.DB, path string, opts Options, ladder []Migration, backup *string) (int, error) {
 	latest := len(ladder)
 
 	var from int
-	if err := db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&from); err != nil {
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&from); err != nil {
 		return 0, fmt.Errorf("store: read schema version of %s: %w", path, err)
 	}
 	if from > latest {
@@ -132,14 +132,14 @@ func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration, ba
 		return from, &SchemaNewerError{Path: path, Found: from, Supported: latest}
 	}
 	if from > 0 {
-		if err := quickCheck(db); err != nil {
+		if err := quickCheck(ctx, db); err != nil {
 			return from, fmt.Errorf("store: %s: %w", path, err)
 		}
 	}
 
 	if from > 0 && from < latest && opts.backupBeforeMigrate() {
 		opts.Progress.set(fmt.Sprintf("backing up schema %d before migrating", from))
-		to, err := backupBeforeMigrating(db, path, from, opts.now())
+		to, err := backupBeforeMigrating(ctx, db, path, from, opts.now())
 		if err != nil {
 			return from, err
 		}
@@ -148,15 +148,15 @@ func runMigrations(db *sql.DB, path string, opts Options, ladder []Migration, ba
 
 	for _, m := range ladder[from:] {
 		opts.Progress.set(fmt.Sprintf("applying schema %d of %d: %s", m.Version, latest, m.Name))
-		if err := applyOne(db, m, opts.Progress); err != nil {
+		if err := applyOne(ctx, db, m, opts.Progress); err != nil {
 			return from, fmt.Errorf("%w: schema %d (%s): %w", errMigrationFailed, m.Version, m.Name, err)
 		}
 	}
 	return from, nil
 }
 
-func applyOne(db *sql.DB, m Migration, p *Progress) (err error) {
-	tx, err := db.BeginTx(context.Background(), nil)
+func applyOne(ctx context.Context, db *sql.DB, m Migration, p *Progress) (err error) {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -169,14 +169,14 @@ func applyOne(db *sql.DB, m Migration, p *Progress) (err error) {
 		return err
 	}
 	// PRAGMA does not take bound parameters; Version is an int we control.
-	if _, err = tx.ExecContext(context.Background(), fmt.Sprintf("PRAGMA user_version = %d", m.Version)); err != nil {
+	if _, err = tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.Version)); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func quickCheck(db *sql.DB) error {
-	rows, err := db.QueryContext(context.Background(), "PRAGMA quick_check")
+func quickCheck(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA quick_check")
 	if err != nil {
 		return err
 	}

@@ -26,7 +26,7 @@ func TestLadderRung9IsNamed(t *testing.T) {
 // five columns, the composite primary key and WITHOUT ROWID.
 func TestPostedReviewTableShape(t *testing.T) {
 	s, _ := mustOpen(t, dbPath(t), fastOpts())
-	if got, want := columnNames(t, s, "posted_review"), []string{"owner", "repo", "number", "state", "updated_at"}; !slices.Equal(got, want) {
+	if got, want := columnNames(t, t.Context(), s, "posted_review"), []string{"owner", "repo", "number", "state", "updated_at"}; !slices.Equal(got, want) {
 		t.Errorf("columns = %v, want %v", got, want)
 	}
 	var sqlText string

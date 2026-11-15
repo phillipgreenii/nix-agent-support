@@ -38,7 +38,13 @@ var currentTables = []string{
 
 func mustOpen(t *testing.T, path string, opts Options) (*Store, Result) {
 	t.Helper()
-	s, res, err := Open(path, opts)
+	return mustOpenCtx(t, t.Context(), path, opts)
+}
+
+// mustOpenCtx is mustOpen for a test that holds its own context.
+func mustOpenCtx(t *testing.T, ctx context.Context, path string, opts Options) (*Store, Result) {
+	t.Helper()
+	s, res, err := OpenCtx(ctx, path, opts)
 	if err != nil {
 		t.Fatalf("Open(%s): %v (result %+v)", path, err, res)
 	}
@@ -64,9 +70,9 @@ func tableNames(t *testing.T, s *Store) []string {
 	return out
 }
 
-func columnNames(t *testing.T, s *Store, table string) []string {
+func columnNames(t *testing.T, ctx context.Context, s *Store, table string) []string {
 	t.Helper()
-	rows, err := s.DB().QueryContext(context.Background(), fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	rows, err := s.DB().QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +183,7 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 		"store_meta":    {"key", "value"},
 	}
 	for table, cols := range wantCols {
-		got := columnNames(t, s, table)
+		got := columnNames(t, t.Context(), s, table)
 		for _, c := range cols {
 			if !slices.Contains(got, c) {
 				t.Errorf("table %s lacks column %s (has %v)", table, c, got)
@@ -205,7 +211,7 @@ func TestIdempotentSecondOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s2, res := mustOpen(t, path, fastOpts())
+	s2, res := mustOpenCtx(t, ctx, path, fastOpts())
 	if res.Outcome != OutcomeOpened || res.FromVersion != SchemaVersion || res.ToVersion != SchemaVersion {
 		t.Fatalf("second open result = %+v, want opened at version %d", res, SchemaVersion)
 	}
@@ -271,7 +277,7 @@ func TestOpenFromEachFixture(t *testing.T) {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			path := dbPath(t)
 			copyFile(t, fx, path)
-			s, res := mustOpen(t, path, fastOpts())
+			s, res := mustOpenCtx(t, ctx, path, fastOpts())
 
 			want := OutcomeMigrated
 			if v == SchemaVersion {
@@ -474,7 +480,7 @@ func TestCorruptBodyIsMovedAside(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s2, res := mustOpen(t, path, fastOpts())
+	s2, res := mustOpenCtx(t, ctx, path, fastOpts())
 	if res.Outcome != OutcomeMovedAside {
 		t.Fatalf("result = %+v, want moved_aside", res)
 	}
@@ -794,7 +800,7 @@ func TestCheckpointTruncatesWAL(t *testing.T) {
 	if fi, err := os.Stat(path + "-wal"); err != nil || fi.Size() == 0 {
 		t.Fatalf("expected WAL content before checkpoint (err=%v)", err)
 	}
-	if err := s.Checkpoint(); err != nil {
+	if err := s.Checkpoint(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if fi, err := os.Stat(path + "-wal"); err == nil && fi.Size() != 0 {
@@ -835,7 +841,7 @@ func TestMigratingIsObservableWhileASlowMigrationRuns(t *testing.T) {
 		opts := fastOpts()
 		opts.Migrations = []Migration{slow}
 		opts.Progress = progress
-		s, res, err := Open(path, opts)
+		s, res, err := OpenCtx(t.Context(), path, opts)
 		if s != nil {
 			_ = s.Close()
 		}

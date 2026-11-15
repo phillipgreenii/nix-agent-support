@@ -188,7 +188,7 @@ func Run(ctx context.Context, o Options) int {
 	log := logs.NewStructuredLog(cfg.StateDir, o.Version)
 	lockPath := filepath.Join(cfg.StateDir, config.LockFileName)
 
-	srv, err := proc.Start(proc.Config{
+	srv, err := proc.StartCtx(ctx, proc.Config{
 		StateDir:   cfg.StateDir,
 		SocketPath: cfg.SocketPath,
 		LockPath:   lockPath,
@@ -296,7 +296,7 @@ func (d *daemon) start(ctx context.Context) error {
 	d.bgCancel = bgCancel
 	d.mu.Unlock()
 
-	if err := d.openStore(); err != nil {
+	if err := d.openStore(ctx); err != nil {
 		return err
 	}
 	st := d.store()
@@ -720,7 +720,7 @@ func (d *daemon) importLegacySidecar(ctx context.Context, st *store.Store) {
 	}
 }
 
-func (d *daemon) openStore() error {
+func (d *daemon) openStore(ctx context.Context) error {
 	path := filepath.Join(d.cfg.StateDir, config.StoreFileName)
 	prog := store.NewProgress()
 	opts := store.Options{Expiry: d.cfg.Expiry.Std(), Progress: prog}
@@ -753,7 +753,7 @@ func (d *daemon) openStore() error {
 	}()
 
 	began := time.Now()
-	st, res, err := store.Open(path, opts)
+	st, res, err := store.OpenCtx(ctx, path, opts)
 	close(stop)
 	<-watching
 	d.log.StoreOpened(path, res, err, time.Since(began))
@@ -934,12 +934,12 @@ func (d *daemon) stopTelemetry(ctx context.Context) error {
 }
 
 // closeStore is the last hook: the WAL checkpoint, then the close.
-func (d *daemon) closeStore(context.Context) error {
+func (d *daemon) closeStore(ctx context.Context) error {
 	st := d.store()
 	if st == nil {
 		return nil
 	}
-	cerr := st.Checkpoint()
+	cerr := st.Checkpoint(ctx)
 	if err := st.Close(); err != nil && cerr == nil {
 		cerr = err
 	}

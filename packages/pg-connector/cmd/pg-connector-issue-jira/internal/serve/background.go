@@ -79,12 +79,12 @@ func (d *daemon) stopTelemetry(ctx context.Context) error {
 }
 
 // closeStore is the last hook: the WAL checkpoint, then the close.
-func (d *daemon) closeStore(context.Context) error {
+func (d *daemon) closeStore(ctx context.Context) error {
 	st := d.store()
 	if st == nil {
 		return nil
 	}
-	cerr := st.Checkpoint()
+	cerr := st.Checkpoint(ctx)
 	if err := st.Close(); err != nil && cerr == nil {
 		cerr = err
 	}

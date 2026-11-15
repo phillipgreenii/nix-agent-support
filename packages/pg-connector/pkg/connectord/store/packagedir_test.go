@@ -114,7 +114,7 @@ func TestOpenTreatsQueryCharactersInPathAsFileName(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, name)
 			s, _ := mustOpen(t, path, fastOpts())
-			if err := s.Checkpoint(); err != nil {
+			if err := s.Checkpoint(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.Close(); err != nil {

@@ -183,7 +183,7 @@ type EventLog struct {
 
 // NewEventLog returns the event log inside stateDir, rotating at DaemonMaxBytes.
 func NewEventLog(stateDir, version string) *EventLog {
-	return &EventLog{Path: EventLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version}
+	return &EventLog{Path: EventLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version, out: sink{ctx: context.Background()}}
 }
 
 func (l *EventLog) now() time.Time {

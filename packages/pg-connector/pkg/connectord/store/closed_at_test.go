@@ -17,15 +17,15 @@ const closedAtVersion = 7
 
 // rawEntities dumps every column of every entity row except closed_at as text,
 // in key order, so a test compares what a rung left untouched byte for byte.
-func rawEntities(t *testing.T, s *Store) []string {
+func rawEntities(t *testing.T, ctx context.Context, s *Store) []string {
 	t.Helper()
 	var cols []string
-	for _, c := range columnNames(t, s, "entity") {
+	for _, c := range columnNames(t, ctx, s, "entity") {
 		if c != "closed_at" {
 			cols = append(cols, "ifnull("+c+", 'NULL')")
 		}
 	}
-	rows, err := s.DB().QueryContext(context.Background(), `SELECT `+strings.Join(cols, " || '|' || ")+` FROM entity ORDER BY kind, id`)
+	rows, err := s.DB().QueryContext(ctx, `SELECT `+strings.Join(cols, " || '|' || ")+` FROM entity ORDER BY kind, id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,17 +79,17 @@ func TestOpenFromOlderFixturesAddsClosedAtAndKeepsRows(t *testing.T) {
 			copyFile(t, fx, path)
 
 			// What the file holds with the ladder cut one rung below the new one.
-			pre, _, err := Open(path, Options{Migrations: BuiltinMigrations()[:closedAtVersion-1], Synchronous: "OFF"})
+			pre, _, err := OpenCtx(ctx, path, Options{Migrations: BuiltinMigrations()[:closedAtVersion-1], Synchronous: "OFF"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			entitiesBefore := rawEntities(t, pre)
+			entitiesBefore := rawEntities(t, ctx, pre)
 			headBefore, logBefore := logSnapshot(t, ctx, pre)
 			if err := pre.Close(); err != nil {
 				t.Fatal(err)
 			}
 
-			s, res := mustOpen(t, path, fastOpts())
+			s, res := mustOpenCtx(t, ctx, path, fastOpts())
 			if res.Outcome != OutcomeMigrated || res.ToVersion != SchemaVersion {
 				t.Fatalf("result = %+v, want migrated to %d", res, SchemaVersion)
 			}
@@ -97,7 +97,7 @@ func TestOpenFromOlderFixturesAddsClosedAtAndKeepsRows(t *testing.T) {
 			assertFixtureJobs(t, ctx, s, v)
 			assertFixtureChanges(t, ctx, s, v)
 
-			if got := rawEntities(t, s); !reflect.DeepEqual(got, entitiesBefore) {
+			if got := rawEntities(t, ctx, s); !reflect.DeepEqual(got, entitiesBefore) {
 				t.Errorf("entity rows = %q, want %q", got, entitiesBefore)
 			}
 			head, log := logSnapshot(t, ctx, s)
@@ -105,11 +105,11 @@ func TestOpenFromOlderFixturesAddsClosedAtAndKeepsRows(t *testing.T) {
 				t.Errorf("change head/log = %d %+v, want %d %+v", head, log, headBefore, logBefore)
 			}
 			var closed, idx int
-			if err := s.DB().QueryRowContext(context.Background(), `SELECT count(*) FROM entity WHERE closed_at IS NOT NULL`).Scan(&closed); err != nil || closed != 0 {
+			if err := s.DB().QueryRowContext(ctx, `SELECT count(*) FROM entity WHERE closed_at IS NOT NULL`).Scan(&closed); err != nil || closed != 0 {
 				t.Errorf("closed entity count = %d err=%v, want 0", closed, err)
 			}
 			if err := s.DB().QueryRowContext(
-				context.Background(),
+				ctx,
 				`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'entity_closed_at'`,
 			).Scan(&idx); err != nil || idx != 1 {
 				t.Errorf("entity_closed_at index count = %d err=%v, want 1", idx, err)
@@ -129,7 +129,7 @@ func TestVersion7FixtureCarriesTheClosedEntity(t *testing.T) {
 	}
 	path := dbPath(t)
 	copyFile(t, fx, path)
-	s, res := mustOpen(t, path, fastOpts())
+	s, res := mustOpenCtx(t, ctx, path, fastOpts())
 	if res.Outcome != OutcomeMigrated || res.FromVersion != closedAtVersion || res.ToVersion != SchemaVersion {
 		t.Fatalf("result = %+v, want migrated %d -> %d", res, closedAtVersion, SchemaVersion)
 	}

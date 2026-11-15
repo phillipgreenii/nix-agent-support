@@ -13,7 +13,7 @@ import (
 
 // sink is one daemon log file written through x/jsonllogger: a RotatingFile
 // (reopens after an external rename or delete, caps the size by renaming to
-// <file>.1) under the shared slog JSONL handler. The zero value is usable; the
+// <file>.1) under the shared slog JSONL handler. Build it with a ctx (the log constructors do); the
 // file is opened on the first write, so the Path and MaxBytes fields of the
 // owning log can be set after construction, and a directory that cannot be
 // written yet is retried on the next row. Writing is strictly best effort: a
@@ -25,6 +25,10 @@ type sink struct {
 	path string
 	max  int64
 	f    *jsonllogger.RotatingFile
+	// ctx is the context every row is handled under. A row is written
+	// fire-and-forget, so it is the detached background context the owning
+	// log constructor sets, never a request context that could cancel it.
+	ctx context.Context
 }
 
 // handler returns the open handler for path, opening (or reopening after the
@@ -61,7 +65,7 @@ func (s *sink) emit(path string, max int64, v any) {
 	if h == nil {
 		return
 	}
-	_ = h.Handle(context.Background(), rec)
+	_ = h.Handle(s.ctx, rec)
 }
 
 // rowRecord maps a typed row to a slog record. The row's own "time" (an

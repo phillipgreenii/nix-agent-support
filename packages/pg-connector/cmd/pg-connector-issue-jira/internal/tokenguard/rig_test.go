@@ -136,12 +136,6 @@ func (e *evRec) Record(ev Event) {
 	}
 }
 
-func (e *evRec) all() []Event {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return append([]Event(nil), e.events...)
-}
-
 // await blocks until an event with the name arrives.
 func (e *evRec) await(t *testing.T, name string) Event {
 	t.Helper()

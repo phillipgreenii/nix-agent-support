@@ -200,11 +200,16 @@ type Store struct {
 	version int
 }
 
-// Open opens (creating if absent) the store at path, applies migrations and
+// Open is OpenCtx under context.Background.
+func Open(path string, opts Options) (*Store, Result, error) {
+	return OpenCtx(context.Background(), path, opts)
+}
+
+// OpenCtx opens (creating if absent) the store at path, applies migrations and
 // returns the handle with the typed Result. On a *SchemaNewerError the
 // handle is nil and Result.Outcome is OutcomeRefusedNewer. See the package
 // comment for the outcomes.
-func Open(path string, opts Options) (*Store, Result, error) {
+func OpenCtx(ctx context.Context, path string, opts Options) (*Store, Result, error) {
 	// An empty path would make SQLite open an anonymous temporary database
 	// (and, were the URI prefix ever lost, a file named after the query
 	// string in the working directory), so it is refused up front.
@@ -238,13 +243,13 @@ func Open(path string, opts Options) (*Store, Result, error) {
 	case err != nil:
 		return nil, res, fmt.Errorf("store: inspect %s: %w", path, err)
 	case hdr.exists && hdr.corrupt:
-		return reopenAfterMoveAside(path, opts, res, fmt.Errorf("%s is not a SQLite database", path))
+		return reopenAfterMoveAside(ctx, path, opts, res, fmt.Errorf("%s is not a SQLite database", path))
 	case hdr.exists && hdr.version > latest:
 		return refuseNewer(path, latest, hdr.version, res)
 	}
 
 	var backup string
-	s, from, err := openAndMigrate(path, opts, ladder, &backup)
+	s, from, err := openAndMigrate(ctx, path, opts, ladder, &backup)
 	res.BackupPath = backup
 	var newer *SchemaNewerError
 	switch {
@@ -252,9 +257,9 @@ func Open(path string, opts Options) (*Store, Result, error) {
 		// The header was stale (the newer version still sat in the WAL).
 		return refuseNewer(path, latest, newer.Found, res)
 	case err != nil && isCorruption(err):
-		return reopenAfterMoveAside(path, opts, res, err)
+		return reopenAfterMoveAside(ctx, path, opts, res, err)
 	case err != nil && errors.Is(err, errMigrationFailed):
-		return reopenAfterMoveAside(path, opts, res, err)
+		return reopenAfterMoveAside(ctx, path, opts, res, err)
 	case err != nil:
 		return nil, res, err
 	}
@@ -276,13 +281,13 @@ func refuseNewer(path string, supported, found int, res Result) (*Store, Result,
 
 // reopenAfterMoveAside moves the unusable store aside and builds a fresh
 // one. A failure here is a real error (the disk, not the data).
-func reopenAfterMoveAside(path string, opts Options, res Result, cause error) (*Store, Result, error) {
+func reopenAfterMoveAside(ctx context.Context, path string, opts Options, res Result, cause error) (*Store, Result, error) {
 	to, err := moveAside(path, opts.now())
 	if err != nil {
 		return nil, res, fmt.Errorf("store: move aside unusable store (%v): %w", cause, err)
 	}
 	var backup string
-	s, from, err := openAndMigrate(path, opts, opts.ladder(), &backup)
+	s, from, err := openAndMigrate(ctx, path, opts, opts.ladder(), &backup)
 	if err != nil {
 		return nil, res, fmt.Errorf("store: create fresh store after moving %s aside to %s (%v): %w",
 			path, to, cause, err)
@@ -307,7 +312,7 @@ var uriPathEscaper = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
 // openAndMigrate opens the database with the connection pragmas, checks it
 // is a database and brings it to the ladder's top. It returns the schema
 // version the file had before migrating.
-func openAndMigrate(path string, opts Options, ladder []Migration, backup *string) (*Store, int, error) {
+func openAndMigrate(ctx context.Context, path string, opts Options, ladder []Migration, backup *string) (*Store, int, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
 		uriPath(path), busyTimeoutMillis)
 	if opts.Synchronous != "" {
@@ -321,7 +326,7 @@ func openAndMigrate(path string, opts Options, ladder []Migration, backup *strin
 	// so WAL writers do not contend within the process.
 	db.SetMaxOpenConns(1)
 
-	from, err := runMigrations(db, path, opts, ladder, backup)
+	from, err := runMigrations(ctx, db, path, opts, ladder, backup)
 	if err != nil {
 		_ = db.Close()
 		return nil, 0, err
@@ -342,8 +347,8 @@ func (s *Store) DB() *sql.DB { return s.db }
 
 // Checkpoint folds the WAL into the main file and truncates it. The daemon
 // registers it as the last drain hook, before Close.
-func (s *Store) Checkpoint() error {
-	if _, err := s.db.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+func (s *Store) Checkpoint(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 		return fmt.Errorf("store: checkpoint %s: %w", s.path, err)
 	}
 	return nil

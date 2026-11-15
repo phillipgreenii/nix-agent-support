@@ -103,7 +103,7 @@ func Run(ctx context.Context, o Options) int {
 	log := logs.NewStructuredLog(cfg.StateDir, o.Version)
 	lockPath := filepath.Join(cfg.StateDir, config.LockFileName)
 
-	srv, err := proc.Start(proc.Config{
+	srv, err := proc.StartCtx(ctx, proc.Config{
 		StateDir:   cfg.StateDir,
 		SocketPath: cfg.SocketPath,
 		LockPath:   lockPath,
@@ -215,7 +215,7 @@ func (d *daemon) start(ctx context.Context) (err error) {
 	// return below removes the file and the link again.
 	defer func() {
 		if err != nil {
-			_ = d.removeToken(context.Background())
+			_ = d.removeToken(context.WithoutCancel(ctx))
 		}
 	}()
 	refresher := d.startToken(ctx)
@@ -227,7 +227,7 @@ func (d *daemon) start(ctx context.Context) (err error) {
 	d.bgCancel = bgCancel
 	d.mu.Unlock()
 
-	if err := d.openStore(); err != nil {
+	if err := d.openStore(ctx); err != nil {
 		return err
 	}
 	st := d.store()
@@ -501,7 +501,7 @@ func (d *daemon) start(ctx context.Context) (err error) {
 
 // openStore opens the store with the gate showing the migration's progress, and
 // logs what Open did. A newer schema is a refusal.
-func (d *daemon) openStore() error {
+func (d *daemon) openStore(ctx context.Context) error {
 	path := filepath.Join(d.cfg.StateDir, config.StoreFileName)
 	prog := store.NewProgress()
 	opts := store.Options{Expiry: d.cfg.Expiry.Std(), Progress: prog}
@@ -534,7 +534,7 @@ func (d *daemon) openStore() error {
 	}()
 
 	began := time.Now()
-	st, res, err := store.Open(path, opts)
+	st, res, err := store.OpenCtx(ctx, path, opts)
 	close(stop)
 	<-watching
 	d.log.StoreOpened(path, res, err, time.Since(began))

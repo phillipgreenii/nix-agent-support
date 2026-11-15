@@ -51,7 +51,7 @@ func backupPath(path string, from int, now time.Time) (string, error) {
 // PRAGMA user_version as the original; a copy that does not is deleted and an
 // error returned. The errors are plain: they MUST NOT take Open's move-aside
 // path, which would lose the store the copy exists to protect.
-func backupBeforeMigrating(db *sql.DB, path string, from int, now time.Time) (string, error) {
+func backupBeforeMigrating(ctx context.Context, db *sql.DB, path string, from int, now time.Time) (string, error) {
 	to, err := backupPath(path, from, now)
 	if err != nil {
 		return "", fmt.Errorf("store: back up %s before migrating: %w", path, err)
@@ -60,7 +60,7 @@ func backupBeforeMigrating(db *sql.DB, path string, from int, now time.Time) (st
 		_ = os.Remove(to)
 		return "", fmt.Errorf("store: back up %s to %s before migrating: %w", path, to, plainError{err})
 	}
-	if err := verifyBackup(to, from); err != nil {
+	if err := verifyBackup(ctx, to, from); err != nil {
 		_ = os.Remove(to)
 		return "", fmt.Errorf("store: verify the backup %s of %s: %w", to, path, plainError{err})
 	}
@@ -68,14 +68,14 @@ func backupBeforeMigrating(db *sql.DB, path string, from int, now time.Time) (st
 }
 
 // verifyBackup opens the copy and checks it reports user_version want.
-func verifyBackup(path string, want int) error {
+func verifyBackup(ctx context.Context, path string, want int) error {
 	cp, err := sql.Open("sqlite", "file:"+uriPath(path)+"?mode=ro")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = cp.Close() }()
 	var got int
-	if err := cp.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&got); err != nil {
+	if err := cp.QueryRowContext(ctx, "PRAGMA user_version").Scan(&got); err != nil {
 		return err
 	}
 	if got != want {

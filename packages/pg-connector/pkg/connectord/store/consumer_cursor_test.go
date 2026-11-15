@@ -278,7 +278,7 @@ func TestRung6OnAnEmptyConsumerTableLeavesTheCurrentShape(t *testing.T) {
 	ctx := context.Background()
 	path := openVersion5With(t, nil)
 	s, _ := mustOpen(t, path, fastOpts())
-	if got := columnNames(t, s, "consumer"); !slices.Equal(got, []string{"consumer", "feed_view", "scope", "acked_seq", "seen_at"}) {
+	if got := columnNames(t, t.Context(), s, "consumer"); !slices.Equal(got, []string{"consumer", "feed_view", "scope", "acked_seq", "seen_at"}) {
 		t.Errorf("consumer columns = %v", got)
 	}
 	if n := len(collapsedRecords(t, ctx, s)); n != 0 {

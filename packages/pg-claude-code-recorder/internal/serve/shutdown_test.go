@@ -87,7 +87,7 @@ func TestGroupSeesLoopsAndCloseFinishesBeforeDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.goLoop("probe", func() { <-d.stop })
-	grp.Go("daemon", func(ctx context.Context) error { <-ctx.Done(); return d.Close() })
+	grp.Go("daemon", func(ctx context.Context) error { <-ctx.Done(); return d.CloseCtx(ctx) })
 	cancel()
 	if err := grp.Run(); err != nil {
 		t.Fatal(err)

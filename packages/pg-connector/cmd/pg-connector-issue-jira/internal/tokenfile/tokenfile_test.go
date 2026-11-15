@@ -219,7 +219,7 @@ func TestNonAtomicVariantIsCaught(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	b, err := os.ReadFile(path) // the reader runs in the truncation window
 	if err != nil {
 		t.Fatal(err)

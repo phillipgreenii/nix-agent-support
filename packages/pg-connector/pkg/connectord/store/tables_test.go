@@ -99,7 +99,7 @@ func TestGenerateFixture(t *testing.T) {
 		ConsumerCollapsedPrefix+"example-multi", fixtureCollapsedRecord); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Checkpoint(); err != nil {
+	if err := s.Checkpoint(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

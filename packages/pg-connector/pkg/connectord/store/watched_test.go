@@ -38,7 +38,7 @@ func TestOpenFromOldFixturesAddsTheWatchedColumnsAndKeepsRows(t *testing.T) {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			path := dbPath(t)
 			copyFile(t, fx, path)
-			s, res := mustOpen(t, path, fastOpts())
+			s, res := mustOpenCtx(t, ctx, path, fastOpts())
 			if res.Outcome != OutcomeMigrated || res.FromVersion != v || res.ToVersion != SchemaVersion {
 				t.Fatalf("result = %+v, want migrated %d -> %d", res, v, SchemaVersion)
 			}
@@ -48,7 +48,7 @@ func TestOpenFromOldFixturesAddsTheWatchedColumnsAndKeepsRows(t *testing.T) {
 
 			// The old fixtures hold one entity row; read its key from the table.
 			var kind, id string
-			if err := s.DB().QueryRowContext(context.Background(), `SELECT kind, id FROM entity`).Scan(&kind, &id); err != nil {
+			if err := s.DB().QueryRowContext(ctx, `SELECT kind, id FROM entity`).Scan(&kind, &id); err != nil {
 				t.Fatal(err)
 			}
 			e, ok, err := s.GetEntity(ctx, kind, id)
@@ -66,7 +66,7 @@ func TestOpenFromOldFixturesAddsTheWatchedColumnsAndKeepsRows(t *testing.T) {
 			}
 			var idx int
 			if err := s.DB().QueryRowContext(
-				context.Background(),
+				ctx,
 				`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'entity_watched'`,
 			).Scan(&idx); err != nil || idx != 1 {
 				t.Errorf("entity_watched index count = %d err=%v, want 1", idx, err)
@@ -89,7 +89,7 @@ func TestVersion5FixtureCarriesTheWatchedEntity(t *testing.T) {
 	}
 	path := dbPath(t)
 	copyFile(t, fx, path)
-	s, _ := mustOpen(t, path, fastOpts())
+	s, _ := mustOpenCtx(t, ctx, path, fastOpts())
 	var kind string
 	if err := s.DB().QueryRowContext(context.Background(), `SELECT kind FROM entity WHERE watched_at IS NOT NULL`).Scan(&kind); err != nil {
 		t.Fatal(err)

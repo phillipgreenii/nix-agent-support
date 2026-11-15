@@ -17,9 +17,9 @@ const aliasFoldVersion = 8
 
 // queryPlan returns the detail column of EXPLAIN QUERY PLAN for query, joined by
 // newlines.
-func queryPlan(t *testing.T, s *Store, query string, args ...any) string {
+func queryPlan(t *testing.T, ctx context.Context, s *Store, query string, args ...any) string {
 	t.Helper()
-	rows, err := s.DB().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+	rows, err := s.DB().QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,14 +79,14 @@ func TestAliasFoldLookupsSearchTheIndexAndDoNotScan(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertNoAliasScan(t, queryPlan(t, s, aliasGetSQL(aliasFoldedRefExpr), "example/item#7"))
+	assertNoAliasScan(t, queryPlan(t, ctx, s, aliasGetSQL(aliasFoldedRefExpr), "example/item#7"))
 	for _, n := range []int{1, 2, 100, aliasFoldChunk} {
 		args := make([]any, n)
 		for i := range args {
 			args[i] = fmt.Sprintf("example/item#%d", i)
 		}
 		t.Run(fmt.Sprintf("in-list-of-%d", n), func(t *testing.T) {
-			assertNoAliasScan(t, queryPlan(t, s, aliasesByFoldedRefsSQL(n), args...))
+			assertNoAliasScan(t, queryPlan(t, ctx, s, aliasesByFoldedRefsSQL(n), args...))
 		})
 	}
 }
@@ -98,7 +98,7 @@ func TestAliasFoldPlanWithoutTheIndexScans(t *testing.T) {
 	if _, err := s.DB().ExecContext(context.Background(), `DROP INDEX alias_ref_fold`); err != nil {
 		t.Fatal(err)
 	}
-	plan := queryPlan(t, s, aliasesByFoldedRefsSQL(3), "a", "b", "c")
+	plan := queryPlan(t, t.Context(), s, aliasesByFoldedRefsSQL(3), "a", "b", "c")
 	if !strings.Contains(plan, "SCAN") || strings.Contains(plan, "alias_ref_fold") {
 		t.Errorf("plan without the index = %q, want a scan", plan)
 	}
@@ -118,13 +118,13 @@ func TestOpenFromOlderFixturesAddsTheAliasFoldIndexAndKeepsRows(t *testing.T) {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			path := dbPath(t)
 			copyFile(t, fx, path)
-			s, res := mustOpen(t, path, fastOpts())
+			s, res := mustOpenCtx(t, ctx, path, fastOpts())
 			if res.Outcome != OutcomeMigrated || res.ToVersion != SchemaVersion {
 				t.Fatalf("result = %+v, want migrated to %d", res, SchemaVersion)
 			}
 			var idx int
 			if err := s.DB().QueryRowContext(
-				context.Background(),
+				ctx,
 				`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'alias_ref_fold'`,
 			).Scan(&idx); err != nil || idx != 1 {
 				t.Errorf("alias_ref_fold index count = %d err=%v, want 1", idx, err)
@@ -132,7 +132,7 @@ func TestOpenFromOlderFixturesAddsTheAliasFoldIndexAndKeepsRows(t *testing.T) {
 			// The fixture's one alias row, read raw, is what both fold lookups must
 			// answer for the upper-cased reference.
 			var node, ref string
-			if err := s.DB().QueryRowContext(context.Background(), `SELECT node_id, ref FROM alias`).Scan(&node, &ref); err != nil {
+			if err := s.DB().QueryRowContext(ctx, `SELECT node_id, ref FROM alias`).Scan(&node, &ref); err != nil {
 				t.Fatal(err)
 			}
 			a, ok, err := s.AliasByRefFold(ctx, strings.ToUpper(ref))
@@ -143,7 +143,7 @@ func TestOpenFromOlderFixturesAddsTheAliasFoldIndexAndKeepsRows(t *testing.T) {
 			if err != nil || len(all) != 1 || all[strings.ToLower(ref)].NodeID != node {
 				t.Errorf("AliasesByRefFold = %+v err=%v, want only node %q", all, err, node)
 			}
-			assertNoAliasScan(t, queryPlan(t, s, aliasesByFoldedRefsSQL(2), "a", "b"))
+			assertNoAliasScan(t, queryPlan(t, ctx, s, aliasesByFoldedRefsSQL(2), "a", "b"))
 		})
 	}
 	if ran == 0 {
