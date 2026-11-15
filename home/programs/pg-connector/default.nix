@@ -182,6 +182,17 @@ let
     else
       { };
   jiraStateDir = "${config.home.homeDirectory}/.local/state/pg-connector-issue-jira-daemon";
+  # The stable token LINK path inside the state dir; the one string a consumer
+  # (the daemon-only pjira config) reads through `jira.tokenFileDefault`.
+  jiraTokenLinkDefault = "${jiraStateDir}/jira-token";
+  # An explicit tokenFile must name a file strictly inside the state dir
+  # (the daemon's own validation): absolute, under `<state_dir>/`, no `..`.
+  jiraTokenInStateDir =
+    jr.tokenFile == null
+    || (
+      lib.hasPrefix "${jiraStateDir}/" jr.tokenFile
+      && !builtins.elem ".." (lib.splitString "/" jr.tokenFile)
+    );
 
   # The queries are declared ONCE, in the umbrella's backends.<instance> block,
   # and copied verbatim (string, list or { expr, watched }) into the daemon's
@@ -202,6 +213,10 @@ let
       pjira_path = jr.pjiraPath;
       pjira_env = jr.pjiraEnvironment;
       queries = jiraQueries;
+      # Opt-in keychain token handoff: nothing is rendered unless tokenFile is set.
+      token_link = jr.tokenFile;
+      keychain_service = if jr.tokenFile == null then null else jr.keychainService;
+      keychain_account = if jr.tokenFile == null then null else jr.keychainAccount;
     };
   jiraConfigHash = builtins.hashString "sha256" (builtins.toJSON jiraConfigBody);
   jiraConfigFile = pkgs.writeText "pg-connector-issue-jira-config.json" (
@@ -1090,6 +1105,46 @@ in
         description = "The ONLY environment the daemon gives every `pjira` process, rendered as `pjira_env`.";
       };
 
+      tokenFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = lib.literalExpression "config.phillipgreenii.programs.pg-connector.jira.tokenFileDefault";
+        description = ''
+          Opts the daemon in to the keychain token handoff. The value is the
+          stable LINK path (rendered as `token_link`) inside the daemon's state
+          directory, never the token file itself: the daemon reads the token
+          from the login keychain once at start, writes it to an owner-only file
+          in the per-user temp directory, and points this symlink at it. The
+          temp-dir path is not known at evaluation time and is not rendered.
+          Use `tokenFileDefault` for the conventional path, and read this one
+          option wherever the same path is needed (for example the daemon-only
+          pjira config), so the two never drift. An explicit value outside the
+          state directory fails evaluation (the daemon rejects it too).
+          `null` (the default) renders no token key: no keychain read, no file.
+          Requires `keychainAccount`.
+        '';
+      };
+
+      tokenFileDefault = lib.mkOption {
+        type = lib.types.str;
+        readOnly = true;
+        default = jiraTokenLinkDefault;
+        description = "The conventional token link path, `<state dir>/jira-token`, derived from the daemon's state directory. Assign it to `tokenFile` to opt in.";
+      };
+
+      keychainService = lib.mkOption {
+        type = lib.types.str;
+        default = "zr-jira";
+        description = "The login-keychain item (service) holding the Jira API token, rendered as `keychain_service` when `tokenFile` is set.";
+      };
+
+      keychainAccount = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        example = "user@example.com";
+        description = "The login-keychain account of the Jira token item, rendered as `keychain_account`. Required (non-empty) when `tokenFile` is set; evaluation fails otherwise.";
+      };
+
       registry.rewrite = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -1115,8 +1170,8 @@ in
           config file (the snake_case keys of the daemon's defaults table: the
           budget, retention and TTL keys; an unknown key fails the daemon's
           load, naming it). The keys this module derives itself (paths, label,
-          OTel endpoint, `instance`, `pjira_path`, `pjira_env`, `queries` and
-          the stamp) win over a same-named entry here.
+          OTel endpoint, `instance`, `pjira_path`, `pjira_env`, `queries`, the
+          token handoff keys and the stamp) win over a same-named entry here.
         '';
       };
 
@@ -1278,6 +1333,18 @@ in
           {
             assertion = parameterizedWatched == [ ];
             message = "phillipgreenii.programs.pg-connector.backends: ${lib.concatStringsSep ", " parameterizedWatched} declare both `params` and `watched = true`. A parameterized query MUST NOT be watched: a watched query's ledger and change stream are keyed by query name alone, so a per-call value would mix result sets, and the backend rejects such a config. Remove `watched = true` (or the `params`).";
+          }
+          {
+            assertion = !jr.enable || jr.tokenFile == null || jr.keychainAccount != "";
+            message = "phillipgreenii.programs.pg-connector.jira.tokenFile is set but jira.keychainAccount is empty: the keychain token handoff needs the account of the keychain item.";
+          }
+          {
+            assertion = !jr.enable || jr.tokenFile == null || jr.keychainService != "";
+            message = "phillipgreenii.programs.pg-connector.jira.tokenFile is set but jira.keychainService is empty.";
+          }
+          {
+            assertion = !jr.enable || jiraTokenInStateDir;
+            message = "phillipgreenii.programs.pg-connector.jira.tokenFile must be an absolute path inside the daemon's state directory (${jiraStateDir}/..., no `..`); use jira.tokenFileDefault.";
           }
           {
             assertion = !jr.enable || (jr.pjiraPath != null && lib.hasPrefix "/" jr.pjiraPath);

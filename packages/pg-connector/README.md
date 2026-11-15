@@ -703,6 +703,9 @@ have no default and MUST be absolute.
 | `socket_path`             | `<state_dir>/sock`                            | The unix socket.                                                                                                              |
 | `pjira_path`              | none (required)                               | Absolute path of `pjira`.                                                                                                     |
 | `pjira_env`               | `{}`                                          | The ONLY environment every `pjira` process gets.                                                                              |
+| `token_link`              | unset (handoff off)                           | Opt-in keychain token handoff. An absolute path INSIDE `state_dir`: the stable symlink `pjira` reads its token through.       |
+| `keychain_service`        | `zr-jira`                                     | The login-keychain item read for the token; used only with `token_link`.                                                      |
+| `keychain_account`        | none; REQUIRED when `token_link` is set       | The keychain account of that item.                                                                                            |
 | `instance`                | `pg-connector-issue-jira`                     | The registry name of the backend.                                                                                             |
 | `supervisor_label`        | `com.phillipg.pg-connector-issue-jira-daemon` | The launchd label shown in a down report.                                                                                     |
 | `otel_endpoint`           | unset (no export)                             | OpenTelemetry endpoint.                                                                                                       |
@@ -747,6 +750,15 @@ launchd entry sets it to `<state_dir>/pprof.sock` unless `jira.pprof.enable` is 
   and gives it ONLY `pjira_env`: launchd supplies no `PATH`, and the daemon never inherits the process environment, so
   anything `pjira` needs (a credential or config location) MUST be in `pjira_env`. The client's writes are the
   opposite: they run under the CALLER's environment.
+- **Token handoff (opt-in).** With `token_link` unset the daemon reads no keychain and writes no file (and `pjira`
+  runs its own credential command per launch). With it set, the daemon reads the token from the login keychain ONCE at
+  start, writes it to an owner-only file in an owner-only subdirectory of the per-user temp directory (`TMPDIR`, which
+  launchd supplies per job and the daemon reads once at start), and makes `token_link` (inside `state_dir`) a symlink
+  to that file. `pjira` is configured, outside this daemon, to read its token through `token_link` (the nix module's
+  `jira.tokenFile` is the one value both the daemon config and that `pjira` config render from). The daemon removes the
+  file and the link on shutdown and any leftover at the next start. A 401 from `pjira` re-reads the keychain; an
+  unchanged token marks the daemon degraded for auth and it stays degraded until restarted (recovery is restart
+  only; there is no recheck timer). The token never appears in config, logs, metrics or process arguments.
 - **Budget.** The request rate and concurrency are internal and conservative, and the origin's own rate-limit reading
   is an input (bead `pg2-doihln`). `pjira` conveys it on stderr, one `pjira-ratelimit: ` line of compact JSON per
   response that carried a header (`status`, and when present `limit`, `remaining`, `near_limit`, `retry_after_seconds`,

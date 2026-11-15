@@ -544,6 +544,29 @@ let
     }
   ) osWithObs;
   jiraWithEnv = jiraCase (jiraOn // { pjiraEnvironment.EXAMPLE_VAR = "example-value"; }) osWithObs;
+  # the opt-in keychain token handoff (token_link, keychain_service, keychain_account)
+  jiraTokenOn = jiraOn // {
+    tokenFile = "/example/home/.local/state/pg-connector-issue-jira-daemon/jira-token";
+    keychainAccount = "user@example.invalid";
+  };
+  jiraToken = jiraCase jiraTokenOn osWithObs;
+  jiraTokenOtherService = jiraCase (
+    jiraTokenOn // { keychainService = "example-service"; }
+  ) osWithObs;
+  jiraTokenNoAccount = jiraCase (jiraOn // { inherit (jiraTokenOn) tokenFile; }) osWithObs;
+  jiraTokenOutside = jiraCase (
+    jiraTokenOn // { tokenFile = "/example/elsewhere/jira-token"; }
+  ) osWithObs;
+  jiraTokenDotDot = jiraCase (
+    jiraTokenOn
+    // {
+      tokenFile = "/example/home/.local/state/pg-connector-issue-jira-daemon/../jira-token";
+    }
+  ) osWithObs;
+  jiraTokenEmptyService = jiraCase (jiraTokenOn // { keychainService = ""; }) osWithObs;
+  # an account without a tokenFile is inert: nothing renders, nothing fails
+  jiraAccountOnly = jiraCase (jiraOn // { keychainAccount = "user@example.invalid"; }) osWithObs;
+  failedAssertionCount = e: builtins.length (builtins.filter (a: !a.assertion) e.config.assertions);
   jiraNoSupervisor = jiraCase (
     jiraRewriteOn
     // {
@@ -781,6 +804,38 @@ let
     # A null or observability-less system scope renders and does not fail.
     nullOsConfigRenders = lib.hasPrefix builtins.storeDir (toString (jOpts jiraEnabledNoOs).configFile);
 
+    # The keychain token handoff is opt-in: tokenFile unset renders no token
+    # key (the whole document is the one of a daemon without these options);
+    # the keys themselves are asserted on the rendered JSON by the check.
+    tokenOffDefaults =
+      (jOpts jiraEnabled).tokenFile == null
+      && (jOpts jiraEnabled).keychainService == "zr-jira"
+      && (jOpts jiraEnabled).keychainAccount == "";
+    tokenOffNoFailure =
+      failedAssertionCount jiraEnabled == 0 && failedAssertionCount jiraAccountOnly == 0;
+    tokenOffInert = (jOpts jiraEnabled).configHash == (jOpts jiraAccountOnly).configHash;
+    # the default link derives from the state dir
+    tokenDefaultFromStateDir =
+      (jOpts jiraEnabled).tokenFileDefault
+      == "/example/home/.local/state/pg-connector-issue-jira-daemon/jira-token";
+    tokenSetRenders =
+      failedAssertionCount jiraToken == 0
+      && (jOpts jiraToken).configHash != (jOpts jiraEnabled).configHash
+      && (jOpts jiraTokenOtherService).configHash != (jOpts jiraToken).configHash;
+    tokenDefaultIsAccepted =
+      failedAssertionCount (
+        jiraCase (jiraTokenOn // { tokenFile = (jOpts jiraEnabled).tokenFileDefault; }) osWithObs
+      ) == 0;
+    # negative fixtures: each fails evaluation (a failed assertion)
+    tokenNeedsAccount =
+      failedAssertionCount jiraTokenNoAccount == 1
+      &&
+        lib.hasInfix "keychainAccount"
+          (builtins.head (builtins.filter (a: !a.assertion) jiraTokenNoAccount.config.assertions)).message;
+    tokenOutsideStateDirRejected = failedAssertionCount jiraTokenOutside == 1;
+    tokenDotDotRejected = failedAssertionCount jiraTokenDotDot == 1;
+    tokenEmptyServiceRejected = failedAssertionCount jiraTokenEmptyService == 1;
+
     # Both daemons at once: each rewrites only its own names, the GitHub
     # rewrite is exactly what it is without Jira.
     bothRewriteOwnNames =
@@ -924,6 +979,8 @@ in
     withEnv = (jOpts jiraWithEnv).configFile;
     settingsOverride = (jOpts jiraSettingsOverride).configFile;
     otherSetting = (jOpts jiraOtherSetting).configFile;
+    token = (jOpts jiraToken).configFile;
+    tokenOtherService = (jOpts jiraTokenOtherService).configFile;
     enabledRegistry = render (jiraRegistry // { jira = jiraRewriteOn; });
     pjira = jiraOn.pjiraPath;
   };

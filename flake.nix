@@ -20407,6 +20407,16 @@
                     jq -e 'has("otel_endpoint") | not' ${rendered.jira.enabledNoOs} >/dev/null
                     jq -e '.pjira_env == {"EXAMPLE_VAR": "example-value"}' ${rendered.jira.withEnv} >/dev/null
                     jq -e '.request_rate_per_second == 4' ${rendered.jira.otherSetting} >/dev/null
+                    # token handoff: absent when tokenFile is unset (opt-in), rendered
+                    # next to state_dir when set
+                    jq -e 'has("token_link") or has("keychain_service") or has("keychain_account") | not' ${rendered.jira.enabled} >/dev/null
+                    jq -e '
+                      .token_link == "/example/home/.local/state/pg-connector-issue-jira-daemon/jira-token"
+                      and .keychain_service == "zr-jira"
+                      and .keychain_account == "user@example.invalid"
+                      and (.state_dir + "/") == .token_link[0:((.state_dir | length) + 1)]
+                    ' ${rendered.jira.token} >/dev/null || { echo "rendered Jira token handoff keys are wrong:" >&2; cat ${rendered.jira.token} >&2; exit 1; }
+                    jq -e '.keychain_service == "example-service"' ${rendered.jira.tokenOtherService} >/dev/null
                     # the keys the module derives win over a same-named setting
                     jq -e '
                       .workers == 3

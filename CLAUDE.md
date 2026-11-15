@@ -196,9 +196,21 @@ fix is forward, there is no rollback path to look for.
 `enable` (off), `package`, `supervisor` (`launchd` on darwin, else `none`), `allowUnsupervised` (false),
 `pprof.enable` (true), `instance` (`pg-connector-issue-jira`), `pjiraPath` (REQUIRED absolute path, asserted: launchd
 supplies no `PATH`), `pjiraEnvironment` (the ONLY environment every `pjira` process gets), `registry.rewrite` (false),
-`settings` (daemon keys merged into the rendered file) and the read-only `configFile` and `configHash`. The rendered
+`tokenFile` (null; the opt-in keychain token handoff, see below), `keychainService` (`zr-jira`), `keychainAccount`
+(REQUIRED when `tokenFile` is set, asserted), `settings` (daemon keys merged into the rendered file) and the read-only
+`tokenFileDefault`, `configFile` and `configHash`. The rendered
 file is the store file `pg-connector-issue-jira-config.json`; its queries are copied from
 `backends.<instance>.queries`, so a query is declared once.
+
+**Token handoff (opt-in).** `tokenFile` is the stable LINK path (rendered as `token_link`; the option name is kept, the
+meaning is the link) and must lie inside the state directory, else evaluation fails; `tokenFileDefault` is the
+conventional `<state dir>/jira-token`, so a consumer assigns `tokenFile = ...tokenFileDefault` and reads the SAME option
+wherever the path is needed (the daemon-only `pjira` config must render the same string). Unset renders no
+`token_link`, `keychain_service` or `keychain_account`: the daemon reads no keychain and writes no file. When set, the
+daemon reads the keychain once at start, writes the token to an owner-only file in the per-user temp directory
+(`TMPDIR`, not rendered by nix: it is unknown at evaluation time and the daemon discovers it at start), and points the
+link at it; it removes both at shutdown. Recovery from a degraded auth state (a 401 whose re-read token is unchanged)
+is a daemon RESTART only. The mapping is covered by `test-pg-connector-home-rendering`.
 
 **Launchd and state.** The entry is `pg-connector-issue-jira-daemon`, label `com.phillipg.pg-connector-issue-jira-daemon`,
 KeepAlive and RunAtLoad, whose whole command is `exec <pkg>/bin/pg-connector-issue-jira --config <file> serve`. The state
