@@ -131,9 +131,9 @@ an error, when pg-connector's module is not imported (`test-pg-task-focus-hm-con
 The daemon's web UI (bead `pg2-t7me1.3`, ADR 0092) is dependency-free ES modules under
 `packages/pg-task-focus/web/assets/`, embedded in the binary: NO npm, bundler, lock file or network
 in the build, and a new view or control follows the rules in the package README ("The web UI"). Its
-logic is tested with `node --test` from inside the Go gate (`web/web_test.go`,
-`internal/daemon/webui_e2e_test.go`), so `checks.<system>.pg-task-focus-go-tests` carries `nodejs` in
-`testDeps` and `PG_TASK_FOCUS_REQUIRE_NODE=1`; a host without `node` skips those tests with the reason.
+logic is tested with `node --test`: the three tests that spawn node or a real `serve` process are
+`//go:build integration` and run in `checks.<system>.pg-task-focus-integration-tests` (on demand;
+it carries `nodejs` and `PG_TASK_FOCUS_REQUIRE_NODE=1`), not in `pg-task-focus-go-tests`.
 
 `swiftbar.enable` (bead `pg2-t7me1.5`) installs the pg-task-focus SwiftBar plugin the same way
 pa-monitor's does (darwin only, requires `enable`, wrapper is the FUNCTION

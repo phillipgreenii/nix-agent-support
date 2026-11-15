@@ -132,11 +132,15 @@ and a stop. It can fail only under `go test -race`, which the commit-time `run-u
 runs. A daemon field that is written once the HTTP server is serving (the alerter, `Daemon.alerter`)
 MUST be published through an atomic or a lock, never read as a plain field.
 
-The web UI's logic is tested with `node --test` (no dependencies), run from inside the Go tests:
-`web/web_test.go` runs the unit tests of the page's modules (`web/test/*.test.mjs`) and scans the
-sources for what the page must never do, and `internal/daemon/webui_e2e_test.go` runs the page's own
-store and API client against a real daemon. A host without `node` skips them with the reason;
-`PG_TASK_FOCUS_REQUIRE_NODE=1` (set by the nix check, which supplies `nodejs`) makes that a failure.
+The web UI's logic is tested with `node --test` (no dependencies). `web/web_test.go` scans the
+sources for what the page must never do and stays in the unit tier. The three tests that spawn a
+process carry `//go:build integration` and run in `checks.<system>.pg-task-focus-integration-tests`
+(on demand, not a hook or land gate; it supplies `nodejs` and sets `PG_TASK_FOCUS_REQUIRE_NODE=1`,
+so a missing `node` is a failure there): `web/node_integration_test.go` runs the unit tests of the
+page's modules (`web/test/*.test.mjs`), `internal/daemon/webui_e2e_test.go` runs the page's own store
+and API client against a real daemon, and `cmd/pg-task-focus/serve_integration_test.go` re-executes
+the test binary as the real `serve` with real signals. Locally:
+`go test -tags integration -run 'TestClientLogicUnderNode|TestWebUIAgainstARealDaemon|TestServeReloadsOnSIGHUPAndStopsOnSIGTERM' ./...`.
 What a browser would show (layout, focus order as a screen reader announces it, contrast, a real
 `EventSource` reconnecting) is not covered by any automated test here.
 

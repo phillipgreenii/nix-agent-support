@@ -1953,10 +1953,7 @@
               # reentrant test-helper-process shape, this time doubling
               # for BOTH its ccpool and pg-connector subprocess wire
               # doubles, verified via
-              # `grep -rln '^//go:build' packages/ccpool-probe`;
-              # `pg-task-focus` added bead pg2-t7me1.1: no build-tagged test
-              # files, verified via
-              # `grep -rln '^//go:build' packages/pg-task-focus`) is a
+              # `grep -rln '^//go:build' packages/ccpool-probe`) is a
               # DELIBERATE exemption: verified 2026-08-31 (and again for the
               # new module) via `grep -rln '^//go:build' packages/<module>` to
               # carry no build-tag test files. Before adding a build-tag
@@ -2042,6 +2039,8 @@
                 "pg-rescue"
                 # pg-keep-awake: internal/integration is `integration`-tagged.
                 "pg-keep-awake"
+                # pg-task-focus: the node and real-serve-process tests are `integration`-tagged.
+                "pg-task-focus"
                 # internal/contract is `contract`-tagged.
                 "beads-exporter"
               ];
@@ -7774,26 +7773,60 @@
               # as an undefined flag.
               #
               # The web UI (bead pg2-t7me1.3, ADR 0092) is dependency-free ES modules
-              # embedded in the daemon, and its logic is tested with node's built-in
-              # test runner from inside this Go gate (web/web_test.go, and the daemon
-              # package's webui_e2e_test.go, which runs the page's own store against
-              # the real daemon). So `nodejs` is a test dependency here, and
-              # PG_TASK_FOCUS_REQUIRE_NODE=1 turns "node is not on PATH" from a skip
-              # (a developer host without node) into a failure: a green check
-              # means the client logic ran, never that it was skipped. There is no
-              # npm, no lock file and no network in the build.
+              # embedded in the daemon. Its logic is tested with node's built-in test
+              # runner, and the real serve process is exercised with real signals, but
+              # those three tests (web TestClientLogicUnderNode, daemon
+              # TestWebUIAgainstARealDaemon, cmd TestServeReloadsOnSIGHUPAndStopsOnSIGTERM)
+              # spawn processes, so they carry `//go:build integration` and run in
+              # pg-task-focus-integration-tests below, not in this unit gate (V-4).
               pg-task-focus-go-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-task-focus-go-tests";
                   src = lib.cleanSource ./packages/pg-task-focus;
                   gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
-                  testDeps = [ pkgs.nodejs ];
                 }).overrideAttrs
                   (_: {
                     RAPID_SEED = "1";
                     RAPID_NOFAILFILE = "true";
+                    __darwinAllowLocalNetworking = true;
+                  });
+
+              # pg-task-focus INTEGRATION tier (V-4): exactly the `integration`-tagged
+              # tests, each spawning a real process (node --test, or the test binary
+              # re-executed as the real `serve` with real signals and a port). ON
+              # DEMAND ONLY: no hook, run-unit-tests, pre-land or land gate. nodejs is a
+              # test dependency and PG_TASK_FOCUS_REQUIRE_NODE=1 turns "node is not on
+              # PATH" from a skip into a failure, so a green check means the node tests
+              # ran. The check also fails if any of the three named tests did not report
+              # PASS. Run it when the web UI, the daemon's HTTP surface or `serve`'s
+              # signal handling changes: `nix build .#checks.<system>.pg-task-focus-integration-tests`.
+              pg-task-focus-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-task-focus-integration-tests";
+                  src = lib.cleanSource ./packages/pg-task-focus;
+                  gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
+                  testDeps = [ pkgs.nodejs ];
+                }).overrideAttrs
+                  (_: {
                     PG_TASK_FOCUS_REQUIRE_NODE = "1";
                     __darwinAllowLocalNetworking = true;
+                    buildPhase = ''
+                      runHook preBuild
+                      set -o pipefail
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go vet -tags integration ./...
+                      go test -tags integration -count=1 -race -v -timeout 30m \
+                        -run '^(TestClientLogicUnderNode|TestWebUIAgainstARealDaemon|TestServeReloadsOnSIGHUPAndStopsOnSIGTERM)$' \
+                        ./... | tee "$TMPDIR/ptf-integration.log"
+                      for t in TestClientLogicUnderNode TestWebUIAgainstARealDaemon TestServeReloadsOnSIGHUPAndStopsOnSIGTERM; do
+                        if ! grep -q -- "^--- PASS: $t " "$TMPDIR/ptf-integration.log"; then
+                          echo "pg-task-focus-integration-tests: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      runHook postBuild
+                    '';
                   });
 
               # pg-keep-awake (docket pg2-8bgxg.2) - whole-module Go test gate.
