@@ -62,7 +62,9 @@ FROM records r ORDER BY r.file_id, r.gen, r.off, r.item`)
 }
 
 func TestBulkRebuildMatchesDefaultDurabilityBuild(t *testing.T) {
-	const files = 25
+	// 10 files of 11 records each, with a budget of 30 records (about 3 files),
+	// so the bulk build flushes on its budget several times, not just at the end.
+	const files = 10
 	def := bulkCorpus(t, files)
 	def.Parse()
 	want := indexDump(t, def)
@@ -71,8 +73,8 @@ func TestBulkRebuildMatchesDefaultDurabilityBuild(t *testing.T) {
 	}
 
 	bulk := bulkCorpus(t, files)
-	// Restart as an offline bulk rebuild, with a budget that spans many files.
-	bulk.StoreOptions = store.Options{Rebuild: true, BulkRebuild: true, BulkRecords: 100}
+	// Restart as an offline bulk rebuild, with a budget that spans a few files.
+	bulk.StoreOptions = store.Options{Rebuild: true, BulkRebuild: true, BulkRecords: 30}
 	bulk.Reopen()
 	bulk.Parse()
 	if err := bulk.Store.FinishRebuild(); err != nil {
@@ -92,16 +94,15 @@ func TestBulkRebuildMatchesDefaultDurabilityBuild(t *testing.T) {
 }
 
 func TestBulkRebuildCommitsFarFewerTimesPerRecord(t *testing.T) {
-	// 60 files, 11 records each, with BulkRecords 200 (below): the default build
-	// commits once per file (60), the bulk build 4 times (3 budget flushes at
-	// about 18 files each, plus the final flush), so 60/4 = 15x fewer against the
-	// asserted 10x, a margin of 1.5x. The test needs several budget flushes (not
-	// just the final one), which takes about 36 or more files at this budget
-	// (2 x 18 files before the third commit). Only the margin is arithmetic, not
-	// a measured threshold, and the saving from fewer files is small against the
-	// risk, so the pair is kept as is (measured 1.91 s plain, 4.93 s -race). Both
-	// builds are needed: the test compares them.
-	const files = 60
+	// 40 files, 11 records each, with BulkRecords 200 (below): the default build
+	// commits once per file (40), the bulk build 3 times (2 budget flushes at
+	// about 18 files each, plus the final flush), so 40/3 = 13x fewer against the
+	// asserted 10x, a margin of 1.3x. The test needs more than one budget flush
+	// (not just the final one), which takes more than 36 files at this budget;
+	// fewer files would leave one budget flush and fall under the 10x margin
+	// (30 files commit 2 times, and only 3 commits at 10x is no margin at all).
+	// Both builds are needed: the test compares them.
+	const files = 40
 	def := bulkCorpus(t, files)
 	def.Parse()
 	records := def.Count(`SELECT COUNT(*) FROM records`)
@@ -118,8 +119,8 @@ func TestBulkRebuildCommitsFarFewerTimesPerRecord(t *testing.T) {
 	if bulk.Count(`SELECT COUNT(*) FROM records`) != records {
 		t.Fatal("record counts differ")
 	}
-	// 60 files commit 60 times by default; a 200-record budget (about 18
-	// files) commits 4 times: 3 budget commits and the final flush.
+	// 40 files commit 40 times by default; a 200-record budget (about 18
+	// files) commits 3 times: 2 budget commits and the final flush.
 	if defCommits != files || bulkCommits < 1 || bulkCommits*10 > defCommits {
 		t.Fatalf("default build %d commits, bulk rebuild %d commits for %d records", defCommits, bulkCommits, records)
 	}
