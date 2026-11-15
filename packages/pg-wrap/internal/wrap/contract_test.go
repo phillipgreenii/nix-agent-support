@@ -24,6 +24,7 @@ import (
 // WC-1: a wrapper runs the rest of its argv as the payload, with argv and stdin
 // unmodified.
 func TestWC1_ArgvAndStdinUnmodified(t *testing.T) {
+	t.Parallel()
 	stdin := "first line\n$(touch SENT); 'quoted' \"double\"\nlast line without newline"
 	eachWrapper(t, func(t *testing.T, w wrapperCase, e wrap.Entry) {
 		r := runChain(t, runOpts{entries: []wrap.Entry{e}, args: hostile, stdin: stdin})
@@ -45,18 +46,25 @@ func TestWC1_ArgvAndStdinUnmodified(t *testing.T) {
 // own 97). A wrapper that fails activation exits before the
 // payload starts, with the reason on stderr.
 func TestWC2_ExitStatusUnchanged(t *testing.T) {
+	t.Parallel()
 	eachWrapper(t, func(t *testing.T, w wrapperCase, e wrap.Entry) {
+		// Every run owns its temp dir and env, so the wrapper x code matrix of
+		// real subprocess spawns runs in parallel (eachWrapper parallelises the
+		// wrapper level).
 		for _, code := range []int{0, 1, 2, 9, 42, 97, 124, 127} {
-			r := runChain(t, runOpts{
-				entries: []wrap.Entry{e},
-				env:     []string{"PROBE_EXIT=" + strconv.Itoa(code)},
+			t.Run("exit"+strconv.Itoa(code), func(t *testing.T) {
+				t.Parallel()
+				r := runChain(t, runOpts{
+					entries: []wrap.Entry{e},
+					env:     []string{"PROBE_EXIT=" + strconv.Itoa(code)},
+				})
+				if r.rep == nil {
+					t.Fatalf("payload did not run for PROBE_EXIT=%d: exit=%d stderr=%s", code, r.exit, r.stderr)
+				}
+				if r.exit != code {
+					t.Fatalf("PROBE_EXIT=%d came back as %d", code, r.exit)
+				}
 			})
-			if r.rep == nil {
-				t.Fatalf("payload did not run for PROBE_EXIT=%d: exit=%d stderr=%s", code, r.exit, r.stderr)
-			}
-			if r.exit != code {
-				t.Fatalf("PROBE_EXIT=%d came back as %d", code, r.exit)
-			}
 		}
 	})
 }
@@ -81,6 +89,7 @@ func TestWC2_ActivationFailureExitsBeforePayload(t *testing.T) {
 // and a failing chain writes none; the wrapper's own messages go to stderr with
 // the pg-wrap[<stage>]: prefix.
 func TestWC3_StdoutIsExactlyThePayloads(t *testing.T) {
+	t.Parallel()
 	eachWrapper(t, func(t *testing.T, w wrapperCase, e wrap.Entry) {
 		r := runChain(t, runOpts{entries: []wrap.Entry{e}})
 		if r.exit != 0 {
@@ -113,6 +122,7 @@ func TestWC3_FailingChainWritesNoStdoutAndPrefixesStderr(t *testing.T) {
 // process group. Proven under a real tmux pane: the payload's tty equals the
 // pane's tty and its process group is the terminal's foreground group.
 func TestWC4_ControllingTerminalAndForegroundGroup(t *testing.T) {
+	t.Parallel()
 	tmux := lookTool(t, "tmux")
 	cases := []struct {
 		name  string
@@ -153,6 +163,7 @@ func TestWC4_ControllingTerminalAndForegroundGroup(t *testing.T) {
 
 // WC-5: SIGTERM, SIGINT and SIGHUP reach the payload through the wrapper.
 func TestWC5_SignalsReachPayload(t *testing.T) {
+	t.Parallel()
 	sigs := []struct {
 		name string
 		sig  syscall.Signal
@@ -199,6 +210,7 @@ func TestWC5_SignalsReachPayload(t *testing.T) {
 // when the chain runs under wrap.Group. The control shows why the group matters:
 // exec.CommandContext's default SIGKILL to the direct child orphans the payload.
 func TestWC5_GroupCancelThroughNonExecTimeoutLeavesNoOrphan(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"timeout", "timeout-foreground"} {
 		t.Run(name, func(t *testing.T) {
 			var e wrap.Entry
@@ -235,6 +247,7 @@ func TestWC5_GroupCancelThroughNonExecTimeoutLeavesNoOrphan(t *testing.T) {
 }
 
 func TestWC5_ControlPlainCancelOrphansThePayload(t *testing.T) {
+	t.Parallel()
 	e := wrap.Entry{Argv: []string{gnuTimeout(t), "60"}}
 	c := buildChain(t, runOpts{entries: []wrap.Entry{e}, env: []string{"PROBE_WAIT=1"}})
 	// The orphan holds the output pipes open; bound Wait so the cancel can return.
@@ -263,6 +276,7 @@ func TestWC5_ControlPlainCancelOrphansThePayload(t *testing.T) {
 // WC-6: the chain works under the base environment alone, reaching its tools by
 // absolute path, never prompts, and carries no variable outside the base set.
 func TestWC6_BaseEnvAloneNoPromptNoLeak(t *testing.T) {
+	t.Parallel()
 	polluted := append(os.Environ(),
 		"SECRET_TOKEN=leak", "SSH_AUTH_SOCK=/leak/sock", "GH_TOKEN=leak", "CCPOOL_LEAK=1")
 	allowed := map[string]bool{
@@ -302,6 +316,7 @@ func TestWC6_BaseEnvAloneNoPromptNoLeak(t *testing.T) {
 // WC-7: a wrapper with no cleanup to do execs, so the payload keeps the pid the
 // adapter started. timeout stays the parent (it has cleanup: the timer).
 func TestWC7_ExecWhenNoCleanup(t *testing.T) {
+	t.Parallel()
 	eachWrapper(t, func(t *testing.T, w wrapperCase, e wrap.Entry) {
 		c := buildChain(t, runOpts{entries: []wrap.Entry{e}})
 		if err := c.cmd.Start(); err != nil {
@@ -328,6 +343,7 @@ func TestWC7_ExecWhenNoCleanup(t *testing.T) {
 // interpolated into a string entry. A spec has no templating, so an array
 // element is used literally.
 func TestWC8_ItemDataOnlyViaEnvOrArgv(t *testing.T) {
+	t.Parallel()
 	data := `a;touch SENT $(touch SENT) "q" 's' ` + "`touch SENT` b  c"
 
 	t.Run("environment variable in a string entry", func(t *testing.T) {
@@ -558,6 +574,7 @@ func TestContractArgvInjection(t *testing.T) {
 
 // Quoting inside string entries follows POSIX sh semantics.
 func TestContractQuotingInStringEntries(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		entry string

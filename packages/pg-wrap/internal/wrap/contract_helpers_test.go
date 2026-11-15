@@ -307,6 +307,7 @@ func eachWrapper(t *testing.T, fn func(t *testing.T, w wrapperCase, e wrap.Entry
 	t.Helper()
 	for _, w := range wrapperCases() {
 		t.Run(w.name, func(t *testing.T) {
+			t.Parallel()
 			fn(t, w, w.entry(t))
 		})
 	}
