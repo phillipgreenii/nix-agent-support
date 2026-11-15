@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -90,7 +91,7 @@ func TestFanOutEach_ResultsInRegistrationOrderUnderReversedCompletion(t *testing
 
 func TestFanOutEach_SlowBackendDoesNotDelayOthers(t *testing.T) {
 	names := fanOutTestNames(4)
-	const hung = 600 * time.Millisecond
+	const hung = 250 * time.Millisecond
 	finished := make([]time.Duration, len(names))
 	start := time.Now()
 	fanOutEach(context.Background(), nil, names, func(_ context.Context, b string) int {
@@ -227,22 +228,36 @@ func TestResolveFanOutConcurrency(t *testing.T) {
 	}
 }
 
-// writeSlowFakeBackend is writeFakeBackend with a delay: it sleeps for
-// delaySeconds (a sleep(1) argument, "0.3") after reading the request, then
-// prints stdout.
-func writeSlowFakeBackend(t *testing.T, name, delaySeconds, stdout string) {
+// fanoutDelayScale shrinks the shell-era sleeps the fan-out tests were written
+// with ("0.4" seconds) so the stagger between backends keeps its order without
+// costing wall-clock time.
+const fanoutDelayScale = 10
+
+// fanoutDelay converts a sleep(1)-style seconds argument ("0.4") to a scaled
+// duration.
+func fanoutDelay(t *testing.T, seconds string) time.Duration {
 	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, name)
-	content := "#!/bin/sh\ncat >/dev/null\nsleep " + delaySeconds + "\ncat <<'FAKE_BACKEND_EOF'\n" + stdout + "\nFAKE_BACKEND_EOF\n"
-	if err := installExec(script, content); err != nil {
-		t.Fatalf("write slow fake backend: %v", err)
+	f, err := strconv.ParseFloat(seconds, 64)
+	if err != nil {
+		t.Fatalf("delay %q: %v", seconds, err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return time.Duration(f * float64(time.Second) / fanoutDelayScale)
 }
 
-// writeGatedFakeBackend writes a fake backend that proves concurrency
-// without relying on wall-clock margins. On each call it drops
+// writeSlowFakeBackend is writeFakeBackend with a delay: it waits for the
+// scaled delaySeconds (a sleep(1) argument, "0.3") after reading the request,
+// then answers stdout.
+func writeSlowFakeBackend(t *testing.T, name, delaySeconds, stdout string) {
+	t.Helper()
+	d := fanoutDelay(t, delaySeconds)
+	registerFake(t, name, func(string) string {
+		time.Sleep(d)
+		return stdout + "\n"
+	})
+}
+
+// writeGatedFakeBackend registers an in-process fake backend that proves
+// concurrency without relying on wall-clock margins. On each call it drops
 // <dir>/<name>.started, then waits (up to about 5s) until every marker in
 // waitFor exists in dir. It answers okOut when they all appeared and
 // timeoutOut when the wait ran out, then drops <dir>/<name>.done. Under a
@@ -251,21 +266,34 @@ func writeSlowFakeBackend(t *testing.T, name, delaySeconds, stdout string) {
 // postSleep ("0.2") delays the answer after the gate, to stagger completion.
 func writeGatedFakeBackend(t *testing.T, name, dir string, waitFor []string, okOut, timeoutOut, postSleep string) {
 	t.Helper()
-	scriptDir := t.TempDir()
-	var wait strings.Builder
-	for _, w := range waitFor {
-		wait.WriteString(`[ -e "` + dir + `/` + w + `" ] || ok=0; `)
-	}
-	content := "#!/bin/sh\ncat >/dev/null\n" +
-		`touch "` + dir + `/` + name + `.started"` + "\n" +
-		"i=0\nwhile [ \"$i\" -lt 100 ]; do\n  ok=1; " + wait.String() + "\n  [ \"$ok\" = 1 ] && break\n  i=$((i+1)); sleep 0.05\ndone\n" +
-		"sleep " + postSleep + "\n" +
-		`touch "` + dir + `/` + name + `.done"` + "\n" +
-		"if [ \"$ok\" = 1 ]; then\ncat <<'FAKE_BACKEND_EOF'\n" + okOut + "\nFAKE_BACKEND_EOF\nelse\ncat <<'FAKE_BACKEND_EOF'\n" + timeoutOut + "\nFAKE_BACKEND_EOF\nfi\n"
-	if err := installExec(filepath.Join(scriptDir, name), content); err != nil {
-		t.Fatalf("write gated fake backend: %v", err)
-	}
-	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	post := fanoutDelay(t, postSleep)
+	registerFake(t, name, func(string) string {
+		touch := func(file string) {
+			if err := os.WriteFile(filepath.Join(dir, file), nil, 0o644); err != nil {
+				t.Errorf("touch %s: %v", file, err)
+			}
+		}
+		touch(name + ".started")
+		ok := false
+		for i := 0; i < 2500 && !ok; i++ {
+			ok = true
+			for _, w := range waitFor {
+				if _, err := os.Stat(filepath.Join(dir, w)); err != nil {
+					ok = false
+					break
+				}
+			}
+			if !ok {
+				time.Sleep(2 * time.Millisecond)
+			}
+		}
+		time.Sleep(post)
+		touch(name + ".done")
+		if ok {
+			return okOut + "\n"
+		}
+		return timeoutOut + "\n"
+	})
 }
 
 // gatedActivity registers the activity backends names, each of which waits
@@ -392,18 +420,30 @@ func TestActivityList_ErrorIsolation(t *testing.T) {
 // = 1 restores the serial behavior (and proves the knob is wired through the
 // config file).
 func TestActivityList_ConcurrencyCapOfOneRunsSerially(t *testing.T) {
-	writeSlowFakeBackend(t, "cap-a", "0.5", activityResp("false", "a1"))
-	writeSlowFakeBackend(t, "cap-b", "0.5", activityResp("false", "b1"))
+	var inflight, maxSeen atomic.Int32
+	for _, n := range []string{"cap-a", "cap-b"} {
+		resp := activityResp("false", map[string]string{"cap-a": "a1", "cap-b": "b1"}[n])
+		registerFake(t, n, func(string) string {
+			cur := inflight.Add(1)
+			defer inflight.Add(-1)
+			for {
+				m := maxSeen.Load()
+				if cur <= m || maxSeen.CompareAndSwap(m, cur) {
+					break
+				}
+			}
+			time.Sleep(30 * time.Millisecond)
+			return resp + "\n"
+		})
+	}
 	writeActivityConfigWithState(t, []string{"cap-a", "cap-b"}, "fanout_concurrency: 1")
 
-	start := time.Now()
 	stdout, _, code := executePr(t, []string{"activity", "list", "--since", "24h"})
-	elapsed := time.Since(start)
 	if code != 0 {
 		t.Fatalf("exit = %d; stdout=%s", code, stdout)
 	}
-	if elapsed < 1000*time.Millisecond {
-		t.Fatalf("elapsed %v: cap 1 must run the two 0.5s sources one after the other", elapsed)
+	if got := maxSeen.Load(); got != 1 {
+		t.Fatalf("max concurrent sources = %d: cap 1 must run the two sources one after the other", got)
 	}
 	if got := activityItemIDs(decodeActivityOut(t, stdout)); got != "cap-a/a1,cap-b/b1" {
 		t.Fatalf("items = %s", got)
