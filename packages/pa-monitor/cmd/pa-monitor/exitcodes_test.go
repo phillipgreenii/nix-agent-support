@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
 )
 
 // TestExitCodeContract exercises the REAL binary and pins the exit-code
@@ -32,6 +34,9 @@ func TestExitCodeContract(t *testing.T) {
 	base := []string{
 		"HOME=" + home, "XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
 		"XDG_STATE_HOME=" + filepath.Join(home, ".state"),
+		// Shrink the client dial deadline (production default 2 s) so the
+		// daemon-unavailable cases fail fast.
+		rpcclient.DialTimeoutEnv + "=5ms",
 	}
 
 	cases := []struct {
@@ -48,9 +53,6 @@ func TestExitCodeContract(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// The daemon-unavailable cases each wait out the client dial deadline
-			// (2-3 s of real time), so run the cases side by side.
-			t.Parallel()
 			cmd := exec.CommandContext(context.Background(), bin, tc.args...)
 			cmd.Env = append(append(os.Environ(), base...), "XDG_CONFIG_HOME="+tc.cfg)
 			var stderr bytes.Buffer

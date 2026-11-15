@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"google.golang.org/grpc"
@@ -27,6 +28,24 @@ type Client struct {
 // MaxRecvMsgSize is the client's gRPC receive cap (256 MiB; the default is 4 MiB).
 const MaxRecvMsgSize = 256 << 20
 
+// DefaultDialTimeout is the production deadline for the blocking connect
+// handshake in DialPath.
+const DefaultDialTimeout = 2 * time.Second
+
+// DialTimeoutEnv names the environment variable that overrides the dial
+// deadline with a Go duration (for example "5ms"). It exists so tests that
+// exercise the daemon-unavailable path do not wait out the full default; an
+// unset, unparsable or non-positive value keeps DefaultDialTimeout.
+const DialTimeoutEnv = "PA_MONITOR_DIAL_TIMEOUT"
+
+// DialTimeout returns the effective dial deadline.
+func DialTimeout() time.Duration {
+	if d, err := time.ParseDuration(os.Getenv(DialTimeoutEnv)); err == nil && d > 0 {
+		return d
+	}
+	return DefaultDialTimeout
+}
+
 // Dial returns a connected client. The caller closes via Close.
 func Dial(ctx context.Context) (*Client, error) {
 	paths, err := daemon.ResolvePaths(daemon.PathOverrides{})
@@ -38,7 +57,7 @@ func Dial(ctx context.Context) (*Client, error) {
 
 // DialPath is the explicit-socket form. Tests pass an arbitrary path.
 func DialPath(ctx context.Context, socket string) (*Client, error) {
-	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	dialCtx, cancel := context.WithTimeout(ctx, DialTimeout())
 	defer cancel()
 
 	conn, err := grpc.NewClient(
