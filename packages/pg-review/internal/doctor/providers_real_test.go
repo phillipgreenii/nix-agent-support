@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"context"
-	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,27 +9,20 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
-	"github.com/phillipgreenii/x/exitcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/provider/ccaudit"
 )
 
 // providerEnv makes the re-exec'd test binary behave as a Go flag-package
 // provider instead of running tests (see TestMain).
 const providerEnv = "PG_REVIEW_DOCTOR_TEST_AS_PROVIDER"
 
-// TestMain lets the test binary double as a real provider process: a Go
-// flag-package program that exits 2 on --help, exactly like the built-in
-// providers. This replaces a per-test go build of the real provider, which
+// TestMain lets the test binary double as a real provider process: it runs the
+// built-in ccaudit provider's real command line (ccaudit.Main), which exits 2
+// on --help like every Go flag-package provider. This replaces a per-test go build of the real provider, which
 // measured compile time and was cache-sensitive.
 func TestMain(m *testing.M) {
 	if os.Getenv(providerEnv) != "" {
-		fs := flag.NewFlagSet("pg-review-provider-ccaudit", flag.ContinueOnError)
-		fs.String("since", "", "window start")
-		fs.String("until", "", "window end")
-		fs.String("scope", "", "scope name")
-		if err := fs.Parse(os.Args[1:]); err != nil {
-			os.Exit(exitcode.Usage)
-		}
-		os.Exit(exitcode.OK)
+		os.Exit(ccaudit.Main(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
 	}
 	os.Exit(m.Run())
 }
