@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"os"
@@ -14,14 +15,20 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/claude-tool-tracker/internal/store"
 )
 
-// app appends events with the real binary and ingests them with the real
-// binary into temporary paths.
+// app appends events and ingests them into temporary paths by calling the
+// command functions in-process (runAppend, runIngest, runTiming); the append
+// and CLI contract tests exec the real binary through run instead. newApp
+// points XDG_STATE_HOME at the app's state directory for the whole test.
 type app struct {
 	t     *testing.T
 	state string
 }
 
-func newApp(t *testing.T) *app { return &app{t: t, state: t.TempDir()} }
+func newApp(t *testing.T) *app {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	return &app{t: t, state: state}
+}
 
 func (a *app) db() string { return filepath.Join(a.state, "claude-tool-tracker", "tracker.db") }
 
@@ -32,18 +39,19 @@ func (a *app) append(session, source, kind, toolUse, ts, eventID, data string, e
 		args = append(args, "--tool-use-id", toolUse)
 	}
 	args = append(args, extra...)
-	if _, errOut, code := run(a.t, a.state, data, args...); code != 0 {
-		a.t.Fatalf("append %s: exit %d: %s", kind, code, errOut)
+	var errOut bytes.Buffer
+	if code := runAppend(args[1:], strings.NewReader(data), &errOut); code != 0 {
+		a.t.Fatalf("append %s: exit %d: %s", kind, code, errOut.String())
 	}
 }
 
 func (a *app) ingest() string {
 	a.t.Helper()
-	out, errOut, code := run(a.t, a.state, "", "ingest")
-	if code != 0 {
-		a.t.Fatalf("ingest: exit %d: %s", code, errOut)
+	var out, errOut bytes.Buffer
+	if code := runIngest(nil, &out, &errOut); code != 0 {
+		a.t.Fatalf("ingest: exit %d: %s", code, errOut.String())
 	}
-	return out
+	return out.String()
 }
 
 func (a *app) writeRaw(name, content string) {

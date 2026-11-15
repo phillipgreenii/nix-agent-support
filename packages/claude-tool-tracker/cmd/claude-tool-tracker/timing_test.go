@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os/exec"
@@ -71,11 +72,12 @@ type timingGroup struct {
 
 func (a *app) timing(args ...string) (string, int) {
 	a.t.Helper()
-	out, errOut, code := run(a.t, a.state, "", append([]string{"timing"}, args...)...)
+	var out, errOut bytes.Buffer
+	code := runTiming(args, &out, &errOut)
 	if code != 0 {
-		a.t.Logf("stderr: %s", errOut)
+		a.t.Logf("stderr: %s", errOut.String())
 	}
-	return out, code
+	return out.String(), code
 }
 
 func (a *app) timingJSON(args ...string) timingJSON {
@@ -199,5 +201,36 @@ func TestTimingUsageAndMissingDB(t *testing.T) {
 	}
 	if _, code := a.timing(); code != 1 {
 		t.Errorf("missing database exit %d, want 1", code)
+	}
+}
+
+// TestTimingEndToEndBinary runs the real binary for append, ingest and timing
+// once, so the in-process fixtures elsewhere are backed by one exec'd check.
+func TestTimingEndToEndBinary(t *testing.T) {
+	state := t.TempDir()
+	repo := gitRepo(t, "alpha")
+	appendEv := func(kind, id, data string) {
+		t.Helper()
+		if _, e, code := run(t, state, data, "append", "--session-id", "s1", "--source", "tracker", "--kind", kind,
+			"--tool-use-id", "tu1", "--ts", "1700000000000", "--event-id", id); code != 0 {
+			t.Fatalf("append %s: %d %s", kind, code, e)
+		}
+	}
+	appendEv("tracker.call_start", "e1", `{"tool":"Bash","input":{"command":"go test ./..."},"cwd":"`+repo+`"}`)
+	appendEv("tracker.post_tool", "e2", `{"hook_event":"PostToolUse","tool_name":"Bash","duration_ms":250,"is_error":false}`)
+	appendEv("tracker.call_end", "e3", `{"outcome":"ok"}`)
+	if _, e, code := run(t, state, "", "ingest"); code != 0 {
+		t.Fatalf("ingest: %d %s", code, e)
+	}
+	out, e, code := run(t, state, "", "timing", "--format", "json")
+	if code != 0 {
+		t.Fatalf("timing: %d %s", code, e)
+	}
+	var r timingJSON
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if g := findGroup(t, r.ByTotal, "Bash", "go", "alpha"); g.Runs != 1 || g.TotalMS != 250 {
+		t.Errorf("group = %+v", g)
 	}
 }
