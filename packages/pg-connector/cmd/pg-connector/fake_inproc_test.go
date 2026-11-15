@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// In-process fake backends. A backend invocation is a scriptout.Call whose
+// In-process fake backends. A backend invocation is a cmdrun.Call whose
 // Name is the backend's registered name; a fake registered under that name
 // answers it with no process, no script file and no PATH edit. A Call for any
-// other name still runs for real (ExecRunner), so a test that needs a real
+// other name still runs for real (cmdrun.Exec), so a test that needs a real
 // script (argv-aware or file-driven fakes) keeps using installExec.
 //
 // The shell fakes this replaces matched the raw request line with a `case`

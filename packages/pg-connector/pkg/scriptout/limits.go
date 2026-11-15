@@ -409,6 +409,13 @@ func SummarizeArgs(raw json.RawMessage) string {
 // well-behaved child, not another full command's worth of work.
 const DefaultWaitDelay = 5 * time.Second
 
+// DefaultTermGrace is how long a cancelled or timed-out backend exec gets
+// between SIGTERM and SIGKILL (cmdrun.Call.TermGrace). Both signals go to the
+// backend's whole process group, so its gh/bd/pjira/claude children end with
+// it. Short: the backend's own deadline has already passed or the caller has
+// already gone.
+const DefaultTermGrace = 2 * time.Second
+
 // MaxFoldedOutputBytes caps how much of a child process's captured
 // stderr/stdout is folded verbatim into an error message or a
 // sources[].reason string: exec.go's runInvoke (the umbrella's own fold of

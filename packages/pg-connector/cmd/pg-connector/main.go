@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/phillipgreenii/x/exitcode"
 )
@@ -19,14 +22,22 @@ type exitError struct{ code int }
 func (e *exitError) Error() string { return fmt.Sprintf("pg-connector: exit %d", e.code) }
 
 func main() {
-	os.Exit(run(os.Args[1:]))
+	// SIGINT and SIGTERM cancel the command's context, so a backend child in
+	// flight is ended (its whole process group, via x/cmdrun) instead of
+	// outliving this process.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := runContext(ctx, os.Args[1:])
+	stop()
+	os.Exit(code)
 }
 
-func run(args []string) int {
+func run(args []string) int { return runContext(context.Background(), args) }
+
+func runContext(ctx context.Context, args []string) int {
 	root := newRootCmd()
 	root.SetArgs(args)
 
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return exitcode.OK
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // --------------------------------------------------------------------
@@ -16,25 +18,25 @@ import (
 // (GO_WANT_HELPER_PROCESS / TestHelperProcess), and a race-built child
 // sleeps 1 s at exit (atexit_sleep_ms), so every fake call cost about 1 s
 // under -race. The behavior names (GO_HELPER_BEHAVIOR values) are kept so
-// call sites did not change. The real exec path (ExecRunner, runInvoke's
+// call sites did not change. The real exec path (cmdrun.Exec, runInvoke's
 // WaitDelay) is covered by runner_test.go with sh -c.
 // --------------------------------------------------------------------
 
 // encodeLine renders v as json.NewEncoder(os.Stdout).Encode did: compact
 // JSON plus a newline.
-func encodeLine(v any) string {
+func encodeLine(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
 		panic(err)
 	}
-	return string(b) + "\n"
+	return append(b, '\n')
 }
 
 // helperRun answers one Call as a backend binary would for behavior: the
 // request arrives on c.Stdin, the answer is the Result.
-func helperRun(ctx context.Context, behavior string, c Call) Result {
-	stdin := []byte(c.Stdin)
-	okOut := func(v any) Result { return Result{Stdout: encodeLine(v)} }
+func helperRun(ctx context.Context, behavior string, c cmdrun.Call) cmdrun.Result {
+	stdin := c.Stdin
+	okOut := func(v any) cmdrun.Result { return cmdrun.Result{Stdout: encodeLine(v)} }
 
 	switch behavior {
 	case "ok_auth":
@@ -44,18 +46,18 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 			Result:          json.RawMessage(`{"state":"OK"}`),
 		})
 	case "not_found":
-		return Result{Code: 1, Stdout: encodeLine(Response{
+		return cmdrun.Result{Code: 1, Stdout: encodeLine(Response{
 			ProtocolVersion: ProtocolVersion,
 			SchemaVersion:   1,
 			Error:           &Error{Code: "not_found", Message: "no such pr"},
 		})}
 	case "unknown_op":
-		return Result{Code: 1, Stdout: encodeLine(Response{
+		return cmdrun.Result{Code: 1, Stdout: encodeLine(Response{
 			ProtocolVersion: ProtocolVersion,
 			Error:           &Error{Code: "unknown_op", Message: `unknown op "auth_status"`},
 		})}
 	case "non_json":
-		return Result{Stdout: "this is not json\n"}
+		return cmdrun.Result{Stdout: []byte("this is not json\n")}
 	case "capabilities":
 		return okOut(CapabilitiesResponse{
 			ProtocolVersion: ProtocolVersion,
@@ -83,7 +85,7 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 	case "echo_op":
 		var req Request
 		if err := json.Unmarshal(stdin, &req); err != nil {
-			return Result{Code: 1, Stdout: encodeLine(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})}
+			return cmdrun.Result{Code: 1, Stdout: encodeLine(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})}
 		}
 		return okOut(Response{
 			ProtocolVersion: ProtocolVersion,
@@ -95,7 +97,7 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 		// reaches the wire request, distinct from echo_op's op-only echo.
 		var req Request
 		if err := json.Unmarshal(stdin, &req); err != nil {
-			return Result{Code: 1, Stdout: encodeLine(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})}
+			return cmdrun.Result{Code: 1, Stdout: encodeLine(Response{Error: &Error{Code: "unavailable", Message: err.Error()}})}
 		}
 		result := req.Config
 		if len(result) == 0 {
@@ -114,7 +116,7 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 			Result:          json.RawMessage(stdin),
 		})
 	case "stderr_only":
-		return Result{Code: 2, Stderr: "boom\n"}
+		return cmdrun.Result{Code: 2, Stderr: []byte("boom\n")}
 	case "hang":
 		// Blocks for far longer than any test-scoped deadline, writing
 		// nothing to stdout/stderr — simulates a hung gh/bd/backend the
@@ -124,20 +126,20 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 		// a call that never carries a deadline still returns.
 		select {
 		case <-ctx.Done():
-			return Result{Code: -1, Signaled: true}
+			return cmdrun.Result{Code: -1, Signal: "killed", CtxErr: ctx.Err()}
 		case <-time.After(30 * time.Second):
-			return Result{}
+			return cmdrun.Result{}
 		}
 	case "big_stderr":
 		// Writes far more than MaxFoldedOutputBytes to stderr and nothing
 		// to stdout, exercising runInvoke's stderr-fold path
 		// [bead pg2-332z8 #26].
-		return Result{Code: 1, Stderr: strings.Repeat("e", MaxFoldedOutputBytes*3) + "\n"}
+		return cmdrun.Result{Code: 1, Stderr: []byte(strings.Repeat("e", MaxFoldedOutputBytes*3) + "\n")}
 	case "big_nonjson_stdout":
 		// Writes far more than MaxFoldedOutputBytes of non-JSON text to
 		// stdout, exercising Invoke's invalid-JSON stdout-fold path
 		// [bead pg2-332z8 #26].
-		return Result{Stdout: strings.Repeat("o", MaxFoldedOutputBytes*3) + "\n"}
+		return cmdrun.Result{Stdout: []byte(strings.Repeat("o", MaxFoldedOutputBytes*3) + "\n")}
 	case "empty_envelope":
 		// Neither result nor error is set — a protocol violation, not a
 		// success [bug A7].
@@ -156,14 +158,33 @@ func helperRun(ctx context.Context, behavior string, c Call) Result {
 			Result:          json.RawMessage("null"),
 		})
 	default:
-		return Result{Code: 99, Stderr: "unknown GO_HELPER_BEHAVIOR\n"}
+		return cmdrun.Result{Code: 99, Stderr: []byte("unknown GO_HELPER_BEHAVIOR\n")}
 	}
 }
 
 // helperRunner returns a Runner that answers every Call with behavior.
-func helperRunner(behavior string) Runner {
-	return func(ctx context.Context, c Call) Result {
+func helperRunner(behavior string) cmdrun.Runner {
+	return honorTimeout(func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
 		return helperRun(ctx, behavior, c)
+	})
+}
+
+// honorTimeout makes a double enforce Call.Timeout the way cmdrun.Exec does:
+// the double sees a context with that deadline, and a call the deadline ended
+// is reported TimedOut.
+func honorTimeout(r cmdrun.Runner) cmdrun.Runner {
+	return func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		parent := ctx
+		if c.Timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+			defer cancel()
+		}
+		res := r(ctx, c)
+		if res.CtxErr != nil {
+			res.TimedOut = c.Timeout > 0 && errors.Is(res.CtxErr, context.DeadlineExceeded) && parent.Err() == nil
+		}
+		return res
 	}
 }
 
@@ -229,7 +250,7 @@ func TestInvoke_EmptyBinary(t *testing.T) {
 
 func TestInvoke_BinaryNotFound(t *testing.T) {
 	orig := execRunner
-	execRunner = ExecRunner
+	execRunner = cmdrun.Exec
 	t.Cleanup(func() { execRunner = orig })
 
 	_, err := Invoke(context.Background(), "definitely-does-not-exist-xyz-987", "x", nil, nil)

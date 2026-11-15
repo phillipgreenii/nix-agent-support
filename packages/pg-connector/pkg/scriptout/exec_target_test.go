@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // recordingFactory wraps helperRunner(behavior) and records the
@@ -14,11 +16,11 @@ func recordingFactory(t *testing.T, behavior string, gotName *string, gotArgs *[
 	t.Helper()
 	inner := helperRunner(behavior)
 	orig := execRunner
-	execRunner = func(ctx context.Context, c Call) Result {
+	execRunner = honorTimeout(func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
 		*gotName = c.Name
 		*gotArgs = append([]string(nil), c.Args...)
 		return inner(ctx, c)
-	}
+	})
 	t.Cleanup(func() { execRunner = orig })
 }
 

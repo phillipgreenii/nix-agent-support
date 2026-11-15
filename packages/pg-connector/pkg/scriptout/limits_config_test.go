@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Tests of the per-backend deadline override [bead pg2-apllc]: a backend's
@@ -266,10 +268,10 @@ func umbrellaDeadline(t *testing.T, op string, cf json.RawMessage) time.Duration
 	base := helperRunner("ok_auth")
 	var got time.Duration
 	orig := execRunner
-	execRunner = func(ctx context.Context, c Call) Result {
+	execRunner = honorTimeout(func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
 		got = deadlineOf(t, ctx)
 		return base(ctx, c)
-	}
+	})
 	t.Cleanup(func() { execRunner = orig })
 	if _, err := Invoke(context.Background(), "fake-binary", op, nil, cf); err != nil {
 		t.Fatalf("Invoke %q: %v", op, err)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // TestMain routes backend invocations through the in-process fake registry
@@ -25,13 +26,13 @@ func TestMain(m *testing.M) {
 // calls it once before any test runs. It lives beside TestMain, in the same
 // build-tag scope, so the contract-tagged build does not carry it unused.
 func installFakeRunner() (restore func()) {
-	return scriptout.SwapRunner(func(ctx context.Context, c scriptout.Call) scriptout.Result {
+	return scriptout.SwapRunner(func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
 		fakeMu.Lock()
 		h, ok := fakeHandlers[c.Name]
 		fakeMu.Unlock()
 		if !ok {
-			return scriptout.ExecRunner(ctx, c)
+			return cmdrun.Exec(ctx, c)
 		}
-		return scriptout.Result{Stdout: h(c.Stdin)}
+		return cmdrun.Result{Stdout: []byte(h(string(c.Stdin)))}
 	})
 }

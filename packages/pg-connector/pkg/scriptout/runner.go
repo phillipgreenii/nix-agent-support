@@ -1,101 +1,24 @@
-// runner.go: the package-local command-runner seam. The shape (Call, Result,
-// Runner, ExecRunner) deliberately mirrors
-// packages/pg-decider/internal/prchange/exec.go so a later merge onto a shared
-// x runner package is mechanical; the one addition is Call.WaitDelay, which
-// runInvoke needs (see its doc comment). Tests answer the Runner in process
-// instead of re-executing the test binary (a race-built child sleeps 1 s at
-// exit).
+// runner.go: the one process-spawn seam for backend invocations. Production
+// runs every backend through x/cmdrun.Exec (own process group, SIGTERM grace
+// before SIGKILL, per-call Timeout), so a cancelled or timed-out umbrella call
+// ends the backend's whole process tree rather than leaving its gh/bd/pjira/
+// claude children running to their own deadline. Tests answer the seam in
+// process (cmdruntest.Fake or a cmdrun.Runner closure) instead of
+// re-executing the test binary (a race-built child sleeps 1 s at exit).
 package scriptout
 
-import (
-	"bytes"
-	"context"
-	"errors"
-	"os"
-	"os/exec"
-	"syscall"
-	"time"
-)
+import "github.com/phillipgreenii/x/cmdrun"
 
-// Call is one subprocess the umbrella runs.
-type Call struct {
-	Name string   // resolved on $PATH
-	Args []string // argv after the name
-	// Stdin, when not empty, is the child's standard input.
-	Stdin string
-	// Env entries (KEY=value) are appended to the process environment.
-	Env []string
-	// WaitDelay, when positive, is exec.Cmd.WaitDelay: how long after the
-	// context ends (or the child exits) the runner waits for the child's
-	// output pipes to close before it closes them itself, so a grandchild
-	// that inherited stdout cannot hold the call open forever.
-	WaitDelay time.Duration
-}
+// execRunner runs the backend binary. nil means cmdrun.Exec; tests swap it for
+// an in-process double.
+var execRunner cmdrun.Runner
 
-// Result is what a Call did.
-type Result struct {
-	Stdout, Stderr string
-	// Code is the exit code; -1 when the child was ended by a signal or the
-	// context.
-	Code int
-	// Signaled is true when the child was ended by a signal (or the context
-	// ended).
-	Signaled bool
-	// StartErr is non-nil when the child could not be started at all.
-	StartErr error
-}
-
-// Runner runs a Call. The production runner is ExecRunner; tests hand in a
-// double.
-type Runner func(ctx context.Context, c Call) Result
-
-// ExecRunner runs the call with os/exec.
-func ExecRunner(ctx context.Context, c Call) Result {
-	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
-	cmd.WaitDelay = c.WaitDelay
-	if len(c.Env) > 0 {
-		cmd.Env = append(os.Environ(), c.Env...)
+// runner returns the active runner.
+func runner() cmdrun.Runner {
+	if execRunner == nil {
+		return cmdrun.Exec
 	}
-	if c.Stdin != "" {
-		cmd.Stdin = bytes.NewReader([]byte(c.Stdin))
-	}
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
-	res := Result{Stdout: out.String(), Stderr: errb.String()}
-	if err == nil {
-		return res
-	}
-	// The child itself exited 0 but a grandchild kept an output pipe open
-	// past WaitDelay: what was captured is all there is, and the exit code
-	// is the child's own, 0.
-	if errors.Is(err, exec.ErrWaitDelay) {
-		return res
-	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			res.Code, res.Signaled = -1, true
-			return res
-		}
-		if ctx.Err() != nil {
-			res.Code, res.Signaled = -1, true
-			return res
-		}
-		res.Code = ee.ExitCode()
-		return res
-	}
-	res.Code = -1
-	res.StartErr = err
-	return res
-}
-
-// do executes c through r, falling back to ExecRunner when r is nil.
-func (r Runner) do(ctx context.Context, c Call) Result {
-	if r == nil {
-		r = ExecRunner
-	}
-	return r(ctx, c)
+	return execRunner
 }
 
 // SwapRunner replaces the runner that every backend invocation uses and returns
@@ -104,7 +27,7 @@ func (r Runner) do(ctx context.Context, c Call) Result {
 // name) instead of writing, and then exec'ing, a script per test. It MUST be
 // called before any goroutine invokes a backend (a test package's TestMain),
 // because the runner variable is not synchronised.
-func SwapRunner(r Runner) (restore func()) {
+func SwapRunner(r cmdrun.Runner) (restore func()) {
 	prev := execRunner
 	execRunner = r
 	return func() { execRunner = prev }

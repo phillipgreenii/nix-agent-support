@@ -12,6 +12,8 @@ cachePackages = [
   'github.com/grpc-ecosystem/grpc-gateway/v2/utilities',
   'github.com/mattn/go-isatty',
   'github.com/ncruces/go-strftime',
+  'github.com/phillipgreenii/x/cmdrun',
+  'github.com/phillipgreenii/x/cmdruntest',
   'github.com/phillipgreenii/x/exitcode',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',

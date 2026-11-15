@@ -28,22 +28,21 @@ import (
 	"errors"
 	"fmt"
 	"time"
-)
 
-// execRunner runs the backend binary (see runner.go). nil means ExecRunner;
-// tests swap it for an in-process double instead of re-executing the test
-// binary (a race-built child sleeps 1 s at exit).
-var execRunner Runner
+	"github.com/phillipgreenii/x/cmdrun"
+)
 
 // runInvoke marshals req, execs binary with it on stdin, and returns the
 // raw stdout bytes (or an error folding in stderr/exit status). Shared by
 // Invoke and InvokeCapabilities.
 //
-// ctx is wrapped in a DefaultExecTimeout deadline (via the swappable
-// execTimeout var) and the Call's WaitDelay (exec.Cmd.WaitDelay) is set to
-// DefaultWaitDelay, so a hung backend binary — or one whose own grandchild
-// holds its stdout pipe open — is killed and reaped within a bounded time
-// rather than hanging this call forever [bead #13]. (pg-connector's own
+// The Call carries a Timeout of execTimeoutFor (DefaultExecTimeout unless the
+// op or its config says otherwise), WaitDelay DefaultWaitDelay, OwnProcGroup
+// and TermGrace DefaultTermGrace: a hung backend binary — or one whose own
+// grandchild holds its stdout pipe open — is ended, as a whole process group
+// (SIGTERM, then SIGKILL after the grace), and reaped within a bounded time
+// rather than hanging this call forever, and a cancelled caller ctx ends the
+// group the same way [bead #13]. (pg-connector's own
 // fan-outs used to dispatch serially, so a hung backend also delayed every
 // backend queued behind it; they now run their calls in parallel, so it
 // costs only its own deadline, bead pg2-55k6y, INV-FANOUT-1.)
@@ -60,30 +59,31 @@ func runInvoke(ctx context.Context, t Target, req Request) ([]byte, error) {
 		return nil, fmt.Errorf("scriptout: marshal request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, execTimeoutFor(req.Op, req.Config))
-	defer cancel()
-
+	timeout := execTimeoutFor(req.Op, req.Config)
 	start := time.Now()
-	r := execRunner.do(ctx, Call{
-		Name:      t.Command[0],
-		Args:      t.Command[1:],
-		Stdin:     string(payload),
-		WaitDelay: DefaultWaitDelay,
+	r := runner()(ctx, cmdrun.Call{
+		Name:         t.Command[0],
+		Args:         t.Command[1:],
+		Stdin:        payload,
+		Timeout:      timeout,
+		WaitDelay:    DefaultWaitDelay,
+		OwnProcGroup: true,
+		TermGrace:    DefaultTermGrace,
 	})
-	runErr := runResultErr(ctx, r)
+	runErr := runResultErr(r)
 	elapsed := time.Since(start)
 
-	out := []byte(r.Stdout)
+	out := r.Stdout
 	if len(out) == 0 {
 		if runErr != nil {
 			// Name the call and how long it ran: a bare "signal: killed" is
 			// exactly what the umbrella's own deadline kill used to leave
 			// the caller with, indistinguishable between ops and between a
 			// 35s stall and an instant crash [bead pg2-5dyz2].
-			detail := callDetail(ctx, req, elapsed)
-			if r.Stderr != "" {
+			detail := callDetail(r, req, timeout, elapsed)
+			if len(r.Stderr) > 0 {
 				return nil, fmt.Errorf("scriptout: %s: %s: %w (stderr: %s)",
-					binary, detail, runErr, TruncateForFold([]byte(r.Stderr)))
+					binary, detail, runErr, TruncateForFold(r.Stderr))
 			}
 			return nil, fmt.Errorf("scriptout: %s: %s: %w", binary, detail, runErr)
 		}
@@ -94,14 +94,15 @@ func runInvoke(ctx context.Context, t Target, req Request) ([]byte, error) {
 
 // runResultErr renders a failed Result as the error cmd.Run used to return:
 // the start error itself, "signal: killed" for a child ended by a signal or
-// by ctx, or "exit status N". It is nil for a child that exited 0.
-func runResultErr(ctx context.Context, r Result) error {
+// by its context, or "exit status N". It is nil for a child that exited 0
+// with its context intact.
+func runResultErr(r cmdrun.Result) error {
 	switch {
 	case r.StartErr != nil:
 		return r.StartErr
-	case r.Signaled && ctx.Err() != nil:
+	case r.CtxErr != nil, r.TimedOut, r.Signal == "killed":
 		return errors.New("signal: killed")
-	case r.Signaled:
+	case r.Signal != "":
 		return errors.New("signal: terminated by a signal")
 	case r.Code != 0:
 		return fmt.Errorf("exit status %d", r.Code)
@@ -110,17 +111,17 @@ func runResultErr(ctx context.Context, r Result) error {
 }
 
 // callDetail describes a failed backend exec for its error message: the op,
-// how long the exec ran, and — when ctx ended it — whether the umbrella's
-// deadline expired (with the limit and a summary of the request's args, the
-// only "argv" the backend process itself has) or the caller canceled
-// [bead pg2-5dyz2].
-func callDetail(ctx context.Context, req Request, elapsed time.Duration) string {
+// how long the exec ran, and — when the call's context ended it — whether the
+// umbrella's deadline expired (with the limit and a summary of the request's
+// args, the only "argv" the backend process itself has) or the caller
+// canceled [bead pg2-5dyz2].
+func callDetail(r cmdrun.Result, req Request, timeout, elapsed time.Duration) string {
 	detail := fmt.Sprintf("op=%s elapsed=%s", req.Op, elapsed.Round(time.Millisecond))
 	switch {
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+	case r.TimedOut || errors.Is(r.CtxErr, context.DeadlineExceeded):
 		detail += fmt.Sprintf(" (umbrella deadline %s exceeded; backend killed) args=%s",
-			execTimeoutFor(req.Op, req.Config), SummarizeArgs(req.Args))
-	case errors.Is(ctx.Err(), context.Canceled):
+			timeout, SummarizeArgs(req.Args))
+	case errors.Is(r.CtxErr, context.Canceled):
 		detail += " (canceled by caller) args=" + SummarizeArgs(req.Args)
 	}
 	return detail
