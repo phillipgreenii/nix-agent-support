@@ -30,10 +30,21 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/runner"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/store"
 )
 
 // Version is set at build time via -ldflags (mkGoApp's default target).
 var Version = "dev"
+
+// Test seams, at their production defaults: newRunner builds the generator
+// runner (a test injects an exec seam into it) and storeOptions are applied
+// to every store.Open (a test shortens the busy timeout).
+var (
+	newRunner    = func() *runner.Runner { return runner.New(Version) }
+	storeOptions []store.Option
+)
 
 var (
 	registryMu sync.Mutex

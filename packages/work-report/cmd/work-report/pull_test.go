@@ -231,6 +231,7 @@ func TestPullCrashedConnector(t *testing.T) {
 
 func TestPullStoreLockedAtOpen(t *testing.T) {
 	isolate(t)
+	shortBusyTimeout(t)
 	fixedNow(t)
 	rec := fake.Install(t, fake.Route{Match: []string{"activity"}, Stdout: pullDoc})
 	db := filepath.Join(t.TempDir(), "s.db")
@@ -434,6 +435,7 @@ func TestPullPGRouterAbsentConnectorExitsNonZero(t *testing.T) {
 
 func TestPullPGRouterStoreLockedExitsNonZero(t *testing.T) {
 	isolate(t)
+	shortBusyTimeout(t)
 	fixedNow(t)
 	rec := fake.Install(t, fake.Route{Match: []string{"activity"}, Stdout: degradedDoc})
 	db := filepath.Join(t.TempDir(), "s.db")

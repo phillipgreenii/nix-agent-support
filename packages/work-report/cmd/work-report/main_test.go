@@ -96,6 +96,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "work-report.test: refusing to run the suite as a child without", envFakeGen, "or", envAsMain)
 		os.Exit(exitLostRole)
 	}
+	newRunner = inProcessRunner
 	os.Exit(m.Run())
 }
 

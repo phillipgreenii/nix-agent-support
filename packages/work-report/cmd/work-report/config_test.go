@@ -595,7 +595,7 @@ func problemFor(v validateOut, preset string) (kind, reason string, ok bool) {
 func TestConfigValidateAttributesEachProblemToItsPreset(t *testing.T) {
 	f := validateFixture(t)
 	body := f.generators("") +
-		"  slow:\n    command: [" + fmt.Sprintf("%q", f.exe) + "]\n    timeout: 1s\n    env: [" + envFakeGen + "]\n" +
+		"  slow:\n    command: [" + fmt.Sprintf("%q", f.exe) + "]\n    timeout: 300ms\n    env: [" + envFakeGen + "]\n" +
 		"  ghost:\n    command: [/nonexistent/ghost-generator]\n" +
 		"  lonely:\n    command: [/nonexistent/lonely-generator]\n" +
 		"reports:\n" +
@@ -670,6 +670,7 @@ func TestConfigValidateOKWithUnreferencedExistingGenerator(t *testing.T) {
 // Validate mode runs under the allowlisted environment of a real run, in a
 // fresh empty temporary directory, with the validate-mode envelope.
 func TestConfigValidateRunsUnderTheRealEnvironmentAllowlist(t *testing.T) {
+	realProcesses(t)
 	f := validateFixture(t)
 	dump := filepath.Join(t.TempDir(), "dump.json")
 	t.Setenv(envDump, dump)

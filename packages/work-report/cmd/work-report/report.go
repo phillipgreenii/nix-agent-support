@@ -337,7 +337,7 @@ func doReport(cmd *cobra.Command, o *reportOpts, args []string) error {
 			fmt.Sprintf("preset %q is invalid: %s", r.preset, strings.Join(broken, "; ")))
 	}
 
-	st, err := store.Open(config.StorePath(cfg, storeFlag))
+	st, err := store.Open(config.StorePath(cfg, storeFlag), storeOptions...)
 	if err != nil {
 		return err
 	}
@@ -377,7 +377,7 @@ func doReport(cmd *cobra.Command, o *reportOpts, args []string) error {
 		req.Baseline = baselineText
 	}
 
-	out := runner.New(Version).Run(ctx, req)
+	out := newRunner().Run(ctx, req)
 
 	// INV-BASELINE-1: a plain view of the data is always available, so the
 	// baseline preset prints to stdout when its output parent is unusable. No

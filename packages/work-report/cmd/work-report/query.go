@@ -103,7 +103,7 @@ func newQueryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := store.Open(config.StorePath(cfg, storeFlag))
+			st, err := store.Open(config.StorePath(cfg, storeFlag), storeOptions...)
 			if err != nil {
 				return err
 			}

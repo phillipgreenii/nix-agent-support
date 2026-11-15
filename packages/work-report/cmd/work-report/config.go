@@ -461,7 +461,7 @@ func validate(cmd *cobra.Command, cfgPath string) (validateJSON, error) {
 // generator, in name order (the order Presets itself uses), and adds a warning
 // for each generator no preset references whose executable cannot be found.
 func validatePresets(ctx context.Context, set config.PresetSet, res *validateJSON) {
-	rn := runner.New(Version)
+	rn := newRunner()
 	referenced := map[string]bool{}
 	for _, name := range sortedKeys(set.Presets) {
 		p := set.Presets[name]

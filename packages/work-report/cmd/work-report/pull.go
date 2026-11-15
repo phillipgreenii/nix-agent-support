@@ -87,7 +87,7 @@ func newPullCmd() *cobra.Command {
 			opts := pull.Opts{Range: rng, Sources: sources, Now: now}
 			deps := pull.Deps{Cfg: cfg, Conn: pgconn.NewExec(), Log: telemetry.New("")}
 
-			st, err := store.Open(config.StorePath(cfg, storeFlag))
+			st, err := store.Open(config.StorePath(cfg, storeFlag), storeOptions...)
 			var res pull.Result
 			switch {
 			case errors.Is(err, store.ErrLocked):
