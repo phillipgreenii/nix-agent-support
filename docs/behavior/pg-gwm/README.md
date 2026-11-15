@@ -107,26 +107,24 @@ so a sandboxed requester's repository SHOULD be configured. _(Operator ruling, P
 "yes it should work in a repo without config. default would be no min or max or clear or use, so it is
 very close to unmanaged, but you get the reap to help with clean up.")_
 
-| Key                         | Default                             | Meaning                                                                                                                       |
-| --------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `worktree-root`             | `<repository directory>.worktrees/` | Directory under which the manager creates this repository's worktrees                                                         |
-| `worktree-dir-template`     | `{{repo}}-wt-{{index}}`             | Directory name of a new worktree, given the worktree information (`INV-GWM-22`)                                               |
-| `standby-branch-template`   | (unset)                             | When set, a worktree kept at reap is put on a new branch from `standby-base` named by this template instead of being detached |
-| `standby-base`              | `HEAD` of the main checkout         | The base of a standby branch                                                                                                  |
-| `min`                       | (unset)                             | `available` worktrees the manager keeps ready after a reap, kept or freshly created (`INV-GWM-20`)                            |
-| `max`                       | (unset)                             | Upper bound on managed worktrees, counted in every state                                                                      |
-| `reuse-reclaimed-worktrees` | `false`                             | A new lease takes a released, then an expired, worktree before creating one                                                   |
-| `clean-reused-worktree`     | `false`                             | Cleaning a reused worktree to a pristine tree, except the keep list, before handing it out                                    |
-| `keep-list`                 | (empty)                             | Ignored paths a clean leaves in place                                                                                         |
-| `reuse-hook-policy`         | `run`                               | Whether the post-checkout hook runs when a reused worktree is switched (`run` or `skip`; creation always runs it)             |
-| `free-space-floor`          | (unset)                             | Free bytes below which no worktree is created                                                                                 |
-| `default-ttl`               | `none`                              | Lease time to live when a lease names none                                                                                    |
-| `lock-wait`                 | `10s`                               | How long a command waits for the repository's lock before `busy` (`INV-GWM-29`)                                               |
-| `git-timeout`               | `2m`                                | Timeout of one repository operation (`INV-GWM-31`)                                                                            |
-| `create-timeout`            | `30m`                               | Timeout of a creation or a clean (`INV-GWM-31`)                                                                               |
-| `index-lock-stale-after`    | `10m`                               | Age after which a zero-byte index lock is stale (`INV-GWM-31`)                                                                |
-| `reap-interval`             | `10m`                               | How often the scheduled reaper runs (`INV-GWM-32`)                                                                            |
-| `tombstone-retention`       | `7d`                                | How long a reclaimed lease's record is kept (`INV-GWM-7`, `INV-GWM-34`)                                                       |
+| Key                         | Default                             | Meaning                                                                                                           |
+| --------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `worktree-root`             | `<repository directory>.worktrees/` | Directory under which the manager creates this repository's worktrees                                             |
+| `worktree-dir-template`     | `{{repo}}-wt-{{index}}`             | Directory name of a new worktree, given the worktree information (`INV-GWM-22`)                                   |
+| `min`                       | (unset)                             | `available` worktrees the manager keeps ready after a reap, kept or freshly created (`INV-GWM-20`)                |
+| `max`                       | (unset)                             | Upper bound on managed worktrees, counted in every state                                                          |
+| `reuse-reclaimed-worktrees` | `false`                             | A new lease takes a released, then an expired, worktree before creating one                                       |
+| `clean-reused-worktree`     | `false`                             | Cleaning a reused worktree to a pristine tree, except the keep list, before handing it out                        |
+| `keep-list`                 | (empty)                             | Ignored paths a clean leaves in place                                                                             |
+| `reuse-hook-policy`         | `run`                               | Whether the post-checkout hook runs when a reused worktree is switched (`run` or `skip`; creation always runs it) |
+| `free-space-floor`          | (unset)                             | Free bytes below which no worktree is created                                                                     |
+| `default-ttl`               | `none`                              | Lease time to live when a lease names none                                                                        |
+| `lock-wait`                 | `10s`                               | How long a command waits for the repository's lock before `busy` (`INV-GWM-29`)                                   |
+| `git-timeout`               | `2m`                                | Timeout of one repository operation (`INV-GWM-31`)                                                                |
+| `create-timeout`            | `30m`                               | Timeout of a creation or a clean (`INV-GWM-31`)                                                                   |
+| `index-lock-stale-after`    | `10m`                               | Age after which a zero-byte index lock is stale (`INV-GWM-31`)                                                    |
+| `reap-interval`             | `10m`                               | How often the scheduled reaper runs (`INV-GWM-32`)                                                                |
+| `tombstone-retention`       | `7d`                                | How long a reclaimed lease's record is kept (`INV-GWM-7`, `INV-GWM-34`)                                           |
 
 A fixed pool of four is `reuse-reclaimed-worktrees = true` with `min = max = 4`. With reuse off, `max`
 is only an upper limit: every lease gets a fresh worktree, and there are never too many.

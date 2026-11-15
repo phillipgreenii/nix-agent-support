@@ -162,17 +162,16 @@ requester that needs a fresher base fetches first (ruled 2026-11-14).
   whose rendered directory does not already exist; an occupied directory MUST move it to the next index,
   never fail the lease. The default `worktree-dir-template` MUST include the repository's directory
   name, and `config check` MUST reject two configured repositories whose templates can render the same
-  path under one `worktree-root`. `worktree-dir-template` and `standby-branch-template` MUST be given: the slot index, the repository name, the name and lease id
+  path under one `worktree-root`. `worktree-dir-template` MUST be given: the slot index, the repository name, the name and lease id
   (when a lease is being made), the owner, the metadata, `min`, `max`, and the count of managed
-  worktrees including the one being created. A template whose output is not a valid directory or branch
+  worktrees including the one being created. A template whose output is not a valid directory
   name MUST fail with `usage` and change nothing; `config check` MUST render each template once with
-  sample values. A standby branch that already exists MUST be reused if no worktree holds it, and
-  otherwise suffixed. (A template such as `slot-{{index | letter}}` yields `slot-a`, `slot-b`, ….)
+  sample values. (A template such as `slot-{{index | letter}}` yields `slot-a`, `slot-b`, ….)
 - **`INV-GWM-23`** <!-- uuid: 313b9d8d-8cb5-4212-8d2d-581e2cdc9296 --> — `reap` MUST reclaim every
   `released` and `lease-expired` worktree of the repository, and MUST check every `available` one for
   unsaved work. For each reclaimed worktree it MUST first end any lease (status `reclaiming`), then
-  preserve unsaved work (`INV-GWM-24`), then either unlock and remove it or keep it, detached or on a
-  new branch from `standby-base` named by `standby-branch-template`, so its lease branch is free, and
+  preserve unsaved work (`INV-GWM-24`), then either unlock and remove it or keep it, detached, so
+  its lease branch is free, and
   mark it `available`; which it keeps is governed by `min` and reuse (`INV-GWM-20`). It MUST also remove
   `available` worktrees while the count exceeds `max`. Reap MUST NOT delete any branch a lease used.
   `reap --dry-run` MUST report what it would do and change nothing.
