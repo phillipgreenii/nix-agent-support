@@ -44,10 +44,19 @@ func newQueue(t *testing.T) *eventqueue.Queue {
 // its Ref. The loop is torn down by the test's cleanup.
 func startService(t *testing.T, logDir string) (*Service, Ref) {
 	t.Helper()
+	return startServiceWithDeadline(t, logDir, 0)
+}
+
+// startServiceWithDeadline is startService with the server-side per-call
+// deadline overridden (0 keeps serverCallDeadline). The override is set before
+// Accept starts, so no handler goroutine can race the write.
+func startServiceWithDeadline(t *testing.T, logDir string, callDeadline time.Duration) (*Service, Ref) {
+	t.Helper()
 	svc, err := Listen(t.Context(), Options{LogDir: logDir, Queue: newQueue(t), Bindings: testBindings(), Command: "pg-router"})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
+	svc.callDeadline = callDeadline
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- svc.Accept(ctx) }()
@@ -798,9 +807,28 @@ func TestExitBusy_IsThePollerBackoffSignal(t *testing.T) {
 // return to baseline within a bounded window (Task 3.10 Step 7: plain
 // runtime.NumGoroutine() diffing; this repo has no goleak-style tooling and
 // none is added).
+// TestServerCallDeadline_ProductionDefaultIsFiveSeconds pins the production
+// accept-to-response bound (the leak test shortens it per Service) and that a
+// Service with no override uses it.
+func TestServerCallDeadline_ProductionDefaultIsFiveSeconds(t *testing.T) {
+	if serverCallDeadline != 5*time.Second {
+		t.Fatalf("serverCallDeadline = %v, want 5s", serverCallDeadline)
+	}
+	if got := (&Service{}).baseCallDeadline(); got != serverCallDeadline {
+		t.Fatalf("baseCallDeadline() with no override = %v, want %v", got, serverCallDeadline)
+	}
+	if got := (&Service{callDeadline: time.Second}).baseCallDeadline(); got != time.Second {
+		t.Fatalf("baseCallDeadline() with override = %v, want 1s", got)
+	}
+}
+
 func TestNoGoroutineLeak_ConcurrentAndAbandonedCalls(t *testing.T) {
 	dir := shortDir(t)
-	svc, ref := startService(t, dir)
+	// The server's accept-to-response bound is shortened here so the stalled
+	// connection below is reaped in well under a second; the production value
+	// is pinned by TestServerCallDeadline_ProductionDefaultIsFiveSeconds.
+	const testDeadline = 300 * time.Millisecond
+	svc, ref := startServiceWithDeadline(t, dir, testDeadline)
 	_ = svc
 
 	runtime.GC()
@@ -848,7 +876,7 @@ func TestNoGoroutineLeak_ConcurrentAndAbandonedCalls(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stalled.Close() })
 
-	deadline := time.Now().Add(serverCallDeadline + 3*time.Second)
+	deadline := time.Now().Add(testDeadline + 3*time.Second)
 	for {
 		runtime.GC()
 		if n := runtime.NumGoroutine(); n <= baseline {

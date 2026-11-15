@@ -300,6 +300,9 @@ type Service struct {
 	logDir   string
 	command  string
 	inflight sync.WaitGroup
+	// callDeadline overrides serverCallDeadline for this Service when non-zero
+	// (set only before Accept starts, by tests that must not wait out 5 s).
+	callDeadline time.Duration
 
 	// metricsReader and monitorSubsets are the two Task 3.6-prereq seams:
 	// the value-read-back handle and the config-resolved
@@ -839,6 +842,15 @@ func (s *Service) isClosing() bool {
 // propagation.
 const serverCallDeadline = DefaultCallTimeout
 
+// baseCallDeadline is the per-connection base deadline: the test override when
+// set, else serverCallDeadline.
+func (s *Service) baseCallDeadline() time.Duration {
+	if s.callDeadline > 0 {
+		return s.callDeadline
+	}
+	return serverCallDeadline
+}
+
 // serverDeadlineFor is the accept-to-response deadline for one authenticated
 // subcommand: serverCallDeadline for every verb except log-compact, which does
 // real file work (fold, write, fsync, rename of a log up to max_log_bytes) and so
@@ -859,7 +871,7 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 	// A socket deadline is WALL-clock, so it deliberately uses time.Now rather than
 	// the injectable clock seam (which stamps domain timestamps): a mock clock must
 	// not be able to make a real connection hang forever.
-	if err := conn.SetDeadline(time.Now().Add(serverCallDeadline)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(s.baseCallDeadline())); err != nil {
 		slog.Warn("core: set connection deadline failed", "err", err)
 		return
 	}
@@ -900,7 +912,7 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 		}
 		defer s.releaseReadSlot()
 	}
-	if d := serverDeadlineFor(req.Subcommand); d != serverCallDeadline {
+	if d := serverDeadlineFor(req.Subcommand); d != serverCallDeadline && d != s.baseCallDeadline() {
 		if err := conn.SetDeadline(time.Now().Add(d)); err != nil {
 			slog.Warn("core: extend connection deadline failed", "subcommand", req.Subcommand, "err", err)
 		}
