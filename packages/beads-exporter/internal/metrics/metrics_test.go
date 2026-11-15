@@ -287,3 +287,29 @@ func TestFormatLabelsEmptyAndSeriesWithEqualEarlierLabels(t *testing.T) {
 		t.Fatalf("series with equal leading labels not ordered by the next label:\n%s", got)
 	}
 }
+
+// TestQueueCandidatesHelpStatesTheDefinition pins the HELP text of
+// beads_queue_candidates: it must say the count is bd ready's result for the
+// queue's flags and name the exact drain-claim definition.
+func TestQueueCandidatesHelpStatesTheDefinition(t *testing.T) {
+	var help string
+	for _, f := range Families() {
+		if f.Name == FamQueueCandidates {
+			help = f.Help
+		}
+	}
+	for _, want := range []string{
+		"bd ready",
+		"not a template",
+		"drain-claim",
+		"--exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign",
+		"--exclude-type epic",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("HELP lacks %q: %s", want, help)
+		}
+	}
+	if strings.Contains(help, "claimable") {
+		t.Errorf("HELP must not use the vague word claimable: %s", help)
+	}
+}

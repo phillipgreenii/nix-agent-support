@@ -30,7 +30,7 @@ beads_issues_stored{db="beta",status="hooked"} 0
 beads_issues_stored{db="beta",status="in_progress"} 0
 beads_issues_stored{db="beta",status="open"} 0
 beads_issues_stored{db="beta",status="pinned"} 0
-# HELP beads_queue_candidates Beads currently claimable through each configured queue.
+# HELP beads_queue_candidates Beads that bd ready returns for the queue's flags: status open, not deferred or blocked by an open dependency, not a template; for client-side queues (only --label, --exclude-label, --exclude-type) the shared bd ready result is filtered in process, otherwise bd ready is spawned with the queue's flags. The drain-claim queue is bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic.
 # TYPE beads_queue_candidates gauge
 beads_queue_candidates{db="alpha",queue="by-priority"} 1
 beads_queue_candidates{db="alpha",queue="drain-claim"} 1

@@ -42,7 +42,7 @@ func Families() []Family {
 		},
 		{
 			FamQueueCandidates, Gauge,
-			"Beads currently claimable through each configured queue.",
+			"Beads that bd ready returns for the queue's flags: status open, not deferred or blocked by an open dependency, not a template; for client-side queues (only --label, --exclude-label, --exclude-type) the shared bd ready result is filtered in process, otherwise bd ready is spawned with the queue's flags. The drain-claim queue is bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign --exclude-type epic.",
 			[]string{"db", "queue"},
 		},
 		{
