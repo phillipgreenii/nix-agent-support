@@ -26,7 +26,7 @@ type evEnv struct {
 
 // setupEvidence builds a hermetic run environment whose lens agent-workflow
 // uses the given fake providers (name -> command words).
-func setupEvidence(t *testing.T, providers map[string][]string, order []string, timeout int) *evEnv {
+func setupEvidence(t *testing.T, providers map[string][]string, order []string, timeout int, perProvider ...map[string]int) *evEnv {
 	t.Helper()
 	dir := t.TempDir()
 	for _, f := range []string{"fake-provider.sh", "fake-fail.sh", "fake-slow.sh", "rows-a.json", "rows-b.json"} {
@@ -50,7 +50,13 @@ func setupEvidence(t *testing.T, providers map[string][]string, order []string, 
 		if strings.HasPrefix(name, "inv") {
 			style = "inventory"
 		}
-		fmt.Fprintf(&cfg, "[[provider]]\nname = %q\ncommand = [%s]\ntimeout_seconds = %d\nargs_style = %q\n[provider.queries]\nagent-workflow = [\"q1\", \"q2\"]\n", name, strings.Join(words, ", "), timeout, style)
+		to := timeout
+		for _, m := range perProvider {
+			if v, ok := m[name]; ok {
+				to = v
+			}
+		}
+		fmt.Fprintf(&cfg, "[[provider]]\nname = %q\ncommand = [%s]\ntimeout_seconds = %d\nargs_style = %q\n[provider.queries]\nagent-workflow = [\"q1\", \"q2\"]\n", name, strings.Join(words, ", "), to, style)
 	}
 	var ps []string
 	for _, n := range order {
@@ -192,7 +198,12 @@ func TestProviderFailureAndTimeoutExit7AndFailRun(t *testing.T) {
 	}
 	for name, cmd := range cases {
 		t.Run(name, func(t *testing.T) {
-			e := setupEvidence(t, twoProviders(func(m map[string][]string) { m["fake-b"] = cmd }), []string{"fake-a", "fake-b"}, 1)
+			if name == "timeout" {
+				old := providerTimeoutUnit
+				providerTimeoutUnit = 50 * time.Millisecond
+				t.Cleanup(func() { providerTimeoutUnit = old })
+			}
+			e := setupEvidence(t, twoProviders(func(m map[string][]string) { m["fake-b"] = cmd }), []string{"fake-a", "fake-b"}, 30, map[string]int{"fake-b": 1})
 			var snaps []stagingSnap
 			e.snapOnRemove(&snaps)
 			start := time.Now()

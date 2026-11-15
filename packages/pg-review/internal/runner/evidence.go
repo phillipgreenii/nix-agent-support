@@ -34,6 +34,10 @@ const generatorVersion = "pg-review evidence 1"
 // defaultProviderTimeout applies when a provider sets no timeout_seconds.
 const defaultProviderTimeout = 300 * time.Second
 
+// providerTimeoutUnit is what one timeout_seconds counts for; tests shrink it
+// so the timeout path does not wait a real second.
+var providerTimeoutUnit = time.Second
+
 // ProviderError is a provider failure or timeout (exit 7).
 type ProviderError struct {
 	Provider string
@@ -185,7 +189,7 @@ func runProvider(ctx context.Context, cfg *config.Effective, p config.Provider, 
 	if len(p.Command) == 0 {
 		return nil, &ProviderError{p.Name, "no command configured"}
 	}
-	timeout := time.Duration(p.TimeoutSeconds) * time.Second
+	timeout := time.Duration(p.TimeoutSeconds) * providerTimeoutUnit
 	if timeout <= 0 {
 		timeout = defaultProviderTimeout
 	}
