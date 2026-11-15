@@ -82,12 +82,18 @@ func TestLockHeldTooLongExits3(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = lk.Unlock() }()
+	// The 2 second bound is verified with a fake clock in the lease package;
+	// here a short bound checks that giving up maps to exit 8.
+	const bound = 150 * time.Millisecond
+	old := stateLockTimeout
+	stateLockTimeout = bound
+	t.Cleanup(func() { stateLockTimeout = old })
 	start := time.Now()
 	if code, _, stderr := runCLI(t, "acquire", "--owner", "t", "--for", "1m"); code != 8 {
 		t.Fatalf("exit = %d, want 8 (stderr %q)", code, stderr)
 	}
-	if took := time.Since(start); took < lease.LockTimeout || took > lease.LockTimeout+3*time.Second {
-		t.Errorf("gave up after %v, want about the %v lock bound", took, lease.LockTimeout)
+	if took := time.Since(start); took < bound || took > bound+3*time.Second {
+		t.Errorf("gave up after %v, want about the %v lock bound", took, bound)
 	}
 }
 

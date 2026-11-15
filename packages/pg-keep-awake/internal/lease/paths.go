@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 // DirName is the state directory's final path element.
@@ -52,6 +53,31 @@ func ResolveStateDirFrom(xdgStateHome, home string) (string, error) {
 // Dir is a checked state directory.
 type Dir struct {
 	path string
+	// lockTimeout bounds TakeLock; zero means LockTimeout. Tests shorten it
+	// through WithLockTimeout.
+	lockTimeout time.Duration
+	// clock is the time source of the lock wait; nil means the real clock.
+	clock lockClock
+}
+
+// lockClock is the time source of the lock wait loop.
+type lockClock interface {
+	Now() time.Time
+	Sleep(time.Duration)
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time        { return time.Now() }
+func (realClock) Sleep(d time.Duration) { time.Sleep(d) }
+
+// WithLockTimeout returns a copy of d whose TakeLock waits at most t instead
+// of LockTimeout. Production code never calls it; it exists so callers' tests
+// of a held lock need not wait out the real 2 second bound.
+func (d *Dir) WithLockTimeout(t time.Duration) *Dir {
+	c := *d
+	c.lockTimeout = t
+	return &c
 }
 
 // Path is the state directory's absolute path.

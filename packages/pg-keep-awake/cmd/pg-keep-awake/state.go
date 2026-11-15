@@ -124,13 +124,25 @@ func failState(stderr io.Writer, cmd string, err error) int {
 	return exitUnexpected
 }
 
+// stateLockTimeout, when non-zero, replaces lease.LockTimeout for every state
+// directory this command opens. Zero (production) keeps the 2 second bound;
+// tests shorten it, and the bound itself is tested in the lease package.
+var stateLockTimeout time.Duration
+
+func withLockBound(d *lease.Dir, err error) (*lease.Dir, error) {
+	if err != nil || stateLockTimeout <= 0 {
+		return d, err
+	}
+	return d.WithLockTimeout(stateLockTimeout), nil
+}
+
 // ensureStateDir resolves the state directory and creates it when missing.
 func ensureStateDir() (*lease.Dir, error) {
 	path, err := lease.ResolveStateDir()
 	if err != nil {
 		return nil, err
 	}
-	return lease.EnsureDir(path)
+	return withLockBound(lease.EnsureDir(path))
 }
 
 // existingStateDir resolves the state directory without creating it. A
@@ -140,5 +152,5 @@ func existingStateDir() (*lease.Dir, error) {
 	if err != nil {
 		return nil, err
 	}
-	return lease.CheckDir(path)
+	return withLockBound(lease.CheckDir(path))
 }

@@ -411,7 +411,7 @@ func TestConcurrentAcquireAndReapLosesNoLease(t *testing.T) {
 // Holding leases/.lock makes the sweep give up within the 2 second bound, and
 // say so, so the caller still touches its heartbeat.
 func TestSweepSkippedWhenLockCannotBeTaken(t *testing.T) {
-	d := newDir(t)
+	d := newDir(t).WithLockTimeout(shortLockBound)
 	past, future := epoch.Add(-time.Minute), epoch.Add(time.Hour)
 	put(t, d, &lease.Lease{Owner: "o", Key: "dead", Kind: lease.KindAcquire, ExpiresAt: &past})
 	put(t, d, &lease.Lease{Owner: "o", Key: "ok", Kind: lease.KindAcquire, ExpiresAt: &future})
@@ -431,8 +431,8 @@ func TestSweepSkippedWhenLockCannotBeTaken(t *testing.T) {
 	if !res.LockSkipped {
 		t.Error("LockSkipped = false")
 	}
-	if took < time.Second || took > 4*time.Second {
-		t.Errorf("sweep took %v, want about the 2s lock bound", took)
+	if took < shortLockBound || took > shortLockBound+2*time.Second {
+		t.Errorf("sweep took %v, want about the %v lock bound", took, shortLockBound)
 	}
 	if !exists(t, leaseFile(d, "o.dead")) {
 		t.Error("nothing may be reaped while the lock is out of reach")
@@ -487,7 +487,7 @@ func TestStartupKeepsHeartbeatShutdownRemovesIt(t *testing.T) {
 
 // The shutdown sweep still removes the heartbeat when the lock is out of reach.
 func TestShutdownRemovesHeartbeatEvenWhenSweepSkipped(t *testing.T) {
-	d := newDir(t)
+	d := newDir(t).WithLockTimeout(shortLockBound)
 	hb := filepath.Join(d.Path(), FileHeartbeat)
 	if err := os.WriteFile(hb, nil, 0o600); err != nil {
 		t.Fatal(err)

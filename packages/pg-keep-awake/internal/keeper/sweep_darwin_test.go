@@ -181,7 +181,7 @@ func TestWatchedProcessDeathReapsRealLease(t *testing.T) {
 // A real child holds flock on leases/.lock and is then stopped: the sweep must
 // give up within the 2 second bound and say so.
 func TestStoppedClientHoldingLockMakesSweepGiveUp(t *testing.T) {
-	d := newDir(t)
+	d := newDir(t).WithLockTimeout(shortLockBound)
 	past := time.Now().Add(-time.Minute)
 	put(t, d, &lease.Lease{Owner: "o", Key: "dead", Kind: lease.KindAcquire, ExpiresAt: &past})
 
@@ -221,8 +221,8 @@ func TestStoppedClientHoldingLockMakesSweepGiveUp(t *testing.T) {
 	if !res.LockSkipped {
 		t.Error("LockSkipped = false")
 	}
-	if took < time.Second || took > 4*time.Second {
-		t.Errorf("sweep took %v, want about 2s", took)
+	if took < shortLockBound || took > shortLockBound+2*time.Second {
+		t.Errorf("sweep took %v, want about %v", took, shortLockBound)
 	}
 	if !exists(t, leaseFile(d, "o.dead")) {
 		t.Error("nothing may be reaped without the lock")

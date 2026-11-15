@@ -419,6 +419,7 @@ func TestNoEndpointIsNoop(t *testing.T) {
 func TestUnreachableCollectorDoesNotBlock(t *testing.T) {
 	for _, ep := range []string{"127.0.0.1:1", "http://127.0.0.1:1"} {
 		t.Run(ep, func(t *testing.T) {
+			t.Parallel()
 			e, err := New(context.Background(), Options{Endpoint: ep, ServiceName: "pg-keep-awake", ServiceVersion: "test"})
 			if err != nil {
 				t.Fatal(err)
@@ -438,12 +439,13 @@ func TestUnreachableCollectorDoesNotBlock(t *testing.T) {
 			if d := time.Since(start); d > 2*time.Second {
 				t.Errorf("recording calls took %v against an unreachable collector", d)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			const closeBound = 200 * time.Millisecond
+			ctx, cancel := context.WithTimeout(context.Background(), closeBound)
 			defer cancel()
 			cs := time.Now()
 			_ = e.Close(ctx) // may report the export failure; it must return
-			if d := time.Since(cs); d > 5*time.Second {
-				t.Errorf("Close took %v, want it bounded by its context", d)
+			if d := time.Since(cs); d > closeBound+2*time.Second {
+				t.Errorf("Close took %v, want it bounded by its %v context", d, closeBound)
 			}
 		})
 	}

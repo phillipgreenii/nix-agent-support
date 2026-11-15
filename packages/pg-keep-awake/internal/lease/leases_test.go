@@ -329,6 +329,21 @@ func TestSweepRemovesOnlyStaleTmp(t *testing.T) {
 	}
 }
 
+// fakeLockClock advances only when the lock loop sleeps, so the bound is
+// measured in virtual time and the test does not wait.
+type fakeLockClock struct {
+	now    time.Time
+	slept  time.Duration
+	sleeps int
+}
+
+func (c *fakeLockClock) Now() time.Time { return c.now }
+func (c *fakeLockClock) Sleep(d time.Duration) {
+	c.now = c.now.Add(d)
+	c.slept += d
+	c.sleeps++
+}
+
 func TestLockBoundIsTwoSeconds(t *testing.T) {
 	if LockTimeout != 2*time.Second {
 		t.Fatalf("LockTimeout = %v, want 2s", LockTimeout)
@@ -338,14 +353,14 @@ func TestLockBoundIsTwoSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
+	clk := &fakeLockClock{now: time.Unix(1_000_000, 0)}
+	d.clock = clk
 	_, err = d.TakeLock() // a second open file description conflicts even in-process
-	elapsed := time.Since(start)
 	if !errors.Is(err, ErrLockTimeout) {
 		t.Fatalf("second TakeLock = %v, want ErrLockTimeout", err)
 	}
-	if elapsed < 1900*time.Millisecond || elapsed > 4*time.Second {
-		t.Errorf("waited %v, want about 2s", elapsed)
+	if clk.slept < LockTimeout || clk.slept > LockTimeout+lockPoll {
+		t.Errorf("waited %v of virtual time, want the %v bound", clk.slept, LockTimeout)
 	}
 	// PutLease on a wedged lock fails the same way, without writing.
 	if err := d.PutLease(&Lease{Owner: "o", Key: "k", Kind: KindRun, Client: &ProcRef{PID: 5, StartUS: 5}}); !errors.Is(err, ErrLockTimeout) {
@@ -361,6 +376,24 @@ func TestLockBoundIsTwoSeconds(t *testing.T) {
 	_ = lk.Unlock()
 	if err := lk.Unlock(); err != nil {
 		t.Errorf("double Unlock: %v", err)
+	}
+}
+
+func TestWithLockTimeoutShortensTheBound(t *testing.T) {
+	d := newDir(t)
+	held, _ := d.TakeLock()
+	defer func() { _ = held.Unlock() }()
+	short := d.WithLockTimeout(30 * time.Millisecond)
+	clk := &fakeLockClock{now: time.Unix(1_000_000, 0)}
+	short.clock = clk
+	if _, err := short.TakeLock(); !errors.Is(err, ErrLockTimeout) {
+		t.Fatalf("got %v", err)
+	}
+	if clk.slept < 30*time.Millisecond || clk.slept > 30*time.Millisecond+lockPoll {
+		t.Errorf("virtual wait %v, want the 30ms override", clk.slept)
+	}
+	if d.lockTimeout != 0 {
+		t.Error("WithLockTimeout mutated the receiver")
 	}
 }
 

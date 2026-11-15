@@ -29,7 +29,12 @@ type Lock struct {
 }
 
 // TakeLock takes leases/.lock, waiting at most LockTimeout.
-func (d *Dir) TakeLock() (*Lock, error) { return d.takeLock(LockTimeout) }
+func (d *Dir) TakeLock() (*Lock, error) {
+	if d.lockTimeout > 0 {
+		return d.takeLock(d.lockTimeout)
+	}
+	return d.takeLock(LockTimeout)
+}
 
 func (d *Dir) takeLock(timeout time.Duration) (*Lock, error) {
 	path := filepath.Join(d.LeasesPath(), ".lock")
@@ -38,7 +43,11 @@ func (d *Dir) takeLock(timeout time.Duration) (*Lock, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	f := os.NewFile(uintptr(fd), path)
-	deadline := time.Now().Add(timeout)
+	var clk lockClock = realClock{}
+	if d.clock != nil {
+		clk = d.clock
+	}
+	deadline := clk.Now().Add(timeout)
 	for {
 		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
@@ -48,11 +57,11 @@ func (d *Dir) takeLock(timeout time.Duration) (*Lock, error) {
 			_ = f.Close()
 			return nil, fmt.Errorf("flock %s: %w", path, err)
 		}
-		if !time.Now().Before(deadline) {
+		if !clk.Now().Before(deadline) {
 			_ = f.Close()
 			return nil, ErrLockTimeout
 		}
-		time.Sleep(lockPoll)
+		clk.Sleep(lockPoll)
 	}
 }
 

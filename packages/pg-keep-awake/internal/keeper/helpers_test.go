@@ -61,6 +61,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// shortLockBound replaces lease.LockTimeout in tests that hold the lock; the
+// 2 second bound itself is verified with a fake clock in the lease package.
+const shortLockBound = 150 * time.Millisecond
+
 func newDir(t *testing.T) *lease.Dir {
 	t.Helper()
 	d, err := lease.EnsureDir(filepath.Join(t.TempDir(), "state", lease.DirName))

@@ -237,7 +237,7 @@ func TestHeartbeatTouchedOnlyAfterStatusWritten(t *testing.T) {
 }
 
 func TestLockSkippedSweepStillTouchesHeartbeat(t *testing.T) {
-	g := newKRig(t, nil)
+	g := newKRig(t, func(o *KeeperOptions) { o.Dir = o.Dir.WithLockTimeout(shortLockBound) })
 	if err := TouchHeartbeat(g.dir, t0.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestLockSkippedSweepStillTouchesHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = lk.Unlock() }()
-	g.tick() // blocks for the 2 second bound, then carries on
+	g.tick() // blocks for the lock bound, then carries on
 	if !g.hbMTime().After(old) {
 		t.Fatal("a pass with a lock-skipped sweep must still touch the heartbeat")
 	}
