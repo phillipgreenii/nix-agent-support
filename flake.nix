@@ -10228,9 +10228,14 @@
                     # contain, so the built binary rides on PATH; the test fails (it
                     # never skips) when it is absent here.
                     pkgs.pg-router-source-pg-connector
+                    # cmd/pg-connector-issue-jira's realpjira_integration_test.go
+                    # runs the REAL pjira (a repo-base package) from PATH.
+                    phillipgreenii-nix-base.packages.${system}.pjira
                   ];
                 }).overrideAttrs
                   (_: {
+                    # realpjira_integration_test.go serves a stub Jira on loopback.
+                    __darwinAllowLocalNetworking = true;
                     buildPhase = ''
                       runHook preBuild
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
@@ -10274,6 +10279,53 @@
                         exit 1
                       fi
                       echo "pg-connector-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
+              # Real-pjira token-handoff check. ON DEMAND ONLY (same rules as
+              # pg-connector-integration-tests above: no hook, run-unit-tests,
+              # pre-land or land gate; `nix build
+              # .#checks.<system>.pg-connector-issue-jira-real-pjira-tests`). Runs
+              # ONLY the `//go:build integration` TestRealPjira* tests of
+              # cmd/pg-connector-issue-jira against the REAL pjira built from
+              # nix-repo-base (modules/jira), with a fake `security` first on PATH
+              # and a loopback stub Jira: pjira configured with source=file through a
+              # symlink must launch security zero times. The servetest shim is a fake
+              # pjira, so only this check can prove that. It fails when a test does
+              # not report PASS or is skipped.
+              pg-connector-issue-jira-real-pjira-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-connector-issue-jira-real-pjira-tests";
+                  src = ./packages/pg-connector;
+                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                  testDeps = [ phillipgreenii-nix-base.packages.${system}.pjira ];
+                }).overrideAttrs
+                  (_: {
+                    __darwinAllowLocalNetworking = true;
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      log="$TMPDIR/real-pjira.log"
+                      go test -tags integration -count=1 -v -run '^TestRealPjira' ./cmd/pg-connector-issue-jira/ > "$log" 2>&1 || {
+                        cat "$log"
+                        echo "pg-connector-issue-jira-real-pjira-tests: FAILED" >&2
+                        exit 1
+                      }
+                      for t in TestRealPjiraTokenFileThroughSymlinkLaunchesNoSecurity TestRealPjiraSourceCommandLaunchesSecurity; do
+                        grep -q -- "^--- PASS: $t " "$log" || {
+                          cat "$log"
+                          echo "pg-connector-issue-jira-real-pjira-tests: $t did not report PASS" >&2
+                          exit 1
+                        }
+                      done
+                      if grep -q -- '--- SKIP' "$log"; then
+                        cat "$log"
+                        echo "pg-connector-issue-jira-real-pjira-tests: a test was SKIPPED" >&2
+                        exit 1
+                      fi
+                      echo "pg-connector-issue-jira-real-pjira-tests: both real-pjira tests PASS, none skipped"
                       runHook postBuild
                     '';
                   });
