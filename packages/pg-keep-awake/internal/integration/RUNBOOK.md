@@ -12,7 +12,7 @@ skip-line unit test (`TestSkipReasonFor`, `TestSkipLineFormat`).
 1. Confirm `/usr/bin/caffeinate` exists, then from `packages/pg-keep-awake` run:
 
    ```bash
-   go test -v -count=1 ./internal/integration/...
+   go test -tags integration -v -count=1 ./internal/integration/...
    ```
 
 2. Confirm the output has no `SKIPPED integration:` line and no `--- SKIP`. A `SKIPPED integration:`
@@ -25,7 +25,7 @@ skip-line unit test (`TestSkipReasonFor`, `TestSkipLineFormat`).
 
 ## Proving the skip path
 
-Run `PG_KEEP_AWAKE_ITEST_SKIP=1 go test -v -count=1 ./internal/integration/...`. Exactly one line
+Run `PG_KEEP_AWAKE_ITEST_SKIP=1 go test -tags integration -v -count=1 ./internal/integration/...`. Exactly one line
 starting `SKIPPED integration: forced by PG_KEEP_AWAKE_ITEST_SKIP` is printed and every scenario
 reports `--- SKIP`. Piping the output through `grep -c '^SKIPPED integration: '` prints `1`.
 
@@ -39,4 +39,4 @@ reports `--- SKIP`. Piping the output through `grep -c '^SKIPPED integration: '`
 - The suite uses absolute paths (`/bin/sleep`, `/bin/sh`, `/usr/bin/pmset`, `/usr/bin/caffeinate`)
   so it also runs in the nix sandbox, where `PATH` is empty. Where the sandbox cannot run
   `caffeinate` or list its assertion, the check log carries the `SKIPPED integration:` line instead
-  (`checks.<system>.pg-keep-awake-go-tests` runs `go test -v`).
+  (`checks.<system>.pg-keep-awake-integration-tests` runs `go test -tags integration -v`; it is not part of the unit gate `checks.<system>.pg-keep-awake-go-tests`, because every file here carries `//go:build integration`).

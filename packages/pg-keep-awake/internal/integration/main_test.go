@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package integration runs the real pg-keep-awake keeper, anchor, CLI and
 // pg-caffeinate-shim, and the real /usr/bin/caffeinate, hermetically: every
 // child gets a temp XDG_STATE_HOME and XDG_CONFIG_HOME and a file-backed

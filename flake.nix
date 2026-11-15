@@ -2040,6 +2040,8 @@
                 "pg-connector"
                 # pg2-04jgw: internal/integration is `integration`-tagged.
                 "pg-rescue"
+                # pg-keep-awake: internal/integration is `integration`-tagged.
+                "pg-keep-awake"
                 # internal/contract is `contract`-tagged.
                 "beads-exporter"
               ];
@@ -7806,6 +7808,34 @@
                 gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
                 testFlags = [ "-v" ];
               };
+
+              # pg-keep-awake INTEGRATION tier (V-4): internal/integration, every file
+              # `//go:build integration`, so the unit gate above never builds or runs it.
+              # It drives the real keeper, anchor, CLI, shim and /usr/bin/caffeinate,
+              # observed through pmset. ON DEMAND ONLY: no hook, run-unit-tests, pre-land
+              # or land gate. Runs only that package (mkGoTest's `./...` with the tag would
+              # re-run the whole unit suite), so the buildPhase is replaced. The suite
+              # skips itself with one visible "SKIPPED integration:" line when the host
+              # (or the nix sandbox) cannot run caffeinate and list it through pmset; a
+              # green check then proves only that the package compiles and vets with the
+              # tag. Read the log for that line: its absence plus the "--- PASS" lines
+              # is what proves the scenarios ran.
+              pg-keep-awake-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-keep-awake-integration-tests";
+                  src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
+                  gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go vet -tags integration ./internal/integration/
+                      go test -tags integration -count=1 -race -v -timeout 30m ./internal/integration/
+                      runHook postBuild
+                    '';
+                  });
 
               # pg-git-lander - whole-module Go test gate (unit tier). Pattern A, flat
               # src. Never compiles the `integration` build tag.
