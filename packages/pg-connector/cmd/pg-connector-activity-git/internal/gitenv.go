@@ -7,9 +7,10 @@
 package internal
 
 import (
-	"context"
 	"os"
-	"os/exec"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // gitEnviron returns the child environment: PATH (to resolve git helpers) and
@@ -24,14 +25,19 @@ func gitEnviron() []string {
 	return env
 }
 
-// gitCommand builds `git <args...>` rooted at dir (empty dir means this
-// process's cwd) under the reduced environment.
-func gitCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
+// gitCall builds the cmdrun.Call for `git <args...>` rooted at dir (empty dir
+// means this process's cwd) under the reduced environment, bounded and in its
+// own process group.
+func gitCall(dir string, args ...string) cmdrun.Call {
 	full := args
 	if dir != "" {
 		full = append([]string{"-C", dir}, args...)
 	}
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = gitEnviron()
-	return cmd
+	return scriptout.BoundChild(cmdrun.Call{
+		Name:    "git",
+		Args:    full,
+		Env:     gitEnviron(),
+		EnvMode: cmdrun.EnvExact,
+		Timeout: scriptout.ChildTimeout,
+	})
 }

@@ -4,12 +4,12 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Runner execs `git <args...>` with its working directory set to dir. It
@@ -19,22 +19,19 @@ type Runner interface {
 	Run(ctx context.Context, dir string, args ...string) (string, error)
 }
 
-type execRunner struct{}
+type execRunner struct{ run cmdrun.Runner }
 
 // NewExecRunner returns the production Runner: the real `git` binary resolved
 // from PATH, under the reduced PATH+HOME child environment.
-func NewExecRunner() Runner { return execRunner{} }
+func NewExecRunner() Runner { return execRunner{run: cmdrun.Exec} }
 
-func (execRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := gitCommand(ctx, dir, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if txt := scriptout.TruncateForFold(stderr.Bytes()); txt != "" {
+func (e execRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
+	r := e.run(ctx, gitCall(dir, args...))
+	if err := scriptout.ResultErr(r); err != nil {
+		if txt := scriptout.TruncateForFold(r.Stderr); txt != "" {
 			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, txt)
 		}
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return strings.TrimRight(stdout.String(), " \t\r\n"), nil
+	return strings.TrimRight(string(r.Stdout), " \t\r\n"), nil
 }

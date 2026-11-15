@@ -1,12 +1,14 @@
 package internal
 
 import (
-	"context"
 	"os"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 func envKeys(env []string) []string {
@@ -43,12 +45,18 @@ func TestGitEnvironIsPathAndHomeOnly(t *testing.T) {
 	if got := envKeys(gitEnviron()); !reflect.DeepEqual(got, want) {
 		t.Errorf("gitEnviron keys = %v, want %v", got, want)
 	}
-	cmd := gitCommand(context.Background(), "/some/repo", "log")
+	cmd := gitCall("/some/repo", "log")
 	if got := envKeys(cmd.Env); !reflect.DeepEqual(got, want) {
 		t.Errorf("child env keys = %v, want %v", got, want)
 	}
-	if wantArgs := []string{"git", "-C", "/some/repo", "log"}; !reflect.DeepEqual(cmd.Args, wantArgs) {
-		t.Errorf("args = %v, want %v", cmd.Args, wantArgs)
+	if wantArgs := []string{"-C", "/some/repo", "log"}; cmd.Name != "git" || !reflect.DeepEqual(cmd.Args, wantArgs) {
+		t.Errorf("call = %s %v, want git %v", cmd.Name, cmd.Args, wantArgs)
+	}
+	if cmd.EnvMode != cmdrun.EnvExact {
+		t.Error("EnvMode is not EnvExact: the reduced env would be appended to the parent's")
+	}
+	if cmd.Timeout != scriptout.ChildTimeout || !cmd.OwnProcGroup || cmd.TermGrace != scriptout.DefaultTermGrace || cmd.WaitDelay != scriptout.DefaultWaitDelay {
+		t.Errorf("call is not bounded: %+v", cmd)
 	}
 }
 
