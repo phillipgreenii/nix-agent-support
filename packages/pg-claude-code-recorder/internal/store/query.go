@@ -143,6 +143,15 @@ func (s *Reader) AllFiles() ([]File, error) {
 	return out, err
 }
 
+// EachFile calls fn with every file ordered by id, the rows AllFiles returns
+// in the same order, without building the slice: a caller that folds the rows
+// into an aggregate holds one File at a time. It stops at the first error fn
+// returns and returns it, and stops with the context error when the Reader's
+// context ends. fn MUST NOT run another statement on the same Reader.
+func (s *Reader) EachFile(fn func(File) error) error {
+	return s.eachFile(fn, `SELECT `+fileCols+` FROM files ORDER BY id`)
+}
+
 // FileIdentity is a file's device, inode and birth time: the key the
 // recorder uses to tell one file from another across renames.
 type FileIdentity struct {
@@ -179,23 +188,39 @@ func (s *Reader) DeletedSnapshotFiles() ([]File, error) {
 // files runs a file query; hint is the expected row count (0 when unknown), the
 // initial capacity of the result so a large result does not grow by doubling.
 func (s *Reader) files(hint int, q string, args ...any) ([]File, error) {
-	rows, err := s.q.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
 	var out []File
 	if hint > 0 {
 		out = make([]File, 0, hint)
 	}
+	err := s.eachFile(func(f File) error {
+		out = append(out, f)
+		return nil
+	}, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// eachFile runs q and calls fn with each scanned row, in query order, stopping
+// at the first error from the scan, from fn or from the context the Reader runs
+// under.
+func (s *Reader) eachFile(fn func(File) error, q string, args ...any) error {
+	rows, err := s.q.Query(q, args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		f, err := scanFile(rows)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, f)
+		if err := fn(f); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
 }
 
 // CurrentPaths returns the paths that currently name the file.

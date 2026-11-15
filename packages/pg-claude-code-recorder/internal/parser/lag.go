@@ -110,15 +110,20 @@ func (p *Parser) StartLag() (*Lag, error) {
 	l.seeding = true
 	st.OnOffsets(l.hook)
 	err := st.ReadTx(func(rd *store.Reader) error {
-		files, err := rd.AllFiles()
-		if err != nil {
+		counted := map[int64]bool{}
+		if err := rd.EachFile(func(f store.File) error {
+			if l.counts(f.Source, f.Mode) {
+				counted[f.ID] = true
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 		gens, err := rd.AllGenerations()
 		if err != nil {
 			return err
 		}
-		l.seed(files, gens)
+		l.seed(counted, gens)
 		return nil
 	})
 	if err != nil {
@@ -132,14 +137,12 @@ func (p *Parser) StartLag() (*Lag, error) {
 }
 
 // seed loads the read and replays the held deliveries.
-func (l *lagState) seed(files []store.File, gens []store.Generation) {
+func (l *lagState) seed(counted map[int64]bool, gens []store.Generation) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	start := l.now().UnixNano()
-	for _, f := range files {
-		if l.counts(f.Source, f.Mode) {
-			l.counted[f.ID] = true
-		}
+	for id := range counted {
+		l.counted[id] = true
 	}
 	for _, g := range gens {
 		k := lagKey{g.File, g.Gen}

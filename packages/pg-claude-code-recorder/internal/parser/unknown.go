@@ -40,11 +40,14 @@ func (p *Parser) StartUnknown() (*Unknown, error) {
 	st := p.cfg.Store
 	st.OnFileState(u.hook)
 	err := st.ReadTx(func(rd *store.Reader) error {
-		files, err := rd.AllFiles()
-		if err != nil {
+		var evs []unknownEvent
+		if err := rd.EachFile(func(f store.File) error {
+			evs = append(evs, unknownEvent{f.ID, f.Source, f.State})
+			return nil
+		}); err != nil {
 			return err
 		}
-		u.seed(files)
+		u.seed(evs)
 		return nil
 	})
 	if err != nil {
@@ -57,11 +60,11 @@ func (p *Parser) StartUnknown() (*Unknown, error) {
 	return u, nil
 }
 
-func (u *unknownState) seed(files []store.File) {
+func (u *unknownState) seed(evs []unknownEvent) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	for _, f := range files {
-		u.applyLocked(unknownEvent{f.ID, f.Source, f.State})
+	for _, e := range evs {
+		u.applyLocked(e)
 	}
 	u.seeding = false
 	buf := u.buf

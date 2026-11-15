@@ -84,7 +84,7 @@ func TestLagSecondsIsTheOldestOriginAcrossGenerations(t *testing.T) {
 func TestLagSeedStartsBehindGenerationsAtNow(t *testing.T) {
 	l := lagTestState()
 	l.seed(
-		[]store.File{{ID: 1, Source: "src"}, {ID: 2, Source: "src"}},
+		map[int64]bool{1: true, 2: true},
 		[]store.Generation{{File: 1, Gen: 1, CopyOffset: 100, ParseOffset: 40}, {File: 2, Gen: 1, CopyOffset: 7, ParseOffset: 7}},
 	)
 	if got := secs(l, lagTestNow); got != 0 {
