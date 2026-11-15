@@ -165,7 +165,7 @@ func Violations(st *store.Store, o Options) []string {
 
 	// No orphan temporary files, except the advisory state files' (see advisoryTmp).
 	_ = filepath.WalkDir(st.Dir(), func(p string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && !(filepath.Dir(p) == filepath.Clean(st.Dir()) && advisoryTmp[d.Name()]) && (strings.HasSuffix(p, ".tmp") || strings.HasSuffix(p, ".corrupt-tmp")) {
+		if err == nil && !d.IsDir() && (filepath.Dir(p) != filepath.Clean(st.Dir()) || !advisoryTmp[d.Name()]) && (strings.HasSuffix(p, ".tmp") || strings.HasSuffix(p, ".corrupt-tmp")) {
 			add("orphan temporary file %s", p)
 		}
 		return nil
