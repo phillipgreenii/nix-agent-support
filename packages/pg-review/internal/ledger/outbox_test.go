@@ -88,6 +88,12 @@ func beadCount(t *testing.T, store string) int {
 // adopted seeds one item, shows it and adopts it with a label; it returns the decision.
 func adopted(t *testing.T, l *Ledger, label string) (Item, Decision) {
 	t.Helper()
+	return adoptedIn(t, l, label, "/tmp/tracker")
+}
+
+// adoptedIn is adopted with an explicit tracker root.
+func adoptedIn(t *testing.T, l *Ledger, label, tracker string) (Item, Decision) {
+	t.Helper()
 	run := startRun(t, l, "agent-workflow", "demo")
 	f := finding("alpha")
 	f.Targets = []string{"pkg/a.md"}
@@ -96,7 +102,7 @@ func adopted(t *testing.T, l *Ledger, label string) (Item, Decision) {
 	if _, err := l.ShowItems(ctx, []int64{it.Number}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := l.RuleItems(ctx, []RuleRequest{{Number: it.Number, Ruling: RulingAdopted, TargetTracker: "/tmp/tracker", RepoLabel: label}}, 12)
+	res, err := l.RuleItems(ctx, []RuleRequest{{Number: it.Number, Ruling: RulingAdopted, TargetTracker: tracker, RepoLabel: label}}, 12)
 	if err != nil {
 		t.Fatal(err)
 	}
