@@ -107,6 +107,9 @@ func TestReadOnlyModeIsObviousEverywhereAndClearsOnRestart(t *testing.T) {
 	}
 
 	// Only a restart clears it, and the unknown outcome of the failed pause is resolved by retrying its id.
+	// The client hangs up first: Stop waits out a still-open /stream until the
+	// shutdown grace expires (about 5 s), and this test is not about draining.
+	stream.close()
 	e.restart(nil)
 	if st := e.state()["store"].(map[string]any); st["state"] != "ok" {
 		t.Fatalf("after a restart the store is %v", st)
