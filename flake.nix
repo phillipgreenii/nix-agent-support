@@ -10533,6 +10533,51 @@
                 }).overrideAttrs
                   (_: {
                     PG_DESK_E2E_PG_CONNECTOR = "${pkgs.pg-connector}/bin/pg-connector";
+                    # cmd/pg-desk holds about 670 sequential CLI-style tests; under
+                    # -race in the sandbox one `go test` over the package ran into
+                    # go's 600 s per-package cap. The timeout is NOT raised: the
+                    # package is run as 4 separate `go test` invocations, each over
+                    # a disjoint quarter of its tests (round-robin over the sorted
+                    # `-list` output, so heavy and light tests spread evenly), each
+                    # with go's own default cap. Every test still runs exactly once
+                    # under -race; the phase fails unless the number of top-level
+                    # PASS/SKIP lines across the shards equals the listed count and
+                    # nothing FAILed, so a shard that silently ran nothing cannot
+                    # pass. All other packages run in one `go test` as before.
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      _pg_cores="''${NIX_BUILD_CORES:-2}"
+                      case "$_pg_cores" in "" | 0 | *[!0-9]*) _pg_cores=2 ;; esac
+                      export GOFLAGS="''${GOFLAGS:-} -p=$_pg_cores"
+                      cmdpkg=./cmd/pg-desk
+                      others=$(go list ./... | grep -v '/cmd/pg-desk$')
+                      # shellcheck disable=SC2086
+                      go test -race $others
+                      names=$(go test -race -list '.*' "$cmdpkg" | grep '^Test' | sort -u)
+                      listed=$(echo "$names" | wc -l)
+                      shards=4
+                      log="$TMPDIR/pg-desk-cmd.log"
+                      : > "$log"
+                      for k in $(seq 0 $((shards - 1))); do
+                        shard=$(echo "$names" | awk -v k="$k" -v n="$shards" 'NR % n == k')
+                        regex="^($(echo "$shard" | paste -sd'|' -))\$"
+                        echo "=== cmd/pg-desk shard $((k + 1))/$shards ($(echo "$shard" | wc -l) tests)"
+                        if ! go test -race -count=1 -v -run "$regex" "$cmdpkg" >> "$log" 2>&1; then
+                          grep -E -- '^(--- FAIL|FAIL|panic)' "$log" | head -50 >&2 || true
+                          echo "pg-desk-go-tests: cmd/pg-desk shard $((k + 1))/$shards FAILED" >&2
+                          exit 1
+                        fi
+                      done
+                      ran=$(grep -cE -- '^--- (PASS|SKIP): Test' "$log" || true)
+                      if [ "$ran" != "$listed" ]; then
+                        echo "pg-desk-go-tests: cmd/pg-desk listed $listed tests but $ran reported PASS or SKIP" >&2
+                        exit 1
+                      fi
+                      echo "pg-desk-go-tests: cmd/pg-desk $ran tests in $shards shards, all reported"
+                      runHook postBuild
+                    '';
                   });
 
               # pg-desk INTEGRATION tier. ON DEMAND ONLY: build it by hand when the
