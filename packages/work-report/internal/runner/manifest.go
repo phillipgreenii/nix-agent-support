@@ -142,8 +142,8 @@ func validateManifest(stdout []byte, runDir string) (*validated, *failure) {
 	if len(items) == 0 {
 		return nil, ruleFailure(ruleFiles, "", "files must be a non-empty array")
 	}
-	if len(items) > MaxFiles {
-		return nil, ruleFailure(ruleFilesMax, "", fmt.Sprintf("%d files listed, at most %d are allowed", len(items), MaxFiles))
+	if len(items) > maxFiles {
+		return nil, ruleFailure(ruleFilesMax, "", fmt.Sprintf("%d files listed, at most %d are allowed", len(items), maxFiles))
 	}
 
 	dirResolved, err := filepath.EvalSymlinks(runDir)
@@ -295,3 +295,8 @@ func hashFile(p string) (sum string, n int64, err error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
+
+// maxFiles is the file-count limit validateManifest enforces. It is MaxFiles
+// in production; a test lowers it to exercise the boundary without writing
+// MaxFiles real files.
+var maxFiles = MaxFiles

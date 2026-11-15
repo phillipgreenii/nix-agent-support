@@ -127,16 +127,28 @@ func TestFileCountAndSizeLimitsAreInvalidManifest(t *testing.T) {
 		requireKind(t, out, KindInvalidManifest)
 		requireRule(t, out, ruleFilesMax, "")
 	})
-	t.Run("exactly 1000 files is not a count violation", func(t *testing.T) {
-		fx := newFixture(t)
-		var files []scriptFile
-		paths := make([]string, MaxFiles)
-		for i := range paths {
-			paths[i] = fmt.Sprintf("f%04d.md", i)
-			files = append(files, scriptFile{Path: paths[i], Content: "x"})
+	t.Run("exactly the file limit is not a count violation", func(t *testing.T) {
+		// The limit is lowered so the boundary needs 20 files, not 1000;
+		// the 1001-file case above still runs against the real MaxFiles.
+		const limit = 20
+		old := maxFiles
+		maxFiles = limit
+		t.Cleanup(func() { maxFiles = old })
+		build := func(n int) script {
+			var files []scriptFile
+			paths := make([]string, n)
+			for i := range paths {
+				paths[i] = fmt.Sprintf("f%04d.md", i)
+				files = append(files, scriptFile{Path: paths[i], Content: "x"})
+			}
+			return script{Files: files, Stdout: okManifest(paths...)}
 		}
-		out := fx.run(fx.gen(script{Files: files, Stdout: okManifest(paths...)}))
-		requireOK(t, out)
+		fx := newFixture(t)
+		requireOK(t, fx.run(fx.gen(build(limit))))
+		fx = newFixture(t)
+		out := fx.run(fx.gen(build(limit + 1)))
+		requireKind(t, out, KindInvalidManifest)
+		requireRule(t, out, ruleFilesMax, "")
 	})
 	t.Run("a file over 1 GiB", func(t *testing.T) {
 		fx := newFixture(t)
