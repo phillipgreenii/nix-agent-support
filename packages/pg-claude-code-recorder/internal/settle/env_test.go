@@ -76,6 +76,10 @@ type env struct {
 	hooks   Hooks
 	before  *invariants.DirSnapshot
 	skipInv bool
+	// mutated records that the store committed at least once; the cleanup
+	// invariants check runs only for an environment whose store state changed
+	// (or whose Claude directory is under snapshot comparison).
+	mutated bool
 	policy  copier.ClonePolicy
 
 	// Removal: remove turns remove.enable on; holders answers the holder listing
@@ -118,7 +122,7 @@ func newEnvWith(t *testing.T, cloneMode bool, pre func(*env)) *env {
 	}
 	e.open()
 	t.Cleanup(func() {
-		if !e.skipInv {
+		if !e.skipInv && (e.mutated || e.before != nil) {
 			invariants.Check(t, e.st, invariants.Options{
 				ClaudeDir: e.claude, ClaudeBefore: e.before, AllowQuarantine: e.allowQuarantine,
 				AllowClaudeChange: e.removeOn, ArchiveCompare: invariants.RecordedBytes(e.st),
@@ -144,6 +148,7 @@ func (e *env) open() {
 	}
 	st.OnCommit(func() {
 		e.rec.Mark("commit")
+		e.mutated = true
 		if e.commitHook != nil {
 			e.commitHook()
 		}
