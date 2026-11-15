@@ -92,9 +92,12 @@ func TestCLIRunner_Binary_ResolvesFromEnv(t *testing.T) {
 
 func TestCLIRunner_Command_SetsWaitDelay(t *testing.T) {
 	r := &CLIRunner{BinaryOverride: "pjira"}
-	cmd := r.command(context.Background(), []string{"issue", "PROJ-1"})
+	cmd := r.command([]string{"issue", "PROJ-1"})
 	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
 		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
+	}
+	if cmd.Timeout != scriptout.ChildTimeout || !cmd.OwnProcGroup || cmd.TermGrace != scriptout.DefaultTermGrace {
+		t.Fatalf("call is not bounded: %+v", cmd)
 	}
 }
 

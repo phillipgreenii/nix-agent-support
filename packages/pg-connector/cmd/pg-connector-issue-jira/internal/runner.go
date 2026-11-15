@@ -26,15 +26,14 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Runner execs the resolved Jira CLI binary. Production code uses
@@ -162,22 +161,22 @@ func (r *CLIRunner) resolveBinary() string {
 // Binary implements Runner.Binary.
 func (r *CLIRunner) Binary() string { return r.resolveBinary() }
 
-// command builds the *exec.Cmd Run below actually executes, split out
-// (mirroring the bd/gh backends' own Command/command choke points) so a
-// test can assert on WaitDelay/Env directly without spawning a real
-// process.
-func (r *CLIRunner) command(ctx context.Context, args []string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, r.resolveBinary(), args...)
-	if r.Env != nil {
-		cmd.Env = r.Env
+// command builds the cmdrun.Call Run below actually executes, split out
+// (mirroring the bd/gh backends' own command choke points) so a test can
+// assert on the bound fields/Env directly without spawning a real process.
+// The call is bounded and runs in its own process group
+// (scriptout.BoundChild): a cancelled or hung pjira ends with its whole tree.
+func (r *CLIRunner) command(args []string) cmdrun.Call {
+	call := cmdrun.Call{
+		Name:    r.resolveBinary(),
+		Args:    args,
+		Timeout: scriptout.ChildTimeout,
 	}
-	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
-	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
-	// residual wait for the stdout/stderr pipes to close, independent of
-	// killing the direct child — the same hang guard
-	// cmd/pg-connector-issue-beads/internal/runner.go applies to `bd`.
-	cmd.WaitDelay = scriptout.DefaultWaitDelay
-	return cmd
+	if r.Env != nil {
+		call.Env = r.Env
+		call.EnvMode = cmdrun.EnvExact
+	}
+	return scriptout.BoundChild(call)
 }
 
 // Run execs the resolved binary with args, returning stdout. On failure it
@@ -185,25 +184,22 @@ func (r *CLIRunner) command(ctx context.Context, args []string) *exec.Cmd {
 // callers can classify it without an unbounded error string.
 func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	bin := r.resolveBinary()
-	cmd := r.command(ctx, args)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	res := cmdrun.Exec(ctx, r.command(args))
+	stdout := string(res.Stdout)
+	err := scriptout.ResultErr(res)
 	// The rate-limit reading (ratelimit.go) is handed over whatever the
 	// outcome, a 429 included, then kept out of the failure text.
-	if rl, ok := ParseRateLimit(stderr.Bytes()); ok {
+	if rl, ok := ParseRateLimit(res.Stderr); ok {
 		ReportRateLimit(ctx, rl)
 	}
 	if err != nil {
-		tail := scriptout.TruncateForFold(StripRateLimitLines(stderr.Bytes()))
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return stdout.String(), fmt.Errorf("%s %s: %w: %s",
+		tail := scriptout.TruncateForFold(StripRateLimitLines(res.Stderr))
+		if res.StartErr == nil {
+			return stdout, fmt.Errorf("%s %s: %w: %s",
 				bin, strings.Join(args, " "), err, tail)
 		}
-		return stdout.String(), fmt.Errorf("%s %s: %w (is %s on PATH?)",
+		return stdout, fmt.Errorf("%s %s: %w (is %s on PATH?)",
 			bin, strings.Join(args, " "), err, bin)
 	}
-	return stdout.String(), nil
+	return stdout, nil
 }
