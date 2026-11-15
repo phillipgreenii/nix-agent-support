@@ -425,11 +425,11 @@ func (s *Selector) AdminName(ctx context.Context, path string, isMain bool) (str
 }
 
 func (s *Selector) gitDir(ctx context.Context, path string) (string, error) {
-	r := s.Git.Run(ctx, path, "rev-parse", "--path-format=absolute", "--git-dir")
-	if !r.OK() {
-		return "", fmt.Errorf("git rev-parse --git-dir in %s: exit %d: %s", path, r.Code, strings.TrimSpace(string(r.Stderr)))
+	gd, err := s.Git.GitDir(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --git-dir in %s: %w", path, err)
 	}
-	return strings.TrimSpace(string(r.Stdout)), nil
+	return gd, nil
 }
 
 // inProgressMarkers are the entries of a git dir that mean an operation is in

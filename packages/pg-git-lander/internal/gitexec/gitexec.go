@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/x/cmdrun"
@@ -34,6 +35,37 @@ type Git struct {
 	Env    seams.GitEnv
 	// Timeout overrides the production Timeout when positive (tests only).
 	Timeout time.Duration
+
+	// mu guards dirs, the per-process memo of the path facts that cannot
+	// change while a directory exists (see CommonDir and GitDir).
+	mu   sync.Mutex
+	dirs map[dirKey]string
+}
+
+type dirKey struct{ kind, dir string }
+
+// memo returns the remembered answer for (kind, dir), or runs fetch and
+// remembers a successful answer. Failures are never remembered, so a
+// directory that is not a repository yet is asked again.
+func (g *Git) memo(kind, dir string, fetch func() (string, error)) (string, error) {
+	k := dirKey{kind, dir}
+	g.mu.Lock()
+	v, ok := g.dirs[k]
+	g.mu.Unlock()
+	if ok {
+		return v, nil
+	}
+	v, err := fetch()
+	if err != nil {
+		return "", err
+	}
+	g.mu.Lock()
+	if g.dirs == nil {
+		g.dirs = map[dirKey]string{}
+	}
+	g.dirs[k] = v
+	g.mu.Unlock()
+	return v, nil
 }
 
 // New returns a Git using the production Runner and environment.
@@ -92,9 +124,22 @@ func (g *Git) must(ctx context.Context, dir string, args ...string) (string, err
 }
 
 // CommonDir returns the absolute git common dir of the repository at dir.
+// The answer is remembered per Git value and dir: a repository's common dir
+// does not change while the directory exists.
 func (g *Git) CommonDir(ctx context.Context, dir string) (string, error) {
-	out, err := g.must(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	return strings.TrimSpace(out), err
+	return g.memo("common", dir, func() (string, error) {
+		out, err := g.must(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		return strings.TrimSpace(out), err
+	})
+}
+
+// GitDir returns the absolute git dir of the worktree at dir, remembered like
+// CommonDir.
+func (g *Git) GitDir(ctx context.Context, dir string) (string, error) {
+	return g.memo("gitdir", dir, func() (string, error) {
+		out, err := g.must(ctx, dir, "rev-parse", "--path-format=absolute", "--git-dir")
+		return strings.TrimSpace(out), err
+	})
 }
 
 // Worktree is one entry of git worktree list --porcelain.

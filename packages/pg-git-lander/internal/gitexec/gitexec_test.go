@@ -282,3 +282,60 @@ func TestHelperErrors(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func countingGit(t *testing.T, repo *gitfixture.Repo) (*gitexec.Git, *int) {
+	t.Helper()
+	g := fixtureGit(t, repo)
+	n := 0
+	inner := g.Runner
+	g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		n++
+		return inner(ctx, c)
+	}
+	return g, &n
+}
+
+func TestCommonDirAndGitDirRunGitOncePerDirectory(t *testing.T) {
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true})
+	g, n := countingGit(t, repo)
+	ctx := t.Context()
+	first, err := g.CommonDir(ctx, repo.Dir)
+	if err != nil || !filepath.IsAbs(first) {
+		t.Fatalf("CommonDir = %q, %v", first, err)
+	}
+	gd, err := g.GitDir(ctx, repo.Dir)
+	if err != nil || !filepath.IsAbs(gd) {
+		t.Fatalf("GitDir = %q, %v", gd, err)
+	}
+	if *n != 2 {
+		t.Fatalf("git ran %d times for two first questions, want 2", *n)
+	}
+	for range 5 {
+		if c, _ := g.CommonDir(ctx, repo.Dir); c != first {
+			t.Fatalf("CommonDir changed: %q != %q", c, first)
+		}
+		if d, _ := g.GitDir(ctx, repo.Dir); d != gd {
+			t.Fatalf("GitDir changed: %q != %q", d, gd)
+		}
+	}
+	if *n != 2 {
+		t.Fatalf("repeat questions ran git again: %d runs", *n)
+	}
+}
+
+func TestCommonDirFailureIsNotRemembered(t *testing.T) {
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true})
+	g, n := countingGit(t, repo)
+	notRepo := t.TempDir()
+	// The fixture sets GIT_CEILING_DIRECTORIES to its root only; a temp dir
+	// outside it is not inside any repository.
+	if _, err := g.CommonDir(t.Context(), notRepo); err == nil {
+		t.Skip("temp dir is inside a repository on this machine")
+	}
+	if _, err := g.CommonDir(t.Context(), notRepo); err == nil {
+		t.Fatal("second call succeeded")
+	}
+	if *n != 2 {
+		t.Fatalf("a failure was remembered: %d runs, want 2", *n)
+	}
+}

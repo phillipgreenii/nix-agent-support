@@ -205,6 +205,16 @@ records, `branch_fate`, `worktree_fate`, `tips`, `landed_commit`, `path_taken`, 
 `verify_skipped`, `warnings` and `log_tail`.
 `pg-git-lander log OP_ID` prints the full log.
 
+## Git call economy
+
+A land runs on the order of 90 git processes, so the path facts that cannot change while a directory exists are
+remembered per `gitexec.Git` value: `CommonDir` (`rev-parse --git-common-dir`) and `GitDir` (`rev-parse --git-dir`)
+each run git once per directory and then answer from memory. Only successes are remembered, so a directory that is not
+yet a repository is asked again. State that does change during an operation (refs, `worktree list`, `status`, lock
+records) is never cached; each call still reads real git, so every behavioural assertion keeps its strength. A
+scenario that needs real subprocess concurrency belongs in the integration tier (`integration/`), not in the unit
+packages.
+
 ## Installed extras
 
 The package installs bash and zsh completions and the tldr page `pg-git-lander` (under `share/tldr/pages.common`).
