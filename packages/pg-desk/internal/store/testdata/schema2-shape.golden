@@ -39,6 +39,7 @@ table entity
   col entity_type TEXT notnull=1 default=<none> pk=2
   col facts TEXT notnull=1 default=<none> pk=0
   col first_seen_at TEXT notnull=0 default=<none> pk=0
+  col focus_facts TEXT notnull=0 default=<none> pk=0
   col head_sha TEXT notnull=0 default=<none> pk=0
   col hydrated_at TEXT notnull=0 default=<none> pk=0
   col list_fp TEXT notnull=0 default=<none> pk=0
@@ -49,6 +50,7 @@ table entity
   col version INTEGER notnull=1 default=0 pk=0
   col watched INTEGER notnull=0 default=<none> pk=0
   index entity_flow unique=0 origin=c (entity_type,entity_id,repo,active,watched,backend,hydrated_at,first_seen_at,read_attempt_at,read_ok_at)
+  index entity_focus unique=0 origin=c (repo,entity_type,entity_id,focus_facts,as_of,stale,content_hash,head_sha,version,hydrated_at,active,list_fp,first_seen_at,backend,watched,read_attempt_at,read_ok_at)
   index <auto> unique=1 origin=pk (repo,entity_type,entity_id)
 
 table focus_draft

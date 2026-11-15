@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -71,18 +72,27 @@ func TestMetricsScrapePerformsZeroDatabaseQueries(t *testing.T) {
 
 // One snapshot compute on the live-size fixture reads no facts bytes (the
 // facts are 11 MB; everything the compute reads is small) and is fast on a
-// warm cache. The focus families are deliberately left out: focus.ComputeHealth
-// is a separate, already-cached computation that ranks every entity from its
-// facts, so it is outside this change.
+// warm cache. The focus families are included: focus.ComputeHealth reads the
+// pruned focus_facts projection through a covering index, not the facts.
 func TestSnapshotComputeOnLiveSizeFixtureReadsNoFacts(t *testing.T) {
 	setClock(t, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
 	st, cnt := liveSizeStore(t)
-	reg, err := newMetricsRegistry(context.Background(), st, testConfig(), nil, withoutFocus)
+	// A configured repository: without one focus.ComputeHealth returns the zero
+	// Health at once and the test would prove nothing about the focus reads.
+	cfg := testConfig()
+	cfg.Repos = []config.RepoConfig{{Remote: "o/r"}}
+	reg, err := newMetricsRegistry(context.Background(), st, cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The first gather also runs the cached focus computation (15 s TTL, so the
+	// second gather serves it from memory): bound its reads too.
+	firstBytes := cnt.Bytes()
 	if _, err := reg.Gather(); err != nil { // warm the page cache and statement caches
 		t.Fatal(err)
+	}
+	if got := cnt.Bytes() - firstBytes; got > 4<<20 {
+		t.Fatalf("first compute (with the focus families) read %d bytes; facts (11 MB) must not be read", got)
 	}
 	q0, b0 := cnt.Queries(), cnt.Bytes()
 	start := time.Now()

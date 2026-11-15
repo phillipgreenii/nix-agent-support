@@ -143,10 +143,8 @@ func newMetricsRegistry(ctx context.Context, st *store.Store, cfg *config.Config
 	focusFn := metrics.CachedFocus(func() (focus.Health, error) {
 		return focus.ComputeHealth(ctx, st, cfg, nowUTC())
 	}, focusHealthTTL)
-	if !ro.noFocus {
-		if err := metrics.RegisterFocus(mp, newBounded("focus", focusFn)); err != nil {
-			return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
-		}
+	if err := metrics.RegisterFocus(mp, newBounded("focus", focusFn)); err != nil {
+		return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
 	}
 
 	// The PR lane families (PR lane refactor, P0b): the configured lane mode
@@ -281,12 +279,7 @@ func scrapeHandler(reg prometheus.Gatherer, timeout time.Duration) http.Handler 
 
 // registryOptions are test seams of newMetricsRegistry.
 type registryOptions struct {
-	noFocus      bool
 	withProvider func(metric.MeterProvider)
 }
 
 type registryOption func(*registryOptions)
-
-// withoutFocus leaves the focus families out of the catalog (tests that measure
-// the rest of the compute).
-func withoutFocus(o *registryOptions) { o.noFocus = true }

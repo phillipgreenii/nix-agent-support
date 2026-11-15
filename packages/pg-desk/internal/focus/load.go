@@ -20,6 +20,22 @@ import (
 // Telemetry: Load emits no OpenTelemetry or Prometheus signal and logs
 // nothing; the verbs that call it own the run record and the stderr line.
 func Load(ctx context.Context, st *store.Store, cfg *config.Config, repo string, now time.Time) (Inputs, error) {
+	return load(ctx, st, cfg, repo, now, st.ListEntities)
+}
+
+// LoadForHealth is Load for the health computation: each entity's Facts is
+// the pruned document store.ListEntitiesForFocus returns (only the members the
+// focus decoders read), so the load reads no facts overflow pages. The
+// comments of an issue are not in it, so a verb that reads them (focus
+// explain) uses Load.
+func LoadForHealth(ctx context.Context, st *store.Store, cfg *config.Config, repo string, now time.Time) (Inputs, error) {
+	if st == nil {
+		return Inputs{}, fmt.Errorf("focus: load: no store")
+	}
+	return load(ctx, st, cfg, repo, now, st.ListEntitiesForFocus)
+}
+
+func load(ctx context.Context, st *store.Store, cfg *config.Config, repo string, now time.Time, listEntities func(context.Context) ([]store.Entity, error)) (Inputs, error) {
 	if st == nil {
 		return Inputs{}, fmt.Errorf("focus: load: no store")
 	}
@@ -40,7 +56,7 @@ func Load(ctx context.Context, st *store.Store, cfg *config.Config, repo string,
 		Absorbed:    map[Key]Key{},
 	}
 
-	ents, err := st.ListEntities(ctx)
+	ents, err := listEntities(ctx)
 	if err != nil {
 		return Inputs{}, fmt.Errorf("focus: load entities: %w", err)
 	}

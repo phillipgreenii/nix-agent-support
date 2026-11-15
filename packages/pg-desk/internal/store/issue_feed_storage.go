@@ -88,6 +88,9 @@ func ensureIssueFeedStorage(ctx context.Context, s *Store) error {
 	if _, err := s.sql.ExecContext(ctx, entityFlowIndexDDL); err != nil {
 		return fmt.Errorf("create entity_flow index: %w", err)
 	}
+	if err := ensureEntityFocusStorage(ctx, s); err != nil {
+		return err
+	}
 	if _, err := s.sql.ExecContext(ctx, ingestFailedDDL); err != nil {
 		return fmt.Errorf("create ingest_failed: %w", err)
 	}

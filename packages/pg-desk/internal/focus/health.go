@@ -184,6 +184,14 @@ func (h Health) Migrated() bool { return len(h.Coverage.PerType) > 0 }
 // and no error (the metrics then emit nothing and the scrape still succeeds).
 // Any other read failure is an error, never a quiet all-clear.
 func ComputeHealth(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time) (Health, error) {
+	return computeHealth(ctx, st, cfg, now, LoadForHealth)
+}
+
+// healthLoader reads the store into Inputs; ComputeHealth passes
+// LoadForHealth, the equivalence test passes Load.
+type healthLoader func(ctx context.Context, st *store.Store, cfg *config.Config, repo string, now time.Time) (Inputs, error)
+
+func computeHealth(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time, loadInputs healthLoader) (Health, error) {
 	if st == nil {
 		return Health{}, fmt.Errorf("focus: health: no store")
 	}
@@ -197,7 +205,7 @@ func ComputeHealth(ctx context.Context, st *store.Store, cfg *config.Config, now
 		return Health{}, nil
 	}
 	repo := cfg.Repos[0].Remote
-	in, err := Load(ctx, st, cfg, repo, now)
+	in, err := loadInputs(ctx, st, cfg, repo, now)
 	if err != nil {
 		return Health{}, err
 	}

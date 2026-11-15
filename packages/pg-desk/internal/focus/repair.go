@@ -37,7 +37,7 @@ type RepairResult struct {
 func Repair(ctx context.Context, d LockDeps, dryRun bool) (RepairResult, error) {
 	repo := d.repo()
 	cands := map[Key]bool{}
-	ents, err := d.Store.ListEntities(ctx)
+	ents, err := d.Store.ListEntityFlow(ctx) // keys only: no facts are read
 	if err != nil {
 		return RepairResult{}, fmt.Errorf("focus: repair: list entities: %w", err)
 	}
