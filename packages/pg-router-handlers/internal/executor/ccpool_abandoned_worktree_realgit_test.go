@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -9,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
@@ -270,16 +271,16 @@ func (h *realGitHarness) leavePreviousAttempt() string {
 
 // captureRealGitLog redirects slog's default logger into the returned buffer
 // until the test ends (the technique the other executor tests use).
-func captureRealGitLog(t *testing.T) *bytes.Buffer {
+func captureRealGitLog(t *testing.T) *jsonlloggertest.Buffer {
 	t.Helper()
-	var buf bytes.Buffer
+	lg, buf := jsonlloggertest.New(t)
 	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	slog.SetDefault(lg)
 	t.Cleanup(func() { slog.SetDefault(old) })
-	return &buf
+	return buf
 }
 
-func wantLogged(t *testing.T, logs *bytes.Buffer, wants ...string) {
+func wantLogged(t *testing.T, logs *jsonlloggertest.Buffer, wants ...string) {
 	t.Helper()
 	out := logs.String()
 	for _, w := range wants {

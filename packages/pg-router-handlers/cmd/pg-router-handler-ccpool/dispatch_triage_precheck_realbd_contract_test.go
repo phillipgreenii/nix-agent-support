@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
+
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
 	"github.com/phillipgreenii/pg-router-handlers/internal/wire"
@@ -207,9 +209,9 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 			if tc.id != unreadable {
 				before = f.show(t, tc.id)
 			}
-			var logs bytes.Buffer
+			lg, logs := jsonlloggertest.New(t)
 			prevLog := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			slog.SetDefault(lg)
 			defer slog.SetDefault(prevLog)
 			code, got := dispatchWith(t, triager.name, triager.cfg, "", `{"id":"e-1","type":"dispatch","payload":{"id":"`+tc.id+`","type":"task"}}`)
 			var reply struct {

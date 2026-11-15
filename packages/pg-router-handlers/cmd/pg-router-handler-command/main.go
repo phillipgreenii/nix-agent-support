@@ -22,15 +22,18 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/cliutil"
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/x/jsonllogger"
 )
 
 var version = "dev"
 
 func main() {
+	slog.SetDefault(jsonllogger.NewLogger(os.Stderr, jsonllogger.WithService("pg-router-handler-command")))
 	os.Exit(run(os.Args[1:]))
 }
 

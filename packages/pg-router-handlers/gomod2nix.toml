@@ -20,6 +20,8 @@ cachePackages = [
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
+  'github.com/phillipgreenii/x/jsonllogger',
+  'github.com/phillipgreenii/x/jsonllogger/jsonlloggertest',
   'github.com/remyoudompheng/bigfft',
   'golang.org/x/sync/errgroup',
   'golang.org/x/sys/cpu',

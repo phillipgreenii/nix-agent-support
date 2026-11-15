@@ -1,7 +1,6 @@
 package worktree
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/jsonllogger"
+	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
 	"github.com/phillipgreenii/x/gitclient"
 )
@@ -387,9 +389,9 @@ func hermeticGit(dir string, args ...string) *exec.Cmd {
 // A drain cut short by its budget is the designed hand-off to the janitor sweep,
 // so a normal teardown of a tree bigger than the budget logs at INFO, not WARN.
 func TestRemoveTree_budgetCutIsLoggedAtInfoNotWarn(t *testing.T) {
-	var buf bytes.Buffer
+	lg, buf := jsonlloggertest.New(t, jsonllogger.WithLevel(slog.LevelDebug))
 	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	slog.SetDefault(lg)
 	t.Cleanup(func() { slog.SetDefault(old) })
 
 	root := filepath.Join(t.TempDir(), "wt")
@@ -399,10 +401,10 @@ func TestRemoveTree_budgetCutIsLoggedAtInfoNotWarn(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "handed to the janitor sweep") {
+	if !strings.Contains(out, `"level":"info"`) || !strings.Contains(out, "handed to the janitor sweep") {
 		t.Errorf("want the INFO hand-off line, got %q", out)
 	}
-	if strings.Contains(out, "level=WARN") {
+	if strings.Contains(out, `"level":"warn"`) {
 		t.Errorf("a budget cut must not warn, got %q", out)
 	}
 }

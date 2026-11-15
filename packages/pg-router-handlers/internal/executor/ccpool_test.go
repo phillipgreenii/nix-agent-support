@@ -2,7 +2,6 @@ package executor
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +16,8 @@ import (
 	"testing"
 	"text/template"
 	"time"
+
+	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
@@ -1794,9 +1795,9 @@ func TestDispatch_ensureFailFirst_noVerb(t *testing.T) {
 // a failing purge-close of the abandoned session must not be swallowed. It is
 // retried once and the error is logged.
 func TestDispatch_ensureFailCloseFails_loggedAndRetried(t *testing.T) {
-	var buf bytes.Buffer
+	lg, buf := jsonlloggertest.New(t)
 	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	slog.SetDefault(lg)
 	t.Cleanup(func() { slog.SetDefault(old) })
 
 	cfg := fastCfg()
@@ -1995,9 +1996,9 @@ func TestRun_poolFullDeclinesBusy(t *testing.T) {
 // backoff) — with no Ensure, no worktree and no bead mutation, and the log says
 // which window and until when.
 func TestRun_usageLimitDeclinesBusyWithoutMutation(t *testing.T) {
-	var buf bytes.Buffer
+	lg, buf := jsonlloggertest.New(t)
 	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	slog.SetDefault(lg)
 	t.Cleanup(func() { slog.SetDefault(old) })
 
 	cfg := fastCfg()

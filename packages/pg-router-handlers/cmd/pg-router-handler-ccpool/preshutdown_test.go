@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/x/gitclient"
@@ -347,9 +348,9 @@ func TestCloseSinglePhase_worktreeRemoveWarnOnlyForRealFailures(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var buf bytes.Buffer
+			lg, buf := jsonlloggertest.New(t)
 			old := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			slog.SetDefault(lg)
 			defer slog.SetDefault(old)
 
 			cc := &fakeCC{}
@@ -360,7 +361,7 @@ func TestCloseSinglePhase_worktreeRemoveWarnOnlyForRealFailures(t *testing.T) {
 			if len(cc.Closed) != 1 {
 				t.Errorf("session must be closed; closed=%v", cc.Closed)
 			}
-			got := strings.Contains(buf.String(), "level=WARN") && strings.Contains(buf.String(), "worktree remove failed")
+			got := strings.Contains(buf.String(), `"level":"warn"`) && strings.Contains(buf.String(), "worktree remove failed")
 			if got != tc.wantWarn {
 				t.Errorf("worktree-remove WARN emitted = %v, want %v; log:\n%s", got, tc.wantWarn, buf.String())
 			}

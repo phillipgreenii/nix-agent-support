@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
 	"github.com/phillipgreenii/x/gitclient"
 
@@ -48,9 +49,9 @@ func TestCloseSinglePhase_pathIsolationNonGitCwdRemovesNothing(t *testing.T) {
 		return c, nil
 	}
 
-	var buf bytes.Buffer
+	lg, buf := jsonlloggertest.New(t)
 	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	slog.SetDefault(lg)
 	defer slog.SetDefault(old)
 
 	cc := &fakeCC{}
@@ -71,7 +72,7 @@ func TestCloseSinglePhase_pathIsolationNonGitCwdRemovesNothing(t *testing.T) {
 	if out, err := h.client(h.repo).Run(t.Context(), "worktree", "list", "--porcelain"); err != nil || !strings.Contains(string(out), "worktree "+other) {
 		t.Errorf("git must still list %s; err=%v\n%s", other, err, out)
 	}
-	if strings.Contains(buf.String(), "level=WARN") {
+	if strings.Contains(buf.String(), `"level":"warn"`) {
 		t.Errorf("a non-git cwd must tear down without a warning; log:\n%s", buf.String())
 	}
 	if !strings.Contains(buf.String(), "no worktree to remove") {
