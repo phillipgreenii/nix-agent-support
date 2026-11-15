@@ -192,6 +192,8 @@ type daemon struct {
 	// tok is the token handoff; nil until startup built it (and always nil when
 	// the config leaves token_link unset).
 	tok atomic.Pointer[tokenHandoff]
+	// tokMetrics counts the token events into the telemetry once it exists.
+	tokMetrics lateMetrics
 
 	gov    atomic.Pointer[governor.Governor]
 	sched  atomic.Pointer[scheduler.Scheduler]
@@ -262,7 +264,8 @@ func (d *daemon) start(ctx context.Context) (err error) {
 			}
 			return scheduler.State{}
 		},
-		KnownOp: func(instance, op string) bool { return slices.Contains(d.rt.Ops(instance), op) },
+		TokenState: d.tokenState,
+		KnownOp:    func(instance, op string) bool { return slices.Contains(d.rt.Ops(instance), op) },
 		Tracked: func(ctx context.Context) (summary.Counts, error) {
 			members, err := query.Members(ctx, st)
 			if err != nil {
@@ -293,6 +296,7 @@ func (d *daemon) start(ctx context.Context) (err error) {
 		d.log.Log("telemetry_init_failed", "error", err.Error())
 		tel = nil
 	}
+	d.tokMetrics.set(tel)
 	if tel != nil {
 		d.rt.Use(tel.Middleware())
 	}

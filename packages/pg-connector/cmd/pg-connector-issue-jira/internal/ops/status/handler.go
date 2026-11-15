@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/origin"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/summary"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/tokenguard"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
@@ -51,7 +52,14 @@ type AuthMarker interface {
 	Unauthenticated() (bool, error)
 }
 
+// TokenGuard is the credential guard as the op reads it. *tokenguard.Guard
+// satisfies it.
+type TokenGuard interface {
+	State() tokenguard.State
+}
+
 var (
+	_ TokenGuard = (*tokenguard.Guard)(nil)
 	_ Governor   = (*governor.Governor)(nil)
 	_ Scheduler  = (*scheduler.Scheduler)(nil)
 	_ Settle     = (*engine.Lifecycle)(nil)
@@ -81,6 +89,9 @@ type Config struct {
 	Settle    Settle
 	Feed      Feed
 	Auth      AuthMarker
+	// Token is the credential guard; nil means the token handoff is off and
+	// the report states no degraded reason.
+	Token TokenGuard
 
 	// Readings is the holder of the origin's last rate-limit reading; nil
 	// reports the floor alone.
@@ -271,6 +282,12 @@ func Collect(ctx context.Context, cfg Config) (Report, error) {
 		r.Auth.State = AuthUnauthenticated
 		if aerr != nil {
 			r.Auth.Detail = aerr.Error()
+		}
+	}
+
+	if cfg.Token != nil {
+		if gs := cfg.Token.State(); gs.Degraded {
+			r.Auth.DegradedReason = gs.Reason
 		}
 	}
 

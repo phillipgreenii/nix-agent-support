@@ -112,6 +112,7 @@
   "cmd/pg-connector-issue-jira/internal/tokenguard/doc.go"
   "cmd/pg-connector-issue-jira/internal/tokenguard/guard.go"
   "cmd/pg-connector-issue-jira/internal/tokenguard/timer.go"
+  "cmd/pg-connector-issue-jira/internal/tokenobs/tokenobs.go"
   "cmd/pg-connector-issue-jira/main.go"
   "cmd/pg-connector-issue-jira/pprof.go"
   "cmd/pg-connector-issue-jira/serve.go"

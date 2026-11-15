@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/origin"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	evlog "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/eventlog"
@@ -39,13 +40,19 @@ type RequestRow struct {
 }
 
 // failureClassOf is the failure_class of a failed answer: auth for an
-// unauthenticated code, rate_limited when the error text reads as an HTTP 429,
+// unauthenticated code (but not for a call refused by a degraded credential
+// guard), rate_limited when the error text reads as an HTTP 429,
 // "" otherwise.
 func failureClassOf(e *scriptout.Error) string {
 	if e == nil {
 		return ""
 	}
 	if e.Code == codeUnauthenticated {
+		// A call refused because the credential guard is degraded is not a new
+		// auth failure; it would keep pg-conn-jira-auth-failing firing.
+		if origin.IsDegradedRefusal(e.Message) {
+			return ""
+		}
 		return eventlog.ClassAuth
 	}
 	return eventlog.ClassifyFailure(e.Message)

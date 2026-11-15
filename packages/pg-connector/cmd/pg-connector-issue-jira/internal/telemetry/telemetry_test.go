@@ -44,6 +44,10 @@ type fixture struct {
 	sched  *scheduler.Scheduler
 	rt     *router.Router
 	st     *store.Store
+
+	// tokenDegraded and tokenReason feed Options.TokenState.
+	tokenDegraded bool
+	tokenReason   string
 }
 
 // newFixture builds a Telemetry with EVERY source set over a real store, a real
@@ -101,6 +105,7 @@ func newFixture(t *testing.T, mutate func(*Options)) *fixture {
 		},
 		ConfiguredQueries: func() []string { return []string{"mine"} },
 		Watched:           func(context.Context) (int, error) { return 3, nil },
+		TokenState:        func() (bool, string) { return f.tokenDegraded, f.tokenReason },
 	}
 	if mutate != nil {
 		mutate(&opts)
@@ -213,6 +218,8 @@ func (f *fixture) exerciseEverything() {
 	f.tel.Request(origin.ResultOK, time.Millisecond)
 	f.tel.Served("summary", 3*time.Second)
 	f.tel.RecordEvictions(f.t.Context(), 2)
+	f.tel.TokenRead("start", "changed", "none")
+	f.tel.TokenFileOp("write", "ok")
 	ob := f.tel.ChangeObserver()
 	ob.Detected("closed", engine.OriginQuery, time.Minute)
 	ob.Settled(engine.ResultSettled)
@@ -268,6 +275,9 @@ func TestEveryInstrumentEmitsUnderItsDocumentedLabelSet(t *testing.T) {
 		MetricConsumerRedeliveries:  {"consumer=desk,query=mine"},
 		MetricQueryLastSuccessAge:   {"query=mine"},
 		MetricWatchedEntities:       {""},
+		MetricAuthDegraded:          {"reason=none"},
+		MetricTokenReads:            {"error_kind=none,reason=start,result=changed"},
+		MetricTokenFileOps:          {"op=write,result=ok"},
 	}
 	if len(got) != len(want) {
 		var names []string

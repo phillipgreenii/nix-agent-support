@@ -224,19 +224,19 @@ three logs, the launchd stdout and stderr files and, while `pprof.enable`, `ppro
 the three sources with `observability.enable`, with the generic `errorAlert` off on each. A glob over the directory MUST
 NOT replace them: it would label the client log with the daemon's name.
 
-**Alerts.** `packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml` holds eleven rules
+**Alerts.** `packages/pg-connector/grafana/alerting/pg-connector-issue-jira-daemon-alerts.yaml` holds twelve rules
 (`pg-conn-jira-daemon-down`, `-query-stale`, `-consumer-stuck`, `-settle-holding`, `-tracked-over`, `-rows-no-kind`,
-`-store-aside`, `-auth-failing`, `-unavailable`, `-rate-limited`, `-below-floor`) with promtool tests under `grafana/alerting/rule-tests/`
+`-store-aside`, `-auth-failing`, `-unavailable`, `-rate-limited`, `-below-floor`, `-auth-degraded`) with promtool tests under `grafana/alerting/rule-tests/`
 and logcli fixtures for the four Loki rules under `rule-tests/loki/`. Its twin
-`pg-connector-issue-jira-daemon-alerts-delete.yaml` is a `deleteRules:`-only file for exactly those eleven uids. The rules file
+`pg-connector-issue-jira-daemon-alerts-delete.yaml` is a `deleteRules:`-only file for exactly those twelve uids. The rules file
 is a TEMPLATE: `-tracked-over` carries the token `__TRACKED_SET_ALERT_SIZE__` (summary, description, threshold), and
 `packages/pg-connector/grafana/render-jira-alerts.nix` renders it for the daemon's `tracked_set_alert_size`, which the
 darwin module reads from `jira.settings` (default 55; two deployed users that disagree fail evaluation). Every consumer
 MUST read the RENDERED file, never the template (bead `pg2-l79uxc`). The rules
 are registered ONLY while some `home-manager.users.<u>` sets `jira.enable` (the daemon-down rule alerts on no data, so a
 host without the daemon would fire forever; Grafana also keeps a file-provisioned rule live after its file is dropped, so
-the twin is registered instead). The two files MUST never be loaded together. The eleven uids are in the router probe's
-built-in `registeredRuleUIDs`; a deployment that passes its own `--rule-uid` list REPLACES that list, so the deployment's
+the twin is registered instead). The two files MUST never be loaded together. The first eleven uids are in the router probe's
+built-in `registeredRuleUIDs` (`-auth-degraded` is added to a deployment's probe list by the nix-ziprecruiter wiring); a deployment that passes its own `--rule-uid` list REPLACES that list, so the deployment's
 list MUST be extended with them (`-below-floor`, bead `pg2-doihln`, is the newest: a deployment's list that predates it
 does not probe it). The old `issue-jira-alerts.yaml`, the old darwin module
 `darwin/modules/pg-connector-issue-jira` and the old log stay untouched until the cleanup.

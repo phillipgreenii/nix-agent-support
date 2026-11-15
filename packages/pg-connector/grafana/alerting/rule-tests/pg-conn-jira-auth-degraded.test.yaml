@@ -1,0 +1,104 @@
+# promtool unit tests for the pg-conn-jira-auth-degraded alert. Run by the flake check
+# test-pg-connector-issue-jira-alert-rules, which generates rules.yml next to this file: the Grafana
+# rule's refId A wrapped as `alert: <uid>` with
+# `expr: (max(pg_connector_issue_jira_auth_degraded)) > 0`, the rule's `for: 5m` and labels, plus a
+# recording rule `wrapped:<uid with _>`.
+#
+# The gauge is ONE series: reason=none at 0 while healthy, reason=<why> at 1 while degraded (the none
+# series is then not reported). One sample per 1m scrape; a firing alert carries severity only (the
+# expression is max() without a by clause).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a degraded series held for the 5m for fires with severity error only, whatever the reason
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_auth_degraded{reason="token_rejected",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts:
+          - exp_labels:
+              severity: error
+      - eval_time: 25m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts:
+          - exp_labels:
+              severity: error
+
+  - name: each degraded reason fires
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_auth_degraded{reason="token_unavailable",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x30"
+      - series: pg_connector_issue_jira_auth_degraded{reason="token_file",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "_x10 1x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts:
+          - exp_labels:
+              severity: error
+
+  - name: the healthy reason=none series at 0 never fires (negative case)
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_auth_degraded{reason="none",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x60"
+    promql_expr_test:
+      - expr: count(wrapped:pg_conn_jira_auth_degraded)
+        eval_time: 30m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts: []
+
+  - name: a degrade that is cleared by a restart before the 5m for elapses never fires, and the alert clears after a restart
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_auth_degraded{reason="token_rejected",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x3 _x40"
+      - series: pg_connector_issue_jira_auth_degraded{reason="none",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "0x3 0x40"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts: []
+
+  - name: after the guard recovers (restart) the alert clears
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_auth_degraded{reason="token_rejected",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x10 _x30"
+      - series: pg_connector_issue_jira_auth_degraded{reason="none",service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "_x10 0x30"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts:
+          - exp_labels:
+              severity: error
+      - eval_time: 20m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts: []
+
+  - name: an absent series gives no alert (noDataState is OK for this rule)
+    interval: 1m
+    input_series:
+      - series: pg_connector_issue_jira_daemon_up{service_name="pg-connector-issue-jira-daemon",job="pg-connector-issue-jira-daemon"}
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-conn-jira-auth-degraded
+        exp_alerts: []

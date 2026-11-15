@@ -198,6 +198,28 @@ type Auth struct {
 	State    string `json:"state"`
 	Detail   string `json:"detail,omitempty"`
 	Identity string `json:"identity,omitempty"`
+	// DegradedReason is set while the credential guard is degraded (the
+	// tokenguard reason: token_rejected, token_unavailable or token_file). It
+	// is independent of State: a successful in-flight call clears the
+	// unauthenticated marker but never a degraded guard.
+	DegradedReason string `json:"degraded_reason,omitempty"`
+}
+
+// DegradedText is the fixed text of each degraded reason; no error text or
+// path ever reaches the report.
+var DegradedText = map[string]string{
+	"token_rejected":    "Jira rejected the token and the keychain holds the same token: rotate the zr-jira keychain item, then restart the daemon",
+	"token_unavailable": "the keychain read failed (item missing, locked or timed out)",
+	"token_file":        "the token file could not be written",
+}
+
+// degradedLine is the one reason line of a degraded guard.
+func degradedLine(reason string) string {
+	text, ok := DegradedText[reason]
+	if !ok {
+		text = "the credential guard is degraded"
+	}
+	return "unauthenticated: " + text + "; restart the daemon to recover"
 }
 
 // Changes is the change engine's part of the report: counts and positions.
@@ -237,7 +259,12 @@ func assess(r *Report, stale []string) {
 	if r.Pause != nil {
 		reasons = append(reasons, fmt.Sprintf("origin paused until %s: %s", ts(&r.Pause.Until), r.Pause.Reason))
 	}
-	if r.Auth != nil && r.Auth.State == AuthUnauthenticated {
+	// The degraded guard has its own branch: it holds whether or not the
+	// AuthState marker is clear (a call already in flight can clear it).
+	switch {
+	case r.Auth != nil && r.Auth.DegradedReason != "":
+		reasons = append(reasons, degradedLine(r.Auth.DegradedReason))
+	case r.Auth != nil && r.Auth.State == AuthUnauthenticated:
 		reasons = append(reasons, "unauthenticated: "+r.Auth.Detail)
 	}
 	for _, q := range r.Queries {

@@ -27,6 +27,14 @@ const tokenFileMissingText = "pjira: read token file"
 // auth failure.
 var ErrTokenDegraded = errors.New("jira call refused: the daemon's credential guard is degraded, pjira was not launched")
 
+// IsDegradedRefusal reports whether an error message (a wire error's text)
+// is the refusal of a call while the guard is degraded. The event log uses it
+// to keep such a refusal out of failure_class=auth: the triggering 401 already
+// fired the auth-failing alert, and the degraded gauge alert covers the rest.
+func IsDegradedRefusal(msg string) bool {
+	return strings.Contains(msg, ErrTokenDegraded.Error())
+}
+
 // Refresher is the credential guard the Runner consults (a Guard/Decorator
 // seam; tokenguard.Guard implements it).
 type Refresher interface {

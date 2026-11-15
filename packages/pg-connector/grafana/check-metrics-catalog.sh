@@ -50,7 +50,7 @@ for f in "${files[@]}"; do
   fi
 done
 
-valid_labels=" bucket purpose group reason class op served_from role result kind origin consumer query "
+valid_labels=" bucket purpose group reason class op served_from role result kind origin consumer query error_kind "
 valid_types=" gauge counter histogram "
 
 # lint <catalog> <telemetry.go> [<changemetrics.go>]: prints RULE-Mn lines to stderr, returns 1

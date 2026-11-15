@@ -49,6 +49,12 @@ type Event struct {
 	Reason string
 	// Result is "ok", a keychain error kind, or "failed".
 	Result string
+	// Unchanged is set on a successful token_read whose token equals the one
+	// last written to the file (no digest is carried, only the comparison).
+	Unchanged bool
+	// Err is the OS error text of a failed token_file_write. The store's
+	// errors never contain the token. It is for the log only, never a label.
+	Err string
 }
 
 // Recorder receives the guard's events; part of the telemetry wiring
@@ -262,11 +268,16 @@ func (g *Guard) read(ctx context.Context, reason string) (string, error) {
 	g.mu.Lock()
 	g.hasRead, g.lastRead = true, g.clock.Now()
 	g.mu.Unlock()
-	res := "ok"
+	ev := Event{Name: "token_read", Reason: reason, Result: "ok"}
 	if err != nil {
-		res = string(keychain.KindOf(err))
+		ev.Result = string(keychain.KindOf(err))
+	} else {
+		d := sha256.Sum256([]byte(tok))
+		g.mu.Lock()
+		ev.Unchanged = g.hasWrit && g.written == d
+		g.mu.Unlock()
 	}
-	g.rec.Record(Event{Name: "token_read", Reason: reason, Result: res})
+	g.rec.Record(ev)
 	return tok, err
 }
 
@@ -279,7 +290,7 @@ func (g *Guard) install(tok string) bool {
 		b[i] = 0
 	}
 	if err != nil {
-		g.rec.Record(Event{Name: "token_file_write", Result: "failed"})
+		g.rec.Record(Event{Name: "token_file_write", Result: "failed", Err: err.Error()})
 		g.degradeFile()
 		return false
 	}

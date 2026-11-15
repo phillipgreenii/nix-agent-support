@@ -10,7 +10,7 @@
 #
 # Every failure line starts with RULE-Sn so a mutant can assert the exact rule that fired.
 #
-#   S1  exactly the eleven uids, each once, each at most 40 characters
+#   S1  exactly the twelve uids, each once, each at most 40 characters
 #   S2  one group pg-connector-issue-jira-daemon in folder Work, no folderUid key anywhere
 #   S3  every rule has condition C, refIds A B C, annotations.summary and description, labels
 #       with exactly the one key severity whose value is critical, error, warning or info; each
@@ -27,7 +27,7 @@
 #       and parses as LogQL offline; the same tokens `pg-connector-issue-jira"` (the old
 #       backend's service name) are absent
 #   S8  the deleteRules file (pg2-susum) is apiVersion 1, has no groups, and its deleteRules
-#       entries are exactly the eleven uids of S1 (so, with S1, exactly the rule file's uids),
+#       entries are exactly the twelve uids of S1 (so, with S1, exactly the rule file's uids),
 #       each once, each with orgId 1
 #
 # Exit codes: 0 consistent (self-test: real inputs pass and every mutant fails with exactly
@@ -67,7 +67,8 @@ loki_uids="pg-conn-jira-auth-failing
 pg-conn-jira-rate-limited
 pg-conn-jira-store-aside
 pg-conn-jira-unavailable"
-want_uids="pg-conn-jira-auth-failing
+want_uids="pg-conn-jira-auth-degraded
+pg-conn-jira-auth-failing
 pg-conn-jira-below-floor
 pg-conn-jira-consumer-stuck
 pg-conn-jira-daemon-down
@@ -90,7 +91,7 @@ lint() {
   # S1
   got="$(jq -r '[.groups[]?.rules[]?.uid] | sort | .[]' <<<"$json")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S1: the rule uids are not exactly the eleven expected ones, each once:" \
+    echo "RULE-S1: the rule uids are not exactly the twelve expected ones, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi
@@ -230,7 +231,7 @@ lint() {
   fi
   got="$(jq -r '[.deleteRules[]?.uid] | sort | .[]' <<<"$deljson")"
   if [ "$got" != "$want_uids" ]; then
-    echo "RULE-S8: the deleteRules uids are not exactly the eleven rule uids, each once:" \
+    echo "RULE-S8: the deleteRules uids are not exactly the twelve rule uids, each once:" \
       "$(diff <(printf '%s\n' "$want_uids") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ')" >&2
     status=1
   fi
@@ -328,6 +329,12 @@ mutant S5 "daemon-down without the absent() branch" \
   "($(rule_of pg-conn-jira-daemon-down) | .data[0].model.expr) |= sub(\"absent[(]pg_connector_issue_jira_daemon_up[)]\"; \"vector(1)\")" ""
 mutant S6 "an expression name missing from the catalog" "" \
   '/^pg_connector_issue_jira_tracked_entities /d'
+mutant S6 "the auth-degraded gauge missing from the catalog" "" \
+  '/^pg_connector_issue_jira_auth_degraded /d'
+mutant S1 "the auth-degraded rule dropped" \
+  "del($(rule_of pg-conn-jira-auth-degraded))" ""
+mutant S4 "the auth-degraded rule on the Loki datasource" \
+  "($(rule_of pg-conn-jira-auth-degraded) | .data[0].datasourceUid) = \"loki\"" ""
 mutant S7 "a Loki expression that no longer names store_refused" \
   "($(rule_of pg-conn-jira-store-aside) | .data[0].model.expr) |= sub(\"store_refused\"; \"store_other\")" ""
 mutant S7 "a Loki expression that does not parse" \
@@ -338,6 +345,8 @@ mutant S7 "the auth rule without its error_code filter" \
   "($(rule_of pg-conn-jira-auth-failing) | .data[0].model.expr) |= sub(\" \\| error_code=\\\"unauthenticated\\\"\"; \"\")" ""
 mutant S8 "a deleteRules entry dropped (a rule uid no longer deleted)" "" "" \
   'del(.deleteRules[] | select(.uid == "pg-conn-jira-store-aside"))'
+mutant S8 "a deleteRules entry dropped for the auth-degraded rule" "" "" \
+  'del(.deleteRules[] | select(.uid == "pg-conn-jira-auth-degraded"))'
 mutant S8 "a deleteRules uid that is not a rule uid" "" "" \
   '(.deleteRules[] | select(.uid == "pg-conn-jira-query-stale") | .uid) = "pg-conn-jira-query-stale-x"'
 mutant S8 "a deleteRules entry for the wrong org" "" "" \

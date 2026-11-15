@@ -53,6 +53,12 @@ const (
 	MetricStoreEvictions     = "pg_connector_issue_jira.store.evictions"
 	MetricRowsWithoutKind    = "pg_connector_issue_jira.change.rows_without_kind"
 
+	// The Jira token handoff: whether the daemon's credential guard is degraded
+	// (and why), the keychain reads, and the token file operations.
+	MetricAuthDegraded = "pg_connector_issue_jira.auth.degraded"
+	MetricTokenReads   = "pg_connector_issue_jira.token.reads"
+	MetricTokenFileOps = "pg_connector_issue_jira.token.file_ops"
+
 	// The change feed and change engine instruments are built by
 	// pkg/connectord/changemetrics under metricPrefix; these constants name them.
 	MetricChangeSettle          = "pg_connector_issue_jira.change.settle"
@@ -91,6 +97,7 @@ const (
 	keyResult     = "result"
 	keyGroup      = "group"
 	keyPurpose    = "purpose"
+	keyErrorKind  = "error_kind"
 )
 
 // Options configure a Telemetry. Every polled source is optional: a nil source
@@ -166,6 +173,11 @@ type Options struct {
 	// watched.entities (store.Store.CountWatched for the issue kind); nil
 	// leaves it unreported.
 	Watched func(context.Context) (int, error)
+
+	// TokenState reports the credential guard's degraded state, polled for
+	// auth.degraded: whether it is degraded and the reason (tokenguard.State).
+	// nil means the token handoff is off and the gauge reports nothing.
+	TokenState func() (degraded bool, reason string)
 }
 
 // Telemetry holds the instruments of the daemon's metric table and records the
@@ -196,6 +208,10 @@ type Telemetry struct {
 	staleness  metric.Float64Histogram
 	storeBytes metric.Int64ObservableGauge
 	evictions  metric.Int64Counter
+
+	authDegraded metric.Int64ObservableGauge
+	tokenReads   metric.Int64Counter
+	tokenFileOps metric.Int64Counter
 
 	// changes holds the change feed's and change engine's instruments
 	// (pkg/connectord/changemetrics), registered under metricPrefix.
@@ -308,6 +324,21 @@ func New(opts Options) (*Telemetry, error) {
 		metric.WithUnit("{row}")); err != nil {
 		return nil, err
 	}
+	if t.authDegraded, err = m.Int64ObservableGauge(MetricAuthDegraded,
+		metric.WithDescription("1 while the credential guard is degraded (reason names why), else 0 with reason none; the daemon refuses Jira calls while it is 1"),
+		metric.WithUnit("1")); err != nil {
+		return nil, err
+	}
+	if t.tokenReads, err = m.Int64Counter(MetricTokenReads,
+		metric.WithDescription("Keychain reads of the Jira token by reason (start, auth_error, backoff), result (changed, unchanged, error) and error_kind"),
+		metric.WithUnit("{read}")); err != nil {
+		return nil, err
+	}
+	if t.tokenFileOps, err = m.Int64Counter(MetricTokenFileOps,
+		metric.WithDescription("Token file operations by op (write, remove) and result (ok, error)"),
+		metric.WithUnit("{op}")); err != nil {
+		return nil, err
+	}
 	if t.noKind, err = m.Int64ObservableGauge(MetricRowsWithoutKind,
 		metric.WithDescription("Stored change rows that carry no kind; it MUST be zero"),
 		metric.WithUnit("{row}")); err != nil {
@@ -331,7 +362,7 @@ func New(opts Options) (*Telemetry, error) {
 	}
 
 	t.registration, err = m.RegisterCallback(t.observe,
-		t.up, t.remaining, t.paused, t.depth, t.overdue, t.tracked, t.storeBytes, t.noKind,
+		t.up, t.remaining, t.paused, t.depth, t.overdue, t.tracked, t.storeBytes, t.noKind, t.authDegraded,
 		t.originRemaining, t.originLimit, t.originNearLimit, t.originReset, t.originFloor, t.originHeadroom, t.originReadingAge)
 	if err != nil {
 		_ = t.changes.Close()
@@ -367,6 +398,7 @@ func (t *Telemetry) observe(ctx context.Context, o metric.Observer) error {
 		}
 	}
 	t.observeOrigin(o)
+	t.observeAuth(o)
 	if t.opts.Scheduler != nil {
 		for _, c := range t.opts.Scheduler().Classes {
 			class := metric.WithAttributes(attribute.String(keyClass, classLabel(c.Class)))
@@ -560,4 +592,69 @@ func storeSize(path string) int64 {
 		}
 	}
 	return total
+}
+
+// Degraded reasons the auth.degraded gauge carries, plus "none" when healthy.
+// They are the tokenguard reasons; a value outside the set folds to "other".
+var degradedReasons = map[string]bool{"token_rejected": true, "token_unavailable": true, "token_file": true}
+
+// observeAuth reports auth.degraded: one series, reason=none value 0 while
+// healthy, or reason=<why> value 1 while degraded (the none series is then not
+// observed, so max(auth.degraded) > 0 is unambiguous).
+func (t *Telemetry) observeAuth(o metric.Observer) {
+	if t.opts.TokenState == nil {
+		return
+	}
+	degraded, reason := t.opts.TokenState()
+	if !degraded {
+		o.ObserveInt64(t.authDegraded, 0, metric.WithAttributes(attribute.String(keyReason, none)))
+		return
+	}
+	if !degradedReasons[reason] {
+		reason = other
+	}
+	o.ObserveInt64(t.authDegraded, 1, metric.WithAttributes(attribute.String(keyReason, reason)))
+}
+
+// TokenRead counts one keychain read. reason is start, auth_error or backoff;
+// result changed, unchanged or error; errorKind locked, item_missing, timeout,
+// other, or none unless result is error. Any other value folds to a fixed one
+// so a caller cannot mint label values.
+func (t *Telemetry) TokenRead(reason, result, errorKind string) {
+	if t == nil {
+		return
+	}
+	reason = oneOf(reason, other, "start", "auth_error", "backoff")
+	result = oneOf(result, "error", "changed", "unchanged", "error")
+	if result != "error" {
+		errorKind = none
+	} else {
+		errorKind = oneOf(errorKind, other, "locked", "item_missing", "timeout", other)
+	}
+	t.tokenReads.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String(keyReason, reason), attribute.String(keyResult, result), attribute.String(keyErrorKind, errorKind),
+	))
+}
+
+// TokenFileOp counts one token file operation: op write or remove, result ok
+// or error (anything else folds to other and error).
+func (t *Telemetry) TokenFileOp(op, result string) {
+	if t == nil {
+		return
+	}
+	op = oneOf(op, other, "write", "remove")
+	result = oneOf(result, "error", "ok", "error")
+	t.tokenFileOps.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String(keyOp, op), attribute.String(keyResult, result),
+	))
+}
+
+// oneOf returns v when it is one of the allowed values, else fallback.
+func oneOf(v, fallback string, allowed ...string) string {
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	return fallback
 }

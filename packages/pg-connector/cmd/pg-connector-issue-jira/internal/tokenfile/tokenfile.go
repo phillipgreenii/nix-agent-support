@@ -50,6 +50,24 @@ func unsafe(path, format string, args ...any) error {
 	return &DirError{Path: path, Reason: fmt.Sprintf(format, args...)}
 }
 
+// Events the Store reports to its Observer. None carries the token.
+const (
+	// EventLinkWritten: the stable link was created or repointed.
+	EventLinkWritten = "link_written"
+	// EventStaleRemoved: Start removed a leftover from an earlier run.
+	EventStaleRemoved = "file_stale_removed"
+	// EventRemoved: Remove deleted the file and the link.
+	EventRemoved = "file_removed"
+	// EventRemoveFailed: Remove could not delete everything.
+	EventRemoveFailed = "file_remove_failed"
+	// EventTouched: Touch refreshed the file's timestamps.
+	EventTouched = "file_touched"
+)
+
+// Observer receives the Store's events (one of the Event* names). It runs
+// inline and MUST NOT block.
+type Observer func(event string)
+
 // Store manages the token file, its subdirectory and the stable link.
 type Store struct {
 	tempDir string
@@ -60,6 +78,34 @@ type Store struct {
 
 	// rename is os.Rename; tests replace it to stand in for ENOSPC and EROFS.
 	rename func(oldpath, newpath string) error
+
+	obs     Observer
+	removed int // successful removals, counted by remove
+}
+
+// SetObserver installs the event observer. Call it before Start; it is not
+// safe to call while the Store is in use.
+func (s *Store) SetObserver(o Observer) { s.obs = o }
+
+func (s *Store) emit(event string) {
+	if s.obs != nil {
+		s.obs(event)
+	}
+}
+
+// remove deletes path, counting a real deletion; a missing path is not an
+// error.
+func (s *Store) remove(path string) error {
+	err := os.Remove(path)
+	switch {
+	case err == nil:
+		s.removed++
+		return nil
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	default:
+		return err
+	}
 }
 
 // New validates the temp directory and returns a Store. It fails closed with
@@ -154,7 +200,12 @@ func (s *Store) Start() error {
 	if err := s.ensureSubdir(); err != nil {
 		return err
 	}
-	return s.cleanup()
+	before := s.removed
+	err := s.cleanup()
+	if s.removed > before {
+		s.emit(EventStaleRemoved)
+	}
+	return err
 }
 
 func (s *Store) cleanup() error {
@@ -162,11 +213,11 @@ func (s *Store) cleanup() error {
 	// The old link target may live in a different temp directory (TMPDIR
 	// changed between starts); remove it only when it is named like ours.
 	if target, err := os.Readlink(s.link); err == nil && filepath.Base(target) == FileName {
-		if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := s.remove(target); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if err := os.Remove(s.link); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := s.remove(s.link); err != nil {
 		errs = append(errs, err)
 	}
 	errs = append(errs, s.removeOwned()...)
@@ -182,7 +233,7 @@ func (s *Store) removeOwned() []error {
 		errs = append(errs, err)
 	}
 	for _, p := range append([]string{s.file}, matches...) {
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := s.remove(p); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -232,7 +283,11 @@ func (s *Store) Write(token []byte) error {
 	if t, err := os.Readlink(s.link); err == nil && t == s.file {
 		return nil
 	}
-	return s.repoint()
+	if err := s.repoint(); err != nil {
+		return err
+	}
+	s.emit(EventLinkWritten)
+	return nil
 }
 
 // syncDir fsyncs a directory, best effort.
@@ -278,6 +333,7 @@ func (s *Store) Touch() error {
 	if err := os.Chtimes(s.file, now, now); err != nil {
 		return fmt.Errorf("tokenfile: touch: %w", err)
 	}
+	s.emit(EventTouched)
 	return nil
 }
 
@@ -286,8 +342,18 @@ func (s *Store) Touch() error {
 // them and continue shutting down. The empty subdirectory itself is removed
 // best effort.
 func (s *Store) Remove() error {
+	err := s.removeAll()
+	if err != nil {
+		s.emit(EventRemoveFailed)
+	} else {
+		s.emit(EventRemoved)
+	}
+	return err
+}
+
+func (s *Store) removeAll() error {
 	var errs []error
-	if err := os.Remove(s.link); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := s.remove(s.link); err != nil {
 		errs = append(errs, err)
 	}
 	errs = append(errs, s.removeOwned()...)

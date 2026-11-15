@@ -49,8 +49,11 @@
 //	queries          [{name, last_success_at, last_success_age_seconds,
 //	                 last_error, baseline_at, baseline_open_age_seconds}] per
 //	                 configured query, sorted by name (daemon only)
-//	auth             {state, detail, identity}: "ok" or "unauthenticated", the
-//	                 failure and the acting identity (daemon only)
+//	auth             {state, detail, identity, degraded_reason}: "ok" or
+//	                 "unauthenticated", the failure, the acting identity and,
+//	                 while the credential guard is degraded, its reason
+//	                 (token_rejected, token_unavailable or token_file)
+//	                 (daemon only)
 //	changes          {head_seq, pending_settle, settle_timeouts_last_hour,
 //	                 settle_failures_last_hour, consumers: [{consumer, view,
 //	                 scope, acked_seq, head_seq, lag_rows,
@@ -73,6 +76,9 @@
 //   - the origin's last rate-limit reading, while current, leaves fewer
 //     requests of the burst window than the floor (rate_limit.below_floor);
 //   - authentication is failing (the authentication marker is set);
+//   - the credential guard is degraded (auth.degraded_reason), whether or not
+//     the marker is set: a call in flight can clear the marker but never the
+//     guard, which recovers only with a daemon restart;
 //   - a configured query has a last_error;
 //   - a configured query has had no whole-query success within
 //     QueryStaleTTLs (3) of its query TTLs, measured from the later of its last

@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/ops/status"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/origin"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/tokenfile"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/tokenguard"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/tokenobs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/keychain"
 )
 
@@ -37,6 +42,7 @@ type tokenHandoff struct {
 // directory instead of staying refused for good.
 type tokenStore struct {
 	tempDir, link string
+	obs           tokenfile.Observer
 
 	mu sync.Mutex
 	s  *tokenfile.Store
@@ -58,6 +64,7 @@ func (t *tokenStore) Start() error {
 		t.mu.Unlock()
 		return err
 	}
+	s.SetObserver(t.obs)
 	t.mu.Lock()
 	t.s = s
 	t.mu.Unlock()
@@ -94,12 +101,44 @@ func (t *tokenStore) Remove() error {
 	return s.Remove()
 }
 
-// logRecorder reports the guard's events to the structured log. It never sees
-// the token or a digest.
-type logRecorder struct{ d *daemon }
+// lateMetrics is the tokenobs.Metrics the daemon hands the observer before the
+// telemetry exists (the guard starts first): events that arrive until set is
+// called are logged but not counted.
+type lateMetrics struct {
+	t atomic.Pointer[telemetry.Telemetry]
+}
 
-func (r logRecorder) Record(ev tokenguard.Event) {
-	r.d.log.Log(ev.Name, "reason", ev.Reason, "result", ev.Result)
+func (m *lateMetrics) set(t *telemetry.Telemetry) { m.t.Store(t) }
+
+func (m *lateMetrics) TokenRead(reason, result, errorKind string) {
+	if t := m.t.Load(); t != nil {
+		t.TokenRead(reason, result, errorKind)
+	}
+}
+
+func (m *lateMetrics) TokenFileOp(op, result string) {
+	if t := m.t.Load(); t != nil {
+		t.TokenFileOp(op, result)
+	}
+}
+
+// tokenState is the telemetry's TokenState: whether the guard is degraded and
+// why; healthy when the token handoff is off.
+func (d *daemon) tokenState() (bool, string) {
+	th := d.tok.Load()
+	if th == nil {
+		return false, ""
+	}
+	st := th.guard.State()
+	return st.Degraded, st.Reason
+}
+
+// tokenGuard is the guard for the status op, or nil when the handoff is off.
+func (d *daemon) tokenGuard() status.TokenGuard {
+	if th := d.tok.Load(); th != nil {
+		return th.guard
+	}
+	return nil
 }
 
 // startToken runs the start sequence of the token handoff and returns the
@@ -118,14 +157,20 @@ func (d *daemon) startToken(ctx context.Context) origin.Refresher {
 	if d.o.TempDir != nil {
 		tempDir = d.o.TempDir()
 	}
-	th := &tokenHandoff{store: &tokenStore{tempDir: tempDir, link: cfg.TokenLink}}
+	obs := &tokenobs.Observer{
+		Metrics:  &d.tokMetrics,
+		Log:      d.log.Log,
+		FilePath: filepath.Join(tempDir, tokenfile.SubdirName, tokenfile.FileName),
+		LinkPath: cfg.TokenLink,
+	}
+	th := &tokenHandoff{store: &tokenStore{tempDir: tempDir, link: cfg.TokenLink, obs: obs.StoreEvent}}
 	kc := d.o.Keychain
 	if kc == nil {
 		kc = keychain.Security{}
 	}
 	th.guard = tokenguard.New(tokenguard.Config{
 		Keychain: kc, Store: th.store, Service: cfg.KeychainService, Account: cfg.KeychainAccount,
-		Clock: d.o.TokenClock, Timer: d.o.TokenTimer, Recorder: logRecorder{d: d},
+		Clock: d.o.TokenClock, Timer: d.o.TokenTimer, Recorder: obs,
 	})
 	d.tok.Store(th)
 	// The guard's Start prepares the store (cleaning leftovers), makes the one

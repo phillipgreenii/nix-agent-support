@@ -124,6 +124,9 @@ func Render(w io.Writer, r Report) error {
 		if a.Detail != "" {
 			line("  detail: %s", a.Detail)
 		}
+		if a.DegradedReason != "" {
+			line("  degraded_reason: %s", a.DegradedReason)
+		}
 	}
 	if c := r.Changes; c != nil {
 		line("changes:")

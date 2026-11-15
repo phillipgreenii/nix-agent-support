@@ -1,12 +1,12 @@
 # pg-connector-issue-jira daemon unified-alerting rules (docket pg2-2qyyh.2): the
-# alerts of the Jira daemon's design ("7. Observability"), as seven Prometheus
+# alerts of the Jira daemon's design ("7. Observability"), as eight Prometheus
 # rules over the daemon's own metrics and four Loki rules over its two logs
 # (events.jsonl and daemon.log.jsonl, one Loki service_name).
 #
 # This file sits BESIDE issue-jira-alerts.yaml (the old one-shot backend's three
 # rules, service_name pg-connector-issue-jira), which stays installed until a
 # later cleanup. Its sibling pg-connector-issue-jira-daemon-alerts-delete.yaml
-# lists the same eleven uids under `deleteRules:` and is what a machine without the
+# lists the same twelve uids under `deleteRules:` and is what a machine without the
 # daemon registers INSTEAD of this file (Grafana keeps a file-provisioned rule
 # live after its file is dropped, pg2-bry0w and pg2-susum). Which of the two a
 # machine registers is the darwin module's business, not this file's.
@@ -338,6 +338,58 @@ groups:
                     type: gt
                     params: [0]
 
+      # Credential guard degraded: the daemon read the Jira token from the
+      # keychain, handed it to pjira through a protected file and has stopped
+      # calling pjira because auth does not work (the keychain holds the token Jira
+      # already rejected, the keychain read failed, or the token file could not
+      # be written). The gauge is one series: reason=none at 0 while healthy,
+      # reason=<why> at 1 while degraded (the none series is then not reported),
+      # so max() > 0 is unambiguous. The Loki rule pg-conn-jira-auth-failing
+      # cannot cover this: it resolves 15 minutes after the last auth event, and a
+      # degraded daemon makes no more calls. The auth_degraded log event carries
+      # no error_code, so that Loki rule does not see the transition. Recovery is
+      # a daemon restart only. A daemon that is down reports nothing (noDataState
+      # OK); pg-conn-jira-daemon-down covers that.
+      - uid: pg-conn-jira-auth-degraded
+        title: pg-connector-issue-jira credential guard degraded
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: error
+        annotations:
+          summary: "pg-connector-issue-jira daemon: Jira authentication is degraded and the daemon has stopped calling Jira"
+          description: "pg_connector_issue_jira_auth_degraded has been above 0 for over 5 minutes: the daemon's credential guard is degraded (the reason label is token_rejected, token_unavailable or token_file), so it refuses Jira calls and every Jira panel it feeds goes stale. token_rejected: Jira rejected the token and the keychain holds the same one, so rotate the zr-jira keychain item, then restart the daemon. token_unavailable: the keychain read failed (item missing, locked or timed out); unlock or fix the zr-jira keychain item, then restart the daemon. token_file: the token file could not be written; check the temp directory, then restart the daemon. Recovery is a daemon restart only. `pg-connector-issue-jira status` shows the reason."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_connector_issue_jira_auth_degraded)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # Store moved aside or refused to start: any daemon.log.jsonl line whose
       # `change` field is store_moved_aside or store_refused in the trailing 10
       # minutes. There is no metric for it (the store did not open), hence a
@@ -407,7 +459,7 @@ groups:
           severity: error
         annotations:
           summary: "pg-connector-issue-jira daemon: Jira rejected the credential within the last 15 minutes"
-          description: 'The pg-connector-issue-jira daemon saw an authentication failure (a 401/403 from Jira, error_code unauthenticated) at least once in the last 15 minutes, so every Jira panel it feeds is empty or stale. Run `pjira auth-status` and refresh the API token in pjira''s secret source. Inspect the events with {service_name="pg-connector-issue-jira-daemon"} | json | failure_class="auth" and read error.'
+          description: 'The pg-connector-issue-jira daemon saw an authentication failure (a 401/403 from Jira, error_code unauthenticated) at least once in the last 15 minutes, so every Jira panel it feeds is empty or stale. Rotate the zr-jira keychain item, then restart the daemon. Inspect the events with {service_name="pg-connector-issue-jira-daemon"} | json | failure_class="auth" and read error.'
         data:
           - refId: A
             relativeTimeRange:

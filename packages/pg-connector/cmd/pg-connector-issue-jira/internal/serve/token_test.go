@@ -227,8 +227,8 @@ func TestTokenHandoffRefusedTempDirStartsDegradedAndRetries(t *testing.T) {
 		t.Errorf("pjira launches = %d, want 0", n)
 	}
 	gone(t, r.link())
-	if !hasChange(r.daemonLog(), "token_degraded") {
-		t.Error("the degrade must be logged as token_degraded")
+	if !hasChange(r.daemonLog(), "auth_degraded") {
+		t.Error("the degrade must be logged as auth_degraded")
 	}
 
 	// The operator fixes the directory; the first retry (one minute) recovers.
