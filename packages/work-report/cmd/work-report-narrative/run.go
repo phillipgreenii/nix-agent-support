@@ -174,7 +174,7 @@ func emptyReport(r envelopeRange) string {
 // newline. Any failure (claude absent, non-zero exit, empty output) is an
 // error naming the reason; no fallback text is ever produced.
 func callClaude(ctx context.Context, cfg narrativeConfig, data string) (string, error) {
-	path, err := exec.LookPath("claude")
+	path, err := lookClaude("claude")
 	if err != nil {
 		return "", fmt.Errorf("claude is not available: %w", err)
 	}
@@ -189,33 +189,48 @@ func callClaude(ctx context.Context, cfg narrativeConfig, data string) (string, 
 	}
 	args = append(args, "--append-system-prompt", assemblePrompt(cfg), "--allowed-tools", "")
 
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Dir = dir
-	cmd.WaitDelay = killGrace
-	cmd.Stdin = strings.NewReader(fence(data))
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	stdout, stderr, err := startClaude(ctx, path, dir, args, fence(data))
+	if err != nil {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("claude was interrupted: %w", errors.Join(ctx.Err(), err))
 		}
 		// claude -p reports some failures (for example "Not logged in") on
 		// stdout, so fall back to a bounded excerpt of it when stderr is empty.
-		msg := strings.TrimSpace(stderr.String())
+		msg := strings.TrimSpace(stderr)
 		if msg == "" {
-			msg = excerpt(strings.TrimSpace(stdout.String()), maxReasonBytes)
+			msg = excerpt(strings.TrimSpace(stdout), maxReasonBytes)
 		}
 		if msg != "" {
 			return "", fmt.Errorf("claude failed: %w: %s", err, msg)
 		}
 		return "", fmt.Errorf("claude failed: %w", err)
 	}
-	out := strings.TrimSpace(stdout.String())
+	out := strings.TrimSpace(stdout)
 	if out == "" {
 		return "", errors.New("claude produced empty output")
 	}
 	return out + "\n", nil
+}
+
+// Test seams, at their production defaults: lookClaude finds the claude
+// executable and startClaude runs it to completion, returning what it wrote.
+var (
+	lookClaude  = exec.LookPath
+	startClaude = execClaude
+)
+
+// execClaude runs the claude executable at path in dir with stdin as its
+// input.
+func execClaude(ctx context.Context, path, dir string, args []string, stdin string) (stdout, stderr string, err error) {
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Dir = dir
+	cmd.WaitDelay = killGrace
+	cmd.Stdin = strings.NewReader(stdin)
+	var so, se bytes.Buffer
+	cmd.Stdout = &so
+	cmd.Stderr = &se
+	err = cmd.Run()
+	return so.String(), se.String(), err
 }
 
 // maxReasonBytes bounds the claude output quoted in a failure reason.

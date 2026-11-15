@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/degraded"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pgconn"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pgconn/fake"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pull"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/rangespec"
@@ -28,6 +27,10 @@ var (
 		Before: now,
 	}
 )
+
+// conn is the pg-connector runner handed to the code under test: the
+// in-process fake of the latest conn.Use, the real exec runner otherwise.
+var conn = &fake.Switch{}
 
 func mustZone(name string) *time.Location {
 	loc, err := time.LoadLocation(name)
@@ -47,7 +50,7 @@ func okRow(source string) pull.OutcomeRow {
 
 func reconcile(t *testing.T, rows ...pull.OutcomeRow) ([]degraded.Item, error) {
 	t.Helper()
-	return degraded.Reconcile(context.Background(), pgconn.NewExec(), "", rows, rng, now, repull)
+	return degraded.Reconcile(context.Background(), conn, "", rows, rng, now, repull)
 }
 
 // verbs returns "<noun> <verb>" for each recorded call.
@@ -90,7 +93,7 @@ func find(calls [][]string, noun, verb string) [][]string {
 
 func TestFirstDegradedPullCreatesOneBead(t *testing.T) {
 	t.Setenv("PG_CONNECTOR_ISSUE_BEADS_DIR", t.TempDir())
-	rec := fake.Install(
+	rec := conn.Use(
 		t,
 		fake.IssueListRoute(),
 		fake.ConfigValidateRoute(fake.ConfigRow{Source: "backend-a", Status: "degraded", Count: 1, Reason: "auth_status: token expired"}),
@@ -159,7 +162,7 @@ func TestFirstDegradedPullCreatesOneBead(t *testing.T) {
 }
 
 func TestSecondDegradedPullAppendsAndCreatesNothing(t *testing.T) {
-	rec := fake.Install(
+	rec := conn.Use(
 		t,
 		fake.IssueListRoute(
 			fake.IssueEntity{ID: "bd-other", Title: "work-report: backend-z degraded"},
@@ -189,7 +192,7 @@ func TestBeadHeldByHumanOrClaimedIsStillFound(t *testing.T) {
 	// returned by it, and must be appended to, never duplicated.
 	for _, state := range []string{"in_progress", "deferred", "blocked"} {
 		t.Run(state, func(t *testing.T) {
-			rec := fake.Install(
+			rec := conn.Use(
 				t,
 				fake.IssueListRoute(fake.IssueEntity{
 					ID: "bd-9", Title: "work-report: backend-a degraded",
@@ -209,7 +212,7 @@ func TestBeadHeldByHumanOrClaimedIsStillFound(t *testing.T) {
 }
 
 func TestSucceedingPullClosesTheBeadWithAReason(t *testing.T) {
-	rec := fake.Install(
+	rec := conn.Use(
 		t,
 		fake.IssueListRoute(fake.IssueEntity{ID: "bd-1", Title: "work-report: backend-a degraded"}),
 		fake.IssueCloseRoute(),
@@ -245,7 +248,7 @@ func containsArg(argv []string, want string) bool {
 }
 
 func TestFailuresRecoversEveryFailedCall(t *testing.T) {
-	fake.Install(
+	conn.Use(
 		t,
 		fake.IssueListRoute(
 			fake.IssueEntity{ID: "bd-1", Title: "work-report: backend-a degraded"},
@@ -268,7 +271,7 @@ func TestFailuresRecoversEveryFailedCall(t *testing.T) {
 }
 
 func TestHealthyPullWithNoBeadMakesNoWrites(t *testing.T) {
-	rec := fake.Install(t, fake.IssueListRoute())
+	rec := conn.Use(t, fake.IssueListRoute())
 	items, err := reconcile(t, okRow("backend-a"))
 	if err != nil || len(items) != 0 {
 		t.Fatalf("items=%+v err=%v", items, err)
@@ -279,7 +282,7 @@ func TestHealthyPullWithNoBeadMakesNoWrites(t *testing.T) {
 }
 
 func TestDisabledRowsNeverTouchTheTracker(t *testing.T) {
-	rec := fake.Install(t) // any call exits 64
+	rec := conn.Use(t) // any call exits 64
 	items, err := reconcile(t, pull.OutcomeRow{Source: "backend-a", Status: pull.StatusDisabled, Reason: pull.ReasonDisabledByConfig})
 	if err != nil || len(items) != 0 {
 		t.Fatalf("items=%+v err=%v", items, err)
@@ -290,7 +293,7 @@ func TestDisabledRowsNeverTouchTheTracker(t *testing.T) {
 }
 
 func TestExpiresAtIsEndOfLocalDayPlusSixHours(t *testing.T) {
-	fake.Install(t, fake.IssueListRoute(), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-1"))
+	conn.Use(t, fake.IssueListRoute(), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-1"))
 	items, err := reconcile(t, degradedRow("backend-a"))
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items=%+v err=%v", items, err)
@@ -302,7 +305,7 @@ func TestExpiresAtIsEndOfLocalDayPlusSixHours(t *testing.T) {
 }
 
 func TestItemJSONKeys(t *testing.T) {
-	fake.Install(t, fake.IssueListRoute(), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-1"))
+	conn.Use(t, fake.IssueListRoute(), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-1"))
 	items, err := reconcile(t, degradedRow("backend-a"))
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +333,7 @@ func TestItemJSONKeys(t *testing.T) {
 }
 
 func TestTrackerUnreachableReturnsErrorAndNoItem(t *testing.T) {
-	fake.Install(t, fake.Route{Match: []string{"issue", "list"}, Stdout: "", Exit: 1})
+	conn.Use(t, fake.Route{Match: []string{"issue", "list"}, Stdout: "", Exit: 1})
 	items, err := reconcile(t, degradedRow("backend-a"))
 	if err == nil {
 		t.Error("want an error when the dedup lookup fails")
@@ -341,7 +344,7 @@ func TestTrackerUnreachableReturnsErrorAndNoItem(t *testing.T) {
 }
 
 func TestPartialFailureKeepsTheItemsThatWereBuilt(t *testing.T) {
-	fake.Install(
+	conn.Use(
 		t,
 		fake.IssueListRoute(fake.IssueEntity{ID: "bd-2", Title: "work-report: backend-b degraded"}),
 		fake.ConfigValidateRoute(),
@@ -358,7 +361,7 @@ func TestPartialFailureKeepsTheItemsThatWereBuilt(t *testing.T) {
 }
 
 func TestConfigValidateFailureDoesNotBlockCreation(t *testing.T) {
-	rec := fake.Install(
+	rec := conn.Use(
 		t,
 		fake.IssueListRoute(),
 		fake.Route{Match: []string{"config", "validate"}, Stdout: "", Exit: 1},
@@ -408,7 +411,7 @@ func registeredBackendsRoute(entities ...fake.IssueEntity) fake.Route {
 // unpinned lookup passes --backend equal to a name the registry reports, never
 // a literal the code carries.
 func TestDiscoveredBackendIsARegisteredName(t *testing.T) {
-	rec := fake.Install(
+	rec := conn.Use(
 		t,
 		registeredBackendsRoute(fake.IssueEntity{ID: "bd-1", Title: "work-report: backend-a degraded"}, fake.IssueEntity{ID: "bd-2", Title: "work-report: backend-c degraded"}),
 		fake.ConfigValidateRoute(),
@@ -481,7 +484,7 @@ func TestAmbiguousOrAbsentTrackerIsAnErrorNamingTheRemedy(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			rec := fake.Install(t, fake.IssueListRouteSources(tc.sources), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-1"))
+			rec := conn.Use(t, fake.IssueListRouteSources(tc.sources), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-1"))
 			items, err := reconcile(t, degradedRow("backend-a"))
 			if err == nil || len(items) != 0 {
 				t.Fatalf("items=%+v err=%v; want an error and no items", items, err)
@@ -500,7 +503,7 @@ func TestAmbiguousOrAbsentTrackerIsAnErrorNamingTheRemedy(t *testing.T) {
 
 func TestOverriddenBackendIsPassedOnEveryCall(t *testing.T) {
 	const override = "pg-connector-issue-beads-zr"
-	rec := fake.Install(
+	rec := conn.Use(
 		t,
 		fake.IssueListRoute(fake.IssueEntity{ID: "bd-1", Title: "work-report: backend-a degraded"}, fake.IssueEntity{ID: "bd-2", Title: "work-report: backend-c degraded"}),
 		fake.ConfigValidateRoute(),
@@ -508,7 +511,7 @@ func TestOverriddenBackendIsPassedOnEveryCall(t *testing.T) {
 		fake.IssueCommentRoute(),
 		fake.IssueCloseRoute(),
 	)
-	_, err := degraded.Reconcile(context.Background(), pgconn.NewExec(), override,
+	_, err := degraded.Reconcile(context.Background(), conn, override,
 		[]pull.OutcomeRow{degradedRow("backend-a"), degradedRow("backend-b"), okRow("backend-c")}, rng, now, repull)
 	if err != nil {
 		t.Fatal(err)
@@ -540,7 +543,7 @@ func TestConfigValidateExitCodes(t *testing.T) {
 		t.Setenv("PG_CONNECTOR_ISSUE_BEADS_DIR", t.TempDir())
 		route := fake.ConfigValidateRoute(fake.ConfigRow{Source: "backend-a", Status: "degraded", Count: 1, Reason: "auth_status: token expired"})
 		route.Exit = tc.exit
-		rec := fake.Install(t, fake.IssueListRoute(), route, fake.IssueCreateRoute("bd-1"))
+		rec := conn.Use(t, fake.IssueListRoute(), route, fake.IssueCreateRoute("bd-1"))
 		if _, err := reconcile(t, degradedRow("backend-a")); err != nil {
 			t.Fatalf("exit %d: %v", tc.exit, err)
 		}

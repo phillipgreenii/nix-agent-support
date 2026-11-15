@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pgconn"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pgconn/fake"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pull"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/rangespec"
@@ -30,6 +29,10 @@ var (
 	now = time.Date(2026, 3, 3, 8, 0, 0, 0, time.UTC)
 	rng = rangespec.Range{Since: t0, Before: t1}
 )
+
+// conn is the pg-connector runner handed to the code under test: the
+// in-process fake of the latest conn.Use, the real exec runner otherwise.
+var conn = &fake.Switch{}
 
 func fixture(t *testing.T, name string) string {
 	t.Helper()
@@ -56,7 +59,7 @@ func newEnv(t *testing.T, cfg config.Config) *env {
 	t.Cleanup(func() { _ = st.Close() })
 	state := filepath.Join(dir, "state")
 	return &env{
-		deps:     pull.Deps{Cfg: cfg, Store: st, Conn: pgconn.NewExec(), Log: telemetry.New(state)},
+		deps:     pull.Deps{Cfg: cfg, Store: st, Conn: conn, Log: telemetry.New(state)},
 		stateDir: state,
 		st:       st,
 	}
@@ -103,7 +106,7 @@ func TestMixedOutcomes(t *testing.T) {
 		"backend-ok": {Enable: true, Labels: []string{"team:example"}},
 	}}
 	e := newEnv(t, cfg)
-	fake.Install(t, listRoute(fixture(t, "mixed.json"), 2))
+	conn.Use(t, listRoute(fixture(t, "mixed.json"), 2))
 
 	res := run(t, e, pull.Opts{})
 	rows := rowsBySource(res)
@@ -192,13 +195,13 @@ func TestMixedOutcomes(t *testing.T) {
 
 func TestSecondPullAppendsNothingEvenWithNewerAsOfAndStale(t *testing.T) {
 	e := newEnv(t, config.Config{})
-	rec := fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
+	rec := conn.Use(t, listRoute(fixture(t, "mixed.json"), 0))
 	first := run(t, e, pull.Opts{})
 	before := len(queryAll(t, e.st))
 
 	// the same items re-observed with a later as_of, flipped stale, a different
 	// offset spelling of the same instant and reordered labels.
-	fake.Install(t, listRoute(fixture(t, "mixed_reobserved.json"), 0))
+	conn.Use(t, listRoute(fixture(t, "mixed_reobserved.json"), 0))
 	second := run(t, e, pull.Opts{Now: now.Add(time.Hour)})
 
 	if after := len(queryAll(t, e.st)); after != before {
@@ -219,12 +222,12 @@ func TestSecondPullAppendsNothingEvenWithNewerAsOfAndStale(t *testing.T) {
 
 func TestChangedContentIsAppendedAsNewVersion(t *testing.T) {
 	e := newEnv(t, config.Config{})
-	fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
+	conn.Use(t, listRoute(fixture(t, "mixed.json"), 0))
 	run(t, e, pull.Opts{})
 	before := len(queryAll(t, e.st))
 
 	changed := strings.Replace(fixture(t, "mixed.json"), "Merged example change one", "Merged example change ONE", 1)
-	fake.Install(t, listRoute(changed, 0))
+	conn.Use(t, listRoute(changed, 0))
 	res := run(t, e, pull.Opts{})
 	if r := rowsBySource(res)["backend-ok"]; r.Count != 1 || r.Unchanged != 1 {
 		t.Errorf("backend-ok = %+v; want 1 superseding entry and 1 unchanged", r)
@@ -257,7 +260,7 @@ func TestExitCodesComeFromOwnRowsNotConnectorExit(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t, config.Config{})
-			fake.Install(t, listRoute(c.stdout, c.fakeExit))
+			conn.Use(t, listRoute(c.stdout, c.fakeExit))
 			if got := run(t, e, pull.Opts{}).ExitCode(); got != c.want {
 				t.Errorf("ExitCode = %d; want %d", got, c.want)
 			}
@@ -324,7 +327,7 @@ func TestCrashWithNoJSONDegradesEverySource(t *testing.T) {
 	for _, stdout := range []string{"", "panic: something went wrong\n", "{not json"} {
 		cfg := config.Config{Sources: map[string]config.SourceCfg{"backend-a": {Enable: true}}}
 		e := newEnv(t, cfg)
-		fake.Install(t, listRoute(stdout, 1))
+		conn.Use(t, listRoute(stdout, 1))
 		res := run(t, e, pull.Opts{})
 		if !res.CouldNotRun || res.ExitCode() != 3 {
 			t.Errorf("stdout %q: res = %+v", stdout, res)
@@ -346,7 +349,7 @@ func TestDisabledSourceStoresNothing(t *testing.T) {
 	}}
 	t.Run("fan-out discards its items", func(t *testing.T) {
 		e := newEnv(t, cfg)
-		fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
+		conn.Use(t, listRoute(fixture(t, "mixed.json"), 0))
 		res := run(t, e, pull.Opts{})
 		r := rowsBySource(res)["backend-ok"]
 		if r.Status != pull.StatusDisabled || r.Reason != "disabled by configuration" || r.Count != 0 {
@@ -370,7 +373,7 @@ func TestDisabledSourceStoresNothing(t *testing.T) {
 	})
 	t.Run("pinned is never invoked", func(t *testing.T) {
 		e := newEnv(t, cfg)
-		rec := fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
+		rec := conn.Use(t, listRoute(fixture(t, "mixed.json"), 0))
 		res := run(t, e, pull.Opts{Sources: []string{"backend-ok"}})
 		if len(rec.Calls()) != 0 {
 			t.Errorf("pg-connector was invoked for a disabled pinned source: %v", rec.Calls())
@@ -390,7 +393,7 @@ func TestArgvShapes(t *testing.T) {
 
 	t.Run("fan-out is one call", func(t *testing.T) {
 		e := newEnv(t, config.Config{})
-		rec := fake.Install(t, listRoute(empty, 0))
+		rec := conn.Use(t, listRoute(empty, 0))
 		run(t, e, pull.Opts{})
 		want := [][]string{{"activity", "list", "--since", since, "--before", before, "--output", "json"}}
 		if got := rec.Calls(); !reflect.DeepEqual(got, want) {
@@ -399,7 +402,7 @@ func TestArgvShapes(t *testing.T) {
 	})
 	t.Run("one --backend call per pinned source", func(t *testing.T) {
 		e := newEnv(t, config.Config{})
-		rec := fake.Install(t, listRoute(`{"sources":[{"source":"backend-a","status":"succeeded"}],"items":[]}`, 0))
+		rec := conn.Use(t, listRoute(`{"sources":[{"source":"backend-a","status":"succeeded"}],"items":[]}`, 0))
 		res := run(t, e, pull.Opts{Sources: []string{"backend-a", "backend-b", "backend-a"}})
 		want := [][]string{
 			{"activity", "list", "--since", since, "--before", before, "--backend", "backend-a", "--output", "json"},
@@ -415,7 +418,7 @@ func TestArgvShapes(t *testing.T) {
 	})
 	t.Run("open-ended range omits --since", func(t *testing.T) {
 		e := newEnv(t, config.Config{})
-		rec := fake.Install(t, listRoute(empty, 0))
+		rec := conn.Use(t, listRoute(empty, 0))
 		run(t, e, pull.Opts{Range: rangespec.Range{Before: t1, OpenStart: true}})
 		want := [][]string{{"activity", "list", "--before", before, "--output", "json"}}
 		if got := rec.Calls(); !reflect.DeepEqual(got, want) {
@@ -424,7 +427,7 @@ func TestArgvShapes(t *testing.T) {
 	})
 	t.Run("--before is an instant with offset", func(t *testing.T) {
 		e := newEnv(t, config.Config{})
-		rec := fake.Install(t, listRoute(empty, 0))
+		rec := conn.Use(t, listRoute(empty, 0))
 		cst := time.FixedZone("CST", -6*3600)
 		run(t, e, pull.Opts{Range: rangespec.Range{Since: t0.In(cst), Before: t1.In(cst)}})
 		c := rec.Calls()[0]
@@ -436,7 +439,7 @@ func TestArgvShapes(t *testing.T) {
 
 func TestBackfillTwiceAppendsNothingSecondTime(t *testing.T) {
 	e := newEnv(t, config.Config{})
-	fake.Install(t, listRoute(fixture(t, "wide.json"), 0))
+	conn.Use(t, listRoute(fixture(t, "wide.json"), 0))
 	wide := rangespec.Range{Since: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Before: t1}
 
 	first := run(t, e, pull.Opts{Range: wide})
@@ -488,7 +491,7 @@ func TestSchemaInvalidItems(t *testing.T) {
 			doc := `{"sources":[{"source":"b","status":"succeeded","count":2}],"items":[` +
 				`{"source":"b","item":` + item(mut) + `},` +
 				`{"source":"b","item":` + item(`{"id":"good"}`) + `}]}`
-			fake.Install(t, listRoute(doc, 0))
+			conn.Use(t, listRoute(doc, 0))
 			res := run(t, e, pull.Opts{})
 			r := res.Rows[0]
 			if r.Status != pull.StatusSucceeded || r.Rejected != 1 || r.Count != 1 {
@@ -499,7 +502,7 @@ func TestSchemaInvalidItems(t *testing.T) {
 	t.Run("an item that is not an object", func(t *testing.T) {
 		e := newEnv(t, config.Config{})
 		doc := `{"sources":[{"source":"b","status":"succeeded"}],"items":[{"source":"b","item":"nope"},{"source":"b","item":null}]}`
-		fake.Install(t, listRoute(doc, 0))
+		conn.Use(t, listRoute(doc, 0))
 		if r := run(t, e, pull.Opts{}).Rows[0]; r.Rejected != 2 || r.Status != pull.StatusSucceeded {
 			t.Errorf("row = %+v", r)
 		}
@@ -534,8 +537,8 @@ func TestLockedStoreDegradesTheWholePull(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	holdWriteLock(t, path)
 
-	deps := pull.Deps{Cfg: config.Config{}, Store: st, Conn: pgconn.NewExec(), Log: telemetry.New(filepath.Join(dir, "state"))}
-	fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
+	deps := pull.Deps{Cfg: config.Config{}, Store: st, Conn: conn, Log: telemetry.New(filepath.Join(dir, "state"))}
+	conn.Use(t, listRoute(fixture(t, "mixed.json"), 0))
 	res, err := pull.Run(context.Background(), deps, pull.Opts{Range: rng, Now: now}) // waits out the (shortened) busy timeout
 	if err != nil {
 		t.Fatal(err)
@@ -592,7 +595,7 @@ func TestTelemetryFailureDoesNotFailThePull(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.deps.Log = telemetry.New(blocker)
-	fake.Install(t, listRoute(fixture(t, "mixed.json"), 0))
+	conn.Use(t, listRoute(fixture(t, "mixed.json"), 0))
 	if res := run(t, e, pull.Opts{}); res.ExitCode() != 2 || len(queryAll(t, e.st)) != 4 {
 		t.Errorf("pull must proceed despite log failures: %+v", res)
 	}

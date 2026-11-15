@@ -85,3 +85,35 @@ func TestFakeQuotesAwkwardStdout(t *testing.T) {
 		t.Errorf("out=%q err=%v", out, err)
 	}
 }
+
+// The in-process fake MUST answer exactly as the installed script does, so a
+// test may use either: the same routes and calls through both runners give the
+// same stdout, exit status and recorded calls.
+func TestInProcessFakeAnswersLikeTheInstalledScript(t *testing.T) {
+	routes := []fake.Route{
+		{Match: []string{"activity", "list", "--backend"}, Stdout: "pinned"},
+		{Match: []string{"activity", "list"}, Stdout: "it's \"quoted\" $HOME `x`", Exit: 2},
+		{Match: []string{"issue"}, Stdout: ""},
+	}
+	calls := [][]string{
+		{"activity", "list", "--backend", "x"},
+		{"activity", "list", "--since", "s"},
+		{"activity"},
+		{"issue", "list", "multi\nline"},
+		{"other"},
+	}
+	rec := fake.Install(t, routes...)
+	script := pgconn.NewExec().(pgconn.DetailedRunner)
+	inproc := fake.NewRunner(routes...)
+	for _, c := range calls {
+		want, werr := script.RunDetailed(context.Background(), c...)
+		got, gerr := inproc.RunDetailed(context.Background(), c...)
+		same := string(got.Stdout) == string(want.Stdout) && string(got.Stderr) == string(want.Stderr) && got.ExitCode == want.ExitCode
+		if werr != nil || gerr != nil || !same {
+			t.Errorf("call %q: in-process %+v (%v), script %+v (%v)", c, got, gerr, want, werr)
+		}
+	}
+	if !reflect.DeepEqual(inproc.Calls(), rec.Calls()) {
+		t.Errorf("calls: in-process %q, script %q", inproc.Calls(), rec.Calls())
+	}
+}

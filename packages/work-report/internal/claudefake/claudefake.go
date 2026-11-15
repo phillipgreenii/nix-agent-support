@@ -9,10 +9,13 @@
 package claudefake
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -97,4 +100,42 @@ func (r *Recorder) Calls() []Call {
 // quote single-quotes s for a POSIX shell.
 func quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// Fake is Install without the process: the same Behavior served in-process
+// through the code under test's run seam, recording the same Calls. A test
+// that does not need the real exec path uses it so each call costs no process
+// launch.
+type Fake struct {
+	b Behavior
+
+	mu    sync.Mutex
+	calls []Call
+}
+
+// NewFake returns an in-process fake claude with behavior b.
+func NewFake(b Behavior) *Fake { return &Fake{b: b} }
+
+// Run runs the fake claude like exec.Cmd.Run would: a done context fails
+// before anything is recorded, a non-zero Exit fails with the text an
+// *exec.ExitError has ("exit status N"), and the output is returned either
+// way. path and dir are ignored.
+func (f *Fake) Run(ctx context.Context, _, _ string, args []string, stdin string) (stdout, stderr string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
+	f.mu.Lock()
+	f.calls = append(f.calls, Call{Args: slices.Clone(args), Stdin: stdin})
+	f.mu.Unlock()
+	if f.b.Exit != 0 {
+		err = fmt.Errorf("exit status %d", f.b.Exit)
+	}
+	return f.b.Stdout, f.b.Stderr, err
+}
+
+// Calls returns every invocation the fake received, in order.
+func (f *Fake) Calls() []Call {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.calls)
 }
