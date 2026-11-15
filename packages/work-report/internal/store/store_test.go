@@ -14,6 +14,7 @@ import (
 	"time"
 	_ "time/tzdata" // the DST test loads a named zone
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 	_ "modernc.org/sqlite"
 )
 
@@ -731,5 +732,42 @@ func TestNoCodePathMutatesEntries(t *testing.T) {
 		if m := forbidden.Find(b); m != nil {
 			t.Errorf("%s contains an entry mutation: %q", f, m)
 		}
+	}
+}
+
+// A work-report store opened the way the CLI opens it carries the whole
+// standard pragma set of the shared sqliteopen helper on a real SQLite file,
+// and keeps its immediate-transaction behaviour (a write lock taken at BEGIN).
+func TestOpenEffectiveStandardPragmas(t *testing.T) {
+	s := openTemp(t)
+
+	got, err := sqliteopen.Effective(ctx, s.sql)
+	if err != nil {
+		t.Fatalf("Effective: %v", err)
+	}
+	want := sqliteopen.Pragmas{
+		JournalMode:      "wal",
+		Synchronous:      1, // NORMAL
+		BusyTimeout:      5000,
+		CacheSize:        -65536,
+		MmapSize:         256 << 20,
+		JournalSizeLimit: 64 << 20,
+		TempStore:        2, // MEMORY
+		ForeignKeys:      true,
+	}
+	if got != want {
+		t.Errorf("effective pragmas = %+v, want %+v", got, want)
+	}
+}
+
+func TestOpenWithBusyTimeoutIsEffective(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "s.db"), WithBusyTimeout(250*time.Millisecond))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	got, err := sqliteopen.Effective(ctx, s.sql)
+	if err != nil || got.BusyTimeout != 250 {
+		t.Fatalf("busy_timeout = %+v, %v; want 250", got, err)
 	}
 }

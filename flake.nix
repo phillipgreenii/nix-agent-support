@@ -8426,6 +8426,7 @@
                   fileset = lib.fileset.unions [
                     ./packages/work-report
                     ./packages/pg-connector
+                    ./packages/pg-sqlite
                   ];
                 };
                 modRoot = "work-report";
@@ -10774,6 +10775,7 @@
                   fileset = lib.fileset.unions [
                     ./packages/work-report
                     ./packages/pg-connector
+                    ./packages/pg-sqlite
                   ];
                 };
                 modRoot = "work-report";

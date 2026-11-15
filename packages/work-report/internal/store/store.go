@@ -15,12 +15,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 	sqlite "modernc.org/sqlite"
 )
 
@@ -121,25 +120,19 @@ func Open(path string, opts ...Option) (*Store, error) {
 	for _, o := range opts {
 		o(&busy)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("store: create dir for %s: %w", path, err)
-	}
-	// _txlock=immediate makes every transaction take the write lock at BEGIN,
-	// so the busy timeout (not a mid-transaction SQLITE_BUSY) governs waits.
-	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)",
-		path, busy)
-	db, err := sql.Open("sqlite", dsn)
+	// Opened through the shared sqliteopen helper (standard pragma set, one
+	// connection to serialize this process's writers; WAL + busy timeout handle
+	// other processes). TxLockImmediate makes every transaction take the write
+	// lock at BEGIN, so the busy timeout (not a mid-transaction SQLITE_BUSY)
+	// governs waits.
+	o := sqliteopen.Standard(path)
+	o.TxLockImmediate = true
+	o.BusyTimeoutMillis = busy
+	db, err := sqliteopen.Open(o)
 	if err != nil {
-		return nil, fmt.Errorf("store: open %s: %w", path, err)
-	}
-	// One connection serializes this process's writers; WAL + busy timeout
-	// handle other processes.
-	db.SetMaxOpenConns(1)
-	s := &Store{sql: db, path: path}
-	if err := db.PingContext(context.Background()); err != nil {
-		_ = db.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, mapErr(err))
 	}
+	s := &Store{sql: db, path: path}
 	if err := migrate(s); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: migrate %s: %w", path, mapErr(err))

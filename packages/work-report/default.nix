@@ -18,6 +18,7 @@ mkGoApp {
     fileset = lib.fileset.unions [
       ./.
       ../pg-connector
+      ../pg-sqlite
     ];
   };
   modRoot = "work-report";
