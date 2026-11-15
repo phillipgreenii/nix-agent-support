@@ -24,6 +24,11 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
+const (
+	meEmail    = "me@example.test"
+	otherEmail = "other@example.test"
+)
+
 // gitFixture builds real repositories from x/gittest (hermetic by
 // construction: fixture root under t.TempDir(), fixture HOME, an allowlisted
 // child environment that never inherits GIT_DIR/GIT_INDEX_FILE, discovery

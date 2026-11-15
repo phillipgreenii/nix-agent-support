@@ -84,3 +84,17 @@ func TestEnrichCommit_GitFailureIsNotSilent(t *testing.T) {
 		}
 	}
 }
+
+// An empty candidate list answers an empty map without running git.
+func TestEnrichCommits_EmptyBatchSpawnsNothing(t *testing.T) {
+	r := &fakeRunner{run: func(string, ...string) (string, error) {
+		return "", errors.New("must not be called")
+	}}
+	got, err := enrichCommits(context.Background(), r, t.TempDir(), nil)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %v, %v; want an empty map and no error", got, err)
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("git ran %d times, want 0: %v", len(r.calls), r.calls)
+	}
+}
