@@ -452,7 +452,7 @@
           pg-origin-guard = final.callPackage ./packages/pg-origin-guard {
             inherit (goBuilders) mkGoApp;
           };
-          # claude-tool-tracker (docket pg2-aj5iq8): Pattern A (ADR 0008), stdlib only.
+          # claude-tool-tracker (docket pg2-aj5iq8): Pattern B (ADR 0008), local replace of pg-sqlite.
           # The tool-event log producer: `append` for the mod and CETA, `hook` for
           # Claude Code command hooks.
           claude-tool-tracker = final.callPackage ./packages/claude-tool-tracker {
@@ -2026,7 +2026,6 @@
                 "pg-probe"
                 "pg-claude-code-recorder"
                 "pg-claude-control"
-                "claude-tool-tracker"
                 "pg-wrap"
                 "pg-sqlite"
                 # pg2-rpo30t: Pattern A since its claude-transcript replace went.
@@ -2083,6 +2082,17 @@
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
                       ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "claude-tool-tracker";
+                  modRoot = "claude-tool-tracker";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/claude-tool-tracker
+                      ./packages/pg-sqlite
                     ];
                   };
                 })
@@ -8210,11 +8220,18 @@
               };
 
               # claude-tool-tracker (docket pg2-aj5iq8) - whole-module Go test gate.
-              # Pattern A, pure-Go SQLite driver (no cgo). The cmd tests build and run the real
+              # Pattern B (local replace of pg-sqlite), pure-Go SQLite driver (no cgo). The cmd tests build and run the real
               # binary (go build, no network needed); the repo-mapping tests run real git.
               claude-tool-tracker-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "claude-tool-tracker-go-tests";
-                src = lib.cleanSource ./packages/claude-tool-tracker; # matches default.nix
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/claude-tool-tracker
+                    ./packages/pg-sqlite
+                  ];
+                };
+                modRoot = "claude-tool-tracker";
                 gomod2nixToml = ./packages/claude-tool-tracker/gomod2nix.toml;
                 testDeps = [ pkgs.git ];
               };

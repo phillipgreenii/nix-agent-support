@@ -6,10 +6,17 @@
 mkGoApp {
   pname = "claude-tool-tracker";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): one standalone module at this
-  # package dir, stdlib only, so there is no local `replace` and no modRoot.
-  src = lib.cleanSource ./.;
-  modRoot = null;
+  # Pattern B (phillipg-nix-repo-base ADR 0008): go.mod locally replaces
+  # ../pg-sqlite (the shared sqlite-open helper, ADR 0125), so the build sandbox
+  # must contain both package dirs at their relative positions.
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../pg-sqlite
+    ];
+  };
+  modRoot = "claude-tool-tracker";
 
   gomod2nixToml = ./gomod2nix.toml;
 

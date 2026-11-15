@@ -10,11 +10,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite" // pure-Go SQLite driver
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 )
 
 // DefaultPath is $XDG_STATE_HOME/claude-tool-tracker/tracker.db
@@ -93,16 +92,15 @@ func Open(path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
-	q := url.Values{}
-	q.Set("_txlock", "immediate")
-	q.Add("_pragma", "busy_timeout(5000)")
-	q.Add("_pragma", "journal_mode(WAL)")
-	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())
+	// Opened through the shared sqliteopen helper (standard pragma set, one
+	// connection: a single ingest process is the only writer). A transaction
+	// takes the write lock when it begins, so concurrent openers serialize.
+	opts := sqliteopen.Standard(path)
+	opts.TxLockImmediate = true
+	db, err := sqliteopen.Open(opts)
 	if err != nil {
 		return nil, err
 	}
-	// One connection: a single ingest process is the only writer.
-	db.SetMaxOpenConns(1)
 	if err := migrate(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -116,18 +114,7 @@ func Open(path string) (*sql.DB, error) {
 
 // OpenReadOnly opens an existing database for reading only.
 func OpenReadOnly(path string) (*sql.DB, error) {
-	q := url.Values{}
-	q.Set("mode", "ro")
-	q.Add("_pragma", "busy_timeout(5000)")
-	db, err := sql.Open("sqlite", "file:"+path+"?"+q.Encode())
-	if err != nil {
-		return nil, err
-	}
-	if err := db.PingContext(context.Background()); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return db, nil
+	return sqliteopen.Open(sqliteopen.ReadOnly(path, 0))
 }
 
 func migrate(db *sql.DB) error {
