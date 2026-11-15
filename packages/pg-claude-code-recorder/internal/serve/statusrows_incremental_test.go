@@ -322,7 +322,8 @@ func TestStatusRowsFailedReadInvalidatesTheCache(t *testing.T) {
 // One file-only commit must allocate a small fraction of what rebuilding the
 // whole table did (the figure the old per-commit AllFiles rebuild cost).
 func TestStatusRowsOneChangeAllocatesAFractionOfAWholeRead(t *testing.T) {
-	const files = 3000
+	const files = 600 // 12 chunks of 50: one change copies about a twelfth
+	smallChunks(t, 50)
 	e := newEnv(t, false)
 	d := e.open(t)
 	defer func() { _ = d.Close() }()
