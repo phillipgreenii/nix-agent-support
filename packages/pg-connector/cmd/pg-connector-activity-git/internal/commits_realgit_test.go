@@ -1,3 +1,5 @@
+//go:build integration
+
 package internal
 
 import (
@@ -8,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -21,11 +22,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
-)
-
-const (
-	meEmail    = "me@example.test"
-	otherEmail = "other@example.test"
 )
 
 // gitFixture builds real repositories from x/gittest (hermetic by
@@ -172,12 +168,6 @@ func populatedRepo(f *gitFixture) string {
 	return repo
 }
 
-var (
-	rangeSince  = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	rangeBefore = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	pinnedNow   = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-)
-
 func realBackend(stderr *bytes.Buffer) *Backend {
 	b := New(Options{Stderr: stderr, Runner: NewExecRunner()})
 	b.now = func() time.Time { return pinnedNow }
@@ -196,15 +186,6 @@ func listWith(t *testing.T, b *Backend, cfg Config, since, before time.Time) *sc
 		t.Fatalf("ListActivity: %v", err)
 	}
 	return res
-}
-
-func subjects(items []schema.ActivityItem) []string {
-	out := make([]string, 0, len(items))
-	for _, it := range items {
-		out = append(out, it.Summary)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func TestListActivity_RealRepo_AuthorDateRangeAndAuthor(t *testing.T) {

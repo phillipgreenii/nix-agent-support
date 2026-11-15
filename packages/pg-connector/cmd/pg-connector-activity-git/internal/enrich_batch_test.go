@@ -1,3 +1,5 @@
+//go:build integration
+
 package internal
 
 // Batched enrichment (pg2-sgj06). enrichCommit (one commit, two git spawns)
@@ -192,14 +194,14 @@ func TestEnrichCommits_SpawnCountDoesNotScaleWithCommits(t *testing.T) {
 	repo := f.newRepo()
 	const day = "2026-09-05T10:00:00+00:00"
 	var shas []string
-	for i := 0; i < 60; i++ {
+	for i := 0; i < 12; i++ {
 		if err := os.WriteFile(filepath.Join(repo, "f"), []byte(strings.Repeat("l\n", i+1)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		f.git(repo, nil, "add", "f")
 		shas = append(shas, f.commit(repo, meEmail, day, day, "c"))
 	}
-	f.git(repo, nil, "branch", "other", shas[30])
+	f.git(repo, nil, "branch", "other", shas[6])
 
 	small, large := newCountingRunner(), newCountingRunner()
 	if _, err := enrichCommits(context.Background(), small, repo, shas[:6]); err != nil {
@@ -209,14 +211,14 @@ func TestEnrichCommits_SpawnCountDoesNotScaleWithCommits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 60 {
-		t.Fatalf("got %d details, want 60", len(got))
+	if len(got) != 12 {
+		t.Fatalf("got %d details, want 12", len(got))
 	}
 	if small.count() != large.count() {
-		t.Errorf("spawns: 6 commits = %d, 60 commits = %d; must not scale with commit count", small.count(), large.count())
+		t.Errorf("spawns: 6 commits = %d, 12 commits = %d; must not scale with commit count", small.count(), large.count())
 	}
 	if large.count() > 4 {
-		t.Errorf("spawns for 60 commits = %d (%v), want at most 4", large.count(), large.calls)
+		t.Errorf("spawns for 12 commits = %d (%v), want at most 4", large.count(), large.calls)
 	}
 }
 

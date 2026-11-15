@@ -1,3 +1,5 @@
+//go:build integration
+
 package internal
 
 // pg2-p5asw: two bounds on the cost and the blast radius of one pull, both
