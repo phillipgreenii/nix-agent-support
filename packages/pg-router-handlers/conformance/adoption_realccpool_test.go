@@ -71,7 +71,7 @@ const (
 	// lease to now+LeaseTTL every poll). It is far under the initial lease a
 	// launch stamps (launch + ccpool.EnsureTimeout + LeaseTTL), so a lease at
 	// most this far ahead proves an adopting dispatch refreshed it.
-	adoptLeaseTTL = 30 * time.Second
+	adoptLeaseTTL = time.Minute
 	// adoptWait bounds every wait on a real session or handler process.
 	adoptWait = 90 * time.Second
 )
