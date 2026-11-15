@@ -37,9 +37,9 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 
 **CRITICAL**: Before claiming any change is complete:
 
-- If the project has pre-commit hooks (probe with `pg-hooks status --porcelain || true` and read the `state=` line, not the exit code. Do NOT probe with `test -f .pre-commit-config.yaml` or bare `ls`): the hooks MUST pass on the **changed** files.
+- If the project has pre-commit hooks (probe with `pg-hooks status --porcelain || true` and read its output, not the exit code. Do NOT probe with `test -f .pre-commit-config.yaml` or bare `ls`): the hooks MUST pass on the **changed** files.
   - The commit's own hook run is the gate: `git add -A` first, run the formatter in write mode (`nix fmt -- <files>`, `gofumpt -w`, `prettier --write`), then `pg-hooks fix`, then `git commit`. Pre-validate with `pg-hooks run pre-commit <changed files>`; never `--all-files` per change. Before landing: `pg-hooks run pre-land`.
-  - State `missing`/`broken`/`unreachable`/`relocated`: commit hooks do NOT run; say so in the report instead of claiming they passed, and never link, copy or regenerate a hook config. (State reference and rebuild steps: the `nix-how-to` path-rule, `pg-hooks status`, `docs/hooks.md` in `phillipg-nix-repo-base`.)
+  - Run `pg-hooks status`; if its output says the hooks did NOT run, say so in the report using the tool's words; if it says pg-hooks does not apply, say nothing about hooks and validate with the repo's own documented tooling. Never link, copy or regenerate a hook config. (Reference and rebuild steps: the `nix-how-to` path-rule, `pg-hooks status`, `docs/hooks.md` in `phillipg-nix-repo-base`.)
   - Exit `127` or no `state=` line: report `pg-hooks not installed on this machine; ask the operator to run pn workspace apply`, then fall back to `test -f .pre-commit-config.yaml && echo yes || echo no`.
 - If the project has `flake.nix`: a full `nix flake check` is NOT a per-change or land-time gate (operator ruling 2026-10-01); you MAY (SHOULD for shared infrastructure) build targeted `nix build .#checks.<system>.<name>` in the background.
 - IF no tests exist for changed code: create them. NEVER claim code is complete without passing tests.

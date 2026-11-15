@@ -268,26 +268,51 @@ ahead_behind_primary() {
 }
 
 # precommit_state <worktree root>: print the PRECOMMIT fact -- one of
-# "bundle", "stale", "missing", "broken" -- from `pg-hooks status --porcelain`
-# (spec 5.3: callers parse the porcelain, never prose):
+# "bundle", "stale", "missing", "broken", "n/a" -- from
+# `pg-hooks status --porcelain` (spec 5.3: callers parse the porcelain, never
+# prose). EVERY line is scanned (hooks= follows state=). hooks= is read first:
+#   runs -> bundle when state is present, else stale (the bundle exists but
+#           must be rebuilt, e.g. a relocated clone)
+#   skipped -> missing (git never runs the hooks from this clone)
+#   failing -> broken   n/a -> n/a (pg-hooks does not apply; no reinstall hint)
+# When hooks= is absent or unrecognized (an older pg-hooks), the state-name
+# mapping applies:
 #   present -> bundle    stale -> stale    missing -> missing   broken -> broken
-#   relocated -> stale   (the bundle exists but must be rebuilt)
-#   unreachable -> missing (git never runs the hooks from this clone)
+#   relocated -> stale   unreachable -> missing   not-enrolled -> n/a
 # `pg-hooks status` encodes the state in its exit code too, so a non-zero exit
 # is expected and ignored here. Anything else -- pg-hooks not on PATH, no
-# `state=` line, or an unrecognized/retired state (e.g. an old pg-hooks's
-# `legacy`) -- is "missing": the tool tolerates both older and newer pg-hooks
-# output and never crashes on it. Read-only: it never inspects, links or
-# regenerates an on-disk hook config.
+# `state=`/`hooks=` line, or an unrecognized/retired state (e.g. an old
+# pg-hooks's `legacy`) -- is "missing": the tool tolerates both older and newer
+# pg-hooks output and never crashes on it. Read-only: it never inspects, links
+# or regenerates an on-disk hook config.
 precommit_state() {
-  local wt="$1" out="" line state=""
+  local wt="$1" out="" line state="" hooks=""
   if command -v pg-hooks >/dev/null 2>&1; then
     out="$(cd "$wt" && pg-hooks status --porcelain 2>/dev/null)" || true
     while IFS= read -r line; do
       case "$line" in
       state=*) state="${line#state=}" ;;
+      hooks=*) hooks="${line#hooks=}" ;;
       esac
     done <<<"$out"
+    case "$hooks" in
+    runs)
+      if [ "$state" = present ]; then printf 'bundle'; else printf 'stale'; fi
+      return
+      ;;
+    skipped)
+      printf 'missing'
+      return
+      ;;
+    failing)
+      printf 'broken'
+      return
+      ;;
+    n/a)
+      printf 'n/a'
+      return
+      ;;
+    esac
     case "$state" in
     present)
       printf 'bundle'
@@ -299,6 +324,10 @@ precommit_state() {
       ;;
     broken)
       printf 'broken'
+      return
+      ;;
+    not-enrolled)
+      printf 'n/a'
       return
       ;;
     esac
@@ -402,17 +431,20 @@ pre_land_realpath() {
   (cd -P "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"
 }
 
-# pre_land_bundle_id <wt>: the resolved real path of a PRESENT hook bundle, else nothing.
+# pre_land_bundle_id <wt>: the resolved real path of a PRESENT hook bundle, else
+# nothing (so an opted-out or not-enrolled clone, hooks=n/a, never records a
+# reuse marker). Every line is scanned: hooks= follows state=.
 pre_land_bundle_id() {
-  local out line state="" bundle=""
+  local out line state="" bundle="" hooks=""
   out="$(cd "$1" && pg-hooks status --porcelain 2>/dev/null)" || true
   while IFS= read -r line; do
     case "$line" in
     state=*) state="${line#state=}" ;;
     bundle=*) bundle="${line#bundle=}" ;;
+    hooks=*) hooks="${line#hooks=}" ;;
     esac
   done <<<"$out"
-  if [ "$state" = present ] && [ -n "$bundle" ]; then
+  if [ "$state" = present ] && [ "$hooks" != "n/a" ] && [ -n "$bundle" ]; then
     pre_land_realpath "$bundle"
   fi
   return 0

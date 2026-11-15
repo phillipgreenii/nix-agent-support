@@ -29,7 +29,8 @@ hook config into it: git runs the clone's hook bundle from the shared common
 dir), reports the hook-bundle state from `pg-hooks status --porcelain`, and
 prints the same integration-facts JSON block `integrate-branch-support` prints (computed from
 inside the new worktree). On stderr it also reports `PRECOMMIT=<value>`, the
-facts-block vocabulary: bundle|stale|missing|broken.
+facts-block vocabulary: bundle|stale|missing|broken|n/a (n/a: pg-hooks does
+not apply to this clone).
 
 Arguments:
   <bead-or-name>    Directory name under .worktrees/, and (unless --branch
@@ -123,7 +124,9 @@ if ! git -C "$root" worktree add "$wt" -b "$branch" "$base" >&2; then
   die "git worktree add failed"
 fi
 
-hooks_state="$(wtnew_hooks_state "$wt")"
-echo "wtnew: PRECOMMIT=$(wtnew_precommit_fact "$hooks_state")" >&2
+hooks_status="$(wtnew_hooks_status "$wt")"
+hooks_state="$(wtnew_status_value "$hooks_status" state)"
+hooks_key="$(wtnew_status_value "$hooks_status" hooks)"
+echo "wtnew: PRECOMMIT=$(wtnew_precommit_fact "$hooks_state" "$hooks_key")" >&2
 
 (cd "$wt" && integrate-branch-support)

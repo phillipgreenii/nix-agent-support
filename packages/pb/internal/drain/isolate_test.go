@@ -63,12 +63,17 @@ func TestMain(m *testing.M) {
 // installed" (exit 127, no output); otherwise it prints the porcelain for that
 // state, records its argv and cwd in PG_HOOKS_STUB_LOG, and exits with
 // PG_HOOKS_STUB_EXIT (default 0) as the real status does for non-present states.
+// With PG_HOOKS_STUB_HOOKS set it also prints a trailing hooks= line (after
+// state=, as the real tool does); unset it is an older pg-hooks with no hooks=.
 const pgHooksStub = `#!/bin/sh
 [ -n "${PG_HOOKS_STUB_STATE:-}" ] || exit 127
 if [ -n "${PG_HOOKS_STUB_LOG:-}" ]; then
   printf '%s|%s\n' "$*" "$(pwd -P)" >>"$PG_HOOKS_STUB_LOG"
 fi
 printf 'state=%s\nbundle=\ngeneration=\nstages=\nreinstall=\n' "$PG_HOOKS_STUB_STATE"
+if [ -n "${PG_HOOKS_STUB_HOOKS:-}" ]; then
+  printf 'hooks=%s\n' "$PG_HOOKS_STUB_HOOKS"
+fi
 exit "${PG_HOOKS_STUB_EXIT:-0}"
 `
 
@@ -497,6 +502,8 @@ func TestIsolate_bundleStatesWriteNoFileAndReportState(t *testing.T) {
 		{"broken", 12, "broken"},
 		{"missing", 13, "missing"},
 		{"unreachable", 15, "missing"},
+		// An old stub with only state= (no hooks=) of a state it never printed.
+		{"not-enrolled", 0, "n/a"},
 		// The retired legacy state (an old pg-hooks) falls through to missing.
 		{"legacy", 0, "missing"},
 	}
@@ -570,26 +577,92 @@ func TestIsolate_unrecognizedPgHooksStateReportsMissingAndWritesNothing(t *testi
 	}
 }
 
-func TestHooksState_scripted(t *testing.T) {
+func TestHooksStatus_scripted(t *testing.T) {
 	cases := []struct {
-		name   string
-		stdout string
-		err    error
-		want   string
+		name      string
+		stdout    string
+		err       error
+		wantState string
+		wantHooks string
 	}{
-		{"present", "state=present\nbundle=/x\n", nil, "present"},
-		{"stale with non-zero exit", "state=stale\n", fmt.Errorf("exit 14"), "stale"},
-		{"retired legacy state", "state=legacy\nbundle=\n", nil, ""},
-		{"absent", "", fmt.Errorf("exec: not found"), ""},
-		{"no state line", "bundle=/x\n", nil, ""},
-		{"unknown state", "state=weird\n", nil, ""},
+		{"present, old stub", "state=present\nbundle=/x\n", nil, "present", ""},
+		{"stale with non-zero exit", "state=stale\n", fmt.Errorf("exit 14"), "stale", ""},
+		{"hooks follows state", "state=stale\nbundle=/x\nreinstall=y\nhooks=runs\n", fmt.Errorf("exit 14"), "stale", "runs"},
+		{"hooks n/a", "state=not-enrolled\nbundle=\nhooks=n/a\n", nil, "not-enrolled", "n/a"},
+		{"hooks before state", "hooks=skipped\nstate=missing\n", nil, "missing", "skipped"},
+		{"retired legacy state", "state=legacy\nbundle=\n", nil, "", ""},
+		{"absent", "", fmt.Errorf("exec: not found"), "", ""},
+		{"no state line", "bundle=/x\n", nil, "", ""},
+		{"unknown state", "state=weird\n", nil, "", ""},
+		{"unknown hooks value", "state=present\nhooks=weird\n", nil, "present", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := run.NewFakeRunner()
 			f.AddResponse("pg-hooks", []string{"status", "--porcelain"}, run.Result{Stdout: tc.stdout}, tc.err)
-			if got := hooksState(context.Background(), f, "/wt"); got != tc.want {
-				t.Errorf("hooksState = %q, want %q", got, tc.want)
+			gotState, gotHooks := hooksStatus(context.Background(), f, "/wt")
+			if gotState != tc.wantState || gotHooks != tc.wantHooks {
+				t.Errorf("hooksStatus = (%q, %q), want (%q, %q)", gotState, gotHooks, tc.wantState, tc.wantHooks)
+			}
+		})
+	}
+}
+
+func TestPrecommitFact_table(t *testing.T) {
+	cases := []struct{ state, hooks, want string }{
+		{"present", "runs", "bundle"},
+		{"stale", "runs", "stale"},
+		{"relocated", "runs", "stale"},
+		{"missing", "skipped", "missing"},
+		{"unreachable", "skipped", "missing"},
+		{"broken", "skipped", "missing"},
+		{"broken", "failing", "broken"},
+		{"not-enrolled", "n/a", "n/a"},
+		// hooks= wins over a state it contradicts (a future state mapping).
+		{"present", "skipped", "missing"},
+		// No hooks=: the state-name fallback.
+		{"present", "", "bundle"},
+		{"stale", "", "stale"},
+		{"relocated", "", "stale"},
+		{"broken", "", "broken"},
+		{"missing", "", "missing"},
+		{"unreachable", "", "missing"},
+		{"not-enrolled", "", "n/a"},
+		{"", "", "missing"},
+	}
+	for _, tc := range cases {
+		if got := precommitFact(tc.state, tc.hooks); got != tc.want {
+			t.Errorf("precommitFact(%q, %q) = %q, want %q", tc.state, tc.hooks, got, tc.want)
+		}
+	}
+}
+
+// TestIsolate_hooksKeyFollowingState: a stub that prints hooks= after state=
+// is read in preference to the state name, and hooks=n/a reports the distinct
+// n/a value.
+func TestIsolate_hooksKeyFollowingState(t *testing.T) {
+	cases := []struct {
+		state, hooks string
+		exit         int
+		want         string
+	}{
+		{"present", "runs", 0, "bundle"},
+		{"relocated", "runs", 16, "stale"},
+		{"unreachable", "skipped", 15, "missing"},
+		{"broken", "failing", 12, "broken"},
+		{"not-enrolled", "n/a", 0, "n/a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state+"/"+tc.hooks, func(t *testing.T) {
+			repo := newRepo(t)
+			stubPgHooks(t, tc.state, tc.exit)
+			t.Setenv("PG_HOOKS_STUB_HOOKS", tc.hooks)
+			out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11h"})
+			if err != nil {
+				t.Fatalf("Isolate: %v", err)
+			}
+			if out.Precommit != tc.want {
+				t.Errorf("Precommit = %q, want %q", out.Precommit, tc.want)
 			}
 		})
 	}

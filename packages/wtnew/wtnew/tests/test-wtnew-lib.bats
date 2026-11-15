@@ -106,9 +106,11 @@ EOF
 
 # --- Task 11 (pg2-pla9d.15) ---------------------------------------------------
 
-# stub_pg_hooks <state> <exit>: a `pg-hooks` on PATH printing that status.
+# stub_pg_hooks <state> <exit> [hooks]: a `pg-hooks` on PATH printing that
+# status; with a third argument it prints a trailing hooks= line (after the
+# other keys, as the real tool does), without one it is an old pg-hooks.
 stub_pg_hooks() {
-  printf '%s\n' '#!/bin/sh' "printf 'state=%s\\nbundle=\\n' '$1'" "exit $2" >"$STUB_BIN/pg-hooks"
+  printf '%s\n' '#!/bin/sh' "printf 'state=%s\\nbundle=\\n' '$1'" ${3:+"printf 'hooks=%s\\n' '$3'"} "exit $2" >"$STUB_BIN/pg-hooks"
   chmod +x "$STUB_BIN/pg-hooks"
   PATH="$STUB_BIN:$PATH"
 }
@@ -155,9 +157,39 @@ EOF
   [ -z "$output" ]
 }
 
+@test "wtnew_hooks_status: scans every line, so hooks= after state= is read; unknown values are dropped" {
+  stub_pg_hooks stale 14 runs
+  run wtnew_hooks_status "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'state=stale\nhooks=runs' ]
+  stub_pg_hooks not-enrolled 0 'n/a'
+  run wtnew_hooks_status "$TEST_DIR"
+  [ "$output" = $'state=not-enrolled\nhooks=n/a' ]
+  stub_pg_hooks present 0 weird
+  run wtnew_hooks_status "$TEST_DIR"
+  [ "$output" = "state=present" ]
+  # An old pg-hooks: state= only.
+  stub_pg_hooks missing 13
+  run wtnew_hooks_status "$TEST_DIR"
+  [ "$output" = "state=missing" ]
+}
+
+@test "wtnew_precommit_fact: hooks= wins; hooks=n/a maps to the distinct n/a value; no hooks= falls back to the state" {
+  local trip st hk want
+  for trip in "present:runs:bundle" "stale:runs:stale" "relocated:runs:stale" "missing:skipped:missing" "unreachable:skipped:missing" "broken:failing:broken" "not-enrolled:n/a:n/a" "present:skipped:missing"; do
+    IFS=: read -r st hk want <<<"$trip"
+    run wtnew_precommit_fact "$st" "$hk"
+    [ "$output" = "$want" ]
+  done
+  run wtnew_precommit_fact not-enrolled ""
+  [ "$output" = "n/a" ]
+  run wtnew_precommit_fact "" ""
+  [ "$output" = "missing" ]
+}
+
 @test "wtnew_precommit_fact: maps every pg-hooks state onto the shared PRECOMMIT vocabulary" {
   local pair st want
-  for pair in present:bundle stale:stale relocated:stale broken:broken missing:missing unreachable:missing; do
+  for pair in present:bundle stale:stale relocated:stale broken:broken missing:missing unreachable:missing not-enrolled:n/a; do
     st="${pair%%:*}"
     want="${pair##*:}"
     run wtnew_precommit_fact "$st"
@@ -190,5 +222,23 @@ EOF
     # the legacy removal; the nix check builds the in-tree tool, which agrees.
     if [ "$st" = legacy ] && [ "$stub_status" = legacy ]; then continue; fi
     [ "$stub_status" = "$(wtnew_precommit_fact "$st")" ]
+  done
+}
+
+@test "wtnew_precommit_fact: agrees with integrate-branch-support --facts for every state and hooks= value (drift guard)" {
+  command -v integrate-branch-support >/dev/null 2>&1 || skip "integrate-branch-support not on PATH"
+  local trip st hk got
+  # An integrate-branch-support build that predates the hooks= key cannot
+  # agree on the hooks cases; the nix check builds the in-tree tool.
+  printf '%s\n' '#!/bin/sh' "printf 'state=not-enrolled\\nhooks=n/a\\n'" >"$STUB_BIN/pg-hooks"
+  chmod +x "$STUB_BIN/pg-hooks"
+  got="$(PATH="$STUB_BIN:$PATH" integrate-branch-support --facts | sed -n 's/^PRECOMMIT=//p')"
+  [ "$got" = "n/a" ] || skip "integrate-branch-support predates the hooks= key"
+  for trip in "present:runs" "stale:runs" "relocated:runs" "missing:skipped" "unreachable:skipped" "broken:skipped" "broken:failing" "not-enrolled:n/a" "present:" "stale:" "relocated:" "missing:" "unreachable:" "broken:" "not-enrolled:"; do
+    IFS=: read -r st hk <<<"$trip"
+    printf '%s\n' '#!/bin/sh' "printf 'state=%s\\nbundle=\\n' '$st'" ${hk:+"printf 'hooks=%s\\n' '$hk'"} >"$STUB_BIN/pg-hooks"
+    chmod +x "$STUB_BIN/pg-hooks"
+    got="$(PATH="$STUB_BIN:$PATH" integrate-branch-support --facts | sed -n 's/^PRECOMMIT=//p')"
+    [ "$got" = "$(wtnew_precommit_fact "$st" "$hk")" ]
   done
 }

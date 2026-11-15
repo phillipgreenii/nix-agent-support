@@ -187,7 +187,9 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
    if `pg-hooks` is absent; never `--all-files`, which re-runs every hook over
    the whole repo and can false-block on a pre-existing violation the subagent
    never touched), IS the first gate and is folded into making the commit when
-   the repo has hooks (`pg-hooks status` says so; do NOT probe with
+   the repo has hooks (`pg-hooks status` says so; when it says pg-hooks does not
+   apply, say nothing about hooks and validate with the repo's own documented
+   tooling; do NOT probe with
    `test -f .pre-commit-config.yaml`, which a bundle repo fails while its hooks
    are live) — in a bundle repo it MAY run `pg-hooks fix` after `git add` to
    autofix the staged files — ONLY THEN run any

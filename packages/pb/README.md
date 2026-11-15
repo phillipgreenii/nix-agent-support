@@ -195,8 +195,9 @@ Idempotent isolation for one bead in the `/drain-beads` work loop: creates or re
 `.worktrees/<bead>` on branch `drain/<bead>` (branching off the repo's primary branch when
 neither the worktree nor the branch already exists). It then reports the clone's hook-bundle
 state (`pg-hooks status --porcelain`) and writes **no file** into the worktree: git runs the
-bundle's hooks from the shared common dir. An absent `pg-hooks` or an unrecognized state reports
-`missing`. Safe to re-run: an existing worktree or parked branch is reused rather than
+bundle's hooks from the shared common dir. It reads the `hooks=` key first (`n/a` means pg-hooks does not apply to the clone) and
+falls back to the state name for an older `pg-hooks`. An absent `pg-hooks` or an unrecognized
+state reports `missing`. Safe to re-run: an existing worktree or parked branch is reused rather than
 recreated.
 
 ```
@@ -211,7 +212,7 @@ pb drain isolate --bead <id> --repo <abs-path> [--json] [--git-timeout <duration
   since the id lands in both a filesystem path and a branch ref; bare `.`/`..` are also
   rejected. Dots are otherwise legal — live ids such as `pg2-4dz88.2.3` exist.
 - Human output is one line:
-  `worktree=<abs> branch=drain/<id> reused=<none|worktree|branch> precommit=<bundle|stale|missing|broken>`
+  `worktree=<abs> branch=drain/<id> reused=<none|worktree|branch> precommit=<bundle|stale|missing|broken|n/a>`
   (the PRECOMMIT vocabulary of `integrate-branch-support --facts`; nothing is written to the
   worktree).
   `--json` emits the same fields as a JSON object instead.

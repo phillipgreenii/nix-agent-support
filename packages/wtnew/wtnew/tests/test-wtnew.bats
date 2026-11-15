@@ -55,7 +55,9 @@ setup() {
   # PGH_BIN: a `pg-hooks` stub shadowing any real one for the whole test, so
   # nothing depends on whether this machine has applied. Default (no
   # PG_HOOKS_STUB_STATE) = "pg-hooks not installed" (exit 127); a test opts into
-  # a state by exporting PG_HOOKS_STUB_STATE. Deliberately OUTSIDE $TEST_DIR so
+  # a state by exporting PG_HOOKS_STUB_STATE (and, to model a pg-hooks new
+  # enough to print the trailing hooks= line, PG_HOOKS_STUB_HOOKS; unset = an
+  # old stub that prints only state=). Deliberately OUTSIDE $TEST_DIR so
   # it cannot dirty the fixture repo. Both wtnew and the integrate-branch-support
   # it runs resolve this stub.
   PGH_BIN="$(mktemp -d)"
@@ -63,6 +65,7 @@ setup() {
     '#!/bin/sh' \
     '[ -n "${PG_HOOKS_STUB_STATE:-}" ] || exit 127' \
     "printf 'state=%s\\nbundle=\\ngeneration=\\nstages=\\nreinstall=\\n' \"\$PG_HOOKS_STUB_STATE\"" \
+    '[ -z "${PG_HOOKS_STUB_HOOKS:-}" ] || printf "hooks=%s\n" "$PG_HOOKS_STUB_HOOKS"' \
     'exit "${PG_HOOKS_STUB_EXIT:-0}"' >"$PGH_BIN/pg-hooks"
   chmod +x "$PGH_BIN/pg-hooks"
   export PATH="$PGH_BIN:$PATH"
@@ -224,6 +227,23 @@ add_worktree() {
     [ ! -e "$TEST_DIR/.worktrees/pg2-state$i/.pre-commit-config.yaml" ]
     [[ "$output" == *"PRECOMMIT=$want"* ]]
   done
+}
+
+@test "pg-hooks hooks= after state= wins over the state name; hooks=n/a reports the distinct n/a value" {
+  local i=0 trip st hk want
+  for trip in "present:runs:bundle" "relocated:runs:stale" "unreachable:skipped:missing" "broken:failing:broken" "not-enrolled:n/a:n/a"; do
+    IFS=: read -r st hk want <<<"$trip"
+    i=$((i + 1))
+    PG_HOOKS_STUB_STATE="$st" PG_HOOKS_STUB_HOOKS="$hk" run bash "$BIN" "pg2-hooks$i"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PRECOMMIT=$want"* ]]
+  done
+}
+
+@test "old pg-hooks printing only state= (no hooks=): a not-enrolled state still reports n/a, others use the state mapping" {
+  PG_HOOKS_STUB_STATE=not-enrolled run bash "$BIN" pg2-old1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PRECOMMIT=n/a"* ]]
 }
 
 @test "pg-hooks absent (127): PRECOMMIT=missing is reported and no config is written" {

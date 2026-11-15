@@ -149,13 +149,16 @@ and the container's own priority, then:
 
      It reuses an existing worktree or parked branch, otherwise creates
      `.worktrees/<id>` on `<work-branch>` off the repo's primary branch. It asks
-     `pg-hooks status --porcelain` about the hooks and writes nothing into the
-     worktree: git runs the hooks from the shared common dir, and the
+     `pg-hooks status --porcelain` about the hooks (its `hooks=` key first, the
+     state name only for an older `pg-hooks`) and writes nothing into the
+     worktree: git runs the hooks from the shared common dir. The
      `precommit=` field of the output line (`Result.Precommit` in `--json`)
-     reports `bundle|stale|missing|broken` (`missing` also covers `pg-hooks`
-     absent or an unrecognized state). `stale`,
-     `missing` and `broken` mean the commit's own hook run will NOT happen
-     (the stubs print one `pg-hooks:` notice and exit 0), so tell the
+     is `bundle` when the hooks run and are current, `n/a` when `pg-hooks`
+     does not apply to the clone (say nothing about hooks to the subagent, and
+     do not suggest a reinstall), and otherwise `stale`, `missing` or `broken`
+     (`missing` also covers `pg-hooks` absent). `stale`, `missing` and
+     `broken` mean the commit's own hook run will NOT happen
+     as the repo intends (the stubs print one `pg-hooks:` notice and exit 0), so tell the
      implementation subagent the commit gate is not in force rather than let
      it report hooks as passed. Exit 0 → proceed
      (the output line names the worktree). Exit 11 → conflicting isolation state

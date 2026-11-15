@@ -32,10 +32,12 @@ func newDrainIsolateCmd() *cobra.Command {
 branch, otherwise branches off the repo's primary branch.
 
 It then reports the clone's hook-bundle state in the precommit field
-(bundle|stale|missing|broken, the PRECOMMIT vocabulary of
+(bundle|stale|missing|broken|n/a, the PRECOMMIT vocabulary of
 integrate-branch-support --facts, from "pg-hooks status --porcelain") and
 writes NO file into the worktree: git runs the bundle's hooks from the shared
-common dir. An absent pg-hooks or an unrecognized state reports missing.
+common dir. It reads the hooks= key first (n/a means pg-hooks does not apply to the clone)
+and falls back to the state name for an older pg-hooks. An absent pg-hooks or an
+unrecognized state reports missing.
 
 Exit codes: 0 isolated (created or reused); 1 generic failure; 2 usage error; 11 conflicting
 isolation state (the worktree path holds another branch, or drain/<bead> is

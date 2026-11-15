@@ -41,19 +41,21 @@ Reserve `--all-files` for a deliberate full-repo sweep, not per-change validatio
 
 ## `pg-hooks status` state reference
 
-Moved here from the always-on core. `pg-hooks status --porcelain || true` prints a `state=` line:
-`present`, `stale`, `missing`, `broken`, `unreachable` or `relocated`. `status` exits non-zero for
-most non-`present` states by design, so read the state, not the exit code. Never probe with bare
-`ls` (it exits non-zero on a missing file, which is itself a failed tool call).
+Moved here from the always-on core. `pg-hooks status --porcelain || true` prints `key=value` lines
+(`state=` for diagnosis, `hooks=` for programs). `status` exits non-zero for most clones that need
+attention by design, so read its output, not the exit code. Never probe with bare `ls` (it exits
+non-zero on a missing file, which is itself a failed tool call).
 
-- `present`/`stale` (bundle repo): `git add` first, then `pg-hooks fix` (also `pre-commit-fix`),
+Run `pg-hooks status`; if its output says the hooks did NOT run, say so in the report using the tool's words; if it says pg-hooks does not apply, say nothing about hooks and validate with the repo's own documented tooling.
+
+- When the hooks run (a bundle repo): `git add` first, then `pg-hooks fix` (also `pre-commit-fix`),
   which applies the repo's fixers to staged files only and restages them; it exits `11` after
   listing files skipped because they have both staged and unstaged changes. Before staging, run
   the project formatter in write mode (`nix fmt -- <files>`, `gofumpt -w`, `prettier --write`) to
   avoid a failed-commit + restage round trip.
-- `missing`/`broken`/`unreachable`/`relocated`: the commit-time stubs print one `pg-hooks:` notice
-  and exit 0, so the commit gate is NOT in force; say so in the report. The notice names the exact
-  rebuild command; a rebuild is a nix build, so run it through `bgrun` and wait for it with `bgwait NAME --timeout 540` and Bash `timeout: 600000` (never more than one `bgcheck` between `bgwait` calls; never poll with `sleep`, `date`, `tail` or repeated `bgcheck`).
+- When the hooks did NOT run, the commit-time stubs print one `pg-hooks:` notice and exit 0, so the
+  commit gate is NOT in force; say so in the report. The notice names the exact rebuild command
+  when a rebuild applies; a rebuild is a nix build, so run it through `bgrun` and wait for it with `bgwait NAME --timeout 540` and Bash `timeout: 600000` (never more than one `bgcheck` between `bgwait` calls; never poll with `sleep`, `date`, `tail` or repeated `bgcheck`).
   Never link, copy or regenerate a hook config to make hooks run.
 - Exit `127` or no `state=` line: `pg-hooks` is not installed; report
   `pg-hooks not installed on this machine; ask the operator to run pn workspace apply` and fall back

@@ -676,7 +676,8 @@ EOF2
 # call records its cwd and argv to $STUB_BIN/pg-hooks-calls (outside the
 # fixture repo, so recording never dirties the tree under test); the ABSENCE
 # of that file proves pg-hooks was NOT called. `pg-hooks status` prints
-# state=$STUB_PGH_STATE (when set) and exits $STUB_PGH_STATUS_RC (default 0);
+# state=$STUB_PGH_STATE (when set), then hooks=$STUB_PGH_HOOKS as the LAST line
+# (when set; unset is an older pg-hooks with no hooks=), and exits $STUB_PGH_STATUS_RC (default 0);
 # any other subcommand writes [stderr-text] to stderr and exits [exit-code].
 stub_pg_hooks() {
   local rc="${1:-0}" msg="${2:-}"
@@ -690,6 +691,7 @@ if [ "\$1" = status ]; then
     bundle="\${STUB_PGH_BUNDLE:-}"
     if [ -n "\${STUB_PGH_BUNDLE_FILE:-}" ] && [ -f "\$STUB_PGH_BUNDLE_FILE" ]; then bundle="\$(cat "\$STUB_PGH_BUNDLE_FILE")"; fi
     printf 'state=%s\nbundle=%s\ngeneration=\nstages=\nreinstall=\n' "\$STUB_PGH_STATE" "\$bundle"
+    if [ -n "\${STUB_PGH_HOOKS:-}" ]; then printf 'hooks=%s\n' "\$STUB_PGH_HOOKS"; fi
   fi
   exit "\${STUB_PGH_STATUS_RC:-0}"
 fi
@@ -754,6 +756,45 @@ facts_precommit() {
 
 @test "facts: PRECOMMIT is missing when pg-hooks status reports unreachable" {
   facts_precommit unreachable missing 15
+}
+
+# facts_precommit_hooks <state> <hooks> <expected PRECOMMIT> [status rc]
+facts_precommit_hooks() {
+  STUB_PGH_HOOKS="$2"
+  export STUB_PGH_HOOKS
+  facts_precommit "$1" "$3" "${4:-0}"
+}
+
+@test "facts: PRECOMMIT follows hooks= when it comes after state=" {
+  facts_precommit_hooks present runs bundle
+  facts_precommit_hooks stale runs stale 14
+  facts_precommit_hooks relocated runs stale 16
+  facts_precommit_hooks missing skipped missing 13
+  facts_precommit_hooks unreachable skipped missing 15
+  facts_precommit_hooks broken skipped missing 12
+  facts_precommit_hooks broken failing broken 12
+}
+
+@test "facts: hooks=n/a reports the distinct n/a value, not missing" {
+  facts_precommit_hooks not-enrolled 'n/a' 'n/a'
+}
+
+@test "facts: hooks= outranks the state name for a state this tool does not know" {
+  facts_precommit_hooks futurestate runs stale
+  facts_precommit_hooks futurestate skipped missing
+  facts_precommit_hooks futurestate 'n/a' 'n/a'
+}
+
+@test "facts: an old pg-hooks printing only state= falls back to the state mapping" {
+  unset STUB_PGH_HOOKS
+  facts_precommit present bundle
+  facts_precommit relocated stale 16
+  facts_precommit unreachable missing 15
+  facts_precommit not-enrolled 'n/a'
+}
+
+@test "facts: an unrecognized hooks= value falls back to the state mapping" {
+  facts_precommit_hooks present weird bundle
 }
 
 @test "facts: pg-hooks status runs from the worktree root of a linked worktree" {
@@ -1328,6 +1369,26 @@ rl_advance_and_rebase() {
   run bash "$BIN" --prek-branch-diff
   [ "$status" -eq 0 ]
   [ "$(rl_runs)" -eq 1 ]
+  [ -f "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+}
+
+@test "pre-land reuse: an opted-out run (hooks=n/a, exit 0) records no marker" {
+  rl_fixture
+  export STUB_PGH_STATE=not-enrolled STUB_PGH_HOOKS='n/a' STUB_PGH_BUNDLE=
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
+  [ "$(rl_runs)" -eq 1 ]
+  [ ! -e "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
+  # and a second run does not reuse anything: the hooks command runs again
+  run bash "$BIN" --prek-branch-diff
+  [ "$(rl_runs)" -eq 2 ]
+}
+
+@test "pre-land reuse: a present bundle with hooks=runs after state= still records a marker" {
+  rl_fixture
+  export STUB_PGH_HOOKS=runs
+  run bash "$BIN" --prek-branch-diff
+  [ "$status" -eq 0 ]
   [ -f "$(git rev-parse --path-format=absolute --git-common-dir)/integrate-branch/pre-land-pass/feat" ]
 }
 

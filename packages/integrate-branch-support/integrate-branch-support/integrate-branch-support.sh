@@ -23,14 +23,20 @@ Options:
                       (WT, FB, CC, PRIMARY, DIRTY, AHEAD, BEHIND, PRECOMMIT,
                       CC_CORE_WORKTREE -- non-empty iff the canonical clone's
                       .git/config sets core.worktree; read-only, never cleared).
-                      PRECOMMIT is bundle|stale|missing|broken, from
-                      `pg-hooks status --porcelain`
+                      PRECOMMIT is bundle|stale|missing|broken|n/a, from the
+                      hooks= key of `pg-hooks status --porcelain` (n/a: pg-hooks
+                      does not apply to this clone; an older pg-hooks without
+                      hooks= is mapped from its state= line)
   --prek-branch-diff  FF-1b: run `pg-hooks run pre-land <FB>` in WT (the hooks
                       over the whole branch diff). Exit 10 (a hook failed)
                       and any other failure are passed through; exit 13 (no
                       hook bundle) and a missing pg-hooks
                       (127) record their notice line and exit 0. Never
-                      links, copies or regenerates a hook config.
+                      links, copies or regenerates a hook config. Accepted
+                      limitation: the lander records exit 0 as pass and
+                      relays stderr only for a skipped result (exit 13), so a
+                      clone where pg-hooks does not apply (exit 0) shows pass,
+                      with the `pg-hooks: NOT run` line only in the raw log.
                       Opt-in reuse (git config pgii-integrate-branch.preLandReuse
                       true; any other value means off): a passing run is
                       remembered under <git-common-dir>/integrate-branch/ and

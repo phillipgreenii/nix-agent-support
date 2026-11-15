@@ -36,7 +36,7 @@ type Result struct {
 	Worktree string `json:"worktree"`
 	Branch   string `json:"branch"`
 	Reused   string `json:"reused"` // none | worktree | branch
-	// Precommit is the hook-bundle state: bundle | stale | missing | broken
+	// Precommit is the hook-bundle state: bundle | stale | missing | broken | n/a
 	// (the PRECOMMIT vocabulary of integrate-branch-support --facts). NO file is
 	// ever written into the worktree.
 	Precommit string `json:"precommit"`
@@ -144,37 +144,61 @@ func Isolate(ctx context.Context, inner run.Runner, p Params) (Result, error) {
 	// Report the hook-bundle state; write nothing into the worktree. An absent
 	// pg-hooks, or any state this tool does not recognize (including the retired
 	// `legacy`), reports missing.
-	res.Precommit = precommitFact(hooksState(ctx, r, wt))
+	state, hooks := hooksStatus(ctx, r, wt)
+	res.Precommit = precommitFact(state, hooks)
 	return res, nil
 }
 
-// hooksState runs `pg-hooks status --porcelain` in dir and returns its
-// state= value (present|stale|missing|broken|unreachable|relocated), or
-// "" when pg-hooks is absent (exec failure or exit 127) or prints no
-// recognizable state. The exit code is deliberately ignored: status encodes
-// the state in its exit code too (14 stale, 13 missing, ...), so a non-zero
-// exit is expected; callers parse the porcelain, never prose (spec 5.3).
-func hooksState(ctx context.Context, r run.Runner, dir string) string {
+// hooksStatus runs `pg-hooks status --porcelain` in dir and returns its
+// state= value (kept for diagnosis and for the fallback mapping) and its
+// hooks= value (runs|skipped|failing|n/a). Either is "" when pg-hooks is
+// absent (exec failure or exit 127), prints no such line, or prints a value
+// this tool does not recognize; an older pg-hooks prints no hooks= line at
+// all. The exit code is deliberately ignored: status encodes the state in its
+// exit code too (14 stale, 13 missing, ...), so a non-zero exit is expected;
+// callers parse the porcelain, never prose (spec 5.3). Every line is scanned:
+// hooks= follows state=.
+func hooksStatus(ctx context.Context, r run.Runner, dir string) (state, hooks string) {
 	out, _ := r.Run(ctx, "pg-hooks", []string{"status", "--porcelain"}, run.Options{Dir: dir})
 	for _, line := range strings.Split(out.Stdout, "\n") {
-		v, ok := strings.CutPrefix(strings.TrimSpace(line), "state=")
-		if !ok {
-			continue
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "state="); ok {
+			switch v {
+			case "present", "stale", "missing", "broken", "unreachable", "relocated", "not-enrolled":
+				state = v
+			}
+		} else if v, ok := strings.CutPrefix(line, "hooks="); ok {
+			switch v {
+			case "runs", "skipped", "failing", "n/a":
+				hooks = v
+			}
 		}
-		switch v {
-		case "present", "stale", "missing", "broken", "unreachable", "relocated":
-			return v
-		}
-		return ""
 	}
-	return ""
+	return state, hooks
 }
 
-// precommitFact maps a pg-hooks state to the PRECOMMIT vocabulary
-// integrate-branch-support --facts defines (bundle|stale|missing|broken):
-// relocated is a bundle that must be rebuilt (stale); unreachable means git
-// never runs this clone's hooks (missing).
-func precommitFact(state string) string {
+// precommitFact maps pg-hooks status to the PRECOMMIT vocabulary
+// integrate-branch-support --facts defines (bundle|stale|missing|broken|n/a).
+// It branches on hooks= when present: runs is a bundle (stale unless the
+// state is present), skipped is missing, failing is broken, and n/a is the
+// distinct value "n/a" (pg-hooks does not apply, so no reinstall hint). When
+// hooks= is absent (an older pg-hooks) it falls back to the state-name
+// mapping: relocated is a bundle that must be rebuilt (stale); unreachable
+// means git never runs this clone's hooks (missing).
+func precommitFact(state, hooks string) string {
+	switch hooks {
+	case "runs":
+		if state == "present" {
+			return "bundle"
+		}
+		return "stale"
+	case "skipped":
+		return "missing"
+	case "failing":
+		return "broken"
+	case "n/a":
+		return "n/a"
+	}
 	switch state {
 	case "present":
 		return "bundle"
@@ -182,6 +206,8 @@ func precommitFact(state string) string {
 		return "stale"
 	case "broken":
 		return "broken"
+	case "not-enrolled":
+		return "n/a"
 	}
 	return "missing"
 }
