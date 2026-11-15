@@ -171,15 +171,16 @@ func TestProduce_levelSourceExemptFromGatesAndHalt(t *testing.T) {
 	}
 }
 
-// One hung probe delays neither another sensor nor a later pass; it is not
-// started again while running, ends at its own deadline, and is counted.
+// One hung probe delays neither another sensor nor a later pass, and is not
+// started again while it is running. The probe is held by a gate channel under
+// an hour-long deadline, so nothing here depends on wall-clock time.
 func TestLevelPuller_hungProbeDelaysNoOtherSensor(t *testing.T) {
 	release := make(chan struct{})
 	cmd := &levelCmd{fn: map[string]func(context.Context, []string) ([]byte, error){
 		"hung": func(ctx context.Context, _ []string) ([]byte, error) {
 			select {
 			case <-ctx.Done():
-				return []byte("partial output that must be discarded\n"), ctx.Err()
+				return nil, ctx.Err()
 			case <-release:
 				return nil, nil
 			}
@@ -188,28 +189,46 @@ func TestLevelPuller_hungProbeDelaysNoOtherSensor(t *testing.T) {
 	}}
 	ing := &fakeIngest{}
 	obs := &failObs{}
-	p := newPuller(cmd, ing, obs, levelSrc("a", "slow", "hung", 300*time.Millisecond), levelSrc("b", "quick", "fast", time.Second))
-	start := time.Now()
+	p := newPuller(cmd, ing, obs, levelSrc("a", "slow", "hung", time.Hour), levelSrc("b", "quick", "fast", time.Hour))
 	started := p.PullAll(context.Background())
 	if len(started) != 2 {
 		t.Fatalf("started %v, want both", started)
 	}
-	deadline := time.After(2 * time.Second)
+	// The hung probe is still blocked on its gate, so the quick sensor being
+	// ingested at all proves it did not wait on the hung one.
 	for len(ing.got()) == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("the quick sensor was never ingested")
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	if time.Since(start) >= 250*time.Millisecond {
-		t.Fatalf("the quick sensor took %s: it waited on the hung one", time.Since(start))
+		time.Sleep(time.Millisecond)
 	}
 	if again := p.PullAll(context.Background()); len(again) != 1 || again[0] != "b" {
 		t.Fatalf("second pull started %v; the still-running probe must not be started twice", again)
 	}
+	close(release)
 	p.Wait()
-	if f := p.Failures(); f["slow"][PullFailDeadline] != 1 || len(f["quick"]) != 0 {
+	if f := p.Failures(); len(f["slow"]) != 0 || len(f["quick"]) != 0 {
+		t.Fatalf("failures = %v, want none (the probe was released, not timed out)", f)
+	}
+	if len(obs.got) != 0 {
+		t.Fatalf("observer = %v", obs.got)
+	}
+}
+
+// A probe that outlives its own deadline ends at it, is counted once as a
+// deadline failure, and any output it produced before then is discarded. The
+// probe blocks until its context ends, so the outcome does not depend on how
+// long the (1 ms) deadline really takes.
+func TestLevelPuller_hungProbeEndsAtItsDeadlineAndIsCounted(t *testing.T) {
+	cmd := &levelCmd{fn: map[string]func(context.Context, []string) ([]byte, error){
+		"hung": func(ctx context.Context, _ []string) ([]byte, error) {
+			<-ctx.Done()
+			return []byte("partial output that must be discarded\n"), ctx.Err()
+		},
+	}}
+	ing := &fakeIngest{}
+	obs := &failObs{}
+	p := newPuller(cmd, ing, obs, levelSrc("a", "slow", "hung", time.Millisecond))
+	p.PullAll(context.Background())
+	p.Wait()
+	if f := p.Failures(); f["slow"][PullFailDeadline] != 1 || len(f["slow"]) != 1 {
 		t.Fatalf("failures = %v, want one deadline for slow", f)
 	}
 	for _, l := range ing.got() {
@@ -258,30 +277,33 @@ func TestLevelPuller_failureReasons(t *testing.T) {
 	}
 }
 
-// The start pass ends as soon as every source finished, or at the wait.
+// The start pass ends as soon as every source finished, or at the wait. The
+// waits are an hour (never reached: a regression hangs the test) and 1 ms with a
+// probe held by a gate, so neither outcome depends on wall-clock time.
 func TestLevelPuller_startPassBoundedWait(t *testing.T) {
+	release := make(chan struct{})
 	cmd := &levelCmd{fn: map[string]func(context.Context, []string) ([]byte, error){
 		"fast": func(context.Context, []string) ([]byte, error) { return answer("cpu"), nil },
-		"hung": func(ctx context.Context, _ []string) ([]byte, error) { <-ctx.Done(); return nil, ctx.Err() },
+		"hung": func(ctx context.Context, _ []string) ([]byte, error) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-release:
+				return nil, nil
+			}
+		},
 	}}
 	ing := &fakeIngest{}
 	p := newPuller(cmd, ing, nil, levelSrc("a", "x", "fast", time.Second))
-	begin := time.Now()
-	if !p.StartPass(context.Background(), 5*time.Second) {
+	if !p.StartPass(context.Background(), time.Hour) {
 		t.Fatal("StartPass reported a timeout although the only source answered")
 	}
-	if time.Since(begin) > time.Second {
-		t.Fatalf("StartPass waited %s for a source that had answered", time.Since(begin))
-	}
 
-	p2 := newPuller(cmd, ing, nil, levelSrc("a", "x", "fast", time.Second), levelSrc("h", "y", "hung", 2*time.Second))
-	begin = time.Now()
-	if p2.StartPass(context.Background(), 100*time.Millisecond) {
+	p2 := newPuller(cmd, ing, nil, levelSrc("a", "x", "fast", time.Second), levelSrc("h", "y", "hung", time.Hour))
+	if p2.StartPass(context.Background(), time.Millisecond) {
 		t.Fatal("StartPass reported every source answered with one hung")
 	}
-	if el := time.Since(begin); el < 90*time.Millisecond || el > time.Second {
-		t.Fatalf("StartPass returned after %s, want about the 100ms wait", el)
-	}
+	close(release)
 	p2.Wait()
 }
 
