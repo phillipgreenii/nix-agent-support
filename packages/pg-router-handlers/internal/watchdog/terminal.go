@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/complete"
 	"github.com/phillipgreenii/pg-router-handlers/internal/gitenv"
+	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/gitclient"
 )
 
@@ -343,14 +344,21 @@ func safeToReset(ctx context.Context, path, repoRoot, worktreeDir string) bool {
 // which worktreeIsolation passes to internal/worktree.Ensure) — a separate,
 // not-yet-landed migration (pg2-mj9n0, x/gitclient's WorktreeManager role).
 // Retire this type only once that bead lands.
-type OSGit struct{}
+type OSGit struct {
+	// Exec runs the call; nil means cmdrun.Exec.
+	Exec cmdrun.Runner
+}
 
 // Run runs `git -C <dir> <args...>` with a hermetic child environment (see
 // this package's gitenv import) — retained for internal/executor's
 // worktree-creation seam; see the OSGit doc comment above for why this
 // file still defines it despite no longer calling it itself.
-func (OSGit) Run(ctx context.Context, dir string, args ...string) error {
-	return gitenv.Command(ctx, dir, args...).Run()
+func (g OSGit) Run(ctx context.Context, dir string, args ...string) error {
+	run := g.Exec
+	if run == nil {
+		run = cmdrun.Exec
+	}
+	return gitenv.ResultErr(run(ctx, gitenv.Call(dir, args...)))
 }
 
 // HardStop runs the 100% hard-stop sequence (terminal) for a session whose

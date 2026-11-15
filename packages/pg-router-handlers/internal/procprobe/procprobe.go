@@ -11,12 +11,13 @@
 package procprobe
 
 import (
-	"bytes"
 	"context"
-	"os/exec"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Timeout bounds one lsof invocation: it walks every process, which is normally
@@ -40,16 +41,23 @@ type Probe func(ctx context.Context) ([]string, error)
 // non-zero when it cannot inspect some process (another user's, a zombie) while
 // still printing the rest, so a non-empty listing is trusted whatever the exit
 // status; only an empty listing WITH an error is a failure.
-func CWDs(ctx context.Context) ([]string, error) {
-	tctx, cancel := context.WithTimeout(ctx, Timeout)
-	defer cancel()
-	cmd := exec.CommandContext(tctx, "lsof", "-n", "-P", "-w", "-d", "cwd", "-Fn")
-	var so bytes.Buffer
-	cmd.Stdout = &so
-	err := cmd.Run()
-	cwds := Parse(so.Bytes())
-	if len(cwds) == 0 && err != nil {
-		return nil, err
+func CWDs(ctx context.Context) ([]string, error) { return CWDsWith(ctx, cmdrun.Exec) }
+
+// CWDsWith is CWDs over an injectable cmdrun.Runner.
+func CWDsWith(ctx context.Context, run cmdrun.Runner) ([]string, error) {
+	res := run(ctx, cmdrun.Call{Name: "lsof", Args: []string{"-n", "-P", "-w", "-d", "cwd", "-Fn"}, Timeout: Timeout})
+	cwds := Parse(res.Stdout)
+	if len(cwds) == 0 {
+		switch {
+		case res.StartErr != nil:
+			return nil, res.StartErr
+		case res.TimedOut:
+			return nil, fmt.Errorf("lsof timed out after %s: %w", Timeout, res.CtxErr)
+		case res.CtxErr != nil:
+			return nil, res.CtxErr
+		case res.Code != 0 || res.Signal != "":
+			return nil, fmt.Errorf("lsof: exit status %d", res.Code)
+		}
 	}
 	return cwds, nil
 }

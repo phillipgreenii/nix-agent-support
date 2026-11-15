@@ -11,10 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/exitcode"
 )
 
@@ -160,14 +160,16 @@ func (c CLI) Release(ctx context.Context, leaseID string) error {
 }
 
 func osExec(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	var so, se bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &so, &se
-	cmd.WaitDelay = 5 * time.Second
-	err := cmd.Run()
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		return so.Bytes(), se.Bytes(), ee.ExitCode(), nil
+	res := cmdrun.Exec(ctx, cmdrun.Call{Name: name, Args: args, WaitDelay: 5 * time.Second, Timeout: execBackstop})
+	switch {
+	case res.StartErr != nil:
+		return res.Stdout, res.Stderr, 0, res.StartErr
+	case res.CtxErr != nil:
+		return res.Stdout, res.Stderr, 0, res.CtxErr
 	}
-	return so.Bytes(), se.Bytes(), 0, err
+	return res.Stdout, res.Stderr, res.Code, nil
 }
+
+// execBackstop bounds one pg-checkout-pool child when the caller's context has
+// no deadline of its own.
+const execBackstop = 5 * time.Minute

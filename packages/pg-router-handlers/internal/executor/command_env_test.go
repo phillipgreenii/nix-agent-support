@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
+	"github.com/phillipgreenii/pg-router-handlers/internal/query"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 )
 
@@ -254,8 +254,7 @@ func TestCommandDispatch_FailingWrapperIsAcceptedFailure(t *testing.T) {
 	if err == nil || errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), "pg-wrap[env]: boom") {
 		t.Fatalf("want a non-busy error with the stderr tail, got %v", err)
 	}
-	var ee *exec.ExitError
-	if !errors.As(err, &ee) || ee.ExitCode() != 2 {
+	if code, _, ok := query.ExitDetail(err); !ok || code != 2 {
 		t.Fatalf("exit code 2 not reachable: %v", err)
 	}
 	role.Command.Argv = []string{"/usr/bin/env", "W=1", "/bin/sh", "-c", "exit 9"}

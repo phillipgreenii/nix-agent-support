@@ -113,9 +113,8 @@ func TestCommandDispatch_FailureIncludesStderrTail(t *testing.T) {
 	if strings.Contains(msg, "stdout-noise") {
 		t.Fatalf("stdout must not leak into the error; err = %q", msg)
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 {
-		t.Fatalf("errors.As did not resolve the exit code 3; err = %v", err)
+	if code, _, ok := query.ExitDetail(err); !ok || code != 3 {
+		t.Fatalf("ExitDetail did not resolve the exit code 3; err = %v", err)
 	}
 }
 

@@ -7,13 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // ErrCancelUnconfirmed is returned by Cancel when `ccpool cancel` exits 24
@@ -127,8 +127,8 @@ func newCLIRunner(cfg config.Config, poolDir string) *CLIRunner {
 	return c
 }
 
-// execCmd runs `bin args...`, capturing stdout and stderr into separate buffers
-// (pg2-x6ef) via exec.CommandContext so a cancelled or expired ctx actually
+// execCmd runs `bin args...` through x/cmdrun, capturing stdout and stderr
+// separately (pg2-x6ef), so a cancelled or expired ctx actually
 // kills the child rather than hanging the orchestrator/watchdog (pg2-yy42).
 // poolDir, when non-empty, overrides CCPOOL_POOL in the child's environment
 // (bead pg2-mr0sl) — cmd.Env is left nil (inherit os.Environ() unchanged,
@@ -141,25 +141,50 @@ func execCmd(ctx context.Context, bin, poolDir string, args []string) (stdout, s
 // is "", CCPOOL_POOL is stripped from the child's environment so ccpool uses
 // its default pool.
 func execCmdIn(ctx context.Context, bin, poolDir string, defaultPool bool, args []string) (stdout, stderr []byte, err error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	call := cmdrun.Call{Name: bin, Args: args, Timeout: execBackstop}
 	switch {
 	case poolDir != "":
-		cmd.Env = append(os.Environ(), "CCPOOL_POOL="+poolDir)
+		call.Env = append(os.Environ(), "CCPOOL_POOL="+poolDir)
+		call.EnvMode = cmdrun.EnvExact
 	case defaultPool:
+		call.EnvMode = cmdrun.EnvExact
+		call.Env = []string{} // an empty env, not "inherit"
 		for _, kv := range os.Environ() {
 			if !strings.HasPrefix(kv, "CCPOOL_POOL=") {
-				cmd.Env = append(cmd.Env, kv)
+				call.Env = append(call.Env, kv)
 			}
 		}
-		if cmd.Env == nil {
-			cmd.Env = []string{} // non-nil: an empty env, not "inherit"
-		}
 	}
-	var so, se bytes.Buffer
-	cmd.Stdout = &so
-	cmd.Stderr = &se
-	err = cmd.Run()
-	return so.Bytes(), se.Bytes(), err
+	res := cmdrun.Exec(ctx, call)
+	switch {
+	case res.StartErr != nil:
+		err = res.StartErr
+	case res.CtxErr != nil:
+		err = res.CtxErr
+	case res.Signal != "" || res.Code != 0:
+		err = &cmdExitError{Code: res.Code, Signal: res.Signal}
+	}
+	return res.Stdout, res.Stderr, err
+}
+
+// execBackstop bounds one ccpool child when its caller's context has no
+// deadline; every real call is bounded tighter by ccpool's per-call timeout.
+const execBackstop = 2 * EnsureTimeout
+
+// cmdExitError is the error a ccpool child that ran but did not succeed
+// produces (the exit-status error exitCoder reads).
+type cmdExitError struct {
+	Code   int
+	Signal string
+}
+
+func (e *cmdExitError) ExitCode() int { return e.Code }
+
+func (e *cmdExitError) Error() string {
+	if e.Signal != "" {
+		return "signal: " + e.Signal
+	}
+	return fmt.Sprintf("exit status %d", e.Code)
 }
 
 // ccpool runs a ccpool subcommand under a per-call timeout and returns stdout

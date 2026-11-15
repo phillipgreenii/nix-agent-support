@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -163,8 +162,7 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) ([]byte, error)
 		emitDispatchEnd(r.deps.Log, d, "", OutcomeCompleted)
 		return out, nil
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() == busyExitCode {
+	if code, _, ok := query.ExitDetail(err); ok && code == busyExitCode {
 		return nil, fmt.Errorf("command role %q item %s: %w: %w", d.Role.Name, d.Item.ID, ErrBusy, err)
 	}
 	// Exactly one outcome record follows dispatch_start (the decline above has the
@@ -181,9 +179,8 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) ([]byte, error)
 // commandFailureText is the text a failed command payload is classified from
 // (INV-CCH-9): the stderr the command wrote, else the error that stopped it.
 func commandFailureText(err error) string {
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
-		return string(exitErr.Stderr)
+	if _, stderr, ok := query.ExitDetail(err); ok && len(stderr) > 0 {
+		return string(stderr)
 	}
 	return err.Error()
 }
@@ -266,11 +263,11 @@ const commandStderrTailMax = 2048
 // last), redacted with failsig.Redact before cutting, then collapsed to a
 // single line.
 func stderrSuffix(err error) string {
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	_, stderr, ok := query.ExitDetail(err)
+	if !ok {
 		return ""
 	}
-	tail := stderrTail(exitErr.Stderr)
+	tail := stderrTail(stderr)
 	if tail == "" {
 		return ""
 	}

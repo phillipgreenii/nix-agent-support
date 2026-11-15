@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router-handlers/internal/sessionlock"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
 
 // Session-list observer, the list-call counters and the bounded diagnostic.
@@ -262,5 +264,26 @@ func TestIdHashIsStable(t *testing.T) {
 	}
 	if idHash("abc") != 440920331 { // FNV-1a 32 of "abc"
 		t.Fatalf("hash = %v", idHash("abc"))
+	}
+}
+
+func TestSampleProcessTreeWith_psFailureIsReported(t *testing.T) {
+	f := cmdruntest.New(t)
+	f.On(cmdruntest.MatchName("ps")).Return(cmdruntest.Fail(1, "boom"))
+	s := sampleProcessTreeWith(context.Background(), 1, f.Runner())
+	if s.Stuck != "none" || len(s.Procs) != 1 || !strings.HasPrefix(s.Procs[0], "ps failed: ") {
+		t.Fatalf("sample = %+v", s)
+	}
+	if c := f.Calls()[0]; c.Timeout != listDiagToolTimeout {
+		t.Fatalf("ps call unbounded: %+v", c)
+	}
+}
+
+func TestSampleProcessTreeWith_listsTheDescendants(t *testing.T) {
+	f := cmdruntest.New(t)
+	f.On(cmdruntest.MatchName("ps")).Return(cmdruntest.Out("  10     1 S    01:00 ccpool list\n  11    10 S    00:05 sleep 1\n"))
+	s := sampleProcessTreeWith(context.Background(), 10, f.Runner())
+	if len(s.Procs) == 0 {
+		t.Fatalf("sample = %+v, want the ccpool tree", s)
 	}
 }

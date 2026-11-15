@@ -140,6 +140,10 @@ func kickJanitor(cfgPath, roleFile string) error {
 	if err != nil {
 		return err
 	}
+	// Not routed through x/cmdrun: the janitor is detached on purpose. cmdrun.Exec
+	// waits for the child and captures its pipes, and this call must return at
+	// once, leave the child running in its own process group after this process
+	// exits, and never kill it (no context, no timeout).
 	cmd := exec.CommandContext(context.Background(), exe, "janitor", "--config", cfgPath, "--role-file", roleFile)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {

@@ -2,36 +2,32 @@ package originguard
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"reflect"
 	"testing"
-)
 
-func stub(t *testing.T, body string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "pg-origin-guard")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
+	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/cmdruntest"
+)
 
 func TestExecCheck_exitCodes(t *testing.T) {
 	for name, tc := range map[string]struct {
-		body    string
+		res     cmdrun.Result
 		avail   bool
 		reason  string
 		wantErr bool
 	}{
-		"available":   {"echo 'available realm=zr reason=ok'; exit 0", true, "ok", false},
-		"unavailable": {"echo 'unavailable realm=zr reason=cert-expired'; exit 3", false, "cert-expired", false},
-		"fault":       {"exit 1", false, "", true},
-		"usage":       {"exit 2", false, "", true},
-		"config":      {"exit 7", false, "", true},
-		"old-75":      {"exit 75", false, "", true},
+		"available":   {cmdruntest.Out("available realm=zr reason=ok\n"), true, "ok", false},
+		"unavailable": {cmdrun.Result{Stdout: []byte("unavailable realm=zr reason=cert-expired\n"), Code: 3}, false, "cert-expired", false},
+		"fault":       {cmdruntest.Fail(1, ""), false, "", true},
+		"usage":       {cmdruntest.Fail(2, ""), false, "", true},
+		"config":      {cmdruntest.Fail(7, ""), false, "", true},
+		"old-75":      {cmdruntest.Fail(75, ""), false, "", true},
+		"signalled":   {cmdrun.Result{Code: -1, Signal: "killed"}, false, "", true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			v, err := ExecCheck(stub(t, tc.body))(context.Background(), "/repo")
+			fake := cmdruntest.New(t)
+			fake.On(cmdruntest.Any).Return(tc.res)
+			v, err := ExecCheckWith("pg-origin-guard", fake.Runner())(context.Background(), "/repo")
 			if (err != nil) != tc.wantErr || v.Available != tc.avail || v.Reason != tc.reason {
 				t.Fatalf("got %+v, %v", v, err)
 			}
@@ -49,18 +45,23 @@ func TestExitCodesPinPgOriginGuardContract(t *testing.T) {
 	}
 }
 
-func TestExecCheck_passesRepoArgs(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "argv")
-	bin := stub(t, `echo "$@" > `+log+"\nexit 0")
-	if _, err := ExecCheck(bin)(context.Background(), "/some/repo"); err != nil {
+func TestExecCheck_passesRepoArgsAndBounds(t *testing.T) {
+	fake := cmdruntest.New(t)
+	fake.On(cmdruntest.Any).Return(cmdruntest.Out(""))
+	if _, err := ExecCheckWith("", fake.Runner())(context.Background(), "/some/repo"); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(log)
-	if string(b) != "check --repo /some/repo\n" {
-		t.Fatalf("argv %q", b)
+	calls := fake.Calls()
+	if len(calls) != 1 || calls[0].Name != DefaultBin || !reflect.DeepEqual(calls[0].Args, []string{"check", "--repo", "/some/repo"}) {
+		t.Fatalf("calls %+v", calls)
+	}
+	if calls[0].Timeout != DefaultTimeout {
+		t.Fatalf("timeout %v, want %v", calls[0].Timeout, DefaultTimeout)
 	}
 }
 
+// One real-process case through the real Exec path: a missing binary is a
+// tool fault, not "unavailable".
 func TestExecCheck_missingBinaryIsFault(t *testing.T) {
 	if _, err := ExecCheck("/nonexistent/pg-origin-guard")(context.Background(), "/r"); err == nil {
 		t.Fatal("want fault")

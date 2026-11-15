@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Session-list observer and bounded hang diagnostic.
@@ -272,13 +273,19 @@ func classifyStuck(tree []procRow) (stuck string, ccpoolPID int) {
 // sampleProcessTree is the production listDiagger: `ps`, classification, and a
 // stack sample of the ccpool process (macOS `sample`, else skipped).
 func sampleProcessTree(ctx context.Context, root int) listDiagSample {
-	tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), listDiagToolTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(tctx, "ps", "-A", "-o", "pid=,ppid=,state=,etime=,command=").Output()
-	if err != nil {
+	return sampleProcessTreeWith(ctx, root, cmdrun.Exec)
+}
+
+// sampleProcessTreeWith is sampleProcessTree over an injectable cmdrun.Runner.
+// The tools run on a context that outlives the caller's cancel, so the
+// diagnosis still gets sampled while the call that wanted it is being torn down.
+func sampleProcessTreeWith(ctx context.Context, root int, run cmdrun.Runner) listDiagSample {
+	ctx = context.WithoutCancel(ctx)
+	ps := run(ctx, cmdrun.Call{Name: "ps", Args: []string{"-A", "-o", "pid=,ppid=,state=,etime=,command="}, Timeout: listDiagToolTimeout})
+	if err := toolErr(ps); err != nil {
 		return listDiagSample{Stuck: "none", Procs: []string{"ps failed: " + err.Error()}}
 	}
-	tree := descendants(parsePS(string(out)), root)
+	tree := descendants(parsePS(string(ps.Stdout)), root)
 	stuck, pid := classifyStuck(tree)
 	s := listDiagSample{Stuck: stuck}
 	for _, r := range tree {
@@ -286,14 +293,26 @@ func sampleProcessTree(ctx context.Context, root int) listDiagSample {
 	}
 	if pid != 0 {
 		if bin, err := exec.LookPath("sample"); err == nil {
-			sctx, scancel := context.WithTimeout(context.WithoutCancel(ctx), listDiagToolTimeout)
-			defer scancel()
-			if b, err := exec.CommandContext(sctx, bin, strconv.Itoa(pid), "1").Output(); err == nil {
-				s.Stack = truncate(string(b), listDiagStackMax)
+			sm := run(ctx, cmdrun.Call{Name: bin, Args: []string{strconv.Itoa(pid), "1"}, Timeout: listDiagToolTimeout})
+			if toolErr(sm) == nil {
+				s.Stack = truncate(string(sm.Stdout), listDiagStackMax)
 			}
 		}
 	}
 	return s
+}
+
+// toolErr is nil for a clean run, else the reason a sampling tool failed.
+func toolErr(res cmdrun.Result) error {
+	switch {
+	case res.StartErr != nil:
+		return res.StartErr
+	case res.CtxErr != nil:
+		return res.CtxErr
+	case res.Signal != "" || res.Code != 0:
+		return fmt.Errorf("exit status %d", res.Code)
+	}
+	return nil
 }
 
 func truncate(s string, n int) string {

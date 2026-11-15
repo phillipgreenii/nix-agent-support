@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/gitenv"
 	"github.com/phillipgreenii/pg-router-handlers/internal/prompt"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Handler-side worktree pre-fetch (bead pg2-hh32y).
@@ -55,6 +55,9 @@ const (
 	// SIGTERM (and its own children, e.g. a smudge filter, to close the pipes)
 	// before it is killed outright (bead pg2-lpctwk).
 	prefetchGitWaitDelay = 15 * time.Second
+	// prefetchGitBackstop bounds one git child when the caller's context has no
+	// deadline of its own.
+	prefetchGitBackstop = time.Hour
 
 	// prefetchCheckoutMarker is a file in the worktree's gitdir that exists
 	// only while the pre-fetch checkout is unfinished. A checkout that was
@@ -94,20 +97,27 @@ func (r *ccpoolRun) guardSkipsFetch(ctx context.Context, wt string, d DispatchCo
 // tests can script git; production uses osGitRun (gitenv-hermetic).
 type GitRun func(ctx context.Context, dir string, stdout io.Writer, args ...string) error
 
-// osGitRun is the production GitRun. gitenv.Command owns the child
-// environment (every git child in this module MUST be built by it).
+// osGitRun is the production GitRun, through x/cmdrun. gitenv.Call owns the
+// child environment (every git child in this module MUST be built by it). The
+// child's stdout is captured and then copied to stdout, so a large diff is held
+// in memory once; the caller's context is the normal bound, prefetchGitBackstop
+// the one for a caller that passed none.
 func osGitRun(ctx context.Context, dir string, stdout io.Writer, args ...string) error {
-	cmd := gitenv.Command(ctx, dir, args...)
-	// Cancel gently: SIGKILL (the exec.CommandContext default) leaves a stale
-	// index.lock in the worktree gitdir that nothing ever removes, because git
-	// cannot clean up after itself. SIGTERM lets git release its lockfiles; the
-	// WaitDelay still kills a child that ignores it (bead pg2-lpctwk).
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = prefetchGitWaitDelay
-	var stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	call := gitenv.Call(dir, args...)
+	// Cancel gently: SIGKILL (the default) leaves a stale index.lock in the
+	// worktree gitdir that nothing ever removes, because git cannot clean up
+	// after itself. SIGTERM lets git release its lockfiles; the grace still
+	// kills a child that ignores it (bead pg2-lpctwk).
+	call.TermGrace = prefetchGitWaitDelay
+	call.Timeout = prefetchGitBackstop
+	res := cmdrun.Exec(ctx, call)
+	if len(res.Stdout) > 0 {
+		if _, err := stdout.Write(res.Stdout); err != nil {
+			return fmt.Errorf("git %s: write stdout: %w", strings.Join(args, " "), err)
+		}
+	}
+	if err := gitenv.ResultErr(res); err != nil {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
 }

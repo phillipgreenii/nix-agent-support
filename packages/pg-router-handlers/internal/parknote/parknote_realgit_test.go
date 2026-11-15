@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/gitenv"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Real-git guard for the discovery (V-3): the porcelain parsing, the primary
@@ -17,11 +18,11 @@ import (
 
 func git(ctx context.Context, t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := gitenv.Command(ctx, dir, args...)
-	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+	call := gitenv.Call(dir, args...)
+	call.Env = append(call.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
+	if res := cmdrun.Exec(ctx, call); !res.OK() {
+		t.Fatalf("git %v: %v: %v\n%s%s", args, res.StartErr, gitenv.ResultErr(res), res.Stdout, res.Stderr)
 	}
 }
 

@@ -205,7 +205,7 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	if run == nil {
 		run = cmdrun.Exec
 	}
-	call := cmdrun.Call{Name: Command, Args: args, Dir: r.Dir, WaitDelay: r.WaitDelay}
+	call := cmdrun.Call{Name: Command, Args: args, Dir: r.Dir, WaitDelay: r.WaitDelay, Timeout: timeout}
 	if call.WaitDelay <= 0 {
 		call.WaitDelay = DefaultWaitDelay
 	}

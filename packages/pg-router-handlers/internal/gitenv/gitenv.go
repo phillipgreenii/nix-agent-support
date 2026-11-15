@@ -27,18 +27,27 @@
 // this and only worktree commits do.
 //
 // Every `git` child in this module's production code MUST therefore be built
-// by [Command], which owns the child environment. A bare
+// described by [Call], which owns the child environment. A bare
 // exec.CommandContext(ctx, "git", ...) with no cmd.Env — or a
 // cmd.Env = append(os.Environ(), ...) — is the defect this package exists to
-// remove (pg2-bh09g).
+// remove (pg2-bh09g). The call runs through x/cmdrun, so each one is bounded
+// by a Timeout.
 package gitenv
 
 import (
-	"context"
+	"fmt"
 	"os"
-	"os/exec"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
+
+// DefaultTimeout is the backstop bound [Call] puts on a git child. The caller's
+// context is the normal limit; a caller with a tighter one overrides Timeout on
+// the returned Call.
+const DefaultTimeout = 5 * time.Minute
 
 // gitVarPrefix is the namespace this package filters. Everything OUTSIDE it
 // is passed through untouched: production git needs PATH, HOME,
@@ -115,22 +124,65 @@ func Hermetic(base []string) []string {
 // Environ is [Hermetic] applied to the current process environment.
 func Environ() []string { return Hermetic(os.Environ()) }
 
-// Command builds `git [-C dir] <args...>` with a hermetic child environment.
-// An empty dir omits -C, so the child inherits the parent's working
-// directory.
+// Call describes `git [-C dir] <args...>` with a hermetic child environment as
+// a cmdrun.Call. An empty dir omits -C, so the child inherits the parent's
+// working directory. The caller adjusts Timeout, TermGrace or Env on the
+// returned value and runs it through a cmdrun.Runner.
 //
 // Callers still pass dir: it is necessary (git must be pointed at the right
 // place) but, as this package's doc comment explains, not sufficient. Both
 // halves are required, which is why they are supplied together here rather
 // than left to each call site.
-func Command(ctx context.Context, dir string, args ...string) *exec.Cmd {
+func Call(dir string, args ...string) cmdrun.Call {
 	full := make([]string, 0, len(args)+2)
 	if dir != "" {
 		full = append(full, "-C", dir)
 	}
 	full = append(full, args...)
+	return cmdrun.Call{
+		Name:    "git",
+		Args:    full,
+		Env:     Environ(),
+		EnvMode: cmdrun.EnvExact,
+		Timeout: DefaultTimeout,
+	}
+}
 
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = Environ()
-	return cmd
+// ExitError is the error a git child that ran but did not succeed produces: it
+// exited non-zero (Code) or was ended by a signal (Signal, Code -1). Stderr is
+// the child's trimmed stderr.
+type ExitError struct {
+	Code   int
+	Signal string
+	Stderr string
+}
+
+// ExitCode is the exit status, or -1 for a signal.
+func (e *ExitError) ExitCode() int { return e.Code }
+
+func (e *ExitError) Error() string {
+	msg := "exit status " + strconv.Itoa(e.Code)
+	if e.Signal != "" {
+		msg = "signal: " + e.Signal
+	}
+	if e.Stderr != "" {
+		msg += ": " + e.Stderr
+	}
+	return msg
+}
+
+// ResultErr maps a cmdrun.Result onto an error: nil for a clean run, the start
+// error, the context error (a timeout reports as such), or an *ExitError.
+func ResultErr(res cmdrun.Result) error {
+	switch {
+	case res.StartErr != nil:
+		return res.StartErr
+	case res.TimedOut:
+		return fmt.Errorf("git timed out: %w", res.CtxErr)
+	case res.CtxErr != nil:
+		return res.CtxErr
+	case res.Signal != "" || res.Code != 0:
+		return &ExitError{Code: res.Code, Signal: res.Signal, Stderr: strings.TrimSpace(string(res.Stderr))}
+	}
+	return nil
 }

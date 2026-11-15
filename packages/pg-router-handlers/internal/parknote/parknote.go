@@ -17,7 +17,6 @@
 package parknote
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -27,6 +26,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/gitenv"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Marker opens every park note, so the note is findable in a bead's comments.
@@ -53,18 +53,25 @@ type Git interface {
 }
 
 // OSGit is the production Git: hermetic environment, explicit WaitDelay.
-type OSGit struct{}
+type OSGit struct {
+	// Exec runs the call; nil means cmdrun.Exec.
+	Exec cmdrun.Runner
+}
 
 // Output implements Git.
-func (OSGit) Output(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := gitenv.Command(ctx, dir, args...)
-	cmd.WaitDelay = gitWaitDelay
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+func (g OSGit) Output(ctx context.Context, dir string, args ...string) (string, error) {
+	run := g.Exec
+	if run == nil {
+		run = cmdrun.Exec
+	}
+	call := gitenv.Call(dir, args...)
+	call.Timeout = gitTimeout
+	call.WaitDelay = gitWaitDelay
+	res := run(ctx, call)
+	if err := gitenv.ResultErr(res); err != nil {
 		return "", err
 	}
-	return out.String(), nil
+	return string(res.Stdout), nil
 }
 
 // Input is everything a park note states.

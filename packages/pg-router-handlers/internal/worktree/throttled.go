@@ -7,12 +7,12 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/gitclient"
 )
 
@@ -382,9 +382,6 @@ func (t *throttledClient) stopFsmonitor(ctx context.Context, path string) {
 // (a worktree with no running daemon exits non-zero; that is not a failure).
 // It stops only this worktree's daemon and leaves core.fsmonitor set.
 func StopFsmonitorDaemon(ctx context.Context, path string) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", path, "fsmonitor--daemon", "stop")
 	env := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "GIT_DIR=") || strings.HasPrefix(kv, "GIT_WORK_TREE=") || strings.HasPrefix(kv, "GIT_INDEX_FILE=") {
@@ -392,6 +389,8 @@ func StopFsmonitorDaemon(ctx context.Context, path string) {
 		}
 		env = append(env, kv)
 	}
-	cmd.Env = env
-	_ = cmd.Run()
+	_ = cmdrun.Exec(ctx, cmdrun.Call{
+		Name: "git", Args: []string{"-C", path, "fsmonitor--daemon", "stop"},
+		Env: env, EnvMode: cmdrun.EnvExact, Timeout: 15 * time.Second,
+	})
 }

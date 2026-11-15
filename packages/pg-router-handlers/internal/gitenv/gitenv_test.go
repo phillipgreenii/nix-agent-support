@@ -1,10 +1,11 @@
 package gitenv
 
 import (
-	"context"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // leakedByAGitHookCommit is the GIT_* set a `git commit` FROM A LINKED
@@ -135,9 +136,9 @@ func TestCommandEnvExcludesLeakedGitDir(t *testing.T) {
 		t.Setenv(k, v)
 	}
 
-	cmd := Command(context.Background(), "/some/target/dir", "status", "--porcelain")
+	cmd := Call("/some/target/dir", "status", "--porcelain")
 
-	if cmd.Env == nil {
+	if cmd.EnvMode != cmdrun.EnvExact || cmd.Env == nil {
 		t.Fatal("cmd.Env is nil: a nil Env makes the child inherit the parent environment, which is the defect")
 	}
 	for _, k := range envKeys(cmd.Env) {
@@ -177,11 +178,10 @@ func TestCommandBuildsDirScopedArgs(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := Command(context.Background(), tc.dir, tc.args...)
+			cmd := Call(tc.dir, tc.args...)
 			// Args[0] is the resolved path to the git binary; compare on the
 			// base name so the assertion holds wherever git lives.
-			got := slices.Clone(cmd.Args)
-			got[0] = "git"
+			got := append([]string{cmd.Name}, cmd.Args...)
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("args\n got: %v\nwant: %v", got, tc.want)
 			}

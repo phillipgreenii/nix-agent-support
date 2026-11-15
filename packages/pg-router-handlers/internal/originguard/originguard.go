@@ -13,12 +13,11 @@ package originguard
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/exitcode"
 )
 
@@ -50,22 +49,28 @@ type Verdict struct {
 type Check func(ctx context.Context, repoPath string) (Verdict, error)
 
 // ExecCheck returns the production Check, running bin (DefaultBin when empty).
-func ExecCheck(bin string) Check {
+func ExecCheck(bin string) Check { return ExecCheckWith(bin, cmdrun.Exec) }
+
+// ExecCheckWith is ExecCheck over an injectable cmdrun.Runner; tests pass a
+// cmdruntest.Fake.
+func ExecCheckWith(bin string, run cmdrun.Runner) Check {
 	if bin == "" {
 		bin = DefaultBin
 	}
 	return func(ctx context.Context, repoPath string) (Verdict, error) {
-		ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, bin, "check", "--repo", repoPath).Output()
-		if err == nil {
+		res := run(ctx, cmdrun.Call{Name: bin, Args: []string{"check", "--repo", repoPath}, Timeout: DefaultTimeout})
+		out := res.Stdout
+		switch {
+		case res.OK():
 			return Verdict{Available: true, Reason: reasonOf(out)}, nil
-		}
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && ee.ExitCode() == exitUnavailable {
+		case res.StartErr != nil:
+			return Verdict{}, fmt.Errorf("%s check --repo: %w", bin, res.StartErr)
+		case res.CtxErr != nil:
+			return Verdict{}, fmt.Errorf("%s check --repo: %w", bin, res.CtxErr)
+		case res.Signal == "" && res.Code == exitUnavailable:
 			return Verdict{Available: false, Reason: reasonOf(out)}, nil
 		}
-		return Verdict{}, fmt.Errorf("%s check --repo: %w", bin, err)
+		return Verdict{}, fmt.Errorf("%s check --repo: exit status %d: %s", bin, res.Code, strings.TrimSpace(string(res.Stderr)))
 	}
 }
 

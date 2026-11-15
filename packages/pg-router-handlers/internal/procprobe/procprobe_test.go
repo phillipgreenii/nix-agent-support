@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
 
 func TestHeld(t *testing.T) {
@@ -52,5 +55,33 @@ func TestKeep(t *testing.T) {
 	}
 	if keep, err := Keep(ctx, func(context.Context) ([]string, error) { return nil, errors.New("boom") }, "/x"); !keep || err == nil {
 		t.Errorf("a failed probe must keep and report: keep=%v err=%v", keep, err)
+	}
+}
+
+func TestCWDsWith_parsesAndTrustsListingDespiteExit(t *testing.T) {
+	f := cmdruntest.New(t)
+	f.On(cmdruntest.Any).Return(cmdrun.Result{Stdout: []byte("p1\nn/a/b\np2\nn/c\n"), Code: 1})
+	got, err := CWDsWith(context.Background(), f.Runner())
+	if err != nil || len(got) != 2 || got[0] != "/a/b" {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	if c := f.Calls()[0]; c.Name != "lsof" || c.Timeout != Timeout {
+		t.Fatalf("call %+v", c)
+	}
+}
+
+func TestCWDsWith_emptyListingIsAFailure(t *testing.T) {
+	for name, res := range map[string]cmdrun.Result{
+		"exit":    cmdruntest.Fail(1, ""),
+		"start":   {Code: -1, StartErr: errors.New("no lsof")},
+		"timeout": {Code: -1, Signal: "killed", CtxErr: context.DeadlineExceeded, TimedOut: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := cmdruntest.New(t)
+			f.On(cmdruntest.Any).Return(res)
+			if got, err := CWDsWith(context.Background(), f.Runner()); err == nil {
+				t.Fatalf("got %v, want an error", got)
+			}
+		})
 	}
 }

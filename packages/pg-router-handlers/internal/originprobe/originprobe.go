@@ -70,7 +70,6 @@
 package originprobe
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,6 +84,7 @@ import (
 	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/gitenv"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Class is the probe's verdict for one origin.
@@ -411,14 +411,12 @@ func Env() []string {
 // gitRunner is the production Runner. gitenv.Command owns the argv shape and
 // the hermetic environment; Env layers the no-prompt policy on top.
 func gitRunner(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := gitenv.Command(ctx, dir, args...)
-	cmd.Env = Env()
+	call := gitenv.Call(dir, args...)
+	call.Env = Env()
 	// A killed git can leave an ssh grandchild holding the pipe open; do not
 	// let Wait block on it past the timeout.
-	cmd.WaitDelay = 2 * time.Second
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	err := cmd.Run()
-	return buf.String(), err
+	call.WaitDelay = 2 * time.Second
+	res := cmdrun.Exec(ctx, call)
+	out := string(res.Stdout) + string(res.Stderr)
+	return out, gitenv.ResultErr(res)
 }
