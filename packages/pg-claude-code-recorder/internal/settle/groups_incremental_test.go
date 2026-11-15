@@ -35,7 +35,7 @@ func newGrpEnv(t *testing.T) *grpEnv {
 	csDriverSeq++
 	name := fmt.Sprintf("settle-groups-%d", csDriverSeq)
 	cnt := countdriver.Register(name)
-	st, err := store.Open(t.TempDir(), store.Options{DriverName: name, NoCloseStats: true})
+	st, err := openStore(t, t.TempDir(), store.Options{DriverName: name, NoCloseStats: true})
 	if err != nil {
 		t.Fatal(err)
 	}

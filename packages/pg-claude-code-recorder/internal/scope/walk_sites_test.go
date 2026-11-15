@@ -32,6 +32,7 @@ var approvedWalkSites = map[string]string{
 	"internal/watcher/backend_linux.go:addWatch":        "exempt: adds one watch for a directory walkWatchTree already accepted (the predicate runs in its caller)",
 	"internal/settle/remove.go:quarantineDirs":          "predicate: walks projects/ pruned with Scope.DescendDir (plus the quarantine directory itself)",
 	// one named directory, non-recursive
+	"internal/tpldir/tpldir.go:load":                 "exempt: reads only the template directory a test build just created in a temp dir; never the Claude directory",
 	"internal/settle/extract.go:sessionExists":       "exempt: lists projects/ (an allowlisted root) one level to find a session; never recurses",
 	"internal/settle/remove.go:findQuarantined":      "exempt: lists one quarantine directory beside an ingested file",
 	"internal/settle/remove.go:flushArchive":         "exempt: lists one archive directory in the recorder's own state",

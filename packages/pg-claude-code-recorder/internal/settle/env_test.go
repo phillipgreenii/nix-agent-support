@@ -138,7 +138,7 @@ func (e *env) open() {
 	e.rec = fsx.NewRecorder(e.innerFS)
 	e.rec.SoftFullSync = true
 	e.obs = obs.New(nil)
-	st, err := store.Open(e.state, store.Options{FS: e.rec, Obs: e.obs, NoCloseStats: true})
+	st, err := openStore(e.t, e.state, store.Options{FS: e.rec, Obs: e.obs, NoCloseStats: true})
 	if err != nil {
 		e.t.Fatal(err)
 	}
