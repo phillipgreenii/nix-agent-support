@@ -10,7 +10,11 @@ cachePackages = [
   'github.com/google/uuid',
   'github.com/grpc-ecosystem/grpc-gateway/v2/runtime',
   'github.com/grpc-ecosystem/grpc-gateway/v2/utilities',
+  'github.com/hashicorp/go-version',
+  'github.com/json-iterator/go',
   'github.com/mattn/go-isatty',
+  'github.com/modern-go/concurrent',
+  'github.com/modern-go/reflect2',
   'github.com/munnerz/goautoneg',
   'github.com/ncruces/go-strftime',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord',
@@ -29,6 +33,9 @@ cachePackages = [
   'github.com/phillipgreenii/x/cmdrun',
   'github.com/phillipgreenii/x/cmdruntest',
   'github.com/phillipgreenii/x/exitcode',
+  'github.com/phillipgreenii/x/jsonllogger',
+  'github.com/phillipgreenii/x/otelsetup',
+  'github.com/phillipgreenii/x/otelsetup/spool',
   'github.com/phillipgreenii/x/pprofserver',
   'github.com/prometheus/client_golang/prometheus',
   'github.com/prometheus/client_golang/prometheus/promhttp',
@@ -39,6 +46,12 @@ cachePackages = [
   'github.com/spf13/cobra',
   'github.com/spf13/pflag',
   'go.opentelemetry.io/auto/sdk',
+  'go.opentelemetry.io/collector/featuregate',
+  'go.opentelemetry.io/collector/pdata/pcommon',
+  'go.opentelemetry.io/collector/pdata/pmetric',
+  'go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp',
+  'go.opentelemetry.io/collector/pdata/ptrace',
+  'go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp',
   'go.opentelemetry.io/contrib/bridges/otelslog',
   'go.opentelemetry.io/otel',
   'go.opentelemetry.io/otel/attribute',
@@ -46,6 +59,9 @@ cachePackages = [
   'go.opentelemetry.io/otel/codes',
   'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc',
   'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp',
+  'go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp',
+  'go.opentelemetry.io/otel/exporters/otlp/otlptrace',
+  'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp',
   'go.opentelemetry.io/otel/exporters/prometheus',
   'go.opentelemetry.io/otel/log',
   'go.opentelemetry.io/otel/log/embedded',
@@ -62,17 +78,24 @@ cachePackages = [
   'go.opentelemetry.io/otel/sdk/metric/exemplar',
   'go.opentelemetry.io/otel/sdk/metric/metricdata',
   'go.opentelemetry.io/otel/sdk/resource',
+  'go.opentelemetry.io/otel/sdk/trace',
   'go.opentelemetry.io/otel/semconv/v1.26.0',
   'go.opentelemetry.io/otel/semconv/v1.37.0',
+  'go.opentelemetry.io/otel/semconv/v1.40.0',
   'go.opentelemetry.io/otel/semconv/v1.43.0',
   'go.opentelemetry.io/otel/semconv/v1.43.0/otelconv',
   'go.opentelemetry.io/otel/trace',
   'go.opentelemetry.io/otel/trace/embedded',
   'go.opentelemetry.io/otel/trace/noop',
   'go.opentelemetry.io/proto/otlp/collector/logs/v1',
+  'go.opentelemetry.io/proto/otlp/collector/metrics/v1',
+  'go.opentelemetry.io/proto/otlp/collector/trace/v1',
   'go.opentelemetry.io/proto/otlp/common/v1',
   'go.opentelemetry.io/proto/otlp/logs/v1',
+  'go.opentelemetry.io/proto/otlp/metrics/v1',
   'go.opentelemetry.io/proto/otlp/resource/v1',
+  'go.opentelemetry.io/proto/otlp/trace/v1',
+  'go.uber.org/multierr',
   'golang.org/x/net/http/httpguts',
   'golang.org/x/net/http2',
   'golang.org/x/net/http2/hpack',
@@ -202,13 +225,29 @@ cachePackages = [
     version = 'v2.33.0'
     hash = 'sha256-WvVvp0wWqIZE4qi3lUOb+VTt1urJAEnjQp7dvRkg2Hg='
 
+  [mod.'github.com/hashicorp/go-version']
+    version = 'v1.9.0'
+    hash = 'sha256-sRr/50k8Wra0PJLCJgSkIxvR+ce3PItx4HpFvVijGYk='
+
   [mod.'github.com/inconshreveable/mousetrap']
     version = 'v1.1.0'
     hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
 
+  [mod.'github.com/json-iterator/go']
+    version = 'v1.1.12'
+    hash = 'sha256-To8A0h+lbfZ/6zM+2PpRpY3+L6725OPC66lffq6fUoM='
+
   [mod.'github.com/mattn/go-isatty']
     version = 'v0.0.24'
     hash = 'sha256-pmq8KKIb2+qMF3E1cR2B7NAj5joF2tZduyXjIfIlkTk='
+
+  [mod.'github.com/modern-go/concurrent']
+    version = 'v0.0.0-20180306012644-bacd9c7ef1dd'
+    hash = 'sha256-OTySieAgPWR4oJnlohaFTeK1tRaVp/b0d1rYY8xKMzo='
+
+  [mod.'github.com/modern-go/reflect2']
+    version = 'v1.0.3-0.20250322232337-35a7c28c31ee'
+    hash = 'sha256-0pkWWZRB3lGFyzmlxxrm0KWVQo9HNXNafaUu3k+rE1g='
 
   [mod.'github.com/munnerz/goautoneg']
     version = 'v0.0.0-20191010083416-a7dc8b61c822'
@@ -254,6 +293,14 @@ cachePackages = [
     version = 'v1.2.1'
     hash = 'sha256-73bFYhnxNf4SfeQ52ebnwOWywdQbqc9lWawCcSgofvE='
 
+  [mod.'go.opentelemetry.io/collector/featuregate']
+    version = 'v1.65.0'
+    hash = 'sha256-2N4nCucHX3zb09YR6z2G7gOPyd7T4494/01Gt8EJVzE='
+
+  [mod.'go.opentelemetry.io/collector/pdata']
+    version = 'v1.65.0'
+    hash = 'sha256-58OGvARo590PNGVZxP0zSqMKzA1lOo5sAvRMqKFyGYs='
+
   [mod.'go.opentelemetry.io/contrib/bridges/otelslog']
     version = 'v0.20.1'
     hash = 'sha256-x9ok/8QKu32U3os9lM7oUBQ4aPVMPjFCHvNR69rtkKA='
@@ -269,6 +316,18 @@ cachePackages = [
   [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp']
     version = 'v0.22.0'
     hash = 'sha256-ssBFTrn1bs8KdY3kYB/v74x8ImrKiECfEeNN7uo+sE8='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp']
+    version = 'v1.46.0'
+    hash = 'sha256-b04JcnVsAhuaDUfrqJY6+KfcgObKhn2KM/aIA+XvMO8='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace']
+    version = 'v1.47.0'
+    hash = 'sha256-upPAkVlbXKHWBritk71OSRcSCbEI7ffueMkGewtcRq4='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp']
+    version = 'v1.46.0'
+    hash = 'sha256-EfYe0k/r58lSJwc4csdhoycyTpHL/neecqXkVrLLXdg='
 
   [mod.'go.opentelemetry.io/otel/exporters/prometheus']
     version = 'v0.56.0'
@@ -301,6 +360,10 @@ cachePackages = [
   [mod.'go.opentelemetry.io/proto/otlp']
     version = 'v1.11.1'
     hash = 'sha256-M8SCpLO073LypQdj2INMAixdbTRvw0b5Hzw0lIJMc0M='
+
+  [mod.'go.uber.org/multierr']
+    version = 'v1.11.0'
+    hash = 'sha256-Lb6rHHfR62Ozg2j2JZy3MKOMKdsfzd1IYTR57r3Mhp0='
 
   [mod.'golang.org/x/net']
     version = 'v0.62.0'

@@ -43,6 +43,11 @@ func TestRunServeReturnsCleanlyOnACancelledContext(t *testing.T) {
 	if !strings.Contains(string(b), "pg-desk serve listening") {
 		t.Errorf("serve log lacks the start-up line:\n%s", b)
 	}
+	for _, phase := range []string{"http drain started", "http drained", "read pool closed", "store closed", "finished"} {
+		if !strings.Contains(string(b), "phase=\""+phase+"\"") && !strings.Contains(string(b), "phase="+phase) {
+			t.Errorf("serve log lacks shutdown phase %q:\n%s", phase, b)
+		}
+	}
 }
 
 // TestRunServeRefusesAddrAndPortTogether covers the flag conflict before

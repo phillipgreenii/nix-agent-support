@@ -10,7 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/phillipgreenii/x/jsonllogger"
+	"github.com/phillipgreenii/x/otelsetup"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/httpapi"
@@ -165,14 +168,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 		defer cancelShutdown()
 		_ = shutdown(shutdownCtx)
 	}()
-	logger := slog.New(telemetry.Fanout(slog.NewTextHandler(logFile, nil), telemetry.NewSlogHandler()))
+	logger := slog.New(jsonllogger.Fanout(slog.NewTextHandler(logFile, nil), telemetry.NewSlogHandler()))
+
+	// The shutdown clock starts when the signal context ends; the deferred
+	// observation below runs once the stores are closed, so the recorded
+	// duration covers every phase that follows the signal. It is registered
+	// before the store defers so it runs after them.
+	clk := newShutdownTimer(cmd.Context(), shutdownGrace)
+	var signals *otelsetup.CommonSignals
+	defer func() {
+		observeShutdown(context.WithoutCancel(cmd.Context()), signals, clk)
+		logShutdownPhase(logger, clk, "finished")
+	}()
 
 	st, err := store.Open(store.DefaultPath())
 	if err != nil {
 		return fmt.Errorf("serve: open store: %w", err)
 	}
 	installIssueGate(st, cfg)
-	defer func() { _ = st.Close() }()
+	defer func() {
+		_ = st.Close()
+		logShutdownPhase(logger, clk, "store closed")
+	}()
 	// A read-only pool for /metrics, the dashboard and the ready gate, so a long
 	// read pass never queues behind the writer's one connection. Opened after
 	// store.Open, which creates the file and brings the schema up to date.
@@ -180,13 +197,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("serve: open read pool: %w", err)
 	}
-	defer func() { _ = readPool.Close() }()
+	defer func() {
+		_ = readPool.Close()
+		logShutdownPhase(logger, clk, "read pool closed")
+	}()
 
 	routerPath := serveRouterConfig
 	if routerPath == "" {
 		routerPath = os.Getenv("PG_DESK_ROUTER_CONFIG")
 	}
-	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval), httpapi.WithReadStore(readPool))
+	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval), httpapi.WithReadStore(readPool), httpapi.WithMeterProvider(func(mp metric.MeterProvider) { signals = registerCommonSignals(mp) }))
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
@@ -213,12 +233,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return nil
 	case <-cmd.Context().Done():
 		logger.Info("pg-desk serve shutting down", "reason", cmd.Context().Err())
+		logShutdownPhase(logger, clk, "http drain started")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Error("serve: shutdown failed", "error", err)
 			return fmt.Errorf("serve: shutdown: %w", err)
 		}
+		logShutdownPhase(logger, clk, "http drained")
 		return nil
 	}
 }

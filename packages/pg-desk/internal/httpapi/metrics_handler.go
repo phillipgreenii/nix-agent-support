@@ -9,6 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	otelprometheus "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
@@ -33,8 +34,8 @@ import (
 // fresh per test (and once per real serve invocation), and a shared
 // global registry would make repeated construction within one test binary
 // collide with "duplicate metrics collector registration attempted".
-func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, snapshotCtx context.Context, every time.Duration) (http.Handler, error) {
-	registry, err := newMetricsRegistry(st, cfg, pollInterval)
+func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, snapshotCtx context.Context, every time.Duration, opts ...registryOption) (http.Handler, error) {
+	registry, err := newMetricsRegistry(st, cfg, pollInterval, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +73,9 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 		return nil, fmt.Errorf("httpapi: new prometheus exporter: %w", err)
 	}
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+	if ro.withProvider != nil {
+		ro.withProvider(mp)
+	}
 
 	// snapshotFn re-derives the same three freshness/counter fields
 	// BuildPayload computes for the JSON payload, read fresh from the
@@ -276,7 +280,10 @@ func scrapeHandler(reg prometheus.Gatherer, timeout time.Duration) http.Handler 
 }
 
 // registryOptions are test seams of newMetricsRegistry.
-type registryOptions struct{ noFocus bool }
+type registryOptions struct {
+	noFocus      bool
+	withProvider func(metric.MeterProvider)
+}
 
 type registryOption func(*registryOptions)
 

@@ -9,7 +9,7 @@
 // internal/metrics package, built the same OTel-metrics-API way
 // pg-router's own catalog is. Traces are out of scope for pg-desk
 // entirely, so — unlike the retired PR tool's own internal/telemetry, which this
-// package otherwise mirrors in shape (Init / NewSlogHandler / Fanout) —
+// package otherwise mirrors in shape (Init / NewSlogHandler) —
 // there is no tracer provider setup and no exported Tracer here.
 //
 // Initialization is best-effort: when no OTLP endpoint is configured, or

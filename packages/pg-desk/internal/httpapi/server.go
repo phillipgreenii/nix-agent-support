@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/freshness"
@@ -435,6 +437,9 @@ type options struct {
 	readStore *store.Store
 	// snapshotEvery overrides snapshotInterval when positive.
 	snapshotEvery time.Duration
+	// withProvider receives the catalog's meter provider before the catalog
+	// registers its own instruments.
+	withProvider func(metric.MeterProvider)
 }
 
 // Option customises NewHandler.
@@ -455,6 +460,13 @@ func WithPollInterval(fn PollIntervalFunc) Option {
 // pg_desk_metrics_snapshot_age_seconds. Without it every scrape collects live.
 func WithMetricsSnapshot(ctx context.Context) Option {
 	return func(o *options) { o.snapshotCtx = ctx }
+}
+
+// WithMeterProvider hands fn the meter provider behind /metrics, so the caller
+// can register instruments of its own on it (serve registers the shared
+// daemon signals). fn runs once, while the handler is built.
+func WithMeterProvider(fn func(metric.MeterProvider)) Option {
+	return func(o *options) { o.withProvider = fn }
 }
 
 // WithMetricsSnapshotInterval sets how often the background snapshot is
@@ -487,7 +499,7 @@ func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handl
 	if o.readStore != nil {
 		st = o.readStore
 	}
-	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval, o.snapshotCtx, o.snapshotEvery)
+	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval, o.snapshotCtx, o.snapshotEvery, func(ro *registryOptions) { ro.withProvider = o.withProvider })
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: new handler: %w", err)
 	}
