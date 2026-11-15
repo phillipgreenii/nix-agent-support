@@ -68,7 +68,7 @@ func newFakeReader(sock string) *facts.Reader {
 func TestWaitMessageBusyWholeWindowIsUnansweredNotAbsent(t *testing.T) {
 	sock, calls := fakeRecorder(t, func(int32) (int, any) { return busy() })
 	r := newFakeReader(sock)
-	ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 1200*time.Millisecond)
+	ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 700*time.Millisecond)
 	if ok || !errors.Is(err, facts.ErrFeedUnanswered) {
 		t.Fatalf("WaitMessage = %v, %v; want false, ErrFeedUnanswered", ok, err)
 	}
@@ -82,7 +82,7 @@ func TestWaitMessageBusyWholeWindowIsUnansweredNotAbsent(t *testing.T) {
 func TestWaitMessageGoodEmptyPageIsAbsent(t *testing.T) {
 	sock, _ := fakeRecorder(t, func(int32) (int, any) { return emptyPage() })
 	r := newFakeReader(sock)
-	if ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 1200*time.Millisecond); ok || err != nil {
+	if ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 150*time.Millisecond); ok || err != nil {
 		t.Fatalf("WaitMessage = %v, %v; want false, nil", ok, err)
 	}
 }
@@ -113,7 +113,7 @@ func TestWaitMessageBusyAtEndAfterGoodPageIsUnanswered(t *testing.T) {
 		return busy()
 	})
 	r := newFakeReader(sock)
-	ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 1500*time.Millisecond)
+	ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 200*time.Millisecond)
 	if ok || !errors.Is(err, facts.ErrFeedUnanswered) {
 		t.Fatalf("WaitMessage = %v, %v; want false, ErrFeedUnanswered", ok, err)
 	}
@@ -126,7 +126,7 @@ func TestWaitMessageDegradedEmptyPageIsUnansweredNotAbsent(t *testing.T) {
 		return http.StatusOK, map[string]any{"entries": []any{}, "next_cursor": "1:1", "degraded": true}
 	})
 	r := newFakeReader(sock)
-	ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 1200*time.Millisecond)
+	ok, err := r.WaitMessage(context.Background(), "/p/"+sess+".jsonl", "1:0", 150*time.Millisecond)
 	if ok || !errors.Is(err, facts.ErrFeedUnanswered) {
 		t.Fatalf("WaitMessage = %v, %v; want false, ErrFeedUnanswered", ok, err)
 	}

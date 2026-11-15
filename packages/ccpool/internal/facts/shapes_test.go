@@ -155,20 +155,33 @@ func TestAwaitingInputAgreesWithTheLegacyTwoQueryForm(t *testing.T) {
 			return askLine(ts(1), "m1", "t1") + askLine(ts(3), "m2", "t2") + resultLine(ts(4), "t2")
 		}, true},
 	}
-	for _, tc := range cases {
+	// One recorder for every case: each case is its own session (the fixture's
+	// session id with the case index in its last digit), so the cases cannot
+	// see each other's lines and the recorder starts and settles once.
+	e := clienttest.Start(t)
+	ids := make([]string, len(cases))
+	for i, tc := range cases {
+		ids[i] = sess[:len(sess)-1] + fmt.Sprint(i)
+		// Line, message and tool ids repeat across cases, so each case prefixes
+		// its own: the recorder keys rows by them.
+		pre := fmt.Sprintf("c%d-", i)
+		lines := strings.NewReplacer(sess, ids[i], `"uuid":"`, `"uuid":"`+pre, `"id":"`, `"id":"`+pre,
+			`"tool_use_id":"`, `"tool_use_id":"`+pre).Replace(tc.lines())
+		e.Write(filepath.Join("projects", e.Project, ids[i]+".jsonl"), lines)
+	}
+	e.Settle()
+	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e := clienttest.Start(t)
-			e.Write(filepath.Join("projects", e.Project, sess+".jsonl"), tc.lines())
-			e.Settle()
-			got, err := newReader(e).IsAwaitingInput(transcriptPath(e))
+			path := e.Path("projects", e.Project, ids[i]+".jsonl")
+			got, err := newReader(e).IsAwaitingInput(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			byQuery, err := newReader(e).IsAwaitingInputByQuery(transcriptPath(e))
+			byQuery, err := newReader(e).IsAwaitingInputByQuery(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if legacy := legacyAwaiting(t, e, sess); got != legacy || got != tc.want || byQuery != got {
+			if legacy := legacyAwaiting(t, e, ids[i]); got != legacy || got != tc.want || byQuery != got {
 				t.Fatalf("IsAwaitingInput = %v, by query = %v, legacy = %v, want %v", got, byQuery, legacy, tc.want)
 			}
 		})
