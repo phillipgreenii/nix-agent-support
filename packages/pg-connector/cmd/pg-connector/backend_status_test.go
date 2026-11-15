@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -244,14 +242,12 @@ func TestHealthRows_HealthyReportWithReasonsStaysSucceeded(t *testing.T) {
 func TestHealthRows_StatusRequestCarriesRegisteredConfigAndNoArgs(t *testing.T) {
 	// The fake answers a healthy document only when the request names the
 	// status op, carries its registered config block and has no args.
-	dir := t.TempDir()
-	script := "#!/bin/sh\nreq=$(cat)\n" +
-		"if echo \"$req\" | grep -q '\"op\":\"status\"' && echo \"$req\" | grep -q '\"k\":\"v\"' && ! echo \"$req\" | grep -q '\"args\"'; then\n" +
-		"cat <<'EOF_FAKE'\n" + statusHealthyDoc + "\nEOF_FAKE\nelse\ncat <<'EOF_FAKE'\n" + statusUnknownOp + "\nEOF_FAKE\nfi\n"
-	if err := installExec(filepath.Join(dir, "cfg-a"), script); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, "cfg-a", func(req string) string {
+		if strings.Contains(req, `"op":"status"`) && strings.Contains(req, `"k":"v"`) && !strings.Contains(req, `"args"`) {
+			return statusHealthyDoc + "\n"
+		}
+		return statusUnknownOp + "\n"
+	})
 	reg, err := parseRegistry([]byte("connector:\n  pr:\n    - cfg-a\nbackends:\n  cfg-a:\n    k: v\n"), "test.yaml")
 	if err != nil {
 		t.Fatalf("parseRegistry: %v", err)

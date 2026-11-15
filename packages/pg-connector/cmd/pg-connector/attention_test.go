@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -196,18 +195,12 @@ func TestFanOutAttentionList_DisabledNotApplicable(t *testing.T) {
 // echo (whose reply shape — the whole request object — cannot itself
 // decode as []schema.AttentionItem).
 func TestFanOutAttentionList_AttachesBackendConfig(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "backend-config-aware")
-	content := "#!/bin/sh\n" +
-		"req=$(cat)\n" +
-		"case \"$req\" in\n" +
-		"  *attention_threshold*72h*) printf '{\"protocolVersion\":1,\"schemaVersion\":1,\"result\":[{\"type\":\"pr\",\"id\":\"1\",\"summary\":\"s\"}]}\\n' ;;\n" +
-		"  *) printf '{\"protocolVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"config missing\"}}\\n' ;;\n" +
-		"esac\n"
-	if err := installExec(script, content); err != nil {
-		t.Fatalf("write backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, "backend-config-aware", func(req string) string {
+		if strings.Contains(req, "attention_threshold") && strings.Contains(req, "72h") {
+			return `{"protocolVersion":1,"schemaVersion":1,"result":[{"type":"pr","id":"1","summary":"s"}]}` + "\n"
+		}
+		return `{"protocolVersion":1,"error":{"code":"unavailable","message":"config missing"}}` + "\n"
+	})
 
 	reg, err := parseRegistry([]byte(
 		"attention:\n  sources:\n    - backend-config-aware\n"+

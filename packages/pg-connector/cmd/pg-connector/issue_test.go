@@ -179,14 +179,7 @@ func TestRun_IssueUpdate_Success(t *testing.T) {
 // and --clear-assignee are forwarded in the update op's fields.* shape.
 func TestRun_IssueUpdate_StatusAndClearAssigneeReachWire(t *testing.T) {
 	argvLog := filepath.Join(t.TempDir(), "argv.log")
-	dir := t.TempDir()
-	script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
-		`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
-	path := filepath.Join(dir, "backend-issue-reopen")
-	if err := installExec(path, script); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, "backend-issue-reopen", fakeAnswers(t, argvLog, nil, `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}`))
 	writeIssueConfigFor(t, "backend-issue-reopen")
 
 	_, _, code := executePr(t, []string{"issue", "update", "issue-1", "--status", "open", "--clear-assignee"})
@@ -217,14 +210,7 @@ func TestRun_IssueUpdate_ClearDeferReachesWire(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argvLog := filepath.Join(t.TempDir(), "argv.log")
-			dir := t.TempDir()
-			script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
-				`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
-			path := filepath.Join(dir, "backend-issue-defer")
-			if err := installExec(path, script); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			registerFake(t, "backend-issue-defer", fakeAnswers(t, argvLog, nil, `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}`))
 			writeIssueConfigFor(t, "backend-issue-defer")
 
 			_, _, code := executePr(t, tc.args)
@@ -255,14 +241,7 @@ func TestRun_IssueUpdate_ReleaseExpiredClaimReachesWire(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			argvLog := filepath.Join(t.TempDir(), "argv.log")
-			dir := t.TempDir()
-			script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
-				`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
-			path := filepath.Join(dir, "backend-issue-release")
-			if err := installExec(path, script); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			registerFake(t, "backend-issue-release", fakeAnswers(t, argvLog, nil, `{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}`))
 			writeIssueConfigFor(t, "backend-issue-release")
 
 			_, _, code := executePr(t, tc.args)

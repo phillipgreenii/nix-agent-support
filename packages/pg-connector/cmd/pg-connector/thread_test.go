@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -389,16 +388,12 @@ func writeThreadConfigWithBackendBlock(t *testing.T, backend string) {
 // test observes forwarding through the answer alone.
 func writeConfigGatedFakeBackend(t *testing.T, name, marker, ok string) {
 	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, name)
-	content := "#!/bin/sh\nreq=$(cat)\ncase \"$req\" in\n" +
-		"  *'" + marker + "'*)\ncat <<'FAKE_BACKEND_EOF'\n" + ok + "\nFAKE_BACKEND_EOF\n;;\n" +
-		"  *)\nprintf '{\"protocolVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"backend config block not forwarded\"}}\\n'\n;;\n" +
-		"esac\n"
-	if err := installExec(script, content); err != nil {
-		t.Fatalf("write config-gated fake backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, func(req string) string {
+		if strings.Contains(req, marker) {
+			return ok + "\n"
+		}
+		return `{"protocolVersion":1,"error":{"code":"unavailable","message":"backend config block not forwarded"}}` + "\n"
+	})
 }
 
 // TestRun_ThreadShow_ForwardsBackendConfig (bead pg2-apllc AC5): "thread

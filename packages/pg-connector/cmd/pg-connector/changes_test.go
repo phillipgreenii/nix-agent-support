@@ -22,13 +22,12 @@ import (
 // ledger path.
 func writeMarkerBackend(t *testing.T, name, markerPath string) {
 	t.Helper()
-	dir := t.TempDir()
-	script := filepath.Join(dir, name)
-	content := "#!/bin/sh\nreq=$(cat)\ncase \"$req\" in *'\"op\":\"capabilities\"'*) ;; *) echo invoked >>" + markerPath + " ;; esac\nprintf '{\"protocolVersion\":1,\"schemaVersion\":1,\"error\":{\"code\":\"unavailable\",\"message\":\"must not be called\"}}\\n'\n"
-	if err := installExec(script, content); err != nil {
-		t.Fatalf("write marker backend: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	registerFake(t, name, func(req string) string {
+		if !strings.Contains(req, `"op":"capabilities"`) {
+			appendLine(t, markerPath, "invoked")
+		}
+		return `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"must not be called"}}` + "\n"
+	})
 }
 
 // seedLedger saves l for key directly, bypassing the CLI, so a test can
