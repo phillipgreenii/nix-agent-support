@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -178,11 +180,83 @@ func FuzzStamp(f *testing.F) {
 // ---------------------------------------------------------------------------
 // The guard: the projection holds every configuration field interpret reads.
 
+// scanImporter resolves standard-library packages from compiled export data
+// (importer.Default) and this repository's own packages (this module and its
+// local replaces, all under one "packages" directory) by type-checking their
+// source in process, function bodies skipped. Any other third-party package
+// becomes an empty stand-in: a config.Config value can only reach interpret
+// through a package of this repository, so a stand-in cannot hide a read, and
+// type-checking the whole dependency closure from source under -race (a
+// pure-Go sqlite among it) is what made this scan cost tens of seconds.
+type scanImporter struct {
+	fset        *token.FileSet
+	std         types.Importer
+	seen        map[string]*types.Package
+	packagesDir string
+}
+
+const repoPackagesPrefix = "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/"
+
+func newScanImporter(fset *token.FileSet) (*scanImporter, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	for d := dir; ; d = filepath.Dir(d) {
+		if filepath.Base(d) == "packages" {
+			return &scanImporter{fset: fset, std: importer.Default(), seen: map[string]*types.Package{}, packagesDir: d}, nil
+		}
+		if d == filepath.Dir(d) {
+			return nil, fmt.Errorf("no enclosing packages directory above %s", dir)
+		}
+	}
+}
+
+func (h *scanImporter) Import(path string) (*types.Package, error) {
+	if path == "unsafe" {
+		return types.Unsafe, nil
+	}
+	if p, ok := h.seen[path]; ok {
+		return p, nil
+	}
+	first, _, _ := strings.Cut(path, "/")
+	switch {
+	case !strings.Contains(first, "."):
+		return h.std.Import(path)
+	case !strings.HasPrefix(path, repoPackagesPrefix):
+		p := types.NewPackage(path, filepath.Base(path))
+		p.MarkComplete()
+		h.seen[path] = p
+		return p, nil
+	}
+	bp, err := build.ImportDir(filepath.Join(h.packagesDir, strings.TrimPrefix(path, repoPackagesPrefix)), 0)
+	if err != nil {
+		return nil, err
+	}
+	var files []*ast.File
+	for _, n := range bp.GoFiles {
+		f, err := parser.ParseFile(h.fset, filepath.Join(bp.Dir, n), nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	// Errors inside a dependency (an unresolved stand-in symbol) are expected
+	// and ignored; the package under scan is checked strictly by the caller.
+	pkg, _ := (&types.Config{Importer: h, IgnoreFuncBodies: true, Error: func(error) {}}).Check(path, h.fset, files, nil)
+	h.seen[path] = pkg
+	return pkg, nil
+}
+
 // configReads type-checks files as one package and returns the names of the
 // fields and methods selected on a value of type *config.Config or
 // config.Config, whatever the variable is called.
 func configReads(fset *token.FileSet, files []*ast.File) (fields, methods []string, err error) {
-	conf := types.Config{Importer: importer.ForCompiler(fset, "source", nil)}
+	imp, err := newScanImporter(fset)
+	if err != nil {
+		return nil, nil, err
+	}
+	conf := types.Config{Importer: imp}
 	info := &types.Info{Selections: map[*ast.SelectorExpr]*types.Selection{}}
 	if _, err := conf.Check("interpret", fset, files, info); err != nil {
 		return nil, nil, err
