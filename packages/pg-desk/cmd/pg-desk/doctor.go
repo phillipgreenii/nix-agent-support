@@ -228,7 +228,7 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 // it closes before returning (doctor opens the store raw so it works on a store
 // that has no schema yet).
 func doctorPRLaneLine(cfg *config.Config) string {
-	st, err := deskStoreOpenRaw()
+	st, err := deskStoreOpenReadPool()
 	if err != nil {
 		return prLaneLine(cfg, nil, changesNow())
 	}
@@ -316,7 +316,7 @@ func runDoctor(cmd *cobra.Command) error {
 	// inspect a store that has no schema yet instead of creating it. A store
 	// left on the retired schema 1 is reported by the change_flow section
 	// below.
-	if st, err := deskStoreOpenRaw(); err != nil {
+	if st, err := deskStoreOpenReadPool(); err != nil {
 		fmt.Fprintf(w, "stranded cycles: FAIL (open store: %v)\n", err)
 		failures = append(failures, "stranded cycles")
 	} else if version, verr := st.SchemaVersion(); verr != nil {

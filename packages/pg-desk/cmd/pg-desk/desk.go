@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"regexp"
 	"strconv"
@@ -25,15 +27,27 @@ var deskConfigLoad = func(ctx context.Context) (*config.Config, error) { return 
 
 var deskStoreOpen = func() (*store.Store, error) { return store.Open(store.DefaultPath()) }
 
-// deskStoreOpenRaw is the store seam for the commands that must work on a
+// deskStoreOpenReadPool is the store seam for the commands that must work on a
 // store that has no schema yet: `status` and `doctor` (which report on it).
-// It opens with store.OpenRaw, which creates no schema and has no
-// schema-version gate, so it does not create a store behind the operator's
-// back. It is deliberately a SEPARATE seam from deskStoreOpen: deskStoreOpen
-// is shared by hide, wip, feedback, show, open, heartbeat and others, which
-// open through store.Open (it creates a new store at schema 2 and refuses a
-// retired one).
-var deskStoreOpenRaw = func() (*store.Store, error) { return store.OpenRaw(store.DefaultPath()) }
+// It opens the existing store through the read-only pool (store.OpenReadPool,
+// the same 3-connection pool serve reads /metrics through), so a status or
+// doctor run never queues behind the writer's single connection, creates no
+// schema and has no schema-version gate. It is deliberately a SEPARATE seam
+// from deskStoreOpen: deskStoreOpen is shared by hide, wip, feedback, show,
+// open, heartbeat and others, which open through store.Open (it creates a new
+// store at schema 2 and refuses a retired one).
+//
+// A store file that does not exist yet is the one case that stays on
+// store.OpenRaw: a read-only open refuses a missing file, while status and
+// doctor report a never-run store as uninitialized (and OpenRaw has always
+// created the empty file there). Every store that exists is read-only.
+var deskStoreOpenReadPool = func() (*store.Store, error) {
+	path := store.DefaultPath()
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return store.OpenRaw(path)
+	}
+	return store.OpenReadPool(path, 3)
+}
 
 // deskStoreOpenReadOnly is the store seam for the read-only verbs (`links`):
 // it opens the existing store file without creating or writing

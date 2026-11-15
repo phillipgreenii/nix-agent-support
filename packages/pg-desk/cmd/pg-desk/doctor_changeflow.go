@@ -54,7 +54,7 @@ const consumerStalledMultiple = 3
 // it are then skipped with a note.
 func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *routerConfig, failures *[]string) {
 	fmt.Fprintln(w, "change_flow:")
-	st, err := deskStoreOpenRaw()
+	st, err := deskStoreOpenReadPool()
 	if err != nil {
 		fmt.Fprintf(w, "  store: FAIL (open store: %v)\n", err)
 		*failures = append(*failures, "change_flow store")

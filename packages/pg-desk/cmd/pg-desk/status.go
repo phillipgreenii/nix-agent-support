@@ -32,7 +32,7 @@ func runStatus(cmd *cobra.Command) error {
 	// status must work on a store that has not been initialized yet, so it
 	// opens raw (no schema creation, no version gate) rather than creating the
 	// file. A store left on the retired schema 1 is refused below.
-	st, err := deskStoreOpenRaw()
+	st, err := deskStoreOpenReadPool()
 	if err != nil {
 		return fmt.Errorf("status: open store: %w", err)
 	}

@@ -82,10 +82,10 @@ func withRawStoreAt(t *testing.T, path string) {
 	t.Helper()
 	withOpenSeams(t, openTestConfig("o/r"), func() (*store.Store, error) { return store.OpenRaw(path) })
 	deskStoreOpen = func() (*store.Store, error) {
-		t.Errorf("deskStoreOpen (Open: migrates and version-gates) was called; this command must open through deskStoreOpenRaw")
+		t.Errorf("deskStoreOpen (Open: migrates and version-gates) was called; this command must open through deskStoreOpenReadPool")
 		return nil, errors.New("deskStoreOpen must not be used here")
 	}
-	deskStoreOpenRaw = func() (*store.Store, error) { return store.OpenRaw(path) }
+	deskStoreOpenReadPool = func() (*store.Store, error) { return store.OpenReadPool(path, 3) }
 }
 
 // TestStatusAndDoctorOnEveryStoreState proves status and doctor open the store
@@ -153,7 +153,7 @@ func TestStatusAndDoctorOnRetiredSchemaStore(t *testing.T) {
 // TestDefaultRawStoreSeamOpensWithoutTheVersionGate pins the production
 // wiring of the raw seam: with the seams left at their defaults, a store
 // newer than this binary knows (which Open refuses) still opens through
-// deskStoreOpenRaw.
+// deskStoreOpenReadPool.
 func TestDefaultRawStoreSeamOpensWithoutTheVersionGate(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", xdg)
@@ -177,9 +177,9 @@ func TestDefaultRawStoreSeamOpensWithoutTheVersionGate(t *testing.T) {
 		_ = st.Close()
 		t.Fatalf("deskStoreOpen accepted a version-3 store; it must keep the version gate")
 	}
-	st, err := deskStoreOpenRaw()
+	st, err := deskStoreOpenReadPool()
 	if err != nil {
-		t.Fatalf("deskStoreOpenRaw refused a version-3 store: %v", err)
+		t.Fatalf("deskStoreOpenReadPool refused a version-3 store: %v", err)
 	}
 	defer func() { _ = st.Close() }()
 	if v, err := st.SchemaVersion(); err != nil || v != 3 {

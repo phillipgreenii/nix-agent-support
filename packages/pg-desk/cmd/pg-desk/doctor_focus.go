@@ -432,7 +432,7 @@ func appendFailure(failures *[]string, name string) {
 // appending the name of every tripped gate to *failures. The store is opened
 // raw so a store with no schema yet is reported, never refused.
 func doctorFocus(ctx context.Context, w io.Writer, cfg *config.Config, rc *routerConfig, failures *[]string) {
-	st, err := deskStoreOpenRaw()
+	st, err := deskStoreOpenReadPool()
 	if err != nil {
 		fmt.Fprintf(w, "focus: FAIL (open store: %v)\n", err)
 		*failures = append(*failures, "focus store")

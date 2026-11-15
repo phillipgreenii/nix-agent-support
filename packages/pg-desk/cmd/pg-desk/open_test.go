@@ -371,7 +371,7 @@ func openTestStore(t *testing.T) (seed *store.Store, openFresh func() (*store.St
 	return s, func() (*store.Store, error) { return store.Open(path) }
 }
 
-// withOpenSeams stubs deskConfigLoad/deskStoreOpen/deskStoreOpenRaw for the
+// withOpenSeams stubs deskConfigLoad/deskStoreOpen/deskStoreOpenReadPool for the
 // duration of one test, restoring all three on cleanup. openFresh is
 // normally openTestStore's second return value; both store seams are pointed
 // at it (the raw seam serves status, doctor and migrate, which must not open
@@ -381,15 +381,15 @@ func withOpenSeams(t *testing.T, cfg *config.Config, openFresh func() (*store.St
 	t.Helper()
 	origConfigLoad := deskConfigLoad
 	origStoreOpen := deskStoreOpen
-	origStoreOpenRaw := deskStoreOpenRaw
+	origStoreOpenRaw := deskStoreOpenReadPool
 	t.Cleanup(func() {
 		deskConfigLoad = origConfigLoad
 		deskStoreOpen = origStoreOpen
-		deskStoreOpenRaw = origStoreOpenRaw
+		deskStoreOpenReadPool = origStoreOpenRaw
 	})
 	deskConfigLoad = func(ctx context.Context) (*config.Config, error) { return cfg, nil }
 	deskStoreOpen = openFresh
-	deskStoreOpenRaw = openFresh
+	deskStoreOpenReadPool = openFresh
 }
 
 func runOpenCmd(t *testing.T, f openFlags) (stdout, stderr string, err error) {

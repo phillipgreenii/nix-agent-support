@@ -132,7 +132,7 @@ func TestStatusBehindIsUnknownWithoutTheStampColumn(t *testing.T) {
 	rs := newRIStore(t)
 	seedOpen(t, rs, 1)
 	rs.exec(t, `ALTER TABLE interpretation DROP COLUMN interp_version`)
-	deskStoreOpenRaw = func() (*store.Store, error) { return store.OpenRaw(rs.path) }
+	deskStoreOpenReadPool = func() (*store.Store, error) { return store.OpenReadPool(rs.path, 3) }
 	out := statusOut(t)
 	if !strings.Contains(out, "interpretations behind: unknown (column not yet added)\n") {
 		t.Errorf("status:\n%s", out)
