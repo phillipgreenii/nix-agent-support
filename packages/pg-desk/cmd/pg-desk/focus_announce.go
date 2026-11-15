@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // The selection announcement (bead pg2-e5g9gx). A PR the plan newly selects
@@ -47,7 +49,7 @@ var focusInject = func(ctx context.Context, eventJSON string) error {
 	if bin == "" {
 		bin = "pg-router"
 	}
-	out, err := exec.CommandContext(ctx, bin, "push-inject", eventJSON).CombinedOutput()
+	out, err := connector.Combined(ctx, cmdrun.Call{Name: bin, Args: []string{"push-inject", eventJSON}, Timeout: connectorInjectTimeout})
 	if err != nil {
 		return fmt.Errorf("%s push-inject: %w: %s", bin, err, strings.TrimSpace(string(out)))
 	}

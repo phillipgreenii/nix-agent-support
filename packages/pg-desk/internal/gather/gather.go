@@ -107,6 +107,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 	"github.com/phillipgreenii/x/cmdrun"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
 )
 
 // ChangeKind is the pr-pool event's own change kind, reproduced verbatim
@@ -241,12 +243,12 @@ type Facts struct {
 // compile-time import of packages/pg-connector (D10).
 const pgConnectorBinary = "pg-connector"
 
-// runner is the exec seam (a cmdrun.Runner; production is cmdrun.Exec).
+// runner is the exec seam (a cmdrun.Runner; production is connector.Run).
 // Production code runs pg-connector through it; gather_test.go swaps it for
 // an in-process pg-connector wire double (this packet's own "fake
 // pg-connector binary or a stubbed exec" wire-double requirement) — the
 // shape mirrors packages/pg-decider/internal/prchange/exec.go's Runner.
-var runner cmdrun.Runner = cmdrun.Exec
+var runner cmdrun.Runner = connector.Run
 
 // callTimeout bounds one pg-connector invocation: a call that never returns
 // fails at the deadline instead of holding the feed lock (a var so a test can
@@ -869,7 +871,7 @@ func (g *Gatherer) run(ctx context.Context, args []string, extraEnv []string) (r
 	done := make(chan cmdrun.Result, 1)
 	exec := runner // read here, not in the goroutine: tests swap the seam
 	go func() {
-		done <- exec(cctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
+		done <- exec(cctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv, Timeout: timeout})
 	}()
 	var res cmdrun.Result
 	select {

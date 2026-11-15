@@ -21,9 +21,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/x/cmdrun"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
 )
 
 // issueShower is the subset of `pg-connector issue show` this package
@@ -87,9 +90,12 @@ func (r *Resolver) ResolvePR(ctx context.Context, beadID string) (repo, entityID
 // shared one.
 const pgConnectorBinary = "pg-connector"
 
-// runner is the exec seam (a cmdrun.Runner; production is cmdrun.Exec).
+// runner is the exec seam (a cmdrun.Runner; production is connector.Run).
 // Tests swap it for an in-process double.
-var runner cmdrun.Runner = cmdrun.Exec
+var runner cmdrun.Runner = connector.Run
+
+// callTimeout bounds one pg-connector invocation.
+const callTimeout = 60 * time.Second
 
 // connectorIssueShower is the production issueShower: it execs
 // `pg-connector issue show <id>` and decodes the result's title/metadata.
@@ -119,7 +125,7 @@ func (c *connectorIssueShower) Show(ctx context.Context, id string) (string, map
 	args := []string{"issue", "show", id}
 	args = append(args, c.backendFlag()...)
 
-	res := runner(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: c.issueBeadsDirEnv()})
+	res := runner(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: c.issueBeadsDirEnv(), Timeout: callTimeout})
 	if res.StartErr != nil {
 		return "", nil, fmt.Errorf("beadref: exec pg-connector %v: %w", args, res.StartErr)
 	}

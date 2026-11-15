@@ -25,6 +25,7 @@ cachePackages = [
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/schemas',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen',
   'github.com/phillipgreenii/x/cmdrun',
   'github.com/phillipgreenii/x/cmdruntest',
   'github.com/phillipgreenii/x/exitcode',
@@ -218,8 +219,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261112162938-c45c22ca2076'
-    hash = 'sha256-hkeXFrYPpIFJPwrzK5x5xkG7cZvKCSmZlSJcAPyOtx4='
+    version = 'v0.0.0-20261112232432-48309b2fc1d1'
+    hash = 'sha256-gvlMTHUv4A5H60h+vXf+EWZ4Ro6D6EPVXvUzIV/ScaM='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'

@@ -387,7 +387,7 @@ echo '{"entities":[]}'`, rec))
 
 func TestDoctorWatchedQueriesAllResolveAndNoneConfigured(t *testing.T) {
 	newSchemaDoctor(t, watchCfg("mine"))
-	installFakePGConnector(t, `echo '{"entities":[]}'`)
+	useFakeConnector(t, func([]string) (string, int) { return `{"entities":[]}`, 0 })
 	stdout, err := runDoctorCmd(t)
 	if err != nil {
 		t.Fatalf("doctor: %v\n%s", err, stdout)
@@ -1128,18 +1128,6 @@ exit 99`, f.dir))
 	}
 }
 
-// fakePgConnector puts a fake pg-connector on PATH that prints stdout and
-// exits with code, so doctorFanOutIssueList runs its real exec path.
-func fakePgConnector(t *testing.T, stdout string, code int) {
-	t.Helper()
-	dir := t.TempDir()
-	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' '%s'\nexit %d\n", stdout, code)
-	if err := os.WriteFile(filepath.Join(dir, "pg-connector"), []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake pg-connector: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
 func TestDoctorFanOutIssueListExitCodes(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1153,7 +1141,7 @@ func TestDoctorFanOutIssueListExitCodes(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fakePgConnector(t, `{"entities":[]}`, tc.code)
+			useFakeConnector(t, func([]string) (string, int) { return `{"entities":[]}`, tc.code })
 			out, err := doctorFanOutIssueList(context.Background(), nil)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)

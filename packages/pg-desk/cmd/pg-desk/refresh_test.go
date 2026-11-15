@@ -400,20 +400,48 @@ func backendTestConfig() *config.Config {
 	return cfg
 }
 
-const backendFakeScript = `D=%q
-echo "$*" >> "$D/calls.log"
-id="$3"
-backend=""; watch=0; prev=""
-for a in "$@"; do
-  if [ "$prev" = "--backend" ]; then backend="$a"; fi
-  if [ "$a" = "--watch" ]; then watch=1; fi
-  prev="$a"
-done
-if [ -f "$D/down" ]; then echo '{"error":{"code":"unavailable","message":"daemon down"}}'; exit 1; fi
-if [ "$backend" = "jira-a" ] && [ ! -f "$D/held-$id" ]; then echo '{"error":{"code":"not_found","message":"no"}}'; exit 4; fi
-if [ "$watch" = 1 ] && [ -f "$D/show-$id.watch.json" ]; then cat "$D/show-$id.watch.json"; exit 0; fi
-if [ -f "$D/show-$id.json" ]; then cat "$D/show-$id.json"; exit 0; fi
-echo '{"error":{"code":"not_found","message":"no"}}'; exit 4`
+const (
+	notFoundJSON     = `{"error":{"code":"not_found","message":"no"}}`
+	daemonDownJSON   = `{"error":{"code":"unavailable","message":"daemon down"}}`
+	noListFixture    = `{"error":{"code":"boom","message":"no list fixture"}}`
+	connectorUnavail = `{"error":{"code":"unavailable","message":"down"}}`
+)
+
+// useBackendFakeConnector is the in-process pg-connector the backend
+// fixtures use: `issue show <id>` answers from dir's show-<id>.json (and
+// show-<id>.watch.json for a --watch call), a jira-a call only for an id with
+// a held-<id> marker, and a `down` marker makes every call fail. Each call is
+// appended to dir/calls.log.
+func useBackendFakeConnector(t *testing.T, dir string) {
+	t.Helper()
+	log := &connectorCallLog{path: filepath.Join(dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		log.record(t, args)
+		id := argAt(args, 2)
+		backend := flagValue(args, "--backend")
+		watch := false
+		for _, a := range args {
+			if a == "--watch" {
+				watch = true
+			}
+		}
+		if fileExists(filepath.Join(dir, "down")) {
+			return daemonDownJSON, 1
+		}
+		if backend == "jira-a" && !fileExists(filepath.Join(dir, "held-"+id)) {
+			return notFoundJSON, 4
+		}
+		if watch {
+			if b, err := os.ReadFile(filepath.Join(dir, "show-"+id+".watch.json")); err == nil {
+				return string(b), 0
+			}
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, "show-"+id+".json")); err == nil {
+			return string(b), 0
+		}
+		return notFoundJSON, 4
+	})
+}
 
 func newBackendFixture(t *testing.T, seedIDs ...string) *backendFixture {
 	t.Helper()
@@ -426,7 +454,7 @@ func newBackendFixture(t *testing.T, seedIDs ...string) *backendFixture {
 	withOpenSeams(t, cfg, open)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	dir := t.TempDir()
-	installFakePGConnector(t, fmt.Sprintf(backendFakeScript, dir))
+	useBackendFakeConnector(t, dir)
 	return &backendFixture{refreshFixture: &refreshFixture{t: t, seed: seed, dir: dir}, cfg: cfg}
 }
 

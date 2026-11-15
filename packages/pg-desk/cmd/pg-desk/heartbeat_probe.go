@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // heartbeatProbeConsumer is the consumer-name prefix the freshness probe polls
@@ -33,7 +35,7 @@ const heartbeatProbeTimeout = 45 * time.Second
 // the same D10-permitted literal as heartbeatRunLedgerShow. A package-level var
 // so tests can stub it.
 var heartbeatRunConnector = func(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, "pg-connector", args...).Output()
+	return connector.Output(ctx, cmdrun.Call{Name: "pg-connector", Args: args, Timeout: heartbeatProbeTimeout})
 }
 
 // prCapabilities is the part of `pg-connector pr capabilities` the probe

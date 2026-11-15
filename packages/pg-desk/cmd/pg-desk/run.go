@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -22,6 +21,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/threadref"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // runFlags holds parsed CLI flags for `pg-desk run`.
@@ -545,19 +547,12 @@ type runThreadWireErrorMsg struct {
 // targetedCall). Tests override this var directly with a fake, so no real
 // pg-connector subprocess is ever needed on a test's $PATH.
 var runThreadShow = func(ctx context.Context, threadID string) (result threadShowResult, notFound bool, err error) {
-	cmd := exec.CommandContext(ctx, "pg-connector", "thread", "show", threadID)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	exitCode := 0
-	if runErr := cmd.Run(); runErr != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(runErr, &exitErr) {
-			return threadShowResult{}, false, fmt.Errorf("exec pg-connector thread show %s: %w", threadID, runErr)
-		}
-		exitCode = exitErr.ExitCode()
+	res := connector.Run(ctx, cmdrun.Call{Name: "pg-connector", Args: []string{"thread", "show", threadID}, Timeout: connectorCallTimeout})
+	stdout := bytes.NewBuffer(res.Stdout)
+	if res.StartErr != nil || res.CtxErr != nil || res.Signal != "" {
+		return threadShowResult{}, false, fmt.Errorf("exec pg-connector thread show %s: %w", threadID, connector.ResultError(res))
 	}
+	exitCode := res.Code
 
 	switch exitCode {
 	case 0:

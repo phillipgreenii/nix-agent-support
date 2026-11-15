@@ -4,37 +4,45 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// backfillFakeScript answers `issue list --query Q --backend B` from
+// useBackfillFakeConnector answers `issue list --query Q --backend B` from
 // <dir>/list-Q.json (exit code from list-Q.exit, default 0) and `issue show
 // <id> --fresh --backend jira-a` from a held-<id> file (exit 4 otherwise). A
 // file named down makes every call answer the wire error unavailable.
-const backfillFakeScript = `D=%q
-echo "$*" >> "$D/calls.log"
-if [ -f "$D/down" ]; then echo '{"error":{"code":"unavailable","message":"daemon down"}}'; exit 1; fi
-if [ "$2" = list ]; then
-  q="$4"
-  code=0
-  if [ -f "$D/list-$q.exit" ]; then code=$(cat "$D/list-$q.exit"); fi
-  if [ -f "$D/list-$q.json" ]; then cat "$D/list-$q.json"; exit "$code"; fi
-  echo '{"error":{"code":"boom","message":"no list fixture"}}'; exit 1
-fi
-id="$3"
-backend=""; prev=""
-for a in "$@"; do
-  if [ "$prev" = "--backend" ]; then backend="$a"; fi
-  prev="$a"
-done
-if [ "$backend" = "jira-a" ] && [ -f "$D/held-$id" ]; then echo '{"id":"'"$id"'"}'; exit 0; fi
-echo '{"error":{"code":"not_found","message":"no"}}'; exit 4`
+func useBackfillFakeConnector(t *testing.T, dir string) {
+	t.Helper()
+	log := &connectorCallLog{path: filepath.Join(dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		log.record(t, args)
+		if fileExists(filepath.Join(dir, "down")) {
+			return daemonDownJSON, 1
+		}
+		if argAt(args, 1) == "list" {
+			q := argAt(args, 3)
+			code := 0
+			if fileExists(filepath.Join(dir, "list-"+q+".exit")) {
+				code, _ = strconv.Atoi(strings.TrimSpace(readFileOr(filepath.Join(dir, "list-"+q+".exit"), "0")))
+			}
+			if fileExists(filepath.Join(dir, "list-"+q+".json")) {
+				return readFileOr(filepath.Join(dir, "list-"+q+".json"), ""), code
+			}
+			return noListFixture, 1
+		}
+		id := argAt(args, 2)
+		if flagValue(args, "--backend") == "jira-a" && fileExists(filepath.Join(dir, "held-"+id)) {
+			return `{"id":"` + id + `"}`, 0
+		}
+		return notFoundJSON, 4
+	})
+}
 
 // runBackfillCmd runs `pg-desk issue backfill-backend` through the real cobra
 // tree, in-process.
@@ -56,7 +64,7 @@ func runBackfillCmd(t *testing.T, extra ...string) (stdout, stderr string, err e
 func newBackfillFixture(t *testing.T) *backendFixture {
 	t.Helper()
 	f := newBackendFixture(t, "PROJ-1", "PROJ-2", "PROJ-3", "bd-5")
-	installFakePGConnector(t, fmt.Sprintf(backfillFakeScript, f.dir)) // shadows the fixture's own fake
+	useBackfillFakeConnector(t, f.dir) // shadows the fixture's own fake
 	f.setBackend("bd-5", "beads-a")
 	yes := true
 	if err := f.seed.SetEntityColumns("o/r", "issue", "bd-5", nil, &yes); err != nil {
@@ -200,11 +208,16 @@ func TestBackfillBackendFailedProbeNamesTheIDAndLeavesItNull(t *testing.T) {
 	f.write("held-PROJ-2", "")
 	dir := f.dir
 	// Make `issue show` fail by exiting 1 for PROJ-2 only.
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-if [ "$2" = list ]; then cat "$D/list-jira-q.json"; exit 0; fi
-if [ "$3" = PROJ-2 ]; then echo '{"error":{"code":"unavailable","message":"down"}}'; exit 1; fi
-if [ "$3" = PROJ-3 ]; then echo '{"error":{"code":"not_found","message":"no"}}'; exit 4; fi
-exit 4`, dir))
+	useFakeConnector(t, func(args []string) (string, int) {
+		switch {
+		case argAt(args, 1) == "list":
+			return readFileOr(filepath.Join(dir, "list-jira-q.json"), ""), 0
+		case argAt(args, 2) == "PROJ-2":
+			return connectorUnavail, 1
+		default:
+			return notFoundJSON, 4
+		}
+	})
 
 	out, errOut, err := runBackfillCmd(t, "--json")
 	if err == nil || exitCodeFor(err) != 1 || !strings.Contains(err.Error(), "issue PROJ-2") {

@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptrace"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -20,6 +18,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/beadref"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // defaultServeAddr mirrors serve's own default synopsis
@@ -41,7 +42,8 @@ var doctorLookPath = func(name string) (string, error) { return exec.LookPath(na
 // not affect config validate's exit code, so it cannot fail doctor
 // either — doctor does not re-implement or surface it separately.
 var doctorConfigValidate = func(ctx context.Context) error {
-	return exec.CommandContext(ctx, "pg-connector", "config", "validate").Run()
+	_, err := connector.Output(ctx, cmdrun.Call{Name: "pg-connector", Args: []string{"config", "validate"}, Timeout: connectorCallTimeout})
+	return err
 }
 
 // Serve probe timing. serve's /metrics handler is cheap, but on a loaded host
@@ -117,25 +119,18 @@ const doctorWorkBeadsQuery = "work-beads"
 // cfg's configured beads_dir the same way internal/gather's Gatherer and
 // internal/sync's issueClient do (PG_CONNECTOR_ISSUE_BEADS_DIR).
 var doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "pg-connector", "issue", "list", "--query", doctorWorkBeadsQuery)
+	call := cmdrun.Call{Name: "pg-connector", Args: []string{"issue", "list", "--query", doctorWorkBeadsQuery}, Timeout: connectorCallTimeout}
 	if cfg != nil && len(cfg.Repos) > 0 && cfg.Repos[0].BeadsDir != "" {
-		cmd.Env = append(os.Environ(), "PG_CONNECTOR_ISSUE_BEADS_DIR="+cfg.Repos[0].BeadsDir)
+		call.Env = []string{"PG_CONNECTOR_ISSUE_BEADS_DIR=" + cfg.Repos[0].BeadsDir}
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	runErr := cmd.Run()
-	if runErr == nil {
-		return stdout.Bytes(), nil
+	res := connector.Run(ctx, call)
+	if res.StartErr == nil && res.CtxErr == nil && res.Signal == "" {
+		if res.Code == 0 || res.Code == exitcode.Degraded {
+			return res.Stdout, nil // exit 5 is partial degradation; stdout is still usable
+		}
+		return nil, fmt.Errorf("pg-connector issue list --query %s: exit %d: %s", doctorWorkBeadsQuery, res.Code, strings.TrimSpace(string(res.Stderr)))
 	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) && exitErr.ExitCode() == exitcode.Degraded {
-		return stdout.Bytes(), nil // partial degradation; stdout is still usable
-	}
-	if errors.As(runErr, &exitErr) {
-		return nil, fmt.Errorf("pg-connector issue list --query %s: exit %d: %s", doctorWorkBeadsQuery, exitErr.ExitCode(), strings.TrimSpace(stderr.String()))
-	}
-	return nil, fmt.Errorf("exec pg-connector issue list --query %s: %w", doctorWorkBeadsQuery, runErr)
+	return nil, fmt.Errorf("exec pg-connector issue list --query %s: %w", doctorWorkBeadsQuery, connector.ResultError(res))
 }
 
 // doctorWorkBeadEntity is the minimal subset of an `issue list` entity this
