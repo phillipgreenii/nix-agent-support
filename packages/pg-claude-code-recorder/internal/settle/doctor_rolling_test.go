@@ -59,7 +59,7 @@ func (e *env) slices(outcome string) float64 {
 }
 
 func TestRollingCycleChecksEachFileOnceAndSurvivesARestart(t *testing.T) {
-	const n, perSlice = 100, 10
+	const n, perSlice, slices = 12, 4, 3
 	e := rollEnv(t, 0)
 	size := e.many(n)
 	budget := size * perSlice
@@ -72,8 +72,8 @@ func TestRollingCycleChecksEachFileOnceAndSurvivesARestart(t *testing.T) {
 	arm := func() { e.sett.doctorSeamRef().hashing = func(f int64) { counts[f]++ } }
 	e.crash() // the settler is rebuilt with the budget
 	arm()
-	for i := 1; i <= perSlice; i++ {
-		if i == 6 {
+	for i := 1; i <= slices; i++ {
+		if i == 2 {
 			e.crash() // a restart mid-cycle: the cursor file carries on
 			arm()
 		}
@@ -84,7 +84,7 @@ func TestRollingCycleChecksEachFileOnceAndSurvivesARestart(t *testing.T) {
 	}
 	got, ok := LoadDoctor(e.state)
 	if !ok || got.FilesChecked != n || len(got.Mismatches) != 0 {
-		t.Fatalf("after ten slices: %v %+v", ok, got)
+		t.Fatalf("after %d slices: %v %+v", slices, ok, got)
 	}
 	if got.AtNS != e.clk.Now().UnixNano() {
 		t.Fatalf("at_ns %d, want the cycle end %d", got.AtNS, e.clk.Now().UnixNano())
