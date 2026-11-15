@@ -48,6 +48,7 @@ type Facts struct {
 	lastFetch    time.Time // when the last successful full discovery ran
 	fetchFailed  bool      // the last full discovery failed: retry on the next call
 	haveSnapshot bool
+	feedTimeout  time.Duration // 0 means DefaultFeedTimeout
 }
 
 // DefaultDiscoveryHeartbeat is how long a quiet registry feed may go before
@@ -76,22 +77,54 @@ func (f *Facts) clock() time.Time {
 // registryFeedPage is how many registry feed entries one gate read asks for.
 const registryFeedPage = 1000
 
+// DefaultFeedTimeout bounds one registry-feed read of the gate. It is far
+// shorter than the discovery timeout so a slow feed can never use up the
+// context discovery still needs.
+const DefaultFeedTimeout = 3 * time.Second
+
 // registryChanged reads the session-registry feed (a second cursor, separate
 // from the transcript drain: only registry records, no bodies) and reports
-// whether anything arrived since the last read. The first read, and a read
-// after a feed error, only seeds the cursor and reports true. A feed error is
-// reported as a change so the caller falls back to a full discovery.
+// whether anything arrived since the last read. Every read has its own short
+// deadline (feedTimeout), so it cannot starve the discovery that follows.
+//
+// The first read seeds the cursor from the feed's head (one snapshot page of
+// one record, never a read of the whole retained feed) and reports true. An
+// expired cursor is reseeded from the head and reported as a change. A feed
+// read that times out or fails for any reason other than the recorder being
+// down is NOT a change: the cursor is kept and the caller relies on its
+// heartbeat and failed-fetch retry instead of discovering on every scan.
 func (f *Facts) registryChanged(ctx context.Context, c *client.Client) (bool, error) {
 	where := &client.Filter{Field: "source", Eq: json.RawMessage(`"session-registry"`)}
-	changed := f.regCursor == ""
-	for {
-		ans, err := c.FeedPage(ctx, where, f.regCursor, []string{"source"}, registryFeedPage, 0)
+	timeout := f.feedTimeout
+	if timeout <= 0 {
+		timeout = DefaultFeedTimeout
+	}
+	fctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if f.regCursor == "" {
+		snap, err := c.Snapshot(fctx, client.SnapshotRequest{Where: where, Limit: 1})
 		if err != nil {
-			f.regCursor = ""
 			if isOffline(err) {
 				return true, f.wrapScan(err)
 			}
-			return true, nil
+			return false, nil
+		}
+		f.regCursor = snap.Cursor
+		return true, nil
+	}
+	changed := false
+	for {
+		ans, err := c.FeedPage(fctx, where, f.regCursor, []string{"source"}, registryFeedPage, 0)
+		if err != nil {
+			switch {
+			case isOffline(err):
+				f.regCursor = ""
+				return true, f.wrapScan(err)
+			case errors.Is(err, client.ErrCursorExpired):
+				f.regCursor = ""
+				return true, nil
+			}
+			return changed, nil
 		}
 		if len(ans.Entries) > 0 {
 			changed = true
