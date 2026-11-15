@@ -33,7 +33,7 @@ func serveDaemon(t *testing.T, rt *router.Router, build string) (sock string, st
 	t.Helper()
 	dir := shortDir(t)
 	sock = filepath.Join(dir, "s")
-	srv, err := proc.Start(proc.Config{StateDir: dir, SocketPath: sock, DrainTimeout: time.Second})
+	srv, err := proc.Start(proc.Config{StateDir: dir, SocketPath: sock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestCollectOutsideTheProtocolWindowIsDegraded(t *testing.T) {
 	}
 	dir := shortDir(t)
 	sock := filepath.Join(dir, "s")
-	srv, err := proc.Start(proc.Config{StateDir: dir, SocketPath: sock, DrainTimeout: time.Second})
+	srv, err := proc.Start(proc.Config{StateDir: dir, SocketPath: sock})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -107,6 +107,17 @@ let
   carries = needle: lib.hasInfix (builtins.unsafeDiscardStringContext needle);
 
   cases = {
+    # ExitTimeOut is DERIVED from the deadline the script passes to the daemon:
+    # deadline plus a 7 s margin, under launchd's 60 s clamp. The deadline is
+    # read back out of the rendered script.
+    exitTimeOutIsDeadlinePlusMargin =
+      let
+        m = builtins.match ".*serve --shutdown-deadline ([0-9]+)s.*" script;
+        deadline = if m == null then null else lib.toInt (builtins.head m);
+      in
+      deadline != null
+      && e.serviceConfig.ExitTimeOut == deadline + 7
+      && e.serviceConfig.ExitTimeOut <= 60;
     # ---- the entry: label, restart policy, command, logs -------------------
     entryIsTheOnlyOne = builtins.attrNames (entries launchdOn) == [ agentName ];
     label = e.label == "com.phillipg.pg-connector-issue-jira-daemon";
@@ -114,7 +125,7 @@ let
     runAtLoad = e.runAtLoad == true;
     enabled = e.enable;
     # the command is exactly the daemon on the rendered config, nothing else
-    command = script == "exec ${binary} --config ${configPath} serve\n";
+    command = script == "exec ${binary} --config ${configPath} serve --shutdown-deadline 40s\n";
     commandCarriesConfigAndServe = carries "--config ${configPath} serve" script;
     configIsAStorePath = lib.hasPrefix builtins.storeDir configPath;
     noExecPath = e.execPath == null;
@@ -138,7 +149,7 @@ let
       e.serviceConfig == {
         StandardOutPath = "${stateDir}/launchd-stdout.log";
         StandardErrorPath = "${stateDir}/launchd-stderr.log";
-        ExitTimeOut = 55;
+        ExitTimeOut = 47;
         EnvironmentVariables.PG_CONNECTOR_ISSUE_JIRA_PPROF_ADDR = "${stateDir}/pprof.sock";
       };
     pprofDisabledOmitsVariable =
@@ -148,7 +159,7 @@ let
         (entryOf launchdPprofOff).serviceConfig == {
           StandardOutPath = "${stateDir}/launchd-stdout.log";
           StandardErrorPath = "${stateDir}/launchd-stderr.log";
-          ExitTimeOut = 55;
+          ExitTimeOut = 47;
         };
     pprofDisabledStillRegisters = (entryOf launchdPprofOff).label == e.label;
     pprofToggleKeepsConfigAndCommand =

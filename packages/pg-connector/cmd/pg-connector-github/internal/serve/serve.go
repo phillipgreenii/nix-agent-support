@@ -169,6 +169,9 @@ type Options struct {
 	// read from the router); the binary leaves them nil.
 	PeerUID func(net.Conn) (uint32, error)
 	OwnUID  func() uint32
+	// OnPhase is told each drain step as it begins (the run group's overrun
+	// report names it); nil ignores it.
+	OnPhase func(name string)
 	OnReady func(rt *router.Router)
 
 	// MeterProvider is where the daemon's instruments go; nil means the global
@@ -195,6 +198,7 @@ func Run(ctx context.Context, o Options) int {
 		Logger:     log,
 		PeerUID:    o.PeerUID,
 		OwnUID:     o.OwnUID,
+		OnPhase:    o.OnPhase,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-connector-github serve: %v\n", err)

@@ -133,7 +133,7 @@ func errBody(t *testing.T, out string) *scriptout.Error {
 // serveDaemon serves r on cfg's socket through the real process shell.
 func serveDaemon(t *testing.T, cfg *config.Config, r *router.Router, protocol int) {
 	t.Helper()
-	pc := proc.Config{StateDir: cfg.StateDir, SocketPath: cfg.SocketPath, DrainTimeout: time.Second}
+	pc := proc.Config{StateDir: cfg.StateDir, SocketPath: cfg.SocketPath}
 	srv, err := proc.Start(pc)
 	if err != nil {
 		t.Fatal(err)

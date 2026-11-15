@@ -177,6 +177,7 @@
   "pkg/connectord/registry/spec.go"
   "pkg/connectord/router/annotate.go"
   "pkg/connectord/router/router.go"
+  "pkg/connectord/rungroup/rungroup.go"
   "pkg/connectord/scheduler/run.go"
   "pkg/connectord/scheduler/scheduler.go"
   "pkg/connectord/socket/client.go"

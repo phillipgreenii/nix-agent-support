@@ -239,7 +239,7 @@ func TestRealClientWriteNoticesBracketTheOriginCall(t *testing.T) {
 			return nil, nil
 		}})
 	}
-	pc := proc.Config{StateDir: filepath.Dir(r.socket), SocketPath: r.socket, DrainTimeout: time.Second}
+	pc := proc.Config{StateDir: filepath.Dir(r.socket), SocketPath: r.socket}
 	srv, err := proc.Start(pc)
 	if err != nil {
 		t.Fatal(err)

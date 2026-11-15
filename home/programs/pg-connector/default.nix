@@ -13,6 +13,13 @@ let
   gh = cfg.github;
   jr = cfg.jira;
 
+  # The one shutdown deadline, in seconds, owned here: it is passed to both
+  # daemons (`serve --shutdown-deadline`) and launchd's ExitTimeOut is derived
+  # from it, so the daemon's own hard exit always comes before launchd's SIGKILL.
+  shutdownDeadlineSeconds = 40;
+  exitTimeOutMarginSeconds = 7;
+  exitTimeOutSeconds = shutdownDeadlineSeconds + exitTimeOutMarginSeconds;
+
   # Whether the composing flake imports personal's home module, which declares
   # the HM launchdServices registry (personal ADR 0055). Read from the module
   # `options` argument, never from `config`/`pkgs` (using those to choose
@@ -1400,7 +1407,7 @@ in
           {
             label = "com.phillipg.pg-connector-github-daemon";
             script = ''
-              exec ${gh.package}/bin/pg-connector-github --config ${gh.configFile} serve
+              exec ${gh.package}/bin/pg-connector-github --config ${gh.configFile} serve --shutdown-deadline ${toString shutdownDeadlineSeconds}s
             '';
             runAtLoad = true;
             keepAlive = true;
@@ -1408,10 +1415,10 @@ in
               StandardOutPath = "${stateDir}/launchd-stdout.log";
               StandardErrorPath = "${stateDir}/launchd-stderr.log";
               # launchd SIGKILLs a job ExitTimeOut seconds after SIGTERM (default 5).
-              # The daemon bounds its own drain (handlers 25 s, hooks 10 s) and a
-              # watchdog hard-exits at 40 s, so 55 s is that deadline plus a margin,
-              # under launchd's 60 s cap.
-              ExitTimeOut = 55;
+              # Derived from the one shutdown deadline this module also passes to
+              # the daemon (`--shutdown-deadline`, see shutdownDeadlineSeconds):
+              # the daemon's hard exit comes first, launchd's SIGKILL never races it.
+              ExitTimeOut = exitTimeOutSeconds;
             }
             # Profiling endpoint (github.com/phillipgreenii/x/pprofserver): a 0600
             # unix socket under the daemon's own state dir (serve creates the
@@ -1433,7 +1440,7 @@ in
           {
             label = "com.phillipg.pg-connector-issue-jira-daemon";
             script = ''
-              exec ${jr.package}/bin/pg-connector-issue-jira --config ${jr.configFile} serve
+              exec ${jr.package}/bin/pg-connector-issue-jira --config ${jr.configFile} serve --shutdown-deadline ${toString shutdownDeadlineSeconds}s
             '';
             runAtLoad = true;
             keepAlive = true;
@@ -1441,10 +1448,10 @@ in
               StandardOutPath = "${jiraStateDir}/launchd-stdout.log";
               StandardErrorPath = "${jiraStateDir}/launchd-stderr.log";
               # launchd SIGKILLs a job ExitTimeOut seconds after SIGTERM (default 5).
-              # The daemon bounds its own drain (handlers 25 s, hooks 10 s) and a
-              # watchdog hard-exits at 40 s, so 55 s is that deadline plus a margin,
-              # under launchd's 60 s cap.
-              ExitTimeOut = 55;
+              # Derived from the one shutdown deadline this module also passes to
+              # the daemon (`--shutdown-deadline`, see shutdownDeadlineSeconds):
+              # the daemon's hard exit comes first, launchd's SIGKILL never races it.
+              ExitTimeOut = exitTimeOutSeconds;
             }
             # Profiling endpoint: a 0600 unix socket under the daemon's state
             # dir; launchd does not expand $XDG_STATE_HOME, so the resolved

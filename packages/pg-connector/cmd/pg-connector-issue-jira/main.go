@@ -28,6 +28,7 @@ import (
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/rungroup"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
@@ -103,7 +104,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch {
 	case len(rest) == 0 && instanceGiven:
 		mode = modeClient
-	case len(rest) == 1 && rest[0] == modeServe && !instanceGiven:
+	case len(rest) >= 1 && rest[0] == modeServe && !instanceGiven:
 		mode = modeServe
 	case len(rest) >= 1 && rest[0] == modeStatus:
 		mode = modeStatus
@@ -112,6 +113,14 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	var modeArgs []string
+	if mode == modeServe {
+		modeArgs = rest[1:]
+		// A bad argument is a usage error before the config is read.
+		if _, err := rungroup.ParseArgs("pg-connector-issue-jira serve", modeArgs); err != nil {
+			fmt.Fprintf(stderr, "pg-connector-issue-jira serve: %v\n\n%s", err, usage)
+			return exitUsage
+		}
+	}
 	if mode == modeStatus {
 		modeArgs = rest[1:]
 		// A bad argument is a usage error before the config is read.
@@ -131,7 +140,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	switch mode {
 	case modeServe:
-		return runServe(cfg, stderr)
+		return runServe(cfg, modeArgs, stderr)
 	case modeStatus:
 		return runStatus(modeArgs, cfg, stdout, stderr)
 	}
@@ -139,7 +148,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 const usage = `usage: pg-connector-issue-jira                                    (the stateless backend: one request on stdin)
-       pg-connector-issue-jira --config <path> serve              (the daemon)
+       pg-connector-issue-jira --config <path> serve [--shutdown-deadline <dur>]  (the daemon)
        pg-connector-issue-jira --config <path> --instance <name>  (client: one request on stdin)
        pg-connector-issue-jira --config <path> status [--json]    (health report: exit 0 healthy, 5 degraded, 3 down)
        pg-connector-issue-jira --version

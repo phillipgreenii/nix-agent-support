@@ -37,7 +37,7 @@ func shortTempDir(t *testing.T) string {
 func startDaemon(t *testing.T, h proc.Handler) string {
 	t.Helper()
 	dir := shortTempDir(t)
-	cfg := proc.Config{StateDir: dir, SocketPath: filepath.Join(dir, "s"), DrainTimeout: 3 * time.Second}
+	cfg := proc.Config{StateDir: dir, SocketPath: filepath.Join(dir, "s")}
 	srv, err := proc.Start(cfg)
 	if err != nil {
 		t.Fatal(err)

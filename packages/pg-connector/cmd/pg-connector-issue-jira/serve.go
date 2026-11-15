@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/serve"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/parentwatch"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/rungroup"
+	"github.com/phillipgreenii/x/lifecycle"
 )
 
 // exitServe is the exit status of a serve that refused to start or failed
@@ -28,32 +28,33 @@ const exitServe = serve.ExitRefused
 var serveHooks = ""
 
 // runServe runs the daemon until SIGTERM or SIGINT, then drains. It returns 0
-// after a clean drain.
-func runServe(cfg *config.Config, stderr io.Writer) int {
-	ctx, stop := armServeSignals(signal.NotifyContext)
-	defer stop()
-	// Opt-in profiling endpoint (PG_CONNECTOR_ISSUE_JIRA_PPROF_ADDR): the serve
-	// mode only. It reports on stderr and a rejected value never stops the
-	// daemon. runServe is the real-process entry, so it reads the process
-	// environment directly; serveWith (the injected-context seam used by tests)
-	// does not start it.
+// after a clean drain. The whole serve path, startup included, runs as one loop
+// of an x/lifecycle group: the first signal cancels it and starts the one
+// shutdown deadline (--shutdown-deadline, owned by the nix module, which derives
+// launchd's ExitTimeOut from it); past the deadline the process exits 10, and a
+// second signal takes its default action.
+func runServe(cfg *config.Config, args []string, stderr io.Writer) int {
+	deadline, err := rungroup.ParseArgs("pg-connector-issue-jira serve", args)
+	if err != nil {
+		fmt.Fprintf(stderr, "pg-connector-issue-jira serve: %v\n", err)
+		return exitUsage
+	}
+	// Opt-in profiling endpoint (see pprof.go): the serve mode only. It reports
+	// on stderr and a rejected value never stops the daemon. runServe is the
+	// real-process entry, so it reads the process environment directly;
+	// serveWith (the injected-context seam used by tests) does not start it.
 	defer startPprofFromEnv(os.Getenv, stderr)()
-	return serveWith(ctx, cfg, stderr)
+	return rungroup.Run(context.Background(), lifecycle.Options{
+		Deadline: deadline,
+		Log:      rungroup.Logger(stderr),
+	}, func(ctx context.Context, setPhase func(string)) int {
+		return serveWith(ctx, cfg, stderr, setPhase)
+	})
 }
 
-// armServeSignals registers SIGTERM and SIGINT through notify (signal.NotifyContext;
-// tests pass a fake) and releases the registration as soon as the returned
-// context ends, so the first signal drives the graceful drain and a second one
-// takes its default action and kills the process. The returned stop stays safe
-// to call again.
-func armServeSignals(notify func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)) (context.Context, context.CancelFunc) {
-	ctx, stop := notify(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	context.AfterFunc(ctx, stop)
-	return ctx, stop
-}
-
-// serveWith is runServe with the shutdown context injected.
-func serveWith(ctx context.Context, cfg *config.Config, stderr io.Writer) int {
+// serveWith is the daemon with the shutdown context injected; setPhase (nil
+// allowed) names the drain step in progress for the run group's overrun report.
+func serveWith(ctx context.Context, cfg *config.Config, stderr io.Writer, setPhase func(string)) int {
 	hooks, err := serve.ParseHooks(serveHooks)
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-connector-issue-jira serve: %v\n", err)
@@ -65,5 +66,5 @@ func serveWith(ctx context.Context, cfg *config.Config, stderr io.Writer) int {
 	// ParentWatch (every shipped build) is inert.
 	ctx, stopWatch := parentwatch.ExitWithParent(ctx, hooks.ParentWatch, os.Getppid)
 	defer stopWatch()
-	return serve.Run(ctx, serve.Options{Config: cfg, Version: Version, Stderr: stderr, Hooks: hooks})
+	return serve.Run(ctx, serve.Options{Config: cfg, Version: Version, Stderr: stderr, Hooks: hooks, OnPhase: setPhase})
 }

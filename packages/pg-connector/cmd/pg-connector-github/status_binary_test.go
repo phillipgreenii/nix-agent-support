@@ -122,7 +122,7 @@ func startStatusDaemon(t *testing.T, cfgPath string, o statusDaemonOpts) *status
 		t.Fatal(err)
 	}
 
-	srv, err := proc.Start(proc.Config{StateDir: cfg.StateDir, SocketPath: cfg.SocketPath, DrainTimeout: time.Second})
+	srv, err := proc.Start(proc.Config{StateDir: cfg.StateDir, SocketPath: cfg.SocketPath})
 	if err != nil {
 		t.Fatal(err)
 	}

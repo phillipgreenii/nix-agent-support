@@ -225,7 +225,7 @@ func startDaemonAt(t *testing.T, stateDir, socketPath string, o daemonOpts) *dae
 	r.Register("pr", "list", scriptout.OpHandler{SchemaVersion: 1, Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
 		return map[string]any{"items": []string{}, "args": args}, nil
 	}})
-	srv, err := proc.Start(proc.Config{StateDir: stateDir, SocketPath: socketPath, DrainTimeout: time.Second, PeerUID: o.peerUID, OwnUID: o.ownUID})
+	srv, err := proc.Start(proc.Config{StateDir: stateDir, SocketPath: socketPath, PeerUID: o.peerUID, OwnUID: o.ownUID})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -173,7 +173,7 @@ func runMode(mode string, modeArgs []string, cfg *config.Config, stdin io.Reader
 	case modeStatus:
 		return runStatus(modeArgs, cfg, stdout, stderr)
 	}
-	return runServe(cfg, stderr)
+	return runServe(cfg, modeArgs, stderr)
 }
 
 // runClient answers one scriptout request for the instance.

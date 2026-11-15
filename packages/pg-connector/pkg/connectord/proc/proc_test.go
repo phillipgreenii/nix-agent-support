@@ -409,9 +409,10 @@ func TestDrainLetsInFlightHandlersFinishThenRunsHooksInOrderThenReleasesTheLock(
 	_ = s2.Close()
 }
 
-func TestDrainTimeoutCancelsAStuckHandlerAndStillRunsHooks(t *testing.T) {
-	cfg, log := testConfig(t)
-	cfg.DrainTimeout = 200 * time.Millisecond
+// The drain tells an in-flight handler to stop by cancelling its context, then
+// runs the hooks once it has returned.
+func TestShutdownCancelsInFlightHandlerAndStillRunsHooks(t *testing.T) {
+	cfg, _ := testConfig(t)
 	s, err := Start(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -422,7 +423,7 @@ func TestDrainTimeoutCancelsAStuckHandlerAndStillRunsHooks(t *testing.T) {
 	hooks.Register("h", func(context.Context) error { close(hookRan); return nil })
 	stop := serveAsync(t, s, func(ctx context.Context, c net.Conn, _ Peer) {
 		close(entered)
-		<-ctx.Done() // cancelled only when the drain gives up
+		<-ctx.Done() // cancelled when the shutdown begins
 	}, hooks)
 	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
 	if err != nil {
@@ -436,10 +437,7 @@ func TestDrainTimeoutCancelsAStuckHandlerAndStillRunsHooks(t *testing.T) {
 	select {
 	case <-hookRan:
 	default:
-		t.Error("the hook must run after a drain timeout")
-	}
-	if !log.has("drain_timeout") {
-		t.Error("a drain timeout must be logged")
+		t.Error("the hook must run after the handlers returned")
 	}
 }
 
@@ -583,8 +581,8 @@ func TestCleanDrainLogsStartedPhasesDoneAndNoOverrun(t *testing.T) {
 	cfg, _ := testConfig(t)
 	log := &kvLogger{}
 	cfg.Logger = log
-	cfg.ShutdownDeadline = 5 * time.Second
-	cfg.Exit = func(int) { t.Error("the watchdog fired on a clean drain") }
+	var onPhase []string
+	cfg.OnPhase = func(name string) { onPhase = append(onPhase, name) }
 	s, err := Start(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -614,83 +612,7 @@ func TestCleanDrainLogsStartedPhasesDoneAndNoOverrun(t *testing.T) {
 	if _, ok := log.find("shutdown_done"); !ok {
 		t.Errorf("no shutdown_done in %v", log.names())
 	}
-	if _, ok := log.find("shutdown_overrun"); ok {
-		t.Error("shutdown_overrun on a clean drain")
-	}
-}
-
-// A hook that ignores its context must not hold the lock past the watchdog
-// deadline: the watchdog logs the phase and exits non-zero.
-func TestWatchdogExitsNonZeroAndNamesTheStuckHook(t *testing.T) {
-	cfg, _ := testConfig(t)
-	log := &kvLogger{}
-	cfg.Logger = log
-	cfg.ShutdownDeadline = 100 * time.Millisecond
-	exited := make(chan int, 1)
-	cfg.Exit = func(code int) { exited <- code }
-	s, err := Start(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	release := make(chan struct{})
-	hooks := &Hooks{}
-	hooks.Register("stuck", func(context.Context) error { <-release; return nil })
-	stop := serveAsync(t, s, func(context.Context, net.Conn, Peer) {}, hooks)
-	go func() { _ = stop() }()
-	defer close(release)
-	select {
-	case code := <-exited:
-		if code == 0 {
-			t.Errorf("exit code = %d, want non-zero", code)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the watchdog did not fire")
-	}
-	l, ok := log.find("shutdown_overrun")
-	if !ok {
-		t.Fatalf("no shutdown_overrun in %v", log.names())
-	}
-	if l.kv["phase"] != "hook:stuck" {
-		t.Errorf("overrun phase = %v, want hook:stuck", l.kv["phase"])
-	}
-}
-
-func TestWatchdogCountsInFlightHandlers(t *testing.T) {
-	cfg, _ := testConfig(t)
-	log := &kvLogger{}
-	cfg.Logger = log
-	cfg.DrainTimeout = time.Minute
-	cfg.ShutdownDeadline = 100 * time.Millisecond
-	exited := make(chan int, 1)
-	cfg.Exit = func(code int) { exited <- code }
-	s, err := Start(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	stop := serveAsync(t, s, func(context.Context, net.Conn, Peer) {
-		close(entered)
-		<-release
-	}, nil)
-	conn, err := new(net.Dialer).DialContext(context.Background(), "unix", cfg.SocketPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = conn.Close() }()
-	<-entered
-	go func() { _ = stop() }()
-	defer close(release)
-	select {
-	case <-exited:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the watchdog did not fire")
-	}
-	l, ok := log.find("shutdown_overrun")
-	if !ok {
-		t.Fatal("no shutdown_overrun")
-	}
-	if l.kv["phase"] != "handlers" || l.kv["in_flight_handlers"] != int64(1) {
-		t.Errorf("overrun = %v, want phase handlers with 1 in flight", l.kv)
+	if got := strings.Join(onPhase, ","); got != strings.Join(want, ",") {
+		t.Errorf("OnPhase saw %v, want %v", onPhase, want)
 	}
 }

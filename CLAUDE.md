@@ -158,8 +158,8 @@ daemon's per-client metrics see the plugin. Tests: `test-pg-task-focus-swiftbar`
 The third HM-scoped launchd agent (docket `pg2-z5fax`, Phase 2): `home/programs/pg-connector`
 registers `phillipgreenii.programs.launchdServices.userAgents.pg-connector-github-daemon` (label
 `com.phillipg.pg-connector-github-daemon`, KeepAlive, RunAtLoad, default `manageLogs`) whose whole
-command is `exec <pkg>/bin/pg-connector-github --config <rendered config store path> serve`, so a
-changed binary or config changes the wrapper hash and restarts the agent. The same stubbing rules
+command is `exec <pkg>/bin/pg-connector-github --config <rendered config store path> serve --shutdown-deadline 40s`, so a
+changed binary or config changes the wrapper hash and restarts the agent. The module owns the shutdown deadline (40 s, passed to both daemons, which run under `x/lifecycle` through `pkg/connectord/rungroup`) and derives `ExitTimeOut` from it (deadline plus a 7 s margin; the two eval tests assert it). The same stubbing rules
 apply; the stub is the shared `tests/launchd-registry-stub.nix`, and `test-pg-connector-github-hm-launchd`
 (`tests/pg-connector-github-hm-launchd.nix`) checks the entry, the `supervisor = "none"` and non-darwin
 cases (an assertion, not a silent no-op), then runs the rendered command under `env -i` against a fake

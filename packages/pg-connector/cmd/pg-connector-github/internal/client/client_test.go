@@ -39,7 +39,7 @@ func shortTempDir(t *testing.T) string {
 func serveRouter(t *testing.T, r *router.Router) string {
 	t.Helper()
 	dir := shortTempDir(t)
-	cfg := proc.Config{StateDir: dir, SocketPath: filepath.Join(dir, "s"), DrainTimeout: 2 * time.Second}
+	cfg := proc.Config{StateDir: dir, SocketPath: filepath.Join(dir, "s")}
 	srv, err := proc.Start(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +241,7 @@ func TestVersionMismatchIsAnsweredOnlyForAnOutOfRangeDaemon(t *testing.T) {
 	r := router.New(router.Options{})
 	r.Register("pr", "list", scriptout.OpHandler{SchemaVersion: 1, Handle: func(context.Context, json.RawMessage) (any, error) { return "ok", nil }})
 	dir := shortTempDir(t)
-	cfg := proc.Config{StateDir: dir, SocketPath: filepath.Join(dir, "s"), DrainTimeout: time.Second}
+	cfg := proc.Config{StateDir: dir, SocketPath: filepath.Join(dir, "s")}
 	srv, err := proc.Start(cfg)
 	if err != nil {
 		t.Fatal(err)
