@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
 	evlog "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // fakeEnv backs ResolveWorkspaceDir/CLIRunner.Getenv in tests, mirroring
@@ -142,7 +143,7 @@ func bdStubExitingWithStderr(t *testing.T, exitCode int, stderrMsg string) {
 }
 
 // TestCLIRunner_Command_SetsWaitDelay is the regression test for bead
-// pg2-332z8 #13's per-Cmd half: command() (Run's own choke point) must set
+// pg2-332z8 #13's per-Cmd half: call() (Run's own choke point) must set
 // WaitDelay, independent of whatever deadline ctx itself carries —
 // WaitDelay bounds Cmd.Wait's own residual wait for the stdout/stderr
 // pipes to close (e.g. a grandchild inheriting one and holding it open,
@@ -150,9 +151,18 @@ func bdStubExitingWithStderr(t *testing.T, exitCode int, stderrMsg string) {
 // context deadline alone does not cover.
 func TestCLIRunner_Command_SetsWaitDelay(t *testing.T) {
 	r := &CLIRunner{Dir: "/some/workspace"}
-	cmd := r.command(context.Background(), "/some/workspace", []string{"show", "tp-1"})
+	cmd := r.call("/some/workspace", []string{"show", "tp-1"})
 	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
 		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
+	}
+	if cmd.Timeout != scriptout.ChildTimeout {
+		t.Fatalf("cmd.Timeout = %v, want %v", cmd.Timeout, scriptout.ChildTimeout)
+	}
+	if !cmd.OwnProcGroup || cmd.TermGrace != scriptout.DefaultTermGrace {
+		t.Fatalf("OwnProcGroup=%v TermGrace=%v, want own process group with %v grace", cmd.OwnProcGroup, cmd.TermGrace, scriptout.DefaultTermGrace)
+	}
+	if cmd.EnvMode != cmdrun.EnvExact {
+		t.Fatal("cmd.EnvMode is not EnvExact: the pinned environment would be appended to the parent's")
 	}
 }
 
@@ -167,14 +177,14 @@ func TestCLIRunner_Command_SetsWaitDelay(t *testing.T) {
 
 // TestCLIRunner_Command_DefaultEnv_SetsBDJSONEnvelope is the regression
 // test for the reported defect: when r.Env is unset (the production
-// default via NewCLIRunner), command() must not leave cmd.Env nil — a nil
+// default via NewCLIRunner), call() must not leave cmd.Env nil — a nil
 // Env makes the exec'd bd child inherit whatever ambient environment this
 // process happens to have, which is exactly the bug. BD_JSON_ENVELOPE=1
 // must be present exactly once regardless of what the real os.Environ()
 // contains.
 func TestCLIRunner_Command_DefaultEnv_SetsBDJSONEnvelope(t *testing.T) {
 	r := &CLIRunner{Dir: "/some/workspace"}
-	cmd := r.command(context.Background(), "/some/workspace", []string{"show", "tp-1"})
+	cmd := r.call("/some/workspace", []string{"show", "tp-1"})
 	if cmd.Env == nil {
 		t.Fatal("cmd.Env is nil: the exec'd bd child would inherit the ambient environment, which is the pg2-8o2cg defect")
 	}
@@ -197,7 +207,7 @@ func TestCLIRunner_Command_DefaultEnv_SetsBDJSONEnvelope(t *testing.T) {
 func TestCLIRunner_Command_DefaultEnv_OverridesConflictingAmbientValue(t *testing.T) {
 	t.Setenv("BD_JSON_ENVELOPE", "0")
 	r := &CLIRunner{Dir: "/some/workspace"}
-	cmd := r.command(context.Background(), "/some/workspace", []string{"show", "tp-1"})
+	cmd := r.call("/some/workspace", []string{"show", "tp-1"})
 	for _, kv := range cmd.Env {
 		if strings.HasPrefix(kv, "BD_JSON_ENVELOPE=") && kv != "BD_JSON_ENVELOPE=1" {
 			t.Fatalf("cmd.Env carries a non-1 BD_JSON_ENVELOPE entry: %q (env=%v)", kv, cmd.Env)
@@ -208,11 +218,11 @@ func TestCLIRunner_Command_DefaultEnv_OverridesConflictingAmbientValue(t *testin
 // TestCLIRunner_Command_ExplicitEnv_NotAugmented locks in that an
 // explicit r.Env (the test-isolation seam every other CLIRunner test in
 // this file relies on, and the one production round-trip test in
-// realbd_test.go) is used exactly as given — command() injects the
+// realbd_test.go) is used exactly as given — call() injects the
 // default envelope pin only when r.Env is nil.
 func TestCLIRunner_Command_ExplicitEnv_NotAugmented(t *testing.T) {
 	r := &CLIRunner{Dir: "/some/workspace", Env: []string{"FOO=bar"}}
-	cmd := r.command(context.Background(), "/some/workspace", []string{"show", "tp-1"})
+	cmd := r.call("/some/workspace", []string{"show", "tp-1"})
 	if len(cmd.Env) != 1 || cmd.Env[0] != "FOO=bar" {
 		t.Fatalf("cmd.Env = %v, want exactly the explicit override [FOO=bar]", cmd.Env)
 	}
@@ -468,11 +478,13 @@ func TestErrWorkspaceNotConfigured_MentionsFlagKeepsOldText(t *testing.T) {
 // ----------------------------------------------------------------------
 
 // fakeBDScript records one marker file per start (so a test can wait until a
-// call is in flight), records whether the slot's descriptor reached it as fd 3,
+// call is in flight), records whether the slot's descriptor reached it (under any
+// descriptor number, found with lsof: cmdrun has no ExtraFiles, so the number
+// is the backend's own, not 3; FAKE_BD_SLOTS names the budget state directory),
 // sleeps FAKE_BD_SLEEP seconds and prints an empty JSON object.
 const fakeBDScript = `#!/bin/sh
 : > "$FAKE_BD_STARTED/start-$$"
-if ( : >&3 ) 2>/dev/null; then : > "$FAKE_BD_STARTED/fd3-$$"; fi
+if lsof -F n -p $$ 2>/dev/null | grep -q "^n$FAKE_BD_SLOTS/slot-"; then : > "$FAKE_BD_STARTED/fd3-$$"; fi
 sleep "${FAKE_BD_SLEEP:-0}"
 echo '{}'
 `
@@ -529,6 +541,7 @@ func budgetRunner(t *testing.T, cfg budget.Config) *CLIRunner {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("FAKE_BD_SLOTS", cfg.StateDir)
 	return &CLIRunner{Dir: t.TempDir(), Budget: b}
 }
 

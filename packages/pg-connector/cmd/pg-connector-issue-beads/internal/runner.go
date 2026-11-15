@@ -23,18 +23,17 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/budget"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Runner shells out to `bd`. Production code uses CLIRunner; tests inject a
@@ -325,31 +324,29 @@ func (r *CLIRunner) Workspace() (string, error) {
 	return r.resolveDir()
 }
 
-// command builds the `bd -C dir <args...>` *exec.Cmd Run below actually
-// executes, split out (mirroring the sibling gh/git backends' own
-// Command/command choke points) so a test can assert on WaitDelay/Env
-// directly without spawning a real bd process.
-func (r *CLIRunner) command(ctx context.Context, dir string, args []string) *exec.Cmd {
-	fullArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "bd", fullArgs...)
-	cmd.Dir = dir
-	if r.Env != nil {
-		cmd.Env = r.Env
-	} else {
-		// bead pg2-8o2cg: do not leave cmd.Env nil here — a nil Env makes
-		// the exec'd bd process inherit whatever ambient environment this
-		// backend's own process happens to have (a LaunchAgent's, in the
-		// reported case), which never carries BD_JSON_ENVELOPE=1. Pin it
-		// explicitly on top of the real process env instead.
-		cmd.Env = withBDJSONEnvelope(os.Environ())
+// call builds the cmdrun.Call Run below executes, split out (mirroring the
+// sibling backends' own Call choke points) so a test can assert on Env,
+// Timeout and the process group directly without spawning a real bd process.
+// The call is bounded and runs bd in its own process group
+// (scriptout.BoundChild); its environment is exact: r.Env as given, or the
+// process env with BD_JSON_ENVELOPE=1 pinned on top.
+func (r *CLIRunner) call(dir string, args []string) cmdrun.Call {
+	env := r.Env
+	if env == nil {
+		// Do not leave Env unset: the child would inherit whatever ambient
+		// environment this backend's own process happens to have (a
+		// LaunchAgent's, in the reported case), which never carries
+		// BD_JSON_ENVELOPE=1. Pin it explicitly on top of the real env.
+		env = withBDJSONEnvelope(os.Environ())
 	}
-	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
-	// even though ctx already carries a deadline (a `bd` blocked on a
-	// wedged dolt server is exactly the hang this bounds): it bounds
-	// Cmd.Wait's own residual wait for the stdout/stderr pipes to close,
-	// independent of killing the direct bd child [bead pg2-332z8 #13].
-	cmd.WaitDelay = scriptout.DefaultWaitDelay
-	return cmd
+	return scriptout.BoundChild(cmdrun.Call{
+		Name:    "bd",
+		Args:    append([]string{"-C", dir}, args...),
+		Dir:     dir,
+		Env:     env,
+		EnvMode: cmdrun.EnvExact,
+		Timeout: scriptout.ChildTimeout,
+	})
 }
 
 // Run shells out to `bd`, explicitly pinned via `-C` to a resolved
@@ -379,17 +376,16 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 		defer slot.Release()
 	}
 	fullArgs := append([]string{"-C", dir}, args...)
-	cmd := r.command(ctx, dir, args)
-	if slot != nil && slot.File() != nil {
-		// The child inherits the slot's descriptor, so the slot stays held
-		// until bd exits even if this process is killed first.
-		cmd.ExtraFiles = []*os.File{slot.File()}
+	if slot != nil {
+		// bd inherits the slot's descriptor (no ExtraFiles on cmdrun.Call),
+		// so the slot stays held until bd exits even if this process is
+		// killed first. A failure leaves the slot releasable only by this
+		// process, which is a degraded budget, not a reason to refuse bd.
+		_ = slot.Inheritable()
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 	start := time.Now()
-	err = cmd.Run()
+	res := cmdrun.Exec(ctx, r.call(dir, args))
+	err = scriptout.ResultErr(res)
 	elapsed := time.Since(start)
 	// Recorded on the in-flight call's event (a no-op without one), whether
 	// bd succeeded or not: a killed call's slowest bd command is exactly
@@ -402,17 +398,16 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 		eventlog.RecordBDTimeout(ctx)
 	}
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if res.StartErr == nil {
 			// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
 			// The elapsed time rides along so a kill at the call's deadline
 			// reads "(after 25.001s): signal: killed" instead of a bare
 			// "signal: killed" [bead pg2-5dyz2].
-			return stdout.String(), fmt.Errorf("bd %s (after %s): %w: %s",
-				strings.Join(fullArgs, " "), elapsed.Round(time.Millisecond), err, scriptout.TruncateForFold(stderr.Bytes()))
+			return string(res.Stdout), fmt.Errorf("bd %s (after %s): %w: %s",
+				strings.Join(fullArgs, " "), elapsed.Round(time.Millisecond), err, scriptout.TruncateForFold(res.Stderr))
 		}
-		return stdout.String(), fmt.Errorf("bd %s (after %s): %w (is bd on PATH?)",
+		return string(res.Stdout), fmt.Errorf("bd %s (after %s): %w (is bd on PATH?)",
 			strings.Join(fullArgs, " "), elapsed.Round(time.Millisecond), err)
 	}
-	return stdout.String(), nil
+	return string(res.Stdout), nil
 }

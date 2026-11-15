@@ -3,9 +3,11 @@
 //
 // The backend is one process per call and has no daemon, so the semaphore is
 // MaxConcurrent slot files in a state directory. A call takes one slot with
-// flock and hands the slot's open file to the bd child as an extra file
-// (exec.Cmd.ExtraFiles). flock locks belong to the open file description, and
-// the child's copy of the descriptor shares it, so the slot stays held until
+// flock and lets the bd child inherit the slot's open file (Slot.Inheritable
+// clears its close-on-exec flag, so the descriptor survives the child's exec
+// without exec.Cmd.ExtraFiles, which x/cmdrun.Call does not offer). flock
+// locks belong to the open file description, and the child's copy of the
+// descriptor shares it, so the slot stays held until
 // the CHILD exits even when the backend that took it is killed at the
 // umbrella's call deadline while bd keeps running. Release therefore only
 // closes the backend's own descriptor; it never issues LOCK_UN, which would
@@ -39,6 +41,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // ErrDenied is returned by Acquire when no eligible slot became free within
@@ -144,9 +148,34 @@ type Slot struct {
 	failErr    error
 }
 
-// File is the slot's open file, to be passed to the bd child in
-// exec.Cmd.ExtraFiles. It is nil when the budget failed open.
+// File is the slot's open file. It is nil when the budget failed open.
 func (s *Slot) File() *os.File { return s.file }
+
+// Inheritable clears the slot descriptor's close-on-exec flag so every child
+// this process starts from now on inherits it (at its own descriptor number),
+// keeping the flock held until that child exits even if this process is killed
+// first. The backend is one process per call and starts only its bd child, so
+// no unrelated child can pick the descriptor up; Release (closing the
+// backend's own copy) never unlocks it for the child. A no-op on a fail-open
+// slot or one already released.
+func (s *Slot) Inheritable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.file == nil || s.failedOpen {
+		return nil
+	}
+	rc, err := s.file.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var ferr error
+	if err := rc.Control(func(fd uintptr) {
+		_, ferr = unix.FcntlInt(fd, unix.F_SETFD, 0)
+	}); err != nil {
+		return err
+	}
+	return ferr
+}
 
 // Waited is how long Acquire waited for the slot; zero on a fail-open slot.
 func (s *Slot) Waited() time.Duration { return s.waited }
@@ -159,8 +188,8 @@ func (s *Slot) FailedOpen() bool { return s.failedOpen }
 func (s *Slot) FailOpenErr() error { return s.failErr }
 
 // Release closes the backend's own descriptor of the slot. It is idempotent
-// and a no-op on a fail-open slot. If a child still holds the file as an
-// extra file the lock stays held until that child exits.
+// and a no-op on a fail-open slot. If a child still holds the inherited
+// descriptor (see Inheritable) the lock stays held until that child exits.
 func (s *Slot) Release() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
