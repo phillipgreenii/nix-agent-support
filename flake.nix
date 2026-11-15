@@ -19246,7 +19246,7 @@
 
                     # The rendered entry's command, exactly as the registration wraps it.
                     printf '%s' ${lib.escapeShellArg r.live.scriptNoOs} > "$work/entry.sh"
-                    cfgpath=$(sed -n 's/^exec .* --config \([^ ]*\) serve$/\1/p' "$work/entry.sh")
+                    cfgpath=$(sed -n 's/^exec .* --config \([^ ]*\) serve --shutdown-deadline 40s$/\1/p' "$work/entry.sh")
                     [ "$cfgpath" = "${r.live.configFile}" ] || { echo "entry does not carry the rendered config path: $(cat "$work/entry.sh")" >&2; exit 1; }
                     grep -q '^exec ${binary} --config ' "$work/entry.sh" || { echo "entry does not exec the daemon binary" >&2; exit 1; }
 
@@ -19361,7 +19361,7 @@
 
                     # The rendered entry's command, exactly as the registration wraps it.
                     printf '%s' ${lib.escapeShellArg r.live.script} > "$work/entry.sh"
-                    cfgpath=$(sed -n 's/^exec .* --config \([^ ]*\) serve$/\1/p' "$work/entry.sh")
+                    cfgpath=$(sed -n 's/^exec .* --config \([^ ]*\) serve --shutdown-deadline 40s$/\1/p' "$work/entry.sh")
                     [ "$cfgpath" = "${r.live.configFile}" ] || { echo "entry does not carry the rendered config path: $(cat "$work/entry.sh")" >&2; exit 1; }
                     grep -q '^exec ${binary} --config ' "$work/entry.sh" || { echo "entry does not exec the configured binary" >&2; exit 1; }
 
@@ -19369,7 +19369,7 @@
                     argv_out="$work/argv.out"
                     ( cd / && exec env -i FAKE_JIRA_OUT="$argv_out" ${pkgs.bash}/bin/bash "$work/entry.sh" )
                     [ -s "$argv_out" ] || { echo "the fake binary was never exec'd" >&2; exit 1; }
-                    printf '%s\n' ${binary} --config "$cfgpath" serve > "$work/want"
+                    printf '%s\n' ${binary} --config "$cfgpath" serve --shutdown-deadline 40s > "$work/want"
                     cmp "$argv_out" "$work/want" || { echo "the fake binary saw a different path or argv:" >&2; cat "$argv_out" >&2; exit 1; }
                     touch $out
                   '';
