@@ -232,12 +232,26 @@ func TestExitCodeMapping(t *testing.T) {
 		{22, 22, false},
 		{23, 23, false},
 	}
+	// One fake pg-review serves every case: it exits with the code held in
+	// the "code" file, rewritten before each real spawn. The adapter looks
+	// pg-review up on the process-wide PATH, so cases cannot run in parallel;
+	// sharing one fake and one PATH setup avoids a temp dir, script write and
+	// t.Setenv per case.
+	dir := t.TempDir()
+	codeFile := filepath.Join(dir, "code")
+	script := "#!/bin/sh\nexit \"$(cat '" + codeFile + "')\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "pg-review"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":/usr/bin:/bin")
 	for _, c := range cases {
 		for _, sub := range [][]string{
 			{"run", "2026-11-05T07:00:00Z", "id", "l", "s", "24h"},
 			{"maintain"},
 		} {
-			fakePgReview(t, c.child, "")
+			if err := os.WriteFile(codeFile, []byte(strconv.Itoa(c.child)), 0o644); err != nil {
+				t.Fatal(err)
+			}
 			code, _, errOut := do(sub...)
 			if code != c.want {
 				t.Errorf("%s child %d: exit %d want %d", sub[0], c.child, code, c.want)
