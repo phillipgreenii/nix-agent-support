@@ -21660,6 +21660,40 @@
                   | sort | uniq -c
               '';
             };
+            # ccpool-integration runs every //go:build integration ccpool test
+            # (the real-tmux, real-process groups under cmd/ccpool). They start tmux
+            # servers, which a nix sandbox may not allow, so this is an on-demand app
+            # like ccpool-contract, NOT a flake check, hook, or part of the unit/land
+            # gates. TMUX_TMPDIR points at a private temp dir so no existing tmux
+            # server or session is touched, and the trap kills only servers under it.
+            ccpool-integration = pkgs.writeShellApplication {
+              name = "ccpool-integration";
+              runtimeInputs = [
+                pkgs.go
+                pkgs.tmux
+                pkgs.sqlite
+                pkgs.coreutils
+              ];
+              text = ''
+                cd "''${1:-packages/ccpool}"
+                # A short private TMPDIR: the tests put unix sockets under it, and a
+                # long inherited TMPDIR or GOTMPDIR overflows the socket path limit on macOS.
+                TMPDIR="$(mktemp -d /tmp/ccint.XXXXXX)"
+                TMUX_TMPDIR="$TMPDIR/tmux"
+                mkdir -p "$TMUX_TMPDIR"
+                export TMPDIR TMUX_TMPDIR
+                # go test hands its tests GOTMPDIR as TMPDIR when it is set.
+                unset GOTMPDIR
+                cleanup() {
+                  for s in "$TMUX_TMPDIR"/tmux-*/*; do
+                    if [ -S "$s" ]; then tmux -S "$s" kill-server 2>/dev/null || true; fi
+                  done
+                  rm -rf "$TMPDIR"
+                }
+                trap cleanup EXIT
+                go test -tags integration -count=1 -timeout=20m -p 1 ./cmd/ccpool/...
+              '';
+            };
             # pb-contract runs pb's on-demand, build-tagged (//go:build contract)
             # suite that pins the REAL bd/git/pn surfaces (bd gate surface, the
             # co-location invariant, the multi-DB dedupe key, git patch-id

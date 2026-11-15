@@ -85,3 +85,17 @@ A `baseline` pins the value `ccpool` exhibits **today**, which is frequently a *
 tagged with a bead, e.g. `pg2-33gl`). Pinning the observed value means that when the bug is later
 **fixed**, the baseline trips as `baseline-drift` and forces you to re-triage and re-pin (or promote
 the check to `live`). The set of `baseline` calls in the code is the expected-deferred manifest.
+
+## Integration tests (real tmux and real processes)
+
+The `//go:build integration` tests under `cmd/ccpool` start real tmux servers and real
+`ccpool` processes. They are not in the unit gate, any hook, or a flake check (a nix sandbox
+may not allow a tmux server). Run them on demand with:
+
+```bash
+nix run .#ccpool-integration
+```
+
+It is `go test -tags integration -count=1 -p 1 ./cmd/ccpool/...` with a private short
+`TMPDIR` and `TMUX_TMPDIR` (no existing tmux server is touched, and the servers it started are
+killed on exit).
