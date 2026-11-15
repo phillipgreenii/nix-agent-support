@@ -10,8 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 const (
@@ -38,11 +40,15 @@ type Keychain interface {
 type securityKeychain struct{}
 
 func (securityKeychain) Password(ctx context.Context, service, account string) (string, error) {
-	out, err := exec.CommandContext(ctx, "security", "find-generic-password", "-a", account, "-s", service, "-w").Output()
-	if err != nil {
+	res := cmdrun.Exec(ctx, scriptout.BoundChild(cmdrun.Call{
+		Name:    "security",
+		Args:    []string{"find-generic-password", "-a", account, "-s", service, "-w"},
+		Timeout: scriptout.ChildTimeout,
+	}))
+	if err := scriptout.ResultErr(res); err != nil {
 		return "", fmt.Errorf("keychain item %s/%s: %w", service, account, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
 // TokenResolver resolves the API key.
