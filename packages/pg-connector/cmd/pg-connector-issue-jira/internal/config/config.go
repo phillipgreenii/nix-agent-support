@@ -31,6 +31,17 @@ type Config struct {
 	// PjiraEnv is the ONLY environment the daemon gives every pjira process.
 	PjiraEnv map[string]string `json:"pjira_env"`
 
+	// TokenLink opts the machine in to the keychain token handoff: the absolute
+	// path, inside state_dir, of the stable symlink pjira reads its token
+	// through. Unset means no keychain read and no token file (today's
+	// behavior). The temp-dir path of the file itself is not configuration: the
+	// daemon finds it at start.
+	TokenLink string `json:"token_link,omitempty"`
+	// KeychainService and KeychainAccount name the login keychain item holding
+	// the token. The account is required when TokenLink is set.
+	KeychainService string `json:"keychain_service,omitempty"`
+	KeychainAccount string `json:"keychain_account,omitempty"`
+
 	// Queries maps a caller-facing query name to its definition. None is
 	// built in; nothing is watched unless its definition says so.
 	Queries map[string]schema.QueryDef `json:"queries"`
@@ -99,6 +110,7 @@ func Defaults() *Config {
 		Instance:             DefaultInstance,
 		SupervisorLabel:      DefaultSupervisorLabel,
 		PjiraEnv:             map[string]string{},
+		KeychainService:      DefaultKeychainService,
 		Queries:              map[string]schema.QueryDef{},
 		RequestRatePerSecond: DefaultRequestRatePerSecond,
 		Concurrency:          DefaultConcurrency,
@@ -237,6 +249,9 @@ func (c *Config) validate() error {
 	if err := proc.CheckSocketPath(c.SocketPath, proc.MaxSocketPathBytes()); err != nil {
 		return fmt.Errorf("socket_path: %w", err)
 	}
+	if err := c.validateToken(); err != nil {
+		return err
+	}
 	if c.Instance == "" {
 		return errors.New("instance must not be empty")
 	}
@@ -272,6 +287,31 @@ func (c *Config) validate() error {
 		if n <= 0 {
 			return fmt.Errorf("%s must be positive", name)
 		}
+	}
+	return nil
+}
+
+// validateToken checks the opt-in token handoff keys: token_link must lie
+// inside state_dir, and the keychain account is required with it.
+func (c *Config) validateToken() error {
+	if c.TokenLink == "" {
+		if c.KeychainAccount != "" {
+			return errors.New("keychain_account is set but token_link is not: set token_link to opt in")
+		}
+		return nil
+	}
+	if !filepath.IsAbs(c.TokenLink) {
+		return fmt.Errorf("token_link must be an absolute path, got %q", c.TokenLink)
+	}
+	rel, err := filepath.Rel(filepath.Clean(c.StateDir), filepath.Clean(c.TokenLink))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("token_link %q must be inside state_dir %q", c.TokenLink, c.StateDir)
+	}
+	if c.KeychainService == "" {
+		return errors.New("keychain_service must not be empty when token_link is set")
+	}
+	if c.KeychainAccount == "" {
+		return errors.New("keychain_account is required when token_link is set")
 	}
 	return nil
 }

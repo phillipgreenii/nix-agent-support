@@ -65,6 +65,9 @@ const (
 	// DefaultSupervisorLabel is the launchd label of the daemon's supervisor
 	// entry.
 	DefaultSupervisorLabel = "com.phillipg.pg-connector-issue-jira-daemon"
+	// DefaultKeychainService is the login keychain service holding the Jira
+	// token when token_link opts in.
+	DefaultKeychainService = "zr-jira"
 	// DaemonName is the daemon binary name, printed in a daemon-down message.
 	DaemonName = "pg-connector-issue-jira"
 )

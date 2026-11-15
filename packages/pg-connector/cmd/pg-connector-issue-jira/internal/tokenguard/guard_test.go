@@ -1,6 +1,7 @@
 package tokenguard
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -399,5 +400,34 @@ func TestFailedAuthStatusTriggersRepull(t *testing.T) {
 	out, err := r.run.Run(t.Context(), "auth-status")
 	if err != nil || out != "{}" || r.kc.Calls() != 2 {
 		t.Errorf("out %q err %v reads %d, want a retry after one re-pull", out, err, r.kc.Calls())
+	}
+}
+
+func TestRetryFileRecoversATokenFileDegrade(t *testing.T) {
+	r := newRig(t, ok(fixtureToken))
+	r.store.startErr = errors.New("unsafe")
+	r.start()
+	if r.guard.State().Reason != ReasonTokenFile {
+		t.Fatalf("state %+v, want token_file", r.guard.State())
+	}
+	// Still refused: no keychain read, still degraded.
+	r.guard.RetryFile(context.Background())
+	if r.kc.Calls() != 0 || r.guard.State().Reason != ReasonTokenFile {
+		t.Fatalf("reads %d state %+v, want no read and still token_file", r.kc.Calls(), r.guard.State())
+	}
+	r.store.startErr = nil
+	r.guard.RetryFile(context.Background())
+	if r.guard.Degraded() || r.store.token() != fixtureToken || r.kc.Calls() != 1 {
+		t.Errorf("degraded %v token %q reads %d, want recovered with one read", r.guard.Degraded(), r.store.token(), r.kc.Calls())
+	}
+}
+
+func TestRetryFileDoesNothingInOtherStates(t *testing.T) {
+	r := newRig(t, ok(fixtureToken))
+	r.start()
+	r.clock.Advance(2 * time.Minute)
+	r.guard.RetryFile(context.Background())
+	if r.kc.Calls() != 1 || r.store.writeCount() != 1 {
+		t.Errorf("a healthy guard retried: reads %d writes %d", r.kc.Calls(), r.store.writeCount())
 	}
 }

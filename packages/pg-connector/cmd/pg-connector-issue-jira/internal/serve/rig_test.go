@@ -79,6 +79,14 @@ type rig struct {
 // directory exists and before the config is loaded.
 func newRig(t *testing.T, pjira string, queries string, before func(r *rig)) *rig {
 	t.Helper()
+	return newRigWith(t, pjira, queries, "", before)
+}
+
+// newRigWith is newRig with extra top-level config keys (a JSON fragment that
+// starts with a comma). "@ROOT@" in the fragment and in the pjira script is the
+// rig's root directory.
+func newRigWith(t *testing.T, pjira string, queries string, extra string, before func(r *rig)) *rig {
+	t.Helper()
 	root, err := os.MkdirTemp("/tmp", "jx")
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +97,8 @@ func newRig(t *testing.T, pjira string, queries string, before func(r *rig)) *ri
 		t.Fatal(err)
 	}
 	script := filepath.Join(root, "pjira")
+	pjira = strings.ReplaceAll(pjira, "@ROOT@", root)
+	extra = strings.ReplaceAll(extra, "@ROOT@", root)
 	if err := os.WriteFile(script, []byte(pjira), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +106,7 @@ func newRig(t *testing.T, pjira string, queries string, before func(r *rig)) *ri
 		queries = "{}"
 	}
 	doc := `{"state_dir":` + quote(r.state) + `,"pjira_path":` + quote(script) +
-		`,"socket_path":` + quote(filepath.Join(root, "s")) + `,"queries":` + queries + `}`
+		`,"socket_path":` + quote(filepath.Join(root, "s")) + `,"queries":` + queries + extra + `}`
 	path := filepath.Join(root, "config.json")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
@@ -133,13 +143,23 @@ type daemonRun struct {
 // stop (a test cleanup ends it too).
 func (r *rig) start(hooks serve.Hooks) *daemonRun {
 	r.t.Helper()
+	return r.startWith(hooks, nil)
+}
+
+// startWith is start with a hand on the Options (the token handoff's seams).
+func (r *rig) startWith(hooks serve.Hooks, mutate func(*serve.Options)) *daemonRun {
+	r.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &daemonRun{r: r, cancel: cancel, code: make(chan int, 1), ready: make(chan *router.Router, 1), stderr: &syncBuf{}}
 	go func() {
-		d.code <- serve.Run(ctx, serve.Options{
+		o := serve.Options{
 			Config: r.cfg, Version: "test", Stderr: d.stderr, Hooks: hooks,
 			OnReady: func(rt *router.Router) { d.ready <- rt },
-		})
+		}
+		if mutate != nil {
+			mutate(&o)
+		}
+		d.code <- serve.Run(ctx, o)
 	}()
 	r.t.Cleanup(func() {
 		cancel()

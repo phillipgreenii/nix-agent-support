@@ -26,9 +26,11 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/telemetry"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/tokenguard"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine"
 	libfeed "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/keychain"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
@@ -80,6 +82,15 @@ type Options struct {
 	// provider telemetry.Setup installed. It is a seam for an in-process test
 	// that reads the metrics; the binary leaves it nil.
 	MeterProvider metric.MeterProvider
+
+	// Keychain, TempDir, TokenClock and TokenTimer are the seams of the token
+	// handoff (only used when the config sets token_link). nil means
+	// production: the login keychain through /usr/bin/security, the TMPDIR
+	// environment variable read once at start, the system clock and timer.
+	Keychain   keychain.Keychain
+	TempDir    func() string
+	TokenClock governor.Clock
+	TokenTimer tokenguard.Timer
 }
 
 // Run runs the daemon until ctx ends and returns the process exit code.
@@ -118,6 +129,9 @@ func Run(ctx context.Context, o Options) int {
 	// whatever startup got to.
 	drain := &proc.Hooks{}
 	drain.Register("writes", d.drainWrites)
+	// The token file goes right after the writes and BEFORE the background:
+	// the 10 s hook budget is shared by every hook, so it must never be last.
+	drain.Register("token-file", d.removeToken)
 	drain.Register("background", d.stopBackground)
 	drain.Register("changes", d.flushChanges)
 	drain.Register("telemetry", d.stopTelemetry)
@@ -175,6 +189,10 @@ type daemon struct {
 	// reads it.
 	opened store.Result
 
+	// tok is the token handoff; nil until startup built it (and always nil when
+	// the config leaves token_link unset).
+	tok atomic.Pointer[tokenHandoff]
+
 	gov    atomic.Pointer[governor.Governor]
 	sched  atomic.Pointer[scheduler.Scheduler]
 	detail atomic.Pointer[detail.Service]
@@ -186,9 +204,19 @@ type daemon struct {
 }
 
 // start runs startup steps 4 to 9 (see the package comment).
-func (d *daemon) start(ctx context.Context) error {
+func (d *daemon) start(ctx context.Context) (err error) {
 	cfg := d.cfg
 	hooks := d.o.Hooks
+
+	// The token handoff comes first: its leftovers of a killed run are removed
+	// and the ONE keychain read happens before anything else, and any error
+	// return below removes the file and the link again.
+	defer func() {
+		if err != nil {
+			_ = d.removeToken(context.Background())
+		}
+	}()
+	refresher := d.startToken(ctx)
 
 	// The background loops outlive startup: they stop on bgCancel, not when the
 	// start context ends.
@@ -343,6 +371,7 @@ func (d *daemon) start(ctx context.Context) error {
 		Auth:         auth,
 		Floor:        int64(cfg.RateReserveRequests),
 		Readings:     readings,
+		Refresher:    refresher,
 	}
 	if tel != nil {
 		runOpts.Observer = tel

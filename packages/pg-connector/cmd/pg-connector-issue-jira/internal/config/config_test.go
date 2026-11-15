@@ -393,3 +393,52 @@ func TestRateReserveRequests(t *testing.T) {
 		t.Errorf("a negative rate_reserve_requests must be rejected by name: %v", err)
 	}
 }
+
+func tokenDoc(extra string) []byte {
+	return []byte(`{"state_dir":"/tmp/s","pjira_path":"/opt/pjira","socket_path":"/tmp/s/sock"` + extra + `}`)
+}
+
+func TestTokenLinkOptInValidation(t *testing.T) {
+	cases := []struct {
+		name, extra, wantErr string
+	}{
+		{"off by default", ``, ""},
+		{"on", `,"token_link":"/tmp/s/jira-token","keychain_account":"a@b.c"`, ""},
+		{"nested inside state_dir", `,"token_link":"/tmp/s/sub/jira-token","keychain_account":"a"`, ""},
+		{"outside state_dir", `,"token_link":"/tmp/other/jira-token","keychain_account":"a"`, "inside state_dir"},
+		{"escapes by dotdot", `,"token_link":"/tmp/s/../x","keychain_account":"a"`, "inside state_dir"},
+		{"is state_dir itself", `,"token_link":"/tmp/s","keychain_account":"a"`, "inside state_dir"},
+		{"relative", `,"token_link":"jira-token","keychain_account":"a"`, "absolute"},
+		{"account required", `,"token_link":"/tmp/s/jira-token"`, "keychain_account is required"},
+		{"account without link", `,"keychain_account":"a"`, "token_link"},
+		{"empty service", `,"token_link":"/tmp/s/jira-token","keychain_account":"a","keychain_service":""`, "keychain_service"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := parse(tokenDoc(tc.extra))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = cfg.validate()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestKeychainServiceDefaultsToZrJira(t *testing.T) {
+	cfg, err := parse(tokenDoc(`,"token_link":"/tmp/s/jira-token","keychain_account":"a"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KeychainService != "zr-jira" {
+		t.Errorf("keychain_service = %q, want zr-jira", cfg.KeychainService)
+	}
+}

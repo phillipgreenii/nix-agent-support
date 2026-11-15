@@ -38,12 +38,36 @@
 //
 // A daemon that cannot reach the origin, or is unauthenticated, still starts and
 // serves stored content. It reads no environment variable: every setting is the
-// rendered file's.
+// rendered file's, with ONE exception: when token_link is set, TMPDIR is read
+// once at start, to place the token file in the per-user temp directory.
+//
+// # Token handoff
+//
+// Only when the config sets token_link. Right after the lock is held (before
+// the store opens) the token store removes the leftovers of a killed run, the
+// daemon reads the login keychain ONCE, and writes the token to a file in an
+// owner-only subdirectory of the temp directory and points the stable link in
+// the state directory at it (pjira reads its token through that link). A locked
+// or missing keychain item does not stop the daemon: it starts degraded
+// (token_unavailable), launches no pjira, and retries the read after 1, 2 and 5
+// minutes. A refused temp directory or a failed write starts it degraded
+// (token_file), retried after 1, 2 and 5 minutes and then every six hours. Every
+// six hours the file's timestamps are refreshed so the OS temp cleaner leaves
+// it; a vanished file is rewritten after one keychain read.
+//
+// The drain hook token-file removes the file, the subdirectory entries and the
+// link. It is registered right after the writes hook and before the background
+// hook, because the 10 second hook budget is shared by all hooks. It first
+// marks the guard closing, so a call failing on the vanished file never reads
+// the keychain or degrades; a removal failure is logged (token_file_remove_failed)
+// and never blocks the shutdown. Any error return of startup removes the file
+// and the link too.
 //
 // # Drain
 //
 // A SIGTERM (ctx ending) drains: the listener closes, in-flight requests finish,
-// then the registered hooks run in order (in-flight writes finish, the scheduler
+// then the registered hooks run in order (in-flight writes finish, the token file
+// is removed, the scheduler
 // and the background loops stop, every pending settle row is appended so no
 // detected change is lost, the telemetry flushes, and the store's WAL checkpoint
 // and close come last) and the lock is released.

@@ -13,6 +13,12 @@
 // is the golden example with every key written out at its default; a file MAY
 // carry only the keys it changes.
 //
+// The token handoff keys (token_link, keychain_service, keychain_account) are
+// the opt-in of a machine. The loader never reads the temp directory: the
+// daemon reads TMPDIR ONCE at start, only when token_link is set (the one
+// documented exception to "no environment variable"), and the config carries
+// no temp path because it cannot be known when the file is rendered.
+//
 // Durations are strings with s, m, h or d units ("60s", "10m", "24h", "7d").
 // change_body_cap is an integer of bytes or a string such as "4KiB".
 //
@@ -33,6 +39,9 @@
 //	otel_endpoint           absent or "" means no export
 //	config_hash             the hash the renderer stamped (see "Config hash")
 //	config_path             where the renderer installs the file (informational; Config.RenderedPath)
+//	token_link              absent or "" means the keychain token handoff is off (no keychain read, no token file); otherwise an absolute path inside state_dir naming the stable symlink pjira reads its token through
+//	keychain_service        zr-jira (the keychain item of the token; used only with token_link)
+//	keychain_account        absent; REQUIRED when token_link is set
 //	pjira_env               {} (see "pjira_env")
 //	queries                 {} (see "Queries")
 //	request_rate_per_second 2

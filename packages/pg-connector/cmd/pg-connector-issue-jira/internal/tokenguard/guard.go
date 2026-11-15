@@ -365,3 +365,31 @@ func (g *Guard) backoffLoop() {
 		return
 	}
 }
+
+// RetryFile retries the token file after a failed write or a refused temp
+// directory (degraded token_file): it prepares the store again, makes one
+// keychain read (subject to the floor) and writes the file. It does nothing in
+// any other state. The caller owns the timing: the guard has no retry timer
+// for a disk error, because a disk error is not a keychain read error.
+func (g *Guard) RetryFile(ctx context.Context) {
+	g.refreshMu.Lock()
+	defer g.refreshMu.Unlock()
+
+	g.mu.Lock()
+	skip := g.closing || g.reason != ReasonTokenFile ||
+		(g.hasRead && g.clock.Now().Sub(g.lastRead) < KeychainFloor)
+	g.mu.Unlock()
+	if skip {
+		return
+	}
+	if err := g.store.Start(); err != nil {
+		return
+	}
+	tok, err := g.read(ctx, ReadRewrite)
+	if err != nil {
+		g.noteReadError(err)
+		g.startBackoff()
+		return
+	}
+	g.install(tok)
+}
