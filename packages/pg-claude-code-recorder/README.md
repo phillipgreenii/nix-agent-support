@@ -224,7 +224,7 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   declared type; see `internal/source/storage.go`; registered when first incremented, so a clean run has no series),
   `sweep_files_total{outcome}` (walked, unchanged_candidate, skipped, ingested; skipped plus ingested is the walked count of a sweep), `sweep_skipped_ratio` (the last sweep, skipped over walked), `sweep_lstat_fallbacks_total` (files the walk did not show present, so checked with an lstat), `sweep_verify_forced_total` (full-verification sweeps: a forced sweep, or the first sweep after a start with an empty seen table) and `sweep_changed_total{reason}` (new, size, mtime, ino,
   not_cached: why a walked file is not known unchanged), `db_max_lifetime_closed_total` and `db_max_idle_closed_total` (label `pool`: `read` or `write`; a rising
-  `db_wait_seconds_total` means callers queue for a connection; the read pool is bounded by `query.max_connections`, default 8, at least 2, 0 means unbounded, and the read panel is "read pool wait"). The `client` label is whitelisted (`clients` in the config adds names); any other
+  `db_wait_seconds_total` means callers queue for a connection; the read pool is bounded by `query.max_connections`, default 8, at least 2, 0 means unbounded, and the read panel is "read pool wait"). The `client` label is whitelisted (the defaults include `pa-monitor-daemon`, `pa-monitor-sessions` and `pg-ccaudit`; `clients` in the config adds names); any other
   name is `other`. The exporter is a small text renderer over the in-process registry, so the
   package takes no Prometheus client dependency.
 - Log: JSONL on standard error (or `logFile`), service `pg-claude-code-recorder`, fields `ts`,

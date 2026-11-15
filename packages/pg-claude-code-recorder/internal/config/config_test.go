@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 )
 
 func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
@@ -222,5 +224,17 @@ func TestSweepIntervalBounds(t *testing.T) {
 	}
 	if c := Defaults(env(map[string]string{"HOME": "/h"})); len(c.Warnings) != 0 {
 		t.Fatalf("defaults warn: %v", c.Warnings)
+	}
+}
+
+func TestDefaultClientsLabelledByName(t *testing.T) {
+	wl := DefaultClients()
+	for _, name := range []string{"pa-monitor-daemon", "pa-monitor-sessions", "pg-ccaudit", "pa-monitor", "ccpool", "cli"} {
+		if got := obs.ClientLabel(name, wl); got != name {
+			t.Errorf("ClientLabel(%q) = %q, want the name", name, got)
+		}
+	}
+	if got := obs.ClientLabel("never-heard-of-it", wl); got != obs.ClientOther {
+		t.Errorf("unknown client = %q, want %q", got, obs.ClientOther)
 	}
 }

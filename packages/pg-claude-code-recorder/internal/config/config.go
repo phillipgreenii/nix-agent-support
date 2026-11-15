@@ -348,7 +348,7 @@ func Defaults(getenv func(string) string) Config {
 
 // DefaultClients are the client names accepted as a metric label.
 func DefaultClients() []string {
-	return []string{"cli", "swiftbar", "pa-monitor", "ccpool", "pg-desk", "pg-task-focus", "pg-router", "pg-claude-code-control", "skill"}
+	return []string{"cli", "swiftbar", "pa-monitor", "pa-monitor-daemon", "pa-monitor-sessions", "pg-ccaudit", "ccpool", "pg-desk", "pg-task-focus", "pg-router", "pg-claude-code-control", "skill"}
 }
 
 // Load reads path (a missing file is an error only when mustExist) over the
