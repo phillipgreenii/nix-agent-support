@@ -6,13 +6,17 @@
 mkGoApp {
   pname = "pg-claude-code-recorder";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): one standalone module at this
-  # package dir with go.mod and the committed gomod2nix.toml side by side. No
-  # local `replace`, so no modRoot (a later packet that takes a replace to
-  # ../claude-transcript switches to Pattern B per
-  # .claude/rules/package-versioning.md).
-  src = lib.cleanSource ./.;
-  modRoot = null;
+  # Pattern B (phillipg-nix-repo-base ADR 0008): go.mod locally replaces
+  # ../pg-sqlite (the shared sqlite-open helper, ADR 0125), so the build sandbox
+  # must contain both package dirs at their relative positions.
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../pg-sqlite
+    ];
+  };
+  modRoot = "pg-claude-code-recorder";
 
   gomod2nixToml = ./gomod2nix.toml;
 

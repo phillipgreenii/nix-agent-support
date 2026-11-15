@@ -25,6 +25,7 @@ mkGoApp {
     fileset = lib.fileset.unions [
       ./.
       ../pg-claude-code-recorder
+      ../pg-sqlite
     ];
   };
   modRoot = "pg-ccaudit";

@@ -25,6 +25,7 @@ mkGoApp {
       ./.
       ../claude-transcript
       ../pg-claude-code-recorder
+      ../pg-sqlite
     ];
   };
   modRoot = "ccpool";

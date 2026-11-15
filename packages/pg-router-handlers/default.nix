@@ -28,6 +28,7 @@ mkGoApp {
       ../pg-router
       ../ccpool
       ../pg-claude-code-recorder
+      ../pg-sqlite
       ../claude-transcript
       ../pg-failsig
     ];

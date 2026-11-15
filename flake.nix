@@ -2024,7 +2024,6 @@
                 "pg-review"
                 "pg-review-router-adapter"
                 "pg-probe"
-                "pg-claude-code-recorder"
                 "pg-claude-control"
                 "pg-wrap"
                 "pg-sqlite"
@@ -2043,8 +2042,6 @@
                 "pg-rescue"
                 # internal/contract is `contract`-tagged.
                 "beads-exporter"
-                # cmd/pg-claude-code-recorder is `integration`-tagged.
-                "pg-claude-code-recorder"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -2070,6 +2067,7 @@
                     fileset = lib.fileset.unions [
                       ./packages/pg-ccaudit
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                     ];
                   };
                 })
@@ -2081,6 +2079,7 @@
                     fileset = lib.fileset.unions [
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
                     ];
                   };
@@ -2092,6 +2091,17 @@
                     root = ./packages;
                     fileset = lib.fileset.unions [
                       ./packages/claude-tool-tracker
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "pg-claude-code-recorder";
+                  modRoot = "pg-claude-code-recorder";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
                       ./packages/pg-sqlite
                     ];
                   };
@@ -2161,6 +2171,7 @@
                       ./packages/pg-router
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
                       ./packages/pg-failsig
                     ];
@@ -2195,7 +2206,19 @@
                     fileset = lib.fileset.unions [
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLintTagged {
+                  module = "pg-claude-code-recorder";
+                  modRoot = "pg-claude-code-recorder";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                     ];
                   };
                 })
@@ -2250,6 +2273,7 @@
                       ./packages/pg-router
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
                       ./packages/pg-failsig
                     ];
@@ -6945,6 +6969,7 @@
                   fileset = lib.fileset.unions [
                     ./packages/ccpool
                     ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
                     ./packages/claude-transcript
                   ];
                 };
@@ -7008,6 +7033,7 @@
                       ./packages/pg-router
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
                       ./packages/pg-failsig
                     ];
@@ -7056,6 +7082,7 @@
                       ./packages/pg-router
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
                       ./packages/claude-transcript
                       ./packages/pg-failsig
                     ];
@@ -7691,6 +7718,7 @@
                   fileset = lib.fileset.unions [
                     ./packages/pg-ccaudit
                     ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
                   ];
                 };
                 modRoot = "pg-ccaudit";
@@ -7886,7 +7914,14 @@
               # integration, V-4). Pattern A, no testDeps.
               pg-claude-code-recorder-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-claude-code-recorder-go-tests";
-                src = lib.cleanSource ./packages/pg-claude-code-recorder; # matches default.nix
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
+                  ];
+                };
+                modRoot = "pg-claude-code-recorder";
                 gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 testFlags = [
                   "-v"
@@ -7918,7 +7953,14 @@
               pg-claude-code-recorder-integration-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-integration-tests";
-                  src = ./packages/pg-claude-code-recorder;
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                  modRoot = "pg-claude-code-recorder";
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
                   (old: {
@@ -7987,7 +8029,14 @@
               pg-claude-code-recorder-soak =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-soak";
-                  src = ./packages/pg-claude-code-recorder;
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                  modRoot = "pg-claude-code-recorder";
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8029,7 +8078,14 @@
               pg-claude-code-recorder-crashsweep-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-crashsweep-tests";
-                  src = ./packages/pg-claude-code-recorder;
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                  modRoot = "pg-claude-code-recorder";
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8079,7 +8135,14 @@
               pg-claude-code-recorder-lockorder-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-lockorder-tests";
-                  src = ./packages/pg-claude-code-recorder;
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                  modRoot = "pg-claude-code-recorder";
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8120,7 +8183,14 @@
               pg-claude-code-recorder-load-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-load-tests";
-                  src = ./packages/pg-claude-code-recorder;
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                  modRoot = "pg-claude-code-recorder";
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8161,7 +8231,14 @@
               pg-claude-code-recorder-integration-tests-gating =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-integration-tests-gating";
-                  src = ./packages/pg-claude-code-recorder;
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                  modRoot = "pg-claude-code-recorder";
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8195,7 +8272,14 @@
               pg-claude-code-recorder-linux-cross-compile =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-claude-code-recorder-linux-cross-compile";
-                  src = ./packages/pg-claude-code-recorder;
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                  modRoot = "pg-claude-code-recorder";
                   gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8404,6 +8488,7 @@
                     ./packages/pg-router
                     ./packages/ccpool
                     ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
                     ./packages/claude-transcript
                     ./packages/pg-failsig
                   ];

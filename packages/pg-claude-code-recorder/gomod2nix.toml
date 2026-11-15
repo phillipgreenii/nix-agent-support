@@ -102,8 +102,8 @@ cachePackages = [
     hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='
 
   [mod.'modernc.org/libc']
-    version = 'v1.79.0'
-    hash = 'sha256-f70OLLdDHzjlwu2PKdPDPS+427MhJKViGPdUj3a1arA='
+    version = 'v1.79.1'
+    hash = 'sha256-tTzZIGVxVRIGkbu9JhHUGZGs9NXE+0wISdoqI3xvsoE='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
@@ -114,8 +114,8 @@ cachePackages = [
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.61.0'
-    hash = 'sha256-hkdsithYwoAc5svUA878mPtOs2eIhtQnmGnSabXfTtc='
+    version = 'v1.61.1'
+    hash = 'sha256-cmbPRIFECMBD0ZIc8FdjCLXRYT1TAHffxW1kVBPMo68='
 
   [mod.'pgregory.net/rapid']
     version = 'v1.3.0'

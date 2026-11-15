@@ -48,6 +48,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 	_ "modernc.org/sqlite" // the database driver
 )
 
@@ -451,17 +452,80 @@ func phaseOf(hook func(string) func(), name string) func() {
 	return func() {}
 }
 
+// dropPragmas removes every "_pragma=name(...)" parameter of the named pragmas
+// from dsn.
+func dropPragmas(dsn string, names ...string) string {
+	base, query, ok := strings.Cut(dsn, "?")
+	if !ok {
+		return dsn
+	}
+	var out []string
+	for _, p := range strings.Split(query, "&") {
+		drop := false
+		for _, n := range names {
+			if strings.HasPrefix(p, "_pragma="+n+"(") {
+				drop = true
+			}
+		}
+		if !drop {
+			out = append(out, p)
+		}
+	}
+	return base + "?" + strings.Join(out, "&")
+}
+
+// withPragmas appends the "&_pragma=name(...)" parameters of extra to dsn,
+// first removing any parameter of the same pragma, so extra replaces rather
+// than duplicates. An empty extra changes nothing.
+func withPragmas(dsn, extra string) string {
+	if extra == "" {
+		return dsn
+	}
+	var names []string
+	for _, p := range strings.Split(extra, "&") {
+		if rest, ok := strings.CutPrefix(p, "_pragma="); ok {
+			if i := strings.IndexByte(rest, '('); i > 0 {
+				names = append(names, rest[:i])
+			}
+		}
+	}
+	return dropPragmas(dsn, names...) + extra
+}
+
 // busyTimeoutMS is the SQLite busy_timeout of every connection; a var so a test can shorten it.
 var busyTimeoutMS = 5000
 
 func (s *Store) openDB(ctx context.Context, path string, bulk bool) error {
-	dsn := "file:" + path + "?_pragma=journal_mode(" + ablateJournal + ")&_pragma=busy_timeout(" + strconv.Itoa(busyTimeoutMS) + ")&_pragma=synchronous(NORMAL)" + ablateDSNExtra
-	// journal_size_limit lives in the DSN so a re-opened pooled connection keeps
-	// it; it caps the WAL file left behind when the WAL restarts.
-	wdsn := dsn + "&_pragma=journal_size_limit(" + strconv.Itoa(s.journalLimit) + ")"
+	// The standard pragma set comes from the shared sqliteopen helper's DSN
+	// (WAL, synchronous NORMAL, 64 MiB cache, mmap, busy timeout, ...), built
+	// here rather than opened by the helper because this store opens its own
+	// driver (Options.DriverName), a deadline connector for reads and a third
+	// connection. journal_size_limit lives in the DSN so a re-opened pooled
+	// connection keeps it; it caps the WAL file left behind when the WAL
+	// restarts, and keeps this store's 1 GiB (the helper default is 64 MiB).
+	// The ablation hooks and the bulk pragmas replace the standard value of a
+	// pragma they name (the driver runs the DSN's pragmas in sorted order, not
+	// in order of appearance, so a duplicate would not reliably override).
+	wdsn := sqliteopen.DSN(sqliteopen.Options{
+		Path:              path,
+		BusyTimeoutMillis: busyTimeoutMS,
+		JournalSizeLimit:  int64(s.journalLimit),
+		// Foreign keys stay off, as they always were here: the lookup-table
+		// references (derived.go) are never relied on, and enforcing them
+		// would add a parent lookup to every row of the tuned bulk insert path.
+		NoForeignKeys: true,
+	})
+	// temp_store stays DEFAULT (not the helper's MEMORY): index builds sort
+	// millions of rows and must spill to disk; a bulk rebuild turns MEMORY on
+	// for its write phase only (bulk.go).
+	wdsn = dropPragmas(wdsn, "temp_store")
+	if ablateJournal != "WAL" {
+		wdsn = withPragmas(wdsn, "&_pragma=journal_mode("+ablateJournal+")")
+	}
+	wdsn = withPragmas(wdsn, ablateDSNExtra)
 	cdsn := wdsn
 	if bulk {
-		wdsn += bulkDSNPragmas()
+		wdsn = withPragmas(wdsn, bulkDSNPragmas())
 	}
 	w, err := sql.Open(s.driverName, wdsn)
 	if err != nil {
@@ -573,7 +637,7 @@ func (s *Store) openDB(ctx context.Context, path string, bulk bool) error {
 		_ = w.Close()
 		return err
 	}
-	r, err := openDeadlineDB(s.driverName, dsn+s.readPragmas(), s.readTO, s.stmtCtx)
+	r, err := openDeadlineDB(s.driverName, s.readDSN(path), s.readTO, s.stmtCtx)
 	if err != nil {
 		_ = w.Close()
 		return err

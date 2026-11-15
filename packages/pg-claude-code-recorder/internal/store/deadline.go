@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen"
 )
 
 // DefaultReadTimeout is the deadline every read-pool statement and read
@@ -46,21 +46,24 @@ const (
 	DefaultReadMmapBytes = int64(512) << 20
 )
 
-// readPragmas is the DSN tail of a read connection: read only, a larger page
-// cache and a bounded memory map.
-func (s *Store) readPragmas() string {
-	kib := s.readCacheKiB
-	if kib <= 0 {
-		kib = DefaultReadCacheKiB
+// readDSN is the DSN of a read connection: the shared sqliteopen helper's
+// read-only variant (mode=ro, query_only, standard read pragmas) with this
+// store's page cache and a bounded memory map (512 MiB by default, above the
+// helper's 256 MiB, since the index runs to tens of gigabytes).
+func (s *Store) readDSN(path string) string {
+	o := sqliteopen.ReadOnly(path, 0)
+	o.BusyTimeoutMillis = busyTimeoutMS
+	o.CacheKiB = s.readCacheKiB
+	if o.CacheKiB <= 0 {
+		o.CacheKiB = DefaultReadCacheKiB
 	}
-	mm := s.readMmap
-	if mm == 0 {
-		mm = DefaultReadMmapBytes
+	o.MmapBytes = s.readMmap
+	if o.MmapBytes == 0 {
+		o.MmapBytes = DefaultReadMmapBytes
 	}
-	if mm < 0 {
-		mm = 0
-	}
-	return "&_pragma=query_only(1)&_pragma=cache_size(-" + strconv.Itoa(kib) + ")&_pragma=mmap_size(" + strconv.FormatInt(mm, 10) + ")"
+	o.NoForeignKeys = true
+	// temp_store stays DEFAULT on the read pool (see openDB).
+	return withPragmas(dropPragmas(sqliteopen.DSN(o), "temp_store"), ablateDSNExtra)
 }
 
 // deadlineConnector opens read-pool connections whose every statement, and
