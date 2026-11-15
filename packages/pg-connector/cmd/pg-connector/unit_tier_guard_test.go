@@ -273,26 +273,6 @@ func evaluateUnitTierPurity(root string, reexecAllowed map[string]string) (viola
 	return violations, integrationFiles, err
 }
 
-// TestUnitTierHasNoIntegrationTests fails when a test file compiled by a plain
-// `go test ./...` starts the daemon, runs a built binary or Go tool, or needs a real
-// external tool. It is the regression guard of the integration/unit split.
-func TestUnitTierHasNoIntegrationTests(t *testing.T) {
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatalf("resolve module root: %v", err)
-	}
-	violations, integrationFiles, err := evaluateUnitTierPurity(root, unitReexecAllowed)
-	if err != nil {
-		t.Fatalf("walk module: %v", err)
-	}
-	for _, v := range violations {
-		t.Error(v)
-	}
-	if integrationFiles == 0 {
-		t.Errorf("no test file under %s carries //go:build integration: either the integration tier is empty or this guard scans the wrong root", root)
-	}
-}
-
 // TestUnitTierGuardRecognizesEachIntegrationShape proves the guard rejects every
 // shape the criteria name (a negative control per rule) and accepts the unit-tier
 // idioms, so the real-tree test above cannot pass vacuously.

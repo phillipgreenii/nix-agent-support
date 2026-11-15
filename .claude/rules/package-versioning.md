@@ -82,7 +82,7 @@ when the daemon, the umbrella or a connector's wire contract changes (and before
 Linux cross-compile gate). It MUST NOT be wired into any hook, `run-unit-tests` or pre-land gate, and
 a test MUST NOT move back into the unit tier by dropping its tag or by raising the unit timeout.
 Classification is per test (a pure-logic test stays untagged); the regression guards are
-`TestUnitTierHasNoIntegrationTests` (unit tier, fails when an untagged test file matches the criteria)
+`TestUnitTierHasNoIntegrationTests` (integration tier, in `arch_scan_integration_test.go`; fails when an untagged test file matches the criteria)
 and `checks.<system>.pg-connector-integration-tests-gating` (real `go`: the tag splits every
 integration package and both builds vet). Details: `packages/pg-connector/README.md`, "Integration
 tier (on demand)". The `contract` tag (real `bd`, real credentials) is a separate on-demand tier.

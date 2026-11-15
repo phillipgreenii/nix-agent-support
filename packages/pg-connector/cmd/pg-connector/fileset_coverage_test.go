@@ -20,7 +20,8 @@ import (
 // This test closes that gap hermetically: it walks each backend's non-test
 // import closure inside the module and requires every Go file on it to be
 // covered by the fileset parsed out of the matching <name>.nix. It runs at
-// commit time (run-unit-tests) and in checks.pg-connector-go-tests.
+// commit time only through the fixture tests; the real-tree scan is tagged integration
+// (arch_scan_integration_test.go) and runs in checks.pg-connector-integration-tests.
 //
 // The nix parsing is deliberately tiny and FAILS LOUDLY on anything it does
 // not understand (an unknown lib.fileset function, a token naming a path that
@@ -248,20 +249,6 @@ func evaluateFilesetCoverage(moduleRoot string) ([]string, error) {
 		return nil, fmt.Errorf("no cmd/pg-connector-* backends found; the test would pass vacuously")
 	}
 	return violations, nil
-}
-
-func TestBackendFilesetCoversImports(t *testing.T) {
-	moduleRoot, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatalf("resolve module root: %v", err)
-	}
-	violations, err := evaluateFilesetCoverage(moduleRoot)
-	if err != nil {
-		t.Fatalf("evaluate fileset coverage: %v", err)
-	}
-	for _, v := range violations {
-		t.Error(v)
-	}
 }
 
 const filesetFixtureNix = `{ lib, mkGoApp, ... }:

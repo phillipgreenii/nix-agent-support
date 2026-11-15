@@ -278,7 +278,7 @@ func TestShowReadThrough_SingleFlightCollapsesConcurrentReaders(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	b := newScriptedBackend(t, "backend-rt-flight")
 	b.setEntity(t, "pr-1", "t", time.Now())
-	b.set(t, "delay", "1")
+	b.set(t, "delay", "0.25")
 	reg := registryFor(t, b.name, "")
 
 	const readers = 5

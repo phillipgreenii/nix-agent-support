@@ -515,36 +515,8 @@ func foldString(e ast.Expr) (string, bool) {
 	return "", false
 }
 
-// TestGHExecChokePoint is the module-wide half of bead pg2-ilzq9's guarantee:
-// the four sites fixed there were fixed one at a time, and nothing stopped a
-// fifth from appearing. It asserts that `gh` is spawned from exactly the
-// choke points in ghChokePoints, one pair per backend that ports this
-// mechanism, and (bead pg2-9df7aq) that it is caught however the binary is
-// named: the literal, a const or var holding it, a multi-line or aliased
-// call, and — in pg-connector-github, whose binary is configured — ANY exec
-// outside the choke-point functions or any exec of a configured-binary value.
-//
-// Every other package reaches gh through a backend's own github.CLI
-// (Run/RunStdin, or Command for sites that wire up their own
-// stdout/stderr/dir), so a new direct exec here means an unauthenticated gh
-// became reachable again — which is what popped interactive auth screens
-// under the launchd sync agent.
-func TestGHExecChokePoint(t *testing.T) {
-	offenders, err := ghExecFindings(moduleRoot(t))
-	if err != nil {
-		t.Fatalf("scan module: %v", err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("gh is exec'd directly outside the protected choke point:\n  %s\n\n"+
-			"Route it through github.NewCLI(): Run/RunStdin for a whole invocation, or\n"+
-			"Command when the call site needs the *exec.Cmd (working directory, own\n"+
-			"stderr capture). See ghexec.go.",
-			strings.Join(offenders, "\n  "))
-	}
-}
-
 // moduleRoot walks up from the test's working directory to the directory holding
-// go.mod. Shared by TestGHExecChokePoint above and TestNoGHStackMutatingArgv
+// go.mod. Shared by TestGHExecChokePoint (arch_scan_integration_test.go) and TestNoGHStackMutatingArgv
 // (stack_readonly_test.go, same package).
 func moduleRoot(t *testing.T) string {
 	t.Helper()
