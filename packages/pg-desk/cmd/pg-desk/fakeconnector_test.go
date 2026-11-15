@@ -43,7 +43,7 @@ func (l *connectorCallLog) record(t *testing.T, args []string) {
 		t.Errorf("record connector call: %v", err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = f.WriteString(strings.Join(args, " ") + "\n")
 }
 
