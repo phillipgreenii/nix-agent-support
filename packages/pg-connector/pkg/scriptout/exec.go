@@ -70,7 +70,7 @@ func runInvoke(ctx context.Context, t Target, req Request) ([]byte, error) {
 		OwnProcGroup: true,
 		TermGrace:    DefaultTermGrace,
 	})
-	runErr := runResultErr(r)
+	runErr := ResultErr(r)
 	elapsed := time.Since(start)
 
 	out := r.Stdout
@@ -92,11 +92,11 @@ func runInvoke(ctx context.Context, t Target, req Request) ([]byte, error) {
 	return out, nil
 }
 
-// runResultErr renders a failed Result as the error cmd.Run used to return:
+// ResultErr (exported for the backends' own runners) renders a failed Result as the error cmd.Run used to return:
 // the start error itself, "signal: killed" for a child ended by a signal or
 // by its context, or "exit status N". It is nil for a child that exited 0
 // with its context intact.
-func runResultErr(r cmdrun.Result) error {
+func ResultErr(r cmdrun.Result) error {
 	switch {
 	case r.StartErr != nil:
 		return r.StartErr

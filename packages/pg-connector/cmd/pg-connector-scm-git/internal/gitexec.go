@@ -12,13 +12,13 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-scm-git/internal/gitenv"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Runner is the seam every Provider method in this package runs its git
@@ -42,22 +42,20 @@ type Runner interface {
 // execRunner is the production Runner: shells out to the real `git`
 // binary resolved from PATH, via gitenv.Command's hermetic child
 // environment.
-type execRunner struct{}
+type execRunner struct{ run cmdrun.Runner }
 
 // NewExecRunner returns the production, real-git-backed Runner.
-func NewExecRunner() Runner { return execRunner{} }
+func NewExecRunner() Runner { return execRunner{run: cmdrun.Exec} }
 
-func (execRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := gitenv.Command(ctx, dir, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+func (e execRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
+	call := gitenv.Call(dir, args...)
+	r := e.run(ctx, call)
+	if err := scriptout.ResultErr(r); err != nil {
 		// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
-		if stderrTxt := scriptout.TruncateForFold(stderr.Bytes()); stderrTxt != "" {
+		if stderrTxt := scriptout.TruncateForFold(r.Stderr); stderrTxt != "" {
 			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderrTxt)
 		}
 		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return strings.TrimSpace(string(r.Stdout)), nil
 }

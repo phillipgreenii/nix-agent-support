@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/gitfixture"
 	"github.com/phillipgreenii/x/gittest"
 
@@ -76,8 +77,8 @@ func TestProvider_RealGit_AmbientHomeIsSandboxed(t *testing.T) {
 
 	repo := newRealGitFixture(t)
 
-	if out, err := gitenv.Command(context.Background(), repo.Dir, "config", "--global", "--get", "user.email").Output(); err == nil {
-		t.Fatalf("git config --global --get user.email = %q, want an error: the ambient HOME must be the fixture's empty HOME, never the poisoned real HOME's ~/.gitconfig", strings.TrimSpace(string(out)))
+	if r := cmdrun.Exec(context.Background(), gitenv.Call(repo.Dir, "config", "--global", "--get", "user.email")); r.OK() {
+		t.Fatalf("git config --global --get user.email = %q, want a failure: the ambient HOME must be the fixture's empty HOME, never the poisoned real HOME's ~/.gitconfig", strings.TrimSpace(string(r.Stdout)))
 	}
 }
 

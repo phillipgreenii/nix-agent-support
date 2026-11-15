@@ -25,17 +25,16 @@
 //
 // Every `git` child this backend spawns MUST therefore be built by
 // [Command], which owns the child environment. A bare
-// exec.CommandContext(ctx, "git", ...) with no cmd.Env is the defect this
+// exec.CommandContext(ctx, "git", ...) with no cmd.Env, or a cmdrun.Call with no EnvExact Env, is the defect this
 // package exists to remove.
 package gitenv
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // gitVarPrefix is the namespace this package filters. Everything OUTSIDE
@@ -108,22 +107,22 @@ func Hermetic(base []string) []string {
 // Environ is [Hermetic] applied to the current process environment.
 func Environ() []string { return Hermetic(os.Environ()) }
 
-// Command builds `git [-C dir] <args...>` with a hermetic child
-// environment. An empty dir omits -C, so the child inherits the parent's
-// working directory.
-func Command(ctx context.Context, dir string, args ...string) *exec.Cmd {
+// Call builds the cmdrun.Call for `git [-C dir] <args...>` with a hermetic
+// child environment (the whole environment, never the parent's). An empty dir
+// omits -C, so the child inherits the parent's working directory. The call is
+// bounded and runs in its own process group (scriptout.BoundChild).
+func Call(dir string, args ...string) cmdrun.Call {
 	full := make([]string, 0, len(args)+2)
 	if dir != "" {
 		full = append(full, "-C", dir)
 	}
 	full = append(full, args...)
 
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = Environ()
-	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
-	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
-	// residual wait for the stdout/stderr pipes to close, independent of
-	// killing the direct git child [bead pg2-332z8 #13].
-	cmd.WaitDelay = scriptout.DefaultWaitDelay
-	return cmd
+	return scriptout.BoundChild(cmdrun.Call{
+		Name:    "git",
+		Args:    full,
+		Env:     Environ(),
+		EnvMode: cmdrun.EnvExact,
+		Timeout: scriptout.ChildTimeout,
+	})
 }

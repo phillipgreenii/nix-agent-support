@@ -32,3 +32,25 @@ func SwapRunner(r cmdrun.Runner) (restore func()) {
 	execRunner = r
 	return func() { execRunner = prev }
 }
+
+// ChildTimeout is the backstop Timeout every backend-side child Call carries
+// (a backend's own gh/git/bd/pjira/claude exec). The handler's context
+// already carries the op's real deadline (30s to a configured 300s), so the
+// per-call bound never fires before it; it only ends a child that a context
+// without a deadline would otherwise leave running forever. It is the largest
+// configurable op budget, so it can never cut a call shorter than its op's own
+// deadline.
+const ChildTimeout = MaxConfiguredTimeout
+
+// BoundChild fills the process-ending fields every backend-side child Call
+// needs besides Timeout: DefaultWaitDelay for a grandchild that holds a pipe
+// open, and its own process group with a SIGTERM grace before SIGKILL so the
+// child's whole tree ends with it. Timeout stays a literal field of the
+// caller's Call (set to ChildTimeout) because the bounded-call guard scans for
+// it. Callers set Name, Args, Dir, Env and Stdin.
+func BoundChild(c cmdrun.Call) cmdrun.Call {
+	c.WaitDelay = DefaultWaitDelay
+	c.OwnProcGroup = true
+	c.TermGrace = DefaultTermGrace
+	return c
+}
