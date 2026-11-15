@@ -211,17 +211,13 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	}
 
 	// Provider cache: the shared owner of point-in-time PULL lookups (git-branch,
-	// subshell, terminal-host, env, repo-label, PR). Created at the composition
+	// subshell, env, repo-label, PR). Created at the composition
 	// root so BOTH the poller (buildPoller wires its prCache-backed PR + the
 	// Discoverer's env) and the label pipeline's Repo detector share one cache and
-	// one eviction lifecycle. The terminal-host + repo-label fetch boundaries are
+	// one eviction lifecycle. The repo-label fetch boundary is
 	// wired here; the PR + env boundaries are wired in buildPoller.
 	providerCache := provider.New(time.Now)
 	providerCache.PidAlive = session.DefaultPidAlive
-	providerCache.FetchTerminalHost = func(pid int) string {
-		return signallayer.DetectHost(signallayer.DefaultSignalers(), pid)
-	}
-	providerCache.FetchParentPID = signallayer.SnapshotParentPID
 	providerCache.FetchRepoLabel = detectors.RepoLabelFor
 
 	opts := daemon.RunOptions{

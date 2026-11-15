@@ -26,21 +26,16 @@ type Cache struct {
 	mu  sync.Mutex // guards bySession, byCwd, prLiveKeys; never held across a ps/gh backend
 	rec Recorder   // nil-safe
 
-	bySession  map[string]*sessionNode // env + terminal-host + subshell (PID/session lifecycle)
+	bySession  map[string]*sessionNode // env + subshell (PID/session lifecycle)
 	byCwd      map[string]*cwdNode     // git-branch + repo-label (workspace lifecycle; refcount-evicted)
 	prLiveKeys map[string]bool         // (cwd,branch) keys touched this scan; drives PR prune
 
 	// Injectable fetch boundaries (nil → the documented default / no-op). Set at
 	// the composition root (buildPoller) or in tests.
-	PidAlive          func(pid int) bool
-	FetchEnv          func(pid int) (map[string]string, error)
-	FetchGitBranch    func(cwd string) (branch, headPath string, ok bool)
-	FetchSubshell     func(pid int) (int, error)
-	FetchTerminalHost func(pid int) string
-	// FetchParentPID reports pid's parent for the unknown-host backoff reset
-	// (nil = no parent check; the backoff then resets only on a new session or
-	// a changed pid).
-	FetchParentPID func(pid int) (ppid int, ok bool)
+	PidAlive       func(pid int) bool
+	FetchEnv       func(pid int) (map[string]string, error)
+	FetchGitBranch func(cwd string) (branch, headPath string, ok bool)
+	FetchSubshell  func(pid int) (int, error)
 	FetchRepoLabel func(cwd string) (string, bool)
 	PRBackend      func(ctx context.Context, cwd, branch string) (*session.PRInfo, error)
 	PRPrune        func(live map[string]bool)
@@ -50,30 +45,15 @@ type Cache struct {
 	SubshellTTL time.Duration
 }
 
-// UnknownProbeMin and UnknownProbeMax bound the exponential backoff between
-// re-probes of a session whose terminal host classified as "unknown".
-const (
-	UnknownProbeMin = 5 * time.Second
-	UnknownProbeMax = 60 * time.Second
-)
-
 // sessionNode holds the PID/session-lifecycle lookups for one session-id.
 type sessionNode struct {
-	pid          int
-	env          map[string]string // cached-while-alive (nil until first alive fetch)
-	envFetched   bool
-	terminalHost string // "" = not yet detected; "unknown" = last probe failed
-	// Unknown-host backoff (see TerminalHost). unknownWindow is the wait that
-	// follows the last failed probe (0 = never probed); unknownNext is when the
-	// next probe is due; unknownPPID is the parent seen at that probe.
-	unknownWindow time.Duration
-	unknownNext   time.Time
-	unknownPPID   int
-	unknownPPIDOK bool
-	subPath       string
-	subMtime      time.Time
-	subCount      int
-	subValid      bool
+	pid        int
+	env        map[string]string // cached-while-alive (nil until first alive fetch)
+	envFetched bool
+	subPath    string
+	subMtime   time.Time
+	subCount   int
+	subValid   bool
 	// TTL cache for transcript-less sessions (path == "").
 	subTTLAt    time.Time
 	subTTLCount int
@@ -139,8 +119,7 @@ func (c *Cache) BeginScan() {
 }
 
 // Reconcile evicts nodes whose lifecycle ended. sessions is the full current set
-// (alive + dead-PID pre-GC), so a dead-not-GC'd session's node is KEPT (its
-// frozen terminal-host survives; env still returns empty for it via Env's alive
+// (alive + dead-PID pre-GC), so a dead-not-GC'd session's node is KEPT (env still returns empty for it via Env's alive
 // gate). Called once per tick AFTER the per-session loop + PR calls. Evicts
 // bySession ids not in sessions and byCwd cwds referenced by no session (which
 // cascades git-branch + repo-label), then — after releasing c.mu — prunes the PR

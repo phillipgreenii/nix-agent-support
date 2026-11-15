@@ -223,9 +223,9 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 		path, mtime, ok := pr.Monitor.ResolvedPath(s.SessionID)
 		snap, _ := pr.Monitor.SessionSnapshot(s.SessionID)
 		shells := pr.Providers.Subshell(s.SessionID, s.PID, path, mtime)
-		// Branch + terminal-host are producer-owned session fields.
+		// Branch + terminal-host (from the recorder's host fact) are producer-owned session fields.
 		s.Branch = pr.Providers.GitBranch(s.Cwd)
-		s.TerminalHost = pr.Providers.TerminalHost(s.SessionID, s.PID)
+		s.TerminalHost = session.HostLabel(s.Host)
 		if s.TerminalHost == "cmux" {
 			s.TerminalHost = refineCmuxTerminalHost(ctx, pr.Signalers, pr.BridgeRegistry, s.PID)
 		}

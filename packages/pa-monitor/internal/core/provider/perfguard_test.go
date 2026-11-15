@@ -25,14 +25,13 @@ func TestPerfGuard_SteadyScanZeroFetches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var gitN, subN, termN, envN, prN int
+	var gitN, subN, envN, prN int
 	c := New(nil)
 	fr := &fakeRec{}
 	c.SetRecorder(fr)
 	c.PidAlive = func(int) bool { return true }
 	c.FetchGitBranch = func(string) (string, string, bool) { gitN++; return "x", head, true }
 	c.FetchSubshell = func(int) (int, error) { subN++; return 1, nil }
-	c.FetchTerminalHost = func(int) string { termN++; return "tmux" }
 	c.FetchEnv = func(int) (map[string]string, error) { envN++; return map[string]string{"A": "1"}, nil }
 
 	// PR backed by a real bounded PRCache so it caches across scans; its LookupFn
@@ -58,7 +57,6 @@ func TestPerfGuard_SteadyScanZeroFetches(t *testing.T) {
 			c.Env(s.SessionID, s.PID)                         //nolint:errcheck
 			c.GitBranch(s.Cwd)                                //
 			c.Subshell(s.SessionID, s.PID, "/t.jsonl", mtime) //
-			c.TerminalHost(s.SessionID, s.PID)                //
 			c.PR(context.Background(), s.Cwd, "x")            //nolint:errcheck
 		}
 		c.Reconcile(sessions)
@@ -66,10 +64,10 @@ func TestPerfGuard_SteadyScanZeroFetches(t *testing.T) {
 
 	// Cold scan: exactly one fetch per distinct key.
 	scan()
-	if gitN != 1 || subN != 1 || termN != 1 || envN != 1 || prN != 1 {
-		t.Fatalf("cold scan fetch counts: git=%d sub=%d term=%d env=%d pr=%d (want all 1)", gitN, subN, termN, envN, prN)
+	if gitN != 1 || subN != 1 || envN != 1 || prN != 1 {
+		t.Fatalf("cold scan fetch counts: git=%d sub=%d env=%d pr=%d (want all 1)", gitN, subN, envN, prN)
 	}
-	for _, k := range []string{"git_branch", "child_procs", "terminal_host", "pr_lookup"} {
+	for _, k := range []string{"git_branch", "child_procs", "pr_lookup"} {
 		if countKind(fr, k) == 0 {
 			t.Fatalf("cold scan: metered kind %q not recorded (presence parity)", k)
 		}
@@ -78,8 +76,8 @@ func TestPerfGuard_SteadyScanZeroFetches(t *testing.T) {
 
 	// Steady scan: unchanged inputs → ZERO fetches and ZERO new subprocess events.
 	scan()
-	if gitN != 1 || subN != 1 || termN != 1 || envN != 1 || prN != 1 {
-		t.Fatalf("steady scan re-fetched: git=%d sub=%d term=%d env=%d pr=%d (want all still 1)", gitN, subN, termN, envN, prN)
+	if gitN != 1 || subN != 1 || envN != 1 || prN != 1 {
+		t.Fatalf("steady scan re-fetched: git=%d sub=%d env=%d pr=%d (want all still 1)", gitN, subN, envN, prN)
 	}
 	if len(fr.kinds) != spawnsAfterCold {
 		t.Fatalf("steady scan recorded new subprocess events: cold=%d now=%d (%v)", spawnsAfterCold, len(fr.kinds), fr.kinds)

@@ -173,12 +173,8 @@ func (p *PSProcTable) StartOf(pid int) (string, bool) {
 	return e.raw, ok
 }
 
-// defaultProcTable is the one table every default signaler and the provider
-// cache's parent probe share, so a tick costs one snapshot in total.
+// defaultProcTable is the one table every default signaler shares, so a tick costs one snapshot in total.
 var defaultProcTable = NewPSProcTable()
-
-// SnapshotParentPID is ParentPID answered from the shared per-tick snapshot.
-func SnapshotParentPID(pid int) (int, bool) { return defaultProcTable.Parent(pid) }
 
 // hopFromTable resolves one ancestry hop from tbl; unknown yields 0 (stop).
 func hopFromTable(tbl ProcessTable, pid int) (int, error) {

@@ -387,6 +387,9 @@ func fromProcess(p client.ProcessInfo) *session.Session {
 	if p.StartedAt != nil {
 		s.StartedAt = *p.StartedAt
 	}
+	if p.Host != nil {
+		s.Host = &session.Host{Kind: p.Host.Kind, TermProgram: p.Host.TermProgram}
+	}
 	return s
 }
 

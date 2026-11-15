@@ -138,15 +138,47 @@ func IsLongIdle(now, lastActivity time.Time, threshold time.Duration) bool {
 	return !lastActivity.IsZero() && now.Sub(lastActivity) > threshold
 }
 
+// Host is the recorder's host fact for a Claude process: where it takes input,
+// read from the process's environment at its start. Kind is "cmux", "tmux" or
+// "other"; TermProgram is the TERM_PROGRAM value.
+type Host struct {
+	Kind        string
+	TermProgram string
+}
+
+// HostLabel is the bare terminal-host label for a recorder Host fact: "cmux" or
+// "tmux" by Kind; for Kind "other" the lowercase TermProgram when it is
+// "ghostty" or "vscode"; otherwise (including a nil Host, which the recorder
+// reports when its environment read failed) "unknown". The cmux bridge-health
+// refinement is applied separately by the poller.
+func HostLabel(h *Host) string {
+	if h == nil {
+		return "unknown"
+	}
+	switch h.Kind {
+	case "cmux", "tmux":
+		return h.Kind
+	case "other":
+		switch p := strings.ToLower(h.TermProgram); p {
+		case "ghostty", "vscode":
+			return p
+		}
+	}
+	return "unknown"
+}
+
 type Session struct {
-	PID             int
-	SessionID       string
-	Cwd             string
-	Kind            string
-	Entrypoint      string
-	Name            string
-	Branch          string
-	StartedAt       time.Time
+	PID        int
+	SessionID  string
+	Cwd        string
+	Kind       string
+	Entrypoint string
+	Name       string
+	Branch     string
+	StartedAt  time.Time
+	// Host is the recorder's host fact (nil when it has none); TerminalHost is
+	// the label the poller derives from it with HostLabel.
+	Host            *Host
 	TerminalHost    string // populated by poller: "tmux","ghostty","vscode","unknown"
 	TranscriptMTime time.Time
 	Status          Status

@@ -113,9 +113,9 @@ func newShimWorld() (*recordingPS, []*session.Session) {
 		pid, sh, lg := 2000+i, 3000+i, 4000+i
 		r.parent[pid], r.parent[sh], r.parent[lg] = sh, lg, cmuxServerPID
 		r.comm[pid], r.comm[sh], r.comm[lg] = "claude", "zsh", "login"
-		sessions = append(sessions, &session.Session{PID: pid, SessionID: fmt.Sprintf("cmux-%d", i), PidAlive: true})
+		sessions = append(sessions, &session.Session{PID: pid, SessionID: fmt.Sprintf("cmux-%d", i), PidAlive: true, Host: &session.Host{Kind: "cmux"}})
 	}
-	sessions = append(sessions, &session.Session{PID: tmuxSessPID, SessionID: "tmux-0", PidAlive: true})
+	sessions = append(sessions, &session.Session{PID: tmuxSessPID, SessionID: "tmux-0", PidAlive: true, Host: &session.Host{Kind: "tmux"}})
 	return r, sessions
 }
 
@@ -123,7 +123,7 @@ type tickCounts struct{ refine, surface int }
 
 // runTicks simulates n daemon ticks over the 22 sessions with the production
 // signalers and a real provider.Cache. Per tick it mirrors, in order: the
-// poller's cached host lookup + cmux refine walk (refineCmuxTerminalHost calls
+// poller's host label (from the recorder fact, no exec) + cmux refine walk (refineCmuxTerminalHost calls
 // FindCmuxServerAncestor), then the nudger's HasSurface
 // for each session through resolve. resolve is the code under test.
 func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tree *aggregate.Tree) func(int) bool) ([]tickCounts, *recordingPS) {
@@ -138,7 +138,6 @@ func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tr
 	signalers := []signal.Signaler{tmux, cmux} // production order: tmux first
 
 	cache := provider.New(func() time.Time { return clock })
-	cache.FetchTerminalHost = func(pid int) string { return signal.DetectHost(signalers, pid) }
 
 	var out []tickCounts
 	for range n {
@@ -147,7 +146,7 @@ func runTicks(n int, useTable bool, resolve func(signalers []signal.Signaler, tr
 		dir := &aggregate.Directory{Path: "/p"}
 		start := r.snapshot()
 		for _, s := range sessions {
-			s.TerminalHost = cache.TerminalHost(s.SessionID, s.PID)
+			s.TerminalHost = session.HostLabel(s.Host)
 			if s.TerminalHost == "cmux" {
 				cmux.FindCmuxServerAncestor(context.Background(), s.PID) // the refine walk (unchanged)
 			}
