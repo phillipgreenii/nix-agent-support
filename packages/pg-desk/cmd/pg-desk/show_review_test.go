@@ -277,7 +277,11 @@ func TestTypedShowReviewMakesNoStateChange(t *testing.T) {
 	f := newViewFixture(t)
 	f.entity("pr", "o/r#14", reviewFacts(14, pendingRecord(reviewOld, true)), "2026-09-29T14:03:10Z", reviewHead)
 	dir := t.TempDir()
-	installFakePGConnector(t, fmt.Sprintf(`echo "$@" >> %q/calls.log; exit 99`, dir))
+	callLog := &connectorCallLog{path: filepath.Join(dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		return "", 99
+	})
 	before, found, err := f.seed.GetEntity(context.Background(), "o/r", "pr", "o/r#14")
 	if err != nil || !found {
 		t.Fatal(err, found)
@@ -308,17 +312,25 @@ type reviewConnector struct{ dir string }
 func newReviewConnector(t *testing.T) *reviewConnector {
 	t.Helper()
 	dir := t.TempDir()
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-echo "$@" >> "$D/calls.log"
-case "$1 $2" in
-"pr show") cat "$D/pr-show.json"; exit 0;;
-"pr files") echo '{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","files":[]}}'; exit 0;;
-"pr commits") echo '{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","commits":[]}}'; exit 0;;
-"ci list") echo '{"runs":[],"sources":[]}'; exit 0;;
-"pr review") cat "$D/pending.json"; exit "$(cat "$D/pending.exit")";;
-"issue list") cat "$D/issues.json"; exit 0;;
-esac
-exit 99`, dir))
+	callLog := &connectorCallLog{path: filepath.Join(dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		switch argAt(args, 0) + " " + argAt(args, 1) {
+		case "pr show":
+			return readFileOr(filepath.Join(dir, "pr-show.json"), ""), 0
+		case "pr files":
+			return `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","files":[]}}` + "\n", 0
+		case "pr commits":
+			return `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","commits":[]}}` + "\n", 0
+		case "ci list":
+			return `{"runs":[],"sources":[]}` + "\n", 0
+		case "pr review":
+			return readFileOr(filepath.Join(dir, "pending.json"), ""), fileExitCode(filepath.Join(dir, "pending.exit"))
+		case "issue list":
+			return readFileOr(filepath.Join(dir, "issues.json"), ""), 0
+		}
+		return "", 99
+	})
 	c := &reviewConnector{dir: dir}
 	c.write("pr-show.json", fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":4,"result":{"id":"PR5","repo":"o/r","number":5,"title":"Add retry","state":"open","draft":false,"head_sha":%q,"as_of":"2026-09-30T00:00:00Z"}}`, reviewHead))
 	c.write("issues.json", `{"entities":[],"present_ids":[],"sources":[]}`)

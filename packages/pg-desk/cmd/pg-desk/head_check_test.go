@@ -55,13 +55,14 @@ func TestHeadCheckRegisteredUnderPR(t *testing.T) {
 func fakeShow(t *testing.T, head string, exit int) (argvFile string) {
 	t.Helper()
 	argvFile = filepath.Join(t.TempDir(), "argv.log")
-	body := fmt.Sprintf("echo \"$*\" >> %q\n", argvFile)
-	if exit == 0 {
-		body += fmt.Sprintf(`echo '{"protocolVersion":1,"schemaVersion":4,"result":{"repo":"o/r","number":5,"state":"open","head_sha":%q}}'`, head) + "\nexit 0"
-	} else {
-		body += `echo '{"protocolVersion":1,"error":{"code":"unavailable","message":"offline"}}'` + fmt.Sprintf("\nexit %d", exit)
-	}
-	installFakePGConnector(t, body)
+	callLog := &connectorCallLog{path: argvFile}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		if exit == 0 {
+			return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":4,"result":{"repo":"o/r","number":5,"state":"open","head_sha":%q}}`, head) + "\n", 0
+		}
+		return `{"protocolVersion":1,"error":{"code":"unavailable","message":"offline"}}` + "\n", exit
+	})
 	return argvFile
 }
 

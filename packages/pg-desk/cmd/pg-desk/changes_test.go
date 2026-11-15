@@ -69,25 +69,25 @@ func newChangesFixture(t *testing.T, typ string, queries ...string) *changesFixt
 	changesNow = func() time.Time { return changesTestNow }
 
 	dir := t.TempDir()
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-t="$1"; v="$2"
-if [ "$v" = list ]; then
-  q=""; prev=""
-  for a in "$@"; do if [ "$prev" = "--query" ]; then q="$a"; fi; prev="$a"; done
-  echo "$t list $q" >> "$D/calls.log"
-  code=0
-  if [ -f "$D/$t-list-$q.exit" ]; then code=$(cat "$D/$t-list-$q.exit"); fi
-  if [ -f "$D/$t-list-$q.json" ]; then cat "$D/$t-list-$q.json"; fi
-  exit "$code"
-fi
-if [ "$v" = show ]; then
-  id=$(echo "$3" | tr '/#' '__')
-  echo "$t show $3" >> "$D/calls.log"
-  if [ -f "$D/show-$id.json" ]; then cat "$D/show-$id.json"; exit 0; fi
-  echo '{"error":{"code":"boom","message":"no fixture"}}'
-  exit 1
-fi
-exit 99`, dir))
+	callLog := &connectorCallLog{path: filepath.Join(dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		typ, verb := argAt(args, 0), argAt(args, 1)
+		switch verb {
+		case "list":
+			q := flagValue(args, "--query")
+			callLog.record(t, []string{typ, "list", q})
+			return readFileOr(filepath.Join(dir, typ+"-list-"+q+".json"), ""), fileExitCode(filepath.Join(dir, typ+"-list-"+q+".exit"))
+		case "show":
+			id := strings.NewReplacer("/", "_", "#", "_").Replace(argAt(args, 2))
+			callLog.record(t, []string{typ, "show", argAt(args, 2)})
+			p := filepath.Join(dir, "show-"+id+".json")
+			if fileExists(p) {
+				return readFileOr(p, ""), 0
+			}
+			return `{"error":{"code":"boom","message":"no fixture"}}` + "\n", 1
+		}
+		return "", 99
+	})
 	return &changesFixture{t: t, typ: typ, cfg: cfg, seed: seed, dir: dir, fps: map[string]string{}}
 }
 

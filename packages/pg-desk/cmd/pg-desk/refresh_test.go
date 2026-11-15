@@ -34,17 +34,19 @@ func newRefreshFixture(t *testing.T) *refreshFixture {
 	withOpenSeams(t, openTestConfig("o/r"), open)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	dir := t.TempDir()
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-if [ "$2" = show ]; then
-  id=$(echo "$3" | tr '/#' '__')
-  echo "$1 show $3" >> "$D/calls.log"
-  code=0
-  if [ -f "$D/show-$id.exit" ]; then code=$(cat "$D/show-$id.exit"); fi
-  if [ -f "$D/show-$id.json" ]; then cat "$D/show-$id.json"; exit "$code"; fi
-  echo '{"error":{"code":"boom","message":"no fixture"}}'
-  exit 1
-fi
-exit 99`, dir))
+	callLog := &connectorCallLog{path: filepath.Join(dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		if argAt(args, 1) != "show" {
+			return "", 99
+		}
+		id := strings.NewReplacer("/", "_", "#", "_").Replace(argAt(args, 2))
+		callLog.record(t, []string{argAt(args, 0), "show", argAt(args, 2)})
+		p := filepath.Join(dir, "show-"+id+".json")
+		if fileExists(p) {
+			return readFileOr(p, ""), fileExitCode(filepath.Join(dir, "show-"+id+".exit"))
+		}
+		return `{"error":{"code":"boom","message":"no fixture"}}` + "\n", 1
+	})
 	return &refreshFixture{t: t, seed: seed, dir: dir}
 }
 

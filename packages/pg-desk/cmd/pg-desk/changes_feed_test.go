@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,34 +19,27 @@ const feedTestInstance = "owning-demo"
 func feedConnector(t *testing.T, f *changesFixture, feedBody string) {
 	t.Helper()
 	f.write("feed.json", feedBody)
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-echo "$*" >> "$D/calls.log"
-v="$2"
-if [ "$v" = changes ]; then
-  cat "$D/feed.json"
-  if [ -f "$D/feed.exit" ]; then exit "$(cat "$D/feed.exit")"; fi
-  exit 0
-fi
-if [ "$v" = changes-ack ]; then
-  n=""; prev=""
-  for a in "$@"; do if [ "$prev" = "--next-seq" ]; then n="$a"; fi; prev="$a"; done
-  echo "{\"consumer\":\"pg-desk\",\"acked_seq\":$n,\"store_identity\":\"s1\"}"
-  exit 0
-fi
-if [ "$v" = health ]; then
-  echo '{"sources":[{"source":"owning-demo","status":"succeeded","count":1}],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}'
-  exit 0
-fi
-if [ "$v" = list ]; then
-  echo '{"entities":[],"present_ids":[],"truncated":false}'
-  exit 0
-fi
-if [ "$v" = show ]; then
-  if [ -f "$D/show-$3.json" ]; then cat "$D/show-$3.json"; exit 0; fi
-  echo '{"error":{"code":"boom","message":"no fixture"}}'
-  exit 1
-fi
-exit 99`, f.dir))
+	callLog := &connectorCallLog{path: filepath.Join(f.dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		switch argAt(args, 1) {
+		case "changes":
+			return readFileOr(filepath.Join(f.dir, "feed.json"), ""), fileExitCode(filepath.Join(f.dir, "feed.exit"))
+		case "changes-ack":
+			return fmt.Sprintf(`{"consumer":"pg-desk","acked_seq":%s,"store_identity":"s1"}`, flagValue(args, "--next-seq")) + "\n", 0
+		case "health":
+			return `{"sources":[{"source":"owning-demo","status":"succeeded","count":1}],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}` + "\n", 0
+		case "list":
+			return `{"entities":[],"present_ids":[],"truncated":false}` + "\n", 0
+		case "show":
+			p := filepath.Join(f.dir, "show-"+argAt(args, 2)+".json")
+			if fileExists(p) {
+				return readFileOr(p, ""), 0
+			}
+			return `{"error":{"code":"boom","message":"no fixture"}}` + "\n", 1
+		}
+		return "", 99
+	})
 }
 
 func owningFeedFixture(t *testing.T) *changesFixture {
@@ -167,21 +161,27 @@ func TestChangesFeedMixedWatchListDoesBothInOnePoll(t *testing.T) {
 	f.listing("beads-q", 0, okSource, [2]string{"added", "bd-1"})
 	f.showIssue("J-1", "2026-09-30T00:00:00Z")
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-echo "$*" >> "$D/calls.log"
-t="$1"; v="$2"
-if [ "$v" = list ]; then
-  case "$*" in
-  *"--backend owning-demo"*) echo '{"entities":[],"present_ids":[],"truncated":false}' ;;
-  *) cat "$D/issue-list-beads-q.json" ;;
-  esac
-  exit 0
-fi
-if [ "$v" = health ]; then echo '{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}'; exit 0; fi
-if [ "$v" = changes ]; then cat "$D/feed.json"; exit 0; fi
-if [ "$v" = changes-ack ]; then echo '{"consumer":"pg-desk","acked_seq":6}'; exit 0; fi
-if [ "$v" = show ]; then id=$(echo "$3" | tr '/#' '__'); cat "$D/show-$id.json"; exit 0; fi
-exit 99`, f.dir))
+	callLog := &connectorCallLog{path: filepath.Join(f.dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		switch argAt(args, 1) {
+		case "list":
+			if strings.Contains(strings.Join(args, " "), "--backend owning-demo") {
+				return `{"entities":[],"present_ids":[],"truncated":false}` + "\n", 0
+			}
+			return readFileOr(filepath.Join(f.dir, "issue-list-beads-q.json"), ""), 0
+		case "health":
+			return `{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}` + "\n", 0
+		case "changes":
+			return readFileOr(filepath.Join(f.dir, "feed.json"), ""), 0
+		case "changes-ack":
+			return `{"consumer":"pg-desk","acked_seq":6}` + "\n", 0
+		case "show":
+			id := strings.NewReplacer("/", "_", "#", "_").Replace(argAt(args, 2))
+			return readFileOr(filepath.Join(f.dir, "show-"+id+".json"), ""), 0
+		}
+		return "", 99
+	})
 
 	env, err := f.envOf("--consumer", "router")
 	if err != nil {

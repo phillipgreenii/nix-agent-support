@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -87,4 +88,14 @@ func installFakePGConnector(t *testing.T, script string) {
 		t.Fatalf("write fake pg-connector: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// fileExitCode reads an exit code a test wrote into p ("0" when p is absent,
+// the shell fakes' `if [ -f p ]; then code=$(cat p)` default).
+func fileExitCode(p string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(readFileOr(p, "0")))
+	if err != nil {
+		return 0
+	}
+	return n
 }

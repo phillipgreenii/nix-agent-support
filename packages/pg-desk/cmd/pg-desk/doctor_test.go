@@ -361,11 +361,14 @@ func TestDoctorReportsAStoreWithNoSchemaWithoutRefusing(t *testing.T) {
 func TestDoctorWatchedQueryResolution(t *testing.T) {
 	newSchemaDoctor(t, watchCfg("mine", "nope"))
 	rec := filepath.Join(t.TempDir(), "calls.txt")
-	installFakePGConnector(t, fmt.Sprintf(`echo "$*" >> %q
-case "$*" in
-  *"--query nope"*) echo '{"error":{"code":"invalid_argument","message":"query_not_recognized: nope"}}'; exit 1 ;;
-esac
-echo '{"entities":[]}'`, rec))
+	callLog := &connectorCallLog{path: rec}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		if strings.Contains(strings.Join(args, " "), "--query nope") {
+			return `{"error":{"code":"invalid_argument","message":"query_not_recognized: nope"}}` + "\n", 1
+		}
+		return `{"entities":[]}` + "\n", 0
+	})
 
 	stdout, err := runDoctorCmd(t)
 	if err == nil || !strings.Contains(err.Error(), "watched queries") {
@@ -814,13 +817,17 @@ func newGateFixture(t *testing.T) *gateFixture {
 	doctorIssueCapabilityer = func(cfg *config.Config) changes.Capabilityer { return gather.NewGatherer(cfg, nil) }
 	f.caps(gateCapsOK, 0)
 	f.health(gateHealthOK, 0)
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-echo "$*" >> "$D/calls.log"
-case "$2" in
-  capabilities) cat "$D/caps.json"; exit "$(cat "$D/caps.exit")" ;;
-  health) cat "$D/health.json"; exit "$(cat "$D/health.exit")" ;;
-esac
-echo '{"entities":[]}'`, f.dir))
+	callLog := &connectorCallLog{path: filepath.Join(f.dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		switch argAt(args, 1) {
+		case "capabilities":
+			return readFileOr(filepath.Join(f.dir, "caps.json"), ""), fileExitCode(filepath.Join(f.dir, "caps.exit"))
+		case "health":
+			return readFileOr(filepath.Join(f.dir, "health.json"), ""), fileExitCode(filepath.Join(f.dir, "health.exit"))
+		}
+		return `{"entities":[]}` + "\n", 0
+	})
 	return f
 }
 
@@ -1099,16 +1106,25 @@ func TestChangesFirstPollLogsDispatchMismatchAndRecordsIt(t *testing.T) {
 	// feedConnector's script has no capabilities verb: answer it with a
 	// backend that reports the owning query unwatched.
 	f.write("caps.json", `{"sources":[],"backends":[{"backend":"owning-demo","vocabulary":{"owns_changes":true},"queries":{"jira-q":{"watched":false}}}]}`)
-	installFakePGConnector(t, fmt.Sprintf(`D=%q
-echo "$*" >> "$D/calls.log"
-v="$2"
-if [ "$v" = capabilities ]; then cat "$D/caps.json"; exit 0; fi
-if [ "$v" = changes ]; then cat "$D/feed.json"; exit 0; fi
-if [ "$v" = changes-ack ]; then echo '{"consumer":"pg-desk","acked_seq":6}'; exit 0; fi
-if [ "$v" = health ]; then echo '{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}'; exit 0; fi
-if [ "$v" = list ]; then echo '{"entities":[],"present_ids":[],"truncated":false}'; exit 0; fi
-if [ "$v" = show ]; then cat "$D/show-$3.json"; exit 0; fi
-exit 99`, f.dir))
+	callLog := &connectorCallLog{path: filepath.Join(f.dir, "calls.log")}
+	useFakeConnector(t, func(args []string) (string, int) {
+		callLog.record(t, args)
+		switch argAt(args, 1) {
+		case "capabilities":
+			return readFileOr(filepath.Join(f.dir, "caps.json"), ""), 0
+		case "changes":
+			return readFileOr(filepath.Join(f.dir, "feed.json"), ""), 0
+		case "changes-ack":
+			return `{"consumer":"pg-desk","acked_seq":6}` + "\n", 0
+		case "health":
+			return `{"sources":[],"backends":[{"backend":"owning-demo","status":{"queries":[]}}]}` + "\n", 0
+		case "list":
+			return `{"entities":[],"present_ids":[],"truncated":false}` + "\n", 0
+		case "show":
+			return readFileOr(filepath.Join(f.dir, "show-"+argAt(args, 2)+".json"), ""), 0
+		}
+		return "", 99
+	})
 
 	_, stderr, rerr := runChangesCmd(t, "issue", "--consumer", "router", "--json")
 	if rerr != nil {
