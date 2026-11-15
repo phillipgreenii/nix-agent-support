@@ -21,7 +21,6 @@ var injectedMarkers = []string{
 	"CCPOOL_AUTONOMOUS",
 	"CCPOOL_EXTERNAL_ID",
 	"CCPOOL_POOL",
-	"PA_MONITOR_NO_NUDGE",
 }
 
 // launchAndWaitLiteralKeys returns the string-literal keys of every

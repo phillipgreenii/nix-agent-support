@@ -249,12 +249,12 @@ func TestStrictEnvKeepsOnlyTheMinimalNamesAndKeepByExactName(t *testing.T) {
 	f := newFixture(t)
 	spec := f.spec(`schema_version = 1
 strict_env = true
-keep = ["PA_MONITOR_NO_NUDGE", "TMUX"]
+keep = ["CCPOOL_EXTERNAL_ID", "TMUX"]
 `)
 	env := []string{
 		"PATH=/usr/bin:/bin", "HOME=/home/x", "USER=u", "LOGNAME=u", "TMPDIR=/t", "LANG=C", "TERM=xterm",
 		"COLORTERM=truecolor",
-		"PA_MONITOR_NO_NUDGE=1", "PA_MONITOR_NO_NUDGE_EXTRA=2", "TMUX=/tmp/tmux-1/default,1,0",
+		"CCPOOL_EXTERNAL_ID=1", "CCPOOL_EXTERNAL_ID_EXTRA=2", "TMUX=/tmp/tmux-1/default,1,0",
 		"CCPOOL_POOL_X=leak", "CLAUDECODE=", "SECRET_TOKEN=leak", "PG_WRAP_SPEC=" + spec,
 	}
 	o := run(t, "pg-wrap", env, "run", "--spec", spec, "--", f.probe, f.out)
@@ -269,7 +269,7 @@ keep = ["PA_MONITOR_NO_NUDGE", "TMUX"]
 	want := map[string]string{
 		"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/home/x", "USER": "u", "LOGNAME": "u",
 		"TMPDIR": "/t", "LANG": "C", "TERM": "xterm", "COLORTERM": "truecolor",
-		"PA_MONITOR_NO_NUDGE": "1", "TMUX": "/tmp/tmux-1/default,1,0",
+		"CCPOOL_EXTERNAL_ID": "1", "TMUX": "/tmp/tmux-1/default,1,0",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("env = %v\nwant %v (extra names: %v)", got, want, names(got))

@@ -720,7 +720,6 @@ func (s *Service) launchAndWait(ctx context.Context, externalID, tmuxName, csid,
 	env := make(map[string]string, len(extraEnv)+len(claudeChildMarkers)+4)
 	maps.Copy(env, extraEnv)
 	env["CCPOOL_EXTERNAL_ID"] = externalID
-	env["PA_MONITOR_NO_NUDGE"] = "1"
 	if s.d.PoolPath != "" {
 		env["CCPOOL_POOL"] = s.d.PoolPath
 	}

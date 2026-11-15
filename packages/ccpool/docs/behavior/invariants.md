@@ -10,10 +10,7 @@ Rules this set's implementation MUST hold, following the behavior-docs method
 
 - **`INV-POOL-1`** <!-- uuid: b9bdb506-7898-4040-98d6-c537cadf2494 --> — **A pool is a directory.**
   Its identity and its runtime substrate both derive from that one canonical location, so two
-  pools MUST NOT share a substrate. Every session a pool launches MUST be marked excluded from a
-  co-resident monitor's own actuation (`packages/pa-monitor/docs/behavior · INTF-NONUDGE`,
-  `ACTOR-CCP-MONITOR`), and the
-  guardrails a pool establishes at launch (isolation, the
+  pools MUST NOT share a substrate. The guardrails a pool establishes at launch (isolation, the
   autonomous-mode question block) MUST NOT be weakened by a session-level setting.
 - **`INV-POOL-2`** <!-- uuid: c6506508-a27c-44ee-9901-f9eda11ba61c --> — Every pool MUST
   self-register in a machine-wide registry at creation, and a periodic, timer-driven sweep MUST
@@ -88,10 +85,10 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   on each call, so a configuration change takes effect on the next launch or resume.
 - **`INV-POOL-7`** <!-- uuid: 7a1e4c52-9d3b-4f68-a2c7-5b0e8d194f36 --> — **The markers ccpool
   injects into a session's environment are a closed, listed set.** Every session a pool launches or
-  resumes MUST be started with exactly these four markers, set after, and so overriding, any
+  resumes MUST be started with exactly these three markers, set after, and so overriding, any
   caller-supplied environment, and no others: `CCPOOL_EXTERNAL_ID` (the session's identity, which
   correlates the session's own signals to its record, so a caller MUST NOT be able to change it);
-  `PA_MONITOR_NO_NUDGE` (always `1`; `INV-POOL-1`); `CCPOOL_POOL` (the pool's directory; present
+  `CCPOOL_POOL` (the pool's directory; present
   only when the pool is addressed explicitly rather than by default); and `CCPOOL_AUTONOMOUS`
   (`1`; present only for an autonomous session). Separately, ccpool MUST blank — set to empty, never
   leave inherited — the five markers an agent uses to flag itself as a nested session

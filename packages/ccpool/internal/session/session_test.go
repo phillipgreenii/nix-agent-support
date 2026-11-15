@@ -181,7 +181,7 @@ func TestEnsure_brandNewWhenNoRow(t *testing.T) {
 	if nc.cwd != "/tmp/proj" {
 		t.Errorf("tmux session cwd = %q, want /tmp/proj", nc.cwd)
 	}
-	if nc.env["CCPOOL_EXTERNAL_ID"] != "ext-alpha" || nc.env["PA_MONITOR_NO_NUDGE"] != "1" {
+	if nc.env["CCPOOL_EXTERNAL_ID"] != "ext-alpha" {
 		t.Errorf("env markers missing: %v", nc.env)
 	}
 	if nc.argv[0] != "claude" || nc.argv[1] != "--session-id" || nc.argv[2] != "csid-1" {
@@ -201,7 +201,7 @@ func TestEnsure_brandNewWhenNoRow(t *testing.T) {
 
 // TestEnsure_mergesCallerEnv asserts that EnsureOpts.Env is injected into the
 // session at launch alongside ccpool's own correlation markers. Merge policy:
-// ccpool's reserved markers (CCPOOL_EXTERNAL_ID/PA_MONITOR_NO_NUDGE) are
+// ccpool's reserved markers (CCPOOL_EXTERNAL_ID) is
 // authoritative and win over a colliding caller key.
 func TestEnsure_mergesCallerEnv(t *testing.T) {
 	tests := []struct {
@@ -214,7 +214,7 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 			callerEnv: map[string]string{"BEADS_ACTOR": "worker-1", "BEADS_DIR": "/repo/.beads", "WORKSPACE_ROOT": "/repo"},
 			wantEnv: map[string]string{
 				"BEADS_ACTOR": "worker-1", "BEADS_DIR": "/repo/.beads", "WORKSPACE_ROOT": "/repo",
-				"CCPOOL_EXTERNAL_ID": "ext-alpha", "PA_MONITOR_NO_NUDGE": "1",
+				"CCPOOL_EXTERNAL_ID": "ext-alpha",
 			},
 		},
 		{
@@ -225,7 +225,7 @@ func TestEnsure_mergesCallerEnv(t *testing.T) {
 		{
 			name:      "nil caller env keeps only the hardcoded markers",
 			callerEnv: nil,
-			wantEnv:   map[string]string{"CCPOOL_EXTERNAL_ID": "ext-alpha", "PA_MONITOR_NO_NUDGE": "1"},
+			wantEnv:   map[string]string{"CCPOOL_EXTERNAL_ID": "ext-alpha"},
 		},
 	}
 	for _, tt := range tests {

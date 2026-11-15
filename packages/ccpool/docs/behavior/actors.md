@@ -23,7 +23,5 @@ Who interacts with the pool. Everything ccpool integrates with is an actor — h
   directions.
 - **`ACTOR-CCP-MONITOR` — Co-resident monitor** <!-- uuid: c406e1b3-b655-4897-9b2b-eebda7661a06
   --> — another tool sharing this host that also drives input into agent sessions (e.g. a
-  passive usage/status watcher). ccpool marks every session it launches excluded from such a
-  monitor's own actuation, so the two tools never double-drive one session
-  (`packages/pa-monitor/docs/behavior · INTF-NONUDGE` — the monitor owns that contract; ccpool is
-  the implementer that sets its marker).
+  passive usage/status watcher). ccpool's own per-session meter is distinct from such a
+  monitor's account-level usage surface (`packages/pa-monitor/docs/behavior · INTF-STATE`).

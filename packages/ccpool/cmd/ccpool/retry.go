@@ -107,9 +107,7 @@ func retryDecision(cfg config.Retry, class ct.RetryClass, retryCount, windowStar
 }
 
 // Nudger delivers a minimal "continue" nudge to a live session's pane. The
-// production implementation actuates tmux send-keys (the same path pa-monitor's
-// nudger uses, which ccpool sessions opt out of via PA_MONITOR_NO_NUDGE); tests
-// inject a fake.
+// production implementation actuates tmux send-keys; tests inject a fake.
 type Nudger interface {
 	Nudge(tmuxSession string) error
 }
@@ -121,9 +119,7 @@ const continueNudge = "continue"
 
 // tmuxNudger actuates the re-nudge over tmux send-keys, mirroring the session
 // service's deliverPrompt (clear input → bracketed paste → Enter) but without
-// the full session machinery — the hook is a short-lived process. This is the
-// same tmux actuation pa-monitor's nudger uses, which ccpool sessions opt out
-// of via PA_MONITOR_NO_NUDGE, so there is no double-nudge.
+// the full session machinery — the hook is a short-lived process.
 type tmuxNudger struct{ c *tmux.Client }
 
 // newTmuxNudger binds a nudger to the active pool's tmux socket.

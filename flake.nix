@@ -13377,7 +13377,7 @@
                           (.keep | sort) == ([
                             "BEADS_ACTOR","BEADS_DIR","WORKSPACE_ROOT","PG_ROUTER_ROLE",
                             "PG_ROUTER_ITEM_ID","PG_ROUTER_ITEM_TYPE","CCPOOL_EXTERNAL_ID",
-                            "PA_MONITOR_NO_NUDGE","CCPOOL_POOL","CCPOOL_AUTONOMOUS",
+                            "CCPOOL_POOL","CCPOOL_AUTONOMOUS",
                             "MY_KEEP","EXTRA_VAR"] | sort)' <<<"$spec_json" >/dev/null
                         jq -e '.keep | index("CLAUDECODE") == null and index("CLAUDE_CODE_CHILD_SESSION") == null' \
                           <<<"$spec_json" >/dev/null

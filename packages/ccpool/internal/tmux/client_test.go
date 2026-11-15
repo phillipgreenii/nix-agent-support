@@ -15,14 +15,14 @@ func TestClient_NewSession_argv(t *testing.T) {
 		return nil, nil
 	}}
 	err := c.NewSession("cc-alpha", "/proj/dir",
-		map[string]string{"CCPOOL_NAME": "alpha", "PA_MONITOR_NO_NUDGE": "1"},
+		map[string]string{"CCPOOL_NAME": "alpha", "CCPOOL_EXTERNAL_ID": "ext-alpha"},
 		[]string{"claude", "--session-id", "u1"})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	want := []string{
 		"-L", "ccpool", "new-session", "-d", "-s", "cc-alpha", "-c", "/proj/dir",
-		"-e", "CCPOOL_NAME=alpha", "-e", "PA_MONITOR_NO_NUDGE=1",
+		"-e", "CCPOOL_EXTERNAL_ID=ext-alpha", "-e", "CCPOOL_NAME=alpha",
 		"--", "claude", "--session-id", "u1",
 		// remain-on-exit=failed (pg2-olchz) is armed in the SAME tmux
 		// invocation (after a ";" separator), so a payload that exits within
