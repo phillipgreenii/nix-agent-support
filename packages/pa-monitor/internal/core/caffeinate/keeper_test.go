@@ -78,6 +78,18 @@ func TestCLIObserveReadsStatusJSONAndCheckExit(t *testing.T) {
 }
 
 func TestCLICallsFailVisibly(t *testing.T) {
+	// Observe reads the keeper's state files in-process before it ever launches
+	// the binary, and a missing state directory reads as "keeper down" (no
+	// error). Pin the state directory to a hermetic temp dir holding an
+	// unreadable status.json so the reading is deferred to the (absent) binary;
+	// otherwise the outcome depends on the host's HOME (the nix sandbox has none).
+	state := keepertest.UseStateDir(t)
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "status.json"), []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	c := &CLI{Configured: filepath.Join(t.TempDir(), "absent")}
 	if err := c.Acquire(os.Getpid()); !errors.Is(err, ErrKeeperNotFound) {
 		t.Errorf("Acquire err = %v, want ErrKeeperNotFound", err)
