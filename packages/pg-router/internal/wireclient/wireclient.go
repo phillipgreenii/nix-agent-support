@@ -188,6 +188,12 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 	if len(argv) == 0 {
 		return nil, 0, errors.New("wireclient: empty argv")
 	}
+	// Not routed through x/cmdrun, on purpose: the handler needs the parent-death
+	// pipe as inherited fd 3 (cmd.ExtraFiles, below), which cmdrun.Call cannot
+	// carry, and its stderr is forwarded live to r.Stderr rather than captured and
+	// replayed after exit. The call is bounded by ctx (the dispatch deadline) and
+	// by runWaitDelay after a cancel; the SIGTERM-on-cancel behaviour is pinned by
+	// runner_cancel_integration_test.go.
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var out bytes.Buffer

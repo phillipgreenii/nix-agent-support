@@ -8,13 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/item"
 	"github.com/phillipgreenii/pg-router/procenv"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // envTestMode is PG_ROUTER_TEST_MODE, set by run-role/run-query in their own
@@ -255,48 +255,77 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	return events, nil
 }
 
-// OSCommander is the default Commander: shells out via os/exec.
-type OSCommander struct{}
+// commandTimeout is the backstop bound on one command-query run. The caller's
+// context (the per-pull deadline, DefaultDeadline unless configured) is the
+// normal limit; this bounds a call whose caller passed a context with none.
+const commandTimeout = 5 * time.Minute
+
+// ExitCodeError is the error a command that ran but did not succeed produces:
+// it exited non-zero (Code) or was ended by a signal (Signal, Code -1). Stderr
+// is the child's trimmed stderr, folded into the message so the reason a
+// source's backing command wrote reaches the producer-tick log.
+type ExitCodeError struct {
+	Code   int
+	Signal string
+	Stderr string
+}
+
+func (e *ExitCodeError) Error() string {
+	msg := fmt.Sprintf("exit status %d", e.Code)
+	if e.Signal != "" {
+		msg = "signal: " + e.Signal
+	}
+	if e.Stderr != "" {
+		msg += ": " + e.Stderr
+	}
+	return msg
+}
+
+// OSCommander is the default Commander: it runs the command through
+// x/cmdrun.
+type OSCommander struct {
+	// Exec runs the call; nil means cmdrun.Exec. Tests inject cmdruntest.Fake.
+	Exec cmdrun.Runner
+}
 
 func (o OSCommander) Run(ctx context.Context, argv []string) ([]byte, error) {
 	return o.RunEnv(ctx, argv, nil)
 }
 
-// RunEnv runs argv with env (os/exec form; nil inherits the process
-// environment) in its own process group: a context cancel sends SIGTERM to the
-// whole group, then SIGKILL after cancelGrace, so a non-exec wrapper cannot
-// orphan the payload.
-func (OSCommander) RunEnv(ctx context.Context, argv []string, env []string) ([]byte, error) {
+// RunEnv runs argv with env (nil inherits the process environment; non-nil is
+// the child's whole environment) in its own process group: a context cancel
+// sends SIGTERM to the whole group, then SIGKILL after cancelGrace, so a
+// non-exec wrapper cannot orphan the payload.
+func (o OSCommander) RunEnv(ctx context.Context, argv []string, env []string) ([]byte, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("empty argv")
 	}
-	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	c.Env = env
-	procenv.Group(c, cancelGrace)
-	out, err := c.Output()
-	if err != nil {
-		// exec.Cmd.Output populates a non-zero-exit *exec.ExitError's own
-		// Stderr field with the child's captured stderr bytes (since
-		// cmd.Stderr was left nil above) — but *exec.ExitError.Error()
-		// itself is just os.ProcessState.String() ("exit status N"),
-		// never the child's own stderr text. Without folding it in here,
-		// Run's caller (CommandQuery.Run's "command query %v: %w"
-		// wrapping) and every WARN log built from that error downstream
-		// (e.g. pg-router's own producer-tick log, run.go) showed only
-		// that bare "exit status N" no matter how much diagnostic detail
-		// the child actually wrote to its own stderr — bead pg2-wa5uk:
-		// pg-router-source-pg-connector's own invokeOrFail now writes
-		// pg-connector's real degraded/failed reason there specifically
-		// so it can reach here. The original *exec.ExitError is still
-		// wrapped with %w, so errors.As(err, &exitErr) keeps resolving
-		// the real exit code for any caller that needs it.
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			if childStderr := strings.TrimSpace(string(exitErr.Stderr)); childStderr != "" {
-				return out, fmt.Errorf("%w: %s", exitErr, childStderr)
-			}
-		}
-		return out, err
+	run := o.Exec
+	if run == nil {
+		run = cmdrun.Exec
 	}
-	return out, nil
+	call := cmdrun.Call{
+		Name:         argv[0],
+		Args:         argv[1:],
+		OwnProcGroup: true,
+		TermGrace:    cancelGrace,
+		Timeout:      commandTimeout,
+	}
+	if env != nil {
+		call.Env, call.EnvMode = env, cmdrun.EnvExact
+	}
+	res := run(ctx, call)
+	switch {
+	case res.StartErr != nil:
+		return nil, res.StartErr
+	case res.TimedOut:
+		return res.Stdout, fmt.Errorf("timed out after %s", commandTimeout)
+	case res.CtxErr != nil:
+		return res.Stdout, res.CtxErr
+	case res.Signal != "" || res.Code != 0:
+		// The *ExitCodeError carries the child's own stderr: the bare "exit
+		// status N" never names the cause a source's backing command wrote.
+		return res.Stdout, &ExitCodeError{Code: res.Code, Signal: res.Signal, Stderr: strings.TrimSpace(string(res.Stderr))}
+	}
+	return res.Stdout, nil
 }

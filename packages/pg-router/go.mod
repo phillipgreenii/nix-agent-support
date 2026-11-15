@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/muesli/termenv v0.16.0
-	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
+	github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1

@@ -7,7 +7,7 @@ require (
 	github.com/phillipgreenii/pg-router v0.0.0
 )
 
-require github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
+require github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d
 
 require golang.org/x/sys v0.47.0
 

@@ -20,18 +20,17 @@
 package query
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/item"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 type QueryFormat string
@@ -275,32 +274,37 @@ type ParticipantRunner interface {
 	Run(ctx context.Context, argv []string, stdin []byte) (stdout []byte, exitCode int, err error)
 }
 
-// OSParticipantRunner is the production ParticipantRunner: a real
-// subprocess, matching DEC-WIRE-1's default transport.
-type OSParticipantRunner struct{}
+// participantTimeout is the backstop bound on one participant query call; the
+// caller's context (the per-pull deadline) is the normal limit.
+const participantTimeout = 5 * time.Minute
 
-func (OSParticipantRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
+// OSParticipantRunner is the production ParticipantRunner: a real
+// subprocess run through x/cmdrun, matching DEC-WIRE-1's default transport.
+type OSParticipantRunner struct {
+	// Exec runs the call; nil means cmdrun.Exec. Tests inject cmdruntest.Fake.
+	Exec cmdrun.Runner
+}
+
+func (r OSParticipantRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
 	if len(argv) == 0 {
 		return nil, 0, errors.New("query: empty argv")
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Stdin = bytes.NewReader(stdin)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err := cmd.Run()
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-		return out.Bytes(), 0, nil
-	case errors.As(err, &exitErr):
-		// The reply body (if any) is still on stdout even on a non-zero exit
-		// (DEC-WIRE-1: "the rich outcome is in the JSON reply"). Return it
-		// alongside the exit code; Run below decides what, if anything, it
-		// means.
-		return out.Bytes(), exitErr.ExitCode(), nil
-	default:
-		return nil, 0, fmt.Errorf("query: run %v: %w", argv, err)
+	run := r.Exec
+	if run == nil {
+		run = cmdrun.Exec
 	}
+	res := run(ctx, cmdrun.Call{Name: argv[0], Args: argv[1:], Stdin: stdin, Timeout: participantTimeout})
+	switch {
+	case res.StartErr != nil:
+		return nil, 0, fmt.Errorf("query: run %v: %w", argv, res.StartErr)
+	case res.TimedOut:
+		return nil, 0, fmt.Errorf("query: run %v: timed out after %s", argv, participantTimeout)
+	}
+	// The reply body (if any) is still on stdout even on a non-zero exit
+	// (DEC-WIRE-1: "the rich outcome is in the JSON reply"). Return it
+	// alongside the exit code (-1 for a signal); Run below decides what, if
+	// anything, it means.
+	return res.Stdout, res.Code, nil
 }
 
 func (q ParticipantQuery) runner() ParticipantRunner {
