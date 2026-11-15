@@ -1,0 +1,68 @@
+# pg-gwm unified-alerting rules. The one rule here watches the exporter itself: the series come
+# from `pg-gwm metrics`, delivered by `pg-gwm serve` (the phillipgreenii.services.pg-gwm-exporter
+# darwin module), which Prometheus scrapes as job="pg-gwm".
+#
+#   pg-gwm-exporter-down     the exporter's scrape fails or is missing, for 5m
+#
+# The exporter-down rule is the exporter's working signal (nix-support-apps ADR 0041, option a): it
+# is the only rule that fires when the exporter dies, so it has noDataState Alerting (a missing up
+# series is the failure it reports), and it is gated on nothing else.
+#
+# refId A is plain PromQL and refId C a single threshold stage, so check-alert-rules.sh can wrap A
+# with C's evaluator and run `promtool test rules` over rule-tests/<uid>.test.yaml.
+#
+# The five pool rules of the tool pg-gwm replaced (leaked slots, quarantined, exhausted
+# waiting, reset slow, daemon orphans) and its exporter-down rule are removed through
+# alerts-delete.yaml, because Grafana keeps a rule live after the file that defined it is dropped.
+#
+# The uid is also in registeredRuleUIDs of packages/pg-router-probe/cmd/pg-router-probe/run.go
+# (a firing instance reaches the escalation flow), and a deployment that passes its own
+# --rule-uid list to the probe MUST add it to that list too. The folder "Claude Agents"
+# converges by title (never pin a folderUid, grafana/grafana#125079). Delivery is Grafana's
+# notification policy; this file adds none.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-gwm
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      - uid: pg-gwm-exporter-down
+        title: pg-gwm exporter is down
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The pg-gwm exporter has not answered a scrape for over 5 minutes"
+          description: 'up{job="pg-gwm"} has been 0, or has gone missing, for over 5 minutes: the exporter (pg-gwm serve, launchd agent com.phillipg.pg-gwm-exporter) is down or its listener is not on the scraped port, so the pg-gwm series are blind. Read the launchd log under ~/.local/state/pg-gwm-exporter/ and restart the agent.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'min(up{job="pg-gwm"})'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]

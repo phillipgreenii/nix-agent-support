@@ -375,15 +375,15 @@ func TestSweep_keptWhenGitLocked(t *testing.T) {
 	h.wantKept(path, "zr-k")
 }
 
-// A checkout-pool slot (a detached worktree locked with a "pool slot" reason,
+// A pg-gwm managed worktree (a detached worktree locked with a "pg-gwm" reason,
 // or one whose lock was lost) is never reclaimed even when it sits under the
-// swept directory and is old: the pool reaps its own slots.
-func TestSweep_checkoutPoolSlotsAreNeverReclaimed(t *testing.T) {
+// swept directory and is old: pg-gwm reaps its own worktrees.
+func TestSweep_gwmManagedWorktreesAreNeverReclaimed(t *testing.T) {
 	h := newSweepHarness(t)
 	old := h.nowFixed.Add(-time.Hour)
 	locked := filepath.Join(h.wtDir, "slot-01")
 	h.git(h.repo, "worktree", "add", "-q", "--detach", locked)
-	h.git(h.repo, "worktree", "lock", "--reason", "pool slot (pg-checkout-pool)", locked)
+	h.git(h.repo, "worktree", "lock", "--reason", "pg-gwm w-0000000000", locked)
 	unlocked := filepath.Join(h.wtDir, "slot-02")
 	h.git(h.repo, "worktree", "add", "-q", "--detach", unlocked)
 	for _, p := range []string{locked, unlocked} {
@@ -392,10 +392,10 @@ func TestSweep_checkoutPoolSlotsAreNeverReclaimed(t *testing.T) {
 		}
 	}
 	if got := h.sweep(); got != 0 {
-		t.Errorf("pool slots must be kept; removed %d", got)
+		t.Errorf("managed worktrees must be kept; removed %d", got)
 	}
 	if !h.exists(locked) || !h.exists(unlocked) {
-		t.Error("a pool slot was removed")
+		t.Error("a managed worktree was removed")
 	}
 }
 

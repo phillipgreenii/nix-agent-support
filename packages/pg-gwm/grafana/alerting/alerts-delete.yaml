@@ -1,0 +1,23 @@
+# Explicit deletion of the alert rules of the earlier pg-checkout-pool tool.
+#
+# Grafana's file provisioner only adds and updates the rules present in a provisioned file:
+# dropping the old rules file from alertRuleFiles leaves the already-provisioned rules live
+# (provenance=file) until a `deleteRules:` entry names each uid, applied on a provisioning
+# reload or restart. The pg-gwm tool replaced pg-checkout-pool, so these six uids are removed.
+#
+# check-alert-rules.sh pins this file to exactly these six uids. Delete the file, and its
+# registration in the deployment, once Grafana shows none of them.
+apiVersion: 1
+deleteRules:
+  - orgId: 1
+    uid: pg-checkout-pool-leaked-slots
+  - orgId: 1
+    uid: pg-checkout-pool-quarantined
+  - orgId: 1
+    uid: pg-checkout-pool-exhausted-waiting
+  - orgId: 1
+    uid: pg-checkout-pool-reset-slow
+  - orgId: 1
+    uid: pg-checkout-pool-daemon-orphans
+  - orgId: 1
+    uid: pg-checkout-pool-exporter-down

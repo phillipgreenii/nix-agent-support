@@ -373,9 +373,9 @@
           pg-router-sensors = final.callPackage ./packages/pg-router-sensors {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-checkout-pool: Pattern A, slot store (golang.org/x/sys only, for clonefile) (per-slot flock,
+          # pg-gwm: Pattern A, slot store (per-slot flock,
           # atomic lease records, slot state machine) plus a status command.
-          pg-checkout-pool = final.callPackage ./packages/pg-checkout-pool {
+          pg-gwm = final.callPackage ./packages/pg-gwm {
             inherit (goBuilders) mkGoApp;
           };
           # pg-router-heartbeat: Pattern A, stdlib-only out-of-stack dead-man's switch.
@@ -2012,7 +2012,7 @@
                 "pg-router-source-pg-desk"
                 "pg-decider"
                 "pg-router-probe"
-                "pg-checkout-pool"
+                "pg-gwm"
                 "pg-router-heartbeat"
                 "ccpool-probe"
                 "pg-rescue"
@@ -8858,13 +8858,13 @@
                     '';
                   });
 
-              # pg-checkout-pool: hermetic unit suite over the slot state machine,
+              # pg-gwm: hermetic unit suite over the slot state machine,
               # flock liveness (including a killed helper process), atomic record
               # writes and the status command; temp dirs and a fake clock; the provisioner tests use real git.
-              pg-checkout-pool-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-checkout-pool-go-tests";
-                src = lib.cleanSource ./packages/pg-checkout-pool; # matches default.nix
-                gomod2nixToml = ./packages/pg-checkout-pool/gomod2nix.toml;
+              pg-gwm-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-gwm-go-tests";
+                src = lib.cleanSource ./packages/pg-gwm; # matches default.nix
+                gomod2nixToml = ./packages/pg-gwm/gomod2nix.toml;
                 # The provision tests drive real git in temp dirs.
                 testDeps = [ pkgs.git ];
               };
@@ -9106,12 +9106,12 @@
                     touch "$out"
                   '';
 
-              # pg-checkout-pool: the alert rules. The script pins the Grafana-only fields (for,
+              # pg-gwm: the alert rules. The script pins the Grafana-only fields (for,
               # severity, noDataState, thresholds, dashboard panel links), compares the rule uids with
               # the router probe's registeredRuleUIDs, then wraps refId A of each rule as a Prometheus
               # alert and runs the cases under grafana/alerting/rule-tests/ under `promtool test rules`.
-              test-pg-checkout-pool-alert-rules =
-                pkgs.runCommand "test-pg-checkout-pool-alert-rules"
+              test-pg-gwm-alert-rules =
+                pkgs.runCommand "test-pg-gwm-alert-rules"
                   {
                     nativeBuildInputs = [
                       pkgs.bash
@@ -9123,11 +9123,12 @@
                     ];
                   }
                   ''
-                    bash ${./packages/pg-checkout-pool/grafana/check-alert-rules.sh} \
-                      ${./packages/pg-checkout-pool/grafana/alerting/alerts.yaml} \
-                      ${./packages/pg-checkout-pool/grafana/pg-checkout-pool.json} \
-                      ${./packages/pg-checkout-pool/grafana/alerting/rule-tests} \
-                      ${./packages/pg-router-probe/cmd/pg-router-probe/run.go}
+                    bash ${./packages/pg-gwm/grafana/check-alert-rules.sh} \
+                      ${./packages/pg-gwm/grafana/alerting/alerts.yaml} \
+                      ${./packages/pg-gwm/grafana/pg-gwm.json} \
+                      ${./packages/pg-gwm/grafana/alerting/rule-tests} \
+                      ${./packages/pg-router-probe/cmd/pg-router-probe/run.go} \
+                      ${./packages/pg-gwm/grafana/alerting/alerts-delete.yaml}
                     touch "$out"
                   '';
 
@@ -9972,17 +9973,17 @@
                     touch "$out"
                   '';
 
-              # pg-checkout-pool-exporter: the darwin module evaluates standalone and renders
+              # pg-gwm-exporter: the darwin module evaluates standalone and renders
               # the launchd agent (loopback serve on the ledger port, optional --root), the
               # scrape target, and nothing at all while off or while observability is off.
-              test-pg-checkout-pool-exporter-darwin-module =
+              test-pg-gwm-exporter-darwin-module =
                 let
                   evalModule =
                     obsEnable: poolCfg:
                     (lib.evalModules {
                       specialArgs = { inherit pkgs lib; };
                       modules = [
-                        ./darwin/modules/pg-checkout-pool-exporter/default.nix
+                        ./darwin/modules/pg-gwm-exporter/default.nix
                         (
                           { lib, ... }:
                           {
@@ -10023,7 +10024,7 @@
                             config.phillipgreenii.observability.enable = obsEnable;
                           }
                         )
-                        { phillipgreenii.services.pg-checkout-pool-exporter = poolCfg; }
+                        { phillipgreenii.services.pg-gwm-exporter = poolCfg; }
                       ];
                     }).config;
 
@@ -10046,33 +10047,33 @@
                     && c.phillipgreenii.observability.metricsTargets == { }
                     && c.phillipgreenii.observability.logSources == { };
 
-                  ua = enabled.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter;
-                  uaRooted = rooted.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter;
+                  ua = enabled.phillipgreenii.system.launchdServices.userAgents.pg-gwm-exporter;
+                  uaRooted = rooted.phillipgreenii.system.launchdServices.userAgents.pg-gwm-exporter;
                   hasInfixNoCtx =
                     needle: hay:
                     lib.hasInfix (builtins.unsafeDiscardStringContext needle) (builtins.unsafeDiscardStringContext hay);
                 in
                 assert inertOk obsOff;
                 assert inertOk moduleOff;
-                assert ua.label == "com.phillipg.pg-checkout-pool-exporter";
+                assert ua.label == "com.phillipg.pg-gwm-exporter";
                 assert ua.keepAlive == true;
                 assert ua.runAtLoad;
                 assert ua.serviceConfig.ProcessType == "Background";
                 # the 5 s serve shutdown bound plus margin, under launchd's 60 s clamp
                 assert ua.serviceConfig.ExitTimeOut == 15;
-                assert enabled.phillipgreenii.observability.metricsTargets.pg-checkout-pool.port == 9148;
-                assert enabled.phillipgreenii.observability.metricsTargets.pg-checkout-pool.scrapeInterval == "60s";
-                assert hasInfixNoCtx "pg-checkout-pool serve" ua.script;
+                assert enabled.phillipgreenii.observability.metricsTargets.pg-gwm.port == 9148;
+                assert enabled.phillipgreenii.observability.metricsTargets.pg-gwm.scrapeInterval == "60s";
+                assert hasInfixNoCtx "pg-gwm serve" ua.script;
                 assert lib.hasInfix "--addr 127.0.0.1:9148" ua.script;
                 # An empty poolRoot lets the command pick its default: no --root.
                 assert !(lib.hasInfix "--root" ua.script);
                 assert lib.hasInfix "export XDG_STATE_HOME=/Users/tester/.local/state" ua.script;
                 assert lib.hasInfix "--addr 127.0.0.1:9999" uaRooted.script;
                 assert lib.hasInfix "--root /srv/pool" uaRooted.script;
-                assert rooted.phillipgreenii.observability.metricsTargets.pg-checkout-pool.port == 9999;
+                assert rooted.phillipgreenii.observability.metricsTargets.pg-gwm.port == 9999;
                 assert
-                  enabled.phillipgreenii.observability.logSources.pg-checkout-pool-exporter == {
-                    path = "/Users/tester/.local/state/pg-checkout-pool-exporter/launchd-*.log";
+                  enabled.phillipgreenii.observability.logSources.pg-gwm-exporter == {
+                    path = "/Users/tester/.local/state/pg-gwm-exporter/launchd-*.log";
                     format = "raw";
                   };
                 assert lib.all (a: a.assertion) enabled.assertions;
@@ -10080,14 +10081,14 @@
                 # path under the state dir; pprof.enable = false leaves no variable.
                 assert
                   ua.serviceConfig.EnvironmentVariables == {
-                    PG_CHECKOUT_POOL_PPROF_ADDR = "/Users/tester/.local/state/pg-checkout-pool-exporter/pprof.sock";
+                    PG_GWM_PPROF_ADDR = "/Users/tester/.local/state/pg-gwm-exporter/pprof.sock";
                   };
                 assert
                   !(
-                    pprofOff.phillipgreenii.system.launchdServices.userAgents.pg-checkout-pool-exporter.serviceConfig
+                    pprofOff.phillipgreenii.system.launchdServices.userAgents.pg-gwm-exporter.serviceConfig
                       ? EnvironmentVariables
                   );
-                pkgs.runCommand "test-pg-checkout-pool-exporter-darwin-module-ok" { } ''
+                pkgs.runCommand "test-pg-gwm-exporter-darwin-module-ok" { } ''
                   touch "$out"
                 '';
 
@@ -12319,30 +12320,6 @@
                   };
                   noRolesJson = rolesJsonDir noRoles;
 
-                  # checkout-pool isolation: the handler runs `pg-checkout-pool` as an
-                  # external command, so the module puts it on the profile PATH only
-                  # when a ccpool role selects that isolation type.
-                  poolIsolationRole = evalHM {
-                    enable = true;
-                    roles.pooled = {
-                      handler = ccpoolHandler;
-                      ccpool = {
-                        actor = "pooled-actor";
-                        completion = "close-only";
-                        onFailure = "unclaim";
-                        onDispatchFail = "leave";
-                        promptBody = "pooled prompt";
-                        isolation.type = "checkout-pool";
-                      };
-                    };
-                  };
-                  checkoutPoolOnPath = lib.boolToString (
-                    lib.elem pkgs.pg-checkout-pool poolIsolationRole.home.packages
-                  );
-                  checkoutPoolOnPathDefault = lib.boolToString (
-                    lib.elem pkgs.pg-checkout-pool twoRoles.home.packages
-                  );
-
                   # pool (pg2-1p4yp): disabled by default -- no
                   # home.activation entry at all (an existing deployment
                   # that hasn't opted in gets zero behavior change).
@@ -13496,8 +13473,6 @@
                           k31WrapJson
                           twoRolesJson
                           noRolesJson
-                          checkoutPoolOnPath
-                          checkoutPoolOnPathDefault
                           launchConfigFile
                           defaultLaunchConfigFile
                           ownPoolRolesJson
@@ -13546,9 +13521,6 @@
                         jq -e 'has("ccpool") | not' "$twoRolesJson/worker.json" >/dev/null
                         jq -e 'has("survivesShutdown") | not' "$twoRolesJson/worker.json" >/dev/null
                         [ "$(ls -1 "$noRolesJson" | wc -l)" -eq 0 ]
-                        # pg-checkout-pool is on the profile only for a checkout-pool role.
-                        [ "$checkoutPoolOnPath" = true ]
-                        [ "$checkoutPoolOnPathDefault" = false ]
 
                         # launchConfigFile (this bead, pg2-qsred): the
                         # overrides render, and everything left untouched
@@ -21505,7 +21477,7 @@
               pg-decider
               pg-router-probe
               pg-router-sensors
-              pg-checkout-pool
+              pg-gwm
               pg-router-heartbeat
               beads-exporter
               beads-exporter-contract

@@ -172,11 +172,10 @@ import (
 // crash-share, removal-stuck, settle-tick-slow, field-type-mismatch, cpu-high, wal-large, loop-stalled, request-slow, schema-rebuild-required and blocked-no-space. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
 //
-// The five pg-checkout-pool-* rules of the checkout pool's alert file (packages/
-// pg-checkout-pool/grafana/alerting/alerts.yaml): leaked-slots, quarantined,
-// exhausted-waiting, reset-slow and daemon-orphans. Registered the same way, with no
-// escalation label. TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile compares the file's
-// uids with this list. A machine where the pool is not deployed never holds the rules.
+// pg-gwm-exporter-down is the one rule of pg-gwm's alert file (packages/pg-gwm/grafana/
+// alerting/alerts.yaml). Registered the same way, with no escalation label.
+// TestRegisteredRuleUIDsMatchGwmRuleFile compares the file's uids with this list. A machine
+// where pg-gwm is not deployed never holds the rule.
 //
 // pa-monitor-scan-stale is the age alert on pa-monitor's last successful corpus scan
 // (packages/pa-monitor/grafana/alerting/scan-stale.yaml): a failing scan keeps the last good
@@ -242,12 +241,7 @@ var registeredRuleUIDs = []string{
 	"pg-ccrec-request-slow",
 	"pg-ccrec-schema-rebuild-required",
 	"pg-ccrec-shutdown-overrun",
-	"pg-checkout-pool-leaked-slots",
-	"pg-checkout-pool-quarantined",
-	"pg-checkout-pool-exhausted-waiting",
-	"pg-checkout-pool-reset-slow",
-	"pg-checkout-pool-daemon-orphans",
-	"pg-checkout-pool-exporter-down",
+	"pg-gwm-exporter-down",
 	"pa-monitor-scan-stale",
 }
 

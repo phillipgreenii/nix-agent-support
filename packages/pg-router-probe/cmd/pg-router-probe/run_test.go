@@ -392,12 +392,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-ccrec-request-slow",
 		"pg-ccrec-schema-rebuild-required",
 		"pg-ccrec-shutdown-overrun",
-		"pg-checkout-pool-leaked-slots",
-		"pg-checkout-pool-quarantined",
-		"pg-checkout-pool-exhausted-waiting",
-		"pg-checkout-pool-reset-slow",
-		"pg-checkout-pool-daemon-orphans",
-		"pg-checkout-pool-exporter-down",
+		"pg-gwm-exporter-down",
 		"pa-monitor-scan-stale",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
@@ -1086,31 +1081,31 @@ func TestRegisteredRuleUIDsMatchRecorderRuleFile(t *testing.T) {
 	}
 }
 
-// checkoutPoolRuleFile is the pg-checkout-pool alert rules file, relative to this package.
-const checkoutPoolRuleFile = "../../../pg-checkout-pool/grafana/alerting/alerts.yaml"
+// gwmRuleFile is the pg-gwm alert rules file, relative to this package.
+const gwmRuleFile = "../../../pg-gwm/grafana/alerting/alerts.yaml"
 
-// The pg-checkout-pool-* entries of registeredRuleUIDs equal the uids of the pool's rule file, in
+// The pg-gwm-* entries of registeredRuleUIDs equal the uids of the pg-gwm rule file, in
 // the file's order. The file lives in a sibling module, so a build that carries only this module
-// (the nix go-tests sandbox) cannot see it and the test then checks the list's own pinned six;
-// the pool's alert-rules flake check compares the real file with this list.
-func TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile(t *testing.T) {
+// (the nix go-tests sandbox) cannot see it and the test then checks the list's own pinned entry;
+// the pg-gwm alert-rules flake check compares the real file with this list.
+func TestRegisteredRuleUIDsMatchGwmRuleFile(t *testing.T) {
 	var registered []string
 	for _, uid := range registeredRuleUIDs {
-		if strings.HasPrefix(uid, "pg-checkout-pool-") {
+		if strings.HasPrefix(uid, "pg-gwm-") {
 			registered = append(registered, uid)
 		}
 	}
-	if len(registered) != 6 {
-		t.Fatalf("registered pg-checkout-pool uids = %d, want 6: %v", len(registered), registered)
+	if len(registered) != 1 {
+		t.Fatalf("registered pg-gwm uids = %d, want 1: %v", len(registered), registered)
 	}
 	for _, uid := range registered {
 		if len(uid) > 40 {
 			t.Fatalf("uid %q is over Grafana's 40-character cap", uid)
 		}
 	}
-	data, err := os.ReadFile(checkoutPoolRuleFile)
+	data, err := os.ReadFile(gwmRuleFile)
 	if errors.Is(err, os.ErrNotExist) {
-		t.Skipf("rule file not in this build (%s); the pool's alert-rules flake check covers it", checkoutPoolRuleFile)
+		t.Skipf("rule file not in this build (%s); the pg-gwm alert-rules flake check covers it", gwmRuleFile)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -1122,6 +1117,6 @@ func TestRegisteredRuleUIDsMatchCheckoutPoolRuleFile(t *testing.T) {
 		}
 	}
 	if strings.Join(fromFile, ",") != strings.Join(registered, ",") {
-		t.Fatalf("rule file uids = %v, registeredRuleUIDs pg-checkout-pool entries = %v", fromFile, registered)
+		t.Fatalf("rule file uids = %v, registeredRuleUIDs pg-gwm entries = %v", fromFile, registered)
 	}
 }

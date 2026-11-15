@@ -48,6 +48,10 @@ type leaseProbeCC struct {
 	at   []time.Time
 	vals []time.Time // the lease_until each write carried
 	fail map[int]bool
+	// done receives one value per write, after its clock reading is recorded.
+	// The write is the last clock read of a lease refresh, so a receive means
+	// that refresh has finished with the clock.
+	done chan struct{}
 }
 
 func (c *leaseProbeCC) SetMeta(ctx context.Context, id, key, value string) error {
@@ -57,6 +61,12 @@ func (c *leaseProbeCC) SetMeta(ctx context.Context, id, key, value string) error
 	until, _ := ccpool.ParseMetaTime(value)
 	c.vals = append(c.vals, until)
 	failing := c.fail[n]
+	defer func() {
+		select {
+		case c.done <- struct{}{}:
+		default:
+		}
+	}()
 	c.mu.Unlock()
 	if failing {
 		return errors.New("ccpool meta set: disk I/O error")
@@ -64,40 +74,15 @@ func (c *leaseProbeCC) SetMeta(ctx context.Context, id, key, value string) error
 	return c.FakeCC.SetMeta(ctx, id, key, value)
 }
 
-// renewProbe is a checkoutpool.Client double that records the clock of every
-// Renew.
-type renewProbe struct {
-	*fakePool
-	clk *dtest.ManualClock
-	mu  sync.Mutex
-	at  []time.Time
-	// done receives one value per Renew, after its clock reading is recorded.
-	// Renew is the last clock read of a lease refresh, so a receive means that
-	// refresh has finished with the clock.
-	done chan struct{}
-}
-
-func (p *renewProbe) Renew(ctx context.Context, id string) error {
-	p.mu.Lock()
-	p.at = append(p.at, p.clk.Now())
-	p.mu.Unlock()
-	err := p.fakePool.Renew(ctx, id)
-	select {
-	case p.done <- struct{}{}:
-	default:
-	}
-	return err
-}
-
 // runLease starts the lease refresh on a fake clock, fires ticks every `step`
 // until `total` has elapsed, stops it and returns the period the handler asked
-// for plus what was written and renewed.
-func runLease(t *testing.T, cc *leaseProbeCC, clk *dtest.ManualClock, total time.Duration) (every time.Duration, writes, renews []time.Time) {
+// for plus what was written.
+func runLease(t *testing.T, cc *leaseProbeCC, clk *dtest.ManualClock, total time.Duration) (every time.Duration, writes []time.Time) {
 	t.Helper()
 	cfg := leaseCfg()
 	mt := newManualTicker()
-	pool := &renewProbe{fakePool: &fakePool{}, clk: clk, done: make(chan struct{}, 1024)}
-	r := &ccpoolRun{deps: Deps{CC: cc, Cfg: cfg, Now: clk.Now, NewTicker: mt.factory, Pool: pool}, lease: "lease-1"}
+	cc.done = make(chan struct{}, 1024)
+	r := &ccpoolRun{deps: Deps{CC: cc, Cfg: cfg, Now: clk.Now, NewTicker: mt.factory}}
 	stop := r.startLease(context.Background(), leaseSess)
 	// The first write happens inline on the loop goroutine before it reads ticks:
 	// the first send below synchronizes with it.
@@ -108,7 +93,7 @@ func runLease(t *testing.T, cc *leaseProbeCC, clk *dtest.ManualClock, total time
 	// loaded host) stamp the write with a later tick's time.
 	refreshed := func() {
 		select {
-		case <-pool.done:
+		case <-cc.done:
 		case <-time.After(30 * time.Second): // a hang guard, not a pacing delay
 			t.Fatal("lease refresh did not finish")
 		}
@@ -125,10 +110,7 @@ func runLease(t *testing.T, cc *leaseProbeCC, clk *dtest.ManualClock, total time
 	cc.mu.Lock()
 	writes = append([]time.Time(nil), cc.at...)
 	cc.mu.Unlock()
-	pool.mu.Lock()
-	renews = append([]time.Time(nil), pool.at...)
-	pool.mu.Unlock()
-	return mt.every, writes, renews
+	return mt.every, writes
 }
 
 // refreshedWithin reports whether, over [start, start+total], no gap between
@@ -150,7 +132,7 @@ func TestLeaseCadence_quarterTTLOverTenMinutes(t *testing.T) {
 	clk := &dtest.ManualClock{T: t0}
 	cc := &leaseProbeCC{FakeCC: &dtest.FakeCC{}, clk: clk}
 	const total = 10 * time.Minute
-	every, writes, renews := runLease(t, cc, clk, total)
+	every, writes := runLease(t, cc, clk, total)
 
 	if every != leaseTTL/4 {
 		t.Fatalf("ticker period = %v, want LeaseTTL/4 = %v", every, leaseTTL/4)
@@ -162,14 +144,8 @@ func TestLeaseCadence_quarterTTLOverTenMinutes(t *testing.T) {
 	if !writes[0].Equal(t0) {
 		t.Errorf("first write at %v, want the start %v", writes[0], t0)
 	}
-	if len(renews) != len(writes) {
-		t.Errorf("checkout-pool renews = %d, want one per lease write (%d)", len(renews), len(writes))
-	}
 	if !refreshedWithin(writes, t0, total, leaseTTL/2) {
 		t.Errorf("lease must be refreshed at least once per LeaseTTL/2; writes=%v", writes)
-	}
-	if !refreshedWithin(renews, t0, total, leaseTTL/2) {
-		t.Errorf("checkout lease must be renewed at least once per LeaseTTL/2; renews=%v", renews)
 	}
 }
 
@@ -195,7 +171,7 @@ func TestLeaseCadence_failedTickRetriesAndLeaseNeverLapses(t *testing.T) {
 	clk := &dtest.ManualClock{T: t0}
 	cc := &leaseProbeCC{FakeCC: &dtest.FakeCC{}, clk: clk, fail: map[int]bool{1: true}} // the first tick fails
 	logs := captureLog(t)
-	every, writes, _ := runLease(t, cc, clk, 3*leaseTTL/4) // ticks at +30s (fails), +60s, +90s
+	every, writes := runLease(t, cc, clk, 3*leaseTTL/4) // ticks at +30s (fails), +60s, +90s
 	if len(writes) != 4 {
 		t.Fatalf("writes = %d, want 4 (start + 3 ticks, the failed one included)", len(writes))
 	}

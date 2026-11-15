@@ -303,10 +303,6 @@ let
     ++ roleCfg.command.argv;
 
   ccpoolRoles = lib.filterAttrs (_name: roleCfg: kindOf roleCfg == "ccpool") cfg.roles;
-  # Whether any ccpool role leases pooled checkouts (isolation.type = "checkout-pool").
-  usesCheckoutPool = lib.any (roleCfg: roleCfg.ccpool.isolation.type == "checkout-pool") (
-    lib.attrValues ccpoolRoles
-  );
   # The ccpool roles that share the handler-wide pool (only meaningful while
   # `pool.enable`; otherwise they run on ccpool's unmanaged default pool).
   handlerPoolRoles = lib.optionalAttrs cfg.pool.enable (
@@ -949,12 +945,6 @@ let
           Repos = roleCfg.ccpool.isolation.repos;
           Fallback = roleCfg.ccpool.isolation.fallback;
         }
-        // lib.optionalAttrs (roleCfg.ccpool.isolation.type == "checkout-pool") {
-          # checkout-pool: Go field names, rendered only for that type so every
-          # other role's file is byte-for-byte unchanged.
-          Ref = roleCfg.ccpool.isolation.ref;
-          PoolRoot = roleCfg.ccpool.isolation.poolRoot;
-        }
         // lib.optionalAttrs roleCfg.ccpool.isolation.prefetch.enable {
           # prefetch (bead pg2-hh32y): omitted unless enabled, so a role that
           # never opts in decodes `Prefetch == nil` (unchanged behavior).
@@ -1573,7 +1563,6 @@ let
                         "path"
                         "workforest"
                         "bead-worktree"
-                        "checkout-pool"
                       ];
                       default = "";
                       description = ''
@@ -1590,42 +1579,8 @@ let
                         one of `repos` fails the dispatch. Read-only access is NOT
                         enforced: the session can write in the found worktree, so the role
                         prompt MUST forbid edits.
-
-                        `"checkout-pool"` leases an already-warm checkout of the handler's
-                        `repoRoot` from `pg-checkout-pool` instead of creating a worktree.
-                        The lease is keyed on the dispatched session's id (the item id is
-                        only the pool's affinity hint); the session runs in the leased
-                        path and receives the lease id in `PG_CHECKOUT_LEASE_ID`. The
-                        lease is renewed while the dispatch runs and released (the pool
-                        resets the checkout, rescuing uncommitted tracked work to a ref)
-                        on teardown, on the orphan reconcile and on every row-keyed
-                        teardown. A full pool declines the dispatch as busy (no bead is
-                        touched). A redispatch of a session that still holds its lease
-                        reuses that lease (same slot, no reset). Enabling this type for
-                        any role adds `pg-checkout-pool` to `home.packages`, so the
                         handler finds it on PATH. Off by default; dispatched agent
                         sessions only.
-                      '';
-                    };
-                    ref = lib.mkOption {
-                      type = lib.types.str;
-                      default = "";
-                      example = "origin/main";
-                      description = ''
-                        Commit reference a `"checkout-pool"` lease checks out
-                        (`roles.IsolationConfig.Ref`). Empty means `origin/main`. Valid
-                        only with `type = "checkout-pool"`.
-                      '';
-                    };
-                    poolRoot = lib.mkOption {
-                      type = lib.types.str;
-                      default = "";
-                      example = "/path/to/pool-state";
-                      description = ''
-                        Absolute pool state directory a `"checkout-pool"` role passes to
-                        `pg-checkout-pool --root` (`roles.IsolationConfig.PoolRoot`). Empty
-                        lets the command pick its default (`PG_CHECKOUT_POOL_ROOT`, else
-                        under `XDG_STATE_HOME`). Valid only with `type = "checkout-pool"`.
                       '';
                     };
                     repos = lib.mkOption {
@@ -2780,14 +2735,9 @@ in
       };
     }
     (lib.mkIf cfg.enable {
-      # pg-checkout-pool joins the profile (and so the handler's inherited PATH)
-      # only when some ccpool role selects the opt-in "checkout-pool" isolation,
-      # because the handler runs it as an external command (internal/checkoutpool).
-      # Any other deployment's package set is unchanged.
       home.packages = [
         cfg.package
-      ]
-      ++ lib.optional usesCheckoutPool pkgs.pg-checkout-pool;
+      ];
 
       # pg2-4roho decision item 4: register this handler's own worktree pool
       # with pg-disk-reclaimer as a belt-and-suspenders safety net -- see

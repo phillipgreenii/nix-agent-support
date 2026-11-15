@@ -807,39 +807,6 @@ func TestLoadConfig_minFreeBytes(t *testing.T) {
 	}
 }
 
-// checkout-pool isolation: the type, ref and poolRoot decode with the Go field
-// names the nix module renders; ref and poolRoot belong to that type alone and
-// poolRoot must be absolute.
-func TestDecodeRole_decodesCheckoutPoolIsolation(t *testing.T) {
-	r, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(`{"Type":"checkout-pool","Ref":"origin/main","PoolRoot":"/state/pool"}`)))
-	if err != nil {
-		t.Fatalf("DecodeRole: %v", err)
-	}
-	got := r.CCPool.Isolation
-	if got.Type != "checkout-pool" || got.Ref != "origin/main" || got.PoolRoot != "/state/pool" {
-		t.Fatalf("Isolation = %+v, want the configured fields", got)
-	}
-	if _, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(`{"Type":"checkout-pool"}`))); err != nil {
-		t.Fatalf("ref and poolRoot are optional: %v", err)
-	}
-}
-
-func TestDecodeRole_rejectsInvalidCheckoutPoolIsolation(t *testing.T) {
-	tests := map[string]string{
-		"relative poolRoot":       `{"Type":"checkout-pool","PoolRoot":"rel/pool"}`,
-		"ref on the default":      `{"Ref":"origin/main"}`,
-		"poolRoot on worktree":    `{"Type":"worktree","PoolRoot":"/p"}`,
-		"prefetch needs worktree": `{"Type":"checkout-pool","Prefetch":{"Rev":"abc1234"}}`,
-	}
-	for name, iso := range tests {
-		t.Run(name, func(t *testing.T) {
-			if _, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(iso))); err == nil {
-				t.Fatal("want an error")
-			}
-		})
-	}
-}
-
 // An actor with an empty session-id part ("-worker") is rejected at load, so no
 // role can be configured to write an unattributable claim.
 func TestDecodeRole_rejectsActorWithEmptyPart(t *testing.T) {

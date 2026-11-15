@@ -67,17 +67,6 @@ const (
 	// carrying this key is purged, but its working directory and any branch are
 	// left exactly as they were. Stamped at dispatch; never a --label.
 	MetaKeyKeepWorktree = "pgrouter.keep_worktree"
-	// MetaKeyCheckoutLease carries the pg-checkout-pool lease id of a session
-	// dispatched with "checkout-pool" isolation. Every teardown path (the
-	// dispatch's own, the closed-bead and stale-session reconciles, the
-	// purge_pending retry, the orphan reconcile, the shutdown sweep) runs without
-	// knowing the role's isolation type, so the lease travels on the row: a row
-	// carrying it has its lease RELEASED to the pool before it is purged, and its
-	// checkout is never removed as a worktree. Never a --label.
-	MetaKeyCheckoutLease = "pgrouter.checkout_lease"
-	// MetaKeyCheckoutRoot is the pool state directory the lease was taken from
-	// (absent when the command's default root was used). Never a --label.
-	MetaKeyCheckoutRoot = "pgrouter.checkout_root"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions
@@ -144,26 +133,11 @@ func (s Session) LaunchedAt() (time.Time, bool) { return ParseMetaTime(s.Meta[Me
 // the directory and branches alone.
 func (s Session) KeepsWorktree() bool { return s.Meta[MetaKeyKeepWorktree] != "" }
 
-// CheckoutLease returns the pg-checkout-pool lease id the session holds, or ""
-// when it holds none (MetaKeyCheckoutLease).
-func (s Session) CheckoutLease() string { return s.Meta[MetaKeyCheckoutLease] }
-
-// SharesCheckout reports whether o uses the same working directory as s AND
-// the same checkout. A pooled slot path is stable across leases, so two
-// sessions of different leases at one path are different occupants and never
-// peers; when either side holds no lease (every non-pooled session) the working
-// directory alone decides, as before. An empty working directory is never
-// shared.
+// SharesCheckout reports whether o uses the same, non-empty working directory
+// as s: two such sessions are peers, and the directory is not torn down while
+// a live peer still uses it.
 func (s Session) SharesCheckout(o Session) bool {
-	return SharesCheckout(s.CWD, s.CheckoutLease(), o.CWD, o.CheckoutLease())
-}
-
-// SharesCheckout is Session.SharesCheckout over the raw (cwd, lease) pairs.
-func SharesCheckout(cwdA, leaseA, cwdB, leaseB string) bool {
-	if cwdA == "" || cwdA != cwdB {
-		return false
-	}
-	return leaseA == "" || leaseB == "" || leaseA == leaseB
+	return s.CWD != "" && s.CWD == o.CWD
 }
 
 // PurgePending reports whether the session carries the two-phase-teardown
