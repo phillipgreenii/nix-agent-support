@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/shutdown"
+	xlifecycle "github.com/phillipgreenii/x/lifecycle"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
@@ -65,11 +65,11 @@ type Options struct {
 	// SrcFS is the copier's source-side file system seam (tests count opens);
 	// the real file system when nil.
 	SrcFS copier.SrcFS
-	// Hooks, when set, gets the in-flight and phase providers once Open has
-	// built the loop tracker (the shutdown watchdog is armed before Open).
-	Hooks *shutdown.Hooks
-	// Watchdog, when set, is disarmed by a Close that finishes.
-	Watchdog *shutdown.Watchdog
+	// Group, when set, is the process's lifecycle run group (signals plus the
+	// shutdown deadline watchdog, armed before Open): every goLoop is also
+	// registered with it so an overrun names the loops still running, and each
+	// shutdown step is reported to it as the phase.
+	Group *xlifecycle.Group
 }
 
 // Daemon is the composed recorder.
@@ -181,12 +181,9 @@ type Daemon struct {
 	cancelWatch atomic.Pointer[context.CancelCauseFunc]
 	stop        <-chan struct{}
 	gor         goroutines
-	// closeOnce makes Close idempotent; closeErr is its result. phase is the
-	// shutdown step in progress (nil before Close), read lock-free by the
-	// watchdog.
+	// closeOnce makes Close idempotent; closeErr is its result.
 	closeOnce sync.Once
 	closeErr  error
-	phase     atomic.Pointer[phaseRec]
 
 	// statusMu guards statusSnap, the cached figures opStatus serves.
 	statusMu   sync.Mutex
@@ -259,7 +256,6 @@ func Open(opt Options) (*Daemon, error) {
 	d := &Daemon{opt: opt, cfg: cfg, obs: o, st: st, clock: opt.Clock, startedAt: opt.Clock.Now(), su: su, sweepPace: newPacer(opt.Clock, cfg.MaxFilesPerSecond), firstParse: make(chan struct{}), statusReady: make(chan struct{}), statFunc: os.Lstat}
 	d.ctx, d.cancel = context.WithCancelCause(context.Background())
 	d.stop = d.ctx.Done()
-	d.registerShutdownHooks()
 	d.seenDB = newSeenStore(st, opt.Clock, func(err error) { o.Log.Warn("seen_write_failed", "err", err.Error()) })
 	d.loadSeen()
 	d.scope = scope.New(cfg.ClaudeDir, cfg.EndsDir())
@@ -1186,7 +1182,7 @@ func (d *Daemon) shutdown(ctx context.Context, reason string) error {
 	var errs []error
 	step := func(name string, fn func()) {
 		start := d.clock.Now()
-		d.phase.Store(&phaseRec{name: name, since: start})
+		d.setPhase(name)
 		fn()
 		d.obs.Event(obs.EvShutdownPhase, "phase", name, "duration_ms", ms(d.clock.Now().Sub(start)))
 	}
@@ -1213,46 +1209,32 @@ func (d *Daemon) shutdown(ctx context.Context, reason string) error {
 	step("tracker", d.tr.Close)
 	step("checkpoint_flush", func() { errs = append(errs, d.ckpt.Flush()) })
 	step("store", func() { errs = append(errs, d.st.CloseCtx(ctx)) })
-	d.phase.Store(&phaseRec{name: "done", since: d.clock.Now()})
-	// A deadline that fired is already exiting the process; Disarm losing the
-	// race means this line is the last the old process writes, so log first.
-	if d.opt.Watchdog == nil || d.opt.Watchdog.Disarm() {
+	d.setPhase("done")
+	// A deadline that fired is already exiting the process, and this line is the
+	// last the old process would write.
+	if d.opt.Group == nil || !d.opt.Group.Fired() {
 		d.obs.Event(obs.EvShutdownDone, "total_ms", ms(d.clock.Now().Sub(t0)))
 	}
 	return errors.Join(errs...)
 }
 
-// phaseRec is the shutdown step in progress and when it began.
-type phaseRec struct {
-	name  string
-	since time.Time
+// SetGroup hands the daemon its run group. It MUST be called after Open and
+// before Run, while nothing else uses the daemon.
+func (d *Daemon) SetGroup(g *xlifecycle.Group) { d.opt.Group = g }
+
+// setPhase names the shutdown step in progress to the run group, so an overrun
+// report says where shutdown hung.
+func (d *Daemon) setPhase(name string) {
+	if d.opt.Group != nil {
+		d.opt.Group.SetPhase(name)
+	}
 }
 
-// registerShutdownHooks gives the watchdog its lock-free providers: the goLoop
-// set and the current shutdown step with the sweep counters.
-func (d *Daemon) registerShutdownHooks() {
-	h := d.opt.Hooks
-	if h == nil {
-		return
-	}
-	h.SetInFlight(func() []shutdown.Flight {
-		fl := d.inFlight()
-		out := make([]shutdown.Flight, len(fl))
-		for i, f := range fl {
-			out[i] = shutdown.Flight{Name: f.Name, Age: f.Age}
-		}
-		return out
-	})
-	h.SetPhase(func() shutdown.PhaseInfo {
-		pi := shutdown.PhaseInfo{Name: "not_closing", Attrs: []any{
-			"files_total", d.filesTotal.Load(), "files_copied", d.filesCopied.Load(), "backfill_done", d.backfillDone.Load(),
-		}}
-		if r := d.phase.Load(); r != nil {
-			pi.Name = r.name
-			pi.Elapsed = d.clock.Now().Sub(r.since)
-		}
-		return pi
-	})
+// ShutdownCounters are the sweep counters logged beside a shutdown overrun:
+// how far the copy sweep and the backfill had got. They are lock-free reads,
+// safe from the watchdog while a stuck goroutine holds locks.
+func (d *Daemon) ShutdownCounters() []any {
+	return []any{"files_total", d.filesTotal.Load(), "files_copied", d.filesCopied.Load(), "backfill_done", d.backfillDone.Load()}
 }
 
 // Run starts the daemon and blocks until ctx ends, then closes it.

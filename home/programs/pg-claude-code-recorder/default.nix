@@ -149,6 +149,13 @@ let
       type = lib.types.strMatching "([0-9]+(\\.[0-9]+)?(d|h|m|s|ms))+";
       inherit default description;
     };
+
+  # The one shutdown deadline, in seconds, owned here: it is passed to the daemon
+  # (`serve --shutdown-deadline`) and launchd's ExitTimeOut is derived from it, so
+  # the daemon's hard exit always comes before launchd's SIGKILL.
+  shutdownDeadlineSeconds = 8;
+  exitTimeOutMarginSeconds = 7;
+  exitTimeOutSeconds = shutdownDeadlineSeconds + exitTimeOutMarginSeconds;
 in
 {
   options.phillipgreenii.programs.pg-claude-code-recorder = {
@@ -466,6 +473,10 @@ in
 
       assertions = [
         {
+          assertion = exitTimeOutSeconds <= 60;
+          message = "pg-claude-code-recorder: shutdown deadline (${toString shutdownDeadlineSeconds}s) plus margin (${toString exitTimeOutMarginSeconds}s) exceeds launchd's 60s ExitTimeOut clamp.";
+        }
+        {
           assertion = !(controlOn && cfg.controlStateDir != control.stateDir);
           message = "phillipgreenii.programs.pg-claude-code-recorder.controlStateDir (${cfg.controlStateDir}) must equal phillipgreenii.programs.pg-claude-control.stateDir (${
             if controlOn then control.stateDir else ""
@@ -503,7 +514,7 @@ in
             # (it exits 0 on them, as before). After the operator's rebuild, start
             # the job again (`launchctl kickstart gui/$(id -u)/<label>`).
             script = ''
-              ${cfg.package}/bin/pg-claude-code-recorder serve --config ${configFile}${lib.optionalString cfg.pprof.enable " --pprof"} &
+              ${cfg.package}/bin/pg-claude-code-recorder serve --config ${configFile} --shutdown-deadline ${toString shutdownDeadlineSeconds}s${lib.optionalString cfg.pprof.enable " --pprof"} &
               pid=$!
               trap 'kill -TERM "$pid" 2>/dev/null || true' TERM INT
               rc=0
@@ -523,13 +534,14 @@ in
               SuccessfulExit = false;
             };
             serviceConfig = {
-              # launchd waits this long after SIGTERM before SIGKILL. The daemon
-              # hard-exits (exit 10) 8 s after a stop begins, so 15 is that
-              # deadline plus a 7 s margin, and stays below launchd's silent
-              # 60 s clamp (darwin/modules/pg-router sets 60 for the same
-              # reason). A literal: no option and no arithmetic against the
-              # daemon's deadline, which is a constant in the daemon.
-              ExitTimeOut = 15;
+              # launchd waits this long after SIGTERM before SIGKILL. It is DERIVED
+              # from the one shutdown deadline this module also passes to the daemon
+              # (`--shutdown-deadline`, see shutdownDeadlineSeconds): the daemon
+              # hard-exits (exit 10) that long after a stop begins, and the margin
+              # keeps launchd's SIGKILL from ever firing first. Change the deadline,
+              # never ExitTimeOut alone. launchd silently clamps ExitTimeOut to 60,
+              # so the module asserts deadline plus margin stays within it.
+              ExitTimeOut = exitTimeOutSeconds;
               StandardOutPath = "${logDir}/launchd-stdout.log";
               StandardErrorPath = "${logDir}/launchd-stderr.log";
               EnvironmentVariables = {

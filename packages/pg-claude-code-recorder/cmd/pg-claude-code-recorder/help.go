@@ -8,7 +8,7 @@ import (
 const helpText = `pg-claude-code-recorder records Claude Code state and answers queries about it.
 
 Usage:
-  pg-claude-code-recorder serve    [--config FILE] [--metrics-addr HOST:PORT] [--pprof] [--rebuild]
+  pg-claude-code-recorder serve    [--config FILE] [--metrics-addr HOST:PORT] [--pprof] [--rebuild] [--shutdown-deadline DURATION]
   pg-claude-code-recorder rebuild  [--config FILE]   rebuild index.db from the journal and re-parse (daemon stopped)
   pg-claude-code-recorder status   [--json|--short] [--watch] [--allow-partial]
   pg-claude-code-recorder coverage [--view summary|files] [--json] [--wait-caught-up] [--allow-partial]
@@ -113,7 +113,7 @@ const exitTable = `  0  success
   7  config error: the config file could not be loaded or is invalid
   8  denied: the operation is switched off (removal disabled)
   9  busy: a live Process holds the session (extract), or the daemon answered busy
-  10 serve hard-exited because shutdown outlasted its 8 s deadline (shutdown_overrun in the log; the launch agent restarts it)
+  10 serve hard-exited because shutdown outlasted its deadline (--shutdown-deadline, default 8 s) (shutdown_overrun in the log; the launch agent restarts it)
   11 conflict: the cursor expired (feed), the extract target exists, or doctor found a mismatch
   20 serve refused to start because index.db has an older schema and needs the rebuild command (schema_rebuild_required; the launch agent does not restart it)
 `

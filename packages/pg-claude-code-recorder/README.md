@@ -323,9 +323,9 @@ Shutdown overrun: when a stop does not finish before its deadline the daemon log
 
 ## Shutdown
 
-The contract: a stop (SIGTERM or SIGINT) finishes within 8 seconds or the daemon hard-exits. A sweep in flight aborts
+The contract: a stop (SIGTERM or SIGINT) finishes within the shutdown deadline or the daemon hard-exits. The deadline is the `serve --shutdown-deadline` flag (default 8 s); the nix module passes it, so the deployment owns it. Signals and the deadline watchdog come from the shared `x/lifecycle` run group; a second signal takes the default action. A sweep in flight aborts
 rather than running to its end, a parser drain pass stops between chunks (what it parsed commits, the rest stays pending for the next start), the stores close, the lock is released and `serve` exits 0. The launchd job gets
-`ExitTimeOut = 15` (the 8 s deadline plus a 7 s margin, under launchd's silent 60 s clamp), so launchd's SIGKILL never
+`ExitTimeOut` derived from that same deadline (deadline plus a 7 s margin, 15 s today; the module asserts it stays within launchd's silent 60 s clamp), so launchd's SIGKILL never
 races a normal shutdown.
 
 Events in the log, in order:

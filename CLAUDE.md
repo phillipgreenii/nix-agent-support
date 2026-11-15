@@ -297,7 +297,7 @@ supervisor: no entry, one warning (raise `fs.inotify.max_user_watches`). Check:
 `test-pg-claude-code-recorder-hm-launchd` (`tests/pg-claude-code-recorder-hm-launchd.nix`), which also runs the
 rendered command under `env -i` against throwaway directories.
 
-The module sets `ExitTimeOut = 15` (a literal: the daemon's 8 s shutdown deadline plus a 7 s margin, under launchd's 60 s clamp); see the README "Shutdown" section.
+The module owns the shutdown deadline (8 s): it passes `--shutdown-deadline` to `serve` and derives `ExitTimeOut` from it (deadline plus a 7 s margin, asserted within launchd's 60 s clamp, and checked by the eval test); see the README "Shutdown" section.
 
 ### pg-repo-runner alerts and dashboard
 

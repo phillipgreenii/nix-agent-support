@@ -3,12 +3,15 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	xlifecycle "github.com/phillipgreenii/x/lifecycle"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/shutdown"
 )
 
 // Close logs shutdown_started, one shutdown_phase per step in order, then
@@ -55,32 +58,52 @@ func TestCloseTwiceAndWithoutStart(t *testing.T) {
 	}
 }
 
-// Open registers the watchdog providers, and a finishing Close disarms it.
-func TestOpenRegistersHooksAndCloseDisarms(t *testing.T) {
+// With a run group, every goLoop is listed by the group, each shutdown step is
+// its phase, and a Close that finishes before the deadline never fires the
+// watchdog.
+func TestGroupSeesLoopsAndCloseFinishesBeforeDeadline(t *testing.T) {
 	e := newEnv(t, false)
-	hooks := &shutdown.Hooks{}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	exited := make(chan int, 1)
-	wd := shutdown.Watch(ctx, shutdown.Options{Deadline: 20 * time.Millisecond, InFlight: hooks.InFlight, Phase: hooks.Phase, Exit: func(c int) { exited <- c }})
-	d, err := Open(Options{Config: e.cfg, Logger: NewLogger(e.log), NoEvents: true, Version: "test", Procs: e.procs, Hooks: hooks, Watchdog: wd})
+	var phases []string
+	var mu sync.Mutex
+	grp := xlifecycle.New(ctx, xlifecycle.Options{
+		Deadline: time.Minute,
+		Exit:     func(c int) { exited <- c },
+		OnEvent: func(ev xlifecycle.Event) {
+			if ev.Name == xlifecycle.EvPhase {
+				mu.Lock()
+				phases = append(phases, ev.Phase)
+				mu.Unlock()
+			}
+		},
+		Notify: func(parent context.Context, _ ...os.Signal) (context.Context, context.CancelFunc) {
+			return context.WithCancel(parent)
+		},
+	})
+	d, err := Open(Options{Config: e.cfg, Logger: NewLogger(e.log), NoEvents: true, Version: "test", Procs: e.procs, Group: grp})
 	if err != nil {
 		t.Fatal(err)
 	}
 	d.goLoop("probe", func() { <-d.stop })
-	time.Sleep(2 * time.Millisecond)
-	if fl := hooks.InFlight(); len(fl) != 1 || fl[0].Name != "probe" {
-		t.Fatalf("in flight %v", fl)
-	}
-	if err := d.Close(); err != nil {
+	grp.Go("daemon", func(ctx context.Context) error { <-ctx.Done(); return d.Close() })
+	cancel()
+	if err := grp.Run(); err != nil {
 		t.Fatal(err)
 	}
-	if got := hooks.Phase().Name; got != "done" {
-		t.Fatalf("phase %q after Close", got)
+	mu.Lock()
+	got := append([]string(nil), phases...)
+	mu.Unlock()
+	if len(got) == 0 || got[len(got)-1] != "done" || got[0] != "cancel" {
+		t.Fatalf("phases %v, want cancel ... done", got)
 	}
-	cancel()
+	if grp.Fired() {
+		t.Fatal("watchdog fired after a finished Close")
+	}
 	select {
 	case <-exited:
-		t.Fatal("watchdog fired after a finished Close")
-	case <-time.After(80 * time.Millisecond):
+		t.Fatal("hard exit after a finished Close")
+	default:
 	}
 }

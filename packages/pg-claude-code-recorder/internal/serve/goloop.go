@@ -6,8 +6,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // errDaemonClosing is the cancellation cause Close gives the root context.
@@ -26,16 +24,16 @@ type LoopFlight struct {
 	Age  time.Duration
 }
 
-// goroutines is the daemon's goroutine lifecycle: an errgroup that Close waits
+// goroutines is the daemon's goroutine lifecycle: a wait group that Close waits
 // on, a closing flag that Close sets (under mu) before it waits, and the set of
-// goroutines still running. The errgroup alone does not close the race between
-// a late Go call and Wait; the flag does, because goLoop checks it under the
+// goroutines still running. The wait group alone does not close the race between
+// a late Add and Wait; the flag does, because goLoop checks it under the
 // same mutex Close takes.
 //
 // Lock order: Daemon.forceMu, then goroutines.mu (opSweep holds forceMu while
 // it calls goLoop). Nothing that holds mu takes another daemon lock.
 type goroutines struct {
-	group   errgroup.Group
+	group   sync.WaitGroup
 	mu      sync.Mutex
 	closing bool
 	seq     uint64
@@ -68,15 +66,23 @@ func (d *Daemon) goLoop(name string, fn func()) bool {
 		g.running = map[uint64]loopRun{}
 	}
 	g.running[id] = loopRun{name: name, since: d.clock.Now()}
-	g.group.Go(func() error {
+	g.group.Add(1)
+	run := func() {
+		defer g.group.Done()
 		defer func() {
 			g.mu.Lock()
 			delete(g.running, id)
 			g.mu.Unlock()
 		}()
 		fn()
-		return nil
-	})
+	}
+	if d.opt.Group != nil {
+		// The shared run group also lists the loop, so a shutdown overrun names
+		// it; fn still returns on the daemon's own stop.
+		d.opt.Group.Go(name, func(context.Context) error { run(); return nil })
+	} else {
+		go run()
+	}
 	g.mu.Unlock()
 	return true
 }
@@ -89,7 +95,7 @@ func (d *Daemon) beginClosing() {
 }
 
 // waitLoops blocks until every goLoop goroutine has returned.
-func (d *Daemon) waitLoops() { _ = d.gor.group.Wait() }
+func (d *Daemon) waitLoops() { d.gor.group.Wait() }
 
 // inFlight lists the goLoop goroutines still running, longest first.
 func (d *Daemon) inFlight() []LoopFlight {

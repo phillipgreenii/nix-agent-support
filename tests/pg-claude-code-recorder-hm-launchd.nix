@@ -283,8 +283,8 @@ let
 
     # ---- label and command --------------------------------------------------
     label = e.label == "com.phillipg.pg-claude-code-recorder";
-    command = hasInfixCtx "${binary} serve --config ${(opts on).configFile} --pprof &\n" e.script;
-    commandWithoutPprof = hasInfixCtx "${binary} serve --config ${(opts onNoPprof).configFile} &\n" (entryOf agent onNoPprof)
+    command = hasInfixCtx "${binary} serve --config ${(opts on).configFile} --shutdown-deadline 8s --pprof &\n" e.script;
+    commandWithoutPprof = hasInfixCtx "${binary} serve --config ${(opts onNoPprof).configFile} --shutdown-deadline 8s &\n" (entryOf agent onNoPprof)
     .script;
     # exit 20 (schema_rebuild_required) is turned into exit 0 by the script, so KeepAlive restarts only after an unsuccessful exit
     keepAliveOnlyAfterFailure = e.keepAlive == { SuccessfulExit = false; };
@@ -299,8 +299,15 @@ let
         "StandardErrorPath"
         "StandardOutPath"
       ];
-    # 15 = the daemon's 8 s shutdown deadline plus a 7 s margin, under launchd's 60 s clamp
-    exitTimeOutIsFifteen = e.serviceConfig.ExitTimeOut == 15;
+    # ExitTimeOut is DERIVED from the deadline the script passes to the daemon: deadline plus a
+    # 7 s margin, under launchd's 60 s clamp. The deadline is read back out of the rendered script.
+    shutdownDeadlineMatch = builtins.match ".*serve --config [^ ]+ --shutdown-deadline ([0-9]+)s.*" e.script;
+    shutdownDeadline =
+      if shutdownDeadlineMatch == null then null else lib.toInt (builtins.head shutdownDeadlineMatch);
+    exitTimeOutIsDeadlinePlusMargin =
+      shutdownDeadline != null
+      && e.serviceConfig.ExitTimeOut == shutdownDeadline + 7
+      && e.serviceConfig.ExitTimeOut <= 60;
     logsOutsideStateDir =
       e.serviceConfig.StandardOutPath
       == "${stateHome}/pg-claude-code-recorder-launchd/launchd-stdout.log";
