@@ -1974,6 +1974,15 @@ func runDaemon(ctx context.Context, g *lifecycle.Group, pr preparedRun, drainTim
 			slog.Warn("run: metrics flush failed", "err", err)
 		}
 	}()
+	// Registered after the flush defer so it runs before it: the shutdown
+	// duration and overrun signals land in the final snapshot.
+	signals := registerCommonSignals(mp)
+	defer func() {
+		if d, ok := clk.Elapsed(); ok {
+			signals.ObserveShutdown(context.WithoutCancel(ctx), d, d > clk.deadline)
+		}
+	}()
+
 	// The first dispatch pass of this process runs BEFORE its first producer tick
 	// (DEC-EVENT-5, bead pg2-x3zkb). A fresh process has no last-fire time for any
 	// source, so its first tick polls every one of them, one after another, and

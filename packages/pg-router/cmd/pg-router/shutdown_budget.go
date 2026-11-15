@@ -77,6 +77,16 @@ func newShutdownClock(ctx context.Context, deadline time.Duration) *shutdownCloc
 	return c
 }
 
+// Elapsed returns the time since the context ended; ok is false while it has
+// not ended.
+func (c *shutdownClock) Elapsed() (d time.Duration, ok bool) {
+	ended := c.endedAt.Load()
+	if ended == 0 {
+		return 0, false
+	}
+	return time.Since(time.Unix(0, ended)), true
+}
+
 // Within returns the allowance for a phase with the given share: the share, or
 // what is left of the deadline when that is less (never negative).
 func (c *shutdownClock) Within(share time.Duration) time.Duration {
