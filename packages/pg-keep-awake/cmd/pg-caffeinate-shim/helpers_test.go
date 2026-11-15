@@ -19,11 +19,20 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake/internal/lease"
 )
 
-// shimBin is the pg-caffeinate-shim binary the tests run as a child process,
-// built once by TestMain.
+// shimName is the basename the test binary is re-executed under. TestMain
+// recognises it and runs the shim's own main, so the tests need no go build.
+const shimName = "pg-caffeinate-shim"
+
+// shimBin is a symlink to this test binary named shimName: running it runs the
+// shim (see TestMain). Created once per test binary.
 var shimBin string
 
 func TestMain(m *testing.M) {
+	if filepath.Base(os.Args[0]) == shimName {
+		main()
+		return
+	}
+
 	// A runner started under nohup (or as a non-interactive background job)
 	// has SIGHUP/SIGINT ignored, and children inherit that. Holding a handler
 	// here makes Go reset those signals to the default in every child it
@@ -39,15 +48,14 @@ func TestMain(m *testing.M) {
 	}
 	code := func() int {
 		defer func() { _ = os.RemoveAll(dir) }()
-		goTool, err := exec.LookPath("go")
+		self, err := os.Executable()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "the go tool is not on PATH: %v\n", err)
+			fmt.Fprintf(os.Stderr, "locating the test binary: %v\n", err)
 			return 1
 		}
-		shimBin = filepath.Join(dir, "pg-caffeinate-shim")
-		build := exec.CommandContext(context.Background(), goTool, "build", "-o", shimBin, ".")
-		if out, err := build.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "building the shim: %v\n%s", err, out)
+		shimBin = filepath.Join(dir, shimName)
+		if err := os.Symlink(self, shimBin); err != nil {
+			fmt.Fprintf(os.Stderr, "linking the shim: %v\n", err)
 			return 1
 		}
 		return m.Run()

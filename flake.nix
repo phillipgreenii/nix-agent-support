@@ -7837,6 +7837,32 @@
                     '';
                   });
 
+              # pg-keep-awake SHIM integration tier (V-4): the `integration`-tagged
+              # files of cmd/pg-caffeinate-shim: the golden parity run against the real
+              # /usr/bin/caffeinate and the timed-lease / watch scenarios that wait real
+              # seconds. ON DEMAND ONLY: no hook, run-unit-tests, pre-land or land gate.
+              # Runs only that package with the tag (the untagged shim tests run again
+              # alongside, which is cheap). Real-caffeinate use may skip itself in the
+              # nix sandbox: TestParityWithRealCaffeinate then logs one visible
+              # "--- SKIP" line (pmset refused), so read the -v log for it; its absence
+              # plus the "--- PASS" lines is what proves the parity rows ran.
+              pg-keep-awake-shim-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-keep-awake-shim-integration-tests";
+                  src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
+                  gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go vet -tags integration ./cmd/pg-caffeinate-shim/
+                      go test -tags integration -count=1 -race -v -timeout 30m ./cmd/pg-caffeinate-shim/
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-git-lander - whole-module Go test gate (unit tier). Pattern A, flat
               # src. Never compiles the `integration` build tag.
               pg-git-lander-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
