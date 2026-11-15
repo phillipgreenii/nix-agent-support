@@ -224,7 +224,7 @@ func (m *Model) renderLogCompactModal() string {
 // ladder.
 func (p *SocketPoller) CompactLog(ctx context.Context, dryRun bool) (core.LogCompactView, error) {
 	p.mu.Lock()
-	client, dialErr := p.dialLocked()
+	client, dialErr := p.dialLocked(ctx)
 	p.mu.Unlock()
 	if dialErr != nil {
 		return core.LogCompactView{}, fmt.Errorf("tui: log compact: %w", dialErr)

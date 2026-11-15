@@ -142,7 +142,7 @@ func (p *SocketPoller) Snapshot(ctx context.Context, since uint64) (StatusReply,
 		p.mu.Unlock()
 	}()
 
-	client, err := p.dialLocked()
+	client, err := p.dialLocked(ctx)
 	if err != nil {
 		p.advanceBackoffLocked()
 		return StatusReply{}, fmt.Errorf("tui: poll: %w", err)
@@ -187,11 +187,11 @@ func (p *SocketPoller) Snapshot(ctx context.Context, since uint64) (StatusReply,
 // its own, deliberately separate, resolution below — it must never advance
 // Snapshot's backoff ladder, so it cannot call this method, which is always
 // followed by advanceBackoffLocked on the caller's error path).
-func (p *SocketPoller) dialLocked() (*core.Client, error) {
+func (p *SocketPoller) dialLocked(ctx context.Context) (*core.Client, error) {
 	ref := p.ref
 	discoveredThisCall := false
 	if ref.Socket == "" {
-		r, err := core.Discover(p.logDir)
+		r, err := core.Discover(ctx, p.logDir)
 		if err != nil {
 			return nil, err
 		}
@@ -200,7 +200,7 @@ func (p *SocketPoller) dialLocked() (*core.Client, error) {
 		discoveredThisCall = true
 	}
 
-	client, dialErr := core.Dial(ref, core.DefaultProbeTimeout)
+	client, dialErr := core.Dial(ctx, ref, core.DefaultProbeTimeout)
 	if dialErr == nil {
 		return client, nil
 	}
@@ -213,11 +213,11 @@ func (p *SocketPoller) dialLocked() (*core.Client, error) {
 	if discoveredThisCall {
 		return nil, dialErr
 	}
-	r, err := core.Discover(p.logDir)
+	r, err := core.Discover(ctx, p.logDir)
 	if err != nil {
 		return nil, dialErr
 	}
-	client, err = core.Dial(r, core.DefaultProbeTimeout)
+	client, err = core.Dial(ctx, r, core.DefaultProbeTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +261,7 @@ func (p *SocketPoller) ToggleGate(ctx context.Context, verb string) (effective s
 	}
 
 	p.mu.Lock()
-	client, dialErr := p.dialLocked()
+	client, dialErr := p.dialLocked(ctx)
 	p.mu.Unlock()
 	if dialErr != nil {
 		return "", fmt.Errorf("tui: toggle gate: %w", dialErr)

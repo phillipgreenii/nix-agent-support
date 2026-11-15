@@ -105,7 +105,7 @@ func TestOSCommanderRunEnvFiles_WithFilesBypassesRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fh.Close()
+	defer func() { _ = fh.Close() }()
 	out, err := c.RunEnvFiles(context.Background(), []string{"/usr/bin/true"}, []string{}, []*os.File{fh})
 	if err != nil || len(out) != 0 {
 		t.Fatalf("out=%q err=%v", out, err)

@@ -284,7 +284,7 @@ func TestLevelMetrics_requirementBlockedSeconds(t *testing.T) {
 	}
 	const name = "pg_router_requirement_blocked_seconds_total"
 	h.now = h.now.Add(5 * time.Second)
-	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{
+	h.e.AccrueRequirementBlocked(t.Context(), []eventqueue.BlockedParticipant{
 		bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true}),
 		bp("b", levels.Shortfall{Resource: "disk", Steps: 2, Sole: false}, levels.Shortfall{Resource: "net", Steps: levels.StepsUnknown, Sole: false}),
 		bp("c", levels.Shortfall{Resource: "router", Steps: 1, Sole: true}),
@@ -298,13 +298,13 @@ func TestLevelMetrics_requirementBlockedSeconds(t *testing.T) {
 	// Next evaluation: only a is still blocked; it books the time since the LAST
 	// evaluation, so b and c keep 5 and a goes to 5 + 3.
 	h.now = h.now.Add(3 * time.Second)
-	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	h.e.AccrueRequirementBlocked(t.Context(), []eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
 	// An evaluation with nobody blocked still advances the clock: the blocked
 	// minute that follows is not stretched back over the idle gap.
 	h.now = h.now.Add(4 * time.Second)
-	h.e.AccrueRequirementBlocked(nil)
+	h.e.AccrueRequirementBlocked(t.Context(), nil)
 	h.now = h.now.Add(2 * time.Second)
-	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	h.e.AccrueRequirementBlocked(t.Context(), []eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
 	got := h.series(t)
 	wantSeries(t, got, map[string]float64{
 		name + "{resource=disk,role=a,sole=true,steps_below=1}":   10,
@@ -313,12 +313,12 @@ func TestLevelMetrics_requirementBlockedSeconds(t *testing.T) {
 	})
 	// A gap longer than the cap (a suspended host) books only the cap.
 	h.now = h.now.Add(time.Hour)
-	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	h.e.AccrueRequirementBlocked(t.Context(), []eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
 	wantSeries(t, h.series(t), map[string]float64{
 		name + "{resource=disk,role=a,sole=true,steps_below=1}": 10 + maxAccrualGap.Seconds(),
 	})
 	// A call with no time elapsed adds nothing (no double count).
-	h.e.AccrueRequirementBlocked([]eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
+	h.e.AccrueRequirementBlocked(t.Context(), []eventqueue.BlockedParticipant{bp("a", levels.Shortfall{Resource: "disk", Steps: 1, Sole: true})})
 	wantSeries(t, h.series(t), map[string]float64{
 		name + "{resource=disk,role=a,sole=true,steps_below=1}": 10 + maxAccrualGap.Seconds(),
 	})

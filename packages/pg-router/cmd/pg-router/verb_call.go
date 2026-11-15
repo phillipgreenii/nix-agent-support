@@ -64,7 +64,7 @@ func callVerb(stderr io.Writer, ref core.Ref, verb, replySchema string, req map[
 		fmt.Fprintf(stderr, "%s: build request: %v\n", verb, err)
 		return exitGeneric
 	}
-	client, err := core.Dial(ref, core.DefaultProbeTimeout)
+	client, err := core.Dial(context.Background(), ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, verb, err)
 		return exitUnavailable

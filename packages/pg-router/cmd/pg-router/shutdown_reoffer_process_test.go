@@ -249,7 +249,7 @@ func (h *reofferHarness) startRouter() *router {
 func (h *reofferHarness) waitCore(r *router) {
 	h.t.Helper()
 	h.waitFor(30*time.Second, "the router's core to become discoverable\nstderr:\n"+r.stderr.String(), func() bool {
-		_, err := core.Discover(h.logDir)
+		_, err := core.Discover(h.t.Context(), h.logDir)
 		return err == nil
 	})
 }

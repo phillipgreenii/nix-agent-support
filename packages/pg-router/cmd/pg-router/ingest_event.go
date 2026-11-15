@@ -98,7 +98,7 @@ func locateCore(socket, token string) (core.Ref, error) {
 	if socket != "" {
 		return core.Ref{Socket: socket, Token: token}, nil
 	}
-	return core.Discover(config.LogDir())
+	return core.Discover(context.Background(), config.LogDir())
 }
 
 // callCore forwards one request to the core and relays the reply verbatim, so the
@@ -116,7 +116,7 @@ func locateCore(socket, token string) (core.Ref, error) {
 // exit code, since a manager callback's contract is exactly those two
 // things.
 func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request []byte) int {
-	client, err := core.Dial(ref, core.DefaultProbeTimeout)
+	client, err := core.Dial(context.Background(), ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, subcommand, err)
 		return exitUnavailable

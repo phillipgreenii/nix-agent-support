@@ -153,12 +153,12 @@ func readRecord(path string) (record, error) {
 // a Ref that every later call would fail against.
 //
 // It never starts a core (ErrNoRunningCore, ADR 0036).
-func Discover(logDir string) (Ref, error) {
+func Discover(ctx context.Context, logDir string) (Ref, error) {
 	r, err := readRecord(RecordPath(logDir))
 	if err != nil {
 		return Ref{}, err
 	}
-	if err := probe(r.Socket, DefaultProbeTimeout); err != nil {
+	if err := probe(ctx, r.Socket, DefaultProbeTimeout); err != nil {
 		return Ref{}, err
 	}
 	return Ref{Socket: r.Socket, Token: r.Token}, nil
@@ -166,8 +166,8 @@ func Discover(logDir string) (Ref, error) {
 
 // probe reports whether something is accepting connections on socket within
 // timeout, mapping a dead/stale socket to ErrNoRunningCore.
-func probe(socket string, timeout time.Duration) error {
-	conn, err := (&net.Dialer{Timeout: timeout}).DialContext(context.Background(), "unix", socket)
+func probe(ctx context.Context, socket string, timeout time.Duration) error {
+	conn, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "unix", socket)
 	if err != nil {
 		return fmt.Errorf("%w: socket %s is not accepting connections: %v", ErrNoRunningCore, socket, err)
 	}
@@ -223,14 +223,14 @@ type Client struct {
 // failure is ErrNoRunningCore: an injected socket that nothing answers on is
 // indistinguishable, to the caller, from no core at all — and the answer is the
 // same (report it, never spawn).
-func Dial(ref Ref, probeTimeout time.Duration) (*Client, error) {
+func Dial(ctx context.Context, ref Ref, probeTimeout time.Duration) (*Client, error) {
 	if ref.Socket == "" {
 		return nil, fmt.Errorf("%w: no socket to dial", ErrNoRunningCore)
 	}
 	if probeTimeout <= 0 {
 		probeTimeout = DefaultProbeTimeout
 	}
-	conn, err := (&net.Dialer{Timeout: probeTimeout}).DialContext(context.Background(), "unix", ref.Socket)
+	conn, err := (&net.Dialer{Timeout: probeTimeout}).DialContext(ctx, "unix", ref.Socket)
 	if err != nil {
 		return nil, fmt.Errorf("%w: cannot reach socket %s: %v", ErrNoRunningCore, ref.Socket, err)
 	}

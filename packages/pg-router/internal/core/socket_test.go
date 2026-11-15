@@ -44,7 +44,7 @@ func newQueue(t *testing.T) *eventqueue.Queue {
 // its Ref. The loop is torn down by the test's cleanup.
 func startService(t *testing.T, logDir string) (*Service, Ref) {
 	t.Helper()
-	svc, err := Listen(Options{LogDir: logDir, Queue: newQueue(t), Bindings: testBindings(), Command: "pg-router"})
+	svc, err := Listen(t.Context(), Options{LogDir: logDir, Queue: newQueue(t), Bindings: testBindings(), Command: "pg-router"})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -79,7 +79,7 @@ func waitStarted(t *testing.T, svc *Service) {
 // record carrying the socket + token.
 func TestListen_PublishesDiscoverableCore(t *testing.T) {
 	dir := shortDir(t)
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
+	svc, err := Listen(t.Context(), Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestListen_RefusesASecondLiveCore(t *testing.T) {
 	svc, _ := startService(t, dir)
 	_ = svc
 
-	_, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
+	_, err := Listen(t.Context(), Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("second Listen err = %v, want ErrAlreadyRunning", err)
 	}
@@ -139,7 +139,7 @@ func TestListen_RebindsOverAStaleSocket(t *testing.T) {
 		t.Fatalf("stale socket should still exist: %v", err)
 	}
 
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
+	svc, err := Listen(t.Context(), Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen over a stale socket: %v", err)
 	}
@@ -149,17 +149,17 @@ func TestListen_RebindsOverAStaleSocket(t *testing.T) {
 }
 
 func TestListen_RejectsMissingRequirements(t *testing.T) {
-	if _, err := Listen(Options{Queue: newQueue(t)}); err == nil {
+	if _, err := Listen(t.Context(), Options{Queue: newQueue(t)}); err == nil {
 		t.Fatal("Listen with no LogDir succeeded, want an error")
 	}
-	if _, err := Listen(Options{LogDir: shortDir(t)}); err == nil {
+	if _, err := Listen(t.Context(), Options{LogDir: shortDir(t)}); err == nil {
 		t.Fatal("Listen with no Queue succeeded, want an error (the queue IS the delivery guarantee)")
 	}
 	// Without the configured binding set the core cannot tell an event type unknown
 	// to the configuration from one merely inactive this run, and INV-DISP-3 requires
 	// opposite outcomes for the two — so a core is refused rather than started with
 	// that question unanswerable.
-	_, err := Listen(Options{LogDir: shortDir(t), Queue: newQueue(t)})
+	_, err := Listen(t.Context(), Options{LogDir: shortDir(t), Queue: newQueue(t)})
 	if err == nil {
 		t.Fatal("Listen with no Bindings succeeded, want an error (INV-DISP-3 is unanswerable without them)")
 	}
@@ -172,7 +172,7 @@ func TestListen_RejectsMissingRequirements(t *testing.T) {
 // net.Listen's bare "invalid argument".
 func TestListen_RejectsAnOverlongSocketPath(t *testing.T) {
 	dir := filepath.Join(shortDir(t), strings.Repeat("d", maxSocketPathLen))
-	_, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
+	_, err := Listen(t.Context(), Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err == nil {
 		t.Fatal("Listen with an overlong socket path succeeded, want an error")
 	}
@@ -186,7 +186,7 @@ func TestDiscover_LiveCore(t *testing.T) {
 	dir := shortDir(t)
 	_, ref := startService(t, dir)
 
-	got, err := Discover(dir)
+	got, err := Discover(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestDiscover_LiveCore(t *testing.T) {
 // error the caller cannot classify (ADR 0036).
 func TestDiscover_NoRunningCore(t *testing.T) {
 	t.Run("no record at all", func(t *testing.T) {
-		if _, err := Discover(shortDir(t)); !errors.Is(err, ErrNoRunningCore) {
+		if _, err := Discover(t.Context(), shortDir(t)); !errors.Is(err, ErrNoRunningCore) {
 			t.Fatalf("err = %v, want ErrNoRunningCore", err)
 		}
 	})
@@ -208,7 +208,7 @@ func TestDiscover_NoRunningCore(t *testing.T) {
 		if err := os.WriteFile(RecordPath(dir), []byte("{not json"), 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-		if _, err := Discover(dir); !errors.Is(err, ErrNoRunningCore) {
+		if _, err := Discover(t.Context(), dir); !errors.Is(err, ErrNoRunningCore) {
 			t.Fatalf("err = %v, want ErrNoRunningCore", err)
 		}
 	})
@@ -217,7 +217,7 @@ func TestDiscover_NoRunningCore(t *testing.T) {
 		if err := os.WriteFile(RecordPath(dir), []byte(`{"schemaVersion":"1"}`), 0o600); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-		if _, err := Discover(dir); !errors.Is(err, ErrNoRunningCore) {
+		if _, err := Discover(t.Context(), dir); !errors.Is(err, ErrNoRunningCore) {
 			t.Fatalf("err = %v, want ErrNoRunningCore", err)
 		}
 	})
@@ -227,30 +227,30 @@ func TestDiscover_NoRunningCore(t *testing.T) {
 		if err := writeRecord(RecordPath(dir), rec); err != nil {
 			t.Fatalf("writeRecord: %v", err)
 		}
-		if _, err := Discover(dir); !errors.Is(err, ErrNoRunningCore) {
+		if _, err := Discover(t.Context(), dir); !errors.Is(err, ErrNoRunningCore) {
 			t.Fatalf("err = %v, want ErrNoRunningCore for a record whose socket is dead", err)
 		}
 	})
 	t.Run("closed core unpublishes itself", func(t *testing.T) {
 		dir := shortDir(t)
-		svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
+		svc, err := Listen(t.Context(), Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 		if err != nil {
 			t.Fatalf("Listen: %v", err)
 		}
 		if err := svc.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
-		if _, err := Discover(dir); !errors.Is(err, ErrNoRunningCore) {
+		if _, err := Discover(t.Context(), dir); !errors.Is(err, ErrNoRunningCore) {
 			t.Fatalf("err = %v, want ErrNoRunningCore after Close", err)
 		}
 	})
 }
 
 func TestDial_NoSocketIsNoRunningCore(t *testing.T) {
-	if _, err := Dial(Ref{}, DefaultProbeTimeout); !errors.Is(err, ErrNoRunningCore) {
+	if _, err := Dial(t.Context(), Ref{}, DefaultProbeTimeout); !errors.Is(err, ErrNoRunningCore) {
 		t.Fatalf("Dial with an empty ref = %v, want ErrNoRunningCore", err)
 	}
-	if _, err := Dial(Ref{Socket: filepath.Join(shortDir(t), "nope.sock")}, DefaultProbeTimeout); !errors.Is(err, ErrNoRunningCore) {
+	if _, err := Dial(t.Context(), Ref{Socket: filepath.Join(shortDir(t), "nope.sock")}, DefaultProbeTimeout); !errors.Is(err, ErrNoRunningCore) {
 		t.Fatalf("Dial at a dead socket = %v, want ErrNoRunningCore", err)
 	}
 }
@@ -260,7 +260,7 @@ func TestServe_RejectsABadToken(t *testing.T) {
 	dir := shortDir(t)
 	svc, ref := startService(t, dir)
 
-	client, err := Dial(Ref{Socket: ref.Socket, Token: "not-the-token"}, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), Ref{Socket: ref.Socket, Token: "not-the-token"}, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestServe_UnknownSubcommand(t *testing.T) {
 	dir := shortDir(t)
 	_, ref := startService(t, dir)
 
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestServe_UnknownSubcommand(t *testing.T) {
 // the participant boundary refuses with a diagnostic.
 func TestServe_RefusesOutsideStarted(t *testing.T) {
 	dir := shortDir(t)
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
+	svc, err := Listen(t.Context(), Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestServe_RefusesOutsideStarted(t *testing.T) {
 // use-of-closed-connection error.
 func TestAcceptAndClose_OrderlyShutdown(t *testing.T) {
 	dir := shortDir(t)
-	svc, err := Listen(Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
+	svc, err := Listen(t.Context(), Options{LogDir: dir, Queue: newQueue(t), Bindings: testBindings()})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestReadRecord_DistinguishesIOFailureFromAbsence(t *testing.T) {
 func TestCall_OnAClosedConnection(t *testing.T) {
 	dir := shortDir(t)
 	_, ref := startService(t, dir)
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestCall_NullReplyIsNoBody(t *testing.T) {
 		_ = json.NewEncoder(conn).Encode(wireResponse{ExitCode: conformance.ExitBusy, Reply: jsonNull})
 	}()
 
-	client, err := Dial(Ref{Socket: sock, Token: "t"}, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), Ref{Socket: sock, Token: "t"}, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestHandleConn_LivenessProbeIsSilent(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	for i := 0; i < 3; i++ {
-		if err := probe(ref.Socket, DefaultProbeTimeout); err != nil {
+		if err := probe(t.Context(), ref.Socket, DefaultProbeTimeout); err != nil {
 			t.Fatalf("probe: %v", err)
 		}
 	}
@@ -607,7 +607,7 @@ func TestSaturatedReadSemaphoreAllowsIngest(t *testing.T) {
 	release := acquireNReadSlots(t, svc, readSemCapacity)
 	defer release()
 
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestSaturatedReadRefusesPromptly(t *testing.T) {
 	release := acquireNReadSlots(t, svc, readSemCapacity)
 	defer release()
 
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -670,7 +670,7 @@ func TestSaturatedReadSemaphoreRefusesMonRead(t *testing.T) {
 	release := acquireNReadSlots(t, svc, readSemCapacity)
 	defer release()
 
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestSaturatedReadSemaphoreRefusesGet(t *testing.T) {
 	release := acquireNReadSlots(t, svc, readSemCapacity)
 	defer release()
 
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -727,7 +727,7 @@ func TestSaturatedReadSemaphoreAllowsPutDelete(t *testing.T) {
 	// Client is single-use (one connection, one request/reply — its own
 	// doc), so put and delete each dial their own connection rather than
 	// sharing one, the same way every other Call in this file does.
-	putClient, err := Dial(ref, DefaultProbeTimeout)
+	putClient, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -741,7 +741,7 @@ func TestSaturatedReadSemaphoreAllowsPutDelete(t *testing.T) {
 		t.Fatalf("put with the read semaphore fully saturated: exit = %d, want %d; reply=%s", code, conformance.ExitOK, putReply)
 	}
 
-	delClient, err := Dial(ref, DefaultProbeTimeout)
+	delClient, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestExitBusy_IsThePollerBackoffSignal(t *testing.T) {
 	release := acquireNReadSlots(t, svc, readSemCapacity)
 	defer release()
 
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -812,7 +812,7 @@ func TestNoGoroutineLeak_ConcurrentAndAbandonedCalls(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			client, err := Dial(ref, DefaultProbeTimeout)
+			client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 			if err != nil {
 				return
 			}
@@ -825,7 +825,7 @@ func TestNoGoroutineLeak_ConcurrentAndAbandonedCalls(t *testing.T) {
 	// abandoned-mid-call scenario #1 (client side): an already-cancelled ctx
 	// means Call must return immediately without ever blocking, and its
 	// watcher goroutine must not linger after Call returns.
-	abandoned, err := Dial(ref, DefaultProbeTimeout)
+	abandoned, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}

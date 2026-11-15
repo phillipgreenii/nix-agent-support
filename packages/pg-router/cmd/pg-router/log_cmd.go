@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,7 +121,7 @@ func logCompact(stdout, stderr io.Writer, o logCompactOpts) int {
 	if socket != "" {
 		ref, haveCore = core.Ref{Socket: socket, Token: token}, true
 	} else {
-		r, err := core.Discover(o.logDir)
+		r, err := core.Discover(context.Background(), o.logDir)
 		switch {
 		case err == nil:
 			ref, haveCore = r, true

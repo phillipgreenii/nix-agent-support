@@ -92,7 +92,7 @@ func TestAssemble_TerminalHostFromRecorderFactRunsNoExec(t *testing.T) {
 	got := map[string]string{}
 	for _, d := range tree.Dirs {
 		for _, s := range d.Sessions {
-			got[s.Session.SessionID] = s.Session.TerminalHost
+			got[s.SessionID] = s.TerminalHost
 		}
 	}
 	for sid, w := range want {
@@ -105,7 +105,7 @@ func TestAssemble_TerminalHostFromRecorderFactRunsNoExec(t *testing.T) {
 	}
 
 	// Negative control: the recorder does see a ps launched through PATH.
-	if err := exec.Command("ps", "-ax").Run(); err != nil {
+	if err := exec.CommandContext(t.Context(), "ps", "-ax").Run(); err != nil {
 		t.Fatalf("control ps: %v", err)
 	}
 	if len(calls()) == 0 {

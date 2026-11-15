@@ -27,7 +27,7 @@ const trackingPrefix = "push-inject:"
 // ref every later call would fail against. It never starts a core (ADR 0036).
 func Discoverer(logDir string) func() (CoreRef, error) {
 	return func() (CoreRef, error) {
-		ref, err := core.Discover(logDir)
+		ref, err := core.Discover(context.Background(), logDir)
 		if err != nil {
 			return CoreRef{}, err
 		}
@@ -76,7 +76,7 @@ func (SocketEnqueuer) Enqueue(c CoreRef, evt eventqueue.Event) (eventqueue.Enque
 	if err != nil {
 		return eventqueue.Enqueued, err
 	}
-	client, err := core.Dial(core.Ref{Socket: c.Socket, Token: c.Token}, core.DefaultProbeTimeout)
+	client, err := core.Dial(context.Background(), core.Ref{Socket: c.Socket, Token: c.Token}, core.DefaultProbeTimeout)
 	if err != nil {
 		return eventqueue.Enqueued, err
 	}

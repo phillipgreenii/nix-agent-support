@@ -51,11 +51,3 @@ func TestEnrichCmdErr_PassesThroughNonExitError(t *testing.T) {
 		t.Errorf("non-ExitError should pass through unchanged; got %v, want %v", got, base)
 	}
 }
-
-// stubEnv returns a LookupEnv whose values come from m.
-func stubEnv(m map[string]string) func(string) (string, bool) {
-	return func(k string) (string, bool) {
-		v, ok := m[k]
-		return v, ok
-	}
-}

@@ -437,7 +437,7 @@ func (e *Emitter) OnRequirementBlocked(participant, _, resource, kind string) {
 // process, so a restart never books the same time twice. Series per participant
 // are bounded by the 64-value fold on role and resource and by the scale sizes
 // (steps_below is a small integer, "unknown" or "none").
-func (e *Emitter) AccrueRequirementBlocked(blocked []eventqueue.BlockedParticipant) {
+func (e *Emitter) AccrueRequirementBlocked(ctx context.Context, blocked []eventqueue.BlockedParticipant) {
 	s := &e.lvl
 	now := s.now()
 	s.mu.Lock()
@@ -450,7 +450,7 @@ func (e *Emitter) AccrueRequirementBlocked(blocked []eventqueue.BlockedParticipa
 	for _, b := range blocked {
 		role := e.foldLabel("role", b.Participant)
 		for _, sf := range b.Shortfalls {
-			s.blockedSecs.Add(context.Background(), delta, metric.WithAttributes(
+			s.blockedSecs.Add(ctx, delta, metric.WithAttributes(
 				attribute.String("role", role),
 				attribute.String("resource", e.foldLabel("resource", sf.Resource)),
 				attribute.String("sole", strconv.FormatBool(sf.Sole)),
@@ -461,7 +461,7 @@ func (e *Emitter) AccrueRequirementBlocked(blocked []eventqueue.BlockedParticipa
 }
 
 // RunRequirementAccrual restarts the accrual clock, then calls
-// AccrueRequirementBlocked(src()) every interval until ctx ends.
+// AccrueRequirementBlocked(ctx, src()) every interval until ctx ends.
 func (e *Emitter) RunRequirementAccrual(ctx context.Context, interval time.Duration, src func() []eventqueue.BlockedParticipant) {
 	e.lvl.mu.Lock()
 	e.lvl.accrualLast = e.lvl.now()
@@ -473,7 +473,7 @@ func (e *Emitter) RunRequirementAccrual(ctx context.Context, interval time.Durat
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			e.AccrueRequirementBlocked(src())
+			e.AccrueRequirementBlocked(ctx, src())
 		}
 	}
 }

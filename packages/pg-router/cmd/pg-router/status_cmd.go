@@ -62,7 +62,7 @@ func runStatus(args []string) int {
 // outcome rendering is testable without the process's real stdout/stderr or
 // flags.
 func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
-	client, err := core.Dial(ref, core.DefaultProbeTimeout)
+	client, err := core.Dial(context.Background(), ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, core.SubcommandStatus, err)
 		return exitUnavailable

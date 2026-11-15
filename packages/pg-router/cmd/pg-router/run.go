@@ -516,7 +516,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// returned none (Config.MeterProvider set to an external provider).
 		opts.MetricsReader = metricsReader
 	}
-	svc, err = core.Listen(opts)
+	svc, err = core.Listen(ctx, opts)
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, nil, nil, fmt.Errorf("start core: %w", err)

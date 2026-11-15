@@ -103,7 +103,7 @@ func startCoreOverFile(t *testing.T, logDir string) (*core.Service, *eventqueue.
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := core.Listen(core.Options{LogDir: logDir, Queue: q, Bindings: core.NewBindings("t1")})
+	svc, err := core.Listen(t.Context(), core.Options{LogDir: logDir, Queue: q, Bindings: core.NewBindings("t1")})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -118,7 +118,7 @@ func startCoreOverFile(t *testing.T, logDir string) (*core.Service, *eventqueue.
 	})
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := core.Discover(logDir); err == nil {
+		if _, err := core.Discover(t.Context(), logDir); err == nil {
 			return svc, q
 		}
 		time.Sleep(time.Millisecond)

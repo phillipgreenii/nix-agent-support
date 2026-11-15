@@ -228,7 +228,7 @@ func doctorSocket(rep *doctorReport, socket, token string) (doctorStatus, bool) 
 		rep.line(verdictFail, "socket", "%v", err)
 		return doctorStatus{}, false
 	}
-	client, err := core.Dial(ref, core.DefaultProbeTimeout)
+	client, err := core.Dial(context.Background(), ref, core.DefaultProbeTimeout)
 	if err != nil {
 		rep.noCore = errors.Is(err, core.ErrNoRunningCore)
 		rep.line(verdictFail, "socket", "%s: %v", ref.Socket, err)

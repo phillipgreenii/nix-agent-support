@@ -85,12 +85,12 @@ func (l *PIDLock) Release() {
 // BindSocket removes any pre-existing socket file at p.Socket, binds a
 // fresh Unix listener, and chmods it 0600. The returned listener removes
 // the socket file on Close.
-func BindSocket(p Paths) (net.Listener, error) {
+func BindSocket(ctx context.Context, p Paths) (net.Listener, error) {
 	if err := os.Remove(p.Socket); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("remove stale socket: %w", err)
 	}
 
-	l, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", p.Socket)
+	l, err := (&net.ListenConfig{}).Listen(ctx, "unix", p.Socket)
 	if err != nil {
 		return nil, fmt.Errorf("listen unix: %w", err)
 	}
@@ -291,7 +291,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 	defer lock.Release()
 
-	lis, err := BindSocket(opts.Paths)
+	lis, err := BindSocket(ctx, opts.Paths)
 	if err != nil {
 		return err
 	}

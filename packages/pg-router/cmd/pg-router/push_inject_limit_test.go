@@ -22,7 +22,7 @@ func startLimitedCore(t *testing.T, logDir string) (*core.Service, *eventqueue.M
 	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	svc, err := core.Listen(core.Options{LogDir: logDir, Queue: q, Bindings: core.NewBindings("review-requested", "t")})
+	svc, err := core.Listen(t.Context(), core.Options{LogDir: logDir, Queue: q, Bindings: core.NewBindings("review-requested", "t")})
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -37,7 +37,7 @@ func startLimitedCore(t *testing.T, logDir string) (*core.Service, *eventqueue.M
 	})
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := core.Discover(logDir); err == nil {
+		if _, err := core.Discover(t.Context(), logDir); err == nil {
 			return svc, mem
 		}
 		time.Sleep(time.Millisecond)

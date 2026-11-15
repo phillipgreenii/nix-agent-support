@@ -80,7 +80,7 @@ func TestSocketRoundTrip_IngestEvent(t *testing.T) {
 	dir := shortDir(t)
 	svc, ref := startService(t, dir)
 
-	client, err := Dial(ref, DefaultProbeTimeout)
+	client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestSocketAndInProcessTransportsAgree(t *testing.T) {
 
 			// Over the socket, against a fresh core with the same empty queue.
 			_, ref := startService(t, shortDir(t))
-			client, err := Dial(ref, DefaultProbeTimeout)
+			client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 			if err != nil {
 				t.Fatalf("Dial: %v", err)
 			}
@@ -178,7 +178,7 @@ func TestSocket_ConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			client, err := Dial(ref, DefaultProbeTimeout)
+			client, err := Dial(t.Context(), ref, DefaultProbeTimeout)
 			if err != nil {
 				t.Errorf("Dial: %v", err)
 				return

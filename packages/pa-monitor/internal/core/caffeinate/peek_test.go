@@ -184,7 +184,7 @@ func TestInProcessObservationMatchesRealBinary(t *testing.T) {
 			rewriteStatus(t, dir, func(m map[string]any) {
 				m["leases"] = []any{map[string]any{"id": "x", "live": true}}
 			})
-			out, err := exec.Command(bin, "acquire", "--owner", "diff", "--pid", itoa(os.Getpid())).CombinedOutput()
+			out, err := exec.CommandContext(t.Context(), bin, "acquire", "--owner", "diff", "--pid", itoa(os.Getpid())).CombinedOutput()
 			if err != nil {
 				t.Fatalf("acquire: %v: %s", err, out)
 			}

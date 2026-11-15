@@ -525,7 +525,7 @@ func (s *Service) observer() IngestObserver {
 //
 // A live core already answering on the socket is ErrAlreadyRunning; a stale socket
 // file left by a crashed core is removed and re-bound.
-func Listen(opts Options) (*Service, error) {
+func Listen(ctx context.Context, opts Options) (*Service, error) {
 	if opts.LogDir == "" {
 		return nil, errors.New("core: Listen requires a LogDir")
 	}
@@ -551,10 +551,10 @@ func Listen(opts Options) (*Service, error) {
 		return nil, fmt.Errorf("core: socket path %s is %d bytes, over the platform limit of %d; set PG_ROUTER_LOG_DIR to a shorter directory",
 			sock, len(sock), maxSocketPathLen)
 	}
-	if err := clearStaleSocket(sock); err != nil {
+	if err := clearStaleSocket(ctx, sock); err != nil {
 		return nil, err
 	}
-	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", sock)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", sock)
 	if err != nil {
 		return nil, fmt.Errorf("core: listen on %s: %w", sock, err)
 	}
@@ -609,14 +609,14 @@ func Listen(opts Options) (*Service, error) {
 // clearStaleSocket removes a leftover socket file so Listen can re-bind, but only
 // after proving nothing answers on it — unlinking a LIVE core's socket would
 // leave two cores fighting over one discovery record.
-func clearStaleSocket(sock string) error {
+func clearStaleSocket(ctx context.Context, sock string) error {
 	if _, err := os.Stat(sock); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("core: stat socket %s: %w", sock, err)
 	}
-	if err := probe(sock, DefaultProbeTimeout); err == nil {
+	if err := probe(ctx, sock, DefaultProbeTimeout); err == nil {
 		return fmt.Errorf("%w: %s", ErrAlreadyRunning, sock)
 	}
 	if err := os.Remove(sock); err != nil {

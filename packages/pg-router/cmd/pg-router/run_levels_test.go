@@ -69,7 +69,7 @@ func TestRunUntilIdleBody_pausedReachableAnswersIngestNoDispatch(t *testing.T) {
 	var ref core.Ref
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if r, err := core.Discover(logDir); err == nil {
+		if r, err := core.Discover(t.Context(), logDir); err == nil {
 			ref = r
 			break
 		}

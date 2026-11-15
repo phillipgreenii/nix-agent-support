@@ -115,7 +115,7 @@ func TestControlResolver_LaunchesNoPsOrTmux(t *testing.T) {
 	}
 
 	// Control: the shims really record.
-	if err := exec.Command("ps").Run(); err != nil || calls() == 0 {
+	if err := exec.CommandContext(t.Context(), "ps").Run(); err != nil || calls() == 0 {
 		t.Fatalf("shim control failed: err=%v calls=%d", err, calls())
 	}
 	if err := os.Remove(logPath); err != nil {

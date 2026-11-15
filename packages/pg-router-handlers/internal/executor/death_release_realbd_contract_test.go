@@ -141,13 +141,12 @@ type raceBD struct {
 	inner *beads.CLIRunner
 	id    string
 	taker *beads.CLIRunner
-	ctx   context.Context
 	t     *testing.T
 }
 
 func (b *raceBD) Run(ctx context.Context, args ...string) (string, error) {
 	if args[0] == "update" {
-		if out, err := b.taker.Run(b.ctx, "update", b.id, "--assignee", "live-worker", "--force"); err != nil {
+		if out, err := b.taker.Run(ctx, "update", b.id, "--assignee", "live-worker", "--force"); err != nil {
 			b.t.Fatalf("simulating the takeover: %v\n%s", err, out)
 		}
 	}
@@ -160,7 +159,7 @@ func (b *raceBD) Run(ctx context.Context, args ...string) (string, error) {
 func TestPark_RealBD_DeathReleaseDoesNotRobAReclaimedBead(t *testing.T) {
 	ctx, handler, id := crossActorBead(t)
 	logPath := filepath.Join(t.TempDir(), "events.jsonl")
-	bd := &raceBD{inner: handler, id: id, taker: otherActorRunner(handler, "live-worker"), ctx: ctx, t: t}
+	bd := &raceBD{inner: handler, id: id, taker: otherActorRunner(handler, "live-worker"), t: t}
 	werr := deathWait(ctx, t, bd, id, roles.AddHuman, logPath)
 	var sd *sessionDied
 	if !errors.As(werr, &sd) {

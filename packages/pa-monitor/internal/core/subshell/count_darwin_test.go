@@ -14,7 +14,7 @@ import (
 // as its final program image, and waits for that line.
 func startReady(t *testing.T, name string, args ...string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(t.Context(), name, args...)
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestDarwinInProcessMatchesRealPgrep(t *testing.T) {
 		startReady(t, "zsh", "-c", script)
 	}
 	// A direct non-shell child (exec has completed when Start returns).
-	sleeper := exec.Command("sleep", "30")
+	sleeper := exec.CommandContext(t.Context(), "sleep", "30")
 	if err := sleeper.Start(); err != nil {
 		t.Fatal(err)
 	}

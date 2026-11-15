@@ -249,8 +249,8 @@ func failingProxyUntil(t *testing.T, target, failSID string, healed *atomic.Bool
 	}
 	rp := &httputil.ReverseProxy{
 		Director: func(r *http.Request) { r.URL.Scheme, r.URL.Host = "http", "recorder" },
-		Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(context.Background(), "unix", target)
+		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", target)
 		}},
 	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

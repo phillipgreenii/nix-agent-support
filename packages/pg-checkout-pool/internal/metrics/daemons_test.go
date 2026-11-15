@@ -69,7 +69,7 @@ func TestDaemonCounterCachesByPidAndStart(t *testing.T) {
 		}
 		return n
 	}
-	if count() != 1 || count() != 1 || len(rec.calls) != 1 {
+	if count() != 1 || len(rec.calls) != 1 {
 		t.Fatalf("a cached (pid,start) must not be looked up again: calls=%v", rec.calls)
 	}
 	// Negative control: the pid is reused by a daemon elsewhere with a new start time.

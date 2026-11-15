@@ -16,7 +16,7 @@ func listAll() ([]Proc, error) { return listProcsComm(func(string) bool { return
 // fsmonitor--daemon, with working directory dir.
 func startFake(t *testing.T, gitBin, dir string) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(gitBin, "-c", "read x", "fsmonitor--daemon")
+	cmd := exec.CommandContext(t.Context(), gitBin, "-c", "read x", "fsmonitor--daemon")
 	cmd.Dir = dir
 	// `read` is a builtin blocking on the open stdin pipe: no fork, so the
 	// table never shows a transient copy of the daemon's argv.

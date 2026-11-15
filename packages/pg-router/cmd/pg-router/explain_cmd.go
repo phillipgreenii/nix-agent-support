@@ -42,7 +42,7 @@ func runExplain(args []string) int {
 
 // explain is runExplain's testable body over an already-resolved core ref.
 func explain(stdout, stderr io.Writer, role string, ref core.Ref, now time.Time) int {
-	client, err := core.Dial(ref, core.DefaultProbeTimeout)
+	client, err := core.Dial(context.Background(), ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, "explain", err)
 		return exitUnavailable

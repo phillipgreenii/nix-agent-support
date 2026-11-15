@@ -195,7 +195,7 @@ func TestE2E_RunUntilIdlePushInject_RealBinary(t *testing.T) {
 	deadline := time.Now().Add(15 * time.Second)
 	var discoverErr error
 	for time.Now().Before(deadline) {
-		if _, discoverErr = core.Discover(logDir); discoverErr == nil {
+		if _, discoverErr = core.Discover(t.Context(), logDir); discoverErr == nil {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

@@ -100,7 +100,7 @@ func TestBindSocket_CreatesAndChmods(t *testing.T) {
 		Socket:  filepath.Join(dir, "daemon.sock"),
 	}
 
-	l, err := BindSocket(paths)
+	l, err := BindSocket(t.Context(), paths)
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestBindSocket_RemovesStaleSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l, err := BindSocket(paths)
+	l, err := BindSocket(t.Context(), paths)
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}

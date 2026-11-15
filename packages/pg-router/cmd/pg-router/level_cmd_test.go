@@ -92,7 +92,7 @@ func levelCore(t *testing.T, fr core.LevelRefresher) (core.Ref, *time.Time) {
 		Skew:      time.Minute,
 		Now:       func() time.Time { return *clk },
 	})
-	svc, err := core.Listen(core.Options{LogDir: logDir, Queue: q, Bindings: core.NewBindings("t"), Levels: proj, LevelRefresher: fr})
+	svc, err := core.Listen(t.Context(), core.Options{LogDir: logDir, Queue: q, Bindings: core.NewBindings("t"), Levels: proj, LevelRefresher: fr})
 	if err != nil {
 		t.Fatal(err)
 	}
