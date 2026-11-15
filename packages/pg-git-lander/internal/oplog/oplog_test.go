@@ -205,10 +205,11 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 	must(f.ev.HolderConverted(ctx, locks.Conversion{Lock: "refs/l", PreviousOwner: locks.Owner{Host: "h", PID: 9}, Why: locks.WhyExpired}))
 	must(f.ev.Conflict(ctx, []string{"a.txt"}, "union", "resolved"))
 	must(f.ev.VerifySkipped(ctx, 2, []string{"pg-hooks", "pre-land-eval"}, "abc"))
-	must(f.ev.OpEnd(ctx, OpEnd{Outcome: "landed", Reason: "", Retryable: false, Stage: "done", PathTaken: "fast", Stats: map[string]any{"commits": 2}, BranchFate: "deleted", WorktreeFate: "kept"}))
+	must(f.ev.Refused(ctx, Refused{Outcome: "refused", Reason: "stopped-pending", Exit: 22, Lock: "refs/l", HolderOpID: "h-op", HolderBranch: "feature/y", HolderStage: "cleanup", HolderState: "stopped"}))
+	must(f.ev.OpEnd(ctx, OpEnd{Outcome: "landed", Reason: "", Retryable: false, Exit: 0, Stage: "done", PathTaken: "fast", Stats: map[string]any{"commits": 2}, BranchFate: "deleted", WorktreeFate: "kept"}))
 
 	got := f.lines(f.ev.Path)
-	if len(got) != 11 {
+	if len(got) != 12 {
 		t.Fatalf("%d lines", len(got))
 	}
 	common := []string{"ts", "repo", "host", "pid", "tool_version", "op_id", "operation", "branch", "target"}
@@ -223,7 +224,8 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 		EvHolderConverted: {"lock", "previous_owner", "why"},
 		EvConflict:        {"paths", "rule", "result"},
 		EvVerifySkipped:   {"point", "count", "argv0", "tip"},
-		EvOpEnd:           {"outcome", "reason", "retryable", "stage", "path_taken", "stats", "branch_fate", "worktree_fate", "restored", "warnings"},
+		EvRefused:         {"outcome", "reason", "exit", "lock", "holder_op_id", "holder_branch", "holder_stage", "holder_state"},
+		EvOpEnd:           {"outcome", "reason", "retryable", "exit", "stage", "path_taken", "stats", "branch_fate", "worktree_fate", "restored", "warnings"},
 	}
 	seen := map[string]bool{}
 	for _, m := range got {
@@ -247,7 +249,7 @@ func TestEveryEventParsesWithCommonFieldsAndOwnFields(t *testing.T) {
 			t.Errorf("%s common values = %v", typ, m)
 		}
 	}
-	if len(seen) != 11 {
+	if len(seen) != 12 {
 		t.Errorf("event types seen = %v", seen)
 	}
 	if h := got[2]["holder"].(map[string]any); h["op_id"] != "h-op" || h["stage"] != "rebasing" || got[2]["waited_ms"] != float64(2000) || got[2]["result"] != "busy" {
@@ -633,5 +635,75 @@ func TestEventsFileWithFormerVersionLinesStaysAppendable(t *testing.T) {
 	got := f.lines(f.ev.Path)
 	if len(got) != 3 || got[0]["point"] != "before_move" || got[1]["stage"] != "after_rebase" || got[2]["event"] != EvVerifySkipped {
 		t.Fatalf("lines = %v", got)
+	}
+}
+
+// auditFigures counts, from events alone, the four figures of the landing
+// audit: land jobs, jobs refused stopped-pending, settle events, jobs whose
+// first end was a lock-lost stop at clean-up, and transient (exit 75) stops.
+// It is the counting rule the README documents.
+func auditFigures(evs []map[string]any) (jobs, stoppedPending, settles, firstLockLostAtCleanup, transient int) {
+	firstEnd := map[string]bool{}
+	for _, e := range evs {
+		if e["operation"] != "land" {
+			continue
+		}
+		switch e["event"] {
+		case EvOpStart:
+			jobs++
+		case EvRefused:
+			jobs++
+			if e["reason"] == "stopped-pending" {
+				stoppedPending++
+			}
+		case EvSettle:
+			settles++
+		case EvOpEnd:
+			b, _ := e["branch"].(string)
+			if !firstEnd[b] {
+				firstEnd[b] = true
+				if e["reason"] == "lock-lost" && e["stage"] == "cleanup" {
+					firstLockLostAtCleanup++
+				}
+			}
+			if e["outcome"] == "stopped" && e["reason"] == "transient" {
+				transient++
+			}
+		}
+	}
+	return
+}
+
+func TestAuditFiguresComeFromEventsAlone(t *testing.T) {
+	f := newFx(t)
+	ctx := t.Context()
+	at := func(op, branch string) *Events {
+		e := *f.ev
+		e.Common.OpID, e.Common.Branch = op, branch
+		return &e
+	}
+	// a: lock-lost at clean-up first, then lands. b: transient stop (exit 75).
+	// c: refused stopped-pending, with a settle by a waiter.
+	a1, a2, b, c := at("a1", "feature/a"), at("a2", "feature/a"), at("b1", "feature/b"), at("c1", "feature/c")
+	for _, e := range []*Events{a1, a2, b} {
+		if err := e.OpStart(ctx, nil, nil, "w", "p", locks.Keep{}, "d"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	steps := []error{
+		a1.OpEnd(ctx, OpEnd{Outcome: "stopped", Reason: "lock-lost", Retryable: true, Exit: 21, Stage: "cleanup"}),
+		a2.OpEnd(ctx, OpEnd{Outcome: "landed", Exit: 0, Stage: "done"}),
+		b.OpEnd(ctx, OpEnd{Outcome: "stopped", Reason: "transient", Retryable: true, Exit: 21, Stage: "pre-merge-verify"}),
+		c.Settle(ctx, Settle{Action: "wait", StoppedOpID: "a1", Branch: "feature/a", Stage: "cleanup", StopReason: "lock-lost", HolderState: "stopped"}),
+		c.Refused(ctx, Refused{Outcome: "refused", Reason: "stopped-pending", Exit: 22, Lock: "refs/l", HolderOpID: "a1"}),
+	}
+	for _, err := range steps {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	jobs, sp, settles, ll, tr := auditFigures(f.lines(f.ev.Path))
+	if jobs != 4 || sp != 1 || settles != 1 || ll != 1 || tr != 1 {
+		t.Errorf("jobs %d, stopped-pending %d, settle %d, lock-lost first at clean-up %d, transient %d; want 4 1 1 1 1", jobs, sp, settles, ll, tr)
 	}
 }

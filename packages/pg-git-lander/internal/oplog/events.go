@@ -25,6 +25,7 @@ const (
 	EvRaceRetry       = "race_retry"
 	EvRevalidateReuse = "revalidate_reuse"
 	EvSettle          = "settle"
+	EvRefused         = "refused"
 	EvHook            = "hook"
 	EvVerifySkipped   = "verify_skipped"
 	EvHolderConverted = "holder_converted"
@@ -206,6 +207,30 @@ func (e *Events) Settle(ctx context.Context, st Settle) error {
 	})
 }
 
+// Refused is the payload of refused: a land or rebase that ended at the lock
+// step, before op_start, because a lock it needs is held by a stopped
+// operation (exit 22, reason stopped-pending, target-stopped, holder-died or
+// unreadable-lock). Such an operation has no op_start and no op_end, so this
+// event is its only record. A busy outcome (exit 20) writes no such event.
+type Refused struct {
+	// Outcome is refused; Reason is the refusal reason.
+	Outcome, Reason string
+	Exit            int
+	// Lock is the lock ref; the Holder fields describe its holder, when known.
+	Lock                                  string
+	HolderOpID, HolderBranch, HolderStage string
+	HolderState                           string
+}
+
+// Refused emits refused.
+func (e *Events) Refused(ctx context.Context, r Refused) error {
+	return e.Emit(ctx, EvRefused, map[string]any{
+		"outcome": r.Outcome, "reason": r.Reason, "exit": r.Exit, "lock": r.Lock,
+		"holder_op_id": r.HolderOpID, "holder_branch": r.HolderBranch,
+		"holder_stage": r.HolderStage, "holder_state": r.HolderState,
+	})
+}
+
 // Hook emits hook for one command run. It carries argv0 only: no argument,
 // no variable value and no output.
 func (e *Events) Hook(ctx context.Context, rec hooks.CommandRecord) error {
@@ -247,6 +272,7 @@ type OpEnd struct {
 	Outcome      string         `json:"outcome"`
 	Reason       string         `json:"reason"`
 	Retryable    bool           `json:"retryable"`
+	Exit         int            `json:"exit"`
 	Stage        string         `json:"stage"`
 	PathTaken    string         `json:"path_taken"`
 	Stats        map[string]any `json:"stats"`
@@ -262,7 +288,7 @@ func (e *Events) OpEnd(ctx context.Context, o OpEnd) error {
 		o.Warnings = []string{}
 	}
 	return e.Emit(ctx, EvOpEnd, map[string]any{
-		"outcome": o.Outcome, "reason": o.Reason, "retryable": o.Retryable, "stage": o.Stage,
+		"outcome": o.Outcome, "reason": o.Reason, "retryable": o.Retryable, "exit": o.Exit, "stage": o.Stage,
 		"path_taken": o.PathTaken, "stats": o.Stats, "branch_fate": o.BranchFate,
 		"worktree_fate": o.WorktreeFate, "restored": o.Restored, "warnings": o.Warnings,
 	})

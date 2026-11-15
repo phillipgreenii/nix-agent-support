@@ -1049,7 +1049,7 @@ func (s *runner) opEnd(ctx context.Context, o *outcome.Outcome) {
 		st = &outcome.Stats{}
 	}
 	e := oplog.OpEnd{
-		Outcome: string(o.Outcome), Reason: o.Reason, Retryable: o.Retryable != nil && *o.Retryable,
+		Outcome: string(o.Outcome), Reason: o.Reason, Retryable: o.Retryable != nil && *o.Retryable, Exit: o.Exit,
 		Stage: p.Stage, PathTaken: o.PathTaken,
 		Stats: map[string]any{
 			"duration_ms": st.DurationMS, "rebased_commits": st.RebasedCommits,

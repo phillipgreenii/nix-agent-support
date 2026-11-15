@@ -415,6 +415,13 @@ func TestTier2StoppedPendingAndTargetStopped(t *testing.T) {
 	if r.json["blocking_op"] == nil {
 		t.Errorf("stopped-pending does not name blocking_op: %s", r.stdout)
 	}
+	// The refusal ends before op_start, so a refused event is its only record.
+	refused := eventsOfType(h.events(), "refused")
+	if len(refused) != 1 || refused[0]["outcome"] != "refused" || refused[0]["reason"] != "stopped-pending" ||
+		refused[0]["exit"] != float64(22) || refused[0]["operation"] != "land" || refused[0]["branch"] != "main" ||
+		refused[0]["holder_state"] != "stopped" || refused[0]["holder_op_id"] == "" {
+		t.Errorf("refused events = %v, want the one stopped-pending land of main", refused)
+	}
 
 	// Resolving the rebase unblocks both.
 	resolveByHand(t, h, h.repo)

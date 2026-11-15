@@ -611,3 +611,30 @@ func TestPathsRevalidateWithAnEmptyBranchDiffReusesTheHookResult(t *testing.T) {
 	}
 	f.untouched()
 }
+
+// A lock lost while the clean-up runs ends lock-lost at stage cleanup, and
+// op_end carries the exit code, reason and stage an audit counts it by.
+func TestLockLostAtCleanupIsRecordedInOpEnd(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.feature()
+	var once sync.Once
+	f.g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		args := strings.Join(c.Args, " ")
+		if strings.Contains(args, "worktree remove") {
+			once.Do(func() {
+				b := cmdrun.Exec(ctx, cmdrun.Call{Name: "git", Args: []string{"-C", f.repo.Dir, "hash-object", "-w", "--stdin"}, Stdin: []byte("{}\n")})
+				f.git(f.repo.Dir, "update-ref", locks.BranchRef("feature/x"), strings.TrimSpace(string(b.Stdout)))
+			})
+		}
+		return cmdrun.Exec(ctx, c)
+	}
+	out := f.run(f.land())
+	if out.Outcome != outcome.Stopped || out.Reason != string(outcome.StopLockLost) {
+		t.Fatalf("outcome = %s %s (%s)", out.Outcome, out.Reason, out.Message)
+	}
+	e := lastEvent(f.events(), "op_end")
+	if e == nil || e["outcome"] != "stopped" || e["reason"] != "lock-lost" || e["stage"] != "cleanup" || e["exit"] != float64(21) {
+		t.Fatalf("op_end = %v, want stopped lock-lost at cleanup with exit 21", e)
+	}
+}

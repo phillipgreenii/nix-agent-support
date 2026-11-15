@@ -363,6 +363,15 @@ func TestTier2TransientExit75(t *testing.T) {
 		})
 		r := h.run("land", "feature/x")
 		expect(t, r, 21, "stopped", "transient")
+		// The hook's exit 75 is recorded, and the stop is a transient one in op_end.
+		if hk := eventsOfType(h.events(), "hook"); len(hk) != 1 || hk[0]["exit"] != float64(75) {
+			t.Errorf("hook events = %v, want one run with exit 75", hk)
+		}
+		ends := eventsOfType(h.events(), "op_end")
+		if len(ends) != 1 || ends[0]["outcome"] != "stopped" || ends[0]["reason"] != "transient" ||
+			ends[0]["retryable"] != true || ends[0]["exit"] != float64(21) || ends[0]["stage"] != "pre-merge-verify" {
+			t.Errorf("op_end events = %v, want one transient stop at pre-merge-verify", ends)
+		}
 		checkNow(t, h, r, Expected{
 			Outcome:  map[string]any{"retryable": true, "stage": "pre-merge-verify"},
 			Snapshot: Snapshot{Refs: startRefs(), TargetTree: "@tree:main"},

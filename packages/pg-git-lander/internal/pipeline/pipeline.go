@@ -543,7 +543,7 @@ func (s *session) lock(ctx context.Context, sel *worktrees.Selection) (*Result, 
 			return aerr
 		})
 		if err != nil {
-			return s.lockFailure(err)
+			return s.lockFailure(ctx, err)
 		}
 		op := &oprecord.Op{Layer: p.Layer, Set: set, Branch: set.ByRef(locks.BranchRef(s.req.Branch))}
 
@@ -573,7 +573,7 @@ func (s *session) lock(ctx context.Context, sel *worktrees.Selection) (*Result, 
 
 func req0(s *session) string { return s.req.RepoFlag }
 
-func (s *session) lockFailure(err error) (*Result, error) {
+func (s *session) lockFailure(ctx context.Context, err error) (*Result, error) {
 	var busy *locks.BusyError
 	var ref *locks.RefusedError
 	switch {
@@ -607,9 +607,19 @@ func (s *session) lockFailure(err error) (*Result, error) {
 			}}
 			o.Next = next
 		}
+		s.emitRefused(ctx, o, ref.Ref, ref.Holder)
 		return &Result{Outcome: o}, nil
 	}
 	return nil, err
+}
+
+// emitRefused records an operation that ended at the lock step as a refused
+// event: it has no op_start and no op_end, so the event is its only record.
+func (s *session) emitRefused(ctx context.Context, o *outcome.Outcome, lock string, h outcome.Holder) {
+	_ = s.p.Events.Refused(context.WithoutCancel(ctx), oplog.Refused{
+		Outcome: string(o.Outcome), Reason: o.Reason, Exit: o.Exit, Lock: lock,
+		HolderOpID: h.OpID, HolderBranch: h.Branch, HolderStage: h.Stage, HolderState: h.State,
+	})
 }
 
 func (s *session) targetName() string {
@@ -677,7 +687,7 @@ func (s *session) fail(ctx context.Context, o *outcome.Outcome) *Result {
 			"duration_ms": s.d.Clock.Since(p.Started).Milliseconds(), "target_lock_wait_ms": 0, "target_lock_held_ms": 0,
 		}
 		_ = p.Events.OpEnd(ctx, oplog.OpEnd{
-			Outcome: string(o.Outcome), Reason: o.Reason, Stage: p.Stage, Stats: stats,
+			Outcome: string(o.Outcome), Reason: o.Reason, Exit: o.Exit, Stage: p.Stage, Stats: stats,
 			Restored: []outcome.Restored{}, Warnings: warningWords(p.Warnings),
 		})
 	}

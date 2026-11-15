@@ -142,6 +142,22 @@ The tool keeps no queue: queuing is the caller's. `op_end` events carry `target_
 included). The clean-up runs holding TARGET and the destination worktree. A reuse of the hook result emits `revalidate_reuse` (not
 `race_retry`), and a waiter's decision about a stopped operation emits `settle`.
 
+### Auditing from `events.jsonl`
+
+`.git/pg-git-lander/events.jsonl` is enough to repeat the landing audit; the figures and the fields they read:
+
+| Figure                               | Count                                                                                                                                                            |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Land jobs                            | `op_start` events plus `refused` events, with `operation` = `land` (a refusal at the lock step has no `op_start` and no `op_end`)                                |
+| Refused stopped-pending              | `refused` events with `reason` = `stopped-pending` (also `target-stopped`, `holder-died`, `unreadable-lock`; a busy outcome, exit 20, writes no `refused` event) |
+| Exit-75 stops                        | `op_end` events with `outcome` = `stopped` and `reason` = `transient` (the `hook` event of the run has `exit` = 75)                                              |
+| Settle events                        | `settle` events; `action` is `wait`, `abort`, `finish`, `lost-to-concurrent`, `refuse` or `settle-failed`                                                        |
+| First stop was lock-lost at clean-up | per `branch`, the earliest `op_end` has `reason` = `lock-lost` and `stage` = `cleanup`                                                                           |
+
+`refused` carries `outcome`, `reason`, `exit`, `lock` and the holder (`holder_op_id`, `holder_branch`, `holder_stage`,
+`holder_state`); `op_end` carries `exit`, the process exit code of the invocation, besides `outcome`, `reason`,
+`retryable` and `stage`.
+
 ## `--no-verify`
 
 `--no-verify` skips every `pre-merge-verify` entry, on every race retry and every `--continue` of the run, and, for

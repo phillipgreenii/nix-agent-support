@@ -1049,7 +1049,7 @@ func (rs *resumer) quit(ctx context.Context, common string) (*outcome.Outcome, e
 		Locks: rs.resumed.Op.Layer,
 	}
 	_ = ev.OpEnd(context.WithoutCancel(ctx), oplog.OpEnd{
-		Outcome: string(o.Outcome), Stage: rec.Stage, Restored: []outcome.Restored{},
+		Outcome: string(o.Outcome), Exit: o.Exit, Stage: rec.Stage, Restored: []outcome.Restored{},
 		Stats: map[string]any{}, Warnings: []string{},
 	})
 	log.Line("OUTCOME", "quit")
