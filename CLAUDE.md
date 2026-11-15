@@ -479,7 +479,7 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
   fields = unclaim|add-human). `pg-router doctor` calls the adapter's real `validate`, so run it on
   the hand-rolled config.
   To prove the backing-command check actually RAN, run the same config against the unwrapped
-  binary `bin/.pg-router-wrapped` under `env -i PATH=/usr/bin:/bin` — it must exit 1 with
+  binary `bin/.pg-router-wrapped` under `env -i PATH=/usr/bin:/bin` — it must exit 7 with
   `backing command "<cmd>" cannot be invoked`; without that negative control, an exit 0 through
   the nix wrapper is vacuous (the wrapper injects the tools onto PATH).
 

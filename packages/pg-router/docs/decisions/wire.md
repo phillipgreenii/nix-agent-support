@@ -35,7 +35,7 @@ its own arguments, but arguments are never the payload channel. Concretely:
   workspace codes** (`ADR 0127`; package `exitcode` of the `x` module): `0` ok, `1` unexpected
   error, `2` **usage** error, `3` **unavailable** (no running core could be located or reached),
   `7` **config** (the core's own config or startup precheck failing before any work begins,
-  `drain.go`'s `exitPrecheck`), `9` **busy**, and `20` to `63` otherwise app-specific. No code is
+  `drain.go`'s `exitPrecheck`; `config check` and `doctor` exit it too when the config does not load), `9` **busy**, and `20` to `63` otherwise app-specific. No code is
   reserved to the core, and a participant MUST NOT use `64` to `78`, `124`, `126`, `127`, `128+n`
   or `255`. The **rich outcome is in the JSON reply**, so a participant in a degraded state MAY
   return an exit code only (busy → `9`, no body). The **low** codes are held for meanings general

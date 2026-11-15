@@ -31,6 +31,8 @@ reserved-3 rule also made `3` mean "precheck" in pg-router and "daemon down" eve
    holds exits `9`; its dry run says a real run "would be REFUSED (exit 9)".
 4. **The config or startup precheck is `7` (Config)**: `run`, `run-until-idle`, `run-role` and
    `run-query` when the configuration does not load.
+   4a. **`config check` exits `7`** (Config) when the config does not load or validate, like `doctor`;
+   `1` stays for any other failure.
 5. **`doctor` exits** `0` when no probe fails, `2` for usage, otherwise the first that applies of
    `7` (the config did not load), `1` (any failed probe other than a missing core) and `3` (the
    only failed probe is that no core is running).

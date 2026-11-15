@@ -56,7 +56,7 @@ func runConfig(mode string, asJSON bool) int {
 // startup, on demand. It adds no check of its own: every problem config.Load
 // reports is printed unchanged, one per line, on stderr, so a missing query
 // command, a missing handler command and a bad role config show in one run.
-// Exit 1 on any problem; with none it prints one line, "config ok", and exits 0.
+// Exit 7 (config) on any problem; with none it prints one line, "config ok", and exits 0.
 func configCheck(stdout, stderr io.Writer) int {
 	return configCheckWith(stdout, stderr, nil)
 }
@@ -71,7 +71,7 @@ func configCheckWith(stdout, stderr io.Writer, loc config.CommandLocator) int {
 		for _, line := range errorLines(err) {
 			_, _ = fmt.Fprintln(stderr, line)
 		}
-		return exitGeneric
+		return exitPrecheck
 	}
 	_, _ = fmt.Fprintln(stdout, "config ok")
 	now := time.Now()

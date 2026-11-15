@@ -432,8 +432,8 @@ handler = "` + filepath.Join(w.dir, "missing") + `"
 	t.Setenv("PG_ROUTER_CONFIG", cfgPath)
 
 	var stdout, stderr strings.Builder
-	if code := configCheck(&stdout, &stderr); code != exitGeneric {
-		t.Fatalf("exit = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := configCheck(&stdout, &stderr); code != 7 {
+		t.Fatalf("exit = %d, want 7; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{"/nonexistent/scratch-producer", `role "ghost" handler "` + filepath.Join(w.dir, "missing") + `"`} {
 		if !strings.Contains(stderr.String(), want) {

@@ -93,13 +93,13 @@ func lowerValidateTimeout(t *testing.T, d time.Duration) {
 }
 
 // config check reports a missing query command and a missing handler in ONE
-// run, and exits 1 (design section 10, V-3).
+// run, and exits 7 (design section 10, V-3).
 func TestConfigCheck_ReportsEveryProblemInOneRun(t *testing.T) {
 	w := newDoctorWorkspace(t, "/nonexistent/k11-producer")
 
 	var stdout, stderr strings.Builder
-	if code := configCheck(&stdout, &stderr); code != exitGeneric {
-		t.Fatalf("exit = %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := configCheck(&stdout, &stderr); code != 7 {
+		t.Fatalf("exit = %d, want 7; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
 	if len(lines) != 2 {
@@ -359,6 +359,7 @@ func TestCLIExitCodeNumbers(t *testing.T) {
 	}{
 		{"no running core", exitUnavailable, 3},
 		{"config precheck", exitPrecheck, 7},
+		{"generic failure", exitGeneric, 1},
 		{"refused lock", exitBusy, 9},
 	} {
 		if c.got != c.want {
