@@ -459,19 +459,16 @@ func newVerbFixture(t *testing.T) *verbFixture {
 	if err := os.WriteFile(cfgPath, []byte(deploymentStyleConfig(serveLog)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	connector := "#!/bin/sh\necho '{\"error\":{\"code\":\"unavailable\",\"message\":\"no connector in this test\"}}'\nexit 1\n"
-	if err := os.WriteFile(filepath.Join(bin, "pg-connector"), []byte(connector), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// No verb here reaches a network: the in-process connector answers every
+	// call as unavailable, with no child process.
+	useFakeConnector(t, func([]string) (string, int) {
+		return `{"error":{"code":"unavailable","message":"no connector in this test"}}` + "\n", 1
+	})
 	return &verbFixture{
 		dir:      dir,
 		serveLog: serveLog,
 		env: []string{
-			"PATH=" + bin + ":/usr/bin:/bin",
+			"PATH=/usr/bin:/bin",
 			"HOME=" + dir,
 			"XDG_STATE_HOME=" + state,
 			"XDG_RUNTIME_DIR=" + filepath.Join(dir, "run"),

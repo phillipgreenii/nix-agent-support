@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,8 +16,7 @@ import (
 // useFakeConnector installs an in-process pg-connector for one test: every
 // call any pg-desk code makes through internal/connector is answered by fn
 // (stdout and exit code from the call's arguments) with no child process and
-// no script on PATH. Prefer it to installFakePGConnector; the script helper
-// stays only for tests that need a real child (a shell's own behaviour).
+// no script on PATH.
 func useFakeConnector(t *testing.T, fn func(args []string) (stdout string, code int)) {
 	t.Helper()
 	restore := connector.Use(func(_ context.Context, c cmdrun.Call) cmdrun.Result {
@@ -74,20 +72,6 @@ func readFileOr(p, def string) string {
 		return def
 	}
 	return string(b)
-}
-
-// installFakePGConnector writes an executable named pg-connector, whose body
-// is script (a shell script, shebang added), into t.TempDir() and prepends
-// that directory to PATH for the test. Later cmd/pg-desk tests (changes,
-// refresh, show) share it instead of each inventing their own.
-func installFakePGConnector(t *testing.T, script string) {
-	t.Helper()
-	dir := t.TempDir()
-	body := "#!/bin/sh\n" + script + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "pg-connector"), []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake pg-connector: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // fileExitCode reads an exit code a test wrote into p ("0" when p is absent,

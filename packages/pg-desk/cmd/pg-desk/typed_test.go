@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -135,22 +133,5 @@ func TestResolveTypedRef(t *testing.T) {
 		if _, _, err := resolveTypedRef(cfg0, typ, "1"); err == nil {
 			t.Errorf("%s: no configured repository must error", typ)
 		}
-	}
-}
-
-func TestInstallFakePGConnectorPutsScriptOnPath(t *testing.T) {
-	installFakePGConnector(t, `echo "fake: $*"`)
-	path, err := exec.LookPath("pg-connector")
-	if err != nil {
-		t.Fatalf("pg-connector not on PATH: %v", err)
-	}
-	// The stub is a shell script; running it would be a subprocess, so check
-	// its body and mode instead.
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), `echo "fake: $*"`) {
-		t.Errorf("stub body = %q, want the installed script", body)
 	}
 }
