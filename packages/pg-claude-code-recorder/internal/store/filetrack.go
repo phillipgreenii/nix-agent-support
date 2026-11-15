@@ -41,14 +41,16 @@ func (t *FileTracker) Take() (ids []int64, full bool) {
 		t.epoch, t.full = ep, true
 	}
 	full = t.full
-	if !full {
+	if !full && len(t.dirty) > 0 {
 		ids = make([]int64, 0, len(t.dirty))
 		for id := range t.dirty {
 			ids = append(ids, id)
 		}
 	}
 	t.full = false
-	t.dirty = map[int64]struct{}{}
+	if len(t.dirty) > 0 { // an idle Take allocates nothing
+		t.dirty = map[int64]struct{}{}
+	}
 	return ids, full
 }
 

@@ -79,37 +79,6 @@ func (d *Daemon) computeCoverageModeCtx(ctx context.Context, view string, withSu
 	return cov, err
 }
 
-// statusRows returns the file rows and current paths. The file rows are rebuilt
-// when the store's commit counter moved; the paths, which change only with a
-// path, path-close or tombstone record, are rebuilt only when the path counter
-// (or the rollback epoch) moved, so the steady stream of copy commits re-reads
-// one table, not two.
-func (d *Daemon) statusRows(rd *store.Reader, seq uint64) ([]store.File, map[int64][]string, error) {
-	// Read before the queries: a commit in between leaves the cache one step
-	// behind, never ahead.
-	pseq, epoch := d.st.PathSeq(), d.st.RollbackEpoch()
-	d.rowsMu.Lock()
-	defer d.rowsMu.Unlock()
-	if d.rowsOK && d.rowsSeq == seq && d.pathsOK && d.pathsSeq == pseq && d.pathsEpoch == epoch {
-		return d.rowsFiles, d.rowsPaths, nil
-	}
-	if !d.rowsOK || d.rowsSeq != seq {
-		files, err := rd.AllFiles()
-		if err != nil {
-			return nil, nil, err
-		}
-		d.rowsFiles, d.rowsSeq, d.rowsOK = files, seq, true
-	}
-	if !d.pathsOK || d.pathsSeq != pseq || d.pathsEpoch != epoch {
-		paths, err := rd.AllCurrentPaths()
-		if err != nil {
-			return nil, nil, err
-		}
-		d.rowsPaths, d.pathsSeq, d.pathsEpoch, d.pathsOK = paths, pseq, epoch, true
-	}
-	return d.rowsFiles, d.rowsPaths, nil
-}
-
 // loadStages returns the stage rows, re-reading them only when the store's
 // lifecycle model input counter moved. The counter is read before the query, so
 // a commit in between leaves the cache one step behind, never ahead.
@@ -144,21 +113,26 @@ func (d *Daemon) cachedStages() ([]store.StageRow, bool) {
 // computeCoverageFrom computes the figures over rd. rd's statements run under
 // the context rd was made with; ctx also bounds the per-file loop (Lstat per
 // file), which no statement would stop.
-func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view string, withSummary bool, mode statMode, seq uint64) (wire.Coverage, error) {
-	var files []store.File
+//
+// The commit count argument is kept for the callers' sake: the status file rows
+// are now kept up to date from the store's file tracker, not keyed on it.
+func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view string, withSummary bool, mode statMode, _ uint64) (wire.Coverage, error) {
+	var files fileView
 	var curPaths map[int64][]string
 	var byGen, parse map[genKey]int64 // statAll: copy and parse offsets
 	var fresh map[int64]bool
 	var err error
 	if mode == statLazy {
-		if files, curPaths, err = d.statusRows(rd, seq); err != nil {
+		if files, curPaths, err = d.statusRows(ctx, rd); err != nil {
 			return wire.Coverage{}, err
 		}
 		fresh = d.freshTouched(d.clock.Now())
 	} else {
-		if files, err = rd.AllFiles(); err != nil {
+		all, err := rd.AllFiles()
+		if err != nil {
 			return wire.Coverage{}, err
 		}
+		files = viewOf(all)
 		gens, err := rd.AllGenerations()
 		if err != nil {
 			return wire.Coverage{}, err
@@ -176,8 +150,8 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 	// Each file's current-generation lag entry, one lock acquisition. Both modes
 	// read UnparsedSince from it (the parse-lag seconds), so statAll needs it
 	// too, but never the whole per-generation copy.
-	curGen := make(map[int64]int, len(files))
-	for _, f := range files {
+	curGen := make(map[int64]int, files.Len())
+	for f := range files.All() {
 		curGen[f.ID] = f.CurGen
 	}
 	lagGens := d.lag.CurrentGenerations(curGen)
@@ -192,7 +166,7 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 	}
 	cov.Roots = make([]wire.RootCoverage, 0, len(roots))
 	counts := map[string]int{}
-	for _, f := range files {
+	for f := range files.All() {
 		if err := ctx.Err(); err != nil {
 			return wire.Coverage{}, err
 		}

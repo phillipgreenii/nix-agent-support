@@ -80,10 +80,9 @@ func BenchmarkStatusRows(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		churn(b, d, i)
-		seq := d.st.CommitSeq()
 		b.StartTimer()
 		err := d.st.ReadTxCtx(context.Background(), func(rd *store.Reader) error {
-			_, _, e := d.statusRows(rd, seq)
+			_, _, e := d.statusRows(context.Background(), rd)
 			return e
 		})
 		if err != nil {

@@ -23,9 +23,8 @@ func TestCacheHitStatusAllocatesAConstantNumberOfObjects(t *testing.T) {
 		if err := d.refreshStatus(); err != nil {
 			t.Fatal(err)
 		}
-		seq := d.st.CommitSeq()
 		err := d.st.ReadTxCtx(context.Background(), func(rd *store.Reader) error {
-			_, _, e := d.statusRows(rd, seq)
+			_, _, e := d.statusRows(context.Background(), rd)
 			return e
 		})
 		if err != nil {
@@ -37,7 +36,7 @@ func TestCacheHitStatusAllocatesAConstantNumberOfObjects(t *testing.T) {
 			}
 		})
 		rows = testing.AllocsPerRun(20, func() {
-			if _, _, err := d.statusRows(nil, seq); err != nil {
+			if _, _, err := d.statusRows(context.Background(), nil); err != nil {
 				t.Fatal(err)
 			}
 		})

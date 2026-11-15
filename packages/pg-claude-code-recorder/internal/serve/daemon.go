@@ -205,12 +205,17 @@ type Daemon struct {
 	touchedMu sync.Mutex
 	touched   map[int64]int64
 	// rows is the status loop's cached copy of the file rows and current paths,
-	// valid for the store commit count rowsSeq.
+	// kept current from the store file tracker (see statusRows).
 	rowsMu    sync.Mutex
 	rowsOK    bool
-	rowsSeq   uint64
-	rowsFiles []store.File
+	rowsFiles fileView
 	rowsPaths map[int64][]string
+	// rowsTrk tells statusRows which file rows changed (nil until first use);
+	// rowsBuilt is when the file rows were last read whole; afterTake is a test
+	// hook run between the tracker Take and the read transaction.
+	rowsTrk   *store.FileTracker
+	rowsBuilt time.Time
+	afterTake func()
 	// pathsOK, pathsSeq and pathsEpoch say the cached rowsPaths are still the
 	// current paths: valid for the store's path counter and rollback epoch.
 	pathsOK    bool

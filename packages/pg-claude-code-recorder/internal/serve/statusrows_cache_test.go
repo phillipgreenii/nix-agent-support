@@ -49,16 +49,19 @@ func TestStatusRefreshReadsOnlyTheTablesACommitChanged(t *testing.T) {
 		t.Fatalf("a refresh with no commit issued %d statements, want 0", q)
 	}
 	commit(&store.Rec{T: store.TState, At: 5, File: 100001, State: "ok"})
-	if q := refresh("file-only commit"); q != 1 {
-		t.Fatalf("a commit that touched no path or stage: %d statements, want 1 (the file rows)", q)
+	// One FilesByIDs for the changed file, plus the row count and largest id
+	// check that catches an insert the tracker missed.
+	if q := refresh("file-only commit"); q != 2 {
+		t.Fatalf("a commit that touched no path or stage: %d statements, want 2 (FilesByIDs and the count check)", q)
 	}
 	commit(&store.Rec{T: store.TPath, At: 6, File: 100002, Path: filepath.Join(e.claude, "projects", "example-proj", "moved.jsonl")})
-	if q := refresh("path commit"); q != 2 {
-		t.Fatalf("a path commit: %d statements, want 2 (file rows and paths)", q)
+	if q := refresh("path commit"); q != 3 {
+		t.Fatalf("a path commit: %d statements, want 3 (the file rows, their check, and paths)", q)
 	}
 	commit(&store.Rec{T: store.TStage, At: 7, Session: "s", State: store.StageHeld})
-	if q := refresh("stage commit"); q != 2 {
-		t.Fatalf("a stage commit: %d statements, want 2 (file rows and stages)", q)
+	// A stage record names no file, so no file row is reread.
+	if q := refresh("stage commit"); q != 1 {
+		t.Fatalf("a stage commit: %d statements, want 1 (the stages)", q)
 	}
 	if got := d.loadStatusSnap().cov.Held; got != 1 {
 		t.Fatalf("held conversations %d after the stage commit, want 1", got)
