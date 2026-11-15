@@ -11,7 +11,7 @@ require (
 	github.com/gofrs/flock v0.13.1
 	github.com/phillipgreenii/claude-transcript v0.0.0
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
+	github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.23.0

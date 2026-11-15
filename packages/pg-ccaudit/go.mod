@@ -17,7 +17,7 @@ require (
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076 // indirect
+	github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sasha-s/go-deadlock v0.3.9 // indirect
 	golang.org/x/sync v0.24.0 // indirect

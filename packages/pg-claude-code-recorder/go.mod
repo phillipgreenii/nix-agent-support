@@ -5,7 +5,7 @@ go 1.26.8
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/phillipgreenii/x v0.0.0-20261112162938-c45c22ca2076
+	github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d
 	github.com/sasha-s/go-deadlock v0.3.9
 	go.uber.org/goleak v1.3.0
 	golang.org/x/sync v0.24.0
