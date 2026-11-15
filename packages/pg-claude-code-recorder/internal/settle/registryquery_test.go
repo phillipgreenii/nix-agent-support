@@ -22,7 +22,7 @@ import (
 // source index and walk every registry record. The plans must start from
 // records_session and never scan records or fields.
 func TestRegistryQueryPlansStartFromTheSessionIndex(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{})
+	st, err := store.Open(t.TempDir(), store.Options{NoCloseStats: true})
 	if err != nil {
 		t.Fatal(err)
 	}

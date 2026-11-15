@@ -61,6 +61,11 @@ type Options struct {
 	StepClock func() time.Duration
 	// ReplayOnly opens for comparison: it never appends an epoch record.
 	ReplayOnly bool
+	// NoCloseStats makes Close skip the planner-statistics pass (sqlite_stat1)
+	// that a due store would otherwise run. It is for a throwaway store whose
+	// query plans nobody reads (a test environment): the pass costs a full scan
+	// per index on every Close. The daemon never sets it.
+	NoCloseStats bool
 	// decoded, when set, is the journal in dir already parsed (a replay of bytes the
 	// caller decoded); Open then does not read it again.
 	decoded *decodedJournal
@@ -156,6 +161,7 @@ func (e *SchemaOlderError) Error() string {
 type Store struct {
 	dirLock      *os.File // flock on the state directory, held until Close
 	replayOnly   bool     // scratch comparison store: Close skips the statistics pass
+	noCloseStats bool     // Options.NoCloseStats: Close skips the statistics pass
 	driverName   string   // database/sql driver name (Options.DriverName)
 	journalLimit int      // journal_size_limit in bytes
 	readTO       time.Duration
@@ -305,7 +311,7 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 	if opt.V3Layout {
 		opt.NoTrigramIndex, opt.ExtensionTables = true, true
 	}
-	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, readMaxOpen: opt.ReadMaxOpenConns, journalLimit: opt.JournalSizeLimit, replayOnly: opt.ReplayOnly}
+	s := &Store{v3: opt.V3Layout, freeFn: opt.FreeBytes, noTrigram: opt.NoTrigramIndex, wantExt: opt.ExtensionTables, bulkRecords: opt.BulkRecords, bulkBytes: opt.BulkBytes, dir: dir, fs: opt.FS, obs: opt.Obs, driverName: opt.DriverName, readTO: opt.ReadTimeout, stmtCtx: opt.stmtCtx, readCacheKiB: opt.ReadCacheKiB, readMmap: opt.ReadMmapBytes, readMaxOpen: opt.ReadMaxOpenConns, journalLimit: opt.JournalSizeLimit, replayOnly: opt.ReplayOnly, noCloseStats: opt.NoCloseStats}
 	if s.stepClock = opt.StepClock; s.stepClock == nil {
 		s.stepClock = monotonicNow
 	}
@@ -1459,7 +1465,7 @@ func (s *Store) CloseCtx(ctx context.Context) error {
 	if s.cdb != nil {
 		// Keep sqlite_stat1 current: a due collection runs here, bounded, on the
 		// checkpoint connection; a cut-short pass resumes at the next one.
-		if s.wdb != nil && !s.replayOnly && s.CollectStatsDue(ctx, time.Now(), StatsEvery) {
+		if s.wdb != nil && !s.replayOnly && !s.noCloseStats && s.CollectStatsDue(ctx, time.Now(), StatsEvery) {
 			ctx, cancel := context.WithTimeout(ctx, closeStatsWait)
 			_, _ = s.collectStats(ctx, s.cdb, DefaultAnalysisLimit, time.Now(), 0)
 			cancel()

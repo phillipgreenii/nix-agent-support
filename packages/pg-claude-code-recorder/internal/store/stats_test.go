@@ -79,6 +79,31 @@ func TestCloseCollectsStats(t *testing.T) {
 	}
 }
 
+// NoCloseStats: a store that would otherwise collect on Close (the same flow
+// as TestCloseCollectsStats) leaves no statistics and no stamp behind.
+func TestNoCloseStatsSkipsTheStatisticsPass(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir, Options{NoCloseStats: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRecords(t, s)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if n := statRows(t, s); n != 0 {
+		t.Fatalf("sqlite_stat1 has %d rows after a NoCloseStats Close", n)
+	}
+	if !s.CollectStatsDue(t.Context(), time.Now(), StatsEvery) {
+		t.Fatal("a NoCloseStats Close stamped the collection")
+	}
+}
+
 func TestCollectStatsAfterClose(t *testing.T) {
 	s, err := Open(t.TempDir(), Options{})
 	if err != nil {

@@ -71,7 +71,7 @@ func newCSEnv(t *testing.T) *csEnv {
 	csDriverSeq++
 	name := fmt.Sprintf("settle-changed-since-%d", csDriverSeq)
 	cnt := countdriver.Register(name)
-	st, err := store.Open(t.TempDir(), store.Options{DriverName: name})
+	st, err := store.Open(t.TempDir(), store.Options{DriverName: name, NoCloseStats: true})
 	if err != nil {
 		t.Fatal(err)
 	}
