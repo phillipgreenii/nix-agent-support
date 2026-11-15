@@ -55,6 +55,17 @@ type sweepHarness struct {
 	nowFixed time.Time
 }
 
+// setSweepCaps lowers the sweep's per-pass removal and examination bounds for
+// one test, so a test that proves a bound holds needs a handful of real
+// worktrees rather than dozens. The bounds are package variables, so such a
+// test MUST NOT run in parallel (none does).
+func setSweepCaps(t *testing.T, perPass, examined int) {
+	t.Helper()
+	oldPer, oldExam := worktreeSweepMaxPerPass, worktreeSweepMaxExamined
+	worktreeSweepMaxPerPass, worktreeSweepMaxExamined = perPass, examined
+	t.Cleanup(func() { worktreeSweepMaxPerPass, worktreeSweepMaxExamined = oldPer, oldExam })
+}
+
 func newSweepHarness(t *testing.T) *sweepHarness {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -464,8 +475,9 @@ func TestSweep_disabledConfigurations(t *testing.T) {
 }
 
 func TestSweep_boundedPerPass(t *testing.T) {
+	setSweepCaps(t, 2, worktreeSweepMaxExamined)
 	h := newSweepHarness(t)
-	for _, b := range []string{"zr-1", "zr-2", "zr-3", "zr-4", "zr-5", "zr-6", "zr-7"} {
+	for _, b := range []string{"zr-1", "zr-2", "zr-3", "zr-4"} {
 		h.leak(b)
 	}
 	if got := h.sweep(); got != worktreeSweepMaxPerPass {

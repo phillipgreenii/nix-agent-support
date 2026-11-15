@@ -71,6 +71,15 @@ import (
 // dispatch; it never fails the dispatch.
 
 const (
+	// worktreeEventReclaimed is the eventlog kind recorded per removed worktree.
+	worktreeEventReclaimed = "worktree_reclaimed"
+)
+
+// The two per-pass bounds are variables only so a unit test can lower them
+// (setSweepCaps in the tests): proving a cap holds needs cap+N real worktrees,
+// and at the production values that is dozens of real git checkouts per test.
+// Nothing outside the tests assigns them.
+var (
 	// worktreeSweepMaxPerPass bounds how many worktrees one dispatch removes, so a
 	// large backlog is drained over several dispatches rather than in one.
 	worktreeSweepMaxPerPass = 5
@@ -79,8 +88,6 @@ const (
 	// worktrees cannot make one dispatch pay for all of them. A candidate skipped
 	// by the keep cache costs no git work and does not count.
 	worktreeSweepMaxExamined = 20
-	// worktreeEventReclaimed is the eventlog kind recorded per removed worktree.
-	worktreeEventReclaimed = "worktree_reclaimed"
 )
 
 // worktreeSweepGrace is how old a worktree must be before the sweep may remove

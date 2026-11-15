@@ -244,6 +244,7 @@ func TestKeepCache_gcRemovesExpiredTornAndOrphanedRecords(t *testing.T) {
 }
 
 func TestSweep_examinedCapBoundsGitWorkPerPass(t *testing.T) {
+	setSweepCaps(t, worktreeSweepMaxPerPass, 3)
 	h := newSweepHarness(t)
 	total := worktreeSweepMaxExamined + 2
 	for i := 0; i < total; i++ {
@@ -253,7 +254,7 @@ func TestSweep_examinedCapBoundsGitWorkPerPass(t *testing.T) {
 	if got := h.sweep(); got != 0 {
 		t.Fatalf("removed %d, want 0 (all dirty)", got)
 	}
-	if opens.Load() != worktreeSweepMaxExamined {
+	if opens.Load() != int64(worktreeSweepMaxExamined) {
 		t.Fatalf("pass 1 examined %d candidates, want the cap %d", opens.Load(), worktreeSweepMaxExamined)
 	}
 	// The kept ones are cached, so they do not consume the cap again: pass 2
@@ -313,6 +314,7 @@ func withLockDir(d executor.Deps, dir string) executor.Deps {
 // cap, must not starve a later removable one. Real git over a throwaway repo;
 // the keep cache is off so every kept worktree costs the cap again each run.
 func TestSweep_oldestExaminedFirstReachesLaterRemovable(t *testing.T) {
+	setSweepCaps(t, worktreeSweepMaxPerPass, 3)
 	h := newSweepHarness(t)
 	h.deps.Cfg.WorktreeKeepRecheck = 0
 	total := worktreeSweepMaxExamined + 2
@@ -344,6 +346,7 @@ func (h *sweepHarness) examFiles() []string {
 // unexamined from then on, so a long-running janitor reaches steady state
 // instead of re-paying for the same kept worktrees each run. Real git.
 func TestKeepCache_otherBranchKeepIsCachedSoEveryCandidateIsReached(t *testing.T) {
+	setSweepCaps(t, worktreeSweepMaxPerPass, 3)
 	h := newSweepHarness(t)
 	h.env.cwds = func(context.Context) ([]string, error) { return nil, nil }
 	total := worktreeSweepMaxExamined*2 + 3

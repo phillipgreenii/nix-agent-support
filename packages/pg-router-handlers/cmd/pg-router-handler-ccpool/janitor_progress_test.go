@@ -37,6 +37,7 @@ func (h *sweepHarness) seenFiles() []string {
 }
 
 func TestProgress_worktreeCountersAddUpWhenTheCapCutsThePass(t *testing.T) {
+	setSweepCaps(t, worktreeSweepMaxPerPass, 3)
 	h := newSweepHarness(t)
 	total := worktreeSweepMaxExamined + 2
 	for i := 0; i < total; i++ {
