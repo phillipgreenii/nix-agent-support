@@ -90,8 +90,9 @@ Extensions:
 - **`INV-GWM-31`** <!-- uuid: 890a6355-fead-4a95-9821-dbaf85814f3b --> — Every repository operation
   MUST run under a timeout (`git-timeout`, default 2 minutes; `create-timeout`, default 30 minutes, for
   a creation or a clean), in an environment that ignores any inherited variable redirecting git to
-  another repository, and MUST be cancelled with SIGTERM and never SIGKILL, because a killed git leaves
-  a lock behind. A zero-byte git index lock older than `index-lock-stale-after` (default 10 minutes)
+  another repository, and MUST be cancelled with SIGTERM, then SIGKILL only if git has not exited after
+  a 30-second grace, because a killed git leaves a lock behind and a git that had to be killed leaves
+  its worktree broken. A zero-byte git index lock older than `index-lock-stale-after` (default 10 minutes)
   MAY be removed only while the manager holds that worktree.
 - **`INV-GWM-32`** <!-- uuid: 715fb890-c503-4988-9e55-0a239bbdfa41 --> — A scheduled job MUST run
   `pg-gwm reap --all-repos` every `reap-interval` (default 10 minutes), over every repository in the
