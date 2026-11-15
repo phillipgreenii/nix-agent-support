@@ -22,15 +22,15 @@ import (
 // not land is surfaced instead of reported as an unclaim (pg2-ybkav).
 
 // externalCloseRun drives waitDone's external-close branch (close reason
-// idle_ttl) for a worker whose bead is held by dead-actor, with bd as given.
-func externalCloseRun(t *testing.T, wrap func(*dtest.ScriptBD) beads.Runner) (*ccpoolRun, *dtest.ScriptBD, string, error) {
+// idle_ttl) for a worker whose bead is held by holder, with bd as given.
+func externalCloseRun(t *testing.T, reason, holder string, wrap func(*dtest.ScriptBD) beads.Runner) (*ccpoolRun, *dtest.ScriptBD, string, error) {
 	t.Helper()
 	cfg := fastCfg()
 	script := &dtest.ScriptBD{
 		StatusSeq:   map[string][]string{"zr-w": {"in_progress", "in_progress", "in_progress"}},
-		AssigneeSeq: map[string][]string{"zr-w": {"dead-actor"}},
+		AssigneeSeq: map[string][]string{"zr-w": {holder}},
 	}
-	row := ccpool.Session{ExternalID: "pg-router-worker-zr-w", Live: false, State: ccpool.StateWorking, CloseReason: "idle_ttl"}
+	row := ccpool.Session{ExternalID: "pg-router-worker-zr-w", Live: false, State: ccpool.StateWorking, CloseReason: reason}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{row}, {row}, {row}}}
 	logPath := filepath.Join(t.TempDir(), "events.jsonl")
 	e := newExecWithLog(cc, script, cfg, logPath)
@@ -39,17 +39,22 @@ func externalCloseRun(t *testing.T, wrap func(*dtest.ScriptBD) beads.Runner) (*c
 	return e, script, logPath, e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w")
 }
 
-// A landed release is the guarded update, and the dispatch reports the unclaim.
+// A landed release is the guarded update, for every external close reason, and
+// the dispatch reports the unclaim. The holder is an actor with no session id.
 func TestWaitDone_externalCloseReleaseIsGuardedByTheObservedHolder(t *testing.T) {
-	e, script, _, err := externalCloseRun(t, func(s *dtest.ScriptBD) beads.Runner { return s })
-	if !errors.Is(err, ErrExternallyClosed) {
-		t.Fatalf("want an external close, got %v", err)
-	}
-	if !dtest.HasUpdate(script, "update zr-w --status=open --assignee= --if-assignee dead-actor --if-status in_progress") {
-		t.Errorf("the release must be guarded by the observed holder; updates=%v", script.Updates)
-	}
-	if v := verbsOf(e.waitFailureResult(workerRole(fastCfg()).CCPool, "zr-w", err)); len(v) != 1 || v[0] != report.Unclaimed {
-		t.Errorf("a landed release is reported as the unclaim verb; got %v", v)
+	for _, reason := range []string{"cap_eviction", "idle_ttl", "operator"} {
+		t.Run(reason, func(t *testing.T) {
+			e, script, _, err := externalCloseRun(t, reason, "review-zr-w", func(s *dtest.ScriptBD) beads.Runner { return s })
+			if !errors.Is(err, ErrExternallyClosed) {
+				t.Fatalf("want an external close, got %v", err)
+			}
+			if !dtest.HasUpdate(script, "update zr-w --status=open --assignee= --if-assignee review-zr-w --if-status in_progress") {
+				t.Errorf("the release must be guarded by the observed holder; updates=%v", script.Updates)
+			}
+			if v := verbsOf(e.waitFailureResult(workerRole(fastCfg()).CCPool, "zr-w", err)); len(v) != 1 || v[0] != report.Unclaimed {
+				t.Errorf("a landed release is reported as the unclaim verb; got %v", v)
+			}
+		})
 	}
 }
 
@@ -57,7 +62,7 @@ func TestWaitDone_externalCloseReleaseIsGuardedByTheObservedHolder(t *testing.T)
 // the dispatch result carries no Unclaimed verb, the failure is logged, and one
 // external_close_release_failed eventlog record names the bead and bd's refusal.
 func TestWaitDone_externalCloseReleaseFailureIsSurfaced(t *testing.T) {
-	e, _, logPath, err := externalCloseRun(t, func(s *dtest.ScriptBD) beads.Runner { return refuseUpdateBD{s} })
+	e, _, logPath, err := externalCloseRun(t, "idle_ttl", "dead-actor", func(s *dtest.ScriptBD) beads.Runner { return refuseUpdateBD{s} })
 	if !errors.Is(err, ErrExternallyClosed) {
 		t.Fatalf("want an external close, got %v", err)
 	}
