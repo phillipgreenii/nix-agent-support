@@ -161,14 +161,14 @@ func TestPushInject_TextOutputNeverLeaksTheToken(t *testing.T) {
 	}
 }
 
-// No running core: exit 1 with the "no running core" diagnostic AND the remedy —
+// No running core: exit 3 with the "no running core" diagnostic AND the remedy —
 // push-inject never starts one (ADR 0036).
-func TestPushInject_NoRunningCoreIsExit1(t *testing.T) {
+func TestPushInject_NoRunningCoreIsExit3(t *testing.T) {
 	var stdout, stderr strings.Builder
 	loc := injectedLocator(filepath.Join(shortDir(t), "gone.sock"), "tok")
 	code := pushInject(&stdout, &stderr, false, loc, emit.SocketEnqueuer{}, testPushEvent)
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want 1", code)
+	if code != conformance.ExitUnavailable {
+		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
 		t.Fatalf("stderr = %q, want a no-running-core diagnostic", stderr.String())
@@ -182,11 +182,11 @@ func TestPushInject_NoRunningCoreIsExit1(t *testing.T) {
 }
 
 // Discovery finding nothing under the log dir is the same outcome.
-func TestPushInject_NoDiscoverableCoreIsExit1(t *testing.T) {
+func TestPushInject_NoDiscoverableCoreIsExit3(t *testing.T) {
 	var stdout, stderr strings.Builder
 	loc := emit.Locator{Discover: emit.Discoverer(shortDir(t))}
-	if code := pushInject(&stdout, &stderr, false, loc, emit.SocketEnqueuer{}, testPushEvent); code != conformance.ExitError {
-		t.Fatalf("exit = %d, want 1", code)
+	if code := pushInject(&stdout, &stderr, false, loc, emit.SocketEnqueuer{}, testPushEvent); code != conformance.ExitUnavailable {
+		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
 		t.Fatalf("stderr = %q, want a no-running-core diagnostic", stderr.String())
@@ -198,8 +198,8 @@ func TestPushInject_NoDiscoverableCoreIsExit1(t *testing.T) {
 func TestPushInject_JSONFailureIsStillJSON(t *testing.T) {
 	var stdout, stderr strings.Builder
 	loc := injectedLocator(filepath.Join(shortDir(t), "gone.sock"), "tok")
-	if code := pushInject(&stdout, &stderr, true, loc, emit.SocketEnqueuer{}, testPushEvent); code != conformance.ExitError {
-		t.Fatalf("exit = %d, want 1", code)
+	if code := pushInject(&stdout, &stderr, true, loc, emit.SocketEnqueuer{}, testPushEvent); code != conformance.ExitUnavailable {
+		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	var got struct {
 		Accepted bool   `json:"accepted"`

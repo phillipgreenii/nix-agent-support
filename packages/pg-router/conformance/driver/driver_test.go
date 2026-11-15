@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router/conformance"
@@ -320,13 +321,17 @@ func TestRun_InvokingCommand_PlainFailure(t *testing.T) {
 	}
 }
 
-func TestRun_InvokingCommand_CoreReservedViolation(t *testing.T) {
-	// Exit 3 (exitCoreReserved, DEC-WIRE-1) is core-reserved pre-flight — no
-	// participant may legitimately emit it.
-	target := Target{Command: fakeCommandParticipant{code: exitCoreReserved}}
+func TestRun_InvokingCommand_ExitThreeIsNoLongerCoreReserved(t *testing.T) {
+	// Exit 3 is the shared Unavailable code (ADR 0127), no longer a core-reserved
+	// pre-flight signal: it is an ordinary nonzero exit, a plain failure that is
+	// not described as reserved.
+	target := Target{Command: fakeCommandParticipant{code: conformance.ExitUnavailable}}
 	r := findResult(t, Run(context.Background(), target), "invoking/command")
-	if r.Err == nil {
-		t.Fatal("expected invoking/command to flag exit 3 (core-reserved) as a violation")
+	if r.Err == nil || r.Busy {
+		t.Fatalf("invoking/command = %+v, want a plain Err, Busy=false", r)
+	}
+	if strings.Contains(r.Err.Error(), "core-reserved") {
+		t.Fatalf("exit 3 error still calls it core-reserved: %v", r.Err)
 	}
 }
 

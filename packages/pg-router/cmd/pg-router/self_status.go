@@ -69,7 +69,7 @@ func runSelfStatusIO(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 	ref, err := locateCore(*socket, *token)
 	if err != nil {
 		reportNoCore(stderr, core.SubcommandSelfStatus, err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	request, err := io.ReadAll(stdin)
 	if err != nil {

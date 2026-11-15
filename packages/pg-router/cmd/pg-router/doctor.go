@@ -47,8 +47,10 @@ const (
 // not adopt the daemon's config path; `pg-router config --show` and
 // `pg-router status` report the daemon's own resolved config.
 //
-// EXIT CODES: 0 when no probe is FAIL, 1 otherwise, 2 usage. It never starts a
-// core: the probes that read the running core report info when none is running.
+// EXIT CODES: 0 when no probe is FAIL, 2 usage; otherwise the first that applies of
+// 7 (Config: the config did not load), 1 (any FAIL other than a missing core) and
+// 3 (Unavailable: the only FAIL is that the socket probe found no running core). It never starts a core: the probes that
+// read the running core report info when none is running.
 func runDoctor(args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // we render usage/errors ourselves
@@ -75,7 +77,7 @@ func runDoctor(args []string) int {
 
 // runDoctorClauses loads the config of the current directory and prints the
 // --clauses report. A config that does not load cannot be evaluated: its problems
-// print as FAIL lines and the exit status is 1; otherwise the exit status is 0
+// print as FAIL lines and the exit status is 7 (Config); otherwise the exit status is 0
 // whatever the sensors answered.
 func runDoctorClauses(stdout io.Writer) int {
 	cfg, err := config.Load()
@@ -84,7 +86,7 @@ func runDoctorClauses(stdout io.Writer) int {
 		for _, line := range errorLines(err) {
 			rep.line(verdictFail, "config", "%s", textsafe.Sanitize(line))
 		}
-		return exitGeneric
+		return exitPrecheck
 	}
 	return doctorClauses(stdout, cfg, query.Env{RepoRoot: cfg.RepoRoot, Cmd: query.OSCommander{}})
 }
@@ -93,10 +95,16 @@ func runDoctorClauses(stdout io.Writer) int {
 type doctorReport struct {
 	w      io.Writer
 	failed bool
+	// configFailed is set when the config did not load; noCore when the socket
+	// probe found no running core. They pick the exit code (see runDoctor).
+	configFailed bool
+	noCore       bool
 }
 
 func (r *doctorReport) line(verdict, probe, format string, a ...any) {
-	if verdict == verdictFail {
+	// A socket FAIL that is "no running core" is tracked apart (noCore), so a
+	// real problem elsewhere still reports as the generic failure.
+	if verdict == verdictFail && !(probe == "socket" && r.noCore) {
 		r.failed = true
 	}
 	_, _ = fmt.Fprintf(r.w, "%-4s %s: %s\n", verdict, probe, fmt.Sprintf(format, a...))
@@ -108,6 +116,7 @@ func doctor(stdout io.Writer, socket, token string) int {
 
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
+		rep.configFailed = true
 		for _, line := range errorLines(cfgErr) {
 			rep.line(verdictFail, "config", "%s", textsafe.Sanitize(line))
 		}
@@ -137,8 +146,13 @@ func doctor(stdout io.Writer, socket, token string) int {
 		doctorValidate(rep, cfg)
 	}
 
-	if rep.failed {
+	switch {
+	case rep.configFailed:
+		return exitPrecheck
+	case rep.failed:
 		return exitGeneric
+	case rep.noCore:
+		return exitUnavailable
 	}
 	return exitOK
 }
@@ -210,11 +224,13 @@ type doctorStatus struct {
 func doctorSocket(rep *doctorReport, socket, token string) (doctorStatus, bool) {
 	ref, err := locateCore(socket, token)
 	if err != nil {
+		rep.noCore = errors.Is(err, core.ErrNoRunningCore)
 		rep.line(verdictFail, "socket", "%v", err)
 		return doctorStatus{}, false
 	}
 	client, err := core.Dial(ref, core.DefaultProbeTimeout)
 	if err != nil {
+		rep.noCore = errors.Is(err, core.ErrNoRunningCore)
 		rep.line(verdictFail, "socket", "%s: %v", ref.Socket, err)
 		return doctorStatus{}, false
 	}

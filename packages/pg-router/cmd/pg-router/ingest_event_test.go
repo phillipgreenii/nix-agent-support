@@ -138,7 +138,7 @@ func TestCallCore_NoRunningCoreIsAnError(t *testing.T) {
 	var stdout, stderr strings.Builder
 	ref := core.Ref{Socket: filepath.Join(shortDir(t), "gone.sock")}
 	code := callCore(&stdout, &stderr, ref, core.SubcommandIngestEvent, []byte(testIngestRequest))
-	if code != conformance.ExitError {
+	if code != conformance.ExitUnavailable {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {

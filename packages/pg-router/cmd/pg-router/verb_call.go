@@ -67,7 +67,7 @@ func callVerb(stderr io.Writer, ref core.Ref, verb, replySchema string, req map[
 	client, err := core.Dial(ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, verb, err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	defer func() { _ = client.Close() }()
 	reply, code, err := client.Call(context.Background(), verb, payload, opts)

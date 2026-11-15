@@ -101,13 +101,12 @@ requires it; the details are here.
   carry meanings general to any app, which is why `2` is **reserved** for usage and `busy` sits
   outside that band rather than on `2`; a caller reading one as the other would treat a decline as a
   typo, and a typo as "re-offer later"
-  (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`). Code `3` is
-  **reserved by the core itself**, never a participant's: it is the **pre-flight** signal
-  (`exitPrecheck`) a subcommand exits with when the core's own config or startup precheck fails
-  **before any work begins** — no event has yet been offered, no dispatch attempted, nothing has
-  crossed a participant boundary at all, so there is nothing here for a participant's own code to
-  mean instead. Codes at or above `4` remain a
-  participant's own (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`).
+  (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`). Code `3` is the shared
+  **unavailable** code: a caller that cannot locate or reach a running core exits `3`, and no code is
+  reserved to the core. The core's own **pre-flight** failure (a config or startup precheck failing
+  **before any work begins**, `exitPrecheck`) is the shared **config** code `7`. Codes `20` to `63`
+  are a participant's own, and `64` to `78`, `124`, `126`, `127`, `128+n` and `255` are never used
+  (`ADR 0127`; `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-WIRE-1`).
 - **Self-status.** Any participant MAY push its **own** status — `healthy` / `degraded` /
   `unavailable` — independent of any per-item outcome. This is the participant reporting on
   **itself**, and it is the **only** status channel into the core: an `unavailable` self-report is a

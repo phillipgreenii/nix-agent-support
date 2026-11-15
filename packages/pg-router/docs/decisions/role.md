@@ -25,7 +25,7 @@ is opaque to the core, and whatever prefixes it is part of the command:
 The core's TOML decode ignores unknown keys today. It
 **MUST decode these new keys strictly**: a value of the wrong type, or one the key does not allow (a
 `handler` that is not an absolute path, a `[role.config]` that is not a table), fails the
-configuration load as a pre-flight failure (exit `3`, `DEC-WIRE-1`). Whether the file's other keys
+configuration load as a pre-flight failure (exit `7`, `DEC-WIRE-1`, `ADR 0127`). Whether the file's other keys
 become strict is not decided here.
 
 **The role object (S1).** For a role that sets `handler`, every core→handler request carries

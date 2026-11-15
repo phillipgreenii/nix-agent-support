@@ -100,20 +100,20 @@ Subcommands:
                           seconds is reported "timed out". The gates, unavailable-role and progress
                           probes read the RUNNING core (located like status); with none running each
                           says so as info, and the socket probe's FAIL is what fails the run. Exit 0
-                          when no probe is FAIL, 1 otherwise. Run it with the same environment the
+                          when no probe is FAIL; otherwise 7 when the config did not load, 1 for any FAIL but a missing core, 3 when a missing core is the only FAIL. Run it with the same environment the
                           core runs with (for example the pool directory variables a handler reads),
                           so a handler's own checks see the same values the core's do.
   push-inject <json>      inject one operator-supplied event into the RUNNING core (the same core-side
                           enqueue as the ingest-event callback, operator-initiated). Text by default,
                           JSON with --json. Locates the core via --socket/--token, else
                           PG_ROUTER_SOCKET/PG_ROUTER_TOKEN, else discovery under the log dir. It NEVER
-                          starts a core: with none running it fails with "no running core" (exit 1).
+                          starts a core: with none running it fails with "no running core" (exit 3, unavailable).
   status                  inspect the RUNNING core: resolved configuration, live deliveries, and
                           per-type queue depths, plus levels/mode/listeners/sources/unmatched
                           bindings/recent activity. Text by default, JSON with --json. Locates the
                           core via --socket/--token, else PG_ROUTER_SOCKET/PG_ROUTER_TOKEN, else
                           discovery under the log dir. It NEVER starts a core: with none running it
-                          fails with "no running core" (exit 1).
+                          fails with "no running core" (exit 3, unavailable).
   tui                     continuous-interactive view: polls status's activity ring and offers
                           pause/resume from the same screen (never a third affordance). No --json
                           (it is a terminal UI, not a scriptable reply). Locates the core via
@@ -147,14 +147,14 @@ Subcommands:
                           live state now, instead of waiting for the startup or threshold trigger. With a
                           core running the request goes over its socket and runs inside the daemon (it
                           owns the log's exclusive lock); with none running it compacts offline, taking
-                          the lock itself, and is refused (exit 1) if another process holds it. --socket/
+                          the lock itself, and is refused (exit 9, busy) if another process holds it. --socket/
                           --token name a core explicitly (no offline fallback then). --dry-run changes
                           NOTHING (no rename, no temp file, no lock kept) and reports what a real run
                           would do: bytes and records before/after, events kept vs dropped, levels kept,
                           the percent of max_log_bytes after, and whether a real run would be refused. A
                           real run on a log that is already live state only rewrites nothing. Human
                           summary by default, --json for the cli.log-compact-reply object. Exit 0 ok
-                          (including "nothing to do"), 1 failure or refusal, 2 usage.
+                          (including "nothing to do"), 1 failure, 2 usage, 3 no running core, 9 refused (the log is locked).
   version                 print the version and exit
   help                    print this help and exit
 
@@ -162,13 +162,13 @@ Manager -> core callback subcommands (NOT for operators; the core hands a
 participant these commands with --socket/--token already baked in, and the
 participant runs them):
   ingest-event            deliver events to the RUNNING core. Request JSON on stdin, reply JSON on
-                          stdout; exit 0 ok / 1 error / 2 usage / 9 busy. Locates the core via
+                          stdout; exit 0 ok / 1 error / 2 usage / 3 no running core / 9 busy. Locates the core via
                           --socket/--token, else PG_ROUTER_SOCKET/PG_ROUTER_TOKEN, else discovery under
                           the log dir. It NEVER starts a core: with none running it fails with
-                          "no running core" (exit 1).
+                          "no running core" (exit 3, unavailable).
   self-status             push the caller's OWN status (healthy/degraded/unavailable) to the
                           RUNNING core, naming the participantId it registered under. Request JSON
-                          on stdin, reply JSON on stdout; exit 0 ok / 1 error / 2 usage / 9 busy.
+                          on stdin, reply JSON on stdout; exit 0 ok / 1 error / 2 usage / 3 no running core / 9 busy.
                           Every registered participant kind gets this callback, unlike ingest-event
                           (a source's alone). Locates the core the same way ingest-event does, and
                           never starts one.

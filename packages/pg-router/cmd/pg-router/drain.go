@@ -12,15 +12,17 @@ import (
 	"github.com/phillipgreenii/x/gitclient"
 )
 
-// Exit codes. The general codes (ok / unexpected / usage) are global across these
-// apps and have exactly ONE declaration — package conformance — so this file
-// cannot restate the convention and drift from it again (ADR 0042's
-// Consequences). Only the app-specific code is local, per "≥3 app-specific".
+// Exit codes. They are the shared workspace codes and have exactly ONE
+// declaration — package conformance, which points at the x module's exitcode
+// package — so this file cannot restate the convention and drift from it again
+// (ADR 0042's Consequences, ADR 0127).
 const (
-	exitOK       = conformance.ExitOK
-	exitGeneric  = conformance.ExitError
-	exitUsage    = conformance.ExitUsage
-	exitPrecheck = 3 // app-specific: a config or precheck failure, before any work
+	exitOK          = conformance.ExitOK
+	exitGeneric     = conformance.ExitError
+	exitUsage       = conformance.ExitUsage
+	exitPrecheck    = conformance.ExitConfig      // a config or precheck failure, before any work
+	exitUnavailable = conformance.ExitUnavailable // no running core, or its socket does not answer
+	exitBusy        = conformance.ExitBusy        // a refused lock; the core's own refusal is relayed as the wire code
 )
 
 // warnDroppedRoleEnv warns if any removed role env var is set, so a stale

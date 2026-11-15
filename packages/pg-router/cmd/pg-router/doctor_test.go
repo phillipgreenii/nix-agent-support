@@ -158,7 +158,7 @@ func TestDoctor_HandlerValidateVerdicts(t *testing.T) {
 		{
 			name:       "with validate",
 			onValidate: `echo '{"schemaVersion":"1","problems":[],"warnings":["watch out"]}'; exit 0`,
-			wantExit:   exitGeneric, // no daemon: the socket probe FAILs
+			wantExit:   exitUnavailable, // no daemon: the socket probe is the only FAIL
 			wantLines:  []string{"ok   validate k11-live: valid", "info validate k11-live: warning: watch out"},
 		},
 		{
@@ -170,7 +170,7 @@ func TestDoctor_HandlerValidateVerdicts(t *testing.T) {
 		{
 			name:       "without validate",
 			onValidate: `exit 2`,
-			wantExit:   exitGeneric,
+			wantExit:   exitUnavailable, // the socket probe is the only FAIL
 			wantLines:  []string{"info validate k11-live: not supported"},
 		},
 		{
@@ -221,15 +221,16 @@ func TestDoctor_HandlerValidateVerdicts(t *testing.T) {
 	}
 }
 
-// With no daemon running the socket probe FAILs (and so fails the run) while the
-// three probes that read the daemon report info, and the state dir probe passes.
+// With no daemon running the socket probe FAILs (and so fails the run, with the
+// shared Unavailable code 3, since nothing else failed) while the three probes
+// that read the daemon report info, and the state dir probe passes.
 func TestDoctor_NoDaemon(t *testing.T) {
 	w := newDoctorWorkspace(t, "/bin/echo")
 	w.writeStub(t, "handler", `echo '{"schemaVersion":"1","problems":[],"warnings":[]}'; exit 0`)
 
 	var out strings.Builder
-	if code := doctor(&out, "", ""); code != exitGeneric {
-		t.Fatalf("exit = %d, want 1:\n%s", code, out.String())
+	if code := doctor(&out, "", ""); code != exitUnavailable {
+		t.Fatalf("exit = %d, want 3 (unavailable):\n%s", code, out.String())
 	}
 	for _, want := range []string{
 		"ok   state dir: " + w.logDir + " is writable",
@@ -268,8 +269,8 @@ func TestDoctor_ConfigFailureSkipsValidate(t *testing.T) {
 	w := newDoctorWorkspace(t, "/nonexistent/k11-producer")
 
 	var out strings.Builder
-	if code := doctor(&out, "", ""); code != exitGeneric {
-		t.Fatalf("exit = %d, want 1", code)
+	if code := doctor(&out, "", ""); code != exitPrecheck {
+		t.Fatalf("exit = %d, want 7 (config)", code)
 	}
 	for _, want := range []string{
 		"FAIL config:", "/nonexistent/k11-producer", w.handler,
@@ -290,8 +291,8 @@ func TestDoctor_HandlerMissing(t *testing.T) {
 	w := newDoctorWorkspace(t, "/bin/echo")
 
 	var out strings.Builder
-	if code := doctor(&out, "", ""); code != exitGeneric {
-		t.Fatalf("exit = %d, want 1", code)
+	if code := doctor(&out, "", ""); code != exitPrecheck {
+		t.Fatalf("exit = %d, want 7 (config)", code)
 	}
 	if !strings.Contains(out.String(), "FAIL config:") || !strings.Contains(out.String(), `role "k11-live" handler "`+w.handler+`"`) {
 		t.Errorf("want a config FAIL naming the role and its handler path:\n%s", out.String())
@@ -346,5 +347,22 @@ func TestDoctor_RunDoctorUsage(t *testing.T) {
 	}
 	if code := runDoctor([]string{"--nope"}); code != exitUsage {
 		t.Errorf("runDoctor(--nope) = %d, want usage", code)
+	}
+}
+
+// The exit codes a caller branches on are the shared workspace values, pinned by
+// number here so a renumbering of a constant cannot pass silently.
+func TestCLIExitCodeNumbers(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		got, want int
+	}{
+		{"no running core", exitUnavailable, 3},
+		{"config precheck", exitPrecheck, 7},
+		{"refused lock", exitBusy, 9},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s exit = %d, want %d", c.name, c.got, c.want)
+		}
 	}
 }

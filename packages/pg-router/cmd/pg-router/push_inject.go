@@ -82,12 +82,13 @@ func runPushInject(args []string) int {
 // so the outcome rendering and the exit code are testable without the process's
 // real stdout/stderr, flags or environment.
 //
-// Every failure here is ExitError, never ExitUsage: emit.Emit reports a
+// A failure here is ExitUnavailable when no core could be reached (see
+// noCoreExit) and ExitError otherwise, never ExitUsage: emit.Emit reports a
 // schema-invalid event, an unreachable core and a refused enqueue as one error
-// value, so this site cannot tell "you typed the event wrong" from "the core is
-// not there". Claiming usage for the whole set would mislabel the runtime cases —
-// and "no running core exits non-zero" is the contract an operator scripts
-// against (interfaces.md "Locating the core", ADR 0036), not a usage signal.
+// value, so this site cannot tell "you typed the event wrong" from a refusal.
+// Claiming usage for the whole set would mislabel the runtime cases — and "no
+// running core exits Unavailable (3)" is the contract an operator scripts
+// against (interfaces.md "Locating the core", ADR 0036, ADR 0127).
 //
 // A protocol-level refusal (bad token, core not `started`) reaches this
 // function already discriminated from a normal enqueue failure: SocketEnqueuer
@@ -103,7 +104,7 @@ func pushInject(stdout, stderr io.Writer, asJSON bool, loc emit.Locator, enq emi
 		if asJSON {
 			writeJSON(stdout, pushInjectReport{SchemaVersion: schemas.SchemaVersion, Accepted: false, Error: err.Error()})
 		}
-		return conformance.ExitError
+		return noCoreExit(err)
 	}
 	if asJSON {
 		writeJSON(stdout, pushInjectReport{

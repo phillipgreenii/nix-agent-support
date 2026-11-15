@@ -292,6 +292,8 @@ func TestCoarseExitCodeValues(t *testing.T) {
 		{"ok", ExitOK, 0},
 		{"unexpected error", ExitError, 1},
 		{"usage error", ExitUsage, 2},
+		{"unavailable (no running core)", ExitUnavailable, 3},
+		{"config (pre-flight precheck)", ExitConfig, 7},
 		{"busy (pre-accept decline)", ExitBusy, 9},
 	} {
 		if c.got != c.want {

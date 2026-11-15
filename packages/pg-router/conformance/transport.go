@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/phillipgreenii/pg-router/schemas"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
 // Lifecycle is a participant's lifecycle state (interfaces.md). Messages are
@@ -43,18 +44,22 @@ func (l Lifecycle) String() string {
 
 // Coarse exit codes for the CLI transport (interfaces.md common contract).
 //
-// The LOW codes carry meanings that are general across every app, not tuned to
-// one app's domain, so 2 is USAGE everywhere and app-specific codes start at 3.
-// BUSY means something only to a participant on a capacity-bounded transport, so
-// it sits out in the app-specific range rather than squatting on 2 (ADR 0042's
-// Decision). This is the ONE declaration of these codes: a second const block
-// stating the same convention in parallel is how the two previously drifted
-// apart (ADR 0042's Consequences).
+// They are the workspace's shared codes (package exitcode in the x module), so a
+// caller reads the same meaning from pg-router as from every other tool; this is
+// the ONE declaration of them for pg-router, so a second const block stating the
+// same convention in parallel is not allowed to drift from it (ADR 0042's
+// Consequences, ADR 0127's Decision). ExitBusy is a participant's pre-accept
+// capacity decline and the core's own read refusal; ExitUnavailable is a caller
+// that found no running core; ExitConfig is the core's pre-flight config or
+// startup precheck failing before any work begins. A participant is free to emit
+// any of the shared codes: none is reserved to the core.
 const (
-	ExitOK    = 0 // ok; rich outcome in the JSON reply
-	ExitError = 1 // unexpected error — NOT a usage error, which is ExitUsage
-	ExitUsage = 2 // usage error: a bad flag, or a missing/unexpected argument
-	ExitBusy  = 9 // at capacity — pre-accept busy decline (no body required)
+	ExitOK          = exitcode.OK          // ok; rich outcome in the JSON reply
+	ExitError       = exitcode.Error       // unexpected error: NOT a usage error, which is ExitUsage
+	ExitUsage       = exitcode.Usage       // usage error: a bad flag, or a missing/unexpected argument
+	ExitUnavailable = exitcode.Unavailable // no running core, or its socket does not answer
+	ExitConfig      = exitcode.Config      // a config or startup precheck failed before any work
+	ExitBusy        = exitcode.Busy        // at capacity: pre-accept busy decline (no body required)
 )
 
 // Participant speaks the default CLI transport: it reads a JSON request from

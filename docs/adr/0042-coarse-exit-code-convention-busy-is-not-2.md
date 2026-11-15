@@ -1,6 +1,6 @@
 # Coarse exit-code convention: low codes are global, `BUSY` moves off 2
 
-**Status**: Accepted (resolves `pg2-kzzam`)
+**Status**: Accepted (resolves `pg2-kzzam`); the `≥3` band and the `9` choice are superseded by ADR 0127 (the shared workspace exit codes), `2` for usage stands
 **Date**: 2026-07-29
 **Deciders**: Phillip Green II
 

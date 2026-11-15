@@ -35,7 +35,7 @@ func runExplain(args []string) int {
 	ref, err := locateCore(*socket, *token)
 	if err != nil {
 		reportNoCore(os.Stderr, "explain", err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	return explain(os.Stdout, os.Stderr, pos[0], ref, time.Now())
 }
@@ -45,7 +45,7 @@ func explain(stdout, stderr io.Writer, role string, ref core.Ref, now time.Time)
 	client, err := core.Dial(ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, "explain", err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	defer func() { _ = client.Close() }()
 	reply, code, err := client.Call(context.Background(), core.SubcommandStatus, []byte(`{"schemaVersion":"`+schemas.SchemaVersion+`"}`), core.CallOptions{})

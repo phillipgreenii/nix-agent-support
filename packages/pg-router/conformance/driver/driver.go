@@ -536,14 +536,6 @@ func invokeCheck(name, subcommand, replyType string, participant conformance.Par
 	return Result{Name: name}
 }
 
-// exitCoreReserved is exit 3, DEC-WIRE-1's core-reserved pre-flight signal
-// (cmd/pg-router/drain.go's own exitPrecheck — unexported from package main, so
-// it cannot be imported here and is instead restated by value with this
-// citation). No participant may legitimately emit it; only pg-router's own
-// core does, so invokeCommand always flags it as a violation rather than
-// treating it like an ordinary nonzero exit.
-const exitCoreReserved = 3
-
 // invokeCommand proves a command-role participant's argv wire contract
 // (Task pg2-2j5ac.23.3 Contract/Binding decisions): it runs participant via
 // argv — never transport.Participant's stdin/stdout JSON protocol, which a
@@ -553,8 +545,6 @@ const exitCoreReserved = 3
 //   - 0 (conformance.ExitOK) passes.
 //   - 9 (conformance.ExitBusy) is a graceful pre-accept decline (INV-CONC-1),
 //     reported as Busy, not a failure — Err stays nil.
-//   - 3 (exitCoreReserved, DEC-WIRE-1) is flagged as a violation: it is
-//     core-reserved pre-flight, and no participant may legitimately emit it.
 //   - 2 (conformance.ExitUsage) is ALSO flagged as a violation here, but for
 //     a project-specific reason DEC-WIRE-1 itself does not state:
 //     df-categorize/df-feedback's real command-role handlers shell out to
@@ -582,8 +572,6 @@ func invokeCommand(ctx context.Context, participant CommandParticipant) Result {
 		return Result{Name: name}
 	case conformance.ExitBusy:
 		return Result{Name: name, Busy: true}
-	case exitCoreReserved:
-		return Result{Name: name, Err: fmt.Errorf("command role exited %d: core-reserved pre-flight (DEC-WIRE-1); no participant may legitimately emit it", code)}
 	case conformance.ExitUsage:
 		return Result{Name: name, Err: fmt.Errorf("command role exited %d: usage error; df-categorize/df-feedback shell out to pg-connector, whose own exit codes 2/3 carry an unrelated meaning, so a command role must not pass this code through unchanged", code)}
 	default:

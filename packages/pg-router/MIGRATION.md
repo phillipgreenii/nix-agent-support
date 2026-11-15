@@ -305,7 +305,7 @@ drops, so a gate that was missed is visible.
 **Breaking changes.**
 
 - **`pause`/`resume`/`level` are socket clients.** They need a running core and fail with
-  `no running core` (exit `1`) otherwise; a level cannot be set while the daemon is down. A
+  `no running core` (exit `3`) otherwise; a level cannot be set while the daemon is down. A
   positional gate name on `pause` / `resume` is a usage error.
 - **Removed:** the `operator_paused`/`cicd_down`/`disk_space_low` gates and their `<LogDir>/gates/*`
   files (leftover files are inert; delete them); `PG_ROUTER_OPERATOR_PAUSED`, `PG_ROUTER_CICD_DOWN`,
@@ -546,7 +546,7 @@ The adapter's `validate` runs over the role's rendered table during the build, s
 before apply. Exercise a new or changed role once with `pg-router run-role <role> '<json>'` against
 a realistic event and read an actual outcome, not just an exit code (the repo's config-testing
 rule). The keys decode strictly: a wrong-typed value, or a `handler` that is not an absolute path,
-fails the load with exit `3` before anything runs.
+fails the load with exit `7` (config) before anything runs.
 
 ### Breaking: the core ships with no built-in role/query set
 

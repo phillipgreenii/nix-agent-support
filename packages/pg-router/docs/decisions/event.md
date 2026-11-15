@@ -189,7 +189,7 @@ the TUI and that there be a way to trigger a compaction and a dry-run compaction
   use (trigger `manual`): the landed scheme folds a prefix **without** holding the queue lock and
   splices the tail under the store's own mutex, rather than `pg2-8e0m6`'s "holds `q.mu`", which is
   the better property and is kept. With no core running it compacts **offline**, taking the lock
-  itself and refusing (exit `1`) when another process holds it; a core named explicitly by
+  itself and refusing (exit `9`, busy) when another process holds it; a core named explicitly by
   `--socket` never falls back to offline. The socket verb alone gets a longer connection deadline
   (2 minutes, set only after the token check) because it does real file work.
 - **Dry run.** Reads only: no rename, no temp file, no lock kept, no lock file created, no counter.

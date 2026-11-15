@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
+	"github.com/phillipgreenii/pg-router/internal/emit"
 )
 
 // Environment names for an INJECTED core reference. interfaces.md allows the CLI
@@ -70,7 +71,7 @@ func runIngestEventIO(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 	ref, err := locateCore(*socket, *token)
 	if err != nil {
 		reportNoCore(stderr, core.SubcommandIngestEvent, err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	request, err := io.ReadAll(stdin)
 	if err != nil {
@@ -118,7 +119,7 @@ func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request
 	client, err := core.Dial(ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, subcommand, err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	defer func() { _ = client.Close() }()
 	reply, code, err := client.Call(context.Background(), subcommand, request, core.CallOptions{})
@@ -163,4 +164,15 @@ func reportNoCore(stderr io.Writer, subcommand string, err error) {
 	if errors.Is(err, core.ErrNoRunningCore) {
 		fmt.Fprintf(stderr, "%s: start the core's socket service first, or pass --socket/--token to name a running core\n", subcommand)
 	}
+}
+
+// noCoreExit is the exit code for a failure that may be "no core is there": the
+// shared Unavailable code when err says no running core could be located or
+// reached, the generic Error otherwise (a schema-invalid event, a refused
+// enqueue).
+func noCoreExit(err error) int {
+	if errors.Is(err, core.ErrNoRunningCore) || errors.Is(err, emit.ErrNoCore) {
+		return exitUnavailable
+	}
+	return exitGeneric
 }

@@ -53,13 +53,13 @@ func TestStatus_JSONOutput(t *testing.T) {
 	}
 }
 
-// No running core: exit 1 with the "no running core" diagnostic and the
+// No running core: exit 3 with the "no running core" diagnostic and the
 // remedy — status never starts one (ADR 0036), matching push-inject.
-func TestStatus_NoRunningCoreIsExit1(t *testing.T) {
+func TestStatus_NoRunningCoreIsExit3(t *testing.T) {
 	var stdout, stderr strings.Builder
 	code := status(&stdout, &stderr, false, core.Ref{Socket: shortDir(t) + "/gone.sock"})
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want 1", code)
+	if code != conformance.ExitUnavailable {
+		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
 		t.Fatalf("stderr = %q, want a no-running-core diagnostic", stderr.String())

@@ -53,7 +53,7 @@ func runStatus(args []string) int {
 	ref, err := locateCore(*socket, *token)
 	if err != nil {
 		reportNoCore(os.Stderr, core.SubcommandStatus, err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	return status(os.Stdout, os.Stderr, *asJSON, ref)
 }
@@ -65,7 +65,7 @@ func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
 	client, err := core.Dial(ref, core.DefaultProbeTimeout)
 	if err != nil {
 		reportNoCore(stderr, core.SubcommandStatus, err)
-		return conformance.ExitError
+		return exitUnavailable
 	}
 	defer func() { _ = client.Close() }()
 

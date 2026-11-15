@@ -153,12 +153,12 @@ func TestDoctorClauses_MalformedAnswerIgnored(t *testing.T) {
 	}
 }
 
-// A config that does not load cannot be evaluated: FAIL lines, exit 1.
-func TestDoctorClauses_ConfigErrorExitsOne(t *testing.T) {
+// A config that does not load cannot be evaluated: FAIL lines, exit 7 (config).
+func TestDoctorClauses_ConfigErrorExitsConfig(t *testing.T) {
 	clausesFixture(t, tightSensor, clausesDiskResource, clausesRoles+"\n[[role]]\nname = \"broken\"\n")
 	var out strings.Builder
-	if code := runDoctorClauses(&out); code != exitGeneric || !strings.Contains(out.String(), "FAIL config:") {
-		t.Fatalf("exit = %d, want 1 with a FAIL config line:\n%s", code, out.String())
+	if code := runDoctorClauses(&out); code != exitPrecheck || !strings.Contains(out.String(), "FAIL config:") {
+		t.Fatalf("exit = %d, want 7 with a FAIL config line:\n%s", code, out.String())
 	}
 }
 

@@ -52,14 +52,14 @@ manual/test injection.
 It locates the core via `--socket`/`--token`, else `PG_ROUTER_SOCKET`/`PG_ROUTER_TOKEN`, else the
 discovery record under the log dir, and **forwards the event over that socket** — the core owns
 the durable queue in another process, so nothing is enqueued locally. With **no core running it
-fails** with a "no running core" error and **exit 1**; it never starts one
+fails** with a "no running core" error and **exit 3** (unavailable); it never starts one
 ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)).
 
-Exit codes are `0` accepted, `2` a **usage** error, and `1` for everything else — the same
-convention every other subcommand follows, because the common contract's pre-accept **busy** sits at
-`9` and no longer occupies `2`
+Exit codes are `0` accepted, `2` a **usage** error, `3` no running core, and `1` for everything
+else — the shared workspace codes ([ADR 0127](../../docs/adr/0127-pg-router-exit-codes-are-the-shared-workspace-codes.md)),
+because the common contract's pre-accept **busy** sits at `9` and no longer occupies `2`
 ([ADR 0042](../../docs/adr/0042-coarse-exit-code-convention-busy-is-not-2.md)). A malformed or
-non-schema-valid **event** is not a usage error: it fails on the same path as an unreachable core, so
+non-schema-valid **event** is not a usage error: it fails on the same path as a refused enqueue, so
 it exits `1`.
 
 The success report says the core **accepted** the event, never "enqueued": a still-retained
@@ -93,7 +93,7 @@ that gap were already evicted (`internal/activity.Ring.Read`). This CLI's own
 is always `false` through this subcommand today — the field exists for a
 future since-cursor caller (Task 4.0's TUI).
 
-Exit codes match every other operator subcommand: `0` ok, `2` usage, `1`
+Exit codes match every other operator subcommand: `0` ok, `2` usage, `3` no running core, `1`
 everything else (`9` is reserved for the pre-accept busy decline, which this
 read-only verb never returns).
 
@@ -146,7 +146,7 @@ procedure is `docs/beads-1-3-1-schema-migration.md` in the deployment repository
 tracker names.
 
 These commands are **socket clients**: they need a
-running core and fail with `no running core` (exit `1`) otherwise — they never start one
+running core and fail with `no running core` (exit `3`) otherwise — they never start one
 ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)). See `MIGRATION.md`'s
 "Gates: file-backed gates replaced by the Gate Registry" for what was removed from the original
 file-backed gates, and "Levels replace gates" for the replacement of the gate registry itself.
@@ -158,14 +158,14 @@ commands: the core hands a registered participant one command string with `--soc
 already baked in, and the participant appends its arguments and runs it (see the behavior docs'
 `INTF-CLI`).
 
-| Command        | Description                                                                                                                                                                                                                                                                                                                            |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ingest-event` | deliver one or more events to the **running** core: request JSON on stdin, reply JSON on stdout, coarse exit code (0 ok / 1 error / 2 usage / 9 busy)                                                                                                                                                                                  |
-| `self-status`  | push the caller's own status (healthy/degraded/unavailable) to the **running** core, naming the `participantId` it registered under: request JSON on stdin, reply JSON on stdout, coarse exit code (0 ok / 1 error / 2 usage / 9 busy). Every registered participant kind gets this callback, unlike `ingest-event` (a source's alone) |
+| Command        | Description                                                                                                                                                                                                                                                                                                                                                |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ingest-event` | deliver one or more events to the **running** core: request JSON on stdin, reply JSON on stdout, coarse exit code (0 ok / 1 error / 2 usage / 3 no running core / 9 busy)                                                                                                                                                                                  |
+| `self-status`  | push the caller's own status (healthy/degraded/unavailable) to the **running** core, naming the `participantId` it registered under: request JSON on stdin, reply JSON on stdout, coarse exit code (0 ok / 1 error / 2 usage / 3 no running core / 9 busy). Every registered participant kind gets this callback, unlike `ingest-event` (a source's alone) |
 
 `ingest-event` locates the core via `--socket`/`--token`, else `PG_ROUTER_SOCKET`/`PG_ROUTER_TOKEN`,
 else the discovery record under the log dir. With **no core running it fails** with a
-"no running core" error and exit 1 — it never starts one
+"no running core" error and exit 3 — it never starts one
 ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)).
 
 `self-status` is not a way to ask the daemon how it is: it needs a JSON request object on stdin

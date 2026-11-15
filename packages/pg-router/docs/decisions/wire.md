@@ -31,14 +31,16 @@ its own arguments, but arguments are never the payload channel. Concretely:
   never absent — so a handler is never handed nothing in its place. The obligation itself is
   behavior and is stated there (`interfaces.md`'s "Event shape"); this entry records only what does
   **not** change in the schema.
-- **Coarse exit codes.** A subcommand's exit code stays coarse: `0` ok, `1` unexpected error, `2`
-  **usage** error, `3` **core-reserved pre-flight** (`drain.go`'s `exitPrecheck` — a config or
-  startup precheck failing before any work begins), `9` busy, and `≥4` otherwise
-  app-specific. The **rich outcome is in the JSON reply**, so a participant in a degraded state MAY
-  return an exit code only (busy → `9`, no body). The **low** codes are held for meanings general to
-  every app — any app can be invoked wrongly, so `2` is reserved for that — while busy means
-  something only to a participant on a capacity-bounded transport and therefore lives out in the
-  app-specific range (`ADR 0042`).
+- **Coarse exit codes.** A subcommand's exit code stays coarse and is one of the **shared
+  workspace codes** (`ADR 0127`; package `exitcode` of the `x` module): `0` ok, `1` unexpected
+  error, `2` **usage** error, `3` **unavailable** (no running core could be located or reached),
+  `7` **config** (the core's own config or startup precheck failing before any work begins,
+  `drain.go`'s `exitPrecheck`), `9` **busy**, and `20` to `63` otherwise app-specific. No code is
+  reserved to the core, and a participant MUST NOT use `64` to `78`, `124`, `126`, `127`, `128+n`
+  or `255`. The **rich outcome is in the JSON reply**, so a participant in a degraded state MAY
+  return an exit code only (busy → `9`, no body). The **low** codes are held for meanings general
+  to every app — any app can be invoked wrongly, so `2` is reserved for that — while busy is a
+  shared code too (`ADR 0042` moved it off `2`; `ADR 0127` made the band the shared one).
   - **`9` now covers two callers, not one.** Until now `9` was only ever a **participant's** own
     pre-accept busy decline on offered work. It also names the core's own **read-refusal**: the
     core itself returns `9` for a **read** verb (`status`, `mon.read`) it is too saturated to serve
@@ -46,13 +48,11 @@ its own arguments, but arguments are never the payload channel. Concretely:
     the code deliberately — a caller that sees `9` always knows "nothing happened, retry later,"
     whichever side declined — and a reply body, where the participant supplies one, still carries
     which case applies (`interfaces.md`'s "Coarse outcome, rich reply").
-  - **Reconciling against `ADR 0042`.** That ADR's own Decision table still reads `≥3` as one
-    undifferentiated **app-specific** band, even though its own Context already quotes
-    `drain.go`'s local `exitPrecheck = 3` verbatim and its Consequences names `3` as the value
-    already occupying it. `3` was therefore never actually free for a participant to claim in
-    practice — this decision makes that explicit rather than contradicting `ADR 0042`: `3` is
-    named `exitPrecheck`, reserved by the core for its own pre-flight failure, and the
-    app-specific band `ADR 0042` decided on narrows to start at `4`.
+  - **Reconciling against `ADR 0042`.** `ADR 0127` supersedes this entry's earlier statement that
+    `3` was core-reserved (`exitPrecheck`) and that the app band started at `4`: the precheck is now
+    `7` (config), `3` is the shared **unavailable** code a CLI verb exits with when no core is
+    running, and the rule that reserved `3` to the core is retired. The conformance driver no
+    longer flags a participant's `3` as a violation.
 - **A decline body carries an optional `kind` and an optional `detail`.** A participant's busy
   decline (exit `9`) MAY carry a JSON body `{ "reason", "kind", "detail" }`. `kind` is one of `busy`,
   `fault` or `neutral`, and **absent means `busy`**, so every existing participant keeps its
@@ -81,9 +81,10 @@ behavior side names only "a transport contract" and this entry names the default
 
 **Why the exit codes stay coarse rather than enumerating outcomes.** An exit code is a single small
 integer with no room for a reason, so any richer scheme would encode a taxonomy in it — and that
-taxonomy would then have two homes, the exit code and the JSON reply, which drift. Four codes cover
-the only distinctions a caller can act on without reading the body: it worked, it broke, it was
-invoked wrongly, it is busy right now. Everything else is a field.
+taxonomy would then have two homes, the exit code and the JSON reply, which drift. A handful of
+shared codes cover the only distinctions a caller can act on without reading the body: it worked, it
+broke, it was invoked wrongly, nothing is there to answer, the configuration is wrong, it is busy
+right now. Everything else is a field.
 
 **The illustrative message shapes.** These are **illustrative examples**, not golden ones: the
 authoritative artifacts are the versioned JSON Schemas each interface's conformance suite checks

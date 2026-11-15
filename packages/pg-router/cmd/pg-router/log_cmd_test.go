@@ -289,8 +289,8 @@ func TestLogCompact_OfflineRefusedWhileLocked(t *testing.T) {
 	defer func() { _ = holder.Close() }()
 
 	_, errOut, code := runLogCompactCapture(t, logCompactOpts{logDir: dir})
-	if code != exitGeneric {
-		t.Fatalf("real run against a locked log: exit = %d, want %d", code, exitGeneric)
+	if code != exitBusy {
+		t.Fatalf("real run against a locked log: exit = %d, want %d (busy)", code, exitBusy)
 	}
 	for _, want := range []string{"log compact:", "in use by another pg-router process", "queue.jsonl.lock"} {
 		if !strings.Contains(errOut, want) {
@@ -310,7 +310,7 @@ func TestLogCompact_OfflineRefusedWhileLocked(t *testing.T) {
 		t.Fatalf("dry run must report that a real run would be refused: %v", dry)
 	}
 	human, _, _ := runLogCompactCapture(t, logCompactOpts{dryRun: true, logDir: dir})
-	if !strings.Contains(human, "a real run would be REFUSED (exit 1): the log is locked by another pg-router process") {
+	if !strings.Contains(human, "a real run would be REFUSED (exit 9): the log is locked by another pg-router process") {
 		t.Fatalf("human dry run lacks the refusal:\n%s", human)
 	}
 	if held, _ := eventqueue.LogLocked(path); !held {
@@ -326,8 +326,8 @@ func TestLogCompact_ExplicitSocketNeverFallsBackOffline(t *testing.T) {
 	path := writeBloatedLog(t, dir, 20)
 	sum := fileSum(t, path)
 	_, errOut, code := runLogCompactCapture(t, logCompactOpts{logDir: dir, socket: filepath.Join(dir, "nope.sock"), token: "t"})
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d; stderr=%s", code, conformance.ExitError, errOut)
+	if code != conformance.ExitUnavailable {
+		t.Fatalf("exit = %d, want %d; stderr=%s", code, conformance.ExitUnavailable, errOut)
 	}
 	if fileSum(t, path) != sum || dirNames(t, dir) != "queue.jsonl" {
 		t.Fatalf("an unreachable explicit socket fell back to touching the log: %s", dirNames(t, dir))
@@ -405,7 +405,7 @@ func TestRenderLogCompact(t *testing.T) {
 		{"dry run, torn", func(v *core.LogCompactView) { v.DryRun = true; v.Torn = true }, []string{"undecodable line"}, nil},
 		{
 			"dry run, would refuse", func(v *core.LogCompactView) { v.DryRun = true; v.Via = core.ViaOffline; v.WouldRefuse = "locked" },
-			[]string{"offline, no daemon running", "a real run would be REFUSED (exit 1): locked"},
+			[]string{"offline, no daemon running", "a real run would be REFUSED (exit 9): locked"},
 			[]string{"would shrink"},
 		},
 		{

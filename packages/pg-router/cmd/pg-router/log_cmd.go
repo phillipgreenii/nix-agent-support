@@ -30,7 +30,7 @@ import (
 //     PG_ROUTER_TOKEN, else discovery under the log dir) the request goes over its
 //     socket and the compaction runs inside the daemon (core's log-compact verb);
 //   - with NO core running it compacts OFFLINE: a real run takes the log lock
-//     itself and is refused (exit 1) if another process holds it, a dry run only
+//     itself and is refused (exit 9, busy) if another process holds it, a dry run only
 //     reads the file. A core named explicitly by --socket never falls back to the
 //     offline path: the operator asked for that daemon.
 //
@@ -174,7 +174,7 @@ func logCompactOffline(stderr io.Writer, o logCompactOpts) (core.LogCompactView,
 			fmt.Fprintf(stderr, "log compact: %v\n", locked)
 			fmt.Fprintf(stderr, "log compact: no running core answered on its socket, so a process that is not serving one holds %s; find it (for example with `lsof %s`) and stop it, then retry\n",
 				textsafe.Sanitize(locked.LockPath), textsafe.Sanitize(locked.LockPath))
-			return core.LogCompactView{}, conformance.ExitError
+			return core.LogCompactView{}, exitBusy
 		}
 		fmt.Fprintf(stderr, "log compact: %v\n", err)
 		return core.LogCompactView{}, conformance.ExitError
@@ -244,7 +244,7 @@ func renderLogCompact(w io.Writer, v core.LogCompactView) {
 	if v.DryRun {
 		switch {
 		case v.WouldRefuse != "":
-			fmt.Fprintf(w, "  a real run would be REFUSED (exit 1): %s\n", textsafe.Sanitize(v.WouldRefuse))
+			fmt.Fprintf(w, "  a real run would be REFUSED (exit 9): %s\n", textsafe.Sanitize(v.WouldRefuse))
 		case v.NoProgress:
 			fmt.Fprintln(w, "  a real run would do nothing: no progress is possible")
 		default:
