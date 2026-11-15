@@ -35,12 +35,11 @@
 package gitenv
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // gitVarPrefix is the namespace this package filters. Everything OUTSIDE it
@@ -119,27 +118,27 @@ func Hermetic(base []string) []string {
 // Environ is [Hermetic] applied to the current process environment.
 func Environ() []string { return Hermetic(os.Environ()) }
 
-// Command builds `git [-C dir] <args...>` with a hermetic child environment.
-// An empty dir omits -C, so the child inherits the parent's working
-// directory.
+// Call builds the cmdrun.Call for `git [-C dir] <args...>` with a hermetic
+// child environment (the whole environment, never the parent's). An empty dir
+// omits -C, so the child inherits the parent's working directory. The call is
+// bounded and runs in its own process group (scriptout.BoundChild).
 //
 // Callers still pass dir: it is necessary (git must be pointed at the right
 // place) but, as this package's doc comment explains, not sufficient. Both
 // halves are required, which is why they are supplied together here rather
 // than left to each call site.
-func Command(ctx context.Context, dir string, args ...string) *exec.Cmd {
+func Call(dir string, args ...string) cmdrun.Call {
 	full := make([]string, 0, len(args)+2)
 	if dir != "" {
 		full = append(full, "-C", dir)
 	}
 	full = append(full, args...)
 
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = Environ()
-	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
-	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
-	// residual wait for the stdout/stderr pipes to close, independent of
-	// killing the direct git child [bead pg2-332z8 #13].
-	cmd.WaitDelay = scriptout.DefaultWaitDelay
-	return cmd
+	return scriptout.BoundChild(cmdrun.Call{
+		Name:    "git",
+		Args:    full,
+		Env:     Environ(),
+		EnvMode: cmdrun.EnvExact,
+		Timeout: scriptout.ChildTimeout,
+	})
 }

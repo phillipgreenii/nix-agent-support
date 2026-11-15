@@ -41,7 +41,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,6 +51,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/vcs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Provider is the builtin GitHub VCS provider.
@@ -134,37 +134,33 @@ func (r *cliGHRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 func (r *cliGHRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	// The token-resolution preflight lives in command() (ghexec.go) — the one
 	// choke point every gh invocation in this module goes through.
-	cmd, err := r.command(ctx, args...)
+	call, err := r.command(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+	call.Stdin = stdin
+	res := cmdrun.Exec(ctx, call)
+	if err := scriptout.ResultErr(res); err != nil {
+		if res.StartErr == nil {
 			// st (untruncated) drives isAuthFailure's classification; only
 			// the copy folded into the returned error message itself is
 			// capped, so a verbose gh failure cannot inflate an error
 			// string without bound [bead pg2-332z8 #26].
-			st := strings.TrimSpace(stderr.String())
-			folded := scriptout.TruncateForFold(stderr.Bytes())
-			if isAuthFailure(exitErr.ExitCode(), st) {
-				return stdout.Bytes(), fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
+			st := strings.TrimSpace(string(res.Stderr))
+			folded := scriptout.TruncateForFold(res.Stderr)
+			if isAuthFailure(res.Code, st) {
+				return res.Stdout, fmt.Errorf("gh %s: %s: run `gh auth login`: %w",
 					strings.Join(args, " "), folded, ErrGHAuthInvalid)
 			}
-			return stdout.Bytes(), &ghExecError{
+			return res.Stdout, &ghExecError{
 				msg:    fmt.Sprintf("gh %s: %v: %s", strings.Join(args, " "), err, folded),
 				stderr: folded,
 				err:    err,
 			}
 		}
-		return stdout.Bytes(), fmt.Errorf("gh %s: %w (is gh on PATH?)", strings.Join(args, " "), err)
+		return res.Stdout, fmt.Errorf("gh %s: %w (is gh on PATH?)", strings.Join(args, " "), err)
 	}
-	return stdout.Bytes(), nil
+	return res.Stdout, nil
 }
 
 // Common JSON field set requested from gh for PR-list endpoints.

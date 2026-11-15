@@ -125,7 +125,7 @@ func TestGHAuthTokenCommand_ExcludesLeakedGitDirFamily(t *testing.T) {
 		t.Setenv(k, v)
 	}
 
-	cmd := ghAuthTokenCommand(context.Background(), "", "")
+	cmd := ghAuthTokenCommand("", "")
 
 	assertNoLeakedGitDirFamily(t, cmd.Env)
 }
@@ -142,7 +142,7 @@ func TestGHAuthTokenCommand_ExcludesEnterpriseAndTargetVars(t *testing.T) {
 	t.Setenv("GH_REPO", "leaked/repo")
 	t.Setenv("GH_CONFIG_DIR", "/leaked/gh-config")
 
-	cmd := ghAuthTokenCommand(context.Background(), "", "")
+	cmd := ghAuthTokenCommand("", "")
 
 	for _, name := range []string{
 		"GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",

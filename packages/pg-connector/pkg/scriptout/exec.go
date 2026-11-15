@@ -105,10 +105,16 @@ func ResultErr(r cmdrun.Result) error {
 	case r.Signal != "":
 		return errors.New("signal: terminated by a signal")
 	case r.Code != 0:
-		return fmt.Errorf("exit status %d", r.Code)
+		return &ExitStatusError{Code: r.Code}
 	}
 	return nil
 }
+
+// ExitStatusError is the error ResultErr returns for a child that exited
+// non-zero ("exit status N"), so a caller can read the code with errors.As.
+type ExitStatusError struct{ Code int }
+
+func (e *ExitStatusError) Error() string { return fmt.Sprintf("exit status %d", e.Code) }
 
 // callDetail describes a failed backend exec for its error message: the op,
 // how long the exec ran, and — when the call's context ended it — whether the

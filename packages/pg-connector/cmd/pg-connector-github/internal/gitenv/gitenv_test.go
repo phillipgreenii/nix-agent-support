@@ -1,12 +1,12 @@
 package gitenv
 
 import (
-	"context"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // leakedByAGitHookCommit is the GIT_* set a `git commit` FROM A LINKED
@@ -129,7 +129,7 @@ func TestHermeticDoesNotModifyBase(t *testing.T) {
 }
 
 // TestCommandEnvExcludesLeakedGitDir is the acceptance test named on
-// pg2-lx41y: it asserts on the constructed exec.Cmd.Env, so it needs no
+// pg2-lx41y: it asserts on the constructed cmdrun.Call.Env, so it needs no
 // subprocess and no real repository.
 func TestCommandEnvExcludesLeakedGitDir(t *testing.T) {
 	for _, kv := range leakedByAGitHookCommit {
@@ -137,10 +137,13 @@ func TestCommandEnvExcludesLeakedGitDir(t *testing.T) {
 		t.Setenv(k, v)
 	}
 
-	cmd := Command(context.Background(), "/some/target/dir", "status", "--porcelain")
+	cmd := Call("/some/target/dir", "status", "--porcelain")
 
+	if cmd.EnvMode != cmdrun.EnvExact {
+		t.Fatal("cmd.EnvMode is not EnvExact: EnvAppend adds the hermetic Env onto the parent environment, which is the defect")
+	}
 	if cmd.Env == nil {
-		t.Fatal("cmd.Env is nil: a nil Env makes the child inherit the parent environment, which is the defect")
+		t.Fatal("cmd.Env is nil: an EnvExact call would then run the child with an empty environment")
 	}
 	for _, k := range envKeys(cmd.Env) {
 		if strings.HasPrefix(k, "GIT_") {
@@ -158,9 +161,12 @@ func TestCommandEnvExcludesLeakedGitDir(t *testing.T) {
 // one and holding it open), which a context deadline alone does not
 // cover.
 func TestCommandSetsWaitDelay(t *testing.T) {
-	cmd := Command(context.Background(), "/some/target/dir", "rev-parse", "--show-toplevel")
+	cmd := Call("/some/target/dir", "rev-parse", "--show-toplevel")
 	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
 		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
+	}
+	if cmd.Timeout != scriptout.ChildTimeout || !cmd.OwnProcGroup || cmd.TermGrace != scriptout.DefaultTermGrace {
+		t.Fatalf("call is not bounded: %+v", cmd)
 	}
 }
 
@@ -192,11 +198,8 @@ func TestCommandBuildsDirScopedArgs(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cmd := Command(context.Background(), tc.dir, tc.args...)
-			// Args[0] is the resolved path to the git binary; compare on the
-			// base name so the assertion holds wherever git lives.
-			got := slices.Clone(cmd.Args)
-			got[0] = "git"
+			cmd := Call(tc.dir, tc.args...)
+			got := append([]string{cmd.Name}, cmd.Args...)
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("args\n got: %v\nwant: %v", got, tc.want)
 			}

@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/vcs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // ghStubOnPath puts an executable named `gh` on PATH that records its own
@@ -200,8 +200,8 @@ func TestCLICommand_NoToken_RefusesBeforeExec(t *testing.T) {
 	cli := NewCLIWithTokenSource(&fakeTokenSource{err: errors.New("keychain unavailable")})
 	cmd, err := cli.Command(context.Background(), "pr", "view", "1")
 
-	if cmd != nil {
-		t.Fatalf("Command returned a non-nil *exec.Cmd (%v) despite failed token resolution", cmd.Args)
+	if cmd.Name != "" {
+		t.Fatalf("Command returned a non-zero Call (%v) despite failed token resolution", cmd)
 	}
 	if err == nil {
 		t.Fatal("Command returned nil error with no resolvable token")
@@ -284,6 +284,9 @@ func TestCLICommand_SetsWaitDelay(t *testing.T) {
 	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
 		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
 	}
+	if cmd.Timeout != scriptout.ChildTimeout || !cmd.OwnProcGroup || cmd.TermGrace != scriptout.DefaultTermGrace || cmd.EnvMode != cmdrun.EnvExact {
+		t.Fatalf("call is not bounded or does not own its environment: %+v", cmd)
+	}
 }
 
 // TestCLIRun_ErrorMessage_CapsStderr is the regression test for bead
@@ -338,8 +341,8 @@ func TestCLIRun_ExecFailureIsTypedAndClassifiedByStderr(t *testing.T) {
 	if !errors.As(err, &ge) {
 		t.Fatalf("error %T is not a *ghExecError", err)
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+	var exitErr *scriptout.ExitStatusError
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 {
 		t.Errorf("exit error not reachable through the typed error: %v", err)
 	}
 	want := "gh search prs -- label:\"rate limit\": exit status 1: error connecting to api.github.com\ncheck your internet connection"

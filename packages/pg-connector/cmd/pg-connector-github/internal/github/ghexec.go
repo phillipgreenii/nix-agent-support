@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/gitenv"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // CLI is the token-protected gateway through which this backend invokes the
@@ -29,7 +29,7 @@ import (
 // Callers reach it two ways. Run/RunStdin hand the whole invocation over
 // (stdout bytes plus gh-auth classification) and are what every production
 // call site in this package (github.go's Provider methods) actually uses.
-// Command returns the prepared *exec.Cmd for a caller that must wire it up
+// Command returns the prepared cmdrun.Call for a caller that must run it
 // itself — no in-module production site does today, but the tests exercise
 // it directly (ghexec_test.go) to assert on the constructed cmd.Env/Args
 // without spawning a real gh.
@@ -89,10 +89,10 @@ func NewCLIWithTokenSource(src TokenSource) *CLI {
 }
 
 // Command resolves a token and returns a ready-to-run `gh <args...>` with the
-// token injected into its env. On resolution failure it returns a nil *exec.Cmd
+// token injected into its env. On resolution failure it returns a zero Call
 // and an error wrapping ErrGHAuthInvalid: no process is created, so a caller
 // that honors the error cannot reach an unauthenticated gh.
-func (c *CLI) Command(ctx context.Context, args ...string) (*exec.Cmd, error) {
+func (c *CLI) Command(ctx context.Context, args ...string) (cmdrun.Call, error) {
 	return c.r.command(ctx, args...)
 }
 
@@ -119,7 +119,8 @@ func (c *CLI) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byt
 // exec sites on pg2-lx41y). gitenv.Hermetic is the same allowlist those git
 // sites use: it drops the GIT_DIR family while leaving gh's own needs (PATH,
 // HOME, GH_*, proxies, SSH) untouched.
-func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, error) {
+func (r *cliGHRunner) command(ctx context.Context, args ...string) (cmdrun.Call, error) {
+	var none cmdrun.Call
 	tok, err := r.token(ctx)
 	if err != nil {
 		// A lookup that never finished (killed at the per-call budget or by a
@@ -127,18 +128,21 @@ func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, e
 		// ErrGHAuthInvalid so it surfaces as unavailable, not as "run `gh auth
 		// login`" [bead pg2-ev2uf]. gh is still not executed.
 		if errors.Is(err, errTokenLookupInterrupted) {
-			return nil, fmt.Errorf("gh %s: GitHub credential lookup did not complete: %w",
+			return none, fmt.Errorf("gh %s: GitHub credential lookup did not complete: %w",
 				strings.Join(args, " "), err)
 		}
-		return nil, fmt.Errorf("gh %s: no usable GitHub credential; run `gh auth login`: %w",
+		return none, fmt.Errorf("gh %s: no usable GitHub credential; run `gh auth login`: %w",
 			strings.Join(args, " "), errors.Join(ErrGHAuthInvalid, err))
 	}
-	cmd := exec.CommandContext(ctx, r.binary(), args...)
-	cmd.Env = envWithGHHost(envWithGHToken(gitenv.Hermetic(os.Environ()), tok), r.host)
-	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
-	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
-	// residual wait for the stdout/stderr pipes to close, independent of
-	// killing the direct gh child [bead pg2-332z8 #13].
-	cmd.WaitDelay = scriptout.DefaultWaitDelay
-	return cmd, nil
+	// Bounded and in its own process group (scriptout.BoundChild): a cancelled
+	// or hung gh ends with its whole tree, git children included, and
+	// WaitDelay bounds the pipe wait a grandchild holding a pipe would
+	// otherwise extend.
+	return scriptout.BoundChild(cmdrun.Call{
+		Name:    r.binary(),
+		Args:    args,
+		Env:     envWithGHHost(envWithGHToken(gitenv.Hermetic(os.Environ()), tok), r.host),
+		EnvMode: cmdrun.EnvExact,
+		Timeout: scriptout.ChildTimeout,
+	}), nil
 }

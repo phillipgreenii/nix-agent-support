@@ -34,8 +34,8 @@ func TestCLIWithOptions_MainCallCarriesBinaryAndHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Command: %v", err)
 	}
-	if cmd.Path != "/opt/example/bin/gh-custom" && cmd.Args[0] != "/opt/example/bin/gh-custom" {
-		t.Errorf("main call binary = Path %q Args[0] %q, want /opt/example/bin/gh-custom", cmd.Path, cmd.Args[0])
+	if cmd.Name != "/opt/example/bin/gh-custom" {
+		t.Errorf("main call binary = %q, want /opt/example/bin/gh-custom", cmd.Name)
 	}
 	if got := ghHostEntries(cmd.Env); len(got) != 1 || got[0] != "GH_HOST=github.example.com" {
 		t.Errorf("main call GH_HOST entries = %v, want exactly [GH_HOST=github.example.com]", got)
@@ -53,11 +53,11 @@ func TestCLIWithOptions_MainCallCarriesBinaryAndHost(t *testing.T) {
 func TestCLIWithOptions_TokenChildCarriesBinaryAndHost(t *testing.T) {
 	t.Setenv("GH_HOST", "ambient.example.invalid")
 
-	cmd := ghAuthTokenCommand(context.Background(), "/opt/example/bin/gh-custom", "github.example.com")
-	if cmd.Args[0] != "/opt/example/bin/gh-custom" {
-		t.Errorf("token child binary = %q, want /opt/example/bin/gh-custom", cmd.Args[0])
+	cmd := ghAuthTokenCommand("/opt/example/bin/gh-custom", "github.example.com")
+	if cmd.Name != "/opt/example/bin/gh-custom" {
+		t.Errorf("token child binary = %q, want /opt/example/bin/gh-custom", cmd.Name)
 	}
-	if got := strings.Join(cmd.Args[1:], " "); got != "auth token" {
+	if got := strings.Join(cmd.Args, " "); got != "auth token" {
 		t.Errorf("token child args = %q, want %q", got, "auth token")
 	}
 	if got := ghHostEntries(cmd.Env); len(got) != 1 || got[0] != "GH_HOST=github.example.com" {
@@ -94,15 +94,15 @@ func TestCLIWithOptions_ZeroValueIsToday(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Command: %v", err)
 	}
-	if cmd.Args[0] != "gh" {
-		t.Errorf("default binary = %q, want gh", cmd.Args[0])
+	if cmd.Name != "gh" {
+		t.Errorf("default binary = %q, want gh", cmd.Name)
 	}
 	if got := ghHostEntries(cmd.Env); len(got) != 0 {
 		t.Errorf("zero Options leaked GH_HOST entries %v into the main call", got)
 	}
-	tok := ghAuthTokenCommand(context.Background(), "", "")
-	if tok.Args[0] != "gh" {
-		t.Errorf("default token child binary = %q, want gh", tok.Args[0])
+	tok := ghAuthTokenCommand("", "")
+	if tok.Name != "gh" {
+		t.Errorf("default token child binary = %q, want gh", tok.Name)
 	}
 	if got := ghHostEntries(tok.Env); len(got) != 0 {
 		t.Errorf("zero host leaked GH_HOST entries %v into the token child", got)

@@ -136,6 +136,7 @@ type ghFile struct {
 	fset    *token.FileSet
 	ast     *ast.File
 	execPkg string          // local name of "os/exec"; "" when not imported
+	runPkg  string          // local name of x/cmdrun; "" when not imported
 	ghCtx   bool            // imports (or is in) a backend's internal/github package
 	aliases map[string]bool // names bound to exec.Command / exec.CommandContext
 }
@@ -187,6 +188,12 @@ func ghExecFindings(root string) ([]string, error) {
 					gf.execPkg = imp.Name.Name
 				}
 			}
+			if v == "github.com/phillipgreenii/x/cmdrun" {
+				gf.runPkg = "cmdrun"
+				if imp.Name != nil {
+					gf.runPkg = imp.Name.Name
+				}
+			}
 			if strings.HasSuffix(v, "/internal/github") {
 				gf.ghCtx = true
 			}
@@ -219,7 +226,9 @@ func ghExecFindings(root string) ([]string, error) {
 			}
 		}
 		for _, gf := range pk.files {
-			if gf.execPkg == "" || gf.execPkg == "_" || gf.execPkg == "." {
+			noExec := gf.execPkg == "" || gf.execPkg == "_" || gf.execPkg == "."
+			noRun := gf.runPkg == "" || gf.runPkg == "_" || gf.runPkg == "."
+			if noExec && noRun {
 				continue
 			}
 			choke, chokeOK := ghChokePoints[gf.rel]
@@ -250,7 +259,7 @@ func ghExecFindings(root string) ([]string, error) {
 					switch n := n.(type) {
 					case *ast.CallExpr:
 						idx, ok := gf.execArgIndex(n)
-						if !ok {
+						if noExec || !ok {
 							return true
 						}
 						switch {
@@ -260,15 +269,25 @@ func ghExecFindings(root string) ([]string, error) {
 							reason = "exec of gh"
 						}
 					case *ast.CompositeLit:
-						if sel, ok := n.Type.(*ast.SelectorExpr); ok && gf.isExecPkg(sel.X) && sel.Sel.Name == "Cmd" {
+						// exec.Cmd{Path: ...} and cmdrun.Call{Name: ...} both
+						// name the program a child runs; the latter is how
+						// every backend execs since the x/cmdrun conversion.
+						if sel, ok := n.Type.(*ast.SelectorExpr); ok {
+							key, what := "", ""
+							switch {
+							case !noExec && gf.isExecPkg(sel.X) && sel.Sel.Name == "Cmd":
+								key, what = "Path", "exec.Cmd literal naming gh"
+							case !noRun && isIdentNamed(sel.X, gf.runPkg) && sel.Sel.Name == "Call":
+								key, what = "Name", "cmdrun.Call literal naming gh"
+							}
 							for _, el := range n.Elts {
 								kv, ok := el.(*ast.KeyValueExpr)
-								if !ok {
+								if !ok || key == "" {
 									continue
 								}
-								if k, ok := kv.Key.(*ast.Ident); ok && k.Name == "Path" && !allowed &&
+								if k, ok := kv.Key.(*ast.Ident); ok && k.Name == key && !allowed &&
 									(strict || pk.isGH(gf, kv.Value, locals, map[string]bool{})) {
-									reason = "exec.Cmd literal naming gh"
+									reason = what
 									pos = kv.Pos()
 								}
 							}
@@ -306,6 +325,11 @@ func (gf *ghFile) snippet(n ast.Node) string {
 		return ""
 	}
 	return strings.Join(strings.Fields(string(gf.src[a:b])), " ")
+}
+
+func isIdentNamed(x ast.Expr, name string) bool {
+	id, ok := x.(*ast.Ident)
+	return ok && id.Name == name
 }
 
 func (gf *ghFile) isExecPkg(x ast.Expr) bool {
@@ -645,6 +669,11 @@ func TestGHExecChokePointDetectsEveryForm(t *testing.T) {
 			"cmd/x/a.go:5",
 		},
 		{
+			"cmdrun.Call literal",
+			map[string]string{"cmd/x/a.go": "package x\n\nimport \"github.com/phillipgreenii/x/cmdrun\"\n\nfunc f() { _ = cmdrun.Call{Name: \"gh\"} }\n"},
+			"cmd/x/a.go:5",
+		},
+		{
 			"context literal",
 			map[string]string{"cmd/x/a.go": "package x\n\nimport (\n\t\"context\"\n\t\"os/exec\"\n)\n\nfunc f(ctx context.Context) { _ = exec.CommandContext(ctx, \"gh\") }\n"},
 			"cmd/x/a.go:8",
@@ -753,6 +782,11 @@ func TestGHExecChokePointDetectsEveryForm(t *testing.T) {
 			ghPkgDir + "token.go:12",
 		},
 		{
+			"configured binary: cmdrun.Call literal in a new function",
+			map[string]string{ghPkgDir + "extra.go": "package github\n\nimport \"github.com/phillipgreenii/x/cmdrun\"\n\nfunc raw(r *cliGHRunner) cmdrun.Call { return cmdrun.Call{Name: r.binary()} }\n"},
+			ghPkgDir + "extra.go:5",
+		},
+		{
 			"configured binary: test file in the package",
 			map[string]string{ghPkgDir + "x_test.go": "package github\n\nimport \"os/exec\"\n\nfunc g(r *cliGHRunner) { _ = exec.Command(r.bin) }\n"},
 			ghPkgDir + "x_test.go:5",
@@ -800,7 +834,7 @@ func TestGHExecChokePointRealChokeFilesAreClean(t *testing.T) {
 		t.Fatalf("the real choke-point files must be clean, got:\n  %s", strings.Join(got, "\n  "))
 	}
 
-	real[dir+"ghexec.go"] += "\nfunc (r *cliGHRunner) sneak(ctx context.Context) *exec.Cmd {\n\treturn exec.CommandContext(ctx, r.bin, \"api\")\n}\n"
+	real[dir+"ghexec.go"] += "\nfunc (r *cliGHRunner) sneak() cmdrun.Call {\n\treturn cmdrun.Call{Name: r.bin, Args: []string{\"api\"}}\n}\n"
 	got, err = ghExecFindings(writeGHTree(t, real))
 	if err != nil {
 		t.Fatal(err)

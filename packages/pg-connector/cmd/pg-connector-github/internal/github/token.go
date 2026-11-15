@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/gitenv"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // TokenSource retrieves a GitHub auth token. The default reads gh's own auth;
@@ -51,45 +51,42 @@ type ghCLITokenSource struct{ bin, host string }
 // wrong repo, but it is still the same defect shape (bead pg2-5xn2j) — an
 // os.Environ() passthrough hands the whole GIT_* family to a gh child for no
 // reason gh needs.
-func ghAuthTokenCommand(ctx context.Context, bin, host string) *exec.Cmd {
+func ghAuthTokenCommand(bin, host string) cmdrun.Call {
 	if bin == "" {
 		bin = DefaultBinary
 	}
-	cmd := exec.CommandContext(ctx, bin, "auth", "token")
-	cmd.Env = envWithGHHost(envWithoutGHToken(gitenv.Hermetic(os.Environ())), host)
-	// See scriptout.DefaultWaitDelay's doc comment [bead pg2-332z8 #13].
-	cmd.WaitDelay = scriptout.DefaultWaitDelay
-	return cmd
+	return scriptout.BoundChild(cmdrun.Call{
+		Name:    bin,
+		Args:    []string{"auth", "token"},
+		Env:     envWithGHHost(envWithoutGHToken(gitenv.Hermetic(os.Environ())), host),
+		EnvMode: cmdrun.EnvExact,
+		Timeout: scriptout.ChildTimeout,
+	})
 }
 
 // Token execs `gh auth token` and returns its stdout. On failure it surfaces
-// the subprocess's actual stderr (via *exec.Cmd.Output's ExitError.Stderr,
-// populated automatically because cmd.Stderr is left nil) instead of the
-// bare "exit status N" .Output() would otherwise leave callers with — every
-// credential failure used to collapse to a generic "run gh auth login"
+// the subprocess's actual stderr instead of the bare "exit status N" every
+// credential failure used to collapse to — a generic "run gh auth login"
 // message regardless of the real cause (bead pg2-y23d4 #32).
 //
-// A lookup that never finished (killed at the context deadline or by a
-// signal, or stuck past WaitDelay) says nothing about the credential, so it
-// wraps errTokenLookupInterrupted and cliGHRunner.command keeps it out of the
+// A lookup that never finished (killed at the context deadline, the call's
+// Timeout or by a signal) says nothing about the credential, so it wraps
+// errTokenLookupInterrupted and cliGHRunner.command keeps it out of the
 // auth-invalid class [bead pg2-ev2uf]. Only a lookup that ran to completion
 // and exited non-zero is left for the caller to treat as a credential problem.
 func (s ghCLITokenSource) Token(ctx context.Context) (string, error) {
-	out, err := ghAuthTokenCommand(ctx, s.bin, s.host).Output()
-	if err != nil {
-		if tokenLookupInterrupted(ctx, err) {
+	res := cmdrun.Exec(ctx, ghAuthTokenCommand(s.bin, s.host))
+	if err := scriptout.ResultErr(res); err != nil {
+		if tokenLookupInterrupted(ctx, res) {
 			return "", fmt.Errorf("gh auth token: %w: %w", errTokenLookupInterrupted, err)
 		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			if st := strings.TrimSpace(string(exitErr.Stderr)); st != "" {
-				// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
-				return "", fmt.Errorf("gh auth token: %s: %w", scriptout.TruncateForFold(exitErr.Stderr), err)
-			}
+		if st := strings.TrimSpace(string(res.Stderr)); res.StartErr == nil && st != "" {
+			// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
+			return "", fmt.Errorf("gh auth token: %s: %w", scriptout.TruncateForFold(res.Stderr), err)
 		}
 		return "", fmt.Errorf("gh auth token: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(res.Stdout)), nil
 }
 
 // errTokenLookupInterrupted marks a `gh auth token` that did not run to
@@ -98,15 +95,11 @@ func (s ghCLITokenSource) Token(ctx context.Context) (string, error) {
 // availability problem, not an authentication one [bead pg2-ev2uf].
 var errTokenLookupInterrupted = errors.New("gh credential lookup did not complete")
 
-// tokenLookupInterrupted reports whether err from running `gh auth token`
-// means the process never finished, as opposed to finishing with a non-zero
-// exit. A process ended by a signal has ExitCode() == -1.
-func tokenLookupInterrupted(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
-		return true
-	}
-	var exitErr *exec.ExitError
-	return errors.As(err, &exitErr) && exitErr.ExitCode() == -1
+// tokenLookupInterrupted reports whether a `gh auth token` run means the
+// process never finished, as opposed to finishing with a non-zero exit: the
+// context or the call's Timeout ended it, or a signal did.
+func tokenLookupInterrupted(ctx context.Context, res cmdrun.Result) bool {
+	return ctx.Err() != nil || res.CtxErr != nil || res.TimedOut || res.Signal != ""
 }
 
 // chainTokenSource returns the first source that yields a non-empty token.
