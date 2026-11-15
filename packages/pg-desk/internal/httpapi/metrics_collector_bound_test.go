@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -107,4 +108,6 @@ type gathererFunc func()
 func (f gathererFunc) Gather() ([]*dto.MetricFamily, error) { f(); return nil, nil }
 
 func newRecorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }
-func newScrapeRequest() *http.Request         { return httptest.NewRequest("GET", "/metrics", nil) }
+func newScrapeRequest() *http.Request {
+	return httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil)
+}
