@@ -43,10 +43,15 @@ type Runner struct {
 	// LookupEnv reads the caller's environment for the allowlist
 	// (os.LookupEnv).
 	LookupEnv func(string) (string, bool)
+	// ExecFn replaces the real process execution of Exec (a test seam; nil
+	// runs the process).
+	ExecFn func(ctx context.Context, spec ExecSpec) ExecResult
 
 	// beforeWrite is a test hook called before each file work-report writes
 	// into a run directory.
 	beforeWrite func(dir, name string)
+	// noSync skips the fsync of each written file (a test hook).
+	noSync bool
 
 	randMu sync.Mutex
 }
@@ -400,7 +405,7 @@ func updateLatest(parent, runID string, r *Runner) string {
 // existing directory is an error and is never written through), creating a
 // temporary file with O_EXCL in the same directory, and renaming it into
 // place. The file is mode 0600.
-func writeAtomic(dir, name string, data []byte) error {
+func writeAtomic(dir, name string, data []byte, noSync bool) error {
 	target := filepath.Join(dir, name)
 	if fi, err := os.Lstat(target); err == nil {
 		if fi.IsDir() {
@@ -426,7 +431,7 @@ func writeAtomic(dir, name string, data []byte) error {
 		}
 	}
 	_, err := f.Write(data)
-	if err == nil {
+	if err == nil && !noSync {
 		err = f.Sync()
 	}
 	if cerr := f.Close(); err == nil {
@@ -563,5 +568,5 @@ func (s *run) write(name string, data []byte) error {
 	if s.r.beforeWrite != nil {
 		s.r.beforeWrite(s.dir, name)
 	}
-	return writeAtomic(s.dir, name, data)
+	return writeAtomic(s.dir, name, data, s.r.noSync)
 }

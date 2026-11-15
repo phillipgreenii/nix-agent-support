@@ -12,7 +12,7 @@ import (
 // Exec is the process-execution path validate mode reuses (it takes no run
 // directory), so it is tested on its own against the real fake generator.
 func TestExecRunsAnArgvInADirectoryWithTheGivenEnvironment(t *testing.T) {
-	fx := newFixture(t)
+	fx := newFixture(t).real()
 	g := fx.gen(script{Stdout: `{"hello":true}`, Stderr: "warn\n", Exit: 3})
 	dir := t.TempDir()
 	res := fx.runner.Exec(context.Background(), ExecSpec{

@@ -21,7 +21,7 @@ import (
 )
 
 func TestRunOneAndSeveralFiles(t *testing.T) {
-	fx := newFixture(t)
+	fx := newFixture(t).real()
 	one := fx.run(fx.gen(okScript()))
 	requireOK(t, one)
 	if len(one.Record.Files) != 1 || one.Record.Files[0].Path != "report.md" {
@@ -211,7 +211,7 @@ func TestOpenStartRangeAndNeverPulledFooter(t *testing.T) {
 }
 
 func TestEnvironmentIsAnAllowlist(t *testing.T) {
-	fx := newFixture(t)
+	fx := newFixture(t).real()
 	fx.env["WR_PASS"] = "passed-through"
 	fx.env["WR_EMPTY"] = ""
 	_, d, _ := dumpRun(t, fx, func(s *script) config.Generator {
@@ -257,7 +257,7 @@ func TestEnvironUsesTheSameAllowlistForValidateMode(t *testing.T) {
 }
 
 func TestArgvIsNotShellExpandedAndCwdIsTheRunDirectory(t *testing.T) {
-	fx := newFixture(t)
+	fx := newFixture(t).real()
 	out, d, _ := dumpRun(t, fx, func(s *script) config.Generator {
 		g := fx.gen(*s)
 		g.Command = append(g.Command, "$HOME", "*", "a b;c", "`id`")

@@ -253,6 +253,18 @@ type fixture struct {
 	runner *Runner
 	parent string
 	env    map[string]string
+	// realProc forces every generator of this fixture to run as a real
+	// process. Without it, a script that needs no process semantics (no
+	// signal, hang, grandchild or ready file) runs in-process through
+	// Runner.ExecFn; the tests that guard process behaviour call real().
+	realProc bool
+}
+
+// real makes the fixture run its generators as real processes.
+func (f *fixture) real() *fixture {
+	f.realProc = true
+	f.runner.ExecFn = nil
+	return f
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -269,6 +281,7 @@ func newFixture(t *testing.T) *fixture {
 		Grace:       100 * time.Millisecond,
 		WaitDelay:   200 * time.Millisecond,
 		LookupEnv:   func(k string) (string, bool) { v, ok := f.env[k]; return v, ok },
+		noSync:      true,
 	}
 	return f
 }
@@ -287,6 +300,10 @@ func (f *fixture) gen(s script, extraEnv ...string) config.Generator {
 	}
 	f.env[envFakeGen] = "script"
 	f.env[envFakeScript] = string(b)
+	f.runner.ExecFn = nil
+	if !f.realProc && !s.needsProcess() {
+		f.runner.ExecFn = f.inProcess(exe, s)
+	}
 	return config.Generator{
 		Name:    "fake",
 		Command: []string{exe},
@@ -519,4 +536,102 @@ func TestInvokedAsTestRecognizesOnlyTestFlags(t *testing.T) {
 			t.Errorf("invokedAsTest(%q) = %v, want %v", c.args, got, c.want)
 		}
 	}
+}
+
+// needsProcess reports whether the script depends on process semantics that
+// only a real child provides: signals, hanging, a grandchild or a ready file.
+func (s script) needsProcess() bool {
+	return s.IgnoreTerm || s.Hang || s.Spawn != "" || s.ReadyFile != ""
+}
+
+// inProcess returns an Exec replacement that interprets s without starting a
+// process. It applies only to the registered fake executable; any other argv
+// (a missing command, say) takes the real path.
+func (f *fixture) inProcess(exe string, s script) func(context.Context, ExecSpec) ExecResult {
+	return func(ctx context.Context, spec ExecSpec) ExecResult {
+		if len(spec.Argv) == 0 || spec.Argv[0] != exe {
+			return f.runner.execProcess(ctx, spec)
+		}
+		begin := time.Now()
+		var res ExecResult
+		stderr := &tailWriter{keep: StderrKeep}
+		stdout, code := runScriptInProcess(s, spec, stderr)
+		res.Duration = time.Since(begin)
+		res.Stderr = stderr.String()
+		if len(stdout) > StdoutCap {
+			res.Stdout = []byte(stdout[:StdoutCap])
+			res.StdoutCapped = true
+			res.Signal = "SIGTERM"
+			return res
+		}
+		res.Stdout = []byte(stdout)
+		res.ExitCode = &code
+		return res
+	}
+}
+
+// runScriptInProcess performs what runScript performs in a child, for the
+// operations that need no process: it returns the stdout text and exit code.
+func runScriptInProcess(s script, spec ExecSpec, stderr io.Writer) (string, int) {
+	abs := func(p string) string {
+		if filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Join(spec.Dir, p)
+	}
+	fail := func(err error) (string, int) {
+		fmt.Fprintln(stderr, "fake:", err)
+		return "", 93
+	}
+	if s.Dump != "" {
+		b, _ := json.Marshal(map[string]any{"env": spec.Env, "args": spec.Argv[1:], "cwd": spec.Dir, "stdin": string(spec.Stdin)})
+		if err := os.WriteFile(abs(s.Dump), b, 0o600); err != nil {
+			return fail(err)
+		}
+	}
+	for _, d := range s.Dirs {
+		if err := os.MkdirAll(abs(d), 0o755); err != nil {
+			return fail(err)
+		}
+	}
+	for _, f := range s.Files {
+		if err := os.MkdirAll(filepath.Dir(abs(f.Path)), 0o755); err != nil {
+			return fail(err)
+		}
+		if err := os.WriteFile(abs(f.Path), []byte(f.Content), 0o644); err != nil {
+			return fail(err)
+		}
+	}
+	for _, l := range s.Symlinks {
+		if err := os.Symlink(l.Target, abs(l.Path)); err != nil {
+			return fail(err)
+		}
+	}
+	for _, l := range s.Hardlinks {
+		if err := os.Link(abs(l.Target), abs(l.Path)); err != nil {
+			return fail(err)
+		}
+	}
+	for _, sp := range s.Sparse {
+		f, err := os.Create(abs(sp.Path))
+		if err != nil {
+			return fail(err)
+		}
+		if err := f.Truncate(sp.Size); err != nil {
+			f.Close()
+			return fail(err)
+		}
+		if err := f.Close(); err != nil {
+			return fail(err)
+		}
+	}
+	fmt.Fprint(stderr, s.Stderr)
+	if r := s.StderrRep; r != nil {
+		fmt.Fprint(stderr, strings.Repeat(r.Text, r.Count))
+	}
+	out := s.Stdout
+	if pad := s.StdoutLen - len(out); pad > 0 {
+		out += strings.Repeat(" ", pad)
+	}
+	return out, s.Exit
 }

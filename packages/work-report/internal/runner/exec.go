@@ -100,6 +100,14 @@ type ExecResult struct {
 // bounded by WaitDelay so a grandchild holding a pipe open cannot hang the
 // run; and on every exit the remaining members of the group are killed.
 func (r *Runner) Exec(ctx context.Context, spec ExecSpec) ExecResult {
+	if r.ExecFn != nil {
+		return r.ExecFn(ctx, spec)
+	}
+	return r.execProcess(ctx, spec)
+}
+
+// execProcess is Exec without the ExecFn seam: it always runs the process.
+func (r *Runner) execProcess(ctx context.Context, spec ExecSpec) ExecResult {
 	var res ExecResult
 	if len(spec.Argv) == 0 || spec.Argv[0] == "" {
 		res.StartErr = errors.New("empty command")
