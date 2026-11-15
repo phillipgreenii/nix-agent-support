@@ -104,7 +104,7 @@ type doctorReport struct {
 func (r *doctorReport) line(verdict, probe, format string, a ...any) {
 	// A socket FAIL that is "no running core" is tracked apart (noCore), so a
 	// real problem elsewhere still reports as the generic failure.
-	if verdict == verdictFail && !(probe == "socket" && r.noCore) {
+	if verdict == verdictFail && (probe != "socket" || !r.noCore) {
 		r.failed = true
 	}
 	_, _ = fmt.Fprintf(r.w, "%-4s %s: %s\n", verdict, probe, fmt.Sprintf(format, a...))
