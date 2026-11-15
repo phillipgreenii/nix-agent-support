@@ -240,6 +240,12 @@ message SessionView {
   // the raw env fields above, these are derived (detectors + decorators).
   // Field number 31 (verified free). (pg2-4xbrm)
   map<string, string> labels = 31;
+
+  // control_inbox is whether the pg-claude-control mod keeps an inbox for this
+  // session's pid (the recorder's control_inbox fact), so a nudge can reach it.
+  // A live session (pid != 0) with control_inbox=false has no control mod:
+  // it gets no nudge and no keep-awake.
+  bool control_inbox = 32;
 }
 
 message Block {

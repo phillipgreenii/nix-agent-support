@@ -162,3 +162,12 @@ func TestEndedSessionWhoseRegistryFileWasDeletedKeepsKindAndEntrypoint(t *testin
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func TestFromProcessCarriesControlInbox(t *testing.T) {
+	if s := fromProcess(client.ProcessInfo{Pid: 1, Alive: true, ControlInbox: true}); !s.ControlInbox || !s.ControlInboxKnown {
+		t.Errorf("with inbox: %+v", s)
+	}
+	if s := fromProcess(client.ProcessInfo{Pid: 1, Alive: true}); s.ControlInbox || !s.ControlInboxKnown {
+		t.Errorf("without inbox: %+v", s)
+	}
+}

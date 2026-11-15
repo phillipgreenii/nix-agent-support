@@ -106,6 +106,7 @@ type sessionJSON struct {
 	Blocker       string  `json:"blocker,omitempty"`
 	Branch        string  `json:"branch,omitempty"`
 	TerminalHost  string  `json:"terminal_host,omitempty"`
+	ControlInbox  bool    `json:"control_inbox"`
 	StartedAt     string  `json:"started_at,omitempty"`
 	SessionTokens uint64  `json:"session_tokens"`
 	CostUSD       float64 `json:"cost_usd"`
@@ -277,6 +278,7 @@ func toSessionJSON(v *pb.SessionView, now time.Time) sessionJSON {
 		Blocker:       v.GetBlocker(),
 		Branch:        v.GetBranch(),
 		TerminalHost:  v.GetTerminalHost(),
+		ControlInbox:  v.GetControlInbox(),
 		SessionTokens: v.GetSessionTokens(),
 		CostUSD:       v.GetCostUsd(),
 	}

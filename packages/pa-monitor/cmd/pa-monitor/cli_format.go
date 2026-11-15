@@ -67,6 +67,9 @@ func formatStatusSessions(sessions []*pb.SessionDetail) string {
 			if s := formatStatusWithBlocker(v); s != "" {
 				r.status = s
 			}
+			if noControlMod(v) {
+				r.status += " (" + noControlModText + ")"
+			}
 		}
 		if le := sd.GetLastError(); le != nil && le.GetIsTerminal() {
 			if apiErrorIsAuthFailure(le) {
@@ -124,6 +127,16 @@ func formatStatusWithBlocker(v *pb.SessionView) string {
 	return st
 }
 
+// noControlModText is the marker for a live session the control mod cannot
+// reach: it gets no nudge and no keep-awake.
+const noControlModText = "no control mod"
+
+// noControlMod reports whether v is a live session (pid set) with no control
+// inbox.
+func noControlMod(v *pb.SessionView) bool {
+	return v != nil && v.GetPid() != 0 && !v.GetControlInbox()
+}
+
 // dirSessionCounts returns the ADR 0024 {working, blocked, idle} rollup for one
 // wire Directory.
 //
@@ -175,6 +188,9 @@ func formatSessionInfoHeader(v *pb.SessionView) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "session_id:     %s\n", v.GetSessionId())
 	fmt.Fprintf(&sb, "status:         %s\n", formatStatusWithBlocker(v))
+	if noControlMod(v) {
+		fmt.Fprintf(&sb, "control:        %s\n", noControlModText)
+	}
 	fmt.Fprintf(&sb, "model:          %s\n", v.GetModel())
 	fmt.Fprintf(&sb, "cwd:            %s\n", v.GetCwd())
 	fmt.Fprintf(&sb, "branch:         %s\n", v.GetBranch())

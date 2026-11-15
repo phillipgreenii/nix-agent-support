@@ -680,12 +680,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		state.mu.RUnlock()
 		anyUnattemptedNudgeableDisrupt := false
 		if wmCaffeinate != nil && wmCaffeinate.AutoResumeEnabled() {
-			// Uses the FULL opts.NudgerSignalers (NOT the cmux-stripped
-			// delivery slice): D5 only resolves a signaler (host-aware, via the
-			// session's cached terminal host), never Send, so keeping CmuxSignaler here lets a cmux-hosted disrupt
-			// hold the Mac awake without the daemon ever exec'ing cmux
-			// (ADR 0022). Do not swap this for the delivery slice.
-			anyUnattemptedNudgeableDisrupt = hasUnattemptedNudgeableDisrupt(tree, wmCaffeinate, opts.NudgerSignalers)
+			// D5 holds the Mac awake only for a session a nudge can reach:
+			// pid alive and a control inbox (controlDeliverable), with no
+			// terminal ancestry walk.
+			anyUnattemptedNudgeableDisrupt = hasUnattemptedNudgeableDisrupt(tree, wmCaffeinate)
 		}
 		keepAwake := anyWorking || anyUnattemptedNudgeableDisrupt
 		if opts.Caffeinate != nil {
@@ -835,10 +833,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 			if directiveTemplate == "" {
 				directiveTemplate = nudger.DefaultDirectiveTemplate
 			}
-			// Per-tick surface resolver: resolves each pid through the
-			// terminal host the poller already cached on the tree, so a
-			// cmux-only session never pays the tmux ancestry walk.
-			surf := newSurfaceResolver(opts.NudgerSignalers, tree)
+			// Per-tick deliverability resolver: a pid is deliverable when it
+			// is alive and has a control inbox; no process is launched.
+			surf := newControlResolver(tree, os.Getenv)
 			tctx := nudger.TickContext{
 				Now:               time.Now(),
 				Tree:              tree,
@@ -852,14 +849,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 				AutoSessionWrapUpIdleThreshold:     opts.AutoSessionWrapUpIdleThreshold,
 				AutoSessionWrapUpDirectiveTemplate: directiveTemplate,
 				Watermarks:                         wm,
-				// Producer-side no-surface gate (bead pg2-gjekd): reap
-				// surfaceless "ghost" sessions from the candidate set so they
-				// are never enqueued. Uses the FULL opts.NudgerSignalers
-				// (Detect-only, never Send) — the same predicate the D5
-				// keep-awake disjunct uses (hasUnattemptedNudgeableDisrupt),
-				// so a cmux-hosted target resolves without the daemon exec'ing
-				// cmux (ADR 0022). Deeper fix complementing pg2-2o0p7's
-				// dispatcher-side suppress-and-drop backstop.
+				// Producer-side deliverability gate: reap sessions the control
+				// mod cannot reach (dead pid, or no control inbox) from the
+				// candidate set so they are never enqueued. The same predicate
+				// the D5 keep-awake disjunct uses.
 				HasSurface: surf.HasSurface,
 			}
 			n.Reconcile(tctx)
@@ -948,12 +941,12 @@ func recordCaffeinateKeeper(opts *RunOptions, state *sharedState) {
 // hasUnattemptedNudgeableDisrupt reports whether any session in the tree has a
 // terminal, nudgeable error with ZERO recorded nudge attempts — the D5 error
 // keep-awake disjunct. It mirrors the disrupt producer's nudge gates (terminal
-// + Retryable + !FromSubagent + a resolvable signaler) but is computed
+// + Retryable + !FromSubagent + a deliverable control inbox) but is computed
 // independently of the nudger so it is true at T+0 (before the disrupt grace
 // elapses and anything is enqueued). The caller has already verified
 // AutoResumeEnabled. A session counts as "zero recorded attempts" when its
 // LastDisruptAttemptAt watermark is zero OR predates this error's timestamp.
-func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore, signalers []signal.Signaler) bool {
+func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore) bool {
 	if tree == nil || wm == nil {
 		return false
 	}
@@ -977,7 +970,7 @@ func hasUnattemptedNudgeableDisrupt(tree *aggregate.Tree, wm *WatermarkStore, si
 			if le.FromSubagent {
 				continue
 			}
-			if signal.ResolveSignalerForHost(signalers, sv.TerminalHost, sv.PID) == nil {
+			if !controlDeliverable(sv, os.Getenv) {
 				continue
 			}
 			attempt := wm.SessionWatermark(sv.SessionID).LastDisruptAttemptAt

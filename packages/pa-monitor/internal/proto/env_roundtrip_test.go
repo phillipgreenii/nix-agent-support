@@ -239,3 +239,13 @@ func TestDaemonStateAutoResumeFieldsRoundTrip(t *testing.T) {
 		t.Fatal("ToTree returned nil")
 	}
 }
+
+func TestControlInboxRoundTripsThroughProto(t *testing.T) {
+	for _, want := range []bool{true, false} {
+		in := &aggregate.SessionView{Session: &session.Session{SessionID: "s", PID: 5, ControlInbox: want}}
+		out := sessionViewFromProto(sessionViewToProto(in))
+		if out.ControlInbox != want || !out.ControlInboxKnown {
+			t.Errorf("round trip ControlInbox=%v: got %v known=%v", want, out.ControlInbox, out.ControlInboxKnown)
+		}
+	}
+}

@@ -97,6 +97,7 @@ func sessionViewToProto(sv *aggregate.SessionView) *SessionView {
 		Blocker:       sv.Blocker.String(),
 		Branch:        sv.Branch,
 		TerminalHost:  sv.TerminalHost,
+		ControlInbox:  sv.ControlInbox,
 		ContextTokens: uint64(sv.ContextTokens),
 		Model:         sv.Model,
 		FirstPrompt:   sv.FirstPrompt,

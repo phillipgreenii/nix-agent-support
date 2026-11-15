@@ -103,6 +103,9 @@ func sessionViewFromProto(sv *SessionView) *aggregate.SessionView {
 			Name:         sv.GetName(),
 			Branch:       sv.GetBranch(),
 			TerminalHost: sv.GetTerminalHost(),
+			ControlInbox: sv.GetControlInbox(),
+			// The wire carries the daemon's verdict; never re-decide it here.
+			ControlInboxKnown: true,
 		},
 		SessionEnrichment: aggregate.SessionEnrichment{
 			ContextTokens: int(sv.GetContextTokens()),

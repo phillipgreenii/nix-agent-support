@@ -383,7 +383,7 @@ func hasID(ss []*session.Session, id string) bool {
 }
 
 func fromProcess(p client.ProcessInfo) *session.Session {
-	s := &session.Session{PID: int(p.Pid), SessionID: p.SessionID, Cwd: p.Cwd, Name: p.Name, RegistryStatus: p.Status, PidAlive: p.Alive}
+	s := &session.Session{PID: int(p.Pid), SessionID: p.SessionID, Cwd: p.Cwd, Name: p.Name, RegistryStatus: p.Status, PidAlive: p.Alive, ControlInbox: p.ControlInbox, ControlInboxKnown: true}
 	if p.StartedAt != nil {
 		s.StartedAt = *p.StartedAt
 	}

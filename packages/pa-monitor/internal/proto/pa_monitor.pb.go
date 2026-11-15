@@ -787,7 +787,12 @@ type SessionView struct {
 	// the DB. Forwarded so status/tui can display e.g. workspace.scope. Unlike
 	// the raw env fields above, these are derived (detectors + decorators).
 	// Field number 31 (verified free). (pg2-4xbrm)
-	Labels        map[string]string `protobuf:"bytes,31,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,31,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// control_inbox is whether the pg-claude-control mod keeps an inbox for this
+	// session's pid (the recorder's control_inbox fact), so a nudge can reach it.
+	// A live session (pid != 0) with control_inbox=false has no control mod:
+	// it gets no nudge and no keep-awake.
+	ControlInbox  bool `protobuf:"varint,32,opt,name=control_inbox,json=controlInbox,proto3" json:"control_inbox,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1023,6 +1028,13 @@ func (x *SessionView) GetLabels() map[string]string {
 		return x.Labels
 	}
 	return nil
+}
+
+func (x *SessionView) GetControlInbox() bool {
+	if x != nil {
+		return x.ControlInbox
+	}
+	return false
 }
 
 type Block struct {
@@ -2566,7 +2578,7 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x14\n" +
 	"\x05state\x18\x03 \x01(\tR\x05state\x12\x10\n" +
-	"\x03url\x18\x04 \x01(\tR\x03url\"\xb8\t\n" +
+	"\x03url\x18\x04 \x01(\tR\x03url\"\xdd\t\n" +
 	"\vSessionView\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -2601,7 +2613,8 @@ const file_internal_proto_pa_monitor_proto_rawDesc = "" +
 	"\x0elast_nudged_at\x18\x1c \x01(\v2\x1a.google.protobuf.TimestampR\flastNudgedAt\x12,\n" +
 	"\x12last_nudge_sources\x18\x1d \x03(\tR\x10lastNudgeSources\x12\x18\n" +
 	"\ablocker\x18\x1e \x01(\tR\ablocker\x12>\n" +
-	"\x06labels\x18\x1f \x03(\v2&.pa_monitor.v1.SessionView.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x1f \x03(\v2&.pa_monitor.v1.SessionView.LabelsEntryR\x06labels\x12#\n" +
+	"\rcontrol_inbox\x18  \x01(\bR\fcontrolInbox\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x19\x10\x1aJ\x04\b\x1a\x10\x1bR\x06gc_rigR\bgc_agent\"\xe0\x03\n" +

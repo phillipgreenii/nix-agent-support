@@ -475,3 +475,15 @@ func TestDetailsClipsLongValues(t *testing.T) {
 		t.Errorf("expected ellipsis somewhere when long Cwd is clipped:\n%s", out)
 	}
 }
+
+func TestDetailsShowsNoControlModForLiveSessionWithoutInbox(t *testing.T) {
+	mk := func(pid int, inbox bool) string {
+		return RenderDetails(&aggregate.SessionView{Session: &session.Session{SessionID: "id1", PID: pid, ControlInbox: inbox}}, 120)
+	}
+	if out := mk(42, false); !strings.Contains(out, "no control mod") {
+		t.Errorf("live session without inbox must show the marker:\n%s", out)
+	}
+	if out := mk(42, true); strings.Contains(out, "no control mod") {
+		t.Errorf("session with an inbox must not show the marker:\n%s", out)
+	}
+}

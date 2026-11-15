@@ -216,6 +216,14 @@ type Session struct {
 	// PidAlive is set by the Discoverer based on its PidAlive function.
 	// Used by the poller to decide whether to write a non-NULL pid to the DB.
 	PidAlive bool
+
+	// ControlInbox is the recorder's fact that the pg-claude-control mod keeps
+	// an inbox (<state>/inbox/<pid>.fifo) for this pid, so a nudge can reach
+	// the session. ControlInboxKnown is true when the value came from the
+	// recorder; when false the daemon decides by looking at the inbox file
+	// itself (see daemon.controlDeliverable).
+	ControlInbox      bool
+	ControlInboxKnown bool
 }
 
 // Label returns the display label. If forceID is true, returns the full SessionID.

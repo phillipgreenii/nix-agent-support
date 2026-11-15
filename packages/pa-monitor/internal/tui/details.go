@@ -28,6 +28,11 @@ func RenderDetails(sv *aggregate.SessionView, width int) string {
 	fmt.Fprintf(&sb, "ID:        %s\n", wrap.Line(sv.SessionID, valBudget))
 	fmt.Fprintf(&sb, "PID:       %d\n", sv.PID)
 	fmt.Fprintf(&sb, "Terminal:  %s\n", wrap.Line(sv.TerminalHost, valBudget))
+	// A live session without a control inbox cannot be nudged (and does not
+	// hold the Mac awake for a nudgeable error).
+	if sv.PID != 0 && !sv.ControlInbox {
+		fmt.Fprintf(&sb, "Control:   %s\n", "no control mod")
+	}
 	fmt.Fprintf(&sb, "Cwd:       %s\n", wrap.Line(sv.Cwd, valBudget))
 	fmt.Fprintf(&sb, "Kind:      %s\n", wrap.Line(string(sv.Kind), valBudget))
 	// ADR 0024: show status, and qualify a blocked session with its blocker

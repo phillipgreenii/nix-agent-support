@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -443,5 +444,26 @@ func TestFormatSessionInfoHeaderOmitsScopeWhenUnset(t *testing.T) {
 	got := formatSessionInfoHeader(&pb.SessionView{SessionId: "sid-3", Status: "idle"})
 	if strings.Contains(got, "scope:") {
 		t.Errorf("unlabeled session must not get a scope line:\n%s", got)
+	}
+}
+
+func TestControlInboxWireAndText(t *testing.T) {
+	without := &pb.SessionView{SessionId: "s1", Pid: 42, Status: "idle"}
+	with := &pb.SessionView{SessionId: "s2", Pid: 43, Status: "idle", ControlInbox: true}
+
+	if got := formatSessionInfoHeader(without); !strings.Contains(got, "no control mod") {
+		t.Errorf("info header missing marker:\n%s", got)
+	}
+	if got := formatSessionInfoHeader(with); strings.Contains(got, "no control mod") {
+		t.Errorf("info header must not carry the marker with an inbox:\n%s", got)
+	}
+
+	b, err := json.Marshal(toSessionJSON(with, time.Now()))
+	if err != nil || !strings.Contains(string(b), `"control_inbox":true`) {
+		t.Errorf("status JSON = %s, err %v; want control_inbox true", b, err)
+	}
+	b, _ = json.Marshal(toSessionJSON(without, time.Now()))
+	if !strings.Contains(string(b), `"control_inbox":false`) {
+		t.Errorf("status JSON = %s; want control_inbox false", b)
 	}
 }

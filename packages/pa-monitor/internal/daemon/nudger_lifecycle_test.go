@@ -68,7 +68,8 @@ func TestRunWith_NudgerFiresWithZeroGrace(t *testing.T) {
 						Session: &session.Session{
 							SessionID: "grace0-sid",
 							PID:       88888,
-							Status:    session.Idle,
+							PidAlive:  true, ControlInbox: true, ControlInboxKnown: true,
+							Status: session.Idle,
 						},
 						SessionEnrichment: aggregate.SessionEnrichment{
 							LastError: &transcript.ErrorRecord{
@@ -230,7 +231,8 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 							Session: &session.Session{
 								SessionID: "annotate-sid",
 								PID:       77777,
-								Status:    session.Idle,
+								PidAlive:  true, ControlInbox: true, ControlInboxKnown: true,
+								Status: session.Idle,
 							},
 							SessionEnrichment: aggregate.SessionEnrichment{
 								LastError: &transcript.ErrorRecord{
