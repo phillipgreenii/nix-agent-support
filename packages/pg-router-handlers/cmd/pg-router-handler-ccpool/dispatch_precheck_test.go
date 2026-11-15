@@ -35,25 +35,71 @@ const reviewEvent = `{"id":"e-1","type":"dispatch","payload":{"id":"zr-r","type"
 // pool-unreadable: an unreadable pool counts as one in flight. That is how these
 // tests tell "launch path reached" from "skipped"). It returns the role and the
 // log of every pg-connector call, so a test can prove the checks were read-only.
+//
+// The fake scripts are written ONCE per env and read their replies from files the
+// returned setter rewrites, so a table of rows reuses the same two executables
+// (a first execution of a freshly written script is the dominant cost of a row on
+// this host). connScript, when non-empty, replaces the pg-connector reply logic
+// wholesale for the current row.
 func precheckEnv(t *testing.T, beadStatus, prJSON, pendingJSON string) (role roleUnderTest, connLog string) {
+	t.Helper()
+	role, connLog, set := precheckEnvTable(t)
+	set(beadStatus, prJSON, pendingJSON, "")
+	return role, connLog
+}
+
+// precheckEnvTable is precheckEnv for a table of rows: it returns a setter that
+// installs one row's bead status, PR and pending-review replies (or, when
+// connScript is non-empty, a pg-connector body of its own) and truncates the log.
+func precheckEnvTable(t *testing.T) (role roleUnderTest, connLog string, set func(beadStatus, prJSON, pendingJSON, connScript string)) {
 	t.Helper()
 	dir := t.TempDir()
 	connLog = filepath.Join(dir, "connector.log")
+	bdReply := filepath.Join(dir, "bd.json")
+	prReply := filepath.Join(dir, "pr.json")
+	pendingReply := filepath.Join(dir, "pending.json")
+	connBody := filepath.Join(dir, "connector.sh")
+	// `cat` is not on the fake PATH, so replies are read with shell builtins.
+	emit := func(f string) string {
+		return `while IFS= read -r l || [ -n "$l" ]; do printf '%s' "$l"; done < '` + f + `'` + "\n"
+	}
 	bin := stubBin(t, map[string]string{
-		"bd": `printf '%s' '{"data":[{"id":"zr-r","status":"` + beadStatus + `","metadata":{"repo":"o/r","pr_number":120058,"head_sha":"abc"}}]}'` + "\n",
+		"bd": emit(bdReply),
 		"pg-connector": `echo "$*" >> '` + connLog + `'
-case "$*" in
-  "pr show "*) printf '%s' '` + prJSON + `' ;;
-  "pr review pending "*) printf '%s' '` + pendingJSON + `' ;;
-  *) echo "unexpected pg-connector call: $*" >&2; exit 2 ;;
-esac
+. '` + connBody + `'
 `,
 	})
 	// Only the fake bin dir: `sh` is reached through the scripts' shebang, and the
 	// scripts use shell builtins only.
 	t.Setenv("PATH", bin)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
-	return roleUnderTest{"review", configFrom(t, `{"ccpool":{"actor":"test-actor","completion":"close-or-handback","onFailure":"add-human","onDispatchFail":"unclaim","promptBody":"hello"}}`)}, connLog
+	set = func(beadStatus, prJSON, pendingJSON, connScript string) {
+		t.Helper()
+		write := func(f, body string) {
+			if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		write(bdReply, `{"data":[{"id":"zr-r","status":"`+beadStatus+`","metadata":{"repo":"o/r","pr_number":120058,"head_sha":"abc"}}]}`)
+		if connScript == "" {
+			connScript = `case "$*" in
+  "pr show "*) ` + emitInline(prReply) + ` ;;
+  "pr review pending "*) ` + emitInline(pendingReply) + ` ;;
+  *) echo "unexpected pg-connector call: $*" >&2; exit 2 ;;
+esac
+`
+			write(prReply, prJSON)
+			write(pendingReply, pendingJSON)
+		}
+		write(connBody, connScript)
+		write(connLog, "")
+	}
+	return roleUnderTest{"review", configFrom(t, `{"ccpool":{"actor":"test-actor","completion":"close-or-handback","onFailure":"add-human","onDispatchFail":"unclaim","promptBody":"hello"}}`)}, connLog, set
+}
+
+// emitInline is the one-line form of the reply-file reader, for a case arm.
+func emitInline(f string) string {
+	return `while IFS= read -r l || [ -n "$l" ]; do printf '%s' "$l"; done < '` + f + `'`
 }
 
 // assertSkippedCompletion checks a reply is the accept-and-complete-as-skipped
@@ -111,9 +157,10 @@ func TestDispatch_reviewPrecheck(t *testing.T) {
 		{"launch path: nothing to skip", "open", prOpen, noPending, wire.BusyReasonPoolUnreadable, false, 2},
 		{"launch path: stale pending review", "open", prOpen, staleReview, wire.BusyReasonPoolUnreadable, false, 2},
 	}
+	role, connLog, setEnv := precheckEnvTable(t)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			role, connLog := precheckEnv(t, tc.bead, tc.pr, tc.pending)
+			setEnv(tc.bead, tc.pr, tc.pending, "")
 			code, reply := runDispatchReply(t, role, reviewEvent)
 			if tc.wantSkipped {
 				assertSkippedCompletion(t, code, reply, tc.wantReason)
@@ -155,12 +202,10 @@ func TestDispatch_reviewPrecheckConnectorErrors(t *testing.T) {
 		{"unauthenticated fails open", `printf '%s' '{"error":{"code":"unauthenticated","message":"no token"}}'; exit 1`, wire.BusyReasonPoolUnreadable, "fault"},
 		{"bare failure fails open", `echo boom >&2; exit 1`, wire.BusyReasonPoolUnreadable, "fault"},
 	}
+	role, _, setEnv := precheckEnvTable(t)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			role, _ := precheckEnv(t, "open", prOpen, noPending)
-			if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "pg-connector"), []byte("#!/bin/sh\n"+tc.script+"\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			setEnv("open", prOpen, noPending, tc.script+"\n")
 			code, reply := runDispatchReply(t, role, reviewEvent)
 			if code != conformance.ExitBusy {
 				t.Fatalf("exit = %d, want ExitBusy (%d)", code, conformance.ExitBusy)
@@ -189,12 +234,23 @@ func TestDispatch_reviewPrecheckFailsOpenWithoutConnector(t *testing.T) {
 // holds only a fake `bd` answering `bd show` with beadJSON (a bd-show-shaped
 // single issue), and the role opts in with precheck = "ready" under actor
 // "test-actor".
-func readyPrecheckEnv(t *testing.T, beadJSON string) roleUnderTest {
+//
+// The fake `bd` is one script that prints the contents of a reply file, and the
+// returned setter rewrites that file, so a table of rows reuses ONE executable
+// instead of writing and first-executing a fresh script per row.
+func readyPrecheckEnv(t *testing.T) (role roleUnderTest, setBead func(beadJSON string)) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("PATH", stubBin(t, map[string]string{"bd": "printf '%s' '{\"data\":[" + beadJSON + "]}'\n"}))
+	reply := filepath.Join(dir, "reply.json")
+	t.Setenv("PATH", stubBin(t, map[string]string{"bd": "while IFS= read -r l || [ -n \"$l\" ]; do printf '%s' \"$l\"; done < '" + reply + "'\n"}))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
-	return roleUnderTest{"drain", configFrom(t, `{"ccpool":{"actor":"test-actor","completion":"close-or-release","precheck":"ready","onFailure":"add-human","onDispatchFail":"leave","promptBody":"hello"}}`)}
+	setBead = func(beadJSON string) {
+		t.Helper()
+		if err := os.WriteFile(reply, []byte(`{"data":[`+beadJSON+`]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return roleUnderTest{"drain", configFrom(t, `{"ccpool":{"actor":"test-actor","completion":"close-or-release","precheck":"ready","onFailure":"add-human","onDispatchFail":"leave","promptBody":"hello"}}`)}, setBead
 }
 
 // The precheck's decline reaches the wire through the real dispatch wiring: the
@@ -218,9 +274,11 @@ func TestDispatch_readyPrecheck(t *testing.T) {
 		{"open blocker, bd show dependency shape", `{"id":"zr-d","status":"open",` + groomed + `,"dependencies":[{"id":"zr-b","status":"open","issue_type":"task","dependency_type":"blocks"}]}`, "skipped-bead-blocked"},
 		{"own-actor in_progress is absorbed, not declined", `{"id":"zr-d","status":"in_progress","assignee":"test-actor","labels":["human"]}`, wire.BusyReasonPoolUnreadable},
 	}
+	role, setBead := readyPrecheckEnv(t)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			code, reply := runDispatchReply(t, readyPrecheckEnv(t, tc.bead), `{"id":"e-1","type":"dispatch","payload":{"id":"zr-d","type":"task"}}`)
+			setBead(tc.bead)
+			code, reply := runDispatchReply(t, role, `{"id":"e-1","type":"dispatch","payload":{"id":"zr-d","type":"task"}}`)
 			if tc.wantReason == "skipped-bead-closed" { // the one moot outcome of the ready precheck
 				assertSkippedCompletion(t, code, reply, tc.wantReason)
 				return
