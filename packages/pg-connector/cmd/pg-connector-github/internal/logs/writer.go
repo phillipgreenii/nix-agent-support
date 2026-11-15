@@ -69,6 +69,3 @@ type header struct {
 func newHeader(t time.Time, level, msg, version string) header {
 	return header{Time: stamp(t), Level: level, Msg: msg, Service: ServiceName, Version: version, PID: os.Getpid()}
 }
-
-// write appends v as one line to path, rotating past max. Errors are swallowed.
-func write(path string, max int64, v any) { evlog.WriteBestEffort(path, max, v) }

@@ -132,6 +132,8 @@ type EventLog struct {
 	Version string
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
+
+	out sink
 }
 
 // NewEventLog returns the event log inside stateDir, rotating at DaemonMaxBytes.
@@ -156,7 +158,7 @@ func (l *EventLog) Middleware() router.Middleware {
 			resp := next(ctx, c)
 			row := newRequestRow(ServiceName, l.Version, c.Request.Op, c.Instance, start, l.now(), resp.Error)
 			row.applyAnnotations(router.AnnotationsFrom(ctx))
-			write(l.Path, l.MaxBytes, row)
+			l.out.emit(l.Path, l.MaxBytes, row)
 			return resp
 		}
 	}
@@ -168,5 +170,5 @@ func (l *EventLog) OnSpend(ev governor.SpendEvent) {
 	if ev.At.IsZero() {
 		ev.At = l.now()
 	}
-	write(l.Path, l.MaxBytes, newOriginRow(l.Version, ev))
+	l.out.emit(l.Path, l.MaxBytes, newOriginRow(l.Version, ev))
 }

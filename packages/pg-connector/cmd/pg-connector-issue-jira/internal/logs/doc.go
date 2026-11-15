@@ -16,8 +16,9 @@
 // The names are distinct, so no file collides with another. The darwin packet registers
 // the logSources entries from this table. A glob of the form
 // <state dir>/*.jsonl matches all three LIVE files and never an archive:
-// rotation (pkg/eventlog.Append) renames a full log to <file>.1 and keeps a
-// <file>.lock beside it, and neither ends in ".jsonl". The client log is the
+// rotation renames a full log to <file>.1 (the daemon logs, through x/jsonllogger
+// RotatingFile) and the client log keeps a <file>.lock beside it
+// (pkg/eventlog.Append); neither ends in ".jsonl". The client log is the
 // one file the client writes, so it MUST get its own logSources entry whose
 // service_name is pg-connector-issue-jira-daemon-client; a state-directory glob that
 // also carries it would label its rows pg-connector-issue-jira-daemon.
@@ -34,6 +35,15 @@
 // the daemon's log with the same selectors under the daemon's service_name; the
 // old backend's log (service_name pg-connector-issue-jira) stays installed until
 // cleanup.
+//
+// The two daemon logs are slog JSONL written through x/jsonllogger: each typed
+// row (RequestRow, OriginRow, stateLine) is mapped to a slog record in sink.go,
+// which keeps its field names and the standard time layout, and the file is a
+// jsonllogger.RotatingFile capped at DaemonMaxBytes, so a row that would take
+// the file past the cap starts a fresh file and the old one becomes <file>.1.
+// The client log stays on pkg/eventlog: many short-lived client processes
+// append to it, and its rotation is under a cross-process flock, which
+// RotatingFile (a per-process mutex) does not give.
 //
 // # Structured log
 //

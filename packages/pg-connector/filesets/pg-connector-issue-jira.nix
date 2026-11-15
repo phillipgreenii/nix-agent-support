@@ -43,6 +43,7 @@
   "cmd/pg-connector-issue-jira/internal/logs/clientlog.go"
   "cmd/pg-connector-issue-jira/internal/logs/doc.go"
   "cmd/pg-connector-issue-jira/internal/logs/events.go"
+  "cmd/pg-connector-issue-jira/internal/logs/sink.go"
   "cmd/pg-connector-issue-jira/internal/logs/structured.go"
   "cmd/pg-connector-issue-jira/internal/logs/writer.go"
   "cmd/pg-connector-issue-jira/internal/operatorfacts.go"

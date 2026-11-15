@@ -219,8 +219,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261112232432-48309b2fc1d1'
-    hash = 'sha256-gvlMTHUv4A5H60h+vXf+EWZ4Ro6D6EPVXvUzIV/ScaM='
+    version = 'v0.0.0-20261114222359-65f23cfd8d2d'
+    hash = 'sha256-R2j1H6WJeyjkYORQMnvLg1o4f/IPVzkHjDww6G+sjvo='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'

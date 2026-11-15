@@ -71,6 +71,7 @@
   "cmd/pg-connector-github/internal/logs/clientlog.go"
   "cmd/pg-connector-github/internal/logs/doc.go"
   "cmd/pg-connector-github/internal/logs/events.go"
+  "cmd/pg-connector-github/internal/logs/sink.go"
   "cmd/pg-connector-github/internal/logs/structured.go"
   "cmd/pg-connector-github/internal/logs/writer.go"
   "cmd/pg-connector-github/internal/metered/classify.go"

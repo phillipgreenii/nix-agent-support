@@ -19,6 +19,8 @@ import (
 const (
 	fiveMiB = 5 << 20
 	oneMiB  = 1 << 20
+	// rowRoom is more than any one daemon log row takes.
+	rowRoom = 4096
 )
 
 // seed writes n bytes of whole JSONL lines to path (n > 0), each line
@@ -102,15 +104,20 @@ func TestEachLogRotatesPastItsLimit(t *testing.T) {
 	appenders := map[string]struct {
 		live  string
 		limit int
-		add   func(dir string)
+		// atLimit is the size of the "at the limit" seed. The client rotates when
+		// the file is already past its limit (pkg/eventlog); the daemon logs go
+		// through x/jsonllogger.RotatingFile, which rotates when the next line
+		// would take the file past it, so their seed leaves room for one row.
+		atLimit int
+		add     func(dir string)
 	}{
-		"event log": {config.EventLogFileName, fiveMiB, func(dir string) {
+		"event log": {config.EventLogFileName, fiveMiB, fiveMiB - rowRoom, func(dir string) {
 			NewEventLog(dir, "v").OnSpend(governor.SpendEvent{At: t0, Bucket: governor.BucketGraphQL, Purpose: governor.PurposeQuery, Cost: 1, Remaining: -1})
 		}},
-		"structured log": {config.DaemonLogFileName, fiveMiB, func(dir string) {
+		"structured log": {config.DaemonLogFileName, fiveMiB, fiveMiB - rowRoom, func(dir string) {
 			NewStructuredLog(dir, "v").Log("daemon_started")
 		}},
-		"client log": {config.ClientLogFileName, oneMiB, func(dir string) {
+		"client log": {config.ClientLogFileName, oneMiB, oneMiB, func(dir string) {
 			NewClientLog(dir, "v").DaemonUnreachable("pr", "list", t0, "daemon down")
 		}},
 	}
@@ -119,13 +126,13 @@ func TestEachLogRotatesPastItsLimit(t *testing.T) {
 			// At the limit: appended to, not rotated.
 			dir := t.TempDir()
 			live := filepath.Join(dir, a.live)
-			seeded := seed(t, live, a.limit)
-			if got := fileSize(t, live); got != int64(a.limit) {
-				t.Fatalf("seed size %d, want exactly %d", got, a.limit)
+			seeded := seed(t, live, a.atLimit)
+			if got := fileSize(t, live); got != int64(a.atLimit) {
+				t.Fatalf("seed size %d, want exactly %d", got, a.atLimit)
 			}
 			a.add(dir)
 			if _, err := os.Stat(live + ".1"); !os.IsNotExist(err) {
-				t.Fatalf("a log AT its limit must not rotate: %v", err)
+				t.Fatalf("a log whose next row still fits must not rotate: %v", err)
 			}
 			if got := lineCount(t, live); got != seeded+1 {
 				t.Fatalf("lines %d, want %d", got, seeded+1)
@@ -304,5 +311,60 @@ func TestNoLogPathIsReadFromTheEnvironment(t *testing.T) {
 	NewStructuredLog(dir, "v").Log("daemon_started")
 	if got := lineCount(t, DaemonLogPath(dir)); got != 1 {
 		t.Errorf("an empty environment still logs: %d lines", got)
+	}
+}
+
+// The daemon logs write through one long-lived x/jsonllogger RotatingFile: a
+// log renamed or deleted underneath the daemon (a janitor, logrotate) is
+// recreated by the next row instead of the daemon writing into the unlinked
+// file for the rest of its life.
+func TestDaemonLogsFollowAnExternalRenameAndDelete(t *testing.T) {
+	dir := t.TempDir()
+	sl := NewStructuredLog(dir, "v")
+	sl.Log("daemon_started")
+	live := DaemonLogPath(dir)
+	if err := os.Rename(live, live+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	sl.Log("lock_acquired")
+	if rows := readRows(t, live); len(rows) != 1 || rows[0]["change"] != "lock_acquired" {
+		t.Errorf("after a rename the next row starts a fresh file: %v", rows)
+	}
+	if err := os.Remove(live); err != nil {
+		t.Fatal(err)
+	}
+	sl.Log("daemon_started")
+	if rows := readRows(t, live); len(rows) != 1 || rows[0]["change"] != "daemon_started" {
+		t.Errorf("after a delete the next row recreates the file: %v", rows)
+	}
+}
+
+// One EventLog, many rows: the same open RotatingFile rotates the live file at
+// its cap, keeps exactly one archive and never splits or loses a row.
+func TestEventLogRotatesAtItsCapAcrossManyRows(t *testing.T) {
+	dir := t.TempDir()
+	el := NewEventLog(dir, "v")
+	el.MaxBytes = 4096
+	const rows = 200
+	for i := 0; i < rows; i++ {
+		el.OnSpend(governor.SpendEvent{At: t0, Bucket: governor.BucketGraphQL, Purpose: governor.PurposeQuery, Group: fmt.Sprintf("g%03d", i), Cost: 1, Remaining: -1})
+	}
+	live := EventLogPath(dir)
+	if got := fileSize(t, live); got > 4096 {
+		t.Errorf("live file %d bytes exceeds its cap", got)
+	}
+	archived := readRows(t, live+".1")
+	if len(archived) == 0 || fileSize(t, live+".1") > 4096 {
+		t.Fatalf("one archive within the cap expected, got %d rows", len(archived))
+	}
+	// Every surviving row is whole and the newest row is in the live file.
+	all := readRows(t, live)
+	if last := all[len(all)-1]; last["group"] != fmt.Sprintf("g%03d", rows-1) || last["kind"] != "origin" || last["service"] != ServiceName {
+		t.Errorf("newest row: %v", last)
+	}
+	for _, n := range names(t, dir) {
+		if n != config.EventLogFileName && n != config.EventLogFileName+".1" {
+			t.Errorf("unexpected file %q", n)
+		}
 	}
 }

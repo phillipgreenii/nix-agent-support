@@ -36,13 +36,16 @@ const (
 // service_name pg-connector-github): one line per state change. It implements
 // connectord.Logger, so every library component that takes a Logger logs into
 // it, and adds one typed method per change the daemon owns. Safe for
-// concurrent use (each line is one O_APPEND write; rotation is under a flock).
+// concurrent use (one x/jsonllogger RotatingFile under a mutex, which caps the
+// file at MaxBytes and reopens it after an external rename or delete).
 type StructuredLog struct {
 	Path     string
 	MaxBytes int64
 	Version  string
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
+
+	out sink
 }
 
 var _ connectord.Logger = (*StructuredLog)(nil)
@@ -68,7 +71,7 @@ func (l *StructuredLog) Log(change string, kv ...any) {
 }
 
 func (l *StructuredLog) write(level, change, msg string, kv []any) {
-	write(l.Path, l.MaxBytes, stateLine{
+	l.out.emit(l.Path, l.MaxBytes, stateLine{
 		header: newHeader(l.now(), level, msg, l.Version),
 		Change: change,
 		fields: kv,
