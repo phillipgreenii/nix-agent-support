@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/x/jsonllogger"
+	"github.com/phillipgreenii/x/lifecycle"
 	"github.com/phillipgreenii/x/otelsetup"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/metric"
@@ -23,8 +24,14 @@ import (
 
 // shutdownGrace bounds how long a SIGINT/SIGTERM shutdown waits for
 // in-flight requests to finish (serve only ever reads committed store rows,
-// so requests are cheap) before forcing the listener closed.
+// so requests are cheap) before forcing the listener closed. It MUST stay
+// below the --shutdown-deadline the deployment passes.
 const shutdownGrace = 5 * time.Second
+
+// telemetryFlushGrace bounds the best-effort OTLP flush that runs after the
+// run group has finished (and so outside the shutdown deadline). The nix
+// module's ExitTimeOut is the deadline plus a margin that covers it.
+const telemetryFlushGrace = 3 * time.Second
 
 // Server timeouts (bead pg2-n6d8y item 3). A bare http.Server has none, so a
 // stalled or abandoned client held its connection and goroutine forever.
@@ -73,6 +80,10 @@ var (
 	serveRouterConfig string
 	// serveSnapshotInterval is the background /metrics snapshot period.
 	serveSnapshotInterval time.Duration
+	// serveShutdownDeadline is the hard deadline of a graceful shutdown (x/lifecycle):
+	// past it serve logs the phase and exits with a failure status. The deployment
+	// owns it: the nix module passes it and derives launchd's ExitTimeOut from it.
+	serveShutdownDeadline time.Duration
 )
 
 // serveCmd implements `pg-desk serve`: the soak-port-only HTTP server
@@ -99,6 +110,7 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().DurationVar(&serveSnapshotInterval, "metrics-snapshot-interval", 30*time.Second, "how often the background /metrics snapshot is rebuilt (30s to 60s is the intended range); /metrics only serves the last snapshot")
+	serveCmd.Flags().DurationVar(&serveShutdownDeadline, "shutdown-deadline", lifecycle.DefaultDeadline, "hard deadline for a graceful shutdown; past it serve exits with a failure status (the nix module derives launchd's ExitTimeOut from it)")
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "", "listen address (host:port); overrides serve.addr from config")
 	serveCmd.Flags().StringVar(&servePort, "port", "", "listen port only, binding 127.0.0.1 (a convenience alias for --addr; mutually exclusive with it)")
 	serveCmd.Flags().StringVar(&serveRouterConfig, "router-config", "", "path to the pg-router config (read as a file on every scrape; env PG_DESK_ROUTER_CONFIG when unset): supplies the poll interval for the pg_desk_sweep_bound_violated metric. Without it the metric reports no verdict")
@@ -166,7 +178,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// unstructured logging untouched (see serveCmd's own doc comment).
 	shutdown, _ := telemetry.Init(cmd.Context(), "pg-desk-serve", Version)
 	defer func() {
-		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownGrace)
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), telemetryFlushGrace)
 		defer cancelShutdown()
 		_ = shutdown(shutdownCtx)
 	}()
@@ -208,43 +220,52 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if routerPath == "" {
 		routerPath = os.Getenv("PG_DESK_ROUTER_CONFIG")
 	}
-	handler, err := httpapi.NewHandler(ctx, st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval), httpapi.WithReadStore(readPool), httpapi.WithMeterProvider(func(mp metric.MeterProvider) { signals = registerCommonSignals(mp) }))
+	// The run group owns the signal context and the shutdown deadline. Its log is
+	// a raw logger on the file (not the telemetry fan-out), so a stuck exporter
+	// cannot swallow the overrun report.
+	g := lifecycle.New(ctx, lifecycle.Options{
+		Deadline: serveShutdownDeadline,
+		Log:      slog.New(slog.NewTextHandler(logFile, nil)),
+	})
+	defer g.Disarm()
+	handler, err := httpapi.NewHandler(g.Context(), st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(g.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval), httpapi.WithReadStore(readPool), httpapi.WithMeterProvider(func(mp metric.MeterProvider) { signals = registerCommonSignals(mp) }))
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
 	srv := newHTTPServer(addr, handler)
 
-	// main.go wires SIGINT/SIGTERM into cmd.Context() via
-	// signal.NotifyContext, which only CONVERTS the signal into context
-	// cancellation — it does not itself terminate the process. serve is a
-	// long-lived launchd user agent (design doc section 7.7), so it MUST act
-	// on that cancellation itself (a graceful http.Server.Shutdown) rather
-	// than relying on the OS default signal action, or launchd's stop
-	// request would never actually end the process (design section 7.9:
-	// "exit 0 ... on a clean shutdown").
-	serveErr := make(chan error, 1)
-	logger.Info("pg-desk serve listening", "addr", addr)
-	go func() { serveErr <- srv.ListenAndServe() }()
-
-	select {
-	case err := <-serveErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("serve: listen failed", "error", err)
-			return fmt.Errorf("serve: %w", err)
+	// main.go converts the first SIGINT/SIGTERM into cmd.Context() cancellation
+	// and releases the registration, so a second signal kills the process; the
+	// run group turns that cancellation into a graceful http.Server.Shutdown
+	// under the --shutdown-deadline watchdog (design section 7.9: "exit 0 ...
+	// on a clean shutdown").
+	logger.Info("pg-desk serve listening", "addr", addr, "shutdown_deadline", serveShutdownDeadline)
+	g.Go("http", func(ctx context.Context) error {
+		serveErr := make(chan error, 1)
+		go func() { serveErr <- srv.ListenAndServe() }()
+		select {
+		case err := <-serveErr:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("serve: listen failed", "error", err)
+				return fmt.Errorf("serve: %w", err)
+			}
+			return nil
+		case <-ctx.Done():
+			logger.Info("pg-desk serve shutting down", "reason", ctx.Err())
+			g.SetPhase("http_shutdown")
+			logShutdownPhase(logger, clk, "http drain started")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+			defer cancel()
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				logger.Error("serve: shutdown failed", "error", err)
+				return fmt.Errorf("serve: shutdown: %w", err)
+			}
+			logShutdownPhase(logger, clk, "http drained")
+			g.SetPhase("telemetry_flush")
+			return nil
 		}
-		return nil
-	case <-cmd.Context().Done():
-		logger.Info("pg-desk serve shutting down", "reason", cmd.Context().Err())
-		logShutdownPhase(logger, clk, "http drain started")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			logger.Error("serve: shutdown failed", "error", err)
-			return fmt.Errorf("serve: shutdown: %w", err)
-		}
-		logShutdownPhase(logger, clk, "http drained")
-		return nil
-	}
+	})
+	return g.Run()
 }
 
 // openServeLogFile opens (creating parent directories as needed) the log

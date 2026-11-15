@@ -167,6 +167,21 @@ in
     # without touching that config file at all. When soak.enable is false,
     # no flag is passed and pg-desk serve falls back to its configured (or
     # legacy-default) serve.addr.
+    shutdownDeadlineSeconds = lib.mkOption {
+      type = lib.types.ints.between 1 53;
+      default = 8;
+      description = ''
+        Hard deadline, in seconds, of a graceful `pg-desk serve` shutdown. Passed as
+        `--shutdown-deadline`: once SIGTERM arrives the process has this long to
+        drain, past which it logs the shutdown phase and exits with a failure
+        status (`x/lifecycle`). launchd's `ExitTimeOut` is derived from it (this
+        value plus a 7 s margin for the telemetry flush that runs after the
+        deadline's watchdog is disarmed), so the two cannot drift. Capped at 53 so
+        the derived value stays under launchd's silent 60 s clamp. Keep the
+        default in step with `lifecycle.DefaultDeadline` in the binary.
+      '';
+    };
+
     pprof.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -206,7 +221,7 @@ in
       system.launchdServices.userAgents.pg-desk-serve = {
         label = "com.phillipg.pg-desk-serve";
         script = ''
-          exec ${cfg.package}/bin/pg-desk serve${lib.optionalString cfg.soak.enable " --port ${toString cfg.soak.port}"}${
+          exec ${cfg.package}/bin/pg-desk serve --shutdown-deadline ${toString cfg.shutdownDeadlineSeconds}s${lib.optionalString cfg.soak.enable " --port ${toString cfg.soak.port}"}${
             lib.optionalString (
               routerConfigPath != null
             ) " --router-config ${lib.escapeShellArg routerConfigPath}"
@@ -216,11 +231,13 @@ in
         keepAlive = true;
         serviceConfig = {
           # launchd SIGKILLs a job ExitTimeOut seconds after SIGTERM (default 5).
-          # serve's worst-case shutdown is two sequential shutdownGrace (5 s)
-          # waits in cmd/pg-desk/serve.go: srv.Shutdown, then the deferred
-          # telemetry flush, so 10 s; 20 is that plus a 10 s margin, under
-          # launchd's silent 60 s clamp. Keep the two in step.
-          ExitTimeOut = 20;
+          # serve owns a hard shutdown deadline (--shutdown-deadline, x/lifecycle):
+          # past it the process exits itself. Nix owns that value and derives this
+          # one from it: the deadline plus 7 s, which covers the 3 s telemetry
+          # flush that runs after the watchdog is disarmed (telemetryFlushGrace
+          # in cmd/pg-desk/serve.go) and leaves a margin. The option is capped so
+          # the sum stays under launchd's silent 60 s clamp.
+          ExitTimeOut = cfg.shutdownDeadlineSeconds + 7;
           EnvironmentVariables =
             emitterEnv
             // lib.optionalAttrs (pgDeskConfigSource != null) {

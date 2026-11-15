@@ -48,6 +48,29 @@ func TestRunServeReturnsCleanlyOnACancelledContext(t *testing.T) {
 			t.Errorf("serve log lacks shutdown phase %q:\n%s", phase, b)
 		}
 	}
+	// The run group reports the shutdown to the same log: it started on the
+	// cancellation, finished inside the deadline and never hit the watchdog.
+	for _, want := range []string{"shutdown_signal", "shutdown_complete"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("serve log lacks the %s lifecycle event:\n%s", want, b)
+		}
+	}
+	if strings.Contains(string(b), "shutdown_overrun") {
+		t.Errorf("serve log reports a shutdown overrun on a clean stop:\n%s", b)
+	}
+}
+
+// TestServeShutdownDeadlineFlag pins the flag the nix module passes and derives
+// launchd's ExitTimeOut from: its name, and a default equal to the lifecycle
+// default (the module's own default must match it).
+func TestServeShutdownDeadlineFlag(t *testing.T) {
+	f := serveCmd.Flags().Lookup("shutdown-deadline")
+	if f == nil {
+		t.Fatal("serve has no --shutdown-deadline flag")
+	}
+	if f.DefValue != "8s" {
+		t.Errorf("--shutdown-deadline default = %q, want 8s (lifecycle.DefaultDeadline, mirrored by the nix module)", f.DefValue)
+	}
 }
 
 // TestRunServeRefusesAddrAndPortTogether covers the flag conflict before

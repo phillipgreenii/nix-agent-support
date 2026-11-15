@@ -15234,6 +15234,10 @@
                     enable = true;
                     pprof.enable = false;
                   };
+                  darwinDeadline20 = evalDarwin {
+                    enable = true;
+                    shutdownDeadlineSeconds = 20;
+                  };
                   darwinEnabledSoak = evalDarwin {
                     enable = true;
                     soak = {
@@ -15467,10 +15471,19 @@
                 # TCP address), merged beside the existing EnvironmentVariables
                 # (PG_DESK_CONFIG survives); off leaves the variable out and the rest
                 # of the attribute exactly as before.
-                # two sequential 5 s shutdown waits plus margin, under launchd's 60 s clamp
+                # nix owns the shutdown deadline: serve gets it as a flag and launchd's
+                # ExitTimeOut is derived from it (deadline + 7 s for the telemetry
+                # flush), so the two cannot drift; a changed option moves both.
+                assert lib.hasInfix "serve --shutdown-deadline 8s"
+                  darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
                 assert
                   darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.ExitTimeOut
-                  == 20;
+                  == 15;
+                assert lib.hasInfix "--shutdown-deadline 20s"
+                  darwinDeadline20.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                assert
+                  darwinDeadline20.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.ExitTimeOut
+                  == 27;
                 assert
                   darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.serviceConfig.EnvironmentVariables.PG_DESK_PPROF_ADDR
                   == "/Users/tester/.local/state/pg-desk/pprof.sock";
