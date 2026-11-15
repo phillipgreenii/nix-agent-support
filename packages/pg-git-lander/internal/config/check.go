@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/glob"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/outcome"
 )
 
@@ -44,7 +46,7 @@ func (l *Loader) Check(ctx context.Context, opts CheckOptions) (*outcome.Outcome
 		src, _ := os.ReadFile(pre.xdgPath)
 		if doc, _ := parseXDG(src); doc != nil {
 			for _, v := range append([]*vals{doc.defaults}, doc.repos...) {
-				warns = append(warns, l.commandWarnings(v, pre.xdgPath, pre.Repo)...)
+				warns = append(warns, l.commandWarnings(ctx, v, pre.xdgPath, pre)...)
 			}
 		}
 	}
@@ -81,7 +83,7 @@ func (l *Loader) Check(ctx context.Context, opts CheckOptions) (*outcome.Outcome
 		if name == "" {
 			name = pre.RebaseTip(ctx) + ":" + RepoFileName
 		}
-		warns = append(warns, l.commandWarnings(repoVals, name, pre.Repo)...)
+		warns = append(warns, l.commandWarnings(ctx, repoVals, name, pre)...)
 	}
 	warns = append(warns, l.lossyDriverWarnings(ctx, pre)...)
 
@@ -200,10 +202,14 @@ func (p *Pre) repoFileAt(ctx context.Context, ref string) ([]byte, string, error
 }
 
 // commandWarnings warns about relative command paths and commands that do
-// not exist, for every command a layer names.
-func (l *Loader) commandWarnings(v *vals, file, repo string) []Warning {
+// not exist, for every command a layer names. A relative command of a
+// run_per = dir conflict rule runs inside each matched directory, so it is
+// looked up in each directory matched at the primary branch tip (check has no
+// branch checkout); every other relative command is looked up in the repo root.
+func (l *Loader) commandWarnings(ctx context.Context, v *vals, file string, pre *Pre) []Warning {
+	repo := pre.Repo
 	var out []Warning
-	check := func(argv []string, line int, key string) {
+	check := func(argv []string, line int, key string, rule *Rule) {
 		if len(argv) == 0 {
 			return
 		}
@@ -221,7 +227,11 @@ func (l *Loader) commandWarnings(v *vals, file, repo string) []Warning {
 				Word: outcome.WarnRelativeCommandPath, File: file, Line: line, Key: key,
 				detail: cmd + " runs a file from the work worktree, which holds the branch's content; acceptable only for a trusted repo",
 			})
-			if !isFile(filepath.Join(repo, cmd)) {
+			if rule != nil && rule.RunPer == "dir" && rule.Glob != "" {
+				if w := l.dirCommandWarning(ctx, pre, rule, cmd, file, line, key); w != nil {
+					out = append(out, *w)
+				}
+			} else if !isFile(filepath.Join(repo, cmd)) {
 				out = append(out, Warning{Word: outcome.WarnCommandNotFound, File: file, Line: line, Key: key, detail: cmd + " does not exist in the repo"})
 			}
 		default:
@@ -236,7 +246,7 @@ func (l *Loader) commandWarnings(v *vals, file, repo string) []Warning {
 	for _, op := range operations {
 		for _, pt := range points {
 			for _, h := range v.hooks[op][pt] {
-				check(h.Run, h.Line, h.Key+".run")
+				check(h.Run, h.Line, h.Key+".run", nil)
 			}
 		}
 	}
@@ -244,11 +254,57 @@ func (l *Loader) commandWarnings(v *vals, file, repo string) []Warning {
 	if v.conflictDefault != nil {
 		rules = append(rules, *v.conflictDefault)
 	}
-	for _, r := range rules {
-		check(r.Resolve, r.Line, r.Key+".resolve")
-		check(r.Verify, r.Line, r.Key+".verify")
+	for i := range rules {
+		r := &rules[i]
+		check(r.Resolve, r.Line, r.Key+".resolve", r)
+		check(r.Verify, r.Line, r.Key+".verify", r)
 	}
 	return out
+}
+
+// maxListedDirs is how many directories a dir-rule warning names.
+const maxListedDirs = 5
+
+// dirCommandWarning tests a relative cmd of a run_per = dir rule against each
+// directory the rule's glob matches at the primary branch tip (path.Dir of
+// each matched file, as the resolver's units do). It returns one warning
+// naming the first maxListedDirs directories that lack cmd, or nil.
+func (l *Loader) dirCommandWarning(ctx context.Context, pre *Pre, r *Rule, cmd, file string, line int, key string) *Warning {
+	g := l.Git
+	tip := pre.RebaseTip(ctx)
+	ls := g.Run(ctx, pre.Repo, "ls-tree", "-r", "--name-only", "-z", tip)
+	if !ls.OK() {
+		return nil
+	}
+	seen := map[string]bool{}
+	var dirs []string
+	for _, p := range strings.Split(string(ls.Stdout), "\x00") {
+		if p == "" || !glob.Match(r.Glob, p) {
+			continue
+		}
+		if d := path.Dir(p); !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+	sort.Strings(dirs)
+	var missing []string
+	for _, d := range dirs {
+		if !g.Run(ctx, pre.Repo, "cat-file", "-e", tip+":"+path.Join(d, cmd)).OK() {
+			missing = append(missing, d)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	list := strings.Join(missing[:min(len(missing), maxListedDirs)], ", ")
+	if len(missing) > maxListedDirs {
+		list += fmt.Sprintf(" and %d more", len(missing)-maxListedDirs)
+	}
+	return &Warning{
+		Word: outcome.WarnCommandNotFound, File: file, Line: line, Key: key,
+		detail: fmt.Sprintf("%s does not exist in %d of %d matched director(ies) at the primary branch tip (%s): %s; this inspects the primary branch tip, not the branch's own content", cmd, len(missing), len(dirs), tip, list),
+	}
 }
 
 func isFile(p string) bool {

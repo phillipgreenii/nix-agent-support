@@ -364,3 +364,55 @@ func TestOldHookKeysAreConfigErrors(t *testing.T) {
 		}
 	})
 }
+
+// dirRuleFiles builds a repo file with a run_per rule over pkgs/*/lock.toml
+// plus one lock.toml per named directory, and the script in the given ones.
+func dirRuleFiles(runPer string, dirs, withScript []string) map[string]string {
+	files := map[string]string{".pg-git-lander.toml": "[[conflict]]\nglob = \"pkgs/*/lock.toml\"\nrun_per = \"" + runPer + "\"\nresolve = [\"./update.sh\"]\n"}
+	for _, d := range dirs {
+		files["pkgs/"+d+"/lock.toml"] = "x\n"
+	}
+	for _, d := range withScript {
+		files["pkgs/"+d+"/update.sh"] = "#!/bin/sh\n"
+	}
+	return files
+}
+
+func TestCheckRunPerDirResolvesCommandInEachMatchedDir(t *testing.T) {
+	f := newFx(t)
+	f.commit("all", dirRuleFiles("dir", []string{"a", "b"}, []string{"a", "b"}))
+	if o := f.check(""); hasWarn(o, outcome.WarnCommandNotFound, "") || !hasWarn(o, outcome.WarnRelativeCommandPath, "update.sh") {
+		t.Fatalf("complete dirs: %+v", o.Warnings)
+	}
+
+	f = newFx(t)
+	f.commit("one missing", dirRuleFiles("dir", []string{"a", "b"}, []string{"a"}))
+	o := f.check("")
+	if !hasWarn(o, outcome.WarnCommandNotFound, "primary branch tip") || !hasWarn(o, outcome.WarnCommandNotFound, ": pkgs/b;") || hasWarn(o, outcome.WarnCommandNotFound, "pkgs/a") {
+		t.Fatalf("one missing: %+v", o.Warnings)
+	}
+
+	f = newFx(t)
+	f.commit("none matched", dirRuleFiles("dir", nil, nil))
+	if o := f.check(""); hasWarn(o, outcome.WarnCommandNotFound, "") {
+		t.Fatalf("no match: %+v", o.Warnings)
+	}
+}
+
+func TestCheckRunPerDirTruncatesMissingList(t *testing.T) {
+	f := newFx(t)
+	f.commit("many", dirRuleFiles("dir", []string{"g", "f", "e", "d", "c", "b", "a"}, nil))
+	o := f.check("")
+	if !hasWarn(o, outcome.WarnCommandNotFound, ": pkgs/a, pkgs/b, pkgs/c, pkgs/d, pkgs/e and 2 more;") {
+		t.Fatalf("truncation: %+v", o.Warnings)
+	}
+}
+
+func TestCheckRunPerFileStillChecksRepoRoot(t *testing.T) {
+	f := newFx(t)
+	// The script exists only in a subdirectory, not at the repo root.
+	f.commit("file rule", dirRuleFiles("file", []string{"a"}, []string{"a"}))
+	if o := f.check(""); !hasWarn(o, outcome.WarnCommandNotFound, "./update.sh does not exist in the repo") {
+		t.Fatalf("run_per file: %+v", o.Warnings)
+	}
+}

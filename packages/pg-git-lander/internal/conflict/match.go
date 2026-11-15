@@ -5,44 +5,12 @@
 package conflict
 
 import (
-	"path"
 	"sort"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-git-lander/internal/glob"
 )
-
-// GlobMatch reports whether the repo-relative path p matches glob: "*"
-// matches within one path segment and "**" across segments (zero or more).
-func GlobMatch(glob, p string) bool {
-	return matchSegs(strings.Split(glob, "/"), strings.Split(p, "/"))
-}
-
-func matchSegs(pat, segs []string) bool {
-	for len(pat) > 0 {
-		if pat[0] == "**" {
-			rest := pat[1:]
-			if len(rest) == 0 {
-				return true
-			}
-			for i := 0; i <= len(segs); i++ {
-				if matchSegs(rest, segs[i:]) {
-					return true
-				}
-			}
-			return false
-		}
-		if len(segs) == 0 {
-			return false
-		}
-		ok, err := path.Match(pat[0], segs[0])
-		if err != nil || !ok {
-			return false
-		}
-		pat, segs = pat[1:], segs[1:]
-	}
-	return len(segs) == 0
-}
 
 // Match is the paths one rule resolves.
 type Match struct {
@@ -59,7 +27,7 @@ func MatchRules(cfg *config.Config, paths []string) (matches []Match, none []str
 	for _, p := range paths {
 		var hit *config.Rule
 		for i := range cfg.Rules {
-			if GlobMatch(cfg.Rules[i].Glob, p) {
+			if glob.Match(cfg.Rules[i].Glob, p) {
 				hit = &cfg.Rules[i]
 				break
 			}
