@@ -53,10 +53,11 @@ func TestTeardown_processGuardOnTheWorktreeRemoval(t *testing.T) {
 			return closeSinglePhase(t.Context(), cc, h.opener, h.repo, s, false)
 		}},
 	}
+	base := newSweepHarness(t)
 	for _, p := range paths {
 		for _, tc := range cases {
 			t.Run(p.name+"/"+tc.name, func(t *testing.T) {
-				h := newSweepHarness(t)
+				h := base.forRow(t)
 				wt := h.leak("zr-k")
 				withTeardownProbe(t, tc.probe(wt))
 				s := ccpool.Session{

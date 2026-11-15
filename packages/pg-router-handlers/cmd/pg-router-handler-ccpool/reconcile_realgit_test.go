@@ -33,9 +33,10 @@ func TestReconcileClosedBeadSessions_realGitKeepsUnpushedOrDirtyWork(t *testing.
 			h.git(path, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-m", "work")
 		}, true},
 	}
+	base := newSweepHarness(t)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := newSweepHarness(t)
+			h := base.forRow(t)
 			path := h.leak("zr-done")
 			c.prepare(h, path)
 			cc := &fakeCC{ListSeq: [][]ccpool.Session{{{

@@ -23,6 +23,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router-handlers/internal/sessionlock"
+	"github.com/phillipgreenii/pg-router-handlers/internal/sharedrepo"
 	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
 )
 
@@ -66,19 +67,82 @@ func setSweepCaps(t *testing.T, perPass, examined int) {
 	t.Cleanup(func() { worktreeSweepMaxPerPass, worktreeSweepMaxExamined = oldPer, oldExam })
 }
 
+// The sweep tests share ONE real repository for the whole package: building a
+// fixture (git init, its configuration and the first commit) costs about half a
+// second under load, and most tests only add linked worktrees and pg-router/*
+// branches, which sharedSweepRepo's reset removes between tests. Tests run
+// sequentially (the sweep caps are package variables), so no two tests ever see
+// the repository at once. A test that commits to the main checkout or must
+// build its own fixture uses newFreshSweepHarness.
+var sharedSweep sharedrepo.Shared
+
+func sharedSweepRepo(t *testing.T) *gitfixture.Repo {
+	t.Helper()
+	repo, err := sharedSweep.Get(context.Background(), "ccpool-handler-worktreesweep", func(ctx context.Context, r *gitfixture.Repo) error {
+		_, err := r.Commit(ctx, "init", nil)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("shared sweep fixture: %v", err)
+	}
+	if err := sharedrepo.Reset(context.Background(), repo); err != nil {
+		t.Fatalf("shared sweep fixture reset: %v", err)
+	}
+	return repo
+}
+
+// removeSharedSweepFixture deletes the shared repository; TestMain calls it.
+func removeSharedSweepFixture() { sharedSweep.Remove() }
+
 func newSweepHarness(t *testing.T) *sweepHarness {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	h := &sweepHarness{t: t, lockDir: t.TempDir()}
+	fx := sharedSweepRepo(t)
+	h := &sweepHarness{repo: fx.Dir, fixture: filepath.Dir(fx.Dir)}
+	h.homeDir = filepath.Join(h.fixture, "home") // gitfixture.NewRepo layout: <root>/{repo,home,hooks}
+	h.bind(t)
+	return h
+}
+
+// newFreshSweepHarness builds the harness over a repository of its own, for a
+// test that changes the main checkout or the repository's configuration.
+func newFreshSweepHarness(t *testing.T) *sweepHarness {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	h := &sweepHarness{}
 	fx := gittest.New(t, gitfixture.RepoOptions{Suite: "ccpool-handler-worktreesweep", InitialBranch: "main"})
 	h.repo = fx.Dir
 	h.fixture = filepath.Dir(fx.Dir)
-	h.homeDir = filepath.Join(h.fixture, "home") // gitfixture.NewRepo layout: <root>/{repo,home,hooks}
+	h.homeDir = filepath.Join(h.fixture, "home")
 	if _, err := fx.Commit(context.Background(), "init", nil); err != nil {
 		t.Fatal(err)
 	}
+	h.bind(t)
+	return h
+}
+
+// forRow returns a harness for one row (subtest) of a table over the SAME
+// repository as h; see newSweepHarness. Everything a row mutates outside the
+// repository (worktree directory, lock directory, event log, session fake) is
+// fresh, and the repository is reset first.
+func (h *sweepHarness) forRow(t *testing.T) *sweepHarness {
+	t.Helper()
+	sharedSweepRepo(t)
+	row := &sweepHarness{repo: h.repo, homeDir: h.homeDir, fixture: h.fixture}
+	row.bind(t)
+	return row
+}
+
+// bind gives the harness its per-test directories, event log and fakes, over
+// the repository and fixture HOME already set on it.
+func (h *sweepHarness) bind(t *testing.T) {
+	t.Helper()
+	h.t = t
+	h.lockDir = t.TempDir()
 	wtDir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +172,6 @@ func newSweepHarness(t *testing.T) *sweepHarness {
 	h.deps = executor.Deps{CC: h.cc, BD: &orphanBD{}, Cfg: cfg, Log: lw, Now: func() time.Time { return h.nowFixed }}
 	h.env = orphanEnv{open: h.opener, lockDir: h.lockDir}
 	h.role = orphanRole(roles.CloseOnly, 0)
-	return h
 }
 
 // client returns a gitclient anchored at dir (the fixture repo or one of its
@@ -225,7 +288,7 @@ func TestSweep_hookGitEnvironmentDoesNotLeakIntoTheOuterRepository(t *testing.T)
 	t.Setenv("GIT_WORK_TREE", t.TempDir())
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(outerGitDir, "index"))
 
-	h := newSweepHarness(t)
+	h := newFreshSweepHarness(t)
 	path := h.leak("zr-k")
 	if got := h.sweep(); got != 1 || h.exists(path) {
 		t.Fatalf("fixture sanity under a hook environment: removed=%d exists=%v, want the leaked worktree reclaimed", got, h.exists(path))
@@ -305,9 +368,10 @@ func TestSweep_keptWhileASessionRowNamesIt(t *testing.T) {
 			return ccpool.Session{ExternalID: "pg-router-worker-x-1", State: ccpool.StateStarting, Live: true, CWD: p}
 		}},
 	}
+	base := newSweepHarness(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newSweepHarness(t)
+			h := base.forRow(t)
 			path := h.leak("zr-k")
 			h.cc.sessions = []ccpool.Session{tc.row(path)}
 			if got := h.sweep(); got != 0 {
@@ -356,7 +420,7 @@ func TestSweep_keptWhenBranchHasUniqueCommits(t *testing.T) {
 // The same commit once it is reachable from the repo's HEAD (merged) is no
 // longer unique, so the worktree is reclaimable.
 func TestSweep_mergedCommitsAreNotUnique(t *testing.T) {
-	h := newSweepHarness(t)
+	h := newFreshSweepHarness(t)
 	path := h.leak("zr-k")
 	h.git(path, "commit", "-q", "--allow-empty", "-m", "worker commit")
 	h.git(h.repo, "merge", "-q", "--ff-only", "pg-router/zr-k")
@@ -438,8 +502,9 @@ func TestSweep_listErrorMeansNoAction(t *testing.T) {
 }
 
 func TestSweep_disabledConfigurations(t *testing.T) {
+	base := newSweepHarness(t)
 	t.Run("role without ccpool block", func(t *testing.T) {
-		h := newSweepHarness(t)
+		h := base.forRow(t)
 		path := h.leak("zr-k")
 		h.role = roles.Role{Name: "cmd"}
 		if got := h.sweep(); got != 0 {
@@ -448,7 +513,7 @@ func TestSweep_disabledConfigurations(t *testing.T) {
 		h.wantKept(path, "zr-k")
 	})
 	t.Run("non-worktree isolation", func(t *testing.T) {
-		h := newSweepHarness(t)
+		h := base.forRow(t)
 		path := h.leak("zr-k")
 		h.role.CCPool.Isolation = roles.IsolationConfig{Type: "none"}
 		if got := h.sweep(); got != 0 {
@@ -457,7 +522,7 @@ func TestSweep_disabledConfigurations(t *testing.T) {
 		h.wantKept(path, "zr-k")
 	})
 	t.Run("no lock directory (acting without exclusion is forbidden)", func(t *testing.T) {
-		h := newSweepHarness(t)
+		h := base.forRow(t)
 		path := h.leak("zr-k")
 		h.env.lockDir = ""
 		if got := h.sweep(); got != 0 {
@@ -466,7 +531,7 @@ func TestSweep_disabledConfigurations(t *testing.T) {
 		h.wantKept(path, "zr-k")
 	})
 	t.Run("missing worktree directory", func(t *testing.T) {
-		h := newSweepHarness(t)
+		h := base.forRow(t)
 		h.deps.Cfg.WorktreeDir = filepath.Join(h.wtDir, "does-not-exist")
 		if got := h.sweep(); got != 0 {
 			t.Errorf("removed %d", got)
@@ -520,9 +585,10 @@ func TestSweep_keptWhileALiveProcessHasTheWorktreeAsItsCWD(t *testing.T) {
 		{"cwd is the worktree root", func(p string) []string { return []string{"/", p} }},
 		{"cwd is a subdirectory of the worktree", func(p string) []string { return []string{filepath.Join(p, "pkg", "sub")} }},
 	}
+	base := newSweepHarness(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newSweepHarness(t)
+			h := base.forRow(t)
 			path := h.leak("zr-k") // no row in the dispatching role's pool, lock free, clean, no commits
 			h.env.cwds = func(context.Context) ([]string, error) { return tc.cwds(path), nil }
 			if got := h.sweep(); got != 0 {
@@ -588,9 +654,10 @@ func TestSweep_processAppearingBeforeTheLockKeepsTheWorktree(t *testing.T) {
 // probes (one pre-filter for the pass, one fresh probe per candidate under its
 // lock). A probe served from a cache under the lock would drop the count.
 func TestSweep_probeCountIsOnePlusNRemovableCandidates(t *testing.T) {
+	base := newSweepHarness(t)
 	for _, n := range []int{1, 3} {
 		t.Run(fmt.Sprintf("N=%d", n), func(t *testing.T) {
-			h := newSweepHarness(t)
+			h := base.forRow(t)
 			var paths []string
 			for i := 0; i < n; i++ {
 				paths = append(paths, h.leak(fmt.Sprintf("zr-k%d", i)))
@@ -790,9 +857,10 @@ func TestSweep_youngOrNonEmptyIndexLockIsNotInterrupted(t *testing.T) {
 			_ = os.Chtimes(lock, old, old)
 		}},
 	}
+	base := newSweepHarness(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newSweepHarness(t)
+			h := base.forRow(t)
 			path := h.leak("zr-k")
 			tc.prep(h, path)
 			if got := h.sweep(); got != 0 {

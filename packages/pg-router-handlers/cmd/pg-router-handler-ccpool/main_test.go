@@ -66,6 +66,7 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.Setenv("XDG_STATE_HOME", dir)
 	code := m.Run()
+	removeSharedSweepFixture()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }

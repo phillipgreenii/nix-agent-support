@@ -273,11 +273,12 @@ func TestLeftover_refusesAndDeletesNothing(t *testing.T) {
 			return h.leftover("zr-k")
 		}},
 	}
+	base := newSweepHarness(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// One real repo per case serves both entry points: the first one
 			// must leave everything in place, so the second sees the same state.
-			h := newSweepHarness(t)
+			h := base.forRow(t)
 			path := tc.setup(t, h)
 			for _, via := range []string{"sweep", "dispatch"} {
 				t.Run(via, func(t *testing.T) {

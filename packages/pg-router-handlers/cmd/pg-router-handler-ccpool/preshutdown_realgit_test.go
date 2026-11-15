@@ -90,6 +90,7 @@ func TestCloseSinglePhase_pathIsolationNonGitCwdRemovesNothing(t *testing.T) {
 // handler's worktree directory) and the two-phase purge (a cwd under it), through
 // closeSession, finishPurge (the purge_pending retry) and the closed-bead reconcile.
 func TestTeardown_beadWorktreeSessionNeverRemovesTheFoundWorktree(t *testing.T) {
+	base := newSweepHarness(t)
 	for _, where := range []string{"outside the handler's worktree dir", "inside the handler's worktree dir"} {
 		for _, keep := range []bool{true, false} {
 			name := where + "/row marked bead-worktree"
@@ -97,8 +98,8 @@ func TestTeardown_beadWorktreeSessionNeverRemovesTheFoundWorktree(t *testing.T) 
 				name = where + "/unmarked row (negative control: the removal is real)"
 			}
 			t.Run(name, func(t *testing.T) {
-				h := newSweepHarness(t)
-				dir := filepath.Join(h.fixture, "drain-wt")
+				h := base.forRow(t)
+				dir := filepath.Join(t.TempDir(), "drain-wt")
 				if where[0] == 'i' {
 					dir = filepath.Join(h.wtDir, "bead-1")
 				}
