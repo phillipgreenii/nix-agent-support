@@ -342,6 +342,15 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 // write paths.
 var pjiraAuthStatusRE = regexp.MustCompile(`\bstatus 40[13]\b|: unauthenticated\b`)
 
+// pjira401RE matches (on lower-cased text) only a 401: "status 401" as a whole
+// number, or the ": unauthenticated" literal pjira prints for a 401 on its
+// write paths. A 403 does not match.
+var pjira401RE = regexp.MustCompile(`\bstatus 401\b|: unauthenticated\b`)
+
+// IsPjira401 reports whether pjira's failure text is a 401. It is narrower
+// than ClassifyPjiraError, which also maps a 403 to unauthenticated.
+func IsPjira401(text string) bool { return pjira401RE.MatchString(strings.ToLower(text)) }
+
 // classifyPJIRAErrorMessage maps pjira's own free-text error message onto
 // scriptout's closed error taxonomy. pjira's not-found phrasing is
 // consistently "issue <KEY> not found" [verified against

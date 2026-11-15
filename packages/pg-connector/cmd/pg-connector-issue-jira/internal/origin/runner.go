@@ -145,6 +145,10 @@ type Options struct {
 	// Readings keeps the latest rate-limit reading for the status op and the
 	// gauges; nil means the runner makes its own (Readings returns it).
 	Readings *Readings
+	// Refresher is the credential guard; nil means none. While it is degraded
+	// Run refuses every call without launching pjira; on a 401 it is asked to
+	// re-pull the token before the failure is recorded.
+	Refresher Refresher
 }
 
 // Runner is the governed internal.Runner.
@@ -161,6 +165,7 @@ type Runner struct {
 	auth       Auth
 	floor      int64
 	readings   *Readings
+	refresher  Refresher
 
 	mu    sync.Mutex
 	pause pauseTracker
@@ -184,7 +189,7 @@ func New(opts Options) (*Runner, error) {
 		inner: opts.Inner, gov: opts.Governor, bucket: opts.Bucket,
 		sem: make(chan struct{}, opts.Concurrency), def: opts.DefaultPause,
 		clock: opts.Clock, jitter: opts.Jitter, retryAfter: opts.RetryAfter,
-		obs: opts.Observer, auth: opts.Auth, floor: opts.Floor, readings: opts.Readings,
+		obs: opts.Observer, auth: opts.Auth, floor: opts.Floor, readings: opts.Readings, refresher: opts.Refresher,
 	}
 	if r.readings == nil {
 		r.readings = NewReadings()
@@ -219,6 +224,12 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 	call := callFrom(ctx)
 	start := r.clock.Now()
 
+	// A degraded credential guard refuses without launching pjira or spending.
+	if r.refresher != nil && r.refresher.Degraded() {
+		r.observe(ResultUnauthenticated, r.clock.Now().Sub(start))
+		return "", &CallError{Kind: KindUnauthenticated, Err: ErrTokenDegraded}
+	}
+
 	// A pause holds only the background classes inside the governor; an
 	// interactive call is refused here so it is answered stale by its caller
 	// instead of being sent to a tenant that has just said 429.
@@ -229,17 +240,35 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 		}
 	}
 
+	retried := false
+	for {
+		out, retry, err := r.attempt(ctx, call, start, retried, args)
+		if !retry {
+			return out, err
+		}
+		retried = true
+	}
+}
+
+// attempt runs one admitted launch of pjira. It reports retry=true (with its
+// ticket already settled) when the Refresher asked for the call to be run
+// again; the caller then calls attempt again, which re-Admits.
+func (r *Runner) attempt(ctx context.Context, call Call, start time.Time, retried bool, args []string) (string, bool, error) {
 	ticket, err := r.gov.Admit(governor.Request{Bucket: r.bucket, Class: call.Class, Cost: 1})
 	if err != nil {
 		r.observe(ResultRefused, r.clock.Now().Sub(start))
-		return "", err
+		return "", false, err
 	}
 
 	select {
 	case r.sem <- struct{}{}:
 	case <-ctx.Done():
 		ticket.Release()
-		return "", ctx.Err()
+		return "", false, ctx.Err()
+	}
+	var used uint64
+	if r.refresher != nil {
+		used = r.refresher.Generation()
 	}
 	var reading *internal.RateLimit
 	runCtx := internal.WithRateLimitSink(ctx, func(rl internal.RateLimit) { reading = &rl })
@@ -262,7 +291,7 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 		spend.Outcome = ResultOK
 		_ = ticket.Settle(ctx, spend)
 		r.observe(ResultOK, r.clock.Now().Sub(start))
-		return out, nil
+		return out, false, nil
 	}
 
 	text := runErr.Error()
@@ -281,12 +310,29 @@ func (r *Runner) Run(ctx context.Context, args ...string) (string, error) {
 	} else {
 		r.endRateLimitRun()
 	}
+	// The guard decides BEFORE the failure is marked: a retry is not a failure
+	// the daemon reports. The first ticket is settled before the retry is
+	// admitted, so none leaks or is counted twice.
+	if r.refresher != nil && kind != KindRateLimited {
+		if why := refreshReason(args, out, text); why != "" {
+			_ = ticket.Settle(ctx, spend)
+			ticket = nil
+			if !retried && r.refresher.Refresh(ctx, used, why) {
+				return "", true, nil
+			}
+			if retried && internal.IsPjira401(text) {
+				r.refresher.RejectedAfterRetry()
+			}
+		}
+	}
 	if kind == KindUnauthenticated && r.auth != nil {
 		r.auth.MarkUnauthenticated(runErr)
 	}
-	_ = ticket.Settle(ctx, spend)
+	if ticket != nil {
+		_ = ticket.Settle(ctx, spend)
+	}
 	r.observe(kind, r.clock.Now().Sub(start))
-	return out, &CallError{Kind: kind, Err: runErr}
+	return out, false, &CallError{Kind: kind, Err: runErr}
 }
 
 func (r *Runner) endRateLimitRun() {

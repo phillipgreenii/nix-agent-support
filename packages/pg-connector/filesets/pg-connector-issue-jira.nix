@@ -74,6 +74,7 @@
   "cmd/pg-connector-issue-jira/internal/origin/govern.go"
   "cmd/pg-connector-issue-jira/internal/origin/pause.go"
   "cmd/pg-connector-issue-jira/internal/origin/ratelimit.go"
+  "cmd/pg-connector-issue-jira/internal/origin/refresher.go"
   "cmd/pg-connector-issue-jira/internal/origin/runner.go"
   "cmd/pg-connector-issue-jira/internal/query/confirmer.go"
   "cmd/pg-connector-issue-jira/internal/query/doc.go"
