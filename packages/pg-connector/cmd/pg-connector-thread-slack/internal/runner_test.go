@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // fakeEnv backs ResolveBinary/CLIRunner.Getenv in tests, mirroring
@@ -97,7 +96,7 @@ func fullConfig() string {
 }
 
 // mustCommand builds r's command for ctx or fails the test.
-func mustCommand(t *testing.T, r *CLIRunner, ctx context.Context, prompt, schema string) *exec.Cmd {
+func mustCommand(t *testing.T, r *CLIRunner, ctx context.Context, prompt, schema string) cmdrun.Call {
 	t.Helper()
 	cmd, err := r.command(ctx, prompt, schema)
 	if err != nil {
@@ -112,7 +111,13 @@ func TestCLIRunner_Command_SetsWaitDelay(t *testing.T) {
 	if cmd.WaitDelay != scriptout.DefaultWaitDelay {
 		t.Fatalf("cmd.WaitDelay = %v, want %v", cmd.WaitDelay, scriptout.DefaultWaitDelay)
 	}
+	if cmd.Timeout != scriptout.ChildTimeout || !cmd.OwnProcGroup || cmd.TermGrace != scriptout.DefaultTermGrace {
+		t.Fatalf("call is not bounded: %+v", cmd)
+	}
 }
+
+// argv is the full argument vector (program first) of a built call.
+func argv(c cmdrun.Call) []string { return append([]string{c.Name}, c.Args...) }
 
 // TestCLIRunner_Command_ConfiguredOptions is bead pg2-apllc's own contract:
 // with every option supplied through the request Config on the context, the
@@ -136,19 +141,19 @@ func TestCLIRunner_Command_ConfiguredOptions(t *testing.T) {
 		"--setting-sources", "user",
 		"--disable-slash-commands",
 	}
-	if !reflect.DeepEqual(cmd.Args, want) {
-		t.Fatalf("cmd.Args =\n%q\nwant\n%q", cmd.Args, want)
+	if !reflect.DeepEqual(argv(cmd), want) {
+		t.Fatalf("cmd.Args =\n%q\nwant\n%q", argv(cmd), want)
 	}
 	if cmd.Dir != testCwd {
 		t.Fatalf("cmd.Dir = %q, want the configured cwd %q", cmd.Dir, testCwd)
 	}
 
 	allowedFlags := 0
-	for i, a := range cmd.Args {
+	for i, a := range argv(cmd) {
 		if a == "--allowed-tools" {
 			allowedFlags++
-			if cmd.Args[i+1] != wantAllowedTools {
-				t.Fatalf("--allowed-tools value = %q, want %q", cmd.Args[i+1], wantAllowedTools)
+			if argv(cmd)[i+1] != wantAllowedTools {
+				t.Fatalf("--allowed-tools value = %q, want %q", argv(cmd)[i+1], wantAllowedTools)
 			}
 		}
 		if a == "--bare" {
@@ -156,10 +161,10 @@ func TestCLIRunner_Command_ConfiguredOptions(t *testing.T) {
 		}
 	}
 	if allowedFlags != 1 {
-		t.Fatalf("%d --allowed-tools flags in %q, want exactly one", allowedFlags, cmd.Args)
+		t.Fatalf("%d --allowed-tools flags in %q, want exactly one", allowedFlags, argv(cmd))
 	}
 	// No write tool is pre-approved, whatever else changes.
-	for _, a := range cmd.Args {
+	for _, a := range argv(cmd) {
 		for _, writer := range []string{"send", "schedule", "draft", "canvas"} {
 			if strings.Contains(a, writer) {
 				t.Fatalf("argv element %q mentions the write capability %q", a, writer)
@@ -188,8 +193,8 @@ func TestCLIRunner_Command_UnsetOptionsAddNothing(t *testing.T) {
 				"--max-turns", "6",
 				"--allowed-tools", wantAllowedTools,
 			}
-			if !reflect.DeepEqual(cmd.Args, want) {
-				t.Fatalf("cmd.Args =\n%q\nwant\n%q", cmd.Args, want)
+			if !reflect.DeepEqual(argv(cmd), want) {
+				t.Fatalf("cmd.Args =\n%q\nwant\n%q", argv(cmd), want)
 			}
 			if cmd.Dir != "" {
 				t.Fatalf("cmd.Dir = %q, want empty (inherited)", cmd.Dir)
@@ -233,7 +238,7 @@ func TestCLIRunner_Command_MaxTurns(t *testing.T) {
 				ctx = configCtx(tc.config)
 			}
 			cmd := mustCommand(t, &CLIRunner{BinaryOverride: "claude"}, ctx, "p", "")
-			if got := maxTurnsArg(t, cmd.Args); got != tc.want {
+			if got := maxTurnsArg(t, argv(cmd)); got != tc.want {
 				t.Fatalf("--max-turns = %q, want %q", got, tc.want)
 			}
 		})
@@ -304,24 +309,17 @@ func TestCLIRunner_Command_ArgsAndStdin(t *testing.T) {
 	cmd := mustCommand(t, r, configCtx(fullConfig()), "look up thread X", "")
 
 	wantArgs := append([]string{"claude"}, claudeArgs("", claudeOptions{Model: testModel, MCPConfig: testMCPConfig})...)
-	if len(cmd.Args) != len(wantArgs) {
-		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+	if len(argv(cmd)) != len(wantArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", argv(cmd), wantArgs)
 	}
 	for i := range wantArgs {
-		if cmd.Args[i] != wantArgs[i] {
-			t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+		if argv(cmd)[i] != wantArgs[i] {
+			t.Fatalf("cmd.Args = %v, want %v", argv(cmd), wantArgs)
 		}
 	}
 
-	if cmd.Stdin == nil {
-		t.Fatal("cmd.Stdin is nil, want the prompt reader command() set")
-	}
-	got, err := io.ReadAll(cmd.Stdin)
-	if err != nil {
-		t.Fatalf("read stdin: %v", err)
-	}
-	if string(got) != "look up thread X" {
-		t.Fatalf("stdin = %q, want the prompt verbatim", got)
+	if string(cmd.Stdin) != "look up thread X" {
+		t.Fatalf("stdin = %q, want the prompt verbatim", cmd.Stdin)
 	}
 }
 
@@ -336,18 +334,18 @@ func TestCLIRunner_Command_AppendsJSONSchemaWhenProvided(t *testing.T) {
 	cmd := mustCommand(t, r, configCtx(fullConfig()), "look up thread X", schema)
 
 	wantArgs := append([]string{"claude"}, claudeArgs(schema, claudeOptions{Model: testModel, MCPConfig: testMCPConfig})...)
-	if len(cmd.Args) != len(wantArgs) {
-		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+	if len(argv(cmd)) != len(wantArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", argv(cmd), wantArgs)
 	}
 	for i := range wantArgs {
-		if cmd.Args[i] != wantArgs[i] {
-			t.Fatalf("cmd.Args = %v, want %v", cmd.Args, wantArgs)
+		if argv(cmd)[i] != wantArgs[i] {
+			t.Fatalf("cmd.Args = %v, want %v", argv(cmd), wantArgs)
 		}
 	}
-	if got := cmd.Args[len(cmd.Args)-2]; got != "--json-schema" {
+	if got := argv(cmd)[len(argv(cmd))-2]; got != "--json-schema" {
 		t.Fatalf("cmd.Args[-2] = %q, want --json-schema", got)
 	}
-	if got := cmd.Args[len(cmd.Args)-1]; got != schema {
+	if got := argv(cmd)[len(argv(cmd))-1]; got != schema {
 		t.Fatalf("cmd.Args[-1] = %q, want the schema verbatim", got)
 	}
 }
@@ -407,7 +405,7 @@ func TestCLIRunner_Run_Success(t *testing.T) {
 // execStub writes a fake `claude` that records how the real exec delivered
 // it: its argv, one argument per line, into <dir>/argv, and its working
 // directory into <dir>/cwd, then answers with a success envelope. It proves
-// the options survive an actual exec, which asserting on *exec.Cmd fields
+// the options survive an actual exec, which asserting on cmdrun.Call fields
 // alone cannot. Arguments here are single-line, so line splitting is exact.
 func execStub(t *testing.T) (stub, dir string) {
 	t.Helper()

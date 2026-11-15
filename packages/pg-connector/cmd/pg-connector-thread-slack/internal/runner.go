@@ -100,18 +100,17 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // Runner execs the resolved claude CLI binary with a prompt delivered over
@@ -319,6 +318,8 @@ type CLIRunner struct {
 	// no `mcp_config` is configured) from; tests use this to avoid
 	// leaking real configuration into a fake-binary invocation.
 	Env []string
+	// Exec overrides the process seam; nil means cmdrun.Exec. Tests only.
+	Exec cmdrun.Runner
 	// Getenv resolves EnvBinary when BinaryOverride is unset. Optional —
 	// nil means os.Getenv.
 	Getenv func(string) string
@@ -341,31 +342,33 @@ func (r *CLIRunner) resolveBinary() string {
 // Binary implements Runner.Binary.
 func (r *CLIRunner) Binary() string { return r.resolveBinary() }
 
-// command builds the *exec.Cmd Run below actually executes, split out
-// (mirroring the pjira/bd/gh backends' own Command/command choke points)
-// so a test can assert on WaitDelay/Env/Args/Dir directly without spawning a
-// real process. The call's options are read from the request Config on ctx
+// command builds the cmdrun.Call Run below actually executes, split out
+// (mirroring the pjira/bd/gh backends' own command choke points) so a test can
+// assert on the bound fields/Env/Args/Dir directly without spawning a real
+// process. The call's options are read from the request Config on ctx
 // (claudeOptionsFromContext) and forwarded to claudeArgs along with
-// jsonSchema; cmd.Dir is the configured `cwd`, left empty (inherited) when
-// none is. A malformed `claude` config block is the only error.
-func (r *CLIRunner) command(ctx context.Context, prompt string, jsonSchema string) (*exec.Cmd, error) {
+// jsonSchema; Dir is the configured `cwd`, left empty (inherited) when none
+// is. A malformed `claude` config block is the only error. The call is
+// bounded and runs in its own process group (scriptout.BoundChild), so a
+// cancelled or hung claude ends with its whole tree (MCP servers included).
+func (r *CLIRunner) command(ctx context.Context, prompt string, jsonSchema string) (cmdrun.Call, error) {
 	opts, err := claudeOptionsFromContext(ctx)
 	if err != nil {
-		return nil, err
+		var none cmdrun.Call
+		return none, err
 	}
-	cmd := exec.CommandContext(ctx, r.resolveBinary(), claudeArgs(jsonSchema, opts)...)
-	cmd.Dir = opts.Cwd
+	call := cmdrun.Call{
+		Name:    r.resolveBinary(),
+		Args:    claudeArgs(jsonSchema, opts),
+		Dir:     opts.Cwd,
+		Stdin:   []byte(prompt),
+		Timeout: scriptout.ChildTimeout,
+	}
 	if r.Env != nil {
-		cmd.Env = r.Env
+		call.Env = r.Env
+		call.EnvMode = cmdrun.EnvExact
 	}
-	cmd.Stdin = strings.NewReader(prompt)
-	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
-	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
-	// residual wait for the stdout/stderr pipes to close, independent of
-	// killing the direct child — the same hang guard
-	// cmd/pg-connector-issue-jira/internal/runner.go applies to `pjira`.
-	cmd.WaitDelay = scriptout.DefaultWaitDelay
-	return cmd, nil
+	return scriptout.BoundChild(call), nil
 }
 
 // Run execs the resolved binary with claudeArgs and prompt on stdin,
@@ -374,30 +377,45 @@ func (r *CLIRunner) command(ctx context.Context, prompt string, jsonSchema strin
 // unbounded error string.
 func (r *CLIRunner) Run(ctx context.Context, prompt string, jsonSchema string) (string, error) {
 	bin := r.resolveBinary()
-	cmd, err := r.command(ctx, prompt, jsonSchema)
+	call, err := r.command(ctx, prompt, jsonSchema)
 	if err != nil {
 		return "", err
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		argv := describeArgs(cmd.Args[1:])
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return stdout.String(), fmt.Errorf("%s %s: %w: %s",
-				bin, argv, err, scriptout.TruncateForFold(stderr.Bytes()))
+	res := r.run(ctx, call)
+	stdout := string(res.Stdout)
+	if err := scriptout.ResultErr(res); err != nil {
+		argv := describeArgs(call.Args)
+		if res.StartErr == nil {
+			return stdout, fmt.Errorf("%s %s: %w: %s",
+				bin, argv, err, scriptout.TruncateForFold(res.Stderr))
 		}
 		// A configured cwd that does not exist (an unmounted volume, a moved
 		// checkout) fails before claude starts; naming the directory beats
 		// the PATH hint below, which would send the operator the wrong way.
-		var pathErr *fs.PathError
-		if errors.As(err, &pathErr) && pathErr.Op == "chdir" {
-			return stdout.String(), fmt.Errorf("%s %s: working directory %q (config claude.cwd): %w",
-				bin, argv, cmd.Dir, err)
+		// With the child in its own process group, Go's fork/exec reports a
+		// missing Dir as a bare ENOENT on the binary, so the directory is
+		// probed directly rather than read off a chdir PathError.
+		if call.Dir != "" {
+			if _, statErr := os.Stat(call.Dir); statErr != nil {
+				var pathErr *fs.PathError
+				cause := statErr
+				if errors.As(statErr, &pathErr) {
+					cause = &fs.PathError{Op: "chdir", Path: pathErr.Path, Err: pathErr.Err}
+				}
+				return stdout, fmt.Errorf("%s %s: working directory %q (config claude.cwd): %w",
+					bin, argv, call.Dir, cause)
+			}
 		}
-		return stdout.String(), fmt.Errorf("%s %s: %w (is %s on PATH?)",
+		return stdout, fmt.Errorf("%s %s: %w (is %s on PATH?)",
 			bin, argv, err, bin)
 	}
-	return stdout.String(), nil
+	return stdout, nil
+}
+
+// run is the process seam: cmdrun.Exec unless a test swapped r.Runner.
+func (r *CLIRunner) run(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+	if r.Exec != nil {
+		return r.Exec(ctx, c)
+	}
+	return cmdrun.Exec(ctx, c)
 }
