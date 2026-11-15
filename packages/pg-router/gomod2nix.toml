@@ -247,7 +247,7 @@ cachePackages = [
 
   [mod.'github.com/phillipgreenii/x']
     version = 'v0.0.0-20261112162533-9b4111e32302'
-    hash = 'sha256-7ciam77rn54KRghpM8M7my2Koo4KEBn4kI1nHPn7Og4='
+    hash = 'sha256-wPa++VQ5zN2ZnlOaLDW3jGa4OROIUSsmlHyJKqxoijM='
 
   [mod.'github.com/prometheus/client_golang']
     version = 'v1.24.1'
