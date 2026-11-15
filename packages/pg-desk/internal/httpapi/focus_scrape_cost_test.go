@@ -159,22 +159,21 @@ func TestFocusScrapeRefreshesHealthAfterTheTTL(t *testing.T) {
 	}
 }
 
-// TestFocusScrapeIsCheapOnALargeStore compares the compute path with the
-// scrape path on a realistic ~1000-entity store. The cached scrape must not
-// pay for ComputeHealth; the bound is generous (a loose factor plus an
-// absolute ceiling far below the 10 s Prometheus scrape_timeout) so it does
-// not flake under host load.
+// TestFocusScrapeIsCheapOnALargeStore pins, by counting work rather than
+// timing it, that a scrape on a store with many entities does not pay for
+// ComputeHealth (a full Load + Rank): after the first scrape warms the cache a
+// plan row is added, which a recomputation would report as one more selected
+// row, and every later scrape inside the TTL must still serve the cached count
+// while a direct ComputeHealth does see the new row. The store holds enough
+// entities (and PR-linked beads) for the compute path to have real work to
+// skip; the wall-clock comparison against it lives in the benchmarks below,
+// which are run by hand with -bench FocusScrape.
 func TestFocusScrapeIsCheapOnALargeStore(t *testing.T) {
-	if testing.Short() {
-		t.Skip("seeds a ~1000-entity store")
-	}
-	s := seedLargeFocusStore(t, 1000)
+	s := seedLargeFocusStore(t, 90)
 	setClock(t, time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC))
 	cfg := focusConfig()
 
-	start := time.Now()
 	hl, err := focus.ComputeHealth(context.Background(), s, cfg, nowUTC())
-	compute := time.Since(start)
 	if err != nil || !hl.Migrated() || hl.Selected != 6 {
 		t.Fatalf("ComputeHealth = migrated %v, selected %d, %v", hl.Migrated(), hl.Selected, err)
 	}
@@ -186,20 +185,15 @@ func TestFocusScrapeIsCheapOnALargeStore(t *testing.T) {
 	if body := scrapeBody(t, h); !strings.Contains(body, "pg_desk_focus_selected 6") { // warms the cache
 		t.Fatalf("first scrape:\n%s", focusOnly(body))
 	}
-	var best time.Duration
+
+	addFocusPlanRow(t, s, "extra", 7)
+	if hl, err = focus.ComputeHealth(context.Background(), s, cfg, nowUTC()); err != nil || hl.Selected != 7 {
+		t.Fatalf("ComputeHealth after the new row = selected %d, %v; want 7", hl.Selected, err)
+	}
 	for i := 0; i < 5; i++ {
-		start = time.Now()
-		scrapeBody(t, h)
-		if d := time.Since(start); i == 0 || d < best {
-			best = d
+		if body := scrapeBody(t, h); !strings.Contains(body, "pg_desk_focus_selected 6") || strings.Contains(body, "pg_desk_focus_selected 7") {
+			t.Fatalf("scrape %d recomputed the health on a large store:\n%s", i, focusOnly(body))
 		}
-	}
-	t.Logf("ComputeHealth on 1000 entities: %v; cached scrape (best of 5): %v", compute, best)
-	if best > compute/2 {
-		t.Errorf("cached scrape %v is not well under the compute path %v", best, compute)
-	}
-	if best > 2*time.Second {
-		t.Errorf("cached scrape %v approaches the 10 s scrape_timeout", best)
 	}
 }
 
