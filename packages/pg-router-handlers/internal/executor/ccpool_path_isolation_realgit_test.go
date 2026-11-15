@@ -17,7 +17,7 @@ import (
 // role MUST run no `git worktree add` and no `git worktree remove`, and the
 // session's working directory MUST be the configured path.
 //
-// The repository comes from x/gittest through newRealGitHarness (hermetic: temp
+// The repository comes from x/gitfixture through newRealGitHarness (hermetic: temp
 // root, fixture HOME, allowlisted git environment) and stands in for the
 // handler-wide RepoRoot a worktree-isolation role would have cut a worktree
 // from. The configured path is a plain directory beside it, not a git
@@ -53,7 +53,7 @@ func (r recordingWTM) record(c string) {
 // non-git directory and routes every worktree mutation through a recorder.
 func (h *realGitHarness) withPathIsolation() (path string, calls func() []string) {
 	h.t.Helper()
-	path = filepath.Join(filepath.Dir(h.repo.Dir), "workspace-root")
+	path = filepath.Join(h.scratch, "workspace-root")
 	h.role.CCPool.Isolation = roles.IsolationConfig{Type: "path", Path: path}
 
 	var mu sync.Mutex

@@ -10,7 +10,6 @@ import (
 
 	"github.com/phillipgreenii/x/gitclient"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
@@ -22,7 +21,7 @@ import (
 // MUST run no `git worktree add` and no `git worktree remove`, its session's
 // working directory is the found worktree (or the configured fallback), and
 // neither the dispatch's early returns nor its worktree cleanup may touch what
-// it found. Repositories come from x/gittest (hermetic); every verdict reads
+// it found. Repositories come from the shared x/gitfixture fixtures (hermetic; see sharedRepo); every verdict reads
 // real git state AND a recording wrapper over the real client.
 
 const drainBranch = "drain/" + realGitBead
@@ -35,7 +34,7 @@ func (h *realGitHarness) withBeadWorktree(repos ...string) (fallback string, cal
 	if len(repos) == 0 {
 		repos = []string{h.repo.Dir}
 	}
-	fallback = filepath.Join(filepath.Dir(h.repo.Dir), "workspace-root")
+	fallback = filepath.Join(h.scratch, "workspace-root")
 	if err := os.MkdirAll(fallback, 0o755); err != nil {
 		h.t.Fatal(err)
 	}
@@ -112,11 +111,7 @@ func wantDrainWorktreeIntact(t *testing.T, repo *gitfixture.Repo, dir, tip strin
 
 func newOtherRepo(t *testing.T) *gitfixture.Repo {
 	t.Helper()
-	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "bead-worktree-other"})
-	if _, err := repo.Commit(t.Context(), "init", map[string]string{"tracked.txt": "committed\n"}); err != nil {
-		t.Fatalf("fixture initial commit: %v", err)
-	}
-	return repo
+	return sharedRepo(t, &sharedOtherGit, "bead-worktree-other")
 }
 
 // A bead with a drain/<bead> worktree launches its session in THAT worktree, runs
@@ -127,7 +122,7 @@ func TestRealGitBeadWorktree_foundWorktreeIsTheCwdAndSurvivesTheDispatch(t *test
 	for _, p := range abandonPoints {
 		t.Run(p.name, func(t *testing.T) {
 			h := newRealGitHarness(t)
-			found := filepath.Join(filepath.Dir(h.repo.Dir), "drain-wt")
+			found := filepath.Join(h.scratch, "drain-wt")
 			tip := leaveDrainWorktree(t, h.repo, found)
 			_, calls := h.withBeadWorktree()
 
@@ -222,8 +217,8 @@ func TestRealGitBeadWorktree_foundInTwoReposFailsLoudAndTouchesNothing(t *testin
 	// same state as the first.
 	h := newRealGitHarness(t)
 	other := newOtherRepo(t)
-	wtA := filepath.Join(filepath.Dir(h.repo.Dir), "drain-wt-a")
-	wtB := filepath.Join(filepath.Dir(other.Dir), "drain-wt-b")
+	wtA := filepath.Join(h.scratch, "drain-wt-a")
+	wtB := filepath.Join(h.scratch, "drain-wt-b")
 	tipA := leaveDrainWorktree(t, h.repo, wtA)
 	tipB := leaveDrainWorktree(t, other, wtB)
 	for _, reversed := range []bool{false, true} {
@@ -264,7 +259,7 @@ func TestRealGitBeadWorktree_foundInTwoReposFailsLoudAndTouchesNothing(t *testin
 func TestRealGitBeadWorktree_searchesEveryConfiguredRepo(t *testing.T) {
 	h := newRealGitHarness(t)
 	other := newOtherRepo(t)
-	found := filepath.Join(filepath.Dir(other.Dir), "drain-wt-b")
+	found := filepath.Join(h.scratch, "drain-wt-b")
 	tip := leaveDrainWorktree(t, other, found)
 	h.withBeadWorktree(h.repo.Dir, other.Dir)
 
@@ -282,7 +277,7 @@ func TestRealGitBeadWorktree_searchesEveryConfiguredRepo(t *testing.T) {
 // needs_input and no activity: every guard but the isolation type is open.
 func TestRealGitBeadWorktree_cleanupWorktreeLeavesTheFoundWorktree(t *testing.T) {
 	h := newRealGitHarness(t)
-	found := filepath.Join(filepath.Dir(h.repo.Dir), "drain-wt")
+	found := filepath.Join(h.scratch, "drain-wt")
 	tip := leaveDrainWorktree(t, h.repo, found)
 	_, calls := h.withBeadWorktree()
 	h.run.deps.CC = &dtest.FakeCC{}

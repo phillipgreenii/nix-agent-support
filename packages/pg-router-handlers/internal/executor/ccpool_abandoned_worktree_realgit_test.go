@@ -15,10 +15,10 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
+	"github.com/phillipgreenii/pg-router-handlers/internal/sharedrepo"
 	"github.com/phillipgreenii/pg-router-handlers/internal/worktree"
 	"github.com/phillipgreenii/x/gitclient"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
 // Real-git regression guards for the abandoned-worktree reclaim (pg2-w3usi),
@@ -32,7 +32,7 @@ import (
 // survives, so here run()'s two early returns -- the ones that call
 // reclaimAbandonedWorktree -- are driven against a REAL repository:
 //
-//   - the repository comes from x/gittest (hermetic by construction: a temp
+//   - the repository comes from x/gitfixture (hermetic by construction: a temp
 //     root, a fixture HOME and an allowlisted git environment);
 //   - the code under test reaches git through the real x/gitclient opener,
 //     built with the fixture's own child-environment options;
@@ -96,7 +96,8 @@ type realGitHarness struct {
 	t       *testing.T
 	repo    *gitfixture.Repo
 	gitOpts []gitclient.Option // the fixture's own child-environment options
-	wtDir   string             // Cfg.WorktreeDir, beside the fixture repository
+	scratch string             // the test's own directory for everything built beside the repository
+	wtDir   string             // Cfg.WorktreeDir, under scratch
 	wt      string             // wtDir/<bead>: where run() puts this bead's worktree
 	run     *ccpoolRun
 	role    roles.Role
@@ -104,28 +105,60 @@ type realGitHarness struct {
 	atLaunch launchSeen
 }
 
-// newRealGitHarness builds a real repository (one commit, so HEAD resolves and
-// the dirty cases have a committed file to modify) and a ccpoolRun whose git
-// opener is the production shape, gitclient.New anchored at the requested
-// directory, over the fixture's hermetic environment. Everything lives under the
-// fixture's temp root.
+// The real-git tests share ONE fixture repository for the whole package (a
+// fixture costs about half a second under load; see internal/sharedrepo), reset
+// before each test. What a test creates beside the repository (worktrees, the
+// path-isolation directory, a second repository's worktrees) lives under its own
+// h.scratch directory.
+var (
+	sharedRealGit  sharedrepo.Shared
+	sharedOtherGit sharedrepo.Shared
+)
+
+func initialCommit(ctx context.Context, r *gitfixture.Repo) error {
+	_, err := r.Commit(ctx, "init", map[string]string{"tracked.txt": "committed\n"})
+	return err
+}
+
+// sharedRepo returns one of the shared repositories, reset to its post-fixture
+// state. A test that commits to the main checkout MUST build its own with
+// gittest.New instead.
+func sharedRepo(t *testing.T, s *sharedrepo.Shared, suite string) *gitfixture.Repo {
+	t.Helper()
+	repo, err := s.Get(context.Background(), suite, initialCommit)
+	if err != nil {
+		t.Fatalf("shared fixture repository: %v", err)
+	}
+	if err := sharedrepo.Reset(context.Background(), repo); err != nil {
+		t.Fatalf("shared fixture repository reset: %v", err)
+	}
+	return repo
+}
+
+// newRealGitHarness takes the shared real repository (one commit, so HEAD
+// resolves and the dirty cases have a committed file to modify) and builds a
+// ccpoolRun whose git opener is the production shape, gitclient.New anchored at
+// the requested directory, over the fixture's hermetic environment, ceilinged at
+// the test's own scratch directory.
 func newRealGitHarness(t *testing.T) *realGitHarness {
 	t.Helper()
-	repo := gittest.New(t, gitfixture.RepoOptions{})
-	if _, err := repo.Commit(t.Context(), "init", map[string]string{"tracked.txt": "committed\n"}); err != nil {
-		t.Fatalf("fixture initial commit: %v", err)
-	}
+	repo := sharedRepo(t, &sharedRealGit, "executor-realgit")
 	root := filepath.Dir(repo.Dir) // gitfixture layout: <root>/{repo,home,hooks}
+	scratch, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := &realGitHarness{
 		t:    t,
 		repo: repo,
 		gitOpts: []gitclient.Option{
 			gitclient.WithHome(filepath.Join(root, "home")),
 			gitclient.WithoutInherited("SSH_AUTH_SOCK"),
-			gitclient.WithCeiling(root),
+			gitclient.WithCeiling(scratch),
 			gitclient.WithEnv("GIT_CONFIG_NOSYSTEM", "1"),
 		},
-		wtDir: filepath.Join(root, "worktrees"),
+		scratch: scratch,
+		wtDir:   filepath.Join(scratch, "worktrees"),
 	}
 	h.wt = filepath.Join(h.wtDir, realGitBead)
 

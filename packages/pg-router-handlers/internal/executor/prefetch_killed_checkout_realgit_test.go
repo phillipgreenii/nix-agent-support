@@ -14,8 +14,8 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dtest"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
+	"github.com/phillipgreenii/pg-router-handlers/internal/sharedrepo"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
 // Real-git coverage for bead pg2-lpctwk: a review checkout killed at the
@@ -32,20 +32,48 @@ type killedCheckoutFixture struct {
 	prSHA  string
 }
 
+// sharedKilledGit is the one repository every killed-checkout test starts from
+// (see internal/sharedrepo): a base commit and the "pr" commit that adds a
+// .gitattributes line routing a.txt through the (test-configured) slow filter.
+// Each test adds its own detached worktree at the base commit.
+var (
+	sharedKilledGit    sharedrepo.Shared
+	killedOldSHA       string
+	killedPRSHA        string
+	killedFilterConfig = []string{"filter.slow.smudge", "filter.slow.clean"}
+)
+
+func killedSetup(ctx context.Context, repo *gitfixture.Repo) error {
+	var err error
+	if killedOldSHA, err = repo.Commit(ctx, "base", map[string]string{"a.txt": "one\n"}); err != nil {
+		return err
+	}
+	killedPRSHA, err = repo.Commit(ctx, "pr", map[string]string{"a.txt": "one\ntwo\n", ".gitattributes": "a.txt filter=slow\n"})
+	return err
+}
+
 func newKilledCheckoutFixture(t *testing.T) *killedCheckoutFixture {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	ctx := context.Background()
-	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "prefetch-killed"})
-	oldSHA, err := repo.Commit(ctx, "base", map[string]string{"a.txt": "one\n"})
+	repo, err := sharedKilledGit.Get(ctx, "prefetch-killed", killedSetup)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("shared fixture repository: %v", err)
 	}
-	prSHA, err := repo.Commit(ctx, "pr", map[string]string{"a.txt": "one\ntwo\n", ".gitattributes": "a.txt filter=slow\n"})
-	if err != nil {
-		t.Fatal(err)
+	if err := sharedrepo.Reset(ctx, repo); err != nil {
+		t.Fatalf("shared fixture repository reset: %v", err)
 	}
+	// Reset leaves repository configuration alone, so drop what a test set.
+	for _, k := range killedFilterConfig {
+		_, _ = repo.Client.Run(ctx, "config", "--unset", k)
+	}
+	t.Cleanup(func() {
+		for _, k := range killedFilterConfig {
+			_, _ = repo.Client.Run(context.Background(), "config", "--unset", k)
+		}
+	})
+	oldSHA, prSHA := killedOldSHA, killedPRSHA
 	wt := filepath.Join(t.TempDir(), "wt")
 	if _, err := repo.Client.Run(ctx, "worktree", "add", "--detach", wt, oldSHA); err != nil {
 		t.Fatal(err)
