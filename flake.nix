@@ -7926,6 +7926,31 @@
                     '';
                   });
 
+              # pg-keep-awake KEEPER integration tier (V-4): the `integration`-tagged
+              # TestRealProcs_* tests in internal/keeper (claude_holders_darwin_test.go).
+              # Each starts several real child processes (copies of the race-built test
+              # binary standing in for claude and caffeinate) and costs about a second
+              # under -race, so they are not unit tests. ON DEMAND ONLY: no hook,
+              # run-unit-tests, pre-land or land gate. `-run` limits the run to them (the
+              # untagged tests of the package already run in pg-keep-awake-go-tests). The
+              # tests are darwin-only; on another platform the run selects nothing.
+              pg-keep-awake-keeper-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-keep-awake-keeper-integration-tests";
+                  src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
+                  gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go vet -tags integration ./internal/keeper/
+                      go test -tags integration -count=1 -race -v -run '^TestRealProcs_' -timeout 30m ./internal/keeper/
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-git-lander - whole-module Go test gate (unit tier). Pattern A, flat
               # src. Never compiles the `integration` build tag.
               pg-git-lander-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {

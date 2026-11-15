@@ -28,6 +28,12 @@ import (
 //	             helper mode sleep), print its pid, then sleep: a stand-in for
 //	             the process that spawns a caffeinate
 func TestMain(m *testing.M) {
+	// A race-built child sleeps atexit_sleep_ms (default 1000) before it exits;
+	// the setting is read at start-up, so this reaches only the children this
+	// binary starts. No assertion depends on it.
+	if os.Getenv("GORACE") == "" {
+		_ = os.Setenv("GORACE", "atexit_sleep_ms=0")
+	}
 	switch h := os.Getenv("KEEPER_TEST_HELPER"); {
 	case strings.HasPrefix(h, "parent:"):
 		c := exec.CommandContext(context.Background(), h[len("parent:"):], "-i", "-t", "300")

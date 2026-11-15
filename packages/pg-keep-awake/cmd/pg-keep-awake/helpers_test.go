@@ -21,7 +21,19 @@ func TestMain(m *testing.M) {
 	if os.Getenv(binaryEnv) == "1" {
 		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 	}
+	quietRaceExit()
 	os.Exit(m.Run())
+}
+
+// quietRaceExit stops every child this test binary starts (the keeper, run and
+// anchor commands) from idling one second at exit. A race-built process sleeps
+// atexit_sleep_ms (default 1000) before it exits; the setting is read once at
+// start-up, so setting it here reaches only the children, which inherit the
+// environment. No assertion depends on it.
+func quietRaceExit() {
+	if os.Getenv("GORACE") == "" {
+		_ = os.Setenv("GORACE", "atexit_sleep_ms=0")
+	}
 }
 
 // useStateDir points XDG_STATE_HOME at a fresh temp directory and returns the

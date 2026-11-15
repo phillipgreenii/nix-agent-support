@@ -28,6 +28,12 @@ const shimName = "pg-caffeinate-shim"
 var shimBin string
 
 func TestMain(m *testing.M) {
+	// A race-built child sleeps atexit_sleep_ms (default 1000) before it exits;
+	// the setting is read at start-up, so this reaches only the children this
+	// binary starts. No assertion depends on it.
+	if os.Getenv("GORACE") == "" {
+		_ = os.Setenv("GORACE", "atexit_sleep_ms=0")
+	}
 	if filepath.Base(os.Args[0]) == shimName {
 		main()
 		return
@@ -73,7 +79,7 @@ func requireDarwin(t *testing.T) {
 
 // shimEnv is a hermetic environment: the state directory is a fresh temp dir.
 func shimEnv(xdg string) []string {
-	return []string{"XDG_STATE_HOME=" + xdg, "PATH=" + os.Getenv("PATH"), "HOME=" + xdg}
+	return []string{"XDG_STATE_HOME=" + xdg, "PATH=" + os.Getenv("PATH"), "HOME=" + xdg, "GORACE=" + os.Getenv("GORACE")}
 }
 
 // proc is a started child with its exit observed on a channel.
