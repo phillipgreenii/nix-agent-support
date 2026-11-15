@@ -301,12 +301,13 @@ let
       ];
     # ExitTimeOut is DERIVED from the deadline the script passes to the daemon: deadline plus a
     # 7 s margin, under launchd's 60 s clamp. The deadline is read back out of the rendered script.
-    shutdownDeadlineMatch = builtins.match ".*serve --config [^ ]+ --shutdown-deadline ([0-9]+)s.*" e.script;
-    shutdownDeadline =
-      if shutdownDeadlineMatch == null then null else lib.toInt (builtins.head shutdownDeadlineMatch);
     exitTimeOutIsDeadlinePlusMargin =
-      shutdownDeadline != null
-      && e.serviceConfig.ExitTimeOut == shutdownDeadline + 7
+      let
+        m = builtins.match ".*serve --config [^ ]+ --shutdown-deadline ([0-9]+)s.*" e.script;
+        deadline = if m == null then null else lib.toInt (builtins.head m);
+      in
+      deadline != null
+      && e.serviceConfig.ExitTimeOut == deadline + 7
       && e.serviceConfig.ExitTimeOut <= 60;
     logsOutsideStateDir =
       e.serviceConfig.StandardOutPath

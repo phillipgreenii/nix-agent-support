@@ -19243,7 +19243,7 @@
                     mkdir -p "$w/claude" "$w/control/ends" "$w/h"
                     sed "s#/example/live#$w#g" ${r.live.configFile} > "$w/config.toml"
                     printf '%s' ${lib.escapeShellArg r.live.script} > entry.sh
-                    grep -q '^${bin} serve --config ${r.live.configFile} --pprof &$' entry.sh \
+                    grep -q '^${bin} serve --config ${r.live.configFile} --shutdown-deadline 8s --pprof &$' entry.sh \
                       || { echo "entry is not the serve command: $(cat entry.sh)" >&2; exit 1; }
                     sed "s#${r.live.configFile}#$w/config.toml#" entry.sh > entry.live.sh
 
