@@ -144,6 +144,9 @@ func IsLongIdle(now, lastActivity time.Time, threshold time.Duration) bool {
 type Host struct {
 	Kind        string
 	TermProgram string
+	// CmuxWorkspaceID is the cmux workspace the process runs in (the recorder's
+	// cmux_workspace_id); empty for a non-cmux host or when the recorder read none.
+	CmuxWorkspaceID string
 }
 
 // HostLabel is the bare terminal-host label for a recorder Host fact: "cmux" or

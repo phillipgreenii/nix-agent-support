@@ -150,14 +150,11 @@ func TestBridgeChannelSendsRegisterFirst(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	waitFor(t, 2*time.Second, func() bool { return stream.firstRegister() != nil })
 	reg := stream.firstRegister()
-	if reg.GetServerPid() != 12345 {
-		t.Errorf("Register.ServerPid = %d, want 12345", reg.GetServerPid())
-	}
 	if reg.GetWorkspaceId() != "workspace:1" {
 		t.Errorf("Register.WorkspaceId = %q, want workspace:1", reg.GetWorkspaceId())
 	}
@@ -182,7 +179,7 @@ func TestBridgeChannelSnapshotDrivesReporterPush(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(10*time.Second))
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{
@@ -223,7 +220,7 @@ func TestBridgeChannelWatchdogTeardownReturns(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(300*time.Millisecond))
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, testBridgeStreamOpts(300*time.Millisecond))
 	}()
 
 	// The watchdog budget here is 300ms; give generous margin under -race. A hang

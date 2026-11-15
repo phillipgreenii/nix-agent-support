@@ -388,7 +388,7 @@ func fromProcess(p client.ProcessInfo) *session.Session {
 		s.StartedAt = *p.StartedAt
 	}
 	if p.Host != nil {
-		s.Host = &session.Host{Kind: p.Host.Kind, TermProgram: p.Host.TermProgram}
+		s.Host = &session.Host{Kind: p.Host.Kind, TermProgram: p.Host.TermProgram, CmuxWorkspaceID: p.Host.CmuxWorkspace}
 	}
 	return s
 }

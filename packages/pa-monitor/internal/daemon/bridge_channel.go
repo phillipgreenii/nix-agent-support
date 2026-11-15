@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
@@ -93,12 +95,12 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 	go func() {
 		var (
 			registered   bool
-			regServerPID int
+			regWorkspace string
 			regBridgePID int
 		)
 		defer func() {
 			if registered {
-				s.bridges.Deregister(regServerPID, regBridgePID)
+				s.bridges.Deregister(regWorkspace, regBridgePID)
 			}
 			close(readerDone)
 		}()
@@ -110,33 +112,34 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 			switch k := msg.GetKind().(type) {
 			case *pb.BridgeMsg_Register:
 				r := k.Register
-				serverPID := int(r.GetServerPid())
-				if serverPID < 1 {
-					// A Register without a resolvable cmux server PID cannot be
-					// keyed; ignore it.
+				workspaceID := r.GetWorkspaceId()
+				if workspaceID == "" {
+					// A Register without a workspace id cannot be keyed; reject
+					// it and keep the stream unregistered.
+					fmt.Fprintf(os.Stderr, "daemon: bridge channel: rejecting Register from bridge pid %d: empty workspace_id\n", r.GetBridgePid())
 					continue
 				}
 				bridgePID := int(r.GetBridgePid())
-				// AttachStream refreshes an existing (serverPID, bridgePID)
-				// member in place; distinct bridge PIDs on one server PID
+				// AttachStream refreshes an existing (workspaceID, bridgePID)
+				// member in place; distinct bridge PIDs on one workspace id
 				// coexist.
-				s.bridges.AttachStream(serverPID, bridgePID)
+				s.bridges.AttachStream(workspaceID, int(r.GetServerPid()), bridgePID)
 				registered = true
-				regServerPID = serverPID
+				regWorkspace = workspaceID
 				regBridgePID = bridgePID
 				// Push an immediate snapshot so the bridge renders the roster
 				// without waiting a full tick.
 				send(snapshotMsg())
 			case *pb.BridgeMsg_Heartbeat:
-				if regServerPID < 1 {
+				if regWorkspace == "" {
 					// No registration yet — nothing to refresh.
 					continue
 				}
 				// Refresh the bridge this stream actually registered
 				// (regBridgePID), not whatever bridge PID the heartbeat
 				// message claims, so stream identity stays consistent with
-				// teardown's Deregister(regServerPID, regBridgePID).
-				s.bridges.Heartbeat(regServerPID, regBridgePID, time.Now())
+				// teardown's Deregister(regWorkspace, regBridgePID).
+				s.bridges.Heartbeat(regWorkspace, regBridgePID, time.Now())
 			}
 		}
 	}()

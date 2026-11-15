@@ -17,32 +17,32 @@ func TestReapOnce_PrunesDeadBridge(t *testing.T) {
 	reg := bridge.NewRegistry(30 * time.Second)
 	reg.SetNowForTest(func() time.Time { return now })
 
-	reg.AttachStream(4000, 100) // will report dead
-	reg.AttachStream(4000, 200) // will report alive
+	reg.AttachStream("ws-4000", 4000, 100) // will report dead
+	reg.AttachStream("ws-4000", 4000, 200) // will report alive
 
 	alive := map[int]bool{200: true}
 	reapOnce(reg, func(pid int) bool { return alive[pid] })
 
-	if got := reg.BridgePIDs(4000); len(got) != 1 || got[0] != 200 {
-		t.Errorf("BridgePIDs(4000) after reapOnce = %v, want [200]", got)
+	if got := reg.BridgePIDs("ws-4000"); len(got) != 1 || got[0] != 200 {
+		t.Errorf("BridgePIDs(ws-4000) after reapOnce = %v, want [200]", got)
 	}
 }
 
 // TestReapOnce_PrunesAllDeadLeavesServerUnknown verifies that when every
 // member for a server is reported dead, the server is fully removed and
-// StatusForServer reports Unknown (matching Registry.Prune's contract of
+// StatusForWorkspace reports Unknown (matching Registry.Prune's contract of
 // dropping servers left with no members).
 func TestReapOnce_PrunesAllDeadLeavesServerUnknown(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	reg := bridge.NewRegistry(30 * time.Second)
 	reg.SetNowForTest(func() time.Time { return now })
 
-	reg.AttachStream(5000, 300)
+	reg.AttachStream("ws-5000", 5000, 300)
 
 	reapOnce(reg, func(pid int) bool { return false })
 
-	if got := reg.StatusForServer(5000); got != bridge.Unknown {
-		t.Errorf("StatusForServer(5000) after reapOnce: got %v, want Unknown", got)
+	if got := reg.StatusForWorkspace("ws-5000"); got != bridge.Unknown {
+		t.Errorf("StatusForWorkspace(ws-5000) after reapOnce: got %v, want Unknown", got)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestRunReaper_TicksAndPrunesUntilCancelled(t *testing.T) {
 	reg := bridge.NewRegistry(30 * time.Second)
 	reg.SetNowForTest(func() time.Time { return now })
 
-	reg.AttachStream(6000, 400)
+	reg.AttachStream("ws-6000", 6000, 400)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -69,7 +69,7 @@ func TestRunReaper_TicksAndPrunesUntilCancelled(t *testing.T) {
 	// Poll until the tick has pruned the dead bridge, or fail after a
 	// generous bound relative to the interval.
 	deadline := time.Now().Add(2 * time.Second)
-	for reg.StatusForServer(6000) != bridge.Unknown {
+	for reg.StatusForWorkspace("ws-6000") != bridge.Unknown {
 
 		if time.Now().After(deadline) {
 			t.Fatal("RunReaper: dead bridge was not pruned within deadline")

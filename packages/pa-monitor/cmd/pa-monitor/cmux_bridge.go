@@ -18,7 +18,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/reexec"
 	"github.com/phillipgreenii/pa-monitor/internal/render"
 	"github.com/phillipgreenii/pa-monitor/internal/rpcclient"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
 	"github.com/phillipgreenii/pa-monitor/internal/versioncmp"
 )
@@ -381,21 +380,6 @@ func runCmuxBridge(args []string) {
 
 	logBridgeVersions(ctx, log)
 
-	// One CmuxSignaler for the bridge's lifetime: its ps/surface caches are
-	// reused across the server-PID probe and every local delivery. The bridge
-	// is a cmux descendant, so its FindCmuxServerAncestor and Send calls both
-	// resolve against the same in-tree cmux server.
-	cmuxSig := &signal.CmuxSignaler{}
-
-	// Resolve the cmux server PID once, retrying until non-zero: the Register
-	// message keys the daemon-side bridge registry on (serverPID, bridgePID),
-	// so a serverPID of 0 would be silently dropped by the daemon. Block here
-	// (best-effort, ctx-cancellable) rather than freeze a bad value.
-	serverPID := resolveServerPID(ctx, cmuxSig, log)
-	if serverPID == 0 {
-		return // ctx cancelled before a cmux server ancestor was found
-	}
-
 	// Connection-timing windows, DERIVED from the same base cadences the daemon
 	// reads (internal/timing), so the bridge's watchdog (pushBudget) and
 	// heartbeat cannot invert against the daemon's snapshot interval / stale
@@ -434,7 +418,7 @@ func runCmuxBridge(args []string) {
 		// cmux may have lost its sidebar state while disconnected: forget what the
 		// reporter believes it pushed so the new session repaints everything.
 		reporter.Reset()
-		err := streamOnce(ctx, ws, serverPID, reporter, log, announcer, cfg.StaleAfter, opts)
+		err := streamOnce(ctx, ws, reporter, log, announcer, cfg.StaleAfter, opts)
 		switch classifyBridgeResult(err, ctx.Err()) {
 		case bridgeStop:
 			return
@@ -458,27 +442,6 @@ func runCmuxBridge(args []string) {
 			reporter.Push(cmuxstatus.Snapshot{State: cmuxstatus.StateUnknown})
 			announcer.disconnected(map[string]string{"error": err.Error()})
 			time.Sleep(2 * time.Second)
-		}
-	}
-}
-
-// resolveServerPID probes for the cmux server in the bridge's own ancestry,
-// retrying with a short backoff until it finds one or ctx is cancelled.
-// Returns 0 only when ctx is cancelled first. The bridge always runs as a
-// descendant of a cmux server, so in steady state this returns on the first
-// probe; the retry loop covers a race where the bridge starts before its
-// ancestry is fully observable via ps.
-func resolveServerPID(ctx context.Context, cmuxSig *signal.CmuxSignaler, log *bridgeLogger) int {
-	const probeBackoff = 2 * time.Second
-	for {
-		if pid, ok := cmuxSig.FindCmuxServerAncestor(ctx, os.Getpid()); ok && pid > 0 {
-			return pid
-		}
-		log.Detail(ctx, "bridge.server_pid_probe", map[string]string{"result": "no cmux server ancestor yet"})
-		select {
-		case <-ctx.Done():
-			return 0
-		case <-time.After(probeBackoff):
 		}
 	}
 }
@@ -547,7 +510,7 @@ type bridgeStreamOpts struct {
 // unblocks Recv on every exit path (watchdog, Send-error, Recv-error, or an
 // outer ctx cancel). The defer here is the backstop for the dial/open error
 // returns above, which never reach runBridgeChannel.
-func streamOnce(ctx context.Context, ws string, serverPID int, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer, staleAfter time.Duration, opts bridgeStreamOpts) error {
+func streamOnce(ctx context.Context, ws string, reporter cmuxstatus.Reporter, log *bridgeLogger, announcer *connAnnouncer, staleAfter time.Duration, opts bridgeStreamOpts) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -562,7 +525,7 @@ func streamOnce(ctx context.Context, ws string, serverPID int, reporter cmuxstat
 		return err
 	}
 
-	return runBridgeChannel(ctx, cancel, stream, ws, serverPID, reporter, log, announcer, staleAfter, opts)
+	return runBridgeChannel(ctx, cancel, stream, ws, reporter, log, announcer, staleAfter, opts)
 }
 
 // runBridgeChannel runs the BridgeChannel message loop over an established
@@ -593,7 +556,6 @@ func runBridgeChannel(
 	cancel context.CancelFunc,
 	stream pb.PaMonitor_BridgeChannelClient,
 	ws string,
-	serverPID int,
 	reporter cmuxstatus.Reporter,
 	log *bridgeLogger,
 	announcer *connAnnouncer,
@@ -617,7 +579,6 @@ func runBridgeChannel(
 		defer senderWG.Done()
 		reg := &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
 			BridgePid:   int32(os.Getpid()),
-			ServerPid:   int32(serverPID),
 			WorkspaceId: ws,
 		}}}
 		if err := stream.Send(reg); err != nil {

@@ -2,8 +2,10 @@ package poller
 
 import (
 	"context"
-	"fmt"
-	"sync"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,31 +31,34 @@ func (d hostDiscovery) Discover() ([]*session.Session, error) {
 	return out, err
 }
 
-// execRecorder is the RunCmd seam of the real tmux and cmux signalers; it counts
-// every process the signal layer would start, as SentinelOne would.
-type execRecorder struct {
-	mu    sync.Mutex
-	calls []string
-}
-
-func (r *execRecorder) run(_ context.Context, name string, args ...string) ([]byte, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.calls = append(r.calls, fmt.Sprint(name, " ", args))
-	return nil, fmt.Errorf("execRecorder: %s %v", name, args)
-}
-
-func (r *execRecorder) count() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.calls)
+// installExecRecorder puts shim `ps` and `pgrep` executables first on PATH that
+// append their argv to a log file, and returns a func that reads the log. Any
+// process the code under test starts through PATH lookup of those names, as
+// SentinelOne would see it, shows up as a line.
+func installExecRecorder(t *testing.T) func() []string {
+	t.Helper()
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "exec.log")
+	for _, name := range []string{"ps", "pgrep"} {
+		script := "#!/bin/sh\necho \"" + name + " $*\" >> \"" + logPath + "\"\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() []string {
+		b, err := os.ReadFile(logPath)
+		if err != nil {
+			return nil
+		}
+		return strings.Split(strings.TrimSpace(string(b)), "\n")
+	}
 }
 
 // TestAssemble_TerminalHostFromRecorderFactRunsNoExec: one Discover/Assemble pass
 // labels every session from its recorder Host fact and starts no process on the
-// label path (no ps, tmux or cmux). The control runs the previous mechanism, the
-// signalers' ancestry detection, over the same shim to show the counter does
-// see an exec when one happens.
+// label path (no ps or pgrep). The control launches a ps through the same
+// PATH shim to show the recorder does see an exec when one happens.
 func TestAssemble_TerminalHostFromRecorderFactRunsNoExec(t *testing.T) {
 	e := corpustest.Start(t)
 	hosts := map[string]*session.Host{
@@ -73,15 +78,14 @@ func TestAssemble_TerminalHostFromRecorderFactRunsNoExec(t *testing.T) {
 		e.Register(pid, sid, "/w/"+sid, "", true)
 	}
 
-	rec := &execRecorder{}
-	sigs := []signal.Signaler{&signal.TmuxSignaler{RunCmd: rec.run}, &signal.CmuxSignaler{RunCmd: rec.run}}
+	calls := installExecRecorder(t)
 	now := time.Unix(1_776_000_300, 0)
 	p := &Poller{
 		IdleThreshold: time.Hour,
 		Now:           func() time.Time { return now },
 		Monitor:       corpus.New(e.Facts, hostDiscovery{inner: e.Discovery(), hosts: hosts}),
 		Providers:     provider.New(func() time.Time { return now }),
-		Signalers:     sigs,
+		Signalers:     signal.DefaultSignalers(),
 	}
 	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {
@@ -98,16 +102,15 @@ func TestAssemble_TerminalHostFromRecorderFactRunsNoExec(t *testing.T) {
 			t.Errorf("%s: terminal host = %q, want %q", sid, got[sid], w)
 		}
 	}
-	if n := rec.count(); n != 0 {
-		t.Errorf("Discover/Assemble started %d processes, want 0: %v", n, rec.calls)
+	if got := calls(); len(got) != 0 {
+		t.Errorf("Discover/Assemble started %d ps/pgrep processes, want 0: %v", len(got), got)
 	}
 
-	// Negative control: the detection the label path used before (ancestry walk
-	// through the signalers) does run processes against the same shim.
-	for _, pid := range pids {
-		signal.ResolveSignaler(sigs, pid)
+	// Negative control: the recorder does see a ps launched through PATH.
+	if err := exec.Command("ps", "-ax").Run(); err != nil {
+		t.Fatalf("control ps: %v", err)
 	}
-	if rec.count() == 0 {
-		t.Fatal("control: the previous detection started no process, so the counter proves nothing")
+	if len(calls()) == 0 {
+		t.Fatal("control: a ps launch was not recorded, so the zero count proves nothing")
 	}
 }

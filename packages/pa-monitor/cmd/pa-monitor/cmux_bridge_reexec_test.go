@@ -125,7 +125,7 @@ func TestBridgeChannelReexecSentinelPropagates(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", &fakeReporter{}, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{DaemonVersion: "NEW"}}}
@@ -160,7 +160,7 @@ func TestBridgeChannelReexecExhaustedKeepsServing(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", 12345, rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
+		errCh <- runBridgeChannel(ctx, cancel, stream, "workspace:1", rep, newTestBridgeLogger(t), newTestAnnouncer(), 10*time.Minute, opts)
 	}()
 
 	stream.inbound <- &pb.DaemonMsg{Kind: &pb.DaemonMsg_Snapshot{Snapshot: &pb.DaemonState{DaemonVersion: "NEW"}}}

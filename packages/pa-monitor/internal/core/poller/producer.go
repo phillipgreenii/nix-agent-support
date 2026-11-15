@@ -227,7 +227,7 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 		s.Branch = pr.Providers.GitBranch(s.Cwd)
 		s.TerminalHost = session.HostLabel(s.Host)
 		if s.TerminalHost == "cmux" {
-			s.TerminalHost = refineCmuxTerminalHost(ctx, pr.Signalers, pr.BridgeRegistry, s.PID)
+			s.TerminalHost = refineCmuxTerminalHost(pr.BridgeRegistry, s.Host)
 		}
 		subErr, _ := pr.Monitor.SubagentError(s.SessionID)
 		projections[s.SessionID] = SessionProjection{

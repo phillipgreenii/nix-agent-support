@@ -196,20 +196,6 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 	// "cmux (no bridge)" / "cmux (bridge disconnected)". staleAfter gives a
 	// bridge >= 3 of its heartbeats before being marked stale (see timing pkg).
 	bridgeRegistry := bridge.NewRegistry(timings.StaleAfter)
-	// CmuxAncestor for the RegisterBridge handler. Fishes the package
-	// singleton CmuxSignaler out of DefaultSignalers() so the daemon's
-	// signal slice and the registry handler share a single ps-cache.
-	var cmuxAncestor func(int) (int, bool)
-	for _, sig := range signallayer.DefaultSignalers() {
-		if cs, ok := sig.(*signallayer.CmuxSignaler); ok {
-			// The handler carries no context; keep ctx values, drop its cancellation.
-			cmuxAncestor = func(pid int) (int, bool) {
-				return cs.FindCmuxServerAncestor(context.WithoutCancel(ctx), pid)
-			}
-			break
-		}
-	}
-
 	// Provider cache: the shared owner of point-in-time PULL lookups (git-branch,
 	// subshell, env, repo-label, PR). Created at the composition
 	// root so BOTH the poller (buildPoller wires its prCache-backed PR + the
@@ -231,7 +217,6 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		RuntimePath:         runtimePath,
 		Version:             ver,
 		BridgeRegistry:      bridgeRegistry,
-		CmuxAncestor:        cmuxAncestor,
 		// Repo-label source defaults to the shared provider cache; the poller
 		// branch below overrides it to poller.RepoLabelSource so the tick reads
 		// the producer-published repo-label map instead of the shared Cache (C1).

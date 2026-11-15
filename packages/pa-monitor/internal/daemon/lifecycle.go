@@ -233,10 +233,6 @@ type RunOptions struct {
 	// The same registry should be passed to the poller (PollerInterface
 	// implementations that consult it) so terminal-host refinement works.
 	BridgeRegistry *bridge.Registry
-	// CmuxAncestor, if non-nil alongside BridgeRegistry, is the function the
-	// RegisterBridge handler uses to walk a bridge PID's ancestry to its
-	// cmux server PID. Typically (*signal.CmuxSignaler).FindCmuxServerAncestor.
-	CmuxAncestor func(pid int) (int, bool)
 	// WriteService, when non-nil, receives block and week upserts after each
 	// cost tick. The returned surrogate ids are assigned to the poller's
 	// ActiveBlockID / ActiveWeekID so the next contribution-upsert pass has them.

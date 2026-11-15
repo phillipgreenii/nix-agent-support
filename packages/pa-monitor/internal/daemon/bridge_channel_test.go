@@ -99,8 +99,8 @@ func newBridgeTestServer(t *testing.T) *server {
 
 // bridgeLive reports whether the server's registry holds a fresh bridge member
 // for serverPID.
-func bridgeLive(srv *server, serverPID int) bool {
-	return srv.bridges.StatusForServer(serverPID) == bridge.Alive
+func bridgeLive(srv *server, workspaceID string) bool {
+	return srv.bridges.StatusForWorkspace(workspaceID) == bridge.Alive
 }
 
 // TestBridgeChannelRegisterPushesSnapshot covers the core happy path: Register
@@ -115,7 +115,7 @@ func TestBridgeChannelRegisterPushesSnapshot(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.BridgeChannel(fake) }()
 
-	const serverPID, bridgePID = 4321, 5678
+	const serverPID, bridgePID, wsID = 4321, 5678, "ws-1"
 	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
 		BridgePid:   bridgePID,
 		ServerPid:   serverPID,
@@ -123,8 +123,8 @@ func TestBridgeChannelRegisterPushesSnapshot(t *testing.T) {
 	}}}
 
 	// (a) registry gains a live bridge.
-	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, serverPID) }) {
-		t.Fatalf("bridge %d never became live", serverPID)
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, wsID) }) {
+		t.Fatalf("bridge %d never became live", bridgePID)
 	}
 
 	// (b) a snapshot reaches the client's Send side (immediate-on-register
@@ -139,7 +139,7 @@ func TestBridgeChannelRegisterPushesSnapshot(t *testing.T) {
 
 	// Teardown via ctx cancel deregisters the bridge and returns.
 	cancel()
-	if !waitFor(t, 2*time.Second, func() bool { return !bridgeLive(srv, serverPID) }) {
+	if !waitFor(t, 2*time.Second, func() bool { return !bridgeLive(srv, wsID) }) {
 		t.Fatalf("bridge not deregistered after ctx cancel")
 	}
 	select {
@@ -159,11 +159,11 @@ func TestBridgeChannelHeartbeatRefreshesMember(t *testing.T) {
 	fake := newFakeBridgeStream(ctx)
 	go func() { _ = srv.BridgeChannel(fake) }()
 
-	const serverPID, bridgePID = 8100, 8101
+	const serverPID, bridgePID, wsID = 8100, 8101, "ws-hb"
 	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
 		BridgePid: bridgePID, ServerPid: serverPID, WorkspaceId: "ws-hb",
 	}}}
-	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, serverPID) }) {
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, wsID) }) {
 		t.Fatalf("bridge never became live")
 	}
 	// A Heartbeat should be accepted without error and keep the member alive.
@@ -172,7 +172,7 @@ func TestBridgeChannelHeartbeatRefreshesMember(t *testing.T) {
 	}}}
 	// Give the reader a moment to process, then confirm still live.
 	time.Sleep(50 * time.Millisecond)
-	if !bridgeLive(srv, serverPID) {
+	if !bridgeLive(srv, wsID) {
 		t.Fatalf("bridge not live after heartbeat")
 	}
 }
@@ -187,17 +187,17 @@ func TestBridgeChannelCtxCancelDeregisters(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.BridgeChannel(fake) }()
 
-	const serverPID = 7000
+	const serverPID, wsID = 7000, "ws-x"
 	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
 		BridgePid: 7001, ServerPid: serverPID, WorkspaceId: "ws-x",
 	}}}
-	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, serverPID) }) {
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, wsID) }) {
 		t.Fatalf("bridge never became live")
 	}
 
 	cancel()
 
-	if !waitFor(t, 2*time.Second, func() bool { return !bridgeLive(srv, serverPID) }) {
+	if !waitFor(t, 2*time.Second, func() bool { return !bridgeLive(srv, wsID) }) {
 		t.Fatalf("bridge not deregistered after ctx cancel")
 	}
 	select {
@@ -240,9 +240,10 @@ func TestBridgeChannelNilBridgesReturnsFailedPrecondition(t *testing.T) {
 	}
 }
 
-// TestBridgeChannelSkipsInvalidRegister verifies a Register with a
-// non-positive server PID is ignored (no live bridge attached).
-func TestBridgeChannelSkipsInvalidRegister(t *testing.T) {
+// TestBridgeChannelRejectsRegisterWithoutWorkspaceID verifies a Register with
+// an empty workspace id is rejected (no bridge attached), even when it carries
+// a valid server pid.
+func TestBridgeChannelRejectsRegisterWithoutWorkspaceID(t *testing.T) {
 	srv := newBridgeTestServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -250,12 +251,10 @@ func TestBridgeChannelSkipsInvalidRegister(t *testing.T) {
 	go func() { _ = srv.BridgeChannel(fake) }()
 
 	fake.recvCh <- &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
-		BridgePid: 1234, ServerPid: 0, WorkspaceId: "ws-bad",
+		BridgePid: 1234, ServerPid: 99, WorkspaceId: "",
 	}}}
-	// Nothing should ever register under any server PID; sample the invalid
-	// key after a short settle.
 	time.Sleep(80 * time.Millisecond)
-	if bridgeLive(srv, 0) {
-		t.Fatalf("invalid Register (server_pid=0) attached a live bridge")
+	if got := srv.bridges.BridgePIDs(""); got != nil {
+		t.Fatalf("Register without workspace_id attached a bridge: %v", got)
 	}
 }

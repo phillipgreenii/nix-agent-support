@@ -600,35 +600,24 @@ func pidPtrIfAlive(pid int, s *session.Session) *int {
 }
 
 // refineCmuxTerminalHost takes a "cmux" detection and refines it against the
-// bridge registry, returning one of:
-//   - "cmux" — a bridge is registered and recently seen
-//   - "cmux (bridge disconnected)" — a bridge was registered but is stale
-//   - "cmux (no bridge)" — no bridge has ever registered for this server
+// bridge registry, looked up by the session's cmux workspace id, returning one of:
+//   - "cmux" - a bridge is registered for the workspace and recently seen
+//   - "cmux (bridge disconnected)" - a bridge was registered but is stale or gone
+//   - "cmux (no bridge)" - no bridge has ever registered for the workspace
 //
-// If br is nil or the CmuxSignaler cannot resolve a server ancestor (e.g.
-// because the ps cache expired between Detect and this call), falls back to
-// the bare "cmux" string — never worse than the pre-refinement value.
-func refineCmuxTerminalHost(ctx context.Context, signalers []signal.Signaler, br *bridge.Registry, pid int) string {
-	if br == nil {
+// If br is nil, or the host carries no workspace id, it returns the bare "cmux"
+// string, never worse than the pre-refinement value.
+func refineCmuxTerminalHost(br *bridge.Registry, host *session.Host) string {
+	if br == nil || host == nil || host.CmuxWorkspaceID == "" {
 		return "cmux"
 	}
-	for _, s := range signalers {
-		cs, ok := s.(*signal.CmuxSignaler)
-		if !ok {
-			continue
-		}
-		serverPID, ok := cs.FindCmuxServerAncestor(ctx, pid)
-		if !ok {
-			return "cmux"
-		}
-		switch br.StatusForServer(serverPID) {
-		case bridge.Alive:
-			return "cmux"
-		case bridge.Stale:
-			return "cmux (bridge disconnected)"
-		case bridge.Unknown:
-			return "cmux (no bridge)"
-		}
+	switch br.StatusForWorkspace(host.CmuxWorkspaceID) {
+	case bridge.Alive:
+		return "cmux"
+	case bridge.Stale:
+		return "cmux (bridge disconnected)"
+	case bridge.Unknown:
+		return "cmux (no bridge)"
 	}
 	return "cmux"
 }

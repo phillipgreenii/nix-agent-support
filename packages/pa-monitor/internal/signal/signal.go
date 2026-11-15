@@ -1,22 +1,10 @@
 package signal
 
-// Signaler classifies the terminal environment hosting a process. Nudges are
-// never delivered through it: delivery goes through the control mod.
+// Signaler names a terminal environment the daemon integrates with. It
+// classifies nothing and delivers nothing: the terminal host comes from the
+// recorder's host fact and nudges go through the control mod.
 type Signaler interface {
 	Name() string
-	// Detect returns true if pid is running inside this terminal environment.
-	Detect(pid int) bool
-}
-
-// ResolveSignaler returns the first Signaler whose Detect returns true for pid,
-// or nil if none match.
-func ResolveSignaler(signalers []Signaler, pid int) Signaler {
-	for _, s := range signalers {
-		if s.Detect(pid) {
-			return s
-		}
-	}
-	return nil
 }
 
 // BinaryRequirer is implemented by Signalers that shell out to an external
@@ -57,8 +45,8 @@ func MissingBinaries(signalers []Signaler, lookPath func(string) (string, error)
 }
 
 var defaultSignalers = []Signaler{
-	&TmuxSignaler{Procs: defaultProcTable},
-	&CmuxSignaler{Procs: defaultProcTable},
+	&TmuxSignaler{},
+	&CmuxSignaler{},
 }
 
 // DefaultSignalers returns the standard ordered list of Signalers.

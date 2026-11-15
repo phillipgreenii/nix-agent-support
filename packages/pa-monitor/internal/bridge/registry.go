@@ -11,11 +11,11 @@ import (
 )
 
 // Status reports the daemon's view of a cmux-bridge for a given cmux
-// server PID.
+// workspace id.
 type Status int
 
 const (
-	// Unknown: no bridge has ever registered for this cmux server.
+	// Unknown: no bridge has ever registered for this cmux workspace.
 	// Surfaced to users as "cmux (no bridge)".
 	Unknown Status = iota
 	// Alive: a bridge is registered and was seen within staleAfter.
@@ -26,65 +26,69 @@ const (
 	Stale
 )
 
-// BridgeEntry is a single live-bridge set member for a cmux server. Multiple
-// bridge processes may register against the same cmux server PID (e.g.
+// BridgeEntry is a single live-bridge set member for a cmux workspace. Multiple
+// bridge processes may register against the same cmux workspace id (e.g.
 // across bridge restarts or concurrent connections); each gets its own
 // entry keyed by its own PID.
 type BridgeEntry struct {
 	BridgePID int
+	// ServerPID is the cmux server pid the bridge reported; informational only
+	// (the registry is keyed by workspace id). Zero when the bridge sent none.
+	ServerPID int
 	lastSeen  time.Time
 }
 
-// Registry tracks cmux-bridge registrations keyed by cmux server PID. Each
-// server PID maps to a set of bridge entries (keyed by bridge PID) so that
-// multiple live bridges for the same cmux server can be tracked
+// Registry tracks cmux-bridge registrations keyed by cmux workspace id. Each
+// workspace id maps to a set of bridge entries (keyed by bridge PID) so that
+// multiple live bridges for the same cmux workspace can be tracked
 // independently. Thread-safe.
 type Registry struct {
-	mu         sync.RWMutex
-	byServer   map[int]map[int]*BridgeEntry
-	staleAfter time.Duration
-	now        func() time.Time
+	mu          sync.RWMutex
+	byWorkspace map[string]map[int]*BridgeEntry
+	staleAfter  time.Duration
+	now         func() time.Time
 }
 
 // NewRegistry constructs a registry. staleAfter is the cutoff beyond which
 // a registered bridge is reported as Stale.
 func NewRegistry(staleAfter time.Duration) *Registry {
 	return &Registry{
-		byServer:   map[int]map[int]*BridgeEntry{},
-		staleAfter: staleAfter,
-		now:        time.Now,
+		byWorkspace: map[string]map[int]*BridgeEntry{},
+		staleAfter:  staleAfter,
+		now:         time.Now,
 	}
 }
 
 // AttachStream adds or updates a live-bridge set member, refreshing its
 // lastSeen to now.
-func (r *Registry) AttachStream(serverPID, bridgePID int) {
+func (r *Registry) AttachStream(workspaceID string, serverPID, bridgePID int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.attachLocked(serverPID, bridgePID, r.now())
+	r.attachLocked(workspaceID, serverPID, bridgePID, r.now())
 }
 
 // attachLocked inserts or refreshes a member. Callers must hold r.mu.
-func (r *Registry) attachLocked(serverPID, bridgePID int, at time.Time) {
-	members := r.byServer[serverPID]
+func (r *Registry) attachLocked(workspaceID string, serverPID, bridgePID int, at time.Time) {
+	members := r.byWorkspace[workspaceID]
 	if members == nil {
 		members = map[int]*BridgeEntry{}
-		r.byServer[serverPID] = members
+		r.byWorkspace[workspaceID] = members
 	}
 	e, ok := members[bridgePID]
 	if !ok {
 		e = &BridgeEntry{BridgePID: bridgePID}
 		members[bridgePID] = e
 	}
+	e.ServerPID = serverPID
 	e.lastSeen = at
 }
 
 // Heartbeat refreshes a member's lastSeen.
 // A no-op if the member does not exist.
-func (r *Registry) Heartbeat(serverPID, bridgePID int, at time.Time) {
+func (r *Registry) Heartbeat(workspaceID string, bridgePID int, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	members := r.byServer[serverPID]
+	members := r.byWorkspace[workspaceID]
 	if members == nil {
 		return
 	}
@@ -95,45 +99,45 @@ func (r *Registry) Heartbeat(serverPID, bridgePID int, at time.Time) {
 	e.lastSeen = at
 }
 
-// Deregister removes a single bridge member for a server. A no-op if the
-// server or member does not exist.
-func (r *Registry) Deregister(serverPID, bridgePID int) {
+// Deregister removes a single bridge member for a workspace. A no-op if the
+// workspace or member does not exist.
+func (r *Registry) Deregister(workspaceID string, bridgePID int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	members := r.byServer[serverPID]
+	members := r.byWorkspace[workspaceID]
 	if members == nil {
 		return
 	}
 	delete(members, bridgePID)
 	if len(members) == 0 {
-		delete(r.byServer, serverPID)
+		delete(r.byWorkspace, workspaceID)
 	}
 }
 
 // Prune removes every bridge member whose bridge PID is no longer alive
-// according to isAlive. Servers left with no members are removed entirely.
+// according to isAlive. Workspaces left with no members are removed entirely.
 func (r *Registry) Prune(isAlive func(pid int) bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for serverPID, members := range r.byServer {
+	for workspaceID, members := range r.byWorkspace {
 		for bridgePID := range members {
 			if !isAlive(bridgePID) {
 				delete(members, bridgePID)
 			}
 		}
 		if len(members) == 0 {
-			delete(r.byServer, serverPID)
+			delete(r.byWorkspace, workspaceID)
 		}
 	}
 }
 
-// BridgePIDs returns the bridge PIDs currently registered for serverPID, in
+// BridgePIDs returns the bridge PIDs currently registered for workspaceID, in
 // ascending order (nil when there are none). It reports membership only, not
-// freshness; StatusForServer reports liveness.
-func (r *Registry) BridgePIDs(serverPID int) []int {
+// freshness; StatusForWorkspace reports liveness.
+func (r *Registry) BridgePIDs(workspaceID string) []int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	members := r.byServer[serverPID]
+	members := r.byWorkspace[workspaceID]
 	if len(members) == 0 {
 		return nil
 	}
@@ -153,12 +157,12 @@ func (r *Registry) SetNowForTest(now func() time.Time) {
 	r.mu.Unlock()
 }
 
-// StatusForServer reports the bridge's liveness for the given cmux server
+// StatusForWorkspace reports the bridge's liveness for the given cmux workspace
 // PID, computed over the freshest set member's lastSeen.
-func (r *Registry) StatusForServer(serverPID int) Status {
+func (r *Registry) StatusForWorkspace(workspaceID string) Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	members := r.byServer[serverPID]
+	members := r.byWorkspace[workspaceID]
 	if len(members) == 0 {
 		return Unknown
 	}
