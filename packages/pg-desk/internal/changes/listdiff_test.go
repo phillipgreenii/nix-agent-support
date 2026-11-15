@@ -61,7 +61,7 @@ func newStoreHydrator(st *store.Store) *storeHydrator {
 	return &storeHydrator{st: st, fail: map[string]error{}, listFPs: map[string]*string{}, changes: map[string]gather.ChangeKind{}, origins: map[string]string{}}
 }
 
-func (h *storeHydrator) RunEntityChange(_ context.Context, entityType, id string, change gather.ChangeKind, opts pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
+func (h *storeHydrator) RunEntityChange(ctx context.Context, entityType, id string, change gather.ChangeKind, opts pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
 	h.calls = append(h.calls, id)
 	h.listFPs[id] = opts.ListFP
 	h.changes[id] = change
@@ -69,7 +69,7 @@ func (h *storeHydrator) RunEntityChange(_ context.Context, entityType, id string
 	if err := h.fail[id]; err != nil {
 		return pipeline.EntityChangeResult{}, err
 	}
-	row, found, err := h.st.GetEntity("o/r", entityType, id)
+	row, found, err := h.st.GetEntity(ctx, "o/r", entityType, id)
 	if err != nil {
 		return pipeline.EntityChangeResult{}, err
 	}
@@ -107,7 +107,7 @@ func (h *storeHydrator) RunEntityChange(_ context.Context, entityType, id string
 	if f, ok := h.facts[id]; ok {
 		facts = f
 	}
-	v, err := h.st.WriteEntityStateWithLogOpts(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
+	v, err := h.st.WriteEntityStateWithLogOpts(ctx, store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
 		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z", wo)
 	return pipeline.EntityChangeResult{Written: err == nil, Version: v}, err
 }
@@ -119,7 +119,7 @@ func newListEngine(t *testing.T, queries ...string) (*Engine, *store.Store, *sto
 	t.Helper()
 	e, st, h := newUnbaselinedEngine(t, queries...)
 	for _, q := range queries {
-		if err := st.SetMeta(MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
+		if err := st.SetMeta(context.Background(), MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -152,7 +152,7 @@ func runTick(t *testing.T, e *Engine, opts ...Options) (Envelope, Outcome, error
 
 func listFPOf(t *testing.T, st *store.Store, id string) string {
 	t.Helper()
-	row, found, err := st.GetEntity("o/r", "issue", id)
+	row, found, err := st.GetEntity(context.Background(), "o/r", "issue", id)
 	if err != nil || !found {
 		t.Fatalf("entity %s: found=%v err=%v", id, found, err)
 	}
@@ -162,7 +162,7 @@ func listFPOf(t *testing.T, st *store.Store, id string) string {
 func seedRow(t *testing.T, st *store.Store, id, listFP, hydratedAt string, active bool) {
 	t.Helper()
 	fp := listFP
-	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 		0, hydratedAt, active, &fp, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
@@ -185,13 +185,13 @@ func TestDiffListedComparesListAgainstStoredListFP(t *testing.T) {
 	seedRow(t, st, "gone", "F1", "2026-10-01T11:00:00Z", false)
 	seedRow(t, st, "cutover", "", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "same", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "same", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 
 	res := listing("same=F1", "differs=F2", "new=F1", "gone=F1", "cutover=F1", "stale=F9")
 	res.Entities[5].Stale = true
-	got, err := e.diffListed("issue", []queryRun{{query: "open", res: res}})
+	got, err := e.diffListed(context.Background(), "issue", []queryRun{{query: "open", res: res}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestDiffListedOrdersChangedOldestFirstThenAdded(t *testing.T) {
 	seedRow(t, st, "c-old", "F1", "2026-09-01T00:00:00Z", true)
 	seedRow(t, st, "c-never", "F1", "", true)
 	res := listing("z-added=F1", "a-added=F1", "c-new=F2", "c-old=F2", "c-never=F2")
-	got, err := e.diffListed("issue", []queryRun{{query: "open", res: res}})
+	got, err := e.diffListed(context.Background(), "issue", []queryRun{{query: "open", res: res}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestDiffListedOrdersChangedOldestFirstThenAdded(t *testing.T) {
 
 func TestDiffListedMergesAnEntityListedByTwoQueries(t *testing.T) {
 	e, _, _ := newListEngine(t, "a", "b")
-	got, err := e.diffListed("issue", []queryRun{
+	got, err := e.diffListed(context.Background(), "issue", []queryRun{
 		{query: "a", res: listing("x=F1")},
 		{query: "b", res: listing("x=F1")},
 	})
@@ -277,10 +277,10 @@ func TestFailedHydrationIsRetriedEveryTickWithNoQueueAndNoGiveUp(t *testing.T) {
 		if !out.Partial || len(h.calls) != before+1 {
 			t.Fatalf("tick %d: partial=%v calls=%v, want the failed entity retried", tick, out.Partial, h.calls)
 		}
-		if _, found, _ := st.GetEntity("o/r", "issue", "bd-1"); found {
+		if _, found, _ := st.GetEntity(context.Background(), "o/r", "issue", "bd-1"); found {
 			t.Fatalf("tick %d: a failed hydration wrote a row", tick)
 		}
-		if _, found, _ := st.GetMeta("change_flow.deferred.issue"); found {
+		if _, found, _ := st.GetMeta(context.Background(), "change_flow.deferred.issue"); found {
 			t.Fatalf("tick %d: a deferral queue was persisted", tick)
 		}
 	}
@@ -348,7 +348,7 @@ func TestBudgetLeftoverIsFoundAgainWithoutAQueue(t *testing.T) {
 	if err != nil || out.Partial || len(h.calls) != 2 || h.calls[1] != "bd-2" {
 		t.Fatalf("tick 2 = %+v %+v calls=%v err=%v", env, out, h.calls, err)
 	}
-	if _, found, _ := st.GetMeta("change_flow.deferred.issue"); found {
+	if _, found, _ := st.GetMeta(context.Background(), "change_flow.deferred.issue"); found {
 		t.Error("a deferral queue was persisted")
 	}
 }
@@ -370,7 +370,7 @@ func TestResetHydratesWithNilListFPAndNoSweepRunsForIssue(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
 	seedRow(t, st, "bd-1", "F1", "2026-09-01T00:00:00Z", true) // old enough for a pr sweep, never swept for an issue
 	watched := true                                            // --reset replays only watched issues
-	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &watched); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "bd-1", nil, &watched); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing("bd-1=F1")}
@@ -403,12 +403,12 @@ func TestResetReplaysOnlyWatchedActiveIssuesAsAdded(t *testing.T) {
 	seedRow(t, st, "bd-4", "F1", "2026-10-01T11:00:00Z", false)
 	yes, no := true, false
 	for _, id := range []string{"bd-1", "bd-2", "bd-4"} {
-		if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &yes); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// bd-3 is stated not watched (a NULL mark would make it a late watch).
-	if err := st.SetEntityColumns("o/r", "issue", "bd-3", nil, &no); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "bd-3", nil, &no); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing("bd-1=F1", "bd-2=F1", "bd-3=F1")}
@@ -440,7 +440,7 @@ func TestResetReplaysOnlyWatchedActiveIssuesAsAdded(t *testing.T) {
 func TestTruncatedListingIsDegradedAndNeverRemoves(t *testing.T) {
 	e, st, _ := newListEngine(t, "open")
 	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true)
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	res := listing()
@@ -451,7 +451,7 @@ func TestTruncatedListingIsDegradedAndNeverRemoves(t *testing.T) {
 		!strings.Contains(env.Sources[0].Reason, ReasonListTruncated) {
 		t.Fatalf("env = %+v %+v %v", env, out, err)
 	}
-	if row, _, _ := st.GetEntity("o/r", "issue", "bd-1"); row.Inactive {
+	if row, _, _ := st.GetEntity(context.Background(), "o/r", "issue", "bd-1"); row.Inactive {
 		t.Error("a truncated listing removed an entity")
 	}
 }
@@ -479,7 +479,7 @@ func (panicLister) ListFingerprints(context.Context, string, string) (gather.Lis
 
 func persisted(t *testing.T, st *store.Store, query string) []string {
 	t.Helper()
-	set := loadWatchSet(st, "issue", query)
+	set := loadWatchSet(context.Background(), st, "issue", query)
 	var ids []string
 	for id := range set {
 		ids = append(ids, id)
@@ -490,7 +490,7 @@ func persisted(t *testing.T, st *store.Store, query string) []string {
 
 func isInactive(t *testing.T, st *store.Store, id string) bool {
 	t.Helper()
-	row, found, err := st.GetEntity("o/r", "issue", id)
+	row, found, err := st.GetEntity(context.Background(), "o/r", "issue", id)
 	if err != nil || !found {
 		t.Fatalf("entity %s: found=%v err=%v", id, found, err)
 	}
@@ -546,7 +546,7 @@ func TestMembershipIdStillListedByAnotherQueryIsNotACandidate(t *testing.T) {
 	if isInactive(t, st, "bd-1") || removedRows(t, st, "bd-1") != 0 {
 		t.Error("bd-1 is watched: absent from every complete listing it becomes an orphan, not a removal")
 	}
-	if got, err := OrphanEntities(st, e.Cfg); err != nil || len(got) != 1 || got[0].EntityID != "bd-1" {
+	if got, err := OrphanEntities(context.Background(), st, e.Cfg); err != nil || len(got) != 1 || got[0].EntityID != "bd-1" {
 		t.Errorf("orphans = %+v, %v, want [bd-1]", got, err)
 	}
 }
@@ -575,7 +575,7 @@ func TestMembershipFailedDeactivationKeepsTheIdPersistedAndRetries(t *testing.T)
 	e, st, _ := newListEngine(t, "open")
 	// An UNWATCHED issue (watched NULL) keeps the removal confirmation.
 	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true)
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing()}

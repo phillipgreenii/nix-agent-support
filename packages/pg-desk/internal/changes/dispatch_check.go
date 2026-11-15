@@ -193,7 +193,7 @@ func (e *Engine) startupDispatchCheck(ctx context.Context, entityType string) {
 			Mismatches []string `json:"mismatches"`
 		}{At: at, Mismatches: texts})
 		if err == nil {
-			err = e.Store.SetMeta(MetaDispatchCheckPrefix+inst, string(body))
+			err = e.Store.SetMeta(ctx, MetaDispatchCheckPrefix+inst, string(body))
 		}
 		if err != nil {
 			e.warnf("warning: dispatch check: record the outcome of %s: %v\n", inst, err)

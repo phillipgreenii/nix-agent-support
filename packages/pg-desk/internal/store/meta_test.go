@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestListMetaPrefixMatchesLiterally(t *testing.T) {
 	s := OpenForTest(t)
@@ -11,12 +14,12 @@ func TestListMetaPrefixMatchesLiterally(t *testing.T) {
 		"last_heartbeat":      "no",
 		"100%_done":           "wildcard-looking key",
 	} {
-		if err := s.SetMeta(k, v); err != nil {
+		if err := s.SetMeta(context.Background(), k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	got, err := s.ListMetaPrefix("source_fetch.")
+	got, err := s.ListMetaPrefix(context.Background(), "source_fetch.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,19 +28,19 @@ func TestListMetaPrefixMatchesLiterally(t *testing.T) {
 	}
 
 	// A LIKE-style wildcard in the prefix MUST NOT widen the match.
-	got, err = s.ListMetaPrefix("%")
+	got, err = s.ListMetaPrefix(context.Background(), "%")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {
 		t.Errorf("ListMetaPrefix(%%) = %v, want none", got)
 	}
-	got, err = s.ListMetaPrefix("100%_")
+	got, err = s.ListMetaPrefix(context.Background(), "100%_")
 	if err != nil || len(got) != 1 {
 		t.Errorf("ListMetaPrefix(100%%_) = %v, %v; want the one literal match", got, err)
 	}
 
-	got, err = s.ListMetaPrefix("nothing.")
+	got, err = s.ListMetaPrefix(context.Background(), "nothing.")
 	if err != nil || got == nil || len(got) != 0 {
 		t.Errorf("ListMetaPrefix(nothing.) = %v, %v; want a non-nil empty map", got, err)
 	}

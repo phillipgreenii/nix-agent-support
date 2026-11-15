@@ -194,7 +194,7 @@ func TestDoctorStrandedCyclesReportsRealFinding(t *testing.T) {
 		return []byte(strandedFixtureFanOut(false)), nil
 	}
 
-	if err := seed.UpsertInterpretation(store.Interpretation{
+	if err := seed.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#5",
 		Ownership: ownershipMine, AsOf: "2026-09-22T00:00:00Z",
 	}); err != nil {
@@ -224,7 +224,7 @@ func TestDoctorStrandedCyclesSkipsAlreadyLabeledMine(t *testing.T) {
 		return []byte(strandedFixtureFanOut(true)), nil
 	}
 
-	if err := seed.UpsertInterpretation(store.Interpretation{
+	if err := seed.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#5",
 		Ownership: ownershipMine, AsOf: "2026-09-22T00:00:00Z",
 	}); err != nil {
@@ -282,7 +282,7 @@ func TestDoctorIgnoresALegacySyncErrorRow(t *testing.T) {
 	seed, openFresh := openTestStore(t)
 	withOpenSeams(t, openTestConfig("o/r"), openFresh)
 	stubDoctorSeams(t, nil, nil, nil)
-	if err := seed.UpsertInterpretation(store.Interpretation{
+	if err := seed.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#9",
 		AsOf: "2026-09-22T00:00:00Z",
 	}); err != nil {
@@ -409,11 +409,11 @@ func TestDoctorWatchedQueriesAllResolveAndNoneConfigured(t *testing.T) {
 func TestDoctorStalledConsumerWithRouterConfig(t *testing.T) {
 	seed := newSchemaDoctor(t, openTestConfig("o/r"))
 	// pr/pg-router has a 60s router period, so 3x = 3m. Seen 4m ago: stalled.
-	if err := seed.RegisterConsumer("pg-router", "pr", doctorNow.Add(-4*time.Minute)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "pg-router", "pr", doctorNow.Add(-4*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	// issue/pg-router has a 5m period, so 3x = 15m. Seen 4m ago: fine.
-	if err := seed.RegisterConsumer("pg-router", "issue", doctorNow.Add(-4*time.Minute)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "pg-router", "issue", doctorNow.Add(-4*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -430,7 +430,7 @@ func TestDoctorStalledConsumerWithRouterConfig(t *testing.T) {
 		}
 	}
 	// reported, not pruned
-	cs, err := seed.ListConsumers()
+	cs, err := seed.ListConsumers(context.Background())
 	if err != nil || len(cs) != 2 {
 		t.Errorf("consumers after doctor = %+v, %v; doctor must not prune", cs, err)
 	}
@@ -438,14 +438,14 @@ func TestDoctorStalledConsumerWithRouterConfig(t *testing.T) {
 
 func TestDoctorStalledConsumerWithoutRouterConfigUsesConsumerStaleAfter(t *testing.T) {
 	seed := newSchemaDoctor(t, openTestConfig("o/r"))
-	if err := seed.RegisterConsumer("fresh", "pr", doctorNow.Add(-4*time.Hour)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "fresh", "pr", doctorNow.Add(-4*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	stdout, err := runDoctorCmd(t)
 	if err != nil {
 		t.Fatalf("a consumer seen hours ago is within the 7d default: %v\n%s", err, stdout)
 	}
-	if err := seed.RegisterConsumer("old", "pr", doctorNow.Add(-8*24*time.Hour)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "old", "pr", doctorNow.Add(-8*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	stdout, err = runDoctorCmd(t)
@@ -461,7 +461,7 @@ func seedActive(t *testing.T, st *store.Store, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
 		e := store.Entity{Repo: "o/r", EntityType: entityTypeThread, EntityID: fmt.Sprintf("t-%d", i+1), Facts: `{}`, AsOf: "x"}
-		if _, err := st.WriteEntityStateWithLog(e, 0, doctorNow.Format(time.RFC3339), true, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), e, 0, doctorNow.Format(time.RFC3339), true, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -586,7 +586,7 @@ func TestDoctorFailsOnUnreadableRouterConfig(t *testing.T) {
 
 func TestDoctorReportsRepeatedDegradedHydrations(t *testing.T) {
 	seed := newSchemaDoctor(t, openTestConfig("o/r"))
-	if err := seed.SetMeta("change_flow.degraded.issue", `{"o/r#7":{"count":3,"since":"2026-10-01T09:00:00Z"},"o/r#8":{"count":1,"since":"2026-10-01T10:00:00Z"}}`); err != nil {
+	if err := seed.SetMeta(context.Background(), "change_flow.degraded.issue", `{"o/r#7":{"count":3,"since":"2026-10-01T09:00:00Z"},"o/r#8":{"count":1,"since":"2026-10-01T10:00:00Z"}}`); err != nil {
 		t.Fatal(err)
 	}
 	stdout, err := runDoctorCmd(t)
@@ -724,11 +724,11 @@ func TestProbeServeRefusedConnectionIsUnreachable(t *testing.T) {
 func seedIssueEntity(t *testing.T, st *store.Store, id, facts string, active bool) {
 	t.Helper()
 	e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: facts, AsOf: doctorNow.Format(time.RFC3339)}
-	if _, err := st.WriteEntityStateWithLog(e, 0, doctorNow.Format(time.RFC3339), active, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
+	if _, err := st.WriteEntityStateWithLog(context.Background(), e, 0, doctorNow.Format(time.RFC3339), active, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
 		t.Fatalf("seed issue %s: %v", id, err)
 	}
 	inst := doctorSeedBackend
-	if err := st.SetEntityColumns("o/r", "issue", id, &inst, nil); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, &inst, nil); err != nil {
 		t.Fatalf("attribute issue %s: %v", id, err)
 	}
 }
@@ -848,14 +848,14 @@ func (f *gateFixture) seedOwningEntity(id string, active bool) {
 	inst := gateInst
 	at := doctorNow.Format(time.RFC3339)
 	e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{"issue_show":{"state":"open","status_category":"new"}}`, AsOf: at}
-	if _, err := f.seed.WriteEntityStateWithLogOpts(e, 0, at, active, nil, []string{"added"}, "test", at, store.WriteOptions{Backend: &inst}); err != nil {
+	if _, err := f.seed.WriteEntityStateWithLogOpts(context.Background(), e, 0, at, active, nil, []string{"added"}, "test", at, store.WriteOptions{Backend: &inst}); err != nil {
 		f.t.Fatalf("seed owning entity %s: %v", id, err)
 	}
 }
 
 func (f *gateFixture) failIngest(id string, firstFailedAt time.Time) {
 	f.t.Helper()
-	if err := f.seed.RecordIngestFailure(store.IngestFailure{
+	if err := f.seed.RecordIngestFailure(context.Background(), store.IngestFailure{
 		Instance: gateInst, EntityID: id, Seq: 7, StoreIdentity: "s1", Kinds: []string{"status_changed"},
 		FirstFailedAt: firstFailedAt.UTC().Format(time.RFC3339), LastError: "hydration failed: boom",
 	}); err != nil {
@@ -892,7 +892,7 @@ func TestDoctorIssueGatesCleanConfigurationPasses(t *testing.T) {
 	f.seedOwningEntity("J-1", true)
 	// A cursor_expired record older than 24 hours and a young failed ingest
 	// both pass.
-	if err := f.seed.SetMeta(changes.MetaFeedCursorExpiredPrefix+gateInst, doctorNow.Add(-25*time.Hour).Format(time.RFC3339)); err != nil {
+	if err := f.seed.SetMeta(context.Background(), changes.MetaFeedCursorExpiredPrefix+gateInst, doctorNow.Add(-25*time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	f.failIngest("J-9", doctorNow.Add(-5*time.Minute))
@@ -951,12 +951,12 @@ func TestDoctorIssueGatesAnIDServedByTwoBackendsFails(t *testing.T) {
 	// Two non-owning queries of two different instances hold the same id, and
 	// the entity row has no backend column yet.
 	for _, q := range []string{"bd-a", "bd-b"} {
-		if err := f.seed.SetMeta("change_flow.watchset.issue."+q, `["pg2-77"]`); err != nil {
+		if err := f.seed.SetMeta(context.Background(), "change_flow.watchset.issue."+q, `["pg2-77"]`); err != nil {
 			t.Fatal(err)
 		}
 	}
 	at := doctorNow.Format(time.RFC3339)
-	if _, err := f.seed.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pg2-77", Facts: `{}`, AsOf: at}, 0, at, true, []string{"added"}, "test", at); err != nil {
+	if _, err := f.seed.WriteEntityStateWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pg2-77", Facts: `{}`, AsOf: at}, 0, at, true, []string{"added"}, "test", at); err != nil {
 		t.Fatal(err)
 	}
 	wantGateFailure(t, gateNameTwoBackends, "FAIL", "pg2-77", "beads-a", "beads-b")
@@ -979,7 +979,7 @@ func TestDoctorIssueGatesNoWatchedQueryIgnoresBackendsWithoutActiveEntities(t *t
 	f.seedOwningEntity("J-1", false)
 	other := "beads-a"
 	at := doctorNow.Format(time.RFC3339)
-	if _, err := f.seed.WriteEntityStateWithLogOpts(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pg2-1", Facts: `{}`, AsOf: at},
+	if _, err := f.seed.WriteEntityStateWithLogOpts(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pg2-1", Facts: `{}`, AsOf: at},
 		0, at, true, nil, []string{"added"}, "test", at, store.WriteOptions{Backend: &other}); err != nil {
 		t.Fatal(err)
 	}
@@ -992,20 +992,20 @@ func TestDoctorIssueGatesNoWatchedQueryIgnoresBackendsWithoutActiveEntities(t *t
 func TestDoctorIssueGatesCursorExpiredFailsOnlyWhileYoungerThanADay(t *testing.T) {
 	f := newGateFixture(t)
 	key := changes.MetaFeedCursorExpiredPrefix + gateInst
-	if err := f.seed.SetMeta(key, doctorNow.Add(-23*time.Hour).Format(time.RFC3339)); err != nil {
+	if err := f.seed.SetMeta(context.Background(), key, doctorNow.Add(-23*time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	wantGateFailure(t, gateNameCursorExpired, "FAIL", gateInst, "dropped-key runbook")
 
 	// A record of 24 hours or more passes, and the key is never deleted.
-	if err := f.seed.SetMeta(key, doctorNow.Add(-24*time.Hour).Format(time.RFC3339)); err != nil {
+	if err := f.seed.SetMeta(context.Background(), key, doctorNow.Add(-24*time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	stdout, err := runDoctorCmd(t)
 	if err != nil {
 		t.Fatalf("an expiry older than a day must pass: %v\n%s", err, stdout)
 	}
-	if _, found, _ := f.seed.GetMeta(key); !found {
+	if _, found, _ := f.seed.GetMeta(context.Background(), key); !found {
 		t.Error("doctor deleted the cursor_expired record")
 	}
 }
@@ -1117,7 +1117,7 @@ exit 99`, f.dir))
 	if !strings.Contains(stderr, "dispatch check: watched_differs: backend owning-demo query jira-q") {
 		t.Errorf("stderr lacks the mismatch warning:\n%s", stderr)
 	}
-	v, found, merr := f.seed.GetMeta(changes.MetaDispatchCheckPrefix + feedTestInstance)
+	v, found, merr := f.seed.GetMeta(context.Background(), changes.MetaDispatchCheckPrefix+feedTestInstance)
 	if merr != nil || !found || !strings.Contains(v, "watched_differs") || !strings.Contains(v, `"at":"2026-10-01T12:00:00Z"`) {
 		t.Errorf("meta = %q %v %v, want the recorded mismatch", v, found, merr)
 	}

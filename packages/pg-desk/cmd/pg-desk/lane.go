@@ -68,6 +68,8 @@ recorded; 1 any error (nothing recorded).`,
 }
 
 func runLaneRecord(cmd *cobra.Command, input string) error {
+	ctx := cmd.Context()
+
 	r := cmd.InOrStdin()
 	if input != "-" {
 		f, err := os.Open(input)
@@ -95,13 +97,13 @@ func runLaneRecord(cmd *cobra.Command, input string) error {
 	if err := in.Validate(); err != nil {
 		return fmt.Errorf("lane-record: %w", err)
 	}
-	st, err := openNewSchemaStore("lane-record")
+	st, err := openNewSchemaStore(ctx, "lane-record")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
 	cmd.SilenceUsage = true
-	if err := lanestate.Record(st, cfg.PRLaneMode(), laneNow(), in); err != nil {
+	if err := lanestate.Record(ctx, st, cfg.PRLaneMode(), laneNow(), in); err != nil {
 		return fmt.Errorf("lane-record: %w", err)
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "recorded pr %s: mode %s\n", id, in.Mode)
@@ -130,6 +132,8 @@ either lane mode may call it. Exit 0 done; 1 any error.`,
 }
 
 func runMarkInactive(cmd *cobra.Command, ref string) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("mark-inactive: load config: %w", err)
@@ -138,13 +142,13 @@ func runMarkInactive(cmd *cobra.Command, ref string) error {
 	if err != nil {
 		return fmt.Errorf("mark-inactive: %w", err)
 	}
-	st, err := openNewSchemaStore("mark-inactive")
+	st, err := openNewSchemaStore(ctx, "mark-inactive")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
 	cmd.SilenceUsage = true
-	changed, err := lanestate.MarkInactive(st, repo, id)
+	changed, err := lanestate.MarkInactive(ctx, st, repo, id)
 	if err != nil {
 		return fmt.Errorf("mark-inactive: %w", err)
 	}

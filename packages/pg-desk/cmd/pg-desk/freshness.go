@@ -42,6 +42,8 @@ func init() {
 }
 
 func execFreshness(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+
 	// An unloadable config degrades to the default threshold and labels
 	// rather than failing the verb: a freshness indicator that disappears
 	// because of a config error would turn a stale source into a false
@@ -57,7 +59,7 @@ func execFreshness(cmd *cobra.Command) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	rep, err := freshness.Build(st, cfg, freshnessNow())
+	rep, err := freshness.Build(ctx, st, cfg, freshnessNow())
 	if err != nil {
 		return fmt.Errorf("freshness: %w", err)
 	}

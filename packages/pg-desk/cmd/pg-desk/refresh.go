@@ -81,6 +81,8 @@ of the read failed) or hydrate_error (any other failure).`, entityType),
 }
 
 func runRefresh(cmd *cobra.Command, entityType, ref string, watch bool) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("refresh: load config: %w", err)
@@ -89,7 +91,7 @@ func runRefresh(cmd *cobra.Command, entityType, ref string, watch bool) error {
 	if err != nil {
 		return fmt.Errorf("refresh: %w", err)
 	}
-	st, err := openNewSchemaStore("refresh")
+	st, err := openNewSchemaStore(ctx, "refresh")
 	if err != nil {
 		return err
 	}
@@ -170,7 +172,7 @@ func refreshEntityWatch(ctx context.Context, cfg *config.Config, st *store.Store
 		ThreadActiveWindow: cfg.ThreadActiveWindow(),
 	}
 	if entityType == entityTypeIssue {
-		instance, owning, err := changes.ResolveIssueBackend(cfg, st, entityID)
+		instance, owning, err := changes.ResolveIssueBackend(ctx, cfg, st, entityID)
 		if err != nil {
 			return pipeline.EntityChangeResult{}, err
 		}
@@ -182,7 +184,7 @@ func refreshEntityWatch(ctx context.Context, cfg *config.Config, st *store.Store
 			instance, held, err = changes.ProbeOwning(ctx, gather.NewGatherer(cfg, st), cfg, entityID)
 			if err != nil {
 				res := pipeline.EntityChangeResult{}
-				changes.RecordHydration(st, entityType, entityID, res, err)
+				changes.RecordHydration(ctx, st, entityType, entityID, res, err)
 				return res, err
 			}
 			owning = held
@@ -198,6 +200,6 @@ func refreshEntityWatch(ctx context.Context, cfg *config.Config, st *store.Store
 		opts.SkipUnchangedWrite = true
 	}
 	res, err := newRefreshHydrator(cfg, st).RunEntityChange(ctx, entityType, entityID, refreshChangeKind, opts)
-	changes.RecordHydration(st, entityType, entityID, res, err)
+	changes.RecordHydration(ctx, st, entityType, entityID, res, err)
 	return res, err
 }

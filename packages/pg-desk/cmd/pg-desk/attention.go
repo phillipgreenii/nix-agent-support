@@ -74,6 +74,8 @@ func init() {
 // the caller in error text. The store is returned open (the caller closes it)
 // so explain can ask it whether an unevaluated entity is held.
 func evaluateAttention(cmd *cobra.Command, verb string) (res attention.Result, st *store.Store, repo string, err error) {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return attention.Result{}, nil, "", fmt.Errorf("%s: load config: %w", verb, err)
@@ -86,7 +88,7 @@ func evaluateAttention(cmd *cobra.Command, verb string) (res attention.Result, s
 	if err != nil {
 		return attention.Result{}, nil, "", fmt.Errorf("%s: open store: %w", verb, err)
 	}
-	res, err = attention.Evaluate(attention.Inputs{Store: st, Repo: repo, Config: cfg, Clock: attentionNow})
+	res, err = attention.Evaluate(ctx, attention.Inputs{Store: st, Repo: repo, Config: cfg, Clock: attentionNow})
 	if err != nil {
 		_ = st.Close()
 		return attention.Result{}, nil, "", fmt.Errorf("%s: %w", verb, err)
@@ -153,6 +155,8 @@ type explainNotRaised struct {
 }
 
 func execAttentionExplain(cmd *cobra.Command, ref string) error {
+	ctx := cmd.Context()
+
 	typ, id, ok := links.ParseRef(ref)
 	if !ok {
 		return fmt.Errorf("attention explain: %q is not shaped <type>:<id>", ref)
@@ -185,7 +189,7 @@ func execAttentionExplain(cmd *cobra.Command, ref string) error {
 		}
 		sort.Slice(doc.NotRaised, func(i, j int) bool { return doc.NotRaised[i].Rule < doc.NotRaised[j].Rule })
 	} else {
-		_, held, gerr := st.GetEntity(repo, typ, id)
+		_, held, gerr := st.GetEntity(ctx, repo, typ, id)
 		if gerr != nil {
 			return fmt.Errorf("attention explain: read entity %s: %w", doc.Ref, gerr)
 		}

@@ -30,19 +30,19 @@ func TestStatusReportsCountsAgainstFixtureStore(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	withOpenSeams(t, openTestConfig("o/r"), openFresh)
 
-	if err := st.UpsertEntityForTest(store.Entity{
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "1",
 		Facts: `{}`, AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "1",
 		Degraded: true, AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
 	}
-	if err := st.SetMeta(store.MetaKeyLastHeartbeat, "2026-09-16T00:00:00Z"); err != nil {
+	if err := st.SetMeta(context.Background(), store.MetaKeyLastHeartbeat, "2026-09-16T00:00:00Z"); err != nil {
 		t.Fatalf("seed meta: %v", err)
 	}
 
@@ -88,20 +88,20 @@ func TestStatusReportsChangeFlowPerTypeAndConsumer(t *testing.T) {
 	write := func(id string, expected int64, hydratedAt string, kinds []string, origin string) {
 		t.Helper()
 		e := store.Entity{Repo: "o/r", EntityType: entityTypePR, EntityID: id, Facts: `{}`, AsOf: "x"}
-		if _, err := st.WriteEntityStateWithLog(e, expected, hydratedAt, true, kinds, origin, "2026-10-01T10:00:00Z"); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), e, expected, hydratedAt, true, kinds, origin, "2026-10-01T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	write("o/r#1", 0, "2026-10-01T11:00:00Z", []string{"created"}, "poll")
 	write("o/r#2", 0, "2026-09-30T00:00:00Z", []string{"created"}, "poll") // due
-	if err := st.RegisterConsumer("alpha", entityTypePR, time.Date(2026, 10, 1, 11, 30, 0, 0, time.UTC)); err != nil {
+	if err := st.RegisterConsumer(context.Background(), "alpha", entityTypePR, time.Date(2026, 10, 1, 11, 30, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.AdvanceCursor("alpha", entityTypePR, 1); err != nil {
+	if err := st.AdvanceCursor(context.Background(), "alpha", entityTypePR, 1); err != nil {
 		t.Fatal(err)
 	}
-	changes.RecordHydration(st, entityTypePR, "o/r#2", pipeline.EntityChangeResult{Degraded: "ci"}, nil)
-	changes.RecordHydration(st, entityTypePR, "o/r#2", pipeline.EntityChangeResult{Retries: 3}, errors.New("boom"))
+	changes.RecordHydration(context.Background(), st, entityTypePR, "o/r#2", pipeline.EntityChangeResult{Degraded: "ci"}, nil)
+	changes.RecordHydration(context.Background(), st, entityTypePR, "o/r#2", pipeline.EntityChangeResult{Retries: 3}, errors.New("boom"))
 
 	stdout, err := runStatusCmd(t)
 	if err != nil {

@@ -38,6 +38,7 @@ package focus
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -231,11 +232,11 @@ func runRankCase(t *testing.T, c *rankCase) rankResult {
 		}
 		active := e.Active == nil || *e.Active
 		ent := store.Entity{Repo: repo, EntityType: e.Type, EntityID: e.ID, Facts: facts.String(), AsOf: at, ContentHash: "h" + e.ID}
-		if _, err := st.WriteEntityStateWithLog(ent, 0, at, active, []string{"created"}, "sync", at); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), ent, 0, at, active, []string{"created"}, "sync", at); err != nil {
 			t.Fatalf("fixture %s: write %s: %v", c.Name, canonKey(k), err)
 		}
 		if e.Interpretation != nil {
-			if err := st.UpsertInterpretation(store.Interpretation{
+			if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 				Repo: repo, EntityType: e.Type, EntityID: e.ID, Ownership: e.Interpretation.Ownership,
 				Enrichment: "{}", Urgency: "{}", Dispositions: "{}", Approvals: "{}", MatchReasons: "[]", AsOf: at,
 			}); err != nil {
@@ -247,7 +248,7 @@ func runRankCase(t *testing.T, c *rankCase) rankResult {
 			if err := json.Compact(&v, raw); err != nil {
 				t.Fatalf("fixture %s: annotation %s of %s: %v", c.Name, name, canonKey(k), err)
 			}
-			if err := st.SetAnnotation(store.KVAnnotation{
+			if err := st.SetAnnotation(context.Background(), store.KVAnnotation{
 				Repo: repo, EntityType: e.Type, EntityID: e.ID, Key: name, Value: v.String(),
 				Origin: "pg-desk", SetBy: "operator", SetAt: at,
 			}); err != nil {
@@ -275,7 +276,7 @@ func runRankCase(t *testing.T, c *rankCase) rankResult {
 		}
 		if l.External {
 			x.Actor, x.ActedAt, x.Reason = "operator", at, l.Reason
-			if err := st.AddExternalXref(x); err != nil {
+			if err := st.AddExternalXref(context.Background(), x); err != nil {
 				t.Fatalf("fixture %s: external link %s -> %s: %v", c.Name, l.From, l.To, err)
 			}
 			continue
@@ -284,12 +285,12 @@ func runRankCase(t *testing.T, c *rankCase) rankResult {
 		derived[from] = append(derived[from], x)
 	}
 	for from, ls := range derived {
-		if err := st.ReplaceDerivedXrefs(repo, from.Type, from.ID, ls); err != nil {
+		if err := st.ReplaceDerivedXrefs(context.Background(), repo, from.Type, from.ID, ls); err != nil {
 			t.Fatalf("fixture %s: derived links of %s: %v", c.Name, canonKey(from), err)
 		}
 	}
 
-	in, err := Load(st, cfg, repo, now)
+	in, err := Load(context.Background(), st, cfg, repo, now)
 	if err != nil {
 		t.Fatalf("fixture %s: Load: %v", c.Name, err)
 	}
@@ -309,7 +310,7 @@ func runRankCase(t *testing.T, c *rankCase) rankResult {
 		in.PlanKeys[k] = true
 	}
 
-	r := Rank(in, Candidates(in), RankOptions{Cap: c.Cap, Clock: interpret.FixedClock(now)})
+	r := Rank(context.Background(), in, Candidates(in), RankOptions{Cap: c.Cap, Clock: interpret.FixedClock(now)})
 
 	res := rankResult{
 		Tiers: map[string]string{}, Deciding: map[string]string{},

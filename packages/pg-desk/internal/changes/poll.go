@@ -209,7 +209,7 @@ func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs
 	persisted := make(map[string]map[string]bool, len(configured))
 	next := make(map[string]map[string]bool, len(configured))
 	for _, q := range configured {
-		persisted[q] = loadWatchSet(e.Store, entityType, q)
+		persisted[q] = loadWatchSet(ctx, e.Store, entityType, q)
 		next[q] = cloneSet(persisted[q])
 	}
 	complete := map[string]map[string]bool{}
@@ -263,7 +263,7 @@ func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs
 	// unwatched issue keeps the removal confirmation below.
 	if entityType == issueEntityType {
 		for id := range candidates {
-			row, found, err := e.Store.GetEntity(e.repo(), entityType, id)
+			row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
 			if err == nil && found && !row.Inactive && row.Watched != nil && *row.Watched {
 				delete(candidates, id)
 			}
@@ -316,7 +316,7 @@ func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs
 		if sameSet(persisted[q], next[q]) {
 			continue
 		}
-		if err := saveWatchSet(e.Store, entityType, q, next[q]); err != nil {
+		if err := saveWatchSet(ctx, e.Store, entityType, q, next[q]); err != nil {
 			failures = append(failures, fmt.Sprintf("watched set %s: %v", q, err))
 		}
 	}
@@ -336,7 +336,7 @@ func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs
 //   - the read fails or degrades: nothing is written and the error is
 //     returned, so the caller leaves membership untouched.
 func (e *Engine) confirmRemoval(ctx context.Context, entityType, id string) error {
-	row, found, err := e.Store.GetEntity(e.repo(), entityType, id)
+	row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
 	if err != nil {
 		return err
 	}
@@ -349,9 +349,9 @@ func (e *Engine) confirmRemoval(ctx context.Context, entityType, id string) erro
 	}
 	removed := []string{string(classify.KindRemoved)}
 	if res.NotFound {
-		return e.deactivate(entityType, id, removed)
+		return e.deactivate(ctx, entityType, id, removed)
 	}
-	row, found, err = e.Store.GetEntity(e.repo(), entityType, id)
+	row, found, err = e.Store.GetEntity(ctx, e.repo(), entityType, id)
 	if err != nil {
 		return err
 	}
@@ -361,9 +361,9 @@ func (e *Engine) confirmRemoval(ctx context.Context, entityType, id string) erro
 	if classify.SourceTerminal(entityType, json.RawMessage(row.Facts), e.now(), e.Cfg.ThreadActiveWindow()) {
 		// The classifier logged closed/merged but hydrate's own deactivation
 		// failed: retry it without a second record.
-		return e.deactivate(entityType, id, nil)
+		return e.deactivate(ctx, entityType, id, nil)
 	}
-	return e.deactivate(entityType, id, removed)
+	return e.deactivate(ctx, entityType, id, removed)
 }
 
 func cloneSet(in map[string]bool) map[string]bool {
@@ -389,16 +389,16 @@ func sameSet(a, b map[string]bool) bool {
 // deactivate sets an entity inactive through a compare-and-set write that
 // keeps its snapshot and hydrated_at, appending a change_log row only when
 // kinds is non-empty. An absent or already inactive entity is left alone.
-func (e *Engine) deactivate(entityType, id string, kinds []string) error {
-	return e.deactivateIf(entityType, id, kinds, nil)
+func (e *Engine) deactivate(ctx context.Context, entityType, id string, kinds []string) error {
+	return e.deactivateIf(ctx, entityType, id, kinds, nil)
 }
 
 // deactivateIf is deactivate that first asks guard (when non-nil) whether the
 // freshly read row still warrants deactivation.
-func (e *Engine) deactivateIf(entityType, id string, kinds []string, guard func(store.Entity) bool) error {
+func (e *Engine) deactivateIf(ctx context.Context, entityType, id string, kinds []string, guard func(store.Entity) bool) error {
 	at := e.now().UTC().Format(time.RFC3339)
 	for attempt := 0; attempt < casAttempts; attempt++ {
-		row, found, err := e.Store.GetEntity(e.repo(), entityType, id)
+		row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
 		if err != nil {
 			return err
 		}
@@ -416,7 +416,7 @@ func (e *Engine) deactivateIf(entityType, id string, kinds []string, guard func(
 			// belongs to the feed path.
 			wo.ClearWatchedAfterAppend = true
 		}
-		_, err = e.Store.WriteEntityStateWithLogOpts(row, row.Version, row.HydratedAt, false, nil, kinds, OriginPGConnector, at, wo)
+		_, err = e.Store.WriteEntityStateWithLogOpts(ctx, row, row.Version, row.HydratedAt, false, nil, kinds, OriginPGConnector, at, wo)
 		if err == nil {
 			return nil
 		}
@@ -431,10 +431,10 @@ func (e *Engine) deactivateIf(entityType, id string, kinds []string, guard func(
 // terminal in its source system (closed/merged PR, issue in a terminal state,
 // thread quiet for the active window), so the sweep stops re-hydrating it.
 // The classifier already logged closed/merged, so no record is appended.
-func (e *Engine) deactivateIfTerminal(entityType, id string) error {
+func (e *Engine) deactivateIfTerminal(ctx context.Context, entityType, id string) error {
 	window := e.Cfg.ThreadActiveWindow()
 	now := e.now()
-	return e.deactivateIf(entityType, id, nil, func(row store.Entity) bool {
+	return e.deactivateIf(ctx, entityType, id, nil, func(row store.Entity) bool {
 		return classify.SourceTerminal(entityType, json.RawMessage(row.Facts), now, window)
 	})
 }
@@ -471,8 +471,8 @@ type listedEntity struct {
 // a late watch the budget cuts is selected again at the next poll.
 // The result is ordered changed first, oldest mismatch first (never hydrated
 // counts as oldest, ties by id), then added by id, then the late watches by id.
-func (e *Engine) diffListed(entityType string, runs []queryRun) ([]*listedEntity, error) {
-	all, err := e.Store.ListEntities()
+func (e *Engine) diffListed(ctx context.Context, entityType string, runs []queryRun) ([]*listedEntity, error) {
+	all, err := e.Store.ListEntities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("changes: list entities: %w", err)
 	}
@@ -511,7 +511,7 @@ func (e *Engine) diffListed(entityType string, runs []queryRun) ([]*listedEntity
 		for _, q := range queries {
 			done, ok := baselined[q]
 			if !ok {
-				state, err := ReadBaseline(e.Store, q)
+				state, err := ReadBaseline(ctx, e.Store, q)
 				if err != nil {
 					return false, err
 				}
@@ -577,7 +577,7 @@ func watchLocal(o *pipeline.EntityChangeOptions) { o.WatchLocal = true }
 // or counted: pg-router's schedule is the only retry. It returns the ids it
 // considered, so the sweep does not duplicate them.
 func (e *Engine) hydrateListed(ctx context.Context, opts Options, runs []queryRun, st *pollState, bud *budget) (map[string]bool, error) {
-	pending, err := e.diffListed(opts.EntityType, runs)
+	pending, err := e.diffListed(ctx, opts.EntityType, runs)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +642,7 @@ func idSet(ids []string) map[string]bool {
 // sweep entity belongs to no single query. Entities not reached stay due and
 // are selected on the next poll.
 func (e *Engine) sweep(ctx context.Context, entityType string, st *pollState, bud *budget, exclude map[string]bool) error {
-	all, err := e.Store.ListEntities()
+	all, err := e.Store.ListEntities(ctx)
 	if err != nil {
 		return fmt.Errorf("changes: list entities: %w", err)
 	}
@@ -683,11 +683,11 @@ func (e *Engine) sweep(ctx context.Context, entityType string, st *pollState, bu
 // age. Entities hydrated this call are skipped: their fresh record already
 // restarted the age.
 func (e *Engine) reconcileLocal(ctx context.Context, entityType string, st *pollState) error {
-	all, err := e.Store.ListEntities()
+	all, err := e.Store.ListEntities(ctx)
 	if err != nil {
 		return fmt.Errorf("changes: list entities: %w", err)
 	}
-	latest, err := e.Store.LatestChangeAt(entityType)
+	latest, err := e.Store.LatestChangeAt(ctx, entityType)
 	if err != nil {
 		return fmt.Errorf("changes: %w", err)
 	}
@@ -700,7 +700,7 @@ func (e *Engine) reconcileLocal(ctx context.Context, entityType string, st *poll
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("changes: %w", err)
 		}
-		if err := e.reconcileOne(entityType, id); err != nil {
+		if err := e.reconcileOne(ctx, entityType, id); err != nil {
 			st.side = append(st.side, fmt.Sprintf("reconcile %s: %s", id, firstErrLine(err.Error())))
 		}
 	}
@@ -712,10 +712,10 @@ func (e *Engine) reconcileLocal(ctx context.Context, entityType string, st *poll
 // (so the remote tier's age clock is not reset), the active flag and list_fp
 // (the non-FP write leaves it untouched), while bumping the version and
 // appending the change_log row. An absent or inactive entity is left alone.
-func (e *Engine) reconcileOne(entityType, id string) error {
+func (e *Engine) reconcileOne(ctx context.Context, entityType, id string) error {
 	at := e.now().UTC().Format(time.RFC3339)
 	for attempt := 0; attempt < casAttempts; attempt++ {
-		row, found, err := e.Store.GetEntity(e.repo(), entityType, id)
+		row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
 		if err != nil {
 			return err
 		}
@@ -725,7 +725,7 @@ func (e *Engine) reconcileOne(entityType, id string) error {
 		if e.beforeCASWrite != nil {
 			e.beforeCASWrite(attempt)
 		}
-		_, err = e.Store.WriteEntityStateWithLog(row, row.Version, row.HydratedAt, true, []string{string(classify.KindReconcile)}, OriginLocalReconcile, at)
+		_, err = e.Store.WriteEntityStateWithLog(ctx, row, row.Version, row.HydratedAt, true, []string{string(classify.KindReconcile)}, OriginLocalReconcile, at)
 		if err == nil {
 			return nil
 		}

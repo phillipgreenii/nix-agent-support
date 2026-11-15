@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"sort"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/links"
@@ -42,7 +43,7 @@ type StackSource interface {
 	// StackRoot returns the entity id of the root PR of the stack the PR
 	// belongs to. ok is false when the PR is in no stack (a lone PR is not a
 	// stack). The same root MUST be returned for every member of one stack.
-	StackRoot(entityType, id string) (rootID string, ok bool, err error)
+	StackRoot(ctx context.Context, entityType, id string) (rootID string, ok bool, err error)
 }
 
 // groupAnchor is where an entity's group key came from.
@@ -58,12 +59,12 @@ func (a groupAnchor) key() string { return Ref(a.Type, a.ID) }
 // stack are read for pull requests only: that is the entity the work-context
 // edges leave from or arrive at; any other entity type is its own singleton.
 // A store read error is an error (INV-ATTNEVAL-6).
-func groupOf(in Inputs, v *View) (groupAnchor, error) {
+func groupOf(ctx context.Context, in Inputs, v *View) (groupAnchor, error) {
 	own := groupAnchor{Type: v.Type, ID: v.ID, Label: v.ID}
 	if v.Type != typePR {
 		return own, nil
 	}
-	linked, err := links.ReadLinked(in.Store, v.Repo, v.Type, v.ID)
+	linked, err := links.ReadLinked(ctx, in.Store, v.Repo, v.Type, v.ID)
 	if err != nil {
 		return groupAnchor{}, err
 	}
@@ -71,7 +72,7 @@ func groupOf(in Inputs, v *View) (groupAnchor, error) {
 		return groupAnchor{Type: typeIssue, ID: id, Label: id}, nil
 	}
 	if in.Stacks != nil {
-		root, ok, serr := in.Stacks.StackRoot(v.Type, v.ID)
+		root, ok, serr := in.Stacks.StackRoot(ctx, v.Type, v.ID)
 		if serr != nil {
 			return groupAnchor{}, serr
 		}

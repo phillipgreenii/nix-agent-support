@@ -48,7 +48,7 @@ func TestRunIssueHydrationRowGoldens(t *testing.T) {
 			if err := hydrateJiraIssue(context.Background(), p, f.cfg, st, id, gather.ChangeAdded); err != nil {
 				t.Fatalf("hydrateJiraIssue: %v", err)
 			}
-			row, found, err := st.GetInterpretation("o/r", "issue", id)
+			row, found, err := st.GetInterpretation(context.Background(), "o/r", "issue", id)
 			if err != nil || !found {
 				t.Fatalf("interpretation found=%v err=%v", found, err)
 			}

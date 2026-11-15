@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,27 +38,27 @@ type focusGather struct {
 	watched  focus.Watched
 }
 
-func gatherFocus(env *focusEnv) (*focusGather, error) {
+func gatherFocus(ctx context.Context, env *focusEnv) (*focusGather, error) {
 	if len(env.Cfg.Repos) == 0 {
 		return nil, focusUsageError("focus: no repository configured", "set repos in the pg-desk config")
 	}
 	g := &focusGather{env: env, repo: env.Cfg.Repos[0].Remote, loc: env.Cfg.FocusTimeZone()}
-	in, err := focus.Load(env.Store, env.Cfg, g.repo, env.Now)
+	in, err := focus.Load(ctx, env.Store, env.Cfg, g.repo, env.Now)
 	if err != nil {
 		return nil, focusTotalError("focus: read the store: "+err.Error(), "check the pg-desk store, then re-run")
 	}
 	g.in = in
 	g.set = focus.Candidates(in)
-	cov, err := focus.ComputeCoverage(env.Store, env.Cfg, env.Now, in.Entities)
+	cov, err := focus.ComputeCoverage(ctx, env.Store, env.Cfg, env.Now, in.Entities)
 	if err != nil {
 		return nil, focusTotalError("focus: "+err.Error(), "check the pg-desk store, then re-run")
 	}
 	g.cov = cov
-	g.watched = focus.LoadWatched(env.Store, env.Cfg)
-	if err := g.reloadPlan(); err != nil {
+	g.watched = focus.LoadWatched(ctx, env.Store, env.Cfg)
+	if err := g.reloadPlan(ctx); err != nil {
 		return nil, err
 	}
-	d, found, err := env.Store.FocusDraftGet()
+	d, found, err := env.Store.FocusDraftGet(ctx)
 	if err != nil {
 		return nil, focusTotalError("focus: read the stored draft: "+err.Error(), "check the pg-desk store, then re-run")
 	}
@@ -67,9 +68,9 @@ func gatherFocus(env *focusEnv) (*focusGather, error) {
 
 // reloadPlan re-reads the addressed period, its plan rows and the unclosed
 // older periods. A lock that committed since the last read shows here.
-func (g *focusGather) reloadPlan() error {
+func (g *focusGather) reloadPlan(ctx context.Context) error {
 	st := g.env.Store
-	p, found, err := st.FocusPeriodGet(g.env.Period.Type, g.env.Period.Key)
+	p, found, err := st.FocusPeriodGet(ctx, g.env.Period.Type, g.env.Period.Key)
 	if err != nil {
 		return focusTotalError("focus: read period: "+err.Error(), "check the pg-desk store, then re-run")
 	}
@@ -77,7 +78,7 @@ func (g *focusGather) reloadPlan() error {
 	g.closed = found && p.ClosedAt != ""
 	g.sel, g.plan = nil, nil
 	if found {
-		rows, err := st.FocusPlanRows(p.ID)
+		rows, err := st.FocusPlanRows(ctx, p.ID)
 		if err != nil {
 			return focusTotalError("focus: read plan rows: "+err.Error(), "check the pg-desk store, then re-run")
 		}
@@ -92,11 +93,11 @@ func (g *focusGather) reloadPlan() error {
 			})
 		}
 	}
-	periods, err := st.FocusPeriods()
+	periods, err := st.FocusPeriods(ctx)
 	if err != nil {
 		return focusTotalError("focus: read periods: "+err.Error(), "check the pg-desk store, then re-run")
 	}
-	all, err := st.FocusRowsAllPeriods()
+	all, err := st.FocusRowsAllPeriods(ctx)
 	if err != nil {
 		return focusTotalError("focus: read plan rows: "+err.Error(), "check the pg-desk store, then re-run")
 	}
@@ -132,8 +133,8 @@ func (g *focusGather) addressedDate() time.Time {
 }
 
 // rank computes the fresh rank under cap.
-func (g *focusGather) rank(cap int) focus.Ranking {
-	return focus.Rank(g.in, g.set, focus.RankOptions{Date: g.addressedDate(), Cap: cap})
+func (g *focusGather) rank(ctx context.Context, cap int) focus.Ranking {
+	return focus.Rank(ctx, g.in, g.set, focus.RankOptions{Date: g.addressedDate(), Cap: cap})
 }
 
 // periodCap is the persisted cap of the addressed period, else the default.

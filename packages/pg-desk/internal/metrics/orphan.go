@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -42,10 +43,10 @@ type WatchedEntitiesFunc func() ([]WatchedEntityCount, error)
 // whose watched column is true, grouped by type and backend and sorted by both.
 // With none watched it returns one issue cell with the empty backend valued 0,
 // so the series exists whenever the store answers.
-func WatchedEntitiesFromStore(st *store.Store) WatchedEntitiesFunc {
+func WatchedEntitiesFromStore(ctx context.Context, st *store.Store) WatchedEntitiesFunc {
 	type key struct{ typ, backend string }
 	return func() ([]WatchedEntityCount, error) {
-		all, err := st.ListEntityFlow()
+		all, err := st.ListEntityFlow(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -96,9 +97,9 @@ func orphanReadTime(e store.Entity) (t time.Time, ok bool, err error) {
 // column is NULL is the empty string. With no orphan it returns the single
 // empty-label series valued 0. An unparseable time fails the scrape rather than
 // reading as 0.
-func OldestOrphanReadAgeFromStore(st *store.Store, cfg *config.Config, now func() time.Time) OutcomeFunc {
+func OldestOrphanReadAgeFromStore(ctx context.Context, st *store.Store, cfg *config.Config, now func() time.Time) OutcomeFunc {
 	return func() ([]OutcomeBackend, error) {
-		orphans, err := changes.OrphanEntities(st, cfg)
+		orphans, err := changes.OrphanEntities(ctx, st, cfg)
 		if err != nil {
 			return nil, err
 		}

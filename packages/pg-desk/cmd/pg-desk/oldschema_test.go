@@ -52,10 +52,10 @@ func storeAtVersion(t *testing.T, kind string) string {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#1", Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
+	if err := s.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#1", Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
-	if err := s.UpsertInterpretation(store.Interpretation{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#1", Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
+	if err := s.UpsertInterpretation(context.Background(), store.Interpretation{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#1", Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
 	}
 	if err := s.Close(); err != nil {
@@ -182,7 +182,7 @@ func TestDefaultRawStoreSeamOpensWithoutTheVersionGate(t *testing.T) {
 		t.Fatalf("deskStoreOpenReadPool refused a version-3 store: %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	if v, err := st.SchemaVersion(); err != nil || v != 3 {
+	if v, err := st.SchemaVersion(context.Background()); err != nil || v != 3 {
 		t.Fatalf("SchemaVersion = %d, %v; want 3", v, err)
 	}
 }

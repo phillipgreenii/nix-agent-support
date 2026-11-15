@@ -306,13 +306,13 @@ var unstampedWarn sync.Once
 // because different facts were committed since is not an error: the newer
 // hydration writes its own row. A handle with no stamp writes NULL and warns
 // once per process, to slog (never to the structured run log).
-func (p *Pipeline) writeInterpretation(row store.Interpretation, hash string) error {
+func (p *Pipeline) writeInterpretation(ctx context.Context, row store.Interpretation, hash string) error {
 	if p.store.InterpStamp() == "" {
 		unstampedWarn.Do(func() {
 			slog.Warn("pg-desk: writing an interpretation through a store handle with no stamp; the row will count as behind (a command forgot pipeline.WithStamp)")
 		})
 	}
-	_, err := p.store.WriteInterpretation(row, store.InterpretationWriteOptions{ExpectedHash: hash})
+	_, err := p.store.WriteInterpretation(ctx, row, store.InterpretationWriteOptions{ExpectedHash: hash})
 	return err
 }
 

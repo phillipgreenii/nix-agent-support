@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"time"
@@ -57,18 +58,18 @@ var recorderNow = func() time.Time { return time.Now().UTC() }
 // degraded call, and is removed on the next successful one). A call failed
 // when err != nil or res.Degraded != "". It is best-effort and never fails
 // the caller: a meta read or write error is dropped.
-func RecordHydration(st *store.Store, entityType, entityID string, res pipeline.EntityChangeResult, err error) {
+func RecordHydration(ctx context.Context, st *store.Store, entityType, entityID string, res pipeline.EntityChangeResult, err error) {
 	failed := err != nil || res.Degraded != ""
-	addInt(st, metaHydrationsPrefix+entityType, 1)
+	addInt(ctx, st, metaHydrationsPrefix+entityType, 1)
 	if failed {
-		addInt(st, metaHydrationFailuresPrefix+entityType, 1)
+		addInt(ctx, st, metaHydrationFailuresPrefix+entityType, 1)
 	}
 	if res.Retries > 0 {
-		addInt(st, metaOCCRetriesPrefix+entityType, int64(res.Retries))
+		addInt(ctx, st, metaOCCRetriesPrefix+entityType, int64(res.Retries))
 	}
 
 	key := metaDegradedPrefix + entityType
-	degraded := readDegraded(st, key)
+	degraded := readDegraded(ctx, st, key)
 	if failed {
 		e := degraded[entityID]
 		if e.Count == 0 {
@@ -82,25 +83,25 @@ func RecordHydration(st *store.Store, entityType, entityID string, res pipeline.
 		return // nothing to write: a clean hydration of a clean entity
 	}
 	if b, merr := json.Marshal(degraded); merr == nil {
-		_ = st.SetMeta(key, string(b))
+		_ = st.SetMeta(ctx, key, string(b))
 	}
 }
 
 // ReadHydrationStats reads one entity type's persisted totals; a missing key
 // reads as zero (or an empty Degraded map).
-func ReadHydrationStats(st *store.Store, entityType string) (HydrationStats, error) {
+func ReadHydrationStats(ctx context.Context, st *store.Store, entityType string) (HydrationStats, error) {
 	var out HydrationStats
 	var err error
-	if out.Hydrations, err = readInt(st, metaHydrationsPrefix+entityType); err != nil {
+	if out.Hydrations, err = readInt(ctx, st, metaHydrationsPrefix+entityType); err != nil {
 		return HydrationStats{}, err
 	}
-	if out.Failures, err = readInt(st, metaHydrationFailuresPrefix+entityType); err != nil {
+	if out.Failures, err = readInt(ctx, st, metaHydrationFailuresPrefix+entityType); err != nil {
 		return HydrationStats{}, err
 	}
-	if out.OCCRetries, err = readInt(st, metaOCCRetriesPrefix+entityType); err != nil {
+	if out.OCCRetries, err = readInt(ctx, st, metaOCCRetriesPrefix+entityType); err != nil {
 		return HydrationStats{}, err
 	}
-	raw, found, err := st.GetMeta(metaDegradedPrefix + entityType)
+	raw, found, err := st.GetMeta(ctx, metaDegradedPrefix+entityType)
 	if err != nil {
 		return HydrationStats{}, err
 	}
@@ -126,8 +127,8 @@ func RepeatedDegraded(stats HydrationStats) map[string]DegradedEntity {
 	return out
 }
 
-func readInt(st *store.Store, key string) (int64, error) {
-	v, found, err := st.GetMeta(key)
+func readInt(ctx context.Context, st *store.Store, key string) (int64, error) {
+	v, found, err := st.GetMeta(ctx, key)
 	if err != nil || !found {
 		return 0, err
 	}
@@ -138,13 +139,13 @@ func readInt(st *store.Store, key string) (int64, error) {
 	return n, nil
 }
 
-func addInt(st *store.Store, key string, delta int64) {
-	_ = st.IncrMeta(key, delta)
+func addInt(ctx context.Context, st *store.Store, key string, delta int64) {
+	_ = st.IncrMeta(ctx, key, delta)
 }
 
-func readDegraded(st *store.Store, key string) map[string]DegradedEntity {
+func readDegraded(ctx context.Context, st *store.Store, key string) map[string]DegradedEntity {
 	out := map[string]DegradedEntity{}
-	if raw, found, err := st.GetMeta(key); err == nil && found {
+	if raw, found, err := st.GetMeta(ctx, key); err == nil && found {
 		if jerr := json.Unmarshal([]byte(raw), &out); jerr != nil || out == nil {
 			out = map[string]DegradedEntity{}
 		}

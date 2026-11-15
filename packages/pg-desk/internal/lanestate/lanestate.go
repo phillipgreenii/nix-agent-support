@@ -1,6 +1,7 @@
 package lanestate
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -168,18 +169,18 @@ func runKey(stage, class string) string { return KeyRunsPrefix + stage + "." + c
 // leaves them, and so the PR's persisted apply-mode residual, untouched. The
 // read-only residual plan an apply run makes afterwards is not a recorded run;
 // it is reported as the Residual of the apply run.
-func Record(st *store.Store, configuredMode string, now time.Time, in RunInput) error {
+func Record(ctx context.Context, st *store.Store, configuredMode string, now time.Time, in RunInput) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
 	if in.SkipReason != "" {
 		// One lock-free UPSERT and nothing else (see RunInput.SkipReason).
-		return st.IncrMeta(skipKey(in.SkipReason), 1)
+		return st.IncrMeta(ctx, skipKey(in.SkipReason), 1)
 	}
 	stamp := now.UTC().Format(time.RFC3339)
 
 	for _, e := range in.Events {
-		if err := st.IncrMeta(runKey(e.Stage, e.Class), 1); err != nil {
+		if err := st.IncrMeta(ctx, runKey(e.Stage, e.Class), 1); err != nil {
 			return err
 		}
 	}
@@ -188,36 +189,36 @@ func Record(st *store.Store, configuredMode string, now time.Time, in RunInput) 
 		if n == 0 {
 			n = 1
 		}
-		if err := st.IncrMeta(decisionKey(Decision{d.Rule, d.Action, d.Outcome, d.Reason}), n); err != nil {
+		if err := st.IncrMeta(ctx, decisionKey(Decision{d.Rule, d.Action, d.Outcome, d.Reason}), n); err != nil {
 			return err
 		}
 	}
 	for stage, ms := range in.Timings.ByStage() {
-		if err := st.IncrMeta(timingKey(stage, timingSumMs), ms); err != nil {
+		if err := st.IncrMeta(ctx, timingKey(stage, timingSumMs), ms); err != nil {
 			return err
 		}
-		if err := st.IncrMeta(timingKey(stage, timingCount), 1); err != nil {
+		if err := st.IncrMeta(ctx, timingKey(stage, timingCount), 1); err != nil {
 			return err
 		}
-		if err := st.SetMeta(timingKey(stage, timingLastMs), strconv.FormatInt(ms, 10)); err != nil {
+		if err := st.SetMeta(ctx, timingKey(stage, timingLastMs), strconv.FormatInt(ms, 10)); err != nil {
 			return err
 		}
 	}
 	if in.LookupItems != nil {
-		if err := st.SetMeta(KeyStateLookupItem, strconv.FormatInt(*in.LookupItems, 10)); err != nil {
+		if err := st.SetMeta(ctx, KeyStateLookupItem, strconv.FormatInt(*in.LookupItems, 10)); err != nil {
 			return err
 		}
 	}
 
 	if in.Mode == configuredMode {
-		if err := recordLaneLevel(st, in.Mode, stamp); err != nil {
+		if err := recordLaneLevel(ctx, st, in.Mode, stamp); err != nil {
 			return err
 		}
-		if err := recordPR(st, in, stamp); err != nil {
+		if err := recordPR(ctx, st, in, stamp); err != nil {
 			return err
 		}
 	}
-	return st.SetMeta(KeyStateLastRunAt, stamp)
+	return st.SetMeta(ctx, KeyStateLastRunAt, stamp)
 }
 
 // recordLaneLevel writes the lane-level mode and flip time for a run whose mode
@@ -225,8 +226,8 @@ func Record(st *store.Store, configuredMode string, now time.Time, in RunInput) 
 // apply that finds the persisted lane mode not yet apply, through an insert
 // that exactly one of several concurrent first runs wins. It is cleared when a
 // recorded run moves the lane out of apply, so a later flip starts a new one.
-func recordLaneLevel(st *store.Store, mode, stamp string) error {
-	prev, found, err := st.GetMeta(KeyStateMode)
+func recordLaneLevel(ctx context.Context, st *store.Store, mode, stamp string) error {
+	prev, found, err := st.GetMeta(ctx, KeyStateMode)
 	if err != nil {
 		return err
 	}
@@ -235,22 +236,22 @@ func recordLaneLevel(st *store.Store, mode, stamp string) error {
 	}
 	switch {
 	case mode == config.PRLaneModeApply && prev != config.PRLaneModeApply:
-		if _, err := st.SetMetaIfAbsent(KeyStateFlipAt, stamp); err != nil {
+		if _, err := st.SetMetaIfAbsent(ctx, KeyStateFlipAt, stamp); err != nil {
 			return err
 		}
 	case mode != config.PRLaneModeApply && prev == config.PRLaneModeApply:
-		if err := st.DeleteMeta(KeyStateFlipAt); err != nil {
+		if err := st.DeleteMeta(ctx, KeyStateFlipAt); err != nil {
 			return err
 		}
 	}
-	return st.SetMeta(KeyStateMode, mode)
+	return st.SetMeta(ctx, KeyStateMode, mode)
 }
 
-func recordPR(st *store.Store, in RunInput, stamp string) error {
+func recordPR(ctx context.Context, st *store.Store, in RunInput, stamp string) error {
 	key := KeyPRPrefix + in.PR
 	var prev PRState
 	hadPrev := false
-	if raw, found, err := st.GetMeta(key); err != nil {
+	if raw, found, err := st.GetMeta(ctx, key); err != nil {
 		return err
 	} else if found {
 		hadPrev = json.Unmarshal([]byte(raw), &prev) == nil
@@ -276,15 +277,15 @@ func recordPR(st *store.Store, in RunInput, stamp string) error {
 	if err != nil {
 		return fmt.Errorf("lanestate: encode pr state: %w", err)
 	}
-	return st.SetMeta(key, string(b))
+	return st.SetMeta(ctx, key, string(b))
 }
 
 // MarkInactive marks the PR inactive and counts it, in a single transaction.
 // It is a store write, not a tracker write, so a run in either mode may call
 // it. It reports whether the entity changed (an absent or already inactive PR
 // changes nothing and counts nothing).
-func MarkInactive(st *store.Store, repo, id string) (bool, error) {
-	return st.MarkEntityInactive(repo, "pr", id, KeyMarkedInactive)
+func MarkInactive(ctx context.Context, st *store.Store, repo, id string) (bool, error) {
+	return st.MarkEntityInactive(ctx, repo, "pr", id, KeyMarkedInactive)
 }
 
 // RunKey identifies one lane-run counter series.
@@ -322,8 +323,8 @@ type StageTiming struct {
 // Read reads the whole lane state with one prefix scan and aggregates it as of
 // now. A corrupt value reads as zero (or is skipped, for a PR record) rather
 // than failing the scrape.
-func Read(st *store.Store, now time.Time) (Snapshot, error) {
-	rows, err := st.ListMetaPrefix(KeyPrefix)
+func Read(ctx context.Context, st *store.Store, now time.Time) (Snapshot, error) {
+	rows, err := st.ListMetaPrefix(ctx, KeyPrefix)
 	if err != nil {
 		return Snapshot{}, err
 	}

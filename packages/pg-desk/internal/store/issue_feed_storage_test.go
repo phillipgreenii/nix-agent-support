@@ -9,7 +9,7 @@ import (
 
 func userVersion(t *testing.T, s *Store) int {
 	t.Helper()
-	v, err := s.SchemaVersion()
+	v, err := s.SchemaVersion(context.Background())
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
@@ -18,7 +18,7 @@ func userVersion(t *testing.T, s *Store) int {
 
 func hasEntityColumn(t *testing.T, s *Store, name string) bool {
 	t.Helper()
-	cols, err := s.tableColumns("entity")
+	cols, err := s.tableColumns(context.Background(), "entity")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func hasEntityColumn(t *testing.T, s *Store, name string) bool {
 
 func hasIngestFailedTable(t *testing.T, s *Store) bool {
 	t.Helper()
-	cols, err := s.tableColumns("ingest_failed")
+	cols, err := s.tableColumns(context.Background(), "ingest_failed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestEnsureIssueFeedStorage_LeavesUserVersionAlone(t *testing.T) {
 	if hasEntityColumn(t, s, "backend") || hasEntityColumn(t, s, "read_ok_at") || hasIngestFailedTable(t, s) {
 		t.Fatal("fixture unexpectedly has the additions")
 	}
-	if err := ensureIssueFeedStorage(s); err != nil {
+	if err := ensureIssueFeedStorage(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
 	if !hasEntityColumn(t, s, "backend") || !hasEntityColumn(t, s, "watched") ||
@@ -104,27 +104,27 @@ func TestEnsureIssueFeedStorage_SecondCallIsNoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, w := "jira-main", true
-	if err := s.SetEntityColumns(clRepo, clType, clID, &b, &w); err != nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, &b, &w); err != nil {
 		t.Fatal(err)
 	}
 	cols := func() int {
-		m, err := s.tableColumns("entity")
+		m, err := s.tableColumns(context.Background(), "entity")
 		if err != nil {
 			t.Fatal(err)
 		}
 		return len(m)
 	}
 	before, v := cols(), userVersion(t, s)
-	if err := ensureIssueFeedStorage(s); err != nil {
+	if err := ensureIssueFeedStorage(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureIssueFeedStorage(s); err != nil {
+	if err := ensureIssueFeedStorage(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
 	if cols() != before || userVersion(t, s) != v {
 		t.Errorf("second ensure changed the schema: columns %d->%d, user_version %d->%d", before, cols(), v, userVersion(t, s))
 	}
-	got, found, err := s.GetEntity(clRepo, clType, clID)
+	got, found, err := s.GetEntity(context.Background(), clRepo, clType, clID)
 	if err != nil || !found || got.Backend != b || got.Watched == nil || !*got.Watched {
 		t.Errorf("ensure lost the column values: (%+v, %v, %v)", got, found, err)
 	}
@@ -148,7 +148,7 @@ func TestOlderBinaryOpenStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkSchema(old); err != nil {
+	if err := checkSchema(context.Background(), old); err != nil {
 		t.Fatalf("ensure-less schema check: %v", err)
 	}
 	if err := old.UpsertEntity(clEntity("a")); err != nil {
@@ -164,7 +164,7 @@ func TestOlderBinaryOpenStillWorks(t *testing.T) {
 	if got := userVersion(t, raw); got != before {
 		t.Errorf("user_version = %d, want %d", got, before)
 	}
-	list, err := raw.ListEntities()
+	list, err := raw.ListEntities(context.Background())
 	if err != nil || len(list) != 1 {
 		t.Fatalf("ListEntities = (%v, %v), want one row", list, err)
 	}
@@ -208,22 +208,22 @@ func TestOpenReadOnly_StoreWithoutIssueFeedStorage(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	list, err := s.ListEntities()
+	list, err := s.ListEntities(context.Background())
 	if err != nil || len(list) != 1 || list[0].Backend != "" || list[0].Watched != nil || list[0].ReadAttemptAt != "" || list[0].ReadOKAt != "" {
 		t.Fatalf("ListEntities = (%+v, %v), want one row with Backend \"\" and Watched nil", list, err)
 	}
-	got, found, err := s.GetEntity(clRepo, clType, clID)
+	got, found, err := s.GetEntity(context.Background(), clRepo, clType, clID)
 	if err != nil || !found || got.Backend != "" || got.Watched != nil {
 		t.Fatalf("GetEntity = (%+v, %v, %v)", got, found, err)
 	}
 	// The failed-ingest reads tolerate the absent table.
-	if n, err := s.CountIngestFailures(""); err != nil || n != 0 {
+	if n, err := s.CountIngestFailures(context.Background(), ""); err != nil || n != 0 {
 		t.Errorf("CountIngestFailures = (%d, %v), want (0, nil)", n, err)
 	}
-	if l, err := s.ListIngestFailures(""); err != nil || len(l) != 0 {
+	if l, err := s.ListIngestFailures(context.Background(), ""); err != nil || len(l) != 0 {
 		t.Errorf("ListIngestFailures = (%v, %v), want empty", l, err)
 	}
-	if _, ok, err := s.OldestIngestFailureAt(); err != nil || ok {
+	if _, ok, err := s.OldestIngestFailureAt(context.Background()); err != nil || ok {
 		t.Errorf("OldestIngestFailureAt ok=%v err=%v, want false, nil", ok, err)
 	}
 	// And the handle really is read-only: nothing was (or can be) added.
@@ -231,19 +231,19 @@ func TestOpenReadOnly_StoreWithoutIssueFeedStorage(t *testing.T) {
 		t.Error("read-only open added storage")
 	}
 	b := "x"
-	if err := s.SetEntityColumns(clRepo, clType, clID, &b, nil); err == nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, &b, nil); err == nil {
 		t.Error("SetEntityColumns succeeded on a read-only handle")
 	}
 }
 
 func TestSetEntityColumns(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
+	if _, err := s.WriteEntityWithLog(context.Background(), clEntity("a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	read := func() Entity {
 		t.Helper()
-		e, found, err := s.GetEntity(clRepo, clType, clID)
+		e, found, err := s.GetEntity(context.Background(), clRepo, clType, clID)
 		if err != nil || !found {
 			t.Fatalf("GetEntity = (%v, %v)", found, err)
 		}
@@ -256,7 +256,7 @@ func TestSetEntityColumns(t *testing.T) {
 	logBefore := changeCount(t, s)
 
 	b, w := "jira-main", true
-	if err := s.SetEntityColumns(clRepo, clType, clID, &b, &w); err != nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, &b, &w); err != nil {
 		t.Fatal(err)
 	}
 	got := read()
@@ -273,7 +273,7 @@ func TestSetEntityColumns(t *testing.T) {
 
 	// Only non-nil arguments change.
 	f := false
-	if err := s.SetEntityColumns(clRepo, clType, clID, nil, &f); err != nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, nil, &f); err != nil {
 		t.Fatal(err)
 	}
 	got = read()
@@ -281,7 +281,7 @@ func TestSetEntityColumns(t *testing.T) {
 		t.Errorf("watched-only write: Backend=%q Watched=%v, want %q and false", got.Backend, got.Watched, b)
 	}
 	other := "jira-other"
-	if err := s.SetEntityColumns(clRepo, clType, clID, &other, nil); err != nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, &other, nil); err != nil {
 		t.Fatal(err)
 	}
 	got = read()
@@ -291,13 +291,13 @@ func TestSetEntityColumns(t *testing.T) {
 
 	// A pointer to "" writes NULL; both nil is a no-op.
 	empty := ""
-	if err := s.SetEntityColumns(clRepo, clType, clID, &empty, nil); err != nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, &empty, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got = read(); got.Backend != "" || got.Watched == nil {
 		t.Errorf("empty-backend write: Backend=%q Watched=%v, want \"\" and unchanged", got.Backend, got.Watched)
 	}
-	if err := s.SetEntityColumns(clRepo, clType, clID, nil, nil); err != nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, nil, nil); err != nil {
 		t.Errorf("both nil: %v, want nil", err)
 	}
 	var isNull bool
@@ -312,7 +312,7 @@ func TestSetEntityColumns(t *testing.T) {
 func TestSetEntityColumns_AbsentRow(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	b := "jira-main"
-	if err := s.SetEntityColumns(clRepo, clType, "nope", &b, nil); !errors.Is(err, ErrNoEntity) {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, "nope", &b, nil); !errors.Is(err, ErrNoEntity) {
 		t.Fatalf("err = %v, want ErrNoEntity", err)
 	}
 }
@@ -325,10 +325,10 @@ func TestEntityReads_IssueFeedColumnsOnVersion1(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, w := "beads", true
-	if err := s.SetEntityColumns(clRepo, clType, clID, &b, &w); err != nil {
+	if err := s.SetEntityColumns(context.Background(), clRepo, clType, clID, &b, &w); err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.ListEntities()
+	list, err := s.ListEntities(context.Background())
 	if err != nil || len(list) != 1 || list[0].Backend != b || list[0].Watched == nil || !*list[0].Watched {
 		t.Fatalf("ListEntities = (%+v, %v)", list, err)
 	}
@@ -339,12 +339,12 @@ func TestEntityReads_IssueFeedColumnsOnVersion1(t *testing.T) {
 // is appended.
 func TestSetEntityReadTimes(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
+	if _, err := s.WriteEntityWithLog(context.Background(), clEntity("a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	read := func() Entity {
 		t.Helper()
-		e, found, err := s.GetEntity(clRepo, clType, clID)
+		e, found, err := s.GetEntity(context.Background(), clRepo, clType, clID)
 		if err != nil || !found {
 			t.Fatalf("GetEntity = (%v, %v)", found, err)
 		}
@@ -357,7 +357,7 @@ func TestSetEntityReadTimes(t *testing.T) {
 	logBefore := changeCount(t, s)
 
 	attempt1, ok1 := "2026-10-28T01:00:00.123456789Z", "2026-10-28T01:00:01Z"
-	if err := s.SetEntityReadTimes(clRepo, clType, clID, &attempt1, &ok1); err != nil {
+	if err := s.SetEntityReadTimes(context.Background(), clRepo, clType, clID, &attempt1, &ok1); err != nil {
 		t.Fatal(err)
 	}
 	got := read()
@@ -367,7 +367,7 @@ func TestSetEntityReadTimes(t *testing.T) {
 
 	// attemptAt only leaves read_ok_at as it was.
 	attempt2 := "2026-10-28T02:00:00Z"
-	if err := s.SetEntityReadTimes(clRepo, clType, clID, &attempt2, nil); err != nil {
+	if err := s.SetEntityReadTimes(context.Background(), clRepo, clType, clID, &attempt2, nil); err != nil {
 		t.Fatal(err)
 	}
 	got = read()
@@ -376,7 +376,7 @@ func TestSetEntityReadTimes(t *testing.T) {
 	}
 	// okAt only leaves read_attempt_at as it was.
 	ok2 := "2026-10-28T02:00:05Z"
-	if err := s.SetEntityReadTimes(clRepo, clType, clID, nil, &ok2); err != nil {
+	if err := s.SetEntityReadTimes(context.Background(), clRepo, clType, clID, nil, &ok2); err != nil {
 		t.Fatal(err)
 	}
 	got = read()
@@ -384,7 +384,7 @@ func TestSetEntityReadTimes(t *testing.T) {
 		t.Errorf("ok-only write: ReadAttemptAt=%q ReadOKAt=%q, want %q and %q", got.ReadAttemptAt, got.ReadOKAt, attempt2, ok2)
 	}
 	// Both nil is a no-op.
-	if err := s.SetEntityReadTimes(clRepo, clType, clID, nil, nil); err != nil {
+	if err := s.SetEntityReadTimes(context.Background(), clRepo, clType, clID, nil, nil); err != nil {
 		t.Errorf("both nil: %v, want nil", err)
 	}
 
@@ -398,7 +398,7 @@ func TestSetEntityReadTimes(t *testing.T) {
 	}
 
 	// The list read returns the same values.
-	list, err := s.ListEntities()
+	list, err := s.ListEntities(context.Background())
 	if err != nil || len(list) != 1 || list[0].ReadAttemptAt != attempt2 || list[0].ReadOKAt != ok2 {
 		t.Fatalf("ListEntities = (%+v, %v)", list, err)
 	}
@@ -407,7 +407,7 @@ func TestSetEntityReadTimes(t *testing.T) {
 func TestSetEntityReadTimes_AbsentRow(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	at := "2026-10-28T01:00:00Z"
-	if err := s.SetEntityReadTimes(clRepo, clType, "nope", &at, nil); !errors.Is(err, ErrNoEntity) {
+	if err := s.SetEntityReadTimes(context.Background(), clRepo, clType, "nope", &at, nil); !errors.Is(err, ErrNoEntity) {
 		t.Fatalf("err = %v, want ErrNoEntity", err)
 	}
 }
@@ -442,7 +442,7 @@ func TestEnsureIssueFeedStorage_AddsReadTimeColumnsOnly(t *testing.T) {
 	if got := userVersion(t, s); got != before {
 		t.Errorf("user_version = %d, want %d", got, before)
 	}
-	if err := ensureIssueFeedStorage(s); err != nil {
+	if err := ensureIssueFeedStorage(context.Background(), s); err != nil {
 		t.Errorf("second ensure: %v", err)
 	}
 }

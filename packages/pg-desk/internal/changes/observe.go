@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"sort"
 	"time"
 
@@ -69,23 +70,23 @@ type Flow struct {
 // sweep bound D used for the due backlog of the types that still have an age
 // sweep. The issue type's Due is its pending hydrations: the watched entities
 // not yet hydrated plus the failed-ingest entries (see DueBacklog).
-func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error) {
-	version, err := st.SchemaVersion()
+func Observe(ctx context.Context, st *store.Store, now time.Time, maxAge time.Duration) (Flow, error) {
+	version, err := st.SchemaVersion(ctx)
 	if err != nil {
 		return Flow{}, err
 	}
 	if version < store.NewSchemaVersion {
 		return Flow{}, nil
 	}
-	entities, err := st.ListEntityFlow()
+	entities, err := st.ListEntityFlow(ctx)
 	if err != nil {
 		return Flow{}, err
 	}
-	consumers, err := st.ListConsumers()
+	consumers, err := st.ListConsumers(ctx)
 	if err != nil {
 		return Flow{}, err
 	}
-	failures, err := st.ListIngestFailures("")
+	failures, err := st.ListIngestFailures(ctx, "")
 	if err != nil {
 		return Flow{}, err
 	}
@@ -137,7 +138,7 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 		return a.Seq < b.Seq
 	})
 	maxSeq := map[string]int64{}
-	kinds, err := st.ChangeKindCountsAll()
+	kinds, err := st.ChangeKindCountsAll(ctx)
 	if err != nil {
 		return Flow{}, err
 	}
@@ -146,7 +147,7 @@ func Observe(st *store.Store, now time.Time, maxAge time.Duration) (Flow, error)
 		counts, top := ks.Counts, ks.MaxSeq
 		maxSeq[t] = top
 
-		stats, err := ReadHydrationStats(st, t)
+		stats, err := ReadHydrationStats(ctx, st, t)
 		if err != nil {
 			return Flow{}, err
 		}

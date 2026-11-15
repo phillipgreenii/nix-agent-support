@@ -96,6 +96,8 @@ func draftToStore(period focusPeriod, doc focus.DraftDoc, cap int, madeAt time.T
 }
 
 func runFocusShow(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+
 	capFlag, capGiven, err := focusCapFlag(cmd)
 	if err != nil {
 		return err
@@ -107,7 +109,7 @@ func runFocusShow(cmd *cobra.Command) error {
 		return err
 	}
 	defer env.Close()
-	g, err := gatherFocus(env)
+	g, err := gatherFocus(ctx, env)
 	if err != nil {
 		return err
 	}
@@ -143,7 +145,7 @@ func runFocusShow(cmd *cobra.Command) error {
 				"drop --cap, or run replan --cap N to recompute")
 		}
 		madeAt, _ := time.Parse(time.RFC3339, g.draft.MadeAt)
-		fresh := g.rank(g.draft.Cap)
+		fresh := g.rank(ctx, g.draft.Cap)
 		line := fmt.Sprintf("DRAFT (stored; reply to lock it in), draft made %s ago", ageText(maxDuration(env.Now.Sub(madeAt), 0)))
 		s := g.buildScreen(screenInput{
 			verb: "show", mode: focusModeDraft, stored: true, draftLine: line, fresh: fresh,
@@ -162,7 +164,7 @@ func runFocusShow(cmd *cobra.Command) error {
 		if capGiven {
 			cap = capFlag
 		}
-		fresh := g.rank(cap)
+		fresh := g.rank(ctx, cap)
 		s := g.buildScreen(screenInput{
 			verb: "show", mode: focusModePlan, draftLine: planDraftLine(g), fresh: fresh,
 			cap: cap, showAll: all, notices: notices,
@@ -175,9 +177,9 @@ func runFocusShow(cmd *cobra.Command) error {
 	if capGiven {
 		cap = capFlag
 	}
-	fresh := g.rank(cap)
+	fresh := g.rank(ctx, cap)
 	newDoc := focus.NewInitialDraft(fresh, cap, g.cov.State)
-	stale := g.hasDraft && isStaleDraft(g.draft, env.Period.Key, env.PeriodClosedFunc())
+	stale := g.hasDraft && isStaleDraft(g.draft, env.Period.Key, env.PeriodClosedFunc(ctx))
 	free := !g.hasDraft || stale || (applicable && !readable)
 	canStore := !noStore && !g.closed && free && !g.totalFailure()
 	stored := false
@@ -188,7 +190,7 @@ func runFocusShow(cmd *cobra.Command) error {
 			return focusTotalError("focus: encode draft: "+err.Error(), "report this as a pg-desk bug")
 		}
 		if applicable && !readable {
-			planNow, err := env.Store.FocusDraftReplace(fd)
+			planNow, err := env.Store.FocusDraftReplace(ctx, fd)
 			if err != nil {
 				return focusTotalError("focus: store draft: "+err.Error(), "check the pg-desk store, then re-run")
 			}
@@ -197,19 +199,19 @@ func runFocusShow(cmd *cobra.Command) error {
 				notices = replaceNotice(notices, "NOTICE stored draft unreadable; ignored", "NOTICE stored draft unreadable; replaced")
 			}
 		} else {
-			stored, err = env.Store.FocusDraftStore(fd, env.Period.Key)
+			stored, err = env.Store.FocusDraftStore(ctx, fd, env.Period.Key)
 			if err != nil {
 				return focusTotalError("focus: store draft: "+err.Error(), "check the pg-desk store, then re-run")
 			}
 		}
 		if !stored {
 			// A plan may have appeared between the compute and the insert.
-			if err := g.reloadPlan(); err != nil {
+			if err := g.reloadPlan(ctx); err != nil {
 				return err
 			}
 			if g.hasPlan() {
 				pcap := g.periodCap()
-				pfresh := g.rank(pcap)
+				pfresh := g.rank(ctx, pcap)
 				s := g.buildScreen(screenInput{
 					verb: "show", mode: focusModePlan, draftLine: planDraftLine(g), fresh: pfresh,
 					cap: pcap, showAll: all, notices: notices,

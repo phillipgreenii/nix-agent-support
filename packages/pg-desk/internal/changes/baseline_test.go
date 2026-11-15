@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -13,7 +14,7 @@ import (
 // is absent.
 func watchedOf(t *testing.T, st *store.Store, id string) (watched, found bool) {
 	t.Helper()
-	row, ok, err := st.GetEntity("o/r", "issue", id)
+	row, ok, err := st.GetEntity(context.Background(), "o/r", "issue", id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +23,7 @@ func watchedOf(t *testing.T, st *store.Store, id string) (watched, found bool) {
 
 func markerDone(t *testing.T, st *store.Store, query string) bool {
 	t.Helper()
-	b, err := ReadBaseline(st, query)
+	b, err := ReadBaseline(context.Background(), st, query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestBaselineFirstRunIsSilentMarksAllAndWritesMarker(t *testing.T) {
 			t.Errorf("%s hydrated with origin %q", id, h.origins[id])
 		}
 	}
-	b, err := ReadBaseline(st, "open")
+	b, err := ReadBaseline(context.Background(), st, "open")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,8 +217,8 @@ func TestBaselineDeletedMarkerRunsASilentBaselineAgain(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	first, _ := ReadBaseline(st, "open")
-	if err := st.DeleteMeta(MetaBaselinePrefix + "open"); err != nil {
+	first, _ := ReadBaseline(context.Background(), st, "open")
+	if err := st.DeleteMeta(context.Background(), MetaBaselinePrefix+"open"); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing("bd-1=F1", "bd-2=F2")}
@@ -232,7 +233,7 @@ func TestBaselineDeletedMarkerRunsASilentBaselineAgain(t *testing.T) {
 	if w, found := watchedOf(t, st, "bd-2"); !found || !w {
 		t.Errorf("bd-2 found=%v watched=%v", found, w)
 	}
-	b, _ := ReadBaseline(st, "open")
+	b, _ := ReadBaseline(context.Background(), st, "open")
 	if !b.Done || !b.At.After(first.At) {
 		t.Errorf("marker not rewritten: %+v then %+v", first, b)
 	}
@@ -272,7 +273,7 @@ func TestBaselineMemberNeverAppendsAddedAtALaterPoll(t *testing.T) {
 // owned by the baseline this poll: it is hydrated silently.
 func TestBaselineMemberAlsoListedByABaselinedQueryStaysSilent(t *testing.T) {
 	e, st, _ := newUnbaselinedEngine(t, "open", "late")
-	if err := st.SetMeta(MetaBaselinePrefix+"open", "2026-09-30T00:00:00Z"); err != nil {
+	if err := st.SetMeta(context.Background(), MetaBaselinePrefix+"open", "2026-09-30T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = queryLister{
@@ -330,7 +331,7 @@ func TestBaselineFailedListingWritesNothing(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := ReadBaseline(st, "other")
+	b, _ := ReadBaseline(context.Background(), st, "other")
 	if b.Done || b.HasOpenSince {
 		t.Errorf("failed query has baseline state %+v", b)
 	}
@@ -341,20 +342,20 @@ func TestBaselineFailedListingWritesNothing(t *testing.T) {
 
 func TestReadBaselineAbsentAndUnparseable(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	b, err := ReadBaseline(st, "q")
+	b, err := ReadBaseline(context.Background(), st, "q")
 	if err != nil || b.Done || b.HasOpenSince || !b.At.IsZero() || !b.OpenSince.IsZero() {
 		t.Fatalf("absent = %+v, %v", b, err)
 	}
-	if err := st.SetMeta(MetaBaselinePrefix+"q", "not a time"); err != nil {
+	if err := st.SetMeta(context.Background(), MetaBaselinePrefix+"q", "not a time"); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := ReadBaseline(st, "q"); b.Done {
+	if b, _ := ReadBaseline(context.Background(), st, "q"); b.Done {
 		t.Errorf("unparseable marker read as done: %+v", b)
 	}
-	if err := st.SetMeta(MetaBaselineOpenPrefix+"q", "2026-10-01T10:00:00Z"); err != nil {
+	if err := st.SetMeta(context.Background(), MetaBaselineOpenPrefix+"q", "2026-10-01T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	b, _ = ReadBaseline(st, "q")
+	b, _ = ReadBaseline(context.Background(), st, "q")
 	if !b.HasOpenSince || b.Done || b.OpenSince.Hour() != 10 {
 		t.Errorf("open only = %+v", b)
 	}

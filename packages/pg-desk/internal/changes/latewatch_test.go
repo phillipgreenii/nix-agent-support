@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -15,7 +16,7 @@ import (
 func seedKnown(t *testing.T, st *store.Store, id, listFP string) {
 	t.Helper()
 	fp := listFP
-	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 		0, "2026-10-01T11:59:00Z", true, &fp, []string{"reconcile"}, "seed", "2026-10-01T11:59:00Z"); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestLateWatchCutByBudgetLeavesWatchedNullAndIsRetried(t *testing.T) {
 	if len(fresh(env.Records)) != 1 || fresh(env.Records)[0].ID != "bd-2" {
 		t.Fatalf("tick 1 records = %+v", fresh(env.Records))
 	}
-	row, _, _ := st.GetEntity("o/r", "issue", "bd-1")
+	row, _, _ := st.GetEntity(context.Background(), "o/r", "issue", "bd-1")
 	if row.Watched != nil || row.Version != 1 {
 		t.Fatalf("a cut late watch wrote: watched=%v version=%d", row.Watched, row.Version)
 	}
@@ -187,13 +188,13 @@ func TestLateWatchFailedHydrationLeavesWatchedNull(t *testing.T) {
 // listed only by a query still in a baseline run is left to the baseline.
 func TestLateWatchNotSelectedOutsideABaselinedQuery(t *testing.T) {
 	e, st, _ := newUnbaselinedEngine(t, "open", "done")
-	if err := st.SetMeta(MetaBaselinePrefix+"done", "2026-09-30T00:00:00Z"); err != nil {
+	if err := st.SetMeta(context.Background(), MetaBaselinePrefix+"done", "2026-09-30T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	seedKnown(t, st, "bd-1", "F1")
 	seedKnown(t, st, "bd-2", "F1")
 
-	got, err := e.diffListed("issue", []queryRun{
+	got, err := e.diffListed(context.Background(), "issue", []queryRun{
 		{query: "open", res: listing("bd-1=F1")},
 		{query: "done", res: listing("bd-2=F1")},
 	})
@@ -215,7 +216,7 @@ func TestLateWatchUnwatchedHeldEntityIsNeitherDiffedNorEmitted(t *testing.T) {
 	seedKnown(t, st, "bd-9", "F1")
 	e.Lister = fakeLister{res: listing("bd-1=F1")}
 	base := len(historyOf(t, st, "bd-9"))
-	got, err := e.diffListed("issue", []queryRun{{query: "open", res: listing("bd-1=F1")}})
+	got, err := e.diffListed(context.Background(), "issue", []queryRun{{query: "open", res: listing("bd-1=F1")}})
 	if err != nil || !reflect.DeepEqual(idsOf(got), []string{"bd-1"}) {
 		t.Errorf("diffListed = %v, %v; want only the listed bd-1", idsOf(got), err)
 	}
@@ -261,7 +262,7 @@ func TestLateWatchObservedCloseAppendsClosedThenClearsTheFlag(t *testing.T) {
 	if len(fresh(env.Records)) != 1 || !reflect.DeepEqual(fresh(env.Records)[0].Kinds, []string{"closed"}) {
 		t.Fatalf("records = %+v, want the closed row delivered", fresh(env.Records))
 	}
-	row, found, err := st.GetEntity("o/r", "issue", "bd-1")
+	row, found, err := st.GetEntity(context.Background(), "o/r", "issue", "bd-1")
 	if err != nil || !found {
 		t.Fatalf("entity: found=%v err=%v", found, err)
 	}
@@ -281,13 +282,13 @@ func TestDeactivateClearsTheFlagAfterTheRemovedRow(t *testing.T) {
 	e, st, _ := newListEngine(t, "open")
 	seedKnown(t, st, "bd-1", "F1")
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "bd-1", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.deactivate("issue", "bd-1", []string{"removed"}); err != nil {
+	if err := e.deactivate(context.Background(), "issue", "bd-1", []string{"removed"}); err != nil {
 		t.Fatal(err)
 	}
-	row, _, _ := st.GetEntity("o/r", "issue", "bd-1")
+	row, _, _ := st.GetEntity(context.Background(), "o/r", "issue", "bd-1")
 	if !row.Inactive || row.Watched == nil || *row.Watched {
 		t.Errorf("inactive=%v watched=%v, want inactive and a stated false", row.Inactive, row.Watched)
 	}
@@ -305,13 +306,13 @@ func TestDeactivateLeavesTheFlagOfAnOwningBackendEntity(t *testing.T) {
 	seedKnown(t, st, "PROJ-1", "F1")
 	yes := true
 	backend := "jira-a"
-	if err := st.SetEntityColumns("o/r", "issue", "PROJ-1", &backend, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "PROJ-1", &backend, &yes); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.deactivate("issue", "PROJ-1", nil); err != nil {
+	if err := e.deactivate(context.Background(), "issue", "PROJ-1", nil); err != nil {
 		t.Fatal(err)
 	}
-	row, _, _ := st.GetEntity("o/r", "issue", "PROJ-1")
+	row, _, _ := st.GetEntity(context.Background(), "o/r", "issue", "PROJ-1")
 	if !row.Inactive || row.Watched == nil || !*row.Watched {
 		t.Errorf("inactive=%v watched=%v, want inactive with the feed path's flag untouched", row.Inactive, row.Watched)
 	}

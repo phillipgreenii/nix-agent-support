@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,7 +29,7 @@ func link(t *testing.T, st *store.Store, fromType, fromID, toType, toID, relatio
 	t.Helper()
 	// ReplaceDerivedXrefs replaces ALL derived links leaving the entity, so
 	// keep the ones already seeded.
-	existing, err := st.ListXrefLinksFrom(testRepo, fromType, fromID)
+	existing, err := st.ListXrefLinksFrom(context.Background(), testRepo, fromType, fromID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +44,7 @@ func link(t *testing.T, st *store.Store, fromType, fromID, toType, toID, relatio
 		Relation: relation, Origin: "derived:test", Evidence: "test",
 		FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
 	})
-	if err := st.ReplaceDerivedXrefs(testRepo, fromType, fromID, keep); err != nil {
+	if err := st.ReplaceDerivedXrefs(context.Background(), testRepo, fromType, fromID, keep); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -51,18 +52,20 @@ func link(t *testing.T, st *store.Store, fromType, fromID, toType, toID, relatio
 // fakeStacks is a StackSource over a fixed PR-to-root map.
 type fakeStacks map[string]string
 
-func (f fakeStacks) StackRoot(_, id string) (string, bool, error) {
+func (f fakeStacks) StackRoot(_ context.Context, _, id string) (string, bool, error) {
 	r, ok := f[id]
 	return r, ok, nil
 }
 
 type failingStacks struct{ err error }
 
-func (f failingStacks) StackRoot(string, string) (string, bool, error) { return "", false, f.err }
+func (f failingStacks) StackRoot(context.Context, string, string) (string, bool, error) {
+	return "", false, f.err
+}
 
 func evaluateWith(t *testing.T, r Reader, stacks StackSource) Result {
 	t.Helper()
-	res, err := Evaluate(Inputs{Store: r, Repo: testRepo, Config: baseConfig(), Clock: testClock(), Stacks: stacks})
+	res, err := Evaluate(context.Background(), Inputs{Store: r, Repo: testRepo, Config: baseConfig(), Clock: testClock(), Stacks: stacks})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -262,7 +265,7 @@ func TestExternalDependsOnLinkGroupsPRsWithNoSharedBranch(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putStackedPR(t, st, 4, "open", "feat-d", "main")
 	putStackedPR(t, st, 7, "open", "feat-g", "main")
-	if err := st.AddExternalXref(store.XrefLink{
+	if err := st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: "pr", FromID: pid(7), ToType: "pr", ToID: pid(4),
 		Relation: "depends_on", Actor: "alice", ActedAt: "2026-10-06T10:00:00Z",
 		FirstSeen: "2026-10-06T10:00:00Z", LastConfirmed: "2026-10-06T10:00:00Z",
@@ -404,7 +407,7 @@ func TestSuppressedEntitiesDoNotFormGroupsOrCountTowardSize(t *testing.T) {
 	teamPR(t, st, 2)
 	link(t, st, "pr", pid(1), "issue", "ABC-1", "jira")
 	link(t, st, "pr", pid(2), "issue", "ABC-1", "jira")
-	if err := st.SetAnnotation(store.KVAnnotation{Repo: testRepo, EntityType: "pr", EntityID: pid(2), Key: store.KeySuppress("attention"), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
+	if err := st.SetAnnotation(context.Background(), store.KVAnnotation{Repo: testRepo, EntityType: "pr", EntityID: pid(2), Key: store.KeySuppress("attention"), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	res := evaluate(t, st, baseConfig())
@@ -418,7 +421,7 @@ func TestGroupReadErrorsAreErrors(t *testing.T) {
 	t.Run("stack source", func(t *testing.T) {
 		st := store.OpenNewSchemaForTest(t)
 		teamPR(t, st, 1)
-		_, err := Evaluate(Inputs{Store: st, Repo: testRepo, Config: baseConfig(), Clock: testClock(), Stacks: failingStacks{err: boom}})
+		_, err := Evaluate(context.Background(), Inputs{Store: st, Repo: testRepo, Config: baseConfig(), Clock: testClock(), Stacks: failingStacks{err: boom}})
 		if !errors.Is(err, boom) {
 			t.Errorf("err = %v, want the stack source error", err)
 		}
@@ -426,7 +429,7 @@ func TestGroupReadErrorsAreErrors(t *testing.T) {
 	t.Run("xref read", func(t *testing.T) {
 		st := store.OpenNewSchemaForTest(t)
 		teamPR(t, st, 1)
-		_, err := Evaluate(Inputs{Store: xrefFailingReader{Reader: st, err: boom}, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
+		_, err := Evaluate(context.Background(), Inputs{Store: xrefFailingReader{Reader: st, err: boom}, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
 		if !errors.Is(err, boom) {
 			t.Errorf("err = %v, want the xref read error, never an ungrouped result", err)
 		}
@@ -438,7 +441,7 @@ type xrefFailingReader struct {
 	err error
 }
 
-func (x xrefFailingReader) ListXrefLinksFrom(string, string, string) ([]store.XrefLink, error) {
+func (x xrefFailingReader) ListXrefLinksFrom(context.Context, string, string, string) ([]store.XrefLink, error) {
 	return nil, x.err
 }
 
@@ -448,13 +451,13 @@ func TestOrderingTiesConfig(t *testing.T) {
 	for name, ties := range map[string]string{"unset": "", "the documented default": config.AttentionTiesDefault} {
 		cfg := baseConfig()
 		cfg.Attention.Ordering.Ties = ties
-		if _, err := Evaluate(Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: testClock()}); err != nil {
+		if _, err := Evaluate(context.Background(), Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: testClock()}); err != nil {
 			t.Errorf("%s: err = %v, want accepted", name, err)
 		}
 	}
 	cfg := baseConfig()
 	cfg.Attention.Ordering.Ties = "entity id first"
-	_, err := Evaluate(Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: testClock()})
+	_, err := Evaluate(context.Background(), Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: testClock()})
 	if err == nil || !strings.Contains(err.Error(), "attention.ordering.ties") {
 		t.Errorf("err = %v, want an error naming attention.ordering.ties for an unimplemented tie rule", err)
 	}

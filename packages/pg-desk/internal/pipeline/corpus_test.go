@@ -71,7 +71,7 @@ func mustFixtures(t *testing.T) []corpus.Fixture {
 
 func renderStored(t *testing.T, st *store.Store, fx corpus.Fixture) []byte {
 	t.Helper()
-	row, found, err := st.GetInterpretation(corpus.Repo, fx.Type, fx.ID)
+	row, found, err := st.GetInterpretation(context.Background(), corpus.Repo, fx.Type, fx.ID)
 	if err != nil || !found {
 		t.Fatalf("%s: interpretation row found=%v err=%v", fx.Name, found, err)
 	}
@@ -125,7 +125,7 @@ func TestCorpusRowGoldens_RunInterpretOnly(t *testing.T) {
 		}
 		t.Run(fx.Name, func(t *testing.T) {
 			st := store.OpenNewSchemaForTest(t)
-			if err := st.UpsertEntityForTest(store.Entity{
+			if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 				Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID,
 				Facts: string(fx.Payload), AsOf: corpusAsOf, ContentHash: "seed",
 			}); err != nil {
@@ -162,7 +162,7 @@ func TestCorpusCoversEveryReasonCode(t *testing.T) {
 			if _, err := p.RunEntityChange(context.Background(), "pr", fx.ID, gather.ChangeAdded, EntityChangeOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			row, _, _ := st.GetInterpretation(corpus.Repo, "pr", fx.ID)
+			row, _, _ := st.GetInterpretation(context.Background(), corpus.Repo, "pr", fx.ID)
 			var appr struct {
 				WaitingOn string `json:"waiting_on"`
 				Reason    string `json:"reason"`
@@ -193,7 +193,7 @@ func TestCorpusKeepsLegacyWaitingOnMe(t *testing.T) {
 	if _, err := p.RunEntityChange(context.Background(), "pr", fx.ID, gather.ChangeAdded, EntityChangeOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	row, _, _ := st.GetInterpretation(corpus.Repo, "pr", fx.ID)
+	row, _, _ := st.GetInterpretation(context.Background(), corpus.Repo, "pr", fx.ID)
 	if !strings.Contains(row.Approvals, `"waiting_on_me":true`) {
 		t.Errorf("approvals = %s, want waiting_on_me true for the Deps fixture", row.Approvals)
 	}

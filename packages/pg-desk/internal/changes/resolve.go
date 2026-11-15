@@ -33,7 +33,7 @@ var ErrAmbiguousBackend = errors.New("changes: issue id is served by queries of 
 // to cfg.OwningInstanceForID, which gives the single owning instance with
 // owning=true when the id matches ticket_patterns; otherwise the answer is "",
 // false, nil and the caller keeps today's unpinned read.
-func ResolveIssueBackend(cfg *config.Config, st *store.Store, id string) (instance string, owning bool, err error) {
+func ResolveIssueBackend(ctx context.Context, cfg *config.Config, st *store.Store, id string) (instance string, owning bool, err error) {
 	if cfg == nil || st == nil {
 		return "", false, errors.New("changes: resolve issue backend: config and store are required")
 	}
@@ -41,7 +41,7 @@ func ResolveIssueBackend(cfg *config.Config, st *store.Store, id string) (instan
 	if len(cfg.Repos) > 0 {
 		repo = cfg.Repos[0].Remote
 	}
-	row, found, err := st.GetEntity(repo, issueEntityType, id)
+	row, found, err := st.GetEntity(ctx, repo, issueEntityType, id)
 	if err != nil {
 		return "", false, fmt.Errorf("changes: resolve issue backend %s: %w", id, err)
 	}
@@ -55,7 +55,7 @@ func ResolveIssueBackend(cfg *config.Config, st *store.Store, id string) (instan
 		if !ok || b.Instance == "" {
 			continue
 		}
-		if loadWatchSet(st, issueEntityType, q)[id] {
+		if loadWatchSet(ctx, st, issueEntityType, q)[id] {
 			held[b.Instance] = true
 		}
 	}

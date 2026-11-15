@@ -40,7 +40,7 @@ func (e *Engine) rehydrateDependants(ctx context.Context, opts Options, st *poll
 	}
 	window := e.Cfg.ThreadActiveWindow()
 	now := e.now()
-	index, err := dependency.NewIssueDependents(e.Store, func(row store.Entity) bool {
+	index, err := dependency.NewIssueDependents(ctx, e.Store, func(row store.Entity) bool {
 		return sourceTerminalRow(row, now, window)
 	})
 	if err != nil {
@@ -61,7 +61,7 @@ func (e *Engine) rehydrateDependants(ctx context.Context, opts Options, st *poll
 			if herr, done := st.hydrated[id]; done && herr == nil {
 				continue // read fresh in this poll
 			}
-			row, found, gerr := e.Store.GetEntity(e.repo(), issueEntityType, id)
+			row, found, gerr := e.Store.GetEntity(ctx, e.repo(), issueEntityType, id)
 			if gerr != nil {
 				return gerr
 			}

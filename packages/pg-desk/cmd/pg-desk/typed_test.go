@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -84,7 +85,7 @@ func TestRequireNewSchemaForTypedVerbRefusesOldSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = old.Close() }()
-	err = requireNewSchemaForTypedVerb(old)
+	err = requireNewSchemaForTypedVerb(context.Background(), old)
 	if !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("err = %v, want it to wrap store.ErrOldSchema", err)
 	}
@@ -97,7 +98,7 @@ func TestRequireNewSchemaForTypedVerbRefusesOldSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cut.Close() }()
-	if err := requireNewSchemaForTypedVerb(cut); err != nil {
+	if err := requireNewSchemaForTypedVerb(context.Background(), cut); err != nil {
 		t.Errorf("new-schema store refused: %v", err)
 	}
 }

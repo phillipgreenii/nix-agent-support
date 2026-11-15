@@ -191,10 +191,10 @@ func (e *Engine) feedStep(ctx context.Context, entityType string, inst feedInsta
 		// A dropped key is a gap for the sole detector: record it (never
 		// deleted by the poll), reset the marker and re-read ONCE with reset
 		// true. The instance is degraded for THIS poll only.
-		if err := e.Store.SetMeta(MetaFeedCursorExpiredPrefix+inst.name, e.now().UTC().Format(time.RFC3339)); err != nil {
+		if err := e.Store.SetMeta(ctx, MetaFeedCursorExpiredPrefix+inst.name, e.now().UTC().Format(time.RFC3339)); err != nil {
 			return o, fmt.Errorf("changes: record feed cursor expiry of %s: %w", inst.name, err)
 		}
-		if err := e.Store.ResetFeedMarker(inst.name); err != nil {
+		if err := e.Store.ResetFeedMarker(ctx, inst.name); err != nil {
 			return o, fmt.Errorf("changes: reset feed marker of %s: %w", inst.name, err)
 		}
 		o.reasons = appendUnique(o.reasons, firstErrLine(sourceReason(src)))
@@ -215,14 +215,14 @@ func (e *Engine) feedStep(ctx context.Context, entityType string, inst feedInsta
 		}
 		replay = true
 	default:
-		m, found, err := e.Store.FeedMarker(inst.name)
+		m, found, err := e.Store.FeedMarker(ctx, inst.name)
 		if err != nil {
 			return o, fmt.Errorf("changes: read feed marker of %s: %w", inst.name, err)
 		}
 		if found && m.StoreIdentity != src.StoreIdentity {
 			// A different store restarts the sequence: reset before any row of
 			// this answer is processed.
-			if err := e.Store.ResetFeedMarker(inst.name); err != nil {
+			if err := e.Store.ResetFeedMarker(ctx, inst.name); err != nil {
 				return o, fmt.Errorf("changes: reset feed marker of %s: %w", inst.name, err)
 			}
 		}
@@ -232,7 +232,7 @@ func (e *Engine) feedStep(ctx context.Context, entityType string, inst feedInsta
 	if !healthy {
 		o.reasons = appendUnique(o.reasons, firstErrLine(sourceReason(src)))
 	} else {
-		e.recordFeedObserved(inst, ans)
+		e.recordFeedObserved(ctx, inst, ans)
 	}
 
 	rows := append([]gather.FeedRow(nil), ans.Rows...)
@@ -319,7 +319,7 @@ func (e *Engine) feedStep(ctx context.Context, entityType string, inst feedInsta
 // recordFeedObserved writes one change_flow.feed_observed.<instance>.<query>
 // key per sources_freshness row of an owning query of the instance that has a
 // last_success_at. Best-effort: a write error is a warning.
-func (e *Engine) recordFeedObserved(inst feedInstance, ans gather.FeedResult) {
+func (e *Engine) recordFeedObserved(ctx context.Context, inst feedInstance, ans gather.FeedResult) {
 	owned := map[string]bool{}
 	for _, q := range e.Cfg.OwningWatchQueries("issue") {
 		if b, _ := e.Cfg.WatchQueryBackend("issue", q); b.Instance == inst.name {
@@ -330,7 +330,7 @@ func (e *Engine) recordFeedObserved(inst feedInstance, ans gather.FeedResult) {
 		if !owned[f.Query] || f.LastSuccessAt == "" {
 			continue
 		}
-		if err := e.Store.SetMeta(MetaFeedObservedPrefix+inst.name+"."+f.Query, f.LastSuccessAt); err != nil {
+		if err := e.Store.SetMeta(ctx, MetaFeedObservedPrefix+inst.name+"."+f.Query, f.LastSuccessAt); err != nil {
 			e.warnf("changes: record feed observation %s.%s: %v\n", inst.name, f.Query, err)
 		}
 	}
@@ -380,7 +380,7 @@ func isUnavailable(err error) bool { return errors.Is(err, gather.ErrUnavailable
 // observation classifies as added. pr and thread replay every active entity as
 // before, as reconcile.
 func (e *Engine) resetReplay(ctx context.Context, entityType string, st *pollState) error {
-	all, err := e.Store.ListEntities()
+	all, err := e.Store.ListEntities(ctx)
 	if err != nil {
 		return fmt.Errorf("changes: list entities: %w", err)
 	}
@@ -415,7 +415,7 @@ func (e *Engine) resetReplay(ctx context.Context, entityType string, st *pollSta
 				// non-owning; otherwise the sole owning instance claims a
 				// ticket-shaped id.
 				if nonOwningWatched == nil {
-					nonOwningWatched, _ = WatchedIDs(e.Store, e.Cfg.NonOwningWatchQueries(entityType), entityType, nil)
+					nonOwningWatched, _ = WatchedIDs(ctx, e.Store, e.Cfg.NonOwningWatchQueries(entityType), entityType, nil)
 				}
 				if !nonOwningWatched[id] {
 					inst, _ = e.Cfg.OwningInstanceForID(entityType, id)

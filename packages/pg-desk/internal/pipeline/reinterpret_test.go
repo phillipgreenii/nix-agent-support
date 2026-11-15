@@ -39,7 +39,7 @@ func seedStale(t *testing.T, p *Pipeline, id string) {
 
 func riHistory(t *testing.T, st *store.Store, entityType, id string) []store.ChangeRecord {
 	t.Helper()
-	recs, err := st.ListEntityHistory(riRepo, entityType, id, 50)
+	recs, err := st.ListEntityHistory(context.Background(), riRepo, entityType, id, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func riHistory(t *testing.T, st *store.Store, entityType, id string) []store.Cha
 func TestReinterpretStored_ChangedDecisionIsWrittenStampedAndRecordedWithoutTouchingTheEntity(t *testing.T) {
 	p := riPipeline(t)
 	seedStale(t, p, "40")
-	before, _, _ := p.store.GetEntity(riRepo, "pr", "40")
+	before, _, _ := p.store.GetEntity(context.Background(), riRepo, "pr", "40")
 
 	res, err := riReinterpret(t, p, "pr", "40", ReinterpretOptions{Origin: "test"})
 	if err != nil {
@@ -62,7 +62,7 @@ func TestReinterpretStored_ChangedDecisionIsWrittenStampedAndRecordedWithoutTouc
 	if !res.Found || !res.Write.Written || !res.Write.DecisionChanged || !res.Write.Recorded {
 		t.Fatalf("result = %+v, want found, written, changed, recorded", res)
 	}
-	row, _, _ := p.store.GetInterpretation(riRepo, "pr", "40")
+	row, _, _ := p.store.GetInterpretation(context.Background(), riRepo, "pr", "40")
 	if row.InterpVersion != "test/stamp" || row.Panel == "old-panel" {
 		t.Fatalf("row = %+v, want the new content under the handle stamp", row)
 	}
@@ -70,7 +70,7 @@ func TestReinterpretStored_ChangedDecisionIsWrittenStampedAndRecordedWithoutTouc
 	if len(recs) != 1 || recs[0].Kinds[0] != store.ChangeKindInterpretationChanged || recs[0].Origin != "test" || recs[0].Version != before.Version {
 		t.Fatalf("history = %+v, want one interpretation_changed at version %d from origin test", recs, before.Version)
 	}
-	if after, _, _ := p.store.GetEntity(riRepo, "pr", "40"); after != before {
+	if after, _, _ := p.store.GetEntity(context.Background(), riRepo, "pr", "40"); after != before {
 		t.Fatalf("entity changed:\nbefore %+v\nafter  %+v", before, after)
 	}
 
@@ -118,15 +118,15 @@ func TestReinterpretStored_DifferentFactsCommittedBetweenReadAndWriteSkipTheWrit
 	p := riPipeline(t)
 	seedStale(t, p, "41")
 	opts := ReinterpretOptions{beforeWrite: func() error {
-		e, _, _ := p.store.GetEntity(riRepo, "pr", "41")
+		e, _, _ := p.store.GetEntity(context.Background(), riRepo, "pr", "41")
 		e.ContentHash = "someone-hydrated-different-facts"
-		return p.store.UpsertEntityForTest(e)
+		return p.store.UpsertEntityForTest(context.Background(), e)
 	}}
 	res, err := riReinterpret(t, p, "pr", "41", opts)
 	if err != nil || !res.Write.Skipped || res.Write.Written {
 		t.Fatalf("result = %+v, %v, want skipped", res, err)
 	}
-	if row, _, _ := p.store.GetInterpretation(riRepo, "pr", "41"); row.Panel != "old-panel" {
+	if row, _, _ := p.store.GetInterpretation(context.Background(), riRepo, "pr", "41"); row.Panel != "old-panel" {
 		t.Fatalf("a skipped write overwrote the row: %+v", row)
 	}
 	if n := len(riHistory(t, p.store, "pr", "41")); n != 0 {
@@ -146,7 +146,7 @@ func TestReinterpretStored_RequiresAStamp(t *testing.T) {
 	if stage, _ := StageOf(err); stage != StageStore {
 		t.Fatalf("stage = %q, want store", stage)
 	}
-	if _, found, _ := st.GetInterpretation(riRepo, "pr", "42"); found {
+	if _, found, _ := st.GetInterpretation(context.Background(), riRepo, "pr", "42"); found {
 		t.Fatal("a refused write left a row")
 	}
 }
@@ -163,7 +163,7 @@ func TestReinterpretStored_SchemaOneStoreIsRefused(t *testing.T) {
 	if stage, _ := StageOf(err); stage != StageStore {
 		t.Fatalf("stage = %q, want store", stage)
 	}
-	if _, found, _ := st.GetInterpretation(riRepo, "pr", "43"); found {
+	if _, found, _ := st.GetInterpretation(context.Background(), riRepo, "pr", "43"); found {
 		t.Fatal("a refused write left a row")
 	}
 }
@@ -180,7 +180,7 @@ func TestReinterpretStored_CancelledContextStopsBeforeReading(t *testing.T) {
 	if stage, _ := StageOf(err); stage != StageLoadFacts {
 		t.Fatalf("stage = %q", stage)
 	}
-	if row, _, _ := p.store.GetInterpretation(riRepo, "pr", "44"); row.Panel != "old-panel" {
+	if row, _, _ := p.store.GetInterpretation(context.Background(), riRepo, "pr", "44"); row.Panel != "old-panel" {
 		t.Fatal("a cancelled call wrote")
 	}
 }
@@ -201,11 +201,11 @@ func TestRunInterpretOnly_LeavesTheEntityRowAloneAndRecordsAChange(t *testing.T)
 	var out bytes.Buffer
 	p := interpretOnlyPipeline(t, &out)
 	seedStale(t, p, "45")
-	before, _, _ := p.store.GetEntity(riRepo, "pr", "45")
+	before, _, _ := p.store.GetEntity(context.Background(), riRepo, "pr", "45")
 	if err := p.RunInterpretOnly(context.Background(), "pr", "45", gather.ChangeChanged); err != nil {
 		t.Fatal(err)
 	}
-	if after, _, _ := p.store.GetEntity(riRepo, "pr", "45"); after != before {
+	if after, _, _ := p.store.GetEntity(context.Background(), riRepo, "pr", "45"); after != before {
 		t.Fatalf("entity rewritten:\nbefore %+v\nafter  %+v", before, after)
 	}
 	if recs := riHistory(t, p.store, "pr", "45"); len(recs) != 1 {
@@ -227,7 +227,7 @@ func mustJSON(t *testing.T, v any) []byte {
 func TestReinterpretStored_DryRunDerivesAndWritesNothing(t *testing.T) {
 	p := riPipeline(t)
 	seedStale(t, p, "41")
-	before, _, _ := p.store.GetInterpretation(riRepo, "pr", "41")
+	before, _, _ := p.store.GetInterpretation(context.Background(), riRepo, "pr", "41")
 	res, err := riReinterpret(t, p, "pr", "41", ReinterpretOptions{DryRun: true})
 	if err != nil || !res.Found || res.Write != (store.InterpretationWriteResult{}) {
 		t.Fatalf("result = %+v, %v, want found and no write", res, err)
@@ -235,7 +235,7 @@ func TestReinterpretStored_DryRunDerivesAndWritesNothing(t *testing.T) {
 	if res.Row.Panel == "old-panel" {
 		t.Errorf("derived row = %+v, want the new decision", res.Row)
 	}
-	after, _, _ := p.store.GetInterpretation(riRepo, "pr", "41")
+	after, _, _ := p.store.GetInterpretation(context.Background(), riRepo, "pr", "41")
 	if after != before {
 		t.Errorf("row changed under DryRun: %+v -> %+v", before, after)
 	}

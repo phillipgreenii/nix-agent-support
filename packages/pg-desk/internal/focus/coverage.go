@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -58,13 +59,13 @@ type CoverageReport struct {
 // backlog within the bound is a Notice only. For issue the backlog counts only
 // pending hydrations (watched entities never hydrated and the failed-ingest
 // entries), never entities past an age, because no age sweep re-hydrates them.
-func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entities map[Key]store.Entity) (CoverageReport, error) {
+func ComputeCoverage(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time, entities map[Key]store.Entity) (CoverageReport, error) {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
 	failedIngest := 0
 	if st != nil {
-		fails, err := st.ListIngestFailures("")
+		fails, err := st.ListIngestFailures(ctx, "")
 		if err != nil {
 			return CoverageReport{}, err
 		}
@@ -87,7 +88,7 @@ func ComputeCoverage(st *store.Store, cfg *config.Config, now time.Time, entitie
 		}
 		cov.OldestHydratedAt = oldestHydrated(rows, t)
 
-		listings, err := QueryListings(st, cfg, t)
+		listings, err := QueryListings(ctx, st, cfg, t)
 		if err != nil {
 			return CoverageReport{}, err
 		}
@@ -136,11 +137,11 @@ func listingReason(t string, ls Listing) string {
 // the two agree on the same query. A query with no persisted status is
 // StatusUnknown: a source that may be missing is shown as incomplete, never as
 // quietly not watched.
-func QueryListings(st *store.Store, cfg *config.Config, entityType string) ([]Listing, error) {
+func QueryListings(ctx context.Context, st *store.Store, cfg *config.Config, entityType string) ([]Listing, error) {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	persisted, err := changes.ReadListingStatuses(st, entityType)
+	persisted, err := changes.ReadListingStatuses(ctx, st, entityType)
 	if err != nil {
 		return nil, fmt.Errorf("focus: read listing statuses: %w", err)
 	}
@@ -197,13 +198,13 @@ type WatchSet struct {
 type Watched map[string]WatchSet
 
 // LoadWatched reads the watch sets of the coverage types.
-func LoadWatched(st *store.Store, cfg *config.Config) Watched {
+func LoadWatched(ctx context.Context, st *store.Store, cfg *config.Config) Watched {
 	w := Watched{}
 	for _, t := range CoverageTypes {
-		ids, known := changes.WatchedIDs(st, cfg.WatchQueries(t), t, nil)
+		ids, known := changes.WatchedIDs(ctx, st, cfg.WatchQueries(t), t, nil)
 		ws := WatchSet{IDs: ids, Known: known}
 		if owning := changes.OwningSet(cfg, t); len(owning) > 0 {
-			watched, all := changes.OwningEntityIDs(st, t, owning)
+			watched, all := changes.OwningEntityIDs(ctx, st, t, owning)
 			for id := range watched {
 				ws.IDs[id] = true
 			}

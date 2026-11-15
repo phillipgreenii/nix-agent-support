@@ -64,7 +64,7 @@ func ecPipeline(t *testing.T, res *gather.GatherResult, gerr *error) *Pipeline {
 
 func (p *Pipeline) changeRows(t *testing.T, entityType, entityID string) []store.ChangeRecord {
 	t.Helper()
-	all, err := p.store.ListChangesAfter(entityType, 0, 0)
+	all, err := p.store.ListChangesAfter(context.Background(), entityType, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestRunEntityChange_FirstObservationIsAddedOnly(t *testing.T) {
 	if !r.Written || r.Version != 1 || r.Retries != 0 || !reflect.DeepEqual(r.Kinds, []string{"added"}) {
 		t.Fatalf("result = %+v", r)
 	}
-	e, found, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !found || e.Version != 1 || e.Inactive || e.HydratedAt != "2026-09-16T12:00:00Z" || e.AsOf != "2026-09-16T00:00:00Z" {
 		t.Fatalf("entity = %+v found=%v", e, found)
 	}
@@ -104,10 +104,10 @@ func TestRunEntityChange_FirstObservationIsAddedOnly(t *testing.T) {
 		t.Fatalf("rows = %+v", rows)
 	}
 	// The interpretation and the derived links are written too (links LAST).
-	if _, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1"); !found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); !found {
 		t.Fatal("interpretation row missing")
 	}
-	links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1")
 	if len(links) != 1 || links[0].ToID != ecRepo+"#7" {
 		t.Fatalf("links = %+v", links)
 	}
@@ -151,14 +151,14 @@ func TestRunEntityChange_FailedReadKeepsPreviousSnapshotAndLogsNothing(t *testin
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
 	p := ecPipeline(t, &res, &gerr)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	before, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	before, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 
 	gerr = errors.New("boom")
 	r, err := p.RunEntityChange(context.Background(), "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})
 	if err == nil || !strings.Contains(err.Error(), "pipeline: gather issue i-1") || r.Written {
 		t.Fatalf("r=%+v err=%v", r, err)
 	}
-	after, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	after, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("snapshot moved: %+v -> %+v", before, after)
 	}
@@ -172,7 +172,7 @@ func TestRunEntityChange_DegradedReadIsNotWrittenAndEntityStaysActive(t *testing
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
 	p := ecPipeline(t, &res, &gerr)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	before, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	before, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 
 	res = ecIssue(t, "closed", "you", "2026-09-16T01:00:00Z", workMeta("8"))
 	res.Degraded = "deps read failed"
@@ -180,14 +180,14 @@ func TestRunEntityChange_DegradedReadIsNotWrittenAndEntityStaysActive(t *testing
 	if r.Written || r.Degraded != "deps read failed" || r.NotFound || len(r.Kinds) != 0 || r.Version != 0 {
 		t.Fatalf("result = %+v", r)
 	}
-	after, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	after, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !reflect.DeepEqual(before, after) || after.Inactive {
 		t.Fatalf("degraded read moved the snapshot or deactivated it: %+v -> %+v", before, after)
 	}
 	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != 1 {
 		t.Fatalf("a degraded read logged: %+v", rows)
 	}
-	links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1")
 	if len(links) != 1 || links[0].ToID != ecRepo+"#7" {
 		t.Fatalf("a degraded read changed the links: %+v", links)
 	}
@@ -206,7 +206,7 @@ func TestRunEntityChange_NotFound(t *testing.T) {
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
 	p := ecPipeline(t, &res, &gerr)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	before, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	before, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 
 	res = gather.GatherResult{RemovedState: "not_found"}
 	if _, err := p.RunEntityChange(context.Background(), "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{}); err == nil || !strings.Contains(err.Error(), "not found") {
@@ -216,14 +216,14 @@ func TestRunEntityChange_NotFound(t *testing.T) {
 	if !r.NotFound || r.Written {
 		t.Fatalf("result = %+v", r)
 	}
-	after, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	after, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !reflect.DeepEqual(before, after) || after.Facts == "{}" || after.Inactive {
 		t.Fatalf("not_found overwrote or deactivated the snapshot: %+v -> %+v", before, after)
 	}
 	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != 1 {
 		t.Fatalf("not_found logged: %+v", rows)
 	}
-	if links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1"); len(links) != 1 {
+	if links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1"); len(links) != 1 {
 		t.Fatalf("not_found cleared the derived links: %+v", links)
 	}
 
@@ -231,7 +231,7 @@ func TestRunEntityChange_NotFound(t *testing.T) {
 	if r, err := p.RunEntityChange(context.Background(), "issue", "i-new", gather.ChangeRemoved, EntityChangeOptions{}); err != nil || !r.NotFound {
 		t.Fatalf("r=%+v err=%v", r, err)
 	}
-	if _, found, _ := p.store.GetEntity(ecRepo, "issue", "i-new"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-new"); found {
 		t.Fatal("not_found created a row")
 	}
 }
@@ -247,11 +247,11 @@ func TestRunEntityChange_RemovedObservedStateWritesAndClearsLinks(t *testing.T) 
 	if !r.Written || r.NotFound {
 		t.Fatalf("result = %+v", r)
 	}
-	e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Version != 2 || e.AsOf != "2026-09-16T03:00:00Z" || e.Inactive {
 		t.Fatalf("entity = %+v", e)
 	}
-	if links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1"); len(links) != 0 {
+	if links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1"); len(links) != 0 {
 		t.Fatalf("an empty derived set should clear the links: %+v", links)
 	}
 	// The removed link is a local change source on the entity's own row.
@@ -295,7 +295,7 @@ func TestRunEntityChange_ForceReconcileSuppressesLocalSources(t *testing.T) {
 		}
 	}
 	// The derived links are still replaced.
-	links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1")
 	if len(links) != 1 || links[0].ToID != ecRepo+"#8" {
 		t.Fatalf("links = %+v", links)
 	}
@@ -307,7 +307,7 @@ func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreAdded(t *testing.T) {
 	p := ecPipeline(t, &res, &gerr)
 
 	// A row the cutover left at version 0 with no hydrated_at is unobserved.
-	if err := p.store.UpsertEntityForTest(store.Entity{Repo: ecRepo, EntityType: "issue", EntityID: "i-1", Facts: `{"old":true}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}); err != nil {
+	if err := p.store.UpsertEntityForTest(context.Background(), store.Entity{Repo: ecRepo, EntityType: "issue", EntityID: "i-1", Facts: `{"old":true}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}); err != nil {
 		t.Fatal(err)
 	}
 	r := mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{})
@@ -316,8 +316,8 @@ func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreAdded(t *testing.T) {
 	}
 
 	// Mark it inactive (what Phase 6's removal does), then hydrate again.
-	e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
-	if _, err := p.store.WriteEntityStateWithLog(e, e.Version, e.HydratedAt, false, []string{"removed"}, "sync", "t"); err != nil {
+	e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
+	if _, err := p.store.WriteEntityStateWithLog(context.Background(), e, e.Version, e.HydratedAt, false, []string{"removed"}, "sync", "t"); err != nil {
 		t.Fatal(err)
 	}
 	res = ecIssue(t, "closed", "me", "2026-09-16T01:00:00Z", workMeta("7"))
@@ -325,7 +325,7 @@ func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreAdded(t *testing.T) {
 	if !reflect.DeepEqual(r.Kinds, []string{"added"}) {
 		t.Fatalf("return from inactive: %+v", r)
 	}
-	e, _, _ = p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ = p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Inactive {
 		t.Fatal("a hydration must write active = true")
 	}
@@ -333,7 +333,7 @@ func TestRunEntityChange_CutoverRowAndReturnFromInactiveAreAdded(t *testing.T) {
 
 func seedPR(t *testing.T, p *Pipeline, id string) {
 	t.Helper()
-	if _, err := p.store.WriteEntityWithLog(store.Entity{Repo: ecRepo, EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}, 0, []string{"reconcile"}, "sync", "t"); err != nil {
+	if _, err := p.store.WriteEntityWithLog(context.Background(), store.Entity{Repo: ecRepo, EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}, 0, []string{"reconcile"}, "sync", "t"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -432,7 +432,7 @@ func TestRunEntityChange_LostRaceRetriesReclassifiesAndCounts(t *testing.T) {
 	opts := EntityChangeOptions{beforeWrite: func(attempt int) {
 		attempts = append(attempts, attempt)
 		if attempt == 0 {
-			if _, err := p.store.WriteEntityWithLog(winner, 1, []string{"closed", "status_changed"}, "other", "t"); err != nil {
+			if _, err := p.store.WriteEntityWithLog(context.Background(), winner, 1, []string{"closed", "status_changed"}, "other", "t"); err != nil {
 				t.Errorf("winner write: %v", err)
 			}
 		}
@@ -458,8 +458,8 @@ func TestRunEntityChange_RetriesAreBounded(t *testing.T) {
 
 	res = ecIssue(t, "closed", "me", "2026-09-16T01:00:00Z", nil)
 	opts := EntityChangeOptions{MaxRetries: 2, beforeWrite: func(int) {
-		e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
-		if _, err := p.store.WriteEntityWithLog(e, e.Version, nil, "other", "t"); err != nil {
+		e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
+		if _, err := p.store.WriteEntityWithLog(context.Background(), e, e.Version, nil, "other", "t"); err != nil {
 			t.Errorf("interloper: %v", err)
 		}
 	}}
@@ -474,9 +474,9 @@ func TestRunEntityChange_FailureBetweenBumpAndAppendLeavesNothingHalfWritten(t *
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
 	p := ecPipeline(t, &res, &gerr)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	before, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	before, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	logBefore := p.changeRows(t, "issue", "i-1")
-	linksBefore, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	linksBefore, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1")
 
 	p.store.SetBetweenBumpAndAppendHook(func() error { return errors.New("injected crash") })
 	res = ecIssue(t, "closed", "you", "2026-09-16T01:00:00Z", workMeta("8"))
@@ -485,14 +485,14 @@ func TestRunEntityChange_FailureBetweenBumpAndAppendLeavesNothingHalfWritten(t *
 	if err == nil || !strings.Contains(err.Error(), "injected crash") || r.Written {
 		t.Fatalf("r=%+v err=%v", r, err)
 	}
-	after, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	after, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("half-written snapshot: %+v -> %+v", before, after)
 	}
 	if got := p.changeRows(t, "issue", "i-1"); !reflect.DeepEqual(got, logBefore) {
 		t.Fatalf("half-written log: %+v", got)
 	}
-	if linksAfter, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1"); !reflect.DeepEqual(linksAfter, linksBefore) {
+	if linksAfter, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1"); !reflect.DeepEqual(linksAfter, linksBefore) {
 		t.Fatalf("links replaced despite the failed write: %+v", linksAfter)
 	}
 }
@@ -551,7 +551,7 @@ func TestRunEntityChange_ConcurrentCallsNeverRegressVersion(t *testing.T) {
 	}
 	wg.Wait()
 
-	e, _, _ := first.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ := first.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Version != writers*rounds {
 		t.Fatalf("final version %d, want %d (one bump per call)", e.Version, writers*rounds)
 	}
@@ -564,7 +564,7 @@ func TestRunEntityChange_ConcurrentCallsNeverRegressVersion(t *testing.T) {
 	if int64(sumRetries) != conflicts {
 		t.Fatalf("retries %d != lost races %d", sumRetries, conflicts)
 	}
-	all, err := first.ListChangesAfter("issue", 0, 0)
+	all, err := first.ListChangesAfter(context.Background(), "issue", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,15 +609,15 @@ type ecState struct {
 
 func captureState(t *testing.T, p *Pipeline) ecState {
 	t.Helper()
-	e, found, err := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, found, err := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if err != nil || !found {
 		t.Fatalf("GetEntity = (%v, %v)", found, err)
 	}
-	interps, err := p.store.ListInterpretations()
+	interps, err := p.store.ListInterpretations(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	links, err := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	links, err := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,15 +632,15 @@ func TestRunEntityChange_SkipUnchangedWrite_UnchangedWritesNothing(t *testing.T)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{ListFP: &lfp})
 	// Tamper with the interpretation row and drop the derived links, so a
 	// post-commit step that ran would visibly restore them.
-	interp, found, err := p.store.GetInterpretation(ecRepo, "issue", "i-1")
+	interp, found, err := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation = (%v, %v)", found, err)
 	}
 	interp.Category = "tampered"
-	if err := p.store.UpsertInterpretation(interp); err != nil {
+	if err := p.store.UpsertInterpretation(context.Background(), interp); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.store.ReplaceDerivedXrefs(ecRepo, "issue", "i-1", nil); err != nil {
+	if err := p.store.ReplaceDerivedXrefs(context.Background(), ecRepo, "issue", "i-1", nil); err != nil {
 		t.Fatal(err)
 	}
 	before := captureState(t, p)
@@ -698,7 +698,7 @@ func TestRunEntityChange_SkipUnchangedWrite_AbsentEntityIsWritten(t *testing.T) 
 // seedThread seeds a thread entity row, the target of a link from the issue.
 func seedThread(t *testing.T, p *Pipeline, id string) {
 	t.Helper()
-	if _, err := p.store.WriteEntityWithLog(store.Entity{Repo: ecRepo, EntityType: "thread", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}, 0, []string{"reconcile"}, "sync", "t"); err != nil {
+	if _, err := p.store.WriteEntityWithLog(context.Background(), store.Entity{Repo: ecRepo, EntityType: "thread", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z", ContentHash: "h"}, 0, []string{"reconcile"}, "sync", "t"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -727,7 +727,7 @@ func TestRunEntityChange_AddedForIssueNeverPropagates(t *testing.T) {
 	prID, threadID := ecRepo+"#7", "t-1"
 	seedPR(t, p, prID)
 	seedThread(t, p, threadID)
-	if err := p.store.UpsertXref(store.Xref{
+	if err := p.store.UpsertXref(context.Background(), store.Xref{
 		Repo: ecRepo, FromType: "issue", FromID: "i-1", ToType: "thread", ToID: threadID,
 		FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -802,7 +802,7 @@ func TestRunEntityChange_WatchLocal(t *testing.T) {
 	p := ecPipeline(t, &res, &gerr)
 	watched := func(id string) *bool {
 		t.Helper()
-		e, found, err := p.store.GetEntity(ecRepo, "issue", id)
+		e, found, err := p.store.GetEntity(context.Background(), ecRepo, "issue", id)
 		if err != nil || !found {
 			t.Fatalf("entity %s: found=%v err=%v", id, found, err)
 		}
@@ -880,19 +880,19 @@ func TestRunEntityChange_KeepActive(t *testing.T) {
 	opts := EntityChangeOptions{SnapshotOnly: true, KeepActive: true}
 
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, opts)
-	if e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1"); e.Inactive {
+	if e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); e.Inactive {
 		t.Fatal("a new row must be active")
 	}
 	mustRun(t, p, "issue", "i-1", gather.ChangeChanged, opts)
-	if e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1"); e.Inactive {
+	if e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); e.Inactive {
 		t.Fatal("an active row stayed active")
 	}
-	if _, err := p.store.MarkEntityInactive(ecRepo, "issue", "i-1", "k"); err != nil {
+	if _, err := p.store.MarkEntityInactive(context.Background(), ecRepo, "issue", "i-1", "k"); err != nil {
 		t.Fatal(err)
 	}
 	res = ecIssue(t, "closed", "me", "2026-09-16T01:00:00Z", workMeta("7"))
 	mustRun(t, p, "issue", "i-1", gather.ChangeChanged, opts)
-	e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !e.Inactive {
 		t.Fatal("KeepActive reactivated a deactivated entity")
 	}

@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sort"
@@ -431,10 +432,10 @@ func TestObserveIssueDueIsPendingHydrationsAndFailedIngests(t *testing.T) {
 	seed := func(id, backend, hydratedAt string, watched bool) {
 		t.Helper()
 		e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"}
-		if _, err := st.WriteEntityStateWithLog(e, 0, hydratedAt, true, nil, "sync", "2026-10-01T10:00:00Z"); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), e, 0, hydratedAt, true, nil, "sync", "2026-10-01T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.SetEntityColumns("o/r", "issue", id, &backend, &watched); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, &backend, &watched); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -446,11 +447,11 @@ func TestObserveIssueDueIsPendingHydrationsAndFailedIngests(t *testing.T) {
 		{Instance: "jira-a", EntityID: "PROJ-8", Seq: 1, StoreIdentity: "s", FirstFailedAt: "2026-10-01T10:00:00Z"},
 		{Instance: "jira-a", EntityID: "PROJ-9", Seq: 2, StoreIdentity: "s", FirstFailedAt: "2026-10-01T10:00:00Z"},
 	} {
-		if err := st.RecordIngestFailure(f); err != nil {
+		if err := st.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	flow, err := Observe(st, sweepTestNow, 6*time.Hour)
+	flow, err := Observe(context.Background(), st, sweepTestNow, 6*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +476,7 @@ func TestWatchedIDsOwningReadsTheEntityColumnAndNoWatchsetKey(t *testing.T) {
 	seed := func(id, backend string, watched *bool) {
 		seedIssue(t, st, id, &backend)
 		if watched != nil {
-			if err := st.SetEntityColumns("o/r", "issue", id, nil, watched); err != nil {
+			if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, watched); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -486,11 +487,11 @@ func TestWatchedIDsOwningReadsTheEntityColumnAndNoWatchsetKey(t *testing.T) {
 	seed("PROJ-3", "jira-a", nil)
 	seed("PROJ-4", "jira-b", &yes) // another, non-owning instance
 	seed("bd-1", "beads-a", &yes)  // watched column is meaningless off an owning backend
-	if err := saveWatchSet(st, "issue", "mine", map[string]bool{"bd-1": true, "bd-2": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "mine", map[string]bool{"bd-1": true, "bd-2": true}); err != nil {
 		t.Fatal(err)
 	}
 
-	ids, known := WatchedIDs(st, []string{"mine", "tracked"}, "issue", owningJira)
+	ids, known := WatchedIDs(context.Background(), st, []string{"mine", "tracked"}, "issue", owningJira)
 	if !known {
 		t.Error("known = false with an owning instance, want true")
 	}
@@ -498,17 +499,17 @@ func TestWatchedIDsOwningReadsTheEntityColumnAndNoWatchsetKey(t *testing.T) {
 	if !reflect.DeepEqual(ids, want) {
 		t.Errorf("ids = %v, want %v (the owning watched entity plus the persisted beads set)", ids, want)
 	}
-	if _, found, _ := st.GetMeta(watchSetKey("issue", "tracked")); found {
+	if _, found, _ := st.GetMeta(context.Background(), watchSetKey("issue", "tracked")); found {
 		t.Error("a change_flow.watchset key was written for the owning query")
 	}
 
 	// A non-owning read is exactly the persisted set.
-	ids, known = WatchedIDs(st, []string{"mine"}, "issue", nil)
+	ids, known = WatchedIDs(context.Background(), st, []string{"mine"}, "issue", nil)
 	if !known || !reflect.DeepEqual(ids, map[string]bool{"bd-1": true, "bd-2": true}) {
 		t.Errorf("non-owning ids = %v known=%v", ids, known)
 	}
 
-	watched, all := OwningEntityIDs(st, "issue", owningJira)
+	watched, all := OwningEntityIDs(context.Background(), st, "issue", owningJira)
 	if !reflect.DeepEqual(watched, map[string]bool{"PROJ-1": true}) ||
 		!reflect.DeepEqual(all, map[string]bool{"PROJ-1": true, "PROJ-2": true, "PROJ-3": true}) {
 		t.Errorf("OwningEntityIDs = %v / %v", watched, all)

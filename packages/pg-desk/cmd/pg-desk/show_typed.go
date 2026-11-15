@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -174,8 +175,8 @@ type hiddenState struct {
 
 // readHiddenAnnotation reads the new schema's hidden key/value annotation;
 // an unset key is not hidden.
-func readHiddenAnnotation(st *store.Store, repo, entityType, id string) (hiddenState, error) {
-	a, found, err := st.GetKVAnnotation(repo, entityType, id, store.AnnotationHidden)
+func readHiddenAnnotation(ctx context.Context, st *store.Store, repo, entityType, id string) (hiddenState, error) {
+	a, found, err := st.GetKVAnnotation(ctx, repo, entityType, id, store.AnnotationHidden)
 	if err != nil || !found {
 		return hiddenState{}, err
 	}
@@ -209,8 +210,8 @@ type viewData struct {
 
 // buildView assembles the composite view of one stored entity from the store
 // alone (no network). stale forces stale: true (a failed or degraded refresh).
-func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string, stale bool) (viewData, error) {
-	ent, found, err := st.GetEntity(repo, entityType, id)
+func buildView(ctx context.Context, cfg *config.Config, st *store.Store, repo, entityType, id string, stale bool) (viewData, error) {
+	ent, found, err := st.GetEntity(ctx, repo, entityType, id)
 	if err != nil {
 		return viewData{}, err
 	}
@@ -237,7 +238,7 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 		v.CI = buildCI(ent, v.Snapshot)
 	}
 
-	anns, err := st.ListKVAnnotations(repo, entityType, id)
+	anns, err := st.ListKVAnnotations(ctx, repo, entityType, id)
 	if err != nil {
 		return viewData{}, err
 	}
@@ -262,7 +263,7 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 		}
 	}
 	sort.Strings(v.Annotations.Suppress)
-	hidden, err := readHiddenAnnotation(st, repo, entityType, id)
+	hidden, err := readHiddenAnnotation(ctx, st, repo, entityType, id)
 	if err != nil {
 		return viewData{}, err
 	}
@@ -289,7 +290,7 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 	}
 
 	v.Decorations = viewDecorations{Dispositions: []viewDisposition{}}
-	interp, ifound, err := st.GetInterpretation(repo, entityType, id)
+	interp, ifound, err := st.GetInterpretation(ctx, repo, entityType, id)
 	if err != nil {
 		return viewData{}, err
 	}
@@ -310,7 +311,7 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 		}
 	}
 
-	det, err := links.ReadDetailed(links.Deps{
+	det, err := links.ReadDetailed(ctx, links.Deps{
 		Store:            st,
 		Repo:             repo,
 		Patterns:         cfg.TicketPatterns,
@@ -393,6 +394,8 @@ func buildCI(ent store.Entity, snapshot json.RawMessage) *viewCI {
 // ---- command ----
 
 func runTypedShow(cmd *cobra.Command, entityType, ref string, f typedShowFlags) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("show: load config: %w", err)
@@ -401,7 +404,7 @@ func runTypedShow(cmd *cobra.Command, entityType, ref string, f typedShowFlags) 
 	if err != nil {
 		return fmt.Errorf("show: %w", err)
 	}
-	st, err := openNewSchemaStore("show")
+	st, err := openNewSchemaStore(ctx, "show")
 	if err != nil {
 		return err
 	}
@@ -415,7 +418,7 @@ func runTypedShow(cmd *cobra.Command, entityType, ref string, f typedShowFlags) 
 		stale = exitErr != nil
 	}
 
-	vd, err := buildView(cfg, st, repo, entityType, id, stale)
+	vd, err := buildView(ctx, cfg, st, repo, entityType, id, stale)
 	if err != nil {
 		if exitErr != nil {
 			return exitErr
@@ -441,6 +444,8 @@ func runTypedShow(cmd *cobra.Command, entityType, ref string, f typedShowFlags) 
 // outcome is returned (as an exit error carrying refresh's codes: 5 degraded,
 // 3 failed); a linked entity that fails is reported on stderr and ignored.
 func refreshForShow(cmd *cobra.Command, cfg *config.Config, st *store.Store, repo, entityType, id string) error {
+	ctx := cmd.Context()
+
 	var primary error
 	res, err := refreshEntity(cmd.Context(), cfg, st, entityType, id)
 	switch {
@@ -449,7 +454,7 @@ func refreshForShow(cmd *cobra.Command, cfg *config.Config, st *store.Store, rep
 	case res.Degraded != "":
 		primary = newExitError(exitPartial, fmt.Errorf("show: refresh %s %s: hydration degraded (previous detail kept): %s", entityType, id, res.Degraded))
 	}
-	det, derr := links.ReadDetailed(links.Deps{Store: st, Repo: repo, Patterns: cfg.TicketPatterns, IssueURLTemplate: cfg.Links.IssueURLTemplate}, entityType, id)
+	det, derr := links.ReadDetailed(ctx, links.Deps{Store: st, Repo: repo, Patterns: cfg.TicketPatterns, IssueURLTemplate: cfg.Links.IssueURLTemplate}, entityType, id)
 	if derr != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: show: read links of %s %s: %v\n", entityType, id, derr)
 		return primary

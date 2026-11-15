@@ -67,7 +67,7 @@ func newBackfillFixture(t *testing.T) *backendFixture {
 	useBackfillFakeConnector(t, f.dir) // shadows the fixture's own fake
 	f.setBackend("bd-5", "beads-a")
 	yes := true
-	if err := f.seed.SetEntityColumns("o/r", "issue", "bd-5", nil, &yes); err != nil {
+	if err := f.seed.SetEntityColumns(context.Background(), "o/r", "issue", "bd-5", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 	f.write("held-PROJ-2", "")
@@ -125,7 +125,7 @@ func TestBackfillBackendSetsEveryHeldIDWithoutAChangeRow(t *testing.T) {
 		t.Errorf("beads entity watched = %v, want unchanged true", w)
 	}
 	// PROJ-9 is listed but not held: it is not created.
-	if _, found, err := f.seed.GetEntity("o/r", "issue", "PROJ-9"); err != nil || found {
+	if _, found, err := f.seed.GetEntity(context.Background(), "o/r", "issue", "PROJ-9"); err != nil || found {
 		t.Errorf("PROJ-9 created: found=%v err=%v", found, err)
 	}
 

@@ -39,6 +39,8 @@ func newSuppressCmd(entityType string, suppress bool) *cobra.Command {
 }
 
 func runSuppress(cmd *cobra.Command, verb, entityType, ref, kind, actorFlag string, suppress bool) error {
+	ctx := cmd.Context()
+
 	if strings.TrimSpace(kind) == "" {
 		return fmt.Errorf("%s: --kind must not be empty", verb)
 	}
@@ -46,7 +48,7 @@ func runSuppress(cmd *cobra.Command, verb, entityType, ref, kind, actorFlag stri
 	if err != nil {
 		return fmt.Errorf("%s: load config: %w", verb, err)
 	}
-	st, err := openNewSchemaStore(verb)
+	st, err := openNewSchemaStore(ctx, verb)
 	if err != nil {
 		return err
 	}
@@ -61,13 +63,13 @@ func runSuppress(cmd *cobra.Command, verb, entityType, ref, kind, actorFlag stri
 		return err
 	}
 	if suppress {
-		if err := w.set(st); err != nil {
+		if err := w.set(ctx, st); err != nil {
 			return err
 		}
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "suppressed %s on %s %s\n", kind, entityType, w.id)
 		return err
 	}
-	removed, err := w.remove(st)
+	removed, err := w.remove(ctx, st)
 	if err != nil {
 		return err
 	}

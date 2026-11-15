@@ -17,7 +17,7 @@ import (
 
 func scrape(t *testing.T, s *store.Store) string {
 	t.Helper()
-	handler, err := NewHandler(s, testConfig())
+	handler, err := NewHandler(context.Background(), s, testConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -39,21 +39,21 @@ func TestMetricsExposeEveryChangeFlowFamilyForANewSchemaStore(t *testing.T) {
 	write := func(id string, expected int64, hydratedAt string, kinds []string, origin string) {
 		t.Helper()
 		e := store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "x"}
-		if _, err := s.WriteEntityStateWithLog(e, expected, hydratedAt, true, kinds, origin, "2026-10-01T10:00:00Z"); err != nil {
+		if _, err := s.WriteEntityStateWithLog(context.Background(), e, expected, hydratedAt, true, kinds, origin, "2026-10-01T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	write("o/r#1", 0, "2026-10-01T11:00:00Z", []string{"created"}, "poll")
 	write("o/r#2", 0, "2026-09-30T00:00:00Z", []string{"created", "labels"}, "poll") // due: older than 6h
 	write("o/r#1", 1, "2026-10-01T11:00:00Z", []string{"reconcile"}, "sweep")
-	if err := s.RegisterConsumer("alpha", "pr", nowUTC()); err != nil {
+	if err := s.RegisterConsumer(context.Background(), "alpha", "pr", nowUTC()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AdvanceCursor("alpha", "pr", 1); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "alpha", "pr", 1); err != nil {
 		t.Fatal(err)
 	}
-	changes.RecordHydration(s, "pr", "o/r#1", pipeline.EntityChangeResult{Retries: 2}, nil)
-	changes.RecordHydration(s, "pr", "o/r#2", pipeline.EntityChangeResult{}, errors.New("boom"))
+	changes.RecordHydration(context.Background(), s, "pr", "o/r#1", pipeline.EntityChangeResult{Retries: 2}, nil)
+	changes.RecordHydration(context.Background(), s, "pr", "o/r#2", pipeline.EntityChangeResult{}, errors.New("boom"))
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:00:00Z",
 	})
@@ -112,7 +112,7 @@ func TestMetricsSweepBoundViolatedPerTier(t *testing.T) {
 	setClock(t, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
 	for _, id := range []string{"t-1", "t-2", "t-3", "t-4", "t-5", "t-6", "t-7"} {
 		e := store.Entity{Repo: "o/r", EntityType: "thread", EntityID: id, Facts: `{}`, AsOf: "x"}
-		if _, err := s.WriteEntityStateWithLog(e, 0, "2026-10-01T11:59:00Z", true, []string{"created"}, "poll", "2026-10-01T11:59:00Z"); err != nil {
+		if _, err := s.WriteEntityStateWithLog(context.Background(), e, 0, "2026-10-01T11:59:00Z", true, []string{"created"}, "poll", "2026-10-01T11:59:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -125,7 +125,7 @@ func TestMetricsSweepBoundViolatedPerTier(t *testing.T) {
 	cfg.Sweep.ReconcileAge = "3m"
 
 	scrapeWith := func(opts ...Option) string {
-		handler, err := NewHandler(s, cfg, opts...)
+		handler, err := NewHandler(context.Background(), s, cfg, opts...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +177,7 @@ func TestMetricsExposeTheFailedIngestSeriesFromTheTable(t *testing.T) {
 			t.Errorf("an empty table: body missing %q; full body:\n%s", want, body)
 		}
 	}
-	if err := s.RecordIngestFailure(store.IngestFailure{
+	if err := s.RecordIngestFailure(context.Background(), store.IngestFailure{
 		Instance: "jira-a", EntityID: "PROJ-1", Seq: 3, StoreIdentity: "s1",
 		FirstFailedAt: "2026-10-01T11:00:00Z", LastError: "boom",
 	}); err != nil {
@@ -226,13 +226,13 @@ func TestMetricsExposeTheJiraOutcomeSeriesFromTheStore(t *testing.T) {
 	cfg := testConfig()
 	cfg.Watch.Issue.Queries = []string{"mine"}
 	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"mine": {Instance: "jira-a", OwnsChanges: true}}
-	if err := s.SetMeta(changes.MetaFeedObservedPrefix+"jira-a.mine", "2026-10-01T10:00:00Z"); err != nil {
+	if err := s.SetMeta(context.Background(), changes.MetaFeedObservedPrefix+"jira-a.mine", "2026-10-01T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetMeta(changes.MetaUnflaggedPrefix+"jira-a", `{"count":2,"at":"2026-10-01T11:55:00Z"}`); err != nil {
+	if err := s.SetMeta(context.Background(), changes.MetaUnflaggedPrefix+"jira-a", `{"count":2,"at":"2026-10-01T11:55:00Z"}`); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(s, cfg)
+	handler, err := NewHandler(context.Background(), s, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,17 +280,17 @@ func TestMetricsExposeTheWatchedEntityAndOrphanSeriesFromTheStore(t *testing.T) 
 	fp := "F1"
 	yes := true
 	for id, hydrated := range map[string]string{"bd-1": "2026-10-01T11:30:00Z", "bd-2": "2026-10-01T11:50:00Z"} {
-		if _, err := s.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+		if _, err := s.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 			0, hydrated, true, &fp, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+		if err := s.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &yes); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// bd-1 was last READ successfully 45 minutes ago, though hydrated 30 minutes ago.
 	ok := "2026-10-01T11:15:00Z"
-	if err := s.SetEntityReadTimes("o/r", "issue", "bd-1", nil, &ok); err != nil {
+	if err := s.SetEntityReadTimes(context.Background(), "o/r", "issue", "bd-1", nil, &ok); err != nil {
 		t.Fatal(err)
 	}
 	body = scrape(t, s)

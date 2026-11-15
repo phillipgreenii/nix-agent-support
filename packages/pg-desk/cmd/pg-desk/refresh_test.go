@@ -72,7 +72,7 @@ func (f *refreshFixture) showThread(id string) {
 
 func (f *refreshFixture) entity(typ, id string) store.Entity {
 	f.t.Helper()
-	e, found, err := f.seed.GetEntity("o/r", typ, id)
+	e, found, err := f.seed.GetEntity(context.Background(), "o/r", typ, id)
 	if err != nil || !found {
 		f.t.Fatalf("GetEntity %s %s: found=%v err=%v", typ, id, found, err)
 	}
@@ -126,11 +126,11 @@ func TestRefreshHappyPathHydratesOneEntityAndExitsZero(t *testing.T) {
 			if e.Inactive || e.HydratedAt == "" || e.Version == 0 {
 				t.Errorf("entity after refresh = %+v, want active and hydrated", e)
 			}
-			hist, herr := f.seed.ListEntityHistory("o/r", tc.typ, tc.id, 0)
+			hist, herr := f.seed.ListEntityHistory(context.Background(), "o/r", tc.typ, tc.id, 0)
 			if herr != nil || len(hist) != 1 || hist[0].Origin != refreshOrigin {
 				t.Errorf("history = %+v, %v; want one record at origin %q", hist, herr, refreshOrigin)
 			}
-			stats, serr := changes.ReadHydrationStats(f.seed, tc.typ)
+			stats, serr := changes.ReadHydrationStats(context.Background(), f.seed, tc.typ)
 			if serr != nil || stats.Hydrations != 1 || stats.Failures != 0 {
 				t.Errorf("hydration stats = %+v, %v; want 1 hydration, 0 failures", stats, serr)
 			}
@@ -152,7 +152,7 @@ func TestRefreshOfAnUnwatchedIssueAppendsNoRow(t *testing.T) {
 	if e.Inactive || e.HydratedAt == "" || e.Version == 0 {
 		t.Errorf("entity after refresh = %+v, want active and hydrated", e)
 	}
-	if hist, herr := f.seed.ListEntityHistory("o/r", "issue", "bd-1", 0); herr != nil || len(hist) != 0 {
+	if hist, herr := f.seed.ListEntityHistory(context.Background(), "o/r", "issue", "bd-1", 0); herr != nil || len(hist) != 0 {
 		t.Errorf("history = %+v, %v; want no record for an unwatched issue", hist, herr)
 	}
 }
@@ -181,11 +181,11 @@ func TestRefreshFailureKeepsSnapshotAndEntityStaysDue(t *testing.T) {
 	if after.Version != before.Version || after.HydratedAt != before.HydratedAt || after.Facts != before.Facts || after.Inactive {
 		t.Errorf("entity changed by a failed refresh:\nbefore %+v\nafter  %+v", before, after)
 	}
-	hist, herr := f.seed.ListEntityHistory("o/r", "issue", "bd-1", 0)
+	hist, herr := f.seed.ListEntityHistory(context.Background(), "o/r", "issue", "bd-1", 0)
 	if herr != nil || len(hist) != 1 {
 		t.Errorf("history = %d records, %v; want the one from the first refresh", len(hist), herr)
 	}
-	stats, serr := changes.ReadHydrationStats(f.seed, "issue")
+	stats, serr := changes.ReadHydrationStats(context.Background(), f.seed, "issue")
 	if serr != nil || stats.Hydrations != 2 || stats.Failures != 1 || stats.Degraded["bd-1"].Count != 1 {
 		t.Errorf("hydration stats = %+v, %v; want 2 hydrations, 1 failure, bd-1 degraded once", stats, serr)
 	}
@@ -212,7 +212,7 @@ func TestRefreshNotFoundFailsLoudly(t *testing.T) {
 			if out != "class=not_found\n" {
 				t.Errorf("stdout = %q, want only the line class=not_found", out)
 			}
-			if _, found, gerr := f.seed.GetEntity("o/r", tc.typ, tc.id); gerr != nil || found {
+			if _, found, gerr := f.seed.GetEntity(context.Background(), "o/r", tc.typ, tc.id); gerr != nil || found {
 				t.Errorf("a not-found refresh created an entity row: found=%v err=%v", found, gerr)
 			}
 		})
@@ -263,7 +263,7 @@ func TestRefreshDegradedHydrationExitsTwoAndKeepsSnapshot(t *testing.T) {
 	if after := f.entity("issue", "bd-1"); after.Version != before.Version || after.HydratedAt != before.HydratedAt {
 		t.Errorf("a degraded refresh changed the entity: %+v -> %+v", before, after)
 	}
-	stats, serr := changes.ReadHydrationStats(f.seed, "issue")
+	stats, serr := changes.ReadHydrationStats(context.Background(), f.seed, "issue")
 	if serr != nil || stats.Failures != 1 || stats.Degraded["bd-1"].Count != 1 {
 		t.Errorf("hydration stats = %+v, %v; want the degraded call recorded", stats, serr)
 	}
@@ -292,7 +292,7 @@ func TestRefreshChangeKindIsNeitherRemovedNorSweep(t *testing.T) {
 	if h.opts.ThreadActiveWindow != config.DefaultThreadActiveWindow {
 		t.Errorf("ThreadActiveWindow = %v, want the configured window", h.opts.ThreadActiveWindow)
 	}
-	stats, serr := changes.ReadHydrationStats(f.seed, "pr")
+	stats, serr := changes.ReadHydrationStats(context.Background(), f.seed, "pr")
 	if serr != nil || stats.Hydrations != 1 {
 		t.Errorf("hydration stats = %+v, %v; want the call recorded", stats, serr)
 	}
@@ -306,7 +306,7 @@ func TestRefreshEntityRecordsAHardErrorAndReturnsIt(t *testing.T) {
 	if _, err := refreshEntity(context.Background(), cfg, f.seed, "thread", "C1/1"); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want boom", err)
 	}
-	stats, serr := changes.ReadHydrationStats(f.seed, "thread")
+	stats, serr := changes.ReadHydrationStats(context.Background(), f.seed, "thread")
 	if serr != nil || stats.Hydrations != 1 || stats.Failures != 1 {
 		t.Errorf("hydration stats = %+v, %v", stats, serr)
 	}
@@ -488,14 +488,14 @@ func (f *backendFixture) calls() []string {
 
 func (f *backendFixture) setBackend(id, backend string) {
 	f.t.Helper()
-	if err := f.seed.SetEntityColumns("o/r", "issue", id, &backend, nil); err != nil {
+	if err := f.seed.SetEntityColumns(context.Background(), "o/r", "issue", id, &backend, nil); err != nil {
 		f.t.Fatal(err)
 	}
 }
 
 func (f *backendFixture) history(id string) []store.ChangeRecord {
 	f.t.Helper()
-	h, err := f.seed.ListEntityHistory("o/r", "issue", id, 0)
+	h, err := f.seed.ListEntityHistory(context.Background(), "o/r", "issue", id, 0)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestRefreshOwningBackendColumnPinsTheReadAndAppendsNoRowWhenUnwatched(t *te
 
 func TestRefreshNullColumnResolvesTheBackendFromTheConfiguredQueries(t *testing.T) {
 	f := newBackendFixture(t, "bd-5", "PROJ-2")
-	if err := f.seed.SetMeta("change_flow.watchset.issue.beads-q", `["bd-5"]`); err != nil {
+	if err := f.seed.SetMeta(context.Background(), "change_flow.watchset.issue.beads-q", `["bd-5"]`); err != nil {
 		t.Fatal(err)
 	}
 	f.write("show-bd-5.json", `{"protocolVersion":1,"schemaVersion":4,"result":{"id":"bd-5","title":"t","updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`)
@@ -559,10 +559,10 @@ func TestRefreshNullColumnResolvesTheBackendFromTheConfiguredQueries(t *testing.
 
 func TestRefreshAnIDServedByTwoBackendsFailsWithErrAmbiguousBackend(t *testing.T) {
 	f := newBackendFixture(t, "bd-9")
-	if err := f.seed.SetMeta("change_flow.watchset.issue.beads-q", `["bd-9"]`); err != nil {
+	if err := f.seed.SetMeta(context.Background(), "change_flow.watchset.issue.beads-q", `["bd-9"]`); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.seed.SetMeta("change_flow.watchset.issue.beads-q2", `["bd-9"]`); err != nil {
+	if err := f.seed.SetMeta(context.Background(), "change_flow.watchset.issue.beads-q2", `["bd-9"]`); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runRefreshCmd(t, "issue", "bd-9")
@@ -587,7 +587,7 @@ func TestRefreshWatchForwardsTheOptionAndDeliversTheFirstRow(t *testing.T) {
 	f.showJira("PROJ-1", "first", "")
 	f.write("show-PROJ-1.watch.json", strings.Replace(readFile(t, filepath.Join(f.dir, "show-PROJ-1.json")), `"as_of"`, `"entity_meta":{"watched":true},"as_of"`, 1))
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	if _, err := f.seed.ReadChanges("c1", "issue", 10, now); err != nil {
+	if _, err := f.seed.ReadChanges(context.Background(), "c1", "issue", 10, now); err != nil {
 		t.Fatal(err)
 	}
 	base := len(f.history("PROJ-1"))
@@ -605,7 +605,7 @@ func TestRefreshWatchForwardsTheOptionAndDeliversTheFirstRow(t *testing.T) {
 	if len(h) != base+1 || strings.Join(h[0].Kinds, ",") != "added" || h[0].Origin != refreshOrigin {
 		t.Fatalf("history = %+v, want one new added row at origin %q", h, refreshOrigin)
 	}
-	recs, err := f.seed.ReadChanges("c1", "issue", 10, now)
+	recs, err := f.seed.ReadChanges(context.Background(), "c1", "issue", 10, now)
 	if err != nil || len(recs) != base+1 || strings.Join(recs[len(recs)-1].Kinds, ",") != "added" {
 		t.Fatalf("ReadChanges = %+v, %v; want the seed record then the added row", recs, err)
 	}
@@ -765,7 +765,7 @@ func TestRefreshOfAnUnchangedIssueTwiceAppendsNoRowAndKeepsTheVersion(t *testing
 		t.Fatalf("first refresh: %v", err)
 	}
 	rows := func() int {
-		h, err := f.seed.ListEntityHistory("o/r", "issue", "bd-1", 0)
+		h, err := f.seed.ListEntityHistory(context.Background(), "o/r", "issue", "bd-1", 0)
 		if err != nil {
 			t.Fatal(err)
 		}

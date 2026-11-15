@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -32,7 +33,7 @@ func rankOpts() RankOptions {
 func (f *fixture) rank(opts RankOptions) Ranking {
 	f.t.Helper()
 	in := f.inputs()
-	return Rank(in, Candidates(in), opts)
+	return Rank(context.Background(), in, Candidates(in), opts)
 }
 
 func rowKeys(r Ranking) []Key {
@@ -173,7 +174,7 @@ func TestFocusDefaultDateIsInjectedClockLocalDay(t *testing.T) {
 
 	// 02:00 UTC on Oct 10 is 22:00 on Oct 9 in New York: today is Oct 9, so
 	// a due date of Oct 9 is due today, not overdue.
-	r := Rank(in, set, RankOptions{Clock: interpret.FixedClock(time.Date(2026, 10, 10, 2, 0, 0, 0, time.UTC))})
+	r := Rank(context.Background(), in, set, RankOptions{Clock: interpret.FixedClock(time.Date(2026, 10, 10, 2, 0, 0, 0, time.UTC))})
 	if got := r.row(t, yesterday).Tier; got != TierNotStarted {
 		t.Errorf("due Oct 9 on the local day Oct 9: tier = %q, want not_started", got)
 	}
@@ -182,18 +183,18 @@ func TestFocusDefaultDateIsInjectedClockLocalDay(t *testing.T) {
 	}
 
 	// 05:00 UTC on Oct 10 is 01:00 on Oct 10 in New York: Oct 9 is overdue.
-	r = Rank(in, set, RankOptions{Clock: interpret.FixedClock(time.Date(2026, 10, 10, 5, 0, 0, 0, time.UTC))})
+	r = Rank(context.Background(), in, set, RankOptions{Clock: interpret.FixedClock(time.Date(2026, 10, 10, 5, 0, 0, 0, time.UTC))})
 	if got := r.row(t, yesterday).Tier; got != TierOverdue {
 		t.Errorf("due Oct 9 on the local day Oct 10: tier = %q, want overdue", got)
 	}
 
 	// No clock option: Inputs.Now (12:00 UTC Oct 10 = 08:00 New York).
-	r = Rank(in, set, RankOptions{})
+	r = Rank(context.Background(), in, set, RankOptions{})
 	if got := r.row(t, yesterday).Tier; got != TierOverdue {
 		t.Errorf("default clock = Inputs.Now: tier = %q, want overdue", got)
 	}
 	// An explicit Date wins over the clock.
-	r = Rank(in, set, RankOptions{Date: time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC), Clock: interpret.FixedClock(fixtureNow)})
+	r = Rank(context.Background(), in, set, RankOptions{Date: time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC), Clock: interpret.FixedClock(fixtureNow)})
 	if got := r.row(t, yesterday).Tier; got != TierNotStarted {
 		t.Errorf("explicit --date Oct 9: tier = %q, want not_started", got)
 	}
@@ -212,7 +213,7 @@ func TestFocusRankStableAcrossRepeatedCalls(t *testing.T) {
 	f.link(b1, pr1, relationWork)
 	in := f.inputs()
 	set := Candidates(in)
-	want := Rank(in, set, rankOpts())
+	want := Rank(context.Background(), in, set, rankOpts())
 	if len(want.Rows) < 6 {
 		t.Fatalf("only %d rows: the fixture does not exercise the rank", len(want.Rows))
 	}
@@ -223,7 +224,7 @@ func TestFocusRankStableAcrossRepeatedCalls(t *testing.T) {
 		rng.Shuffle(len(shuffled.Candidates), func(a, b int) {
 			shuffled.Candidates[a], shuffled.Candidates[b] = shuffled.Candidates[b], shuffled.Candidates[a]
 		})
-		if got := Rank(in, shuffled, rankOpts()); !reflect.DeepEqual(got, want) {
+		if got := Rank(context.Background(), in, shuffled, rankOpts()); !reflect.DeepEqual(got, want) {
 			t.Fatalf("shuffle %d changed the ranking:\n got  %v\n want %v", i, rowKeys(got), rowKeys(want))
 		}
 	}
@@ -291,7 +292,7 @@ func TestOverdueTierInnerOrder(t *testing.T) {
 		in := f.inputs()
 		// The PR is started, so it leads the overdue tier only if it is overdue;
 		// it has no due date and is therefore not in this tier at all.
-		r := Rank(in, Candidates(in), rankOpts())
+		r := Rank(context.Background(), in, Candidates(in), rankOpts())
 		if got := r.row(t, p).Tier; got != TierStarted {
 			t.Errorf("PR tier = %q, want started", got)
 		}
@@ -517,7 +518,7 @@ func TestAgeTrackerCreationElseFirstSeen(t *testing.T) {
 		ent.FirstSeenAt = ts
 		in.Entities[k] = ent
 	}
-	r := Rank(in, Candidates(in), rankOpts())
+	r := Rank(context.Background(), in, Candidates(in), rankOpts())
 	// Oldest first by the effective age: a (Jan, tracker), b (Feb, first-seen),
 	// c (Mar, first-seen), d (May, tracker), then e (no age at all).
 	wantOrder(t, r, a, b, c, d, e)
@@ -547,7 +548,7 @@ func TestAgeReadsJiraOffsetCreatedAt(t *testing.T) {
 		ent.FirstSeenAt = ts
 		in.Entities[k] = ent
 	}
-	r := Rank(in, Candidates(in), rankOpts())
+	r := Rank(context.Background(), in, Candidates(in), rankOpts())
 	wantOrder(t, r, a, b, c)
 	if r.Inputs.AgeFallback != 0 {
 		t.Errorf("AgeFallback = %d, want 0 (every +0000/+0200/Z created_at is readable)", r.Inputs.AgeFallback)
@@ -591,7 +592,7 @@ func TestPRRanksOnFirstSeenAndCountsAsFallback(t *testing.T) {
 		ent.FirstSeenAt = ts
 		in.Entities[k] = ent
 	}
-	r := Rank(in, Candidates(in), rankOpts())
+	r := Rank(context.Background(), in, Candidates(in), rankOpts())
 	wantOrder(t, r, old, young)
 	if r.Inputs.AgeFallback != 2 {
 		t.Errorf("AgeFallback = %d, want 2 (every PR ranks on first-seen)", r.Inputs.AgeFallback)
@@ -822,7 +823,7 @@ func TestCapLineAndForcePullRaisesCap(t *testing.T) {
 	}
 	base := rankOpts()
 	base.Cap = 3
-	r3 := Rank(in, set, base)
+	r3 := Rank(context.Background(), in, set, base)
 	if r3.Cap != 3 || inPlan(r3) != 3 {
 		t.Errorf("cap 3: Cap = %d, in plan = %d", r3.Cap, inPlan(r3))
 	}
@@ -830,7 +831,7 @@ func TestCapLineAndForcePullRaisesCap(t *testing.T) {
 	// next row joins the plan. (The lock transaction that records it is the
 	// select and pull verbs' own test.)
 	base.Cap = 4
-	r4 := Rank(in, set, base)
+	r4 := Rank(context.Background(), in, set, base)
 	if !reflect.DeepEqual(rowKeys(r3), rowKeys(r4)) {
 		t.Errorf("the cap moved the order: %v vs %v", rowKeys(r3), rowKeys(r4))
 	}
@@ -839,12 +840,12 @@ func TestCapLineAndForcePullRaisesCap(t *testing.T) {
 	}
 	// Default cap.
 	base.Cap = 0
-	if r := Rank(in, set, base); r.Cap != DefaultCap || inPlan(r) != DefaultCap {
+	if r := Rank(context.Background(), in, set, base); r.Cap != DefaultCap || inPlan(r) != DefaultCap {
 		t.Errorf("default: Cap = %d, in plan = %d, want %d", r.Cap, inPlan(r), DefaultCap)
 	}
 	// A cap above the row count is fine.
 	base.Cap = 50
-	if r := Rank(in, set, base); inPlan(r) != len(keys) {
+	if r := Rank(context.Background(), in, set, base); inPlan(r) != len(keys) {
 		t.Errorf("cap 50: in plan = %d, want all %d", inPlan(r), len(keys))
 	}
 }
@@ -864,7 +865,7 @@ func TestFinishedRowKeepsItsPlaceAndDoesNotUseTheCap(t *testing.T) {
 	set.Candidates = append(set.Candidates, Candidate{Key: done, Kind: KindPR, Seed: true})
 	opts := rankOpts()
 	opts.Cap = 2
-	r := Rank(in, set, opts)
+	r := Rank(context.Background(), in, set, opts)
 	row := r.row(t, done)
 	if !row.Finished || row.InPlan {
 		t.Errorf("finished row = %+v, want Finished and not InPlan", row)
@@ -959,7 +960,7 @@ func TestPositionsAreDenseAndDecidingKeysChain(t *testing.T) {
 			t.Errorf("row %d deciding key = %q", i, row.DecidingKey)
 		}
 	}
-	if empty := Rank(Inputs{Config: fixtureConfig()}, CandidateSet{}, rankOpts()); len(empty.Rows) != 0 || empty.Cap != DefaultCap {
+	if empty := Rank(context.Background(), Inputs{Config: fixtureConfig()}, CandidateSet{}, rankOpts()); len(empty.Rows) != 0 || empty.Cap != DefaultCap {
 		t.Errorf("empty ranking = %+v", empty)
 	}
 }
@@ -974,14 +975,14 @@ func TestRankDoesNotMutateItsInputs(t *testing.T) {
 	before := fmt.Sprintf("%v", in)
 	set := Candidates(in)
 	setBefore := fmt.Sprintf("%v", set)
-	Rank(in, set, rankOpts())
+	Rank(context.Background(), in, set, rankOpts())
 	if fmt.Sprintf("%v", in) != before || fmt.Sprintf("%v", set) != setBefore {
 		t.Error("Rank changed its inputs")
 	}
 }
 
 func TestRankOfNothingNeedsNoConfig(t *testing.T) {
-	r := Rank(Inputs{}, CandidateSet{}, RankOptions{})
+	r := Rank(context.Background(), Inputs{}, CandidateSet{}, RankOptions{})
 	if len(r.Rows) != 0 || r.Cap != DefaultCap {
 		t.Errorf("ranking = %+v", r)
 	}
@@ -1002,7 +1003,7 @@ func TestAbsorbingItselfCoversNothing(t *testing.T) {
 	k := f.bead("bd-1", issueSpec{})
 	in := f.inputs()
 	in.Absorbed = map[Key]Key{k: k}
-	if r := Rank(in, Candidates(in), rankOpts()); len(r.Covered) != 0 {
+	if r := Rank(context.Background(), in, Candidates(in), rankOpts()); len(r.Covered) != 0 {
 		t.Errorf("Covered = %v, want none for a key absorbed into itself", r.Covered)
 	}
 }
@@ -1016,7 +1017,7 @@ func TestCandidateMissingFromInputsStillRanks(t *testing.T) {
 	in := f.inputs()
 	set := Candidates(in)
 	set.Candidates = append(set.Candidates, Candidate{Key: ghost, Kind: KindBead})
-	r := Rank(in, set, rankOpts())
+	r := Rank(context.Background(), in, set, rankOpts())
 	if r.row(t, ghost).Tier != TierNotStarted || r.row(t, ghost).Finished || r.row(t, real).Position != 1 {
 		t.Errorf("rows = %+v", r.Rows)
 	}
@@ -1042,7 +1043,7 @@ func TestFinishedAndStartedOfHandBuiltCandidates(t *testing.T) {
 			set.Candidates[i].Kind = Kind("other")
 		}
 	}
-	r := Rank(in, set, rankOpts())
+	r := Rank(context.Background(), in, set, rankOpts())
 	for k, want := range map[Key]bool{mergedFlag: true, closedState: true, doneJira: true, openPR: false, unknownKind: false} {
 		if got := r.row(t, k).Finished; got != want {
 			t.Errorf("%v Finished = %v, want %v", k, got, want)
@@ -1121,17 +1122,17 @@ func TestMemReaderReadsTheInputs(t *testing.T) {
 	)
 	m := memReader{in: in}
 	for _, typ := range []string{"pr", "issue"} {
-		if got, _ := m.ListXrefLinksFrom("", typ, "same"); len(got) != 1 || got[0].FromType != typ {
+		if got, _ := m.ListXrefLinksFrom(context.Background(), "", typ, "same"); len(got) != 1 || got[0].FromType != typ {
 			t.Errorf("links from (%s, same) = %+v, want only the %s one", typ, got, typ)
 		}
-		if got, _ := m.ListXrefLinksTo("", typ, "other"); len(got) != 1 || got[0].ToType != typ {
+		if got, _ := m.ListXrefLinksTo(context.Background(), "", typ, "other"); len(got) != 1 || got[0].ToType != typ {
 			t.Errorf("links to (%s, other) = %+v, want only the %s one", typ, got, typ)
 		}
 	}
-	if err := m.RequireNewSchema(); err != nil {
+	if err := m.RequireNewSchema(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	ents, _ := m.ListEntities()
+	ents, _ := m.ListEntities(context.Background())
 	byID := map[string]store.Entity{}
 	for _, e := range ents {
 		byID[e.EntityID] = e
@@ -1140,24 +1141,24 @@ func TestMemReaderReadsTheInputs(t *testing.T) {
 		byID["o/r#1"].EntityType != "pr" {
 		t.Errorf("entities = %+v: type and id come from the key, an empty repo from the inputs", ents)
 	}
-	from, _ := m.ListXrefLinksFrom("", b.Type, b.ID)
+	from, _ := m.ListXrefLinksFrom(context.Background(), "", b.Type, b.ID)
 	if len(from) != 1 || from[0].ToID != c.ID {
 		t.Errorf("links from %v = %+v, want only the one leaving it", b, from)
 	}
-	if got, _ := m.ListXrefLinksFrom("", b.Type, "o/r#9"); len(got) != 0 {
+	if got, _ := m.ListXrefLinksFrom(context.Background(), "", b.Type, "o/r#9"); len(got) != 0 {
 		t.Errorf("links from an unknown id = %+v", got)
 	}
-	if got, _ := m.ListXrefLinksFrom("", c.Type, b.ID); len(got) != 0 {
+	if got, _ := m.ListXrefLinksFrom(context.Background(), "", c.Type, b.ID); len(got) != 0 {
 		t.Errorf("links from a matching id of another type = %+v", got)
 	}
-	to, _ := m.ListXrefLinksTo("", b.Type, b.ID)
+	to, _ := m.ListXrefLinksTo(context.Background(), "", b.Type, b.ID)
 	if len(to) != 2 {
 		t.Errorf("links to %v = %+v, want the two arriving", b, to)
 	}
-	if got, _ := m.ListXrefLinksTo("", b.Type, "o/r#9"); len(got) != 0 {
+	if got, _ := m.ListXrefLinksTo(context.Background(), "", b.Type, "o/r#9"); len(got) != 0 {
 		t.Errorf("links to an unknown id = %+v", got)
 	}
-	if got, _ := m.ListXrefLinksTo("", c.Type, b.ID); len(got) != 0 {
+	if got, _ := m.ListXrefLinksTo(context.Background(), "", c.Type, b.ID); len(got) != 0 {
 		t.Errorf("links to a matching id of another type = %+v", got)
 	}
 }

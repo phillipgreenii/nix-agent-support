@@ -195,7 +195,7 @@ func TestWatchedSourceNotObservedNoDataAlertsOnlyWhilePgDeskIsUp(t *testing.T) {
 }
 
 func watchedSourceOption(st *store.Store, now time.Time, queries map[string][]string) metrics.ChangeFlowOption {
-	return metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedFromStore(st, queries, func() time.Time { return now }))
+	return metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedFromStore(context.Background(), st, queries, func() time.Time { return now }))
 }
 
 // TestWatchedSourceNotObservedRuleAgreesWithTheEmittedSeries feeds the model
@@ -208,7 +208,7 @@ func TestWatchedSourceNotObservedRuleAgreesWithTheEmittedSeries(t *testing.T) {
 	queries := map[string][]string{"jira-a": {"mine", "team"}}
 	set := func(q string, at time.Time) {
 		t.Helper()
-		if err := st.SetMeta(changes.MetaFeedObservedPrefix+"jira-a."+q, at.Format(time.RFC3339)); err != nil {
+		if err := st.SetMeta(context.Background(), changes.MetaFeedObservedPrefix+"jira-a."+q, at.Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -267,21 +267,21 @@ func TestBeadsWatchedSourceNotObservedRuleAgreesWithTheEmittedSeries(t *testing.
 	cfg.Watch.Issue.Queries = []string{"open"}
 	cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"open": {Instance: "beads-a"}}
 	opt := func(s *store.Store) metrics.ChangeFlowOption {
-		return metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedForConfig(s, cfg, func() time.Time { return now }))
+		return metrics.WithWatchedSourceObserved(metrics.WatchedSourceObservedForConfig(context.Background(), s, cfg, func() time.Time { return now }))
 	}
-	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", now.Add(-48*time.Hour).Format(time.RFC3339)); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaListingOKPrefix+"open", now.Add(-48*time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	fp, yes := "F1", true
-	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "bd-o", Facts: `{}`, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "bd-o", Facts: `{}`, AsOf: "x"},
 		0, now.Add(-time.Hour).Format(time.RFC3339), true, &fp, []string{"reconcile"}, "sweep", now.Add(-time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	backend, okAt := "beads-a", now.Add(-30*time.Minute).Format(time.RFC3339Nano)
-	if err := st.SetEntityColumns("o/r", "issue", "bd-o", &backend, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "bd-o", &backend, &yes); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetEntityReadTimes("o/r", "issue", "bd-o", nil, &okAt); err != nil {
+	if err := st.SetEntityReadTimes(context.Background(), "o/r", "issue", "bd-o", nil, &okAt); err != nil {
 		t.Fatal(err)
 	}
 	series := emittedOutcome(t, metrics.MetricWatchedSourceObservedAge, opt(st))
@@ -291,7 +291,7 @@ func TestBeadsWatchedSourceNotObservedRuleAgreesWithTheEmittedSeries(t *testing.
 	if got, _ := outcomeFiring(evalOutcomeExpr(series, true), watchedSourceBoundSeconds, nd); len(got) != 1 || got[0] != "beads-a" {
 		t.Errorf("a two day old listing: firing = %v, want [beads-a]", got)
 	}
-	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", now.Add(-time.Minute).Format(time.RFC3339)); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaListingOKPrefix+"open", now.Add(-time.Minute).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	series = emittedOutcome(t, metrics.MetricWatchedSourceObservedAge, opt(st))

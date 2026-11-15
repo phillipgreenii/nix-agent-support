@@ -1,6 +1,7 @@
 package dependency
 
 import (
+	"context"
 	"sort"
 )
 
@@ -42,14 +43,14 @@ func NewStackSourceWith(res *Resolver) *StackSource {
 // StackRoot returns the id of the root PR of the stack the PR belongs to; ok
 // is false when it is in no stack. Every member of one stack gets the same
 // root.
-func (s *StackSource) StackRoot(entityType, id string) (string, bool, error) {
+func (s *StackSource) StackRoot(ctx context.Context, entityType, id string) (string, bool, error) {
 	if entityType != TypePR || id == "" {
 		return "", false, nil
 	}
 	if a, seen := s.roots[id]; seen {
 		return a.root, a.ok, nil
 	}
-	state, err := s.res.ctx.stateOf(id)
+	state, err := s.res.ctx.stateOf(ctx, id)
 	if err != nil {
 		return "", false, err
 	}
@@ -57,7 +58,7 @@ func (s *StackSource) StackRoot(entityType, id string) (string, bool, error) {
 		s.roots[id] = stackAnswer{}
 		return "", false, nil
 	}
-	members, hasDep, err := s.component(id)
+	members, hasDep, err := s.component(ctx, id)
 	if err != nil {
 		return "", false, err
 	}
@@ -83,18 +84,18 @@ func (s *StackSource) StackRoot(entityType, id string) (string, bool, error) {
 
 // component walks the open dependency graph from id and returns the sorted
 // member ids and, per member, whether it depends on another member.
-func (s *StackSource) component(id string) ([]string, map[string]bool, error) {
+func (s *StackSource) component(ctx context.Context, id string) ([]string, map[string]bool, error) {
 	seen := map[string]bool{id: true}
 	hasDep := map[string]bool{}
 	queue := []string{id}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		deps, err := s.res.OpenDependenciesOf(TypePR, cur)
+		deps, err := s.res.OpenDependenciesOf(ctx, TypePR, cur)
 		if err != nil {
 			return nil, nil, err
 		}
-		dependents, err := s.res.DependentsOf(TypePR, cur)
+		dependents, err := s.res.DependentsOf(ctx, TypePR, cur)
 		if err != nil {
 			return nil, nil, err
 		}

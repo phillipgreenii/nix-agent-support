@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -85,7 +86,7 @@ func TestChangesFeedEndToEndOneRow(t *testing.T) {
 	if len(env.Records) != 1 || env.Records[0].ID != "J-1" {
 		t.Fatalf("records = %+v", env.Records)
 	}
-	rows, lerr := f.seed.ListChangesAfter("issue", 0, 0)
+	rows, lerr := f.seed.ListChangesAfter(context.Background(), "issue", 0, 0)
 	if lerr != nil || len(rows) != 1 {
 		t.Fatalf("change rows = %+v, %v", rows, lerr)
 	}
@@ -126,10 +127,10 @@ func TestChangesFeedEndToEndOneRow(t *testing.T) {
 	if callIndex(calls, "issue list --query jira-q --backend "+feedTestInstance) < 0 || callIndex(calls, "issue health --backend "+feedTestInstance) < 0 {
 		t.Errorf("calls = %v; want the unflagged-member read (health, then list of jira-q)", calls)
 	}
-	if v, found, _ := f.seed.GetMeta("change_flow.unflagged." + feedTestInstance); !found || !strings.Contains(v, `"count":0`) {
+	if v, found, _ := f.seed.GetMeta(context.Background(), "change_flow.unflagged."+feedTestInstance); !found || !strings.Contains(v, `"count":0`) {
 		t.Errorf("unflagged record = %q %v, want a stored count of 0", v, found)
 	}
-	if v, found, _ := f.seed.GetMeta("change_flow.feed_observed." + feedTestInstance + ".jira-q"); !found || v != "2026-10-01T11:59:00Z" {
+	if v, found, _ := f.seed.GetMeta(context.Background(), "change_flow.feed_observed."+feedTestInstance+".jira-q"); !found || v != "2026-10-01T11:59:00Z" {
 		t.Errorf("feed_observed = %q %v", v, found)
 	}
 }
@@ -208,10 +209,10 @@ exit 99`, f.dir))
 		}
 	}
 	// The beads query keeps its persisted watched set; the owning one has none.
-	if _, found, _ := f.seed.GetMeta("change_flow.watchset.issue.beads-q"); !found {
+	if _, found, _ := f.seed.GetMeta(context.Background(), "change_flow.watchset.issue.beads-q"); !found {
 		t.Error("beads watch set missing")
 	}
-	if _, found, _ := f.seed.GetMeta("change_flow.watchset.issue.jira-q"); found {
+	if _, found, _ := f.seed.GetMeta(context.Background(), "change_flow.watchset.issue.jira-q"); found {
 		t.Error("an owning query kept a watch set")
 	}
 }

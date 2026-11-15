@@ -49,7 +49,7 @@ func TestLaneRecordWritesStateForTheConfiguredModeThroughTheRealStore(t *testing
 	if !strings.Contains(out, "recorded pr o/r#1") {
 		t.Errorf("stdout %q", out)
 	}
-	snap, err := lanestate.Read(seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	snap, err := lanestate.Read(context.Background(), seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestLaneRecordWritesStateForTheConfiguredModeThroughTheRealStore(t *testing
 		snap.Decisions[lanestate.Decision{Rule: "all.closed", Action: "close", Outcome: "applied"}] != 1 {
 		t.Errorf("snapshot after the record: %+v", snap)
 	}
-	if v, found, _ := seed.GetMeta(lanestate.KeyPRPrefix + "o/r#1"); !found || !strings.Contains(v, `"residual":2`) {
+	if v, found, _ := seed.GetMeta(context.Background(), lanestate.KeyPRPrefix+"o/r#1"); !found || !strings.Contains(v, `"residual":2`) {
 		t.Errorf("per-PR key value %q found=%v", v, found)
 	}
 }
@@ -78,7 +78,7 @@ func TestLaneRecordRejectsABadDocumentAndWritesNothing(t *testing.T) {
 			if _, err := execLaneRecord(t, doc); err == nil {
 				t.Fatal("lane-record accepted a bad document")
 			}
-			rows, err := seed.ListMetaPrefix(lanestate.KeyPrefix)
+			rows, err := seed.ListMetaPrefix(context.Background(), lanestate.KeyPrefix)
 			if err != nil || len(rows) != 0 {
 				t.Errorf("wrote %v (err %v), want nothing", rows, err)
 			}
@@ -118,11 +118,11 @@ func TestMarkInactiveVerbWorksInPlanModeAndCountsOnce(t *testing.T) {
 	if out := run(); !strings.Contains(out, "nothing to do") {
 		t.Errorf("second run stdout %q", out)
 	}
-	e, found, err := seed.GetEntity("o/r", "pr", "o/r#1")
+	e, found, err := seed.GetEntity(context.Background(), "o/r", "pr", "o/r#1")
 	if err != nil || !found || !e.Inactive {
 		t.Errorf("entity %+v found=%v err=%v, want inactive", e, found, err)
 	}
-	snap, err := lanestate.Read(seed, time.Now())
+	snap, err := lanestate.Read(context.Background(), seed, time.Now())
 	if err != nil || snap.MarkedInactive != 1 {
 		t.Errorf("marked-inactive counter %d (err %v), want 1", snap.MarkedInactive, err)
 	}
@@ -148,7 +148,7 @@ func TestLaneRecordTakesTheWritersTimingsMemberAndStillTakesADocumentWithoutOne(
 	if _, err := execLaneRecord(t, `{"pr":"1","mode":"apply","timings":{"bogus_ms":1}}`); err == nil {
 		t.Fatal("an unknown timings member was accepted")
 	}
-	snap, err := lanestate.Read(seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	snap, err := lanestate.Read(context.Background(), seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,14 +172,14 @@ func TestLaneRecordSkipDocumentBumpsOnlyTheSkipCounter(t *testing.T) {
 	if _, err := execLaneRecord(t, `{"pr":"o/r#1","mode":"apply","skip_reason":"own-origin"}`); err != nil {
 		t.Fatalf("lane-record skip: %v", err)
 	}
-	snap, err := lanestate.Read(seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
+	snap, err := lanestate.Read(context.Background(), seed, time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if snap.Skips["own-origin"] != 1 || snap.LastRunAt != "" || snap.FlipAt != "" || snap.LaneMode != "off" || len(snap.Runs) != 0 {
 		t.Errorf("snapshot after a skip: %+v", snap)
 	}
-	if v, found, _ := seed.GetMeta(lanestate.KeyPRPrefix + "o/r#1"); found {
+	if v, found, _ := seed.GetMeta(context.Background(), lanestate.KeyPRPrefix+"o/r#1"); found {
 		t.Errorf("a skip wrote the PR's state: %q", v)
 	}
 	if _, err := execLaneRecord(t, `{"pr":"o/r#1","mode":"apply","skip_reason":"other"}`); err == nil {

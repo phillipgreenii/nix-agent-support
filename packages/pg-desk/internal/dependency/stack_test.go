@@ -1,6 +1,7 @@
 package dependency
 
 import (
+	"context"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -8,7 +9,7 @@ import (
 
 func stackRoot(t *testing.T, s *StackSource, id string) (string, bool) {
 	t.Helper()
-	root, ok, err := s.StackRoot("pr", id)
+	root, ok, err := s.StackRoot(context.Background(), "pr", id)
 	if err != nil {
 		t.Fatalf("StackRoot(%s): %v", id, err)
 	}
@@ -56,7 +57,7 @@ func TestStackRoot_LonePRIsNotAStack(t *testing.T) {
 func TestStackRoot_OtherEntityTypesHaveNone(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	seedStack(t, st)
-	root, ok, err := NewStackSource(st, testRepo).StackRoot("issue", prID(1))
+	root, ok, err := NewStackSource(st, testRepo).StackRoot(context.Background(), "issue", prID(1))
 	if err != nil || ok || root != "" {
 		t.Errorf("StackRoot(issue) = %q, %v, %v; want none", root, ok, err)
 	}

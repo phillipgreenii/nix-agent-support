@@ -2,6 +2,7 @@ package changes
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -27,7 +28,7 @@ func TestRunPersistsOneListingStatusPerConsultedQuery(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ReadListingStatuses(st, "issue")
+	got, err := ReadListingStatuses(context.Background(), st, "issue")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestRunPersistsOneListingStatusPerConsultedQuery(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("statuses = %+v\nwant     %+v", got, want)
 	}
-	raw, found, _ := st.GetMeta("change_flow.listing.issue.degq")
+	raw, found, _ := st.GetMeta(context.Background(), "change_flow.listing.issue.degq")
 	if !found || raw != `{"status":"degraded","reason":"`+ReasonListTruncated+`","at":"`+at+`"}` {
 		t.Errorf("raw value = %q (found %v)", raw, found)
 	}
@@ -52,7 +53,7 @@ func TestRunOverwritesAFailedListingStatusWithOK(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := ReadListingStatuses(st, "issue"); len(got) != 2 || got[0].Query != "open" || got[0].Status != StatusFailed {
+	if got, _ := ReadListingStatuses(context.Background(), st, "issue"); len(got) != 2 || got[0].Query != "open" || got[0].Status != StatusFailed {
 		t.Fatalf("after failure = %+v", got)
 	}
 	e.Now = func() time.Time { return time.Date(2026, 10, 1, 13, 0, 0, 0, time.UTC) }
@@ -60,7 +61,7 @@ func TestRunOverwritesAFailedListingStatusWithOK(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := ReadListingStatuses(st, "issue")
+	got, _ := ReadListingStatuses(context.Background(), st, "issue")
 	if len(got) != 2 || got[0] != (ListingStatus{Query: "open", Status: StatusOK, At: "2026-10-01T13:00:00Z"}) {
 		t.Fatalf("after recovery = %+v", got)
 	}
@@ -72,7 +73,7 @@ func TestTotalFailureStillPersistsListingStatuses(t *testing.T) {
 	if _, _, err := runTick(t, e); !errors.Is(err, ErrTotalFailure) {
 		t.Fatalf("err = %v", err)
 	}
-	got, _ := ReadListingStatuses(st, "issue")
+	got, _ := ReadListingStatuses(context.Background(), st, "issue")
 	if len(got) != 1 || got[0].Status != StatusFailed || got[0].Reason != "down" {
 		t.Fatalf("statuses = %+v", got)
 	}
@@ -84,10 +85,10 @@ func TestCachedCallWritesNoListingStatus(t *testing.T) {
 	if _, _, err := runTick(t, e, Options{EntityType: "issue", Consumer: "router", Cached: true}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := ReadListingStatuses(st, "issue"); len(got) != 0 {
+	if got, _ := ReadListingStatuses(context.Background(), st, "issue"); len(got) != 0 {
 		t.Errorf("--cached wrote %+v", got)
 	}
-	if all, _ := st.ListMetaPrefix("change_flow.listing."); len(all) != 0 {
+	if all, _ := st.ListMetaPrefix(context.Background(), "change_flow.listing."); len(all) != 0 {
 		t.Errorf("--cached wrote meta %v", all)
 	}
 }
@@ -98,14 +99,14 @@ func TestQueryFlagLeavesOtherQueriesListingUntouched(t *testing.T) {
 	if _, _, err := runTick(t, e); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := ReadListingStatuses(st, "issue")
+	before, _ := ReadListingStatuses(context.Background(), st, "issue")
 
 	e.Now = func() time.Time { return time.Date(2026, 10, 1, 14, 0, 0, 0, time.UTC) }
 	e.Lister = queryLister{"a": {res: okListing()}, "b": {err: errors.New("must not be consulted")}}
 	if _, _, err := runTick(t, e, Options{EntityType: "issue", Consumer: "router", Query: "a"}); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := ReadListingStatuses(st, "issue")
+	after, _ := ReadListingStatuses(context.Background(), st, "issue")
 	if len(after) != 2 || after[0].Query != "a" || after[0].Status != StatusOK || after[0].At != "2026-10-01T14:00:00Z" {
 		t.Fatalf("a = %+v", after)
 	}
@@ -119,12 +120,12 @@ func TestListingWriteFailureNeverFailsTheCall(t *testing.T) {
 	var warn bytes.Buffer
 	e.Warn = &warn
 	e.Lister = fakeLister{res: okListing()}
-	e.setMeta = func(string, string) error { return errors.New("disk full") }
+	e.setMeta = func(context.Context, string, string) error { return errors.New("disk full") }
 	env, out, err := runTick(t, e)
 	if err != nil || out.Partial || len(env.Sources) != 1 || env.Sources[0].Status != StatusOK {
 		t.Fatalf("env = %+v out = %+v err = %v", env, out, err)
 	}
-	if got, _ := ReadListingStatuses(st, "issue"); len(got) != 0 {
+	if got, _ := ReadListingStatuses(context.Background(), st, "issue"); len(got) != 0 {
 		t.Errorf("wrote %+v despite the failing setter", got)
 	}
 	if !bytes.Contains(warn.Bytes(), []byte("persist listing status")) {
@@ -141,11 +142,11 @@ func TestReadListingStatusesSkipsUndecodableAndScopesToType(t *testing.T) {
 		"change_flow.listing.issue.empty": `{"reason":"x"}`,
 		"change_flow.listing.pr.mine":     `{"status":"ok","reason":"","at":"t3"}`,
 	} {
-		if err := st.SetMeta(k, v); err != nil {
+		if err := st.SetMeta(context.Background(), k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, err := ReadListingStatuses(st, "issue")
+	got, err := ReadListingStatuses(context.Background(), st, "issue")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,26 +157,26 @@ func TestReadListingStatusesSkipsUndecodableAndScopesToType(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v want %+v", got, want)
 	}
-	if none, err := ReadListingStatuses(st, "thread"); err != nil || len(none) != 0 {
+	if none, err := ReadListingStatuses(context.Background(), st, "thread"); err != nil || len(none) != 0 {
 		t.Errorf("thread = %+v, %v", none, err)
 	}
 }
 
 func TestWatchedIDsUnionsTheConfiguredQueriesAndReportsKnown(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	if ids, known := WatchedIDs(st, []string{"a", "b"}, "pr", nil); known || len(ids) != 0 {
+	if ids, known := WatchedIDs(context.Background(), st, []string{"a", "b"}, "pr", nil); known || len(ids) != 0 {
 		t.Fatalf("nothing recorded: ids %v known %v", ids, known)
 	}
-	if err := saveWatchSet(st, "pr", "a", map[string]bool{"x": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "pr", "a", map[string]bool{"x": true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "pr", "b", map[string]bool{"y": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "pr", "b", map[string]bool{"y": true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "pr", "unconfigured", map[string]bool{"z": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "pr", "unconfigured", map[string]bool{"z": true}); err != nil {
 		t.Fatal(err)
 	}
-	ids, known := WatchedIDs(st, []string{"a", "b", "never-ran"}, "pr", nil)
+	ids, known := WatchedIDs(context.Background(), st, []string{"a", "b", "never-ran"}, "pr", nil)
 	if !known || len(ids) != 2 || !ids["x"] || !ids["y"] {
 		t.Fatalf("ids %v known %v, want the union of a and b", ids, known)
 	}
@@ -183,7 +184,7 @@ func TestWatchedIDsUnionsTheConfiguredQueriesAndReportsKnown(t *testing.T) {
 
 func listingOKOf(t *testing.T, st *store.Store, query string) (string, bool) {
 	t.Helper()
-	v, found, err := st.GetMeta(MetaListingOKPrefix + query)
+	v, found, err := st.GetMeta(context.Background(), MetaListingOKPrefix+query)
 	if err != nil {
 		t.Fatal(err)
 	}

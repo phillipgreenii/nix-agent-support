@@ -49,6 +49,8 @@ func init() {
 }
 
 func execLinks(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
 	refs := append([]string(nil), args...)
 	if linksFlags.stdin {
 		fromStdin, err := readRefLines(cmd.InOrStdin())
@@ -73,7 +75,7 @@ func execLinks(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	res, err := links.Resolve(links.Deps{
+	res, err := links.Resolve(ctx, links.Deps{
 		Store:             st,
 		Repo:              cfg.Repos[0].Remote,
 		Patterns:          cfg.TicketPatterns,

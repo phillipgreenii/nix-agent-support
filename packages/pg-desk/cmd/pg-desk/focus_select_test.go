@@ -52,7 +52,7 @@ func (f *selFixture) useAnnotator(t *testing.T, wrap func(focus.Annotator) focus
 
 func (f *selFixture) hideEntity(t *testing.T, k focus.Key) {
 	t.Helper()
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: showRepo, EntityType: k.Type, EntityID: k.ID, Key: store.AnnotationHidden,
 		Value: `{"value":true,"reason":null}`, Origin: "pg-desk", SetBy: "me", SetAt: showAt,
 	}); err != nil {
@@ -77,11 +77,11 @@ func sel(t *testing.T, reply string, args ...string) (string, string, error) {
 
 func (f *selFixture) plan(t *testing.T, period string) []store.FocusSelection {
 	t.Helper()
-	p, found, err := f.st.FocusPeriodGet("day", period)
+	p, found, err := f.st.FocusPeriodGet(context.Background(), "day", period)
 	if err != nil || !found {
 		t.Fatalf("period %s: found %v err %v", period, found, err)
 	}
-	rows, err := f.st.FocusPlanRows(p.ID)
+	rows, err := f.st.FocusPlanRows(context.Background(), p.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func (f *selFixture) planKeys(t *testing.T, period string) []string {
 
 func (f *selFixture) annotation(t *testing.T, k focus.Key) string {
 	t.Helper()
-	a, found, err := f.st.GetKVAnnotation(showRepo, k.Type, k.ID, store.AnnotationFocusSelected)
+	a, found, err := f.st.GetKVAnnotation(context.Background(), showRepo, k.Type, k.ID, store.AnnotationFocusSelected)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestSelectApplyLocksThePlanInOrderAndWritesTheRecord(t *testing.T) {
 	if _, found := f.draftRow(t); found {
 		t.Errorf("the lock left the stored draft")
 	}
-	p, _, _ := f.st.FocusPeriodGet("day", showToday)
+	p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday)
 	if p.Cap == nil || *p.Cap != focus.DefaultCap {
 		t.Errorf("period cap = %v, want the draft's cap %d", p.Cap, focus.DefaultCap)
 	}
@@ -332,7 +332,7 @@ func TestSelectWithoutStoredDraftWarnsAndRecordsFreshOrder(t *testing.T) {
 func TestSelectUnreadableDraftFallsBackToTheInProcessCompute(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
-	if _, err := f.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: showToday, Cap: 6, MadeAt: showAt, BodyJSON: `{"contract":"nope"}`}); err != nil {
+	if _, err := f.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: showToday, Cap: 6, MadeAt: showAt, BodyJSON: `{"contract":"nope"}`}); err != nil {
 		t.Fatal(err)
 	}
 	_, errOut, err := sel(t, "ok", "--apply")
@@ -370,7 +370,7 @@ func TestCapPersistsAcrossRerun(t *testing.T) {
 		t.Fatalf("plan = %v, want the top 2", got)
 	}
 	capOf := func() int {
-		p, _, _ := f.st.FocusPeriodGet("day", showToday)
+		p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday)
 		if p.Cap == nil {
 			return -1
 		}
@@ -425,7 +425,7 @@ func TestCapLineAndForcePullRaisesCap(t *testing.T) {
 	if got := f.planKeys(t, showToday); len(got) != 2 {
 		t.Fatalf("plan = %v, want the forced row kept", got)
 	}
-	if p, _, _ := f.st.FocusPeriodGet("day", showToday); p.Cap == nil || *p.Cap != 1 {
+	if p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday); p.Cap == nil || *p.Cap != 1 {
 		t.Errorf("cap = %v, want 1 persisted", p.Cap)
 	}
 	out, _, _ := show(t)
@@ -477,7 +477,7 @@ func TestSelectHandAddHasNullTierAndIsHydratedFirst(t *testing.T) {
 	f.showDraft(t)
 	h := &writingHydrator{st: f.st, write: func(st *store.Store, typ, id string) error {
 		e := store.Entity{Repo: showRepo, EntityType: typ, EntityID: id, Facts: `{"issue_show":{"id":"J-9","state":"In Progress","title":"new"}}`, AsOf: showAt, ContentHash: "hJ-9"}
-		_, err := st.WriteEntityStateWithLog(e, 0, showAt, true, []string{"created"}, "sync", showAt)
+		_, err := st.WriteEntityStateWithLog(context.Background(), e, 0, showAt, true, []string{"created"}, "sync", showAt)
 		return err
 	}}
 	withHydrator(t, h)
@@ -543,11 +543,11 @@ type failingFor struct {
 	id    string
 }
 
-func (a failingFor) SetFocusSelected(repo, typ, id, value, origin, actor, at string) (int64, bool, error) {
+func (a failingFor) SetFocusSelected(ctx context.Context, repo, typ, id, value, origin, actor, at string) (int64, bool, error) {
 	if id == a.id {
 		return 0, false, errors.New("injected annotation failure")
 	}
-	return a.inner.SetFocusSelected(repo, typ, id, value, origin, actor, at)
+	return a.inner.SetFocusSelected(ctx, repo, typ, id, value, origin, actor, at)
 }
 
 func TestSelectAnnotationFailureExitsEightAndRepairMendsIt(t *testing.T) {
@@ -623,7 +623,7 @@ func TestRowsCommitBeforeAnnotationsAndRunRecordIsFinalizedLast(t *testing.T) {
 					t.Errorf("annotation = %q before its write", got)
 				}
 			}
-			return a.SetFocusSelected(repo, typ, id, value, origin, actor, at)
+			return a.SetFocusSelected(context.Background(), repo, typ, id, value, origin, actor, at)
 		})
 	})
 	_, _, err := sel(t, "ok", "--apply")
@@ -638,7 +638,7 @@ func TestRowsCommitBeforeAnnotationsAndRunRecordIsFinalizedLast(t *testing.T) {
 
 type annotatorFunc func(repo, typ, id, value, origin, actor, at string) (int64, bool, error)
 
-func (fn annotatorFunc) SetFocusSelected(repo, typ, id, value, origin, actor, at string) (int64, bool, error) {
+func (fn annotatorFunc) SetFocusSelected(_ context.Context, repo, typ, id, value, origin, actor, at string) (int64, bool, error) {
 	return fn(repo, typ, id, value, origin, actor, at)
 }
 
@@ -700,7 +700,7 @@ func TestLockOverDegradedSourceRecordsCoverage(t *testing.T) {
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	f.cfg.Watch.Issue.Queries = []string{"mine"}
 	v, _ := json.Marshal(map[string]string{"status": "degraded", "reason": "timeout", "at": showAt})
-	if err := f.st.SetMeta("change_flow.listing.issue.mine", string(v)); err != nil {
+	if err := f.st.SetMeta(context.Background(), "change_flow.listing.issue.mine", string(v)); err != nil {
 		t.Fatal(err)
 	}
 	_, _, _ = show(t) // exit 5: coverage incomplete, the draft is still stored
@@ -801,7 +801,7 @@ func TestFirstLockOfALaterPeriodReplacesThePlan(t *testing.T) {
 	f.pr(t, 2, "new", "2026-10-10T08:00:00Z")
 	f.lock(t, "2026-10-09", 6, old)
 	f.hideEntity(t, old) // no longer a candidate, so the new plan cannot hold it
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: showRepo, EntityType: old.Type, EntityID: old.ID, Key: store.AnnotationFocusSelected,
 		Value: "2026-10-09", Origin: "pg-desk", SetBy: "me", SetAt: showAt,
 	}); err != nil {
@@ -812,8 +812,8 @@ func TestFirstLockOfALaterPeriodReplacesThePlan(t *testing.T) {
 	mustOK(t, err)
 	mustContain(t, out, "new plan")
 	// The old plan's only row is gone and its entity annotated none.
-	p, _, _ := f.st.FocusPeriodGet("day", "2026-10-09")
-	rows, _ := f.st.FocusPlanRows(p.ID)
+	p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", "2026-10-09")
+	rows, _ := f.st.FocusPlanRows(context.Background(), p.ID)
 	if len(rows) != 0 {
 		t.Fatalf("the old plan keeps %d rows", len(rows))
 	}
@@ -842,7 +842,7 @@ func TestFirstLockEarlierOrFutureIsUsageAndEmptyReplacesNothing(t *testing.T) {
 	if got := strings.Join(f.planKeys(t, showToday), ","); got != "o/r#1" {
 		t.Errorf("a refused first lock changed the plan: %s", got)
 	}
-	if _, found, _ := f.st.FocusPeriodGet("day", "2026-10-09"); found {
+	if _, found, _ := f.st.FocusPeriodGet(context.Background(), "day", "2026-10-09"); found {
 		t.Errorf("a refused first lock left a focus_period row")
 	}
 }
@@ -928,7 +928,7 @@ func TestLockWithoutDateAfterMidnightIgnoresTheStaleDraft(t *testing.T) {
 func TestFirstLockOfALaterPeriodDeletesAStaleDraft(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "a", "2026-10-09T08:00:00Z")
-	if _, err := f.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-09", Cap: 6, MadeAt: showAt, BodyJSON: `{}`}); err != nil {
+	if _, err := f.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-09", Cap: 6, MadeAt: showAt, BodyJSON: `{}`}); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := sel(t, "ok", "--apply")
@@ -964,7 +964,7 @@ func TestRemovalReasonPerCause(t *testing.T) {
 		t.Errorf("plan after cap=1 = %s, want the lowest position kept", got)
 	}
 	// dropped (hidden since the lock)
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: showRepo, EntityType: "pr", EntityID: "o/r#2", Key: store.AnnotationHidden,
 		Value: `{"value":true,"reason":null}`, Origin: "pg-desk", SetBy: "me", SetAt: showAt,
 	}); err != nil {
@@ -1003,7 +1003,7 @@ func TestFinishedItemStaysInPlanAndKeepsItsAnnotation(t *testing.T) {
 
 func (f *selFixture) mergeLinks(t *testing.T, kept focus.Key) []store.XrefLink {
 	t.Helper()
-	ls, err := f.st.ListXrefLinksFrom(showRepo, kept.Type, kept.ID)
+	ls, err := f.st.ListXrefLinksFrom(context.Background(), showRepo, kept.Type, kept.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1103,7 +1103,7 @@ func TestRepairScansEveryAnnotatedEntityAndEveryPlanRowEntity(t *testing.T) {
 	withRow := f.pr(t, 1, "row without annotation", "2026-10-09T08:00:00Z")
 	noRow := f.pr(t, 2, "annotation without row", "2026-10-09T09:00:00Z")
 	f.lock(t, showToday, 6, withRow)
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: showRepo, EntityType: noRow.Type, EntityID: noRow.ID, Key: store.AnnotationFocusSelected,
 		Value: "2026-10-09", Origin: "pg-desk", SetBy: "me", SetAt: showAt,
 	}); err != nil {
@@ -1142,7 +1142,7 @@ func TestRepairReoffersOpenUnclaimedBeadOfDroppedPR(t *testing.T) {
 	f.bead(t, held, "bd-2", "deferred", "", "struck")
 	f.bead(t, claimed, "bd-3", "in_progress", "me", "")
 	for _, k := range []focus.Key{dropped, held, claimed, noBead} {
-		if err := f.st.SetAnnotation(store.KVAnnotation{
+		if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 			Repo: showRepo, EntityType: k.Type, EntityID: k.ID, Key: store.AnnotationFocusSelected,
 			Value: "none", Origin: "pg-desk", SetBy: "me", SetAt: showAt,
 		}); err != nil {

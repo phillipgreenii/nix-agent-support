@@ -69,10 +69,10 @@ func ReinterpretStored(ctx context.Context, st *store.Store, cfg *config.Config,
 	// A retired schema is refused up front; any other failure of the check
 	// (an unreadable handle) surfaces from the entity read below, tagged as
 	// the load it is.
-	if err := st.RequireNewSchema(); errors.Is(err, store.ErrOldSchema) {
+	if err := st.RequireNewSchema(ctx); errors.Is(err, store.ErrOldSchema) {
 		return ReinterpretResult{}, TagStage(StageStore, fmt.Errorf("pipeline: reinterpret %s %s: %w", entityType, entityID, err))
 	}
-	entity, found, err := st.GetEntity(repo, entityType, entityID)
+	entity, found, err := st.GetEntity(ctx, repo, entityType, entityID)
 	if err != nil {
 		return ReinterpretResult{}, TagStage(StageLoadFacts, fmt.Errorf("pipeline: reinterpret get entity %s %s: %w", entityType, entityID, err))
 	}
@@ -99,7 +99,7 @@ func ReinterpretStored(ctx context.Context, st *store.Store, cfg *config.Config,
 			return res, TagStage(StageStore, fmt.Errorf("pipeline: reinterpret store %s %s: %w", entityType, entityID, err))
 		}
 	}
-	res.Write, err = st.WriteInterpretation(row, store.InterpretationWriteOptions{
+	res.Write, err = st.WriteInterpretation(ctx, row, store.InterpretationWriteOptions{
 		ExpectedHash: entity.ContentHash,
 		RecordChange: true,
 		RequireStamp: true,

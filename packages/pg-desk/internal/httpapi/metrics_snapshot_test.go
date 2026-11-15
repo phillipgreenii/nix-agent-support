@@ -149,7 +149,7 @@ func TestNewHandler_WithMetricsSnapshotServesCachedCatalog(t *testing.T) {
 	mustUpsertInterpretation(t, s, store.Interpretation{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-10T00:00:00Z"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h, err := NewHandler(s, testConfig(), WithMetricsSnapshot(ctx))
+	h, err := NewHandler(ctx, s, testConfig(), WithMetricsSnapshot(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}

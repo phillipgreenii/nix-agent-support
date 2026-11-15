@@ -1,13 +1,16 @@
 package main
 
 import (
-	crand "crypto/rand"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	mrand "math/rand/v2"
 	"sync"
 	"time"
+
+	crand "crypto/rand"
+
+	mrand "math/rand/v2"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -186,17 +189,17 @@ func (r *focusRun) RunID() string { return r.runID }
 // transaction. It is a no-op for a dry run. An error means the store is not
 // writable: the run goes on without a row (the record is then the stderr line
 // only) and Finish will not try to finalize one.
-func (r *focusRun) Start(st *store.Store) error {
+func (r *focusRun) Start(ctx context.Context, st *store.Store) error {
 	r.st = st
 	if r.dryRun {
 		return nil
 	}
 	var periodID *int64
-	if p, found, err := st.FocusPeriodGet(r.period.Type, r.period.Key); err == nil && found {
+	if p, found, err := st.FocusPeriodGet(ctx, r.period.Type, r.period.Key); err == nil && found {
 		id := p.ID
 		periodID = &id
 	}
-	if _, err := st.FocusRunInsert(store.FocusRun{
+	if _, err := st.FocusRunInsert(ctx, store.FocusRun{
 		RunID: r.runID, Verb: r.verb, FocusPeriodID: periodID,
 		StartedAt: r.now.Format(time.RFC3339), Actor: r.actor, CountsJSON: "{}",
 	}); err != nil {
@@ -277,7 +280,7 @@ func (r *focusRun) Line(exitCode int) ([]byte, error) {
 // exit_code NULL. The line is printed even when the finalize fails; the
 // finalize error is returned so the caller can report it (the exit code is
 // the verb's to decide). A second Finish is a no-op.
-func (r *focusRun) Finish(exitCode int) error {
+func (r *focusRun) Finish(ctx context.Context, exitCode int) error {
 	if r.finished {
 		return nil
 	}
@@ -288,7 +291,7 @@ func (r *focusRun) Finish(exitCode int) error {
 		if err != nil {
 			ferr = err
 		} else {
-			ferr = r.st.FocusRunFinalize(r.runID, exitCode, cj)
+			ferr = r.st.FocusRunFinalize(ctx, r.runID, exitCode, cj)
 		}
 	}
 	line, err := r.Line(exitCode)

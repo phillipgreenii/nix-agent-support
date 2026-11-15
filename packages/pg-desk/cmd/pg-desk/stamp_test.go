@@ -51,13 +51,13 @@ func TestEveryCommandThatWritesInterpretationsStamps(t *testing.T) {
 			}
 			// A write through the handle carries it.
 			st.SeedEntityForTest(t, store.Entity{Repo: "acme/widgets", EntityType: "pr", EntityID: "1", Facts: "{}", AsOf: "a", ContentHash: "h"})
-			if _, err := st.WriteInterpretation(store.Interpretation{
+			if _, err := st.WriteInterpretation(context.Background(), store.Interpretation{
 				Repo: "acme/widgets", EntityType: "pr", EntityID: "1", Enrichment: "{}", Urgency: "{}",
 				Dispositions: "{}", Approvals: "{}", MatchReasons: "[]", AsOf: "a",
 			}, store.InterpretationWriteOptions{ExpectedHash: "h", RequireStamp: true}); err != nil {
 				t.Fatal(err)
 			}
-			got, _, _ := st.GetInterpretation("acme/widgets", "pr", "1")
+			got, _, _ := st.GetInterpretation(context.Background(), "acme/widgets", "pr", "1")
 			if got.InterpVersion != want {
 				t.Fatalf("row stamp = %q, want %q", got.InterpVersion, want)
 			}

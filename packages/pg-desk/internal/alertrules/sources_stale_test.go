@@ -1,6 +1,7 @@
 package alertrules
 
 import (
+	"context"
 	"os"
 	"regexp"
 	"strings"
@@ -56,10 +57,10 @@ func TestSourcesStaleRuleExprMatchesModel(t *testing.T) {
 func staleSourcesSeries(t *testing.T, cfg *config.Config, now time.Time, rows ...freshness.LedgerRow) []series {
 	t.Helper()
 	st := store.OpenForTest(t)
-	if err := freshness.Update(st, rows); err != nil {
+	if err := freshness.Update(context.Background(), st, rows); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := freshness.Build(st, cfg, now)
+	rep, err := freshness.Build(context.Background(), st, cfg, now)
 	if err != nil {
 		t.Fatal(err)
 	}

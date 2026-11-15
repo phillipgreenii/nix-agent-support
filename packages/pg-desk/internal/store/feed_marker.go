@@ -39,8 +39,8 @@ func feedMarkerKey(instance string) string { return metaKeyFeedSeqPrefix + insta
 
 // FeedMarker returns the stored marker of instance, or found=false when none
 // is stored.
-func (s *Store) FeedMarker(instance string) (m FeedMarker, found bool, err error) {
-	raw, found, err := s.GetMeta(feedMarkerKey(instance))
+func (s *Store) FeedMarker(ctx context.Context, instance string) (m FeedMarker, found bool, err error) {
+	raw, found, err := s.GetMeta(ctx, feedMarkerKey(instance))
 	if err != nil || !found {
 		return FeedMarker{}, false, err
 	}
@@ -64,21 +64,21 @@ func decodeFeedMarker(instance, raw string) (FeedMarker, error) {
 // has the same store identity and seq is at or below its seq, or a
 // failed-ingest entry already exists for (instance, entityID, seq) under the
 // same store identity (an entry of another identity names another sequence).
-func (s *Store) ShouldSkipFeedRow(instance, storeIdentity string, seq int64, entityID string) (bool, error) {
-	m, found, err := s.FeedMarker(instance)
+func (s *Store) ShouldSkipFeedRow(ctx context.Context, instance, storeIdentity string, seq int64, entityID string) (bool, error) {
+	m, found, err := s.FeedMarker(ctx, instance)
 	if err != nil {
 		return false, err
 	}
 	if found && m.StoreIdentity == storeIdentity && seq <= m.Seq {
 		return true, nil
 	}
-	ok, err := s.ingestFailedExists()
+	ok, err := s.ingestFailedExists(ctx)
 	if err != nil || !ok {
 		return false, err
 	}
 	var identity string
 	err = s.sql.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT store_identity FROM ingest_failed WHERE instance = ? AND entity_id = ? AND seq = ?`,
 		instance, entityID, seq,
 	).Scan(&identity)
@@ -94,21 +94,21 @@ func (s *Store) ShouldSkipFeedRow(instance, storeIdentity string, seq int64, ent
 // ResetFeedMarker deletes the marker of instance. It is called on a
 // different store identity or a cursor_expired: answer, before any row is
 // processed. Deleting an absent marker is not an error.
-func (s *Store) ResetFeedMarker(instance string) error {
-	return s.DeleteMeta(feedMarkerKey(instance))
+func (s *Store) ResetFeedMarker(ctx context.Context, instance string) error {
+	return s.DeleteMeta(ctx, feedMarkerKey(instance))
 }
 
 // AdvanceFeedMarker writes m as the marker of m.Instance without any entity
 // or change_log write (a row that needs no entity change). It follows the
 // write path's rule: within one store identity the marker only moves
 // forward, and a different identity replaces it.
-func (s *Store) AdvanceFeedMarker(m FeedMarker) error {
-	tx, err := s.sql.BeginTx(context.Background(), nil)
+func (s *Store) AdvanceFeedMarker(ctx context.Context, m FeedMarker) error {
+	tx, err := s.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: advance feed marker %q: begin: %w", m.Instance, err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
-	if err := writeFeedMarkerTx(tx, m); err != nil {
+	if err := writeFeedMarkerTx(ctx, tx, m); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -120,10 +120,10 @@ func (s *Store) AdvanceFeedMarker(m FeedMarker) error {
 // writeFeedMarkerTx upserts m inside tx: written when none is stored, when
 // the stored identity differs, or when m.Seq is greater than the stored seq;
 // an equal or lower seq under the same identity leaves it unchanged.
-func writeFeedMarkerTx(tx *sql.Tx, m FeedMarker) error {
+func writeFeedMarkerTx(ctx context.Context, tx *sql.Tx, m FeedMarker) error {
 	key := feedMarkerKey(m.Instance)
 	var raw string
-	err := tx.QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key = ?`, key).Scan(&raw)
+	err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&raw)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		// No marker yet: write below.
@@ -143,7 +143,7 @@ func writeFeedMarkerTx(tx *sql.Tx, m FeedMarker) error {
 		return fmt.Errorf("store: encode feed marker %q: %w", m.Instance, err)
 	}
 	if _, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO meta (key, value) VALUES (?, ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 		key, string(val),

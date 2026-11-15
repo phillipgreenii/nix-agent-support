@@ -25,7 +25,7 @@ func hydrateWith(t *testing.T, fx corpus.Fixture, cfg *config.Config, opts ...Op
 	if _, err := p.RunEntityChange(context.Background(), fx.Type, fx.ID, gather.ChangeAdded, EntityChangeOptions{}); err != nil {
 		t.Fatalf("RunEntityChange: %v", err)
 	}
-	row, found, err := st.GetInterpretation(corpus.Repo, fx.Type, fx.ID)
+	row, found, err := st.GetInterpretation(context.Background(), corpus.Repo, fx.Type, fx.ID)
 	if err != nil || !found {
 		t.Fatalf("row found=%v err=%v", found, err)
 	}

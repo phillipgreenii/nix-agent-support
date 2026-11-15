@@ -11,11 +11,11 @@ import (
 func TestListEntityFlowMatchesListEntitiesFlowColumns(t *testing.T) {
 	st := OpenForTest(t)
 	st.SeedLiveSizeForTest(t, 40, 200, 10)
-	full, err := st.ListEntities()
+	full, err := st.ListEntities(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	flow, err := st.ListEntityFlow()
+	flow, err := st.ListEntityFlow(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestChangeKindCountsMatchesListChangesAfter(t *testing.T) {
 	st := OpenForTest(t)
 	st.SeedLiveSizeForTest(t, 40, 100, 300)
 	for _, typ := range []string{"pr", "issue", "absent"} {
-		recs, err := st.ListChangesAfter(typ, 0, 0)
+		recs, err := st.ListChangesAfter(context.Background(), typ, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func TestChangeKindCountsMatchesListChangesAfter(t *testing.T) {
 				want[key{k, r.Origin}]++
 			}
 		}
-		all, err := st.ChangeKindCountsAll()
+		all, err := st.ChangeKindCountsAll(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,12 +106,12 @@ func TestListHiddenWIPMatchesPRHiddenWIPAndIsConstantQueries(t *testing.T) {
 		base.SeedLiveSizeForTest(t, n, 10, 1)
 		now := "2026-11-01T00:00:00Z"
 		for _, id := range []string{"id-1", "id-2"} {
-			if err := base.SetAnnotation(KVAnnotation{Repo: "o/r", EntityType: "issue", EntityID: id, Key: AnnotationWIP, Value: "true", Origin: "cli", SetBy: "me", SetAt: now}); err != nil {
+			if err := base.SetAnnotation(context.Background(), KVAnnotation{Repo: "o/r", EntityType: "issue", EntityID: id, Key: AnnotationWIP, Value: "true", Origin: "cli", SetBy: "me", SetAt: now}); err != nil {
 				t.Fatal(err)
 			}
 		}
 		st, cnt := base.WithCounterForTest(t)
-		got, err := st.ListHiddenWIP()
+		got, err := st.ListHiddenWIP(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +119,7 @@ func TestListHiddenWIPMatchesPRHiddenWIPAndIsConstantQueries(t *testing.T) {
 			t.Fatalf("n=%d: %d queries, want a constant (<=3)", n, q)
 		}
 		for key, hw := range got {
-			h, r, w, err := base.PRHiddenWIP(key.Repo, key.EntityType, key.EntityID)
+			h, r, w, err := base.PRHiddenWIP(context.Background(), key.Repo, key.EntityType, key.EntityID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,10 +140,10 @@ func TestLiveSizeNarrowReadsMoveNoFactsAndAreFast(t *testing.T) {
 	t.Logf("fixture built in %v", time.Since(start))
 	st, cnt := base.WithCounterForTest(t)
 	start = time.Now()
-	if _, err := st.ListEntityFlow(); err != nil {
+	if _, err := st.ListEntityFlow(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ChangeKindCountsAll(); err != nil {
+	if _, err := st.ChangeKindCountsAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("narrow reads took %v, %d bytes", time.Since(start), cnt.Bytes())

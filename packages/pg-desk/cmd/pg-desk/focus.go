@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -259,6 +260,8 @@ func (e *focusEnv) Close() {
 // caller MUST Close the returned env. Period-closed (exit 20) and everything
 // after it is the verb's own business: CheckPeriodClosed is the helper.
 func openFocusEnv(cmd *cobra.Command, writing bool) (*focusEnv, error) {
+	ctx := cmd.Context()
+
 	now := focusNow()
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
@@ -268,7 +271,7 @@ func openFocusEnv(cmd *cobra.Command, writing bool) (*focusEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := openNewSchemaStore("focus")
+	st, err := openNewSchemaStore(ctx, "focus")
 	if err != nil {
 		if errors.Is(err, store.ErrOldSchema) {
 			return nil, focusUsageError(
@@ -297,8 +300,8 @@ func printFocusNote(w io.Writer, p focusPeriod) {
 
 // CheckPeriodClosed is the period-closed check (exit 20) of the spec's check
 // order: nil when the addressed period is open or has no row yet.
-func (e *focusEnv) CheckPeriodClosed() error {
-	closed, err := focusPeriodIsClosed(e.Store, e.Period)
+func (e *focusEnv) CheckPeriodClosed(ctx context.Context) error {
+	closed, err := focusPeriodIsClosed(ctx, e.Store, e.Period)
 	if err != nil {
 		return focusTotalError("focus: read period: "+err.Error(), "check the pg-desk store, then re-run")
 	}
@@ -312,16 +315,16 @@ func (e *focusEnv) CheckPeriodClosed() error {
 // reports whether the day period with the given key is closed. A read error
 // counts as not closed (the callback has no error return; the verb's own
 // reads surface a broken store).
-func (e *focusEnv) PeriodClosedFunc() func(key string) bool {
+func (e *focusEnv) PeriodClosedFunc(ctx context.Context) func(key string) bool {
 	return func(key string) bool {
-		closed, err := focusPeriodIsClosed(e.Store, focusPeriod{Type: e.Period.Type, Key: key})
+		closed, err := focusPeriodIsClosed(ctx, e.Store, focusPeriod{Type: e.Period.Type, Key: key})
 		return err == nil && closed
 	}
 }
 
 // focusPeriodIsClosed reports whether the stored period row has a closed_at.
-func focusPeriodIsClosed(st *store.Store, p focusPeriod) (bool, error) {
-	row, found, err := st.FocusPeriodGet(p.Type, p.Key)
+func focusPeriodIsClosed(ctx context.Context, st *store.Store, p focusPeriod) (bool, error) {
+	row, found, err := st.FocusPeriodGet(ctx, p.Type, p.Key)
 	if err != nil {
 		return false, err
 	}

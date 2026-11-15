@@ -57,6 +57,8 @@ type showPayload struct {
 }
 
 func runShow(cmd *cobra.Command, ref string) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("show: load config: %w", err)
@@ -73,7 +75,7 @@ func runShow(cmd *cobra.Command, ref string) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	interp, found, err := st.GetInterpretation(repo, entityTypePR, id)
+	interp, found, err := st.GetInterpretation(ctx, repo, entityTypePR, id)
 	if err != nil {
 		return fmt.Errorf("show: %w", err)
 	}
@@ -81,7 +83,7 @@ func runShow(cmd *cobra.Command, ref string) error {
 		return fmt.Errorf("show: %s does not resolve", ref)
 	}
 
-	hidden, hiddenReason, wip, err := st.PRHiddenWIP(repo, entityTypePR, id)
+	hidden, hiddenReason, wip, err := st.PRHiddenWIP(ctx, repo, entityTypePR, id)
 	if err != nil {
 		return fmt.Errorf("show: read annotation: %w", err)
 	}

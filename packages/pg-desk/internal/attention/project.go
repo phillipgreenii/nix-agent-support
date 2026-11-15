@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -122,8 +123,8 @@ func (v *View) candidate(kind string, sev Severity, reason string) Candidate {
 // not projected. A row whose JSON columns do not decode is projected as
 // degraded rather than dropped, so it raises nothing but still has an
 // explainable trace.
-func Project(r Reader, repo string, cfg *config.Config) ([]*View, error) {
-	rows, err := r.ListInterpretations()
+func Project(ctx context.Context, r Reader, repo string, cfg *config.Config) ([]*View, error) {
+	rows, err := r.ListInterpretations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("attention: read interpretations: %w", err)
 	}
@@ -151,7 +152,7 @@ func Project(r Reader, repo string, cfg *config.Config) ([]*View, error) {
 				v.Degraded = true
 			}
 		}
-		ent, found, gerr := r.GetEntity(row.Repo, row.EntityType, row.EntityID)
+		ent, found, gerr := r.GetEntity(ctx, row.Repo, row.EntityType, row.EntityID)
 		if gerr != nil {
 			return nil, fmt.Errorf("attention: read entity %s:%s: %w", row.EntityType, row.EntityID, gerr)
 		}
@@ -165,7 +166,7 @@ func Project(r Reader, repo string, cfg *config.Config) ([]*View, error) {
 		out = append(out, v)
 	}
 
-	ents, err := r.ListEntities()
+	ents, err := r.ListEntities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("attention: read entities: %w", err)
 	}

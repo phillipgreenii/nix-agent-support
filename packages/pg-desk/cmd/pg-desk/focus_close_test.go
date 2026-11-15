@@ -52,7 +52,7 @@ func closeJSON(t *testing.T, stdin string, args ...string) map[string]any {
 
 func (f *selFixture) period(t *testing.T, key string) (store.FocusPeriod, bool) {
 	t.Helper()
-	p, found, err := f.st.FocusPeriodGet("day", key)
+	p, found, err := f.st.FocusPeriodGet(context.Background(), "day", key)
 	if err != nil {
 		t.Fatal(err)
 	}

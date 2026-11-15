@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -110,7 +111,7 @@ func TestTypedFeedbackWritesDispositionAnnotations(t *testing.T) {
 	if _, err := runGroupCmd(t, typedFeedback, "pr", "set", "1", "c1", "--disposition", "bogus"); err == nil {
 		t.Error("set with bogus disposition: error = nil")
 	}
-	if got, _ := seed.ListKVAnnotations("o/r", "pr", "o/r#1"); len(got) != 2 {
+	if got, _ := seed.ListKVAnnotations(context.Background(), "o/r", "pr", "o/r#1"); len(got) != 2 {
 		t.Errorf("annotations = %+v, want exactly the two disposition rows", got)
 	}
 }

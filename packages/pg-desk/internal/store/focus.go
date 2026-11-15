@@ -135,7 +135,7 @@ func (x focusExec) row(q string, args ...any) *sql.Row {
 // open, fn, COMMIT and ROLLBACK run detached from cancellation so a cancelled
 // caller cannot leave a half-applied transaction or skip the rollback.
 func (s *Store) focusImmediate(ctx context.Context, what string, fn func(x focusExec) error) error {
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
 	conn, err := s.sql.Conn(ctx)
@@ -266,9 +266,9 @@ func getOrCreatePeriod(x focusExec, periodType, periodKey string) (FocusPeriod, 
 // The key is parsed and re-formatted on write, so 2026-9-3 cannot make a
 // second period. An invalid key, or a period type outside day|week|sprint,
 // is an error and writes nothing.
-func (s *Store) GetOrCreateFocusPeriod(periodType, periodKey string) (FocusPeriod, error) {
+func (s *Store) GetOrCreateFocusPeriod(ctx context.Context, periodType, periodKey string) (FocusPeriod, error) {
 	var p FocusPeriod
-	err := s.focusImmediate(context.Background(), "focus period", func(x focusExec) error {
+	err := s.focusImmediate(ctx, "focus period", func(x focusExec) error {
 		var err error
 		p, err = getOrCreatePeriod(x, periodType, periodKey)
 		return err
@@ -279,15 +279,15 @@ func (s *Store) GetOrCreateFocusPeriod(periodType, periodKey string) (FocusPerio
 // FocusPeriodGet returns the focus_period row for (periodType, periodKey)
 // and found=true, or found=false when none exists. It never creates a row.
 // The key is normalized like GetOrCreateFocusPeriod's.
-func (s *Store) FocusPeriodGet(periodType, periodKey string) (FocusPeriod, bool, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) FocusPeriodGet(ctx context.Context, periodType, periodKey string) (FocusPeriod, bool, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return FocusPeriod{}, false, err
 	}
 	key, err := NormalizeFocusPeriodKey(periodType, periodKey)
 	if err != nil {
 		return FocusPeriod{}, false, err
 	}
-	p, err := scanFocusPeriod(s.sql.QueryRowContext(context.Background(), `SELECT `+focusPeriodCols+` FROM focus_period WHERE period_type = ? AND period_key = ?`, periodType, key))
+	p, err := scanFocusPeriod(s.sql.QueryRowContext(ctx, `SELECT `+focusPeriodCols+` FROM focus_period WHERE period_type = ? AND period_key = ?`, periodType, key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return FocusPeriod{}, false, nil
 	}
@@ -299,11 +299,11 @@ func (s *Store) FocusPeriodGet(periodType, periodKey string) (FocusPeriod, bool,
 
 // FocusPeriods returns every focus_period row, ordered by (period_type,
 // period_key).
-func (s *Store) FocusPeriods() ([]FocusPeriod, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) FocusPeriods(ctx context.Context) ([]FocusPeriod, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.QueryContext(context.Background(), `SELECT `+focusPeriodCols+` FROM focus_period ORDER BY period_type, period_key`)
+	rows, err := s.sql.QueryContext(ctx, `SELECT `+focusPeriodCols+` FROM focus_period ORDER BY period_type, period_key`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list focus periods: %w", err)
 	}
@@ -324,11 +324,11 @@ func (s *Store) FocusPeriods() ([]FocusPeriod, error) {
 
 // ---------------------------------------------------------------- plan reads
 
-func (s *Store) focusSelections(what, where string, args ...any) ([]FocusSelection, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) focusSelections(ctx context.Context, what, where string, args ...any) ([]FocusSelection, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.QueryContext(context.Background(), `SELECT `+focusSelectionCols+` FROM focus_selection `+where, args...)
+	rows, err := s.sql.QueryContext(ctx, `SELECT `+focusSelectionCols+` FROM focus_selection `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: focus rows of %s: %w", what, err)
 	}
@@ -349,21 +349,21 @@ func (s *Store) focusSelections(what, where string, args ...any) ([]FocusSelecti
 
 // FocusPlanRows returns the plan of one period: its focus_selection rows
 // ordered by rank_position (then id).
-func (s *Store) FocusPlanRows(periodID int64) ([]FocusSelection, error) {
-	return s.focusSelections(fmt.Sprintf("period %d", periodID),
+func (s *Store) FocusPlanRows(ctx context.Context, periodID int64) ([]FocusSelection, error) {
+	return s.focusSelections(ctx, fmt.Sprintf("period %d", periodID),
 		`WHERE focus_period_id = ? ORDER BY rank_position, id`, periodID)
 }
 
 // FocusRowsAllPeriods returns every focus_selection row, ordered by
 // (focus_period_id, rank_position, id).
-func (s *Store) FocusRowsAllPeriods() ([]FocusSelection, error) {
-	return s.focusSelections("every period", `ORDER BY focus_period_id, rank_position, id`)
+func (s *Store) FocusRowsAllPeriods(ctx context.Context) ([]FocusSelection, error) {
+	return s.focusSelections(ctx, "every period", `ORDER BY focus_period_id, rank_position, id`)
 }
 
 // FocusRowsOfEntity returns the rows of one entity in every period, ordered
 // by focus_period_id.
-func (s *Store) FocusRowsOfEntity(repo, entityType, entityID string) ([]FocusSelection, error) {
-	return s.focusSelections(fmt.Sprintf("(%s,%s,%s)", repo, entityType, entityID),
+func (s *Store) FocusRowsOfEntity(ctx context.Context, repo, entityType, entityID string) ([]FocusSelection, error) {
+	return s.focusSelections(ctx, fmt.Sprintf("(%s,%s,%s)", repo, entityType, entityID),
 		`WHERE repo = ? AND entity_type = ? AND entity_id = ? ORDER BY focus_period_id, id`,
 		repo, entityType, entityID)
 }
@@ -392,8 +392,8 @@ func focusAnnotationValue(q func(string, ...any) *sql.Row, repo, entityType, ent
 // entity MUST hold: the maximum period_key over the entity's rows in every
 // period, else "none" (D-F18). It is a function of the committed table; it
 // never means "selected today".
-func (s *Store) FocusAnnotationValue(repo, entityType, entityID string) (string, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) FocusAnnotationValue(ctx context.Context, repo, entityType, entityID string) (string, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return "", err
 	}
 	return focusAnnotationValue(s.sql.QueryRow, repo, entityType, entityID)
@@ -411,11 +411,11 @@ func scanFocusDraft(sc interface{ Scan(...any) error }) (FocusDraft, error) {
 
 // FocusDraftGet returns the single stored draft, or found=false when the
 // row is free.
-func (s *Store) FocusDraftGet() (FocusDraft, bool, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) FocusDraftGet(ctx context.Context) (FocusDraft, bool, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return FocusDraft{}, false, err
 	}
-	d, err := scanFocusDraft(s.sql.QueryRowContext(context.Background(), `SELECT `+focusDraftCols+` FROM focus_draft WHERE id = 1`))
+	d, err := scanFocusDraft(s.sql.QueryRowContext(ctx, `SELECT `+focusDraftCols+` FROM focus_draft WHERE id = 1`))
 	if errors.Is(err, sql.ErrNoRows) {
 		return FocusDraft{}, false, nil
 	}
@@ -447,7 +447,7 @@ func periodHoldsRows(x focusExec, periodType, key string) (bool, error) {
 // committed stores nothing) or when a draft for the same or a later period
 // holds the row. Both keys are normalized first. A same-period draft that
 // could not be decoded is replaced through FocusDraftReplace, not here.
-func (s *Store) FocusDraftStore(d FocusDraft, addressedKey string) (stored bool, err error) {
+func (s *Store) FocusDraftStore(ctx context.Context, d FocusDraft, addressedKey string) (stored bool, err error) {
 	dkey, err := NormalizeFocusPeriodKey(d.PeriodType, d.PeriodKey)
 	if err != nil {
 		return false, err
@@ -457,7 +457,7 @@ func (s *Store) FocusDraftStore(d FocusDraft, addressedKey string) (stored bool,
 		return false, err
 	}
 	d.PeriodKey = dkey
-	err = s.focusImmediate(context.Background(), "store focus draft", func(x focusExec) error {
+	err = s.focusImmediate(ctx, "store focus draft", func(x focusExec) error {
 		held, err := periodHoldsRows(x, d.PeriodType, akey)
 		if err != nil {
 			return err
@@ -497,13 +497,13 @@ func (s *Store) FocusDraftStore(d FocusDraft, addressedKey string) (stored bool,
 // recompute), in one transaction that re-checks the plan rows of the draft's
 // period and writes the row only when none exist. planNowExists=true means a
 // plan appeared and nothing was written.
-func (s *Store) FocusDraftReplace(d FocusDraft) (planNowExists bool, err error) {
+func (s *Store) FocusDraftReplace(ctx context.Context, d FocusDraft) (planNowExists bool, err error) {
 	key, err := NormalizeFocusPeriodKey(d.PeriodType, d.PeriodKey)
 	if err != nil {
 		return false, err
 	}
 	d.PeriodKey = key
-	err = s.focusImmediate(context.Background(), "replace focus draft", func(x focusExec) error {
+	err = s.focusImmediate(ctx, "replace focus draft", func(x focusExec) error {
 		held, err := periodHoldsRows(x, d.PeriodType, key)
 		if err != nil {
 			return err
@@ -541,13 +541,13 @@ func (s *Store) FocusDraftReplace(d FocusDraft) (planNowExists bool, err error) 
 // initial draft. planStateChanged=true means the period's plan state differs
 // from expectPlan and nothing was written, so the caller recomputes for the
 // state it now finds. A draft for any period replaces whatever is stored.
-func (s *Store) FocusDraftReplan(d FocusDraft, expectPlan bool) (planStateChanged bool, err error) {
+func (s *Store) FocusDraftReplan(ctx context.Context, d FocusDraft, expectPlan bool) (planStateChanged bool, err error) {
 	key, err := NormalizeFocusPeriodKey(d.PeriodType, d.PeriodKey)
 	if err != nil {
 		return false, err
 	}
 	d.PeriodKey = key
-	err = s.focusImmediate(context.Background(), "replan focus draft", func(x focusExec) error {
+	err = s.focusImmediate(ctx, "replan focus draft", func(x focusExec) error {
 		held, err := periodHoldsRows(x, d.PeriodType, key)
 		if err != nil {
 			return err
@@ -582,9 +582,9 @@ func (s *Store) FocusDraftReplan(d FocusDraft, expectPlan bool) (planStateChange
 // FocusRunInsert inserts a focus_run row outside a lock transaction (for
 // verbs that fail before locking) and returns its id. ExitCode nil leaves
 // exit_code NULL until FocusRunFinalize.
-func (s *Store) FocusRunInsert(r FocusRun) (int64, error) {
+func (s *Store) FocusRunInsert(ctx context.Context, r FocusRun) (int64, error) {
 	var id int64
-	err := s.focusImmediate(context.Background(), "insert focus run", func(x focusExec) error {
+	err := s.focusImmediate(ctx, "insert focus run", func(x focusExec) error {
 		var err error
 		id, err = insertRun(x, r)
 		return err
@@ -594,8 +594,8 @@ func (s *Store) FocusRunInsert(r FocusRun) (int64, error) {
 
 // FocusRunFinalize sets the exit_code and counts_json of the run runID. It
 // errors when no such run exists.
-func (s *Store) FocusRunFinalize(runID string, exitCode int, countsJSON string) error {
-	return s.focusImmediate(context.Background(), "finalize focus run", func(x focusExec) error {
+func (s *Store) FocusRunFinalize(ctx context.Context, runID string, exitCode int, countsJSON string) error {
+	return s.focusImmediate(ctx, "finalize focus run", func(x focusExec) error {
 		return finalizeRun(x, runID, exitCode, countsJSON)
 	})
 }
@@ -654,12 +654,12 @@ type FocusRunStats struct {
 // finalized under an older scheme (see FocusExitScheme) is read under that
 // scheme's table. Any other code is counted as total (fail closed). A row is written
 // only by a non-dry-run, so every row counts.
-func (s *Store) FocusRunStats() (FocusRunStats, error) {
+func (s *Store) FocusRunStats(ctx context.Context) (FocusRunStats, error) {
 	out := FocusRunStats{ByVerbOutcome: map[[2]string]int{}}
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return out, err
 	}
-	rows, err := s.sql.QueryContext(context.Background(), `SELECT `+focusRunCols+` FROM focus_run ORDER BY id`)
+	rows, err := s.sql.QueryContext(ctx, `SELECT `+focusRunCols+` FROM focus_run ORDER BY id`)
 	if err != nil {
 		return out, fmt.Errorf("store: focus run stats: %w", err)
 	}
@@ -880,8 +880,8 @@ func (t *FocusTx) CloseOpenPeriod(periodType, periodKey, note, at string) (Focus
 // at with the summary note: CloseOpenPeriod in one transaction of its own
 // (period get-or-create, the close, the draft deletion). An already-closed
 // period is a *FocusPeriodClosedError and nothing changes.
-func (s *Store) FocusPeriodClose(periodType, periodKey, note, at string) error {
-	return s.FocusLockTx(context.Background(), func(tx *FocusTx) error {
+func (s *Store) FocusPeriodClose(ctx context.Context, periodType, periodKey, note, at string) error {
+	return s.FocusLockTx(ctx, func(tx *FocusTx) error {
 		_, err := tx.CloseOpenPeriod(periodType, periodKey, note, at)
 		return err
 	})

@@ -34,7 +34,7 @@ type ReinterpretRun struct {
 // row records nothing (an idle heartbeat writes no meta row), so the last-run
 // line keeps describing the last pass that did work. It reports whether a row
 // was written.
-func (s *Store) RecordReinterpretRun(r ReinterpretRun) (bool, error) {
+func (s *Store) RecordReinterpretRun(ctx context.Context, r ReinterpretRun) (bool, error) {
 	if r.Selected <= 0 {
 		return false, nil
 	}
@@ -42,7 +42,7 @@ func (s *Store) RecordReinterpretRun(r ReinterpretRun) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("store: encode reinterpret last run: %w", err)
 	}
-	if err := s.SetMeta(MetaKeyReinterpretLastRun, string(b)); err != nil {
+	if err := s.SetMeta(ctx, MetaKeyReinterpretLastRun, string(b)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -51,8 +51,8 @@ func (s *Store) RecordReinterpretRun(r ReinterpretRun) (bool, error) {
 // LastReinterpretRun returns the persisted counts of the last pass, with
 // found=false when no pass has recorded any (including on a store that lacks
 // the key). An unreadable value is an error.
-func (s *Store) LastReinterpretRun() (r ReinterpretRun, found bool, err error) {
-	v, found, err := s.GetMeta(MetaKeyReinterpretLastRun)
+func (s *Store) LastReinterpretRun(ctx context.Context) (r ReinterpretRun, found bool, err error) {
+	v, found, err := s.GetMeta(ctx, MetaKeyReinterpretLastRun)
 	if err != nil || !found {
 		return ReinterpretRun{}, false, err
 	}
@@ -67,12 +67,12 @@ func (s *Store) LastReinterpretRun() (r ReinterpretRun, found bool, err error) {
 // with no error, on a store that cannot answer (no stamp
 // column yet): "unknown" is never "none". The handle must carry a stamp, else
 // ErrNoInterpStamp.
-func (s *Store) InterpretationsFailed(repo string) (n int, known bool, err error) {
+func (s *Store) InterpretationsFailed(ctx context.Context, repo string) (n int, known bool, err error) {
 	stamp := s.InterpStamp()
 	if stamp == "" {
 		return 0, false, ErrNoInterpStamp
 	}
-	haveStamp, err := s.hasInterpStampColumn()
+	haveStamp, err := s.hasInterpStampColumn(ctx)
 	if err != nil {
 		return 0, false, fmt.Errorf("store: interpretations failed: %w", err)
 	}
@@ -80,7 +80,7 @@ func (s *Store) InterpretationsFailed(repo string) (n int, known bool, err error
 		return 0, false, nil
 	}
 	err = s.sql.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT COUNT(*) FROM interpretation WHERE repo = ? AND entity_type = 'pr' AND `+interpStampColumn+` = ?`,
 		repo, stamp+FailedStampSuffix,
 	).Scan(&n)

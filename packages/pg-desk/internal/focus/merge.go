@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -78,12 +79,12 @@ func isMergeLink(l store.XrefLink) bool {
 
 // RecordMerges writes the external focus:merge link of every pair, as actor.
 // Recording a pair again refreshes it and keeps its first-seen time.
-func RecordMerges(st *store.Store, repo string, merges []Merge, actor, at string) error {
+func RecordMerges(ctx context.Context, st *store.Store, repo string, merges []Merge, actor, at string) error {
 	if actor == "" {
 		return fmt.Errorf("focus: record merge: no actor available")
 	}
 	for _, m := range merges {
-		if err := st.AddExternalXref(store.XrefLink{
+		if err := st.AddExternalXref(ctx, store.XrefLink{
 			Repo: repo, FromType: m.Kept.Type, FromID: m.Kept.ID,
 			ToType: m.Absorbed.Type, ToID: m.Absorbed.ID,
 			Relation: relationReferences, Actor: actor, ActedAt: at, Reason: MergeReason,
@@ -97,9 +98,9 @@ func RecordMerges(st *store.Store, repo string, merges []Merge, actor, at string
 
 // RemoveMerges removes the recorded focus:merge link of every pair, whichever
 // actor recorded it (the merge belongs to the plan, not to one caller).
-func RemoveMerges(st *store.Store, repo string, merges []Merge) error {
+func RemoveMerges(ctx context.Context, st *store.Store, repo string, merges []Merge) error {
 	for _, m := range merges {
-		links, err := st.ListXrefLinksFrom(repo, m.Kept.Type, m.Kept.ID)
+		links, err := st.ListXrefLinksFrom(ctx, repo, m.Kept.Type, m.Kept.ID)
 		if err != nil {
 			return fmt.Errorf("focus: remove merge %s into %s: %w", m.Absorbed, m.Kept, err)
 		}
@@ -108,7 +109,7 @@ func RemoveMerges(st *store.Store, repo string, merges []Merge) error {
 				continue
 			}
 			actor := strings.TrimPrefix(l.Origin, externalOriginPrefix)
-			if _, err := st.RemoveExternalXref(repo, l.FromType, l.FromID, l.ToType, l.ToID, l.Relation, actor); err != nil {
+			if _, err := st.RemoveExternalXref(ctx, repo, l.FromType, l.FromID, l.ToType, l.ToID, l.Relation, actor); err != nil {
 				return fmt.Errorf("focus: remove merge %s into %s: %w", m.Absorbed, m.Kept, err)
 			}
 		}

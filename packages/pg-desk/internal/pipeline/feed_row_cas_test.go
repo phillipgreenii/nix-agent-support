@@ -12,11 +12,11 @@ import (
 // bumpEntity makes a competing write: it bumps the entity's version.
 func bumpEntity(t *testing.T, p *Pipeline, id string) {
 	t.Helper()
-	cur, found, err := p.store.GetEntity(ecRepo, issueEntityType, id)
+	cur, found, err := p.store.GetEntity(context.Background(), ecRepo, issueEntityType, id)
 	if err != nil || !found {
 		t.Fatalf("competing write read: found=%v err=%v", found, err)
 	}
-	if _, err := p.store.WriteEntityStateWithLog(cur, cur.Version, cur.HydratedAt, true, []string{"reconcile"}, "pg-desk", "2026-09-16T00:00:00Z"); err != nil {
+	if _, err := p.store.WriteEntityStateWithLog(context.Background(), cur, cur.Version, cur.HydratedAt, true, []string{"reconcile"}, "pg-desk", "2026-09-16T00:00:00Z"); err != nil {
 		t.Fatalf("competing write: %v", err)
 	}
 }
@@ -47,7 +47,7 @@ func TestCommitRemovedFeedRow_UnheldEntityMarkerAdvanceFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "advance feed marker "+frInstance) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, found, _ := p.store.GetEntity(ecRepo, issueEntityType, "i-9"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), ecRepo, issueEntityType, "i-9"); found {
 		t.Fatal("an unheld removed row created an entity")
 	}
 }
@@ -55,14 +55,14 @@ func TestCommitRemovedFeedRow_UnheldEntityMarkerAdvanceFailure(t *testing.T) {
 func TestCommitRemovedFeedRow_WriteFailureIsAnErrorAndLeavesTheRow(t *testing.T) {
 	p, _ := frPipeline(t)
 	frIngest(t, p, frRow(1, "i-1", "title_changed"))
-	before, _, _ := p.store.GetEntity(ecRepo, issueEntityType, "i-1")
+	before, _, _ := p.store.GetEntity(context.Background(), ecRepo, issueEntityType, "i-1")
 	failStoreWrites(t, p.store, "UPDATE", "entity")
 
 	_, err := p.commitRemovedFeedRow(context.Background(), removedCommit("i-1", nil), ecRepo, "t", store.WriteOptions{})
 	if err == nil || !strings.Contains(err.Error(), "write issue i-1") {
 		t.Fatalf("err = %v", err)
 	}
-	if after, _, _ := p.store.GetEntity(ecRepo, issueEntityType, "i-1"); after.Version != before.Version || after.Inactive != before.Inactive || after.Facts != before.Facts {
+	if after, _, _ := p.store.GetEntity(context.Background(), ecRepo, issueEntityType, "i-1"); after.Version != before.Version || after.Inactive != before.Inactive || after.Facts != before.Facts {
 		t.Fatalf("entity changed despite the failure: before=%+v after=%+v", before, after)
 	}
 }
@@ -88,7 +88,7 @@ func TestCommitRemovedFeedRow_LostRaceRetriesThenGivesUp(t *testing.T) {
 	if len(attempts) != 2 {
 		t.Fatalf("attempts = %v, want 2 (one lost race, one win)", attempts)
 	}
-	if e, _, _ := p.store.GetEntity(ecRepo, issueEntityType, "i-1"); !e.Inactive {
+	if e, _, _ := p.store.GetEntity(context.Background(), ecRepo, issueEntityType, "i-1"); !e.Inactive {
 		t.Fatalf("entity = %+v, want inactive after the removed commit", e)
 	}
 
@@ -103,7 +103,7 @@ func TestCommitRemovedFeedRow_LostRaceRetriesThenGivesUp(t *testing.T) {
 	if calls != defaultEntityChangeRetries+1 {
 		t.Fatalf("calls = %d, want %d (the initial attempt plus the retries)", calls, defaultEntityChangeRetries+1)
 	}
-	if e, _, _ := p2.store.GetEntity(ecRepo, issueEntityType, "i-1"); e.Inactive {
+	if e, _, _ := p2.store.GetEntity(context.Background(), ecRepo, issueEntityType, "i-1"); e.Inactive {
 		t.Fatal("the entity was deactivated although every write lost the race")
 	}
 }
@@ -139,7 +139,7 @@ func TestCommitCAS_CancelledContextIsAnErrorBeforeAnyWrite(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || exhausted {
 		t.Fatalf("err = %v exhausted = %v", err, exhausted)
 	}
-	if _, found, _ := p.store.GetEntity(ecRepo, issueEntityType, "i-2"); found {
+	if _, found, _ := p.store.GetEntity(ctx, ecRepo, issueEntityType, "i-2"); found {
 		t.Fatal("a cancelled context still wrote")
 	}
 }

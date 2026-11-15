@@ -19,7 +19,7 @@ func focusSeed(t *testing.T, s *Store, ids ...string) {
 	t.Helper()
 	for _, id := range ids {
 		e := Entity{Repo: focusRepo, EntityType: "pr", EntityID: id, Facts: `{"n":"` + id + `"}`, AsOf: "2026-09-10T00:00:00Z", ContentHash: "h-" + id}
-		if _, err := s.WriteEntityWithLog(e, 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
+		if _, err := s.WriteEntityWithLog(context.Background(), e, 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
@@ -67,14 +67,14 @@ func tableCount(t *testing.T, s *Store, table string) int {
 func TestFocusPeriodGetOrCreate(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 
-	a, err := s.GetOrCreateFocusPeriod("day", "2026-9-3")
+	a, err := s.GetOrCreateFocusPeriod(context.Background(), "day", "2026-9-3")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.PeriodType != "day" || a.PeriodKey != "2026-09-03" || a.Cap != nil || a.ClosedAt != "" || a.CloseNote != "" {
 		t.Fatalf("created period = %+v; want day 2026-09-03 with cap/closed_at/close_note empty", a)
 	}
-	b, err := s.GetOrCreateFocusPeriod("day", "2026-09-03")
+	b, err := s.GetOrCreateFocusPeriod(context.Background(), "day", "2026-09-03")
 	if err != nil || b != a {
 		t.Fatalf("second call = %+v, %v; want the same period %+v", b, err, a)
 	}
@@ -91,7 +91,7 @@ func TestFocusPeriodGetOrCreate(t *testing.T) {
 		{"", "2026-09-03"},
 		{"week", ""},
 	} {
-		if _, err := s.GetOrCreateFocusPeriod(bad.typ, bad.key); err == nil {
+		if _, err := s.GetOrCreateFocusPeriod(context.Background(), bad.typ, bad.key); err == nil {
 			t.Errorf("GetOrCreateFocusPeriod(%q,%q) succeeded, want an error", bad.typ, bad.key)
 		}
 	}
@@ -100,21 +100,21 @@ func TestFocusPeriodGetOrCreate(t *testing.T) {
 	}
 
 	// Read-only: FocusPeriodGet never creates, and normalizes the key.
-	got, ok, err := s.FocusPeriodGet("day", "2026-9-3")
+	got, ok, err := s.FocusPeriodGet(context.Background(), "day", "2026-9-3")
 	if err != nil || !ok || got != a {
 		t.Fatalf("FocusPeriodGet = %+v, %v, %v; want %+v", got, ok, err, a)
 	}
-	if _, ok, err := s.FocusPeriodGet("day", "2026-09-04"); err != nil || ok {
+	if _, ok, err := s.FocusPeriodGet(context.Background(), "day", "2026-09-04"); err != nil || ok {
 		t.Fatalf("FocusPeriodGet of an absent period = %v, %v; want not found", ok, err)
 	}
 	if n := tableCount(t, s, "focus_period"); n != 1 {
 		t.Fatalf("FocusPeriodGet created a row: %d rows", n)
 	}
 
-	if _, err := s.GetOrCreateFocusPeriod("week", "2026-W39"); err != nil {
+	if _, err := s.GetOrCreateFocusPeriod(context.Background(), "week", "2026-W39"); err != nil {
 		t.Fatalf("week period: %v", err)
 	}
-	ps, err := s.FocusPeriods()
+	ps, err := s.FocusPeriods(context.Background())
 	if err != nil || len(ps) != 2 {
 		t.Fatalf("FocusPeriods = %+v, %v; want 2", ps, err)
 	}
@@ -163,7 +163,7 @@ func TestFocusSelectionStrikeDeletesRows(t *testing.T) {
 	p1 := focusPlan(t, s, "2026-09-22", "1", "2")
 	p2 := focusPlan(t, s, "2026-09-23", "1")
 
-	rows, err := s.FocusRowsOfEntity(focusRepo, "pr", "1")
+	rows, err := s.FocusRowsOfEntity(context.Background(), focusRepo, "pr", "1")
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("rows of entity 1 = %+v, %v; want 2", rows, err)
 	}
@@ -176,10 +176,10 @@ func TestFocusSelectionStrikeDeletesRows(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("DeleteEntityRows removed %d rows, want 2", n)
 	}
-	if rows, _ := s.FocusRowsOfEntity(focusRepo, "pr", "1"); len(rows) != 0 {
+	if rows, _ := s.FocusRowsOfEntity(context.Background(), focusRepo, "pr", "1"); len(rows) != 0 {
 		t.Fatalf("rows of entity 1 after the strike = %+v", rows)
 	}
-	left, err := s.FocusRowsAllPeriods()
+	left, err := s.FocusRowsAllPeriods(context.Background())
 	if err != nil || len(left) != 1 || left[0].EntityID != "2" || left[0].FocusPeriodID != p1.ID {
 		t.Fatalf("remaining rows = %+v, %v; want only entity 2 in period %d", left, err, p1.ID)
 	}
@@ -211,7 +211,7 @@ func TestFocusPlanRowsAreOrderedByRankPositionWithTier(t *testing.T) {
 		}
 		return nil
 	})
-	rows, err := s.FocusPlanRows(p.ID)
+	rows, err := s.FocusPlanRows(context.Background(), p.ID)
 	if err != nil || len(rows) != 3 {
 		t.Fatalf("plan rows = %+v, %v", rows, err)
 	}
@@ -240,7 +240,7 @@ func TestAnnotationIsMaxPeriodAcrossPeriods(t *testing.T) {
 
 	val := func(id string) string {
 		t.Helper()
-		v, err := s.FocusAnnotationValue(focusRepo, "pr", id)
+		v, err := s.FocusAnnotationValue(context.Background(), focusRepo, "pr", id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -306,7 +306,7 @@ func TestFocusDraftRejectsIdOtherThanOneAndASecondRow(t *testing.T) {
 	// The layer itself never writes a second row.
 	for _, key := range []string{"2026-09-24", "2026-09-25"} {
 		d := FocusDraft{PeriodType: "day", PeriodKey: key, Cap: 5, MadeAt: "t", BodyJSON: "{}"}
-		if _, err := s.FocusDraftStore(d, key); err != nil {
+		if _, err := s.FocusDraftStore(context.Background(), d, key); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -322,54 +322,54 @@ func draftOf(key, body string) FocusDraft {
 func TestFocusDraftStoreCases(t *testing.T) {
 	t.Run("free row", func(t *testing.T) {
 		s := OpenNewSchemaForTest(t)
-		if _, ok, err := s.FocusDraftGet(); err != nil || ok {
+		if _, ok, err := s.FocusDraftGet(context.Background()); err != nil || ok {
 			t.Fatalf("FocusDraftGet on a free row = %v, %v", ok, err)
 		}
-		stored, err := s.FocusDraftStore(draftOf("2026-9-23", `{"a":1}`), "2026-09-23")
+		stored, err := s.FocusDraftStore(context.Background(), draftOf("2026-9-23", `{"a":1}`), "2026-09-23")
 		if err != nil || !stored {
 			t.Fatalf("store on a free row = %v, %v; want stored", stored, err)
 		}
-		d, ok, err := s.FocusDraftGet()
+		d, ok, err := s.FocusDraftGet(context.Background())
 		if err != nil || !ok || d != draftOf("2026-09-23", `{"a":1}`) {
 			t.Fatalf("stored draft = %+v, %v, %v (key must be normalized)", d, ok, err)
 		}
 	})
 	t.Run("same-period draft untouched", func(t *testing.T) {
 		s := OpenNewSchemaForTest(t)
-		if _, err := s.FocusDraftStore(draftOf("2026-09-23", `{"first":true}`), "2026-09-23"); err != nil {
+		if _, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{"first":true}`), "2026-09-23"); err != nil {
 			t.Fatal(err)
 		}
-		stored, err := s.FocusDraftStore(draftOf("2026-09-23", `{"second":true}`), "2026-09-23")
+		stored, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{"second":true}`), "2026-09-23")
 		if err != nil || stored {
 			t.Fatalf("same-period store = %v, %v; want stored=false", stored, err)
 		}
-		if d, _, _ := s.FocusDraftGet(); d.BodyJSON != `{"first":true}` {
+		if d, _, _ := s.FocusDraftGet(context.Background()); d.BodyJSON != `{"first":true}` {
 			t.Fatalf("the same-period draft was overwritten: %+v", d)
 		}
 	})
 	t.Run("earlier stored period replaced", func(t *testing.T) {
 		s := OpenNewSchemaForTest(t)
-		if _, err := s.FocusDraftStore(draftOf("2026-09-22", `{"old":true}`), "2026-09-22"); err != nil {
+		if _, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-22", `{"old":true}`), "2026-09-22"); err != nil {
 			t.Fatal(err)
 		}
-		stored, err := s.FocusDraftStore(draftOf("2026-09-23", `{"new":true}`), "2026-09-23")
+		stored, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{"new":true}`), "2026-09-23")
 		if err != nil || !stored {
 			t.Fatalf("store over an earlier draft = %v, %v; want stored", stored, err)
 		}
-		if d, _, _ := s.FocusDraftGet(); d.PeriodKey != "2026-09-23" || d.BodyJSON != `{"new":true}` {
+		if d, _, _ := s.FocusDraftGet(context.Background()); d.PeriodKey != "2026-09-23" || d.BodyJSON != `{"new":true}` {
 			t.Fatalf("draft = %+v, want the 2026-09-23 draft", d)
 		}
 	})
 	t.Run("later stored period untouched", func(t *testing.T) {
 		s := OpenNewSchemaForTest(t)
-		if _, err := s.FocusDraftStore(draftOf("2026-09-24", `{"later":true}`), "2026-09-24"); err != nil {
+		if _, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-24", `{"later":true}`), "2026-09-24"); err != nil {
 			t.Fatal(err)
 		}
-		stored, err := s.FocusDraftStore(draftOf("2026-09-23", `{"earlier":true}`), "2026-09-23")
+		stored, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{"earlier":true}`), "2026-09-23")
 		if err != nil || stored {
 			t.Fatalf("store under a later draft = %v, %v; want stored=false", stored, err)
 		}
-		if d, _, _ := s.FocusDraftGet(); d.PeriodKey != "2026-09-24" {
+		if d, _, _ := s.FocusDraftGet(context.Background()); d.PeriodKey != "2026-09-24" {
 			t.Fatalf("the later draft was replaced: %+v", d)
 		}
 	})
@@ -377,7 +377,7 @@ func TestFocusDraftStoreCases(t *testing.T) {
 		s := OpenNewSchemaForTest(t)
 		focusSeed(t, s, "1")
 		focusPlan(t, s, "2026-09-23", "1") // the lock committed after show computed
-		stored, err := s.FocusDraftStore(draftOf("2026-09-23", `{}`), "2026-09-23")
+		stored, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{}`), "2026-09-23")
 		if err != nil || stored {
 			t.Fatalf("store after a plan appeared = %v, %v; want stored=false", stored, err)
 		}
@@ -385,26 +385,26 @@ func TestFocusDraftStoreCases(t *testing.T) {
 			t.Fatalf("a draft was stored over a plan: %d rows", n)
 		}
 		// A plan for ANOTHER period does not block it.
-		stored, err = s.FocusDraftStore(draftOf("2026-09-24", `{}`), "2026-09-24")
+		stored, err = s.FocusDraftStore(context.Background(), draftOf("2026-09-24", `{}`), "2026-09-24")
 		if err != nil || !stored {
 			t.Fatalf("store for a period with no rows = %v, %v; want stored", stored, err)
 		}
 	})
 	t.Run("a period row with no selection rows does not block", func(t *testing.T) {
 		s := OpenNewSchemaForTest(t)
-		if _, err := s.GetOrCreateFocusPeriod("day", "2026-09-23"); err != nil {
+		if _, err := s.GetOrCreateFocusPeriod(context.Background(), "day", "2026-09-23"); err != nil {
 			t.Fatal(err)
 		}
-		if stored, err := s.FocusDraftStore(draftOf("2026-09-23", `{}`), "2026-09-23"); err != nil || !stored {
+		if stored, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{}`), "2026-09-23"); err != nil || !stored {
 			t.Fatalf("store = %v, %v; want stored (the check counts rows)", stored, err)
 		}
 	})
 	t.Run("invalid keys", func(t *testing.T) {
 		s := OpenNewSchemaForTest(t)
-		if _, err := s.FocusDraftStore(draftOf("bad", `{}`), "2026-09-23"); err == nil {
+		if _, err := s.FocusDraftStore(context.Background(), draftOf("bad", `{}`), "2026-09-23"); err == nil {
 			t.Errorf("a bad draft key was accepted")
 		}
-		if _, err := s.FocusDraftStore(draftOf("2026-09-23", `{}`), "bad"); err == nil {
+		if _, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{}`), "bad"); err == nil {
 			t.Errorf("a bad addressed key was accepted")
 		}
 	})
@@ -413,30 +413,30 @@ func TestFocusDraftStoreCases(t *testing.T) {
 func TestFocusDraftReplace(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	focusSeed(t, s, "1")
-	if _, err := s.FocusDraftStore(draftOf("2026-09-23", `{"v":1}`), "2026-09-23"); err != nil {
+	if _, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{"v":1}`), "2026-09-23"); err != nil {
 		t.Fatal(err)
 	}
 	// A same-period draft is replaced (the show verb's unreadable-draft path).
-	if now, err := s.FocusDraftReplace(draftOf("2026-09-23", `{"v":2}`)); err != nil || now {
+	if now, err := s.FocusDraftReplace(context.Background(), draftOf("2026-09-23", `{"v":2}`)); err != nil || now {
 		t.Fatalf("replace = %v, %v; want a write", now, err)
 	}
-	if d, _, _ := s.FocusDraftGet(); d.BodyJSON != `{"v":2}` {
+	if d, _, _ := s.FocusDraftGet(context.Background()); d.BodyJSON != `{"v":2}` {
 		t.Fatalf("draft after replace = %+v", d)
 	}
 	// Replace also takes a free row and a different period.
-	if now, err := s.FocusDraftReplace(draftOf("2026-09-22", `{"v":3}`)); err != nil || now {
+	if now, err := s.FocusDraftReplace(context.Background(), draftOf("2026-09-22", `{"v":3}`)); err != nil || now {
 		t.Fatalf("replace to another period = %v, %v", now, err)
 	}
-	if d, _, _ := s.FocusDraftGet(); d.PeriodKey != "2026-09-22" {
+	if d, _, _ := s.FocusDraftGet(context.Background()); d.PeriodKey != "2026-09-22" {
 		t.Fatalf("draft after replace = %+v", d)
 	}
 	// A plan appearing for the period: nothing is written, planNowExists.
 	focusPlan(t, s, "2026-09-23", "1")
-	now, err := s.FocusDraftReplace(draftOf("2026-09-23", `{"v":4}`))
+	now, err := s.FocusDraftReplace(context.Background(), draftOf("2026-09-23", `{"v":4}`))
 	if err != nil || !now {
 		t.Fatalf("replace over a plan = %v, %v; want planNowExists", now, err)
 	}
-	if d, _, _ := s.FocusDraftGet(); d.BodyJSON != `{"v":3}` {
+	if d, _, _ := s.FocusDraftGet(context.Background()); d.BodyJSON != `{"v":3}` {
 		t.Fatalf("a draft was written despite the plan: %+v", d)
 	}
 }
@@ -477,7 +477,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 	setup := func() *Store {
 		s := OpenNewSchemaForTest(t)
 		focusSeed(t, s, "1")
-		if _, err := s.FocusDraftStore(draftOf("2026-09-23", `{}`), "2026-09-23"); err != nil {
+		if _, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-23", `{}`), "2026-09-23"); err != nil {
 			t.Fatal(err)
 		}
 		return s
@@ -506,7 +506,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 			t.Fatalf("rows = %v after the panic, want %v unchanged", after, before)
 		}
 		// The connection is released: the store still works.
-		if _, _, err := s.FocusDraftGet(); err != nil {
+		if _, _, err := s.FocusDraftGet(context.Background()); err != nil {
 			t.Fatalf("store unusable after a panicking lock: %v", err)
 		}
 	})
@@ -518,7 +518,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 		if got, want := counts(s), [4]int{1, 1, 0, 1}; got != want {
 			t.Fatalf("rows = %v, want %v (period, plan row, no draft, run row)", got, want)
 		}
-		p, _, _ := s.FocusPeriodGet("day", "2026-09-23")
+		p, _, _ := s.FocusPeriodGet(context.Background(), "day", "2026-09-23")
 		if p.Cap == nil || *p.Cap != 5 {
 			t.Fatalf("period cap = %v, want 5", p.Cap)
 		}
@@ -551,11 +551,11 @@ func TestFocusTxOtherPeriodQueries(t *testing.T) {
 	focusSeed(t, s, "1", "2", "3")
 	focusPlan(t, s, "2026-09-21", "1", "2")
 	focusPlan(t, s, "2026-09-22", "3")
-	empty, err := s.GetOrCreateFocusPeriod("day", "2026-09-25") // no rows: never counts
+	empty, err := s.GetOrCreateFocusPeriod(context.Background(), "day", "2026-09-25") // no rows: never counts
 	if err != nil {
 		t.Fatal(err)
 	}
-	cur, err := s.GetOrCreateFocusPeriod("day", "2026-09-23")
+	cur, err := s.GetOrCreateFocusPeriod(context.Background(), "day", "2026-09-23")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestFocusTxOtherPeriodQueries(t *testing.T) {
 		}
 		return nil
 	})
-	p21, _, _ := s.FocusPeriodGet("day", "2026-09-21")
+	p21, _, _ := s.FocusPeriodGet(context.Background(), "day", "2026-09-21")
 	focusLock(t, s, func(tx *FocusTx) error {
 		if m, err := tx.MaxRankPosition(p21.ID); err != nil || m != 2 {
 			t.Errorf("MaxRankPosition = %d, %v; want 2", m, err)
@@ -599,7 +599,7 @@ func TestFocusTxOtherPeriodQueries(t *testing.T) {
 		}
 		return err
 	})
-	all, _ := s.FocusRowsAllPeriods()
+	all, _ := s.FocusRowsAllPeriods(context.Background())
 	if len(all) != 1 || all[0].FocusPeriodID != cur.ID {
 		t.Fatalf("rows after the replacement = %+v", all)
 	}
@@ -612,7 +612,7 @@ func TestFocusTxDraftDeletes(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	store := func(key string) {
 		t.Helper()
-		if _, err := s.FocusDraftReplace(draftOf(key, `{}`)); err != nil {
+		if _, err := s.FocusDraftReplace(context.Background(), draftOf(key, `{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -636,58 +636,58 @@ func TestFocusTxDraftDeletes(t *testing.T) {
 		}
 		return tx.DeleteDraftOfPeriod("day", "2026-9-23")
 	})
-	if _, ok, _ := s.FocusDraftGet(); ok {
+	if _, ok, _ := s.FocusDraftGet(context.Background()); ok {
 		t.Fatalf("the period's draft survived DeleteDraftOfPeriod")
 	}
 }
 
 func TestFocusPeriodCloseCreatesClosesAndDropsItsDraft(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, err := s.FocusDraftReplace(draftOf("2026-09-23", `{}`)); err != nil {
+	if _, err := s.FocusDraftReplace(context.Background(), draftOf("2026-09-23", `{}`)); err != nil {
 		t.Fatal(err)
 	}
 	// No period row yet: close creates it.
-	if err := s.FocusPeriodClose("day", "2026-9-23", "line1\nline2", "2026-09-23T20:00:00Z"); err != nil {
+	if err := s.FocusPeriodClose(context.Background(), "day", "2026-9-23", "line1\nline2", "2026-09-23T20:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	p, found, err := s.FocusPeriodGet("day", "2026-09-23")
+	p, found, err := s.FocusPeriodGet(context.Background(), "day", "2026-09-23")
 	if err != nil || !found || p.ClosedAt != "2026-09-23T20:00:00Z" || p.CloseNote != "line1\nline2" {
 		t.Fatalf("period = %+v, %v, %v", p, found, err)
 	}
-	if _, ok, _ := s.FocusDraftGet(); ok {
+	if _, ok, _ := s.FocusDraftGet(context.Background()); ok {
 		t.Errorf("the draft of the closed period survived")
 	}
 	// Again: refused with the recorded values, nothing changed.
-	err = s.FocusPeriodClose("day", "2026-09-23", "other", "2026-09-24T01:00:00Z")
+	err = s.FocusPeriodClose(context.Background(), "day", "2026-09-23", "other", "2026-09-24T01:00:00Z")
 	var closed *FocusPeriodClosedError
 	if !errors.As(err, &closed) || closed.ClosedAt != "2026-09-23T20:00:00Z" || closed.CloseNote != "line1\nline2" {
 		t.Fatalf("second close = %v, want a FocusPeriodClosedError carrying the recorded close", err)
 	}
-	if again, _, _ := s.FocusPeriodGet("day", "2026-09-23"); again != p {
+	if again, _, _ := s.FocusPeriodGet(context.Background(), "day", "2026-09-23"); again != p {
 		t.Errorf("a refused close changed the period: %+v", again)
 	}
 }
 
 func TestFocusPeriodCloseKeepsAnotherPeriodsDraft(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, err := s.FocusDraftReplace(draftOf("2026-09-24", `{}`)); err != nil {
+	if _, err := s.FocusDraftReplace(context.Background(), draftOf("2026-09-24", `{}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FocusPeriodClose("day", "2026-09-23", "n", "2026-09-23T20:00:00Z"); err != nil {
+	if err := s.FocusPeriodClose(context.Background(), "day", "2026-09-23", "n", "2026-09-23T20:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if d, ok, _ := s.FocusDraftGet(); !ok || d.PeriodKey != "2026-09-24" {
+	if d, ok, _ := s.FocusDraftGet(context.Background()); !ok || d.PeriodKey != "2026-09-24" {
 		t.Errorf("draft = %+v, %v; want the other period's draft kept", d, ok)
 	}
-	if err := s.FocusPeriodClose("day", "not a date", "n", "x"); err == nil {
+	if err := s.FocusPeriodClose(context.Background(), "day", "not a date", "n", "x"); err == nil {
 		t.Errorf("an invalid key closed a period")
 	}
 }
 
 func TestFocusRunInsertAndFinalize(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	p, _ := s.GetOrCreateFocusPeriod("day", "2026-09-23")
-	id, err := s.FocusRunInsert(FocusRun{RunID: "01A", Verb: "select", FocusPeriodID: &p.ID, StartedAt: "2026-09-23T08:00:00Z", Actor: "op"})
+	p, _ := s.GetOrCreateFocusPeriod(context.Background(), "day", "2026-09-23")
+	id, err := s.FocusRunInsert(context.Background(), FocusRun{RunID: "01A", Verb: "select", FocusPeriodID: &p.ID, StartedAt: "2026-09-23T08:00:00Z", Actor: "op"})
 	if err != nil || id == 0 {
 		t.Fatalf("FocusRunInsert = %d, %v", id, err)
 	}
@@ -705,21 +705,21 @@ func TestFocusRunInsertAndFinalize(t *testing.T) {
 	if exit != nil || counts != "{}" {
 		t.Fatalf("new run: exit_code=%v counts=%q; want NULL and {}", exit, counts)
 	}
-	if err := s.FocusRunFinalize("01A", 2, `{"selected":3}`); err != nil {
+	if err := s.FocusRunFinalize(context.Background(), "01A", 2, `{"selected":3}`); err != nil {
 		t.Fatal(err)
 	}
 	read()
 	if exit == nil || *exit != 2 || counts != `{"selected":3}` {
 		t.Fatalf("finalized run: exit_code=%v counts=%q", exit, counts)
 	}
-	if err := s.FocusRunFinalize("missing", 0, "{}"); err == nil {
+	if err := s.FocusRunFinalize(context.Background(), "missing", 0, "{}"); err == nil {
 		t.Errorf("finalizing a missing run succeeded")
 	}
-	if _, err := s.FocusRunInsert(FocusRun{RunID: "01A", Verb: "pull", StartedAt: "t", Actor: "op"}); err == nil {
+	if _, err := s.FocusRunInsert(context.Background(), FocusRun{RunID: "01A", Verb: "pull", StartedAt: "t", Actor: "op"}); err == nil {
 		t.Errorf("a duplicate run_id was accepted")
 	}
 	// A failure before locking: no period, no counts.
-	if _, err := s.FocusRunInsert(FocusRun{RunID: "01B", Verb: "close", StartedAt: "t", Actor: "op"}); err != nil {
+	if _, err := s.FocusRunInsert(context.Background(), FocusRun{RunID: "01B", Verb: "close", StartedAt: "t", Actor: "op"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -744,11 +744,11 @@ func TestFocusRunStats(t *testing.T) {
 	}
 	for _, r := range runs {
 		r.Actor = "op"
-		if _, err := s.FocusRunInsert(r); err != nil {
+		if _, err := s.FocusRunInsert(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	st, err := s.FocusRunStats()
+	st, err := s.FocusRunStats(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,7 +773,7 @@ func TestFocusRunStats(t *testing.T) {
 	}
 
 	// No runs: empty stats, nil last-lock values.
-	empty, err := OpenNewSchemaForTest(t).FocusRunStats()
+	empty, err := OpenNewSchemaForTest(t).FocusRunStats(context.Background())
 	if err != nil || len(empty.ByVerbOutcome) != 0 || empty.LastSelectAt != "" || empty.LastLockDraftAgeSeconds != nil || empty.LastLockDriftRows != nil {
 		t.Errorf("stats of a store with no runs = %+v, %v", empty, err)
 	}
@@ -813,11 +813,11 @@ func TestFocusRunStatsReadsEachRowUnderItsExitScheme(t *testing.T) {
 	}
 	for _, r := range runs {
 		r.Actor, r.StartedAt = "op", "2026-10-28T08:00:00Z"
-		if _, err := s.FocusRunInsert(r); err != nil {
+		if _, err := s.FocusRunInsert(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}
-	st, err := s.FocusRunStats()
+	st, err := s.FocusRunStats(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,11 +845,11 @@ func TestSetAnnotationSeq(t *testing.T) {
 	logBefore := changeCount(t, s)
 
 	a := kvAnn(AnnotationFocusSelected, "2026-09-23")
-	seq, changed, err := s.SetAnnotationSeq(a)
+	seq, changed, err := s.SetAnnotationSeq(context.Background(), a)
 	if err != nil || !changed || seq == 0 {
 		t.Fatalf("first write = %d, %v, %v; want a sequence and changed", seq, changed, err)
 	}
-	hist, _ := s.ListEntityHistory(kvRepo, kvType, kvID, 1)
+	hist, _ := s.ListEntityHistory(context.Background(), kvRepo, kvType, kvID, 1)
 	if len(hist) != 1 || hist[0].Seq != seq || hist[0].Kinds[0] != ChangeKindAnnotationChanged {
 		t.Fatalf("history = %+v, want the annotation_changed record with seq %d", hist, seq)
 	}
@@ -861,20 +861,20 @@ func TestSetAnnotationSeq(t *testing.T) {
 	// nothing and leaves the row as it was.
 	again := a
 	again.SetBy, again.SetAt, again.Origin = "agent", "2026-09-24T00:00:00Z", "other"
-	seq2, changed2, err := s.SetAnnotationSeq(again)
+	seq2, changed2, err := s.SetAnnotationSeq(context.Background(), again)
 	if err != nil || changed2 || seq2 != 0 {
 		t.Fatalf("identical rewrite = %d, %v, %v; want 0, unchanged", seq2, changed2, err)
 	}
 	if changeCount(t, s) != logBefore+1 {
 		t.Fatalf("the identical rewrite appended a record")
 	}
-	if got, _, _ := s.GetKVAnnotation(kvRepo, kvType, kvID, AnnotationFocusSelected); got != a {
+	if got, _, _ := s.GetKVAnnotation(context.Background(), kvRepo, kvType, kvID, AnnotationFocusSelected); got != a {
 		t.Fatalf("the identical rewrite changed the row: %+v", got)
 	}
 
 	// A different value writes and returns a later sequence.
 	a.Value = "none"
-	seq3, changed3, err := s.SetAnnotationSeq(a)
+	seq3, changed3, err := s.SetAnnotationSeq(context.Background(), a)
 	if err != nil || !changed3 || seq3 <= seq {
 		t.Fatalf("changed value = %d, %v, %v; want a later sequence", seq3, changed3, err)
 	}
@@ -883,23 +883,23 @@ func TestSetAnnotationSeq(t *testing.T) {
 	boom := errors.New("injected failure")
 	s.betweenAnnotationAndAppend = func() error { return boom }
 	a.Value = "2026-09-25"
-	seq4, changed4, err := s.SetAnnotationSeq(a)
+	seq4, changed4, err := s.SetAnnotationSeq(context.Background(), a)
 	s.betweenAnnotationAndAppend = nil
 	if !errors.Is(err, boom) || seq4 != 0 || changed4 {
 		t.Fatalf("faulted write = %d, %v, %v", seq4, changed4, err)
 	}
-	if got, _, _ := s.GetKVAnnotation(kvRepo, kvType, kvID, AnnotationFocusSelected); got.Value != "none" {
+	if got, _, _ := s.GetKVAnnotation(context.Background(), kvRepo, kvType, kvID, AnnotationFocusSelected); got.Value != "none" {
 		t.Fatalf("a faulted write persisted: %+v", got)
 	}
 
 	// An entity with no row errors and writes nothing.
 	ghost := a
 	ghost.EntityID = "ghost"
-	if _, _, err := s.SetAnnotationSeq(ghost); !errors.Is(err, ErrNoEntity) {
+	if _, _, err := s.SetAnnotationSeq(context.Background(), ghost); !errors.Is(err, ErrNoEntity) {
 		t.Fatalf("unknown entity: err = %v, want ErrNoEntity", err)
 	}
 	// An old-schema store refuses.
-	if _, _, err := OpenForTest(t).SetAnnotationSeq(a); err == nil {
+	if _, _, err := OpenForTest(t).SetAnnotationSeq(context.Background(), a); err == nil {
 		t.Fatalf("SetAnnotationSeq on an old-schema store succeeded")
 	}
 }
@@ -941,7 +941,7 @@ func TestFocusLockTxSerializesConcurrentLocks(t *testing.T) {
 	if n := len(firstLocks); n != 1 {
 		t.Fatalf("%d locks saw an empty period, want exactly 1 first lock", n)
 	}
-	rows, _ := s.FocusRowsAllPeriods()
+	rows, _ := s.FocusRowsAllPeriods(context.Background())
 	if len(rows) != 2 || rows[0].RankPosition == rows[1].RankPosition {
 		t.Fatalf("rows = %+v, want two with distinct positions", rows)
 	}
@@ -951,32 +951,32 @@ func TestFocusDraftReplan(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	focusSeed(t, s, "1")
 	// No plan, expectPlan false: written, replacing a draft of any period.
-	if _, err := s.FocusDraftStore(draftOf("2026-09-22", `{"v":1}`), "2026-09-22"); err != nil {
+	if _, err := s.FocusDraftStore(context.Background(), draftOf("2026-09-22", `{"v":1}`), "2026-09-22"); err != nil {
 		t.Fatal(err)
 	}
-	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":2}`), false); err != nil || changed {
+	if changed, err := s.FocusDraftReplan(context.Background(), draftOf("2026-09-23", `{"v":2}`), false); err != nil || changed {
 		t.Fatalf("replan = %v, %v; want a write", changed, err)
 	}
-	if d, _, _ := s.FocusDraftGet(); d.PeriodKey != "2026-09-23" || d.BodyJSON != `{"v":2}` {
+	if d, _, _ := s.FocusDraftGet(context.Background()); d.PeriodKey != "2026-09-23" || d.BodyJSON != `{"v":2}` {
 		t.Fatalf("draft = %+v", d)
 	}
 	// No plan but a plan was expected: nothing written, state changed.
-	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":3}`), true); err != nil || !changed {
+	if changed, err := s.FocusDraftReplan(context.Background(), draftOf("2026-09-23", `{"v":3}`), true); err != nil || !changed {
 		t.Fatalf("replan expecting a plan with none = %v, %v; want changed", changed, err)
 	}
 	// A plan exists and one was expected: written.
 	focusPlan(t, s, "2026-09-23", "1")
-	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":4}`), true); err != nil || changed {
+	if changed, err := s.FocusDraftReplan(context.Background(), draftOf("2026-09-23", `{"v":4}`), true); err != nil || changed {
 		t.Fatalf("replan over a plan = %v, %v; want a write", changed, err)
 	}
-	if d, _, _ := s.FocusDraftGet(); d.BodyJSON != `{"v":4}` {
+	if d, _, _ := s.FocusDraftGet(context.Background()); d.BodyJSON != `{"v":4}` {
 		t.Fatalf("draft = %+v", d)
 	}
 	// A plan appeared where an initial draft was computed: nothing written.
-	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":5}`), false); err != nil || !changed {
+	if changed, err := s.FocusDraftReplan(context.Background(), draftOf("2026-09-23", `{"v":5}`), false); err != nil || !changed {
 		t.Fatalf("replan with an unexpected plan = %v, %v; want changed", changed, err)
 	}
-	if d, _, _ := s.FocusDraftGet(); d.BodyJSON != `{"v":4}` {
+	if d, _, _ := s.FocusDraftGet(context.Background()); d.BodyJSON != `{"v":4}` {
 		t.Fatalf("a draft was written despite the changed plan state: %+v", d)
 	}
 }

@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -13,7 +14,7 @@ import (
 
 func TestReadHydrationStatsMissingKeysReadAsZero(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	got, err := ReadHydrationStats(st, "pr")
+	got, err := ReadHydrationStats(context.Background(), st, "pr")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,10 +25,10 @@ func TestReadHydrationStatsMissingKeysReadAsZero(t *testing.T) {
 
 func TestRecordHydrationPersistsTotalsUnderThePinnedKeys(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	RecordHydration(st, "pr", "o/r#1", pipeline.EntityChangeResult{Written: true, Retries: 2}, nil)
-	RecordHydration(st, "pr", "o/r#2", pipeline.EntityChangeResult{Degraded: "ci list"}, nil)
-	RecordHydration(st, "pr", "o/r#3", pipeline.EntityChangeResult{}, errors.New("boom"))
-	RecordHydration(st, "issue", "bd-1", pipeline.EntityChangeResult{Retries: 1}, nil)
+	RecordHydration(context.Background(), st, "pr", "o/r#1", pipeline.EntityChangeResult{Written: true, Retries: 2}, nil)
+	RecordHydration(context.Background(), st, "pr", "o/r#2", pipeline.EntityChangeResult{Degraded: "ci list"}, nil)
+	RecordHydration(context.Background(), st, "pr", "o/r#3", pipeline.EntityChangeResult{}, errors.New("boom"))
+	RecordHydration(context.Background(), st, "issue", "bd-1", pipeline.EntityChangeResult{Retries: 1}, nil)
 
 	for key, want := range map[string]string{
 		"change_flow.hydrations.pr":         "3",
@@ -36,7 +37,7 @@ func TestRecordHydrationPersistsTotalsUnderThePinnedKeys(t *testing.T) {
 		"change_flow.hydrations.issue":      "1",
 		"change_flow.occ_retries.issue":     "1",
 	} {
-		got, _, err := st.GetMeta(key)
+		got, _, err := st.GetMeta(context.Background(), key)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,11 +45,11 @@ func TestRecordHydrationPersistsTotalsUnderThePinnedKeys(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
 	}
-	if _, found, _ := st.GetMeta("change_flow.hydration_failures.issue"); found {
+	if _, found, _ := st.GetMeta(context.Background(), "change_flow.hydration_failures.issue"); found {
 		t.Error("a clean type must not get a failure key")
 	}
 
-	pr, err := ReadHydrationStats(st, "pr")
+	pr, err := ReadHydrationStats(context.Background(), st, "pr")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +68,11 @@ func TestRecordHydrationDegradedRunGrowsAndClearsOnSuccess(t *testing.T) {
 	first := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 	recorderNow = func() time.Time { return first }
 
-	RecordHydration(st, "pr", "o/r#1", pipeline.EntityChangeResult{Degraded: "ci list"}, nil)
+	RecordHydration(context.Background(), st, "pr", "o/r#1", pipeline.EntityChangeResult{Degraded: "ci list"}, nil)
 	recorderNow = func() time.Time { return first.Add(time.Hour) }
-	RecordHydration(st, "pr", "o/r#1", pipeline.EntityChangeResult{}, errors.New("boom"))
+	RecordHydration(context.Background(), st, "pr", "o/r#1", pipeline.EntityChangeResult{}, errors.New("boom"))
 
-	stats, _ := ReadHydrationStats(st, "pr")
+	stats, _ := ReadHydrationStats(context.Background(), st, "pr")
 	e := stats.Degraded["o/r#1"]
 	if e.Count != 2 || e.Since != "2026-10-01T08:00:00Z" {
 		t.Errorf("degraded run = %+v, want count 2 since the FIRST failure", e)
@@ -80,8 +81,8 @@ func TestRecordHydrationDegradedRunGrowsAndClearsOnSuccess(t *testing.T) {
 		t.Errorf("RepeatedDegraded = %+v", rep)
 	}
 
-	RecordHydration(st, "pr", "o/r#1", pipeline.EntityChangeResult{Written: true}, nil)
-	stats, _ = ReadHydrationStats(st, "pr")
+	RecordHydration(context.Background(), st, "pr", "o/r#1", pipeline.EntityChangeResult{Written: true}, nil)
+	stats, _ = ReadHydrationStats(context.Background(), st, "pr")
 	if len(stats.Degraded) != 0 {
 		t.Errorf("a successful hydration must clear the entity, got %+v", stats.Degraded)
 	}
@@ -90,8 +91,8 @@ func TestRecordHydrationDegradedRunGrowsAndClearsOnSuccess(t *testing.T) {
 	}
 	// A new failure after the clear starts a fresh run.
 	recorderNow = func() time.Time { return first.Add(2 * time.Hour) }
-	RecordHydration(st, "pr", "o/r#1", pipeline.EntityChangeResult{}, errors.New("again"))
-	stats, _ = ReadHydrationStats(st, "pr")
+	RecordHydration(context.Background(), st, "pr", "o/r#1", pipeline.EntityChangeResult{}, errors.New("again"))
+	stats, _ = ReadHydrationStats(context.Background(), st, "pr")
 	if e := stats.Degraded["o/r#1"]; e.Count != 1 || e.Since != "2026-10-01T10:00:00Z" {
 		t.Errorf("fresh run = %+v", e)
 	}
@@ -132,12 +133,12 @@ func TestRecordHydrationLosesNoTotalUnderConcurrentRuns(t *testing.T) {
 			for i := 0; i < perRunner; i++ {
 				// A unique entity per call keeps the degraded set's own
 				// best-effort read-modify-write out of the totals under test.
-				RecordHydration(h, "pr", fmt.Sprintf("o/r#%d-%d", r, i), pipeline.EntityChangeResult{Retries: 1}, errors.New("boom"))
+				RecordHydration(context.Background(), h, "pr", fmt.Sprintf("o/r#%d-%d", r, i), pipeline.EntityChangeResult{Retries: 1}, errors.New("boom"))
 			}
 		}(r)
 	}
 	wg.Wait()
-	got, err := ReadHydrationStats(seed, "pr")
+	got, err := ReadHydrationStats(context.Background(), seed, "pr")
 	if err != nil {
 		t.Fatal(err)
 	}

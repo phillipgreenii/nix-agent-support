@@ -25,12 +25,13 @@ func fmMarker(identity string, seq int64) *FeedMarker {
 func fmWrite(t *testing.T, s *Store, id string, m *FeedMarker) int64 {
 	t.Helper()
 	var expected int64
-	if cur, found, err := s.GetEntity(gateRepo, gateIssueTyp, id); err != nil {
+	if cur, found, err := s.GetEntity(context.Background(), gateRepo, gateIssueTyp, id); err != nil {
 		t.Fatal(err)
 	} else if found {
 		expected = cur.Version
 	}
 	v, err := s.WriteEntityStateWithLogOpts(
+		context.Background(),
 		fmEntity(id, fmt.Sprintf("v%d", expected+1)), expected, fmAt, true, nil,
 		[]string{"fields_changed"}, gateOrigin, fmAt, WriteOptions{FeedMarker: m},
 	)
@@ -42,7 +43,7 @@ func fmWrite(t *testing.T, s *Store, id string, m *FeedMarker) int64 {
 
 func fmStoredMarker(t *testing.T, s *Store) (FeedMarker, bool) {
 	t.Helper()
-	m, found, err := s.FeedMarker(fmInstance)
+	m, found, err := s.FeedMarker(context.Background(), fmInstance)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestFeedMarker_WrittenWithEntityWriteAsJSON(t *testing.T) {
 		t.Fatal("marker found before any write")
 	}
 	fmWrite(t, s, "PROJ-1", fmMarker("X", 5))
-	raw, found, err := s.GetMeta("change_flow.feed_seq." + fmInstance)
+	raw, found, err := s.GetMeta(context.Background(), "change_flow.feed_seq."+fmInstance)
 	if err != nil || !found {
 		t.Fatalf("GetMeta = (%q, %v, %v)", raw, found, err)
 	}
@@ -93,7 +94,7 @@ func TestFeedMarker_RedeliveryIsIdempotent(t *testing.T) {
 	batch := []row{{3, "PROJ-3"}, {4, "PROJ-4"}, {5, "PROJ-5"}}
 	deliver := func() (written int) {
 		for _, r := range batch {
-			skip, err := s.ShouldSkipFeedRow(fmInstance, "X", r.seq, r.id)
+			skip, err := s.ShouldSkipFeedRow(context.Background(), fmInstance, "X", r.seq, r.id)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +117,7 @@ func TestFeedMarker_RedeliveryIsIdempotent(t *testing.T) {
 		t.Errorf("change_log rows = %d, want exactly one per feed seq (3)", n)
 	}
 	for _, r := range batch {
-		e, found, err := s.GetEntity(gateRepo, gateIssueTyp, r.id)
+		e, found, err := s.GetEntity(context.Background(), gateRepo, gateIssueTyp, r.id)
 		if err != nil || !found || e.Version != 1 {
 			t.Errorf("%s = (%+v, %v, %v), want version 1", r.id, e, found, err)
 		}
@@ -129,12 +130,12 @@ func TestFeedMarker_RedeliveryIsIdempotent(t *testing.T) {
 		identity string
 		seq      int64
 	}{{"X", 6}, {"Y", 1}, {"Y", 5}} {
-		if skip, err := s.ShouldSkipFeedRow(fmInstance, c.identity, c.seq, "PROJ-9"); err != nil || skip {
+		if skip, err := s.ShouldSkipFeedRow(context.Background(), fmInstance, c.identity, c.seq, "PROJ-9"); err != nil || skip {
 			t.Errorf("ShouldSkipFeedRow(%s, %d) = (%v, %v), want false", c.identity, c.seq, skip, err)
 		}
 	}
 	// Another instance has its own marker.
-	if skip, err := s.ShouldSkipFeedRow("other", "X", 3, "PROJ-3"); err != nil || skip {
+	if skip, err := s.ShouldSkipFeedRow(context.Background(), "other", "X", 3, "PROJ-3"); err != nil || skip {
 		t.Errorf("other instance skipped = (%v, %v), want false", skip, err)
 	}
 }
@@ -142,24 +143,24 @@ func TestFeedMarker_RedeliveryIsIdempotent(t *testing.T) {
 func TestFeedMarker_ResetLetsRestartedSequenceThrough(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	fmWrite(t, s, "PROJ-1", fmMarker("X", 5))
-	if skip, _ := s.ShouldSkipFeedRow(fmInstance, "X", 1, "PROJ-1"); !skip {
+	if skip, _ := s.ShouldSkipFeedRow(context.Background(), fmInstance, "X", 1, "PROJ-1"); !skip {
 		t.Fatal("seq 1 under identity X must be skipped before the reset")
 	}
-	if err := s.ResetFeedMarker(fmInstance); err != nil {
+	if err := s.ResetFeedMarker(context.Background(), fmInstance); err != nil {
 		t.Fatal(err)
 	}
 	if _, found := fmStoredMarker(t, s); found {
 		t.Error("marker still present after ResetFeedMarker")
 	}
-	if skip, err := s.ShouldSkipFeedRow(fmInstance, "Y", 1, "PROJ-1"); err != nil || skip {
+	if skip, err := s.ShouldSkipFeedRow(context.Background(), fmInstance, "Y", 1, "PROJ-1"); err != nil || skip {
 		t.Errorf("identity Y seq 1 after reset = (%v, %v), want not skipped", skip, err)
 	}
 	// Even the old identity restarts from nothing after a reset.
-	if skip, err := s.ShouldSkipFeedRow(fmInstance, "X", 1, "PROJ-1"); err != nil || skip {
+	if skip, err := s.ShouldSkipFeedRow(context.Background(), fmInstance, "X", 1, "PROJ-1"); err != nil || skip {
 		t.Errorf("seq 1 after reset = (%v, %v), want not skipped", skip, err)
 	}
 	// Resetting an absent marker is not an error.
-	if err := s.ResetFeedMarker(fmInstance); err != nil {
+	if err := s.ResetFeedMarker(context.Background(), fmInstance); err != nil {
 		t.Errorf("second reset: %v", err)
 	}
 }
@@ -187,7 +188,7 @@ func TestFeedMarker_ForwardOnlyWithinIdentityAndReplacedForAnother(t *testing.T)
 
 func TestFeedMarker_FailedIngestEntrySkipsOnlySameIdentity(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if err := s.RecordIngestFailure(IngestFailure{
+	if err := s.RecordIngestFailure(context.Background(), IngestFailure{
 		Instance: fmInstance, EntityID: "PROJ-7", Seq: 7, StoreIdentity: "X",
 		FirstFailedAt: fmAt, LastError: "boom",
 	}); err != nil {
@@ -207,7 +208,7 @@ func TestFeedMarker_FailedIngestEntrySkipsOnlySameIdentity(t *testing.T) {
 		{"other seq", fmInstance, "X", 8, "PROJ-7", false},
 		{"other instance", "other", "X", 7, "PROJ-7", false},
 	} {
-		got, err := s.ShouldSkipFeedRow(c.instance, c.identity, c.seq, c.entity)
+		got, err := s.ShouldSkipFeedRow(context.Background(), c.instance, c.identity, c.seq, c.entity)
 		if err != nil || got != c.want {
 			t.Errorf("%s: ShouldSkipFeedRow = (%v, %v), want %v", c.name, got, err, c.want)
 		}
@@ -225,6 +226,7 @@ func TestFeedMarker_CommitsInOneTransaction(t *testing.T) {
 	afterAppendHook = func() error { return boom }
 	t.Cleanup(func() { afterAppendHook = nil })
 	_, err := s.WriteEntityStateWithLogOpts(
+		context.Background(),
 		fmEntity("PROJ-1", "next"), 1, fmAt, true, nil,
 		[]string{"fields_changed"}, gateOrigin, fmAt, WriteOptions{FeedMarker: fmMarker("X", 3)},
 	)
@@ -238,7 +240,7 @@ func TestFeedMarker_CommitsInOneTransaction(t *testing.T) {
 	if n := changeCount(t, s); n != 1 {
 		t.Errorf("change_log rows = %d, want 1 (the failed write's row must not persist)", n)
 	}
-	e, _, _ := s.GetEntity(gateRepo, gateIssueTyp, "PROJ-1")
+	e, _, _ := s.GetEntity(context.Background(), gateRepo, gateIssueTyp, "PROJ-1")
 	if e.Version != 1 || e.Facts != "v1" {
 		t.Errorf("entity = %+v, want version 1 facts v1", e)
 	}
@@ -256,6 +258,7 @@ func TestFeedMarker_GatedAndEmptyKindsWritesStillCarryMarker(t *testing.T) {
 	backend := gateOwning
 	// Gated: owning backend, not watched, so no row is appended.
 	v, err := s.WriteEntityStateWithLogOpts(
+		context.Background(),
 		fmEntity("PROJ-1", "a"), 0, fmAt, true, nil, []string{"created"}, gateOrigin, fmAt,
 		WriteOptions{Backend: &backend, FeedMarker: fmMarker("X", 4)},
 	)
@@ -270,6 +273,7 @@ func TestFeedMarker_GatedAndEmptyKindsWritesStillCarryMarker(t *testing.T) {
 	}
 	// Empty kinds: no row, marker still moves.
 	if _, err := s.WriteEntityStateWithLogOpts(
+		context.Background(),
 		fmEntity("PROJ-1", "b"), 1, fmAt, true, nil, nil, gateOrigin, fmAt,
 		WriteOptions{FeedMarker: fmMarker("X", 6)},
 	); err != nil {
@@ -284,6 +288,7 @@ func TestFeedMarker_VersionConflictLeavesMarkerUnchanged(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	fmWrite(t, s, "PROJ-1", fmMarker("X", 2))
 	_, err := s.WriteEntityStateWithLogOpts(
+		context.Background(),
 		fmEntity("PROJ-1", "stale"), 0, fmAt, true, nil, []string{"x"}, gateOrigin, fmAt,
 		WriteOptions{FeedMarker: fmMarker("X", 9)},
 	)
@@ -299,7 +304,7 @@ func TestAdvanceFeedMarker(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	adv := func(identity string, seq int64) {
 		t.Helper()
-		if err := s.AdvanceFeedMarker(FeedMarker{Instance: fmInstance, StoreIdentity: identity, Seq: seq}); err != nil {
+		if err := s.AdvanceFeedMarker(context.Background(), FeedMarker{Instance: fmInstance, StoreIdentity: identity, Seq: seq}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -329,26 +334,26 @@ func TestAdvanceFeedMarker(t *testing.T) {
 		t.Errorf("entity rows = (%d, %v), want 0", entities, err)
 	}
 	// The advanced marker drives the skip rule.
-	if skip, _ := s.ShouldSkipFeedRow(fmInstance, "Y", 1, "PROJ-1"); !skip {
+	if skip, _ := s.ShouldSkipFeedRow(context.Background(), fmInstance, "Y", 1, "PROJ-1"); !skip {
 		t.Error("seq at the advanced marker must be skipped")
 	}
 }
 
 func TestFeedMarker_CorruptMarkerIsAnError(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if err := s.SetMeta("change_flow.feed_seq."+fmInstance, "not json"); err != nil {
+	if err := s.SetMeta(context.Background(), "change_flow.feed_seq."+fmInstance, "not json"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.FeedMarker(fmInstance); err == nil {
+	if _, _, err := s.FeedMarker(context.Background(), fmInstance); err == nil {
 		t.Error("FeedMarker on corrupt value returned nil error")
 	}
-	if _, err := s.ShouldSkipFeedRow(fmInstance, "X", 1, "PROJ-1"); err == nil {
+	if _, err := s.ShouldSkipFeedRow(context.Background(), fmInstance, "X", 1, "PROJ-1"); err == nil {
 		t.Error("ShouldSkipFeedRow on corrupt marker returned nil error")
 	}
-	if err := s.ResetFeedMarker(fmInstance); err != nil {
+	if err := s.ResetFeedMarker(context.Background(), fmInstance); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := s.FeedMarker(fmInstance); err != nil || found {
+	if _, found, err := s.FeedMarker(context.Background(), fmInstance); err != nil || found {
 		t.Errorf("after reset = (%v, %v)", found, err)
 	}
 }

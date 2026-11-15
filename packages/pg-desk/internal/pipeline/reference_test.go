@@ -117,7 +117,7 @@ func TestCorpusDifferentialAgainstReference(t *testing.T) {
 			if _, err := p.RunEntityChange(context.Background(), fx.Type, fx.ID, gather.ChangeAdded, EntityChangeOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			got, found, err := st.GetInterpretation(corpus.Repo, fx.Type, fx.ID)
+			got, found, err := st.GetInterpretation(context.Background(), corpus.Repo, fx.Type, fx.ID)
 			if err != nil || !found {
 				t.Fatalf("row found=%v err=%v", found, err)
 			}

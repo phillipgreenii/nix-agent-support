@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -9,7 +10,7 @@ import (
 
 func gateIssueRows(t *testing.T, st *store.Store, id string) int {
 	t.Helper()
-	rows, err := st.ListChangesAfter("issue", 0, 1000)
+	rows, err := st.ListChangesAfter(context.Background(), "issue", 0, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +36,7 @@ func TestInstallIssueGateGatesEveryIssueWhateverTheConfig(t *testing.T) {
 			InstallIssueGate(st, cfg)
 			const repo, id = "example/repo", "bd-1"
 			if _, err := st.WriteEntityStateWithLogOpts(
+				context.Background(),
 				store.Entity{Repo: repo, EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "2026-10-20T00:00:00Z"},
 				0, "2026-10-20T00:00:00Z", true, nil, []string{"added"}, "pg-desk", "2026-10-20T00:00:00Z", store.WriteOptions{},
 			); err != nil {
@@ -44,10 +46,10 @@ func TestInstallIssueGateGatesEveryIssueWhateverTheConfig(t *testing.T) {
 				t.Fatalf("unwatched issue appended %d rows, want 0", got)
 			}
 			on := true
-			if err := st.SetEntityColumns(repo, "issue", id, nil, &on); err != nil {
+			if err := st.SetEntityColumns(context.Background(), repo, "issue", id, nil, &on); err != nil {
 				t.Fatal(err)
 			}
-			if seq, err := st.AppendEntityChange(repo, "issue", id, []string{"link_changed"}, "pg-desk", "2026-10-20T00:00:00Z"); err != nil || seq == 0 {
+			if seq, err := st.AppendEntityChange(context.Background(), repo, "issue", id, []string{"link_changed"}, "pg-desk", "2026-10-20T00:00:00Z"); err != nil || seq == 0 {
 				t.Errorf("watched append = (%d, %v), want a sequence", seq, err)
 			}
 		})

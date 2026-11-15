@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -16,7 +17,7 @@ import (
 // value (a re-run is idempotent and appends no redundant record). A failure
 // is returned as err and leaves the annotation as it was.
 type Annotator interface {
-	SetFocusSelected(repo, entityType, entityID, value, origin, actor, at string) (seq int64, changed bool, err error)
+	SetFocusSelected(ctx context.Context, repo, entityType, entityID, value, origin, actor, at string) (seq int64, changed bool, err error)
 }
 
 // StoreAnnotator is the production Annotator: it writes through the store
@@ -36,13 +37,13 @@ func NewAnnotator(s *store.Store, l *store.Locker) *StoreAnnotator {
 
 // SetFocusSelected implements Annotator. The lock is held for the whole
 // read-then-write, and is released on every path.
-func (a *StoreAnnotator) SetFocusSelected(repo, entityType, entityID, value, origin, actor, at string) (int64, bool, error) {
+func (a *StoreAnnotator) SetFocusSelected(ctx context.Context, repo, entityType, entityID, value, origin, actor, at string) (int64, bool, error) {
 	unlock, err := a.Locker.Lock(repo, entityType, entityID)
 	if err != nil {
 		return 0, false, fmt.Errorf("focus: annotate (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
 	defer unlock()
-	return a.Store.SetAnnotationSeq(store.KVAnnotation{
+	return a.Store.SetAnnotationSeq(ctx, store.KVAnnotation{
 		Repo: repo, EntityType: entityType, EntityID: entityID,
 		Key: store.AnnotationFocusSelected, Value: value,
 		Origin: origin, SetBy: actor, SetAt: at,

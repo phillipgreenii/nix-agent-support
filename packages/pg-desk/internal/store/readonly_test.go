@@ -28,11 +28,11 @@ func TestOpenReadOnlyReadsButNeverWrites(t *testing.T) {
 	}
 	defer func() { _ = ro.Close() }()
 
-	e, found, err := ro.GetEntity("o/r", "pr", "o/r#1")
+	e, found, err := ro.GetEntity(context.Background(), "o/r", "pr", "o/r#1")
 	if err != nil || !found || e.EntityID != "o/r#1" {
 		t.Fatalf("GetEntity = %+v, %v, %v", e, found, err)
 	}
-	if v, err := ro.SchemaVersion(); err != nil || v != 2 {
+	if v, err := ro.SchemaVersion(context.Background()); err != nil || v != 2 {
 		t.Fatalf("SchemaVersion = %d, %v; want 2", v, err)
 	}
 	if err := ro.UpsertEntity(Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#2", Facts: "{}", AsOf: "x"}); err == nil {
@@ -60,7 +60,7 @@ func TestOpenReadOnlyEmptyFileFailsOnFirstRead(t *testing.T) {
 	ro, err := OpenReadOnly(path)
 	if err == nil {
 		defer func() { _ = ro.Close() }()
-		if _, _, err = ro.GetEntity("o/r", "pr", "x"); err == nil {
+		if _, _, err = ro.GetEntity(context.Background(), "o/r", "pr", "x"); err == nil {
 			t.Fatal("reading a schema-less file returned no error")
 		}
 	}
@@ -128,7 +128,7 @@ func TestWriterAndReadPoolCarryTheStandardPragmas(t *testing.T) {
 	if _, err := tx.ExecContext(context.Background(), `UPDATE entity SET stale = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := rd.CountEntities(); err != nil || n != 20 {
+	if n, err := rd.CountEntities(context.Background()); err != nil || n != 20 {
 		t.Fatalf("read pool during a writer transaction: %d, %v", n, err)
 	}
 }

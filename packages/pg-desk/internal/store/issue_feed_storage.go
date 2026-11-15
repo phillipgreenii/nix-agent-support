@@ -64,8 +64,8 @@ var ingestFailedAddedColumns = []struct{ name, decl string }{
 const entityFlowIndexDDL = `CREATE INDEX IF NOT EXISTS entity_flow ON entity(
   entity_type, entity_id, repo, active, watched, backend, hydrated_at, first_seen_at, read_attempt_at, read_ok_at)`
 
-func ensureIssueFeedStorage(s *Store) error {
-	have, err := s.tableColumns("entity")
+func ensureIssueFeedStorage(ctx context.Context, s *Store) error {
+	have, err := s.tableColumns(ctx, "entity")
 	if err != nil {
 		return err
 	}
@@ -76,22 +76,22 @@ func ensureIssueFeedStorage(s *Store) error {
 		if have[col.name] {
 			continue
 		}
-		if _, err := s.sql.ExecContext(context.Background(), `ALTER TABLE entity ADD COLUMN `+col.name+` `+col.decl); err != nil {
+		if _, err := s.sql.ExecContext(ctx, `ALTER TABLE entity ADD COLUMN `+col.name+` `+col.decl); err != nil {
 			// A second process may have added it between the check and the
 			// ALTER; the column being present now is success.
-			again, cerr := s.tableColumns("entity")
+			again, cerr := s.tableColumns(ctx, "entity")
 			if cerr != nil || !again[col.name] {
 				return fmt.Errorf("add entity.%s: %w", col.name, err)
 			}
 		}
 	}
-	if _, err := s.sql.ExecContext(context.Background(), entityFlowIndexDDL); err != nil {
+	if _, err := s.sql.ExecContext(ctx, entityFlowIndexDDL); err != nil {
 		return fmt.Errorf("create entity_flow index: %w", err)
 	}
-	if _, err := s.sql.ExecContext(context.Background(), ingestFailedDDL); err != nil {
+	if _, err := s.sql.ExecContext(ctx, ingestFailedDDL); err != nil {
 		return fmt.Errorf("create ingest_failed: %w", err)
 	}
-	cols, err := s.tableColumns("ingest_failed")
+	cols, err := s.tableColumns(ctx, "ingest_failed")
 	if err != nil {
 		return err
 	}
@@ -99,8 +99,8 @@ func ensureIssueFeedStorage(s *Store) error {
 		if cols[col.name] {
 			continue
 		}
-		if _, err := s.sql.ExecContext(context.Background(), `ALTER TABLE ingest_failed ADD COLUMN `+col.name+` `+col.decl); err != nil {
-			again, cerr := s.tableColumns("ingest_failed")
+		if _, err := s.sql.ExecContext(ctx, `ALTER TABLE ingest_failed ADD COLUMN `+col.name+` `+col.decl); err != nil {
+			again, cerr := s.tableColumns(ctx, "ingest_failed")
 			if cerr != nil || !again[col.name] {
 				return fmt.Errorf("add ingest_failed.%s: %w", col.name, err)
 			}
@@ -113,13 +113,13 @@ func ensureIssueFeedStorage(s *Store) error {
 // when the table does not exist). The read is fully drained before it
 // returns, so callers may issue a query right after on the single
 // connection.
-func (s *Store) tableColumns(table string) (map[string]bool, error) {
+func (s *Store) tableColumns(ctx context.Context, table string) (map[string]bool, error) {
 	if s.faultTableColumns != nil { // test seam: nil in production
 		if err := s.faultTableColumns(table); err != nil {
 			return nil, err
 		}
 	}
-	rows, err := s.sql.QueryContext(context.Background(), `SELECT name FROM pragma_table_info(?)`, table)
+	rows, err := s.sql.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return nil, fmt.Errorf("store: read %s columns: %w", table, err)
 	}
@@ -147,8 +147,8 @@ func (s *Store) tableColumns(table string) (map[string]bool, error) {
 // them, the constants NULL, NULL when it does not (a store opened read-only
 // or raw that predates the additions). Called before the query is issued,
 // never while a result set is open.
-func (s *Store) issueFeedSelect() (string, error) {
-	have, err := s.tableColumns("entity")
+func (s *Store) issueFeedSelect(ctx context.Context) (string, error) {
+	have, err := s.tableColumns(ctx, "entity")
 	if err != nil {
 		return "", err
 	}
@@ -182,7 +182,7 @@ func applyIssueFeedColumns(e *Entity, backend sql.NullString, watched sql.NullIn
 // bump entity.version, and leaves the snapshot, as_of, hydrated_at, list_fp
 // and active untouched. With both arguments nil it is a no-op returning nil.
 // It returns ErrNoEntity (matchable with errors.Is) when the row is absent.
-func (s *Store) SetEntityColumns(repo, entityType, entityID string, backend *string, watched *bool) error {
+func (s *Store) SetEntityColumns(ctx context.Context, repo, entityType, entityID string, backend *string, watched *bool) error {
 	var sets []string
 	var args []any
 	if backend != nil {
@@ -202,7 +202,7 @@ func (s *Store) SetEntityColumns(repo, entityType, entityID string, backend *str
 	}
 	args = append(args, repo, entityType, entityID)
 	res, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE entity SET `+strings.Join(sets, ", ")+`
 		 WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		args...,
@@ -228,7 +228,7 @@ func (s *Store) SetEntityColumns(repo, entityType, entityID string, backend *str
 // active, backend and watched untouched. With both arguments nil it is a
 // no-op returning nil. It returns ErrNoEntity (matchable with errors.Is) when
 // the row is absent.
-func (s *Store) SetEntityReadTimes(repo, entityType, entityID string, attemptAt, okAt *string) error {
+func (s *Store) SetEntityReadTimes(ctx context.Context, repo, entityType, entityID string, attemptAt, okAt *string) error {
 	var sets []string
 	var args []any
 	if attemptAt != nil {
@@ -244,7 +244,7 @@ func (s *Store) SetEntityReadTimes(repo, entityType, entityID string, attemptAt,
 	}
 	args = append(args, repo, entityType, entityID)
 	res, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE entity SET `+strings.Join(sets, ", ")+`
 		 WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		args...,

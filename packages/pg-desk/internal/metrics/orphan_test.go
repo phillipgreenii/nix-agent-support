@@ -31,7 +31,7 @@ func orphanTestConfig() *config.Config {
 func seedWatchedIssue(t *testing.T, st *store.Store, id, hydratedAt string, active bool, watched *bool, backend, readOK string) {
 	t.Helper()
 	fp := "F1"
-	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 		0, hydratedAt, active, &fp, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +39,11 @@ func seedWatchedIssue(t *testing.T, st *store.Store, id, hydratedAt string, acti
 	if backend != "" {
 		b = &backend
 	}
-	if err := st.SetEntityColumns("o/r", "issue", id, b, watched); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, b, watched); err != nil {
 		t.Fatal(err)
 	}
 	if readOK != "" {
-		if err := st.SetEntityReadTimes("o/r", "issue", id, nil, &readOK); err != nil {
+		if err := st.SetEntityReadTimes(context.Background(), "o/r", "issue", id, nil, &readOK); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -97,7 +97,7 @@ func TestOldestOrphanReadAgeIsTheOldestSuccessfulReadPerBackend(t *testing.T) {
 	// A NULL-column orphan has the empty label; with no read_ok_at it ages from
 	// hydrated_at.
 	seedWatchedIssue(t, st, "bd-c", minutesAgo(20), true, &yes, "", "")
-	fn := WithOldestOrphanReadAge(OldestOrphanReadAgeFromStore(st, orphanTestConfig(), func() time.Time { return orphanNow }))
+	fn := WithOldestOrphanReadAge(OldestOrphanReadAgeFromStore(context.Background(), st, orphanTestConfig(), func() time.Time { return orphanNow }))
 	got := scrapeGauges(t, MetricOldestOrphanReadAge, fn)
 	want := map[string]int64{"bd-x": 45 * 60, "": 20 * 60}
 	if !reflect.DeepEqual(got, want) {
@@ -112,11 +112,11 @@ func TestOldestOrphanReadAgeKeepsAgeingWhileReadsFail(t *testing.T) {
 	// A failing read advances read_attempt_at only; the age still counts from
 	// read_ok_at.
 	attempt := minutesAgo(1)
-	if err := st.SetEntityReadTimes("o/r", "issue", "bd-a", &attempt, nil); err != nil {
+	if err := st.SetEntityReadTimes(context.Background(), "o/r", "issue", "bd-a", &attempt, nil); err != nil {
 		t.Fatal(err)
 	}
 	later := func() time.Time { return orphanNow.Add(10 * time.Minute) }
-	fn := OldestOrphanReadAgeFromStore(st, orphanTestConfig(), later)
+	fn := OldestOrphanReadAgeFromStore(context.Background(), st, orphanTestConfig(), later)
 	rows, err := fn()
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestOldestOrphanReadAgeIsOneZeroSeriesWithNoOrphan(t *testing.T) {
 	seedWatchedIssue(t, st, "unwatched", minutesAgo(500), true, &no, "", "")
 	seedWatchedIssue(t, st, "never-stated", minutesAgo(500), true, nil, "", "")
 	seedWatchedIssue(t, st, "inactive", minutesAgo(500), false, &yes, "", "")
-	fn := WithOldestOrphanReadAge(OldestOrphanReadAgeFromStore(st, orphanTestConfig(), func() time.Time { return orphanNow }))
+	fn := WithOldestOrphanReadAge(OldestOrphanReadAgeFromStore(context.Background(), st, orphanTestConfig(), func() time.Time { return orphanNow }))
 	got := scrapeGauges(t, MetricOldestOrphanReadAge, fn)
 	if want := map[string]int64{"": 0}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("series = %v, want %v", got, want)
@@ -143,14 +143,14 @@ func TestOldestOrphanReadAgeIgnoresAWatchedEntityAQueryStillHolds(t *testing.T) 
 	st := store.OpenNewSchemaForTest(t)
 	yes := true
 	seedWatchedIssue(t, st, "bd-held", minutesAgo(500), true, &yes, "", "")
-	if err := st.SetMeta("change_flow.watchset.issue.open", `["bd-held"]`); err != nil {
+	if err := st.SetMeta(context.Background(), "change_flow.watchset.issue.open", `["bd-held"]`); err != nil {
 		t.Fatal(err)
 	}
-	orphans, err := changes.OrphanEntities(st, orphanTestConfig())
+	orphans, err := changes.OrphanEntities(context.Background(), st, orphanTestConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := OldestOrphanReadAgeFromStore(st, orphanTestConfig(), func() time.Time { return orphanNow })()
+	rows, err := OldestOrphanReadAgeFromStore(context.Background(), st, orphanTestConfig(), func() time.Time { return orphanNow })()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestWatchedEntitiesCountsActiveWatchedByTypeAndBackend(t *testing.T) {
 	seedWatchedIssue(t, st, "bd-off", minutesAgo(1), true, &no, "bd-x", "")
 	seedWatchedIssue(t, st, "bd-unset", minutesAgo(1), true, nil, "bd-x", "")
 	seedWatchedIssue(t, st, "bd-gone", minutesAgo(1), false, &yes, "bd-x", "")
-	got := scrapeGauges(t, MetricWatchedEntities, WithWatchedEntities(WatchedEntitiesFromStore(st)))
+	got := scrapeGauges(t, MetricWatchedEntities, WithWatchedEntities(WatchedEntitiesFromStore(context.Background(), st)))
 	want := map[string]int64{"issue/bd-x": 2, "issue/": 1}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("series = %v, want %v", got, want)
@@ -211,7 +211,7 @@ func TestWatchedEntitiesCountsActiveWatchedByTypeAndBackend(t *testing.T) {
 
 func TestWatchedEntitiesWithNoneWatchedIsOneZeroIssueSeries(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	got := scrapeGauges(t, MetricWatchedEntities, WithWatchedEntities(WatchedEntitiesFromStore(st)))
+	got := scrapeGauges(t, MetricWatchedEntities, WithWatchedEntities(WatchedEntitiesFromStore(context.Background(), st)))
 	if want := map[string]int64{"issue/": 0}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("series = %v, want %v", got, want)
 	}

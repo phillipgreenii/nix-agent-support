@@ -57,7 +57,7 @@ func seedOpen(t *testing.T, rs *riStore, n int) {
 func behindCount(t *testing.T, rs *riStore) int {
 	t.Helper()
 	rs.seed.SetInterpStamp(riStamp())
-	keys, known, err := rs.seed.InterpretationsBehind(riRepo, 0)
+	keys, known, err := rs.seed.InterpretationsBehind(context.Background(), riRepo, 0)
 	if err != nil || !known {
 		t.Fatalf("behind: known=%v err=%v", known, err)
 	}
@@ -111,10 +111,10 @@ func TestHeartbeatCatchUpReinterpretsAndHeartbeatCompletes(t *testing.T) {
 	if row := rs.row(t, 1); row.InterpVersion != riStamp() {
 		t.Errorf("stamp = %q, want %q", row.InterpVersion, riStamp())
 	}
-	if _, found, _ := rs.seed.GetMeta(store.MetaKeyLastHeartbeat); !found {
+	if _, found, _ := rs.seed.GetMeta(context.Background(), store.MetaKeyLastHeartbeat); !found {
 		t.Error("liveness not stamped")
 	}
-	if _, found, _ := rs.seed.GetMeta("source_fetch.pg-connector-pr-github.team"); !found {
+	if _, found, _ := rs.seed.GetMeta(context.Background(), "source_fetch.pg-connector-pr-github.team"); !found {
 		t.Error("source fetch not recorded")
 	}
 	if stderr != "" {
@@ -218,7 +218,7 @@ func TestHeartbeatCatchUpSkipsWhenThePeriodIsSpent(t *testing.T) {
 	if got := behindCount(t, rs); got != 2 {
 		t.Errorf("behind = %d, want 2 (nothing re-interpreted)", got)
 	}
-	if _, found, _ := rs.seed.GetMeta(store.MetaKeyLastHeartbeat); !found {
+	if _, found, _ := rs.seed.GetMeta(context.Background(), store.MetaKeyLastHeartbeat); !found {
 		t.Error("liveness not stamped")
 	}
 }

@@ -21,6 +21,7 @@
 package attention
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -67,13 +68,13 @@ func (s Severity) rank() int {
 // Reader is the read-only view of the local store Evaluate needs.
 // *store.Store satisfies it; nothing here writes.
 type Reader interface {
-	RequireNewSchema() error
-	ListInterpretations() ([]store.Interpretation, error)
+	RequireNewSchema(ctx context.Context) error
+	ListInterpretations(ctx context.Context) ([]store.Interpretation, error)
 	// ListEntities lets the projector reach an issue or thread entity that
 	// has no interpretation row.
-	ListEntities() ([]store.Entity, error)
-	GetEntity(repo, entityType, entityID string) (store.Entity, bool, error)
-	ListKVAnnotations(repo, entityType, entityID string) ([]store.KVAnnotation, error)
+	ListEntities(ctx context.Context) ([]store.Entity, error)
+	GetEntity(ctx context.Context, repo, entityType, entityID string) (store.Entity, bool, error)
+	ListKVAnnotations(ctx context.Context, repo, entityType, entityID string) ([]store.KVAnnotation, error)
 	// LinkedReader is the cross-reference read grouping uses (the same one
 	// `pg-desk links` uses, so the two cannot disagree on what is linked).
 	links.LinkedReader
@@ -206,7 +207,7 @@ func Ref(entityType, id string) string { return entityType + ":" + id }
 // reads time only from in.Clock. An unreadable store, or an unknown rule kind
 // in the configuration, is an error, never an empty result that reads as
 // "all clear" (INV-ATTNEVAL-6).
-func Evaluate(in Inputs) (Result, error) {
+func Evaluate(ctx context.Context, in Inputs) (Result, error) {
 	if in.Store == nil {
 		return Result{}, fmt.Errorf("attention: no store")
 	}
@@ -224,12 +225,12 @@ func Evaluate(in Inputs) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	ann, err := newAnnotationReader(in.Store)
+	ann, err := newAnnotationReader(ctx, in.Store)
 	if err != nil {
 		return Result{}, err
 	}
 
-	views, err := Project(in.Store, in.Repo, cfg)
+	views, err := Project(ctx, in.Store, in.Repo, cfg)
 	if err != nil {
 		return Result{}, err
 	}
@@ -278,12 +279,12 @@ func Evaluate(in Inputs) (Result, error) {
 			raised = append(raised, cs...)
 		}
 		if len(raised) > 0 {
-			state, err := ann.read(v.Repo, v.Type, v.ID)
+			state, err := ann.read(ctx, v.Repo, v.Type, v.ID)
 			if err != nil {
 				return Result{}, err
 			}
 			for _, c := range raised {
-				by, dropped, serr := firstSuppressor(chain, c, state, env)
+				by, dropped, serr := firstSuppressor(ctx, chain, c, state, env)
 				if serr != nil {
 					return Result{}, serr
 				}
@@ -304,7 +305,7 @@ func Evaluate(in Inputs) (Result, error) {
 	var items []Item
 	for _, s := range survivors {
 		item := collapse(s.view, s.cands)
-		anchor, err := groupOf(in, s.view)
+		anchor, err := groupOf(ctx, in, s.view)
 		if err != nil {
 			return Result{}, fmt.Errorf("attention: group %s: %w", s.view.Ref(), err)
 		}

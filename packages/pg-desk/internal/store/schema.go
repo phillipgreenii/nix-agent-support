@@ -192,14 +192,13 @@ ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 // or the file is left empty. It re-reads user_version under the write lock, so
 // two processes opening the same new file cannot both create it; the loser
 // sees version 2 and does nothing.
-func createSchema(s *Store) error {
-	return s.createSchemaWith(schemaStatements)
+func createSchema(ctx context.Context, s *Store) error {
+	return s.createSchemaWith(ctx, schemaStatements)
 }
 
 // createSchemaWith runs steps as the creation transaction. It is split from
 // createSchema so tests can inject a failing step at any position.
-func (s *Store) createSchemaWith(steps []string) error {
-	ctx := context.Background()
+func (s *Store) createSchemaWith(ctx context.Context, steps []string) error {
 	conn, err := s.sql.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire connection: %w", err)
@@ -241,9 +240,9 @@ func (s *Store) createSchemaWith(steps []string) error {
 // fresh file (version 0) gets the schema created, version 2 is accepted, the
 // retired version 1 is refused with ErrOldSchema, and anything newer is
 // refused as newer than this binary.
-func checkSchema(s *Store) error {
+func checkSchema(ctx context.Context, s *Store) error {
 	var current int
-	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&current); err != nil {
+	if err := s.sql.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {
 		return fmt.Errorf("read user_version: %w", err)
 	}
 	switch {
@@ -252,7 +251,7 @@ func checkSchema(s *Store) error {
 	case current == schemaVersion:
 		return nil
 	case current == 0:
-		return createSchema(s)
+		return createSchema(ctx, s)
 	default:
 		return fmt.Errorf("%w (schema version %d, need %d): %s", ErrOldSchema, current, schemaVersion, oldSchemaAdvice)
 	}

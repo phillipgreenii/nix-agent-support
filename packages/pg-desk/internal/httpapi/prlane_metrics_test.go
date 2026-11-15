@@ -14,7 +14,7 @@ import (
 
 func scrapeWithConfig(t *testing.T, s *store.Store, cfg *config.Config) string {
 	t.Helper()
-	handler, err := NewHandler(s, cfg)
+	handler, err := NewHandler(context.Background(), s, cfg)
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -33,16 +33,16 @@ func TestMetricsExposeThePRLaneFamiliesOnASchema2Store(t *testing.T) {
 	setClock(t, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	s := store.OpenForTest(t)
 	for id, asOf := range map[string]string{"o/r#1": "2026-10-10T00:00:00Z", "o/r#2": "2026-10-09T00:00:00Z", "o/r#3": "2026-10-01T00:00:00Z"} {
-		if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: asOf}); err != nil {
+		if err := s.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: asOf}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// #3 was hydrated after the cutover: it leaves the set.
-	e, _, err := s.GetEntity("o/r", "pr", "o/r#3")
+	e, _, err := s.GetEntity(context.Background(), "o/r", "pr", "o/r#3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.WriteEntityStateWithLog(e, e.Version, "2026-10-10T12:00:00Z", true, []string{"created"}, "poll", "2026-10-10T12:00:00Z"); err != nil {
+	if _, err := s.WriteEntityStateWithLog(context.Background(), e, e.Version, "2026-10-10T12:00:00Z", true, []string{"created"}, "poll", "2026-10-10T12:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	mustUpsertInterpretation(t, s, store.Interpretation{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-10T00:00:00Z"})

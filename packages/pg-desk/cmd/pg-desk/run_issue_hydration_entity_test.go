@@ -28,7 +28,7 @@ var hydrationCases = []hydrationCase{
 	{"non-owning backend", func(f *backendFixture) {
 		// A held row is pinned to the non-owning instance; an absent one
 		// resolves to it through the probe.
-		if _, found, _ := f.seed.GetEntity("o/r", "issue", hydrateIssueID); found {
+		if _, found, _ := f.seed.GetEntity(context.Background(), "o/r", "issue", hydrateIssueID); found {
 			f.setBackend(hydrateIssueID, "beads-a")
 		}
 	}},
@@ -72,7 +72,7 @@ func TestHydrateJiraIssueUnownedFirstWriteBookkeeping(t *testing.T) {
 			if h := f.history(hydrateIssueID); len(h) != 0 {
 				t.Errorf("history = %+v, want no change record from a snapshot hydration", h)
 			}
-			if _, found, err := f.seed.GetInterpretation("o/r", "issue", hydrateIssueID); err != nil || !found {
+			if _, found, err := f.seed.GetInterpretation(context.Background(), "o/r", "issue", hydrateIssueID); err != nil || !found {
 				t.Errorf("interpretation found=%v err=%v", found, err)
 			}
 		})
@@ -85,7 +85,7 @@ func TestHydrateJiraIssueUnownedKeepsADeactivatedIssueInactive(t *testing.T) {
 			f := newBackendFixture(t, hydrateIssueID)
 			f.write("show-"+hydrateIssueID+".json", issueBody(""))
 			tc.setup(f)
-			if _, err := f.seed.MarkEntityInactive("o/r", "issue", hydrateIssueID, "k"); err != nil {
+			if _, err := f.seed.MarkEntityInactive(context.Background(), "o/r", "issue", hydrateIssueID, "k"); err != nil {
 				t.Fatal(err)
 			}
 			if err := hydrateRaw(t, f, gather.ChangeChanged); err != nil {
@@ -137,7 +137,7 @@ func TestHydrateJiraIssueUnownedDegradedRead(t *testing.T) {
 			before := f.entity("issue", hydrateIssueID)
 			err := hydrateRaw(t, f, gather.ChangeChanged)
 			after := f.entity("issue", hydrateIssueID)
-			_, interpFound, _ := f.seed.GetInterpretation("o/r", "issue", hydrateIssueID)
+			_, interpFound, _ := f.seed.GetInterpretation(context.Background(), "o/r", "issue", hydrateIssueID)
 			if degradedWritesNothing {
 				if err == nil {
 					t.Fatal("a degraded read must not report success")
@@ -184,7 +184,7 @@ func TestHydrateJiraIssueUnownedDerivedLinksAndBackendColumn(t *testing.T) {
 	if e := f.entity("issue", hydrateIssueID); e.Backend != "beads-a" {
 		t.Errorf("backend = %q, want beads-a", e.Backend)
 	}
-	links, err := f.seed.ListXrefLinksFrom("o/r", "issue", hydrateIssueID)
+	links, err := f.seed.ListXrefLinksFrom(context.Background(), "o/r", "issue", hydrateIssueID)
 	if err != nil {
 		t.Fatal(err)
 	}

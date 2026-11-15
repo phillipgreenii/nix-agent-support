@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,19 +101,21 @@ type closeRun struct {
 // finish ends the run with err's exit code when the write path did not: a
 // writing run still writes its focus_run row (exit 2, 3 and 20 are counted by
 // the run statistics), then prints the stderr line.
-func (c *closeRun) finish(err error) error {
+func (c *closeRun) finish(ctx context.Context, err error) error {
 	if c.done {
 		return err
 	}
 	c.done = true
 	if c.writing && !c.run.Inserted() {
-		_ = c.run.Start(c.env.Store)
+		_ = c.run.Start(ctx, c.env.Store)
 	}
-	_ = c.run.Finish(focusExitCode(err))
+	_ = c.run.Finish(ctx, focusExitCode(err))
 	return err
 }
 
 func runFocusClose(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+
 	dry, _ := cmd.Flags().GetBool(focusFlagDryRun)
 	writing := !dry
 	env, err := openFocusEnv(cmd, writing)
@@ -122,7 +125,7 @@ func runFocusClose(cmd *cobra.Command) error {
 	defer env.Close()
 	c := &closeRun{cmd: cmd, env: env, writing: writing}
 	c.run = newFocusRun(cmd.ErrOrStderr(), focusVerbClose, env.Period, env.Actor, dry, env.Now)
-	return c.finish(c.once())
+	return c.finish(ctx, c.once(ctx))
 }
 
 // decodeCloseSummary reads the one JSON object of stdin and returns its
@@ -174,8 +177,8 @@ type closeState struct {
 	closed         bool
 }
 
-func (c *closeRun) readState() (closeState, error) {
-	p, found, err := c.env.Store.FocusPeriodGet(c.env.Period.Type, c.env.Period.Key)
+func (c *closeRun) readState(ctx context.Context) (closeState, error) {
+	p, found, err := c.env.Store.FocusPeriodGet(ctx, c.env.Period.Type, c.env.Period.Key)
 	if err != nil {
 		return closeState{}, focusTotalError("focus close: read period: "+err.Error(), "check the pg-desk store, then re-run")
 	}
@@ -194,7 +197,7 @@ func closeRefusal(period string, st closeState) error {
 
 // once is the whole run after the environment is open; its error is the
 // run's exit.
-func (c *closeRun) once() error {
+func (c *closeRun) once(ctx context.Context) error {
 	env := c.env
 	summary, err := decodeCloseSummary(c.cmd.InOrStdin())
 	if err != nil {
@@ -208,7 +211,7 @@ func (c *closeRun) once() error {
 	}
 
 	for attempt := 0; ; attempt++ {
-		st, err := c.readState()
+		st, err := c.readState(ctx)
 		if err != nil {
 			return err
 		}
@@ -216,13 +219,13 @@ func (c *closeRun) once() error {
 			if st.note != summary {
 				return closeRefusal(env.Period.Key, st)
 			}
-			return c.report(st, true)
+			return c.report(ctx, st, true)
 		}
 		at := env.Now.UTC().Format(time.RFC3339)
 		if !c.writing {
-			return c.report(closeState{closed: false, closedAt: at, note: summary}, false)
+			return c.report(ctx, closeState{closed: false, closedAt: at, note: summary}, false)
 		}
-		werr := env.Store.FocusLockTx(c.cmd.Context(), func(tx *store.FocusTx) error {
+		werr := env.Store.FocusLockTx(ctx, func(tx *store.FocusTx) error {
 			p, err := tx.CloseOpenPeriod(env.Period.Type, env.Period.Key, summary, at)
 			if err != nil {
 				return err
@@ -238,7 +241,7 @@ func (c *closeRun) once() error {
 		switch {
 		case werr == nil:
 			c.run.Adopt(env.Store)
-			return c.report(closeState{closed: true, closedAt: at, note: summary}, false)
+			return c.report(ctx, closeState{closed: true, closedAt: at, note: summary}, false)
 		case errors.As(werr, &closedErr) && attempt == 0:
 			// Another close committed between the read and the write: decide
 			// again against what it recorded.
@@ -253,11 +256,11 @@ func (c *closeRun) once() error {
 
 // report prints the outcome and finishes the run with exit 0. st carries the
 // recorded (or would-be) close time and note.
-func (c *closeRun) report(st closeState, already bool) error {
+func (c *closeRun) report(ctx context.Context, st closeState, already bool) error {
 	env := c.env
 	if c.writing && !c.run.Inserted() {
 		// The already-closed outcome wrote nothing yet; the run still leaves its row.
-		_ = c.run.Start(env.Store)
+		_ = c.run.Start(ctx, env.Store)
 	}
 	w := c.cmd.OutOrStdout()
 	if env.JSON {
@@ -286,7 +289,7 @@ func (c *closeRun) report(st closeState, already bool) error {
 		}
 	}
 	c.done = true
-	if ferr := c.run.Finish(0); ferr != nil {
+	if ferr := c.run.Finish(ctx, 0); ferr != nil {
 		return focusTotalError("focus close: finalize the run record: "+ferr.Error(), "the day is closed; check the pg-desk store")
 	}
 	return nil

@@ -174,8 +174,8 @@ func checkPull(key, today string, hasRows, otherHolds bool, maxOther string) err
 // no rows, no other period holds any. A dry run and a preview call it so that
 // they report what the pull itself would; Pull repeats the same checks inside
 // its transaction.
-func PullPreflight(d LockDeps, p Period) error {
-	period, found, err := d.Store.FocusPeriodGet(p.Type, p.Key)
+func PullPreflight(ctx context.Context, d LockDeps, p Period) error {
+	period, found, err := d.Store.FocusPeriodGet(ctx, p.Type, p.Key)
 	if err != nil {
 		return fmt.Errorf("focus: read period: %w", err)
 	}
@@ -184,17 +184,17 @@ func PullPreflight(d LockDeps, p Period) error {
 	}
 	hasRows := false
 	if found {
-		rows, err := d.Store.FocusPlanRows(period.ID)
+		rows, err := d.Store.FocusPlanRows(ctx, period.ID)
 		if err != nil {
 			return fmt.Errorf("focus: read plan rows: %w", err)
 		}
 		hasRows = len(rows) > 0
 	}
-	all, err := d.Store.FocusRowsAllPeriods()
+	all, err := d.Store.FocusRowsAllPeriods(ctx)
 	if err != nil {
 		return fmt.Errorf("focus: read plan rows: %w", err)
 	}
-	periods, err := d.Store.FocusPeriods()
+	periods, err := d.Store.FocusPeriods(ctx)
 	if err != nil {
 		return fmt.Errorf("focus: read periods: %w", err)
 	}

@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"sort"
 	"testing"
 	"time"
@@ -17,11 +18,11 @@ func TestObserveNarrowReadsMatchFullRowReference(t *testing.T) {
 	st := store.OpenForTest(t)
 	st.SeedLiveSizeForTest(t, 400, 300, 3000)
 	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
-	flow, err := Observe(st, now, 6*time.Hour)
+	flow, err := Observe(context.Background(), st, now, 6*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	entities, err := st.ListEntities()
+	entities, err := st.ListEntities(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +30,7 @@ func TestObserveNarrowReadsMatchFullRowReference(t *testing.T) {
 		t.Fatal("no types observed")
 	}
 	for _, tf := range flow.Types {
-		recs, err := st.ListChangesAfter(tf.Type, 0, 0)
+		recs, err := st.ListChangesAfter(context.Background(), tf.Type, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

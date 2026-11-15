@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,7 +76,7 @@ func TestResolveRejectsUnknownRuleKind(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	cfg := baseConfig()
 	cfg.Attention = config.AttentionConfig{Rules: map[string]config.AttentionRuleConfig{"pr.no-such-rule": {}}}
-	if _, err := Evaluate(Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: testClock()}); err == nil {
+	if _, err := Evaluate(context.Background(), Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: testClock()}); err == nil {
 		t.Error("Evaluate must fail on an unknown rule kind")
 	}
 }

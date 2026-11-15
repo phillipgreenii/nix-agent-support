@@ -88,7 +88,7 @@ func (rs *riStore) pr(t *testing.T, n int, facts string) {
 
 func (rs *riStore) row(t *testing.T, n int) store.Interpretation {
 	t.Helper()
-	row, found, err := rs.seed.GetInterpretation(riRepo, "pr", riID(n))
+	row, found, err := rs.seed.GetInterpretation(context.Background(), riRepo, "pr", riID(n))
 	if err != nil || !found {
 		t.Fatalf("row %d: found=%v err=%v", n, found, err)
 	}
@@ -503,12 +503,12 @@ func TestReinterpretStopsOnCancelledContext(t *testing.T) {
 func TestReinterpretMakesNoNetworkCallAndLeavesEntitiesAlone(t *testing.T) {
 	rs := newRIStore(t)
 	rs.pr(t, 90, riFacts("open", false, "me"))
-	before, _, _ := rs.seed.GetEntity(riRepo, "pr", riID(90))
+	before, _, _ := rs.seed.GetEntity(context.Background(), riRepo, "pr", riID(90))
 	t.Setenv("PATH", t.TempDir())
 	if _, _, err := riRun(t, "--open"); err != nil {
 		t.Fatal(err)
 	}
-	after, _, _ := rs.seed.GetEntity(riRepo, "pr", riID(90))
+	after, _, _ := rs.seed.GetEntity(context.Background(), riRepo, "pr", riID(90))
 	if after != before {
 		t.Errorf("entity changed:\nbefore %+v\nafter  %+v", before, after)
 	}

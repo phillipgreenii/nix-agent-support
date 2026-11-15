@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestUpsertXrefAndGetXref proves the existing (Phase 9) writer/reader
 // round-trips, and that a second UpsertXref for the same key overwrites
@@ -9,7 +12,7 @@ import "testing"
 func TestUpsertXrefAndGetXref(t *testing.T) {
 	s := OpenForTest(t)
 
-	if err := s.UpsertXref(Xref{
+	if err := s.UpsertXref(context.Background(), Xref{
 		Repo: "acme/widgets", FromType: "pr", FromID: "acme/widgets#7",
 		ToType: "issue", ToID: "PROJ-1", Evidence: "branch",
 		FirstSeen: "2026-09-17T00:00:00Z", LastConfirmed: "2026-09-17T00:00:00Z",
@@ -17,7 +20,7 @@ func TestUpsertXrefAndGetXref(t *testing.T) {
 		t.Fatalf("first UpsertXref: %v", err)
 	}
 
-	got, found, err := s.GetXref("acme/widgets", "pr", "acme/widgets#7", "issue", "PROJ-1")
+	got, found, err := s.GetXref(context.Background(), "acme/widgets", "pr", "acme/widgets#7", "issue", "PROJ-1")
 	if err != nil || !found {
 		t.Fatalf("GetXref: found=%v err=%v", found, err)
 	}
@@ -25,7 +28,7 @@ func TestUpsertXrefAndGetXref(t *testing.T) {
 		t.Fatalf("Evidence = %q, want %q", got.Evidence, "branch")
 	}
 
-	if err := s.UpsertXref(Xref{
+	if err := s.UpsertXref(context.Background(), Xref{
 		Repo: "acme/widgets", FromType: "pr", FromID: "acme/widgets#7",
 		ToType: "issue", ToID: "PROJ-1", Evidence: "title",
 		FirstSeen: "2026-09-18T00:00:00Z", LastConfirmed: "2026-09-18T00:00:00Z",
@@ -33,7 +36,7 @@ func TestUpsertXrefAndGetXref(t *testing.T) {
 		t.Fatalf("second UpsertXref: %v", err)
 	}
 
-	got, found, err = s.GetXref("acme/widgets", "pr", "acme/widgets#7", "issue", "PROJ-1")
+	got, found, err = s.GetXref(context.Background(), "acme/widgets", "pr", "acme/widgets#7", "issue", "PROJ-1")
 	if err != nil || !found {
 		t.Fatalf("GetXref (after second upsert): found=%v err=%v", found, err)
 	}
@@ -51,7 +54,7 @@ func TestUpsertXrefAndGetXref(t *testing.T) {
 // TestGetXrefNotFound proves the not-found branch: no row, no error.
 func TestGetXrefNotFound(t *testing.T) {
 	s := OpenForTest(t)
-	_, found, err := s.GetXref("acme/widgets", "pr", "acme/widgets#7", "issue", "PROJ-1")
+	_, found, err := s.GetXref(context.Background(), "acme/widgets", "pr", "acme/widgets#7", "issue", "PROJ-1")
 	if err != nil {
 		t.Fatalf("GetXref: unexpected error %v", err)
 	}
@@ -80,12 +83,12 @@ func TestListXrefsByTo(t *testing.T) {
 		{Repo: "other/repo", FromType: "pr", FromID: "other/repo#1", ToType: "issue", ToID: "PROJ-1", Evidence: "branch", FirstSeen: "t1", LastConfirmed: "t1"},
 	}
 	for _, x := range seed {
-		if err := s.UpsertXref(x); err != nil {
+		if err := s.UpsertXref(context.Background(), x); err != nil {
 			t.Fatalf("seed UpsertXref %+v: %v", x, err)
 		}
 	}
 
-	got, err := s.ListXrefsByTo("acme/widgets", "issue", "PROJ-1")
+	got, err := s.ListXrefsByTo(context.Background(), "acme/widgets", "issue", "PROJ-1")
 	if err != nil {
 		t.Fatalf("ListXrefsByTo: %v", err)
 	}
@@ -105,7 +108,7 @@ func TestListXrefsByTo(t *testing.T) {
 		}
 	}
 
-	none, err := s.ListXrefsByTo("acme/widgets", "issue", "PROJ-999")
+	none, err := s.ListXrefsByTo(context.Background(), "acme/widgets", "issue", "PROJ-999")
 	if err != nil {
 		t.Fatalf("ListXrefsByTo (no match): %v", err)
 	}
@@ -127,12 +130,12 @@ func TestListXrefsByFrom(t *testing.T) {
 		{Repo: "acme/widgets", FromType: "pr", FromID: "acme/widgets#8", ToType: "issue", ToID: "PROJ-3", Evidence: "branch", FirstSeen: "t1", LastConfirmed: "t1"},
 	}
 	for _, x := range seed {
-		if err := s.UpsertXref(x); err != nil {
+		if err := s.UpsertXref(context.Background(), x); err != nil {
 			t.Fatalf("seed UpsertXref %+v: %v", x, err)
 		}
 	}
 
-	got, err := s.ListXrefsByFrom("acme/widgets", "pr", "acme/widgets#7", "issue")
+	got, err := s.ListXrefsByFrom(context.Background(), "acme/widgets", "pr", "acme/widgets#7", "issue")
 	if err != nil {
 		t.Fatalf("ListXrefsByFrom: %v", err)
 	}
@@ -152,7 +155,7 @@ func TestListXrefsByFrom(t *testing.T) {
 		}
 	}
 
-	none, err := s.ListXrefsByFrom("acme/widgets", "pr", "acme/widgets#999", "issue")
+	none, err := s.ListXrefsByFrom(context.Background(), "acme/widgets", "pr", "acme/widgets#999", "issue")
 	if err != nil {
 		t.Fatalf("ListXrefsByFrom (no match): %v", err)
 	}

@@ -141,6 +141,8 @@ type selectFlags struct {
 }
 
 func runFocusSelect(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+
 	var f selectFlags
 	var err error
 	if f.capN, f.capGiven, err = focusCapFlag(cmd); err != nil {
@@ -179,7 +181,7 @@ func runFocusSelect(cmd *cobra.Command) error {
 			}
 			err = focusTotalError("focus select: the plan kept changing under the lock", "re-run select")
 		}
-		return s.finishEarly(err)
+		return s.finishEarly(ctx, err)
 	}
 }
 
@@ -197,15 +199,15 @@ type selectRun struct {
 // finishEarly ends the run with err's exit code when no row-writing path did:
 // a non-dry run still writes its focus_run row (exit 2, 3 and 20 are counted by
 // the run statistics), then prints the stderr line.
-func (s *selectRun) finishEarly(err error) error {
+func (s *selectRun) finishEarly(ctx context.Context, err error) error {
 	if s.done {
 		return err
 	}
 	s.done = true
 	if s.f.apply && !s.run.Inserted() {
-		_ = s.run.Start(s.env.Store)
+		_ = s.run.Start(ctx, s.env.Store)
 	}
-	_ = s.run.Finish(focusExitCode(err))
+	_ = s.run.Finish(ctx, focusExitCode(err))
 	return err
 }
 
@@ -273,9 +275,9 @@ func mapFocusErr(err error, period string) error {
 
 // plan runs the compute stage: gather, closed check, draft, reply, merges and
 // the final set. It writes nothing.
-func (s *selectRun) plan() (*planned, error) {
+func (s *selectRun) plan(ctx context.Context) (*planned, error) {
 	env, f := s.env, s.f
-	g, err := gatherFocus(env)
+	g, err := gatherFocus(ctx, env)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +318,7 @@ func (s *selectRun) plan() (*planned, error) {
 		p.stored = &sd
 		p.cap = g.draft.Cap
 		p.madeAt, _ = time.Parse(time.RFC3339, g.draft.MadeAt)
-		p.rk = g.rank(p.cap)
+		p.rk = g.rank(ctx, p.cap)
 	} else {
 		if g.totalFailure() {
 			return nil, g.coverageResult()
@@ -329,7 +331,7 @@ func (s *selectRun) plan() (*planned, error) {
 		if f.capGiven {
 			p.cap = f.capN
 		}
-		p.rk = g.rank(p.cap)
+		p.rk = g.rank(ctx, p.cap)
 		p.doc = focus.NewReplanDraft(g.plan, p.rk, g.cov.State, p.cap, g.firstSeen)
 		p.madeAt = env.Now
 	}
@@ -402,7 +404,7 @@ func (s *selectRun) once() error {
 		ctx = context.Background()
 	}
 	env := s.env
-	p, err := s.plan()
+	p, err := s.plan(ctx)
 	if err != nil {
 		return err
 	}
@@ -423,7 +425,7 @@ func (s *selectRun) once() error {
 		}
 		// The store changed: recompute over it (a hand-add that turns out
 		// closed or hidden is a usage error now).
-		if p, err = s.plan(); err != nil {
+		if p, err = s.plan(ctx); err != nil {
 			return err
 		}
 		p.hydrated = hydrated
@@ -444,7 +446,7 @@ func (s *selectRun) once() error {
 			return perr
 		}
 		s.done = true
-		return s.run.Finish(0)
+		return s.run.Finish(ctx, 0)
 	}
 
 	// The effects are resolved BEFORE the lock: afterwards the rows are gone.
@@ -484,7 +486,7 @@ func (s *selectRun) once() error {
 			"run pg-desk focus select --repair",
 		)
 	}
-	if ferr := s.run.Finish(focusExitCode(runErr)); ferr != nil && runErr == nil {
+	if ferr := s.run.Finish(ctx, focusExitCode(runErr)); ferr != nil && runErr == nil {
 		return focusTotalError("focus select: finalize the run record: "+ferr.Error(), "run pg-desk focus select --repair")
 	}
 	return runErr
@@ -709,6 +711,11 @@ func nonNilStrings(l []string) []string {
 // from the period-closed check, and (without --dry-run) writes a focus_run
 // row of verb repair.
 func runFocusRepair(cmd *cobra.Command, f selectFlags) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	writing := !f.dry
 	env, err := openFocusEnv(cmd, writing)
 	if err != nil {
@@ -717,18 +724,14 @@ func runFocusRepair(cmd *cobra.Command, f selectFlags) error {
 	defer env.Close()
 	run := newFocusRun(cmd.ErrOrStderr(), focusVerbRepair, env.Period, env.Actor, f.dry, env.Now)
 	if writing {
-		_ = run.Start(env.Store)
+		_ = run.Start(ctx, env.Store)
 	}
 	s := &selectRun{cmd: cmd, env: env, f: f}
 	deps := s.deps()
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	res, rerr := focus.Repair(ctx, deps, f.dry)
 	if rerr != nil {
 		err := focusTotalError(rerr.Error(), "check the pg-desk store, then re-run")
-		_ = run.Finish(focusExitCode(err))
+		_ = run.Finish(ctx, focusExitCode(err))
 		return err
 	}
 	failed := 0
@@ -783,7 +786,7 @@ func runFocusRepair(cmd *cobra.Command, f selectFlags) error {
 			"re-run pg-desk focus select --repair",
 		)
 	}
-	if ferr := run.Finish(focusExitCode(runErr)); ferr != nil && runErr == nil {
+	if ferr := run.Finish(ctx, focusExitCode(runErr)); ferr != nil && runErr == nil {
 		return focusTotalError("focus select --repair: finalize the run record: "+ferr.Error(), "re-run pg-desk focus select --repair")
 	}
 	return runErr

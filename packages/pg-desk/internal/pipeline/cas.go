@@ -53,7 +53,7 @@ func (p *Pipeline) commitCAS(ctx context.Context, repo, entityType, entityID str
 		if err := ctx.Err(); err != nil {
 			return res, fmt.Errorf("pipeline: %s %s: %w", entityType, entityID, err)
 		}
-		cur, found, err := p.store.GetEntity(repo, entityType, entityID)
+		cur, found, err := p.store.GetEntity(ctx, repo, entityType, entityID)
 		if err != nil {
 			return res, fmt.Errorf("pipeline: read %s %s: %w", entityType, entityID, err)
 		}
@@ -73,7 +73,7 @@ func (p *Pipeline) commitCAS(ctx context.Context, repo, entityType, entityID str
 		if seam != nil {
 			seam(attempt)
 		}
-		v, werr := p.store.WriteEntityStateWithLogOpts(cp.entity, expected, cp.hydratedAt, cp.active, cp.listFP, cp.kinds, cp.origin, cp.at, cp.opts)
+		v, werr := p.store.WriteEntityStateWithLogOpts(ctx, cp.entity, expected, cp.hydratedAt, cp.active, cp.listFP, cp.kinds, cp.origin, cp.at, cp.opts)
 		if werr == nil {
 			res.version, res.written = v, true
 			return res, nil

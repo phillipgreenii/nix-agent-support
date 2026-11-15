@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,6 +66,8 @@ annotation_changed record is appended when it existed, and nothing is written
 // runAnnotateRemove deletes the annotation key, appending one
 // annotation_changed record when a row existed.
 func runAnnotateRemove(cmd *cobra.Command, entityType, ref, key, origin, actorFlag string) error {
+	ctx := cmd.Context()
+
 	if strings.TrimSpace(key) == "" {
 		return fmt.Errorf("annotate: --key must not be empty")
 	}
@@ -75,7 +78,7 @@ func runAnnotateRemove(cmd *cobra.Command, entityType, ref, key, origin, actorFl
 	if err != nil {
 		return fmt.Errorf("annotate: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("annotate")
+	st, err := openNewSchemaStore(ctx, "annotate")
 	if err != nil {
 		return err
 	}
@@ -85,7 +88,7 @@ func runAnnotateRemove(cmd *cobra.Command, entityType, ref, key, origin, actorFl
 	if err != nil {
 		return err
 	}
-	removed, err := w.remove(st)
+	removed, err := w.remove(ctx, st)
 	if err != nil {
 		return err
 	}
@@ -98,6 +101,8 @@ func runAnnotateRemove(cmd *cobra.Command, entityType, ref, key, origin, actorFl
 }
 
 func runAnnotate(cmd *cobra.Command, entityType, ref, key, value, origin, actorFlag string) error {
+	ctx := cmd.Context()
+
 	if strings.TrimSpace(key) == "" {
 		return fmt.Errorf("annotate: --key must not be empty")
 	}
@@ -111,7 +116,7 @@ func runAnnotate(cmd *cobra.Command, entityType, ref, key, value, origin, actorF
 	if err != nil {
 		return fmt.Errorf("annotate: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("annotate")
+	st, err := openNewSchemaStore(ctx, "annotate")
 	if err != nil {
 		return err
 	}
@@ -121,7 +126,7 @@ func runAnnotate(cmd *cobra.Command, entityType, ref, key, value, origin, actorF
 	if err != nil {
 		return err
 	}
-	if err := w.set(st); err != nil {
+	if err := w.set(ctx, st); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "annotated %s %s: %s\n", entityType, w.id, key)
@@ -157,8 +162,8 @@ func newKVWrite(cfg *config.Config, cmdName, entityType, ref, key, value, origin
 // transaction, in the store). A write of the value the key already holds
 // writes nothing and appends no record (INV-ANNOTATE-1); the stored origin,
 // set_by and set_at keep their earlier values.
-func (w *kvWrite) set(st *store.Store) error {
-	_, _, err := st.SetAnnotationSeq(store.KVAnnotation{
+func (w *kvWrite) set(ctx context.Context, st *store.Store) error {
+	_, _, err := st.SetAnnotationSeq(ctx, store.KVAnnotation{
 		Repo: w.repo, EntityType: w.entityType, EntityID: w.id,
 		Key: w.key, Value: w.value, Origin: w.origin, SetBy: w.by, SetAt: annotationNow(),
 	})
@@ -167,8 +172,8 @@ func (w *kvWrite) set(st *store.Store) error {
 
 // remove deletes the annotation (appending annotation_changed when a row was
 // removed) and reports whether one existed.
-func (w *kvWrite) remove(st *store.Store) (bool, error) {
-	removed, err := st.DeleteAnnotation(w.repo, w.entityType, w.id, w.key, w.origin, annotationNow())
+func (w *kvWrite) remove(ctx context.Context, st *store.Store) (bool, error) {
+	removed, err := st.DeleteAnnotation(ctx, w.repo, w.entityType, w.id, w.key, w.origin, annotationNow())
 	return removed, w.wrap(err)
 }
 

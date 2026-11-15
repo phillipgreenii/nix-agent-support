@@ -46,16 +46,16 @@ func newStubFocusVerb() *cobra.Command {
 			var run *focusRun
 			if !readonly {
 				run = newFocusRun(cmd.ErrOrStderr(), focusVerbSelect, env.Period, env.Actor, dry, env.Now)
-				_ = run.Start(env.Store)
+				_ = run.Start(context.Background(), env.Store)
 				run.SetCounts(focusCounts{Ranked: 1, Selected: 1}) // not an "empty" select
 			}
 			finish := func(err error) error {
 				if run != nil {
-					_ = run.Finish(focusExitCode(err))
+					_ = run.Finish(context.Background(), focusExitCode(err))
 				}
 				return err
 			}
-			if err := env.CheckPeriodClosed(); err != nil {
+			if err := env.CheckPeriodClosed(context.Background()); err != nil {
 				return finish(err)
 			}
 			var runID string
@@ -236,7 +236,7 @@ func TestFocusRetiredSchemaStoreRefusal(t *testing.T) {
 	}
 	// Nothing applied: the store is still on the old schema.
 	st := f.open(t)
-	if v, verr := st.SchemaVersion(); verr != nil || v >= store.NewSchemaVersion {
+	if v, verr := st.SchemaVersion(context.Background()); verr != nil || v >= store.NewSchemaVersion {
 		t.Errorf("store schema version = %d, %v; the refusal must apply nothing", v, verr)
 	}
 }
@@ -279,7 +279,7 @@ func TestFocusNoteForNonTodayDateOnWritingVerbs(t *testing.T) {
 func TestFocusAddressedPeriodNeverComesFromStoredDraft(t *testing.T) {
 	f := newFocusFixture(t, "new")
 	st := f.open(t)
-	if _, err := st.FocusDraftReplace(store.FocusDraft{
+	if _, err := st.FocusDraftReplace(context.Background(), store.FocusDraft{
 		PeriodType: store.FocusPeriodDay, PeriodKey: "2026-10-08", Cap: 5,
 		MadeAt: "2026-10-08T23:50:00Z", BodyJSON: "{}",
 	}); err != nil {
@@ -637,7 +637,7 @@ func TestFocusRunRowWrittenByStubVerbs(t *testing.T) {
 	} {
 		runFocusVerb(t, args...) //nolint:errcheck // exit codes are asserted elsewhere
 	}
-	stats, err := st.FocusRunStats()
+	stats, err := st.FocusRunStats(context.Background())
 	if err != nil {
 		t.Fatalf("FocusRunStats: %v", err)
 	}

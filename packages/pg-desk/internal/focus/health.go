@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -182,30 +183,30 @@ func (h Health) Migrated() bool { return len(h.Coverage.PerType) > 0 }
 // focus tables, or a configuration with no repository, yields the zero Health
 // and no error (the metrics then emit nothing and the scrape still succeeds).
 // Any other read failure is an error, never a quiet all-clear.
-func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, error) {
+func ComputeHealth(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time) (Health, error) {
 	if st == nil {
 		return Health{}, fmt.Errorf("focus: health: no store")
 	}
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	if err := st.RequireNewSchema(); err != nil {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		return Health{}, nil //nolint:nilerr // an unmigrated store has no focus series by design
 	}
 	if len(cfg.Repos) == 0 {
 		return Health{}, nil
 	}
 	repo := cfg.Repos[0].Remote
-	in, err := Load(st, cfg, repo, now)
+	in, err := Load(ctx, st, cfg, repo, now)
 	if err != nil {
 		return Health{}, err
 	}
 	set := Candidates(in)
-	cov, err := ComputeCoverage(st, cfg, now, in.Entities)
+	cov, err := ComputeCoverage(ctx, st, cfg, now, in.Entities)
 	if err != nil {
 		return Health{}, err
 	}
-	watched := LoadWatched(st, cfg)
+	watched := LoadWatched(ctx, st, cfg)
 
 	h := Health{
 		PlanRows:         zeroCounts(HealthPlanRowStates),
@@ -231,11 +232,11 @@ func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, 
 	}
 
 	// ---- the plan: periods, rows, newest row per item
-	periods, err := st.FocusPeriods()
+	periods, err := st.FocusPeriods(ctx)
 	if err != nil {
 		return Health{}, err
 	}
-	allRows, err := st.FocusRowsAllPeriods()
+	allRows, err := st.FocusRowsAllPeriods(ctx)
 	if err != nil {
 		return Health{}, err
 	}
@@ -268,7 +269,7 @@ func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, 
 	var plan []store.FocusSelection
 	capLine := DefaultCap
 	if current != nil {
-		rows, err := st.FocusPlanRows(current.ID)
+		rows, err := st.FocusPlanRows(ctx, current.ID)
 		if err != nil {
 			return Health{}, err
 		}
@@ -284,7 +285,7 @@ func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, 
 	h.Selected = len(plan)
 
 	// ---- the draft
-	d, haveDraft, err := st.FocusDraftGet()
+	d, haveDraft, err := st.FocusDraftGet(ctx)
 	if err != nil {
 		return Health{}, err
 	}
@@ -300,7 +301,7 @@ func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, 
 	}
 
 	// ---- runs
-	stats, err := st.FocusRunStats()
+	stats, err := st.FocusRunStats(ctx)
 	if err != nil {
 		return Health{}, err
 	}
@@ -321,7 +322,7 @@ func ComputeHealth(st *store.Store, cfg *config.Config, now time.Time) (Health, 
 	}
 
 	// ---- the rank (computed at most once per call)
-	rk := Rank(in, set, RankOptions{Cap: capLine})
+	rk := Rank(ctx, in, set, RankOptions{Cap: capLine})
 	h.RankInputs = rk.Inputs
 
 	// ---- focus beads

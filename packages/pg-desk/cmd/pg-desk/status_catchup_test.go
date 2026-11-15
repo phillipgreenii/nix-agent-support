@@ -27,7 +27,7 @@ func statusOut(t *testing.T) string {
 func TestStatusReportsBehindFailedAndNeverRun(t *testing.T) {
 	rs := newRIStore(t)
 	seedOpen(t, rs, 3)
-	if err := rs.seed.MarkInterpretationFailed(store.InterpretationKey{Repo: riRepo, EntityType: "pr", EntityID: riID(3)}, riStamp()); err != nil {
+	if err := rs.seed.MarkInterpretationFailed(context.Background(), store.InterpretationKey{Repo: riRepo, EntityType: "pr", EntityID: riID(3)}, riStamp()); err != nil {
 		t.Fatal(err)
 	}
 	out := statusOut(t)
@@ -68,7 +68,7 @@ func TestReinterpretWritesLastRunOnlyForAWritingOpenPassThatSelectedRows(t *test
 	rs := newRIStore(t)
 	rs.pr(t, 1, riFacts("open", false, "me"))
 	lastRun := func() bool {
-		_, found, err := rs.seed.GetMeta(store.MetaKeyReinterpretLastRun)
+		_, found, err := rs.seed.GetMeta(context.Background(), store.MetaKeyReinterpretLastRun)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func TestReinterpretWritesLastRunOnlyForAWritingOpenPassThatSelectedRows(t *test
 	if _, _, err := riRun(t, "--open"); err != nil || !lastRun() {
 		t.Fatalf("open pass: err=%v recorded=%v", err, lastRun())
 	}
-	if err := rs.seed.DeleteMeta(store.MetaKeyReinterpretLastRun); err != nil {
+	if err := rs.seed.DeleteMeta(context.Background(), store.MetaKeyReinterpretLastRun); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := riRun(t, riID(1)); err != nil || lastRun() {
@@ -101,7 +101,7 @@ func TestStatusShowsHeartbeatBacklogDraining(t *testing.T) {
 	if _, err := runHeartbeat(t); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, _ := rs.seed.GetMeta(store.MetaKeyReinterpretLastRun); found {
+	if _, found, _ := rs.seed.GetMeta(context.Background(), store.MetaKeyReinterpretLastRun); found {
 		t.Fatal("an idle heartbeat wrote last-run counts")
 	}
 	seedOpen(t, rs, CatchUpMaxRows+3)
@@ -169,7 +169,7 @@ func TestStatusBehindIsUnknownWithNoSchemaAndWithoutConfig(t *testing.T) {
 
 func TestStatusReportsACorruptLastRunAsAnError(t *testing.T) {
 	rs := newRIStore(t)
-	if err := rs.seed.SetMeta(store.MetaKeyReinterpretLastRun, "garbage"); err != nil {
+	if err := rs.seed.SetMeta(context.Background(), store.MetaKeyReinterpretLastRun, "garbage"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runStatusCmd(t); err == nil || !strings.Contains(err.Error(), "last catch-up") {
@@ -186,7 +186,7 @@ func TestRecordLastRunFailureIsOneLine(t *testing.T) {
 	}
 	_ = closed.Close()
 	var buf strings.Builder
-	recordLastRun(&buf, closed, "heartbeat", time.Now(), reinterpretCounts{Selected: 1}, 0)
+	recordLastRun(context.Background(), &buf, closed, "heartbeat", time.Now(), reinterpretCounts{Selected: 1}, 0)
 	if !strings.HasPrefix(buf.String(), "reinterpret: record last run: ") || strings.Count(buf.String(), "\n") != 1 {
 		t.Errorf("stderr = %q", buf.String())
 	}
@@ -199,7 +199,7 @@ func TestStatusShowsFlaggedIngestFailures(t *testing.T) {
 		{Instance: "owning-a", EntityID: "i-1", Seq: 1, FirstFailedAt: "2026-11-10T09:00:00Z", LastError: "gone", FailureClass: "not_found", FlaggedAt: "2026-11-10T09:00:00Z"},
 		{Instance: "owning-a", EntityID: "i-2", Seq: 2, FirstFailedAt: "2026-11-10T09:00:00Z", LastError: "down", FailureClass: "unavailable"},
 	} {
-		if err := rs.seed.RecordIngestFailure(f); err != nil {
+		if err := rs.seed.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}

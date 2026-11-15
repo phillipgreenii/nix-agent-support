@@ -93,7 +93,7 @@ type Engine struct {
 
 	// setMeta replaces Store.SetMeta for the best-effort listing-status
 	// write; tests use it to inject a write failure.
-	setMeta func(key, value string) error
+	setMeta func(ctx context.Context, key, value string) error
 
 	// beforeCASWrite is a TEST SEAM (nil in production): it runs once per
 	// compare-and-set attempt of deactivateIf and reconcileOne, after the
@@ -142,7 +142,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		return Outcome{}, errors.New("changes: --reset cannot be combined with --cached")
 	}
 	if opts.Cached {
-		return e.runCached(opts, emit)
+		return e.runCached(ctx, opts, emit)
 	}
 	selected, err := SelectQueries(e.Cfg, opts.EntityType, opts.Query)
 	if err != nil {
@@ -156,7 +156,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	e.startupDispatchCheck(ctx, opts.EntityType)
 	// Liveness: every real call stamps the consumer's seen_at, even one that
 	// ends in total failure [design 6.9].
-	if err := e.Store.RegisterConsumer(opts.Consumer, opts.EntityType, e.now()); err != nil {
+	if err := e.Store.RegisterConsumer(ctx, opts.Consumer, opts.EntityType, e.now()); err != nil {
 		return Outcome{}, fmt.Errorf("changes: %w", err)
 	}
 
@@ -270,13 +270,13 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	if set == nil {
 		set = e.Store.SetMeta
 	}
-	if err := recordListing(set, opts.EntityType, e.now().UTC().Format(time.RFC3339), listedSources); err != nil {
+	if err := recordListing(ctx, set, opts.EntityType, e.now().UTC().Format(time.RFC3339), listedSources); err != nil {
 		e.warnf("changes: persist listing status: %v\n", err)
 	}
-	e.recordListingOK(set, opts.EntityType, runs)
+	e.recordListingOK(ctx, set, opts.EntityType, runs)
 	// The beads half of the unflagged-member count reads the persisted watch
 	// sets, which this poll's complete listings have just rewritten.
-	e.recordListedUnflagged(opts.EntityType, selected, st)
+	e.recordListedUnflagged(ctx, opts.EntityType, selected, st)
 
 	// The feed step of every owning instance runs after phases A-C2 and
 	// before phase D (and before any total early return).
@@ -322,7 +322,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	}
 
 	if total {
-		cur, err := e.consumerCursor(opts.Consumer, opts.EntityType)
+		cur, err := e.consumerCursor(ctx, opts.Consumer, opts.EntityType)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -344,7 +344,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	}
 	func() {
 		defer unlock()
-		err = e.deliver(opts, sources, emit)
+		err = e.deliver(ctx, opts, sources, emit)
 	}()
 	if err != nil {
 		return Outcome{}, err
@@ -353,7 +353,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	// Prune after a real call: rows past retention that every non-stale
 	// consumer has passed [design 6.6, 6.9]. A failure here is not fatal: the
 	// output was already delivered and the cursor advanced.
-	if _, perr := e.Store.PruneChangeLog(e.now(), e.Cfg.ChangeLogRetention(), e.Cfg.ConsumerStaleAfter()); perr != nil {
+	if _, perr := e.Store.PruneChangeLog(ctx, e.now(), e.Cfg.ChangeLogRetention(), e.Cfg.ConsumerStaleAfter()); perr != nil {
 		e.warnf("changes: prune change_log: %v\n", perr)
 	}
 	return Outcome{Partial: partial}, nil
@@ -361,21 +361,21 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 
 // deliver reads the consumer's records, emits the envelope and, only after
 // the emit succeeded, advances the cursor. The caller holds the consumer lock.
-func (e *Engine) deliver(opts Options, sources []Source, emit func(Envelope) error) error {
-	from, err := e.consumerCursor(opts.Consumer, opts.EntityType)
+func (e *Engine) deliver(ctx context.Context, opts Options, sources []Source, emit func(Envelope) error) error {
+	from, err := e.consumerCursor(ctx, opts.Consumer, opts.EntityType)
 	if err != nil {
 		return err
 	}
-	rows, err := e.Store.ReadChanges(opts.Consumer, opts.EntityType, opts.Limit, e.now())
+	rows, err := e.Store.ReadChanges(ctx, opts.Consumer, opts.EntityType, opts.Limit, e.now())
 	if err != nil {
 		return fmt.Errorf("changes: %w", err)
 	}
-	env := e.envelope(opts, from, sources, rows)
+	env := e.envelope(ctx, opts, from, sources, rows)
 	if err := emit(env); err != nil {
 		return fmt.Errorf("changes: write output: %w", err)
 	}
 	if env.Cursor.To > from {
-		if err := e.Store.AdvanceCursor(opts.Consumer, opts.EntityType, env.Cursor.To); err != nil {
+		if err := e.Store.AdvanceCursor(ctx, opts.Consumer, opts.EntityType, env.Cursor.To); err != nil {
 			return fmt.Errorf("changes: %w", err)
 		}
 	}
@@ -384,22 +384,22 @@ func (e *Engine) deliver(opts Options, sources []Source, emit func(Envelope) err
 
 // runCached is the --cached peek: it reads the records a real call would
 // return and touches nothing (no register, no seen_at, no cursor).
-func (e *Engine) runCached(opts Options, emit func(Envelope) error) (Outcome, error) {
-	from, err := e.consumerCursor(opts.Consumer, opts.EntityType)
+func (e *Engine) runCached(ctx context.Context, opts Options, emit func(Envelope) error) (Outcome, error) {
+	from, err := e.consumerCursor(ctx, opts.Consumer, opts.EntityType)
 	if err != nil {
 		return Outcome{}, err
 	}
-	rows, err := e.Store.PeekChanges(opts.Consumer, opts.EntityType, opts.Limit)
+	rows, err := e.Store.PeekChanges(ctx, opts.Consumer, opts.EntityType, opts.Limit)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("changes: %w", err)
 	}
-	if err := emit(e.envelope(opts, from, []Source{}, rows)); err != nil {
+	if err := emit(e.envelope(ctx, opts, from, []Source{}, rows)); err != nil {
 		return Outcome{}, fmt.Errorf("changes: write output: %w", err)
 	}
 	return Outcome{}, nil
 }
 
-func (e *Engine) envelope(opts Options, from int64, sources []Source, rows []store.ChangeRecord) Envelope {
+func (e *Engine) envelope(ctx context.Context, opts Options, from int64, sources []Source, rows []store.ChangeRecord) Envelope {
 	titles := map[[2]string]string{}
 	records := make([]Record, 0, len(rows))
 	to := from
@@ -407,7 +407,7 @@ func (e *Engine) envelope(opts Options, from int64, sources []Source, rows []sto
 		k := [2]string{r.Repo, r.EntityID}
 		title, ok := titles[k]
 		if !ok {
-			if ent, found, err := e.Store.GetEntity(r.Repo, r.EntityType, r.EntityID); err == nil && found {
+			if ent, found, err := e.Store.GetEntity(ctx, r.Repo, r.EntityType, r.EntityID); err == nil && found {
 				title = TitleFromFacts(r.EntityType, ent.Facts)
 			}
 			titles[k] = title
@@ -454,7 +454,7 @@ func (e *Engine) hydrateResult(ctx context.Context, entityType, id string, chang
 		apply(&ecOpts)
 	}
 	res, err := e.Hydrator.RunEntityChange(ctx, entityType, id, change, ecOpts)
-	RecordHydration(e.Store, entityType, id, res, err)
+	RecordHydration(ctx, e.Store, entityType, id, res, err)
 	if err != nil {
 		return res, err
 	}
@@ -469,15 +469,15 @@ func (e *Engine) hydrateResult(ctx context.Context, entityType, id string, chang
 	// Spec 6.1 (a): an entity terminal in its source system stops being
 	// active so the sweep leaves it alone. A failure here is not a hydration
 	// failure: the entity stays active and the next sweep retries.
-	if derr := e.deactivateIfTerminal(entityType, id); derr != nil {
+	if derr := e.deactivateIfTerminal(ctx, entityType, id); derr != nil {
 		e.warnf("changes: deactivate %s %s: %v\n", entityType, id, derr)
 	}
 	return res, nil
 }
 
 // consumerCursor is the consumer's current cursor, 0 when it is unregistered.
-func (e *Engine) consumerCursor(name, entityType string) (int64, error) {
-	cs, err := e.Store.ListConsumers()
+func (e *Engine) consumerCursor(ctx context.Context, name, entityType string) (int64, error) {
+	cs, err := e.Store.ListConsumers(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("changes: %w", err)
 	}

@@ -28,9 +28,9 @@ type PRUnhydrated struct {
 // It reads schema-2 columns, so it fails on an older store; callers check
 // SchemaVersion first and treat an older store as "no data", never as an empty
 // set. A read failure is returned, never folded into a zero count.
-func (s *Store) CountPRUnhydrated(now time.Time) (PRUnhydrated, error) {
+func (s *Store) CountPRUnhydrated(ctx context.Context, now time.Time) (PRUnhydrated, error) {
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT e.facts, COALESCE(e.first_seen_at, e.as_of),
 		        COALESCE((SELECT a.value FROM annotation a
 		                  WHERE a.repo = e.repo AND a.entity_type = e.entity_type

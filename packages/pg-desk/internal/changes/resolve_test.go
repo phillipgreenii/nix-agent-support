@@ -32,13 +32,14 @@ func resolveCfg() *config.Config {
 func seedIssue(t *testing.T, st *store.Store, id string, backend *string) {
 	t.Helper()
 	if _, err := st.WriteEntityWithLog(
+		context.Background(),
 		store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
 		0, []string{"created"}, "sync", "2026-09-29T10:00:00Z",
 	); err != nil {
 		t.Fatal(err)
 	}
 	if backend != nil {
-		if err := st.SetEntityColumns("o/r", "issue", id, backend, nil); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, backend, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -51,14 +52,14 @@ func TestResolveIssueBackendReadsTheColumn(t *testing.T) {
 	seedIssue(t, st, "PROJ-1", &owner)
 	seedIssue(t, st, "bd-1", &tracker)
 	// A watch set on another instance must not override a stored column.
-	if err := saveWatchSet(st, "issue", "team", map[string]bool{"bd-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "team", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 
-	if inst, owning, err := ResolveIssueBackend(cfg, st, "PROJ-1"); err != nil || inst != "owner-a" || !owning {
+	if inst, owning, err := ResolveIssueBackend(context.Background(), cfg, st, "PROJ-1"); err != nil || inst != "owner-a" || !owning {
 		t.Errorf("owning column: %q %v %v, want owner-a true nil", inst, owning, err)
 	}
-	if inst, owning, err := ResolveIssueBackend(cfg, st, "bd-1"); err != nil || inst != "tracker-a" || owning {
+	if inst, owning, err := ResolveIssueBackend(context.Background(), cfg, st, "bd-1"); err != nil || inst != "tracker-a" || owning {
 		t.Errorf("non-owning column: %q %v %v, want tracker-a false nil", inst, owning, err)
 	}
 }
@@ -67,14 +68,14 @@ func TestResolveIssueBackendNullColumnUsesTheNonOwningWatchSet(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	cfg := resolveCfg()
 	seedIssue(t, st, "bd-2", nil)
-	if err := saveWatchSet(st, "issue", "mine", map[string]bool{"bd-2": true, "bd-3": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "mine", map[string]bool{"bd-2": true, "bd-3": true}); err != nil {
 		t.Fatal(err)
 	}
 	// An id the store has no row for resolves the same way.
-	if inst, owning, err := ResolveIssueBackend(cfg, st, "bd-2"); err != nil || inst != "tracker-a" || owning {
+	if inst, owning, err := ResolveIssueBackend(context.Background(), cfg, st, "bd-2"); err != nil || inst != "tracker-a" || owning {
 		t.Errorf("NULL column: %q %v %v, want tracker-a false nil", inst, owning, err)
 	}
-	if inst, owning, err := ResolveIssueBackend(cfg, st, "bd-3"); err != nil || inst != "tracker-a" || owning {
+	if inst, owning, err := ResolveIssueBackend(context.Background(), cfg, st, "bd-3"); err != nil || inst != "tracker-a" || owning {
 		t.Errorf("no row: %q %v %v, want tracker-a false nil", inst, owning, err)
 	}
 }
@@ -83,11 +84,11 @@ func TestResolveIssueBackendAnIdInTwoBackendsIsAmbiguous(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	cfg := resolveCfg()
 	for _, q := range []string{"mine", "team"} {
-		if err := saveWatchSet(st, "issue", q, map[string]bool{"bd-9": true}); err != nil {
+		if err := saveWatchSet(context.Background(), st, "issue", q, map[string]bool{"bd-9": true}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	inst, owning, err := ResolveIssueBackend(cfg, st, "bd-9")
+	inst, owning, err := ResolveIssueBackend(context.Background(), cfg, st, "bd-9")
 	if !errors.Is(err, ErrAmbiguousBackend) || inst != "" || owning {
 		t.Fatalf("got %q %v %v, want ErrAmbiguousBackend", inst, owning, err)
 	}
@@ -96,7 +97,7 @@ func TestResolveIssueBackendAnIdInTwoBackendsIsAmbiguous(t *testing.T) {
 	}
 	// Two queries of the SAME instance are not ambiguous.
 	cfg.Watch.Issue.Backends["team"] = config.WatchBackend{Instance: "tracker-a"}
-	if inst, _, err := ResolveIssueBackend(cfg, st, "bd-9"); err != nil || inst != "tracker-a" {
+	if inst, _, err := ResolveIssueBackend(context.Background(), cfg, st, "bd-9"); err != nil || inst != "tracker-a" {
 		t.Errorf("same instance twice: %q %v, want tracker-a nil", inst, err)
 	}
 }
@@ -106,17 +107,17 @@ func TestResolveIssueBackendTicketShapeFallsBackToTheSingleOwningInstance(t *tes
 	cfg := resolveCfg()
 	// In no watch set, NULL column, ticket-shaped: the owning instance, no probe.
 	seedIssue(t, st, "PROJ-5", nil)
-	if inst, owning, err := ResolveIssueBackend(cfg, st, "PROJ-5"); err != nil || inst != "owner-a" || !owning {
+	if inst, owning, err := ResolveIssueBackend(context.Background(), cfg, st, "PROJ-5"); err != nil || inst != "owner-a" || !owning {
 		t.Errorf("ticket shape: %q %v %v, want owner-a true nil", inst, owning, err)
 	}
 	// Not ticket-shaped and in no set: unresolved, no error.
-	if inst, owning, err := ResolveIssueBackend(cfg, st, "bd-77"); err != nil || inst != "" || owning {
+	if inst, owning, err := ResolveIssueBackend(context.Background(), cfg, st, "bd-77"); err != nil || inst != "" || owning {
 		t.Errorf("unresolved: %q %v %v, want empty false nil", inst, owning, err)
 	}
 	// Two owning instances make the ticket shape insufficient.
 	cfg.Watch.Issue.Queries = append(cfg.Watch.Issue.Queries, "tracked2")
 	cfg.Watch.Issue.Backends["tracked2"] = config.WatchBackend{Instance: "owner-b", OwnsChanges: true}
-	if inst, _, err := ResolveIssueBackend(cfg, st, "PROJ-5"); err != nil || inst != "" {
+	if inst, _, err := ResolveIssueBackend(context.Background(), cfg, st, "PROJ-5"); err != nil || inst != "" {
 		t.Errorf("two owning instances: %q %v, want empty nil", inst, err)
 	}
 }

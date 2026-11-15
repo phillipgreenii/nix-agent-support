@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -48,7 +49,7 @@ func wantOneAnnotationChange(t *testing.T, st *store.Store, entityType, id strin
 
 func wantAnnotation(t *testing.T, st *store.Store, entityType, id, key, value, origin, by string) {
 	t.Helper()
-	a, found, err := st.GetKVAnnotation("o/r", entityType, id, key)
+	a, found, err := st.GetKVAnnotation(context.Background(), "o/r", entityType, id, key)
 	if err != nil || !found {
 		t.Fatalf("annotation %q: found=%v err=%v", key, found, err)
 	}
@@ -115,7 +116,7 @@ func TestAnnotateWritesRowAndOneChangeRecord(t *testing.T) {
 func TestAnnotateAnUnwatchedIssueStoresTheValueAndAppendsNoRow(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"issue", "K-1"})
 	off := false
-	if err := seed.SetEntityColumns("o/r", "issue", "K-1", nil, &off); err != nil {
+	if err := seed.SetEntityColumns(context.Background(), "o/r", "issue", "K-1", nil, &off); err != nil {
 		t.Fatal(err)
 	}
 	withOpenSeams(t, linkTestConfig(), open)
@@ -200,7 +201,7 @@ func TestAnnotateUnknownEntityFailsWritingNothing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "does not resolve to a stored entity") {
 		t.Fatalf("error = %v, want a does-not-resolve error", err)
 	}
-	if got, _ := seed.ListKVAnnotations("o/r", "pr", "o/r#99"); len(got) != 0 {
+	if got, _ := seed.ListKVAnnotations(context.Background(), "o/r", "pr", "o/r#99"); len(got) != 0 {
 		t.Errorf("annotations = %+v, want none", got)
 	}
 }
@@ -228,7 +229,7 @@ func TestSuppressUnsuppressRoundTrip(t *testing.T) {
 	if _, err := runGroupCmd(t, unsuppressCmd, "pr", "5", "--kind", "lint"); err != nil {
 		t.Fatalf("unsuppress: %v", err)
 	}
-	if _, found, _ := seed.GetKVAnnotation("o/r", "pr", "o/r#5", "suppress.lint"); found {
+	if _, found, _ := seed.GetKVAnnotation(context.Background(), "o/r", "pr", "o/r#5", "suppress.lint"); found {
 		t.Error("suppress.lint still present after unsuppress")
 	}
 	if got := kindsOf(t, seed, "pr", "o/r#5"); len(got) != 3 || got[2] != "annotation_changed@pg-desk" {
@@ -256,7 +257,7 @@ func TestSuppressOtherKindsAreIndependent(t *testing.T) {
 	if _, err := runGroupCmd(t, unsuppressCmd, "issue", "K-1", "--kind", "a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, _ := seed.GetKVAnnotation("o/r", "issue", "K-1", "suppress.b"); !found {
+	if _, found, _ := seed.GetKVAnnotation(context.Background(), "o/r", "issue", "K-1", "suppress.b"); !found {
 		t.Error("suppress.b removed by unsuppress --kind a")
 	}
 	if _, err := runGroupCmd(t, suppressCmd, "issue", "K-1"); err == nil {
@@ -266,7 +267,7 @@ func TestSuppressOtherKindsAreIndependent(t *testing.T) {
 
 func TestForceReviewStoresHeadSHA(t *testing.T) {
 	open, seed := newStoreAt(t, "new")
-	if err := seed.UpsertEntityForTest(store.Entity{
+	if err := seed.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Facts: `{}`, AsOf: "2026-09-29T00:00:00Z", HeadSHA: "deadbeef",
 	}); err != nil {
 		t.Fatal(err)
@@ -289,7 +290,7 @@ func TestForceReviewNeedsAKnownHead(t *testing.T) {
 	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "99"); err == nil || !strings.Contains(err.Error(), "does not resolve") {
 		t.Errorf("error = %v, want a does-not-resolve error", err)
 	}
-	if got, _ := seed.ListKVAnnotations("o/r", "pr", "o/r#1"); len(got) != 0 {
+	if got, _ := seed.ListKVAnnotations(context.Background(), "o/r", "pr", "o/r#1"); len(got) != 0 {
 		t.Errorf("annotations = %+v, want none", got)
 	}
 }
@@ -297,7 +298,7 @@ func TestForceReviewNeedsAKnownHead(t *testing.T) {
 // seedForceReviewEntity seeds o/r#1 with a recorded head SHA.
 func seedForceReviewEntity(t *testing.T, seed *store.Store, head string) {
 	t.Helper()
-	if err := seed.UpsertEntityForTest(store.Entity{
+	if err := seed.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Facts: `{}`, AsOf: "2026-09-29T00:00:00Z", HeadSHA: head,
 	}); err != nil {
 		t.Fatal(err)
@@ -319,7 +320,7 @@ func TestForceReviewClearRemovesTheFlagWithOneRecord(t *testing.T) {
 	if !strings.Contains(out, "cleared") {
 		t.Errorf("output = %q, want it to say the flag was cleared", out)
 	}
-	if _, found, _ := seed.GetKVAnnotation("o/r", "pr", "o/r#1", "force_review"); found {
+	if _, found, _ := seed.GetKVAnnotation(context.Background(), "o/r", "pr", "o/r#1", "force_review"); found {
 		t.Error("force_review still present after --clear")
 	}
 	// set + clear: exactly one more annotation_changed record, from --origin.
@@ -449,7 +450,7 @@ func TestAnnotateRemoveDeletesAnExistingKeyWithOneChangeRecord(t *testing.T) {
 	if !strings.Contains(out, "removed") {
 		t.Errorf("output = %q, want it to say removed", out)
 	}
-	if _, found, err := seed.GetKVAnnotation("o/r", "pr", "o/r#5", "focus_selected"); err != nil || found {
+	if _, found, err := seed.GetKVAnnotation(context.Background(), "o/r", "pr", "o/r#5", "focus_selected"); err != nil || found {
 		t.Errorf("annotation after --remove: found=%v err=%v, want it gone", found, err)
 	}
 	wantOneAnnotationChange(t, seed, "pr", "o/r#5", before, "pg-desk")
@@ -608,7 +609,7 @@ func TestAnnotationVerbsSameValueRerunWritesNothing(t *testing.T) {
 			if err := tc.first(t, "alice"); err != nil {
 				t.Fatalf("first run: %v", err)
 			}
-			before, found, err := seed.GetKVAnnotation("o/r", "pr", "o/r#1", tc.key)
+			before, found, err := seed.GetKVAnnotation(context.Background(), "o/r", "pr", "o/r#1", tc.key)
 			if err != nil || !found {
 				t.Fatalf("annotation %q after the first run: found=%v err=%v", tc.key, found, err)
 			}
@@ -618,7 +619,7 @@ func TestAnnotationVerbsSameValueRerunWritesNothing(t *testing.T) {
 			if err := tc.first(t, "bob"); err != nil {
 				t.Fatalf("same-value re-run: %v", err)
 			}
-			after, _, _ := seed.GetKVAnnotation("o/r", "pr", "o/r#1", tc.key)
+			after, _, _ := seed.GetKVAnnotation(context.Background(), "o/r", "pr", "o/r#1", tc.key)
 			if after != before {
 				t.Errorf("annotation after a same-value re-run = %+v, want unchanged %+v", after, before)
 			}
@@ -685,7 +686,7 @@ func TestConcurrentSameValueAnnotationWritesProduceOneRecord(t *testing.T) {
 			}
 			defer func() { _ = st.Close() }()
 			w := &kvWrite{cmdName: "annotate", entityType: "pr", repo: "o/r", id: "o/r#1", key: "free", value: "same", origin: "pg-desk", by: "alice"}
-			if err := w.set(st); err != nil {
+			if err := w.set(context.Background(), st); err != nil {
 				t.Error(err)
 			}
 		}()

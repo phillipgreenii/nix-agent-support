@@ -34,7 +34,7 @@ func TestHeartbeatUpdatesLastHeartbeat(t *testing.T) {
 	if _, err := runNamedCmd(t, "heartbeat"); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
-	got, found, err := st.GetMeta(store.MetaKeyLastHeartbeat)
+	got, found, err := st.GetMeta(context.Background(), store.MetaKeyLastHeartbeat)
 	if err != nil || !found {
 		t.Fatalf("GetMeta(last_heartbeat): found=%v err=%v", found, err)
 	}

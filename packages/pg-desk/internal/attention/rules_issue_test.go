@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func ago(d time.Duration) string { return fixedNow.Add(-d).Format(stamp) }
 
 func evaluateIssueAt(t *testing.T, st *store.Store, cfg *config.Config, now time.Time) Result {
 	t.Helper()
-	res, err := Evaluate(Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: interpret.FixedClock(now)})
+	res, err := Evaluate(context.Background(), Inputs{Store: st, Repo: testRepo, Config: cfg, Clock: interpret.FixedClock(now)})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestIssueStaleInProgressConfiguration(t *testing.T) {
 	t.Run("suppress annotation drops it with a recorded reason", func(t *testing.T) {
 		st := store.OpenNewSchemaForTest(t)
 		putIssue(t, st, "K-1", stale(8*day))
-		if err := st.SetAnnotation(store.KVAnnotation{Repo: testRepo, EntityType: "issue", EntityID: "K-1", Key: store.KeySuppress(KindIssueStaleInProgress), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
+		if err := st.SetAnnotation(context.Background(), store.KVAnnotation{Repo: testRepo, EntityType: "issue", EntityID: "K-1", Key: store.KeySuppress(KindIssueStaleInProgress), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
 		res := evaluateIssueAt(t, st, baseConfig(), fixedNow)

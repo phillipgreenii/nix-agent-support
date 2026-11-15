@@ -1,6 +1,7 @@
 package dependency
 
 import (
+	"context"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -22,14 +23,14 @@ func prID(n int) string { return fmt.Sprintf("acme/api#%d", n) }
 func putPR(t *testing.T, st *store.Store, id, state, branch, base string, merged bool) {
 	t.Helper()
 	facts := fmt.Sprintf(`{"pr_show":{"state":%q,"branch":%q,"base":%q,"merged":%v}}`, state, branch, base, merged)
-	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: id, Facts: facts, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: "pr", EntityID: id, Facts: facts, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
 }
 
 func addDependsOn(t *testing.T, st *store.Store, from, to, actor string) {
 	t.Helper()
-	err := st.AddExternalXref(store.XrefLink{
+	err := st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: "pr", FromID: from, ToType: "pr", ToID: to,
 		Relation: RelationDependsOn, Actor: actor, ActedAt: "2026-10-01T12:00:00Z",
 		FirstSeen: "2026-10-01T12:00:00Z", LastConfirmed: "2026-10-01T12:00:00Z",
@@ -58,7 +59,7 @@ func ids(edges []Edge) []string {
 
 func deps(t *testing.T, r *Resolver, id string) []Edge {
 	t.Helper()
-	e, err := r.DependenciesOf("pr", id)
+	e, err := r.DependenciesOf(context.Background(), "pr", id)
 	if err != nil {
 		t.Fatalf("DependenciesOf(%s): %v", id, err)
 	}
@@ -67,7 +68,7 @@ func deps(t *testing.T, r *Resolver, id string) []Edge {
 
 func dependents(t *testing.T, r *Resolver, id string) []Edge {
 	t.Helper()
-	e, err := r.DependentsOf("pr", id)
+	e, err := r.DependentsOf(context.Background(), "pr", id)
 	if err != nil {
 		t.Fatalf("DependentsOf(%s): %v", id, err)
 	}
@@ -110,7 +111,7 @@ func TestStackSource_ReadTimeAndMerge(t *testing.T) {
 		t.Fatalf("deps with the base PR not stored = %v; want none", ids(got))
 	}
 	putPR(t, st, prID(1), "open", "feat-a", "main", false) // base hydrates later
-	open, err := NewResolver(st, testRepo).OpenDependenciesOf("pr", prID(2))
+	open, err := NewResolver(st, testRepo).OpenDependenciesOf(context.Background(), "pr", prID(2))
 	if err != nil || !reflect.DeepEqual(ids(open), []string{prID(1)}) {
 		t.Fatalf("open deps = %v, %v; want [#1]", ids(open), err)
 	}
@@ -119,7 +120,7 @@ func TestStackSource_ReadTimeAndMerge(t *testing.T) {
 	if got := deps(t, r, prID(2)); len(got) != 0 {
 		t.Errorf("deps after the base merged = %v; want none (stack needs B open)", ids(got))
 	}
-	open, err = r.OpenDependenciesOf("pr", prID(2))
+	open, err = r.OpenDependenciesOf(context.Background(), "pr", prID(2))
 	if err != nil || len(open) != 0 {
 		t.Errorf("open deps after the base merged = %v, %v; want none", ids(open), err)
 	}
@@ -154,7 +155,7 @@ func TestStackSource_NotAnEdge(t *testing.T) {
 		}},
 		{"undecodable facts", func(t *testing.T, st *store.Store) {
 			putPR(t, st, prID(2), "open", "feat-b", "feat-a", false)
-			if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: prID(1), Facts: "not json", AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+			if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: "pr", EntityID: prID(1), Facts: "not json", AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -200,7 +201,7 @@ func TestExternalSource(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("deps of #1 =\n%+v\nwant\n%+v", got, want)
 	}
-	open, err := r.OpenDependenciesOf("pr", prID(1))
+	open, err := r.OpenDependenciesOf(context.Background(), "pr", prID(1))
 	if err != nil || !reflect.DeepEqual(ids(open), []string{prID(2)}) {
 		t.Errorf("open deps = %v, %v; want only the open #2", ids(open), err)
 	}
@@ -219,21 +220,21 @@ func TestExternalSource_IgnoresOtherLinks(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putPR(t, st, prID(1), "open", "one", "main", false)
 	putPR(t, st, prID(2), "open", "two", "main", false)
-	if err := st.AddExternalXref(store.XrefLink{
+	if err := st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: "pr", FromID: prID(1), ToType: "pr", ToID: prID(2),
 		Relation: "references", Actor: "operator", ActedAt: "2026-10-01T12:00:00Z",
 		FirstSeen: "2026-10-01T12:00:00Z", LastConfirmed: "2026-10-01T12:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.AddExternalXref(store.XrefLink{
+	if err := st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: "pr", FromID: prID(1), ToType: "issue", ToID: "ABC-1",
 		Relation: RelationDependsOn, Actor: "operator", ActedAt: "2026-10-01T12:00:00Z",
 		FirstSeen: "2026-10-01T12:00:00Z", LastConfirmed: "2026-10-01T12:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ReplaceDerivedXrefs(testRepo, "pr", prID(1), []store.XrefLink{{
+	if err := st.ReplaceDerivedXrefs(context.Background(), testRepo, "pr", prID(1), []store.XrefLink{{
 		Repo: testRepo, FromType: "pr", FromID: prID(1), ToType: "pr", ToID: prID(2),
 		Relation: RelationDependsOn, Origin: "derived:other", Evidence: "test",
 		FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
@@ -255,7 +256,7 @@ func TestExternalSource_UnstoredDependencyIsNotOpen(t *testing.T) {
 	if len(got) != 1 || got[0].ID != prID(9) || got[0].State != "" || got[0].Open() {
 		t.Fatalf("deps = %+v; want one unknown-state, not-open edge to #9", got)
 	}
-	if open, _ := r.OpenDependenciesOf("pr", prID(1)); len(open) != 0 {
+	if open, _ := r.OpenDependenciesOf(context.Background(), "pr", prID(1)); len(open) != 0 {
 		t.Errorf("open deps = %v; want none", ids(open))
 	}
 }
@@ -294,10 +295,10 @@ func TestNonPREntityHasNoDependencies(t *testing.T) {
 	seedStack(t, st)
 	r := NewResolver(st, testRepo)
 	for _, typ := range []string{"issue", "thread", ""} {
-		if e, err := r.DependenciesOf(typ, prID(2)); err != nil || len(e) != 0 {
+		if e, err := r.DependenciesOf(context.Background(), typ, prID(2)); err != nil || len(e) != 0 {
 			t.Errorf("DependenciesOf(%q) = %v, %v; want none", typ, e, err)
 		}
-		if e, err := r.DependentsOf(typ, prID(1)); err != nil || len(e) != 0 {
+		if e, err := r.DependentsOf(context.Background(), typ, prID(1)); err != nil || len(e) != 0 {
 			t.Errorf("DependentsOf(%q) = %v, %v; want none", typ, e, err)
 		}
 	}
@@ -309,7 +310,7 @@ func TestSharedIssueIsNotADependency(t *testing.T) {
 	putPR(t, st, prID(1), "open", "one", "main", false)
 	putPR(t, st, prID(2), "open", "two", "main", false)
 	for _, id := range []string{prID(1), prID(2)} {
-		if err := st.ReplaceDerivedXrefs(testRepo, "pr", id, []store.XrefLink{{
+		if err := st.ReplaceDerivedXrefs(context.Background(), testRepo, "pr", id, []store.XrefLink{{
 			Repo: testRepo, FromType: "pr", FromID: id, ToType: "issue", ToID: "ABC-1",
 			Relation: "jira", Origin: "derived:jira-key", Evidence: "test",
 			FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
@@ -329,15 +330,17 @@ func TestSharedIssueIsNotADependency(t *testing.T) {
 // An unreadable store is an error, never "no dependencies".
 type failingReader struct{ Reader }
 
-func (failingReader) ListEntities() ([]store.Entity, error) { return nil, fmt.Errorf("boom") }
+func (failingReader) ListEntities(_ context.Context) ([]store.Entity, error) {
+	return nil, fmt.Errorf("boom")
+}
 
 func TestStoreErrorIsAnError(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	r := NewResolver(failingReader{st}, testRepo)
-	if _, err := r.DependenciesOf("pr", prID(1)); err == nil {
+	if _, err := r.DependenciesOf(context.Background(), "pr", prID(1)); err == nil {
 		t.Fatal("DependenciesOf on an unreadable store returned no error")
 	}
-	if _, err := r.DependentsOf("pr", prID(1)); err == nil {
+	if _, err := r.DependentsOf(context.Background(), "pr", prID(1)); err == nil {
 		t.Fatal("DependentsOf on an unreadable store returned no error")
 	}
 }

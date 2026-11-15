@@ -49,7 +49,7 @@ func newConfirmHydrator(st *store.Store) *confirmHydrator {
 	return &confirmHydrator{st: st, shows: map[string]showOutcome{}, changes: map[string]gather.ChangeKind{}, listFPs: map[string]*string{}}
 }
 
-func (h *confirmHydrator) RunEntityChange(_ context.Context, entityType, id string, change gather.ChangeKind, opts pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
+func (h *confirmHydrator) RunEntityChange(ctx context.Context, entityType, id string, change gather.ChangeKind, opts pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
 	h.calls = append(h.calls, id)
 	h.changes[id] = change
 	h.listFPs[id] = opts.ListFP
@@ -62,7 +62,7 @@ func (h *confirmHydrator) RunEntityChange(_ context.Context, entityType, id stri
 	case out.degraded != "":
 		return pipeline.EntityChangeResult{Degraded: out.degraded}, nil
 	}
-	row, found, err := h.st.GetEntity("o/r", entityType, id)
+	row, found, err := h.st.GetEntity(ctx, "o/r", entityType, id)
 	if err != nil {
 		return pipeline.EntityChangeResult{}, err
 	}
@@ -76,7 +76,7 @@ func (h *confirmHydrator) RunEntityChange(_ context.Context, entityType, id stri
 	for _, r := range classify.Classify(old, classify.Snapshot{Type: entityType, ID: id, Exists: true, Active: true, Payload: []byte(out.facts)}) {
 		kinds = append(kinds, string(r.Kind))
 	}
-	v, err := h.st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: out.facts, AsOf: "x"},
+	v, err := h.st.WriteEntityStateWithLogFP(ctx, store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: out.facts, AsOf: "x"},
 		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z")
 	return pipeline.EntityChangeResult{Written: err == nil, Version: v, Kinds: kinds}, err
 }
@@ -93,7 +93,7 @@ func newPREngine(t *testing.T, queries ...string) (*Engine, *store.Store, *confi
 	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	cfg.Watch.Issue.Queries = queries
 	for _, q := range queries {
-		if err := st.SetMeta(MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
+		if err := st.SetMeta(context.Background(), MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,7 +111,7 @@ func seedWatchedPR(t *testing.T, st *store.Store, ids ...string) {
 	set := map[string]bool{}
 	for _, id := range ids {
 		fp := "F1"
-		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: prOpenFacts, AsOf: "x"},
+		if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: prOpenFacts, AsOf: "x"},
 			0, "2026-10-01T11:00:00Z", true, &fp, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
@@ -119,12 +119,12 @@ func seedWatchedPR(t *testing.T, st *store.Store, ids ...string) {
 		// left its queries is an orphan, not a removal candidate, and a NULL
 		// one listed by a baselined query is a late watch.
 		watched := false
-		if err := st.SetEntityColumns("o/r", "issue", id, nil, &watched); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &watched); err != nil {
 			t.Fatal(err)
 		}
 		set[id] = true
 	}
-	if err := saveWatchSet(st, "issue", "open", set); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", set); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -140,7 +140,7 @@ func runPRTick(t *testing.T, e *Engine) (Envelope, Outcome, error) {
 // first, skipping the seeded reconcile row.
 func kindsLogged(t *testing.T, st *store.Store, entityType, id string) []string {
 	t.Helper()
-	rows, err := st.ListChangesAfter(entityType, 0, 0)
+	rows, err := st.ListChangesAfter(context.Background(), entityType, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func kindsLogged(t *testing.T, st *store.Store, entityType, id string) []string 
 
 func prInactive(t *testing.T, st *store.Store, id string) bool {
 	t.Helper()
-	row, found, err := st.GetEntity("o/r", "issue", id)
+	row, found, err := st.GetEntity(context.Background(), "o/r", "issue", id)
 	if err != nil || !found {
 		t.Fatalf("pr %s: found=%v err=%v", id, found, err)
 	}
@@ -197,7 +197,7 @@ func TestRemovalConfirmationClassifiesWhatTheReadShows(t *testing.T) {
 			if !prInactive(t, st, "pr-1") {
 				t.Error("the entity must be deactivated")
 			}
-			if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
+			if got := loadWatchSet(context.Background(), st, "issue", "open"); len(got) != 0 {
 				t.Errorf("persisted = %v, want the id dropped", got)
 			}
 			if !reflect.DeepEqual(h.calls, []string{"pr-1"}) {
@@ -220,11 +220,11 @@ func TestRemovalConfirmationClassifiesAClosedBead(t *testing.T) {
 	ch := newConfirmHydrator(st)
 	e.Hydrator = ch
 	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true)
-	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "bd-1", Facts: `{"issue_show":{"state":"open"}}`, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "bd-1", Facts: `{"issue_show":{"state":"open"}}`, AsOf: "x"},
 		1, "2026-10-01T11:00:00Z", true, nil, nil, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	ch.shows["bd-1"] = showOutcome{facts: `{"issue_show":{"state":"closed"}}`}
@@ -267,7 +267,7 @@ func TestRemovalConfirmationFailedReadLeavesEverythingAndRetriesNextTick(t *test
 			if prInactive(t, st, "pr-1") {
 				t.Fatal("a failed read must leave the entity active")
 			}
-			if got := loadWatchSet(st, "issue", "open"); !got["pr-1"] || len(got) != 1 {
+			if got := loadWatchSet(context.Background(), st, "issue", "open"); !got["pr-1"] || len(got) != 1 {
 				t.Fatalf("persisted = %v, want pr-1 kept so it is found again", got)
 			}
 			if got := kindsLogged(t, st, "issue", "pr-1"); len(got) != 0 {
@@ -284,7 +284,7 @@ func TestRemovalConfirmationFailedReadLeavesEverythingAndRetriesNextTick(t *test
 			if got := kindsLogged(t, st, "issue", "pr-1"); !reflect.DeepEqual(got, []string{"closed", "status_changed"}) || !prInactive(t, st, "pr-1") {
 				t.Errorf("after the retry logged %v inactive=%v", got, prInactive(t, st, "pr-1"))
 			}
-			if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
+			if got := loadWatchSet(context.Background(), st, "issue", "open"); len(got) != 0 {
 				t.Errorf("persisted = %v after the removal succeeded", got)
 			}
 		})
@@ -322,10 +322,10 @@ func TestRemovalConfirmationNeverHappensForADegradedOrTruncatedSource(t *testing
 func TestRemovalConfirmationSkipsAnIdAnotherQueryStillHolds(t *testing.T) {
 	e, st, h := newPREngine(t, "a", "b")
 	seedWatchedPR(t, st, "pr-1")
-	if err := saveWatchSet(st, "issue", "a", map[string]bool{"pr-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "a", map[string]bool{"pr-1": true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "issue", "b", map[string]bool{"pr-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "b", map[string]bool{"pr-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = queryLister{"a": {res: listing()}, "b": {res: listing("pr-1=F1")}}
@@ -353,7 +353,7 @@ func TestRemovalConfirmationReadsEachCandidateOnceInSortedOrder(t *testing.T) {
 	if !reflect.DeepEqual(h.calls, []string{"pr-1", "pr-2", "pr-3"}) {
 		t.Errorf("show calls = %v", h.calls)
 	}
-	if got := loadWatchSet(st, "issue", "open"); !got["pr-2"] || len(got) != 1 {
+	if got := loadWatchSet(context.Background(), st, "issue", "open"); !got["pr-2"] || len(got) != 1 {
 		t.Errorf("persisted = %v, want only the failed pr-2 kept", got)
 	}
 	if !prInactive(t, st, "pr-1") || prInactive(t, st, "pr-2") || !prInactive(t, st, "pr-3") {
@@ -378,7 +378,7 @@ func TestRemovalConfirmationStopsAfterADegradedStreak(t *testing.T) {
 	if len(h.calls) != backendDownStreak {
 		t.Errorf("show calls = %v, want %d", h.calls, backendDownStreak)
 	}
-	if got := loadWatchSet(st, "issue", "open"); len(got) != len(ids) {
+	if got := loadWatchSet(context.Background(), st, "issue", "open"); len(got) != len(ids) {
 		t.Errorf("persisted = %v, want every id kept", got)
 	}
 }
@@ -388,11 +388,11 @@ func TestRemovalConfirmationStopsAfterADegradedStreak(t *testing.T) {
 func TestRemovalConfirmationSkipsAbsentAndInactiveRows(t *testing.T) {
 	e, st, h := newPREngine(t, "open")
 	seedWatchedPR(t, st, "pr-1")
-	if _, err := st.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pr-1", Facts: prOpenFacts, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: "pr-1", Facts: prOpenFacts, AsOf: "x"},
 		1, "2026-10-01T11:00:00Z", false, nil, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"pr-1": true, "pr-ghost": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"pr-1": true, "pr-ghost": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing()}
@@ -402,10 +402,10 @@ func TestRemovalConfirmationSkipsAbsentAndInactiveRows(t *testing.T) {
 	if len(h.calls) != 0 {
 		t.Errorf("show calls = %v, want none", h.calls)
 	}
-	if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
+	if got := loadWatchSet(context.Background(), st, "issue", "open"); len(got) != 0 {
 		t.Errorf("persisted = %v", got)
 	}
-	if _, found, _ := st.GetEntity("o/r", "issue", "pr-ghost"); found {
+	if _, found, _ := st.GetEntity(context.Background(), "o/r", "issue", "pr-ghost"); found {
 		t.Error("a ghost id must not be created by the confirmation")
 	}
 }
@@ -433,10 +433,10 @@ func TestRemovalConfirmationSkipsAWatchedIssueThatLeftEveryQuery(t *testing.T) {
 	e.Hydrator = ch
 	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "bd-1", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.applyMembership("issue", []queryRun{{query: "open", res: listing()}}); len(got) != 0 {
@@ -454,7 +454,7 @@ func TestRemovalConfirmationSkipsAWatchedIssueThatLeftEveryQuery(t *testing.T) {
 	if w, _ := watchedOf(t, st, "bd-1"); !w {
 		t.Error("the watched mark must stay")
 	}
-	if got := loadWatchSet(st, "issue", "open"); len(got) != 0 {
+	if got := loadWatchSet(context.Background(), st, "issue", "open"); len(got) != 0 {
 		t.Errorf("persisted = %v, want the id dropped (that is how it becomes an orphan)", got)
 	}
 }

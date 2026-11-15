@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -185,7 +186,7 @@ func TestRunEntityChange_IssueNormalisedComparison(t *testing.T) {
 	var gerr error
 	p := ecPipeline(t, &res, &gerr)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	first, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	first, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 
 	newShow := baseShow()
 	// updated_at stays as it was: an updated_at-only advance is the classifier's
@@ -201,7 +202,7 @@ func TestRunEntityChange_IssueNormalisedComparison(t *testing.T) {
 	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != 1 {
 		t.Fatalf("rows = %+v, want only the first observation", rows)
 	}
-	second, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	second, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if second.ContentHash != first.ContentHash {
 		t.Errorf("content hash moved on a volatile-only change: %s -> %s", first.ContentHash, second.ContentHash)
 	}

@@ -2,6 +2,7 @@ package dependency
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -45,11 +46,11 @@ type IssueDependents struct {
 // terminal. An issue whose facts do not decode contributes no edge. It
 // returns the store's old-schema refusal on an unmigrated store, where
 // activity is not recorded.
-func NewIssueDependents(r Reader, isTerminal func(store.Entity) bool) (*IssueDependents, error) {
-	if err := r.RequireNewSchema(); err != nil {
+func NewIssueDependents(ctx context.Context, r Reader, isTerminal func(store.Entity) bool) (*IssueDependents, error) {
+	if err := r.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := r.ListEntities()
+	rows, err := r.ListEntities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("dependency: read entities: %w", err)
 	}

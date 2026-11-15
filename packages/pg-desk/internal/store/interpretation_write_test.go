@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -53,7 +54,7 @@ func wStore(t *testing.T, seed bool) *Store {
 
 func wGet(t *testing.T, s *Store, id string) Interpretation {
 	t.Helper()
-	got, found, err := s.GetInterpretation(wRepo, "pr", id)
+	got, found, err := s.GetInterpretation(context.Background(), wRepo, "pr", id)
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation(%s) found=%v err=%v", id, found, err)
 	}
@@ -62,7 +63,7 @@ func wGet(t *testing.T, s *Store, id string) Interpretation {
 
 func wChanges(t *testing.T, s *Store, entityType string) []ChangeRecord {
 	t.Helper()
-	rs, err := s.ListChangesAfter(entityType, 0, 0)
+	rs, err := s.ListChangesAfter(context.Background(), entityType, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func wChanges(t *testing.T, s *Store, entityType string) []ChangeRecord {
 
 func wVersion(t *testing.T, s *Store, id string) int64 {
 	t.Helper()
-	e, found, err := s.GetEntity(wRepo, "pr", id)
+	e, found, err := s.GetEntity(context.Background(), wRepo, "pr", id)
 	if err != nil || !found {
 		t.Fatalf("GetEntity found=%v err=%v", found, err)
 	}
@@ -81,7 +82,7 @@ func wVersion(t *testing.T, s *Store, id string) int64 {
 func TestWriteInterpretation_WritesWithTheHandleStampAndRecordsAChangedPair(t *testing.T) {
 	s := wStore(t, true)
 	vBefore := wVersion(t, s, "1")
-	res, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{
+	res, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{
 		ExpectedHash: "h1", RecordChange: true, RequireStamp: true, At: "2026-09-16T01:00:00Z", Origin: "pg-desk",
 	})
 	if err != nil {
@@ -121,7 +122,7 @@ func TestWriteInterpretation_ChangedPairIsWaitingOnOrPanelAndNothingElse(t *test
 			s := wStore(t, true)
 			row := wRow("1", tc.waitingOn, tc.panel)
 			row.Category = tc.category
-			res, err := s.WriteInterpretation(row, InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
+			res, err := s.WriteInterpretation(context.Background(), row, InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -141,7 +142,7 @@ func TestWriteInterpretation_ChangedPairIsWaitingOnOrPanelAndNothingElse(t *test
 func TestWriteInterpretation_RecordIsOnlyAskedForAndOnlyForAPR(t *testing.T) {
 	t.Run("not asked", func(t *testing.T) {
 		s := wStore(t, true)
-		res, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1"})
+		res, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1"})
 		if err != nil || !res.Written || !res.DecisionChanged || res.Recorded {
 			t.Fatalf("result = %+v err=%v, want written, changed and not recorded", res, err)
 		}
@@ -160,7 +161,7 @@ func TestWriteInterpretation_RecordIsOnlyAskedForAndOnlyForAPR(t *testing.T) {
 			s.SeedInterpretationForTest(t, old)
 			row := wRow("x", "author", "theirs")
 			row.EntityType = typ
-			res, err := s.WriteInterpretation(row, InterpretationWriteOptions{ExpectedHash: "hx", RecordChange: true})
+			res, err := s.WriteInterpretation(context.Background(), row, InterpretationWriteOptions{ExpectedHash: "hx", RecordChange: true})
 			if err != nil || !res.Written || !res.DecisionChanged || res.Recorded {
 				t.Fatalf("result = %+v err=%v, want written, changed and not recorded", res, err)
 			}
@@ -173,7 +174,7 @@ func TestWriteInterpretation_RecordIsOnlyAskedForAndOnlyForAPR(t *testing.T) {
 
 func TestWriteInterpretation_FirstRowHasNoPriorDecisionAndRecordsNothing(t *testing.T) {
 	s := wStore(t, false)
-	res, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
+	res, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
 	if err != nil || !res.Written || res.DecisionChanged || res.Recorded {
 		t.Fatalf("result = %+v err=%v, want written with no decision change", res, err)
 	}
@@ -187,7 +188,7 @@ func TestWriteInterpretation_SkipsOnDifferentFactsAndWritesOnTheSameFactsAtAHigh
 	t.Run("different facts: skipped, row and log untouched", func(t *testing.T) {
 		s := wStore(t, true)
 		before := dumpDB(t, s)
-		res, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "stale-hash", RecordChange: true})
+		res, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "stale-hash", RecordChange: true})
 		if err != nil || res.Written || !res.Skipped {
 			t.Fatalf("result = %+v err=%v, want skipped", res, err)
 		}
@@ -200,8 +201,8 @@ func TestWriteInterpretation_SkipsOnDifferentFactsAndWritesOnTheSameFactsAtAHigh
 		// A version bump that keeps the facts (the deactivation, reconcile and
 		// removed-row writers): hash stays h1.
 		for i := 0; i < 3; i++ {
-			e, _, _ := s.GetEntity(wRepo, "pr", "1")
-			if _, err := s.WriteEntityStateWithLog(Entity{
+			e, _, _ := s.GetEntity(context.Background(), wRepo, "pr", "1")
+			if _, err := s.WriteEntityStateWithLog(context.Background(), Entity{
 				Repo: wRepo, EntityType: "pr", EntityID: "1", Facts: e.Facts, AsOf: e.AsOf, ContentHash: "h1",
 			}, e.Version, "2026-09-16T02:00:00Z", false, nil, "pg-desk", "2026-09-16T02:00:00Z"); err != nil {
 				t.Fatal(err)
@@ -210,7 +211,7 @@ func TestWriteInterpretation_SkipsOnDifferentFactsAndWritesOnTheSameFactsAtAHigh
 		if v := wVersion(t, s, "1"); v < 3 {
 			t.Fatalf("precondition: version did not move (%d)", v)
 		}
-		res, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1"})
+		res, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1"})
 		if err != nil || !res.Written || res.Skipped {
 			t.Fatalf("result = %+v err=%v, want written: a version bump alone must not skip", res, err)
 		}
@@ -223,7 +224,7 @@ func TestWriteInterpretation_SkipsOnDifferentFactsAndWritesOnTheSameFactsAtAHigh
 func TestWriteInterpretation_MissingEntityIsErrNoEntityAndWritesNothing(t *testing.T) {
 	s := wStore(t, true)
 	before := dumpDB(t, s)
-	_, err := s.WriteInterpretation(wRow("gone", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"})
+	_, err := s.WriteInterpretation(context.Background(), wRow("gone", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"})
 	if !errors.Is(err, ErrNoEntity) {
 		t.Fatalf("err = %v, want ErrNoEntity", err)
 	}
@@ -237,7 +238,7 @@ func TestWriteInterpretation_StampRules(t *testing.T) {
 		s := wStore(t, true)
 		s.SetInterpStamp("")
 		before := dumpDB(t, s)
-		_, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RequireStamp: true})
+		_, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RequireStamp: true})
 		if !errors.Is(err, ErrStampRequired) {
 			t.Fatalf("err = %v, want ErrStampRequired", err)
 		}
@@ -248,7 +249,7 @@ func TestWriteInterpretation_StampRules(t *testing.T) {
 	t.Run("not required and absent writes NULL", func(t *testing.T) {
 		s := wStore(t, true)
 		s.SetInterpStamp("")
-		if _, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1"}); err != nil {
+		if _, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1"}); err != nil {
 			t.Fatal(err)
 		}
 		if got := wGet(t, s, "1"); got.InterpVersion != "" {
@@ -258,7 +259,7 @@ func TestWriteInterpretation_StampRules(t *testing.T) {
 	t.Run("column absent on the table", func(t *testing.T) {
 		s := wStore(t, false)
 		dropStampColumn(t, s)
-		if _, err := s.WriteInterpretation(wRow("1", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"}); err != nil {
+		if _, err := s.WriteInterpretation(context.Background(), wRow("1", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"}); err != nil {
 			t.Fatalf("write without the stamp column: %v", err)
 		}
 	})
@@ -269,7 +270,7 @@ func TestWriteInterpretation_SchemaOneIsRefusedBeforeBeginAndNothingIsWritten(t 
 	s.SetInterpStamp(wStamp)
 	begun := false
 	s.SetInterpretationWriteHook(func(InterpretationWriteStep) error { begun = true; return nil })
-	_, err := s.WriteInterpretation(wRow("1", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"})
+	_, err := s.WriteInterpretation(context.Background(), wRow("1", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"})
 	if !errors.Is(err, ErrOldSchema) || !strings.Contains(err.Error(), "migrate --cutover") {
 		t.Fatalf("err = %v, want the cutover refusal", err)
 	}
@@ -278,10 +279,12 @@ func TestWriteInterpretation_SchemaOneIsRefusedBeforeBeginAndNothingIsWritten(t 
 	}
 	for name, call := range map[string]func() error{
 		"StampInterpretation": func() error {
-			_, err := s.StampInterpretation(InterpretationKey{wRepo, "pr", "1"}, "h1")
+			_, err := s.StampInterpretation(context.Background(), InterpretationKey{wRepo, "pr", "1"}, "h1")
 			return err
 		},
-		"MarkInterpretationFailed": func() error { return s.MarkInterpretationFailed(InterpretationKey{wRepo, "pr", "1"}, wStamp) },
+		"MarkInterpretationFailed": func() error {
+			return s.MarkInterpretationFailed(context.Background(), InterpretationKey{wRepo, "pr", "1"}, wStamp)
+		},
 	} {
 		if err := call(); !errors.Is(err, ErrOldSchema) {
 			t.Errorf("%s on schema 1: %v, want ErrOldSchema", name, err)
@@ -299,7 +302,7 @@ func TestWriteInterpretation_FinishesOnTheOneConnectionHandle(t *testing.T) {
 	s := wStore(t, true)
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
+		_, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
 		done <- err
 	}()
 	select {
@@ -327,7 +330,7 @@ func TestWriteInterpretation_FaultAtAnyStepRollsBackEverything(t *testing.T) {
 				}
 				return nil
 			})
-			_, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
+			_, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true})
 			if !errors.Is(err, injected) {
 				t.Fatalf("err = %v, want the injected fault", err)
 			}
@@ -335,7 +338,7 @@ func TestWriteInterpretation_FaultAtAnyStepRollsBackEverything(t *testing.T) {
 				t.Fatal("a fault left the store half-written")
 			}
 			s.SetInterpretationWriteHook(nil)
-			if res, err := s.WriteInterpretation(wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true}); err != nil || !res.Written {
+			if res, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true}); err != nil || !res.Written {
 				t.Fatalf("retry after the fault: %+v %v", res, err)
 			}
 		})
@@ -367,7 +370,7 @@ func TestWriteInterpretation_SecondHandleNeverSeesBusyAndAnOlderHashIsSkipped(t 
 				h.SetInterpStamp(wStamp)
 			}
 			for n := 0; n < 20; n++ {
-				if _, err := h.WriteInterpretation(wRow("1", "author", fmt.Sprintf("p%d-%d", i, n)), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true}); err != nil {
+				if _, err := h.WriteInterpretation(context.Background(), wRow("1", "author", fmt.Sprintf("p%d-%d", i, n)), InterpretationWriteOptions{ExpectedHash: "h1", RecordChange: true}); err != nil {
 					errs <- err
 					return
 				}
@@ -381,16 +384,16 @@ func TestWriteInterpretation_SecondHandleNeverSeesBusyAndAnOlderHashIsSkipped(t 
 	}
 	// Different facts committed by the second handle: the first handle's write
 	// with the old hash is now skipped and the newer row stays.
-	e, _, _ := other.GetEntity(wRepo, "pr", "1")
-	if _, err := other.WriteEntityStateWithLog(Entity{
+	e, _, _ := other.GetEntity(context.Background(), wRepo, "pr", "1")
+	if _, err := other.WriteEntityStateWithLog(context.Background(), Entity{
 		Repo: wRepo, EntityType: "pr", EntityID: "1", Facts: `{"n":2}`, AsOf: e.AsOf, ContentHash: "h2",
 	}, e.Version, "2026-09-16T03:00:00Z", true, nil, "pg-desk", "2026-09-16T03:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.WriteInterpretation(wRow("1", "newer", "newer-panel"), InterpretationWriteOptions{ExpectedHash: "h2"}); err != nil {
+	if _, err := other.WriteInterpretation(context.Background(), wRow("1", "newer", "newer-panel"), InterpretationWriteOptions{ExpectedHash: "h2"}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.WriteInterpretation(wRow("1", "older", "older-panel"), InterpretationWriteOptions{ExpectedHash: "h1"})
+	res, err := s.WriteInterpretation(context.Background(), wRow("1", "older", "older-panel"), InterpretationWriteOptions{ExpectedHash: "h1"})
 	if err != nil || !res.Skipped {
 		t.Fatalf("late write: %+v %v, want skipped", res, err)
 	}
@@ -402,7 +405,7 @@ func TestWriteInterpretation_SecondHandleNeverSeesBusyAndAnOlderHashIsSkipped(t 
 func TestStampInterpretation_UpdatesOnlyTheStamp(t *testing.T) {
 	s := wStore(t, true)
 	before := wGet(t, s, "1")
-	ok, err := s.StampInterpretation(InterpretationKey{wRepo, "pr", "1"}, "h1")
+	ok, err := s.StampInterpretation(context.Background(), InterpretationKey{wRepo, "pr", "1"}, "h1")
 	if err != nil || !ok {
 		t.Fatalf("stamped=%v err=%v", ok, err)
 	}
@@ -419,22 +422,22 @@ func TestStampInterpretation_UpdatesOnlyTheStamp(t *testing.T) {
 
 func TestStampInterpretation_SkipsDifferentFactsAndRefusesBadCalls(t *testing.T) {
 	s := wStore(t, true)
-	ok, err := s.StampInterpretation(InterpretationKey{wRepo, "pr", "1"}, "other-hash")
+	ok, err := s.StampInterpretation(context.Background(), InterpretationKey{wRepo, "pr", "1"}, "other-hash")
 	if err != nil || ok {
 		t.Fatalf("stamped=%v err=%v, want a clean skip", ok, err)
 	}
 	if got := wGet(t, s, "1"); got.InterpVersion != "old-stamp" {
 		t.Fatalf("stamp = %q, want the skipped row untouched", got.InterpVersion)
 	}
-	if _, err := s.StampInterpretation(InterpretationKey{wRepo, "pr", "gone"}, "h1"); !errors.Is(err, ErrNoEntity) {
+	if _, err := s.StampInterpretation(context.Background(), InterpretationKey{wRepo, "pr", "gone"}, "h1"); !errors.Is(err, ErrNoEntity) {
 		t.Fatalf("missing entity: %v, want ErrNoEntity", err)
 	}
 	s.SeedEntityForTest(t, wEntity("2", "h2")) // entity without an interpretation row
-	if _, err := s.StampInterpretation(InterpretationKey{wRepo, "pr", "2"}, "h2"); !errors.Is(err, ErrNoInterpretation) {
+	if _, err := s.StampInterpretation(context.Background(), InterpretationKey{wRepo, "pr", "2"}, "h2"); !errors.Is(err, ErrNoInterpretation) {
 		t.Fatalf("missing row: %v, want ErrNoInterpretation", err)
 	}
 	s.SetInterpStamp("")
-	if _, err := s.StampInterpretation(InterpretationKey{wRepo, "pr", "1"}, "h1"); !errors.Is(err, ErrStampRequired) {
+	if _, err := s.StampInterpretation(context.Background(), InterpretationKey{wRepo, "pr", "1"}, "h1"); !errors.Is(err, ErrStampRequired) {
 		t.Fatalf("no stamp: %v, want ErrStampRequired", err)
 	}
 }
@@ -451,7 +454,7 @@ func TestStampInterpretation_FaultRollsBack(t *testing.T) {
 				}
 				return nil
 			})
-			if _, err := s.StampInterpretation(InterpretationKey{wRepo, "pr", "1"}, "h1"); !errors.Is(err, injected) {
+			if _, err := s.StampInterpretation(context.Background(), InterpretationKey{wRepo, "pr", "1"}, "h1"); !errors.Is(err, injected) {
 				t.Fatalf("err = %v", err)
 			}
 			if dumpDB(t, s) != before {
@@ -467,7 +470,7 @@ func TestMarkInterpretationFailed_NeedsNoEntityKeepsContentAndHidesTheRowFromThe
 	s := wStore(t, true)
 	execStamp(t, s, `DELETE FROM entity WHERE entity_id = '1'`)
 	before := wGet(t, s, "1")
-	if err := s.MarkInterpretationFailed(InterpretationKey{wRepo, "pr", "1"}, wStamp); err != nil {
+	if err := s.MarkInterpretationFailed(context.Background(), InterpretationKey{wRepo, "pr", "1"}, wStamp); err != nil {
 		t.Fatal(err)
 	}
 	after := wGet(t, s, "1")
@@ -476,23 +479,23 @@ func TestMarkInterpretationFailed_NeedsNoEntityKeepsContentAndHidesTheRowFromThe
 	if after != want {
 		t.Fatalf("row = %+v, want only the failed marker changed from %+v", after, before)
 	}
-	keys, known, err := s.InterpretationsBehind(wRepo, 0)
+	keys, known, err := s.InterpretationsBehind(context.Background(), wRepo, 0)
 	if err != nil || !known || len(keys) != 0 {
 		t.Fatalf("behind = %v known=%v err=%v, want the failed row skipped", keys, known, err)
 	}
 	// A new stamp makes it eligible again.
 	s.SetInterpStamp("v2/def")
-	if keys, _, _ := s.InterpretationsBehind(wRepo, 0); len(keys) != 1 {
+	if keys, _, _ := s.InterpretationsBehind(context.Background(), wRepo, 0); len(keys) != 1 {
 		t.Fatalf("behind under a new stamp = %v, want the row eligible again", keys)
 	}
 }
 
 func TestMarkInterpretationFailed_RefusesBadCallsAndRollsBackOnFault(t *testing.T) {
 	s := wStore(t, true)
-	if err := s.MarkInterpretationFailed(InterpretationKey{wRepo, "pr", "nope"}, wStamp); !errors.Is(err, ErrNoInterpretation) {
+	if err := s.MarkInterpretationFailed(context.Background(), InterpretationKey{wRepo, "pr", "nope"}, wStamp); !errors.Is(err, ErrNoInterpretation) {
 		t.Fatalf("missing row: %v, want ErrNoInterpretation", err)
 	}
-	if err := s.MarkInterpretationFailed(InterpretationKey{wRepo, "pr", "1"}, ""); !errors.Is(err, ErrStampRequired) {
+	if err := s.MarkInterpretationFailed(context.Background(), InterpretationKey{wRepo, "pr", "1"}, ""); !errors.Is(err, ErrStampRequired) {
 		t.Fatalf("empty stamp: %v, want ErrStampRequired", err)
 	}
 	for _, step := range []InterpretationWriteStep{StepBegin, StepUpsert, StepCommit} {
@@ -504,7 +507,7 @@ func TestMarkInterpretationFailed_RefusesBadCallsAndRollsBackOnFault(t *testing.
 			}
 			return nil
 		})
-		if err := s.MarkInterpretationFailed(InterpretationKey{wRepo, "pr", "1"}, wStamp); !errors.Is(err, injected) {
+		if err := s.MarkInterpretationFailed(context.Background(), InterpretationKey{wRepo, "pr", "1"}, wStamp); !errors.Is(err, injected) {
 			t.Fatalf("%s: err = %v", step, err)
 		}
 		if dumpDB(t, s) != before {
@@ -544,31 +547,31 @@ func TestInterpretationWrites_StatementFailuresRollBackAndAreReturned(t *testing
 		call func(s *Store) error
 	}{
 		{"write: lock", abort("UPDATE", "entity"), func(s *Store) error {
-			_, err := s.WriteInterpretation(wRow("1", "author", "theirs"), opts)
+			_, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), opts)
 			return err
 		}},
 		{"write: upsert", abort("INSERT", "interpretation"), func(s *Store) error {
-			_, err := s.WriteInterpretation(wRow("1", "author", "theirs"), opts)
+			_, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), opts)
 			return err
 		}},
 		{"write: append", abort("INSERT", "change_log"), func(s *Store) error {
-			_, err := s.WriteInterpretation(wRow("1", "author", "theirs"), opts)
+			_, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), opts)
 			return err
 		}},
 		{"write: read old row", `ALTER TABLE interpretation RENAME COLUMN approvals TO approvals_x`, func(s *Store) error {
-			_, err := s.WriteInterpretation(wRow("1", "author", "theirs"), opts)
+			_, err := s.WriteInterpretation(context.Background(), wRow("1", "author", "theirs"), opts)
 			return err
 		}},
 		{"stamp: lock", abort("UPDATE", "entity"), func(s *Store) error {
-			_, err := s.StampInterpretation(key, "h1")
+			_, err := s.StampInterpretation(context.Background(), key, "h1")
 			return err
 		}},
 		{"stamp: update", abort("UPDATE", "interpretation"), func(s *Store) error {
-			_, err := s.StampInterpretation(key, "h1")
+			_, err := s.StampInterpretation(context.Background(), key, "h1")
 			return err
 		}},
 		{"mark: update", abort("UPDATE", "interpretation"), func(s *Store) error {
-			return s.MarkInterpretationFailed(key, wStamp)
+			return s.MarkInterpretationFailed(context.Background(), key, wStamp)
 		}},
 	}
 	for _, tc := range cases {
@@ -589,7 +592,7 @@ func TestInterpretationWrites_StatementFailuresRollBackAndAreReturned(t *testing
 func TestWriteInterpretation_ColumnProbeFailureIsReturned(t *testing.T) {
 	s := wStore(t, true)
 	s.faultTableColumns = func(string) error { return errors.New("injected probe failure") }
-	if _, err := s.WriteInterpretation(wRow("1", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"}); err == nil {
+	if _, err := s.WriteInterpretation(context.Background(), wRow("1", "me", "mine"), InterpretationWriteOptions{ExpectedHash: "h1"}); err == nil {
 		t.Fatal("err = nil, want the probe failure")
 	}
 }

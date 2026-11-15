@@ -29,14 +29,14 @@ func linksFixture(t *testing.T, cutover bool) (string, *config.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertEntityForTest(store.Entity{
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "acme/api", EntityType: "pr", EntityID: "acme/api#123", AsOf: "2026-10-01T10:00:00Z",
 		Facts: `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123"}}`,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if cutover {
-		if err := st.ReplaceDerivedXrefs("acme/api", "pr", "acme/api#123", []store.XrefLink{{
+		if err := st.ReplaceDerivedXrefs(context.Background(), "acme/api", "pr", "acme/api#123", []store.XrefLink{{
 			Repo: "acme/api", FromType: "pr", FromID: "acme/api#123", ToType: "issue", ToID: "ABC-42",
 			Relation: "jira", Origin: "derived:jira-key", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
 		}}); err != nil {
@@ -230,7 +230,7 @@ func TestLinksVerbBuildLinksHonorConfigCheckInterpreters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertEntityForTest(store.Entity{
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "acme/api", EntityType: "pr", EntityID: "acme/api#123", AsOf: "2026-10-01T10:00:00Z",
 		Facts: `{"pr_show":{"url":"https://scm.example.invalid/acme/api/pull/123","head_sha":"h"},` +
 			`"ci":{"runs":[` +

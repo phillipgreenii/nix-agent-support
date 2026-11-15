@@ -34,7 +34,7 @@ func TestFeedFailureClassDecidesRetryByTypeNotText(t *testing.T) {
 			if r := frIngest(t, p, frRow(1, "i-1", "title_changed")); !r.Failed {
 				t.Fatalf("result = %+v", r)
 			}
-			fails, _ := p.store.ListIngestFailures(frInstance)
+			fails, _ := p.store.ListIngestFailures(context.Background(), frInstance)
 			if len(fails) != 1 || fails[0].FailureClass != c.wantClass || fails[0].Flagged() != c.flagged {
 				t.Fatalf("entry = %+v, want class %q flagged %v", fails, c.wantClass, c.flagged)
 			}
@@ -50,7 +50,7 @@ func TestFeedFailureClassDecidesRetryByTypeNotText(t *testing.T) {
 			if g.calls != wantCalls || retried != wantRetried || still != wantStill {
 				t.Fatalf("retry: calls %d retried %d still %d, want %d %d %d", g.calls, retried, still, wantCalls, wantRetried, wantStill)
 			}
-			if n, _ := p.store.CountIngestFailures(frInstance); n != 1 {
+			if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 1 {
 				t.Fatalf("entry dropped: %d", n)
 			}
 		})
@@ -61,7 +61,7 @@ func TestFeedNotFoundWithoutRemovedIsFlaggedAndNotRetried(t *testing.T) {
 	p, g := frPipeline(t)
 	g.result = gather.GatherResult{RemovedState: "not_found"}
 	frIngest(t, p, frRow(1, "i-1", "title_changed"))
-	fails, _ := p.store.ListIngestFailures(frInstance)
+	fails, _ := p.store.ListIngestFailures(context.Background(), frInstance)
 	if len(fails) != 1 || !fails[0].Flagged() || fails[0].FailureClass != "not_found" {
 		t.Fatalf("entry = %+v", fails)
 	}
@@ -77,14 +77,14 @@ func TestFeedLaterSuccessForTheEntityClearsItsFlaggedEntry(t *testing.T) {
 	g.err = gather.NewWireError("not_found", "gone")
 	frIngest(t, p, frRow(1, "i-1", "title_changed"))
 	frIngest(t, p, frRow(2, "i-2", "title_changed")) // another entity, also flagged
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 2 {
+	if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 2 {
 		t.Fatalf("entries = %d, want 2", n)
 	}
 	g.err, g.result = nil, healthy
 	if r := frIngest(t, p, frRow(3, "i-1", "title_changed")); !r.Written {
 		t.Fatalf("result = %+v", r)
 	}
-	fails, _ := p.store.ListIngestFailures(frInstance)
+	fails, _ := p.store.ListIngestFailures(context.Background(), frInstance)
 	if len(fails) != 1 || fails[0].EntityID != "i-2" || !fails[0].Flagged() {
 		t.Fatalf("entries after success = %+v, want only the flagged i-2", fails)
 	}
@@ -98,7 +98,7 @@ func TestFeedRetryThatTurnsPermanentFlagsTheEntry(t *testing.T) {
 	if _, still, err := p.RetryIngestFailures(context.Background(), frInstance); err != nil || still != 1 {
 		t.Fatalf("retry = %d %v", still, err)
 	}
-	fails, _ := p.store.ListIngestFailures(frInstance)
+	fails, _ := p.store.ListIngestFailures(context.Background(), frInstance)
 	if len(fails) != 1 || !fails[0].Flagged() || fails[0].FailureClass != "not_found" {
 		t.Fatalf("entry = %+v", fails)
 	}

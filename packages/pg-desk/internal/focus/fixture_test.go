@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ type prSpec struct {
 func (f *fixture) writeEntity(k Key, facts string, active bool) {
 	f.t.Helper()
 	e := store.Entity{Repo: testRepo, EntityType: k.Type, EntityID: k.ID, Facts: facts, AsOf: fixtureAt, ContentHash: "h" + k.ID}
-	if _, err := f.st.WriteEntityStateWithLog(e, 0, fixtureAt, active, []string{"created"}, "sync", fixtureAt); err != nil {
+	if _, err := f.st.WriteEntityStateWithLog(context.Background(), e, 0, fixtureAt, active, []string{"created"}, "sync", fixtureAt); err != nil {
 		f.t.Fatalf("write entity %v: %v", k, err)
 	}
 }
@@ -90,7 +91,7 @@ func (f *fixture) pr(id string, s prSpec) Key {
 	}
 	f.writeEntity(k, mustJSON(f.t, map[string]any{"pr_show": show}), !s.inactive)
 	if s.ownership != "" {
-		if err := f.st.UpsertInterpretation(store.Interpretation{
+		if err := f.st.UpsertInterpretation(context.Background(), store.Interpretation{
 			Repo: testRepo, EntityType: "pr", EntityID: id, Ownership: s.ownership,
 			Enrichment: "{}", Urgency: "{}", Dispositions: "{}", Approvals: "{}", MatchReasons: "[]",
 			AsOf: fixtureAt,
@@ -183,7 +184,7 @@ func (f *fixture) link(from, to Key, relation string) {
 // external records an externally managed link now.
 func (f *fixture) external(from, to Key, relation, reason string) {
 	f.t.Helper()
-	if err := f.st.AddExternalXref(store.XrefLink{
+	if err := f.st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: from.Type, FromID: from.ID, ToType: to.Type, ToID: to.ID,
 		Relation: relation, Actor: "operator", ActedAt: fixtureAt, Reason: reason,
 		FirstSeen: fixtureAt, LastConfirmed: fixtureAt,
@@ -194,7 +195,7 @@ func (f *fixture) external(from, to Key, relation, reason string) {
 
 func (f *fixture) hide(k Key) {
 	f.t.Helper()
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: k.Type, EntityID: k.ID, Key: store.AnnotationHidden,
 		Value: `{"value":true,"reason":null}`, Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 	}); err != nil {
@@ -205,12 +206,12 @@ func (f *fixture) hide(k Key) {
 func (f *fixture) inputs() Inputs {
 	f.t.Helper()
 	for from, ls := range f.derived {
-		if err := f.st.ReplaceDerivedXrefs(testRepo, from.Type, from.ID, ls); err != nil {
+		if err := f.st.ReplaceDerivedXrefs(context.Background(), testRepo, from.Type, from.ID, ls); err != nil {
 			f.t.Fatalf("derived links of %v: %v", from, err)
 		}
 	}
 	f.derived = map[Key][]store.XrefLink{}
-	in, err := Load(f.st, f.cfg, testRepo, fixtureNow)
+	in, err := Load(context.Background(), f.st, f.cfg, testRepo, fixtureNow)
 	if err != nil {
 		f.t.Fatalf("Load: %v", err)
 	}

@@ -1,6 +1,7 @@
 package lanestate
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -18,14 +19,14 @@ func intp(n int) *int { return &n }
 
 func mustRecord(t *testing.T, st *store.Store, configured string, at time.Time, in RunInput) {
 	t.Helper()
-	if err := Record(st, configured, at, in); err != nil {
+	if err := Record(context.Background(), st, configured, at, in); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 }
 
 func mustRead(t *testing.T, st *store.Store, at time.Time) Snapshot {
 	t.Helper()
-	snap, err := Read(st, at)
+	snap, err := Read(context.Background(), st, at)
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -34,7 +35,7 @@ func mustRead(t *testing.T, st *store.Store, at time.Time) Snapshot {
 
 func TestWritingLaneStateLeavesTheSchemaVersionUnchanged(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	before, err := st.SchemaVersion()
+	before, err := st.SchemaVersion(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,10 +44,10 @@ func TestWritingLaneStateLeavesTheSchemaVersionUnchanged(t *testing.T) {
 		Events:    []RunEvent{{Stage: "hydrate", Class: "transient"}},
 		Decisions: []DecisionCount{{Rule: "all.closed", Action: "close", Outcome: "applied"}},
 	})
-	if _, err := MarkInactive(st, "o/r", "o/r#9"); err != nil {
+	if _, err := MarkInactive(context.Background(), st, "o/r", "o/r#9"); err != nil {
 		t.Fatal(err)
 	}
-	after, err := st.SchemaVersion()
+	after, err := st.SchemaVersion(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestEveryLaneKeyLivesUnderTheLanePrefixAndNoneIsTheConfigKey(t *testing.T) 
 		Events:    []RunEvent{{Stage: "decide", Class: "decide_failed"}},
 		Decisions: []DecisionCount{{Rule: "land.ready", Action: "skip", Outcome: "skipped", Reason: "not matched"}},
 	})
-	rows, err := st.ListMetaPrefix("pr_lane")
+	rows, err := st.ListMetaPrefix(context.Background(), "pr_lane")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestByHandPlanRunAfterTheFlipLeavesLaneLevelAndPRStateAlone(t *testing.T) {
 	mustRecord(t, st, "apply", t0, RunInput{PR: "o/r#1", Mode: "apply", Residual: intp(2), LastOutcome: "applied"})
 	flip := mustRead(t, st, t0).FlipAt
 	prKey := KeyPRPrefix + "o/r#1"
-	beforePR, _, err := st.GetMeta(prKey)
+	beforePR, _, err := st.GetMeta(context.Background(), prKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestByHandPlanRunAfterTheFlipLeavesLaneLevelAndPRStateAlone(t *testing.T) {
 	if s.LaneMode != "apply" || s.FlipAt != flip {
 		t.Errorf("a by-hand plan run changed the lane level: lane %q flip %q, want apply and %q", s.LaneMode, s.FlipAt, flip)
 	}
-	afterPR, _, _ := st.GetMeta(prKey)
+	afterPR, _, _ := st.GetMeta(context.Background(), prKey)
 	if afterPR != beforePR {
 		t.Errorf("a by-hand plan run overwrote the PR's apply-mode state:\n before %s\n after  %s", beforePR, afterPR)
 	}
@@ -158,7 +159,7 @@ func TestResidualPlanInsideAnApplyRunNeverSetsTheLaneMode(t *testing.T) {
 	if s.LaneMode != "off" || s.FlipAt != "" {
 		t.Errorf("lane %q flip %q: a run that is not the configured mode set the lane level", s.LaneMode, s.FlipAt)
 	}
-	if v, found, _ := st.GetMeta(KeyPRPrefix + "o/r#1"); found {
+	if v, found, _ := st.GetMeta(context.Background(), KeyPRPrefix+"o/r#1"); found {
 		t.Errorf("per-PR state written for a run that is not the configured mode: %s", v)
 	}
 }
@@ -222,10 +223,10 @@ func TestRecordRejectsAnythingOutsideTheClosedVocabulariesAndWritesNothing(t *te
 			st := store.OpenNewSchemaForTest(t)
 			// A valid event ahead of the bad one: validation runs before any write.
 			in.Events = append([]RunEvent{{Stage: "hydrate", Class: "transient"}}, in.Events...)
-			if err := Record(st, "plan", t0, in); err == nil {
+			if err := Record(context.Background(), st, "plan", t0, in); err == nil {
 				t.Fatal("Record accepted an invalid input")
 			}
-			rows, err := st.ListMetaPrefix(KeyPrefix)
+			rows, err := st.ListMetaPrefix(context.Background(), KeyPrefix)
 			if err != nil || len(rows) != 0 {
 				t.Errorf("rejected input wrote %v (err %v), want nothing", rows, err)
 			}
@@ -260,11 +261,11 @@ func TestDecisionsAndRunsAccumulateAcrossRunsAndLookupFiguresAreKept(t *testing.
 
 func TestMarkInactiveWorksFromAPlanRunAndDropsThePRFromTheNeverHydratedSet(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	if err := st.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#7", Facts: `{"pr_show":{"state":"open"}}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#7", Facts: `{"pr_show":{"state":"open"}}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	// Migrate the row to schema 2 style: a never-hydrated entity (version 0).
-	got, err := st.CountPRUnhydrated(t0)
+	got, err := st.CountPRUnhydrated(context.Background(), t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,11 +274,11 @@ func TestMarkInactiveWorksFromAPlanRunAndDropsThePRFromTheNeverHydratedSet(t *te
 	}
 	// A plan-mode run: marking is a store write, no mode check.
 	mustRecord(t, st, "plan", t0, RunInput{PR: "o/r#7", Mode: "plan"})
-	changed, err := MarkInactive(st, "o/r", "o/r#7")
+	changed, err := MarkInactive(context.Background(), st, "o/r", "o/r#7")
 	if err != nil || !changed {
 		t.Fatalf("MarkInactive: changed=%v err=%v", changed, err)
 	}
-	if got, _ := st.CountPRUnhydrated(t0); got.Count != 0 {
+	if got, _ := st.CountPRUnhydrated(context.Background(), t0); got.Count != 0 {
 		t.Errorf("never-hydrated set = %d after marking inactive, want the PR dropped", got.Count)
 	}
 	if s := mustRead(t, st, t0); s.MarkedInactive != 1 {
@@ -335,11 +336,11 @@ func TestStageTimingsAccumulateKeepTheLastAndSkipUnmeasuredStages(t *testing.T) 
 
 func TestANegativeTimingRejectsTheRunAndWritesNothing(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	err := Record(st, "plan", t0, RunInput{PR: "o/r#1", Mode: "plan", Timings: &StageTimings{HydrateMs: i64p(-1)}})
+	err := Record(context.Background(), st, "plan", t0, RunInput{PR: "o/r#1", Mode: "plan", Timings: &StageTimings{HydrateMs: i64p(-1)}})
 	if err == nil {
 		t.Fatal("a negative timing was accepted")
 	}
-	rows, _ := st.ListMetaPrefix("pr_lane")
+	rows, _ := st.ListMetaPrefix(context.Background(), "pr_lane")
 	if len(rows) != 0 {
 		t.Fatalf("a rejected run wrote %v", rows)
 	}
@@ -370,7 +371,7 @@ func TestASkipRecordBumpsOnlyTheSkipCounter(t *testing.T) {
 		PR: "o/r#1", Mode: "apply", Residual: intp(3), LastOutcome: "ok",
 		Decisions: []DecisionCount{{Rule: "all.closed", Action: "close", Outcome: "applied"}},
 	})
-	before, err := st.ListMetaPrefix("pr_lane.")
+	before, err := st.ListMetaPrefix(context.Background(), "pr_lane.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +383,7 @@ func TestASkipRecordBumpsOnlyTheSkipCounter(t *testing.T) {
 	if snap.Skips["own-origin"] != 2 {
 		t.Fatalf("skips = %v, want own-origin 2", snap.Skips)
 	}
-	after, err := st.ListMetaPrefix("pr_lane.")
+	after, err := st.ListMetaPrefix(context.Background(), "pr_lane.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,11 +410,11 @@ func TestASkipDocumentStillNeedsPRAndModeAndAKnownReason(t *testing.T) {
 		{PR: "o/r#1", SkipReason: "own-origin"},
 		{PR: "o/r#1", Mode: "apply", SkipReason: "elsewhere"},
 	} {
-		if err := Record(st, "apply", t0, in); err == nil {
+		if err := Record(context.Background(), st, "apply", t0, in); err == nil {
 			t.Errorf("Record(%+v) = nil, want a refusal", in)
 		}
 	}
-	if rows, _ := st.ListMetaPrefix("pr_lane."); len(rows) != 0 {
+	if rows, _ := st.ListMetaPrefix(context.Background(), "pr_lane."); len(rows) != 0 {
 		t.Errorf("a refused skip wrote %v", rows)
 	}
 }

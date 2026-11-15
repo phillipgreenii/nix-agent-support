@@ -247,8 +247,8 @@ type Payload struct {
 // BuildPayload assembles the dashboard payload from the store, as of now.
 // Callers MUST have already confirmed store.HasAnyInterpretation (the
 // 503 gate); BuildPayload itself does not re-check it.
-func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload, error) {
-	return buildPayload(st, cfg, now, true)
+func BuildPayload(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time) (*Payload, error) {
+	return buildPayload(ctx, st, cfg, now, true)
 }
 
 // buildPayload is BuildPayload with the attention evaluation optional. The
@@ -256,8 +256,8 @@ func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload,
 // freshness fields, the dropped count and the source ages, and the evaluator
 // (an extra store walk per call) was the largest single cost of a scrape
 // (bead pg2-jj0ym).
-func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttention bool) (*Payload, error) {
-	interps, err := st.ListInterpretations()
+func buildPayload(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time, withAttention bool) (*Payload, error) {
+	interps, err := st.ListInterpretations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: build payload: %w", err)
 	}
@@ -282,7 +282,7 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 
 	// One batched read of every hidden/wip annotation, instead of two
 	// annotation reads per interpretation row.
-	hiddenWIP, herr := st.ListHiddenWIP()
+	hiddenWIP, herr := st.ListHiddenWIP(ctx)
 	if herr != nil {
 		hiddenWIP = nil // fail open toward visible, as a per-row error did
 	}
@@ -313,7 +313,7 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 	syncIntervalSeconds := int(heartbeatPeriod.Seconds())
 	staleAfterSeconds := syncIntervalSeconds * boundIntervals
 
-	lastHeartbeat, _, err := st.GetMeta(store.MetaKeyLastHeartbeat)
+	lastHeartbeat, _, err := st.GetMeta(ctx, store.MetaKeyLastHeartbeat)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: build payload: read meta.last_heartbeat: %w", err)
 	}
@@ -325,25 +325,25 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 	p.AgeSeconds = ageSeconds(generatedAt, now)
 	p.Stale = isStale(generatedAt, now, staleAfterSeconds)
 
-	if lastRun, found, gerr := st.GetMeta(store.MetaKeyLastRun); gerr != nil {
+	if lastRun, found, gerr := st.GetMeta(ctx, store.MetaKeyLastRun); gerr != nil {
 		return nil, fmt.Errorf("httpapi: build payload: read meta.last_run: %w", gerr)
 	} else if found {
 		p.LastRunAt = lastRun
 	}
-	if lastSweep, found, gerr := st.GetMeta(store.MetaKeyLastSweep); gerr != nil {
+	if lastSweep, found, gerr := st.GetMeta(ctx, store.MetaKeyLastSweep); gerr != nil {
 		return nil, fmt.Errorf("httpapi: build payload: read meta.last_sweep: %w", gerr)
 	} else if found {
 		p.LastSweepAt = lastSweep
 	}
 
-	sources, err := freshness.Sources(st, cfg, now)
+	sources, err := freshness.Sources(ctx, st, cfg, now)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: build payload: %w", err)
 	}
 	p.Sources = sources
 
 	if withAttention {
-		p.Attention, p.AttentionError = evaluateAttention(st, cfg, now)
+		p.Attention, p.AttentionError = evaluateAttention(ctx, st, cfg, now)
 	}
 
 	return p, nil
@@ -355,11 +355,11 @@ func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttent
 // repository, the default store-backed PR-stack source), as the pg-desk-attention plugin, so the
 // two surfaces cannot disagree (INV-ATTNEVAL-2). A failure returns nil groups
 // and the reason; it never returns an empty list for a failed evaluation.
-func evaluateAttention(st *store.Store, cfg *config.Config, now time.Time) ([]attention.Group, string) {
+func evaluateAttention(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time) ([]attention.Group, string) {
 	if cfg == nil || len(cfg.Repos) == 0 {
 		return nil, "no repository configured"
 	}
-	res, err := attention.Evaluate(attention.Inputs{
+	res, err := attention.Evaluate(ctx, attention.Inputs{
 		Store:  st,
 		Repo:   cfg.Repos[0].Remote,
 		Config: cfg,
@@ -491,7 +491,7 @@ func WithReadStore(rd *store.Store) Option {
 // (newMetricsHandler, in metrics_handler.go) fails — in practice this
 // cannot happen with a fresh registry and a fixed, valid instrument set,
 // but the constructor is fallible so we propagate rather than panic.
-func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handler, error) {
+func NewHandler(ctx context.Context, st *store.Store, cfg *config.Config, opts ...Option) (http.Handler, error) {
 	var o options
 	for _, opt := range opts {
 		opt(&o)
@@ -499,14 +499,14 @@ func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handl
 	if o.readStore != nil {
 		st = o.readStore
 	}
-	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval, o.snapshotCtx, o.snapshotEvery, func(ro *registryOptions) { ro.withProvider = o.withProvider })
+	metricsHandler, err := newMetricsHandler(ctx, st, cfg, o.pollInterval, o.snapshotCtx, o.snapshotEvery, func(ro *registryOptions) { ro.withProvider = o.withProvider })
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: new handler: %w", err)
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/api/v1/dashboard", dashboardHandler(st, cfg))
+	mux.Handle("/api/v1/dashboard", dashboardHandler(ctx, st, cfg))
 	mux.Handle("/metrics", metricsHandler)
-	return readyGate(st, mux), nil
+	return readyGate(ctx, st, mux), nil
 }
 
 // readyGate implements the Binding decisions section's "503 for every route
@@ -516,11 +516,11 @@ func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handl
 // Once the table has been seen non-empty the answer is remembered for the life
 // of the handler (a store does not go back to having no interpretation), so a
 // /metrics scrape after that point performs no database query at all.
-func readyGate(st *store.Store, next http.Handler) http.Handler {
+func readyGate(ctx context.Context, st *store.Store, next http.Handler) http.Handler {
 	var sawReady atomic.Bool
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !sawReady.Load() {
-			ready, err := st.HasAnyInterpretation()
+			ready, err := st.HasAnyInterpretation(ctx)
 			if err != nil {
 				http.Error(w, `{"error":"store read failed"}`, http.StatusInternalServerError)
 				return
@@ -535,9 +535,9 @@ func readyGate(st *store.Store, next http.Handler) http.Handler {
 	})
 }
 
-func dashboardHandler(st *store.Store, cfg *config.Config) http.Handler {
+func dashboardHandler(ctx context.Context, st *store.Store, cfg *config.Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		payload, err := BuildPayload(st, cfg, nowUTC())
+		payload, err := BuildPayload(ctx, st, cfg, nowUTC())
 		if err != nil {
 			http.Error(w, `{"error":"store read failed"}`, http.StatusInternalServerError)
 			return

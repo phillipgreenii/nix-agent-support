@@ -97,7 +97,7 @@ func TestRunCmdIssue_Jira_HydratesIssueEntityWhenWatched(t *testing.T) {
 		t.Fatalf("run issue PROJ-99: %v", err)
 	}
 
-	ent, found, err := st.GetEntity("acme/widgets", "issue", "PROJ-99")
+	ent, found, err := st.GetEntity(context.Background(), "acme/widgets", "issue", "PROJ-99")
 	if err != nil || !found {
 		t.Fatalf("GetEntity: found=%v err=%v", found, err)
 	}
@@ -113,7 +113,7 @@ func TestRunCmdIssue_Jira_HydratesIssueEntityWhenWatched(t *testing.T) {
 	}
 
 	// The facts reach the evaluator's view through the projector.
-	views, err := attention.Project(st, "acme/widgets", cfg)
+	views, err := attention.Project(context.Background(), st, "acme/widgets", cfg)
 	if err != nil {
 		t.Fatalf("Project: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestRunCmdIssue_Jira_DoesNotHydrateWithoutWatchConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run issue PROJ-99: %v", err)
 	}
-	if _, found, _ := st.GetEntity("acme/widgets", "issue", "PROJ-99"); found {
+	if _, found, _ := st.GetEntity(context.Background(), "acme/widgets", "issue", "PROJ-99"); found {
 		t.Error("an issue entity was stored although no watch.issue.queries is configured")
 	}
 }
@@ -159,7 +159,7 @@ func TestRunCmdIssue_Jira_HydrationFailureStillReinterpretsPRs(t *testing.T) {
 	if runErr == nil || !strings.Contains(runErr.Error(), "hydrate issue") {
 		t.Fatalf("run issue: err = %v, want a hydration error", runErr)
 	}
-	if _, found, _ := reopen().GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7"); !found {
+	if _, found, _ := reopen().GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7"); !found {
 		t.Error("the linked PR was not re-interpreted after the hydration failure")
 	}
 }
@@ -172,7 +172,7 @@ func TestRunCmdIssue_Jira_RemovedChange(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run issue PROJ-99 --change removed: %v", err)
 		}
-		if _, found, _ := st.GetEntity("acme/widgets", "issue", "PROJ-99"); found {
+		if _, found, _ := st.GetEntity(context.Background(), "acme/widgets", "issue", "PROJ-99"); found {
 			t.Error("a removed, never-stored issue must not be stored")
 		}
 	})
@@ -186,7 +186,7 @@ func TestRunCmdIssue_Jira_RemovedChange(t *testing.T) {
 		if err := runIssue(t, "PROJ-99", "removed"); err != nil {
 			t.Fatalf("run issue (removed): %v", err)
 		}
-		ent, found, err := reopen().GetEntity("acme/widgets", "issue", "PROJ-99")
+		ent, found, err := reopen().GetEntity(context.Background(), "acme/widgets", "issue", "PROJ-99")
 		if err != nil || !found {
 			t.Fatalf("GetEntity: found=%v err=%v", found, err)
 		}
@@ -245,7 +245,7 @@ func TestRunCmdIssue_HydrationReadIssueDepsSwitch(t *testing.T) {
 			if calledDeps != tc.wantDeps {
 				t.Errorf("issue deps --full called = %v, want %v; calls:\n%s", calledDeps, tc.wantDeps, raw)
 			}
-			ent, found, err := st.GetEntity("acme/widgets", "issue", "PROJ-99")
+			ent, found, err := st.GetEntity(context.Background(), "acme/widgets", "issue", "PROJ-99")
 			if err != nil || !found {
 				t.Fatalf("GetEntity: found=%v err=%v", found, err)
 			}

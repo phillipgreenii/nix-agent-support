@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -25,13 +26,13 @@ func init() {
 
 // withStore opens the store, refuses one that is not on schema 2 (the store's
 // own error, unchanged) and runs fn against it.
-func withStore(fn func(st *store.Store) error) error {
+func withStore(ctx context.Context, fn func(st *store.Store) error) error {
 	st, err := openDeskStore()
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = st.Close() }()
-	if err := st.RequireNewSchema(); err != nil {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		return err
 	}
 	return fn(st)
@@ -86,9 +87,12 @@ func runTypedHidden(cmd *cobra.Command, cmdName, entityType, ref string, hidden 
 }
 
 func runTypedHiddenWrite(cmd *cobra.Command, cmdName, entityType, ref string, hidden bool, reason string) error {
+	ctx := cmd.Context()
+
 	return withStore(
+		ctx,
 		func(st *store.Store) error {
-			cfg, err := deskConfigLoad(cmd.Context())
+			cfg, err := deskConfigLoad(ctx)
 			if err != nil {
 				return fmt.Errorf("%s: load config: %w", cmdName, err)
 			}
@@ -96,7 +100,7 @@ func runTypedHiddenWrite(cmd *cobra.Command, cmdName, entityType, ref string, hi
 			if err != nil {
 				return err
 			}
-			return w.set(st)
+			return w.set(ctx, st)
 		},
 	)
 }
@@ -124,9 +128,12 @@ func newTypedWIPCmd(entityType string) *cobra.Command {
 // runTypedWIP is wip on|off for entityType: it writes the key/value wip
 // annotation. The top-level `wip` verb calls it with the pr type.
 func runTypedWIP(cmd *cobra.Command, entityType, ref string, wip bool) error {
+	ctx := cmd.Context()
+
 	return withStore(
+		ctx,
 		func(st *store.Store) error {
-			cfg, err := deskConfigLoad(cmd.Context())
+			cfg, err := deskConfigLoad(ctx)
 			if err != nil {
 				return fmt.Errorf("wip: load config: %w", err)
 			}
@@ -134,7 +141,7 @@ func runTypedWIP(cmd *cobra.Command, entityType, ref string, wip bool) error {
 			if err != nil {
 				return err
 			}
-			return w.set(st)
+			return w.set(ctx, st)
 		},
 	)
 }
@@ -173,21 +180,27 @@ func newTypedFeedbackCmd() *cobra.Command {
 // disposition.<comment_id> overlay. The top-level `feedback list` and
 // `pr feedback list` both call it.
 func runFeedbackList(cmd *cobra.Command, ref string) error {
-	return withStore(func(st *store.Store) error { return runTypedFeedbackList(cmd, st, ref) })
+	ctx := cmd.Context()
+
+	return withStore(ctx, func(st *store.Store) error { return runTypedFeedbackList(cmd, st, ref) })
 }
 
 // runFeedbackSet is feedback set for pr: it writes disposition.<comment_id>.
 // The top-level `feedback set` and `pr feedback set` both call it. The
 // disposition is validated before the store is opened.
 func runFeedbackSet(cmd *cobra.Command, ref, commentID, disposition, actor string) error {
+	ctx := cmd.Context()
+
 	if !validDisposition(disposition) {
 		return fmt.Errorf("feedback set: --disposition must be one of open|will-fix|wont-fix|no-action, got %q", disposition)
 	}
-	return withStore(func(st *store.Store) error { return runTypedFeedbackSet(cmd, st, ref, commentID, disposition, actor) })
+	return withStore(ctx, func(st *store.Store) error { return runTypedFeedbackSet(cmd, st, ref, commentID, disposition, actor) })
 }
 
 // feedbackBase resolves ref and reads the PR's stored base dispositions.
 func feedbackBase(cmd *cobra.Command, st *store.Store, cmdName, ref string) (cfg *config.Config, repo, id string, base []feedbackDisposition, err error) {
+	ctx := cmd.Context()
+
 	cfg, err = deskConfigLoad(cmd.Context())
 	if err != nil {
 		return nil, "", "", nil, fmt.Errorf("%s: load config: %w", cmdName, err)
@@ -196,7 +209,7 @@ func feedbackBase(cmd *cobra.Command, st *store.Store, cmdName, ref string) (cfg
 	if err != nil {
 		return nil, "", "", nil, fmt.Errorf("%s: %w", cmdName, err)
 	}
-	interp, found, err := st.GetInterpretation(repo, entityTypePR, id)
+	interp, found, err := st.GetInterpretation(ctx, repo, entityTypePR, id)
 	if err != nil {
 		return nil, "", "", nil, fmt.Errorf("%s: %w", cmdName, err)
 	}
@@ -209,13 +222,15 @@ func feedbackBase(cmd *cobra.Command, st *store.Store, cmdName, ref string) (cfg
 // runTypedFeedbackList is feedback list: the stored
 // verdicts with the disposition.<comment_id> annotations laid over them.
 func runTypedFeedbackList(cmd *cobra.Command, st *store.Store, ref string) error {
+	ctx := cmd.Context()
+
 	_, repo, id, base, err := feedbackBase(cmd, st, "feedback list", ref)
 	if err != nil {
 		return err
 	}
 	overrides := map[string]string{}
 	for _, d := range base {
-		a, found, aerr := st.GetKVAnnotation(repo, entityTypePR, id, store.KeyDisposition(d.CommentID))
+		a, found, aerr := st.GetKVAnnotation(ctx, repo, entityTypePR, id, store.KeyDisposition(d.CommentID))
 		if aerr != nil {
 			return fmt.Errorf("feedback list: read annotation for comment %s: %w", d.CommentID, aerr)
 		}
@@ -233,6 +248,8 @@ func runTypedFeedbackList(cmd *cobra.Command, st *store.Store, ref string) error
 // open (an explicit override back to open), so what the user asked for is
 // what is stored.
 func runTypedFeedbackSet(cmd *cobra.Command, st *store.Store, ref, commentID, disposition, actorFlag string) error {
+	ctx := cmd.Context()
+
 	cfg, _, _, base, err := feedbackBase(cmd, st, "feedback set", ref)
 	if err != nil {
 		return err
@@ -251,5 +268,5 @@ func runTypedFeedbackSet(cmd *cobra.Command, st *store.Store, ref, commentID, di
 	if err != nil {
 		return err
 	}
-	return w.set(st)
+	return w.set(ctx, st)
 }

@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -55,7 +56,7 @@ func (w *healthWorld) rowOnly(periodKey string, k Key, pos int, selectedAt strin
 
 func (w *healthWorld) annotate(k Key, value string) {
 	w.t.Helper()
-	if err := w.st.SetAnnotation(store.KVAnnotation{
+	if err := w.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: k.Type, EntityID: k.ID, Key: store.AnnotationFocusSelected,
 		Value: value, Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 	}); err != nil {
@@ -85,7 +86,7 @@ func (w *healthWorld) bead(id string, source Key, s beadSpec) Key {
 func (w *healthWorld) health() Health {
 	w.t.Helper()
 	w.inputs() // flushes the fixture's derived links
-	h, err := ComputeHealth(w.st, w.cfg, fixtureNow)
+	h, err := ComputeHealth(context.Background(), w.st, w.cfg, fixtureNow)
 	if err != nil {
 		w.t.Fatalf("ComputeHealth: %v", err)
 	}
@@ -109,16 +110,16 @@ const (
 )
 
 func TestComputeHealthOnAnUnmigratedStoreOrNoRepoIsZero(t *testing.T) {
-	h, err := ComputeHealth(store.OpenRetiredSchemaForTest(t), &config.Config{Repos: []config.RepoConfig{{Remote: testRepo}}}, fixtureNow)
+	h, err := ComputeHealth(context.Background(), store.OpenRetiredSchemaForTest(t), &config.Config{Repos: []config.RepoConfig{{Remote: testRepo}}}, fixtureNow)
 	if err != nil || h.Migrated() || h.Beads != nil {
 		t.Fatalf("unmigrated: %+v, %v; want the zero Health and no error", h, err)
 	}
 	f := newFixture(t) // a new-schema store but no repository configured
-	h, err = ComputeHealth(f.st, f.cfg, fixtureNow)
+	h, err = ComputeHealth(context.Background(), f.st, f.cfg, fixtureNow)
 	if err != nil || h.Migrated() {
 		t.Fatalf("no repo: %+v, %v; want the zero Health and no error", h, err)
 	}
-	if _, err := ComputeHealth(nil, f.cfg, fixtureNow); err == nil {
+	if _, err := ComputeHealth(context.Background(), nil, f.cfg, fixtureNow); err == nil {
 		t.Errorf("a nil store must be an error")
 	}
 }
@@ -151,7 +152,7 @@ func TestSelectedIsTheNewestPeriodThatHoldsRowsNotTheLocalDay(t *testing.T) {
 	w.row("2026-10-08", c, 2, fixtureAt)
 	// A newer period that holds no row (an emptied or just-opened period) is
 	// not "the current plan".
-	if _, err := w.st.GetOrCreateFocusPeriod("day", today); err != nil {
+	if _, err := w.st.GetOrCreateFocusPeriod(context.Background(), "day", today); err != nil {
 		t.Fatal(err)
 	}
 	h := w.health()
@@ -215,7 +216,7 @@ func TestEachDivergenceKindIsTrippedByItsOwnFixture(t *testing.T) {
 		}, nil},
 		{"a closed old period is not stale", func(w *healthWorld) {
 			w.row("2026-10-07", w.pr("1", prSpec{ownership: "mine"}), 1, fixtureAt)
-			if err := w.st.FocusPeriodClose("day", "2026-10-07", "done", fixtureAt); err != nil {
+			if err := w.st.FocusPeriodClose(context.Background(), "day", "2026-10-07", "done", fixtureAt); err != nil {
 				t.Fatal(err)
 			}
 		}, nil},
@@ -275,7 +276,7 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	w.cfg.Watch.Issue.Queries = []string{"mine"}
 	// Every issue but "K-1" is listed by the watch query; the issue "K-1" is
 	// outside it. (A PR has no watch set in pg-desk: the daemon is the PR feed.)
-	if err := w.st.SetMeta("change_flow.watchset.issue.mine", `["bd-77"]`); err != nil {
+	if err := w.st.SetMeta(context.Background(), "change_flow.watchset.issue.mine", `["bd-77"]`); err != nil {
 		t.Fatal(err)
 	}
 	unminted := w.pr("9", prSpec{ownership: "mine"})
@@ -284,7 +285,7 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	hidden := w.pr("2", prSpec{ownership: "mine"})
 	w.hide(hidden)
 	suppressed := w.pr("3", prSpec{ownership: "mine"})
-	if err := w.st.SetAnnotation(store.KVAnnotation{
+	if err := w.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: "pr", EntityID: "3", Key: store.KeySuppress("kind-x"),
 		Value: "true", Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 	}); err != nil {
@@ -297,7 +298,7 @@ func TestPendingReasonsAndTheirAges(t *testing.T) {
 	w.hide(hiddenBead)
 	w.bead("bd-10", hiddenBead, beadSpec{state: "open"})
 	suppressedBead := w.pr("11", prSpec{ownership: "mine"})
-	if err := w.st.SetAnnotation(store.KVAnnotation{
+	if err := w.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: "pr", EntityID: "11", Key: store.KeySuppress("kind-x"),
 		Value: "true", Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 	}); err != nil {
@@ -422,7 +423,7 @@ func TestEscalatedFocusRulesCountsSourcesNotAnnotations(t *testing.T) {
 	w := newHealthWorld(t)
 	k := w.pr("1", prSpec{ownership: "mine"})
 	for _, key := range []string{"escalated.focus.item", "escalated.focus.other"} {
-		if err := w.st.SetAnnotation(store.KVAnnotation{
+		if err := w.st.SetAnnotation(context.Background(), store.KVAnnotation{
 			Repo: testRepo, EntityType: k.Type, EntityID: k.ID, Key: key,
 			Value: "true", Origin: "decider", SetBy: "decider", SetAt: fixtureAt,
 		}); err != nil {
@@ -474,7 +475,7 @@ func TestRunsDerivedFromFocusRunWithANullExitCodeCountedAsTotal(t *testing.T) {
 		{RunID: "R7", Verb: "close", StartedAt: "2026-10-10T04:00:00Z", Actor: "a", ExitCode: nil, CountsJSON: `{}`},
 	}
 	for _, r := range runs {
-		if _, err := w.st.FocusRunInsert(r); err != nil {
+		if _, err := w.st.FocusRunInsert(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -499,7 +500,7 @@ func TestRunsDerivedFromFocusRunWithANullExitCodeCountedAsTotal(t *testing.T) {
 func TestLastLockValuesComeFromTheNewestSelectRun(t *testing.T) {
 	w := newHealthWorld(t)
 	zero := 0
-	if _, err := w.st.FocusRunInsert(store.FocusRun{
+	if _, err := w.st.FocusRunInsert(context.Background(), store.FocusRun{
 		RunID: "R1", Verb: "select", StartedAt: "2026-10-10T09:00:00Z", Actor: "a", ExitCode: &zero,
 		CountsJSON: `{"selected":2,"removed":{"operator":0},"draft_age_seconds":7200,"drift_rows":3}`,
 	}); err != nil {
@@ -516,7 +517,7 @@ func TestDraftAgeIsAbsentWithoutADraft(t *testing.T) {
 	if h := w.health(); h.DraftAge != nil || h.DraftPeriodKey != "" {
 		t.Fatalf("draft = %v %q, want none", h.DraftAge, h.DraftPeriodKey)
 	}
-	if _, err := w.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: today, Cap: 6, MadeAt: "2026-10-10T09:00:00Z", BodyJSON: "{}"}); err != nil {
+	if _, err := w.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: today, Cap: 6, MadeAt: "2026-10-10T09:00:00Z", BodyJSON: "{}"}); err != nil {
 		t.Fatal(err)
 	}
 	h := w.health()
@@ -571,7 +572,7 @@ func TestComputeHealthWritesNothing(t *testing.T) {
 	w.bead("bd-1", k, beadSpec{state: "open"})
 	w.inputs()
 	before := dumpAll(t, w.st)
-	if _, err := ComputeHealth(w.st, w.cfg, fixtureNow); err != nil {
+	if _, err := ComputeHealth(context.Background(), w.st, w.cfg, fixtureNow); err != nil {
 		t.Fatal(err)
 	}
 	if after := dumpAll(t, w.st); after != before {
@@ -585,13 +586,13 @@ func TestComputeHealthWritesNothing(t *testing.T) {
 func dumpAll(t *testing.T, s *store.Store) string {
 	t.Helper()
 	out := dumpFocus(t, s)
-	ents, err := s.ListEntities()
+	ents, err := s.ListEntities(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range ents {
 		out += fmt.Sprintf("entity %s %s v%d %s\n", e.EntityType, e.EntityID, e.Version, e.ContentHash)
-		anns, err := s.ListKVAnnotations(e.Repo, e.EntityType, e.EntityID)
+		anns, err := s.ListKVAnnotations(context.Background(), e.Repo, e.EntityType, e.EntityID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -600,13 +601,13 @@ func dumpAll(t *testing.T, s *store.Store) string {
 		}
 	}
 	for _, typ := range []string{"pr", "issue"} {
-		recs, err := s.ListChangesAfter(typ, 0, 10000)
+		recs, err := s.ListChangesAfter(context.Background(), typ, 0, 10000)
 		if err != nil {
 			t.Fatal(err)
 		}
 		out += fmt.Sprintf("changes %s %d\n", typ, len(recs))
 	}
-	meta, err := s.ListMetaPrefix("")
+	meta, err := s.ListMetaPrefix(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

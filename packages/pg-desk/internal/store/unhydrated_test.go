@@ -40,7 +40,7 @@ func TestCountPRUnhydrated(t *testing.T) {
 	mustExec(`UPDATE entity SET active = 0 WHERE entity_id = 'o/r#7'`)
 
 	now := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
-	got, err := s.CountPRUnhydrated(now)
+	got, err := s.CountPRUnhydrated(context.Background(), now)
 	if err != nil {
 		t.Fatalf("CountPRUnhydrated: %v", err)
 	}
@@ -53,14 +53,14 @@ func TestCountPRUnhydrated(t *testing.T) {
 
 func TestCountPRUnhydratedEmptySetAndReadFailure(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	got, err := s.CountPRUnhydrated(time.Now())
+	got, err := s.CountPRUnhydrated(context.Background(), time.Now())
 	if err != nil || got.Count != 0 || got.OldestAgeSeconds != 0 {
 		t.Errorf("empty store: got %+v, err %v; want a zero set", got, err)
 	}
 	// A schema-1 store has no version or active column: the read fails and
 	// the failure is returned, never folded into a zero count.
 	old := OpenRetiredSchemaForTest(t)
-	if got, err := old.CountPRUnhydrated(time.Now()); err == nil {
+	if got, err := old.CountPRUnhydrated(context.Background(), time.Now()); err == nil {
 		t.Errorf("schema-1 store: got %+v with no error; a failed read must be an error", got)
 	}
 }

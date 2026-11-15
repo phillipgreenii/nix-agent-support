@@ -23,10 +23,10 @@ type seedT interface {
 // without touching version, hydrated_at or active.
 func (s *Store) SeedEntityForTest(t seedT, e Entity) {
 	t.Helper()
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(context.Background()); err != nil {
 		t.Fatalf("SeedEntityForTest: %v", err)
 	}
-	if err := s.UpsertEntityForTest(e); err != nil {
+	if err := s.UpsertEntityForTest(context.Background(), e); err != nil {
 		t.Fatalf("SeedEntityForTest: %v", err)
 	}
 }
@@ -36,9 +36,9 @@ func (s *Store) SeedEntityForTest(t seedT, e Entity) {
 // (Repo, EntityType, EntityID) without touching version, hydrated_at or
 // active. A first insert stamps first_seen_at with e.AsOf and the
 // update branch never rewrites it.
-func (s *Store) UpsertEntityForTest(e Entity) error {
+func (s *Store) UpsertEntityForTest(ctx context.Context, e Entity) error {
 	_, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, first_seen_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
@@ -59,10 +59,10 @@ func (s *Store) UpsertEntityForTest(e Entity) error {
 // schema-2 store with the handle's stamp, without looking at the entity.
 func (s *Store) SeedInterpretationForTest(t seedT, i Interpretation) {
 	t.Helper()
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(context.Background()); err != nil {
 		t.Fatalf("SeedInterpretationForTest: %v", err)
 	}
-	if err := s.UpsertInterpretation(i); err != nil {
+	if err := s.UpsertInterpretation(context.Background(), i); err != nil {
 		t.Fatalf("SeedInterpretationForTest: %v", err)
 	}
 }
@@ -127,7 +127,7 @@ func OpenRetiredSchemaForTest(t testT) *Store {
 // moves no facts bytes.
 func (s *Store) SeedLiveSizeForTest(t seedT, entities, factsBytes, changeRows int) {
 	t.Helper()
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(context.Background()); err != nil {
 		t.Fatalf("SeedLiveSizeForTest: %v", err)
 	}
 	s.ExecForTest(t, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < ?)

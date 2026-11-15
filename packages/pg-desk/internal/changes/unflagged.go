@@ -27,8 +27,8 @@ type UnflaggedRecord struct {
 // ReadUnflagged reads the stored unflagged-member record of an instance.
 // found is false before the first successful read; a malformed value is an
 // error.
-func ReadUnflagged(st *store.Store, instance string) (rec UnflaggedRecord, found bool, err error) {
-	v, ok, err := st.GetMeta(MetaUnflaggedPrefix + instance)
+func ReadUnflagged(ctx context.Context, st *store.Store, instance string) (rec UnflaggedRecord, found bool, err error) {
+	v, ok, err := st.GetMeta(ctx, MetaUnflaggedPrefix+instance)
 	if err != nil || !ok {
 		return UnflaggedRecord{}, false, err
 	}
@@ -95,7 +95,7 @@ func (e *Engine) unflaggedInstance(ctx context.Context, entityType, instance str
 		degrade()
 		return nil
 	}
-	all, err := e.Store.ListEntities()
+	all, err := e.Store.ListEntities(ctx)
 	if err != nil {
 		return fmt.Errorf("changes: list entities: %w", err)
 	}
@@ -132,7 +132,7 @@ func (e *Engine) unflaggedInstance(ctx context.Context, entityType, instance str
 	if err != nil {
 		return err
 	}
-	if err := e.Store.SetMeta(MetaUnflaggedPrefix+instance, string(rec)); err != nil {
+	if err := e.Store.SetMeta(ctx, MetaUnflaggedPrefix+instance, string(rec)); err != nil {
 		e.warnf("changes: record unflagged count %s: %v\n", instance, err)
 	}
 	return nil
@@ -152,7 +152,7 @@ func (e *Engine) unflaggedInstance(ctx context.Context, entityType, instance str
 // by this call (a --query call that skipped one would otherwise drop its
 // members), and a baseline read error keeps the previous count and degrades the
 // poll. Nothing is stored per member.
-func (e *Engine) recordListedUnflagged(entityType string, selected []string, st *pollState) {
+func (e *Engine) recordListedUnflagged(ctx context.Context, entityType string, selected []string, st *pollState) {
 	if entityType != issueEntityType || e.Cfg == nil {
 		return
 	}
@@ -189,7 +189,7 @@ func (e *Engine) recordListedUnflagged(entityType string, selected []string, st 
 		members := map[string]bool{}
 		degraded := false
 		for _, q := range queries {
-			bs, err := ReadBaseline(e.Store, q)
+			bs, err := ReadBaseline(ctx, e.Store, q)
 			if err != nil {
 				st.side = append(st.side, "unflagged read degraded: "+q)
 				degraded = true
@@ -201,7 +201,7 @@ func (e *Engine) recordListedUnflagged(entityType string, selected []string, st 
 			if !bs.Done && (!bs.HasOpenSince || now.Sub(bs.OpenSince) < BaselineHoldSeconds*time.Second) {
 				continue
 			}
-			for id := range loadWatchSet(e.Store, entityType, q) {
+			for id := range loadWatchSet(ctx, e.Store, entityType, q) {
 				members[id] = true
 			}
 		}
@@ -209,7 +209,7 @@ func (e *Engine) recordListedUnflagged(entityType string, selected []string, st 
 			continue
 		}
 		if held == nil {
-			rows, err := e.Store.ListEntities()
+			rows, err := e.Store.ListEntities(ctx)
 			if err != nil {
 				st.side = append(st.side, "unflagged read degraded: list entities: "+firstErrLine(err.Error()))
 				return
@@ -233,7 +233,7 @@ func (e *Engine) recordListedUnflagged(entityType string, selected []string, st 
 		if err != nil {
 			continue
 		}
-		if err := e.Store.SetMeta(MetaUnflaggedPrefix+inst, string(rec)); err != nil {
+		if err := e.Store.SetMeta(ctx, MetaUnflaggedPrefix+inst, string(rec)); err != nil {
 			e.warnf("changes: record unflagged count %s: %v\n", inst, err)
 		}
 	}

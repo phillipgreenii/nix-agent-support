@@ -29,7 +29,7 @@ func attentionConfig() *config.Config {
 // pr.review-requested raises as a medium item.
 func seedAttentionPR(t *testing.T, s *store.Store, id string) {
 	t.Helper()
-	if err := s.UpsertEntityForTest(store.Entity{
+	if err := s.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: attentionRepo, EntityType: "pr", EntityID: id,
 		Facts: `{"pr_show":{"number":1,"state":"open","author":"me","head_sha":"h1"}}`, AsOf: "2026-10-06T11:00:00Z",
 	}); err != nil {
@@ -52,7 +52,7 @@ func TestPayloadCarriesTheEvaluatorsGroups(t *testing.T) {
 	seedAttentionPR(t, s, attentionRepo+"#1")
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-10-06T11:59:30Z")
 
-	p, err := BuildPayload(s, attentionConfig(), attentionNow())
+	p, err := BuildPayload(context.Background(), s, attentionConfig(), attentionNow())
 	if err != nil {
 		t.Fatalf("BuildPayload: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestDashboardJSONAttentionIsAnArrayWhenNothingNeedsTheOperator(t *testing.T
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-10-06T11:59:30Z")
 	setClock(t, attentionNow())
 
-	handler, err := NewHandler(s, attentionConfig())
+	handler, err := NewHandler(context.Background(), s, attentionConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestFailedEvaluationIsNeverAllClear(t *testing.T) {
 			mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-10-06T11:59:30Z")
 			setClock(t, attentionNow())
 
-			handler, err := NewHandler(s, tc.cfg())
+			handler, err := NewHandler(context.Background(), s, tc.cfg())
 			if err != nil {
 				t.Fatalf("NewHandler: %v", err)
 			}
@@ -166,11 +166,11 @@ func TestBuildPayloadWithoutAttentionSkipsTheEvaluator(t *testing.T) {
 	seedAttentionPR(t, s, attentionRepo+"#1")
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-10-06T11:59:30Z")
 
-	full, err := BuildPayload(s, attentionConfig(), attentionNow())
+	full, err := BuildPayload(context.Background(), s, attentionConfig(), attentionNow())
 	if err != nil {
 		t.Fatalf("BuildPayload: %v", err)
 	}
-	light, err := buildPayload(s, attentionConfig(), attentionNow(), false)
+	light, err := buildPayload(context.Background(), s, attentionConfig(), attentionNow(), false)
 	if err != nil {
 		t.Fatalf("buildPayload(false): %v", err)
 	}

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ func owningPipeline(t *testing.T, res *gather.GatherResult, backend string) *Pip
 	p.cfg = ownerCfg(t)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
 	if backend != "" {
-		if err := p.store.SetEntityColumns(ecRepo, "issue", "i-1", &backend, nil); err != nil {
+		if err := p.store.SetEntityColumns(context.Background(), ecRepo, "issue", "i-1", &backend, nil); err != nil {
 			t.Fatalf("SetEntityColumns: %v", err)
 		}
 	}

@@ -105,19 +105,21 @@ type pullRun struct {
 // finish ends the run with err's exit code when no row-writing path did: a
 // writing run still writes its focus_run row (exit 2, 3 and 20 are counted by
 // the run statistics), then prints the stderr line.
-func (p *pullRun) finish(err error) error {
+func (p *pullRun) finish(ctx context.Context, err error) error {
 	if p.done {
 		return err
 	}
 	p.done = true
 	if p.writing && !p.run.Inserted() {
-		_ = p.run.Start(p.env.Store)
+		_ = p.run.Start(ctx, p.env.Store)
 	}
-	_ = p.run.Finish(focusExitCode(err))
+	_ = p.run.Finish(ctx, focusExitCode(err))
 	return err
 }
 
 func runFocusPull(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
 	topGiven := cmd.Flags().Changed(focusFlagTop)
 	top, _ := cmd.Flags().GetInt(focusFlagTop)
 	dry, _ := cmd.Flags().GetBool(focusFlagDryRun)
@@ -138,7 +140,7 @@ func runFocusPull(cmd *cobra.Command, args []string) error {
 	defer env.Close()
 	p := &pullRun{cmd: cmd, env: env, writing: writing}
 	p.run = newFocusRun(cmd.ErrOrStderr(), focusVerbPull, env.Period, env.Actor, !writing, env.Now)
-	return p.finish(p.once(args, top, preview))
+	return p.finish(ctx, p.once(args, top, preview))
 }
 
 // once is the whole run after the environment is open; its error is the
@@ -157,7 +159,7 @@ func (p *pullRun) once(args []string, top int, preview bool) error {
 		}
 		keys = append(keys, k)
 	}
-	g, err := gatherFocus(env)
+	g, err := gatherFocus(ctx, env)
 	if err != nil {
 		return err
 	}
@@ -167,7 +169,7 @@ func (p *pullRun) once(args []string, top int, preview bool) error {
 	deps := focusLockDeps(cmd, env)
 	deps.Hydrate = nil // pull never hydrates: a named key must already have an entity row
 	period := focus.Period{Type: env.Period.Type, Key: env.Period.Key}
-	if err := focus.PullPreflight(deps, period); err != nil {
+	if err := focus.PullPreflight(ctx, deps, period); err != nil {
 		return mapFocusErr(err, env.Period.Key)
 	}
 	if err := p.printNotices(g); err != nil {
@@ -175,9 +177,9 @@ func (p *pullRun) once(args []string, top int, preview bool) error {
 	}
 
 	cap := g.periodCap()
-	rk := g.rank(cap)
+	rk := g.rank(ctx, cap)
 	if preview {
-		return p.previewScreen(g, rk, cap)
+		return p.previewScreen(ctx, g, rk, cap)
 	}
 
 	seen := map[focus.Key]bool{}
@@ -220,7 +222,7 @@ func (p *pullRun) once(args []string, top int, preview bool) error {
 			return err
 		}
 		p.done = true
-		return p.run.Finish(0)
+		return p.run.Finish(ctx, 0)
 	}
 
 	focusPullBeforeTx(env.Store)
@@ -257,7 +259,7 @@ func (p *pullRun) once(args []string, top int, preview bool) error {
 			"run pg-desk focus select --repair",
 		)
 	}
-	if ferr := p.run.Finish(focusExitCode(runErr)); ferr != nil && runErr == nil {
+	if ferr := p.run.Finish(ctx, focusExitCode(runErr)); ferr != nil && runErr == nil {
 		return focusTotalError("focus pull: finalize the run record: "+ferr.Error(), "run pg-desk focus select --repair")
 	}
 	return runErr
@@ -298,7 +300,7 @@ func pullCounts(g *focusGather, rk focus.Ranking, cap, selected int) focusCounts
 
 // previewScreen is a bare invocation: the plan and what is left to pull,
 // computed and printed, nothing written.
-func (p *pullRun) previewScreen(g *focusGather, rk focus.Ranking, cap int) error {
+func (p *pullRun) previewScreen(ctx context.Context, g *focusGather, rk focus.Ranking, cap int) error {
 	s := g.buildScreen(screenInput{
 		verb: "pull", mode: focusModePlan, draftLine: planDraftLine(g), fresh: rk, cap: cap,
 	})
@@ -312,7 +314,7 @@ func (p *pullRun) previewScreen(g *focusGather, rk focus.Ranking, cap int) error
 		s.writeText(w)
 	}
 	p.done = true
-	return p.run.Finish(0)
+	return p.run.Finish(ctx, 0)
 }
 
 // pullSelectedJSON is one member of the --json `selected` array.

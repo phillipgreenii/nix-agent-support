@@ -29,6 +29,8 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+
 	// status must work on a store that has not been initialized yet, so it
 	// opens raw (no schema creation, no version gate) rather than creating the
 	// file. A store left on the retired schema 1 is refused below.
@@ -43,12 +45,12 @@ func runStatus(cmd *cobra.Command) error {
 	// The raw open leaves an empty file empty. With no schema there is
 	// nothing to count, and querying would fail on the missing tables, so
 	// report the same shape with zeros.
-	version, err := st.SchemaVersion()
+	version, err := st.SchemaVersion(ctx)
 	if err != nil {
 		return fmt.Errorf("status: read schema version: %w", err)
 	}
 	if version > 0 && version < store.NewSchemaVersion {
-		return fmt.Errorf("status: %w", st.RequireNewSchema())
+		return fmt.Errorf("status: %w", st.RequireNewSchema(ctx))
 	}
 	initialized := version > 0
 
@@ -58,15 +60,15 @@ func runStatus(cmd *cobra.Command) error {
 		interps                                          []store.Interpretation
 	)
 	if initialized {
-		schemaVersion, _, err = st.GetMeta(store.MetaKeySchemaVersion)
+		schemaVersion, _, err = st.GetMeta(ctx, store.MetaKeySchemaVersion)
 		if err != nil {
 			return fmt.Errorf("status: read meta.schema_version: %w", err)
 		}
-		entityCount, err = st.CountEntities()
+		entityCount, err = st.CountEntities(ctx)
 		if err != nil {
 			return fmt.Errorf("status: count entities: %w", err)
 		}
-		interps, err = st.ListInterpretations()
+		interps, err = st.ListInterpretations(ctx)
 		if err != nil {
 			return fmt.Errorf("status: list interpretations: %w", err)
 		}
@@ -75,15 +77,15 @@ func runStatus(cmd *cobra.Command) error {
 				degraded++
 			}
 		}
-		lastHeartbeat, _, err = st.GetMeta(store.MetaKeyLastHeartbeat)
+		lastHeartbeat, _, err = st.GetMeta(ctx, store.MetaKeyLastHeartbeat)
 		if err != nil {
 			return fmt.Errorf("status: read meta.last_heartbeat: %w", err)
 		}
-		lastRun, _, err = st.GetMeta(store.MetaKeyLastRun)
+		lastRun, _, err = st.GetMeta(ctx, store.MetaKeyLastRun)
 		if err != nil {
 			return fmt.Errorf("status: read meta.last_run: %w", err)
 		}
-		lastSweep, _, err = st.GetMeta(store.MetaKeyLastSweep)
+		lastSweep, _, err = st.GetMeta(ctx, store.MetaKeyLastSweep)
 		if err != nil {
 			return fmt.Errorf("status: read meta.last_sweep: %w", err)
 		}
@@ -102,9 +104,9 @@ func runStatus(cmd *cobra.Command) error {
 	// read from the persisted store state. A config-load failure degrades to
 	// "unknown", like the sections below.
 	laneCfg, _ := deskConfigLoad(cmd.Context())
-	fmt.Fprintln(w, prLaneLine(laneCfg, st, changesNow()))
+	fmt.Fprintln(w, prLaneLine(ctx, laneCfg, st, changesNow()))
 
-	if err := printInterpretationCatchUp(w, st, version, laneCfg); err != nil {
+	if err := printInterpretationCatchUp(ctx, w, st, version, laneCfg); err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
 
@@ -130,7 +132,7 @@ func runStatus(cmd *cobra.Command) error {
 // verdict. It reads stored state only, so it works on the raw handle status
 // opens; a store that cannot answer (not initialized, no stamp column yet, no
 // configuration to name the repo and the stamp) reports "unknown", never 0.
-func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *config.Config) error {
+func printInterpretationCatchUp(ctx context.Context, w io.Writer, st *store.Store, version int, cfg *config.Config) error {
 	switch {
 	case version < store.NewSchemaVersion:
 		fmt.Fprintln(w, "interpretations behind: unknown (store not initialized)")
@@ -140,7 +142,7 @@ func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *
 		stamp := runningStamp(cfg)
 		repo := cfg.Repos[0].Remote
 		st.SetInterpStamp(stamp)
-		behind, known, err := st.InterpretationsBehind(repo, 0)
+		behind, known, err := st.InterpretationsBehind(ctx, repo, 0)
 		if err != nil {
 			return fmt.Errorf("count interpretations behind: %w", err)
 		}
@@ -148,7 +150,7 @@ func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *
 			fmt.Fprintln(w, "interpretations behind: unknown (column not yet added)")
 			break
 		}
-		failed, _, err := st.InterpretationsFailed(repo)
+		failed, _, err := st.InterpretationsFailed(ctx, repo)
 		if err != nil {
 			return fmt.Errorf("count interpretations failed: %w", err)
 		}
@@ -158,7 +160,7 @@ func printInterpretationCatchUp(w io.Writer, st *store.Store, version int, cfg *
 	if version < store.NewSchemaVersion {
 		return nil
 	}
-	run, found, err := st.LastReinterpretRun()
+	run, found, err := st.LastReinterpretRun(ctx)
 	if err != nil {
 		return fmt.Errorf("read last catch-up: %w", err)
 	}
@@ -196,7 +198,7 @@ func printChangeFlow(ctx context.Context, w io.Writer, st *store.Store, version 
 		cfg = &config.Config{}
 		fmt.Fprintf(w, "  config: unavailable (%v); defaults assumed\n", cfgErr)
 	}
-	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge())
+	flow, err := changes.Observe(ctx, st, changesNow(), cfg.SweepMaxAge())
 	if err != nil {
 		return fmt.Errorf("observe change flow: %w", err)
 	}

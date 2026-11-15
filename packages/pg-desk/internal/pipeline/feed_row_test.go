@@ -97,15 +97,15 @@ func TestIngestFeedRow_StoresTheRowsOwnKinds(t *testing.T) {
 	if len(rows) != 1 || !reflect.DeepEqual(rows[0].Kinds, []string{"labels_changed", "title_changed"}) || rows[0].Origin != "pg-connector" {
 		t.Fatalf("rows = %+v", rows)
 	}
-	e, found, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !found || e.Backend != frInstance || e.Inactive || e.Watched == nil || !*e.Watched {
 		t.Fatalf("entity = %+v found=%v watched=%s", e, found, frWatched(e.Watched))
 	}
-	m, ok, _ := p.store.FeedMarker(frInstance)
+	m, ok, _ := p.store.FeedMarker(context.Background(), frInstance)
 	if !ok || m.Seq != 1 || m.StoreIdentity != frIdentity {
 		t.Fatalf("marker = %+v ok=%v", m, ok)
 	}
-	if _, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1"); !found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); !found {
 		t.Fatal("interpretation row missing")
 	}
 }
@@ -131,7 +131,7 @@ func TestIngestFeedRow_RedeliveryAppendsNothing(t *testing.T) {
 	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != 1 {
 		t.Fatalf("after redelivery: %+v", rows)
 	}
-	e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Version != 1 {
 		t.Fatalf("version = %d, want 1", e.Version)
 	}
@@ -156,7 +156,7 @@ func TestIngestFeedRow_HydrationErrorRecordsAndRetryWritesRecordedKinds(t *testi
 	if !r.Failed || r.Written || r.Skipped || r.Version != 0 {
 		t.Fatalf("result = %+v", r)
 	}
-	fails, err := p.store.ListIngestFailures(frInstance)
+	fails, err := p.store.ListIngestFailures(context.Background(), frInstance)
 	if err != nil || len(fails) != 1 {
 		t.Fatalf("failures = %+v err=%v", fails, err)
 	}
@@ -165,7 +165,7 @@ func TestIngestFeedRow_HydrationErrorRecordsAndRetryWritesRecordedKinds(t *testi
 		!reflect.DeepEqual(f.Kinds, []string{"description_changed", "labels_changed"}) || f.LastError == "" {
 		t.Fatalf("failure = %+v", f)
 	}
-	if _, found, _ := p.store.GetEntity(ecRepo, "issue", "i-1"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); found {
 		t.Fatal("a failed row wrote an entity")
 	}
 	// The same row redelivered is skipped (the failed-ingest entry).
@@ -178,7 +178,7 @@ func TestIngestFeedRow_HydrationErrorRecordsAndRetryWritesRecordedKinds(t *testi
 	if err != nil || retried != 1 || still != 1 {
 		t.Fatalf("retry (failing) = %d, %d, %v", retried, still, err)
 	}
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 1 {
+	if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 1 {
 		t.Fatalf("entries = %d, want 1", n)
 	}
 
@@ -192,10 +192,10 @@ func TestIngestFeedRow_HydrationErrorRecordsAndRetryWritesRecordedKinds(t *testi
 	if len(rows) != 1 || !reflect.DeepEqual(rows[0].Kinds, []string{"description_changed", "labels_changed"}) {
 		t.Fatalf("rows = %+v", rows)
 	}
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 0 {
+	if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 0 {
 		t.Fatalf("entries = %d, want 0", n)
 	}
-	if _, ok, _ := p.store.FeedMarker(frInstance); ok {
+	if _, ok, _ := p.store.FeedMarker(context.Background(), frInstance); ok {
 		t.Fatal("a retry wrote a feed marker")
 	}
 	// Nothing left to retry.
@@ -212,16 +212,16 @@ func TestIngestFeedRow_DegradedAnswerWritesNothing(t *testing.T) {
 	if !r.Failed || !r.Degraded || r.Written {
 		t.Fatalf("result = %+v", r)
 	}
-	if _, found, _ := p.store.GetEntity(ecRepo, "issue", "i-1"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); found {
 		t.Fatal("a degraded answer wrote an entity")
 	}
 	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != 0 {
 		t.Fatalf("rows = %+v", rows)
 	}
-	if _, ok, _ := p.store.FeedMarker(frInstance); ok {
+	if _, ok, _ := p.store.FeedMarker(context.Background(), frInstance); ok {
 		t.Fatal("a degraded answer advanced the marker")
 	}
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 1 {
+	if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 1 {
 		t.Fatalf("entries = %d, want 1", n)
 	}
 }
@@ -234,7 +234,7 @@ func TestIngestFeedRow_ContextCancelIsAnErrorNotAFailure(t *testing.T) {
 	if _, err := p.IngestFeedRow(ctx, frRow(1, "i-1", "title_changed")); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 0 {
+	if n, _ := p.store.CountIngestFailures(ctx, frInstance); n != 0 {
 		t.Fatalf("a cancelled read recorded %d failures", n)
 	}
 }
@@ -247,12 +247,12 @@ func TestIngestFeedRow_ClosedRowAppendsDeactivatesAndClearsWatched(t *testing.T)
 	if !r.Written {
 		t.Fatalf("result = %+v", r)
 	}
-	e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if !e.Inactive || e.Watched == nil || *e.Watched {
 		t.Fatalf("entity inactive=%v watched=%s, want inactive and watched=false", e.Inactive, frWatched(e.Watched))
 	}
 	// The delivered closed row is readable.
-	read, err := p.store.ReadChanges("c1", "issue", 100, time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC))
+	read, err := p.store.ReadChanges(context.Background(), "c1", "issue", 100, time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestIngestFeedRow_ClosedRowAppendsDeactivatesAndClearsWatched(t *testing.T)
 
 	// The next feed row sets the flag again and reactivates the entity.
 	frIngest(t, p, frRow(3, "i-1", "reopened"))
-	e, _, _ = p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ = p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Inactive || e.Watched == nil || !*e.Watched {
 		t.Fatalf("after next row: inactive=%v watched=%s", e.Inactive, frWatched(e.Watched))
 	}
@@ -274,7 +274,7 @@ func TestIngestFeedRow_WatchedMirrorsEntityMeta(t *testing.T) {
 
 	// NOT STATED is written as true.
 	frIngest(t, p, frRow(1, "i-1", "title_changed"))
-	e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Watched == nil || !*e.Watched {
 		t.Fatalf("not stated: watched = %s, want true", frWatched(e.Watched))
 	}
@@ -283,7 +283,7 @@ func TestIngestFeedRow_WatchedMirrorsEntityMeta(t *testing.T) {
 	f := false
 	g.result.Watched = &f
 	frIngest(t, p, frRow(2, "i-1", "labels_changed"))
-	e, _, _ = p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ = p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Watched == nil || *e.Watched {
 		t.Fatalf("stated false: watched = %s, want false", frWatched(e.Watched))
 	}
@@ -295,7 +295,7 @@ func TestIngestFeedRow_WatchedMirrorsEntityMeta(t *testing.T) {
 	tr := true
 	g.result.Watched = &tr
 	frIngest(t, p, frRow(3, "i-1", "title_changed"))
-	e, _, _ = p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, _, _ = p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if e.Watched == nil || !*e.Watched {
 		t.Fatalf("stated true: watched = %s, want true", frWatched(e.Watched))
 	}
@@ -304,14 +304,14 @@ func TestIngestFeedRow_WatchedMirrorsEntityMeta(t *testing.T) {
 func TestIngestFeedRow_RemovedRowOfAHeldEntityKeepsFactsAndDeactivates(t *testing.T) {
 	p, g := frPipeline(t)
 	frIngest(t, p, frRow(1, "i-1", "title_changed"))
-	before, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	before, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 
 	g.result = gather.GatherResult{RemovedState: "not_found"}
 	r := frIngest(t, p, frRow(2, "i-1", "removed"))
 	if !r.Written || r.Failed {
 		t.Fatalf("result = %+v", r)
 	}
-	after, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	after, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if after.Facts != before.Facts || after.ContentHash != before.ContentHash || !after.Inactive ||
 		after.Watched == nil || *after.Watched || after.Version != before.Version+1 {
 		t.Fatalf("before=%+v after=%+v", before, after)
@@ -320,7 +320,7 @@ func TestIngestFeedRow_RemovedRowOfAHeldEntityKeepsFactsAndDeactivates(t *testin
 	if len(rows) != 2 || !reflect.DeepEqual(rows[1].Kinds, []string{"removed"}) {
 		t.Fatalf("rows = %+v", rows)
 	}
-	if m, _, _ := p.store.FeedMarker(frInstance); m.Seq != 2 {
+	if m, _, _ := p.store.FeedMarker(context.Background(), frInstance); m.Seq != 2 {
 		t.Fatalf("marker = %+v", m)
 	}
 }
@@ -333,10 +333,10 @@ func TestIngestFeedRow_RemovedRowOfAnUnheldEntityOnlyAdvancesTheMarker(t *testin
 	if r.Written || r.Skipped || r.Failed {
 		t.Fatalf("result = %+v", r)
 	}
-	if _, found, _ := p.store.GetEntity(ecRepo, "issue", "i-9"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-9"); found {
 		t.Fatal("an unheld removed row created an entity")
 	}
-	if m, ok, _ := p.store.FeedMarker(frInstance); !ok || m.Seq != 4 {
+	if m, ok, _ := p.store.FeedMarker(context.Background(), frInstance); !ok || m.Seq != 4 {
 		t.Fatalf("marker = %+v ok=%v", m, ok)
 	}
 }
@@ -349,7 +349,7 @@ func TestIngestFeedRow_NotFoundWithoutRemovedIsAFailure(t *testing.T) {
 	if !r.Failed || r.Written {
 		t.Fatalf("result = %+v", r)
 	}
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 1 {
+	if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 1 {
 		t.Fatalf("entries = %d, want 1", n)
 	}
 }
@@ -363,7 +363,7 @@ func TestIngestFeedRow_OnlyMembershipKindsAdvancesMarkerWithoutARow(t *testing.T
 	if rows := p.changeRows(t, "issue", "i-1"); len(rows) != 0 {
 		t.Fatalf("rows = %+v, want none", rows)
 	}
-	if m, ok, _ := p.store.FeedMarker(frInstance); !ok || m.Seq != 1 {
+	if m, ok, _ := p.store.FeedMarker(context.Background(), frInstance); !ok || m.Seq != 1 {
 		t.Fatalf("marker = %+v ok=%v", m, ok)
 	}
 }
@@ -382,7 +382,7 @@ func TestIngestFeedRow_ReplayRowIsAddedWithResetOriginAndNoMarker(t *testing.T) 
 	if len(rows) != 2 || !reflect.DeepEqual(rows[1].Kinds, []string{"added"}) || rows[1].Origin != "reset" {
 		t.Fatalf("rows = %+v", rows)
 	}
-	if m, _, _ := p.store.FeedMarker(frInstance); m.Seq != 3 {
+	if m, _, _ := p.store.FeedMarker(context.Background(), frInstance); m.Seq != 3 {
 		t.Fatalf("marker = %+v, a replay row must not move it", m)
 	}
 	// Replaying again appends again (no skip check).
@@ -400,7 +400,7 @@ func TestIngestFeedRow_PropagationIsDerivedFromTheRowsKinds(t *testing.T) {
 	frIngest(t, p, frRow(1, "i-1", "added"))
 	// The PR entity exists so the propagated record has a row to land on.
 	const prID = ecRepo + "#7"
-	if _, err := p.store.WriteEntityStateWithLogFP(store.Entity{
+	if _, err := p.store.WriteEntityStateWithLogFP(context.Background(), store.Entity{
 		Repo: ecRepo, EntityType: "pr", EntityID: prID, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z", ContentHash: "h",
 	}, 0, "2026-09-16T00:00:00Z", true, nil, nil, "test", "2026-09-16T00:00:00Z"); err != nil {
 		t.Fatal(err)
@@ -429,7 +429,7 @@ func TestPropagationToALinkedIssueIsGatedByWatched(t *testing.T) {
 
 	const prID = ecRepo + "#9"
 	for _, id := range []string{"i-watched", "i-unwatched"} {
-		if err := p.store.UpsertXref(store.Xref{
+		if err := p.store.UpsertXref(context.Background(), store.Xref{
 			Repo: ecRepo, FromType: "pr", FromID: prID, ToType: "issue", ToID: id,
 			Evidence: "branch", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
 		}); err != nil {
@@ -437,8 +437,8 @@ func TestPropagationToALinkedIssueIsGatedByWatched(t *testing.T) {
 		}
 	}
 	// The PR's own change record (kinds include link_changed) propagates.
-	own := classify.NewStoreWorkLookup(p.store, ecRepo)
-	if err := p.appendLocalRecords(ecRepo, "pr", prID, true, true, nil, own, "2026-09-16T12:00:00Z"); err != nil {
+	own := classify.NewStoreWorkLookup(context.Background(), p.store, ecRepo)
+	if err := p.appendLocalRecords(context.Background(), ecRepo, "pr", prID, true, true, nil, own, "2026-09-16T12:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -471,7 +471,7 @@ func TestRetryIngestFailures_StopsAfterADegradedStreakAndResumesNextPoll(t *test
 	if got := g.calls - callsBefore; got != FeedDegradedStreak {
 		t.Fatalf("hydrations = %d, want %d", got, FeedDegradedStreak)
 	}
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 5 {
+	if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 5 {
 		t.Fatalf("entries = %d, want all 5 kept", n)
 	}
 
@@ -481,7 +481,7 @@ func TestRetryIngestFailures_StopsAfterADegradedStreakAndResumesNextPoll(t *test
 	if err != nil || retried != 5 || still != 0 {
 		t.Fatalf("next poll = %d, %d, %v", retried, still, err)
 	}
-	if n, _ := p.store.CountIngestFailures(frInstance); n != 0 {
+	if n, _ := p.store.CountIngestFailures(context.Background(), frInstance); n != 0 {
 		t.Fatalf("entries = %d, want 0", n)
 	}
 }

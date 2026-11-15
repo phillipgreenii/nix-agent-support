@@ -51,7 +51,7 @@ func (h *orphanHydrator) RunEntityChange(ctx context.Context, entityType, id str
 	if d := h.degraded[id]; d != "" {
 		return pipeline.EntityChangeResult{Degraded: d}, nil
 	}
-	row, found, err := h.st.GetEntity("o/r", entityType, id)
+	row, found, err := h.st.GetEntity(ctx, "o/r", entityType, id)
 	if err != nil {
 		return pipeline.EntityChangeResult{}, err
 	}
@@ -70,7 +70,7 @@ func (h *orphanHydrator) RunEntityChange(ctx context.Context, entityType, id str
 	if k, ok := h.kindsOf[id]; ok {
 		kinds = k
 	}
-	v, err := h.st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
+	v, err := h.st.WriteEntityStateWithLogFP(ctx, store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
 		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z")
 	return pipeline.EntityChangeResult{Written: err == nil, Version: v, Kinds: kinds}, err
 }
@@ -98,21 +98,21 @@ func seedOrphan(t *testing.T, st *store.Store, id string) {
 	t.Helper()
 	seedRow(t, st, id, "F1", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func seedAttempt(t *testing.T, st *store.Store, id, at string) {
 	t.Helper()
-	if err := st.SetEntityReadTimes("o/r", "issue", id, &at, nil); err != nil {
+	if err := st.SetEntityReadTimes(context.Background(), "o/r", "issue", id, &at, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func entityOf(t *testing.T, st *store.Store, id string) store.Entity {
 	t.Helper()
-	row, found, err := st.GetEntity("o/r", "issue", id)
+	row, found, err := st.GetEntity(context.Background(), "o/r", "issue", id)
 	if err != nil || !found {
 		t.Fatalf("entity %s: found=%v err=%v", id, found, err)
 	}
@@ -147,7 +147,7 @@ func orphanCalls(calls []string) []string {
 func TestWatchedIssueThatLeftEveryQueryIsReadByIDNotRemoved(t *testing.T) {
 	e, st, h := newOrphanEngine(t)
 	seedOrphan(t, st, "bd-1")
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing()} // bd-1 left the only query
@@ -181,7 +181,7 @@ func TestWatchedIssueThatLeftEveryQueryIsReadByIDNotRemoved(t *testing.T) {
 func TestUnwatchedIssueThatLeftEveryQueryIsStillRemovalConfirmed(t *testing.T) {
 	e, st, h := newOrphanEngine(t)
 	seedRow(t, st, "bd-1", "F1", "2026-10-01T11:00:00Z", true) // watched NULL
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"bd-1": true}); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing()}
@@ -367,7 +367,7 @@ func TestFailedOrDegradedOrphanReadLeavesItWatchedAndDueAgain(t *testing.T) {
 			seedOrphan(t, st, "bd-o1")
 			okBefore := "2026-10-01T10:00:00Z"
 			attemptBefore := "2026-10-01T10:00:01Z"
-			if err := st.SetEntityReadTimes("o/r", "issue", "bd-o1", &attemptBefore, &okBefore); err != nil {
+			if err := st.SetEntityReadTimes(context.Background(), "o/r", "issue", "bd-o1", &attemptBefore, &okBefore); err != nil {
 				t.Fatal(err)
 			}
 			setup(h)
@@ -402,7 +402,7 @@ func TestFailedOrDegradedOrphanReadLeavesItWatchedAndDueAgain(t *testing.T) {
 
 func changeRows(t *testing.T, st *store.Store, id string) []store.ChangeRecord {
 	t.Helper()
-	all, err := st.ListChangesAfter("issue", 0, 0)
+	all, err := st.ListChangesAfter(context.Background(), "issue", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func TestOrphanEntitiesSelection(t *testing.T) {
 		if backend != "" {
 			b = &backend
 		}
-		if err := st.SetEntityColumns("o/r", "issue", id, b, watched); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, b, watched); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -545,11 +545,11 @@ func TestOrphanEntitiesSelection(t *testing.T) {
 	seed("inactive", false, &yes, "")
 	seed("owned", true, &yes, "jira")
 	seed("other-backend", true, &yes, "beads-x")
-	if err := saveWatchSet(st, "issue", "open", map[string]bool{"held": true}); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", map[string]bool{"held": true}); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := OrphanEntities(st, cfg)
+	got, err := OrphanEntities(context.Background(), st, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

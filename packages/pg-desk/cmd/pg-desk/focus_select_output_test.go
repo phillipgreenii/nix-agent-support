@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ func (f *selFixture) bead(t *testing.T, src focus.Key, id, status, assignee, hol
 	f.write(t, "issue", id, map[string]any{"issue_show": map[string]any{
 		"id": id, "state": status, "assignee": assignee, "title": "Focus " + id, "metadata": meta,
 	}}, showAt)
-	if err := f.st.ReplaceDerivedXrefs(showRepo, "issue", id, []store.XrefLink{{
+	if err := f.st.ReplaceDerivedXrefs(context.Background(), showRepo, "issue", id, []store.XrefLink{{
 		Repo: showRepo, FromType: "issue", FromID: id, ToType: src.Type, ToID: src.ID,
 		Relation: "source", Origin: "derived:source-entity", FirstSeen: showAt, LastConfirmed: showAt,
 	}}); err != nil {

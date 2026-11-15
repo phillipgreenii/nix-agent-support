@@ -1,6 +1,7 @@
 package gather
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -27,7 +28,7 @@ type StackParent struct {
 // a pg-connector call, so a parent's mergeability is as current as its own
 // stored row.
 type entityLister interface {
-	ListEntities() ([]store.Entity, error)
+	ListEntities(ctx context.Context) ([]store.Entity, error)
 }
 
 // gatherStackParents records into f the open PRs the triggering PR is stacked
@@ -37,12 +38,12 @@ type entityLister interface {
 // branch is its own base ends the chain. A store without ListEntities (or a
 // nil one) or a read failure leaves f unchanged apart from a degraded mark on
 // the failure.
-func (g *Gatherer) gatherStackParents(repo, entityID, base string, f *Facts) {
+func (g *Gatherer) gatherStackParents(ctx context.Context, repo, entityID, base string, f *Facts) {
 	lister, ok := g.xrefs.(entityLister)
 	if !ok || lister == nil || base == "" {
 		return
 	}
-	rows, err := lister.ListEntities()
+	rows, err := lister.ListEntities(ctx)
 	if err != nil {
 		f.degrade("stack parents")
 		return

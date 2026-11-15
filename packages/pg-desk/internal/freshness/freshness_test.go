@@ -1,6 +1,7 @@
 package freshness
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -19,14 +20,14 @@ func ledgerRow(backend, query string, refreshed *time.Time) LedgerRow {
 
 func mustUpdate(t *testing.T, st *store.Store, rows ...LedgerRow) {
 	t.Helper()
-	if err := Update(st, rows); err != nil {
+	if err := Update(context.Background(), st, rows); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 }
 
 func mustSources(t *testing.T, st *store.Store, cfg *config.Config, now time.Time) []Row {
 	t.Helper()
-	rows, err := Sources(st, cfg, now)
+	rows, err := Sources(context.Background(), st, cfg, now)
 	if err != nil {
 		t.Fatalf("Sources: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestUpdateRecordsAndIsIdempotent(t *testing.T) {
 		ledgerRow("pg-connector-pr-github", "team", ts(-2*time.Minute)),
 	}
 	mustUpdate(t, st, rows...)
-	before, _ := st.ListMetaPrefix(MetaKeyPrefix)
+	before, _ := st.ListMetaPrefix(context.Background(), MetaKeyPrefix)
 	if len(before) != 2 {
 		t.Fatalf("recorded %d keys, want 2: %v", len(before), before)
 	}
@@ -97,7 +98,7 @@ func TestUpdateRecordsAndIsIdempotent(t *testing.T) {
 		t.Errorf("key shape source_fetch.<backend>.<query> missing: %v", before)
 	}
 	mustUpdate(t, st, rows...)
-	after, _ := st.ListMetaPrefix(MetaKeyPrefix)
+	after, _ := st.ListMetaPrefix(context.Background(), MetaKeyPrefix)
 	for k, v := range before {
 		if after[k] != v {
 			t.Errorf("%s changed on an idempotent re-run: %q -> %q", k, v, after[k])
@@ -139,7 +140,7 @@ func TestUpdateRecordsASourceWithNoSuccessAsUnknown(t *testing.T) {
 func TestUpdateSkipsRowsWithoutBackendOrQuery(t *testing.T) {
 	st := store.OpenForTest(t)
 	mustUpdate(t, st, LedgerRow{Type: "pr", Query: "q"}, LedgerRow{Type: "pr", Backend: "b"})
-	if kv, _ := st.ListMetaPrefix(MetaKeyPrefix); len(kv) != 0 {
+	if kv, _ := st.ListMetaPrefix(context.Background(), MetaKeyPrefix); len(kv) != 0 {
 		t.Errorf("recorded %v for rows with no backend or query", kv)
 	}
 }
@@ -165,7 +166,7 @@ func TestUpdateKeepsInstancesApart(t *testing.T) {
 		LedgerRow{Type: "issue", Backend: "b", Query: "q", Instance: "one", RefreshedAt: ts(-time.Minute)},
 		LedgerRow{Type: "issue", Backend: "b", Query: "q", Instance: "two", RefreshedAt: ts(-time.Hour)},
 	)
-	if kv, _ := st.ListMetaPrefix(MetaKeyPrefix); len(kv) != 2 {
+	if kv, _ := st.ListMetaPrefix(context.Background(), MetaKeyPrefix); len(kv) != 2 {
 		t.Fatalf("recorded %v, want one key per instance", kv)
 	}
 	rows := mustSources(t, st, nil, t0)
@@ -266,10 +267,10 @@ func TestSourcesHonorsConfiguredThresholdsAndLabels(t *testing.T) {
 func TestSourcesClockSkewAndMalformedRows(t *testing.T) {
 	st := store.OpenForTest(t)
 	mustUpdate(t, st, ledgerRow("b", "q", ts(time.Minute))) // success "in the future"
-	if err := st.SetMeta(MetaKeyPrefix+"junk.q", "{not json"); err != nil {
+	if err := st.SetMeta(context.Background(), MetaKeyPrefix+"junk.q", "{not json"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetMeta(MetaKeyPrefix+"empty.q", `{"backend":""}`); err != nil {
+	if err := st.SetMeta(context.Background(), MetaKeyPrefix+"empty.q", `{"backend":""}`); err != nil {
 		t.Fatal(err)
 	}
 	rows := mustSources(t, st, nil, t0)
@@ -297,7 +298,7 @@ func TestBuildReport(t *testing.T) {
 		ledgerRow("pg-connector-pr-github", "mine", ts(-time.Minute)),
 		ledgerRow("pg-connector-issue-jira", "mine", ts(-time.Hour)),
 	)
-	rep, err := Build(st, &config.Config{}, t0)
+	rep, err := Build(context.Background(), st, &config.Config{}, t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,11 +308,11 @@ func TestBuildReport(t *testing.T) {
 
 	fresh := store.OpenForTest(t)
 	mustUpdate(t, fresh, ledgerRow("b", "q", ts(-time.Minute)))
-	rep, err = Build(fresh, nil, t0)
+	rep, err = Build(context.Background(), fresh, nil, t0)
 	if err != nil || rep.AnyStale {
 		t.Errorf("fresh report = %+v, %v; want any_stale false", rep, err)
 	}
-	empty, err := Build(store.OpenForTest(t), nil, t0)
+	empty, err := Build(context.Background(), store.OpenForTest(t), nil, t0)
 	if err != nil || empty.AnyStale || empty.Sources == nil {
 		t.Errorf("empty report = %+v, %v; want no stale source and a non-nil sources", empty, err)
 	}
@@ -357,7 +358,7 @@ func TestUpdateRecordsLastSeenMonotonically(t *testing.T) {
 	mustUpdate(t, st, seen(row, -time.Minute))
 	mustUpdate(t, st, seen(row, -time.Hour)) // stale read
 	mustUpdate(t, st, row)                   // consumer info absent
-	kv, _ := st.ListMetaPrefix(MetaKeyPrefix)
+	kv, _ := st.ListMetaPrefix(context.Background(), MetaKeyPrefix)
 	var rec Record
 	if err := json.Unmarshal([]byte(kv["source_fetch.b.q"]), &rec); err != nil {
 		t.Fatal(err)
@@ -533,7 +534,7 @@ func TestSourcesRetiredBackendWithOnlyAbandonedRowsLeavesTheReport(t *testing.T)
 	)
 	for _, name := range []string{"pr-github", old} {
 		cfg := &config.Config{Freshness: config.FreshnessConfig{RetiredSources: []string{name}}}
-		rep, err := Build(st, cfg, t0)
+		rep, err := Build(context.Background(), st, cfg, t0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -542,7 +543,7 @@ func TestSourcesRetiredBackendWithOnlyAbandonedRowsLeavesTheReport(t *testing.T)
 		}
 	}
 	// Not deleting store rows (INV-FRESH-6).
-	if kv, _ := st.ListMetaPrefix(MetaKeyPrefix + old); len(kv) != 2 {
+	if kv, _ := st.ListMetaPrefix(context.Background(), MetaKeyPrefix+old); len(kv) != 2 {
 		t.Errorf("store rows = %d, want 2 kept", len(kv))
 	}
 }

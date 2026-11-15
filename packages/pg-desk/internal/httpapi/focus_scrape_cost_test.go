@@ -26,7 +26,7 @@ func seedLargeFocusStore(t testing.TB, n int) *store.Store {
 	write := func(typ, id, facts string) {
 		t.Helper()
 		e := store.Entity{Repo: focusScrapeRepo, EntityType: typ, EntityID: id, Facts: facts, AsOf: focusAt, ContentHash: "h" + id}
-		if _, err := s.WriteEntityStateWithLog(e, 0, focusAt, true, []string{"created"}, "sync", focusAt); err != nil {
+		if _, err := s.WriteEntityStateWithLog(context.Background(), e, 0, focusAt, true, []string{"created"}, "sync", focusAt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -38,14 +38,14 @@ func seedLargeFocusStore(t testing.TB, n int) *store.Store {
 		id := fmt.Sprintf("bd-%d", i)
 		src := fmt.Sprint(i % prs)
 		write("issue", id, fmt.Sprintf(`{"issue_show":{"id":%q,"state":"open","created_at":"2026-10-10T10:00:00Z","metadata":{"source_id":%q,"source_type":"pr"}}}`, id, src))
-		if err := s.ReplaceDerivedXrefs(focusScrapeRepo, "issue", id, []store.XrefLink{{
+		if err := s.ReplaceDerivedXrefs(context.Background(), focusScrapeRepo, "issue", id, []store.XrefLink{{
 			Repo: focusScrapeRepo, FromType: "issue", FromID: id, ToType: "pr", ToID: src,
 			Relation: "source", Origin: "derived:test", FirstSeen: focusAt, LastConfirmed: focusAt,
 		}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.UpsertInterpretation(store.Interpretation{
+	if err := s.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: focusScrapeRepo, EntityType: "pr", EntityID: "0", Panel: PanelMineAwaitingMe, AsOf: focusAt,
 	}); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func seedLargeFocusStore(t testing.TB, n int) *store.Store {
 func addFocusPlanRow(t *testing.T, s *store.Store, id string, pos int) {
 	t.Helper()
 	e := store.Entity{Repo: focusScrapeRepo, EntityType: "pr", EntityID: id, Facts: `{"pr_show":{"state":"open"}}`, AsOf: focusAt, ContentHash: "h" + id}
-	if _, err := s.WriteEntityStateWithLog(e, 0, focusAt, true, []string{"created"}, "sync", focusAt); err != nil {
+	if _, err := s.WriteEntityStateWithLog(context.Background(), e, 0, focusAt, true, []string{"created"}, "sync", focusAt); err != nil {
 		t.Fatal(err)
 	}
 	err := s.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
@@ -111,7 +111,7 @@ func scrapeBody(t testing.TB, h http.Handler) string {
 // old value at once and the following one the refreshed value.
 func TestFocusScrapeDoesNotRecomputeHealthWithinTheTTL(t *testing.T) {
 	s := seedFocusStore(t)
-	h, err := NewHandler(s, focusConfig())
+	h, err := NewHandler(context.Background(), s, focusConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestFocusScrapeRefreshesHealthAfterTheTTL(t *testing.T) {
 	t.Cleanup(func() { focusHealthTTL = old })
 
 	s := seedFocusStore(t)
-	h, err := NewHandler(s, focusConfig())
+	h, err := NewHandler(context.Background(), s, focusConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -173,13 +173,13 @@ func TestFocusScrapeIsCheapOnALargeStore(t *testing.T) {
 	cfg := focusConfig()
 
 	start := time.Now()
-	hl, err := focus.ComputeHealth(s, cfg, nowUTC())
+	hl, err := focus.ComputeHealth(context.Background(), s, cfg, nowUTC())
 	compute := time.Since(start)
 	if err != nil || !hl.Migrated() || hl.Selected != 6 {
 		t.Fatalf("ComputeHealth = migrated %v, selected %d, %v", hl.Migrated(), hl.Selected, err)
 	}
 
-	h, err := NewHandler(s, cfg)
+	h, err := NewHandler(context.Background(), s, cfg)
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestFocusScrapeIsCheapOnALargeStore(t *testing.T) {
 // ~1000-entity store: run with -bench FocusScrape to compare the two.
 func BenchmarkFocusScrapeCached(b *testing.B) {
 	s := seedLargeFocusStore(b, 1000)
-	h, err := NewHandler(s, focusConfig())
+	h, err := NewHandler(context.Background(), s, focusConfig())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func BenchmarkFocusComputeHealth(b *testing.B) {
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := focus.ComputeHealth(s, cfg, now); err != nil {
+		if _, err := focus.ComputeHealth(context.Background(), s, cfg, now); err != nil {
 			b.Fatal(err)
 		}
 	}

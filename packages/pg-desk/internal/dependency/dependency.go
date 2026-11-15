@@ -27,6 +27,7 @@
 package dependency
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -60,10 +61,10 @@ const (
 // Reader is the read-only slice of the store this package needs.
 // *store.Store satisfies it.
 type Reader interface {
-	RequireNewSchema() error
-	ListEntities() ([]store.Entity, error)
-	ListXrefLinksFrom(repo, fromType, fromID string) ([]store.XrefLink, error)
-	ListXrefLinksTo(repo, toType, toID string) ([]store.XrefLink, error)
+	RequireNewSchema(ctx context.Context) error
+	ListEntities(ctx context.Context) ([]store.Entity, error)
+	ListXrefLinksFrom(ctx context.Context, repo, fromType, fromID string) ([]store.XrefLink, error)
+	ListXrefLinksTo(ctx context.Context, repo, toType, toID string) ([]store.XrefLink, error)
 }
 
 // Edge is one dependency relationship seen from one end. For DependenciesOf
@@ -97,9 +98,9 @@ type Claim struct {
 type Source interface {
 	Name() string
 	// Dependencies returns the PRs that PR id depends on.
-	Dependencies(c *Context, id string) ([]Claim, error)
+	Dependencies(ctx context.Context, c *Context, id string) ([]Claim, error)
 	// Dependents returns the PRs that depend on PR id.
-	Dependents(c *Context, id string) ([]Claim, error)
+	Dependents(ctx context.Context, c *Context, id string) ([]Claim, error)
 }
 
 // Registry is the ordered set of Sources.
@@ -158,15 +159,15 @@ func NewResolverWith(reg *Registry, r Reader, repo string) *Resolver {
 
 // DependenciesOf returns every PR the given entity depends on, whatever its
 // state, ordered by id. An entity type other than pr has none.
-func (r *Resolver) DependenciesOf(entityType, id string) ([]Edge, error) {
-	return r.collect(entityType, id, Source.Dependencies)
+func (r *Resolver) DependenciesOf(ctx context.Context, entityType, id string) ([]Edge, error) {
+	return r.collect(ctx, entityType, id, Source.Dependencies)
 }
 
 // OpenDependenciesOf is DependenciesOf restricted to dependencies that are
 // still open: the set a suppression rule waits on. It empties once the last
 // dependency has merged or closed.
-func (r *Resolver) OpenDependenciesOf(entityType, id string) ([]Edge, error) {
-	all, err := r.DependenciesOf(entityType, id)
+func (r *Resolver) OpenDependenciesOf(ctx context.Context, entityType, id string) ([]Edge, error) {
+	all, err := r.DependenciesOf(ctx, entityType, id)
 	if err != nil {
 		return nil, err
 	}
@@ -182,24 +183,24 @@ func (r *Resolver) OpenDependenciesOf(entityType, id string) ([]Edge, error) {
 // DependentsOf returns every PR that depends on the given entity, ordered by
 // id. The reverse of DependenciesOf: the stack source reports a dependent
 // only while the entity is itself open.
-func (r *Resolver) DependentsOf(entityType, id string) ([]Edge, error) {
-	return r.collect(entityType, id, Source.Dependents)
+func (r *Resolver) DependentsOf(ctx context.Context, entityType, id string) ([]Edge, error) {
+	return r.collect(ctx, entityType, id, Source.Dependents)
 }
 
-func (r *Resolver) collect(entityType, id string, ask func(Source, *Context, string) ([]Claim, error)) ([]Edge, error) {
+func (r *Resolver) collect(ctx context.Context, entityType, id string, ask func(Source, context.Context, *Context, string) ([]Claim, error)) ([]Edge, error) {
 	if entityType != TypePR || id == "" {
 		return nil, nil
 	}
 	merged := map[string]*Edge{}
 	for _, s := range r.reg.sources {
-		claims, err := ask(s, r.ctx, id)
+		claims, err := ask(s, ctx, r.ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("dependency: source %s: %w", s.Name(), err)
 		}
 		for _, c := range claims {
 			e := merged[c.ID]
 			if e == nil {
-				st, err := r.ctx.stateOf(c.ID)
+				st, err := r.ctx.stateOf(ctx, c.ID)
 				if err != nil {
 					return nil, err
 				}
@@ -257,11 +258,11 @@ func (p *prRow) open() bool { return p.State == StateOpen }
 // repository, that the store marks inactive (no longer watched, so its state
 // is unreliable) or whose facts do not decode is left out: it is then unknown,
 // and an unknown PR is not open.
-func (c *Context) index() error {
+func (c *Context) index(ctx context.Context) error {
 	if c.indexed {
 		return nil
 	}
-	rows, err := c.Reader.ListEntities()
+	rows, err := c.Reader.ListEntities(ctx)
 	if err != nil {
 		return fmt.Errorf("dependency: read entities: %w", err)
 	}
@@ -307,8 +308,8 @@ func (c *Context) index() error {
 	return nil
 }
 
-func (c *Context) stateOf(id string) (string, error) {
-	if err := c.index(); err != nil {
+func (c *Context) stateOf(ctx context.Context, id string) (string, error) {
+	if err := c.index(ctx); err != nil {
 		return "", err
 	}
 	if p := c.prs[id]; p != nil {
@@ -333,8 +334,8 @@ const originStack = "derived:stack"
 
 // Dependencies: the open PRs in the same repository whose head branch is this
 // PR's base branch.
-func (stackSource) Dependencies(c *Context, id string) ([]Claim, error) {
-	if err := c.index(); err != nil {
+func (stackSource) Dependencies(ctx context.Context, c *Context, id string) ([]Claim, error) {
+	if err := c.index(ctx); err != nil {
 		return nil, err
 	}
 	a := c.prs[id]
@@ -352,8 +353,8 @@ func (stackSource) Dependencies(c *Context, id string) ([]Claim, error) {
 
 // Dependents: the PRs in the same repository whose base branch is this PR's
 // head branch, while this PR is open.
-func (stackSource) Dependents(c *Context, id string) ([]Claim, error) {
-	if err := c.index(); err != nil {
+func (stackSource) Dependents(ctx context.Context, c *Context, id string) ([]Claim, error) {
+	if err := c.index(ctx); err != nil {
 		return nil, err
 	}
 	b := c.prs[id]
@@ -374,8 +375,8 @@ type externalSource struct{}
 func (externalSource) Name() string { return SourceExternal }
 
 // Dependencies: the PRs this PR has an external depends_on link to.
-func (externalSource) Dependencies(c *Context, id string) ([]Claim, error) {
-	rows, err := c.Reader.ListXrefLinksFrom(c.Repo, TypePR, id)
+func (externalSource) Dependencies(ctx context.Context, c *Context, id string) ([]Claim, error) {
+	rows, err := c.Reader.ListXrefLinksFrom(ctx, c.Repo, TypePR, id)
 	if err != nil {
 		return nil, fmt.Errorf("read links from %s: %w", id, err)
 	}
@@ -383,8 +384,8 @@ func (externalSource) Dependencies(c *Context, id string) ([]Claim, error) {
 }
 
 // Dependents: the PRs that have an external depends_on link to this PR.
-func (externalSource) Dependents(c *Context, id string) ([]Claim, error) {
-	rows, err := c.Reader.ListXrefLinksTo(c.Repo, TypePR, id)
+func (externalSource) Dependents(ctx context.Context, c *Context, id string) ([]Claim, error) {
+	rows, err := c.Reader.ListXrefLinksTo(ctx, c.Repo, TypePR, id)
 	if err != nil {
 		return nil, fmt.Errorf("read links to %s: %w", id, err)
 	}

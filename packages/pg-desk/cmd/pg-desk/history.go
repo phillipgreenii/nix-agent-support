@@ -37,6 +37,8 @@ func newHistoryCmd(entityType string) *cobra.Command {
 }
 
 func runHistory(cmd *cobra.Command, entityType, ref string, limit int, jsonOut bool) error {
+	ctx := cmd.Context()
+
 	if limit < 0 {
 		return fmt.Errorf("history: --limit must be >= 0, got %d", limit)
 	}
@@ -53,16 +55,16 @@ func runHistory(cmd *cobra.Command, entityType, ref string, limit int, jsonOut b
 		return fmt.Errorf("history: open store: %w", err)
 	}
 	defer func() { _ = st.Close() }()
-	if err := requireNewSchemaForTypedVerb(st); err != nil {
+	if err := requireNewSchemaForTypedVerb(ctx, st); err != nil {
 		return err
 	}
 
-	rows, err := st.ListEntityHistory(repo, entityType, id, limit)
+	rows, err := st.ListEntityHistory(ctx, repo, entityType, id, limit)
 	if err != nil {
 		return fmt.Errorf("history: %w", err)
 	}
 	title := ""
-	if ent, found, gerr := st.GetEntity(repo, entityType, id); gerr != nil {
+	if ent, found, gerr := st.GetEntity(ctx, repo, entityType, id); gerr != nil {
 		return fmt.Errorf("history: read entity: %w", gerr)
 	} else if found {
 		title = changes.TitleFromFacts(entityType, ent.Facts)

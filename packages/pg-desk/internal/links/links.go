@@ -13,6 +13,7 @@
 package links
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -104,7 +105,7 @@ type Subject struct {
 
 // Strategy produces the links for refs of one entity type.
 type Strategy interface {
-	Links(d Deps, s Subject) ([]Link, error)
+	Links(ctx context.Context, d Deps, s Subject) ([]Link, error)
 }
 
 // Registry maps an entity type name to its Strategy.
@@ -135,11 +136,11 @@ func ParseRef(ref string) (typ, id string, ok bool) {
 
 // Resolve answers every ref against the local store. An unknown ref is not an
 // error (INV-LINKS-2); only an unreadable store is.
-func Resolve(d Deps, refs []string) (Result, error) {
+func Resolve(ctx context.Context, d Deps, refs []string) (Result, error) {
 	reg := NewRegistry()
 	d.dependencies() // one resolver (one entity-table read) for the whole batch
 	res := Result{SchemaVersion: SchemaVersion, Items: map[string]Item{}}
-	if err := d.Store.RequireNewSchema(); err != nil {
+	if err := d.Store.RequireNewSchema(ctx); err != nil {
 		return Result{}, fmt.Errorf("links: read schema version: %w", err)
 	}
 	var oldest time.Time
@@ -159,11 +160,11 @@ func Resolve(d Deps, refs []string) (Result, error) {
 			res.Items[ref] = unknown
 			continue
 		}
-		ent, found, err := d.Store.GetEntity(d.Repo, typ, id)
+		ent, found, err := d.Store.GetEntity(ctx, d.Repo, typ, id)
 		if err != nil {
 			return Result{}, fmt.Errorf("links: read entity %s: %w", ref, err)
 		}
-		linked, err := ReadLinked(d.Store, d.Repo, typ, id)
+		linked, err := ReadLinked(ctx, d.Store, d.Repo, typ, id)
 		if err != nil {
 			return Result{}, fmt.Errorf("links: read links of %s: %w", ref, err)
 		}
@@ -178,7 +179,7 @@ func Resolve(d Deps, refs []string) (Result, error) {
 				oldest, oldestRaw = t, ent.AsOf
 			}
 		}
-		ls, err := strat.Links(d, subj)
+		ls, err := strat.Links(ctx, d, subj)
 		if err != nil {
 			return Result{}, fmt.Errorf("links: build links of %s: %w", ref, err)
 		}
@@ -213,8 +214,8 @@ func prLabel(id string) string {
 
 // entityURL is the snapshot URL of a stored entity, "" when it is not stored
 // or has none.
-func entityURL(d Deps, typ, id string) (string, error) {
-	e, found, err := d.Store.GetEntity(d.Repo, typ, id)
+func entityURL(ctx context.Context, d Deps, typ, id string) (string, error) {
+	e, found, err := d.Store.GetEntity(ctx, d.Repo, typ, id)
 	if err != nil || !found {
 		return "", err
 	}
@@ -234,14 +235,14 @@ func templateURL(d Deps, key string) string {
 // id shaped like one) prefers the configured template and falls back to a
 // stored snapshot; any other id (a bead) uses its snapshot only, so a bead id
 // is never rendered through the tracker template.
-func issueURL(d Deps, id string, jiraEdge bool, prFacts string) (string, error) {
+func issueURL(ctx context.Context, d Deps, id string, jiraEdge bool, prFacts string) (string, error) {
 	isKey := jiraEdge || ticketkey.MatchesShape(id, d.Patterns)
 	if isKey {
 		if u := templateURL(d, id); u != "" {
 			return u, nil
 		}
 	}
-	u, err := entityURL(d, entityTypeIssue, id)
+	u, err := entityURL(ctx, d, entityTypeIssue, id)
 	if err != nil || u != "" {
 		return u, err
 	}
@@ -260,13 +261,13 @@ type prStrategy struct{}
 // Links for a PR: itself; one build link per failing CI run on its current
 // head (relation ci); the PRs it depends on (relation depends_on); the issues
 // its text names (relation jira); the threads that mention it.
-func (prStrategy) Links(d Deps, s Subject) ([]Link, error) {
+func (prStrategy) Links(ctx context.Context, d Deps, s Subject) ([]Link, error) {
 	var out []Link
 	if s.Entity != nil {
 		out = append(out, selfLink(KindPR, prLabel(s.ID), SnapshotURL(entityTypePR, s.Entity.Facts))...)
 		out = append(out, buildLinks(d, s.Entity)...)
 	}
-	deps, err := dependencyLinks(&d, s.ID)
+	deps, err := dependencyLinks(ctx, &d, s.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -278,13 +279,13 @@ func (prStrategy) Links(d Deps, s Subject) ([]Link, error) {
 	for _, l := range s.Linked {
 		switch {
 		case l.Direction == DirOut && l.Type == entityTypeIssue && l.Relation == relationJira:
-			u, err := issueURL(d, l.ID, true, prFacts)
+			u, err := issueURL(ctx, d, l.ID, true, prFacts)
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, Link{Kind: KindIssue, Relation: l.Relation, Label: l.ID, URL: u})
 		case l.Direction == DirIn && l.Type == entityTypeThread:
-			u, err := entityURL(d, entityTypeThread, l.ID)
+			u, err := entityURL(ctx, d, entityTypeThread, l.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -300,14 +301,14 @@ func (prStrategy) Links(d Deps, s Subject) ([]Link, error) {
 // dependency's stored state, so a consumer can tell an open dependency from a
 // merged one. Read from the store only, and available on the unmigrated store
 // for the stack source.
-func dependencyLinks(d *Deps, id string) ([]Link, error) {
-	edges, err := d.dependencies().DependenciesOf(entityTypePR, id)
+func dependencyLinks(ctx context.Context, d *Deps, id string) ([]Link, error) {
+	edges, err := d.dependencies().DependenciesOf(ctx, entityTypePR, id)
 	if err != nil {
 		return nil, err
 	}
 	var out []Link
 	for _, e := range edges {
-		u, err := entityURL(*d, entityTypePR, e.ID)
+		u, err := entityURL(ctx, *d, entityTypePR, e.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -351,7 +352,7 @@ type issueStrategy struct{}
 
 // Links for an issue: itself; the PR it tracks (relation work) or that names
 // it (relation jira, the reverse of a PR's ticket-key edge); its parent.
-func (issueStrategy) Links(d Deps, s Subject) ([]Link, error) {
+func (issueStrategy) Links(ctx context.Context, d Deps, s Subject) ([]Link, error) {
 	var out []Link
 	selfURL := ""
 	if s.Entity != nil {
@@ -364,7 +365,7 @@ func (issueStrategy) Links(d Deps, s Subject) ([]Link, error) {
 	// The tracked/naming PR first, then the parent: the order a reader scans.
 	for _, l := range s.Linked {
 		if l.Type == entityTypePR && ((l.Direction == DirOut && l.Relation == relationWork) || (l.Direction == DirIn && l.Relation == relationJira)) {
-			u, err := entityURL(d, entityTypePR, l.ID)
+			u, err := entityURL(ctx, d, entityTypePR, l.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -373,7 +374,7 @@ func (issueStrategy) Links(d Deps, s Subject) ([]Link, error) {
 	}
 	for _, l := range s.Linked {
 		if l.Direction == DirOut && l.Type == entityTypeIssue && l.Relation == relationParent {
-			u, err := issueURL(d, l.ID, false, "")
+			u, err := issueURL(ctx, d, l.ID, false, "")
 			if err != nil {
 				return nil, err
 			}
@@ -386,14 +387,14 @@ func (issueStrategy) Links(d Deps, s Subject) ([]Link, error) {
 type threadStrategy struct{}
 
 // Links for a thread: itself and the PRs it mentions.
-func (threadStrategy) Links(d Deps, s Subject) ([]Link, error) {
+func (threadStrategy) Links(ctx context.Context, d Deps, s Subject) ([]Link, error) {
 	var out []Link
 	if s.Entity != nil {
 		out = append(out, selfLink(KindThread, "Thread", SnapshotURL(entityTypeThread, s.Entity.Facts))...)
 	}
 	for _, l := range s.Linked {
 		if l.Direction == DirOut && l.Type == entityTypePR && l.Relation == relationMentions {
-			u, err := entityURL(d, entityTypePR, l.ID)
+			u, err := entityURL(ctx, d, entityTypePR, l.ID)
 			if err != nil {
 				return nil, err
 			}

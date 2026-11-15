@@ -14,7 +14,7 @@ import (
 func dumpDB(t *testing.T, s *Store) string {
 	t.Helper()
 	var b strings.Builder
-	v, err := s.SchemaVersion()
+	v, err := s.SchemaVersion(context.Background())
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}

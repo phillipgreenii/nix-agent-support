@@ -94,8 +94,8 @@ func (l focusLine) String() string {
 // one stored entity in-process with the builder `show` uses (buildView) and
 // marshals it to the pg-desk.view/v1 JSON. Tests replace it to plant a view
 // without the member.
-var focusViewJSON = func(cfg *config.Config, st *store.Store, repo, entityType, id string) ([]byte, error) {
-	vd, err := buildView(cfg, st, repo, entityType, id, false)
+var focusViewJSON = func(ctx context.Context, cfg *config.Config, st *store.Store, repo, entityType, id string) ([]byte, error) {
+	vd, err := buildView(ctx, cfg, st, repo, entityType, id, false)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ var focusViewJSON = func(cfg *config.Config, st *store.Store, repo, entityType, 
 // row of the newest plan, else any one stored entity. A gate: it trips on a
 // view whose annotations object has no focus_selected member. With no entity
 // in the store the line is n/a and never trips.
-func focusViewContractLine(cfg *config.Config, st *store.Store) (focusLine, error) {
+func focusViewContractLine(ctx context.Context, cfg *config.Config, st *store.Store) (focusLine, error) {
 	line := focusLine{
 		Name: "focus view contract", Kind: focusLineGate, Count: -1, GateName: focusGateViewContract,
 		Remedy: "upgrade pg-desk so `show` emits annotations.focus_selected, then re-run doctor",
@@ -115,7 +115,7 @@ func focusViewContractLine(cfg *config.Config, st *store.Store) (focusLine, erro
 	if len(cfg.Repos) > 0 {
 		repo = cfg.Repos[0].Remote
 	}
-	typ, id, found, err := focusProbeEntity(st, repo)
+	typ, id, found, err := focusProbeEntity(ctx, st, repo)
 	if err != nil {
 		return line, err
 	}
@@ -123,7 +123,7 @@ func focusViewContractLine(cfg *config.Config, st *store.Store) (focusLine, erro
 		line.Detail = "n/a (no entity in the store)"
 		return line, nil
 	}
-	raw, err := focusViewJSON(cfg, st, repo, typ, id)
+	raw, err := focusViewJSON(ctx, cfg, st, repo, typ, id)
 	if err != nil {
 		return line, fmt.Errorf("build the view of %s %s: %w", typ, id, err)
 	}
@@ -144,8 +144,8 @@ func focusViewContractLine(cfg *config.Config, st *store.Store) (focusLine, erro
 
 // focusProbeEntity picks the entity the view-contract probe runs on: the first
 // row of the newest period that holds rows, else the first stored entity.
-func focusProbeEntity(st *store.Store, repo string) (typ, id string, found bool, err error) {
-	periods, err := st.FocusPeriods()
+func focusProbeEntity(ctx context.Context, st *store.Store, repo string) (typ, id string, found bool, err error) {
+	periods, err := st.FocusPeriods(ctx)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -156,7 +156,7 @@ func focusProbeEntity(st *store.Store, repo string) (typ, id string, found bool,
 		return periods[i].ID > periods[j].ID
 	})
 	for _, p := range periods {
-		rows, err := st.FocusPlanRows(p.ID)
+		rows, err := st.FocusPlanRows(ctx, p.ID)
 		if err != nil {
 			return "", "", false, err
 		}
@@ -166,7 +166,7 @@ func focusProbeEntity(st *store.Store, repo string) (typ, id string, found bool,
 			}
 		}
 	}
-	entities, err := st.ListEntities()
+	entities, err := st.ListEntities(ctx)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -371,7 +371,7 @@ func focusLines(h focus.Health, cfg *config.Config, now time.Time, contract focu
 // schema 1 fails). Every
 // tripped gate's name is appended to *failures when failures is non-nil.
 func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *config.Config, rc *routerConfig, failures *[]string) {
-	version, err := st.SchemaVersion()
+	version, err := st.SchemaVersion(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "focus: FAIL (read schema version: %v)\n", err)
 		appendFailure(failures, "focus store")
@@ -381,7 +381,7 @@ func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *con
 		fmt.Fprintln(w, "focus: no data (the store has no schema yet)")
 		return
 	}
-	if err := st.RequireNewSchema(); err != nil {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		fmt.Fprintf(w, "focus: FAIL (%v)\n", err)
 		appendFailure(failures, "focus store")
 		return
@@ -390,7 +390,7 @@ func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *con
 		cfg = &config.Config{}
 	}
 	now := focusNow()
-	h, err := focus.ComputeHealth(st, cfg, now)
+	h, err := focus.ComputeHealth(ctx, st, cfg, now)
 	if err != nil {
 		fmt.Fprintf(w, "focus: FAIL (compute health: %v)\n", err)
 		appendFailure(failures, "focus health")
@@ -401,13 +401,13 @@ func printFocusBlock(ctx context.Context, w io.Writer, st *store.Store, cfg *con
 		fmt.Fprintln(w, "focus: no data (no repository configured)")
 		return
 	}
-	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge())
+	flow, err := changes.Observe(ctx, st, changesNow(), cfg.SweepMaxAge())
 	if err != nil {
 		fmt.Fprintf(w, "focus: FAIL (observe change flow: %v)\n", err)
 		appendFailure(failures, "focus health")
 		return
 	}
-	contract, err := focusViewContractLine(cfg, st)
+	contract, err := focusViewContractLine(ctx, cfg, st)
 	if err != nil {
 		fmt.Fprintf(w, "focus: FAIL (view contract probe: %v)\n", err)
 		appendFailure(failures, focusGateViewContract)

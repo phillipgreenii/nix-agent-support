@@ -1,6 +1,7 @@
 package links
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -60,11 +61,11 @@ const (
 // satisfies it; the attention evaluator names it so that it can read the same
 // edges without depending on the concrete store.
 type LinkedReader interface {
-	RequireNewSchema() error
-	ListXrefLinksFrom(repo, fromType, fromID string) ([]store.XrefLink, error)
-	ListXrefLinksTo(repo, toType, toID string) ([]store.XrefLink, error)
-	ListXrefsByFrom(repo, fromType, fromID, toType string) ([]store.Xref, error)
-	ListXrefsByTo(repo, toType, toID string) ([]store.Xref, error)
+	RequireNewSchema(ctx context.Context) error
+	ListXrefLinksFrom(ctx context.Context, repo, fromType, fromID string) ([]store.XrefLink, error)
+	ListXrefLinksTo(ctx context.Context, repo, toType, toID string) ([]store.XrefLink, error)
+	ListXrefsByFrom(ctx context.Context, repo, fromType, fromID, toType string) ([]store.Xref, error)
+	ListXrefsByTo(ctx context.Context, repo, toType, toID string) ([]store.Xref, error)
 }
 
 // ReadLinked is the shared linked-entity read helper: every entity related to
@@ -78,23 +79,23 @@ type LinkedReader interface {
 // Callers wanting a different shape (the Phase 6 `show`
 // composite view) add fields on top of Linked rather than re-reading the
 // xref table.
-func ReadLinked(st LinkedReader, repo, entityType, id string) ([]Linked, error) {
-	linked, _, err := readLinkedAsOf(st, repo, entityType, id)
+func ReadLinked(ctx context.Context, st LinkedReader, repo, entityType, id string) ([]Linked, error) {
+	linked, _, err := readLinkedAsOf(ctx, st, repo, entityType, id)
 	return linked, err
 }
 
 // readLinkedAsOf is ReadLinked plus linksAsOf: the newest last_confirmed among
 // the stored edge rows read ("" when there are none). It is the one linked-entity read
 // both ReadLinked and ReadDetailed use.
-func readLinkedAsOf(st LinkedReader, repo, entityType, id string) (linked []Linked, linksAsOf string, err error) {
-	if err := st.RequireNewSchema(); err != nil {
+func readLinkedAsOf(ctx context.Context, st LinkedReader, repo, entityType, id string) (linked []Linked, linksAsOf string, err error) {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		return nil, "", err
 	}
-	out, err := st.ListXrefLinksFrom(repo, entityType, id)
+	out, err := st.ListXrefLinksFrom(ctx, repo, entityType, id)
 	if err != nil {
 		return nil, "", err
 	}
-	in, err := st.ListXrefLinksTo(repo, entityType, id)
+	in, err := st.ListXrefLinksTo(ctx, repo, entityType, id)
 	if err != nil {
 		return nil, "", err
 	}

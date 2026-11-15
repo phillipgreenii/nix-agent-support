@@ -43,10 +43,10 @@ func (f *typedOpenFixture) pr(number int, title, ownership, panel string, asOf s
 	f.t.Helper()
 	id := fmt.Sprintf("o/r#%d", number)
 	facts := fmt.Sprintf(`{"pr_show":{"number":%d,"title":%q,"url":"https://code.example/o/r/pull/%d","additions":10,"deletions":5,"head_sha":"9f3c1e2aaaa"}}`, number, title, number)
-	if err := f.seed.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
+	if err := f.seed.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.seed.UpsertInterpretation(store.Interpretation{
+	if err := f.seed.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: "pr", EntityID: id, Ownership: ownership,
 		Approvals: `{}`, MatchReasons: `["review-requested"]`, Panel: panel, AsOf: asOf,
 	}); err != nil {
@@ -59,7 +59,7 @@ func (f *typedOpenFixture) pr(number int, title, ownership, panel string, asOf s
 
 func (f *typedOpenFixture) annotate(typ, id, key, value string) {
 	f.t.Helper()
-	if err := f.seed.SetAnnotation(store.KVAnnotation{
+	if err := f.seed.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: "o/r", EntityType: typ, EntityID: id, Key: key, Value: value,
 		Origin: "pg-desk", SetBy: "operator", SetAt: "2026-09-29T14:05:00Z",
 	}); err != nil {
@@ -69,7 +69,7 @@ func (f *typedOpenFixture) annotate(typ, id, key, value string) {
 
 func (f *typedOpenFixture) entity(typ, id, facts, asOf string, hidden bool) {
 	f.t.Helper()
-	if err := f.seed.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
+	if err := f.seed.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
 		f.t.Fatal(err)
 	}
 	if hidden {

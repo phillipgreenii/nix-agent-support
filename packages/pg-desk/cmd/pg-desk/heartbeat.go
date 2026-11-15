@@ -53,6 +53,8 @@ var heartbeatCmd = &cobra.Command{
 	Use:   "heartbeat",
 	Short: "Stamp the store's last-heartbeat time and record source fetch times",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
 		st, err := openDeskStore()
 		if err != nil {
 			return fmt.Errorf("heartbeat: open store: %w", err)
@@ -60,7 +62,7 @@ var heartbeatCmd = &cobra.Command{
 		defer func() { _ = st.Close() }()
 		start := heartbeatClock()
 
-		if err := st.SetMeta(store.MetaKeyLastHeartbeat, heartbeatNow()); err != nil {
+		if err := st.SetMeta(ctx, store.MetaKeyLastHeartbeat, heartbeatNow()); err != nil {
 			return fmt.Errorf("heartbeat: %w", err)
 		}
 		probeOwningSources(cmd)
@@ -74,6 +76,8 @@ var heartbeatCmd = &cobra.Command{
 // an error (the previous source_fetch.* values simply stay, and age); only a
 // failure to WRITE the store fails the command.
 func recordSourceFetches(cmd *cobra.Command, st *store.Store) error {
+	ctx := cmd.Context()
+
 	out, err := heartbeatRunLedgerShow(cmd.Context())
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "heartbeat: source ages not refreshed: pg-connector ledger show: %v\n", err)
@@ -84,7 +88,7 @@ func recordSourceFetches(cmd *cobra.Command, st *store.Store) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "heartbeat: source ages not refreshed: %v\n", err)
 		return nil
 	}
-	if err := freshness.Update(st, rows); err != nil {
+	if err := freshness.Update(ctx, st, rows); err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
 	}
 	return nil

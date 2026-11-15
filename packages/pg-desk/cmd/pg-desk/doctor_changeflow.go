@@ -61,7 +61,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 		return
 	}
 	defer func() { _ = st.Close() }()
-	version, err := st.SchemaVersion()
+	version, err := st.SchemaVersion(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  store: FAIL (read schema version: %v)\n", err)
 		*failures = append(*failures, "change_flow store")
@@ -71,7 +71,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 		fmt.Fprintln(w, "  uninitialized: the store has no schema yet; change-flow checks skipped")
 		return
 	}
-	if err := st.RequireNewSchema(); err != nil {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		fmt.Fprintf(w, "  store: FAIL (%v)\n", err)
 		*failures = append(*failures, "change_flow store")
 		return
@@ -82,7 +82,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 		checkCfg = &config.Config{}
 	}
 	now := changesNow()
-	flow, err := changes.Observe(st, now, checkCfg.SweepMaxAge())
+	flow, err := changes.Observe(ctx, st, now, checkCfg.SweepMaxAge())
 	if err != nil {
 		fmt.Fprintf(w, "  observe: FAIL (%v)\n", err)
 		*failures = append(*failures, "change_flow observe")
@@ -94,7 +94,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 	doctorStalledConsumers(w, checkCfg, rc, flow, now, failures)
 	doctorSweepBound(w, checkCfg, rc, flow, failures)
 	doctorRepeatedDegraded(w, flow)
-	doctorIssueStatusCategory(w, st, checkCfg)
+	doctorIssueStatusCategory(ctx, w, st, checkCfg)
 	if rc != nil {
 		doctorRouterRoles(w, rc)
 	}
@@ -118,7 +118,7 @@ func doctorWatchedQueries(ctx context.Context, w io.Writer, st *store.Store, cfg
 	bad := false
 	for _, t := range changes.FlowEntityTypes {
 		listings := map[string]focus.Listing{}
-		if ls, err := focus.QueryListings(st, cfg, t); err == nil {
+		if ls, err := focus.QueryListings(ctx, st, cfg, t); err == nil {
 			for _, l := range ls {
 				listings[l.Query] = l
 			}
@@ -275,8 +275,8 @@ func doctorRepeatedDegraded(w io.Writer, flow changes.Flow) {
 // the way `pg-desk run issue` tells a ticket key from a beads id
 // (config ticket_patterns, ticketkey.MatchesShape); with none configured no
 // issue is recognized as Jira and the count is 0.
-func doctorIssueStatusCategory(w io.Writer, st *store.Store, cfg *config.Config) {
-	entities, err := st.ListEntities()
+func doctorIssueStatusCategory(ctx context.Context, w io.Writer, st *store.Store, cfg *config.Config) {
+	entities, err := st.ListEntities(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "  jira status category: skipped (list entities: %v)\n", err)
 		return

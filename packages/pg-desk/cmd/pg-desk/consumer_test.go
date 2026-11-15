@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -39,16 +40,16 @@ func TestConsumerListShowsCursorSeenAtAndStaleness(t *testing.T) {
 	withConsumerClock(t)
 	open, seed := seedLinkStore(t)
 	withOpenSeams(t, linkTestConfig(), open)
-	if err := seed.RegisterConsumer("fresh", "pr", consumerTestNow.Add(-time.Hour)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "fresh", "pr", consumerTestNow.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.RegisterConsumer("old", "pr", consumerTestNow.Add(-8*24*time.Hour)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "old", "pr", consumerTestNow.Add(-8*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.RegisterConsumer("other-type", "issue", consumerTestNow); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "other-type", "issue", consumerTestNow); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := seed.ReadChanges("fresh", "pr", 0, consumerTestNow.Add(-time.Hour)); err != nil {
+	if _, err := seed.ReadChanges(context.Background(), "fresh", "pr", 0, consumerTestNow.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +70,7 @@ func TestConsumerListUsesConfiguredStaleAfter(t *testing.T) {
 	cfg := linkTestConfig()
 	cfg.ConsumerStaleAfterRaw = "1h"
 	withOpenSeams(t, cfg, open)
-	if err := seed.RegisterConsumer("c", "pr", consumerTestNow.Add(-2*time.Hour)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "c", "pr", consumerTestNow.Add(-2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runConsumer(t, "pr", "list")
@@ -97,7 +98,7 @@ func TestConsumerListJSONAndEmpty(t *testing.T) {
 		t.Errorf("empty text list = %q, %v", text, err)
 	}
 
-	if err := seed.RegisterConsumer("a", "pr", consumerTestNow.Add(-time.Hour)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "a", "pr", consumerTestNow.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	out, err = runConsumer(t, "pr", "list", "--json")
@@ -119,7 +120,7 @@ func TestConsumerForgetDeletesOnlyThatNameAndType(t *testing.T) {
 	open, seed := seedLinkStore(t)
 	withOpenSeams(t, linkTestConfig(), open)
 	for _, c := range [][2]string{{"a", "pr"}, {"b", "pr"}, {"a", "issue"}} {
-		if err := seed.RegisterConsumer(c[0], c[1], consumerTestNow); err != nil {
+		if err := seed.RegisterConsumer(context.Background(), c[0], c[1], consumerTestNow); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -128,7 +129,7 @@ func TestConsumerForgetDeletesOnlyThatNameAndType(t *testing.T) {
 		t.Fatalf("forget = %q, %v", out, err)
 	}
 	var left []string
-	rows, _ := seed.ListConsumers()
+	rows, _ := seed.ListConsumers(context.Background())
 	for _, c := range rows {
 		left = append(left, c.Type+"/"+c.Name)
 	}
@@ -152,17 +153,17 @@ func TestConsumerForgetStopsPruneWaiting(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"}) // one old "created" record
 	withOpenSeams(t, linkTestConfig(), open)
 	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC) // far past the 14d retention
-	if err := seed.RegisterConsumer("slow", "pr", now.Add(-time.Hour)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "slow", "pr", now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
-	if n, err := seed.PruneChangeLog(now, 0, 0); err != nil || n != 0 {
+	if n, err := seed.PruneChangeLog(context.Background(), now, 0, 0); err != nil || n != 0 {
 		t.Fatalf("prune with a waiting consumer = %d, %v; want 0 (it holds the horizon)", n, err)
 	}
 	if _, err := runConsumer(t, "pr", "forget", "slow"); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := seed.PruneChangeLog(now, 0, 0); err != nil || n != 1 {
+	if n, err := seed.PruneChangeLog(context.Background(), now, 0, 0); err != nil || n != 1 {
 		t.Fatalf("prune after forget = %d, %v; want 1 (nothing waits any more)", n, err)
 	}
 }

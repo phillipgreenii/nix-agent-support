@@ -38,14 +38,14 @@ type BaselineState struct {
 
 // ReadBaseline reads query's baseline marker and open time. Both false/zero
 // when neither key exists. An unparseable value reads as absent.
-func ReadBaseline(st *store.Store, query string) (BaselineState, error) {
+func ReadBaseline(ctx context.Context, st *store.Store, query string) (BaselineState, error) {
 	var out BaselineState
-	if t, ok, err := readMetaTime(st, MetaBaselinePrefix+query); err != nil {
+	if t, ok, err := readMetaTime(ctx, st, MetaBaselinePrefix+query); err != nil {
 		return BaselineState{}, err
 	} else if ok {
 		out.Done, out.At = true, t
 	}
-	if t, ok, err := readMetaTime(st, MetaBaselineOpenPrefix+query); err != nil {
+	if t, ok, err := readMetaTime(ctx, st, MetaBaselineOpenPrefix+query); err != nil {
 		return BaselineState{}, err
 	} else if ok {
 		out.HasOpenSince, out.OpenSince = true, t
@@ -53,8 +53,8 @@ func ReadBaseline(st *store.Store, query string) (BaselineState, error) {
 	return out, nil
 }
 
-func readMetaTime(st *store.Store, key string) (time.Time, bool, error) {
-	raw, found, err := st.GetMeta(key)
+func readMetaTime(ctx context.Context, st *store.Store, key string) (time.Time, bool, error) {
+	raw, found, err := st.GetMeta(ctx, key)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("changes: read %s: %w", key, err)
 	}
@@ -104,7 +104,7 @@ func (e *Engine) baselineStep(ctx context.Context, opts Options, runs []queryRun
 			rest = append(rest, r) // nothing was listed: hydrateListed skips it
 			continue
 		}
-		state, err := ReadBaseline(e.Store, r.query)
+		state, err := ReadBaseline(ctx, e.Store, r.query)
 		if err != nil {
 			return nil, err
 		}
@@ -120,12 +120,12 @@ func (e *Engine) baselineStep(ctx context.Context, opts Options, runs []queryRun
 
 	nowText := e.now().UTC().Format(time.RFC3339)
 	for _, r := range inBaseline {
-		state, err := ReadBaseline(e.Store, r.query)
+		state, err := ReadBaseline(ctx, e.Store, r.query)
 		if err != nil {
 			return nil, err
 		}
 		if !state.HasOpenSince {
-			if err := e.Store.SetMeta(MetaBaselineOpenPrefix+r.query, nowText); err != nil {
+			if err := e.Store.SetMeta(ctx, MetaBaselineOpenPrefix+r.query, nowText); err != nil {
 				st.side = append(st.side, fmt.Sprintf("baseline open %s: %v", r.query, err))
 			}
 		}
@@ -181,7 +181,7 @@ func (e *Engine) baselineStep(ctx context.Context, opts Options, runs []queryRun
 		if !done {
 			continue
 		}
-		if err := e.Store.SetMeta(MetaBaselinePrefix+r.query, nowText); err != nil {
+		if err := e.Store.SetMeta(ctx, MetaBaselinePrefix+r.query, nowText); err != nil {
 			st.side = append(st.side, fmt.Sprintf("baseline marker %s: %v", r.query, err))
 		}
 	}
@@ -192,7 +192,7 @@ func (e *Engine) baselineStep(ctx context.Context, opts Options, runs []queryRun
 // pg-desk does not hold it or its list_fp differs. m.ok is set only when the
 // member ended up held and marked.
 func (e *Engine) baselineMember(ctx context.Context, m *baselineMember, st *pollState, bud *budget) {
-	row, found, err := e.Store.GetEntity(e.repo(), issueEntityType, m.id)
+	row, found, err := e.Store.GetEntity(ctx, e.repo(), issueEntityType, m.id)
 	if err != nil {
 		st.noteQueries(m.queries, fmt.Sprintf("baseline %s: %s", m.id, firstErrLine(err.Error())))
 		return
@@ -236,7 +236,7 @@ func (e *Engine) baselineMember(ctx context.Context, m *baselineMember, st *poll
 		return
 	}
 	yes := true
-	if err := e.Store.SetEntityColumns(e.repo(), issueEntityType, m.id, nil, &yes); err != nil {
+	if err := e.Store.SetEntityColumns(ctx, e.repo(), issueEntityType, m.id, nil, &yes); err != nil {
 		st.noteQueries(m.queries, fmt.Sprintf("baseline mark %s: %s", m.id, firstErrLine(err.Error())))
 		return
 	}

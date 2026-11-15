@@ -39,6 +39,8 @@ Exit codes are show's: 0, 5 (coverage incomplete), 3, 2 (usage), 1
 const replanAttempts = 3
 
 func runFocusReplan(cmd *cobra.Command) error {
+	ctx := cmd.Context()
+
 	capFlag, capGiven, err := focusCapFlag(cmd)
 	if err != nil {
 		return err
@@ -49,7 +51,7 @@ func runFocusReplan(cmd *cobra.Command) error {
 		return err
 	}
 	defer env.Close()
-	g, err := gatherFocus(env)
+	g, err := gatherFocus(ctx, env)
 	if err != nil {
 		return err
 	}
@@ -70,7 +72,7 @@ func runFocusReplan(cmd *cobra.Command) error {
 		if capGiven {
 			cap = capFlag
 		}
-		fresh := g.rank(cap)
+		fresh := g.rank(ctx, cap)
 		s := g.buildScreen(screenInput{
 			verb: "replan", mode: focusModePlan, draftLine: planDraftLine(g), fresh: fresh,
 			cap: cap, showAll: all, notices: notices,
@@ -87,7 +89,7 @@ func runFocusReplan(cmd *cobra.Command) error {
 		if capGiven {
 			cap = capFlag
 		}
-		fresh := g.rank(cap)
+		fresh := g.rank(ctx, cap)
 		doc := focus.NewReplanDraft(g.plan, fresh, g.cov.State, cap, g.firstSeen)
 		stored := false
 		if canStore {
@@ -96,14 +98,14 @@ func runFocusReplan(cmd *cobra.Command) error {
 			if err != nil {
 				return focusTotalError("focus: encode draft: "+err.Error(), "report this as a pg-desk bug")
 			}
-			changed, err := env.Store.FocusDraftReplan(fd, g.hasPlan())
+			changed, err := env.Store.FocusDraftReplan(ctx, fd, g.hasPlan())
 			if err != nil {
 				return focusTotalError("focus: store draft: "+err.Error(), "check the pg-desk store, then re-run")
 			}
 			if changed && attempt+1 < replanAttempts {
 				// A lock changed the plan state between the compute and the
 				// store: recompute for the state the store now holds.
-				if err := g.reloadPlan(); err != nil {
+				if err := g.reloadPlan(ctx); err != nil {
 					return err
 				}
 				continue

@@ -33,7 +33,7 @@ func newSchema2RunStore(t *testing.T, cfg *config.Config) (st *store.Store, reop
 		t.Fatalf("open test store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if v, err := st.SchemaVersion(); err != nil || v < store.NewSchemaVersion {
+	if v, err := st.SchemaVersion(context.Background()); err != nil || v < store.NewSchemaVersion {
 		t.Fatalf("schema version = %d, %v; want a cut-over store", v, err)
 	}
 	runStoreOpen = func() (*store.Store, error) { return store.Open(dbPath) }
@@ -67,7 +67,7 @@ func TestRunIssueRunsOnASchema2StoreWithoutRunPR(t *testing.T) {
 		t.Fatalf("run issue PROJ-99 on a schema-2 store: %v", err)
 	}
 
-	interp, found, err := reopen().GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	interp, found, err := reopen().GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7")
 	if err != nil || !found {
 		t.Fatalf("the linked PR was not re-interpreted: found=%v err=%v", found, err)
 	}
@@ -100,11 +100,11 @@ func TestRunThreadRunsOnASchema2StoreWithoutRunPR(t *testing.T) {
 	}
 
 	v := reopen()
-	xref, found, err := v.GetXref("acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T1")
+	xref, found, err := v.GetXref(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T1")
 	if err != nil || !found || xref.Evidence != "permalink" {
 		t.Fatalf("thread xref: found=%v evidence=%q err=%v", found, xref.Evidence, err)
 	}
-	if _, found, err := v.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7"); err != nil || !found {
+	if _, found, err := v.GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7"); err != nil || !found {
 		t.Fatalf("the linked PR was not re-interpreted: found=%v err=%v", found, err)
 	}
 }

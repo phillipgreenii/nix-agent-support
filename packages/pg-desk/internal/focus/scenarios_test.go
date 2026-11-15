@@ -13,6 +13,7 @@ package focus
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -152,7 +153,7 @@ func classifyScenario(t *testing.T, file scenarioFile, sc scenario) BeadCell {
 		f.hide(src)
 	}
 	for _, kind := range v.Annotations.Suppress {
-		if err := f.st.SetAnnotation(store.KVAnnotation{
+		if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 			Repo: testRepo, EntityType: src.Type, EntityID: src.ID, Key: store.KeySuppress(kind),
 			Value: "true", Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 		}); err != nil {

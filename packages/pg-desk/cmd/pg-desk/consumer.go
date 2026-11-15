@@ -72,17 +72,19 @@ type consumerListPayload struct {
 }
 
 func runConsumerList(cmd *cobra.Command, entityType string, jsonOut bool) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("consumer list: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("consumer list")
+	st, err := openNewSchemaStore(ctx, "consumer list")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
 
-	rows, err := st.ListConsumers()
+	rows, err := st.ListConsumers(ctx)
 	if err != nil {
 		return fmt.Errorf("consumer list: %w", err)
 	}
@@ -145,16 +147,18 @@ func renderConsumers(w io.Writer, views []consumerView) error {
 }
 
 func runConsumerForget(cmd *cobra.Command, entityType, name string) error {
+	ctx := cmd.Context()
+
 	if _, err := deskConfigLoad(cmd.Context()); err != nil {
 		return fmt.Errorf("consumer forget: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("consumer forget")
+	st, err := openNewSchemaStore(ctx, "consumer forget")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
 
-	rows, err := st.ListConsumers()
+	rows, err := st.ListConsumers(ctx)
 	if err != nil {
 		return fmt.Errorf("consumer forget: %w", err)
 	}
@@ -165,7 +169,7 @@ func runConsumerForget(cmd *cobra.Command, entityType, name string) error {
 			break
 		}
 	}
-	if err := st.ForgetConsumer(name, entityType); err != nil {
+	if err := st.ForgetConsumer(ctx, name, entityType); err != nil {
 		return fmt.Errorf("consumer forget: %w", err)
 	}
 	msg := fmt.Sprintf("forgot %s consumer %s", entityType, name)

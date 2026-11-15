@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -36,16 +37,16 @@ func TestMetricsExposeTheOpenAnchorFamiliesFromTheStoresLinks(t *testing.T) {
 	} {
 		prID := fmt.Sprintf("o/r#%d", n+1)
 		anchorID := fmt.Sprintf("bd-%d", n+1)
-		if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: p.facts, AsOf: p.hydratedAt}); err != nil {
+		if err := s.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: p.facts, AsOf: p.hydratedAt}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.UpsertEntityForTest(store.Entity{
+		if err := s.UpsertEntityForTest(context.Background(), store.Entity{
 			Repo: "o/r", EntityType: "issue", EntityID: anchorID,
 			Facts: `{"issue_show":{"issue_type":"merge-request","state":"open"}}`, AsOf: p.hydratedAt,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.ReplaceDerivedXrefs("o/r", "issue", anchorID, []store.XrefLink{{
+		if err := s.ReplaceDerivedXrefs(context.Background(), "o/r", "issue", anchorID, []store.XrefLink{{
 			Repo: "o/r", FromType: "issue", FromID: anchorID, ToType: "pr", ToID: prID,
 			Relation: "work", Origin: "derived:work-item", FirstSeen: p.hydratedAt, LastConfirmed: p.hydratedAt,
 		}}); err != nil {
@@ -55,11 +56,11 @@ func TestMetricsExposeTheOpenAnchorFamiliesFromTheStoresLinks(t *testing.T) {
 	// hydrated_at is stamped by the entity-change path; stamp it the way that
 	// path does (WriteEntityStateWithLog), since UpsertEntity writes none.
 	for n, at := range []string{"2026-10-09T00:00:00Z", "2026-10-10T19:00:00Z"} {
-		e, _, err := s.GetEntity("o/r", "pr", fmt.Sprintf("o/r#%d", n+1))
+		e, _, err := s.GetEntity(context.Background(), "o/r", "pr", fmt.Sprintf("o/r#%d", n+1))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.WriteEntityStateWithLog(e, e.Version, at, true, []string{"created"}, "poll", at); err != nil {
+		if _, err := s.WriteEntityStateWithLog(context.Background(), e, e.Version, at, true, []string{"created"}, "poll", at); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,16 +105,16 @@ func TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes(t *testing.T)
 	for n, facts := range []string{`{"pr_show":{"state":"open"}}`, `{"pr_show":{"state":"closed"}}`, `{"pr_show":{"state":"open"}}`} {
 		prID := fmt.Sprintf("o/r#%d", n+1)
 		anchorID := fmt.Sprintf("bd-%d", n+1)
-		if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: facts, AsOf: at}); err != nil {
+		if err := s.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: prID, Facts: facts, AsOf: at}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.UpsertEntityForTest(store.Entity{
+		if err := s.UpsertEntityForTest(context.Background(), store.Entity{
 			Repo: "o/r", EntityType: "issue", EntityID: anchorID,
 			Facts: `{"issue_show":{"issue_type":"merge-request","state":"open"}}`, AsOf: at,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.ReplaceDerivedXrefs("o/r", "issue", anchorID, []store.XrefLink{{
+		if err := s.ReplaceDerivedXrefs(context.Background(), "o/r", "issue", anchorID, []store.XrefLink{{
 			Repo: "o/r", FromType: "issue", FromID: anchorID, ToType: "pr", ToID: prID,
 			Relation: "work", Origin: "derived:work-item", FirstSeen: at, LastConfirmed: at,
 		}}); err != nil {
@@ -122,7 +123,7 @@ func TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes(t *testing.T)
 	}
 	// PRs 2 (closed) and 3 are hidden; PR 1 stays visible.
 	for _, id := range []string{"o/r#2", "o/r#3"} {
-		if err := s.SetAnnotation(store.KVAnnotation{
+		if err := s.SetAnnotation(context.Background(), store.KVAnnotation{
 			Repo: "o/r", EntityType: "pr", EntityID: id, Key: "hidden",
 			Value: `{"value":true,"reason":"x"}`, Origin: "pg-desk", SetBy: "test", SetAt: at,
 		}); err != nil {

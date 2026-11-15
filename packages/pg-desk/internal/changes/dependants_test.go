@@ -35,7 +35,7 @@ type diffHydrator struct {
 	*storeHydrator
 }
 
-func (h *diffHydrator) RunEntityChange(_ context.Context, entityType, id string, change gather.ChangeKind, opts pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
+func (h *diffHydrator) RunEntityChange(ctx context.Context, entityType, id string, change gather.ChangeKind, opts pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
 	h.calls = append(h.calls, id)
 	h.listFPs[id] = opts.ListFP
 	h.changes[id] = change
@@ -43,7 +43,7 @@ func (h *diffHydrator) RunEntityChange(_ context.Context, entityType, id string,
 	if err := h.fail[id]; err != nil {
 		return pipeline.EntityChangeResult{}, err
 	}
-	row, found, err := h.st.GetEntity("o/r", entityType, id)
+	row, found, err := h.st.GetEntity(ctx, "o/r", entityType, id)
 	if err != nil {
 		return pipeline.EntityChangeResult{}, err
 	}
@@ -62,7 +62,7 @@ func (h *diffHydrator) RunEntityChange(_ context.Context, entityType, id string,
 	if k, ok := h.kindsOf[id]; ok {
 		kinds = k
 	}
-	v, err := h.st.WriteEntityStateWithLogOpts(store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
+	v, err := h.st.WriteEntityStateWithLogOpts(ctx, store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "x"},
 		expected, "2026-10-01T11:59:00Z", true, opts.ListFP, kinds, opts.Origin, "2026-10-01T12:00:00Z", store.WriteOptions{})
 	return pipeline.EntityChangeResult{Written: err == nil, Version: v, Kinds: kinds}, err
 }
@@ -72,12 +72,12 @@ func (h *diffHydrator) RunEntityChange(_ context.Context, entityType, id string,
 func seedDep(t *testing.T, st *store.Store, id, facts string, watched, active bool) {
 	t.Helper()
 	fp := "F1"
-	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: facts, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: facts, AsOf: "x"},
 		0, "2026-10-01T11:00:00Z", active, &fp, []string{"reconcile"}, "seed", "2026-09-29T10:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	w := watched
-	if err := st.SetEntityColumns("o/r", "issue", id, nil, &w); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &w); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -96,7 +96,7 @@ func depsEngine(t *testing.T, ids ...string) (*Engine, *store.Store, *diffHydrat
 	for _, id := range ids {
 		set[id] = true
 	}
-	if err := saveWatchSet(st, "issue", "open", set); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", "open", set); err != nil {
 		t.Fatal(err)
 	}
 	return e, st, h
@@ -117,7 +117,7 @@ func TestListedBlockerClosingRehydratesItsWatchedDependants(t *testing.T) {
 	e, st, h := depsEngine(t, "B", "D1", "D2")
 	seedRow(t, st, "B", "F1", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "B", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "B", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 	seedDep(t, st, "D1", depOpenFacts, true, true)
@@ -186,7 +186,7 @@ func TestInactiveTerminalAndUnwatchedDependantsAreNotRehydrated(t *testing.T) {
 	e, st, h := depsEngine(t, "B", "Dok", "Dterm", "Dunw")
 	seedRow(t, st, "B", "F1", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "B", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "B", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 	seedDep(t, st, "Dok", depOpenFacts, true, true)
@@ -214,7 +214,7 @@ func TestDependantsDrawOnTheBudgetRemainderOnly(t *testing.T) {
 	e.Cfg.Hydration.MaxPerPoll = &two
 	seedRow(t, st, "B", "F1", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "B", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "B", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"D1", "D2", "D3"} {
@@ -249,7 +249,7 @@ func TestBlockerHydrationWithoutClosedTriggersNothing(t *testing.T) {
 	e, st, h := depsEngine(t, "B", "D1")
 	seedRow(t, st, "B", "F1", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "B", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "B", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 	seedDep(t, st, "D1", depOpenFacts, true, true)
@@ -272,7 +272,7 @@ func TestClosedBlockerWithoutIssueDepsIsUnavailableAndSkipped(t *testing.T) {
 	e, st, h := depsEngine(t, "B", "D1")
 	seedRow(t, st, "B", "F1", "2026-10-01T11:00:00Z", true)
 	yes := true
-	if err := st.SetEntityColumns("o/r", "issue", "B", nil, &yes); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "B", nil, &yes); err != nil {
 		t.Fatal(err)
 	}
 	seedDep(t, st, "D1", `{"issue_show":{"state":"open","title":"t"}}`, true, true) // no stored edge
@@ -304,7 +304,7 @@ func TestDependantOfTwoClosedBlockersIsRehydratedOnce(t *testing.T) {
 	yes := true
 	for _, id := range []string{"B", "B2"} {
 		seedRow(t, st, id, "F1", "2026-10-01T11:00:00Z", true)
-		if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &yes); err != nil {
 			t.Fatal(err)
 		}
 		h.kindsOf[id] = []string{"closed"}

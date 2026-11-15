@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -200,7 +201,7 @@ func TestIssueDueConfiguration(t *testing.T) {
 	t.Run("suppress annotation drops it with a recorded reason", func(t *testing.T) {
 		st := store.OpenNewSchemaForTest(t)
 		putIssue(t, st, "K-1", dueFacts("To Do", "2026-10-01"))
-		if err := st.SetAnnotation(store.KVAnnotation{Repo: testRepo, EntityType: "issue", EntityID: "K-1", Key: store.KeySuppress(KindIssueOverdue), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
+		if err := st.SetAnnotation(context.Background(), store.KVAnnotation{Repo: testRepo, EntityType: "issue", EntityID: "K-1", Key: store.KeySuppress(KindIssueOverdue), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
 		res := evaluateIssueAt(t, st, baseConfig(), fixedNow)

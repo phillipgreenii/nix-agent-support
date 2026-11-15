@@ -31,18 +31,18 @@ var ErrNoInterpStamp = errors.New("store: no interpretation stamp set on this ha
 // a rung would mis-stamp user_version). The cutover only drops sync_error from
 // interpretation and does not rebuild it, so the column survives it. A file
 // with no interpretation table at all (nothing migrated) is left alone.
-func ensureInterpretationStamp(s *Store) error {
-	have, err := s.tableColumns("interpretation")
+func ensureInterpretationStamp(ctx context.Context, s *Store) error {
+	have, err := s.tableColumns(ctx, "interpretation")
 	if err != nil {
 		return err
 	}
 	if len(have) == 0 || have[interpStampColumn] {
 		return nil
 	}
-	if _, err := s.sql.ExecContext(context.Background(), `ALTER TABLE interpretation ADD COLUMN `+interpStampColumn+` TEXT`); err != nil {
+	if _, err := s.sql.ExecContext(ctx, `ALTER TABLE interpretation ADD COLUMN `+interpStampColumn+` TEXT`); err != nil {
 		// A second process may have added it between the check and the ALTER;
 		// the column being present now is success.
-		again, cerr := s.tableColumns("interpretation")
+		again, cerr := s.tableColumns(ctx, "interpretation")
 		if cerr != nil || !again[interpStampColumn] {
 			return fmt.Errorf("add interpretation.%s: %w", interpStampColumn, err)
 		}
@@ -54,8 +54,8 @@ func ensureInterpretationStamp(s *Store) error {
 // column: false for a store a read-only or raw open reached before any Open of
 // the binary that adds it. Called before a query is issued, never while a
 // result set is open.
-func (s *Store) hasInterpStampColumn() (bool, error) {
-	have, err := s.tableColumns("interpretation")
+func (s *Store) hasInterpStampColumn(ctx context.Context) (bool, error) {
+	have, err := s.tableColumns(ctx, "interpretation")
 	if err != nil {
 		return false, err
 	}
@@ -105,12 +105,12 @@ type InterpretationKey struct {
 // reaches open PRs first without reading facts: entity.active DESC, then
 // entity.hydrated_at DESC, then the entity id for a stable order. A row whose
 // entity is gone still appears (last), so its failure can be recorded.
-func (s *Store) InterpretationsBehind(repo string, limit int) (keys []InterpretationKey, known bool, err error) {
+func (s *Store) InterpretationsBehind(ctx context.Context, repo string, limit int) (keys []InterpretationKey, known bool, err error) {
 	stamp := s.InterpStamp()
 	if stamp == "" {
 		return nil, false, ErrNoInterpStamp
 	}
-	haveStamp, err := s.hasInterpStampColumn()
+	haveStamp, err := s.hasInterpStampColumn(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("store: interpretations behind: %w", err)
 	}
@@ -130,7 +130,7 @@ func (s *Store) InterpretationsBehind(repo string, limit int) (keys []Interpreta
 		q += ` LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := s.sql.QueryContext(context.Background(), q, args...)
+	rows, err := s.sql.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("store: interpretations behind: %w", err)
 	}

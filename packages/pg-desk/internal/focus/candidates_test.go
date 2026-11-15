@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -227,7 +228,7 @@ func TestHiddenEntityIsNotACandidate(t *testing.T) {
 func TestHiddenFalseHidesNothing(t *testing.T) {
 	f := newFixture(t)
 	k := f.pr("7", prSpec{ownership: "mine"})
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: "pr", EntityID: "7", Key: store.AnnotationHidden,
 		Value: `{"value":false,"reason":"unhidden"}`, Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 	}); err != nil {
@@ -240,7 +241,7 @@ func TestHiddenFalseHidesNothing(t *testing.T) {
 func TestWIPEntityStaysACandidate(t *testing.T) {
 	f := newFixture(t)
 	k := f.pr("7", prSpec{ownership: "mine"})
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: "pr", EntityID: "7", Key: store.AnnotationWIP,
 		Value: "true", Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 	}); err != nil {

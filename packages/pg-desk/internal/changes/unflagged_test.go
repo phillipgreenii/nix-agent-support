@@ -55,6 +55,7 @@ func seedHeld(t *testing.T, st *store.Store, id string, backend string, watched 
 	b := backend
 	opts := store.WriteOptions{Backend: &b, Watched: watched}
 	if _, err := st.WriteEntityStateWithLogOpts(
+		context.Background(),
 		store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 		0, "2026-10-01T11:59:00Z", true, nil, []string{"added"}, "pg-connector", "2026-10-01T11:59:00Z", opts,
 	); err != nil {
@@ -66,7 +67,7 @@ func boolp(b bool) *bool { return &b }
 
 func unflaggedCount(t *testing.T, st *store.Store, inst string) (UnflaggedRecord, bool) {
 	t.Helper()
-	rec, found, err := ReadUnflagged(st, inst)
+	rec, found, err := ReadUnflagged(context.Background(), st, inst)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestUnflaggedCountsHeldMembersWithoutAFlagOnceAndStoresOnlyCountAndTime(t *
 	if !found || rec.Count != 2 || rec.At != "2026-10-01T12:00:00Z" {
 		t.Fatalf("record = %+v found=%v, want count 2 at the poll time", rec, found)
 	}
-	keys, err := f.st.ListMetaPrefix("change_flow.")
+	keys, err := f.st.ListMetaPrefix(context.Background(), "change_flow.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +225,7 @@ func seedListedSet(t *testing.T, st *store.Store, query string, ids ...string) {
 	for _, id := range ids {
 		set[id] = true
 	}
-	if err := saveWatchSet(st, "issue", query, set); err != nil {
+	if err := saveWatchSet(context.Background(), st, "issue", query, set); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -232,7 +233,7 @@ func seedListedSet(t *testing.T, st *store.Store, query string, ids ...string) {
 func recordListed(t *testing.T, e *Engine, queries ...string) *pollState {
 	t.Helper()
 	st := &pollState{hydrated: map[string]error{}, notes: map[string][]string{}}
-	e.recordListedUnflagged("issue", queries, st)
+	e.recordListedUnflagged(context.Background(), "issue", queries, st)
 	return st
 }
 
@@ -258,7 +259,7 @@ func TestListedUnflaggedCountsMembersOfTheLastListingWithoutAFlag(t *testing.T) 
 	}
 	// Flagging the members clears the count at the next read.
 	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
-		if err := st.SetEntityColumns("o/r", "issue", id, nil, boolp(true)); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, boolp(true)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -279,12 +280,12 @@ func TestListedUnflaggedExcludesABaselineOpenUnderADay(t *testing.T) {
 	}
 	set := func(k, v string) {
 		t.Helper()
-		if err := st.SetMeta(k, v); err != nil {
+		if err := st.SetMeta(context.Background(), k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, q := range []string{"fresh", "old"} { // newListEngine wrote markers
-		if err := st.DeleteMeta(MetaBaselinePrefix + q); err != nil {
+		if err := st.DeleteMeta(context.Background(), MetaBaselinePrefix+q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -301,7 +302,7 @@ func TestListedUnflaggedExcludesABaselineOpenUnderADay(t *testing.T) {
 	}
 	// A baseline begun but with no readable open time stays excluded; a marker
 	// ends the hold whatever the open time was.
-	if err := st.DeleteMeta(MetaBaselineOpenPrefix + "fresh"); err != nil {
+	if err := st.DeleteMeta(context.Background(), MetaBaselineOpenPrefix+"fresh"); err != nil {
 		t.Fatal(err)
 	}
 	recordListed(t, e, "fresh", "old")
@@ -333,7 +334,7 @@ func TestListedUnflaggedNeedsEveryQueryOfTheInstanceAndABackendsEntry(t *testing
 	seedListedSet(t, st2, "open", "bd-1")
 	seedHeld(t, st2, "bd-1", "beads-a", nil)
 	recordListed(t, e2, "open")
-	if keys, _ := st2.ListMetaPrefix(MetaUnflaggedPrefix); len(keys) != 0 {
+	if keys, _ := st2.ListMetaPrefix(context.Background(), MetaUnflaggedPrefix); len(keys) != 0 {
 		t.Errorf("a query with no backends entry stored %v", keys)
 	}
 }
@@ -351,7 +352,7 @@ func TestRunStoresTheListedUnflaggedCount(t *testing.T) {
 		t.Fatalf("record = %+v found=%v, want a stored zero", rec, found)
 	}
 	// A member whose flag is lost afterwards is counted by the next poll.
-	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, boolp(false)); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "bd-1", nil, boolp(false)); err != nil {
 		t.Fatal(err)
 	}
 	e.Lister = fakeLister{res: listing("bd-1=F1", "bd-2=F2")}

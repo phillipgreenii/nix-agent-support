@@ -1,6 +1,7 @@
 package links
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -53,8 +54,8 @@ type Detailed struct {
 // edges (both ends of each stored one), merged across direction so a link
 // appears once per (type, id, relation) with the union of its origins, each
 // joined with the linked entity's stored snapshot. Read-only, no network.
-func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
-	linked, asOf, err := readLinkedAsOf(d.Store, d.Repo, entityType, id)
+func ReadDetailed(ctx context.Context, d Deps, entityType, id string) (Detailed, error) {
+	linked, asOf, err := readLinkedAsOf(ctx, d.Store, d.Repo, entityType, id)
 	if err != nil {
 		return Detailed{}, err
 	}
@@ -62,7 +63,7 @@ func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
 	// added here with its origin; an external depends_on link is already in
 	// linked, with its actor, and is not repeated.
 	if entityType == entityTypePR {
-		edges, derr := d.dependencies().DependenciesOf(entityTypePR, id)
+		edges, derr := d.dependencies().DependenciesOf(ctx, entityTypePR, id)
 		if derr != nil {
 			return Detailed{}, derr
 		}
@@ -76,7 +77,7 @@ func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
 	}
 	focusFacts := ""
 	if entityType == entityTypePR {
-		e, found, gerr := d.Store.GetEntity(d.Repo, entityType, id)
+		e, found, gerr := d.Store.GetEntity(ctx, d.Repo, entityType, id)
 		if gerr != nil {
 			return Detailed{}, gerr
 		}
@@ -121,12 +122,12 @@ func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
 	for _, k := range order {
 		det := merged[k]
 		sort.SliceStable(det.Origins, func(i, j int) bool { return det.Origins[i].Origin < det.Origins[j].Origin })
-		ent, found, gerr := d.Store.GetEntity(d.Repo, det.Type, det.ID)
+		ent, found, gerr := d.Store.GetEntity(ctx, d.Repo, det.Type, det.ID)
 		if gerr != nil {
 			return Detailed{}, fmt.Errorf("links: read linked %s %s: %w", det.Type, det.ID, gerr)
 		}
 		if det.Type == entityTypeIssue {
-			det.URL, err = issueURL(d, det.ID, det.Relation == relationJira, focusFacts)
+			det.URL, err = issueURL(ctx, d, det.ID, det.Relation == relationJira, focusFacts)
 		} else if found {
 			det.URL = SnapshotURL(det.Type, ent.Facts)
 		}

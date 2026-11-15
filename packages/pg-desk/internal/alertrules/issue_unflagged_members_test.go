@@ -60,7 +60,7 @@ func TestIssueUnflaggedMembersRuleAgreesWithTheEmittedSeries(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	queries := map[string][]string{"jira-a": {"mine"}}
 	emit := func() []outcomeSample {
-		return emittedOutcome(t, metrics.MetricIssueUnflaggedMembers, metrics.WithUnflaggedMembers(metrics.UnflaggedMembersFromStore(st, queries)))
+		return emittedOutcome(t, metrics.MetricIssueUnflaggedMembers, metrics.WithUnflaggedMembers(metrics.UnflaggedMembersFromStore(context.Background(), st, queries)))
 	}
 	if series := emit(); len(series) != 1 || series[0].v != 0 {
 		t.Fatalf("no stored count must read 0, got %+v", series)
@@ -68,7 +68,7 @@ func TestIssueUnflaggedMembersRuleAgreesWithTheEmittedSeries(t *testing.T) {
 	store1 := func(n int) {
 		t.Helper()
 		b, _ := json.Marshal(changes.UnflaggedRecord{Count: n, At: time.Now().UTC().Format(time.RFC3339)})
-		if err := st.SetMeta(changes.MetaUnflaggedPrefix+"jira-a", string(b)); err != nil {
+		if err := st.SetMeta(context.Background(), changes.MetaUnflaggedPrefix+"jira-a", string(b)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -120,7 +120,7 @@ func TestBeadsUnflaggedSeriesFromARealPollFiresClearsAndHoldsABaseline(t *testin
 	}
 	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
 		fp := "F1"
-		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+		if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 			0, now.Add(-time.Hour).Format(time.RFC3339), true, &fp, []string{"reconcile"}, "sweep", now.Add(-time.Hour).Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
@@ -136,11 +136,11 @@ func TestBeadsUnflaggedSeriesFromARealPollFiresClearsAndHoldsABaseline(t *testin
 		}
 	}
 	emit := func() []outcomeSample {
-		return emittedOutcome(t, metrics.MetricIssueUnflaggedMembers, metrics.WithUnflaggedMembers(metrics.UnflaggedMembersForConfig(st, cfg)))
+		return emittedOutcome(t, metrics.MetricIssueUnflaggedMembers, metrics.WithUnflaggedMembers(metrics.UnflaggedMembersForConfig(context.Background(), st, cfg)))
 	}
 	setOpen := func(ago time.Duration) {
 		t.Helper()
-		if err := st.SetMeta(changes.MetaBaselineOpenPrefix+"open", now.Add(-ago).Format(time.RFC3339)); err != nil {
+		if err := st.SetMeta(context.Background(), changes.MetaBaselineOpenPrefix+"open", now.Add(-ago).Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -168,7 +168,7 @@ func TestBeadsUnflaggedSeriesFromARealPollFiresClearsAndHoldsABaseline(t *testin
 	// The members get their flag: the next poll reads 0 and the alert clears.
 	yes := true
 	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
-		if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &yes); err != nil {
 			t.Fatal(err)
 		}
 	}

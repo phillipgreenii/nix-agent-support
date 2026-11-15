@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func derivedLink(toID, relation, origin, seen string) XrefLink {
 	return XrefLink{
@@ -19,23 +22,23 @@ func externalLink(toID, relation, actor string) XrefLink {
 
 func TestReplaceDerivedXrefsReplacesPerHydration(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{
 		derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z"),
 		derivedLink("A-2", "references", "derived:body", "2026-09-01T00:00:00Z"),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddExternalXref(externalLink("A-9", "blocks", "alice")); err != nil {
+	if err := s.AddExternalXref(context.Background(), externalLink("A-9", "blocks", "alice")); err != nil {
 		t.Fatal(err)
 	}
 	// Second hydration: A-1 stays (first_seen kept, last_confirmed moves), A-2 goes, A-3 arrives.
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{
 		derivedLink("A-1", "fixes", "derived:body", "2026-09-05T00:00:00Z"),
 		derivedLink("A-3", "fixes", "derived:body", "2026-09-05T00:00:00Z"),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	links, err := s.ListXrefLinksFrom(kvRepo, "pr", kvID)
+	links, err := s.ListXrefLinksFrom(context.Background(), kvRepo, "pr", kvID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,15 +58,15 @@ func TestReplaceDerivedXrefsReplacesPerHydration(t *testing.T) {
 		t.Fatalf("external row did not persist: %+v", ext)
 	}
 	// Reverse lookup returns origin/relation too.
-	to, err := s.ListXrefLinksTo(kvRepo, "issue", "A-3")
+	to, err := s.ListXrefLinksTo(context.Background(), kvRepo, "issue", "A-3")
 	if err != nil || len(to) != 1 || to[0].Origin != "derived:body" || to[0].Relation != "fixes" {
 		t.Fatalf("ListXrefLinksTo = %+v, %v", to, err)
 	}
 	// Empty replacement clears derived rows only.
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, nil); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, nil); err != nil {
 		t.Fatal(err)
 	}
-	links, _ = s.ListXrefLinksFrom(kvRepo, "pr", kvID)
+	links, _ = s.ListXrefLinksFrom(context.Background(), kvRepo, "pr", kvID)
 	if len(links) != 1 || links[0].ToID != "A-9" {
 		t.Fatalf("after clear = %+v", links)
 	}
@@ -77,13 +80,13 @@ func TestReplaceDerivedXrefsValidatesLinks(t *testing.T) {
 		derivedLink("A-1", "", "derived:body", "t"),
 	}
 	for _, l := range bad {
-		if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{l}); err == nil {
+		if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{l}); err == nil {
 			t.Errorf("link %+v accepted", l)
 		}
 	}
 	other := derivedLink("A-1", "fixes", "derived:body", "t")
 	other.FromID = "acme/widgets#8"
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{other}); err == nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{other}); err == nil {
 		t.Error("link from another entity accepted")
 	}
 }
@@ -92,7 +95,7 @@ func TestReplaceDerivedXrefsValidatesLinks(t *testing.T) {
 // with relation, keyed by origin.
 func linksByOrigin(t *testing.T, s *Store, toID, relation string) map[string]XrefLink {
 	t.Helper()
-	links, err := s.ListXrefLinksFrom(kvRepo, "pr", kvID)
+	links, err := s.ListXrefLinksFrom(context.Background(), kvRepo, "pr", kvID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,12 +113,12 @@ func linksByOrigin(t *testing.T, s *Store, toID, relation string) map[string]Xre
 func TestExternalXrefCannotOverrideDerived(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	derived := derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z")
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derived}); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{derived}); err != nil {
 		t.Fatal(err)
 	}
 	ext := externalLink("A-1", "fixes", "alice")
 	ext.Evidence = "external evidence"
-	if err := s.AddExternalXref(ext); err != nil {
+	if err := s.AddExternalXref(context.Background(), ext); err != nil {
 		t.Fatal(err)
 	}
 	got := linksByOrigin(t, s, "A-1", "fixes")
@@ -132,7 +135,7 @@ func TestExternalXrefCannotOverrideDerived(t *testing.T) {
 	// Re-adding refreshes only alice's row; the derived row is still untouched.
 	again := externalLink("A-1", "fixes", "alice")
 	again.LastConfirmed, again.ActedAt, again.Reason = "2026-09-20T00:00:00Z", "2026-09-20T00:00:00Z", "still"
-	if err := s.AddExternalXref(again); err != nil {
+	if err := s.AddExternalXref(context.Background(), again); err != nil {
 		t.Fatal(err)
 	}
 	got = linksByOrigin(t, s, "A-1", "fixes")
@@ -143,10 +146,10 @@ func TestExternalXrefCannotOverrideDerived(t *testing.T) {
 		t.Fatalf("re-added external row = %+v", e)
 	}
 	// A different relation to the same target is a distinct link and is allowed.
-	if err := s.AddExternalXref(externalLink("A-1", "blocks", "alice")); err != nil {
+	if err := s.AddExternalXref(context.Background(), externalLink("A-1", "blocks", "alice")); err != nil {
 		t.Fatal(err)
 	}
-	if links, _ := s.ListXrefLinksFrom(kvRepo, "pr", kvID); len(links) != 3 {
+	if links, _ := s.ListXrefLinksFrom(context.Background(), kvRepo, "pr", kvID); len(links) != 3 {
 		t.Fatalf("links = %+v, want 3", links)
 	}
 }
@@ -155,21 +158,21 @@ func TestExternalXrefCannotOverrideDerived(t *testing.T) {
 // external origin, a re-hydration that no longer finds it.
 func TestExternalClaimKeepsLinkWhenDerivedSourceDisappears(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z")}); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddExternalXref(externalLink("A-1", "fixes", "alice")); err != nil {
+	if err := s.AddExternalXref(context.Background(), externalLink("A-1", "fixes", "alice")); err != nil {
 		t.Fatal(err)
 	}
 	// A hydration that still finds the link keeps both claims.
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "2026-09-05T00:00:00Z")}); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "2026-09-05T00:00:00Z")}); err != nil {
 		t.Fatal(err)
 	}
 	if got := linksByOrigin(t, s, "A-1", "fixes"); len(got) != 2 {
 		t.Fatalf("after confirming hydration = %+v, want both claims", got)
 	}
 	// The source entity changes: re-hydration no longer derives the link.
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, nil); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := linksByOrigin(t, s, "A-1", "fixes")
@@ -181,7 +184,7 @@ func TestExternalClaimKeepsLinkWhenDerivedSourceDisappears(t *testing.T) {
 		t.Fatalf("surviving external claim = %+v", e)
 	}
 	// The reverse lookup still sees the link too.
-	to, err := s.ListXrefLinksTo(kvRepo, "issue", "A-1")
+	to, err := s.ListXrefLinksTo(context.Background(), kvRepo, "issue", "A-1")
 	if err != nil || len(to) != 1 || to[0].Origin != "external:alice" {
 		t.Fatalf("ListXrefLinksTo = %+v, %v", to, err)
 	}
@@ -192,13 +195,13 @@ func TestExternalClaimKeepsLinkWhenDerivedSourceDisappears(t *testing.T) {
 func TestRemoveExternalClaimLeavesDerivedLink(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	derived := derivedLink("A-1", "fixes", "derived:body", "2026-09-01T00:00:00Z")
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derived}); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{derived}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddExternalXref(externalLink("A-1", "fixes", "alice")); err != nil {
+	if err := s.AddExternalXref(context.Background(), externalLink("A-1", "fixes", "alice")); err != nil {
 		t.Fatal(err)
 	}
-	if removed, err := s.RemoveExternalXref(kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || !removed {
+	if removed, err := s.RemoveExternalXref(context.Background(), kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || !removed {
 		t.Fatalf("remove alice's claim = (%v, %v)", removed, err)
 	}
 	got := linksByOrigin(t, s, "A-1", "fixes")
@@ -206,7 +209,7 @@ func TestRemoveExternalClaimLeavesDerivedLink(t *testing.T) {
 		t.Fatalf("after removing the external claim = %+v, want only the derived row, unchanged", got)
 	}
 	// With no external claim left, a second remove removes nothing.
-	if removed, err := s.RemoveExternalXref(kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || removed {
+	if removed, err := s.RemoveExternalXref(context.Background(), kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || removed {
 		t.Fatalf("second remove = (%v, %v)", removed, err)
 	}
 	if got := linksByOrigin(t, s, "A-1", "fixes"); len(got) != 1 {
@@ -216,23 +219,23 @@ func TestRemoveExternalClaimLeavesDerivedLink(t *testing.T) {
 
 func TestRemoveExternalXrefOnlyRemovesThatActorsExternalRow(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "t1")}); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, []XrefLink{derivedLink("A-1", "fixes", "derived:body", "t1")}); err != nil {
 		t.Fatal(err)
 	}
 	for _, x := range []XrefLink{externalLink("A-2", "blocks", "alice"), externalLink("A-2", "blocks", "bob")} {
-		if err := s.AddExternalXref(x); err != nil {
+		if err := s.AddExternalXref(context.Background(), x); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Never a derived row, even naming its relation.
-	if removed, err := s.RemoveExternalXref(kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || removed {
+	if removed, err := s.RemoveExternalXref(context.Background(), kvRepo, "pr", kvID, "issue", "A-1", "fixes", "alice"); err != nil || removed {
 		t.Fatalf("remove derived = (%v, %v)", removed, err)
 	}
 	// Removes only alice's row, not bob's.
-	if removed, err := s.RemoveExternalXref(kvRepo, "pr", kvID, "issue", "A-2", "blocks", "alice"); err != nil || !removed {
+	if removed, err := s.RemoveExternalXref(context.Background(), kvRepo, "pr", kvID, "issue", "A-2", "blocks", "alice"); err != nil || !removed {
 		t.Fatalf("remove alice = (%v, %v)", removed, err)
 	}
-	links, _ := s.ListXrefLinksFrom(kvRepo, "pr", kvID)
+	links, _ := s.ListXrefLinksFrom(context.Background(), kvRepo, "pr", kvID)
 	if len(links) != 2 {
 		t.Fatalf("links = %+v, want derived + bob", links)
 	}
@@ -245,13 +248,13 @@ func TestRemoveExternalXrefOnlyRemovesThatActorsExternalRow(t *testing.T) {
 
 func TestLegacyXrefRowsAreUntouchedByLinkAPI(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if err := s.UpsertXref(Xref{Repo: kvRepo, FromType: "pr", FromID: kvID, ToType: "issue", ToID: "L-1", Evidence: "e", FirstSeen: "t", LastConfirmed: "t"}); err != nil {
+	if err := s.UpsertXref(context.Background(), Xref{Repo: kvRepo, FromType: "pr", FromID: kvID, ToType: "issue", ToID: "L-1", Evidence: "e", FirstSeen: "t", LastConfirmed: "t"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReplaceDerivedXrefs(kvRepo, "pr", kvID, nil); err != nil {
+	if err := s.ReplaceDerivedXrefs(context.Background(), kvRepo, "pr", kvID, nil); err != nil {
 		t.Fatal(err)
 	}
-	links, _ := s.ListXrefLinksFrom(kvRepo, "pr", kvID)
+	links, _ := s.ListXrefLinksFrom(context.Background(), kvRepo, "pr", kvID)
 	if len(links) != 1 || links[0].Origin != xrefLegacyOrigin || links[0].Relation != xrefLegacyRelation {
 		t.Fatalf("links = %+v, want the legacy row intact", links)
 	}

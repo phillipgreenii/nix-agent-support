@@ -1,6 +1,10 @@
 package attention
 
-import "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/dependency"
+import (
+	"context"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/dependency"
+)
 
 // NameBlockedByOpenDependency is the name the context suppressor records as
 // the reason a candidate was dropped (shown by `pg-desk attention explain`).
@@ -31,11 +35,11 @@ type blockedByOpenDependency struct{}
 
 func (blockedByOpenDependency) Name() string { return NameBlockedByOpenDependency }
 
-func (blockedByOpenDependency) Suppress(c Candidate, env *SuppressEnv) (bool, error) {
+func (blockedByOpenDependency) Suppress(ctx context.Context, c Candidate, env *SuppressEnv) (bool, error) {
 	if !c.SelfBroken || c.Type != dependency.TypePR || env == nil || env.Dependencies == nil {
 		return false, nil
 	}
-	open, err := env.Dependencies.OpenDependenciesOf(c.Type, c.ID)
+	open, err := env.Dependencies.OpenDependenciesOf(ctx, c.Type, c.ID)
 	if err != nil {
 		return false, err
 	}

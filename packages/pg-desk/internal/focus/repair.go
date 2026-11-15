@@ -37,7 +37,7 @@ type RepairResult struct {
 func Repair(ctx context.Context, d LockDeps, dryRun bool) (RepairResult, error) {
 	repo := d.repo()
 	cands := map[Key]bool{}
-	ents, err := d.Store.ListEntities()
+	ents, err := d.Store.ListEntities(ctx)
 	if err != nil {
 		return RepairResult{}, fmt.Errorf("focus: repair: list entities: %w", err)
 	}
@@ -45,7 +45,7 @@ func Repair(ctx context.Context, d LockDeps, dryRun bool) (RepairResult, error) 
 		if e.Repo != repo {
 			continue
 		}
-		a, found, err := d.Store.GetKVAnnotation(repo, e.EntityType, e.EntityID, store.AnnotationFocusSelected)
+		a, found, err := d.Store.GetKVAnnotation(ctx, repo, e.EntityType, e.EntityID, store.AnnotationFocusSelected)
 		if err != nil {
 			return RepairResult{}, fmt.Errorf("focus: repair: read annotation of %s:%s: %w", e.EntityType, e.EntityID, err)
 		}
@@ -53,7 +53,7 @@ func Repair(ctx context.Context, d LockDeps, dryRun bool) (RepairResult, error) 
 			cands[Key{Type: e.EntityType, ID: e.EntityID}] = true
 		}
 	}
-	rows, err := d.Store.FocusRowsAllPeriods()
+	rows, err := d.Store.FocusRowsAllPeriods(ctx)
 	if err != nil {
 		return RepairResult{}, fmt.Errorf("focus: repair: read plan rows: %w", err)
 	}
@@ -70,11 +70,11 @@ func Repair(ctx context.Context, d LockDeps, dryRun bool) (RepairResult, error) 
 
 	var stale []Key
 	for _, k := range keys {
-		want, err := d.Store.FocusAnnotationValue(repo, k.Type, k.ID)
+		want, err := d.Store.FocusAnnotationValue(ctx, repo, k.Type, k.ID)
 		if err != nil {
 			return RepairResult{}, fmt.Errorf("focus: repair: %w", err)
 		}
-		a, found, err := d.Store.GetKVAnnotation(repo, k.Type, k.ID, store.AnnotationFocusSelected)
+		a, found, err := d.Store.GetKVAnnotation(ctx, repo, k.Type, k.ID, store.AnnotationFocusSelected)
 		if err != nil {
 			return RepairResult{}, fmt.Errorf("focus: repair: %w", err)
 		}
@@ -90,13 +90,13 @@ func Repair(ctx context.Context, d LockDeps, dryRun bool) (RepairResult, error) 
 		for _, k := range stale {
 			out.Written = append(out.Written, AnnotationOutcome{Key: k, Outcome: AnnotationWouldWrite})
 		}
-		if out.Reoffered, err = Reoffered(d); err != nil {
+		if out.Reoffered, err = Reoffered(ctx, d); err != nil {
 			return RepairResult{}, err
 		}
 		return out, nil
 	}
 	out := RepairResult{Written: ApplyAnnotations(ctx, d, stale, d.now().Format(time.RFC3339))}
-	if out.Reoffered, err = Reoffered(d); err != nil {
+	if out.Reoffered, err = Reoffered(ctx, d); err != nil {
 		return RepairResult{}, err
 	}
 	if d.EmitRemoved != nil && len(out.Reoffered) > 0 {

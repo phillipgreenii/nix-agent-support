@@ -34,8 +34,8 @@ import (
 // fresh per test (and once per real serve invocation), and a shared
 // global registry would make repeated construction within one test binary
 // collide with "duplicate metrics collector registration attempted".
-func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, snapshotCtx context.Context, every time.Duration, opts ...registryOption) (http.Handler, error) {
-	registry, err := newMetricsRegistry(st, cfg, pollInterval, opts...)
+func newMetricsHandler(ctx context.Context, st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, snapshotCtx context.Context, every time.Duration, opts ...registryOption) (http.Handler, error) {
+	registry, err := newMetricsRegistry(ctx, st, cfg, pollInterval, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 // newMetricsRegistry builds the live catalog: every collect of the returned
 // registry reads the store. The scrape handler never collects it directly when
 // a snapshot is configured; the snapshotter does, off the request path.
-func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, opts ...registryOption) (*prometheus.Registry, error) {
+func newMetricsRegistry(ctx context.Context, st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc, opts ...registryOption) (*prometheus.Registry, error) {
 	var ro registryOptions
 	for _, o := range opts {
 		o(&ro)
@@ -83,7 +83,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 	// the /api/v1/dashboard payload can never disagree about what "now"
 	// means (design section 8).
 	snapshotFn := func() (metrics.Snapshot, error) {
-		payload, err := buildPayload(st, cfg, nowUTC(), false)
+		payload, err := buildPayload(ctx, st, cfg, nowUTC(), false)
 		if err != nil {
 			return metrics.Snapshot{}, err
 		}
@@ -105,7 +105,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 	// store that is not on the new schema Observe returns a zero Flow, so
 	// serve keeps working there and simply omits these series.
 	flowFn := func() (changes.Flow, error) {
-		return changes.Observe(st, nowUTC(), cfg.SweepMaxAge())
+		return changes.Observe(ctx, st, nowUTC(), cfg.SweepMaxAge())
 	}
 	// The sizing bound is evaluated per (type, tier) with the SAME function
 	// `doctor` uses (changes.EvaluateSweepBound). The poll interval is not
@@ -120,13 +120,13 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 		return changes.EvaluateSweepBound(changes.SweepInputsForTier(cfg, tf, tier), poll, known)
 	}
 	if err := metrics.RegisterChangeFlow(mp, newBounded("changeflow", flowFn), metrics.WithSweepBound(sweepBound),
-		metrics.WithIngestFailed(newBounded("ingest_failed", metrics.IngestFailedFromStore(st, cfg.OwningInstances(changes.EntityTypeIssue),
+		metrics.WithIngestFailed(newBounded("ingest_failed", metrics.IngestFailedFromStore(ctx, st, cfg.OwningInstances(changes.EntityTypeIssue),
 			func() time.Time { return nowUTC() }))),
-		metrics.WithWatchedSourceObserved(newBounded("watched_source", metrics.WatchedSourceObservedForConfig(st, cfg,
+		metrics.WithWatchedSourceObserved(newBounded("watched_source", metrics.WatchedSourceObservedForConfig(ctx, st, cfg,
 			func() time.Time { return nowUTC() }))),
-		metrics.WithUnflaggedMembers(newBounded("unflagged", metrics.UnflaggedMembersForConfig(st, cfg))),
-		metrics.WithWatchedEntities(newBounded("watched_entities", metrics.WatchedEntitiesFromStore(st))),
-		metrics.WithOldestOrphanReadAge(newBounded("orphan_age", metrics.OldestOrphanReadAgeFromStore(st, cfg,
+		metrics.WithUnflaggedMembers(newBounded("unflagged", metrics.UnflaggedMembersForConfig(ctx, st, cfg))),
+		metrics.WithWatchedEntities(newBounded("watched_entities", metrics.WatchedEntitiesFromStore(ctx, st))),
+		metrics.WithOldestOrphanReadAge(newBounded("orphan_age", metrics.OldestOrphanReadAgeFromStore(ctx, st, cfg,
 			func() time.Time { return nowUTC() })))); err != nil {
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
@@ -141,7 +141,7 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 	// store that is not migrated for the focus tables yields a zero Health, so
 	// serve keeps working there and simply omits these series.
 	focusFn := metrics.CachedFocus(func() (focus.Health, error) {
-		return focus.ComputeHealth(st, cfg, nowUTC())
+		return focus.ComputeHealth(ctx, st, cfg, nowUTC())
 	}, focusHealthTTL)
 	if !ro.noFocus {
 		if err := metrics.RegisterFocus(mp, newBounded("focus", focusFn)); err != nil {
@@ -154,14 +154,14 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 	// schema-2 columns, so a store that is not migrated has NO series for it
 	// (not 0), and a failed read has none either.
 	unhydratedFn := func() (metrics.PRUnhydratedSnapshot, bool, error) {
-		v, err := st.SchemaVersion()
+		v, err := st.SchemaVersion(ctx)
 		if err != nil {
 			return metrics.PRUnhydratedSnapshot{}, false, err
 		}
 		if v < store.NewSchemaVersion {
 			return metrics.PRUnhydratedSnapshot{}, false, nil
 		}
-		u, err := st.CountPRUnhydrated(nowUTC())
+		u, err := st.CountPRUnhydrated(ctx, nowUTC())
 		if err != nil {
 			return metrics.PRUnhydratedSnapshot{}, false, err
 		}
@@ -176,14 +176,14 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 	// at scrape time, zero-filled. Like the never-hydrated set it needs a
 	// schema-2 store; an older one or a failed read has no series for it.
 	laneStateFn := func() (lanestate.Snapshot, bool, error) {
-		v, err := st.SchemaVersion()
+		v, err := st.SchemaVersion(ctx)
 		if err != nil {
 			return lanestate.Snapshot{}, false, err
 		}
 		if v < store.NewSchemaVersion {
 			return lanestate.Snapshot{}, false, nil
 		}
-		snap, err := lanestate.Read(st, nowUTC())
+		snap, err := lanestate.Read(ctx, st, nowUTC())
 		if err != nil {
 			return lanestate.Snapshot{}, false, err
 		}
@@ -198,14 +198,14 @@ func newMetricsRegistry(st *store.Store, cfg *config.Config, pollInterval PollIn
 	// never-hydrated set: a store that is not migrated, or a failed read, has
 	// NO series for them (never 0).
 	anchorsFn := func() (metrics.PRAnchorsSnapshot, bool, error) {
-		v, err := st.SchemaVersion()
+		v, err := st.SchemaVersion(ctx)
 		if err != nil {
 			return metrics.PRAnchorsSnapshot{}, false, err
 		}
 		if v < store.NewSchemaVersion {
 			return metrics.PRAnchorsSnapshot{}, false, nil
 		}
-		a, err := st.CountPRAnchors(nowUTC())
+		a, err := st.CountPRAnchors(ctx, nowUTC())
 		if err != nil {
 			return metrics.PRAnchorsSnapshot{}, false, err
 		}

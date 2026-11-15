@@ -87,7 +87,7 @@ type feedOutcome struct {
 // nil error, so the caller keeps polling and acknowledges past the row; an
 // error is returned only for a store or infrastructure fault.
 func (p *Pipeline) IngestFeedRow(ctx context.Context, in FeedRowInput) (FeedRowResult, error) {
-	if err := p.store.RequireNewSchema(); err != nil {
+	if err := p.store.RequireNewSchema(ctx); err != nil {
 		return FeedRowResult{}, err
 	}
 	row := in.Row
@@ -96,7 +96,7 @@ func (p *Pipeline) IngestFeedRow(ctx context.Context, in FeedRowInput) (FeedRowR
 	}
 	replay := row.Seq == 0
 	if !replay {
-		skip, err := p.store.ShouldSkipFeedRow(in.Instance, in.StoreIdentity, row.Seq, row.EntityID)
+		skip, err := p.store.ShouldSkipFeedRow(ctx, in.Instance, in.StoreIdentity, row.Seq, row.EntityID)
 		if err != nil {
 			return FeedRowResult{}, fmt.Errorf("pipeline: feed row %s %s#%d: %w", in.Instance, row.EntityID, row.Seq, err)
 		}
@@ -121,7 +121,7 @@ func (p *Pipeline) IngestFeedRow(ctx context.Context, in FeedRowInput) (FeedRowR
 		return FeedRowResult{}, err
 	}
 	if out.failure != "" {
-		if err := p.store.RecordIngestFailure(store.IngestFailure{
+		if err := p.store.RecordIngestFailure(ctx, store.IngestFailure{
 			Instance: in.Instance, EntityID: row.EntityID, Seq: row.Seq,
 			StoreIdentity: in.StoreIdentity, Kinds: c.kinds, LastError: out.failure,
 			FailureClass: out.class, FlaggedAt: p.flagTime(out.class),
@@ -131,7 +131,7 @@ func (p *Pipeline) IngestFeedRow(ctx context.Context, in FeedRowInput) (FeedRowR
 		return FeedRowResult{Failed: true, Degraded: out.degraded}, nil
 	}
 	// A later success for the entity resolves its flagged entries.
-	if _, err := p.store.ClearFlaggedIngestFailures(in.Instance, row.EntityID); err != nil {
+	if _, err := p.store.ClearFlaggedIngestFailures(ctx, in.Instance, row.EntityID); err != nil {
 		return FeedRowResult{}, fmt.Errorf("pipeline: clear flagged ingest failures %s %s: %w", in.Instance, row.EntityID, err)
 	}
 	return FeedRowResult{Written: out.written, Version: out.version}, nil
@@ -160,10 +160,10 @@ const FeedDegradedStreak = 3
 // failure time and gets the new error. retried is the number of entries
 // attempted and stillFailing how many of those failed again.
 func (p *Pipeline) RetryIngestFailures(ctx context.Context, instance string) (retried, stillFailing int, err error) {
-	if err := p.store.RequireNewSchema(); err != nil {
+	if err := p.store.RequireNewSchema(ctx); err != nil {
 		return 0, 0, err
 	}
-	fails, err := p.store.ListIngestFailures(instance)
+	fails, err := p.store.ListIngestFailures(ctx, instance)
 	if err != nil {
 		return 0, 0, fmt.Errorf("pipeline: list ingest failures: %w", err)
 	}
@@ -200,16 +200,16 @@ func (p *Pipeline) RetryIngestFailures(ctx context.Context, instance string) (re
 			f.LastError = out.failure
 			f.FailureClass = out.class
 			f.FlaggedAt = p.flagTime(out.class)
-			if err := p.store.RecordIngestFailure(f); err != nil {
+			if err := p.store.RecordIngestFailure(ctx, f); err != nil {
 				return retried, stillFailing, fmt.Errorf("pipeline: record ingest failure %s %s#%d: %w", f.Instance, f.EntityID, f.Seq, err)
 			}
 			stillFailing++
 			continue
 		}
-		if err := p.store.ClearIngestFailure(f.Instance, f.EntityID, f.Seq); err != nil {
+		if err := p.store.ClearIngestFailure(ctx, f.Instance, f.EntityID, f.Seq); err != nil {
 			return retried, stillFailing, fmt.Errorf("pipeline: clear ingest failure %s %s#%d: %w", f.Instance, f.EntityID, f.Seq, err)
 		}
-		if _, err := p.store.ClearFlaggedIngestFailures(f.Instance, f.EntityID); err != nil {
+		if _, err := p.store.ClearFlaggedIngestFailures(ctx, f.Instance, f.EntityID); err != nil {
 			return retried, stillFailing, fmt.Errorf("pipeline: clear flagged ingest failures %s %s: %w", f.Instance, f.EntityID, err)
 		}
 	}
@@ -303,13 +303,13 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 	hash := contentHash(issueCompareBytes(factsJSON))
 
 	// The new derived link set, diffed once against the current one.
-	newLinks, haveLinks, err := p.deriveLinks(issueEntityType, c.entityID, result.Payload, len(result.Payload) == 0, at)
+	newLinks, haveLinks, err := p.deriveLinks(ctx, issueEntityType, c.entityID, result.Payload, len(result.Payload) == 0, at)
 	if err != nil {
 		return feedOutcome{failure: "links failed: " + err.Error()}, nil
 	}
 	var linkChanges []classify.LinkChange
 	if haveLinks {
-		current, err := p.store.ListXrefLinksFrom(repo, issueEntityType, c.entityID)
+		current, err := p.store.ListXrefLinksFrom(ctx, repo, issueEntityType, c.entityID)
 		if err != nil {
 			return feedOutcome{}, fmt.Errorf("pipeline: links %s %s: %w", issueEntityType, c.entityID, err)
 		}
@@ -321,7 +321,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 		}
 		linkChanges = classify.DiffLinks(derived, newLinks)
 	}
-	own := classify.NewStoreWorkLookup(p.store, repo)
+	own := classify.NewStoreWorkLookup(ctx, p.store, repo)
 
 	cr, err := p.commitCAS(ctx, repo, issueEntityType, c.entityID, defaultEntityChangeRetries, p.seams.beforeCASWrite, func(store.Entity, bool) (casPlan, error) {
 		return casPlan{
@@ -356,7 +356,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 			}
 		}
 	}
-	if err := p.finishEntityChange(repo, issueEntityType, c.entityID, postCommit{
+	if err := p.finishEntityChange(ctx, repo, issueEntityType, c.entityID, postCommit{
 		observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
 		interp: interpRow, contentHash: hash, haveLinks: haveLinks, newLinks: newLinks,
 	}); err != nil {
@@ -392,7 +392,7 @@ func (p *Pipeline) commitRemovedFeedRow(ctx context.Context, c feedCommit, repo,
 	switch {
 	case cr.skipped:
 		if c.marker != nil {
-			if err := p.store.AdvanceFeedMarker(*c.marker); err != nil {
+			if err := p.store.AdvanceFeedMarker(ctx, *c.marker); err != nil {
 				return feedOutcome{}, fmt.Errorf("pipeline: advance feed marker %s: %w", c.instance, err)
 			}
 		}
@@ -401,9 +401,9 @@ func (p *Pipeline) commitRemovedFeedRow(ctx context.Context, c feedCommit, repo,
 		return feedOutcome{failure: "still losing the version race"}, nil
 	}
 	cur := cr.cur
-	own := classify.NewStoreWorkLookup(p.store, repo)
+	own := classify.NewStoreWorkLookup(ctx, p.store, repo)
 	observed := !c.replay && !cur.Inactive && (cur.Version != 0 || cur.HydratedAt != "")
-	if err := p.appendLocalRecords(repo, issueEntityType, c.entityID, observed, len(c.kinds) > 0, nil, own, at); err != nil {
+	if err := p.appendLocalRecords(ctx, repo, issueEntityType, c.entityID, observed, len(c.kinds) > 0, nil, own, at); err != nil {
 		return feedOutcome{}, err
 	}
 	return feedOutcome{written: true, version: cr.version}, nil

@@ -15,17 +15,17 @@ import (
 //
 // It is a store write, not a tracker write, so a run in either lane mode may
 // call it. New schema only (the active column does not exist before it).
-func (s *Store) MarkEntityInactive(repo, entityType, entityID, counterKey string) (bool, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) MarkEntityInactive(ctx context.Context, repo, entityType, entityID, counterKey string) (bool, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return false, err
 	}
-	tx, err := s.sql.BeginTx(context.Background(), nil)
+	tx, err := s.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("store: mark inactive (%s,%s,%s): begin: %w", repo, entityType, entityID, err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 	res, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE entity SET active = 0
 		  WHERE repo = ? AND entity_type = ? AND entity_id = ? AND active = 1`,
 		repo, entityType, entityID,
@@ -41,7 +41,7 @@ func (s *Store) MarkEntityInactive(repo, entityType, entityID, counterKey string
 		return false, nil
 	}
 	if _, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO meta (key, value) VALUES (?, '1')
 		 ON CONFLICT (key) DO UPDATE SET value = CAST(meta.value AS INTEGER) + excluded.value`,
 		counterKey,

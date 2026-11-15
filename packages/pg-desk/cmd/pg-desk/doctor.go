@@ -211,7 +211,7 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 			continue
 		}
 		entityID := fmt.Sprintf("%s#%d", repo, prNumber)
-		interp, found, err := st.GetInterpretation(repo, entityTypePR, entityID)
+		interp, found, err := st.GetInterpretation(ctx, repo, entityTypePR, entityID)
 		if err != nil {
 			return nil, fmt.Errorf("read interpretation %s: %w", entityID, err)
 		}
@@ -227,13 +227,13 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 // doctorPRLaneLine renders the live pr lane line with a raw store handle that
 // it closes before returning (doctor opens the store raw so it works on a store
 // that has no schema yet).
-func doctorPRLaneLine(cfg *config.Config) string {
+func doctorPRLaneLine(ctx context.Context, cfg *config.Config) string {
 	st, err := deskStoreOpenReadPool()
 	if err != nil {
-		return prLaneLine(cfg, nil, changesNow())
+		return prLaneLine(ctx, cfg, nil, changesNow())
 	}
 	defer func() { _ = st.Close() }()
-	return prLaneLine(cfg, st, changesNow())
+	return prLaneLine(ctx, cfg, st, changesNow())
 }
 
 // doctorCmd implements `pg-desk doctor`
@@ -275,7 +275,7 @@ func runDoctor(cmd *cobra.Command) error {
 	// The live pr lane line: information, not a check (it never adds a
 	// failure). It reads the persisted lane state from a raw store handle of
 	// its own; a store that cannot be opened prints the configured part only.
-	fmt.Fprintln(w, doctorPRLaneLine(cfg))
+	fmt.Fprintln(w, doctorPRLaneLine(ctx, cfg))
 
 	if path, err := doctorLookPath("pg-connector"); err != nil {
 		fmt.Fprintf(w, "pg-connector on PATH: FAIL (%v)\n", err)
@@ -319,7 +319,7 @@ func runDoctor(cmd *cobra.Command) error {
 	if st, err := deskStoreOpenReadPool(); err != nil {
 		fmt.Fprintf(w, "stranded cycles: FAIL (open store: %v)\n", err)
 		failures = append(failures, "stranded cycles")
-	} else if version, verr := st.SchemaVersion(); verr != nil {
+	} else if version, verr := st.SchemaVersion(ctx); verr != nil {
 		_ = st.Close()
 		fmt.Fprintf(w, "stranded cycles: FAIL (read schema version: %v)\n", verr)
 		failures = append(failures, "stranded cycles")

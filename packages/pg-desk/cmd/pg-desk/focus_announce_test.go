@@ -106,13 +106,13 @@ func TestSelectApplyQuietPRAndIssueReachDeciderExactlyOnce(t *testing.T) {
 	f.showDraft(t)
 	withHydrator(t, &writingHydrator{st: f.st, write: func(st *store.Store, typ, id string) error {
 		e := store.Entity{Repo: showRepo, EntityType: typ, EntityID: id, Facts: `{"issue_show":{"id":"J-9","state":"In Progress","title":"quiet"}}`, AsOf: showAt, ContentHash: "hJ-9"}
-		if _, err := st.WriteEntityStateWithLog(e, 0, showAt, true, []string{"created"}, "sync", showAt); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), e, 0, showAt, true, []string{"created"}, "sync", showAt); err != nil {
 			return err
 		}
 		// A selected issue is a watched one: only a watched issue's
 		// annotation reaches the issue change feed (INV-ICD-16).
 		on := true
-		return st.SetEntityColumns(showRepo, typ, id, nil, &on)
+		return st.SetEntityColumns(context.Background(), showRepo, typ, id, nil, &on)
 	}})
 	got := captureInject(t, nil)
 

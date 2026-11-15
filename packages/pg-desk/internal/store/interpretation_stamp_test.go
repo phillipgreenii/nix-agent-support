@@ -16,7 +16,7 @@ import (
 
 func hasInterpColumn(t *testing.T, s *Store) bool {
 	t.Helper()
-	cols, err := s.tableColumns("interpretation")
+	cols, err := s.tableColumns(context.Background(), "interpretation")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestOpen_AddsStampColumnToExistingStoreKeepingRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertInterpretation(stampRow("o/r#1")); err != nil {
+	if err := s.UpsertInterpretation(context.Background(), stampRow("o/r#1")); err != nil {
 		t.Fatal(err)
 	}
 	dropStampColumn(t, s)
@@ -101,7 +101,7 @@ func TestOpen_AddsStampColumnToExistingStoreKeepingRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s2.Close() }()
-	got, found, err := s2.GetInterpretation("o/r", "pr", "o/r#1")
+	got, found, err := s2.GetInterpretation(context.Background(), "o/r", "pr", "o/r#1")
 	if err != nil || !found {
 		t.Fatalf("row lost: found=%v err=%v", found, err)
 	}
@@ -117,7 +117,7 @@ func TestEnsureInterpretationStamp_Branches(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = s.Close() }()
-		if err := ensureInterpretationStamp(s); err != nil {
+		if err := ensureInterpretationStamp(context.Background(), s); err != nil {
 			t.Fatal(err)
 		}
 		if hasInterpColumn(t, s) {
@@ -128,7 +128,7 @@ func TestEnsureInterpretationStamp_Branches(t *testing.T) {
 		s := OpenForTest(t)
 		boom := errors.New("boom")
 		s.faultTableColumns = func(string) error { return boom }
-		if err := ensureInterpretationStamp(s); !errors.Is(err, boom) {
+		if err := ensureInterpretationStamp(context.Background(), s); !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want boom", err)
 		}
 	})
@@ -140,7 +140,7 @@ func TestEnsureInterpretationStamp_Branches(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = ro.Close() }()
-		err = ensureInterpretationStamp(ro)
+		err = ensureInterpretationStamp(context.Background(), ro)
 		if err == nil || !strings.Contains(err.Error(), "add interpretation.interp_version") {
 			t.Fatalf("err = %v, want the add-column error", err)
 		}
@@ -161,7 +161,7 @@ func TestEnsureInterpretationStamp_Branches(t *testing.T) {
 			}
 			return nil
 		}
-		if err := ensureInterpretationStamp(ro); err != nil {
+		if err := ensureInterpretationStamp(context.Background(), ro); err != nil {
 			t.Fatalf("err = %v, want success once the column is present", err)
 		}
 		if calls != 2 {
@@ -196,40 +196,40 @@ func TestUpsertInterpretation_WritesHandleStamp(t *testing.T) {
 			s := open(t)
 			read := func(id string) string {
 				t.Helper()
-				got, found, err := s.GetInterpretation("o/r", "pr", id)
+				got, found, err := s.GetInterpretation(context.Background(), "o/r", "pr", id)
 				if err != nil || !found {
 					t.Fatalf("found=%v err=%v", found, err)
 				}
 				return got.InterpVersion
 			}
-			if err := s.UpsertInterpretation(stampRow("o/r#1")); err != nil {
+			if err := s.UpsertInterpretation(context.Background(), stampRow("o/r#1")); err != nil {
 				t.Fatal(err)
 			}
 			if got := read("o/r#1"); got != "" {
 				t.Fatalf("no stamp on the handle: InterpVersion = %q, want NULL", got)
 			}
 			s.SetInterpStamp("v1/aaaaaaaa")
-			if err := s.UpsertInterpretation(stampRow("o/r#1")); err != nil {
+			if err := s.UpsertInterpretation(context.Background(), stampRow("o/r#1")); err != nil {
 				t.Fatal(err)
 			}
 			if got := read("o/r#1"); got != "v1/aaaaaaaa" {
 				t.Fatalf("InterpVersion = %q, want the handle stamp", got)
 			}
 			s.SetInterpStamp("v2/bbbbbbbb")
-			if err := s.UpsertInterpretation(stampRow("o/r#1")); err != nil {
+			if err := s.UpsertInterpretation(context.Background(), stampRow("o/r#1")); err != nil {
 				t.Fatal(err)
 			}
 			if got := read("o/r#1"); got != "v2/bbbbbbbb" {
 				t.Fatalf("InterpVersion after restamp = %q", got)
 			}
 			// List sees the same stamp.
-			all, err := s.ListInterpretations()
+			all, err := s.ListInterpretations(context.Background())
 			if err != nil || len(all) != 1 || all[0].InterpVersion != "v2/bbbbbbbb" {
 				t.Fatalf("ListInterpretations = %+v err=%v", all, err)
 			}
 			// A handle with no stamp rewrites the row with NULL.
 			s.SetInterpStamp("")
-			if err := s.UpsertInterpretation(stampRow("o/r#1")); err != nil {
+			if err := s.UpsertInterpretation(context.Background(), stampRow("o/r#1")); err != nil {
 				t.Fatal(err)
 			}
 			if got := read("o/r#1"); got != "" {
@@ -243,17 +243,17 @@ func TestUpsertInterpretation_ShapeErrorIsReturned(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	boom := errors.New("boom")
 	s.faultTableColumns = func(string) error { return boom }
-	if err := s.UpsertInterpretation(stampRow("o/r#1")); !errors.Is(err, boom) {
+	if err := s.UpsertInterpretation(context.Background(), stampRow("o/r#1")); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want boom", err)
 	}
-	if _, _, err := s.GetInterpretation("o/r", "pr", "o/r#1"); !errors.Is(err, boom) {
+	if _, _, err := s.GetInterpretation(context.Background(), "o/r", "pr", "o/r#1"); !errors.Is(err, boom) {
 		t.Fatalf("Get err = %v, want boom", err)
 	}
-	if _, err := s.ListInterpretations(); !errors.Is(err, boom) {
+	if _, err := s.ListInterpretations(context.Background()); !errors.Is(err, boom) {
 		t.Fatalf("List err = %v, want boom", err)
 	}
 	s.SetInterpStamp("x")
-	if _, _, err := s.InterpretationsBehind("o/r", 0); !errors.Is(err, boom) {
+	if _, _, err := s.InterpretationsBehind(context.Background(), "o/r", 0); !errors.Is(err, boom) {
 		t.Fatalf("Behind err = %v, want boom", err)
 	}
 }
@@ -263,7 +263,7 @@ func TestHasInterpStampColumn_ClosedHandleError(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.hasInterpStampColumn(); err == nil {
+	if _, err := s.hasInterpStampColumn(context.Background()); err == nil {
 		t.Fatal("hasInterpStampColumn on a closed handle returned no error")
 	}
 }
@@ -277,7 +277,7 @@ func TestReadersWithoutStampColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.SetInterpStamp("v1/aaaaaaaa")
-	if err := s.UpsertInterpretation(stampRow("o/r#1")); err != nil {
+	if err := s.UpsertInterpretation(context.Background(), stampRow("o/r#1")); err != nil {
 		t.Fatal(err)
 	}
 	dropStampColumn(t, s)
@@ -293,16 +293,16 @@ func TestReadersWithoutStampColumn(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = r.Close() }()
-			got, found, err := r.GetInterpretation("o/r", "pr", "o/r#1")
+			got, found, err := r.GetInterpretation(context.Background(), "o/r", "pr", "o/r#1")
 			if err != nil || !found || got.InterpVersion != "" || got.Ownership != "mine" {
 				t.Fatalf("Get = %+v found=%v err=%v", got, found, err)
 			}
-			all, err := r.ListInterpretations()
+			all, err := r.ListInterpretations(context.Background())
 			if err != nil || len(all) != 1 || all[0].InterpVersion != "" {
 				t.Fatalf("List = %+v err=%v", all, err)
 			}
 			r.SetInterpStamp("v1/aaaaaaaa")
-			keys, known, err := r.InterpretationsBehind("o/r", 0)
+			keys, known, err := r.InterpretationsBehind(context.Background(), "o/r", 0)
 			if err != nil || known || keys != nil {
 				t.Fatalf("Behind = %v known=%v err=%v, want unknown", keys, known, err)
 			}
@@ -319,10 +319,10 @@ func TestReadersWithoutStampColumn(t *testing.T) {
 	raw.SetInterpStamp("v1/aaaaaaaa")
 	row := stampRow("o/r#1")
 	row.Ownership = "theirs"
-	if err := raw.UpsertInterpretation(row); err != nil {
+	if err := raw.UpsertInterpretation(context.Background(), row); err != nil {
 		t.Fatalf("upsert through a raw handle without the column: %v", err)
 	}
-	got, _, _ := raw.GetInterpretation("o/r", "pr", "o/r#1")
+	got, _, _ := raw.GetInterpretation(context.Background(), "o/r", "pr", "o/r#1")
 	if got.Ownership != "theirs" || hasInterpColumn(t, raw) {
 		t.Fatalf("got %+v; the upsert must write content and not add the column", got)
 	}
@@ -330,12 +330,12 @@ func TestReadersWithoutStampColumn(t *testing.T) {
 
 func TestInterpretationsBehind_NeedsAStampAndSchema2(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, _, err := s.InterpretationsBehind("o/r", 0); !errors.Is(err, ErrNoInterpStamp) {
+	if _, _, err := s.InterpretationsBehind(context.Background(), "o/r", 0); !errors.Is(err, ErrNoInterpStamp) {
 		t.Fatalf("err = %v, want ErrNoInterpStamp", err)
 	}
 	v1 := OpenRetiredSchemaForTest(t)
 	v1.SetInterpStamp("x")
-	keys, known, err := v1.InterpretationsBehind("o/r", 0)
+	keys, known, err := v1.InterpretationsBehind(context.Background(), "o/r", 0)
 	if err != nil || known || keys != nil {
 		t.Fatalf("schema 1: keys=%v known=%v err=%v, want unknown", keys, known, err)
 	}
@@ -344,7 +344,7 @@ func TestInterpretationsBehind_NeedsAStampAndSchema2(t *testing.T) {
 	if err := closed.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := closed.InterpretationsBehind("o/r", 0); err == nil {
+	if _, _, err := closed.InterpretationsBehind(context.Background(), "o/r", 0); err == nil {
 		t.Fatal("closed handle returned no error")
 	}
 }
@@ -376,7 +376,7 @@ func seedBehind(t *testing.T, s *Store, cur string) {
 		}
 		row := stampRow(sd.id)
 		row.Repo, row.EntityType = sd.repo, sd.typ
-		if err := s.UpsertInterpretation(row); err != nil {
+		if err := s.UpsertInterpretation(context.Background(), row); err != nil {
 			t.Fatal(err)
 		}
 		if sd.stamp == "NULL" {
@@ -401,7 +401,7 @@ func TestInterpretationsBehind_SelectsOrdersAndBounds(t *testing.T) {
 	seedBehind(t, s, cur)
 	s.SetInterpStamp(cur)
 
-	keys, known, err := s.InterpretationsBehind("o/r", 0)
+	keys, known, err := s.InterpretationsBehind(context.Background(), "o/r", 0)
 	if err != nil || !known {
 		t.Fatalf("known=%v err=%v", known, err)
 	}
@@ -418,7 +418,7 @@ func TestInterpretationsBehind_SelectsOrdersAndBounds(t *testing.T) {
 		}
 	}
 
-	limited, known, err := s.InterpretationsBehind("o/r", 2)
+	limited, known, err := s.InterpretationsBehind(context.Background(), "o/r", 2)
 	if err != nil || !known || !reflect.DeepEqual(ids(limited), want[:2]) {
 		t.Fatalf("limit 2 = %v known=%v err=%v, want %v", ids(limited), known, err, want[:2])
 	}
@@ -426,14 +426,14 @@ func TestInterpretationsBehind_SelectsOrdersAndBounds(t *testing.T) {
 	// A change of stamp makes the failed-under-current row eligible again and
 	// the rows stamped current behind.
 	s.SetInterpStamp("v10/dddddddd")
-	keys, _, err = s.InterpretationsBehind("o/r", 0)
+	keys, _, err = s.InterpretationsBehind(context.Background(), "o/r", 0)
 	if err != nil || len(keys) != 7 {
 		t.Fatalf("after a stamp change: %v err=%v, want all 7 prs of o/r", ids(keys), err)
 	}
 
 	// Steady state: once every row carries the running stamp nothing is behind.
 	execStamp(t, s, `UPDATE interpretation SET interp_version = ?`, "v10/dddddddd")
-	keys, known, err = s.InterpretationsBehind("o/r", 0)
+	keys, known, err = s.InterpretationsBehind(context.Background(), "o/r", 0)
 	if err != nil || !known || len(keys) != 0 {
 		t.Fatalf("steady state: %v known=%v err=%v", ids(keys), known, err)
 	}
@@ -446,7 +446,7 @@ func TestInterpretationsBehind_NeverTouchesFacts(t *testing.T) {
 	seedBehind(t, s, "cur")
 	execStamp(t, s, `UPDATE entity SET facts = 'not json at all {'`)
 	s.SetInterpStamp("cur")
-	keys, known, err := s.InterpretationsBehind("o/r", 0)
+	keys, known, err := s.InterpretationsBehind(context.Background(), "o/r", 0)
 	if err != nil || !known || len(keys) != 5 {
 		t.Fatalf("keys=%v known=%v err=%v", ids(keys), known, err)
 	}
@@ -456,7 +456,7 @@ func TestInterpretationsBehind_QueryFailureIsReturned(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	s.SetInterpStamp("cur")
 	execStamp(t, s, `DROP TABLE entity`)
-	if _, known, err := s.InterpretationsBehind("o/r", 0); err == nil || known {
+	if _, known, err := s.InterpretationsBehind(context.Background(), "o/r", 0); err == nil || known {
 		t.Fatalf("known=%v err=%v, want an error", known, err)
 	}
 }

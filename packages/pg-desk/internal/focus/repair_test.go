@@ -27,7 +27,7 @@ func lockRows(t *testing.T, f *fixture, period string, keys ...Key) {
 
 func setFocusAnnotation(t *testing.T, f *fixture, k Key, v string) {
 	t.Helper()
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: k.Type, EntityID: k.ID, Key: store.AnnotationFocusSelected,
 		Value: v, Origin: "pg-desk", SetBy: "me", SetAt: fixtureAt,
 	}); err != nil {
@@ -58,7 +58,7 @@ func TestRepairScansEveryAnnotatedEntityAndEveryPlanRowEntity(t *testing.T) {
 			t.Errorf("dry-run outcome = %q", w.Outcome)
 		}
 	}
-	if v, found, _ := f.st.GetKVAnnotation(testRepo, "pr", "1", store.AnnotationFocusSelected); found {
+	if v, found, _ := f.st.GetKVAnnotation(context.Background(), testRepo, "pr", "1", store.AnnotationFocusSelected); found {
 		t.Fatalf("a dry run wrote an annotation: %v", v)
 	}
 	res, err := Repair(context.Background(), d, false)
@@ -67,12 +67,12 @@ func TestRepairScansEveryAnnotatedEntityAndEveryPlanRowEntity(t *testing.T) {
 	}
 	want := map[Key]string{missing: "2026-10-09", mismatch: lockToday, stale: "none", good: "2026-10-09"}
 	for k, v := range want {
-		a, found, _ := f.st.GetKVAnnotation(testRepo, k.Type, k.ID, store.AnnotationFocusSelected)
+		a, found, _ := f.st.GetKVAnnotation(context.Background(), testRepo, k.Type, k.ID, store.AnnotationFocusSelected)
 		if !found || a.Value != v {
 			t.Errorf("annotation of %v = %q (found %v), want %q", k, a.Value, found, v)
 		}
 	}
-	if _, found, _ := f.st.GetKVAnnotation(testRepo, untouched.Type, untouched.ID, store.AnnotationFocusSelected); found {
+	if _, found, _ := f.st.GetKVAnnotation(context.Background(), testRepo, untouched.Type, untouched.ID, store.AnnotationFocusSelected); found {
 		t.Errorf("repair annotated an entity with no row and no annotation")
 	}
 	again, err := Repair(context.Background(), d, false)
@@ -100,10 +100,10 @@ func TestRepairIgnoresAClosedPeriodAndMendsAnnotationWithoutRow(t *testing.T) {
 	if err != nil || len(res.Written) != 2 {
 		t.Fatalf("repair = %+v, %v", res, err)
 	}
-	if v, _ := f.st.FocusAnnotationValue(testRepo, "pr", "2"); v != "none" {
+	if v, _ := f.st.FocusAnnotationValue(context.Background(), testRepo, "pr", "2"); v != "none" {
 		t.Errorf("value of the row-less entity = %q", v)
 	}
-	if a, _, _ := f.st.GetKVAnnotation(testRepo, "pr", "2", store.AnnotationFocusSelected); a.Value != "none" {
+	if a, _, _ := f.st.GetKVAnnotation(context.Background(), testRepo, "pr", "2", store.AnnotationFocusSelected); a.Value != "none" {
 		t.Errorf("annotation without a row = %q, want none", a.Value)
 	}
 }

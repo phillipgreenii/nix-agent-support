@@ -128,15 +128,15 @@ func doctorIssueGates(ctx context.Context, w io.Writer, st *store.Store, cfg *co
 	rep := gateReport{w: w, failures: failures}
 	owning := cfg.OwningInstances("issue")
 	caps := &memoCaps{g: doctorIssueCapabilityer(cfg), ans: map[string]gather.CapabilitiesAnswer{}, errs: map[string]error{}}
-	entities, lerr := st.ListEntities()
+	entities, lerr := st.ListEntities(ctx)
 
 	gateDispatchCheck(ctx, rep, cfg, caps, owning)
-	gateTwoBackendsServe(rep, cfg, st, entities, lerr)
+	gateTwoBackendsServe(ctx, rep, cfg, st, entities, lerr)
 	gateNoWatchedQueryBackend(ctx, rep, cfg, st, caps, owning, entities, lerr)
-	gateFeedCursorExpired(rep, st, owning, now)
-	gateFailedIngestAgeCheck(rep, cfg, st, now)
+	gateFeedCursorExpired(ctx, rep, st, owning, now)
+	gateFailedIngestAgeCheck(ctx, rep, cfg, st, now)
 	gateBaselineOpenAge(ctx, rep, cfg, st, owning, now)
-	doctorIssueReports(w, st, cfg, entities, lerr)
+	doctorIssueReports(ctx, w, st, cfg, entities, lerr)
 }
 
 func gateDispatchCheck(ctx context.Context, rep gateReport, cfg *config.Config, caps *memoCaps, owning []string) {
@@ -161,7 +161,7 @@ func gateDispatchCheck(ctx context.Context, rep gateReport, cfg *config.Config, 
 	}
 }
 
-func gateTwoBackendsServe(rep gateReport, cfg *config.Config, st *store.Store, entities []store.Entity, lerr error) {
+func gateTwoBackendsServe(ctx context.Context, rep gateReport, cfg *config.Config, st *store.Store, entities []store.Entity, lerr error) {
 	if lerr != nil {
 		rep.fail(gateNameTwoBackends, []string{fmt.Sprintf("list entities: %v", lerr)})
 		return
@@ -171,7 +171,7 @@ func gateTwoBackendsServe(rep gateReport, cfg *config.Config, st *store.Store, e
 		if e.EntityType != "issue" || e.Backend != "" {
 			continue
 		}
-		if _, _, err := changes.ResolveIssueBackend(cfg, st, e.EntityID); err != nil {
+		if _, _, err := changes.ResolveIssueBackend(ctx, cfg, st, e.EntityID); err != nil {
 			if errors.Is(err, changes.ErrAmbiguousBackend) {
 				what = append(what, "issue "+e.EntityID+": "+err.Error())
 			} else {
@@ -191,7 +191,7 @@ func gateTwoBackendsServe(rep gateReport, cfg *config.Config, st *store.Store, e
 // else by changes.ResolveIssueBackend) and the active entities attributable to
 // no backend at all. An entity of an owning instance, and an id served by two
 // backends (the two-backends gate's finding), is counted by neither.
-func nonOwningAttribution(cfg *config.Config, st *store.Store, entities []store.Entity) (byInst map[string]int, unattributed int) {
+func nonOwningAttribution(ctx context.Context, cfg *config.Config, st *store.Store, entities []store.Entity) (byInst map[string]int, unattributed int) {
 	owning := map[string]bool{}
 	for _, inst := range cfg.OwningInstances("issue") {
 		owning[inst] = true
@@ -205,7 +205,7 @@ func nonOwningAttribution(cfg *config.Config, st *store.Store, entities []store.
 		if inst == "" {
 			var isOwning bool
 			var err error
-			inst, isOwning, err = changes.ResolveIssueBackend(cfg, st, e.EntityID)
+			inst, isOwning, err = changes.ResolveIssueBackend(ctx, cfg, st, e.EntityID)
 			if err != nil || isOwning {
 				continue
 			}
@@ -232,7 +232,7 @@ func gateNoWatchedQueryBackend(ctx context.Context, rep gateReport, cfg *config.
 			active[e.Backend]++
 		}
 	}
-	nonOwningActive, unattributed := nonOwningAttribution(cfg, st, entities)
+	nonOwningActive, unattributed := nonOwningAttribution(ctx, cfg, st, entities)
 	nonOwning := map[string]bool{}
 	for _, inst := range cfg.NonOwningInstances("issue") {
 		nonOwning[inst] = true
@@ -318,10 +318,10 @@ func capsDeclareWatched(b gather.CapBackend) bool {
 	return false
 }
 
-func gateFeedCursorExpired(rep gateReport, st *store.Store, owning []string, now time.Time) {
+func gateFeedCursorExpired(ctx context.Context, rep gateReport, st *store.Store, owning []string, now time.Time) {
 	var what []string
 	for _, inst := range owning {
-		v, found, err := st.GetMeta(changes.MetaFeedCursorExpiredPrefix + inst)
+		v, found, err := st.GetMeta(ctx, changes.MetaFeedCursorExpiredPrefix+inst)
 		if err != nil {
 			what = append(what, fmt.Sprintf("backend %s: read %s: %v", inst, changes.MetaFeedCursorExpiredPrefix+inst, err))
 			continue
@@ -345,9 +345,9 @@ func gateFeedCursorExpired(rep gateReport, st *store.Store, owning []string, now
 	rep.ok(gateNameCursorExpired, "")
 }
 
-func gateFailedIngestAgeCheck(rep gateReport, cfg *config.Config, st *store.Store, now time.Time) {
+func gateFailedIngestAgeCheck(ctx context.Context, rep gateReport, cfg *config.Config, st *store.Store, now time.Time) {
 	bound := cfg.IngestFailedMaxAge()
-	fails, err := st.ListIngestFailures("")
+	fails, err := st.ListIngestFailures(ctx, "")
 	if err != nil {
 		rep.fail(gateNameFailedIngestAge, []string{fmt.Sprintf("list failed ingests: %v", err)})
 		return
@@ -382,7 +382,7 @@ func gateBaselineOpenAge(ctx context.Context, rep gateReport, cfg *config.Config
 		return
 	}
 	var what, unreach []string
-	what = append(what, beadsBaselineOpen(st, cfg, beadsQueries, now)...)
+	what = append(what, beadsBaselineOpen(ctx, st, cfg, beadsQueries, now)...)
 	for _, inst := range owning {
 		ages, err := doctorIssueBaselineAges(ctx, cfg, inst)
 		if err != nil {
@@ -403,7 +403,7 @@ func gateBaselineOpenAge(ctx context.Context, rep gateReport, cfg *config.Config
 				continue
 			}
 			what = append(what, fmt.Sprintf("backend %s query %s: baseline open for %ds (limit %ds); failed-ingest entities: %s",
-				inst, q, ages[q], doctorBaselineOpenGateSeconds, failedIngestEntities(st, inst)))
+				inst, q, ages[q], doctorBaselineOpenGateSeconds, failedIngestEntities(ctx, st, inst)))
 		}
 	}
 	switch {
@@ -419,10 +419,10 @@ func gateBaselineOpenAge(ctx context.Context, rep gateReport, cfg *config.Config
 // beadsBaselineOpen reads the pg-desk baseline marker and open time of every
 // non-owning watched query: a query with no marker whose baseline began more
 // than a day ago fails, naming the query and the members that keep it open.
-func beadsBaselineOpen(st *store.Store, cfg *config.Config, queries []string, now time.Time) []string {
+func beadsBaselineOpen(ctx context.Context, st *store.Store, cfg *config.Config, queries []string, now time.Time) []string {
 	var what []string
 	for _, q := range queries {
-		state, err := changes.ReadBaseline(st, q)
+		state, err := changes.ReadBaseline(ctx, st, q)
 		if err != nil {
 			what = append(what, fmt.Sprintf("query %s: read baseline: %v", q, err))
 			continue
@@ -439,7 +439,7 @@ func beadsBaselineOpen(st *store.Store, cfg *config.Config, queries []string, no
 			inst = b.Instance
 		}
 		what = append(what, fmt.Sprintf("backend %s query %s: baseline open for %ds (limit %ds); members keeping it open: %s",
-			inst, q, age, doctorBaselineOpenGateSeconds, baselineOpenMembers(st, q)))
+			inst, q, age, doctorBaselineOpenGateSeconds, baselineOpenMembers(ctx, st, q)))
 	}
 	return what
 }
@@ -447,12 +447,12 @@ func beadsBaselineOpen(st *store.Store, cfg *config.Config, queries []string, no
 // baselineOpenMembers names the members of the query's persisted watch set
 // that are absent from the entity table, inactive or not watched, sorted, or
 // "none".
-func baselineOpenMembers(st *store.Store, query string) string {
-	ids := changes.WatchSetIDs(st, "issue", query)
+func baselineOpenMembers(ctx context.Context, st *store.Store, query string) string {
+	ids := changes.WatchSetIDs(ctx, st, "issue", query)
 	if len(ids) == 0 {
 		return "none"
 	}
-	entities, err := st.ListEntities()
+	entities, err := st.ListEntities(ctx)
 	if err != nil {
 		return fmt.Sprintf("unreadable (%v)", err)
 	}
@@ -482,8 +482,8 @@ func baselineOpenMembers(st *store.Store, query string) string {
 
 // failedIngestEntities names the distinct entities of instance's failed-ingest
 // entries, sorted, or "none" (the members that keep a baseline from finishing).
-func failedIngestEntities(st *store.Store, instance string) string {
-	fails, err := st.ListIngestFailures(instance)
+func failedIngestEntities(ctx context.Context, st *store.Store, instance string) string {
+	fails, err := st.ListIngestFailures(ctx, instance)
 	if err != nil {
 		return fmt.Sprintf("unreadable (%v)", err)
 	}
@@ -514,7 +514,7 @@ func failedIngestEntities(st *store.Store, instance string) string {
 //     watched active entities of the instance);
 //   - an entity nothing watches: the ACTIVE issue entities that no watched
 //     query's persisted set holds and whose watched mark is not true.
-func doctorIssueReports(w io.Writer, st *store.Store, cfg *config.Config, entities []store.Entity, lerr error) {
+func doctorIssueReports(ctx context.Context, w io.Writer, st *store.Store, cfg *config.Config, entities []store.Entity, lerr error) {
 	fmt.Fprintln(w, "  issue change-flow reports:")
 	if lerr != nil {
 		fmt.Fprintf(w, "    unavailable (list entities: %v)\n", lerr)
@@ -522,7 +522,7 @@ func doctorIssueReports(w io.Writer, st *store.Store, cfg *config.Config, entiti
 	}
 	held := map[string]bool{}
 	for _, q := range cfg.WatchQueries("issue") {
-		for _, id := range changes.WatchSetIDs(st, "issue", q) {
+		for _, id := range changes.WatchSetIDs(ctx, st, "issue", q) {
 			held[id] = true
 		}
 	}
@@ -536,7 +536,7 @@ func doctorIssueReports(w io.Writer, st *store.Store, cfg *config.Config, entiti
 		if isWatched {
 			inst := e.Backend
 			if inst == "" {
-				if resolved, _, err := changes.ResolveIssueBackend(cfg, st, e.EntityID); err == nil {
+				if resolved, _, err := changes.ResolveIssueBackend(ctx, cfg, st, e.EntityID); err == nil {
 					inst = resolved
 				}
 			}
@@ -573,7 +573,7 @@ func doctorIssueReports(w io.Writer, st *store.Store, cfg *config.Config, entiti
 		case ok && b.OwnsChanges:
 			fmt.Fprintf(w, "      %s: %d (owning backend %s: watched active entities of the backend)\n", q, watchedPer[b.Instance], b.Instance)
 		default:
-			fmt.Fprintf(w, "      %s: %d\n", q, len(changes.WatchSetIDs(st, "issue", q)))
+			fmt.Fprintf(w, "      %s: %d\n", q, len(changes.WatchSetIDs(ctx, st, "issue", q)))
 		}
 	}
 

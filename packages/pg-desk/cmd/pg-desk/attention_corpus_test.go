@@ -35,7 +35,7 @@ func corpusAttentionStore(t *testing.T) (string, []string) {
 		if fx.Type != "pr" {
 			continue
 		}
-		if err := st.UpsertEntityForTest(store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID, Facts: string(fx.Payload), AsOf: "2026-09-16T00:00:00Z", ContentHash: "seed"}); err != nil {
+		if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID, Facts: string(fx.Payload), AsOf: "2026-09-16T00:00:00Z", ContentHash: "seed"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := p.RunInterpretOnly(context.Background(), "pr", fx.ID, gather.ChangeChanged); err != nil {
@@ -44,10 +44,10 @@ func corpusAttentionStore(t *testing.T) (string, []string) {
 		ids = append(ids, fx.ID)
 	}
 	legacy := corpus.Repo + "#990"
-	if err := st.UpsertEntityForTest(store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: legacy, Facts: `{"pr_show":{"number":990,"state":"open","author":"teammate","head_sha":"h1"}}`, AsOf: "2026-09-01T00:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: legacy, Facts: `{"pr_show":{"number":990,"state":"open","author":"teammate","head_sha":"h1"}}`, AsOf: "2026-09-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: corpus.Repo, EntityType: "pr", EntityID: legacy, Ownership: "team",
 		Enrichment: `{"kind":"other","size":"S","title":"Legacy row","url":"https://example.invalid/acme/widgets/pull/990","author":"teammate"}`,
 		Urgency:    `{"level":"low","score":0}`, Dispositions: "null",

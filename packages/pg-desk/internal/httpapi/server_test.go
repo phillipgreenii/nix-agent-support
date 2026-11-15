@@ -34,7 +34,7 @@ func setClock(t *testing.T, fixed time.Time) {
 // decisions: "503 for every route").
 func TestReadyGate503BeforeFirstInterpretation(t *testing.T) {
 	s := store.OpenForTest(t)
-	handler, err := NewHandler(s, testConfig())
+	handler, err := NewHandler(context.Background(), s, testConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestDashboard200AfterFirstInterpretation(t *testing.T) {
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
 
-	handler, err := NewHandler(s, testConfig())
+	handler, err := NewHandler(context.Background(), s, testConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestStaleFlag(t *testing.T) {
 			}
 			setClock(t, tc.now)
 
-			payload, err := BuildPayload(s, testConfig(), nowUTC())
+			payload, err := BuildPayload(context.Background(), s, testConfig(), nowUTC())
 			if err != nil {
 				t.Fatalf("BuildPayload: %v", err)
 			}
@@ -159,7 +159,7 @@ func TestHiddenArrayExcludesFromPanel(t *testing.T) {
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T10:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
 
-	payload, err := BuildPayload(s, testConfig(), nowUTC())
+	payload, err := BuildPayload(context.Background(), s, testConfig(), nowUTC())
 	if err != nil {
 		t.Fatalf("BuildPayload: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestMetricsSmoke(t *testing.T) {
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
 
-	handler, err := NewHandler(s, testConfig())
+	handler, err := NewHandler(context.Background(), s, testConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestMetricsSmoke_StalePolarity(t *testing.T) {
 	// 121s past a 60s heartbeat period (120s stale-after bound): stale.
 	setClock(t, time.Date(2026, 9, 16, 12, 2, 1, 0, time.UTC))
 
-	handler, err := NewHandler(s, testConfig())
+	handler, err := NewHandler(context.Background(), s, testConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestPayloadGoldenMatchesGrafanaSelectors(t *testing.T) {
 	mustSetMeta(t, s, store.MetaKeyLastSweep, "2026-09-16T11:00:00Z")
 
 	fixedNow := time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC)
-	payload, err := BuildPayload(s, testConfig(), fixedNow)
+	payload, err := BuildPayload(context.Background(), s, testConfig(), fixedNow)
 	if err != nil {
 		t.Fatalf("BuildPayload: %v", err)
 	}
@@ -413,14 +413,14 @@ func requireColumns(t *testing.T, label string, row Row, columns []string) {
 
 func mustUpsertInterpretation(t *testing.T, s *store.Store, i store.Interpretation) {
 	t.Helper()
-	if err := s.UpsertInterpretation(i); err != nil {
+	if err := s.UpsertInterpretation(context.Background(), i); err != nil {
 		t.Fatalf("UpsertInterpretation: %v", err)
 	}
 }
 
 func mustSetMeta(t *testing.T, s *store.Store, key, value string) {
 	t.Helper()
-	if err := s.SetMeta(key, value); err != nil {
+	if err := s.SetMeta(context.Background(), key, value); err != nil {
 		t.Fatalf("SetMeta(%s): %v", key, err)
 	}
 }
@@ -437,7 +437,7 @@ func freshnessFixture(t *testing.T) (*store.Store, time.Time) {
 	now := time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC)
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	at := func(d time.Duration) *time.Time { u := now.Add(d); return &u }
-	if err := freshness.Update(s, []freshness.LedgerRow{
+	if err := freshness.Update(context.Background(), s, []freshness.LedgerRow{
 		{Type: "pr", Backend: "pg-connector-pr-github", Query: "mine", RefreshedAt: at(-2 * time.Minute)},
 		{Type: "issue", Backend: "pg-connector-issue-jira", Query: "mine", RefreshedAt: at(-40 * time.Minute)},
 		{Type: "thread", Backend: "pg-connector-thread-slack", Query: "mine"},
@@ -454,7 +454,7 @@ func freshnessFixture(t *testing.T) (*store.Store, time.Time) {
 // freshness row shape.
 func TestDashboardSourcesAreAdditiveAndSeparateFromLiveness(t *testing.T) {
 	s, _ := freshnessFixture(t)
-	handler, err := NewHandler(s, testConfig())
+	handler, err := NewHandler(context.Background(), s, testConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestDashboardSourcesIsEmptyArrayWhenNothingRecorded(t *testing.T) {
 	})
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
-	p, err := BuildPayload(s, testConfig(), nowUTC())
+	p, err := BuildPayload(context.Background(), s, testConfig(), nowUTC())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestDashboardSourcesIsEmptyArrayWhenNothingRecorded(t *testing.T) {
 // and pg_desk_dashboard_stale untouched by a stale source.
 func TestMetricsSourceAgeSeriesPerKnownSource(t *testing.T) {
 	s, _ := freshnessFixture(t)
-	handler, err := NewHandler(s, testConfig())
+	handler, err := NewHandler(context.Background(), s, testConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -571,7 +571,7 @@ func TestMetricsSourcesStaleIgnoresRetiredGhostRows(t *testing.T) {
 		r.Consumers = map[string]freshness.LedgerConsumer{"pg-router": {LastSeen: at(d)}}
 		return r
 	}
-	if err := freshness.Update(s, []freshness.LedgerRow{
+	if err := freshness.Update(context.Background(), s, []freshness.LedgerRow{
 		seen(freshness.LedgerRow{Type: "pr", Backend: "pg-connector-pr-github", Query: "mine"}, ghost),
 		seen(freshness.LedgerRow{Type: "pr", Backend: "pg-connector-github", Query: "mine", RefreshedAt: at(-time.Minute)}, -time.Minute),
 	}); err != nil {
@@ -580,7 +580,7 @@ func TestMetricsSourcesStaleIgnoresRetiredGhostRows(t *testing.T) {
 	setClock(t, now)
 	cfg := testConfig()
 	cfg.Freshness.RetiredSources = []string{"pr-github"}
-	handler, err := NewHandler(s, cfg)
+	handler, err := NewHandler(context.Background(), s, cfg)
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -597,7 +597,7 @@ func TestMetricsSourcesStaleIgnoresRetiredGhostRows(t *testing.T) {
 func TestHiddenKVAnnotationOnNewSchemaGoesToHiddenPanel(t *testing.T) {
 	s := store.OpenNewSchemaForTest(t)
 	for _, id := range []string{"9", "10"} {
-		if err := s.UpsertEntityForTest(store.Entity{
+		if err := s.UpsertEntityForTest(context.Background(), store.Entity{
 			Repo: "acme/widgets", EntityType: "pr", EntityID: id,
 			Facts: `{}`, AsOf: "2026-09-16T10:00:00Z",
 		}); err != nil {
@@ -609,7 +609,7 @@ func TestHiddenKVAnnotationOnNewSchemaGoesToHiddenPanel(t *testing.T) {
 			Urgency: "{}", Dispositions: "[]", AsOf: "2026-09-16T10:00:00Z",
 		})
 	}
-	if err := s.SetAnnotation(store.KVAnnotation{
+	if err := s.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: "acme/widgets", EntityType: "pr", EntityID: "9",
 		Key: store.AnnotationHidden, Value: `{"value":true,"reason":"waiting"}`,
 		Origin: "pg-desk", SetBy: "operator", SetAt: "2026-09-16T09:00:00Z",
@@ -619,7 +619,7 @@ func TestHiddenKVAnnotationOnNewSchemaGoesToHiddenPanel(t *testing.T) {
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T10:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
 
-	payload, err := BuildPayload(s, testConfig(), nowUTC())
+	payload, err := BuildPayload(context.Background(), s, testConfig(), nowUTC())
 	if err != nil {
 		t.Fatalf("BuildPayload: %v", err)
 	}
@@ -640,7 +640,7 @@ func hideForTest(t *testing.T, s *store.Store, id, reason, at string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAnnotation(store.KVAnnotation{
+	if err := s.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: "acme/widgets", EntityType: "pull_request", EntityID: id,
 		Key: store.AnnotationHidden, Value: string(value), Origin: "pg-desk", SetBy: "operator", SetAt: at,
 	}); err != nil {

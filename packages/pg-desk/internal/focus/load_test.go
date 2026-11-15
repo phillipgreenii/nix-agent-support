@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestLoadAndCandidatesWriteNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ro.Close() }()
-	in, err := Load(ro, fixtureConfig(), testRepo, fixtureNow)
+	in, err := Load(context.Background(), ro, fixtureConfig(), testRepo, fixtureNow)
 	if err != nil {
 		t.Fatalf("Load over a read-only store: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestLoadScopesToTheRepo(t *testing.T) {
 	f := newFixture(t)
 	f.pr("7", prSpec{ownership: "mine"})
 	e := store.Entity{Repo: "other/repo", EntityType: "pr", EntityID: "1", Facts: `{"pr_show":{"state":"open"}}`, AsOf: fixtureAt, ContentHash: "x"}
-	if _, err := f.st.WriteEntityStateWithLog(e, 0, fixtureAt, true, []string{"created"}, "sync", fixtureAt); err != nil {
+	if _, err := f.st.WriteEntityStateWithLog(context.Background(), e, 0, fixtureAt, true, []string{"created"}, "sync", fixtureAt); err != nil {
 		t.Fatal(err)
 	}
 	in := f.inputs()
@@ -105,7 +106,7 @@ func TestLoadScopesToTheRepo(t *testing.T) {
 
 func TestLoadRejectsAnOldSchemaStore(t *testing.T) {
 	st := store.OpenRetiredSchemaForTest(t)
-	if _, err := Load(st, fixtureConfig(), testRepo, fixtureNow); err == nil {
+	if _, err := Load(context.Background(), st, fixtureConfig(), testRepo, fixtureNow); err == nil {
 		t.Fatal("Load over an old-schema store: want an error, never an empty set")
 	}
 }
@@ -113,19 +114,19 @@ func TestLoadRejectsAnOldSchemaStore(t *testing.T) {
 func TestLoadRejectsAnUndecodableHiddenAnnotation(t *testing.T) {
 	f := newFixture(t)
 	k := f.pr("7", prSpec{ownership: "mine"})
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: testRepo, EntityType: "pr", EntityID: "7", Key: store.AnnotationHidden,
 		Value: "not json", Origin: "pg-desk", SetBy: "operator", SetAt: fixtureAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(f.st, f.cfg, testRepo, fixtureNow); err == nil {
+	if _, err := Load(context.Background(), f.st, f.cfg, testRepo, fixtureNow); err == nil {
 		t.Errorf("Load with an undecodable hidden annotation on %v: want an error", k)
 	}
 }
 
 func TestLoadRejectsNoStore(t *testing.T) {
-	if _, err := Load(nil, fixtureConfig(), testRepo, fixtureNow); err == nil {
+	if _, err := Load(context.Background(), nil, fixtureConfig(), testRepo, fixtureNow); err == nil {
 		t.Fatal("Load(nil): want an error")
 	}
 }

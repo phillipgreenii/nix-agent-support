@@ -25,6 +25,7 @@
 package freshness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -250,10 +251,10 @@ func utcError(e *LedgerError) *LedgerError {
 // time backwards. A row for a source the store has never seen is recorded
 // even when it has no success yet, so that source reports as unknown and
 // stale (INV-FRESH-4) instead of being absent.
-func Update(st *store.Store, rows []LedgerRow) error {
+func Update(ctx context.Context, st *store.Store, rows []LedgerRow) error {
 	for _, rec := range collapse(rows) {
 		key := rec.key()
-		raw, found, err := st.GetMeta(key)
+		raw, found, err := st.GetMeta(ctx, key)
 		if err != nil {
 			return fmt.Errorf("freshness: read %s: %w", key, err)
 		}
@@ -271,7 +272,7 @@ func Update(st *store.Store, rows []LedgerRow) error {
 		if err != nil {
 			return fmt.Errorf("freshness: encode %s: %w", key, err)
 		}
-		if err := st.SetMeta(key, string(b)); err != nil {
+		if err := st.SetMeta(ctx, key, string(b)); err != nil {
 			return fmt.Errorf("freshness: write %s: %w", key, err)
 		}
 	}
@@ -332,8 +333,8 @@ func resolve(cfg *config.Config, backend string) (label string, staleAfter time.
 // Sources reads the recorded source_fetch.* keys and returns one Row per
 // backend, sorted by source, as of now. It reads the store only. The result
 // is never nil, so it serializes as [] rather than null.
-func Sources(st *store.Store, cfg *config.Config, now time.Time) ([]Row, error) {
-	kv, err := st.ListMetaPrefix(MetaKeyPrefix)
+func Sources(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time) ([]Row, error) {
+	kv, err := st.ListMetaPrefix(ctx, MetaKeyPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("freshness: %w", err)
 	}
@@ -432,8 +433,8 @@ func ageSeconds(t, now time.Time) int {
 }
 
 // Build assembles the freshness report as of now.
-func Build(st *store.Store, cfg *config.Config, now time.Time) (*Report, error) {
-	rows, err := Sources(st, cfg, now)
+func Build(ctx context.Context, st *store.Store, cfg *config.Config, now time.Time) (*Report, error) {
+	rows, err := Sources(ctx, st, cfg, now)
 	if err != nil {
 		return nil, err
 	}

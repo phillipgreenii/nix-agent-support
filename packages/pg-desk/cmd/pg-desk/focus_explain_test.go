@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -43,7 +44,7 @@ func newExplainFixture(t *testing.T) *explainFixture {
 	f.pr1 = f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	f.pr2 = f.pr(t, 2, "bravo", "2026-10-09T09:00:00Z")
 	f.pr3 = f.pr(t, 3, "charlie", "2026-10-09T10:00:00Z")
-	if err := f.st.SetAnnotation(store.KVAnnotation{
+	if err := f.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: showRepo, EntityType: f.pr3.Type, EntityID: f.pr3.ID, Key: store.AnnotationHidden,
 		Value: `{"value":true,"reason":null}`, Origin: "pg-desk", SetBy: "me", SetAt: showAt,
 	}); err != nil {
@@ -78,7 +79,7 @@ func newExplainFixture(t *testing.T) *explainFixture {
 
 func (f *explainFixture) link(t *testing.T, from, to focus.Key, relation, origin string) {
 	t.Helper()
-	if err := f.st.ReplaceDerivedXrefs(showRepo, from.Type, from.ID, []store.XrefLink{{
+	if err := f.st.ReplaceDerivedXrefs(context.Background(), showRepo, from.Type, from.ID, []store.XrefLink{{
 		Repo: showRepo, FromType: from.Type, FromID: from.ID, ToType: to.Type, ToID: to.ID,
 		Relation: relation, Origin: origin, FirstSeen: showAt, LastConfirmed: showAt,
 	}}); err != nil {
@@ -260,7 +261,7 @@ func TestExplainIsReadOnly(t *testing.T) {
 			t.Fatalf("explain %v changed the store:\n%s", args, firstDiff(before, after))
 		}
 	}
-	if _, found, err := f.st.FocusPeriodGet("day", "2026-10-15"); err != nil || found {
+	if _, found, err := f.st.FocusPeriodGet(context.Background(), "day", "2026-10-15"); err != nil || found {
 		t.Errorf("period 2026-10-15: found=%v err=%v, want no row", found, err)
 	}
 	if _, found := f.draftRow(t); found {
@@ -400,7 +401,7 @@ func TestExplainBeadAuditStates(t *testing.T) {
 			show[k] = v
 		}
 		bead := f.write(t, "issue", id, map[string]any{"issue_show": show}, showAt)
-		if err := f.st.ReplaceDerivedXrefs(showRepo, "issue", id, []store.XrefLink{{
+		if err := f.st.ReplaceDerivedXrefs(context.Background(), showRepo, "issue", id, []store.XrefLink{{
 			Repo: showRepo, FromType: "issue", FromID: id, ToType: "pr", ToID: a.ID,
 			Relation: "source", Origin: "derived:source-entity", FirstSeen: showAt, LastConfirmed: showAt,
 		}}); err != nil {

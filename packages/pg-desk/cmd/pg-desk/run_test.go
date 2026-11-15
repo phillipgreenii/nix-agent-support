@@ -133,7 +133,7 @@ func seedPRFacts(t *testing.T, st *store.Store, entityID string) {
 	if err != nil {
 		t.Fatalf("marshal facts fixture: %v", err)
 	}
-	if err := st.UpsertEntityForTest(store.Entity{
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "acme/widgets", EntityType: entityTypePR, EntityID: entityID,
 		Facts: string(factsJSON), AsOf: "2026-09-17T00:00:00Z", ContentHash: "fixture",
 	}); err != nil {
@@ -199,7 +199,7 @@ func TestRunCmdIssue_ResolvesAndReinterprets(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = verify.Close() })
 
-	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	interp, found, err := verify.GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
 	}
@@ -311,7 +311,7 @@ func jiraTestCfg() *config.Config {
 // reads it back through the real Store.ListXrefsByTo.
 func seedXref(t *testing.T, st *store.Store, fromID, toID string) {
 	t.Helper()
-	if err := st.UpsertXref(store.Xref{
+	if err := st.UpsertXref(context.Background(), store.Xref{
 		Repo: "acme/widgets", FromType: entityTypePR, FromID: fromID,
 		ToType: "issue", ToID: toID, Evidence: "branch",
 		FirstSeen: "2026-09-17T00:00:00Z", LastConfirmed: "2026-09-17T00:00:00Z",
@@ -374,7 +374,7 @@ func TestRunCmdIssue_JiraTicketKey_ResolvesViaXrefAndReinterprets(t *testing.T) 
 	}
 	t.Cleanup(func() { _ = verify.Close() })
 
-	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	interp, found, err := verify.GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
 	}
@@ -513,7 +513,7 @@ func TestRunCmdThread_PermalinkMatch_WritesXrefAndReinterprets(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = verify.Close() })
 
-	xref, found, err := verify.GetXref("acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T1")
+	xref, found, err := verify.GetXref(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T1")
 	if err != nil || !found {
 		t.Fatalf("GetXref: found=%v err=%v", found, err)
 	}
@@ -521,7 +521,7 @@ func TestRunCmdThread_PermalinkMatch_WritesXrefAndReinterprets(t *testing.T) {
 		t.Fatalf("xref evidence = %q, want %q", xref.Evidence, "permalink")
 	}
 
-	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	interp, found, err := verify.GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
 	}
@@ -560,7 +560,7 @@ func TestRunCmdThread_TicketKeyMatch_ResolvesViaXrefAndReinterprets(t *testing.T
 	}
 	t.Cleanup(func() { _ = verify.Close() })
 
-	xref, found, err := verify.GetXref("acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T2")
+	xref, found, err := verify.GetXref(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7", "thread", "T2")
 	if err != nil || !found {
 		t.Fatalf("GetXref: found=%v err=%v", found, err)
 	}
@@ -568,7 +568,7 @@ func TestRunCmdThread_TicketKeyMatch_ResolvesViaXrefAndReinterprets(t *testing.T
 		t.Fatalf("xref evidence = %q, want %q", xref.Evidence, "ticket-key")
 	}
 
-	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	interp, found, err := verify.GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
 	}
@@ -600,7 +600,7 @@ func TestRunCmdThread_NoMatch_WritesNoXrefAndNoReinterpret(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = verify.Close() })
 
-	linked, err := verify.ListXrefsByTo("acme/widgets", "thread", "T3")
+	linked, err := verify.ListXrefsByTo(context.Background(), "acme/widgets", "thread", "T3")
 	if err != nil {
 		t.Fatalf("ListXrefsByTo: %v", err)
 	}
@@ -619,7 +619,7 @@ func TestRunCmdThread_ExistingLink_StaysLinkedWithoutRematch(t *testing.T) {
 	show := threadShowResult{Text: "just chatting, no links here", AsOf: "2026-09-18T00:00:00Z"}
 	st, dbPath := setupRunThreadTest(t, cfg, show, false, nil)
 	seedPRFacts(t, st, "acme/widgets#7")
-	if err := st.UpsertXref(store.Xref{
+	if err := st.UpsertXref(context.Background(), store.Xref{
 		Repo: "acme/widgets", FromType: entityTypePR, FromID: "acme/widgets#7",
 		ToType: "thread", ToID: "T4", Evidence: "permalink",
 		FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
@@ -641,7 +641,7 @@ func TestRunCmdThread_ExistingLink_StaysLinkedWithoutRematch(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = verify.Close() })
 
-	interp, found, err := verify.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#7")
+	interp, found, err := verify.GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#7")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation: found=%v err=%v (the pre-existing link should still have been re-interpreted)", found, err)
 	}
@@ -789,7 +789,7 @@ func TestHydrateJiraIssueUnavailableWritesNothingAndIsRetried(t *testing.T) {
 	if !errors.Is(err, gather.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
-	if _, found, gerr := f.seed.GetEntity("o/r", "issue", "PROJ-5"); gerr != nil || found {
+	if _, found, gerr := f.seed.GetEntity(context.Background(), "o/r", "issue", "PROJ-5"); gerr != nil || found {
 		t.Fatalf("entity found=%v err=%v, want nothing written (no non-owning fallback on an unavailable probe)", found, gerr)
 	}
 	if err := os.Remove(filepath.Join(f.dir, "down")); err != nil {
@@ -846,7 +846,7 @@ func TestHydrateJiraIssueANullBackendOwningIDIsGatedUntilWatched(t *testing.T) {
 		t.Fatalf("seed backend = %q, want NULL", e.Backend)
 	}
 	base := len(f.history("PROJ-9"))
-	if _, err := st.WriteEntityStateWithLogFP(e, e.Version, "2026-10-01T00:00:00Z", true, nil, []string{"changed"}, "sync", "2026-10-01T00:00:00Z"); err != nil {
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), e, e.Version, "2026-10-01T00:00:00Z", true, nil, []string{"changed"}, "sync", "2026-10-01T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	if h := f.history("PROJ-9"); len(h) != base {

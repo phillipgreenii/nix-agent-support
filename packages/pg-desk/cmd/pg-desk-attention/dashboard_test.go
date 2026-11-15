@@ -30,7 +30,7 @@ func TestPluginAndDashboardPayloadReturnTheSameGroups(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: fixtureRepo}}}
-	payload, err := httpapi.BuildPayload(st, cfg, fixedNow)
+	payload, err := httpapi.BuildPayload(context.Background(), st, cfg, fixedNow)
 	if err != nil {
 		t.Fatal(err)
 	}

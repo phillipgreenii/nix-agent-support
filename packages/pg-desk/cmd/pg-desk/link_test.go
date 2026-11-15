@@ -66,19 +66,20 @@ func seedLinkStoreWatching(t *testing.T, watchIssues bool, ents ...[2]string) (o
 	}
 	t.Cleanup(func() { _ = seed.Close() })
 	for _, e := range ents {
-		if _, found, gerr := seed.GetEntity("o/r", e[0], e[1]); gerr != nil {
+		if _, found, gerr := seed.GetEntity(context.Background(), "o/r", e[0], e[1]); gerr != nil {
 			t.Fatal(gerr)
 		} else if found {
 			continue
 		}
 		if _, err := seed.WriteEntityWithLog(
+			context.Background(),
 			store.Entity{Repo: "o/r", EntityType: e[0], EntityID: e[1], Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
 			0, []string{"created"}, "sync", "2026-09-29T10:00:00Z",
 		); err != nil {
 			t.Fatalf("seed %v: %v", e, err)
 		}
 		if e[0] == "issue" && watchIssues {
-			if err := seed.SetEntityColumns("o/r", e[0], e[1], nil, &watchedTrue); err != nil {
+			if err := seed.SetEntityColumns(context.Background(), "o/r", e[0], e[1], nil, &watchedTrue); err != nil {
 				t.Fatalf("watch %v: %v", e, err)
 			}
 		}
@@ -91,7 +92,7 @@ var watchedTrue = true
 // kindsOf lists "kind@origin" for each record of one entity, oldest first.
 func kindsOf(t *testing.T, st *store.Store, entityType, id string) []string {
 	t.Helper()
-	rows, err := st.ListEntityHistory("o/r", entityType, id, 0)
+	rows, err := st.ListEntityHistory(context.Background(), "o/r", entityType, id, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func TestLinkAddRecordsExternalClaimWithDefaults(t *testing.T) {
 	if _, err := runLink(t, "pr", "add", "5", "issue:K-1", "--reason", "same work"); err != nil {
 		t.Fatalf("link add: %v", err)
 	}
-	links, err := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5")
+	links, err := seed.ListXrefLinksFrom(context.Background(), "o/r", "pr", "o/r#5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +154,7 @@ func TestLinkAddExplicitRelationAndActor(t *testing.T) {
 	if _, err := runLink(t, "issue", "add", "K-1", "issue:K-2", "--relation", "blocks", "--actor", "bob"); err != nil {
 		t.Fatal(err)
 	}
-	links, _ := seed.ListXrefLinksFrom("o/r", "issue", "K-1")
+	links, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "issue", "K-1")
 	if len(links) != 1 || links[0].Relation != "blocks" || links[0].Origin != "external:bob" {
 		t.Errorf("links = %+v", links)
 	}
@@ -180,7 +181,7 @@ func TestLinkAddAppendsLinkChangedForBothEntities(t *testing.T) {
 func TestLinkAddToAnUnwatchedIssueAppendsNoRowForTheIssue(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"}, [2]string{"issue", "K-1"})
 	off := false
-	if err := seed.SetEntityColumns("o/r", "issue", "K-1", nil, &off); err != nil {
+	if err := seed.SetEntityColumns(context.Background(), "o/r", "issue", "K-1", nil, &off); err != nil {
 		t.Fatal(err)
 	}
 	withOpenSeams(t, linkTestConfig(), open)
@@ -188,7 +189,7 @@ func TestLinkAddToAnUnwatchedIssueAppendsNoRowForTheIssue(t *testing.T) {
 	if _, err := runLink(t, "pr", "add", "5", "issue:K-1"); err != nil {
 		t.Fatal(err)
 	}
-	if links, _ := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5"); len(links) != 1 {
+	if links, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "pr", "o/r#5"); len(links) != 1 {
 		t.Errorf("links = %+v, want the link stored although the issue row is withheld", links)
 	}
 	if got, want := kindsOf(t, seed, "pr", "o/r#5"), []string{"created@sync", "link_changed@pg-desk"}; !equalStrings(got, want) {
@@ -232,7 +233,7 @@ func TestLinkAddSkipsRecordForEndWithNoStoredRow(t *testing.T) {
 func TestLinkAddOnDerivedLinkRecordsExternalClaimToo(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"}, [2]string{"issue", "K-1"})
 	withOpenSeams(t, linkTestConfig(), open)
-	if err := seed.ReplaceDerivedXrefs("o/r", "pr", "o/r#5", []store.XrefLink{{
+	if err := seed.ReplaceDerivedXrefs(context.Background(), "o/r", "pr", "o/r#5", []store.XrefLink{{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "K-1",
 		Relation: "references", Origin: "derived:jira-key",
 		FirstSeen: "2026-09-29T00:00:00Z", LastConfirmed: "2026-09-29T00:00:00Z",
@@ -243,7 +244,7 @@ func TestLinkAddOnDerivedLinkRecordsExternalClaimToo(t *testing.T) {
 	if _, err := runLink(t, "pr", "add", "5", "issue:K-1"); err != nil {
 		t.Fatal(err)
 	}
-	links, _ := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5")
+	links, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "pr", "o/r#5")
 	var origins []string
 	for _, l := range links {
 		origins = append(origins, l.Origin)
@@ -273,7 +274,7 @@ func TestLinkAddTwiceIsIdempotent(t *testing.T) {
 func TestLinkRemoveRemovesOnlyActorsExternalRowsInEitherDirection(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"}, [2]string{"issue", "K-1"})
 	withOpenSeams(t, linkTestConfig(), open)
-	if err := seed.ReplaceDerivedXrefs("o/r", "pr", "o/r#5", []store.XrefLink{{
+	if err := seed.ReplaceDerivedXrefs(context.Background(), "o/r", "pr", "o/r#5", []store.XrefLink{{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "K-1",
 		Relation: "references", Origin: "derived:jira-key",
 		FirstSeen: "2026-09-29T00:00:00Z", LastConfirmed: "2026-09-29T00:00:00Z",
@@ -300,8 +301,8 @@ func TestLinkRemoveRemovesOnlyActorsExternalRowsInEitherDirection(t *testing.T) 
 		t.Errorf("output = %q, want it to report 3 removed", out)
 	}
 	var left []string
-	pair, _ := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5")
-	rev, _ := seed.ListXrefLinksFrom("o/r", "issue", "K-1")
+	pair, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "pr", "o/r#5")
+	rev, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "issue", "K-1")
 	for _, l := range append(pair, rev...) {
 		left = append(left, l.Origin+"/"+l.Relation)
 	}
@@ -346,7 +347,7 @@ func TestLinkRemoveOwnWorkItemAppendsWorkChanged(t *testing.T) {
 func TestLinkRemoveDerivedOnlyErrorsAndChangesNothing(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"}, [2]string{"issue", "K-1"})
 	withOpenSeams(t, linkTestConfig(), open)
-	if err := seed.ReplaceDerivedXrefs("o/r", "pr", "o/r#5", []store.XrefLink{{
+	if err := seed.ReplaceDerivedXrefs(context.Background(), "o/r", "pr", "o/r#5", []store.XrefLink{{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "K-1",
 		Relation: "references", Origin: "derived:jira-key",
 		FirstSeen: "2026-09-29T00:00:00Z", LastConfirmed: "2026-09-29T00:00:00Z",
@@ -358,7 +359,7 @@ func TestLinkRemoveDerivedOnlyErrorsAndChangesNothing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "derived from jira-key; change the source entity") {
 		t.Fatalf("err = %v, want the derived-only refusal", err)
 	}
-	if links, _ := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5"); len(links) != 1 {
+	if links, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "pr", "o/r#5"); len(links) != 1 {
 		t.Errorf("derived link disturbed: %+v", links)
 	}
 	if got := kindsOf(t, seed, "pr", "o/r#5"); len(got) != 1 {
@@ -376,7 +377,7 @@ func TestLinkRemoveOtherActorsExternalLinkIsNotTheirs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no external link by alice") {
 		t.Fatalf("err = %v, want a no-external-link error", err)
 	}
-	if links, _ := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5"); len(links) != 1 {
+	if links, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "pr", "o/r#5"); len(links) != 1 {
 		t.Errorf("bob's link was removed: %+v", links)
 	}
 }
@@ -384,7 +385,7 @@ func TestLinkRemoveOtherActorsExternalLinkIsNotTheirs(t *testing.T) {
 func TestLinkRemoveKeepsDerivedWhenActorHasExternalToo(t *testing.T) {
 	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"}, [2]string{"issue", "K-1"})
 	withOpenSeams(t, linkTestConfig(), open)
-	if err := seed.ReplaceDerivedXrefs("o/r", "pr", "o/r#5", []store.XrefLink{{
+	if err := seed.ReplaceDerivedXrefs(context.Background(), "o/r", "pr", "o/r#5", []store.XrefLink{{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "K-1",
 		Relation: "references", Origin: "derived:jira-key",
 		FirstSeen: "2026-09-29T00:00:00Z", LastConfirmed: "2026-09-29T00:00:00Z",
@@ -397,7 +398,7 @@ func TestLinkRemoveKeepsDerivedWhenActorHasExternalToo(t *testing.T) {
 	if _, err := runLink(t, "pr", "remove", "5", "issue:K-1"); err != nil {
 		t.Fatalf("remove of the actor's own external claim on a derived link: %v", err)
 	}
-	links, _ := seed.ListXrefLinksFrom("o/r", "pr", "o/r#5")
+	links, _ := seed.ListXrefLinksFrom(context.Background(), "o/r", "pr", "o/r#5")
 	if len(links) != 1 || links[0].Origin != "derived:jira-key" {
 		t.Errorf("links = %+v, want only the derived claim", links)
 	}
@@ -479,7 +480,7 @@ func owningLinkConfig(instance string) *config.Config {
 // issueRowCount counts the change_log rows of one issue entity.
 func issueRowCount(t *testing.T, st *store.Store, id string) int {
 	t.Helper()
-	rows, err := st.ListEntityHistory("o/r", "issue", id, 0)
+	rows, err := st.ListEntityHistory(context.Background(), "o/r", "issue", id, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +496,7 @@ func TestLinkAddAppendsNoRowForUnwatchedOwningIssue(t *testing.T) {
 	withOpenSeams(t, owningLinkConfig("jira-1"), open)
 	instance := "jira-1"
 	for _, id := range []string{"K-1", "K-2"} {
-		if err := seed.SetEntityColumns("o/r", "issue", id, &instance, nil); err != nil {
+		if err := seed.SetEntityColumns(context.Background(), "o/r", "issue", id, &instance, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -504,7 +505,7 @@ func TestLinkAddAppendsNoRowForUnwatchedOwningIssue(t *testing.T) {
 	if _, err := runLink(t, "issue", "add", "K-1", "issue:K-2", "--relation", "blocks"); err != nil {
 		t.Fatalf("link add: %v", err)
 	}
-	links, err := seed.ListXrefLinksFrom("o/r", "issue", "K-1")
+	links, err := seed.ListXrefLinksFrom(context.Background(), "o/r", "issue", "K-1")
 	if err != nil || len(links) != 1 {
 		t.Fatalf("link not recorded: %+v, %v", links, err)
 	}
@@ -517,7 +518,7 @@ func TestLinkAddAppendsNoRowForUnwatchedOwningIssue(t *testing.T) {
 
 	// Watch K-1: removing the link now appends its row to K-1 only.
 	watched := true
-	if err := seed.SetEntityColumns("o/r", "issue", "K-1", nil, &watched); err != nil {
+	if err := seed.SetEntityColumns(context.Background(), "o/r", "issue", "K-1", nil, &watched); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runLink(t, "issue", "remove", "K-1", "issue:K-2"); err != nil {

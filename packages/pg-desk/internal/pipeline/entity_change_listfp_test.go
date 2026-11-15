@@ -14,7 +14,7 @@ func strp(s string) *string { return &s }
 
 func listFPNow(t *testing.T, p *Pipeline) string {
 	t.Helper()
-	e, found, err := p.store.GetEntity(ecRepo, "issue", "i-1")
+	e, found, err := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if err != nil || !found {
 		t.Fatalf("entity: found=%v err=%v", found, err)
 	}
@@ -40,9 +40,9 @@ func TestRunEntityChange_ListFPIsWrittenWithTheSnapshotAndIsTheObservedValue(t *
 	// The payload now hashes differently, yet the stored value stays the
 	// observed list fingerprint of THIS call.
 	res = ecIssue(t, "closed", "you", "2026-09-16T01:00:00Z", nil)
-	before, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	before, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	mustRun(t, p, "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{ListFP: strp("list-F2")})
-	after, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
+	after, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 	if after.ContentHash == before.ContentHash {
 		t.Fatal("test setup: the hydrated payload must hash differently")
 	}
@@ -97,8 +97,8 @@ func TestRunEntityChange_FailuresLeaveListFPAndLogUntouched(t *testing.T) {
 		"lost compare-and-set": func(t *testing.T, p *Pipeline, res *gather.GatherResult, gerr *error) error {
 			*res = ecIssue(t, "closed", "you", "2026-09-16T01:00:00Z", nil)
 			opts := EntityChangeOptions{ListFP: strp("list-F2"), MaxRetries: 1, beforeWrite: func(int) {
-				e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
-				if _, err := p.store.WriteEntityWithLog(e, e.Version, nil, "other", "t"); err != nil {
+				e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
+				if _, err := p.store.WriteEntityWithLog(context.Background(), e, e.Version, nil, "other", "t"); err != nil {
 					t.Errorf("interloper: %v", err)
 				}
 			}}

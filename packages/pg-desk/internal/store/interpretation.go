@@ -53,8 +53,8 @@ func interpretationSelectList(haveStamp bool) string {
 
 // selectListFor decides the guard from the table's current shape, before any
 // query is issued (never while a result set is open).
-func (s *Store) selectListFor() (string, error) {
-	haveStamp, err := s.hasInterpStampColumn()
+func (s *Store) selectListFor(ctx context.Context) (string, error) {
+	haveStamp, err := s.hasInterpStampColumn(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -68,8 +68,8 @@ func (s *Store) selectListFor() (string, error) {
 // It writes the handle's stamp (SetInterpStamp) into interp_version: a handle
 // with no stamp writes NULL. On a store whose table has no interp_version
 // column (a raw open that never ran the ensure step) the stamp is not written.
-func (s *Store) UpsertInterpretation(i Interpretation) error {
-	haveStamp, err := s.hasInterpStampColumn()
+func (s *Store) UpsertInterpretation(ctx context.Context, i Interpretation) error {
+	haveStamp, err := s.hasInterpStampColumn(ctx)
 	if err == nil {
 		err = upsertInterpretationNew(s.sql, i, haveStamp, s.InterpStamp())
 	}
@@ -83,13 +83,13 @@ func (s *Store) UpsertInterpretation(i Interpretation) error {
 // (repo, entity_type, entity_id) for a deterministic result — this
 // docket's packet 7 (serve) routes rows into a fixed set of panel arrays
 // and needs a stable order across calls, not incidental SQLite scan order.
-func (s *Store) ListInterpretations() ([]Interpretation, error) {
-	cols, err := s.selectListFor()
+func (s *Store) ListInterpretations(ctx context.Context) ([]Interpretation, error) {
+	cols, err := s.selectListFor(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: list interpretations: %w", err)
 	}
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT `+cols+`
 		 FROM interpretation ORDER BY repo, entity_type, entity_id`,
 	)
@@ -121,9 +121,9 @@ func (s *Store) ListInterpretations() ([]Interpretation, error) {
 // least one row. This is the 503-until-first-interpretation gate this
 // docket's packet 7 (serve) applies to every route (Binding decisions:
 // "503 for every route until the interpretation table has ≥1 row").
-func (s *Store) HasAnyInterpretation() (bool, error) {
+func (s *Store) HasAnyInterpretation(ctx context.Context) (bool, error) {
 	var exists int
-	if err := s.sql.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM interpretation LIMIT 1)`).Scan(&exists); err != nil {
+	if err := s.sql.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM interpretation LIMIT 1)`).Scan(&exists); err != nil {
 		return false, fmt.Errorf("store: has any interpretation: %w", err)
 	}
 	return exists != 0, nil
@@ -131,14 +131,14 @@ func (s *Store) HasAnyInterpretation() (bool, error) {
 
 // GetInterpretation returns the interpretation row for
 // (repo, entityType, entityID), or found=false if no such row exists.
-func (s *Store) GetInterpretation(repo, entityType, entityID string) (interp Interpretation, found bool, err error) {
-	cols, err := s.selectListFor()
+func (s *Store) GetInterpretation(ctx context.Context, repo, entityType, entityID string) (interp Interpretation, found bool, err error) {
+	cols, err := s.selectListFor(ctx)
 	if err != nil {
 		return Interpretation{}, false, fmt.Errorf("store: get interpretation (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
 	var stamp sql.NullString
 	row := s.sql.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT `+cols+`
 		 FROM interpretation WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,

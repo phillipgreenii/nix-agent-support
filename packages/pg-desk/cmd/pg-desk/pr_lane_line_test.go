@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ func laneLineStore(t *testing.T, kind string, record func(t *testing.T, st *stor
 func recordRun(t *testing.T, st *store.Store, configured, mode string, residual *int, at time.Time) {
 	t.Helper()
 	in := lanestate.RunInput{PR: "o/r#1", Mode: mode, Residual: residual, LastOutcome: "ok"}
-	if err := lanestate.Record(st, configured, at, in); err != nil {
+	if err := lanestate.Record(context.Background(), st, configured, at, in); err != nil {
 		t.Fatalf("record %s run: %v", mode, err)
 	}
 }
@@ -102,7 +103,7 @@ func prLaneLineCases(t *testing.T) []struct {
 func TestPRLaneLineGolden(t *testing.T) {
 	var b strings.Builder
 	for _, tc := range prLaneLineCases(t) {
-		b.WriteString(tc.name + " => " + prLaneLine(tc.cfg, tc.st, laneLineNow) + "\n")
+		b.WriteString(tc.name + " => " + prLaneLine(context.Background(), tc.cfg, tc.st, laneLineNow) + "\n")
 	}
 	got := b.String()
 	if os.Getenv("UPDATE_GOLDEN") != "" {
@@ -127,7 +128,7 @@ func TestPRLaneLineGolden(t *testing.T) {
 // large in a quiet window and has no source in pg-desk.
 func TestPRLaneLineNeverSaysTimeSinceTheLastApply(t *testing.T) {
 	for _, tc := range prLaneLineCases(t) {
-		line := prLaneLine(tc.cfg, tc.st, laneLineNow)
+		line := prLaneLine(context.Background(), tc.cfg, tc.st, laneLineNow)
 		for _, bad := range []string{"since the last", "last apply", "last decider"} {
 			if strings.Contains(line, bad) {
 				t.Errorf("%s: line %q contains %q", tc.name, line, bad)

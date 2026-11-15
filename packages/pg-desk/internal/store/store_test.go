@@ -117,7 +117,7 @@ func TestReopenIsIdempotentAndKeepsSchemaVersion(t *testing.T) {
 		t.Fatalf("user_version = %d, want %d", userVersion, schemaVersion)
 	}
 
-	value, found, err := s2.GetMeta(MetaKeySchemaVersion)
+	value, found, err := s2.GetMeta(context.Background(), MetaKeySchemaVersion)
 	if err != nil {
 		t.Fatalf("GetMeta: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestEntityRoundTrip(t *testing.T) {
 		t.Fatalf("UpsertEntity: %v", err)
 	}
 
-	got, found, err := s.GetEntity(e.Repo, e.EntityType, e.EntityID)
+	got, found, err := s.GetEntity(context.Background(), e.Repo, e.EntityType, e.EntityID)
 	if err != nil {
 		t.Fatalf("GetEntity: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestEntityRoundTrip(t *testing.T) {
 	if err := s.UpsertEntity(e); err != nil {
 		t.Fatalf("UpsertEntity (update): %v", err)
 	}
-	got, found, err = s.GetEntity(e.Repo, e.EntityType, e.EntityID)
+	got, found, err = s.GetEntity(context.Background(), e.Repo, e.EntityType, e.EntityID)
 	if err != nil {
 		t.Fatalf("GetEntity (after update): %v", err)
 	}
@@ -176,7 +176,7 @@ func TestEntityRoundTrip(t *testing.T) {
 
 func TestEntityGetMissingNotFound(t *testing.T) {
 	s := OpenForTest(t)
-	_, found, err := s.GetEntity("owner/repo", "pull_request", "999")
+	_, found, err := s.GetEntity(context.Background(), "owner/repo", "pull_request", "999")
 	if err != nil {
 		t.Fatalf("GetEntity: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestListEntitiesReturnsEveryRowOrdered(t *testing.T) {
 		}
 	}
 
-	got, err := s.ListEntities()
+	got, err := s.ListEntities(context.Background())
 	if err != nil {
 		t.Fatalf("ListEntities: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestListEntitiesReturnsEveryRowOrdered(t *testing.T) {
 // error, just report zero entities to sweep.
 func TestListEntitiesEmptyStoreReturnsNoRowsNoError(t *testing.T) {
 	s := OpenForTest(t)
-	got, err := s.ListEntities()
+	got, err := s.ListEntities(context.Background())
 	if err != nil {
 		t.Fatalf("ListEntities: %v", err)
 	}
@@ -254,11 +254,11 @@ func TestInterpretationRoundTrip(t *testing.T) {
 		Degraded:       false,
 		AsOf:           "2026-09-16T00:00:00Z",
 	}
-	if err := s.UpsertInterpretation(i); err != nil {
+	if err := s.UpsertInterpretation(context.Background(), i); err != nil {
 		t.Fatalf("UpsertInterpretation: %v", err)
 	}
 
-	got, found, err := s.GetInterpretation(i.Repo, i.EntityType, i.EntityID)
+	got, found, err := s.GetInterpretation(context.Background(), i.Repo, i.EntityType, i.EntityID)
 	if err != nil {
 		t.Fatalf("GetInterpretation: %v", err)
 	}
@@ -283,11 +283,11 @@ func TestXrefRoundTrip(t *testing.T) {
 		FirstSeen:     "2026-09-16T00:00:00Z",
 		LastConfirmed: "2026-09-16T00:00:00Z",
 	}
-	if err := s.UpsertXref(x); err != nil {
+	if err := s.UpsertXref(context.Background(), x); err != nil {
 		t.Fatalf("UpsertXref: %v", err)
 	}
 
-	got, found, err := s.GetXref(x.Repo, x.FromType, x.FromID, x.ToType, x.ToID)
+	got, found, err := s.GetXref(context.Background(), x.Repo, x.FromType, x.FromID, x.ToType, x.ToID)
 	if err != nil {
 		t.Fatalf("GetXref: %v", err)
 	}
@@ -302,10 +302,10 @@ func TestXrefRoundTrip(t *testing.T) {
 func TestMetaRoundTrip(t *testing.T) {
 	s := OpenForTest(t)
 
-	if err := s.SetMeta(MetaKeyLastHeartbeat, "2026-09-16T00:00:00Z"); err != nil {
+	if err := s.SetMeta(context.Background(), MetaKeyLastHeartbeat, "2026-09-16T00:00:00Z"); err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}
-	got, found, err := s.GetMeta(MetaKeyLastHeartbeat)
+	got, found, err := s.GetMeta(context.Background(), MetaKeyLastHeartbeat)
 	if err != nil {
 		t.Fatalf("GetMeta: %v", err)
 	}
@@ -317,10 +317,10 @@ func TestMetaRoundTrip(t *testing.T) {
 	}
 
 	// Overwrite exercises the update path.
-	if err := s.SetMeta(MetaKeyLastHeartbeat, "2026-09-16T01:00:00Z"); err != nil {
+	if err := s.SetMeta(context.Background(), MetaKeyLastHeartbeat, "2026-09-16T01:00:00Z"); err != nil {
 		t.Fatalf("SetMeta (overwrite): %v", err)
 	}
-	got, _, err = s.GetMeta(MetaKeyLastHeartbeat)
+	got, _, err = s.GetMeta(context.Background(), MetaKeyLastHeartbeat)
 	if err != nil {
 		t.Fatalf("GetMeta (after overwrite): %v", err)
 	}
@@ -331,7 +331,7 @@ func TestMetaRoundTrip(t *testing.T) {
 
 func TestMetaGetMissingNotFound(t *testing.T) {
 	s := OpenForTest(t)
-	_, found, err := s.GetMeta("no-such-key")
+	_, found, err := s.GetMeta(context.Background(), "no-such-key")
 	if err != nil {
 		t.Fatalf("GetMeta: %v", err)
 	}

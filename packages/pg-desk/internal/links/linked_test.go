@@ -1,6 +1,7 @@
 package links
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -15,7 +16,7 @@ import (
 func TestReadLinkedMergesOriginsAndBothDirections(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putDerived(t, st, "pr", testPR, "issue", "ABC-42", "jira", "jira-key")
-	if err := st.AddExternalXref(store.XrefLink{
+	if err := st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: "pr", FromID: testPR, ToType: "issue", ToID: "ABC-42", Relation: "jira",
 		Actor: "operator", ActedAt: "2026-10-01T12:00:00Z", Reason: "same incident",
 		FirstSeen: "2026-10-01T12:00:00Z", LastConfirmed: "2026-10-01T12:00:00Z",
@@ -24,7 +25,7 @@ func TestReadLinkedMergesOriginsAndBothDirections(t *testing.T) {
 	}
 	putDerived(t, st, "thread", "C1/100.1", "pr", testPR, "mentions", "thread-refs")
 
-	got, err := ReadLinked(st, testRepo, "pr", testPR)
+	got, err := ReadLinked(context.Background(), st, testRepo, "pr", testPR)
 	if err != nil {
 		t.Fatalf("ReadLinked: %v", err)
 	}
@@ -72,17 +73,17 @@ func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
 			Relation: "jira", Origin: "derived:jira-key", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
 		})
 	}
-	if err := st.ReplaceDerivedXrefs(testRepo, "pr", testPR, derived); err != nil {
+	if err := st.ReplaceDerivedXrefs(context.Background(), testRepo, "pr", testPR, derived); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertEntityForTest(store.Entity{
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: testRepo, EntityType: "issue", EntityID: "ABC-43", AsOf: "2026-10-01T00:00:00Z",
 		Facts: `{"issue_show":{"title":"ABC-43: adopt me","state":"closed","labels":["x"],"metadata":{"k":"v"},"assignee":"bob","priority":"P1","closed_by":"nobody"}}`,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	d := Deps{Store: st, Repo: testRepo, Patterns: []string{`[A-Z]+-\d+`}, IssueURLTemplate: "https://tracker.example.invalid/browse/%s"}
-	got, err := ReadDetailed(d, "pr", testPR)
+	got, err := ReadDetailed(context.Background(), d, "pr", testPR)
 	if err != nil || len(got.Links) != 2 || got.LinksAsOf == "" {
 		t.Fatalf("ReadDetailed = %+v, %v", got, err)
 	}
@@ -101,10 +102,10 @@ func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
 // A store that is not on schema 2 is refused with the store's error.
 func TestReadLinkedRefusesRetiredSchemaStore(t *testing.T) {
 	st := store.OpenRetiredSchemaForTest(t)
-	if _, err := ReadLinked(st, testRepo, "pr", testPR); !errors.Is(err, store.ErrOldSchema) {
+	if _, err := ReadLinked(context.Background(), st, testRepo, "pr", testPR); !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("ReadLinked on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
-	if _, err := ReadDetailed(Deps{Store: st, Repo: testRepo}, "pr", testPR); !errors.Is(err, store.ErrOldSchema) {
+	if _, err := ReadDetailed(context.Background(), Deps{Store: st, Repo: testRepo}, "pr", testPR); !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("ReadDetailed on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
 }

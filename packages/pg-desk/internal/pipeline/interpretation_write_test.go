@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -38,11 +39,11 @@ func TestFinishEntityChange_VersionBumpWithTheSameFactsStillWritesTheInterpretat
 			p.store.SetInterpStamp("v1/abc")
 			bumped := false
 			p.seams.beforeFinish = func() error {
-				e, found, err := p.store.GetEntity(ecRepo, "issue", "i-1")
+				e, found, err := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
 				if err != nil || !found {
 					t.Fatalf("GetEntity found=%v err=%v", found, err)
 				}
-				if _, err := p.store.WriteEntityStateWithLog(store.Entity{
+				if _, err := p.store.WriteEntityStateWithLog(context.Background(), store.Entity{
 					Repo: ecRepo, EntityType: "issue", EntityID: "i-1",
 					Facts: e.Facts, AsOf: e.AsOf, ContentHash: e.ContentHash, HeadSHA: e.HeadSHA,
 				}, e.Version, "2026-09-16T01:00:00Z", tc.active, tc.kinds, "pg-desk", "2026-09-16T01:00:00Z"); err != nil {
@@ -55,7 +56,7 @@ func TestFinishEntityChange_VersionBumpWithTheSameFactsStillWritesTheInterpretat
 			if !bumped {
 				t.Fatal("the seam did not run")
 			}
-			got, found, err := p.store.GetInterpretation(ecRepo, "issue", "i-1")
+			got, found, err := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1")
 			if err != nil || !found {
 				t.Fatalf("interpretation found=%v err=%v: a version bump alone must not skip the write", found, err)
 			}
@@ -73,8 +74,8 @@ func TestFinishEntityChange_LateWriteWithDifferentFactsIsSkipped(t *testing.T) {
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", nil)
 	p := ecPipeline(t, &res, &gerr)
 	p.seams.beforeFinish = func() error {
-		e, _, _ := p.store.GetEntity(ecRepo, "issue", "i-1")
-		if _, err := p.store.WriteEntityStateWithLog(store.Entity{
+		e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
+		if _, err := p.store.WriteEntityStateWithLog(context.Background(), store.Entity{
 			Repo: ecRepo, EntityType: "issue", EntityID: "i-1",
 			Facts: e.Facts, AsOf: e.AsOf, ContentHash: "a-newer-hydration", HeadSHA: e.HeadSHA,
 		}, e.Version, "2026-09-16T01:00:00Z", true, nil, "pg-desk", "2026-09-16T01:00:00Z"); err != nil {
@@ -83,7 +84,7 @@ func TestFinishEntityChange_LateWriteWithDifferentFactsIsSkipped(t *testing.T) {
 		return nil
 	}
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	if _, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1"); found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); found {
 		t.Fatal("a late write with different facts was written")
 	}
 }
@@ -95,7 +96,7 @@ func TestWriteInterpretation_HandleWithoutStampWritesNull(t *testing.T) {
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", nil)
 	p := ecPipeline(t, &res, &gerr)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	got, found, err := p.store.GetInterpretation(ecRepo, "issue", "i-1")
+	got, found, err := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1")
 	if err != nil || !found || got.InterpVersion != "" {
 		t.Fatalf("row = %+v found=%v err=%v, want a NULL-stamped row", got, found, err)
 	}

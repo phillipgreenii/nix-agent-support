@@ -1,6 +1,7 @@
 package gather
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -14,11 +15,12 @@ type fakeStackStore struct {
 	err  error
 }
 
-func (f fakeStackStore) UpsertXref(store.Xref) error { return nil }
-func (f fakeStackStore) ListXrefsByFrom(_, _, _, _ string) ([]store.Xref, error) {
+func (f fakeStackStore) UpsertXref(_ context.Context, _ store.Xref) error { return nil }
+func (f fakeStackStore) ListXrefsByFrom(_ context.Context, _, _, _, _ string) ([]store.Xref, error) {
 	return nil, nil
 }
-func (f fakeStackStore) ListEntities() ([]store.Entity, error) { return f.rows, f.err }
+
+func (f fakeStackStore) ListEntities(_ context.Context) ([]store.Entity, error) { return f.rows, f.err }
 
 func stackRow(repo, id, state, branch, base, mss string) store.Entity {
 	return store.Entity{
@@ -55,7 +57,7 @@ func TestGatherStackParents(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewGatherer(nil, fakeStackStore{rows: tt.rows})
 			var f Facts
-			g.gatherStackParents(repo, "acme/api#3", tt.base, &f)
+			g.gatherStackParents(context.Background(), repo, "acme/api#3", tt.base, &f)
 			var got []string
 			for _, p := range f.StackParents {
 				got = append(got, p.ID)
@@ -73,7 +75,7 @@ func TestGatherStackParents(t *testing.T) {
 func TestGatherStackParents_StoreErrorDegrades(t *testing.T) {
 	g := NewGatherer(nil, fakeStackStore{err: errors.New("boom")})
 	var f Facts
-	g.gatherStackParents("acme/api", "acme/api#3", "b", &f)
+	g.gatherStackParents(context.Background(), "acme/api", "acme/api#3", "b", &f)
 	if f.Degraded != "stack parents" || len(f.StackParents) != 0 {
 		t.Errorf("Degraded = %q, parents = %v; want degraded mark and none", f.Degraded, f.StackParents)
 	}
@@ -82,7 +84,7 @@ func TestGatherStackParents_StoreErrorDegrades(t *testing.T) {
 func TestGatherStackParents_NilStoreIsNoop(t *testing.T) {
 	g := NewGatherer(nil, nil)
 	var f Facts
-	g.gatherStackParents("acme/api", "acme/api#3", "b", &f)
+	g.gatherStackParents(context.Background(), "acme/api", "acme/api#3", "b", &f)
 	if f.Degraded != "" || len(f.StackParents) != 0 {
 		t.Errorf("want untouched facts, got %+v", f)
 	}

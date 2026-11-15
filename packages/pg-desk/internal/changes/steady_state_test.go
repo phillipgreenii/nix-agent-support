@@ -37,11 +37,11 @@ func baselinedWatchedEngine(t *testing.T, ids []string) (*Engine, *store.Store, 
 	watched := true
 	for _, id := range ids {
 		fp := "F-" + id
-		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+		if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 			0, "2026-09-01T00:00:00Z", true, &fp, nil, OriginPGConnector, ""); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.SetEntityColumns("o/r", "issue", id, nil, &watched); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &watched); err != nil {
 			t.Fatal(err)
 		}
 		pairs = append(pairs, id+"="+fp)
@@ -54,7 +54,7 @@ func baselinedWatchedEngine(t *testing.T, ids []string) (*Engine, *store.Store, 
 
 func changeLogOf(t *testing.T, st *store.Store) []store.ChangeRecord {
 	t.Helper()
-	recs, err := st.ListChangesAfter("issue", 0, 0)
+	recs, err := st.ListChangesAfter(context.Background(), "issue", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestSteadyStateIssuesAreNeverReEmittedByAge(t *testing.T) {
 		t.Errorf("hydrated %d listed members, want zero: %v", len(h.calls), h.calls)
 	}
 	for _, id := range ids {
-		row, found, err := st.GetEntity("o/r", "issue", id)
+		row, found, err := st.GetEntity(context.Background(), "o/r", "issue", id)
 		if err != nil || !found || row.Version != 1 {
 			t.Fatalf("%s = %+v found=%v err=%v, want the untouched seed version", id, row, found, err)
 		}
@@ -145,7 +145,7 @@ func TestNoReconcileSweepOrLocalReconcileRowExistsForAnIssue(t *testing.T) {
 
 	// A focus-annotated issue: the annotation row itself is a row; a day of
 	// polls over it appends no more.
-	if _, _, err := st.SetAnnotationSeq(store.KVAnnotation{
+	if _, _, err := st.SetAnnotationSeq(ctx, store.KVAnnotation{
 		Repo: "o/r", EntityType: "issue", EntityID: ids[0],
 		Key: store.KeyDecider("focus", "pin"), Value: "1", Origin: "test", SetBy: "test", SetAt: now.Format(time.RFC3339),
 	}); err != nil {
@@ -170,11 +170,11 @@ func TestNoReconcileSweepOrLocalReconcileRowExistsForAnIssue(t *testing.T) {
 	// A return after deactivation: the row is inactive, the lister lists it
 	// again, and the next poll hydrates it as a first observation.
 	fp := "F-" + ids[2]
-	row, _, err := st.GetEntity("o/r", "issue", ids[2])
+	row, _, err := st.GetEntity(ctx, "o/r", "issue", ids[2])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.WriteEntityStateWithLogFP(row, row.Version, row.HydratedAt, false, &fp, []string{"removed"}, OriginPGConnector, now.Format(time.RFC3339)); err != nil {
+	if _, err := st.WriteEntityStateWithLogFP(ctx, row, row.Version, row.HydratedAt, false, &fp, []string{"removed"}, OriginPGConnector, now.Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	tick()

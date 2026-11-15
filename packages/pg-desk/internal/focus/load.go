@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -18,14 +19,14 @@ import (
 //
 // Telemetry: Load emits no OpenTelemetry or Prometheus signal and logs
 // nothing; the verbs that call it own the run record and the stderr line.
-func Load(st *store.Store, cfg *config.Config, repo string, now time.Time) (Inputs, error) {
+func Load(ctx context.Context, st *store.Store, cfg *config.Config, repo string, now time.Time) (Inputs, error) {
 	if st == nil {
 		return Inputs{}, fmt.Errorf("focus: load: no store")
 	}
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	if err := st.RequireNewSchema(); err != nil {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		return Inputs{}, err
 	}
 	in := Inputs{
@@ -39,7 +40,7 @@ func Load(st *store.Store, cfg *config.Config, repo string, now time.Time) (Inpu
 		Absorbed:    map[Key]Key{},
 	}
 
-	ents, err := st.ListEntities()
+	ents, err := st.ListEntities(ctx)
 	if err != nil {
 		return Inputs{}, fmt.Errorf("focus: load entities: %w", err)
 	}
@@ -50,7 +51,7 @@ func Load(st *store.Store, cfg *config.Config, repo string, now time.Time) (Inpu
 		in.Entities[Key{e.EntityType, e.EntityID}] = e
 	}
 
-	interps, err := st.ListInterpretations()
+	interps, err := st.ListInterpretations(ctx)
 	if err != nil {
 		return Inputs{}, fmt.Errorf("focus: load interpretations: %w", err)
 	}
@@ -71,7 +72,7 @@ func Load(st *store.Store, cfg *config.Config, repo string, now time.Time) (Inpu
 	}
 	sort.Slice(keys, func(i, j int) bool { return keyLess(keys[i], keys[j]) })
 	for _, k := range keys {
-		anns, err := st.ListKVAnnotations(repo, k.Type, k.ID)
+		anns, err := st.ListKVAnnotations(ctx, repo, k.Type, k.ID)
 		if err != nil {
 			return Inputs{}, fmt.Errorf("focus: load annotations of %s:%s: %w", k.Type, k.ID, err)
 		}
@@ -87,7 +88,7 @@ func Load(st *store.Store, cfg *config.Config, repo string, now time.Time) (Inpu
 			}
 			in.Annotations[k] = m
 		}
-		ls, err := st.ListXrefLinksFrom(repo, k.Type, k.ID)
+		ls, err := st.ListXrefLinksFrom(ctx, repo, k.Type, k.ID)
 		if err != nil {
 			return Inputs{}, fmt.Errorf("focus: load links of %s:%s: %w", k.Type, k.ID, err)
 		}
@@ -99,7 +100,7 @@ func Load(st *store.Store, cfg *config.Config, repo string, now time.Time) (Inpu
 		}
 	}
 
-	rows, err := st.FocusRowsAllPeriods()
+	rows, err := st.FocusRowsAllPeriods(ctx)
 	if err != nil {
 		return Inputs{}, fmt.Errorf("focus: load plan rows: %w", err)
 	}

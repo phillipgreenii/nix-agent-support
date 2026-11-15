@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func (f *gateFixture) seedBackendEntity(id, backend string, active bool, watched
 	if backend != "" {
 		opts.Backend = &backend
 	}
-	if _, err := f.seed.WriteEntityStateWithLogOpts(e, 0, at, active, nil, []string{"added"}, "test", at, opts); err != nil {
+	if _, err := f.seed.WriteEntityStateWithLogOpts(context.Background(), e, 0, at, active, nil, []string{"added"}, "test", at, opts); err != nil {
 		f.t.Fatalf("seed %s: %v", id, err)
 	}
 }
@@ -51,7 +52,7 @@ func (f *gateFixture) watchSet(query string, ids ...string) {
 	for i, id := range ids {
 		quoted[i] = `"` + id + `"`
 	}
-	if err := f.seed.SetMeta("change_flow.watchset.issue."+query, "["+strings.Join(quoted, ",")+"]"); err != nil {
+	if err := f.seed.SetMeta(context.Background(), "change_flow.watchset.issue."+query, "["+strings.Join(quoted, ",")+"]"); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -159,13 +160,13 @@ func TestDoctorBeadsBaselineOpenMoreThanADayFailsNamingQueryAndMembers(t *testin
 	f.seedBackendEntity("pg2-2", "beads-a", true, nil)     // not watched
 	f.seedBackendEntity("pg2-3", "beads-a", false, nil)    // inactive
 	f.watchSet("bd-a", "pg2-1", "pg2-2", "pg2-3", "pg2-4") // pg2-4 absent
-	if err := f.seed.SetMeta(changes.MetaBaselineOpenPrefix+"bd-a", doctorNow.Add(-48*time.Hour).Format(time.RFC3339)); err != nil {
+	if err := f.seed.SetMeta(context.Background(), changes.MetaBaselineOpenPrefix+"bd-a", doctorNow.Add(-48*time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	wantGateFailure(t, gateNameBaselineOpen, "FAIL", "beads-a", "bd-a", "pg2-2 (not watched)", "pg2-3 (inactive)", "pg2-4 (absent)")
 
 	// With the marker present the baseline is finished and the gate passes.
-	if err := f.seed.SetMeta(changes.MetaBaselinePrefix+"bd-a", doctorNow.Format(time.RFC3339)); err != nil {
+	if err := f.seed.SetMeta(context.Background(), changes.MetaBaselinePrefix+"bd-a", doctorNow.Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	stdout, err := runDoctorCmd(t)
@@ -179,7 +180,7 @@ func TestDoctorBeadsBaselineOpenMoreThanADayFailsNamingQueryAndMembers(t *testin
 
 func TestDoctorBeadsBaselineOpenUnderADayOrNeverStartedPasses(t *testing.T) {
 	f := newGateFixture(t)
-	if err := f.seed.SetMeta(changes.MetaBaselineOpenPrefix+"bd-a", doctorNow.Add(-23*time.Hour).Format(time.RFC3339)); err != nil {
+	if err := f.seed.SetMeta(context.Background(), changes.MetaBaselineOpenPrefix+"bd-a", doctorNow.Add(-23*time.Hour).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	stdout, err := runDoctorCmd(t)

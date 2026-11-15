@@ -50,9 +50,9 @@ func xrefLegacyFilter() (clause string, args []any) {
 // UpsertXref inserts or replaces the xref row keyed by
 // (Repo, FromType, FromID, ToType, ToID). The row is the legacy-marked one
 // (see Xref).
-func (s *Store) UpsertXref(x Xref) error {
+func (s *Store) UpsertXref(ctx context.Context, x Xref) error {
 	_, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO xref (repo, from_type, from_id, to_type, to_id, origin, relation, evidence, first_seen, last_confirmed)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, from_type, from_id, to_type, to_id, relation, origin) DO UPDATE SET
@@ -70,10 +70,10 @@ func (s *Store) UpsertXref(x Xref) error {
 // GetXref returns the xref row for (repo, fromType, fromID, toType, toID),
 // or found=false if no such row exists. On the new schema only the
 // legacy-marked row is visible (see Xref).
-func (s *Store) GetXref(repo, fromType, fromID, toType, toID string) (xref Xref, found bool, err error) {
+func (s *Store) GetXref(ctx context.Context, repo, fromType, fromID, toType, toID string) (xref Xref, found bool, err error) {
 	filter, filterArgs := xrefLegacyFilter()
 	row := s.sql.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
 		 FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ? AND to_id = ?`+filter,
 		append([]any{repo, fromType, fromID, toType, toID}, filterArgs...)...,
@@ -98,10 +98,10 @@ func (s *Store) GetXref(repo, fromType, fromID, toType, toID string) (xref Xref,
 // (to_type="thread") — the same reverse lookup, two to_type values. Returns
 // an empty (nil) slice, not an error, when nothing matches. Only the legacy-marked
 // rows are returned (see Xref).
-func (s *Store) ListXrefsByTo(repo, toType, toID string) ([]Xref, error) {
+func (s *Store) ListXrefsByTo(ctx context.Context, repo, toType, toID string) ([]Xref, error) {
 	filter, filterArgs := xrefLegacyFilter()
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
 		 FROM xref WHERE repo = ? AND to_type = ? AND to_id = ?`+filter,
 		append([]any{repo, toType, toID}, filterArgs...)...,
@@ -136,10 +136,10 @@ func (s *Store) ListXrefsByTo(repo, toType, toID string) ([]Xref, error) {
 // packet's own code. Returns an empty (nil) slice, not an error, when
 // nothing matches. Only the legacy-marked rows are
 // returned (see Xref).
-func (s *Store) ListXrefsByFrom(repo, fromType, fromID, toType string) ([]Xref, error) {
+func (s *Store) ListXrefsByFrom(ctx context.Context, repo, fromType, fromID, toType string) ([]Xref, error) {
 	filter, filterArgs := xrefLegacyFilter()
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, from_type, from_id, to_type, to_id, evidence, first_seen, last_confirmed
 		 FROM xref WHERE repo = ? AND from_type = ? AND from_id = ? AND to_type = ?`+filter,
 		append([]any{repo, fromType, fromID, toType}, filterArgs...)...,

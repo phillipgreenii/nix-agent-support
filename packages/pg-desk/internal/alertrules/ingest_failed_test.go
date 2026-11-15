@@ -171,7 +171,7 @@ func metricsAgeSeries(t *testing.T, st *store.Store, owning []string, now time.T
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	flow := func() (changes.Flow, error) { return changes.Flow{Migrated: true}, nil }
-	opt := metrics.WithIngestFailed(metrics.IngestFailedFromStore(st, owning, func() time.Time { return now }))
+	opt := metrics.WithIngestFailed(metrics.IngestFailedFromStore(context.Background(), st, owning, func() time.Time { return now }))
 	if err := metrics.RegisterChangeFlow(mp, flow, opt); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestIngestFailedRuleAgreesWithTheEmittedSeries(t *testing.T) {
 	nd := ingestFailedNoDataState(t)
 	st := store.OpenNewSchemaForTest(t)
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	if err := st.RecordIngestFailure(store.IngestFailure{
+	if err := st.RecordIngestFailure(context.Background(), store.IngestFailure{
 		Instance: "jira-a", EntityID: "PROJ-1", Seq: 7, StoreIdentity: "s1",
 		FirstFailedAt: now.Add(-31 * time.Minute).Format(time.RFC3339), LastError: "boom",
 	}); err != nil {
@@ -216,7 +216,7 @@ func TestIngestFailedRuleAgreesWithTheEmittedSeries(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("a 29 minute old entry fired %v", got)
 	}
-	if err := st.ClearIngestFailure("jira-a", "PROJ-1", 7); err != nil {
+	if err := st.ClearIngestFailure(context.Background(), "jira-a", "PROJ-1", 7); err != nil {
 		t.Fatal(err)
 	}
 	series := metricsAgeSeries(t, st, []string{"jira-a"}, now)

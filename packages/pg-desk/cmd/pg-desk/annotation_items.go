@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -95,6 +96,8 @@ other records (hydrations) cannot stall the feed.`, entityType, annotationConsum
 }
 
 func runAnnotationItems(cmd *cobra.Command, entityType, consumer string, retryWindow time.Duration, limit int) error {
+	ctx := cmd.Context()
+
 	if !strings.HasPrefix(consumer, annotationConsumerPrefix) || strings.TrimSpace(strings.TrimPrefix(consumer, annotationConsumerPrefix)) == "" {
 		return fmt.Errorf("annotation-items: --consumer %q must be %sNAME", consumer, annotationConsumerPrefix)
 	}
@@ -104,7 +107,7 @@ func runAnnotationItems(cmd *cobra.Command, entityType, consumer string, retryWi
 	if retryWindow < 0 {
 		return fmt.Errorf("annotation-items: --retry-window must be >= 0, got %s", retryWindow)
 	}
-	st, err := openNewSchemaStore("annotation-items")
+	st, err := openNewSchemaStore(ctx, "annotation-items")
 	if err != nil {
 		return err
 	}
@@ -120,14 +123,14 @@ func runAnnotationItems(cmd *cobra.Command, entityType, consumer string, retryWi
 	defer unlock()
 
 	now := annotationItemsNow()
-	if err := st.RegisterConsumerAtMax(consumer, entityType, now); err != nil {
+	if err := st.RegisterConsumerAtMax(ctx, consumer, entityType, now); err != nil {
 		return fmt.Errorf("annotation-items: %w", err)
 	}
-	rows, err := st.ReadChanges(consumer, entityType, limit, now)
+	rows, err := st.ReadChanges(ctx, consumer, entityType, limit, now)
 	if err != nil {
 		return fmt.Errorf("annotation-items: %w", err)
 	}
-	items := annotationItemsOf(entityType, rows, now, retryWindow, laneResidualCheck(st, entityType))
+	items := annotationItemsOf(entityType, rows, now, retryWindow, laneResidualCheck(ctx, st, entityType))
 	b, err := json.Marshal(items)
 	if err != nil {
 		return fmt.Errorf("annotation-items: marshal json: %w", err)
@@ -137,14 +140,14 @@ func runAnnotationItems(cmd *cobra.Command, entityType, consumer string, retryWi
 	}
 	if len(rows) > 0 {
 		// The last row SCANNED, not the last item emitted.
-		if err := st.AdvanceCursor(consumer, entityType, rows[len(rows)-1].Seq); err != nil {
+		if err := st.AdvanceCursor(ctx, consumer, entityType, rows[len(rows)-1].Seq); err != nil {
 			return fmt.Errorf("annotation-items: %w", err)
 		}
 	}
 	// Prune like a real `changes` call: no other reader of a pr consumer does.
 	// Not fatal, the output was delivered and the cursor advanced.
 	if cfg, cerr := deskConfigLoad(cmd.Context()); cerr == nil {
-		if _, perr := st.PruneChangeLog(now, cfg.ChangeLogRetention(), cfg.ConsumerStaleAfter()); perr != nil {
+		if _, perr := st.PruneChangeLog(ctx, now, cfg.ChangeLogRetention(), cfg.ConsumerStaleAfter()); perr != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "annotation-items: prune change_log: %v\n", perr)
 		}
 	}
@@ -154,12 +157,12 @@ func runAnnotationItems(cmd *cobra.Command, entityType, consumer string, retryWi
 // laneResidualCheck returns the predicate "this entity's lane row holds a
 // non-zero residual". Only a pr has a lane row; for any other type the
 // predicate is always false. A missing or unreadable row reads as no residual.
-func laneResidualCheck(st *store.Store, entityType string) func(entityID string) bool {
+func laneResidualCheck(ctx context.Context, st *store.Store, entityType string) func(entityID string) bool {
 	if entityType != "pr" {
 		return func(string) bool { return false }
 	}
 	return func(entityID string) bool {
-		raw, found, err := st.GetMeta(lanestate.KeyPRPrefix + entityID)
+		raw, found, err := st.GetMeta(ctx, lanestate.KeyPRPrefix+entityID)
 		if err != nil || !found {
 			return false
 		}

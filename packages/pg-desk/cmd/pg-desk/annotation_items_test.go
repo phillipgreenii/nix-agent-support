@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func itemsOf(t *testing.T, out string) []annotationItem {
 // annotate writes one annotation through the store with the origin given.
 func annotate(t *testing.T, st *store.Store, typ, id, key, value, origin string) {
 	t.Helper()
-	if _, _, err := st.SetAnnotationSeq(store.KVAnnotation{
+	if _, _, err := st.SetAnnotationSeq(context.Background(), store.KVAnnotation{
 		Repo: "o/r", EntityType: typ, EntityID: id, Key: key, Value: value, Origin: origin, SetBy: "alice", SetAt: "2026-10-01T00:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
@@ -40,11 +41,12 @@ func annotate(t *testing.T, st *store.Store, typ, id, key, value, origin string)
 // hydrate appends one non-annotation (hydration) change row.
 func hydrate(t *testing.T, st *store.Store, typ, id string) {
 	t.Helper()
-	cur, found, err := st.GetEntity("o/r", typ, id)
+	cur, found, err := st.GetEntity(context.Background(), "o/r", typ, id)
 	if err != nil || !found {
 		t.Fatalf("entity %s %s: found=%v err=%v", typ, id, found, err)
 	}
 	if _, err := st.WriteEntityWithLog(
+		context.Background(),
 		store.Entity{Repo: "o/r", EntityType: typ, EntityID: id, Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
 		cur.Version, []string{"refreshed"}, "sync", "2026-09-29T10:00:00Z",
 	); err != nil {
@@ -54,7 +56,7 @@ func hydrate(t *testing.T, st *store.Store, typ, id string) {
 
 func cursorOf(t *testing.T, st *store.Store, name, typ string) int64 {
 	t.Helper()
-	cs, err := st.ListConsumers()
+	cs, err := st.ListConsumers(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +230,7 @@ func TestAnnotationItemsCursorAdvancesPastNonAnnotationRows(t *testing.T) {
 
 func maxSeqOf(t *testing.T, st *store.Store, typ string) int64 {
 	t.Helper()
-	rows, err := st.ListChangesAfter(typ, 0, 0)
+	rows, err := st.ListChangesAfter(context.Background(), typ, 0, 0)
 	if err != nil || len(rows) == 0 {
 		t.Fatalf("no rows for %s: %v", typ, err)
 	}
@@ -265,7 +267,7 @@ func TestAnnotationConsumerPrefixIsRequiredHereAndRefusedByChanges(t *testing.T)
 	}
 	// RegisterConsumer (the `changes` path) still starts at 0; the new
 	// registration starts at max.
-	if err := seed.RegisterConsumer("router", "issue", time.Now()); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "router", "issue", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := cursorOf(t, seed, "router", "issue"); got != 0 {
@@ -306,21 +308,21 @@ func TestAnnotationConsumerHoldsBackPruningUntilStale(t *testing.T) {
 	annotate(t, seed, "pr", "o/r#1", "wip", "true", "pg-desk") // undelivered
 	future := time.Now().Add(30 * 24 * time.Hour)
 	// Live: seen_at is now, so the undelivered row survives a prune past retention.
-	if err := seed.RegisterConsumer(annotationsConsumer, "pr", future); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), annotationsConsumer, "pr", future); err != nil {
 		t.Fatal(err)
 	}
-	n, err := seed.PruneChangeLog(future, 0, 0)
+	n, err := seed.PruneChangeLog(context.Background(), future, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows, _ := seed.ListChangesAfter("pr", cursorOf(t, seed, annotationsConsumer, "pr"), 0); len(rows) != 1 {
+	if rows, _ := seed.ListChangesAfter(context.Background(), "pr", cursorOf(t, seed, annotationsConsumer, "pr"), 0); len(rows) != 1 {
 		t.Errorf("undelivered rows after prune (deleted %d) = %d, want 1 held back", n, len(rows))
 	}
 	// Stale: unseen for longer than staleAfter, so pruning stops waiting.
-	if _, err := seed.PruneChangeLog(future.Add(10*24*time.Hour), 0, 0); err != nil {
+	if _, err := seed.PruneChangeLog(context.Background(), future.Add(10*24*time.Hour), 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if rows, _ := seed.ListChangesAfter("pr", 0, 0); len(rows) != 0 {
+	if rows, _ := seed.ListChangesAfter(context.Background(), "pr", 0, 0); len(rows) != 0 {
 		t.Errorf("rows left = %d, want 0 once the consumer is stale", len(rows))
 	}
 }
@@ -333,7 +335,7 @@ func setLaneRow(t *testing.T, st *store.Store, id string, residual int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetMeta(lanestate.KeyPRPrefix+id, string(b)); err != nil {
+	if err := st.SetMeta(context.Background(), lanestate.KeyPRPrefix+id, string(b)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -342,7 +344,7 @@ func setLaneRow(t *testing.T, st *store.Store, id string, residual int) {
 // as a link write or a hydration propagation does.
 func appendKind(t *testing.T, st *store.Store, typ, id, kind, origin string) {
 	t.Helper()
-	if _, err := st.AppendEntityChange("o/r", typ, id, []string{kind}, origin, "2026-11-11T06:37:00Z"); err != nil {
+	if _, err := st.AppendEntityChange(context.Background(), "o/r", typ, id, []string{kind}, origin, "2026-11-11T06:37:00Z"); err != nil {
 		t.Fatal(err)
 	}
 }

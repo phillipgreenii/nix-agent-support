@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -129,6 +130,8 @@ type explainDoc struct {
 }
 
 func runFocusExplain(cmd *cobra.Command, raw string) error {
+	ctx := cmd.Context()
+
 	env, err := openFocusEnv(cmd, false)
 	if err != nil {
 		return err
@@ -138,7 +141,7 @@ func runFocusExplain(cmd *cobra.Command, raw string) error {
 	if err != nil {
 		return mapFocusErr(err, env.Period.Key)
 	}
-	doc, err := buildExplain(env, key)
+	doc, err := buildExplain(ctx, env, key)
 	if err != nil {
 		return err
 	}
@@ -151,26 +154,26 @@ func runFocusExplain(cmd *cobra.Command, raw string) error {
 
 // buildExplain computes the explanation of key from the live rows. It reads
 // the store only.
-func buildExplain(env *focusEnv, key focus.Key) (*explainDoc, error) {
+func buildExplain(ctx context.Context, env *focusEnv, key focus.Key) (*explainDoc, error) {
 	if len(env.Cfg.Repos) == 0 {
 		return nil, focusUsageError("focus: no repository configured", "set repos in the pg-desk config")
 	}
 	st := env.Store
 	g := &focusGather{env: env, repo: env.Cfg.Repos[0].Remote, loc: env.Cfg.FocusTimeZone()}
-	in, err := focus.Load(st, env.Cfg, g.repo, env.Now)
+	in, err := focus.Load(ctx, st, env.Cfg, g.repo, env.Now)
 	if err != nil {
 		return nil, focusTotalError("focus: read the store: "+err.Error(), "check the pg-desk store, then re-run")
 	}
 	g.in = in
 	g.set = focus.Candidates(in)
-	g.watched = focus.LoadWatched(st, env.Cfg)
-	if err := g.reloadPlan(); err != nil {
+	g.watched = focus.LoadWatched(ctx, st, env.Cfg)
+	if err := g.reloadPlan(ctx); err != nil {
 		return nil, err
 	}
 	cap := focus.DefaultCap
 	if g.found && g.period.Cap != nil && *g.period.Cap > 0 {
 		cap = *g.period.Cap
-	} else if d, found, derr := st.FocusDraftGet(); derr != nil {
+	} else if d, found, derr := st.FocusDraftGet(ctx); derr != nil {
 		return nil, focusTotalError("focus: read the stored draft: "+derr.Error(), "check the pg-desk store, then re-run")
 	} else if found && isApplicableDraft(d, env.Period) && d.Cap > 0 {
 		cap = d.Cap
@@ -187,7 +190,7 @@ func buildExplain(env *focusEnv, key focus.Key) (*explainDoc, error) {
 	doc.NotHeld = !stored
 
 	// Position: the rank is computed live for the addressed day.
-	ranking := g.rank(cap)
+	ranking := g.rank(ctx, cap)
 	capPos := 0
 	for i, r := range ranking.Rows {
 		if r.InPlan {
@@ -224,7 +227,7 @@ func buildExplain(env *focusEnv, key focus.Key) (*explainDoc, error) {
 	}
 
 	// The plan row: the addressed period's, else the row another period holds.
-	plan, err := explainPlanRowOf(env, g, key)
+	plan, err := explainPlanRowOf(ctx, env, g, key)
 	if err != nil {
 		return nil, err
 	}
@@ -256,20 +259,20 @@ func buildExplain(env *focusEnv, key focus.Key) (*explainDoc, error) {
 
 // explainPlanRowOf finds the plan row of key: the addressed period's, else
 // the one another period holds (the highest period key when several do).
-func explainPlanRowOf(env *focusEnv, g *focusGather, key focus.Key) (*explainPlanRow, error) {
+func explainPlanRowOf(ctx context.Context, env *focusEnv, g *focusGather, key focus.Key) (*explainPlanRow, error) {
 	for _, r := range g.sel {
 		if r.EntityType == key.Type && r.EntityID == key.ID {
 			return &explainPlanRow{Period: env.Period.Key, SelectedAt: r.SelectedAt, RankPosition: r.RankPosition, Tier: r.Tier}, nil
 		}
 	}
-	rows, err := env.Store.FocusRowsOfEntity(g.repo, key.Type, key.ID)
+	rows, err := env.Store.FocusRowsOfEntity(ctx, g.repo, key.Type, key.ID)
 	if err != nil {
 		return nil, focusTotalError("focus: read plan rows: "+err.Error(), "check the pg-desk store, then re-run")
 	}
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	periods, err := env.Store.FocusPeriods()
+	periods, err := env.Store.FocusPeriods(ctx)
 	if err != nil {
 		return nil, focusTotalError("focus: read periods: "+err.Error(), "check the pg-desk store, then re-run")
 	}

@@ -45,12 +45,12 @@ func formatTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 // RegisterConsumer creates the (name, type) consumer at cursor 0 if absent
 // and sets its seen_at to now; an existing consumer keeps its cursor.
-func (s *Store) RegisterConsumer(name, entityType string, now time.Time) error {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) RegisterConsumer(ctx context.Context, name, entityType string, now time.Time) error {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
 	if _, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO consumer (name, type, cursor, seen_at) VALUES (?, ?, 0, ?)
 		 ON CONFLICT (name, type) DO UPDATE SET seen_at = excluded.seen_at`,
 		name, entityType, formatTime(now),
@@ -67,12 +67,12 @@ func (s *Store) RegisterConsumer(name, entityType string, now time.Time) error {
 // consumer keeps its cursor and only has its seen_at refreshed, so the call is
 // safe on every poll (the start-at-max rule applies to the first registration
 // only).
-func (s *Store) RegisterConsumerAtMax(name, entityType string, now time.Time) error {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) RegisterConsumerAtMax(ctx context.Context, name, entityType string, now time.Time) error {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
 	if _, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO consumer (name, type, cursor, seen_at)
 		 SELECT ?, ?, COALESCE(MAX(seq), 0), ? FROM change_log WHERE entity_type = ?
 		 ON CONFLICT (name, type) DO UPDATE SET seen_at = excluded.seen_at`,
@@ -89,26 +89,26 @@ func (s *Store) RegisterConsumerAtMax(name, entityType string, now time.Time) er
 // cursor: the caller flushes the records, then calls AdvanceCursor with the
 // last seq it delivered. Repeated reads without an advance return the same
 // records.
-func (s *Store) ReadChanges(name, entityType string, limit int, now time.Time) ([]ChangeRecord, error) {
-	if err := s.RegisterConsumer(name, entityType, now); err != nil {
+func (s *Store) ReadChanges(ctx context.Context, name, entityType string, limit int, now time.Time) ([]ChangeRecord, error) {
+	if err := s.RegisterConsumer(ctx, name, entityType, now); err != nil {
 		return nil, err
 	}
-	return s.PeekChanges(name, entityType, limit)
+	return s.PeekChanges(ctx, name, entityType, limit)
 }
 
 // PeekChanges is ReadChanges without any side effect: it neither registers
 // the consumer, nor touches seen_at, nor moves the cursor (the read behind
 // `--cached`). An unregistered consumer peeks from cursor 0.
-func (s *Store) PeekChanges(name, entityType string, limit int) ([]ChangeRecord, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) PeekChanges(ctx context.Context, name, entityType string, limit int) ([]ChangeRecord, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
 	var cursor int64
-	err := s.sql.QueryRowContext(context.Background(), `SELECT cursor FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&cursor)
+	err := s.sql.QueryRowContext(ctx, `SELECT cursor FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&cursor)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: read consumer cursor (%s,%s): %w", name, entityType, err)
 	}
-	return s.ListChangesAfter(entityType, cursor, limit)
+	return s.ListChangesAfter(ctx, entityType, cursor, limit)
 }
 
 // ErrConsumerNotFound is returned (matchable with errors.Is) when a cursor
@@ -119,11 +119,11 @@ var ErrConsumerNotFound = errors.New("consumer not registered")
 // last seq the caller has flushed. It only ever moves forward: a seq at or
 // below the current cursor changes nothing (it is not an error, so a retried
 // advance is harmless). An unregistered consumer returns ErrConsumerNotFound.
-func (s *Store) AdvanceCursor(name, entityType string, seq int64) error {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) AdvanceCursor(ctx context.Context, name, entityType string, seq int64) error {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
-	res, err := s.sql.ExecContext(context.Background(), `UPDATE consumer SET cursor = ? WHERE name = ? AND type = ? AND cursor < ?`,
+	res, err := s.sql.ExecContext(ctx, `UPDATE consumer SET cursor = ? WHERE name = ? AND type = ? AND cursor < ?`,
 		seq, name, entityType, seq)
 	if err != nil {
 		return fmt.Errorf("store: advance consumer (%s,%s): %w", name, entityType, err)
@@ -132,7 +132,7 @@ func (s *Store) AdvanceCursor(name, entityType string, seq int64) error {
 		return fmt.Errorf("store: advance consumer (%s,%s): %w", name, entityType, err)
 	} else if n == 0 {
 		var one int
-		qerr := s.sql.QueryRowContext(context.Background(), `SELECT 1 FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&one)
+		qerr := s.sql.QueryRowContext(ctx, `SELECT 1 FROM consumer WHERE name = ? AND type = ?`, name, entityType).Scan(&one)
 		if errors.Is(qerr, sql.ErrNoRows) {
 			return fmt.Errorf("store: advance consumer (%s,%s): %w", name, entityType, ErrConsumerNotFound)
 		} else if qerr != nil {
@@ -145,11 +145,11 @@ func (s *Store) AdvanceCursor(name, entityType string, seq int64) error {
 // ResetConsumer moves the consumer's cursor back to 0 so the next read
 // replays the log from the start (the only backward move). An unregistered
 // consumer returns ErrConsumerNotFound.
-func (s *Store) ResetConsumer(name, entityType string) error {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) ResetConsumer(ctx context.Context, name, entityType string) error {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
-	res, err := s.sql.ExecContext(context.Background(), `UPDATE consumer SET cursor = 0 WHERE name = ? AND type = ?`, name, entityType)
+	res, err := s.sql.ExecContext(ctx, `UPDATE consumer SET cursor = 0 WHERE name = ? AND type = ?`, name, entityType)
 	if err != nil {
 		return fmt.Errorf("store: reset consumer (%s,%s): %w", name, entityType, err)
 	}
@@ -162,11 +162,11 @@ func (s *Store) ResetConsumer(name, entityType string) error {
 }
 
 // ListConsumers returns every registered consumer ordered by (type, name).
-func (s *Store) ListConsumers() ([]Consumer, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) ListConsumers(ctx context.Context) ([]Consumer, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.QueryContext(context.Background(), `SELECT name, type, cursor, seen_at FROM consumer ORDER BY type, name`)
+	rows, err := s.sql.QueryContext(ctx, `SELECT name, type, cursor, seen_at FROM consumer ORDER BY type, name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list consumers: %w", err)
 	}
@@ -189,11 +189,11 @@ func (s *Store) ListConsumers() ([]Consumer, error) {
 
 // ForgetConsumer deletes the (name, type) consumer. Forgetting an absent
 // consumer is not an error.
-func (s *Store) ForgetConsumer(name, entityType string) error {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) ForgetConsumer(ctx context.Context, name, entityType string) error {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
-	if _, err := s.sql.ExecContext(context.Background(), `DELETE FROM consumer WHERE name = ? AND type = ?`, name, entityType); err != nil {
+	if _, err := s.sql.ExecContext(ctx, `DELETE FROM consumer WHERE name = ? AND type = ?`, name, entityType); err != nil {
 		return fmt.Errorf("store: forget consumer (%s,%s): %w", name, entityType, err)
 	}
 	return nil
@@ -223,8 +223,8 @@ func (s *Store) LockConsumer(consumerType, name string) (unlock func(), err erro
 // staleAfter before now, is stale and excluded. With no non-stale consumer
 // for a type, every row older than retention is prunable. A zero (or
 // negative) retention or staleAfter means the design default (14 and 7 days).
-func (s *Store) PruneChangeLog(now time.Time, retention, staleAfter time.Duration) (int64, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) PruneChangeLog(ctx context.Context, now time.Time, retention, staleAfter time.Duration) (int64, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return 0, err
 	}
 	if retention <= 0 {
@@ -240,7 +240,7 @@ func (s *Store) PruneChangeLog(now time.Time, retention, staleAfter time.Duratio
 	// max int64) when there is none. Rows with seq <= that cursor have been
 	// delivered to everyone who is still waiting.
 	res, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`DELETE FROM change_log
 		 WHERE at < ?
 		   AND seq <= COALESCE(

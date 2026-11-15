@@ -364,12 +364,12 @@ type fakeXrefUpserter struct {
 	listErr       error
 }
 
-func (f *fakeXrefUpserter) UpsertXref(x store.Xref) error {
+func (f *fakeXrefUpserter) UpsertXref(_ context.Context, x store.Xref) error {
 	f.upserts = append(f.upserts, x)
 	return nil
 }
 
-func (f *fakeXrefUpserter) ListXrefsByFrom(repo, fromType, fromID, toType string) ([]store.Xref, error) {
+func (f *fakeXrefUpserter) ListXrefsByFrom(_ context.Context, repo, fromType, fromID, toType string) ([]store.Xref, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}

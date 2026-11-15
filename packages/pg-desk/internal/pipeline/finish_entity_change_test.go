@@ -47,17 +47,17 @@ func finishPipeline(t *testing.T) *Pipeline {
 // derived links LAST. A full success leaves all three written.
 func TestFinishEntityChange_SuccessWritesInterpretationThenLinks(t *testing.T) {
 	p := finishPipeline(t)
-	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
+	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
 		interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if err != nil {
 		t.Fatalf("finishEntityChange: %v", err)
 	}
-	got, found, err := p.store.GetInterpretation(ecRepo, "issue", "i-1")
+	got, found, err := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1")
 	if err != nil || !found || got.AsOf != "A" || got.Ownership != "mine" {
 		t.Fatalf("interpretation = %+v found=%v err=%v", got, found, err)
 	}
-	links, err := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	links, err := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1")
 	if err != nil || len(links) != 1 || links[0].ToID != ecRepo+"#7" {
 		t.Fatalf("links = %+v err=%v", links, err)
 	}
@@ -66,13 +66,13 @@ func TestFinishEntityChange_SuccessWritesInterpretationThenLinks(t *testing.T) {
 // haveLinks=false leaves the stored derived links alone.
 func TestFinishEntityChange_NoLinksFlagLeavesStoredLinksAlone(t *testing.T) {
 	p := finishPipeline(t)
-	if err := p.store.ReplaceDerivedXrefs(ecRepo, "issue", "i-1", []store.XrefLink{finishLink("i-1")}); err != nil {
+	if err := p.store.ReplaceDerivedXrefs(context.Background(), ecRepo, "issue", "i-1", []store.XrefLink{finishLink("i-1")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A"), contentHash: finishHash}); err != nil {
+	if err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A"), contentHash: finishHash}); err != nil {
 		t.Fatal(err)
 	}
-	if links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1"); len(links) != 1 {
+	if links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1"); len(links) != 1 {
 		t.Fatalf("links = %+v, want the stored link kept", links)
 	}
 }
@@ -83,16 +83,16 @@ func TestFinishEntityChange_InterpretationWriteFailureSkipsTheLinks(t *testing.T
 	p := finishPipeline(t)
 	bad := finishInterp("i-1", "A")
 	_ = p.store.Close() // a real store failure
-	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
+	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
 		interp: bad, contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if err == nil || !strings.Contains(err.Error(), "persist interpretation issue i-1") {
 		t.Fatalf("err = %v, want a persist interpretation error", err)
 	}
-	if links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1"); len(links) != 0 {
+	if links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1"); len(links) != 0 {
 		t.Fatalf("links = %+v, want none: the links step runs only after the interpretation is stored", links)
 	}
-	if _, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1"); found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); found {
 		t.Fatal("a failed interpretation write left a row")
 	}
 }
@@ -102,13 +102,13 @@ func TestFinishEntityChange_InterpretationWriteFailureSkipsTheLinks(t *testing.T
 func TestFinishEntityChange_LinkFailureKeepsTheInterpretation(t *testing.T) {
 	p := finishPipeline(t)
 	wrong := finishLink("another-entity") // does not start from i-1: the store refuses it
-	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
+	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
 		interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{wrong},
 	})
 	if err == nil || !strings.Contains(err.Error(), "links issue i-1") {
 		t.Fatalf("err = %v, want a links error", err)
 	}
-	if got, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1"); !found || got.AsOf != "A" {
+	if got, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); !found || got.AsOf != "A" {
 		t.Fatalf("interpretation = %+v found=%v, want it stored before the links step", got, found)
 	}
 }
@@ -119,16 +119,16 @@ func TestFinishEntityChange_LocalRecordsFailureStopsTheLaterSteps(t *testing.T) 
 	p := finishPipeline(t)
 	boom := errors.New("injected local records failure")
 	p.seams.appendLocalRecords = func() error { return boom }
-	err := p.finishEntityChange(ecRepo, "issue", "i-1", postCommit{
+	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
 		observed: true, interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the injected failure", err)
 	}
-	if _, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1"); found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); found {
 		t.Fatal("the interpretation was written after a local-records failure")
 	}
-	if links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1"); len(links) != 0 {
+	if links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1"); len(links) != 0 {
 		t.Fatalf("links = %+v, want none", links)
 	}
 }
@@ -146,10 +146,10 @@ func TestFinishEntityChange_GapFailureLeavesTheCommittedEntityWithoutAnInterpret
 	if !errors.Is(err, boom) {
 		t.Fatalf("RunEntityChange err = %v, want the injected failure", err)
 	}
-	if e, found, _ := p.store.GetEntity(ecRepo, "issue", "i-1"); !found || e.Version == 0 {
+	if e, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); !found || e.Version == 0 {
 		t.Fatalf("entity = %+v found=%v, want the commit to stand", e, found)
 	}
-	if _, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1"); found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); found {
 		t.Fatal("an interpretation was written despite the gap failure")
 	}
 
@@ -168,7 +168,7 @@ func TestRunEntityChange_LocalRecordsFailureKeepsThePreviousInterpretation(t *te
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", workMeta("7"))
 	p := ecPipeline(t, &res, &gerr)
 	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-	before, found, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1")
+	before, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1")
 	if !found {
 		t.Fatal("no interpretation after the first hydration")
 	}
@@ -179,11 +179,11 @@ func TestRunEntityChange_LocalRecordsFailureKeepsThePreviousInterpretation(t *te
 	if _, err := p.RunEntityChange(context.Background(), "issue", "i-1", gather.ChangeChanged, EntityChangeOptions{}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the injected failure", err)
 	}
-	after, _, _ := p.store.GetInterpretation(ecRepo, "issue", "i-1")
+	after, _, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1")
 	if after != before {
 		t.Fatalf("interpretation changed after a failed finish: before=%+v after=%+v", before, after)
 	}
-	links, _ := p.store.ListXrefLinksFrom(ecRepo, "issue", "i-1")
+	links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1")
 	for _, l := range links {
 		if strings.HasSuffix(l.ToID, "#8") {
 			t.Fatalf("links = %+v, want the old link set (the replacement runs last)", links)

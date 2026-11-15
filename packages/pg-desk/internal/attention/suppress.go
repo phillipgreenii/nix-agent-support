@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -41,7 +42,7 @@ type Suppressor interface {
 	// Suppress reports whether it claims the candidate. An error is an
 	// unreadable store, which fails the evaluation: it is never an all-clear
 	// (INV-ATTNEVAL-6).
-	Suppress(c Candidate, env *SuppressEnv) (bool, error)
+	Suppress(ctx context.Context, c Candidate, env *SuppressEnv) (bool, error)
 }
 
 var (
@@ -85,16 +86,16 @@ type annotationReader struct {
 // newAnnotationReader checks the schema once: a store that is not on schema 2
 // has no suppress.* overrides and no key/value annotations, and is refused
 // rather than read as an all-clear.
-func newAnnotationReader(r Reader) (*annotationReader, error) {
-	if err := r.RequireNewSchema(); err != nil {
+func newAnnotationReader(ctx context.Context, r Reader) (*annotationReader, error) {
+	if err := r.RequireNewSchema(ctx); err != nil {
 		return nil, fmt.Errorf("attention: read schema version: %w", err)
 	}
 	return &annotationReader{r: r}, nil
 }
 
-func (a *annotationReader) read(repo, entityType, id string) (annotationState, error) {
+func (a *annotationReader) read(ctx context.Context, repo, entityType, id string) (annotationState, error) {
 	st := annotationState{suppressed: map[string]bool{}}
-	anns, err := a.r.ListKVAnnotations(repo, entityType, id)
+	anns, err := a.r.ListKVAnnotations(ctx, repo, entityType, id)
 	if err != nil {
 		return st, fmt.Errorf("attention: read annotations of %s:%s: %w", entityType, id, err)
 	}
@@ -121,7 +122,7 @@ func (a *annotationReader) read(repo, entityType, id string) (annotationState, e
 
 // firstSuppressor walks the chain and returns the first applicable
 // suppressor's name.
-func firstSuppressor(chain []Suppressor, c Candidate, st annotationState, env *SuppressEnv) (by string, dropped bool, err error) {
+func firstSuppressor(ctx context.Context, chain []Suppressor, c Candidate, st annotationState, env *SuppressEnv) (by string, dropped bool, err error) {
 	switch {
 	case st.hidden:
 		return "hidden", true, nil
@@ -133,7 +134,7 @@ func firstSuppressor(chain []Suppressor, c Candidate, st annotationState, env *S
 		return store.KeySuppress(c.Kind), true, nil
 	}
 	for _, s := range chain {
-		claimed, serr := s.Suppress(c, env)
+		claimed, serr := s.Suppress(ctx, c, env)
 		if serr != nil {
 			return "", false, fmt.Errorf("attention: suppressor %s on %s: %w", s.Name(), Ref(c.Type, c.ID), serr)
 		}

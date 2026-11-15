@@ -45,11 +45,13 @@ nothing.`,
 }
 
 func runForceReview(cmd *cobra.Command, ref, actorFlag, origin string, clear bool) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("force-review: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("force-review")
+	st, err := openNewSchemaStore(ctx, "force-review")
 	if err != nil {
 		return err
 	}
@@ -66,7 +68,7 @@ func runForceReview(cmd *cobra.Command, ref, actorFlag, origin string, clear boo
 		return err
 	}
 	if clear {
-		removed, err := w.remove(st)
+		removed, err := w.remove(ctx, st)
 		if err != nil {
 			return err
 		}
@@ -77,7 +79,7 @@ func runForceReview(cmd *cobra.Command, ref, actorFlag, origin string, clear boo
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "force-review cleared on pr %s\n", w.id)
 		return err
 	}
-	e, found, err := st.GetEntity(w.repo, entityTypePR, w.id)
+	e, found, err := st.GetEntity(ctx, w.repo, entityTypePR, w.id)
 	if err != nil {
 		return fmt.Errorf("force-review: %w", err)
 	}
@@ -88,7 +90,7 @@ func runForceReview(cmd *cobra.Command, ref, actorFlag, origin string, clear boo
 		return fmt.Errorf("force-review: %s has no recorded head commit", ref)
 	}
 	w.value = e.HeadSHA
-	if err := w.set(st); err != nil {
+	if err := w.set(ctx, st); err != nil {
 		return err
 	}
 	if _, err = fmt.Fprintf(cmd.OutOrStdout(), "force-review requested on pr %s at %s\n", w.id, e.HeadSHA); err != nil {

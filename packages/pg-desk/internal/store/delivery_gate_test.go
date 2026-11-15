@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -42,6 +43,7 @@ func gateSeed(t *testing.T, s *Store, id, backend string, watched *bool) int64 {
 	}
 	defer func() { _ = plain.Close() }()
 	v, err := plain.WriteEntityStateWithLog(
+		context.Background(),
 		Entity{Repo: gateRepo, EntityType: gateIssueTyp, EntityID: id, Facts: `{}`, AsOf: gateAt},
 		0, gateAt, true, []string{"created"}, gateOrigin, gateAt,
 	)
@@ -52,7 +54,7 @@ func gateSeed(t *testing.T, s *Store, id, backend string, watched *bool) int64 {
 	if backend != "" {
 		b = &backend
 	}
-	if err := plain.SetEntityColumns(gateRepo, gateIssueTyp, id, b, watched); err != nil {
+	if err := plain.SetEntityColumns(context.Background(), gateRepo, gateIssueTyp, id, b, watched); err != nil {
 		t.Fatal(err)
 	}
 	return v
@@ -63,7 +65,7 @@ func gateBool(b bool) *bool { return &b }
 // gateRows counts the issue change_log rows of one entity.
 func gateRows(t *testing.T, s *Store, id string) int {
 	t.Helper()
-	rows, err := s.ListChangesAfter(gateIssueTyp, 0, 1000)
+	rows, err := s.ListChangesAfter(context.Background(), gateIssueTyp, 0, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +80,7 @@ func gateRows(t *testing.T, s *Store, id string) int {
 
 func gateEntity(t *testing.T, s *Store, id string) Entity {
 	t.Helper()
-	e, found, err := s.GetEntity(gateRepo, gateIssueTyp, id)
+	e, found, err := s.GetEntity(context.Background(), gateRepo, gateIssueTyp, id)
 	if err != nil || !found {
 		t.Fatalf("GetEntity %s: found=%v err=%v", id, found, err)
 	}
@@ -88,6 +90,7 @@ func gateEntity(t *testing.T, s *Store, id string) Entity {
 func gateWrite(t *testing.T, s *Store, id string, version int64, kinds []string, opts WriteOptions) int64 {
 	t.Helper()
 	v, err := s.WriteEntityStateWithLogOpts(
+		context.Background(),
 		Entity{Repo: gateRepo, EntityType: gateIssueTyp, EntityID: id, Facts: `{"n":1}`, AsOf: gateAt},
 		version, gateAt, true, nil, kinds, gateOrigin, gateAt, opts,
 	)
@@ -126,24 +129,24 @@ func TestDeliveryGate_UnwatchedInScopeAppendsNothing(t *testing.T) {
 				if kind == "added" {
 					origin = "reset"
 				}
-				seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, tc.id, []string{kind}, origin, gateAt)
+				seq, err := s.AppendEntityChange(context.Background(), gateRepo, gateIssueTyp, tc.id, []string{kind}, origin, gateAt)
 				if err != nil || seq != 0 {
 					t.Errorf("AppendEntityChange(%s) = (%d, %v), want (0, nil)", kind, seq, err)
 				}
 			}
 
 			// An annotation write is persisted, reads as changed, appends nothing.
-			seq, changed, err := s.SetAnnotationSeq(KVAnnotation{
+			seq, changed, err := s.SetAnnotationSeq(context.Background(), KVAnnotation{
 				Repo: gateRepo, EntityType: gateIssueTyp, EntityID: tc.id, Key: "wip", Value: "true",
 				Origin: gateOrigin, SetBy: "op", SetAt: gateAt,
 			})
 			if err != nil || seq != 0 || !changed {
 				t.Errorf("SetAnnotationSeq = (%d, %v, %v), want (0, true, nil)", seq, changed, err)
 			}
-			if _, found, _ := s.GetKVAnnotation(gateRepo, gateIssueTyp, tc.id, "wip"); !found {
+			if _, found, _ := s.GetKVAnnotation(context.Background(), gateRepo, gateIssueTyp, tc.id, "wip"); !found {
 				t.Error("annotation was not persisted")
 			}
-			if removed, err := s.DeleteAnnotation(gateRepo, gateIssueTyp, tc.id, "wip", gateOrigin, gateAt); err != nil || !removed {
+			if removed, err := s.DeleteAnnotation(context.Background(), gateRepo, gateIssueTyp, tc.id, "wip", gateOrigin, gateAt); err != nil || !removed {
 				t.Errorf("DeleteAnnotation = (%v, %v)", removed, err)
 			}
 
@@ -161,13 +164,13 @@ func TestDeliveryGate_WatchedAppends(t *testing.T) {
 	base := gateRows(t, s, "K-1")
 
 	gateWrite(t, s, "K-1", v, []string{"fields_changed"}, WriteOptions{})
-	if seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, "K-1", []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq == 0 {
+	if seq, err := s.AppendEntityChange(context.Background(), gateRepo, gateIssueTyp, "K-1", []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq == 0 {
 		t.Errorf("link_changed = (%d, %v), want a sequence", seq, err)
 	}
-	if seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, "K-1", []string{"added"}, "reset", gateAt); err != nil || seq == 0 {
+	if seq, err := s.AppendEntityChange(context.Background(), gateRepo, gateIssueTyp, "K-1", []string{"added"}, "reset", gateAt); err != nil || seq == 0 {
 		t.Errorf("reset replay = (%d, %v), want a sequence", seq, err)
 	}
-	seq, changed, err := s.SetAnnotationSeq(KVAnnotation{
+	seq, changed, err := s.SetAnnotationSeq(context.Background(), KVAnnotation{
 		Repo: gateRepo, EntityType: gateIssueTyp, EntityID: "K-1", Key: "wip", Value: "true",
 		Origin: gateOrigin, SetBy: "op", SetAt: gateAt,
 	})
@@ -222,7 +225,7 @@ func TestDeliveryGate_ClearAfterAppend(t *testing.T) {
 	}
 
 	// Reads stay unfiltered: the row appended while watched is still delivered.
-	rows, err := s.ListChangesAfter(gateIssueTyp, 0, 1000)
+	rows, err := s.ListChangesAfter(context.Background(), gateIssueTyp, 0, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +238,7 @@ func TestDeliveryGate_ClearAfterAppend(t *testing.T) {
 	if !found {
 		t.Error("closed row hidden after the mark was cleared")
 	}
-	if _, err := s.ReadChanges("c1", gateIssueTyp, 100, time.Now()); err != nil {
+	if _, err := s.ReadChanges(context.Background(), "c1", gateIssueTyp, 100, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -266,10 +269,10 @@ func TestDeliveryGate_OutOfScopeStillAppends(t *testing.T) {
 	v := gateSeed(t, s, "B-1", gateOther, nil)
 	base := gateRows(t, s, "B-1")
 	gateWrite(t, s, "B-1", v, []string{"fields_changed"}, WriteOptions{})
-	if seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, "B-1", []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq == 0 {
+	if seq, err := s.AppendEntityChange(context.Background(), gateRepo, gateIssueTyp, "B-1", []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq == 0 {
 		t.Errorf("beads append = (%d, %v)", seq, err)
 	}
-	if _, changed, err := s.SetAnnotationSeq(KVAnnotation{
+	if _, changed, err := s.SetAnnotationSeq(context.Background(), KVAnnotation{
 		Repo: gateRepo, EntityType: gateIssueTyp, EntityID: "B-1", Key: "wip", Value: "true",
 		Origin: gateOrigin, SetBy: "op", SetAt: gateAt,
 	}); err != nil || !changed {
@@ -289,12 +292,13 @@ func TestDeliveryGate_OutOfScopeStillAppends(t *testing.T) {
 
 	// A PR entity is not an issue.
 	if _, err := s.WriteEntityWithLog(
+		context.Background(),
 		Entity{Repo: gateRepo, EntityType: "pr", EntityID: "example/repo#1", Facts: `{}`, AsOf: gateAt},
 		0, []string{"created"}, "sync", gateAt,
 	); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.ListChangesAfter("pr", 0, 10)
+	rows, err := s.ListChangesAfter(context.Background(), "pr", 0, 10)
 	if err != nil || len(rows) != 1 {
 		t.Errorf("pr rows = %d, %v", len(rows), err)
 	}
@@ -321,6 +325,7 @@ func TestDeliveryGate_ScopeErrorPropagates(t *testing.T) {
 	boom := errors.New("boom")
 	s.SetGateScope(func(_ *sql.Tx, _, _, _, _ string) (bool, error) { return false, boom })
 	_, err := s.WriteEntityStateWithLogOpts(
+		context.Background(),
 		Entity{Repo: gateRepo, EntityType: gateIssueTyp, EntityID: "K-1", Facts: `{}`, AsOf: gateAt},
 		0, gateAt, true, nil, []string{"added"}, gateOrigin, gateAt, WriteOptions{},
 	)
@@ -342,10 +347,10 @@ func TestAllIssueGateScope_GatesEveryIssueRegardlessOfBackend(t *testing.T) {
 			v := gateSeed(t, s, tc.id, tc.backend, nil)
 			base := gateRows(t, s, tc.id)
 			gateWrite(t, s, tc.id, v, []string{"fields_changed"}, WriteOptions{})
-			if seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, tc.id, []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq != 0 {
+			if seq, err := s.AppendEntityChange(context.Background(), gateRepo, gateIssueTyp, tc.id, []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq != 0 {
 				t.Errorf("AppendEntityChange = (%d, %v), want (0, nil)", seq, err)
 			}
-			if _, changed, err := s.SetAnnotationSeq(KVAnnotation{
+			if _, changed, err := s.SetAnnotationSeq(context.Background(), KVAnnotation{
 				Repo: gateRepo, EntityType: gateIssueTyp, EntityID: tc.id, Key: "wip", Value: "true",
 				Origin: gateOrigin, SetBy: "op", SetAt: gateAt,
 			}); err != nil || !changed {
@@ -356,10 +361,10 @@ func TestAllIssueGateScope_GatesEveryIssueRegardlessOfBackend(t *testing.T) {
 			}
 
 			// Watched, the same entity appends again.
-			if err := s.SetEntityColumns(gateRepo, gateIssueTyp, tc.id, nil, gateBool(true)); err != nil {
+			if err := s.SetEntityColumns(context.Background(), gateRepo, gateIssueTyp, tc.id, nil, gateBool(true)); err != nil {
 				t.Fatal(err)
 			}
-			if seq, err := s.AppendEntityChange(gateRepo, gateIssueTyp, tc.id, []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq == 0 {
+			if seq, err := s.AppendEntityChange(context.Background(), gateRepo, gateIssueTyp, tc.id, []string{"link_changed"}, gateOrigin, gateAt); err != nil || seq == 0 {
 				t.Errorf("watched AppendEntityChange = (%d, %v), want a sequence", seq, err)
 			}
 		})
@@ -367,12 +372,13 @@ func TestAllIssueGateScope_GatesEveryIssueRegardlessOfBackend(t *testing.T) {
 
 	// A PR entity is not an issue.
 	if _, err := s.WriteEntityWithLog(
+		context.Background(),
 		Entity{Repo: gateRepo, EntityType: "pr", EntityID: "example/repo#1", Facts: `{}`, AsOf: gateAt},
 		0, []string{"created"}, "sync", gateAt,
 	); err != nil {
 		t.Fatal(err)
 	}
-	if rows, err := s.ListChangesAfter("pr", 0, 10); err != nil || len(rows) != 1 {
+	if rows, err := s.ListChangesAfter(context.Background(), "pr", 0, 10); err != nil || len(rows) != 1 {
 		t.Errorf("pr rows = %d, %v; want 1", len(rows), err)
 	}
 }

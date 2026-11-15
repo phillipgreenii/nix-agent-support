@@ -110,7 +110,7 @@ func catchUp(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 		return out, errors.New("no repository configured")
 	}
 	repo := cfg.Repos[0].Remote
-	if err := requireNewSchemaForTypedVerb(st); err != nil {
+	if err := requireNewSchemaForTypedVerb(ctx, st); err != nil {
 		return out, err
 	}
 	// A second catch-up skips rather than queueing behind this one.
@@ -124,9 +124,13 @@ func catchUp(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 	defer unlock()
 
 	r := newReinterpreter(cmd, cfg, st, repo, false, false)
-	r.ctx = context.WithoutCancel(ctx)
+	// The row in flight and the closing reads and writes outlive the budget
+	// deadline, so they run on a context that keeps ctx's values but not its
+	// cancellation.
+	passCtx := context.WithoutCancel(ctx)
+	r.ctx = passCtx
 	r.out = io.Discard
-	keys, known, err := st.InterpretationsBehind(repo, maxRows)
+	keys, known, err := st.InterpretationsBehind(ctx, repo, maxRows)
 	if err != nil {
 		return out, err
 	}
@@ -141,7 +145,7 @@ func catchUp(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 		if h := catchUpBeforeRow; h != nil {
 			h(k)
 		}
-		r.one(k, false)
+		r.one(passCtx, k, false)
 	}
 	if out.stoppedBy == "" && len(keys) == maxRows {
 		out.stoppedBy = "row cap"
@@ -151,7 +155,7 @@ func catchUp(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 	if out.stoppedBy != "" {
 		// Best effort: the count only feeds the stderr line, so a failed read
 		// makes the line vanish rather than the pass report an error.
-		rest, _, _ := st.InterpretationsBehind(repo, 0)
+		rest, _, _ := st.InterpretationsBehind(passCtx, repo, 0)
 		out.remaining = len(rest)
 		if out.remaining == 0 {
 			out.stoppedBy = ""
@@ -159,6 +163,6 @@ func catchUp(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 	}
 	// Written only for a pass that selected a row (an idle heartbeat writes
 	// nothing); the remaining count lets status show the backlog draining.
-	recordLastRun(r.errOut, st, "heartbeat", heartbeatClock(), out.counts, out.remaining)
+	recordLastRun(passCtx, r.errOut, st, "heartbeat", heartbeatClock(), out.counts, out.remaining)
 	return out, nil
 }

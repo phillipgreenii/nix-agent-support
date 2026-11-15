@@ -115,12 +115,12 @@ type fakeIngester struct {
 	rows    []pipeline.FeedRowInput
 }
 
-func (g *fakeIngester) IngestFeedRow(_ context.Context, in pipeline.FeedRowInput) (pipeline.FeedRowResult, error) {
+func (g *fakeIngester) IngestFeedRow(ctx context.Context, in pipeline.FeedRowInput) (pipeline.FeedRowResult, error) {
 	g.ev.add("ingest %s seq=%d", in.Row.EntityID, in.Row.Seq)
 	g.rows = append(g.rows, in)
 	replay := in.Row.Seq == 0
 	if !replay {
-		skip, err := g.st.ShouldSkipFeedRow(in.Instance, in.StoreIdentity, in.Row.Seq, in.Row.EntityID)
+		skip, err := g.st.ShouldSkipFeedRow(ctx, in.Instance, in.StoreIdentity, in.Row.Seq, in.Row.EntityID)
 		if err != nil {
 			return pipeline.FeedRowResult{}, err
 		}
@@ -129,17 +129,17 @@ func (g *fakeIngester) IngestFeedRow(_ context.Context, in pipeline.FeedRowInput
 		}
 	}
 	if g.failID[in.Row.EntityID] {
-		err := g.st.RecordIngestFailure(store.IngestFailure{
+		err := g.st.RecordIngestFailure(ctx, store.IngestFailure{
 			Instance: in.Instance, EntityID: in.Row.EntityID, Seq: in.Row.Seq,
 			StoreIdentity: in.StoreIdentity, Kinds: in.Row.Kinds, LastError: "hydration failed: boom",
 		})
 		return pipeline.FeedRowResult{Failed: true, Degraded: g.degrade}, err
 	}
-	return g.commit(in.Instance, in.Row, in.StoreIdentity, !replay)
+	return g.commit(ctx, in.Instance, in.Row, in.StoreIdentity, !replay)
 }
 
-func (g *fakeIngester) commit(inst string, row gather.FeedRow, identity string, marker bool) (pipeline.FeedRowResult, error) {
-	e, found, err := g.st.GetEntity("o/r", "issue", row.EntityID)
+func (g *fakeIngester) commit(ctx context.Context, inst string, row gather.FeedRow, identity string, marker bool) (pipeline.FeedRowResult, error) {
+	e, found, err := g.st.GetEntity(ctx, "o/r", "issue", row.EntityID)
 	if err != nil {
 		return pipeline.FeedRowResult{}, err
 	}
@@ -158,6 +158,7 @@ func (g *fakeIngester) commit(inst string, row gather.FeedRow, identity string, 
 		origin, kinds = "reset", []string{"added"}
 	}
 	nv, err := g.st.WriteEntityStateWithLogOpts(
+		ctx,
 		store.Entity{Repo: "o/r", EntityType: "issue", EntityID: row.EntityID, Facts: `{}`, AsOf: "x"},
 		ver, "2026-10-01T11:59:00Z", true, nil, kinds, origin, "2026-10-01T11:59:00Z", opts,
 	)
@@ -167,10 +168,10 @@ func (g *fakeIngester) commit(inst string, row gather.FeedRow, identity string, 
 	return pipeline.FeedRowResult{Written: true, Version: nv}, nil
 }
 
-func (g *fakeIngester) RetryIngestFailures(_ context.Context, instance string) (int, int, error) {
+func (g *fakeIngester) RetryIngestFailures(ctx context.Context, instance string) (int, int, error) {
 	g.retries.Add(1)
 	g.ev.add("retry %s", instance)
-	fails, err := g.st.ListIngestFailures(instance)
+	fails, err := g.st.ListIngestFailures(ctx, instance)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -180,10 +181,10 @@ func (g *fakeIngester) RetryIngestFailures(_ context.Context, instance string) (
 			still++
 			continue
 		}
-		if _, err := g.commit(f.Instance, gather.FeedRow{Seq: f.Seq, Kinds: f.Kinds, EntityID: f.EntityID}, f.StoreIdentity, false); err != nil {
+		if _, err := g.commit(ctx, f.Instance, gather.FeedRow{Seq: f.Seq, Kinds: f.Kinds, EntityID: f.EntityID}, f.StoreIdentity, false); err != nil {
 			return len(fails), still, err
 		}
-		if err := g.st.ClearIngestFailure(f.Instance, f.EntityID, f.Seq); err != nil {
+		if err := g.st.ClearIngestFailure(ctx, f.Instance, f.EntityID, f.Seq); err != nil {
 			return len(fails), still, err
 		}
 	}
@@ -310,7 +311,7 @@ func TestFeedMixedPollListsBeadsAndReadsOwning(t *testing.T) {
 		t.Errorf("kinds = %v", env.Records[0].Kinds)
 	}
 	// No membership is kept for the owning query.
-	keys, err := f.st.ListMetaPrefix("change_flow.watchset.")
+	keys, err := f.st.ListMetaPrefix(context.Background(), "change_flow.watchset.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +339,7 @@ func TestFeedAckComesAfterCommitAndIsNextSeq(t *testing.T) {
 	}
 	// The committed rows are in the store at the time of the ack, and the
 	// marker is the last row (not next_seq).
-	m, ok, _ := f.st.FeedMarker(feedInst)
+	m, ok, _ := f.st.FeedMarker(context.Background(), feedInst)
 	if !ok || m.Seq != 4 || m.StoreIdentity != feedIdentity {
 		t.Errorf("marker = %+v %v", m, ok)
 	}
@@ -385,7 +386,7 @@ func TestFeedFailedRowIsRecordedAckPassesItAndRetriedEveryPoll(t *testing.T) {
 	if !reflect.DeepEqual(f.feeder.acks, []int64{2}) {
 		t.Errorf("acks = %v, want the ack to pass the failed row", f.feeder.acks)
 	}
-	fails, _ := f.st.ListIngestFailures(feedInst)
+	fails, _ := f.st.ListIngestFailures(context.Background(), feedInst)
 	if len(fails) != 1 || fails[0].EntityID != "J-bad" || fails[0].Seq != 1 {
 		t.Fatalf("failed-ingest = %+v", fails)
 	}
@@ -405,7 +406,7 @@ func TestFeedFailedRowIsRecordedAckPassesItAndRetriedEveryPoll(t *testing.T) {
 	if len(env.Records) != 1 || env.Records[0].ID != "J-bad" {
 		t.Fatalf("recovered records = %+v", env.Records)
 	}
-	if fails, _ := f.st.ListIngestFailures(feedInst); len(fails) != 0 {
+	if fails, _ := f.st.ListIngestFailures(context.Background(), feedInst); len(fails) != 0 {
 		t.Errorf("failed-ingest not cleared: %+v", fails)
 	}
 }
@@ -482,7 +483,7 @@ func TestFeedDegradedSourceIsNotAcknowledged(t *testing.T) {
 
 func TestFeedStoreIdentityChangeResetsMarkerBeforeAnyRow(t *testing.T) {
 	f := newFeedFixture(t, []string{"jira-q"}, nil, feedAnswer("store-B", 2, frow(1, "J-1", "x"), frow(2, "J-2", "x")))
-	if err := f.st.AdvanceFeedMarker(store.FeedMarker{Instance: feedInst, StoreIdentity: feedIdentity, Seq: 50}); err != nil {
+	if err := f.st.AdvanceFeedMarker(context.Background(), store.FeedMarker{Instance: feedInst, StoreIdentity: feedIdentity, Seq: 50}); err != nil {
 		t.Fatal(err)
 	}
 	env, _, err := f.run("router")
@@ -493,7 +494,7 @@ func TestFeedStoreIdentityChangeResetsMarkerBeforeAnyRow(t *testing.T) {
 	if len(env.Records) != 2 {
 		t.Fatalf("records = %+v", env.Records)
 	}
-	m, _, _ := f.st.FeedMarker(feedInst)
+	m, _, _ := f.st.FeedMarker(context.Background(), feedInst)
 	if m.StoreIdentity != "store-B" || m.Seq != 2 {
 		t.Errorf("marker = %+v", m)
 	}
@@ -509,7 +510,7 @@ func TestFeedCursorExpiredRecordsGapResetsAndRereadsOnce(t *testing.T) {
 	cfg := f.eng.Cfg
 	max := 2 // fewer than the three replay rows
 	cfg.Hydration.MaxPerPoll = &max
-	if err := f.st.AdvanceFeedMarker(store.FeedMarker{Instance: feedInst, StoreIdentity: feedIdentity, Seq: 9}); err != nil {
+	if err := f.st.AdvanceFeedMarker(context.Background(), store.FeedMarker{Instance: feedInst, StoreIdentity: feedIdentity, Seq: 9}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -534,10 +535,10 @@ func TestFeedCursorExpiredRecordsGapResetsAndRereadsOnce(t *testing.T) {
 	if s, _ := sourceOf(env, "jira-q"); s.Status != StatusDegraded || !strings.Contains(s.Reason, "cursor_expired") {
 		t.Errorf("source = %+v", s)
 	}
-	if v, found, _ := f.st.GetMeta(MetaFeedCursorExpiredPrefix + feedInst); !found || v != "2026-10-01T12:00:00Z" {
+	if v, found, _ := f.st.GetMeta(context.Background(), MetaFeedCursorExpiredPrefix+feedInst); !found || v != "2026-10-01T12:00:00Z" {
 		t.Errorf("cursor_expired key = %q %v", v, found)
 	}
-	if _, found, _ := f.st.FeedMarker(feedInst); found {
+	if _, found, _ := f.st.FeedMarker(context.Background(), feedInst); found {
 		t.Error("the marker survived the reset")
 	}
 
@@ -546,7 +547,7 @@ func TestFeedCursorExpiredRecordsGapResetsAndRereadsOnce(t *testing.T) {
 	if err != nil || out.Partial {
 		t.Fatalf("next poll = %+v %v", out, err)
 	}
-	if _, found, _ := f.st.GetMeta(MetaFeedCursorExpiredPrefix + feedInst); !found {
+	if _, found, _ := f.st.GetMeta(context.Background(), MetaFeedCursorExpiredPrefix+feedInst); !found {
 		t.Error("the poll deleted the cursor_expired key")
 	}
 }
@@ -589,11 +590,11 @@ func TestFeedTwoQueriesOneInstanceOneReadAndObservedKeys(t *testing.T) {
 		t.Fatalf("lists = %+v acks = %v", f.feeder.lists, f.feeder.acks)
 	}
 	for q, want := range map[string]string{"q1": "2026-10-01T11:58:00Z", "q2": "2026-10-01T11:59:00Z"} {
-		if v, found, _ := f.st.GetMeta(MetaFeedObservedPrefix + feedInst + "." + q); !found || v != want {
+		if v, found, _ := f.st.GetMeta(context.Background(), MetaFeedObservedPrefix+feedInst+"."+q); !found || v != want {
 			t.Errorf("observed %s = %q %v", q, v, found)
 		}
 	}
-	keys, _ := f.st.ListMetaPrefix(MetaFeedObservedPrefix)
+	keys, _ := f.st.ListMetaPrefix(context.Background(), MetaFeedObservedPrefix)
 	if len(keys) != 2 {
 		t.Errorf("observed keys = %v", keys)
 	}
@@ -603,7 +604,7 @@ func TestFeedObservedKeyIsNotWrittenOnAFailedRead(t *testing.T) {
 	f := newFeedFixture(t, []string{"q1"}, nil)
 	f.feeder.listErr = errors.New("boom")
 	_, _, _ = f.run("router")
-	keys, _ := f.st.ListMetaPrefix(MetaFeedObservedPrefix)
+	keys, _ := f.st.ListMetaPrefix(context.Background(), MetaFeedObservedPrefix)
 	if len(keys) != 0 {
 		t.Errorf("observed keys = %v", keys)
 	}
@@ -686,11 +687,11 @@ func TestFeedResetReplaysOnlyWatchedIssues(t *testing.T) {
 	f := newFeedFixture(t, []string{"jira-q"}, []string{"beads-q"}, feedAnswer(feedIdentity, 1))
 	seed := func(id, backend string, watched bool) {
 		t.Helper()
-		if _, err := f.st.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+		if _, err := f.st.WriteEntityStateWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 			0, "2026-10-01T11:00:00Z", true, []string{"reconcile"}, "sweep", "2026-10-01T11:55:00Z"); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.st.SetEntityColumns("o/r", "issue", id, &backend, &watched); err != nil {
+		if err := f.st.SetEntityColumns(context.Background(), "o/r", "issue", id, &backend, &watched); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -760,7 +761,7 @@ func TestFeedAFlipBurstIsHydratedAtMostMaxPerPollAndLosesNoRow(t *testing.T) {
 		t.Errorf("acks = %v, want the last processed seq then the scanned next position", f.feeder.acks)
 	}
 	for _, id := range []string{"J-1", "J-2", "J-3", "J-4"} {
-		rows, err := f.st.ReadChanges("other", "issue", 100, f.eng.Now())
+		rows, err := f.st.ReadChanges(context.Background(), "other", "issue", 100, f.eng.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -796,7 +797,7 @@ func TestFeedDegradedStreakStopsTheRowLoopAndAcksOnlyCommittedRows(t *testing.T)
 	if !reflect.DeepEqual(f.feeder.acks, []int64{3}) {
 		t.Errorf("acks = %v, want the last committed row's seq, not the scanned next position", f.feeder.acks)
 	}
-	fails, _ := f.st.ListIngestFailures(feedInst)
+	fails, _ := f.st.ListIngestFailures(context.Background(), feedInst)
 	if len(fails) != backendDownStreak {
 		t.Errorf("failed-ingest = %+v, want only the three rows before the trip", fails)
 	}

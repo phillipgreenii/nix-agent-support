@@ -20,9 +20,9 @@ const (
 )
 
 // SetMeta inserts or replaces the meta row for key.
-func (s *Store) SetMeta(key, value string) error {
+func (s *Store) SetMeta(ctx context.Context, key, value string) error {
 	_, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO meta (key, value) VALUES (?, ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 		key, value,
@@ -35,8 +35,8 @@ func (s *Store) SetMeta(key, value string) error {
 
 // DeleteMeta removes the meta row for key. Deleting a key that was never
 // set is not an error.
-func (s *Store) DeleteMeta(key string) error {
-	if _, err := s.sql.ExecContext(context.Background(), `DELETE FROM meta WHERE key = ?`, key); err != nil {
+func (s *Store) DeleteMeta(ctx context.Context, key string) error {
+	if _, err := s.sql.ExecContext(ctx, `DELETE FROM meta WHERE key = ?`, key); err != nil {
 		return fmt.Errorf("store: delete meta %q: %w", key, err)
 	}
 	return nil
@@ -44,8 +44,8 @@ func (s *Store) DeleteMeta(key string) error {
 
 // GetMeta returns the meta value for key, or found=false if no such key
 // has been set.
-func (s *Store) GetMeta(key string) (value string, found bool, err error) {
-	row := s.sql.QueryRowContext(context.Background(), `SELECT value FROM meta WHERE key = ?`, key)
+func (s *Store) GetMeta(ctx context.Context, key string) (value string, found bool, err error) {
+	row := s.sql.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key)
 	if err := row.Scan(&value); err != nil {
 		if err == sql.ErrNoRows {
 			return "", false, nil
@@ -59,9 +59,9 @@ func (s *Store) GetMeta(key string) (value string, found bool, err error) {
 // by the full key. An empty result is an empty (non-nil) map, not an error.
 // The prefix is matched literally (no LIKE wildcards), so a key containing
 // "%" or "_" cannot widen the match.
-func (s *Store) ListMetaPrefix(prefix string) (map[string]string, error) {
+func (s *Store) ListMetaPrefix(ctx context.Context, prefix string) (map[string]string, error) {
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT key, value FROM meta WHERE substr(key, 1, ?) = ? ORDER BY key`,
 		utf8.RuneCountInString(prefix), prefix,
 	)
@@ -90,9 +90,9 @@ func (s *Store) ListMetaPrefix(prefix string) (map[string]string, error) {
 // backfill beside live dispatches, in this or another process) cannot lose an
 // increment. The value stays text, as the meta table requires. A stored value
 // that is not an integer casts to 0.
-func (s *Store) IncrMeta(key string, delta int64) error {
+func (s *Store) IncrMeta(ctx context.Context, key string, delta int64) error {
 	_, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO meta (key, value) VALUES (?, ?)
 		 ON CONFLICT (key) DO UPDATE SET value = CAST(meta.value AS INTEGER) + excluded.value`,
 		key, strconv.FormatInt(delta, 10),
@@ -106,9 +106,9 @@ func (s *Store) IncrMeta(key string, delta int64) error {
 // SetMetaIfAbsent writes value under key only when the key has no row yet, in
 // one statement, and reports whether it wrote. Of several concurrent callers
 // exactly one gets true, which makes it the write for a set-once value.
-func (s *Store) SetMetaIfAbsent(key, value string) (bool, error) {
+func (s *Store) SetMetaIfAbsent(ctx context.Context, key, value string) (bool, error) {
 	res, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`,
 		key, value,
 	)

@@ -26,15 +26,15 @@ import (
 // watched column is true, whose backend column does not name an owning
 // instance, and that are absent from every change_flow.watchset.issue.<query>
 // set. It only reads the store; the order is the store's.
-func OrphanEntities(st *store.Store, cfg *config.Config) ([]store.Entity, error) {
-	all, err := st.ListEntityFlow()
+func OrphanEntities(ctx context.Context, st *store.Store, cfg *config.Config) ([]store.Entity, error) {
+	all, err := st.ListEntityFlow(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("changes: list entities: %w", err)
 	}
 	owning := OwningSet(cfg, issueEntityType)
 	held := map[string]bool{}
 	for _, q := range cfg.WatchQueries(issueEntityType) {
-		for id := range loadWatchSet(st, issueEntityType, q) {
+		for id := range loadWatchSet(ctx, st, issueEntityType, q) {
 			held[id] = true
 		}
 	}
@@ -112,7 +112,7 @@ func (e *Engine) readOrphans(ctx context.Context, opts Options, st *pollState, b
 	if opts.EntityType != issueEntityType {
 		return nil
 	}
-	orphans, err := OrphanEntities(e.Store, e.Cfg)
+	orphans, err := OrphanEntities(ctx, e.Store, e.Cfg)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (e *Engine) readOrphans(ctx context.Context, opts Options, st *pollState, b
 			// is delivered), then the flag is cleared and the entity deactivated
 			// in the same transaction. A failure leaves the entity watched and
 			// active, so the next poll reads it again.
-			if derr := e.deactivate(issueEntityType, id, []string{string(classify.KindRemoved)}); derr != nil {
+			if derr := e.deactivate(ctx, issueEntityType, id, []string{string(classify.KindRemoved)}); derr != nil {
 				st.side = append(st.side, fmt.Sprintf("orphan read %s: removal: %s", id, firstErrLine(derr.Error())))
 			} else {
 				continue
@@ -158,7 +158,7 @@ func (e *Engine) readOrphans(ctx context.Context, opts Options, st *pollState, b
 		if herr == nil && !res.NotFound {
 			okAt = &now
 		}
-		if terr := e.Store.SetEntityReadTimes(e.repo(), issueEntityType, id, &now, okAt); terr != nil && !errors.Is(terr, store.ErrNoEntity) {
+		if terr := e.Store.SetEntityReadTimes(ctx, e.repo(), issueEntityType, id, &now, okAt); terr != nil && !errors.Is(terr, store.ErrNoEntity) {
 			st.side = append(st.side, fmt.Sprintf("orphan read %s: read times: %s", id, firstErrLine(terr.Error())))
 		}
 	}

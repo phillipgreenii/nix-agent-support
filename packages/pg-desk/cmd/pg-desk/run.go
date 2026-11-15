@@ -153,6 +153,8 @@ func logRunFailure(w io.Writer, entityType, entityID, change string, err error) 
 // the failing step is known (pipeline.TagStage), without changing any
 // message text.
 func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
+	ctx := cmd.Context()
+
 	entityType, entityID := args[0], args[1]
 	switch entityType {
 	case "issue", "thread":
@@ -174,7 +176,7 @@ func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 	// store before anything is written: `run thread` writes xrefs (through the
 	// still schema-dual UpsertXref) before its final re-interpretation, and a
 	// late refusal would leave them behind.
-	if err := st.RequireNewSchema(); err != nil {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		return pipeline.TagStage(runStageStoreOpen, fmt.Errorf("run: %w", err))
 	}
 
@@ -223,7 +225,7 @@ func runJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config,
 		errs = append(errs, fmt.Errorf("hydrate issue: %w", hydrateErr))
 	}
 
-	xrefs, err := st.ListXrefsByTo(repo, "issue", ticketKey)
+	xrefs, err := st.ListXrefsByTo(ctx, repo, "issue", ticketKey)
 	if err != nil {
 		return fmt.Errorf("run issue %s: list xrefs: %w", ticketKey, err)
 	}
@@ -275,7 +277,7 @@ func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Con
 		return nil
 	}
 	repo := runRepo(cfg)
-	row, known, err := st.GetEntity(repo, entityTypeIssue, ticketKey)
+	row, known, err := st.GetEntity(ctx, repo, entityTypeIssue, ticketKey)
 	if err != nil {
 		return fmt.Errorf("check entity known: %w", err)
 	}
@@ -288,7 +290,7 @@ func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Con
 			Origin: refreshOrigin, SnapshotOnly: true, KeepActive: true,
 		})
 	}
-	if err := st.RequireNewSchema(); err != nil {
+	if err := st.RequireNewSchema(ctx); err != nil {
 		return err
 	}
 
@@ -315,7 +317,7 @@ func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Con
 		if backend == "" || (known && row.Backend == backend) {
 			return nil
 		}
-		if err := st.SetEntityColumns(repo, entityTypeIssue, ticketKey, &backend, nil); err != nil {
+		if err := st.SetEntityColumns(ctx, repo, entityTypeIssue, ticketKey, &backend, nil); err != nil {
 			return fmt.Errorf("write backend %s: %w", backend, err)
 		}
 		return nil
@@ -356,7 +358,7 @@ func hydrateIssueSnapshot(ctx context.Context, p *pipeline.Pipeline, ticketKey s
 // configured). A daemon that is unavailable fails the probe with an error
 // naming unavailable: nothing is written and the next run retries.
 func resolveJiraBackend(ctx context.Context, cfg *config.Config, st *store.Store, ticketKey string) (string, error) {
-	inst, owning, err := changes.ResolveIssueBackend(cfg, st, ticketKey)
+	inst, owning, err := changes.ResolveIssueBackend(ctx, cfg, st, ticketKey)
 	if err != nil {
 		return "", err
 	}
@@ -454,7 +456,7 @@ func runThread(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st
 	now := fields.AsOf
 
 	for _, prEntityID := range threadref.ScanPermalinks(fields.Text, repo) {
-		if err := st.UpsertXref(store.Xref{
+		if err := st.UpsertXref(ctx, store.Xref{
 			Repo: repo, FromType: entityTypePR, FromID: prEntityID,
 			ToType: "thread", ToID: threadID,
 			Evidence:      "permalink",
@@ -466,7 +468,7 @@ func runThread(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st
 	}
 
 	for _, key := range ticketkey.Parse(fields.Text, "", "", cfg.TicketPatterns) {
-		linkedToKey, err := st.ListXrefsByTo(repo, "issue", key)
+		linkedToKey, err := st.ListXrefsByTo(ctx, repo, "issue", key)
 		if err != nil {
 			return fmt.Errorf("run thread %s: list xrefs for ticket %s: %w", threadID, key, err)
 		}
@@ -474,7 +476,7 @@ func runThread(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st
 			if x.FromType != entityTypePR {
 				continue
 			}
-			if err := st.UpsertXref(store.Xref{
+			if err := st.UpsertXref(ctx, store.Xref{
 				Repo: repo, FromType: entityTypePR, FromID: x.FromID,
 				ToType: "thread", ToID: threadID,
 				Evidence:      "ticket-key",
@@ -486,7 +488,7 @@ func runThread(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st
 		}
 	}
 
-	linked, err := st.ListXrefsByTo(repo, "thread", threadID)
+	linked, err := st.ListXrefsByTo(ctx, repo, "thread", threadID)
 	if err != nil {
 		return fmt.Errorf("run thread %s: list linked PRs: %w", threadID, err)
 	}

@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"sort"
 	"testing"
 	"time"
@@ -11,14 +12,14 @@ import (
 
 func putIssue(t *testing.T, st *store.Store, id, facts string) {
 	t.Helper()
-	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "issue", EntityID: id, Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: "issue", EntityID: id, Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func projectedRefs(t *testing.T, st *store.Store) []string {
 	t.Helper()
-	views, err := Project(st, testRepo, baseConfig())
+	views, err := Project(context.Background(), st, testRepo, baseConfig())
 	if err != nil {
 		t.Fatalf("Project: %v", err)
 	}
@@ -36,7 +37,7 @@ func TestProjectIssueEntityWithoutInterpretationRow(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putIssue(t, st, "K-1", `{"issue_show":{"id":"K-1","state":"In Progress"}}`)
 
-	views, err := Project(st, testRepo, baseConfig())
+	views, err := Project(context.Background(), st, testRepo, baseConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,12 +58,12 @@ func TestProjectEntityOnlyRowSelection(t *testing.T) {
 	// pr with an interpretation row: projected once, through the row.
 	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
 	// pr entity with NO interpretation row: not projected (a PR rule reads the interpretation).
-	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testRepo + "#2", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testRepo + "#2", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	// issue with an interpretation row (the generic pipeline writes one): projected once, not twice.
 	putIssue(t, st, "K-1", `{"issue_show":{"state":"To Do"}}`)
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: testRepo, EntityType: "issue", EntityID: "K-1", Ownership: "mine",
 		Enrichment: "{}", Urgency: "{}", Dispositions: "[]", AsOf: "2026-10-06T11:00:00Z",
 	}); err != nil {
@@ -71,7 +72,7 @@ func TestProjectEntityOnlyRowSelection(t *testing.T) {
 	// issue with no interpretation row: projected.
 	putIssue(t, st, "K-2", `{"issue_show":{"state":"In Progress"}}`)
 	// issue in another repo: not projected.
-	if err := st.UpsertEntityForTest(store.Entity{Repo: "other/repo", EntityType: "issue", EntityID: "K-3", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: "other/repo", EntityType: "issue", EntityID: "K-3", Facts: "{}", AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -90,7 +91,7 @@ func TestProjectEntityOnlyRowSelection(t *testing.T) {
 func TestProjectSkipsInactiveEntityOnlyIssue(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putIssue(t, st, "K-1", `{"issue_show":{"state":"In Progress"}}`)
-	if _, err := st.WriteEntityStateWithLog(store.Entity{
+	if _, err := st.WriteEntityStateWithLog(context.Background(), store.Entity{
 		Repo: testRepo, EntityType: "issue", EntityID: "K-2", Facts: `{"issue_show":{"state":"In Progress"}}`, AsOf: "2026-10-06T11:00:00Z",
 	}, 0, "2026-10-06T11:00:00Z", false, nil, "pg-desk", "2026-10-06T11:00:00Z"); err != nil {
 		t.Fatalf("write inactive entity: %v", err)
@@ -104,7 +105,7 @@ func TestViewIssueFactsIsNotAvailableForOtherTypesOrBadFacts(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putIssue(t, st, "K-1", `not json`)
 	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	views, err := Project(st, testRepo, baseConfig())
+	views, err := Project(context.Background(), st, testRepo, baseConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,7 +80,7 @@ func TestHeartbeatProbesEveryQueryOfAnOwningBackendThenReadsTheLedger(t *testing
 		t.Errorf("probed queries = %v, want [mine team] (sorted, owning backend only)", probed)
 	}
 
-	rep, err := freshness.Build(st, &config.Config{}, freshnessTestNow)
+	rep, err := freshness.Build(context.Background(), st, &config.Config{}, freshnessTestNow)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package dependency
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,7 @@ func putIssue(t *testing.T, st *store.Store, id, state string, active bool, issu
 	}
 	facts += "}"
 	e := store.Entity{Repo: testRepo, EntityType: "issue", EntityID: id, Facts: facts, AsOf: "2026-10-01T00:00:00Z"}
-	if _, err := st.WriteEntityStateWithLog(e, 0, "2026-10-01T00:00:00Z", active, nil, "test", "2026-10-01T00:00:00Z"); err != nil {
+	if _, err := st.WriteEntityStateWithLog(context.Background(), e, 0, "2026-10-01T00:00:00Z", active, nil, "test", "2026-10-01T00:00:00Z"); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
 }
@@ -45,7 +46,7 @@ func terminalByState(e store.Entity) bool {
 
 func mustIndex(t *testing.T, st *store.Store, term func(store.Entity) bool) *IssueDependents {
 	t.Helper()
-	x, err := NewIssueDependents(st, term)
+	x, err := NewIssueDependents(context.Background(), st, term)
 	if err != nil {
 		t.Fatalf("NewIssueDependents: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestIssueDependents_Available(t *testing.T) {
 func TestIssueDependents_IgnoresOtherEntityTypes(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putIssue(t, st, "bd-a", "open", true, "")
-	err := st.UpsertEntityForTest(store.Entity{
+	err := st.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: testRepo, EntityType: "pr", EntityID: prID(1),
 		Facts: `{"issue_show":{"deps":[{"id":"bd-a","type":"blocks"}]},"issue_deps":{}}`, AsOf: "2026-10-01T00:00:00Z",
 	})
@@ -177,7 +178,7 @@ func TestIssueDependents_ReturnsCopy(t *testing.T) {
 // The unmigrated store records no activity, so the index refuses it.
 func TestIssueDependents_RefusesOldSchema(t *testing.T) {
 	st := store.OpenRetiredSchemaForTest(t)
-	if _, err := NewIssueDependents(st, nil); !errors.Is(err, store.ErrOldSchema) {
+	if _, err := NewIssueDependents(context.Background(), st, nil); !errors.Is(err, store.ErrOldSchema) {
 		t.Errorf("err = %v, want store.ErrOldSchema", err)
 	}
 }

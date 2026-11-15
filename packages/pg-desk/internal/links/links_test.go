@@ -1,6 +1,7 @@
 package links
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -24,14 +25,14 @@ func deps(st *store.Store) Deps {
 
 func putEntity(t *testing.T, st *store.Store, typ, id, asOf, facts string) {
 	t.Helper()
-	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf}); err != nil {
 		t.Fatalf("seed entity %s %s: %v", typ, id, err)
 	}
 }
 
 func putDerived(t *testing.T, st *store.Store, fromType, fromID, toType, toID, relation, extractor string) {
 	t.Helper()
-	err := st.ReplaceDerivedXrefs(testRepo, fromType, fromID, []store.XrefLink{{
+	err := st.ReplaceDerivedXrefs(context.Background(), testRepo, fromType, fromID, []store.XrefLink{{
 		Repo: testRepo, FromType: fromType, FromID: fromID, ToType: toType, ToID: toID,
 		Relation: relation, Origin: "derived:" + extractor, Evidence: "test",
 		FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
@@ -43,7 +44,7 @@ func putDerived(t *testing.T, st *store.Store, fromType, fromID, toType, toID, r
 
 func resolve(t *testing.T, d Deps, refs ...string) Result {
 	t.Helper()
-	r, err := Resolve(d, refs)
+	r, err := Resolve(context.Background(), d, refs)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -156,7 +157,7 @@ func TestIssueLinks_BeadWorkParentAndJiraReverse(t *testing.T) {
 	putDerived(t, st, "issue", "bd-1", "pr", testPR, "work", "work-item")
 	// A second source for the same bead's parent edge: ReplaceDerivedXrefs replaces
 	// per (entity, extractor-set), so write both edges in one call.
-	err := st.ReplaceDerivedXrefs(testRepo, "issue", "bd-1", []store.XrefLink{
+	err := st.ReplaceDerivedXrefs(context.Background(), testRepo, "issue", "bd-1", []store.XrefLink{
 		{Repo: testRepo, FromType: "issue", FromID: "bd-1", ToType: "pr", ToID: testPR, Relation: "work", Origin: "derived:work-item", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"},
 		{Repo: testRepo, FromType: "issue", FromID: "bd-1", ToType: "issue", ToID: "bd-0", Relation: "parent", Origin: "derived:work-item", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"},
 	})
@@ -219,7 +220,7 @@ func TestThreadLinks_SelfAndMentionedPRs(t *testing.T) {
 // derived:jira-key ones; the same key MUST appear once.
 func TestLegacyAndDerivedJiraEdgesDedup(t *testing.T) {
 	st := store.OpenForTest(t)
-	if err := st.UpsertXref(store.Xref{Repo: testRepo, FromType: "pr", FromID: testPR, ToType: "issue", ToID: "ABC-42", Evidence: "title", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"}); err != nil {
+	if err := st.UpsertXref(context.Background(), store.Xref{Repo: testRepo, FromType: "pr", FromID: testPR, ToType: "issue", ToID: "ABC-42", Evidence: "title", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", `{}`)
@@ -240,7 +241,7 @@ func TestLegacyAndDerivedJiraEdgesDedup(t *testing.T) {
 // A store that is not on schema 2 is refused with the store's error.
 func TestRetiredSchemaStoreIsRefused(t *testing.T) {
 	st := store.OpenRetiredSchemaForTest(t)
-	if _, err := Resolve(deps(st), []string{"pr:" + testPR}); !errors.Is(err, store.ErrOldSchema) {
+	if _, err := Resolve(context.Background(), deps(st), []string{"pr:" + testPR}); !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("Resolve on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
 }
@@ -285,7 +286,7 @@ func TestParseRef(t *testing.T) {
 
 func TestRetiredSchemaStoreIsRefusedEvenWhenNoRefIsSupported(t *testing.T) {
 	st := store.OpenRetiredSchemaForTest(t)
-	if _, err := Resolve(deps(st), []string{"alert:grafana:abc"}); !errors.Is(err, store.ErrOldSchema) {
+	if _, err := Resolve(context.Background(), deps(st), []string{"alert:grafana:abc"}); !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("Resolve = %v, want store.ErrOldSchema", err)
 	}
 }
@@ -416,7 +417,7 @@ func TestPRLinks_HeadFallsBackToEntityHeadSHA(t *testing.T) {
 			ciRun("unit", "success", "h", "2", "https://ci.example.invalid/run/2"),
 		}},
 	})
-	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testPR, Facts: string(facts), AsOf: "2026-10-01T10:00:00Z", HeadSHA: "h"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: "pr", EntityID: testPR, Facts: string(facts), AsOf: "2026-10-01T10:00:00Z", HeadSHA: "h"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := buildKindLinks(resolve(t, deps(st), "pr:"+testPR), "pr:"+testPR); len(got) != 0 {

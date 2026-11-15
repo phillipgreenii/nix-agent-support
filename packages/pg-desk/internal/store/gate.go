@@ -104,11 +104,11 @@ func (o WriteOptions) isZero() bool {
 
 // gateColumns reads the entity's backend and watched columns inside tx. found
 // is false when the entity row is absent.
-func gateColumns(tx *sql.Tx, repo, entityType, entityID string) (backend string, watched, found bool, err error) {
+func gateColumns(ctx context.Context, tx *sql.Tx, repo, entityType, entityID string) (backend string, watched, found bool, err error) {
 	var b sql.NullString
 	var w sql.NullInt64
 	err = tx.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT backend, watched FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&b, &w)
@@ -124,7 +124,7 @@ func gateColumns(tx *sql.Tx, repo, entityType, entityID string) (backend string,
 // setColumnsTx writes the non-nil arguments to entity.backend and
 // entity.watched inside tx (a pointer to "" writes NULL to backend). It
 // appends nothing and bumps no version.
-func setColumnsTx(tx *sql.Tx, repo, entityType, entityID string, backend *string, watched *bool) error {
+func setColumnsTx(ctx context.Context, tx *sql.Tx, repo, entityType, entityID string, backend *string, watched *bool) error {
 	var sets []string
 	var args []any
 	if backend != nil {
@@ -144,7 +144,7 @@ func setColumnsTx(tx *sql.Tx, repo, entityType, entityID string, backend *string
 	}
 	args = append(args, repo, entityType, entityID)
 	if _, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE entity SET `+strings.Join(sets, ", ")+` WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		args...,
 	); err != nil {
@@ -154,9 +154,9 @@ func setColumnsTx(tx *sql.Tx, repo, entityType, entityID string, backend *string
 }
 
 // clearWatchedTx marks the entity as stated not watched (watched = 0).
-func clearWatchedTx(tx *sql.Tx, repo, entityType, entityID string) error {
+func clearWatchedTx(ctx context.Context, tx *sql.Tx, repo, entityType, entityID string) error {
 	off := false
-	return setColumnsTx(tx, repo, entityType, entityID, nil, &off)
+	return setColumnsTx(ctx, tx, repo, entityType, entityID, nil, &off)
 }
 
 // WriteEntityStateWithLogOpts is WriteEntityStateWithLogFP with the
@@ -169,6 +169,6 @@ func clearWatchedTx(tx *sql.Tx, repo, entityType, entityID string) error {
 // bump and column writes still commit and the new version is returned. Same
 // compare-and-set, ErrVersionConflict and ConflictCount behavior as the
 // other writers; new schema only.
-func (s *Store) WriteEntityStateWithLogOpts(e Entity, expectedVersion int64, hydratedAt string, active bool, listFP *string, kinds []string, origin, at string, opts WriteOptions) (newVersion int64, err error) {
-	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active, listFP: listFP}, kinds, origin, at, opts)
+func (s *Store) WriteEntityStateWithLogOpts(ctx context.Context, e Entity, expectedVersion int64, hydratedAt string, active bool, listFP *string, kinds []string, origin, at string, opts WriteOptions) (newVersion int64, err error) {
+	return s.writeEntity(ctx, e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active, listFP: listFP}, kinds, origin, at, opts)
 }

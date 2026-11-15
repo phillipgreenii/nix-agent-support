@@ -37,7 +37,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 	f.entity("pr", "o/r#5", viewPRFacts, "2026-09-29T14:03:10Z", "9f3c1e2aaaa")
 	f.entity("issue", "bd-1", viewIssueFacts, "2026-09-29T14:00:00Z", "")
 	f.entity("thread", "C1/1.5", viewThreadFacts, "2026-09-29T13:00:00Z", "")
-	if err := seed.UpsertInterpretation(store.Interpretation{
+	if err := seed.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#5", Ownership: "mine", Category: "feature",
 		Urgency: `{"level":"medium","score":1}`, Dispositions: `[{"comment_id":"c-881","verdict":"open"},{"comment_id":"c-882","verdict":"open"}]`,
 		Approvals: `{}`, MatchReasons: `[]`, AsOf: "2026-09-29T14:03:10Z",
@@ -45,13 +45,13 @@ func newViewFixture(t *testing.T) *viewFixture {
 		t.Fatal(err)
 	}
 	// The work item records the link; the PR's own view must show it too.
-	if err := seed.ReplaceDerivedXrefs("o/r", "issue", "bd-1", []store.XrefLink{{
+	if err := seed.ReplaceDerivedXrefs(context.Background(), "o/r", "issue", "bd-1", []store.XrefLink{{
 		Repo: "o/r", FromType: "issue", FromID: "bd-1", ToType: "pr", ToID: "o/r#5",
 		Relation: "work", Origin: "derived:work-item", FirstSeen: "2026-09-29T14:00:00Z", LastConfirmed: "2026-09-29T14:01:02Z",
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.AddExternalXref(store.XrefLink{
+	if err := seed.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "thread", ToID: "C1/1.5", Relation: "references",
 		FirstSeen: "2026-09-29T13:00:00Z", LastConfirmed: "2026-09-29T13:00:00Z",
 		Actor: "operator", ActedAt: "2026-09-29T13:00:00Z", Reason: "same incident",
@@ -68,7 +68,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 
 func (f *viewFixture) entity(typ, id, facts, asOf, head string) {
 	f.t.Helper()
-	if _, err := f.seed.WriteEntityWithLog(store.Entity{Repo: "o/r", EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf, HeadSHA: head},
+	if _, err := f.seed.WriteEntityWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: typ, EntityID: id, Facts: facts, AsOf: asOf, HeadSHA: head},
 		0, []string{"reconcile"}, "pg-connector", asOf); err != nil {
 		f.t.Fatalf("seed %s %s: %v", typ, id, err)
 	}
@@ -76,7 +76,7 @@ func (f *viewFixture) entity(typ, id, facts, asOf, head string) {
 
 func (f *viewFixture) annotate(typ, id, key, value string) {
 	f.t.Helper()
-	if err := f.seed.SetAnnotation(store.KVAnnotation{
+	if err := f.seed.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: "o/r", EntityType: typ, EntityID: id, Key: key, Value: value,
 		Origin: "pg-desk", SetBy: "operator", SetAt: "2026-09-29T14:05:00Z",
 	}); err != nil {
@@ -211,7 +211,7 @@ func TestTypedShowLinkRecordedOnOneEntityAppearsOnBoth(t *testing.T) {
 
 func TestTypedShowLinkToUnstoredEntityOmitsSnapshotFields(t *testing.T) {
 	f := newViewFixture(t)
-	if err := f.seed.AddExternalXref(store.XrefLink{
+	if err := f.seed.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "gone-9", Relation: "references",
 		FirstSeen: "2026-09-29T13:00:00Z", LastConfirmed: "2026-09-29T13:00:00Z", Actor: "operator", ActedAt: "2026-09-29T13:00:00Z",
 	}); err != nil {
@@ -246,7 +246,7 @@ func TestTypedShowLinkToUnstoredEntityOmitsSnapshotFields(t *testing.T) {
 // snapshot carries none, for a PR or thread link, and for an unstored entity.
 func TestTypedShowLinkPriority(t *testing.T) {
 	f := newViewFixture(t)
-	if err := f.seed.UpsertEntityForTest(store.Entity{
+	if err := f.seed.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "o/r", EntityType: "issue", EntityID: "bd-1", AsOf: "2026-09-29T14:10:00Z",
 		Facts: `{"issue_show":{"id":"bd-1","title":"process feedback","state":"open","priority":"P3","labels":[],"metadata":{}}}`,
 	}); err != nil {
@@ -354,19 +354,19 @@ func TestTypedShowRefreshHydratesEntityAndLinkedEntity(t *testing.T) {
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
 	f.showThread("C1/1.5")
 	for _, e := range [][3]string{{"issue", "bd-1", `{}`}, {"thread", "C1/1.5", `{}`}} {
-		if _, err := f.seed.WriteEntityWithLog(store.Entity{Repo: "o/r", EntityType: e[0], EntityID: e[1], Facts: e[2], AsOf: "2026-09-01T00:00:00Z"},
+		if _, err := f.seed.WriteEntityWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: e[0], EntityID: e[1], Facts: e[2], AsOf: "2026-09-01T00:00:00Z"},
 			0, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := f.seed.AddExternalXref(store.XrefLink{
+	if err := f.seed.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: "o/r", FromType: "issue", FromID: "bd-1", ToType: "thread", ToID: "C1/1.5",
 		Relation: "references", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z", Actor: "operator", ActedAt: "2026-09-01T00:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// A linked entity with no stored row is not hydrated.
-	if err := f.seed.AddExternalXref(store.XrefLink{
+	if err := f.seed.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: "o/r", FromType: "issue", FromID: "bd-1", ToType: "issue", ToID: "unstored-2",
 		Relation: "references", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z", Actor: "operator", ActedAt: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -397,12 +397,12 @@ func TestTypedShowRefreshLinkedFailureDoesNotFailShow(t *testing.T) {
 	f := newRefreshFixture(t)
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z") // the thread has no fixture: its show fails
 	for _, e := range [][2]string{{"issue", "bd-1"}, {"thread", "C1/1.5"}} {
-		if _, err := f.seed.WriteEntityWithLog(store.Entity{Repo: "o/r", EntityType: e[0], EntityID: e[1], Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"},
+		if _, err := f.seed.WriteEntityWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: e[0], EntityID: e[1], Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"},
 			0, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := f.seed.AddExternalXref(store.XrefLink{
+	if err := f.seed.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: "o/r", FromType: "issue", FromID: "bd-1", ToType: "thread", ToID: "C1/1.5",
 		Relation: "references", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z", Actor: "operator", ActedAt: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -419,7 +419,7 @@ func TestTypedShowRefreshLinkedFailureDoesNotFailShow(t *testing.T) {
 
 func TestTypedShowRefreshPrimaryFailurePrintsStaleViewThenExitsThree(t *testing.T) {
 	f := newRefreshFixture(t)
-	if _, err := f.seed.WriteEntityWithLog(store.Entity{
+	if _, err := f.seed.WriteEntityWithLog(context.Background(), store.Entity{
 		Repo: "o/r", EntityType: "issue", EntityID: "bd-1",
 		Facts: `{"issue_show":{"id":"bd-1","title":"old title","state":"open"}}`, AsOf: "2026-09-01T00:00:00Z",
 	},
@@ -441,7 +441,7 @@ func TestTypedShowRefreshPrimaryFailurePrintsStaleViewThenExitsThree(t *testing.
 
 func TestTypedShowRefreshDegradedExitsTwoWithStaleView(t *testing.T) {
 	f := newRefreshFixture(t)
-	if _, err := f.seed.WriteEntityWithLog(store.Entity{
+	if _, err := f.seed.WriteEntityWithLog(context.Background(), store.Entity{
 		Repo: "o/r", EntityType: "issue", EntityID: "bd-1",
 		Facts: `{"issue_show":{"id":"bd-1","title":"old title","state":"open"}}`, AsOf: "2026-09-01T00:00:00Z",
 	},
@@ -616,7 +616,7 @@ func TestTypedShowForceReviewSHAReportsTheRequestedHead(t *testing.T) {
 func TestTypedShowForceReviewSetClearSetShowsTheNewSHA(t *testing.T) {
 	f := newViewFixture(t)
 	f.annotate("pr", "o/r#5", "force_review", "9f3c1e2aaaa")
-	if _, err := f.seed.DeleteAnnotation("o/r", "pr", "o/r#5", "force_review", "pr-decider", "2026-09-29T15:00:00Z"); err != nil {
+	if _, err := f.seed.DeleteAnnotation(context.Background(), "o/r", "pr", "o/r#5", "force_review", "pr-decider", "2026-09-29T15:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	if a := annotationsOf(t, "pr", "5"); a["force_review"] != false || a["force_review_sha"] != nil {
@@ -650,7 +650,7 @@ func linksByID(t *testing.T, typ, id string) map[string]map[string]any {
 
 func TestTypedShowLinkTitleIsTheStoredTitleOrEmpty(t *testing.T) {
 	f := newViewFixture(t)
-	if err := f.seed.AddExternalXref(store.XrefLink{
+	if err := f.seed.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "gone-9", Relation: "references",
 		FirstSeen: "2026-09-29T13:00:00Z", LastConfirmed: "2026-09-29T13:00:00Z", Actor: "operator", ActedAt: "2026-09-29T13:00:00Z",
 	}); err != nil {
@@ -658,7 +658,7 @@ func TestTypedShowLinkTitleIsTheStoredTitleOrEmpty(t *testing.T) {
 	}
 	// A stored issue whose snapshot carries no title.
 	f.entity("issue", "bd-2", `{"issue_show":{"id":"bd-2","state":"open"}}`, "2026-09-29T14:00:00Z", "")
-	if err := f.seed.AddExternalXref(store.XrefLink{
+	if err := f.seed.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: "o/r", FromType: "pr", FromID: "o/r#5", ToType: "issue", ToID: "bd-2", Relation: "references",
 		FirstSeen: "2026-09-29T13:00:00Z", LastConfirmed: "2026-09-29T13:00:00Z", Actor: "operator", ActedAt: "2026-09-29T13:00:00Z",
 	}); err != nil {
@@ -728,7 +728,7 @@ func TestTypedShowFocusSelectedIsStringOrNull(t *testing.T) {
 func TestTypedShowPrintsTheUnhydratedHintForAVersionZeroRow(t *testing.T) {
 	open, seed := seedLinkStore(t) // the cut-over seed holds pr o/r#1 at version 0
 	withOpenSeams(t, linkTestConfig(), open)
-	if e, found, err := seed.GetEntity("o/r", "pr", "o/r#1"); err != nil || !found || e.Version != 0 {
+	if e, found, err := seed.GetEntity(context.Background(), "o/r", "pr", "o/r#1"); err != nil || !found || e.Version != 0 {
 		t.Fatalf("seed entity o/r#1: found=%v version=%d err=%v, want a version-0 row", found, e.Version, err)
 	}
 

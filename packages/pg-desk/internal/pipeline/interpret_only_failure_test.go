@@ -27,7 +27,7 @@ func TestRunInterpretOnly_StoreWriteFailureIsTaggedLoggedAndWritesNothing(t *tes
 	p := interpretOnlyPipeline(t, &out)
 	facts := minimalFacts(t, map[string]any{"author": "me", "title": "fix: x"})
 	seedInterpretOnlyEntity(t, p, "30", facts)
-	entityBefore, _, _ := p.store.GetEntity("acme/widgets", "pr", "30")
+	entityBefore, _, _ := p.store.GetEntity(context.Background(), "acme/widgets", "pr", "30")
 
 	boom := errors.New("injected store failure")
 	p.seams.interpretOnlyWrite = func() error { return boom }
@@ -41,10 +41,10 @@ func TestRunInterpretOnly_StoreWriteFailureIsTaggedLoggedAndWritesNothing(t *tes
 	if !strings.Contains(out.String(), `"outcome":"error"`) || !strings.Contains(out.String(), `"path":"interpret_only"`) {
 		t.Fatalf("log = %s, want an interpret_only error record", out.String())
 	}
-	if _, found, _ := p.store.GetInterpretation("acme/widgets", "pr", "30"); found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), "acme/widgets", "pr", "30"); found {
 		t.Fatal("a failed store write left an interpretation row")
 	}
-	if entityAfter, _, _ := p.store.GetEntity("acme/widgets", "pr", "30"); entityAfter != entityBefore {
+	if entityAfter, _, _ := p.store.GetEntity(context.Background(), "acme/widgets", "pr", "30"); entityAfter != entityBefore {
 		t.Fatalf("entity changed: before=%+v after=%+v", entityBefore, entityAfter)
 	}
 	// With the seam cleared the very same call succeeds: the seam alone caused the failure.
@@ -92,7 +92,7 @@ func TestRunInterpretOnly_LoadFactsFailures(t *testing.T) {
 	t.Run("undecodable stored facts", func(t *testing.T) {
 		var out bytes.Buffer
 		p := interpretOnlyPipeline(t, &out)
-		if err := p.store.UpsertEntityForTest(store.Entity{
+		if err := p.store.UpsertEntityForTest(context.Background(), store.Entity{
 			Repo: "acme/widgets", EntityType: "pr", EntityID: "33",
 			Facts: "{not json", AsOf: "2026-09-16T00:00:00Z", ContentHash: "h",
 		}); err != nil {
@@ -105,7 +105,7 @@ func TestRunInterpretOnly_LoadFactsFailures(t *testing.T) {
 		if stage, _ := StageOf(err); stage != StageLoadFacts {
 			t.Fatalf("stage = %q, want %q", stage, StageLoadFacts)
 		}
-		if _, found, _ := p.store.GetInterpretation("acme/widgets", "pr", "33"); found {
+		if _, found, _ := p.store.GetInterpretation(context.Background(), "acme/widgets", "pr", "33"); found {
 			t.Fatal("an interpretation was written from undecodable facts")
 		}
 	})
@@ -125,7 +125,7 @@ func TestRunInterpretOnly_InterpretFailureIsTaggedAndWritesNothing(t *testing.T)
 	if stage, _ := StageOf(err); stage != StageInterpret {
 		t.Fatalf("stage = %q, want %q", stage, StageInterpret)
 	}
-	if _, found, _ := p.store.GetInterpretation("acme/widgets", "pr", "34"); found {
+	if _, found, _ := p.store.GetInterpretation(context.Background(), "acme/widgets", "pr", "34"); found {
 		t.Fatal("an interpretation was written after an interpret failure")
 	}
 }

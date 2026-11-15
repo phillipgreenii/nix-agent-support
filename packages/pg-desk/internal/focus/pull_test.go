@@ -165,18 +165,18 @@ func TestPullTransactionTakesMaxPlusOneAndWritesAnnotationsAndTheRunRow(t *testi
 	if err != nil || res.ExitCode != ExitOK || res.Outcome != OutcomeOK || len(res.Inserted) != 1 {
 		t.Fatalf("Pull = %+v, %v", res, err)
 	}
-	p, _, _ := f.st.FocusPeriodGet("day", lockToday)
-	rows, _ := f.st.FocusPlanRows(p.ID)
+	p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", lockToday)
+	rows, _ := f.st.FocusPlanRows(context.Background(), p.ID)
 	if len(rows) != 3 || rows[2].EntityID != "3" || rows[2].RankPosition != 5 || rows[2].Tier == nil || *rows[2].Tier != TierStarted {
 		t.Fatalf("rows = %+v, want the pulled row at max plus one (5) with the run's tier", rows)
 	}
-	if v, _ := f.st.FocusAnnotationValue(testRepo, c.Type, c.ID); v != lockToday {
+	if v, _ := f.st.FocusAnnotationValue(context.Background(), testRepo, c.Type, c.ID); v != lockToday {
 		t.Errorf("annotation of the pulled row = %q", v)
 	}
 	if len(res.Annotations) != 1 || res.Annotations[0].Outcome != AnnotationOK || res.Annotations[0].Seq == 0 {
 		t.Errorf("annotations = %+v", res.Annotations)
 	}
-	if stats, _ := f.st.FocusRunStats(); stats.ByVerbOutcome[[2]string{"pull", "total"}] != 1 {
+	if stats, _ := f.st.FocusRunStats(context.Background()); stats.ByVerbOutcome[[2]string{"pull", "total"}] != 1 {
 		t.Errorf("run stats = %v, want the unfinalised pull row", stats.ByVerbOutcome)
 	}
 }
@@ -185,7 +185,7 @@ func TestPullTransactionIsAtomicAndLeavesTheDraft(t *testing.T) {
 	f := newFixture(t)
 	a := f.pr("1", prSpec{ownership: "mine"})
 	d := lockDeps(t, f)
-	if _, err := f.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: lockToday, Cap: 6, MadeAt: fixtureAt, BodyJSON: "{}"}); err != nil {
+	if _, err := f.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: lockToday, Cap: 6, MadeAt: fixtureAt, BodyJSON: "{}"}); err != nil {
 		t.Fatal(err)
 	}
 	before := dumpFocus(t, f.st)
@@ -201,7 +201,7 @@ func TestPullTransactionIsAtomicAndLeavesTheDraft(t *testing.T) {
 	if res, err := Pull(context.Background(), d, pullIn(a)); err != nil || res.ExitCode != ExitOK {
 		t.Fatalf("Pull = %+v, %v", res, err)
 	}
-	if dr, found, _ := f.st.FocusDraftGet(); !found || dr.PeriodKey != lockToday {
+	if dr, found, _ := f.st.FocusDraftGet(context.Background()); !found || dr.PeriodKey != lockToday {
 		t.Errorf("the pull deleted or changed the stored draft: %+v found=%v", dr, found)
 	}
 }
@@ -220,7 +220,7 @@ func TestPullTransactionRefusesClosedFutureAndNoPlanPeriods(t *testing.T) {
 	if !errors.As(err, &ue) || res.ExitCode != ExitUsage {
 		t.Fatalf("future: %+v, %v; want a usage error", res, err)
 	}
-	if _, found, _ := f.st.FocusPeriodGet("day", "2026-10-11"); found {
+	if _, found, _ := f.st.FocusPeriodGet(context.Background(), "day", "2026-10-11"); found {
 		t.Errorf("the refused pull left the future period behind")
 	}
 
@@ -239,10 +239,10 @@ func TestPullTransactionRefusesClosedFutureAndNoPlanPeriods(t *testing.T) {
 	if !errors.As(err, &ue) || ue.Remedy != PullNoPlanRemedy || res.ExitCode != ExitUsage {
 		t.Fatalf("no plan: %+v, %v; want the usage error with the remedy", res, err)
 	}
-	if err := PullPreflight(d, Period{Type: "day", Key: lockToday}); !errors.As(err, &ue) || ue.Remedy != PullNoPlanRemedy {
+	if err := PullPreflight(context.Background(), d, Period{Type: "day", Key: lockToday}); !errors.As(err, &ue) || ue.Remedy != PullNoPlanRemedy {
 		t.Errorf("preflight = %v, want the same usage error", err)
 	}
-	if _, found, _ := f.st.FocusPeriodGet("day", lockToday); found {
+	if _, found, _ := f.st.FocusPeriodGet(context.Background(), "day", lockToday); found {
 		t.Errorf("the refused pull left a period row behind")
 	}
 
@@ -260,7 +260,7 @@ func TestPullTransactionRefusesClosedFutureAndNoPlanPeriods(t *testing.T) {
 	if !errors.Is(err, ErrPeriodClosed) || res.ExitCode != ExitPeriodClosed {
 		t.Fatalf("closed: %+v, %v; want exit 6", res, err)
 	}
-	if err := PullPreflight(d, Period{Type: "day", Key: lockToday}); !errors.Is(err, ErrPeriodClosed) {
+	if err := PullPreflight(context.Background(), d, Period{Type: "day", Key: lockToday}); !errors.Is(err, ErrPeriodClosed) {
 		t.Errorf("preflight = %v, want ErrPeriodClosed", err)
 	}
 }
@@ -281,8 +281,8 @@ func TestPullTransactionReportsAKeyAConcurrentPullAddedAsRaced(t *testing.T) {
 	if !reflect.DeepEqual(res.Raced, []Key{a}) || len(res.Inserted) != 1 || res.Inserted[0].Key != b {
 		t.Errorf("Raced = %v, Inserted = %v, want a raced and b inserted", res.Raced, keysOf(res.Inserted))
 	}
-	p, _, _ := f.st.FocusPeriodGet("day", lockToday)
-	rows, _ := f.st.FocusPlanRows(p.ID)
+	p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", lockToday)
+	rows, _ := f.st.FocusPlanRows(context.Background(), p.ID)
 	if len(rows) != 2 || rows[1].RankPosition != 2 {
 		t.Errorf("rows = %+v", rows)
 	}

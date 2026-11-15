@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -22,7 +23,7 @@ func seedObserve(t *testing.T) *store.Store {
 	write := func(id string, expected int64, hydratedAt string, kinds []string, origin string) {
 		t.Helper()
 		e := store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "x"}
-		if _, err := st.WriteEntityStateWithLog(e, expected, hydratedAt, true, kinds, origin, "2026-10-01T10:00:00Z"); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), e, expected, hydratedAt, true, kinds, origin, "2026-10-01T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -31,23 +32,23 @@ func seedObserve(t *testing.T) *store.Store {
 	write("o/r#1", 1, "2026-10-01T11:00:00Z", []string{"reconcile"}, "sweep")
 
 	for name, cursor := range map[string]int64{"alpha": 1, "beta": 3} {
-		if err := st.RegisterConsumer(name, "pr", observeNow); err != nil {
+		if err := st.RegisterConsumer(context.Background(), name, "pr", observeNow); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.AdvanceCursor(name, "pr", cursor); err != nil {
+		if err := st.AdvanceCursor(context.Background(), name, "pr", cursor); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	RecordHydration(st, "pr", "o/r#1", pipeline.EntityChangeResult{Retries: 2}, nil)
-	RecordHydration(st, "pr", "o/r#2", pipeline.EntityChangeResult{Degraded: "ci"}, nil)
-	RecordHydration(st, "pr", "o/r#2", pipeline.EntityChangeResult{}, errors.New("boom"))
+	RecordHydration(context.Background(), st, "pr", "o/r#1", pipeline.EntityChangeResult{Retries: 2}, nil)
+	RecordHydration(context.Background(), st, "pr", "o/r#2", pipeline.EntityChangeResult{Degraded: "ci"}, nil)
+	RecordHydration(context.Background(), st, "pr", "o/r#2", pipeline.EntityChangeResult{}, errors.New("boom"))
 	return st
 }
 
 func TestObserveReportsEveryChangeFlowFamily(t *testing.T) {
 	st := seedObserve(t)
-	flow, err := Observe(st, observeNow, 6*time.Hour)
+	flow, err := Observe(context.Background(), st, observeNow, 6*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestObserveReportsEveryChangeFlowFamily(t *testing.T) {
 
 func TestObserveDegradesOnAnOldSchemaStore(t *testing.T) {
 	st := store.OpenRetiredSchemaForTest(t) // schema 1: no change_log or consumer table
-	flow, err := Observe(st, observeNow, 6*time.Hour)
+	flow, err := Observe(context.Background(), st, observeNow, 6*time.Hour)
 	if err != nil {
 		t.Fatalf("Observe on an old-schema store must degrade, not fail: %v", err)
 	}
@@ -181,11 +182,11 @@ func TestObserveSeparatesFlaggedIngestFailuresFromTheRetryableBacklog(t *testing
 		{Instance: "b", EntityID: "i-1", Seq: 1, FirstFailedAt: "2026-10-01T10:00:00Z", FailureClass: "not_found", FlaggedAt: "2026-10-01T10:00:00Z"},
 		{Instance: "b", EntityID: "i-2", Seq: 2, FirstFailedAt: "2026-10-01T10:00:00Z", FailureClass: "unavailable"},
 	} {
-		if err := st.RecordIngestFailure(f); err != nil {
+		if err := st.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	flow, err := Observe(st, observeNow, 6*time.Hour)
+	flow, err := Observe(context.Background(), st, observeNow, 6*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

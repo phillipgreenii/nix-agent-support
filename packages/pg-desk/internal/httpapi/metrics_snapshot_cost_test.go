@@ -45,7 +45,7 @@ func TestMetricsScrapePerformsZeroDatabaseQueries(t *testing.T) {
 	st, cnt := liveSizeStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h, err := NewHandler(st, testConfig(), WithMetricsSnapshot(ctx), WithMetricsSnapshotInterval(time.Hour))
+	h, err := NewHandler(ctx, st, testConfig(), WithMetricsSnapshot(ctx), WithMetricsSnapshotInterval(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestMetricsScrapePerformsZeroDatabaseQueries(t *testing.T) {
 func TestSnapshotComputeOnLiveSizeFixtureReadsNoFacts(t *testing.T) {
 	setClock(t, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
 	st, cnt := liveSizeStore(t)
-	reg, err := newMetricsRegistry(st, testConfig(), nil, withoutFocus)
+	reg, err := newMetricsRegistry(context.Background(), st, testConfig(), nil, withoutFocus)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestPayloadQueriesAreConstantInRowCount(t *testing.T) {
 			mustUpsertInterpretation(t, base, store.Interpretation{Repo: "o/r", EntityType: "issue", EntityID: fmt.Sprintf("id-%d", i), Panel: PanelMineAwaitingMe, AsOf: "2026-11-01T00:00:00Z"})
 		}
 		st, cnt := base.WithCounterForTest(t)
-		if _, err := buildPayload(st, testConfig(), time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), false); err != nil {
+		if _, err := buildPayload(context.Background(), st, testConfig(), time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), false); err != nil {
 			t.Fatal(err)
 		}
 		counts[n] = cnt.Queries()
@@ -142,7 +142,7 @@ func TestHandlerServesThroughTheReadOnlyPool(t *testing.T) {
 	defer func() { _ = rd.Close() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h, err := NewHandler(w, testConfig(), WithMetricsSnapshot(ctx), WithReadStore(rd))
+	h, err := NewHandler(ctx, w, testConfig(), WithMetricsSnapshot(ctx), WithReadStore(rd))
 	if err != nil {
 		t.Fatal(err)
 	}

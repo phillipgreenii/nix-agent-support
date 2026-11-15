@@ -84,7 +84,7 @@ func seedInterpretOnlyEntity(t *testing.T, p *Pipeline, entityID string, facts g
 	if err != nil {
 		t.Fatalf("marshal facts fixture: %v", err)
 	}
-	if err := p.store.UpsertEntityForTest(store.Entity{
+	if err := p.store.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "acme/widgets", EntityType: "pr", EntityID: entityID,
 		Facts: string(factsJSON), AsOf: facts.AsOf, HeadSHA: facts.HeadSHA, ContentHash: "fixture",
 	}); err != nil {
@@ -113,7 +113,7 @@ func TestPipelineRunInterpretOnly_Success(t *testing.T) {
 		t.Fatalf("gather was invoked %d times by RunInterpretOnly, want 0", cg.calls)
 	}
 
-	interp, found, err := p.store.GetInterpretation("acme/widgets", "pr", "20")
+	interp, found, err := p.store.GetInterpretation(context.Background(), "acme/widgets", "pr", "20")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
 	}
@@ -146,7 +146,7 @@ func TestPipelineRunInterpretOnly_NeverGathered(t *testing.T) {
 	if !strings.Contains(out.String(), `"outcome":"noop"`) || !strings.Contains(out.String(), `"path":"interpret_only"`) {
 		t.Fatalf("expected one interpret_only noop record, got: %s", out.String())
 	}
-	if _, found, _ := p.store.GetEntity(p.repo(), "pr", "no-such-entity"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), p.repo(), "pr", "no-such-entity"); found {
 		t.Fatal("a no-op must not write an entity row")
 	}
 	if cg.calls != 0 {
@@ -194,7 +194,7 @@ func TestPipelineRunInterpretOnly_Degraded(t *testing.T) {
 		t.Fatalf("RunInterpretOnly: %v", err)
 	}
 
-	interp, found, err := p.store.GetInterpretation("acme/widgets", "pr", "22")
+	interp, found, err := p.store.GetInterpretation(context.Background(), "acme/widgets", "pr", "22")
 	if err != nil || !found {
 		t.Fatalf("GetInterpretation: found=%v err=%v", found, err)
 	}

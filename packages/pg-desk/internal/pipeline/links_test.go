@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -47,7 +48,7 @@ func hydrate(t *testing.T, p *Pipeline, typ, id string, r gather.GatherResult) {
 
 func linksFrom(t *testing.T, p *Pipeline, typ, id string) []store.XrefLink {
 	t.Helper()
-	ls, err := p.store.ListXrefLinksFrom(linkRepo, typ, id)
+	ls, err := p.store.ListXrefLinksFrom(context.Background(), linkRepo, typ, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func linksFrom(t *testing.T, p *Pipeline, typ, id string) []store.XrefLink {
 type fakeExt struct{}
 
 func (fakeExt) Name() string { return "fake" }
-func (fakeExt) Extract(string, string, json.RawMessage) ([]store.XrefLink, error) {
+func (fakeExt) Extract(context.Context, string, string, json.RawMessage) ([]store.XrefLink, error) {
 	return []store.XrefLink{{ToType: "commit", ToID: "abc", Relation: "built"}}, nil
 }
 
@@ -65,7 +66,7 @@ func TestRegistry_NewTypeFakeExtractor(t *testing.T) {
 	p := linkPipeline(t, nil)
 	p.extractors["widget"] = []LinkExtractor{fakeExt{}}
 	// No interpreter exists for the fake type, so exercise the hook directly.
-	if err := p.extractAndReplace("widget", "w1", json.RawMessage(`{}`), false, "2026-09-16T00:00:00Z"); err != nil {
+	if err := p.extractAndReplace(context.Background(), "widget", "w1", json.RawMessage(`{}`), false, "2026-09-16T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	ls := linksFrom(t, p, "widget", "w1")
@@ -161,7 +162,7 @@ func TestThreadExtractor(t *testing.T) {
 func TestRehydrationRebuildsSetKeepsExternal(t *testing.T) {
 	p := linkPipeline(t, nil)
 	hydrate(t, p, "pr", "acme/widgets#1", prResult(t, "PROJ-1", "PROJ-2", ""))
-	if err := p.store.AddExternalXref(store.XrefLink{
+	if err := p.store.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: linkRepo, FromType: "pr", FromID: "acme/widgets#1", ToType: "issue", ToID: "EXT-1",
 		Relation: "manual", Actor: "me", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -191,7 +192,7 @@ func TestRehydrationRebuildsSetKeepsExternal(t *testing.T) {
 func TestRemovedPayloadClearsDerivedKeepsExternal(t *testing.T) {
 	p := linkPipeline(t, nil)
 	hydrate(t, p, "pr", "acme/widgets#1", prResult(t, "PROJ-1", "", ""))
-	if err := p.store.AddExternalXref(store.XrefLink{
+	if err := p.store.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: linkRepo, FromType: "pr", FromID: "acme/widgets#1", ToType: "issue", ToID: "EXT-1",
 		Relation: "manual", Actor: "me", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -209,7 +210,7 @@ func TestRemovedPayloadClearsDerivedKeepsExternal(t *testing.T) {
 // gather.go's scan) even when the derived Jira extractor never ran.
 func TestThreadExtractorCountsLegacyPRToKeyRows(t *testing.T) {
 	p := linkPipeline(t, nil)
-	if err := p.store.UpsertXref(store.Xref{
+	if err := p.store.UpsertXref(context.Background(), store.Xref{
 		Repo: linkRepo, FromType: "pr", FromID: "acme/widgets#3", ToType: "issue", ToID: "PROJ-4",
 		Evidence: "branch", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -227,25 +228,25 @@ func TestThreadExtractorCountsLegacyPRToKeyRows(t *testing.T) {
 // extraction itself appends no change_log record.
 func TestExtractionRunsWithoutDeciderAndWritesNoChangeLog(t *testing.T) {
 	p := linkPipeline(t, nil)
-	before, err := p.store.ListChangesAfter("pr", 0, 0)
+	before, err := p.store.ListChangesAfter(context.Background(), "pr", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.extractAndReplace("pr", "acme/widgets#1",
+	if err := p.extractAndReplace(context.Background(), "pr", "acme/widgets#1",
 		prResult(t, "PROJ-1", "", "").Payload, false, "2026-09-16T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	if ls := linksFrom(t, p, "pr", "acme/widgets#1"); len(ls) != 1 {
 		t.Fatalf("links = %+v", ls)
 	}
-	after, err := p.store.ListChangesAfter("pr", 0, 0)
+	after, err := p.store.ListChangesAfter(context.Background(), "pr", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(after) != len(before) {
 		t.Fatalf("change_log grew: before=%d after=%d", len(before), len(after))
 	}
-	hist, err := p.store.ListEntityHistory(linkRepo, "pr", "acme/widgets#1", 0)
+	hist, err := p.store.ListEntityHistory(context.Background(), linkRepo, "pr", "acme/widgets#1", 0)
 	if err != nil || len(hist) != 0 {
 		t.Fatalf("history = %+v err=%v", hist, err)
 	}
@@ -327,7 +328,7 @@ func TestSourceEntityExtractorYieldsNothingOtherwise(t *testing.T) {
 		"whitespace-y type": `{"source_type":" pr","source_id":"acme/widgets#12"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			ls, err := sourceEntityExtractor{}.Extract("issue", "bd-1",
+			ls, err := sourceEntityExtractor{}.Extract(context.Background(), "issue", "bd-1",
 				json.RawMessage(`{"issue_show":{"id":"bd-1","metadata":`+meta+`}}`))
 			if err != nil || len(ls) != 0 {
 				t.Fatalf("links = %+v, err = %v", ls, err)
@@ -335,10 +336,10 @@ func TestSourceEntityExtractorYieldsNothingOtherwise(t *testing.T) {
 		})
 	}
 	// An issue payload without issue_show derives nothing and does not fail.
-	if ls, err := (sourceEntityExtractor{}).Extract("issue", "bd-1", json.RawMessage(`{}`)); err != nil || len(ls) != 0 {
+	if ls, err := (sourceEntityExtractor{}).Extract(context.Background(), "issue", "bd-1", json.RawMessage(`{}`)); err != nil || len(ls) != 0 {
 		t.Fatalf("empty payload: links = %+v, err = %v", ls, err)
 	}
-	if _, err := (sourceEntityExtractor{}).Extract("issue", "bd-1", json.RawMessage(`not json`)); err == nil {
+	if _, err := (sourceEntityExtractor{}).Extract(context.Background(), "issue", "bd-1", json.RawMessage(`not json`)); err == nil {
 		t.Fatal("malformed payload: want an error")
 	}
 }
@@ -396,7 +397,7 @@ func TestLinkedFocusBeadLeavesPRUnchanged(t *testing.T) {
 	hydrate(t, p, "pr", pr, prResult(t, "feat/PROJ-1", "PROJ-1 change", ""))
 	deps := links.Deps{Store: p.store, Repo: linkRepo, Patterns: []string{"PROJ-[0-9]+"}}
 	resolve := func() links.Result {
-		r, err := links.Resolve(deps, []string{"pr:" + pr})
+		r, err := links.Resolve(context.Background(), deps, []string{"pr:" + pr})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -413,12 +414,12 @@ func TestLinkedFocusBeadLeavesPRUnchanged(t *testing.T) {
 	if got := resolve(); !reflect.DeepEqual(got, beforeResolved) {
 		t.Errorf("links verb result for the PR changed:\n got %+v\nwant %+v", got, beforeResolved)
 	}
-	if classify.NewStoreWorkLookup(p.store, linkRepo)(pr, "bd-focus") {
+	if classify.NewStoreWorkLookup(context.Background(), p.store, linkRepo)(pr, "bd-focus") {
 		t.Error("a source-linked bead was recognized as the PR's own work item")
 	}
 	// The one new edge is the bead's own source link, and it is not a work link.
 	var toPR []store.XrefLink
-	toPR, err := p.store.ListXrefLinksTo(linkRepo, "pr", pr)
+	toPR, err := p.store.ListXrefLinksTo(context.Background(), linkRepo, "pr", pr)
 	if err != nil {
 		t.Fatal(err)
 	}

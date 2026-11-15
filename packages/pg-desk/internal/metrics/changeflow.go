@@ -82,9 +82,9 @@ type IngestFailedFunc func() ([]IngestFailedBackend, error)
 // When there is no instance at all it returns a single element with an empty
 // backend and zeros, so the series exist (and read 0) on a deployment with no
 // owning backend; an absent series therefore always means the read failed.
-func IngestFailedFromStore(st *store.Store, owning []string, now func() time.Time) IngestFailedFunc {
+func IngestFailedFromStore(ctx context.Context, st *store.Store, owning []string, now func() time.Time) IngestFailedFunc {
 	return func() ([]IngestFailedBackend, error) {
-		fails, err := st.ListIngestFailures("")
+		fails, err := st.ListIngestFailures(ctx, "")
 		if err != nil {
 			return nil, err
 		}

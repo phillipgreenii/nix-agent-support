@@ -316,7 +316,7 @@ func seedOpenPR(t *testing.T, st *store.Store, repo string, number int, title, u
 	if err != nil {
 		t.Fatalf("marshal facts: %v", err)
 	}
-	if err := st.UpsertEntityForTest(store.Entity{
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: repo, EntityType: entityTypePR, EntityID: id,
 		Facts: string(factsRaw), AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
@@ -325,7 +325,7 @@ func seedOpenPR(t *testing.T, st *store.Store, repo string, number int, title, u
 
 	approvalsRaw, _ := json.Marshal(map[string]any{"human_approvers": humanApprovers})
 	matchRaw, _ := json.Marshal(matchReasons)
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: repo, EntityType: entityTypePR, EntityID: id,
 		Ownership: ownership, Approvals: string(approvalsRaw),
 		MatchReasons: string(matchRaw), Panel: panel,

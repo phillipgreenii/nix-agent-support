@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,6 +97,8 @@ PRs the store marked ready_to_promote (D15's own PR-facing lever, since
 pg-desk never converts a draft to ready automatically).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		ctx := cmd.Context()
+
 		if err := validateOpenFlags(opFlags); err != nil {
 			return err
 		}
@@ -111,7 +114,7 @@ pg-desk never converts a draft to ready automatically).`,
 		}
 		defer func() { _ = st.Close() }()
 
-		mineRows, teamRows, err := buildOpenRows(st, cfg)
+		mineRows, teamRows, err := buildOpenRows(ctx, st, cfg)
 		if err != nil {
 			return fmt.Errorf("open: %w", err)
 		}
@@ -154,8 +157,8 @@ pg-desk never converts a draft to ready automatically).`,
 // (hidden state) at read time — mirroring the design's own "hidden is
 // joined at read time" rule [docs/behavior/pg-desk/hide-unhide-wip.md] for
 // this packet's own read path.
-func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, err error) {
-	interps, err := st.ListInterpretations()
+func buildOpenRows(ctx context.Context, st *store.Store, cfg *config.Config) (mine, team []openRow, err error) {
+	interps, err := st.ListInterpretations(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list interpretations: %w", err)
 	}
@@ -184,7 +187,7 @@ func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, e
 			actNowPanel = panelTeamAwaitingMe
 		}
 
-		row, rerr := openRowFrom(st, interp)
+		row, rerr := openRowFrom(ctx, st, interp)
 		if rerr != nil {
 			return nil, nil, rerr
 		}
@@ -205,8 +208,8 @@ func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, e
 // read time. Owner is always the PR author and NeedsAttention is left for
 // the caller, which knows which half of the review set the row belongs to.
 // The hidden state comes from the key/value annotation API.
-func openRowFrom(st *store.Store, interp store.Interpretation) (openRow, error) {
-	entity, found, gerr := st.GetEntity(interp.Repo, interp.EntityType, interp.EntityID)
+func openRowFrom(ctx context.Context, st *store.Store, interp store.Interpretation) (openRow, error) {
+	entity, found, gerr := st.GetEntity(ctx, interp.Repo, interp.EntityType, interp.EntityID)
 	if gerr != nil {
 		return openRow{}, fmt.Errorf("get entity (%s,%s,%s): %w", interp.Repo, interp.EntityType, interp.EntityID, gerr)
 	}
@@ -230,7 +233,7 @@ func openRowFrom(st *store.Store, interp store.Interpretation) (openRow, error) 
 
 	hidden := false
 	hiddenReason := ""
-	if h, aerr := readHiddenAnnotation(st, interp.Repo, interp.EntityType, interp.EntityID); aerr == nil {
+	if h, aerr := readHiddenAnnotation(ctx, st, interp.Repo, interp.EntityType, interp.EntityID); aerr == nil {
 		hidden, hiddenReason = h.Value, h.Reason
 	}
 

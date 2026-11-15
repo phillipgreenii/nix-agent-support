@@ -28,10 +28,10 @@ func TestFreshStoreShape(t *testing.T) {
 
 func TestOpenCreatesSchema2Directly(t *testing.T) {
 	s := OpenForTest(t)
-	if v, err := s.SchemaVersion(); err != nil || v != 2 {
+	if v, err := s.SchemaVersion(context.Background()); err != nil || v != 2 {
 		t.Fatalf("SchemaVersion = %d, %v; want 2", v, err)
 	}
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(context.Background()); err != nil {
 		t.Fatalf("RequireNewSchema on a fresh store: %v", err)
 	}
 }
@@ -58,10 +58,10 @@ func TestOpenRefusesRetiredSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = raw.Close() }()
-	if v, _ := raw.SchemaVersion(); v != 1 {
+	if v, _ := raw.SchemaVersion(context.Background()); v != 1 {
 		t.Fatalf("user_version after refusal = %d, want 1", v)
 	}
-	if err := raw.RequireNewSchema(); !errors.Is(err, ErrOldSchema) {
+	if err := raw.RequireNewSchema(context.Background()); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("RequireNewSchema on version 1 = %v, want ErrOldSchema", err)
 	}
 }
@@ -85,7 +85,7 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 // current one alike.
 func TestOpenRawSkipsTheVersionGate(t *testing.T) {
 	r := OpenRetiredSchemaForTest(t)
-	if v, err := r.SchemaVersion(); err != nil || v != 1 {
+	if v, err := r.SchemaVersion(context.Background()); err != nil || v != 1 {
 		t.Fatalf("SchemaVersion = %d, %v; want 1", v, err)
 	}
 	empty, err := OpenRaw(filepath.Join(t.TempDir(), "empty.db"))
@@ -93,10 +93,10 @@ func TestOpenRawSkipsTheVersionGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = empty.Close() }()
-	if v, err := empty.SchemaVersion(); err != nil || v != 0 {
+	if v, err := empty.SchemaVersion(context.Background()); err != nil || v != 0 {
 		t.Fatalf("SchemaVersion of an empty file = %d, %v; want 0", v, err)
 	}
-	if err := empty.RequireNewSchema(); !errors.Is(err, ErrOldSchema) {
+	if err := empty.RequireNewSchema(context.Background()); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("RequireNewSchema on an empty file = %v, want ErrOldSchema", err)
 	}
 }
@@ -111,10 +111,10 @@ func TestCreateSchemaFailureLeavesStoreEmpty(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.createSchemaWith(steps); err == nil || !strings.Contains(err.Error(), "store left empty") {
+		if err := s.createSchemaWith(context.Background(), steps); err == nil || !strings.Contains(err.Error(), "store left empty") {
 			t.Fatalf("step %d: createSchemaWith = %v, want a step failure", i+1, err)
 		}
-		if v, _ := s.SchemaVersion(); v != 0 {
+		if v, _ := s.SchemaVersion(context.Background()); v != 0 {
 			t.Errorf("step %d: user_version = %d after failure, want 0", i+1, v)
 		}
 		var n int
@@ -151,7 +151,7 @@ func TestConcurrentSchemaChecksCreateOneSchema(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[i] = checkSchema(handles[i])
+			errs[i] = checkSchema(context.Background(), handles[i])
 		}()
 	}
 	close(start)
@@ -169,7 +169,7 @@ func TestConcurrentSchemaChecksCreateOneSchema(t *testing.T) {
 func TestCreateSchemaIsANoOpOnAnExistingStore(t *testing.T) {
 	s := OpenForTest(t)
 	before := dumpDB(t, s)
-	if err := createSchema(s); err != nil {
+	if err := createSchema(context.Background(), s); err != nil {
 		t.Fatalf("createSchema on a created store: %v", err)
 	}
 	if after := dumpDB(t, s); after != before {
@@ -180,10 +180,10 @@ func TestCreateSchemaIsANoOpOnAnExistingStore(t *testing.T) {
 func TestCheckSchemaReadError(t *testing.T) {
 	s := OpenForTest(t)
 	_ = s.Close()
-	if err := checkSchema(s); err == nil {
+	if err := checkSchema(context.Background(), s); err == nil {
 		t.Fatal("checkSchema on a closed handle returned no error")
 	}
-	if err := s.createSchemaWith(nil); err == nil {
+	if err := s.createSchemaWith(context.Background(), nil); err == nil {
 		t.Fatal("createSchemaWith on a closed handle returned no error")
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -127,12 +128,12 @@ func resolveLinkEnds(cfg *config.Config, entityType, ref, other string) (linkEnd
 
 // pairLinks is every stored claim on a link between the two ends, in either
 // direction.
-func pairLinks(st *store.Store, e linkEnds) ([]store.XrefLink, error) {
-	out, err := st.ListXrefLinksFrom(e.repo, e.fromType, e.from)
+func pairLinks(ctx context.Context, st *store.Store, e linkEnds) ([]store.XrefLink, error) {
+	out, err := st.ListXrefLinksFrom(ctx, e.repo, e.fromType, e.from)
 	if err != nil {
 		return nil, err
 	}
-	in, err := st.ListXrefLinksTo(e.repo, e.fromType, e.from)
+	in, err := st.ListXrefLinksTo(ctx, e.repo, e.fromType, e.from)
 	if err != nil {
 		return nil, err
 	}
@@ -152,12 +153,12 @@ func pairLinks(st *store.Store, e linkEnds) ([]store.XrefLink, error) {
 
 // openNewSchemaStore opens the store for a link or consumer verb and refuses an
 // old-schema one.
-func openNewSchemaStore(cmdName string) (*store.Store, error) {
+func openNewSchemaStore(ctx context.Context, cmdName string) (*store.Store, error) {
 	st, err := openDeskStore()
 	if err != nil {
 		return nil, fmt.Errorf("%s: open store: %w", cmdName, err)
 	}
-	if err := requireNewSchemaForTypedVerb(st); err != nil {
+	if err := requireNewSchemaForTypedVerb(ctx, st); err != nil {
 		_ = st.Close()
 		return nil, err
 	}
@@ -165,6 +166,8 @@ func openNewSchemaStore(cmdName string) (*store.Store, error) {
 }
 
 func runLinkAdd(cmd *cobra.Command, entityType, ref, other, relation, reason, actorFlag string) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("link add: load config: %w", err)
@@ -180,18 +183,18 @@ func runLinkAdd(cmd *cobra.Command, entityType, ref, other, relation, reason, ac
 	if strings.TrimSpace(relation) == "" {
 		return fmt.Errorf("link add: --relation must not be empty")
 	}
-	st, err := openNewSchemaStore("link add")
+	st, err := openNewSchemaStore(ctx, "link add")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
 
-	before, err := pairLinks(st, ends)
+	before, err := pairLinks(ctx, st, ends)
 	if err != nil {
 		return fmt.Errorf("link add: %w", err)
 	}
 	now := annotationNow()
-	if err := st.AddExternalXref(store.XrefLink{
+	if err := st.AddExternalXref(ctx, store.XrefLink{
 		Repo: ends.repo, FromType: ends.fromType, FromID: ends.from,
 		ToType: ends.toType, ToID: ends.to,
 		Relation: relation, Actor: actor, ActedAt: now, Reason: reason,
@@ -199,11 +202,11 @@ func runLinkAdd(cmd *cobra.Command, entityType, ref, other, relation, reason, ac
 	}); err != nil {
 		return fmt.Errorf("link add: %w", err)
 	}
-	after, err := pairLinks(st, ends)
+	after, err := pairLinks(ctx, st, ends)
 	if err != nil {
 		return fmt.Errorf("link add: %w", err)
 	}
-	if err := appendLinkChanges(st, ends.repo, before, after, now); err != nil {
+	if err := appendLinkChanges(ctx, st, ends.repo, before, after, now); err != nil {
 		return fmt.Errorf("link add: %w", err)
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "linked %s %s -> %s %s (relation %s, origin external:%s)\n",
@@ -212,6 +215,8 @@ func runLinkAdd(cmd *cobra.Command, entityType, ref, other, relation, reason, ac
 }
 
 func runLinkRemove(cmd *cobra.Command, entityType, ref, other, actorFlag string) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("link remove: load config: %w", err)
@@ -224,13 +229,13 @@ func runLinkRemove(cmd *cobra.Command, entityType, ref, other, actorFlag string)
 	if actor == "" {
 		return fmt.Errorf("link remove: no actor available (pass --actor or set config's actor)")
 	}
-	st, err := openNewSchemaStore("link remove")
+	st, err := openNewSchemaStore(ctx, "link remove")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
 
-	before, err := pairLinks(st, ends)
+	before, err := pairLinks(ctx, st, ends)
 	if err != nil {
 		return fmt.Errorf("link remove: %w", err)
 	}
@@ -240,7 +245,7 @@ func runLinkRemove(cmd *cobra.Command, entityType, ref, other, actorFlag string)
 		if l.Origin != mine {
 			continue
 		}
-		ok, err := st.RemoveExternalXref(l.Repo, l.FromType, l.FromID, l.ToType, l.ToID, l.Relation, actor)
+		ok, err := st.RemoveExternalXref(ctx, l.Repo, l.FromType, l.FromID, l.ToType, l.ToID, l.Relation, actor)
 		if err != nil {
 			return fmt.Errorf("link remove: %w", err)
 		}
@@ -251,11 +256,11 @@ func runLinkRemove(cmd *cobra.Command, entityType, ref, other, actorFlag string)
 	if removed == 0 {
 		return noExternalLinkError(before, ends, actor)
 	}
-	after, err := pairLinks(st, ends)
+	after, err := pairLinks(ctx, st, ends)
 	if err != nil {
 		return fmt.Errorf("link remove: %w", err)
 	}
-	if err := appendLinkChanges(st, ends.repo, before, after, annotationNow()); err != nil {
+	if err := appendLinkChanges(ctx, st, ends.repo, before, after, annotationNow()); err != nil {
 		return fmt.Errorf("link remove: %w", err)
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "removed %d external link(s) between %s %s and %s %s (origin %s)\n",
@@ -288,10 +293,10 @@ func noExternalLinkError(pair []store.XrefLink, ends linkEnds, actor string) err
 // per kind (link_changed, or work_changed for a PR whose other end is its own
 // work item), with origin pg-desk. An end with no stored entity row is
 // skipped; the other end still gets its record [design 6.5].
-func appendLinkChanges(st *store.Store, repo string, before, after []store.XrefLink, at string) error {
+func appendLinkChanges(ctx context.Context, st *store.Store, repo string, before, after []store.XrefLink, at string) error {
 	changes := classify.DiffLinks(before, after)
-	for _, t := range classify.LinkRecords(changes, classify.NewStoreWorkLookup(st, repo)) {
-		if _, err := st.AppendEntityChange(repo, t.EntityType, t.EntityID, []string{string(t.Kind)}, linkChangeOrigin, at); err != nil && !errors.Is(err, store.ErrNoEntity) {
+	for _, t := range classify.LinkRecords(changes, classify.NewStoreWorkLookup(ctx, st, repo)) {
+		if _, err := st.AppendEntityChange(ctx, repo, t.EntityType, t.EntityID, []string{string(t.Kind)}, linkChangeOrigin, at); err != nil && !errors.Is(err, store.ErrNoEntity) {
 			return fmt.Errorf("append %s for %s %s: %w", t.Kind, t.EntityType, t.EntityID, err)
 		}
 	}

@@ -26,7 +26,7 @@ func seedFeedbackPR(t *testing.T, st *store.Store, repo, id string, dispositions
 		t.Fatalf("marshal dispositions: %v", err)
 	}
 	seedBareEntity(t, st, repo, id)
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: repo, EntityType: entityTypePR, EntityID: id,
 		Dispositions: string(b), AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
@@ -205,7 +205,7 @@ func TestTopLevelFeedbackSetListOnNewSchema(t *testing.T) {
 	if err := runFeedbackSetCmd(t, "1", "c1", "bogus", ""); err == nil {
 		t.Error("set with bogus disposition: error = nil")
 	}
-	if got, _ := seed.ListKVAnnotations("o/r", "pr", "o/r#1"); len(got) != 2 {
+	if got, _ := seed.ListKVAnnotations(context.Background(), "o/r", "pr", "o/r#1"); len(got) != 2 {
 		t.Errorf("annotations = %+v, want exactly the two disposition rows", got)
 	}
 }

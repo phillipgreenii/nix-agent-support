@@ -2,6 +2,7 @@ package focus
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -162,7 +163,7 @@ type Ranking struct {
 // nothing and calls no tracker or network. It emits no OpenTelemetry or
 // Prometheus signal and logs nothing; the verbs that call it own the run
 // record, the stderr line and the rank_inputs metric.
-func Rank(in Inputs, set CandidateSet, opts RankOptions) Ranking {
+func Rank(ctx context.Context, in Inputs, set CandidateSet, opts RankOptions) Ranking {
 	if in.Config == nil {
 		in.Config = &config.Config{}
 	}
@@ -188,10 +189,10 @@ func Rank(in Inputs, set CandidateSet, opts RankOptions) Ranking {
 		covered: map[Key]Key{},
 	}
 	r.resolver = dependency.NewResolver(r.reader, in.Repo)
-	r.issueDeps, _ = dependency.NewIssueDependents(r.reader, func(e store.Entity) bool {
+	r.issueDeps, _ = dependency.NewIssueDependents(ctx, r.reader, func(e store.Entity) bool {
 		return classify.SourceTerminal(e.EntityType, json.RawMessage(e.Facts), in.Now, 0)
 	})
-	items := r.build(set.Candidates)
+	items := r.build(ctx, set.Candidates)
 	r.inherit(items, Groups(in, set))
 	sort.Slice(items, func(i, j int) bool { return less(items[i], items[j]) })
 
@@ -329,7 +330,7 @@ func lowerSet(in []string) map[string]bool {
 }
 
 // build computes the own keys of every candidate and counts the degradations.
-func (r *ranker) build(cands []Candidate) []*item {
+func (r *ranker) build(ctx context.Context, cands []Candidate) []*item {
 	items := make([]*item, 0, len(cands))
 	for _, c := range cands {
 		it := &item{cand: c}
@@ -360,7 +361,7 @@ func (r *ranker) build(cands []Candidate) []*item {
 		it.prio, it.prioKnown = rank, present
 
 		r.age(it, v, e)
-		r.unblocksOf(it, v)
+		r.unblocksOf(ctx, it, v)
 		items = append(items, it)
 	}
 	return items
@@ -421,10 +422,10 @@ func (r *ranker) age(it *item, v *view, e store.Entity) {
 }
 
 // unblocksOf reads the unblocks key.
-func (r *ranker) unblocksOf(it *item, v *view) {
+func (r *ranker) unblocksOf(ctx context.Context, it *item, v *view) {
 	switch it.cand.Key.Type {
 	case entityTypePR:
-		edges, err := r.resolver.DependentsOf(dependency.TypePR, it.cand.Key.ID)
+		edges, err := r.resolver.DependentsOf(ctx, dependency.TypePR, it.cand.Key.ID)
 		if err != nil {
 			return
 		}
@@ -620,9 +621,9 @@ func decidingKey(upper, lower *item) string {
 // snapshot the rank reads and never touch the store.
 type memReader struct{ in Inputs }
 
-func (m memReader) RequireNewSchema() error { return nil }
+func (m memReader) RequireNewSchema(_ context.Context) error { return nil }
 
-func (m memReader) ListEntities() ([]store.Entity, error) {
+func (m memReader) ListEntities(_ context.Context) ([]store.Entity, error) {
 	out := make([]store.Entity, 0, len(m.in.Entities))
 	for k, e := range m.in.Entities {
 		e.EntityType, e.EntityID = k.Type, k.ID
@@ -634,7 +635,7 @@ func (m memReader) ListEntities() ([]store.Entity, error) {
 	return out, nil
 }
 
-func (m memReader) ListXrefLinksFrom(_, fromType, fromID string) ([]store.XrefLink, error) {
+func (m memReader) ListXrefLinksFrom(_ context.Context, _, fromType, fromID string) ([]store.XrefLink, error) {
 	var out []store.XrefLink
 	for _, l := range m.in.Links {
 		if l.FromType == fromType && l.FromID == fromID {
@@ -644,7 +645,7 @@ func (m memReader) ListXrefLinksFrom(_, fromType, fromID string) ([]store.XrefLi
 	return out, nil
 }
 
-func (m memReader) ListXrefLinksTo(_, toType, toID string) ([]store.XrefLink, error) {
+func (m memReader) ListXrefLinksTo(_ context.Context, _, toType, toID string) ([]store.XrefLink, error) {
 	var out []store.XrefLink
 	for _, l := range m.in.Links {
 		if l.ToType == toType && l.ToID == toID {

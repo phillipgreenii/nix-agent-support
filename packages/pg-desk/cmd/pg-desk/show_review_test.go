@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -277,7 +278,7 @@ func TestTypedShowReviewMakesNoStateChange(t *testing.T) {
 	f.entity("pr", "o/r#14", reviewFacts(14, pendingRecord(reviewOld, true)), "2026-09-29T14:03:10Z", reviewHead)
 	dir := t.TempDir()
 	installFakePGConnector(t, fmt.Sprintf(`echo "$@" >> %q/calls.log; exit 99`, dir))
-	before, found, err := f.seed.GetEntity("o/r", "pr", "o/r#14")
+	before, found, err := f.seed.GetEntity(context.Background(), "o/r", "pr", "o/r#14")
 	if err != nil || !found {
 		t.Fatal(err, found)
 	}
@@ -289,7 +290,7 @@ func TestTypedShowReviewMakesNoStateChange(t *testing.T) {
 	if calls, _ := os.ReadFile(filepath.Join(dir, "calls.log")); len(calls) != 0 {
 		t.Errorf("show without --refresh called pg-connector:\n%s", calls)
 	}
-	after, _, err := f.seed.GetEntity("o/r", "pr", "o/r#14")
+	after, _, err := f.seed.GetEntity(context.Background(), "o/r", "pr", "o/r#14")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +346,7 @@ func refreshReviewView(t *testing.T) (human string, stderr string) {
 	open, seed := seedLinkStore(t)
 	withOpenSeams(t, openTestConfig("o/r"), open)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
-	if _, err := seed.WriteEntityWithLog(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#5", Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"},
+	if _, err := seed.WriteEntityWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#5", Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"},
 		0, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}

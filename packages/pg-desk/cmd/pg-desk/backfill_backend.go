@@ -64,11 +64,13 @@ type backfillResult struct {
 }
 
 func runBackfillBackend(cmd *cobra.Command, jsonOut bool) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("backfill-backend: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("backfill-backend")
+	st, err := openNewSchemaStore(ctx, "backfill-backend")
 	if err != nil {
 		return err
 	}
@@ -107,7 +109,7 @@ func backfillBackend(ctx context.Context, cfg *config.Config, st *store.Store, g
 		_, _ = fmt.Fprintf(errw, "backfill-backend: %s\n", msg)
 	}
 
-	all, err := st.ListEntities()
+	all, err := st.ListEntities(ctx)
 	if err != nil {
 		return res, fmt.Errorf("list entities: %w", err)
 	}
@@ -144,7 +146,7 @@ func backfillBackend(ctx context.Context, cfg *config.Config, st *store.Store, g
 			done[m.ID] = true
 			for _, e := range rows {
 				backend := wb.Instance
-				if err := st.SetEntityColumns(e.Repo, e.EntityType, e.EntityID, &backend, m.Watched); err != nil {
+				if err := st.SetEntityColumns(ctx, e.Repo, e.EntityType, e.EntityID, &backend, m.Watched); err != nil {
 					return res, fmt.Errorf("set columns of %s: %w", m.ID, err)
 				}
 				res.Updated++
@@ -172,7 +174,7 @@ func backfillBackend(ctx context.Context, cfg *config.Config, st *store.Store, g
 			}
 		}
 		backend := inst
-		if err := st.SetEntityColumns(e.Repo, e.EntityType, e.EntityID, &backend, nil); err != nil {
+		if err := st.SetEntityColumns(ctx, e.Repo, e.EntityType, e.EntityID, &backend, nil); err != nil {
 			return res, fmt.Errorf("set backend of %s: %w", e.EntityID, err)
 		}
 		res.Updated++

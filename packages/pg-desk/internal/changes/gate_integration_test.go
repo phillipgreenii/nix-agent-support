@@ -38,7 +38,7 @@ func gateEngine(t *testing.T, seed ...string) (*Engine, *store.Store, *storeHydr
 
 func watch(t *testing.T, st *store.Store, id string, on bool) {
 	t.Helper()
-	if err := st.SetEntityColumns("o/r", "issue", id, nil, &on); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &on); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -74,11 +74,11 @@ func ownOperations(t *testing.T, e *Engine, st *store.Store, id string) (annotSe
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"link_changed", "work_changed"} {
-		if _, err := st.AppendEntityChange("o/r", "issue", id, []string{kind}, "pg-desk", gateAt); err != nil {
+		if _, err := st.AppendEntityChange(context.Background(), "o/r", "issue", id, []string{kind}, "pg-desk", gateAt); err != nil {
 			t.Fatal(err)
 		}
 	}
-	seq, changed, err := st.SetAnnotationSeq(store.KVAnnotation{
+	seq, changed, err := st.SetAnnotationSeq(context.Background(), store.KVAnnotation{
 		Repo: "o/r", EntityType: "issue", EntityID: id, Key: "wip", Value: "true",
 		Origin: "pg-desk", SetBy: "op", SetAt: gateAt,
 	})
@@ -106,7 +106,7 @@ func TestGateUnwatchedIssueAppendsNothingForAnyCause(t *testing.T) {
 	if seq != 0 || !changed {
 		t.Errorf("annotation = (%d, %v), want (0, true): written, no row", seq, changed)
 	}
-	if _, found, err := st.GetKVAnnotation("o/r", "issue", "bd-u", "wip"); err != nil || !found {
+	if _, found, err := st.GetKVAnnotation(context.Background(), "o/r", "issue", "bd-u", "wip"); err != nil || !found {
 		t.Errorf("annotation not written: found=%v err=%v", found, err)
 	}
 	if got := len(changeRows(t, st, "bd-u")); got != before {
@@ -196,7 +196,7 @@ func TestGateTrackedIssueDeliversNothingMemberDelivers(t *testing.T) {
 	// A PR change propagates link_changed to every linked issue: only the
 	// watched member receives it.
 	for _, id := range []string{"bd-m", "bd-t"} {
-		if _, err := st.AppendEntityChange("o/r", "issue", id, []string{"link_changed"}, "pg-desk", gateAt); err != nil {
+		if _, err := st.AppendEntityChange(context.Background(), "o/r", "issue", id, []string{"link_changed"}, "pg-desk", gateAt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -259,7 +259,7 @@ func TestGateClosedRowOfAWatchedIssueIsDeliveredThenTheMarkIsCleared(t *testing.
 	}
 	// Once cleared, the next write is withheld.
 	before := len(changeRows(t, st, "bd-o1"))
-	if _, err := st.AppendEntityChange("o/r", "issue", "bd-o1", []string{"link_changed"}, "pg-desk", gateAt); err != nil {
+	if _, err := st.AppendEntityChange(context.Background(), "o/r", "issue", "bd-o1", []string{"link_changed"}, "pg-desk", gateAt); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(changeRows(t, st, "bd-o1")); got != before {

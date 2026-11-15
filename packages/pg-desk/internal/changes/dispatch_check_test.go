@@ -207,7 +207,7 @@ func TestStartupDispatchCheckLogsAndRecordsOncePerProcess(t *testing.T) {
 	if !strings.Contains(warn.String(), "dispatch check: watched_differs: backend "+feedInst+" query jira-q") {
 		t.Errorf("warning output lacks the mismatch line:\n%s", warn.String())
 	}
-	v, found, err := f.st.GetMeta(MetaDispatchCheckPrefix + feedInst)
+	v, found, err := f.st.GetMeta(context.Background(), MetaDispatchCheckPrefix+feedInst)
 	if err != nil || !found {
 		t.Fatalf("meta = %q %v %v, want the dispatch_check record", v, found, err)
 	}
@@ -247,7 +247,7 @@ func TestStartupDispatchCheckAgreementRecordsAnEmptyList(t *testing.T) {
 	if strings.Contains(warn.String(), "dispatch check") {
 		t.Errorf("warning for an agreeing configuration:\n%s", warn.String())
 	}
-	if v, _, _ := f.st.GetMeta(MetaDispatchCheckPrefix + feedInst); !strings.Contains(v, `"mismatches":[]`) {
+	if v, _, _ := f.st.GetMeta(context.Background(), MetaDispatchCheckPrefix+feedInst); !strings.Contains(v, `"mismatches":[]`) {
 		t.Errorf("record = %q, want an empty mismatches list", v)
 	}
 }
@@ -260,7 +260,7 @@ func TestStartupDispatchCheckSkipsWithoutInstancesOrReader(t *testing.T) {
 	if _, _, err := f.run("router"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if _, found, _ := f.st.GetMeta(MetaDispatchCheckPrefix + feedInst); found {
+	if _, found, _ := f.st.GetMeta(context.Background(), MetaDispatchCheckPrefix+feedInst); found {
 		t.Error("a record was written without a Capabilities reader")
 	}
 	// A watched query with no backends entry names no instance: the reader is
@@ -298,7 +298,7 @@ func TestStartupDispatchCheckCoversNonOwningInstances(t *testing.T) {
 	if !strings.Contains(warn.String(), "dispatch check: watched_differs: backend beads query beads-q") {
 		t.Errorf("warning output lacks the mismatch line:\n%s", warn.String())
 	}
-	v, found, err := f.st.GetMeta(MetaDispatchCheckPrefix + "beads")
+	v, found, err := f.st.GetMeta(context.Background(), MetaDispatchCheckPrefix+"beads")
 	if err != nil || !found || !strings.Contains(v, "watched_differs") {
 		t.Errorf("meta = %q %v %v, want the recorded mismatch", v, found, err)
 	}

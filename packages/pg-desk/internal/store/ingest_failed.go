@@ -35,7 +35,7 @@ func (f IngestFailure) Flagged() bool { return f.FlaggedAt != "" }
 // Seq) updates LastError and FailureClass, keeps FirstFailedAt, and sets
 // FlaggedAt only when the entry is not flagged yet. An empty
 // FirstFailedAt on a first record is stamped with the current UTC time.
-func (s *Store) RecordIngestFailure(f IngestFailure) error {
+func (s *Store) RecordIngestFailure(ctx context.Context, f IngestFailure) error {
 	kinds := f.Kinds
 	if kinds == nil {
 		kinds = []string{}
@@ -49,7 +49,7 @@ func (s *Store) RecordIngestFailure(f IngestFailure) error {
 		first = time.Now().UTC().Format(time.RFC3339)
 	}
 	if _, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO ingest_failed
 		   (instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, failure_class, flagged_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -66,8 +66,8 @@ func (s *Store) RecordIngestFailure(f IngestFailure) error {
 
 // ingestFailedExists reports whether the ingest_failed table exists. A store
 // opened read-only or raw that predates the table reads as empty.
-func (s *Store) ingestFailedExists() (bool, error) {
-	cols, err := s.tableColumns("ingest_failed")
+func (s *Store) ingestFailedExists(ctx context.Context) (bool, error) {
+	cols, err := s.tableColumns(ctx, "ingest_failed")
 	if err != nil {
 		return false, err
 	}
@@ -77,12 +77,12 @@ func (s *Store) ingestFailedExists() (bool, error) {
 // ListIngestFailures returns the entries of instance ordered by Seq ("" =
 // every instance; ties break by instance then entity id). A store without
 // the table yields none.
-func (s *Store) ListIngestFailures(instance string) ([]IngestFailure, error) {
-	ok, err := s.ingestFailedExists()
+func (s *Store) ListIngestFailures(ctx context.Context, instance string) ([]IngestFailure, error) {
+	ok, err := s.ingestFailedExists(ctx)
 	if err != nil || !ok {
 		return nil, err
 	}
-	cols, err := s.tableColumns("ingest_failed")
+	cols, err := s.tableColumns(ctx, "ingest_failed")
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (s *Store) ListIngestFailures(instance string) ([]IngestFailure, error) {
 		args = append(args, instance)
 	}
 	q += ` ORDER BY seq, instance, entity_id`
-	rows, err := s.sql.QueryContext(context.Background(), q, args...)
+	rows, err := s.sql.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list ingest failures: %w", err)
 	}
@@ -126,9 +126,9 @@ func (s *Store) ListIngestFailures(instance string) ([]IngestFailure, error) {
 
 // ClearIngestFailure removes the entry for (instance, entityID, seq); an
 // absent entry is not an error.
-func (s *Store) ClearIngestFailure(instance, entityID string, seq int64) error {
+func (s *Store) ClearIngestFailure(ctx context.Context, instance, entityID string, seq int64) error {
 	if _, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`DELETE FROM ingest_failed WHERE instance = ? AND entity_id = ? AND seq = ?`,
 		instance, entityID, seq,
 	); err != nil {
@@ -141,13 +141,13 @@ func (s *Store) ClearIngestFailure(instance, entityID string, seq int64) error {
 // entityID): a later successful commit for the entity resolves them. Entries
 // that are not flagged are left to their own retry, which still owes their
 // recorded kinds. It reports how many entries it removed.
-func (s *Store) ClearFlaggedIngestFailures(instance, entityID string) (int, error) {
-	ok, err := s.ingestFailedExists()
+func (s *Store) ClearFlaggedIngestFailures(ctx context.Context, instance, entityID string) (int, error) {
+	ok, err := s.ingestFailedExists(ctx)
 	if err != nil || !ok {
 		return 0, err
 	}
 	res, err := s.sql.ExecContext(
-		context.Background(),
+		ctx,
 		`DELETE FROM ingest_failed WHERE instance = ? AND entity_id = ? AND flagged_at <> ''`,
 		instance, entityID,
 	)
@@ -160,12 +160,12 @@ func (s *Store) ClearFlaggedIngestFailures(instance, entityID string) (int, erro
 
 // OldestIngestFailureAt returns the earliest first_failed_at over every
 // entry, and ok=false when there is none (or the table is absent).
-func (s *Store) OldestIngestFailureAt() (at time.Time, ok bool, err error) {
-	exists, err := s.ingestFailedExists()
+func (s *Store) OldestIngestFailureAt(ctx context.Context) (at time.Time, ok bool, err error) {
+	exists, err := s.ingestFailedExists(ctx)
 	if err != nil || !exists {
 		return time.Time{}, false, err
 	}
-	rows, err := s.sql.QueryContext(context.Background(), `SELECT first_failed_at FROM ingest_failed`)
+	rows, err := s.sql.QueryContext(ctx, `SELECT first_failed_at FROM ingest_failed`)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("store: oldest ingest failure: %w", err)
 	}
@@ -191,8 +191,8 @@ func (s *Store) OldestIngestFailureAt() (at time.Time, ok bool, err error) {
 
 // CountIngestFailures returns the number of entries of instance ("" = every
 // instance). A store without the table counts zero.
-func (s *Store) CountIngestFailures(instance string) (int, error) {
-	exists, err := s.ingestFailedExists()
+func (s *Store) CountIngestFailures(ctx context.Context, instance string) (int, error) {
+	exists, err := s.ingestFailedExists(ctx)
 	if err != nil || !exists {
 		return 0, err
 	}
@@ -203,7 +203,7 @@ func (s *Store) CountIngestFailures(instance string) (int, error) {
 		args = append(args, instance)
 	}
 	var n int
-	if err := s.sql.QueryRowContext(context.Background(), q, args...).Scan(&n); err != nil && err != sql.ErrNoRows {
+	if err := s.sql.QueryRowContext(ctx, q, args...).Scan(&n); err != nil && err != sql.ErrNoRows {
 		return 0, fmt.Errorf("store: count ingest failures: %w", err)
 	}
 	return n, nil

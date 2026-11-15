@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -19,7 +20,7 @@ import (
 // entity to any type.
 type LinkExtractor interface {
 	Name() string
-	Extract(entityType, entityID string, payload json.RawMessage) ([]store.XrefLink, error)
+	Extract(ctx context.Context, entityType, entityID string, payload json.RawMessage) ([]store.XrefLink, error)
 }
 
 // ExtractorRegistry maps an entity type name to that type's extractors.
@@ -40,19 +41,19 @@ func NewExtractorRegistry(cfg *config.Config, st *store.Store, repo string) Extr
 // the entity's complete derived link set. A removed or empty payload passes
 // an empty set, which drops the entity's derived links. Types without
 // extractors are skipped. External and legacy rows are never touched.
-func (p *Pipeline) extractAndReplace(entityType, entityID string, payload json.RawMessage, removed bool, now string) error {
-	links, ok, err := p.deriveLinks(entityType, entityID, payload, removed, now)
+func (p *Pipeline) extractAndReplace(ctx context.Context, entityType, entityID string, payload json.RawMessage, removed bool, now string) error {
+	links, ok, err := p.deriveLinks(ctx, entityType, entityID, payload, removed, now)
 	if err != nil || !ok {
 		return err
 	}
-	return p.store.ReplaceDerivedXrefs(p.repo(), entityType, entityID, links)
+	return p.store.ReplaceDerivedXrefs(ctx, p.repo(), entityType, entityID, links)
 }
 
 // deriveLinks runs the extractors of entityType in memory and returns the
 // entity's complete derived link set WITHOUT touching the store. ok is false
 // when the type has no extractors (nothing to replace). A removed or empty
 // payload yields an empty set.
-func (p *Pipeline) deriveLinks(entityType, entityID string, payload json.RawMessage, removed bool, now string) (links []store.XrefLink, ok bool, err error) {
+func (p *Pipeline) deriveLinks(ctx context.Context, entityType, entityID string, payload json.RawMessage, removed bool, now string) (links []store.XrefLink, ok bool, err error) {
 	exts := p.extractors[entityType]
 	if len(exts) == 0 {
 		return nil, false, nil
@@ -61,7 +62,7 @@ func (p *Pipeline) deriveLinks(entityType, entityID string, payload json.RawMess
 	links = []store.XrefLink{}
 	if !removed && len(payload) > 0 {
 		for _, e := range exts {
-			ls, err := e.Extract(entityType, entityID, payload)
+			ls, err := e.Extract(ctx, entityType, entityID, payload)
 			if err != nil {
 				return nil, false, fmt.Errorf("extractor %s: %w", e.Name(), err)
 			}
@@ -84,7 +85,7 @@ type workItemExtractor struct{}
 
 func (workItemExtractor) Name() string { return "work-item" }
 
-func (workItemExtractor) Extract(_, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
+func (workItemExtractor) Extract(_ context.Context, _, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
 	var f struct {
 		IssueShow json.RawMessage `json:"issue_show"`
 	}
@@ -131,7 +132,7 @@ var sourceEntityTypes = map[string]bool{"pr": true, "issue": true, "thread": tru
 
 func (sourceEntityExtractor) Name() string { return "source-entity" }
 
-func (sourceEntityExtractor) Extract(_, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
+func (sourceEntityExtractor) Extract(_ context.Context, _, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
 	var f struct {
 		IssueShow json.RawMessage `json:"issue_show"`
 	}
@@ -160,7 +161,7 @@ type jiraKeyExtractor struct{ patterns []string }
 
 func (jiraKeyExtractor) Name() string { return "jira-key" }
 
-func (j jiraKeyExtractor) Extract(_, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
+func (j jiraKeyExtractor) Extract(_ context.Context, _, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
 	var f struct {
 		PRShow json.RawMessage `json:"pr_show"`
 	}
@@ -197,7 +198,7 @@ type threadExtractor struct {
 
 func (threadExtractor) Name() string { return "thread-refs" }
 
-func (t threadExtractor) Extract(_, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
+func (t threadExtractor) Extract(ctx context.Context, _, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
 	var f struct {
 		ThreadShow json.RawMessage `json:"thread_show"`
 	}
@@ -218,7 +219,7 @@ func (t threadExtractor) Extract(_, _ string, payload json.RawMessage) ([]store.
 		out = append(out, store.XrefLink{ToType: "pr", ToID: id, Relation: "mentions", Evidence: "permalink"})
 	}
 	for _, key := range ticketkey.Parse(show.Text, "", "", t.patterns) {
-		linked, err := t.st.ListXrefLinksTo(t.repo, "issue", key)
+		linked, err := t.st.ListXrefLinksTo(ctx, t.repo, "issue", key)
 		if err != nil {
 			return nil, fmt.Errorf("list links to ticket %s: %w", key, err)
 		}

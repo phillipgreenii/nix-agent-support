@@ -30,21 +30,21 @@ func lockIn(fs FinalSet) LockInput {
 func dumpFocus(t *testing.T, s *store.Store) string {
 	t.Helper()
 	var sb strings.Builder
-	rows, err := s.FocusRowsAllPeriods()
+	rows, err := s.FocusRowsAllPeriods(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range rows {
 		sb.WriteString(r.EntityID + "|" + r.SelectedAt + "\n")
 	}
-	ps, _ := s.FocusPeriods()
+	ps, _ := s.FocusPeriods(context.Background())
 	for _, p := range ps {
 		sb.WriteString(p.PeriodKey + "\n")
 	}
-	if d, found, _ := s.FocusDraftGet(); found {
+	if d, found, _ := s.FocusDraftGet(context.Background()); found {
 		sb.WriteString("draft " + d.PeriodKey + "\n")
 	}
-	st, _ := s.FocusRunStats()
+	st, _ := s.FocusRunStats(context.Background())
 	for k, n := range st.ByVerbOutcome {
 		sb.WriteString(k[0] + k[1] + string(rune('0'+n)) + "\n")
 	}
@@ -55,7 +55,7 @@ func TestLockInsertsInLockOrderAnnotatesAndWritesTheRunRow(t *testing.T) {
 	f := newFixture(t)
 	a, b := f.pr("1", prSpec{ownership: "mine"}), f.pr("2", prSpec{ownership: "mine"})
 	d := lockDeps(t, f)
-	if _, err := f.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: lockToday, Cap: 6, MadeAt: fixtureAt, BodyJSON: "{}"}); err != nil {
+	if _, err := f.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: lockToday, Cap: 6, MadeAt: fixtureAt, BodyJSON: "{}"}); err != nil {
 		t.Fatal(err)
 	}
 	six := 6
@@ -67,26 +67,26 @@ func TestLockInsertsInLockOrderAnnotatesAndWritesTheRunRow(t *testing.T) {
 	if err != nil || res.ExitCode != ExitOK || res.Outcome != OutcomeOK {
 		t.Fatalf("Lock = %+v, %v", res, err)
 	}
-	p, _, _ := f.st.FocusPeriodGet("day", lockToday)
-	rows, _ := f.st.FocusPlanRows(p.ID)
+	p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", lockToday)
+	rows, _ := f.st.FocusPlanRows(context.Background(), p.ID)
 	if len(rows) != 2 || rows[0].RankPosition != 1 || rows[1].RankPosition != 2 || rows[0].Tier == nil || rows[1].Tier != nil {
 		t.Fatalf("rows = %+v, want 1..2 and a NULL tier for the hand-add", rows)
 	}
 	if p.Cap == nil || *p.Cap != 6 {
 		t.Errorf("cap = %v", p.Cap)
 	}
-	if _, found, _ := f.st.FocusDraftGet(); found {
+	if _, found, _ := f.st.FocusDraftGet(context.Background()); found {
 		t.Errorf("the lock left the draft")
 	}
 	for _, k := range []Key{a, b} {
-		if v, _ := f.st.FocusAnnotationValue(testRepo, k.Type, k.ID); v != lockToday {
+		if v, _ := f.st.FocusAnnotationValue(context.Background(), testRepo, k.Type, k.ID); v != lockToday {
 			t.Errorf("annotation value of %v = %q", k, v)
 		}
 	}
 	if len(res.Annotations) != 2 || res.Annotations[0].Seq == 0 {
 		t.Errorf("annotations = %+v", res.Annotations)
 	}
-	stats, _ := f.st.FocusRunStats()
+	stats, _ := f.st.FocusRunStats(context.Background())
 	if stats.ByVerbOutcome[[2]string{"select", "total"}] != 1 {
 		// the row exists with exit_code NULL until the verb finalizes it
 		t.Errorf("run stats = %v, want the unfinalised row counted as total", stats.ByVerbOutcome)
@@ -98,7 +98,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 	f := newFixture(t)
 	f.pr("1", prSpec{ownership: "mine"})
 	d := lockDeps(t, f)
-	if _, err := f.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: lockToday, Cap: 6, MadeAt: fixtureAt, BodyJSON: "{}"}); err != nil {
+	if _, err := f.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: lockToday, Cap: 6, MadeAt: fixtureAt, BodyJSON: "{}"}); err != nil {
 		t.Fatal(err)
 	}
 	before := dumpFocus(t, f.st)
@@ -117,7 +117,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 	if res, err := Lock(context.Background(), d, lockIn(FinalSet{Insert: []Insertion{{Key: Key{"pr", "1"}, Source: SourceDraft}}})); err != nil || res.ExitCode != ExitOK {
 		t.Fatalf("Lock = %+v, %v", res, err)
 	}
-	if _, found, _ := f.st.FocusDraftGet(); found {
+	if _, found, _ := f.st.FocusDraftGet(context.Background()); found {
 		t.Errorf("the committed lock left the draft")
 	}
 }

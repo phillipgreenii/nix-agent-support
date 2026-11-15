@@ -86,7 +86,7 @@ func TestHydrateJiraIssueRemovedForAnUnknownIDIsANoop(t *testing.T) {
 	if calls := f.calls(); len(calls) != 0 {
 		t.Fatalf("calls = %q, want none", calls)
 	}
-	if _, found, _ := f.seed.GetEntity("o/r", "issue", "PROJ-21"); found {
+	if _, found, _ := f.seed.GetEntity(context.Background(), "o/r", "issue", "PROJ-21"); found {
 		t.Fatal("a removed event for an unknown id created an entity")
 	}
 }
@@ -113,7 +113,7 @@ func TestHydrateJiraIssueDegradedOwningReadWritesNothing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "PROJ-23 read from jira-a was degraded (issue answer is stale): nothing written, retry") {
 		t.Fatalf("err = %v, want the degraded-read error", err)
 	}
-	if _, found, _ := f.seed.GetEntity("o/r", "issue", "PROJ-23"); found {
+	if _, found, _ := f.seed.GetEntity(context.Background(), "o/r", "issue", "PROJ-23"); found {
 		t.Fatal("a degraded read wrote an entity")
 	}
 }
@@ -211,7 +211,7 @@ func newThreadStore(t *testing.T) *store.Store {
 
 func seedThreadLink(t *testing.T, st *store.Store, fromType, fromID, threadID string) {
 	t.Helper()
-	if err := st.UpsertXref(store.Xref{
+	if err := st.UpsertXref(context.Background(), store.Xref{
 		Repo: "acme/widgets", FromType: fromType, FromID: fromID, ToType: "thread", ToID: threadID,
 		Evidence: "permalink", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -252,7 +252,7 @@ func TestRunThreadTicketKeyXrefWriteFailureIsReturnedNamingThePR(t *testing.T) {
 // type that references the same key is ignored.
 func TestRunThreadTicketKeyIgnoresNonPRAnchors(t *testing.T) {
 	st := newThreadStore(t)
-	if err := st.UpsertXref(store.Xref{
+	if err := st.UpsertXref(context.Background(), store.Xref{
 		Repo: "acme/widgets", FromType: "thread", FromID: "T-other", ToType: "issue", ToID: "PROJ-9",
 		Evidence: "ticket-key", FirstSeen: "2026-09-01T00:00:00Z", LastConfirmed: "2026-09-01T00:00:00Z",
 	}); err != nil {
@@ -261,7 +261,7 @@ func TestRunThreadTicketKeyIgnoresNonPRAnchors(t *testing.T) {
 	if err := runThreadDirect(t, st, "tracked in PROJ-9", "T13", gather.ChangeChanged); err != nil {
 		t.Fatal(err)
 	}
-	if linked, _ := st.ListXrefsByTo("acme/widgets", "thread", "T13"); len(linked) != 0 {
+	if linked, _ := st.ListXrefsByTo(context.Background(), "acme/widgets", "thread", "T13"); len(linked) != 0 {
 		t.Fatalf("linked = %+v, want none: a non-PR anchor must not link the thread", linked)
 	}
 }
@@ -282,7 +282,7 @@ func TestRunThreadLinkedNonPREntityIsNotReinterpreted(t *testing.T) {
 	if err := runThreadDirect(t, st, "nothing", "T15", gather.ChangeChanged); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, _ := st.GetInterpretation("acme/widgets", "issue", "PROJ-30"); found {
+	if _, found, _ := st.GetInterpretation(context.Background(), "acme/widgets", "issue", "PROJ-30"); found {
 		t.Fatal("a linked issue was re-interpreted by run thread")
 	}
 }
@@ -292,7 +292,7 @@ func TestRunThreadLinkedNonPREntityIsNotReinterpreted(t *testing.T) {
 func TestRunThreadReinterpretFailuresAreJoinedAndTheRestStillRun(t *testing.T) {
 	st := newThreadStore(t)
 	for _, id := range []string{"acme/widgets#1", "acme/widgets#3"} {
-		if err := st.UpsertEntityForTest(store.Entity{
+		if err := st.UpsertEntityForTest(context.Background(), store.Entity{
 			Repo: "acme/widgets", EntityType: entityTypePR, EntityID: id,
 			Facts: "{not json", AsOf: "2026-09-17T00:00:00Z", ContentHash: "h",
 		}); err != nil {
@@ -315,7 +315,7 @@ func TestRunThreadReinterpretFailuresAreJoinedAndTheRestStillRun(t *testing.T) {
 	if strings.Contains(err.Error(), "acme/widgets#2") {
 		t.Errorf("err = %q names the PR that interpreted fine", err.Error())
 	}
-	if _, found, _ := st.GetInterpretation("acme/widgets", entityTypePR, "acme/widgets#2"); !found {
+	if _, found, _ := st.GetInterpretation(context.Background(), "acme/widgets", entityTypePR, "acme/widgets#2"); !found {
 		t.Fatal("the good PR was not re-interpreted after an earlier failure")
 	}
 }
@@ -333,7 +333,7 @@ func TestRunThreadFetchErrorIsWrappedAndWritesNothing(t *testing.T) {
 	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "run thread T17: fetch thread") {
 		t.Fatalf("err = %v", err)
 	}
-	if linked, _ := st.ListXrefsByTo("acme/widgets", "thread", "T17"); len(linked) != 0 {
+	if linked, _ := st.ListXrefsByTo(context.Background(), "acme/widgets", "thread", "T17"); len(linked) != 0 {
 		t.Fatalf("linked = %+v, want none", linked)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -46,7 +47,7 @@ func (f *selFixture) foreignPR(t *testing.T, n int, title string) focus.Key {
 	t.Helper()
 	id := prKey(n).ID
 	k := f.write(t, "pr", id, map[string]any{"pr_show": map[string]any{"state": "open", "title": title}}, "2026-10-09T08:00:00Z")
-	if err := f.st.UpsertInterpretation(store.Interpretation{
+	if err := f.st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: showRepo, EntityType: "pr", EntityID: id, Ownership: "other",
 		Enrichment: "{}", Urgency: "{}", Dispositions: "{}", Approvals: "{}", MatchReasons: "[]", AsOf: "2026-10-09T08:00:00Z",
 	}); err != nil {
@@ -110,7 +111,7 @@ func TestPullTopAddsRowsAfterTheLockedPlanWithTheRunsTier(t *testing.T) {
 		}
 	}
 	// A pull never re-caps: the period's cap is the lock's.
-	if p, _, _ := f.st.FocusPeriodGet("day", showToday); p.Cap == nil || *p.Cap != 6 {
+	if p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday); p.Cap == nil || *p.Cap != 6 {
 		t.Errorf("period cap = %v, want 6 untouched", p.Cap)
 	}
 }
@@ -134,7 +135,7 @@ func TestPullIsUncappedAndNeverRemovesOrReSorts(t *testing.T) {
 	if rows[0].EntityID != "o/r#2" || rows[1].EntityID != "o/r#1" {
 		t.Errorf("the plan was re-sorted: %s,%s", rows[0].EntityID, rows[1].EntityID)
 	}
-	if p, _, _ := f.st.FocusPeriodGet("day", showToday); p.Cap == nil || *p.Cap != 2 {
+	if p, _, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday); p.Cap == nil || *p.Cap != 2 {
 		t.Errorf("period cap = %v, want 2 untouched", p.Cap)
 	}
 }
@@ -253,7 +254,7 @@ func TestPullDryRunWritesNoPeriodRowAndNoTableChanges(t *testing.T) {
 			if got := f.snapshot(t); got != before {
 				t.Fatalf("a dry run changed the store:\n%s\n---\n%s", before, got)
 			}
-			if _, found, _ := f.st.FocusPeriodGet("day", showToday); found {
+			if _, found, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday); found {
 				t.Errorf("a dry run left a focus_period row behind")
 			}
 			mustContain(t, out, "CHANGES", "pr:o/r#1", "pr:o/r#2", "will mint")
@@ -287,7 +288,7 @@ func TestPullIntoNewPeriodBeforeFirstLockIsUsage(t *testing.T) {
 		_, _, err := pull(t, args...)
 		assertFocusExit(t, err, 2, "lock today's plan first: run show, then select --apply")
 	}
-	if _, found, _ := f.st.FocusPeriodGet("day", showToday); found {
+	if _, found, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday); found {
 		t.Errorf("a refused pull left a focus_period row behind")
 	}
 	// Only the run rows of the writing attempts may differ.
@@ -311,7 +312,7 @@ func TestPullIntoFuturePeriodIsUsage(t *testing.T) {
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
 	_, _, err := pull(t, "--top", "1", "--date", "2026-10-11")
 	assertFocusExit(t, err, 2, "2026-10-11 is in the future")
-	if _, found, _ := f.st.FocusPeriodGet("day", "2026-10-11"); found {
+	if _, found, _ := f.st.FocusPeriodGet(context.Background(), "day", "2026-10-11"); found {
 		t.Errorf("a refused pull created the future period")
 	}
 	if f.count(t, "focus_selection") != 0 {
@@ -333,7 +334,7 @@ func TestPullUsageCheckRunsInsideTheTransaction(t *testing.T) {
 
 	_, _, err := pull(t, "o/r#1")
 	assertFocusExit(t, err, 2, "lock today's plan first: run show, then select --apply")
-	if _, found, _ := f.st.FocusPeriodGet("day", showToday); found {
+	if _, found, _ := f.st.FocusPeriodGet(context.Background(), "day", showToday); found {
 		t.Errorf("the refused transaction left a focus_period row behind")
 	}
 	if rows := f.plan(t, showYesterday); len(rows) != 1 || rows[0].EntityID != "o/r#9" {

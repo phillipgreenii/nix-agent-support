@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -16,9 +17,9 @@ import (
 // do nothing for it. The order is the keys' order.
 //
 // It reads the store only (no tracker call).
-func Reoffered(d LockDeps) ([]Key, error) {
+func Reoffered(ctx context.Context, d LockDeps) ([]Key, error) {
 	repo := d.repo()
-	in, err := Load(d.Store, d.Config, repo, d.now())
+	in, err := Load(ctx, d.Store, d.Config, repo, d.now())
 	if err != nil {
 		return nil, fmt.Errorf("focus: reoffer: read the store: %w", err)
 	}

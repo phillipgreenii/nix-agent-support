@@ -76,8 +76,8 @@ type Entity struct {
 
 // GetEntity returns the entity row for (repo, entityType, entityID), or
 // found=false if no such row exists.
-func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, found bool, err error) {
-	feedCols, err := s.issueFeedSelect()
+func (s *Store) GetEntity(ctx context.Context, repo, entityType, entityID string) (entity Entity, found bool, err error) {
+	feedCols, err := s.issueFeedSelect(ctx)
 	if err != nil {
 		return Entity{}, false, err
 	}
@@ -85,7 +85,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	var watched sql.NullInt64
 	var active int
 	row := s.sql.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, `+feedCols+`
 		 FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
@@ -112,9 +112,9 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 // counts"] — mirrors HasAnyInterpretation's own plain-COUNT pattern
 // (interpretation.go) rather than requiring a caller to page through
 // ListInterpretations-style rows just to count them.
-func (s *Store) CountEntities() (int, error) {
+func (s *Store) CountEntities(ctx context.Context) (int, error) {
 	var n int
-	if err := s.sql.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM entity`).Scan(&n); err != nil {
+	if err := s.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("store: count entities: %w", err)
 	}
 	return n, nil
@@ -126,13 +126,13 @@ func (s *Store) CountEntities() (int, error) {
 // Added for `pg-desk sweep` (bead pg2-gznpe): the bulk-backfill command's
 // own "iterate every entity currently in the store" driver reads this list
 // rather than requiring a caller to invent its own full-table scan.
-func (s *Store) ListEntities() ([]Entity, error) {
-	feedCols, err := s.issueFeedSelect()
+func (s *Store) ListEntities(ctx context.Context) ([]Entity, error) {
+	feedCols, err := s.issueFeedSelect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version, hydrated_at, active, list_fp, first_seen_at, `+feedCols+`
 		 FROM entity ORDER BY repo, entity_type, entity_id`,
 	)
@@ -178,13 +178,13 @@ func (s *Store) ListEntities() ([]Entity, error) {
 // ensureIssueFeedStorage) and never touches the table rows. On a store opened
 // without that index it still answers, from the table. Rows come in index
 // order: (entity_type, entity_id, repo).
-func (s *Store) ListEntityFlow() ([]Entity, error) {
-	feedCols, err := s.issueFeedSelect()
+func (s *Store) ListEntityFlow(ctx context.Context) ([]Entity, error) {
+	feedCols, err := s.issueFeedSelect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, entity_type, entity_id, hydrated_at, active, first_seen_at, `+feedCols+`
 		 FROM entity ORDER BY entity_type, entity_id, repo`,
 	)

@@ -402,12 +402,12 @@ func Lock(ctx context.Context, d LockDeps, in LockInput) (LockResult, error) {
 	}
 	var mergeErr error
 	if len(fs.Absorbed) > 0 {
-		if mergeErr = RecordMerges(d.Store, repo, fs.Absorbed, mergeActor, at); mergeErr == nil {
+		if mergeErr = RecordMerges(ctx, d.Store, repo, fs.Absorbed, mergeActor, at); mergeErr == nil {
 			res.Merged = fs.Absorbed
 		}
 	}
 	if mergeErr == nil && len(fs.Unmerge) > 0 {
-		if mergeErr = RemoveMerges(d.Store, repo, fs.Unmerge); mergeErr == nil {
+		if mergeErr = RemoveMerges(ctx, d.Store, repo, fs.Unmerge); mergeErr == nil {
 			res.Unmerged = fs.Unmerge
 		}
 	}
@@ -500,18 +500,18 @@ func ApplyAnnotations(ctx context.Context, d LockDeps, keys []Key, at string) []
 		o := AnnotationOutcome{Key: k, Outcome: AnnotationFailed}
 		var seq int64
 		for attempt := 0; attempt < 3 && ctx.Err() == nil; attempt++ {
-			v, err := d.Store.FocusAnnotationValue(repo, k.Type, k.ID)
+			v, err := d.Store.FocusAnnotationValue(ctx, repo, k.Type, k.ID)
 			if err != nil {
 				break
 			}
-			s, changed, err := d.Annotator.SetFocusSelected(repo, k.Type, k.ID, v, annotationOrigin, d.Actor, at)
+			s, changed, err := d.Annotator.SetFocusSelected(ctx, repo, k.Type, k.ID, v, annotationOrigin, d.Actor, at)
 			if err != nil {
 				break
 			}
 			if changed {
 				seq = s
 			}
-			if again, err := d.Store.FocusAnnotationValue(repo, k.Type, k.ID); err == nil && again == v {
+			if again, err := d.Store.FocusAnnotationValue(ctx, repo, k.Type, k.ID); err == nil && again == v {
 				o.Outcome, o.Seq = AnnotationOK, seq
 				break
 			}

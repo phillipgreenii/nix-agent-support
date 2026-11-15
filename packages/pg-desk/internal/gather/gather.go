@@ -280,8 +280,8 @@ type ThreadRef struct {
 // since both this Gatherer's own xref reads and writes go through the
 // SAME *store.Store value (NewGatherer's own xrefs parameter, below).
 type xrefUpserter interface {
-	UpsertXref(x store.Xref) error
-	ListXrefsByFrom(repo, fromType, fromID, toType string) ([]store.Xref, error)
+	UpsertXref(ctx context.Context, x store.Xref) error
+	ListXrefsByFrom(ctx context.Context, repo, fromType, fromID, toType string) ([]store.Xref, error)
 }
 
 // Gatherer holds this run's per-run budget cache (see the package doc
@@ -372,7 +372,7 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 		f.degrade("pr show truncated: " + strings.Join(names, ", "))
 	}
 
-	g.gatherStackParents(show.Repo, entityID, show.Base, &f)
+	g.gatherStackParents(ctx, show.Repo, entityID, show.Base, &f)
 
 	if change == ChangeSweep {
 		if prev, seen := g.lastHeadSHA[entityID]; seen && prev == show.HeadSHA {
@@ -390,7 +390,7 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 	matched := g.gatherWorkBeads(ctx, show.Repo, show.Number, &f)
 	g.gatherDeps(ctx, matched, &f)
 	g.gatherJiraXrefs(ctx, entityID, show, &f)
-	g.gatherLinkedThreads(entityID, &f)
+	g.gatherLinkedThreads(ctx, entityID, &f)
 
 	return f, nil
 }
@@ -609,7 +609,7 @@ func (g *Gatherer) gatherJiraXrefs(ctx context.Context, entityID string, show pr
 				f.JiraIssues[key] = raw
 			}
 			if g.xrefs != nil {
-				_ = g.xrefs.UpsertXref(store.Xref{
+				_ = g.xrefs.UpsertXref(ctx, store.Xref{
 					Repo:          repo,
 					FromType:      "pr",
 					FromID:        entityID,
@@ -633,11 +633,11 @@ func (g *Gatherer) gatherJiraXrefs(ctx context.Context, entityID string, show pr
 // exactly like every other non-triggering-entity input; zero linked
 // threads is a normal, expected outcome (most PRs have none), not a
 // degradation.
-func (g *Gatherer) gatherLinkedThreads(entityID string, f *Facts) {
+func (g *Gatherer) gatherLinkedThreads(ctx context.Context, entityID string, f *Facts) {
 	if g.xrefs == nil {
 		return
 	}
-	xrefs, err := g.xrefs.ListXrefsByFrom(g.repo(), "pr", entityID, "thread")
+	xrefs, err := g.xrefs.ListXrefsByFrom(ctx, g.repo(), "pr", entityID, "thread")
 	if err != nil {
 		f.degrade("linked threads")
 		return

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -20,7 +21,7 @@ func newRunFixture(t *testing.T) *store.Store {
 
 func runStat(t *testing.T, st *store.Store, verb, outcome string) int {
 	t.Helper()
-	stats, err := st.FocusRunStats()
+	stats, err := st.FocusRunStats(context.Background())
 	if err != nil {
 		t.Fatalf("FocusRunStats: %v", err)
 	}
@@ -32,11 +33,11 @@ func TestFocusRunRowWritten(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
 	run := newFocusRun(&stderr, focusVerbPull, focusPeriod{Type: "day", Key: "2026-10-10"}, "tester", false, focusFixedNow)
-	if err := run.Start(st); err != nil {
+	if err := run.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	// Even a total failure that commits nothing else leaves its row.
-	if err := run.Finish(focus.ExitTotal); err != nil {
+	if err := run.Finish(context.Background(), focus.ExitTotal); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	if got := runStat(t, st, "pull", "total"); got != 1 {
@@ -47,27 +48,27 @@ func TestFocusRunRowWritten(t *testing.T) {
 func TestFocusRunStartedRowCarriesActorPeriodAndTime(t *testing.T) {
 	st := newRunFixture(t)
 	// A period row that exists is referenced by the run row.
-	if _, err := st.GetOrCreateFocusPeriod("day", "2026-10-10"); err != nil {
+	if _, err := st.GetOrCreateFocusPeriod(context.Background(), "day", "2026-10-10"); err != nil {
 		t.Fatalf("period: %v", err)
 	}
 	run := newFocusRun(&bytes.Buffer{}, focusVerbClose, focusPeriod{Type: "day", Key: "2026-10-10"}, "tester", false, focusFixedNow)
-	if err := run.Start(st); err != nil {
+	if err := run.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if err := run.Finish(0); err != nil {
+	if err := run.Finish(context.Background(), 0); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	// FocusRunStats.LastSelectAt only reads select rows; read the row back
 	// through a second run of verb select to prove started_at is the
 	// injected clock.
 	sel := newFocusRun(&bytes.Buffer{}, focusVerbSelect, focusPeriod{Type: "day", Key: "2026-10-10"}, "tester", false, focusFixedNow)
-	if err := sel.Start(st); err != nil {
+	if err := sel.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start select: %v", err)
 	}
-	if err := sel.Finish(0); err != nil {
+	if err := sel.Finish(context.Background(), 0); err != nil {
 		t.Fatalf("Finish select: %v", err)
 	}
-	stats, err := st.FocusRunStats()
+	stats, err := st.FocusRunStats(context.Background())
 	if err != nil {
 		t.Fatalf("FocusRunStats: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestRunRowExitCodeFinalisedLast(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
 	run := newFocusRun(&stderr, focusVerbSelect, focusPeriod{Type: "day", Key: "2026-10-10"}, "tester", false, focusFixedNow)
-	if err := run.Start(st); err != nil {
+	if err := run.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	// A crash here leaves exit_code NULL, which the statistics count as total.
@@ -96,7 +97,7 @@ func TestRunRowExitCodeFinalisedLast(t *testing.T) {
 		t.Fatalf("the stderr line must not be printed before the row is finalized, got %q", stderr.String())
 	}
 	run.SetCounts(focusCounts{Ranked: 4, Selected: 2})
-	if err := run.Finish(focus.ExitPartial); err != nil {
+	if err := run.Finish(context.Background(), focus.ExitPartial); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	if got := runStat(t, st, "select", "partial"); got != 1 {
@@ -114,7 +115,7 @@ func TestRunRowExitCodeFinalisedLast(t *testing.T) {
 	}
 	// A second Finish neither rewrites the row nor reprints.
 	n := stderr.Len()
-	if err := run.Finish(0); err != nil || stderr.Len() != n {
+	if err := run.Finish(context.Background(), 0); err != nil || stderr.Len() != n {
 		t.Errorf("a second Finish must be a no-op (err %v, printed %d more bytes)", err, stderr.Len()-n)
 	}
 	if got := runStat(t, st, "select", "partial"); got != 1 {
@@ -137,10 +138,10 @@ func TestFocusRunOutcomeWordsFollowTheExitCode(t *testing.T) {
 		{20, focusVerbClose, "period_closed"},
 	} {
 		run := newFocusRun(&bytes.Buffer{}, tc.verb, focusPeriod{Type: "day", Key: "2026-10-10"}, "a", false, focusFixedNow)
-		if err := run.Start(st); err != nil {
+		if err := run.Start(context.Background(), st); err != nil {
 			t.Fatalf("Start: %v", err)
 		}
-		if err := run.Finish(tc.exit); err != nil {
+		if err := run.Finish(context.Background(), tc.exit); err != nil {
 			t.Fatalf("Finish(%d): %v", tc.exit, err)
 		}
 		if got := runStat(t, st, tc.verb, tc.outcome); got < 1 {
@@ -149,10 +150,10 @@ func TestFocusRunOutcomeWordsFollowTheExitCode(t *testing.T) {
 	}
 	// An empty select is outcome "empty".
 	run := newFocusRun(&bytes.Buffer{}, focusVerbSelect, focusPeriod{Type: "day", Key: "2026-10-10"}, "a", false, focusFixedNow)
-	if err := run.Start(st); err != nil {
+	if err := run.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if err := run.Finish(0); err != nil {
+	if err := run.Finish(context.Background(), 0); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	if got := runStat(t, st, "select", "empty"); got != 1 {
@@ -169,7 +170,7 @@ func TestSelectStderrLineIsParseableJSON(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
 	run := newFocusRun(&stderr, focusVerbSelect, focusPeriod{Type: "day", Key: "2026-10-10"}, "tester", false, focusFixedNow)
-	if err := run.Start(st); err != nil {
+	if err := run.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	run.SetCounts(focusCounts{
@@ -188,7 +189,7 @@ func TestSelectStderrLineIsParseableJSON(t *testing.T) {
 	})
 	run.Annotation("o/r#1", "ok", 41)
 	run.Annotation("o/r#2", "failed", 99) // a failed write has no seq
-	if err := run.Finish(focus.ExitPartial); err != nil {
+	if err := run.Finish(context.Background(), focus.ExitPartial); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 
@@ -285,14 +286,14 @@ func TestFocusCountsJSONNeverOmitsAbsentCounts(t *testing.T) {
 func TestFocusRunCountsReadByStatistics(t *testing.T) {
 	st := newRunFixture(t)
 	run := newFocusRun(&bytes.Buffer{}, focusVerbSelect, focusPeriod{Type: "day", Key: "2026-10-10"}, "a", false, focusFixedNow)
-	if err := run.Start(st); err != nil {
+	if err := run.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	run.SetCounts(focusCounts{Selected: 3, DraftAgeSeconds: 7200, DriftRows: 5})
-	if err := run.Finish(0); err != nil {
+	if err := run.Finish(context.Background(), 0); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
-	stats, err := st.FocusRunStats()
+	stats, err := st.FocusRunStats(context.Background())
 	if err != nil {
 		t.Fatalf("FocusRunStats: %v", err)
 	}
@@ -307,17 +308,17 @@ func TestFocusRunDryRunWritesNoRowButPrintsTheLine(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
 	run := newFocusRun(&stderr, focusVerbSelect, focusPeriod{Type: "day", Key: "2026-10-10"}, "a", true, focusFixedNow)
-	if err := run.Start(st); err != nil {
+	if err := run.Start(context.Background(), st); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if err := run.Finish(0); err != nil {
+	if err := run.Finish(context.Background(), 0); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	var rec map[string]any
 	if err := json.Unmarshal(stderr.Bytes(), &rec); err != nil || rec["dry_run"] != true {
 		t.Fatalf("dry-run line: %v / %v", err, rec)
 	}
-	stats, err := st.FocusRunStats()
+	stats, err := st.FocusRunStats(context.Background())
 	if err != nil {
 		t.Fatalf("FocusRunStats: %v", err)
 	}
@@ -336,10 +337,10 @@ func TestFocusRunWithoutWritableStoreStillPrintsTheLine(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	run := newFocusRun(&stderr, focusVerbPull, focusPeriod{Type: "day", Key: "2026-10-10"}, "a", false, focusFixedNow)
-	if err := run.Start(st); err == nil {
+	if err := run.Start(context.Background(), st); err == nil {
 		t.Fatal("Start on a closed store: want an error")
 	}
-	if err := run.Finish(exitTotal); err != nil {
+	if err := run.Finish(context.Background(), exitTotal); err != nil {
 		t.Errorf("Finish without a row must not error: %v", err)
 	}
 	var rec map[string]any

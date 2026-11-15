@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -402,7 +403,7 @@ func TestLocalNewStoreWorkLookup(t *testing.T) {
 	put := func(l store.XrefLink) {
 		t.Helper()
 		l.FirstSeen, l.LastConfirmed = now, now
-		if err := st.ReplaceDerivedXrefs(l.Repo, l.FromType, l.FromID, []store.XrefLink{l}); err != nil {
+		if err := st.ReplaceDerivedXrefs(context.Background(), l.Repo, l.FromType, l.FromID, []store.XrefLink{l}); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -417,7 +418,7 @@ func TestLocalNewStoreWorkLookup(t *testing.T) {
 	// A parent link to an issue that has a jira (not work) link proves nothing.
 	put(localLink("issue", "I-6", "issue", "I-5", "parent", "derived:work-item"))
 
-	own := NewStoreWorkLookup(st, localRepo)
+	own := NewStoreWorkLookup(context.Background(), st, localRepo)
 	tests := []struct {
 		name          string
 		prID, issueID string
@@ -441,7 +442,7 @@ func TestLocalNewStoreWorkLookup(t *testing.T) {
 	}
 
 	t.Run("other repo sees nothing", func(t *testing.T) {
-		if NewStoreWorkLookup(st, "example/other")("r#1", "I-1") {
+		if NewStoreWorkLookup(context.Background(), st, "example/other")("r#1", "I-1") {
 			t.Fatal("lookup crossed repos")
 		}
 	})

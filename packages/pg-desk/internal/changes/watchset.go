@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 
@@ -20,9 +21,9 @@ func watchSetKey(entityType, query string) string {
 
 // loadWatchSet reads the ids query currently returns; a missing or corrupt
 // key reads as empty.
-func loadWatchSet(st *store.Store, entityType, query string) map[string]bool {
+func loadWatchSet(ctx context.Context, st *store.Store, entityType, query string) map[string]bool {
 	out := map[string]bool{}
-	raw, found, err := st.GetMeta(watchSetKey(entityType, query))
+	raw, found, err := st.GetMeta(ctx, watchSetKey(entityType, query))
 	if err != nil || !found {
 		return out
 	}
@@ -38,8 +39,8 @@ func loadWatchSet(st *store.Store, entityType, query string) map[string]bool {
 
 // WatchSetIDs returns the sorted ids query listed at its last complete
 // listing (the persisted watch set); empty for a query never listed.
-func WatchSetIDs(st *store.Store, entityType, query string) []string {
-	set := loadWatchSet(st, entityType, query)
+func WatchSetIDs(ctx context.Context, st *store.Store, entityType, query string) []string {
+	set := loadWatchSet(ctx, st, entityType, query)
 	ids := make([]string, 0, len(set))
 	for id := range set {
 		ids = append(ids, id)
@@ -48,7 +49,7 @@ func WatchSetIDs(st *store.Store, entityType, query string) []string {
 	return ids
 }
 
-func saveWatchSet(st *store.Store, entityType, query string, set map[string]bool) error {
+func saveWatchSet(ctx context.Context, st *store.Store, entityType, query string, set map[string]bool) error {
 	ids := make([]string, 0, len(set))
 	for id := range set {
 		ids = append(ids, id)
@@ -58,7 +59,7 @@ func saveWatchSet(st *store.Store, entityType, query string, set map[string]bool
 	if err != nil {
 		return err
 	}
-	return st.SetMeta(watchSetKey(entityType, query), string(b))
+	return st.SetMeta(ctx, watchSetKey(entityType, query), string(b))
 }
 
 // WatchedIDs returns the ids watched for entityType.
@@ -76,10 +77,10 @@ func saveWatchSet(st *store.Store, entityType, query string, set map[string]bool
 // known is true whenever owning is non-empty. A query that names an owning
 // instance has no persisted set, so passing every configured query is safe.
 // It only reads the store.
-func WatchedIDs(st *store.Store, queries []string, entityType string, owning map[string]bool) (ids map[string]bool, known bool) {
+func WatchedIDs(ctx context.Context, st *store.Store, queries []string, entityType string, owning map[string]bool) (ids map[string]bool, known bool) {
 	ids = map[string]bool{}
 	for _, q := range queries {
-		raw, found, err := st.GetMeta(watchSetKey(entityType, q))
+		raw, found, err := st.GetMeta(ctx, watchSetKey(entityType, q))
 		if err != nil || !found {
 			continue
 		}
@@ -93,7 +94,7 @@ func WatchedIDs(st *store.Store, queries []string, entityType string, owning map
 		}
 	}
 	if len(owning) > 0 {
-		watched, _ := OwningEntityIDs(st, entityType, owning)
+		watched, _ := OwningEntityIDs(ctx, st, entityType, owning)
 		for id := range watched {
 			ids[id] = true
 		}
@@ -105,12 +106,12 @@ func WatchedIDs(st *store.Store, queries []string, entityType string, owning map
 // OwningEntityIDs reads the entity table for the entities of entityType whose
 // backend column is in owning: all is every such id and watched the subset whose
 // watched column is set (true). A read failure yields empty sets.
-func OwningEntityIDs(st *store.Store, entityType string, owning map[string]bool) (watched, all map[string]bool) {
+func OwningEntityIDs(ctx context.Context, st *store.Store, entityType string, owning map[string]bool) (watched, all map[string]bool) {
 	watched, all = map[string]bool{}, map[string]bool{}
 	if len(owning) == 0 {
 		return watched, all
 	}
-	rows, err := st.ListEntityFlow()
+	rows, err := st.ListEntityFlow(ctx)
 	if err != nil {
 		return watched, all
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,6 +75,8 @@ top-level 'pg-desk open' keeps serving the old one.`, entityType),
 }
 
 func runTypedOpen(cmd *cobra.Command, entityType, ref string, f openFlags) error {
+	ctx := cmd.Context()
+
 	if err := validateOpenFlags(f); err != nil {
 		return err
 	}
@@ -82,7 +85,7 @@ func runTypedOpen(cmd *cobra.Command, entityType, ref string, f openFlags) error
 	if err != nil {
 		return fmt.Errorf("open: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("open")
+	st, err := openNewSchemaStore(ctx, "open")
 	if err != nil {
 		return err
 	}
@@ -95,12 +98,12 @@ func runTypedOpen(cmd *cobra.Command, entityType, ref string, f openFlags) error
 		if rerr != nil {
 			return fmt.Errorf("open: %w", rerr)
 		}
-		row, rerr := typedOpenOne(st, entityType, repo, id)
+		row, rerr := typedOpenOne(ctx, st, entityType, repo, id)
 		if rerr != nil {
 			return rerr
 		}
 		rows = []openRow{row}
-	} else if rows, err = typedOpenList(st, cfg, entityType, f); err != nil {
+	} else if rows, err = typedOpenList(ctx, st, cfg, entityType, f); err != nil {
 		return err
 	}
 
@@ -141,16 +144,16 @@ func runTypedOpen(cmd *cobra.Command, entityType, ref string, f openFlags) error
 
 // typedOpenOne builds the single row of the id form. It ignores the selection
 // flags: naming the entity is the selection.
-func typedOpenOne(st *store.Store, entityType, repo, id string) (openRow, error) {
+func typedOpenOne(ctx context.Context, st *store.Store, entityType, repo, id string) (openRow, error) {
 	if entityType == entityTypePR {
-		interp, found, err := st.GetInterpretation(repo, entityTypePR, id)
+		interp, found, err := st.GetInterpretation(ctx, repo, entityTypePR, id)
 		if err != nil {
 			return openRow{}, fmt.Errorf("open: %w", err)
 		}
 		if !found {
 			return openRow{}, fmt.Errorf("open: %s %s does not resolve to a stored entity", entityType, id)
 		}
-		row, err := openRowFrom(st, interp)
+		row, err := openRowFrom(ctx, st, interp)
 		if err != nil {
 			return openRow{}, fmt.Errorf("open: %w", err)
 		}
@@ -162,23 +165,23 @@ func typedOpenOne(st *store.Store, entityType, repo, id string) (openRow, error)
 		row.NeedsAttention = interp.Panel == actNow
 		return row, nil
 	}
-	ent, found, err := st.GetEntity(repo, entityType, id)
+	ent, found, err := st.GetEntity(ctx, repo, entityType, id)
 	if err != nil {
 		return openRow{}, fmt.Errorf("open: %w", err)
 	}
 	if !found {
 		return openRow{}, fmt.Errorf("open: %s %s does not resolve to a stored entity", entityType, id)
 	}
-	return genericOpenRow(st, ent)
+	return genericOpenRow(ctx, st, ent)
 }
 
 // typedOpenList builds the list form's rows. A PR list is the old open's
 // selection (same halves, same filters) read through the new schema; an issue
 // or thread list is every active stored entity of the type, hidden ones
 // excluded unless --include-hidden.
-func typedOpenList(st *store.Store, cfg *config.Config, entityType string, f openFlags) ([]openRow, error) {
+func typedOpenList(ctx context.Context, st *store.Store, cfg *config.Config, entityType string, f openFlags) ([]openRow, error) {
 	if entityType == entityTypePR {
-		mine, team, err := buildOpenRows(st, cfg)
+		mine, team, err := buildOpenRows(ctx, st, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("open: %w", err)
 		}
@@ -188,7 +191,7 @@ func typedOpenList(st *store.Store, cfg *config.Config, entityType string, f ope
 		}
 		return selectRows(candidates, f), nil
 	}
-	ents, err := st.ListEntities()
+	ents, err := st.ListEntities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open: list entities: %w", err)
 	}
@@ -197,7 +200,7 @@ func typedOpenList(st *store.Store, cfg *config.Config, entityType string, f ope
 		if e.EntityType != entityType || e.Inactive {
 			continue
 		}
-		row, rerr := genericOpenRow(st, e)
+		row, rerr := genericOpenRow(ctx, st, e)
 		if rerr != nil {
 			return nil, rerr
 		}
@@ -210,8 +213,8 @@ func typedOpenList(st *store.Store, cfg *config.Config, entityType string, f ope
 	return rows, nil
 }
 
-func genericOpenRow(st *store.Store, ent store.Entity) (openRow, error) {
-	h, err := readHiddenAnnotation(st, ent.Repo, ent.EntityType, ent.EntityID)
+func genericOpenRow(ctx context.Context, st *store.Store, ent store.Entity) (openRow, error) {
+	h, err := readHiddenAnnotation(ctx, st, ent.Repo, ent.EntityType, ent.EntityID)
 	if err != nil {
 		return openRow{}, fmt.Errorf("open: %w", err)
 	}

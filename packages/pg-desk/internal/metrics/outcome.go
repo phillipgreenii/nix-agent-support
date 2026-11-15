@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -65,7 +66,7 @@ func emptyOutcome() []OutcomeBackend { return []OutcomeBackend{{}} }
 // oldest feed_observed value across its queries. An instance with no value yet
 // reads 0 (a fresh deployment never pages). An unparseable value fails the
 // scrape rather than reading as 0.
-func WatchedSourceObservedFromStore(st *store.Store, queriesByInstance map[string][]string, now func() time.Time) OutcomeFunc {
+func WatchedSourceObservedFromStore(ctx context.Context, st *store.Store, queriesByInstance map[string][]string, now func() time.Time) OutcomeFunc {
 	return func() ([]OutcomeBackend, error) {
 		if len(queriesByInstance) == 0 {
 			return emptyOutcome(), nil
@@ -76,7 +77,7 @@ func WatchedSourceObservedFromStore(st *store.Store, queriesByInstance map[strin
 			var oldest time.Time
 			have := false
 			for _, q := range queriesByInstance[inst] {
-				v, found, err := st.GetMeta(changes.MetaFeedObservedPrefix + inst + "." + q)
+				v, found, err := st.GetMeta(ctx, changes.MetaFeedObservedPrefix+inst+"."+q)
 				if err != nil {
 					return nil, err
 				}
@@ -105,14 +106,14 @@ func WatchedSourceObservedFromStore(st *store.Store, queriesByInstance map[strin
 
 // UnflaggedMembersFromStore reads, per owning instance, the stored unflagged
 // count (0 when none has been stored).
-func UnflaggedMembersFromStore(st *store.Store, queriesByInstance map[string][]string) OutcomeFunc {
+func UnflaggedMembersFromStore(ctx context.Context, st *store.Store, queriesByInstance map[string][]string) OutcomeFunc {
 	return func() ([]OutcomeBackend, error) {
 		if len(queriesByInstance) == 0 {
 			return emptyOutcome(), nil
 		}
 		var out []OutcomeBackend
 		for _, inst := range sortedInstances(queriesByInstance) {
-			rec, _, err := changes.ReadUnflagged(st, inst)
+			rec, _, err := changes.ReadUnflagged(ctx, st, inst)
 			if err != nil {
 				return nil, err
 			}
@@ -187,13 +188,13 @@ func ageSince(at, t time.Time) int64 {
 // orphans (read_ok_at, else hydrated_at, else first_seen_at, as the orphan-lag
 // series counts it). An instance with no value yet reads 0, so a fresh
 // deployment never pages. An unparseable value fails the scrape.
-func WatchedListedSourceObservedFromStore(st *store.Store, cfg *config.Config, now func() time.Time) OutcomeFunc {
+func WatchedListedSourceObservedFromStore(ctx context.Context, st *store.Store, cfg *config.Config, now func() time.Time) OutcomeFunc {
 	return func() ([]OutcomeBackend, error) {
 		by := ListedQueriesByInstance(cfg)
 		if len(by) == 0 {
 			return emptyOutcome(), nil
 		}
-		orphans, err := changes.OrphanEntities(st, cfg)
+		orphans, err := changes.OrphanEntities(ctx, st, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +209,7 @@ func WatchedListedSourceObservedFromStore(st *store.Store, cfg *config.Config, n
 				}
 			}
 			for _, q := range by[inst] {
-				v, found, err := st.GetMeta(changes.MetaListingOKPrefix + q)
+				v, found, err := st.GetMeta(ctx, changes.MetaListingOKPrefix+q)
 				if err != nil {
 					return nil, err
 				}
@@ -246,19 +247,19 @@ func WatchedListedSourceObservedFromStore(st *store.Store, cfg *config.Config, n
 // WatchedSourceObservedForConfig is the whole observed-age series of a
 // deployment: the owning instances' feed observations plus the beads
 // instances' listings and orphan reads.
-func WatchedSourceObservedForConfig(st *store.Store, cfg *config.Config, now func() time.Time) OutcomeFunc {
+func WatchedSourceObservedForConfig(ctx context.Context, st *store.Store, cfg *config.Config, now func() time.Time) OutcomeFunc {
 	return CombineOutcomes(
-		WatchedSourceObservedFromStore(st, OwningQueriesByInstance(cfg), now),
-		WatchedListedSourceObservedFromStore(st, cfg, now),
+		WatchedSourceObservedFromStore(ctx, st, OwningQueriesByInstance(cfg), now),
+		WatchedListedSourceObservedFromStore(ctx, st, cfg, now),
 	)
 }
 
 // UnflaggedMembersForConfig is the whole unflagged-member series of a
 // deployment: the stored count of every owning and every beads instance (both
 // halves write change_flow.unflagged.<instance>).
-func UnflaggedMembersForConfig(st *store.Store, cfg *config.Config) OutcomeFunc {
+func UnflaggedMembersForConfig(ctx context.Context, st *store.Store, cfg *config.Config) OutcomeFunc {
 	return CombineOutcomes(
-		UnflaggedMembersFromStore(st, OwningQueriesByInstance(cfg)),
-		UnflaggedMembersFromStore(st, ListedQueriesByInstance(cfg)),
+		UnflaggedMembersFromStore(ctx, st, OwningQueriesByInstance(cfg)),
+		UnflaggedMembersFromStore(ctx, st, ListedQueriesByInstance(cfg)),
 	)
 }

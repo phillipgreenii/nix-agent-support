@@ -35,7 +35,7 @@ func TestServePayloadGoldenOverCorpus(t *testing.T) {
 		if fx.Type != "pr" {
 			continue
 		}
-		if err := s.UpsertEntityForTest(store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID, Facts: string(fx.Payload), AsOf: "2026-09-16T00:00:00Z", ContentHash: "seed"}); err != nil {
+		if err := s.UpsertEntityForTest(context.Background(), store.Entity{Repo: corpus.Repo, EntityType: "pr", EntityID: fx.ID, Facts: string(fx.Payload), AsOf: "2026-09-16T00:00:00Z", ContentHash: "seed"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := p.RunInterpretOnly(context.Background(), "pr", fx.ID, gather.ChangeChanged); err != nil {
@@ -44,7 +44,7 @@ func TestServePayloadGoldenOverCorpus(t *testing.T) {
 		seeded++
 	}
 	// A row written by an older binary: the decision pair is absent.
-	if err := s.UpsertInterpretation(store.Interpretation{
+	if err := s.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: corpus.Repo, EntityType: "pr", EntityID: corpus.Repo + "#990", Ownership: "team",
 		Enrichment:   `{"kind":"other","size":"S","title":"Legacy row","url":"https://example.invalid/acme/widgets/pull/990","author":"teammate"}`,
 		Urgency:      `{"level":"low","score":0}`,
@@ -60,7 +60,7 @@ func TestServePayloadGoldenOverCorpus(t *testing.T) {
 	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
 	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
 
-	h, err := NewHandler(s, cfg)
+	h, err := NewHandler(context.Background(), s, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

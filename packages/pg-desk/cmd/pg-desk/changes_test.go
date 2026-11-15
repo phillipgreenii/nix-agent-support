@@ -54,7 +54,7 @@ func newChangesFixture(t *testing.T, typ string, queries ...string) *changesFixt
 		// These fixtures exercise the rules AFTER a query's baseline, so each
 		// marker is preset; the baseline run itself is tested in internal/changes.
 		for _, q := range queries {
-			if err := seed.SetMeta(changes.MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
+			if err := seed.SetMeta(context.Background(), changes.MetaBaselinePrefix+q, "2026-09-30T00:00:00Z"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -173,7 +173,7 @@ func (f *changesFixture) envOf(args ...string) (changes.Envelope, error) {
 
 func (f *changesFixture) consumer(name string) (store.Consumer, bool) {
 	f.t.Helper()
-	cs, err := f.seed.ListConsumers()
+	cs, err := f.seed.ListConsumers(context.Background())
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func (f *changesFixture) consumer(name string) (store.Consumer, bool) {
 
 func (f *changesFixture) logLen() int {
 	f.t.Helper()
-	rows, err := f.seed.ListChangesAfter(f.typ, 0, 0)
+	rows, err := f.seed.ListChangesAfter(context.Background(), f.typ, 0, 0)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestChangesListAndDiffHydratesLogsAndAdvances(t *testing.T) {
 		t.Errorf("an unchanged tick must only list, got %v", got)
 	}
 	// Whatever the fingerprints, nothing is ever queued for a later tick.
-	if _, found, _ := f.seed.GetMeta("change_flow.deferred.issue"); found {
+	if _, found, _ := f.seed.GetMeta(context.Background(), "change_flow.deferred.issue"); found {
 		t.Error("a deferral queue was persisted")
 	}
 }
@@ -289,7 +289,7 @@ func TestChangesCachedDoesNotAdvanceCursor(t *testing.T) {
 	if _, err := f.envOf("--consumer", "other"); err != nil { // fills the log
 		t.Fatal(err)
 	}
-	if _, err := f.seed.ReadChanges("peeker", "issue", 0, changesTestNow.Add(-time.Hour)); err != nil {
+	if _, err := f.seed.ReadChanges(context.Background(), "peeker", "issue", 0, changesTestNow.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	callsBefore := len(f.calls())
@@ -408,8 +408,8 @@ func TestChangesResetReplaysActiveEntities(t *testing.T) {
 		t.Fatalf("seed call = %+v, %v", first, err)
 	}
 	// bd-3 leaves the watched set: inactive entities are not replayed.
-	ent, _, _ := f.seed.GetEntity("o/r", "issue", "bd-3")
-	if _, err := f.seed.WriteEntityStateWithLog(ent, ent.Version, "2026-09-30T01:00:00Z", false, []string{"removed"}, "sweep", "2026-09-30T01:00:00Z"); err != nil {
+	ent, _, _ := f.seed.GetEntity(context.Background(), "o/r", "issue", "bd-3")
+	if _, err := f.seed.WriteEntityStateWithLog(context.Background(), ent, ent.Version, "2026-09-30T01:00:00Z", false, []string{"removed"}, "sweep", "2026-09-30T01:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	f.watch("bd-1", "bd-2", "bd-3") // --reset replays only watched issues
@@ -485,7 +485,7 @@ func TestChangesExit2OnPartialFailure(t *testing.T) {
 		}
 	}
 	// The failure is persisted for status and doctor.
-	stats, err := changes.ReadHydrationStats(f.seed, "issue")
+	stats, err := changes.ReadHydrationStats(context.Background(), f.seed, "issue")
 	if err != nil || stats.Failures != 1 || stats.Hydrations != 3 || stats.Degraded["bd-3"].Count != 1 {
 		t.Errorf("hydration stats = %+v, %v", stats, err)
 	}
@@ -500,7 +500,7 @@ func TestChangesTotalFailureLogsNothingAndKeepsCursor(t *testing.T) {
 	if _, err := f.envOf("--consumer", "other"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.seed.RegisterConsumer("router", "issue", changesTestNow.Add(-48*time.Hour)); err != nil {
+	if err := f.seed.RegisterConsumer(context.Background(), "router", "issue", changesTestNow.Add(-48*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	logBefore := f.logLen()
@@ -527,7 +527,7 @@ func TestSeenAtLivenessReplacesHeartbeat(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open")
 	f.listing("open", 0, okSource)
 	old := changesTestNow.Add(-72 * time.Hour)
-	if err := f.seed.RegisterConsumer("router", "issue", old); err != nil {
+	if err := f.seed.RegisterConsumer(context.Background(), "router", "issue", old); err != nil {
 		t.Fatal(err)
 	}
 
@@ -545,7 +545,7 @@ func TestSeenAtLivenessReplacesHeartbeat(t *testing.T) {
 	if c, _ := f.consumer("router"); c.SeenAt != changesTestNow.Format(time.RFC3339) {
 		t.Errorf("real call seen_at = %q, want %q", c.SeenAt, changesTestNow.Format(time.RFC3339))
 	}
-	if _, found, _ := f.seed.GetMeta(store.MetaKeyLastHeartbeat); found {
+	if _, found, _ := f.seed.GetMeta(context.Background(), store.MetaKeyLastHeartbeat); found {
 		t.Error("changes wrote the retired heartbeat key")
 	}
 	// A consumer first seen by a real call is registered with that seen_at.
@@ -565,6 +565,7 @@ func TestChangesLimitPagesThroughTheLog(t *testing.T) {
 	f.listing("open", 0, okSource)
 	for i := 1; i <= 5; i++ {
 		if _, err := f.seed.WriteEntityStateWithLog(
+			context.Background(),
 			store.Entity{Repo: "o/r", EntityType: "issue", EntityID: fmt.Sprintf("bd-%d", i), Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
 			0, freshHydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
 		); err != nil {
@@ -610,6 +611,7 @@ func TestChangesConcurrentCallsForOneConsumerSerialize(t *testing.T) {
 	f.listing("open", 0, okSource)
 	for i := 1; i <= 6; i++ {
 		if _, err := f.seed.WriteEntityStateWithLog(
+			context.Background(),
 			store.Entity{Repo: "o/r", EntityType: "issue", EntityID: fmt.Sprintf("bd-%d", i), Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
 			0, freshHydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
 		); err != nil {
@@ -675,13 +677,14 @@ func TestChangesPrunesWithConfiguredRetentionAndStaleness(t *testing.T) {
 			f.listing("open", 0, okSource)
 			for i := 1; i <= 2; i++ {
 				if _, err := f.seed.WriteEntityStateWithLog(
+					context.Background(),
 					store.Entity{Repo: "o/r", EntityType: "issue", EntityID: fmt.Sprintf("bd-%d", i), Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"},
 					0, freshHydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-01T10:00:00Z",
 				); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err := f.seed.RegisterConsumer("slow", "issue", tc.slowSeenAt); err != nil {
+			if err := f.seed.RegisterConsumer(context.Background(), "slow", "issue", tc.slowSeenAt); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.envOf("--consumer", "router"); err != nil {
@@ -792,6 +795,7 @@ func (f *changesFixture) showIssueState(id, state string) {
 func (f *changesFixture) seedHydrated(id, hydratedAt string) {
 	f.t.Helper()
 	if _, err := f.seed.WriteEntityStateWithLog(
+		context.Background(),
 		store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
 		0, hydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
 	); err != nil {
@@ -806,7 +810,7 @@ func (f *changesFixture) watch(ids ...string) {
 	f.t.Helper()
 	yes := true
 	for _, id := range ids {
-		if err := f.seed.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+		if err := f.seed.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &yes); err != nil {
 			f.t.Fatal(err)
 		}
 	}
@@ -814,7 +818,7 @@ func (f *changesFixture) watch(ids ...string) {
 
 func (f *changesFixture) entity(id string) store.Entity {
 	f.t.Helper()
-	e, found, err := f.seed.GetEntity("o/r", f.typ, id)
+	e, found, err := f.seed.GetEntity(context.Background(), "o/r", f.typ, id)
 	if err != nil || !found {
 		f.t.Fatalf("entity %s: found=%v err=%v", id, found, err)
 	}
@@ -990,7 +994,7 @@ func TestAgedUnchangedIssueIsNeverSwept(t *testing.T) {
 	}
 	// Age the row past sweep.max_age without changing its facts.
 	e := f.entity("bd-1")
-	if _, err := f.seed.WriteEntityStateWithLog(e, e.Version, "2026-09-01T00:00:00Z", true, nil, "", ""); err != nil {
+	if _, err := f.seed.WriteEntityStateWithLog(context.Background(), e, e.Version, "2026-09-01T00:00:00Z", true, nil, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	before := len(f.shows())
@@ -1016,7 +1020,7 @@ func TestSweepDueIssuesAreNotHydrated(t *testing.T) {
 	f.seedHydrated("bd-4", "2026-09-05T00:00:00Z")
 	f.seedHydrated("bd-2", "2026-09-20T00:00:00Z")
 	e := f.entity("bd-2")
-	if _, err := f.seed.WriteEntityStateWithLog(e, e.Version, e.HydratedAt, false, []string{"removed"}, "pg-connector", "2026-09-29T11:00:00Z"); err != nil {
+	if _, err := f.seed.WriteEntityStateWithLog(context.Background(), e, e.Version, e.HydratedAt, false, []string{"removed"}, "pg-connector", "2026-09-29T11:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	f.listing("a", 0, okSource)

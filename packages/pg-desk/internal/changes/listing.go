@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -37,7 +38,7 @@ const MetaListingOKPrefix = "change_flow.listing_ok."
 // listing shrink a watched set, see listComplete). A failed, degraded or
 // truncated listing leaves the key untouched. Best-effort: a write error is a
 // warning, never a failed call.
-func (e *Engine) recordListingOK(set func(key, value string) error, entityType string, runs []queryRun) {
+func (e *Engine) recordListingOK(ctx context.Context, set func(ctx context.Context, key, value string) error, entityType string, runs []queryRun) {
 	if entityType != issueEntityType {
 		return
 	}
@@ -46,7 +47,7 @@ func (e *Engine) recordListingOK(set func(key, value string) error, entityType s
 		if r.err != nil || !listComplete(r.res) {
 			continue
 		}
-		if err := set(MetaListingOKPrefix+r.query, at); err != nil {
+		if err := set(ctx, MetaListingOKPrefix+r.query, at); err != nil {
 			e.warnf("changes: persist listing_ok %s: %v\n", r.query, err)
 		}
 	}
@@ -76,13 +77,13 @@ type listingValue struct {
 
 // recordListing writes one entry per source via set (meta SetMeta). It stops
 // at, and returns, the first write error; the caller treats it as a warning.
-func recordListing(set func(key, value string) error, entityType, at string, sources []Source) error {
+func recordListing(ctx context.Context, set func(ctx context.Context, key, value string) error, entityType, at string, sources []Source) error {
 	for _, s := range sources {
 		b, err := json.Marshal(listingValue{Status: s.Status, Reason: s.Reason, At: at})
 		if err != nil {
 			return err
 		}
-		if err := set(listingKey(entityType, s.Query), string(b)); err != nil {
+		if err := set(ctx, listingKey(entityType, s.Query), string(b)); err != nil {
 			return err
 		}
 	}
@@ -93,9 +94,9 @@ func recordListing(set func(key, value string) error, entityType, at string, sou
 // sorted by query. A missing key reads as no entry; an undecodable value (or
 // one with an empty status) is skipped, never an error, so the caller can
 // count the query as unknown.
-func ReadListingStatuses(st *store.Store, entityType string) ([]ListingStatus, error) {
+func ReadListingStatuses(ctx context.Context, st *store.Store, entityType string) ([]ListingStatus, error) {
 	prefix := listingKey(entityType, "")
-	rows, err := st.ListMetaPrefix(prefix)
+	rows, err := st.ListMetaPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}

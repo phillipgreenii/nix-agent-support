@@ -29,7 +29,7 @@ func focusConfig() *config.Config {
 
 func focusScrape(t *testing.T, s *store.Store) string {
 	t.Helper()
-	handler, err := NewHandler(s, focusConfig())
+	handler, err := NewHandler(context.Background(), s, focusConfig())
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -53,7 +53,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 	write := func(typ, id, facts string) {
 		t.Helper()
 		e := store.Entity{Repo: focusScrapeRepo, EntityType: typ, EntityID: id, Facts: facts, AsOf: focusAt, ContentHash: "h" + id}
-		if _, err := s.WriteEntityStateWithLog(e, 0, focusAt, true, []string{"created"}, "sync", focusAt); err != nil {
+		if _, err := s.WriteEntityStateWithLog(context.Background(), e, 0, focusAt, true, []string{"created"}, "sync", focusAt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -63,7 +63,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 	write("issue", "bd-1", `{"issue_show":{"id":"bd-1","state":"open","created_at":"2026-10-10T10:00:00Z","metadata":{"source_id":"1","source_type":"pr"}}}`)
 	write("issue", "bd-2", `{"issue_show":{"id":"bd-2","state":"deferred","metadata":{"source_id":"2","source_type":"pr","focus_hold":"struck"}}}`)
 	for bead, src := range map[string]string{"bd-1": "1", "bd-2": "2"} {
-		err := s.ReplaceDerivedXrefs(focusScrapeRepo, "issue", bead, []store.XrefLink{{
+		err := s.ReplaceDerivedXrefs(context.Background(), focusScrapeRepo, "issue", bead, []store.XrefLink{{
 			Repo: focusScrapeRepo, FromType: "issue", FromID: bead, ToType: "pr", ToID: src,
 			Relation: "source", Origin: "derived:test", FirstSeen: focusAt, LastConfirmed: focusAt,
 		}})
@@ -74,7 +74,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 	mustUpsertInterpretation(t, s, store.Interpretation{
 		Repo: focusScrapeRepo, EntityType: "pr", EntityID: "1", Panel: PanelMineAwaitingMe, AsOf: focusAt,
 	})
-	if err := s.SetMeta("change_flow.listing.issue.mine", `{"status":"degraded","reason":"truncated","at":"`+focusAt+`"}`); err != nil {
+	if err := s.SetMeta(context.Background(), "change_flow.listing.issue.mine", `{"status":"degraded","reason":"truncated","at":"`+focusAt+`"}`); err != nil {
 		t.Fatal(err)
 	}
 	err := s.FocusLockTx(t.Context(), func(tx *store.FocusTx) error {
@@ -96,7 +96,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"1", "2", "3"} {
-		if err := s.SetAnnotation(store.KVAnnotation{
+		if err := s.SetAnnotation(context.Background(), store.KVAnnotation{
 			Repo: focusScrapeRepo, EntityType: "pr", EntityID: id, Key: store.AnnotationFocusSelected,
 			Value: "2026-10-10", Origin: "pg-desk", SetBy: "operator", SetAt: focusAt,
 		}); err != nil {
@@ -104,7 +104,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 		}
 	}
 	// A replan draft over the locked plan.
-	if changed, err := s.FocusDraftReplan(store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-10", Cap: 6, MadeAt: "2026-10-10T11:00:00Z", BodyJSON: "{}"}, true); err != nil || changed {
+	if changed, err := s.FocusDraftReplan(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-10", Cap: 6, MadeAt: "2026-10-10T11:00:00Z", BodyJSON: "{}"}, true); err != nil || changed {
 		t.Fatalf("FocusDraftReplan = %v, %v", changed, err)
 	}
 	exit := func(n int) *int { return &n }
@@ -121,7 +121,7 @@ func seedFocusStore(t *testing.T) *store.Store {
 		r.RunID = "RUN" + string(rune('A'+i))
 		r.StartedAt = "2026-10-10T09:0" + string(rune('0'+i)) + ":00Z"
 		r.Actor = "tester"
-		if _, err := s.FocusRunInsert(r); err != nil {
+		if _, err := s.FocusRunInsert(context.Background(), r); err != nil {
 			t.Fatal(err)
 		}
 	}

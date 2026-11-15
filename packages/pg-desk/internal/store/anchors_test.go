@@ -69,7 +69,7 @@ func TestCountPRAnchors(t *testing.T) {
 	// it has no age to report.
 	anchor("a9", AnchorIssueType, "open", "o/r#99", "work", 1)
 
-	got, err := s.CountPRAnchors(now)
+	got, err := s.CountPRAnchors(context.Background(), now)
 	if err != nil {
 		t.Fatalf("CountPRAnchors: %v", err)
 	}
@@ -89,13 +89,13 @@ func TestCountPRAnchors(t *testing.T) {
 }
 
 func TestCountPRAnchorsEmptyStoreIsZeroAndAnOldSchemaIsAnError(t *testing.T) {
-	got, err := OpenNewSchemaForTest(t).CountPRAnchors(time.Now())
+	got, err := OpenNewSchemaForTest(t).CountPRAnchors(context.Background(), time.Now())
 	if err != nil || got != (PRAnchors{}) {
 		t.Errorf("empty schema-2 store: got %+v, err %v; want the zero view", got, err)
 	}
 	// A schema-1 store has no xref relation column: the read fails and the
 	// failure is returned, never folded into a zero view.
-	if got, err := OpenRetiredSchemaForTest(t).CountPRAnchors(time.Now()); err == nil {
+	if got, err := OpenRetiredSchemaForTest(t).CountPRAnchors(context.Background(), time.Now()); err == nil {
 		t.Errorf("schema-1 store: got %+v with no error; a failed read must be an error", got)
 	}
 }

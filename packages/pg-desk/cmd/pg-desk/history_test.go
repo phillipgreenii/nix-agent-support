@@ -53,6 +53,7 @@ func seedHistoryAt(t *testing.T, entityType, id, facts string, n int) (string, f
 			kinds, origin = []string{"reconcile"}, "sweep"
 		}
 		version, err = s.WriteEntityWithLog(
+			context.Background(),
 			store.Entity{Repo: "o/r", EntityType: entityType, EntityID: id, Facts: facts, AsOf: "2026-09-29T00:00:00Z"},
 			version, kinds, origin, fmt.Sprintf("2026-09-29T14:00:%02dZ", i),
 		)

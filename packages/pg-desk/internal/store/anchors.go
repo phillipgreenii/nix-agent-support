@@ -48,9 +48,9 @@ type PRAnchors struct {
 // It reads schema-2 tables and columns, so it fails on an older store;
 // callers check SchemaVersion first and treat an older store as "no data",
 // never as an empty view. A read failure is returned, never folded into zero.
-func (s *Store) CountPRAnchors(now time.Time) (PRAnchors, error) {
+func (s *Store) CountPRAnchors(ctx context.Context, now time.Time) (PRAnchors, error) {
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT x.to_id, a.facts,
 		        COALESCE(p.facts, ''), p.entity_id IS NOT NULL,
 		        COALESCE(p.hydrated_at, p.first_seen_at, p.as_of, ''),

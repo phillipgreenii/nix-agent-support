@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func TestCorrelationGroupTakesOneSlot(t *testing.T) {
 	// Through the rank: the group is represented by its highest-ranked member
 	// (the started PR) and consumes ONE slot, so with a cap of 2 the group and
 	// the lone bead fill the plan.
-	r := Rank(in, set, RankOptions{Date: rankDay, Cap: 2, Clock: interpret.FixedClock(fixtureNow)})
+	r := Rank(context.Background(), in, set, RankOptions{Date: rankDay, Cap: 2, Clock: interpret.FixedClock(fixtureNow)})
 	wantOrder(t, r, pr, alone)
 	if !r.Rows[0].InPlan || !r.Rows[1].InPlan {
 		t.Errorf("rows = %+v: the group must take one slot, leaving one for the lone bead", r.Rows)
@@ -69,7 +70,7 @@ func TestSourceLinkDoesNotJoinCorrelationGroup(t *testing.T) {
 	}
 	// End to end through the rank: nothing is grouped, so each is a row of its
 	// own and the focus bead's P0 does not leak into its PR's priority.
-	r := Rank(in, set, RankOptions{Date: rankDay, Clock: interpret.FixedClock(fixtureNow)})
+	r := Rank(context.Background(), in, set, RankOptions{Date: rankDay, Clock: interpret.FixedClock(fixtureNow)})
 	if len(r.Rows) != 4 || len(r.Covered) != 0 {
 		t.Errorf("rows = %v, covered = %v, want four separate rows", rowKeys(r), r.Covered)
 	}
@@ -127,7 +128,7 @@ func TestCorrelatedDueDateInheritance(t *testing.T) {
 	// End to end through the rank: the group is ONE row (the started PR),
 	// carrying the earliest due DAY of the group (read in the focus zone) and
 	// its highest priority; the two degradations are counted.
-	r := Rank(in, set, RankOptions{Date: rankDay, Clock: interpret.FixedClock(fixtureNow)})
+	r := Rank(context.Background(), in, set, RankOptions{Date: rankDay, Clock: interpret.FixedClock(fixtureNow)})
 	if len(r.Rows) != 1 || r.Rows[0].Key != pr {
 		t.Fatalf("rows = %v, want the PR alone", rowKeys(r))
 	}
@@ -144,7 +145,7 @@ func TestCorrelatedDueDateInheritance(t *testing.T) {
 	}
 	// The inherited date decides the TIER: a group whose earliest due is before
 	// the addressed day is overdue, though the PR has no date of its own.
-	later := Rank(in, set, RankOptions{Date: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC), Clock: interpret.FixedClock(fixtureNow)})
+	later := Rank(context.Background(), in, set, RankOptions{Date: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC), Clock: interpret.FixedClock(fixtureNow)})
 	if later.Rows[0].Tier != TierOverdue {
 		t.Errorf("tier on Oct 13 = %q, want overdue through the inherited due date", later.Rows[0].Tier)
 	}

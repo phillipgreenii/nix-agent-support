@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -136,11 +137,11 @@ func put(t *testing.T, st *store.Store, p prSpec) {
 		p.approvals.WaitingOn, p.approvals.Reason = string(w), r
 	}
 	if !p.noFacts {
-		if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: "pr", EntityID: p.id(), Facts: p.facts(), AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+		if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: "pr", EntityID: p.id(), Facts: p.facts(), AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: testRepo, EntityType: "pr", EntityID: p.id(),
 		Ownership: p.ownership, Panel: p.panel, Degraded: p.degraded,
 		Approvals: mustJSON(t, p.approvals), MatchReasons: mustJSON(t, p.match),
@@ -157,7 +158,7 @@ func baseConfig() *config.Config {
 
 func evaluate(t *testing.T, r Reader, cfg *config.Config) Result {
 	t.Helper()
-	res, err := Evaluate(Inputs{Store: r, Repo: testRepo, Config: cfg, Clock: testClock()})
+	res, err := Evaluate(context.Background(), Inputs{Store: r, Repo: testRepo, Config: cfg, Clock: testClock()})
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -407,7 +408,7 @@ func TestSuppressionChainOrderAndReasons(t *testing.T) {
 	setKV := func(key, value string) annotate {
 		return func(t *testing.T, st *store.Store, id string) {
 			t.Helper()
-			if err := st.SetAnnotation(store.KVAnnotation{Repo: testRepo, EntityType: "pr", EntityID: id, Key: key, Value: value, Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
+			if err := st.SetAnnotation(context.Background(), store.KVAnnotation{Repo: testRepo, EntityType: "pr", EntityID: id, Key: key, Value: value, Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -498,7 +499,7 @@ func orEmpty(m map[string]string) map[string]string {
 // A store that is not on schema 2 is refused, never read as an all-clear.
 func TestRetiredSchemaStoreIsRefused(t *testing.T) {
 	st := store.OpenRetiredSchemaForTest(t)
-	_, err := Evaluate(Inputs{Store: st, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
+	_, err := Evaluate(context.Background(), Inputs{Store: st, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
 	if !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("Evaluate on a retired-schema store = %v, want store.ErrOldSchema", err)
 	}
@@ -515,7 +516,7 @@ func TestMissingFactsAndUnreadableStoreAreNeverAllClear(t *testing.T) {
 	})
 	t.Run("an unreadable store is an error", func(t *testing.T) {
 		boom := errors.New("disk on fire")
-		_, err := Evaluate(Inputs{Store: failingReader{err: boom}, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
+		_, err := Evaluate(context.Background(), Inputs{Store: failingReader{err: boom}, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
 		if !errors.Is(err, boom) {
 			t.Errorf("err = %v, want it to wrap the read error, never an empty result", err)
 		}
@@ -524,7 +525,7 @@ func TestMissingFactsAndUnreadableStoreAreNeverAllClear(t *testing.T) {
 		st := store.OpenNewSchemaForTest(t)
 		put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
 		boom := errors.New("annotation read failed")
-		_, err := Evaluate(Inputs{Store: annotationFailingReader{Reader: st, err: boom}, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
+		_, err := Evaluate(context.Background(), Inputs{Store: annotationFailingReader{Reader: st, err: boom}, Repo: testRepo, Config: baseConfig(), Clock: testClock()})
 		if !errors.Is(err, boom) {
 			t.Errorf("err = %v, want the annotation read error", err)
 		}
@@ -533,34 +534,34 @@ func TestMissingFactsAndUnreadableStoreAreNeverAllClear(t *testing.T) {
 
 type failingReader struct{ err error }
 
-func (f failingReader) RequireNewSchema() error { return nil }
-func (f failingReader) ListInterpretations() ([]store.Interpretation, error) {
+func (f failingReader) RequireNewSchema(_ context.Context) error { return nil }
+func (f failingReader) ListInterpretations(_ context.Context) ([]store.Interpretation, error) {
 	return nil, f.err
 }
 
-func (f failingReader) ListEntities() ([]store.Entity, error) { return nil, f.err }
+func (f failingReader) ListEntities(_ context.Context) ([]store.Entity, error) { return nil, f.err }
 
-func (f failingReader) GetEntity(string, string, string) (store.Entity, bool, error) {
+func (f failingReader) GetEntity(context.Context, string, string, string) (store.Entity, bool, error) {
 	return store.Entity{}, false, f.err
 }
 
-func (f failingReader) ListKVAnnotations(string, string, string) ([]store.KVAnnotation, error) {
+func (f failingReader) ListKVAnnotations(context.Context, string, string, string) ([]store.KVAnnotation, error) {
 	return nil, f.err
 }
 
-func (f failingReader) ListXrefLinksFrom(string, string, string) ([]store.XrefLink, error) {
+func (f failingReader) ListXrefLinksFrom(context.Context, string, string, string) ([]store.XrefLink, error) {
 	return nil, f.err
 }
 
-func (f failingReader) ListXrefLinksTo(string, string, string) ([]store.XrefLink, error) {
+func (f failingReader) ListXrefLinksTo(context.Context, string, string, string) ([]store.XrefLink, error) {
 	return nil, f.err
 }
 
-func (f failingReader) ListXrefsByFrom(string, string, string, string) ([]store.Xref, error) {
+func (f failingReader) ListXrefsByFrom(context.Context, string, string, string, string) ([]store.Xref, error) {
 	return nil, f.err
 }
 
-func (f failingReader) ListXrefsByTo(string, string, string) ([]store.Xref, error) {
+func (f failingReader) ListXrefsByTo(context.Context, string, string, string) ([]store.Xref, error) {
 	return nil, f.err
 }
 
@@ -569,7 +570,7 @@ type annotationFailingReader struct {
 	err error
 }
 
-func (a annotationFailingReader) ListKVAnnotations(string, string, string) ([]store.KVAnnotation, error) {
+func (a annotationFailingReader) ListKVAnnotations(context.Context, string, string, string) ([]store.KVAnnotation, error) {
 	return nil, a.err
 }
 
@@ -602,19 +603,19 @@ func TestEvaluateIsDeterministicWithAFixedClock(t *testing.T) {
 func TestEvaluateDoesNotWrite(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	before, err := st.ListInterpretations()
+	before, err := st.ListInterpretations(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	evaluate(t, st, baseConfig())
-	after, err := st.ListInterpretations()
+	after, err := st.ListInterpretations(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(before) != fmt.Sprint(after) {
 		t.Error("Evaluate changed the store")
 	}
-	if logs, err := st.ListKVAnnotations(testRepo, "pr", pid(1)); err != nil || len(logs) != 0 {
+	if logs, err := st.ListKVAnnotations(context.Background(), testRepo, "pr", pid(1)); err != nil || len(logs) != 0 {
 		t.Errorf("Evaluate wrote annotations: %v %v", logs, err)
 	}
 }
@@ -622,7 +623,7 @@ func TestEvaluateDoesNotWrite(t *testing.T) {
 func TestInactiveEntitiesAreNotProjected(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	views, err := Project(inactiveReader{Reader: st}, testRepo, baseConfig())
+	views, err := Project(context.Background(), inactiveReader{Reader: st}, testRepo, baseConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,8 +634,8 @@ func TestInactiveEntitiesAreNotProjected(t *testing.T) {
 
 type inactiveReader struct{ Reader }
 
-func (i inactiveReader) GetEntity(repo, typ, id string) (store.Entity, bool, error) {
-	e, ok, err := i.Reader.GetEntity(repo, typ, id)
+func (i inactiveReader) GetEntity(ctx context.Context, repo, typ, id string) (store.Entity, bool, error) {
+	e, ok, err := i.Reader.GetEntity(ctx, repo, typ, id)
 	e.Inactive = true
 	return e, ok, err
 }
@@ -642,7 +643,7 @@ func (i inactiveReader) GetEntity(repo, typ, id string) (store.Entity, bool, err
 func TestRepoFilter(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	put(t, st, prSpec{number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe})
-	res, err := Evaluate(Inputs{Store: st, Repo: "other/repo", Config: baseConfig(), Clock: testClock()})
+	res, err := Evaluate(context.Background(), Inputs{Store: st, Repo: "other/repo", Config: baseConfig(), Clock: testClock()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +657,7 @@ func TestRepoFilter(t *testing.T) {
 type ctxSuppressor struct{}
 
 func (ctxSuppressor) Name() string { return "test-context" }
-func (ctxSuppressor) Suppress(c Candidate, _ *SuppressEnv) (bool, error) {
+func (ctxSuppressor) Suppress(_ context.Context, c Candidate, _ *SuppressEnv) (bool, error) {
 	return strings.HasSuffix(c.ID, "#4242"), nil
 }
 

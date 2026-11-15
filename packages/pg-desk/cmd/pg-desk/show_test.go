@@ -35,7 +35,7 @@ func TestShowPrintsStoredInterpretation(t *testing.T) {
 	// Seeded with the qualified "o/r#42" entity id — the real convention
 	// gather/pg-connector write (pg2-276sg) — not the bare "42" a pre-fix
 	// resolvePRRef would have queried with.
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 		Ownership: "mine", Category: "bugfix", Panel: panelMineAwaitingMe,
 		AsOf: "2026-09-16T00:00:00Z",
@@ -56,7 +56,7 @@ func TestShowJSONIncludesWIP(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	withOpenSeams(t, cfg, openFresh)
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 		Ownership: "mine", AsOf: "2026-09-16T00:00:00Z",
 	}); err != nil {
@@ -92,7 +92,7 @@ func TestShowPlainTextEntityIDNotDoubled(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: "owner/repo"}}}
 	withOpenSeams(t, cfg, openFresh)
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "owner/repo", EntityType: entityTypePR, EntityID: "owner/repo#105204",
 		Ownership: "mine", Category: "bugfix", Panel: panelMineAwaitingMe,
 		AsOf: "2026-09-16T00:00:00Z",
@@ -153,7 +153,7 @@ func seedShowNewSchema(t *testing.T, anns map[string]string) {
 	t.Helper()
 	open, seed := seedLinkStore(t, [2]string{entityTypePR, "o/r#42"})
 	withOpenSeams(t, linkTestConfig(), open)
-	if err := seed.UpsertInterpretation(store.Interpretation{
+	if err := seed.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 		Ownership: "mine", Category: "bugfix", Panel: panelMineAwaitingMe,
 		AsOf: "2026-09-16T00:00:00Z",
@@ -161,7 +161,7 @@ func seedShowNewSchema(t *testing.T, anns map[string]string) {
 		t.Fatalf("seed interpretation: %v", err)
 	}
 	for k, v := range anns {
-		if err := seed.SetAnnotation(store.KVAnnotation{
+		if err := seed.SetAnnotation(context.Background(), store.KVAnnotation{
 			Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#42",
 			Key: k, Value: v, Origin: "pg-desk", SetBy: "alice", SetAt: "2026-09-16T00:00:00Z",
 		}); err != nil {

@@ -90,6 +90,8 @@ Entity types whose list cannot be fingerprinted (thread) are refused.`, entityTy
 }
 
 func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
+	ctx := cmd.Context()
+
 	if strings.TrimSpace(f.consumer) == "" {
 		return errors.New("changes: --consumer must not be empty")
 	}
@@ -110,7 +112,7 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 	if err != nil {
 		return fmt.Errorf("changes: load config: %w", err)
 	}
-	st, err := openNewSchemaStore("changes")
+	st, err := openNewSchemaStore(ctx, "changes")
 	if err != nil {
 		return err
 	}

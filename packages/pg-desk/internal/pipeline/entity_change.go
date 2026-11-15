@@ -159,7 +159,7 @@ type EntityChangeResult struct {
 // crash inside (4) MAY duplicate a link_changed on the next hydration (the
 // diff is recomputed against the unreplaced set) but never loses one.
 func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID string, change gather.ChangeKind, opts EntityChangeOptions) (EntityChangeResult, error) {
-	if err := p.store.RequireNewSchema(); err != nil {
+	if err := p.store.RequireNewSchema(ctx); err != nil {
 		return EntityChangeResult{}, err
 	}
 	ge, ok := p.entityGatherers[entityType]
@@ -239,13 +239,13 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 
 	// (2) the new derived link set, diffed once against the current one.
 	removed := result.RemovedState != "" || len(result.Payload) == 0
-	newLinks, haveLinks, err := p.deriveLinks(entityType, entityID, result.Payload, removed, at)
+	newLinks, haveLinks, err := p.deriveLinks(ctx, entityType, entityID, result.Payload, removed, at)
 	if err != nil {
 		return EntityChangeResult{}, fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
 	}
 	var linkChanges []classify.LinkChange
 	if haveLinks {
-		current, err := p.store.ListXrefLinksFrom(repo, entityType, entityID)
+		current, err := p.store.ListXrefLinksFrom(ctx, repo, entityType, entityID)
 		if err != nil {
 			return EntityChangeResult{}, fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
 		}
@@ -257,7 +257,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		}
 		linkChanges = classify.DiffLinks(derived, newLinks)
 	}
-	own := classify.NewStoreWorkLookup(p.store, repo)
+	own := classify.NewStoreWorkLookup(ctx, p.store, repo)
 
 	// An issue whose backend column names an owning instance has the comments
 	// proxy retired (Snapshot.OwningBackend, INV-ICD-6).
@@ -396,7 +396,7 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 
 	// (4) after the commit: local records for other entities, the
 	// interpretation, and the derived-link replacement LAST.
-	if err := p.finishEntityChange(repo, entityType, entityID, postCommit{
+	if err := p.finishEntityChange(ctx, repo, entityType, entityID, postCommit{
 		observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
 		interp: interpRow, contentHash: newSnap.ContentHash, haveLinks: haveLinks, newLinks: newLinks,
 	}); err != nil {
@@ -425,20 +425,20 @@ type postCommit struct {
 // the pinned order: the other-entity and propagation records, the
 // interpretation row and, LAST, the derived-link replacement. RunEntityChange
 // and IngestFeedRow both call it.
-func (p *Pipeline) finishEntityChange(repo, entityType, entityID string, pc postCommit) error {
+func (p *Pipeline) finishEntityChange(ctx context.Context, repo, entityType, entityID string, pc postCommit) error {
 	if h := p.seams.beforeFinish; h != nil {
 		if err := h(); err != nil {
 			return err
 		}
 	}
-	if err := p.appendLocalRecords(repo, entityType, entityID, pc.observed, pc.propagate, pc.otherLinks, pc.own, pc.at); err != nil {
+	if err := p.appendLocalRecords(ctx, repo, entityType, entityID, pc.observed, pc.propagate, pc.otherLinks, pc.own, pc.at); err != nil {
 		return err
 	}
-	if err := p.writeInterpretation(pc.interp, pc.contentHash); err != nil {
+	if err := p.writeInterpretation(ctx, pc.interp, pc.contentHash); err != nil {
 		return fmt.Errorf("pipeline: persist interpretation %s %s: %w", entityType, entityID, err)
 	}
 	if pc.haveLinks {
-		if err := p.store.ReplaceDerivedXrefs(repo, entityType, entityID, pc.newLinks); err != nil {
+		if err := p.store.ReplaceDerivedXrefs(ctx, repo, entityType, entityID, pc.newLinks); err != nil {
 			return fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
 		}
 	}
@@ -450,7 +450,7 @@ func (p *Pipeline) finishEntityChange(repo, entityType, entityID string, pc post
 // non-reconcile one, the one-hop propagation records for the entities linked
 // to it. Each (entity, kind) is appended at most once per call; an entity with
 // no row is skipped. An unobserved hydration appends nothing.
-func (p *Pipeline) appendLocalRecords(repo, entityType, entityID string, observed, propagate bool, otherLinks []classify.Targeted, own classify.WorkLookup, at string) error {
+func (p *Pipeline) appendLocalRecords(ctx context.Context, repo, entityType, entityID string, observed, propagate bool, otherLinks []classify.Targeted, own classify.WorkLookup, at string) error {
 	if h := p.seams.appendLocalRecords; h != nil {
 		if err := h(); err != nil {
 			return err
@@ -461,11 +461,11 @@ func (p *Pipeline) appendLocalRecords(repo, entityType, entityID string, observe
 	}
 	targets := otherLinks
 	if propagate {
-		from, err := p.store.ListXrefLinksFrom(repo, entityType, entityID)
+		from, err := p.store.ListXrefLinksFrom(ctx, repo, entityType, entityID)
 		if err != nil {
 			return fmt.Errorf("pipeline: propagate %s %s: %w", entityType, entityID, err)
 		}
-		to, err := p.store.ListXrefLinksTo(repo, entityType, entityID)
+		to, err := p.store.ListXrefLinksTo(ctx, repo, entityType, entityID)
 		if err != nil {
 			return fmt.Errorf("pipeline: propagate %s %s: %w", entityType, entityID, err)
 		}
@@ -480,7 +480,7 @@ func (p *Pipeline) appendLocalRecords(repo, entityType, entityID string, observe
 			continue
 		}
 		done[k] = true
-		if _, err := p.store.AppendEntityChange(repo, t.EntityType, t.EntityID, []string{string(t.Kind)}, localChangeOrigin, at); err != nil && !errors.Is(err, store.ErrNoEntity) {
+		if _, err := p.store.AppendEntityChange(ctx, repo, t.EntityType, t.EntityID, []string{string(t.Kind)}, localChangeOrigin, at); err != nil && !errors.Is(err, store.ErrNoEntity) {
 			return fmt.Errorf("pipeline: append %s for %s %s: %w", t.Kind, t.EntityType, t.EntityID, err)
 		}
 	}

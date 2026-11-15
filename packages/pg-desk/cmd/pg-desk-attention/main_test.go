@@ -67,7 +67,7 @@ func fixtureStore(t *testing.T, prs ...fixturePR) string {
 		if facts == "" {
 			facts = fmt.Sprintf(`{"pr_show":{"number":%d,"state":"open","author":"me","head_sha":"h1"}}`, p.n)
 		}
-		if err := st.UpsertEntityForTest(store.Entity{Repo: fixtureRepo, EntityType: "pr", EntityID: p.id(), Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+		if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: fixtureRepo, EntityType: "pr", EntityID: p.id(), Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
 		// The stored waiting-on decision a row of that panel carries.
@@ -78,7 +78,7 @@ func fixtureStore(t *testing.T, prs ...fixturePR) string {
 		case interpret.PanelMineAwaitingMe:
 			approvals = `{"waiting_on":"me","reason":"ci-failing"}`
 		}
-		if err := st.UpsertInterpretation(store.Interpretation{
+		if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 			Repo: fixtureRepo, EntityType: "pr", EntityID: p.id(), Ownership: p.ownership, Panel: p.panel,
 			Approvals: approvals, MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]", AsOf: "2026-10-06T11:00:00Z",
 		}); err != nil {
@@ -122,7 +122,7 @@ func evaluate(t *testing.T, path string) attention.Result {
 	}
 	defer func() { _ = st.Close() }()
 	cfg := &config.Config{SelfLogin: "me", Repos: []config.RepoConfig{{Remote: fixtureRepo}}}
-	res, err := attention.Evaluate(attention.Inputs{Store: st, Repo: fixtureRepo, Config: cfg, Clock: interpret.FixedClock(fixedNow)})
+	res, err := attention.Evaluate(context.Background(), attention.Inputs{Store: st, Repo: fixtureRepo, Config: cfg, Clock: interpret.FixedClock(fixedNow)})
 	if err != nil {
 		t.Fatal(err)
 	}

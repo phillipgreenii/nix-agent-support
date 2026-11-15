@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -89,8 +90,8 @@ func exitCodeFor(err error) int {
 // requireNewSchemaForTypedVerb is the refusal every typed verb applies right
 // after opening the store. It returns
 // the store's own error unchanged (it wraps store.ErrOldSchema).
-func requireNewSchemaForTypedVerb(st *store.Store) error {
-	return st.RequireNewSchema()
+func requireNewSchemaForTypedVerb(ctx context.Context, st *store.Store) error {
+	return st.RequireNewSchema(ctx)
 }
 
 // resolveTypedRef turns a command-line entity reference into the store key

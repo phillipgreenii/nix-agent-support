@@ -152,15 +152,15 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkSchema(s); err != nil {
+	if err := checkSchema(context.Background(), s); err != nil {
 		_ = s.sql.Close()
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
-	if err := ensureIssueFeedStorage(s); err != nil {
+	if err := ensureIssueFeedStorage(context.Background(), s); err != nil {
 		_ = s.sql.Close()
 		return nil, fmt.Errorf("store: ensure issue feed storage %s: %w", path, err)
 	}
-	if err := ensureInterpretationStamp(s); err != nil {
+	if err := ensureInterpretationStamp(context.Background(), s); err != nil {
 		_ = s.sql.Close()
 		return nil, fmt.Errorf("store: ensure interpretation stamp %s: %w", path, err)
 	}
@@ -259,9 +259,9 @@ var ErrOldSchema = errors.New("store is on the retired schema")
 // SchemaVersion returns the store's schema version: SQLite's user_version,
 // which is the source of truth (meta.schema_version mirrors it for
 // `status`). 0 means the file holds no schema at all.
-func (s *Store) SchemaVersion() (int, error) {
+func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 	var v int
-	if err := s.sql.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&v); err != nil {
+	if err := s.sql.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		return 0, fmt.Errorf("store: read user_version: %w", err)
 	}
 	return v, nil
@@ -272,8 +272,8 @@ func (s *Store) SchemaVersion() (int, error) {
 // handle on an older store, so the guard matters for the handles that do
 // (OpenRaw, OpenReadOnly): every command that needs the current schema calls
 // it right after opening the store.
-func (s *Store) RequireNewSchema() error {
-	v, err := s.SchemaVersion()
+func (s *Store) RequireNewSchema(ctx context.Context) error {
+	v, err := s.SchemaVersion(ctx)
 	if err != nil {
 		return err
 	}

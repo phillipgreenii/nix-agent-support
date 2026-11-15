@@ -14,17 +14,17 @@ func TestIngestFailed_RecordIsIdempotentPerKey(t *testing.T) {
 		Instance: "jira-main", EntityID: "PROJ-1", Seq: 5, StoreIdentity: "id-a",
 		Kinds: []string{"created", "fields_changed"}, FirstFailedAt: "2026-10-01T00:00:00Z", LastError: "first",
 	}
-	if err := s.RecordIngestFailure(f); err != nil {
+	if err := s.RecordIngestFailure(context.Background(), f); err != nil {
 		t.Fatal(err)
 	}
 	again := f
 	again.FirstFailedAt = "2026-10-02T00:00:00Z"
 	again.LastError = "second"
 	again.Kinds = []string{"other"}
-	if err := s.RecordIngestFailure(again); err != nil {
+	if err := s.RecordIngestFailure(context.Background(), again); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.ListIngestFailures("jira-main")
+	got, err := s.ListIngestFailures(context.Background(), "jira-main")
 	if err != nil || len(got) != 1 {
 		t.Fatalf("ListIngestFailures = (%v, %v), want one entry", got, err)
 	}
@@ -33,7 +33,7 @@ func TestIngestFailed_RecordIsIdempotentPerKey(t *testing.T) {
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("entry = %+v, want %+v (LastError updated, everything else kept)", got[0], want)
 	}
-	if n, err := s.CountIngestFailures("jira-main"); err != nil || n != 1 {
+	if n, err := s.CountIngestFailures(context.Background(), "jira-main"); err != nil || n != 1 {
 		t.Errorf("CountIngestFailures = (%d, %v), want (1, nil)", n, err)
 	}
 }
@@ -45,13 +45,13 @@ func TestIngestFailed_ListOrdersBySeqAndFiltersInstance(t *testing.T) {
 		{Instance: "b", EntityID: "Y-1", Seq: 10, FirstFailedAt: "2026-10-01T00:00:01Z"},
 		{Instance: "a", EntityID: "X-2", Seq: 20, FirstFailedAt: "2026-10-01T00:00:02Z"},
 	} {
-		if err := s.RecordIngestFailure(f); err != nil {
+		if err := s.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
 	seqs := func(instance string) []int64 {
 		t.Helper()
-		l, err := s.ListIngestFailures(instance)
+		l, err := s.ListIngestFailures(context.Background(), instance)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,10 +67,10 @@ func TestIngestFailed_ListOrdersBySeqAndFiltersInstance(t *testing.T) {
 	if got := seqs("a"); !reflect.DeepEqual(got, []int64{20, 30}) {
 		t.Errorf("instance a = %v, want [20 30]", got)
 	}
-	if n, err := s.CountIngestFailures(""); err != nil || n != 3 {
+	if n, err := s.CountIngestFailures(context.Background(), ""); err != nil || n != 3 {
 		t.Errorf("CountIngestFailures(\"\") = (%d, %v), want (3, nil)", n, err)
 	}
-	if n, err := s.CountIngestFailures("b"); err != nil || n != 1 {
+	if n, err := s.CountIngestFailures(context.Background(), "b"); err != nil || n != 1 {
 		t.Errorf("CountIngestFailures(b) = (%d, %v), want (1, nil)", n, err)
 	}
 }
@@ -82,14 +82,14 @@ func TestIngestFailed_ClearRemovesOneEntry(t *testing.T) {
 		{Instance: "a", EntityID: "X-1", Seq: 2},
 		{Instance: "a", EntityID: "X-2", Seq: 2},
 	} {
-		if err := s.RecordIngestFailure(f); err != nil {
+		if err := s.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.ClearIngestFailure("a", "X-1", 2); err != nil {
+	if err := s.ClearIngestFailure(context.Background(), "a", "X-1", 2); err != nil {
 		t.Fatal(err)
 	}
-	l, err := s.ListIngestFailures("a")
+	l, err := s.ListIngestFailures(context.Background(), "a")
 	if err != nil || len(l) != 2 {
 		t.Fatalf("after clear: (%v, %v), want two entries", l, err)
 	}
@@ -98,14 +98,14 @@ func TestIngestFailed_ClearRemovesOneEntry(t *testing.T) {
 			t.Errorf("cleared entry still present: %+v", f)
 		}
 	}
-	if err := s.ClearIngestFailure("a", "X-1", 2); err != nil {
+	if err := s.ClearIngestFailure(context.Background(), "a", "X-1", 2); err != nil {
 		t.Errorf("clearing an absent entry: %v, want nil", err)
 	}
 }
 
 func TestIngestFailed_OldestIngestFailureAt(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, ok, err := s.OldestIngestFailureAt(); err != nil || ok {
+	if _, ok, err := s.OldestIngestFailureAt(context.Background()); err != nil || ok {
 		t.Fatalf("empty table: ok=%v err=%v, want false, nil", ok, err)
 	}
 	for _, f := range []IngestFailure{
@@ -113,19 +113,19 @@ func TestIngestFailed_OldestIngestFailureAt(t *testing.T) {
 		{Instance: "b", EntityID: "Y-1", Seq: 9, FirstFailedAt: "2026-10-01T12:00:00Z"},
 		{Instance: "a", EntityID: "X-2", Seq: 2, FirstFailedAt: "2026-10-02T00:00:00Z"},
 	} {
-		if err := s.RecordIngestFailure(f); err != nil {
+		if err := s.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, ok, err := s.OldestIngestFailureAt()
+	got, ok, err := s.OldestIngestFailureAt(context.Background())
 	want := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	if err != nil || !ok || !got.Equal(want) {
 		t.Fatalf("OldestIngestFailureAt = (%v, %v, %v), want %v", got, ok, err, want)
 	}
-	if err := s.ClearIngestFailure("b", "Y-1", 9); err != nil {
+	if err := s.ClearIngestFailure(context.Background(), "b", "Y-1", 9); err != nil {
 		t.Fatal(err)
 	}
-	got, _, _ = s.OldestIngestFailureAt()
+	got, _, _ = s.OldestIngestFailureAt(context.Background())
 	if !got.Equal(time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("after clearing the oldest: %v, want 2026-10-02", got)
 	}
@@ -133,10 +133,10 @@ func TestIngestFailed_OldestIngestFailureAt(t *testing.T) {
 
 func TestIngestFailed_EmptyFirstFailedAtIsStamped(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if err := s.RecordIngestFailure(IngestFailure{Instance: "a", EntityID: "X-1", Seq: 1}); err != nil {
+	if err := s.RecordIngestFailure(context.Background(), IngestFailure{Instance: "a", EntityID: "X-1", Seq: 1}); err != nil {
 		t.Fatal(err)
 	}
-	at, ok, err := s.OldestIngestFailureAt()
+	at, ok, err := s.OldestIngestFailureAt(context.Background())
 	if err != nil || !ok || time.Since(at) > time.Minute {
 		t.Fatalf("OldestIngestFailureAt = (%v, %v, %v), want a recent stamp", at, ok, err)
 	}
@@ -147,7 +147,7 @@ func TestIngestFailedFlagIsStickyAndClearedPerEntity(t *testing.T) {
 	first := "2026-11-10T09:00:00Z"
 	rec := func(f IngestFailure) {
 		t.Helper()
-		if err := s.RecordIngestFailure(f); err != nil {
+		if err := s.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -156,17 +156,17 @@ func TestIngestFailedFlagIsStickyAndClearedPerEntity(t *testing.T) {
 	rec(IngestFailure{Instance: "b", EntityID: "i-1", Seq: 1, FailureClass: "not_found", FlaggedAt: "2026-11-10T11:00:00Z"})
 	rec(IngestFailure{Instance: "b", EntityID: "i-1", Seq: 2, FirstFailedAt: first, FailureClass: "unavailable"})
 	rec(IngestFailure{Instance: "b", EntityID: "i-9", Seq: 3, FirstFailedAt: first, FailureClass: "not_found", FlaggedAt: first})
-	got, err := s.ListIngestFailures("b")
+	got, err := s.ListIngestFailures(context.Background(), "b")
 	if err != nil || len(got) != 3 {
 		t.Fatalf("list = %+v, %v", got, err)
 	}
 	if got[0].FlaggedAt != "2026-11-10T10:00:00Z" || got[0].FirstFailedAt != first {
 		t.Fatalf("flag moved or first-failed lost: %+v", got[0])
 	}
-	if n, err := s.ClearFlaggedIngestFailures("b", "i-1"); err != nil || n != 1 {
+	if n, err := s.ClearFlaggedIngestFailures(context.Background(), "b", "i-1"); err != nil || n != 1 {
 		t.Fatalf("clear = %d, %v", n, err)
 	}
-	left, _ := s.ListIngestFailures("b")
+	left, _ := s.ListIngestFailures(context.Background(), "b")
 	if len(left) != 2 || left[0].Seq != 2 || left[1].EntityID != "i-9" {
 		t.Fatalf("left = %+v", left)
 	}
@@ -195,7 +195,7 @@ func TestIngestFailedLegacyTableGainsFlagColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	got, err := s.ListIngestFailures("")
+	got, err := s.ListIngestFailures(context.Background(), "")
 	if err != nil || len(got) != 1 || got[0].Flagged() || got[0].FailureClass != "" {
 		t.Fatalf("list = %+v, %v", got, err)
 	}

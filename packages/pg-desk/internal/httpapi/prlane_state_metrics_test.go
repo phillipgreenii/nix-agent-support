@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 
 	resid, items := 2, int64(40)
 	hyd, dec, lk := int64(1200), int64(4300), int64(250)
-	if err := lanestate.Record(s, "apply", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), lanestate.RunInput{
+	if err := lanestate.Record(context.Background(), s, "apply", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), lanestate.RunInput{
 		PR: "o/r#1", Mode: "apply", Residual: &resid, LookupItems: &items,
 		Events:    []lanestate.RunEvent{{Stage: "hydrate", Class: "transient"}},
 		Decisions: []lanestate.DecisionCount{{Rule: "all.closed", Action: "close", Outcome: "applied"}},
@@ -67,14 +68,14 @@ func TestMetricsExportThePersistedLaneFamiliesZeroFilledThenRiseAfterARecordedRu
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertEntityForTest(store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#9", Facts: `{}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+	if err := s.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#9", Facts: `{}`, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := lanestate.MarkInactive(s, "o/r", "o/r#9"); err != nil {
+	if _, err := lanestate.MarkInactive(context.Background(), s, "o/r", "o/r#9"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := lanestate.Record(s, "apply", time.Date(2026, 10, 10, 1, 0, 0, 0, time.UTC), lanestate.RunInput{
+	if err := lanestate.Record(context.Background(), s, "apply", time.Date(2026, 10, 10, 1, 0, 0, 0, time.UTC), lanestate.RunInput{
 		PR: "o/r#1", Mode: "apply", SkipReason: "own-origin",
 	}); err != nil {
 		t.Fatal(err)

@@ -97,7 +97,7 @@ func (p *provider) ListAttention(ctx context.Context) ([]schema.AttentionItem, e
 	}
 	defer func() { _ = st.Close() }()
 
-	res, err := deskattention.Evaluate(deskattention.Inputs{Store: st, Repo: cfg.Repos[0].Remote, Config: cfg, Clock: p.clock})
+	res, err := deskattention.Evaluate(ctx, deskattention.Inputs{Store: st, Repo: cfg.Repos[0].Remote, Config: cfg, Clock: p.clock})
 	if err != nil {
 		return nil, unavailable("%v", err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -39,7 +40,7 @@ import (
 //
 // where <age> is a Go duration (1h2m3s), and a recorded lane mode that differs
 // from the configured one adds ", recorded lane mode <m>" before the residual.
-func prLaneLine(cfg *config.Config, st *store.Store, now time.Time) string {
+func prLaneLine(ctx context.Context, cfg *config.Config, st *store.Store, now time.Time) string {
 	if cfg == nil {
 		return "pr lane: lane unknown (configuration unavailable)"
 	}
@@ -49,18 +50,18 @@ func prLaneLine(cfg *config.Config, st *store.Store, now time.Time) string {
 	if st == nil {
 		return head + ", lane state unavailable (no store)"
 	}
-	version, err := st.SchemaVersion()
+	version, err := st.SchemaVersion(ctx)
 	if err != nil {
 		return head + fmt.Sprintf(", lane state unavailable (read schema version: %v)", err)
 	}
 	if version < store.NewSchemaVersion {
 		return head + ", lane state unavailable (store is not at schema 2)"
 	}
-	snap, err := lanestate.Read(st, now)
+	snap, err := lanestate.Read(ctx, st, now)
 	if err != nil {
 		return head + fmt.Sprintf(", lane state unavailable (%v)", err)
 	}
-	unhydrated, err := st.CountPRUnhydrated(now)
+	unhydrated, err := st.CountPRUnhydrated(ctx, now)
 	if err != nil {
 		return head + fmt.Sprintf(", lane state unavailable (%v)", err)
 	}

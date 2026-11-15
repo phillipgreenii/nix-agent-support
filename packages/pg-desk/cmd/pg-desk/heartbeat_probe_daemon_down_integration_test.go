@@ -120,10 +120,10 @@ backends:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := freshness.Update(st, rows); err != nil {
+	if err := freshness.Update(context.Background(), st, rows); err != nil {
 		t.Fatal(err)
 	}
-	before, err := st.ListMetaPrefix(freshness.MetaKeyPrefix)
+	before, err := st.ListMetaPrefix(context.Background(), freshness.MetaKeyPrefix)
 	if err != nil || len(before) != 2 {
 		t.Fatalf("seeded rows = %v, %v; want one per query", before, err)
 	}
@@ -140,7 +140,7 @@ backends:
 	if !strings.Contains(stderr, "not probed") || !strings.Contains(stderr, "pg-connector-pr-github") {
 		t.Errorf("stderr = %q, want a not-probed query named", stderr)
 	}
-	after, err := st.ListMetaPrefix(freshness.MetaKeyPrefix)
+	after, err := st.ListMetaPrefix(context.Background(), freshness.MetaKeyPrefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ backends:
 		if _, err := runHeartbeat(t); err != nil {
 			t.Fatal(err)
 		}
-		advanced, err := st.ListMetaPrefix(freshness.MetaKeyPrefix)
+		advanced, err := st.ListMetaPrefix(context.Background(), freshness.MetaKeyPrefix)
 		if err != nil {
 			t.Fatal(err)
 		}

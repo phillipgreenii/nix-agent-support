@@ -128,6 +128,8 @@ func routerPollIntervals(path string, logger *slog.Logger) func(string) (time.Du
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
 	if serveAddr != "" && servePort != "" {
 		return fmt.Errorf("serve: --addr and --port are mutually exclusive")
 	}
@@ -206,7 +208,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if routerPath == "" {
 		routerPath = os.Getenv("PG_DESK_ROUTER_CONFIG")
 	}
-	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval), httpapi.WithReadStore(readPool), httpapi.WithMeterProvider(func(mp metric.MeterProvider) { signals = registerCommonSignals(mp) }))
+	handler, err := httpapi.NewHandler(ctx, st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)), httpapi.WithMetricsSnapshot(cmd.Context()), httpapi.WithMetricsSnapshotInterval(serveSnapshotInterval), httpapi.WithReadStore(readPool), httpapi.WithMeterProvider(func(mp metric.MeterProvider) { signals = registerCommonSignals(mp) }))
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}

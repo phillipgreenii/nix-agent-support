@@ -82,17 +82,17 @@ var ErrNoEntity = errors.New("entity not found")
 // appends an annotation_changed change_log record (origin a.Origin, at
 // a.SetAt) in the same transaction. It errors, writing nothing, when the
 // entity has no row.
-func (s *Store) SetAnnotation(a KVAnnotation) error {
-	_, _, err := s.annotationTx(a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
-		return true, upsertAnnotation(tx, a)
+func (s *Store) SetAnnotation(ctx context.Context, a KVAnnotation) error {
+	_, _, err := s.annotationTx(ctx, a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
+		return true, upsertAnnotation(ctx, tx, a)
 	})
 	return err
 }
 
 // upsertAnnotation writes a's row (insert, or replace of the same key).
-func upsertAnnotation(tx *sql.Tx, a KVAnnotation) error {
+func upsertAnnotation(ctx context.Context, tx *sql.Tx, a KVAnnotation) error {
 	_, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO annotation (repo, entity_type, entity_id, key, value, origin, set_by, set_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, entity_type, entity_id, key) DO UPDATE SET
@@ -114,12 +114,12 @@ func upsertAnnotation(tx *sql.Tx, a KVAnnotation) error {
 // when the entity has no row. The read of the stored value and the write
 // share one transaction; callers that need two writers serialized hold the
 // per-entity Locker around the call.
-func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err error) {
+func (s *Store) SetAnnotationSeq(ctx context.Context, a KVAnnotation) (seq int64, changed bool, err error) {
 	var mutated bool
-	seq, mutated, err = s.annotationTx(a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
+	seq, mutated, err = s.annotationTx(ctx, a.Repo, a.EntityType, a.EntityID, a.Key, a.Origin, a.SetAt, func(tx *sql.Tx) (bool, error) {
 		var current string
 		qerr := tx.QueryRowContext(
-			context.Background(),
+			ctx,
 			`SELECT value FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
 			a.Repo, a.EntityType, a.EntityID, a.Key,
 		).Scan(&current)
@@ -129,7 +129,7 @@ func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err e
 		if qerr != nil && !errors.Is(qerr, sql.ErrNoRows) {
 			return false, qerr
 		}
-		return true, upsertAnnotation(tx, a)
+		return true, upsertAnnotation(ctx, tx, a)
 	})
 	if err != nil {
 		return 0, false, err
@@ -141,11 +141,11 @@ func (s *Store) SetAnnotationSeq(a KVAnnotation) (seq int64, changed bool, err e
 // row was removed, appends an annotation_changed record (origin, at) in the
 // same transaction. It reports whether a row existed. It errors, writing
 // nothing, when the entity has no row.
-func (s *Store) DeleteAnnotation(repo, entityType, entityID, key, origin, at string) (bool, error) {
+func (s *Store) DeleteAnnotation(ctx context.Context, repo, entityType, entityID, key, origin, at string) (bool, error) {
 	removed := false
-	_, _, err := s.annotationTx(repo, entityType, entityID, key, origin, at, func(tx *sql.Tx) (bool, error) {
+	_, _, err := s.annotationTx(ctx, repo, entityType, entityID, key, origin, at, func(tx *sql.Tx) (bool, error) {
 		res, err := tx.ExecContext(
-			context.Background(),
+			ctx,
 			`DELETE FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
 			repo, entityType, entityID, key,
 		)
@@ -166,14 +166,14 @@ func (s *Store) DeleteAnnotation(repo, entityType, entityID, key, origin, at str
 // the delivery gate withheld the row). changed reports whether mutate changed
 // anything, independent of the sequence, so a written annotation whose row the
 // gate withheld still reads as changed.
-func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string, mutate func(tx *sql.Tx) (changed bool, err error)) (int64, bool, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) annotationTx(ctx context.Context, repo, entityType, entityID, key, origin, at string, mutate func(tx *sql.Tx) (changed bool, err error)) (int64, bool, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return 0, false, err
 	}
 	wrap := func(err error) error {
 		return fmt.Errorf("store: annotation %q on (%s,%s,%s): %w", key, repo, entityType, entityID, err)
 	}
-	tx, err := s.sql.BeginTx(context.Background(), nil)
+	tx, err := s.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, false, wrap(err)
 	}
@@ -187,7 +187,7 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 	// one reads what the first wrote. Nothing is changed: the version is set to
 	// itself.
 	if _, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE entity SET version = version WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	); err != nil {
@@ -195,7 +195,7 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 	}
 	var version int64
 	err = tx.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT version FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&version)
@@ -217,7 +217,7 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 				return 0, false, wrap(err)
 			}
 		}
-		seq, err = s.AppendChangeLogTx(tx, ChangeRecord{
+		seq, err = s.AppendChangeLogTx(ctx, tx, ChangeRecord{
 			Repo: repo, EntityType: entityType, EntityID: entityID,
 			Version: version, Kinds: []string{ChangeKindAnnotationChanged}, Origin: origin, At: at,
 		})
@@ -232,13 +232,13 @@ func (s *Store) annotationTx(repo, entityType, entityID, key, origin, at string,
 }
 
 // GetKVAnnotation returns one entity's annotation for key, or found=false.
-func (s *Store) GetKVAnnotation(repo, entityType, entityID, key string) (KVAnnotation, bool, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) GetKVAnnotation(ctx context.Context, repo, entityType, entityID, key string) (KVAnnotation, bool, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return KVAnnotation{}, false, err
 	}
 	var a KVAnnotation
 	err := s.sql.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, entity_type, entity_id, key, value, origin, set_by, set_at
 		 FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? AND key = ?`,
 		repo, entityType, entityID, key,
@@ -253,12 +253,12 @@ func (s *Store) GetKVAnnotation(repo, entityType, entityID, key string) (KVAnnot
 }
 
 // ListKVAnnotations returns every annotation of one entity, ordered by key.
-func (s *Store) ListKVAnnotations(repo, entityType, entityID string) ([]KVAnnotation, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) ListKVAnnotations(ctx context.Context, repo, entityType, entityID string) ([]KVAnnotation, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, entity_type, entity_id, key, value, origin, set_by, set_at
 		 FROM annotation WHERE repo = ? AND entity_type = ? AND entity_id = ? ORDER BY key`,
 		repo, entityType, entityID,
@@ -286,8 +286,8 @@ func (s *Store) ListKVAnnotations(repo, entityType, entityID string) ([]KVAnnota
 // the hidden and wip key/value annotations. An entity with no annotation is
 // not hidden and not wip. Callers that only need these three facts use it
 // instead of reading the annotations directly.
-func (s *Store) PRHiddenWIP(repo, entityType, entityID string) (hidden bool, reason string, wip bool, err error) {
-	h, found, err := s.GetKVAnnotation(repo, entityType, entityID, AnnotationHidden)
+func (s *Store) PRHiddenWIP(ctx context.Context, repo, entityType, entityID string) (hidden bool, reason string, wip bool, err error) {
+	h, found, err := s.GetKVAnnotation(ctx, repo, entityType, entityID, AnnotationHidden)
 	if err != nil {
 		return false, "", false, err
 	}
@@ -304,7 +304,7 @@ func (s *Store) PRHiddenWIP(repo, entityType, entityID string) (hidden bool, rea
 			reason = *v.Reason
 		}
 	}
-	w, found, err := s.GetKVAnnotation(repo, entityType, entityID, AnnotationWIP)
+	w, found, err := s.GetKVAnnotation(ctx, repo, entityType, entityID, AnnotationWIP)
 	if err != nil {
 		return false, "", false, err
 	}
@@ -333,12 +333,12 @@ type HiddenWIPKey struct {
 // annotation is absent from the map (not hidden, not wip). A hidden value that
 // does not decode is recorded in that entity's Err, not returned as an error,
 // so one bad row cannot fail the others.
-func (s *Store) ListHiddenWIP() (map[HiddenWIPKey]HiddenWIP, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) ListHiddenWIP(ctx context.Context) (map[HiddenWIPKey]HiddenWIP, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT repo, entity_type, entity_id, key, value FROM annotation WHERE key IN (?, ?)`,
 		AnnotationHidden, AnnotationWIP,
 	)

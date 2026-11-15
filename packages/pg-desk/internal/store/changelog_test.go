@@ -31,21 +31,21 @@ func changeCount(t *testing.T, s *Store) int {
 func TestWriteEntityWithLog_InsertThenUpdateBumpsVersion(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 
-	v, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z")
+	v, err := s.WriteEntityWithLog(context.Background(), clEntity("a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z")
 	if err != nil || v != 1 {
 		t.Fatalf("first write = (%d, %v), want (1, nil)", v, err)
 	}
-	got, found, err := s.GetEntity(clRepo, clType, clID)
+	got, found, err := s.GetEntity(context.Background(), clRepo, clType, clID)
 	if err != nil || !found || got.Version != 1 || got.Facts != "a" {
 		t.Fatalf("GetEntity = (%+v, %v, %v)", got, found, err)
 	}
 
-	v, err = s.WriteEntityWithLog(clEntity("b"), 1, []string{"facts_changed", "state_changed"}, "local", "2026-09-11T00:00:00Z")
+	v, err = s.WriteEntityWithLog(context.Background(), clEntity("b"), 1, []string{"facts_changed", "state_changed"}, "local", "2026-09-11T00:00:00Z")
 	if err != nil || v != 2 {
 		t.Fatalf("second write = (%d, %v), want (2, nil)", v, err)
 	}
 
-	hist, err := s.ListEntityHistory(clRepo, clType, clID, 10)
+	hist, err := s.ListEntityHistory(context.Background(), clRepo, clType, clID, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,27 +59,27 @@ func TestWriteEntityWithLog_InsertThenUpdateBumpsVersion(t *testing.T) {
 
 func TestWriteEntityWithLog_StaleVersionConflicts(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"created"}, "sync", "t1"); err != nil {
+	if _, err := s.WriteEntityWithLog(context.Background(), clEntity("a"), 0, []string{"created"}, "sync", "t1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.WriteEntityWithLog(clEntity("b"), 1, []string{"x"}, "sync", "t2"); err != nil {
+	if _, err := s.WriteEntityWithLog(context.Background(), clEntity("b"), 1, []string{"x"}, "sync", "t2"); err != nil {
 		t.Fatal(err)
 	}
 	// A writer that read version 1 must not overwrite snapshot 2.
-	_, err := s.WriteEntityWithLog(clEntity("stale"), 1, []string{"x"}, "sync", "t3")
+	_, err := s.WriteEntityWithLog(context.Background(), clEntity("stale"), 1, []string{"x"}, "sync", "t3")
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("stale write err = %v, want ErrVersionConflict", err)
 	}
 	// Absent entity with nonzero expected version conflicts too.
 	e := clEntity("z")
 	e.EntityID = "acme/widgets#absent"
-	if _, err := s.WriteEntityWithLog(e, 3, []string{"x"}, "sync", "t4"); !errors.Is(err, ErrVersionConflict) {
+	if _, err := s.WriteEntityWithLog(context.Background(), e, 3, []string{"x"}, "sync", "t4"); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("absent+nonzero err = %v, want ErrVersionConflict", err)
 	}
 	if got := s.ConflictCount(); got != 2 {
 		t.Fatalf("ConflictCount = %d, want 2", got)
 	}
-	got, _, _ := s.GetEntity(clRepo, clType, clID)
+	got, _, _ := s.GetEntity(context.Background(), clRepo, clType, clID)
 	if got.Facts != "b" || got.Version != 2 {
 		t.Fatalf("entity after conflicts = %+v", got)
 	}
@@ -91,12 +91,12 @@ func TestWriteEntityWithLog_StaleVersionConflicts(t *testing.T) {
 func TestWriteEntityWithLog_AdoptsRowAtVersionZero(t *testing.T) {
 	s := OpenForTest(t)
 	s.SeedEntityForTest(t, Entity{Repo: "acme/widgets", EntityType: "pr", EntityID: "acme/widgets#1", Facts: `{}`, AsOf: "2026-09-20T00:00:00Z", ContentHash: "h"})
-	e, found, err := s.GetEntity("acme/widgets", "pr", "acme/widgets#1")
+	e, found, err := s.GetEntity(context.Background(), "acme/widgets", "pr", "acme/widgets#1")
 	if err != nil || !found || e.Version != 0 {
 		t.Fatalf("migrated entity = (%+v, %v, %v)", e, found, err)
 	}
 	e.Facts = `{"title":"changed"}`
-	v, err := s.WriteEntityWithLog(e, 0, []string{"facts_changed"}, "sync", "t")
+	v, err := s.WriteEntityWithLog(context.Background(), e, 0, []string{"facts_changed"}, "sync", "t")
 	if err != nil || v != 1 {
 		t.Fatalf("write over migrated row = (%d, %v), want (1, nil)", v, err)
 	}
@@ -104,7 +104,7 @@ func TestWriteEntityWithLog_AdoptsRowAtVersionZero(t *testing.T) {
 
 func TestWriteEntityWithLog_RefusesOldSchema(t *testing.T) {
 	s := OpenRetiredSchemaForTest(t)
-	_, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"x"}, "sync", "t")
+	_, err := s.WriteEntityWithLog(context.Background(), clEntity("a"), 0, []string{"x"}, "sync", "t")
 	if !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
 	}
@@ -115,11 +115,11 @@ func TestGetEntity_VersionZeroOnOldSchema(t *testing.T) {
 	if err := s.UpsertEntity(clEntity("a")); err != nil {
 		t.Fatal(err)
 	}
-	got, found, err := s.GetEntity(clRepo, clType, clID)
+	got, found, err := s.GetEntity(context.Background(), clRepo, clType, clID)
 	if err != nil || !found || got.Version != 0 {
 		t.Fatalf("old-schema read = (%+v, %v, %v)", got, found, err)
 	}
-	list, err := s.ListEntities()
+	list, err := s.ListEntities(context.Background())
 	if err != nil || len(list) != 1 || list[0].Version != 0 {
 		t.Fatalf("old-schema list = (%+v, %v)", list, err)
 	}
@@ -129,13 +129,13 @@ func TestGetEntity_VersionZeroOnOldSchema(t *testing.T) {
 // bump and the log append, and asserts neither persisted.
 func TestLogAppendAndVersionBumpAreAtomic(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, err := s.WriteEntityWithLog(clEntity("a"), 0, []string{"created"}, "sync", "t1"); err != nil {
+	if _, err := s.WriteEntityWithLog(context.Background(), clEntity("a"), 0, []string{"created"}, "sync", "t1"); err != nil {
 		t.Fatal(err)
 	}
 
 	boom := errors.New("injected failure")
 	s.betweenBumpAndAppend = func() error { return boom }
-	_, err := s.WriteEntityWithLog(clEntity("b"), 1, []string{"x"}, "sync", "t2")
+	_, err := s.WriteEntityWithLog(context.Background(), clEntity("b"), 1, []string{"x"}, "sync", "t2")
 	s.betweenBumpAndAppend = nil
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want injected failure", err)
@@ -144,7 +144,7 @@ func TestLogAppendAndVersionBumpAreAtomic(t *testing.T) {
 		t.Fatalf("an injected failure must not be reported as a conflict")
 	}
 
-	got, _, _ := s.GetEntity(clRepo, clType, clID)
+	got, _, _ := s.GetEntity(context.Background(), clRepo, clType, clID)
 	if got.Version != 1 || got.Facts != "a" {
 		t.Fatalf("entity after failed write = %+v, want version 1 facts a", got)
 	}
@@ -156,7 +156,7 @@ func TestLogAppendAndVersionBumpAreAtomic(t *testing.T) {
 	}
 
 	// The failed attempt left the store usable: the same write now succeeds.
-	if v, err := s.WriteEntityWithLog(clEntity("b"), 1, []string{"x"}, "sync", "t2"); err != nil || v != 2 {
+	if v, err := s.WriteEntityWithLog(context.Background(), clEntity("b"), 1, []string{"x"}, "sync", "t2"); err != nil || v != 2 {
 		t.Fatalf("retry = (%d, %v)", v, err)
 	}
 }
@@ -175,7 +175,7 @@ func openSecondHandle(t *testing.T, s *Store) *Store {
 // connections to a real SQLite file through the optimistic-version path.
 func TestRefreshRacingHydrationNeverRegressesVersion(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
-	if _, err := s.WriteEntityWithLog(clEntity("seed"), 0, []string{"created"}, "sync", "t0"); err != nil {
+	if _, err := s.WriteEntityWithLog(context.Background(), clEntity("seed"), 0, []string{"created"}, "sync", "t0"); err != nil {
 		t.Fatal(err)
 	}
 	handles := []*Store{s, openSecondHandle(t, s), openSecondHandle(t, s)}
@@ -188,12 +188,12 @@ func TestRefreshRacingHydrationNeverRegressesVersion(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for r := 0; r < rounds; r++ {
-				cur, found, err := h.GetEntity(clRepo, clType, clID)
+				cur, found, err := h.GetEntity(context.Background(), clRepo, clType, clID)
 				if err != nil || !found {
 					t.Errorf("read: found=%v err=%v", found, err)
 					return
 				}
-				v, err := h.WriteEntityWithLog(clEntity(fmt.Sprintf("w%d-%d", i, r)), cur.Version, []string{"facts_changed"}, fmt.Sprintf("w%d", i), "t")
+				v, err := h.WriteEntityWithLog(context.Background(), clEntity(fmt.Sprintf("w%d-%d", i, r)), cur.Version, []string{"facts_changed"}, fmt.Sprintf("w%d", i), "t")
 				switch {
 				case err == nil:
 					if v != cur.Version+1 {
@@ -214,12 +214,12 @@ func TestRefreshRacingHydrationNeverRegressesVersion(t *testing.T) {
 	for _, w := range wins {
 		total += w
 	}
-	final, _, _ := s.GetEntity(clRepo, clType, clID)
+	final, _, _ := s.GetEntity(context.Background(), clRepo, clType, clID)
 	if final.Version != int64(1+total) {
 		t.Fatalf("final version %d, want %d (1 + %d wins)", final.Version, 1+total, total)
 	}
 	// The log names exactly the snapshots that exist: versions 1..final, once each, in order.
-	recs, err := s.ListChangesAfter(clType, 0, 0)
+	recs, err := s.ListChangesAfter(context.Background(), clType, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestConcurrentFirstWritersExactlyOneWins(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = h.WriteEntityWithLog(clEntity(fmt.Sprintf("first%d", i)), 0, []string{"created"}, "sync", "t")
+			_, errs[i] = h.WriteEntityWithLog(context.Background(), clEntity(fmt.Sprintf("first%d", i)), 0, []string{"created"}, "sync", "t")
 		}()
 	}
 	close(start)
@@ -288,16 +288,16 @@ func TestListChangesAfter_AscendingLimitedAndTypeScoped(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	for i := 0; i < 3; i++ {
 		e := clEntity(fmt.Sprintf("v%d", i))
-		if _, err := s.WriteEntityWithLog(e, int64(i), []string{"k"}, "sync", "t"); err != nil {
+		if _, err := s.WriteEntityWithLog(context.Background(), e, int64(i), []string{"k"}, "sync", "t"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	other := Entity{Repo: clRepo, EntityType: "issue", EntityID: "acme/widgets#i1", Facts: "{}", AsOf: "t"}
-	if _, err := s.WriteEntityWithLog(other, 0, []string{"created"}, "sync", "t"); err != nil {
+	if _, err := s.WriteEntityWithLog(context.Background(), other, 0, []string{"created"}, "sync", "t"); err != nil {
 		t.Fatal(err)
 	}
 
-	all, err := s.ListChangesAfter(clType, 0, 100)
+	all, err := s.ListChangesAfter(context.Background(), clType, 0, 100)
 	if err != nil || len(all) != 3 {
 		t.Fatalf("all = (%+v, %v)", all, err)
 	}
@@ -306,11 +306,11 @@ func TestListChangesAfter_AscendingLimitedAndTypeScoped(t *testing.T) {
 			t.Fatalf("not ascending: %+v", all)
 		}
 	}
-	after, err := s.ListChangesAfter(clType, all[0].Seq, 1)
+	after, err := s.ListChangesAfter(context.Background(), clType, all[0].Seq, 1)
 	if err != nil || len(after) != 1 || after[0].Seq != all[1].Seq {
 		t.Fatalf("after/limit = (%+v, %v)", after, err)
 	}
-	none, err := s.ListChangesAfter(clType, all[2].Seq, 10)
+	none, err := s.ListChangesAfter(context.Background(), clType, all[2].Seq, 10)
 	if err != nil || len(none) != 0 {
 		t.Fatalf("past end = (%+v, %v)", none, err)
 	}
@@ -322,7 +322,7 @@ func TestAppendChangeLogTx_UsableInCallerTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seq, err := s.AppendChangeLogTx(tx, ChangeRecord{Repo: clRepo, EntityType: clType, EntityID: clID, Version: 1, Kinds: []string{"annotation_changed"}, Origin: "pg-desk", At: "t"})
+	seq, err := s.AppendChangeLogTx(context.Background(), tx, ChangeRecord{Repo: clRepo, EntityType: clType, EntityID: clID, Version: 1, Kinds: []string{"annotation_changed"}, Origin: "pg-desk", At: "t"})
 	if err != nil || seq <= 0 {
 		t.Fatalf("append = (%d, %v)", seq, err)
 	}
@@ -341,24 +341,24 @@ func TestLatestChangeAt_PerEntityMaxTypeScopedAndAbsentWhenNoRows(t *testing.T) 
 	}
 	var v int64
 	var err error
-	if v, err = s.WriteEntityWithLog(mk("pr", "a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
+	if v, err = s.WriteEntityWithLog(context.Background(), mk("pr", "a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.WriteEntityWithLog(mk("pr", "a"), v, []string{"reconcile"}, "sweep", "2026-09-12T00:00:00Z"); err != nil {
+	if _, err = s.WriteEntityWithLog(context.Background(), mk("pr", "a"), v, []string{"reconcile"}, "sweep", "2026-09-12T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.WriteEntityWithLog(mk("pr", "b"), 0, []string{"created"}, "sync", "2026-09-11T00:00:00Z"); err != nil {
+	if _, err = s.WriteEntityWithLog(context.Background(), mk("pr", "b"), 0, []string{"created"}, "sync", "2026-09-11T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.WriteEntityWithLog(mk("issue", "c"), 0, []string{"created"}, "sync", "2026-09-13T00:00:00Z"); err != nil {
+	if _, err = s.WriteEntityWithLog(context.Background(), mk("issue", "c"), 0, []string{"created"}, "sync", "2026-09-13T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 	// An entity written with no kinds appends no change_log row.
-	if _, err = s.WriteEntityStateWithLog(mk("pr", "quiet"), 0, "", true, nil, "sync", "2026-09-14T00:00:00Z"); err != nil {
+	if _, err = s.WriteEntityStateWithLog(context.Background(), mk("pr", "quiet"), 0, "", true, nil, "sync", "2026-09-14T00:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := s.LatestChangeAt("pr")
+	got, err := s.LatestChangeAt(context.Background(), "pr")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestLatestChangeAt_PerEntityMaxTypeScopedAndAbsentWhenNoRows(t *testing.T) 
 
 func TestLatestChangeAt_RefusesOldSchema(t *testing.T) {
 	s := OpenRetiredSchemaForTest(t)
-	if _, err := s.LatestChangeAt("pr"); !errors.Is(err, ErrOldSchema) {
+	if _, err := s.LatestChangeAt(context.Background(), "pr"); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("err = %v, want ErrOldSchema", err)
 	}
 }

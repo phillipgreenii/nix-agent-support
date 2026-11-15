@@ -432,13 +432,13 @@ func newVerbFixture(t *testing.T) *verbFixture {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if err := st.UpsertEntityForTest(store.Entity{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
+	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
-	if err := st.UpsertInterpretation(store.Interpretation{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
 		t.Fatalf("seed interpretation: %v", err)
 	}
-	if v, err := st.SchemaVersion(); err != nil || v != store.NewSchemaVersion {
+	if v, err := st.SchemaVersion(context.Background()); err != nil || v != store.NewSchemaVersion {
 		t.Fatalf("fixture store is at schema %d (err %v), want %d", v, err, store.NewSchemaVersion)
 	}
 	for _, e := range []store.Entity{
@@ -446,7 +446,7 @@ func newVerbFixture(t *testing.T) *verbFixture {
 		{Repo: testRepo, EntityType: "issue", EntityID: "other-1", Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
 		{Repo: testRepo, EntityType: "thread", EntityID: testThread, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
 	} {
-		if _, err := st.WriteEntityWithLog(e, 0, []string{"created"}, "poll", "2026-09-16T00:00:00Z"); err != nil {
+		if _, err := st.WriteEntityWithLog(context.Background(), e, 0, []string{"created"}, "poll", "2026-09-16T00:00:00Z"); err != nil {
 			t.Fatalf("seed %s: %v", e.EntityID, err)
 		}
 	}

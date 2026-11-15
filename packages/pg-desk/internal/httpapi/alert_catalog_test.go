@@ -77,7 +77,7 @@ func namedMetrics(t *testing.T) map[string][]string {
 
 func scrapeWith(t *testing.T, s *store.Store, opts ...Option) string {
 	t.Helper()
-	handler, err := NewHandler(s, focusConfig(), opts...)
+	handler, err := NewHandler(context.Background(), s, focusConfig(), opts...)
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestEveryMetricNamedByAnAlertIsEmittedByARealScrape(t *testing.T) {
 	s := seedFocusStore(t)
 	// A consumer's lag is emitted per registered consumer (the focus role's
 	// issue consumer registers on its first read).
-	if err := s.RegisterConsumer("focus", "issue", time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)); err != nil {
+	if err := s.RegisterConsumer(context.Background(), "focus", "issue", time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 	body := scrapeWith(t, s, WithPollInterval(func(string) (time.Duration, bool) { return time.Minute, true }))
@@ -146,14 +146,14 @@ func TestTheLaneSeriesAnAlertReadsAreWrittenByTheComposedCommandsPath(t *testing
 	cfg := focusConfig()
 	cfg.PRLane.Mode = "apply"
 	resid := 2
-	if err := lanestate.Record(s, "apply", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), lanestate.RunInput{
+	if err := lanestate.Record(context.Background(), s, "apply", time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), lanestate.RunInput{
 		PR: "o/r#1", Mode: "apply", Residual: &resid,
 		Events:    []lanestate.RunEvent{{Stage: "hydrate", Class: "unauthenticated"}},
 		Decisions: []lanestate.DecisionCount{{Rule: "all.closed", Action: "close", Outcome: "applied"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(s, cfg)
+	handler, err := NewHandler(context.Background(), s, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

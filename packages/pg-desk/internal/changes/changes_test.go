@@ -47,7 +47,7 @@ func seededEngine(t *testing.T) (*Engine, *store.Store) {
 	// The seeded records are newer than reconcile_age (30m) at the engine's
 	// clock, so the local reconcile tier leaves these entities alone.
 	for _, id := range []string{"bd-1", "bd-2"} {
-		if _, err := st.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+		if _, err := st.WriteEntityStateWithLog(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 			0, "2026-10-01T11:00:00Z", true, []string{"reconcile"}, "sweep", "2026-10-01T11:55:00Z"); err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +63,7 @@ func seededEngine(t *testing.T) (*Engine, *store.Store) {
 
 func cursorOf(t *testing.T, st *store.Store, name string) int64 {
 	t.Helper()
-	cs, err := st.ListConsumers()
+	cs, err := st.ListConsumers(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func seedTierRow(t *testing.T, st *store.Store, id, hydratedAt, listFP, logAt st
 		kinds = []string{"reconcile"}
 	}
 	fp := listFP
-	if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{"k":1}`, AsOf: "x"},
+	if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{"k":1}`, AsOf: "x"},
 		0, hydratedAt, true, &fp, kinds, "sweep", logAt); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func (p noConnectorLister) ListFingerprints(context.Context, string, string) (ga
 
 func historyOf(t *testing.T, st *store.Store, id string) []store.ChangeRecord {
 	t.Helper()
-	h, err := st.ListEntityHistory("o/r", "issue", id, 0)
+	h, err := st.ListEntityHistory(context.Background(), "o/r", "issue", id, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestReconcileLocalRecordsWithoutRemoteCallOrHydration(t *testing.T) {
 	e, st, h := newListEngine(t, "open")
 	e.Lister = noConnectorLister{t}
 	seedTierRow(t, st, "bd-1", "2026-10-01T11:58:00Z", "F1", "2026-10-01T09:00:00Z") // log 3h old
-	before, _, _ := st.GetEntity("o/r", "issue", "bd-1")
+	before, _, _ := st.GetEntity(context.Background(), "o/r", "issue", "bd-1")
 
 	if err := e.reconcileLocal(context.Background(), "issue", &pollState{hydrated: map[string]error{}}); err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestReconcileLocalRecordsWithoutRemoteCallOrHydration(t *testing.T) {
 	if len(h.calls) != 0 {
 		t.Errorf("hydrator called for %v, want zero hydrations", h.calls)
 	}
-	after, found, err := st.GetEntity("o/r", "issue", "bd-1")
+	after, found, err := st.GetEntity(context.Background(), "o/r", "issue", "bd-1")
 	if err != nil || !found {
 		t.Fatalf("GetEntity = %v, %v", found, err)
 	}
@@ -216,7 +216,7 @@ func TestRunIssueRunsNeitherAgeTier(t *testing.T) {
 	// reconcile_age): both tiers would select it for a pr.
 	seedTierRow(t, st, "bd-1", "2026-10-01T00:00:00Z", "F1", "2026-10-01T09:00:00Z")
 	watched := true
-	if err := st.SetEntityColumns("o/r", "issue", "bd-1", nil, &watched); err != nil {
+	if err := st.SetEntityColumns(context.Background(), "o/r", "issue", "bd-1", nil, &watched); err != nil {
 		t.Fatal(err)
 	}
 
@@ -252,7 +252,7 @@ func TestRunRefusesAPRChangeFlow(t *testing.T) {
 	if len(h.calls) != 0 {
 		t.Errorf("a refused pr call hydrated %v", h.calls)
 	}
-	if cur, err := st.ListConsumers(); err != nil || len(cur) != 0 {
+	if cur, err := st.ListConsumers(context.Background()); err != nil || len(cur) != 0 {
 		t.Errorf("a refused pr call registered consumers %v (%v)", cur, err)
 	}
 }

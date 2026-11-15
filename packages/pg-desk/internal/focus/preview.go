@@ -112,9 +112,9 @@ type lockState struct {
 	neverClosed []string
 }
 
-func (d LockDeps) readLockState(in LockInput, fs FinalSet) (lockState, error) {
+func (d LockDeps) readLockState(ctx context.Context, in LockInput, fs FinalSet) (lockState, error) {
 	var ls lockState
-	p, found, err := d.Store.FocusPeriodGet(in.Period.Type, in.Period.Key)
+	p, found, err := d.Store.FocusPeriodGet(ctx, in.Period.Type, in.Period.Key)
 	if err != nil {
 		return ls, fmt.Errorf("focus: read period: %w", err)
 	}
@@ -124,17 +124,17 @@ func (d LockDeps) readLockState(in LockInput, fs FinalSet) (lockState, error) {
 	}
 	ls.first = true
 	if found {
-		rows, err := d.Store.FocusPlanRows(p.ID)
+		rows, err := d.Store.FocusPlanRows(ctx, p.ID)
 		if err != nil {
 			return ls, fmt.Errorf("focus: read plan rows: %w", err)
 		}
 		ls.first = len(rows) == 0
 	}
-	all, err := d.Store.FocusRowsAllPeriods()
+	all, err := d.Store.FocusRowsAllPeriods(ctx)
 	if err != nil {
 		return ls, fmt.Errorf("focus: read plan rows: %w", err)
 	}
-	periods, err := d.Store.FocusPeriods()
+	periods, err := d.Store.FocusPeriods(ctx)
 	if err != nil {
 		return ls, fmt.Errorf("focus: read periods: %w", err)
 	}
@@ -174,7 +174,7 @@ func (d LockDeps) readLockState(in LockInput, fs FinalSet) (lockState, error) {
 // usage error for an earlier or a future period). The verb calls it before
 // hand-add hydration so that a doomed run never hydrates.
 func PreflightLock(ctx context.Context, d LockDeps, in LockInput) error {
-	_, err := d.readLockState(in, in.Final)
+	_, err := d.readLockState(ctx, in, in.Final)
 	return err
 }
 
@@ -183,12 +183,12 @@ func PreflightLock(ctx context.Context, d LockDeps, in LockInput) error {
 // nothing. It returns the same errors the lock would for a closed period and
 // for a first lock that is earlier than the plan or in the future.
 func BuildPreview(ctx context.Context, d LockDeps, in LockInput, fs FinalSet) (PreviewResult, error) {
-	ls, err := d.readLockState(in, fs)
+	ls, err := d.readLockState(ctx, in, fs)
 	if err != nil {
 		return PreviewResult{}, err
 	}
 	repo := d.repo()
-	inputs, err := Load(d.Store, d.Config, repo, d.now())
+	inputs, err := Load(ctx, d.Store, d.Config, repo, d.now())
 	if err != nil {
 		return PreviewResult{}, fmt.Errorf("focus: preview: %w", err)
 	}
@@ -219,7 +219,7 @@ func BuildPreview(ctx context.Context, d LockDeps, in LockInput, fs FinalSet) (P
 		add(m.Kept)
 		add(m.Absorbed)
 	}
-	live := BuildLive(inputs, keys, Ranking{}, LiveOptions{Watched: LoadWatched(d.Store, d.Config)})
+	live := BuildLive(inputs, keys, Ranking{}, LiveOptions{Watched: LoadWatched(ctx, d.Store, d.Config)})
 
 	pv := PreviewResult{FirstLock: ls.first, ReplacesPlan: ls.replace, NeverClosed: ls.neverClosed}
 	// resolve reads the bead column of k once: the table row it falls in, the

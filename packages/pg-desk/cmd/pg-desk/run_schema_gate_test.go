@@ -32,7 +32,7 @@ func oldSchemaRunStore(t *testing.T, cfg *config.Config, threadText string) (ope
 		return s
 	}
 	st := open() // version 1
-	if err := st.RequireNewSchema(); !errors.Is(err, store.ErrOldSchema) {
+	if err := st.RequireNewSchema(context.Background()); !errors.Is(err, store.ErrOldSchema) {
 		t.Fatalf("precondition: want a schema-1 store, got %v", err)
 	}
 	runConfigLoad = func(context.Context) (*config.Config, error) { return cfg, nil }
@@ -55,10 +55,10 @@ func assertRefusedWritingNothing(t *testing.T, open func() *store.Store, err err
 	}
 	// Nothing was written: the file is still the version-1 store with its one
 	// table, and no table of schema 2 appeared.
-	if v, e := st.SchemaVersion(); e != nil || v != 1 {
+	if v, e := st.SchemaVersion(context.Background()); e != nil || v != 1 {
 		t.Fatalf("SchemaVersion = %d, %v, want 1 left alone", v, e)
 	}
-	meta, e := st.ListMetaPrefix("")
+	meta, e := st.ListMetaPrefix(context.Background(), "")
 	if e != nil || len(meta) != 1 || meta["schema_version"] != "1" {
 		t.Fatalf("meta = %v, %v, want only schema_version 1", meta, e)
 	}

@@ -13,6 +13,7 @@ package classify
 // writes.
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"strconv"
@@ -124,9 +125,9 @@ type WorkLookup func(prID, issueID string) bool
 // from st, using only the relations work (issue -> pr) and parent
 // (issue -> issue). A store error answers false: a lookup that cannot be
 // answered never fabricates ownership.
-func NewStoreWorkLookup(st *store.Store, repo string) WorkLookup {
+func NewStoreWorkLookup(ctx context.Context, st *store.Store, repo string) WorkLookup {
 	hasWork := func(prID, issueID string) bool {
-		links, err := st.ListXrefLinksFrom(repo, localTypeIssue, issueID)
+		links, err := st.ListXrefLinksFrom(ctx, repo, localTypeIssue, issueID)
 		if err != nil {
 			return false
 		}
@@ -141,7 +142,7 @@ func NewStoreWorkLookup(st *store.Store, repo string) WorkLookup {
 		if hasWork(prID, issueID) {
 			return true
 		}
-		links, err := st.ListXrefLinksFrom(repo, localTypeIssue, issueID)
+		links, err := st.ListXrefLinksFrom(ctx, repo, localTypeIssue, issueID)
 		if err != nil {
 			return false
 		}

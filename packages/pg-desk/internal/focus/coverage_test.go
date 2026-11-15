@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ import (
 func setListing(t *testing.T, f *fixture, typ, query, status, reason string) {
 	t.Helper()
 	v := `{"status":"` + status + `","reason":"` + reason + `","at":"` + fixtureAt + `"}`
-	if err := f.st.SetMeta("change_flow.listing."+typ+"."+query, v); err != nil {
+	if err := f.st.SetMeta(context.Background(), "change_flow.listing."+typ+"."+query, v); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -29,7 +30,7 @@ func TestComputeCoverage(t *testing.T) {
 
 	t.Run("complete", func(t *testing.T) {
 		setListing(t, f, "issue", "mine", "ok", "")
-		rep, err := ComputeCoverage(f.st, f.cfg, fixtureNow, in.Entities)
+		rep, err := ComputeCoverage(context.Background(), f.st, f.cfg, fixtureNow, in.Entities)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -43,7 +44,7 @@ func TestComputeCoverage(t *testing.T) {
 	t.Run("degraded and failed are incomplete", func(t *testing.T) {
 		for _, status := range []string{"degraded", "failed"} {
 			setListing(t, f, "issue", "mine", status, "slow")
-			rep, _ := ComputeCoverage(f.st, f.cfg, fixtureNow, in.Entities)
+			rep, _ := ComputeCoverage(context.Background(), f.st, f.cfg, fixtureNow, in.Entities)
 			if !rep.State.Incomplete || len(rep.State.Reasons) != 1 || !strings.Contains(rep.State.Reasons[0], "slow") {
 				t.Errorf("%s report = %+v", status, rep)
 			}
@@ -54,11 +55,11 @@ func TestComputeCoverage(t *testing.T) {
 	})
 	t.Run("a query with no persisted status is unknown and incomplete", func(t *testing.T) {
 		f.cfg.Watch.Issue.Queries = []string{"mine", "other"}
-		if err := f.st.RegisterConsumer("pg-router", "issue", fixtureNow); err != nil {
+		if err := f.st.RegisterConsumer(context.Background(), "pg-router", "issue", fixtureNow); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = f.st.ForgetConsumer("pg-router", "issue") })
-		rep, _ := ComputeCoverage(f.st, f.cfg, fixtureNow, in.Entities)
+		t.Cleanup(func() { _ = f.st.ForgetConsumer(context.Background(), "pg-router", "issue") })
+		rep, _ := ComputeCoverage(context.Background(), f.st, f.cfg, fixtureNow, in.Entities)
 		if !rep.State.Incomplete {
 			t.Fatalf("report = %+v", rep)
 		}
@@ -80,7 +81,7 @@ func TestComputeCoverage(t *testing.T) {
 		g.cfg.Watch.Issue.Queries = []string{"mine"}
 		setListing(t, g, "issue", "mine", "ok", "")
 		g.pending("K-1")
-		rep, _ := ComputeCoverage(g.st, g.cfg, fixtureNow, g.inputs().Entities)
+		rep, _ := ComputeCoverage(context.Background(), g.st, g.cfg, fixtureNow, g.inputs().Entities)
 		// 1 pending of 1 active: the default bound is ceil(10%) = 1, so within it.
 		if rep.State.Incomplete || len(rep.Notices) != 1 {
 			t.Errorf("within the bound: %+v", rep)
@@ -88,7 +89,7 @@ func TestComputeCoverage(t *testing.T) {
 		n := 1
 		g.cfg.Focus.CoverageBacklogMax = &n
 		g.pending("K-2")
-		rep, _ = ComputeCoverage(g.st, g.cfg, fixtureNow, g.inputs().Entities)
+		rep, _ = ComputeCoverage(context.Background(), g.st, g.cfg, fixtureNow, g.inputs().Entities)
 		if !rep.State.Incomplete || !strings.Contains(strings.Join(rep.State.Reasons, ";"), "backlog") {
 			t.Errorf("above the bound: %+v", rep)
 		}
@@ -104,14 +105,14 @@ func TestComputeCoverage(t *testing.T) {
 		for i := 0; i < 50; i++ {
 			k := g.issue(fmt.Sprintf("K-%d", i), issueSpec{state: "open"})
 			watched := true
-			if err := g.st.SetEntityColumns(testRepo, "issue", k.ID, nil, &watched); err != nil {
+			if err := g.st.SetEntityColumns(context.Background(), testRepo, "issue", k.ID, nil, &watched); err != nil {
 				t.Fatal(err)
 			}
 		}
 		n := 1
 		g.cfg.Focus.CoverageBacklogMax = &n
 		late := fixtureNow.Add(365 * 24 * time.Hour) // far past hydrated_at + any sweep age
-		rep, _ := ComputeCoverage(g.st, g.cfg, late, g.inputs().Entities)
+		rep, _ := ComputeCoverage(context.Background(), g.st, g.cfg, late, g.inputs().Entities)
 		if rep.State.Incomplete || len(rep.Notices) != 0 {
 			t.Errorf("a fully hydrated set read incomplete or noisy: %+v", rep)
 		}
@@ -127,11 +128,11 @@ func TestComputeCoverage(t *testing.T) {
 		g.pending("K-2")
 		g.pending("K-3")
 		for i, id := range []string{"PROJ-1", "PROJ-2"} {
-			if err := g.st.RecordIngestFailure(store.IngestFailure{Instance: "jira-a", EntityID: id, Seq: int64(i + 1), StoreIdentity: "s", FirstFailedAt: fixtureAt}); err != nil {
+			if err := g.st.RecordIngestFailure(context.Background(), store.IngestFailure{Instance: "jira-a", EntityID: id, Seq: int64(i + 1), StoreIdentity: "s", FirstFailedAt: fixtureAt}); err != nil {
 				t.Fatal(err)
 			}
 		}
-		rep, _ := ComputeCoverage(g.st, g.cfg, fixtureNow, g.inputs().Entities)
+		rep, _ := ComputeCoverage(context.Background(), g.st, g.cfg, fixtureNow, g.inputs().Entities)
 		if got := rep.State.PerType["issue"].DueBacklog; got != 5 {
 			t.Errorf("DueBacklog = %d, want 5 (3 pending hydrations and 2 failed ingests)", got)
 		}
@@ -150,7 +151,7 @@ func TestComputeCoverageHasNoPRInput(t *testing.T) {
 	n := 1
 	f.cfg.Focus.CoverageBacklogMax = &n
 	late := fixtureNow.Add(30 * 24 * time.Hour)
-	rep, err := ComputeCoverage(f.st, f.cfg, late, f.inputs().Entities)
+	rep, err := ComputeCoverage(context.Background(), f.st, f.cfg, late, f.inputs().Entities)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +229,7 @@ func TestLoadWatchedReadsTheWatchedColumnForAnOwningBackend(t *testing.T) {
 	}
 	jira, beads, yes, no := "jira-a", "beads-a", true, false
 	set := func(id string, backend *string, watched *bool) {
-		if err := f.st.SetEntityColumns(testRepo, "issue", id, backend, watched); err != nil {
+		if err := f.st.SetEntityColumns(context.Background(), testRepo, "issue", id, backend, watched); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -236,11 +237,11 @@ func TestLoadWatchedReadsTheWatchedColumnForAnOwningBackend(t *testing.T) {
 	set("PROJ-2", &jira, &no)
 	set("PROJ-3", &jira, nil)
 	set("bd-1", &beads, nil)
-	if err := f.st.SetMeta("change_flow.watchset.issue.open", `["bd-1"]`); err != nil {
+	if err := f.st.SetMeta(context.Background(), "change_flow.watchset.issue.open", `["bd-1"]`); err != nil {
 		t.Fatal(err)
 	}
 
-	w := LoadWatched(f.st, f.cfg)
+	w := LoadWatched(context.Background(), f.st, f.cfg)
 	if w.Unwatched(Key{"issue", "PROJ-1"}) {
 		t.Error("PROJ-1 (watched 1) read unwatched")
 	}
@@ -250,7 +251,7 @@ func TestLoadWatchedReadsTheWatchedColumnForAnOwningBackend(t *testing.T) {
 	if w.Unwatched(Key{"issue", "bd-1"}) {
 		t.Error("bd-1 is in the persisted beads set and must read watched")
 	}
-	if _, found, _ := f.st.GetMeta("change_flow.watchset.issue.tracked"); found {
+	if _, found, _ := f.st.GetMeta(context.Background(), "change_flow.watchset.issue.tracked"); found {
 		t.Error("a watchset key exists for the owning query")
 	}
 }
@@ -263,11 +264,11 @@ func TestComputeCoverageCountsOwningBackendEntitiesLikeAnyOther(t *testing.T) {
 	f.cfg.Watch.Issue.Backends = map[string]config.WatchBackend{"tracked": {Instance: "jira-a", OwnsChanges: true}}
 	f.pending("PROJ-1")
 	jira := "jira-a"
-	if err := f.st.SetEntityColumns(testRepo, "issue", "PROJ-1", &jira, nil); err != nil {
+	if err := f.st.SetEntityColumns(context.Background(), testRepo, "issue", "PROJ-1", &jira, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Far past any age: only the missing hydration makes it pending.
-	rep, err := ComputeCoverage(f.st, f.cfg, fixtureNow.Add(1000*time.Hour), f.inputs().Entities)
+	rep, err := ComputeCoverage(context.Background(), f.st, f.cfg, fixtureNow.Add(1000*time.Hour), f.inputs().Entities)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,11 +281,11 @@ func TestComputeCoverageCountsOwningBackendEntitiesLikeAnyOther(t *testing.T) {
 func (f *fixture) pending(id string) {
 	f.t.Helper()
 	e := store.Entity{Repo: testRepo, EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: fixtureAt, ContentHash: "h" + id}
-	if _, err := f.st.WriteEntityStateWithLog(e, 0, "", true, []string{"created"}, "sync", fixtureAt); err != nil {
+	if _, err := f.st.WriteEntityStateWithLog(context.Background(), e, 0, "", true, []string{"created"}, "sync", fixtureAt); err != nil {
 		f.t.Fatalf("write pending issue %s: %v", id, err)
 	}
 	watched := true
-	if err := f.st.SetEntityColumns(testRepo, "issue", id, nil, &watched); err != nil {
+	if err := f.st.SetEntityColumns(context.Background(), testRepo, "issue", id, nil, &watched); err != nil {
 		f.t.Fatal(err)
 	}
 }

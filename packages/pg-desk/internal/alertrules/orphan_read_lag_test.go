@@ -1,6 +1,7 @@
 package alertrules
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -83,20 +84,20 @@ func TestOrphanReadLagRuleAgreesWithTheEmittedSeries(t *testing.T) {
 	seed := func(id string, okAgo time.Duration) {
 		t.Helper()
 		fp := "F1"
-		if _, err := st.WriteEntityStateWithLogFP(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+		if _, err := st.WriteEntityStateWithLogFP(context.Background(), store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
 			0, now.Add(-time.Hour).Format(time.RFC3339), true, &fp, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.SetEntityColumns("o/r", "issue", id, nil, &yes); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, nil, &yes); err != nil {
 			t.Fatal(err)
 		}
 		ok, attempt := now.Add(-okAgo).Format(time.RFC3339Nano), now.Add(-time.Minute).Format(time.RFC3339Nano)
-		if err := st.SetEntityReadTimes("o/r", "issue", id, &attempt, &ok); err != nil {
+		if err := st.SetEntityReadTimes(context.Background(), "o/r", "issue", id, &attempt, &ok); err != nil {
 			t.Fatal(err)
 		}
 	}
 	opt := func() metrics.ChangeFlowOption {
-		return metrics.WithOldestOrphanReadAge(metrics.OldestOrphanReadAgeFromStore(st, cfg, func() time.Time { return now }))
+		return metrics.WithOldestOrphanReadAge(metrics.OldestOrphanReadAgeFromStore(context.Background(), st, cfg, func() time.Time { return now }))
 	}
 	empty := emittedOutcome(t, metrics.MetricOldestOrphanReadAge, opt())
 	if len(empty) != 1 || empty[0].v != 0 {
@@ -118,7 +119,7 @@ func TestOrphanReadLagRuleAgreesWithTheEmittedSeries(t *testing.T) {
 	seed2 := func() {
 		t.Helper()
 		ok := now.Add(-5 * time.Minute).Format(time.RFC3339Nano)
-		if err := st.SetEntityReadTimes("o/r", "issue", "bd-b", nil, &ok); err != nil {
+		if err := st.SetEntityReadTimes(context.Background(), "o/r", "issue", "bd-b", nil, &ok); err != nil {
 			t.Fatal(err)
 		}
 	}

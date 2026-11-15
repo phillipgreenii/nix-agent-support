@@ -236,18 +236,18 @@ func TestDueBacklogGaugeForIssueCountsOnlyPendingHydrations(t *testing.T) {
 	seed := func(id, hydratedAt string, watched bool) {
 		t.Helper()
 		e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"}
-		if _, err := st.WriteEntityStateWithLog(e, 0, hydratedAt, true, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), e, 0, hydratedAt, true, []string{"created"}, "sync", "2026-09-01T00:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 		backend := "beads-a"
-		if err := st.SetEntityColumns("o/r", "issue", id, &backend, &watched); err != nil {
+		if err := st.SetEntityColumns(context.Background(), "o/r", "issue", id, &backend, &watched); err != nil {
 			t.Fatal(err)
 		}
 	}
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	issueDue := func(t *testing.T) int64 {
 		t.Helper()
-		rm, err := collectChangeFlow(t, func() (changes.Flow, error) { return changes.Observe(st, now, 6*time.Hour) })
+		rm, err := collectChangeFlow(t, func() (changes.Flow, error) { return changes.Observe(context.Background(), st, now, 6*time.Hour) })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,7 +280,7 @@ func TestDueBacklogGaugeForIssueCountsOnlyPendingHydrations(t *testing.T) {
 		{Instance: "jira-a", EntityID: "PROJ-1", Seq: 1, StoreIdentity: "s", FirstFailedAt: "2026-10-01T11:00:00Z"},
 		{Instance: "jira-a", EntityID: "PROJ-2", Seq: 2, StoreIdentity: "s", FirstFailedAt: "2026-10-01T11:00:00Z"},
 	} {
-		if err := st.RecordIngestFailure(f); err != nil {
+		if err := st.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -333,11 +333,11 @@ func TestIngestFailedSeriesReadTheTableAtScrapeTime(t *testing.T) {
 		{Instance: "jira-a", EntityID: "PROJ-2", Seq: 5, StoreIdentity: "s1", FirstFailedAt: now.Add(-40 * time.Minute).Format(time.RFC3339), LastError: "boom"},
 		{Instance: "stray", EntityID: "X-1", Seq: 1, StoreIdentity: "s9", FirstFailedAt: now.Add(-5 * time.Minute).Format(time.RFC3339), LastError: "boom"},
 	} {
-		if err := st.RecordIngestFailure(f); err != nil {
+		if err := st.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	rm, err := collectIngest(t, IngestFailedFromStore(st, []string{"jira-a", "jira-b"}, func() time.Time { return now }), true)
+	rm, err := collectIngest(t, IngestFailedFromStore(context.Background(), st, []string{"jira-a", "jira-b"}, func() time.Time { return now }), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,11 +358,11 @@ func TestIngestFailedSeriesReadTheTableAtScrapeTime(t *testing.T) {
 
 	// Clearing the entries empties the table: both families read 0 again.
 	for _, f := range []store.IngestFailure{{Instance: "jira-a", EntityID: "PROJ-1", Seq: 4}, {Instance: "jira-a", EntityID: "PROJ-2", Seq: 5}} {
-		if err := st.ClearIngestFailure(f.Instance, f.EntityID, f.Seq); err != nil {
+		if err := st.ClearIngestFailure(context.Background(), f.Instance, f.EntityID, f.Seq); err != nil {
 			t.Fatal(err)
 		}
 	}
-	rm, err = collectIngest(t, IngestFailedFromStore(st, []string{"jira-a"}, func() time.Time { return now }), true)
+	rm, err = collectIngest(t, IngestFailedFromStore(context.Background(), st, []string{"jira-a"}, func() time.Time { return now }), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestIngestFailedSeriesReadTheTableAtScrapeTime(t *testing.T) {
 // backend never reads as "the store cannot answer".
 func TestIngestFailedSeriesExistWithNoInstance(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	rm, err := collectIngest(t, IngestFailedFromStore(st, nil, time.Now), true)
+	rm, err := collectIngest(t, IngestFailedFromStore(context.Background(), st, nil, time.Now), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,10 +414,10 @@ func TestIngestFailedSeriesAbsentWhenTheStoreCannotAnswer(t *testing.T) {
 		t.Error("a failing read must surface from Collect")
 	}
 	st := store.OpenNewSchemaForTest(t)
-	if err := st.RecordIngestFailure(store.IngestFailure{Instance: "jira-a", EntityID: "P-1", Seq: 1, FirstFailedAt: "not-a-time"}); err != nil {
+	if err := st.RecordIngestFailure(context.Background(), store.IngestFailure{Instance: "jira-a", EntityID: "P-1", Seq: 1, FirstFailedAt: "not-a-time"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := collectIngest(t, IngestFailedFromStore(st, []string{"jira-a"}, time.Now), true); err == nil {
+	if _, err := collectIngest(t, IngestFailedFromStore(context.Background(), st, []string{"jira-a"}, time.Now), true); err == nil {
 		t.Error("an unparseable first_failed_at must fail the scrape")
 	}
 }
@@ -462,13 +462,13 @@ func TestWatchedSourceObservedAgeIsTheOldestOfTheInstancesQueries(t *testing.T) 
 		changes.MetaFeedObservedPrefix + "jira-a.stray": 90 * time.Hour, // not a configured query of the instance
 		changes.MetaFeedObservedPrefix + "jira-b.mine":  time.Hour,
 	} {
-		if err := st.SetMeta(k, now.Add(-at).Format(time.RFC3339)); err != nil {
+		if err := st.SetMeta(context.Background(), k, now.Add(-at).Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	queries := map[string][]string{"jira-a": {"mine", "team"}, "jira-b": {"mine"}, "jira-c": {"mine"}}
 	got, err := outcomePoints(t, MetricWatchedSourceObservedAge,
-		WithWatchedSourceObserved(WatchedSourceObservedFromStore(st, queries, func() time.Time { return now })), true)
+		WithWatchedSourceObserved(WatchedSourceObservedFromStore(context.Background(), st, queries, func() time.Time { return now })), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,8 +481,8 @@ func TestWatchedSourceObservedAgeIsTheOldestOfTheInstancesQueries(t *testing.T) 
 func TestOutcomeSeriesExistWithNoOwningInstanceAndFailLoudlyOnBadData(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	for name, opt := range map[string]ChangeFlowOption{
-		MetricWatchedSourceObservedAge: WithWatchedSourceObserved(WatchedSourceObservedFromStore(st, nil, time.Now)),
-		MetricIssueUnflaggedMembers:    WithUnflaggedMembers(UnflaggedMembersFromStore(st, nil)),
+		MetricWatchedSourceObservedAge: WithWatchedSourceObserved(WatchedSourceObservedFromStore(context.Background(), st, nil, time.Now)),
+		MetricIssueUnflaggedMembers:    WithUnflaggedMembers(UnflaggedMembersFromStore(context.Background(), st, nil)),
 	} {
 		got, err := outcomePoints(t, name, opt, true)
 		if err != nil || !reflect.DeepEqual(got, map[string]int64{"": 0}) {
@@ -494,29 +494,29 @@ func TestOutcomeSeriesExistWithNoOwningInstanceAndFailLoudlyOnBadData(t *testing
 		}
 	}
 	queries := map[string][]string{"jira-a": {"mine"}}
-	if err := st.SetMeta(changes.MetaFeedObservedPrefix+"jira-a.mine", "yesterday"); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaFeedObservedPrefix+"jira-a.mine", "yesterday"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := outcomePoints(t, MetricWatchedSourceObservedAge,
-		WithWatchedSourceObserved(WatchedSourceObservedFromStore(st, queries, time.Now)), true); err == nil {
+		WithWatchedSourceObserved(WatchedSourceObservedFromStore(context.Background(), st, queries, time.Now)), true); err == nil {
 		t.Error("an unparseable observation must fail the scrape")
 	}
-	if err := st.SetMeta(changes.MetaUnflaggedPrefix+"jira-a", "{not json"); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaUnflaggedPrefix+"jira-a", "{not json"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := outcomePoints(t, MetricIssueUnflaggedMembers,
-		WithUnflaggedMembers(UnflaggedMembersFromStore(st, queries)), true); err == nil {
+		WithUnflaggedMembers(UnflaggedMembersFromStore(context.Background(), st, queries)), true); err == nil {
 		t.Error("an undecodable unflagged record must fail the scrape")
 	}
 }
 
 func TestUnflaggedMembersSeriesIsTheStoredCountPerInstance(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	if err := st.SetMeta(changes.MetaUnflaggedPrefix+"jira-a", `{"count":4,"at":"2026-10-10T11:55:00Z"}`); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaUnflaggedPrefix+"jira-a", `{"count":4,"at":"2026-10-10T11:55:00Z"}`); err != nil {
 		t.Fatal(err)
 	}
 	queries := map[string][]string{"jira-a": {"mine"}, "jira-b": {"mine"}}
-	got, err := outcomePoints(t, MetricIssueUnflaggedMembers, WithUnflaggedMembers(UnflaggedMembersFromStore(st, queries)), true)
+	got, err := outcomePoints(t, MetricIssueUnflaggedMembers, WithUnflaggedMembers(UnflaggedMembersFromStore(context.Background(), st, queries)), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestListedSourceObservedAgeIsTheOldestOfListingsAndOrphans(t *testing.T) {
 		changes.MetaListingOKPrefix + "other": time.Hour,
 		changes.MetaListingOKPrefix + "stray": 90 * time.Hour, // names no instance
 	} {
-		if err := st.SetMeta(k, now.Add(-ago).Format(time.RFC3339)); err != nil {
+		if err := st.SetMeta(context.Background(), k, now.Add(-ago).Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -572,7 +572,7 @@ func TestListedSourceObservedAgeIsTheOldestOfListingsAndOrphans(t *testing.T) {
 	reader := func() map[string]int64 {
 		t.Helper()
 		got, err := outcomePoints(t, MetricWatchedSourceObservedAge,
-			WithWatchedSourceObserved(WatchedSourceObservedForConfig(st, cfg, func() time.Time { return now })), true)
+			WithWatchedSourceObserved(WatchedSourceObservedForConfig(context.Background(), st, cfg, func() time.Time { return now })), true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -587,10 +587,10 @@ func TestListedSourceObservedAgeIsTheOldestOfListingsAndOrphans(t *testing.T) {
 		t.Fatalf("ages = %v, want %v", got, want)
 	}
 	// A fresh listing leaves the 30 minute orphan as the oldest source of beads-a.
-	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", now.Add(-time.Minute).Format(time.RFC3339)); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaListingOKPrefix+"open", now.Add(-time.Minute).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetMeta(changes.MetaListingOKPrefix+"mine", now.Add(-2*time.Minute).Format(time.RFC3339)); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaListingOKPrefix+"mine", now.Add(-2*time.Minute).Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
 	if got := reader()["beads-a"]; got != 30*60 {
@@ -598,18 +598,18 @@ func TestListedSourceObservedAgeIsTheOldestOfListingsAndOrphans(t *testing.T) {
 	}
 	// No value recorded at all reads 0.
 	empty, err := outcomePoints(t, MetricWatchedSourceObservedAge,
-		WithWatchedSourceObserved(WatchedSourceObservedForConfig(store.OpenNewSchemaForTest(t), cfg, func() time.Time { return now })), true)
+		WithWatchedSourceObserved(WatchedSourceObservedForConfig(context.Background(), store.OpenNewSchemaForTest(t), cfg, func() time.Time { return now })), true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := map[string]int64{"beads-a": 0, "beads-b": 0, "jira-a": 0}; !reflect.DeepEqual(empty, want) {
 		t.Errorf("fresh ages = %v, want %v", empty, want)
 	}
-	if err := st.SetMeta(changes.MetaListingOKPrefix+"open", "yesterday"); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaListingOKPrefix+"open", "yesterday"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := outcomePoints(t, MetricWatchedSourceObservedAge,
-		WithWatchedSourceObserved(WatchedSourceObservedForConfig(st, cfg, func() time.Time { return now })), true); err == nil {
+		WithWatchedSourceObserved(WatchedSourceObservedForConfig(context.Background(), st, cfg, func() time.Time { return now })), true); err == nil {
 		t.Error("an unparseable listing_ok must fail the scrape")
 	}
 }
@@ -618,10 +618,10 @@ func TestListedSourceObservedAgeIsTheOldestOfListingsAndOrphans(t *testing.T) {
 // record, and a deployment with neither kind keeps the one backendless 0.
 func TestUnflaggedSeriesCoversBeadsInstancesAndKeepsThePlaceholder(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
-	if err := st.SetMeta(changes.MetaUnflaggedPrefix+"beads-a", `{"count":3,"at":"2026-10-10T11:55:00Z"}`); err != nil {
+	if err := st.SetMeta(context.Background(), changes.MetaUnflaggedPrefix+"beads-a", `{"count":3,"at":"2026-10-10T11:55:00Z"}`); err != nil {
 		t.Fatal(err)
 	}
-	got, err := outcomePoints(t, MetricIssueUnflaggedMembers, WithUnflaggedMembers(UnflaggedMembersForConfig(st, listedOutcomeConfig())), true)
+	got, err := outcomePoints(t, MetricIssueUnflaggedMembers, WithUnflaggedMembers(UnflaggedMembersForConfig(context.Background(), st, listedOutcomeConfig())), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,8 +630,8 @@ func TestUnflaggedSeriesCoversBeadsInstancesAndKeepsThePlaceholder(t *testing.T)
 	}
 	none := &config.Config{}
 	for name, opt := range map[string]ChangeFlowOption{
-		MetricWatchedSourceObservedAge: WithWatchedSourceObserved(WatchedSourceObservedForConfig(st, none, time.Now)),
-		MetricIssueUnflaggedMembers:    WithUnflaggedMembers(UnflaggedMembersForConfig(st, none)),
+		MetricWatchedSourceObservedAge: WithWatchedSourceObserved(WatchedSourceObservedForConfig(context.Background(), st, none, time.Now)),
+		MetricIssueUnflaggedMembers:    WithUnflaggedMembers(UnflaggedMembersForConfig(context.Background(), st, none)),
 	} {
 		got, err := outcomePoints(t, name, opt, true)
 		if err != nil || !reflect.DeepEqual(got, map[string]int64{"": 0}) {
@@ -650,11 +650,11 @@ func TestIngestFlaggedSeriesCountsOnlyFlaggedEntries(t *testing.T) {
 		{Instance: "a", EntityID: "i-1", Seq: 1, FirstFailedAt: first, FailureClass: "not_found", FlaggedAt: first},
 		{Instance: "a", EntityID: "i-2", Seq: 2, FirstFailedAt: first, FailureClass: "unavailable"},
 	} {
-		if err := st.RecordIngestFailure(f); err != nil {
+		if err := st.RecordIngestFailure(context.Background(), f); err != nil {
 			t.Fatal(err)
 		}
 	}
-	rm, err := collectIngest(t, IngestFailedFromStore(st, []string{"a", "b"}, func() time.Time { return now }), true)
+	rm, err := collectIngest(t, IngestFailedFromStore(context.Background(), st, []string{"a", "b"}, func() time.Time { return now }), true)
 	if err != nil {
 		t.Fatal(err)
 	}

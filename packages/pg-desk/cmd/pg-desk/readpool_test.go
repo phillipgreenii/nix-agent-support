@@ -18,8 +18,6 @@ import (
 // seedReadPoolStore builds one store at the default path (under a temp
 // XDG_STATE_HOME) with a known change flow: two active prs, two consumers at
 // different cursors and a degraded-hydration history.
-var seedAt = time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
-
 func seedReadPoolStore(t *testing.T) {
 	t.Helper()
 	store.SetSynchronousForTests("OFF")
@@ -32,7 +30,7 @@ func seedReadPoolStore(t *testing.T) {
 	write := func(id string, expected int64, kinds []string) {
 		t.Helper()
 		e := store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "x"}
-		if _, err := st.WriteEntityStateWithLog(e, expected, "2026-10-01T11:00:00Z", true, kinds, "poll", "2026-10-01T10:00:00Z"); err != nil {
+		if _, err := st.WriteEntityStateWithLog(context.Background(), e, expected, "2026-10-01T11:00:00Z", true, kinds, "poll", "2026-10-01T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,17 +38,17 @@ func seedReadPoolStore(t *testing.T) {
 	write("o/r#2", 0, []string{"created"})
 	write("o/r#1", 1, []string{"labels"})
 	for name, cursor := range map[string]int64{"alpha": 1, "beta": 3} {
-		if err := st.RegisterConsumer(name, "pr", time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)); err != nil {
+		if err := st.RegisterConsumer(context.Background(), name, "pr", time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.AdvanceCursor(name, "pr", cursor); err != nil {
+		if err := st.AdvanceCursor(context.Background(), name, "pr", cursor); err != nil {
 			t.Fatal(err)
 		}
 	}
-	changes.RecordHydration(st, "pr", "o/r#1", pipeline.EntityChangeResult{Retries: 2}, nil)
-	changes.RecordHydration(st, "pr", "o/r#2", pipeline.EntityChangeResult{}, errors.New("boom"))
+	changes.RecordHydration(context.Background(), st, "pr", "o/r#1", pipeline.EntityChangeResult{Retries: 2}, nil)
+	changes.RecordHydration(context.Background(), st, "pr", "o/r#2", pipeline.EntityChangeResult{}, errors.New("boom"))
 	// One interpretation row so /metrics' ready gate answers.
-	if err := st.UpsertInterpretation(store.Interpretation{
+	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: httpapi.PanelMineAwaitingMe, AsOf: "2026-10-01T11:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
@@ -85,7 +83,7 @@ func TestStatusDoctorAndMetricsAgreeOverOneReadPoolStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = pool.Close() }()
-	h, err := httpapi.NewHandler(pool, openTestConfig("o/r"))
+	h, err := httpapi.NewHandler(context.Background(), pool, openTestConfig("o/r"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +123,7 @@ func TestDefaultStatusDoctorSeamIsReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	if err := st.SetMeta("probe", "x"); err == nil {
+	if err := st.SetMeta(context.Background(), "probe", "x"); err == nil {
 		t.Fatal("status/doctor seam handle accepted a write; it must be the read-only pool")
 	}
 }

@@ -120,29 +120,29 @@ func decisionPair(approvals, panel string) (waitingOn, p string) {
 //
 // The schema check runs BEFORE Begin, so a schema-1 store is refused with the
 // cutover message having written nothing.
-func (s *Store) WriteInterpretation(row Interpretation, opts InterpretationWriteOptions) (InterpretationWriteResult, error) {
+func (s *Store) WriteInterpretation(ctx context.Context, row Interpretation, opts InterpretationWriteOptions) (InterpretationWriteResult, error) {
 	wrap := func(err error) error {
 		return fmt.Errorf("store: write interpretation (%s,%s,%s): %w", row.Repo, row.EntityType, row.EntityID, err)
 	}
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return InterpretationWriteResult{}, err
 	}
 	stamp := s.InterpStamp()
 	if opts.RequireStamp && stamp == "" {
 		return InterpretationWriteResult{}, wrap(ErrStampRequired)
 	}
-	haveStamp, err := s.hasInterpStampColumn()
+	haveStamp, err := s.hasInterpStampColumn(ctx)
 	if err != nil {
 		return InterpretationWriteResult{}, wrap(err)
 	}
 
-	tx, err := s.beginLocked(StepBegin)
+	tx, err := s.beginLocked(ctx, StepBegin)
 	if err != nil {
 		return InterpretationWriteResult{}, wrap(err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
-	version, hash, err := s.lockEntity(tx, row.Repo, row.EntityType, row.EntityID)
+	version, hash, err := s.lockEntity(ctx, tx, row.Repo, row.EntityType, row.EntityID)
 	if err != nil {
 		return InterpretationWriteResult{}, wrap(err)
 	}
@@ -155,7 +155,7 @@ func (s *Store) WriteInterpretation(row Interpretation, opts InterpretationWrite
 	}
 	var oldApprovals, oldPanel string
 	oldErr := tx.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT approvals, panel FROM interpretation WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		row.Repo, row.EntityType, row.EntityID,
 	).Scan(&oldApprovals, &oldPanel)
@@ -181,7 +181,7 @@ func (s *Store) WriteInterpretation(row Interpretation, opts InterpretationWrite
 		if err := s.interpStep(StepAppend); err != nil {
 			return InterpretationWriteResult{}, wrap(err)
 		}
-		if _, err := s.AppendChangeLogTx(tx, ChangeRecord{
+		if _, err := s.AppendChangeLogTx(ctx, tx, ChangeRecord{
 			Repo: row.Repo, EntityType: row.EntityType, EntityID: row.EntityID,
 			Version: version, Kinds: []string{ChangeKindInterpretationChanged},
 			Origin: opts.Origin, At: opts.At,
@@ -205,30 +205,30 @@ func (s *Store) WriteInterpretation(row Interpretation, opts InterpretationWrite
 // for a row that is not open: its content stays, no record is appended. It
 // returns whether the stamp was written. The handle MUST carry a stamp
 // (ErrStampRequired), and the row MUST exist (ErrNoInterpretation).
-func (s *Store) StampInterpretation(key InterpretationKey, expectedHash string) (stamped bool, err error) {
+func (s *Store) StampInterpretation(ctx context.Context, key InterpretationKey, expectedHash string) (stamped bool, err error) {
 	wrap := func(err error) error {
 		return fmt.Errorf("store: stamp interpretation (%s,%s,%s): %w", key.Repo, key.EntityType, key.EntityID, err)
 	}
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return false, err
 	}
 	stamp := s.InterpStamp()
 	if stamp == "" {
 		return false, wrap(ErrStampRequired)
 	}
-	tx, err := s.beginLocked(StepBegin)
+	tx, err := s.beginLocked(ctx, StepBegin)
 	if err != nil {
 		return false, wrap(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, hash, err := s.lockEntity(tx, key.Repo, key.EntityType, key.EntityID)
+	_, hash, err := s.lockEntity(ctx, tx, key.Repo, key.EntityType, key.EntityID)
 	if err != nil {
 		return false, wrap(err)
 	}
 	if hash != expectedHash {
 		return false, nil
 	}
-	if err := s.setStampTx(tx, key, stamp); err != nil {
+	if err := s.setStampTx(ctx, tx, key, stamp); err != nil {
 		return false, wrap(err)
 	}
 	if err := s.interpStep(StepCommit); err != nil {
@@ -245,17 +245,17 @@ func (s *Store) StampInterpretation(key InterpretationKey, expectedHash string) 
 // must work when the entity row is the thing that is gone. stamp is the
 // running stamp (the handle's, passed by the caller so the marker names the
 // stamp it was computed under). The row MUST exist (ErrNoInterpretation).
-func (s *Store) MarkInterpretationFailed(key InterpretationKey, stamp string) error {
+func (s *Store) MarkInterpretationFailed(ctx context.Context, key InterpretationKey, stamp string) error {
 	wrap := func(err error) error {
 		return fmt.Errorf("store: mark interpretation failed (%s,%s,%s): %w", key.Repo, key.EntityType, key.EntityID, err)
 	}
-	if err := s.RequireNewSchema(); err != nil {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
 	if stamp == "" {
 		return wrap(ErrStampRequired)
 	}
-	tx, err := s.sql.BeginTx(context.Background(), nil)
+	tx, err := s.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return wrap(err)
 	}
@@ -263,7 +263,7 @@ func (s *Store) MarkInterpretationFailed(key InterpretationKey, stamp string) er
 	if err := s.interpStep(StepBegin); err != nil {
 		return wrap(err)
 	}
-	if err := s.setStampTx(tx, key, stamp+FailedStampSuffix); err != nil {
+	if err := s.setStampTx(ctx, tx, key, stamp+FailedStampSuffix); err != nil {
 		return wrap(err)
 	}
 	if err := s.interpStep(StepCommit); err != nil {
@@ -277,12 +277,12 @@ func (s *Store) MarkInterpretationFailed(key InterpretationKey, stamp string) er
 
 // setStampTx updates interp_version of key's row; ErrNoInterpretation when
 // there is no such row or the table has no stamp column.
-func (s *Store) setStampTx(tx *sql.Tx, key InterpretationKey, stamp string) error {
+func (s *Store) setStampTx(ctx context.Context, tx *sql.Tx, key InterpretationKey, stamp string) error {
 	if err := s.interpStep(StepUpsert); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE interpretation SET `+interpStampColumn+` = ? WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		stamp, key.Repo, key.EntityType, key.EntityID,
 	)
@@ -300,8 +300,8 @@ func (s *Store) setStampTx(tx *sql.Tx, key InterpretationKey, stamp string) erro
 }
 
 // beginLocked begins a transaction, running the begin-step hook.
-func (s *Store) beginLocked(step InterpretationWriteStep) (*sql.Tx, error) {
-	tx, err := s.sql.BeginTx(context.Background(), nil)
+func (s *Store) beginLocked(ctx context.Context, step InterpretationWriteStep) (*sql.Tx, error) {
+	tx, err := s.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -314,12 +314,12 @@ func (s *Store) beginLocked(step InterpretationWriteStep) (*sql.Tx, error) {
 
 // lockEntity takes the write lock with a no-op UPDATE of the entity row and
 // returns its version and content_hash; ErrNoEntity when the row is missing.
-func (s *Store) lockEntity(tx *sql.Tx, repo, entityType, entityID string) (version int64, hash string, err error) {
+func (s *Store) lockEntity(ctx context.Context, tx *sql.Tx, repo, entityType, entityID string) (version int64, hash string, err error) {
 	if err := s.interpStep(StepLock); err != nil {
 		return 0, "", err
 	}
 	res, err := tx.ExecContext(
-		context.Background(),
+		ctx,
 		`UPDATE entity SET version = version WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	)
@@ -334,7 +334,7 @@ func (s *Store) lockEntity(tx *sql.Tx, repo, entityType, entityID string) (versi
 		return 0, "", ErrNoEntity
 	}
 	err = tx.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT version, content_hash FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&version, &hash)

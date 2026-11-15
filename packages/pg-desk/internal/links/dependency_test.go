@@ -1,6 +1,7 @@
 package links
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -65,7 +66,7 @@ func TestPRLinks_DependsOnExternalAndMerged(t *testing.T) {
 	if got := dependsOnLinks(resolve(t, deps(st), "pr:"+top).Items["pr:"+top]); len(got) != 0 {
 		t.Fatalf("depends_on links with a merged base = %+v; want none (stack needs the base open)", got)
 	}
-	err := st.AddExternalXref(store.XrefLink{
+	err := st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: "pr", FromID: top, ToType: "pr", ToID: base, Relation: "depends_on",
 		Actor: "operator", ActedAt: "2026-10-01T12:00:00Z", FirstSeen: "2026-10-01T12:00:00Z", LastConfirmed: "2026-10-01T12:00:00Z",
 	})
@@ -88,7 +89,7 @@ func TestReadDetailed_DependsOn(t *testing.T) {
 	top := putStackPR(t, st, 2, "open", "feat-b", "feat-a", false)
 	d := deps(st)
 
-	got, err := ReadDetailed(d, "pr", top)
+	got, err := ReadDetailed(context.Background(), d, "pr", top)
 	if err != nil || len(got.Links) != 1 {
 		t.Fatalf("ReadDetailed = %+v, %v", got, err)
 	}
@@ -99,7 +100,7 @@ func TestReadDetailed_DependsOn(t *testing.T) {
 		t.Errorf("link = %+v", l)
 	}
 
-	err = st.AddExternalXref(store.XrefLink{
+	err = st.AddExternalXref(context.Background(), store.XrefLink{
 		Repo: testRepo, FromType: "pr", FromID: top, ToType: "pr", ToID: base, Relation: "depends_on",
 		Actor: "operator", ActedAt: "2026-10-01T12:00:00Z", Reason: "stacked by hand",
 		FirstSeen: "2026-10-01T12:00:00Z", LastConfirmed: "2026-10-01T12:00:00Z",
@@ -107,7 +108,7 @@ func TestReadDetailed_DependsOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err = ReadDetailed(d, "pr", top)
+	got, err = ReadDetailed(context.Background(), d, "pr", top)
 	if err != nil || len(got.Links) != 1 {
 		t.Fatalf("ReadDetailed with an external claim = %+v, %v", got, err)
 	}

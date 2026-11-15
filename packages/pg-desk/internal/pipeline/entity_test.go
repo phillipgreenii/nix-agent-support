@@ -75,14 +75,14 @@ func TestHydrateEntity_IssueSuccessWritesRows(t *testing.T) {
 	if err := runEntity(p, "issue", "i-1", gather.ChangeAdded); err != nil {
 		t.Fatalf("RunEntityChange: %v", err)
 	}
-	e, found, err := p.store.GetEntity("acme/widgets", "issue", "i-1")
+	e, found, err := p.store.GetEntity(context.Background(), "acme/widgets", "issue", "i-1")
 	if err != nil || !found {
 		t.Fatalf("GetEntity found=%v err=%v", found, err)
 	}
 	if e.AsOf != "2026-09-16T00:00:00Z" || e.ContentHash == "" {
 		t.Fatalf("entity = %+v", e)
 	}
-	if _, found, err := p.store.GetInterpretation("acme/widgets", "issue", "i-1"); err != nil || !found {
+	if _, found, err := p.store.GetInterpretation(context.Background(), "acme/widgets", "issue", "i-1"); err != nil || !found {
 		t.Fatalf("GetInterpretation found=%v err=%v", found, err)
 	}
 }
@@ -95,7 +95,7 @@ func TestHydrateEntity_NotFoundGate(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want not found", err)
 	}
-	if _, found, _ := p.store.GetEntity("acme/widgets", "issue", "i-9"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), "acme/widgets", "issue", "i-9"); found {
 		t.Fatal("not-found run must not write an entity row")
 	}
 
@@ -104,7 +104,7 @@ func TestHydrateEntity_NotFoundGate(t *testing.T) {
 	if err := runEntity(p, "issue", "i-9", gather.ChangeRemoved); err != nil {
 		t.Fatalf("removal: %v", err)
 	}
-	if _, found, _ := p.store.GetEntity("acme/widgets", "issue", "i-9"); found {
+	if _, found, _ := p.store.GetEntity(context.Background(), "acme/widgets", "issue", "i-9"); found {
 		t.Fatal("a not_found removal must not write an entity row")
 	}
 }
@@ -117,8 +117,8 @@ func TestFailedDetailReadKeepsPreviousSnapshot(t *testing.T) {
 	if err := runEntity(p, "issue", "i-1", gather.ChangeAdded); err != nil {
 		t.Fatal(err)
 	}
-	e1, _, _ := p.store.GetEntity("acme/widgets", "issue", "i-1")
-	i1, _, _ := p.store.GetInterpretation("acme/widgets", "issue", "i-1")
+	e1, _, _ := p.store.GetEntity(context.Background(), "acme/widgets", "issue", "i-1")
+	i1, _, _ := p.store.GetInterpretation(context.Background(), "acme/widgets", "issue", "i-1")
 	out.Reset()
 
 	p.entityGatherers["issue"] = fakeEntityGatherer{err: errors.New("boom")}
@@ -126,8 +126,8 @@ func TestFailedDetailReadKeepsPreviousSnapshot(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "pipeline: gather issue i-1") {
 		t.Fatalf("err = %v", err)
 	}
-	e2, _, _ := p.store.GetEntity("acme/widgets", "issue", "i-1")
-	i2, _, _ := p.store.GetInterpretation("acme/widgets", "issue", "i-1")
+	e2, _, _ := p.store.GetEntity(context.Background(), "acme/widgets", "issue", "i-1")
+	i2, _, _ := p.store.GetInterpretation(context.Background(), "acme/widgets", "issue", "i-1")
 	if e1 != e2 {
 		t.Fatalf("entity changed:\n%+v\n%+v", e1, e2)
 	}
@@ -155,7 +155,7 @@ func TestHydrateEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	if err := runEntity(p, "pr", "1", gather.ChangeAdded); err != nil {
 		t.Fatalf("RunEntityChange: %v", err)
 	}
-	generic, found, err := p.store.GetEntity("acme/widgets", "pr", "1")
+	generic, found, err := p.store.GetEntity(context.Background(), "acme/widgets", "pr", "1")
 	if err != nil || !found {
 		t.Fatalf("GetEntity found=%v err=%v", found, err)
 	}
@@ -175,16 +175,16 @@ func TestHydrateEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := q.store.UpsertEntityForTest(store.Entity{
+	if err := q.store.UpsertEntityForTest(context.Background(), store.Entity{
 		Repo: "acme/widgets", EntityType: "pr", EntityID: "1", Facts: string(factsJSON),
 		AsOf: facts.AsOf, ContentHash: contentHash(factsJSON), HeadSHA: facts.HeadSHA,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.writeInterpretation(row, contentHash(factsJSON)); err != nil {
+	if err := q.writeInterpretation(context.Background(), row, contentHash(factsJSON)); err != nil {
 		t.Fatal(err)
 	}
-	viaPR, _, _ := st.GetEntity("acme/widgets", "pr", "1")
+	viaPR, _, _ := st.GetEntity(context.Background(), "acme/widgets", "pr", "1")
 	if viaPR.HeadSHA != generic.HeadSHA || viaPR.ContentHash != generic.ContentHash {
 		t.Fatalf("PR path %+v vs generic %+v", viaPR, generic)
 	}

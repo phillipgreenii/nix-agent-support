@@ -1,6 +1,7 @@
 package attention
 
 import (
+	"context"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
@@ -96,7 +97,7 @@ func TestDependencySuppression_ClosedDependencyReleases(t *testing.T) {
 func TestDependencySuppression_TwoSiblingDependencies(t *testing.T) {
 	link := func(st *store.Store, from, to int) {
 		t.Helper()
-		err := st.AddExternalXref(store.XrefLink{
+		err := st.AddExternalXref(context.Background(), store.XrefLink{
 			Repo: testRepo, FromType: "pr", FromID: pid(from), ToType: "pr", ToID: pid(to),
 			Relation: "depends_on", Actor: "op", ActedAt: "2026-10-06T10:00:00Z",
 			FirstSeen: "2026-10-06T10:00:00Z", LastConfirmed: "2026-10-06T10:00:00Z",
@@ -165,7 +166,7 @@ func TestDependencySuppression_AnnotationsComeFirst(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	put(t, st, stackPR(1, "feat-a", "main", "open"))
 	put(t, st, stackPR(2, "feat-b", "feat-a", "open"))
-	if err := st.SetAnnotation(store.KVAnnotation{Repo: testRepo, EntityType: "pr", EntityID: pid(2), Key: store.KeySuppress(KindOwnCIFailing), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T10:00:00Z"}); err != nil {
+	if err := st.SetAnnotation(context.Background(), store.KVAnnotation{Repo: testRepo, EntityType: "pr", EntityID: pid(2), Key: store.KeySuppress(KindOwnCIFailing), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T10:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	res := evaluate(t, st, baseConfig())

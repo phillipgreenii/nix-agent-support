@@ -79,10 +79,10 @@ func TestHeartbeatRecordsSourceFetchesFromTheLedger(t *testing.T) {
 	if _, err := runHeartbeat(t); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
-	if hb, found, _ := st.GetMeta(store.MetaKeyLastHeartbeat); !found || hb != "2026-10-06T12:00:00Z" {
+	if hb, found, _ := st.GetMeta(context.Background(), store.MetaKeyLastHeartbeat); !found || hb != "2026-10-06T12:00:00Z" {
 		t.Errorf("last_heartbeat = %q, found=%v", hb, found)
 	}
-	kv, err := st.ListMetaPrefix(freshness.MetaKeyPrefix)
+	kv, err := st.ListMetaPrefix(context.Background(), freshness.MetaKeyPrefix)
 	if err != nil || len(kv) != 3 {
 		t.Fatalf("source_fetch keys = %v, %v; want one per (backend, query)", kv, err)
 	}
@@ -98,7 +98,7 @@ func TestHeartbeatRecordsSourceFetchesFromTheLedger(t *testing.T) {
 	if _, err := runHeartbeat(t); err != nil {
 		t.Fatalf("second heartbeat: %v", err)
 	}
-	again, _ := st.ListMetaPrefix(freshness.MetaKeyPrefix)
+	again, _ := st.ListMetaPrefix(context.Background(), freshness.MetaKeyPrefix)
 	for k, v := range kv {
 		if again[k] != v {
 			t.Errorf("%s changed on a repeated heartbeat", k)
@@ -128,13 +128,13 @@ func TestHeartbeatStillStampsWhenTheLedgerReadFails(t *testing.T) {
 			if err != nil {
 				t.Fatalf("heartbeat returned %v, want nil (a ledger read failure is not a heartbeat failure)", err)
 			}
-			if hb, _, _ := st.GetMeta(store.MetaKeyLastHeartbeat); hb != "2026-10-06T12:00:00Z" {
+			if hb, _, _ := st.GetMeta(context.Background(), store.MetaKeyLastHeartbeat); hb != "2026-10-06T12:00:00Z" {
 				t.Errorf("last_heartbeat = %q, want it stamped", hb)
 			}
 			if !strings.Contains(stderr, "source ages not refreshed") {
 				t.Errorf("stderr = %q, want the skipped refresh named", stderr)
 			}
-			if kv, _ := st.ListMetaPrefix(freshness.MetaKeyPrefix); len(kv) != 0 {
+			if kv, _ := st.ListMetaPrefix(context.Background(), freshness.MetaKeyPrefix); len(kv) != 0 {
 				t.Errorf("recorded %v from a failed read", kv)
 			}
 		})
@@ -144,7 +144,7 @@ func TestHeartbeatStillStampsWhenTheLedgerReadFails(t *testing.T) {
 func seedSourceFetches(t *testing.T, st *store.Store) {
 	t.Helper()
 	at := func(d time.Duration) *time.Time { u := freshnessTestNow.Add(d); return &u }
-	if err := freshness.Update(st, []freshness.LedgerRow{
+	if err := freshness.Update(context.Background(), st, []freshness.LedgerRow{
 		{Type: "pr", Backend: "pg-connector-pr-github", Query: "mine", RefreshedAt: at(-2 * time.Minute)},
 		{Type: "issue", Backend: "pg-connector-issue-jira", Query: "mine", RefreshedAt: at(-40 * time.Minute)},
 		{Type: "thread", Backend: "pg-connector-thread-slack", Query: "mine"},

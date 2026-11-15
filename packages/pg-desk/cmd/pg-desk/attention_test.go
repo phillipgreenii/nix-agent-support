@@ -44,7 +44,7 @@ func attnFixture(t *testing.T, cutover bool, prs ...attnPR) string {
 		if facts == "" {
 			facts = fmt.Sprintf(`{"pr_show":{"number":%d,"state":"open","author":"me","head_sha":"h1"}}`, p.n)
 		}
-		if err := st.UpsertEntityForTest(store.Entity{Repo: attnRepo, EntityType: "pr", EntityID: p.id(), Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
+		if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: attnRepo, EntityType: "pr", EntityID: p.id(), Facts: facts, AsOf: "2026-10-06T11:00:00Z"}); err != nil {
 			t.Fatal(err)
 		}
 		if p.panel == "none" {
@@ -66,7 +66,7 @@ func attnFixture(t *testing.T, cutover bool, prs ...attnPR) string {
 		if p.approvals != "" {
 			approvals = p.approvals
 		}
-		if err := st.UpsertInterpretation(store.Interpretation{
+		if err := st.UpsertInterpretation(context.Background(), store.Interpretation{
 			Repo: attnRepo, EntityType: "pr", EntityID: p.id(), Ownership: p.ownership, Panel: p.panel,
 			Approvals: approvals, MatchReasons: "[]", Enrichment: "{}", Urgency: "{}", Dispositions: "[]", AsOf: "2026-10-06T11:00:00Z",
 		}); err != nil {
@@ -260,7 +260,7 @@ func TestAttentionExplain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetAnnotation(store.KVAnnotation{Repo: attnRepo, EntityType: "pr", EntityID: "acme/api#3", Key: store.KeySuppress("pr.own-needs-action"), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
+	if err := st.SetAnnotation(context.Background(), store.KVAnnotation{Repo: attnRepo, EntityType: "pr", EntityID: "acme/api#3", Key: store.KeySuppress("pr.own-needs-action"), Value: "true", Origin: "test", SetBy: "test", SetAt: "2026-10-06T00:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.Close()

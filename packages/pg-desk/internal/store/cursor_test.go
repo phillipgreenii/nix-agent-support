@@ -23,11 +23,11 @@ func seedChanges(t *testing.T, s *Store, entityType string, n int, at time.Time)
 			Repo: clRepo, EntityType: entityType, EntityID: fmt.Sprintf("%s-%d-%d", entityType, at.Unix(), i),
 			Facts: "f", AsOf: formatTime(at), ContentHash: "h",
 		}
-		if _, err := s.WriteEntityWithLog(e, 0, []string{"created"}, "sync", formatTime(at)); err != nil {
+		if _, err := s.WriteEntityWithLog(context.Background(), e, 0, []string{"created"}, "sync", formatTime(at)); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	recs, err := s.ListChangesAfter(entityType, 0, 0)
+	recs, err := s.ListChangesAfter(context.Background(), entityType, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,19 +48,19 @@ func TestCursorAdvancesOnlyAfterFlush(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	seedChanges(t, s, "pr", 3, curNow)
 
-	first, err := s.ReadChanges("c1", "pr", 0, curNow)
+	first, err := s.ReadChanges(context.Background(), "c1", "pr", 0, curNow)
 	if err != nil || len(first) != 3 {
 		t.Fatalf("first read = (%d, %v)", len(first), err)
 	}
 	// No advance yet: a second read returns the same records.
-	again, err := s.ReadChanges("c1", "pr", 0, curNow)
+	again, err := s.ReadChanges(context.Background(), "c1", "pr", 0, curNow)
 	if err != nil || len(again) != 3 {
 		t.Fatalf("read without advance = (%d, %v), want 3 again", len(again), err)
 	}
-	if err := s.AdvanceCursor("c1", "pr", last(first)); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "c1", "pr", last(first)); err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.ReadChanges("c1", "pr", 0, curNow)
+	after, err := s.ReadChanges(context.Background(), "c1", "pr", 0, curNow)
 	if err != nil || len(after) != 0 {
 		t.Fatalf("read after advance = (%d, %v), want 0", len(after), err)
 	}
@@ -69,20 +69,20 @@ func TestCursorAdvancesOnlyAfterFlush(t *testing.T) {
 func TestAdvanceCursorOnlyForward(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	recs := seedChanges(t, s, "pr", 3, curNow)
-	if err := s.RegisterConsumer("c1", "pr", curNow); err != nil {
+	if err := s.RegisterConsumer(context.Background(), "c1", "pr", curNow); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AdvanceCursor("c1", "pr", recs[2].Seq); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "c1", "pr", recs[2].Seq); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AdvanceCursor("c1", "pr", recs[0].Seq); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "c1", "pr", recs[0].Seq); err != nil {
 		t.Fatalf("backward advance err = %v, want silent no-op", err)
 	}
-	cs, _ := s.ListConsumers()
+	cs, _ := s.ListConsumers(context.Background())
 	if len(cs) != 1 || cs[0].Cursor != recs[2].Seq {
 		t.Fatalf("cursor = %+v, want %d", cs, recs[2].Seq)
 	}
-	if err := s.AdvanceCursor("ghost", "pr", 1); !errors.Is(err, ErrConsumerNotFound) {
+	if err := s.AdvanceCursor(context.Background(), "ghost", "pr", 1); !errors.Is(err, ErrConsumerNotFound) {
 		t.Fatalf("advance unregistered err = %v, want ErrConsumerNotFound", err)
 	}
 }
@@ -91,21 +91,21 @@ func TestPeekReadsWithoutAdvancingOrRegistering(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	seedChanges(t, s, "pr", 2, curNow)
 
-	got, err := s.PeekChanges("cached", "pr", 0)
+	got, err := s.PeekChanges(context.Background(), "cached", "pr", 0)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("peek = (%d, %v)", len(got), err)
 	}
-	if cs, _ := s.ListConsumers(); len(cs) != 0 {
+	if cs, _ := s.ListConsumers(context.Background()); len(cs) != 0 {
 		t.Fatalf("peek registered a consumer: %+v", cs)
 	}
 	// A registered consumer's peek leaves cursor and seen_at alone.
-	if _, err := s.ReadChanges("c1", "pr", 0, curNow); err != nil {
+	if _, err := s.ReadChanges(context.Background(), "c1", "pr", 0, curNow); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PeekChanges("c1", "pr", 1); err != nil {
+	if _, err := s.PeekChanges(context.Background(), "c1", "pr", 1); err != nil {
 		t.Fatal(err)
 	}
-	cs, _ := s.ListConsumers()
+	cs, _ := s.ListConsumers(context.Background())
 	if len(cs) != 1 || cs[0].Cursor != 0 || cs[0].SeenAt != formatTime(curNow) {
 		t.Fatalf("after peek consumer = %+v", cs)
 	}
@@ -119,7 +119,7 @@ func TestMultiConsumerDeliveryAndLimitPaging(t *testing.T) {
 	// Consumer a pages through 5 records, 2 at a time.
 	var got []int64
 	for i := 0; i < 5; i++ {
-		page, err := s.ReadChanges("a", "pr", 2, curNow)
+		page, err := s.ReadChanges(context.Background(), "a", "pr", 2, curNow)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +127,7 @@ func TestMultiConsumerDeliveryAndLimitPaging(t *testing.T) {
 			break
 		}
 		got = append(got, seqs(page)...)
-		if err := s.AdvanceCursor("a", "pr", last(page)); err != nil {
+		if err := s.AdvanceCursor(context.Background(), "a", "pr", last(page)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -135,12 +135,12 @@ func TestMultiConsumerDeliveryAndLimitPaging(t *testing.T) {
 		t.Fatalf("paged seqs = %v, want %v", got, seqs(all))
 	}
 	// Consumer b of the same type is independent and still sees everything.
-	b, err := s.ReadChanges("b", "pr", 0, curNow)
+	b, err := s.ReadChanges(context.Background(), "b", "pr", 0, curNow)
 	if err != nil || len(b) != 5 {
 		t.Fatalf("b read = (%d, %v), want 5", len(b), err)
 	}
 	// The same name on another type has its own cursor and its own log slice.
-	iss, err := s.ReadChanges("a", "issue", 0, curNow)
+	iss, err := s.ReadChanges(context.Background(), "a", "issue", 0, curNow)
 	if err != nil || len(iss) != 2 {
 		t.Fatalf("a/issue read = (%d, %v), want 2", len(iss), err)
 	}
@@ -149,20 +149,20 @@ func TestMultiConsumerDeliveryAndLimitPaging(t *testing.T) {
 func TestResetReplaysFromStart(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	recs := seedChanges(t, s, "pr", 3, curNow)
-	if _, err := s.ReadChanges("c1", "pr", 0, curNow); err != nil {
+	if _, err := s.ReadChanges(context.Background(), "c1", "pr", 0, curNow); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AdvanceCursor("c1", "pr", last(recs)); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "c1", "pr", last(recs)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResetConsumer("c1", "pr"); err != nil {
+	if err := s.ResetConsumer(context.Background(), "c1", "pr"); err != nil {
 		t.Fatal(err)
 	}
-	replay, err := s.ReadChanges("c1", "pr", 0, curNow)
+	replay, err := s.ReadChanges(context.Background(), "c1", "pr", 0, curNow)
 	if err != nil || fmt.Sprint(seqs(replay)) != fmt.Sprint(seqs(recs)) {
 		t.Fatalf("replay = (%v, %v), want %v", seqs(replay), err, seqs(recs))
 	}
-	if err := s.ResetConsumer("ghost", "pr"); !errors.Is(err, ErrConsumerNotFound) {
+	if err := s.ResetConsumer(context.Background(), "ghost", "pr"); !errors.Is(err, ErrConsumerNotFound) {
 		t.Fatalf("reset unregistered err = %v", err)
 	}
 }
@@ -170,11 +170,11 @@ func TestResetReplaysFromStart(t *testing.T) {
 func TestListAndForgetConsumers(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	for _, c := range [][2]string{{"b", "pr"}, {"a", "pr"}, {"a", "issue"}} {
-		if err := s.RegisterConsumer(c[0], c[1], curNow); err != nil {
+		if err := s.RegisterConsumer(context.Background(), c[0], c[1], curNow); err != nil {
 			t.Fatal(err)
 		}
 	}
-	cs, err := s.ListConsumers()
+	cs, err := s.ListConsumers(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,13 +185,13 @@ func TestListAndForgetConsumers(t *testing.T) {
 	if strings.Join(names, ",") != "issue/a,pr/a,pr/b" {
 		t.Fatalf("list order = %v", names)
 	}
-	if err := s.ForgetConsumer("a", "pr"); err != nil {
+	if err := s.ForgetConsumer(context.Background(), "a", "pr"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ForgetConsumer("a", "pr"); err != nil {
+	if err := s.ForgetConsumer(context.Background(), "a", "pr"); err != nil {
 		t.Fatalf("forget absent err = %v, want nil", err)
 	}
-	cs, _ = s.ListConsumers()
+	cs, _ = s.ListConsumers(context.Background())
 	if len(cs) != 2 {
 		t.Fatalf("after forget = %+v", cs)
 	}
@@ -199,17 +199,17 @@ func TestListAndForgetConsumers(t *testing.T) {
 
 func TestOldSchemaRefusesCursorAPI(t *testing.T) {
 	s := OpenRetiredSchemaForTest(t)
-	if _, err := s.ReadChanges("c", "pr", 0, curNow); !errors.Is(err, ErrOldSchema) {
+	if _, err := s.ReadChanges(context.Background(), "c", "pr", 0, curNow); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("ReadChanges on old schema err = %v", err)
 	}
-	if _, err := s.PruneChangeLog(curNow, 0, 0); !errors.Is(err, ErrOldSchema) {
+	if _, err := s.PruneChangeLog(context.Background(), curNow, 0, 0); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("PruneChangeLog on old schema err = %v", err)
 	}
 }
 
 func logSeqs(t *testing.T, s *Store, entityType string) []int64 {
 	t.Helper()
-	recs, err := s.ListChangesAfter(entityType, 0, 0)
+	recs, err := s.ListChangesAfter(context.Background(), entityType, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,18 +225,18 @@ func TestPruneWaitsForSlowestConsumer(t *testing.T) {
 
 	// fast has consumed everything; slow only the first old record.
 	for _, name := range []string{"fast", "slow"} {
-		if _, err := s.ReadChanges(name, "pr", 0, curNow); err != nil {
+		if _, err := s.ReadChanges(context.Background(), name, "pr", 0, curNow); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.AdvanceCursor("fast", "pr", recs[len(recs)-1].Seq+1); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "fast", "pr", recs[len(recs)-1].Seq+1); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AdvanceCursor("slow", "pr", recs[0].Seq); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "slow", "pr", recs[0].Seq); err != nil {
 		t.Fatal(err)
 	}
 
-	n, err := s.PruneChangeLog(curNow, 14*24*time.Hour, 7*24*time.Hour)
+	n, err := s.PruneChangeLog(context.Background(), curNow, 14*24*time.Hour, 7*24*time.Hour)
 	if err != nil || n != 1 {
 		t.Fatalf("prune = (%d, %v), want 1 (only what slow passed)", n, err)
 	}
@@ -246,10 +246,10 @@ func TestPruneWaitsForSlowestConsumer(t *testing.T) {
 	}
 	// Once slow catches up, the remaining old rows go; the fresh one stays
 	// because it is younger than retention.
-	if err := s.AdvanceCursor("slow", "pr", recs[len(recs)-1].Seq+1); err != nil {
+	if err := s.AdvanceCursor(context.Background(), "slow", "pr", recs[len(recs)-1].Seq+1); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.PruneChangeLog(curNow, 0, 0); err != nil || n != 3 {
+	if n, err := s.PruneChangeLog(context.Background(), curNow, 0, 0); err != nil || n != 3 {
 		t.Fatalf("second prune = (%d, %v), want 3", n, err)
 	}
 	if got := len(logSeqs(t, s, "pr")); got != 1 {
@@ -263,10 +263,10 @@ func TestStaleConsumerExcludedFromPruneHorizon(t *testing.T) {
 	seedChanges(t, s, "pr", 3, old)
 
 	// "stuck" never advanced and was last seen 10 days ago (> 7d stale).
-	if err := s.RegisterConsumer("stuck", "pr", curNow.Add(-10*24*time.Hour)); err != nil {
+	if err := s.RegisterConsumer(context.Background(), "stuck", "pr", curNow.Add(-10*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.PruneChangeLog(curNow, 0, 0); err != nil || n != 3 {
+	if n, err := s.PruneChangeLog(context.Background(), curNow, 0, 0); err != nil || n != 3 {
 		t.Fatalf("prune with stale consumer = (%d, %v), want 3", n, err)
 	}
 
@@ -275,16 +275,16 @@ func TestStaleConsumerExcludedFromPruneHorizon(t *testing.T) {
 	if _, err := s.sql.ExecContext(context.Background(), `INSERT INTO consumer (name, type, cursor, seen_at) VALUES ('nullseen', 'pr', 0, NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.PruneChangeLog(curNow, 0, 0); err != nil || n != 2 {
+	if n, err := s.PruneChangeLog(context.Background(), curNow, 0, 0); err != nil || n != 2 {
 		t.Fatalf("prune with NULL seen_at = (%d, %v), want 2", n, err)
 	}
 
 	// A consumer seen 1 day ago is NOT stale and holds rows back.
 	seedChanges(t, s, "pr", 2, old.Add(2*time.Hour))
-	if err := s.RegisterConsumer("live", "pr", curNow.Add(-24*time.Hour)); err != nil {
+	if err := s.RegisterConsumer(context.Background(), "live", "pr", curNow.Add(-24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := s.PruneChangeLog(curNow, 0, 0); err != nil || n != 0 {
+	if n, err := s.PruneChangeLog(context.Background(), curNow, 0, 0); err != nil || n != 0 {
 		t.Fatalf("prune with live consumer at cursor 0 = (%d, %v), want 0", n, err)
 	}
 }
@@ -295,10 +295,10 @@ func TestPruneHorizonIsPerType(t *testing.T) {
 	seedChanges(t, s, "pr", 2, old)
 	seedChanges(t, s, "issue", 2, old)
 	// A live consumer of "pr" at cursor 0 must not hold back "issue" rows.
-	if err := s.RegisterConsumer("prc", "pr", curNow); err != nil {
+	if err := s.RegisterConsumer(context.Background(), "prc", "pr", curNow); err != nil {
 		t.Fatal(err)
 	}
-	n, err := s.PruneChangeLog(curNow, 0, 0)
+	n, err := s.PruneChangeLog(context.Background(), curNow, 0, 0)
 	if err != nil || n != 2 {
 		t.Fatalf("prune = (%d, %v), want 2 (the issue rows)", n, err)
 	}
@@ -310,10 +310,10 @@ func TestPruneHorizonIsPerType(t *testing.T) {
 func TestPruneKeepsRowsWithinRetention(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	seedChanges(t, s, "pr", 2, curNow.Add(-24*time.Hour))
-	if n, err := s.PruneChangeLog(curNow, 0, 0); err != nil || n != 0 {
+	if n, err := s.PruneChangeLog(context.Background(), curNow, 0, 0); err != nil || n != 0 {
 		t.Fatalf("prune = (%d, %v), want 0 within retention", n, err)
 	}
-	if n, err := s.PruneChangeLog(curNow, time.Hour, 0); err != nil || n != 2 {
+	if n, err := s.PruneChangeLog(context.Background(), curNow, time.Hour, 0); err != nil || n != 2 {
 		t.Fatalf("prune with 1h retention = (%d, %v), want 2", n, err)
 	}
 }
@@ -341,13 +341,13 @@ func TestConcurrentChangesSameConsumerSerialize(t *testing.T) {
 			if inCritical.Add(1) > 1 {
 				overlapped.Store(true)
 			}
-			recs, err := s.ReadChanges("c1", "pr", 2, curNow)
+			recs, err := s.ReadChanges(context.Background(), "c1", "pr", 2, curNow)
 			if err != nil {
 				t.Errorf("read: %v", err)
 			}
 			time.Sleep(100 * time.Millisecond) // "flush"
 			if len(recs) > 0 {
-				if err := s.AdvanceCursor("c1", "pr", last(recs)); err != nil {
+				if err := s.AdvanceCursor(context.Background(), "c1", "pr", last(recs)); err != nil {
 					t.Errorf("advance: %v", err)
 				}
 			}
@@ -514,19 +514,19 @@ func TestCrashBetweenFlushAndAdvanceYieldsDuplicateNotLoss(t *testing.T) {
 
 	// Run 1: read, flush (output recorded), then the advance fails mid-sequence.
 	var output []int64
-	got, err := fs.ReadChanges("c1", "pr", 0, curNow)
+	got, err := fs.ReadChanges(context.Background(), "c1", "pr", 0, curNow)
 	if err != nil {
 		t.Fatal(err)
 	}
 	output = append(output, seqs(got)...) // the flush
 	fault.set("UPDATE consumer")
-	if err := fs.AdvanceCursor("c1", "pr", last(got)); !errors.Is(err, errInjected) {
+	if err := fs.AdvanceCursor(context.Background(), "c1", "pr", last(got)); !errors.Is(err, errInjected) {
 		t.Fatalf("advance err = %v, want injected fault", err)
 	}
 	fault.set("")
 
 	// Run 2 (the "restart"): a fresh read re-delivers the same records.
-	got2, err := fs.ReadChanges("c1", "pr", 0, curNow)
+	got2, err := fs.ReadChanges(context.Background(), "c1", "pr", 0, curNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ func TestCrashBetweenFlushAndAdvanceYieldsDuplicateNotLoss(t *testing.T) {
 		t.Fatalf("re-read = %v, want duplicate delivery of %v", seqs(got2), seqs(recs))
 	}
 	output = append(output, seqs(got2)...)
-	if err := fs.AdvanceCursor("c1", "pr", last(got2)); err != nil {
+	if err := fs.AdvanceCursor(context.Background(), "c1", "pr", last(got2)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -551,7 +551,7 @@ func TestCrashBetweenFlushAndAdvanceYieldsDuplicateNotLoss(t *testing.T) {
 	if count[recs[0].Seq] != 2 {
 		t.Fatalf("expected a duplicate of seq %d; output = %v", recs[0].Seq, output)
 	}
-	if rest, _ := fs.ReadChanges("c1", "pr", 0, curNow); len(rest) != 0 {
+	if rest, _ := fs.ReadChanges(context.Background(), "c1", "pr", 0, curNow); len(rest) != 0 {
 		t.Fatalf("after confirmed advance still got %v", seqs(rest))
 	}
 }

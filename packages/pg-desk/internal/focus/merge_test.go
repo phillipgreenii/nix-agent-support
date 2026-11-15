@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -29,11 +30,11 @@ func TestParseMerges(t *testing.T) {
 func TestMergeLinkRoundTrip(t *testing.T) {
 	f := newFixture(t)
 	kept, gone := f.pr("1", prSpec{ownership: "mine"}), f.pr("2", prSpec{ownership: "mine"})
-	if err := RecordMerges(f.st, testRepo, []Merge{{Kept: kept, Absorbed: gone}}, "operator", fixtureAt); err != nil {
+	if err := RecordMerges(context.Background(), f.st, testRepo, []Merge{{Kept: kept, Absorbed: gone}}, "operator", fixtureAt); err != nil {
 		t.Fatal(err)
 	}
 	// Recording again is idempotent.
-	if err := RecordMerges(f.st, testRepo, []Merge{{Kept: kept, Absorbed: gone}}, "operator", fixtureAt); err != nil {
+	if err := RecordMerges(context.Background(), f.st, testRepo, []Merge{{Kept: kept, Absorbed: gone}}, "operator", fixtureAt); err != nil {
 		t.Fatal(err)
 	}
 	in := f.inputs()
@@ -45,13 +46,13 @@ func TestMergeLinkRoundTrip(t *testing.T) {
 		t.Errorf("Inputs.Absorbed = %v, want the absorbed key mapped to the kept key", in.Absorbed)
 	}
 	// Another actor's removal still removes the merge (it belongs to the plan).
-	if err := RemoveMerges(f.st, testRepo, pm); err != nil {
+	if err := RemoveMerges(context.Background(), f.st, testRepo, pm); err != nil {
 		t.Fatal(err)
 	}
 	if got := PersistedMerges(f.inputs()); len(got) != 0 {
 		t.Errorf("merge survived removal: %v", got)
 	}
-	if err := RecordMerges(f.st, testRepo, []Merge{{Kept: kept, Absorbed: gone}}, "", fixtureAt); err == nil {
+	if err := RecordMerges(context.Background(), f.st, testRepo, []Merge{{Kept: kept, Absorbed: gone}}, "", fixtureAt); err == nil {
 		t.Errorf("recording with no actor must fail")
 	}
 }

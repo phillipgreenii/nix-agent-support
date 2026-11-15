@@ -64,8 +64,8 @@ func (s *Store) ConflictCount() int64 { return s.conflicts.Load() }
 // losing a race with another first writer) returns ErrVersionConflict, counts
 // it in ConflictCount, and leaves the store untouched. It requires the new
 // schema.
-func (s *Store) WriteEntityWithLog(e Entity, expectedVersion int64, kinds []string, origin, at string) (int64, error) {
-	return s.writeEntity(e, expectedVersion, nil, kinds, origin, at, WriteOptions{})
+func (s *Store) WriteEntityWithLog(ctx context.Context, e Entity, expectedVersion int64, kinds []string, origin, at string) (int64, error) {
+	return s.writeEntity(ctx, e, expectedVersion, nil, kinds, origin, at, WriteOptions{})
 }
 
 // entityState is the extra pair WriteEntityStateWithLog sets in the same
@@ -85,8 +85,8 @@ type entityState struct {
 // ErrVersionConflict and ConflictCount behavior, new schema only. When kinds
 // is empty it still updates the row and bumps the version (a re-hydration
 // must refresh hydrated_at) but appends NO change_log row.
-func (s *Store) WriteEntityStateWithLog(e Entity, expectedVersion int64, hydratedAt string, active bool, kinds []string, origin, at string) (int64, error) {
-	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active}, kinds, origin, at, WriteOptions{})
+func (s *Store) WriteEntityStateWithLog(ctx context.Context, e Entity, expectedVersion int64, hydratedAt string, active bool, kinds []string, origin, at string) (int64, error) {
+	return s.writeEntity(ctx, e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active}, kinds, origin, at, WriteOptions{})
 }
 
 // WriteEntityStateWithLogFP is WriteEntityStateWithLog that additionally sets
@@ -96,8 +96,8 @@ func (s *Store) WriteEntityStateWithLog(e Entity, expectedVersion int64, hydrate
 // active and the change_log row. A nil listFP leaves list_fp untouched. The
 // store never computes the fingerprint. Same compare-and-set, same
 // ErrVersionConflict and ConflictCount behavior, new schema only.
-func (s *Store) WriteEntityStateWithLogFP(e Entity, expectedVersion int64, hydratedAt string, active bool, listFP *string, kinds []string, origin, at string) (int64, error) {
-	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active, listFP: listFP}, kinds, origin, at, WriteOptions{})
+func (s *Store) WriteEntityStateWithLogFP(ctx context.Context, e Entity, expectedVersion int64, hydratedAt string, active bool, listFP *string, kinds []string, origin, at string) (int64, error) {
+	return s.writeEntity(ctx, e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active, listFP: listFP}, kinds, origin, at, WriteOptions{})
 }
 
 // SetBetweenBumpAndAppendHook installs fn as a fault-injection seam run
@@ -113,11 +113,11 @@ func (s *Store) SetBetweenBumpAndAppendHook(fn func() error) { s.betweenBumpAndA
 // feed path's transactional column writes: they happen before the append (a
 // clear after it), appended or not, and the delivery gate may still withhold
 // the row without affecting the write.
-func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState, kinds []string, origin, at string, opts WriteOptions) (int64, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) writeEntity(ctx context.Context, e Entity, expectedVersion int64, state *entityState, kinds []string, origin, at string, opts WriteOptions) (int64, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return 0, err
 	}
-	tx, err := s.sql.BeginTx(context.Background(), nil)
+	tx, err := s.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): begin: %w", e.Repo, e.EntityType, e.EntityID, err)
 	}
@@ -151,7 +151,7 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 	updateSQL += ` WHERE repo = ? AND entity_type = ? AND entity_id = ? AND version = ?`
 	updateArgs = append(updateArgs, e.Repo, e.EntityType, e.EntityID, expectedVersion)
 
-	res, err := tx.ExecContext(context.Background(), updateSQL, updateArgs...)
+	res, err := tx.ExecContext(ctx, updateSQL, updateArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
 	}
@@ -168,7 +168,7 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 		}
 		placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(insertArgs)), ", ")
 		ins, err := tx.ExecContext(
-			context.Background(),
+			ctx,
 			`INSERT INTO entity (`+insertCols+`) VALUES (`+placeholders+`)
 			 ON CONFLICT (repo, entity_type, entity_id) DO NOTHING`,
 			insertArgs...,
@@ -189,7 +189,7 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 		}
 	}
 	if state == nil || len(kinds) > 0 {
-		if _, err := s.AppendChangeLogTx(tx, ChangeRecord{
+		if _, err := s.AppendChangeLogTx(ctx, tx, ChangeRecord{
 			Repo: e.Repo, EntityType: e.EntityType, EntityID: e.EntityID,
 			Version: newVersion, Kinds: kinds, Origin: origin, At: at,
 			SetBackend: opts.Backend, SetWatched: opts.Watched, ClearWatchedAfter: opts.ClearWatchedAfterAppend,
@@ -199,11 +199,11 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 	} else if !opts.isZero() {
 		// No row is appended (an empty-kinds re-hydration), but the column
 		// writes still commit with the snapshot: set before, clear after.
-		if err := setColumnsTx(tx, e.Repo, e.EntityType, e.EntityID, opts.Backend, opts.Watched); err != nil {
+		if err := setColumnsTx(ctx, tx, e.Repo, e.EntityType, e.EntityID, opts.Backend, opts.Watched); err != nil {
 			return 0, err
 		}
 		if opts.ClearWatchedAfterAppend {
-			if err := clearWatchedTx(tx, e.Repo, e.EntityType, e.EntityID); err != nil {
+			if err := clearWatchedTx(ctx, tx, e.Repo, e.EntityType, e.EntityID); err != nil {
 				return 0, err
 			}
 		}
@@ -215,7 +215,7 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 	}
 	if opts.FeedMarker != nil {
 		// The marker commits with the entity write and its row (INV-ICD-19).
-		if err := writeFeedMarkerTx(tx, *opts.FeedMarker); err != nil {
+		if err := writeFeedMarkerTx(ctx, tx, *opts.FeedMarker); err != nil {
 			return 0, err
 		}
 	}
@@ -230,14 +230,14 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 // transaction. It does NOT bump the version (like SetAnnotation's record) and
 // returns ErrNoEntity (matchable with errors.Is) when the entity row does not
 // exist. It requires the new schema.
-func (s *Store) AppendEntityChange(repo, entityType, entityID string, kinds []string, origin, at string) (int64, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) AppendEntityChange(ctx context.Context, repo, entityType, entityID string, kinds []string, origin, at string) (int64, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return 0, err
 	}
 	wrap := func(err error) error {
 		return fmt.Errorf("store: append entity change (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
-	tx, err := s.sql.BeginTx(context.Background(), nil)
+	tx, err := s.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, wrap(err)
 	}
@@ -245,7 +245,7 @@ func (s *Store) AppendEntityChange(repo, entityType, entityID string, kinds []st
 
 	var version int64
 	err = tx.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT version FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
 	).Scan(&version)
@@ -255,7 +255,7 @@ func (s *Store) AppendEntityChange(repo, entityType, entityID string, kinds []st
 	if err != nil {
 		return 0, wrap(err)
 	}
-	seq, err := s.AppendChangeLogTx(tx, ChangeRecord{
+	seq, err := s.AppendChangeLogTx(ctx, tx, ChangeRecord{
 		Repo: repo, EntityType: entityType, EntityID: entityID,
 		Version: version, Kinds: kinds, Origin: origin, At: at,
 	})
@@ -286,7 +286,7 @@ func (s *Store) conflict(e Entity) error {
 // r.SetWatched are written before the gate decision; r.ClearWatchedAfter is
 // written after the append, so the closed or removed row of a watched entity
 // is always appended.
-func (s *Store) AppendChangeLogTx(tx *sql.Tx, r ChangeRecord) (int64, error) {
+func (s *Store) AppendChangeLogTx(ctx context.Context, tx *sql.Tx, r ChangeRecord) (int64, error) {
 	kinds := r.Kinds
 	if kinds == nil {
 		kinds = []string{}
@@ -295,17 +295,17 @@ func (s *Store) AppendChangeLogTx(tx *sql.Tx, r ChangeRecord) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("store: append change_log: encode kinds: %w", err)
 	}
-	gated, err := s.gateDecision(tx, r)
+	gated, err := s.gateDecision(ctx, tx, r)
 	if err != nil {
 		return 0, err
 	}
-	if err := setColumnsTx(tx, r.Repo, r.EntityType, r.EntityID, r.SetBackend, r.SetWatched); err != nil {
+	if err := setColumnsTx(ctx, tx, r.Repo, r.EntityType, r.EntityID, r.SetBackend, r.SetWatched); err != nil {
 		return 0, err
 	}
 	var seq int64
 	if !gated {
 		res, err := tx.ExecContext(
-			context.Background(),
+			ctx,
 			`INSERT INTO change_log (repo, entity_type, entity_id, version, kinds, origin, at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			r.Repo, r.EntityType, r.EntityID, r.Version, string(kindsJSON), r.Origin, r.At,
@@ -319,7 +319,7 @@ func (s *Store) AppendChangeLogTx(tx *sql.Tx, r ChangeRecord) (int64, error) {
 		}
 	}
 	if r.ClearWatchedAfter {
-		if err := clearWatchedTx(tx, r.Repo, r.EntityType, r.EntityID); err != nil {
+		if err := clearWatchedTx(ctx, tx, r.Repo, r.EntityType, r.EntityID); err != nil {
 			return 0, err
 		}
 	}
@@ -329,12 +329,12 @@ func (s *Store) AppendChangeLogTx(tx *sql.Tx, r ChangeRecord) (int64, error) {
 // gateDecision reports whether the delivery gate withholds r's append. With no
 // scope installed, or an entity row that does not exist, nothing is withheld.
 // It reads the entity's columns as they stand BEFORE this write's column sets.
-func (s *Store) gateDecision(tx *sql.Tx, r ChangeRecord) (bool, error) {
+func (s *Store) gateDecision(ctx context.Context, tx *sql.Tx, r ChangeRecord) (bool, error) {
 	scope := s.gateScope.Load()
 	if scope == nil {
 		return false, nil
 	}
-	backend, watched, found, err := gateColumns(tx, r.Repo, r.EntityType, r.EntityID)
+	backend, watched, found, err := gateColumns(ctx, tx, r.Repo, r.EntityType, r.EntityID)
 	if err != nil {
 		return false, fmt.Errorf("store: append change_log (%s,%s,%s): read gate columns: %w", r.Repo, r.EntityType, r.EntityID, err)
 	}
@@ -357,8 +357,9 @@ func (s *Store) gateDecision(tx *sql.Tx, r ChangeRecord) (bool, error) {
 // ListChangesAfter returns change_log records of entityType with seq >
 // afterSeq, ascending by seq, at most limit of them (limit <= 0 means no
 // limit).
-func (s *Store) ListChangesAfter(entityType string, afterSeq int64, limit int) ([]ChangeRecord, error) {
+func (s *Store) ListChangesAfter(ctx context.Context, entityType string, afterSeq int64, limit int) ([]ChangeRecord, error) {
 	return s.queryChanges(
+		ctx,
 		`SELECT seq, repo, entity_type, entity_id, version, kinds, origin, at
 		 FROM change_log WHERE entity_type = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
 		entityType, afterSeq, limitArg(limit),
@@ -385,12 +386,12 @@ type ChangeKindStats struct {
 // seq of each type. It is ListChangesAfter(type, 0, 0) for every type reduced to
 // what the change-flow observation needs, without loading a single row. A type
 // with no record is absent from the map.
-func (s *Store) ChangeKindCountsAll() (map[string]ChangeKindStats, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) ChangeKindCountsAll(ctx context.Context) (map[string]ChangeKindStats, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT c.entity_type, j.value, c.origin, COUNT(*), MAX(c.seq)
 		 FROM change_log c, json_each(c.kinds) j
 		 GROUP BY c.entity_type, j.value, c.origin
@@ -423,8 +424,9 @@ func (s *Store) ChangeKindCountsAll() (map[string]ChangeKindStats, error) {
 
 // ListEntityHistory returns one entity's change_log records, newest first,
 // at most limit of them (limit <= 0 means no limit).
-func (s *Store) ListEntityHistory(repo, entityType, entityID string, limit int) ([]ChangeRecord, error) {
+func (s *Store) ListEntityHistory(ctx context.Context, repo, entityType, entityID string, limit int) ([]ChangeRecord, error) {
 	return s.queryChanges(
+		ctx,
 		`SELECT seq, repo, entity_type, entity_id, version, kinds, origin, at
 		 FROM change_log WHERE repo = ? AND entity_type = ? AND entity_id = ? ORDER BY seq DESC LIMIT ?`,
 		repo, entityType, entityID, limitArg(limit),
@@ -439,11 +441,11 @@ func limitArg(limit int) int {
 	return limit
 }
 
-func (s *Store) queryChanges(query string, args ...any) ([]ChangeRecord, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) queryChanges(ctx context.Context, query string, args ...any) ([]ChangeRecord, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.QueryContext(context.Background(), query, args...)
+	rows, err := s.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: list change_log: %w", err)
 	}
@@ -473,12 +475,12 @@ func (s *Store) queryChanges(query string, args ...any) ([]ChangeRecord, error) 
 // backfilled entity may hold none. Nothing is stored for this: it is derived
 // on every read, so no column can drift from the log. It requires the new
 // schema.
-func (s *Store) LatestChangeAt(entityType string) (map[string]string, error) {
-	if err := s.RequireNewSchema(); err != nil {
+func (s *Store) LatestChangeAt(ctx context.Context, entityType string) (map[string]string, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
 	rows, err := s.sql.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT entity_id, MAX(at) FROM change_log WHERE entity_type = ? GROUP BY entity_id`,
 		entityType,
 	)

@@ -34,7 +34,7 @@ func (w *doctorFocusWorld) write(t *testing.T, typ, id string, facts any, at str
 	k := w.showFixture.write(t, typ, id, facts, at)
 	if typ == "issue" {
 		inst := doctorSeedBackend
-		if err := w.st.SetEntityColumns(showRepo, typ, id, &inst, nil); err != nil {
+		if err := w.st.SetEntityColumns(context.Background(), showRepo, typ, id, &inst, nil); err != nil {
 			t.Fatalf("attribute %s: %v", id, err)
 		}
 	}
@@ -69,7 +69,7 @@ func (w *doctorFocusWorld) terminalPR(t *testing.T, n int) focus.Key {
 	t.Helper()
 	id := fmt.Sprintf("o/r#%d", n)
 	k := w.write(t, "pr", id, map[string]any{"pr_show": map[string]any{"state": "closed", "merged": true, "author": "x"}}, showAt)
-	if err := w.st.UpsertInterpretation(store.Interpretation{
+	if err := w.st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: showRepo, EntityType: "pr", EntityID: id, Ownership: "mine",
 		Enrichment: "{}", Urgency: "{}", Dispositions: "{}", Approvals: "{}", MatchReasons: "[]", AsOf: showAt,
 	}); err != nil {
@@ -83,7 +83,7 @@ func (w *doctorFocusWorld) terminalPR(t *testing.T, n int) focus.Key {
 func (w *doctorFocusWorld) watch(t *testing.T, k focus.Key) {
 	t.Helper()
 	w.watched = append(w.watched, fmt.Sprintf("%q", k.ID))
-	if err := w.st.SetMeta("change_flow.watchset.pr.mine", "["+strings.Join(w.watched, ",")+"]"); err != nil {
+	if err := w.st.SetMeta(context.Background(), "change_flow.watchset.pr.mine", "["+strings.Join(w.watched, ",")+"]"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -96,7 +96,7 @@ func (w *doctorFocusWorld) bead(t *testing.T, id, state, hold string, source foc
 		md["focus_hold"] = hold
 	}
 	k := w.write(t, "issue", id, map[string]any{"issue_show": map[string]any{"id": id, "state": state, "metadata": md}}, showAt)
-	if err := w.st.ReplaceDerivedXrefs(showRepo, k.Type, k.ID, []store.XrefLink{{
+	if err := w.st.ReplaceDerivedXrefs(context.Background(), showRepo, k.Type, k.ID, []store.XrefLink{{
 		Repo: showRepo, FromType: k.Type, FromID: k.ID, ToType: source.Type, ToID: source.ID,
 		Relation: "source", Origin: "derived:test", FirstSeen: showAt, LastConfirmed: showAt,
 	}}); err != nil {
@@ -107,7 +107,7 @@ func (w *doctorFocusWorld) bead(t *testing.T, id, state, hold string, source foc
 // annotate sets the focus_selected annotation of k.
 func (w *doctorFocusWorld) annotate(t *testing.T, k focus.Key, value string) {
 	t.Helper()
-	if err := w.st.SetAnnotation(store.KVAnnotation{
+	if err := w.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: showRepo, EntityType: k.Type, EntityID: k.ID, Key: store.AnnotationFocusSelected,
 		Value: value, Origin: "pg-desk", SetBy: "operator", SetAt: showAt,
 	}); err != nil {
@@ -213,7 +213,7 @@ func TestDoctorFocusBlock(t *testing.T) {
 		orig := focusViewJSON
 		t.Cleanup(func() { focusViewJSON = orig })
 		var probed string
-		focusViewJSON = func(cfg *config.Config, st *store.Store, repo, typ, id string) ([]byte, error) {
+		focusViewJSON = func(_ context.Context, cfg *config.Config, st *store.Store, repo, typ, id string) ([]byte, error) {
 			probed = typ + " " + id
 			return []byte(`{"contract":"pg-desk.view/v1","annotations":{"hidden":{"value":false}}}`), nil
 		}
@@ -230,7 +230,7 @@ func TestDoctorFocusBlock(t *testing.T) {
 	})
 
 	t.Run("the view contract is n/a and never a gate with no entity", func(t *testing.T) {
-		line, err := focusViewContractLine(&config.Config{Repos: []config.RepoConfig{{Remote: showRepo}}}, store.OpenNewSchemaForTest(t))
+		line, err := focusViewContractLine(context.Background(), &config.Config{Repos: []config.RepoConfig{{Remote: showRepo}}}, store.OpenNewSchemaForTest(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -413,7 +413,7 @@ func TestDoctorPendingGateIsUnminted(t *testing.T) {
 	w := newDoctorFocusWorld(t)
 	epic := w.write(t, "issue", "bd-9", map[string]any{"issue_show": map[string]any{"id": "bd-9", "state": "open", "issue_type": "epic"}}, showAt)
 	hidden := w.openPR(t, 2)
-	if err := w.st.SetAnnotation(store.KVAnnotation{
+	if err := w.st.SetAnnotation(context.Background(), store.KVAnnotation{
 		Repo: showRepo, EntityType: "pr", EntityID: hidden.ID, Key: store.AnnotationHidden,
 		Value: `{"value":true,"reason":null}`, Origin: "pg-desk", SetBy: "operator", SetAt: showAt,
 	}); err != nil {
@@ -490,7 +490,7 @@ func TestDoctorFocusReportsNeverFail(t *testing.T) {
 	k := w.openPR(t, 1)
 	w.annotate(t, k, store.FocusAnnotationNone)
 	w.bead(t, "bd-1", "open", "", k)
-	if _, err := w.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-01", Cap: 5, MadeAt: showAt, BodyJSON: `{}`}); err != nil {
+	if _, err := w.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-01", Cap: 5, MadeAt: showAt, BodyJSON: `{}`}); err != nil {
 		t.Fatalf("seed draft: %v", err)
 	}
 	stdout, err := runDoctorCmd(t)
@@ -512,7 +512,7 @@ func TestDoctorFocusLagLineReadsTheRouterConsumer(t *testing.T) {
 	w := newDoctorFocusWorld(t)
 	w.selected(t, w.openPR(t, 1))
 	seed := w.st
-	if err := seed.RegisterConsumer("pg-router", "issue", doctorNow.Add(-time.Minute)); err != nil {
+	if err := seed.RegisterConsumer(context.Background(), "pg-router", "issue", doctorNow.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	stdout, _ := runDoctorWithRouter(t, doctorRouterFixture)
@@ -578,7 +578,7 @@ func TestDoctorAndFocusShowAgreeOnAWatchedQueryListingStatus(t *testing.T) {
 	step("nothing recorded", `mine unknown (no listing status recorded)`,
 		`issue "mine": ok (probe), listing unknown (no listing status recorded)`, 5)
 
-	if err := w.st.SetMeta("change_flow.listing.issue.mine", `{"status":"ok","reason":"","at":"`+showAt+`"}`); err != nil {
+	if err := w.st.SetMeta(context.Background(), "change_flow.listing.issue.mine", `{"status":"ok","reason":"","at":"`+showAt+`"}`); err != nil {
 		t.Fatal(err)
 	}
 	step("listing recorded", "coverage: complete", `issue "mine": ok`+"\n", 0)

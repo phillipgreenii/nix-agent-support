@@ -51,14 +51,14 @@ func (f *showFixture) write(t *testing.T, typ, id string, facts any, at string) 
 		t.Fatal(err)
 	}
 	e := store.Entity{Repo: showRepo, EntityType: typ, EntityID: id, Facts: string(b), AsOf: at, ContentHash: "h" + id}
-	if cur, found, _ := f.st.GetEntity(showRepo, typ, id); found {
+	if cur, found, _ := f.st.GetEntity(context.Background(), showRepo, typ, id); found {
 		e.Version = cur.Version
-		if _, err := f.st.WriteEntityStateWithLog(e, cur.Version, f.hydrated, true, []string{"updated"}, "sync", at); err != nil {
+		if _, err := f.st.WriteEntityStateWithLog(context.Background(), e, cur.Version, f.hydrated, true, []string{"updated"}, "sync", at); err != nil {
 			t.Fatalf("rewrite %s: %v", id, err)
 		}
 		return focus.Key{Type: typ, ID: id}
 	}
-	if _, err := f.st.WriteEntityStateWithLog(e, 0, f.hydrated, true, []string{"created"}, "sync", at); err != nil {
+	if _, err := f.st.WriteEntityStateWithLog(context.Background(), e, 0, f.hydrated, true, []string{"created"}, "sync", at); err != nil {
 		t.Fatalf("write %s: %v", id, err)
 	}
 	return focus.Key{Type: typ, ID: id}
@@ -69,7 +69,7 @@ func (f *showFixture) pr(t *testing.T, n int, title, at string) focus.Key {
 	t.Helper()
 	id := fmt.Sprintf("o/r#%d", n)
 	k := f.write(t, "pr", id, map[string]any{"pr_show": map[string]any{"state": "open", "title": title}}, at)
-	if err := f.st.UpsertInterpretation(store.Interpretation{
+	if err := f.st.UpsertInterpretation(context.Background(), store.Interpretation{
 		Repo: showRepo, EntityType: "pr", EntityID: id, Ownership: "mine",
 		Enrichment: "{}", Urgency: "{}", Dispositions: "{}", Approvals: "{}", MatchReasons: "[]", AsOf: at,
 	}); err != nil {
@@ -134,7 +134,7 @@ func (f *showFixture) snapshot(t *testing.T) string {
 
 func (f *showFixture) draftRow(t *testing.T) (store.FocusDraft, bool) {
 	t.Helper()
-	d, found, err := f.st.FocusDraftGet()
+	d, found, err := f.st.FocusDraftGet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestStoredDraftOfALaterPeriodIsIgnoredWithNotice(t *testing.T) {
 	f := newShowFixture(t)
 	f.pr(t, 1, "alpha", showAt)
 	later := store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-11", Cap: 6, MadeAt: "2026-10-10T11:00:00Z", BodyJSON: `{"contract":"pg-desk.focus.draft/v1"}`}
-	if ok, err := f.st.FocusDraftStore(later, "2026-10-11"); err != nil || !ok {
+	if ok, err := f.st.FocusDraftStore(context.Background(), later, "2026-10-11"); err != nil || !ok {
 		t.Fatalf("seed later draft: %v %v", ok, err)
 	}
 	before := f.snapshot(t)
@@ -381,7 +381,7 @@ func TestStaleEarlierPeriodDraftIsReplacedByShow(t *testing.T) {
 	f := newShowFixture(t)
 	f.pr(t, 1, "alpha", showAt)
 	old := store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-09", Cap: 6, MadeAt: "2026-10-09T23:50:00Z", BodyJSON: `{"contract":"pg-desk.focus.draft/v1"}`}
-	if ok, err := f.st.FocusDraftStore(old, "2026-10-09"); err != nil || !ok {
+	if ok, err := f.st.FocusDraftStore(context.Background(), old, "2026-10-09"); err != nil || !ok {
 		t.Fatalf("seed stale draft: %v %v", ok, err)
 	}
 	out, _, err := show(t)
@@ -398,7 +398,7 @@ func TestStaleEarlierPeriodDraftIsReplacedByReplan(t *testing.T) {
 	f := newShowFixture(t)
 	f.pr(t, 1, "alpha", showAt)
 	old := store.FocusDraft{PeriodType: "day", PeriodKey: "2026-10-09", Cap: 6, MadeAt: "2026-10-09T23:50:00Z", BodyJSON: `{"contract":"pg-desk.focus.draft/v1"}`}
-	if ok, err := f.st.FocusDraftStore(old, "2026-10-09"); err != nil || !ok {
+	if ok, err := f.st.FocusDraftStore(context.Background(), old, "2026-10-09"); err != nil || !ok {
 		t.Fatalf("seed stale draft: %v %v", ok, err)
 	}
 	_, _, err := replan(t)
@@ -487,7 +487,7 @@ func TestUnreadableDraftIsTreatedAsAbsent(t *testing.T) {
 			f := newShowFixture(t)
 			f.pr(t, 1, "alpha", showAt)
 			bad := store.FocusDraft{PeriodType: "day", PeriodKey: showToday, Cap: 6, MadeAt: "2026-10-10T11:00:00Z", BodyJSON: body}
-			if ok, err := f.st.FocusDraftStore(bad, showToday); err != nil || !ok {
+			if ok, err := f.st.FocusDraftStore(context.Background(), bad, showToday); err != nil || !ok {
 				t.Fatalf("seed: %v %v", ok, err)
 			}
 			// The existence guard never exits non-zero for a bad draft and stores nothing.
@@ -505,7 +505,7 @@ func TestUnreadableDraftIsTreatedAsAbsent(t *testing.T) {
 				t.Errorf("the replaced draft is still unreadable: %v", derr)
 			}
 			// replan prints the same notice and replaces too.
-			if ok, err := f.st.FocusDraftReplace(store.FocusDraft{PeriodType: "day", PeriodKey: showToday, Cap: 6, MadeAt: "2026-10-10T11:00:00Z", BodyJSON: body}); err != nil || ok {
+			if ok, err := f.st.FocusDraftReplace(context.Background(), store.FocusDraft{PeriodType: "day", PeriodKey: showToday, Cap: 6, MadeAt: "2026-10-10T11:00:00Z", BodyJSON: body}); err != nil || ok {
 				t.Fatalf("reseed: %v %v", ok, err)
 			}
 			out, _, err = replan(t)
@@ -724,7 +724,7 @@ func TestShowOfAPlannedPeriodWhileADraftIsStoredForAnotherPeriod(t *testing.T) {
 	a := f.pr(t, 1, "alpha", showAt)
 	f.lock(t, "2026-10-09", 6, a)
 	other := store.FocusDraft{PeriodType: "day", PeriodKey: showToday, Cap: 6, MadeAt: "2026-10-10T11:00:00Z", BodyJSON: `{"contract":"pg-desk.focus.draft/v1"}`}
-	if ok, err := f.st.FocusDraftStore(other, showToday); err != nil || !ok {
+	if ok, err := f.st.FocusDraftStore(context.Background(), other, showToday); err != nil || !ok {
 		t.Fatalf("seed: %v %v", ok, err)
 	}
 	before := f.snapshot(t)
@@ -783,7 +783,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 		t.Helper()
 		f.cfg.Watch.Issue.Queries = []string{query}
 		v, _ := json.Marshal(map[string]string{"status": status, "reason": "timeout", "at": showAt})
-		if err := f.st.SetMeta("change_flow.listing.issue."+query, string(v)); err != nil {
+		if err := f.st.SetMeta(context.Background(), "change_flow.listing.issue."+query, string(v)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -811,7 +811,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			for _, id := range []string{"K-1", "K-2"} {
 				f.jira(t, id, id, "", showAt)
 				watched := true
-				if err := f.st.SetEntityColumns(showRepo, "issue", id, nil, &watched); err != nil {
+				if err := f.st.SetEntityColumns(context.Background(), showRepo, "issue", id, nil, &watched); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -827,7 +827,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 			for _, id := range []string{"K-1", "K-2"} {
 				f.jira(t, id, id, "", showAt)
 				watched := true
-				if err := f.st.SetEntityColumns(showRepo, "issue", id, nil, &watched); err != nil {
+				if err := f.st.SetEntityColumns(context.Background(), showRepo, "issue", id, nil, &watched); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -916,7 +916,7 @@ func TestShowBeadColumnReadsTheLinkedBead(t *testing.T) {
 		"id": "bd-9", "state": "deferred", "assignee": "", "title": "Focus alpha",
 		"metadata": map[string]string{"source_type": "pr", "source_id": a.ID, "focus_hold": "struck"},
 	}}, showAt)
-	if err := f.st.ReplaceDerivedXrefs(showRepo, "issue", bead.ID, []store.XrefLink{{
+	if err := f.st.ReplaceDerivedXrefs(context.Background(), showRepo, "issue", bead.ID, []store.XrefLink{{
 		Repo: showRepo, FromType: "issue", FromID: bead.ID, ToType: "pr", ToID: a.ID,
 		Relation: "source", Origin: "derived:source-entity", FirstSeen: showAt, LastConfirmed: showAt,
 	}}); err != nil {

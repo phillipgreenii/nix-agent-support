@@ -77,6 +77,8 @@ type reinterpretCounts struct {
 }
 
 func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) error {
+	ctx := cmd.Context()
+
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("reinterpret: load config: %w", err)
@@ -91,7 +93,7 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 			return fmt.Errorf("reinterpret: %w", err)
 		}
 	}
-	st, err := openNewSchemaStore("reinterpret")
+	st, err := openNewSchemaStore(ctx, "reinterpret")
 	if err != nil {
 		return err
 	}
@@ -102,7 +104,7 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 	var keys []store.InterpretationKey
 	if open {
 		var known bool
-		keys, known, err = st.InterpretationsBehind(repo, 0)
+		keys, known, err = st.InterpretationsBehind(ctx, repo, 0)
 		if err != nil {
 			return fmt.Errorf("reinterpret: %w", err)
 		}
@@ -117,7 +119,7 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 		if err := cmd.Context().Err(); err != nil {
 			return fmt.Errorf("reinterpret: %w", err)
 		}
-		r.one(k, !open)
+		r.one(r.ctx, k, !open)
 	}
 	r.counts.Selected = len(keys)
 	if dryRun {
@@ -127,7 +129,7 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 	}
 	c := r.counts
 	if open && !dryRun {
-		recordLastRun(r.errOut, st, "pr reinterpret --open", changesNow(), c, 0)
+		recordLastRun(ctx, r.errOut, st, "pr reinterpret --open", changesNow(), c, 0)
 	}
 	if _, err := fmt.Fprintf(r.out, "reinterpreted %d open PRs: %d changed, %d unchanged; %d not open (stamped only), %d skipped, %d failed\n",
 		c.Changed+c.Unchanged, c.Changed, c.Unchanged, c.StampedOnly, c.Skipped, c.Failed); err != nil {
@@ -142,8 +144,8 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 // recordLastRun persists a pass's counts for `status` (written only when the
 // pass selected a row). A failed write is one stderr line, never an error of
 // the pass: the counts are a report, not the work.
-func recordLastRun(errOut io.Writer, st *store.Store, source string, at time.Time, c reinterpretCounts, remaining int) {
-	_, err := st.RecordReinterpretRun(store.ReinterpretRun{
+func recordLastRun(ctx context.Context, errOut io.Writer, st *store.Store, source string, at time.Time, c reinterpretCounts, remaining int) {
+	_, err := st.RecordReinterpretRun(ctx, store.ReinterpretRun{
 		At: at.UTC().Format(time.RFC3339), Source: source, Selected: c.Selected, Changed: c.Changed,
 		Unchanged: c.Unchanged, StampedOnly: c.StampedOnly, Skipped: c.Skipped, Failed: c.Failed, Remaining: remaining,
 	})
@@ -180,36 +182,36 @@ type reinterpreter struct {
 // state (the named-PR form); otherwise a row whose PR is not open is only
 // stamped. A failure is reported, counted and, when it is the facts or the
 // entity that is at fault, recorded on the row; it never stops the pass.
-func (r *reinterpreter) one(k store.InterpretationKey, force bool) {
-	e, found, err := r.st.GetEntity(k.Repo, k.EntityType, k.EntityID)
+func (r *reinterpreter) one(ctx context.Context, k store.InterpretationKey, force bool) {
+	e, found, err := r.st.GetEntity(ctx, k.Repo, k.EntityType, k.EntityID)
 	if err != nil {
-		r.fail(k, fmt.Errorf("get entity: %w", err), false)
+		r.fail(ctx, k, fmt.Errorf("get entity: %w", err), false)
 		return
 	}
 	if !found {
-		r.fail(k, errors.New("entity is not stored"), true)
+		r.fail(ctx, k, errors.New("entity is not stored"), true)
 		return
 	}
 	state, decodable := classify.PRStateOfFacts([]byte(e.Facts))
 	if !force && decodable && state != "open" {
-		r.stampOnly(k, e.ContentHash, state)
+		r.stampOnly(ctx, k, e.ContentHash, state)
 		return
 	}
 	// An undecodable row goes through the re-interpretation so that it fails
 	// the same way and is marked failed there.
-	old, hadOld, err := r.st.GetInterpretation(k.Repo, k.EntityType, k.EntityID)
+	old, hadOld, err := r.st.GetInterpretation(ctx, k.Repo, k.EntityType, k.EntityID)
 	if err != nil {
-		r.fail(k, fmt.Errorf("read interpretation: %w", err), false)
+		r.fail(ctx, k, fmt.Errorf("read interpretation: %w", err), false)
 		return
 	}
-	res, err := pipeline.ReinterpretStored(r.ctx, r.st, r.cfg, r.clock, k.EntityType, k.EntityID, pipeline.ReinterpretOptions{Origin: reinterpretOrigin, DryRun: r.dryRun})
+	res, err := pipeline.ReinterpretStored(ctx, r.st, r.cfg, r.clock, k.EntityType, k.EntityID, pipeline.ReinterpretOptions{Origin: reinterpretOrigin, DryRun: r.dryRun})
 	if err != nil {
 		stage, _ := pipeline.StageOf(err)
-		r.fail(k, err, stage == pipeline.StageLoadFacts || stage == pipeline.StageInterpret)
+		r.fail(ctx, k, err, stage == pipeline.StageLoadFacts || stage == pipeline.StageInterpret)
 		return
 	}
 	if !res.Found {
-		r.fail(k, errors.New("entity is not stored"), true)
+		r.fail(ctx, k, errors.New("entity is not stored"), true)
 		return
 	}
 	if res.Write.Skipped {
@@ -239,7 +241,7 @@ func (r *reinterpreter) one(k store.InterpretationKey, force bool) {
 }
 
 // stampOnly gives a PR that is not open the current stamp, keeping its content.
-func (r *reinterpreter) stampOnly(k store.InterpretationKey, hash, state string) {
+func (r *reinterpreter) stampOnly(ctx context.Context, k store.InterpretationKey, hash, state string) {
 	if state == "" {
 		state = "no recognisable state"
 	}
@@ -248,10 +250,10 @@ func (r *reinterpreter) stampOnly(k store.InterpretationKey, hash, state string)
 		r.line(k, fmt.Sprintf("not open (%s): would stamp only", state))
 		return
 	}
-	stamped, err := r.st.StampInterpretation(k, hash)
+	stamped, err := r.st.StampInterpretation(ctx, k, hash)
 	switch {
 	case err != nil:
-		r.fail(k, fmt.Errorf("stamp: %w", err), false)
+		r.fail(ctx, k, fmt.Errorf("stamp: %w", err), false)
 	case !stamped:
 		r.counts.Skipped++
 		r.line(k, "skipped: different facts were committed since they were read")
@@ -264,13 +266,13 @@ func (r *reinterpreter) stampOnly(k store.InterpretationKey, hash, state string)
 // fail reports and counts a failed row, and records it on the row (under the
 // running stamp, so the next catch-up skips it) when mark is set and the pass
 // writes.
-func (r *reinterpreter) fail(k store.InterpretationKey, cause error, mark bool) {
+func (r *reinterpreter) fail(ctx context.Context, k store.InterpretationKey, cause error, mark bool) {
 	r.counts.Failed++
 	_, _ = fmt.Fprintf(r.errOut, "reinterpret: %s: %v\n", k.EntityID, cause)
 	if !mark || r.dryRun {
 		return
 	}
-	if err := r.st.MarkInterpretationFailed(k, r.st.InterpStamp()); err != nil && !errors.Is(err, store.ErrNoInterpretation) {
+	if err := r.st.MarkInterpretationFailed(ctx, k, r.st.InterpStamp()); err != nil && !errors.Is(err, store.ErrNoInterpretation) {
 		_, _ = fmt.Fprintf(r.errOut, "reinterpret: %s: mark failed: %v\n", k.EntityID, err)
 	}
 }
