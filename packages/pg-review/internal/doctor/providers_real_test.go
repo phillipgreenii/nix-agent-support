@@ -2,23 +2,51 @@ package doctor
 
 import (
 	"context"
+	"flag"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/config"
+	"github.com/phillipgreenii/x/exitcode"
 )
 
-// buildProvider compiles a real built-in provider into dir and returns dir.
+// providerEnv makes the re-exec'd test binary behave as a Go flag-package
+// provider instead of running tests (see TestMain).
+const providerEnv = "PG_REVIEW_DOCTOR_TEST_AS_PROVIDER"
+
+// TestMain lets the test binary double as a real provider process: a Go
+// flag-package program that exits 2 on --help, exactly like the built-in
+// providers. This replaces a per-test go build of the real provider, which
+// measured compile time and was cache-sensitive.
+func TestMain(m *testing.M) {
+	if os.Getenv(providerEnv) != "" {
+		fs := flag.NewFlagSet("pg-review-provider-ccaudit", flag.ContinueOnError)
+		fs.String("since", "", "window start")
+		fs.String("until", "", "window end")
+		fs.String("scope", "", "scope name")
+		if err := fs.Parse(os.Args[1:]); err != nil {
+			os.Exit(exitcode.Usage)
+		}
+		os.Exit(exitcode.OK)
+	}
+	os.Exit(m.Run())
+}
+
+// buildProvider returns a dir holding an executable named name that re-execs
+// this test binary as a flag-package provider process.
 func buildProvider(t *testing.T, name string) string {
 	t.Helper()
 	dir := t.TempDir()
-	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", filepath.Join(dir, name), "../../cmd/"+name)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build %s: %v\n%s", name, err, out)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapper := "#!/bin/sh\nexec env " + providerEnv + "=1 '" + self + "' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(wrapper), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	return dir
 }
