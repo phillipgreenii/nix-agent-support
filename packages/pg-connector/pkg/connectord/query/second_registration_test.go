@@ -1,3 +1,5 @@
+//go:build secondregistration
+
 package query
 
 import (
@@ -6,6 +8,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/enginetest/vocab"
 )
 
+// Tagged secondregistration: on demand, not part of the unit tier.
 // TestWholeSetOverASecondRegistration runs every other test of this package
 // again with the second registration, whose entity kind, groups, change kinds,
 // roles and views are different invented words: a test that holds a name of the

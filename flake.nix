@@ -10437,6 +10437,59 @@
                     '';
                   });
 
+              # pg-connector SECOND-REGISTRATION tier. ON DEMAND ONLY: build it by hand
+              # when engine, enginetest, query, feed or feedop (or the vocab table in
+              # enginetest/vocab) changes
+              # (`nix build .#checks.<system>.pg-connector-second-registration`). It MUST
+              # NOT be wired into any hook, run-unit-tests, pre-land or land gate: the
+              # test it runs re-executes each of those five package test binaries a
+              # second time over different invented names (code-file-standards Unit
+              # Tests, Speed And Scope: not a unit test). It lives in files tagged
+              # `//go:build secondregistration`, which the unit tier does not compile.
+              # The buildPhase runs exactly TestWholeSetOverASecondRegistration in each
+              # of the five packages under -race and fails when the tagged build does
+              # not list it, when it does not report PASS or when it is skipped.
+              pg-connector-second-registration =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-connector-second-registration";
+                  src = ./packages/pg-connector;
+                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      fail() { echo "pg-connector-second-registration: $*" >&2; exit 1; }
+                      name=TestWholeSetOverASecondRegistration
+                      log="$TMPDIR/second-registration.log"
+                      : > "$log"
+                      for p in engine enginetest query feed feedop; do
+                        dir=./pkg/connectord/$p
+                        # Listings go to variables first: `grep -q` closing the pipe
+                        # early would fail a pipefail pipeline on SIGPIPE.
+                        plain=$(go test -list '.*' "$dir")
+                        tagged=$(go test -tags secondregistration -list '.*' "$dir")
+                        if echo "$plain" | grep -q "^$name\$"; then
+                          fail "$dir: the unit tier lists $name; it must sit behind the secondregistration tag"
+                        fi
+                        echo "$tagged" | grep -q "^$name\$" || fail "$dir: the tagged build does not list $name"
+                        echo "=== $dir" | tee -a "$log"
+                        if ! go test -tags secondregistration -count=1 -race -v -timeout 30m -run "^$name\$" "$dir" >> "$log" 2>&1; then
+                          cat "$log"
+                          fail "$dir FAILED"
+                        fi
+                        grep -q -- "^--- PASS: $name " "$log" || { cat "$log"; fail "$dir: $name did not report PASS"; }
+                      done
+                      if grep -q -- '^--- SKIP' "$log"; then
+                        cat "$log"
+                        fail "a test was SKIPPED"
+                      fi
+                      echo "pg-connector-second-registration: 5 packages, each with a PASS line, none skipped"
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-connector-github load test (bead pg2-7r19vr). ON DEMAND ONLY: build it
               # by hand when the scheduler, governor or change engine changes
               # (`nix build .#checks.<system>.pg-connector-load-test`). It MUST NOT be

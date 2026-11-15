@@ -18,8 +18,10 @@
 // literal and the test that compares against it would fail.
 //
 // RerunUnderSecond runs the current test binary again, every test but itself,
-// with the second registration selected; one test of each package calls it, so
-// "go test" of the package runs its whole set over both registrations.
+// with the second registration selected. One test of each package calls it, from
+// a file tagged secondregistration, so "go test -tags secondregistration" runs
+// the whole set over both registrations while the unit tier runs it over the
+// first only (check pg-connector-second-registration).
 package vocab
 
 import (

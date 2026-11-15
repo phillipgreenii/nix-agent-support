@@ -87,6 +87,13 @@ and `checks.<system>.pg-connector-integration-tests-gating` (real `go`: the tag 
 integration package and both builds vet). Details: `packages/pg-connector/README.md`, "Integration
 tier (on demand)". The `contract` tag (real `bd`, real credentials) is a separate on-demand tier.
 
+**pg-connector second-registration tier** (on demand, not a gate): the whole-binary re-run of
+`engine`, `enginetest`, `query`, `feed` and `feedop` over a second set of invented names
+(`TestWholeSetOverASecondRegistration`) sits behind `//go:build secondregistration`, so the unit tier
+runs those packages over the first registration only. Run it with
+`nix build .#checks.<system>.pg-connector-second-registration`; it MUST NOT be wired into any hook,
+`run-unit-tests` or pre-land gate.
+
 **pg-connector load test (on demand, not a gate)**: `cmd/pg-connector-github/internal/loadtest` is
 excluded from `go test ./...` and from `pg-connector-go-tests` (operator ruling 2026-10-25, bead
 `pg2-7r19vr`): its `TestMain` skips the whole package unless `PG_CONNECTOR_LOAD_TEST=1`, so a test

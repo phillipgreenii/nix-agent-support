@@ -995,6 +995,16 @@ the real `go` tool that the tag splits every integration package and that both b
 single-process test is a unit test even when it is real (a `git` fixture repo, an in-process serve
 loop, the re-exec-the-test-binary helper process).
 
+**Second-registration tier (on demand).** The shared connector-daemon tests (`engine`, `enginetest`,
+`query`, `feed`, `feedop`) run over two registrations of invented names (`enginetest/vocab`). The
+second run re-executes each package test binary, so it is not a unit test: `TestWholeSetOverASecondRegistration`
+sits in a `second_registration_test.go` file tagged `//go:build secondregistration`, and the unit
+tier runs the set over the first registration only. Run the second one when a vocabulary-sensitive
+test, the vocab table or one of those packages changes:
+`nix build .#checks.<system>.pg-connector-second-registration` (not part of any hook or land gate),
+or `go test -tags secondregistration -run '^TestWholeSetOverASecondRegistration$' ./pkg/connectord/...`.
+The check fails if the unit tier lists that test, if the tagged build does not, or if it does not report PASS.
+
 **Live-API contract tests (on demand).** `cmd/pg-connector-alert-pagerduty/internal/contract_test.go`
 (`//go:build contract`) calls the real PagerDuty REST API with the operator's own key (Keychain
 service `pd-schedule-manager`, account `pagerduty-api`, or `PAGERDUTY_API_TOKEN`), so it can run
