@@ -274,32 +274,6 @@ func TestHolderFoundRestoresTheFile(t *testing.T) {
 	}
 }
 
-func TestCrashAtEveryRemovalPointConverges(t *testing.T) {
-	for _, point := range []string{"remove.after-pending", "remove.after-rename", "remove.after-quarantined", "remove.after-unlink", "remove.before-removed", "remove.after-removed"} {
-		t.Run(point, func(t *testing.T) {
-			e := newRemoveEnv(t, false)
-			content := e.oldSettled(6, removeAge+time.Hour)
-			file := e.fileID()
-			disarm := faults.ArmPanic(point)
-			crashed := faults.Recover(func() { _, _ = e.sett.Remove(RemoveOptions{Sessions: []string{sess}}) })
-			disarm()
-			if !crashed {
-				t.Fatalf("%s not reached", point)
-			}
-			e.crash()
-			if got := e.stage(); got != store.StageRemoved {
-				t.Fatalf("stage %s after recovery", got)
-			}
-			if e.exists(e.transcript()) {
-				t.Fatal("the file is back or was never removed")
-			}
-			if got := e.raw(file, len(content)); got != content {
-				t.Fatal("bytes lost")
-			}
-		})
-	}
-}
-
 func TestCrashAfterQuarantineWithANewProcessRestores(t *testing.T) {
 	e := newRemoveEnv(t, false)
 	content := e.oldSettled(6, removeAge+time.Hour)

@@ -8216,7 +8216,7 @@
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
                       log="$TMPDIR/crashsweep.log"
-                      if ! go test -tags crashsweep -run 'TestCrashSweep|TestModelSequence' -count=1 -v -timeout 30m ./internal/settle/ > "$log" 2>&1; then
+                      if ! go test -tags crashsweep -run 'TestCrashSweep|TestModelSequence|TestExtractCrashPointsConverge|TestCrashAtEveryRemovalPointConverges' -count=1 -v -timeout 30m ./internal/settle/ > "$log" 2>&1; then
                         cat "$log"
                         echo "pg-claude-code-recorder-crashsweep-tests: the crash sweep FAILED" >&2
                         exit 1
@@ -8236,6 +8236,13 @@
                         echo "pg-claude-code-recorder-crashsweep-tests: TestModelSequence did not report PASS" >&2
                         exit 1
                       }
+                      for t in TestExtractCrashPointsConverge TestCrashAtEveryRemovalPointConverges; do
+                        grep -q -- "^--- PASS: $t " "$log" || {
+                          cat "$log"
+                          echo "pg-claude-code-recorder-crashsweep-tests: $t did not report PASS" >&2
+                          exit 1
+                        }
+                      done
                       if grep -q -- '--- SKIP' "$log"; then
                         echo "pg-claude-code-recorder-crashsweep-tests: a test was SKIPPED" >&2
                         exit 1

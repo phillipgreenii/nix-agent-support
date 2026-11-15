@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
@@ -140,35 +139,6 @@ func TestExtractToDirectoryNeverTouchesTheClaudeDirectory(t *testing.T) {
 	}
 	if _, err := e.sett.Extract(sess, to); !errors.Is(err, ErrTargetExists) {
 		t.Fatalf("--to target exists: %v", err)
-	}
-}
-
-func TestExtractCrashPointsConverge(t *testing.T) {
-	for _, point := range []string{"extract.after-register", "extract.after-mtime", "extract.after-path", "extract.after-partial"} {
-		t.Run(point, func(t *testing.T) {
-			e := newEnv(t, false)
-			content, _ := e.removedConversation()
-			disarm := faults.ArmPanic(point)
-			crashed := faults.Recover(func() { _, _ = e.sett.Extract(sess, "") })
-			disarm()
-			if !crashed {
-				t.Fatalf("%s not reached", point)
-			}
-			e.crash()
-			if _, err := e.sett.Extract(sess, ""); err != nil {
-				t.Fatalf("running the extract again: %v", err)
-			}
-			if got := e.readOrig(e.transcript()); got != content {
-				t.Fatal("bytes differ after the retried extract")
-			}
-			if e.stage() != StageQuiet {
-				t.Fatalf("stage %s", e.stage())
-			}
-			matches, _ := filepath.Glob(e.path("projects/example-project/*.tmp.pgrec"))
-			if len(matches) != 0 {
-				t.Fatalf("a temporary file is left: %v", matches)
-			}
-		})
 	}
 }
 
