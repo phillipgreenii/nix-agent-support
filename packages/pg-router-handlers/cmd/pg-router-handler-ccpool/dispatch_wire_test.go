@@ -3,7 +3,6 @@ package main
 import (
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -13,36 +12,18 @@ import (
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
-// callArgs returns the argument list of the first recorded stub call whose first
-// argument is sub (calls are separated by a "--" line, see ccpoolNewFails).
-func callArgs(t *testing.T, log, sub string) []string {
-	t.Helper()
-	b, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, call := range strings.Split(string(b), "--\n") {
-		if args := strings.Split(strings.TrimSuffix(call, "\n"), "\n"); args[0] == sub {
-			return args
-		}
-	}
-	t.Fatalf("no `ccpool %s` call recorded:\n%s", sub, b)
-	return nil
-}
-
 // In-flight sessions the OLD handler started MUST be adopted by this adapter
 // across the cutover (ADR 0085), and the reverse: the external id format, the
 // session naming and the dispatch metadata this adapter writes are pinned here
 // to the old handler's (both are the shared library's, so this is the guard
 // against anyone giving the adapter its own).
 func TestDispatch_externalIDSessionNamingAndMetadataUnchanged(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "calls.log")
-	t.Setenv("PATH", stubBin(t, map[string]string{"ccpool": ccpoolNewFails(log)})+":/usr/bin:/bin")
+	fk := ccpoolNewFailsFake(t)
 	name, cfg := workerRole("", "")
 	if code, got := dispatchWith(t, name, cfg, "", defaultEvent); code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy (the stub's new fails); stdout=%q", code, got)
 	}
-	args := callArgs(t, log, "new")
+	args := callArgsOf(t, fk, "ccpool", "new")
 
 	// <prefix><role>-<bead>-<stamp>, the stamp being 20060102T150405.000000000.
 	if !regexp.MustCompile(`^pg-router-worker-zr-w-\d{8}T\d{6}\.\d{9}$`).MatchString(args[1]) {

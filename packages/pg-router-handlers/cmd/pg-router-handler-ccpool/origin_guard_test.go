@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
@@ -78,7 +76,7 @@ func TestOriginGate_noRepoRootIsNotChecked(t *testing.T) {
 // Through the whole dispatch: a guard that reports unavailable declines with
 // exit 9 and makes no bd/ccpool call.
 func TestDispatch_guardUnavailableDeclinesWithoutBeadsCalls(t *testing.T) {
-	cfgPath, _, callLog := originFixture(t, t.TempDir())
+	cfgPath, _, calls := originFixture(t, t.TempDir())
 	// no watched origin matches: only the guard can decline.
 	old := newGuardCheck
 	newGuardCheck = func(config.Config) originguard.Check {
@@ -92,7 +90,7 @@ func TestDispatch_guardUnavailableDeclinesWithoutBeadsCalls(t *testing.T) {
 	if code != conformance.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
 		t.Fatalf("exit=%d out=%q, want a busy origin-unavailable decline", code, out)
 	}
-	if b, err := os.ReadFile(callLog); err == nil {
-		t.Fatalf("a decline must make no bd/ccpool call, saw:\n%s", strings.TrimSpace(string(b)))
+	if got := calls.Calls(); len(got) != 0 {
+		t.Fatalf("a decline must make no bd/ccpool call, saw: %v", got)
 	}
 }

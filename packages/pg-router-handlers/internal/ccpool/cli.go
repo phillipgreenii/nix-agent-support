@@ -87,6 +87,9 @@ type CLIRunner struct {
 	// was launched against (pg-router core exports CCPOOL_POOL for the whole
 	// handler process tree). Mutually exclusive with PoolDir (PoolDir wins).
 	DefaultPool bool
+	// Exec runs the ccpool process (nil = cmdrun.Exec). Tests inject a
+	// cmdruntest.Fake here instead of putting a ccpool stub on PATH.
+	Exec cmdrun.Runner
 	// run executes `bin args...` under ctx and returns stdout and stderr in
 	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
 	// pg2-x6ef) plus the run error.
@@ -122,7 +125,7 @@ func NewCLIRunnerDefaultPool(cfg config.Config) *CLIRunner {
 func newCLIRunner(cfg config.Config, poolDir string) *CLIRunner {
 	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, Autonomous: cfg.Autonomous, bin: config.CCPoolCommand, PoolDir: poolDir}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
-		return execCmdIn(ctx, c.bin, c.PoolDir, c.DefaultPool, args)
+		return execCmdIn(ctx, c.Exec, c.bin, c.PoolDir, c.DefaultPool, args)
 	}
 	return c
 }
@@ -134,13 +137,13 @@ func newCLIRunner(cfg config.Config, poolDir string) *CLIRunner {
 // (bead pg2-mr0sl) — cmd.Env is left nil (inherit os.Environ() unchanged,
 // the pre-existing behavior) when poolDir is "".
 func execCmd(ctx context.Context, bin, poolDir string, args []string) (stdout, stderr []byte, err error) {
-	return execCmdIn(ctx, bin, poolDir, false, args)
+	return execCmdIn(ctx, nil, bin, poolDir, false, args)
 }
 
 // execCmdIn is execCmd plus defaultPool (bead pg2-wqi3e): when true and poolDir
 // is "", CCPOOL_POOL is stripped from the child's environment so ccpool uses
 // its default pool.
-func execCmdIn(ctx context.Context, bin, poolDir string, defaultPool bool, args []string) (stdout, stderr []byte, err error) {
+func execCmdIn(ctx context.Context, run cmdrun.Runner, bin, poolDir string, defaultPool bool, args []string) (stdout, stderr []byte, err error) {
 	call := cmdrun.Call{Name: bin, Args: args, Timeout: execBackstop}
 	switch {
 	case poolDir != "":
@@ -155,7 +158,10 @@ func execCmdIn(ctx context.Context, bin, poolDir string, defaultPool bool, args 
 			}
 		}
 	}
-	res := cmdrun.Exec(ctx, call)
+	if run == nil {
+		run = cmdrun.Exec
+	}
+	res := run(ctx, call)
 	switch {
 	case res.StartErr != nil:
 		err = res.StartErr

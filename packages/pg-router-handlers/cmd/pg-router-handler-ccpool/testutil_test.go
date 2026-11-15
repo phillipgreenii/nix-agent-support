@@ -6,12 +6,20 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
+	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/dispatchlib"
+	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
 	"github.com/phillipgreenii/pg-router-handlers/internal/handlerstate"
+	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
+	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
 
 // defaultEvent is a dispatch event for bead zr-w.
@@ -51,6 +59,64 @@ func request(event, name string, cfg map[string]any) string {
 	return string(b)
 }
 
+// buildDepsUnderTest is the deps builder dispatchWith hands serveDispatch: the
+// production dispatchlib.BuildDeps, unless a test installed a process fake with
+// useRunner.
+var buildDepsUnderTest = dispatchlib.BuildDeps
+
+// useRunner makes every ccpool and bd call the dispatch wiring makes go through
+// run instead of a process (the production CLIRunners, with their Exec seam
+// replaced), for the rest of the test.
+func useRunner(t *testing.T, run cmdrun.Runner) {
+	t.Helper()
+	prev := buildDepsUnderTest
+	buildDepsUnderTest = func(cfg config.Config, role roles.Role) executor.Deps {
+		d := dispatchlib.BuildDeps(cfg, role)
+		d.CC.(*ccpool.CLIRunner).Exec = run
+		d.BD.(*beads.CLIRunner).Exec = run
+		return d
+	}
+	t.Cleanup(func() { buildDepsUnderTest = prev })
+}
+
+// bdAbsent answers every bd call as a bd that is not installed, the state the
+// stub-on-PATH tests ran in when they put no bd on PATH.
+func bdAbsent(f *cmdruntest.Fake) {
+	f.On(cmdruntest.MatchName("bd")).Return(cmdrun.Result{Code: -1, StartErr: exec.ErrNotFound})
+}
+
+// ccpoolNewFailsFake answers like a ccpool whose `new` fails before ready: an
+// empty pool with room, `close` succeeds, any other subcommand is unavailable.
+// The fake records every call.
+func ccpoolNewFailsFake(t *testing.T) *cmdruntest.Fake {
+	t.Helper()
+	f := cmdruntest.New(t)
+	sub := func(s string) func(cmdrun.Call) bool {
+		return func(c cmdrun.Call) bool { return c.Name == "ccpool" && len(c.Args) > 0 && c.Args[0] == s }
+	}
+	f.On(sub("list")).Return(cmdruntest.Out("[]\n"))
+	f.On(sub("capacity")).Return(cmdruntest.Out(`{"max_sessions":4,"free":4,"counted":0,"live":0,"preserved":0}` + "\n"))
+	f.On(sub("new")).Return(cmdruntest.Fail(1, "did not reach ready (state=starting) Bearer abcdefghijklmnopqrstuvwxyz0123456789ABCDEF\n"))
+	f.On(sub("close")).Return(cmdruntest.Out(""))
+	f.On(cmdruntest.MatchName("ccpool")).Return(cmdruntest.Fail(1, "stub ccpool unavailable\n"))
+	bdAbsent(f)
+	useRunner(t, f.Runner())
+	return f
+}
+
+// callArgsOf returns the argument list of the first recorded call to tool whose
+// first argument is sub.
+func callArgsOf(t *testing.T, f *cmdruntest.Fake, tool, sub string) []string {
+	t.Helper()
+	for _, c := range f.Calls() {
+		if c.Name == tool && len(c.Args) > 0 && c.Args[0] == sub {
+			return c.Args
+		}
+	}
+	t.Fatalf("no `%s %s` call recorded: %v", tool, sub, f.Calls())
+	return nil
+}
+
 // dispatchWith runs serveDispatch (real dispatchlib.BuildDeps: a real ccpool
 // CLIRunner and bd CLIRunner shelling out to whatever is on PATH) for the role
 // and returns the exit code and the reply.
@@ -62,7 +128,7 @@ func dispatchWith(t *testing.T, name string, cfg map[string]any, cfgPath, event 
 func dispatchCtx(ctx context.Context, t *testing.T, name string, cfg map[string]any, cfgPath, event string) (int, string) {
 	t.Helper()
 	var out bytes.Buffer
-	code := serveDispatch(ctx, strings.NewReader(request(event, name, cfg)), &out, cfgPath, dispatchlib.BuildDeps)
+	code := serveDispatch(ctx, strings.NewReader(request(event, name, cfg)), &out, cfgPath, buildDepsUnderTest)
 	return code, out.String()
 }
 

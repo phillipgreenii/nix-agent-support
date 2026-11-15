@@ -12,22 +12,22 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/x/cmdruntest"
 )
 
 // originFixture writes a launch config whose one watched origin's repoRoot is
 // repoRoot, K=1 so a single failed probe gates, and returns the config path, the
-// state dir, and the log of every call to the fake `bd`/`ccpool` binaries.
-// PATH is narrowed to that directory so a call that escaped the gate is visible.
-func originFixture(t *testing.T, repoRoot string, extra ...map[string]any) (cfgPath, stateDir, callLog string) {
+// state dir, and the fake that answers (and records) every `bd`/`ccpool` call, so a call
+// that escaped the gate is visible.
+func originFixture(t *testing.T, repoRoot string, extra ...map[string]any) (cfgPath, stateDir string, calls *cmdruntest.Fake) {
 	t.Helper()
 	dir := t.TempDir()
 	stateDir = filepath.Join(dir, "state")
-	callLog = filepath.Join(dir, "calls.log")
-	scripts := map[string]string{}
+	calls = cmdruntest.New(t)
 	for _, name := range []string{"bd", "ccpool"} {
-		scripts[name] = fmt.Sprintf("echo %s \"$@\" >> %s\nexit 1\n", name, callLog)
+		calls.On(cmdruntest.MatchName(name)).Return(cmdruntest.Fail(1, ""))
 	}
-	t.Setenv("PATH", stubBin(t, scripts))
+	useRunner(t, calls.Runner())
 
 	origins := []map[string]any{{"key": "git.example.test/o/a", "repoRoot": repoRoot}}
 	origins = append(origins, extra...)
@@ -42,7 +42,7 @@ func originFixture(t *testing.T, repoRoot string, extra ...map[string]any) (cfgP
 	if err := os.WriteFile(cfgPath, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return cfgPath, stateDir, callLog
+	return cfgPath, stateDir, calls
 }
 
 // workerWithIsolation is a worker role whose isolation table is the given JSON.
@@ -55,7 +55,7 @@ func workerWithIsolation(t *testing.T, isolation string) roleUnderTest {
 // ZERO bd/ccpool calls (INV-CCH-10).
 func TestDispatch_gatedOriginDeclinesWithoutBeadsCalls(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "unmounted", "repo") // step 1 fails: mount-missing
-	cfgPath, stateDir, callLog := originFixture(t, missing)
+	cfgPath, stateDir, calls := originFixture(t, missing)
 	r := workerWithIsolation(t, `{}`)
 	code, out := dispatchWith(t, r.name, r.cfg, cfgPath, defaultEvent)
 	if code != conformance.ExitBusy {
@@ -64,9 +64,8 @@ func TestDispatch_gatedOriginDeclinesWithoutBeadsCalls(t *testing.T) {
 	if reply := decodeReply(t, out); reply["reason"] != "origin-unavailable" {
 		t.Fatalf("reply = %q, want reason origin-unavailable", out)
 	}
-	if _, err := os.Stat(callLog); err == nil {
-		b, _ := os.ReadFile(callLog)
-		t.Fatalf("a decline must make no bd/ccpool call, saw:\n%s", b)
+	if got := calls.Calls(); len(got) != 0 {
+		t.Fatalf("a decline must make no bd/ccpool call, saw: %v", got)
 	}
 	// The origin key is in the state file, never in the wire reason.
 	if strings.Contains(out, "git.example.test") {
