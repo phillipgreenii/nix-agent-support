@@ -9181,6 +9181,87 @@
                     touch "$out"
                   '';
 
+              # Marketplace shebang check: every EXECUTABLE file that carries a shebang under the
+              # built agent-support marketplace (and the hook-router plugin skeleton) MUST start
+              # with #!/nix/store/ (no `/usr/bin/env` hop; SentinelOne inspects every process
+              # launch), because the nix-repo-base builders run patchShebangs. .bats files and docs
+              # that carry a shebang are not executable and are not listed. Negative control: the
+              # same assertion over the source tree claude-marketplace/ (shebangs still
+              # `#!/usr/bin/env bash`) MUST fail, so the check passes only when it does, which also
+              # proves the assertion is not vacuous. The in-repo hook-router plugin ships no
+              # executables (its delegates are first-party commands, `sources = [ ]`), so the
+              # skeleton may legitimately list none; the marketplace itself MUST list at least one.
+              test-claude-marketplace-store-shebangs =
+                let
+                  hookRouterSkeleton =
+                    (phillipgreenii-nix-base.lib.mkClaudeMarketplaceBuilders { inherit pkgs lib; })
+                    .mkClaudeHookRouterPlugin
+                      {
+                        name = "shebang-check";
+                        declared = "1.0.0";
+                        sources = [ ];
+                      };
+                in
+                pkgs.runCommand "test-claude-marketplace-store-shebangs"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.findutils
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                    ];
+                  }
+                  ''
+                    # offenders DIR: set `count` to the number of executable shebang files under
+                    # DIR and `bad` to those whose first line is not #!/nix/store/.
+                    offenders() {
+                      count=0
+                      bad=""
+                      while IFS= read -r -d "" f; do
+                        first=$(head -n 1 "$f" || true)
+                        case "$first" in
+                          '#!'*)
+                            count=$((count + 1))
+                            case "$first" in
+                              '#!/nix/store/'*) ;;
+                              *) bad="$bad$f: $first"$'\n' ;;
+                            esac
+                            ;;
+                        esac
+                      done < <(find "$1" -type f -perm -u+x -print0 | sort -z)
+                    }
+
+                    offenders ${agentSupportMarketplace}
+                    echo "marketplace: $count executable shebang files"
+                    if [ "$count" -lt 1 ]; then
+                      echo "FAIL: no executable shebang files under the marketplace (vacuous)" >&2
+                      exit 1
+                    fi
+                    if [ -n "$bad" ]; then
+                      echo "FAIL: marketplace scripts without a store shebang:" >&2
+                      printf '%s' "$bad" >&2
+                      exit 1
+                    fi
+
+                    offenders ${hookRouterSkeleton}
+                    echo "hook-router skeleton: $count executable shebang files"
+                    if [ -n "$bad" ]; then
+                      echo "FAIL: hook-router plugin scripts without a store shebang:" >&2
+                      printf '%s' "$bad" >&2
+                      exit 1
+                    fi
+
+                    # Negative control: the source tree MUST trip the assertion.
+                    offenders ${./claude-marketplace}
+                    echo "source tree: $count executable shebang files"
+                    printf '%s' "$bad"
+                    if [ "$count" -lt 1 ] || [ -z "$bad" ]; then
+                      echo "FAIL: negative control did not fail; the assertion cannot detect env shebangs" >&2
+                      exit 1
+                    fi
+                    touch "$out"
+                  '';
+
               # pg-connector-github dashboard: rules D1-D8 over the dashboard JSON and the metric
               # catalog (uid and title, catalogued names, counters inside rate/increase, the topic
               # list, descriptions, Prometheus datasource, every expr parses under promtool,
