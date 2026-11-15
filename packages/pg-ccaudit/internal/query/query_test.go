@@ -55,7 +55,7 @@ func buildIndex(t *testing.T) (string, string, *sql.DB) {
 	}
 
 	dbPath := filepath.Join(base, "transcripts.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -70,7 +70,7 @@ func buildIndex(t *testing.T) (string, string, *sql.DB) {
 		t.Fatalf("close writer: %v", err)
 	}
 
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatalf("store.OpenReadOnly: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestDefaultWindowIncludesRowsWithNoTimestamp(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	dbPath := filepath.Join(base, "transcripts.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestDefaultWindowIncludesRowsWithNoTimestamp(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}

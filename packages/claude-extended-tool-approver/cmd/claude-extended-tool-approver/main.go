@@ -331,11 +331,11 @@ func logPreToolDecision(store *asklog.Store, dbPath, openCause string, input *ho
 			// into metrics.DefaultRuleErrors while deciding; this is the only point where
 			// those counts can outlive the process (one process per tool call). A failure
 			// to persist it is reported only; it is not part of the verdict row.
-			if err := asklog.RecordRuleErrors(store, input, metrics.DefaultRuleErrors.Snapshot()); err != nil {
+			if err := asklog.RecordRuleErrors(ctx, store, input, metrics.DefaultRuleErrors.Snapshot()); err != nil {
 				fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog rule_errors: %v\n", err)
 			}
 			// This hook got through, so replay what earlier slow hooks spooled.
-			if _, err := store.DrainSpool(dbPath, askLogDrainMax); err != nil {
+			if _, err := store.DrainSpool(ctx, dbPath, askLogDrainMax); err != nil {
 				fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: asklog spool drain: %v\n", err)
 			}
 			return nil

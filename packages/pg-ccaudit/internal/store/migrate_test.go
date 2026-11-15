@@ -20,7 +20,7 @@ func TestSchemaUpgradeForcesAFullReIngest(t *testing.T) {
 
 	// Stand up a database that looks like schema 1: the current DDL, one file row and
 	// its children, and the OLD user_version stamped last.
-	db, err := Open(path, false)
+	db, err := Open(t.Context(), path, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestSchemaUpgradeForcesAFullReIngest(t *testing.T) {
 	}
 
 	// Re-open at the current version: the migration must clear the database.
-	db2, err := Open(path, false)
+	db2, err := Open(t.Context(), path, false)
 	if err != nil {
 		t.Fatalf("re-Open: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestSchemaUpgradeForcesAFullReIngest(t *testing.T) {
 // index nothing.
 func TestMigrationClearsFilesNotJustOffsets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transcripts.db")
-	db, err := Open(path, false)
+	db, err := Open(t.Context(), path, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestMigrationClearsFilesNotJustOffsets(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	db2, err := Open(path, false)
+	db2, err := Open(t.Context(), path, false)
 	if err != nil {
 		t.Fatalf("re-Open: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestMigrationClearsFilesNotJustOffsets(t *testing.T) {
 // open would throw away the whole index on each ingest tick.
 func TestOpenAtCurrentVersionPreservesData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transcripts.db")
-	db, err := Open(path, false)
+	db, err := Open(t.Context(), path, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestOpenAtCurrentVersionPreservesData(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 	for i := 0; i < 2; i++ {
-		again, err := Open(path, false)
+		again, err := Open(t.Context(), path, false)
 		if err != nil {
 			t.Fatalf("re-Open %d: %v", i, err)
 		}
@@ -140,13 +140,13 @@ func TestOpenAtCurrentVersionPreservesData(t *testing.T) {
 // A brand-new database reports user_version 0 and has nothing to clear. Treating 0
 // as "an old version" would make the migration run on every fresh install.
 func TestFreshDatabaseIsNotMigrated(t *testing.T) {
-	if err := migrate(nil, 0, false); err != nil {
+	if err := migrate(t.Context(), nil, 0, false); err != nil {
 		t.Errorf("migrate at prior=0 must be a no-op and must not touch the handle: %v", err)
 	}
-	if err := migrate(nil, SchemaVersion, false); err != nil {
+	if err := migrate(t.Context(), nil, SchemaVersion, false); err != nil {
 		t.Errorf("migrate at the current version must be a no-op: %v", err)
 	}
-	if err := migrate(nil, SchemaVersion+1, false); err != nil {
+	if err := migrate(t.Context(), nil, SchemaVersion+1, false); err != nil {
 		t.Errorf("migrate on a NEWER database must be a no-op, not a downgrade: %v", err)
 	}
 }

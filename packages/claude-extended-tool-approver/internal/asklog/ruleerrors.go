@@ -24,14 +24,14 @@ import (
 // Failures here are REPORTED, never propagated into the decision: the hook has
 // already decided by the time this runs, and losing an observability row must not be
 // able to change or delay a permission verdict.
-func RecordRuleErrors(s *Store, input *hookio.HookInput, snapshot []metrics.RuleErrorCount) error {
+func RecordRuleErrors(ctx context.Context, s *Store, input *hookio.HookInput, snapshot []metrics.RuleErrorCount) error {
 	if s == nil || len(snapshot) == 0 {
 		return nil
 	}
 	now := nowISO()
 	for _, e := range snapshot {
 		if _, err := s.db.ExecContext(
-			context.Background(),
+			ctx,
 			`
 			INSERT INTO rule_errors
 				(session_id, cwd, tool_name, rule_name, error_count, error_sample, created_at)

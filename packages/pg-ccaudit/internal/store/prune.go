@@ -46,7 +46,7 @@ func Prune(ctx context.Context, db *sql.DB, cutoff time.Time, dryRun bool) (Prun
 	cutoff = cutoff.UTC()
 	res := PruneResult{Cutoff: cutoff.Format(TSLayout), DryRun: dryRun, Rows: map[string]int64{}}
 
-	hasThinking, err := HasThinkingTable(db)
+	hasThinking, err := HasThinkingTable(ctx, db)
 	if err != nil {
 		return res, err
 	}

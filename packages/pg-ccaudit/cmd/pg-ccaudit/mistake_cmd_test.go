@@ -43,7 +43,7 @@ func mistakeIndex(t *testing.T) string {
 	}
 
 	dbPath := filepath.Join(base, "transcripts.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

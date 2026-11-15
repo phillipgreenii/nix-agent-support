@@ -24,7 +24,7 @@ type skillCall struct {
 func buildSkillDB(t *testing.T, calls []skillCall) *sql.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "skill.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func buildSkillDB(t *testing.T, calls []skillCall) *sql.DB {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -404,7 +404,7 @@ func TestWindowDrivenQueryTimingsOnBigFixture(t *testing.T) {
 func buildScopeDBRaw(t testing.TB) *sql.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "boundary.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +426,7 @@ func buildScopeDBRaw(t testing.TB) *sql.DB {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

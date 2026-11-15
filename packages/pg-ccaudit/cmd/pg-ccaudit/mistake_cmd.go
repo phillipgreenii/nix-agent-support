@@ -69,12 +69,12 @@ func signalNames() []string {
 // openIndex opens the index READ-ONLY. Every census subcommand goes through it:
 // the corpus and the index are shared with running sessions, so a census that could
 // write is a census that can corrupt what it is measuring.
-func openIndex(path string) (*sql.DB, string, error) {
+func openIndex(ctx context.Context, path string) (*sql.DB, string, error) {
 	resolved, err := resolveDB(path)
 	if err != nil {
 		return nil, "", err
 	}
-	db, err := store.OpenReadOnly(resolved)
+	db, err := store.OpenReadOnly(ctx, resolved)
 	if err != nil {
 		return nil, "", err
 	}
@@ -124,7 +124,7 @@ FLAGS
 	if err := fs.Parse(args); err != nil {
 		return errUsage
 	}
-	db, _, err := openIndex(*cf.db)
+	db, _, err := openIndex(ctx, *cf.db)
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ FLAGS
 		return cmdClassifyStatus(ctx, cf, stdout, stderr)
 	}
 
-	db, _, err := openIndex(*cf.db)
+	db, _, err := openIndex(ctx, *cf.db)
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ FLAGS
 // exactly the arithmetic the bead's own problem statement says "cannot be
 // seeded while spend is unmeasurable".
 func cmdClassifyStatus(ctx context.Context, cf *censusFlags, stdout, _ *os.File) error {
-	db, _, err := openIndex(*cf.db)
+	db, _, err := openIndex(ctx, *cf.db)
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ FLAGS
 		return err
 	}
 
-	db, _, err := openIndex(*cf.db)
+	db, _, err := openIndex(ctx, *cf.db)
 	if err != nil {
 		return err
 	}
@@ -493,7 +493,7 @@ FLAGS
 	if err := fs.Parse(args); err != nil {
 		return errUsage
 	}
-	db, _, err := openIndex(*cf.db)
+	db, _, err := openIndex(ctx, *cf.db)
 	if err != nil {
 		return err
 	}
@@ -823,7 +823,7 @@ FLAGS
 		if *sample <= 0 {
 			return fmt.Errorf("gold sample needs --sample N")
 		}
-		db, _, derr := openIndex(*cf.db)
+		db, _, derr := openIndex(ctx, *cf.db)
 		if derr != nil {
 			return derr
 		}

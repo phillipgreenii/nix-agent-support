@@ -13,7 +13,7 @@ import (
 
 func TestPruneCommandDryRunThenYes(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "t.db")
-	db, err := store.Open(dbPath, false)
+	db, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}

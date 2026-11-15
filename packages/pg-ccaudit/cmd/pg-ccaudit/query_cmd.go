@@ -78,7 +78,7 @@ QUERIES
 	if err != nil {
 		return err
 	}
-	db, err := store.OpenReadOnly(resolvedDB)
+	db, err := store.OpenReadOnly(ctx, resolvedDB)
 	if err != nil {
 		return err
 	}

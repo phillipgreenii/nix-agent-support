@@ -29,7 +29,7 @@ func TestRecordRuleErrors_PersistsOneRowPerRule(t *testing.T) {
 	c.Record("gh", errors.New("resolve current branch: timeout again"))
 	c.Record("primary-commit", errors.New("resolver failed"))
 
-	if err := RecordRuleErrors(s, input, c.Snapshot()); err != nil {
+	if err := RecordRuleErrors(context.Background(), s, input, c.Snapshot()); err != nil {
 		t.Fatalf("RecordRuleErrors: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestRecordRuleErrors_EmptySnapshotWritesNothing(t *testing.T) {
 	s := ruleErrorStore(t)
 	input := &hookio.HookInput{SessionID: "sess-1", CWD: "/repo", ToolName: "Bash"}
 
-	if err := RecordRuleErrors(s, input, metrics.NewRuleErrors().Snapshot()); err != nil {
+	if err := RecordRuleErrors(context.Background(), s, input, metrics.NewRuleErrors().Snapshot()); err != nil {
 		t.Fatalf("RecordRuleErrors: %v", err)
 	}
 	var n int
@@ -99,7 +99,7 @@ func TestRecordRuleErrors_EmptySnapshotWritesNothing(t *testing.T) {
 func TestRecordRuleErrors_NilStoreIsANoOp(t *testing.T) {
 	c := metrics.NewRuleErrors()
 	c.Record("gh", errors.New("x"))
-	if err := RecordRuleErrors(nil, &hookio.HookInput{}, c.Snapshot()); err != nil {
+	if err := RecordRuleErrors(context.Background(), nil, &hookio.HookInput{}, c.Snapshot()); err != nil {
 		t.Errorf("RecordRuleErrors(nil store) = %v, want nil", err)
 	}
 }
@@ -118,7 +118,7 @@ func TestRuleErrorsSurvivesReopen(t *testing.T) {
 		}
 		c := metrics.NewRuleErrors()
 		c.Record("gh", errors.New("timeout"))
-		if err := RecordRuleErrors(s, input, c.Snapshot()); err != nil {
+		if err := RecordRuleErrors(context.Background(), s, input, c.Snapshot()); err != nil {
 			t.Fatalf("RecordRuleErrors (pass %d): %v", i, err)
 		}
 		if err := s.Close(); err != nil {

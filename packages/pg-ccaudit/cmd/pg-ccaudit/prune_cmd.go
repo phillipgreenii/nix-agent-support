@@ -69,7 +69,7 @@ FLAGS
 		}
 		defer func() { _ = handle.Release() }()
 	}
-	db, err := store.Open(resolvedDB, false)
+	db, err := store.Open(ctx, resolvedDB, false)
 	if err != nil {
 		return err
 	}

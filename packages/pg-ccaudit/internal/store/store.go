@@ -238,7 +238,7 @@ func DefaultTranscriptRoot() (string, error) {
 //
 // WAL is mandatory, not a tuning choice (T-12): the query path must never block
 // the ingester and the ingester must never block a query.
-func Open(path string, withThinking bool) (*sql.DB, error) {
+func Open(ctx context.Context, path string, withThinking bool) (*sql.DB, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create database directory %s: %w", dir, err)
@@ -260,35 +260,35 @@ func Open(path string, withThinking bool) (*sql.DB, error) {
 	// The stored version must be read BEFORE the DDL runs: applying the schema is
 	// what makes an older database structurally indistinguishable from a current
 	// one, and the pragma is the only surviving evidence of which it was.
-	prior, err := userVersion(db)
+	prior, err := userVersion(ctx, db)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err := db.ExecContext(context.Background(), Schema); err != nil {
+	if _, err := db.ExecContext(ctx, Schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := migrate(db, prior, withThinking); err != nil {
+	if err := migrate(ctx, db, prior, withThinking); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	if withThinking {
-		if _, err := db.ExecContext(context.Background(), ThinkingSchema); err != nil {
+		if _, err := db.ExecContext(ctx, ThinkingSchema); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("apply thinking schema: %w", err)
 		}
 	}
-	if _, err := db.ExecContext(context.Background(), fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set user_version: %w", err)
 	}
 	return db, nil
 }
 
-func userVersion(db *sql.DB) (int, error) {
+func userVersion(ctx context.Context, db *sql.DB) (int, error) {
 	var v int
-	if err := db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&v); err != nil {
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		return 0, fmt.Errorf("read user_version: %w", err)
 	}
 	return v, nil
@@ -316,7 +316,7 @@ func userVersion(db *sql.DB) (int, error) {
 //
 // A version of 0 is a database this package never finished writing (Open sets the
 // pragma last), so it is left alone: there is nothing to clear.
-func migrate(db *sql.DB, prior int, withThinking bool) error {
+func migrate(ctx context.Context, db *sql.DB, prior int, withThinking bool) error {
 	if prior == 0 || prior >= SchemaVersion {
 		return nil
 	}
@@ -333,7 +333,7 @@ func migrate(db *sql.DB, prior int, withThinking bool) error {
 		stmts = append([]string{`DELETE FROM thinking`}, stmts...)
 	}
 	for _, s := range stmts {
-		if _, err := db.ExecContext(context.Background(), s); err != nil {
+		if _, err := db.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("migrate schema %d -> %d (%s): %w", prior, SchemaVersion, s, err)
 		}
 	}
@@ -351,7 +351,7 @@ func migrate(db *sql.DB, prior int, withThinking bool) error {
 // `query_only` blocks writes at the statement layer instead, so the main
 // database file is never modified (the query-path test asserts its size and
 // mtime are unchanged across a query) while WAL reads still work.
-func OpenReadOnly(path string) (*sql.DB, error) {
+func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("index not found at %s (run `pg-ccaudit ingest`, or let the scheduled sweep do it): %w", path, err)
 	}
@@ -365,7 +365,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(1)
 	var queryOnly int
-	if err := db.QueryRowContext(context.Background(), "PRAGMA query_only").Scan(&queryOnly); err != nil {
+	if err := db.QueryRowContext(ctx, "PRAGMA query_only").Scan(&queryOnly); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("verify query_only: %w", err)
 	}
@@ -377,10 +377,10 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 }
 
 // HasThinkingTable reports whether the optional T-16 thinking table exists.
-func HasThinkingTable(db *sql.DB) (bool, error) {
+func HasThinkingTable(ctx context.Context, db *sql.DB) (bool, error) {
 	var n int
 	err := db.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='thinking'`,
 	).Scan(&n)
 	if err != nil {

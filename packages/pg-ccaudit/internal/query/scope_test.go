@@ -49,7 +49,7 @@ var scopeFixtureSessions = []scopeSession{
 func buildScopeDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "scope.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -94,7 +94,7 @@ func buildScopeDB(t *testing.T) *sql.DB {
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestWorktreeSessionCwdIsRecordedVerbatimAndMatched(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(base, "t.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestWorktreeSessionCwdIsRecordedVerbatimAndMatched(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = w.Close()
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestFirstCwdIsFirstNonNullByOrder(t *testing.T) {
 // cannot drop it.
 func TestSessionWithNoCwdAtAll(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "nocwd.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestSessionWithNoCwdAtAll(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestEmptyWindowReturnsNoRows(t *testing.T) {
 // (the window by ts, the sessions by session_id), never by a table scan.
 func TestFirstCwdLookupIsRestrictedToTheWindow(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "many.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestFirstCwdLookupIsRestrictedToTheWindow(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

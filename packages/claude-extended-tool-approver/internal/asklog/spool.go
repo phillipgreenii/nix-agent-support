@@ -199,7 +199,7 @@ func SpoolLen(dbPath string) int {
 // (session_id, tool_use_id) is already in the table (a write that was abandoned
 // by the hook but still committed) is skipped, not duplicated. Returns the
 // number of records inserted.
-func (s *Store) DrainSpool(dbPath string, max int) (int, error) {
+func (s *Store) DrainSpool(ctx context.Context, dbPath string, max int) (int, error) {
 	sp := SpoolPath(dbPath)
 	if _, err := os.Stat(sp); err != nil {
 		return 0, nil
@@ -233,7 +233,7 @@ func (s *Store) DrainSpool(dbPath string, max int) (int, error) {
 		if err := json.Unmarshal(raw, &e); err != nil {
 			continue // unreadable record: nothing to retry
 		}
-		ok, err := s.replaySpooled(&e)
+		ok, err := s.replaySpooled(ctx, &e)
 		if err != nil {
 			firstErr = err
 			keep = append(keep, append([]byte(nil), raw...))
@@ -257,11 +257,11 @@ func (s *Store) DrainSpool(dbPath string, max int) (int, error) {
 	return inserted, firstErr
 }
 
-func (s *Store) replaySpooled(e *spoolEntry) (bool, error) {
+func (s *Store) replaySpooled(ctx context.Context, e *spoolEntry) (bool, error) {
 	if e.Input.ToolUseID != "" {
 		var n int
 		if err := s.db.QueryRowContext(
-			context.Background(),
+			ctx,
 			`SELECT COUNT(*) FROM tool_decisions WHERE session_id = ? AND tool_use_id = ?`,
 			e.Input.SessionID, e.Input.ToolUseID,
 		).Scan(&n); err != nil {
@@ -287,7 +287,7 @@ func (s *Store) replaySpooled(e *spoolEntry) (bool, error) {
 	prev := s.sandboxEnabled
 	s.sandboxEnabled = e.SandboxEnabled
 	defer func() { s.sandboxEnabled = prev }()
-	if err := recordPreToolDecisionAt(context.Background(), s, in, res, e.At); err != nil {
+	if err := recordPreToolDecisionAt(ctx, s, in, res, e.At); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -99,7 +99,7 @@ func TestReportSurvivesAMidRunKill(t *testing.T) {
 	if err := fs.Parse([]string{"--classifier", "cli", "--batch", "2"}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	db, _, err := openIndex(*cf.db)
+	db, _, err := openIndex(t.Context(), *cf.db)
 	if err != nil {
 		t.Fatalf("openIndex: %v", err)
 	}

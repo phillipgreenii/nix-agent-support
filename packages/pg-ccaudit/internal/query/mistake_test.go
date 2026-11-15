@@ -126,7 +126,7 @@ func buildIndexFrom(t *testing.T, corpus string) (string, *sql.DB) {
 	}
 
 	dbPath := filepath.Join(base, "transcripts.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -140,7 +140,7 @@ func buildIndexFrom(t *testing.T, corpus string) (string, *sql.DB) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatalf("store.OpenReadOnly: %v", err)
 	}

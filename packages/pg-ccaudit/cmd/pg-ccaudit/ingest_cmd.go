@@ -76,7 +76,7 @@ FLAGS
 		return err
 	}
 
-	db, err := store.Open(resolvedDB, *thinking)
+	db, err := store.Open(ctx, resolvedDB, *thinking)
 	if err != nil {
 		return err
 	}

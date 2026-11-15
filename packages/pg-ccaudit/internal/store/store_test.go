@@ -16,7 +16,7 @@ import (
 func tempDB(t *testing.T, withThinking bool) (string, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "transcripts.db")
-	db, err := Open(path, withThinking)
+	db, err := Open(t.Context(), path, withThinking)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestSchemaTableSetIsExactlyCanonical(t *testing.T) {
 // against the DDL.
 func TestThinkingTableAbsentByDefault(t *testing.T) {
 	_, db := tempDB(t, false)
-	has, err := HasThinkingTable(db)
+	has, err := HasThinkingTable(t.Context(), db)
 	if err != nil {
 		t.Fatalf("HasThinkingTable: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestThinkingTableAbsentByDefault(t *testing.T) {
 
 func TestThinkingTableCreatedOnRequest(t *testing.T) {
 	_, db := tempDB(t, true)
-	has, err := HasThinkingTable(db)
+	has, err := HasThinkingTable(t.Context(), db)
 	if err != nil {
 		t.Fatalf("HasThinkingTable: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestWALEnabled(t *testing.T) {
 func TestOpenIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transcripts.db")
 	for i := range 3 {
-		db, err := Open(path, false)
+		db, err := Open(t.Context(), path, false)
 		if err != nil {
 			t.Fatalf("Open #%d: %v", i, err)
 		}
@@ -184,7 +184,7 @@ func TestOpenReadOnlyRefusesWritesAndLeavesFileUntouched(t *testing.T) {
 		t.Fatalf("stat before: %v", err)
 	}
 
-	ro, err := OpenReadOnly(path)
+	ro, err := OpenReadOnly(t.Context(), path)
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestOpenReadOnlyRefusesWritesAndLeavesFileUntouched(t *testing.T) {
 }
 
 func TestOpenReadOnlyMissingDatabaseIsAnError(t *testing.T) {
-	if _, err := OpenReadOnly(filepath.Join(t.TempDir(), "nope.db")); err == nil {
+	if _, err := OpenReadOnly(t.Context(), filepath.Join(t.TempDir(), "nope.db")); err == nil {
 		t.Fatal("expected an error for a missing index")
 	}
 }

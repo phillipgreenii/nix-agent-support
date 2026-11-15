@@ -38,14 +38,14 @@ FLAGS
 	if err != nil {
 		return err
 	}
-	db, err := store.OpenReadOnly(resolvedDB)
+	db, err := store.OpenReadOnly(ctx, resolvedDB)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
 
 	s := query.Measure(ctx, db, "")
-	hasThinking, err := store.HasThinkingTable(db)
+	hasThinking, err := store.HasThinkingTable(ctx, db)
 	if err != nil {
 		return err
 	}

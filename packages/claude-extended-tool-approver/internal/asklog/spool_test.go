@@ -52,7 +52,7 @@ func TestSpool_DrainReplaysWithOriginalTimeAndTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	n, err := s.DrainSpool(db, 10)
+	n, err := s.DrainSpool(context.Background(), db, 10)
 	if err != nil || n != 1 {
 		t.Fatalf("drain = %d, %v", n, err)
 	}
@@ -87,7 +87,7 @@ func TestSpool_DrainDedupesAndKeepsOverflow(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	n, err := s.DrainSpool(db, 1) // max 1: tu1 is skipped (dup), tu2 inserted, tu3 kept
+	n, err := s.DrainSpool(context.Background(), db, 1) // max 1: tu1 is skipped (dup), tu2 inserted, tu3 kept
 	if err != nil || n != 1 {
 		t.Fatalf("drain = %d, %v", n, err)
 	}
@@ -97,7 +97,7 @@ func TestSpool_DrainDedupesAndKeepsOverflow(t *testing.T) {
 	if SpoolLen(db) != 1 {
 		t.Fatalf("SpoolLen = %d, want 1 (overflow kept)", SpoolLen(db))
 	}
-	if n, err = s.DrainSpool(db, 10); err != nil || n != 1 {
+	if n, err = s.DrainSpool(context.Background(), db, 10); err != nil || n != 1 {
 		t.Fatalf("second drain = %d, %v", n, err)
 	}
 	if c := spoolCountRows(t, s, `1=1`); c != 3 {

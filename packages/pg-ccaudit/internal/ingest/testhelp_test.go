@@ -95,7 +95,7 @@ func fixtureCorpus(t *testing.T) string {
 func openTestDB(t *testing.T, withThinking bool) (string, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "transcripts.db")
-	db, err := store.Open(path, withThinking)
+	db, err := store.Open(t.Context(), path, withThinking)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}

@@ -180,7 +180,7 @@ func extractAll(t *testing.T) []string {
 	if err := fs.Parse(nil); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	db, _, err := openIndex(*cf.db)
+	db, _, err := openIndex(t.Context(), *cf.db)
 	if err != nil {
 		t.Fatalf("openIndex: %v", err)
 	}

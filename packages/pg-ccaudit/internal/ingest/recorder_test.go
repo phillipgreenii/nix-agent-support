@@ -25,7 +25,7 @@ const (
 
 func openDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"), false)
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"), false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,7 @@ const (
 func buildBigFixture(t testing.TB, f bigFixture) *sql.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "big.db")
-	w, err := store.Open(dbPath, false)
+	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -101,7 +101,7 @@ FROM events WHERE seq % 16 = 5`)
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	db, err := store.OpenReadOnly(dbPath)
+	db, err := store.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
