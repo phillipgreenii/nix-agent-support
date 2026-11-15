@@ -7097,6 +7097,9 @@
                     pkgs.coreutils
                     pkgs.jq
                     pkgs.lsof
+                    # ps: TestSampleProcessTree_realPsSeesAChildOfThisProcess runs the
+                    # real `ps`, which the sandbox PATH does not otherwise carry.
+                    pkgs.procps
                   ];
                 }).overrideAttrs
                   (_: {
