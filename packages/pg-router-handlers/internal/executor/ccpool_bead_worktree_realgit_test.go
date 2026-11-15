@@ -36,7 +36,7 @@ func (h *realGitHarness) withBeadWorktree(repos ...string) (fallback string, cal
 		repos = []string{h.repo.Dir}
 	}
 	fallback = filepath.Join(filepath.Dir(h.repo.Dir), "workspace-root")
-	if err := os.Mkdir(fallback, 0o755); err != nil {
+	if err := os.MkdirAll(fallback, 0o755); err != nil {
 		h.t.Fatal(err)
 	}
 	h.role.CCPool.Isolation = roles.IsolationConfig{Type: BeadWorktreeIsolation, Repos: repos, Fallback: fallback}
@@ -217,22 +217,26 @@ func TestRealGitBeadWorktree_missingFallbackFailsAndCreatesNothing(t *testing.T)
 // naming both, in either configured order; no session launches and both worktrees
 // are left alone.
 func TestRealGitBeadWorktree_foundInTwoReposFailsLoudAndTouchesNothing(t *testing.T) {
+	// One pair of real repositories serves both configured orders: the dispatch
+	// touches nothing (asserted after each), so the second order starts from the
+	// same state as the first.
+	h := newRealGitHarness(t)
+	other := newOtherRepo(t)
+	wtA := filepath.Join(filepath.Dir(h.repo.Dir), "drain-wt-a")
+	wtB := filepath.Join(filepath.Dir(other.Dir), "drain-wt-b")
+	tipA := leaveDrainWorktree(t, h.repo, wtA)
+	tipB := leaveDrainWorktree(t, other, wtB)
 	for _, reversed := range []bool{false, true} {
 		name := "configured order"
 		if reversed {
 			name = "reversed order"
 		}
 		t.Run(name, func(t *testing.T) {
-			h := newRealGitHarness(t)
-			other := newOtherRepo(t)
-			wtA := filepath.Join(filepath.Dir(h.repo.Dir), "drain-wt-a")
-			wtB := filepath.Join(filepath.Dir(other.Dir), "drain-wt-b")
-			tipA := leaveDrainWorktree(t, h.repo, wtA)
-			tipB := leaveDrainWorktree(t, other, wtB)
 			repos := []string{h.repo.Dir, other.Dir}
 			if reversed {
 				repos = []string{other.Dir, h.repo.Dir}
 			}
+			h.atLaunch = launchSeen{}
 			_, calls := h.withBeadWorktree(repos...)
 
 			err := h.dispatch(launchHookCC{FakeCC: &dtest.FakeCC{}, onLaunch: h.launchHook(nil)})

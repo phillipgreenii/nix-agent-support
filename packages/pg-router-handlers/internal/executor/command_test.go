@@ -122,7 +122,10 @@ func TestCommandDispatch_FailureIncludesStderrTail(t *testing.T) {
 // (well over exec.Output's own 32 KiB retention) and requires the error to carry
 // only the LAST commandStderrTailMax bytes.
 func TestCommandDispatch_StderrTailIsBounded(t *testing.T) {
-	script := `i=0; while [ $i -lt 4000 ]; do echo "noise-line-$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >&2; i=$((i+1)); done; echo FINAL-REASON >&2; exit 1`
+	// 60 lines of about 1.2 KB: about 72 KB, well past both the 2 KB tail bound and
+	// the 64 KB pipe buffer (so the writer would block if stderr were not drained),
+	// in few enough writes to keep the real shell cheap.
+	script := `pad=$(printf 'ab %s ' $(seq 1 150)); i=0; while [ $i -lt 60 ]; do echo "noise-line-$i-$pad" >&2; i=$((i+1)); done; echo FINAL-REASON >&2; exit 1`
 	d := DispatchContext{Role: shCommandRole(script), Item: item.Item{ID: "b1"}}
 
 	_, err := commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: query.OSCommander{}})
@@ -133,7 +136,7 @@ func TestCommandDispatch_StderrTailIsBounded(t *testing.T) {
 	if !strings.Contains(msg, "FINAL-REASON") {
 		t.Fatalf("tail must keep the LAST stderr line; err tail = %q", msg[max(0, len(msg)-200):])
 	}
-	if strings.Contains(msg, "noise-line-0-") || strings.Contains(msg, "noise-line-100-") {
+	if strings.Contains(msg, "noise-line-0-") || strings.Contains(msg, "noise-line-30-") {
 		t.Fatalf("early stderr must be cut off; len(err) = %d", len(msg))
 	}
 	// prefix + suffix label + the bound (the "..." marker is the only addition).
