@@ -142,7 +142,7 @@ func TestFixtureHasNullTsNullSessionAndNoCwdRows(t *testing.T) {
 		"session with no cwd, with call": `SELECT COUNT(*) FROM events e JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq WHERE e.session_id IS NOT NULL AND e.session_id NOT IN (SELECT session_id FROM events WHERE cwd IS NOT NULL AND session_id IS NOT NULL)`,
 	} {
 		var n int
-		if err := db.QueryRow(q).Scan(&n); err != nil {
+		if err := db.QueryRowContext(context.Background(), q).Scan(&n); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if n == 0 {
@@ -166,10 +166,10 @@ func TestNullTsCallsAreCountedOnlyWhenUnbounded(t *testing.T) {
 	windowedOnly := q
 	windowedOnly.UnboundedSQL = ""
 	var allCalls, nullTs int64
-	if err := db.QueryRow(`SELECT COUNT(*) FROM tool_calls`).Scan(&allCalls); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM tool_calls`).Scan(&allCalls); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events e JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq WHERE e.ts IS NULL`).Scan(&nullTs); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events e JOIN tool_calls c ON c.path = e.path AND c.seq = e.seq WHERE e.ts IS NULL`).Scan(&nullTs); err != nil {
 		t.Fatal(err)
 	}
 	for name, qq := range map[string]Query{"dispatched": q, "windowed statement": windowedOnly} {
