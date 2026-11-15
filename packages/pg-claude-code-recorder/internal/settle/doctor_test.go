@@ -80,6 +80,7 @@ func TestDoctorFindsAnArchiveThatDisagreesWithItsManifest(t *testing.T) {
 	if err != nil || len(res.Mismatches) != 0 || res.ArchivesCheck != 1 {
 		t.Fatalf("%v %+v", err, res)
 	}
+	e.skipInv = true // the test damages the manifest file on purpose
 	mp := filepath.Join(e.st.SegDir(sess), "manifest.json")
 	if err := os.WriteFile(mp, []byte(`{"session":"other"}`), 0o600); err != nil {
 		t.Fatal(err)

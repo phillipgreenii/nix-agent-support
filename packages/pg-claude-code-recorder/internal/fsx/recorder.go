@@ -6,11 +6,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Event is one recorded operation.
 type Event struct {
-	Op   string // write, sync, truncate, rename, remove, syncdir, create, mark
+	Op   string // write, sync, truncate, rename, link, chtimes, remove, syncdir, create, mark
 	Path string // for rename, "old->new"
 }
 
@@ -85,6 +86,18 @@ func (r *Recorder) Rename(a, b string) error {
 func (r *Recorder) Remove(name string) error {
 	r.add("remove", name)
 	return r.Inner.Remove(name)
+}
+
+// Link records and performs a hard link.
+func (r *Recorder) Link(a, b string) error {
+	r.add("link", a+"->"+b)
+	return r.Inner.Link(a, b)
+}
+
+// Chtimes records and performs a time change.
+func (r *Recorder) Chtimes(name string, atime, mtime time.Time) error {
+	r.add("chtimes", name)
+	return r.Inner.Chtimes(name, atime, mtime)
 }
 
 // Stat stats a file.

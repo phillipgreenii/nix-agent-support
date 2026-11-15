@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 )
@@ -195,6 +196,36 @@ func (s *sweepFS) Rename(a, b string) error {
 	}
 	s.mu.Unlock()
 	s.step("rename " + a + "->" + b)
+	return nil
+}
+
+// Link counts as one operation. The new name shares the content of the old
+// one, so it shares its shadow (an unsynced file stays unsynced under both).
+func (s *sweepFS) Link(a, b string) error {
+	if err := s.gate(); err != nil {
+		return err
+	}
+	if err := s.inner.Link(a, b); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if st, ok := s.shadow[a]; ok {
+		s.shadow[b] = st
+	}
+	s.mu.Unlock()
+	s.step("link " + a + "->" + b)
+	return nil
+}
+
+// Chtimes counts as one operation; times are not part of the power-loss model.
+func (s *sweepFS) Chtimes(name string, atime, mtime time.Time) error {
+	if err := s.gate(); err != nil {
+		return err
+	}
+	if err := s.inner.Chtimes(name, atime, mtime); err != nil {
+		return err
+	}
+	s.step("chtimes " + name)
 	return nil
 }
 

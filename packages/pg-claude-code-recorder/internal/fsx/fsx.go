@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // File is the subset of *os.File the recorder uses.
@@ -28,6 +29,11 @@ type FS interface {
 	OpenFile(name string, flag int, perm fs.FileMode) (File, error)
 	Rename(oldpath, newpath string) error
 	Remove(name string) error
+	// Link makes newpath a hard link of oldpath; it fails with fs.ErrExist when
+	// newpath exists (an exclusive rename is a Link then a Remove).
+	Link(oldpath, newpath string) error
+	// Chtimes sets the access and modification times of a file.
+	Chtimes(name string, atime, mtime time.Time) error
 	Stat(name string) (fs.FileInfo, error)
 	MkdirAll(path string, perm fs.FileMode) error
 	ReadDir(name string) ([]fs.DirEntry, error)
@@ -50,6 +56,14 @@ func (OS) Rename(a, b string) error { return os.Rename(a, b) }
 // Remove removes a file.
 func (OS) Remove(name string) error { return os.Remove(name) }
 
+// Link makes a hard link.
+func (OS) Link(a, b string) error { return os.Link(a, b) }
+
+// Chtimes sets the access and modification times.
+func (OS) Chtimes(name string, atime, mtime time.Time) error {
+	return os.Chtimes(name, atime, mtime)
+}
+
 // Stat stats a file.
 func (OS) Stat(name string) (fs.FileInfo, error) { return os.Stat(name) }
 
@@ -67,4 +81,28 @@ func (OS) SyncDir(dir string) error {
 	}
 	defer func() { _ = d.Close() }()
 	return d.Sync()
+}
+
+// WriteFileAtomic writes data to path through fsys: a temporary file beside it
+// (path + ".tmp"), a plain fsync, then a rename over path. A crash leaves the
+// old content or the new, never a torn file. It does not sync the directory:
+// the callers keep advisory state (a missing or stale file is rebuilt).
+func WriteFileAtomic(fsys FS, path string, data []byte, perm fs.FileMode) error {
+	tmp := path + ".tmp"
+	f, err := fsys.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = fsys.Remove(tmp)
+		return err
+	}
+	return fsys.Rename(tmp, path)
 }

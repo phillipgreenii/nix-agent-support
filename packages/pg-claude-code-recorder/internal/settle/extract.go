@@ -139,7 +139,7 @@ func (s *Settler) ExtractCtx(ctx context.Context, session, to string) (ExtractRe
 		p := filepath.Join(root, mf.Path)
 		if _, err := os.Lstat(p); err == nil {
 			if to == "" && resuming {
-				if err := os.Remove(p); err != nil { // a partial file of the unfinished extract
+				if err := s.cfs().Remove(p); err != nil { // a partial file of the unfinished extract
 					return res, err
 				}
 				continue
@@ -167,7 +167,7 @@ func (s *Settler) ExtractCtx(ctx context.Context, session, to string) (ExtractRe
 			}
 			tmp := final + ".tmp.pgrec"
 			if err := s.writeRestored(mf, tmp, now); err != nil {
-				_ = os.Remove(tmp)
+				_ = s.cfs().Remove(tmp)
 				return err
 			}
 			if i == 0 {
@@ -176,7 +176,7 @@ func (s *Settler) ExtractCtx(ctx context.Context, session, to string) (ExtractRe
 			if to == "" {
 				id, ok := copier.IdentityOfFile(tmp)
 				if !ok {
-					_ = os.Remove(tmp)
+					_ = s.cfs().Remove(tmp)
 					return fmt.Errorf("cannot read the identity of %s", tmp)
 				}
 				recs := []*store.Rec{
@@ -184,7 +184,7 @@ func (s *Settler) ExtractCtx(ctx context.Context, session, to string) (ExtractRe
 					{T: store.TPath, At: now.UnixNano(), File: mf.File, Path: final},
 				}
 				if err := s.st.CommitCtx(ctx, recs...); err != nil {
-					_ = os.Remove(tmp)
+					_ = s.cfs().Remove(tmp)
 					return err
 				}
 				s.dirtyRecorded(mf.File)
@@ -193,8 +193,8 @@ func (s *Settler) ExtractCtx(ctx context.Context, session, to string) (ExtractRe
 				}
 			}
 			// An exclusive rename: a link, then the temporary name goes.
-			if err := os.Link(tmp, final); err != nil {
-				_ = os.Remove(tmp)
+			if err := cfs.Link(tmp, final); err != nil {
+				_ = cfs.Remove(tmp)
 				if errors.Is(err, fs.ErrExist) {
 					return fmt.Errorf("%w: %s", ErrTargetExists, final)
 				}
@@ -245,7 +245,7 @@ func (s *Settler) writeRestored(mf store.ManifestFile, tmp string, now time.Time
 		return err
 	}
 	defer func() { _ = ptr.Close() }()
-	_ = os.Remove(tmp) // a leftover of an unfinished extract
+	_ = s.cfs().Remove(tmp) // a leftover of an unfinished extract
 	f, err := s.cfs().OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -285,5 +285,5 @@ func (s *Settler) writeRestored(mf store.ManifestFile, tmp string, now time.Time
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Chtimes(tmp, now, now)
+	return s.cfs().Chtimes(tmp, now, now)
 }

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 )
 
@@ -55,11 +56,7 @@ func RemovalDue(settled, quiet int, lastRun, now time.Time, dueShare float64, du
 func (s *Settler) recordRemovalRun(now time.Time) {
 	b, err := json.Marshal(RemovalRun{AtNS: now.UnixNano()})
 	if err == nil {
-		final := filepath.Join(s.st.Dir(), RemovalRunFile)
-		tmp := final + ".tmp"
-		if err = os.WriteFile(tmp, b, 0o600); err == nil {
-			err = os.Rename(tmp, final)
-		}
+		err = fsx.WriteFileAtomic(s.fs, filepath.Join(s.st.Dir(), RemovalRunFile), b, 0o600)
 	}
 	if err != nil {
 		s.cfg.Obs.Log.Warn("removal_run_record_failed", "err", err.Error())

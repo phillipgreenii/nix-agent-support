@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 )
 
 // The seen table records the last observation of each file by any actor (a
@@ -64,7 +66,7 @@ func (s *Store) SeenPrepare(epoch int) (reset bool, err error) {
 			return reset, err
 		}
 	}
-	return reset, os.WriteFile(tokPath, []byte(tok), 0o600)
+	return reset, fsx.WriteFileAtomic(s.fs, tokPath, []byte(tok), 0o600)
 }
 
 // SeenTruncate empties the table.

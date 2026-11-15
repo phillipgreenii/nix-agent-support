@@ -156,6 +156,7 @@ var rollingFixtures = map[string]func(*testing.T, *env){
 	},
 	"bad manifest": func(t *testing.T, e *env) {
 		e.oldSettled(5, 48*time.Hour)
+		e.skipInv = true // the test damages the manifest file on purpose
 		if err := os.WriteFile(e.st.SegDir(sess)+"/manifest.json", []byte(`{"session":"other"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}

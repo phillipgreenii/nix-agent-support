@@ -19,6 +19,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
@@ -388,11 +389,7 @@ func (d *Doctor) writeDoctor(res DoctorResult) error {
 		return err
 	}
 	final := filepath.Join(d.st.Dir(), DoctorFile)
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, final)
+	return fsx.WriteFileAtomic(d.st.FS(), final, b, 0o600)
 }
 
 // LoadDoctor reads the result file of dir (ok is false when none exists).

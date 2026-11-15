@@ -777,15 +777,32 @@ func (s *Settler) flushArchive(session string) error {
 	return fsx.FullSyncDir(s.cfs(), dir)
 }
 
+// sameFile reports whether a and b are hard links of one file.
+func (s *Settler) sameFile(a, b string) bool {
+	fa, err := s.cfs().Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := s.cfs().Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fa, fb)
+}
+
 // restoreOne puts a quarantined file back with an exclusive rename (a hard link,
 // then the quarantine name is dropped): a new file at the path is never
 // overwritten.
 func (s *Settler) restoreOne(pf pendingFile, q string) (conflict bool, err error) {
-	if err := os.Link(q, pf.Path); err != nil {
-		if errors.Is(err, fs.ErrExist) {
+	if err := s.cfs().Link(q, pf.Path); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return false, err
+		}
+		// A crash between the link and the unlink of the quarantine name leaves
+		// both names on one file: that is a finished restore, not a conflict.
+		if !s.sameFile(q, pf.Path) {
 			return true, nil
 		}
-		return false, err
 	}
 	if err := s.cfs().Remove(q); err != nil {
 		return false, err
@@ -833,7 +850,7 @@ func (s *Settler) abortPending(ctx context.Context, pl *pendingList, now time.Ti
 // tidyQuarantine removes the quarantine directories of the list when empty.
 func (s *Settler) tidyQuarantine(pl *pendingList) {
 	for _, pf := range pl.Files {
-		_ = os.Remove(qDir(pf)) // only succeeds when empty
+		_ = s.cfs().Remove(qDir(pf)) // only succeeds when empty
 	}
 }
 
@@ -844,7 +861,7 @@ func (s *Settler) tidy(pl *pendingList) {
 	root := filepath.Join(s.cfg.ClaudeDir, "projects")
 	for _, pf := range pl.Files {
 		for d := filepath.Dir(pf.Path); strings.HasPrefix(d, root+string(filepath.Separator)); d = filepath.Dir(d) {
-			if err := os.Remove(d); err != nil { // fails while the directory is not empty
+			if err := s.cfs().Remove(d); err != nil { // fails while the directory is not empty
 				break
 			}
 		}

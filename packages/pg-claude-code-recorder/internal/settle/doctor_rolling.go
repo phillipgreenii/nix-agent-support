@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
@@ -304,11 +305,7 @@ func (d *Doctor) saveCursor(c *DoctorCursor) error {
 	if err != nil {
 		return err
 	}
-	tmp := d.cursorPath() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, d.cursorPath())
+	return fsx.WriteFileAtomic(d.st.FS(), d.cursorPath(), b, 0o600)
 }
 
 // startCycle opens a cycle over the files that exist now (a file created

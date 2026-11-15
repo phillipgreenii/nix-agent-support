@@ -6,6 +6,7 @@
 //     bytes equal the original's prefix;
 //   - no orphan temporary files remain;
 //   - the journal replay equals the database's observations;
+//   - every settled Conversation has a manifest.json equal to the committed manifest;
 //   - the Claude directory is unchanged unless removal (or extract, which
 //     writes into it) is enabled.
 //
@@ -17,6 +18,7 @@ package invariants
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -32,6 +34,20 @@ import (
 // quarantineDir is the name of the directory removal quarantines files in
 // (scope.QuarantineDir; repeated here so the helper imports nothing but the store).
 const quarantineDir = ".pg-recorder-quarantine"
+
+// advisoryTmp names the temporary files of the advisory state files (the
+// doctor result, the doctor cursor, the removal-run time, the seen token),
+// each written with a temporary file and a rename (fsx.WriteFileAtomic). A
+// crash between the create and the rename leaves the temporary file; it is
+// harmless because the next write of the same file truncates and reuses it, and
+// the final file is either the old content or the new. Orphan temporary files
+// of any other file are still violations.
+var advisoryTmp = map[string]bool{
+	"doctor.json.tmp":        true,
+	"doctor-cursor.json.tmp": true,
+	"removal.json.tmp":       true,
+	"seen.token.tmp":         true,
+}
 
 // RecordedBytes is the ArchiveCompare hook that compares a generation's copy file
 // with the same bytes read through the record pointer (the archive when the
@@ -141,9 +157,15 @@ func Violations(st *store.Store, o Options) []string {
 		}
 	}
 
-	// No orphan temporary files.
+	// Every settled Conversation has its manifest on disk, equal to the
+	// committed one: the manifest file is flushed before "settled" commits.
+	for _, v := range manifestViolations(st) {
+		add("%s", v)
+	}
+
+	// No orphan temporary files, except the advisory state files' (see advisoryTmp).
 	_ = filepath.WalkDir(st.Dir(), func(p string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && (strings.HasSuffix(p, ".tmp") || strings.HasSuffix(p, ".corrupt-tmp")) {
+		if err == nil && !d.IsDir() && !(filepath.Dir(p) == filepath.Clean(st.Dir()) && advisoryTmp[d.Name()]) && (strings.HasSuffix(p, ".tmp") || strings.HasSuffix(p, ".corrupt-tmp")) {
 			add("orphan temporary file %s", p)
 		}
 		return nil
@@ -266,4 +288,40 @@ func (s *DirSnapshot) Diff(other *DirSnapshot) string {
 	}
 	sort.Strings(d)
 	return strings.Join(d, "; ")
+}
+
+// manifestViolations checks that each settled Conversation has
+// archives/<session>/manifest.json and that it equals the committed manifest.
+func manifestViolations(st *store.Store) []string {
+	rows, err := st.Read().QueryContext(context.Background(), `SELECT session FROM settled ORDER BY session`)
+	if err != nil {
+		return []string{"listing settled sessions: " + err.Error()}
+	}
+	var sessions []string
+	for rows.Next() {
+		var x string
+		if err := rows.Scan(&x); err != nil {
+			_ = rows.Close()
+			return []string{"scanning settled sessions: " + err.Error()}
+		}
+		sessions = append(sessions, x)
+	}
+	if err := rows.Close(); err != nil {
+		return []string{"listing settled sessions: " + err.Error()}
+	}
+	var out []string
+	for _, session := range sessions {
+		rec, ok, err := st.SettledOf(session)
+		if err != nil || !ok {
+			continue
+		}
+		disk, err := os.ReadFile(filepath.Join(st.SegDir(session), "manifest.json"))
+		switch {
+		case err != nil:
+			out = append(out, fmt.Sprintf("settled session %s: manifest.json: %v", session, err))
+		case !bytes.Equal(bytes.TrimSpace(disk), bytes.TrimSpace(rec.Manifest)):
+			out = append(out, fmt.Sprintf("settled session %s: manifest.json differs from the committed manifest", session))
+		}
+	}
+	return out
 }

@@ -41,6 +41,25 @@ without each tag. `pg-claude-code-recorder-linux-cross-compile` is the Linux bui
 The integration check MUST NOT be wired into a hook, `run-unit-tests` or pre-land
 (V-4, `docs/adr/0111-real-process-test-suites-split-by-cost-driver-under-v-4.md`).
 
+### What the crash sweep covers
+
+`crashsweep` stops each settle scenario after every file-system operation that goes through the
+`fsx.FS` seam, reopens the store, recovers, and runs `internal/invariants`. The seam carries create,
+write, sync, truncate, rename, link, chtimes, remove and directory sync; the sweep's power-loss
+variant also discards what no sync made durable. These writes route through the seam so the sweep
+counts and crashes at them: the settle manifest and segments, quarantine and restore (including the
+link and unlink pair), extract (the link, the unlink and the mtime change), and the advisory state
+files (`doctor.json`, the doctor cursor, `removal.json` and the seen token, through
+`fsx.WriteFileAtomic`). The oracle checks, among the other invariants, that every settled
+Conversation has a `manifest.json` equal to the committed manifest, so dropping the manifest fsync
+fails the power variant.
+
+Out of scope, on purpose: the SQLite database and WAL (SQLite owns their durability and the journal
+replay invariant covers the result), the journal append and the copier's files (the copier's own
+ordering tests assert them), the rebuild's rename of `index.db` aside, the serve checkpoint file,
+the directory lock file and test-only helpers. Directory entries are modeled only as far as the
+sweep's `fsx.FS.SyncDir` calls: a rename or create with no directory sync is treated as durable.
+
 The unit gate has a per-package time budget: the check runs `go test -timeout 120s`, so a
 package whose tests exceed it fails.
 
