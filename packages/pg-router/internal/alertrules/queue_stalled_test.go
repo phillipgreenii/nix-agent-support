@@ -642,6 +642,16 @@ func TestStalledDeclineStormHeldTheOldConditionForAFewMinutesOnly(t *testing.T) 
 	}
 }
 
+// equivalencePhaseStep is the scrape-phase stride of the two replays that compare one
+// storm lane against another (skip versus decline, recorded versus true starts). An offer
+// is in flight for declineBefore+declineAfter = 3 s, so a 3 s stride lands a grid phase in
+// every offer's in-flight stretch (each offer is read in flight by exactly one grid
+// phase per scrape period) and the neighbouring grid phases read it as not in flight: both
+// sides of each edge are still compared, and only the two intermediate one-second phases
+// of each stride are skipped. The replays that assert absolute behaviour (the holds, the
+// longest run) keep the full one-second sweep.
+const equivalencePhaseStep = 3 * time.Second
+
 // A handler that completes moot events as skipped (pg2-6t91v7) instead of declining
 // them settles each one on its first offer, but the completion is counted on
 // pg_router_skipped_total and not on pg_router_throughput_total. Replay the
@@ -660,7 +670,7 @@ func TestStalledMootSkipStormIsNotProgress(t *testing.T) {
 
 	from := parseUTC("2026-10-13T20:45:00Z")
 	holdFrom, holdTo := parseUTC("2026-10-13T21:05:00Z"), parseUTC("2026-10-13T22:00:00Z")
-	for phase := time.Duration(0); phase < scrape; phase += time.Second {
+	for phase := time.Duration(0); phase < scrape; phase += equivalencePhaseStep {
 		viaDecline := replayStalled(declined.scrapes(stormScrapeStart.Add(phase), stormEnd), awakeIn(declined), from, stormEnd)
 		viaSkip := replayStalled(skipStorm.scrapes(stormScrapeStart.Add(phase), stormEnd), awakeIn(skipStorm), from, stormEnd)
 		for e := holdFrom; !e.After(holdTo); e = e.Add(evalEvery) {
@@ -711,7 +721,7 @@ func TestStormReplayDoesNotReadTheRetimedStarts(t *testing.T) {
 	if moved != 2 {
 		t.Fatalf("%d re-timed starts found in the fixture, want 2", moved)
 	}
-	for phase := time.Duration(0); phase < scrape; phase += time.Second {
+	for phase := time.Duration(0); phase < scrape; phase += equivalencePhaseStep {
 		a := l.scrapes(stormScrapeStart.Add(phase), stormEnd)
 		b := truth.scrapes(stormScrapeStart.Add(phase), stormEnd)
 		if len(a) != len(b) {
