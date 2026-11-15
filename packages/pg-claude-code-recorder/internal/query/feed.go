@@ -63,6 +63,9 @@ type Selection struct {
 	// CurGenOnly keeps only records of each file's current generation (the
 	// snapshot); the feed delivers every generation it committed.
 	CurGenOnly bool
+	// sourceIdx is set by Select when the filter pins one source that is rare in
+	// the id range, so the source index serves the page.
+	sourceIdx bool
 }
 
 // Selected is one record read for the feed.
@@ -80,6 +83,7 @@ func LimitOf(n int) int { return limitOf(n) }
 func (e *Engine) selectQuery(sel Selection) (string, []any, []string, []colSpec, *wire.Error) {
 	b := e.builder()
 	b.idWalk = true
+	b.sourceIdx = sel.sourceIdx
 	names := sel.Project
 	if len(names) == 0 {
 		names = []string{"type", "session", "time"}
@@ -114,6 +118,9 @@ func (e *Engine) selectQuery(sel Selection) (string, []any, []string, []colSpec,
 // statement walks the id range and stops at its limit instead of reading every
 // matching row of the table and sorting them.
 func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Error) {
+	if src, ok := pinnedSource(sel.Where); ok && e.rareSource(tx, src, sel) {
+		sel.sourceIdx = true
+	}
 	q, args, names, cols, werr := e.selectQuery(sel)
 	if werr != nil {
 		return nil, werr
@@ -144,6 +151,44 @@ func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Erro
 		out = append(out, h)
 	}
 	return out, nil
+}
+
+// rareSourceMax is the most records of a pinned source in the id range for
+// which the page is read through the source index and sorted by id.
+var rareSourceMax = 20000
+
+// pinnedSource returns the source a filter requires of every match: a source
+// equality leaf, or an all holding one.
+func pinnedSource(f *Filter) (string, bool) {
+	if f == nil {
+		return "", false
+	}
+	if f.Field == "source" && f.Eq != nil {
+		var v string
+		if jsonString(f.Eq, &v) {
+			return v, true
+		}
+		return "", false
+	}
+	for i := range f.All {
+		if v, ok := pinnedSource(&f.All[i]); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// rareSource reports whether at most rareSourceMax records of src lie in the
+// selection's id range. The id walk of a feed page reads every record of the
+// range to find the few of a rare source (an empty-cursor feed of the session
+// registry read the whole retained table, about 20 s); the source index reads
+// just those rows. The probe stops at the threshold, so it costs at most that
+// many index entries whatever the source's size. An error answers false (walk).
+func (e *Engine) rareSource(tx store.Querier, src string, sel Selection) bool {
+	var n int
+	err := tx.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM records INDEXED BY records_source_type WHERE source=? AND id>? AND id<=? LIMIT ?)`,
+		src, sel.AfterID, sel.UpToID, rareSourceMax+1).Scan(&n)
+	return err == nil && n <= rareSourceMax
 }
 
 // CouldMatch reports whether a filter could match some record of a file whose

@@ -67,6 +67,10 @@ type builder struct {
 	// an index on such a column makes the planner read every matching row and
 	// sort them (the page then costs the whole table, not the page).
 	idWalk bool
+	// sourceIdx lets the source test use records_source_type even under idWalk:
+	// set only when a bounded probe showed the source is rare in the id range
+	// (see Engine.rareSource), so reading its rows and sorting them is cheap.
+	sourceIdx bool
 	// refPinned records that the filter pins the session through session_ref
 	// (the session_ref=? test of byRef). Then (session_ref, source) of
 	// records_session_ref_source_time serves a source test too, so source keeps
@@ -330,7 +334,7 @@ func (b *builder) where(f *Filter) (string, []any, *wire.Error) {
 		e = tf.typed
 	}
 	if b.idWalk && !byRef {
-		if stored, _, rerr := b.resolve(f.Field); rerr == nil && (stored == "source" || stored == "type" || stored == "item") && (stored != "source" || !b.refPinned) {
+		if stored, _, rerr := b.resolve(f.Field); rerr == nil && (stored == "source" || stored == "type" || stored == "item") && (stored != "source" || !(b.refPinned || b.sourceIdx)) {
 			// A source test next to a session_ref pin is left to
 			// records_session_ref_source_time(session_ref, source): with the plus
 			// a session of millions of records of one source is read whole to

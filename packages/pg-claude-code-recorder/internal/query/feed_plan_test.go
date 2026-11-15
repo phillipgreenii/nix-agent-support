@@ -103,3 +103,72 @@ func seedSkewedRecords(t *testing.T, st *store.Store) {
 		t.Fatal(err)
 	}
 }
+
+// setRareSourceMax lowers the rare-source threshold for a test whose seeded
+// table is small.
+func setRareSourceMax(t *testing.T, n int) {
+	t.Helper()
+	old := rareSourceMax
+	rareSourceMax = n
+	t.Cleanup(func() { rareSourceMax = old })
+}
+
+// An empty-cursor feed filtered on a source that is rare in the id range (the
+// session registry) must read it through records_source_type instead of walking
+// every retained record, and must answer exactly what the walk answers.
+func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
+	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	seedSkewedRecords(t, st) // 8 'other' records (ids 500, 1000, ...) among 4000
+	srcs := sources.All()
+	e := &Engine{
+		DB:           st.Read(),
+		Catalog:      sources.Catalog(srcs),
+		Storage:      sources.Storage(srcs),
+		TypedStorage: func() bool { return true },
+		SessionRef:   func() bool { return true },
+	}
+	var f Filter
+	if werr := Decode([]byte(`{"field":"source","eq":"other"}`), &f); werr != nil {
+		t.Fatal(werr)
+	}
+	sel := Selection{Where: &f, UpToID: 4000, Limit: 5}
+
+	setRareSourceMax(t, 100)
+	if !e.rareSource(st.Read(), "other", sel) {
+		t.Fatal("a source with 8 records is not rare under a threshold of 100")
+	}
+	idx := sel
+	idx.sourceIdx = true
+	q, args, _, _, werr := e.selectQuery(idx)
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	if p := plan(t, st, q, args); !strings.Contains(p, "INDEX records_source_type") {
+		t.Errorf("the rare source is not read through its index:\n%s", p)
+	}
+	got, werr := e.Select(st.Read(), sel)
+	if werr != nil {
+		t.Fatal(werr)
+	}
+
+	setRareSourceMax(t, 2) // too many records now: the id walk
+	if e.rareSource(st.Read(), "other", sel) {
+		t.Fatal("a source with 8 records is rare under a threshold of 2")
+	}
+	want, werr := e.Select(st.Read(), sel)
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	if len(got) != 6 || len(want) != 6 { // limit+1 rows
+		t.Fatalf("rows: index %d, walk %d, want 6 each", len(got), len(want))
+	}
+	for i := range got {
+		if got[i].ID != want[i].ID || got[i].ID != int64(500*(i+1)) {
+			t.Errorf("row %d: index id %d, walk id %d, want %d", i, got[i].ID, want[i].ID, 500*(i+1))
+		}
+	}
+}
