@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -31,7 +30,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/recorderfacts"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/shutdown"
-	signallayer "github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
 	"github.com/phillipgreenii/x/pprofserver"
@@ -93,23 +91,6 @@ func runDaemon(args []string) {
 	}
 	defer cleanup()
 	opts.Shutdown = shutTracker
-
-	// Startup health check: tmux/cmux are required, not optional. Each
-	// signaler shells out to its multiplexer's CLI; a missing binary (e.g.
-	// absent from the launchd PATH) otherwise fails silently — the terminal
-	// classifies as "unknown" and auto-resume nudges are dropped with no
-	// signal. Report loudly (stderr + metric) but keep running so billing /
-	// context / other-multiplexer monitoring stays alive.
-	for _, mb := range signallayer.MissingBinaries(signallayer.DefaultSignalers(), exec.LookPath) {
-		fmt.Fprintf(os.Stderr,
-			"daemon: ERROR: signaler %q requires %q which is not on PATH; "+
-				"detection and auto-resume for %s sessions are disabled until it is installed\n",
-			mb.Signaler, mb.Binary, mb.Signaler)
-		opts.Emitter.RecordSignalerBinaryMissing(ctx, map[string]string{
-			"signaler": mb.Signaler,
-			"binary":   mb.Binary,
-		})
-	}
 
 	if err := daemon.RunWith(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
@@ -324,12 +305,6 @@ func buildRunOptions(ctx context.Context, cfg config.Config, paths daemon.Paths,
 		// non-Monitor test pollers.
 		opts.WeeklyEvery = 12
 
-		// Without NudgerSignalers being non-empty, lifecycle.go skips
-		// constructing the WatermarkStore — which makes SetAutoResume,
-		// NudgeQueue, and NudgeCancel all return FailedPrecondition. The
-		// integration test TestRunWith_SetAutoResumePersistsViaGetState
-		// guards this contract.
-		opts.NudgerSignalers = signallayer.DefaultSignalers()
 		opts.AutoResumeMessage = cfg.AutoResumeMessage
 		opts.AutoResumeDelay = cfg.AutoResumeDelay
 		opts.DisruptGrace = cfg.DisruptGrace
@@ -422,7 +397,6 @@ func buildPoller(_ context.Context, cfg config.Config, acct account.Account, cac
 		BurnWindowShort:    cfg.BurnWindowShort,
 		BurnWindowLong:     cfg.BurnWindowLong,
 		Now:                time.Now,
-		Signalers:          signallayer.DefaultSignalers(),
 		Providers:          cache,
 	}
 

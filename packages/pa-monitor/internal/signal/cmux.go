@@ -8,18 +8,6 @@ import (
 	"os/exec"
 )
 
-// CmuxSignaler names the cmux terminal environment. It classifies nothing and
-// delivers nothing: the terminal host comes from the recorder's host fact and
-// the bridge registry is keyed by workspace id. It remains only as a named
-// entry in the signaler list that the startup binary check walks.
-type CmuxSignaler struct{}
-
-func (c *CmuxSignaler) Name() string { return "cmux" }
-
-// RequiredBinaries reports the executables the cmux integration needs: the
-// `cmux` CLI is run by the cmux status reporter (through RunCmux).
-func (c *CmuxSignaler) RequiredBinaries() []string { return []string{"cmux"} }
-
 // RunCmux is the single cmux-CLI exec seam: it runs the subprocess, returns its
 // stdout, and augments a failure with the captured stderr (enrichCmdErr) so a
 // failing `cmux` surfaces its cause instead of a bare "exit status N". The

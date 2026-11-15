@@ -92,7 +92,6 @@ type Emitter struct {
 	nudgeQueued          metric.Int64Counter
 	nudgeDroppedNoBridge metric.Int64Counter
 	apiErrorObserved     metric.Int64Counter
-	signalerBinMissing   metric.Int64Counter
 	staleBeadsExport     metric.Int64Counter
 
 	// Instrumentation histograms/counters (pg2-sewtz). Nil when SDK uninitialised.
@@ -425,9 +424,6 @@ func (e *Emitter) registerMetrics(ctx context.Context, mp *sdkmetric.MeterProvid
 		return err
 	}
 	if e.apiErrorObserved, err = meter.Int64Counter("pa_monitor.session.api_error.observed_total"); err != nil {
-		return err
-	}
-	if e.signalerBinMissing, err = meter.Int64Counter("pa_monitor.signaler.binary_missing_total"); err != nil {
 		return err
 	}
 	if e.staleBeadsExport, err = meter.Int64Counter("pa_monitor.beads.stale_export_found_total"); err != nil {
@@ -970,20 +966,6 @@ func (e *Emitter) RecordApiErrorObserved(ctx context.Context, attrs map[string]s
 		e.apiErrorObserved.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
 	}
 	e.LogEvent(ctx, "session.api_error.observed", attrs)
-}
-
-// RecordSignalerBinaryMissing fires pa_monitor.signaler.binary_missing_total
-// and logs a signaler.binary_missing event. Called once per missing binary at
-// daemon startup so an unwrapped tmux/cmux dependency is loudly visible instead
-// of silently disabling that terminal's detection and auto-resume.
-func (e *Emitter) RecordSignalerBinaryMissing(ctx context.Context, attrs map[string]string) {
-	if e == nil {
-		return
-	}
-	if e.signalerBinMissing != nil {
-		e.signalerBinMissing.Add(ctx, 1, metric.WithAttributes(attrsToKV(attrs)...))
-	}
-	e.LogEvent(ctx, "signaler.binary_missing", attrs)
 }
 
 // RecordStaleBeadsExport fires the TOP-LEVEL alert (pg2-zjopv) for a stray

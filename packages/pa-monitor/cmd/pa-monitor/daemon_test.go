@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/daemon"
+	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // TestBuildRunOptions_WiringNotNil is a smoke test that catches the class
@@ -77,4 +80,48 @@ func TestBuildRunOptions_WiringNotNil(t *testing.T) {
 	// The corpus Monitor is now mandatory: Snapshot requires it, so a buildPoller
 	// that dropped the wiring would crash on the first tick (exercised by the
 	// daemon tick integration tests). No separate flag guard is needed post-pg2-66h9g.
+}
+
+// TestBuildRunOptions_DoesNotLookForTerminalBinaries is a recording test: with
+// recording stand-ins for tmux and cmux first on PATH, assembling the daemon's
+// run options must not launch either one (delivery goes through the control
+// mod, so the daemon has no startup binary check or detection for them), while
+// the cmux status reporter's exec seam (signal.RunCmux) still runs cmux.
+func TestBuildRunOptions_DoesNotLookForTerminalBinaries(t *testing.T) {
+	bin := t.TempDir()
+	log := filepath.Join(bin, "calls.log")
+	for _, name := range []string{"tmux", "cmux"} {
+		script := "#!/bin/sh\necho " + name + " \"$@\" >> " + log + "\n"
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dir := t.TempDir()
+	paths := daemon.Paths{
+		Dir:     dir,
+		PIDFile: filepath.Join(dir, "daemon.pid"),
+		Socket:  filepath.Join(dir, "daemon.sock"),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := config.Config{PlanTier: "max_5x", CaffeinateGrace: 60 * time.Second}
+	_, cleanup, err := buildRunOptions(ctx, cfg, paths, "test", 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("buildRunOptions returned error: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	if b, err := os.ReadFile(log); err == nil {
+		t.Fatalf("daemon assembly launched terminal binaries: %q", b)
+	}
+
+	if _, err := signal.RunCmux(ctx, "cmux", "ping"); err != nil {
+		t.Fatalf("RunCmux: %v", err)
+	}
+	b, err := os.ReadFile(log)
+	if err != nil || !strings.Contains(string(b), "cmux ping") {
+		t.Fatalf("RunCmux did not run cmux: log=%q err=%v", b, err)
+	}
 }

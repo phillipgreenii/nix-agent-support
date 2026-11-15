@@ -13,7 +13,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus/corpustest"
 	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // hostDiscovery gives each discovered session the recorder Host fact a fixture
@@ -85,7 +84,6 @@ func TestAssemble_TerminalHostFromRecorderFactRunsNoExec(t *testing.T) {
 		Now:           func() time.Time { return now },
 		Monitor:       corpus.New(e.Facts, hostDiscovery{inner: e.Discovery(), hosts: hosts}),
 		Providers:     provider.New(func() time.Time { return now }),
-		Signalers:     signal.DefaultSignalers(),
 	}
 	tree, _, err := assembleAndSnapshot(t, p, context.Background())
 	if err != nil {

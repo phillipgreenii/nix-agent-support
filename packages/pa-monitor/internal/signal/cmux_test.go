@@ -11,7 +11,7 @@ import (
 )
 
 // TestRunCmux_EnrichesStderr verifies the shared exec seam (used by the
-// CmuxSignaler and the cmuxstatus reporter) folds a failing subprocess's stderr
+// cmuxstatus reporter) folds a failing subprocess's stderr
 // into the error instead of a bare "exit status N".
 func TestRunCmux_EnrichesStderr(t *testing.T) {
 	_, err := signal.RunCmux(context.Background(), "sh", "-c", "echo detail-on-stderr 1>&2; exit 3")

@@ -11,11 +11,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
-// captureSignaler is a fake signal.Signaler that records Send calls.
-// It always claims to own every pid so it is selected by ResolveSignaler.
+// captureSignaler is a fake delivery sink that records Send calls.
 type captureSignaler struct {
 	mu   sync.Mutex
 	sent []capturedNudge
@@ -40,9 +38,6 @@ func (c *captureSignaler) Len() int {
 	defer c.mu.Unlock()
 	return len(c.sent)
 }
-
-// Ensure captureSignaler satisfies signal.Signaler at compile time.
-var _ signal.Signaler = (*captureSignaler)(nil)
 
 // TestRunWith_NudgerFiresWithZeroGrace verifies end-to-end that RunWith
 // wires the nudger correctly: with DisruptGrace=0, the disrupt producer
@@ -101,7 +96,6 @@ func TestRunWith_NudgerFiresWithZeroGrace(t *testing.T) {
 				},
 			},
 			InitialAutoResumeEnabled: true,
-			NudgerSignalers:          []signal.Signaler{cap},
 			Deliverer:                capDeliverer{cap},
 			DisruptGrace:             0, // fire immediately after first sighting
 			EscalationAfter:          60 * time.Second,
@@ -143,7 +137,7 @@ func TestRunWith_NudgerFiresWithZeroGrace(t *testing.T) {
 }
 
 // TestRunWith_NudgerNoOpWhenNotConfigured verifies that when RunWith is
-// started without NudgerSignalers (and without RuntimePath), the daemon
+// started without RuntimePath, the daemon
 // still processes ticks correctly and returns no error on cancellation.
 // The nudger is nil in this configuration, so no nudges are sent.
 func TestRunWith_NudgerNoOpWhenNotConfigured(t *testing.T) {
@@ -181,7 +175,7 @@ func TestRunWith_NudgerNoOpWhenNotConfigured(t *testing.T) {
 					return tree, true, nil
 				},
 			},
-			// NudgerSignalers intentionally absent — nudger should be nil.
+			// RuntimePath intentionally absent — nudger should be nil.
 		})
 	}()
 
@@ -267,7 +261,6 @@ func TestRunWith_NudgerAnnotatesPendingNudge(t *testing.T) {
 				},
 			},
 			InitialAutoResumeEnabled: true,
-			NudgerSignalers:          []signal.Signaler{cap},
 			Deliverer:                capDeliverer{cap},
 			// DisruptGrace=0: tick 1 primes firstSeen, tick 2 adds intent +
 			// annotation runs before dispatch, so TreeObserver sees PendingNudge.
@@ -340,14 +333,14 @@ waitLoop:
 }
 
 // TestRunWith_SetAutoResumePersistsViaGetState is the regression guard
-// for the missing-NudgerSignalers bug: previously the daemon was started
-// with empty NudgerSignalers, lifecycle.go skipped constructing the
+// for the missing-WatermarkStore bug: previously the daemon was started
+// without the nudger wiring, lifecycle.go skipped constructing the
 // WatermarkStore, and SetAutoResume returned FailedPrecondition silently.
 // The TUI's optimistic R-flip was then undone by the next poll, because
 // the daemon still reported the OLD AutoResumeEnabled value.
 //
 // This test exercises the path actually used in production:
-//   - Real RunWith() with NudgerSignalers + Poller + RuntimePath.
+//   - Real RunWith() with Poller + RuntimePath.
 //   - gRPC dial.
 //   - SetAutoResume(true).
 //   - GetState; assert AutoResumeEnabled == true.
@@ -374,7 +367,6 @@ func TestRunWith_SetAutoResumePersistsViaGetState(t *testing.T) {
 					return tree, false, nil
 				},
 			},
-			NudgerSignalers: []signal.Signaler{&captureSignaler{}},
 		})
 	}()
 	t.Cleanup(func() {
@@ -394,7 +386,7 @@ func TestRunWith_SetAutoResumePersistsViaGetState(t *testing.T) {
 
 	// SetAutoResume must succeed (not FailedPrecondition).
 	if _, err := client.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: true}); err != nil {
-		t.Fatalf("SetAutoResume: %v (this means lifecycle.go skipped WatermarkStore construction — check NudgerSignalers wiring)", err)
+		t.Fatalf("SetAutoResume: %v (this means lifecycle.go skipped WatermarkStore construction — check RuntimePath wiring)", err)
 	}
 
 	// GetState must reflect the change.
@@ -452,7 +444,6 @@ func TestRunWith_SeedsAutoResumeFromOption(t *testing.T) {
 					return tree, false, nil
 				},
 			},
-			NudgerSignalers: []signal.Signaler{&captureSignaler{}},
 		})
 	}()
 	t.Cleanup(func() {
@@ -475,57 +466,6 @@ func TestRunWith_SeedsAutoResumeFromOption(t *testing.T) {
 	}
 	if !state.GetAutoResumeEnabled() {
 		t.Error("GetState.AutoResumeEnabled = false; daemon did not seed the live store from the persisted toggle")
-	}
-}
-
-// TestRunWith_RejectsConfigWithoutNudgerSignalers is the explicit-contract
-// counterpart: if a caller constructs RunOptions WITHOUT NudgerSignalers,
-// SetAutoResume returns FailedPrecondition. This documents the contract
-// that landed pa-monitor in its broken state and makes future regressions
-// visible immediately.
-func TestRunWith_RejectsConfigWithoutNudgerSignalers(t *testing.T) {
-	dir := shortTempDir(t)
-	paths := Paths{
-		Dir:     dir,
-		PIDFile: filepath.Join(dir, "daemon.pid"),
-		Socket:  filepath.Join(dir, "daemon.sock"),
-	}
-	runtimePath := filepath.Join(dir, "runtime.json")
-
-	tree := &aggregate.Tree{Dirs: []*aggregate.Directory{{Path: "/p"}}}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- RunWith(ctx, RunOptions{
-			Paths:       paths,
-			Tick:        30 * time.Millisecond,
-			RuntimePath: runtimePath,
-			Poller: &stubPoller{
-				snapshot: func(ctx context.Context) (*aggregate.Tree, bool, error) {
-					return tree, false, nil
-				},
-			},
-			// NudgerSignalers intentionally absent.
-		})
-	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			t.Error("RunWith did not return after cancel")
-		}
-	})
-
-	waitForFile(t, paths.Socket)
-
-	conn := dialUnix(t, paths.Socket)
-	defer func() { _ = conn.Close() }()
-	client := pb.NewPaMonitorClient(conn)
-
-	if _, err := client.SetAutoResume(context.Background(), &pb.SetAutoResumeRequest{Enabled: true}); err == nil {
-		t.Error("SetAutoResume without NudgerSignalers should fail with FailedPrecondition, got nil error")
 	}
 }
 

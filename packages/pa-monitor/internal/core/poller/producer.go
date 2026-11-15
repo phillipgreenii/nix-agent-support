@@ -11,7 +11,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/corpus"
 	"github.com/phillipgreenii/pa-monitor/internal/core/provider"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 )
 
 // Producer is the single writer of the corpus-derived state: it owns the corpus
@@ -21,13 +20,12 @@ import (
 // the ChangeSource cadence (Start); the emit tick only Loads the last published
 // DerivedState.
 //
-// Field ownership (C5): Monitor + Providers + Signalers + BridgeRegistry are
+// Field ownership (C5): Monitor + Providers + BridgeRegistry are
 // producer-side; the burn-rate maps stay on the Poller (tick-side).
 type Producer struct {
 	Monitor        *corpus.Monitor
 	Providers      *provider.Cache
 	Now            func() time.Time
-	Signalers      []signal.Signaler
 	BridgeRegistry *bridge.Registry
 
 	// Rec receives the producer-side phase timings (discover/pricer/limits/weekly

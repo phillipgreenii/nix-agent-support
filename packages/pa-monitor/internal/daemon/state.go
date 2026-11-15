@@ -267,7 +267,7 @@ func (s *sharedState) caffeinateIndicators() (mode, active bool, process caffein
 }
 
 // Nudger returns the daemon's Nudger instance. May be nil when nudger
-// signaling is not configured (NudgerSignalers empty / RuntimePath absent).
+// signaling is not configured (RuntimePath absent).
 // Used by gRPC handlers (Phase 6) to enqueue manual nudges.
 func (s *sharedState) Nudger() *nudger.Nudger {
 	s.mu.RLock()

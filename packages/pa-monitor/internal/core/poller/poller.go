@@ -15,7 +15,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
 
@@ -56,7 +55,6 @@ type Poller struct {
 	BurnWindowShort    time.Duration
 	BurnWindowLong     time.Duration
 	Now                func() time.Time
-	Signalers          []signal.Signaler
 	// BridgeRegistry, if non-nil, refines a "cmux" TerminalHost into one of
 	// "cmux" / "cmux (no bridge)" / "cmux (bridge disconnected)" based on
 	// whether a cmux-bridge has registered for the session's cmux server PID.
@@ -156,7 +154,6 @@ func (p *Poller) ensureProducer() *Producer {
 		Monitor:        p.Monitor,
 		Providers:      p.Providers,
 		Now:            p.Now,
-		Signalers:      p.Signalers,
 		BridgeRegistry: p.BridgeRegistry,
 		Rec:            p.Rec,
 	}

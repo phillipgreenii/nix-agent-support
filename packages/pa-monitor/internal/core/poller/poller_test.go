@@ -407,7 +407,6 @@ func TestPoller_WritesToStores(t *testing.T) {
 		WorkingThreshold: 30 * time.Second,
 		IdleThreshold:    10 * time.Minute,
 		Now:              time.Now,
-		Signalers:        nil,
 		WriteService:     ws,
 	})
 	if _, _, err := assembleAndSnapshot(t, p, ctx); err != nil {

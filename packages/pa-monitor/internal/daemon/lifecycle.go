@@ -26,7 +26,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	"github.com/phillipgreenii/pa-monitor/internal/shutdown"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
 )
@@ -186,14 +185,13 @@ type RunOptions struct {
 	// Version is the build identifier reported on DaemonState. Defaults to "dev".
 	Version string
 	// Nudger config — passed to nudger.TickContext each tick. Defaults
-	// applied if zero. NudgerSignalers must be non-empty for the daemon
-	// to construct its WatermarkStore and accept NudgeQueue / NudgeCancel
-	// / SetAutoResume RPCs.
+	// applied if zero. RuntimePath must be set for the daemon to construct
+	// its WatermarkStore and accept NudgeQueue / NudgeCancel / SetAutoResume
+	// RPCs.
 	AutoResumeMessage string
 	AutoResumeDelay   time.Duration
 	DisruptGrace      time.Duration
 	EscalationAfter   time.Duration
-	NudgerSignalers   []signal.Signaler
 	// AutoSessionWrapUpEnable / AutoSessionWrapUpIdleThreshold /
 	// AutoSessionWrapUpDirectiveTemplate configure
 	// nudger.AutoSessionWrapUpProducer (bead tc-m08w3). DirectiveTemplate, when
@@ -410,7 +408,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	}
 
 	// Construct Nudger + WatermarkStore when configured.
-	if opts.RuntimePath != "" && len(opts.NudgerSignalers) > 0 {
+	if opts.RuntimePath != "" {
 		watermarks, err := NewWatermarkStore(opts.RuntimePath, opts.Emitter)
 		if err != nil {
 			return fmt.Errorf("read runtime.json: %w", err)
@@ -422,9 +420,7 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 		watermarks.SetAutoResumeEnabled(opts.InitialAutoResumeEnabled)
 		// Nudges go through pg-claude-control (the control mod's inbox), never by
 		// injecting keystrokes into a terminal: it works for any host and does not
-		// depend on the recorder. The D5 keep-awake predicate below keeps the FULL
-		// opts.NudgerSignalers (it only Detects, never Sends) so a cmux-hosted
-		// disrupt still holds the Mac awake.
+		// depend on the recorder.
 		var deliverer nudger.Deliverer = newControlDeliverer()
 		if opts.Deliverer != nil {
 			deliverer = opts.Deliverer

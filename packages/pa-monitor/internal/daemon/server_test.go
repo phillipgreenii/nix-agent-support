@@ -17,7 +17,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/daemon/nudger"
 	pb "github.com/phillipgreenii/pa-monitor/internal/proto"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
-	"github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 )
@@ -384,14 +383,6 @@ func findServerCallDurationDataPoint(rm *metricdata.ResourceMetrics) (metricdata
 	}
 	return metricdata.HistogramDataPoint[float64]{}, false
 }
-
-// noopSignaler is a Signaler that does nothing. Satisfies signal.Signaler.
-type noopSignaler struct{}
-
-func (noopSignaler) Name() string      { return "noop" }
-func (noopSignaler) Detect(_ int) bool { return true }
-
-var _ signal.Signaler = noopSignaler{}
 
 // newTestServerWithNudger builds a server backed by a real Nudger +
 // WatermarkStore and an in-memory SQLite DB containing one Idle session

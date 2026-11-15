@@ -139,8 +139,8 @@ func (c *cmuxReporter) run(ctx context.Context, name string, args ...string) ([]
 	}
 	// Route the default subprocess call through the shared cmux exec seam so a
 	// failing `cmux` carries its stderr (enrichCmdErr) instead of a bare
-	// "exit status N" — the same enrichment the CmuxSignaler delivery path gets
-	// (pg2-p1q00). Previously this duplicated exec.CommandContext and dropped it.
+	// "exit status N" — the same enrichment RunCmux gives.
+	// Previously this duplicated exec.CommandContext and dropped it.
 	return signal.RunCmux(ctx, name, args...)
 }
 
