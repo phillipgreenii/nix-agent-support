@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/wire"
@@ -35,6 +36,9 @@ type Client struct {
 	HTTP *http.Client
 	// Timeout bounds a request; zero means 15 seconds.
 	Timeout time.Duration
+
+	mu sync.Mutex
+	tr *http.Transport // the private transport used when HTTP is nil
 }
 
 // UnreachableError means the daemon could not be reached at all.
@@ -73,7 +77,35 @@ func (c *Client) http() *http.Client {
 	if t <= 0 {
 		t = 15 * time.Second
 	}
-	return &http.Client{Timeout: t}
+	return &http.Client{Timeout: t, Transport: c.transport()}
+}
+
+// transport returns the Client's own transport, never the process-wide
+// default. Two requests that race for a connection can leave the dialed loser
+// idle and unused in the pool; the daemon sees that connection as new, not
+// idle, and http.Server.Shutdown waits its full grace for it. A private
+// transport lets Close drop every such connection.
+func (c *Client) transport() http.RoundTripper {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tr == nil {
+		c.tr = http.DefaultTransport.(*http.Transport).Clone()
+	}
+	return c.tr
+}
+
+// Close drops the connections the Client holds open. A command that is done
+// with the daemon SHOULD call it; the Client stays usable afterwards.
+func (c *Client) Close() {
+	c.mu.Lock()
+	tr := c.tr
+	c.mu.Unlock()
+	if tr != nil {
+		tr.CloseIdleConnections()
+	}
+	if c.HTTP != nil {
+		c.HTTP.CloseIdleConnections()
+	}
 }
 
 func (c *Client) name() string {
@@ -168,7 +200,7 @@ func (c *Client) Stream(ctx context.Context, fn func(Event) error) error {
 	req.Header.Set("X-Client", c.name())
 	req.Header.Set("Accept", "text/event-stream")
 	// A stream has no overall timeout; the daemon's heartbeat keeps it alive.
-	hc := &http.Client{}
+	hc := &http.Client{Transport: c.transport()}
 	res, err := hc.Do(req)
 	if err != nil {
 		return c.unreachable(err)

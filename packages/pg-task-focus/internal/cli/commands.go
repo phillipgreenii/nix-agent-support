@@ -84,6 +84,7 @@ func (s *state) statusCmd(ctx context.Context) *cobra.Command {
 // interval.
 func (s *state) watch(ctx context.Context, every time.Duration) error {
 	cl := s.client()
+	defer cl.Close()
 	emit := func() error {
 		raw, _, err := cl.State(ctx)
 		if err != nil {
