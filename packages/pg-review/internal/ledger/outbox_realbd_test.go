@@ -26,7 +26,7 @@ func realBdTracker(t *testing.T) string {
 	t.Setenv("BD_NON_INTERACTIVE", "1")
 	root := t.TempDir()
 	for _, args := range [][]string{{"git", "init", "-q", "."}, {"bd", "init", "--non-interactive", "--quiet", "-p", "rb"}} {
-		c := exec.Command(args[0], args[1:]...)
+		c := exec.CommandContext(t.Context(), args[0], args[1:]...)
 		c.Dir = root
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Skipf("cannot create a throwaway tracker (%v): %s", err, out)
@@ -45,7 +45,7 @@ type realBead struct {
 
 func listRealBeads(t *testing.T, root string) []realBead {
 	t.Helper()
-	out, err := exec.Command("bd", "-C", root, "list", "--all", "--json").Output()
+	out, err := exec.CommandContext(t.Context(), "bd", "-C", root, "list", "--all", "--json").Output()
 	if err != nil {
 		t.Fatalf("bd list: %v", err)
 	}
