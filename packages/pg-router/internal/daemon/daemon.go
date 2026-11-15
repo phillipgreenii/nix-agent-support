@@ -484,7 +484,7 @@ func BootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		// A role whose handler supervises its own work (a ccpool-backed session)
 		// declares it survives a shutdown (bead pg2-dtigc, ADR 0085): in daemon
 		// mode its dispatch runs on a context the shutdown's cancelDispatch cannot
-		// reach, so exec.CommandContext never SIGKILLs its handler. Drain-and-exit
+		// reach, so the OSRunner never terminates its handler. Drain-and-exit
 		// keeps the cancellable ctx: an interactive interrupt still stops handlers.
 		listenerCtx := ctx
 		if runMode == core.RunModeLongRunning && RoleSurvives(r) {

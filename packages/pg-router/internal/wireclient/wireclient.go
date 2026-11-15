@@ -17,7 +17,6 @@
 package wireclient
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -27,9 +26,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
-	"syscall"
 	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
 
 	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/api/status"
@@ -197,35 +196,30 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 	if len(argv) == 0 {
 		return nil, 0, errors.New("wireclient: empty argv")
 	}
-	// Not routed through x/cmdrun, on purpose: the handler needs the parent-death
-	// pipe as inherited fd 3 (cmd.ExtraFiles, below), which cmdrun.Call cannot
-	// carry, and its stderr is forwarded live to r.Stderr rather than captured and
-	// replayed after exit. The call is bounded by ctx (the dispatch deadline) and
-	// by runWaitDelay after a cancel; the SIGTERM-on-cancel behaviour is pinned by
-	// runner_cancel_integration_test.go.
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Stdin = bytes.NewReader(stdin)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if r.Stderr != nil {
-		cmd.Stderr = r.Stderr
-	} else {
-		cmd.Stderr = os.Stderr
+	stderr := r.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
 	}
-	// A cancelled context sends the handler SIGTERM, not the SIGKILL that
-	// exec.CommandContext sends by default: the command adapter's only cleanup is
-	// its SIGTERM/SIGINT handler, which stops its payload's process group (the
-	// payload runs in a group of its own, so it would otherwise outlive the
-	// adapter). Only the adapter's pid is signalled, never a group: the handler
-	// shares this process's group. WaitDelay then escalates to SIGKILL.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	// WaitDelay bounds how long Run waits, after the handler process exits or is
-	// killed on the context's deadline, for the stdout copy to finish. Without it a
-	// child the handler left running with the pipe open (a handler that hangs, or
-	// forks and leaves) keeps cmd.Run blocked until that child exits, so a deadline
-	// never arrives (docket pg2-12gr4.8, the validate call's "handler that hangs"
-	// case).
-	cmd.WaitDelay = runWaitDelay
+	// A cancelled context sends the handler SIGTERM (cmdrun's TermGrace), not
+	// SIGKILL: the command adapter's only cleanup is its SIGTERM/SIGINT handler,
+	// which stops its payload's process group (the payload runs in a group of its
+	// own, so it would otherwise outlive the adapter). Only the adapter's pid is
+	// signalled, never a group (no OwnProcGroup): the handler shares this
+	// process's group. The grace is runWaitDelay, after which cmdrun escalates to
+	// SIGKILL; cmdrun's pipe-release delay then bounds how long Run waits for the
+	// stdout copy, so a child the handler left holding the pipe cannot keep a
+	// deadline from arriving. The SIGTERM-on-cancel behaviour is pinned by
+	// runner_cancel_integration_test.go. The handler's stderr is forwarded live
+	// to the writer (StderrWriter), not replayed after exit.
+	//cmdrun:unbounded the dispatch deadline on ctx bounds the call; a handler's run time is the caller's to set (a survives_shutdown role has none)
+	call := cmdrun.Call{
+		Name:         argv[0],
+		Args:         argv[1:],
+		Stdin:        stdin,
+		EnvMode:      cmdrun.EnvAppend,
+		StderrWriter: stderr,
+		TermGrace:    runWaitDelay,
+	}
 	// Parent-death pipe: the handler gets the read end as fd 3 and its number in
 	// ParentDeathFDEnv; this process keeps the write end open until the call
 	// returns. If this process dies without a graceful cancel (SIGKILL, the
@@ -240,22 +234,25 @@ func (r OSRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte,
 		}
 		defer func() { _ = pw.Close() }()
 		defer func() { _ = pr.Close() }()
-		cmd.ExtraFiles = []*os.File{pr}
-		cmd.Env = append(os.Environ(), ParentDeathFDEnv+"=3")
+		call.ExtraFiles = []*os.File{pr}
+		call.Env = []string{ParentDeathFDEnv + "=3"}
 	}
-	err := cmd.Run()
-	var exitErr *exec.ExitError
+	res := cmdrun.Exec(ctx, call)
 	switch {
-	case err == nil:
-		return out.Bytes(), 0, nil
-	case errors.As(err, &exitErr):
+	case res.StartErr != nil:
+		return nil, 0, fmt.Errorf("wireclient: run %v: %w", argv, res.StartErr)
+	case res.Signal != "" || res.Code != 0:
 		// The reply body (if any) is still on stdout even on a non-zero exit
 		// (DEC-WIRE-1: "the rich outcome is in the JSON reply" — a degraded
 		// participant MAY return an exit code only). Return it alongside the
-		// exit code; Dispatch below decides what, if anything, it means.
-		return out.Bytes(), exitErr.ExitCode(), nil
+		// exit code (-1 for a signal); Dispatch below decides what, if anything,
+		// it means.
+		return res.Stdout, res.Code, nil
+	case res.CtxErr != nil:
+		// The handler exited 0 after the context ended (it handled SIGTERM).
+		return nil, 0, fmt.Errorf("wireclient: run %v: %w", argv, res.CtxErr)
 	default:
-		return nil, 0, fmt.Errorf("wireclient: run %v: %w", argv, err)
+		return res.Stdout, 0, nil
 	}
 }
 

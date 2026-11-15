@@ -108,7 +108,7 @@ func drainThenCloseStore(ctx context.Context, q *eventqueue.Queue, storeClose fu
 // dispatches run under a context decoupled from the signal context, so they are
 // NOT cancelled by SIGTERM -- and then cancels the dispatch context, which
 // unsticks any handler that outlived the timeout (wireclient's
-// exec.CommandContext kills it). The caller MUST run this before
+// the OSRunner terminates it). The caller MUST run this before
 // preShutdownAll so a handler's shutdown hook never races a live dispatch.
 //
 // survives (nil: none) names the listeners whose dispatches survive a
