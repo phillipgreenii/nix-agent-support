@@ -513,6 +513,11 @@ func (rs *resumer) checkRoles(ctx context.Context, rec locks.Record) (*outcome.O
 	}
 	sel := p.Selection
 	late := stageIndex(oprecord.Canonical(rec.Stage)) >= stageIndex(oprecord.StageCleanup)
+	if !late && oprecord.Canonical(rec.Stage) == oprecord.StageMoving {
+		// A stop at moving whose move already happened (a crash right after
+		// it) resumes as for cleanup: only the finish is left.
+		late, _ = rs.moved(ctx, rec)
+	}
 	sx := &worktrees.Selector{Git: rs.d.Git}
 
 	ww := findListed(wts, sel.Work.Path)
@@ -623,8 +628,8 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 	}
 	work := rs.workDir()
 	if gone(findListedOrNil(rs, ctx, work)) {
-		// Only possible at the after stage or later (checkRoles refused it
-		// before): no hook can run in a work worktree that is gone, so the
+		// Only possible at the cleanup stage or later, or at moving once the
+		// move happened (checkRoles refused it before): no hook can run in a work worktree that is gone, so the
 		// record cleanup finishes.
 		done, exp := rs.moved(ctx, rec)
 		done = done || rec.Move.Intent != nil
