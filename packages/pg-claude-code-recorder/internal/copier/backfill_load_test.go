@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/fsx"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/scope"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
@@ -19,12 +21,33 @@ import (
 // production backfill batch size).
 const loadBatchSize = 64
 
-// TestBackfillRate measures first-copy files/s on a throwaway fixture tree with
-// the real clone policy, real SQLite and the real file system, once with one
-// Ingest call per file and once with IngestBatch(64), and fails unless batched
-// is faster than single-file. The assertion is a RATIO, never an absolute rate,
-// because host load varies. It is a load test: run it with -tags loadtest (it
-// is not part of the unit gate, V-4); the flake check
+// countingFS wraps a state-directory file system and counts directory syncs.
+type countingFS struct {
+	fsx.FS
+	dirSyncs atomic.Int64
+}
+
+func (c *countingFS) SyncDir(dir string) error {
+	c.dirSyncs.Add(1)
+	return c.FS.SyncDir(dir)
+}
+
+// backfillStats is what one measured backfill did: the durability operations it
+// issued (deterministic) and its rate (informational only).
+type backfillStats struct {
+	rate     float64
+	commits  uint64 // journal commits (one fsync and one SQLite transaction each)
+	dirSyncs int64  // directory fsyncs
+}
+
+// TestBackfillRate backfills a throwaway fixture tree with the real clone
+// policy, real SQLite and the real file system, once with one Ingest call per
+// file and once with IngestBatch(64). It asserts the DETERMINISTIC effect of
+// batching: the journal commits and directory syncs (the operations that
+// dominate cost) drop from one per file to one per batch. Wall-clock rates are
+// logged but never compared, because two timings taken at different moments
+// differ with host load. It is a load test: run it with -tags loadtest (it is
+// not part of the unit gate, V-4); the flake check
 // pg-claude-code-recorder-load-tests runs it. RECORDER_LOAD_FILES sets the file
 // count (default 3000).
 func TestBackfillRate(t *testing.T) {
@@ -34,15 +57,20 @@ func TestBackfillRate(t *testing.T) {
 	}
 	single := measureBackfill(t, n, 0)
 	batched := measureBackfill(t, n, loadBatchSize)
-	t.Logf("SUMMARY files=%d single=%.1f files/s batched(%d)=%.1f files/s ratio=%.2fx", n, single, loadBatchSize, batched, batched/single)
-	if batched <= single {
-		t.Fatalf("batched ingest (%.1f files/s) is not faster than single-file ingest (%.1f files/s)", batched, single)
+	t.Logf("SUMMARY files=%d single=%.1f files/s commits=%d dirSyncs=%d; batched(%d)=%.1f files/s commits=%d dirSyncs=%d (rates informational)",
+		n, single.rate, single.commits, single.dirSyncs, loadBatchSize, batched.rate, batched.commits, batched.dirSyncs)
+	if single.commits != uint64(n) || single.dirSyncs != int64(n) {
+		t.Fatalf("single-file ingest should commit and dir-sync once per file (%d), got commits=%d dirSyncs=%d", n, single.commits, single.dirSyncs)
+	}
+	maxOps := (n + loadBatchSize - 1) / loadBatchSize
+	if batched.commits > uint64(maxOps) || batched.dirSyncs > int64(maxOps) {
+		t.Fatalf("batched ingest should commit and dir-sync at most once per batch (%d), got commits=%d dirSyncs=%d", maxOps, batched.commits, batched.dirSyncs)
 	}
 }
 
 // measureBackfill ingests n fresh fixture files (batch <= 1 means one Ingest
-// call per file) and returns the rate in files/s.
-func measureBackfill(t *testing.T, n, batch int) float64 {
+// call per file) and returns what it did.
+func measureBackfill(t *testing.T, n, batch int) backfillStats {
 	t.Helper()
 	root := t.TempDir()
 	claude := filepath.Join(root, "claude")
@@ -58,7 +86,8 @@ func measureBackfill(t *testing.T, n, batch int) float64 {
 			t.Fatal(err)
 		}
 	}
-	st, err := store.Open(filepath.Join(root, "state"), store.Options{})
+	cfs := &countingFS{FS: fsx.OS{}}
+	st, err := store.Open(filepath.Join(root, "state"), store.Options{FS: cfs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,15 +97,16 @@ func measureBackfill(t *testing.T, n, batch int) float64 {
 		t.Fatal(err)
 	}
 	m, why := cp.Method()
+	seq0, sync0 := st.CommitSeq(), cfs.dirSyncs.Load()
 	start := time.Now()
 	ingestAll(t, cp, paths, batch)
 	el := time.Since(start)
-	rate := float64(n) / el.Seconds()
-	t.Logf("method=%s (%s) files=%d batch=%d elapsed=%s rate=%.1f files/s", m, why, n, batch, el.Round(time.Millisecond), rate)
+	out := backfillStats{rate: float64(n) / el.Seconds(), commits: st.CommitSeq() - seq0, dirSyncs: cfs.dirSyncs.Load() - sync0}
+	t.Logf("method=%s (%s) files=%d batch=%d elapsed=%s rate=%.1f files/s commits=%d dirSyncs=%d", m, why, n, batch, el.Round(time.Millisecond), out.rate, out.commits, out.dirSyncs)
 	if m != "clone" {
 		t.Fatalf("clone method required for the measurement, got %s", m)
 	}
-	return rate
+	return out
 }
 
 func ingestAll(t *testing.T, cp *Copier, paths []string, batch int) {
