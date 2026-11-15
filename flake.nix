@@ -7829,6 +7829,36 @@
                     '';
                   });
 
+              # pg-task-focus PROPERTY tier (V-4): the rapid property tests of testgen,
+              # store and projection run in the unit gate at a capped count (25 for testgen
+              # and projection, 50 for store; internal/rapidtier, a
+              # `var _ = rapidtier.Cap(n)` in each package);
+              # `-tags integration` removes the cap, so this check runs those packages
+              # at rapid's full 100 checks, under -race, with the seed pinned to 1 like
+              # the unit gate. ON DEMAND ONLY: no hook, run-unit-tests, pre-land or land
+              # gate. Run it when a generator (internal/testgen), the store's append
+              # and recovery paths or the projection's replay change:
+              # `nix build .#checks.<system>.pg-task-focus-property-tests`.
+              pg-task-focus-property-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-task-focus-property-tests";
+                  src = lib.cleanSource ./packages/pg-task-focus;
+                  gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    RAPID_SEED = "1";
+                    RAPID_NOFAILFILE = "true";
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go vet -tags integration ./internal/testgen/ ./internal/store/ ./internal/projection/
+                      go test -tags integration -count=1 -race -v -timeout 30m \
+                        ./internal/testgen/ ./internal/store/ ./internal/projection/
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-keep-awake (docket pg2-8bgxg.2) - whole-module Go test gate.
               # Pattern A: flat src at the module dir, no local replace. -v puts
               # the integration suite's visible lines in the check log: either

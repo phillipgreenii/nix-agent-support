@@ -141,6 +141,11 @@ page's modules (`web/test/*.test.mjs`), `internal/daemon/webui_e2e_test.go` runs
 and API client against a real daemon, and `cmd/pg-task-focus/serve_integration_test.go` re-executes
 the test binary as the real `serve` with real signals. Locally:
 `go test -tags integration -run 'TestClientLogicUnderNode|TestWebUIAgainstARealDaemon|TestServeReloadsOnSIGHUPAndStopsOnSIGTERM' ./...`.
+The rapid property tests of `internal/testgen`, `internal/store` and `internal/projection` run in
+the unit gate for a capped number of checks (25, 50 for the store; rapid's default is 100), set by
+`internal/rapidtier`. `-tags integration` removes the cap, and `checks.<system>.pg-task-focus-property-tests`
+runs those packages at the full count (on demand). A `-rapid.checks` flag or `RAPID_CHECKS` overrides both.
+
 What a browser would show (layout, focus order as a screen reader announces it, contrast, a real
 `EventSource` reconnecting) is not covered by any automated test here.
 
