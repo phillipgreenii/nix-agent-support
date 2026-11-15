@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/build/constraint"
@@ -73,6 +74,11 @@ var servetestLaunchers = map[string]bool{"NewDaemon": true, "StartDaemon": true,
 // integrationMarkers returns one reason per integration-tier construct in the Go
 // source src (a test file named name). An empty result means the file is unit-tier clean.
 func integrationMarkers(name string, src []byte) ([]string, error) {
+	// Both markers need the text "servetest" or "Command"; a file with neither cannot
+	// carry one, so it is not parsed (parsing is the cost of the whole-module scan).
+	if !bytes.Contains(src, []byte("servetest")) && !bytes.Contains(src, []byte("Command")) {
+		return nil, nil
+	}
 	f, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
 	if err != nil {
 		return nil, err
@@ -271,6 +277,27 @@ func evaluateUnitTierPurity(root string, reexecAllowed map[string]string) (viola
 	}
 	sort.Strings(violations)
 	return violations, integrationFiles, err
+}
+
+// TestUnitTierHasNoIntegrationTests fails when a test file compiled by a plain
+// `go test ./...` starts the daemon, runs a built binary or Go tool, or needs a real
+// external tool. It is the regression guard of the integration/unit split.
+func TestUnitTierHasNoIntegrationTests(t *testing.T) {
+	t.Parallel()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("resolve module root: %v", err)
+	}
+	violations, integrationFiles, err := evaluateUnitTierPurity(root, unitReexecAllowed)
+	if err != nil {
+		t.Fatalf("walk module: %v", err)
+	}
+	for _, v := range violations {
+		t.Error(v)
+	}
+	if integrationFiles == 0 {
+		t.Errorf("no test file under %s carries //go:build integration: either the integration tier is empty or this guard scans the wrong root", root)
+	}
 }
 
 // TestUnitTierGuardRecognizesEachIntegrationShape proves the guard rejects every

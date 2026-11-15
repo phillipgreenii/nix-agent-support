@@ -20,8 +20,9 @@ import (
 // This test closes that gap hermetically: it walks each backend's non-test
 // import closure inside the module and requires every Go file on it to be
 // covered by the fileset parsed out of the matching <name>.nix. It runs at
-// commit time only through the fixture tests; the real-tree scan is tagged integration
-// (arch_scan_integration_test.go) and runs in checks.pg-connector-integration-tests.
+// commit time (run-unit-tests) and in checks.pg-connector-go-tests. The scan is kept
+// cheap enough for the unit tier: go/build's ImportDir result is memoized per
+// (directory, GOOS) across the backends (see importDirCache).
 //
 // The nix parsing is deliberately tiny and FAILS LOUDLY on anything it does
 // not understand (an unknown lib.fileset function, a token naming a path that
@@ -154,10 +155,37 @@ func parseNixFileset(moduleRoot, nixSrc string) (nixFileset, error) {
 	return fs, nil
 }
 
+// importDirCache memoizes go/build's ImportDir per (directory, GOOS): the backends'
+// import closures overlap heavily (every one reaches the shared pkg/ packages), so
+// each directory is read and import-parsed once per scan instead of once per backend.
+type importDirCache struct{ m map[string]*build.Package }
+
+func newImportDirCache() *importDirCache { return &importDirCache{m: map[string]*build.Package{}} }
+
+// importDir returns nil, nil for a directory with no buildable Go files.
+func (c *importDirCache) importDir(moduleRoot, dir, goos string) (*build.Package, error) {
+	key := goos + ":" + dir
+	if pkg, ok := c.m[key]; ok {
+		return pkg, nil
+	}
+	ctx := build.Default
+	ctx.GOOS = goos
+	pkg, err := ctx.ImportDir(filepath.Join(moduleRoot, filepath.FromSlash(dir)), 0)
+	if err != nil {
+		if _, ok := err.(*build.NoGoError); ok {
+			c.m[key] = nil
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%s (GOOS=%s): %w", dir, goos, err)
+	}
+	c.m[key] = pkg
+	return pkg, nil
+}
+
 // backendImportClosure returns every module-root-relative non-test Go file
 // reachable from cmd/<backend> through module-internal imports, evaluated for
 // both GOOS values the packages build on (meta.platforms = platforms.all).
-func backendImportClosure(moduleRoot, modulePath, backend string) ([]string, error) {
+func backendImportClosure(moduleRoot, modulePath, backend string, dirs *importDirCache) ([]string, error) {
 	seen := map[string]bool{}
 	files := map[string]bool{}
 	queue := []string{path.Join("cmd", backend)}
@@ -169,14 +197,12 @@ func backendImportClosure(moduleRoot, modulePath, backend string) ([]string, err
 		}
 		seen[dir] = true
 		for _, goos := range []string{"linux", "darwin"} {
-			ctx := build.Default
-			ctx.GOOS = goos
-			pkg, err := ctx.ImportDir(filepath.Join(moduleRoot, filepath.FromSlash(dir)), 0)
+			pkg, err := dirs.importDir(moduleRoot, dir, goos)
 			if err != nil {
-				if _, ok := err.(*build.NoGoError); ok {
-					continue
-				}
-				return nil, fmt.Errorf("%s (GOOS=%s): %w", dir, goos, err)
+				return nil, err
+			}
+			if pkg == nil {
+				continue
 			}
 			for _, f := range append(append([]string{}, pkg.GoFiles...), pkg.CgoFiles...) {
 				files[path.Join(dir, f)] = true
@@ -215,6 +241,7 @@ func evaluateFilesetCoverage(moduleRoot string) ([]string, error) {
 	}
 	var violations []string
 	checked := 0
+	dirs := newImportDirCache()
 	for _, e := range entries {
 		// cmd/pg-connector itself is built from default.nix with whole ./cmd
 		// and ./pkg, so only the per-backend binaries are filtered.
@@ -232,7 +259,7 @@ func evaluateFilesetCoverage(moduleRoot string) ([]string, error) {
 			violations = append(violations, fmt.Sprintf("%s.nix: %v", name, err))
 			continue
 		}
-		files, err := backendImportClosure(moduleRoot, modulePath, name)
+		files, err := backendImportClosure(moduleRoot, modulePath, name, dirs)
 		if err != nil {
 			return nil, err
 		}
@@ -249,6 +276,21 @@ func evaluateFilesetCoverage(moduleRoot string) ([]string, error) {
 		return nil, fmt.Errorf("no cmd/pg-connector-* backends found; the test would pass vacuously")
 	}
 	return violations, nil
+}
+
+func TestBackendFilesetCoversImports(t *testing.T) {
+	t.Parallel()
+	moduleRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("resolve module root: %v", err)
+	}
+	violations, err := evaluateFilesetCoverage(moduleRoot)
+	if err != nil {
+		t.Fatalf("evaluate fileset coverage: %v", err)
+	}
+	for _, v := range violations {
+		t.Error(v)
+	}
 }
 
 const filesetFixtureNix = `{ lib, mkGoApp, ... }:

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -106,7 +107,11 @@ type taintFunc struct {
 // non-test files, the reason it is tainted.
 func computeTaint(root string) (map[guardFuncKey]string, error) {
 	modPath := readModulePath(root)
-	var funcs []taintFunc
+	type srcFile struct {
+		path string
+		src  []byte
+	}
+	var all []srcFile
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -125,14 +130,29 @@ func computeTaint(root string) (map[guardFuncKey]string, error) {
 		if err != nil {
 			return err
 		}
-		if !inDefaultBuild(src) {
-			return nil
+		if inDefaultBuild(src) {
+			all = append(all, srcFile{p, src})
 		}
-		f, err := parser.ParseFile(token.NewFileSet(), p, src, 0)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Only files that can seed taint (an exec.Command spelling, or package servetest)
+	// are parsed up front. A function is tainted only through a seed or through a call
+	// to a tainted function by name, so each later round parses just the files whose text
+	// names a function found tainted so far, until none are left. Every file not
+	// parsed has no seed and names no tainted function, so it cannot change the result.
+	parsed := make([]bool, len(all))
+	var funcs []taintFunc
+	parseOne := func(sf srcFile) []taintFunc {
+		var out []taintFunc
+		f, err := parser.ParseFile(token.NewFileSet(), sf.path, sf.src, parser.SkipObjectResolution)
 		if err != nil {
 			return nil // a file the toolchain would reject is not this guard's concern
 		}
-		rel, _ := filepath.Rel(root, filepath.Dir(p))
+		rel, _ := filepath.Rel(root, filepath.Dir(sf.path))
 		dir := filepath.ToSlash(rel)
 		aliases := moduleImportAliases(f, modPath)
 		for _, decl := range f.Decls {
@@ -163,13 +183,55 @@ func computeTaint(root string) (map[guardFuncKey]string, error) {
 				}
 				return true
 			})
-			funcs = append(funcs, tf)
+			out = append(out, tf)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		return out
 	}
+	parseBatch := func(idx []int) {
+		res := make([][]taintFunc, len(idx))
+		parallelDo(len(idx), func(j int) { res[j] = parseOne(all[idx[j]]) })
+		for _, r := range res {
+			funcs = append(funcs, r...)
+		}
+	}
+	var seedIdx []int
+	for i, sf := range all {
+		if bytes.Contains(sf.src, []byte("Command")) || bytes.Contains(sf.src, []byte("package servetest")) {
+			parsed[i] = true
+			seedIdx = append(seedIdx, i)
+		}
+	}
+	parseBatch(seedIdx)
+	var tainted map[guardFuncKey]string
+	for {
+		tainted = propagateTaint(funcs)
+		names := map[string]bool{}
+		for k := range tainted {
+			names[k.name] = true
+		}
+		var more []int
+		for i, sf := range all {
+			if parsed[i] {
+				continue
+			}
+			for n := range names {
+				if bytes.Contains(sf.src, []byte(n)) {
+					parsed[i] = true
+					more = append(more, i)
+					break
+				}
+			}
+		}
+		if len(more) == 0 {
+			return tainted, nil
+		}
+		parseBatch(more)
+	}
+}
+
+// propagateTaint seeds taint from the functions that carry a seed and spreads it to
+// every function that calls a tainted one, to a fixed point.
+func propagateTaint(funcs []taintFunc) map[guardFuncKey]string {
 	tainted := map[guardFuncKey]string{}
 	for _, tf := range funcs {
 		if tf.seed != "" {
@@ -191,13 +253,25 @@ func computeTaint(root string) (map[guardFuncKey]string, error) {
 			}
 		}
 	}
-	return tainted, nil
+	return tainted
 }
 
 // helperMarkers returns one reason per tainted function that the test file src
 // (in package directory dir, relative to the module root) calls. A qualified
 // servetest launcher call is left to integrationMarkers, which already reports it.
 func helperMarkers(name string, src []byte, dir, modPath string, tainted map[guardFuncKey]string) ([]string, error) {
+	// A call can only resolve to a tainted function whose name appears in the file's
+	// text, so a file naming none of them is not parsed.
+	named := false
+	for k := range tainted {
+		if bytes.Contains(src, []byte(k.name)) {
+			named = true
+			break
+		}
+	}
+	if !named {
+		return nil, nil
+	}
 	f, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
 	if err != nil {
 		return nil, err

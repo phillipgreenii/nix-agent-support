@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -10,9 +11,11 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -141,10 +144,18 @@ type ghFile struct {
 	aliases map[string]bool // names bound to exec.Command / exec.CommandContext
 }
 
+// ghRaw is one source file read but not yet parsed.
+type ghRaw struct {
+	rel string
+	src []byte
+}
+
 // ghExecFindings returns one line per exec of gh outside the choke points
 // under root: "rel:line: reason: source". Output is sorted.
 func ghExecFindings(root string) ([]string, error) {
 	pkgs := map[string]*ghPkg{}
+	read := map[string][]ghRaw{}
+	candidate := map[string]bool{}
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -167,12 +178,47 @@ func ghExecFindings(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, rel, src, parser.SkipObjectResolution)
-		if err != nil {
-			return fmt.Errorf("parse %s: %w", rel, err)
-		}
 		dir := filepath.Dir(rel)
+		read[dir] = append(read[dir], ghRaw{rel: rel, src: src})
+		if bytes.Contains(src, []byte(`"os/exec"`)) || bytes.Contains(src, []byte(`x/cmdrun"`)) {
+			candidate[dir] = true
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	// A directory none of whose files imports os/exec or x/cmdrun cannot produce a
+	// finding (every one of its files is skipped below), so it is never parsed. Parsing
+	// is the cost; reading is not.
+	var jobs []ghRaw
+	var dirs []string
+	for dir, raws := range read {
+		if !candidate[dir] {
+			continue
+		}
+		for _, raw := range raws {
+			jobs = append(jobs, raw)
+			dirs = append(dirs, dir)
+		}
+	}
+	type parsedFile struct {
+		fset *token.FileSet
+		f    *ast.File
+		err  error
+	}
+	results := make([]parsedFile, len(jobs))
+	parallelDo(len(jobs), func(i int) {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, jobs[i].rel, jobs[i].src, parser.SkipObjectResolution)
+		results[i] = parsedFile{fset, f, err}
+	})
+	for i, raw := range jobs {
+		fset, f, dir := results[i].fset, results[i].f, dirs[i]
+		if results[i].err != nil {
+			return nil, fmt.Errorf("parse %s: %w", raw.rel, results[i].err)
+		}
+		rel, src := raw.rel, raw.src
 		pk := pkgs[dir]
 		if pk == nil {
 			pk = &ghPkg{dir: dir, decls: map[string][]ast.Expr{}}
@@ -199,10 +245,6 @@ func ghExecFindings(root string) ([]string, error) {
 			}
 		}
 		pk.files = append(pk.files, gf)
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
 	}
 
 	var out []string
@@ -515,8 +557,37 @@ func foldString(e ast.Expr) (string, bool) {
 	return "", false
 }
 
+// TestGHExecChokePoint is the module-wide half of bead pg2-ilzq9's guarantee:
+// the four sites fixed there were fixed one at a time, and nothing stopped a
+// fifth from appearing. It asserts that `gh` is spawned from exactly the
+// choke points in ghChokePoints, one pair per backend that ports this
+// mechanism, and (bead pg2-9df7aq) that it is caught however the binary is
+// named: the literal, a const or var holding it, a multi-line or aliased
+// call, and — in pg-connector-github, whose binary is configured — ANY exec
+// outside the choke-point functions or any exec of a configured-binary value.
+//
+// Every other package reaches gh through a backend's own github.CLI
+// (Run/RunStdin, or Command for sites that wire up their own
+// stdout/stderr/dir), so a new direct exec here means an unauthenticated gh
+// became reachable again — which is what popped interactive auth screens
+// under the launchd sync agent.
+func TestGHExecChokePoint(t *testing.T) {
+	t.Parallel()
+	offenders, err := ghExecFindings(moduleRoot(t))
+	if err != nil {
+		t.Fatalf("scan module: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("gh is exec'd directly outside the protected choke point:\n  %s\n\n"+
+			"Route it through github.NewCLI(): Run/RunStdin for a whole invocation, or\n"+
+			"Command when the call site needs the *exec.Cmd (working directory, own\n"+
+			"stderr capture). See ghexec.go.",
+			strings.Join(offenders, "\n  "))
+	}
+}
+
 // moduleRoot walks up from the test's working directory to the directory holding
-// go.mod. Shared by TestGHExecChokePoint (arch_scan_integration_test.go) and TestNoGHStackMutatingArgv
+// go.mod. Shared by TestGHExecChokePoint above and TestNoGHStackMutatingArgv
 // (stack_readonly_test.go, same package).
 func moduleRoot(t *testing.T) string {
 	t.Helper()
@@ -814,4 +885,29 @@ func TestGHExecChokePointRealChokeFilesAreClean(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0], "ghexec.go:") || !strings.Contains(got[0], "r.bin") {
 		t.Fatalf("want exactly the planted exec flagged, got:\n  %s", strings.Join(got, "\n  "))
 	}
+}
+
+// parallelDo runs fn(0..n-1) on up to GOMAXPROCS goroutines and waits. The scans
+// below use it only for independent, read-only parsing.
+func parallelDo(n int, fn func(i int)) {
+	workers := runtime.GOMAXPROCS(0)
+	if workers > n {
+		workers = n
+	}
+	var wg sync.WaitGroup
+	next := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				fn(i)
+			}
+		}()
+	}
+	for i := 0; i < n; i++ {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
 }

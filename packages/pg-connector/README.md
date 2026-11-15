@@ -988,7 +988,7 @@ nice -n 10 go test -p 4 -count=1 -tags integration ./cmd/pg-connector-github/int
 ```
 
 Classification is per test, not per package: a pure-logic test next to a daemon test stays in the
-unit tier, in an untagged file. `TestUnitTierHasNoIntegrationTests` (`cmd/pg-connector/arch_scan_integration_test.go`, integration tier like the other whole-module scans; its fixture tests stay in the unit tier)
+unit tier, in an untagged file. `TestUnitTierHasNoIntegrationTests` (`cmd/pg-connector/unit_tier_guard_test.go`, unit tier, with its fixture tests; like `TestGHExecChokePoint` and `TestBackendFilesetCoversImports` it scans the whole module but is kept cheap: a file is parsed only when its text can carry a finding, the parses run in parallel, and `go/build` results are memoized across backends, about 0.2 s without `-race` and under 1.5 s with it)
 fails when an untagged test file starts the daemon, execs a built binary or Go tool, or execs a real
 external tool, and `nix build .#checks.<system>.pg-connector-integration-tests-gating` proves against
 the real `go` tool that the tag splits every integration package and that both builds vet. A fast
