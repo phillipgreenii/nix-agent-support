@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest"
 )
 
 // buildCCPool compiles the binary once into the test's temp dir.
@@ -166,4 +169,43 @@ func TestRunCCEnv_sandboxesHome(t *testing.T) {
 			t.Errorf("%s = %q, want real %q", k, got[k], strings.TrimSpace(string(want)))
 		}
 	}
+}
+
+// recorderSocketEnv starts a real recorder daemon in-process (the same
+// clienttest server internal/facts tests use) and returns the
+// PG_CLAUDE_CODE_RECORDER_SOCKET entry that points a ccpool subprocess at it.
+// ccpool reads session facts only through the recorder, so a real-ccpool test
+// without one fails with "the recorder is not available". The socket lives in a
+// short /tmp directory (unix socket paths are short on darwin), and the daemon
+// stops with the test.
+func recorderSocketEnv(t *testing.T) string {
+	t.Helper()
+	return "PG_CLAUDE_CODE_RECORDER_SOCKET=" + clienttest.Start(t).Socket
+}
+
+// recorderWatching is recorderSocketEnv for a test whose fake claude writes a
+// transcript under env.ClaudeDir: a background sweep (the daemon's own rescan
+// and parse, every 50 ms, until the test ends) puts each written line in the
+// feed deterministically, instead of depending on file-system event latency.
+func recorderWatching(t *testing.T) *clienttest.Env {
+	t.Helper()
+	e := clienttest.Start(t)
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(50 * time.Millisecond):
+				_ = e.Daemon.Watcher().Rescan()
+				_ = e.Daemon.Parser().Drain()
+			}
+		}
+	}()
+	// Registered after Start's own cleanup, so it runs first: the sweep stops
+	// before the daemon closes.
+	t.Cleanup(func() { close(done); <-finished })
+	return e
 }

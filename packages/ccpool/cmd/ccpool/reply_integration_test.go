@@ -28,7 +28,8 @@ func TestReply_returnsAssistantReply(t *testing.T) {
 	socket := "ccpool-replytest"
 	registerTmuxCleanup(t, socket)
 
-	transcript := filepath.Join(base, "t.jsonl")
+	rec := recorderWatching(t)
+	transcript := rec.Path("projects", rec.Project, "11111111-1111-4111-8111-111111111111.jsonl")
 	cfgDir := filepath.Join(base, "cfg", "ccpool")
 	_ = os.MkdirAll(cfgDir, 0o700)
 	_ = os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(`
@@ -38,7 +39,7 @@ socket = "`+socket+`"
 bin = "`+fake+`"
 plugin_dir = "/unused"
 [wait]
-timeout = "10s"
+timeout = "60s"
 `), 0o600)
 
 	env := append(
@@ -46,6 +47,7 @@ timeout = "10s"
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		"PG_CLAUDE_CODE_RECORDER_SOCKET="+rec.Socket,
 		"HOME="+base,
 		"CCPOOL_BIN="+ccpool,
 		"FAKE_CLAUDE_TRANSCRIPT="+transcript, // both new + reply share this transcript

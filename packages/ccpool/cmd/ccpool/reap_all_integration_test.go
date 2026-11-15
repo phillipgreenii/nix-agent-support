@@ -57,6 +57,7 @@ func TestReapAll_gcAndSkip(t *testing.T) {
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		recorderSocketEnv(t),
 		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
 		"CCPOOL_REGISTRY_DIR="+reg,
 	)
@@ -143,6 +144,7 @@ timeout = "10s"
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		recorderSocketEnv(t),
 		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
 		"CCPOOL_REGISTRY_DIR="+reg,
 		"HOME="+base, "CCPOOL_BIN="+ccpool, "PATH="+bin+":"+os.Getenv("PATH"),
@@ -272,6 +274,7 @@ func TestReapAll_closureNarrationResolvesEachPoolsOwnLabels(t *testing.T) {
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		recorderSocketEnv(t),
 		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
 		"CCPOOL_REGISTRY_DIR="+filepath.Join(base, "reg"),
 		"HOME="+base, "CCPOOL_BIN="+ccpool, "PATH="+bin+":"+os.Getenv("PATH"),

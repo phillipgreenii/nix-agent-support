@@ -44,6 +44,7 @@ socket = "`+socket+`"
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		recorderSocketEnv(t),
 		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
 		"HOME="+base, "PATH="+bin+":"+os.Getenv("PATH"),
 	)
@@ -121,6 +122,7 @@ func TestUsageGate_endToEndRefusesWhileWindowHit(t *testing.T) {
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		recorderSocketEnv(t),
 		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
 		"HOME="+base, "PATH="+bin+":"+os.Getenv("PATH"),
 	)

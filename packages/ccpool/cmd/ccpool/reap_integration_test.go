@@ -46,6 +46,7 @@ timeout = "10s"
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		recorderSocketEnv(t),
 		"XDG_RUNTIME_DIR="+filepath.Join(base, "run"),
 		"HOME="+base, "CCPOOL_BIN="+ccpool, "PATH="+bin+":"+os.Getenv("PATH"),
 	)

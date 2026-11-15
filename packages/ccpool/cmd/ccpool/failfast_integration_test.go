@@ -77,6 +77,7 @@ func newFFPool(t *testing.T, claudeBin, timeout string) *ffPool {
 		"XDG_CONFIG_HOME="+filepath.Join(base, "cfg"),
 		"XDG_DATA_HOME="+filepath.Join(base, "data"),
 		"XDG_STATE_HOME="+filepath.Join(base, "state"),
+		recorderSocketEnv(t),
 		"HOME="+base,
 		"CCPOOL_BIN="+ccpool,
 		"FAKE_CLAUDE_TRANSCRIPT="+filepath.Join(base, "t.jsonl"),

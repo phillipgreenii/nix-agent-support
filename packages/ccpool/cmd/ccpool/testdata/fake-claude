@@ -3,6 +3,7 @@
 # assistant reply to the transcript and fires Stop (one "turn" per line).
 set -uo pipefail
 
+n=0
 uuid=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -25,6 +26,8 @@ while IFS= read -r line; do
   case "$line" in
     *exit*) exit 0 ;;
   esac
-  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"OK-DONE"}]}}\n' >> "$transcript"
+  n=$((n + 1))
+  ts="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+  printf '{"type":"assistant","uuid":"a-%s","sessionId":"%s","timestamp":"%s","message":{"id":"m-%s","role":"assistant","content":[{"type":"text","text":"OK-DONE"}],"usage":{"output_tokens":2}}}\n' "$n" "$(basename "$transcript" .jsonl)" "$ts" "$n" >> "$transcript"
   payload Stop | "$cc" hook stop || true
 done
