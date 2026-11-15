@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/phillipgreenii/x/jsonllogger"
 	"github.com/phillipgreenii/x/lifecycle"
 	"go.opentelemetry.io/otel/metric"
 
@@ -1241,7 +1242,7 @@ func prepareRun(ctx context.Context, sel runSelectors) (preparedRun, int) {
 	// goroutine dump). The retired PR tool's own internal/sync/daemon.go sidesteps this
 	// the same way (NewTextHandler/NewJSONHandler build a handler directly,
 	// never touch slog.Default()) — mirrored here rather than rediscovered.
-	slog.SetDefault(slog.New(telemetry.Fanout(
+	slog.SetDefault(slog.New(jsonllogger.Fanout(
 		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}),
 		telemetry.NewSlogHandler(),
 	)))
@@ -1973,7 +1974,6 @@ func runDaemon(ctx context.Context, g *lifecycle.Group, pr preparedRun, drainTim
 			slog.Warn("run: metrics flush failed", "err", err)
 		}
 	}()
-
 	// The first dispatch pass of this process runs BEFORE its first producer tick
 	// (DEC-EVENT-5, bead pg2-x3zkb). A fresh process has no last-fire time for any
 	// source, so its first tick polls every one of them, one after another, and
