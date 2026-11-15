@@ -27,6 +27,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -419,6 +420,63 @@ type verbFixture struct {
 	serveLog string
 }
 
+var (
+	verbSeedOnce  sync.Once
+	verbSeedBytes []byte
+	verbSeedErr   error
+)
+
+// seededVerbStore returns the bytes of the closed schema-2 store every verb
+// fixture starts from (a pr, its interpretation, an issue, another issue and
+// a thread), built once through the real store writers; each fixture writes
+// its own copy, so a verb that writes cannot touch another's. Building it per
+// verb was most of the walk's cost under -race.
+func seededVerbStore() ([]byte, error) {
+	verbSeedOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "pg-desk-verb-seed-")
+		if err != nil {
+			verbSeedErr = err
+			return
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		path := filepath.Join(dir, "store.db")
+		st, err := store.Open(path)
+		if err != nil {
+			verbSeedErr = fmt.Errorf("open store: %w", err)
+			return
+		}
+		ctx := context.Background()
+		if err := st.UpsertEntityForTest(ctx, store.Entity{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
+			verbSeedErr = fmt.Errorf("seed entity: %w", err)
+			return
+		}
+		if err := st.UpsertInterpretation(ctx, store.Interpretation{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
+			verbSeedErr = fmt.Errorf("seed interpretation: %w", err)
+			return
+		}
+		if v, err := st.SchemaVersion(ctx); err != nil || v != store.NewSchemaVersion {
+			verbSeedErr = fmt.Errorf("fixture store is at schema %d (err %v), want %d", v, err, store.NewSchemaVersion)
+			return
+		}
+		for _, e := range []store.Entity{
+			{Repo: testRepo, EntityType: "issue", EntityID: testIssue, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
+			{Repo: testRepo, EntityType: "issue", EntityID: "other-1", Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
+			{Repo: testRepo, EntityType: "thread", EntityID: testThread, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
+		} {
+			if _, err := st.WriteEntityWithLog(ctx, e, 0, []string{"created"}, "poll", "2026-09-16T00:00:00Z"); err != nil {
+				verbSeedErr = fmt.Errorf("seed %s: %w", e.EntityID, err)
+				return
+			}
+		}
+		if err := st.Close(); err != nil {
+			verbSeedErr = err
+			return
+		}
+		verbSeedBytes, verbSeedErr = os.ReadFile(path)
+	})
+	return verbSeedBytes, verbSeedErr
+}
+
 func newVerbFixture(t *testing.T) *verbFixture {
 	t.Helper()
 	dir := t.TempDir()
@@ -428,29 +486,11 @@ func newVerbFixture(t *testing.T) *verbFixture {
 		t.Fatal(err)
 	}
 	store.SetSynchronousForTests("OFF")
-	st, err := store.Open(storePath)
+	seed, err := seededVerbStore()
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatal(err)
 	}
-	if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
-	if err := st.UpsertInterpretation(context.Background(), store.Interpretation{Repo: testRepo, EntityType: entityTypePR, EntityID: testPR, Degraded: true, AsOf: "2026-09-16T00:00:00Z"}); err != nil {
-		t.Fatalf("seed interpretation: %v", err)
-	}
-	if v, err := st.SchemaVersion(context.Background()); err != nil || v != store.NewSchemaVersion {
-		t.Fatalf("fixture store is at schema %d (err %v), want %d", v, err, store.NewSchemaVersion)
-	}
-	for _, e := range []store.Entity{
-		{Repo: testRepo, EntityType: "issue", EntityID: testIssue, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
-		{Repo: testRepo, EntityType: "issue", EntityID: "other-1", Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
-		{Repo: testRepo, EntityType: "thread", EntityID: testThread, Facts: `{}`, AsOf: "2026-09-16T00:00:00Z"},
-	} {
-		if _, err := st.WriteEntityWithLog(context.Background(), e, 0, []string{"created"}, "poll", "2026-09-16T00:00:00Z"); err != nil {
-			t.Fatalf("seed %s: %v", e.EntityID, err)
-		}
-	}
-	if err := st.Close(); err != nil {
+	if err := os.WriteFile(storePath, seed, 0o644); err != nil {
 		t.Fatal(err)
 	}
 

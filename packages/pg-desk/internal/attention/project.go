@@ -128,6 +128,18 @@ func Project(ctx context.Context, r Reader, repo string, cfg *config.Config) ([]
 	if err != nil {
 		return nil, fmt.Errorf("attention: read interpretations: %w", err)
 	}
+	// One read of the entity table serves both the per-row lookup below and the
+	// entity-only views after it (a GetEntity per interpretation row was a
+	// query per row).
+	ents, err := r.ListEntities(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("attention: read entities: %w", err)
+	}
+	type entKey struct{ repo, typ, id string }
+	byKey := make(map[entKey]*store.Entity, len(ents))
+	for i := range ents {
+		byKey[entKey{ents[i].Repo, ents[i].EntityType, ents[i].EntityID}] = &ents[i]
+	}
 	var out []*View
 	seen := map[string]bool{}
 	for _, row := range rows {
@@ -152,24 +164,17 @@ func Project(ctx context.Context, r Reader, repo string, cfg *config.Config) ([]
 				v.Degraded = true
 			}
 		}
-		ent, found, gerr := r.GetEntity(ctx, row.Repo, row.EntityType, row.EntityID)
-		if gerr != nil {
-			return nil, fmt.Errorf("attention: read entity %s:%s: %w", row.EntityType, row.EntityID, gerr)
-		}
-		if found {
+		if ent, found := byKey[entKey{row.Repo, row.EntityType, row.EntityID}]; found {
 			if ent.Inactive {
 				continue
 			}
-			v.Entity = &ent
+			c := *ent
+			v.Entity = &c
 		}
 		seen[v.Ref()] = true
 		out = append(out, v)
 	}
 
-	ents, err := r.ListEntities(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("attention: read entities: %w", err)
-	}
 	for i := range ents {
 		ent := ents[i]
 		if ent.Repo != repo || ent.EntityType == "pr" || ent.Inactive || seen[Ref(ent.EntityType, ent.EntityID)] {

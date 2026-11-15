@@ -148,6 +148,12 @@ func openDB(path string) (*Store, error) {
 // at schema version 2, a version-2 store is accepted, and a store at the
 // retired version 1 or at a version newer than this binary is refused.
 func Open(path string) (*Store, error) {
+	if copied, err := openFromTemplate(path); err != nil {
+		return nil, err
+	} else if copied {
+		// The copy is a closed store Open already created and checked.
+		return openDB(path)
+	}
 	s, err := openDB(path)
 	if err != nil {
 		return nil, err

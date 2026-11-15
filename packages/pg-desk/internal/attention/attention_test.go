@@ -634,10 +634,12 @@ func TestInactiveEntitiesAreNotProjected(t *testing.T) {
 
 type inactiveReader struct{ Reader }
 
-func (i inactiveReader) GetEntity(ctx context.Context, repo, typ, id string) (store.Entity, bool, error) {
-	e, ok, err := i.Reader.GetEntity(ctx, repo, typ, id)
-	e.Inactive = true
-	return e, ok, err
+func (i inactiveReader) ListEntities(ctx context.Context) ([]store.Entity, error) {
+	es, err := i.Reader.ListEntities(ctx)
+	for k := range es {
+		es[k].Inactive = true
+	}
+	return es, err
 }
 
 func TestRepoFilter(t *testing.T) {

@@ -34,6 +34,11 @@ func TestMain(m *testing.M) {
 	// No test execs a real pg-router: the selection announcement is a no-op
 	// unless the test installs its own focusInject (focus_announce_test.go).
 	focusInject = func(context.Context, string) error { return nil }
+	// Hundreds of tests each open a fresh store; build the schema once and copy it.
+	store.SetSynchronousForTests("OFF")
+	if err := store.EnableNewStoreTemplateForTests(); err != nil {
+		panic(err)
+	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
