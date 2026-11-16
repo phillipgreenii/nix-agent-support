@@ -3,7 +3,9 @@ package validate
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,25 +24,7 @@ func Load(evidenceDir, stagingPath string) (Input, error) {
 	if err := json.Unmarshal(b, &in.Evidence); err != nil {
 		return in, fmt.Errorf("evidence.json: %w", err)
 	}
-	f, err := os.Open(filepath.Join(evidenceDir, "query-log.jsonl"))
-	if err != nil {
-		return in, err
-	}
-	defer func() { _ = f.Close() }()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 1<<20), 16<<20)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var q QueryEntry
-		if err := json.Unmarshal([]byte(line), &q); err != nil {
-			return in, fmt.Errorf("query-log.jsonl: %w", err)
-		}
-		in.QueryLog = append(in.QueryLog, q)
-	}
-	if err := sc.Err(); err != nil {
+	if err := loadQueryLog(evidenceDir, &in); err != nil {
 		return in, err
 	}
 	in.QueryResults = map[string]QueryResult{}
@@ -67,6 +51,33 @@ func Load(evidenceDir, stagingPath string) (Input, error) {
 		in.RawText = raw
 	}
 	return in, nil
+}
+
+// loadQueryLog reads query-log.jsonl. The file is created by the first
+// query, so an analyst that made none leaves it absent: that is an empty log.
+func loadQueryLog(evidenceDir string, in *Input) error {
+	f, err := os.Open(filepath.Join(evidenceDir, "query-log.jsonl"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var q QueryEntry
+		if err := json.Unmarshal([]byte(line), &q); err != nil {
+			return fmt.Errorf("query-log.jsonl: %w", err)
+		}
+		in.QueryLog = append(in.QueryLog, q)
+	}
+	return sc.Err()
 }
 
 // readTree reads a file, or every regular file under a directory, as text.

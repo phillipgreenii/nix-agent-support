@@ -318,3 +318,33 @@ func hasField(fs []Failure, fld string) bool {
 	}
 	return false
 }
+
+// An analyst that makes no queries never creates query-log.jsonl; Load must
+// treat the absent file as an empty log, not fail the run.
+func TestLoadWithoutQueryLogIsEmptyLog(t *testing.T) {
+	dir := t.TempDir()
+	ev, err := os.ReadFile(filepath.Join(goldenDir, "evidence.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "evidence.json"), ev, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, err := Load(dir, "")
+	if err != nil {
+		t.Fatalf("Load with no query-log.jsonl: %v", err)
+	}
+	if len(in.QueryLog) != 0 || len(in.QueryResults) != 0 {
+		t.Fatalf("want empty query log and results, got %d and %d", len(in.QueryLog), len(in.QueryResults))
+	}
+}
+
+func TestLoadMalformedQueryLogStillFails(t *testing.T) {
+	dir := t.TempDir()
+	ev, _ := os.ReadFile(filepath.Join(goldenDir, "evidence.json"))
+	_ = os.WriteFile(filepath.Join(dir, "evidence.json"), ev, 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "query-log.jsonl"), []byte("{not json\n"), 0o600)
+	if _, err := Load(dir, ""); err == nil {
+		t.Fatal("malformed query log must still fail")
+	}
+}

@@ -222,12 +222,15 @@ func Run(ctx context.Context, o Options) ([]Row, error) {
 
 	since, until := stamp(o.Since), stamp(o.Until)
 	var rows []Row
+	// One scan of the table serves every selected query: the decision table
+	// has no index on outcome or created_at, so each separate query would be
+	// a full scan of a multi-gigabyte file.
+	byQuery, err := runQueries(ctx, db, qs, since, until, inc, exc)
+	if err != nil {
+		return nil, fmt.Errorf("query decisions: %w", err)
+	}
 	for _, q := range qs {
-		groups, err := runQuery(ctx, db, q, since, until, inc, exc)
-		if err != nil {
-			return nil, fmt.Errorf("query %s: %w", q.Name, err)
-		}
-		for _, g := range groups {
+		for _, g := range byQuery[q.Name] {
 			samples := make([]string, 0, len(g.samples))
 			for _, s := range g.samples {
 				samples = append(samples, fmt.Sprintf("decision:%d session:%s", s.id, s.session))
@@ -267,23 +270,36 @@ func Run(ctx context.Context, o Options) ([]Row, error) {
 	return rows, nil
 }
 
-func runQuery(ctx context.Context, db *sql.DB, q query, since, until string, inc, exc []string) ([]*agg, error) {
-	r, err := db.QueryContext(ctx, `SELECT id, session_id, cwd, tool_name, tool_input_json, created_at
+// runQueries scans the decision table once and groups matching rows per
+// query name. tool_input_json (the large column) is read only for Bash rows,
+// the only tools whose subject key depends on it.
+func runQueries(ctx context.Context, db *sql.DB, qs []query, since, until string, inc, exc []string) (map[string][]*agg, error) {
+	byOutcome := map[string]query{}
+	args := []any{}
+	marks := make([]string, 0, len(qs))
+	for _, q := range qs {
+		byOutcome[q.Outcome] = q
+		marks = append(marks, "?")
+		args = append(args, q.Outcome)
+	}
+	args = append(args, since, until)
+	r, err := db.QueryContext(ctx, `SELECT id, session_id, cwd, tool_name,
+		CASE WHEN tool_name = 'Bash' THEN tool_input_json ELSE '' END, created_at, outcome
 		FROM tool_decisions
-		WHERE excluded = 0 AND outcome = ? AND created_at >= ? AND created_at < ?
-		ORDER BY id`, q.Outcome, since, until)
+		WHERE excluded = 0 AND outcome IN (`+strings.Join(marks, ",")+`) AND created_at >= ? AND created_at < ?
+		ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = r.Close() }()
 
-	byKey := map[string]*agg{}
+	byKey := map[string]map[string]*agg{}
 	for r.Next() {
 		var (
-			id                                     int64
-			session, cwd, tool, inputJSON, created string
+			id                                              int64
+			session, cwd, tool, inputJSON, created, outcome string
 		)
-		if err := r.Scan(&id, &session, &cwd, &tool, &inputJSON, &created); err != nil {
+		if err := r.Scan(&id, &session, &cwd, &tool, &inputJSON, &created, &outcome); err != nil {
 			return nil, err
 		}
 		if len(inc) > 0 && !underAny(cwd, inc) {
@@ -292,11 +308,17 @@ func runQuery(ctx context.Context, db *sql.DB, q query, since, until string, inc
 		if len(exc) > 0 && underAny(cwd, exc) {
 			continue
 		}
+		q := byOutcome[outcome]
 		subject := SubjectKey(tool, inputJSON)
-		g := byKey[subject]
+		m := byKey[q.Name]
+		if m == nil {
+			m = map[string]*agg{}
+			byKey[q.Name] = m
+		}
+		g := m[subject]
 		if g == nil {
 			g = &agg{kind: q.Name, subject: subject, queryName: q.Name, sessions: map[string]bool{}, first: created, last: created}
-			byKey[subject] = g
+			m[subject] = g
 		}
 		g.count++
 		g.sessions[session] = true
@@ -313,9 +335,11 @@ func runQuery(ctx context.Context, db *sql.DB, q query, since, until string, inc
 	if err := r.Err(); err != nil {
 		return nil, err
 	}
-	out := make([]*agg, 0, len(byKey))
-	for _, g := range byKey {
-		out = append(out, g)
+	out := map[string][]*agg{}
+	for name, m := range byKey {
+		for _, g := range m {
+			out[name] = append(out[name], g)
+		}
 	}
 	return out, nil
 }

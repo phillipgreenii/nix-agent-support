@@ -145,7 +145,7 @@ func Providers() []Provider {
 		},
 		{
 			Name: "hook-decisions", Command: []string{"pg-review-provider-hook-decisions"},
-			SchemaVersion: 1, TimeoutSeconds: 60,
+			SchemaVersion: 1, TimeoutSeconds: 300, // multi-GB decision table, no index on outcome/created_at: one scan
 			Queries: map[string][]string{
 				"agent-workflow": {"denied", "failed", "rejected"},
 			},
