@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,7 +127,10 @@ func DSN(o Options) string {
 	if !o.NoForeignKeys {
 		q = append(q, "_pragma=foreign_keys(ON)")
 	}
-	return "file:" + o.Path + "?" + strings.Join(q, "&")
+	// The path is a URI path: a "#" or "?" in it (a Go test names its temp dir
+	// after the subtest) would otherwise end the path early and open a
+	// different file, so escape it.
+	return "file:" + (&url.URL{Path: o.Path}).EscapedPath() + "?" + strings.Join(q, "&")
 }
 
 // Open opens the database described by o and pings it, so a path that is not a

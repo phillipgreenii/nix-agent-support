@@ -110,3 +110,22 @@ func TestOverrides(t *testing.T) {
 		t.Fatalf("overrides not applied: %+v", got)
 	}
 }
+
+// A path holding URI metacharacters opens that exact file, not a prefix of it.
+func TestOpenPathWithURIMetacharacters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a#b", "c?d e%41.db")
+	db, err := Open(Standard(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE t (x INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the store was not created at the requested path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "c")); err == nil {
+		t.Fatalf("a truncated path was created")
+	}
+}
