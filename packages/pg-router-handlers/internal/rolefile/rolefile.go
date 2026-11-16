@@ -20,6 +20,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
+	"github.com/phillipgreenii/pg-router-handlers/internal/gwm"
 	"github.com/phillipgreenii/pg-router-handlers/internal/prompt"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 )
@@ -220,6 +221,24 @@ func DecodeRole(path string, data []byte, checkSessionEnv bool) (roles.Role, err
 		}
 		if err := executor.ValidatePrefetch(*pf); err != nil {
 			return roles.Role{}, fmt.Errorf("role config %s: isolation.%w", path, err)
+		}
+	}
+	// branchAccess, worktreeLeaseTTL and parkedTTL configure the pg-gwm lease of
+	// a worktree-isolation role.
+	{
+		iso := rf.CCPool.Isolation
+		switch iso.BranchAccess {
+		case "", roles.BranchWrite, roles.BranchRead:
+		default:
+			return roles.Role{}, fmt.Errorf("role config %s: isolation.branchAccess must be %q or %q, got %q", path, roles.BranchWrite, roles.BranchRead, iso.BranchAccess)
+		}
+		for name, v := range map[string]string{"worktreeLeaseTTL": iso.WorktreeLeaseTTL, "parkedTTL": iso.ParkedTTL} {
+			if v == "" {
+				continue
+			}
+			if d, err := gwm.ParseTTL(v); err != nil || d <= 0 {
+				return roles.Role{}, fmt.Errorf("role config %s: isolation.%s must be a positive duration like 30m or 3d, got %q", path, name, v)
+			}
 		}
 	}
 	// isolation.repos and isolation.fallback (bead pg2-b49ydt) belong to the

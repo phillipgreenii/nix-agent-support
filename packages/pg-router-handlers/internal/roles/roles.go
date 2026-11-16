@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
+	"github.com/phillipgreenii/pg-router-handlers/internal/gwm"
 )
 
 // Role is one dispatched participant role, resolved from this module's own
@@ -160,6 +161,50 @@ type IsolationConfig struct {
 	// clock. Valid only with the "worktree" strategy (anything else would
 	// check out into a directory this handler does not own).
 	Prefetch *PrefetchConfig
+	// BranchAccess says whether a worktree-isolation role commits: "write" (or
+	// empty, the default) leases the worktree on pg-router/<item id>; "read"
+	// leases it detached, so the role cannot move a branch. Worktree isolation
+	// only.
+	BranchAccess string
+	// WorktreeLeaseTTL is the pg-gwm lease the dispatch takes and renews while
+	// the session works, in pg-gwm's duration grammar ("30m"). Empty means
+	// DefaultWorktreeLeaseTTL. Worktree isolation only.
+	WorktreeLeaseTTL string
+	// ParkedTTL is the lease a session keeps while it is parked (still live when
+	// the dispatch returns), in pg-gwm's grammar ("3d"). Empty means
+	// DefaultParkedTTL. Worktree isolation only.
+	ParkedTTL string
+}
+
+const (
+	// BranchWrite and BranchRead are the BranchAccess values.
+	BranchWrite = "write"
+	BranchRead  = "read"
+	// DefaultWorktreeLeaseTTL and DefaultParkedTTL are the lease TTL defaults.
+	DefaultWorktreeLeaseTTL = 30 * time.Minute
+	DefaultParkedTTL        = 72 * time.Hour
+)
+
+// ReadOnly reports whether the role leases its worktree detached.
+func (c IsolationConfig) ReadOnly() bool { return c.BranchAccess == BranchRead }
+
+// LeaseTTL is the parsed WorktreeLeaseTTL, or the default when empty or invalid
+// (the role file loader rejects an invalid one).
+func (c IsolationConfig) LeaseTTL() time.Duration {
+	return ttlOr(c.WorktreeLeaseTTL, DefaultWorktreeLeaseTTL)
+}
+
+// ParkTTL is the parsed ParkedTTL, or the default when empty or invalid.
+func (c IsolationConfig) ParkTTL() time.Duration { return ttlOr(c.ParkedTTL, DefaultParkedTTL) }
+
+func ttlOr(s string, def time.Duration) time.Duration {
+	if s == "" {
+		return def
+	}
+	if d, err := gwm.ParseTTL(s); err == nil && d > 0 {
+		return d
+	}
+	return def
 }
 
 // PrefetchConfig configures the handler-side pre-fetch of a worktree-isolation

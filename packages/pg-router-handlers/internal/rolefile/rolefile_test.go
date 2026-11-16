@@ -822,3 +822,32 @@ func TestDecodeRole_rejectsActorWithEmptyPart(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeRole_gwmLeaseFields(t *testing.T) {
+	iso := `{"Type":"worktree","BranchAccess":"read","WorktreeLeaseTTL":"45m","ParkedTTL":"3d"}`
+	r, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(iso)))
+	if err != nil {
+		t.Fatalf("DecodeRole: %v", err)
+	}
+	c := r.CCPool.Isolation
+	if !c.ReadOnly() || c.LeaseTTL() != 45*time.Minute || c.ParkTTL() != 72*time.Hour {
+		t.Errorf("isolation = %+v", c)
+	}
+	d, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(`{"Type":"worktree"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := d.CCPool.Isolation; c.ReadOnly() || c.LeaseTTL() != 30*time.Minute || c.ParkTTL() != 72*time.Hour {
+		t.Errorf("defaults = %+v", c)
+	}
+	for name, bad := range map[string]string{
+		"access":  `{"BranchAccess":"rw"}`,
+		"lease":   `{"WorktreeLeaseTTL":"0m"}`,
+		"parked":  `{"ParkedTTL":"3x"}`,
+		"garbage": `{"WorktreeLeaseTTL":"soon"}`,
+	} {
+		if _, err := loadRoleFile(mustWriteRoleFile(t, prefetchRoleBody(bad))); err == nil {
+			t.Errorf("%s: accepted %s", name, bad)
+		}
+	}
+}
