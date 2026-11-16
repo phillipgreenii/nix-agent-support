@@ -322,6 +322,14 @@ func (l *lagState) Generations() map[int64][]GenLag {
 // longer than one pass over the generations (Generations also sorts per file).
 func (l *lagState) CurrentGenerations(cur map[int64]int) map[int64]GenLag {
 	out := make(map[int64]GenLag, len(cur))
+	l.CurrentGenerationsInto(cur, out)
+	return out
+}
+
+// CurrentGenerationsInto is CurrentGenerations filling a caller-owned map (not
+// cleared here), so a caller that repeats the lookup can reuse one map and its
+// buckets instead of allocating a per-file map every call.
+func (l *lagState) CurrentGenerationsInto(cur map[int64]int, out map[int64]GenLag) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for k, lg := range l.gens {
@@ -329,7 +337,6 @@ func (l *lagState) CurrentGenerations(cur map[int64]int) map[int64]GenLag {
 			out[k.file] = l.genLag(k, lg)
 		}
 	}
-	return out
 }
 
 // FileGenerations is Generations for one file.

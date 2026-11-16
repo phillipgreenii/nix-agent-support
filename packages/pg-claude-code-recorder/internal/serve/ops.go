@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/parser"
@@ -18,6 +19,41 @@ import (
 // behindAfter is the copy and parse lag, in seconds, that makes the verdict
 // "behind" (healthy means both lags are under 60 seconds).
 const behindAfter = 60.0
+
+// lagScratch holds the per-file maps of one coverage pass (file -> current
+// generation, file -> that generation's lag entry), reused across passes.
+type lagScratch struct {
+	cur  map[int64]int
+	gens map[int64]parser.GenLag
+}
+
+// lagScratchSlot keeps one idle scratch between passes (not a sync.Pool, which
+// the GC and the race detector may empty); a pass that finds it taken makes its
+// own.
+var lagScratchSlot struct {
+	mu   sync.Mutex
+	idle *lagScratch
+}
+
+func getLagScratch() *lagScratch {
+	lagScratchSlot.mu.Lock()
+	s := lagScratchSlot.idle
+	lagScratchSlot.idle = nil
+	lagScratchSlot.mu.Unlock()
+	if s == nil {
+		s = &lagScratch{cur: map[int64]int{}, gens: map[int64]parser.GenLag{}}
+	}
+	return s
+}
+
+// release empties both maps (keeping their buckets) and parks the scratch.
+func (s *lagScratch) release() {
+	clear(s.cur)
+	clear(s.gens)
+	lagScratchSlot.mu.Lock()
+	lagScratchSlot.idle = s
+	lagScratchSlot.mu.Unlock()
+}
 
 type genKey struct {
 	file int64
@@ -150,11 +186,15 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 	// Each file's current-generation lag entry, one lock acquisition. Both modes
 	// read UnparsedSince from it (the parse-lag seconds), so statAll needs it
 	// too, but never the whole per-generation copy.
-	curGen := make(map[int64]int, files.Len())
+	// Both per-file maps come from a parked scratch and are cleared, not rebuilt, so a
+	// steady-state coverage pass reuses their buckets.
+	scratch := getLagScratch()
+	defer scratch.release()
+	curGen, lagGens := scratch.cur, scratch.gens
 	for f := range files.All() {
 		curGen[f.ID] = f.CurGen
 	}
-	lagGens := d.lag.CurrentGenerations(curGen)
+	d.lag.CurrentGenerationsInto(curGen, lagGens)
 	exceptions := 0
 	now := d.clock.Now()
 	var cov wire.Coverage

@@ -1188,9 +1188,17 @@ func changedAgainst(st store.Settled, c *conv, offset func(store.File) (int64, b
 	return false
 }
 
+// hashBufPool reuses the 1 MiB read buffer across hashReader calls.
+var hashBufPool = sync.Pool{New: func() any {
+	b := make([]byte, 1<<20)
+	return &b
+}}
+
 func hashReader(r io.ReaderAt, n int64) (uint64, error) {
 	h := xxhash.New()
-	buf := make([]byte, 1<<20)
+	bp := hashBufPool.Get().(*[]byte)
+	defer hashBufPool.Put(bp)
+	buf := *bp
 	for off := int64(0); off < n; {
 		m := int64(len(buf))
 		if n-off < m {

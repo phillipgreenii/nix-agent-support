@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -129,4 +130,39 @@ func TestCollectPoolMetricsPublishesBothPools(t *testing.T) {
 		}
 	}
 	_ = store.DBName
+}
+
+// A steady-state lazy coverage pass must not allocate the per-file lag maps
+// each time: the per-pass allocation count and bytes stay under a bound that
+// the former per-call map build (one entry per file) would exceed by far.
+func TestCoverageLazyDoesNotRebuildPerFileLagMaps(t *testing.T) {
+	e := newEnv(t, false)
+	d := e.open(t)
+	seedFiles(t, d, e.claude, 2000)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d = e.open(t)
+	defer func() { _ = d.Close() }()
+	ctx := context.Background()
+	run := func() {
+		if _, err := d.computeCoverageFrom(ctx, &d.st.Reader, "summary", false, statLazy, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run() // warm the status cache and the pooled maps
+	var before, after runtime.MemStats
+	const passes = 10
+	runtime.ReadMemStats(&before)
+	for i := 0; i < passes; i++ {
+		run()
+	}
+	runtime.ReadMemStats(&after)
+	perPass := (after.TotalAlloc - before.TotalAlloc) / passes
+	t.Logf("bytes per lazy coverage pass (2000 files): %d", perPass)
+	// Two per-file maps of 2000 entries cost well over 100 KiB per pass.
+	const maxBytes = 40 << 10
+	if perPass > maxBytes {
+		t.Fatalf("a lazy coverage pass allocated %d bytes, want at most %d", perPass, maxBytes)
+	}
 }
