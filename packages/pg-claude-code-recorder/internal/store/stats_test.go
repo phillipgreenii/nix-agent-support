@@ -194,7 +194,12 @@ func TestCollectStatsSamplesIndexesInsteadOfScanningWhole(t *testing.T) {
 // removed; those are guarded by TestCollectStatsSamplesIndexesInsteadOfScanningWhole
 // and TestCollectStatsSkipsSlowStepWithoutStamping. The scaled version is
 // TestSoakFirstCollectionDoesNotBlockWriterNearBusyTimeout behind the soak tag.
+// The pause between the 18 steps (100 ms each, 1.8 s of deliberate waiting) is
+// shortened here: the smoke checks the writer, not the pacing; the soak keeps it.
 func TestFirstCollectionDoesNotBlockWriterNearBusyTimeout(t *testing.T) {
+	old := statsPause
+	statsPause = time.Millisecond
+	defer func() { statsPause = old }()
 	firstCollectionWriterWait(t, 1000)
 }
 
