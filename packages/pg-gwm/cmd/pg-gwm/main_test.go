@@ -2,65 +2,41 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/phillipgreenii/pg-gwm/internal/pool"
 )
 
-type fixedClock struct{ t time.Time }
-
-func (c fixedClock) Now() time.Time { return c.t }
-
-func TestStatusTableAndJSON(t *testing.T) {
-	root := t.TempDir()
-	clk := fixedClock{time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)}
-	s := pool.NewStore(root, clk)
-	for _, id := range []string{"a", "b"} {
-		if err := s.CreateSlot(id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	h, err := s.Acquire(pool.AcquireRequest{OwnerSessionID: "sess-1", BeadHint: "bead-x", Commit: "0123456789abcdef", TTL: time.Hour})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Unlock()
-
+func TestVersionAndUsage(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := run([]string{"status", "--root", root}, &out, &errb, clk); code != 0 {
-		t.Fatalf("exit %d: %s", code, errb.String())
+	a := newApp(&out, &errb)
+	if code := a.run([]string{"version"}); code != 0 || strings.TrimSpace(out.String()) != Version {
+		t.Fatalf("version: %d %q", code, out.String())
 	}
-	for _, want := range []string{"SLOT", "sess-1", "bead-x", "0123456789ab", "resetting", "warm-free"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("table missing %q:\n%s", want, out.String())
-		}
+	if code := a.run(nil); code != 2 {
+		t.Fatalf("no args exit %d", code)
 	}
-
-	out.Reset()
-	if code := run([]string{"status", "--root", root, "--json"}, &out, &errb, clk); code != 0 {
-		t.Fatalf("exit %d", code)
-	}
-	var got []pool.SlotStatus
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil || len(got) != 2 {
-		t.Fatalf("json: %v %s", err, out.String())
-	}
-	if !got[0].Held || got[0].Record.OwnerSessionID != "sess-1" || got[1].Held {
-		t.Errorf("unexpected status: %+v", got)
+	if code := a.run([]string{"status"}); code != 2 {
+		t.Fatalf("removed command exit %d", code)
 	}
 }
 
-func TestStatusEmptyAndUsage(t *testing.T) {
+func TestServeRendersBuildInfo(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := run([]string{"status", "--root", t.TempDir(), "--json"}, &out, &errb, fixedClock{}); code != 0 || strings.TrimSpace(out.String()) != "[]" {
-		t.Fatalf("empty: %d %q", code, out.String())
+	srv := httptest.NewServer(newApp(&out, &errb).metricsHandler())
+	defer srv.Close()
+	code, ctype, body := get(t, srv.URL+"/metrics")
+	if code != 200 || !strings.HasPrefix(ctype, "text/plain") {
+		t.Fatalf("scrape: %d %q", code, ctype)
 	}
-	if code := run(nil, &out, &errb, fixedClock{}); code != 2 {
-		t.Fatalf("no args exit %d", code)
+	if !strings.Contains(body, "pg_gwm_build_info{version=") || strings.Count(body, "pg_gwm_") != 3 {
+		t.Errorf("unexpected exposition:\n%s", body)
 	}
-	if code := run([]string{"bogus"}, &out, &errb, fixedClock{}); code != 2 {
-		t.Fatalf("bogus exit %d", code)
+}
+
+func TestServeRejectsNonLoopback(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := newApp(&out, &errb).serve([]string{"--addr", "0.0.0.0:0"}, nil); code != 2 {
+		t.Fatalf("exit %d", code)
 	}
 }

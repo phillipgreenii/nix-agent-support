@@ -6,16 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/phillipgreenii/pg-gwm/internal/gitrun"
 )
 
-// DefaultKeepList is the measured default for the ZR monorepo: the flox
-// environment, the direnv overrides, and the three files the post-checkout
-// hook writes (which a skipped-hook reset must not delete). Per-repo
+// DefaultKeepList is the measured default for the monorepo: the flox
+// environment, the direnv overrides, and the files the post-checkout hook
+// writes (which a hook-skipping switch must not delete). Per-repository
 // configuration replaces it wholesale.
 var DefaultKeepList = []string{
 	".flox",
@@ -25,292 +27,347 @@ var DefaultKeepList = []string{
 	".vscode/settings.json",
 }
 
-// DefaultTimeout bounds each git command.
-const DefaultTimeout = 5 * time.Minute
-
-// skipHooksPath is the per-command core.hooksPath override that disables every
+// skipHooks is the per-command core.hooksPath override that disables every
 // hook for one git invocation without writing configuration.
-const skipHooksPath = "core.hooksPath=/dev/null"
+var skipHooks = []string{"-c", "core.hooksPath=/dev/null"}
 
-// WorktreeConfig configures a Worktree provisioner.
-type WorktreeConfig struct {
-	// Repo is the canonical clone the slots are linked worktrees of.
-	Repo string
-	// Keep is the per-repository list of ignored paths that survive a reset.
-	// Nil means DefaultKeepList; an empty non-nil slice keeps nothing.
-	Keep []string
-	// Timeout bounds each git command; zero means DefaultTimeout.
-	Timeout time.Duration
-	// GitBin is the git executable; empty means "git" from PATH.
-	GitBin string
-	// Env is appended to the sanitised process environment (tests use it for
-	// GIT_CONFIG_GLOBAL=/dev/null style hermeticity).
-	Env []string
-	// RunHookOnReset runs the post-checkout hook on reset-in-place. The
-	// default (false) skips it, which is only safe with a keep list that
-	// covers every path the hook writes.
-	RunHookOnReset bool
-}
+// preserveSubject is the subject of every preservation commit (INV-GWM-24).
+const preserveSubject = "adding dirty WIP"
 
 // Worktree is the git-worktree Provisioner.
 type Worktree struct {
-	repo    string
-	keep    []string
-	timeout time.Duration
-	gitBin  string
-	env     []string
-	hook    bool
+	repo          string
+	g             gitrun.Git
+	gitTimeout    time.Duration
+	createTimeout time.Duration
 }
 
 var _ Provisioner = (*Worktree)(nil)
 
-// NewWorktree validates cfg and returns the provisioner.
-func NewWorktree(cfg WorktreeConfig) (*Worktree, error) {
-	if cfg.Repo == "" || !filepath.IsAbs(cfg.Repo) {
-		return nil, fmt.Errorf("repo %q must be an absolute path", cfg.Repo)
-	}
-	keep := cfg.Keep
-	if keep == nil {
-		keep = DefaultKeepList
-	}
-	keep, err := ValidateKeep(keep)
-	if err != nil {
-		return nil, err
-	}
-	w := &Worktree{repo: cfg.Repo, keep: keep, timeout: cfg.Timeout, gitBin: cfg.GitBin, env: cfg.Env, hook: cfg.RunHookOnReset}
-	if w.timeout <= 0 {
-		w.timeout = DefaultTimeout
-	}
-	if w.gitBin == "" {
-		w.gitBin = "git"
-	}
-	return w, nil
+// NewWorktree returns the provisioner for the repository whose main checkout
+// is repoMain. Create is bounded by createTimeout, every other git call by
+// gitTimeout.
+func NewWorktree(repoMain string, g gitrun.Git, gitTimeout, createTimeout time.Duration) *Worktree {
+	return &Worktree{repo: repoMain, g: g, gitTimeout: gitTimeout, createTimeout: createTimeout}
 }
 
-// environ is the process environment minus the variables that make git act on
-// a different repository than the -C directory, plus non-interactive settings.
-func (w *Worktree) environ() []string {
-	drop := []string{"GIT_DIR=", "GIT_WORK_TREE=", "GIT_INDEX_FILE=", "GIT_COMMON_DIR=", "GIT_OBJECT_DIRECTORY=", "GIT_NAMESPACE="}
-	var env []string
-outer:
-	for _, kv := range os.Environ() {
-		for _, d := range drop {
-			if strings.HasPrefix(kv, d) {
-				continue outer
-			}
-		}
-		env = append(env, kv)
-	}
-	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true", "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C")
-	return append(env, w.env...)
-}
-
-// git runs one bounded git command in dir (the repo itself when dir is empty).
-// A timeout kills the whole process group and returns ErrWedged.
 func (w *Worktree) git(ctx context.Context, dir string, args ...string) (string, error) {
-	if dir == "" {
-		dir = w.repo
-	}
-	ctx, cancel := context.WithTimeout(ctx, w.timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, w.gitBin, append([]string{"-C", dir}, args...)...)
-	cmd.Env = w.environ()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 2 * time.Second
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("%w: git %s after %s", ErrWedged, strings.Join(args, " "), w.timeout)
-	}
-	if err != nil {
-		msg := strings.TrimSpace(errb.String())
-		if strings.Contains(msg, ".lock': File exists") {
-			return "", fmt.Errorf("%w: git %s: %s", ErrStaleLock, strings.Join(args, " "), msg)
+	return w.g.Exec(ctx, dir, w.gitTimeout, args...)
+}
+
+func (w *Worktree) gitTrim(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := w.git(ctx, dir, args...)
+	return strings.TrimSpace(out), err
+}
+
+// branchArgs renders b as the trailing arguments of git worktree add or git
+// switch. add selects worktree add's shape (the directory goes before the
+// commit).
+func (b BranchSpec) args(dir string, add bool) []string {
+	var flags, tail []string
+	switch {
+	case b.Detach:
+		flags = []string{"--detach"}
+		if add {
+			tail = []string{dir}
 		}
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
-	}
-	return strings.TrimSpace(out.String()), nil
-}
-
-// LockReason is the `git worktree lock` reason every slot carries. The
-// worktree sweeps and audit tools treat a worktree locked with a reason that
-// starts with this text as a pool slot and never remove or report it.
-const LockReason = "pool slot (pg-gwm)"
-
-// Create adds a detached linked worktree at dir and locks it with LockReason,
-// so git refuses to remove or prune it and every janitor that honours
-// `git worktree lock` leaves it alone. git runs the repository's post-checkout
-// hook as part of worktree add: this is the one full hook run of the slot's
-// life. When the lock cannot be taken the worktree is removed again, so a slot
-// is never left registered but unlocked.
-func (w *Worktree) Create(ctx context.Context, dir, commit string) error {
-	if _, err := w.git(ctx, "", "worktree", "add", "--detach", dir, commit); err != nil {
-		return err
-	}
-	if _, err := w.git(ctx, "", "worktree", "lock", "--reason", LockReason, dir); err != nil {
-		_, _ = w.git(ctx, "", "worktree", "remove", "--force", dir)
-		return fmt.Errorf("lock slot worktree: %w", err)
-	}
-	return nil
-}
-
-// gitDir returns the absolute per-worktree git directory.
-func (w *Worktree) gitDir(ctx context.Context, dir string) (string, error) {
-	return w.git(ctx, dir, "rev-parse", "--absolute-git-dir")
-}
-
-// lockPresent reports a leftover lock file in the slot's git directory or the
-// shared one. The pool holds the slot exclusively, so no live git of ours owns
-// it.
-func (w *Worktree) lockPresent(ctx context.Context, dir string) error {
-	gd, err := w.gitDir(ctx, dir)
-	if err != nil {
-		return err
-	}
-	common, err := w.git(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return err
-	}
-	for _, lock := range []string{
-		filepath.Join(gd, "index.lock"), filepath.Join(gd, "HEAD.lock"),
-		filepath.Join(common, "index.lock"), filepath.Join(common, "shallow.lock"),
-	} {
-		if _, err := os.Lstat(lock); err == nil {
-			return fmt.Errorf("%w: %s", ErrStaleLock, lock)
+		if b.Commit != "" {
+			tail = append(tail, b.Commit)
 		}
-	}
-	return nil
-}
-
-// Verify checks dir is a worktree of the configured repository with no stale
-// lock.
-func (w *Worktree) Verify(ctx context.Context, dir string) error {
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		return fmt.Errorf("%w: %s missing", ErrUnhealthy, dir)
-	}
-	top, err := w.git(ctx, dir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		if errors.Is(err, ErrWedged) {
-			return err
+		return append(flags, tail...)
+	case b.Create, b.Reset:
+		flag := "-b"
+		if b.Reset {
+			flag = "-B"
 		}
-		return fmt.Errorf("%w: %v", ErrUnhealthy, err)
+		if add {
+			flags = []string{flag, b.Branch}
+			tail = []string{dir}
+		} else {
+			flag = map[string]string{"-b": "-c", "-B": "-C"}[flag]
+			flags = []string{flag, b.Branch}
+		}
+		if b.Commit != "" {
+			tail = append(tail, b.Commit)
+		}
+		return append(flags, tail...)
+	default:
+		if add {
+			return []string{dir, b.Branch}
+		}
+		return []string{b.Branch}
 	}
-	if !samePath(top, dir) {
-		return fmt.Errorf("%w: toplevel %s is not %s", ErrUnhealthy, top, dir)
-	}
-	common, err := w.git(ctx, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	if err != nil {
-		return err
-	}
-	if !samePath(common, filepath.Join(w.repo, ".git")) {
-		return fmt.Errorf("%w: belongs to %s, not %s", ErrUnhealthy, common, w.repo)
-	}
-	return w.lockPresent(ctx, dir)
 }
 
-func samePath(a, b string) bool {
-	ra, ea := filepath.EvalSymlinks(a)
-	rb, eb := filepath.EvalSymlinks(b)
-	return ea == nil && eb == nil && ra == rb
-}
-
-// skip returns the per-command hook override unless hooks are wanted on reset.
-// It is passed as a leading -c option and so is never written to any config.
-func (w *Worktree) skip() []string {
-	if w.hook {
-		return nil
-	}
-	return []string{"-c", skipHooksPath}
-}
-
-func (w *Worktree) cleanArgs(dry bool) []string {
-	a := append(w.skip(), "clean", "-ffdxq")
-	if dry {
-		a = append(w.skip(), "clean", "-ffdxn")
-	}
-	for _, k := range w.keep {
-		a = append(a, "-e", "/"+k)
-	}
-	return a
-}
-
-// Reset checks out commit (as branch when given, forced, else detached),
-// removes every untracked and ignored file outside the keep list, and proves
-// the result: HEAD is commit and a dry-run clean finds nothing left.
-func (w *Worktree) Reset(ctx context.Context, dir, commit, branch string) (string, error) {
-	if err := w.lockPresent(ctx, dir); err != nil {
-		return "", err
-	}
-	want, err := w.git(ctx, dir, "rev-parse", "--verify", "--end-of-options", commit+"^{commit}")
-	if err != nil {
-		return "", err
-	}
-	co := append(w.skip(), "checkout", "-q", "-f")
-	if branch != "" {
-		co = append(co, "-B", branch, want)
-	} else {
-		co = append(co, "--detach", want)
-	}
-	if _, err := w.git(ctx, dir, co...); err != nil {
-		return "", err
-	}
-	if _, err := w.git(ctx, dir, w.cleanArgs(false)...); err != nil {
-		return "", err
-	}
-	left, err := w.git(ctx, dir, w.cleanArgs(true)...)
-	if err != nil {
-		return "", err
-	}
-	if left != "" {
-		return "", fmt.Errorf("%w: %s", ErrNotClean, strings.ReplaceAll(left, "\n", "; "))
-	}
-	head, err := w.git(ctx, dir, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	if head != want {
-		return "", fmt.Errorf("%w: HEAD %s, wanted %s", ErrUnhealthy, head, want)
-	}
-	return head, nil
-}
-
-// Detach detaches HEAD at its current commit, leaving the lease branch intact.
-func (w *Worktree) Detach(ctx context.Context, dir string) error {
-	_, err := w.git(ctx, dir, append(w.skip(), "checkout", "-q", "--detach")...)
+// Create adds a locked linked worktree at dir. git runs the repository's
+// post-checkout hook as part of worktree add.
+func (w *Worktree) Create(ctx context.Context, dir string, b BranchSpec, lockReason string) error {
+	args := append([]string{"worktree", "add", "--lock", "--reason", lockReason}, b.args(dir, true)...)
+	_, err := w.g.Exec(ctx, w.repo, w.createTimeout, args...)
 	return err
 }
 
-// Resolve returns the full commit id ref names in the configured repository.
-func (w *Worktree) Resolve(ctx context.Context, ref string) (string, error) {
-	out, err := w.git(ctx, "", "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-	if err != nil {
-		if errors.Is(err, ErrWedged) {
-			return "", err
-		}
-		return "", fmt.Errorf("%w: %q", ErrRefUnresolvable, ref)
+// Switch moves dir to b. With runHook false the post-checkout hook is
+// skipped for this command only.
+func (w *Worktree) Switch(ctx context.Context, dir string, b BranchSpec, runHook bool) error {
+	var args []string
+	if !runHook {
+		args = append(args, skipHooks...)
 	}
-	return out, nil
+	args = append(append(args, "switch"), b.args(dir, false)...)
+	_, err := w.git(ctx, dir, args...)
+	return err
 }
 
-// rescueIdent gives stash creation an identity without reading or writing any
-// configuration, so a host with no git identity still captures.
-var rescueIdent = []string{"-c", "user.name=pg-gwm", "-c", "user.email=pg-gwm@localhost"}
+// Clean resets tracked files, removes everything else outside keep, and
+// proves nothing but keep paths remains.
+func (w *Worktree) Clean(ctx context.Context, dir string, keep []string) error {
+	keep, err := ValidateKeep(keep)
+	if err != nil {
+		return err
+	}
+	if _, err := w.git(ctx, dir, "reset", "--hard"); err != nil {
+		return err
+	}
+	args := []string{"clean", "-ffdx"}
+	for _, k := range keep {
+		args = append(args, "-e", "/"+k)
+	}
+	if _, err := w.git(ctx, dir, args...); err != nil {
+		return err
+	}
+	out, err := w.git(ctx, dir, "status", "--porcelain", "--ignored", "-z")
+	if err != nil {
+		return err
+	}
+	var left []string
+	for _, rec := range strings.Split(out, "\x00") {
+		if len(rec) < 4 {
+			continue
+		}
+		path := rec[3:]
+		if rec[:2] == "!!" && keepCovers(keep, strings.TrimSuffix(path, "/")) {
+			continue
+		}
+		left = append(left, path)
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("%w: %s", ErrNotClean, strings.Join(left, "; "))
+	}
+	return nil
+}
 
-// Rescue captures staged and unstaged tracked changes in dir as a stash-style
-// commit and points ref at it. Untracked files are not captured (they are
-// removed by the reset by design).
-func (w *Worktree) Rescue(ctx context.Context, dir, ref string) (string, error) {
-	commit, err := w.git(ctx, dir, append(append([]string{}, rescueIdent...), "stash", "create", "pg-gwm rescue")...)
+// keepCovers reports whether an ignored status path is a keep path, lies
+// inside one, or is a directory that holds only keep paths.
+func keepCovers(keep []string, path string) bool {
+	for _, k := range keep {
+		if path == k || strings.HasPrefix(path, k+"/") || strings.HasPrefix(k, path+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// Unsaved reports tracked changes, untracked files, unreachable commits and
+// any operation in progress.
+func (w *Worktree) Unsaved(ctx context.Context, dir string) (Unsaved, error) {
+	var u Unsaved
+	out, err := w.git(ctx, dir, "status", "--porcelain=v2", "-z")
+	if err != nil {
+		return u, err
+	}
+	recs := strings.Split(out, "\x00")
+	files := map[string]bool{}
+	var blockers []string
+	for i := 0; i < len(recs); i++ {
+		r := recs[i]
+		if len(r) < 3 {
+			continue
+		}
+		switch r[0] {
+		case '?':
+			files[r[2:]] = true
+		case '1', '2', 'u':
+			nf := map[byte]int{'1': 9, '2': 10, 'u': 11}[r[0]]
+			f := strings.SplitN(r, " ", nf)
+			if len(f) < nf {
+				continue
+			}
+			files[f[nf-1]] = true
+			if r[0] == '2' {
+				i++ // the rename's original path
+				if i < len(recs) {
+					files[recs[i]] = true
+				}
+			}
+			if sub := f[2]; len(sub) == 4 && sub[0] == 'S' && sub[1:] != "..." {
+				blockers = append(blockers, "submodule change in "+f[nf-1])
+			}
+		}
+	}
+	for f := range files {
+		u.Files = append(u.Files, f)
+	}
+	sort.Strings(u.Files)
+	gd, err := w.gitTrim(ctx, dir, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return u, err
+	}
+	for _, c := range []struct{ name, why string }{
+		{"MERGE_HEAD", "merge in progress"},
+		{"rebase-merge", "rebase in progress"},
+		{"rebase-apply", "rebase in progress"},
+		{"CHERRY_PICK_HEAD", "cherry-pick in progress"},
+	} {
+		if _, err := os.Lstat(filepath.Join(gd, c.name)); err == nil {
+			blockers = append(blockers, c.why)
+		}
+	}
+	u.Blocker = strings.Join(dedupe(blockers), "; ")
+	rl, err := w.gitTrim(ctx, dir, "rev-list", "HEAD", "--not", "--branches", "--tags")
+	if err != nil {
+		return u, err
+	}
+	if rl != "" {
+		u.Unreachable = strings.Split(rl, "\n")
+	}
+	return u, nil
+}
+
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Preserve creates branch at the current head, adds every change (never
+// ignored files) and commits it with the fixed subject and message as body.
+// Hooks and signing are off and a missing identity gets a fallback author.
+// A merge, rebase, cherry-pick or submodule change returns ErrPreserveBlocked
+// before anything is touched.
+func (w *Worktree) Preserve(ctx context.Context, dir, branch, message string) error {
+	u, err := w.Unsaved(ctx, dir)
+	if err != nil {
+		return err
+	}
+	if u.Blocker != "" {
+		return fmt.Errorf("%w: %s", ErrPreserveBlocked, u.Blocker)
+	}
+	if _, err := w.git(ctx, dir, "switch", "-c", branch); err != nil {
+		return err
+	}
+	if _, err := w.git(ctx, dir, "add", "-A"); err != nil {
+		return err
+	}
+	pending, err := w.gitTrim(ctx, dir, "status", "--porcelain")
+	if err != nil {
+		return err
+	}
+	if pending == "" {
+		return nil
+	}
+	args := append([]string{}, skipHooks...)
+	if _, ierr := w.git(ctx, dir, "var", "GIT_AUTHOR_IDENT"); ierr != nil {
+		args = append(args, "-c", "user.name=pg-gwm", "-c", "user.email=pg-gwm@localhost")
+	}
+	args = append(args, "-c", "commit.gpgsign=false", "commit", "-m", preserveSubject, "-m", message)
+	_, err = w.git(ctx, dir, args...)
+	return err
+}
+
+// Unlock removes the lock git worktree add --lock took.
+func (w *Worktree) Unlock(ctx context.Context, dir string) error {
+	_, err := w.git(ctx, w.repo, "worktree", "unlock", dir)
+	return err
+}
+
+// Remove deletes the worktree. A single --force still refuses a locked
+// worktree, so the caller unlocks first.
+func (w *Worktree) Remove(ctx context.Context, dir string) error {
+	_, err := w.git(ctx, w.repo, "worktree", "remove", "--force", dir)
+	return err
+}
+
+// Prune forgets worktrees whose directory no longer exists.
+func (w *Worktree) Prune(ctx context.Context) error {
+	_, err := w.git(ctx, w.repo, "worktree", "prune")
+	return err
+}
+
+// StopFSMonitor stops the file-system monitor daemon of dir; one that is not
+// running is success.
+func (w *Worktree) StopFSMonitor(ctx context.Context, dir string) error {
+	_, err := w.git(ctx, dir, "fsmonitor--daemon", "stop")
+	var ge *gitrun.GitError
+	if errors.As(err, &ge) && strings.Contains(ge.Stderr, "not running") {
+		return nil
+	}
+	return err
+}
+
+// RemoveStaleIndexLock deletes dir's index.lock when it is zero bytes and
+// older than olderThan, and reports whether it did. A non-empty or younger
+// lock may belong to a live git and is kept.
+func (w *Worktree) RemoveStaleIndexLock(dir string, olderThan time.Duration) (bool, error) {
+	gd, err := worktreeGitDir(dir)
+	if err != nil {
+		return false, err
+	}
+	lock := filepath.Join(gd, "index.lock")
+	fi, err := os.Lstat(lock)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if fi.Size() != 0 || time.Since(fi.ModTime()) < olderThan {
+		return false, nil
+	}
+	if err := os.Remove(lock); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	return true, nil
+}
+
+// worktreeGitDir resolves dir's own git directory from its .git entry: the
+// directory itself, or the target of a "gitdir:" file.
+func worktreeGitDir(dir string) (string, error) {
+	dot := filepath.Join(dir, ".git")
+	fi, err := os.Stat(dot)
 	if err != nil {
 		return "", err
 	}
-	if commit == "" {
-		return "", nil
+	if fi.IsDir() {
+		return dot, nil
 	}
-	if _, err := w.git(ctx, dir, "update-ref", ref, commit); err != nil {
+	b, err := os.ReadFile(dot)
+	if err != nil {
 		return "", err
 	}
-	return commit, nil
+	line, ok := strings.CutPrefix(strings.TrimSpace(string(bytes.SplitN(b, []byte("\n"), 2)[0])), "gitdir:")
+	if !ok {
+		return "", fmt.Errorf("%s: not a gitdir file", dot)
+	}
+	gd := strings.TrimSpace(line)
+	if !filepath.IsAbs(gd) {
+		gd = filepath.Join(dir, gd)
+	}
+	return gd, nil
+}
+
+// FreeBytes reports the bytes available to an unprivileged writer on the
+// volume holding path.
+func FreeBytes(path string) (uint64, error) {
+	var s syscall.Statfs_t
+	if err := syscall.Statfs(path, &s); err != nil {
+		return 0, err
+	}
+	return uint64(s.Bavail) * uint64(s.Bsize), nil //nolint:gosec // block counts are non-negative
 }

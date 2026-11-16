@@ -1,8 +1,8 @@
-// Package provision drives the git side of a pool slot: creating the slot
-// checkout, verifying it, resetting it in place for the next lease and
-// detaching it on release. It sits on top of package pool (which owns the slot
-// lock, lease records and state machine) and never touches the state itself
-// except through QuarantineIfWedged.
+// Package provision drives the git side of a managed worktree's life:
+// creating it, switching it to another branch, cleaning it, finding unsaved
+// work, preserving that work on a branch, and removing it. It never touches
+// the manager's state; callers hold the repository lock and the worktree's
+// operation hold around every call (INV-GWM-31).
 package provision
 
 import (
@@ -10,68 +10,79 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/phillipgreenii/pg-gwm/internal/pool"
+	"time"
 )
 
-// Provisioner prepares the working tree of one slot. Implementations MUST be
-// safe to call only while the caller holds the slot's exclusive lock.
+// BranchSpec says what a worktree checks out. Commit is already resolved.
+// Create corresponds to -b (a new branch), Reset to -B (a new or moved
+// branch), Detach to --detach. With none of the three, Branch is an existing
+// branch.
+type BranchSpec struct {
+	Branch string
+	Create bool
+	Reset  bool
+	Detach bool
+	Commit string
+}
+
+// Unsaved is work in a worktree that a removal or reuse would lose.
+type Unsaved struct {
+	// Files are the paths with tracked changes or untracked files; ignored
+	// files are not listed.
+	Files []string
+	// Unreachable are commits reachable from HEAD that no branch or tag
+	// reaches.
+	Unreachable []string
+	// Blocker is non-empty for a merge, rebase or cherry-pick in progress,
+	// or a submodule change; it names the reason.
+	Blocker string
+}
+
+// Any reports whether anything would be lost: files, unreachable commits, or
+// an operation in progress. An ignored-only tree reports false.
+func (u Unsaved) Any() bool {
+	return len(u.Files) > 0 || len(u.Unreachable) > 0 || u.Blocker != ""
+}
+
+// Provisioner is the host side of a managed worktree (INTF-GWM-HOST).
 type Provisioner interface {
-	// Create makes a new checkout at dir at commit, detached, and runs the
-	// repository's post-checkout hook once.
-	Create(ctx context.Context, dir, commit string) error
-	// Verify reports whether dir is still a healthy checkout of the
-	// configured repository.
-	Verify(ctx context.Context, dir string) error
-	// Reset moves dir to commit (on branch when non-empty, else detached) and
-	// removes every untracked and ignored file outside the keep list. It
-	// returns the resulting HEAD commit.
-	Reset(ctx context.Context, dir, commit, branch string) (string, error)
-	// Detach leaves the lease branch and detaches HEAD, so the branch is
-	// free to be checked out elsewhere.
-	Detach(ctx context.Context, dir string) error
-	// Resolve turns ref into a full commit id, using only the objects the
-	// repository already has.
-	Resolve(ctx context.Context, ref string) (string, error)
-	// Rescue captures uncommitted tracked changes in dir (staged and unstaged)
-	// as a commit kept alive by the ref name. It returns the commit, or an
-	// empty string and no ref when the tracked tree is clean. A failure means
-	// the changes are NOT safe and the caller MUST NOT reset.
-	Rescue(ctx context.Context, dir, ref string) (string, error)
+	// Create runs git worktree add --lock --reason with the branch flags;
+	// the post-checkout hook runs.
+	Create(ctx context.Context, dir string, b BranchSpec, lockReason string) error
+	// Switch runs git switch (or --detach). With runHook false it passes
+	// -c core.hooksPath=/dev/null to that command only (INV-GWM-25).
+	Switch(ctx context.Context, dir string, b BranchSpec, runHook bool) error
+	// Clean resets tracked files and removes every untracked and ignored
+	// file outside keep, then proves the tree holds only keep paths or
+	// returns ErrNotClean.
+	Clean(ctx context.Context, dir string, keep []string) error
+	// Unsaved reports the work a removal or reuse would lose.
+	Unsaved(ctx context.Context, dir string) (Unsaved, error)
+	// Preserve commits every change (never ignored files) to a new branch
+	// created at the current head. message is the commit body.
+	Preserve(ctx context.Context, dir, branch, message string) error
+	// Unlock removes the worktree's lock.
+	Unlock(ctx context.Context, dir string) error
+	// Remove deletes the worktree; it refuses while the worktree is locked.
+	Remove(ctx context.Context, dir string) error
+	// Prune forgets worktrees whose directory is gone.
+	Prune(ctx context.Context) error
+	// StopFSMonitor stops the worktree's file-system monitor daemon; a daemon
+	// that is not running is success.
+	StopFSMonitor(ctx context.Context, dir string) error
+	// RemoveStaleIndexLock deletes a zero-byte index.lock older than
+	// olderThan and reports whether it did. The manager calls it before
+	// every Switch and Clean while it holds the operation hold.
+	RemoveStaleIndexLock(dir string, olderThan time.Duration) (bool, error)
 }
 
-// ErrRefUnresolvable: the requested reference names no commit.
-var ErrRefUnresolvable = errors.New("reference does not resolve to a commit")
-
-// Errors that mark a slot as unusable. A caller turns them into a quarantine
-// with QuarantineIfWedged.
 var (
-	// ErrWedged: a git command exceeded its time bound and was killed.
-	ErrWedged = errors.New("git command wedged (timed out)")
-	// ErrStaleLock: a git lock file is present while the pool holds the slot.
-	ErrStaleLock = errors.New("stale git lock file in slot")
-	// ErrNotClean: files outside the keep list survived a reset.
-	ErrNotClean = errors.New("slot tree not clean after reset")
-	// ErrUnhealthy: Verify found the slot is not a checkout of the repository.
-	ErrUnhealthy = errors.New("slot is not a healthy checkout")
+	// ErrNotClean: files outside the keep list survived a clean.
+	ErrNotClean = errors.New("worktree not clean after clean")
+	// ErrPreserveBlocked: a merge, rebase, cherry-pick or submodule change is
+	// in progress, so committing the work would corrupt it.
+	ErrPreserveBlocked = errors.New("preserve blocked by an operation in progress")
 )
-
-// QuarantineIfWedged quarantines the slot behind h when err is one of the
-// slot-unusable errors, recording err as the reason, and returns err
-// unchanged (joined with any quarantine failure). Other errors pass through.
-func QuarantineIfWedged(h *pool.Handle, err error) error {
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrWedged) && !errors.Is(err, ErrStaleLock) &&
-		!errors.Is(err, ErrNotClean) && !errors.Is(err, ErrUnhealthy) {
-		return err
-	}
-	if qerr := h.Quarantine(err.Error()); qerr != nil {
-		return errors.Join(err, fmt.Errorf("quarantine: %w", qerr))
-	}
-	return err
-}
 
 // ValidateKeep checks a keep list: every entry a plain relative path inside
 // the tree, with no pathspec magic or parent traversal. It returns the entries

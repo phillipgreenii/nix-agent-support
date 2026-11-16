@@ -133,12 +133,12 @@ func dialUnix(sock string) func(ctx context.Context, network, addr string) (net.
 // SIGTERM once it is listening, and returns what it wrote to stderr.
 func runServeUntilReady(t *testing.T) string {
 	t.Helper()
-	e := newEnv(t)
+
 	var out, errb bytes.Buffer
 	done := make(chan int, 1)
 	ready := make(chan struct{})
 	go func() {
-		done <- e.scrapeApp(&out, &errb).serve([]string{"--addr", "127.0.0.1:0", "--root", e.root}, func(string) { close(ready) })
+		done <- newApp(&out, &errb).serve([]string{"--addr", "127.0.0.1:0"}, func(string) { close(ready) })
 	}()
 	select {
 	case <-ready:
