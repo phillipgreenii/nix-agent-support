@@ -502,3 +502,68 @@ func TestReapAllNothingAndFailures(t *testing.T) {
 		t.Errorf("entries = %+v", rec.Repos)
 	}
 }
+
+// A broken worktree git no longer knows (no .git link, no admin directory)
+// has nothing git can preserve: one reap removes its directory and record.
+func TestReapBrokenUnregisteredWorktreeIsRemoved(t *testing.T) {
+	e := newEnv(t)
+	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
+	w, _ := e.worktreeOf(rec.ID)
+	e.git(e.repo.Dir, "worktree", "unlock", w.Path)
+	if err := os.WriteFile(filepath.Join(w.Path, "leftover.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(w.Path, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(e.repo.Dir, ".git", "worktrees", filepath.Base(w.Path))); err != nil {
+		t.Fatal(err)
+	}
+	e.seed(func(st *state.State) { st.Worktrees[0].Status = state.Broken })
+
+	res := e.mustReap(ReapOptions{})
+	if _, ok := e.worktreeOf(rec.ID); ok || exists(w.Path) || len(res.Removed) != 1 || e.count(state.Broken) != 0 {
+		t.Fatalf("not removed: present=%v dir=%v res=%+v", ok, exists(w.Path), res)
+	}
+	if !strings.Contains(e.events(), `"kind":"remove"`) {
+		t.Errorf("no remove event: %s", e.events())
+	}
+}
+
+// A worktree reap created and no lease ever wrote into has no work to
+// protect, so a tree left half-deleted by an interrupted removal is not
+// preserved as a branch of deletions.
+func TestReapBrokenNeverLeasedIsNotPreserved(t *testing.T) {
+	e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
+	e.commitFile("tracked.txt", "one\n")
+	e.mustReap(ReapOptions{})
+	if len(e.state().Worktrees) != 1 {
+		t.Fatalf("standby not created: %+v", e.state().Worktrees)
+	}
+	w := e.state().Worktrees[0]
+	if err := os.Remove(filepath.Join(w.Path, "tracked.txt")); err != nil {
+		t.Fatal(err)
+	}
+	e.seed(func(st *state.State) { st.Worktrees[0].Status = state.Broken })
+
+	e.mustReap(ReapOptions{})
+	if got := e.git(e.repo.Dir, "branch", "--list", "pg-gwm/dirty-reaped-*"); got != "" {
+		t.Errorf("a preserved branch was written: %q", got)
+	}
+	if len(e.state().Preserved) != 0 {
+		t.Errorf("preserved recorded: %+v", e.state().Preserved)
+	}
+}
+
+// A worktree a lease has held keeps its protection after it breaks.
+func TestReapBrokenLeasedStillPreserved(t *testing.T) {
+	e := newEnv(t)
+	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
+	w, _ := e.worktreeOf(rec.ID)
+	e.write(w.Path, "work.txt", "mine\n")
+	e.seed(func(st *state.State) { st.Worktrees[0].Status, st.Worktrees[0].Lease = state.Broken, nil })
+	e.mustReap(ReapOptions{})
+	if got := e.git(e.repo.Dir, "branch", "--list", "pg-gwm/dirty-reaped-*"); got == "" {
+		t.Error("a once-leased worktree's work was not preserved")
+	}
+}

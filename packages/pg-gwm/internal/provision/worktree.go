@@ -55,6 +55,13 @@ func (w *Worktree) git(ctx context.Context, dir string, args ...string) (string,
 	return w.g.Exec(ctx, dir, w.gitTimeout, args...)
 }
 
+// gitLong runs a git call that walks or deletes a whole tree, which outlasts
+// gitTimeout on a large repository; a kill leaves a half-deleted tree, so it
+// is bounded by createTimeout instead.
+func (w *Worktree) gitLong(ctx context.Context, dir string, args ...string) (string, error) {
+	return w.g.Exec(ctx, dir, w.createTimeout, args...)
+}
+
 func (w *Worktree) gitTrim(ctx context.Context, dir string, args ...string) (string, error) {
 	out, err := w.git(ctx, dir, args...)
 	return strings.TrimSpace(out), err
@@ -126,17 +133,17 @@ func (w *Worktree) Clean(ctx context.Context, dir string, keep []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := w.git(ctx, dir, "reset", "--hard"); err != nil {
+	if _, err := w.gitLong(ctx, dir, "reset", "--hard"); err != nil {
 		return err
 	}
 	args := []string{"clean", "-ffdx"}
 	for _, k := range keep {
 		args = append(args, "-e", "/"+k)
 	}
-	if _, err := w.git(ctx, dir, args...); err != nil {
+	if _, err := w.gitLong(ctx, dir, args...); err != nil {
 		return err
 	}
-	out, err := w.git(ctx, dir, "status", "--porcelain", "--ignored", "-z")
+	out, err := w.gitLong(ctx, dir, "status", "--porcelain", "--ignored", "-z")
 	if err != nil {
 		return err
 	}
@@ -287,10 +294,10 @@ func (w *Worktree) Unlock(ctx context.Context, dir string) error {
 	return err
 }
 
-// Remove deletes the worktree. A single --force still refuses a locked
+// Remove deletes the worktree, bounded by createTimeout. A single --force still refuses a locked
 // worktree, so the caller unlocks first.
 func (w *Worktree) Remove(ctx context.Context, dir string) error {
-	_, err := w.git(ctx, w.repo, "worktree", "remove", "--force", dir)
+	_, err := w.gitLong(ctx, w.repo, "worktree", "remove", "--force", dir)
 	return err
 }
 

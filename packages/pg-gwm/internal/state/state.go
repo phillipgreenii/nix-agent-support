@@ -97,6 +97,11 @@ type Worktree struct {
 	CreatedAt   time.Time `json:"created_at"`
 	StatusSince time.Time `json:"status_since"`
 	Reason      string    `json:"reason"`
+	// NeverLeased is true for a worktree reap created to meet min that no
+	// lease has taken yet; nothing was written into it on anyone's behalf.
+	// A record that lacks it (written by an older build) is treated as
+	// possibly leased.
+	NeverLeased bool `json:"never_leased,omitempty"`
 }
 
 // Effective is the status a reader reports: a Leased worktree whose expiry has

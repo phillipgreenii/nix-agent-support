@@ -131,3 +131,28 @@ func TestPreserveFallbackAuthor(t *testing.T) {
 		t.Errorf("author = %q", got)
 	}
 }
+
+// Removing a large tree outlasts git-timeout, and a killed removal leaves a
+// half-deleted tree, so removal and the clean are bounded by the create
+// timeout.
+func TestRemoveAndCleanAreBoundedByCreateTimeout(t *testing.T) {
+	f := cmdruntest.New(t)
+	g := gitrun.Git{Run: f.Runner()}
+	f.On(cmdruntest.MatchName("git")).Return(cmdruntest.Out(""))
+	w := NewWorktree("/repo", g, time.Minute, time.Hour)
+	if err := w.Remove(t.Context(), "/wt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Clean(t.Context(), "/wt", nil); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.Calls()
+	if len(calls) < 4 {
+		t.Fatalf("calls = %d", len(calls))
+	}
+	for _, c := range calls {
+		if c.Timeout != time.Hour {
+			t.Errorf("%q bound %v, want the create timeout 1h", gitArgs(c), c.Timeout)
+		}
+	}
+}

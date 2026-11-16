@@ -388,6 +388,7 @@ func (m *Manager) newWorktree(ctx context.Context, st *state.State, lease *state
 // markLeased makes w leased under lease, with its expiry counted from now.
 func (m *Manager) markLeased(w *state.Worktree, lease *state.Lease, now time.Time) {
 	w.Lease, w.Status, w.StatusSince, w.Reason = lease, state.Leased, now, ""
+	w.NeverLeased = false
 	lease.Expiry = nil
 	if !lease.TTL.None && lease.TTL.D > 0 {
 		exp := now.Add(lease.TTL.D)

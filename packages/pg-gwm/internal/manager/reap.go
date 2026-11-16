@@ -395,8 +395,20 @@ func (r *reaper) retryBroken() {
 func (r *reaper) preserveAndRemove(w state.Worktree) error {
 	m := r.m
 	w.Lease = nil
-	if _, err := m.preserveIfNeeded(r.ctx, w); err != nil {
-		return err
+	if !m.registered(r.ctx, w.Path) {
+		// git no longer knows the directory, so there is nothing for it to
+		// preserve and every git command inside it fails: delete what is
+		// left and forget the registration.
+		if err := os.RemoveAll(w.Path); err != nil {
+			return err
+		}
+		_ = m.Prov.Unlock(r.ctx, w.Path) // a locked leftover registration blocks the prune
+		return m.Prov.Prune(r.ctx)
+	}
+	if !w.NeverLeased {
+		if _, err := m.preserveIfNeeded(r.ctx, w); err != nil {
+			return err
+		}
 	}
 	if _, err := m.Prov.RemoveStaleIndexLock(w.Path, m.Cfg.IndexLockStaleAfter.D); err != nil {
 		return err
@@ -678,7 +690,7 @@ func (r *reaper) reserveStandby() (id, path string, stopped bool) {
 	}
 	// The hold stays with this process until createStandby ends.
 	r.standbyHold = rel
-	w.Lease, w.Status = nil, state.Creating
+	w.Lease, w.Status, w.NeverLeased = nil, state.Creating, true
 	st.Worktrees = append(st.Worktrees, w)
 	if err := lk.Commit(); err != nil {
 		rel()

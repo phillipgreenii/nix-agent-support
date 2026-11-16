@@ -84,12 +84,18 @@ Extensions:
   hold that the working command keeps on that worktree for the operation's duration and that the
   operating system drops when the command dies; this is the manager's own bookkeeping and never a
   lease's liveness (`INV-GWM-11`). Reap MUST retry a `broken` worktree once (preserving unsaved work
-  first) and remove it on success, or leave it `broken` with its directory intact. A missing directory
+  first, except for a worktree no lease has ever taken, which has no work to protect) and remove it on
+  success, or leave it `broken` with its directory intact. When git no longer knows the directory (it
+  holds no `.git` link, or the repository does not list it as a worktree), nothing is left for git to
+  preserve and every git command inside it fails, so the retry MUST delete the leftover directory,
+  prune the registration and drop the record, without running git inside it; the directory's untracked
+  files are not preserved. A missing directory
   MUST be handled by unlocking, pruning its registration and dropping its record, never by deleting a
   branch. When `worktree-root` itself is missing, reap MUST change nothing in that repository and warn.
 - **`INV-GWM-31`** <!-- uuid: 890a6355-fead-4a95-9821-dbaf85814f3b --> — Every repository operation
   MUST run under a timeout (`git-timeout`, default 2 minutes; `create-timeout`, default 30 minutes, for
-  a creation or a clean), in an environment that ignores any inherited variable redirecting git to
+  a creation, a clean or a removal, which on a large tree outlast `git-timeout` and, killed, leave a
+  half-deleted tree), in an environment that ignores any inherited variable redirecting git to
   another repository, and MUST be cancelled with SIGTERM, then SIGKILL only if git has not exited after
   a 30-second grace, because a killed git leaves a lock behind and a git that had to be killed leaves
   its worktree broken. A zero-byte git index lock older than `index-lock-stale-after` (default 10 minutes)

@@ -192,7 +192,9 @@ requester that needs a fresher base fetches first (ruled 2026-11-14).
   delete from under a requester), then `git reset --soft HEAD~1`. The
   lease's own branch MUST NOT move. If the work cannot be preserved (a merge or rebase in progress,
   changes inside a submodule), the worktree MUST be marked `broken` and nothing about it removed,
-  switched or handed out. _(Operator rulings, Phillip, 2026-11-14: hooks skipped, "yes; the comment
+  switched or handed out. A worktree reap created to meet `min` that no lease has taken yet MUST NOT be
+  preserved: nothing was written into it on anyone's behalf, and a tree left half-deleted by an
+  interrupted removal would otherwise be saved as a branch of deletions. _(Operator rulings, Phillip, 2026-11-14: hooks skipped, "yes; the comment
   should mention that", and "instruction on how to take the WIP commit and remove it but leave the WIP
   changes on the index".)_
 - **`INV-GWM-25`** <!-- uuid: c1d962b8-756a-42d6-ae3a-9d12bf5623e4 --> — When a reused worktree is

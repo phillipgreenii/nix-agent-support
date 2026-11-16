@@ -3,6 +3,8 @@ package manager
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -200,4 +202,24 @@ func (m *Manager) removeWorktree(ctx context.Context, path string) error {
 		return err
 	}
 	return m.Prov.Remove(ctx, path)
+}
+
+// registered reports whether path is a worktree git still knows: it holds a
+// .git link and the repository lists it. A listing failure counts as
+// registered, so a broken git never causes a directory to be deleted.
+func (m *Manager) registered(ctx context.Context, path string) bool {
+	if _, err := os.Lstat(filepath.Join(path, ".git")); err != nil {
+		return false
+	}
+	out, err := m.git(ctx, m.Repo.Main, "worktree", "list", "--porcelain")
+	if err != nil {
+		return true
+	}
+	want := realPath(path)
+	for _, line := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok && realPath(p) == want {
+			return true
+		}
+	}
+	return false
 }
