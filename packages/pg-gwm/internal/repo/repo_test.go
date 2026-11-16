@@ -97,3 +97,39 @@ func TestLabelDiffersForSameName(t *testing.T) {
 		t.Fatalf("a=%+v b=%+v", ra, rb)
 	}
 }
+
+func TestFromMainAgreesWithResolve(t *testing.T) {
+	for _, sep := range []string{"", "gitdirs/app.git"} {
+		t.Run("sep="+sep, func(t *testing.T) {
+			r := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true, SeparateGitDir: sep})
+			want, err := repo.Resolve(context.Background(), gitruntest.New(t, r), r.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := repo.FromMain(want.Main)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("FromMain = %+v, Resolve = %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestFromMainRejectsNonRepositories(t *testing.T) {
+	plain := t.TempDir()
+	if _, err := repo.FromMain(plain); !errors.Is(err, repo.ErrNotARepo) {
+		t.Errorf("plain directory: %v", err)
+	}
+	if _, err := repo.FromMain(filepath.Join(plain, "gone")); err == nil {
+		t.Error("a missing path resolved")
+	}
+}
+
+func TestPathLabel(t *testing.T) {
+	a, b := repo.PathLabel("/x/one/app"), repo.PathLabel("/x/two/app")
+	if a == b || !strings.HasPrefix(a, "app-") || len(a) != len("app-")+6 {
+		t.Errorf("labels %q and %q", a, b)
+	}
+}

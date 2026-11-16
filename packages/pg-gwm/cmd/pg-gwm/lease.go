@@ -38,10 +38,17 @@ func (a *app) openManager(ctx context.Context, path string) (m *manager.Manager,
 	if err != nil {
 		return nil, "", manager.ErrUsage(err.Error(), "run: pg-gwm config check", nil)
 	}
+	m = a.buildManager(r, file)
+	a.counters, a.label = m.Counters, r.Label
+	return m, baseDir, nil
+}
+
+// buildManager is the Manager of r under the configuration file.
+func (a *app) buildManager(r repo.Repo, file config.File) *manager.Manager {
 	cfg := file.For(r)
 	store := state.Open(r.CommonDir)
 	store.Retention = cfg.TombstoneRetention
-	m = &manager.Manager{
+	return &manager.Manager{
 		Repo:     r,
 		Cfg:      cfg,
 		Store:    store,
@@ -50,8 +57,6 @@ func (a *app) openManager(ctx context.Context, path string) (m *manager.Manager,
 		Registry: state.Registry{Path: state.RegistryPath()},
 		Counters: state.Counters{Path: state.CountersPath()},
 	}
-	a.counters, a.label = m.Counters, r.Label
-	return m, baseDir, nil
 }
 
 // cmdContext is cancelled by SIGINT and SIGTERM.

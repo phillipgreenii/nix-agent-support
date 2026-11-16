@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 
+	"github.com/phillipgreenii/pg-gwm/internal/gitrun"
 	"github.com/phillipgreenii/pg-gwm/internal/provision"
 	"github.com/phillipgreenii/pg-gwm/internal/state"
 )
@@ -74,7 +76,7 @@ func (m *Manager) reclaimOne(ctx context.Context, l *state.Locked) (*state.Workt
 
 // reclaimWorktree is the per-worktree reclaim step of lease and reap
 // (INV-GWM-23). l is locked and id names a released or lease-expired
-// worktree. It ends the lease (status reclaiming, with a reclaimed tombstone
+// worktree (or, with keep false, an available one that reap retires). It ends the lease (status reclaiming, with a reclaimed tombstone
 // for an expired one), takes the operation hold, releases l, preserves unsaved
 // work, then either keeps the worktree detached and available (keep) or
 // unlocks and removes it, and records the outcome under a fresh lock. A
@@ -90,7 +92,10 @@ func (m *Manager) reclaimWorktree(ctx context.Context, l *state.Locked, id strin
 		}
 	}
 	now := m.now()
-	if w == nil || (w.Effective(now) != state.Released && w.Effective(now) != state.LeaseExpired) {
+	// Reap also retires an available worktree above max through here, with
+	// keep false.
+	if w == nil || (w.Effective(now) != state.Released && w.Effective(now) != state.LeaseExpired &&
+		!(w.Status == state.Available && w.Lease == nil && !keep)) {
 		return nil, ErrInternal(errors.New("worktree " + id + " is not reclaimable"))
 	}
 	rel, err := m.Store.HoldOp(id)
@@ -186,7 +191,9 @@ func (m *Manager) reclaimWorktree(ctx context.Context, l *state.Locked, id strin
 // removeWorktree unlocks, stops the file-system monitor of, and removes the
 // worktree at path.
 func (m *Manager) removeWorktree(ctx context.Context, path string) error {
-	if err := m.Prov.Unlock(ctx, path); err != nil {
+	// A retry after a failed removal meets a worktree already unlocked.
+	var ge *gitrun.GitError
+	if err := m.Prov.Unlock(ctx, path); err != nil && !(errors.As(err, &ge) && strings.Contains(ge.Stderr, "not locked")) {
 		return err
 	}
 	if err := m.Prov.StopFSMonitor(ctx, path); err != nil {

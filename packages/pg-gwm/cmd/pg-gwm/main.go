@@ -1,5 +1,5 @@
 // pg-gwm manages worktrees of a git repository: a bounded set of leased,
-// reusable checkouts. This build carries lease, renew, release, expire, info, list, completion, the metrics
+// reusable checkouts. This build carries lease, renew, release, expire, info, list, reap, completion, the metrics
 // exporter (serve) and version; the other commands arrive with the manager.
 package main
 
@@ -49,6 +49,7 @@ commands:
   expire   <lease id> | --name N
   info     <key> | --path P | --id W | --lease-id L | --name N [--print=path]
   list     [--include-unmanaged]
+  reap     [--all-repos] [--dry-run] [--deadline D]
   preserved list
   preserved prune [--older-than D] [--dry-run]
   completion <bash|zsh>
@@ -86,6 +87,8 @@ func (a *app) run(args []string) int {
 		return a.info(args[1:])
 	case "list":
 		return a.list(args[1:])
+	case "reap":
+		return a.reap(args[1:])
 	case "preserved":
 		return a.preserved(args[1:])
 	case "completion":

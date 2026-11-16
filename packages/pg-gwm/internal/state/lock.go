@@ -94,3 +94,10 @@ func (s Store) OpHeld(id string) (bool, error) {
 func (s Store) HoldCreate(ctx context.Context, wait time.Duration) (release func(), err error) {
 	return flockFile(ctx, s.opPath("create"), wait)
 }
+
+// HoldReap takes the single-flight hold of a reap (Dir/reap.lock) and fails at
+// once with ErrBusy while another reap of this repository holds it. The hold
+// dies with its process.
+func (s Store) HoldReap() (release func(), err error) {
+	return flockFile(context.Background(), filepath.Join(s.Dir, "reap.lock"), 0)
+}

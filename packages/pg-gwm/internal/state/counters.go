@@ -199,3 +199,24 @@ func WriteReaperRecord(path string, r ReaperRecord) error {
 	}
 	return writeAtomic(path, append(b, '\n'), nil)
 }
+
+// UpdateRepoReap replaces one repository's entry in the record at path and
+// leaves every other field, the run fields and the last-success time
+// included, as it was. A single-repository reap uses it.
+func UpdateRepoReap(path string, e RepoReap) error {
+	unlock, err := flockFile(context.Background(), path+".lock", userLockWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	rec, err := ReadReaperRecord(path)
+	if err != nil {
+		rec = ReaperRecord{Repos: map[string]RepoReap{}}
+	}
+	rec.Repos[e.Label] = e
+	b, err := json.MarshalIndent(&rec, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(path, append(b, '\n'), nil)
+}

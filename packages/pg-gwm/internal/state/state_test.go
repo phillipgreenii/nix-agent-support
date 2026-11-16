@@ -459,3 +459,44 @@ func TestReaperRecordMerges(t *testing.T) {
 		t.Fatal("missing file")
 	}
 }
+
+func TestHoldReapSingleFlight(t *testing.T) {
+	s := newStore(t)
+	rel, err := s.HoldReap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldReap(); !errors.Is(err, ErrBusy) {
+		t.Fatalf("second hold: %v", err)
+	}
+	rel()
+	rel2, err := s.HoldReap()
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	rel2()
+}
+
+func TestUpdateRepoReapLeavesRunFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reaper.json")
+	ok := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	if err := WriteReaperRecord(path, ReaperRecord{
+		Started: ok, Ended: ok, Outcome: "completed", LastSuccess: &ok,
+		Repos: map[string]RepoReap{"a-1": {Label: "a-1", Outcome: "completed"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateRepoReap(path, RepoReap{Label: "b-2", Outcome: "deadline", Removed: 3}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadReaperRecord(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Started.Equal(ok) || got.Outcome != "completed" || got.LastSuccess == nil || !got.LastSuccess.Equal(ok) {
+		t.Errorf("run fields changed: %+v", got)
+	}
+	if len(got.Repos) != 2 || got.Repos["b-2"].Removed != 3 || got.Repos["a-1"].Outcome != "completed" {
+		t.Errorf("repos = %+v", got.Repos)
+	}
+}

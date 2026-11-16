@@ -82,3 +82,62 @@ func Resolve(ctx context.Context, g gitrun.Git, path string) (Repo, error) {
 		Label:     name + "-" + hex.EncodeToString(sum[:])[:6],
 	}, nil
 }
+
+// PathLabel is the label of a repository that cannot be opened: the base name
+// of path, a hyphen and the first six hex characters of the SHA-256 of path
+// itself (its common git directory cannot be computed).
+func PathLabel(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return filepath.Base(path) + "-" + hex.EncodeToString(sum[:])[:6]
+}
+
+// FromMain describes the repository whose main checkout is at main without
+// running git: it reads the checkout's .git entry (a directory, or a
+// "gitdir:" file that may point into a linked worktree's directory) and, for
+// a path that is itself a git directory, uses that. It fails with ErrNotARepo
+// when main is no repository.
+func FromMain(main string) (Repo, error) {
+	real, err := filepath.EvalSymlinks(main)
+	if err != nil {
+		return Repo{}, fmt.Errorf("%s: %w", main, err)
+	}
+	gitDir := filepath.Join(real, ".git")
+	fi, err := os.Stat(gitDir)
+	switch {
+	case err == nil && fi.IsDir():
+	case err == nil:
+		b, rerr := os.ReadFile(gitDir)
+		target, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir: ")
+		if rerr != nil || !ok {
+			return Repo{}, fmt.Errorf("%s: %w", main, ErrNotARepo)
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(real, target)
+		}
+		gitDir = target
+	default:
+		// A repository made with --separate-git-dir is listed by its git
+		// directory itself.
+		if _, herr := os.Stat(filepath.Join(real, "HEAD")); herr != nil {
+			return Repo{}, fmt.Errorf("%s: %w", main, ErrNotARepo)
+		}
+		if _, oerr := os.Stat(filepath.Join(real, "objects")); oerr != nil {
+			return Repo{}, fmt.Errorf("%s: %w", main, ErrNotARepo)
+		}
+		gitDir = real
+	}
+	if b, cerr := os.ReadFile(filepath.Join(gitDir, "commondir")); cerr == nil {
+		c := strings.TrimSpace(string(b))
+		if !filepath.IsAbs(c) {
+			c = filepath.Join(gitDir, c)
+		}
+		gitDir = c
+	}
+	common, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return Repo{}, fmt.Errorf("%s: %w", main, ErrNotARepo)
+	}
+	sum := sha256.Sum256([]byte(common))
+	name := filepath.Base(real)
+	return Repo{Main: real, CommonDir: common, Name: name, Label: name + "-" + hex.EncodeToString(sum[:])[:6]}, nil
+}
