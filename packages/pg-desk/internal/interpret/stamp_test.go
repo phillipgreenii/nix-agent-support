@@ -203,11 +203,13 @@ func newScanImporter(fset *token.FileSet) (*scanImporter, error) {
 		return nil, err
 	}
 	for d := dir; ; d = filepath.Dir(d) {
-		if filepath.Base(d) == "packages" {
+		// A checkout has .../packages/pg-desk; the nix sandbox source root is
+		// the packages directory itself under another name (.../source/pg-desk).
+		if _, err := os.Stat(filepath.Join(d, "pg-desk", "go.mod")); err == nil {
 			return &scanImporter{fset: fset, std: importer.Default(), seen: map[string]*types.Package{}, packagesDir: d}, nil
 		}
 		if d == filepath.Dir(d) {
-			return nil, fmt.Errorf("no enclosing packages directory above %s", dir)
+			return nil, fmt.Errorf("no enclosing directory holding pg-desk/go.mod above %s", dir)
 		}
 	}
 }
