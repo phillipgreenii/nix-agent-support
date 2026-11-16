@@ -172,3 +172,81 @@ func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
 		}
 	}
 }
+
+// A pinned source with more records than rareSourceMax (the session registry
+// holds tens of thousands) must not walk the id range or sort its rows: the
+// empty-cursor feed page and the snapshot page of limit 1 read each type through
+// records_source_type in id order, and answer exactly what the id walk answers.
+func TestSelectSourceAboveThresholdReadsByTypeAndMatchesTheWalk(t *testing.T) {
+	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	seedSkewedRecords(t, st) // 8 'other' records among 4000
+	err = st.WithWrite("", func(tx *sql.Tx) error {
+		// 600 'big' records (above a threshold of 100), three types, ids 5001..5600.
+		_, err := tx.ExecContext(context.Background(), `WITH RECURSIVE n(i) AS (SELECT 5001 UNION ALL SELECT i+1 FROM n WHERE i<5600)
+			INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
+			SELECT i,1,0,i,-1,1,'big',CASE i%3 WHEN 0 THEN 'a' WHEN 1 THEN 'b' ELSE 'c' END,1,i,i%400+1 FROM n`)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcs := sources.All()
+	e := &Engine{
+		DB:           st.Read(),
+		Catalog:      sources.Catalog(srcs),
+		Storage:      sources.Storage(srcs),
+		TypedStorage: func() bool { return true },
+		SessionRef:   func() bool { return true },
+	}
+	var f Filter
+	if werr := Decode([]byte(`{"field":"source","eq":"big"}`), &f); werr != nil {
+		t.Fatal(werr)
+	}
+	setRareSourceMax(t, 100)
+
+	for _, tc := range []struct {
+		name  string
+		sel   Selection
+		after int64
+	}{
+		{"feed empty cursor", Selection{Where: &f, UpToID: 1 << 40, Limit: 5}, 0},
+		{"snapshot limit 1", Selection{Where: &f, UpToID: 1 << 40, Limit: 1, CurGenOnly: true}, 0},
+		{"snapshot next page", Selection{Where: &f, AfterID: 5100, UpToID: 1 << 40, Limit: 7, CurGenOnly: true}, 0},
+	} {
+		sel := tc.sel
+		if e.rareSource(st.Read(), "big", sel) {
+			t.Fatalf("%s: a source of 600 records is rare under a threshold of 100", tc.name)
+		}
+		got, werr := e.Select(st.Read(), sel)
+		if werr != nil {
+			t.Fatal(werr)
+		}
+		want, werr := e.selectRows(st.Read(), sel) // the id walk
+		if werr != nil {
+			t.Fatal(werr)
+		}
+		if len(got) != limitOf(sel.Limit)+1 || len(got) != len(want) {
+			t.Fatalf("%s: rows by type %d, walk %d, want %d", tc.name, len(got), len(want), limitOf(sel.Limit)+1)
+		}
+		for i := range got {
+			if got[i].ID != want[i].ID {
+				t.Errorf("%s: row %d: by type id %d, walk id %d", tc.name, i, got[i].ID, want[i].ID)
+			}
+		}
+	}
+
+	typ := "b"
+	sel := Selection{Where: &f, UpToID: 1 << 40, Limit: 1, CurGenOnly: true, typePin: &typ, srcPin: "big"}
+	q, args, _, _, werr := e.selectQuery(sel)
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	p := plan(t, st, q, args)
+	if !strings.Contains(p, "INDEX records_source_type") || strings.Contains(p, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Errorf("a type's page is not read in id order through its index:\n%s", p)
+	}
+}

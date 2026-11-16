@@ -1,8 +1,11 @@
 package query
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -66,6 +69,12 @@ type Selection struct {
 	// sourceIdx is set by Select when the filter pins one source that is rare in
 	// the id range, so the source index serves the page.
 	sourceIdx bool
+	// typePin, when set, adds r.type=? so the (source, type) index delivers the
+	// page in id order with no sort (see Engine.selectByType).
+	typePin *string
+	// srcPin is the pinned source, set with typePin: the statement then names
+	// both columns and reads records through records_source_type.
+	srcPin string
 }
 
 // Selected is one record read for the feed.
@@ -83,7 +92,7 @@ func LimitOf(n int) int { return limitOf(n) }
 func (e *Engine) selectQuery(sel Selection) (string, []any, []string, []colSpec, *wire.Error) {
 	b := e.builder()
 	b.idWalk = true
-	b.sourceIdx = sel.sourceIdx
+	b.sourceIdx = sel.sourceIdx || sel.typePin != nil
 	names := sel.Project
 	if len(names) == 0 {
 		names = []string{"type", "session", "time"}
@@ -105,11 +114,21 @@ func (e *Engine) selectQuery(sel Selection) (string, []any, []string, []colSpec,
 	for _, c := range cols {
 		selects = append(selects, c.expr)
 	}
-	q := "SELECT " + strings.Join(selects, ",") + base(!sel.CurGenOnly) + " " + strings.Join(b.joins, " ") +
-		" WHERE r.id>? AND r.id<=? AND (" + wsql + ") ORDER BY r.id LIMIT ?"
-	// Statement text order: the field joins, the id bounds, the filter, the limit.
+	from := base(!sel.CurGenOnly)
+	if sel.typePin != nil {
+		from = strings.Replace(from, "FROM records r", "FROM records r INDEXED BY records_source_type", 1)
+	}
+	q := "SELECT " + strings.Join(selects, ",") + from + " " + strings.Join(b.joins, " ") +
+		" WHERE r.id>? AND r.id<=? AND (" + wsql + ")"
+	// Statement text order: the field joins, the id bounds, the filter, the type pin, the limit.
 	args := append(append([]any{}, b.joinArgs...), sel.AfterID, sel.UpToID)
-	args = append(append(args, wargs...), limitOf(sel.Limit)+1)
+	args = append(args, wargs...)
+	if sel.typePin != nil {
+		q += " AND r.source=? AND r.type=?"
+		args = append(args, sel.srcPin, *sel.typePin)
+	}
+	q += " ORDER BY r.id LIMIT ?"
+	args = append(args, limitOf(sel.Limit)+1)
 	return q, args, names, cols, nil
 }
 
@@ -118,9 +137,68 @@ func (e *Engine) selectQuery(sel Selection) (string, []any, []string, []colSpec,
 // statement walks the id range and stops at its limit instead of reading every
 // matching row of the table and sorting them.
 func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Error) {
-	if src, ok := pinnedSource(sel.Where); ok && e.rareSource(tx, src, sel) {
-		sel.sourceIdx = true
+	if src, ok := pinnedSource(sel.Where); ok {
+		if e.rareSource(tx, src, sel) {
+			sel.sourceIdx = true
+		} else if types, ok := e.sourceTypes(tx, src); ok {
+			return e.selectByType(tx, sel, src, types)
+		}
 	}
+	return e.selectRows(tx, sel)
+}
+
+// sourceTypesMax is the most distinct record types of a pinned source for which
+// selectByType merges one id-ordered read per type.
+const sourceTypesMax = 32
+
+// sourceTypes lists the record types of src with one index seek per type (a
+// loose scan of records_source_type, so its cost does not grow with the rows of
+// the source). It reports false when the source has too many types or a seek
+// fails.
+func (e *Engine) sourceTypes(tx store.Querier, src string) ([]string, bool) {
+	var types []string
+	last := ""
+	for len(types) <= sourceTypesMax {
+		var t string
+		err := tx.QueryRow(`SELECT type FROM records INDEXED BY records_source_type WHERE source=? AND type>? ORDER BY type LIMIT 1`, src, last).Scan(&t)
+		if errors.Is(err, sql.ErrNoRows) {
+			return types, len(types) > 0
+		}
+		if err != nil {
+			return nil, false
+		}
+		types = append(types, t)
+		last = t
+	}
+	return nil, false
+}
+
+// selectByType reads a page of a source that is too large for the rare-source
+// sort: for each record type of the source, the (source, type) index delivers
+// that type's rows in id order, so the first Limit+1 of each are read without
+// sorting or walking the id range, and the merged rows are cut to Limit+1. The
+// cost is bounded by the types times the page, not by the rows of the source.
+func (e *Engine) selectByType(tx store.Querier, sel Selection, src string, types []string) ([]Selected, *wire.Error) {
+	var out []Selected
+	for i := range types {
+		s := sel
+		s.sourceIdx = true
+		s.typePin, s.srcPin = &types[i], src
+		rows, werr := e.selectRows(tx, s)
+		if werr != nil {
+			return nil, werr
+		}
+		out = append(out, rows...)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if n := limitOf(sel.Limit) + 1; len(out) > n {
+		out = out[:n]
+	}
+	return out, nil
+}
+
+// selectRows runs the page statement of sel.
+func (e *Engine) selectRows(tx store.Querier, sel Selection) ([]Selected, *wire.Error) {
 	q, args, names, cols, werr := e.selectQuery(sel)
 	if werr != nil {
 		return nil, werr
