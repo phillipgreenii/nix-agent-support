@@ -1713,7 +1713,7 @@
           };
           contractBd = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${system}.beads;
 
-          # mkBdContractCheck: `go test -tags contract` for the named packages of
+          # mkBdContractCheck: `go test -tags <tags>` (default contract) for the named packages of
           # one Go module against `contractBd`. A skipped test or an empty run
           # fails the check, so it cannot pass vacuously.
           mkBdContractCheck =
@@ -1726,6 +1726,7 @@
               testPackages,
               testDeps ? [ ],
               env ? { },
+              tags ? "contract",
             }:
             (pkgs._agentSupportGoBuilders.mkGoTest {
               inherit
@@ -1751,7 +1752,7 @@
                     export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                     export GOFLAGS=''${GOFLAGS//-trimpath/}
                     log="$TMPDIR/${pname}.log"
-                    if ! go test -count=1 -v -tags contract -timeout 30m -run '${runRegex}' ${lib.escapeShellArgs testPackages} > "$log" 2>&1; then
+                    if ! go test -count=1 -v -tags ${tags} -timeout 30m -run '${runRegex}' ${lib.escapeShellArgs testPackages} > "$log" 2>&1; then
                       cat "$log"
                       echo "${pname}: the contract tests FAILED" >&2
                       exit 1
@@ -8656,6 +8657,21 @@
                   "./cmd/pg-router-handler-command/"
                   "./cmd/pg-router-handler-ccpool/"
                 ];
+              };
+
+              # The pg-rescue real-bd triage test (TestRealBDProjectBeadIsNotAnItem,
+              # `realbd` tag): a real `bd init` plus about eight bd calls, far over the
+              # unit-test budget (rule V-4), so it stays out of pg-rescue-go-tests
+              # and runs only here, against `contractBd`. A skip or an empty run fails
+              # the check. It does not use the `contract` tag because the pg-rescue
+              # README reserves that tag for a manual end-to-end run.
+              pg-rescue-realbd-tests = mkBdContractCheck {
+                pname = "pg-rescue-realbd-tests";
+                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
+                tags = "realbd";
+                runRegex = "^TestRealBDProjectBeadIsNotAnItem$";
+                testPackages = [ "./internal/triage/" ];
               };
 
               work-report-bd-contract-tests = mkBdContractCheck {

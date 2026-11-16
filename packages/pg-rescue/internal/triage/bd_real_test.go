@@ -1,3 +1,5 @@
+//go:build realbd
+
 package triage
 
 import (

@@ -696,6 +696,13 @@ They run in their own check, `nix build .#checks.<system>.pg-rescue-integration-
 off the deploy path. Locally: `go test -tags integration ./internal/integration/`. Without the
 binaries on `PATH` the tests build them with `go build`.
 
+## Real-bd triage test
+
+`internal/triage/bd_real_test.go` (`realbd` tag) runs the real `bd` in a scratch tracker, so it is
+slower than a unit test and stays out of `go test ./...`. It runs in its own check,
+`nix build .#checks.<system>.pg-rescue-realbd-tests`, which provides `bd` and `git` and fails on a
+skip. Locally, with `bd` and `git` on `PATH`: `go test -tags realbd ./internal/triage/`.
+
 ## Manual end-to-end run
 
 The automated scenarios fake the three things that cost money or touch real state. This run uses the
