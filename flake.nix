@@ -1847,6 +1847,65 @@
             }/bin/pg-git-lander-conflict-rules-tests";
           };
 
+          # Opt-in runner for pg-wrap's slow real-process contract tests
+          # (`//go:build integration` in packages/pg-wrap/internal/wrap/
+          # contract_slow_test.go: WC-4 real tmux controlling terminal, WC-5 signals
+          # and group cancel, string-entry quoting). It cannot be a sandboxed
+          # checks.* entry: those tests need real process-group and tty reporting from
+          # `ps`, which the nix build sandbox denies (they then skip, proving nothing),
+          # so the unit tier and pre-land never select it. Run it from the checkout
+          # root with `nix run .#pg-wrap-integration-tests` on the host. It runs
+          # EXACTLY the tagged-only tests and fails when none are listed, when one does
+          # not report a top-level PASS, or when a test skipped because `ps` could not
+          # report (a vacuous run).
+          apps.pg-wrap-integration-tests = {
+            type = "app";
+            program = "${
+              pkgs.writeShellApplication {
+                name = "pg-wrap-integration-tests";
+                runtimeInputs = [
+                  pkgs.go
+                  pkgs.tmux
+                  pkgs.coreutils
+                  pkgs.gnugrep
+                ];
+                text = ''
+                  root="''${REPO_ROOT:-$PWD}"
+                  if [ ! -f "$root/packages/pg-wrap/go.mod" ]; then
+                    echo "run from the checkout root (or set REPO_ROOT)" >&2
+                    exit 2
+                  fi
+                  cd "$root/packages/pg-wrap"
+                  tagged=$(go test -tags integration -list '.*' ./internal/wrap | grep '^Test' | sort -u || true)
+                  plain=$(go test -list '.*' ./internal/wrap | grep '^Test' | sort -u || true)
+                  names=$(comm -23 <(echo "$tagged") <(echo "$plain") || true)
+                  if [ -z "$names" ]; then
+                    echo "pg-wrap-integration-tests: no integration-only tests listed" >&2
+                    exit 1
+                  fi
+                  regex="^($(echo "$names" | paste -sd'|' -))\$"
+                  log=$(mktemp)
+                  trap 'rm -f "$log"' EXIT
+                  if ! go test -tags integration -count=1 -v -run "$regex" ./internal/wrap 2>&1 | tee "$log"; then
+                    echo "pg-wrap-integration-tests: FAILED" >&2
+                    exit 1
+                  fi
+                  for t in $names; do
+                    if ! grep -q -- "^--- PASS: $t " "$log"; then
+                      echo "pg-wrap-integration-tests: $t did not report PASS (skipped or not run)" >&2
+                      exit 1
+                    fi
+                  done
+                  if grep -q 'ps cannot report' "$log"; then
+                    echo "pg-wrap-integration-tests: a case skipped because ps cannot report process info here (vacuous run)" >&2
+                    exit 1
+                  fi
+                  echo "pg-wrap-integration-tests: $(echo "$names" | wc -l) tests, each with a top-level PASS"
+                '';
+              }
+            }/bin/pg-wrap-integration-tests";
+          };
+
           checks =
             let
               # Rows + check builder for the single-boolean tie tests (tc-2k1o8).
