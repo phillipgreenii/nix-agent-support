@@ -154,6 +154,27 @@ Partly docs only. `$.process.run` runs a command without a shell (verified live)
 Consequence: file reads and the recorder CLI are the data paths; invalidation is cheap but MUST
 still be coalesced.
 
+## F14: the blank line above the input box
+
+### Observation
+
+Verified live on Claude Code 2.1.318 (2026-11-15). A blank line draws between the band and the input
+box.
+
+### How it was isolated
+
+The line stays when the band is collapsed with the engine's own `[-]` control. It also stays in a
+session started with pgd disabled: `claude --settings '{"enabledPlugins":{"<plugin>@<marketplace>":false}}'`
+(the plugin key is the one under `enabledPlugins` in `~/.claude/settings.json`). In that session the
+band is gone and the line remains, so no pgd render hook draws it. The band hook adds only label rows
+(it adds no spacer, margin or padding), and the alert hook returns `next(e)` untouched.
+
+### Consequence
+
+The engine draws the line. A mod MUST NOT try to remove it, and a later session SHOULD NOT look for
+it in `bandHook`. To tell an engine-drawn layout element from a mod-drawn one, start a session with
+the plugin disabled as above and compare.
+
 ## Open items
 
 These are carried forward from the design and MUST stay here until a spike or a later phase answers
@@ -261,3 +282,14 @@ Observed 2026-11-10 on Claude Code 2.1.318 (tmux 3.7b). Full note:
 - consequence: the opt-in script `scripts/run-pgd-links-e2e.sh` (`PGD_E2E=1`) asserts the OSC 8 urls
   of the github-pr, jira, file-ref and regex kinds and that code spans carry none. It is not a flake
   check and no hook runs it.
+
+### Telling engine layout from mod layout
+
+- result: a session started with one plugin disabled through `--settings` shows what the engine draws
+  alone. Disabling pgd removed the band and left the blank line above the input box (F14), and the
+  blank footer row between the input box and the mode line was already gone after the `statusLine`
+  key was deleted (F2).
+- version: 2.1.318
+- date: 2026-11-15
+- consequence: before changing a mod to remove a layout gap, reproduce the gap with the mod disabled;
+  if it stays, the engine draws it.
