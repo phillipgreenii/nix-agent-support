@@ -912,6 +912,19 @@
           '';
         };
 
+      # The offline-safe golangci hook from nix-repo-base (mkGolangciHook),
+      # narrowed to the `packages/*` Go modules. The base hook finds the module
+      # of each staged file (nearest go.mod), lints only the touched modules and
+      # blocks only on NEW findings (--new-from-rev); it skips in the nix build
+      # sandbox. Hoisted to one shared binding so the production extraHooks entry
+      # and its bats test (tests/golangci-hook-scoping.bats) use the same hook.
+      golangci-hook-entry =
+        pkgs:
+        (phillipgreenii-nix-base.lib.mkGolangciHook { inherit pkgs; })
+        // {
+          files = "^packages/.*(\\.go$|(^|/)go\\.(mod|sum)$)";
+        };
+
       # pg2-i5t0k: the `prevent-main-rebase` pre-rebase hook's shell text
       # (used below as the `phillipgreenii.pre-commit.extraHooks` entry, and
       # again -- unchanged -- as `checks.<system>.test-prevent-main-rebase-hook`'s
@@ -1028,6 +1041,12 @@
       # concurrent invocations of the entry, which would race one project's
       # suite against itself.
       phillipgreenii.pre-commit.extraHooks = pkgs: {
+        # Lint (golangci-lint, new findings only) the packages/* Go modules a
+        # commit touches, at commit time and in `pg-hooks run pre-land`. Only
+        # touched modules are linted; the full per-module lint stays in the
+        # checks.<system>.<module>-golangci derivations.
+        golangci-lint = golangci-hook-entry pkgs;
+
         # Each pg-connector binary's nix fileset is generated from its Go import
         # graph (packages/pg-connector/gen-filesets.sh -> filesets/<binary>.nix).
         # This hook fails with a diff when a committed fileset is stale (a new
@@ -2454,6 +2473,29 @@
                     export PATH="${preventMainRebaseHookPkg}/bin:$PATH"
                     export GFH_LIB="${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash"
                     bats ${./tests/prevent-main-rebase.bats}
+                    touch $out
+                  '';
+
+              # bats test of the golangci hook's scoping (touched module only, new
+              # findings only, packages/* only) and its sandbox skip, using the
+              # REAL golangci-lint and go on throwaway modules.
+              golangci-hook-scoping =
+                let
+                  hook = golangci-hook-entry pkgs;
+                in
+                pkgs.runCommand "check-golangci-hook-scoping"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.git
+                    ];
+                    HOOK = hook.entry;
+                    FILES_REGEX = hook.files;
+                    GO_MINOR = lib.versions.majorMinor pkgs.go.version;
+                  }
+                  ''
+                    export HOME="$TMPDIR/home"; mkdir -p "$HOME"
+                    bats ${./tests/golangci-hook-scoping.bats}
                     touch $out
                   '';
 
