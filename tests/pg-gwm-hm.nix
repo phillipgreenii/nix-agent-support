@@ -95,7 +95,7 @@ let
     {
       isDarwin ? true,
       declareLaunchd ? true,
-      cfg,
+      cfg ? { },
     }:
     (lib.evalModules {
       specialArgs = {
@@ -116,10 +116,10 @@ let
       ++ lib.optional declareLaunchd ./launchd-registry-stub.nix;
     }).config;
 
-  defaultC = evalWith { cfg = { }; };
+  defaultC = evalWith { };
   customC = evalWith { cfg.phillipgreenii.programs.pg-gwm.reaper.intervalSeconds = 300; };
   offC = evalWith { cfg.phillipgreenii.programs.pg-gwm.reaper.enable = false; };
-  disabledC = evalWith { cfg.phillipgreenii.programs.pg-gwm.enable = false; };
+  disabledC = evalWith { cfg.phillipgreenii.programs.pg-gwm.enable = lib.mkForce false; };
   noRegistryC = evalWith { declareLaunchd = false; };
   linuxC = evalWith { isDarwin = false; };
 
