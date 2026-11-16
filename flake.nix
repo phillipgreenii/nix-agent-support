@@ -8969,6 +8969,33 @@
                 testDeps = [ pkgs.git ];
               };
 
+              # pg-gwm INTEGRATION tier (V-4): runs the built binary across
+              # processes (a lease killed mid-create, a reap that outruns its
+              # deadline, a git that ignores SIGTERM). ON DEMAND ONLY: it MUST NOT
+              # be wired into any hook, run-unit-tests, pre-land or land gate, and
+              # the unit check above never compiles it (the tests carry
+              # `//go:build integration`). One test waits out the real 30-second
+              # SIGTERM grace.
+              pg-gwm-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-gwm-integration-tests";
+                  src = lib.cleanSource ./packages/pg-gwm; # matches default.nix
+                  gomod2nixToml = ./packages/pg-gwm/gomod2nix.toml;
+                  testDeps = [
+                    pkgs.git
+                    pkgs.coreutils
+                  ];
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go test -tags integration -race -count=1 -v -timeout 10m ./integration_test
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-router-heartbeat: unit suite over the pure sleep-aware decision, the
               # run loop with fake clock/probe/notifier, and the probe against httptest.
               pg-router-heartbeat-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
