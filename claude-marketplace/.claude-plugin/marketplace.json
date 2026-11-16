@@ -90,6 +90,11 @@
       "description": "Claude skill + command: tool-error waste review driven by the pg-ccaudit SQLite transcript index (query the pre-built index; never scan the raw JSONL)"
     },
     {
+      "name": "pg-gwm",
+      "source": "./pg-gwm",
+      "description": "Claude skill: lease, renew and release a single-repo worktree from pg-gwm instead of managing worktrees by hand"
+    },
+    {
       "name": "pg-go-mutate",
       "source": "./pg-go-mutate",
       "description": "Claude skill: operator-initiated mutation analysis of one Go package with pg-go-mutate; output is a triage bead of test gaps. Never part of implementation work"

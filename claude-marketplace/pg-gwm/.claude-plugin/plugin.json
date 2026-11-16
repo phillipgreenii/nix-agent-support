@@ -1,0 +1,7 @@
+{
+  "name": "pg-gwm",
+  "description": "Lease, renew and release a single-repo git worktree from pg-gwm, the worktree manager, instead of creating and deleting worktrees by hand",
+  "version": "0.1.0",
+  "defaultEnabled": true,
+  "requires": ["pg-gwm"]
+}

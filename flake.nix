@@ -6140,6 +6140,7 @@
                     pg-hooks -
                     pg-repo-runner -
                     pg-go-mutate -
+                    pg-gwm pg-gwm
                     bash-language-server -
                     wtdone wtdone hard
                     wtaudit wtaudit hard
