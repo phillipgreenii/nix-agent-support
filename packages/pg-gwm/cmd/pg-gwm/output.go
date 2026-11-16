@@ -49,6 +49,14 @@ func withSchema(v any) ([]byte, error) {
 // form. It returns the exit code.
 func (a *app) emit(format string, v any) int {
 	if format == "json" {
+		if recs, ok := v.([]manager.Record); ok { // a list is a bare array
+			b, err := json.Marshal(recs)
+			if err != nil {
+				return a.fail(err)
+			}
+			fmt.Fprintln(a.stdout, string(b))
+			return 0
+		}
 		b, err := withSchema(v)
 		if err != nil {
 			return a.fail(err)
@@ -57,6 +65,8 @@ func (a *app) emit(format string, v any) int {
 		return 0
 	}
 	switch rec := v.(type) {
+	case []manager.Record:
+		writeListText(a.stdout, rec)
 	case manager.Record:
 		writeRecordText(a.stdout, rec)
 	default:
@@ -74,6 +84,19 @@ func orDash(s *string) string {
 		return "-"
 	}
 	return *s
+}
+
+// writeListText prints one table row per record.
+func writeListText(w io.Writer, recs []manager.Record) {
+	fmt.Fprintf(w, "%-12s %-14s %-20s %-24s %-24s %s\n", "ID", "STATUS", "NAME", "BRANCH", "EXPIRES", "PATH")
+	for _, r := range recs {
+		id := r.ID
+		if id == "" {
+			id = "-"
+		}
+		fmt.Fprintf(w, "%-12s %-14s %-20s %-24s %-24s %s\n",
+			id, r.Status, orDash(r.Name), orDash(r.Branch), orDash(r.LeaseExpiration), r.WorktreePath)
+	}
 }
 
 func writeRecordText(w io.Writer, r manager.Record) {

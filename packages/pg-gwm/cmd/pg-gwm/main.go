@@ -1,5 +1,5 @@
 // pg-gwm manages worktrees of a git repository: a bounded set of leased,
-// reusable checkouts. This build carries lease, completion, the metrics
+// reusable checkouts. This build carries lease, renew, release, expire, info, list, completion, the metrics
 // exporter (serve) and version; the other commands arrive with the manager.
 package main
 
@@ -44,6 +44,11 @@ const usage = `usage: pg-gwm <command> [flags]
 commands:
   lease    [--name N [--or-renew]] [--owner O] [--metadata k=v]... [--ttl D|none]
            [-b B | -B B | --detach] [<commit-ish>] [--wait D] [--print=path]
+  renew    <lease id> | --name N [--ttl D] [--metadata k=v]... [--print=path]
+  release  <lease id> | --name N
+  expire   <lease id> | --name N
+  info     <key> | --path P | --id W | --lease-id L | --name N [--print=path]
+  list     [--include-unmanaged]
   completion <bash|zsh>
   serve    [--addr 127.0.0.1:9148]   loopback /metrics
   version
@@ -69,6 +74,16 @@ func (a *app) run(args []string) int {
 		return 0
 	case "lease":
 		return a.lease(args[1:])
+	case "renew":
+		return a.renew(args[1:])
+	case "release":
+		return a.release(args[1:])
+	case "expire":
+		return a.expire(args[1:])
+	case "info":
+		return a.info(args[1:])
+	case "list":
+		return a.list(args[1:])
 	case "completion":
 		return a.completion(args[1:])
 	case "serve":

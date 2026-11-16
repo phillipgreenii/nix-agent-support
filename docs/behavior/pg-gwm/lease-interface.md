@@ -185,7 +185,9 @@ manager does not manage reports the pseudo-status `unmanaged`.
   `tombstone-retention`, and a renew by name that matches only such a record MUST fail with
   `lease-lost`. Renew MUST NOT change the name, the owner, the path or the branch. `lease --name N
 --or-renew` MUST, as one step under the repository's lock, renew the lease named N if it is leased or
-  expired and otherwise lease a new one, and MUST report in the record whether it renewed.
+  expired and otherwise lease a new one, and MUST report in the record whether it renewed. When it
+  renews, it MUST ignore any branch arguments (`-b`, `-B`, `--detach`, a commit-ish), report
+  `renewed: true`, and warn on standard error, naming the worktree's current branch.
 - **`INV-GWM-8`** <!-- uuid: 7b6f91a0-5a78-4184-845c-2e5842a613c9 --> — When `renew` is given metadata
   it MUST replace the lease's metadata entirely (keys not given are dropped). When it is given none, the
   metadata MUST stay as it was. `lease` MUST accept owner, name and metadata.

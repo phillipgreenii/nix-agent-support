@@ -209,10 +209,31 @@ func (m *Manager) reserve(ctx context.Context, r LeaseRequest) (*plan, error) {
 	return p, nil
 }
 
-// orRenewLive is the seam for lease --or-renew meeting a live name: the
-// renew path is not part of this change.
-func (m *Manager) orRenewLive(_ context.Context, _ *state.Locked, w *state.Worktree, _ LeaseRequest) (Record, error) {
-	return Record{}, ErrInternal(fmt.Errorf("--or-renew of the live lease %s is not available yet", w.Lease.ID))
+// orRenewLive is lease --or-renew meeting a live name: it renews that lease
+// under the lock the caller holds. Branch arguments are ignored, and the
+// record says so in a warning naming the worktree's current branch.
+func (m *Manager) orRenewLive(ctx context.Context, lk *state.Locked, w *state.Worktree, r LeaseRequest) (Record, error) {
+	if r.TTL != nil && r.TTL.None {
+		return Record{}, ErrUsage("renew cannot remove an expiry", "release and lease again with --ttl none", map[string]any{"flag": "--ttl"})
+	}
+	if err := m.renewLocked(lk, w, r.TTL, r.Metadata); err != nil {
+		return Record{}, err
+	}
+	rec := m.record(*w, m.headOf(ctx, w.Path))
+	t := true
+	rec.Renewed = &t
+	if m.Registry.Path != "" {
+		_ = m.Registry.Add(m.Repo.Main)
+	}
+	if r.Branch != "" || r.Detach || r.CommitIsh != "" {
+		cur := "a detached HEAD"
+		if w.Branch != "" {
+			cur = "branch " + w.Branch
+		}
+		rec.Warnings = append(rec.Warnings,
+			fmt.Sprintf("lease %q was renewed; the branch arguments were ignored and the worktree stays on %s", r.Name, cur))
+	}
+	return rec, nil
 }
 
 func copyMeta(in map[string]string) map[string]string {

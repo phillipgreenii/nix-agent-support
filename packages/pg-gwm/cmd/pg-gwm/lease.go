@@ -135,9 +135,5 @@ func (a *app) lease(args []string) int {
 	if err != nil {
 		return a.emitErr(format, printPath, err)
 	}
-	if printPath {
-		fmt.Fprintln(a.stdout, rec.WorktreePath)
-		return 0
-	}
-	return a.emit(format, rec)
+	return a.emitRecord(format, printPath, rec)
 }

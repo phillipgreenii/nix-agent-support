@@ -25,6 +25,8 @@ type Record struct {
 	Managed         bool              `json:"managed"`
 	// Renewed is set only by lease --or-renew.
 	Renewed *bool `json:"renewed,omitempty"`
+	// Warnings are for standard error; they are not part of the output.
+	Warnings []string `json:"-"`
 }
 
 func strPtr(s string) *string {

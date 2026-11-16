@@ -297,11 +297,25 @@ func TestRefusalChangesNothing(t *testing.T) {
 	if code, _, e := c.run("lease", "--name", "held", "-b", "held"); code != 0 {
 		t.Fatalf("setup: %d %s", code, e)
 	}
+	_, dout, _ := c.run("lease", "--name", "dirty", "-b", "dirty", "--json")
+	if err := os.WriteFile(filepath.Join(decode(t, dout)["worktree_path"].(string), "unsaved.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name string
 		args []string
 		code int
 	}{
+		{"renew usage", []string{"renew", "--name", "held", "--ttl", "none"}, 2},
+		{"renew zero ttl", []string{"renew", "--name", "held", "--ttl", "0s"}, 2},
+		{"renew no key", []string{"renew"}, 2},
+		{"renew not-found", []string{"renew", "--name", "nobody"}, 4},
+		{"renew id not-found", []string{"renew", "l-nope000000"}, 4},
+		{"release not-found", []string{"release", "--name", "nobody"}, 4},
+		{"release dirty", []string{"release", "--name", "dirty"}, 23},
+		{"expire not-found", []string{"expire", "--name", "nobody"}, 4},
+		{"info not-found", []string{"info", "nobody"}, 4},
+		{"info no key", []string{"info"}, 2},
 		{"usage", []string{"lease"}, 2},
 		{"name-held", []string{"lease", "--name", "held", "--detach"}, 21},
 		{"branch-in-use", []string{"lease", main}, 22},
