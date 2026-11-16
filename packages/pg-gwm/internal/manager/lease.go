@@ -48,20 +48,63 @@ type plan struct {
 // Lease follows the lease algorithm: validate, select or create under the
 // lock, provision outside it, record the outcome, and on a cancel mid-create
 // record the worktree as broken.
+//
+// With r.Wait set, a lease that meets max-reached tries again every second
+// until the deadline, then answers max-reached.
 func (m *Manager) Lease(ctx context.Context, r LeaseRequest) (Record, error) {
 	if err := validate(&r); err != nil {
 		return Record{}, err
 	}
-	p, err := m.reserve(ctx, r)
-	if err != nil {
-		return Record{}, err
+	deadline := time.Now().Add(r.Wait)
+	for {
+		rec, err := m.leaseOnce(ctx, r)
+		var ce *Error
+		if err == nil || r.Wait <= 0 || !errors.As(err, &ce) || ce.Code != CodeMaxReached {
+			return rec, err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return rec, err
+		}
+		select {
+		case <-ctx.Done():
+			return Record{}, ErrInterrupted("interrupted while waiting for a worktree")
+		case <-time.After(min(waitInterval, remaining)):
+		}
 	}
-	if p.done != nil {
-		return *p.done, nil
-	}
-	defer p.opHold()
-	return m.provisionAndRecord(ctx, r, p)
 }
+
+// waitInterval is how often lease --wait tries again.
+const waitInterval = time.Second
+
+// maxReclaims bounds how many times one lease reclaims a worktree and starts
+// over, so a lease that keeps losing the reclaimed worktree to another
+// command still ends.
+const maxReclaims = 4
+
+// leaseOnce is one attempt: reserve, then provision and record. A reserve
+// that reclaimed a worktree released the lock to do so and runs again, now
+// seeing the reclaimed worktree (available, or gone).
+func (m *Manager) leaseOnce(ctx context.Context, r LeaseRequest) (Record, error) {
+	for attempt := 0; ; attempt++ {
+		p, err := m.reserve(ctx, r, attempt < maxReclaims)
+		if errors.Is(err, errReclaimed) {
+			continue
+		}
+		if err != nil {
+			return Record{}, err
+		}
+		if p.done != nil {
+			return *p.done, nil
+		}
+		defer p.opHold()
+		return m.provisionAndRecord(ctx, r, p)
+	}
+}
+
+// errReclaimed says reserve reclaimed a worktree and let go of the lock; the
+// caller reserves again.
+var errReclaimed = errors.New("a worktree was reclaimed")
 
 // validate is step 1: the checks that need no repository.
 func validate(r *LeaseRequest) error {
@@ -121,7 +164,7 @@ func validName(name string) error {
 }
 
 // reserve is step 2, under the repository's lock.
-func (m *Manager) reserve(ctx context.Context, r LeaseRequest) (*plan, error) {
+func (m *Manager) reserve(ctx context.Context, r LeaseRequest, mayReclaim bool) (*plan, error) {
 	lk, err := m.Store.Lock(ctx, span(m.Cfg.LockWait, 0))
 	if errors.Is(err, state.ErrBusy) {
 		return nil, ErrBusy("")
@@ -189,6 +232,20 @@ func (m *Manager) reserve(ctx context.Context, r LeaseRequest) (*plan, error) {
 		c.Lease, c.Status, c.StatusSince = lease, state.Preparing, now
 		p.w, p.switchOnly, p.opHold = *c, true, rel
 		break
+	}
+	if p.opHold == nil && mayReclaim {
+		// Only a reclaim can give a worktree: at max, or with reuse on and an
+		// expired lease to take over (INV-GWM-19).
+		atMax := m.Cfg.Max != nil && len(st.Worktrees) >= *m.Cfg.Max
+		if atMax || (m.Cfg.Reuse && m.hasExpired(st)) {
+			w, err := m.reclaimOne(ctx, lk)
+			if err != nil {
+				return nil, err
+			}
+			if w != nil {
+				return nil, errReclaimed
+			}
+		}
 	}
 	if p.opHold == nil {
 		w, err := m.newWorktree(ctx, st, lease, r, now)
@@ -345,6 +402,22 @@ func (m *Manager) provisionAndRecord(ctx context.Context, r LeaseRequest, p *pla
 	}
 	if p.switchOnly {
 		t0 := time.Now()
+		// A released or available worktree may hold work written since its
+		// lease ended; save it before anything is switched or cleaned
+		// (INV-GWM-24, INV-GWM-18).
+		prior := p.w
+		prior.Lease = nil
+		if _, err := m.preserveIfNeeded(ctx, prior); err != nil {
+			return m.fail(ctx, p, err)
+		}
+		if _, err := m.Prov.RemoveStaleIndexLock(p.w.Path, m.Cfg.IndexLockStaleAfter.D); err != nil {
+			return m.fail(ctx, p, err)
+		}
+		if m.Cfg.Clean {
+			if err := m.Prov.Clean(ctx, p.w.Path, m.Cfg.KeepList); err != nil {
+				return m.fail(ctx, p, err)
+			}
+		}
 		runHook := m.Cfg.ReuseHookPolicy != "skip"
 		if err := m.Prov.Switch(ctx, p.w.Path, p.spec, runHook); err != nil {
 			return m.fail(ctx, p, err)

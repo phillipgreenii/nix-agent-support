@@ -8,19 +8,30 @@ import (
 )
 
 // candidates lists the worktrees a lease may take instead of creating one,
-// best first (INV-GWM-20). This packet selects available worktrees only; the
-// released and expired candidates arrive with reuse. The row 12 target (a
-// released worktree already holding the requested branch) comes first and is
-// chosen by planBranch, not here.
+// best first (INV-GWM-20): available worktrees by slot, then, with reuse on,
+// released ones (the longest released first). Lease-expired worktrees are not
+// here: they are reclaimed first (reclaimOne). The row 12 target (a released
+// worktree already holding the requested branch) comes first and is chosen by
+// planBranch, not here.
 func (m *Manager) candidates(st *state.State) []*state.Worktree {
-	var out []*state.Worktree
+	var avail, released []*state.Worktree
 	for i := range st.Worktrees {
-		if w := &st.Worktrees[i]; w.Status == state.Available && w.Lease == nil {
-			out = append(out, w)
+		w := &st.Worktrees[i]
+		switch {
+		case w.Status == state.Available && w.Lease == nil:
+			avail = append(avail, w)
+		case m.Cfg.Reuse && w.Status == state.Released && w.Lease == nil:
+			released = append(released, w)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
-	return out
+	sort.SliceStable(avail, func(i, j int) bool { return avail[i].Slot < avail[j].Slot })
+	sort.SliceStable(released, func(i, j int) bool {
+		if !released[i].StatusSince.Equal(released[j].StatusSince) {
+			return released[i].StatusSince.Before(released[j].StatusSince)
+		}
+		return released[i].Slot < released[j].Slot
+	})
+	return append(avail, released...)
 }
 
 // counts tallies every managed worktree by effective status, and lists the

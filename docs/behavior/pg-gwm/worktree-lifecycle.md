@@ -82,8 +82,10 @@ Extensions:
    `adding dirty WIP` (`INV-GWM-24`).
 3. `feature/x` is untouched. The worktree is now clean and is reclaimed as in `JOURNEY-GWM-REAP`.
 4. Later the requester runs `pg-gwm preserved list`, finds the branch, runs
-   `pg-gwm lease <that branch>`, and then `git reset --soft HEAD~1`: the commit is gone and its changes
-   are staged, ready for the correct commit (the commit message says exactly this, `INV-GWM-24`).
+   `pg-gwm lease -b <their own branch> <that branch>`, and then `git reset --soft HEAD~1`: the commit is
+   gone and its changes are staged, ready for the correct commit (the commit message says exactly this,
+   `INV-GWM-24`). The requester leases a branch of their own because leasing the `pg-gwm/` branch itself
+   would leave them on a branch `preserved prune` will not delete.
 
 ## Branch and commit on lease
 
@@ -185,7 +187,9 @@ requester that needs a fresher base fetches first (ruled 2026-11-14).
   a clean tree with unreachable commits the branch alone suffices). The commit's subject MUST be
   `adding dirty WIP`, and its body MUST name the lease (name, lease id, branch), say that commit hooks
   were skipped, and give the commands that take the commit back off while keeping its changes staged
-  so the correct commit can be made: `pg-gwm lease <this branch>`, then `git reset --soft HEAD~1`. The
+  so the correct commit can be made: `pg-gwm lease -b <your-branch> <this branch>` (a branch of the
+  requester's own, not the `pg-gwm/` branch, which `lease` refuses to create and `preserved prune` will not
+  delete from under a requester), then `git reset --soft HEAD~1`. The
   lease's own branch MUST NOT move. If the work cannot be preserved (a merge or rebase in progress,
   changes inside a submodule), the worktree MUST be marked `broken` and nothing about it removed,
   switched or handed out. _(Operator rulings, Phillip, 2026-11-14: hooks skipped, "yes; the comment

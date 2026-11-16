@@ -49,6 +49,8 @@ commands:
   expire   <lease id> | --name N
   info     <key> | --path P | --id W | --lease-id L | --name N [--print=path]
   list     [--include-unmanaged]
+  preserved list
+  preserved prune [--older-than D] [--dry-run]
   completion <bash|zsh>
   serve    [--addr 127.0.0.1:9148]   loopback /metrics
   version
@@ -84,6 +86,8 @@ func (a *app) run(args []string) int {
 		return a.info(args[1:])
 	case "list":
 		return a.list(args[1:])
+	case "preserved":
+		return a.preserved(args[1:])
 	case "completion":
 		return a.completion(args[1:])
 	case "serve":
