@@ -53,7 +53,7 @@ lower bound:
 | -------------------------- | ---------- | -------------------- | --------------------- | ------------ |
 | `disk` (free GiB)          | `>= 40`    | `>= 25` and `< 40`   | `>= 12` and `< 25`    | `< 12`       |
 | `cpu` (1-minute load/core) | `< 4`      | `>= 4` and `< 8`     | `>= 8` and `< 14`     | `>= 14`      |
-| `ram` swap (GiB)           | `< 2`      | `>= 2` and `< 10`    | `>= 10` and `< 20`    | `>= 20`      |
+| `ram` swap (GiB)           | `< 6`      | `>= 6` and `< 12`    | `>= 12` and `< 20`    | `>= 20`      |
 | `ram` pressure             | normal (1) | warn (2)             | none                  | critical (4) |
 | Claude pace                | `< 0.8`    | `>= 0.8` and `< 1.0` | `>= 1.0` and `< 1.25` | `>= 1.25`    |
 
@@ -67,7 +67,11 @@ read the router's `disk` level (`INV-SEN-4`).
 incident, so routine load stays at `OK` or better and the incident range is `TIGHT` or `EXHAUSTED`;
 the platform's memory-pressure "warn" occurs routinely, so it is `OK`, not `TIGHT`; swap cannot
 exceed free disk, so pressure critical is the practical `EXHAUSTED` signal. The retired watchdog
-tripped at 30 GiB and recovered at 37.5; this is a deliberate change. `>= 20` rather than `> 20`
+tripped at 30 GiB and recovered at 37.5; this is a deliberate change. The swap edges were retuned
+(2026-11-16) from `2`/`10`/`20` to `6`/`12`/`20` after a three-day review: swap used never fell below
+4.36 GiB (p50 7.38, p90 9.66, max 14.7) because macOS keeps swap until reboot, so a `< 2` PLENTY was
+unreachable; the new edges put roughly 12% of minutes in PLENTY and 85% in OK from swap alone. The
+step-down trigger (swap `>= 10` with free disk `< 25`) is unchanged. `>= 20` rather than `> 20`
 because a half-open rule leaves exactly 20 in the more restrictive band.
 
 **Hysteresis and dwell** (`INV-SEN-3`). A fall to a worse level is immediate when the reading enters

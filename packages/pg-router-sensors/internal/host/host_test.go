@@ -250,11 +250,11 @@ func TestRAMIsWorstOfSwapAndPressure(t *testing.T) {
 		want  string
 	}{
 		{0, "1\n", "PLENTY"},
-		{1.99, "1\n", "PLENTY"},
-		{2, "1\n", "OK"},
+		{5.99, "1\n", "PLENTY"},
+		{6, "1\n", "OK"},
 		{3.3, "2\n", "OK"}, // pressure warn is routine, OK
-		{9.99, "1\n", "OK"},
-		{10, "1\n", "TIGHT"},
+		{11.99, "1\n", "OK"},
+		{12, "1\n", "TIGHT"},
 		{19.99, "1\n", "TIGHT"},
 		{20, "1\n", "EXHAUSTED"},
 		{0, "4\n", "EXHAUSTED"},
@@ -295,7 +295,7 @@ func TestRAMPartialAndMissingReadings(t *testing.T) {
 
 func TestRAMStepDownEngagesAndDropsOneLevel(t *testing.T) {
 	r := newRig(t)
-	r.swapG, r.free["/"] = 10, 24.9
+	r.swapG, r.free["/"] = 12, 24.9
 	if got := r.level(t, "ram"); got != "EXHAUSTED" { // raw TIGHT lowered one step
 		t.Errorf("engaged: %s, want EXHAUSTED", got)
 	}
@@ -307,7 +307,7 @@ func TestRAMStepDownNotEngagedAtBoundaries(t *testing.T) {
 	if got := r.level(t, "ram"); got != "OK" {
 		t.Errorf("swap below 10: %s", got)
 	}
-	r.swapG, r.free["/"] = 10, 25
+	r.swapG, r.free["/"] = 12, 25
 	if got := r.level(t, "ram"); got != "TIGHT" {
 		t.Errorf("disk exactly 25 is not < 25: %s", got)
 	}
@@ -324,8 +324,8 @@ func TestRAMStepDownNeverBelowExhausted(t *testing.T) {
 // stateful drives the engaged step-down across invocations (the state file).
 func TestRAMStepDownStaysEngagedUntilReleased(t *testing.T) {
 	r := newRig(t)
-	// Engage: swap 10 with disk 20 (< 25): raw TIGHT, lowered to EXHAUSTED.
-	r.swapG, r.free["/"] = 10, 20
+	// Engage: swap 12 with disk 20 (< 25): raw TIGHT, lowered to EXHAUSTED.
+	r.swapG, r.free["/"] = 12, 20
 	_, ls := r.run(t)
 	if got := byRes(ls, "ram")["level"]; got != "EXHAUSTED" {
 		t.Fatalf("engaged level = %v", got)
@@ -337,13 +337,13 @@ func TestRAMStepDownStaysEngagedUntilReleased(t *testing.T) {
 		_, ls := r.run(t)
 		return byRes(ls, "ram")["level"].(string)
 	}
-	// swap 9 GiB, disk 28 GiB: between the release readings; stays engaged.
-	// Raw band is OK (9 < 10) lowered to TIGHT; announced rise is one step from EXHAUSTED.
-	if got := step(9, 28); got != "TIGHT" {
-		t.Errorf("9/28 first step = %s, want TIGHT (one level per dwell, engaged OK->TIGHT)", got)
+	// swap 11 GiB, disk 28 GiB: between the release readings; stays engaged.
+	// Raw band is OK (11 < 12) lowered to TIGHT; announced rise is one step from EXHAUSTED.
+	if got := step(11, 28); got != "TIGHT" {
+		t.Errorf("11/28 first step = %s, want TIGHT (one level per dwell, engaged OK->TIGHT)", got)
 	}
-	if got := step(9, 28); got != "TIGHT" {
-		t.Errorf("9/28 second step = %s, want TIGHT (engaged holds OK-1)", got)
+	if got := step(11, 28); got != "TIGHT" {
+		t.Errorf("11/28 second step = %s, want TIGHT (engaged holds OK-1)", got)
 	}
 	// exactly 8 GiB swap releases.
 	if got := step(8, 28); got != "OK" {
@@ -374,7 +374,7 @@ func TestRAMRiseNeedsSwapMargin(t *testing.T) {
 	r := newRig(t)
 	r.swapG, r.free["/"] = 25, 100
 	r.run(t) // EXHAUSTED
-	// swap 9.9 is in band OK but above TIGHT->OK needs <= 10*0.8 = 8.
+	// EXHAUSTED->TIGHT needs swap <= 20*0.8 = 16.
 	r.now = r.now.Add(10 * time.Minute)
 	r.swapG = 18 // TIGHT band, EXHAUSTED->TIGHT needs <= 16
 	_, ls := r.run(t)

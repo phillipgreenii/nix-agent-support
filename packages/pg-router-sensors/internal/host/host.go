@@ -78,7 +78,7 @@ func Defaults() Thresholds {
 	return Thresholds{
 		DiskPlenty: 40, DiskOK: 25, DiskTight: 12,
 		CPUPlenty: 4, CPUOK: 8, CPUTight: 14,
-		SwapPlenty: 2, SwapOK: 10, SwapTight: 20,
+		SwapPlenty: 6, SwapOK: 12, SwapTight: 20,
 		StepSwap: 10, StepDisk: 25,
 	}
 }
