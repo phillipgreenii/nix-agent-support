@@ -418,3 +418,39 @@ func TestASkipDocumentStillNeedsPRAndModeAndAKnownReason(t *testing.T) {
 		t.Errorf("a refused skip wrote %v", rows)
 	}
 }
+
+func TestResidualOfAMergedOrInactivePRIsNotLive(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name  string
+		facts string
+		inact bool
+		want  int
+	}{
+		{"open", `{"pr_show":{"state":"open"}}`, false, 1},
+		{"merged", `{"pr_show":{"state":"merged","merged":true}}`, false, 0},
+		{"closed", `{"pr_show":{"state":"closed"}}`, false, 0},
+		{"inactive", `{"pr_show":{"state":"open"}}`, true, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			st := store.OpenNewSchemaForTest(t)
+			if err := st.UpsertEntityForTest(ctx, store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#7", Facts: c.facts, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+				t.Fatal(err)
+			}
+			mustRecord(t, st, "apply", t0, RunInput{PR: "o/r#7", Mode: "apply", Residual: intp(2)})
+			if c.inact {
+				if _, err := MarkInactive(ctx, st, "o/r", "o/r#7"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := mustRead(t, st, t2)
+			if s.ResidualPRs != c.want {
+				t.Errorf("ResidualPRs = %d, want %d", s.ResidualPRs, c.want)
+			}
+			if c.want == 0 && s.ResidualOldestAgeSeconds != 0 {
+				t.Errorf("oldest age = %d, want 0", s.ResidualOldestAgeSeconds)
+			}
+		})
+	}
+}

@@ -102,6 +102,9 @@ type PRState struct {
 	ResidualSince string `json:"residual_since,omitempty"`
 	LastOutcome   string `json:"last_outcome,omitempty"`
 	UpdatedAt     string `json:"updated_at"`
+
+	// ref is the PR reference the record is keyed by; set on read only.
+	ref string
 }
 
 // Validate rejects an input that names a value outside the closed vocabularies,
@@ -379,12 +382,19 @@ func Read(ctx context.Context, st *store.Store, now time.Time) (Snapshot, error)
 		case strings.HasPrefix(k, KeyPRPrefix):
 			var ps PRState
 			if json.Unmarshal([]byte(v), &ps) == nil {
+				ps.ref = strings.TrimPrefix(k, KeyPRPrefix)
 				prs = append(prs, ps)
 			}
 		}
 	}
+	// A PR that has merged, closed or been marked inactive is never run again,
+	// so a residual it was left with cannot clear; it is not a live residual.
+	finished, err := st.FinishedPRIDs(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	for _, ps := range prs {
-		if ps.Mode != snap.LaneMode || ps.Residual <= 0 {
+		if ps.Mode != snap.LaneMode || ps.Residual <= 0 || finished[ps.ref] {
 			continue
 		}
 		snap.ResidualPRs++

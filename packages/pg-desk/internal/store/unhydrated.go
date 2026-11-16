@@ -95,3 +95,34 @@ func factsSayClosed(facts string) bool {
 	}
 	return f.PRShow.Merged || f.PRShow.State == "closed" || f.PRShow.State == "merged"
 }
+
+// FinishedPRIDs returns the entity ids of the stored PRs that are finished:
+// their stored facts say closed or merged, or they are marked inactive. The
+// PR lane never runs for such a PR again, so state it recorded earlier can no
+// longer change and must not be read as live. A PR with no row is not in the
+// set. It reads schema-2 columns, so callers check SchemaVersion first.
+func (s *Store) FinishedPRIDs(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.sql.QueryContext(
+		ctx,
+		`SELECT entity_id, facts, active FROM entity WHERE entity_type = 'pr'`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: finished prs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id, facts string
+		var active int
+		if err := rows.Scan(&id, &facts, &active); err != nil {
+			return nil, fmt.Errorf("store: finished prs: scan: %w", err)
+		}
+		if active == 0 || factsSayClosed(facts) {
+			out[id] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: finished prs: %w", err)
+	}
+	return out, nil
+}
