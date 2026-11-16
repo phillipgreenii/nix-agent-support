@@ -100,6 +100,20 @@ func buildRefusalIndex(t *testing.T) (string, *sql.DB) {
 
 func buildIndexFrom(t *testing.T, corpus string) (string, *sql.DB) {
 	t.Helper()
+	r := shared(t, "index/"+corpus, func(tb testing.TB) indexFixture {
+		root, db := buildIndexUncached(tb, corpus)
+		return indexFixture{root, db}
+	})
+	return r.root, r.db
+}
+
+type indexFixture struct {
+	root string
+	db   *sql.DB
+}
+
+func buildIndexUncached(t testing.TB, corpus string) (string, *sql.DB) {
+	t.Helper()
 	base := t.TempDir()
 	root := filepath.Join(base, "projects")
 	src := filepath.Join("..", "ingest", "testdata", corpus)

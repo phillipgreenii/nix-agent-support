@@ -48,6 +48,11 @@ var scopeFixtureSessions = []scopeSession{
 // seven queries yields rows tagged with the session.
 func buildScopeDB(t *testing.T) *sql.DB {
 	t.Helper()
+	return shared(t, "scope", buildScopeDBUncached)
+}
+
+func buildScopeDBUncached(t testing.TB) *sql.DB {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "scope.db")
 	w, err := store.Open(t.Context(), dbPath, false)
 	if err != nil {

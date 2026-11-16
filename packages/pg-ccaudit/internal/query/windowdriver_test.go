@@ -97,11 +97,17 @@ func runWith(t testing.TB, db *sql.DB, q Query, w windowCase, f flagCase) [][]an
 }
 
 func smallFixture(t testing.TB) *sql.DB {
+	t.Helper()
+	return shared(t, "small", smallFixtureUncached)
+}
+
+func smallFixtureUncached(t testing.TB) *sql.DB {
 	sessions, perSess := 90, 240
 	if raceBuild {
-		// A third of the sessions: the old-SQL oracle is quadratic
-		// and the race detector makes it 20 to 30 times slower.
-		sessions, perSess = 30, 240
+		// A third of the sessions and two fifths of the lines per
+		// session: the old-SQL oracle is quadratic in the lines per
+		// session and the race detector makes it 20 to 30 times slower.
+		sessions, perSess = 30, 144
 	}
 	return buildBigFixture(t, bigFixture{sessions: sessions, perSess: perSess})
 }
