@@ -48,8 +48,16 @@ teardown() {
   for _ in $(seq 1 60); do
     n=$(grep -o 'pg_disk_reclaimer_item_duration_seconds' "$TEST_DIR/out.json" 2>/dev/null | wc -l)
     [ "$n" -ge 2 ] && break
-    read -r -t 0.5 <> <(:) || true
+    sleep 0.5
   done
+  if [ "$n" -lt 2 ]; then
+    echo "--- collector log" >&3
+    cat "$TEST_DIR/collector.log" >&3
+    echo "--- spool" >&3
+    ls -la "$TEST_DIR/spool/metrics" >&3
+    echo "--- out" >&3
+    head -c 2000 "$TEST_DIR/out.json" >&3 2>/dev/null || true
+  fi
   [ "$n" -ge 2 ]
   run grep -q file_id "$TEST_DIR/out.json"
   [ "$status" -ne 0 ]

@@ -17,6 +17,7 @@ setup() {
 }
 
 teardown() {
+  chmod -R u+w "$TEST_DIR" 2>/dev/null || true # go makes read-only module cache dirs
   rm -rf "$TEST_DIR"
 }
 
@@ -188,6 +189,8 @@ stubs() {
   mkreadme
   entry old-a 100
   mkdir -p "$TEST_DIR/gopath"
+  stubs 1 # a build host may have a live go; the guard has its own tests, and the go here is the packaged one
+  unset PGDR_GO_CMD
   GOPATH="$TEST_DIR/gopath" GOFLAGS=-modcacherw run --separate-stderr "$SCRIPT_UNDER_TEST" go-cache-wipe --cache "$CACHE"
   [ "$status" -eq 0 ]
   [ ! -e "$CACHE/ab" ]

@@ -37,6 +37,11 @@ exporters:
   file:
     path: ${env:OUT_FILE}
 service:
+  # No self-telemetry listener: the collector's own metrics port is not needed
+  # here and a build sandbox may refuse to bind it.
+  telemetry:
+    metrics:
+      level: none
   pipelines:
     metrics:
       receivers: [otlpjsonfile/metrics]
