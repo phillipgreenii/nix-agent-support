@@ -14698,6 +14698,49 @@
                     touch "$out"
                   '';
 
+              # test-pg-gwm-hm: the scheduled reaper's launchd entry and the rendered
+              # configuration of home/programs/pg-gwm. Eval cases (tests/pg-gwm-hm.nix)
+              # run the REAL module against stubs; the check then runs the rendered
+              # reaper command with the real CLI under `env -i` against a throwaway
+              # configuration (one real repository) and requires a JSON result list
+              # whose outcomes contain no error, and re-checks the rendered file.
+              test-pg-gwm-hm =
+                let
+                  r = import ./tests/pg-gwm-hm.nix { inherit lib pkgs; };
+                  reaperScript = pkgs.writeText "pg-gwm-reaper-script" r.script;
+                in
+                pkgs.runCommand "test-pg-gwm-hm"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.pg-gwm
+                      pkgs.git
+                      pkgs.jq
+                      pkgs.bash
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-gwm hm eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    pg-gwm config check --config ${r.config}
+
+                    work="$PWD/work"
+                    mkdir -p "$work/cfg/pg-gwm" "$work/state" "$work/repo"
+                    git -C "$work/repo" init -q
+                    git -C "$work/repo" -c user.name=t -c user.email=t@example.test \
+                      commit -q --allow-empty -m init
+                    printf '[repos."%s"]\nmin = 0\n' "$(cd "$work/repo" && pwd -P)" \
+                      > "$work/cfg/pg-gwm/config.toml"
+
+                    env -i PATH=${pkgs.git}/bin:${pkgs.coreutils}/bin HOME="$work" \
+                      XDG_CONFIG_HOME="$work/cfg" XDG_STATE_HOME="$work/state" \
+                      ${pkgs.bash}/bin/bash ${reaperScript} > "$work/reap.json"
+                    cat "$work/reap.json"
+                    jq -e '.results | length > 0 and all(.outcome != "error")' "$work/reap.json"
+                    touch "$out"
+                  '';
+
               # test-tmp-sweep (bead pg2-bo3n7, packet C of the build_tmp design): the daily
               # launchd sweep agent of home/programs/tmp-sweep. Eval cases
               # (tests/tmp-sweep.nix) run the REAL tmp-sweep, build-tmp, claude-code-tmp and

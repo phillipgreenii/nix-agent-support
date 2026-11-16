@@ -21,8 +21,8 @@ var completionFlags = map[string][]string{
 	"info":       {"--path", "--id", "--lease-id", "--name", "--print"},
 	"list":       {"--include-unmanaged"},
 	"preserved":  {"--older-than", "--dry-run"},
-	"reap":       {"--all-repos", "--dry-run"},
-	"config":     {},
+	"reap":       {"--all-repos", "--dry-run", "--deadline"},
+	"config":     {"--config"},
 	"completion": {},
 }
 

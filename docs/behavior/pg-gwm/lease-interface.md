@@ -240,8 +240,11 @@ manager does not manage reports the pseudo-status `unmanaged`.
   - `info <key> | --path P | --id W | --lease-id L | --name N [--print=path]`
   - `list [--include-unmanaged]`
   - `preserved list`, `preserved prune [--older-than <duration>] [--dry-run]`
-  - `reap [--all-repos] [--dry-run]`
-  - `config check`, `completion <shell>`
+  - `reap [--all-repos] [--dry-run] [--deadline <duration>]`
+  - `config check [--config <path>]`: prints the configuration findings and exits 2 on any error;
+    with `--config` it checks that file alone (no repository lookups), without it the user
+    configuration and the findings that need the machine
+  - `serve [--addr <host:port>]` (the loopback metrics exporter), `version`, `completion <shell>`
 
   What crosses out: the record of `INV-GWM-4` (a JSON object, or a list of them for `list` and
   `reap`), or a refusal from the catalog below. What MUST hold: `INV-GWM-1` to `INV-GWM-14`. The

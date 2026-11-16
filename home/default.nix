@@ -36,6 +36,7 @@
     ./programs/pg-connector
     ./programs/pg-rescue
     ./programs/pg-task-focus
+    ./programs/pg-gwm
     ./programs/pg-keep-awake
     ./programs/pg-git-lander
     ./programs/pg-review

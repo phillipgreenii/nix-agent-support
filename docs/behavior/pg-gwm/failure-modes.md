@@ -95,7 +95,7 @@ Extensions:
   its worktree broken. A zero-byte git index lock older than `index-lock-stale-after` (default 10 minutes)
   MAY be removed only while the manager holds that worktree.
 - **`INV-GWM-32`** <!-- uuid: 715fb890-c503-4988-9e55-0a239bbdfa41 --> — A scheduled job MUST run
-  `pg-gwm reap --all-repos` every `reap-interval` (default 10 minutes), over every repository in the
+  `pg-gwm reap --all-repos` every reaper interval (the reaper's own setting, `reaper.intervalSeconds`, default 600 seconds; it is not a per-repository key), over every repository in the
   user configuration and every repository in which a lease has been made (the manager MUST record each
   such repository in a user-level registry), single-flight per repository and bounded by a deadline,
   and MUST record each run. The lease's own one-candidate reclaim (`INV-GWM-19`) complements it and MUST
@@ -105,7 +105,7 @@ Extensions:
   oldest lease with no expiry; worktrees removed and kept by reap; preserved branches; `broken`
   worktrees; refusals by error name; the time a lease takes (split into wait, creation and switch); and
   the age of the last reaper run. It MUST have alerts for `broken` worktrees persisting, a reaper run
-  older than three `reap-interval`s, and `max-reached` refusals above a configured rate. The rate is a
+  older than three reaper intervals, and `max-reached` refusals above a configured rate. The rate is a
   literal in the alert rule file (5 an hour); the rule file is the configuration, and changing the rate is
   a one-line edit of that file. _(Plan decision 12; the operator may overrule.)_ Each alert rule MUST be
   registered with the deployment's probe, as the deployment's alert convention requires.
@@ -121,5 +121,8 @@ Extensions:
   worktrees removed, kept, preserved and marked `broken`, and the run record. What MUST hold:
   `INV-GWM-23`, `INV-GWM-24`, `INV-GWM-30`, `INV-GWM-32`. The counterparty is `ACTOR-REAPER`.
 - **`INTF-GWM-OPS`** <!-- uuid: 66e0b90f-5c51-4526-8896-90703917cd55 --> — what the operator reads:
-  `list`, `preserved list`, the event log, and the metrics and alerts of `INV-GWM-33`. What MUST
+  `list`, `preserved list`, the event log, the metrics and alerts of `INV-GWM-33` (served by the
+  exporter, `pg-gwm serve`, on a loopback `/metrics` port) and the reaper record `reaper.json` (the
+  last run's start, end and worst outcome, and each repository's entry; the age of its last success
+  feeds the stale-reaper alert). What MUST
   hold: `INV-GWM-33`, `INV-GWM-34`. The counterparty is `ACTOR-OPERATOR`.

@@ -1,58 +1,56 @@
 # pg-gwm
 
-> Lease reusable, already-warm checkouts of a repository to agent sessions.
-> A lease is keyed on the owner session id; the work item id is only an affinity hint.
-> Every command prints JSON; failures exit non-zero (1 internal, 2 usage, 4 lease-not-found, 9 slot-busy, 11 owner-already-leases, 20 pool-exhausted, 21 low-disk, 22 ref-unresolvable, 23 quarantine-only, 24 git-wedged).
+> Lease git worktrees of a repository: bounded, reusable, and reaped when idle.
+> Every command prints JSON when piped and text on a terminal (`--format=text|json`).
+> Failures exit non-zero (1 internal, 2 usage, 4 not found, 9 busy, 20 max-reached, 21 name-held, 22 branch-in-use, 23 dirty, 24 lease-released, 25 lease-lost, 26 ref-unresolvable, 28 broken, 29 low-disk).
 > More information: `pg-gwm --help`.
 
-- Lease a checkout of a ref for a session (prefers the slot last used for the work item):
+- Lease a worktree on a new branch and enter it (the path is the only output):
 
-`pg-gwm lease --repo {{/path/to/clone}} --ref {{origin/main}} --owner {{session-id}} --bead {{work-item}}`
+`p=$(pg-gwm lease --name {{x}} -b {{feature/x}} --print=path) || exit; cd "$p"`
 
-- Lease again for a session that may already hold one (a redispatch): the live lease is renewed and returned unchanged (same lease id, slot and path; the checkout is not reset). Without `--reuse` the second lease exits 11:
+- Lease a detached worktree at a commit-ish, waiting up to a while for one:
 
-`pg-gwm lease --repo {{/path/to/clone}} --ref {{origin/main}} --owner {{session-id}} --reuse`
+`pg-gwm lease --detach {{origin/main}} --wait {{2m}}`
 
-- Extend a lease before it expires:
+- Renew a lease by name, or take it again if it is already held:
 
-`pg-gwm renew --lease {{lease-id}} --ttl {{30m}}`
+`pg-gwm renew --name {{x}} --ttl {{30m}}`
 
-- Give the checkout back: reset it for the next lease (uncommitted tracked work is captured to a rescue ref first):
+`pg-gwm lease --name {{x}} --or-renew`
 
-`pg-gwm release --lease {{lease-id}}`
+- Give a worktree back, or mark its lease expired so the reaper reclaims it:
 
-- Leave the checkout as it is and hold it for the operator:
+`pg-gwm release --name {{x}}`
 
-`pg-gwm release --lease {{lease-id}} --disposition {{keep}}`
+`pg-gwm expire --name {{x}}`
 
-- Show what the janitor would reclaim from expired leases, then reclaim:
+- Show one worktree, or list every managed one:
+
+`pg-gwm info --name {{x}}`
+
+`pg-gwm list`
+
+- See what a reap would do, then reap this repository, or every configured and registered one with a deadline:
 
 `pg-gwm reap --dry-run`
 
-`pg-gwm reap`
+`pg-gwm reap --all-repos --deadline {{5m}}`
 
-- Show every slot, its state, owner and expiry:
+- List the branches kept from dirty expired worktrees, and delete old ones:
 
-`pg-gwm status`
+`pg-gwm preserved list`
 
-- Print the Prometheus metrics (slot gauges plus reset, wait, failure and rescue counters), or write them atomically to a file:
+`pg-gwm preserved prune --older-than {{30d}} --dry-run`
 
-`pg-gwm metrics`
+- Check the configuration file (alone with `--config`; with repository lookups without it):
 
-`pg-gwm metrics --out {{/path/to/pg_gwm.prom}}`
+`pg-gwm config check --config {{path/to/config.toml}}`
 
-- Serve the same exposition on a loopback `/metrics` port, rendered on each scrape (the launchd exporter runs this):
+- Serve the Prometheus metrics on a loopback port:
 
 `pg-gwm serve --addr {{127.0.0.1:9148}}`
 
-- Also expose Go's pprof endpoint while serving (the binary opens it only when the variable is set, and the launchd exporter module sets it by default (`pprof.enable`); an absolute unix-socket path or a loopback `host:port`):
+- Print the shell completion:
 
-`PG_GWM_PPROF_ADDR={{/path/to/pprof.sock}} pg-gwm serve`
-
-- Grow a cold pool to a number of slots, one slot at a time with a pause between creations (refused below the free-space floor):
-
-`pg-gwm prewarm --repo {{/path/to/clone}} --ref {{origin/main}} --count {{4}} --delay {{30s}}`
-
-- After an apply, check every idle slot and quarantine any that is no longer a healthy checkout:
-
-`pg-gwm revalidate --repo {{/path/to/clone}}`
+`pg-gwm completion {{bash|zsh}}`

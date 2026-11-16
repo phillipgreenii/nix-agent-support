@@ -52,6 +52,7 @@ commands:
   reap     [--all-repos] [--dry-run] [--deadline D]
   preserved list
   preserved prune [--older-than D] [--dry-run]
+  config check [--config PATH]   validate the configuration file
   completion <bash|zsh>
   serve    [--addr 127.0.0.1:9148]   loopback /metrics
   version
@@ -91,6 +92,8 @@ func (a *app) run(args []string) int {
 		return a.reap(args[1:])
 	case "preserved":
 		return a.preserved(args[1:])
+	case "config":
+		return a.configCmd(args[1:])
 	case "completion":
 		return a.completion(args[1:])
 	case "serve":

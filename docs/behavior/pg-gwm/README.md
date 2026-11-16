@@ -123,8 +123,10 @@ very close to unmanaged, but you get the reap to help with clean up.")_
 | `git-timeout`               | `2m`                                | Timeout of one repository operation (`INV-GWM-31`)                                                                |
 | `create-timeout`            | `30m`                               | Timeout of a creation or a clean (`INV-GWM-31`)                                                                   |
 | `index-lock-stale-after`    | `10m`                               | Age after which a zero-byte index lock is stale (`INV-GWM-31`)                                                    |
-| `reap-interval`             | `10m`                               | How often the scheduled reaper runs (`INV-GWM-32`)                                                                |
 | `tombstone-retention`       | `7d`                                | How long a reclaimed lease's record is kept (`INV-GWM-7`, `INV-GWM-34`)                                           |
+
+The scheduled reaper's interval is not a per-repository key: one machine runs one reaper, so it is the
+reaper's own setting, `reaper.intervalSeconds` (default 600 seconds, `INV-GWM-32`).
 
 A fixed pool of four is `reuse-reclaimed-worktrees = true` with `min = max = 4`. With reuse off, `max`
 is only an upper limit: every lease gets a fresh worktree, and there are never too many.
@@ -253,5 +255,4 @@ per gap. The code is still `pg-checkout-pool`, whose contract this set replaces.
 | Element      | Intended                                                                                                 | Where the implementation stands                                                                                              |
 | ------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `INV-GWM-26` | Every sibling tool skips a worktree locked with a `pg-gwm` reason                                        | Only the handler's sweep still recognizes pool slots by their old marker; it needs its own change and its own test (task 17) |
-| `INV-GWM-32` | A scheduled reaper over a registry of repositories                                                       | The router handler's janitor and the pool's own reap                                                                         |
 | Consumers    | The router handler leases `<role>/<bead>` from `pg-gwm` and no longer creates or sweeps worktrees itself | The handler creates `<worktree dir>/<bead>` and runs its own worktree-keyed sweep with a live-process probe                  |
