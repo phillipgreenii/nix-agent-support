@@ -363,6 +363,36 @@ and does not contradict the aggregate 5h reading.
 > heavier 7-day usage MAY be re-observed opportunistically, but the missing-field
 > robustness above makes the answer immaterial to correctness.
 
+### Status update 2026-11-16: `seven_day` is still absent, so `claude_week` has no reading
+
+Re-observed on Claude Code 2.1.318: across 2393 `*.status.jsonl` capture files under
+`~/.claude/projects`, 27880 lines carry `five_hour_pct` and none carry `seven_day`.
+`pa-monitor status --rate-limits` therefore prints only `rate_limits.five_hour` and no
+`rate_limits.seven_day`. The upstream Claude Code statusline documentation says `rate_limits`
+appears only for claude.ai Pro, Max and Ultra subscribers and that each window MAY be
+independently absent, so the account's plan type is the likely cause (not confirmed). Several
+upstream issue reports describe the same gap on other plans.
+
+Consequence for pg-router: the `claude-sensor` (`packages/pg-router-sensors/internal/claude/claude.go`)
+is correct and reports "no reading" for `claude_week` ("window or used_pct absent", exit 0). A
+resource with no reading is treated as its `unknown` level. A deployment that configures
+`unknown = "best"` for `claude_week` therefore always passes a `claude_week >= OK` clause, so that
+clause gates nothing today, while `claude_5h` reads normally and does gate. If `seven_day` ever
+appears, the clause starts gating with no code change.
+
+Decision (operator, 2026-11-16): leave `claude_week` as "no reading" and re-observe; build no
+fallback. The options below were weighed and are NOT adopted:
+
+| Option                                                   | Accuracy                                    | Why not now                                                                                                        |
+| -------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Poll the OAuth usage endpoint through a `LimitsSource`   | Exact                                       | Undocumented and unstable; reuses an OAuth credential outside its issued scope. The operator declined to adopt it. |
+| Local proxy reading `anthropic-ratelimit-*` headers      | Exact                                       | Observed, not documented; sits in the path of every credentialed request (rejected under Alternatives Considered). |
+| Local weighted-token estimate (ccusage style rolling 7d) | Approximate (the old cost cap was 6.4x off) | Anthropic publishes no weekly cap, and a local sum misses other machines (rejected under Alternatives Considered). |
+
+`internal/core/week/tracker.go` no longer computes a percentage; it only derives an ISO-week id
+for correlation. To revisit, re-run the capture count above first: if `seven_day` has appeared,
+nothing needs building.
+
 ## Sequencing (each phase compiles and the daemon keeps running)
 
 0. **Phase 0 — gate (above). ✅ PASSED 2026-07-01.** `rate_limits` appears for this
