@@ -1616,6 +1616,8 @@
           ceta-agreement-test = "check";
           ceta-depguard = "check";
           go-local-replace-build = "check";
+          # Runs `golangci-lint run` without --fix: verifies only.
+          golangci-lint = "check";
           identifier-allowlist = "check";
           no-reexec-test-doubles = "check";
           pg-connector-filesets = "check";
