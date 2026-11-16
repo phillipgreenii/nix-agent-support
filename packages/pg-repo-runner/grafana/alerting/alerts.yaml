@@ -3,8 +3,9 @@
 # at the end of each `tips` run (every 5 minutes), so each series is labelled by `repo`
 # (the allow-list key) and the rules alert per repo.
 #
-# Rule "red-no-newer-tip" likewise reads last_over_time over 1d, so a runner hold longer than the
-# 5 minute lookback does not drop the series and restart its 24h timer.
+# Rules "red-no-newer-tip" and "tip-unverified" read the last known value across gaps with
+# last_over_time over 1d, so a runner hold longer than the 5 minute lookback does not drop the
+# series and restart their 24h and 2h timers.
 #
 # Pushed gauges go stale a few minutes after the runner stops, so a dead runner leaves
 # no series at all. Rule "tips-stale" therefore reads the LAST KNOWN run time with
@@ -122,7 +123,7 @@ groups:
           severity: warning
         annotations:
           summary: "A repo's primary tip has had no check verdict for over 2 hours"
-          description: "pg_repo_runner_unverified_tip has been 1 for over 2 hours: the verify role has not recorded a verdict for this repo's primary tip. Check that verify is enabled for the repo in the runner allow-list, that pg-router is running, and the verify role's run log."
+          description: "pg_repo_runner_unverified_tip has been 1 for over 2 hours (read as the last known value over 1d, so a runner hold does not reset the timer): the verify role has not recorded a verdict for this repo's primary tip. Check that verify is enabled for the repo in the runner allow-list, that pg-router is running, and the verify role's run log."
         data:
           - refId: A
             relativeTimeRange:
@@ -133,7 +134,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "pg_repo_runner_unverified_tip == 1"
+              expr: "last_over_time(pg_repo_runner_unverified_tip[1d]) == 1"
           - refId: B
             datasourceUid: __expr__
             model:
