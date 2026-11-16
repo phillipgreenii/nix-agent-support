@@ -1,6 +1,6 @@
 // pg-gwm manages worktrees of a git repository: a bounded set of leased,
-// reusable checkouts. This build carries only the metrics exporter (serve)
-// and version; the lease commands arrive with the manager.
+// reusable checkouts. This build carries lease, completion, the metrics
+// exporter (serve) and version; the other commands arrive with the manager.
 package main
 
 import (
@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/phillipgreenii/pg-gwm/internal/gitrun"
+	"github.com/phillipgreenii/pg-gwm/internal/state"
 	"github.com/phillipgreenii/x/exitcode"
 )
 
@@ -22,13 +24,27 @@ func main() {
 
 type app struct {
 	stdout, stderr io.Writer
+	// isTerminal decides whether stdout is a terminal (text output) or not
+	// (JSON); tests replace it.
+	isTerminal func(*os.File) bool
+	// git is the runner every git call goes through; tests give it a
+	// hermetic one.
+	git gitrun.Git
+	// counters and label count refusals once a repository is open.
+	counters state.Counters
+	label    string
 }
 
-func newApp(stdout, stderr io.Writer) *app { return &app{stdout: stdout, stderr: stderr} }
+func newApp(stdout, stderr io.Writer) *app {
+	return &app{stdout: stdout, stderr: stderr, isTerminal: defaultIsTerminal}
+}
 
 const usage = `usage: pg-gwm <command> [flags]
 
 commands:
+  lease    [--name N [--or-renew]] [--owner O] [--metadata k=v]... [--ttl D|none]
+           [-b B | -B B | --detach] [<commit-ish>] [--wait D] [--print=path]
+  completion <bash|zsh>
   serve    [--addr 127.0.0.1:9148]   loopback /metrics
   version
 
@@ -51,6 +67,10 @@ func (a *app) run(args []string) int {
 	case "version":
 		fmt.Fprintln(a.stdout, Version)
 		return 0
+	case "lease":
+		return a.lease(args[1:])
+	case "completion":
+		return a.completion(args[1:])
 	case "serve":
 		return a.serve(args[1:], nil)
 	}
