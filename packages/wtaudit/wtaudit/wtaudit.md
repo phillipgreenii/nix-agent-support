@@ -25,7 +25,7 @@
 
 - Exit codes of `remove`: 0 gone; 10 refused before acting (verdict changed or tip moved); 11 worktree gone but the branch remains; 12 set member (use `pnwf cleanup`); 13 `wtdone` refused and the worktree is still there; 2 usage.
 
-- Checkout-pool slots are never candidates: a worktree locked with a reason starting "pool slot" (what `pg-checkout-pool` sets), or sitting at `<root>/pg-checkout-pool/slots/<id>/tree`, is neither removed nor reported, and the lease branch it has checked out is not a dangling branch. Any other `git worktree lock`ed worktree is still reported as `keep worktree-unreadable`.
+- pg-gwm managed worktrees are never candidates: a worktree locked with a reason starting "pg-gwm" (what `pg-gwm` sets, `pg-gwm <worktree id>`) is neither removed nor reported, and the branch it has checked out is not a dangling branch. Any other `git worktree lock`ed worktree is still reported as `keep worktree-unreadable`.
 
 - Agent instructions, in order:
   1. Run `wtaudit scan > <fresh scratch file>` (JSON is the default). Read it; never re-derive its facts by hand.

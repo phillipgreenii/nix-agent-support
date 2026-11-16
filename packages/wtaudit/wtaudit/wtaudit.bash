@@ -48,15 +48,12 @@ wtaudit_branch_exists() {
   git -C "$1" rev-parse --verify -q "refs/heads/$2" >/dev/null 2>&1
 }
 
-# wtaudit_is_pool_slot <path> <lock-reason>: succeeds for a checkout-pool slot
-# (pg-checkout-pool): a worktree locked with a reason that starts with
-# "pool slot", or one whose path is <pool root>/slots/<id>/tree under a
-# directory named pg-checkout-pool (covers a slot whose lock was lost). The
-# pool owns those worktrees and reaps them itself; no audit may remove or
-# report one as abandoned.
-wtaudit_is_pool_slot() {
-  [[ $2 == "pool slot"* ]] && return 0
-  [[ $1 =~ /pg-checkout-pool/slots/[^/]+/tree$ ]]
+# wtaudit_is_managed <lock-reason>: succeeds for a worktree pg-gwm manages: one
+# locked with a reason that starts with "pg-gwm" (the form is "pg-gwm <worktree
+# id>"). pg-gwm owns those worktrees and reaps them itself; no audit may remove
+# or report one as abandoned.
+wtaudit_is_managed() {
+  [[ $1 == "pg-gwm"* ]]
 }
 
 # wtaudit_entries <repo> <primary>: print one record per candidate, fields
@@ -65,8 +62,8 @@ wtaudit_is_pool_slot() {
 #   wtstate  ok | missing | locked | canonical | none
 # The first `git worktree list` entry is the canonical clone: it is emitted
 # only when it has a non-primary branch checked out (row 1a, wtstate
-# canonical); a detached canonical clone is never emitted. A checkout-pool
-# slot (wtaudit_is_pool_slot) is never emitted, though the branch it has
+# canonical); a detached canonical clone is never emitted. A pg-gwm
+# managed worktree (wtaudit_is_managed) is never emitted, though the branch it has
 # checked out still counts as checked out. A dangling branch
 # is a local branch that is neither the primary nor checked out anywhere.
 wtaudit_entries() {
@@ -99,8 +96,8 @@ wtaudit_entries() {
         if [[ -n $branch && $branch != "$primary" ]]; then
           printf '%s\n' "worktree${WTAUDIT_US}${WTAUDIT_US}${branch}${WTAUDIT_US}${path}${WTAUDIT_US}canonical${WTAUDIT_US}0${WTAUDIT_US}${head}"
         fi
-      elif wtaudit_is_pool_slot "$path" "$lockreason"; then
-        : # a checkout-pool slot is never a candidate: not removed, not reported
+      elif wtaudit_is_managed "$lockreason"; then
+        : # a pg-gwm managed worktree is never a candidate: not removed, not reported
       else
         kind="worktree"
         set=""

@@ -260,3 +260,10 @@ flat() {
     [[ $text == *"mutually exclusive"* ]] || { echo "$name lacks 'mutually exclusive'" >&2; return 1; }
   done
 }
+
+@test "scale doc: level 1 skips worktrees locked with a reason starting pg-gwm" {
+  run sed -n '/^### Level 1: tidy/,/^### Level 2/p' "$SCALE_DOC"
+  [ "$status" -eq 0 ]
+  [[ $output == *"locked with a reason starting \`pg-gwm\`"* ]]
+  [[ $output != *"checkout-pool"* ]]
+}

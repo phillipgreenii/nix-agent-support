@@ -395,12 +395,13 @@ fake_lsof_records() {
   [ "$status" -ne 0 ]
 }
 
-@test "locked worktree (a checkout-pool slot): refused before anything is touched, worktree and branch kept" {
+@test "locked worktree (a pg-gwm managed one): refused before anything is touched, worktree and branch kept" {
   add_worktree feature
-  git -C "$TEST_DIR" worktree lock --reason "pool slot (pg-checkout-pool)" "$WT_DIR/wt"
+  git -C "$TEST_DIR" worktree lock --reason "pg-gwm w-abc" "$WT_DIR/wt"
   run bash "$BIN" feature
   [ "$status" -ne 0 ]
   [[ "$output" =~ "it is locked" ]]
+  [[ "$output" =~ "pg-gwm release" ]]
   [ -d "$WT_DIR/wt" ]
   git -C "$TEST_DIR" rev-parse --verify --quiet refs/heads/feature
 }
