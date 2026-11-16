@@ -303,6 +303,14 @@ let
     ++ roleCfg.command.argv;
 
   ccpoolRoles = lib.filterAttrs (_name: roleCfg: kindOf roleCfg == "ccpool") cfg.roles;
+
+  # A role whose isolation type is the pg-gwm-leased worktree ("" means worktree).
+  usesWorktreeIsolation =
+    roleCfg:
+    builtins.elem roleCfg.ccpool.isolation.type [
+      ""
+      "worktree"
+    ];
   # The ccpool roles that share the handler-wide pool (only meaningful while
   # `pool.enable`; otherwise they run on ccpool's unmanaged default pool).
   handlerPoolRoles = lib.optionalAttrs cfg.pool.enable (
@@ -938,6 +946,13 @@ let
         isolation = {
           Type = roleCfg.ccpool.isolation.type;
           Path = roleCfg.ccpool.isolation.path;
+        }
+        // lib.optionalAttrs (usesWorktreeIsolation roleCfg) {
+          # pg-gwm lease of a worktree-isolation role: Go field names, in the
+          # duration grammar pg-gwm parses (whole d, h, m or s).
+          BranchAccess = roleCfg.ccpool.isolation.branchAccess;
+          WorktreeLeaseTTL = roleCfg.ccpool.isolation.worktreeLeaseTTL;
+          ParkedTTL = roleCfg.ccpool.isolation.parkedTTL;
         }
         // lib.optionalAttrs (roleCfg.ccpool.isolation.type == "bead-worktree") {
           # bead-worktree (bead pg2-b49ydt): Go field names, rendered only for
@@ -1615,6 +1630,40 @@ let
                         runs in when no `drain/<item id>` worktree exists
                         (`roles.IsolationConfig.Fallback`); never created. Empty means the
                         handler's `repoRoot`. Valid only with `type = "bead-worktree"`.
+                      '';
+                    };
+                    branchAccess = lib.mkOption {
+                      type = lib.types.enum [
+                        "write"
+                        "read"
+                      ];
+                      default = "write";
+                      description = ''
+                        Whether a worktree-isolation role commits
+                        (`roles.IsolationConfig.BranchAccess`). `"write"` leases the
+                        worktree on branch `pg-router/<item id>`; `"read"` leases it
+                        detached, so the role cannot move a branch. Worktree isolation only.
+                      '';
+                    };
+                    worktreeLeaseTTL = lib.mkOption {
+                      type = lib.types.strMatching "[0-9]+[dhms]";
+                      default = "30m";
+                      example = "1h";
+                      description = ''
+                        pg-gwm lease the dispatch takes and renews while the session
+                        works (`roles.IsolationConfig.WorktreeLeaseTTL`), a whole number of
+                        days, hours, minutes or seconds (`d`, `h`, `m`, `s`). Worktree
+                        isolation only.
+                      '';
+                    };
+                    parkedTTL = lib.mkOption {
+                      type = lib.types.strMatching "[0-9]+[dhms]";
+                      default = "3d";
+                      example = "7d";
+                      description = ''
+                        Lease a session keeps while it is parked, still live when the
+                        dispatch returns (`roles.IsolationConfig.ParkedTTL`), in the same
+                        duration grammar as `worktreeLeaseTTL`. Worktree isolation only.
                       '';
                     };
                     path = lib.mkOption {
@@ -2759,7 +2808,9 @@ in
     (lib.mkIf cfg.enable {
       home.packages = [
         cfg.package
-      ];
+      ]
+      # The worktree-isolation dispatch leases its worktree through pg-gwm.
+      ++ lib.optional (lib.any usesWorktreeIsolation (lib.attrValues ccpoolRoles)) pkgs.pg-gwm;
 
       # pg2-4roho decision item 4: register this handler's own worktree pool
       # with pg-disk-reclaimer as a belt-and-suspenders safety net -- see

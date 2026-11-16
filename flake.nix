@@ -12443,12 +12443,17 @@
                           };
                           # pg2-hh32y: handler-side worktree pre-fetch renders
                           # under the Go-named `Prefetch` key.
-                          isolation.prefetch = {
-                            enable = true;
-                            refspec = "pull/{{index .Item.Metadata \"pr_number\"}}/head";
-                            rev = "{{index .Item.Metadata \"head_sha\"}}";
-                            diffBase = "origin/main";
-                            timeout = "3m";
+                          isolation = {
+                            prefetch = {
+                              enable = true;
+                              refspec = "pull/{{index .Item.Metadata \"pr_number\"}}/head";
+                              rev = "{{index .Item.Metadata \"head_sha\"}}";
+                              diffBase = "origin/main";
+                              timeout = "3m";
+                            };
+                            branchAccess = "read";
+                            worktreeLeaseTTL = "45m";
+                            parkedTTL = "2d";
                           };
                         };
                       };
@@ -12485,6 +12490,27 @@
                     };
                   };
                   twoRolesJson = rolesJsonDir twoRoles;
+
+                  # A worktree role that sets no lease field renders the defaults;
+                  # pkgs.pg-gwm rides home.packages only while some role uses
+                  # worktree isolation.
+                  leaseDefaults = evalHM {
+                    enable = true;
+                    roles.lease = {
+                      handler = ccpoolHandler;
+                      ccpool = {
+                        actor = "lease-actor";
+                        completion = "close-only";
+                        onFailure = "unclaim";
+                        onDispatchFail = "leave";
+                        promptBody = "lease prompt";
+                      };
+                    };
+                  };
+                  leaseDefaultsJson = rolesJsonDir leaseDefaults;
+                  hasGwm = eval: lib.elem pkgs.pg-gwm eval.home.packages;
+                  gwmOnWorktreeRole = if hasGwm twoRoles && hasGwm leaseDefaults then "yes" else "no";
+                  gwmOffWithoutWorktreeRole = if hasGwm noRoles then "no" else "yes";
 
                   # Zero roles: the rendered result must still resolve (an
                   # empty directory), never throw.
@@ -13668,6 +13694,9 @@
                           npCommandAdapter
                           k31WrapJson
                           twoRolesJson
+                          leaseDefaultsJson
+                          gwmOnWorktreeRole
+                          gwmOffWithoutWorktreeRole
                           noRolesJson
                           launchConfigFile
                           defaultLaunchConfigFile
@@ -13707,6 +13736,17 @@
                         [ "$(jq -r .ccpool.isolation.Prefetch.DiffBase "$twoRolesJson/feedback.json")" = origin/main ]
                         [ "$(jq -r .ccpool.isolation.Prefetch.Timeout "$twoRolesJson/feedback.json")" = 3m ]
                         [ "$(jq -r .ccpool.isolation.Prefetch.Rev "$twoRolesJson/feedback.json")" = '{{index .Item.Metadata "head_sha"}}' ]
+                        # pg-gwm lease fields render under the Go field names, with the
+                        # defaults for a role that sets none; bead-worktree roles carry none.
+                        [ "$(jq -r .ccpool.isolation.BranchAccess "$twoRolesJson/feedback.json")" = read ]
+                        [ "$(jq -r .ccpool.isolation.WorktreeLeaseTTL "$twoRolesJson/feedback.json")" = 45m ]
+                        [ "$(jq -r .ccpool.isolation.ParkedTTL "$twoRolesJson/feedback.json")" = 2d ]
+                        [ "$(jq -r .ccpool.isolation.BranchAccess "$leaseDefaultsJson/lease.json")" = write ]
+                        [ "$(jq -r .ccpool.isolation.WorktreeLeaseTTL "$leaseDefaultsJson/lease.json")" = 30m ]
+                        [ "$(jq -r .ccpool.isolation.ParkedTTL "$leaseDefaultsJson/lease.json")" = 3d ]
+                        jq -e '.ccpool.isolation | has("BranchAccess") | not' "$twoRolesJson/triager.json" >/dev/null
+                        [ "$gwmOnWorktreeRole" = yes ]
+                        [ "$gwmOffWithoutWorktreeRole" = yes ]
                         # pg2-b49ydt: bead-worktree isolation renders its type, repos and
                         # fallback; no other role's file carries Repos/Fallback.
                         [ "$(jq -r .ccpool.isolation.Type "$twoRolesJson/triager.json")" = bead-worktree ]
