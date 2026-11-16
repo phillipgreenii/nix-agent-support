@@ -147,7 +147,7 @@ func Providers() []Provider {
 			Name: "hook-decisions", Command: []string{"pg-review-provider-hook-decisions"},
 			SchemaVersion: 1, TimeoutSeconds: 60,
 			Queries: map[string][]string{
-				"agent-workflow": {"decisions-by-rule", "abstains-by-pattern"},
+				"agent-workflow": {"denied", "failed", "rejected"},
 			},
 			ArgsStyle: ArgsStyleCwdPrefix,
 		},
