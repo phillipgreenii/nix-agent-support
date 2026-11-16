@@ -67,7 +67,7 @@ Rules (RFC 2119):
 
 - **W1** On every start the wrapper MUST run the local cert check first (a manual renewal is seen at once). It
   MUST NOT use the network or open a browser. Agent socket order: configured `agent_socket` (its owner MUST be
-  the current user, else it is ignored), then `SSH_AUTH_SOCK`; neither usable is `agent-unreachable`; an agent
+  the current user, else it is ignored), then `SSH_AUTH_SOCK`, then (only when none of those answered) the launchd agent socket resolved at run time with `launchctl getenv SSH_AUTH_SOCK` (its owner MUST be the current user; a failed lookup adds nothing); no usable socket is `agent-unreachable`; an agent
   holding no user certificate is `cert-missing`; one whose user certificates are all outside their validity
   window is `cert-expired`. Any user certificate valid now counts (no principal matching in v1).
 - **W2** `caller-has-terminal` is true when the wrapper's stderr is a terminal OR `/dev/tty` opens. Such a

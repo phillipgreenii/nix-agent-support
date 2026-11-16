@@ -60,13 +60,22 @@ heartbeat_interval = "5m"
 
 [realm.example]
 match = { host = "git.example.com", user = "org-*" }   # used only by `check --remote`
-# agent_socket = "/path/to/agent.sock"
+# agent_socket = "/path/to/agent.sock"   # optional override; see "Agent socket" below
 [realm.example.login]
 attempt_timeout = "3m"
 backoff = ["5m", "10m", "30m"]
 ```
 
 Unknown keys, a bad realm name (lowercase letters, digits, `_`, `-`) and out-of-range values exit 7.
+
+### Agent socket
+
+The cert check tries these sockets in order and the first agent that answers decides: the realm's
+`agent_socket` (an override; ignored unless the current user owns it), then `SSH_AUTH_SOCK`, then the launchd
+agent socket, resolved at run time with `launchctl getenv SSH_AUTH_SOCK` (it must also be owned by the current
+user). The fallback is what lets a dispatched session that dropped `SSH_AUTH_SOCK` still see the cert. The
+socket directory is random per boot, so do not hard-code it in `agent_socket`. If the launchd lookup fails
+(no launchctl, no value) the result stays `agent-unreachable`.
 
 ## State layout
 

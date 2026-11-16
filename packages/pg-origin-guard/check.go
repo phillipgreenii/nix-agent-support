@@ -192,7 +192,7 @@ func NewChecker(cfg Config, env Env, dialer AgentDialer, clock Clock) *Checker {
 		Config: cfg,
 		Clock:  clock,
 		Store:  store,
-		Certs:  &CertChecker{Clock: clock, Dialer: dialer, Getenv: env.Getenv},
+		Certs:  &CertChecker{Clock: clock, Dialer: dialer, Getenv: env.Getenv, LaunchdSocket: LaunchctlSocket},
 		Rec:    &Recorder{Store: store, Sink: sink, Clock: clock, HeartbeatInterval: cfg.Events.HeartbeatInterval},
 	}
 }

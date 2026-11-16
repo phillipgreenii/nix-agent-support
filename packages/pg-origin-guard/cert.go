@@ -2,8 +2,12 @@ package originguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -45,6 +49,26 @@ type CertChecker struct {
 	OwnerUID func(path string) (uint32, error)
 	// UID is the current user. Nil means os.Getuid.
 	UID func() uint32
+	// LaunchdSocket resolves the launchd agent socket at run time. It is the
+	// last resort, tried only when no earlier socket answered. Nil disables
+	// the fallback; production wires LaunchctlSocket.
+	LaunchdSocket func(ctx context.Context) (string, error)
+}
+
+// LaunchctlSocket asks launchd for SSH_AUTH_SOCK (`launchctl getenv`). The
+// socket directory is random per boot, so it cannot be configured statically.
+func LaunchctlSocket(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "launchctl", "getenv", "SSH_AUTH_SOCK").Output()
+	if err != nil {
+		return "", err
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return "", errors.New("launchd has no SSH_AUTH_SOCK")
+	}
+	return s, nil
 }
 
 func (c *CertChecker) getenv(k string) string {
@@ -82,6 +106,7 @@ func statOwner(p string) (uint32, error) {
 
 // Sockets returns the agent sockets to try, in order: the realm's configured
 // agent_socket (ignored unless the current user owns it), then SSH_AUTH_SOCK.
+// The launchd socket (LaunchdSocket) is tried afterwards by Check.
 func (c *CertChecker) Sockets(realm RealmConfig) []string {
 	var out []string
 	if realm.AgentSocket != "" {
@@ -101,7 +126,28 @@ func (c *CertChecker) Sockets(realm RealmConfig) []string {
 // validity window is cert-expired. Any certificate valid now counts: there is
 // no principal matching.
 func (c *CertChecker) Check(ctx context.Context, realm RealmConfig) Reason {
-	for _, sock := range c.Sockets(realm) {
+	socks := c.Sockets(realm)
+	tried := map[string]bool{}
+	for _, s := range socks {
+		tried[s] = true
+	}
+	// Lazy launchd fallback: a lookup failure or an already-tried socket
+	// adds nothing, so the result stays agent-unreachable.
+	socks = append(socks, "")
+	for _, sock := range socks {
+		if sock == "" {
+			if c.LaunchdSocket == nil {
+				break
+			}
+			s, err := c.LaunchdSocket(ctx)
+			if err != nil || s == "" || tried[s] || !filepath.IsAbs(s) {
+				break
+			}
+			if uid, err := c.owner(s); err != nil || uid != c.uid() {
+				break
+			}
+			sock = s
+		}
 		certs, err := c.Dialer.ListCerts(ctx, sock)
 		if err != nil {
 			continue

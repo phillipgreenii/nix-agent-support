@@ -107,3 +107,77 @@ func TestConfiguredSocketFallsBackToEnvWhenDead(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func launchdResolver(sock string, err error, calls *int) func(context.Context) (string, error) {
+	return func(context.Context) (string, error) {
+		*calls++
+		return sock, err
+	}
+}
+
+func TestLaunchdSocketUsedWhenSSHAuthSockUnset(t *testing.T) {
+	clock := newClock()
+	agent := fakeAgent{"/launchd/Listeners": {validCert(clock)}}
+	cc := newCertChecker(clock, agent, map[string]string{}, map[string]uint32{"/launchd/Listeners": 501})
+	calls := 0
+	cc.LaunchdSocket = launchdResolver("/launchd/Listeners", nil, &calls)
+	if got := cc.Check(context.Background(), RealmConfig{}); got != ReasonOK {
+		t.Fatalf("got %v, want ok", got)
+	}
+}
+
+func TestLaunchdSocketUsedWhenSSHAuthSockStale(t *testing.T) {
+	clock := newClock()
+	agent := fakeAgent{"/launchd/Listeners": {validCert(clock)}}
+	cc := newCertChecker(clock, agent, map[string]string{"SSH_AUTH_SOCK": "/stale"}, map[string]uint32{"/launchd/Listeners": 501})
+	calls := 0
+	cc.LaunchdSocket = launchdResolver("/launchd/Listeners", nil, &calls)
+	if got := cc.Check(context.Background(), RealmConfig{}); got != ReasonOK {
+		t.Fatalf("got %v, want ok", got)
+	}
+}
+
+func TestLaunchdLookupFailureIsAgentUnreachable(t *testing.T) {
+	cc := newCertChecker(newClock(), fakeAgent{}, map[string]string{}, nil)
+	calls := 0
+	cc.LaunchdSocket = launchdResolver("", context.Canceled, &calls)
+	if got := cc.Check(context.Background(), RealmConfig{}); got != ReasonAgentUnreachable {
+		t.Fatalf("got %v, want agent-unreachable", got)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d", calls)
+	}
+}
+
+func TestLaunchdNotConsultedWhenEarlierSocketAnswers(t *testing.T) {
+	clock := newClock()
+	agent := fakeAgent{"/env.sock": {validCert(clock)}}
+	cc := newCertChecker(clock, agent, map[string]string{"SSH_AUTH_SOCK": "/env.sock"}, nil)
+	calls := 0
+	cc.LaunchdSocket = launchdResolver("/launchd/Listeners", nil, &calls)
+	if got := cc.Check(context.Background(), RealmConfig{}); got != ReasonOK || calls != 0 {
+		t.Fatalf("got %v calls %d", got, calls)
+	}
+}
+
+func TestConfiguredSocketOverridesLaunchd(t *testing.T) {
+	clock := newClock()
+	agent := fakeAgent{"/cfg.sock": {validCert(clock)}}
+	cc := newCertChecker(clock, agent, map[string]string{}, map[string]uint32{"/cfg.sock": 501})
+	calls := 0
+	cc.LaunchdSocket = launchdResolver("/launchd/Listeners", nil, &calls)
+	if got := cc.Check(context.Background(), RealmConfig{AgentSocket: "/cfg.sock"}); got != ReasonOK || calls != 0 {
+		t.Fatalf("got %v calls %d", got, calls)
+	}
+}
+
+func TestLaunchdSocketOwnedByOtherUserIsIgnored(t *testing.T) {
+	clock := newClock()
+	agent := fakeAgent{"/launchd/Listeners": {validCert(clock)}}
+	cc := newCertChecker(clock, agent, map[string]string{}, map[string]uint32{"/launchd/Listeners": 0})
+	calls := 0
+	cc.LaunchdSocket = launchdResolver("/launchd/Listeners", nil, &calls)
+	if got := cc.Check(context.Background(), RealmConfig{}); got != ReasonAgentUnreachable {
+		t.Fatalf("got %v", got)
+	}
+}
