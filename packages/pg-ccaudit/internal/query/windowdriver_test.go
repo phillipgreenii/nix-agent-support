@@ -97,7 +97,13 @@ func runWith(t testing.TB, db *sql.DB, q Query, w windowCase, f flagCase) [][]an
 }
 
 func smallFixture(t testing.TB) *sql.DB {
-	return buildBigFixture(t, bigFixture{sessions: 90, perSess: 240})
+	sessions, perSess := 90, 240
+	if raceBuild {
+		// A third of the sessions: the old-SQL oracle is quadratic
+		// and the race detector makes it 20 to 30 times slower.
+		sessions, perSess = 30, 240
+	}
+	return buildBigFixture(t, bigFixture{sessions: sessions, perSess: perSess})
 }
 
 // The new statements return exactly the old statements' rows over every window
