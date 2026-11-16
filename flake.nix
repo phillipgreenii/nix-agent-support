@@ -12714,6 +12714,28 @@
                       };
                     }).phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
 
+                  # minFreeBytes: set renders (0 included), unset omits the key.
+                  minFreeBytesLaunchConfigFile =
+                    (evalHM {
+                      enable = true;
+                      roles = { };
+                      launchConfig = {
+                        repoRoot = "/tmp/minfree-repo";
+                        worktreeDir = "/tmp/minfree-repo/.worktrees";
+                        minFreeBytes = 26843545600;
+                      };
+                    }).phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
+                  zeroMinFreeBytesLaunchConfigFile =
+                    (evalHM {
+                      enable = true;
+                      roles = { };
+                      launchConfig = {
+                        repoRoot = "/tmp/minfree-repo";
+                        worktreeDir = "/tmp/minfree-repo/.worktrees";
+                        minFreeBytes = 0;
+                      };
+                    }).phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
+
                   # Handler-wide pool only (no role with its own pool):
                   # poolMetrics must be accepted (no failed assertion) and
                   # report just the handler pool; pool.enable = false and no
@@ -13610,6 +13632,8 @@
                           janitorScript
                           janitorReviewRoleFile
                           noInlineSweepsLaunchConfigFile
+                          minFreeBytesLaunchConfigFile
+                          zeroMinFreeBytesLaunchConfigFile
                           ;
                       }
                       ''
@@ -13817,6 +13841,11 @@
                         # inlineSweeps: default true, switchable off
                         [ "$(jq -r .inlineSweeps "$launchConfigFile")" = true ]
                         [ "$(jq -r .inlineSweeps "$noInlineSweepsLaunchConfigFile")" = false ]
+                        # minFreeBytes: unset omits the key (Go default applies), set renders, 0 renders
+                        [ "$(jq -r 'has("minFreeBytes")' "$launchConfigFile")" = false ]
+                        [ "$(jq -r 'has("minFreeBytes")' "$defaultLaunchConfigFile")" = false ]
+                        [ "$(jq -r .minFreeBytes "$minFreeBytesLaunchConfigFile")" = 26843545600 ]
+                        [ "$(jq -r .minFreeBytes "$zeroMinFreeBytesLaunchConfigFile")" = 0 ]
                         # declineReconcileMinInterval (bead pg2-fx5x0l.5): nanoseconds, default 30 s
                         [ "$(jq -r .declineReconcileMinInterval "$launchConfigFile")" = 30000000000 ]
                         [ "$(jq -r .declineReconcileMinInterval "$noInlineSweepsLaunchConfigFile")" = 5000000000 ]

@@ -504,14 +504,16 @@ func Default() Config {
 	}
 }
 
-// DefaultMinFreeBytes is the default worktree-creation floor: 40 GiB. The
-// other disk consumers on the machine act at 20 GiB (the disk watchdog sets its
-// gate below 20 GiB, the recorder holds work below 20 GiB), and a fresh
-// checkout of a large repository measured about 12 GiB each, so a floor of 20
-// GiB plus room for two concurrent checkouts (2 x 12 GiB = 24 GiB, rounded up
-// to 20 GiB of margin) is 40 GiB: a dispatch that would push free space under
-// the other tools' floors is declined before it starts.
-const DefaultMinFreeBytes int64 = 40 << 30
+// DefaultMinFreeBytes is the default worktree-creation floor: 25 GiB. The role
+// gates in the router admit work from 12 GiB of free disk, so a floor above
+// that makes the handler decline every new worktree in the band between the two
+// as a low-disk fault; 25 GiB narrows that band (operator ruling, 2026-11-16:
+// 25 GiB for now, gates unchanged). The margin this gives up compared with the
+// earlier 40 GiB: one fresh checkout of a large repository measured about 12
+// GiB, so a checkout started at the floor can take free space from 25 GiB to
+// about 13 GiB, below the 20 GiB at which the recorder enters its low-space
+// mode. A deployment sets the floor explicitly through minFreeBytes.
+const DefaultMinFreeBytes int64 = 25 << 30
 
 // DefaultDeclineReconcileMinInterval is the default TTL of the decline-time
 // reconcile's negative cache (plan pg2-fx5x0l rev 3, Phase 4).

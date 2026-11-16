@@ -126,12 +126,12 @@ func TestSkippedReply_isAnOutcomeReplyWithTheReason(t *testing.T) {
 // A pre-creation free-space refusal maps to the same low-disk fault decline as
 // a worktree add that ran out of room, and carries the measured numbers.
 func TestBusyDeclineFor_lowFreeSpaceCarriesDetail(t *testing.T) {
-	err := fmt.Errorf("isolation zr-w: %w", &executor.LowFreeSpaceError{Path: "/wt", Free: 30 << 30, Floor: 40 << 30})
+	err := fmt.Errorf("isolation zr-w: %w", &executor.LowFreeSpaceError{Path: "/wt", Free: 20 << 30, Floor: 25 << 30})
 	d, ok := BusyDeclineFor(err)
 	if !ok || d.Reason != BusyReasonLowDisk || d.Kind != DeclineKindFault {
 		t.Fatalf("BusyDeclineFor = %+v, %v; want low-disk fault", d, ok)
 	}
-	if !strings.Contains(d.Detail, "below the floor of 42949672960 bytes") {
+	if !strings.Contains(d.Detail, "below the floor of 26843545600 bytes") {
 		t.Errorf("detail must name the floor; got %q", d.Detail)
 	}
 }

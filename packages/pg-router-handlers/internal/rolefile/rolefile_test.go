@@ -782,7 +782,7 @@ func TestDecodeRole_sessionEnvNonStringValueFails(t *testing.T) {
 }
 
 // TestLoadConfig_minFreeBytes proves the worktree free-space floor defaults to
-// 40 GiB, is settable (and disableable with 0) through the launch config, and
+// 25 GiB, is settable (and disableable with 0) through the launch config, and
 // rejects a negative value.
 func TestLoadConfig_minFreeBytes(t *testing.T) {
 	load := func(body string) (config.Config, error) {
@@ -793,8 +793,8 @@ func TestLoadConfig_minFreeBytes(t *testing.T) {
 		return LoadConfig(p)
 	}
 	cfg, err := load(`{}`)
-	if err != nil || cfg.MinFreeBytes != 40<<30 {
-		t.Fatalf("default = %d, %v; want 40 GiB", cfg.MinFreeBytes, err)
+	if err != nil || cfg.MinFreeBytes != 25<<30 {
+		t.Fatalf("default = %d, %v; want 25 GiB", cfg.MinFreeBytes, err)
 	}
 	if cfg, err = load(`{"minFreeBytes":0}`); err != nil || cfg.MinFreeBytes != 0 {
 		t.Fatalf("minFreeBytes 0 = %d, %v; want 0 (disabled)", cfg.MinFreeBytes, err)

@@ -1212,59 +1212,67 @@ let
   # fields, since `loadConfig` overlays this JSON onto `Default()`, not the
   # reverse.
   launchConfigFile = pkgs.writeText "pg-router-ccpool-handler-launch-config.json" (
-    builtins.toJSON {
-      inherit (cfg.launchConfig)
-        repoRoot
-        worktreeDir
-        beadsPrefix
-        permissionMode
-        autonomous
-        effort
-        model
-        sessionPrefix
-        selfLogin
-        inlineSweeps
-        ;
-      # allowedTools (this bead, pg2-yybrp): extraAllowedTools is additive --
-      # appended (comma-joined) onto allowedTools's own value rather than
-      # replacing it -- so a deployment can grant a handful of extra tools
-      # without restating allowedTools's entire default list (see
-      # extraAllowedTools's own doc comment for why that restatement is a
-      # drift hazard).
-      allowedTools =
-        if cfg.launchConfig.extraAllowedTools == [ ] then
-          cfg.launchConfig.allowedTools
-        else
-          lib.concatStringsSep "," ([ cfg.launchConfig.allowedTools ] ++ cfg.launchConfig.extraAllowedTools);
-      confirmIngest = cfg.launchConfig.confirmIngestSeconds * 1000000000;
-      # worktree sweep bounds (bead pg2-fx5x0l.2, INV-CCH-19): nanoseconds, as above.
-      worktreeKeepRecheck = cfg.launchConfig.worktreeKeepRecheckSeconds * 1000000000;
-      sweepDeadline = cfg.launchConfig.sweepDeadlineSeconds * 1000000000;
-      worktreeRemoveTimeout = cfg.launchConfig.worktreeRemoveTimeoutSeconds * 1000000000;
-      declineReconcileMinInterval = cfg.launchConfig.declineReconcileMinIntervalSeconds * 1000000000;
-      budgetTokens = cfg.launchConfig.budget.tokens;
-      budgetCost = cfg.launchConfig.budget.cost;
-      budgetTime = cfg.launchConfig.budget.timeSeconds * 1000000000;
-      reminderPct = cfg.launchConfig.budget.reminderPct;
-      cancelPct = cfg.launchConfig.budget.cancelPct;
-      hardPct = cfg.launchConfig.budget.hardPct;
-      # originProbe (bead pg2-4gi2c, INV-CCH-10): the per-origin availability
-      # probe/decline gate. Durations render as nanosecond integers for the same
-      # reason confirmIngest does. `remote` is omitted when empty so the Go
-      # side's own default ("origin") applies.
-      originProbe = {
-        origins = map (
-          o:
-          {
-            inherit (o) key repoRoot;
-          }
-          // lib.optionalAttrs (o.remote != "") { inherit (o) remote; }
-        ) cfg.launchConfig.originProbe.origins;
-        inherit (cfg.launchConfig.originProbe) failureThreshold stateDir;
-        ttl = cfg.launchConfig.originProbe.ttlSeconds * 1000000000;
-        timeout = cfg.launchConfig.originProbe.timeoutSeconds * 1000000000;
-      };
-    }
+    builtins.toJSON (
+      # Free-space floor for creating a NEW worktree, in bytes. Omitted when
+      # unset so the Go default (internal/config.DefaultMinFreeBytes) applies;
+      # 0 is rendered and disables the check.
+      lib.optionalAttrs (cfg.launchConfig.minFreeBytes != null) {
+        inherit (cfg.launchConfig) minFreeBytes;
+      }
+      // {
+        inherit (cfg.launchConfig)
+          repoRoot
+          worktreeDir
+          beadsPrefix
+          permissionMode
+          autonomous
+          effort
+          model
+          sessionPrefix
+          selfLogin
+          inlineSweeps
+          ;
+        # allowedTools (this bead, pg2-yybrp): extraAllowedTools is additive --
+        # appended (comma-joined) onto allowedTools's own value rather than
+        # replacing it -- so a deployment can grant a handful of extra tools
+        # without restating allowedTools's entire default list (see
+        # extraAllowedTools's own doc comment for why that restatement is a
+        # drift hazard).
+        allowedTools =
+          if cfg.launchConfig.extraAllowedTools == [ ] then
+            cfg.launchConfig.allowedTools
+          else
+            lib.concatStringsSep "," ([ cfg.launchConfig.allowedTools ] ++ cfg.launchConfig.extraAllowedTools);
+        confirmIngest = cfg.launchConfig.confirmIngestSeconds * 1000000000;
+        # worktree sweep bounds (bead pg2-fx5x0l.2, INV-CCH-19): nanoseconds, as above.
+        worktreeKeepRecheck = cfg.launchConfig.worktreeKeepRecheckSeconds * 1000000000;
+        sweepDeadline = cfg.launchConfig.sweepDeadlineSeconds * 1000000000;
+        worktreeRemoveTimeout = cfg.launchConfig.worktreeRemoveTimeoutSeconds * 1000000000;
+        declineReconcileMinInterval = cfg.launchConfig.declineReconcileMinIntervalSeconds * 1000000000;
+        budgetTokens = cfg.launchConfig.budget.tokens;
+        budgetCost = cfg.launchConfig.budget.cost;
+        budgetTime = cfg.launchConfig.budget.timeSeconds * 1000000000;
+        reminderPct = cfg.launchConfig.budget.reminderPct;
+        cancelPct = cfg.launchConfig.budget.cancelPct;
+        hardPct = cfg.launchConfig.budget.hardPct;
+        # originProbe (bead pg2-4gi2c, INV-CCH-10): the per-origin availability
+        # probe/decline gate. Durations render as nanosecond integers for the same
+        # reason confirmIngest does. `remote` is omitted when empty so the Go
+        # side's own default ("origin") applies.
+        originProbe = {
+          origins = map (
+            o:
+            {
+              inherit (o) key repoRoot;
+            }
+            // lib.optionalAttrs (o.remote != "") { inherit (o) remote; }
+          ) cfg.launchConfig.originProbe.origins;
+          inherit (cfg.launchConfig.originProbe) failureThreshold stateDir;
+          ttl = cfg.launchConfig.originProbe.ttlSeconds * 1000000000;
+          timeout = cfg.launchConfig.originProbe.timeoutSeconds * 1000000000;
+        };
+      }
+    )
   );
 
   roleSubmodule = lib.types.submodule {
@@ -2242,6 +2250,20 @@ in
           safety preamble asserts authorship against. `""` is
           `internal/config.Default()`'s own (implicit, zero-value) default --
           empty until a deployment sets it explicitly.
+        '';
+      };
+      minFreeBytes = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.unsigned;
+        default = null;
+        example = 26843545600;
+        description = ''
+          MinFreeBytes in the launch config: the free space, in bytes, the
+          volume holding `worktreeDir` must keep before the handler creates a
+          NEW per-bead worktree; below it the handler declines the dispatch
+          (reason `low-disk`). A worktree that already exists is reused without
+          the check. `0` disables the check. `null` (the default) omits the key,
+          so the handler's own default
+          (`internal/config.DefaultMinFreeBytes`, 25 GiB) applies.
         '';
       };
       inlineSweeps = lib.mkOption {

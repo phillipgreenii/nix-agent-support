@@ -83,9 +83,9 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   signal, not a post-accept or per-bead outcome.
   - **Free-space floor before creation.** Before creating a NEW per-bead worktree the handler MUST
     compare the free bytes of the volume holding the worktree directory against the configured
-    floor (`minFreeBytes`, default 40 GiB: the disk watchdog and the recorder both act at 20 GiB, and
-    one fresh checkout of a large repository measured about 12 GiB, so the floor leaves the other
-    tools' margin plus room for two concurrent checkouts). Below the floor it MUST create no worktree
+    floor (`minFreeBytes`, default 25 GiB: the router's role gates admit work from 12 GiB, and one fresh
+    checkout of a large repository measured about 12 GiB, so a checkout started at the floor can
+    take free space below the recorder's 20 GiB low-space mode; that margin is given up). Below the floor it MUST create no worktree
     and launch no session, and MUST decline exactly as above (reason `low-disk`, kind `fault`, the
     measured free bytes and the floor in the reply detail), so the core's declined metric counts it
     and the event log records it. A floor of `0` disables the check; a worktree that already exists
