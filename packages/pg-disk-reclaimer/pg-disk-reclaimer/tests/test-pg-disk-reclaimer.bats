@@ -106,3 +106,17 @@ run_pg_disk_reclaimer() {
   [[ ! "$output" =~ "unknown option" ]]
   [[ "$output" =~ "--aggressiveness" ]]
 }
+
+@test "--help documents go-cache-trim, go-cache-wipe, the exit 75 skip and telemetry" {
+  run_pg_disk_reclaimer --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"go-cache-trim --cache DIR --older-than-days N"* ]]
+  [[ "$output" == *"go-cache-wipe --cache DIR"* ]]
+  [[ "$output" == *"Exit status 75 of a registry command"* ]]
+  [[ "$output" == *"PGDR_OTEL_SPOOL_DIR"* ]]
+}
+
+@test "the tldr page has the go-cache bullet and the exit 75 bullet" {
+  grep -q 'go-cache-trim --cache' "$SCRIPTS_DIR/pg-disk-reclaimer.md"
+  grep -q 'exits 75 is reported as skipped' "$SCRIPTS_DIR/pg-disk-reclaimer.md"
+}

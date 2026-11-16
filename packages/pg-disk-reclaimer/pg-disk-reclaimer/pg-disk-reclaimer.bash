@@ -1411,7 +1411,9 @@ cmd_reclaim() {
   # Pass 2: run every item. No prompt happens here, and every command gets
   # stdin from /dev/null, so a command that tries to read input fails fast
   # instead of hanging behind a prompt the operator cannot see.
-  local kind_idx size_kb held_kb dry_out
+  local kind_idx size_kb held_kb dry_out dry_status rm_status
+  local m_t0 m_t1 m_free0 m_free1 m_freed
+  pgdr_metrics_begin "$apply"
   for ((i = 0; i < n_items; i++)); do
     id="${r_id[i]}"
     kind_idx="${r_kind_idx[i]}"
@@ -1433,8 +1435,19 @@ cmd_reclaim() {
       # stdout+stderr captured together so a long single-line dry run (go
       # clean -n prints its `rm -rf` line on a stream we should not guess)
       # can be collapsed; see pgdr_print_dry_run_output.
-      if dry_out=$(eval "${r_dry[i]}" 2>&1 </dev/null); then
+      dry_status=0
+      m_t0=$(pgdr_now_us)
+      dry_out=$(eval "${r_dry[i]}" 2>&1 </dev/null) || dry_status=$?
+      m_t1=$(pgdr_now_us)
+      if [[ $dry_status -eq $PGDR_EXIT_SKIPPED ]]; then
+        # Exit 75 (EX_TEMPFAIL): the command chose to skip, retry later. Not a
+        # failure and not counted as reclaimable.
         pgdr_print_dry_run_output "${r_path[i]}" "$verbose" "$dry_out"
+        echo "pg-disk-reclaimer: dry-run command for '$id' skipped (exit $PGDR_EXIT_SKIPPED), retry later" >&2
+        pgdr_metric_item "$id" "${r_level[i]}" skipped "$m_t0" "$m_t1" 0
+      elif [[ $dry_status -eq 0 ]]; then
+        pgdr_print_dry_run_output "${r_path[i]}" "$verbose" "$dry_out"
+        pgdr_metric_item "$id" "${r_level[i]}" ok "$m_t0" "$m_t1" 0
         if [[ -n $size_kb ]]; then
           bucket_kb[kind_idx]=$((bucket_kb[kind_idx] + size_kb))
           bucket_n[kind_idx]=$((bucket_n[kind_idx] + 1))
@@ -1453,6 +1466,7 @@ cmd_reclaim() {
           pgdr_print_dry_run_output "${r_path[i]}" "$verbose" "$dry_out"
         fi
         echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
+        pgdr_metric_item "$id" "${r_level[i]}" failed "$m_t0" "$m_t1" 0
         overall_status=1
         failed_count=$((failed_count + 1))
       fi
@@ -1463,7 +1477,18 @@ cmd_reclaim() {
     held_kb="${r_held_kb[i]}"
     # Run in a subshell so a registry command's own variables (a `for i in ...`
     # loop, a `cd`) cannot leak into this loop's state or into later items.
-    if (eval "${r_remove[i]}") </dev/null; then
+    rm_status=0
+    m_free0=$(pgdr_metric_free_kb)
+    m_t0=$(pgdr_now_us)
+    (eval "${r_remove[i]}") </dev/null || rm_status=$?
+    m_t1=$(pgdr_now_us)
+    m_free1=$(pgdr_metric_free_kb)
+    m_freed=$(pgdr_freed_bytes "$m_free0" "$m_free1")
+    if [[ $rm_status -eq $PGDR_EXIT_SKIPPED ]]; then
+      echo "pg-disk-reclaimer: remove command for '$id' skipped (exit $PGDR_EXIT_SKIPPED), retry later" >&2
+      pgdr_metric_item "$id" "${r_level[i]}" skipped "$m_t0" "$m_t1" "$m_freed"
+    elif [[ $rm_status -eq 0 ]]; then
+      pgdr_metric_item "$id" "${r_level[i]}" ok "$m_t0" "$m_t1" "$m_freed"
       if [[ -n $size_kb ]]; then
         bucket_kb[kind_idx]=$((bucket_kb[kind_idx] + size_kb))
         bucket_n[kind_idx]=$((bucket_n[kind_idx] + 1))
@@ -1473,6 +1498,7 @@ cmd_reclaim() {
       fi
     else
       echo "pg-disk-reclaimer: remove command for '$id' exited non-zero" >&2
+      pgdr_metric_item "$id" "${r_level[i]}" failed "$m_t0" "$m_t1" "$m_freed"
       overall_status=1
       failed_count=$((failed_count + 1))
     fi
@@ -1490,6 +1516,7 @@ cmd_reclaim() {
       "$failed_count"
   fi
 
+  pgdr_metrics_flush_unless_deferred
   return "$overall_status"
 }
 
@@ -1561,10 +1588,37 @@ pgdr_auto_log() {
 # cmd_auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N]
 #          [--below3-gb N]
 # Logs one JSON line per run: ts, level_chosen, free_kb_before, free_kb_after,
-# bytes_reclaimed, alert, applied. The reclaim output itself goes to stderr.
-# An alert is a line with level "ERROR" (free space below the lowest threshold
-# before the run, or still below it after).
+# bytes_reclaimed, alert, applied, duration_s, items. The reclaim output itself
+# goes to stderr. An alert is a line with level "ERROR" (free space below the
+# lowest threshold before the run, or still below it after).
+#
+# Metrics: the whole run is one spool file (see pgdr_metrics_flush); run points
+# are written only for an applied run.
 cmd_auto() {
+  pgdr_metric_mode=auto
+  PGDR_METRICS_DEFER=1
+  PGDR_ITEM_RECORDS=()
+  PGDR_AUTO_OUTCOME=""
+  PGDR_AUTO_LEVEL=none
+  PGDR_AUTO_APPLIED=0
+  PGDR_AUTO_BEFORE_KB=""
+  PGDR_AUTO_AFTER_KB=""
+  PGDR_AUTO_T1="" PGDR_AUTO_T2="" PGDR_AUTO_T3=""
+  PGDR_AUTO_T0=$(pgdr_now_us)
+
+  local status=0
+  pgdr_auto_main "$@" || status=$?
+
+  PGDR_METRICS_DEFER=0
+  if [[ -n $PGDR_AUTO_OUTCOME ]]; then
+    pgdr_auto_run_points "$(pgdr_now_us)"
+    pgdr_metrics_flush
+  fi
+  pgdr_metric_mode=manual
+  return "$status"
+}
+
+pgdr_auto_main() {
   local apply=0 volume="$PGDR_AUTO_VOLUME"
   local t1="$PGDR_AUTO_LEVEL1_BELOW_GB" t2="$PGDR_AUTO_LEVEL2_BELOW_GB" t3="$PGDR_AUTO_LEVEL3_BELOW_GB"
 
@@ -1593,10 +1647,20 @@ cmd_auto() {
       ;;
     esac
   done
+  PGDR_AUTO_APPLIED=$apply
 
   local before after level
-  before=$(pgdr_auto_free_kb "$volume") || return 1
-  level=$(pgdr_auto_level_for_free_kb "$before" "$t1" "$t2" "$t3") || return 1
+  if ! before=$(pgdr_auto_free_kb "$volume"); then
+    PGDR_AUTO_OUTCOME=read-error
+    return 1
+  fi
+  PGDR_AUTO_BEFORE_KB="$before"
+  if ! level=$(pgdr_auto_level_for_free_kb "$before" "$t1" "$t2" "$t3"); then
+    PGDR_AUTO_OUTCOME=config-error
+    return 1
+  fi
+  PGDR_AUTO_T1="$t1" PGDR_AUTO_T2="$t2" PGDR_AUTO_T3="$t3"
+  PGDR_AUTO_LEVEL="$level"
 
   local alert_before=false status=0
   if ((before < t3 * 1048576)); then
@@ -1604,10 +1668,13 @@ cmd_auto() {
   fi
 
   if [[ $level == none ]]; then
+    PGDR_AUTO_OUTCOME=nothing-to-do
+    PGDR_AUTO_AFTER_KB="$before"
     pgdr_auto_log "$(jq -cn --argjson b "$before" --argjson apply "$apply" \
+      --argjson dur "$(pgdr_duration_s "$PGDR_AUTO_T0" "$(pgdr_now_us)")" \
       '{ts: (now | todate), level: "INFO", msg: "free space above all thresholds, nothing to do",
         level_chosen: null, free_kb_before: $b, free_kb_after: $b, bytes_reclaimed: 0,
-        alert: false, applied: ($apply == 1)}')"
+        alert: false, applied: ($apply == 1), duration_s: $dur, items: []}')"
     return 0
   fi
 
@@ -1618,29 +1685,377 @@ cmd_auto() {
   cmd_reclaim "${args[@]}" >&2 || status=$?
 
   if ((apply)); then
-    after=$(pgdr_auto_free_kb "$volume") || after="$before"
+    after=$(pgdr_auto_after_free_kb "$volume") || after="$before"
   else
     after="$before"
   fi
+  PGDR_AUTO_AFTER_KB="$after"
   local alert_after=false
   if ((after < t3 * 1048576)); then
     alert_after=true
   fi
   local alert=false log_level=INFO msg="auto reclaim finished"
+  PGDR_AUTO_OUTCOME=ok
   if [[ $alert_before == true || $alert_after == true ]]; then
     alert=true
     log_level=ERROR
     msg="free space below the alert threshold (${t3} GiB)"
+    PGDR_AUTO_OUTCOME=alert
   elif ((status != 0)); then
     log_level=WARN
     msg="auto reclaim finished with a failing item"
+    PGDR_AUTO_OUTCOME=failed
+  fi
+  local items_json="[]"
+  if ((${#PGDR_ITEM_RECORDS[@]} > 0)); then
+    items_json=$(printf '%s\n' "${PGDR_ITEM_RECORDS[@]}" | jq -cs .)
   fi
   pgdr_auto_log "$(jq -cn --argjson b "$before" --argjson a "$after" --argjson lvl "$level" \
     --argjson apply "$apply" --argjson alert "$alert" --arg ll "$log_level" --arg msg "$msg" \
-    --argjson status "$status" \
+    --argjson status "$status" --argjson items "$items_json" \
+    --argjson dur "$(pgdr_duration_s "$PGDR_AUTO_T0" "$(pgdr_now_us)")" \
     '{ts: (now | todate), level: $ll, msg: $msg, level_chosen: $lvl,
       free_kb_before: $b, free_kb_after: $a,
       bytes_reclaimed: (if $a > $b then ($a - $b) * 1024 else 0 end),
-      alert: $alert, applied: ($apply == 1), reclaim_status: $status}')"
+      alert: $alert, applied: ($apply == 1), reclaim_status: $status,
+      duration_s: $dur, items: $items}')"
   return "$status"
+}
+
+# ---------------------------------------------------------------------------
+# Skipped outcome, tool pins, Go-cache helpers and spool metrics.
+# ---------------------------------------------------------------------------
+
+# A variant command that exits 75 (EX_TEMPFAIL) is recorded as skipped.
+PGDR_EXIT_SKIPPED=75
+
+# Tool paths. The packaged script assigns absolute store paths to these after
+# sourcing this file; a raw source falls back to the bare name. The helpers
+# below never rely on whichever find/date/jq a launchd PATH happens to put first.
+: "${PGDR_TOOL_FIND:=find}"
+: "${PGDR_TOOL_RM:=rm}"
+: "${PGDR_TOOL_MV:=mv}"
+: "${PGDR_TOOL_MKDIR:=mkdir}"
+: "${PGDR_TOOL_JQ:=jq}"
+: "${PGDR_TOOL_GO:=go}"
+: "${PGDR_TOOL_PGREP:=pgrep}"
+
+# pgdr_now_us: wall clock in integer microseconds. PGDR_NOW_CMD (a command
+# printing seconds.micros) overrides $EPOCHREALTIME (BSD date has no %N).
+pgdr_now_us() {
+  local t
+  if [[ -n ${PGDR_NOW_CMD:-} ]]; then
+    t=$("$PGDR_NOW_CMD")
+  else
+    t=$EPOCHREALTIME
+  fi
+  t=${t/[.,]/}
+  printf '%s\n' "$((10#$t))"
+}
+
+# pgdr_duration_s <t0-us> <t1-us>: seconds with six decimals, never negative.
+pgdr_duration_s() {
+  local d=$(($2 - $1))
+  ((d < 0)) && d=0
+  printf '%d.%06d\n' "$((d / 1000000))" "$((d % 1000000))"
+}
+
+# pgdr_metric_free_kb: free KiB for the metric deltas (empty when unreadable).
+# PGDR_FREE_KB_CMD is called once per read so a test can script a sequence.
+pgdr_metric_free_kb() {
+  local free
+  if [[ -n ${PGDR_FREE_KB_CMD:-} ]]; then
+    free=$("$PGDR_FREE_KB_CMD" 2>/dev/null) || free=""
+  else
+    free=$(df -k -P "$PGDR_AUTO_VOLUME" 2>/dev/null | awk 'NR==2 {print $4}') || free=""
+  fi
+  [[ $free =~ ^[0-9]+$ ]] && printf '%s\n' "$free"
+  return 0
+}
+
+# pgdr_auto_after_free_kb <volume>: the free space after an applied auto run.
+pgdr_auto_after_free_kb() {
+  if [[ -n ${PGDR_FREE_KB_CMD:-} ]]; then
+    local f
+    f=$(pgdr_metric_free_kb)
+    [[ -n $f ]] || return 1
+    printf '%s\n' "$f"
+    return 0
+  fi
+  pgdr_auto_free_kb "$1"
+}
+
+# pgdr_freed_bytes <before-kb> <after-kb>: free-space delta in bytes, 0 when
+# either read is missing or the delta is negative.
+pgdr_freed_bytes() {
+  if [[ -z $1 || -z $2 ]] || (($2 <= $1)); then
+    echo 0
+    return 0
+  fi
+  echo $((($2 - $1) * 1024))
+}
+
+# --- records ---------------------------------------------------------------
+
+pgdr_metric_mode=manual
+PGDR_METRICS_DEFER=0
+PGDR_METRICS_APPLIED=0
+PGDR_ITEM_RECORDS=()
+PGDR_RUN_POINTS=()
+PGDR_SPOOL_SEQ=0
+PGDR_AUTO_APPLIED=0
+
+# pgdr_metrics_begin <apply>: start collecting one reclaim run. A deferred run
+# (auto) keeps what its caller already reset.
+pgdr_metrics_begin() {
+  PGDR_METRICS_APPLIED="$1"
+  if [[ $PGDR_METRICS_DEFER -ne 1 ]]; then
+    PGDR_ITEM_RECORDS=()
+    PGDR_RUN_POINTS=()
+  fi
+}
+
+# pgdr_metric_item <id> <level> <outcome> <t0-us> <t1-us> <freed-bytes>
+pgdr_metric_item() {
+  PGDR_ITEM_RECORDS+=("$("$PGDR_TOOL_JQ" -cn --arg id "$1" --arg level "$2" --arg outcome "$3" \
+    --argjson dur "$(pgdr_duration_s "$4" "$5")" --argjson freed "$6" \
+    '{id: $id, level: ($level | tonumber), outcome: $outcome, duration_s: $dur, freed_bytes: $freed}')")
+}
+
+# pgdr_auto_run_points <end-us>: the run-level points of an APPLIED auto run.
+pgdr_auto_run_points() {
+  PGDR_RUN_POINTS=()
+  [[ $PGDR_AUTO_APPLIED -eq 1 ]] || return 0
+  local lvl="$PGDR_AUTO_LEVEL" outcome="$PGDR_AUTO_OUTCOME" dur
+  dur=$(pgdr_duration_s "$PGDR_AUTO_T0" "$1")
+  PGDR_RUN_POINTS+=("$(pgdr_point pg_disk_reclaimer_auto_run_duration_seconds s double "$dur" level "$lvl" outcome "$outcome")")
+  if [[ -n $PGDR_AUTO_BEFORE_KB && -n $PGDR_AUTO_AFTER_KB ]]; then
+    PGDR_RUN_POINTS+=("$(pgdr_point pg_disk_reclaimer_auto_run_freed_bytes By int \
+      "$(pgdr_freed_bytes "$PGDR_AUTO_BEFORE_KB" "$PGDR_AUTO_AFTER_KB")" level "$lvl")")
+    PGDR_RUN_POINTS+=("$(pgdr_point pg_disk_reclaimer_auto_free_bytes By int "$((PGDR_AUTO_BEFORE_KB * 1024))" when before)")
+    PGDR_RUN_POINTS+=("$(pgdr_point pg_disk_reclaimer_auto_free_bytes By int "$((PGDR_AUTO_AFTER_KB * 1024))" when after)")
+  fi
+  if [[ -n $PGDR_AUTO_T1 ]]; then
+    local n=1 t
+    for t in "$PGDR_AUTO_T1" "$PGDR_AUTO_T2" "$PGDR_AUTO_T3"; do
+      PGDR_RUN_POINTS+=("$(pgdr_point pg_disk_reclaimer_auto_threshold_bytes By int "$((t * 1073741824))" level "$n")")
+      n=$((n + 1))
+    done
+  fi
+}
+
+# pgdr_point <name> <unit> <int|double> <value> [key value]...: one record.
+pgdr_point() {
+  local n="$1" u="$2" k="$3" v="$4"
+  shift 4
+  local -a a=()
+  while [[ $# -ge 2 ]]; do
+    a+=(--arg "$1" "$2")
+    shift 2
+  done
+  "$PGDR_TOOL_JQ" -cn --arg n "$n" --arg u "$u" --arg k "$k" --arg v "$v" "${a[@]}" \
+    '{n: $n, u: $u, k: $k, v: $v, a: ($ARGS.named | del(.n, .u, .k, .v))}'
+}
+
+# --- spool -----------------------------------------------------------------
+
+# pgdr_spool_dir: prints the spool directory when telemetry is on for this
+# run, nothing otherwise. Precedence follows pn: OTEL_SDK_DISABLED=true forces
+# off; PGDR_OTEL_SPOOL_DIR is an explicit per-run opt-in; telemetry.toml
+# `enabled = false` is off; `enabled = true` is on (spool_dir, else the default
+# ${XDG_STATE_HOME:-$HOME/.local/state}/otel-spool); anything else is off. The
+# directory MUST be absolute.
+pgdr_spool_dir() {
+  local sdk="${OTEL_SDK_DISABLED:-}"
+  [[ ${sdk,,} == true ]] && return 0
+  local dir=""
+  if [[ -n ${PGDR_OTEL_SPOOL_DIR:-} ]]; then
+    dir="$PGDR_OTEL_SPOOL_DIR"
+  else
+    local toml="${XDG_CONFIG_HOME:-$HOME/.config}/pg-disk-reclaimer/telemetry.toml"
+    [[ -r $toml ]] || return 0
+    local line enabled="" sd=""
+    while IFS= read -r line; do
+      if [[ $line =~ ^[[:space:]]*enabled[[:space:]]*=[[:space:]]*(true|false) ]]; then
+        enabled="${BASH_REMATCH[1]}"
+      elif [[ $line =~ ^[[:space:]]*spool_dir[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]; then
+        sd="${BASH_REMATCH[1]}"
+      fi
+    done <"$toml"
+    [[ $enabled == true ]] || return 0
+    dir="${sd:-${XDG_STATE_HOME:-${HOME:+$HOME/.local/state}}}"
+    [[ -n $dir ]] || return 0
+    [[ -n $sd ]] || dir="$dir/otel-spool"
+  fi
+  [[ $dir == /* ]] || return 0
+  printf '%s\n' "${dir%/}"
+}
+
+# pgdr_rand_hex <n>: n random hex digits.
+pgdr_rand_hex() {
+  local out="" n="$1"
+  while ((${#out} < n)); do
+    out+=$(printf '%04x' "$(((RANDOM << 1 | RANDOM & 1) & 65535))")
+  done
+  printf '%s\n' "${out:0:n}"
+}
+
+# pgdr_metrics_flush_unless_deferred: end of a standalone reclaim run.
+pgdr_metrics_flush_unless_deferred() {
+  [[ $PGDR_METRICS_DEFER -eq 1 ]] || pgdr_metrics_flush
+}
+
+# pgdr_metrics_flush: writes everything collected as ONE OTLP-JSON
+# ExportMetricsServiceRequest in the collector's file spool, in pn's exact
+# file-name pattern (so pn's spool sweep also cleans it), then clears the
+# collection. A write failure prints one stderr line and never changes the exit
+# status.
+pgdr_metrics_flush() {
+  local items=("${PGDR_ITEM_RECORDS[@]}") runs=("${PGDR_RUN_POINTS[@]}")
+  PGDR_ITEM_RECORDS=()
+  PGDR_RUN_POINTS=()
+  ((${#items[@]} + ${#runs[@]} > 0)) || return 0
+  local spool
+  spool=$(pgdr_spool_dir)
+  [[ -n $spool ]] || return 0
+
+  local now_us sec fid name tmp dir="$spool/metrics" applied=false
+  [[ $PGDR_METRICS_APPLIED -eq 1 ]] && applied=true
+  [[ $PGDR_AUTO_APPLIED -eq 1 && ${#runs[@]} -gt 0 ]] && applied=true
+  now_us=$(pgdr_now_us)
+  sec=$((now_us / 1000000))
+  fid="${PGDR_OTEL_FILE_ID:-$(pgdr_rand_hex 32)}"
+  PGDR_SPOOL_SEQ=$((PGDR_SPOOL_SEQ + 1))
+  name="pg_disk_reclaimer-$("$PGDR_TOOL_JQ" -nr --argjson s "$sec" '$s | strftime("%Y%m%dT%H%M%SZ")')-$$-${fid:0:8}-${PGDR_SPOOL_SEQ}.jsonl"
+  tmp="$dir/.$name.tmp"
+
+  local items_json="[]" runs_json="[]"
+  ((${#items[@]} > 0)) && items_json=$(printf '%s\n' "${items[@]}" | "$PGDR_TOOL_JQ" -cs .)
+  ((${#runs[@]} > 0)) && runs_json=$(printf '%s\n' "${runs[@]}" | "$PGDR_TOOL_JQ" -cs .)
+
+  if ! "$PGDR_TOOL_MKDIR" -p "$dir" 2>/dev/null ||
+    ! "$PGDR_TOOL_JQ" -cn --argjson items "$items_json" --argjson runs "$runs_json" \
+      --arg mode "$pgdr_metric_mode" --arg applied "$applied" --arg fid "$fid" --arg ts "${now_us}000" '
+      def attrs: to_entries | map({key: .key, value: {stringValue: .value}});
+      ([$items[] |
+        ({n: "pg_disk_reclaimer_item_duration_seconds", u: "s", k: "double", v: (.duration_s | tostring),
+          a: {item: .id, level: (.level | tostring), outcome: .outcome, mode: $mode}}),
+        (select($applied == "true") |
+          {n: "pg_disk_reclaimer_item_freed_bytes", u: "By", k: "int", v: (.freed_bytes | tostring),
+           a: {item: .id, level: (.level | tostring), mode: $mode}})]
+       + $runs)
+      | map(.a += {applied: $applied}) as $pts
+      | {resourceMetrics: [{
+          resource: {attributes: [
+            {key: "pn.spool.file_id", value: {stringValue: $fid}},
+            {key: "service.name", value: {stringValue: "pg-disk-reclaimer"}}]},
+          scopeMetrics: [{
+            scope: {name: "pg-disk-reclaimer"},
+            metrics: ($pts | group_by(.n) | map({
+              name: .[0].n, unit: .[0].u,
+              gauge: {dataPoints: map(
+                {attributes: (.a | attrs), timeUnixNano: $ts}
+                + (if .k == "int" then {asInt: .v} else {asDouble: (.v | tonumber * 1)} end))}}))}]}]}' \
+      >"$tmp" 2>/dev/null ||
+    ! "$PGDR_TOOL_MV" -f "$tmp" "$dir/$name" 2>/dev/null; then
+    "$PGDR_TOOL_RM" -f "$tmp" 2>/dev/null
+    echo "pg-disk-reclaimer: telemetry: cannot write metrics to '$dir'" >&2
+  fi
+  return 0
+}
+
+# --- Go build-cache helpers (subcommands) -----------------------------------
+
+# pgdr_go_cache_args <sub> <args...>: parses --cache DIR [--older-than-days N]
+# [--dry-run] into PGDR_GC_DIR, PGDR_GC_DAYS, PGDR_GC_DRY. Returns 2 on usage
+# errors and when DIR is not a Go build cache (no README).
+pgdr_go_cache_args() {
+  local sub="$1" need_days="$2"
+  shift 2
+  PGDR_GC_DIR="" PGDR_GC_DAYS="" PGDR_GC_DRY=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --cache | --older-than-days)
+      if [[ -z ${2:-} ]]; then
+        echo "pg-disk-reclaimer: $sub: $1 requires a value" >&2
+        return 2
+      fi
+      if [[ $1 == --cache ]]; then PGDR_GC_DIR="$2"; else PGDR_GC_DAYS="$2"; fi
+      shift 2
+      ;;
+    --dry-run)
+      PGDR_GC_DRY=1
+      shift
+      ;;
+    *)
+      echo "pg-disk-reclaimer: $sub: unknown argument '$1'" >&2
+      return 2
+      ;;
+    esac
+  done
+  if [[ -z $PGDR_GC_DIR ]]; then
+    echo "pg-disk-reclaimer: $sub: --cache DIR is required" >&2
+    return 2
+  fi
+  if [[ $need_days -eq 1 && ! $PGDR_GC_DAYS =~ ^[0-9]+$ ]]; then
+    echo "pg-disk-reclaimer: $sub: --older-than-days N (a non-negative integer) is required" >&2
+    return 2
+  fi
+  if [[ ! -f $PGDR_GC_DIR/README ]]; then
+    echo "pg-disk-reclaimer: $sub: '$PGDR_GC_DIR' is not a Go build cache (no README); refusing" >&2
+    return 2
+  fi
+  return 0
+}
+
+# cmd_go_cache_trim --cache DIR --older-than-days N [--dry-run]
+# Go's own trim rule (cmd/go/internal/cache): under each shard directory
+# ([0-9a-f][0-9a-f]), a depth-1 entry whose name ends -a or -d and whose mtime
+# is older than N days plus one hour (Go's mtime slack) is removed, a directory
+# entry whole. README, trim.txt, testexpire.txt and fuzz/ are never touched.
+cmd_go_cache_trim() {
+  pgdr_go_cache_args go-cache-trim 1 "$@" || return $?
+  local minutes=$((PGDR_GC_DAYS * 1440 + 60)) shard entry n=0
+  while IFS= read -r -d '' shard; do
+    while IFS= read -r -d '' entry; do
+      n=$((n + 1))
+      if [[ $PGDR_GC_DRY -eq 1 ]]; then
+        printf 'would remove %s\n' "$entry"
+      else
+        "$PGDR_TOOL_RM" -rf -- "$entry"
+      fi
+    done < <("$PGDR_TOOL_FIND" "$shard" -mindepth 1 -maxdepth 1 \( -name '*-a' -o -name '*-d' \) -mmin "+$minutes" -print0)
+  done < <("$PGDR_TOOL_FIND" "$PGDR_GC_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f][0-9a-f]' -print0)
+  if [[ $PGDR_GC_DRY -eq 1 ]]; then
+    printf 'go-cache-trim: %d entr(ies) would be removed from %s\n' "$n" "$PGDR_GC_DIR"
+  else
+    printf 'go-cache-trim: removed %d entr(ies) from %s\n' "$n" "$PGDR_GC_DIR"
+  fi
+  return 0
+}
+
+# pgdr_go_live: succeeds when a go or golangci-lint process is running. The
+# pgrep seam is PGDR_PGREP_CMD.
+pgdr_go_live() {
+  local pg="${PGDR_PGREP_CMD:-$PGDR_TOOL_PGREP}" name
+  for name in go golangci-lint; do
+    "$pg" -x "$name" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# cmd_go_cache_wipe --cache DIR [--dry-run]
+# GOCACHE=DIR go clean -cache, skipped (exit 75) while a go or golangci-lint
+# process is running. go is the packaged store path (seam: PGDR_GO_CMD), never PATH.
+cmd_go_cache_wipe() {
+  pgdr_go_cache_args go-cache-wipe 0 "$@" || return $?
+  if pgdr_go_live; then
+    echo "pg-disk-reclaimer: go-cache-wipe: a go or golangci-lint process is running; skipping" >&2
+    return "$PGDR_EXIT_SKIPPED"
+  fi
+  if [[ $PGDR_GC_DRY -eq 1 ]]; then
+    printf 'would run: GOCACHE=%s go clean -cache\n' "$PGDR_GC_DIR"
+    return 0
+  fi
+  GOCACHE="$PGDR_GC_DIR" "${PGDR_GO_CMD:-$PGDR_TOOL_GO}" clean -cache
 }

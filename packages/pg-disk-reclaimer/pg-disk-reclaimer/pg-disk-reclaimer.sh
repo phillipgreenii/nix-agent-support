@@ -33,6 +33,14 @@ Commands:
       an alert; defaults 60, 45, 30), reclaim at that level (dry-run unless
       --apply), and log one JSON line with the level, free space before and
       after and bytes reclaimed. Levels 4 and 5 are never chosen.
+  go-cache-trim --cache DIR --older-than-days N [--dry-run]
+      Remove the entries of a Go build cache that Go's own trim rule would
+      (name ends -a or -d, unused for N days plus one hour). Exit 2 when DIR
+      is not a Go build cache (no README); nothing to do (exit 0) when it has
+      no shard directories. Meant for registry item commands.
+  go-cache-wipe --cache DIR [--dry-run]
+      GOCACHE=DIR go clean -cache with the packaged go; exits 75 (skipped)
+      while a go or golangci-lint process is running.
 
 Options:
   -h, --help     Show this help message
@@ -106,6 +114,20 @@ Size contract (what a printed size means):
     total reclaimable: 1.0M (1 sized, 0 unknown); held, not removable: 1.0M; 1 item(s) failed, excluded from total
   A run where every item failed still prints that marked total.
 
+Exit status 75 of a registry command:
+  A dryRunCommand or removeCommand MAY exit 75 (EX_TEMPFAIL, never 1) to say
+  "skipped, retry later". reclaim records the item as skipped, in a dry run
+  and under --apply alike: it is not a failure, the run status stays 0, and
+  the item's size is not added to the reclaimed total. Outcomes are ok,
+  failed and skipped.
+
+Telemetry:
+  Every reclaim and auto run writes OTLP-JSON gauge files to the collector's
+  file spool (<spool>/metrics) when telemetry is on: telemetry.toml
+  (enabled, spool_dir) in the registry's config directory, or
+  PGDR_OTEL_SPOOL_DIR for one run; OTEL_SDK_DISABLED=true forces it off. A
+  write failure prints one line on stderr and never changes the exit status.
+
 Aggressiveness scale:
   --aggressiveness N is a CEILING: every item with a variant at level <= N
   is selected, and an item with several qualifying variants runs the one
@@ -166,6 +188,12 @@ reclaim)
   ;;
 auto)
   cmd_auto "$@"
+  ;;
+go-cache-trim)
+  cmd_go_cache_trim "$@"
+  ;;
+go-cache-wipe)
+  cmd_go_cache_wipe "$@"
   ;;
 *)
   echo "pg-disk-reclaimer: unknown command '$cmd'" >&2

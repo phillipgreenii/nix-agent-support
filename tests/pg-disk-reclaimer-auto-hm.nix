@@ -132,6 +132,15 @@ let
     cfg = autoOn;
   };
 
+  telemetryC = evalWith { cfg.phillipgreenii.programs.pg-disk-reclaimer.telemetry.enable = true; };
+  telemetryDirC = evalWith {
+    cfg.phillipgreenii.programs.pg-disk-reclaimer.telemetry = {
+      enable = true;
+      spoolDir = "/example/spool";
+    };
+  };
+  telemetryFile = c: c.xdg.configFile."pg-disk-reclaimer/telemetry.toml".source;
+
   agents = c: c.phillipgreenii.programs.launchdServices.userAgents;
   agent = c: (agents c).pg-disk-reclaimer-auto;
   failedAssertions = c: lib.filter (a: !a.assertion) c.assertions;
@@ -253,6 +262,28 @@ let
         && ccaudit.removeCommand == "pg-ccaudit prune --days 90 --yes"
         && has "archive --days 90 --dry-run" ceta.dryRunCommand
         && has "archive --days 90 --yes --fixtures-out" ceta.removeCommand;
+    }
+    {
+      name = "telemetry is off without an observability stack: no telemetry.toml";
+      ok = !(defaultC.xdg.configFile ? "pg-disk-reclaimer/telemetry.toml");
+    }
+    {
+      name = "telemetry on renders enabled = true and leaves the spool directory to the tool default";
+      ok =
+        let
+          t = builtins.fromTOML (builtins.readFile (telemetryFile telemetryC));
+        in
+        t == {
+          enabled = true;
+        };
+    }
+    {
+      name = "telemetry.spoolDir renders spool_dir";
+      ok =
+        (builtins.fromTOML (builtins.readFile (telemetryFile telemetryDirC))) == {
+          enabled = true;
+          spool_dir = "/example/spool";
+        };
     }
     {
       name = "every grower removal has an age cutoff";

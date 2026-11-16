@@ -1,0 +1,75 @@
+{
+  "resourceMetrics": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "pn.spool.file_id",
+            "value": {
+              "stringValue": "0123456789abcdef0123456789abcdef"
+            }
+          },
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "pg-disk-reclaimer"
+            }
+          }
+        ]
+      },
+      "scopeMetrics": [
+        {
+          "metrics": [
+            {
+              "gauge": {
+                "dataPoints": [
+                  {
+                    "asDouble": 0.25,
+                    "attributes": [
+                      {
+                        "key": "item",
+                        "value": {
+                          "stringValue": "ok1"
+                        }
+                      },
+                      {
+                        "key": "level",
+                        "value": {
+                          "stringValue": "1"
+                        }
+                      },
+                      {
+                        "key": "outcome",
+                        "value": {
+                          "stringValue": "ok"
+                        }
+                      },
+                      {
+                        "key": "mode",
+                        "value": {
+                          "stringValue": "manual"
+                        }
+                      },
+                      {
+                        "key": "applied",
+                        "value": {
+                          "stringValue": "false"
+                        }
+                      }
+                    ],
+                    "timeUnixNano": "1700000000500000000"
+                  }
+                ]
+              },
+              "name": "pg_disk_reclaimer_item_duration_seconds",
+              "unit": "s"
+            }
+          ],
+          "scope": {
+            "name": "pg-disk-reclaimer"
+          }
+        }
+      ]
+    }
+  ]
+}

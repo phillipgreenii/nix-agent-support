@@ -16,7 +16,7 @@ _pg_disk_reclaimer() {
   _arguments -C \
     '(-h --help)'{-h,--help}'[Show help message]' \
     '(-v --version)'{-v,--version}'[Show version information]' \
-    '1: :(list validate reclaim auto)' \
+    '1: :(list validate reclaim auto go-cache-trim go-cache-wipe)' \
     '*::args:->args'
 
   case $words[1] in
@@ -36,6 +36,17 @@ _pg_disk_reclaimer() {
       '--below1-gb[Run level 1 below this many GiB free]:gib:' \
       '--below2-gb[Run level 2 below this many GiB free]:gib:' \
       '--below3-gb[Run level 3 and alert below this many GiB free]:gib:'
+    ;;
+  go-cache-trim)
+    _arguments \
+      '--cache[Go build cache directory]:cache dir:_files -/' \
+      '--older-than-days[Remove entries unused for this many days plus an hour]:days:' \
+      '--dry-run[Print what would be removed]'
+    ;;
+  go-cache-wipe)
+    _arguments \
+      '--cache[Go build cache directory]:cache dir:_files -/' \
+      '--dry-run[Print what would be run]'
     ;;
   list)
     _arguments \

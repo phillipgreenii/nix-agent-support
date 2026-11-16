@@ -1,0 +1,44 @@
+# Fixture collector config for the integration tier of the metrics suite.
+#
+# Source: the user metrics spool receiver block and the pn.spool.file_id delete
+# processor of the observability stack's collector config
+# (darwin/services/otelcol/config.yaml.nix in the support-apps repository,
+# mkSpoolReceiver and transform/pn_nix_metrics), copied here because this
+# repository has no input on that one. Drift risk: if that config changes the
+# receiver or the processor, update this copy. It runs on the nixpkgs
+# opentelemetry-collector-contrib, whose version MAY differ from the one the
+# stack pins; the test prints both versions.
+#
+# Started with --feature-gates=filelog.allowFileDeletion,filelog.mtimeSortType
+# (darwin/services/otelcol/featureGates.nix there). SPOOL_DIR and OUT_FILE come
+# from the environment.
+receivers:
+  otlpjsonfile/metrics:
+    include: ["${env:SPOOL_DIR}/metrics/*.jsonl"]
+    start_at: beginning
+    poll_interval: 1s
+    max_log_size: 16MiB
+    force_flush_period: 0
+    max_concurrent_files: 2
+    ordering_criteria:
+      sort_by:
+        - sort_type: mtime
+          ascending: true
+      top_n: 10000
+    delete_after_read: true
+processors:
+  transform/pn_nix_metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - 'delete_key(attributes, "pn.spool.file_id")'
+exporters:
+  file:
+    path: ${env:OUT_FILE}
+service:
+  pipelines:
+    metrics:
+      receivers: [otlpjsonfile/metrics]
+      processors: [transform/pn_nix_metrics]
+      exporters: [file]

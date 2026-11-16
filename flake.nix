@@ -3144,6 +3144,7 @@
                       ${./packages/pa-monitor/grafana/pa-monitor-overview.json} \
                       ${./packages/pg-connector/grafana/pg-connector-github.json} \
                       ${./packages/pg-connector/grafana/pg-connector-issue-jira.json} \
+                      ${./packages/pg-disk-reclaimer/grafana/pg-disk-reclaimer.json} \
                       ${./packages/pg-rescue/grafana/pg-rescue-runs.json} \
                       ${./packages/pg-repo-runner/grafana/pg-repo-runner.json} \
                       ${./packages/pg-task-focus/grafana/pg-task-focus.json}
@@ -14798,6 +14799,23 @@
                     pg-disk-reclaimer validate ${r.registry}
                     touch "$out"
                   '';
+
+              # test-pg-disk-reclaimer-darwin-module: the log source's error alert (threshold
+              # 1, critical, emit interval and window derived from auto.intervalSeconds) and
+              # the dashboard registration of darwin/modules/pg-disk-reclaimer. Eval cases
+              # (tests/pg-disk-reclaimer-darwin.nix) run the REAL module against stubs of
+              # the observability options.
+              test-pg-disk-reclaimer-darwin-module =
+                let
+                  r = import ./tests/pg-disk-reclaimer-darwin.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "test-pg-disk-reclaimer-darwin-module" { } ''
+                  ${lib.optionalString (r.failures != [ ]) ''
+                    echo "pg-disk-reclaimer darwin eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                    exit 1
+                  ''}
+                  touch "$out"
+                '';
 
               # test-pg-gwm-hm: the scheduled reaper's launchd entry and the rendered
               # configuration of home/programs/pg-gwm. Eval cases (tests/pg-gwm-hm.nix)

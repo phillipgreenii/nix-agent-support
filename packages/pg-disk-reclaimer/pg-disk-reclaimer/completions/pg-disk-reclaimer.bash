@@ -44,7 +44,7 @@ _pg_disk_reclaimer() {
   _init_completion || return
 
   if [[ $COMP_CWORD -eq 1 ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "list validate reclaim auto --help -h --version -v" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "list validate reclaim auto go-cache-trim go-cache-wipe --help -h --version -v" -- "$cur")
     return
   fi
 
@@ -64,6 +64,17 @@ _pg_disk_reclaimer() {
   if [[ ${words[1]} == auto ]]; then
     if [[ $cur == -* ]]; then
       mapfile -t COMPREPLY < <(compgen -W "--apply --volume --below1-gb --below2-gb --below3-gb --help -h --version" -- "$cur")
+    fi
+    return
+  fi
+
+  if [[ ${words[1]} == go-cache-trim || ${words[1]} == go-cache-wipe ]]; then
+    if [[ $prev == --cache ]]; then
+      _filedir -d
+    elif [[ $prev == --older-than-days ]]; then
+      return
+    elif [[ $cur == -* ]]; then
+      mapfile -t COMPREPLY < <(compgen -W "--cache --older-than-days --dry-run --help -h --version" -- "$cur")
     fi
     return
   fi

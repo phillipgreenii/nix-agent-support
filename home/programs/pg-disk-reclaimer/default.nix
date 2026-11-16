@@ -3,11 +3,21 @@
   lib,
   pkgs,
   options,
+  osConfig ? null,
   ...
 }:
 
 let
   cfg = config.phillipgreenii.programs.pg-disk-reclaimer;
+  tomlFormat = pkgs.formats.toml { };
+
+  # The observability surface is declared at darwin/system scope. Read it
+  # null-safely from osConfig (as home/programs/pg-keep-awake does): absent
+  # osConfig, an absent `phillipgreenii.observability` or an absent metrics
+  # signal all mean "no metrics". Same gate as the collector's metrics spool
+  # receiver.
+  obs = if osConfig == null then { } else osConfig.phillipgreenii.observability or { };
+  metricsAvailable = (obs.enable or false) && ((obs.signals or { }).metrics or { }).enable or false;
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
 
   # Read from the `options` argument, never from `config`/`pkgs` (using those to
@@ -236,6 +246,29 @@ in
       };
     };
 
+    telemetry = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = metricsAvailable;
+        defaultText = lib.literalMD "the observability stack's metrics signal is enabled (read null-safely from `osConfig`)";
+        description = ''
+          Write the reclaimer's own metrics (duration, outcome and level per
+          registry item, and per whole `auto` run) as OTLP-JSON gauge files into
+          the collector's file spool, the way `pn` does. Rendered as
+          `~/.config/pg-disk-reclaimer/telemetry.toml`.
+        '';
+      };
+      spoolDir = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          Absolute spool directory. When null the tool uses
+          `''${XDG_STATE_HOME:-$HOME/.local/state}/otel-spool`, which the
+          collector's metrics receiver reads (`metrics/` below it).
+        '';
+      };
+    };
+
     # bead pg2-9lfsj: build-time aggregation option for the tool's registry,
     # mirroring phillipg-nix-ziprecruiter's `services.localProxy.registrations`
     # precedent (structured submodule data, no ordering requirement, so plain
@@ -406,6 +439,14 @@ in
         hand-authoring the registry JSON directly. Shape mirrors the tool's own
         schema fixture
         (packages/pg-disk-reclaimer/pg-disk-reclaimer/tests/fixtures/valid.json).
+
+        A variant command MAY exit 75 (EX_TEMPFAIL, never 1) to say "skipped,
+        retry later": `reclaim` records the item as skipped, not failed, in a
+        dry run and under `--apply`, and does not count its size as reclaimed.
+        The built-in `go-cache-trim --cache DIR --older-than-days N` and
+        `go-cache-wipe --cache DIR` subcommands (the wipe exits 75 while a go
+        or golangci-lint process runs) are meant to be called from these
+        commands by absolute package path.
       '';
     };
   };
@@ -428,6 +469,17 @@ in
       xdg.configFile."pg-disk-reclaimer/registry.json".source =
         (pkgs.formats.json { }).generate "pg-disk-reclaimer-registry.json"
           renderedRegistryEntries;
+    })
+
+    (lib.mkIf (cfg.enable && cfg.telemetry.enable) {
+      xdg.configFile."pg-disk-reclaimer/telemetry.toml".source =
+        tomlFormat.generate "pg-disk-reclaimer-telemetry.toml"
+          (
+            {
+              enabled = true;
+            }
+            // lib.optionalAttrs (cfg.telemetry.spoolDir != null) { spool_dir = cfg.telemetry.spoolDir; }
+          );
     })
 
     {

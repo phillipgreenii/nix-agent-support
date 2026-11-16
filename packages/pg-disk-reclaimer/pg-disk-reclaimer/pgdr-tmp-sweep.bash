@@ -471,6 +471,8 @@ pgdr_tmp_sweep() {
     [ "${k1##*/}" != "$marker" ] || continue
     # The top-level `shared` entry holds state meant to outlive the idle cutoff
     # (the build-tmp module's shared GOCACHE, shared/go-build): never a candidate.
+    # A configured reclaimer item (go-cache-trim, go-cache-wipe) MAY trim or wipe
+    # that cache under disk pressure; this idle sweep never does, and agents MUST NOT.
     [ "${k1##*/}" != shared ] || continue
     if [ "$depth" = 1 ]; then
       # D9a safeguard: Claude's own per-user tree is never swept by this item.

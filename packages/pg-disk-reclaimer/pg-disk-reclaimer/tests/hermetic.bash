@@ -22,11 +22,11 @@
 # the program under test stays the real one (a mock of it would prove nothing).
 
 # Exported PGDR_* variables that are test-harness inputs, not tool tunables, and so
-# survive isolation: the REQUIRE switches (enforcement of skipped tiers) and the
-# nix-injected sweep library path.
+# survive isolation: the REQUIRE switches (enforcement of skipped tiers), the
+# integration switch, the nix-injected sweep library path and tool paths.
 pgdr_test_is_harness_var() {
   case "$1" in
-  PGDR_REQUIRE_* | PGDR_TMP_SWEEP_LIB) return 0 ;;
+  PGDR_REQUIRE_* | PGDR_TMP_SWEEP_LIB | PGDR_TOOL_* | PGDR_INTEGRATION) return 0 ;;
   *) return 1 ;;
   esac
 }

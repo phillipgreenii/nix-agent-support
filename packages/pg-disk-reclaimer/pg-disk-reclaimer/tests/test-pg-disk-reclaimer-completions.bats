@@ -97,3 +97,41 @@ JSON
   [ "${COMPREPLY[0]}" = '$(touch '"$marker"')' ]
   [ ! -e "$marker" ]
 }
+
+# --- go-cache subcommands -----------------------------------------------------
+
+# complete_words <words...>: runs the bash completion with a minimal stand-in
+# for bash-completion's _init_completion.
+complete_words() {
+  # shellcheck disable=SC2034 # cur, prev and words are read by _pg_disk_reclaimer
+  _init_completion() {
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD - 1]}"
+    words=("${COMP_WORDS[@]}")
+    return 0
+  }
+  COMP_WORDS=("$@")
+  COMP_CWORD=$(($# - 1))
+  COMPREPLY=()
+  _pg_disk_reclaimer
+}
+
+@test "the subcommand word list completes go-cache-trim and go-cache-wipe" {
+  complete_words pg-disk-reclaimer go-
+  [[ " ${COMPREPLY[*]} " == *" go-cache-trim "* ]]
+  [[ " ${COMPREPLY[*]} " == *" go-cache-wipe "* ]]
+}
+
+@test "go-cache-trim completes its flags" {
+  complete_words pg-disk-reclaimer go-cache-trim --
+  [[ " ${COMPREPLY[*]} " == *" --cache "* ]]
+  [[ " ${COMPREPLY[*]} " == *" --older-than-days "* ]]
+  [[ " ${COMPREPLY[*]} " == *" --dry-run "* ]]
+}
+
+@test "the zsh completion lists both go-cache subcommands and their flags" {
+  local f="$SCRIPTS_DIR/completions/_pg-disk-reclaimer"
+  grep -q 'go-cache-trim go-cache-wipe' "$f"
+  grep -q -- '--older-than-days' "$f"
+  grep -q 'go-cache-wipe)' "$f"
+}

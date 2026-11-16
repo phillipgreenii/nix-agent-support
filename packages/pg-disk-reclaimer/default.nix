@@ -24,5 +24,19 @@ in
         })
       else
         pg-disk-reclaimer.check;
+
+    # Opt-in tier (PGDR_INTEGRATION=1): cases that need a real go or a real
+    # OpenTelemetry collector. Built on demand
+    # (nix build .#checks.<system>.test-pg-disk-reclaimer-integration), in no
+    # hook and no run-unit-tests/pre-land gate (the pg-connector-integration-tests
+    # precedent). The collector is nixpkgs', which MAY differ from the one the
+    # observability stack pins; the fixture config records both versions.
+    test-pg-disk-reclaimer-integration = pg-disk-reclaimer.check.overrideAttrs (old: {
+      PGDR_INTEGRATION = "1";
+      nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+        pkgs.go
+        pkgs.opentelemetry-collector-contrib
+      ];
+    });
   };
 }

@@ -19,6 +19,25 @@ mkBashScript {
     pkgs.coreutils
   ];
 
+  # Tool paths (operator ruling, 2026-11-16: the bash tool pins its own tool
+  # paths). The Go-cache helpers and the spool metrics call these by absolute
+  # store path, so a launchd PATH that puts /usr/bin first (BSD find and date,
+  # Apple jq) cannot change their behavior. pgrep is the system one on darwin
+  # (procps does not build there) and procps' on Linux. The runtimeDeps PATH
+  # suffix above stays for the rest of the script. Injected as plain
+  # assignments AFTER pg-disk-reclaimer.bash is sourced, so they win over its
+  # bare-name defaults; the check exports them too.
+  exportedConfig = {
+    PGDR_TOOL_FIND = "${pkgs.findutils}/bin/find";
+    PGDR_TOOL_RM = "${pkgs.coreutils}/bin/rm";
+    PGDR_TOOL_MV = "${pkgs.coreutils}/bin/mv";
+    PGDR_TOOL_MKDIR = "${pkgs.coreutils}/bin/mkdir";
+    PGDR_TOOL_JQ = "${pkgs.jq}/bin/jq";
+    PGDR_TOOL_GO = "${pkgs.go}/bin/go";
+    PGDR_TOOL_PGREP =
+      if pkgs.stdenv.hostPlatform.isDarwin then "/usr/bin/pgrep" else "${pkgs.procps}/bin/pgrep";
+  };
+
   # The lib bats suite sources pg-disk-reclaimer.bash directly (raw source,
   # not the assembled+wrapped script), so it needs jq/timeout on PATH
   # independently of runtimeDeps' `--suffix` wrapper (which only applies to
@@ -37,6 +56,7 @@ mkBashScript {
     pkgs.jq
     pkgs.coreutils
     pkgs.findutils
+    pkgs.go
     pkgs.gnugrep
     pkgs.gnused
     pkgs.lsof

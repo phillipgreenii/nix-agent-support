@@ -10,6 +10,9 @@ temp root on a machine-specific volume and point tools at it:
   only when `exportTmpdir` is set). The sweep never judges the top-level `shared` entry,
   so the idle cache is not removed (operator ruling, Phillip, 2026-11-12: "if a shared
   GOCACHE is ok, then do it, but keep it some where under /Volumes/gitrepos/build_tmp/").
+  The idle sweep is not the only actor: a pg-disk-reclaimer registry item the operator
+  configures MAY trim (`go-cache-trim`) or wipe (`go-cache-wipe`) the shared cache under
+  disk pressure. Agents MUST NOT clear it themselves.
 - `claude_code_tmp` holds Claude Code's own temp tree (`CLAUDE_CODE_TMPDIR`).
 
 The modules create the directory, the guarded environment and the CETA contribution
