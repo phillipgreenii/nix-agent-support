@@ -23,10 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pb/internal/gittemplate"
 	"github.com/phillipgreenii/pb/internal/patchid"
 	"github.com/phillipgreenii/pb/internal/run"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
 // noBaselineRepo builds base <- gated <- f1 <- f2 <- f3 <- f4 <- f5, every commit
@@ -37,34 +37,57 @@ func noBaselineRepo(t *testing.T) (dir, gatedPatchID, base, tip string) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
-	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-gate-nobaseline"})
-	commit := func(file, content, msg string) {
-		t.Helper()
-		if _, err := repo.Commit(t.Context(), msg, map[string]string{file: content}); err != nil {
-			t.Fatalf("commit %q: %v", msg, err)
-		}
-	}
-	commit("base.txt", "base\n", "base")
-	base = revParse(t, repo, "HEAD")
-	commit("gated.txt", "the gated change\n", "the gated change")
-	gated := revParse(t, repo, "HEAD")
-	for i := 1; i <= 5; i++ {
-		commit(fmt.Sprintf("f%d.txt", i), fmt.Sprintf("filler %d\n", i), fmt.Sprintf("filler %d", i))
-	}
-	pid, err := patchid.Client{R: realGitRunner{other: run.NewFakeRunner()}}.Compute(t.Context(), repo.Dir, gated)
-	if err != nil {
-		t.Fatalf("patch-id of gated commit: %v", err)
-	}
-	return repo.Dir, pid, base, revParse(t, repo, "HEAD")
+	repo := noBaselineTemplate.Instance(t)
+	return repo.Dir, noBaselineShas.gatedPatchID, noBaselineShas.base, noBaselineShas.tip
 }
 
-func revParse(t *testing.T, repo *gitfixture.Repo, rev string) string {
-	t.Helper()
-	out, err := repo.Client.Run(t.Context(), "rev-parse", rev)
-	if err != nil {
-		t.Fatalf("rev-parse %s: %v", rev, err)
+// noBaselineShas are the facts of the template built by noBaselineTemplate. The
+// template is seeded once per test process (every commit dated then, which is
+// before any test's own time.Now), and each test gets a private copy.
+var noBaselineShas struct{ gatedPatchID, base, tip string }
+
+var noBaselineTemplate = gittemplate.New("pb-gate-nobaseline", func(ctx context.Context, repo *gitfixture.Repo) error {
+	commit := func(file, content, msg string) error {
+		_, err := repo.Commit(ctx, msg, map[string]string{file: content})
+		return err
 	}
-	return strings.TrimSpace(string(out))
+	if err := commit("base.txt", "base\n", "base"); err != nil {
+		return err
+	}
+	base, err := revParse(ctx, repo, "HEAD")
+	if err != nil {
+		return err
+	}
+	if err := commit("gated.txt", "the gated change\n", "the gated change"); err != nil {
+		return err
+	}
+	gated, err := revParse(ctx, repo, "HEAD")
+	if err != nil {
+		return err
+	}
+	for i := 1; i <= 5; i++ {
+		if err := commit(fmt.Sprintf("f%d.txt", i), fmt.Sprintf("filler %d\n", i), fmt.Sprintf("filler %d", i)); err != nil {
+			return err
+		}
+	}
+	pid, err := patchid.Client{R: realGitRunner{other: run.NewFakeRunner()}}.Compute(ctx, repo.Dir, gated)
+	if err != nil {
+		return fmt.Errorf("patch-id of gated commit: %w", err)
+	}
+	tip, err := revParse(ctx, repo, "HEAD")
+	if err != nil {
+		return err
+	}
+	noBaselineShas.gatedPatchID, noBaselineShas.base, noBaselineShas.tip = pid, base, tip
+	return nil
+})
+
+func revParse(ctx context.Context, repo *gitfixture.Repo, rev string) (string, error) {
+	out, err := repo.Client.Run(ctx, "rev-parse", rev)
+	if err != nil {
+		return "", fmt.Errorf("rev-parse %s: %w", rev, err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // noBaselineScenario scripts pn (one repo applied at tip) and bd (one gate keyed on

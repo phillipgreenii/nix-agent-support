@@ -10,9 +10,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/phillipgreenii/pb/internal/gittemplate"
 	"github.com/phillipgreenii/pb/internal/run"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
 // gitEnvVars are the variables git exports into a hook's environment (GIT_DIR,
@@ -55,6 +55,7 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	code := m.Run()
+	repoTemplate.Close()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
@@ -125,16 +126,21 @@ func gitTest(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// newRepo creates a hermetic x/gittest repository on branch main with one
-// commit and returns its path. gittest resolves symlinks in the path up front
+// repoTemplate is the seeded repository (branch main, one commit) every newRepo
+// call copies; it is built once per test process by x/gitfixture and removed by
+// TestMain.
+var repoTemplate = gittemplate.New("pb-drain-isolate", func(ctx context.Context, r *gitfixture.Repo) error {
+	_, err := r.Commit(ctx, "init", map[string]string{"f.txt": "x\n"})
+	return err
+})
+
+// newRepo returns a private copy of the hermetic template repository on branch
+// main with one commit and returns its path. The path is symlink-resolved
 // (macOS t.TempDir() lives under /var/folders → /private/var/folders; git
 // reports resolved paths, so the test must compare in resolved space).
 func newRepo(t *testing.T) string {
 	t.Helper()
-	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-drain-isolate"})
-	if _, err := repo.Commit(t.Context(), "init", map[string]string{"f.txt": "x\n"}); err != nil {
-		t.Fatalf("seed commit: %v", err)
-	}
+	repo := repoTemplate.Instance(t)
 	fixtureRepos.Store(repo.Dir, repo)
 	t.Cleanup(func() { fixtureRepos.Delete(repo.Dir) })
 	return repo.Dir

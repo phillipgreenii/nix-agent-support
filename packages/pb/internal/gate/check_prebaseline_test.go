@@ -27,11 +27,11 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pb/internal/bd"
+	"github.com/phillipgreenii/pb/internal/gittemplate"
 	"github.com/phillipgreenii/pb/internal/patchid"
 	"github.com/phillipgreenii/pb/internal/pn"
 	"github.com/phillipgreenii/pb/internal/run"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
 // gitOnlyEnviron is the environment the code under test's git calls run with: an
@@ -78,29 +78,41 @@ func preBaselineRepo(t *testing.T) (dir, gatedPatchID string, c0, gated, c2, c3 
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
-	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-gate-prebaseline"})
-	sha := func(file, content, msg string) string {
-		t.Helper()
-		if _, err := repo.Commit(t.Context(), msg, map[string]string{file: content}); err != nil {
-			t.Fatalf("commit %q: %v", msg, err)
-		}
-		out, err := repo.Client.Run(t.Context(), "rev-parse", "HEAD")
-		if err != nil {
-			t.Fatalf("rev-parse: %v", err)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	c0 = sha("zero.txt", "zero\n", "c0")
-	gated = sha("gated.txt", "the gated change\n", "the gated change")
-	c2 = sha("two.txt", "two\n", "c2")
-	c3 = sha("three.txt", "three\n", "c3")
-
-	pid, err := patchid.Client{R: realGitRunner{other: run.NewFakeRunner()}}.Compute(t.Context(), repo.Dir, gated)
-	if err != nil {
-		t.Fatalf("patch-id of gated commit: %v", err)
-	}
-	return repo.Dir, pid, c0, gated, c2, c3
+	repo := preBaselineTemplate.Instance(t)
+	s := preBaselineShas
+	return repo.Dir, s.pid, s.c0, s.gated, s.c2, s.c3
 }
+
+// preBaselineShas are the facts of the template built by preBaselineTemplate,
+// seeded once per test process; each test gets a private copy.
+var preBaselineShas struct{ pid, c0, gated, c2, c3 string }
+
+var preBaselineTemplate = gittemplate.New("pb-gate-prebaseline", func(ctx context.Context, repo *gitfixture.Repo) error {
+	sha := func(file, content, msg string) (string, error) {
+		if _, err := repo.Commit(ctx, msg, map[string]string{file: content}); err != nil {
+			return "", fmt.Errorf("commit %q: %w", msg, err)
+		}
+		return revParse(ctx, repo, "HEAD")
+	}
+	var err error
+	s := &preBaselineShas
+	if s.c0, err = sha("zero.txt", "zero\n", "c0"); err != nil {
+		return err
+	}
+	if s.gated, err = sha("gated.txt", "the gated change\n", "the gated change"); err != nil {
+		return err
+	}
+	if s.c2, err = sha("two.txt", "two\n", "c2"); err != nil {
+		return err
+	}
+	if s.c3, err = sha("three.txt", "three\n", "c3"); err != nil {
+		return err
+	}
+	if s.pid, err = (patchid.Client{R: realGitRunner{other: run.NewFakeRunner()}}).Compute(ctx, repo.Dir, s.gated); err != nil {
+		return fmt.Errorf("patch-id of gated commit: %w", err)
+	}
+	return nil
+})
 
 // preBaselineScenario scripts pn (one repo applied at appliedRef) and bd (one gate
 // keyed on gatedPatchID carrying baseline) and returns the runner Check runs

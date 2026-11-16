@@ -18,36 +18,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pb/internal/gittemplate"
 	"github.com/phillipgreenii/pb/internal/patchid"
 	"github.com/phillipgreenii/pb/internal/run"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
+// ctxRepo drives real git in a fixture repository. t is nil while the process
+// wide template is seeded (a failure there panics, since no single test owns
+// it); inside a test it fails that test.
 type ctxRepo struct {
 	dir string
 	t   *testing.T
+	ctx context.Context
+}
+
+func (r ctxRepo) fatalf(format string, args ...any) {
+	if r.t != nil {
+		r.t.Helper()
+		r.t.Fatalf(format, args...)
+	}
+	panic(fmt.Sprintf(format, args...))
 }
 
 func (r ctxRepo) git(date string, args ...string) string {
-	r.t.Helper()
-	cmd := exec.CommandContext(r.t.Context(), "git", append([]string{"-C", r.dir}, args...)...)
+	if r.t != nil {
+		r.t.Helper()
+	}
+	cmd := exec.CommandContext(r.ctx, "git", append([]string{"-C", r.dir}, args...)...)
 	cmd.Env = append(gitOnlyEnviron(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e.com",
 		"GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE=2026-07-01T00:00:00+00:00")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		r.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		r.fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out))
 }
 
 func (r ctxRepo) writeCommit(date, msg string, edit func(lines []string)) string {
-	r.t.Helper()
+	if r.t != nil {
+		r.t.Helper()
+	}
 	lines := strings.Split(r.git(date, "show", "HEAD:f.txt"), "\n")
 	edit(lines)
 	if err := os.WriteFile(filepath.Join(r.dir, "f.txt"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-		r.t.Fatal(err)
+		r.fatalf("write f.txt: %v", err)
 	}
 	r.git(date, "commit", "-aq", "-m", msg)
 	return r.git(date, "rev-parse", "HEAD")
@@ -58,35 +74,44 @@ const (
 	featSubj = "tune five"
 )
 
-// rebasedScenario builds the tc-m3483 shape and returns the repo, c0, the ORIGINAL
-// feature commit (now orphaned), the rebased commit and the final main tip.
+// rebasedShas are the commits of the template built by rebasedTemplate; every
+// date is explicit, so the whole scenario is deterministic and is built once.
+var rebasedShas struct{ c0, orig, rebased, adjacent string }
+
+var rebasedTemplate = gittemplate.New("pb-gate-rebasectx", func(ctx context.Context, g *gitfixture.Repo) error {
+	repo := ctxRepo{dir: g.Dir, ctx: ctx}
+	var base strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&base, "l%d\n", i)
+	}
+	if _, err := g.Commit(ctx, "c0", map[string]string{"f.txt": base.String()}); err != nil {
+		return err
+	}
+	rebasedShas.c0 = repo.git(featDate, "rev-parse", "HEAD")
+	repo.git(featDate, "branch", "-M", "main")
+
+	repo.git(featDate, "checkout", "-q", "-b", "feat")
+	rebasedShas.orig = repo.writeCommit(featDate, featSubj, func(l []string) { l[4] = "FIVE" })
+	repo.git(featDate, "checkout", "-q", "main")
+	rebasedShas.adjacent = repo.writeCommit("2026-06-21T10:00:00+00:00", "adjacent", func(l []string) { l[2] = "THREE" })
+	repo.git(featDate, "checkout", "-q", "feat")
+	repo.git(featDate, "rebase", "-q", "main")
+	rebasedShas.rebased = repo.git(featDate, "rev-parse", "HEAD")
+	repo.git(featDate, "checkout", "-q", "main")
+	repo.git(featDate, "merge", "-q", "--ff-only", "feat")
+	return nil
+})
+
+// rebasedScenario returns a private copy of the tc-m3483 shape and the repo, c0,
+// the ORIGINAL feature commit (now orphaned), the rebased commit and the final
+// main tip.
 func rebasedScenario(t *testing.T) (repo ctxRepo, c0, orig, rebased, adjacent string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
-	g := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-gate-rebasectx"})
-	repo = ctxRepo{dir: g.Dir, t: t}
-	var base strings.Builder
-	for i := 1; i <= 10; i++ {
-		fmt.Fprintf(&base, "l%d\n", i)
-	}
-	if _, err := g.Commit(t.Context(), "c0", map[string]string{"f.txt": base.String()}); err != nil {
-		t.Fatal(err)
-	}
-	c0 = repo.git(featDate, "rev-parse", "HEAD")
-	repo.git(featDate, "branch", "-M", "main")
-
-	repo.git(featDate, "checkout", "-q", "-b", "feat")
-	orig = repo.writeCommit(featDate, featSubj, func(l []string) { l[4] = "FIVE" })
-	repo.git(featDate, "checkout", "-q", "main")
-	adjacent = repo.writeCommit("2026-06-21T10:00:00+00:00", "adjacent", func(l []string) { l[2] = "THREE" })
-	repo.git(featDate, "checkout", "-q", "feat")
-	repo.git(featDate, "rebase", "-q", "main")
-	rebased = repo.git(featDate, "rev-parse", "HEAD")
-	repo.git(featDate, "checkout", "-q", "main")
-	repo.git(featDate, "merge", "-q", "--ff-only", "feat")
-	return repo, c0, orig, rebased, adjacent
+	g := rebasedTemplate.Instance(t)
+	return ctxRepo{dir: g.Dir, t: t, ctx: t.Context()}, rebasedShas.c0, rebasedShas.orig, rebasedShas.rebased, rebasedShas.adjacent
 }
 
 func ctxGateScenario(t *testing.T, dir, gatedPatchID, baseline, appliedRef, extraMeta string, repoTail ...string) *run.FakeRunner {
