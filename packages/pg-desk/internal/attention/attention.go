@@ -92,6 +92,9 @@ type Inputs struct {
 	// PR stack with no wiring and the surfaces cannot disagree
 	// (INV-ATTNEVAL-2); a caller sets it only to substitute another source.
 	Stacks StackSource
+
+	// snapshot is Evaluate's per-call batched xref read (see linkReader).
+	snapshot *linkSnapshot
 }
 
 // Candidate is one reason a rule found that an entity needs the operator.
@@ -301,6 +304,9 @@ func Evaluate(ctx context.Context, in Inputs) (Result, error) {
 		res.Traces[v.Ref()] = tr
 	}
 
+	if lister, ok := in.Store.(repoLinkLister); ok {
+		in.snapshot = &linkSnapshot{LinkedReader: in.Store, lister: lister}
+	}
 	labels := map[string]string{}
 	var items []Item
 	for _, s := range survivors {

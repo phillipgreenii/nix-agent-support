@@ -198,6 +198,14 @@ func (s *Store) ListXrefLinksTo(ctx context.Context, repo, toType, toID string) 
 	return s.queryXrefLinks(ctx, `WHERE repo = ? AND to_type = ? AND to_id = ?`, repo, toType, toID)
 }
 
+// ListXrefLinksForRepo returns every link of repo, in the order
+// ListXrefLinksFrom and ListXrefLinksTo return them (so filtering the result
+// by one end gives exactly what those return). It is the batched form for a
+// caller that reads the links of many entities.
+func (s *Store) ListXrefLinksForRepo(ctx context.Context, repo string) ([]XrefLink, error) {
+	return s.queryXrefLinks(ctx, `WHERE repo = ?`, repo)
+}
+
 func (s *Store) queryXrefLinks(ctx context.Context, where string, args ...any) ([]XrefLink, error) {
 	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err

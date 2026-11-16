@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/links"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 // This file is stage 4 of the evaluator, grouping and ordering
@@ -64,7 +65,7 @@ func groupOf(ctx context.Context, in Inputs, v *View) (groupAnchor, error) {
 	if v.Type != typePR {
 		return own, nil
 	}
-	linked, err := links.ReadLinked(ctx, in.Store, v.Repo, v.Type, v.ID)
+	linked, err := links.ReadLinked(ctx, in.linkReader(), v.Repo, v.Type, v.ID)
 	if err != nil {
 		return groupAnchor{}, err
 	}
@@ -163,4 +164,69 @@ func flatten(groups []Group) []Item {
 		out = append(out, g.Items...)
 	}
 	return out
+}
+
+// repoLinkLister is the optional batched xref read: a store that has it is
+// read once per repo instead of twice per grouped entity.
+type repoLinkLister interface {
+	ListXrefLinksForRepo(ctx context.Context, repo string) ([]store.XrefLink, error)
+}
+
+// linkReader returns the LinkedReader grouping reads through: the store
+// itself, or, when the store can list a repo's links in one query, a
+// per-evaluation snapshot of them. Evaluate reads, never writes, so the
+// snapshot answers exactly what the per-entity queries would.
+func (in Inputs) linkReader() links.LinkedReader {
+	if in.snapshot != nil {
+		return in.snapshot
+	}
+	return in.Store
+}
+
+// linkSnapshot serves ListXrefLinksFrom/To from one ListXrefLinksForRepo read
+// per repo; every other LinkedReader method goes to the store.
+type linkSnapshot struct {
+	links.LinkedReader
+	lister repoLinkLister
+	byRepo map[string][]store.XrefLink
+}
+
+func (s *linkSnapshot) repoLinks(ctx context.Context, repo string) ([]store.XrefLink, error) {
+	if ls, ok := s.byRepo[repo]; ok {
+		return ls, nil
+	}
+	ls, err := s.lister.ListXrefLinksForRepo(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	if s.byRepo == nil {
+		s.byRepo = map[string][]store.XrefLink{}
+	}
+	s.byRepo[repo] = ls
+	return ls, nil
+}
+
+func (s *linkSnapshot) filter(ctx context.Context, repo string, keep func(store.XrefLink) bool) ([]store.XrefLink, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
+		return nil, err
+	}
+	all, err := s.repoLinks(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	var out []store.XrefLink
+	for _, l := range all {
+		if keep(l) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+func (s *linkSnapshot) ListXrefLinksFrom(ctx context.Context, repo, fromType, fromID string) ([]store.XrefLink, error) {
+	return s.filter(ctx, repo, func(l store.XrefLink) bool { return l.FromType == fromType && l.FromID == fromID })
+}
+
+func (s *linkSnapshot) ListXrefLinksTo(ctx context.Context, repo, toType, toID string) ([]store.XrefLink, error) {
+	return s.filter(ctx, repo, func(l store.XrefLink) bool { return l.ToType == toType && l.ToID == toID })
 }
