@@ -198,7 +198,13 @@ func reconcileOneOrphan(ctx context.Context, role roles.Role, deps executor.Deps
 	case ccpool.StateIdle, ccpool.StateErrored:
 		return reclaimIdleOrphan(ctx, role, deps, env, s, fresh)
 	case ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking:
-		return stopActiveOrphan(ctx, role, deps, env, s)
+		out := stopActiveOrphan(ctx, role, deps, env, s)
+		if out == orphanLeftAlone && gwmLeased(s) {
+			// Left running with no handler to renew for it: keep its worktree lease
+			// alive for one more worktreeLeaseTTL.
+			renewGWM(ctx, gwmClientFor(deps.GWM, deps.Cfg.RepoRoot), s, role.CCPool.Isolation.LeaseTTL())
+		}
+		return out
 	}
 	return orphanLeftAlone // needs_input (ADR 0037) and anything unrecognized
 }
@@ -432,6 +438,11 @@ func closeNeverPromptedOrphan(ctx context.Context, role roles.Role, deps executo
 func removeOrphanWorktree(ctx context.Context, role roles.Role, deps executor.Deps, env orphanEnv, s ccpool.Session, sessions []ccpool.Session) {
 	cc := role.CCPool
 	if s.CWD == "" || s.CWD == deps.Cfg.RepoRoot || !executor.UsesWorktreeIsolation(cc.Isolation) {
+		return
+	}
+	if gwmLeased(s) {
+		// pg-gwm owns the worktree; each role has its own, so no peer is consulted.
+		endGWMLease(ctx, gwmClientFor(deps.GWM, deps.Cfg.RepoRoot), env.open, deps.Cfg.RepoRoot, s)
 		return
 	}
 	if sessions == nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
+	"github.com/phillipgreenii/pg-router-handlers/internal/gwm"
 	"github.com/phillipgreenii/pg-router-handlers/internal/handlerstate"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 	"github.com/phillipgreenii/pg-router-handlers/internal/originguard"
@@ -157,6 +158,8 @@ func BuildDeps(cfg config.Config, role roles.Role) executor.Deps {
 		// events.jsonl) serialize the orphan reconcile against an absorbing
 		// dispatch (pg2-g2u9m, INV-CCH-18).
 		LockDir: sessionlock.Dir(handlerstate.Dir(cfg)),
+		// A worktree-isolation role's worktree is leased from pg-gwm.
+		GWM: &gwm.CLI{RepoRoot: cfg.RepoRoot},
 	}
 }
 

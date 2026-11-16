@@ -133,7 +133,13 @@ func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, r
 	// teardown runs for sessions of every role. closeSinglePhase repeats the
 	// check so no caller can reach the force-remove around it.
 	keepWorktree = keepWorktree || s.KeepsWorktree()
-	if keepWorktree || !twoPhaseEligible(s, repoRoot, worktreeDir) {
+	// A pg-gwm session owns its own worktree (no peer shares it) and is always
+	// torn down in two phases: its lease is released, by name, before the purge.
+	leased := gwmLeased(s) && !s.KeepsWorktree()
+	if leased {
+		keepWorktree = false
+	}
+	if keepWorktree || (!leased && !twoPhaseEligible(s, repoRoot, worktreeDir)) {
 		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
 	}
 	// The marker goes on BEFORE the non-purge close: a handler-closed idle row
@@ -165,6 +171,10 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 	if s.KeepsWorktree() {
 		slog.Info("teardown: worktree kept -- the session's isolation does not own it (bead-worktree)",
 			"session", s.ExternalID, "cwd", s.CWD)
+		return true
+	}
+	if gwmLeased(s) {
+		endGWMLease(ctx, gwmClientFor(teardownGWM, repoRoot), open, repoRoot, s)
 		return true
 	}
 	if keepWorktree {

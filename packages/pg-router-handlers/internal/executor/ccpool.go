@@ -13,8 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/phillipgreenii/pg-router-handlers/internal/procprobe"
-
 	"github.com/phillipgreenii/pg-failsig"
 	"github.com/phillipgreenii/pg-router-handlers/internal/beads"
 	"github.com/phillipgreenii/pg-router-handlers/internal/budget"
@@ -838,11 +836,10 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // worktree path, or pg-disk-reclaimer's independent belt-and-suspenders
 // sweep, decision item 4) rather than force-removing.
 //
-// Process guard (INV-CCH-15): the removal also keeps the worktree while a live
-// process anywhere on the machine has it as its working directory, and when the
-// process listing cannot be read. finishWait closes the settled session between
-// the guards (prepareWorktreeCleanup) and the removal (removeWorktree), so the
-// dispatch's own idle process is not counted.
+// finishWait closes the settled session between the guards
+// (prepareWorktreeCleanup) and the removal (removeWorktree). The dispatch does
+// not probe the process table: a pg-gwm lease, not a process listing, says who
+// holds a worktree.
 //
 // The returned quietResult reports whether this call already ran
 // waitSessionQuiet (and what it found), so finishWait's following
@@ -882,21 +879,10 @@ func (r *ccpoolRun) prepareWorktreeCleanup(ctx context.Context, cc *roles.CCPool
 }
 
 // removeWorktree is cleanupWorktree's removal half, run once
-// prepareWorktreeCleanup said to proceed. It keeps the worktree while a live
-// process anywhere on the machine has it, or a directory inside it, as its
-// working directory, and when that cannot be determined (INV-CCH-15).
+// prepareWorktreeCleanup said to proceed.
 func (r *ccpoolRun) removeWorktree(ctx context.Context, name, beadID, wt string) {
 	if r.gwmOn() {
 		r.gwmSessionEnd(ctx, nil, name, true)
-		return
-	}
-	if keep, err := procprobe.Keep(ctx, r.deps.processProbe(), wt); err != nil {
-		slog.Warn("dispatch: worktree cleanup: live-process probe failed; keeping the worktree (left for next sweep)",
-			"session", name, "worktree", wt, "err", err)
-		return
-	} else if keep {
-		slog.Info("dispatch: worktree cleanup deferred -- a live process has it as its working directory (left for next sweep)",
-			"session", name, "worktree", wt)
 		return
 	}
 	wm, err := r.deps.gitOpener()(ctx, wt)

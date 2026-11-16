@@ -91,9 +91,9 @@ type Deps struct {
 	// ok=false means nothing observable. Tests substitute a fake.
 	LatestActivity func(transcriptPath string) (t time.Time, ok bool)
 	// ProcessCWDs lists the working directory of every live process (nil =>
-	// procprobe.CWDs, `lsof`). The dispatch-time worktree cleanup keeps a
-	// worktree a process holds, and keeps it when the probe fails. Tests
-	// substitute a fake.
+	// procprobe.CWDs, `lsof`). The dispatch path never calls it (a pg-gwm lease,
+	// not a process listing, says who holds a worktree); it is a seam a test
+	// counts calls through.
 	ProcessCWDs procprobe.Probe
 	// InFlight reports whether a session transcript (or a subagent's) ends with
 	// a Bash call still inside its declared timeout plus grace (nil ⇒
@@ -137,17 +137,6 @@ type Deps struct {
 	FreeBytes   func(path string) (uint64, error)
 	PoolListing []ccpool.Session
 	PoolListed  bool
-}
-
-// defaultProcessCWDs is the probe a Deps with no ProcessCWDs uses; the package's
-// tests replace it so no test depends on lsof.
-var defaultProcessCWDs procprobe.Probe = procprobe.CWDs
-
-func (d Deps) processProbe() procprobe.Probe {
-	if d.ProcessCWDs != nil {
-		return d.ProcessCWDs
-	}
-	return defaultProcessCWDs
 }
 
 func (d Deps) git() watchdog.GitRunner {

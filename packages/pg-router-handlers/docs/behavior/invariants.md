@@ -289,9 +289,15 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   ruling, Phillip, 2026-09-30: "spare working sessions entirely"); a closed-bead close applies only
   to a session whose turn has ended (`idle`, or `needs_input` with its bead already closed), and a
   `needs_input` session whose bead is still open, or whose bead status cannot be determined, is
-  preserved so a person can still attach; a closed session's worktree MUST be kept when a live
-  peer session still uses the same directory (a per-bead worktree is shared by every role's session
-  for that bead); and a session whose supervision lease (`INV-CCH-18`) has not expired is left to
+  preserved so a person can still attach; a closed session's worktree is a `pg-gwm` lease named
+  `<role>/<bead>`, which the teardown MUST release by that name (and expire when `pg-gwm` reports
+  the tree dirty) and MUST NOT remove with `git worktree remove`: each role holds its own
+  worktree, so no peer session shares it and no live-process check applies. Only a session whose
+  row carries a lease id is torn down this way; a session without one (in flight when leasing was
+  introduced) is torn down the old way. The `pg-router/<bead>` anchor branch is then deleted only
+  when no worktree holds it and it has no commit the canonical clone's HEAD lacks. A release that
+  fails leaves the two-phase purge pending (`INV-CCH-20`) to retry; a lease that is not found,
+  lost or already released counts as released; and a session whose supervision lease (`INV-CCH-18`) has not expired is left to
   its handler, because a dispatch of a ccpool-backed role outlives a daemon restart (see below).
   A session mid-launch is protected by its state, not by a lease: it is `starting` from the moment
   its row is created (and a resumed one is flipped to `starting` before it launches), `ready` once
@@ -321,19 +327,22 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     working one has its time budget enforced from its launch time. Until then the session runs
     unsupervised. (e) A worktree left with no session row at all
     is reclaimed by the janitor's worktree-keyed sweep (`INV-CCH-19`).
-- **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
-  MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`
-  or `needs_input` still uses the same directory; the last session to detach removes it. A
-  per-bead worktree is shared by every role's session for that bead, so closing the first one
-  (or its bead) must not delete the working directory out from under a peer. If the session list
-  cannot be read the worktree is left in place. This extends the same sharing rule that
-  `INV-CCH-14` and the closed-bead reconcile apply to their own purges (bead `pg2-aqpqx`).
-  The same worktree MUST also be kept while a live process anywhere on the machine, whichever
-  role, pool or handler owns it, has it or a directory inside it as its working directory (the
-  process-working-directory guard of `INV-CCH-19`), and kept when the process listing cannot be
-  read. The dispatch's own settled session is closed (`INV-CCH-17`) BEFORE that check and before
-  the removal, so its own idle process never counts as a holder; a session whose close was
-  deferred or failed is still running, so its process then keeps the worktree.
+- **`INV-CCH-15`** — a worktree-isolation dispatch MUST lease its worktree from `pg-gwm` under
+  the name `<role>/<bead>` (each role holds its own worktree, so no worktree is shared between
+  roles and there is no peer-sharing rule and no live-process check), and when the session
+  reaches a terminal outcome the handler MUST end that lease instead of removing the directory:
+  it releases the lease, and expires it when `pg-gwm` reports the tree dirty. The settled session
+  is closed (`INV-CCH-17`) before the lease is ended. A session that is still live when the
+  dispatch returns (parked) MUST keep its lease, renewed for the parked TTL and never shortened
+  to the working lease TTL. A lease that is not found, lost or already released is already over.
+  The refusal of a lease call maps to an outcome, and each refusal MUST write an `events` row
+  carrying the error name, its hint and the holder (the handler adds no counter of its own):
+  - `max-reached` and `busy` are a capacity decline, and `branch-in-use` is a busy decline that
+    names the holder;
+  - `low-disk` is an `ErrLowDisk` decline;
+  - `name-held` is an internal error;
+  - `ref-unresolvable`, `broken` and any other refusal are a dispatch failure, which runs the
+    role's `onDispatchFail` action.
 - **`INV-CCH-16`** — when a ccpool-backed handler session runs under `permissionMode=dontAsk`, the
   prompt the handler sends it MUST carry, ahead of the role's task text, a code-owned notice (not
   editable through any role's prompt file) that writes to the agent runtime's protected paths --
@@ -412,19 +421,20 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     the release guarded by the holder just read; a bead that is
     open or closed, or claimed under an actor with no session id while another live session works the bead, is not written, and a role that never claims its
     bead (the triage roles) writes nothing. If the bead cannot be read, nothing is done this
-    time. Then the session MUST be closed without purging, and its worktree and anchor branch
-    removed under the guards of `INV-CCH-15` (kept when a live or `needs_input` session still uses
-    the directory, and kept, with the reason logged, when git refuses because the tree is dirty).
+    time. Then the session MUST be closed without purging, and its worktree lease released by name
+    (expired when the tree is dirty; `INV-CCH-14`), with its anchor branch deleted only when no
+    worktree holds it and it has no commit the canonical clone's HEAD lacks. A session without a
+    lease id on its row is torn down the old way.
   - **`starting`, `ready` or `working`**: enforce the role's time budget, measured from the
     session's recorded launch time. Over budget, the handler MUST apply the same hard stop a
-    supervised session gets (`INV-CCH-11`) and then remove the worktree under the same guards;
-    under budget it MUST leave the session alone. A role with no time budget leaves such an
+    supervised session gets (`INV-CCH-11`) and then end the worktree lease as above; under budget
+    it MUST leave the session alone and MUST renew its worktree lease for the working lease TTL,
+    because no handler is left to renew it. A role with no time budget leaves such an
     orphan alone, and an over-budget orphan whose bead is already closed is never hard-stopped (that would
     reopen it). A `working` one is left to the closed-bead reconcile once its turn ends; a `starting` or
     `ready` one has never taken a turn, which the closed-bead reconcile (`idle` and `needs_input`
     only, `INV-CCH-14`) never reaches, so over its budget with its bead closed it MUST be closed
-    without purging (nothing to wrap up, the bead is not written) and its worktree removed under the
-    same guards; one whose bead is still open takes the hard stop, and one under budget is left
+    without purging (nothing to wrap up, the bead is not written) and its worktree lease ended; one whose bead is still open takes the hard stop, and one under budget is left
     alone. A `starting` or `ready` orphan left alone here has no turn in progress, so the
     dispatch then closes and replaces it as a leftover (`INV-CCH-30`).
   - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037); a SUPERVISED drain

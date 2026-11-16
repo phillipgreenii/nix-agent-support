@@ -95,6 +95,12 @@ func finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, re
 	if s.KeepsWorktree() {
 		slog.Info("teardown: worktree kept -- the session's isolation does not own it (bead-worktree)",
 			"session", s.ExternalID, "cwd", s.CWD)
+	} else if gwmLeased(s) {
+		// pg-gwm owns the worktree: a failed release leaves the purge pending;
+		// an already-over lease counts as released.
+		if !endGWMLease(ctx, gwmClientFor(teardownGWM, repoRoot), open, repoRoot, s) {
+			return false
+		}
 	} else if keepWorktree {
 		slog.Info("teardown: worktree kept -- another live session still uses it",
 			"session", s.ExternalID, "cwd", s.CWD)
@@ -254,7 +260,7 @@ func retryPurgePending(ctx context.Context, cc ccpool.Runner, open worktree.Open
 			return fail("close failed", err)
 		}
 	}
-	keep := worktreeHeldByLivePeer(sessions, s)
+	keep := !gwmLeased(s) && worktreeHeldByLivePeer(sessions, s)
 	if !finishPurge(ctx, cc, open, repoRoot, worktreeDir, s, keep) {
 		return fail("worktree removal or purge did not complete", nil)
 	}

@@ -252,7 +252,6 @@ name is a `usage` error (row 9 of the branch table, `INV-GWM-16`; operator rulin
 This set's **realization-gap register**: intended behavior the product does not yet deliver, one row
 per gap. The code is still `pg-checkout-pool`, whose contract this set replaces.
 
-| Element      | Intended                                                                                                 | Where the implementation stands                                                                                              |
-| ------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `INV-GWM-26` | Every sibling tool skips a worktree locked with a `pg-gwm` reason                                        | Only the handler's sweep still recognizes pool slots by their old marker; it needs its own change and its own test (task 17) |
-| Consumers    | The router handler leases `<role>/<bead>` from `pg-gwm` and no longer creates or sweeps worktrees itself | The handler creates `<worktree dir>/<bead>` and runs its own worktree-keyed sweep with a live-process probe                  |
+| Element      | Intended                                                          | Where the implementation stands                                                                                              |
+| ------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `INV-GWM-26` | Every sibling tool skips a worktree locked with a `pg-gwm` reason | Only the handler's sweep still recognizes pool slots by their old marker; it needs its own change and its own test (task 17) |
