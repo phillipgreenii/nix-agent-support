@@ -24,6 +24,16 @@ var ErrCancelUnconfirmed = errors.New("ccpool cancel unconfirmed")
 // per-call timeout killed, so a caller can count timeouts without parsing text.
 var ErrCallTimeout = errors.New("ccpool call timed out")
 
+// ErrCallerDeadline is matched (errors.Is) by the error of a ccpool call cut
+// short because the caller's own context ended (its deadline expired or it was
+// cancelled) before the per-call timeout. It is not a ccpool hang, so callers
+// must not count it as ErrCallTimeout.
+var ErrCallerDeadline = errors.New("ccpool call cut by caller context")
+
+// errPerCallTimeout is the cause of the per-call deadline, read back with
+// context.Cause to tell it from a deadline inherited from the parent context.
+var errPerCallTimeout = errors.New("per-call timeout")
+
 // callTimeoutError keeps the original error text and adds ErrCallTimeout.
 type callTimeoutError struct{ err error }
 
@@ -196,7 +206,7 @@ func (e *cmdExitError) Error() string {
 // ccpool runs a ccpool subcommand under a per-call timeout and returns stdout
 // only; on failure the wrapped error carries the (trimmed) stderr for context.
 func (c *CLIRunner) ccpool(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
-	tctx, cancel := context.WithTimeout(ctx, timeout)
+	tctx, cancel := context.WithTimeoutCause(ctx, timeout, errPerCallTimeout)
 	defer cancel()
 	stdout, stderr, err := c.run(tctx, args)
 	if err == nil {
@@ -204,8 +214,13 @@ func (c *CLIRunner) ccpool(ctx context.Context, timeout time.Duration, args ...s
 	}
 	// A wedged ccpool that blew the per-call timeout is the common operator
 	// failure; name the timeout rather than leak a bare "context deadline
-	// exceeded". tctx (not the parent ctx) carries the WithTimeout deadline.
-	if errors.Is(tctx.Err(), context.DeadlineExceeded) {
+	// exceeded". Only the per-call deadline counts: a call cut by the caller's
+	// own context is reported as such, not as a ccpool hang.
+	if perr := ctx.Err(); perr != nil {
+		return stdout, fmt.Errorf("ccpool %s cut short by the caller's context (%v) before the %s per-call timeout: %w",
+			argSummary(args), perr, timeout, errors.Join(ErrCallerDeadline, perr))
+	}
+	if errors.Is(context.Cause(tctx), errPerCallTimeout) {
 		return stdout, fmt.Errorf("ccpool %s timed out after %s: %w", argSummary(args), timeout, &callTimeoutError{err})
 	}
 	if se := bytes.TrimSpace(stderr); len(se) > 0 {

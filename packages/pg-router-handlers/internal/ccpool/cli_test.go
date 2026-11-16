@@ -683,6 +683,31 @@ func TestCCpool_timeoutNamesTheTimeout(t *testing.T) {
 	}
 }
 
+// A caller whose own deadline expires before the per-call timeout must not see
+// its cut reported as the per-call timeout.
+func TestCCpool_callerDeadlineIsNotReportedAsCallTimeout(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(ctx context.Context, _ []string) ([]byte, []byte, error) {
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := cli.ccpool(ctx, time.Minute, "list", "--all", "--json")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if errors.Is(err, ErrCallTimeout) {
+		t.Fatalf("a caller deadline must not match ErrCallTimeout: %v", err)
+	}
+	if strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("a caller deadline must not read as a per-call timeout: %v", err)
+	}
+	if !errors.Is(err, ErrCallerDeadline) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want ErrCallerDeadline wrapping the parent's deadline error, got %v", err)
+	}
+}
+
 // review follow-up: long positionals (the full reply prompt) must be elided in
 // error messages so the real diagnostic isn't buried.
 func TestArgSummary_elidesLongArgs(t *testing.T) {

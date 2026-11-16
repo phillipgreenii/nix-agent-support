@@ -93,6 +93,21 @@ func TestListObserver_countsCallsWallTimeAndTimeouts(t *testing.T) {
 	}
 }
 
+// A role deadline that cuts a list call is not a list hang: it must not count
+// as a list timeout, while a per-call timeout still does.
+func TestListObserver_roleDeadlineCutIsNotCountedAsTimeout(t *testing.T) {
+	counts := &passCounts{Pass: passWorktree, Role: "a"}
+	ctx := withCounts(context.Background(), counts)
+	cc := &listCC{err: fmt.Errorf("ccpool list cut short: %w", errors.Join(ccpool.ErrCallerDeadline, context.DeadlineExceeded))}
+	o := &listObserver{Runner: cc}
+	if _, err := o.List(ctx); err == nil {
+		t.Fatal("want the error back")
+	}
+	if counts.ListCalls != 1 || counts.ListTimeouts != 0 {
+		t.Fatalf("calls %d timeouts %d, want 1 and 0", counts.ListCalls, counts.ListTimeouts)
+	}
+}
+
 func TestListDiag_slowListIsSampledOnceAndRecordedWithContext(t *testing.T) {
 	d, recs := newTestDiag(t, nil)
 	counts := &passCounts{Pass: passOrphan, Role: "a", Pool: "/p"}
