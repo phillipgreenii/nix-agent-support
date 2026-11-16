@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"text/tabwriter"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
@@ -77,7 +78,7 @@ func originGate(ctx context.Context, p *originprobe.Prober, check originguard.Ch
 			return busyReasonOriginUnavailable, true
 		}
 	}
-	if root == "" || check == nil {
+	if root == "" || check == nil || notAGitCheckout(role, root) {
 		return "", false
 	}
 	v, err := check(ctx, root)
@@ -90,6 +91,69 @@ func originGate(ctx context.Context, p *originprobe.Prober, check originguard.Ch
 	}
 	slog.Warn("dispatch declined: origin guard reports auth unavailable", "role", role.Name, "bead", beadID, "reason", v.Reason)
 	return busyReasonOriginUnavailable, true
+}
+
+// notAGitCheckout reports whether root is the fixed directory of a "path"
+// isolation role that exists but is not a git checkout (the pn-workspace root a
+// drain worker runs from). It has no origin for the guard to read, and the
+// guard's .git-exists check would misreport it as mount-missing and decline
+// every dispatch. A root that does not exist at all is NOT exempt: that is a
+// missing mount, which the guard must still report.
+func notAGitCheckout(role roles.Role, root string) bool {
+	if role.CCPool == nil || role.CCPool.Isolation.Type != "path" {
+		return false
+	}
+	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(root, ".git"))
+	return err != nil
+}
+
+// writeGuardStatus lists, below the probe table, each repo root a dispatch
+// consults pg-origin-guard for: the launch config's repoRoot and the fixed path
+// of each --role file's path isolation. The probe table only covers
+// originProbe.origins, but the guard can decline roots that are not listed
+// there. Guard Check reads local state only (no network, no login).
+func writeGuardStatus(w io.Writer, cfg config.Config, check originguard.Check, roleFiles []string) error {
+	var roots []string
+	seen := map[string]bool{}
+	add := func(r string) {
+		if r != "" && !seen[r] {
+			seen[r] = true
+			roots = append(roots, r)
+		}
+	}
+	add(cfg.RepoRoot)
+	for _, f := range roleFiles {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		role, err := rolefile.DecodeRole(f, data, false)
+		if err != nil {
+			return err
+		}
+		if role.CCPool != nil && notAGitCheckout(role, dispatchRepoRoot(role, cfg)) {
+			continue
+		}
+		add(dispatchRepoRoot(role, cfg))
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "\nGUARD_ROOT\tAVAILABLE\tREASON")
+	for _, r := range roots {
+		if check == nil {
+			fmt.Fprintf(tw, "%s\t-\tguard not configured\n", r)
+			continue
+		}
+		v, err := check(context.Background(), r)
+		if err != nil {
+			fmt.Fprintf(tw, "%s\t-\tguard fault: %v\n", r, err)
+			continue
+		}
+		fmt.Fprintf(tw, "%s\t%t\t%s\n", r, v.Available, v.Reason)
+	}
+	return tw.Flush()
 }
 
 // runOrigin implements the `origin` operator subcommands:
@@ -106,6 +170,8 @@ func runOrigin(args []string) int { return runOriginTo(args, os.Stdout, os.Stder
 func runOriginTo(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("origin", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	var roleFiles stringList
+	fs.Var(&roleFiles, "role", "role config JSON whose repo root status also lists (repeatable; origin status only)")
 	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
 	// flag stops at the first non-flag, so the verb comes first: origin <verb> [flags] [key].
 	if len(args) == 0 {
@@ -138,6 +204,10 @@ func runOriginTo(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "origin status:", err)
 			return conformance.ExitError
 		}
+		if err := writeGuardStatus(stdout, cfg, newGuardCheck(cfg), roleFiles); err != nil {
+			fmt.Fprintln(stderr, "origin status:", err)
+			return conformance.ExitError
+		}
 		return conformance.ExitOK
 	case "ignore", "unignore":
 		if fs.NArg() != 1 {
@@ -166,6 +236,11 @@ func runOriginTo(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
+type stringList []string
+
+func (l *stringList) String() string     { return fmt.Sprint([]string(*l)) }
+func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
+
 func watched(p *originprobe.Prober, key string) bool {
 	for _, o := range p.Origins() {
 		if o.Key == key {
@@ -177,10 +252,12 @@ func watched(p *originprobe.Prober, key string) bool {
 
 const originHelp = `pg-router-handler-ccpool origin — per-origin availability probe (operator tool).
 
-usage: pg-router-handler-ccpool origin <status|ignore|unignore> [--config FILE] [key]
+usage: pg-router-handler-ccpool origin <status|ignore|unignore> [--config FILE] [--role FILE]... [key]
 
   status         list watched origins with class, gated, ignored, since, failures,
-                 and a redacted last-error tail (reads state files; never probes)
+                 and a redacted last-error tail (reads state files; never probes),
+                 then each repo root pg-origin-guard is consulted for (the
+                 config repoRoot and each --role FILE's path) with its verdict
   ignore <key>   write the kill-switch file: the probe becomes a no-op for that
                  origin and never declines a dispatch
   unignore <key> remove the kill-switch file

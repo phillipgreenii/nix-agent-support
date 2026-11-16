@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
+	"github.com/phillipgreenii/pg-router-handlers/internal/originguard"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/x/cmdruntest"
@@ -146,7 +148,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 	wantUnchecked := "KEY                   CLASS      GATED  IGNORED  SINCE  FAILURES  LAST_ERROR\n" +
 		"git.example.test/o/a  unchecked  false  false    -      0         -\n"
-	if out.String() != wantUnchecked {
+	if !strings.HasPrefix(out.String(), wantUnchecked) {
 		t.Fatalf("status (unchecked)\n got:\n%s\nwant:\n%s", out.String(), wantUnchecked)
 	}
 
@@ -194,5 +196,51 @@ func TestOrigin_usageErrors(t *testing.T) {
 		if code := runOriginTo(args, &out, &errb); code != conformance.ExitUsage {
 			t.Errorf("%s: exit = %d, want ExitUsage (%d)", name, code, conformance.ExitUsage)
 		}
+	}
+}
+
+// origin status must list every root pg-origin-guard can decline, not only the
+// probed origins: the config repoRoot and each --role file's path isolation
+// root, with the guard's verdict. A path root that exists without a .git (the
+// pn-workspace root) is never declined, so it is not listed.
+func TestOrigin_statusListsGuardRoots(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "unmounted", "repo")
+	cfgPath, _, _ := originFixture(t, missing)
+
+	wsRoot := t.TempDir() // exists, no .git
+	gone := filepath.Join(t.TempDir(), "not-mounted")
+	writeRole := func(path string) string {
+		f := filepath.Join(t.TempDir(), "role.json")
+		body := fmt.Sprintf(`{"ccpool":{"actor":"a","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"hi","isolation":{"type":"path","path":%q}}}`, path)
+		if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	old := newGuardCheck
+	newGuardCheck = func(config.Config) originguard.Check {
+		return func(_ context.Context, repo string) (originguard.Verdict, error) {
+			return originguard.Verdict{Available: false, Reason: "mount-missing"}, nil
+		}
+	}
+	t.Cleanup(func() { newGuardCheck = old })
+
+	var out, errb bytes.Buffer
+	args := []string{"status", "--config", cfgPath, "--role", writeRole(wsRoot), "--role", writeRole(gone)}
+	if code := runOriginTo(args, &out, &errb); code != conformance.ExitOK {
+		t.Fatalf("status exit = %d stderr=%s", code, errb.String())
+	}
+	got := out.String()
+	for _, want := range []string{"GUARD_ROOT", missing, gone} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status output lacks %q:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(got, "mount-missing") {
+		t.Errorf("status output lacks the guard reason:\n%s", got)
+	}
+	if strings.Contains(got, wsRoot) {
+		t.Errorf("a path root without .git is never declined and must not be listed:\n%s", got)
 	}
 }

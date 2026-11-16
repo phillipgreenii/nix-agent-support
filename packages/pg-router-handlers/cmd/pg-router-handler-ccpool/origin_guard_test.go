@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
@@ -92,5 +94,41 @@ func TestDispatch_guardUnavailableDeclinesWithoutBeadsCalls(t *testing.T) {
 	}
 	if got := calls.Calls(); len(got) != 0 {
 		t.Fatalf("a decline must make no bd/ccpool call, saw: %v", got)
+	}
+}
+
+// The pn-workspace root a path-isolation drain worker runs from exists but is
+// not a git checkout. The guard's .git check would call it mount-missing and
+// decline every dispatch, so the gate must not consult the guard for it; a
+// path root that does not exist (a real missing mount) and a real checkout are
+// still checked.
+func TestOriginGate_pathRootWithoutGitIsNotCheckedButMissingOrGitRootIs(t *testing.T) {
+	cfg := config.Default()
+	p := originprobe.New(config.OriginProbe{StateDir: t.TempDir(), FailureThreshold: 1})
+	role := func(path string) roles.Role {
+		return roles.Role{Name: "drain", CCPool: &roles.CCPoolConfig{Isolation: roles.IsolationConfig{Type: "path", Path: path}}}
+	}
+	withGit := t.TempDir()
+	if err := os.Mkdir(filepath.Join(withGit, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		path       string
+		wantCalled bool
+	}{
+		"workspace root without .git": {t.TempDir(), false},
+		"missing mount":               {filepath.Join(t.TempDir(), "gone"), true},
+		"git checkout":                {withGit, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			called := false
+			_, declined := originGate(context.Background(), p, func(context.Context, string) (originguard.Verdict, error) {
+				called = true
+				return originguard.Verdict{Available: false, Reason: "mount-missing"}, nil
+			}, role(tc.path), cfg, "b-1")
+			if called != tc.wantCalled || declined != tc.wantCalled {
+				t.Fatalf("called=%v declined=%v, want both %v", called, declined, tc.wantCalled)
+			}
+		})
 	}
 }
