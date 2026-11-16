@@ -158,7 +158,7 @@ manager does not manage reports the pseudo-status `unmanaged`.
   once given to a lease, MUST NOT change for that lease's life, and MUST be held from the moment the
   lease is recorded. A name labels the worktree, as a path labels an unmanaged one: it is usually
   correlated with the branch but MUST NOT determine it, and one worktree MAY carry different branches
-  under different leases. A name MUST be unique, compared exactly, among the repository's worktrees
+  under different leases. A name MUST be unique, compared case-insensitively, among the repository's worktrees
   whose lease is `preparing`, `leased` or `lease-expired`; `lease --name X` MUST fail with `name-held`
   while such a worktree is named X. A name MUST be free again once its lease is released or its
   worktree begins reclaiming, so last week's reclaimed `potato` never blocks today's. A name MUST be
