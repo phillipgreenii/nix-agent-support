@@ -116,8 +116,13 @@ in
         lib.mkIf (cfg.enable && cfg.reaper.enable && isDarwin)
           {
             label = "com.phillipg.pg-gwm-reaper";
+            # The deadline is checked only between steps, so one worktree create always
+            # finishes. A cold monorepo create was measured at 7m40s, so 10m lets a reap that
+            # needs one create end "completed"; a reap that needs more ends "deadline" and the
+            # next run continues. A run lasts at most about 10m plus one create (under 18m), so
+            # the 1800 s pg-gwm-reaper-stale threshold (three intervals) still holds.
             script = ''
-              exec ${cfg.package}/bin/pg-gwm reap --all-repos --deadline 5m --format=json
+              exec ${cfg.package}/bin/pg-gwm reap --all-repos --deadline 10m --format=json
             '';
             runAtLoad = false;
             keepAlive = false;

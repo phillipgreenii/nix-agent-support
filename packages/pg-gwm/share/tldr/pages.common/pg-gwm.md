@@ -35,7 +35,7 @@
 
 `pg-gwm reap --dry-run`
 
-`pg-gwm reap --all-repos --deadline {{5m}}`
+`pg-gwm reap --all-repos --deadline {{10m}}`
 
 - List the branches kept from dirty expired worktrees, and delete old ones:
 

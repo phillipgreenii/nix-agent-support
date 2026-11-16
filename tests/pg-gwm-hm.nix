@@ -151,8 +151,8 @@ let
         && has "/bin" p;
     }
     {
-      name = "the reaper command reaps all repositories with a 5m deadline in JSON";
-      ok = has "reap --all-repos --deadline 5m --format=json" (agent defaultC).script;
+      name = "the reaper command reaps all repositories with a 10m deadline in JSON, longer than one measured 7m40s create";
+      ok = has "reap --all-repos --deadline 10m --format=json" (agent defaultC).script;
     }
     {
       name = "a disabled reaper produces no entry";
