@@ -186,3 +186,22 @@ func TestRepairListsEveryFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestAssembleAndRepairCarryFindingsSchema(t *testing.T) {
+	r, err := Assemble(params(t, "config-health"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"FINDINGS DOCUMENT FORMAT", `"schema_version"`, `"unverified"`, `"why_problem"`, `"targets"`}
+	for _, w := range want {
+		if !strings.Contains(r.Text, w) {
+			t.Errorf("prompt lacks %q", w)
+		}
+	}
+	rep := Repair([]validate.Failure{{Index: -1, Finding: "#document", Field: "document", Rule: "schema", Token: "missing properties"}})
+	for _, w := range want {
+		if !strings.Contains(rep, w) {
+			t.Errorf("repair reply lacks %q", w)
+		}
+	}
+}

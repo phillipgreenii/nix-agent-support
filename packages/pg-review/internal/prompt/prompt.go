@@ -23,6 +23,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/builtin"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/validate"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/schemas"
 )
 
 // Topic is a known topic returned to the analyst. It is data, never
@@ -95,10 +96,34 @@ func Assemble(p Params) (Result, error) {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+	format, err := FindingsFormat()
+	if err != nil {
+		return Result{}, err
+	}
+	b.WriteString(format)
+	b.WriteString("\n")
 	b.WriteString(knownTopics(p.Topics))
 	out := b.String()
 	sum := sha256.Sum256([]byte(out))
 	return Result{Text: out, Hash: hex.EncodeToString(sum[:])}, nil
+}
+
+// FindingsFormat is the prompt section that hands the analyst the findings
+// document schema. Without it the analyst has only prose naming a few fields
+// and invents the rest of the document's shape; the schema is the contract the
+// runner validates against, so the analyst gets that text verbatim.
+func FindingsFormat() (string, error) {
+	raw, err := schemas.FS.ReadFile("findings.schema.json")
+	if err != nil {
+		return "", fmt.Errorf("findings schema: %w", err)
+	}
+	var b strings.Builder
+	b.WriteString("FINDINGS DOCUMENT FORMAT (the JSON Schema your final fenced block MUST satisfy; every property\n")
+	b.WriteString("listed under \"required\" must be present, including empty arrays such as \"findings\": [] and\n")
+	b.WriteString("\"unverified\": [], and no property outside \"properties\" is allowed)\n")
+	b.WriteString(strings.TrimSpace(string(raw)))
+	b.WriteString("\n")
+	return b.String(), nil
 }
 
 // splitLens returns the first paragraph (rule 4 text, joined on one line)
@@ -153,12 +178,17 @@ func read(p Params, name string) (string, error) {
 func Repair(failures []validate.Failure) string {
 	var b strings.Builder
 	b.WriteString("Your findings were rejected. Fix exactly the failures below and send the full corrected JSON block as your final message, with nothing after it.\n\n")
+	b.WriteString("Failures:\n")
 	for _, f := range failures {
 		fmt.Fprintf(&b, "- finding %s, field %s, rule %s", oneLine(f.Finding), oneLine(f.Field), oneLine(f.Rule))
 		if f.Token != "" {
 			fmt.Fprintf(&b, ", offending token %q", oneLine(f.Token))
 		}
 		b.WriteString("\n")
+	}
+	if format, err := FindingsFormat(); err == nil {
+		b.WriteString("\n")
+		b.WriteString(format)
 	}
 	return b.String()
 }

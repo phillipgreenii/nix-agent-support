@@ -104,6 +104,30 @@ func stampWindow(raw []byte, w Window) ([]byte, error) {
 	return json.Marshal(doc)
 }
 
+// stampRun sets the document's constant top-level fields from the run:
+// schema_version, lens and scope are facts the runner already knows, and an
+// analyst that has not been shown them omits them. An absent "unverified"
+// defaults to the empty list (the analyst has nothing unverified to declare).
+// Per-finding fields are never defaulted; they come from the analyst.
+func stampRun(raw []byte, lens, scope string) ([]byte, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	doc["schema_version"] = json.RawMessage("1")
+	for k, v := range map[string]string{"lens": lens, "scope": scope} {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		doc[k] = b
+	}
+	if _, ok := doc["unverified"]; !ok {
+		doc["unverified"] = json.RawMessage("[]")
+	}
+	return json.Marshal(doc)
+}
+
 func parseFailure(err error) []validate.Failure {
 	return []validate.Failure{{Index: -1, Finding: "#document", Field: "document", Rule: "parse", Token: err.Error()}}
 }
@@ -210,6 +234,9 @@ func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 		raw, perr := extractFindings(text)
 		if perr == nil {
 			raw, perr = stampWindow(raw, s.Window)
+		}
+		if perr == nil {
+			raw, perr = stampRun(raw, s.Lens.ID, s.Scope.Name)
 		}
 		if perr != nil {
 			failures = parseFailure(perr)

@@ -572,3 +572,38 @@ func TestSIGTERMClosesTheSessionAndFailsTheRun(t *testing.T) {
 		t.Errorf("%+v closed %v", r, e.fake.closed)
 	}
 }
+
+func TestRunnerStampsRunFieldsWhenAnalystOmitsThem(t *testing.T) {
+	out, err := stampRun([]byte(`{"window":{},"findings":[],"end":true}`), "config-health", "workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc["schema_version"] != float64(1) || doc["lens"] != "config-health" || doc["scope"] != "workspace" {
+		t.Errorf("run fields not stamped: %s", out)
+	}
+	if u, ok := doc["unverified"].([]any); !ok || len(u) != 0 {
+		t.Errorf("unverified not defaulted: %s", out)
+	}
+
+	// End to end: a final message missing the top-level fields is filed with no repair.
+	e := setupCcpool(t, ccCfg, 0)
+	g := goldenFinal(t)
+	for _, k := range []string{"schema_version", "lens", "scope"} {
+		g = regexp.MustCompile(`(?m)^\s*"`+k+`":[^\n]*\n`).ReplaceAllString(g, "")
+	}
+	if strings.Contains(g, `"schema_version"`) {
+		t.Fatal("fixture field not removed")
+	}
+	e.fake.finals = []string{g}
+	res, err := e.runLens(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Run.State != ledger.RunFiled || res.Run.RepairCount != 0 {
+		t.Errorf("%+v", res.Run)
+	}
+}
