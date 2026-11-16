@@ -29,22 +29,52 @@ tests:
     input_series:
       - series: pg_router_resource_level{resource="disk",job="pg-router"}
         values: "0x500"
-      - series: pg_router_resource_level{resource="ram",job="pg-router"}
+      - series: pg_router_resource_level{resource="cpu",job="pg-router"}
         values: "1x300 0x200"
     alert_rule_test:
       - eval_time: 480m
         alertname: pg-router-resource-held-nonbest
         exp_alerts: []
 
-  - name: monitor-only resources (network_zr_trust, aws_sso_zr) held at their worst level never fire, while a real resource still does
+  - name: monitor-only resources (network_zr_trust, aws_sso_zr, ram) held at their worst level never fire, while a real resource still does
     interval: 1m
     input_series:
       - series: pg_router_resource_level{resource="network_zr_trust",job="pg-router"}
         values: "1x500"
       - series: pg_router_resource_level{resource="aws_sso_zr",job="pg-router"}
         values: "1x500"
+      - series: pg_router_resource_level{resource="ram",job="pg-router"}
+        values: "1x500"
       - series: pg_router_resource_level{resource="disk",job="pg-router"}
         values: "1x500"
+    alert_rule_test:
+      - eval_time: 370m
+        alertname: pg-router-resource-held-nonbest
+        exp_alerts:
+          - exp_labels:
+              resource: disk
+              severity: warning
+
+  - name: ram held at level 1 for 6 hours never fires, while cpu at level 1 fires only for cpu
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level{resource="ram",job="pg-router"}
+        values: "1x500"
+      - series: pg_router_resource_level{resource="cpu",job="pg-router"}
+        values: "1x500"
+    alert_rule_test:
+      - eval_time: 370m
+        alertname: pg-router-resource-held-nonbest
+        exp_alerts:
+          - exp_labels:
+              resource: cpu
+              severity: warning
+
+  - name: a resource sustained at level 2 fires
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_level{resource="disk",job="pg-router"}
+        values: "2x500"
     alert_rule_test:
       - eval_time: 370m
         alertname: pg-router-resource-held-nonbest
