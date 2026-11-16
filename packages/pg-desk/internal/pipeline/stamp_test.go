@@ -17,7 +17,13 @@ import (
 // given stamp options, and returns the stored row.
 func hydrateWith(t *testing.T, fx corpus.Fixture, cfg *config.Config, opts ...Option) store.Interpretation {
 	t.Helper()
-	st := store.OpenNewSchemaForTest(t)
+	return hydrateIn(t, store.OpenNewSchemaForTest(t), fx, cfg, opts...)
+}
+
+// hydrateIn is hydrateWith on a store the caller owns, so a test that hydrates
+// many fixtures under one config opens one store, not one per fixture.
+func hydrateIn(t *testing.T, st *store.Store, fx corpus.Fixture, cfg *config.Config, opts ...Option) store.Interpretation {
+	t.Helper()
 	all := append([]Option{WithClock(corpus.Clock()), WithLogWriter(io.Discard)}, opts...)
 	p := New(cfg, st, all...)
 	g := corpusGatherer{fx}
@@ -76,13 +82,16 @@ func TestConfigChange_ShowsInRowsAndStamp(t *testing.T) {
 		t.Fatal("a config edit interpret does not read changed the stamp")
 	}
 
+	// One store per config, not per fixture: each fixture is hydrated and read
+	// back before the next, and the rows are compared as before.
+	baseSt, unreadSt, readSt := store.OpenNewSchemaForTest(t), store.OpenNewSchemaForTest(t), store.OpenNewSchemaForTest(t)
 	rowsDiffer := 0
 	for _, fx := range mustFixtures(t) {
-		b := corpus.RenderRow(hydrateWith(t, fx, base))
-		if !bytes.Equal(b, corpus.RenderRow(hydrateWith(t, fx, unread))) {
+		b := corpus.RenderRow(hydrateIn(t, baseSt, fx, base))
+		if !bytes.Equal(b, corpus.RenderRow(hydrateIn(t, unreadSt, fx, unread))) {
 			t.Fatalf("%s: a config edit interpret does not read changed the row", fx.Name)
 		}
-		if !bytes.Equal(b, corpus.RenderRow(hydrateWith(t, fx, read))) {
+		if !bytes.Equal(b, corpus.RenderRow(hydrateIn(t, readSt, fx, read))) {
 			rowsDiffer++
 		}
 	}

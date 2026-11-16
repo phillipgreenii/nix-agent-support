@@ -136,7 +136,10 @@ func TestListHiddenWIPMatchesPRHiddenWIPAndIsConstantQueries(t *testing.T) {
 func TestLiveSizeNarrowReadsMoveNoFactsAndAreFast(t *testing.T) {
 	base := OpenForTest(t)
 	start := time.Now()
-	base.SeedLiveSizeForTest(t, 2700, 37000, 40000)
+	// 300 entities of 37000-byte facts is 11 MB: reading facts would move far
+	// more than the 2 MB bound, so the assertion keeps its teeth at a tenth of
+	// the live entity and change counts.
+	base.SeedLiveSizeForTest(t, 300, 37000, 4000)
 	t.Logf("fixture built in %v", time.Since(start))
 	st, cnt := base.WithCounterForTest(t)
 	start = time.Now()
