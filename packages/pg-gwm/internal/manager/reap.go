@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-gwm/internal/config"
+	"github.com/phillipgreenii/pg-gwm/internal/gitrun"
 	"github.com/phillipgreenii/pg-gwm/internal/provision"
 	"github.com/phillipgreenii/pg-gwm/internal/repo"
 	"github.com/phillipgreenii/pg-gwm/internal/state"
@@ -392,6 +393,19 @@ func (r *reaper) retryBroken() {
 	}
 }
 
+// neverLeased reports whether no lease ever took w, so nothing was written
+// into it on anyone's behalf. The record says so (NeverLeased); a record an
+// older build wrote lacks the flag, and counts as never leased when the event
+// log, which reaches back to the worktree's creation, holds no lease event
+// for it.
+func (m *Manager) neverLeased(w state.Worktree) bool {
+	return w.NeverLeased || m.Store.NoLeaseEvent(w.ID, w.CreatedAt)
+}
+
+// transient reports whether err only shows that git was slow, which says
+// nothing about the worktree's condition.
+func transient(err error) bool { return errors.Is(err, gitrun.ErrTimedOut) }
+
 func (r *reaper) preserveAndRemove(w state.Worktree) error {
 	m := r.m
 	w.Lease = nil
@@ -405,7 +419,7 @@ func (r *reaper) preserveAndRemove(w state.Worktree) error {
 		_ = m.Prov.Unlock(r.ctx, w.Path) // a locked leftover registration blocks the prune
 		return m.Prov.Prune(r.ctx)
 	}
-	if !w.NeverLeased {
+	if !m.neverLeased(w) {
 		if _, err := m.preserveIfNeeded(r.ctx, w); err != nil {
 			return err
 		}
@@ -431,6 +445,16 @@ func (r *reaper) settleRetry(w state.Worktree, gitErr error) {
 			continue
 		}
 		if gitErr != nil {
+			if transient(gitErr) {
+				// Slow git is not damage: keep the record as it is (broken, its
+				// directory intact) for the next reap to retry, and say so once.
+				r.warn("retrying %s later: %v", w.ID, gitErr)
+				m.event(state.Event{
+					Kind: "retry", WorktreeID: w.ID, Outcome: "timeout",
+					Details: map[string]any{"reason": gitErr.Error()},
+				})
+				return
+			}
 			st.Worktrees[i].Reason, st.Worktrees[i].StatusSince = gitErr.Error(), m.now()
 			_ = lk.Commit()
 			m.event(state.Event{
@@ -607,11 +631,20 @@ func (r *reaper) checkOne(id string) {
 	if w == nil {
 		return
 	}
+	if m.neverLeased(*w) {
+		return // nothing was written into it on anyone's behalf
+	}
 	pb, gitErr := m.preserveIfNeeded(r.ctx, *w)
 	if gitErr == nil && pb != "" {
 		gitErr = m.Prov.Switch(r.ctx, w.Path, provision.BranchSpec{Detach: true}, m.Cfg.ReuseHookPolicy != "skip")
 	}
 	if gitErr == nil {
+		return
+	}
+	if transient(gitErr) {
+		// Slow git (host load) is not damage: the worktree stays available and
+		// the next reap checks it again.
+		r.warn("checking %s later: %v", id, gitErr)
 		return
 	}
 	if lk, cancel, err := m.lockDetached(r.ctx); err == nil {

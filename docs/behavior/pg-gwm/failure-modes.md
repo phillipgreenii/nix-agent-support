@@ -85,7 +85,9 @@ Extensions:
   operating system drops when the command dies; this is the manager's own bookkeeping and never a
   lease's liveness (`INV-GWM-11`). Reap MUST retry a `broken` worktree once (preserving unsaved work
   first, except for a worktree no lease has ever taken, which has no work to protect) and remove it on
-  success, or leave it `broken` with its directory intact. When git no longer knows the directory (it
+  success, or leave it `broken` with its directory intact. A git timeout in that retry (host load, not
+  damage) MUST leave the record `broken` with its directory and reason unchanged, report a warning
+  and record a retry event with outcome `timeout`, never a new `broken` event, so a later reap tries again. When git no longer knows the directory (it
   holds no `.git` link, or the repository does not list it as a worktree), nothing is left for git to
   preserve and every git command inside it fails, so the retry MUST delete the leftover directory,
   prune the registration and drop the record, without running git inside it; the directory's untracked

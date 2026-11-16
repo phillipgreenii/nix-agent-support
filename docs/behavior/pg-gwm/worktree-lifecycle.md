@@ -194,7 +194,14 @@ requester that needs a fresher base fetches first (ruled 2026-11-14).
   changes inside a submodule), the worktree MUST be marked `broken` and nothing about it removed,
   switched or handed out. A worktree reap created to meet `min` that no lease has taken yet MUST NOT be
   preserved: nothing was written into it on anyone's behalf, and a tree left half-deleted by an
-  interrupted removal would otherwise be saved as a branch of deletions. _(Operator rulings, Phillip, 2026-11-14: hooks skipped, "yes; the comment
+  interrupted removal would otherwise be saved as a branch of deletions. Reap MUST therefore skip the
+  unsaved-work check of such an `available` worktree. A record written before the manager kept that
+  mark counts as never leased when the event log reaches back to the worktree's creation and holds no
+  `lease` event for it; with no such proof (a log that starts later, or none) it counts as possibly
+  leased and stays protected. If the unsaved-work check of an `available` worktree (or the switch to a
+  detached head that follows it) times out, that shows only that git was slow: reap MUST leave the
+  worktree `available`, MUST NOT record it as `broken`, and MUST report a warning; the next reap checks
+  again. A failure that is not a timeout still marks it `broken`. _(Operator rulings, Phillip, 2026-11-14: hooks skipped, "yes; the comment
   should mention that", and "instruction on how to take the WIP commit and remove it but leave the WIP
   changes on the index".)_
 - **`INV-GWM-25`** <!-- uuid: c1d962b8-756a-42d6-ae3a-9d12bf5623e4 --> — When a reused worktree is

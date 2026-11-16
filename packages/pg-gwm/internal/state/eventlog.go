@@ -83,3 +83,43 @@ func (s Store) pruneEvents(now time.Time) {
 		}
 	}
 }
+
+// NoLeaseEvent reports whether the event log proves that no lease ever took
+// worktree id, for a worktree created at createdAt: no "lease" event names it
+// and the retained daily files reach back to the day it was created, so
+// retention has not dropped the evidence. An unreadable or absent log proves
+// nothing, so it reports false.
+func (s Store) NoLeaseEvent(id string, createdAt time.Time) bool {
+	ents, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return false
+	}
+	var oldest time.Time
+	for _, e := range ents {
+		n := e.Name()
+		if !strings.HasPrefix(n, eventPrefix) || !strings.HasSuffix(n, eventSuffix) {
+			continue
+		}
+		day, err := time.Parse("20060102", strings.TrimSuffix(strings.TrimPrefix(n, eventPrefix), eventSuffix))
+		if err != nil {
+			continue
+		}
+		if oldest.IsZero() || day.Before(oldest) {
+			oldest = day
+		}
+		b, err := os.ReadFile(filepath.Join(s.Dir, n))
+		if err != nil {
+			return false
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if !strings.Contains(line, id) {
+				continue
+			}
+			var ev Event
+			if json.Unmarshal([]byte(line), &ev) == nil && ev.Kind == "lease" && ev.WorktreeID == id {
+				return false
+			}
+		}
+	}
+	return !oldest.IsZero() && !createdAt.IsZero() && !oldest.After(createdAt.UTC())
+}

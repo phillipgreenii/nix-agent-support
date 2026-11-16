@@ -567,3 +567,148 @@ func TestReapBrokenLeasedStillPreserved(t *testing.T) {
 		t.Error("a once-leased worktree's work was not preserved")
 	}
 }
+
+// timeoutStatus makes every git status call of e time out, as a loaded host
+// does, and returns the number of such calls.
+func (e *env) timeoutStatus(tune ...func(*config.RepoConfig)) *atomic.Int32 {
+	var n atomic.Int32
+	run := e.g.Run
+	e.g.Run = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		for _, a := range c.Args {
+			if a == "status" {
+				n.Add(1)
+				return cmdrun.Result{Code: -1, Signal: "terminated", TimedOut: true, CtxErr: context.DeadlineExceeded}
+			}
+		}
+		return run(ctx, c)
+	}
+	e.m = e.manager(tune...)
+	return &n
+}
+
+// A git status that times out under host load shows only that git was slow:
+// a once-leased available worktree stays available, no broken event is
+// written, and the reap says it will check again.
+func TestReapStatusTimeoutKeepsAvailableWorktree(t *testing.T) {
+	tune := func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) }
+	e := newEnv(t, tune)
+	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
+	if _, err := e.m.Release(t.Context(), LeaseKey{LeaseID: str(rec.LeaseID)}); err != nil {
+		t.Fatal(err)
+	}
+	e.mustReap(ReapOptions{})
+	if e.count(state.Available) != 1 {
+		t.Fatalf("setup: %+v", e.state().Worktrees)
+	}
+	calls := e.timeoutStatus(tune)
+
+	res := e.mustReap(ReapOptions{})
+	if calls.Load() == 0 {
+		t.Fatal("the unsaved-work check never ran")
+	}
+	if e.count(state.Available) != 1 || e.count(state.Broken) != 0 || len(res.Broken) != 0 {
+		t.Fatalf("worktree not kept available: %+v res=%+v", e.state().Worktrees, res)
+	}
+	if strings.Contains(e.events(), `"kind":"broken"`) {
+		t.Errorf("a broken event was written: %s", e.events())
+	}
+	if len(res.Warnings) == 0 || !strings.Contains(res.Warnings[0], "later") || res.Outcome != ReapCompleted {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+// A worktree no lease ever took has no unsaved work to protect, so the reap
+// does not run the unsaved-work check on it.
+func TestReapNeverLeasedAvailableSkipsUnsavedCheck(t *testing.T) {
+	tune := func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) }
+	e := newEnv(t, tune)
+	e.mustReap(ReapOptions{})
+	if e.count(state.Available) != 1 || !e.state().Worktrees[0].NeverLeased {
+		t.Fatalf("setup: %+v", e.state().Worktrees)
+	}
+	calls := e.timeoutStatus(tune)
+	e.mustReap(ReapOptions{})
+	if calls.Load() != 0 {
+		t.Errorf("git status ran %d times for a never-leased worktree", calls.Load())
+	}
+	if e.count(state.Available) != 1 {
+		t.Errorf("worktrees = %+v", e.state().Worktrees)
+	}
+}
+
+// A record an older build wrote lacks never_leased: the event log, which
+// reaches back to its creation and holds no lease event for it, shows it was
+// never leased. A lease event for it, or an event log that starts after its
+// creation, keeps it protected.
+func TestReapLegacyRecordNeverLeasedFromEventLog(t *testing.T) {
+	tune := func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) }
+	legacy := func(e *env) {
+		// The store stamps events with the wall clock, not the Manager clock.
+		e.seed(func(st *state.State) {
+			st.Worktrees[0].NeverLeased, st.Worktrees[0].CreatedAt = false, time.Now().UTC()
+		})
+	}
+	t.Run("no lease event", func(t *testing.T) {
+		e := newEnv(t, tune)
+		e.mustReap(ReapOptions{})
+		legacy(e)
+		calls := e.timeoutStatus(tune)
+		e.mustReap(ReapOptions{})
+		if calls.Load() != 0 {
+			t.Errorf("git status ran %d times", calls.Load())
+		}
+	})
+	t.Run("lease event", func(t *testing.T) {
+		e := newEnv(t, tune)
+		rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
+		if _, err := e.m.Release(t.Context(), LeaseKey{LeaseID: str(rec.LeaseID)}); err != nil {
+			t.Fatal(err)
+		}
+		e.mustReap(ReapOptions{})
+		legacy(e)
+		calls := e.timeoutStatus(tune)
+		e.mustReap(ReapOptions{})
+		if calls.Load() == 0 {
+			t.Error("a once-leased worktree skipped the unsaved-work check")
+		}
+	})
+	t.Run("log starts after creation", func(t *testing.T) {
+		e := newEnv(t, tune)
+		e.mustReap(ReapOptions{})
+		legacy(e)
+		e.seed(func(st *state.State) { st.Worktrees[0].CreatedAt = time.Now().UTC().AddDate(0, 0, -3) })
+		calls := e.timeoutStatus(tune)
+		e.mustReap(ReapOptions{})
+		if calls.Load() == 0 {
+			t.Error("a worktree older than the event log skipped the unsaved-work check")
+		}
+	})
+}
+
+// A git status that times out in the broken retry leaves the record broken
+// with its directory, to be retried; the next reap with a healthy git removes it.
+func TestReapBrokenRetryStatusTimeoutStaysRetryable(t *testing.T) {
+	e := newEnv(t)
+	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
+	w, _ := e.worktreeOf(rec.ID)
+	e.write(w.Path, "work.txt", "mine\n")
+	e.seed(func(st *state.State) { st.Worktrees[0].Status, st.Worktrees[0].Lease = state.Broken, nil })
+	before := e.state().Worktrees[0]
+	e.timeoutStatus()
+
+	res := e.mustReap(ReapOptions{})
+	got, ok := e.worktreeOf(rec.ID)
+	if !ok || got.Status != state.Broken || !exists(w.Path) || got.Reason != before.Reason {
+		t.Fatalf("record changed: ok=%v %+v", ok, got)
+	}
+	if len(res.Warnings) == 0 || len(res.Removed) != 0 {
+		t.Errorf("res = %+v", res)
+	}
+
+	e.g = gitruntest.New(t, e.repo)
+	e.m = e.manager()
+	e.mustReap(ReapOptions{})
+	if _, ok := e.worktreeOf(rec.ID); ok || exists(w.Path) {
+		t.Errorf("not removed by the next reap")
+	}
+}
