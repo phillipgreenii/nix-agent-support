@@ -1,8 +1,11 @@
 // history.go: the list_history op (design 3.2, 4, 9.2, bead pg2-rwuhs).
 //
-// Grafana has no bulk history endpoint: the backend enumerates rules
+// Grafana has no bulk history endpoint (without ruleUID it answers HTTP 500
+// "ruleUID is required to query annotations"): the backend enumerates rules
 // (client.go Rules) and asks for each rule's state-history frame once
-// (RuleHistory, ruleUID is required). A frame is column-oriented,
+// (RuleHistory), with bounded concurrency, a per-request timeout and an
+// op-wide budget; rules that fail or run out of budget make the result
+// partial (Truncated) instead of failing the op, unless no rule answered. A frame is column-oriented,
 // `{data: {values: [times[], texts[], prevs[], nexts[], datas[]]}}`, one
 // column slot per state transition; times are MICROSECONDS since the epoch.
 // A row's firing-instance label set is not structured data: it is embedded
@@ -28,6 +31,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -38,6 +42,18 @@ import (
 // A rule returning exactly this many rows may have more, so the result is
 // marked truncated.
 const historyLimit = 1000
+
+// historyConcurrency bounds in-flight per-rule history requests. It is a
+// variable so tests can pin it.
+var historyConcurrency = 8
+
+// historyRuleTimeout is the budget of one per-rule request; a rule that
+// exceeds it is skipped and the result is marked truncated.
+var historyRuleTimeout = 10 * time.Second
+
+// historyBudgetMargin is how long before the op deadline the backend stops
+// starting and awaiting requests, leaving time to answer with what it has.
+var historyBudgetMargin = 5 * time.Second
 
 // alertingState is the state-history state name an episode starts in.
 const alertingState = "Alerting"
@@ -65,37 +81,112 @@ func (b *Backend) ListHistory(ctx context.Context, since, until time.Time, query
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "alert-grafana: "+err.Error())
 	}
 
-	res := &schema.AlertHistoryResult{Episodes: []schema.AlertEpisode{}}
+	// Distinct, non-empty rule uids in ruler order.
 	seen := make(map[string]bool, len(rules))
+	uniq := make([]apiRule, 0, len(rules))
 	for _, rule := range rules {
 		if rule.UID == "" || seen[rule.UID] {
 			continue
 		}
 		seen[rule.UID] = true
+		uniq = append(uniq, rule)
+	}
 
-		frame, err := b.transport.RuleHistory(ctx, cfg.BaseURL, rule.UID, since, until, historyLimit)
-		if err != nil {
-			return nil, scriptout.WrapError(scriptout.ErrUnavailable, "alert-grafana: "+err.Error())
+	outcomes := b.fetchHistories(ctx, cfg.BaseURL, uniq, since, until)
+
+	res := &schema.AlertHistoryResult{Episodes: []schema.AlertEpisode{}}
+	var firstErr error
+	succeeded := 0
+	for i, o := range outcomes {
+		if o.malformed != nil {
+			return nil, o.malformed
 		}
-		rows, err := decodeHistoryRows(frame)
-		if err != nil {
-			return nil, scriptout.WrapError(scriptout.ErrUnavailable,
-				fmt.Sprintf("alert-grafana: malformed history for rule %s: %v", rule.UID, err))
+		if !o.done {
+			// Failed, timed out or never started: the result is partial.
+			res.Truncated = true
+			if firstErr == nil {
+				firstErr = o.err
+			}
+			continue
 		}
-		if len(rows) >= historyLimit {
+		succeeded++
+		if len(o.rows) >= historyLimit {
 			res.Truncated = true
 		}
-		for _, ep := range episodesFromRows(rule, rows) {
+		for _, ep := range episodesFromRows(uniq[i], o.rows) {
 			if matchesAnySet(sets, ep) {
 				res.Episodes = append(res.Episodes, ep)
 			}
 		}
+	}
+	if succeeded == 0 && firstErr != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "alert-grafana: "+firstErr.Error())
 	}
 
 	sort.SliceStable(res.Episodes, func(i, j int) bool {
 		return res.Episodes[i].StartedAt < res.Episodes[j].StartedAt
 	})
 	return res, nil
+}
+
+// historyOutcome is one rule's fetch result. done is false when the request
+// failed, hit its budget or was never started; malformed is a structurally
+// wrong frame, which fails the whole op (a partial result cannot hide it).
+type historyOutcome struct {
+	done      bool
+	rows      []historyRow
+	err       error
+	malformed error
+}
+
+// fetchHistories reads every rule's history with bounded concurrency. Each
+// request gets historyRuleTimeout, and no new request starts once the
+// op-wide budget (the context deadline less historyBudgetMargin) is spent, so
+// a loaded Grafana yields a partial result instead of a timeout that loses
+// everything. The returned slice is index-aligned with rules.
+func (b *Backend) fetchHistories(ctx context.Context, baseURL string, rules []apiRule, since, until time.Time) []historyOutcome {
+	out := make([]historyOutcome, len(rules))
+	budget := ctx
+	if dl, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		budget, cancel = context.WithDeadline(ctx, dl.Add(-historyBudgetMargin))
+		defer cancel()
+	}
+	idx := make(chan int)
+	var wg sync.WaitGroup
+	workers := min(historyConcurrency, max(len(rules), 1))
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range idx {
+				if budget.Err() != nil {
+					out[i].err = budget.Err()
+					continue
+				}
+				rctx, cancel := context.WithTimeout(budget, historyRuleTimeout)
+				frame, err := b.transport.RuleHistory(rctx, baseURL, rules[i].UID, since, until, historyLimit)
+				cancel()
+				if err != nil {
+					out[i].err = err
+					continue
+				}
+				rows, err := decodeHistoryRows(frame)
+				if err != nil {
+					out[i].malformed = scriptout.WrapError(scriptout.ErrUnavailable,
+						fmt.Sprintf("alert-grafana: malformed history for rule %s: %v", rules[i].UID, err))
+					continue
+				}
+				out[i].rows, out[i].done = rows, true
+			}
+		}()
+	}
+	for i := range rules {
+		idx <- i
+	}
+	close(idx)
+	wg.Wait()
+	return out
 }
 
 // matchesAnySet reports whether the episode satisfies the query: no sets

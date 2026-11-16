@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,6 +154,7 @@ func TestListHistory_OneHistoryCallPerRuleConcatenated(t *testing.T) {
 	for _, c := range st.historyCalls {
 		uids = append(uids, c.uid)
 	}
+	sort.Strings(uids) // requests run concurrently
 	if !reflect.DeepEqual(uids, []string{"r1", "r2"}) {
 		t.Fatalf("history calls = %v, want one per distinct non-empty rule uid", uids)
 	}
@@ -303,17 +306,111 @@ func TestListHistory_UnreachableIsUnavailable(t *testing.T) {
 		_, err := New(&stubTransport{rulesErr: dead}).ListHistory(cfgCtx(t, baseCfg()), winFrom, winTo, nil)
 		wantErrIs(t, err, scriptout.ErrUnavailable)
 	})
-	t.Run("a per-rule history call fails", func(t *testing.T) {
+	t.Run("a per-rule history call fails: partial result", func(t *testing.T) {
 		st := &stubTransport{
 			rules:   []apiRule{{UID: "r1", Title: "One"}, {UID: "r2", Title: "Two"}},
 			histErr: map[string]error{"r2": dead},
+			frames: map[string]apiHistory{
+				"r1": mkFrame(histRow{day.Add(time.Hour), histText("One", "a=1"), "Normal", "Alerting"}),
+			},
+		}
+		res, err := New(st).ListHistory(cfgCtx(t, baseCfg()), winFrom, winTo, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.Truncated || len(res.Episodes) != 1 || res.Episodes[0].RuleID != "r1" {
+			t.Fatalf("want partial result with r1 only, got %+v", res)
+		}
+	})
+	t.Run("every per-rule history call fails", func(t *testing.T) {
+		st := &stubTransport{
+			rules:   []apiRule{{UID: "r1", Title: "One"}, {UID: "r2", Title: "Two"}},
+			histErr: map[string]error{"r1": dead, "r2": dead},
 		}
 		res, err := New(st).ListHistory(cfgCtx(t, baseCfg()), winFrom, winTo, nil)
 		wantErrIs(t, err, scriptout.ErrUnavailable)
 		if res != nil {
-			t.Errorf("a partial result must not be returned: %+v", res)
+			t.Errorf("no result expected: %+v", res)
 		}
 	})
+}
+
+func TestListHistory_HungRuleIsSkippedWithinBudget(t *testing.T) {
+	old := historyRuleTimeout
+	historyRuleTimeout = 50 * time.Millisecond
+	defer func() { historyRuleTimeout = old }()
+	st := &stubTransport{
+		rules:     []apiRule{{UID: "slow", Title: "Slow"}, {UID: "r1", Title: "One"}},
+		histBlock: map[string]bool{"slow": true},
+		frames: map[string]apiHistory{
+			"r1": mkFrame(histRow{day.Add(time.Hour), histText("One", "a=1"), "Normal", "Alerting"}),
+		},
+	}
+	start := time.Now()
+	res, err := New(st).ListHistory(cfgCtx(t, baseCfg()), winFrom, winTo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Truncated || len(res.Episodes) != 1 {
+		t.Fatalf("want partial result, got %+v", res)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("hung rule not bounded: %v", time.Since(start))
+	}
+}
+
+func TestListHistory_OpBudgetStopsFurtherRequests(t *testing.T) {
+	oldC, oldM := historyConcurrency, historyBudgetMargin
+	historyConcurrency, historyBudgetMargin = 1, 0
+	defer func() { historyConcurrency, historyBudgetMargin = oldC, oldM }()
+	st := &stubTransport{
+		rules:     []apiRule{{UID: "slow", Title: "Slow"}, {UID: "r1", Title: "One"}, {UID: "r2", Title: "Two"}},
+		histBlock: map[string]bool{"slow": true},
+	}
+	ctx, cancel := context.WithTimeout(cfgCtx(t, baseCfg()), 100*time.Millisecond)
+	defer cancel()
+	_, err := New(st).ListHistory(ctx, winFrom, winTo, nil)
+	// slow consumed the whole budget; r1 and r2 were never requested and
+	// nothing succeeded, so the op reports unavailable.
+	wantErrIs(t, err, scriptout.ErrUnavailable)
+	if len(st.historyCalls) != 1 {
+		t.Fatalf("requests after the budget was spent: %+v", st.historyCalls)
+	}
+}
+
+func TestListHistory_ConcurrencyIsBounded(t *testing.T) {
+	oldC := historyConcurrency
+	historyConcurrency = 3
+	defer func() { historyConcurrency = oldC }()
+	var rules []apiRule
+	for i := 0; i < 20; i++ {
+		rules = append(rules, apiRule{UID: fmt.Sprintf("r%d", i), Title: "T"})
+	}
+	st := &concurrencyTransport{stubTransport: stubTransport{rules: rules}}
+	if _, err := New(st).ListHistory(cfgCtx(t, baseCfg()), winFrom, winTo, nil); err != nil {
+		t.Fatal(err)
+	}
+	if st.peak > 3 || st.peak < 1 {
+		t.Fatalf("peak in-flight = %d, want 1..3", st.peak)
+	}
+}
+
+type concurrencyTransport struct {
+	stubTransport
+	cmu       sync.Mutex
+	cur, peak int
+}
+
+func (c *concurrencyTransport) RuleHistory(ctx context.Context, base, uid string, from, to time.Time, limit int) (apiHistory, error) {
+	c.cmu.Lock()
+	c.cur++
+	c.peak = max(c.peak, c.cur)
+	c.cmu.Unlock()
+	time.Sleep(5 * time.Millisecond)
+	c.cmu.Lock()
+	c.cur--
+	c.cmu.Unlock()
+	return c.stubTransport.RuleHistory(ctx, base, uid, from, to, limit)
 }
 
 func TestListHistory_TruncatedWhenRuleHitsLimit(t *testing.T) {

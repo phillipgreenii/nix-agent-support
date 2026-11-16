@@ -26,7 +26,8 @@ const alertsPath = "/api/alertmanager/grafana/api/v2/alerts"
 const rulerRulesPath = "/api/ruler/grafana/api/v1/rules"
 
 // historyPath is Grafana's per-rule state-history endpoint; ruleUID is
-// REQUIRED (there is no bulk endpoint), so history is one call per rule.
+// REQUIRED (there is no bulk endpoint: without it Grafana answers HTTP 500),
+// so history is one call per rule, issued concurrently by history.go.
 const historyPath = "/api/v1/rules/history"
 
 // maxResponseBytes bounds how much of a response body is read.

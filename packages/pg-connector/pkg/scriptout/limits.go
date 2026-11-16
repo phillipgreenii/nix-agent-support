@@ -177,9 +177,11 @@ var (
 // 30.001s (limit 30s) in op=list_history") is this file's backendTimeoutFor
 // default: list_history had no budget of its own and no configurable key, so
 // the only governing key is timeouts.list_history (timeouts.list does NOT
-// apply to it). pg-connector-alert-grafana fans out one Grafana
-// /api/v1/rules/history request per rule inside this one op, so its duration
-// grows with the rule count and the host's load.
+// apply to it). pg-connector-alert-grafana sends one Grafana
+// /api/v1/rules/history request per rule (Grafana requires ruleUID) inside
+// this one op, with bounded concurrency, a per-request timeout and an op-wide
+// budget just inside this deadline; rules that miss the budget make the result
+// partial (truncated) rather than failing the op.
 const OpListHistory = "list_history"
 
 // ListHistoryBackendTimeout is the per-call budget of "list_history". 120s:

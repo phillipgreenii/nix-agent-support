@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,9 @@ type stubTransport struct {
 	histErr      map[string]error
 	rulesCalls   int
 	historyCalls []historyCall
+	mu           sync.Mutex
+	// histBlock rules block until the request context ends (a hung Grafana).
+	histBlock map[string]bool
 }
 
 type historyCall struct {
@@ -48,8 +52,14 @@ func (s *stubTransport) Rules(context.Context, string) ([]apiRule, error) {
 	return s.rules, nil
 }
 
-func (s *stubTransport) RuleHistory(_ context.Context, _ string, uid string, from, to time.Time, limit int) (apiHistory, error) {
+func (s *stubTransport) RuleHistory(ctx context.Context, _ string, uid string, from, to time.Time, limit int) (apiHistory, error) {
+	s.mu.Lock()
 	s.historyCalls = append(s.historyCalls, historyCall{uid, from, to, limit})
+	s.mu.Unlock()
+	if s.histBlock[uid] {
+		<-ctx.Done()
+		return apiHistory{}, ctx.Err()
+	}
 	if err := s.histErr[uid]; err != nil {
 		return apiHistory{}, err
 	}
