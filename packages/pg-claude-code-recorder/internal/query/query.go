@@ -610,6 +610,10 @@ func (e *Engine) aggregate(tx store.Querier, req Request, ans *Answer) *wire.Err
 		}
 		plans[i] = p
 	}
+	// A session-pinned aggregate needs the same plan as a pinned row query:
+	// without it a LEFT JOINed field test (is_sidechain) drives the query from
+	// the fields index across every main-thread record of the store.
+	b.pinSession(req.Where)
 	wsql, wargs, err := b.where(req.Where)
 	if err != nil {
 		return err
