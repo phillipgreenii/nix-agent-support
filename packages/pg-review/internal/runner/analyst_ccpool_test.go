@@ -2,10 +2,12 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -293,6 +295,40 @@ func TestMalformedFinalMessageGetsOneRepairReply(t *testing.T) {
 	}
 	if n := e2.count(t, "topic"); n != 0 {
 		t.Errorf("%d topics stored from a rejected run", n)
+	}
+}
+
+func TestRunnerStampsWindowOverModelValue(t *testing.T) {
+	win := Window{From: t0.Add(-24 * time.Hour), To: t0}
+	raw := []byte(`{"schema_version":1,"window":"2030-01-01 to 2030-01-02","end":true}`)
+	out, err := stampWindow(raw, win)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Window struct{ From, To string } `json:"window"`
+		End    bool                      `json:"end"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Window.From != win.FromText() || doc.Window.To != win.ToText() || !doc.End {
+		t.Errorf("window not stamped: %s", out)
+	}
+
+	// End to end: a string window no longer costs the run.
+	e := setupCcpool(t, ccCfg, 0)
+	bad := regexp.MustCompile(`(?s)"window":\s*\{[^}]*\}`).ReplaceAllString(goldenFinal(t), `"window": "2030-03-01 to 2030-03-08"`)
+	if !strings.Contains(bad, `"window": "2030`) {
+		t.Fatal("fixture window not replaced")
+	}
+	e.fake.finals = []string{bad}
+	res, err := e.runLens(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Run.State != ledger.RunFiled || res.Run.RepairCount != 0 || len(e.fake.prompts) != 1 {
+		t.Errorf("%+v prompts %d", res.Run, len(e.fake.prompts))
 	}
 }
 

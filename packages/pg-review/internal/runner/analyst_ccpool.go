@@ -86,6 +86,24 @@ func extractFindings(text string) ([]byte, error) {
 	return raw, nil
 }
 
+// stampWindow overwrites the document's "window" with the run's own window.
+// The runner knows the window; the prompt renders it as one line of text, and
+// the model sometimes echoes that string back where the findings schema wants
+// an object with from and to, which rejected a whole run. Taking the value
+// from the runner removes that failure and the model's chance to misstate it.
+func stampWindow(raw []byte, w Window) ([]byte, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	win, err := json.Marshal(map[string]string{"from": w.FromText(), "to": w.ToText()})
+	if err != nil {
+		return nil, err
+	}
+	doc["window"] = win
+	return json.Marshal(doc)
+}
+
 func parseFailure(err error) []validate.Failure {
 	return []validate.Failure{{Index: -1, Finding: "#document", Field: "document", Rule: "parse", Token: err.Error()}}
 }
@@ -190,6 +208,9 @@ func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 			return err
 		}
 		raw, perr := extractFindings(text)
+		if perr == nil {
+			raw, perr = stampWindow(raw, s.Window)
+		}
 		if perr != nil {
 			failures = parseFailure(perr)
 		} else {
