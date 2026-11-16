@@ -67,6 +67,19 @@ const (
 	// carrying this key is purged, but its working directory and any branch are
 	// left exactly as they were. Stamped at dispatch; never a --label.
 	MetaKeyKeepWorktree = "pgrouter.keep_worktree"
+	// MetaKeyGWMLease is the id of the pg-gwm lease holding the session's
+	// worktree. Stamped at dispatch; never a --label.
+	MetaKeyGWMLease = "pgrouter.gwm_lease"
+	// MetaKeyGWMStartHead is the commit the worktree was at when pg-gwm first
+	// leased it (not written when the lease was a renewal of an earlier one).
+	MetaKeyGWMStartHead = "pgrouter.gwm_start_head"
+	// MetaKeyGWMPrefetchHead is the commit the handler's prefetch detached the
+	// worktree to; session end detaches back to the start head only while HEAD
+	// is still this commit and the tree is clean.
+	MetaKeyGWMPrefetchHead = "pgrouter.gwm_prefetch_head"
+	// MetaKeyWorktreeLost flags a session whose pg-gwm lease was lost or
+	// released while the session was running.
+	MetaKeyWorktreeLost = "pgrouter.worktree_lost"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions

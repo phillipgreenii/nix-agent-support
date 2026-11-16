@@ -47,6 +47,9 @@ func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps
 type ccpoolRun struct {
 	deps Deps
 
+	// gwm is this dispatch's pg-gwm lease state (zero when it uses none).
+	gwm gwmState
+
 	// sigMu guards the failure-signature state below (INV-CCH-9).
 	sigMu      sync.Mutex
 	transcript string            // last-seen TranscriptPath of the dispatched session
@@ -315,7 +318,8 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// until this dispatch returns, so the worktree-keyed sweep can tell a worktree
 	// a live dispatch is using from one a killed handler leaked (pg2-ganjb,
 	// INV-CCH-19). A SIGKILL drops the lock with the process.
-	if usesWorktreeIsolation(cc.Isolation) {
+	useGWM := r.useGWM(cc)
+	if usesWorktreeIsolation(cc.Isolation) && !useGWM {
 		// Before the shared lock (the examination takes the lock exclusively): a
 		// worktree this bead's own earlier attempt leaked is reclaimed, under the
 		// sweep's guards, rather than reused as if it were fresh (INV-CCH-19). With
@@ -327,19 +331,30 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		}
 		defer r.holdWorktreeLock(ctx, d.Item.ID)()
 	}
-	preexisting := usesWorktreeIsolation(cc.Isolation) && r.worktreePathExists(d.Item.ID)
+	preexisting := usesWorktreeIsolation(cc.Isolation) && !useGWM && r.worktreePathExists(d.Item.ID)
 	// Free-space floor (INV-CCH-8): creating a worktree writes gigabytes, so a
 	// NEW worktree is only started while the volume keeps at least
 	// Cfg.MinFreeBytes free, above the floors other tools on the machine act on.
 	// A worktree that already exists is reused and adds nothing.
-	if usesWorktreeIsolation(cc.Isolation) && !preexisting {
+	if usesWorktreeIsolation(cc.Isolation) && !useGWM && !preexisting {
 		if _, fErr := r.deps.checkFreeSpace(); fErr != nil {
 			slog.Warn("dispatch declined: free space below the worktree floor", "role", d.Role.Name, "bead", d.Item.ID, "err", fErr)
 			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, fErr)
 		}
 	}
-	iso := newIsolation(cc.Isolation, r.deps)
-	wt, wtErr := iso.Ensure(ctx, d.Item.ID)
+	var wt string
+	var wtErr error
+	if useGWM {
+		var res report.Result
+		wt, res, wtErr = r.leaseWorktree(ctx, d, cc)
+		if wtErr != nil {
+			return res, wtErr
+		}
+		// A renewed lease is a worktree an earlier attempt already used.
+		preexisting = r.gwm.lease.Renewed
+	} else {
+		wt, wtErr = newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
+	}
 	if wtErr != nil {
 		if errors.Is(wtErr, ErrLowDisk) {
 			// Low disk is the ONE isolation failure this function does NOT treat
@@ -390,6 +405,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	env["BEADS_DIR"] = beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads"
 	env["WORKSPACE_ROOT"] = wt
 	meta := ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))
+	r.gwmMeta(meta)
 	if cc.Isolation.Type == BeadWorktreeIsolation {
 		// The directory is not this handler's: every teardown path leaves it alone
 		// (bead pg2-b49ydt, ccpool.MetaKeyKeepWorktree).
@@ -726,6 +742,10 @@ func budgetUnlimited(b budget.Budget) bool {
 // absorbed (closeSettledSession, INV-CCH-17, ADR 0082), so a finished session
 // does not hold a counted slot of a max_sessions=1 pool until idle_ttl.
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
+	lost := r.gwm.lost.Load() && werr == nil
+	if lost {
+		werr = ErrWorktreeLost
+	}
 	r.finished, r.waitErr = true, werr
 	r.recordDispatchFailure(d, name, werr)
 	// The settled session is closed BEFORE the worktree is removed, so its own idle
@@ -733,8 +753,20 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 	// INV-CCH-17); the quiet verdict computed by the first step is passed on.
 	q, proceed := r.prepareWorktreeCleanup(ctx, cc, name, wt)
 	r.closeSettledSession(ctx, cc, d.Item.ID, name, werr, q)
-	if proceed {
+	switch {
+	case r.gwmOn():
+		r.gwmSessionEnd(ctx, cc, name, proceed)
+	case proceed:
 		r.removeWorktree(ctx, name, d.Item.ID, wt)
+	}
+	if lost {
+		// The worktree went away under a session that otherwise finished: a
+		// dispatch failure, with the role's on_dispatch_fail action.
+		var res report.Result
+		if cc.OnDispatchFail == roles.DispatchUnclaim && r.releaseAfterFailedSend(ctx, d.Item.ID) {
+			res = failureAction(report.Unclaimed, d.Item.ID)
+		}
+		return res, werr
 	}
 	if errors.Is(werr, ErrPeerHeld) {
 		// Another actor holds the bead (close-or-release, INV-CCH-28): the dispatch
@@ -854,6 +886,10 @@ func (r *ccpoolRun) prepareWorktreeCleanup(ctx context.Context, cc *roles.CCPool
 // process anywhere on the machine has it, or a directory inside it, as its
 // working directory, and when that cannot be determined (INV-CCH-15).
 func (r *ccpoolRun) removeWorktree(ctx context.Context, name, beadID, wt string) {
+	if r.gwmOn() {
+		r.gwmSessionEnd(ctx, nil, name, true)
+		return
+	}
 	if keep, err := procprobe.Keep(ctx, r.deps.processProbe(), wt); err != nil {
 		slog.Warn("dispatch: worktree cleanup: live-process probe failed; keeping the worktree (left for next sweep)",
 			"session", name, "worktree", wt, "err", err)

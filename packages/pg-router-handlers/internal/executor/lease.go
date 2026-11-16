@@ -95,6 +95,7 @@ func (r *ccpoolRun) startLease(ctx context.Context, name string) (stop func()) {
 	go func() {
 		defer close(done)
 		l.refresh(lctx)
+		r.renewWorktreeLease(lctx, name)
 		tick, stopTick := r.deps.newTicker(every)
 		defer stopTick()
 		for {
@@ -103,6 +104,7 @@ func (r *ccpoolRun) startLease(ctx context.Context, name string) (stop func()) {
 				return
 			case <-tick:
 				l.refresh(lctx)
+				r.renewWorktreeLease(lctx, name)
 			}
 		}
 	}()

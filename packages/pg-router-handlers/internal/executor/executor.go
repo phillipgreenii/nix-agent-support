@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
+	"github.com/phillipgreenii/pg-router-handlers/internal/gwm"
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 	"github.com/phillipgreenii/pg-router-handlers/internal/parknote"
 	"github.com/phillipgreenii/pg-router-handlers/internal/query"
@@ -104,6 +105,9 @@ type Deps struct {
 	// pg2-g2u9m, INV-CCH-18): <handler state dir>/locks. Empty disables the lock
 	// (unit tests; buildDeps always sets it).
 	LockDir string
+	// GWM is the pg-gwm client that leases each worktree-isolation role's
+	// worktree. nil keeps the legacy per-bead worktree path.
+	GWM gwm.Client
 	// GitRun runs git for the handler-side worktree pre-fetch (bead pg2-hh32y);
 	// nil => osGitRun (gitenv-hermetic). Tests substitute a script.
 	GitRun GitRun

@@ -3,11 +3,15 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/gwm"
 	"github.com/phillipgreenii/pg-router-handlers/internal/parknote"
 	"github.com/phillipgreenii/pg-router-handlers/internal/query"
 	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
@@ -202,3 +206,61 @@ func (e errIsolation) Ensure(context.Context, string) (string, error) { return "
 // pg2-g2u9m), which removes an orphan's worktree under the same scoping as
 // cleanupWorktree.
 func UsesWorktreeIsolation(cfg roles.IsolationConfig) bool { return usesWorktreeIsolation(cfg) }
+
+// gwmBranchPrefix is the branch namespace a leased write-role worktree commits on.
+const gwmBranchPrefix = "pg-router/"
+
+// gwmIsolation leases a role's worktree from pg-gwm instead of creating a
+// per-bead worktree itself. The lease is named <role>/<bead>, so a redelivery
+// of the same dispatch renews it (--or-renew) rather than taking a second one.
+type gwmIsolation struct {
+	client   gwm.Client
+	git      GitRun
+	repoRoot string
+	ttl      time.Duration
+	readOnly bool
+}
+
+// lease takes (or renews) the worktree lease for role and bead on behalf of
+// session. A write role works on pg-router/<bead>: checked out when that branch
+// exists, else created with -b (and, when pg-gwm answers a usage refusal to
+// that -b, retried once without it). A read role is detached, at
+// pg-router/<bead> when that branch exists.
+func (g gwmIsolation) lease(ctx context.Context, role, bead, session string) (gwm.Lease, error) {
+	branch := gwmBranchPrefix + bead
+	exists := g.git(ctx, g.repoRoot, io.Discard, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch) == nil
+	req := gwm.LeaseRequest{
+		Repo:  g.repoRoot,
+		Name:  role + "/" + bead,
+		Owner: session,
+		TTL:   g.ttl,
+		Metadata: map[string]string{
+			"role": role, "bead": bead, "session": session,
+		},
+	}
+	switch {
+	case g.readOnly:
+		req.Detach = true
+		if exists {
+			req.Branch = branch
+		}
+	default:
+		req.Branch = branch
+		req.Create = !exists
+	}
+	l, err := g.client.Lease(ctx, req)
+	if err != nil && req.Create && errors.Is(err, gwm.ErrUsage) {
+		req.Create = false
+		l, err = g.client.Lease(ctx, req)
+	}
+	return l, err
+}
+
+// expectedBranch is the branch a leased worktree should be on: the role's
+// anchor branch for a write role, none (detached) for a read role.
+func (g gwmIsolation) expectedBranch(bead string) string {
+	if g.readOnly {
+		return ""
+	}
+	return gwmBranchPrefix + bead
+}

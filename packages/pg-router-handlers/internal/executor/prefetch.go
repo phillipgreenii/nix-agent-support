@@ -281,6 +281,7 @@ func (r *ccpoolRun) prefetch(ctx context.Context, pf roles.PrefetchConfig, d Dis
 		_ = os.Remove(marker)
 	}
 	info.OK, info.Rev = true, rev
+	r.notePrefetchHead(ctx, wt)
 
 	if !r.prepareOutDir(ctx, wt, info.Dir) {
 		return fail("outdir", errors.New("cannot prepare the output directory"))
