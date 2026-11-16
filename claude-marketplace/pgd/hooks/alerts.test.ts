@@ -29,7 +29,7 @@ const limits = (five: number, seven: number) => ({
 test('items are ordered by priority, highest first', () => {
   const p = ALERT_ITEMS.map(i => i.priority)
   expect(p).toEqual([...p].sort((a, b) => b - a))
-  expect(ALERT_ITEMS.map(i => i.id)).toEqual(['wrapping-up', 'dolt', 'limit', 'context', 'login-expired'])
+  expect(ALERT_ITEMS.map(i => i.id)).toEqual(['wrapping-up', 'dolt', 'limit', 'context', 'context-200k', 'login-expired'])
 })
 
 test('only true conditions appear, highest priority first', () => {
@@ -66,6 +66,31 @@ test('the context item fires at or above contextAlert and ignores contextWarn', 
   expect(ctx.condition(base({ usage: { limits: [], contextPercent: 80 } }))).toBe(true)
   expect(ctx.condition(base({ thresholds: { ...T, contextAlert: 90 }, usage: { limits: [], contextPercent: 85 } }))).toBe(false)
   expect(ctx.condition(base({ thresholds: { ...T, contextWarn: 10 }, usage: { limits: [], contextPercent: 70 } }))).toBe(false)
+})
+
+test('the context-200k item fires at 200_000 tokens, not below, and never without a count', () => {
+  const item = ALERT_ITEMS.find(i => i.id === 'context-200k')!
+  expect(item.condition(base({ usage: { limits: [], contextTokens: 200_000 } }))).toBe(true)
+  expect(item.condition(base({ usage: { limits: [], contextTokens: 350_000 } }))).toBe(true)
+  expect(item.condition(base({ usage: { limits: [], contextTokens: 199_999 } }))).toBe(false)
+  expect(item.condition(base({ usage: { limits: [] } }))).toBe(false)
+  expect(item.condition(base())).toBe(false)
+  // independent of the percent: a small percent with 200k tokens still raises it
+  expect(item.condition(base({ usage: { limits: [], contextPercent: 5, contextTokens: 200_000 } }))).toBe(true)
+  expect(item.text(base({ usage: { limits: [], contextTokens: 200_000 } }))).toBe('context over 200k')
+})
+
+test('context-200k ranks just below the context item and drops first by width', () => {
+  const ids = ALERT_ITEMS.map(i => i.id)
+  expect(ids.indexOf('context-200k')).toBe(ids.indexOf('context') + 1)
+  const both = base({ usage: { limits: [], contextPercent: 91, contextTokens: 210_000 } })
+  const full = 'context 91% · context over 200k'
+  expect(fitAlerts(both, 200)).toBe(full)
+  expect(fitAlerts(both, 7 + full.length)).toBe(full)
+  expect(fitAlerts(both, 7 + full.length - 1)).toBe('context 91%')
+  // alone (percent below contextAlert) it is the whole row
+  expect(fitAlerts(base({ usage: { limits: [], contextPercent: 40, contextTokens: 200_000 } }), 200)).toBe('context over 200k')
+  expect(fitAlerts(base({ usage: { limits: [], contextPercent: 40, contextTokens: 199_999 } }), 200)).toBe('')
 })
 
 test('the row drops the lowest-priority items by width and never cuts text', () => {

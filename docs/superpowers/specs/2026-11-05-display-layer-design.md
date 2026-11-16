@@ -7,6 +7,12 @@ ahead of phase 3, and a ZR bundle without a plugin (operator rulings recorded in
 `2026-11-07-mod-bundle-grouping-design.md`).
 Date: 2026-11-05. Claude Code version the findings come from: 2.1.314.
 
+> Correction 2026-11-15 (observed on Claude Code 2.1.318): F2, D19 and phase 3 below say the shell
+> line is retired by the empty `statusLine` command. That is wrong: an empty command still reserves a
+> blank footer row, so the `statusLine` key MUST be deleted. The claude-settings option is now
+> tri-state (`"remove"` default, attribute set, `null` no-op); see F2 in
+> `docs/guides/claude-code-mods.md`. The text below is the original snapshot, left unchanged.
+
 ## Intent
 
 The shell status line (ten part scripts, one subprocess per part, joined with

@@ -32,14 +32,22 @@ them as one line it fits itself.
 ## F2: the shell statusLine setting
 
 Verified live. The shell `statusLine` setting accepts only `{ type: "command", command: <string> }`;
-`null`, `""` and `{}` are rejected; an empty `command` string loads and draws no shell row. In this
-repo a null option is a deliberate no-op that leaves an already-written `statusLine` in the user
-settings file.
+`null`, `""` and `{}` are rejected. Corrected on Claude Code 2.1.318: an empty `command` string loads
+but still reserves a blank footer row between the input box and the mode line, because the engine
+reserves the row whenever `statusLine` is defined at all. The key MUST be absent from
+`~/.claude/settings.json` for no shell row to be drawn.
 
-Consequence: the shell line is retired by setting the `statusLine` option to
-`{ type = "command"; command = ""; }`, which the option already accepts. This is now the claude-settings
-default, and the shell part scripts and their module are removed. Writing the empty command
-overwrites any stale `statusLine` the old module left, so no delete filter was added.
+Consequence: the shell line is retired by DELETING the key. The `statusLine` option of the
+claude-settings module is tri-state:
+
+| Value                | Effect on `~/.claude/settings.json`                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `"remove"` (default) | emits `del(.statusLine)`, so any existing value is removed                                                                |
+| an attribute set     | sets `.statusLine` to it                                                                                                  |
+| `null`               | no-op: a value already present is left alone (`/statusline` writes the key at runtime, so a scrub-on-null would fight it) |
+
+The shell part scripts and their module are removed. The earlier guidance (set the empty command, no
+delete filter needed) is obsolete.
 
 ## F3: the band above the prompt
 

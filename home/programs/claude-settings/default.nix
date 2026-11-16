@@ -48,9 +48,9 @@ let
         )
       }"
     ++
-      # These top-level-key options are tri-state nullOr, but unlike promptCacheTtl
-      # (below) `null` is a deliberate NO-OP: no filter is emitted, so a value a
-      # previous non-null generation wrote is LEFT IN PLACE, not deleted (pg2-a6y3).
+      # These top-level-key options are nullOr, and unlike promptCacheTtl (below)
+      # `null` is a deliberate NO-OP: no filter is emitted, so a value a previous
+      # non-null generation wrote is LEFT IN PLACE, not deleted.
       # A promptCacheTtl-style scrub-on-null is intentionally NOT applied here because
       # (1) `theme`/`statusLine` are written by Claude Code itself at runtime
       # (`/theme`, `/statusline`), so del-on-null would fight an interactive choice;
@@ -59,7 +59,19 @@ let
       # value with no opt-out — and this list runs on EVERY activation (it is never
       # empty: noFlicker and the promptCacheTtl null-cleanup always append). A
       # `sandbox` scrub was considered and deferred for the same no-opt-out reason.
-      lib.optional (cfg.statusLine != null) ".statusLine = ${builtins.toJSON cfg.statusLine}"
+      # `statusLine` is the one top-level key with a third state: the string
+      # "remove" is an explicit, opt-in delete (`del(.statusLine)`), because Claude
+      # Code reserves a footer row whenever the key is defined at all, even with an
+      # empty command (observed on 2.1.318), and rejects null/""/{} as values, so
+      # deleting the key is the only way to draw no shell row.
+      (
+        if cfg.statusLine == null then
+          [ ]
+        else if cfg.statusLine == "remove" then
+          [ "del(.statusLine)" ]
+        else
+          [ ".statusLine = ${builtins.toJSON cfg.statusLine}" ]
+      )
     ++ lib.optional (
       cfg.showClearContextOnPlanAccept != null
     ) ".showClearContextOnPlanAccept = ${builtins.toJSON cfg.showClearContextOnPlanAccept}"
@@ -184,21 +196,24 @@ in
     };
 
     statusLine = lib.mkOption {
-      type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
-      default = {
-        type = "command";
-        command = "";
-      };
+      type = lib.types.nullOr (
+        lib.types.either (lib.types.enum [ "remove" ]) (lib.types.attrsOf lib.types.anything)
+      );
+      default = "remove";
       description = ''
-        statusLine config object to set in ~/.claude/settings.json. The default
-        is the empty command, which Claude Code loads and draws no shell status
-        row for (the shell line is retired; the pgd display mod draws the band
-        and status row instead). Writing it also overwrites any stale
-        `.statusLine` left by the retired shell implementation, so no delete
-        filter is needed. `null` is a deliberate no-op: a previously written
-        `.statusLine` is left in place, not deleted (unlike `promptCacheTtl`),
-        because Claude Code's `/statusline` command writes `.statusLine` itself
-        and a scrub-on-null would fight an interactive change.
+        Tri-state control of `.statusLine` in ~/.claude/settings.json.
+
+        - `"remove"` (the default): emit `del(.statusLine)` so any existing value
+          is deleted. The shell status line is retired (the pgd display mod draws
+          the band and status row), and Claude Code 2.1.318 reserves a blank
+          footer row whenever the key is defined, even as the empty command, so
+          the key MUST be absent. Claude Code rejects `null`, `""` and `{}` as
+          values, so deletion is the only way to get no row.
+        - an attribute set: set `.statusLine` to it.
+        - `null`: a deliberate no-op. A previously written `.statusLine` is left
+          in place, never deleted, because Claude Code's `/statusline` command
+          writes `.statusLine` itself and a scrub-on-null would fight an
+          interactive change.
       '';
     };
 

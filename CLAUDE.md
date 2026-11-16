@@ -332,9 +332,11 @@ The `identifier-allowlist` hook covers its `.go` files, `docs/` and `testdata/`:
 ## Status Line
 
 The shell status line (the `claude-status-line` module and its part scripts) is retired. The
-`statusLine` option of the claude-settings module defaults to the empty command
-`{ type = "command"; command = ""; }`, which Claude Code loads and draws no shell row for; the
-display mod (`claude-marketplace/pgd`) draws the band and status row. See
+`statusLine` option of the claude-settings module is tri-state and defaults to `"remove"`, which
+emits `del(.statusLine)`: Claude Code 2.1.318 reserves a blank footer row whenever the key is
+defined, even as an empty command, so the key MUST be deleted, not blanked. An attribute set sets
+the key, and `null` is a no-op that leaves whatever is in the file. The display mod
+(`claude-marketplace/pgd`) draws the band and status row. See
 `docs/guides/claude-code-mods.md` (F2) and the display layer design. Do not reintroduce part
 scripts or a `status-line-parts` option.
 

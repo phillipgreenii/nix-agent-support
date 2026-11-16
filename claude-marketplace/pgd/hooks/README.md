@@ -9,6 +9,10 @@ The alert row (`alerts.ts`) is the status-line row the engine prefixes with the 
   until the live collapse check; if it does not, the site is the one line to change in
   `registerAlertHooks`. With no width read the row is unfitted and the engine's own ellipsis
   applies.
+- Items, highest priority first: wrapping up 100, dolt unavailable 80, rate limit near cap 70,
+  `context N%` 60 (percent at or above `contextAlert`), `context over 200k` 55 (the context holds
+  200_000 tokens or more, the same condition as the band's `(!)` marker), login expired 50. The
+  items state only true conditions; an unknown token count never raises `context over 200k`.
 - Dolt probe: `bd dolt test` with a 5 second timeout, at most every 30 seconds, shared across
   sessions, defined only while `components.beads` is on.
 

@@ -18250,8 +18250,9 @@
                   # retention guarantee). noFlicker and the promptCacheTtl null-cleanup
                   # are the only other filters emitted.
                   allNull = activationWith { };
-                  # Explicit null opts out of the empty-command default.
+                  # Explicit null opts out of the "remove" default (a no-op).
                   statusLineNull = activationWith { statusLine = null; };
+                  statusLineRemove = activationWith { statusLine = "remove"; };
 
                   # Positive controls: a set value must emit its assignment.
                   themeSet = activationWith { theme = "dark"; };
@@ -18293,11 +18294,16 @@
                 # activation-script boilerplate.
                 assert !(hasSub ".statusLine = " statusLineNull);
                 assert !(hasSub "del(.statusLine)" statusLineNull);
-                assert !(hasSub "del(.statusLine)" allNull);
-                # The default retires the shell status line: the empty command renders
-                # (Claude Code loads it and draws no shell row), and the other
-                # top-level keys are untouched by it.
-                assert hasSub ''.statusLine = {"command":"","type":"command"}'' allNull;
+                # The default ("remove") retires the shell status line by DELETING the
+                # key (an empty command still reserves a blank footer row on Claude
+                # Code 2.1.318): a del filter and no assignment. An explicit "remove"
+                # is identical, and the other top-level keys are untouched by it.
+                assert hasSub "del(.statusLine)" allNull;
+                assert !(hasSub ".statusLine = " allNull);
+                assert hasSub "del(.statusLine)" statusLineRemove;
+                assert !(hasSub ".statusLine = " statusLineRemove);
+                assert hasSub ".cleanupPeriodDays = 365" statusLineRemove;
+                assert !(hasSub ".theme = " statusLineRemove);
                 assert !(hasSub ".theme = " allNull);
                 assert hasSub ".cleanupPeriodDays = 365" statusLineNull;
                 assert !(hasSub ".showClearContextOnPlanAccept = " allNull);
@@ -18313,6 +18319,9 @@
                 # Positive controls: a set value emits its assignment.
                 assert hasSub ''.theme = "dark"'' themeSet;
                 assert hasSub ".statusLine = " statusLineSet;
+                assert hasSub ''.statusLine = {"command":"x","type":"command"}'' statusLineSet;
+                assert !(hasSub "del(.statusLine)" statusLineSet);
+                assert !(hasSub ".theme = " statusLineSet);
                 assert hasSub ".showThinkingSummaries = true" thinkingSet;
                 assert hasSub ".includeCoAuthoredBy = true" coauthSet;
                 assert hasSub ".showClearContextOnPlanAccept = true" clearCtxSet;

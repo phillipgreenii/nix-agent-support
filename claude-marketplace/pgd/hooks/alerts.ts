@@ -6,13 +6,15 @@ import { timedDraw } from './metrics'
 import { isWrapUp } from './session-mode'
 import { listContributions } from './contributions'
 import { loginNeedsAction, type SsoLogin } from './assume'
+import { exceeds200k } from './band'
 
 // The alert row (the status line): one aggregated row listing only the alerts whose condition is
 // true, highest priority first. The engine prefixes the row with a warning glyph and the plugin
 // name (pgd) and cuts a long row mid-word, so fitAlerts drops the lowest-priority items itself
 // when the width runs out. Priorities (larger is higher): wrapping up 100 (session-mode
-// packet), dolt unavailable 80, rate limit near cap 70, context excessive 60, login expired 50
-// (assume packet); a later packet adds its entry to ALERT_ITEMS. Every item states a true
+// packet), dolt unavailable 80, rate limit near cap 70, context excessive 60, context over 200k
+// tokens 55 (just below the percent item, so both read "context 91% · context over 200k"),
+// login expired 50 (assume packet); a later packet adds its entry to ALERT_ITEMS. Every item states a true
 // condition; an absent thing is never a "no X" item. contextWarn plays no role in this row.
 export interface AlertInputs {
   usage?: Usage
@@ -69,6 +71,14 @@ export const ALERT_ITEMS: AlertItem[] = [
       return typeof p === 'number' && p >= v.thresholds.contextAlert
     },
     text: v => `context ${Math.round(v.usage?.contextPercent ?? 0)}%`,
+  },
+  {
+    // the context holds 200_000 tokens or more, whatever the percent of the window (the band's
+    // context label carries the same condition as its "(!)" marker); an unknown count never raises it
+    id: 'context-200k',
+    priority: 55,
+    condition: v => exceeds200k(v.usage),
+    text: () => 'context over 200k',
   },
   {
     // the SSO login is expired and cannot refresh, or its cache file is missing; an unread state
