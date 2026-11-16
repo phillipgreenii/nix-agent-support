@@ -88,10 +88,7 @@ func runNamed(t *testing.T, db *sql.DB, root, name string, args []string, since,
 		t.Fatalf("Lookup(%q): %v", name, err)
 	}
 	req := Request{Query: q, Args: args, Since: since, Until: until, Format: FormatTable}
-	res, err := Run(context.Background(), db, req)
-	if err != nil {
-		t.Fatalf("Run(%s): %v", name, err)
-	}
+	res := runOnce(t, db, req)
 	out := make([][]string, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		cells := make([]string, len(row))

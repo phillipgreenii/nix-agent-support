@@ -115,12 +115,9 @@ func tagsIn(t *testing.T, db *sql.DB, name string, in, ex []string) ([]string, i
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Run(context.Background(), db, Request{
+	res := runOnce(t, db, Request{
 		Query: q, CwdPrefixes: in, ExcludeCwdPrefixes: ex, Format: FormatTSV,
 	})
-	if err != nil {
-		t.Fatalf("Run(%s): %v", name, err)
-	}
 	var sb strings.Builder
 	for _, row := range res.Rows {
 		for _, c := range row {
@@ -165,10 +162,7 @@ func TestScopeFilterOnEverySevenQueries(t *testing.T) {
 				if name == "error-rate-by-tool" {
 					// Aggregated by tool: every session contributes 2 Bash calls.
 					q, _ := Lookup(name)
-					res, err := Run(context.Background(), db, Request{Query: q, CwdPrefixes: c.in, ExcludeCwdPrefixes: c.ex, Format: FormatTSV})
-					if err != nil {
-						t.Fatal(err)
-					}
+					res := runOnce(t, db, Request{Query: q, CwdPrefixes: c.in, ExcludeCwdPrefixes: c.ex, Format: FormatTSV})
 					got := int64(0)
 					if len(res.Rows) > 0 {
 						got = res.Rows[0][1].(int64)
@@ -367,10 +361,7 @@ func TestEmptyWindowReturnsNoRows(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, sc := range []struct{ in, ex []string }{{nil, nil}, {[]string{"/w/a"}, nil}, {nil, []string{"/w/a"}}, {[]string{"/w/a"}, []string{"/w/b"}}} {
-			res, err := Run(context.Background(), db, Request{Query: q, Since: "2030-01-01", Until: "2030-01-02", CwdPrefixes: sc.in, ExcludeCwdPrefixes: sc.ex})
-			if err != nil {
-				t.Fatalf("%s: %v", name, err)
-			}
+			res := runOnce(t, db, Request{Query: q, Since: "2030-01-01", Until: "2030-01-02", CwdPrefixes: sc.in, ExcludeCwdPrefixes: sc.ex})
 			if name == "error-rate-by-tool" {
 				continue // an aggregate may render a zero row; covered by the call count below
 			}

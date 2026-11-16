@@ -2019,7 +2019,8 @@
               # `patternBTaggedGoLints` has a companion check, so its tagged
               # files are linted. A module NOT listed there
               # (`pa-monitor-decorator-scope`, `claude-transcript`,
-              # `pg-ccaudit` as of tc-t3wx; `pg-router-source-pg-connector`
+              # (`pg-ccaudit` was exempt as of tc-t3wx and now has a companion:
+              # its old-SQL oracle is integration-tagged); `pg-router-source-pg-connector`
               # added docket pg2-2j5ac.30 Phase 8 — its own wire double is a
               # reentrant test-helper PROCESS, not a build-tagged file;
               # `pg-router-probe` added docket pg2-93e5s packet 1 — same
@@ -2268,6 +2269,19 @@
               # src/modRoot as patternBGoLints
               # above so the tagged check lints the identical module tree.
               patternBTaggedGoLints = [
+                # pg-ccaudit: internal/query's old-SQL oracle is `integration`-tagged.
+                (goLintTagged {
+                  module = "pg-ccaudit";
+                  modRoot = "pg-ccaudit";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-ccaudit
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                    ];
+                  };
+                })
                 # pg-origin-guard: integration_test.go carries the `integration` tag.
                 (goLintTagged {
                   module = "pg-origin-guard";
@@ -7833,6 +7847,39 @@
                 };
                 modRoot = "pg-ccaudit";
                 gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
+              };
+
+              # pg-ccaudit integration tier (`//go:build integration`, V-4: never in the
+              # unit gate above). internal/query's old-SQL oracle runs the pre-change
+              # interruptions and error-rate-by-tool statements, which are quadratic in
+              # the lines per session, over every window and flag combination and
+              # compares rows with the new statements: about 160 G instructions under
+              # -race, far over the unit-test budget. ON DEMAND: build it when those two
+              # statements, `scoped()` or `prevToolAgg` change. It MUST NOT be wired into
+              # any hook, run-unit-tests or pre-land gate. The `-run` filter names exactly
+              # the tagged tests, so the unit tests do not run a second time; the
+              # opt-in big-fixture timing test inside it skips itself without
+              # PG_CCAUDIT_BIGFIXTURE.
+              pg-ccaudit-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-ccaudit-integration-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-ccaudit
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
+                  ];
+                };
+                modRoot = "pg-ccaudit";
+                gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
+                testFlags = [
+                  "-tags"
+                  "integration"
+                  "-count=1"
+                  "-v"
+                  "-run"
+                  "^(TestWindowDrivenQueriesEqualTheirOldSQL|TestOldSQLScannedEveryToolCall|TestWindowBoundariesAgreeWithOldSQL)$"
+                ];
               };
 
               # pg-router-source-pg-connector — the changes/sweep/list golden

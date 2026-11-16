@@ -2,6 +2,8 @@ package query
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -74,6 +76,39 @@ func shared[T any](t testing.TB, key string, build func(testing.TB) T) T {
 		t.Fatalf("shared fixture %q failed to build", key)
 	}
 	return v
+}
+
+// runOnce is Run with each distinct (database, request) executed once per test
+// process: under the race detector the cost of a canned query is dominated by
+// SQLite preparing its large statement text, and several tests and subtests ask
+// the same question of the same shared read-only database. The caller MUST NOT
+// modify the returned rows.
+func runOnce(t testing.TB, db *sql.DB, req Request) *Result {
+	t.Helper()
+	key := fmt.Sprintf("%p|%s|%q|%q|%q|%s|%q|%q|%s|%s", db, req.Query.Name, req.Args, req.Since, req.Until, req.Format, req.CwdPrefixes, req.ExcludeCwdPrefixes, req.Query.SQL, req.Query.UnboundedSQL)
+	runMu.Lock()
+	e := runCache[key]
+	if e == nil {
+		e = &runEntry{}
+		runCache[key] = e
+	}
+	runMu.Unlock()
+	e.once.Do(func() { e.res, e.err = Run(context.Background(), db, req) })
+	if e.err != nil {
+		t.Fatalf("%s: %v", req.Query.Name, e.err)
+	}
+	return e.res
+}
+
+var (
+	runMu    sync.Mutex
+	runCache = map[string]*runEntry{}
+)
+
+type runEntry struct {
+	once sync.Once
+	res  *Result
+	err  error
 }
 
 func TestMain(m *testing.M) {
