@@ -174,6 +174,23 @@ pgdr_tmp_root_guard() {
   return 0
 }
 
+# pgdr_tmp_lsof ARGS...: run lsof. PGDR_TOOL_LSOF (an absolute path the package
+# pins) wins. Otherwise the lsof on PATH, else /usr/sbin/lsof: macOS keeps lsof in
+# /usr/sbin, which the scheduled launchd job's PATH does not include.
+pgdr_tmp_lsof() {
+  local bin="${PGDR_TOOL_LSOF:-}"
+  if [ -z "$bin" ]; then
+    if command -v lsof >/dev/null 2>&1; then
+      bin=lsof
+    elif [ -x /usr/sbin/lsof ]; then
+      bin=/usr/sbin/lsof
+    else
+      bin=lsof
+    fi
+  fi
+  "$bin" "$@"
+}
+
 # pgdr_tmp_capture LIVENESS: capture ps and lsof ONCE, fail closed. Sets
 # _PGDR_PS (argv text), _PGDR_LSOF (newline-wrapped open-file paths) and
 # _PGDR_LIVE_UUIDS (newline-wrapped lowercase uuid tokens found in argv).
@@ -191,12 +208,12 @@ pgdr_tmp_capture() {
     return 2
   fi
   if [ "$liveness" = claude-session ]; then
-    if ! lsof_out="$(lsof -n -w -Fn 2>/dev/null)"; then
+    if ! lsof_out="$(pgdr_tmp_lsof -n -w -Fn 2>/dev/null)"; then
       pgdr_tmp_log "refusing: 'lsof -n -w -Fn' failed (liveness unknown)"
       return 2
     fi
   else
-    if ! lsof_out="$(lsof -n -w -d cwd -Fn 2>/dev/null)"; then
+    if ! lsof_out="$(pgdr_tmp_lsof -n -w -d cwd -Fn 2>/dev/null)"; then
       pgdr_tmp_log "refusing: 'lsof -n -w -d cwd -Fn' failed (liveness unknown)"
       return 2
     fi

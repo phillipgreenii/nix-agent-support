@@ -1043,3 +1043,53 @@ cli() {
   [ "$status" -eq 0 ]
   [ ! -e "$ROOT/claude-1" ]
 }
+
+# ----- the scheduled launchd job's PATH ---------------------------------------
+
+# jobpath: a PATH like the launchd job's (per-user bin, /run/current-system/sw/bin,
+# the nix default bin, /opt/homebrew/bin, /usr/bin, /bin: no /usr/sbin, where macOS
+# keeps lsof) built from a directory of symlinks to every tool the sweep needs
+# EXCEPT lsof, so the result is the same on a host that has lsof elsewhere.
+jobpath() {
+  local d="$FX/jobbin" t p
+  mkdir -p "$d"
+  for t in bash sh ps find rm mv mkdir rmdir sed tr sort grep cat date touch stat id uname head dirname basename; do
+    p="$(command -v "$t" 2>/dev/null)" || continue
+    [[ $p == /* ]] && ln -sf "$p" "$d/$t"
+  done
+  JOBPATH="$d:/nonexistent/per-user/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:/usr/bin:/bin"
+}
+
+@test "job PATH: with lsof off PATH, the pinned PGDR_TOOL_LSOF is used and the sweep gives a result (build-tmp and claude-code-tmp)" {
+  need_ps
+  local real
+  real="$(command -v lsof)"
+  jobpath
+  [[ -z "$(PATH="$JOBPATH" command -v lsof 2>/dev/null)" ]] || skip "lsof is on the job PATH here"
+  mkroot
+  : >"$ROOT/oldfile"
+  age "$ROOT/oldfile" 1500
+  age "$ROOT/.build-tmp-root" 100000
+  SWEEP_PATH="$JOBPATH" PGDR_TOOL_LSOF="$real" bsweep dry 1440
+  [ "$status" -eq 0 ]
+  [[ $output != *"refusing"* ]]
+  listed "$ROOT/oldfile"
+  mkroot claude_code_tmp .claude-code-tmp-root
+  SWEEP_PATH="$JOBPATH" PGDR_TOOL_LSOF="$real" csweep dry 2880
+  [ "$status" -eq 0 ]
+  [[ $output != *"refusing"* ]]
+}
+
+@test "job PATH on macOS: with no pin and lsof only in /usr/sbin, the sweep falls back to /usr/sbin/lsof" {
+  need_ps
+  [[ -x /usr/sbin/lsof ]] || skip "no /usr/sbin/lsof on this host"
+  jobpath
+  mkroot
+  : >"$ROOT/oldfile"
+  age "$ROOT/oldfile" 1500
+  age "$ROOT/.build-tmp-root" 100000
+  run env -u PGDR_TOOL_LSOF PATH="$JOBPATH" "$BASH" -c 'set -euo pipefail; . "$1"; shift; pgdr_tmp_sweep "$@"' _ "$LIB" dry "$ROOT" .build-tmp-root build_tmp 1440 1 none
+  [ "$status" -eq 0 ]
+  [[ $output != *"refusing"* ]]
+  listed "$ROOT/oldfile"
+}

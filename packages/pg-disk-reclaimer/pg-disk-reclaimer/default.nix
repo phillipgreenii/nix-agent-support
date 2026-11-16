@@ -36,6 +36,10 @@ mkBashScript {
     PGDR_TOOL_GO = "${pkgs.go}/bin/go";
     PGDR_TOOL_PGREP =
       if pkgs.stdenv.hostPlatform.isDarwin then "/usr/bin/pgrep" else "${pkgs.procps}/bin/pgrep";
+    # lsof is /usr/sbin/lsof on darwin, a directory the scheduled launchd job's
+    # PATH does not list, so the sweep must not resolve it by name there.
+    PGDR_TOOL_LSOF =
+      if pkgs.stdenv.hostPlatform.isDarwin then "/usr/sbin/lsof" else "${pkgs.lsof}/bin/lsof";
   };
 
   # The lib bats suite sources pg-disk-reclaimer.bash directly (raw source,
