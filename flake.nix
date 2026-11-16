@@ -14485,7 +14485,10 @@
                 let
                   evaluated =
                     (lib.evalModules {
-                      specialArgs = { inherit pkgs; };
+                      specialArgs = {
+                        inherit pkgs;
+                        osConfig = null;
+                      };
                       modules = [
                         ./home/programs/pg-disk-reclaimer/default.nix
                         (

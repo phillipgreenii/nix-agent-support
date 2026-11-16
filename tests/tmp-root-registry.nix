@@ -80,6 +80,7 @@ let
     cfg:
     (lib.evalModules {
       specialArgs = {
+        osConfig = null;
         inherit pkgs;
         lib = hmLib;
       };

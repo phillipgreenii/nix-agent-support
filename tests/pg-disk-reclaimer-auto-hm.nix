@@ -83,6 +83,7 @@ let
     }:
     (lib.evalModules {
       specialArgs = {
+        osConfig = null;
         pkgs = withPlatform isDarwin;
         inherit lib;
       };

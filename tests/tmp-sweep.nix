@@ -125,6 +125,7 @@ let
     }:
     (lib.evalModules {
       specialArgs = {
+        osConfig = null;
         pkgs = withPlatform isDarwin;
         lib = hmLib;
       };
