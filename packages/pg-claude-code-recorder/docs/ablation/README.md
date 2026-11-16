@@ -112,7 +112,29 @@ timers. The cost of one clock read is `go test -bench StepClockRead ./internal/s
 sampled statements, so about 5 reads, or 0.25 percent of a 21 s parse of 300,000 lines (300,000 x 5 x 36 ns =
 0.054 s). A synthetic corpus (86 MB, built by repeating the repository's transcript fixture) run five times per
 variant under a load average of 36 to 47 varied by more than 50 percent between runs of the same variant, so
-the harness could not resolve a 1 percent difference on that host; rerun it on a quiet machine.
+the harness could not resolve a 1 percent difference on that host.
+
+A second measurement (2026-11-16) did not wait for a quiet host (load average 38 to 70 on 11 cores) and decided
+on instructions retired from `/usr/bin/time -l`, which do not depend on load, plus the benchmark. It used a
+synthetic corpus of 30 files, each the repository's transcript fixture repeated 40 times (104 MB, 16,800 lines,
+37,200 records), the test binary built with `-tags ablation` and without `-race`, and six interleaved `V1`,
+`V1T0` pairs:
+
+| Measure (median of 6, min to max)  | V1 (timers on)              | V1T0 (timers off)           | V1 against V1T0 |
+| ---------------------------------- | --------------------------- | --------------------------- | --------------- |
+| Instructions retired               | 114.90 G (114.29 to 115.76) | 115.06 G (114.37 to 115.66) | -0.14 percent   |
+| Cycles elapsed                     | 34.83 G (34.00 to 38.37)    | 37.45 G (30.21 to 39.11)    | -7.0 percent    |
+| User plus system CPU, seconds      | 11.91 (11.59 to 13.70)      | 13.17 (9.78 to 14.15)       | -9.5 percent    |
+| Wall time, seconds (informational) | 20.99 (18.73 to 35.68)      | 22.03 (15.95 to 35.53)      | -4.7 percent    |
+
+The within-variant spread of instructions retired is 1.1 to 1.3 percent (max over min), so the instruction
+comparison resolves only differences above about 1 percent: the timers cost less than that, and the sign of the
+-0.14 percent is noise (the timers cannot remove instructions). Cycles and CPU time varied by 13 to 29 percent
+within a variant, with the wrong sign, so they only confirm that load swamps them. The decision rests on the
+benchmark: `go test -bench StepClockRead -count 12 ./internal/store/` gave 24.56 ns per read (benchstat, plus or
+minus 21 percent; range 15.0 to 41.5 ns). At about 5 reads per line, 300,000 lines cost 300,000 x 5 x 24.56 ns =
+0.037 s, or 0.17 percent of a 21.4 s parse (0.29 percent at the slowest sample, 41.5 ns). The step timers cost
+under 1 percent of the baseline.
 
 ## Output-equivalence digest
 
