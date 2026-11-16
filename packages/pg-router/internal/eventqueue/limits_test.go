@@ -153,6 +153,24 @@ func drainToIdle(t *testing.T, q *Queue) {
 	}
 }
 
+// seedDeadHistory writes to path a log of n accepted-and-evicted events (dead
+// history, no live state): the history is built on a MemStore queue and written
+// out in one buffered pass, because an fsync per append would dominate the test.
+func seedDeadHistory(t *testing.T, path string, clk *mockClock, n int) {
+	t.Helper()
+	mem := NewMemStore()
+	q, err := New(mem, WithClock(clk.now), WithSleeper(clk.after))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Register(newListener("h", "T"))
+	for i := 0; i < n; i++ {
+		mustEnqueue(t, q, evt("e"+strconv.Itoa(i), "T"))
+	}
+	drainToIdle(t, q)
+	writeRecordsLog(t, path, mem.recs)
+}
+
 // --- soft step ------------------------------------------------------------
 
 func TestLimits_belowSoftDoesNothing(t *testing.T) {
@@ -277,23 +295,21 @@ func TestLimits_haltIsNotALevelAndLevelChangesDoNotTouchIt(t *testing.T) {
 // is cleared (and was never set after the compaction landed).
 func TestLimits_compactionReclaimingSpaceClearsTheHalt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
+	clk := newClock()
+	// Dead history: events that are accepted and evicted. The history is built in
+	// memory and written out in one buffered pass (an fsync per append dominated).
+	seedDeadHistory(t, path, clk, 300)
 	fs, err := NewFileStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = fs.Close() }()
-	clk := newClock()
 	q, err := New(fs, WithClock(clk.now), WithSleeper(clk.after), WithLogLimits(20_000, 1<<20))
 	if err != nil {
 		t.Fatal(err)
 	}
 	l := newListener("h", "T")
 	q.Register(l)
-	// Dead history: events that are accepted and evicted.
-	for i := 0; i < 300; i++ {
-		mustEnqueue(t, q, evt("e"+strconv.Itoa(i), "T"))
-	}
-	drainToIdle(t, q)
 	if fs.LogSize() <= 20_000 {
 		t.Fatalf("setup: log is only %d bytes, want > soft 20000", fs.LogSize())
 	}
@@ -637,22 +653,9 @@ func TestLimits_encodeErrorDoesNotMarkUnwritable(t *testing.T) {
 // compacted size and nothing is halted or rejected.
 func TestLimits_restartCompactsBeforeEvaluatingLimits(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "queue.jsonl")
-	fs, err := NewFileStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	clk := newClock()
-	q, err := New(fs, WithClock(clk.now), WithSleeper(clk.after))
-	if err != nil {
-		t.Fatal(err)
-	}
-	q.Register(newListener("h", "T"))
-	for i := 0; i < 300; i++ {
-		mustEnqueue(t, q, evt("e"+strconv.Itoa(i), "T"))
-	}
-	drainToIdle(t, q)
-	big := fs.LogSize()
-	_ = fs.Close()
+	seedDeadHistory(t, path, clk, 300)
+	big := fileSize(t, path)
 	const hard = 10_000
 	if big <= hard {
 		t.Fatalf("setup: log %d bytes is not over the %d hard limit", big, hard)

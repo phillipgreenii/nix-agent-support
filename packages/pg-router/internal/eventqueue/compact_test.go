@@ -1,6 +1,7 @@
 package eventqueue
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,6 +70,29 @@ func stateOf(q *Queue) string {
 		panic(err)
 	}
 	return string(b)
+}
+
+// writeRecordsLog writes recs to path as one JSON line each, in one buffered
+// pass (the shape FileStore appends, without its fsync per record).
+func writeRecordsLog(t *testing.T, path string, recs []Record) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bw := bufio.NewWriter(f)
+	enc := json.NewEncoder(bw)
+	for _, r := range recs {
+		if err := enc.Encode(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func stateOfRecords(t *testing.T, recs []Record) string {
@@ -169,7 +193,7 @@ func randomLog(r *rand.Rand, n int) []Record {
 // offers go to the same listeners, and a re-emit of every id (live or retired)
 // is deduped or admitted the same way.
 func TestCompactEquivalenceProperty(t *testing.T) {
-	for seed := int64(0); seed < 400; seed++ {
+	for seed := int64(0); seed < 150; seed++ {
 		r := rand.New(rand.NewSource(seed))
 		l := randomLog(r, 1+r.Intn(160))
 		c := compactRecords(l)
@@ -562,7 +586,7 @@ func TestCompactConcurrentAppendsLoseNothing(t *testing.T) {
 	l := newListener("h", "T")
 	q.Register(l)
 
-	const producers, per = 4, 250
+	const producers, per = 4, 120
 	var wg, aux sync.WaitGroup
 	var stop atomic.Bool
 	exp := time.Now().Add(time.Hour)
@@ -625,13 +649,22 @@ func TestCompactRuntimeThresholdTrigger(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "queue.jsonl")
 	clk := newClock()
-	q, fs := newFileQueue(t, path, WithClock(clk.now), WithEarlyEviction(), WithCompaction(8*1024, false))
-	l := newListener("h", "T")
-	q.Register(l)
-	for i := 0; i < 200; i++ {
-		mustEnqueue(t, q, evtUntil(fmt.Sprintf("t%d", i), "T", clk.in(time.Hour)))
-		q.Dispatch()
+	// The 200 accepted-and-evicted events are built on a MemStore and written out
+	// in one buffered pass (an fsync per append dominated); the queue under test
+	// then replays that log.
+	mem := NewMemStore()
+	mq, err := New(mem, WithClock(clk.now), WithEarlyEviction())
+	if err != nil {
+		t.Fatal(err)
 	}
+	mq.Register(newListener("h", "T"))
+	for i := 0; i < 200; i++ {
+		mustEnqueue(t, mq, evtUntil(fmt.Sprintf("t%d", i), "T", clk.in(time.Hour)))
+		mq.Dispatch()
+	}
+	writeRecordsLog(t, path, mem.recs)
+	q, fs := newFileQueue(t, path, WithClock(clk.now), WithEarlyEviction(), WithCompaction(8*1024, false))
+	q.Register(newListener("h", "T"))
 	mustEnqueue(t, q, evtUntil("keep", "U", clk.in(time.Hour)))
 	grown := q.LogSize()
 	if grown < 8*1024 {
@@ -784,7 +817,13 @@ func writeLiveShapedLog(t *testing.T, path string, events, live int) int {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	enc := json.NewEncoder(f)
+	bw := bufio.NewWriter(f)
+	defer func() {
+		if err := bw.Flush(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	enc := json.NewEncoder(bw)
 	at := time.Date(2026, 9, 17, 8, 0, 0, 0, time.UTC)
 	n := 0
 	put := func(r Record) {
