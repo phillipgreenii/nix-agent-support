@@ -351,7 +351,7 @@ func (r *reaper) dropMissing() {
 			keep = append(keep, w)
 			continue
 		}
-		ev := state.Event{Kind: "reap-missing", WorktreeID: w.ID, Outcome: "ok", Details: map[string]any{"path": w.Path, "branch": w.Branch}}
+		ev := state.Event{Kind: "remove", WorktreeID: w.ID, Outcome: "ok", Details: map[string]any{"path": w.Path, "branch": w.Branch}}
 		if w.Lease != nil {
 			ev.LeaseID, ev.Name, ev.Owner = w.Lease.ID, w.Lease.Name, w.Lease.Owner
 		}
@@ -432,7 +432,7 @@ func (r *reaper) settleRetry(w state.Worktree, gitErr error) {
 			r.fail("%v", err)
 			return
 		}
-		m.event(state.Event{Kind: "reap-broken", WorktreeID: w.ID, Outcome: "ok"})
+		m.event(state.Event{Kind: "remove", WorktreeID: w.ID, Outcome: "ok"})
 		r.res.Removed = append(r.res.Removed, w.ID)
 		return
 	}
@@ -727,7 +727,7 @@ func (r *reaper) createStandby(id, path string) bool {
 		r.res.Broken = append(r.res.Broken, id)
 		return false
 	}
-	m.event(state.Event{Kind: "standby", WorktreeID: id, Outcome: "ok", Details: map[string]any{"path": path}})
+	m.event(state.Event{Kind: "create", WorktreeID: id, Outcome: "ok", Details: map[string]any{"path": path}})
 	r.res.Created = append(r.res.Created, id)
 	return true
 }

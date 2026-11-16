@@ -393,6 +393,9 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-ccrec-schema-rebuild-required",
 		"pg-ccrec-shutdown-overrun",
 		"pg-gwm-exporter-down",
+		"pg-gwm-broken-persisting",
+		"pg-gwm-max-reached-rate",
+		"pg-gwm-reaper-stale",
 		"pa-monitor-scan-stale",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
@@ -1084,8 +1087,11 @@ func TestRegisteredRuleUIDsMatchRecorderRuleFile(t *testing.T) {
 // gwmRuleFile is the pg-gwm alert rules file, relative to this package.
 const gwmRuleFile = "../../../pg-gwm/grafana/alerting/alerts.yaml"
 
-// The pg-gwm-* entries of registeredRuleUIDs equal the uids of the pg-gwm rule file, in
-// the file's order. The file lives in a sibling module, so a build that carries only this module
+// gwmReaperRuleFile holds the reaper-stale rule alone.
+const gwmReaperRuleFile = "../../../pg-gwm/grafana/alerting/alerts-reaper.yaml"
+
+// The pg-gwm-* entries of registeredRuleUIDs equal the uids of the two pg-gwm rule files
+// (alerts.yaml, then alerts-reaper.yaml), in order. The file lives in a sibling module, so a build that carries only this module
 // (the nix go-tests sandbox) cannot see it and the test then checks the list's own pinned entry;
 // the pg-gwm alert-rules flake check compares the real file with this list.
 func TestRegisteredRuleUIDsMatchGwmRuleFile(t *testing.T) {
@@ -1095,25 +1101,27 @@ func TestRegisteredRuleUIDsMatchGwmRuleFile(t *testing.T) {
 			registered = append(registered, uid)
 		}
 	}
-	if len(registered) != 1 {
-		t.Fatalf("registered pg-gwm uids = %d, want 1: %v", len(registered), registered)
+	if len(registered) != 4 {
+		t.Fatalf("registered pg-gwm uids = %d, want 4: %v", len(registered), registered)
 	}
 	for _, uid := range registered {
 		if len(uid) > 40 {
 			t.Fatalf("uid %q is over Grafana's 40-character cap", uid)
 		}
 	}
-	data, err := os.ReadFile(gwmRuleFile)
-	if errors.Is(err, os.ErrNotExist) {
-		t.Skipf("rule file not in this build (%s); the pg-gwm alert-rules flake check covers it", gwmRuleFile)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
 	var fromFile []string
-	for _, line := range strings.Split(string(data), "\n") {
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "- uid: "); ok {
-			fromFile = append(fromFile, strings.TrimSpace(rest))
+	for _, f := range []string{gwmRuleFile, gwmReaperRuleFile} {
+		data, err := os.ReadFile(f)
+		if errors.Is(err, os.ErrNotExist) {
+			t.Skipf("rule file not in this build (%s); the pg-gwm alert-rules flake check covers it", f)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "- uid: "); ok {
+				fromFile = append(fromFile, strings.TrimSpace(rest))
+			}
 		}
 	}
 	if strings.Join(fromFile, ",") != strings.Join(registered, ",") {

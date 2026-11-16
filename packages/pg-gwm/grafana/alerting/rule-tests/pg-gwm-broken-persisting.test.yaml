@@ -1,0 +1,46 @@
+# promtool unit tests for the pg-gwm-broken-persisting alert. Run by the flake check
+# test-pg-gwm-alert-rules through check-alert-rules.sh, which generates rules.yml next to
+# this file (see pg-gwm-exporter-down.test.yaml). promtool's clock starts at 0.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a worktree broken for over an hour fires, one per repository
+    interval: 1m
+    input_series:
+      - series: pg_gwm_broken_worktrees{repo="r-aaaaaa"}
+        values: "1x200"
+      - series: pg_gwm_broken_worktrees{repo="r-bbbbbb"}
+        values: "0x200"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: pg-gwm-broken-persisting
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: pg-gwm-broken-persisting
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: r-aaaaaa
+
+  - name: no broken worktree stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_gwm_broken_worktrees{repo="r-aaaaaa"}
+        values: "0x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-gwm-broken-persisting
+        exp_alerts: []
+
+  - name: a break cleared within the hour never fires
+    interval: 1m
+    input_series:
+      - series: pg_gwm_broken_worktrees{repo="r-aaaaaa"}
+        values: "1x30 0x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-gwm-broken-persisting
+        exp_alerts: []

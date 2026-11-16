@@ -1,0 +1,57 @@
+# pg-gwm-reaper-stale, the only rule of this file. It has noDataState Alerting: a reaper that has
+# never run leaves no series, and that is the failure the rule reports. So the deployment registers
+# this file only in the change that enables the reaper; it is never loaded before then and needs no
+# delete twin. The rule is in the router probe's registeredRuleUIDs.
+#
+# The expression takes the larger of the last successful run's age (no repository label) and each
+# repository's last-reap age, so either going over 1800 seconds (three 600-second reaper
+# intervals) fires. A repository whose reap keeps being skipped keeps its entry and ages until this
+# fires.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-gwm-reaper
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      - uid: pg-gwm-reaper-stale
+        title: pg-gwm reaper is stale
+        condition: C
+        for: 0m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The pg-gwm reaper has not completed a reap for over 30 minutes"
+          description: "pg_gwm_reaper_last_success_age_seconds or pg_gwm_last_reap_age_seconds is above 1800 seconds (three reaper intervals), or the reaper has never run. Check the reaper launchd agent and its log, then run pg-gwm reap --all-repos by hand and read its warnings."
+          __dashboardUid__: pg-gwm
+          __panelId__: "10"
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max by (repo) ({__name__=~"pg_gwm_reaper_last_success_age_seconds|pg_gwm_last_reap_age_seconds"})'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1800]

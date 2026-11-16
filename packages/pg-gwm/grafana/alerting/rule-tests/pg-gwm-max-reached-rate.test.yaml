@@ -1,0 +1,41 @@
+# promtool unit tests for the pg-gwm-max-reached-rate alert. Run by the flake check
+# test-pg-gwm-alert-rules through check-alert-rules.sh, which generates rules.yml next to
+# this file (see pg-gwm-exporter-down.test.yaml). promtool's clock starts at 0.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: more than 5 max-reached refusals in an hour fires
+    interval: 1m
+    input_series:
+      - series: pg_gwm_refusals_total{repo="r-aaaaaa",error="max-reached"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-gwm-max-reached-rate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: r-aaaaaa
+
+  - name: a trickle of refusals stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_gwm_refusals_total{repo="r-aaaaaa",error="max-reached"}
+        values: "0+0.05x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-gwm-max-reached-rate
+        exp_alerts: []
+
+  - name: other refusals do not count
+    interval: 1m
+    input_series:
+      - series: pg_gwm_refusals_total{repo="r-aaaaaa",error="busy"}
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-gwm-max-reached-rate
+        exp_alerts: []

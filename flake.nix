@@ -9225,6 +9225,7 @@
                   ''
                     bash ${./packages/pg-gwm/grafana/check-alert-rules.sh} \
                       ${./packages/pg-gwm/grafana/alerting/alerts.yaml} \
+                      ${./packages/pg-gwm/grafana/alerting/alerts-reaper.yaml} \
                       ${./packages/pg-gwm/grafana/pg-gwm.json} \
                       ${./packages/pg-gwm/grafana/alerting/rule-tests} \
                       ${./packages/pg-router-probe/cmd/pg-router-probe/run.go} \
@@ -10074,7 +10075,7 @@
                   '';
 
               # pg-gwm-exporter: the darwin module evaluates standalone and renders
-              # the launchd agent (loopback serve on the ledger port, optional --root), the
+              # the launchd agent (loopback serve on the ledger port, no --root), the
               # scrape target, and nothing at all while off or while observability is off.
               test-pg-gwm-exporter-darwin-module =
                 let
@@ -10131,7 +10132,6 @@
                   enabled = evalModule true { enable = true; };
                   rooted = evalModule true {
                     enable = true;
-                    poolRoot = "/srv/pool";
                     port = 9999;
                   };
                   obsOff = evalModule false { enable = true; };
@@ -10165,11 +10165,12 @@
                 assert enabled.phillipgreenii.observability.metricsTargets.pg-gwm.scrapeInterval == "60s";
                 assert hasInfixNoCtx "pg-gwm serve" ua.script;
                 assert lib.hasInfix "--addr 127.0.0.1:9148" ua.script;
-                # An empty poolRoot lets the command pick its default: no --root.
+                # serve reads the user config and registry: no --root.
                 assert !(lib.hasInfix "--root" ua.script);
+                assert !(enabled.phillipgreenii.services.pg-gwm-exporter ? poolRoot);
                 assert lib.hasInfix "export XDG_STATE_HOME=/Users/tester/.local/state" ua.script;
                 assert lib.hasInfix "--addr 127.0.0.1:9999" uaRooted.script;
-                assert lib.hasInfix "--root /srv/pool" uaRooted.script;
+                assert !(lib.hasInfix "--root" uaRooted.script);
                 assert rooted.phillipgreenii.observability.metricsTargets.pg-gwm.port == 9999;
                 assert
                   enabled.phillipgreenii.observability.logSources.pg-gwm-exporter == {

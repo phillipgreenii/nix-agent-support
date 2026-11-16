@@ -17,21 +17,6 @@ import (
 // port is the one reserved for this exporter in the shared port ledger.
 const defaultServeAddr = "127.0.0.1:9148"
 
-// buildInfoExposition is the only series served until the manager's metrics
-// land.
-func buildInfoExposition() string {
-	return fmt.Sprintf("# HELP pg_gwm_build_info Build information; always 1.\n# TYPE pg_gwm_build_info gauge\npg_gwm_build_info{version=%q} 1\n", Version)
-}
-
-func (a *app) metricsHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprint(w, buildInfoExposition())
-	})
-	return mux
-}
-
 // checkLoopback rejects a listen address whose host is not a loopback IP: the
 // exposition is unauthenticated and MUST NOT leave the machine.
 func checkLoopback(addr string) error {

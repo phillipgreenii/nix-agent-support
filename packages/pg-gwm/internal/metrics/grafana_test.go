@@ -5,15 +5,22 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/pg-gwm/internal/state"
 )
 
 var metricToken = regexp.MustCompile(`pg_gwm_[a-z_]+`)
 
 // exportedNames are the series names Render emits, with the histogram suffixes.
-func exportedNames(t *testing.T) map[string]bool {
-	t.Helper()
-	free := uint64(1)
-	out := Render(Gauges{FreeBytes: &free}, Journal{})
+func exportedNames() map[string]bool {
+	free, floor, preserved, age := uint64(1), uint64(1), 1, 1.0
+	out := Render(Snapshot{
+		ReaperLastSuccessAge: &age, ConfigValid: true,
+		Repos: []Repo{{
+			Label: "r-abcdef", HaveState: true, FreeBytes: &free, FloorBytes: &floor, Preserved: &preserved,
+			LastReapAge: &age, Worktrees: map[string]int{}, Counters: &state.RepoCounters{},
+		}},
+	})
 	names := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -24,24 +31,24 @@ func exportedNames(t *testing.T) map[string]bool {
 	return names
 }
 
-// Every pg_gwm_* token in an alert expression or a dashboard panel is a series the
-// `metrics` command exports; a rename in Render without the rule files fails here.
+// Every pg_gwm_* token in an alert expression or a dashboard panel is a series
+// the exporter serves; a rename in Render without the rule files fails here.
 func TestGrafanaFilesOnlyReadExportedSeries(t *testing.T) {
-	names := exportedNames(t)
-	for _, f := range []string{"../../grafana/alerting/alerts.yaml", "../../grafana/pg-gwm.json"} {
+	names := exportedNames()
+	for _, f := range []string{
+		"../../grafana/alerting/alerts.yaml", "../../grafana/alerting/alerts-reaper.yaml", "../../grafana/pg-gwm.json",
+	} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
 		toks := metricToken.FindAllString(string(b), -1)
-		// The alert file holds only the exporter-down rule, which reads up{}, so it
-		// carries no exported series; the dashboard must read some.
 		if len(toks) == 0 && strings.HasSuffix(f, ".json") {
 			t.Fatalf("%s: no metric tokens found", f)
 		}
 		for _, tok := range toks {
-			// "pg_gwm_" alone and the package-name token "pg_gwm" are prose.
-			if tok == Prefix || tok == "pg_gwm_alert_rules" {
+			// "pg_gwm_" alone is prose.
+			if tok == Prefix {
 				continue
 			}
 			if !names[tok] {

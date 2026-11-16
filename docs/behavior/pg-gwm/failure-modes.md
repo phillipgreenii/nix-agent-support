@@ -105,8 +105,10 @@ Extensions:
   oldest lease with no expiry; worktrees removed and kept by reap; preserved branches; `broken`
   worktrees; refusals by error name; the time a lease takes (split into wait, creation and switch); and
   the age of the last reaper run. It MUST have alerts for `broken` worktrees persisting, a reaper run
-  older than three `reap-interval`s, and `max-reached` refusals above a configured rate. Each alert rule
-  MUST be registered with the deployment's probe, as the deployment's alert convention requires.
+  older than three `reap-interval`s, and `max-reached` refusals above a configured rate. The rate is a
+  literal in the alert rule file (5 an hour); the rule file is the configuration, and changing the rate is
+  a one-line edit of that file. _(Plan decision 12; the operator may overrule.)_ Each alert rule MUST be
+  registered with the deployment's probe, as the deployment's alert convention requires.
 - **`INV-GWM-34`** <!-- uuid: a867aa28-7d57-4838-a7a2-e840e583e823 --> — Every lease, renew, release,
   reclaim, preservation, creation, removal and `broken` transition MUST be recorded in an append-only
   event log under the repository's state, naming the worktree id, lease id, name, owner and outcome.

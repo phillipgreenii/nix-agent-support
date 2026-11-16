@@ -52,32 +52,9 @@ in
         `docs/go-daemon-profiling-runbook.md` in `phillipg-nix-repo-base`.
       '';
     };
-
-    poolRoot = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      example = "/path/to/pool-state";
-      description = ''
-        Absolute pool state directory the exporter reads (`pg-gwm
-        serve --root`). Empty lets the command pick its default
-        (`PG_GWM_ROOT`, else under `XDG_STATE_HOME`; the agent sets
-        `XDG_STATE_HOME` to `~/.local/state`, the same default every other
-        process of the user sees).
-
-        This MUST be the pool the leases are taken from, or the exporter
-        reports an empty pool while the real one is busy.
-      '';
-    };
   };
 
   config = lib.mkIf gate {
-    assertions = [
-      {
-        assertion = cfg.poolRoot == "" || lib.hasPrefix "/" cfg.poolRoot;
-        message = "phillipgreenii.services.pg-gwm-exporter.poolRoot must be empty or an absolute path (got \"${cfg.poolRoot}\").";
-      }
-    ];
-
     phillipgreenii = {
       system.launchdServices.userAgents.pg-gwm-exporter = {
         label = "com.phillipg.pg-gwm-exporter";
@@ -87,11 +64,10 @@ in
         script = ''
           export HOME=${lib.escapeShellArg homeDir}
           export XDG_STATE_HOME=${lib.escapeShellArg stateHome}
+          export XDG_CONFIG_HOME=${lib.escapeShellArg "${homeDir}/.config"}
           mkdir -p ${lib.escapeShellArg stateDir}
           exec ${cfg.package}/bin/pg-gwm serve \
-            --addr 127.0.0.1:${toString cfg.port}${
-              lib.optionalString (cfg.poolRoot != "") " \\\n    --root ${lib.escapeShellArg cfg.poolRoot}"
-            }
+            --addr 127.0.0.1:${toString cfg.port}
         '';
         runAtLoad = true;
         keepAlive = true;

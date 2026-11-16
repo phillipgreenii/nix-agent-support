@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Alert rule check for the pg-gwm Grafana alert rules.
 #
-#   check-alert-rules.sh <alerts.yaml> <dashboard.json> <rule-tests-dir> <probe run.go> <alerts-delete.yaml>
+#   check-alert-rules.sh <alerts.yaml> <alerts-reaper.yaml> <dashboard.json> <rule-tests-dir> <probe run.go> <alerts-delete.yaml>
 #
 # Three parts:
 #
 #   1. Grafana-only fields, read with yq and asserted with jq: the exact uid set, uid length,
-#      condition C over refIds A, B, C, the per-rule `for` and threshold, noDataState OK,
-#      execErrState Error, severity warning, the absence of any folderUid, and the dashboard
-#      annotations (the panel id must exist exactly once in the dashboard JSON).
+#      condition C over refIds A, B, C, the per-rule `for`, threshold, noDataState and severity,
+#      execErrState Error, the absence of any folderUid, and the dashboard annotations (the panel
+#      id must exist exactly once in the dashboard JSON). alerts.yaml holds exactly the exporter-down,
+#      broken-persisting and max-reached-rate rules and alerts-reaper.yaml exactly the reaper-stale
+#      rule, whose noDataState Alerting is pinned here because promtool cannot test a missing series.
 #   2. Registration: the pg-gwm-* entries of registeredRuleUIDs in the router probe's
-#      run.go are exactly the rule uids of the file, in its order. The delete file holds
+#      run.go are exactly the rule uids of the two files (alerts.yaml first), in order. The delete file holds
 #      deleteRules for exactly the six uids of the tool pg-gwm replaced.
 #   3. PromQL behaviour: refId A of every rule is wrapped as a Prometheus `alert:` rule
 #      `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator, `for` and
@@ -18,21 +20,25 @@
 #      every `*.test.yaml` in the rule-tests directory runs under `promtool test rules`.
 set -euo pipefail
 
-if [ "$#" -ne 5 ]; then
-  echo "usage: check-alert-rules.sh <alerts.yaml> <dashboard.json> <rule-tests-dir> <probe run.go> <alerts-delete.yaml>" >&2
+if [ "$#" -ne 6 ]; then
+  echo "usage: check-alert-rules.sh <alerts.yaml> <alerts-reaper.yaml> <dashboard.json> <rule-tests-dir> <probe run.go> <alerts-delete.yaml>" >&2
   exit 2
 fi
 alerts="$1"
-dashboard="$2"
-tests_dir="$3"
-run_go="$4"
-delete_file="$5"
+reaper_alerts="$2"
+dashboard="$3"
+tests_dir="$4"
+run_go="$5"
+delete_file="$6"
 
-# uid, for, threshold, dashboard panel id, evaluator, noDataState: one row per rule, in the
-# file's order. An empty panel id means the rule links no dashboard panel (the exporter-down
-# rule, the exporter's working signal, which alerts on missing data).
+# uid, for, threshold, dashboard panel id, evaluator, noDataState, severity: one row per rule,
+# alerts.yaml's first, then alerts-reaper.yaml's. An empty panel id means the rule links no
+# dashboard panel (the exporter-down rule, the exporter's working signal, which alerts on missing data).
 rows='[
-  ["pg-gwm-exporter-down", "5m", 1, "", "lt", "Alerting"]
+  ["pg-gwm-exporter-down", "10m", 1, "", "lt", "Alerting", "critical"],
+  ["pg-gwm-broken-persisting", "1h", 0, "2", "gt", "OK", "warning"],
+  ["pg-gwm-max-reached-rate", "0m", 5, "8", "gt", "OK", "warning"],
+  ["pg-gwm-reaper-stale", "0m", 1800, "10", "gt", "Alerting", "warning"]
 ]'
 rule_uids="$(printf '%s' "$rows" | jq -c '[.[][0]]')"
 
@@ -41,7 +47,13 @@ fail() {
   exit 1
 }
 
-alerts_json="$(yq -o=json -I=0 '.' "$alerts")"
+main_json="$(yq -o=json -I=0 '.' "$alerts")"
+reaper_json="$(yq -o=json -I=0 '.' "$reaper_alerts")"
+[ "$(printf '%s' "$main_json" | jq -c '[.groups[].rules[].uid]')" = '["pg-gwm-exporter-down","pg-gwm-broken-persisting","pg-gwm-max-reached-rate"]' ] ||
+  fail "alerts.yaml must hold exactly the exporter-down, broken-persisting and max-reached-rate rules"
+[ "$(printf '%s' "$reaper_json" | jq -c '[.groups[].rules[].uid]')" = '["pg-gwm-reaper-stale"]' ] ||
+  fail "alerts-reaper.yaml must hold exactly the reaper-stale rule"
+alerts_json="$(jq -cn --argjson a "$main_json" --argjson b "$reaper_json" '$a + {groups: ($a.groups + $b.groups)}')"
 
 assert() {
   local msg="$1" prog="$2"
@@ -62,14 +74,14 @@ assert "rule uids must be exactly the tested set, in order" \
   '[.groups[].rules[].uid] == $uids' --argjson uids "$rule_uids"
 
 dash_uid="$(jq -r '.uid' "$dashboard")"
-while IFS=$'\t' read -r uid for_ thr op nodata panel; do
+while IFS=$'\t' read -r uid for_ thr op nodata sev panel; do
   assert "$uid: uid at most 40 characters" '.groups[].rules[] | select(.uid == $u) | (.uid | length) <= 40' --arg u "$uid"
-  assert "$uid: condition C over A, B, C; for $for_; noDataState $nodata; execErrState Error; severity warning" \
+  assert "$uid: condition C over A, B, C; for $for_; noDataState $nodata; execErrState Error; severity $sev" \
     '.groups[].rules[] | select(.uid == $u)
      | .condition == "C" and (.data | map(.refId) == ["A", "B", "C"]) and .for == $f
-       and .noDataState == $nd and .execErrState == "Error" and .labels == { severity: "warning" }
+       and .noDataState == $nd and .execErrState == "Error" and .labels == { severity: $sev }
        and ((.title // "") != "") and ((.annotations.summary // "") != "") and ((.annotations.description // "") != "")' \
-    --arg u "$uid" --arg f "$for_" --arg nd "$nodata"
+    --arg u "$uid" --arg f "$for_" --arg nd "$nodata" --arg sev "$sev"
   assert "$uid: refId C is a single $op $thr threshold stage over B" \
     '.groups[].rules[] | select(.uid == $u) | (.data[] | select(.refId == "C") | .model)
      | .type == "threshold" and .expression == "B"
@@ -89,7 +101,7 @@ while IFS=$'\t' read -r uid for_ thr op nodata panel; do
   jq -e --arg pid "$panel" \
     '[.. | objects | select(has("gridPos")) | select((.id | tostring) == $pid)] | length == 1' \
     "$dashboard" >/dev/null || fail "$uid: __panelId__ $panel does not exist in the dashboard JSON exactly once"
-done < <(printf '%s' "$rows" | jq -r '.[] | [.[0], .[1], (.[2] | tostring), .[4], .[5], .[3]] | @tsv')
+done < <(printf '%s' "$rows" | jq -r '.[] | [.[0], .[1], (.[2] | tostring), .[4], .[5], .[6], .[3]] | @tsv')
 
 # --- part 2: registration with the router probe ----------------------------------------
 

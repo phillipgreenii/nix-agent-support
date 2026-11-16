@@ -1,0 +1,63 @@
+# promtool unit tests for the pg-gwm-reaper-stale alert. Run by the flake check
+# test-pg-gwm-alert-rules through check-alert-rules.sh, which generates rules.yml next to
+# this file (see pg-gwm-exporter-down.test.yaml). promtool's clock starts at 0.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+# The rule's noDataState is Alerting (pinned by check-alert-rules.sh, because promtool sees no
+# series and so cannot assert it): a reaper that never ran leaves no series at all.
+# Ages grow one second per second, so the series below are ages in seconds at each minute.
+tests:
+  - name: a last success older than 1800 seconds fires
+    interval: 1m
+    input_series:
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "0+60x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: a repository whose reap keeps being skipped fires on its own age
+    interval: 1m
+    input_series:
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "0+10x120"
+      - series: pg_gwm_last_reap_age_seconds{repo="r-aaaaaa"}
+        values: "0+60x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: r-aaaaaa
+
+  - name: a fresh reaper stays quiet
+    interval: 1m
+    input_series:
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "0+10x120"
+      - series: pg_gwm_last_reap_age_seconds{repo="r-aaaaaa"}
+        values: "0+10x120"
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+
+  - name: no series at all (the reaper never ran) shows nothing to promtool
+    interval: 1m
+    input_series:
+      - series: up{job="pg-gwm"}
+        values: "1x200"
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []

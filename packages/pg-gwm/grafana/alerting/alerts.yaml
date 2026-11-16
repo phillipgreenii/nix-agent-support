@@ -1,23 +1,27 @@
-# pg-gwm unified-alerting rules. The one rule here watches the exporter itself: the series come
-# from `pg-gwm metrics`, delivered by `pg-gwm serve` (the phillipgreenii.services.pg-gwm-exporter
-# darwin module), which Prometheus scrapes as job="pg-gwm".
+# pg-gwm unified-alerting rules. The series come from `pg-gwm serve` (the
+# phillipgreenii.services.pg-gwm-exporter darwin module), which Prometheus scrapes as job="pg-gwm".
 #
-#   pg-gwm-exporter-down     the exporter's scrape fails or is missing, for 5m
+#   pg-gwm-exporter-down      the exporter's scrape fails or is missing, for 10m (critical)
+#   pg-gwm-broken-persisting  a worktree stays broken for 1h
+#   pg-gwm-max-reached-rate   more than 5 max-reached refusals in an hour; the rate is a literal
+#                             here (the rule file is the configuration; changing it is a one-line edit)
+#
+# pg-gwm-reaper-stale lives in alerts-reaper.yaml: its noDataState is Alerting (a reaper that never
+# ran is the failure), so it is registered only together with the reaper. This file is registered
+# by the deployment already.
 #
 # The exporter-down rule is the exporter's working signal (nix-support-apps ADR 0041, option a): it
-# is the only rule that fires when the exporter dies, so it has noDataState Alerting (a missing up
-# series is the failure it reports), and it is gated on nothing else.
+# is the only rule that fires when the exporter dies, so it has noDataState Alerting.
 #
 # refId A is plain PromQL and refId C a single threshold stage, so check-alert-rules.sh can wrap A
 # with C's evaluator and run `promtool test rules` over rule-tests/<uid>.test.yaml.
 #
-# The five pool rules of the tool pg-gwm replaced (leaked slots, quarantined, exhausted
-# waiting, reset slow, daemon orphans) and its exporter-down rule are removed through
+# The five pool rules of the tool pg-gwm replaced and its exporter-down rule are removed through
 # alerts-delete.yaml, because Grafana keeps a rule live after the file that defined it is dropped.
 #
-# The uid is also in registeredRuleUIDs of packages/pg-router-probe/cmd/pg-router-probe/run.go
+# Every uid is also in registeredRuleUIDs of packages/pg-router-probe/cmd/pg-router-probe/run.go
 # (a firing instance reaches the escalation flow), and a deployment that passes its own
-# --rule-uid list to the probe MUST add it to that list too. The folder "Claude Agents"
+# --rule-uid list to the probe MUST add them to that list too. The folder "Claude Agents"
 # converges by title (never pin a folderUid, grafana/grafana#125079). Delivery is Grafana's
 # notification policy; this file adds none.
 apiVersion: 1
@@ -30,14 +34,14 @@ groups:
       - uid: pg-gwm-exporter-down
         title: pg-gwm exporter is down
         condition: C
-        for: 5m
+        for: 10m
         noDataState: Alerting
         execErrState: Error
         labels:
-          severity: warning
+          severity: critical
         annotations:
-          summary: "The pg-gwm exporter has not answered a scrape for over 5 minutes"
-          description: 'up{job="pg-gwm"} has been 0, or has gone missing, for over 5 minutes: the exporter (pg-gwm serve, launchd agent com.phillipg.pg-gwm-exporter) is down or its listener is not on the scraped port, so the pg-gwm series are blind. Read the launchd log under ~/.local/state/pg-gwm-exporter/ and restart the agent.'
+          summary: "The pg-gwm exporter has not answered a scrape for over 10 minutes"
+          description: 'up{job="pg-gwm"} has been 0, or has gone missing, for over 10 minutes: the exporter (pg-gwm serve, launchd agent com.phillipg.pg-gwm-exporter) is down or its listener is not on the scraped port, so the pg-gwm series are blind. Read the launchd log under ~/.local/state/pg-gwm-exporter/ and restart the agent.'
         data:
           - refId: A
             relativeTimeRange:
@@ -66,3 +70,85 @@ groups:
                 - evaluator:
                     type: lt
                     params: [1]
+      - uid: pg-gwm-broken-persisting
+        title: pg-gwm worktree stays broken
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A pg-gwm worktree has been broken for over an hour"
+          description: "pg_gwm_broken_worktrees has been above 0 for an hour. Run: pg-gwm list, then pg-gwm info <id> for the broken worktree, read the event log under the repository git directory (pg-gwm/events-*.jsonl), then run pg-gwm reap to retry its removal."
+          __dashboardUid__: pg-gwm
+          __panelId__: "2"
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (repo) (pg_gwm_broken_worktrees)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-gwm-max-reached-rate
+        title: pg-gwm refuses leases at max
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5 pg-gwm leases an hour were refused with max-reached"
+          description: 'increase(pg_gwm_refusals_total{error="max-reached"}[1h]) is above 5: requesters are waiting on a full set. Run pg-gwm list to see who holds the worktrees, pg-gwm reap to reclaim expired and released ones, and raise max if the load is real.'
+          __dashboardUid__: pg-gwm
+          __panelId__: "8"
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'sum by (repo) (increase(pg_gwm_refusals_total{error="max-reached"}[1h]))'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5]

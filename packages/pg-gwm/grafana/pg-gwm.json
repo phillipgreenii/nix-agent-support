@@ -1,7 +1,7 @@
 {
   "uid": "pg-gwm",
   "title": "pg-gwm",
-  "description": "Slots, leases, resets and waiters of pg-gwm. The alert rules in grafana/alerting/alerts.yaml link to the panels that show the number they read.",
+  "description": "Managed worktrees: status, leases, reaping, refusals and lease phase times. The alert rules under grafana/alerting link to the panels that show the number they read.",
   "tags": ["pg-gwm"],
   "schemaVersion": 39,
   "editable": false,
@@ -15,8 +15,8 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Slots by state",
-      "description": "Slots in each lifecycle state. A quarantined slot keeps its directory and waits for the operator.",
+      "title": "Worktrees by status",
+      "description": "Managed worktrees in each status, per repository.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -41,16 +41,16 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (state) (pg_gwm_slots)",
-          "legendFormat": "{{state}}"
+          "expr": "sum by (repo, status) (pg_gwm_worktrees)",
+          "legendFormat": "{{repo}} {{status}}"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Leaked slots",
-      "description": "Leased or resetting slots whose lock is free and whose expiry has passed: held by nobody. Reaped by the janitor (pg-gwm reap).",
+      "title": "Broken worktrees",
+      "description": "Worktrees whose status is broken. pg-gwm-broken-persisting fires when this stays above 0 for an hour: run pg-gwm list, pg-gwm info <id>, read the event log, then pg-gwm reap.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -75,16 +75,16 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max(pg_gwm_leaked_slots)",
-          "legendFormat": "leaked"
+          "expr": "max by (repo) (pg_gwm_broken_worktrees)",
+          "legendFormat": "{{repo}}"
         }
       ]
     },
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Quarantined slots",
-      "description": "Slots taken out of rotation after failed resets, a kept release or a failed rescue capture. Nothing removes them automatically.",
+      "title": "Preserved branches",
+      "description": "Branches under pg-gwm/dirty-reaped-, counted from the refs.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -109,16 +109,16 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max(pg_gwm_quarantined_slots)",
-          "legendFormat": "quarantined"
+          "expr": "max by (repo) (pg_gwm_preserved_branches)",
+          "legendFormat": "{{repo}}"
         }
       ]
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Lease commands waiting for a slot",
-      "description": "Lease commands sleeping because every slot is busy and the pool is at its cap or its disk floor.",
+      "title": "Oldest expired lease age",
+      "description": "Seconds since the oldest lease-expired lease expired.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -131,7 +131,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -143,26 +143,16 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max(pg_gwm_waiters)",
-          "legendFormat": "waiters"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(pg_gwm_slots{state=\"warm-free\"})",
-          "legendFormat": "warm-free slots"
+          "expr": "max by (repo) (pg_gwm_oldest_expired_lease_age_seconds)",
+          "legendFormat": "{{repo}}"
         }
       ]
     },
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Reset duration p50 and p95",
-      "description": "Time a slot reset took, over 30 minutes. The reset-slow alert fires when p95 stays above 30 s (the measured ZR reset is about 9 s, at most 14 s under load).",
+      "title": "Oldest no-expiry lease age",
+      "description": "Age of the oldest lease that has no expiry.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -187,26 +177,16 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(pg_gwm_reset_seconds_bucket[30m])))",
-          "legendFormat": "p50"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(pg_gwm_reset_seconds_bucket[30m])))",
-          "legendFormat": "p95"
+          "expr": "max by (repo) (pg_gwm_oldest_no_expiry_lease_age_seconds)",
+          "legendFormat": "{{repo}}"
         }
       ]
     },
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Acquire wait p95",
-      "description": "Time a lease command spent obtaining a slot, over 30 minutes.",
+      "title": "Free bytes and floor",
+      "description": "Free bytes under the worktree-root and the configured free-space-floor.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -214,74 +194,6 @@
       "gridPos": {
         "x": 16,
         "y": 8,
-        "w": 8,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(pg_gwm_acquire_wait_seconds_bucket[30m])))",
-          "legendFormat": "p95"
-        }
-      ]
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Oldest lease age",
-      "description": "Age of the oldest active lease.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 8,
-        "h": 8
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "max(pg_gwm_lease_age_seconds)",
-          "legendFormat": "oldest lease"
-        }
-      ]
-    },
-    {
-      "id": 9,
-      "type": "timeseries",
-      "title": "Free bytes",
-      "description": "Free space on the volume that holds the pool. The pool will not grow below its floor.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 16,
         "w": 8,
         "h": 8
       },
@@ -299,22 +211,198 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "min(pg_gwm_free_bytes)",
-          "legendFormat": "free"
+          "expr": "min by (repo) (pg_gwm_free_bytes)",
+          "legendFormat": "free {{repo}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (repo) (pg_gwm_free_space_floor_bytes)",
+          "legendFormat": "floor {{repo}}"
         }
       ]
     },
     {
-      "id": 10,
+      "id": 7,
       "type": "timeseries",
-      "title": "Reset failures and rescues",
-      "description": "Resets that quarantined a slot, and releases that captured uncommitted work to a rescue ref, per hour.",
+      "title": "Reap removed and kept",
+      "description": "Worktrees removed and kept by reap, per hour.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (repo) (increase(pg_gwm_reap_removed_total[1h]))",
+          "legendFormat": "removed {{repo}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (repo) (increase(pg_gwm_reap_kept_total[1h]))",
+          "legendFormat": "kept {{repo}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Refusals by error",
+      "description": "Refused commands in the last hour, by error name. pg-gwm-max-reached-rate fires on more than 5 max-reached refusals an hour: raise max, or run pg-gwm list and pg-gwm reap to free worktrees.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (repo, error) (increase(pg_gwm_refusals_total[1h]))",
+          "legendFormat": "{{repo}} {{error}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Lease phase p50 and p95",
+      "description": "Time a lease spends waiting, creating and switching.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.5, sum by (le, phase) (rate(pg_gwm_lease_seconds_bucket[30m])))",
+          "legendFormat": "p50 {{phase}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, phase) (rate(pg_gwm_lease_seconds_bucket[30m])))",
+          "legendFormat": "p95 {{phase}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Reaper age",
+      "description": "Seconds since the last successful reaper run and since each repository was last reaped. pg-gwm-reaper-stale fires above 1800 (three 600-second intervals): check the reaper agent, run pg-gwm reap --all-repos.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(pg_gwm_reaper_last_success_age_seconds)",
+          "legendFormat": "last success"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max by (repo) (pg_gwm_last_reap_age_seconds)",
+          "legendFormat": "{{repo}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Unreachable repositories and config",
+      "description": "1 for a configured or registered repository that cannot be opened, and whether the config file parses.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
         "y": 24,
         "w": 12,
         "h": 8
@@ -333,8 +421,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(increase(pg_gwm_reset_failures_total[1h]))",
-          "legendFormat": "reset failures"
+          "expr": "max by (repo) (pg_gwm_repo_unreachable)",
+          "legendFormat": "unreachable {{repo}}"
         },
         {
           "refId": "B",
@@ -343,8 +431,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(increase(pg_gwm_rescued_total[1h]))",
-          "legendFormat": "rescued"
+          "expr": "max(pg_gwm_config_valid)",
+          "legendFormat": "config valid"
         }
       ]
     }
