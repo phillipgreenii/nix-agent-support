@@ -66,6 +66,91 @@ change being deployed (`pb:pb-gate-lifecycle`), whose work is to run the suite a
 agent MUST NOT raise a package test timeout (`-timeout 30m`) to make a slow test fit the unit gate:
 the timeout is the sign the test is in the wrong place.
 
+#### Measuring Test Cost On A Loaded Host
+
+Operator ruling (Phillip, 2026-11-16, verbatim): "we need a way to do the validation of those beads
+but we can't wait for "quiet" host." The shared host's load average has stayed between about 25 and
+66 for days, so a test-cost or overhead measurement MUST NOT wait for, or be deferred on, a quiet
+host. It MUST use the load-independent method below. Wall time and the load average MUST be
+recorded beside each run, for information only; they MUST NOT decide pass or fail except as the
+minimum-wall-time rule below says.
+
+**Build and run.** Build the test binary once per package with `-race`, skipping packages that have
+no test files, and name the output with slashes replaced:
+
+```bash
+go test -c -race -o /tmp/cost-<pkg-with-slashes-replaced>.test ./<pkg>
+```
+
+Run the binary FROM THE PACKAGE DIRECTORY (tests read fixtures relative to it) under
+`/usr/bin/time -l`, with `-test.count=1 -test.v`, and `-test.run` to pick one test or subtest:
+
+```bash
+cd <pkg-dir> && /usr/bin/time -l /tmp/cost-<pkg-with-slashes-replaced>.test -test.count=1 -test.v -test.run '^TestName$/^subtest$'
+```
+
+The output MUST contain `=== RUN` and `PASS`; a `-test.run` pattern that matches nothing exits 0,
+so an exit code alone proves nothing.
+
+**What `/usr/bin/time -l` measures on macOS (verified 2026-11-16).** User plus sys CPU includes
+waited-for child processes. Instructions retired EXCLUDES them: `sh -c 'true'` reads 61.7 M and
+`sh -c 'git --version; true'` reads 65.4 M. To re-check, compare these two commands (the `; true`
+matters: a single or final command is exec'd in place, which confounds the comparison):
+
+```bash
+/usr/bin/time -l sh -c 'true'
+```
+
+```bash
+/usr/bin/time -l sh -c 'git --version; true'
+```
+
+**Baseline and scope.** Single-test figures MUST have a baseline subtracted, taken from a run that
+selects no test:
+
+```bash
+cd <pkg-dir> && /usr/bin/time -l /tmp/cost-<pkg-with-slashes-replaced>.test -test.count=1 -test.run '^$'
+```
+
+A fixture-sharing fix (`TestMain`, `sync.Once`) MUST be judged on whole-package CPU, because its
+saving lands in the package setup, not in one test. `GOMAXPROCS` MUST be recorded with each result.
+
+**Cost and threshold.** A test's cost is its user plus sys CPU PLUS the deliberate waits it must
+sit out (sleeps, timeouts, read from the code). Exceeding the threshold on either counts as over.
+
+On a mixed-core host (this one has 5 performance and 6 efficiency cores) CPU seconds inflate under
+load. A test therefore passes if its MINIMUM wall time over 5 runs is under the threshold. For an
+in-process test whose cost is between 0.5x and 2x the threshold, the verdict MUST be judged on
+performance-core-equivalent CPU: instructions retired divided by the highest
+instructions-per-CPU-second seen across that test's runs.
+
+**Deterministic work counts.** Where they explain the cost, a measurement SHOULD include
+deterministic counts such as git spawns (a counting shim placed first on `PATH`) or fixture rows.
+Example shim, written to a scratch directory:
+
+```bash
+mkdir -p /tmp/gitshim && printf '#!/bin/sh\necho x >> /tmp/gitshim/count\nexec /usr/bin/git "$@"\n' > /tmp/gitshim/git && chmod +x /tmp/gitshim/git
+```
+
+```bash
+cd <pkg-dir> && PATH=/tmp/gitshim:$PATH /tmp/cost-<pkg-with-slashes-replaced>.test -test.count=1 -test.run '^TestName$' && wc -l < /tmp/gitshim/count
+```
+
+**Before and after.** A comparison MUST use interleaved pairs (before, after, before, after, ...),
+at least 5 of each, and report medians with spread. When the change has already landed, "before" is
+built from the parent of the landed commit, found by its `git patch-id --stable`, not by a
+remembered SHA.
+
+**Precision.** A comparison that needs better than a few percent precision (an overhead A/B) MUST
+use instructions retired plus cycles elapsed from `/usr/bin/time -l`, or a `go test -bench` run
+summarised with benchstat, and MUST NOT use wall time. benchstat is not on `PATH`:
+
+```bash
+go run golang.org/x/perf/cmd/benchstat@latest old.txt new.txt
+```
+
+An A/B harness MUST be built without `-race`.
+
 ### Tests That Need Git
 
 A test that needs a git repository MUST get it from the shared hermetic fixture library for its
