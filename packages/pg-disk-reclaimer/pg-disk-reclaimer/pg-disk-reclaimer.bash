@@ -1533,6 +1533,7 @@ cmd_reclaim() {
 : "${PGDR_AUTO_LEVEL1_BELOW_GB:=60}"
 : "${PGDR_AUTO_LEVEL2_BELOW_GB:=45}"
 : "${PGDR_AUTO_LEVEL3_BELOW_GB:=30}"
+: "${PGDR_AUTO_MAX_LEVEL:=3}"
 : "${PGDR_AUTO_VOLUME:=/System/Volumes/Data}"
 
 # pgdr_auto_level_for_free_kb <free-kb> <below1-gb> <below2-gb> <below3-gb>:
@@ -1586,7 +1587,10 @@ pgdr_auto_log() {
 }
 
 # cmd_auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N]
-#          [--below3-gb N]
+#          [--below3-gb N] [--max-level N]
+# --max-level N (1 to 3, default 3) caps the chosen level: free space that
+# selects a higher level runs level N instead. The alert still keys on the
+# level-3 threshold, so a capped run still raises it.
 # Logs one JSON line per run: ts, level_chosen, free_kb_before, free_kb_after,
 # bytes_reclaimed, alert, applied, duration_s, items. The reclaim output itself
 # goes to stderr. An alert is a line with level "ERROR" (free space below the
@@ -1621,6 +1625,7 @@ cmd_auto() {
 pgdr_auto_main() {
   local apply=0 volume="$PGDR_AUTO_VOLUME"
   local t1="$PGDR_AUTO_LEVEL1_BELOW_GB" t2="$PGDR_AUTO_LEVEL2_BELOW_GB" t3="$PGDR_AUTO_LEVEL3_BELOW_GB"
+  local max_level="$PGDR_AUTO_MAX_LEVEL"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1628,7 +1633,7 @@ pgdr_auto_main() {
       apply=1
       shift
       ;;
-    --volume | --below1-gb | --below2-gb | --below3-gb)
+    --volume | --below1-gb | --below2-gb | --below3-gb | --max-level)
       if [[ -z ${2:-} ]]; then
         echo "pg-disk-reclaimer: $1 requires a value" >&2
         return 1
@@ -1638,6 +1643,7 @@ pgdr_auto_main() {
       --below1-gb) t1="$2" ;;
       --below2-gb) t2="$2" ;;
       --below3-gb) t3="$2" ;;
+      --max-level) max_level="$2" ;;
       esac
       shift 2
       ;;
@@ -1648,6 +1654,11 @@ pgdr_auto_main() {
     esac
   done
   PGDR_AUTO_APPLIED=$apply
+  if [[ ! $max_level =~ ^[123]$ ]]; then
+    echo "pg-disk-reclaimer: auto: --max-level must be 1, 2 or 3 (got '$max_level')" >&2
+    PGDR_AUTO_OUTCOME=config-error
+    return 1
+  fi
 
   local before after level
   if ! before=$(pgdr_auto_free_kb "$volume"); then
@@ -1658,6 +1669,9 @@ pgdr_auto_main() {
   if ! level=$(pgdr_auto_level_for_free_kb "$before" "$t1" "$t2" "$t3"); then
     PGDR_AUTO_OUTCOME=config-error
     return 1
+  fi
+  if [[ $level != none ]] && ((level > max_level)); then
+    level="$max_level"
   fi
   PGDR_AUTO_T1="$t1" PGDR_AUTO_T2="$t2" PGDR_AUTO_T3="$t3"
   PGDR_AUTO_LEVEL="$level"

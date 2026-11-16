@@ -110,6 +110,7 @@ let
             level2BelowGb = 80;
             level3BelowGb = 50;
           };
+          maxLevel = 1;
           intervalSeconds = 300;
         };
       }
@@ -172,6 +173,7 @@ let
         && has "--below1-gb 60" (agent autoC).script
         && has "--below2-gb 45" (agent autoC).script
         && has "--below3-gb 30" (agent autoC).script
+        && has "--max-level 3" (agent autoC).script
         && !(has "--aggressiveness" (agent autoC).script);
     }
     {
@@ -180,6 +182,7 @@ let
         has "--below1-gb 100" (agent customC).script
         && has "--below2-gb 80" (agent customC).script
         && has "--below3-gb 50" (agent customC).script
+        && has "--max-level 1" (agent customC).script
         && (agent customC).serviceConfig.StartInterval == 300
         && (agent autoC).serviceConfig.StartInterval == 900;
     }

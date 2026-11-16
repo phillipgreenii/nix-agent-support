@@ -239,6 +239,17 @@ in
         };
       };
 
+      maxLevel = lib.mkOption {
+        type = lib.types.ints.between 1 3;
+        default = 3;
+        description = ''
+          Highest aggressiveness the scheduled run may use (passed as
+          `--max-level`). Free space that selects a higher level runs this level
+          instead; the alert still keys on the lowest threshold. 1 keeps the run
+          to the fast items.
+        '';
+      };
+
       intervalSeconds = lib.mkOption {
         type = lib.types.ints.positive;
         default = 900;
@@ -517,7 +528,8 @@ in
               exec ${cfg.package}/bin/pg-disk-reclaimer auto --apply \
                 --below1-gb ${toString cfg.auto.thresholds.level1BelowGb} \
                 --below2-gb ${toString cfg.auto.thresholds.level2BelowGb} \
-                --below3-gb ${toString cfg.auto.thresholds.level3BelowGb}
+                --below3-gb ${toString cfg.auto.thresholds.level3BelowGb} \
+                --max-level ${toString cfg.auto.maxLevel}
             '';
             runAtLoad = true;
             keepAlive = false;

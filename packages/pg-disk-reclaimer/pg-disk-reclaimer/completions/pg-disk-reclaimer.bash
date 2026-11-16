@@ -63,7 +63,7 @@ _pg_disk_reclaimer() {
 
   if [[ ${words[1]} == auto ]]; then
     if [[ $cur == -* ]]; then
-      mapfile -t COMPREPLY < <(compgen -W "--apply --volume --below1-gb --below2-gb --below3-gb --help -h --version" -- "$cur")
+      mapfile -t COMPREPLY < <(compgen -W "--apply --volume --below1-gb --below2-gb --below3-gb --max-level --help -h --version" -- "$cur")
     fi
     return
   fi

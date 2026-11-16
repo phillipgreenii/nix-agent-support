@@ -126,3 +126,22 @@ level() {
   [ "$(jq -r .level_chosen <<<"$output")" = 3 ]
   [ "$(jq -r .alert <<<"$output")" = true ]
 }
+
+@test "--max-level caps the chosen level but the alert still fires" {
+  PGDR_AUTO_FREE_KB=$((10 * GB)) run --separate-stderr cmd_auto --max-level 1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .level_chosen <<<"$output")" = 1 ]
+  [ "$(jq -r .alert <<<"$output")" = true ]
+}
+
+@test "--max-level above the chosen level changes nothing" {
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --max-level 3
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .level_chosen <<<"$output")" = 1 ]
+}
+
+@test "--max-level rejects a value outside 1 to 3" {
+  PGDR_AUTO_FREE_KB=$((10 * GB)) run --separate-stderr cmd_auto --max-level 4
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"--max-level must be 1, 2 or 3"* ]]
+}

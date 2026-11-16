@@ -53,7 +53,7 @@
 
 - Scheduled mode: choose level 1, 2 or 3 from the free space on the Data volume (below 60, 45, 30 GiB by default), reclaim at that level and log one JSON line (dry-run unless `--apply`; levels 4 and 5 are never chosen):
 
-`pg-disk-reclaimer auto --apply --below1-gb {{60}} --below2-gb {{45}} --below3-gb {{30}}`
+`pg-disk-reclaimer auto --apply --below1-gb {{60}} --below2-gb {{45}} --below3-gb {{30}} --max-level {{3}}`
 
 - Go build cache helpers for registry commands: remove the entries Go's own trim rule would (name ends `-a` or `-d`, unused for N days plus an hour), or wipe the cache with the packaged go (exit 75, skipped, while a go or golangci-lint process runs):
 

@@ -35,7 +35,8 @@ _pg_disk_reclaimer() {
       '--volume[Volume whose free space picks the level]:volume:_files' \
       '--below1-gb[Run level 1 below this many GiB free]:gib:' \
       '--below2-gb[Run level 2 below this many GiB free]:gib:' \
-      '--below3-gb[Run level 3 and alert below this many GiB free]:gib:'
+      '--below3-gb[Run level 3 and alert below this many GiB free]:gib:' \
+      '--max-level[Cap the chosen level at this value]:level:(1 2 3)'
     ;;
   go-cache-trim)
     _arguments \
