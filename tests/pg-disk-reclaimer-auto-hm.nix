@@ -24,6 +24,10 @@ let
     { lib, ... }:
     {
       options = {
+        phillipgreenii.programs.pg-claude-code-recorder.remove.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+        };
         programs.tldr = {
           enable = lib.mkOption {
             type = lib.types.bool;
@@ -99,6 +103,9 @@ let
   autoOn.phillipgreenii.programs.pg-disk-reclaimer.auto.enable = true;
 
   defaultC = evalWith { cfg = { }; };
+  recorderOnC = evalWith {
+    cfg.phillipgreenii.programs.pg-claude-code-recorder.remove.enable = true;
+  };
   autoC = evalWith { cfg = autoOn; };
   customC = evalWith {
     cfg.imports = [
@@ -224,23 +231,25 @@ let
       ok = agents linuxC == { } && failedAssertions linuxC == [ ];
     }
     {
-      name = "the four grower items are in the registry by default and absent when disabled";
+      name = "the grower items are in the registry by default and absent when disabled; the recorder store item needs the recorder retention enabled";
       ok =
         lib.all (id: lib.elem id (ids defaultC)) [
-          "pg-claude-code-recorder-store"
           "claude-projects"
           "pg2-scratch-caches"
           "library-caches"
           "pg-ccaudit-index"
           "ceta-asks-db"
         ]
-        && ids noGrowersC == [ ];
+        && ids noGrowersC == [ ]
+        && lib.elem "pg-claude-code-recorder-store" (ids recorderOnC)
+        && !(lib.elem "pg-claude-code-recorder-store" (ids defaultC))
+        && !(lib.elem "pg-claude-code-recorder-store" (ids noGrowersC));
     }
     {
       name = "the recorder store item only calls the recorder's own retention command";
       ok =
         let
-          v = lib.head (item defaultC "pg-claude-code-recorder-store").variants;
+          v = lib.head (item recorderOnC "pg-claude-code-recorder-store").variants;
         in
         v.removeCommand == "pg-claude-code-recorder remove --all-eligible --yes"
         && v.dryRunCommand == "pg-claude-code-recorder remove --dry-run";
@@ -251,7 +260,7 @@ let
         levels defaultC "claude-projects" == [ 4 ]
         && levels defaultC "pg2-scratch-caches" == [ 2 ]
         && levels defaultC "library-caches" == [ 2 ]
-        && levels defaultC "pg-claude-code-recorder-store" == [ 3 ]
+        && levels recorderOnC "pg-claude-code-recorder-store" == [ 3 ]
         && levels defaultC "pg-ccaudit-index" == [ 4 ]
         && levels defaultC "ceta-asks-db" == [ 4 ];
     }

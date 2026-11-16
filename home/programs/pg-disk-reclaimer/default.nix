@@ -34,9 +34,22 @@ let
   # 2026-11-03). Each `path` exists independently of its contents so the CLI's
   # existence guard works (it does not expand globs); the size commands and
   # variants spell out the globs themselves.
+  # The recorder store item only works when the recorder's own retention is
+  # enabled: its `remove` exits non-zero with removal_disabled otherwise, which
+  # made every scheduled run that reached the item report a failure. Read the
+  # flag null-safely (the recorder module may not be imported); absent means off.
+  recorderStoreId = "pg-claude-code-recorder-store";
+  recorderRemoveEnabled = lib.attrByPath [
+    "phillipgreenii"
+    "programs"
+    "pg-claude-code-recorder"
+    "remove"
+    "enable"
+  ] false config;
+
   growerEntries = [
     {
-      id = "pg-claude-code-recorder-store";
+      id = recorderStoreId;
       description = "pg-claude-code-recorder store: the recorder's own retention command";
       path = "~/.local/share/pg-claude-code-recorder";
       displayCommand = "du -sh ~/.local/share/pg-claude-code-recorder";
@@ -496,7 +509,7 @@ in
     {
       phillipgreenii.programs.pg-disk-reclaimer.registryEntries = lib.mkIf (
         cfg.enable && cfg.growerEntries.enable
-      ) growerEntries;
+      ) (lib.filter (e: e.id != recorderStoreId || recorderRemoveEnabled) growerEntries);
     }
 
     (lib.mkIf (cfg.enable && cfg.auto.enable) {
