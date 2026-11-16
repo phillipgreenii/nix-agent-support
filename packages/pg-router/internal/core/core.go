@@ -1297,7 +1297,7 @@ func (s *Service) composeStatusReply(ctx context.Context, since uint64) map[stri
 			"startedAt":  s.startedAt.UTC().Format(time.RFC3339Nano),
 			"configPath": s.configPath,
 		},
-		"registry":  statusRegistrations(regs),
+		"registry":  s.statusRegistrationsWithRequires(regs),
 		"listeners": statusListeners(s.declaredRoles, s.excludedRoles, s.listenerCounts, regs, s.q.InFlightListeners(), s.readRoleProgress()),
 		"levels":    s.statusLevels(),
 		// pausedRoles: every role a level requirement blocks right now, with the
@@ -1835,6 +1835,46 @@ func (s *Service) statusPausedRoles() []map[string]any {
 			failing = append(failing, e)
 		}
 		out = append(out, map[string]any{"role": p.Role, "failing": failing})
+	}
+	return out
+}
+
+// statusRegistrationsWithRequires is statusRegistrations plus, on each entry
+// whose id has registered requires clauses, a `requires` array: one object per
+// original clause with its text, resource, allowed levels, the current verdict
+// ("pass" or "fail") and the level the clause was judged against.
+func (s *Service) statusRegistrationsWithRequires(regs []Registration) []map[string]any {
+	out := statusRegistrations(regs)
+	if s.q == nil {
+		return out
+	}
+	for i, r := range regs {
+		req := s.q.RequirementOf(r.ID)
+		if len(req.Clauses) == 0 {
+			continue
+		}
+		res := s.q.Explain(r.ID)
+		snap := s.q.Levels()
+		failing := map[int]levels.Entry{}
+		for _, f := range res.Failing {
+			failing[f.ClauseIndex] = f
+		}
+		clauses := make([]map[string]any, 0, len(req.Clauses))
+		for _, c := range req.Clauses {
+			e := map[string]any{"clause": c.Text, "resource": c.Resource, "allowed": append([]string{}, c.Allowed...)}
+			if f, bad := failing[c.Index]; bad {
+				e["verdict"] = "fail"
+				e["kind"] = string(f.Kind)
+				e["level"] = f.Level
+			} else {
+				e["verdict"] = "pass"
+				if lv, ok := snap.Levels[c.Resource]; ok {
+					e["level"] = lv.Value
+				}
+			}
+			clauses = append(clauses, e)
+		}
+		out[i]["requires"] = clauses
 	}
 	return out
 }

@@ -171,3 +171,28 @@ func TestRenderLevels_RouterWithNoPauseIsRunning(t *testing.T) {
 		t.Fatalf("levels = %q", out.String())
 	}
 }
+
+// A role with registered clauses lists each clause's verdict after the decision
+// line, for a paused and for a not-paused role.
+func TestExplainRole_ListsRequiresVerdicts(t *testing.T) {
+	st := pausedStatus(t)
+	st.Registry = []registryView{
+		{ID: "worker", Requires: []requiresClauseView{
+			{Clause: "disk >= OK", Resource: "disk", Verdict: "fail", Level: "TIGHT", Kind: "level"},
+			{Clause: "net == UP", Resource: "net", Verdict: "pass", Level: "UP"},
+		}},
+		{ID: "free", Requires: []requiresClauseView{{Clause: "cpu == LOW", Resource: "cpu", Verdict: "pass"}}},
+	}
+	var out, errb strings.Builder
+	explainRole(&out, &errb, "worker", st, explainNow)
+	got := out.String()
+	if !strings.Contains(got, "worker is paused by 2 requirements") ||
+		!strings.Contains(got, "\n  requires disk >= OK: FAIL (now TIGHT)\n  requires net == UP: pass (now UP)\n") {
+		t.Fatalf("worker explain = %q", got)
+	}
+	out.Reset()
+	explainRole(&out, &errb, "free", st, explainNow)
+	if want := "free is not paused by levels\n  requires cpu == LOW: pass (no reading)\n"; out.String() != want {
+		t.Fatalf("free explain = %q, want %q", out.String(), want)
+	}
+}

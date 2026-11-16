@@ -316,7 +316,24 @@
           "id": { "type": "string" },
           "kind": { "type": "string" },
           "state": { "type": "string" },
-          "self": { "type": "string" }
+          "self": { "type": "string" },
+          "requires": {
+            "type": "array",
+            "description": "The registration's requires clauses with the current verdict of each; absent when it has none.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["clause", "resource", "allowed", "verdict"],
+              "properties": {
+                "clause": { "type": "string" },
+                "resource": { "type": "string" },
+                "allowed": { "type": "array", "items": { "type": "string" } },
+                "verdict": { "enum": ["pass", "fail"] },
+                "level": { "type": "string" },
+                "kind": { "enum": ["level", "unknown", "stale"] }
+              }
+            }
+          }
         }
       }
     },

@@ -70,6 +70,7 @@ func explainRole(stdout, stderr io.Writer, role string, st statusReply, now time
 	for _, p := range st.PausedRoles {
 		if p.Role == role {
 			fmt.Fprintln(stdout, pausedRoleLine(p, now))
+			writeRequires(stdout, role, st)
 			return exitOK
 		}
 	}
@@ -85,8 +86,23 @@ func explainRole(stdout, stderr io.Writer, role string, st statusReply, now time
 		default:
 			fmt.Fprintf(stdout, "%s is not paused by levels\n", textsafe.Sanitize(role))
 		}
+		writeRequires(stdout, role, st)
 		return exitOK
 	}
 	fmt.Fprintf(stderr, "unknown role %s\n", textsafe.Sanitize(role))
 	return conformance.ExitError
+}
+
+// writeRequires lists every requires clause of role with its current verdict,
+// one per line, naming the clause (and so the level) holding a blocked role. It
+// writes nothing for a role with no registered clauses or an older core.
+func writeRequires(w io.Writer, role string, st statusReply) {
+	for _, r := range st.Registry {
+		if r.ID != role {
+			continue
+		}
+		for _, c := range r.Requires {
+			fmt.Fprintf(w, "  requires %s\n", c.requiresText())
+		}
+	}
 }

@@ -76,3 +76,58 @@ func TestLevelEntries_noSensorFlag(t *testing.T) {
 		t.Fatalf("git_auth entry = %v, want no no_sensor", e)
 	}
 }
+
+// registry[] entries of a role with requires clauses carry each clause with its
+// current verdict and the level it was judged against; an entry without clauses
+// carries none, and the reply validates.
+func TestStatusReply_registryCarriesRequiresVerdicts(t *testing.T) {
+	svc, f := levelVerbService(t)
+	q, err := eventqueue.New(eventqueue.NewMemStore(),
+		eventqueue.WithLevelSource(f.p.Snapshot), eventqueue.WithRegistry(map[string]levels.Scale{
+			"cpu": {Levels: []string{"LOW", "HIGH"}, Unknown: "LOW"},
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.q = q
+	q.Register(idleListener{"worker"})
+	q.RegisterListener("worker", levels.Requirement{Clauses: []levels.Clause{{Index: 0, Text: "cpu == LOW", Resource: "cpu", Allowed: []string{"LOW"}}}})
+	if _, err := svc.reg.RegisterInProcess("worker", KindHandler); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.reg.RegisterInProcess("plain", KindHandler); err != nil {
+		t.Fatal(err)
+	}
+
+	find := func(reply map[string]any, id string) map[string]any {
+		for _, e := range reply["registry"].([]any) {
+			if m := e.(map[string]any); m["id"] == id {
+				return m
+			}
+		}
+		t.Fatalf("no registry entry %s in %v", id, reply["registry"])
+		return nil
+	}
+	reply, _ := serveStatus(t, svc, statusRequest)
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("status reply: %v", err)
+	}
+	c := find(reply, "worker")["requires"].([]any)[0].(map[string]any)
+	if c["clause"] != "cpu == LOW" || c["verdict"] != "pass" {
+		t.Fatalf("clause = %v, want pass", c)
+	}
+	if find(reply, "plain")["requires"] != nil {
+		t.Fatalf("plain carries requires: %v", find(reply, "plain"))
+	}
+
+	serveVerb(t, svc, SubcommandLevelIngest, `{"schemaVersion":"1","resource":"cpu","level":"HIGH","observed_at":"`+
+		f.clk.now().UTC().Format("2006-01-02T15:04:05Z")+`","valid_for_s":180,"owner":"host-sensor"}`)
+	reply, _ = serveStatus(t, svc, statusRequest)
+	if err := conformance.Check(StatusReplySchema, reply); err != nil {
+		t.Fatalf("status reply: %v", err)
+	}
+	c = find(reply, "worker")["requires"].([]any)[0].(map[string]any)
+	if c["verdict"] != "fail" || c["level"] != "HIGH" || c["resource"] != "cpu" {
+		t.Fatalf("clause = %v, want fail at HIGH", c)
+	}
+}

@@ -162,6 +162,9 @@ type statusReply struct {
 	// for it here): the two arrays diverged on the wire, and reusing one
 	// type for both would silently mix them up again.
 	Listeners []listenerView `json:"listeners"`
+	// Registry is registry[]; only the per-entry requires verdicts are decoded
+	// (explain reads them), the rest of the entry is the TUI's and listeners'.
+	Registry []registryView `json:"registry"`
 	// Sources is sources[]'s WIDENED shape (Task 4.1): the prior
 	// {name, rejected} decode target is gone along with the wire field it
 	// named — `rejected` was never part of the frozen tree and nothing

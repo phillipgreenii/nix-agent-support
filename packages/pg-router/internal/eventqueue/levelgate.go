@@ -181,6 +181,12 @@ func (q *Queue) requirement(id string) levels.Requirement {
 	return levels.Requirement{}
 }
 
+// RequirementOf returns the requires clauses registered for the listener id
+// (empty when none), for the operator surfaces that show each clause's verdict.
+func (q *Queue) RequirementOf(id string) levels.Requirement {
+	return q.requirement(id)
+}
+
 func firstResource(res levels.Result) string {
 	if len(res.Failing) == 0 {
 		return ""

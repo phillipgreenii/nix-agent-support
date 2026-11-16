@@ -138,3 +138,38 @@ func pausedRoleSummary(p pausedRoleView, now time.Time) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// requiresClauseView is one entry of status registry[].requires: an original
+// requires clause with its current verdict ("pass" or "fail"), the level it was
+// judged against and, for a failing clause, why (level, unknown or stale).
+type requiresClauseView struct {
+	Clause   string   `json:"clause"`
+	Resource string   `json:"resource"`
+	Allowed  []string `json:"allowed"`
+	Verdict  string   `json:"verdict"`
+	Level    string   `json:"level"`
+	Kind     string   `json:"kind"`
+}
+
+// registryView is the part of a status registry[] entry the CLI reads.
+type registryView struct {
+	ID       string               `json:"id"`
+	Requires []requiresClauseView `json:"requires"`
+}
+
+// requiresText is the explain detail of one clause, for example
+// "disk >= OK: pass (now OK)" or "net == UP: FAIL (now DOWN)".
+func (c requiresClauseView) requiresText() string {
+	verdict := "pass"
+	if c.Verdict == "fail" {
+		verdict = "FAIL"
+	}
+	now := "no reading"
+	if c.Level != "" {
+		now = "now " + textsafe.Sanitize(c.Level)
+	}
+	if c.Kind == "stale" {
+		now += ", stale"
+	}
+	return fmt.Sprintf("%s: %s (%s)", textsafe.Sanitize(c.Clause), verdict, now)
+}
