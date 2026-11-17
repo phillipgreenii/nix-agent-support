@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit/storetpl"
 )
 
 // ClaudeDir is the fake Claude directory the copies pretend to come from.
@@ -70,6 +71,13 @@ func (k *Kit) open() {
 	k.Obs = obs.New(nil)
 	opt := k.StoreOptions
 	opt.Obs = k.Obs
+	// Close would otherwise scan every index for planner statistics; a kit store
+	// is thrown away, and a test that wants statistics runs ANALYZE itself.
+	opt.NoCloseStats = true
+	// A directory with no store yet gets one with its schema built, restored from
+	// a template built once per process; store.Open then opens an existing store.
+	// A test of schema creation itself MUST open an empty directory with store.Open.
+	storetpl.Prepare(k.T, k.Dir, opt)
 	st, err := store.Open(k.Dir, opt)
 	if err != nil {
 		k.T.Fatal(err)

@@ -50,6 +50,7 @@ func sharedStore(t *testing.T, key string, opts store.Options, seed func(tx *sql
 		}
 		shared.dir, shared.stores = d, map[string]*store.Store{}
 	}
+	opts.NoCloseStats = true // closed only by TestMain; nobody reads statistics after
 	st, err := store.Open(fmt.Sprintf("%s/%d", shared.dir, len(shared.stores)), opts)
 	if err != nil {
 		t.Fatal(err)
