@@ -49,10 +49,14 @@ type PRAnchors struct {
 // callers check SchemaVersion first and treat an older store as "no data",
 // never as an empty view. A read failure is returned, never folded into zero.
 func (s *Store) CountPRAnchors(ctx context.Context, now time.Time) (PRAnchors, error) {
+	prFactsCol, prIndexedBy, err := s.prStateSource(ctx)
+	if err != nil {
+		return PRAnchors{}, err
+	}
 	rows, err := s.sql.QueryContext(
 		ctx,
 		`SELECT x.to_id, a.facts,
-		        COALESCE(p.facts, ''), p.entity_id IS NOT NULL,
+		        COALESCE(p.`+prFactsCol+`, ''), p.entity_id IS NOT NULL,
 		        COALESCE(p.hydrated_at, p.first_seen_at, p.as_of, ''),
 		        COALESCE((SELECT h.value FROM annotation h
 		                   WHERE h.repo = a.repo AND h.entity_type = 'pr'
@@ -61,7 +65,7 @@ func (s *Store) CountPRAnchors(ctx context.Context, now time.Time) (PRAnchors, e
 		   JOIN xref x ON x.repo = a.repo AND x.from_type = 'issue'
 		              AND x.from_id = a.entity_id AND x.to_type = 'pr'
 		              AND x.relation = 'work'
-		   LEFT JOIN entity p ON p.repo = a.repo AND p.entity_type = 'pr'
+		   LEFT JOIN entity p `+prIndexedBy+` ON p.repo = a.repo AND p.entity_type = 'pr'
 		                     AND p.entity_id = x.to_id
 		  WHERE a.entity_type = 'issue' AND a.active = 1`,
 		AnnotationHidden,

@@ -29,13 +29,17 @@ type PRUnhydrated struct {
 // SchemaVersion first and treat an older store as "no data", never as an empty
 // set. A read failure is returned, never folded into a zero count.
 func (s *Store) CountPRUnhydrated(ctx context.Context, now time.Time) (PRUnhydrated, error) {
+	factsCol, indexedBy, err := s.prStateSource(ctx)
+	if err != nil {
+		return PRUnhydrated{}, err
+	}
 	rows, err := s.sql.QueryContext(
 		ctx,
-		`SELECT e.facts, COALESCE(e.first_seen_at, e.as_of),
+		`SELECT e.`+factsCol+`, COALESCE(e.first_seen_at, e.as_of),
 		        COALESCE((SELECT a.value FROM annotation a
 		                  WHERE a.repo = e.repo AND a.entity_type = e.entity_type
 		                    AND a.entity_id = e.entity_id AND a.key = ?), '')
-		   FROM entity e
+		   FROM entity e `+indexedBy+`
 		  WHERE e.entity_type = 'pr' AND e.active = 1 AND e.version = 0`,
 		AnnotationHidden,
 	)
@@ -64,6 +68,29 @@ func (s *Store) CountPRUnhydrated(ctx context.Context, now time.Time) (PRUnhydra
 		return PRUnhydrated{}, fmt.Errorf("store: count unhydrated prs: %w", err)
 	}
 	return out, nil
+}
+
+// prStateSource names where a reader that only needs a PR's open/closed state
+// (factsSayClosed reads pr_show.state and pr_show.merged) takes its facts: the
+// pruned focus_facts column through the covering index entity_focus, which
+// carries those two members and never touches the facts overflow pages (about
+// 117 KB per PR on the live store), or, on a store opened without that column
+// or index (read-only or raw, predating it), the full facts column. The pruned
+// document decodes with factsSayClosed unchanged. The returned indexedBy is the
+// INDEXED BY clause for the entity table (empty on the fallback).
+func (s *Store) prStateSource(ctx context.Context) (factsCol, indexedBy string, err error) {
+	have, err := s.tableColumns(ctx, "entity")
+	if err != nil {
+		return "", "", err
+	}
+	var indexed int
+	if err := s.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_index_list('entity') WHERE name = 'entity_focus'`).Scan(&indexed); err != nil {
+		return "", "", fmt.Errorf("store: read entity indexes: %w", err)
+	}
+	if !have["focus_facts"] || indexed == 0 {
+		return "facts", "", nil
+	}
+	return "focus_facts", "INDEXED BY entity_focus", nil
 }
 
 // isHiddenAnnotation reads the hidden annotation value ({"value": bool,
@@ -102,9 +129,13 @@ func factsSayClosed(facts string) bool {
 // longer change and must not be read as live. A PR with no row is not in the
 // set. It reads schema-2 columns, so callers check SchemaVersion first.
 func (s *Store) FinishedPRIDs(ctx context.Context) (map[string]bool, error) {
+	factsCol, indexedBy, err := s.prStateSource(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.sql.QueryContext(
 		ctx,
-		`SELECT entity_id, facts, active FROM entity WHERE entity_type = 'pr'`,
+		`SELECT entity_id, `+factsCol+`, active FROM entity `+indexedBy+` WHERE entity_type = 'pr'`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("store: finished prs: %w", err)
