@@ -57,13 +57,14 @@ const usageText = `usage: pg-claude-control <command> [flags]
                                          once (works without the mod); --escalate follows with
                                          SIGTERM if the Claude is still alive after the duration;
                                          without --escalate, a Claude still alive after --timeout
-                                         (it may be asking to stop its tasks or stay) exits 9
+                                         (it may be asking to stop its tasks or stay) exits 20
   read      <target> --json              read the prompt draft
-  list      [--json]                     every running Claude: pid, session, name, inbox present
+  usage     <target> [--json]            context size, rate-limit and cost figures (always waits for the reply)
+  list      [--json]                    every running Claude: pid, session, name, inbox present
 
 <target> is a pid, a session id (UUID) or a name; pid:, session: and name: force one reading.
 Flags: --json  --wait <duration> (inbox wait, default 3s)  --timeout <duration> (reply wait, default 10s)
-       --reply (ask the mod to confirm; exit 6 on refusal, 8 on no reply)
+       --reply (ask the mod to confirm; exit 21 on refusal, 6 on no reply)
 Flags go before run's <command>; everything after it is passed to the command.
 Exit codes: 0 written, 1 unexpected, 2 usage, 3 no control mod, 4 no such Claude process,
 6 no reply within --timeout, 9 mod not accepting, 20 session stayed (stop: still running after
@@ -138,7 +139,7 @@ func (a *app) run(args []string) int {
 	case "--version", "version":
 		_, _ = fmt.Fprintf(a.out, "pg-claude-control %s\n", Version)
 		return exitOK
-	case "submit", "interrupt", "run", "stop", "read", "list":
+	case "submit", "interrupt", "run", "stop", "read", "usage", "list":
 		return a.command(args[0], args[1:])
 	}
 	return a.emitError(false, fail(errUsage, "unknown command %q\n%s", args[0], usageText))

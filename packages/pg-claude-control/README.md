@@ -1,6 +1,6 @@
 # pg-claude-control
 
-The one way for a tool in any language to send `submit`, `interrupt`, `run`, `stop` and `read`
+The one way for a tool in any language to send `submit`, `interrupt`, `run`, `stop`, `read` and `usage`
 requests to a running Claude. The command resolves the target through the session registry
 (`<claude dir>/sessions/<pid>.json`; the claude dir is `CLAUDE_CONFIG_DIR`, else `~/.claude`) and writes
 one request line into that Claude's inbox FIFO, which the `pg-claude-control` mod (plugin in
@@ -13,6 +13,7 @@ pg-claude-control interrupt <target>
 pg-claude-control run       [flags] <target> <command> [args]
 pg-claude-control stop      <target> [--signal] [--escalate <duration>]
 pg-claude-control read      <target> --json
+pg-claude-control usage     <target> [--json] [--wait <d>] [--timeout <d>]
 pg-claude-control list      [--json]
 ```
 

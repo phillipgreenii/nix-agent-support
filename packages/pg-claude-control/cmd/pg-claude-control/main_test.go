@@ -722,3 +722,83 @@ func TestUsageTextExitCodes(t *testing.T) {
 		}
 	}
 }
+
+const usageReply = `{"ok":true,"result":{"context":{"percent":41.5,"tokens":83000,"window":200000},` +
+	`"rateLimits":[{"kind":"five_hour","percentUsed":62,"resetsAt":"2026-11-16T20:00:00Z"}],"cost":{"usd":1.25}}}` + "\n"
+
+func TestUsageJSONCarriesResult(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	w.inbox(4242, func(string) string { return usageReply })
+	if rc := w.run("usage", "4242", "--json"); rc != 0 {
+		t.Fatalf("rc=%d err=%s", rc, w.errb.String())
+	}
+	var got struct {
+		Session string
+		Result  struct {
+			Context struct{ Tokens int }
+		}
+	}
+	must(t, json.Unmarshal(w.out.Bytes(), &got))
+	if got.Result.Context.Tokens != 83000 || got.Session != uuid1 {
+		t.Fatalf("out %s", w.out.String())
+	}
+}
+
+func TestUsageTextLine(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	w.inbox(4242, func(string) string { return usageReply })
+	if rc := w.run("usage", "4242"); rc != 0 {
+		t.Fatalf("rc=%d err=%s", rc, w.errb.String())
+	}
+	want := "context 83000 of 200000 tokens (41.5%); five_hour 62% resets 2026-11-16T20:00:00Z; cost $1.25"
+	if got := strings.TrimSpace(w.out.String()); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestUsageTextLineOmitsAbsentParts(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	w.inbox(4242, func(string) string { return `{"ok":true,"result":{"cost":{"usd":0.5}}}` + "\n" })
+	if rc := w.run("usage", "4242"); rc != 0 || strings.TrimSpace(w.out.String()) != "cost $0.50" {
+		t.Fatalf("rc=%d out %q", rc, w.out.String())
+	}
+}
+
+func TestUsageRequestCarriesReply(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	ch := w.inbox(4242, func(string) string { return usageReply })
+	if rc := w.run("usage", "4242", "--json"); rc != 0 {
+		t.Fatalf("rc=%d", rc)
+	}
+	if l := next(t, ch); !strings.Contains(l, " usage") || !strings.Contains(l, "reply=") {
+		t.Fatalf("line %q", l)
+	}
+}
+
+func TestUsageNoReplyTimesOut(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	w.inbox(4242, nil)
+	if rc := w.run("usage", "4242", "--timeout", "50ms"); rc != exitNoReply {
+		t.Fatalf("rc=%d", rc)
+	}
+}
+
+// TestUsageTextCorrectedStatements pins the two exit-code statements that were stale.
+func TestUsageTextCorrectedStatements(t *testing.T) {
+	flat := strings.ReplaceAll(usageText, "\n", " ")
+	for _, want := range []string{"exit 21 on refusal, 6 on no reply", "still alive after --timeout", "exits 20", "usage     <target>"} {
+		if !strings.Contains(flat, want) && !strings.Contains(usageText, want) {
+			t.Errorf("usageText lacks %q", want)
+		}
+	}
+	for _, bad := range []string{"exits 9", "8 on no reply"} {
+		if strings.Contains(flat, bad) {
+			t.Errorf("usageText still has %q", bad)
+		}
+	}
+}

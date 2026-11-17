@@ -236,6 +236,9 @@ func (a *app) command(name string, args []string) int {
 	case "read":
 		r = req{verb: "read"}
 		o.reply = true
+	case "usage":
+		r = req{verb: "usage"}
+		o.reply = true
 	case "run":
 		cmd := strings.TrimPrefix(pos[1], "/")
 		ok := false
@@ -285,6 +288,10 @@ func (a *app) command(name string, args []string) int {
 	}
 	if !*rep.OK {
 		return a.emitError(o.json, fail(errRefused, "%s", rep.Reason))
+	}
+	if name == "usage" && !o.json {
+		_, _ = fmt.Fprintln(a.out, usageLine(rep.Result))
+		return exitOK
 	}
 	if name == "read" && !o.json {
 		var res struct {
@@ -419,4 +426,54 @@ func (a *app) list(o opts) int {
 		_, _ = fmt.Fprintf(a.out, "%d\t%s\t%s\tinbox=%s\n", r.PID, r.Session, r.Name, inbox)
 	}
 	return exitOK
+}
+
+// usageLine renders the mod's usage result as one line; absent parts are omitted.
+func usageLine(raw json.RawMessage) string {
+	var res struct {
+		Context *struct {
+			Percent *float64 `json:"percent"`
+			Tokens  *float64 `json:"tokens"`
+			Window  *float64 `json:"window"`
+		} `json:"context"`
+		RateLimits []struct {
+			Kind        string   `json:"kind"`
+			PercentUsed *float64 `json:"percentUsed"`
+			ResetsAt    string   `json:"resetsAt"`
+		} `json:"rateLimits"`
+		Cost *struct {
+			USD *float64 `json:"usd"`
+		} `json:"cost"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	num := func(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
+	var parts []string
+	if c := res.Context; c != nil {
+		s := "context"
+		if c.Tokens != nil {
+			s += " " + num(*c.Tokens)
+			if c.Window != nil {
+				s += " of " + num(*c.Window)
+			}
+			s += " tokens"
+		}
+		if c.Percent != nil {
+			s += " (" + num(*c.Percent) + "%)"
+		}
+		parts = append(parts, s)
+	}
+	for _, l := range res.RateLimits {
+		s := l.Kind
+		if l.PercentUsed != nil {
+			s += " " + num(*l.PercentUsed) + "%"
+		}
+		if l.ResetsAt != "" {
+			s += " resets " + l.ResetsAt
+		}
+		parts = append(parts, s)
+	}
+	if res.Cost != nil && res.Cost.USD != nil {
+		parts = append(parts, fmt.Sprintf("cost $%.2f", *res.Cost.USD))
+	}
+	return strings.Join(parts, "; ")
 }
