@@ -2130,6 +2130,8 @@
                 "pg-keep-awake"
                 # pg-task-focus: the node and real-serve-process tests are `integration`-tagged.
                 "pg-task-focus"
+                # pg-assistants: the real-tmux test is `integration`-tagged.
+                "pg-assistants"
                 # internal/contract is `contract`-tagged.
                 "beads-exporter"
               ];
@@ -8047,6 +8049,34 @@
                   "120s"
                 ];
               };
+
+              # pg-assistants INTEGRATION tier (V-4): the `integration`-tagged real-tool
+              # tests (a real tmux server on a private socket). ON DEMAND ONLY: no hook,
+              # run-unit-tests, pre-land or land gate. REQUIRE_TOOLS makes a missing tmux
+              # fail instead of skip; TMUX_TMPDIR keeps the socket inside the sandbox.
+              pg-assistants-integration-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-assistants-integration-tests";
+                  src = lib.cleanSource ./packages/pg-assistants; # matches default.nix
+                  gomod2nixToml = ./packages/pg-assistants/gomod2nix.toml;
+                  testDeps = [ pkgs.tmux ];
+                }).overrideAttrs
+                  (old: {
+                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.tmux ];
+                    # tmux serves its socket over a unix socket, which the
+                    # darwin sandbox only permits with local networking.
+                    __darwinAllowLocalNetworking = true;
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      export PG_ASSISTANTS_REQUIRE_TOOLS=1
+                      export TMUX_TMPDIR="$TMPDIR"
+                      go vet -tags integration ./...
+                      go test -tags integration -count=1 -v -timeout 10m ./...
+                      runHook postBuild
+                    '';
+                  });
 
               # pg-keep-awake INTEGRATION tier (V-4): internal/integration, every file
               # `//go:build integration`, so the unit gate above never builds or runs it.
