@@ -49,7 +49,18 @@ type Facts struct {
 	fetchFailed  bool      // the last full discovery failed: retry on the next call
 	haveSnapshot bool
 	feedTimeout  time.Duration // 0 means DefaultFeedTimeout
+	// pidAlive is the local liveness probe (nil means session.DefaultPidAlive).
+	// goneTries counts, per pid, the discoveries the local probe has forced
+	// while the recorder still listed the Process alive.
+	pidAlive  func(pid int) bool
+	goneTries map[int]int
 }
+
+// maxGoneTries bounds how many discoveries one pid can force by being dead
+// locally while the recorder still lists it alive (the recorder notices an exit
+// within a few seconds; a pid the probe cannot judge, such as one in another
+// pid domain, must not make every Scan discover).
+const maxGoneTries = 4
 
 // DefaultDiscoveryHeartbeat is how long a quiet registry feed may go before
 // discovery runs anyway (a process can start or exit without a registry write).
@@ -136,6 +147,44 @@ func (f *Facts) registryChanged(ctx context.Context, c *client.Client) (bool, er
 			return changed, nil
 		}
 	}
+}
+
+// liveProcessGone reports whether a session the last discovery listed alive has
+// a pid that is no longer alive on this host. A Process can exit without any
+// session-registry record (the recorder learns of it from its own tracker), so
+// the registry feed alone would show the exit only at the next heartbeat. The
+// probe is a local kill -0: it sends no request to the recorder. It only
+// triggers a discovery, the recorder's answer stays the truth.
+func (f *Facts) liveProcessGone() bool {
+	probe := f.pidAlive
+	if probe == nil {
+		probe = session.DefaultPidAlive
+	}
+	seen := make(map[int]bool, len(f.live))
+	gone := false
+	for _, s := range f.live {
+		if s.PID <= 0 {
+			continue
+		}
+		seen[s.PID] = true
+		if probe(s.PID) {
+			delete(f.goneTries, s.PID)
+			continue
+		}
+		if f.goneTries == nil {
+			f.goneTries = map[int]int{}
+		}
+		if f.goneTries[s.PID] < maxGoneTries {
+			f.goneTries[s.PID]++
+			gone = true
+		}
+	}
+	for pid := range f.goneTries {
+		if !seen[pid] {
+			delete(f.goneTries, pid)
+		}
+	}
+	return gone
 }
 
 // cachedRegistrations is the previous discovery answer, copied.
@@ -256,6 +305,9 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 		changed, err := f.registryChanged(ctx, c)
 		if err != nil {
 			return nil, err
+		}
+		if !changed && f.liveProcessGone() {
+			changed = true
 		}
 		if f.haveSnapshot && !f.fetchFailed && !changed && f.clock().Sub(f.lastFetch) < f.heartbeat {
 			return f.cachedRegistrations(), nil

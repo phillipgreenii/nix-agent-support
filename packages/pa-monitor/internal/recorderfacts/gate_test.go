@@ -18,6 +18,7 @@ func TestDiscoveryGateRunsOnlyOnRegistryChangeHeartbeatOrFailure(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	f.now = func() time.Time { return now }
 	f.SetDiscoveryHeartbeat(60 * time.Second)
+	f.pidAlive = func(int) bool { return true } // the pids are the recorder's fakes
 
 	want := 3
 	quiet := func(label string) {
@@ -126,5 +127,92 @@ func TestDiscoveryGateOffByDefault(t *testing.T) {
 		if n := len(ops(since(), "process.list")); n == 0 {
 			t.Fatalf("call %d sent no process.list", i)
 		}
+	}
+}
+
+// TestDiscoveryGateSeesAnExitWithoutARegistryWrite: a Process that exits with no
+// session-registry record is shown on the next Scan after the local pid probe
+// sees it dead, not at the 60 s heartbeat. The clock never advances, so the
+// heartbeat cannot be what fires; nothing sleeps beyond the poll for the
+// recorder's own asynchronous exit bookkeeping.
+func TestDiscoveryGateSeesAnExitWithoutARegistryWrite(t *testing.T) {
+	e, f, since := scanEnv(t)
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	f.now = func() time.Time { return now }
+	f.SetDiscoveryHeartbeat(60 * time.Second)
+	dead := map[int]bool{}
+	f.pidAlive = func(pid int) bool { return !dead[pid] }
+
+	if _, err := f.Registrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Registrations(ctx); err != nil { // drain the seed's trailing feed read
+		t.Fatal(err)
+	}
+	since()
+	got, err := f.Registrations(ctx)
+	if err != nil || byID(got, "example-live-a") == nil || !byID(got, "example-live-a").PidAlive {
+		t.Fatalf("before the exit: %v %v", got, err)
+	}
+	if n := len(ops(since(), "process.list")); n != 0 {
+		t.Fatalf("quiet scan sent %d process.list, want 0", n)
+	}
+
+	// The process exits: the registry file is untouched, only the recorder's
+	// Process fact and the local pid change.
+	e.Procs.Exit(501, time.UnixMilli(startMs+30000))
+	dead[501] = true
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err = f.Registrations(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s := byID(got, "example-live-a"); s != nil && !s.PidAlive {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the exit never reached discovery before the heartbeat")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !now.Equal(time.Unix(1_800_000_000, 0)) {
+		t.Fatal("clock moved")
+	}
+	since()
+
+	// Once the recorder agrees the session is not live, the probe is quiet again.
+	if _, err := f.Registrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ops(since(), "process.list")); n != 0 {
+		t.Errorf("after the exit was seen: process.list = %d, want 0", n)
+	}
+}
+
+// TestDiscoveryGateGivesUpOnAPidTheRecorderKeepsAlive: a pid dead locally but
+// alive for the recorder (another pid domain) forces only a bounded number of
+// discoveries.
+func TestDiscoveryGateGivesUpOnAPidTheRecorderKeepsAlive(t *testing.T) {
+	_, f, since := scanEnv(t)
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	f.now = func() time.Time { return now }
+	f.SetDiscoveryHeartbeat(60 * time.Second)
+	f.pidAlive = func(pid int) bool { return pid != 501 }
+	for i := 0; i < 3; i++ { // seed and drain
+		if _, err := f.Registrations(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since()
+	for i := 0; i < maxGoneTries+6; i++ {
+		if _, err := f.Registrations(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(ops(since(), "process.list")); n > maxGoneTries {
+		t.Errorf("process.list = %d, want at most %d forced discoveries", n, maxGoneTries)
 	}
 }
