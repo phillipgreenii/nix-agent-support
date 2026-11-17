@@ -25,9 +25,12 @@ var epoch = time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
 type env struct {
 	t    *testing.T
 	repo *gitfixture.Repo
-	g    gitrun.Git
-	m    *Manager
-	now  time.Time
+	// mainDir is the main checkout; fake is set (and repo nil) for newFakeEnv.
+	mainDir string
+	fake    *fakeGit
+	g       gitrun.Git
+	m       *Manager
+	now     time.Time
 }
 
 func newEnv(t *testing.T, tune ...func(*config.RepoConfig)) *env {
@@ -35,7 +38,7 @@ func newEnv(t *testing.T, tune ...func(*config.RepoConfig)) *env {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	r := newBaseRepo(t)
-	e := &env{t: t, repo: r, g: gitruntest.New(t, r), now: epoch}
+	e := &env{t: t, repo: r, mainDir: r.Dir, g: gitruntest.New(t, r), now: epoch}
 	e.m = e.manager(tune...)
 	return e
 }
@@ -44,9 +47,13 @@ func newEnv(t *testing.T, tune ...func(*config.RepoConfig)) *env {
 // handle, as a separate process would hold.
 func (e *env) manager(tune ...func(*config.RepoConfig)) *Manager {
 	e.t.Helper()
-	rp, err := repo.Resolve(context.Background(), e.g, e.repo.Dir)
+	rp, err := repo.Resolve(context.Background(), e.g, e.mainDir)
 	if err != nil {
 		e.t.Fatal(err)
+	}
+	var prov provision.Provisioner = provision.NewWorktree(rp.Main, e.g, time.Minute, time.Minute)
+	if e.fake != nil {
+		prov = e.fake
 	}
 	cfg := config.File{}.For(rp)
 	for _, f := range tune {
@@ -56,7 +63,7 @@ func (e *env) manager(tune ...func(*config.RepoConfig)) *Manager {
 		Repo:     rp,
 		Cfg:      cfg,
 		Store:    state.Open(rp.CommonDir),
-		Prov:     provision.NewWorktree(rp.Main, e.g, time.Minute, time.Minute),
+		Prov:     prov,
 		Git:      e.g,
 		Registry: state.Registry{Path: state.RegistryPath()},
 		Counters: state.Counters{Path: state.CountersPath()},
@@ -81,7 +88,7 @@ func (e *env) git(dir string, args ...string) string {
 func (e *env) lease(r LeaseRequest) (Record, error) {
 	e.t.Helper()
 	if r.BaseDir == "" {
-		r.BaseDir = e.repo.Dir
+		r.BaseDir = e.mainDir
 	}
 	return e.m.Lease(e.t.Context(), r)
 }

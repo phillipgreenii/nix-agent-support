@@ -154,7 +154,7 @@ func (e *env) makeAvailable(id string) {
 func TestSelectionOrder(t *testing.T) {
 	// four worktrees: available A, released R, lease-expired E, leased L.
 	four := func(t *testing.T, tune ...func(*config.RepoConfig)) (e *env, a, r, x, l Record) {
-		e = newEnv(t, tune...)
+		e = newFakeEnv(t, tune...)
 		a = e.mustLease(LeaseRequest{Name: "a", Detach: true})
 		r = e.mustLease(LeaseRequest{Name: "r", Branch: "keep-r", Create: true})
 		x = e.mustLease(LeaseRequest{Name: "x", Detach: true, TTL: ptr(dur(t, "1h"))})

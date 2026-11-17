@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-gwm/internal/config"
+	"github.com/phillipgreenii/pg-gwm/internal/provision"
 	"github.com/phillipgreenii/pg-gwm/internal/state"
 	"github.com/phillipgreenii/x/cmdrun"
 )
@@ -77,8 +78,8 @@ func TestLeaseTTLMustBePositive(t *testing.T) {
 
 func TestBranchTable(t *testing.T) {
 	t.Run("1 existing branch", func(t *testing.T) {
-		e := newEnv(t)
-		e.git(e.repo.Dir, "branch", "feat")
+		e := newFakeEnv(t)
+		e.fake.addBranch("feat")
 		rec := e.mustLease(LeaseRequest{CommitIsh: "feat"})
 		if rec.Branch == nil || *rec.Branch != "feat" {
 			t.Errorf("branch = %v", rec.Branch)
@@ -122,8 +123,8 @@ func TestBranchTable(t *testing.T) {
 		}
 	})
 	t.Run("5 -b of an existing branch is usage", func(t *testing.T) {
-		e := newEnv(t)
-		e.git(e.repo.Dir, "branch", "b5")
+		e := newFakeEnv(t)
+		e.fake.addBranch("b5")
 		_, err := e.lease(LeaseRequest{Branch: "b5", Create: true})
 		wantErr(t, err, "usage", 2)
 	})
@@ -151,19 +152,19 @@ func TestBranchTable(t *testing.T) {
 		wantErr(t, err, "branch-in-use", 22)
 	})
 	t.Run("7 --detach", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		rec := e.mustLease(LeaseRequest{Detach: true})
-		if rec.Branch != nil || rec.Head != e.git(e.repo.Dir, "rev-parse", "HEAD") {
+		if rec.Branch != nil || rec.Head != e.fake.heads[fakeMainBranch] {
 			t.Errorf("record = %+v", rec)
 		}
 	})
 	t.Run("8 name only", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		rec := e.mustLease(LeaseRequest{Name: "fresh"})
 		if rec.Branch == nil || *rec.Branch != "fresh" {
 			t.Errorf("created branch = %v", rec.Branch)
 		}
-		e.git(e.repo.Dir, "branch", "old")
+		e.fake.addBranch("old")
 		rec = e.mustLease(LeaseRequest{Name: "old"})
 		if rec.Branch == nil || *rec.Branch != "old" {
 			t.Errorf("existing branch = %v", rec.Branch)
@@ -172,7 +173,7 @@ func TestBranchTable(t *testing.T) {
 		wantErr(t, err, "usage", 2)
 	})
 	t.Run("9 nothing", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		_, err := e.lease(LeaseRequest{})
 		ee := wantErr(t, err, "usage", 2)
 		if !strings.Contains(ee.Hint, "--name") || !strings.Contains(ee.Hint, "-b") || !strings.Contains(ee.Hint, "--detach") {
@@ -180,12 +181,13 @@ func TestBranchTable(t *testing.T) {
 		}
 	})
 	t.Run("10 branch held outside pg-gwm", func(t *testing.T) {
-		e := newEnv(t)
-		main := e.git(e.repo.Dir, "branch", "--show-current")
-		_, err := e.lease(LeaseRequest{CommitIsh: main})
+		e := newFakeEnv(t)
+		_, err := e.lease(LeaseRequest{CommitIsh: fakeMainBranch})
 		wantErr(t, err, "branch-in-use", 22)
-		other := filepath.Join(filepath.Dir(e.repo.Dir), "unmanaged")
-		e.git(e.repo.Dir, "worktree", "add", "-b", "outside", other)
+		other := filepath.Join(filepath.Dir(e.mainDir), "unmanaged")
+		if err := e.fake.Create(t.Context(), other, provision.BranchSpec{Branch: "outside", Create: true}, ""); err != nil {
+			t.Fatal(err)
+		}
 		ee := func() *Error {
 			_, err := e.lease(LeaseRequest{CommitIsh: "outside"})
 			return wantErr(t, err, "branch-in-use", 22)
@@ -195,7 +197,7 @@ func TestBranchTable(t *testing.T) {
 		}
 	})
 	t.Run("11 branch held by a managed lease", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		first := e.mustLease(LeaseRequest{Name: "holder", Branch: "b11", Create: true})
 		_, err := e.lease(LeaseRequest{CommitIsh: "b11"})
 		ee := wantErr(t, err, "branch-in-use", 22)
@@ -204,7 +206,7 @@ func TestBranchTable(t *testing.T) {
 		}
 	})
 	t.Run("12 branch held by a released worktree", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		first := e.mustLease(LeaseRequest{Name: "old", Branch: "b12", Create: true})
 		lk, err := e.m.Store.Lock(t.Context(), time.Second)
 		if err != nil {
@@ -228,7 +230,7 @@ func TestBranchTable(t *testing.T) {
 		}
 	})
 	t.Run("13 new branch under pg-gwm/", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		for _, r := range []LeaseRequest{
 			{Branch: "pg-gwm/x", Create: true},
 			{Branch: "pg-gwm/x", Reset: true},
@@ -268,7 +270,7 @@ func TestNoFetch(t *testing.T) {
 }
 
 func TestNameRules(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	e.mustLease(LeaseRequest{Name: "worker", Detach: true})
 	e.mustLease(LeaseRequest{Name: "worker/bd-1", Detach: true})
 	for _, name := range []string{strings.Repeat("x", 101), "two\nlines"} {
@@ -292,13 +294,13 @@ func TestNameBranchConflict(t *testing.T) {
 }
 
 func TestNameHeldWhilePreparing(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	bp := newBlocking(e.m.Prov)
 	e.m.Prov = bp
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.m.Lease(ctx, LeaseRequest{Name: "slow", Detach: true, BaseDir: e.repo.Dir})
+		_, err := e.m.Lease(ctx, LeaseRequest{Name: "slow", Detach: true, BaseDir: e.mainDir})
 		done <- err
 	}()
 	<-bp.started
@@ -315,7 +317,7 @@ func TestNameHeldWhilePreparing(t *testing.T) {
 }
 
 func TestSameNameRace(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	ms := []*Manager{e.manager(), e.manager()}
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
@@ -325,7 +327,7 @@ func TestSameNameRace(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = ms[i].Lease(t.Context(), LeaseRequest{Name: "potato", Detach: true, BaseDir: e.repo.Dir})
+			_, errs[i] = ms[i].Lease(t.Context(), LeaseRequest{Name: "potato", Detach: true, BaseDir: e.mainDir})
 		}()
 	}
 	close(start)
@@ -347,7 +349,7 @@ func TestSameNameRace(t *testing.T) {
 }
 
 func TestSlotIndex(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	var recs []Record
 	for _, n := range []string{"a", "b", "c"} {
 		recs = append(recs, e.mustLease(LeaseRequest{Name: n, Detach: true}))
@@ -394,7 +396,7 @@ func TestSlotIndex(t *testing.T) {
 }
 
 func TestLowDisk(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.FreeSpaceFloor = ptr(uint64(100)) })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.FreeSpaceFloor = ptr(uint64(100)) })
 	e.m.FreeBytes = func(string) (uint64, error) { return 10, nil }
 	_, err := e.lease(LeaseRequest{Name: "n", Detach: true})
 	ee := wantErr(t, err, "low-disk", 29)
@@ -412,7 +414,7 @@ func TestLowDisk(t *testing.T) {
 }
 
 func TestFirstLeaseCreatesRoot(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	if _, err := os.Stat(e.m.Cfg.WorktreeRoot); err == nil {
 		t.Fatal("worktree-root exists before the first lease")
 	}
@@ -426,13 +428,13 @@ func TestFirstLeaseCreatesRoot(t *testing.T) {
 }
 
 func TestCancelMidCreate(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	bp := newBlocking(e.m.Prov)
 	e.m.Prov = bp
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.m.Lease(ctx, LeaseRequest{Name: "doomed", Detach: true, BaseDir: e.repo.Dir})
+		_, err := e.m.Lease(ctx, LeaseRequest{Name: "doomed", Detach: true, BaseDir: e.mainDir})
 		done <- err
 	}()
 	<-bp.started

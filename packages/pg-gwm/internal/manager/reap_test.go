@@ -48,8 +48,23 @@ func (e *env) rawState() string {
 	return string(b)
 }
 
+// worktreeList is git worktree list --porcelain over the main checkout.
+func (e *env) worktreeList() string {
+	e.t.Helper()
+	if e.fake != nil {
+		e.fake.mu.Lock()
+		defer e.fake.mu.Unlock()
+		return e.fake.worktreeList()
+	}
+	return e.git(e.repo.Dir, "worktree", "list", "--porcelain")
+}
+
 func (e *env) branchExists(name string) bool {
 	e.t.Helper()
+	if e.fake != nil {
+		_, ok := e.fake.heads[name]
+		return ok
+	}
 	return e.git(e.repo.Dir, "branch", "--list", name) != ""
 }
 
@@ -72,7 +87,7 @@ func (e *env) twoReleasedOneExpired() []Record {
 }
 
 func TestReapMinTwo(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(2) })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(2) })
 	e.twoReleasedOneExpired()
 	before := e.rawState()
 
@@ -116,7 +131,7 @@ func TestReapMinTwo(t *testing.T) {
 }
 
 func TestReapReuseOff(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Min = ptr(1) })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Min = ptr(1) })
 	e.twoReleasedOneExpired()
 	res := e.mustReap(ReapOptions{})
 	if len(res.Removed) != 3 || len(res.Kept) != 0 || len(res.Created) != 1 {
@@ -129,7 +144,7 @@ func TestReapReuseOff(t *testing.T) {
 }
 
 func TestReapShrinkAboveMax(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	var recs []Record
 	for _, n := range []string{"a", "b", "c", "d"} {
 		recs = append(recs, e.mustLease(LeaseRequest{Name: n, Detach: true}))
@@ -162,7 +177,7 @@ func (s *serialProv) Create(ctx context.Context, dir string, b provision.BranchS
 }
 
 func TestReapCreatesStandbys(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Min = ptr(2) })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Min = ptr(2) })
 	sp := &serialProv{Provisioner: e.m.Prov, t: t}
 	e.m.Prov = sp
 	res := e.mustReap(ReapOptions{})
@@ -176,7 +191,7 @@ func TestReapCreatesStandbys(t *testing.T) {
 	}
 
 	t.Run("the floor stops creation", func(t *testing.T) {
-		e := newEnv(t, func(c *config.RepoConfig) { c.Min, c.FreeSpaceFloor = ptr(2), ptr(uint64(1)<<62) })
+		e := newFakeEnv(t, func(c *config.RepoConfig) { c.Min, c.FreeSpaceFloor = ptr(2), ptr(uint64(1)<<62) })
 		res := e.mustReap(ReapOptions{})
 		if len(res.Created) != 0 || len(res.Warnings) == 0 {
 			t.Errorf("reap = %+v", res)
@@ -201,7 +216,7 @@ func (f *failRemove) Remove(ctx context.Context, dir string) error {
 }
 
 func TestReapBroken(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	fr := &failRemove{Provisioner: e.m.Prov}
 	e.m.Prov = fr
 	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
@@ -225,16 +240,21 @@ func TestReapBroken(t *testing.T) {
 	}
 }
 
-// TestRenewRacesReap keeps the unit run short: each iteration spawns real
-// worktree git, so a few iterations of the renew-versus-reap race stay in the
-// unit gate and the 50-iteration soak (TestRenewRacesReapSoak) sits behind the
-// integration tag.
-func TestRenewRacesReap(t *testing.T) { renewRacesReap(t, renewRacesReapUnitIterations) }
+// TestRenewRacesReap keeps the unit run short: a few iterations of the
+// renew-versus-reap race over the in-process fake stay in the unit gate, and
+// the 50-iteration soak over real worktree git (TestRenewRacesReapSoak) sits
+// behind the integration tag.
+func TestRenewRacesReap(t *testing.T) {
+	renewRacesReap(t, renewRacesReapUnitIterations, newFakeEnv)
+}
 
 const renewRacesReapUnitIterations = 2
 
-func renewRacesReap(t *testing.T, iterations int) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
+// renewRacesReap runs the race over the environment mk builds: the unit test
+// uses the in-process fake (the race is in the manager's locking), the soak
+// real git.
+func renewRacesReap(t *testing.T, iterations int, mk func(*testing.T, ...func(*config.RepoConfig)) *env) {
+	e := mk(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
 	for i := 0; i < iterations; i++ {
 		rec := e.mustLease(LeaseRequest{Name: "n", Detach: true, TTL: ptr(dur(t, "1h"))})
 		e.now = e.now.Add(2 * time.Hour) // the lease is now expired
@@ -273,7 +293,7 @@ func renewRacesReap(t *testing.T, iterations int) {
 
 func TestReapMissingDir(t *testing.T) {
 	t.Run("a deleted worktree directory", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		rec := e.mustLease(LeaseRequest{Name: "a", Branch: "br-a", Create: true})
 		if err := os.RemoveAll(rec.WorktreePath); err != nil {
 			t.Fatal(err)
@@ -282,7 +302,7 @@ func TestReapMissingDir(t *testing.T) {
 		if _, ok := e.worktreeOf(rec.ID); ok || len(res.Removed) != 1 {
 			t.Errorf("record kept or not reported: %+v", res)
 		}
-		if got := e.git(e.repo.Dir, "worktree", "list", "--porcelain"); strings.Contains(got, rec.WorktreePath) {
+		if got := e.worktreeList(); strings.Contains(got, rec.WorktreePath) {
 			t.Errorf("git still registers it:\n%s", got)
 		}
 		if !e.branchExists("br-a") {
@@ -291,7 +311,7 @@ func TestReapMissingDir(t *testing.T) {
 	})
 
 	t.Run("a missing worktree-root", func(t *testing.T) {
-		e := newEnv(t)
+		e := newFakeEnv(t)
 		rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 		before := e.rawState()
 		if err := os.RemoveAll(e.m.Cfg.WorktreeRoot); err != nil {
@@ -346,7 +366,7 @@ func TestReapNoProcessProbe(t *testing.T) {
 }
 
 func TestReapSingleFlight(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	rel, err := e.m.Store.HoldReap()
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +385,7 @@ func TestReapSingleFlight(t *testing.T) {
 }
 
 func TestReapBusyRepoLock(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.LockWait = dur(t, "1s") })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.LockWait = dur(t, "1s") })
 	lk, err := e.m.Store.Lock(t.Context(), time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -379,7 +399,7 @@ func TestReapBusyRepoLock(t *testing.T) {
 }
 
 func TestReapDeadline(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Min = ptr(2) })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Min = ptr(2) })
 	res := e.mustReap(ReapOptions{Deadline: e.now.Add(-time.Second)})
 	if res.Outcome != ReapDeadline || len(res.Created) != 0 {
 		t.Errorf("reap = %+v", res)

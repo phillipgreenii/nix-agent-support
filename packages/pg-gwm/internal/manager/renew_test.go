@@ -48,7 +48,7 @@ func str(s *string) string {
 }
 
 func TestTTLMatrix(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 	if rec.LeaseExpiration != nil {
 		t.Fatalf("expiry = %v", rec.LeaseExpiration)
@@ -86,7 +86,7 @@ func TestTTLMatrix(t *testing.T) {
 }
 
 func TestRenewStates(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	h := dur(t, "1h")
 	a := e.mustLease(LeaseRequest{Name: "a", Branch: "ab", Create: true, TTL: &h})
 	b := e.mustLease(LeaseRequest{Name: "b", Detach: true, TTL: &h})
@@ -157,7 +157,7 @@ func TestRenewStates(t *testing.T) {
 }
 
 func TestNotFoundHintCapsHeldNames(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Max = nil })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Max = nil })
 	// The hint reads only the state: one real lease, eleven seeded records.
 	e.mustLease(LeaseRequest{Name: "na", Detach: true})
 	e.seed(func(st *state.State) {
@@ -211,7 +211,7 @@ func TestOrRenew(t *testing.T) {
 }
 
 func TestRenewMetadata(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	first := e.mustLease(LeaseRequest{Name: "m", Owner: "me", Branch: "mb", Create: true, Metadata: map[string]string{"old": "1", "keep": "x"}})
 	got, err := e.renew(LeaseKey{Name: "m"}, nil, nil)
 	if err != nil || got.Metadata["old"] != "1" || got.Metadata["keep"] != "x" {
@@ -301,7 +301,7 @@ func TestReleaseDirty(t *testing.T) {
 }
 
 func TestReleaseThenLeaseSameName(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	a := e.mustLease(LeaseRequest{Name: "same", Branch: "sb", Create: true})
 	if _, err := e.m.Release(t.Context(), LeaseKey{Name: "same"}); err != nil {
 		t.Fatal(err)
@@ -313,7 +313,7 @@ func TestReleaseThenLeaseSameName(t *testing.T) {
 }
 
 func TestLeaseIDNeverReused(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	seen := map[string]bool{}
 	const cycles = 4 // reuse of an id shows by the second cycle; more adds only spawns
 	for i := 0; i < cycles; i++ {
@@ -336,7 +336,7 @@ func TestLeaseIDNeverReused(t *testing.T) {
 }
 
 func TestExpire(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	h := dur(t, "1h")
 	rec := e.mustLease(LeaseRequest{Name: "x", Owner: "olga", Metadata: map[string]string{"k": "v"}, Branch: "xb", Create: true, TTL: &h})
 	got, err := e.m.Expire(t.Context(), LeaseKey{Name: "x"})

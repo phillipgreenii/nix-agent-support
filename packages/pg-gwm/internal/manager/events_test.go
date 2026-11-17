@@ -33,7 +33,7 @@ func (e *env) eventsByKind() (map[string]int, []state.Event) {
 // and broken transition, naming the worktree id, lease id, name, owner and
 // outcome.
 func TestEveryTransitionLogged(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	ttl := ptr(dur(t, "1h"))
 	lease := func(name, branch string) Record {
 		return e.mustLease(LeaseRequest{Name: name, Owner: "me", Branch: branch, Create: true, TTL: ttl})
