@@ -385,6 +385,37 @@ mv `+pidf+`.tmp `+pidf+`
 wait`)
 	f.cfg.Rules = []config.Rule{{ID: "r", Glob: "*", RunPer: "file", Resolve: []string{s}, Timeout: 5 * time.Second}}
 	f.conflicting("f.txt")
+	// The timeout under test must not fire before the resolver has published
+	// its child pid, however slow the host is: only the resolver script's run
+	// is ended by the test, once the pid file exists, as a deadline expiry.
+	inner := f.g.Runner
+	f.g.Runner = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		if c.Name != s {
+			return inner(ctx, c)
+		}
+		rctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		defer cancel()
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			for limit := time.Now().Add(2 * time.Minute); time.Now().Before(limit); time.Sleep(10 * time.Millisecond) {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := os.Stat(pidf); err == nil {
+					break
+				}
+			}
+			cancel() // ready, or the wait ran out (the test then fails on the missing pid)
+		}()
+		res := inner(rctx, c)
+		if rctx.Err() != nil && res.CtxErr != nil {
+			res.CtxErr = context.DeadlineExceeded
+		}
+		return res
+	}
 	start := time.Now()
 	res := f.resolve(f.resolver(true), 0, nil, nil)
 	if res.Stop == nil || res.Stop.Reason != outcome.StopTimeout {

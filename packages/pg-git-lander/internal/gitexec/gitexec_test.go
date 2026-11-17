@@ -159,7 +159,10 @@ func TestTimeoutKillsWholeProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := fixtureGit(t, repo)
-	g.Timeout = 1500 * time.Millisecond
+	// The timeout under test must not start before the hook has published the
+	// grandchild pid, however slow the host is: the runner ends the command
+	// with a deadline-exceeded context only once the pid file exists.
+	g.Runner = deadlineWhenReady(t, g.Runner, func() bool { _, err := os.Stat(pidFile); return err == nil })
 
 	start := time.Now()
 	r := g.Run(t.Context(), repo.Dir, "commit", "--allow-empty", "-m", "x")
@@ -188,6 +191,36 @@ func TestTimeoutKillsWholeProcessGroup(t *testing.T) {
 			t.Fatalf("grandchild %d survived the timeout", pid)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// deadlineWhenReady runs inner with a context that nothing but the returned
+// runner ends: once ready reports true it cancels the child (killing its whole
+// process group, as a real timeout does) and reports the end as a deadline
+// expiry. A readiness wait that runs out ends the command too, so the test
+// fails on the missing pid instead of hanging.
+func deadlineWhenReady(t *testing.T, inner cmdrun.Runner, ready func() bool) cmdrun.Runner {
+	t.Helper()
+	return func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+		rctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		defer cancel()
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			for limit := time.Now().Add(2 * time.Minute); time.Now().Before(limit) && !ready(); time.Sleep(10 * time.Millisecond) {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+			}
+			cancel() // ready, or the wait ran out (the test then fails on the missing pid)
+		}()
+		res := inner(rctx, c)
+		if rctx.Err() != nil && res.CtxErr != nil {
+			res.CtxErr = context.DeadlineExceeded
+		}
+		return res
 	}
 }
 
