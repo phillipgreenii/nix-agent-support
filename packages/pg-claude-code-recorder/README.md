@@ -30,6 +30,12 @@ the `-linux-cross-compile` check (`GOOS=linux CGO_ENABLED=0 go vet ./...`) keeps
 | `crashsweep`  | crash injection after every file-system operation of the settle scenarios (`internal/settle`)                       | `pg-claude-code-recorder-crashsweep-tests` (on demand, 30m timeout)           |
 | `lockorder`   | go-deadlock lock-order checks on the settler run lock and the copier lock (`internal/settle`, `internal/lockcheck`) | `pg-claude-code-recorder-lockorder-tests` (on demand, `-race`, 10m timeout)   |
 
+`internal/query` also keeps its five costliest tests (`*_slow_integration_test.go`: the file-facts
+rebuild, the inventory read count, the session-pinned aggregate plan, the partial-index baseline
+comparison and the v2/v3 rebuild parity) behind `integration`, because each costs seconds under
+`-race` (fixture inserts plus a store per test) and the package's unit run is held near 10 s of CPU.
+They run in `pg-claude-code-recorder-integration-tests`, not in the unit gate.
+
 The `ablation` tag is a development measurement harness for the rebuild's write path, not a tier
 and not a check: it is never part of a gate, and its build is only vetted by the gating check
 below. When and how to run it: `docs/ablation/README.md`.
