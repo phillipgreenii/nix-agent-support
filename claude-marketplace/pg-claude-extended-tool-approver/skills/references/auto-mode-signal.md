@@ -98,3 +98,17 @@ carries over:
 
 The data-state caveat above applies to `--source ceta` only: the tracker source needs no
 `permission_mode` inference.
+
+Under `--source tracker` the human tier and the false-denial lens read differently:
+
+- `approval_source` is `user` only when a person settled the call (`asklog.ApprovalSource` with the
+  tracker's prompt id), and in auto mode a person is prompted only when CETA asks, so "abstain +
+  `user`" is empty by construction. The human tier is `ask/person/approved` plus `abstain/person`
+  with `settlement == "approved"`.
+- `outcome_notes` of a classifier denial holds the raw text ("Permission for this action was denied
+  by the Claude Code auto mode classifier. Reason: [...]"), not `auto_mode_classifier:`. Select the
+  cell `abstain/classifier/refused` and discard "gave no verdict" and "judged this action dangerous
+  (it gave no explanation)": those are classifier infrastructure noise, not a risk rationale.
+- The tracker never stores `tool_response`; "errored" is the top-level `is_error`.
+- `abstain/rule-or-mode` is not free: calls refused by `dontAsk` mode (`settled_by == "mode"`,
+  `settlement == "refused"`) are an unattended worker's detours.

@@ -31,6 +31,17 @@ sidecar (see "Generated goldens" below) and a completed, HARD-clean `lint` run. 
 including a missing citation) and `internal/specfmt/repository.go` (the P17 layered loader your
 output must be readable by) before writing anything; the rest of this file assumes you have.
 
+## Which engine a spec feeds
+
+A spec you author feeds ONLY the new effect engine (`effectpolicy.Evaluate`, run offline today by
+`evaluate --corpus`, `shapes`/`replay` and `internal/legacyextract`). It does NOT change what the
+live PreToolUse hook decides: the live hook still runs the old RuleChain, and the cutover that
+hands the effect engine the registry (ADR 0075) has not happened. See the "Effect engine" section
+of `packages/claude-extended-tool-approver/docs/ARCHITECTURE.md`. So a new spec has no effect on
+real tool calls until that cutover, and its effect can be checked only by a `replay` before/after
+diff, never by `evaluate --baseline` (which replays the old chain). Say this in anything you
+report about a finished spec; never claim the hook now approves the command.
+
 ## Citation methodology (the part every downstream packet depends on)
 
 **Every fact-bearing element carries a real citation.** For a command spec that is: the four
@@ -70,7 +81,7 @@ you actually read, not what you remember reading.
    first-party plugin skill/command/agent in this pn-workspace instructs an agent to run (the
    epic `pg2-cjfpy` set: `bgcheck`, `pg-ccaudit`, `pn`, `pb`, `ccpool`, ...): it is made built-in
    by adding its Go `CommandSchema` to the registry (see "Output routing" below — this is the
-   one route that reaches the engine). Custom = none of these (a machine- or repo-local tool no
+   one route that reaches the effect engine). Custom = none of these (a machine- or repo-local tool no
    plugin ships). This decides your output location and which severity a thin citation would
    trigger if you slipped (WARN for builtin-only `lint --embedded`, HARD everywhere else per
    `internal/speclint/lint.go`'s `citationFinding`) — but you must never rely on that severity
@@ -266,7 +277,7 @@ command's _regenerated_ spec (re-sourcing its citations) is the one case that DO
 "any command which is supposed to work as part of a skill should be autoapproved").** The
 user-level / repo-level JSON layers are read today ONLY by `lint`, `spec-drift-check` and
 `genspecs`; the new engine decides from `cmddesc.DefaultRegistry()` alone (`evaluate --corpus`
-grades with exactly that registry, and the live cutover will too), so a JSON spec in a P17 layer
+grades with exactly that registry, and the cutover will too; the live hook does not yet, see "Which engine a spec feeds"), so a JSON spec in a P17 layer
 changes NO verdict. The only callers of `claudecodeadapter.Evaluate` today (`evaluate --corpus`
 and `internal/legacyextract`) pass `cmddesc.DefaultRegistry()`; no engine entry point loads
 `internal/embeddedspecs` or a P17 layer (its only importers are `lint`, `spec-drift-check` and
