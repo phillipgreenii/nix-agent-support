@@ -197,7 +197,7 @@ kill = "2m"                   # default 2m: interrupt -> kill
 nudge = 0.95                  # defaults 0.95 / 0.98 / 1.00
 interrupt = 0.98
 kill = 1.00
-unknown_reset_hold = "1h"     # default 1h
+unknown_reset_hold = "1h"     # default 1h; also for a reset past the block's length + 1h
 
 [restart]
 min_uptime = "1m"             # default 1m

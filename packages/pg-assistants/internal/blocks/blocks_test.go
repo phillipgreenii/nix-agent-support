@@ -154,7 +154,8 @@ func TestStaleLowerReadingDoesNotLowerHold(t *testing.T) {
 		t.Fatalf("zero reset: %v, want the reading with a reset kept", got)
 	}
 
-	next := reset.Add(5 * time.Hour)
+	// a later reset that a five-hour block can still have (TestImplausibleResetIsUnknown)
+	next := reset.Add(30 * time.Minute)
 	tr.Observe([]control.Limit{five(0.10, next, at(3))})
 	if got := fractions(tr, at(3)); !slices.Equal(got, []string{"five_hour=0.1"}) {
 		t.Fatalf("later reset: %v, want 0.10", got)
@@ -269,5 +270,50 @@ func TestConcurrentObserveAndRead(t *testing.T) {
 	wg.Wait()
 	if got := fractions(tr, t0); !slices.Equal(got, []string{"five_hour=0.799", "seven_day=0.799"}) {
 		t.Errorf("after the race: %v, want the highest fraction of each kind", got)
+	}
+}
+
+// A reset time further out than the block can last (its length plus an hour
+// of slack) is not believed: the reading is kept as one with no reset time, so
+// its fraction still counts and a held block holds starts for the unknown
+// reset hold, not for days. A plausible reset time is kept as it is.
+func TestImplausibleResetIsUnknown(t *testing.T) {
+	cases := []struct {
+		name  string
+		l     control.Limit
+		reset time.Time // what the tracker keeps
+	}{
+		{"five_hour past its length", five(0.96, t0.Add(6*time.Hour+time.Minute), t0), time.Time{}},
+		{"five_hour within its length", five(0.96, t0.Add(6*time.Hour), t0), t0.Add(6 * time.Hour)},
+		{"seven_day past its length", seven(0.96, t0.Add(7*24*time.Hour+time.Hour+time.Second), t0), time.Time{}},
+		{"seven_day within its length", seven(0.96, t0.Add(7*24*time.Hour), t0), t0.Add(7 * 24 * time.Hour)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, way := range []string{"observe", "seed"} {
+				tr := blocks.NewTracker(cfg)
+				if way == "observe" {
+					tr.Observe([]control.Limit{tc.l})
+				} else {
+					tr.Seed([]control.Limit{tc.l}, t0)
+				}
+				snap := tr.Snapshot(t0.Add(time.Minute))
+				if len(snap) != 1 || !snap[0].ResetsAt.Equal(tc.reset) || snap[0].Fraction != 0.96 {
+					t.Fatalf("%s: snapshot = %+v, want the reading with reset %v", way, snap, tc.reset)
+				}
+				until := tc.reset
+				if until.IsZero() {
+					until = t0.Add(cfg.UnknownResetHold)
+				}
+				checkHold(t, tr, t0.Add(time.Minute), true, until)
+			}
+		})
+	}
+	// a reading with a plausible reset time then replaces the unbelieved one
+	tr := blocks.NewTracker(cfg)
+	tr.Observe([]control.Limit{five(0.99, t0.Add(30*24*time.Hour), t0)})
+	tr.Observe([]control.Limit{five(0.50, reset, t0.Add(time.Minute))})
+	if got := fractions(tr, t0.Add(2*time.Minute)); !slices.Equal(got, []string{"five_hour=0.5"}) {
+		t.Errorf("readings = %q, want the one with a plausible reset time", got)
 	}
 }

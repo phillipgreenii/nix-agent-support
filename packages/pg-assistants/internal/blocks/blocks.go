@@ -10,6 +10,9 @@
 //     kind the reading with the latest reset time wins; for an equal reset
 //     time, the higher fraction (use within one block only grows). A reading
 //     without a reset time never replaces one that has one.
+//   - A reset time further past its observation than the block can last (5
+//     hours or 7 days, plus an hour) is not believed: the reading counts as
+//     one without a reset time.
 //   - A reading is current until its reset time, or, without one, until its
 //     observation time plus the unknown-reset hold. A reading that is no
 //     longer current is discarded, so the next one replaces it.
@@ -63,10 +66,33 @@ func (t *Tracker) Seed(limits []control.Limit, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, l := range limits {
-		if t.current(l, now) {
+		if l = plausible(l); t.current(l, now) {
 			t.merge(l)
 		}
 	}
+}
+
+// blockLength is how long each block kind lasts; resetSlack is added to it
+// before a reset time counts as implausible.
+var blockLength = map[string]time.Duration{
+	control.KindFiveHour: 5 * time.Hour,
+	control.KindSevenDay: 7 * 24 * time.Hour,
+}
+
+const resetSlack = time.Hour
+
+// plausible returns l with its reset time cleared when that time is further
+// past its observation than the block can last (its length plus resetSlack).
+// Such a reset is not believed, but the fraction is: dropping the reading
+// could start sessions into a full block, and believing the reset would hold
+// starts for as long as the bogus time says. As a reading with no reset time
+// it holds starts for UnknownResetHold and gives way to any reading that has
+// a plausible reset time.
+func plausible(l control.Limit) control.Limit {
+	if length, ok := blockLength[l.Kind]; ok && !l.ResetsAt.IsZero() && l.ResetsAt.Sub(l.ObservedAt) > length+resetSlack {
+		l.ResetsAt = time.Time{}
+	}
+	return l
 }
 
 // Meters returns the current block meters (readings whose reset time has not
@@ -118,8 +144,10 @@ func (t *Tracker) Snapshot(now time.Time) []control.Limit {
 	return out
 }
 
-// merge applies one reading. The caller holds t.mu.
+// merge applies one reading, its reset time first checked by plausible. The
+// caller holds t.mu.
 func (t *Tracker) merge(l control.Limit) {
+	l = plausible(l)
 	if !l.Valid() || !t.current(l, l.ObservedAt) {
 		return
 	}
