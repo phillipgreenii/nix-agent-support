@@ -840,9 +840,8 @@ func (l *assistantLoop) cwdExists(ctx context.Context) bool {
 // leftover exit request, then tmux new-session.
 func (l *assistantLoop) start(ctx context.Context, now time.Time) {
 	a, p := l.a, l.s.cfg.Paths
-	// Trust is keyed by the resolved directory, the key Claude looks up; the
-	// existence check and tmux keep a.Cwd.
-	key := config.ResolvePath(a.Cwd)
+	// x/claudetrust resolves the directory to the key Claude looks up.
+	key := a.Cwd
 	if ok, err := l.s.d.Trust.IsTrusted(key); err != nil || !ok {
 		if err := l.s.d.Trust.Ensure(key); err != nil {
 			l.startFailed(ctx, now, "trust", err)
@@ -855,7 +854,7 @@ func (l *assistantLoop) start(ctx context.Context, now time.Time) {
 	}
 	id := l.s.d.NewID()
 	err := bounded(ctx, tmuxTimeout, func(ctx context.Context) error {
-		return l.s.d.Tmux.NewSession(ctx, a.ID, LaunchCwd(a), LaunchEnv(a, p.StateDir, l.s.cfg.BlankEnv), LaunchArgv(p, a, id))
+		return l.s.d.Tmux.NewSession(ctx, a.ID, a.Cwd, LaunchEnv(a, p.StateDir, l.s.cfg.BlankEnv), LaunchArgv(p, a, id))
 	})
 	if err != nil {
 		if !ending(ctx) {

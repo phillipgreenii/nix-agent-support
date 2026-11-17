@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/config"
 	"github.com/phillipgreenii/x/claudetrust"
 	"github.com/phillipgreenii/x/exitcode"
 )
@@ -46,13 +45,7 @@ func (c *cli) trust(args []string) int {
 			return exitcode.Usage
 		}
 	}
-	// Claude keys .projects by the resolved directory; one that does not
-	// resolve (not created yet) keeps its path.
-	keys := make([]string, len(cwds))
-	for i, cwd := range cwds {
-		keys[i] = config.ResolvePath(cwd)
-	}
-	if err := claudetrust.Ensure(*path, keys...); err != nil {
+	if err := claudetrust.Ensure(*path, cwds...); err != nil {
 		fmt.Fprintf(c.stderr, "pg-assistants trust: %v\n", err)
 		return exitcode.Error
 	}

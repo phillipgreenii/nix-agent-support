@@ -181,7 +181,7 @@ func runChain(t *testing.T, c tmux.Client, dir, shell string, a config.Assistant
 	stateDir := filepath.Join(dir, "state")
 	a.Cwd = mkdir(t, dir, cwdName)
 	argv := LaunchArgv(config.Paths{Shell: shell, Claude: claude}, a, "example-session")
-	if err := c.NewSession(ctx, a.ID, LaunchCwd(a), LaunchEnv(a, stateDir, blank), argv); err != nil {
+	if err := c.NewSession(ctx, a.ID, a.Cwd, LaunchEnv(a, stateDir, blank), argv); err != nil {
 		t.Fatal(err)
 	}
 	waitForRecord(t, c, a.ID, rec)

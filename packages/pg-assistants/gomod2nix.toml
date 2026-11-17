@@ -21,8 +21,8 @@ cachePackages = [
     hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261117051938-78e769cfef03'
-    hash = 'sha256-eiGDplQJp/1q1/CkVfVO0+6Jq9VKQo3M818WmqsqD5Q='
+    version = 'v0.0.0-20261117200038-33c4146bc31f'
+    hash = 'sha256-QIpgp7q0adBZcOBdwBf+oUmM2Yjy+tREsO7B1+iW6Wc='
 
   [mod.'go.uber.org/goleak']
     version = 'v1.3.0'
