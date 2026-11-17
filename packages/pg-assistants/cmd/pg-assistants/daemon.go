@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/blocks"
@@ -158,7 +159,9 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	onEvent, signalled := signalWatch()
 	g := lifecycle.New(runCtx, lifecycle.Options{
+		OnEvent:  onEvent,
 		Deadline: *deadline,
 		ExitCode: exitcode.ShutdownOverrun,
 		Log:      events,
@@ -187,6 +190,12 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 		failed = true
 		cancel()
 	}
+	// Workaround for an x/lifecycle race: when every loop returns before the
+	// context's AfterFunc runs, g.Run skips shutdown_complete. Waiting for the
+	// shutdown_signal event first makes the order deterministic. The wait
+	// always ends: Run returns only after the context is done. Remove it when
+	// the x/lifecycle fix is adopted.
+	<-signalled
 	g.SetPhase("stop_loops")
 	if err := g.Run(); err != nil {
 		fmt.Fprintf(c.stderr, "pg-assistants daemon: %v\n", err)
@@ -205,6 +214,18 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 		return exitcode.Error
 	}
 	return exitcode.OK
+}
+
+// signalWatch returns a lifecycle.Options.OnEvent hook and a channel that the
+// hook closes (once) when it sees the shutdown_signal event.
+func signalWatch() (func(lifecycle.Event), <-chan struct{}) {
+	ch := make(chan struct{})
+	var once sync.Once
+	return func(ev lifecycle.Event) {
+		if ev.Name == lifecycle.EvSignal {
+			once.Do(func() { close(ch) })
+		}
+	}, ch
 }
 
 // newUUID returns a random (version 4) UUID, a new session's id.

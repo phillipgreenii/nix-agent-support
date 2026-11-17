@@ -21,6 +21,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/control"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/supervisor"
 	"github.com/phillipgreenii/x/cmdrun"
+	"github.com/phillipgreenii/x/lifecycle"
 )
 
 // The daemon tests run the whole daemon subcommand in a testing/synctest
@@ -506,4 +507,27 @@ func TestNewUUIDIsVersion4(t *testing.T) {
 		}
 		seen[id] = true
 	}
+}
+
+// signalWatch closes its channel on the first shutdown_signal event only, so
+// the daemon never starts g.Run before the signal event was emitted.
+func TestSignalWatchClosesOnShutdownSignal(t *testing.T) {
+	onEvent, ch := signalWatch()
+	closed := func() bool {
+		select {
+		case <-ch:
+			return true
+		default:
+			return false
+		}
+	}
+	onEvent(lifecycle.Event{Name: lifecycle.EvClean})
+	if closed() {
+		t.Fatal("channel closed by an event that is not the shutdown signal")
+	}
+	onEvent(lifecycle.Event{Name: lifecycle.EvSignal})
+	if !closed() {
+		t.Fatal("channel not closed by the shutdown signal")
+	}
+	onEvent(lifecycle.Event{Name: lifecycle.EvSignal}) // a repeat must not panic
 }
