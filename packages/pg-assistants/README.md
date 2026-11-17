@@ -152,12 +152,18 @@ The daemon runs through the operator's login shell so that it, and every `pg-cla
 call it makes, sees the operator's session variables. `AbandonProcessGroup` is set, so stopping or
 restarting the daemon leaves the tmux server and the assistants running, and the next daemon adopts
 them. `ExitTimeOut` is the 8 s shutdown deadline plus a 7 s margin. Its environment carries `HOME`,
-`PG_ASSISTANTS_CONFIG_HASH` (a hash of the rendered file, so a config change restarts the daemon),
+`PG_ASSISTANTS_CONFIG_HASH` (so a config change restarts the daemon),
 `PG_ASSISTANTS_SESSION_VARS_HASH` (a hash of `home.sessionVariables`, so a change of a session
 variable restarts it too) and, with `pprof.enable`, `PG_ASSISTANTS_PPROF_ADDR`. The tmux server
-keeps this environment and hands it to every session, so these names are in `blank_env`. launchd's own stdout and stderr go to
-`$XDG_STATE_HOME/pg-assistants-launchd/`, outside the daemon's 0700 state directory. Linux has no
-supervisor: the module registers nothing and warns.
+keeps this environment and hands it to every session, so these names are in `blank_env`.
+launchd's own stdout and stderr go to `$XDG_STATE_HOME/pg-assistants-launchd/`, outside the
+daemon's 0700 state directory. Linux has no supervisor: the module registers nothing and warns.
+
+The two config hashes never match. `PG_ASSISTANTS_CONFIG_HASH` in the job is a sha256 of the
+unchecked config file's store path (computed at evaluation, without building anything), while the
+hash that `status` shows and `daemon_start` logs is a sha256 of the file's content, read by the
+daemon. Compare like with like: the job's value with the job's value, the status hash with
+`sha256sum` of the file.
 
 ## Events
 
@@ -296,6 +302,17 @@ Where the rules apply:
 - The daemon isolates problems per assistant: an assistant with a problem is not started and the
   others run. A failing global field falls back to its default and is reported. Only a file that
   cannot be read or parsed, or an invalid `[paths]` entry, stops the daemon.
+
+## After landing
+
+What the tests cannot show, to check on the machine after a deploy:
+
+- `pg-assistants exit` writes `<state_dir>/exit-requests/<id>`, outside the session's `cwd`. If
+  Claude's Bash sandbox is ever enabled for the sessions, it would block that write, so the
+  assistant could not ask to stop. The session's `--allowed-tools 'Bash(pg-assistants exit)'`
+  answers only Claude's own permission prompt: any tool-approval layer in front of it (a
+  `PreToolUse` hook that approves or denies Bash commands) MUST also allow `pg-assistants exit`,
+  or the request is refused and the session is stopped only by the ladder's time steps.
 
 ## Development
 
