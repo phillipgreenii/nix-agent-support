@@ -7,11 +7,11 @@ its work. Operator ruling (Phillip, 2026-11-13): "the focus for me should be to 
 alerting. we should be checking on is the janitor making progress and is the oldest one not seen not
 growing unboundly." A candidate waiting an hour or so is fine; unbounded waiting is not.
 
-| Alert uid                               | Fires when                                                                                                                                               | Why this bar                                                                                                                                                |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pg-router-ccpool-janitor-no-progress`  | for one pass and role, every run of the last 2 hours (at least 6) saw candidates and examined and cached none                                            | healthy runs never went more than 5 in a row without reaching anything (7 days to 2026-11-13); the 2026-11-11 stall went 16                                 |
-| `pg-router-ccpool-janitor-stagnant`     | the oldest unexamined candidate of a pass has waited over 7200 s (2 hours), for 30 minutes                                                               | healthy peak was 4550 s in 24 hours; the stall reached 13904 s. The bar was 21600 s and never fired                                                         |
-| `pg-router-ccpool-janitor-list-timeout` | over 6 hours, more than 25% of the worktree sweeps spent 55 s or more in their list phase (the session list is killed at 60 s), from at least 24 samples | baseline is about 8.5% of sweeps (132 of 1557); 25% was passed in 3% of the six-hour windows of the week. It reads the existing list-phase gauge, see below |
+| Alert uid                               | Fires when                                                                                                                                                                                           | Why this bar                                                                                                                                                |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg-router-ccpool-janitor-no-progress`  | for one pass and role, every run of the last 2 hours (at least 6) saw candidates and examined and cached none                                                                                        | healthy runs never went more than 5 in a row without reaching anything (7 days to 2026-11-13); the 2026-11-11 stall went 16                                 |
+| `pg-router-ccpool-janitor-stagnant`     | the oldest unexamined candidate of a pass has waited over 7200 s (2 hours), for 30 minutes                                                                                                           | healthy peak was 4550 s in 24 hours; the stall reached 13904 s. The bar was 21600 s and never fired                                                         |
+| `pg-router-ccpool-janitor-list-timeout` | over 6 hours and again over the last hour, more than 25% of the worktree sweeps spent 55 s or more in their list phase (the session list is killed at 60 s), from at least 24 samples in the 6 hours | baseline is about 8.5% of sweeps (132 of 1557); 25% was passed in 3% of the six-hour windows of the week. It reads the existing list-phase gauge, see below |
 
 ```mermaid
 flowchart TD
@@ -72,6 +72,24 @@ list phase, not a per-pool count of killed list calls: that metric does not exis
 should be rebuilt on it when it lands.
 
 ## Evaluation of the alerts
+
+First evaluation (2026-11-17, from the janitor_run rows and the Grafana history of 2026-11-14 to
+2026-11-17). In both episodes the session list hung at 60 s on all four roles:
+
+| Alert        | 2026-11-15 episode                      | 2026-11-16 episode                      | Verdict                                                                                                 |
+| ------------ | --------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| no-progress  | 01:39 to 05:42Z, four roles: real stall | 17:19 to 18:37Z, four roles: real stall | Right on both and cleared within minutes of recovery. No change.                                        |
+| stagnant     | 00:50 to 05:42Z: real (age up to 7.2 h) | did not fire (peak age 6852 s)          | Right on both: the peak stayed under 7200 s and the pass recovered. No change.                          |
+| list-timeout | 01:42 to 09:13Z: real onset, 3.5 h tail | 18:18 to 22:59Z: real onset, 4.4 h tail | Onset real; the 6 hour share kept it firing for hours after the list recovered (05:39Z, 18:36Z). Tuned. |
+
+The cause of both episodes is the hung session list, not the janitor: `list_ms` was near 60000 for
+every role on nearly every run, so the sweep spent its 240 s budget on four serial 60 s kills and
+`closed_bead_reconcile` ran 150 to 390 s (healthy 30 to 90 s) against the 480 s deadline. Read
+`list_ms` for this: the `list_timeouts` counter is not reliable here (it read 0 on most of these
+runs). The list-timeout tuning: the share over the last hour must also exceed 25%, so the alert ends
+about an hour after the list recovers; the onset and the 6 hour threshold are unchanged. A shorter
+6 hour window (3 hours) was tried and rejected: it would fire on the roughly 1.5 hour hang of
+2026-11-13 that no other alert noticed.
 
 After deployment, count over 7 days how often each alert fired and whether each firing was a real
 stall. Keep an alert that fires only on real stalls; if one is noisy or the threshold trade-off is

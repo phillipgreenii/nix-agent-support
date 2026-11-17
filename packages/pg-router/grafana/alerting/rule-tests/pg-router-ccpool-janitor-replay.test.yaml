@@ -482,6 +482,35 @@ tests:
               severity: warning
               pass: worktree_sweep
 
+  # The 2026-11-15 and 2026-11-16 spells: every sweep hung for hours, then the list recovered.
+  # The 6 hour share stays above 25% for hours after that, so without the last-hour share the
+  # alert kept firing for 3.5 and 4.4 hours after recovery. Here the hang lasts 5h (30 samples
+  # of 10 minutes), the list is fast from then on.
+  - name: list-timeout fires during a hang and ends within about an hour of the list recovering
+    interval: 10m
+    input_series:
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="a",phase="list"}
+        values: "60x30 1x40"
+      - series: ccpool_janitor_phase_seconds{pass="worktree_sweep",role="b",phase="list"}
+        values: "60x30 1x40"
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pass: worktree_sweep
+      - eval_time: 5h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              pass: worktree_sweep
+      # Recovered at 5h; the 6 hour share is still about 70% at 7h, the last hour has none.
+      - eval_time: 7h
+        alertname: pg-router-ccpool-janitor-list-timeout
+        exp_alerts: []
+
   - name: list-timeout stays quiet at the measured baseline share and when fewer than 24 samples exist
     interval: 10m
     input_series:

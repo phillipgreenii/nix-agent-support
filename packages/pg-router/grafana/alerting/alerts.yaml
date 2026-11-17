@@ -2196,7 +2196,11 @@ groups:
       # (three times the baseline) fires on a clearly worse than usual spell and not on the
       # known background rate. A 6 hour window holds about 140 samples (4 pools, 10 minute
       # runs); at least 24 are required so a quiet host cannot fire on a handful. `for: 1h`
-      # asks for the spell to persist. The subquery steps every minute so each pushed sample
+      # asks for the spell to persist. The share must also exceed 25% over the last hour, so
+      # the alert ends about an hour after the list recovers: with the 6 hour share alone the
+      # 2026-11-15 and 2026-11-16 spells (every sweep hung for 5.5 and 3.5 hours) kept it
+      # firing 3.5 and 4.4 hours after recovery while the 6 hour share drained. The onset is
+      # unchanged, since a real spell lifts both shares. The subquery steps every minute so each pushed sample
       # counts for the same number of steps. First check: pg-router-ccpool-janitor-no-progress
       # and -stagnant, then docs/runbooks/ccpool-janitor-progress-alerts.md.
       - uid: pg-router-ccpool-janitor-list-timeout
@@ -2209,7 +2213,7 @@ groups:
           severity: warning
         annotations:
           summary: "more than 25% of the ccpool janitor's worktree sweeps spent 55 seconds or more listing, over 6 hours"
-          description: "ccpool_janitor_phase_seconds (pass worktree_sweep, phase list) was 55 seconds or more in over 25% of the samples of the last 6 hours (at least 24 samples): the session list is hitting its 60 second kill, the usual baseline being about 8.5% of sweeps. A killed list makes the sweep act on nothing for that role in that run, so candidates wait longer. First check host load and which child is stuck (tmux, the ccpool sqlite store or git on a live checkout) by running `ccpool --pool <pool> list --all --json` by hand and timing it, then the steps in docs/runbooks/ccpool-janitor-progress-alerts.md."
+          description: "ccpool_janitor_phase_seconds (pass worktree_sweep, phase list) was 55 seconds or more in over 25% of the samples of the last 6 hours (at least 24 samples) and of the last hour: the session list is hitting its 60 second kill, the usual baseline being about 8.5% of sweeps. A killed list makes the sweep act on nothing for that role in that run, so candidates wait longer. First check host load and which child is stuck (tmux, the ccpool sqlite store or git on a live checkout) by running `ccpool --pool <pool> list --all --json` by hand and timing it, then the steps in docs/runbooks/ccpool-janitor-progress-alerts.md."
         data:
           - refId: A
             relativeTimeRange:
@@ -2220,7 +2224,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (avg by (pass) (avg_over_time((ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"} >= bool 55)[6h:1m])) > 0.25) and on (pass) (sum by (pass) (count_over_time(ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"}[6h])) >= 24)
+              expr: (avg by (pass) (avg_over_time((ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"} >= bool 55)[6h:1m])) > 0.25) and (avg by (pass) (avg_over_time((ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"} >= bool 55)[1h:1m])) > 0.25) and on (pass) (sum by (pass) (count_over_time(ccpool_janitor_phase_seconds{pass="worktree_sweep",phase="list"}[6h])) >= 24)
           - refId: B
             datasourceUid: __expr__
             model:
