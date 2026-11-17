@@ -66,7 +66,7 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 	if err != nil {
 		return nil, err
 	}
-	run := func(req client.QueryRequest) (*client.QueryAnswer, error) {
+	run := func(ctx context.Context, req client.QueryRequest) (*client.QueryAnswer, error) {
 		req.From = "records"
 		a, err := c.Query(ctx, req)
 		return a, f.wrap(err)
@@ -102,13 +102,23 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 		return nil, fmt.Errorf("listing sessions: %w", client.ErrBehind)
 	}
 
-	// First and last record time per session: one ordered single-row read per
-	// session (the recorder serves a query pinned to a session by its index),
-	// never a min/max group over records, which scanned every record of every
-	// listed session and timed out.
-	timeOf := func(sid any, dir string) (time.Time, error) {
-		one, err := run(client.QueryRequest{
-			Where:  &client.Filter{All: append(append([]client.Filter{}, base...), client.Filter{Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", sid))})},
+	// Every session is read independently (a query pinned to the session is served
+	// by the recorder's session index, never a group over every listed session,
+	// which read all their records at once and timed out), so the sessions are
+	// read with bounded concurrency: about five sequential reads per session over
+	// a thousand sessions did not fit the recorder deadline one after another.
+	pinned := func(sid string) client.Filter {
+		return client.Filter{Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", sid))}
+	}
+	where := func(sid string, extra ...client.Filter) *client.Filter {
+		return &client.Filter{All: append([]client.Filter{transcriptSource(), main, stamped, pinned(sid)}, extra...)}
+	}
+	// timeOf is the first or last record time of one session: an ordered
+	// single-row read, never a min/max group over records, which scanned every
+	// record of every listed session and timed out.
+	timeOf := func(ctx context.Context, sid, dir string) (time.Time, error) {
+		one, err := run(ctx, client.QueryRequest{
+			Where:  &client.Filter{All: append(append([]client.Filter{}, base...), pinned(sid))},
 			Select: []string{"time"}, Order: []client.Order{{By: "time", Dir: dir}}, Limit: 1,
 		})
 		if err != nil || len(one.Rows) != 1 {
@@ -116,50 +126,33 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 		}
 		return parseTime(one.Rows[0][0]), nil
 	}
-	byID := map[string]*SessionSummary{}
-	var ids []any
-	for _, sid := range act {
-		first, err := timeOf(sid, "asc")
+	results := make([]*SessionSummary, len(act))
+	err = forEachBounded(ctx, len(act), sessionConcurrency, func(ctx context.Context, i int) error {
+		id := act[i].(string)
+		first, err := timeOf(ctx, id, "asc")
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if first.IsZero() || (!since.IsZero() && first.Before(since)) || (!before.IsZero() && !first.Before(before)) {
-			continue
+			return nil
 		}
-		last, err := timeOf(sid, "desc")
+		last, err := timeOf(ctx, id, "desc")
 		if err != nil {
-			return nil, err
+			return err
 		}
-		id := sid.(string)
-		byID[id] = &SessionSummary{SessionID: id, StartedAt: first, EndedAt: last, ModelTokens: map[string]Tokens{}}
-		ids = append(ids, sid)
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	// Each session's counts are read by a query pinned to that one session (the
-	// recorder serves those by its session index), not by one group over every
-	// listed session, which read all their records at once and timed out.
-	pinned := func(sid string) client.Filter {
-		return client.Filter{Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", sid))}
-	}
-	where := func(sid string, extra ...client.Filter) *client.Filter {
-		return &client.Filter{All: append([]client.Filter{transcriptSource(), main, stamped, pinned(sid)}, extra...)}
-	}
-	for _, id := range ids {
-		s := byID[id.(string)]
+		s := &SessionSummary{SessionID: id, StartedAt: first, EndedAt: last, ModelTokens: map[string]Tokens{}}
 		// User turns are the user lines of the main thread (tool results arrive
 		// as user lines too, so this counts them as well).
-		uc, err := run(client.QueryRequest{Where: where(s.SessionID, typeIs("user"), lineRecord), Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000})
+		uc, err := run(ctx, client.QueryRequest{Where: where(id, typeIs("user"), lineRecord), Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, r := range uc.Rows {
 			s.UserTurns = int(num(r[0]))
 		}
 		// Assistant turns, models and tokens, de-duplicated by message id.
-		ac, err := run(client.QueryRequest{
-			Where: where(s.SessionID, typeIs("assistant")),
+		ac, err := run(ctx, client.QueryRequest{
+			Where: where(id, typeIs("assistant")),
 			Group: []string{"model"},
 			Aggregate: []client.Agg{
 				{Fn: "count", Field: "message.id", Distinct: "message.id", As: "turns"},
@@ -171,7 +164,7 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 			Limit: 10000,
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		var best int64
 		for _, r := range ac.Rows {
@@ -185,34 +178,38 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 				}
 			}
 		}
-	}
-	// Cwd and branch of the first record; the first prompt.
-	for _, sid := range ids {
-		s := byID[sid.(string)]
-		one, err := run(client.QueryRequest{
-			Where:  &client.Filter{All: []client.Filter{transcriptSource(), main, stamped, {Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", s.SessionID))}}},
+		// Cwd and branch of the first record; the first prompt.
+		one, err := run(ctx, client.QueryRequest{
+			Where:  where(id),
 			Select: []string{"cwd", "git_branch"}, Order: []client.Order{{By: "time"}}, Limit: 1,
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if len(one.Rows) == 1 {
 			s.Cwd, s.Branch = str(one.Rows[0][0]), str(one.Rows[0][1])
 		}
-		fp, err := run(client.QueryRequest{
-			Where:  &client.Filter{All: []client.Filter{transcriptSource(), main, stamped, typeIs("user"), {Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", s.SessionID))}, lineRecord}},
+		fp, err := run(ctx, client.QueryRequest{
+			Where:  where(id, typeIs("user"), lineRecord),
 			Select: []string{"session"}, Order: []client.Order{{By: "time"}}, Limit: 1, Raw: true,
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if len(fp.Raw) == 1 {
 			s.FirstPrompt = promptOf(fp.Raw[0])
 		}
+		results[i] = s
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	out := make([]SessionSummary, 0, len(byID))
-	for _, s := range byID {
-		out = append(out, *s)
+	out := make([]SessionSummary, 0, len(results))
+	for _, s := range results {
+		if s != nil {
+			out = append(out, *s)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].StartedAt.Equal(out[j].StartedAt) {
