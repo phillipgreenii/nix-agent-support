@@ -178,3 +178,19 @@ func stripComments(s string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// A ccpool whose capacity check keeps failing (a recorder unreachable under
+// load) ends the run as Skipped, which the adapter-facing exit code reports
+// as 3. The real binary name is resolved from PATH, so a stub stands in.
+func TestJobRunCapacityFailureExits3(t *testing.T) {
+	jobEnv(t, true)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ccpool"), []byte("#!/bin/sh\necho recorder unreachable >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code, _, stderr := run(t, "job", "run", "agent-workflow", "--scope", "demo", "--duration", "1h", "--analyst", "ccpool")
+	if code != appcode.Skipped || !strings.Contains(stderr, "capacity check failed") {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+}

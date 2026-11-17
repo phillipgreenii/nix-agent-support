@@ -497,6 +497,72 @@ func TestCapacityErrorRetriesThenSkips(t *testing.T) {
 	}
 }
 
+// A capacity-check Skipped run does not consume the run key: a rerun with the
+// same key is not refused as already filed.
+func TestCapacityErrorSkipDoesNotConsumeRunKey(t *testing.T) {
+	e := setupCcpool(t, ccCfg, 0)
+	boom := errors.New("recorder unreachable")
+	e.fake.capErrs = []error{boom, boom, boom}
+	e.fake.capacity = ccpool.Capacity{Free: 0}
+	p := Params{Lens: "agent-workflow", Scope: "demo-scope", Duration: "24h", Analyst: "ccpool", RunKey: "key-1"}
+	_, err := Run(bg, e.d, p)
+	var sk *SkippedError
+	if !errors.As(err, &sk) || !strings.Contains(sk.Reason, "capacity check failed") {
+		t.Fatalf("%v", err)
+	}
+	prev, err := e.l.LastRunForKey(bg, "key-1")
+	if err != nil || prev.State != ledger.RunSkipped {
+		t.Fatalf("%+v %v", prev, err)
+	}
+	_, err = Run(bg, e.d, p)
+	var af *AlreadyFiledError
+	if errors.As(err, &af) {
+		t.Fatalf("the skipped run consumed the run key: %v", err)
+	}
+	if !errors.As(err, &sk) || !strings.Contains(sk.Reason, "no free session slot") {
+		t.Fatalf("the rerun should have reached the capacity check: %v", err)
+	}
+}
+
+// A capacity-check Skipped run is invisible to the schedule metrics: it
+// neither adds to the consecutive-failed count nor resets it.
+func TestCapacityErrorSkipLeavesScheduleCountersAlone(t *testing.T) {
+	e := setupCcpool(t, ccCfg, 0)
+	p := Params{Lens: "agent-workflow", Scope: "demo-scope", Duration: "24h", Analyst: "ccpool", ScheduleID: "sched-1"}
+	// One genuine Failed scheduled run: the counter reads 1.
+	e.fake.startErr = errors.New("start exploded")
+	if _, err := Run(bg, e.d, p); err == nil {
+		t.Fatal("want a failed run")
+	}
+	count := func() int {
+		md, err := e.l.MetricsData(bg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range md.Schedules {
+			if s.Schedule == "sched-1" {
+				return s.ConsecutiveFailed
+			}
+		}
+		t.Fatal("no schedule state")
+		return -1
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("baseline consecutive failed = %d, want 1", n)
+	}
+	e.fake.startErr = nil
+	boom := errors.New("recorder unreachable")
+	e.fake.capCalls, e.fake.capErrs = 0, []error{boom, boom, boom}
+	_, err := Run(bg, e.d, p)
+	var sk *SkippedError
+	if !errors.As(err, &sk) {
+		t.Fatalf("%v", err)
+	}
+	if n := count(); n != 1 {
+		t.Errorf("consecutive failed = %d after a capacity skip, want it unchanged at 1", n)
+	}
+}
+
 func TestCapacityErrorRecoversWithinRetries(t *testing.T) {
 	e := setupCcpool(t, ccCfg, 0)
 	e.fake.capErrs = []error{errors.New("transient"), errors.New("transient")}
