@@ -9,7 +9,7 @@ Operator constraints (Phillip, 2026-11-10): fetch only what the tool needs; quer
 
 These override anything older in this plan.
 
-- **Recorder owns derived reads.** "the recorder owns the derived reads": there is NO client-side copy of recorder state in pa-monitor (no `SnapshotSource`, no in-app discovery snapshot, no heartbeat or back-off machinery). The recorder answers a cheap, bounded, cached read; pa-monitor asks it once per Scan.
+- **Recorder owns derived reads.** "the recorder owns the derived reads": there is NO client-side copy of recorder state in pa-monitor (no `SnapshotSource`, no in-app discovery snapshot, no heartbeat or back-off machinery), with ONE deliberate exception: the single `if_seq` conditional token and the previous answer's session list, reused only while the recorder answers `unchanged` for that same `seq`. Because the operator kept the extended `process.list` (answer 3, which includes `if_seq`), this is a conditional-GET cache validator, not a replicated copy of recorder state: the recorder decides validity and the client never answers a question on its own. The recorder answers a cheap, bounded, cached read; pa-monitor asks it once per Scan.
 - **Offline is shown immediately.** When the recorder is offline, pa-monitor MUST publish the existing Offline state at once; there is no 60 s stale-serving window.
 - **No long-lived-refresher question.** The ccpool refresher question is moot (see the ccpool plan); it does not affect this plan.
 
@@ -127,7 +127,7 @@ Recorder changes:
 - core/corpus/monitor.go:111: unchanged error handling (an error fails the Scan; Offline is published immediately).
 - daemon/gc.go:115 `keepIDs`: reads the full known-id set with an explicit request: `alive:null`, no `detail`, `limit` covering the live set plus the 500-row dead cap (today's 1000 live plus 500 dead), so the dead rows up to the cap are returned and the set does not shrink; a degraded or failed answer skips this GC pass entirely.
 - core/corpus/reader.go:300: unchanged.
-- Capability detection from hello selects the extended `process.list` or the slice 1 fallback (amendment 2).
+- Capability detection from hello selects the extended `process.list` or the slice 1 fallback (amendment 2); slice 5 keeps that fallback code for an older recorder.
 
 ## 5. Slices (sizes S/M/L/XL)
 
@@ -137,7 +137,7 @@ All tests use a real recorder with a recording proxy; base: the recordingProxy h
 2. S: bootstrap-convergence check for FilesInventory (keep partial progress, bound the window). Test: an interrupted bootstrap resumes from its partial progress.
 3. M, recorder: slice R, bound `registryQuery` (live and recently ended only, or incremental). Tests: a store with many old registry versions reads in time proportional to the live set; results equal the unbounded query for live processes.
 4. L, recorder: extended `process.list` (`if_seq`, `ended_since`, `detail=registry`). Recorder tests: new fields from the newest version including entrypoint from the records column, `unchanged` when nothing committed, `degraded` while backfilling, cancel-op audit, capability lists, README. pa-monitor tests: per Scan exactly 1 `process.list`, 0 `query`; an equivalence test against the old three-call answer before deleting old code; capability fallback to slice 1 on an older recorder.
-5. S: cleanup. Remove registryExtra, the dead Registrations path and the old tests.
+5. S: cleanup. Remove registryExtra, the dead per-Scan Registrations code that nothing reaches any more, and the tests of that code. KEEP the slice-1-shaped capability fallback (live-only ids, 24 h floor, one records query) so a new pa-monitor still works against an older recorder.
 
 Order: 1 and 2 land first against the existing recorder; 3 then 4 need recorder changes and follow the serial plumbing order in the usage plan (R, usage op, extended `process.list`, then `sessions.facts`); 5 follows 4.
 
