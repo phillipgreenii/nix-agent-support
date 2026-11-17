@@ -5,4 +5,5 @@ go 1.26.8
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/phillipgreenii/x v0.0.0-20261117051938-78e769cfef03
+	go.uber.org/goleak v1.3.0
 )
