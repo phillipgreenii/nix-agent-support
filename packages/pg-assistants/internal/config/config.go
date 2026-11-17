@@ -1,0 +1,631 @@
+// Package config loads and validates the pg-assistants configuration file, a
+// TOML file rendered by the home-manager module.
+//
+// Validation is isolated per assistant: an assistant that breaks a rule gets
+// the problem in its own Problems and the daemon does not start it, while
+// every other assistant runs. A global field that breaks a rule falls back to
+// its default and the problem is kept in Config.Problems. Only a file that
+// cannot be read or parsed, or an invalid [paths] entry, makes Load fail,
+// because then no assistant could run at all. Strict joins every problem for
+// `pg-assistants config check`, which the build runs, so a bad config fails
+// the build before it is deployed.
+//
+// Whether an assistant's cwd exists is NOT checked here: the build sandbox
+// cannot see it. The daemon checks it before each start.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/BurntSushi/toml"
+)
+
+// Built-in defaults for the optional fields.
+const (
+	DefaultTick             = time.Minute
+	DefaultGraceInterrupt   = 5 * time.Minute
+	DefaultGraceKill        = 2 * time.Minute
+	DefaultBlocksNudge      = 0.95
+	DefaultBlocksInterrupt  = 0.98
+	DefaultBlocksKill       = 1.00
+	DefaultUnknownResetHold = time.Hour
+	DefaultMinUptime        = time.Minute
+	DefaultBackoffInitial   = time.Minute
+	DefaultBackoffMax       = 30 * time.Minute
+	DefaultStartTimeout     = 5 * time.Minute
+	DefaultContextKill      = 1.00
+)
+
+// efforts are the accepted values of an assistant's effort (claude --effort).
+var efforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+var (
+	idPattern     = regexp.MustCompile(`^[a-z0-9-]+$`)
+	envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
+// Config is the loaded configuration. Durations and points hold their
+// effective values: a global field that failed validation holds its default
+// and is listed in Problems.
+type Config struct {
+	Tick       time.Duration
+	Grace      Grace
+	Blocks     Blocks
+	Restart    Restart
+	Paths      Paths
+	Assistants []Assistant
+	Problems   []FieldError // global fields that fell back to their defaults
+}
+
+// Grace is the [grace] table: the time-based ladder steps, for every ladder.
+type Grace struct{ Interrupt, Kill time.Duration }
+
+// Points are a meter's nudge, interrupt and kill points, as fractions;
+// 0 < Nudge < Interrupt <= Kill.
+type Points struct{ Nudge, Interrupt, Kill float64 }
+
+// Blocks is the [blocks] table: points over the account's 5-hour and 7-day
+// blocks, and how long to hold when a held block reports no reset time.
+type Blocks struct {
+	Points
+	UnknownResetHold time.Duration
+}
+
+// Restart is the [restart] table.
+type Restart struct{ MinUptime, BackoffInitial, BackoffMax, StartTimeout time.Duration }
+
+// Paths is the [paths] table. Every entry is required and absolute.
+type Paths struct{ Tmux, Claude, PgClaudeControl, Shell, StateDir, ClaudeJSON string }
+
+// Assistant is one [[assistant]] entry.
+type Assistant struct {
+	ID, Name, Model, Effort, Cwd, Prompt string
+	Enabled                              bool              // true when the key is absent
+	Tick                                 time.Duration     // resolved: own value or Config.Tick
+	Env                                  map[string]string // extra session environment
+	Context                              Context
+	Problems                             []FieldError // non-empty: the daemon does not start this assistant
+}
+
+// Context is the [assistant.context] table.
+type Context struct {
+	Limit, Window int64 // Window resolved from the model table unless set
+	Points
+}
+
+// FieldError is one validation problem, naming the field it is about, such as
+// `grace.kill` or `assistant[example-a].context.kill`. An assistant whose id
+// is not valid is named by its position instead: `assistant[#2]`.
+type FieldError struct{ Field, Msg string }
+
+func (e FieldError) Error() string { return e.Field + ": " + e.Msg }
+
+// Defaults returns the global defaults, with no paths and no assistants.
+func Defaults() Config {
+	return Config{
+		Tick:  DefaultTick,
+		Grace: Grace{Interrupt: DefaultGraceInterrupt, Kill: DefaultGraceKill},
+		Blocks: Blocks{
+			Points:           Points{Nudge: DefaultBlocksNudge, Interrupt: DefaultBlocksInterrupt, Kill: DefaultBlocksKill},
+			UnknownResetHold: DefaultUnknownResetHold,
+		},
+		Restart: Restart{
+			MinUptime:      DefaultMinUptime,
+			BackoffInitial: DefaultBackoffInitial,
+			BackoffMax:     DefaultBackoffMax,
+			StartTimeout:   DefaultStartTimeout,
+		},
+	}
+}
+
+// Load returns an error only for an unreadable or unparseable file or an
+// invalid [paths] entry. Every other problem is recorded in Problems.
+func Load(path string) (Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+	var doc map[string]any
+	if _, err := toml.Decode(string(data), &doc); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
+	}
+	return fromDocument(doc)
+}
+
+// Strict joins every Problem (global and per assistant); config check uses it.
+// The result is nil when there are none, and its text has one problem per line.
+func (c Config) Strict() error {
+	var errs []error
+	for _, p := range c.Problems {
+		errs = append(errs, p)
+	}
+	for _, a := range c.Assistants {
+		for _, p := range a.Problems {
+			errs = append(errs, p)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func fromDocument(doc map[string]any) (Config, error) {
+	cfg := Defaults()
+	top := &table{m: doc, problems: &cfg.Problems, global: true}
+
+	paths, err := readPaths(top)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Paths = paths
+
+	top.duration("tick", &cfg.Tick)
+
+	if g := top.sub("grace"); g != nil {
+		g.duration("interrupt", &cfg.Grace.Interrupt)
+		g.duration("kill", &cfg.Grace.Kill)
+		g.unknown("interrupt", "kill")
+	}
+
+	if b := top.sub("blocks"); b != nil {
+		pts := cfg.Blocks.Points
+		ok := b.float("nudge", &pts.Nudge)
+		ok = b.float("interrupt", &pts.Interrupt) && ok
+		ok = b.float("kill", &pts.Kill) && ok
+		if ok {
+			if key, msg := checkPoints(pts); key != "" {
+				b.problem(key, msg+fmt.Sprintf("; [blocks] uses the default points %g/%g/%g",
+					DefaultBlocksNudge, DefaultBlocksInterrupt, DefaultBlocksKill))
+				ok = false
+			}
+		}
+		if ok {
+			cfg.Blocks.Points = pts
+		}
+		b.duration("unknown_reset_hold", &cfg.Blocks.UnknownResetHold)
+		b.unknown("nudge", "interrupt", "kill", "unknown_reset_hold")
+	}
+
+	if r := top.sub("restart"); r != nil {
+		r.duration("min_uptime", &cfg.Restart.MinUptime)
+		r.duration("backoff_initial", &cfg.Restart.BackoffInitial)
+		r.duration("backoff_max", &cfg.Restart.BackoffMax)
+		r.duration("start_timeout", &cfg.Restart.StartTimeout)
+		r.unknown("min_uptime", "backoff_initial", "backoff_max", "start_timeout")
+	}
+
+	cfg.Assistants = readAssistants(top, cfg.Tick)
+	top.unknown("tick", "grace", "blocks", "restart", "paths", "assistant")
+	return cfg, nil
+}
+
+// readPaths reads [paths]. Every entry is required and MUST be an absolute
+// path; a failure is fatal. An unknown key is only a problem.
+func readPaths(top *table) (Paths, error) {
+	v, ok := top.m["paths"]
+	if !ok {
+		return Paths{}, FieldError{"paths", "the [paths] table is required"}
+	}
+	m, isTable := v.(map[string]any)
+	if !isTable {
+		return Paths{}, FieldError{"paths", "must be a table, got " + describe(v)}
+	}
+	var p Paths
+	entries := []struct {
+		key string
+		dst *string
+	}{
+		{"tmux", &p.Tmux},
+		{"claude", &p.Claude},
+		{"pg_claude_control", &p.PgClaudeControl},
+		{"shell", &p.Shell},
+		{"state_dir", &p.StateDir},
+		{"claude_json", &p.ClaudeJSON},
+	}
+	known := make([]string, 0, len(entries))
+	for _, e := range entries {
+		known = append(known, e.key)
+		field := "paths." + e.key
+		raw, present := m[e.key]
+		if !present {
+			return Paths{}, FieldError{field, "required"}
+		}
+		s, isString := raw.(string)
+		if !isString {
+			return Paths{}, FieldError{field, "must be a string, got " + describe(raw)}
+		}
+		if !filepath.IsAbs(s) {
+			return Paths{}, FieldError{field, fmt.Sprintf("%q must be an absolute path", s)}
+		}
+		*e.dst = s
+	}
+	(&table{name: "paths", m: m, problems: top.problems}).unknown(known...)
+	return p, nil
+}
+
+// readAssistants reads every [[assistant]] entry, then marks duplicate ids
+// and shared cwds on every assistant involved.
+func readAssistants(top *table, globalTick time.Duration) []Assistant {
+	v, ok := top.m["assistant"]
+	if !ok {
+		return nil
+	}
+	list, isList := v.([]map[string]any)
+	if !isList {
+		top.problem("assistant", "must be an array of tables ([[assistant]]), got "+describe(v)+"; no assistant runs")
+		return nil
+	}
+	out := make([]Assistant, 0, len(list))
+	labels := make([]string, 0, len(list))
+	for i, m := range list {
+		label := fmt.Sprintf("assistant[#%d]", i+1)
+		if id, isString := m["id"].(string); isString && idPattern.MatchString(id) {
+			label = "assistant[" + id + "]"
+		}
+		labels = append(labels, label)
+		out = append(out, readAssistant(label, m, globalTick))
+	}
+
+	markShared(out, labels, "id", func(a Assistant) string { return a.ID },
+		func(v string, others []string) string {
+			return fmt.Sprintf("id %q is also used by %s; ids MUST be unique", v, strings.Join(others, ", "))
+		})
+	markShared(out, labels, "cwd", func(a Assistant) string {
+		if !filepath.IsAbs(a.Cwd) {
+			return ""
+		}
+		return filepath.Clean(a.Cwd)
+	}, func(v string, others []string) string {
+		return fmt.Sprintf("cwd %q is also the cwd of %s; one assistant per directory", v, strings.Join(others, ", "))
+	})
+	return out
+}
+
+// markShared records a problem on field for every assistant whose key(a) is
+// non-empty and shared with another assistant. The others are named by
+// position and, where it differs from the assistant's own, by label.
+func markShared(as []Assistant, labels []string, field string, key func(Assistant) string, msg func(v string, others []string) string) {
+	byKey := map[string][]int{}
+	for i, a := range as {
+		if k := key(a); k != "" {
+			byKey[k] = append(byKey[k], i)
+		}
+	}
+	for i, a := range as {
+		k := key(a)
+		idx := byKey[k]
+		if k == "" || len(idx) < 2 {
+			continue
+		}
+		var others []string
+		for _, j := range idx {
+			switch {
+			case j == i:
+			case labels[j] == labels[i] || labels[j] == fmt.Sprintf("assistant[#%d]", j+1):
+				others = append(others, fmt.Sprintf("assistant #%d", j+1))
+			default:
+				others = append(others, fmt.Sprintf("assistant #%d (%s)", j+1, labels[j]))
+			}
+		}
+		as[i].Problems = append(as[i].Problems, FieldError{labels[i] + "." + field, msg(k, others)})
+	}
+}
+
+func readAssistant(label string, m map[string]any, globalTick time.Duration) Assistant {
+	a := Assistant{
+		Enabled: true,
+		Tick:    globalTick,
+		Context: Context{Points: Points{Kill: DefaultContextKill}},
+	}
+	t := &table{name: label, m: m, problems: &a.Problems}
+
+	if t.requiredString("id", &a.ID) && !idPattern.MatchString(a.ID) {
+		t.problem("id", fmt.Sprintf("%q must match [a-z0-9-]+", a.ID))
+	}
+	t.requiredString("name", &a.Name)
+	t.requiredString("model", &a.Model)
+	if t.requiredString("effort", &a.Effort) && !slices.Contains(efforts, a.Effort) {
+		t.problem("effort", fmt.Sprintf("%q must be one of %s", a.Effort, strings.Join(efforts, ", ")))
+	}
+	if t.requiredString("cwd", &a.Cwd) && !filepath.IsAbs(a.Cwd) {
+		t.problem("cwd", fmt.Sprintf("%q must be an absolute path", a.Cwd))
+	}
+	if t.requiredString("prompt", &a.Prompt) && strings.HasPrefix(a.Prompt, "-") {
+		t.problem("prompt", fmt.Sprintf("%q must not start with \"-\"", a.Prompt))
+	}
+	t.boolean("enabled", &a.Enabled)
+	t.duration("tick", &a.Tick)
+	a.Env = readEnv(t)
+	readContext(t, &a)
+	t.unknown("id", "name", "model", "effort", "cwd", "prompt", "enabled", "tick", "env", "context")
+	return a
+}
+
+func readEnv(t *table) map[string]string {
+	e := t.sub("env")
+	if e == nil {
+		return nil
+	}
+	env := make(map[string]string, len(e.m))
+	for _, k := range sortedKeys(e.m) {
+		if !envKeyPattern.MatchString(k) {
+			e.problem(k, fmt.Sprintf("%q is not an environment variable name ([A-Za-z_][A-Za-z0-9_]*)", k))
+			continue
+		}
+		var s string
+		if e.str(k, &s) {
+			env[k] = s
+		}
+	}
+	return env
+}
+
+func readContext(t *table, a *Assistant) {
+	_, present := t.m["context"]
+	c := t.sub("context")
+	if c == nil {
+		if present {
+			return // not a table: already recorded
+		}
+		// Absent: every required context key is missing.
+		c = &table{name: t.field("context"), m: map[string]any{}, problems: t.problems}
+	}
+	limitOK := c.requiredInt("limit", &a.Context.Limit)
+	if limitOK && a.Context.Limit <= 0 {
+		c.problem("limit", fmt.Sprintf("%d must be above 0", a.Context.Limit))
+		limitOK = false
+	}
+
+	pointsOK := c.requiredFloat("nudge", &a.Context.Nudge)
+	pointsOK = c.requiredFloat("interrupt", &a.Context.Interrupt) && pointsOK
+	pointsOK = c.float("kill", &a.Context.Kill) && pointsOK
+	if pointsOK {
+		if key, msg := checkPoints(a.Context.Points); key != "" {
+			c.problem(key, msg)
+			pointsOK = false
+		}
+	}
+
+	_, explicit := c.m["window"]
+	windowOK := false
+	if explicit {
+		if c.requiredInt("window", &a.Context.Window) {
+			if a.Context.Window > 0 {
+				windowOK = true
+			} else {
+				c.problem("window", fmt.Sprintf("%d must be above 0", a.Context.Window))
+			}
+		}
+	} else if a.Model != "" {
+		if w, known := ContextWindow(a.Model); known {
+			a.Context.Window, windowOK = w, true
+		} else {
+			t.problem("model", fmt.Sprintf("%q is not in the context-window table; set context.window for it", a.Model))
+		}
+	}
+
+	// With auto-compact off, a full session fails instead of compacting, so a
+	// kill point at or past the window can never fire.
+	if limitOK && pointsOK && windowOK {
+		at := float64(a.Context.Limit) * a.Context.Kill
+		if !(at < float64(a.Context.Window)) {
+			c.problem("kill", fmt.Sprintf("limit*kill = %d*%g = %g tokens must be below the context window, %d tokens",
+				a.Context.Limit, a.Context.Kill, at, a.Context.Window))
+		}
+	}
+	c.unknown("limit", "window", "nudge", "interrupt", "kill")
+}
+
+// checkPoints applies 0 < nudge < interrupt <= kill and returns the key of the
+// first point that breaks it, with the reason. Each comparison is written so
+// that a NaN fails it.
+func checkPoints(p Points) (key, msg string) {
+	switch {
+	case !(p.Nudge > 0):
+		return "nudge", fmt.Sprintf("%g must be above 0", p.Nudge)
+	case !(p.Interrupt > p.Nudge):
+		return "interrupt", fmt.Sprintf("%g must be above nudge %g", p.Interrupt, p.Nudge)
+	case !(p.Kill >= p.Interrupt):
+		return "kill", fmt.Sprintf("%g must be at least interrupt %g", p.Kill, p.Interrupt)
+	}
+	return "", ""
+}
+
+// table reads one TOML table, records problems under its name and tracks
+// which keys it knows.
+type table struct {
+	name     string // field prefix: "" (top level), "grace", "assistant[example-a]"
+	m        map[string]any
+	problems *[]FieldError
+	global   bool // a failing field falls back to its default (said in the message)
+}
+
+func (t *table) field(key string) string {
+	if t.name == "" {
+		return key
+	}
+	return t.name + "." + key
+}
+
+func (t *table) problem(key, msg string) {
+	*t.problems = append(*t.problems, FieldError{t.field(key), msg})
+}
+
+// sub returns the sub-table key, or nil when it is absent or not a table (the
+// latter is recorded as a problem).
+func (t *table) sub(key string) *table {
+	v, ok := t.m[key]
+	if !ok {
+		return nil
+	}
+	m, isTable := v.(map[string]any)
+	if !isTable {
+		t.problem(key, "must be a table, got "+describe(v))
+		return nil
+	}
+	return &table{name: t.field(key), m: m, problems: t.problems, global: t.global}
+}
+
+// unknown records every key of the table that is not in known, sorted, so a
+// misspelt key is caught instead of silently running on a default.
+func (t *table) unknown(known ...string) {
+	for _, k := range sortedKeys(t.m) {
+		if !slices.Contains(known, k) {
+			t.problem(k, "unknown key")
+		}
+	}
+}
+
+// duration sets *dst from a positive Go duration string and reports whether
+// it did. An absent key leaves *dst alone; a bad one is recorded and leaves
+// *dst holding its default.
+func (t *table) duration(key string, dst *time.Duration) bool {
+	v, ok := t.m[key]
+	if !ok {
+		return true
+	}
+	fallback := ""
+	if t.global {
+		fallback = fmt.Sprintf("; using the default %s", *dst)
+	}
+	s, isString := v.(string)
+	if !isString {
+		t.problem(key, "must be a duration string such as \"1m\", got "+describe(v)+fallback)
+		return false
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		t.problem(key, fmt.Sprintf("%q is not a Go duration such as \"1m\"%s", s, fallback))
+		return false
+	}
+	if d <= 0 {
+		t.problem(key, fmt.Sprintf("%q must be positive%s", s, fallback))
+		return false
+	}
+	*dst = d
+	return true
+}
+
+// str sets *dst from a string value; false (recorded) when it is not one.
+func (t *table) str(key string, dst *string) bool {
+	v := t.m[key]
+	s, isString := v.(string)
+	if !isString {
+		t.problem(key, "must be a string, got "+describe(v))
+		return false
+	}
+	*dst = s
+	return true
+}
+
+// requiredString is str for a key that MUST be present and non-empty.
+func (t *table) requiredString(key string, dst *string) bool {
+	if _, ok := t.m[key]; !ok {
+		t.problem(key, "required")
+		return false
+	}
+	if !t.str(key, dst) {
+		return false
+	}
+	if *dst == "" {
+		t.problem(key, "must not be empty")
+		return false
+	}
+	return true
+}
+
+func (t *table) boolean(key string, dst *bool) bool {
+	v, ok := t.m[key]
+	if !ok {
+		return true
+	}
+	b, isBool := v.(bool)
+	if !isBool {
+		t.problem(key, "must be true or false, got "+describe(v))
+		return false
+	}
+	*dst = b
+	return true
+}
+
+// float sets *dst from a number (a TOML integer is accepted). An absent key
+// leaves *dst alone.
+func (t *table) float(key string, dst *float64) bool {
+	v, ok := t.m[key]
+	if !ok {
+		return true
+	}
+	switch n := v.(type) {
+	case float64:
+		*dst = n
+	case int64:
+		*dst = float64(n)
+	default:
+		t.problem(key, "must be a number, got "+describe(v))
+		return false
+	}
+	return true
+}
+
+func (t *table) requiredFloat(key string, dst *float64) bool {
+	if _, ok := t.m[key]; !ok {
+		t.problem(key, "required")
+		return false
+	}
+	return t.float(key, dst)
+}
+
+func (t *table) requiredInt(key string, dst *int64) bool {
+	v, ok := t.m[key]
+	if !ok {
+		t.problem(key, "required")
+		return false
+	}
+	n, isInt := v.(int64)
+	if !isInt {
+		t.problem(key, "must be an integer, got "+describe(v))
+		return false
+	}
+	*dst = n
+	return true
+}
+
+// describe names a decoded TOML value's type for a problem message.
+func describe(v any) string {
+	switch v.(type) {
+	case string:
+		return "a string"
+	case int64:
+		return "an integer"
+	case float64:
+		return "a float"
+	case bool:
+		return "a boolean"
+	case map[string]any:
+		return "a table"
+	case []map[string]any:
+		return "an array of tables"
+	case []any:
+		return "an array"
+	case time.Time:
+		return "a date or time"
+	case nil:
+		return "nothing"
+	}
+	return fmt.Sprintf("%T", v)
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}

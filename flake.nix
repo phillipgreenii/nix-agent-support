@@ -415,6 +415,12 @@
           pg-keep-awake = final.callPackage ./packages/pg-keep-awake {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-assistants: Pattern A (ADR 0008), the supervisor that keeps
+          # permanent Claude Code assistants running in tmux. One binary; no
+          # local `replace`, so no modRoot.
+          pg-assistants = final.callPackage ./packages/pg-assistants {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-git-lander: Pattern A (ADR 0008), the lock-safe rebase and land tool.
           pg-git-lander = final.callPackage ./packages/pg-git-lander {
             inherit (goBuilders) mkGoApp;
@@ -2100,6 +2106,7 @@
                 "pg-rescue"
                 "pg-task-focus"
                 "pg-keep-awake"
+                "pg-assistants"
                 "pg-review"
                 "pg-review-router-adapter"
                 "pg-probe"
@@ -8025,6 +8032,20 @@
                 src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
                 gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
                 testFlags = [ "-v" ];
+              };
+
+              # pg-assistants - whole-module Go test gate (the unit tier). Pattern A:
+              # flat src at the module dir, no local replace. Real-tool tests are
+              # `integration`-tagged and never run here.
+              pg-assistants-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-assistants-go-tests";
+                src = lib.cleanSource ./packages/pg-assistants; # matches default.nix
+                gomod2nixToml = ./packages/pg-assistants/gomod2nix.toml;
+                testFlags = [
+                  "-v"
+                  "-timeout"
+                  "120s"
+                ];
               };
 
               # pg-keep-awake INTEGRATION tier (V-4): internal/integration, every file
@@ -21864,6 +21885,7 @@
               pg-rescue
               pg-task-focus
               pg-keep-awake
+              pg-assistants
               pg-git-lander
               pg-review
               pg-review-router-adapter

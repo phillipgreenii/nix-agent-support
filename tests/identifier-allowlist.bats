@@ -106,6 +106,13 @@ build_fixture() {
   printf 'package main\n' >"$ROOT/packages/pg-claude-control/cmd/pg-claude-control/main.go"
   printf 'package main\n' >"$ROOT/packages/pg-claude-control/cmd/pg-claude-control/main_test.go"
 
+  # pg-assistants: the three required files plus filler .go files.
+  fill packages/pg-assistants/internal/x 4 f go
+  mkdir -p "$ROOT/packages/pg-assistants/cmd/pg-assistants" "$ROOT/packages/pg-assistants/internal/config"
+  printf 'package main\n' >"$ROOT/packages/pg-assistants/cmd/pg-assistants/main.go"
+  printf 'package main\n' >"$ROOT/packages/pg-assistants/cmd/pg-assistants/main_test.go"
+  printf 'package config\n' >"$ROOT/packages/pg-assistants/internal/config/config.go"
+
   # pg-claude-code-recorder: the three required files plus filler .go files.
   fill packages/pg-claude-code-recorder/internal/platform 6 f go
   mkdir -p "$ROOT/packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder"
@@ -144,7 +151,7 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
 @test "clean fixture passes and reports what it scanned" {
   run_guard
   [ "$status" -eq 0 ]
-  [[ $output == *"OK:"*"7 module(s)"* ]]
+  [[ $output == *"OK:"*"8 module(s)"* ]]
 }
 
 @test "json shape: each identity key with a non-allowlisted value is flagged with file:line" {
@@ -300,10 +307,11 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
   plant packages/work-report/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-claude-code-recorder/internal/platform/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-claude-control/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
+  plant packages/pg-assistants/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
   run_guard
   [ "$status" -eq 1 ]
   local m
-  for m in pg-claude-code-recorder pg-claude-control pg-connector pg-decider pg-desk pg-router-source-pg-desk work-report; do
+  for m in pg-assistants pg-claude-code-recorder pg-claude-control pg-connector pg-decider pg-desk pg-router-source-pg-desk work-report; do
     [[ $output == *"check-identifier-allowlist: $m: packages/$m/"* ]]
   done
 }

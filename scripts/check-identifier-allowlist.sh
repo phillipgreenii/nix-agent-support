@@ -54,6 +54,7 @@ SELF="scripts/check-identifier-allowlist.sh"
 # Subtree minimums are  <relative-prefix>=<n>  or  kind:go=<n>, kind:testdata=<n>,
 # kind:docs=<n>  (files of that kind among the scanned ones).
 MODULES=(
+  "pg-assistants|packages/pg-assistants|wide|7|cmd/pg-assistants/main.go cmd/pg-assistants/main_test.go internal/config/config.go|kind:go=7"
   "pg-claude-code-recorder|packages/pg-claude-code-recorder|wide|7|cmd/pg-claude-code-recorder/main.go internal/platform/platform_darwin.go cmd/pg-claude-code-recorder/unit_tier_guard_test.go|kind:go=7"
   "pg-claude-control|packages/pg-claude-control|wide|5|cmd/pg-claude-control/main.go cmd/pg-claude-control/main_test.go|kind:go=5"
   "pg-connector|packages/pg-connector|testdata|60|pkg/scriptout/conformance/testdata/golden/response-success.json pkg/scriptout/conformance/testdata/golden/error.json|"
