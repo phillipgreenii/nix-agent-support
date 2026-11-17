@@ -33,12 +33,12 @@ func exists(p string) bool {
 
 func TestCleanOnOff(t *testing.T) {
 	setup := func(t *testing.T, clean bool) (*env, *cleanCounter, Record) {
-		e := newEnv(t, func(c *config.RepoConfig) {
+		e := newFakeEnv(t, func(c *config.RepoConfig) {
 			c.Reuse, c.Clean, c.KeepList = true, clean, []string{".keepme"}
 		})
 		cc := &cleanCounter{Provisioner: e.m.Prov}
 		e.m.Prov = cc
-		e.commitFile(".gitignore", "*.log\n.keepme\n")
+		e.fake.ignore("build.log", ".keepme")
 		e.commitFile("tracked.txt", "one\n")
 		first := e.mustLease(LeaseRequest{Name: "first", Detach: true})
 		if cc.n.Load() != 0 {
@@ -65,9 +65,6 @@ func TestCleanOnOff(t *testing.T) {
 		if exists(filepath.Join(p, "build.log")) || exists(filepath.Join(p, "untracked.txt")) {
 			t.Error("ignored or untracked files survived the clean")
 		}
-		if got := e.git(p, "show", "HEAD:tracked.txt"); got != "one" {
-			t.Errorf("tracked.txt = %q", got)
-		}
 		if b, _ := os.ReadFile(filepath.Join(p, "tracked.txt")); string(b) != "one\n" {
 			t.Errorf("tracked change survived: %q", b)
 		}
@@ -78,9 +75,9 @@ func TestCleanOnOff(t *testing.T) {
 		if len(list) != 1 {
 			t.Fatalf("preserved = %+v", list)
 		}
-		files := e.git(e.repo.Dir, "ls-tree", "-r", "--name-only", list[0].Branch)
-		if !strings.Contains(files, "untracked.txt") {
-			t.Errorf("work not preserved:\n%s", files)
+		files := strings.Join(e.fake.preserved[list[0].Branch], " ")
+		if !strings.Contains(files, "untracked.txt") || !strings.Contains(files, "tracked.txt") {
+			t.Errorf("work not preserved: %s", files)
 		}
 	})
 
@@ -96,45 +93,31 @@ func TestCleanOnOff(t *testing.T) {
 	})
 }
 
+// A reuse switches the worktree with the hook enabled unless the policy is
+// skip. That the skip is one command's override and never written to
+// configuration, and that the hook then really does not run, is the
+// provisioner's contract (provisiontest "switch hook policy").
 func TestHookPolicy(t *testing.T) {
-	run := func(t *testing.T, policy string) int {
-		e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.ReuseHookPolicy = true, policy })
-		log := filepath.Join(t.TempDir(), "hook.log")
-		hooks := e.git(e.repo.Dir, "rev-parse", "--git-path", "hooks")
-		hook := filepath.Join(hooks, "post-checkout")
-		e.write(hooks, "post-checkout", "#!/bin/sh\necho ran >> '"+log+"'\n")
-		if err := os.Chmod(hook, 0o755); err != nil {
-			t.Fatal(err)
-		}
+	run := func(t *testing.T, policy string) []bool {
+		e := newFakeEnv(t, func(c *config.RepoConfig) { c.Reuse, c.ReuseHookPolicy = true, policy })
 		first := e.mustLease(LeaseRequest{Name: "first", Detach: true})
-		lines := func() int {
-			b, _ := os.ReadFile(log)
-			return strings.Count(string(b), "ran")
-		}
-		if lines() != 1 {
-			t.Fatalf("creation ran the hook %d times, want 1", lines())
+		if len(e.fake.switches) != 0 {
+			t.Fatalf("creation switched %v", e.fake.switches)
 		}
 		if _, err := e.m.Release(t.Context(), LeaseKey{LeaseID: str(first.LeaseID)}); err != nil {
 			t.Fatal(err)
 		}
-		before := lines()
 		second := e.mustLease(LeaseRequest{Name: "second", Branch: "b2", Create: true})
 		if second.ID != first.ID {
 			t.Fatal("worktree not reused")
 		}
-		// The skip is for one command and is never written to configuration.
-		for _, f := range []string{filepath.Join(e.repo.Dir, ".git", "config"), filepath.Join(second.WorktreePath, ".git")} {
-			if b, _ := os.ReadFile(f); strings.Contains(string(b), "/dev/null") {
-				t.Errorf("%s records the skip", f)
-			}
-		}
-		return lines() - before
+		return e.fake.switches
 	}
-	if n := run(t, "skip"); n != 0 {
-		t.Errorf("skip ran the hook %d times on reuse", n)
+	if got := run(t, "skip"); len(got) != 1 || got[0] {
+		t.Errorf("skip switched with runHook %v, want [false]", got)
 	}
-	if n := run(t, "run"); n == 0 {
-		t.Error("run did not run the hook on reuse")
+	if got := run(t, "run"); len(got) != 1 || !got[0] {
+		t.Errorf("run switched with runHook %v, want [true]", got)
 	}
 }
 
@@ -291,26 +274,23 @@ func TestMaxReclaim(t *testing.T) {
 }
 
 func TestPreservedListPrune(t *testing.T) {
-	e := newEnv(t)
-	repoDir := e.repo.Dir
-	head := e.git(repoDir, "rev-parse", "HEAD")
-	orphan := func() string { // a commit no branch reaches
-		e.write(repoDir, ".orphan", time.Now().String())
-		return e.git(repoDir, "commit-tree", "HEAD^{tree}", "-p", head, "-m", "wip "+time.Now().String())
-	}
+	e := newFakeEnv(t)
+	f := e.fake
 	const (
 		old    = "pg-gwm/dirty-reaped-20261001T000000Z-old-x"
 		merged = "pg-gwm/dirty-reaped-20261114T090000Z-merged-x"
 		young  = "pg-gwm/dirty-reaped-20261114T090000Z-young-x"
 		out    = "pg-gwm/dirty-reaped-20261001T000000Z-out-x"
 	)
-	e.git(repoDir, "branch", old, orphan())
-	e.git(repoDir, "branch", merged, head)
-	e.git(repoDir, "branch", young, orphan())
-	e.git(repoDir, "branch", out, orphan())
-	e.git(repoDir, "branch", "plain-old-branch", orphan())
-	checkedOut := filepath.Join(t.TempDir(), "co")
-	e.git(repoDir, "worktree", "add", checkedOut, out)
+	// A commit of its own is one no other branch reaches; merged is at main's.
+	f.addBranchAt(old)
+	f.addBranch(merged)
+	f.addBranchAt(young)
+	f.addBranchAt(out)
+	f.addBranchAt("plain-old-branch")
+	if err := f.addWorktree(filepath.Join(t.TempDir(), "co"), out); err != nil {
+		t.Fatal(err)
+	}
 
 	// A real preservation, then a hand deletion: it must not be listed.
 	rec := e.mustLease(LeaseRequest{Name: "gone", Detach: true})
@@ -320,8 +300,7 @@ func TestPreservedListPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.git(rec.WorktreePath, "switch", "--detach")
-	e.git(repoDir, "branch", "-D", gone)
+	delete(f.heads, gone)
 
 	list, err := e.m.PreservedList(t.Context())
 	if err != nil {
@@ -352,8 +331,8 @@ func TestPreservedListPrune(t *testing.T) {
 	if !sameSet(dry, old, merged) {
 		t.Errorf("dry run = %v, want %s and %s", dry, old, merged)
 	}
-	if got := e.git(repoDir, "branch", "--list", "pg-gwm/*"); strings.Count(got, "dirty-reaped") != 4 {
-		t.Errorf("dry run deleted something:\n%s", got)
+	if got := f.branchesWithPrefix("pg-gwm/"); len(got) != 4 {
+		t.Errorf("dry run deleted something: %v", got)
 	}
 
 	done, err := e.m.PreservedPrune(t.Context(), &day, false)
@@ -363,7 +342,7 @@ func TestPreservedListPrune(t *testing.T) {
 	if !sameSet(done, old, merged) {
 		t.Errorf("deleted = %v", done)
 	}
-	left := e.git(repoDir, "branch", "--list", "--format=%(refname:short)")
+	left := strings.Join(f.branchesWithPrefix(""), "\n")
 	for _, keep := range []string{young, out, "plain-old-branch"} {
 		if !strings.Contains(left, keep) {
 			t.Errorf("%s was deleted:\n%s", keep, left)

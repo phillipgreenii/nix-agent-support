@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +31,23 @@ type fakeGit struct {
 	seq    int
 	heads  map[string]string // branch -> commit
 	wts    []*fakeWT
+
+	// tracked is the committed content of the main branch's files (path
+	// relative to a worktree -> content): a new or cleaned worktree holds
+	// it, and a missing or changed tracked file is unsaved work.
+	tracked map[string]string
+	// ignored names the files Unsaved does not report, as a .gitignore does.
+	ignored map[string]bool
+	// orphans are the unreachable commits of a worktree, by real path.
+	orphans map[string][]string
+	// preserved is the file list each Preserve wrote, by branch.
+	preserved map[string][]string
+	// timeoutStatus makes every Unsaved and Preserve call time out, as a
+	// loaded host does; statusCalls counts those calls.
+	timeoutStatus atomic.Bool
+	statusCalls   atomic.Int32
+	// switches records the runHook flag of every Switch.
+	switches []bool
 }
 
 type fakeWT struct {
@@ -198,17 +216,113 @@ func (f *fakeGit) forEachRef(args []string) cmdrun.Result {
 	return okOut(out.String())
 }
 
-// workFiles lists the entries of dir that count as work: everything but the
-// .git marker.
-func workFiles(dir string) []string {
-	ents, _ := os.ReadDir(dir)
+// unsavedFiles lists the work in dir: tracked files that are missing or
+// changed, and every file that is neither tracked, ignored nor the .git marker.
+func (f *fakeGit) unsavedFiles(dir string) []string {
 	var names []string
+	for rel, want := range f.tracked {
+		if got, err := os.ReadFile(filepath.Join(dir, rel)); err != nil || string(got) != want {
+			names = append(names, rel)
+		}
+	}
+	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
-		if e.Name() != ".git" {
+		if _, ok := f.tracked[e.Name()]; !ok && e.Name() != ".git" && !f.ignored[e.Name()] {
 			names = append(names, e.Name())
 		}
 	}
+	sort.Strings(names)
 	return names
+}
+
+// restore writes every tracked file back to its committed content.
+func (f *fakeGit) restore(dir string) error {
+	for rel, content := range f.tracked {
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// commitFile commits rel with content on the main branch: worktrees created or
+// cleaned afterwards hold it.
+func (f *fakeGit) commitFile(rel, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tracked[rel] = content
+}
+
+// ignore marks the file names as ignored.
+func (f *fakeGit) ignore(names ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, n := range names {
+		f.ignored[n] = true
+	}
+}
+
+// addOrphan gives the worktree at dir a commit no branch reaches.
+func (f *fakeGit) addOrphan(dir string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	k := realPath(dir)
+	f.orphans[k] = append(f.orphans[k], f.newSHA())
+}
+
+// addBranchAt makes a local branch at a commit of its own (no other branch
+// contains it) and returns the commit.
+func (f *fakeGit) addBranchAt(name string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sha := f.newSHA()
+	f.heads[name] = sha
+	return sha
+}
+
+// addWorktree registers a worktree git knows that no lease made (a hand-made
+// one), checked out on branch.
+func (f *fakeGit) addWorktree(dir, branch string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: fake\n"), 0o644); err != nil {
+		return err
+	}
+	f.wts = append(f.wts, &fakeWT{path: dir, branch: branch, head: f.heads[branch]})
+	return nil
+}
+
+// forget drops the worktree at dir from git's knowledge, as removing its
+// administrative directory does; its files stay.
+func (f *fakeGit) forget(dir string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, x := range f.wts {
+		if realPath(x.path) == realPath(dir) {
+			f.wts = append(f.wts[:i], f.wts[i+1:]...)
+			return
+		}
+	}
+}
+
+// branchesWithPrefix lists the local branches under prefix.
+func (f *fakeGit) branchesWithPrefix(prefix string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, h := range f.sortedHeads() {
+		if strings.HasPrefix(h, prefix) {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 func (f *fakeGit) apply(w *fakeWT, b provision.BranchSpec) {
@@ -236,15 +350,19 @@ func (f *fakeGit) Create(_ context.Context, dir string, b provision.BranchSpec, 
 	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: fake\n"), 0o644); err != nil {
 		return err
 	}
+	if err := f.restore(dir); err != nil {
+		return err
+	}
 	w := &fakeWT{path: dir, locked: true, reason: reason}
 	f.apply(w, b)
 	f.wts = append(f.wts, w)
 	return nil
 }
 
-func (f *fakeGit) Switch(_ context.Context, dir string, b provision.BranchSpec, _ bool) error {
+func (f *fakeGit) Switch(_ context.Context, dir string, b provision.BranchSpec, runHook bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.switches = append(f.switches, runHook)
 	w := f.wt(dir)
 	if w == nil {
 		return &gitrun.GitError{Args: []string{"switch"}, Code: 128, Stderr: "fatal: not a git repository"}
@@ -254,6 +372,8 @@ func (f *fakeGit) Switch(_ context.Context, dir string, b provision.BranchSpec, 
 }
 
 func (f *fakeGit) Clean(_ context.Context, dir string, keep []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	kept := map[string]bool{".git": true}
 	for _, k := range keep {
 		kept[k] = true
@@ -266,23 +386,47 @@ func (f *fakeGit) Clean(_ context.Context, dir string, keep []string) error {
 			}
 		}
 	}
+	return f.restore(dir)
+}
+
+// statusTimedOut counts a status call and reports the timeout error when the
+// test injected one.
+func (f *fakeGit) statusTimedOut() error {
+	f.statusCalls.Add(1)
+	if f.timeoutStatus.Load() {
+		return fmt.Errorf("git status --porcelain=v2 -z: %w after 1m0s", gitrun.ErrTimedOut)
+	}
 	return nil
 }
 
 func (f *fakeGit) Unsaved(_ context.Context, dir string) (provision.Unsaved, error) {
-	return provision.Unsaved{Files: workFiles(dir)}, nil
+	if err := f.statusTimedOut(); err != nil {
+		return provision.Unsaved{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return provision.Unsaved{Files: f.unsavedFiles(dir), Unreachable: f.orphans[realPath(dir)]}, nil
 }
 
+// Preserve records the work as a branch and leaves the worktree clean, as the
+// commit on the new branch does.
 func (f *fakeGit) Preserve(_ context.Context, dir, branch, _ string) error {
+	if err := f.statusTimedOut(); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.heads[branch] = f.newSHA()
-	for _, n := range workFiles(dir) {
+	f.preserved[branch] = f.unsavedFiles(dir)
+	for _, n := range f.unsavedFiles(dir) {
+		if _, tracked := f.tracked[n]; tracked {
+			continue
+		}
 		if err := os.RemoveAll(filepath.Join(dir, n)); err != nil {
 			return err
 		}
 	}
-	return nil
+	return f.restore(dir)
 }
 
 func (f *fakeGit) Unlock(_ context.Context, dir string) error {
@@ -334,13 +478,10 @@ func (f *fakeGit) RemoveStaleIndexLock(string, time.Duration) (bool, error) { re
 
 var _ provision.Provisioner = (*fakeGit)(nil)
 
-// newFakeEnv is newEnv over fakeGit: no git process runs and no repository is
-// built. Use it for tests that assert state transitions, ordering and
-// refusals; e.git, e.commitFile and e.repo are unavailable.
-func newFakeEnv(t *testing.T, tune ...func(*config.RepoConfig)) *env {
+// newFakeRepo is one fake repository under a fresh temporary directory: its
+// main checkout holds only the .git directory.
+func newFakeRepo(t *testing.T) *fakeGit {
 	t.Helper()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -350,9 +491,23 @@ func newFakeEnv(t *testing.T, tune ...func(*config.RepoConfig)) *env {
 	if err := os.MkdirAll(common, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeGit{main: main, common: common, heads: map[string]string{}}
+	f := &fakeGit{
+		main: main, common: common, heads: map[string]string{}, tracked: map[string]string{},
+		ignored: map[string]bool{}, orphans: map[string][]string{}, preserved: map[string][]string{},
+	}
 	f.heads[fakeMainBranch] = f.newSHA()
-	e := &env{t: t, mainDir: main, fake: f, g: gitrun.Git{Run: f.run}, now: epoch}
+	return f
+}
+
+// newFakeEnv is newEnv over fakeGit: no git process runs and no repository is
+// built. Use it for tests that assert state transitions, ordering and
+// refusals; e.git, e.commitFile and e.repo are unavailable (use e.fake).
+func newFakeEnv(t *testing.T, tune ...func(*config.RepoConfig)) *env {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	f := newFakeRepo(t)
+	e := &env{t: t, mainDir: f.main, fake: f, g: gitrun.Git{Run: f.run}, now: epoch}
 	e.m = e.manager(tune...)
 	return e
 }

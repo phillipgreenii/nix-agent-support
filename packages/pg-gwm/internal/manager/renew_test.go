@@ -227,7 +227,7 @@ func TestRenewMetadata(t *testing.T) {
 }
 
 func TestReleaseDirty(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	check := func(name string, mutate func(path string), wantFile string) {
 		t.Helper()
 		rec := e.mustLease(LeaseRequest{Name: name, Branch: name, Create: true})
@@ -252,11 +252,8 @@ func TestReleaseDirty(t *testing.T) {
 		}
 	}
 	check("tracked", func(p string) {
-		if err := os.WriteFile(filepath.Join(p, "tracked.txt"), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		e.git(p, "add", "tracked.txt")
-		e.git(p, "commit", "-m", "add tracked")
+		// The manager sees only the unsaved file list, so a changed file
+		// needs no commit first.
 		if err := os.WriteFile(filepath.Join(p, "tracked.txt"), []byte("changed"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -267,17 +264,12 @@ func TestReleaseDirty(t *testing.T) {
 		}
 	}, "new.txt")
 	check("detached", func(p string) {
-		e.git(p, "checkout", "--detach")
-		e.git(p, "commit", "--allow-empty", "-m", "orphan")
+		e.fake.addOrphan(p)
 	}, "")
 
 	// Ignored-only: released, and the output names the owner.
 	rec := e.mustLease(LeaseRequest{Name: "ign", Owner: "ivy", Branch: "ign", Create: true})
-	if err := os.WriteFile(filepath.Join(rec.WorktreePath, ".gitignore"), []byte("*.log\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	e.git(rec.WorktreePath, "add", ".gitignore")
-	e.git(rec.WorktreePath, "commit", "-m", "ignore logs")
+	e.fake.ignore("x.log")
 	if err := os.WriteFile(filepath.Join(rec.WorktreePath, "x.log"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +393,7 @@ func TestRenewDuringSlowCreation(t *testing.T) {
 }
 
 func TestInfo(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	rec := e.mustLease(LeaseRequest{Name: "inf", Owner: "me", Branch: "ib", Create: true})
 	sub := filepath.Join(rec.WorktreePath, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -441,9 +433,12 @@ func TestInfo(t *testing.T) {
 	wantErr(t, err, "not-found", 4)
 
 	// Unmanaged: a worktree of the repository's own, and the main checkout.
-	own := filepath.Join(e.repo.Root(), "manual-wt")
-	e.git(e.repo.Dir, "worktree", "add", "-b", "manual", own)
-	for _, p := range []string{own, e.repo.Dir} {
+	own := filepath.Join(filepath.Dir(e.mainDir), "manual-wt")
+	e.fake.addBranch("manual")
+	if err := e.fake.addWorktree(own, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{own, e.mainDir} {
 		got, err := e.m.Info(t.Context(), InfoKey{Raw: p})
 		if err != nil || got.Managed || got.Status != state.Unmanaged || len(got.Warnings) != 1 || got.Head == "" || got.Metadata == nil {
 			t.Errorf("unmanaged %s: %+v %v", p, got, err)
@@ -466,7 +461,7 @@ func TestInfo(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	a := e.mustLease(LeaseRequest{Name: "first", Detach: true})
 	e.now = e.now.Add(time.Minute)
 	b := e.mustLease(LeaseRequest{Name: "second", Detach: true})
@@ -495,13 +490,16 @@ func TestList(t *testing.T) {
 			t.Errorf("unmanaged row without the flag: %+v", r)
 		}
 	}
-	empty := newEnv(t)
+	empty := newFakeEnv(t)
 	if recs, err := empty.m.List(t.Context(), false); err != nil || recs == nil || len(recs) != 0 {
 		t.Errorf("empty list = %#v %v", recs, err)
 	}
 
-	own := filepath.Join(e.repo.Root(), "manual-wt")
-	e.git(e.repo.Dir, "worktree", "add", "-b", "manual", own)
+	own := filepath.Join(filepath.Dir(e.mainDir), "manual-wt")
+	e.fake.addBranch("manual")
+	if err := e.fake.addWorktree(own, "manual"); err != nil {
+		t.Fatal(err)
+	}
 	recs, err = e.m.List(t.Context(), true)
 	if err != nil || len(recs) != 5 {
 		t.Fatalf("with unmanaged: %d %v", len(recs), err)

@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-gwm/internal/config"
-	"github.com/phillipgreenii/pg-gwm/internal/gitrun/gitruntest"
+	"github.com/phillipgreenii/pg-gwm/internal/gitrun"
 	"github.com/phillipgreenii/pg-gwm/internal/provision"
 	"github.com/phillipgreenii/pg-gwm/internal/repo"
 	"github.com/phillipgreenii/pg-gwm/internal/state"
 	"github.com/phillipgreenii/x/cmdrun"
-	"github.com/phillipgreenii/x/gitfixture"
 )
 
 func (e *env) mustReap(o ReapOptions) ReapResult {
@@ -342,8 +341,8 @@ func (r *recordingRunner) run(ctx context.Context, c cmdrun.Call) cmdrun.Result 
 }
 
 func TestReapNoProcessProbe(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
-	rr := &recordingRunner{next: cmdrun.Exec}
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
+	rr := &recordingRunner{next: e.fake.run}
 	g := e.g
 	g.Run = rr.run
 	e.g = g
@@ -408,16 +407,20 @@ func TestReapDeadline(t *testing.T) {
 
 // reapAllEnv wires a second repository next to e's and the manager factory
 // ReapAll needs.
-func reapAllEnv(t *testing.T) (e *env, second *gitfixture.Repo, f config.File, mk func(repo.Repo) (*Manager, error)) {
+func reapAllEnv(t *testing.T) (e *env, second *fakeGit, f config.File, mk func(repo.Repo) (*Manager, error)) {
 	t.Helper()
-	e = newEnv(t)
-	second = newBaseRepo(t)
-	f = config.File{Repos: map[string]config.RepoConfig{e.repo.Dir: {}}}
+	e = newFakeEnv(t)
+	second = newFakeRepo(t)
+	f = config.File{Repos: map[string]config.RepoConfig{e.mainDir: {}}}
 	mk = func(rp repo.Repo) (*Manager, error) {
+		fg := e.fake
+		if rp.Main == second.main {
+			fg = second
+		}
 		cfg := f.For(rp)
 		return &Manager{
 			Repo: rp, Cfg: cfg, Store: state.Open(rp.CommonDir),
-			Prov: provision.NewWorktree(rp.Main, e.g, time.Minute, time.Minute), Git: e.g,
+			Prov: fg, Git: gitrun.Git{Run: fg.run},
 			Registry: state.Registry{Path: state.RegistryPath()},
 			Counters: state.Counters{Path: state.CountersPath()},
 			Now:      func() time.Time { return e.now },
@@ -428,7 +431,7 @@ func reapAllEnv(t *testing.T) (e *env, second *gitfixture.Repo, f config.File, m
 
 func TestReapAll(t *testing.T) {
 	e, second, f, mk := reapAllEnv(t)
-	rp2, err := repo.Resolve(t.Context(), gitruntest.New(t, second), second.Dir)
+	rp2, err := repo.Resolve(t.Context(), gitrun.Git{Run: second.run}, second.main)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +504,7 @@ func TestReapAll(t *testing.T) {
 }
 
 func TestReapAllNothingAndFailures(t *testing.T) {
-	newEnv(t) // only for the XDG settings
+	newFakeEnv(t) // only for the XDG settings
 	reg := state.Registry{Path: state.RegistryPath()}
 	mk := func(repo.Repo) (*Manager, error) { return nil, errors.New("no manager") }
 	// The persisted RFC 3339 stamps have second resolution, so the clock is
@@ -519,8 +522,8 @@ func TestReapAllNothingAndFailures(t *testing.T) {
 	}
 	first := *rec.LastSuccess
 
-	e2 := newBaseRepo(t)
-	f := config.File{Repos: map[string]config.RepoConfig{e2.Dir: {}}}
+	e2 := newFakeRepo(t)
+	f := config.File{Repos: map[string]config.RepoConfig{e2.main: {}}}
 	clock = clock.Add(2 * time.Second)
 	res := ReapAll(t.Context(), f, reg, mk, ReapOptions{})
 	if len(res) != 1 || res[0].Outcome != ReapError {
@@ -530,7 +533,7 @@ func TestReapAllNothingAndFailures(t *testing.T) {
 	if rec.Outcome != ReapError || rec.LastSuccess == nil || !rec.LastSuccess.Equal(first) {
 		t.Errorf("a failed run must carry the last success forward: %+v (first %v)", rec, first)
 	}
-	if _, ok := rec.Repos[repo.PathLabel(realPath(e2.Dir))]; !ok {
+	if _, ok := rec.Repos[repo.PathLabel(realPath(e2.main))]; !ok {
 		t.Errorf("entries = %+v", rec.Repos)
 	}
 }
@@ -538,19 +541,16 @@ func TestReapAllNothingAndFailures(t *testing.T) {
 // A broken worktree git no longer knows (no .git link, no admin directory)
 // has nothing git can preserve: one reap removes its directory and record.
 func TestReapBrokenUnregisteredWorktreeIsRemoved(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 	w, _ := e.worktreeOf(rec.ID)
-	e.git(e.repo.Dir, "worktree", "unlock", w.Path)
 	if err := os.WriteFile(filepath.Join(w.Path, "leftover.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(w.Path, ".git")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(e.repo.Dir, ".git", "worktrees", filepath.Base(w.Path))); err != nil {
-		t.Fatal(err)
-	}
+	e.fake.forget(w.Path)
 	e.seed(func(st *state.State) { st.Worktrees[0].Status = state.Broken })
 
 	res := e.mustReap(ReapOptions{})
@@ -566,7 +566,7 @@ func TestReapBrokenUnregisteredWorktreeIsRemoved(t *testing.T) {
 // protect, so a tree left half-deleted by an interrupted removal is not
 // preserved as a branch of deletions.
 func TestReapBrokenNeverLeasedIsNotPreserved(t *testing.T) {
-	e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
 	e.commitFile("tracked.txt", "one\n")
 	e.mustReap(ReapOptions{})
 	if len(e.state().Worktrees) != 1 {
@@ -579,7 +579,7 @@ func TestReapBrokenNeverLeasedIsNotPreserved(t *testing.T) {
 	e.seed(func(st *state.State) { st.Worktrees[0].Status = state.Broken })
 
 	e.mustReap(ReapOptions{})
-	if got := e.git(e.repo.Dir, "branch", "--list", "pg-gwm/dirty-reaped-*"); got != "" {
+	if got := e.fake.branchesWithPrefix("pg-gwm/dirty-reaped-"); len(got) != 0 {
 		t.Errorf("a preserved branch was written: %q", got)
 	}
 	if len(e.state().Preserved) != 0 {
@@ -589,33 +589,23 @@ func TestReapBrokenNeverLeasedIsNotPreserved(t *testing.T) {
 
 // A worktree a lease has held keeps its protection after it breaks.
 func TestReapBrokenLeasedStillPreserved(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 	w, _ := e.worktreeOf(rec.ID)
 	e.write(w.Path, "work.txt", "mine\n")
 	e.seed(func(st *state.State) { st.Worktrees[0].Status, st.Worktrees[0].Lease = state.Broken, nil })
 	e.mustReap(ReapOptions{})
-	if got := e.git(e.repo.Dir, "branch", "--list", "pg-gwm/dirty-reaped-*"); got == "" {
+	if got := e.fake.branchesWithPrefix("pg-gwm/dirty-reaped-"); len(got) == 0 {
 		t.Error("a once-leased worktree's work was not preserved")
 	}
 }
 
-// timeoutStatus makes every git status call of e time out, as a loaded host
-// does, and returns the number of such calls.
-func (e *env) timeoutStatus(tune ...func(*config.RepoConfig)) *atomic.Int32 {
-	var n atomic.Int32
-	run := e.g.Run
-	e.g.Run = func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
-		for _, a := range c.Args {
-			if a == "status" {
-				n.Add(1)
-				return cmdrun.Result{Code: -1, Signal: "terminated", TimedOut: true, CtxErr: context.DeadlineExceeded}
-			}
-		}
-		return run(ctx, c)
-	}
-	e.m = e.manager(tune...)
-	return &n
+// timeoutStatus makes every unsaved-work check of e time out, as a loaded
+// host does, and returns the number of such checks from now on.
+func (e *env) timeoutStatus() *atomic.Int32 {
+	e.fake.statusCalls.Store(0)
+	e.fake.timeoutStatus.Store(true)
+	return &e.fake.statusCalls
 }
 
 // A git status that times out under host load shows only that git was slow:
@@ -623,7 +613,7 @@ func (e *env) timeoutStatus(tune ...func(*config.RepoConfig)) *atomic.Int32 {
 // written, and the reap says it will check again.
 func TestReapStatusTimeoutKeepsAvailableWorktree(t *testing.T) {
 	tune := func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) }
-	e := newEnv(t, tune)
+	e := newFakeEnv(t, tune)
 	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 	if _, err := e.m.Release(t.Context(), LeaseKey{LeaseID: str(rec.LeaseID)}); err != nil {
 		t.Fatal(err)
@@ -632,7 +622,7 @@ func TestReapStatusTimeoutKeepsAvailableWorktree(t *testing.T) {
 	if e.count(state.Available) != 1 {
 		t.Fatalf("setup: %+v", e.state().Worktrees)
 	}
-	calls := e.timeoutStatus(tune)
+	calls := e.timeoutStatus()
 
 	res := e.mustReap(ReapOptions{})
 	if calls.Load() == 0 {
@@ -653,12 +643,12 @@ func TestReapStatusTimeoutKeepsAvailableWorktree(t *testing.T) {
 // does not run the unsaved-work check on it.
 func TestReapNeverLeasedAvailableSkipsUnsavedCheck(t *testing.T) {
 	tune := func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) }
-	e := newEnv(t, tune)
+	e := newFakeEnv(t, tune)
 	e.mustReap(ReapOptions{})
 	if e.count(state.Available) != 1 || !e.state().Worktrees[0].NeverLeased {
 		t.Fatalf("setup: %+v", e.state().Worktrees)
 	}
-	calls := e.timeoutStatus(tune)
+	calls := e.timeoutStatus()
 	e.mustReap(ReapOptions{})
 	if calls.Load() != 0 {
 		t.Errorf("git status ran %d times for a never-leased worktree", calls.Load())
@@ -681,35 +671,35 @@ func TestReapLegacyRecordNeverLeasedFromEventLog(t *testing.T) {
 		})
 	}
 	t.Run("no lease event", func(t *testing.T) {
-		e := newEnv(t, tune)
+		e := newFakeEnv(t, tune)
 		e.mustReap(ReapOptions{})
 		legacy(e)
-		calls := e.timeoutStatus(tune)
+		calls := e.timeoutStatus()
 		e.mustReap(ReapOptions{})
 		if calls.Load() != 0 {
 			t.Errorf("git status ran %d times", calls.Load())
 		}
 	})
 	t.Run("lease event", func(t *testing.T) {
-		e := newEnv(t, tune)
+		e := newFakeEnv(t, tune)
 		rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 		if _, err := e.m.Release(t.Context(), LeaseKey{LeaseID: str(rec.LeaseID)}); err != nil {
 			t.Fatal(err)
 		}
 		e.mustReap(ReapOptions{})
 		legacy(e)
-		calls := e.timeoutStatus(tune)
+		calls := e.timeoutStatus()
 		e.mustReap(ReapOptions{})
 		if calls.Load() == 0 {
 			t.Error("a once-leased worktree skipped the unsaved-work check")
 		}
 	})
 	t.Run("log starts after creation", func(t *testing.T) {
-		e := newEnv(t, tune)
+		e := newFakeEnv(t, tune)
 		e.mustReap(ReapOptions{})
 		legacy(e)
 		e.seed(func(st *state.State) { st.Worktrees[0].CreatedAt = time.Now().UTC().AddDate(0, 0, -3) })
-		calls := e.timeoutStatus(tune)
+		calls := e.timeoutStatus()
 		e.mustReap(ReapOptions{})
 		if calls.Load() == 0 {
 			t.Error("a worktree older than the event log skipped the unsaved-work check")
@@ -720,7 +710,7 @@ func TestReapLegacyRecordNeverLeasedFromEventLog(t *testing.T) {
 // A git status that times out in the broken retry leaves the record broken
 // with its directory, to be retried; the next reap with a healthy git removes it.
 func TestReapBrokenRetryStatusTimeoutStaysRetryable(t *testing.T) {
-	e := newEnv(t)
+	e := newFakeEnv(t)
 	rec := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 	w, _ := e.worktreeOf(rec.ID)
 	e.write(w.Path, "work.txt", "mine\n")
@@ -737,8 +727,7 @@ func TestReapBrokenRetryStatusTimeoutStaysRetryable(t *testing.T) {
 		t.Errorf("res = %+v", res)
 	}
 
-	e.g = gitruntest.New(t, e.repo)
-	e.m = e.manager()
+	e.fake.timeoutStatus.Store(false)
 	e.mustReap(ReapOptions{})
 	if _, ok := e.worktreeOf(rec.ID); ok || exists(w.Path) {
 		t.Errorf("not removed by the next reap")

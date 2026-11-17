@@ -29,6 +29,10 @@ func (e *env) write(dir, rel, content string) {
 // commitFile commits rel with content in the main checkout.
 func (e *env) commitFile(rel, content string) {
 	e.t.Helper()
+	if e.fake != nil {
+		e.fake.commitFile(rel, content)
+		return
+	}
 	e.write(e.repo.Dir, rel, content)
 	e.git(e.repo.Dir, "add", rel)
 	e.git(e.repo.Dir, "commit", "-m", "add "+rel)
