@@ -13,7 +13,6 @@ import (
 	"github.com/phillipgreenii/pg-gwm/internal/repo"
 	"github.com/phillipgreenii/pg-gwm/internal/state"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
 var t0 = time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
@@ -30,7 +29,7 @@ func newFixture(t *testing.T) *fixture {
 	xdgState, xdgConf := t.TempDir(), t.TempDir()
 	t.Setenv("XDG_STATE_HOME", xdgState)
 	t.Setenv("XDG_CONFIG_HOME", xdgConf)
-	r := gittest.New(t, gitfixture.RepoOptions{Suite: "metrics", InitialCommit: true})
+	r := newBaseRepo(t)
 	g := gitruntest.New(t, r)
 	rp, err := repo.Resolve(context.Background(), g, r.Dir)
 	if err != nil {

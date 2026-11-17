@@ -61,7 +61,7 @@ func TestResolveSameRepoFromEverywhere(t *testing.T) {
 }
 
 func TestResolveOutsideRepo(t *testing.T) {
-	r := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true})
+	r := newBaseRepo(t)
 	g := gitruntest.New(t, r)
 	_, err := repo.Resolve(context.Background(), g, r.Root())
 	if !errors.Is(err, repo.ErrNotARepo) {
@@ -70,7 +70,7 @@ func TestResolveOutsideRepo(t *testing.T) {
 }
 
 func TestResolveDeletedDir(t *testing.T) {
-	r := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true})
+	r := newBaseRepo(t)
 	g := gitruntest.New(t, r)
 	gone := filepath.Join(r.Dir, "gone")
 	_, err := repo.Resolve(context.Background(), g, gone)

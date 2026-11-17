@@ -4,10 +4,12 @@
 package provisiontest
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -85,19 +87,57 @@ func (e *env) hook(name, body string) {
 	}
 }
 
+// The suite's base repository (an initial commit plus the "base" commit) is
+// built once per test binary and copied per test: a copy is a directory copy
+// and a few git config calls, where building it costs a dozen git spawns,
+// which is most of a conformance case's cost under -race. The template is
+// read-only; each test uses its own copy.
+var (
+	tplOnce sync.Once
+	tplRoot string
+	tplRepo *gitfixture.Template
+	tplBase string
+	tplErr  error
+)
+
+func template(t *testing.T) (*gitfixture.Template, string) {
+	t.Helper()
+	tplOnce.Do(func() {
+		tplRoot, tplErr = os.MkdirTemp("", "pg-gwm-provisiontest-")
+		if tplErr != nil {
+			return
+		}
+		tplRepo, tplErr = gitfixture.NewTemplate(context.Background(), tplRoot,
+			gitfixture.RepoOptions{Suite: "provisiontest", InitialCommit: true},
+			func(ctx context.Context, r *gitfixture.Repo) error {
+				var err error
+				tplBase, err = r.Commit(ctx, "base", map[string]string{
+					".gitignore": "*.o\n.flox/\n.keepme\n",
+					"a.txt":      "one\n",
+					"sub/b.txt":  "b\n",
+				})
+				return err
+			})
+	})
+	if tplErr != nil {
+		t.Fatalf("building the template repository: %v", tplErr)
+	}
+	return tplRepo, tplBase
+}
+
+// Cleanup removes the shared template repository; a test binary that runs
+// Run calls it from TestMain after m.Run.
+func Cleanup() {
+	if tplRoot != "" {
+		_ = os.RemoveAll(tplRoot)
+	}
+}
+
 func newEnv(t *testing.T, newProv func(*testing.T, *gitfixture.Repo) provision.Provisioner) *env {
 	t.Helper()
-	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "provisiontest", InitialCommit: true})
-	e := &env{t: t, repo: repo}
-	var err error
-	e.base, err = repo.Commit(t.Context(), "base", map[string]string{
-		".gitignore": "*.o\n.flox/\n.keepme\n",
-		"a.txt":      "one\n",
-		"sub/b.txt":  "b\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	tpl, base := template(t)
+	repo := gittest.FromTemplate(t, tpl, "provisiontest")
+	e := &env{t: t, repo: repo, base: base}
 	e.marker = e.path("hook.log")
 	e.hook("post-checkout", "echo ran >> '"+e.marker+"'\n")
 	e.p = newProv(t, repo)

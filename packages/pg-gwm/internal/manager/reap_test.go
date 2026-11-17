@@ -18,7 +18,6 @@ import (
 	"github.com/phillipgreenii/pg-gwm/internal/state"
 	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/gitfixture"
-	"github.com/phillipgreenii/x/gittest"
 )
 
 func (e *env) mustReap(o ReapOptions) ReapResult {
@@ -392,7 +391,7 @@ func TestReapDeadline(t *testing.T) {
 func reapAllEnv(t *testing.T) (e *env, second *gitfixture.Repo, f config.File, mk func(repo.Repo) (*Manager, error)) {
 	t.Helper()
 	e = newEnv(t)
-	second = gittest.New(t, gitfixture.RepoOptions{Suite: "manager-second", InitialCommit: true})
+	second = newBaseRepo(t)
 	f = config.File{Repos: map[string]config.RepoConfig{e.repo.Dir: {}}}
 	mk = func(rp repo.Repo) (*Manager, error) {
 		cfg := f.For(rp)
@@ -500,7 +499,7 @@ func TestReapAllNothingAndFailures(t *testing.T) {
 	}
 	first := *rec.LastSuccess
 
-	e2 := gittest.New(t, gitfixture.RepoOptions{Suite: "manager-fail", InitialCommit: true})
+	e2 := newBaseRepo(t)
 	f := config.File{Repos: map[string]config.RepoConfig{e2.Dir: {}}}
 	clock = clock.Add(2 * time.Second)
 	res := ReapAll(t.Context(), f, reg, mk, ReapOptions{})

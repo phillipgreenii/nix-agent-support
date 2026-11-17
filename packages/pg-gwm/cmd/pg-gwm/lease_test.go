@@ -28,7 +28,7 @@ func newCLI(t *testing.T) *cli {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	r := gittest.New(t, gitfixture.RepoOptions{Suite: "cli", InitialCommit: true})
+	r := newBaseRepo(t)
 	c := &cli{t: t, repo: r}
 	var err error
 	if c.out, err = os.CreateTemp(t.TempDir(), "out"); err != nil {

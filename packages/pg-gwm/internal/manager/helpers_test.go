@@ -34,7 +34,7 @@ func newEnv(t *testing.T, tune ...func(*config.RepoConfig)) *env {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	r := gittest.New(t, gitfixture.RepoOptions{Suite: "manager", InitialCommit: true})
+	r := newBaseRepo(t)
 	e := &env{t: t, repo: r, g: gitruntest.New(t, r), now: epoch}
 	e.m = e.manager(tune...)
 	return e

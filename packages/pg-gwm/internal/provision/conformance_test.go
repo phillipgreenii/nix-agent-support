@@ -1,6 +1,7 @@
 package provision_test
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -9,6 +10,12 @@ import (
 	"github.com/phillipgreenii/pg-gwm/internal/provision/provisiontest"
 	"github.com/phillipgreenii/x/gitfixture"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	provisiontest.Cleanup()
+	os.Exit(code)
+}
 
 func TestWorktreeConformance(t *testing.T) {
 	provisiontest.Run(t, func(t *testing.T, repo *gitfixture.Repo) provision.Provisioner {
