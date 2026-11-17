@@ -12,33 +12,19 @@ import (
 
 // The snapshot page of a subscriber that filters on source and item and projects
 // many fields must walk the record id range and stop at its limit. The test
-// database is unanalyzed (the live store is analyzed daily; the next test
-// holds the plan with statistics), and the planner then prefers records_source_type for the
+// database is unanalyzed (the live store is analyzed daily), and the planner then
+// prefers records_source_type for the
 // source test, which reads every record of the source and sorts them by id
 // before the limit applies: the first page costs the whole table and outruns the
-// query deadline on a large store.
+// query deadline on a large store. Once sqlite_stat1 exists on a skewed store
+// the planner already avoids that index without the unary plus, so a plan test
+// over an analyzed store cannot fail for this regression and is not kept.
 func TestSelectPlanWalksTheIDRangeForASourceAndItemFilter(t *testing.T) {
-	feedPlanCase(t, false)
-}
-
-// The same plan must hold once sqlite_stat1 exists, on a store whose rows are
-// skewed the way the live one is (nearly every record is one source).
-func TestSelectPlanWalksTheIDRangeWithStatistics(t *testing.T) {
-	feedPlanCase(t, true)
-}
-
-func feedPlanCase(t *testing.T, withStats bool) {
 	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if withStats {
-		seedSkewedRecords(t, st)
-		if err := st.WithWrite("", func(tx *sql.Tx) error { _, err := tx.ExecContext(context.Background(), `ANALYZE`); return err }); err != nil {
-			t.Fatal(err)
-		}
-	}
 	srcs := sources.All()
 	e := &Engine{
 		DB:           st.Read(),
@@ -84,14 +70,22 @@ func feedPlanCase(t *testing.T, withStats bool) {
 	}
 }
 
-func seedSkewedRecords(t *testing.T, st *store.Store) {
+// skewedStore is the shared read-only store of the two source-threshold tests:
+// 4000 records of which 8 are 'other' (ids 500, 1000, ...) and the rest
+// 'claude-transcript', plus 600 'big' records (ids 5001..5600, three types).
+// The rare-source test reads up to id 4000 only, so the 'big' rows do not
+// reach it.
+func skewedStore(t *testing.T) *store.Store {
 	t.Helper()
-	err := st.WithWrite("", func(tx *sql.Tx) error {
+	return sharedStore(t, "skewed", store.Options{ExtensionTables: true}, func(tx *sql.Tx) error {
 		for _, q := range []string{
 			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
 			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<4000)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
 			 SELECT i,1,0,i,-1,1,CASE WHEN i%500=0 THEN 'other' ELSE 'claude-transcript' END,CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
+			`WITH RECURSIVE n(i) AS (SELECT 5001 UNION ALL SELECT i+1 FROM n WHERE i<5600)
+			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
+			 SELECT i,1,0,i,-1,1,'big',CASE i%3 WHEN 0 THEN 'a' WHEN 1 THEN 'b' ELSE 'c' END,1,i,i%400+1 FROM n`,
 		} {
 			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err
@@ -99,9 +93,6 @@ func seedSkewedRecords(t *testing.T, st *store.Store) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 // setRareSourceMax lowers the rare-source threshold for a test whose seeded
@@ -117,12 +108,7 @@ func setRareSourceMax(t *testing.T, n int) {
 // session registry) must read it through records_source_type instead of walking
 // every retained record, and must answer exactly what the walk answers.
 func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	seedSkewedRecords(t, st) // 8 'other' records (ids 500, 1000, ...) among 4000
+	st := skewedStore(t) // 8 'other' records (ids 500, 1000, ...) among 4000
 	srcs := sources.All()
 	e := &Engine{
 		DB:           st.Read(),
@@ -178,22 +164,7 @@ func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
 // empty-cursor feed page and the snapshot page of limit 1 read each type through
 // records_source_type in id order, and answer exactly what the id walk answers.
 func TestSelectSourceAboveThresholdReadsByTypeAndMatchesTheWalk(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	seedSkewedRecords(t, st) // 8 'other' records among 4000
-	err = st.WithWrite("", func(tx *sql.Tx) error {
-		// 600 'big' records (above a threshold of 100), three types, ids 5001..5600.
-		_, err := tx.ExecContext(context.Background(), `WITH RECURSIVE n(i) AS (SELECT 5001 UNION ALL SELECT i+1 FROM n WHERE i<5600)
-			INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
-			SELECT i,1,0,i,-1,1,'big',CASE i%3 WHEN 0 THEN 'a' WHEN 1 THEN 'b' ELSE 'c' END,1,i,i%400+1 FROM n`)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := skewedStore(t) // 600 'big' records, above a threshold of 100
 	srcs := sources.All()
 	e := &Engine{
 		DB:           st.Read(),

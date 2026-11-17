@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,18 +13,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
-// partialStore opens a throwaway store and fills it with records whose "tokens"
+// partialStore returns the shared read-only store (see sharedStore) filled with records whose "tokens"
 // field is a number on every third record, text only (n NULL) on the next, and
 // absent on the rest. With full set, fields_name_n is replaced by a full index
 // to serve as the baseline for result comparisons.
 func partialStore(t *testing.T, full bool) *store.Store {
 	t.Helper()
-	st, err := store.Open(t.TempDir(), store.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	err = st.WithWrite("", func(tx *sql.Tx) error {
+	return sharedStore(t, fmt.Sprintf("partial-%v", full), store.Options{}, func(tx *sql.Tx) error {
 		if full {
 			for _, q := range []string{`DROP INDEX fields_name_n`, `CREATE INDEX fields_name_n ON fields(name_id, n)`} {
 				if _, err := tx.ExecContext(context.Background(), q); err != nil {
@@ -57,10 +53,6 @@ func partialStore(t *testing.T, full bool) *store.Store {
 		_, err := tx.ExecContext(context.Background(), `ANALYZE`)
 		return err
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return st
 }
 
 var partialCat = map[string]source.Kind{"tokens": source.KindInt, "label": source.KindKeyword}

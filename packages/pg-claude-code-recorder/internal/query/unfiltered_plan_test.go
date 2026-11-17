@@ -23,11 +23,11 @@ func TestUnfilteredRowQueryWalksRecordsByIDWithStatistics(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	err = st.WithWrite("", func(tx *sql.Tx) error {
 		for _, q := range []string{
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<600)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<200)
 			 INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) SELECT i,'claude-transcript','append',1,0 FROM n`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<6000)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
-			 SELECT i,i%600+1,0,i,-1,1,'claude-transcript',CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
+			 SELECT i,i%200+1,0,i,-1,1,'claude-transcript',CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
 		} {
 			if _, err := tx.ExecContext(context.Background(), q); err != nil {
 				return err

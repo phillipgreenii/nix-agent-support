@@ -2,13 +2,11 @@ package query
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
 // pa-monitor reads a session's first (and last) record time with one ordered
@@ -21,32 +19,8 @@ import (
 // and filtered by session afterwards: 23 s for a session of 381 records on a 15 GB
 // store. The session index must drive it and fields must be probed per record.
 func TestSessionFirstTimeQueryIsDrivenBySessionIndex(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	const sessions, perSession = 400, 50
-	err = st.WithWrite("", func(tx *sql.Tx) error {
-		for _, q := range []string{
-			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
-			`INSERT INTO field_names(id,name) VALUES(1,'is_sidechain')`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400) INSERT INTO sessions(session_ref,session_id,first_time_ns) SELECT i,'sess-'||i,0 FROM n`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
-			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
-			 SELECT i,1,0,i,0,1,'claude-transcript',CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
-			// every record is a main-thread record
-			`INSERT INTO fields(rec_id,name_id,n) SELECT id,1,0 FROM records`,
-		} {
-			if _, err := tx.ExecContext(context.Background(), q); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	st := sessionPlanStore(t)
+	const sessions, perSession = 400, 10
 	srcs := sources.All()
 	var flt Filter
 	if e := Decode([]byte(`{"all":[{"field":"source","eq":"claude-transcript"},{"any":[{"field":"type","eq":"user"},{"field":"type","eq":"assistant"}]},{"field":"is_sidechain","eq":false},{"field":"session","eq":"sess-7"}]}`), &flt); e != nil {
