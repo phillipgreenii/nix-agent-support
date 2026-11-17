@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/phillipgreenii/pg-gwm/internal/config"
@@ -251,31 +252,40 @@ func TestMaxReclaim(t *testing.T) {
 	})
 
 	t.Run("--wait succeeds when a release happens", func(t *testing.T) {
-		e := newEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
-		a := e.mustLease(LeaseRequest{Name: "a", Detach: true})
-		other := e.manager(func(c *config.RepoConfig) { c.Max = ptr(1) })
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			_, _ = other.Release(context.Background(), LeaseKey{LeaseID: str(a.LeaseID)})
-		}()
-		start := time.Now()
-		rec, err := e.lease(LeaseRequest{Name: "b", Detach: true, Wait: 2 * time.Second})
-		if err != nil {
-			t.Fatalf("lease --wait: %v", err)
-		}
-		if d := time.Since(start); d < 400*time.Millisecond || d > 2500*time.Millisecond {
-			t.Errorf("took %v", d)
-		}
-		if str(rec.Name) != "b" {
-			t.Errorf("record = %+v", rec)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			e := newEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
+			a := e.mustLease(LeaseRequest{Name: "a", Detach: true})
+			other := e.manager(func(c *config.RepoConfig) { c.Max = ptr(1) })
+			go func() {
+				time.Sleep(500 * time.Millisecond)
+				_, _ = other.Release(context.Background(), LeaseKey{LeaseID: str(a.LeaseID)})
+			}()
+			start := time.Now()
+			rec, err := e.lease(LeaseRequest{Name: "b", Detach: true, Wait: 2 * time.Second})
+			if err != nil {
+				t.Fatalf("lease --wait: %v", err)
+			}
+			// Fake clock: the lease retries on its one-second interval.
+			if d := time.Since(start); d < 400*time.Millisecond || d > 2500*time.Millisecond {
+				t.Errorf("took %v", d)
+			}
+			if str(rec.Name) != "b" {
+				t.Errorf("record = %+v", rec)
+			}
+		})
 	})
 
 	t.Run("--wait gives up with max-reached", func(t *testing.T) {
-		e := newEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
-		e.mustLease(LeaseRequest{Name: "a", Detach: true})
-		_, err := e.lease(LeaseRequest{Name: "b", Detach: true, Wait: 1200 * time.Millisecond})
-		wantErr(t, err, "max-reached", 20)
+		synctest.Test(t, func(t *testing.T) {
+			e := newEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
+			e.mustLease(LeaseRequest{Name: "a", Detach: true})
+			start := time.Now()
+			_, err := e.lease(LeaseRequest{Name: "b", Detach: true, Wait: 1200 * time.Millisecond})
+			_ = wantErr(t, err, "max-reached", 20)
+			if d := time.Since(start); d < 1200*time.Millisecond {
+				t.Errorf("gave up after %v, before the 1.2s wait", d)
+			}
+		})
 	})
 }
 

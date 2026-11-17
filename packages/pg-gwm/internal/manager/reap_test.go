@@ -485,6 +485,11 @@ func TestReapAllNothingAndFailures(t *testing.T) {
 	newEnv(t) // only for the XDG settings
 	reg := state.Registry{Path: state.RegistryPath()}
 	mk := func(repo.Repo) (*Manager, error) { return nil, errors.New("no manager") }
+	// The persisted RFC 3339 stamps have second resolution, so the clock is
+	// injected and advanced instead of sleeping.
+	clock := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	reapAllNow = func() time.Time { return clock }
+	t.Cleanup(func() { reapAllNow = time.Now })
 
 	if res := ReapAll(t.Context(), config.File{}, reg, mk, ReapOptions{}); res == nil || len(res) != 0 {
 		t.Fatalf("empty run = %#v", res)
@@ -497,7 +502,7 @@ func TestReapAllNothingAndFailures(t *testing.T) {
 
 	e2 := gittest.New(t, gitfixture.RepoOptions{Suite: "manager-fail", InitialCommit: true})
 	f := config.File{Repos: map[string]config.RepoConfig{e2.Dir: {}}}
-	time.Sleep(1100 * time.Millisecond) // RFC 3339 resolution is a second
+	clock = clock.Add(2 * time.Second)
 	res := ReapAll(t.Context(), f, reg, mk, ReapOptions{})
 	if len(res) != 1 || res[0].Outcome != ReapError {
 		t.Fatalf("results = %+v", res)
