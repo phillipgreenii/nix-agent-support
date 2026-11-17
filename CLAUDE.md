@@ -311,6 +311,28 @@ rendered command under `env -i` against throwaway directories.
 
 The module owns the shutdown deadline (8 s): it passes `--shutdown-deadline` to `serve` and derives `ExitTimeOut` from it (deadline plus a 7 s margin, asserted within launchd's 60 s clamp, and checked by the eval test); see the README "Shutdown" section.
 
+### pg-assistants supervisor (`phillipgreenii.programs.pg-assistants`)
+
+An HM-scoped launchd agent (ADR 0128; read `packages/pg-assistants/README.md` first):
+`home/programs/pg-assistants` renders `config.toml` (only keys the loader knows, null options
+omitted, assistants as `[[assistant]]` tables ordered by id, every `[paths]` entry a literal
+absolute path with a `$HOME` in `CLAUDE_CONFIG_DIR` expanded at evaluation), checks it at build
+time with the strict `pg-assistants config check`, installs the command through `home.packages`
+(an assistant runs `pg-assistants exit`), registers its tldr page, runs `pg-assistants trust` for
+every assistant `cwd` at activation (best effort), and registers `pg-assistants-daemon` (label
+`com.phillipg.pg-assistants-daemon`, keep-alive, `AbandonProcessGroup = true` so a daemon restart
+never kills the tmux sessions) whose command runs the daemon through the operator's login shell
+(`exec <loginShell> -l -c 'exec "$@"' <loginShell> <pkg>/bin/pg-assistants daemon --config <file> --shutdown-deadline 8s`,
+`ExitTimeOut` 15). `PG_ASSISTANTS_CONFIG_HASH` and, with `pprof.enable`, `PG_ASSISTANTS_PPROF_ADDR`
+ride in its environment; launchd's logs go to `$XDG_STATE_HOME/pg-assistants-launchd`, outside
+the 0700 state dir (`status` names that stderr path). It asserts that `pg-claude-control` is
+enabled and its plugin not overridden off (each gated on the option's declaration) and that every
+`cwd` and `loginShell` is absolute; Linux gets no entry and one warning. No capability enables
+it. Same stubbing rules as above (plus `home.activation` with `lib.hm.dag`); the check is
+`test-pg-assistants-hm-launchd` (`tests/pg-assistants-hm-launchd.nix`), which also rejects bad
+renderings with the real `config check`, runs the trust activation on a throwaway `.claude.json`
+and runs the entry under `env -i` through a fake login shell.
+
 ### pg-repo-runner alerts and dashboard
 
 `darwin/modules/pg-repo-runner` registers `packages/pg-repo-runner/grafana/alerting/alerts.yaml` (seven rules over

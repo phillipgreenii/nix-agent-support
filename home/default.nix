@@ -38,6 +38,7 @@
     ./programs/pg-task-focus
     ./programs/pg-gwm
     ./programs/pg-keep-awake
+    ./programs/pg-assistants
     ./programs/pg-git-lander
     ./programs/pg-review
     ./programs/pg-claude-code-recorder

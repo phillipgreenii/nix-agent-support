@@ -20012,6 +20012,117 @@
                     touch $out
                   '';
 
+              # pg-assistants HM module: the eval cases live in
+              # tests/pg-assistants-hm-launchd.nix (the launchd registry is the shared
+              # STUB, tests/launchd-registry-stub.nix; the pg-claude-control module and
+              # the marketplace overrides are stub options). This check then builds the
+              # rendered config (the module's build-time `pg-assistants config check`
+              # runs on it), reads the TOML back, rejects three bad renderings with the
+              # same command, runs the trust activation with the real binary against a
+              # throwaway .claude.json, and runs the rendered launchd entry under
+              # `env -i` through a fake login shell to a fake pg-assistants that records
+              # its argv and environment. Nothing is applied (no launchctl).
+              test-pg-assistants-hm-launchd =
+                let
+                  r = import ./tests/pg-assistants-hm-launchd.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "pg-assistants-hm-launchd"
+                  {
+                    nativeBuildInputs = [
+                      r.live.package
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.diffutils
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-assistants launchd eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    # The registered tldr page and the completions are real files.
+                    for f in ${r.live.tldrSource} \
+                      ${r.live.package}/share/bash-completion/completions/pg-assistants \
+                      ${r.live.package}/share/zsh/site-functions/_pg-assistants; do
+                      [ -s "$f" ] || fail "missing or empty: $f"
+                    done
+
+                    # ---- the rendered TOML (building it already ran `config check`)
+                    said=$(pg-assistants config check --config ${r.live.configFile})
+                    [ "$said" = "ok: 2 assistants" ] || fail "config check said: $said"
+                    [ "$(grep -c '^\[\[assistant\]\]$' ${r.live.configFile})" = 2 ] \
+                      || { cat ${r.live.configFile} >&2; fail "the assistants are not two [[assistant]] tables"; }
+                    yq -p toml -o json ${r.live.configFile} > config.json
+                    jq -e '
+                      .tick == "1m"
+                      and .grace == {interrupt: "5m", kill: "2m"}
+                      and .blocks == {nudge: 0.95, interrupt: 0.98, kill: 1, unknown_reset_hold: "1h"}
+                      and .restart == {min_uptime: "1m", backoff_initial: "1m", backoff_max: "30m", start_timeout: "5m"}
+                      and (.paths | keys) == ["claude", "claude_json", "pg_claude_control", "shell", "state_dir", "tmux"]
+                      and .paths.shell == "/bin/zsh"
+                      and .paths.state_dir == "/example/home/.local/state/pg-assistants"
+                      and .paths.claude_json == "/example/home/.claude.json"
+                      and (.assistant | length) == 2
+                      and .assistant[0].id == "example-a" and .assistant[0].tick == "30s"
+                      and .assistant[0].env.EXAMPLE == "value" and .assistant[0].context.window == 1000000
+                      and .assistant[1].id == "example-b"
+                      and (.assistant[1] | has("tick") or has("env") | not)
+                      and (.assistant[1].context | has("window") | not)
+                      and .assistant[1].context == {limit: 150000, nudge: 0.8, interrupt: 0.95, kill: 1}
+                    ' config.json >/dev/null || { cat config.json >&2; fail "unexpected rendered config"; }
+                    # every [paths] binary is a real executable in the store
+                    for k in tmux claude pg_claude_control; do
+                      p=$(jq -r --arg k "$k" '.paths[$k]' config.json)
+                      [ -x "$p" ] || fail "paths.$k ($p) is not an executable"
+                    done
+
+                    # ---- the negative controls: the same check REJECTS bad renderings
+                    rejects() {
+                      rc=0
+                      pg-assistants config check --config "$1" >out.txt 2>&1 || rc=$?
+                      [ "$rc" = 7 ] || { cat out.txt >&2; fail "config check on $1 exited $rc, want 7"; }
+                      grep -qF -- "$2" out.txt || { cat out.txt >&2; fail "config check on $1 did not name $2"; }
+                    }
+                    rejects ${r.live.uncheckedBadEffort} 'assistant[example-a].effort: "turbo"'
+                    rejects ${r.live.uncheckedOverWindow} 'assistant[example-b].context.kill: limit*kill'
+                    rejects ${r.live.uncheckedDuplicateCwd} 'assistant[example-a].cwd: cwd "/example/home/assistants/a" is also the cwd of'
+
+                    # ---- the trust activation, with the real binary, on a throwaway file
+                    w=$TMPDIR/w
+                    mkdir -p "$w/home/assistants/a" "$w/home/assistants/b" "$w/log" "$w/h"
+                    printf '{"example": 1, "projects": {"/example/other": {"hasTrustDialogAccepted": false}}}\n' > "$w/home/.claude.json"
+                    printf '%s\n' ${lib.escapeShellArg r.live.trustText} | sed "s#/example/home#$w/home#g" > trust.sh
+                    grep -q " trust --claude-json $w/home/.claude.json $w/home/assistants/a $w/home/assistants/b " trust.sh \
+                      || { cat trust.sh >&2; fail "the activation does not trust every cwd"; }
+                    env -u DRY_RUN_CMD bash trust.sh
+                    jq -e --arg a "$w/home/assistants/a" --arg b "$w/home/assistants/b" '
+                      .projects[$a].hasTrustDialogAccepted == true
+                      and .projects[$b].hasTrustDialogAccepted == true
+                      and .projects["/example/other"].hasTrustDialogAccepted == false
+                      and .example == 1
+                    ' "$w/home/.claude.json" >/dev/null || { cat "$w/home/.claude.json" >&2; fail "trust did not mark every cwd"; }
+
+                    # ---- the launchd entry under env -i: login shell, then the daemon
+                    ( cd / && exec env -i FAKE_LOG_DIR="$w/log" HOME="$w/h" ${pkgs.bash}/bin/bash ${r.live.fakeWrapper} ) \
+                      || fail "the rendered entry failed"
+                    printf '%s\n' ${r.live.fakeShell} -l -c 'exec "$@"' ${r.live.fakeShell} \
+                      ${r.live.fakeBinary} daemon --config ${r.live.fakeConfigFile} --shutdown-deadline 8s > want-shell.argv
+                    diff want-shell.argv "$w/log/shell.argv" || fail "the login shell's argv differs"
+                    printf '%s\n' daemon --config ${r.live.fakeConfigFile} --shutdown-deadline 8s > want-daemon.argv
+                    diff want-daemon.argv "$w/log/daemon.argv" || fail "the daemon's argv differs"
+                    grep -qx 'PG_ASSISTANTS_CONFIG_HASH=${r.live.fakeHash}' "$w/log/daemon.env" \
+                      || { cat "$w/log/daemon.env" >&2; fail "the daemon did not get the config hash"; }
+                    grep -qx 'PG_ASSISTANTS_PPROF_ADDR=${r.live.stateDir}/pprof.sock' "$w/log/daemon.env" \
+                      || { cat "$w/log/daemon.env" >&2; fail "the daemon did not get the pprof socket"; }
+                    grep -qx "HOME=$w/h" "$w/log/daemon.env" || fail "the daemon did not get HOME"
+                    touch $out
+                  '';
+
               # pg-git-lander HM module: the eval cases live in tests/pg-git-lander-hm.nix.
               # This check then runs the REAL `pg-git-lander config check` on the rendered
               # XDG file with XDG_CONFIG_HOME pointing at it (the [[repo]] roots are

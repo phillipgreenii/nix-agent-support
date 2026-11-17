@@ -15,7 +15,8 @@ configuration files, not hardcoded here.
   (`packages/claude-extended-tool-approver`).
 - **Agent work orchestration**: `pg-router` (event router and scheduler), `ccpool` (session
   pool), `pb` (beads workflow tool), `pg-connector` (issue and pull-request connectors),
-  `pg-desk` and `pg-task-focus` (operator views).
+  `pg-desk` and `pg-task-focus` (operator views), `pg-assistants` (keeps permanent Claude Code
+  assistants running in tmux and recycles each session before its context fills).
 - **Monitoring and housekeeping daemons**: `pa-monitor`, `pg-keep-awake`, `pg-rescue`,
   `beads-exporter`, `tmp-sweep`.
 - **Small CLI tools** (`packages/`): `wtnew`, `wtdone`, `wtaudit`, `bg-tools`, `handoff-create`,
