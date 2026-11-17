@@ -22,6 +22,7 @@ type cli struct {
 	a         *app
 	out, errf *os.File
 	tty       bool
+	common    string // the git common dir, resolved once by snapshot
 }
 
 func newCLI(t *testing.T) *cli {
@@ -275,8 +276,10 @@ func TestPathInNoRepositoryIsUsage(t *testing.T) {
 func snapshot(t *testing.T, c *cli) string {
 	t.Helper()
 	var b strings.Builder
-	common := c.git("rev-parse", "--path-format=absolute", "--git-common-dir")
-	dir := filepath.Join(common, "pg-gwm")
+	if c.common == "" {
+		c.common = c.git("rev-parse", "--path-format=absolute", "--git-common-dir")
+	}
+	dir := filepath.Join(c.common, "pg-gwm")
 	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		rel, _ := filepath.Rel(dir, p)
 		if err != nil || d.IsDir() || strings.HasPrefix(rel, "events-") || strings.HasPrefix(rel, "ops"+string(filepath.Separator)) {
@@ -323,15 +326,19 @@ func TestRefusalChangesNothing(t *testing.T) {
 		{"usage", []string{"lease", "-b", "held"}, 2},
 		{"usage", []string{"lease", "-b", "pg-gwm/x"}, 2},
 	}
+	// Each case's after is the next case's before: no case may change anything,
+	// so the snapshots stay equal and one snapshot per case is enough.
+	before := snapshot(t, c)
 	for _, tc := range cases {
-		before := snapshot(t, c)
 		code, _, _ := c.run(tc.args...)
 		if code != tc.code {
 			t.Errorf("%v: exit %d, want %d", tc.args, code, tc.code)
 		}
-		if after := snapshot(t, c); after != before {
+		after := snapshot(t, c)
+		if after != before {
 			t.Errorf("%v changed something:\n--- before\n%s\n--- after\n%s", tc.args, before, after)
 		}
+		before = after
 	}
 	snap, err := c.a.counters.Read()
 	if err != nil {

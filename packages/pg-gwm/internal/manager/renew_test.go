@@ -158,9 +158,17 @@ func TestRenewStates(t *testing.T) {
 
 func TestNotFoundHintCapsHeldNames(t *testing.T) {
 	e := newEnv(t, func(c *config.RepoConfig) { c.Max = nil })
-	for i := 0; i < 12; i++ {
-		e.mustLease(LeaseRequest{Name: "n" + string(rune('a'+i)), Detach: true})
-	}
+	// The hint reads only the state: one real lease, eleven seeded records.
+	e.mustLease(LeaseRequest{Name: "na", Detach: true})
+	e.seed(func(st *state.State) {
+		for i := 1; i < 12; i++ {
+			name := "n" + string(rune('a'+i))
+			st.Worktrees = append(st.Worktrees, state.Worktree{
+				ID: "w-seed" + name, Slot: i + 1, Status: state.Leased,
+				Lease: &state.Lease{ID: "l-seed" + name, Name: name, Acquired: epoch},
+			})
+		}
+	})
 	_, err := e.renew(LeaseKey{Name: "zzz"}, nil, nil)
 	ee := wantErr(t, err, "not-found", 4)
 	if names, _ := ee.Details["held_names"].([]string); len(names) != 10 {
@@ -307,7 +315,8 @@ func TestReleaseThenLeaseSameName(t *testing.T) {
 func TestLeaseIDNeverReused(t *testing.T) {
 	e := newEnv(t)
 	seen := map[string]bool{}
-	for i := 0; i < 10; i++ {
+	const cycles = 4 // reuse of an id shows by the second cycle; more adds only spawns
+	for i := 0; i < cycles; i++ {
 		req := LeaseRequest{Name: "cycle", Branch: "cyc", Create: true}
 		if i > 0 {
 			req = LeaseRequest{Name: "cycle", CommitIsh: "cyc"}
@@ -321,7 +330,7 @@ func TestLeaseIDNeverReused(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(seen) != 10 || len(e.state().Worktrees) != 1 {
+	if len(seen) != cycles || len(e.state().Worktrees) != 1 {
 		t.Errorf("ids %d, worktrees %d", len(seen), len(e.state().Worktrees))
 	}
 }

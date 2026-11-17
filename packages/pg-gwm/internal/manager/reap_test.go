@@ -53,16 +53,16 @@ func (e *env) branchExists(name string) bool {
 	return e.git(e.repo.Dir, "branch", "--list", name) != ""
 }
 
-// four leases: three released and one expired, each on its own branch.
-func (e *env) threeReleasedOneExpired() []Record {
+// three leases: two released and one expired, each on its own branch.
+func (e *env) twoReleasedOneExpired() []Record {
 	e.t.Helper()
 	var recs []Record
-	for _, n := range []string{"a", "b", "c"} {
+	for _, n := range []string{"a", "b"} {
 		r := e.mustLease(LeaseRequest{Name: n, Branch: "br-" + n, Create: true})
 		recs = append(recs, r)
 	}
 	recs = append(recs, e.mustLease(LeaseRequest{Name: "x", Branch: "br-x", Create: true, TTL: ptr(dur(e.t, "1h"))}))
-	for _, r := range recs[:3] {
+	for _, r := range recs[:2] {
 		if _, err := e.m.Release(e.t.Context(), LeaseKey{LeaseID: str(r.LeaseID)}); err != nil {
 			e.t.Fatal(err)
 		}
@@ -73,11 +73,11 @@ func (e *env) threeReleasedOneExpired() []Record {
 
 func TestReapMinTwo(t *testing.T) {
 	e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(2) })
-	e.threeReleasedOneExpired()
+	e.twoReleasedOneExpired()
 	before := e.rawState()
 
 	dry := e.mustReap(ReapOptions{DryRun: true})
-	if len(dry.Kept) != 2 || len(dry.Removed) != 2 || dry.Outcome != ReapCompleted {
+	if len(dry.Kept) != 2 || len(dry.Removed) != 1 || dry.Outcome != ReapCompleted {
 		t.Errorf("dry run = %+v", dry)
 	}
 	if e.rawState() != before {
@@ -88,13 +88,13 @@ func TestReapMinTwo(t *testing.T) {
 	}
 
 	res := e.mustReap(ReapOptions{})
-	if len(res.Kept) != 2 || len(res.Removed) != 2 || len(res.Created) != 0 {
+	if len(res.Kept) != 2 || len(res.Removed) != 1 || len(res.Created) != 0 {
 		t.Fatalf("reap = %+v", res)
 	}
 	if e.count(state.Available) != 2 || len(e.state().Worktrees) != 2 {
 		t.Errorf("state = %+v", e.state().Worktrees)
 	}
-	for _, b := range []string{"br-a", "br-b", "br-c", "br-x"} {
+	for _, b := range []string{"br-a", "br-b", "br-x"} {
 		if !e.branchExists(b) {
 			t.Errorf("branch %s was deleted", b)
 		}
@@ -103,23 +103,23 @@ func TestReapMinTwo(t *testing.T) {
 		t.Error("no reap event")
 	}
 	rec, err := state.ReadReaperRecord(state.ReaperPath())
-	if err != nil || rec.Repos[e.m.Repo.Label].Removed != 2 || rec.Repos[e.m.Repo.Label].Kept != 2 {
+	if err != nil || rec.Repos[e.m.Repo.Label].Removed != 1 || rec.Repos[e.m.Repo.Label].Kept != 2 {
 		t.Errorf("reaper.json = %+v, %v", rec, err)
 	}
 	if !rec.Started.IsZero() || rec.LastSuccess != nil {
 		t.Errorf("a single-repository reap wrote the run fields: %+v", rec)
 	}
 	snap, _ := state.Counters{Path: state.CountersPath()}.Read()
-	if c := snap.Repos[e.m.Repo.Label]; c == nil || c.ReapRemoved != 2 || c.ReapKept != 2 {
+	if c := snap.Repos[e.m.Repo.Label]; c == nil || c.ReapRemoved != 1 || c.ReapKept != 2 {
 		t.Errorf("counters = %+v", c)
 	}
 }
 
 func TestReapReuseOff(t *testing.T) {
 	e := newEnv(t, func(c *config.RepoConfig) { c.Min = ptr(1) })
-	e.threeReleasedOneExpired()
+	e.twoReleasedOneExpired()
 	res := e.mustReap(ReapOptions{})
-	if len(res.Removed) != 4 || len(res.Kept) != 0 || len(res.Created) != 1 {
+	if len(res.Removed) != 3 || len(res.Kept) != 0 || len(res.Created) != 1 {
 		t.Fatalf("reap = %+v", res)
 	}
 	// Every reclaimed worktree is removed; only the fresh standby remains.
@@ -131,15 +131,15 @@ func TestReapReuseOff(t *testing.T) {
 func TestReapShrinkAboveMax(t *testing.T) {
 	e := newEnv(t)
 	var recs []Record
-	for _, n := range []string{"a", "b", "c", "d", "e"} {
+	for _, n := range []string{"a", "b", "c", "d"} {
 		recs = append(recs, e.mustLease(LeaseRequest{Name: n, Detach: true}))
 	}
 	for _, r := range recs {
 		e.makeAvailable(r.ID)
 	}
-	e.m = e.manager(func(c *config.RepoConfig) { c.Max = ptr(3) })
+	e.m = e.manager(func(c *config.RepoConfig) { c.Max = ptr(2) })
 	res := e.mustReap(ReapOptions{})
-	if len(res.Removed) != 2 || e.count(state.Available) != 3 {
+	if len(res.Removed) != 2 || e.count(state.Available) != 2 {
 		t.Errorf("reap = %+v, state = %+v", res, e.state().Worktrees)
 	}
 }

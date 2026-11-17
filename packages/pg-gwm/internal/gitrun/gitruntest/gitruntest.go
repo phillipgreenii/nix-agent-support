@@ -3,7 +3,10 @@
 package gitruntest
 
 import (
+	"context"
+	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/phillipgreenii/pg-gwm/internal/gitrun"
@@ -13,11 +16,20 @@ import (
 
 // New returns a Git on the real runner for repo's fixture: a temporary HOME,
 // no system or global config, discovery capped at the fixture root's parent,
-// and a fixed author and committer identity.
+// and a fixed author and committer identity. With PG_GWM_COUNT_GIT set, each
+// test logs how many git processes this Git started (run with -v), a
+// load-independent measure of a test's cost.
 func New(t *testing.T, repo *gitfixture.Repo) gitrun.Git {
 	t.Helper()
+	var spawns atomic.Int64
+	if os.Getenv("PG_GWM_COUNT_GIT") != "" {
+		t.Cleanup(func() { t.Logf("git spawns: %d", spawns.Load()) })
+	}
 	return gitrun.Git{
-		Run: cmdrun.Exec,
+		Run: func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+			spawns.Add(1)
+			return cmdrun.Exec(ctx, c)
+		},
 		Bin: "git",
 		ExtraEnv: []string{
 			"HOME=" + t.TempDir(),
