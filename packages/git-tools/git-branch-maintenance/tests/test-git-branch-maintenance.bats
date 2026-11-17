@@ -574,3 +574,22 @@ output_without_tmp_cleanup() {
 
     git worktree remove "$wt" --force 2>/dev/null || true
 }
+
+@test "a refused git fetch is tolerated: warns and still deletes locally merged branches" {
+    git branch merged-after-refused-fetch main
+
+    cat > "$MOCK_DIR/git" <<MOCK
+#!/usr/bin/env bash
+if [[ "\$1" == "fetch" ]]; then
+    echo "pg-origin-guard: refused (no-human)" >&2
+    exit 1
+fi
+exec "$REAL_GIT" "\$@"
+MOCK
+    chmod +x "$MOCK_DIR/git"
+
+    run_git_branch_maintenance --delete-merged
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "git fetch failed"
+    ! git branch | grep -q "merged-after-refused-fetch"
+}

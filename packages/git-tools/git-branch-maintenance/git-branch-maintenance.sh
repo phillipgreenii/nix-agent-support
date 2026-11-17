@@ -683,8 +683,13 @@ if [[ $DO_FF == "true" || $DO_REBASE == "true" || $DO_DELETE_MERGED == "true" ]]
 fi
 
 # Fetch all remotes
+# A refused or failed fetch (for example an unattended launchd run whose
+# remote access is blocked) is not fatal: continue with the local remote-tracking
+# refs. Stale refs only make fewer branches look merged, so this is safe.
 echo "Fetching all remotes..."
-git fetch --all --prune
+if ! git fetch --all --prune; then
+  echo "Warning: git fetch failed; continuing with local remote-tracking data" >&2
+fi
 
 # Create temporary worktree
 echo "Creating temporary worktree..."
