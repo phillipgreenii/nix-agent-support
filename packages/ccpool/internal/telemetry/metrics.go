@@ -52,6 +52,7 @@ type metricsInstruments struct {
 	launchOutcomeTotal        metric.Int64Counter
 	sessionStates             metric.Int64Gauge
 	sessionRecords            metric.Int64Gauge
+	sessionBackgroundAgents   metric.Int64Gauge
 	sessionInfo               metric.Int64Gauge
 	sessionDuration           metric.Float64Histogram
 	sessionsClosedTotal       metric.Int64Counter
@@ -120,6 +121,12 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 		metric.WithDescription("Registry records per pool by kind, snapshotted at each reap: live, dead_closed (not live, closed since last activity) and dead_unclosed (not live, nobody closed it: the fault signal). The kinds sum to the pool's row count."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_session_records: %w", err)
+	}
+	if m.sessionBackgroundAgents, err = meter.Int64Gauge(
+		"ccpool_session_background_agents",
+		metric.WithDescription("Live sessions per pool whose last turn ended with a background agent still running and whose subagent transcript was written recently (a drain orchestrator waiting on its implementer or lander subagent), snapshotted at each reap. Such a session reads state=idle in ccpool_session_states while work is in progress; 0 is emitted when none, so a stall alert can tell a waiting session from a dead hold."),
+	); err != nil {
+		return metricsInstruments{}, fmt.Errorf("ccpool_session_background_agents: %w", err)
 	}
 	if m.sessionInfo, err = meter.Int64Gauge(
 		"ccpool_session_info",
@@ -327,6 +334,13 @@ func (m metricsInstruments) records(ctx context.Context, counts []SessionRecordC
 	}
 }
 
+func (m metricsInstruments) backgroundAgents(ctx context.Context, count int64, attrs []attribute.KeyValue) {
+	if m.sessionBackgroundAgents == nil {
+		return
+	}
+	m.sessionBackgroundAgents.Record(ctx, count, withAttrs(attrs))
+}
+
 func (m metricsInstruments) info(ctx context.Context, claudeSessionID string, attrs []attribute.KeyValue) {
 	if m.sessionInfo == nil || claudeSessionID == "" {
 		return
@@ -531,6 +545,13 @@ type SessionRecordCount struct {
 // sees an explicit 0 rather than a stale prior value.
 func RecordSessionRecords(counts []SessionRecordCount, attrs []attribute.KeyValue) {
 	ensureInstruments().records(context.Background(), counts, attrs)
+}
+
+// RecordSessionBackgroundAgents records ccpool_session_background_agents: the
+// number of live sessions in the pool (attrs) waiting on a running background
+// agent. The caller passes 0 when none so the gauge reads an explicit zero.
+func RecordSessionBackgroundAgents(count int64, attrs []attribute.KeyValue) {
+	ensureInstruments().backgroundAgents(context.Background(), count, attrs)
 }
 
 // RecordSessionInfo records ccpool_session_info = 1 for one live session:

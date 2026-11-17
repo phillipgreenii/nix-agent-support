@@ -326,3 +326,90 @@ tests:
       - eval_time: 1200s
         alertname: pg-router-pool-full-idle
         exp_alerts: []
+
+  - name: a single-slot drain lane whose idle orchestrator waits on a background subagent does not fire (40m of declines)
+    interval: 1m
+    input_series:
+      # max_sessions 1, the slot held by an orchestrator that ended its turn after
+      # dispatching its subagent: ccpool_session_states says idle while
+      # ccpool_session_background_agents is 1.
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="drain-pg2"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="free"}
+        values: "0x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="counted"}
+        values: "1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="max_sessions"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="idle",live="true"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="working",live="true"}
+        values: "0x40"
+      - series: ccpool_session_background_agents{pool="pg-router-ccpool-drain-pg2"}
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+      - eval_time: 2400s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+
+  - name: an idle hold with the background-agent gauge at zero still fires (no pending agent, or its subagent went silent)
+    interval: 1m
+    input_series:
+      # The gauge is present and 0: the held session has no background work (a
+      # finished session whose settled close was cut off, holding the slot until
+      # idle_ttl) or its subagent has been silent past ccpool's recency bound.
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="drain-pg2"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="free"}
+        values: "0x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="counted"}
+        values: "1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="max_sessions"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="idle",live="true"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="working",live="true"}
+        values: "0x40"
+      - series: ccpool_session_background_agents{pool="pg-router-ccpool-drain-pg2"}
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 600s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts:
+          - exp_labels:
+              pool: pg-router-ccpool-drain-pg2
+              role: drain-pg2
+              severity: warning
+
+  - name: a held slot whose background work ended fires once the gauge has read 0 for the window
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="drain-pg2"}
+        values: "0+1x60"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="free"}
+        values: "0x60"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="counted"}
+        values: "1x60"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="max_sessions"}
+        values: "1x60"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="idle",live="true"}
+        values: "1x60"
+      - series: ccpool_session_background_agents{pool="pg-router-ccpool-drain-pg2"}
+        values: "1x10 0x50"
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+      - eval_time: 3000s
+        alertname: pg-router-pool-full-idle
+        exp_alerts:
+          - exp_labels:
+              pool: pg-router-ccpool-drain-pg2
+              role: drain-pg2
+              severity: warning

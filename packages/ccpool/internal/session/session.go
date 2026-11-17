@@ -42,6 +42,7 @@ var (
 	recordLaunchOutcomeFn           = telemetry.RecordLaunchOutcome
 	recordSessionStates             = telemetry.RecordSessionStates
 	recordSessionRecords            = telemetry.RecordSessionRecords
+	recordSessionBackgroundAgents   = telemetry.RecordSessionBackgroundAgents
 	recordSessionInfo               = telemetry.RecordSessionInfo
 	recordSessionClosed             = telemetry.RecordSessionClosed
 	recordSessionOutputTokens       = telemetry.RecordSessionOutputTokens
@@ -271,6 +272,11 @@ type Deps struct {
 	// stop at the folder-trust prompt for $HOME (never pre-trusted) and burn
 	// the whole wait. nil = no check (tests); the cmd layer wires the real stat.
 	DirExists func(dir string) bool
+	// BackgroundAgents, when set, reports whether the session behind a transcript
+	// path is waiting on a running background agent (its last turn ended with one
+	// pending and its subagent transcript is recent). Reap counts the live rows
+	// for which it holds into ccpool_session_background_agents. nil = never.
+	BackgroundAgents func(transcriptPath string) bool
 	// Gate, when set, is probed before capacity is reported: a recorder that does
 	// not answer makes Capacity fail (the dispatch gate then refuses). nil = no gate.
 	Gate Gate

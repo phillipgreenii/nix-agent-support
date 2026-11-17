@@ -160,6 +160,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	}
 	recordSessionStates(sessionStateCounts(live, deadKept), s.poolMetricAttrs())
 	recordSessionRecords(sessionRecordCounts(live, deadKept), s.poolMetricAttrs())
+	recordSessionBackgroundAgents(s.backgroundAgentCount(live), s.poolMetricAttrs())
 
 	// Keep only live sessions (derived liveness), oldest-activity first.
 	sort.Slice(live, func(i, j int) bool { return live[i].LastActivityAt < live[j].LastActivityAt })
@@ -603,6 +604,25 @@ func sessionStateCounts(live, dead []store.Session) []telemetry.SessionStateCoun
 			telemetry.SessionStateCount{State: string(st), Live: false, Count: counts[st][0]})
 	}
 	return out
+}
+
+// backgroundAgentCount counts the live rows whose session is waiting on a
+// running background agent (Deps.BackgroundAgents), for
+// ccpool_session_background_agents. A drain orchestrator that ended its turn
+// after dispatching a subagent reads idle in ccpool_session_states for the whole
+// subagent run; this gauge is what tells it apart from a slot held by a session
+// with no work in progress. 0 without a configured probe.
+func (s *Service) backgroundAgentCount(live []store.Session) int64 {
+	if s.d.BackgroundAgents == nil {
+		return 0
+	}
+	var n int64
+	for _, r := range live {
+		if r.TranscriptPath != "" && s.d.BackgroundAgents(r.TranscriptPath) {
+			n++
+		}
+	}
+	return n
 }
 
 // Record kinds of ccpool_session_records.

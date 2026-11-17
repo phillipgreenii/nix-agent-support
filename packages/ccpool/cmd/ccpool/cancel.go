@@ -111,6 +111,7 @@ func newSessionDeps(cfg config.Config, st *store.Store, el *eventlog.Logger) ses
 			fi, err := os.Stat(dir)
 			return err == nil && fi.IsDir()
 		},
+		BackgroundAgents:     backgroundAgents,
 		Gate:                 processGate{},
 		Control:              newControlClient(),
 		Socket:               cfg.Tmux.Socket,

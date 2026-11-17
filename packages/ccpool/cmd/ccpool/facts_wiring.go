@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/facts"
 	"github.com/phillipgreenii/ccpool/internal/session"
+	ct "github.com/phillipgreenii/claude-transcript"
 )
 
 // factReader is the recorder-backed fact source shared by every command in this
@@ -87,3 +88,13 @@ type processGate struct{}
 func (processGate) Ping(ctx context.Context) error { return factReader.PingOnce(ctx) }
 
 var _ session.Gate = processGate{}
+
+// backgroundAgentRecency bounds how long a subagent transcript may stay
+// unwritten before its orchestrator stops counting as waiting on it.
+const backgroundAgentRecency = 15 * time.Minute
+
+// backgroundAgents is session.Deps.BackgroundAgents: the transcript's last turn
+// ended with a background agent pending and its subagent wrote recently.
+func backgroundAgents(transcriptPath string) bool {
+	return ct.PendingBackgroundAgents(transcriptPath, time.Now(), backgroundAgentRecency)
+}

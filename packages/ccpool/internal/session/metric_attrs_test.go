@@ -274,6 +274,7 @@ type liveRow struct {
 	state store.State
 	ageS  int64
 	role  string // "" = unlabelled
+	path  string // transcript path, "" = none
 }
 
 // reapService builds a pool's Service over its OWN store with the given live
@@ -286,7 +287,7 @@ func reapService(t *testing.T, now time.Time, poolPath string, rows ...liveRow) 
 	for _, r := range rows {
 		_ = st.Insert(ctx, store.Session{
 			ExternalID: r.id, ClaudeSessionID: "csid-" + r.id, State: r.state,
-			TmuxSession: "cc-" + r.id, LastActivityAt: now.Unix() - r.ageS,
+			TmuxSession: "cc-" + r.id, LastActivityAt: now.Unix() - r.ageS, TranscriptPath: r.path,
 		})
 		live["cc-"+r.id] = true
 		if r.role != "" {
