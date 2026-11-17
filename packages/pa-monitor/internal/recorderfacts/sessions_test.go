@@ -6,8 +6,11 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httputil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -127,6 +130,9 @@ func TestSessionsBeforeOnlyWindow(t *testing.T) {
 // every byte the client sent, so a test sees the requests on the wire.
 func recordingProxy(t *testing.T, target string) (socket string, sent func() string) {
 	t.Helper()
+
+	// recordingProxyRewriting is recordingProxy that also passes each chunk the
+	// recorder sends back through rewrite (nil leaves it as is).
 	dir, err := os.MkdirTemp("", "pxy")
 	if err != nil {
 		t.Fatal(err)
@@ -195,5 +201,78 @@ func TestSessionsListingIssuesNoSessionGroupAggregateOverRecords(t *testing.T) {
 	}
 	if strings.Contains(wire, `"group":["session"`) {
 		t.Errorf("a query groups records by session: %s", wire)
+	}
+}
+
+// degradedInventoryProxy is an HTTP proxy to the recorder socket that marks
+// every files.inventory answer degraded (the recorder catching up) and keeps
+// the path and body of every request.
+func degradedInventoryProxy(t *testing.T, target string) (socket string, sent func() string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "pxy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socket = filepath.Join(dir, "p.sock")
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var buf bytes.Buffer
+	rp := &httputil.ReverseProxy{
+		Director: func(r *http.Request) { r.URL.Scheme, r.URL.Host = "http", "recorder" },
+		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", target)
+		}},
+		ModifyResponse: func(resp *http.Response) error {
+			if !strings.Contains(resp.Request.URL.Path, "inventory") {
+				return nil
+			}
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			_ = resp.Body.Close()
+			data = bytes.Replace(data, []byte(`"files":[`), []byte(`"degraded":true,"files":[`), 1)
+			resp.Body = io.NopCloser(bytes.NewReader(data))
+			resp.ContentLength = int64(len(data))
+			resp.Header.Set("Content-Length", strconv.Itoa(len(data)))
+			return nil
+		},
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		buf.WriteString(r.URL.Path + " " + string(body) + "\n")
+		mu.Unlock()
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		rp.ServeHTTP(w, r)
+	}), ReadHeaderTimeout: time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return socket, func() string { mu.Lock(); defer mu.Unlock(); return buf.String() }
+}
+
+// TestSessionsListingWhileInventoryDegradedReportsBehindWithoutAggregate: when
+// the recorder reports its file inventory degraded (it is catching up), the
+// listing fails with client.ErrBehind instead of falling back to a count of
+// records grouped by session, which scans every record and exceeds the query
+// deadline.
+func TestSessionsListingWhileInventoryDegradedReportsBehindWithoutAggregate(t *testing.T) {
+	e, _ := recorderWithTranscript(t)
+	socket, sent := degradedInventoryProxy(t, e.Socket)
+	f := New(client.Options{Socket: socket})
+	_, err := f.Sessions(context.Background(), time.Time{}, time.Time{})
+	if !errors.Is(err, client.ErrBehind) {
+		t.Fatalf("err = %v, want client.ErrBehind", err)
+	}
+	wire := sent()
+	if !strings.Contains(wire, "inventory") {
+		t.Fatalf("proxy saw no inventory request, so the check below is vacuous: %q", wire)
+	}
+	if strings.Contains(wire, `"group":["session"`) || strings.Contains(wire, "records") {
+		t.Errorf("a records query was issued while the inventory was degraded: %s", wire)
 	}
 }

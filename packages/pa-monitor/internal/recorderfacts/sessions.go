@@ -86,25 +86,12 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 		return nil, err
 	}
 	if !ok {
-		// The inventory cannot be trusted (the recorder reports it degraded):
-		// count records, in the window when there is one.
-		where := base
-		if win := windowFilter(since, before); win != nil {
-			where = append(append([]client.Filter{}, base...), *win)
-		}
-		active, err := run(client.QueryRequest{
-			Where: &client.Filter{All: where},
-			Group: []string{"session"}, Aggregate: []client.Agg{{Fn: "count", As: "n"}}, Limit: 10000,
-		})
-		if err != nil {
-			return nil, err
-		}
-		act = nil
-		for _, r := range active.Rows {
-			if sid := str(r[0]); sid != "" {
-				act = append(act, sid)
-			}
-		}
+		// The inventory cannot be trusted (the recorder is catching up, so its
+		// records are partial too). Do not count records grouped by session:
+		// that scans every record of every session and exceeds the query
+		// deadline on a real tree. Report the recorder behind; the caller
+		// retries once it has caught up.
+		return nil, fmt.Errorf("listing sessions: %w", client.ErrBehind)
 	}
 
 	// First and last record time per session: one ordered single-row read per
@@ -235,8 +222,7 @@ const inventoryPage = 10000
 // is at or after since (every transcript file when since is zero), from the
 // recorder's per-file table (no scan of records, which timed out on a real
 // tree). ok is false when the answer cannot be trusted (the recorder reports it
-// degraded); the caller
-// then counts records. The list is a superset of the sessions active in the
+// degraded); the caller then reports the recorder behind. The list is a superset of the sessions active in the
 // window; the caller checks each session's true first record.
 func (f *Facts) activeSessions(ctx context.Context, c *client.Client, since time.Time) (ids []any, ok bool, err error) {
 	req := client.InventoryRequest{Sources: []string{"claude-transcript"}, Limit: inventoryPage}
