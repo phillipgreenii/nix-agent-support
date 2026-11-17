@@ -741,3 +741,85 @@ func TestReapBrokenRetryStatusTimeoutStaysRetryable(t *testing.T) {
 		t.Errorf("not removed by the next reap")
 	}
 }
+
+// clockProv advances the fake clock by step on every Create.
+type clockProv struct {
+	provision.Provisioner
+	e    *env
+	step time.Duration
+}
+
+func (c *clockProv) Create(ctx context.Context, dir string, b provision.BranchSpec, reason string) error {
+	c.e.now = c.e.now.Add(c.step)
+	return c.Provisioner.Create(ctx, dir, b, reason)
+}
+
+// A reap whose last create passes the deadline, and that leaves the pool at
+// min with nothing else to do, is completed.
+func TestReapCompletedWhenDeadlinePassesDuringFinalCreate(t *testing.T) {
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Min = ptr(1) })
+	e.m.Prov = &clockProv{Provisioner: e.m.Prov, e: e, step: 2 * time.Minute}
+	res := e.mustReap(ReapOptions{Deadline: e.now.Add(time.Minute)})
+	if res.Outcome != ReapCompleted || len(res.Created) != 1 {
+		t.Fatalf("reap = %+v", res)
+	}
+	if res.StepsMS["create"] != (2 * time.Minute).Milliseconds() {
+		t.Errorf("steps = %+v", res.StepsMS)
+	}
+}
+
+// deadline means work was left undone: the pool is below min, or removals
+// were skipped.
+func TestReapDeadlineOnlyWhenWorkRemains(t *testing.T) {
+	t.Run("pool below min", func(t *testing.T) {
+		e := newFakeEnv(t, func(c *config.RepoConfig) { c.Min = ptr(2) })
+		e.m.Prov = &clockProv{Provisioner: e.m.Prov, e: e, step: 2 * time.Minute}
+		res := e.mustReap(ReapOptions{Deadline: e.now.Add(time.Minute)})
+		if res.Outcome != ReapDeadline || len(res.Created) != 1 {
+			t.Errorf("reap = %+v", res)
+		}
+	})
+	t.Run("removals skipped", func(t *testing.T) {
+		e := newFakeEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(2) })
+		e.twoReleasedOneExpired()
+		res := e.mustReap(ReapOptions{Deadline: e.now.Add(-time.Second)})
+		if res.Outcome != ReapDeadline || len(res.Removed) != 0 || len(res.Kept) != 0 {
+			t.Errorf("reap = %+v", res)
+		}
+	})
+}
+
+// The reap result and the reap event carry a start time and per-step
+// durations.
+func TestReapRecordsTimestampAndStepDurations(t *testing.T) {
+	e := newFakeEnv(t, func(c *config.RepoConfig) { c.Min = ptr(1) })
+	e.m.Prov = &clockProv{Provisioner: e.m.Prov, e: e, step: 3 * time.Second}
+	start := e.now
+	res := e.mustReap(ReapOptions{})
+	if !res.Started.Equal(start.UTC()) {
+		t.Errorf("started = %v, want %v", res.Started, start)
+	}
+	for _, k := range []string{"drop", "retry", "reclaim", "check", "create"} {
+		if _, ok := res.StepsMS[k]; !ok {
+			t.Errorf("steps_ms lacks %q: %+v", k, res.StepsMS)
+		}
+	}
+	if res.StepsMS["create"] != 3000 {
+		t.Errorf("create = %d ms, want 3000", res.StepsMS["create"])
+	}
+	_, evs := e.eventsByKind()
+	var found bool
+	for _, ev := range evs {
+		if ev.Kind != "reap" {
+			continue
+		}
+		found = true
+		steps, ok := ev.Details["steps_ms"].(map[string]any)
+		if !ok || steps["create"] != float64(3000) || ev.Details["started"] == nil {
+			t.Errorf("reap event details = %+v", ev.Details)
+		}
+	}
+	if !found {
+		t.Error("no reap event")
+	}
+}

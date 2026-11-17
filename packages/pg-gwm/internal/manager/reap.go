@@ -42,6 +42,11 @@ type ReapResult struct {
 	Created   []string `json:"created"`
 	Warnings  []string `json:"warnings"`
 	Outcome   string   `json:"outcome"`
+	// Started is when the reap began; StepsMS holds the milliseconds each
+	// step took (drop, retry, reclaim, check, create), so a slow reap shows
+	// where the time went.
+	Started time.Time        `json:"started"`
+	StepsMS map[string]int64 `json:"steps_ms"`
 }
 
 func (r *ReapResult) normalize() {
@@ -49,6 +54,9 @@ func (r *ReapResult) normalize() {
 		if *p == nil {
 			*p = []string{}
 		}
+	}
+	if r.StepsMS == nil {
+		r.StepsMS = map[string]int64{}
 	}
 }
 
@@ -87,8 +95,38 @@ func (r *reaper) fail(format string, args ...any) {
 	r.warn(format, args...)
 }
 
+// timed runs f and adds its duration to the step's total.
+func (r *reaper) timed(step string, f func()) {
+	t0 := r.m.nowWall()
+	f()
+	if r.res.StepsMS == nil {
+		r.res.StepsMS = map[string]int64{}
+	}
+	r.res.StepsMS[step] += r.m.nowWall().Sub(t0).Milliseconds()
+}
+
+// poolFull reports whether min is set and that many worktrees are ready.
+func (r *reaper) poolFull() bool {
+	min := r.m.Cfg.Min
+	if min == nil {
+		return false
+	}
+	st, err := r.m.Store.ReadUnlocked()
+	if err != nil {
+		return false
+	}
+	ready := 0
+	for _, w := range st.Worktrees {
+		if w.Status == state.Available || w.Status == state.Creating {
+			ready++
+		}
+	}
+	return ready >= *min
+}
+
 // stop reports whether the run must end: the deadline passed or the command
-// was interrupted.
+// was interrupted. Callers ask it only while work remains, so a true answer
+// for the deadline means that work was left undone.
 func (r *reaper) stop() bool {
 	if r.ctx.Err() != nil {
 		return true
@@ -122,7 +160,7 @@ func isBroken(err error) bool {
 // error with Outcome skipped. With DryRun nothing is written and no worktree
 // is touched; the result says what a run would do.
 func (m *Manager) Reap(ctx context.Context, o ReapOptions) (ReapResult, error) {
-	r := &reaper{m: m, ctx: ctx, o: o, res: ReapResult{Repo: m.Repo.Main, Outcome: ReapCompleted}}
+	r := &reaper{m: m, ctx: ctx, o: o, res: ReapResult{Repo: m.Repo.Main, Outcome: ReapCompleted, Started: m.nowWall().UTC()}}
 	res, err := r.run()
 	res.normalize()
 	return res, err
@@ -178,11 +216,11 @@ func (r *reaper) run() (ReapResult, error) {
 		r.fail("%v", err)
 		return r.finish(), nil
 	}
-	r.dropMissing()
-	r.retryBroken()
-	r.reclaimAll()
-	r.checkAvailable()
-	r.standbys()
+	r.timed("drop", r.dropMissing)
+	r.timed("retry", r.retryBroken)
+	r.timed("reclaim", r.reclaimAll)
+	r.timed("check", r.checkAvailable)
+	r.timed("create", r.standbys)
 
 	if after, err := m.Store.ReadUnlocked(); err == nil {
 		for _, p := range after.Preserved {
@@ -232,6 +270,7 @@ func (r *reaper) record() {
 		Details: map[string]any{
 			"removed": len(res.Removed), "kept": len(res.Kept), "preserved": len(res.Preserved),
 			"broken": len(res.Broken), "created": len(res.Created), "warnings": res.Warnings,
+			"started": res.Started, "steps_ms": res.StepsMS,
 		},
 	})
 	if m.Counters.Path != "" {
@@ -669,6 +708,9 @@ func (r *reaper) standbys() {
 		return
 	}
 	for {
+		if r.poolFull() {
+			return // done: a deadline that passed during the last create is not late
+		}
 		if r.stop() {
 			return
 		}
