@@ -205,3 +205,44 @@ stub_pmset() {
   [ -e "$TEST_DIR/area/victim" ]
   [ "$(jq -r .reason <<<"$output")" = battery ]
 }
+
+@test "auto skips at once while a live run holds the lock, and leaves the lock alone" {
+  mkdir -p "$PGDR_AUTO_LOCK_DIR"
+  sleep 60 &
+  local holder=$!
+  echo "$holder" >"$PGDR_AUTO_LOCK_DIR/pid"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  kill "$holder"
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_DIR/area/victim" ]
+  [ "$(jq -r .reason <<<"$output")" = locked ]
+  [ -d "$PGDR_AUTO_LOCK_DIR" ]
+}
+
+@test "auto takes over a stale lock and releases it when the run ends" {
+  mkdir -p "$PGDR_AUTO_LOCK_DIR"
+  sleep 0 &
+  local gone=$!
+  wait "$gone"
+  echo "$gone" >"$PGDR_AUTO_LOCK_DIR/pid"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_DIR/area/victim" ]
+  [ ! -e "$PGDR_AUTO_LOCK_DIR" ]
+}
+
+@test "auto bounds each remove command: a hung item is killed and the run goes on" {
+  jq -n --arg path "$TEST_DIR/area" --arg v "$TEST_DIR/area/victim" '[
+    {id: "slow", description: "hangs", path: $path, displayCommand: "true", sizeCommand: "echo 1",
+     variants: [{aggressiveness: 1, variantDescription: "v", dryRunCommand: "echo dry",
+                 removeCommand: "sleep 30"}]},
+    {id: "a", description: "auto item", path: $path, displayCommand: "true", sizeCommand: "echo 1",
+     variants: [{aggressiveness: 1, variantDescription: "v", dryRunCommand: "echo dry",
+                 removeCommand: ("rm -f " + $v)}]}]' \
+    >"$HOME/.config/pg-disk-reclaimer/registry.json"
+  PGDR_AUTO_ITEM_TIMEOUT_SECONDS=1 PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  [ ! -e "$TEST_DIR/area/victim" ]
+  [ "$(jq -r '[.items[]|select(.id=="slow")|.outcome][0]' <<<"$output")" = failed ]
+  [[ $stderr == *"timed out after 1s"* ]]
+  [ "$(jq -r .duration_s <<<"$output" | cut -d. -f1)" -lt 20 ]
+}

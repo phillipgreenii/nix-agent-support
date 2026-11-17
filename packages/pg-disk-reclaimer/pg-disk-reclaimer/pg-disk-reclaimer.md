@@ -59,6 +59,10 @@
 
 `pg-disk-reclaimer auto --apply --ignore-power`
 
+- Scheduled mode never overlaps itself and is bounded: a second `auto` run exits 0 at once (JSON line with `skipped` true and `reason` locked) while a live run holds the lock (`$XDG_STATE_HOME/pg-disk-reclaimer/auto.lock`, override `PGDR_AUTO_LOCK_DIR`), and each item's remove command is killed after `PGDR_AUTO_ITEM_TIMEOUT_SECONDS` (default 1800; 0 disables) and recorded as failed:
+
+`PGDR_AUTO_ITEM_TIMEOUT_SECONDS={{1800}} pg-disk-reclaimer auto --apply`
+
 - Go build cache helpers for registry commands: remove the entries Go's own trim rule would (name ends `-a` or `-d`, unused for N days plus an hour), or wipe the cache with the packaged go (exit 75, skipped, while a go or golangci-lint process runs):
 
 `pg-disk-reclaimer go-cache-trim --cache {{path/to/go-build}} --older-than-days {{3}} --dry-run`

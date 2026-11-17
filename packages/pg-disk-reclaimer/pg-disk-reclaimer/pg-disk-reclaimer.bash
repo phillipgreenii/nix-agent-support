@@ -1480,7 +1480,17 @@ cmd_reclaim() {
     rm_status=0
     m_free0=$(pgdr_metric_free_kb)
     m_t0=$(pgdr_now_us)
-    (eval "${r_remove[i]}") </dev/null || rm_status=$?
+    if [[ ${PGDR_ITEM_TIMEOUT_SECONDS:-0} =~ ^[1-9][0-9]*$ ]]; then
+      # Bounded (scheduled `auto` runs): a bash child under `timeout`, which
+      # kills the command's whole process group, so a hung registry command
+      # cannot hold the run (and the launchd job) for hours.
+      timeout -k 30 "$PGDR_ITEM_TIMEOUT_SECONDS" bash -c "${r_remove[i]}" </dev/null || rm_status=$?
+      if [[ $rm_status -eq 124 || $rm_status -eq 137 ]]; then
+        echo "pg-disk-reclaimer: remove command for '$id' timed out after ${PGDR_ITEM_TIMEOUT_SECONDS}s" >&2
+      fi
+    else
+      (eval "${r_remove[i]}") </dev/null || rm_status=$?
+    fi
     m_t1=$(pgdr_now_us)
     m_free1=$(pgdr_metric_free_kb)
     m_freed=$(pgdr_freed_bytes "$m_free0" "$m_free1")
@@ -1535,6 +1545,12 @@ cmd_reclaim() {
 : "${PGDR_AUTO_LEVEL3_BELOW_GB:=30}"
 : "${PGDR_AUTO_MAX_LEVEL:=3}"
 : "${PGDR_AUTO_VOLUME:=/System/Volumes/Data}"
+# Wall-clock ceiling (seconds) on each item's remove command in an `auto
+# --apply` run, so one hung or very slow item (a git scan over a huge monorepo
+# took up to 6254 s) cannot hold the whole run for hours. 0 disables it.
+: "${PGDR_AUTO_ITEM_TIMEOUT_SECONDS:=1800}"
+# Lock directory: a second `auto` run exits at once while a live one holds it.
+: "${PGDR_AUTO_LOCK_DIR:=${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/pg-disk-reclaimer/auto.lock}"
 
 # pgdr_auto_level_for_free_kb <free-kb> <below1-gb> <below2-gb> <below3-gb>:
 # pure threshold-to-level selection. Prints 1, 2 or 3, or "none" when free
@@ -1597,6 +1613,32 @@ pgdr_auto_log() {
   printf '%s\n' "$1"
 }
 
+# pgdr_auto_lock_acquire: takes the run lock (an atomic mkdir holding the
+# owner's pid). Returns 1 when a live process holds it; a lock whose pid is
+# gone is stale and is taken over.
+pgdr_auto_lock_acquire() {
+  local dir="$PGDR_AUTO_LOCK_DIR" owner
+  mkdir -p "$(dirname "$dir")" 2>/dev/null || return 0
+  if mkdir "$dir" 2>/dev/null; then
+    printf '%s\n' "$$" >"$dir/pid"
+    return 0
+  fi
+  owner=$(cat "$dir/pid" 2>/dev/null || true)
+  if [[ $owner =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+    return 1
+  fi
+  rm -rf "$dir"
+  if mkdir "$dir" 2>/dev/null; then
+    printf '%s\n' "$$" >"$dir/pid"
+    return 0
+  fi
+  return 1
+}
+
+pgdr_auto_lock_release() {
+  rm -rf "$PGDR_AUTO_LOCK_DIR" 2>/dev/null || true
+}
+
 # cmd_auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N]
 #          [--below3-gb N] [--max-level N] [--ignore-power]
 # On battery power the run is skipped (exit 0, one JSON line with skipped=true
@@ -1625,7 +1667,15 @@ cmd_auto() {
   PGDR_AUTO_T0=$(pgdr_now_us)
 
   local status=0
-  pgdr_auto_main "$@" || status=$?
+  if pgdr_auto_lock_acquire; then
+    PGDR_ITEM_TIMEOUT_SECONDS="$PGDR_AUTO_ITEM_TIMEOUT_SECONDS"
+    pgdr_auto_main "$@" || status=$?
+    PGDR_ITEM_TIMEOUT_SECONDS=0
+    pgdr_auto_lock_release
+  else
+    pgdr_auto_log "$(jq -cn '{ts: (now | todate), level: "INFO",
+      msg: "another auto run is still running, skipping this run", skipped: true, reason: "locked"}')"
+  fi
 
   PGDR_METRICS_DEFER=0
   if [[ -n $PGDR_AUTO_OUTCOME ]]; then

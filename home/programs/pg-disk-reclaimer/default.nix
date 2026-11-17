@@ -261,7 +261,9 @@ in
           Highest aggressiveness the scheduled run may use (passed as
           `--max-level`). Free space that selects a higher level runs this level
           instead; the alert still keys on the lowest threshold. 1 keeps the run
-          to the fast items.
+          to the fast items. The scheduled run never overlaps itself (a lock) and
+          kills any item's remove command after 30 minutes; a consumer that sets
+          this below 3 SHOULD record the ruling that chose it beside the setting.
         '';
       };
 
