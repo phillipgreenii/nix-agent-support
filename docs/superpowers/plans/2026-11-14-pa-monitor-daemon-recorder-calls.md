@@ -1,21 +1,27 @@
-Status: DRAFT pending the operator decisions
+# Plan: bounded, batched discovery reads for pa-monitor-daemon
 
-# Plan: one periodic discovery snapshot for pa-monitor-daemon
-
-Status: DRAFT for operator review (2026-11-10). Written by a planning subagent from a read-only review; not yet critiqued or approved.
+Status: APPROVED DIRECTION. The operator answered the open questions on 2026-11-17 (Phillip); the answers are folded into the body below and listed in "Operator rulings". Drafted 2026-11-10 by a planning subagent from a read-only review, then amended after an independent critique and the operator answers.
 Tags: [V] verified from source by the planner, [I] inferred. Paths are under /Volumes/gitrepos/phillipg/nix-agent-support/packages.
 
-## AMENDMENTS after independent critique (2026-11-10) — these OVERRIDE the sections below
+Operator constraints (Phillip, 2026-11-10): fetch only what the tool needs; query a batch periodically instead of ad hoc N+1; state the time context of every request.
 
-1. DO NOT SHRINK GC `keepIDs` (the draft would lose history). `keepIDs` today is every session the recorder knows (alive or dead, dead capped at 500: daemon/gc.go:107-117, recorderfacts/facts.go:26,126); `MarkSessionsDeleted(keepIDs)` soft-deletes every pa-monitor row NOT in it and a hard delete follows 24 h later (gc.go:42-56). So slice 1 must not drop the dead read from the GC path, and "24 h" is the hard-delete grace, not a keep window. GC keeps reading the full known-id set (or a recorder-side "known ids" answer), never the discovery snapshot, and never acts on a `Stale` or `degraded` snapshot. [critique, verified at file:line]
-2. Drop the new op name `sessions.snapshot` for pa-monitor. Extend `process.list` instead: add `if_seq` and `ended_since` to ProcessFilter, plus an opt-in `detail:"registry"` adding kind, entrypoint, waiting_for, status_updated_at; response `{processes, degraded, seq, unchanged}` with no processes when unchanged. Per-id facts for ccpool are a separate op (`sessions.facts`, see the ccpool plan). Add capability detection from hello with a fallback to the old calls so a new pa-monitor still works on an older recorder; update the capability-list tests (serve/daemon_integration_test.go:491, client/contract_integration_test.go:31), cancel_ops_test.go (19-39), and README.md (process.list at lines 633, 661). No protocol-version bump is needed (wire.ProtocolVersion=1 is additive).
-3. `entrypoint` is a records column (`store:"record:entrypoint_id"`), not necessarily a `fields` row, so the extended registry query must join entrypoint_id; kind and status_updated_at are stored fields [verified, source/sessionregistry/registry.go:20-41].
-4. The "unchanged when nothing committed" claim needs care: ModelInputSeq moves on every committed session-registry record, every history or control-end record, every TProc/TStage/TSettle/TTorn journal record and every row-clearing write (parser.go:1057-1059, 787; store.go:773-783, 1170-1179), and each miss re-reads EVERY registry version ever stored (registryQuery, engine.go:129-135, no time bound). Measured on a clone of the live store: 17,005 registry versions for 885 processes took 1.83 s to read, and only 166 arrived in the last hour. The recorder must bound `registryQuery` (live and recently ended processes only) or load incrementally; without that, batching three client calls into one does not remove the reload cost. This recorder change is part of the plan (new slice R, ahead of the op change).
+## Operator rulings (Phillip, 2026-11-17)
+
+These override anything older in this plan.
+
+- **Recorder owns derived reads.** "the recorder owns the derived reads": there is NO client-side copy of recorder state in pa-monitor (no `SnapshotSource`, no in-app discovery snapshot, no heartbeat or back-off machinery). The recorder answers a cheap, bounded, cached read; pa-monitor asks it once per Scan.
+- **Offline is shown immediately.** When the recorder is offline, pa-monitor MUST publish the existing Offline state at once; there is no 60 s stale-serving window.
+- **No long-lived-refresher question.** The ccpool refresher question is moot (see the ccpool plan); it does not affect this plan.
+
+## Amendments from the independent critique (still in force)
+
+1. GC `keepIDs` MUST NOT shrink. `keepIDs` today is every session the recorder knows (alive or dead, dead capped at 500: daemon/gc.go:107-117, recorderfacts/facts.go:26,126); `MarkSessionsDeleted(keepIDs)` soft-deletes every pa-monitor row NOT in it and a hard delete follows 24 h later (gc.go:42-56). GC keeps reading the full known-id set (ids only, a cheap form of the extended `process.list`) and MUST NOT act on a `degraded` answer or on an error. [critique, verified at file:line]
+2. No new op for the live-session list. Extend `process.list`: add `if_seq` and `ended_since` to ProcessFilter, plus an opt-in `detail:"registry"` adding kind, entrypoint, waiting_for, status_updated_at; the response is `{processes, degraded, seq, unchanged}` with no processes when unchanged. Per-id facts for ccpool are a separate op (`sessions.facts`, see the ccpool plan). Capability detection from hello with a fallback to the old calls, so a new pa-monitor still works on an older recorder; update the capability-list tests (serve/daemon_integration_test.go:491, client/contract_integration_test.go:31), cancel_ops_test.go (19-39) and README.md (process.list at lines 633, 661). No protocol-version bump (wire.ProtocolVersion=1 is additive).
+3. `entrypoint` is a records column (`store:"record:entrypoint_id"`), not necessarily a `fields` row, so the extended registry query MUST join entrypoint_id; kind and status_updated_at are stored fields [verified, source/sessionregistry/registry.go:20-41].
+4. "Unchanged when nothing committed" needs care: ModelInputSeq moves on every committed session-registry record, every history or control-end record, every TProc/TStage/TSettle/TTorn journal record and every row-clearing write (parser.go:1057-1059, 787; store.go:773-783, 1170-1179), and each miss re-reads EVERY registry version ever stored (registryQuery, engine.go:129-135, no time bound). Measured on a clone of the live store: 17,005 registry versions for 885 processes took 1.83 s to read, and only 166 arrived in the last hour. The recorder MUST bound `registryQuery` (live and recently ended processes only) or load incrementally; without that, batching three client calls into one does not remove the reload cost. This recorder change is slice R, ahead of the op change.
 5. The file inventory is NOT the current source of load. A recorder doc of 2026-11-09 (docs/investigations/2026-11-09-op-query-slow-and-cancelled.md) names the FilesInventory bootstrap as dominant, but the live log shows that group-by shape stopped on 2026-11-09 at about 15:00 EST after commit 1aa480161 (files.inventory: 7 requests, 0.9 s total since the restart), while the registry-in-list query kept running (565 slow requests, mean 14.9 s, to 2026-11-10 15:00). Still add the bootstrap-convergence check (keep partial progress, bound the window) as a small slice, because the doc describes a failure that can return.
-6. Best first slice (replaces the draft's slice 1): add an id restriction (live ids only) and a time floor to the 5000-row records query, and fix nothing in GC. Then the periodic refresh at the 5 s floor.
-7. State explicitly: control and nudge actions resolve their target live; a `degraded` snapshot never drives GC or deletion.
-
-Operator constraints (Phillip, 2026-11-10): fetch only what the tool needs; query a batch periodically instead of ad hoc N+1; querying every 5 to 10 seconds (or longer) and answering sub-queries from an in-app snapshot is preferred; state the time context of every request.
+6. Best first slice: add an id restriction (live ids only) and a time floor to the 5000-row records query, and fix nothing in GC.
+7. Control and nudge actions resolve their target live; a `degraded` answer never drives GC or deletion.
 
 ## 1. Current state (per Scan)
 
@@ -35,29 +41,34 @@ Other facts [V]: Discover has a 20 s timeout and an error fails the whole Scan (
 
 ## 2. Target design
 
-One `discoverySnapshot` owned by a new `recorderfacts.SnapshotSource`, built by one batch request and published as an immutable struct through an atomic pointer.
+Pattern: the recorder is the single owner of derived discovery state (a server-side cached read model, keyed on ModelInputSeq); pa-monitor is a stateless client of it. Discovery is a Query Object with a conditional-read token (`if_seq`), not a replicated cache.
 
-Contents: Sessions (PID, SessionID, Cwd, Name, Status, StartedAt, Kind, Entrypoint, WaitingFor, StatusUpdatedAt, PidAlive, Host), FetchedAt, Seq, Err, Stale, Age. Time context: live-now only plus a short bounded "recently ended" tail.
+```mermaid
+sequenceDiagram
+    participant S as Scan (pa-monitor)
+    participant R as recorder process.list
+    S->>R: process.list(detail=registry, if_seq=N, ended_since=floor)
+    alt model unchanged
+        R-->>S: unchanged=true, seq=N (no processes)
+        S->>S: reuse the previous Scan's sessions
+    else model changed
+        R-->>S: processes, seq=M, degraded
+    end
+    Note over S,R: recorder offline: Scan publishes Offline immediately
+```
 
-Refresh: a background goroutine every `discovery_interval` (default 5 s, configurable, floor 5 s, reusing MinPollInterval at facts.go:19), outside Scan so a slow recorder cannot stall Scan. Scan, GC, the CLI and the tree builder read the pointer. Single flight; the fetch timeout is 10 s, below the 20 s discoverTimeout, so a hung request cannot hold one of the recorder's 8 query connections for long.
+- One request per Scan replaces the two `process.list` calls and the 5000-row registry query. The request states its time context: live now plus processes ended since `ended_since` (a bounded tail, default 24 h to match GC), never "all history".
+- The conditional token carries the only client-side state: the previous `seq` and the previous answer's session list held only while the recorder keeps answering `unchanged` for that same `seq`, and replaced or dropped on any changed, degraded or failed answer, so an `unchanged` answer is reused. This is the response to an `if_seq` the recorder issued, not an independent cache; a failed or `degraded` answer is never reused.
+- Errors: a failed request fails the Scan exactly as today (monitor.go:111-114); `ErrDaemonOffline` publishes the Offline state immediately. There is no stale-serving period, no back-off and no heartbeat.
+- A `degraded` answer (the recorder is still backfilling) MUST NOT drive GC, deletion or a "session ended" decision; the Scan treats it as a read that carries no negatives.
+- Stays event-driven: FeedPage drain, readLines by offset, FilesInventory. The Scan fold phase still runs every tick.
+- Cadence is unchanged (max(RefreshInterval, 5 s)). Because an unchanged answer is tiny and the recorder serves it from the cached model, no separate refresh interval is added.
 
-Replaced: both process.list calls and the registry-in-list query become one `sessions.snapshot` call (section 3). Dead processes are no longer read; a session alive in the previous snapshot and absent or dead now is carried forward as PidAlive=false with its last-known fields, for 24 h to match GC. A daemon that restarts mid-death loses only the dead flag of a session that died while it was down; one `alive=false` read at startup is the fallback.
+## 3. Recorder-side requirements
 
-Stays event-driven: FeedPage drain, readLines by offset, FilesInventory. The Scan fold phase still runs every tick.
+Extend the existing `process.list` (served from Engine.loadCtx, free when the model is unchanged). No new op name; a different op already named `snapshot` (feed state at a cursor, daemon.go:582) exists and MUST NOT be reused.
 
-Gate: refetch when (a) the feed shows a registry change (a second small feed cursor with where source=session-registry; do NOT add registry to the transcript drain, it would create bogus fileState entries [V: reader.go:300-330]), (b) the slow heartbeat expired (default 60 s), or (c) the previous fetch failed. With the new op the gate is built in: the request carries `if_seq` and the answer is `{unchanged:true}` when ModelInputSeq has not moved.
-
-Caveat [I]: registry status flips count as registry changes, so on an active machine the gate fires most periods. The real saving is one call instead of three plus the cheap unchanged answer.
-
-Errors: keep the last good snapshot, set Stale and Err, back off to 2x the interval (max 30 s) with jitter. Scan never fails because of discovery. On ErrDaemonOffline serve the last snapshot for `max_stale` (proposed 60 s) then publish the existing Offline state. Cold start with no snapshot returns ErrDaemonOffline as today.
-
-Maximum staleness in the healthy case: discovery_interval plus a Scan tick, about 10 s at defaults; during failure, `max_stale`, then Offline.
-
-## 3. Recorder-side requirements (SHARED with ccpool: op name `sessions.snapshot`)
-
-New op `sessions.snapshot`, KindQuery, registered next to process.list in serve/daemon.go:587, served from Engine.loadCtx (free when the model is unchanged).
-
-Request:
+Request additions to ProcessFilter:
 
 ```json
 {
@@ -65,21 +76,20 @@ Request:
   "ended_since": "RFC3339",
   "limit": 1000,
   "if_seq": 12345,
-  "fields": ["registry_extra", "host", "control_inbox"]
+  "detail": "registry"
 }
 ```
 
-(`alive` is true, false or null for both; `ended_since` omitted means no dead tail; `if_seq` comes from the previous answer; `fields` is opt-in.)
+(`alive` is true, false or null for both; `ended_since` omitted means no dead tail, except that the GC form below returns dead rows; `if_seq` comes from the previous answer; `detail` is opt-in and absent keeps today's shape.)
 
-Response:
+Response when `detail` is `registry`:
 
 ```json
 {
   "seq": 12345,
-  "as_of": "...",
   "unchanged": false,
   "degraded": false,
-  "sessions": [
+  "processes": [
     {
       "pid": 0,
       "proc_start": "",
@@ -90,7 +100,6 @@ Response:
       "started_at": 0,
       "alive": true,
       "host": "",
-      "control_inbox": "",
       "kind": "",
       "entrypoint": "",
       "waiting_for": "",
@@ -102,49 +111,46 @@ Response:
 }
 ```
 
-Recorder changes: extend registryQuery (engine.go:129) and regRow (engine.go:79) with kind, entrypoint, status_updated_at (the source struct already stores entrypoint and statusUpdatedAt [V: source/sessionregistry/registry.go:32,41]; kind is [I] a stored field and must be checked); add the new fields to the Process result only for this op (do not change process.list or process.show shapes); return `degraded` when !d.backfillDone as opProcessList does; add the op to the cancel-ops audit (cancel_ops_test.go); add Client.SessionsSnapshot in client/lifecycle.go. A different op already named `snapshot` (feed state at a cursor, daemon.go:582) exists; do not reuse that name.
+Recorder changes:
+
+- Bound `registryQuery` (engine.go:129) to live and recently ended processes, or load incrementally (slice R; amendment 4).
+- Extend registryQuery and regRow (engine.go:79) with kind, entrypoint (joined from `entrypoint_id`) and status_updated_at; kind is [I] a stored field and MUST be verified. The new fields appear only when `detail` is `registry`; the default `process.list` and `process.show` shapes do not change.
+- Return `degraded` while `!d.backfillDone`, as opProcessList does today.
+- Cancel-ops audit entry, capability and README updates (amendment 2); `Client.ProcessList` gains the new request fields in client/lifecycle.go.
 
 ## 4. Call-site changes
 
-- recorderfacts/facts.go:116-195 `Registrations`: a thin reader of the snapshot; the fetch moves to SnapshotSource.refresh; delete the `done` map loop, registryExtra and the 5000-row query once slice 3 lands.
-- facts.go:122,126: slice 1 keeps only the alive call; the dead call runs once at startup and when the snapshot is empty.
-- facts.go:156-166: slice 1 restricts ids to live sessions and adds a time floor of now - 24 h (bounded interim).
-- core/session/discovery.go:51-70 `Discover`: reads the snapshot; the 20 s timeout moves to the fetch; env reads stay, cached per (sid, pid) [I].
-- core/corpus/monitor.go:111: Discover errors become impossible once a snapshot exists; Stale becomes a metric label.
-- daemon/gc.go:115 `keepIDs`: reads the snapshot including the carried-forward tail and keeps all rows when Stale (preserves "offline keeps every row" [V: gc.go:~36]).
-- core/corpus/reader.go:300: unchanged (add the registry cursor drain only if slice 2 ships on the old recorder).
-- config/config.go:21,166: add discovery_interval_ms (floor 5000), discovery_heartbeat_ms, discovery_max_stale_ms.
+- recorderfacts/facts.go:116-195 `Registrations`: one `process.list` call with `detail=registry` and `if_seq`; delete the `done` map loop, registryExtra and the 5000-row records query once slice 4 lands (removal is slice 5).
+- facts.go:122,126: the per-Scan dead read is replaced by `ended_since`; slice 1 keeps only the alive call on an old recorder.
+- facts.go:156-166: slice 1 restricts ids to live sessions and adds a time floor of now minus 24 h (bounded interim for an old recorder).
+- core/session/discovery.go:51-70 `Discover`: reads the one answer; env reads stay, cached per (sid, pid) [I].
+- core/corpus/monitor.go:111: unchanged error handling (an error fails the Scan; Offline is published immediately).
+- daemon/gc.go:115 `keepIDs`: reads the full known-id set with an explicit request: `alive:null`, no `detail`, `limit` covering the live set plus the 500-row dead cap (today's 1000 live plus 500 dead), so the dead rows up to the cap are returned and the set does not shrink; a degraded or failed answer skips this GC pass entirely.
+- core/corpus/reader.go:300: unchanged.
+- Capability detection from hello selects the extended `process.list` or the slice 1 fallback (amendment 2).
 
 ## 5. Slices (sizes S/M/L/XL)
 
 All tests use a real recorder with a recording proxy; base: the recordingProxy helper at recorderfacts/sessions_test.go:126 and the corpustest.Env harness.
 
-1. S: stop re-reading dead and old data (old recorder; lands first). Drop the per-Scan dead read, restrict registry ids to live, add a 24 h floor, carry dead state forward in memory. Tests: per Scan exactly 1 process.list (alive) and 1 records query, the `session IN` set holds only live ids, a session dying mid-run still persists as dead with its DB row unchanged, startup does one dead read.
-2. M: periodic snapshot source (old recorder; lands second). Background refresh with floor, single flight, last-good snapshot, Stale and Err, backoff, max_stale to Offline; Scan, GC and CLI read memory; registry-cursor gate and heartbeat. Tests: discovery requests do not scale with Scan count (10 Scans in 1 s produce at most 1 fetch); fault tests (delayed or dropped proxy leaves Scan succeeding with Stale=true; recorder stopped and restarted gives Offline after max_stale then recovery; a 20 s hang does not stall Scan).
-3. L: recorder op `sessions.snapshot` (needs a recorder change). Add the op, the extended registryQuery, the client method and the if_seq path; switch pa-monitor and delete the records query. Recorder tests: new fields from the newest version, unchanged when nothing committed, degraded while backfilling, cancel-op audit, the huge-session case does not scan. pa-monitor tests: per refresh exactly 1 `sessions.snapshot`, 0 `query`, 0 `process.list`; an equivalence test against the old three-call answer before deleting old code.
-4. S: staleness surfacing. Metrics snapshot_age_seconds, snapshot_stale, discovery_errors_total and tree health; test: age rises while the proxy blocks and resets on recovery.
+1. S: stop re-reading dead and old data (old recorder; lands first). Drop the per-Scan dead read, restrict registry ids to live, add a 24 h floor. Tests: per Scan exactly 1 `process.list` (alive) and 1 records query, the `session IN` set holds only live ids, a session dying mid-run still persists as dead with its DB row unchanged, GC still sees the full known-id set.
+2. S: bootstrap-convergence check for FilesInventory (keep partial progress, bound the window). Test: an interrupted bootstrap resumes from its partial progress.
+3. M, recorder: slice R, bound `registryQuery` (live and recently ended only, or incremental). Tests: a store with many old registry versions reads in time proportional to the live set; results equal the unbounded query for live processes.
+4. L, recorder: extended `process.list` (`if_seq`, `ended_since`, `detail=registry`). Recorder tests: new fields from the newest version including entrypoint from the records column, `unchanged` when nothing committed, `degraded` while backfilling, cancel-op audit, capability lists, README. pa-monitor tests: per Scan exactly 1 `process.list`, 0 `query`; an equivalence test against the old three-call answer before deleting old code; capability fallback to slice 1 on an older recorder.
 5. S: cleanup. Remove registryExtra, the dead Registrations path and the old tests.
 
-Order: 1 and 2 land first against the existing recorder; 3 is the only slice needing a recorder change and needs the ccpool plan reconciled on the shared shape; 4 and 5 follow 3.
+Order: 1 and 2 land first against the existing recorder; 3 then 4 need recorder changes and follow the serial plumbing order in the usage plan (R, usage op, extended `process.list`, then `sessions.facts`); 5 follows 4.
 
 ## 6. Post-apply verification
 
-- Recorder log, client pa-monitor-daemon, requests per minute by op. Before: about 12 Scans per minute x 3 discovery calls plus the feed. After: at most 60 / discovery_interval refreshes per minute (12 at 5 s, fewer when gated), 1 request each.
+- Recorder log, client pa-monitor-daemon, requests per minute by op. Before: about 12 Scans per minute x 3 discovery calls plus the feed. After: 1 `process.list` per Scan, mostly `unchanged`.
 - No slow_request lines for the records-by-session query; no discoverTimeout cancellations; no wait_ms over 1 s with exec_ms 0.
-- Kill a test claude and see it dead within 10 s; snapshot_age_seconds under 2x the interval; snapshot_stale recorded while the recorder is stopped and the Offline state after 60 s; dead sessions in the DB at startup unchanged.
+- Kill a test claude and see it dead on the next Scan; stop the recorder and see the Offline state on the next Scan (no stale window); dead sessions in the DB at startup unchanged.
 
-## 7. Risks, where delay is not acceptable, open questions
+## 7. Risks and where delay is not acceptable
 
-Risks: dropping dead reads loses PidAlive=false for a session that dies while the daemon is down (slice 1 startup read covers it [I]); the registry gate may fire almost every period [I]; a stale snapshot may hide a just-started session for up to one interval; Kind as a stored registry field is not yet verified; GC must never soft-delete because of a stale snapshot (keep all rows when Stale).
+Risks: kind as a stored registry field is not yet verified; an `unchanged` answer on a busy machine may be rare (registry status flips move ModelInputSeq [I]), in which case the saving is one call instead of three, not zero; slice 1 on an old recorder keeps one records query per Scan until slice 4 lands.
 
-Delay NOT acceptable: control and nudge actions through pg-claude-control (resolve the target live, gate on snapshot Age and re-check one process.show before acting); GC deletion decisions (only on a fresh snapshot); the Offline state must still appear when the recorder is really down; authoritative cost and limits stay on the feed.
-
-Open questions for Phillip:
-
-1. On ErrDaemonOffline, keep serving the last snapshot for max_stale (proposed 60 s) or show Offline immediately as today?
-2. Is a 5 s default and 5 s floor right, or should a quiet machine back off to 10 s or more?
-3. Keep dead sessions in memory 24 h (GC parity) or fewer?
-4. Does ccpool need `ended_since` and `fields=registry_extra`? (To reconcile with the ccpool plan.)
-5. Is a 60 s heartbeat right when no registry change is seen?
+Delay NOT acceptable: control and nudge actions through pg-claude-control (resolve the target live and re-check one process.show before acting); GC deletion decisions (only on a complete, non-degraded answer); the Offline state when the recorder is really down (shown at once); authoritative cost and limits come from the recorder's `usage.totals` and the grouped `claude-status` `query` read (usage plan), not from a client fold.
 
 Critical files: pa-monitor/internal/recorderfacts/facts.go, pa-monitor/internal/core/session/discovery.go, pa-monitor/internal/core/corpus/monitor.go, pg-claude-code-recorder/internal/lifecycle/engine.go, pg-claude-code-recorder/internal/serve/lifecycle_ops.go.
