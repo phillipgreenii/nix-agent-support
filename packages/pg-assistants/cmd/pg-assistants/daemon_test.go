@@ -183,6 +183,30 @@ func TestDaemonCreatesPrivateStateDir(t *testing.T) {
 	})
 }
 
+// A state dir that already exists with a looser mode is made private too:
+// the events log and the status file in it are created world-readable.
+func TestDaemonMakesExistingStateDirPrivate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newDaemonFixture(t, newFakeTmux(), "")
+		if err := os.MkdirAll(f.stateDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(f.stateDir, 0o755); err != nil { // past the umask
+			t.Fatal(err)
+		}
+		if code := f.runBriefly(t); code != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr %q)", code, f.errb.String())
+		}
+		fi, err := os.Stat(f.stateDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o700 {
+			t.Errorf("state dir mode = %o, want 700", perm)
+		}
+	})
+}
+
 func TestDaemonRunsWithOneBadAssistant(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		srv := newFakeTmux()

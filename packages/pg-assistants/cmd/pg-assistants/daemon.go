@@ -96,8 +96,14 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 	}
 	p := cfg.Paths
 
-	// The state dir is private: create it 0700 before anything is opened in it.
+	// The state dir is private: create it 0700 before anything is opened in
+	// it, and make an existing one 0700 too (MkdirAll leaves its mode alone),
+	// because the events log and the status file are created world-readable.
 	if err := os.MkdirAll(p.StateDir, 0o700); err != nil {
+		fmt.Fprintf(c.stderr, "pg-assistants daemon: state dir: %v\n", err)
+		return exitcode.Error
+	}
+	if err := os.Chmod(p.StateDir, 0o700); err != nil {
 		fmt.Fprintf(c.stderr, "pg-assistants daemon: state dir: %v\n", err)
 		return exitcode.Error
 	}
