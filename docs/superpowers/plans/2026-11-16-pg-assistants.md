@@ -25,6 +25,7 @@
   - `lifecycle`: the daemon's run group, shutdown deadline (`DeadlineFlag`), watchdog and shutdown events. Each assistant loop, orphan loop, the orphan sweep and the heartbeat is a named loop (`g.Go`), so an overrun names what hung (Tasks 8 and 9).
   - `jsonllogger`: the events log (`NewLogger` over `OpenRotatingFile`, `WithService("pg-assistants")`), and `jsonllogger/jsonlloggertest` for every test that asserts on events (`jsonlloggertest.New`, `Buffer.Records`).
   - `osdirs`: the default config path of `status` and `attach` (`osdirs.ConfigDir("pg-assistants")`) and the default state dir when `config check` reports it.
+  - `tmux` and `claudetrust` (new, Task 0): the tmux client and the folder-trust writer.
   - `pprofserver`: `StartFromEnv("PG_ASSISTANTS_PPROF_ADDR", ...)` (required for a daemon with a pprof endpoint by `x`'s `CLAUDE.md`).
   - Not used: `otelsetup` (no metrics on day 1), `gitclient` / `gitfixture` / `gittest` (no git).
 - **Real-tool tests** (real tmux, the real `pg-claude-control`, the real launch chain) carry `//go:build integration` and run only in `checks.<system>.pg-assistants-integration-tests` (on demand), never in the unit gate. That check runs `go test -tags integration ./...`, sets `PG_ASSISTANTS_REQUIRE_TOOLS=1` (a test then FAILS instead of skipping when its tool is missing, the `PG_TASK_FOCUS_REQUIRE_NODE` precedent), `TMUX_TMPDIR="$TMPDIR"` and `__darwinAllowLocalNetworking = true` (as the existing tmux sandbox check does, `flake.nix:20367-20371`). Time bounds in these tests are generous (10 s): the host runs at a high load average.
@@ -54,11 +55,9 @@ packages/pg-claude-control/cmd/pg-claude-control/{main.go,send.go,main_test.go} 
 packages/pg-assistants/
   cmd/pg-assistants/{main.go,daemon.go,status.go,attach.go,exit.go,trust.go,*_test.go}
   internal/config/{config.go,windows.go,config_test.go}
-  internal/tmux/{tmux.go,tmux_test.go,tmux_integration_test.go}
   internal/control/{control.go,control_test.go,control_integration_test.go}
   internal/blocks/{blocks.go,blocks_test.go}
   internal/ladder/{ladder.go,ladder_test.go}
-  internal/trust/{trust.go,trust_test.go}
   internal/supervisor/{launch.go,status.go,exitreq.go,lastexit.go,messages.go,supervisor.go,orphans.go,*_test.go,launch_integration_test.go}
   bounded_test.go
   completions/{_pg-assistants,pg-assistants.bash}
@@ -67,9 +66,68 @@ packages/pg-assistants/
 home/programs/pg-assistants/default.nix
 tests/pg-assistants-hm-launchd.nix
 docs/adr/0128-pg-assistants-minimal-supervisor-for-permanent-assistants.md
+
+# in the x repo (github.com/phillipgreenii/x, Task 0)
+tmux/{tmux.go,tmux_test.go,tmux_integration_test.go}
+claudetrust/{claudetrust.go,claudetrust_test.go}
 ```
 
 ---
+
+### Task 0: Shared `x/tmux` and `x/claudetrust` packages (in the `x` repo)
+
+Operator ruling (Phillip, 2026-11-16, on whether to promote the tmux client and the trust writer into `x` or copy them from ccpool): "A", promote both now. ccpool's own move onto them is a separate follow-up and is NOT part of this plan.
+
+This task works in the `x` repo, so the isolation for the implementation is a workforest set spanning `x` and `nix-agent-support`. `x` has no nix test check: its gate is CI running `go vet ./...`, `go test -race ./...` and `go test -race -tags integration,contract ./...` (`x` README, "Testing"); all three MUST pass locally before the commit, with tmux on `PATH`. The CI workflow (`.github/workflows/ci.yml`) MUST have tmux available and set `X_REQUIRE_TOOLS=1`, so the tmux tests cannot pass by skipping there.
+
+**Files (x repo):**
+
+- Create: `tmux/{tmux.go,tmux_test.go,tmux_integration_test.go}`, seeded from `nix-agent-support` `packages/ccpool/internal/tmux/client.go` (header comment naming the origin), rewritten to take a `cmdrun.Runner` and a `context.Context` on every call
+- Create: `claudetrust/{claudetrust.go,claudetrust_test.go}`, from `packages/ccpool/internal/trust/` with its tests (header naming the origin)
+- Modify: `README.md` "Packages" list (one entry each, in the style of the others)
+
+**Interfaces:**
+
+- Produces (package `tmux`):
+
+```go
+type Client struct {
+    Bin    string // absolute path to tmux
+    Socket string // -L socket name
+    Conf   string // passed as -f; empty means -f /dev/null
+    Run    cmdrun.Runner
+}
+type SessionState struct{ Exists, Dead bool } // Dead: the pane's process has exited
+type DeadInfo struct {
+    Status, Signal int    // #{pane_dead_status}, #{pane_dead_signal}
+    Tail           string // capture-pane -p -S -<n>
+}
+// WriteConf writes Conf holding exactly the given lines (mode 0600).
+func (c Client) WriteConf(lines ...string) error
+func (c Client) NewSession(ctx context.Context, name, cwd string, env, argv []string) error
+func (c Client) State(ctx context.Context, name string) (SessionState, error)
+func (c Client) PanePID(ctx context.Context, name string) (int, error)
+func (c Client) Dead(ctx context.Context, name string, tailLines int) (DeadInfo, error) // only for a dead pane
+func (c Client) List(ctx context.Context) ([]string, error)                            // session names
+func (c Client) Kill(ctx context.Context, name string) error                           // nil when already gone
+```
+
+- Every call is `tmux -L <Socket> -f <Conf> ...` with `Call.Timeout` 10 s; targets use `=<name>`. `NewSession` runs `new-session -d -s <name> -c <cwd> -e K=V... -- <argv...>` with env in the given order. `State` runs `has-session -t =<name>` first and only then `display-message -p -t =<name> '#{pane_dead}'`, with the reason in a comment (display falls back to another session when the target is gone). "no server running", "error connecting to" (a stale socket) and "can't find session" mean `Exists: false` (and an empty `List`), not an error. A cancelled `ctx` returns `ctx.Err()` wrapped. The API is a starting set: methods ccpool needs later (send-keys, paste, capture) are added by the ccpool follow-up, not here.
+- Produces (package `claudetrust`): `IsTrusted(path, cwd string) (bool, error)` and `Ensure(path string, cwds ...string) error` over a `.claude.json` file (merge-only on `.projects[<cwd>].hasTrustDialogAccepted`, keeps every other key, atomic write).
+
+- [ ] **Step 1: Write the failing tests:**
+  - `tmux_test.go` (`cmdruntest.Fake`): `TestNewSessionArgv` (exact argv including `-L <socket> -f <conf>`, env order kept, `--` before argv); `TestEmptyConfIsDevNull`; `TestStateChecksHasSessionFirst`; `TestStatePaneDead` (`1` gives `{true,true}`); `TestStateNoServer` (both no-server messages); `TestDeadReadsStatusAndTail`; `TestListNoServerIsEmpty`; `TestKillWhenGone`; `TestCancelledContext` (scripted `CtxErr: context.Canceled`); `TestCallsBounded` (`cmdruntest.AssertCallsBounded`).
+  - `tmux_integration_test.go` (`//go:build integration`, real tmux, socket `x-tmux-test-<random>`, `WriteConf("set -g remain-on-exit on")` into `t.TempDir()`, `TMUX_TMPDIR` set to a temp dir, server killed in `t.Cleanup`; fails rather than skips when tmux is missing and `X_REQUIRE_TOOLS=1`):
+    - `TestRealLifecycle`: start `sh -c 'echo $$ > <dir>/pid; echo "$X" > <dir>/x; exec sleep 30'` with env `X=1`; `State == {true,false}`, `PanePID` equals the pid in `<dir>/pid`, `<dir>/x` holds `1`; `Kill`; `State.Exists == false`.
+    - `TestRealExitLeavesDeadPane`: start `sh -c 'echo boom >&2; exit 3'`; within 10 s `State == {true,true}`; `Dead` gives status 3 and a tail containing `boom`; a same-name `NewSession` fails; after `Kill` it succeeds.
+    - `TestRealStateMissingWithAnotherAlive`: with `example-b` alive, `State("example-a").Exists == false`.
+    - `TestRealExactMatchNotPrefix`: with only `example-ab` alive, `State("example-a").Exists == false` and `Kill("example-a")` leaves `example-ab` running.
+    - `TestRealList`: two sessions listed; after the server is killed, an empty list and no error.
+  - `claudetrust_test.go`: ccpool's trust tests, plus `TestEnsureKeepsOtherKeys`, `TestEnsureManyCwds` and `TestIsTrustedMissingFile`.
+- [ ] **Step 2: Run** `nice -n 10 go test -p 4 -race ./tmux/ ./claudetrust/` and `nice -n 10 go test -p 4 -race -tags integration ./tmux/`. Expected: FAIL.
+- [ ] **Step 3: Implement** both packages and the README entries.
+- [ ] **Step 4: Run** both again, then `nix fmt` and the `x` pre-commit hooks on the changed files. Expected: PASS.
+- [ ] **Step 5: Commit** in `x` `tmux, claudetrust: shared tmux client and Claude folder-trust writer`, and land it in `x` (`integrate-branch`) before Task 3 pins it.
 
 ### Task 1: `usage` verb in the pg-claude-control mod
 
@@ -123,7 +181,7 @@ docs/adr/0128-pg-assistants-minimal-supervisor-for-permanent-assistants.md
 - Modify: `flake.nix`: overlay entry beside `pg-keep-awake` (:415-417); `simpleGoLintModules` (:2102); `pg-assistants-go-tests` (`mkGoTest`) beside `pg-keep-awake-go-tests` (:8021-8026); `packages` re-export (:21862)
 - Modify: `scripts/check-identifier-allowlist.sh`: a `MODULES` row with scope `wide` and a `kind:go` canary (as the pg-claude-control row has); create `scripts/identifier-allowlists/pg-assistants.txt`
 
-Module path `github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants`; `go 1.26.8` (matching the other modules, or `scripts/check-go-deps-wired.sh` fails); `x` pinned at or above `v0.0.0-20261114222359-65f23cfd8d2d` (the first version with `jsonllogger.OpenRotatingFile`, already used by pa-monitor and the recorder); `update-deps.sh` is executable. `default.nix` mirrors `packages/pg-keep-awake/default.nix` (Pattern A, `subPackages = ["cmd/pg-assistants"]`) WITHOUT its `postInstall` copies of `completions/` and `share/tldr`, which Task 9 adds once those files exist.
+Module path `github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants`; `go 1.26.8` (matching the other modules, or `scripts/check-go-deps-wired.sh` fails); `x` pinned at the commit Task 0 landed (it has `tmux`, `claudetrust`, and `jsonllogger.OpenRotatingFile`, which arrived in `v0.0.0-20261114222359-65f23cfd8d2d`); `update-deps.sh` is executable. `default.nix` mirrors `packages/pg-keep-awake/default.nix` (Pattern A, `subPackages = ["cmd/pg-assistants"]`) WITHOUT its `postInstall` copies of `completions/` and `share/tldr`, which Task 9 adds once those files exist.
 
 **Interfaces:**
 
@@ -192,53 +250,24 @@ func ContextWindow(model string) (int64, bool)
 - [ ] **Step 4: Run** the tests; then `nix build .#pg-assistants .#checks.aarch64-darwin.pg-assistants-go-tests -L` (background). Expected: PASS.
 - [ ] **Step 5: Commit** `pg-assistants: scaffold the package and the config loader`.
 
-### Task 4: tmux client
+### Task 4: The integration-tests check
+
+The tmux client itself is `x/tmux` (Task 0); pg-assistants has no tmux package of its own. This task wires the on-demand check that runs pg-assistants' own real-tool tests (Tasks 6 and 7 add more).
 
 **Files:**
 
-- Create: `packages/pg-assistants/internal/tmux/{tmux.go,tmux_test.go,tmux_integration_test.go}`
+- Create: `packages/pg-assistants/internal/supervisor/tmux_integration_test.go`
 - Modify: `flake.nix`: `taggedGoLintModules` (:2123); `pg-assistants-integration-tests`, modeled on pg-keep-awake's (:8039-8100) but running `go test -tags integration ./...` with `tmux` on its PATH and the settings in Global Constraints
 
 **Interfaces:**
 
-- Produces:
+- Consumes: `x/tmux.Client` with `Socket "pg-assistants"` in production, and `Conf` = `<state dir>/tmux.conf` written with `WriteConf("set -g remain-on-exit on")`.
 
-```go
-type Client struct {
-    Bin    string // absolute path to tmux
-    Socket string // "pg-assistants"
-    Conf   string // <state dir>/tmux.conf, passed as -f
-    Run    cmdrun.Runner
-}
-type SessionState struct{ Exists, Dead bool } // Dead: the pane's process has exited
-type DeadInfo struct {
-    Status, Signal int    // #{pane_dead_status}, #{pane_dead_signal}
-    Tail           string // capture-pane -p -S -40
-}
-// WriteConf writes Conf holding only "set -g remain-on-exit on" (mode 0600).
-func (c Client) WriteConf() error
-func (c Client) NewSession(ctx context.Context, name, cwd string, env, argv []string) error
-func (c Client) State(ctx context.Context, name string) (SessionState, error)
-func (c Client) PanePID(ctx context.Context, name string) (int, error)
-func (c Client) Dead(ctx context.Context, name string) (DeadInfo, error) // only for a dead pane
-func (c Client) List(ctx context.Context) ([]string, error)               // session names
-func (c Client) Kill(ctx context.Context, name string) error             // nil when already gone
-```
-
-- Every call is `tmux -L <Socket> -f <Conf> ...` with `Call.Timeout` 10 s; targets use `=<name>`. `NewSession` runs `new-session -d -s <name> -c <cwd> -e K=V... -- <argv...>` with env in the given order. `State` runs `has-session -t =<name>` first and only then `display-message -p -t =<name> '#{pane_dead}'` (copied from ccpool `internal/tmux/client.go` :199-243, with a header naming the origin and the reason). "no server running", "error connecting to" (a stale socket) and "can't find session" mean `Exists: false` (and an empty `List`), not an error. A cancelled `ctx` returns `ctx.Err()` wrapped.
-
-- [ ] **Step 1: Write the failing tests:**
-  - `tmux_test.go` (Fake runner): `TestNewSessionArgv` (exact argv including `-L pg-assistants -f <conf>`, env order kept, `--` before argv); `TestStateChecksHasSessionFirst`; `TestStatePaneDead` (`1` gives `{true,true}`); `TestStateNoServer` (both no-server messages); `TestDeadReadsStatusAndTail`; `TestListNoServerIsEmpty`; `TestKillWhenGone`; `TestCancelledContext` (scripted `CtxErr: context.Canceled`, per Global Constraints).
-  - `tmux_integration_test.go` (`//go:build integration`, real tmux, socket `pg-assistants-test-<random>`, `WriteConf` into `t.TempDir()`, server killed in `t.Cleanup`):
-    - `TestRealLifecycle`: start `sh -c 'echo $$ > <dir>/pid; echo "$X" > <dir>/x; exec sleep 30'` with env `X=1`; `State == {true,false}`, `PanePID` equals the pid in `<dir>/pid`, `<dir>/x` holds `1`; `Kill`; `State.Exists == false`.
-    - `TestRealExitLeavesDeadPane`: start `sh -c 'echo boom >&2; exit 3'`; within 10 s `State == {true,true}`; `Dead` gives status 3 and a tail containing `boom`; a same-name `NewSession` fails; after `Kill` it succeeds. (`remain-on-exit` comes from the conf, so there is no race.)
-    - `TestRealStateMissingWithAnotherAlive`: with `example-b` alive, `State("example-a").Exists == false`.
-    - `TestRealExactMatchNotPrefix`: with only `example-ab` alive, `State("example-a").Exists == false` and `Kill("example-a")` leaves `example-ab` running.
-    - `TestRealList`: two sessions listed; after the server is killed, an empty list and no error.
-- [ ] **Step 2: Run** `nice -n 10 go test -p 4 ./internal/tmux/` and the same with `-tags integration`. Expected: FAIL.
-- [ ] **Step 3: Implement** `tmux.go`.
-- [ ] **Step 4: Run** both. Expected: PASS. Build `checks.aarch64-darwin.pg-assistants-integration-tests` once (background).
-- [ ] **Step 5: Commit** `pg-assistants: add the tmux client`.
+- [ ] **Step 1: Write the failing test** `TestRealTmuxWithDaemonConf` (`//go:build integration`; socket `pg-assistants-test-<random>`, server killed in `t.Cleanup`): with the daemon's conf line, a pane running `sh -c 'exit 3'` is reported dead with status 3, so the daemon's dead-pane path works against the real server. It FAILS rather than skips when tmux is missing and `PG_ASSISTANTS_REQUIRE_TOOLS=1`.
+- [ ] **Step 2: Run** `nice -n 10 go test -p 4 -tags integration ./internal/supervisor/`. Expected: FAIL.
+- [ ] **Step 3: Implement** the flake wiring and whatever constant the test needs (the conf line lives in one place, `supervisor`).
+- [ ] **Step 4: Run** it, then build `checks.aarch64-darwin.pg-assistants-integration-tests` once (background). Expected: PASS.
+- [ ] **Step 5: Commit** `pg-assistants: add the integration-tests check`.
 
 ### Task 5: Pure ladder engine
 
@@ -385,12 +414,11 @@ func (t *Tracker) Snapshot(now time.Time) []control.Limit
 - [ ] **Step 4: Run.** Expected: PASS.
 - [ ] **Step 5: Commit** `pg-assistants: add the control client and the block tracker`.
 
-### Task 7: Launch command, status board, exit requests, last exits and folder trust
+### Task 7: Launch command, status board, exit requests and last exits
 
 **Files:**
 
 - Create: `packages/pg-assistants/internal/supervisor/{launch.go,status.go,exitreq.go,lastexit.go,launch_test.go,status_test.go,exitreq_test.go,lastexit_test.go,launch_integration_test.go}`
-- Create: `packages/pg-assistants/internal/trust/{trust.go,trust_test.go}`, copied from `packages/ccpool/internal/trust/` with its tests and a header comment naming the origin
 
 **Interfaces:**
 
@@ -467,7 +495,7 @@ func ClearExitRequest(stateDir, id string) error               // nil when missi
 func WriteLastExit(stateDir, id string, d tmux.DeadInfo, uptime time.Duration, at time.Time) error // <stateDir>/last-exit/<id>.txt
 ```
 
-- Produces (package `trust`, from ccpool): `IsTrusted(path, cwd string) (bool, error)` and `Ensure(path string, cwds ...string) error` over `paths.claude_json` (merge-only, keeps every other key).
+- Folder trust is `x/claudetrust` (Task 0), used directly by Tasks 8 and 9 over `paths.claude_json`.
 
 - [ ] **Step 1: Write the failing tests:**
   - `TestLaunchArgv`: for `Paths{Shell:"/bin/zsh", Claude:"/c/claude"}` and `{ID:"example-a", Name:"Example A", Model:"claude-sonnet-5-5", Effort:"medium", Prompt:"Resume your duties."}`, session `u1`: exactly `["/bin/zsh","-l","-i","-c","exec \"$@\"","/bin/zsh","/c/claude","--allowed-tools","Bash(pg-assistants exit)","--session-id","u1","--name","Example A","--model","claude-sonnet-5-5","--effort","medium","--","Resume your duties."]`.
@@ -477,9 +505,8 @@ func WriteLastExit(stateDir, id string, d tmux.DeadInfo, uptime time.Duration, a
   - `TestStatusBoardConcurrent`: parallel `Set` and `Flush` under `-race`.
   - `TestExitRequestRoundTrip`: write; `HasExitRequest` true twice (it never deletes); clear; false; clear on a missing file nil; `ValidID("../x") == false`.
   - `TestWriteLastExit`: the file names the status, signal, uptime and holds the tail.
-  - `trust_test.go`: ccpool's tests, plus `TestEnsureKeepsOtherKeys` and `TestIsTrustedMissingFile`.
   - `launch_integration_test.go` (`//go:build integration`): `TestRealLaunchChain` runs `LaunchArgv`/`LaunchEnv` through the real tmux client with `Shell=/bin/sh` and a fake `claude` script that records its argv, its environment and `$$`; it asserts `PanePID` equals the recorded `$$`, the prompt `Resume "now", please` arrives as one argument after `--`, `CLAUDECODE` is set and empty, and `FOO=bar` arrived. A second case runs `zsh -l -i` with a temp `ZDOTDIR` and `HOME` whose `.zshenv` exports `PATH=<dir>:$PATH` and checks the recorded `PATH` starts with `<dir>`.
-- [ ] **Step 2: Run** `nice -n 10 go test -p 4 -race ./internal/supervisor/ ./internal/trust/` (and `-tags integration`). Expected: FAIL.
+- [ ] **Step 2: Run** `nice -n 10 go test -p 4 -race ./internal/supervisor/` (and `-tags integration`). Expected: FAIL.
 - [ ] **Step 3: Implement** the files.
 - [ ] **Step 4: Run.** Expected: PASS.
 - [ ] **Step 5: Commit** `pg-assistants: add launch, status, exit-request, last-exit and trust helpers`.
@@ -500,7 +527,7 @@ type Tmux interface {
     NewSession(ctx context.Context, name, cwd string, env, argv []string) error
     State(ctx context.Context, name string) (tmux.SessionState, error)
     PanePID(ctx context.Context, name string) (int, error)
-    Dead(ctx context.Context, name string) (tmux.DeadInfo, error)
+    Dead(ctx context.Context, name string, tailLines int) (tmux.DeadInfo, error) // x/tmux; the daemon passes 40
     List(ctx context.Context) ([]string, error)
     Kill(ctx context.Context, name string) error
 }
@@ -606,7 +633,7 @@ func StopText(reason string) string
   - `pg-assistants status [--json] [--check] [--config <path>]` (default `<osdirs.ConfigDir("pg-assistants")>/config.toml`): reads `<state_dir>/status.json`. Without `--json`: a header (`daemon pid <n>, up <age>, config <hash prefix>`, any config problems, one line per block such as `five_hour 96% (starts held until 20:00)`), then the table `ID ENABLED RUNNING CONTEXT LADDER WAIT NOTE` (`CONTEXT` with the age of the reading when older than two ticks; `WAIT` the time and reason; `NOTE` = config error, hint, last error, last exit, or `stalled` when `last_tick` is older than `tick + grace.kill + 45s`), then orphan rows with `not in config`. `--json` prints the file. It exits 0; a stale (over one minute) or missing file prints a warning on stderr naming `launchctl print gui/$UID/com.phillipg.pg-assistants-daemon` and the launchd stderr path. `--check`: exit 3 when the file is missing or stale, 5 when degraded (any config error or problem, hint, stalled loop, `WaitReason backoff`, or orphan), 0 otherwise, printing one line.
   - `pg-assistants attach <id> [--config <path>]`: validates the id, then execs `<paths.tmux> -L pg-assistants -f <conf> attach -t =<id>` with `TMUX` removed from the environment; an id with no session exits 4 (`exitcode.NotFound`) naming `pg-assistants status`; no tmux server exits 3 (`Unavailable`).
   - `pg-assistants exit`: needs `PG_ASSISTANT_ID` (valid per `ValidID`) and `PG_ASSISTANTS_STATE_DIR`; writes the request; prints `exit requested for <id>; end your turn now`. A missing or invalid id exits 2 with `PG_ASSISTANT_ID is not set: run this from inside a pg-assistants session` (or `... is not a valid id`).
-  - `pg-assistants trust --claude-json <path> <cwd>...`: `trust.Ensure`; exit 0, or 1 printing the error.
+  - `pg-assistants trust --claude-json <path> <cwd>...`: `claudetrust.Ensure`; exit 0, or 1 printing the error.
 
 - [ ] **Step 1: Write the failing tests** (in-process run functions): `TestExitWritesRequest`; `TestExitWithoutAssistantID` (exit 2, nothing written); `TestExitRejectsBadID` (`../x`); `TestStatusTable` (a config-error row, an orphan row, a stalled row, the block header); `TestStatusShowsHoldReason` (`block_hold` in `WAIT`); `TestStatusStaleWarnsAndExitsZero`; `TestStatusMissingNamesLaunchdLog`; `TestStatusCheckExitCodes` (missing 3, stale 3, degraded 5, healthy 0); `TestAttachArgvAndEnv` (exec captured through a seam: exact argv with `=example-a`, no `TMUX`); `TestTrustWritesClaudeJSON`; `TestDaemonRejectsUnparseableConfig` (exit 7); `TestDaemonRunsWithOneBadAssistant` (starts, supervises the good one, through an internal constructor with fake deps); `TestGlobalConfigProblemLogged` (`config_problem` event and `DaemonStatus.ConfigProblems`); `TestDaemonCreatesPrivateStateDir` (0700, `tmux.conf` written); `TestDaemonSeedsBlocksFromStatus`; `TestDaemonStopsOnContextCancel` (returns within the shutdown deadline, no `Kill`; the events log, read with `jsonlloggertest`, holds `lifecycle`'s `shutdown_signal` and `shutdown_complete` and a `loop_stopped` for `assistant:example-a`); `TestAttachExitCodes` (no session 4, no server 3).
 - [ ] **Step 2: Run** `nice -n 10 go test -p 4 ./cmd/...`. Expected: FAIL.
@@ -642,7 +669,7 @@ func StopText(reason string) string
   - each assertion fires with its message (pg-claude-control disabled, the marketplace override false, a relative `cwd`, a relative `loginShell`); the non-darwin warning;
   - the rendered `script` run under `env -i` with `loginShell` set to a fake shell that records its argv and then execs the rest, against a fake `pg-assistants` that records its own argv.
 - [ ] **Step 2: Run** `nix build .#checks.aarch64-darwin.test-pg-assistants-hm-launchd -L` (background). Expected: FAIL.
-- [ ] **Step 3: Implement** the module; write ADR 0128 (context; decision: a separate minimal daemon, ccpool not used as a dependency, two pieces copied; consequences: chain-of-sessions model, auto-compact off, `limit*kill` below the window, per-assistant isolation, sessions run through the operator's login shell, folder trust written by `pg-assistants trust`, `tmux new-session -c` falling back to `$HOME` for a missing directory) and the docs. The package README covers usage, the config reference, `status` and `status --check`, attaching and detaching (`C-b d`), removing an assistant and uninstalling (from the spec's "Packaging"), and a copy-paste `AGENTS.md` block: keep notes in the directory; when nudged or done, write notes, then run `pg-assistants exit` as a command on its own as the last action and end the turn; never wait for input, nobody is attached; an assistant that should poll less often gets a longer `tick`.
+- [ ] **Step 3: Implement** the module; write ADR 0128 (context; decision: a separate minimal daemon, ccpool not used as a dependency, its tmux client and trust writer promoted into `x` as `x/tmux` and `x/claudetrust`; consequences: chain-of-sessions model, auto-compact off, `limit*kill` below the window, per-assistant isolation, sessions run through the operator's login shell, folder trust written by `pg-assistants trust`, `tmux new-session -c` falling back to `$HOME` for a missing directory) and the docs. The package README covers usage, the config reference, `status` and `status --check`, attaching and detaching (`C-b d`), removing an assistant and uninstalling (from the spec's "Packaging"), and a copy-paste `AGENTS.md` block: keep notes in the directory; when nudged or done, write notes, then run `pg-assistants exit` as a command on its own as the last action and end the turn; never wait for input, nobody is attached; an assistant that should poll less often gets a longer `tick`.
 - [ ] **Step 4: Run** the eval test, `pg-assistants-go-tests`, and `pn workspace flake-check --no-build <worktree path>` (background). Expected: PASS.
 - [ ] **Step 5: Commit** `pg-assistants: add the home-manager module, launchd agent and ADR 0128`.
 

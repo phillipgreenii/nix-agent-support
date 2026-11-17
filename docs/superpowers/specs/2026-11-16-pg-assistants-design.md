@@ -1,6 +1,7 @@
 # pg-assistants: a minimal supervisor for permanent Claude Code assistants
 
-Status: DRAFT for operator review (2026-11-16; revised after the second review round, 2026-11-16).
+Status: APPROVED by the operator (2026-11-16), after two review rounds. Implementation starts in a
+fresh session.
 
 ## Intent
 
@@ -62,8 +63,9 @@ heal-every-30-seconds daemon over tmux sessions) but resumes one conversation in
 Claude Code's built-in background supervisor (`claude --bg`, `claude respawn`) restarts crashed
 sessions but has no config, no tmux, no context recycling, and stops idle sessions after about an
 hour, which works against a permanent assistant. ccpool (this repo) is NOT used as a dependency; two
-small pieces of it are copied (the folder-trust writer and the tmux liveness order), each with a
-header naming its origin.
+pieces of it are promoted into the shared `x` module (operator ruling, 2026-11-16): its tmux client
+becomes `x/tmux` and its folder-trust writer `x/claudetrust`, so pg-assistants does not make a
+second copy. Moving ccpool onto them is a separate follow-up.
 
 ## Design
 
@@ -219,7 +221,7 @@ tmux -L pg-assistants -f <state dir>/tmux.conf new-session -d -s <id> -c <cwd> \
   output, until the daemon has read it.
 - "Running" means `tmux has-session -t =<id>` succeeds AND `display -p -t =<id> '#{pane_dead}'` is
   not `1` (the order matters: `display` falls back to another session when the target is gone;
-  ccpool's `internal/tmux` does the same). Targets always use `=<id>`, an exact match, never a
+  `x/tmux` does this, as ccpool's `internal/tmux` did). Targets always use `=<id>`, an exact match, never a
   prefix.
 - **A dead pane is the normal end of a session.** The daemon reads `#{pane_dead_status}` and
   `#{pane_dead_signal}` and the last 40 lines (`capture-pane -p -S -40`), writes them to
@@ -230,8 +232,8 @@ tmux -L pg-assistants -f <state dir>/tmux.conf new-session -d -s <id> -c <cwd> \
   `tmux display -p -t =<id> '#{pane_pid}'`), which survives `/clear` changing the session id.
 - **Folder trust.** An untrusted `cwd` stops claude on the trust dialog before any hook runs, so the
   control mod never loads. `pg-assistants trust <cwd>...` marks directories trusted in
-  `paths.claude_json` (a merge-only write of `.projects[<cwd>].hasTrustDialogAccepted`, copied
-  from ccpool's `internal/trust` with its tests). The HM module runs it for every assistant `cwd` at
+  `paths.claude_json` (a merge-only write of `.projects[<cwd>].hasTrustDialogAccepted`,
+  through `x/claudetrust`). The HM module runs it for every assistant `cwd` at
   activation (best effort), and the daemon checks it before each start and writes it again when it
   is missing, because Claude's own rewrites of that file can lose the activation's write.
 - **`cwd` is checked before every start.** `tmux new-session -c <missing dir>` silently starts the
