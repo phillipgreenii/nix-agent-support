@@ -42,6 +42,7 @@ export const register: Register = on => {
       abort: turnId => $.turn.abort({ turnId }),
       command: (command, args) => $.command.run({ command, args }),
       readPrompt: () => $.prompt.read(),
+      usage: () => $.session.usage(),
     }
     const started = await next(e)
     void (async () => {

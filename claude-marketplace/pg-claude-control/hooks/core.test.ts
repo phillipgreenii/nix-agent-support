@@ -51,6 +51,7 @@ function realIo(calls: Calls, over: Partial<Io> = {}): Io {
       return {}
     },
     readPrompt: async () => ({ text: 'draft é', cursor: 7 }),
+    usage: async () => ({}),
     ...over,
   }
 }
@@ -203,6 +204,65 @@ test('read and ping reply through a temporary name moved into place with mv -f',
   assert.equal(existsSync(`${reply}.tmp`), false)
   await ctl.handleLine(io, `ping reply=${reply}`)
   assert.equal(JSON.parse(readFileSync(reply, 'utf8')).result.pong, true)
+})
+
+test('usage replies with the engine figures', async () => {
+  const { ctl, calls, dir } = fresh()
+  const io = realIo(calls, {
+    usage: async () => ({
+      context: { percent: 41.5, tokens: 83000, window: 200000, extra: 1 },
+      rateLimits: [{ kind: 'five_hour', percentUsed: 62, resetsAt: '2026-11-16T20:00:00Z', extra: 2 }],
+      cost: { usd: 1.25, extra: 3 },
+      extra: 'x',
+    }),
+  })
+  const reply = join(dir, 'reply', 'u.json')
+  await ctl.handleLine(io, `id=u1 usage reply=${reply}`)
+  assert.deepEqual(JSON.parse(readFileSync(reply, 'utf8')), {
+    ok: true,
+    result: {
+      context: { percent: 41.5, tokens: 83000, window: 200000 },
+      rateLimits: [{ kind: 'five_hour', percentUsed: 62, resetsAt: '2026-11-16T20:00:00Z' }],
+      cost: { usd: 1.25 },
+    },
+  })
+})
+
+test('usage with no figures yet', async () => {
+  const { ctl, calls, dir } = fresh()
+  const io = realIo(calls, { usage: async () => ({}) })
+  const reply = join(dir, 'reply', 'u.json')
+  await ctl.handleLine(io, `usage reply=${reply}`)
+  assert.deepEqual(JSON.parse(readFileSync(reply, 'utf8')), { ok: true, result: { rateLimits: [] } })
+})
+
+test('usage when the engine throws', async () => {
+  const { ctl, calls, dir } = fresh()
+  const io = realIo(calls, {
+    usage: async () => {
+      throw new Error('boom')
+    },
+  })
+  const reply = join(dir, 'reply', 'u.json')
+  await ctl.handleLine(io, `usage reply=${reply}`)
+  assert.deepEqual(JSON.parse(readFileSync(reply, 'utf8')), { ok: false, reason: 'usage unavailable: boom' })
+})
+
+test('usage without a reply path runs and writes nothing', async () => {
+  const { ctl, calls } = fresh()
+  let ran = 0
+  const io = realIo(calls, {
+    usage: async () => {
+      ran++
+      return {}
+    },
+  })
+  await ctl.handleLine(io, 'usage')
+  assert.equal(ran, 1)
+})
+
+test('usage parses as a known verb', () => {
+  assert.equal(parseRequest('id=a usage reply=/tmp/r').ok, true)
 })
 
 test('a failed reply is logged as reply_failed', async () => {

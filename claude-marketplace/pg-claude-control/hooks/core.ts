@@ -8,7 +8,7 @@ export const REQUEST_LOG_LINES = 1000
 export const RESPAWN_MAX_TRIES = 5
 export const RESPAWN_RESET_MS = 60_000
 export const DEFAULT_ALLOW = ['exit', 'clear', 'compact']
-export const VERBS = ['submit', 'interrupt', 'run', 'read', 'ping'] as const
+export const VERBS = ['submit', 'interrupt', 'run', 'read', 'usage', 'ping'] as const
 export type Verb = (typeof VERBS)[number]
 export const END_REASONS = ['prompt_input_exit', 'clear', 'other', 'resume', 'logout']
 
@@ -154,6 +154,32 @@ export class RespawnCounter {
   }
 }
 
+function pick(o: unknown, keys: readonly string[], kind: 'number' | 'string'): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (typeof o !== 'object' || o === null) return out
+  for (const k of keys) {
+    const v = (o as Record<string, unknown>)[k]
+    if (typeof v === kind) out[k] = v
+  }
+  return out
+}
+
+/** The usage reply: only the listed fields, unknown keys dropped. */
+export function mapUsage(raw: unknown): Record<string, unknown> {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  const context = pick(r.context, ['percent', 'tokens', 'window'], 'number')
+  if (Object.keys(context).length > 0) result.context = context
+  result.rateLimits = (Array.isArray(r.rateLimits) ? r.rateLimits : []).map(l => ({
+    ...pick(l, ['kind'], 'string'),
+    ...pick(l, ['percentUsed'], 'number'),
+    ...pick(l, ['resetsAt'], 'string'),
+  }))
+  const cost = pick(r.cost, ['usd'], 'number')
+  if (Object.keys(cost).length > 0) result.cost = cost
+  return result
+}
+
 export interface Io {
   now: () => Promise<number>
   readText: (path: string) => Promise<string>
@@ -163,6 +189,7 @@ export interface Io {
   abort: (turnId: string) => Promise<void>
   command: (command: string, args: string) => Promise<{ text?: string }>
   readPrompt: () => Promise<{ text: string; cursor: number }>
+  usage: () => Promise<unknown>
   /** Faults-style pause seam: a test blocks here to hold a request between steps. */
   pause?: (point: string) => Promise<void>
 }
@@ -313,6 +340,15 @@ export class Controller {
       case 'read': {
         const box = await io.readPrompt()
         return { ok: true, result: { text: box.text, cursor: box.cursor } }
+      }
+      case 'usage': {
+        let raw: unknown
+        try {
+          raw = await io.usage()
+        } catch (err) {
+          return { ok: false, reason: `usage unavailable: ${err instanceof Error ? err.message : String(err)}` }
+        }
+        return { ok: true, result: mapUsage(raw) }
       }
       case 'interrupt': {
         if (this.turnId === undefined) return { ok: false, reason: 'no turn' }

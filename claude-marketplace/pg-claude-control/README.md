@@ -35,7 +35,7 @@ PIPE_BUF, so one write is atomic):
 [id=<token>] <verb> [argument] [payload=<path>] [reply=<path>]
 ```
 
-Verbs are a fixed table: `submit`, `interrupt`, `run`, `read`, `ping`. An unknown verb is ignored
+Verbs are a fixed table: `submit`, `interrupt`, `run`, `read`, `usage`, `ping`. An unknown verb is ignored
 and logged as `request_rejected`. A line over the cap is discarded up to its newline and logged.
 
 - `submit <text>`: `$.prompt.submit`; text starting with `/` is refused. A long text travels in a
@@ -45,6 +45,7 @@ and logged as `request_rejected`. A line over the cap is discarded up to its new
   when none runs.
 - `run <command> [args]`: `$.command.run`, only for a command in `run.allow`.
 - `read`: `$.prompt.read`; the result is `{text, cursor}`.
+- `usage`: `$.session.usage()`; the result is `{context?: {percent?, tokens?, window?}, rateLimits: [{kind, percentUsed, resetsAt?}], cost?: {usd?}}` (unknown keys dropped), or reason `usage unavailable: <message>` when the engine throws.
 - `ping`: reply `{pong: true, ts}`.
 
 An `id=` repeating one of the last 256 ids is dropped (logged as `duplicate`). Delivery is at most
