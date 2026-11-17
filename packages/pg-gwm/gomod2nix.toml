@@ -16,5 +16,5 @@ cachePackages = [
     hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261116145242-7b9b33474f22'
-    hash = 'sha256-+Tm3KqbAeAUkS46EALjBXsO7NxGoFCqA9MHj2wTLWdM='
+    version = 'v0.0.0-20261116135148-eeb0d0a38aa9'
+    hash = 'sha256-SXBRwCYFj4cSm5AATqrnxq6UaO7+VqJc1IXlHPZR5mU='
