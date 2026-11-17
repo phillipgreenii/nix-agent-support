@@ -95,3 +95,15 @@ nice -n 10 go test -p 4 ./...      # the unit tier
 The whole-module test gate is `nix build .#checks.<system>.pg-assistants-go-tests`; `nix build
 .#pg-assistants` only proves the binary compiles. `TestCallsBounded` guards that every
 `cmdrun.Call` in the module sets a timeout.
+
+The real-tool tests (a real tmux server; the real `pg-claude-control` against a temporary session
+registry and an inbox the test answers) are `integration`-tagged and run on demand in
+`nix build .#checks.<system>.pg-assistants-integration-tests`, never in the unit tier. To run them
+by hand, point `PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL` at a `pg-claude-control` built from this
+repo (`go build -o <dir>/pg-claude-control ./cmd/pg-claude-control` in `packages/pg-claude-control`)
+and set `PG_ASSISTANTS_REQUIRE_TOOLS=1` so a missing tool fails instead of skipping:
+
+```bash
+PG_ASSISTANTS_REQUIRE_TOOLS=1 PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL=<dir>/pg-claude-control \
+  nice -n 10 go test -p 4 -tags integration ./...
+```

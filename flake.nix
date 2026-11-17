@@ -2130,7 +2130,7 @@
                 "pg-keep-awake"
                 # pg-task-focus: the node and real-serve-process tests are `integration`-tagged.
                 "pg-task-focus"
-                # pg-assistants: the real-tmux test is `integration`-tagged.
+                # pg-assistants: the real-tmux and real-pg-claude-control tests are `integration`-tagged.
                 "pg-assistants"
                 # internal/contract is `contract`-tagged.
                 "beads-exporter"
@@ -8051,17 +8051,24 @@
               };
 
               # pg-assistants INTEGRATION tier (V-4): the `integration`-tagged real-tool
-              # tests (a real tmux server on a private socket). ON DEMAND ONLY: no hook,
-              # run-unit-tests, pre-land or land gate. REQUIRE_TOOLS makes a missing tmux
-              # fail instead of skip; TMUX_TMPDIR keeps the socket inside the sandbox.
+              # tests (a real tmux server on a private socket; the real pg-claude-control
+              # against a temp registry and an inbox FIFO the test answers). ON DEMAND
+              # ONLY: no hook, run-unit-tests, pre-land or land gate. REQUIRE_TOOLS makes
+              # a missing tool fail instead of skip; TMUX_TMPDIR keeps the socket inside
+              # the sandbox; PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL names the binary built
+              # from packages/pg-claude-control (the control client's contract test).
               pg-assistants-integration-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-assistants-integration-tests";
                   src = lib.cleanSource ./packages/pg-assistants; # matches default.nix
                   gomod2nixToml = ./packages/pg-assistants/gomod2nix.toml;
-                  testDeps = [ pkgs.tmux ];
+                  testDeps = [
+                    pkgs.tmux
+                    pkgs.pg-claude-control
+                  ];
                 }).overrideAttrs
                   (old: {
+                    PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL = "${pkgs.pg-claude-control}/bin/pg-claude-control";
                     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.tmux ];
                     # tmux serves its socket over a unix socket, which the
                     # darwin sandbox only permits with local networking.
