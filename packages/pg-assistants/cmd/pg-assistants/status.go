@@ -209,6 +209,7 @@ func orphanRows(st supervisor.Status) []string {
 	var out []string
 	for _, o := range st.Orphans {
 		if !listed[o] {
+			listed[o] = true // once per name
 			out = append(out, o)
 		}
 	}
@@ -218,7 +219,14 @@ func orphanRows(st supervisor.Status) []string {
 // renderStatus prints the header and the table.
 func renderStatus(w io.Writer, cfg config.Config, st supervisor.Status, now time.Time) {
 	d := st.Daemon
-	fmt.Fprintf(w, "daemon pid %d, up %s, config %s\n", d.PID, age(now.Sub(d.StartedAt)), prefix(d.ConfigHash, hashPrefix))
+	if now.Sub(st.WrittenAt) > staleAfter {
+		// A daemon that stopped writing is not "up" as of now: show how long
+		// it had been up when the file was last written, and the file's age.
+		fmt.Fprintf(w, "daemon pid %d, up %s when last written, status file %s old, config %s\n",
+			d.PID, age(st.WrittenAt.Sub(d.StartedAt)), age(now.Sub(st.WrittenAt)), prefix(d.ConfigHash, hashPrefix))
+	} else {
+		fmt.Fprintf(w, "daemon pid %d, up %s, config %s\n", d.PID, age(now.Sub(d.StartedAt)), prefix(d.ConfigHash, hashPrefix))
+	}
 	for _, p := range d.ConfigProblems {
 		fmt.Fprintf(w, "config problem: %s\n", p)
 	}

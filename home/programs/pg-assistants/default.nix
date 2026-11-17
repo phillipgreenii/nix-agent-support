@@ -56,11 +56,13 @@ let
   overrides =
     if hasMarketplaces then config.phillipgreenii.programs.claude-code.marketplaces.overrides else { };
   # An override is keyed by the bare plugin name or by "<plugin>@<marketplace>".
-  controlPluginKeys = [
-    "pg-claude-control"
-    "pg-claude-control@phillipgreenii-nix-agent-support-marketplace-local"
-  ];
-  controlPluginOff = lib.any (k: (overrides.${k} or null) == false) controlPluginKeys;
+  # The resolver (home/programs/claude-marketplaces) reads the qualified key
+  # first and the bare name only when it is absent, so the plugin is off only
+  # when the entry the resolver reads is false.
+  controlPluginOff =
+    (overrides."pg-claude-control@phillipgreenii-nix-agent-support-marketplace-local"
+      or overrides."pg-claude-control" or true
+    ) == false;
 
   controlPackage = if hasControl then control.package else pkgs.pg-claude-control;
 
@@ -79,12 +81,19 @@ let
   logDir = "${config.xdg.stateHome}/pg-assistants-launchd";
   pprofSocket = "${stateDir}/pprof.sock";
 
-  # A hash of the operator's session variables, so an apply that changes one
+  # A hash of the operator's session variables (home.sessionVariables,
+  # home.sessionPath and programs.zsh.sessionVariables), so an apply that changes one
   # restarts the daemon (whose own login shell, and so every pg-claude-control
   # call it makes, then sees the new value). Its string context is dropped: it
   # is a value in the job definition, not a dependency, and nothing is built.
   sessionVarsHash = builtins.hashString "sha256" (
-    builtins.unsafeDiscardStringContext (builtins.toJSON config.home.sessionVariables)
+    builtins.unsafeDiscardStringContext (
+      builtins.toJSON {
+        inherit (config.home) sessionVariables;
+        sessionPath = config.home.sessionPath or [ ];
+        zshSessionVariables = config.programs.zsh.sessionVariables or { };
+      }
+    )
   );
 
   # The variables the launchd agent sets for the daemon alone (HOME aside) and
@@ -560,6 +569,10 @@ in
           message = "phillipgreenii.programs.pg-assistants.assistants: every cwd must be an absolute path; not absolute: ${
             lib.concatMapStringsSep ", " (id: "${id} (${cfg.assistants.${id}.cwd})") relativeCwds
           }.";
+        }
+        {
+          assertion = isAbsolute cfg.claudeJson;
+          message = "phillipgreenii.programs.pg-assistants.claudeJson (${cfg.claudeJson}) must be an absolute path: the daemon reads the rendered file under launchd, where no shell expands a variable.";
         }
         {
           assertion = isAbsolute cfg.loginShell;

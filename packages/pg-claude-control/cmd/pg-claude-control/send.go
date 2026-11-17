@@ -475,5 +475,8 @@ func usageLine(raw json.RawMessage) string {
 	if res.Cost != nil && res.Cost.USD != nil {
 		parts = append(parts, fmt.Sprintf("cost $%.2f", *res.Cost.USD))
 	}
+	if len(parts) == 0 {
+		return "no usage figures reported"
+	}
 	return strings.Join(parts, "; ")
 }

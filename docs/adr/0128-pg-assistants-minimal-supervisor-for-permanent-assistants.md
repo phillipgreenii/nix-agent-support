@@ -124,6 +124,10 @@ flowchart LR
   so an unknown model needs an explicit `context.window`, and the table needs refreshing when
   models change. At run time a window the engine reports that differs from the configured one is
   logged as `window_mismatch`.
+- **"Every exported I/O function takes `ctx` first" means process I/O.** Calls that start a process
+  or talk to a server (tmux, `pg-claude-control`, the supervisor's actions) take a context first
+  and run under a deadline; local file helpers (`Flush`, `ReadStatus`, `config.Load`, the exit
+  request and trust helpers) take none.
 - **A slow, broken or misconfigured assistant delays only itself.** A graceful stop blocks its own
   loop for up to `grace.kill` plus 15 s; every other loop keeps ticking.
 - **Sessions inherit the operator's login shell.** They see what an interactive terminal sees only

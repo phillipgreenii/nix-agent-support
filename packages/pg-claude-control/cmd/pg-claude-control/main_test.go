@@ -767,6 +767,35 @@ func TestUsageTextLineOmitsAbsentParts(t *testing.T) {
 	}
 }
 
+func TestUsageTextLineWhenEmpty(t *testing.T) {
+	w := newWorld(t)
+	w.claude(4242, uuid1, "example-one", startA)
+	w.inbox(4242, func(string) string { return `{"ok":true,"result":{}}` + "\n" })
+	if rc := w.run("usage", "4242"); rc != 0 || strings.TrimSpace(w.out.String()) != "no usage figures reported" {
+		t.Fatalf("rc=%d out %q", rc, w.out.String())
+	}
+}
+
+func TestListHelpLineAligned(t *testing.T) {
+	w := newWorld(t)
+	w.run("--help")
+	var usage, list string
+	for _, l := range strings.Split(w.out.String()+w.errb.String(), "\n") {
+		switch {
+		case strings.HasPrefix(l, "  usage "):
+			usage = l
+		case strings.HasPrefix(l, "  list "):
+			list = l
+		}
+	}
+	if usage == "" || list == "" {
+		t.Fatal("help text lacks the usage or list line")
+	}
+	if strings.Index(usage, "context size") != strings.Index(list, "every running") {
+		t.Errorf("descriptions misaligned:\n%s\n%s", usage, list)
+	}
+}
+
 func TestUsageRequestCarriesReply(t *testing.T) {
 	w := newWorld(t)
 	w.claude(4242, uuid1, "example-one", startA)

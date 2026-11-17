@@ -18,6 +18,9 @@
 //   - A reading is current until its reset time, or, without one, until its
 //     observation time plus the unknown-reset hold. A reading that is no
 //     longer current is discarded, so the next one replaces it.
+//   - A reading without a reset time stays current for the hold counted from
+//     its latest observation, so a session that keeps reporting the same
+//     stale, unchanged figure keeps extending the hold.
 //   - While any current reading is at or above the nudge point, new starts are
 //     held until it stops being current.
 //

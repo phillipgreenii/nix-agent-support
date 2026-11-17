@@ -8069,9 +8069,8 @@
                     pkgs.zsh
                   ];
                 }).overrideAttrs
-                  (old: {
+                  (_: {
                     PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL = "${pkgs.pg-claude-control}/bin/pg-claude-control";
-                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.tmux ];
                     # tmux serves its socket over a unix socket, which the
                     # darwin sandbox only permits with local networking.
                     __darwinAllowLocalNetworking = true;
@@ -8080,9 +8079,8 @@
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
                       export PG_ASSISTANTS_REQUIRE_TOOLS=1
-                      export TMUX_TMPDIR="$TMPDIR"
                       go vet -tags integration ./...
-                      go test -tags integration -count=1 -v -timeout 10m ./...
+                      go test -race -tags integration -count=1 -v -timeout 20m ./...
                       runHook postBuild
                     '';
                   });

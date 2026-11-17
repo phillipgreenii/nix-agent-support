@@ -253,8 +253,8 @@ func TestStatusStaleWarnsAndExitsZero(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0", code)
 		}
-		if !strings.Contains(stdout, "daemon pid 4242") {
-			t.Errorf("a stale file is not shown:\n%s", stdout)
+		if want := "daemon pid 4242, up 2h00m when last written, status file 2m old, config abcdef012345\n"; !strings.Contains(stdout, want) {
+			t.Errorf("a stale file's header lacks %q:\n%s", want, stdout)
 		}
 		assertNamesLaunchd(t, stderr)
 		if !strings.Contains(stderr, "2m old") {
@@ -390,4 +390,32 @@ func TestStatusUsageAndConfig(t *testing.T) {
 	if code, stdout, _ := runCLI(t, "status", "--help"); code != 0 || !strings.Contains(stdout, "--check") {
 		t.Errorf("status --help = %d, %q; want 0 and the help", code, stdout)
 	}
+}
+
+// An assistant with a config error shows as running when its session runs on
+// as an orphan, and an orphan with a row of its own is not listed twice.
+func TestStatusOrphanRows(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		configPath, stateDir := statusFixture(t)
+		st := healthy(now)
+		st.Assistants = []supervisor.AssistantStatus{
+			{ID: "example-b", Enabled: true, ConfigError: "assistant[example-b].effort: bad"},
+		}
+		st.Orphans = []string{"example-b", "example-gone", "example-gone"}
+		writeStatusFile(t, stateDir, st)
+		code, stdout, stderr := runStatus(t, configPath)
+		if code != 0 {
+			t.Fatalf("exit = %d (stderr %q)", code, stderr)
+		}
+		if b := strings.Fields(row(t, stdout, "example-b")); len(b) < 3 || b[2] != "yes" {
+			t.Errorf("config-error assistant with an orphan session: row %q, want RUNNING yes", row(t, stdout, "example-b"))
+		}
+		if n := strings.Count(stdout, "example-b"); n != 2 { // the row, and the config error text
+			t.Errorf("example-b appears %d times, want the row and its config error only:\n%s", n, stdout)
+		}
+		if n := strings.Count(stdout, "example-gone\t") + strings.Count(stdout, "example-gone "); n != 1 {
+			t.Errorf("orphan example-gone listed %d times, want once:\n%s", n, stdout)
+		}
+	})
 }

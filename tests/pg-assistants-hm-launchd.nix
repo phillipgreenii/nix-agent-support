@@ -20,6 +20,9 @@ let
   # The flake's check pkgs has no llm-agents overlay: the module's default
   # claudePath reads pkgs.llm-agentsPkgs.claude-code, so a stand-in is supplied.
   fakeClaude = pkgs.writeShellScriptBin "claude" "exit 0";
+  # a control package that is NOT pkgs.pg-claude-control, to tell the module's
+  # option from its fallback
+  fakeControl = pkgs.writeShellScriptBin "pg-claude-control" "exit 0";
 
   withPlatform = isDarwin: {
     pkgs' = pkgs // {
@@ -49,6 +52,8 @@ let
     {
       tldrEnable,
       sessionVariables,
+      sessionPath,
+      zshSessionVariables,
     }:
     { lib, ... }:
     {
@@ -72,6 +77,10 @@ let
             type = lib.types.attrsOf lib.types.str;
             default = sessionVariables;
           };
+          sessionPath = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = sessionPath;
+          };
           file = lib.mkOption {
             type = lib.types.attrsOf lib.types.anything;
             default = { };
@@ -84,6 +93,10 @@ let
             type = lib.types.attrsOf lib.types.anything;
             default = { };
           };
+        };
+        programs.zsh.sessionVariables = lib.mkOption {
+          type = lib.types.attrsOf lib.types.str;
+          default = zshSessionVariables;
         };
         programs.tldr = {
           enable = lib.mkOption {
@@ -142,6 +155,8 @@ let
       declareLaunchd ? true,
       tldrEnable ? true,
       sessionVariables ? { },
+      sessionPath ? [ ],
+      zshSessionVariables ? { },
       # null: the module is not declared; otherwise its stub values
       control ? {
         enable = true;
@@ -157,7 +172,14 @@ let
       };
       modules = [
         ../home/programs/pg-assistants/default.nix
-        (stubs { inherit tldrEnable sessionVariables; })
+        (stubs {
+          inherit
+            tldrEnable
+            sessionVariables
+            sessionPath
+            zshSessionVariables
+            ;
+        })
         {
           phillipgreenii.programs.pg-assistants = {
             enable = true;
@@ -249,6 +271,10 @@ let
   # the operator's session variables: a change restarts the daemon
   sessionVarsA = case (darwin // { sessionVariables.EXAMPLE_VAR = "a"; }) { assistants = two; };
   sessionVarsB = case (darwin // { sessionVariables.EXAMPLE_VAR = "b"; }) { assistants = two; };
+  sessionPathA = case (darwin // { sessionPath = [ "/example/bin-a" ]; }) { assistants = two; };
+  sessionPathB = case (darwin // { sessionPath = [ "/example/bin-b" ]; }) { assistants = two; };
+  zshVarsA = case (darwin // { zshSessionVariables.EXAMPLE_VAR = "a"; }) { assistants = two; };
+  zshVarsB = case (darwin // { zshSessionVariables.EXAMPLE_VAR = "b"; }) { assistants = two; };
   # the guards a session blanks, replaced
   otherGuards = case darwin {
     assistants = two;
@@ -280,6 +306,38 @@ let
       overrides."pg-claude-control@phillipgreenii-nix-agent-support-marketplace-local" = false;
     }
   ) { assistants = two; };
+  # the resolver reads the qualified key first: it wins over the bare name
+  overrideKeyOnBareOff = case (
+    darwin
+    // {
+      overrides = {
+        "pg-claude-control@phillipgreenii-nix-agent-support-marketplace-local" = true;
+        "pg-claude-control" = false;
+      };
+    }
+  ) { assistants = two; };
+  overrideKeyOffBareOn = case (
+    darwin
+    // {
+      overrides = {
+        "pg-claude-control@phillipgreenii-nix-agent-support-marketplace-local" = false;
+        "pg-claude-control" = true;
+      };
+    }
+  ) { assistants = two; };
+  customControl = case (
+    darwin
+    // {
+      control = {
+        enable = true;
+        package = fakeControl;
+      };
+    }
+  ) { assistants = two; };
+  relativeClaudeJson = case darwin {
+    assistants = two;
+    claudeJson = "relative/.claude.json";
+  };
   overrideOn = case (darwin // { overrides."pg-claude-control" = true; }) { assistants = two; };
   overridesUndeclared = case (darwin // { overrides = null; }) { assistants = two; };
   relativeCwd = case darwin {
@@ -587,6 +645,13 @@ let
       == "${pkgs.pg-claude-control}/bin/pg-claude-control";
     overrideOffAsserts = oneMessageWith overrideOff "marketplaces.overrides";
     overrideKeyOffAsserts = oneMessageWith overrideKeyOff "marketplaces.overrides";
+    overrideKeyOnBareOffPasses = failedAssertions overrideKeyOnBareOff == [ ];
+    overrideKeyOffBareOnAsserts = oneMessageWith overrideKeyOffBareOn "marketplaces.overrides";
+    controlPackageFromTheOption =
+      (settingsOf customControl).paths.pg_claude_control == "${fakeControl}/bin/pg-claude-control";
+    relativeClaudeJsonAsserts = oneMessageWith relativeClaudeJson "claudeJson";
+    sessionPathChangesHash = sessionVarsHashOf sessionPathA != sessionVarsHashOf sessionPathB;
+    zshVarsChangeHash = sessionVarsHashOf zshVarsA != sessionVarsHashOf zshVarsB;
     overrideOnPasses = failedAssertions overrideOn == [ ];
     overridesUndeclaredPasses = failedAssertions overridesUndeclared == [ ];
     relativeCwdAsserts =

@@ -60,7 +60,7 @@ const usageText = `usage: pg-claude-control <command> [flags]
                                          (it may be asking to stop its tasks or stay) exits 20
   read      <target> --json              read the prompt draft
   usage     <target> [--json]            context size, rate-limit and cost figures (always waits for the reply)
-  list      [--json]                    every running Claude: pid, session, name, inbox present
+  list      [--json]                     every running Claude: pid, session, name, inbox present
 
 <target> is a pid, a session id (UUID) or a name; pid:, session: and name: force one reading.
 Flags: --json  --wait <duration> (inbox wait, default 3s)  --timeout <duration> (reply wait, default 10s)
