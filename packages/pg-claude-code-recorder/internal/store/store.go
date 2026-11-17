@@ -210,6 +210,11 @@ type Store struct {
 	bulkBytes   int64
 
 	mu sync.Mutex // serializes every write
+	// hmu guards only the wdb, rdb and cdb pointers: Open and Close assign them
+	// under it, and a caller that merely copies a handle (a scrape, a read
+	// transaction, a checkpoint) takes the read side. It is never held across a
+	// database call, so none of those callers waits on a write in flight.
+	hmu sync.RWMutex
 	// waitNow is the clock of the write-lock wait (time.Now when nil) and
 	// onContended a test seam that runs after a lock attempt found the lock busy
 	// and before it queues.
@@ -671,7 +676,9 @@ func (s *Store) openDB(ctx context.Context, path string, bulk bool) error {
 		return err
 	}
 	c.SetMaxOpenConns(1)
+	s.hmu.Lock()
 	s.wdb, s.rdb, s.cdb = w, r, c
+	s.hmu.Unlock()
 	s.deferIdx = bulk
 	s.sessionRef = marked
 	return nil
@@ -729,6 +736,14 @@ func (s *Store) SessionRefReady() bool { return s.sessionRef }
 // truncated to at most this size when the WAL restarts.
 const JournalSizeLimit = 1073741824
 
+// checkpointDB returns the checkpoint handle (nil after Close) without waiting
+// on the write lock.
+func (s *Store) checkpointDB() *sql.DB {
+	s.hmu.RLock()
+	defer s.hmu.RUnlock()
+	return s.cdb
+}
+
 // Checkpoint runs one PASSIVE WAL checkpoint on its own connection and returns
 // the frames in the WAL (log) and the frames already moved into the database
 // (checkpointed). Both are cumulative until the WAL restarts; checkpointed ==
@@ -737,9 +752,7 @@ const JournalSizeLimit = 1073741824
 // after Close.
 func (s *Store) Checkpoint() (log, checkpointed int, err error) {
 	ctx := context.Background()
-	s.mu.Lock()
-	c := s.cdb
-	s.mu.Unlock()
+	c := s.checkpointDB()
 	if c == nil {
 		return 0, 0, errors.New("store closed")
 	}
@@ -762,9 +775,7 @@ const walBusyTimeoutMS = 5000
 // a writer held it) and the attempt gave up; the WAL is then unchanged. It
 // returns an error after Close.
 func (s *Store) CheckpointTruncate(busyTimeout time.Duration) (busy bool, err error) {
-	s.mu.Lock()
-	c := s.cdb
-	s.mu.Unlock()
+	c := s.checkpointDB()
 	if c == nil {
 		return false, errors.New("store closed")
 	}
@@ -803,7 +814,9 @@ func (s *Store) closeDBs() {
 	if s.rdb != nil {
 		_ = s.rdb.Close()
 	}
+	s.hmu.Lock()
 	s.wdb, s.rdb, s.cdb = nil, nil, nil
+	s.hmu.Unlock()
 }
 
 func (s *Store) metaInt(ctx context.Context, key string) int64 {
@@ -1479,7 +1492,9 @@ func (s *Store) CloseCtx(ctx context.Context) error {
 			cancel()
 		}
 		_ = s.cdb.Close()
+		s.hmu.Lock()
 		s.cdb = nil
+		s.hmu.Unlock()
 	}
 	if s.wdb != nil {
 		// Checkpoint so a reopen starts from a small WAL; a reader that pins the

@@ -72,9 +72,7 @@ func (s *Store) CollectStats(ctx context.Context, limit int, now time.Time) (sta
 	if limit <= 0 {
 		limit = DefaultAnalysisLimit
 	}
-	s.mu.Lock()
-	c := s.cdb
-	s.mu.Unlock()
+	c := s.checkpointDB()
 	if c == nil {
 		return 0, errors.New("store closed")
 	}

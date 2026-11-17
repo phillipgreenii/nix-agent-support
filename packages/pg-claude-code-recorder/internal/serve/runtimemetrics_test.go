@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -125,5 +126,40 @@ func TestScrapeRefreshNeverReachesTheStoreOrTheDirectoryWalk(t *testing.T) {
 	}
 	if el := time.Since(start); el > time.Second {
 		t.Fatalf("scrape took %v", el)
+	}
+}
+
+// A scrape of a real daemon must answer while a store write is in flight: the
+// scrape reads the pool statistics, which MUST NOT wait on the write lock.
+func TestScrapeAnswersWhileTheStoreWriteLockIsHeld(t *testing.T) {
+	e := newEnv(t, false)
+	d := e.open(t)
+	inside := make(chan struct{})
+	gate := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = d.st.WithWrite("test.hold", func(*sql.Tx) error {
+			close(inside)
+			<-gate
+			return nil
+		})
+	}()
+	<-inside
+	defer func() { close(gate); <-done }()
+	h := exporter.Handler(d.obs.Reg, d.scrapeRefresh)
+	res := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), "GET", "/metrics", nil))
+		res <- rec
+	}()
+	select {
+	case rec := <-res:
+		if rec.Code != 200 {
+			t.Fatalf("scrape: %d", rec.Code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scrape waited on the store write lock")
 	}
 }

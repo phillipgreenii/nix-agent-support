@@ -89,9 +89,9 @@ func (s *Store) ReadTx(fn func(*Reader) error) error {
 // deadline (the connection fixes it at BeginTx), so a request deadline works
 // through ctx and the earlier of the two ends the statement.
 func (s *Store) ReadTxCtx(ctx context.Context, fn func(*Reader) error) error {
-	s.mu.Lock()
+	s.hmu.RLock()
 	db := s.rdb
-	s.mu.Unlock()
+	s.hmu.RUnlock()
 	if db == nil {
 		return errors.New("store closed")
 	}
@@ -111,9 +111,9 @@ type PoolStats struct {
 // PoolStats returns the pool statistics of the read and the write handles
 // (counters kept in memory; it issues no query).
 func (s *Store) PoolStats() PoolStats {
-	s.mu.Lock()
+	s.hmu.RLock()
 	r, w := s.rdb, s.wdb
-	s.mu.Unlock()
+	s.hmu.RUnlock()
 	var ps PoolStats
 	if r != nil {
 		ps.Read = r.Stats()
