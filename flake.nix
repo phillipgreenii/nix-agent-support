@@ -6499,16 +6499,18 @@
                     jq -e '.modules == ["./register.ts"]' "$plugin/hooks/hooks.json" >/dev/null
                     jq -e '.defaultEnabled == true' "$plugin/.claude-plugin/plugin.json" >/dev/null
                     jq -e '.properties.reason.enum == ["prompt_input_exit","clear","other","resume","logout"]' "$plugin/schema/session-end.schema.json" >/dev/null
-                    for f in register.ts core.ts core.test.ts; do test -f "$plugin/hooks/$f"; done
+                    for f in register.ts register.test.ts core.ts core.test.ts; do test -f "$plugin/hooks/$f"; done
                     mkdir -p work/hooks work/scripts work/schema
                     cp "$plugin/hooks/core.ts" work/hooks/core.ts
                     sed -e "s#'./core'#'./core.ts'#" "$plugin/hooks/core.test.ts" > work/hooks/core.test.ts
+                    sed -e "s#'./core'#'./core.ts'#" "$plugin/hooks/register.ts" > work/hooks/register.ts
+                    sed -e "s#'./register'#'./register.ts'#" "$plugin/hooks/register.test.ts" > work/hooks/register.test.ts
                     cp "$plugin/scripts/listen.sh" work/scripts/listen.sh
                     cp "$plugin/schema/session-end.schema.json" work/schema/
                     chmod +x work/scripts/listen.sh
                     cd work/hooks
                     export HOME="$TMPDIR" TMPDIR="$TMPDIR"
-                    node --experimental-strip-types --test --test-timeout=120000 core.test.ts
+                    node --experimental-strip-types --test --test-timeout=120000 core.test.ts register.test.ts
                     touch $out
                   '';
 

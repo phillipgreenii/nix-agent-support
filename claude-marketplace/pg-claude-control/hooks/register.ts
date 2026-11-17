@@ -49,6 +49,7 @@ export const register: Register = on => {
       for (;;) {
         const t0 = await io.now()
         let code: number | null = null
+        let refused = false
         try {
           const child = $.process.spawn({
             argv: ['bash', `${$.plugin.root}/scripts/listen.sh`],

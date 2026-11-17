@@ -698,3 +698,27 @@ func TestExitCodeValues(t *testing.T) {
 		}
 	}
 }
+
+// TestUsageTextExitCodes pins the usage text's exit-code list to the exit constants.
+func TestUsageTextExitCodes(t *testing.T) {
+	for _, c := range []struct {
+		code int
+		name string
+	}{
+		{exitOK, "written"},
+		{exitInternal, "unexpected"},
+		{exitUsage, "usage"},
+		{exitNoControlMod, "no control mod"},
+		{exitNoProcess, "no such Claude process"},
+		{exitNoReply, "no reply"},
+		{exitNotAccepting, "mod not accepting"},
+		{exitStayed, "session stayed"},
+		{exitRefused, "refused by the mod"},
+		{exitAmbiguous, "ambiguous target"},
+	} {
+		want := fmt.Sprintf("%d %s", c.code, c.name)
+		if !strings.Contains(strings.ReplaceAll(usageText, "\n", " "), want) {
+			t.Errorf("usageText lacks %q", want)
+		}
+	}
+}
