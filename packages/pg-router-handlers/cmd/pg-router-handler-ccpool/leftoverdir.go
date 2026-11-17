@@ -281,7 +281,23 @@ func (p pacedRemover) DrainErr(ctx context.Context, path string) error {
 // purgeTrash deletes trash entries older than grace (a delete that was killed
 // part-way or cut short by its budget), paced like the original delete. Everything in the trash was moved there by reclaimLeftoverDir
 // after the plain-tree check; RemoveAll never follows a symlink.
+//
+// It runs once per distinct dir within one janitor run (firstPurge), and its drain
+// budget is bounded by the time the pass context has left (trashBudget), so a
+// large trash cannot consume the whole role share the sweep's later stages need.
 func purgeTrash(ctx context.Context, dir string, now time.Time, grace time.Duration) {
+	if !firstPurge(ctx, dir) {
+		return
+	}
+	removal := pacedRemoval
+	base := removal.Budget
+	if base <= 0 {
+		base = worktree.DefaultBudget
+	}
+	removal.Budget = trashBudget(ctx, base)
+	if removal.Budget <= 0 {
+		return
+	}
 	trashRoot := filepath.Join(dir, trashDirName)
 	entries, err := os.ReadDir(trashRoot)
 	if err != nil {
@@ -292,7 +308,7 @@ func purgeTrash(ctx context.Context, dir string, now time.Time, grace time.Durat
 		if err != nil || trashAge(e.Name(), info.ModTime(), now) < grace {
 			continue
 		}
-		st, err := pacedRemoval.DrainTree(ctx, filepath.Join(trashRoot, e.Name()))
+		st, err := removal.DrainTree(ctx, filepath.Join(trashRoot, e.Name()))
 		if err != nil {
 			slog.Warn("worktree sweep: cannot purge a trash entry", "entry", e.Name(), "err", err)
 			continue

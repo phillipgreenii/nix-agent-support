@@ -132,6 +132,7 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 		return 0
 	}
 	counts := countsFrom(ctx)
+	counts.enter(phaseList)
 	listStart := time.Now()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -176,6 +177,7 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 		candidates = append(candidates, c)
 	}
 	counts.setPhase(phaseList, time.Since(listStart))
+	counts.enter(phaseProbe)
 	probeStart := time.Now()
 	if len(candidates) > 0 && env.cwds != nil {
 		// One process listing for the whole pass, taken only when something is a
@@ -199,6 +201,7 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 		candidates = kept
 	}
 	counts.setPhase(phaseProbe, time.Since(probeStart))
+	counts.enter(phaseScan)
 	scanStart := time.Now()
 	reached := map[string]bool{}
 	examined := 0
@@ -415,6 +418,13 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	dirty, err := st.Status(ctx)
 	if err != nil {
 		slog.Warn("worktree sweep: status unreadable; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
+			// A status that timed out would time out again at full cost on the next run
+			// (it is the oldest unexamined candidate, so it comes first again); cache it
+			// like any other keep so it is retried only after the recheck window or
+			// when the worktree changes.
+			keepRemember(env.lockDir, c, sig, now, deps.Cfg.WorktreeKeepRecheck)
+		}
 		return false, didGit, false
 	}
 	// Interrupted checkout (pg2-f6lxmp): a zero-byte index.lock older than the grace

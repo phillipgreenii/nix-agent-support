@@ -144,6 +144,12 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 			attemptedOne = true
 		}
 	}
+	// Candidates, then examined one by one under the pass context. A pass cut at
+	// its share (the janitor) stops between candidates and, with a resume
+	// cursor, the next run continues after the last candidate it finished, so a
+	// pool whose candidates cost a bd call each is walked across runs instead of
+	// restarting at the same first candidates every time.
+	var cands []ccpool.Session
 	for _, s := range sessions {
 		if !strings.HasPrefix(s.ExternalID, prefix) {
 			continue
@@ -151,32 +157,52 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 		// EXCLUSIVITY (INV-CCH-20): a marked row was handled above (or is left to a
 		// later pass); this branch must never touch it, or one row would be closed
 		// twice in a single pass.
-		if s.PurgePending() {
+		if s.PurgePending() || !reconcilableState(s.State) {
 			continue
 		}
-		if !reconcilableState(s.State) {
-			continue
+		cands = append(cands, s)
+	}
+	counts.seen(len(cands))
+	counts.enter(phaseReconcile)
+	cursor, resumable := resumeFrom(ctx, prefix)
+	if resumable {
+		cands = rotateAfter(cands, cursor.load())
+	}
+	for _, s := range cands {
+		if ctx.Err() != nil {
+			return closed // cut: the cursor stays on the last finished candidate
 		}
-		counts.seen(1)
 		counts.examined()
-		if !beadAlreadyClosed(ctx, br, s) {
-			continue
-		}
-		if guard != nil {
-			if ok, reason := guard(ctx, s); !ok {
-				slog.Info("reconcile: preserving closed-bead session", "session", s.ExternalID, "reason", reason)
-				continue
-			}
-		}
-		if quiet != nil && !quiet(s) {
-			slog.Info("reconcile: session transcript still active; deferring", "session", s.ExternalID)
-			continue
-		}
-		if closeSession(ctx, cc, open, repoRoot, worktreeDir, s, worktreeInUseByPeer(sessions, s)) {
-			closed++
+		closed += reconcileOneClosedBead(ctx, cc, open, br, repoRoot, worktreeDir, quiet, guard, sessions, s)
+		if resumable && ctx.Err() == nil {
+			cursor.save(s.ExternalID)
 		}
 	}
+	if resumable && ctx.Err() == nil {
+		cursor.clear()
+	}
 	return closed
+}
+
+// reconcileOneClosedBead examines one candidate and returns 1 when it closed it.
+func reconcileOneClosedBead(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard, sessions []ccpool.Session, s ccpool.Session) int {
+	if !beadAlreadyClosed(ctx, br, s) {
+		return 0
+	}
+	if guard != nil {
+		if ok, reason := guard(ctx, s); !ok {
+			slog.Info("reconcile: preserving closed-bead session", "session", s.ExternalID, "reason", reason)
+			return 0
+		}
+	}
+	if quiet != nil && !quiet(s) {
+		slog.Info("reconcile: session transcript still active; deferring", "session", s.ExternalID)
+		return 0
+	}
+	if closeSession(ctx, cc, open, repoRoot, worktreeDir, s, worktreeInUseByPeer(sessions, s)) {
+		return 1
+	}
+	return 0
 }
 
 // reconcilableState reports whether state is one reconcileClosedBeadSessions

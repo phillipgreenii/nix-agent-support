@@ -27,6 +27,12 @@ const (
 	phaseScan  = "scan"
 )
 
+// Stages of closed_bead_reconcile, named in a cut-stage record.
+const (
+	phasePurgeRetry = "purge_retry"
+	phaseReconcile  = "reconcile"
+)
+
 // passCounts is one pass's numbers for one role in one run. Unexamined is
 // derived when the pass ends (Candidates - Examined - Cached), so the counters
 // add up by construction; Kept is Examined - Removed.
@@ -57,6 +63,34 @@ type passCounts struct {
 	ListCalls    int   `json:"list_calls"`
 	ListTimeouts int   `json:"list_timeouts"`
 	ListWallMS   int64 `json:"list_wall_ms"`
+
+	// phase is the stage the pass last entered (enter). watch is the pass's
+	// context; the first enter after it ended freezes the stage that was
+	// running as cutPhase (cutSet), because a pass keeps running, and entering
+	// later stages, for a while after its share expires.
+	phase    string
+	watch    context.Context
+	cutPhase string
+	cutSet   bool
+}
+
+// enter records the stage the pass is now in. Nil-safe.
+func (c *passCounts) enter(phase string) {
+	if c == nil {
+		return
+	}
+	if !c.cutSet && c.watch != nil && c.watch.Err() != nil {
+		c.cutPhase, c.cutSet = c.phase, true
+	}
+	c.phase = phase
+}
+
+// cutStagePhase is the stage the pass was in when its context ended.
+func (c *passCounts) cutStagePhase() string {
+	if c.cutSet {
+		return c.cutPhase
+	}
+	return c.phase
 }
 
 // listCall records one `ccpool list` call of d wall time; timedOut says the

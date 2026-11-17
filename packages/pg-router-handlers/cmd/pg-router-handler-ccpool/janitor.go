@@ -106,8 +106,8 @@ func (p janitorPasses) clock() time.Time {
 func prodJanitorPasses() janitorPasses {
 	gb := newGaugeBatch()
 	return janitorPasses{
-		closedBead: func(ctx context.Context, _ roles.Role, cfg config.Config, deps executor.Deps) int {
-			return reconcileClosedBeadSessions(ctx, deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
+		closedBead: func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
+			return reconcileClosedBeadSessions(withResume(ctx, deps.LockDir, rolePool(role)), deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
 		},
 		defaultPool: func(ctx context.Context, cfg config.Config) int { return reconcileDefaultPool(ctx, cfg) },
 		orphan: func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
@@ -128,6 +128,14 @@ func prodJanitorPasses() janitorPasses {
 			return ccpool.NewCLIRunner(config.Default()).Version(ctx)
 		},
 	}
+}
+
+// rolePool is the pool key of role, as loadJanitorRoles derives it.
+func rolePool(role roles.Role) string {
+	if role.CCPool != nil && role.CCPool.PoolDir != "" {
+		return role.CCPool.PoolDir
+	}
+	return os.Getenv("CCPOOL_POOL")
 }
 
 // janitorOptions are the parsed flags.
@@ -261,12 +269,24 @@ type janitorRun struct {
 	// really reached its deadline.
 	cutRoles []string
 	skipped  []string
+	// cutStages records, for each role cut at its share, the pass and stage that
+	// was running when the share expired (the first such pass of the role).
+	cutStages []cutStage
 	// counts is each role-level pass's progress counters, in run order
 	// (INV-CCH-41, design D2).
 	counts []*passCounts
 	// pool is the pool key of the role whose passes are running, stamped on
 	// their counters so the list numbers can be read per pool.
 	pool string
+}
+
+// cutStage names where a role's share expired: the pass, and for passes that
+// have stages (worktree_sweep: list, probe or scan; closed_bead_reconcile:
+// purge_retry or reconcile) the stage.
+type cutStage struct {
+	Role  string `json:"role"`
+	Pass  string `json:"pass"`
+	Phase string `json:"phase,omitempty"`
 }
 
 // listStats are the list-call numbers of a run or of one pool.
@@ -304,6 +324,8 @@ func (j *janitorRun) runPass(ctx context.Context, name, role string, deps execut
 		j.stats[name] = st
 	}
 	counts := &passCounts{Pass: name, Role: role, Pool: j.pool}
+	aliveAtStart := ctx.Err() == nil
+	counts.watch = ctx
 	start := time.Now()
 	n, err := func() (n int, err error) {
 		defer func() {
@@ -327,6 +349,19 @@ func (j *janitorRun) runPass(ctx context.Context, name, role string, deps execut
 	}
 	if ctx.Err() != nil {
 		j.cutOff = true
+		// Only the pass the share expired in is the cut stage: one that started
+		// on an already expired context was cut earlier.
+		if aliveAtStart {
+			already := false
+			for _, cs := range j.cutStages {
+				if cs.Role == role {
+					already = true
+				}
+			}
+			if !already {
+				j.cutStages = append(j.cutStages, cutStage{Role: role, Pass: name, Phase: counts.cutStagePhase()})
+			}
+		}
 		if n := len(j.cutRoles); n == 0 || j.cutRoles[n-1] != role {
 			j.cutRoles = append(j.cutRoles, role)
 		}
@@ -390,6 +425,8 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	run := &janitorRun{passes: passes, stats: map[string]*passStat{}}
 	runCtx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
+	// A trash directory is purged once per run, however many roles share it.
+	runCtx = withTrashPurged(runCtx)
 
 	poolDone := map[string]bool{}
 	defaultPoolDone := false
@@ -431,8 +468,11 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	// Lock GC is deliberately detached from the run deadline (a cheap, handler-wide pass that always runs).
 	run.runPass(context.WithoutCancel(runCtx), passLockGC, "", lockDeps, func(context.Context) int { return passes.lockGC(lockDeps) })
 
+	// outcome=deadline covers both a run that reached its own deadline and one
+	// where only a role's share expired; run_deadline_reached tells them apart.
+	runDeadlineReached := runCtx.Err() != nil
 	outcome := janitorCompleted
-	if run.cutOff || runCtx.Err() != nil {
+	if run.cutOff || runDeadlineReached {
 		outcome = janitorDeadline
 	}
 	rolesDone := finishedRoles(order, run.cutRoles, run.skipped)
@@ -456,8 +496,11 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		"reclaimed":     reclaimed,
 		"roles_skipped": run.skipped,
 		"roles_cut":     run.cutRoles,
-		"roles_done":    rolesDone,
-		"counters":      run.counts,
+		"cut_stages":    run.cutStages,
+
+		"run_deadline_reached": runDeadlineReached,
+		"roles_done":           rolesDone,
+		"counters":             run.counts,
 	}
 	_ = log.Emit("info", janitorRunEvent, "janitor run "+outcome, fields)
 	emitJanitorGauges(ctx, passes.emit, time.Now(), outcome, elapsed, run.stats, rolesDone)
