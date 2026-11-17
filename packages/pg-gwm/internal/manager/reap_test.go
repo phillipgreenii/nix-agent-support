@@ -256,6 +256,11 @@ func renewRacesReap(t *testing.T, iterations int, mk func(*testing.T, ...func(*c
 	e := mk(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
 	for i := 0; i < iterations; i++ {
 		rec := e.mustLease(LeaseRequest{Name: "n", Detach: true, TTL: ptr(dur(t, "1h"))})
+		// Exactly one worktree must exist, or reap's keep budget (min 1) may
+		// legitimately remove the expired one in favor of a stray released one.
+		if n := len(e.state().Worktrees); n != 1 {
+			t.Fatalf("iteration %d: %d worktrees before the race, want 1: %+v", i, n, e.state().Worktrees)
+		}
 		e.now = e.now.Add(2 * time.Hour) // the lease is now expired
 		renewer := e.manager(func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
 		var wg sync.WaitGroup
@@ -281,6 +286,9 @@ func renewRacesReap(t *testing.T, iterations int, mk func(*testing.T, ...func(*c
 			if _, err := e.m.Release(t.Context(), LeaseKey{LeaseID: str(rec.LeaseID)}); err != nil {
 				t.Fatal(err)
 			}
+			// The release leaves the worktree released, not available; settle it
+			// so the next lease reuses it instead of creating a second one.
+			e.mustReap(ReapOptions{})
 			continue
 		}
 		wantErr(t, renewErr, "lease-lost", 25)
