@@ -54,7 +54,18 @@ type Facts struct {
 	// while the recorder still listed the Process alive.
 	pidAlive  func(pid int) bool
 	goneTries map[int]int
+	// emptyPids are the alive Processes the last discovery listed with no
+	// session id yet; emptyTries counts, per pid, the discoveries that
+	// sessionless state has forced.
+	emptyPids  []int
+	emptyTries map[int]int
 }
+
+// maxEmptyTries bounds how many discoveries one alive Process with no session
+// id yet can force (the recorder binds a new session's registry record to its
+// Process within a few seconds; a Process that never gets one, such as a
+// non-interactive Claude run, must not make every Scan discover).
+const maxEmptyTries = 6
 
 // maxGoneTries bounds how many discoveries one pid can force by being dead
 // locally while the recorder still lists it alive (the recorder notices an exit
@@ -187,6 +198,30 @@ func (f *Facts) liveProcessGone() bool {
 	return gone
 }
 
+// sessionIDPending reports whether the last discovery listed an alive Process
+// whose session id was still empty: a session start writes its registry record
+// before the Process fact carries the session id, so the one discovery the
+// record triggered saw nothing new and the next would be the heartbeat. Each
+// such pid forces at most maxEmptyTries rediscoveries, and none once it has a
+// session id, so the steady process.list rate is unchanged.
+func (f *Facts) sessionIDPending() bool {
+	pending := false
+	seen := make(map[int]bool, len(f.emptyPids))
+	for _, pid := range f.emptyPids {
+		seen[pid] = true
+		if f.emptyTries[pid] < maxEmptyTries {
+			f.emptyTries[pid]++
+			pending = true
+		}
+	}
+	for pid := range f.emptyTries {
+		if !seen[pid] {
+			delete(f.emptyTries, pid)
+		}
+	}
+	return pending
+}
+
 // cachedRegistrations is the previous discovery answer, copied.
 func (f *Facts) cachedRegistrations() []*session.Session {
 	out := make([]*session.Session, 0, len(f.live)+len(f.ended))
@@ -309,6 +344,9 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 		if !changed && f.liveProcessGone() {
 			changed = true
 		}
+		if !changed && f.sessionIDPending() {
+			changed = true
+		}
 		if f.haveSnapshot && !f.fetchFailed && !changed && f.clock().Sub(f.lastFetch) < f.heartbeat {
 			return f.cachedRegistrations(), nil
 		}
@@ -331,8 +369,13 @@ func (f *Facts) discover(ctx context.Context, c *client.Client) ([]*session.Sess
 	}
 	var live []*session.Session
 	liveSeen := map[string]bool{}
+	var empty []int
 	for _, p := range alive.Processes {
-		if p.SessionID == "" || liveSeen[p.SessionID] {
+		if p.SessionID == "" {
+			empty = append(empty, int(p.Pid))
+			continue
+		}
+		if liveSeen[p.SessionID] {
 			continue
 		}
 		liveSeen[p.SessionID] = true
@@ -391,6 +434,10 @@ func (f *Facts) discover(ctx context.Context, c *client.Client) ([]*session.Sess
 		return nil, err
 	}
 	f.live, f.ended, f.endedSeeded = live, ended, true
+	f.emptyPids = empty
+	if f.emptyTries == nil {
+		f.emptyTries = map[int]int{}
+	}
 
 	out := make([]*session.Session, 0, len(live)+len(ended))
 	for _, s := range live {
@@ -444,6 +491,7 @@ func (f *Facts) resetEnded() {
 	f.endedSeeded = false
 	f.haveSnapshot, f.regCursor = false, ""
 	f.live, f.ended = nil, nil
+	f.emptyPids, f.emptyTries = nil, nil
 }
 
 // wrapScan is wrap for a scan: an outage also forgets the carried state.

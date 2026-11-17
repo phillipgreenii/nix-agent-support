@@ -216,3 +216,95 @@ func TestDiscoveryGateGivesUpOnAPidTheRecorderKeepsAlive(t *testing.T) {
 		t.Errorf("process.list = %d, want at most %d forced discoveries", n, maxGoneTries)
 	}
 }
+
+// TestDiscoveryGateRediscoversAStartWhoseProcessHasNoSessionIDYet: a Process the
+// recorder lists with no session id yet (the registry record arrived first, or
+// the binding has not settled) is rediscovered on the next Scans, within the
+// heartbeat, and the session shows as soon as the id is bound. The clock never
+// advances, so the heartbeat cannot be what fires.
+func TestDiscoveryGateRediscoversAStartWhoseProcessHasNoSessionIDYet(t *testing.T) {
+	e, f, since := scanEnv(t)
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	f.now = func() time.Time { return now }
+	f.SetDiscoveryHeartbeat(60 * time.Second)
+	f.pidAlive = func(int) bool { return true }
+
+	// A new Process whose registry record carries no session id yet.
+	e.Procs.Add(505, time.UnixMilli(startMs), nil)
+	writeRegistry(t, e, 505, "", "busy", "")
+	f.ResyncEnded()
+	for i := 0; i < 2; i++ { // discover it sessionless, drain the seed's feed read
+		if _, err := f.Registrations(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since()
+
+	// The next Scan rediscovers although nothing changed in the feed.
+	if _, err := f.Registrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ops(since(), "process.list")); n != 1 {
+		t.Fatalf("process.list on the Scan after a sessionless Process = %d, want 1", n)
+	}
+
+	// The session id is bound: the session shows within the Scan interval.
+	writeRegistry(t, e, 505, "example-new", "busy", "")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got, err := f.Registrations(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if byID(got, "example-new") != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("session never appeared")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	since()
+	for i := 0; i < 2; i++ { // trailing feed reads
+		if _, err := f.Registrations(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since()
+	if _, err := f.Registrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ops(since(), "process.list")); n != 0 {
+		t.Errorf("steady state after the session appeared: process.list = %d, want 0", n)
+	}
+}
+
+// TestDiscoveryGateGivesUpOnAProcessThatNeverGetsASessionID: a Process that
+// stays sessionless forces only a bounded number of discoveries, so the steady
+// process.list rate does not rise.
+func TestDiscoveryGateGivesUpOnAProcessThatNeverGetsASessionID(t *testing.T) {
+	e, f, since := scanEnv(t)
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	f.now = func() time.Time { return now }
+	f.SetDiscoveryHeartbeat(60 * time.Second)
+	f.pidAlive = func(int) bool { return true }
+	e.Procs.Add(506, time.UnixMilli(startMs), nil)
+	writeRegistry(t, e, 506, "", "busy", "")
+	f.ResyncEnded()
+	for i := 0; i < 3; i++ {
+		if _, err := f.Registrations(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since()
+	for i := 0; i < maxEmptyTries+6; i++ {
+		if _, err := f.Registrations(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(ops(since(), "process.list")); n > maxEmptyTries {
+		t.Errorf("process.list = %d, want at most %d forced discoveries", n, maxEmptyTries)
+	}
+}
