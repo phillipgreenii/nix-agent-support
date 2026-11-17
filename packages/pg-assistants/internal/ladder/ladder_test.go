@@ -355,6 +355,75 @@ func TestMeterWithoutPointsSetsNoTarget(t *testing.T) {
 		want{act: ActNone, rung: RungNone, kind: KindMeter})
 }
 
+// NudgeIgnored is the signal behind status's "did not exit after the nudge"
+// hint: it is set when the interrupt fires once grace.interrupt has passed
+// since the nudge, whichever reason wins the step, and never otherwise.
+func TestNudgeIgnored(t *testing.T) {
+	nudged := func(k Kind) State { return State{Kind: k, Rung: RungNudge, At: t0} }
+	due := t0.Add(5 * time.Minute)
+	early := t0.Add(time.Minute)
+	exitIn := enabled(due)
+	exitIn.ExitRequested = true
+	cases := []struct {
+		name       string
+		s          State
+		in         Input
+		act        Action
+		reasonHas  string
+		reasonNot  string
+		wantIgnore bool
+	}{
+		{"time step, no meters", nudged(KindMeter), enabled(due), ActInterrupt, "after the nudge", "", true},
+		{"time step, meter below interrupt", nudged(KindMeter), enabled(due, contextMeter(0.85, "")), ActInterrupt, "after the nudge", "", true},
+		{"meter crosses before the grace", nudged(KindMeter), enabled(early, contextMeter(0.96, "")), ActInterrupt, "context at 96%", "", false},
+		// Both due on the same call: the meter wins the reason, and the hint
+		// still holds, because the session did not exit within the grace.
+		{"meter and time step both due", nudged(KindMeter), enabled(due, contextMeter(0.96, "")), ActInterrupt, "context at 96%", "after the nudge", true},
+		{"block meter and time step both due", nudged(KindMeter), enabled(due, blockMeter("five_hour", 0.98)), ActInterrupt, "five_hour at 98%", "after the nudge", true},
+		// The disabled ladder's interrupt is always a time step.
+		{"disabled ladder", nudged(KindDisabled), disabled(due), ActInterrupt, "after the nudge", "", true},
+		{"exit request", nudged(KindMeter), exitIn, ActGracefulStop, "exit requested", "", false},
+		{"before the grace, no meter", nudged(KindMeter), enabled(early), ActNone, "", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, act, reason := Step(c.s, c.in, g)
+			if act != c.act {
+				t.Fatalf("action = %v, want %v (reason %q)", act, c.act, reason)
+			}
+			if !strings.Contains(reason, c.reasonHas) {
+				t.Errorf("reason = %q, want it to contain %q", reason, c.reasonHas)
+			}
+			if c.reasonNot != "" && strings.Contains(reason, c.reasonNot) {
+				t.Errorf("reason = %q, want it not to contain %q", reason, c.reasonNot)
+			}
+			if got.NudgeIgnored != c.wantIgnore {
+				t.Errorf("NudgeIgnored = %v, want %v", got.NudgeIgnored, c.wantIgnore)
+			}
+		})
+	}
+}
+
+// Once set, NudgeIgnored stays for the session: the kill and force kill that
+// follow keep it, and a change of ladder keeps it as it keeps the rung.
+func TestNudgeIgnoredIsKept(t *testing.T) {
+	s, _, _ := Step(State{Kind: KindMeter, Rung: RungNudge, At: t0}, enabled(t0.Add(5*time.Minute)), g)
+	if !s.NudgeIgnored {
+		t.Fatal("NudgeIgnored not set by the time-step interrupt")
+	}
+	s, act, _ := Step(s, disabled(t0.Add(7*time.Minute)), g)
+	if act != ActKill || !s.NudgeIgnored {
+		t.Errorf("after the kill: action %v, NudgeIgnored %v; want %v, true", act, s.NudgeIgnored, ActKill)
+	}
+	s, act, _ = Step(s, disabled(t0.Add(8*time.Minute)), g)
+	if act != ActForceKill || !s.NudgeIgnored {
+		t.Errorf("after the force kill: action %v, NudgeIgnored %v; want %v, true", act, s.NudgeIgnored, ActForceKill)
+	}
+	if fresh, _, _ := Step(State{}, enabled(t0, contextMeter(0.85, "")), g); fresh.NudgeIgnored {
+		t.Error("a first nudge set NudgeIgnored")
+	}
+}
+
 func TestNames(t *testing.T) {
 	cases := []struct {
 		got, want string

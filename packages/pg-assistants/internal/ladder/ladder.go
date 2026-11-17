@@ -24,6 +24,9 @@
 //     a turn), the disabled ladder's time steps apply as well, with or without
 //     meters; after a kill, a force kill on every call. A session that was never
 //     nudged and has no meter at its nudge point is left alone.
+//   - An interrupt that fires once grace.interrupt has passed since the nudge
+//     marks the state NudgeIgnored, which status shows as a hint (a session
+//     that does not exit after a nudge may be waiting on a permission prompt).
 package ladder
 
 import (
@@ -125,6 +128,13 @@ type State struct {
 	Kind Kind
 	Rung Rung
 	At   time.Time // when the current rung fired
+	// NudgeIgnored is set when the interrupt fired once grace.interrupt had
+	// passed since the nudge: the session did not exit after the nudge (on
+	// the disabled ladder always, since its interrupt is a time step). It is
+	// set whichever reason wins the step, so a meter reaching its interrupt
+	// point on the same call as the time step does not hide it, and it stays
+	// set for the rest of the session. Status shows it as a hint.
+	NudgeIgnored bool
 }
 
 // Meter is one fraction with its own nudge, interrupt and kill points: the
@@ -185,13 +195,19 @@ const stillRunning = "still running after the stop"
 // force kill once the kill has fired. why is the reason for a step toward
 // target; prefix starts the reason for every other step.
 func climb(s State, now time.Time, g Grace, target Rung, why, prefix string) (State, Action, string) {
+	// The interrupt's time step is due: checked before the state moves, so a
+	// meter that wins the step below still records it.
+	interruptDue := s.Rung == RungNudge && now.Sub(s.At) >= g.Interrupt
+	if interruptDue {
+		s.NudgeIgnored = true
+	}
 	switch {
 	case s.Rung >= RungKill:
 		return fire(s, RungForceKill, now), ActForceKill, prefix + stillRunning
 	case target > s.Rung:
 		next := s.Rung + 1
 		return fire(s, next, now), climbAction(next), why
-	case s.Rung == RungNudge && now.Sub(s.At) >= g.Interrupt:
+	case interruptDue:
 		return fire(s, RungInterrupt, now), ActInterrupt,
 			fmt.Sprintf("%sno exit %s after the nudge", prefix, g.Interrupt)
 	case s.Rung == RungInterrupt && now.Sub(s.At) >= g.Kill:
