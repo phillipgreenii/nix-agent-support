@@ -504,6 +504,8 @@ func TestBlankEnv(t *testing.T) {
 		{"not a string", `blank_env = ["EXAMPLE_GUARD", 1]`, "blank_env", []string{"EXAMPLE_GUARD"}},
 		{"not a variable name", `blank_env = ["EXAMPLE=GUARD", "EXAMPLE_OK"]`, "blank_env", []string{"EXAMPLE_OK"}},
 		{"empty name", `blank_env = [""]`, "blank_env", nil},
+		{"HOME", `blank_env = ["HOME", "EXAMPLE_OK"]`, "blank_env", []string{"EXAMPLE_OK"}},
+		{"a name the launch chain sets", `blank_env = ["PG_ASSISTANT_ID", "CLAUDECODE", "EXAMPLE_OK"]`, "blank_env", []string{"EXAMPLE_OK"}},
 	}
 	for _, tc := range bad {
 		t.Run(tc.name, func(t *testing.T) {
@@ -528,6 +530,7 @@ func TestAssistantEnvRules(t *testing.T) {
 		{"value not a string", `env = { EXAMPLE_FOO = 1 }`, "assistant[example-a].env.EXAMPLE_FOO"},
 		{"key not a variable name", `env = { "EXAMPLE=FOO" = "bar" }`, "assistant[example-a].env.EXAMPLE=FOO"},
 		{"not a table", `env = "EXAMPLE_FOO=bar"`, "assistant[example-a].env"},
+		{"reserved name", `env = { PG_ASSISTANT_ID = "x" }`, "assistant[example-a].env.PG_ASSISTANT_ID"},
 		{"value ending in \\;", `env = { EXAMPLE_FOO = "bar\\;" }`, "assistant[example-a].env.EXAMPLE_FOO"},
 	}
 	for _, tc := range cases {
@@ -657,6 +660,8 @@ func TestContextWindowExactIDsOnly(t *testing.T) {
 		{"claude-opus-5-5", 1_000_000, true},
 		{"claude-haiku-5-5", 1_000_000, true},
 		{"claude-fable-5-1", 1_000_000, true},
+		{"claude-fable-5-2", 1_000_000, true},
+		{"claude-opus-5", 1_000_000, true},
 		{"claude-sonnet-4-5", 200_000, true},
 		{"claude-haiku-4-5", 200_000, true},
 		{"claude-sonnet-4-5[1m]", 1_000_000, true},
@@ -673,5 +678,20 @@ func TestContextWindowExactIDsOnly(t *testing.T) {
 		if got != tc.want || known != tc.known {
 			t.Errorf("ContextWindow(%q) = %d, %v; want %d, %v", tc.model, got, known, tc.want, tc.known)
 		}
+	}
+}
+
+func TestInlineAssistantArray(t *testing.T) {
+	one := `assistant = [{ id = "example-a", name = "A", model = "claude-sonnet-5-5", effort = "medium", cwd = "/example/work/a", prompt = "go", context = { limit = 200000, nudge = 0.8, interrupt = 0.95 } }]`
+	cfg := load(t, one+"\n"+pathsTOML)
+	if len(cfg.Assistants) != 1 || cfg.Assistants[0].ID != "example-a" {
+		t.Fatalf("Assistants = %+v, want example-a", cfg.Assistants)
+	}
+	if err := cfg.Strict(); err != nil {
+		t.Errorf("Strict = %v, want nil", err)
+	}
+	cfg = load(t, `assistant = [1]`+"\n"+pathsTOML)
+	if got := fields(cfg.Problems); !slices.Contains(got, "assistant") {
+		t.Errorf("Problems = %v, want one for assistant", cfg.Problems)
 	}
 }

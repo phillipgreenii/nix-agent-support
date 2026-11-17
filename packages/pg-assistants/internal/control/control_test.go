@@ -248,7 +248,7 @@ func TestInterruptArgv(t *testing.T) {
 	if err := c.Interrupt(t.Context(), 42); err != nil {
 		t.Fatal(err)
 	}
-	checkCall(t, only(t, fake), control.CallTimeout, "interrupt", "pid:42", "--reply")
+	checkCall(t, only(t, fake), control.CallTimeout, "interrupt", "pid:42", "--reply", "--timeout", "5s")
 }
 
 func TestInterruptNoTurnIsSuccess(t *testing.T) {

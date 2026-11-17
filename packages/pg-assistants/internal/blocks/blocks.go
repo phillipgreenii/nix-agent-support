@@ -8,7 +8,9 @@
 //   - A stale reading never lowers a fresh one: the engine updates its figures
 //     only after a model response, so an idle session reports old ones. Per
 //     kind the reading with the latest reset time wins; for an equal reset
-//     time, the higher fraction (use within one block only grows). A reading
+//     time, the higher fraction (use within one block only grows), and an
+//     equal reading still refreshes ObservedAt, so a block without a reset
+//     time keeps holding while sessions keep reporting it. A reading
 //     without a reset time never replaces one that has one.
 //   - A reset time further past its observation than the block can last (5
 //     hours or 7 days, plus an hour) is not believed: the reading counts as
@@ -66,6 +68,9 @@ func (t *Tracker) Seed(limits []control.Limit, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, l := range limits {
+		// Live readings carry whole seconds (control.Usage); a status file
+		// written by another version may not.
+		l.ResetsAt = l.ResetsAt.Truncate(time.Second)
 		if l = plausible(l); t.current(l, now) {
 			t.merge(l)
 		}

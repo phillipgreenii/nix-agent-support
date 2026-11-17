@@ -128,7 +128,7 @@ func (o *orphanLoop) tick(loopCtx context.Context, now time.Time) (gone bool) {
 			o.t.pid = pid
 		}
 	}
-	in := ladder.Input{Now: now, Enabled: false, ExitRequested: o.exitRequested()}
+	in := ladder.Input{Now: now, Enabled: false, Orphan: true, ExitRequested: o.exitRequested()}
 	next, act, reason := ladder.Step(o.ladder, in, s.grace)
 	o.ladder = next
 	_ = s.act(ctx, o.t, act, reason) // logged by act; the ladder moves on either way

@@ -32,7 +32,7 @@ import (
 const (
 	// CallTimeout bounds usage, submit, interrupt and stop --signal. It covers
 	// the tool's own waits: up to 3s for a missing inbox plus the reply wait
-	// (5s for usage, the tool's 10s default for interrupt --reply).
+	// (5s for usage and interrupt --reply).
 	CallTimeout = 15 * time.Second
 	// StopMargin is added to a graceful stop's escalation for its bound.
 	StopMargin = 15 * time.Second
@@ -125,7 +125,9 @@ func (c Client) Submit(ctx context.Context, pid int, text string) error {
 // Interrupt runs `interrupt pid:<n> --reply`, which returns once the turn is
 // aborted. A "no turn" refusal is success: there was nothing to abort.
 func (c Client) Interrupt(ctx context.Context, pid int) error {
-	res, err := c.run(ctx, CallTimeout, nil, "interrupt", target(pid), "--reply")
+	// --timeout keeps the tool's reply wait below CallTimeout, so a missing
+	// reply is ErrNoReply and not a masking DeadlineExceeded.
+	res, err := c.run(ctx, CallTimeout, nil, "interrupt", target(pid), "--reply", "--timeout", usageReplyWait.String())
 	if errors.Is(err, ErrRefused) && isNoTurn(res.Stderr) {
 		return nil
 	}

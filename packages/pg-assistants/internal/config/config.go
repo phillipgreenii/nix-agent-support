@@ -69,6 +69,16 @@ func ResolvePath(p string) string {
 	return p
 }
 
+// reservedEnv are the names the launch chain sets itself: the daemon's fixed
+// session entries and the CLAUDE* markers it blanks. blank_env cannot list
+// them and an assistant's env cannot set them. Keep in step with
+// supervisor.LaunchEnv.
+var reservedEnv = []string{
+	"DISABLE_AUTO_COMPACT", "PG_ASSISTANT_ID", "PG_ASSISTANTS_STATE_DIR",
+	"CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT",
+	"CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_EXECPATH",
+}
+
 // Config is the loaded configuration. Durations and points hold their
 // effective values: a global field that failed validation holds its default
 // and is listed in Problems.
@@ -84,7 +94,7 @@ type Config struct {
 	// login shell, and variables meant for the daemon alone.
 	BlankEnv   []string
 	Assistants []Assistant
-	Problems   []FieldError // global fields that fell back to their defaults
+	Problems   []FieldError // global fields that fell back to their defaults, and unknown global keys
 }
 
 // Grace is the [grace] table: the time-based ladder steps, for every ladder.
@@ -249,6 +259,10 @@ func readBlankEnv(top *table) []string {
 			top.problem("blank_env", fmt.Sprintf("entry %d must be a string, got %s; it is left out", i+1, describe(e)))
 		case !envKeyPattern.MatchString(s):
 			top.problem("blank_env", fmt.Sprintf("entry %d, %q, is not an environment variable name ([A-Za-z_][A-Za-z0-9_]*); it is left out", i+1, s))
+		case s == "HOME":
+			top.problem("blank_env", fmt.Sprintf("entry %d, %q, would strip the session's home directory; it is left out", i+1, s))
+		case slices.Contains(reservedEnv, s):
+			top.problem("blank_env", fmt.Sprintf("entry %d, %q, is set by the launch chain itself; it is left out", i+1, s))
 		default:
 			names = append(names, s)
 		}
@@ -312,6 +326,18 @@ func readAssistants(top *table, globalTick time.Duration) []Assistant {
 		return nil
 	}
 	list, isList := v.([]map[string]any)
+	if inline, ok := v.([]any); ok && !isList {
+		// An inline array of tables (assistant = [{...}]) decodes as []any.
+		list, isList = make([]map[string]any, 0, len(inline)), true
+		for i, e := range inline {
+			m, isTable := e.(map[string]any)
+			if !isTable {
+				top.problem("assistant", fmt.Sprintf("entry %d must be a table, got %s; no assistant runs", i+1, describe(e)))
+				return nil
+			}
+			list = append(list, m)
+		}
+	}
 	if !isList {
 		top.problem("assistant", "must be an array of tables ([[assistant]]), got "+describe(v)+"; no assistant runs")
 		return nil
@@ -430,6 +456,10 @@ func readEnv(t *table) map[string]string {
 	for _, k := range sortedKeys(e.m) {
 		if !envKeyPattern.MatchString(k) {
 			e.problem(k, fmt.Sprintf("%q is not an environment variable name ([A-Za-z_][A-Za-z0-9_]*)", k))
+			continue
+		}
+		if slices.Contains(reservedEnv, k) {
+			e.problem(k, fmt.Sprintf("%q is set by the launch chain itself and cannot be set here", k))
 			continue
 		}
 		var s string

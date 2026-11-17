@@ -346,6 +346,39 @@ func TestHintOnNoControlProcessOrBusy(t *testing.T) {
 	}
 }
 
+// A claude that accepted a model id it cannot use answers usage without ever
+// reporting a context count: the status says so after two ticks, and a real
+// reading clears it.
+func TestHintOnNoContextReading(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, exampleA)
+		h.w.usage = func(_ context.Context, name string, n int, _ time.Time) (control.Usage, error) {
+			if n <= 3 {
+				return control.Usage{SessionID: "sess-" + name, Window: 200000}, nil
+			}
+			return control.Usage{SessionID: "sess-" + name, HaveContext: true, ContextTokens: 1000}, nil
+		}
+		h.start()
+		defer h.stop()
+		h.until(time.Minute)
+		if st := h.statusOf(exampleA); st.Hint != "" {
+			t.Errorf("hint after one reading = %q, want none", st.Hint)
+		}
+		h.until(2 * time.Minute)
+		if st := h.statusOf(exampleA); st.Hint != noContextHintText(exampleA) {
+			t.Errorf("hint after two ticks = %q, want %q", st.Hint, noContextHintText(exampleA))
+		}
+		h.until(4 * time.Minute)
+		if st := h.statusOf(exampleA); st.Hint != "" {
+			t.Errorf("hint after a context reading = %q, want none", st.Hint)
+		}
+	})
+}
+
+func noContextHintText(id string) string {
+	return "no context reading yet (model id not accepted? first message unanswered?): pg-assistants attach " + id
+}
+
 func TestStartStallIsKilledAndBacksOff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := newHarness(t, exampleA)

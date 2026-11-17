@@ -1,6 +1,7 @@
 package ladder
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -451,5 +452,57 @@ func TestNames(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("String() = %q, want %q", c.got, c.want)
 		}
+	}
+}
+
+// A meter at its interrupt point wins the step over the interrupt's own time
+// step on the same call, and the time step still marks the nudge ignored.
+func TestMeterBeatsTimeStepOnTheSameCall(t *testing.T) {
+	s := State{Kind: KindMeter, Rung: RungNudge, At: t0}
+	now := t0.Add(g.Interrupt)
+	got, act, reason := Step(s, enabled(now, contextMeter(0.96, "x")), g)
+	if act != ActInterrupt || got.Rung != RungInterrupt {
+		t.Fatalf("action %v rung %v, want interrupt", act, got.Rung)
+	}
+	if !strings.HasPrefix(reason, "context at 96%") {
+		t.Errorf("reason = %q, want the meter's", reason)
+	}
+	if !got.NudgeIgnored {
+		t.Error("NudgeIgnored = false, want true")
+	}
+}
+
+func TestNonFiniteAndZeroPointMetersAreSkipped(t *testing.T) {
+	for name, m := range map[string]Meter{
+		"+Inf":        contextMeter(math.Inf(1), ""),
+		"NaN":         contextMeter(math.NaN(), ""),
+		"zero kill":   {Name: "context", Fraction: 0.99, Points: config.Points{Nudge: 0.8, Interrupt: 0.9}},
+		"zero points": {Name: "context", Fraction: 5},
+	} {
+		if _, act, _ := Step(State{}, enabled(t0, m), g); act != ActNone {
+			t.Errorf("%s: action %v, want none", name, act)
+		}
+	}
+}
+
+func TestToKill(t *testing.T) {
+	got := ToKill(State{}, t0)
+	if got.Kind != KindMeter || got.Rung != RungKill || !got.At.Equal(t0) {
+		t.Errorf("ToKill(zero) = %+v", got)
+	}
+	got = ToKill(State{Kind: KindDisabled, Rung: RungNudge, NudgeIgnored: true}, t0)
+	if got.Kind != KindDisabled || got.Rung != RungKill || !got.NudgeIgnored {
+		t.Errorf("ToKill(disabled) = %+v", got)
+	}
+}
+
+func TestOrphanReasonSaysNotInConfig(t *testing.T) {
+	_, act, reason := Step(State{}, Input{Now: t0, Orphan: true}, g)
+	if act != ActNudge || reason != "not in config" {
+		t.Errorf("action %v reason %q, want nudge for \"not in config\"", act, reason)
+	}
+	_, _, reason = Step(State{}, Input{Now: t0}, g)
+	if reason != "disabled" {
+		t.Errorf("reason = %q, want disabled", reason)
 	}
 }

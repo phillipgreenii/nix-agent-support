@@ -76,10 +76,19 @@ const (
 	// noControlTicks consecutive usage failures saying the mod is not there
 	// (no control mod, no such process, mod not accepting) set the hint.
 	noControlTicks = 3
+	// noContextTicks consecutive answered usage calls without a context token
+	// count mean the session never completed a model turn: claude accepts a
+	// model id it cannot use, shows its prompt and answers the first message
+	// with an error, so it stays idle and no process exit reports it.
+	noContextTicks = 2
 )
 
 // The status hints.
 const permissionPromptHint = "did not exit after the nudge (a permission prompt?)"
+
+func noContextHint(id string) string {
+	return "no context reading yet (model id not accepted? first message unanswered?): pg-assistants attach " + id
+}
 
 func controlModHint(id string) string {
 	return "control mod not answering (shell startup waiting? trust dialog? plugin disabled?): pg-assistants attach " + id
@@ -496,6 +505,7 @@ type session struct {
 	usageErr     string // the latest usage error
 	loggedErr    string // the usage error last logged
 	noControl    int    // consecutive usage failures saying the mod is not there
+	noContext    int    // consecutive answered usage calls without a context token count
 	windowWarned bool
 	stalled      bool // the start stalled: its end counts as a crash
 	exitSeen     bool // an exit request was seen while it ran
@@ -665,7 +675,12 @@ func (l *assistantLoop) usage(ctx context.Context, now time.Time) []ladder.Meter
 		l.s.event(ctx, slog.LevelWarn, evWindowMismatch,
 			append(s.attrs(), "window", u.Window, "configured_window", l.a.Context.Window)...)
 	}
-	if !u.HaveContext || l.a.Context.Limit <= 0 {
+	if !u.HaveContext {
+		s.noContext++
+		return nil
+	}
+	s.noContext = 0
+	if l.a.Context.Limit <= 0 {
 		return nil
 	}
 	s.contextTokens, s.contextAt = u.ContextTokens, now
@@ -693,11 +708,7 @@ func (l *assistantLoop) stalled(ctx context.Context, now time.Time) bool {
 		return false
 	}
 	s.stalled = true
-	kind := s.ladder.Kind
-	if kind == ladder.KindNone {
-		kind = ladder.KindMeter
-	}
-	s.ladder = ladder.State{Kind: kind, Rung: ladder.RungKill, At: now, NudgeIgnored: s.ladder.NudgeIgnored}
+	s.ladder = ladder.ToKill(s.ladder, now)
 	last := s.usageErr
 	if last == "" {
 		last = errNoPID.Error()
@@ -904,6 +915,9 @@ func (l *assistantLoop) status(now time.Time) AssistantStatus {
 	var hints []string
 	if s.noControl >= noControlTicks {
 		hints = append(hints, controlModHint(l.a.ID))
+	}
+	if s.noContext >= noContextTicks {
+		hints = append(hints, noContextHint(l.a.ID))
 	}
 	if s.ladder.NudgeIgnored {
 		hints = append(hints, permissionPromptHint)

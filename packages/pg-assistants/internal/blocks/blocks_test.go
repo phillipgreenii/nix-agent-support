@@ -317,3 +317,14 @@ func TestImplausibleResetIsUnknown(t *testing.T) {
 		t.Errorf("readings = %q, want the one with a plausible reset time", got)
 	}
 }
+
+// A seeded reading with a sub-second reset time equals the live reading of the
+// same block (whole seconds), so the two merge instead of one replacing the other.
+func TestSeedTruncatesResetTime(t *testing.T) {
+	tr := blocks.NewTracker(cfg)
+	tr.Seed([]control.Limit{five(0.5, reset.Add(123*time.Millisecond), t0)}, t0)
+	snap := tr.Snapshot(t0)
+	if len(snap) != 1 || !snap[0].ResetsAt.Equal(reset) {
+		t.Fatalf("snapshot = %+v, want the reset time truncated to %v", snap, reset)
+	}
+}

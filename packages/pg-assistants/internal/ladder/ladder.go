@@ -151,6 +151,7 @@ type Meter struct {
 type Input struct {
 	Now           time.Time
 	Enabled       bool    // false also for an orphan
+	Orphan        bool    // no valid config entry supervises the session; names it in reasons
 	ExitRequested bool    // true while the request is on file
 	Meters        []Meter // only the meters with a current reading
 }
@@ -162,6 +163,7 @@ type Grace struct{ Interrupt, Kill time.Duration }
 // Reason prefixes for the ladders whose reasons are not a meter's.
 const (
 	disabledReason = "disabled"
+	orphanReason   = "not in config"
 	exitReason     = "exit requested"
 )
 
@@ -181,7 +183,11 @@ func Step(s State, in Input, g Grace) (State, Action, string) {
 	case !in.Enabled:
 		s.Kind = KindDisabled
 		// The disabled ladder nudges on the first call, whatever the meters say.
-		return climb(s, in.Now, g, RungNudge, disabledReason, disabledReason+": ")
+		reason := disabledReason
+		if in.Orphan {
+			reason = orphanReason
+		}
+		return climb(s, in.Now, g, RungNudge, reason, reason+": ")
 	default:
 		s.Kind = KindMeter
 		target, why := target(in.Meters)
@@ -215,6 +221,16 @@ func climb(s State, now time.Time, g Grace, target Rung, why, prefix string) (St
 			fmt.Sprintf("%sno exit %s after the interrupt", prefix, g.Kill)
 	}
 	return s, ActNone, ""
+}
+
+// ToKill moves s to the kill rung at now without an action of its own: the
+// caller sends the kill itself (a start that never answered). A session not
+// on a ladder yet is put on the meter ladder; what the nudge did stays.
+func ToKill(s State, now time.Time) State {
+	if s.Kind == KindNone {
+		s.Kind = KindMeter
+	}
+	return State{Kind: s.Kind, Rung: RungKill, At: now, NudgeIgnored: s.NudgeIgnored}
 }
 
 // climbAction is the action that fires rung r on the way up.
@@ -256,7 +272,9 @@ func target(meters []Meter) (Rung, string) {
 func (m Meter) rung() Rung {
 	p := m.Points
 	switch {
-	case !(p.Nudge > 0):
+	case !(p.Nudge > 0 && p.Interrupt > 0 && p.Kill > 0):
+		return RungNone
+	case math.IsNaN(m.Fraction) || math.IsInf(m.Fraction, 0):
 		return RungNone
 	case m.Fraction >= p.Kill:
 		return RungKill
