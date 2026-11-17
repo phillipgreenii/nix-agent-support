@@ -22,7 +22,7 @@ func typedBuilder() *builder {
 // key seek: the lookup table by its id or its unique value, the extension table
 // by rec_id. A scan of either would be read once per candidate row.
 func TestTypedStoragePlansSeekTheLookupAndExtensionTables(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
+	st, err := openPrepared(t, t.TempDir(), store.Options{ExtensionTables: true})
 	if err != nil {
 		t.Fatal(err)
 	}

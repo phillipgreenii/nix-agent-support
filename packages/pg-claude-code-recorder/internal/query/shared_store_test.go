@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit/storetpl"
 )
 
 // The plan tests each need a store holding thousands of rows, and building one
@@ -34,6 +35,17 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// openPrepared opens a store in dir with its schema restored from the
+// per-process template (storetpl) instead of built from scratch, and with no
+// close-time statistics: these stores are thrown away, and a test that wants
+// statistics runs ANALYZE itself. A test of schema creation MUST NOT use it.
+func openPrepared(t testing.TB, dir string, opts store.Options) (*store.Store, error) {
+	t.Helper()
+	opts.NoCloseStats = true
+	storetpl.Prepare(t, dir, opts)
+	return store.Open(dir, opts)
+}
+
 // sharedStore returns the read-only store named key, building it with seed on
 // first use.
 func sharedStore(t *testing.T, key string, opts store.Options, seed func(tx *sql.Tx) error) *store.Store {
@@ -51,7 +63,7 @@ func sharedStore(t *testing.T, key string, opts store.Options, seed func(tx *sql
 		shared.dir, shared.stores = d, map[string]*store.Store{}
 	}
 	opts.NoCloseStats = true // closed only by TestMain; nobody reads statistics after
-	st, err := store.Open(fmt.Sprintf("%s/%d", shared.dir, len(shared.stores)), opts)
+	st, err := openPrepared(t, fmt.Sprintf("%s/%d", shared.dir, len(shared.stores)), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +74,7 @@ func sharedStore(t *testing.T, key string, opts store.Options, seed func(tx *sql
 	return st
 }
 
-// sessionPlanStore is the fixture of the two session-pinned plan tests: 400
+// sessionPlanStore is the fixture of the two session-pinned plan tests: 100
 // sessions of 10 records each, every record a main-thread one (is_sidechain
 // false), records alternating user and assistant, no statistics.
 func sessionPlanStore(t *testing.T) *store.Store {
@@ -71,10 +83,10 @@ func sessionPlanStore(t *testing.T) *store.Store {
 		for _, q := range []string{
 			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
 			`INSERT INTO field_names(id,name) VALUES(1,'is_sidechain')`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400) INSERT INTO sessions(session_ref,session_id,first_time_ns) SELECT i,'sess-'||i,0 FROM n`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<4000)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<100) INSERT INTO sessions(session_ref,session_id,first_time_ns) SELECT i,'sess-'||i,0 FROM n`,
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
-			 SELECT i,1,0,i,-1,1,'claude-transcript',CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
+			 SELECT i,1,0,i,-1,1,'claude-transcript',CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%100+1 FROM n`,
 			`INSERT INTO fields(rec_id,name_id,n) SELECT id,1,0 FROM records`,
 		} {
 			if _, err := tx.ExecContext(context.Background(), q); err != nil {

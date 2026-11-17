@@ -34,15 +34,15 @@ func partialStore(t *testing.T, full bool) *store.Store {
 				return err
 			}
 		}
-		// Set-based inserts: the same 3000 rows as one statement each, without
-		// thousands of parameter-bound round trips per store.
+		// Set-based inserts: the same 750 rows as one statement each, without
+		// hundreds of parameter-bound round trips per store.
 		for _, q := range []string{
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<750)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns)
 			 SELECT i,1,0,i,0,1,'claude-transcript','assistant',1,i FROM n`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<750)
 			 INSERT INTO fields(rec_id,name_id,s) SELECT i,2,'l'||(i%7) FROM n`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<3000)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<750)
 			 INSERT INTO fields(rec_id,name_id,n,s) SELECT i,1,CASE WHEN i%3=0 THEN i%100 END,CASE WHEN i%3=1 THEN 'none' END FROM n WHERE i%3<2`,
 		} {
 			if _, err := tx.ExecContext(context.Background(), q); err != nil {
@@ -127,8 +127,8 @@ var numericFilters = map[string]string{
 
 func TestNumericFilterUsesPartialIndex(t *testing.T) {
 	st := partialStore(t, false)
-	// The index holds only the 1000 rows with a number, not the 2000 rows that
-	// have a tokens row: a full index would make this count 2000.
+	// The index holds only the 250 rows with a number, not the 500 rows that
+	// have a tokens row: a full index would make this count 500.
 	var held int
 	if err := st.Read().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM fields INDEXED BY fields_name_n WHERE name_id=1 AND n IS NOT NULL`).Scan(&held); err != nil {
 		t.Fatal(err)
@@ -137,8 +137,8 @@ func TestNumericFilterUsesPartialIndex(t *testing.T) {
 	if err := st.Read().QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name='fields_name_n'`).Scan(&def); err != nil || !strings.Contains(def, "WHERE n IS NOT NULL") {
 		t.Fatalf("fields_name_n is not partial on n IS NOT NULL: %q, %v", def, err)
 	}
-	if held != 1000 {
-		t.Fatalf("index holds %d numeric rows, want 1000", held)
+	if held != 250 {
+		t.Fatalf("index holds %d numeric rows, want 250", held)
 	}
 	for name, where := range numericFilters {
 		q, args := sqlFor(t, where, "")
@@ -157,13 +157,13 @@ func TestFieldWithNullNumberStillAnswersCorrectly(t *testing.T) {
 		t.Fatalf("n IS NULL cannot be answered from a partial index, plan:\n%s", p)
 	}
 	got := ids(t, st, q, nil)
-	if len(got) != 1000 || got[0] != 1 || got[1] != 4 {
+	if len(got) != 250 || got[0] != 1 || got[1] != 4 {
 		t.Fatalf("n IS NULL rows: %d, first %v", len(got), got[:2])
 	}
 	// The existence filter, which reads the row and not the index, still counts
 	// both the numeric and the text-only rows.
 	eq, args := sqlFor(t, `{"field":"tokens","exists":true}`, "")
-	if n := len(ids(t, st, eq, args)); n != 2000 {
-		t.Fatalf("exists tokens: %d rows, want 2000", n)
+	if n := len(ids(t, st, eq, args)); n != 500 {
+		t.Fatalf("exists tokens: %d rows, want 500", n)
 	}
 }

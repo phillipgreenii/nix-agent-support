@@ -20,7 +20,7 @@ import (
 // store. The session index must drive it and fields must be probed per record.
 func TestSessionFirstTimeQueryIsDrivenBySessionIndex(t *testing.T) {
 	st := sessionPlanStore(t)
-	const sessions, perSession = 400, 10
+	const sessions, perSession = 100, 10
 	srcs := sources.All()
 	var flt Filter
 	if e := Decode([]byte(`{"all":[{"field":"source","eq":"claude-transcript"},{"any":[{"field":"type","eq":"user"},{"field":"type","eq":"assistant"}]},{"field":"is_sidechain","eq":false},{"field":"session","eq":"sess-7"}]}`), &flt); e != nil {

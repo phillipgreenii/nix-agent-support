@@ -16,7 +16,7 @@ import (
 // in a temp b-tree before the limit applies: on the live store (tens of
 // millions of records) that read took about 22 s, past the query deadline.
 func TestUnfilteredRowQueryWalksRecordsByIDWithStatistics(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
+	st, err := openPrepared(t, t.TempDir(), store.Options{ExtensionTables: true})
 	if err != nil {
 		t.Fatal(err)
 	}

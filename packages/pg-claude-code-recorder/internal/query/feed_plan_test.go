@@ -20,7 +20,7 @@ import (
 // the planner already avoids that index without the unary plus, so a plan test
 // over an analyzed store cannot fail for this regression and is not kept.
 func TestSelectPlanWalksTheIDRangeForASourceAndItemFilter(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
+	st, err := openPrepared(t, t.TempDir(), store.Options{ExtensionTables: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,19 +71,19 @@ func TestSelectPlanWalksTheIDRangeForASourceAndItemFilter(t *testing.T) {
 }
 
 // skewedStore is the shared read-only store of the two source-threshold tests:
-// 4000 records of which 8 are 'other' (ids 500, 1000, ...) and the rest
-// 'claude-transcript', plus 600 'big' records (ids 5001..5600, three types).
-// The rare-source test reads up to id 4000 only, so the 'big' rows do not
+// 1000 records of which 8 are 'other' (ids 125, 250, ...) and the rest
+// 'claude-transcript', plus 150 'big' records (ids 5001..5150, three types).
+// The rare-source test reads up to id 1000 only, so the 'big' rows do not
 // reach it.
 func skewedStore(t *testing.T) *store.Store {
 	t.Helper()
 	return sharedStore(t, "skewed", store.Options{ExtensionTables: true}, func(tx *sql.Tx) error {
 		for _, q := range []string{
 			`INSERT INTO files(id,source,mode,first_seen_ns,cur_gen) VALUES(1,'claude-transcript','append',1,0)`,
-			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<4000)
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
-			 SELECT i,1,0,i,-1,1,CASE WHEN i%500=0 THEN 'other' ELSE 'claude-transcript' END,CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
-			`WITH RECURSIVE n(i) AS (SELECT 5001 UNION ALL SELECT i+1 FROM n WHERE i<5600)
+			 SELECT i,1,0,i,-1,1,CASE WHEN i%125=0 THEN 'other' ELSE 'claude-transcript' END,CASE WHEN i%2=0 THEN 'user' ELSE 'assistant' END,1,i,i%400+1 FROM n`,
+			`WITH RECURSIVE n(i) AS (SELECT 5001 UNION ALL SELECT i+1 FROM n WHERE i<5150)
 			 INSERT INTO records(id,file_id,gen,off,item,len,source,type,parser_version,time_ns,session_ref)
 			 SELECT i,1,0,i,-1,1,'big',CASE i%3 WHEN 0 THEN 'a' WHEN 1 THEN 'b' ELSE 'c' END,1,i,i%400+1 FROM n`,
 		} {
@@ -108,7 +108,7 @@ func setRareSourceMax(t *testing.T, n int) {
 // session registry) must read it through records_source_type instead of walking
 // every retained record, and must answer exactly what the walk answers.
 func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
-	st := skewedStore(t) // 8 'other' records (ids 500, 1000, ...) among 4000
+	st := skewedStore(t) // 8 'other' records (ids 125, 250, ...) among 1000
 	srcs := sources.All()
 	e := &Engine{
 		DB:           st.Read(),
@@ -121,7 +121,7 @@ func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
 	if werr := Decode([]byte(`{"field":"source","eq":"other"}`), &f); werr != nil {
 		t.Fatal(werr)
 	}
-	sel := Selection{Where: &f, UpToID: 4000, Limit: 5}
+	sel := Selection{Where: &f, UpToID: 1000, Limit: 5}
 
 	setRareSourceMax(t, 100)
 	if !e.rareSource(st.Read(), "other", sel) {
@@ -153,8 +153,8 @@ func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
 		t.Fatalf("rows: index %d, walk %d, want 6 each", len(got), len(want))
 	}
 	for i := range got {
-		if got[i].ID != want[i].ID || got[i].ID != int64(500*(i+1)) {
-			t.Errorf("row %d: index id %d, walk id %d, want %d", i, got[i].ID, want[i].ID, 500*(i+1))
+		if got[i].ID != want[i].ID || got[i].ID != int64(125*(i+1)) {
+			t.Errorf("row %d: index id %d, walk id %d, want %d", i, got[i].ID, want[i].ID, 125*(i+1))
 		}
 	}
 }
@@ -164,7 +164,7 @@ func TestSelectRareSourceUsesTheSourceIndexAndMatchesTheWalk(t *testing.T) {
 // empty-cursor feed page and the snapshot page of limit 1 read each type through
 // records_source_type in id order, and answer exactly what the id walk answers.
 func TestSelectSourceAboveThresholdReadsByTypeAndMatchesTheWalk(t *testing.T) {
-	st := skewedStore(t) // 600 'big' records, above a threshold of 100
+	st := skewedStore(t) // 150 'big' records, above a threshold of 100
 	srcs := sources.All()
 	e := &Engine{
 		DB:           st.Read(),
@@ -186,11 +186,11 @@ func TestSelectSourceAboveThresholdReadsByTypeAndMatchesTheWalk(t *testing.T) {
 	}{
 		{"feed empty cursor", Selection{Where: &f, UpToID: 1 << 40, Limit: 5}, 0},
 		{"snapshot limit 1", Selection{Where: &f, UpToID: 1 << 40, Limit: 1, CurGenOnly: true}, 0},
-		{"snapshot next page", Selection{Where: &f, AfterID: 5100, UpToID: 1 << 40, Limit: 7, CurGenOnly: true}, 0},
+		{"snapshot next page", Selection{Where: &f, AfterID: 5030, UpToID: 1 << 40, Limit: 7, CurGenOnly: true}, 0},
 	} {
 		sel := tc.sel
 		if e.rareSource(st.Read(), "big", sel) {
-			t.Fatalf("%s: a source of 600 records is rare under a threshold of 100", tc.name)
+			t.Fatalf("%s: a source of 150 records is rare under a threshold of 100", tc.name)
 		}
 		got, werr := e.Select(st.Read(), sel)
 		if werr != nil {

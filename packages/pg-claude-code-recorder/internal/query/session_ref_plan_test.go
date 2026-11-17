@@ -14,7 +14,7 @@ import (
 // resolve the id to its reference once and then search records through the
 // session_ref index; it must not walk the table or read every row's session id.
 func TestSessionFilterPlanSearchesTheSessionRefIndex(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{})
+	st, err := openPrepared(t, t.TempDir(), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

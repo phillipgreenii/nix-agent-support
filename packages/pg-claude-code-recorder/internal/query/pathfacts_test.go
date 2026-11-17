@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit/storetpl"
 )
 
 const historyLine = `{"display":"fix the example bug","timestamp":1761768000000,"project":"/example/work","sessionId":"example-session-1"}` + "\n"
@@ -193,7 +194,10 @@ func qe(t *testing.T, e *query.Engine, req string) *query.Answer {
 // (the open path wins), a deleted file (its only, closed, path), and a path
 // outside the Claude directory (no fact).
 func TestPathFactsOfEverySourceShape(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{})
+	dir := t.TempDir()
+	opt := store.Options{NoCloseStats: true} // thrown away: no close-time statistics
+	storetpl.Prepare(t, dir, opt)
+	st, err := store.Open(dir, opt)
 	if err != nil {
 		t.Fatal(err)
 	}

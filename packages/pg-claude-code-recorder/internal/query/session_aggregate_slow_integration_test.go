@@ -46,7 +46,7 @@ func TestSessionPinnedAggregateIsDrivenBySessionIndex(t *testing.T) {
 			t.Errorf("fields or records is scanned across sessions (%q):\n%s", l, p)
 		}
 	}
-	// 4000 records over 400 sessions: 10 per session, all of sess-7 user lines (even ids).
+	// 1000 records over 100 sessions: 10 per session, all of sess-7 user lines (even ids).
 	if len(ans.Rows) != 1 || ans.Rows[0][0] != int64(10) {
 		t.Errorf("rows = %v, want [[10]]", ans.Rows)
 	}

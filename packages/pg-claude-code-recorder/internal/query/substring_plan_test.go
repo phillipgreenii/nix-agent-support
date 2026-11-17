@@ -14,7 +14,7 @@ import (
 // first candidate, so a time bound or an unscoped request outran the query
 // deadline on a large store.
 func TestSubstringPlanStreamsRecordsNewestFirst(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.Options{ExtensionTables: true})
+	st, err := openPrepared(t, t.TempDir(), store.Options{ExtensionTables: true})
 	if err != nil {
 		t.Fatal(err)
 	}
