@@ -120,7 +120,7 @@ Recorder changes:
 
 ## 4. Call-site changes
 
-- recorderfacts/facts.go:116-195 `Registrations`: one `process.list` call with `detail=registry` and `if_seq`; delete the `done` map loop, registryExtra and the 5000-row records query once slice 4 lands (removal is slice 5).
+- recorderfacts/facts.go:116-195 `Registrations`: one `process.list` call with `detail=registry` and `if_seq`; delete the `done` map loop and the unbounded 5000-row records query once slice 4 lands (removal is slice 5; the bounded slice-1 form stays as the older-recorder fallback, and registryExtra stays only if that fallback uses it).
 - facts.go:122,126: the per-Scan dead read is replaced by `ended_since`; slice 1 keeps only the alive call on an old recorder.
 - facts.go:156-166: slice 1 restricts ids to live sessions and adds a time floor of now minus 24 h (bounded interim for an old recorder).
 - core/session/discovery.go:51-70 `Discover`: reads the one answer; env reads stay, cached per (sid, pid) [I].
@@ -137,13 +137,13 @@ All tests use a real recorder with a recording proxy; base: the recordingProxy h
 2. S: bootstrap-convergence check for FilesInventory (keep partial progress, bound the window). Test: an interrupted bootstrap resumes from its partial progress.
 3. M, recorder: slice R, bound `registryQuery` (live and recently ended only, or incremental). Tests: a store with many old registry versions reads in time proportional to the live set; results equal the unbounded query for live processes.
 4. L, recorder: extended `process.list` (`if_seq`, `ended_since`, `detail=registry`). Recorder tests: new fields from the newest version including entrypoint from the records column, `unchanged` when nothing committed, `degraded` while backfilling, cancel-op audit, capability lists, README. pa-monitor tests: per Scan exactly 1 `process.list`, 0 `query`; an equivalence test against the old three-call answer before deleting old code; capability fallback to slice 1 on an older recorder.
-5. S: cleanup. Remove registryExtra, the dead per-Scan Registrations code that nothing reaches any more, and the tests of that code. KEEP the slice-1-shaped capability fallback (live-only ids, 24 h floor, one records query) so a new pa-monitor still works against an older recorder.
+5. S: cleanup. Remove the dead per-Scan Registrations code that nothing reaches any more, and the tests of that code. KEEP the slice-1-shaped capability fallback (live-only ids, 24 h floor, one records query) so a new pa-monitor still works against an older recorder.
 
 Order: 1 and 2 land first against the existing recorder; 3 then 4 need recorder changes and follow the serial plumbing order in the usage plan (R, usage op, extended `process.list`, then `sessions.facts`); 5 follows 4.
 
 ## 6. Post-apply verification
 
-- Recorder log, client pa-monitor-daemon, requests per minute by op. Before: about 12 Scans per minute x 3 discovery calls plus the feed. After: 1 `process.list` per Scan, mostly `unchanged`.
+- Recorder log, client pa-monitor-daemon, requests per minute by op. Before: about 12 Scans per minute x 3 discovery calls plus the feed. After: 1 `process.list` per Scan, `unchanged` when the machine is idle.
 - No slow_request lines for the records-by-session query; no discoverTimeout cancellations; no wait_ms over 1 s with exec_ms 0.
 - Kill a test claude and see it dead on the next Scan; stop the recorder and see the Offline state on the next Scan (no stale window); dead sessions in the DB at startup unchanged.
 

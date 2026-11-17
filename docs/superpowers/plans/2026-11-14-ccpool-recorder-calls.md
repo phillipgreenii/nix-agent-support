@@ -20,7 +20,7 @@ These override anything older in this plan.
 3. Slice 1 (stat-first, per-pass breaker, one WARN, 5 s timeout, 24 h positive TTL) is the best first change and needs no recorder change; land it first. Two additions: (a) the probe runs inside the per-id lock (reap.go:461-480, resumableForReap under withLock), so a batch result gathered before the lock MUST be re-verified under the lock before any delete; (b) behavior change to state: a transcript on disk that the recorder has not ingested is ErrNotFound today ("not resumable", row pruned, facts.go:315-337); with stat-first the row is kept. Benign, but call it out in the test fixtures.
 4. Awaiting-input drives pg-router's needs_input edge detection and lease-release guards (executor/ccpool.go:1638, 2148); a stale awaiting answer could release a lease or worktree under a session waiting for input. Awaiting is read directly (bounded, since-floor, limit 50) for `state`, `list`, control paths and post-send, until `sessions.facts` exists; afterwards via its `awaiting_input` field (still a live read, staleness 0). A `degraded` answer never drives a "not resumable" or a prune.
 5. `ccpool state` is per session (cmd/ccpool/state.go:40-60): it fetches only the fields the one session needs; it MUST NOT request a pool-wide fact set.
-6. Cheapest-first order: slices 1 and 3 first (both need no recorder change; 2 is the prerequisite for the clean form of 1), then 2, then 4 (recorder `sessions.facts`), then 5 (the ccpool switch).
+6. Cheapest-first order: slice 1 first in its stat-first form with the per-id fallback, and slice 3 (both need no recorder change); then 2, which turns the per-id fallback of slice 1 into the batch form, then 4 (recorder `sessions.facts`), then 5 (the ccpool switch).
 
 ## 1. Current state
 
