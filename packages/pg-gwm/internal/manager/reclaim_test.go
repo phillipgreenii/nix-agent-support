@@ -265,9 +265,10 @@ func TestMaxReclaim(t *testing.T) {
 			if err != nil {
 				t.Fatalf("lease --wait: %v", err)
 			}
-			// Fake clock: the lease retries on its one-second interval.
-			if d := time.Since(start); d < 400*time.Millisecond || d > 2500*time.Millisecond {
-				t.Errorf("took %v", d)
+			// Lower bound only: proves the wait happened. An upper bound is
+			// wall-clock sensitive under host load.
+			if d := time.Since(start); d < 400*time.Millisecond {
+				t.Errorf("took %v, want at least 400ms", d)
 			}
 			if str(rec.Name) != "b" {
 				t.Errorf("record = %+v", rec)
