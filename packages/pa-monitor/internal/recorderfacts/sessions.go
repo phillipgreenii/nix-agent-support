@@ -72,8 +72,16 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 		return a, f.wrap(err)
 	}
 	main := client.Filter{Field: "is_sidechain", Eq: json.RawMessage("false")}
+	// stamped keeps the records that carry a timestamp. A transcript line of the
+	// main thread always does; the block records of a line and a few bookkeeping
+	// lines are stored with time 0. A long session holds millions of those, and a
+	// read ordered by time (or a count over the session) would walk them all
+	// before reaching a turn (an 11.7 million record session took 29 s, past the
+	// recorder deadline). A bound on time is the one condition the session,
+	// source and time index can seek past.
+	stamped := client.Filter{Field: "time", Range: &client.Range{Gt: "1970-01-01T00:00:00Z"}}
 	turns := client.Filter{Any: []client.Filter{typeIs("user"), typeIs("assistant")}}
-	base := []client.Filter{transcriptSource(), turns, main}
+	base := []client.Filter{transcriptSource(), turns, main, stamped}
 
 	// The sessions to consider come from the recorder's per-file inventory, not
 	// from a scan of records (which timed out on a real tree). A session whose
@@ -136,7 +144,7 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 		return client.Filter{Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", sid))}
 	}
 	where := func(sid string, extra ...client.Filter) *client.Filter {
-		return &client.Filter{All: append([]client.Filter{transcriptSource(), main, pinned(sid)}, extra...)}
+		return &client.Filter{All: append([]client.Filter{transcriptSource(), main, stamped, pinned(sid)}, extra...)}
 	}
 	for _, id := range ids {
 		s := byID[id.(string)]
@@ -182,7 +190,7 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 	for _, sid := range ids {
 		s := byID[sid.(string)]
 		one, err := run(client.QueryRequest{
-			Where:  &client.Filter{All: []client.Filter{transcriptSource(), main, {Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", s.SessionID))}}},
+			Where:  &client.Filter{All: []client.Filter{transcriptSource(), main, stamped, {Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", s.SessionID))}}},
 			Select: []string{"cwd", "git_branch"}, Order: []client.Order{{By: "time"}}, Limit: 1,
 		})
 		if err != nil {
@@ -192,7 +200,7 @@ func (f *Facts) Sessions(ctx context.Context, since, before time.Time) ([]Sessio
 			s.Cwd, s.Branch = str(one.Rows[0][0]), str(one.Rows[0][1])
 		}
 		fp, err := run(client.QueryRequest{
-			Where:  &client.Filter{All: []client.Filter{transcriptSource(), main, typeIs("user"), {Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", s.SessionID))}, lineRecord}},
+			Where:  &client.Filter{All: []client.Filter{transcriptSource(), main, stamped, typeIs("user"), {Field: "session", Eq: json.RawMessage(fmt.Sprintf("%q", s.SessionID))}, lineRecord}},
 			Select: []string{"session"}, Order: []client.Order{{By: "time"}}, Limit: 1, Raw: true,
 		})
 		if err != nil {

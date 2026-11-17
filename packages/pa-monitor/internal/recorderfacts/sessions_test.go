@@ -276,3 +276,28 @@ func TestSessionsListingWhileInventoryDegradedReportsBehindWithoutAggregate(t *t
 		t.Errorf("a records query was issued while the inventory was degraded: %s", wire)
 	}
 }
+
+// TestSessionsRecordQueriesSeekPastUntimedRecords: every per-session read of
+// records carries a time bound, the one condition the recorder's session,
+// source and time index can seek past. Without it a read ordered by time
+// walks the millions of untimed block records a long session holds before it
+// reaches a turn, and the first-time read of such a session ran 29 s on the
+// real store, past the recorder's 25 s deadline.
+func TestSessionsRecordQueriesSeekPastUntimedRecords(t *testing.T) {
+	e, _ := recorderWithTranscript(t)
+	socket, sent := recordingProxy(t, e.Socket)
+	f := New(client.Options{Socket: socket})
+	got, err := f.Sessions(context.Background(), time.Time{}, time.Time{})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got[0].UserTurns != 1 || got[0].AssistantTurns != 1 || got[0].Cwd != "/example/work" || got[0].FirstPrompt == "" {
+		t.Errorf("the bound changed the answer: %+v", got[0])
+	}
+	wire := sent()
+	queries := strings.Count(wire, `"from":"records"`)
+	bounded := strings.Count(wire, `"gt":"1970-01-01T00:00:00Z"`)
+	if queries == 0 || bounded != queries {
+		t.Errorf("%d records queries, %d with the time bound: %s", queries, bounded, wire)
+	}
+}
