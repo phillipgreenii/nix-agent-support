@@ -52,6 +52,10 @@ var (
 	envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
+// ValidID reports whether id is a valid assistant id, [a-z0-9-]+. An id names
+// a tmux session and becomes part of file paths, so nothing else is accepted.
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
 // Config is the loaded configuration. Durations and points hold their
 // effective values: a global field that failed validation holds its default
 // and is listed in Problems.
@@ -265,7 +269,7 @@ func readAssistants(top *table, globalTick time.Duration) []Assistant {
 	labels := make([]string, 0, len(list))
 	for i, m := range list {
 		label := fmt.Sprintf("assistant[#%d]", i+1)
-		if id, isString := m["id"].(string); isString && idPattern.MatchString(id) {
+		if id, isString := m["id"].(string); isString && ValidID(id) {
 			label = "assistant[" + id + "]"
 		}
 		labels = append(labels, label)
@@ -325,7 +329,7 @@ func readAssistant(label string, m map[string]any, globalTick time.Duration) Ass
 	}
 	t := &table{name: label, m: m, problems: &a.Problems}
 
-	if t.requiredString("id", &a.ID) && !idPattern.MatchString(a.ID) {
+	if t.requiredString("id", &a.ID) && !ValidID(a.ID) {
 		t.problem("id", fmt.Sprintf("%q must match [a-z0-9-]+", a.ID))
 	}
 	t.requiredString("name", &a.Name)

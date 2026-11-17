@@ -96,7 +96,8 @@ The whole-module test gate is `nix build .#checks.<system>.pg-assistants-go-test
 .#pg-assistants` only proves the binary compiles. `TestCallsBounded` guards that every
 `cmdrun.Call` in the module sets a timeout.
 
-The real-tool tests (a real tmux server; the real `pg-claude-control` against a temporary session
+The real-tool tests (a real tmux server; the real launch chain, through `/bin/sh` and a `zsh`
+login shell to a stand-in `claude`; the real `pg-claude-control` against a temporary session
 registry and an inbox the test answers) are `integration`-tagged and run on demand in
 `nix build .#checks.<system>.pg-assistants-integration-tests`, never in the unit tier. To run them
 by hand, point `PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL` at a `pg-claude-control` built from this

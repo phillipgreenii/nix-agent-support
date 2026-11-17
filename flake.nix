@@ -8057,6 +8057,7 @@
               # a missing tool fail instead of skip; TMUX_TMPDIR keeps the socket inside
               # the sandbox; PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL names the binary built
               # from packages/pg-claude-control (the control client's contract test).
+              # zsh is for the launch chain's login-shell case (/bin/sh is the other).
               pg-assistants-integration-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-assistants-integration-tests";
@@ -8065,6 +8066,7 @@
                   testDeps = [
                     pkgs.tmux
                     pkgs.pg-claude-control
+                    pkgs.zsh
                   ];
                 }).overrideAttrs
                   (old: {
