@@ -154,10 +154,45 @@ func TestCollectStatsSkipsSlowStepWithoutStamping(t *testing.T) {
 	}
 }
 
+// A collection samples each index instead of scanning it whole: with
+// analysis_limit=MinAnalysisLimit, the planner statistics of the records_type
+// index on 2,000 rows record MinAnalysisLimit+1 rows per key (the sampled prefix
+// of the index), where a full ANALYZE records 2,000. This is the guard for the
+// sampled-PRAGMA half of analyzeStep (the per-step timeout half is guarded by
+// TestCollectStatsSkipsSlowStepWithoutStamping); it is deterministic and does not
+// depend on how fast the host is.
+func TestCollectStatsSamplesIndexesInsteadOfScanningWhole(t *testing.T) {
+	const rows = 2000
+	s, err := Open(t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err := s.wdb.ExecContext(context.Background(), `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns)
+		WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?)
+		SELECT 1,1,i,0,10,'s','t',1,'sess'||(i%50),i FROM n`, rows); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CollectStats(context.Background(), MinAnalysisLimit, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var stat string
+	if err := s.Read().QueryRowContext(context.Background(), `SELECT stat FROM sqlite_stat1 WHERE tbl='records' AND idx='records_type'`).Scan(&stat); err != nil {
+		t.Fatal(err)
+	}
+	// A full scan of this index gives "2000 2000"; a sampled one gives "2000 51".
+	if want := "2000 51"; stat != want {
+		t.Fatalf("records_type stat=%q, want %q (a sampled analysis)", stat, want)
+	}
+}
+
 // A first collection on a store without sqlite_stat1, with the writer running
 // concurrently: no write fails and no single write waits near the busy_timeout.
-// This is the small smoke version; the load-shaped one (30,000 rows, which is
-// what makes an unbounded ANALYZE hold the write lock long enough to show) is
+// This is a smoke test of the plumbing only. On a fast host a full ANALYZE of
+// 1,000 rows (and of 30,000 or 1,000,000, measured) finishes inside the limit,
+// so it does NOT fail when the sampling or the per-step timeout in analyzeStep is
+// removed; those are guarded by TestCollectStatsSamplesIndexesInsteadOfScanningWhole
+// and TestCollectStatsSkipsSlowStepWithoutStamping. The scaled version is
 // TestSoakFirstCollectionDoesNotBlockWriterNearBusyTimeout behind the soak tag.
 func TestFirstCollectionDoesNotBlockWriterNearBusyTimeout(t *testing.T) {
 	firstCollectionWriterWait(t, 1000)
