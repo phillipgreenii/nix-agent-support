@@ -2504,6 +2504,56 @@ groups:
                     type: gt
                     params: [0]
 
+      # pg-router-git-auth-expiring: the ssh certificate behind a git_auth_<remote> resource has
+      # under 2 hours left (pg_router_resource_reading, unit s_left, written by the git-auth
+      # sensor: seconds until the certificate's valid-to). The sensor reports UNAVAILABLE once
+      # less than its margin (30 minutes) is left, which blocks every role that requires the
+      # resource until the certificate is renewed by hand, so this warns early enough (mid-morning,
+      # before an overnight run) to renew first. Renewal is deliberately NOT automated: the
+      # origin-guard contract forbids opening a login window for an unattended caller. The
+      # reading is 0 whenever the sensor cannot establish validity (agent unreachable, no
+      # matching certificate, expired), so those cases fire it too. The unavailable level
+      # itself is never relaxed.
+      - uid: pg-router-git-auth-expiring
+        title: pg-router git auth certificate expires within 2 hours (by resource)
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a pg-router git auth certificate has under 2 hours left"
+          description: "pg_router_resource_reading (unit s_left) for the git_auth_* resource in this alert's resource label stayed under 7200 seconds (2 hours) for 5 minutes: the ssh certificate is about to lapse, or the sensor cannot establish it (reading 0). At under 30 minutes the resource turns UNAVAILABLE and every role requiring it is blocked. Renew the certificate by hand now (log in with the step CLI, then check ssh-add -L and pg-router level list); renewal is never automated for an unattended caller."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'max by (resource)(last_over_time(pg_router_resource_reading{resource=~"git_auth_.+",unit="s_left"}[10m]) < bool 7200)'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
       # pg-router-role-paused-long: a registration held for 4 hours, for any reason.
       - uid: pg-router-role-paused-long
         title: pg-router role has been paused for 4 hours (by role)

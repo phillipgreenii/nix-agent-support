@@ -17,7 +17,7 @@ func unquoteExpr(s string) string {
 
 const awakeExpr = `((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) or (host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))`
 
-// The six level alerts. Each has a rule test in grafana/alerting/rule-tests named for its
+// The seven level alerts. Each has a rule test in grafana/alerting/rule-tests named for its
 // uid, a rule_uids entry in check-alert-rules.sh (TestLevelAlertsAreChecked) and static
 // annotations (the probe copies them into beads).
 var levelAlerts = []struct {
@@ -32,6 +32,11 @@ var levelAlerts = []struct {
 		"pg-router-resource-held-nonbest",
 		`max by (resource)(last_over_time(pg_router_resource_level{resource!~"network_zr_trust|aws_sso_zr|ram"}[10m]) > 0)`,
 		"for: 6h", "noDataState: OK",
+	},
+	{
+		"pg-router-git-auth-expiring",
+		`max by (resource)(last_over_time(pg_router_resource_reading{resource=~"git_auth_.+",unit="s_left"}[10m]) < bool 7200)`,
+		"for: 5m", "noDataState: OK",
 	},
 	{
 		"pg-router-role-paused-long",

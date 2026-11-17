@@ -1,0 +1,60 @@
+# promtool unit tests for the pg-router-git-auth-expiring alert. Run by the flake check test-pg-router-alert-rules,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for` and labels. Every series has a 1m interval.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a certificate counting down through 2 hours fires once it is under 7200 seconds left
+    interval: 1m
+    input_series:
+      # 9000 s left at t=0, minus 60 s per minute: crosses 7200 s at minute 30.
+      - series: pg_router_resource_reading{resource="git_auth_zr",unit="s_left",job="pg-router"}
+        values: "9000-60x100"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-router-git-auth-expiring
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: pg-router-git-auth-expiring
+        exp_alerts:
+          - exp_labels:
+              resource: git_auth_zr
+              severity: warning
+
+  - name: a certificate with plenty of time left never fires
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_reading{resource="git_auth_zr",unit="s_left",job="pg-router"}
+        values: "30000x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-router-git-auth-expiring
+        exp_alerts: []
+
+  - name: an expired or unreadable certificate (reading 0) fires
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_reading{resource="git_auth_zr",unit="s_left",job="pg-router"}
+        values: "0x100"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-git-auth-expiring
+        exp_alerts:
+          - exp_labels:
+              resource: git_auth_zr
+              severity: warning
+
+  - name: another resource's reading and another unit are ignored
+    interval: 1m
+    input_series:
+      - series: pg_router_resource_reading{resource="aws_sso_zr",unit="s_left",job="pg-router"}
+        values: "10x100"
+      - series: pg_router_resource_reading{resource="git_auth_zr",unit="percent",job="pg-router"}
+        values: "10x100"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-router-git-auth-expiring
+        exp_alerts: []
