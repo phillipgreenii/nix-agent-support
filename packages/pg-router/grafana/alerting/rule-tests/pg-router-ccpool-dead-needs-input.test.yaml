@@ -3,6 +3,11 @@
 # the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's
 # `for: 48h` and labels, plus a recording rule `wrapped:<uid with _>`.
 #
+# Evaluation interval: 5m, not the 1m default, because the series are 5m and no
+# case asserts between emitter samples; promtool evaluates every rule of the wrapped file
+# at each step, so a 48h-plus case at 1m cost about 20s of CPU each and 5m about a quarter
+# of that. Every eval_time below MUST stay a multiple of 5m (300s).
+#
 # Time model: ccpool-reap emits ccpool_session_states about every 5 minutes (it is the
 # sweep cadence), so every series here has a 5m interval. The condition needs `for: 48h`
 # (172800s), so a steady dead needs_input row is pending until about 48h and firing after:
@@ -13,7 +18,7 @@
 rule_files:
   - rules.yml
 
-evaluation_interval: 1m
+evaluation_interval: 5m
 
 tests:
   - name: a dead needs_input row held for 3 days fires at 49h but not at 47h, only for its own pool
