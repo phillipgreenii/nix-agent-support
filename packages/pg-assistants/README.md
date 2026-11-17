@@ -107,14 +107,14 @@ An assistant that should poll less often (it finds nothing to do on most starts)
 
 ## Commands
 
-| Command                                         | What it does                                                                        |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `daemon --config PATH [--shutdown-deadline 8s]` | Run the supervisor (launchd keeps it alive).                                        |
-| `status [--json] [--check] [--config PATH]`     | Show each assistant's state; `--check` is the health probe.                         |
-| `attach <id> [--config PATH]`                   | Attach to an assistant's session on `tmux -L pg-assistants` (detach with `C-b d`).  |
-| `exit`                                          | Inside a session: ask the daemon to stop it (run it on its own, then end the turn). |
-| `trust --claude-json PATH <cwd>...`             | Mark directories trusted in Claude's `.claude.json` (merge-only).                   |
-| `config check --config PATH`                    | Validate a configuration file strictly, without changing a thing.                   |
+| Command                                         | What it does                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `daemon --config PATH [--shutdown-deadline 8s]` | Run the supervisor (launchd keeps it alive).                                         |
+| `status [--json] [--check] [--config PATH]`     | Show each assistant's state; `--check` is the health probe.                          |
+| `attach <id> [--config PATH]`                   | Attach to an assistant's session on `tmux -L pg-assistants` (detach with `C-b d`).   |
+| `exit`                                          | Inside a session: ask the daemon to stop it (run it on its own, then end the turn).  |
+| `trust --claude-json PATH <cwd>...`             | Mark directories trusted (by resolved path) in Claude's `.claude.json` (merge-only). |
+| `config check --config PATH`                    | Validate a configuration file strictly, without changing a thing.                    |
 
 `status` and `attach` read `--config`, by default `$XDG_CONFIG_HOME/pg-assistants/config.toml`.
 Every command answers `--help`.
@@ -245,7 +245,9 @@ Rules beyond the comments above:
   already ends in `\;` cannot be passed on intact. A `;` anywhere else, or a trailing `;`, is fine.
 - `cwd` MUST NOT contain `#`: tmux expands a format in the start directory (`##`, `#{...}`), and a
   directory it then cannot find silently starts the session in `$HOME`.
-- Whether `cwd` exists is NOT checked here (the build sandbox cannot see it).
+- Whether `cwd` exists is NOT checked here (the build sandbox cannot see it). Two `cwd` values
+  that resolve to the same existing directory through a symlink count as shared; folder trust is
+  read and written under the resolved directory, the key Claude looks up.
 - `blank_env` lists environment variable names (`[A-Za-z_][A-Za-z0-9_]*`) that every session
   starts with set and empty. The tmux server keeps the environment of the daemon that started it,
   and the daemon runs under the operator's login shell, which has already run the startup files and

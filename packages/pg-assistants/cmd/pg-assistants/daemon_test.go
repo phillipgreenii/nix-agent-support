@@ -17,6 +17,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/control"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/supervisor"
 	"github.com/phillipgreenii/x/cmdrun"
@@ -204,7 +205,8 @@ func TestDaemonRunsWithOneBadAssistant(t *testing.T) {
 			!slices.Contains(s.Args, "00000000-0000-4000-8000-000000000001") {
 			t.Errorf("new-session args %q lack the state dir or the session id from NewID", s.Args)
 		}
-		trusted, err := newTrustFile(f.claudeJSON).IsTrusted(f.cwdA)
+		// keyed by the resolved directory (a temporary directory may sit under a symlink)
+		trusted, err := newTrustFile(f.claudeJSON).IsTrusted(config.ResolvePath(f.cwdA))
 		if err != nil || !trusted {
 			t.Errorf("example-a's cwd is not trusted in paths.claude_json: %v, %v", trusted, err)
 		}

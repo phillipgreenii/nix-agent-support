@@ -647,10 +647,41 @@ func TestMissingCwdRetriesEveryTick(t *testing.T) {
 	})
 }
 
+// Trust is read and written under the resolved directory, the key Claude
+// looks up; the existence check and tmux get the configured path.
+func TestTrustUsesTheResolvedCwd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, exampleA)
+		realDir := h.a(exampleA).Cwd
+		link := filepath.Join(h.root, "work", "example-a-link")
+		if err := os.Symlink(realDir, link); err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := filepath.EvalSymlinks(realDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.a(exampleA).Cwd = link
+		h.w.untrust[resolved] = true
+		h.start()
+		defer h.stop()
+		for _, op := range []string{"is-trusted", "ensure"} {
+			if cs := h.w.callsOf(op, exampleA); len(cs) != 1 || cs[0].cwd != resolved {
+				t.Errorf("%s calls = %+v, want one for the resolved %s", op, cs, resolved)
+			}
+		}
+		if starts := h.w.callsOf("new-session", exampleA); len(starts) != 1 || starts[0].cwd != LaunchCwd(*h.a(exampleA)) {
+			t.Errorf("new-session calls = %+v, want one in the configured %s", starts, link)
+		}
+	})
+}
+
 func TestUntrustedCwdIsTrustedBeforeStart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := newHarness(t, exampleA)
-		cwd := h.a(exampleA).Cwd
+		// trust is keyed by the resolved directory (the temporary directory
+		// may itself sit under a symlink)
+		cwd := config.ResolvePath(h.a(exampleA).Cwd)
 		h.w.untrust[cwd] = true
 		h.start()
 		defer h.stop()

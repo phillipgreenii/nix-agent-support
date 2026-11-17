@@ -20101,7 +20101,8 @@
                     grep -q " trust --claude-json $w/home/.claude.json $w/home/assistants/a $w/home/assistants/b " trust.sh \
                       || { cat trust.sh >&2; fail "the activation does not trust every cwd"; }
                     env -u DRY_RUN_CMD bash trust.sh
-                    jq -e --arg a "$w/home/assistants/a" --arg b "$w/home/assistants/b" '
+                    # trust is keyed by the resolved directory, the key Claude looks up
+                    jq -e --arg a "$(realpath "$w/home/assistants/a")" --arg b "$(realpath "$w/home/assistants/b")" '
                       .projects[$a].hasTrustDialogAccepted == true
                       and .projects[$b].hasTrustDialogAccepted == true
                       and .projects["/example/other"].hasTrustDialogAccepted == false

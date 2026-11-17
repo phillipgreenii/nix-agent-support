@@ -43,6 +43,49 @@ func TestTrustWritesClaudeJSON(t *testing.T) {
 	}
 }
 
+// Claude keys .projects by the resolved directory (it resolves symlinks, as
+// /tmp -> /private/tmp on macOS), so trust is written under that key; a
+// directory that does not resolve keeps its path.
+func TestTrustKeysTheResolvedPath(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "missing")
+	path := filepath.Join(dir, ".claude.json")
+	if code, stdout, stderr := runCLI(t, "trust", "--claude-json", path, link, missing); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stdout %q, stderr %q)", code, stdout, stderr)
+	}
+	var got struct {
+		Projects map[string]map[string]any `json:"projects"`
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Projects[resolved]["hasTrustDialogAccepted"] != true {
+		t.Errorf("the resolved %s is not trusted in %s", resolved, data)
+	}
+	if _, ok := got.Projects[link]; ok && link != resolved {
+		t.Errorf("the unresolved %s was written in %s", link, data)
+	}
+	if got.Projects[missing]["hasTrustDialogAccepted"] != true {
+		t.Errorf("the missing %s is not trusted under its own path in %s", missing, data)
+	}
+}
+
 func TestTrustErrors(t *testing.T) {
 	dir := t.TempDir()
 	broken := filepath.Join(dir, "broken.json")

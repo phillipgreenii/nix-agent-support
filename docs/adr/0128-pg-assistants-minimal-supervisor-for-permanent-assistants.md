@@ -135,7 +135,9 @@ flowchart LR
   trust dialog before any hook runs, so the control mod never loads. The module runs
   `pg-assistants trust` for every assistant directory at activation (best effort), and the daemon
   checks before each start and writes it again when it is missing, because Claude's own rewrites of
-  `.claude.json` can lose the activation's write.
+  `.claude.json` can lose the activation's write. Trust is keyed by the directory with its symlinks
+  resolved, as Claude looks it up (on macOS `/tmp` is `/private/tmp`), and two `cwd` values that
+  resolve to the same directory count as one directory.
 - **`tmux new-session -c` silently falls back to `$HOME` for a missing directory**, which is the
   wrong directory and an untrusted one. The daemon therefore checks `cwd` before every start; a
   `cwd` MUST NOT contain `#` (tmux expands a format there), and no value that reaches tmux as an

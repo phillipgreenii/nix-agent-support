@@ -56,6 +56,19 @@ var (
 // a tmux session and becomes part of file paths, so nothing else is accepted.
 func ValidID(id string) bool { return idPattern.MatchString(id) }
 
+// ResolvePath returns p with every symlink resolved, or p itself when it does
+// not resolve (a directory that does not exist yet). Claude resolves a
+// directory before it looks up its folder trust (on macOS /tmp is
+// /private/tmp), so trust is read and written under this form, and two cwds
+// with the same resolved form are one directory. The existence check and
+// tmux keep the configured path.
+func ResolvePath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
+}
+
 // Config is the loaded configuration. Durations and points hold their
 // effective values: a global field that failed validation holds its default
 // and is listed in Problems.
@@ -318,11 +331,14 @@ func readAssistants(top *table, globalTick time.Duration) []Assistant {
 		func(v string, others []string) string {
 			return fmt.Sprintf("id %q is also used by %s; ids MUST be unique", v, strings.Join(others, ", "))
 		})
+	// Compared resolved, so two paths to one directory through a symlink are
+	// shared too. A cwd that does not exist (always so in the build sandbox)
+	// is compared as written.
 	markShared(out, labels, "cwd", func(a Assistant) string {
 		if !filepath.IsAbs(a.Cwd) {
 			return ""
 		}
-		return filepath.Clean(a.Cwd)
+		return filepath.Clean(ResolvePath(a.Cwd))
 	}, func(v string, others []string) string {
 		return fmt.Sprintf("cwd %q is also the cwd of %s; one assistant per directory", v, strings.Join(others, ", "))
 	})

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/config"
 	"github.com/phillipgreenii/x/claudetrust"
 	"github.com/phillipgreenii/x/exitcode"
 )
@@ -16,7 +17,9 @@ usage: pg-assistants trust --claude-json PATH <cwd>...
 An untrusted directory stops claude on its folder-trust dialog before any
 hook runs, so an assistant started there never answers. This sets
 .projects[<cwd>].hasTrustDialogAccepted for every <cwd>, keeping everything
-else in the file, and writes nothing when all are trusted already. The
+else in the file, and writes nothing when all are trusted already. Each <cwd>
+is written with its symlinks resolved, the key Claude looks up (one that does
+not exist yet is written as given). The
 home-manager module runs it for every assistant at activation; the daemon
 also checks before each start.
 
@@ -43,7 +46,13 @@ func (c *cli) trust(args []string) int {
 			return exitcode.Usage
 		}
 	}
-	if err := claudetrust.Ensure(*path, cwds...); err != nil {
+	// Claude keys .projects by the resolved directory; one that does not
+	// resolve (not created yet) keeps its path.
+	keys := make([]string, len(cwds))
+	for i, cwd := range cwds {
+		keys[i] = config.ResolvePath(cwd)
+	}
+	if err := claudetrust.Ensure(*path, keys...); err != nil {
 		fmt.Fprintf(c.stderr, "pg-assistants trust: %v\n", err)
 		return exitcode.Error
 	}

@@ -323,6 +323,52 @@ func TestSharedProblemsNameTheOthers(t *testing.T) {
 	}
 }
 
+// symlinkedDir makes dir/real and a symlink dir/link to it, and returns the
+// link and the real directory with its own symlinks resolved (a temporary
+// directory on macOS is itself under the /var -> /private/var symlink).
+func symlinkedDir(t *testing.T) (link, target string) {
+	t.Helper()
+	dir := t.TempDir()
+	r := filepath.Join(dir, "real")
+	if err := os.Mkdir(r, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link = filepath.Join(dir, "link")
+	if err := os.Symlink(r, link); err != nil {
+		t.Fatal(err)
+	}
+	target, err := filepath.EvalSymlinks(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return link, target
+}
+
+func TestResolvePath(t *testing.T) {
+	link, target := symlinkedDir(t)
+	if got := ResolvePath(link); got != target {
+		t.Errorf("ResolvePath(%q) = %q, want %q", link, got, target)
+	}
+	missing := filepath.Join(link, "missing")
+	if got := ResolvePath(missing); got != missing {
+		t.Errorf("ResolvePath(%q) = %q, want it unchanged (it does not exist)", missing, got)
+	}
+}
+
+// Two cwds that are the same directory through a symlink are one directory:
+// both assistants are flagged, as for two equal paths.
+func TestSharedCwdThroughASymlink(t *testing.T) {
+	link, target := symlinkedDir(t)
+	cfg := load(t, pathsTOML+
+		assistant("example-a", `cwd = "`+target+`"`)+
+		assistant("example-b", `cwd = "`+link+`"`))
+	for i, id := range []string{"example-a", "example-b"} {
+		if !slices.Contains(fields(cfg.Assistants[i].Problems), "assistant["+id+"].cwd") {
+			t.Errorf("%s Problems = %v, want the shared cwd", id, cfg.Assistants[i].Problems)
+		}
+	}
+}
+
 func TestAssistantRulesAccept(t *testing.T) {
 	cases := []struct {
 		name       string
