@@ -95,6 +95,8 @@ func sessionLogArgs(externalID string) []any {
 // `programs.ccpool`, so `claude.plugin_dir` was never rendered into
 // config.toml — a misconfiguration this check turns into an immediate,
 // diagnosable error instead of a 10-minute hang).
+var ErrCwdMissing = errors.New("ccpool: launch cwd does not exist or is not a directory")
+
 var ErrNoPluginDir = errors.New("ccpool: no plugin dir configured (claude.plugin_dir is empty) — the ccpool-plugin SessionStart hook would never register, so the session could never reach ready; set claude.plugin_dir in config.toml (nix: enable phillipgreenii.programs.ccpool alongside any consumer that launches ccpool sessions)")
 
 type Tmux interface {
@@ -263,6 +265,12 @@ type Deps struct {
 	// row's hook-recorded transcript path (ADR 0015). A nil Exister means "never
 	// resumable" (tests inject a fake; the cmd layer wires NewFSSessionExister).
 	Exister SessionExister
+	// DirExists, when set, reports whether a launch cwd is an existing
+	// directory. A launch whose cwd is missing fails fast: tmux silently starts
+	// the pane in $HOME when its -c directory does not exist, so claude would
+	// stop at the folder-trust prompt for $HOME (never pre-trusted) and burn
+	// the whole wait. nil = no check (tests); the cmd layer wires the real stat.
+	DirExists func(dir string) bool
 	// Gate, when set, is probed before capacity is reported: a recorder that does
 	// not answer makes Capacity fail (the dispatch gate then refuses). nil = no gate.
 	Gate Gate
@@ -442,6 +450,12 @@ func (s *Service) ensureLocked(ctx context.Context, externalID, cwd, model strin
 	// resolves symlinks, e.g. macOS /tmp -> /private/tmp). Best-effort.
 	if resolved, rerr := filepath.EvalSymlinks(cwd); rerr == nil {
 		cwd = resolved
+	}
+	// A missing cwd would make tmux fall back to $HOME and park claude on the
+	// folder-trust prompt for $HOME; refuse before any row or tmux session.
+	if s.d.DirExists != nil && !s.d.DirExists(cwd) {
+		s.recordLaunchOutcome(externalID, "preflight", "error")
+		return Handle{}, fmt.Errorf("%w: %q", ErrCwdMissing, cwd)
 	}
 	if err := s.d.Trust.EnsureTrusted(cwd); err != nil {
 		s.recordLaunchOutcome(externalID, "preflight", "error")

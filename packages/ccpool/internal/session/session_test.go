@@ -1041,3 +1041,33 @@ func TestEnsure_recordsLaunchOutcome_tmuxError(t *testing.T) {
 		}
 	})
 }
+
+// A launch cwd that does not exist must fail before any tmux session or row:
+// tmux would start the pane in $HOME and claude would stop at the folder-trust
+// prompt for $HOME (the pool-launch timeout this guards against).
+func TestEnsure_failsFastWhenCwdMissing(t *testing.T) {
+	withLaunchOutcomeSpy(t, func(calls *[]launchOutcomeCall) {
+		st := newMemStore(t)
+		ft := &fakeTmux{live: map[string]bool{}}
+		s := New(Deps{
+			Tmux: ft, Trust: &fakeTrust{}, Store: st,
+			Wait: waitFunc(func(context.Context, string, int64) (wait.Outcome, error) {
+				t.Fatal("Wait must not be reached when the cwd is missing")
+				return wait.Outcome{}, nil
+			}),
+			Socket: "ccpool", Prefix: "cc-", PluginDir: "/p", ClaudeBin: "claude",
+			DirExists: func(string) bool { return false },
+			NewUUID:   func() string { return "csid-1" }, Now: func() time.Time { return time.Unix(100, 0) },
+		})
+		_, err := s.Ensure(context.Background(), "ext-missing-cwd", "/gone/wt-5", "", EnsureOpts{})
+		if !errors.Is(err, ErrCwdMissing) {
+			t.Fatalf("Ensure err = %v, want ErrCwdMissing", err)
+		}
+		if len(ft.newCalls) != 0 {
+			t.Errorf("NewSession calls = %d, want 0", len(ft.newCalls))
+		}
+		if got := *calls; len(got) != 1 || got[0] != (launchOutcomeCall{"preflight", "error"}) {
+			t.Errorf("recordLaunchOutcome calls = %v, want [{preflight error}]", got)
+		}
+	})
+}
