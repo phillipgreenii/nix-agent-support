@@ -66,6 +66,8 @@ func copyTree(src, dst string) error {
 // can.
 type fakeCcpool struct {
 	capacity   ccpool.Capacity
+	capErrs    []error // per capacity call; nil entries succeed
+	capCalls   int
 	startErr   error
 	replyErrs  []error  // per reply call; nil entries succeed
 	finals     []string // final message per turn (index = turn number)
@@ -81,7 +83,15 @@ type fakeCcpool struct {
 	polls     int
 }
 
-func (f *fakeCcpool) Capacity(context.Context) (ccpool.Capacity, error) { return f.capacity, nil }
+func (f *fakeCcpool) Capacity(context.Context) (ccpool.Capacity, error) {
+	n := f.capCalls
+	f.capCalls++
+	if n < len(f.capErrs) && f.capErrs[n] != nil {
+		return ccpool.Capacity{}, f.capErrs[n]
+	}
+	return f.capacity, nil
+}
+
 func (f *fakeCcpool) Start(_ context.Context, o ccpool.StartOpts) error {
 	f.started = append(f.started, o)
 	return f.startErr
@@ -460,6 +470,60 @@ func TestUsageLimitGateExit20RecordsSkippedRun(t *testing.T) {
 				t.Error("started session not closed")
 			}
 		})
+	}
+}
+
+func TestCapacityErrorRetriesThenSkips(t *testing.T) {
+	e := setupCcpool(t, ccCfg, 0)
+	boom := &ccpool.ExitError{Cmd: "capacity", Code: 1, Stderr: "recorder unreachable"}
+	e.fake.capErrs = []error{boom, boom, boom}
+	_, err := e.runLens(t)
+	var sk *SkippedError
+	if !errors.As(err, &sk) || !strings.Contains(sk.Reason, "capacity check failed 3 times") || !strings.Contains(sk.Reason, "recorder unreachable") {
+		t.Fatalf("want a skipped run naming the capacity failure, got %v", err)
+	}
+	if e.fake.capCalls != 3 {
+		t.Errorf("capacity tried %d times, want 3", e.fake.capCalls)
+	}
+	r := lastRun(t, e)
+	if r.State != ledger.RunSkipped || !strings.Contains(r.SkipReason, "capacity check failed") {
+		t.Errorf("%+v", r)
+	}
+	if len(e.fake.started) != 0 {
+		t.Error("a session was started although capacity was unknown")
+	}
+	if n := e.count(t, "topic"); n != 0 {
+		t.Errorf("%d topics", n)
+	}
+}
+
+func TestCapacityErrorRecoversWithinRetries(t *testing.T) {
+	e := setupCcpool(t, ccCfg, 0)
+	e.fake.capErrs = []error{errors.New("transient"), errors.New("transient")}
+	e.fake.capacity = ccpool.Capacity{Free: 0}
+	_, err := e.runLens(t)
+	var sk *SkippedError
+	// The third try succeeds and reports no free slot: the ordinary busy skip,
+	// not the capacity-failure skip.
+	if !errors.As(err, &sk) || !strings.Contains(sk.Reason, "no free session slot") {
+		t.Fatalf("%v", err)
+	}
+	if e.fake.capCalls != 3 {
+		t.Errorf("capacity tried %d times, want 3", e.fake.capCalls)
+	}
+}
+
+func TestCapacityErrorWithCancelledContextStaysFailed(t *testing.T) {
+	fake := &fakeCcpool{capErrs: []error{errors.New("x"), errors.New("x"), errors.New("x")}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (&CcpoolAnalyst{Client: fake}).capacity(ctx, 1)
+	var sk *SkippedError
+	if err == nil || errors.As(err, &sk) {
+		t.Fatalf("a cancelled context must not become a skipped run: %v", err)
+	}
+	if fake.capCalls != 1 {
+		t.Errorf("capacity tried %d times, want 1", fake.capCalls)
 	}
 }
 

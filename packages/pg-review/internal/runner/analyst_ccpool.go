@@ -132,15 +132,54 @@ func parseFailure(err error) []validate.Failure {
 	return []validate.Failure{{Index: -1, Finding: "#document", Field: "document", Rule: "parse", Token: err.Error()}}
 }
 
+// capacityTries and capacityBackoff bound the in-process retry of a failed
+// capacity check: a capacity error is infrastructure (the pool or its
+// recorder was unreachable), not an analyst failure.
+const (
+	capacityTries   = 3
+	capacityBackoff = 2 * time.Second
+)
+
+// capacity reads the pool capacity, retrying a failed read with a doubling
+// backoff. When every try fails the run is Skipped with a reason naming the
+// infrastructure cause, so it neither counts as a failed run nor consumes the
+// run key. A cancelled context is not infrastructure and stays a plain error.
+func (a *CcpoolAnalyst) capacity(ctx context.Context, runID int64) (ccpool.Capacity, error) {
+	sleep := a.Sleep
+	if sleep == nil {
+		sleep = sleepCtx
+	}
+	var last error
+	for i := 0; i < capacityTries; i++ {
+		if i > 0 {
+			if err := sleep(ctx, capacityBackoff<<(i-1)); err != nil {
+				return ccpool.Capacity{}, fmt.Errorf("ccpool capacity: %w", err)
+			}
+		}
+		capa, err := a.Client.Capacity(ctx)
+		if err == nil {
+			return capa, nil
+		}
+		if ctx.Err() != nil {
+			return ccpool.Capacity{}, fmt.Errorf("ccpool capacity: %w", err)
+		}
+		last = err
+	}
+	return ccpool.Capacity{}, &SkippedError{RunID: runID, Reason: fmt.Sprintf(
+		"ccpool capacity check failed %d times (ccpool or its recorder unreachable, likely transient load; the next scheduled run retries): %v",
+		capacityTries, last,
+	)}
+}
+
 // Analyse implements Analyst.
 func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 	d := s.Deps
 	cl := a.Client
 	runID := s.Run.ID
 
-	capa, err := cl.Capacity(ctx)
+	capa, err := a.capacity(ctx, runID)
 	if err != nil {
-		return fmt.Errorf("ccpool capacity: %w", err)
+		return err
 	}
 	if capa.UsageLimit != nil {
 		return usageSkip(runID, capa.UsageLimit)

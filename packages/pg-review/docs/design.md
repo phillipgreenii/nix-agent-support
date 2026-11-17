@@ -255,7 +255,11 @@ flowchart LR
   its limit, reports `free` as 0 with a `usage_limit` field (`ccpool/cmd/ccpool/capacity.go`).
   The runner reads `capacity --json` before starting a session and also treats exit 20 from `new`
   or `reply` as the same refusal; either records a Skipped run. A `reply` exit 5 (busy turn, not
-  expected on a fresh session) also records a Skipped run.
+  expected on a fresh session) also records a Skipped run. A `capacity --json` that itself fails
+  (any error, such as a recorder that cannot be reached under load) is infrastructure, not an
+  analyst failure: the runner retries it in process (3 tries, 2 s then 4 s apart), and when every
+  try fails the run is Skipped with a reason naming the capacity failure (5.14). A cancelled
+  context is not retried and stays Failed.
 - C5. `ccpool result` prints only the LAST assistant message's text blocks (`LastAssistantText`).
   Any text after the findings, such as a sign-off, loses them. The final message MUST be the
   findings and nothing else. There is no ccpool-side truncation, but Claude's own per-message
@@ -1252,6 +1256,13 @@ providers that nothing built in supplied, so with no `config.toml` no built-in l
 
 ### 5.14 Resolved review findings (draft 13; these rules override any earlier text they touch)
 
+- **Capacity-check failure.** A failed `ccpool capacity --json` is a retryable pre-start
+  infrastructure failure: the runner tries it up to 3 times (2 s, then 4 s between tries) and then
+  records the run as Skipped with a reason naming the capacity failure and the last error. Skipped
+  means the run key and window are not consumed (only Filed consumes them), the run does not count
+  toward the consecutive-failed-runs metric, and it exits 3 like every Skipped run (the adapter maps
+  it to 0). A cancelled context is not retried and stays Failed. Analyst failures after the session
+  starts stay Failed so they remain distinguishable. Test: `TestCapacityErrorRetriesThenSkips`.
 - **Interactive runs.** `--analyst interactive` writes the run row in a new state `AwaitingAnalyst`
   (no pid check; a TTL `interactive_ttl_minutes`, default 240, expires it to Failed and deletes its
   staging). `job run` prints the run id with the prompt, and `agent file` takes `--run <id>`
