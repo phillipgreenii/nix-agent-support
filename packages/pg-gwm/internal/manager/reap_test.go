@@ -226,9 +226,17 @@ func TestReapBroken(t *testing.T) {
 	}
 }
 
-func TestRenewRacesReap(t *testing.T) {
+// TestRenewRacesReap keeps the unit run short: each iteration spawns real
+// worktree git, so a few iterations of the renew-versus-reap race stay in the
+// unit gate and the 50-iteration soak (TestRenewRacesReapSoak) sits behind the
+// integration tag.
+func TestRenewRacesReap(t *testing.T) { renewRacesReap(t, renewRacesReapUnitIterations) }
+
+const renewRacesReapUnitIterations = 2
+
+func renewRacesReap(t *testing.T, iterations int) {
 	e := newEnv(t, func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })
-	for i := 0; i < 50; i++ {
+	for i := 0; i < iterations; i++ {
 		rec := e.mustLease(LeaseRequest{Name: "n", Detach: true, TTL: ptr(dur(t, "1h"))})
 		e.now = e.now.Add(2 * time.Hour) // the lease is now expired
 		renewer := e.manager(func(c *config.RepoConfig) { c.Reuse, c.Min = true, ptr(1) })

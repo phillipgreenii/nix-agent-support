@@ -9068,7 +9068,8 @@
               # be wired into any hook, run-unit-tests, pre-land or land gate, and
               # the unit check above never compiles it (the tests carry
               # `//go:build integration`). One test waits out the real 30-second
-              # SIGTERM grace.
+              # SIGTERM grace. It also runs the 50-iteration renew-versus-reap soak
+              # in internal/manager (TestRenewRacesReapSoak).
               pg-gwm-integration-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-gwm-integration-tests";
@@ -9085,6 +9086,7 @@
                       export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
                       export GOFLAGS=''${GOFLAGS//-trimpath/}
                       go test -tags integration -race -count=1 -v -timeout 10m ./integration_test
+                      go test -tags integration -race -count=1 -v -timeout 10m -run '^TestRenewRacesReapSoak$' ./internal/manager
                       runHook postBuild
                     '';
                   });
