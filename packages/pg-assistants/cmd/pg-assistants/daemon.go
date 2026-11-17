@@ -34,7 +34,8 @@ running and the next daemon adopts them.
 
 An assistant with a config problem is not started and the others run; a bad
 global field falls back to its default. Exit 7 only when the file cannot be
-read or parsed or a [paths] entry is invalid, 10 when a shutdown overran its
+read or parsed or a [paths] entry is invalid, 1 when the state dir, its
+tmux.conf or the events log cannot be created, 10 when a shutdown overran its
 deadline, 2 on a usage error.
 
 PG_ASSISTANTS_PPROF_ADDR (a socket path or a loopback host:port) opens the
@@ -135,12 +136,16 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 	}
 
 	// The start hold survives a restart: seed the block readings from the
-	// previous status file. A missing or unreadable one seeds nothing.
+	// previous status file. A missing or unreadable one seeds nothing. The
+	// seeded readings go on the board at once: only an assistant loop's tick
+	// publishes them, so with no valid assistant the next restart would
+	// otherwise find them gone.
 	tracker := blocks.NewTracker(cfg.Blocks)
 	if prev, err := supervisor.ReadStatus(statusPath(p.StateDir)); err == nil {
 		tracker.Seed(prev.Blocks, now)
 	}
 	board := supervisor.NewStatusBoard(statusPath(p.StateDir), ds)
+	board.SetBlocks(tracker.Snapshot(now))
 
 	stopPprof := pprofserver.StartFromEnv(pprofEnv, c.getenv, c.stderr)
 	defer stopPprof()

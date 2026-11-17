@@ -24,8 +24,9 @@ Exit codes (`x/exitcode`):
 - `config check` exits 0 printing `ok: <n> assistants`, 7 printing each problem on its own line
   (`<field>: <message>`), and 2 on a usage error (including a missing `--config`).
 - `daemon` exits 7 only when the file cannot be read or parsed or a `[paths]` entry is invalid
-  (an assistant's problem or a bad global field is logged and the rest runs), 10 when a shutdown
-  overran its deadline, and 2 on a usage error. It writes `<state dir>/status.json` and
+  (an assistant's problem or a bad global field is logged and the rest runs), 1 when the state
+  dir, its `tmux.conf` or the events log cannot be created, 10 when a shutdown overran its
+  deadline, and 2 on a usage error. It writes `<state dir>/status.json` and
   `<state dir>/events.jsonl` (10 MiB, one `.1` backup); its own events are `daemon_start` (pid,
   version, config path and hash, the effective `PG_CLAUDE_CONTROL_STATE_DIR` and
   `CLAUDE_CONFIG_DIR`), `config_problem` for each global problem, and `status_write_failed` when

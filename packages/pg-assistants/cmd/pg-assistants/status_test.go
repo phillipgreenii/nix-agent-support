@@ -179,6 +179,10 @@ func TestStatusNotePriority(t *testing.T) {
 	}{
 		{"config error over stalled", supervisor.AssistantStatus{ConfigError: "x: bad", LastTick: stalledTick}, "config error: x: bad"},
 		{"stalled over hint", supervisor.AssistantStatus{Hint: "h", LastTick: stalledTick}, "stalled (last tick 1h00m ago)"},
+		{"stalled keeps the last error", supervisor.AssistantStatus{Hint: "h", LastError: "usage: no reply", LastTick: stalledTick}, "stalled (last tick 1h00m ago): usage: no reply"},
+		// A loop that panicked on its first tick published a zero last tick.
+		{"stalled before any tick", supervisor.AssistantStatus{LastError: "panic: boom (loop restarts in 4m0s)"}, "stalled (no tick yet): panic: boom (loop restarts in 4m0s)"},
+		{"stalled before any tick, no error", supervisor.AssistantStatus{}, "stalled (no tick yet)"},
 		{"hint over last error", supervisor.AssistantStatus{Hint: "h", LastError: "e", LastTick: now}, "h"},
 		{"last error over last exit", supervisor.AssistantStatus{LastError: "e", LastExit: exit, LastTick: now}, "e"},
 		{"last exit", supervisor.AssistantStatus{LastExit: exit, LastTick: now}, "last exit: status 1 after 12s"},
@@ -201,6 +205,43 @@ func TestStatusNotePriority(t *testing.T) {
 	if isStalled(supervisor.AssistantStatus{ConfigError: "x: bad"}, time.Minute, 2*time.Minute, time.Time{}, now) {
 		t.Errorf("isStalled reports an assistant with a config error (no loop, no last tick) stalled")
 	}
+}
+
+// A loop that panics on its first tick publishes its status with a zero last
+// tick and the panic in last_error. Once its restart backoff outlasts tick +
+// grace.kill + 45s it is stalled, and the panic MUST still show in its note.
+func TestStatusPanickedFirstTickShowsTheError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		configPath, stateDir := statusFixture(t,
+			assistantTOML("example-a", "/example/work/a"), assistantTOML("example-c", "/example/work/c"))
+		st := healthy(now)
+		st.Daemon.StartedAt = now.Add(-10 * time.Minute)
+		st.Assistants = []supervisor.AssistantStatus{
+			{ID: "example-a", Enabled: true, LastError: "panic: boom (loop restarts in 4m0s)"},
+			{ID: "example-c", Enabled: true, Running: true, PID: 5001, LastError: "usage: no reply", LastTick: now.Add(-10 * time.Minute)},
+		}
+		writeStatusFile(t, stateDir, st)
+
+		code, stdout, stderr := runStatus(t, configPath)
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr %q)", code, stderr)
+		}
+		if a, want := row(t, stdout, "example-a"), "stalled (no tick yet): panic: boom (loop restarts in 4m0s)"; !strings.HasSuffix(a, want) {
+			t.Errorf("example-a row = %q, want NOTE %q", a, want)
+		}
+		if c, want := row(t, stdout, "example-c"), "stalled (last tick 10m ago): usage: no reply"; !strings.HasSuffix(c, want) {
+			t.Errorf("example-c row = %q, want NOTE %q", c, want)
+		}
+		if strings.Contains(stdout, "106751d") {
+			t.Errorf("a zero last tick rendered as a saturated age:\n%s", stdout)
+		}
+
+		code, stdout, _ = runStatus(t, configPath, "--check")
+		if want := "degraded: example-a stalled; example-c stalled\n"; code != 5 || stdout != want {
+			t.Errorf("status --check = %d, %q; want 5, %q", code, stdout, want)
+		}
+	})
 }
 
 func TestStatusStaleWarnsAndExitsZero(t *testing.T) {

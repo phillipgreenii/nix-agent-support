@@ -82,7 +82,9 @@ type Status struct {
 // Flush writes the file, so it MUST be called only from the daemon's
 // heartbeat goroutine, never from an assistant's loop: a loop that wants the
 // file written at the end of its tick signals the heartbeat, without blocking,
-// instead.
+// instead. The one other permitted call is the daemon's final Flush from main
+// after Run's loops have all returned: the heartbeat has returned by then
+// (it ends with the context), and that flush writes the loops' last ticks.
 //
 // One Flush writes at a time. A Flush that finds a write in progress returns
 // nil at once, handing its state to the writer in progress, which writes it
@@ -147,7 +149,8 @@ func (b *StatusBoard) SetBlocks(l []control.Limit) {
 // directory, then a rename), mode 0600, with written_at set to now (the
 // latest now any Flush has passed). A missing directory is created 0700; a
 // path that is not absolute is an error. Call it only from the heartbeat
-// goroutine (see StatusBoard).
+// goroutine, or once from main after the loops have returned (see
+// StatusBoard).
 func (b *StatusBoard) Flush(now time.Time) error {
 	b.mu.Lock()
 	if now.After(b.flushAt) {

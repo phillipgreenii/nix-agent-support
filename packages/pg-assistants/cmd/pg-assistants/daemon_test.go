@@ -311,6 +311,45 @@ func TestDaemonSeedsBlocksFromStatus(t *testing.T) {
 	})
 }
 
+// Only an assistant loop's tick publishes the block readings, so with no
+// valid assistant the seeded hold reaches the new status file only because
+// the daemon puts the seeded readings on the board itself; otherwise the next
+// restart would lose the hold.
+func TestDaemonKeepsSeededBlocksWithNoValidAssistant(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		f := newDaemonFixture(t, newFakeTmux(), "")
+		bad := strings.Replace(assistantTOML("example-a", f.cwdA), `effort = "medium"`, `effort = "turbo"`, 1)
+		f.configPath = tempConfig(t, pathsTOML(f.stateDir, f.claudeJSON)+bad)
+		mkdir(t, f.stateDir)
+		reset := now.Add(2 * time.Hour)
+		seeded := control.Limit{Kind: control.KindFiveHour, Fraction: 0.97, ResetsAt: reset, ObservedAt: now.Add(-time.Minute)}
+		data, err := json.Marshal(supervisor.Status{
+			SchemaVersion: supervisor.SchemaVersion, WrittenAt: now.Add(-time.Minute), Blocks: []control.Limit{seeded},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f.path("status.json"), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if code := f.runBriefly(t); code != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr %q)", code, f.errb.String())
+		}
+		st := f.status(t)
+		if !st.WrittenAt.After(now.Add(-time.Minute)) {
+			t.Fatalf("status.json was not rewritten (written_at %v)", st.WrittenAt)
+		}
+		if len(st.Blocks) != 1 || st.Blocks[0].Kind != control.KindFiveHour || st.Blocks[0].Fraction != 0.97 ||
+			!st.Blocks[0].ResetsAt.Equal(reset) {
+			t.Errorf("blocks = %+v, want the seeded five_hour reading kept", st.Blocks)
+		}
+		if a := assistantStatus(t, st, "example-a"); a.ConfigError == "" {
+			t.Errorf("example-a = %+v, want its config error", a)
+		}
+	})
+}
+
 func TestDaemonIgnoresUnreadablePreviousStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newDaemonFixture(t, newFakeTmux(), "")

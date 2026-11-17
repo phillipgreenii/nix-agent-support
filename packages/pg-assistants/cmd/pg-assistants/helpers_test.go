@@ -241,7 +241,7 @@ func answerTools(tc *testCLI, srv *fakeTmux) {
 	tc.fake.On(cmdruntest.MatchName(controlBin)).Return(cmdruntest.Out(""))
 }
 
-// callsTo returns the fake's calls to tmux with the given verb.
+// tmuxCalls returns the fake's calls to tmux with the given verb.
 func tmuxCalls(tc *testCLI, verb string) []cmdrun.Call {
 	var out []cmdrun.Call
 	for _, c := range tc.fake.Calls() {

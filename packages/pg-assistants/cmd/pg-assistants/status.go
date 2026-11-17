@@ -306,13 +306,24 @@ func waitCell(a supervisor.AssistantStatus, now time.Time) string {
 
 // note is the first of: the config error, stalled, the hint, the last error,
 // the last exit. A config error comes first: such an assistant has no loop,
-// so it never ticks. Stalled comes next: a stalled loop's other fields are old.
+// so it never ticks. Stalled comes next: a stalled loop's other fields are
+// old, except its last error, which is kept after it, since it is often the
+// reason (a loop that panicked shows the panic there). A loop that has not
+// finished a tick, such as one that panicked on its first, has a zero last
+// tick: "no tick yet".
 func note(a supervisor.AssistantStatus, stalled bool, now time.Time) string {
 	switch {
 	case a.ConfigError != "":
 		return "config error: " + a.ConfigError
 	case stalled:
-		return fmt.Sprintf("stalled (last tick %s ago)", age(now.Sub(a.LastTick)))
+		s := "stalled (no tick yet)"
+		if !a.LastTick.IsZero() {
+			s = fmt.Sprintf("stalled (last tick %s ago)", age(now.Sub(a.LastTick)))
+		}
+		if a.LastError != "" {
+			s += ": " + a.LastError
+		}
+		return s
 	case a.Hint != "":
 		return a.Hint
 	case a.LastError != "":
