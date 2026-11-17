@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/facts"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
@@ -44,29 +43,54 @@ func fakeRecorder(t *testing.T) (socket string, hellos *atomic.Int64) {
 	return socket, &n
 }
 
-// TestMultiPoolEmit_recorderHellosDoNotScaleWithPools: a multi-pool emit run
-// builds one service per pool and each consults its Gate before reporting
-// capacity. The recorder must see at most 2 hellos (Dial's, plus at most one
-// ping) however many pools there are.
-func TestMultiPoolEmit_recorderHellosDoNotScaleWithPools(t *testing.T) {
+// TestCapacity_sendsNoRecorderHello: capacity reads only ccpool's own store and
+// tmux, so a multi-pool capacity run sends the recorder no request at all,
+// however many pools there are.
+func TestCapacity_sendsNoRecorderHello(t *testing.T) {
 	socket, hellos := fakeRecorder(t)
 	old := factReader
 	factReader = facts.NewWith(client.Options{Socket: socket, Name: "ccpool-test", ConnectTimeout: time.Second})
 	t.Cleanup(func() { factReader = old })
 
+	svc, st, code := buildService()
+	if code != 0 {
+		t.Fatalf("buildService = %d", code)
+	}
+	t.Cleanup(func() { _ = st.Close() })
 	const pools = 6
 	dirs := make([]string, pools)
 	for i := range dirs {
 		dirs[i] = fmt.Sprintf("/pool-%d", i)
 	}
 	rc := emitCapacityForPools(dirs, func(string) error {
-		// what Service.Capacity does per pool, with the production wiring
-		return newSessionDeps(config.Config{}, nil, nil).Gate.Ping(context.Background())
+		_, err := svc.Capacity(context.Background(), 6)
+		return err
 	})
 	if rc != 0 {
 		t.Fatalf("emitCapacityForPools = %d, want 0", rc)
 	}
-	if got := hellos.Load(); got < 1 || got > 2 {
-		t.Fatalf("recorder saw %d hellos for %d pools, want 1..2", got, pools)
+	if got := hellos.Load(); got != 0 {
+		t.Fatalf("recorder saw %d hellos for %d pools, want 0", got, pools)
+	}
+}
+
+// TestCapacity_succeedsWithRecorderUnreachable: the production wiring with the
+// recorder's socket absent still reports capacity.
+func TestCapacity_succeedsWithRecorderUnreachable(t *testing.T) {
+	old := factReader
+	factReader = facts.NewWith(client.Options{Socket: filepath.Join(t.TempDir(), "none.sock"), Name: "ccpool-test", ConnectTimeout: 100 * time.Millisecond})
+	t.Cleanup(func() { factReader = old })
+
+	svc, st, code := buildService()
+	if code != 0 {
+		t.Fatalf("buildService = %d", code)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	c, err := svc.Capacity(context.Background(), 6)
+	if err != nil {
+		t.Fatalf("Capacity with the recorder unreachable: %v", err)
+	}
+	if c.Free != 6 {
+		t.Fatalf("capacity = %+v; want Free 6", c)
 	}
 }

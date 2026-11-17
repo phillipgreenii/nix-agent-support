@@ -28,6 +28,7 @@ func useDownRecorder(t *testing.T) {
 	t.Helper()
 	e := useRecorder(t)
 	e.Stop()
+	t.Cleanup(facts.SetRetryPolicy(2, time.Millisecond, time.Second))
 }
 
 const testSess = "11111111-1111-4111-8111-111111111111"
@@ -44,15 +45,14 @@ func tReplyLine(ts, text string) string {
 	return fmt.Sprintf(`{"type":"assistant","uuid":"a-%s","sessionId":"%s","timestamp":"%s","message":{"id":"m-%s","role":"assistant","content":[{"type":"text","text":"%s"}],"usage":{"output_tokens":2}}}`+"\n", ts, testSess, ts, ts, text)
 }
 
-// TestRunCapacity_refusesWhenDaemonOffline: with the recorder down ccpool cannot
-// check capacity, so `capacity` fails (an admission gate fails closed) instead of
-// reporting free slots.
-func TestRunCapacity_refusesWhenDaemonOffline(t *testing.T) {
+// TestRunCapacity_succeedsWhenDaemonOffline: capacity reads only ccpool's own
+// store and tmux, so it reports occupancy with the recorder down.
+func TestRunCapacity_succeedsWhenDaemonOffline(t *testing.T) {
 	armedLaunchEnv(t)
 	useDownRecorder(t)
 	out, code := captureStderr(t, func() int { return runCapacity([]string{"--json"}) })
-	if code == 0 || !strings.Contains(out, "the recorder is not available") {
-		t.Fatalf("runCapacity with the recorder down = %d, %q; want failure naming the recorder as not available", code, out)
+	if code != 0 {
+		t.Fatalf("runCapacity with the recorder down = %d, %q; want success", code, out)
 	}
 }
 

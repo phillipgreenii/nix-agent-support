@@ -30,8 +30,8 @@ func TestNewSessionDeps_wiresExister(t *testing.T) {
 	if !ok {
 		t.Fatalf("production Exister %T must be a session.CheckedExister", deps.Exister)
 	}
-	if deps.Gate == nil || deps.Control == nil {
-		t.Fatalf("production deps must wire Gate and Control, got %v and %v", deps.Gate, deps.Control)
+	if deps.Control == nil {
+		t.Fatalf("production deps must wire Control, got %v", deps.Control)
 	}
 
 	transcript := e.Path("projects", e.Project, testSess+".jsonl")

@@ -79,16 +79,6 @@ func requireFacts(cmd string) int {
 	return 0
 }
 
-// processGate is the session.Gate every service shares: it asks the recorder at
-// most once per process (facts.Reader.PingOnce), so a multi-pool capacity run
-// that builds a service per pool sends one hello per run, not one per pool. It
-// reads factReader at call time so a test that swaps the reader is honoured.
-type processGate struct{}
-
-func (processGate) Ping(ctx context.Context) error { return factReader.PingOnce(ctx) }
-
-var _ session.Gate = processGate{}
-
 // backgroundAgentRecency bounds how long a subagent transcript may stay
 // unwritten before its orchestrator stops counting as waiting on it.
 const backgroundAgentRecency = 15 * time.Minute

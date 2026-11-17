@@ -192,16 +192,19 @@ func TestClose_stopsThroughControl(t *testing.T) {
 	}
 }
 
-type downGate struct{}
-
-func (downGate) Ping(context.Context) error { return errors.New("daemon offline") }
-
-func TestCapacity_refusesWhenGateIsDown(t *testing.T) {
+// TestCapacity_succeedsWithRecorderDown: Capacity reads only the store and tmux,
+// so a Transcript and Exister whose every read fails with the recorder offline
+// (the production wiring with the daemon down) do not change its answer.
+func TestCapacity_succeedsWithRecorderDown(t *testing.T) {
 	s, _ := reapFixtureStates(t, time.Unix(10_000, 0),
 		map[string]int64{"w": 1}, map[string]store.State{"w": store.Working})
-	s.d.Gate = downGate{}
-	if _, err := s.Capacity(context.Background(), 6); err == nil {
-		t.Fatal("Capacity must fail when the fact source is down")
+	s.d.Exister = checkedExister{err: errors.New("the recorder is not available")}
+	c, err := s.Capacity(context.Background(), 6)
+	if err != nil {
+		t.Fatalf("Capacity with the recorder down: %v", err)
+	}
+	if c.MaxSessions != 6 {
+		t.Fatalf("capacity = %+v; want MaxSessions 6", c)
 	}
 }
 

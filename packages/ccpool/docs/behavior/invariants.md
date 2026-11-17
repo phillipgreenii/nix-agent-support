@@ -54,6 +54,15 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   the record alone, never treat the conversation as gone (`INV-POOL-2`). A record whose original
   transcript disappears is therefore pruned at the first sweep after the reused answer expires.
 
+- **`INV-POOL-13`** <!-- uuid: cb772e83-4930-497e-af37-3e39b0354c30 --> — **A pool's capacity read MUST NOT depend on the
+  recorder, and every read that does use it MUST retry before failing.** Whether a session is
+  recorded is the recorder's concern: the capacity read answers from the pool's own records and its
+  terminal sessions alone, so it MUST succeed with the recorder unreachable, and no dispatch is
+  refused up front for want of a recorder answer. A read that needs a recorded fact (a reply, a
+  state, a resumable check, a delivery confirmation) MUST try again a bounded number of times with
+  growing pauses, covering the connection handshake too, and MUST log each retry. When every attempt
+  fails it MUST fail with an error naming the recorder as unavailable, never a guess, and never
+  leave a half-started launch.
 - **`INV-POOL-4`** <!-- uuid: 627882d5-f2ad-4be6-97be-f24e6963f0c1 --> — **A pool MUST NOT accept
   work while the account's usage window is at its limit.** Whenever the co-resident monitor's
   account-level usage surface (`packages/pa-monitor/docs/behavior · INTF-STATE`) reports the

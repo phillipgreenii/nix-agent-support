@@ -186,6 +186,7 @@ func TestDaemonOffline(t *testing.T) {
 		t.Fatalf("read while up: %v", err)
 	}
 	e.Stop()
+	defer facts.SetRetryPolicy(2, time.Millisecond, time.Second)()
 	path := transcriptPath(e)
 	checks := map[string]func() error{
 		"Ping":              func() error { return r.Ping(context.Background()) },

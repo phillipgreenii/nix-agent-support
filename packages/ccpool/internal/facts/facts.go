@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -36,9 +37,6 @@ type Reader struct {
 
 	mu sync.Mutex
 	c  *client.Client
-
-	pingMu sync.Mutex
-	pinged bool // a PingOnce succeeded: the recorder answered earlier in this process
 }
 
 // New returns a Reader. name is the per-client metric label sent to the daemon.
@@ -79,52 +77,104 @@ func (r *Reader) reset() {
 	r.mu.Unlock()
 }
 
-func (r *Reader) query(ctx context.Context, req client.QueryRequest) (*client.QueryAnswer, error) {
+// Retry policy for every recorder read. A read that fails because the recorder
+// is slow, busy or briefly gone (a hello that waits behind the recorder's write
+// connection, a socket that is not up yet) is tried again with a growing pause
+// before the caller sees an error; each attempt gets its own time budget. They
+// are variables so a test can shorten the pauses.
+var (
+	// readAttempts is how many times a read is tried (the first try included).
+	readAttempts = 4
+	// readBackoff is the pause before the second try; each later pause doubles.
+	readBackoff = 500 * time.Millisecond
+	// readAttemptTimeout is one attempt's budget, the dial handshake included.
+	readAttemptTimeout = 30 * time.Second
+)
+
+// retryable reports whether a failed read is worth trying again: the recorder
+// did not answer (wrapped ErrDaemonOffline), answered busy or timed out, or the
+// attempt's own deadline passed.
+func retryable(err error) bool {
+	return errors.Is(err, ErrDaemonOffline) || client.Retryable(err) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// once makes one attempt: it dials if no connection is cached (Dial performs the
+// recorder's hello handshake, so a slow hello is covered by the same retry) and
+// runs fn. An unreachable recorder drops the cached connection so the next
+// attempt dials again.
+func (r *Reader) once(ctx context.Context, fn func(context.Context, *client.Client) error) error {
 	c, err := r.conn(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	ans, err := c.Query(ctx, req)
-	if err != nil {
+	if err := fn(ctx, c); err != nil {
 		if werr := wrapErr(err); errors.Is(werr, ErrDaemonOffline) {
 			r.reset()
-			return nil, werr
+			return werr
 		}
+		return err
+	}
+	return nil
+}
+
+// call runs fn against the recorder with bounded retries and backoff. It logs
+// each retry. After the last attempt it returns the last error, which for an
+// unreachable recorder matches ErrDaemonOffline; each attempt has readAttemptTimeout. A cancelled parent ctx stops the retries at once.
+func (r *Reader) call(parent context.Context, op string, fn func(context.Context, *client.Client) error) error {
+	var err error
+	pause := readBackoff
+	for attempt := 1; attempt <= readAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(parent, readAttemptTimeout)
+		err = r.once(ctx, fn)
+		cancel()
+		if err == nil || parent.Err() != nil || !retryable(err) {
+			return err
+		}
+		if attempt == readAttempts {
+			break
+		}
+		slog.Warn("ccpool: recorder read failed; retrying", "op", op, "attempt", attempt, "of", readAttempts, "pause", pause, "err", err)
+		select {
+		case <-parent.Done():
+			return err
+		case <-time.After(pause):
+		}
+		pause *= 2
+	}
+	return fmt.Errorf("%s: the recorder did not answer after %d attempts: %w", op, readAttempts, err)
+}
+
+// SetRetryPolicy replaces the retry policy of every read and returns a function
+// that restores the previous one. It is a seam for tests that need a down
+// recorder to fail fast.
+func SetRetryPolicy(attempts int, backoff, attemptTimeout time.Duration) (restore func()) {
+	a, b, d := readAttempts, readBackoff, readAttemptTimeout
+	readAttempts, readBackoff, readAttemptTimeout = attempts, backoff, attemptTimeout
+	return func() { readAttempts, readBackoff, readAttemptTimeout = a, b, d }
+}
+
+func (r *Reader) query(ctx context.Context, req client.QueryRequest) (*client.QueryAnswer, error) {
+	var ans *client.QueryAnswer
+	err := r.call(ctx, "query", func(ctx context.Context, c *client.Client) error {
+		var qerr error
+		ans, qerr = c.Query(ctx, req)
+		return qerr
+	})
+	if err != nil {
 		return nil, err
 	}
 	return ans, nil
 }
 
-// Ping reports nil when the recorder answers and ErrDaemonOffline when it does
-// not. It is the capacity and dispatch gate: ccpool refuses to dispatch when it
-// cannot check.
+// Ping reports nil when the recorder answers a hello (retried like every read)
+// and an error matching ErrDaemonOffline when it does not. It is not a gate for
+// capacity or dispatch: only a fact-reading command that must not mistake an
+// outage for "no data" uses it.
 func (r *Reader) Ping(ctx context.Context) error {
-	c, err := r.conn(ctx)
-	if err != nil {
+	return r.call(ctx, "hello", func(ctx context.Context, c *client.Client) error {
+		_, err := c.Hello(ctx)
 		return err
-	}
-	if _, err := c.Hello(ctx); err != nil {
-		r.reset()
-		return wrapErr(err)
-	}
-	return nil
-}
-
-// PingOnce is Ping for a process that gates many times (a multi-pool metrics run
-// builds one service per pool, each consulting the gate): the first success is
-// remembered, so later calls send no further hello. A failure is not remembered.
-// Dial already performs a hello, so a run costs one or two, not one per pool.
-func (r *Reader) PingOnce(ctx context.Context) error {
-	r.pingMu.Lock()
-	defer r.pingMu.Unlock()
-	if r.pinged {
-		return nil
-	}
-	if err := r.Ping(ctx); err != nil {
-		return err
-	}
-	r.pinged = true
-	return nil
+	})
 }
 
 // SessionID is the Claude session id of a transcript path: the file name without
@@ -165,8 +215,7 @@ func (r *Reader) LastAssistantText(path string) (string, error) {
 // caller that knows when its turn began (a send) passes it so the read cannot
 // walk a long history for an answer it already knows is newer.
 func (r *Reader) LastAssistantTextSince(path string, since time.Time) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	more := []client.Filter{eq("type", "text"), exists("assistant_text", true)}
 	if !since.IsZero() {
 		more = append(more, timeFloor(since))
@@ -236,25 +285,22 @@ const (
 // session) and falls back to IsAwaitingInputByQuery when the recorder predates the
 // operation or has not finished deriving the tables for an older database.
 func (r *Reader) IsAwaitingInput(path string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	c, err := r.conn(ctx)
-	if err != nil {
-		return false, err
-	}
-	if !c.HasCapability("sessions.facts") {
-		return r.IsAwaitingInputByQuery(path)
-	}
 	id := SessionID(path)
-	ans, err := c.SessionsFacts(ctx, []string{id}, []string{client.FactAwaitingInput})
-	if err != nil {
-		if werr := wrapErr(err); errors.Is(werr, ErrDaemonOffline) {
-			r.reset()
-			return false, werr
+	var ans *client.SessionsFactsAnswer
+	supported := true
+	err := r.call(context.Background(), "sessions.facts", func(ctx context.Context, c *client.Client) error {
+		if !c.HasCapability("sessions.facts") {
+			supported = false
+			return nil
 		}
+		var ferr error
+		ans, ferr = c.SessionsFacts(ctx, []string{id}, []string{client.FactAwaitingInput})
+		return ferr
+	})
+	if err != nil {
 		return false, err
 	}
-	if len(ans.Unavailable) > 0 {
+	if !supported || len(ans.Unavailable) > 0 {
 		return r.IsAwaitingInputByQuery(path)
 	}
 	f := ans.Sessions[id]
@@ -273,8 +319,7 @@ func (r *Reader) IsAwaitingInput(path string) (bool, error) {
 // per-id tool_result lookup is not used because tool_use_id has no index and
 // would walk the whole session.
 func (r *Reader) IsAwaitingInputByQuery(path string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	id := SessionID(path)
 	asked, err := r.query(ctx, client.QueryRequest{
 		Where:  mainSession(id, eq("source", transcriptSource), eq("type", "tool_use"), eq("name", "AskUserQuestion")),
@@ -346,8 +391,7 @@ func (r *Reader) FirstMessageActivity(path string) (time.Time, bool) {
 
 // MessageActivity is FirstMessageActivity with the read error.
 func (r *Reader) MessageActivity(path string) (time.Time, bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	notErr := client.Filter{Any: []client.Filter{exists("is_api_error_message", false), eq("is_api_error_message", false)}}
 	ans, err := r.query(ctx, client.QueryRequest{
 		Where:  mainSession(SessionID(path), isMessage(), notErr),
@@ -372,8 +416,7 @@ func (r *Reader) MessageActivity(path string) (time.Time, bool, error) {
 // OutputTokens is the total output_tokens of the session, counted once per
 // distinct assistant message.
 func (r *Reader) OutputTokens(path string) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	ans, err := r.query(ctx, client.QueryRequest{
 		Where: mainSession(SessionID(path), eq("type", "assistant")),
 		Aggregate: []client.Agg{
@@ -400,48 +443,40 @@ func (r *Reader) OutputTokens(path string) (int64, error) {
 // still in the Claude directory: what makes a Conversation resumable. A session
 // the recorder has never seen is not resumable.
 func (r *Reader) OriginalsPresent(transcriptPath string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	c, err := r.conn(ctx)
-	if err != nil {
-		return false, err
-	}
-	conv, err := c.Conversation(ctx, SessionID(transcriptPath))
-	if err != nil {
-		if errors.Is(err, client.ErrNotFound) {
-			return false, nil
+	present := false
+	err := r.call(context.Background(), "conversation", func(ctx context.Context, c *client.Client) error {
+		conv, cerr := c.Conversation(ctx, SessionID(transcriptPath))
+		if errors.Is(cerr, client.ErrNotFound) {
+			present = false
+			return nil
 		}
-		if werr := wrapErr(err); errors.Is(werr, ErrDaemonOffline) {
-			r.reset()
-			return false, werr
+		if cerr != nil {
+			return cerr
 		}
-		return false, err
-	}
-	return conv.OriginalsExist, nil
+		present = conv.OriginalsExist
+		return nil
+	})
+	return present, err
 }
 
 // ProcessAlive reports whether the Process (pid and its start time as the
 // registry file names it) is alive now. It replaces the inline pid and
 // start-time check of the registry reader.
 func (r *Reader) ProcessAlive(pid int64, procStart string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	c, err := r.conn(ctx)
-	if err != nil {
-		return false, err
-	}
-	p, err := c.Process(ctx, pid, procStart)
-	if err != nil {
-		if errors.Is(err, client.ErrNotFound) {
-			return false, nil
+	alive := false
+	err := r.call(context.Background(), "process", func(ctx context.Context, c *client.Client) error {
+		p, perr := c.Process(ctx, pid, procStart)
+		if errors.Is(perr, client.ErrNotFound) {
+			alive = false
+			return nil
 		}
-		if werr := wrapErr(err); errors.Is(werr, ErrDaemonOffline) {
-			r.reset()
-			return false, werr
+		if perr != nil {
+			return perr
 		}
-		return false, err
-	}
-	return p.Alive, nil
+		alive = p.Alive
+		return nil
+	})
+	return alive, err
 }
 
 // Mark returns the feed position now: a later WaitMessage sees only records
@@ -484,8 +519,11 @@ const feedGrace = 2 * time.Second
 // ErrFeedUnanswered (the iterator would have retried them silently, so the
 // window's end would have read as a definitive "no record").
 func (r *Reader) WaitMessage(ctx context.Context, transcriptPath, mark string, window time.Duration) (bool, error) {
-	c, err := r.conn(ctx)
-	if err != nil {
+	var c *client.Client
+	if err := r.call(ctx, "connect", func(_ context.Context, cc *client.Client) error {
+		c = cc
+		return nil
+	}); err != nil {
 		return false, err
 	}
 	deadline := time.Now().Add(window)

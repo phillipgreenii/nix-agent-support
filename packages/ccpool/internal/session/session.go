@@ -247,11 +247,6 @@ type Control interface {
 	Stop(ctx context.Context, claudeSessionID string) error
 }
 
-// Gate reports whether the fact source answers.
-type Gate interface {
-	Ping(ctx context.Context) error
-}
-
 type Deps struct {
 	Tmux       Tmux
 	Trust      Truster
@@ -277,9 +272,6 @@ type Deps struct {
 	// pending and its subagent transcript is recent). Reap counts the live rows
 	// for which it holds into ccpool_session_background_agents. nil = never.
 	BackgroundAgents func(transcriptPath string) bool
-	// Gate, when set, is probed before capacity is reported: a recorder that does
-	// not answer makes Capacity fail (the dispatch gate then refuses). nil = no gate.
-	Gate Gate
 	// Control, when set, carries sends, interrupts, slash commands and stops. nil
 	// (or ErrNoControl from it) falls back to tmux key delivery.
 	Control   Control
