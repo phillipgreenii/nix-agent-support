@@ -225,7 +225,9 @@ in
         it picks aggressiveness 1, 2 or 3 from the free space on the Data
         volume, reclaims, logs one JSON line per run, and logs an ERROR line
         (the alert) when free space is below the lowest threshold. Levels 4 and
-        5 are never run by it. Needs phillipgreenii-nix-personal's HM
+        5 are never run by it. A run on battery power is skipped (one JSON line
+        with skipped true and reason battery); `pg-disk-reclaimer auto
+        --ignore-power` overrides that for a manual run. Needs phillipgreenii-nix-personal's HM
         `launchdServices` registry
       '';
 

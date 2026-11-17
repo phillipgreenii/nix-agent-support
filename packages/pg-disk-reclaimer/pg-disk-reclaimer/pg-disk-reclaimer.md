@@ -55,6 +55,10 @@
 
 `pg-disk-reclaimer auto --apply --below1-gb {{60}} --below2-gb {{45}} --below3-gb {{30}} --max-level {{3}}`
 
+- Scheduled mode skips its run on battery power (exit 0, one JSON line with `skipped` true and `reason` battery; an unreadable `pmset` result still runs). Run it anyway from a terminal with:
+
+`pg-disk-reclaimer auto --apply --ignore-power`
+
 - Go build cache helpers for registry commands: remove the entries Go's own trim rule would (name ends `-a` or `-d`, unused for N days plus an hour), or wipe the cache with the packaged go (exit 75, skipped, while a go or golangci-lint process runs):
 
 `pg-disk-reclaimer go-cache-trim --cache {{path/to/go-build}} --older-than-days {{3}} --dry-run`

@@ -1581,13 +1581,27 @@ pgdr_auto_free_kb() {
   printf '%s\n' "$free"
 }
 
+# pgdr_auto_on_battery: succeeds only when `pmset -g batt` reports that the
+# machine runs on battery (its first line names "Battery Power"). A missing
+# pmset, a failing pmset or any other answer (AC Power, UPS Power, no battery
+# on a desktop, unparseable text) fails, so an unreadable result never silences
+# the scheduled run.
+pgdr_auto_on_battery() {
+  local first
+  first=$(pmset -g batt 2>/dev/null | head -n 1) || return 1
+  [[ $first == *"Battery Power"* ]]
+}
+
 # pgdr_auto_log <json-line>: one structured line on stdout (JSONL).
 pgdr_auto_log() {
   printf '%s\n' "$1"
 }
 
 # cmd_auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N]
-#          [--below3-gb N] [--max-level N]
+#          [--below3-gb N] [--max-level N] [--ignore-power]
+# On battery power the run is skipped (exit 0, one JSON line with skipped=true
+# and reason=battery, nothing reclaimed, no metrics); --ignore-power runs
+# anyway, for a manual run from a terminal.
 # --max-level N (1 to 3, default 3) caps the chosen level: free space that
 # selects a higher level runs level N instead. The alert still keys on the
 # level-3 threshold, so a capped run still raises it.
@@ -1625,12 +1639,16 @@ cmd_auto() {
 pgdr_auto_main() {
   local apply=0 volume="$PGDR_AUTO_VOLUME"
   local t1="$PGDR_AUTO_LEVEL1_BELOW_GB" t2="$PGDR_AUTO_LEVEL2_BELOW_GB" t3="$PGDR_AUTO_LEVEL3_BELOW_GB"
-  local max_level="$PGDR_AUTO_MAX_LEVEL"
+  local max_level="$PGDR_AUTO_MAX_LEVEL" ignore_power=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --apply)
       apply=1
+      shift
+      ;;
+    --ignore-power)
+      ignore_power=1
       shift
       ;;
     --volume | --below1-gb | --below2-gb | --below3-gb | --max-level)
@@ -1658,6 +1676,13 @@ pgdr_auto_main() {
     echo "pg-disk-reclaimer: auto: --max-level must be 1, 2 or 3 (got '$max_level')" >&2
     PGDR_AUTO_OUTCOME=config-error
     return 1
+  fi
+
+  if ((!ignore_power)) && pgdr_auto_on_battery; then
+    pgdr_auto_log "$(jq -cn --argjson apply "$apply" \
+      '{ts: (now | todate), level: "INFO", msg: "on battery power, skipping the run",
+        skipped: true, reason: "battery", applied: ($apply == 1)}')"
+    return 0
   fi
 
   local before after level

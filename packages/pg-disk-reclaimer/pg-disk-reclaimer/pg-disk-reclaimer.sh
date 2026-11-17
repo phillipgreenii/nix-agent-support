@@ -28,13 +28,17 @@ Commands:
       Reclaim disk space (dry-run unless --apply); --yes or --no answers
       the level 4+ confirmation without asking (needs --apply)
   auto [--apply] [--volume PATH] [--below1-gb N] [--below2-gb N] [--below3-gb N]
-       [--max-level N]
+       [--max-level N] [--ignore-power]
       Scheduled mode: pick level 1, 2 or 3 from the free space on the Data
       volume (below N1 GiB level 1, below N2 level 2, below N3 level 3 and
       an alert; defaults 60, 45, 30), reclaim at that level (dry-run unless
       --apply), and log one JSON line with the level, free space before and
       after and bytes reclaimed. Levels 4 and 5 are never chosen. --max-level N
       (1 to 3, default 3) caps the chosen level; the alert still keys on N3.
+      On battery power (`pmset -g batt` names "Battery Power") the run is
+      skipped: exit 0 and one JSON line with skipped=true and reason=battery.
+      An unreadable pmset result runs the reclaim. --ignore-power runs
+      regardless of the power source (manual runs from a terminal).
   go-cache-trim --cache DIR --older-than-days N [--dry-run]
       Remove the entries of a Go build cache that Go's own trim rule would
       (name ends -a or -d, unused for N days plus one hour). Exit 2 when DIR

@@ -145,3 +145,63 @@ level() {
   [ "$status" -eq 1 ]
   [[ $stderr == *"--max-level must be 1, 2 or 3"* ]]
 }
+
+# stub_pmset <first-line>|fail: a pmset on PATH ahead of any real one.
+stub_pmset() {
+  local bin="$TEST_DIR/pmset-bin"
+  mkdir -p "$bin"
+  case "$1" in
+  fail) printf '#!/bin/sh\nexit 1\n' >"$bin/pmset" ;;
+  *) printf '#!/bin/sh\necho "%s"\necho " -InternalBattery-0 (id=1)	80%%; discharging"\n' "$1" >"$bin/pmset" ;;
+  esac
+  chmod +x "$bin/pmset"
+  PATH="$bin:$PATH"
+}
+
+@test "on battery auto --apply skips: exit 0, nothing removed, one skipped line" {
+  stub_pmset "Now drawing from 'Battery Power'"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_DIR/area/victim" ]
+  [ "$(wc -l <<<"$output")" -eq 1 ]
+  [ "$(jq -r .skipped <<<"$output")" = true ]
+  [ "$(jq -r .reason <<<"$output")" = battery ]
+}
+
+@test "on AC power auto --apply reclaims as before" {
+  stub_pmset "Now drawing from 'AC Power'"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_DIR/area/victim" ]
+  [ "$(jq -r .level_chosen <<<"$output")" = 1 ]
+  [ "$(jq -r '.skipped // false' <<<"$output")" = false ]
+}
+
+@test "a failing pmset falls through to running the reclaim" {
+  stub_pmset fail
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_DIR/area/victim" ]
+}
+
+@test "an unparseable pmset answer falls through to running the reclaim" {
+  stub_pmset "garbage"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  [ ! -e "$TEST_DIR/area/victim" ]
+}
+
+@test "--ignore-power runs the reclaim on battery" {
+  stub_pmset "Now drawing from 'Battery Power'"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply --ignore-power
+  [ "$status" -eq 0 ]
+  [ ! -e "$TEST_DIR/area/victim" ]
+  [ "$(jq -r .level_chosen <<<"$output")" = 1 ]
+}
+
+@test "the real CLI script skips on battery too" {
+  stub_pmset "Now drawing from 'Battery Power'"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr bash "$SCRIPTS_DIR/pg-disk-reclaimer.sh" auto --apply
+  [ "$status" -eq 0 ]
+  [ -e "$TEST_DIR/area/victim" ]
+  [ "$(jq -r .reason <<<"$output")" = battery ]
+}
