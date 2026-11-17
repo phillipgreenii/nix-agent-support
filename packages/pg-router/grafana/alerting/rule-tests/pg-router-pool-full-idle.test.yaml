@@ -400,6 +400,8 @@ tests:
         values: "1x60"
       - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="idle",live="true"}
         values: "1x60"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="working",live="true"}
+        values: "0x60"
       - series: ccpool_session_background_agents{pool="pg-router-ccpool-drain-pg2"}
         values: "1x10 0x50"
     alert_rule_test:
