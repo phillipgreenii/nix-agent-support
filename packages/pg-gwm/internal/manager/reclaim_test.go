@@ -207,7 +207,7 @@ func TestSelectionOrder(t *testing.T) {
 
 func TestMaxReclaim(t *testing.T) {
 	t.Run("released before expired, exactly one, no top-up", func(t *testing.T) {
-		e := newEnv(t, func(c *config.RepoConfig) { c.Max, c.Min = ptr(2), ptr(2) })
+		e := newFakeEnv(t, func(c *config.RepoConfig) { c.Max, c.Min = ptr(2), ptr(2) })
 		rel := e.mustLease(LeaseRequest{Name: "rel", Detach: true})
 		exp := e.mustLease(LeaseRequest{Name: "exp", Detach: true, TTL: ptr(dur(t, "1h"))})
 		if _, err := e.m.Release(t.Context(), LeaseKey{LeaseID: str(rel.LeaseID)}); err != nil {
@@ -228,7 +228,7 @@ func TestMaxReclaim(t *testing.T) {
 	})
 
 	t.Run("reuse on keeps the reclaimed worktree", func(t *testing.T) {
-		e := newEnv(t, func(c *config.RepoConfig) { c.Max, c.Reuse = ptr(1), true })
+		e := newFakeEnv(t, func(c *config.RepoConfig) { c.Max, c.Reuse = ptr(1), true })
 		exp := e.mustLease(LeaseRequest{Name: "exp", Detach: true, TTL: ptr(dur(t, "1h"))})
 		e.now = e.now.Add(2 * time.Hour)
 		got := e.mustLease(LeaseRequest{Name: "new", Detach: true})
@@ -241,7 +241,7 @@ func TestMaxReclaim(t *testing.T) {
 	})
 
 	t.Run("only leased worktrees: max-reached with the counts", func(t *testing.T) {
-		e := newEnv(t, func(c *config.RepoConfig) { c.Max = ptr(2) })
+		e := newFakeEnv(t, func(c *config.RepoConfig) { c.Max = ptr(2) })
 		e.mustLease(LeaseRequest{Name: "a", Detach: true})
 		e.mustLease(LeaseRequest{Name: "b", Detach: true})
 		_, err := e.lease(LeaseRequest{Name: "c", Detach: true})
@@ -253,7 +253,7 @@ func TestMaxReclaim(t *testing.T) {
 
 	t.Run("--wait succeeds when a release happens", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			e := newEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
+			e := newFakeEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
 			a := e.mustLease(LeaseRequest{Name: "a", Detach: true})
 			other := e.manager(func(c *config.RepoConfig) { c.Max = ptr(1) })
 			go func() {
@@ -278,7 +278,7 @@ func TestMaxReclaim(t *testing.T) {
 
 	t.Run("--wait gives up with max-reached", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
-			e := newEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
+			e := newFakeEnv(t, func(c *config.RepoConfig) { c.Max = ptr(1) })
 			e.mustLease(LeaseRequest{Name: "a", Detach: true})
 			start := time.Now()
 			_, err := e.lease(LeaseRequest{Name: "b", Detach: true, Wait: 1200 * time.Millisecond})
