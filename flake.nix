@@ -20093,6 +20093,15 @@
                     rejects ${r.live.uncheckedOverWindow} 'assistant[example-b].context.kill: limit*kill'
                     rejects ${r.live.uncheckedDuplicateCwd} 'assistant[example-a].cwd: cwd "/example/home/assistants/a" is also the cwd of'
 
+                    # ---- the module's build-time check itself: the good rendering built
+                    # (it is ${r.live.configFile}), and the checked file of a bad one fails
+                    # to build, with config check's exit 7 and the field it names
+                    [ -s ${r.live.configFile} ] || fail "the checked config of a good rendering did not build"
+                    [ "$(cat ${r.live.badConfigBuild}/testBuildFailure.exit)" = 7 ] \
+                      || fail "the checked config of effort turbo exited $(cat ${r.live.badConfigBuild}/testBuildFailure.exit), want 7"
+                    grep -qF 'assistant[example-a].effort: "turbo"' ${r.live.badConfigBuild}/testBuildFailure.log \
+                      || { cat ${r.live.badConfigBuild}/testBuildFailure.log >&2; fail "the failed build did not name the field"; }
+
                     # ---- the trust activation, with the real binary, on a throwaway file
                     w=$TMPDIR/w
                     mkdir -p "$w/home/assistants/a" "$w/home/assistants/b" "$w/log" "$w/h"

@@ -635,6 +635,9 @@ in
     uncheckedBadEffort = (opts badEffort).internal.configUnchecked;
     uncheckedOverWindow = (opts overWindow).internal.configUnchecked;
     uncheckedDuplicateCwd = (opts duplicateCwd).internal.configUnchecked;
+    # the module's own build-time check: the checked file of a bad rendering
+    # FAILS to build (testBuildFailure captures the failure as an output)
+    badConfigBuild = pkgs.testers.testBuildFailure (opts badEffort).internal.configFile;
     # the env -i run
     fakeWrapper = wrapperOf fakeRun;
     fakeShell = "${fakeShell}";
