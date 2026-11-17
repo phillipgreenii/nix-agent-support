@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"time"
 
 	"github.com/phillipgreenii/x/pprofserver"
 
@@ -38,5 +40,15 @@ func startPprof(flagOn bool, getenv func(string) string, w io.Writer) (stop func
 		_ = os.MkdirAll(filepath.Dir(addr), 0o700)
 	}
 	env := func(string) string { return addr }
-	return pprofserver.StartFromEnv(config.EnvPprofAddr, env, w)
+	// With the profiler on, record where goroutines block and which mutexes
+	// contend, so a stall behind the write connection shows in
+	// /debug/pprof/block and /debug/pprof/mutex. Both stay off otherwise.
+	runtime.SetBlockProfileRate(int(time.Millisecond))
+	runtime.SetMutexProfileFraction(100)
+	stopServer := pprofserver.StartFromEnv(config.EnvPprofAddr, env, w)
+	return func() {
+		stopServer()
+		runtime.SetBlockProfileRate(0)
+		runtime.SetMutexProfileFraction(0)
+	}
 }

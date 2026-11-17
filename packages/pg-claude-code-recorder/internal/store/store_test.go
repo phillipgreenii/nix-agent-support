@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/faults"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
@@ -505,5 +506,35 @@ func TestBulkRebuildCreatesFeedMarksAtIndex(t *testing.T) {
 	}
 	if !hasIndex(t, s, "feed_marks_at") {
 		t.Fatal("the bulk rebuild did not create feed_marks_at")
+	}
+}
+
+// epoch and schema_version are cached at Open, so hello's two reads must not
+// queue behind a long write transaction on the single write connection.
+func TestEpochAndSchemaVersionDoNotWaitForTheWriteConnection(t *testing.T) {
+	s := open(t, t.TempDir())
+	held, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.WithWrite("", func(*sql.Tx) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	got := make(chan [2]int, 1)
+	go func() { got <- [2]int{s.Epoch(), s.SchemaVersion(context.Background())} }()
+	select {
+	case v := <-got:
+		if v[0] != 1 || v[1] != SchemaVersion {
+			t.Errorf("epoch %d schema %d, want 1 and %d", v[0], v[1], SchemaVersion)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Epoch/SchemaVersion blocked behind the held write transaction")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

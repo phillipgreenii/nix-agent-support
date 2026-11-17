@@ -216,6 +216,8 @@ type Store struct {
 	waitNow     func() time.Time
 	onContended func()
 	rbEpoch     atomic.Uint64
+	epochCache  atomic.Int64 // epoch and schema_version as of Open: hello reads them without SQLite
+	schemaCache atomic.Int64
 	commitSeq   atomic.Uint64 // journal applies committed (see CommitSeq)
 	pathSeq     atomic.Uint64 // journal applies that may have changed the path rows (see PathSeq)
 	liveSeq     atomic.Uint64 // commits that may have changed the live-Process inputs (see LiveInputSeq)
@@ -443,6 +445,8 @@ func openLocked(ctx context.Context, dir string, opt Options) (*Store, error) {
 			}
 		}
 	}
+	s.epochCache.Store(s.metaInt(ctx, "epoch"))
+	s.schemaCache.Store(s.metaInt(ctx, "schema_version"))
 	return s, nil
 }
 
@@ -818,7 +822,9 @@ func (s *Store) Dir() string { return s.dir }
 func (s *Store) FS() fsx.FS { return s.fs }
 
 // Epoch returns the current state epoch; a rebuild bumps it so clients resync.
-func (s *Store) Epoch() int { return int(s.metaInt(context.Background(), "epoch")) }
+// It is cached at Open (the epoch changes only there), so it never waits for the
+// write connection.
+func (s *Store) Epoch() int { return int(s.epochCache.Load()) }
 
 // CommitSeq counts the journal applies committed by this process. The file,
 // path and generation rows change only inside one, so a reader that cached them
@@ -892,7 +898,9 @@ func (s *Store) LastSeq() int64 { return s.metaInt(context.Background(), "last_s
 func (s *Store) HasTrigram() bool { return s.trigram }
 
 // SchemaVersion returns the schema_version recorded in index.db.
-func (s *Store) SchemaVersion(ctx context.Context) int { return int(s.metaInt(ctx, "schema_version")) }
+// It is cached at Open, so it never waits for the write connection; ctx is kept
+// for the signature.
+func (s *Store) SchemaVersion(_ context.Context) int { return int(s.schemaCache.Load()) }
 
 // OnCommit registers a hook called after each successful database commit (the
 // recording file-system wrapper observes the commit through it).

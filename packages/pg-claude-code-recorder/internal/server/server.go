@@ -147,7 +147,11 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	client := sanitize(r.Header.Get(wire.ClientHeader))
 	switch {
 	case r.URL.Path == "/v1/hello" && r.Method == http.MethodGet:
-		s.finish(w, "hello", client, "ok", s.now(), 200, s.hello())
+		start := s.now()
+		ans := s.hello()
+		// hello is timed like an operation so a stall shows as slow_request.
+		s.warnIfSlow("hello", client, &obs.ReqTrace{ID: s.boot + "-" + strconv.FormatUint(s.reqID.Add(1), 10)}, nil, s.now().Sub(start))
+		s.finish(w, "hello", client, "ok", start, 200, ans)
 	case strings.HasPrefix(r.URL.Path, "/v1/") && r.Method == http.MethodPost:
 		name := strings.TrimPrefix(r.URL.Path, "/v1/")
 		s.mu.RLock()

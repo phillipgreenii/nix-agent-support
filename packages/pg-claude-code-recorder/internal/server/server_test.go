@@ -439,3 +439,18 @@ func TestOKRequestIsNotLoggedAtInfoButFailureIs(t *testing.T) {
 		t.Fatalf("%d request events recorded, want 2", n)
 	}
 }
+
+func TestSlowHelloLogsSlowRequest(t *testing.T) {
+	s, _, buf, clock := logServer(t)
+	s.hello = func() any {
+		*clock = clock.Add(11 * time.Second)
+		return map[string]int{"protocol_version": 1}
+	}
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/v1/hello", nil)
+	s.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	for _, want := range []string{"slow_request", "level=WARN", "op=hello", "ms=11000"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("slow hello log lacks %q:\n%s", want, buf)
+		}
+	}
+}

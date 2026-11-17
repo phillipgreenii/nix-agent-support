@@ -530,7 +530,9 @@ transcript parser stores the saved-to path a `tool_result` preview names as `sav
 matches it to the body's `rel_path`. No full-text index is read.
 
 Operations beyond `query` and `search`: `hello` (`GET /v1/hello`: `protocol_version`,
-`schema_version`, `epoch`, `capabilities`, `caught_up`, `degraded`), `feed`, `snapshot` and `raw`.
+`schema_version`, `epoch`, `capabilities`, `caught_up`, `degraded`; `schema_version` and `epoch` are cached at
+open, so hello touches no SQLite and never waits behind a write, and a hello over 10 s logs `slow_request`
+like any operation), `feed`, `snapshot` and `raw`.
 
 - **Cursor** `<epoch>:<sequence>`, opaque. A record's sequence is twice its id; a reset (a re-parse or
   a new generation) is its own entry just before the records it brings. `feed` takes `after`, `where`,
