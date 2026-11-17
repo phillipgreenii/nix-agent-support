@@ -234,6 +234,13 @@ func ReadStatus(path string) (Status, error) {
 	if err != nil {
 		return Status{}, fmt.Errorf("status: %w", err)
 	}
+	return ParseStatus(path, data)
+}
+
+// ParseStatus parses data, the content of the status file at path (named in
+// the error), as ReadStatus does. A caller that also prints the file uses it
+// on the bytes it printed.
+func ParseStatus(path string, data []byte) (Status, error) {
 	var s Status
 	if err := json.Unmarshal(data, &s); err != nil {
 		return Status{}, fmt.Errorf("status %s: %w", path, err)

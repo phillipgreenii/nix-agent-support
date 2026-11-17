@@ -22,6 +22,19 @@ mkGoApp {
   # This build is NOT the Go test gate (mkGoApp defaults doCheck = false): the
   # whole-module gate is checks.<system>.pg-assistants-go-tests in flake.nix.
 
+  # Shell completions (bash under bash-completion, zsh under site-functions)
+  # and the tldr page, flat under share/tldr/pages.common (the pg-keep-awake
+  # layout; the home-manager module registers it through
+  # programs.tldr.customPages).
+  postInstall = ''
+    mkdir -p $out/share/bash-completion/completions
+    mkdir -p $out/share/zsh/site-functions
+    mkdir -p $out/share/tldr/pages.common
+    cp ${./completions/pg-assistants.bash} $out/share/bash-completion/completions/pg-assistants
+    cp ${./completions/_pg-assistants} $out/share/zsh/site-functions/_pg-assistants
+    cp ${./share/tldr/pages.common/pg-assistants.md} $out/share/tldr/pages.common/pg-assistants.md
+  '';
+
   meta = {
     description = "pg-assistants: a minimal supervisor for permanent Claude Code assistants in tmux";
     mainProgram = "pg-assistants";

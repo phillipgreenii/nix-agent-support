@@ -1,0 +1,60 @@
+#compdef pg-assistants
+# daemon is the long-running supervisor launchd starts, so it is left out of
+# the offered commands; its flags still complete if typed.
+_pg_assistants() {
+  local -a subcmds
+  subcmds=(
+    'status:show each assistant'\''s state'
+    'attach:attach to an assistant'\''s tmux session'
+    'exit:ask the daemon to stop this session (inside a session)'
+    'trust:mark directories trusted in .claude.json'
+    'config:validate a configuration file'
+    'help:show help'
+  )
+
+  if (( CURRENT == 2 )); then
+    _describe 'subcommand' subcmds
+    return
+  fi
+
+  case $words[2] in
+    status)
+      _arguments \
+        '--json[print the status file as it is]' \
+        '--check[exit 3 when the daemon is down, 5 when degraded]' \
+        '--config=[configuration file]:file:_files' \
+        '(- *)--help[show help]'
+      ;;
+    attach)
+      _arguments \
+        '--config=[configuration file]:file:_files' \
+        '(- *)--help[show help]' \
+        '1:assistant id'
+      ;;
+    exit)
+      _arguments '(- *)--help[show help]'
+      ;;
+    trust)
+      _arguments \
+        '--claude-json=[Claude'\''s .claude.json]:file:_files' \
+        '(- *)--help[show help]' \
+        '*:directory:_files -/'
+      ;;
+    daemon)
+      _arguments \
+        '--config=[configuration file]:file:_files' \
+        '--shutdown-deadline=[hard deadline for a graceful shutdown]:duration' \
+        '(- *)--help[show help]'
+      ;;
+    config)
+      if (( CURRENT == 3 )); then
+        _values 'action' check
+      elif [[ $words[3] == check ]]; then
+        _arguments \
+          '--config=[configuration file to validate]:file:_files' \
+          '(- *)--help[show help]'
+      fi
+      ;;
+  esac
+}
+_pg_assistants "$@"

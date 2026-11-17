@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,22 +27,6 @@ limit = 200000
 nudge = 0.80
 interrupt = 0.95
 `
-
-func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
-	t.Helper()
-	var out, errb bytes.Buffer
-	code = run(args, &out, &errb)
-	return code, out.String(), errb.String()
-}
-
-func tempConfig(t *testing.T, body string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
 
 func TestConfigCheckExitCodes(t *testing.T) {
 	valid := tempConfig(t, validConfig)

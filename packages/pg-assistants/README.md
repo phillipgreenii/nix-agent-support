@@ -5,17 +5,39 @@ assistant running in its own tmux session (on a dedicated server, `tmux -L pg-as
 recycles a session through a nudge, interrupt, kill ladder driven by its context fill and the
 account's usage blocks.
 
-This build carries only `config check`. The daemon and the `status`, `attach`, `exit` and `trust`
-subcommands are added in later changes.
-
 ## Commands
 
-| Command                      | What it does                                                      |
-| ---------------------------- | ----------------------------------------------------------------- |
-| `config check --config PATH` | Validate a configuration file strictly, without changing a thing. |
+| Command                                         | What it does                                                                        |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `daemon --config PATH [--shutdown-deadline 8s]` | Run the supervisor (launchd keeps it alive).                                        |
+| `status [--json] [--check] [--config PATH]`     | Show each assistant's state; `--check` is the health probe.                         |
+| `attach <id> [--config PATH]`                   | Attach to an assistant's session on `tmux -L pg-assistants` (detach with `C-b d`).  |
+| `exit`                                          | Inside a session: ask the daemon to stop it (run it on its own, then end the turn). |
+| `trust --claude-json PATH <cwd>...`             | Mark directories trusted in Claude's `.claude.json` (merge-only).                   |
+| `config check --config PATH`                    | Validate a configuration file strictly, without changing a thing.                   |
 
-`config check` exits 0 printing `ok: <n> assistants`, 7 printing each problem on its own line
-(`<field>: <message>`), and 2 on a usage error (including a missing `--config`).
+`status` and `attach` read `--config`, by default `$XDG_CONFIG_HOME/pg-assistants/config.toml`.
+Every command answers `--help`.
+
+Exit codes (`x/exitcode`):
+
+- `config check` exits 0 printing `ok: <n> assistants`, 7 printing each problem on its own line
+  (`<field>: <message>`), and 2 on a usage error (including a missing `--config`).
+- `daemon` exits 7 only when the file cannot be read or parsed or a `[paths]` entry is invalid
+  (an assistant's problem or a bad global field is logged and the rest runs), 10 when a shutdown
+  overran its deadline, and 2 on a usage error. It writes `<state dir>/status.json` and
+  `<state dir>/events.jsonl` (10 MiB, one `.1` backup); its own events are `daemon_start` (pid,
+  version, config path and hash, the effective `PG_CLAUDE_CONTROL_STATE_DIR` and
+  `CLAUDE_CONFIG_DIR`), `config_problem` for each global problem, and `status_write_failed` when
+  the final status write fails. `PG_ASSISTANTS_PPROF_ADDR` opens the opt-in pprof endpoint.
+- `status` exits 0, warning on stderr (naming `launchctl print gui/<uid>/com.phillipg.pg-assistants-daemon`
+  and `$XDG_STATE_HOME/pg-assistants-launchd/launchd-stderr.log`) when the file is missing or over
+  a minute old. `status --check` prints one line and exits 3 when the file is missing, unreadable
+  or stale, 5 when degraded (a config error or problem, a hint, a stalled loop, a crash backoff,
+  or an orphan session), 0 otherwise.
+- `attach` exits 4 when the server has no such session, 3 when no assistants' tmux server runs.
+- `exit` exits 2 when `PG_ASSISTANT_ID` or `PG_ASSISTANTS_STATE_DIR` is missing or invalid.
+- `trust` exits 1 printing the error when the file cannot be read or written.
 
 ## Configuration
 

@@ -7,3 +7,5 @@ require (
 	github.com/phillipgreenii/x v0.0.0-20261117051938-78e769cfef03
 	go.uber.org/goleak v1.3.0
 )
+
+require golang.org/x/sync v0.22.0 // indirect
