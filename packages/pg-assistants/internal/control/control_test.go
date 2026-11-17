@@ -68,7 +68,7 @@ func TestUsageParsesResult(t *testing.T) {
 	want := control.Limit{
 		Kind:       "five_hour",
 		Fraction:   0.62,
-		ResetsAt:   time.Date(2026, 11, 16, 20, 0, 0, 123000000, time.UTC),
+		ResetsAt:   time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC), // to the second
 		ObservedAt: now,
 	}
 	if len(u.Limits) != 1 {
@@ -133,6 +133,29 @@ func TestUsageLimitEdges(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("limits = %+v, want %+v (a reading without percentUsed or kind is dropped)", got, want)
+	}
+}
+
+// Sessions report the same block's reset time with different fractions of a
+// second. Truncated to the second they are one block, so the tracker keeps
+// the higher reading instead of a stale lower one whose reset time happens to
+// be a few milliseconds later.
+func TestUsageResetTimeIsWholeSeconds(t *testing.T) {
+	resets := func(stamp string) time.Time {
+		t.Helper()
+		c, fake := newClient(t)
+		fake.On(cmdruntest.MatchName(bin)).Return(cmdruntest.Out(
+			`{"session":"s1","result":{"rateLimits":[{"kind":"five_hour","percentUsed":40,"resetsAt":"` + stamp + `"}]}}`,
+		))
+		u, err := c.Usage(t.Context(), 42, now)
+		if err != nil || len(u.Limits) != 1 {
+			t.Fatalf("usage = %+v, %v; want one limit", u, err)
+		}
+		return u.Limits[0].ResetsAt
+	}
+	a, b := resets("2026-11-16T20:00:00.001Z"), resets("2026-11-16T20:00:00.999Z")
+	if want := time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC); !a.Equal(want) || !b.Equal(want) {
+		t.Errorf("resets = %v and %v, want both %v", a, b, want)
 	}
 }
 

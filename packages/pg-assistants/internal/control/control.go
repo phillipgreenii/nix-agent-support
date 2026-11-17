@@ -227,8 +227,12 @@ func parseUsage(stdout []byte, now time.Time) (Usage, error) {
 		// Valid drops a reading outside 0..100 percent (pgd has seen
 		// epoch-sized bogus values) and an untracked kind.
 		l := Limit{Kind: rl.Kind, Fraction: *rl.PercentUsed / 100, ObservedAt: now}
+		// To the second: sessions report one block's reset time with
+		// different fractions of a second, and the block tracker lets a later
+		// reset time win, so a stale lower reading could otherwise beat a
+		// fresh higher one of the same block.
 		if t, err := time.Parse(time.RFC3339Nano, rl.ResetsAt); err == nil {
-			l.ResetsAt = t
+			l.ResetsAt = t.Truncate(time.Second)
 		}
 		if l.Valid() {
 			u.Limits = append(u.Limits, l)
