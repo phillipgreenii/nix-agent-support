@@ -122,6 +122,17 @@ func osGitRun(ctx context.Context, dir string, stdout io.Writer, args ...string)
 	return nil
 }
 
+func (d Deps) statDir(path string) error {
+	if d.StatDir != nil {
+		return d.StatDir(path)
+	}
+	fi, err := os.Stat(path)
+	if err == nil && !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory", path)
+	}
+	return err
+}
+
 func (d Deps) gitRun() GitRun {
 	if d.GitRun != nil {
 		return d.GitRun

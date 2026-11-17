@@ -65,6 +65,18 @@ func (r *ccpoolRun) leaseWorktree(ctx context.Context, d DispatchContext, cc *ro
 		res, mapped := r.mapGWMRefusal(ctx, d, cc, err)
 		return "", res, mapped
 	}
+	// pg-gwm can grant or renew a lease for a slot whose directory is gone.
+	// Never hand ccpool a cwd that does not exist: end the lease and refuse.
+	if serr := r.deps.statDir(l.Path); serr != nil {
+		key := gwm.Key{LeaseID: l.LeaseID, Name: l.Name}
+		if xerr := r.deps.GWM.Expire(context.WithoutCancel(ctx), key); xerr != nil && !leaseOver(xerr) {
+			slog.Warn("could not expire the lease on a missing worktree", "lease", l.LeaseID, "path", l.Path, "err", xerr)
+		}
+		missing := fmt.Errorf("%w: leased worktree directory %s is missing: %v", gwm.ErrBroken, l.Path, serr)
+		slog.Warn("dispatch declined: leased worktree directory is missing", "role", d.Role.Name, "bead", d.Item.ID, "path", l.Path, "err", serr)
+		res, mapped := r.mapGWMRefusal(ctx, d, cc, missing)
+		return "", res, mapped
+	}
 	r.gwm.on = true
 	r.gwm.lease = l
 	r.gwm.ttl, r.gwm.parkTTL = iso.ttl, cc.Isolation.ParkTTL()

@@ -111,6 +111,9 @@ type Deps struct {
 	// GitRun runs git for the handler-side worktree pre-fetch (bead pg2-hh32y);
 	// nil => osGitRun (gitenv-hermetic). Tests substitute a script.
 	GitRun GitRun
+	// StatDir reports whether a leased worktree directory exists; nil => os.Stat.
+	// Tests substitute a fake for the placeholder paths their pg-gwm fakes return.
+	StatDir func(path string) error
 	// OriginCheck is pg-origin-guard's Check, consulted before the review
 	// pre-fetch's network fetch (INV-CCH-10). nil => no guard (the fetch runs);
 	// a returned error is a guard fault and the fetch runs (fail open).

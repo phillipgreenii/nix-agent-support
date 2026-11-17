@@ -1056,3 +1056,14 @@ func TestExitCodeContract(t *testing.T) {
 		}
 	}
 }
+
+func TestArgSummary_keepsCwdPathWhole(t *testing.T) {
+	cwd := "/Volumes/gitrepos/example/pg-gwm/pristine/pristine-wt-5/with/extra/depth"
+	if len(cwd) <= 48 {
+		t.Fatal("test path must exceed the elision limit")
+	}
+	got := argSummary([]string{"new", "ext", "--cwd", cwd})
+	if !strings.Contains(got, cwd) {
+		t.Errorf("--cwd value must not be elided, got %q", got)
+	}
+}

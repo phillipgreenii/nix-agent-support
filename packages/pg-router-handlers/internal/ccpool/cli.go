@@ -231,12 +231,15 @@ func (c *CLIRunner) ccpool(ctx context.Context, timeout time.Duration, args ...s
 
 // argSummary renders ccpool args for an error message, eliding long positionals
 // (e.g. the full reply prompt, which is the entire skill markdown) so the real
-// diagnostic isn't buried under thousands of characters.
+// diagnostic isn't buried under thousands of characters. The value after --cwd
+// is never elided.
 func argSummary(args []string) string {
 	const maxArg = 48
 	parts := make([]string, len(args))
 	for i, a := range args {
-		if len(a) > maxArg {
+		// The --cwd value is a path, never a prompt: keep it whole so a failure
+		// names the directory (a pool slot path is longer than maxArg).
+		if len(a) > maxArg && (i == 0 || args[i-1] != "--cwd") {
 			parts[i] = fmt.Sprintf("<%d bytes>", len(a))
 		} else {
 			parts[i] = a

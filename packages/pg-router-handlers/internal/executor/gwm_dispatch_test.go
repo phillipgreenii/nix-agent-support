@@ -103,7 +103,7 @@ func newGWMHarness(t *testing.T, readOnly bool) *gwmHarness {
 	clk := &dtest.ManualClock{T: time.Unix(1_000_000, 0)}
 	h.run = &ccpoolRun{deps: Deps{
 		CC: h.cc, BD: &dtest.ScriptBD{}, Cfg: cfg, Log: lw, Now: clk.Now, Tick: clk.TickAdvancing(),
-		ExternalID: gwmSess, GitRun: h.git.run,
+		ExternalID: gwmSess, GitRun: h.git.run, StatDir: func(string) error { return nil },
 		GWM: &gwm.CLI{Exec: h.gwm.Runner(), RepoRoot: gwmRoot},
 	}}
 	h.role = workerRole(cfg)
@@ -476,4 +476,43 @@ func TestPrefetchDetachesBeforeRelease(t *testing.T) {
 			t.Errorf("renew calls = %v, want one --ttl 3d", got)
 		}
 	})
+}
+
+func TestLeaseWorktree_missingDirectoryIsRefusedNotDispatched(t *testing.T) {
+	h := newGWMHarness(t, false)
+	missing := filepath.Join(t.TempDir(), "pristine-wt-5")
+	h.run.deps.StatDir = nil // use the real os.Stat against a directory that does not exist
+	h.gwm.On(gwmByVerb("lease")).Return(cmdruntest.Out(
+		`{"id":"w-5","lease_id":"l-5","worktree_path":"` + missing + `","branch":"pg-router/bd-1","name":"worker/bd-1","head":"h","renewed":true}`,
+	))
+	h.gwm.On(gwmByVerb("expire")).Return(cmdruntest.Out(`{}`))
+	wt, _, err := h.run.leaseWorktree(context.Background(), h.dispatchCtx(), h.role.CCPool)
+	if err == nil || wt != "" {
+		t.Fatalf("a missing slot directory must refuse the dispatch, got wt=%q err=%v", wt, err)
+	}
+	if !errors.Is(err, gwm.ErrBroken) || !strings.Contains(err.Error(), missing) {
+		t.Errorf("error must be a broken-worktree refusal naming the slot path, got %v", err)
+	}
+	if h.run.gwm.on {
+		t.Error("a refused lease must not be recorded as held")
+	}
+	if got := gwmCalls(h.gwm, "expire"); len(got) != 1 {
+		t.Errorf("the lease on the missing slot must be expired once, got %v", got)
+	}
+	if ev := h.events(t); !strings.Contains(ev, missing) {
+		t.Errorf("events row must show the slot path, got %s", ev)
+	}
+}
+
+func TestLeaseWorktree_existingDirectoryDispatches(t *testing.T) {
+	h := newGWMHarness(t, false)
+	dir := t.TempDir()
+	h.run.deps.StatDir = nil
+	h.gwm.On(gwmByVerb("lease")).Return(cmdruntest.Out(
+		`{"id":"w-5","lease_id":"l-5","worktree_path":"` + dir + `","branch":"pg-router/bd-1","name":"worker/bd-1","head":"h","renewed":false}`,
+	))
+	wt, _, err := h.run.leaseWorktree(context.Background(), h.dispatchCtx(), h.role.CCPool)
+	if err != nil || wt != dir {
+		t.Fatalf("wt=%q err=%v", wt, err)
+	}
 }
