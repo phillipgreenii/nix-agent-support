@@ -380,10 +380,13 @@ part of a file path).
   `grace.kill + 15s`. No function creates a fresh `context.Background()` below `main`. On shutdown
   every in-flight call is cancelled and every loop returns within the shutdown deadline; tmux
   sessions are left running.
-- **Shutdown follows the workspace daemon convention** (`phillipg-nix-repo-base`
-  `docs/go-daemons.md`, "Shutdown requirements"): `shutdown_started`, one `shutdown_phase` per
-  step, `shutdown_done`, and `shutdown_overrun` naming the in-flight calls when the deadline wins;
-  tests check for leaked goroutines with `goleak`.
+- **Shutdown uses `x/lifecycle` as it is** (`phillipg-nix-repo-base` `docs/go-daemons.md`,
+  "Shutdown requirements"). Every assistant loop, orphan loop, the orphan sweep and the heartbeat
+  is a named `lifecycle` loop (`assistant:<id>`, `orphan:<name>`), so the package's own events
+  (`shutdown_signal`, `shutdown_phase`, `shutdown_complete`, `shutdown_overrun`, `loop_started`,
+  `loop_stopped`) go to the events log, and an overrun names the assistant whose call hung. A hard
+  exit uses `exitcode.ShutdownOverrun`. The daemon adds no shutdown events of its own. Tests check
+  for leaked goroutines with `goleak`.
 - **Mechanical guards.** The module is added to the repo's golangci lint lists, which enable
   `noctx` (no non-context `os/exec` forms) and `contextcheck` (no fresh context where one was passed
   in) (`.golangci.yml`), and one `cmdruntest.AssertCallsBounded` test fails any `cmdrun.Call`
@@ -429,8 +432,8 @@ WAIT NOTE`, or the raw JSON. It marks an assistant `stalled` when its `last_tick
   a crash backoff or an orphan), 0 otherwise.
 - `pg-assistants attach <id>` runs `tmux -L pg-assistants attach -t =<id>` with `TMUX` unset, so it
   works from inside the operator's own tmux; detach with `C-b d`.
-- The daemon logs one JSON line per action to `<state dir>/events.jsonl` (size-capped with one
-  backup), shaped `{ts, event, assistant, session_id, pid, reason, error, uptime_s, ...}`. Events:
+- The daemon logs one JSON line per action to `<state dir>/events.jsonl` through `x/jsonllogger`
+  over its `RotatingFile` (size-capped with one backup), shaped `{ts, event, assistant, session_id, pid, reason, error, uptime_s, ...}`. Events:
   `start`, `start_failed`, `start_stalled`, `adopt`, `exited`, `nudge`, `interrupt`, `kill`,
   `force_kill`, `graceful_stop`, `usage_failed`, `window_mismatch`, `action_failed`,
   `config_problem`, `orphan`, `loop_panic` and the shutdown events.
