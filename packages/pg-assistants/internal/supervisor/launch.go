@@ -75,10 +75,20 @@ func tmuxArg(s string) string {
 // new-session -e: DISABLE_AUTO_COMPACT=1 (a full session fails instead of
 // compacting, which the kill point relies on), PG_ASSISTANT_ID and
 // PG_ASSISTANTS_STATE_DIR (read by `pg-assistants exit`), the five CLAUDE*
-// markers set empty, then a.Env sorted by name. An a.Env entry for any of the
-// first eight names is dropped. There is no PATH entry: the login shell sets
-// it. Every entry is escaped for tmux as LaunchArgv's tokens are.
-func LaunchEnv(a config.Assistant, stateDir string) []string {
+// markers set empty, then the blank names (the config's blank_env) set
+// empty, sorted and once each, then a.Env sorted by name. An a.Env entry for
+// any of the first eight names is dropped, and a blank name that is one of
+// them or is set by a.Env is not blanked. There is no PATH entry: the login
+// shell sets it. Every entry is escaped for tmux as LaunchArgv's tokens are.
+//
+// The blank names matter because the tmux server keeps the environment of
+// the client that started it, the daemon, which runs under the operator's
+// login shell: that shell already ran the startup files and exported their
+// run-once guards, and every pane starts from the server's environment. An
+// empty guard makes the session's own login shell run those files again
+// (each guard tests for an empty value), so the session gets the current
+// PATH and session variables rather than those of the server's start.
+func LaunchEnv(a config.Assistant, stateDir string, blank []string) []string {
 	env := []string{
 		"DISABLE_AUTO_COMPACT=1",
 		"PG_ASSISTANT_ID=" + a.ID,
@@ -90,6 +100,16 @@ func LaunchEnv(a config.Assistant, stateDir string) []string {
 	reserved := map[string]bool{"DISABLE_AUTO_COMPACT": true, "PG_ASSISTANT_ID": true, "PG_ASSISTANTS_STATE_DIR": true}
 	for _, k := range blankedMarkers {
 		reserved[k] = true
+	}
+	blanks := make([]string, 0, len(blank))
+	for _, k := range blank {
+		if _, own := a.Env[k]; !reserved[k] && !own {
+			blanks = append(blanks, k)
+		}
+	}
+	slices.Sort(blanks)
+	for _, k := range slices.Compact(blanks) {
+		env = append(env, k+"=")
 	}
 	keys := make([]string, 0, len(a.Env))
 	for k := range a.Env {

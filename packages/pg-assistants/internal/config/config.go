@@ -60,11 +60,16 @@ func ValidID(id string) bool { return idPattern.MatchString(id) }
 // effective values: a global field that failed validation holds its default
 // and is listed in Problems.
 type Config struct {
-	Tick       time.Duration
-	Grace      Grace
-	Blocks     Blocks
-	Restart    Restart
-	Paths      Paths
+	Tick    time.Duration
+	Grace   Grace
+	Blocks  Blocks
+	Restart Restart
+	Paths   Paths
+	// BlankEnv names the variables every session starts with set and empty
+	// (blank_env): the run-once guards of the operator's startup files, which
+	// the tmux server would otherwise hand every session from the daemon's own
+	// login shell, and variables meant for the daemon alone.
+	BlankEnv   []string
 	Assistants []Assistant
 	Problems   []FieldError // global fields that fell back to their defaults
 }
@@ -204,9 +209,38 @@ func fromDocument(doc map[string]any) (Config, error) {
 		r.unknown("min_uptime", "backoff_initial", "backoff_max", "start_timeout")
 	}
 
+	cfg.BlankEnv = readBlankEnv(top)
 	cfg.Assistants = readAssistants(top, cfg.Tick)
-	top.unknown("tick", "grace", "blocks", "restart", "paths", "assistant")
+	top.unknown("tick", "grace", "blocks", "restart", "paths", "blank_env", "assistant")
 	return cfg, nil
+}
+
+// readBlankEnv reads blank_env, an array of environment variable names. A
+// value that is not an array falls back to the default (none); an entry that
+// is not a variable name is a problem and is left out.
+func readBlankEnv(top *table) []string {
+	v, ok := top.m["blank_env"]
+	if !ok {
+		return nil
+	}
+	list, isList := v.([]any)
+	if !isList {
+		top.problem("blank_env", "must be an array of environment variable names, got "+describe(v)+"; no variable is blanked")
+		return nil
+	}
+	var names []string
+	for i, e := range list {
+		s, isString := e.(string)
+		switch {
+		case !isString:
+			top.problem("blank_env", fmt.Sprintf("entry %d must be a string, got %s; it is left out", i+1, describe(e)))
+		case !envKeyPattern.MatchString(s):
+			top.problem("blank_env", fmt.Sprintf("entry %d, %q, is not an environment variable name ([A-Za-z_][A-Za-z0-9_]*); it is left out", i+1, s))
+		default:
+			names = append(names, s)
+		}
+	}
+	return names
 }
 
 // readPaths reads [paths]. Every entry is required and MUST be an absolute

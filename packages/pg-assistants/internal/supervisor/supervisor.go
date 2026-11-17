@@ -852,7 +852,7 @@ func (l *assistantLoop) start(ctx context.Context, now time.Time) {
 	}
 	id := l.s.d.NewID()
 	err := bounded(ctx, tmuxTimeout, func(ctx context.Context) error {
-		return l.s.d.Tmux.NewSession(ctx, a.ID, LaunchCwd(a), LaunchEnv(a, p.StateDir), LaunchArgv(p, a, id))
+		return l.s.d.Tmux.NewSession(ctx, a.ID, LaunchCwd(a), LaunchEnv(a, p.StateDir, l.s.cfg.BlankEnv), LaunchArgv(p, a, id))
 	})
 	if err != nil {
 		if !ending(ctx) {

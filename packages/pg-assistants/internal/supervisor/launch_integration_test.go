@@ -30,7 +30,7 @@ var wantBlanked = []string{
 // markers.
 var recordedEnv = append(slices.Clone(wantBlanked),
 	"DISABLE_AUTO_COMPACT", "PG_ASSISTANT_ID", "PG_ASSISTANTS_STATE_DIR",
-	"FOO", "PATH", "PGA_LOGIN", "PGA_INTERACTIVE")
+	"FOO", "PATH", "PGA_LOGIN", "PGA_INTERACTIVE", "PGA_SESSVAR", "PGA_SYSVAR", "PGA_DAEMON_ONLY")
 
 // chainAssistant is the assistant every case starts; a case changes fields.
 func chainAssistant() config.Assistant {
@@ -52,7 +52,7 @@ func TestRealLaunchChain(t *testing.T) {
 		c, dir := newRealTmux(t)
 		t.Setenv("HOME", mkdir(t, dir, "home")) // no ~/.profile
 		t.Setenv("ENV", "")                     // no interactive startup file
-		return runChain(t, c, dir, shell, a, cwd)
+		return runChain(t, c, dir, shell, a, cwd, nil)
 	}
 
 	t.Run("sh", func(t *testing.T) {
@@ -99,7 +99,7 @@ func TestRealLaunchChain(t *testing.T) {
 		writeFile(t, filepath.Join(zdot, ".zprofile"), 0o600, "export PGA_LOGIN=zprofile\n")
 		writeFile(t, filepath.Join(zdot, ".zshrc"), 0o600, "export PGA_INTERACTIVE=zshrc\n")
 
-		r := runChain(t, c, dir, shell, chainAssistant(), "cwd")
+		r := runChain(t, c, dir, shell, chainAssistant(), "cwd", nil)
 		if p := r.env["PATH"]; !strings.HasPrefix(p, bin+":") {
 			t.Errorf("PATH = %q, want it to start with %q", p, bin+":")
 		}
@@ -108,6 +108,50 @@ func TestRealLaunchChain(t *testing.T) {
 		}
 		if got := r.env["PGA_INTERACTIVE"]; got != "zshrc" {
 			t.Errorf("PGA_INTERACTIVE = %q, want zshrc (the interactive file ran)", got)
+		}
+	})
+
+	// The tmux server keeps the environment of the client that started it:
+	// the daemon's own login shell, which already ran the operator's startup
+	// files and so exported their run-once guards (home-manager's
+	// hm-session-vars.sh returns when its guard is non-empty; nix-darwin's
+	// /etc/zshenv skips set-environment unless its guard is empty). Without
+	// blanking them every session would skip those files and keep the values
+	// frozen when the server started. The guards here mirror both forms.
+	t.Run("zsh reruns guarded startup files", func(t *testing.T) {
+		shell := requireTool(t, "zsh")
+		c, dir := newRealTmux(t)
+		zdot := mkdir(t, dir, "zdot")
+		t.Setenv("HOME", zdot)
+		t.Setenv("ZDOTDIR", zdot)
+		// As the daemon's login shell left them, when the server started.
+		t.Setenv("PGA_HM_GUARD", "1")
+		t.Setenv("PGA_SYS_GUARD", "1")
+		t.Setenv("PGA_SESSVAR", "stale")
+		t.Setenv("PGA_SYSVAR", "stale")
+		t.Setenv("PGA_DAEMON_ONLY", "daemon")
+		writeFile(t, filepath.Join(zdot, ".zshenv"), 0o600,
+			"unsetopt GLOBAL_RCS\n"+
+				". \"$ZDOTDIR/session-vars.sh\"\n"+
+				"if [ -z \"${PGA_SYS_GUARD-}\" ]; then . \"$ZDOTDIR/set-environment\"; fi\n")
+		writeFile(t, filepath.Join(zdot, "session-vars.sh"), 0o600,
+			"if [ -n \"${PGA_HM_GUARD-}\" ]; then return; fi\n"+
+				"export PGA_HM_GUARD=1\n"+
+				"export PGA_SESSVAR=fresh\n")
+		writeFile(t, filepath.Join(zdot, "set-environment"), 0o600,
+			"export PGA_SYS_GUARD=1\n"+
+				"export PGA_SYSVAR=fresh\n")
+
+		r := runChain(t, c, dir, shell, chainAssistant(), "cwd",
+			[]string{"PGA_HM_GUARD", "PGA_SYS_GUARD", "PGA_DAEMON_ONLY"})
+		if got := r.env["PGA_SESSVAR"]; got != "fresh" {
+			t.Errorf("PGA_SESSVAR = %q, want fresh (the -n guarded file ran again)", got)
+		}
+		if got := r.env["PGA_SYSVAR"]; got != "fresh" {
+			t.Errorf("PGA_SYSVAR = %q, want fresh (the -z guarded file ran again)", got)
+		}
+		if got, ok := r.env["PGA_DAEMON_ONLY"]; !ok || got != "" {
+			t.Errorf("PGA_DAEMON_ONLY = %q (set %v), want set and empty", got, ok)
 		}
 	})
 }
@@ -127,7 +171,7 @@ type launchRecord struct {
 // environment arrived and the CLAUDE* markers are set and empty. The
 // arguments are compared with the assistant's own values, not with
 // LaunchArgv's tokens, which carry tmux's escapes.
-func runChain(t *testing.T, c tmux.Client, dir, shell string, a config.Assistant, cwdName string) launchRecord {
+func runChain(t *testing.T, c tmux.Client, dir, shell string, a config.Assistant, cwdName string, blank []string) launchRecord {
 	t.Helper()
 	ctx := t.Context()
 	for _, k := range wantBlanked {
@@ -137,7 +181,7 @@ func runChain(t *testing.T, c tmux.Client, dir, shell string, a config.Assistant
 	stateDir := filepath.Join(dir, "state")
 	a.Cwd = mkdir(t, dir, cwdName)
 	argv := LaunchArgv(config.Paths{Shell: shell, Claude: claude}, a, "example-session")
-	if err := c.NewSession(ctx, a.ID, LaunchCwd(a), LaunchEnv(a, stateDir), argv); err != nil {
+	if err := c.NewSession(ctx, a.ID, LaunchCwd(a), LaunchEnv(a, stateDir, blank), argv); err != nil {
 		t.Fatal(err)
 	}
 	waitForRecord(t, c, a.ID, rec)

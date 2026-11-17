@@ -152,8 +152,10 @@ The daemon runs through the operator's login shell so that it, and every `pg-cla
 call it makes, sees the operator's session variables. `AbandonProcessGroup` is set, so stopping or
 restarting the daemon leaves the tmux server and the assistants running, and the next daemon adopts
 them. `ExitTimeOut` is the 8 s shutdown deadline plus a 7 s margin. Its environment carries `HOME`,
-`PG_ASSISTANTS_CONFIG_HASH` (a hash of the rendered file, so a config change restarts the daemon)
-and, with `pprof.enable`, `PG_ASSISTANTS_PPROF_ADDR`. launchd's own stdout and stderr go to
+`PG_ASSISTANTS_CONFIG_HASH` (a hash of the rendered file, so a config change restarts the daemon),
+`PG_ASSISTANTS_SESSION_VARS_HASH` (a hash of `home.sessionVariables`, so a change of a session
+variable restarts it too) and, with `pprof.enable`, `PG_ASSISTANTS_PPROF_ADDR`. The tmux server
+keeps this environment and hands it to every session, so these names are in `blank_env`. launchd's own stdout and stderr go to
 `$XDG_STATE_HOME/pg-assistants-launchd/`, outside the daemon's 0700 state directory. Linux has no
 supervisor: the module registers nothing and warns.
 
@@ -185,6 +187,7 @@ and MUST be positive; points are fractions.
 
 ```toml
 tick = "1m"                   # default 1m; an assistant MAY override it
+blank_env = ["__HM_SESS_VARS_SOURCED"]   # default none: set empty in every session
 
 [grace]                       # time-based ladder steps, for every ladder
 interrupt = "5m"              # default 5m: nudge -> interrupt
@@ -243,6 +246,16 @@ Rules beyond the comments above:
 - `cwd` MUST NOT contain `#`: tmux expands a format in the start directory (`##`, `#{...}`), and a
   directory it then cannot find silently starts the session in `$HOME`.
 - Whether `cwd` exists is NOT checked here (the build sandbox cannot see it).
+- `blank_env` lists environment variable names (`[A-Za-z_][A-Za-z0-9_]*`) that every session
+  starts with set and empty. The tmux server keeps the environment of the daemon that started it,
+  and the daemon runs under the operator's login shell, which has already run the startup files and
+  exported their run-once guards; every session starts from the server's environment, so without
+  this its own login shell would skip those files and keep the `PATH` and session variables of the
+  server's start. An empty guard runs the file again. It also blanks variables meant for the
+  daemon alone. An assistant's own `env` wins over a name listed here, and the daemon's fixed
+  entries (`DISABLE_AUTO_COMPACT`, `PG_ASSISTANT_ID`, `PG_ASSISTANTS_STATE_DIR`, the `CLAUDE*`
+  markers) cannot be blanked. A variable removed from the startup files stays in the server's
+  environment until the server restarts (`tmux -L pg-assistants kill-server`).
 
 ### Module options
 
@@ -252,6 +265,7 @@ is omitted. The module renders only the keys above (an unknown key fails the bui
 | Option                                                            | Key                                          | Default                                                                                       |
 | ----------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `tick`, `grace.{interrupt,kill}`                                  | `tick`, `[grace]`                            | `1m`, `5m`, `2m`                                                                              |
+| `sessionBlankEnv`                                                 | `blank_env`, then the daemon-only names      | `__HM_SESS_VARS_SOURCED`, `__HM_ZSH_SESS_VARS_SOURCED`, `__NIX_DARWIN_SET_ENVIRONMENT_DONE`   |
 | `blocks.{nudge,interrupt,kill,unknownResetHold}`                  | `[blocks]`                                   | 0.95, 0.98, 1.00, `1h`                                                                        |
 | `restart.{minUptime,backoffInitial,backoffMax,startTimeout}`      | `[restart]`                                  | `1m`, `1m`, `30m`, `5m`                                                                       |
 | (none)                                                            | `paths.tmux`, `paths.pg_claude_control`      | the `tmux` package; the `pg-claude-control` module's package                                  |
@@ -263,8 +277,14 @@ is omitted. The module renders only the keys above (an unknown key fails the bui
 | `assistants.<id>.context.{limit,window,nudge,interrupt,kill}`     | `[assistant.context]`                        | `limit` required, `window` omitted, 0.80, 0.95, 1.00                                          |
 | `pprof.enable`                                                    | (the agent's `PG_ASSISTANTS_PPROF_ADDR`)     | true: `<state dir>/pprof.sock`                                                                |
 
-`context.nudge` and `context.interrupt` defaults are the module's: the file itself has none, so a
-hand-written file MUST set them. Every `[paths]` entry is a literal absolute path: a `$HOME` in
+`blank_env` is `sessionBlankEnv` followed by the variables the launchd agent sets for the daemon
+alone (`PG_ASSISTANTS_CONFIG_HASH`, `PG_ASSISTANTS_PPROF_ADDR`, `PG_ASSISTANTS_SESSION_VARS_HASH`)
+and launchd's `XPC_SERVICE_NAME`; replacing `sessionBlankEnv` keeps those. The default guards are
+home-manager's (`hm-session-vars.sh` returns when `__HM_SESS_VARS_SOURCED` is non-empty, and
+`~/.zshenv` skips its zsh session variables when `__HM_ZSH_SESS_VARS_SOURCED` is non-empty) and
+nix-darwin's (`/etc/zshenv` sources `set-environment` only when
+`__NIX_DARWIN_SET_ENVIRONMENT_DONE` is empty). `context.nudge` and `context.interrupt` defaults are
+the module's: the file itself has none, so a hand-written file MUST set them. Every `[paths]` entry is a literal absolute path: a `$HOME` in
 `CLAUDE_CONFIG_DIR` is expanded at evaluation, because the daemon reads the file where no shell
 expands anything. `model`, `cwd` and `prompt` have no default.
 

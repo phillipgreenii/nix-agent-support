@@ -58,7 +58,7 @@ func TestLaunchArgvVariadicFlagIsFollowedByAFlag(t *testing.T) {
 func TestLaunchEnv(t *testing.T) {
 	a := exampleAssistant()
 	a.Env = map[string]string{"PG_ASSISTANT_ID": "x", "FOO": "bar"}
-	got := LaunchEnv(a, "/s")
+	got := LaunchEnv(a, "/s", nil)
 	want := []string{
 		"DISABLE_AUTO_COMPACT=1",
 		"PG_ASSISTANT_ID=example-a",
@@ -77,6 +77,38 @@ func TestLaunchEnv(t *testing.T) {
 		if strings.HasPrefix(e, "PATH=") {
 			t.Errorf("LaunchEnv sets %q; the login shell sets PATH", e)
 		}
+	}
+}
+
+// The config's blank_env names come after the CLAUDE* markers, sorted and
+// once each, set and empty. A name the daemon itself sets, a marker, or a name
+// the assistant's own env sets is not blanked: the fixed entry or the
+// assistant's value stands.
+func TestLaunchEnvBlanksTheConfigsNames(t *testing.T) {
+	a := exampleAssistant()
+	a.Env = map[string]string{"FOO": "bar", "EXAMPLE_KEEP": "mine"}
+	blank := []string{
+		"__HM_SESS_VARS_SOURCED", "PG_ASSISTANTS_CONFIG_HASH", "__HM_SESS_VARS_SOURCED",
+		"PG_ASSISTANT_ID", "CLAUDECODE", "EXAMPLE_KEEP", "XPC_SERVICE_NAME",
+	}
+	got := LaunchEnv(a, "/s", blank)
+	want := []string{
+		"DISABLE_AUTO_COMPACT=1",
+		"PG_ASSISTANT_ID=example-a",
+		"PG_ASSISTANTS_STATE_DIR=/s",
+		"CLAUDECODE=",
+		"CLAUDE_CODE_CHILD_SESSION=",
+		"CLAUDE_CODE_ENTRYPOINT=",
+		"CLAUDE_CODE_SESSION_ID=",
+		"CLAUDE_CODE_EXECPATH=",
+		"PG_ASSISTANTS_CONFIG_HASH=",
+		"XPC_SERVICE_NAME=",
+		"__HM_SESS_VARS_SOURCED=",
+		"EXAMPLE_KEEP=mine",
+		"FOO=bar",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("LaunchEnv =\n  %q\nwant\n  %q", got, want)
 	}
 }
 
@@ -101,7 +133,7 @@ func TestLaunchEscapesTrailingSemicolon(t *testing.T) {
 		t.Errorf("LaunchArgv =\n  %q\nwant\n  %q", argv, want)
 	}
 
-	env := LaunchEnv(a, "/s;")
+	env := LaunchEnv(a, "/s;", nil)
 	for _, e := range []string{`PG_ASSISTANTS_STATE_DIR=/s\;`, `FOO=bar\;`, "MID=a;b"} {
 		if !slices.Contains(env, e) {
 			t.Errorf("LaunchEnv = %q, want it to hold %q", env, e)
@@ -136,14 +168,14 @@ func TestLaunchArgvLoneSemicolonPrompt(t *testing.T) {
 // The extra environment comes after the fixed entries, sorted by name, and
 // can override none of them.
 func TestLaunchEnvExtrasSortedAndNeverOverride(t *testing.T) {
-	fixed := LaunchEnv(exampleAssistant(), "/s")
+	fixed := LaunchEnv(exampleAssistant(), "/s", nil)
 	a := exampleAssistant()
 	a.Env = map[string]string{"ZED": "z", "ALPHA": "a", "MID": "m"}
 	for _, e := range fixed {
 		k, _, _ := strings.Cut(e, "=")
 		a.Env[k] = "overridden"
 	}
-	got := LaunchEnv(a, "/s")
+	got := LaunchEnv(a, "/s", nil)
 	want := append(slices.Clone(fixed), "ALPHA=a", "MID=m", "ZED=z")
 	if !slices.Equal(got, want) {
 		t.Errorf("LaunchEnv =\n  %q\nwant\n  %q", got, want)

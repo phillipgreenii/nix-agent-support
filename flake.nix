@@ -20060,6 +20060,7 @@
                     yq -p toml -o json ${r.live.configFile} > config.json
                     jq -e '
                       .tick == "1m"
+                      and .blank_env == ["__HM_SESS_VARS_SOURCED", "__HM_ZSH_SESS_VARS_SOURCED", "__NIX_DARWIN_SET_ENVIRONMENT_DONE", "PG_ASSISTANTS_CONFIG_HASH", "PG_ASSISTANTS_PPROF_ADDR", "PG_ASSISTANTS_SESSION_VARS_HASH", "XPC_SERVICE_NAME"]
                       and .grace == {interrupt: "5m", kill: "2m"}
                       and .blocks == {nudge: 0.95, interrupt: 0.98, kill: 1, unknown_reset_hold: "1h"}
                       and .restart == {min_uptime: "1m", backoff_initial: "1m", backoff_max: "30m", start_timeout: "5m"}
@@ -20119,6 +20120,8 @@
                       || { cat "$w/log/daemon.env" >&2; fail "the daemon did not get the config hash"; }
                     grep -qx 'PG_ASSISTANTS_PPROF_ADDR=${r.live.stateDir}/pprof.sock' "$w/log/daemon.env" \
                       || { cat "$w/log/daemon.env" >&2; fail "the daemon did not get the pprof socket"; }
+                    grep -qx 'PG_ASSISTANTS_SESSION_VARS_HASH=${r.live.fakeSessionVarsHash}' "$w/log/daemon.env" \
+                      || { cat "$w/log/daemon.env" >&2; fail "the daemon did not get the session variables hash"; }
                     grep -qx "HOME=$w/h" "$w/log/daemon.env" || fail "the daemon did not get HOME"
                     touch $out
                   '';

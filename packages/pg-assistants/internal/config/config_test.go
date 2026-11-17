@@ -431,6 +431,50 @@ func TestUnknownKeysAreProblems(t *testing.T) {
 	}
 }
 
+// blank_env names the variables every session starts with set and empty. It
+// is a global field: a bad value falls back to the default (none), and a bad
+// name is a problem and is left out.
+func TestBlankEnv(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		cfg := load(t, pathsTOML+assistant("example-a"))
+		if cfg.BlankEnv != nil || len(cfg.Problems) != 0 {
+			t.Errorf("BlankEnv = %q, Problems = %v; want none of either", cfg.BlankEnv, cfg.Problems)
+		}
+	})
+	t.Run("names", func(t *testing.T) {
+		cfg := load(t, `blank_env = ["EXAMPLE_GUARD", "_example_done", "EXAMPLE_GUARD"]`+"\n"+pathsTOML+assistant("example-a"))
+		if want := []string{"EXAMPLE_GUARD", "_example_done", "EXAMPLE_GUARD"}; !slices.Equal(cfg.BlankEnv, want) {
+			t.Errorf("BlankEnv = %q, want %q", cfg.BlankEnv, want)
+		}
+		if len(cfg.Problems) != 0 {
+			t.Errorf("Problems = %v, want none", cfg.Problems)
+		}
+	})
+	bad := []struct {
+		name, toml, field string
+		want              []string
+	}{
+		{"not an array", `blank_env = "EXAMPLE_GUARD"`, "blank_env", nil},
+		{"not a string", `blank_env = ["EXAMPLE_GUARD", 1]`, "blank_env", []string{"EXAMPLE_GUARD"}},
+		{"not a variable name", `blank_env = ["EXAMPLE=GUARD", "EXAMPLE_OK"]`, "blank_env", []string{"EXAMPLE_OK"}},
+		{"empty name", `blank_env = [""]`, "blank_env", nil},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := load(t, tc.toml+"\n"+pathsTOML+assistant("example-a"))
+			if got := fields(cfg.Problems); !slices.Contains(got, tc.field) {
+				t.Errorf("Problems = %v, want one for %s", cfg.Problems, tc.field)
+			}
+			if !slices.Equal(cfg.BlankEnv, tc.want) {
+				t.Errorf("BlankEnv = %q, want %q", cfg.BlankEnv, tc.want)
+			}
+			if cfg.Strict() == nil {
+				t.Error("Strict = nil, want the problem")
+			}
+		})
+	}
+}
+
 func TestAssistantEnvRules(t *testing.T) {
 	cases := []struct {
 		name, env, field string

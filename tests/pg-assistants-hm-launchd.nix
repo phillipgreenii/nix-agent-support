@@ -180,6 +180,8 @@ let
   messages = c: map (a: a.message) (failedAssertions c);
   settingsOf = c: (opts c).internal.settings;
   hashOf = c: (entryOf c).serviceConfig.EnvironmentVariables.PG_ASSISTANTS_CONFIG_HASH;
+  sessionVarsHashOf =
+    c: (entryOf c).serviceConfig.EnvironmentVariables.PG_ASSISTANTS_SESSION_VARS_HASH;
   # lib.hasInfix matches by regex, which refuses strings that carry store-path context
   hasInfixCtx =
     infix: s:
@@ -243,6 +245,15 @@ let
     assistants = two;
   };
   tldrOff = case (darwin // { tldrEnable = false; }) { assistants = two; };
+
+  # the operator's session variables: a change restarts the daemon
+  sessionVarsA = case (darwin // { sessionVariables.EXAMPLE_VAR = "a"; }) { assistants = two; };
+  sessionVarsB = case (darwin // { sessionVariables.EXAMPLE_VAR = "b"; }) { assistants = two; };
+  # the guards a session blanks, replaced
+  otherGuards = case darwin {
+    assistants = two;
+    sessionBlankEnv = [ "EXAMPLE_GUARD" ];
+  };
 
   # where folder trust is written
   claudeDirAbsolute =
@@ -391,6 +402,7 @@ let
         "HOME"
         "PG_ASSISTANTS_CONFIG_HASH"
         "PG_ASSISTANTS_PPROF_ADDR"
+        "PG_ASSISTANTS_SESSION_VARS_HASH"
       ];
     homeIsSet = env.HOME == "/example/home";
     pprofSocketInStateDir = env.PG_ASSISTANTS_PPROF_ADDR == "${stateDir}/pprof.sock";
@@ -398,12 +410,52 @@ let
       builtins.attrNames (entryOf onNoPprof).serviceConfig.EnvironmentVariables == [
         "HOME"
         "PG_ASSISTANTS_CONFIG_HASH"
+        "PG_ASSISTANTS_SESSION_VARS_HASH"
       ];
     hashIsTheModules = env.PG_ASSISTANTS_CONFIG_HASH == (opts on).internal.configHash;
     hashLooksLikeSha256 = builtins.match "[0-9a-f]{64}" env.PG_ASSISTANTS_CONFIG_HASH != null;
     sameInputsSameHash = hashOf (case darwin { assistants = two; }) == hashOf on;
     promptChangeChangesHash = hashOf otherPrompt != hashOf on;
     addedAssistantChangesHash = hashOf threeAssistants != hashOf on;
+    # a change of the operator's session variables restarts the daemon too
+    sessionVarsHashLooksLikeSha256 =
+      builtins.match "[0-9a-f]{64}" env.PG_ASSISTANTS_SESSION_VARS_HASH != null;
+    sessionVarChangeChangesItsHash =
+      sessionVarsHashOf sessionVarsA != sessionVarsHashOf sessionVarsB
+      && sessionVarsHashOf sessionVarsA != sessionVarsHashOf on
+      &&
+        sessionVarsHashOf (
+          case (darwin // { sessionVariables.EXAMPLE_VAR = "a"; }) {
+            assistants = two;
+          }
+        ) == sessionVarsHashOf sessionVarsA;
+    # ... and only that hash: the rendered config is the same
+    sessionVarChangeKeepsConfigHash = hashOf sessionVarsA == hashOf sessionVarsB;
+
+    # ---- what a session starts with blanked: the guards and the daemon's own --
+    blankEnvRendered =
+      s.blank_env == [
+        "__HM_SESS_VARS_SOURCED"
+        "__HM_ZSH_SESS_VARS_SOURCED"
+        "__NIX_DARWIN_SET_ENVIRONMENT_DONE"
+        "PG_ASSISTANTS_CONFIG_HASH"
+        "PG_ASSISTANTS_PPROF_ADDR"
+        "PG_ASSISTANTS_SESSION_VARS_HASH"
+        "XPC_SERVICE_NAME"
+      ];
+    # every variable the agent sets for the daemon alone is blanked for sessions
+    daemonOnlyEnvIsBlanked = lib.all (k: builtins.elem k s.blank_env) (
+      builtins.attrNames (removeAttrs env [ "HOME" ])
+    );
+    # replacing the guards keeps the daemon-only names
+    otherGuardsKeepDaemonOnly =
+      (settingsOf otherGuards).blank_env == [
+        "EXAMPLE_GUARD"
+        "PG_ASSISTANTS_CONFIG_HASH"
+        "PG_ASSISTANTS_PPROF_ADDR"
+        "PG_ASSISTANTS_SESSION_VARS_HASH"
+        "XPC_SERVICE_NAME"
+      ];
 
     # ---- the command: the daemon through the operator's login shell --------
     command =
@@ -419,6 +471,7 @@ let
     topLevelKeys =
       builtins.attrNames s == [
         "assistant"
+        "blank_env"
         "blocks"
         "grace"
         "paths"
@@ -588,6 +641,7 @@ in
     fakeBinary = "${fakePgAssistants}/bin/pg-assistants";
     fakeConfigFile = (opts fakeRun).internal.configFile;
     fakeHash = hashOf fakeRun;
+    fakeSessionVarsHash = sessionVarsHashOf fakeRun;
     inherit stateDir;
   };
 }

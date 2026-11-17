@@ -323,9 +323,12 @@ every assistant `cwd` at activation (best effort), and registers `pg-assistants-
 `com.phillipg.pg-assistants-daemon`, keep-alive, `AbandonProcessGroup = true` so a daemon restart
 never kills the tmux sessions) whose command runs the daemon through the operator's login shell
 (`exec <loginShell> -l -c 'exec "$@"' <loginShell> <pkg>/bin/pg-assistants daemon --config <file> --shutdown-deadline 8s`,
-`ExitTimeOut` 15). `PG_ASSISTANTS_CONFIG_HASH` and, with `pprof.enable`, `PG_ASSISTANTS_PPROF_ADDR`
-ride in its environment; launchd's logs go to `$XDG_STATE_HOME/pg-assistants-launchd`, outside
-the 0700 state dir (`status` names that stderr path). It asserts that `pg-claude-control` is
+`ExitTimeOut` 15). `PG_ASSISTANTS_CONFIG_HASH`, `PG_ASSISTANTS_SESSION_VARS_HASH` (of
+`home.sessionVariables`) and, with `pprof.enable`, `PG_ASSISTANTS_PPROF_ADDR` ride in its
+environment; the tmux server keeps that environment, so the rendered `blank_env` (the
+`sessionBlankEnv` startup-file guards plus those daemon-only names) is set empty in every session.
+launchd's logs go to `$XDG_STATE_HOME/pg-assistants-launchd`, outside the 0700 state dir (`status`
+names that stderr path). It asserts that `pg-claude-control` is
 enabled and its plugin not overridden off (each gated on the option's declaration) and that every
 `cwd` and `loginShell` is absolute; Linux gets no entry and one warning. No capability enables
 it. Same stubbing rules as above (plus `home.activation` with `lib.hm.dag`); the check is

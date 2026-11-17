@@ -79,6 +79,24 @@ let
   logDir = "${config.xdg.stateHome}/pg-assistants-launchd";
   pprofSocket = "${stateDir}/pprof.sock";
 
+  # A hash of the operator's session variables, so an apply that changes one
+  # restarts the daemon (whose own login shell, and so every pg-claude-control
+  # call it makes, then sees the new value). Its string context is dropped: it
+  # is a value in the job definition, not a dependency, and nothing is built.
+  sessionVarsHash = builtins.hashString "sha256" (
+    builtins.unsafeDiscardStringContext (builtins.toJSON config.home.sessionVariables)
+  );
+
+  # The variables the launchd agent sets for the daemon alone (HOME aside) and
+  # launchd's own job name. The tmux server keeps the daemon's environment and
+  # hands it to every session, so each is rendered into blank_env.
+  daemonOnlyEnv = [
+    "PG_ASSISTANTS_CONFIG_HASH"
+    "PG_ASSISTANTS_PPROF_ADDR"
+    "PG_ASSISTANTS_SESSION_VARS_HASH"
+    "XPC_SERVICE_NAME"
+  ];
+
   # The rendered configuration. Only keys the loader knows are rendered (an
   # unknown key fails `config check`); null options are omitted; the
   # assistants are an array of tables ([[assistant]]), ordered by id.
@@ -112,6 +130,7 @@ let
 
   settings = {
     inherit (cfg) tick;
+    blank_env = lib.unique (cfg.sessionBlankEnv ++ daemonOnlyEnv);
     grace = {
       inherit (cfg.grace) interrupt kill;
     };
@@ -401,6 +420,29 @@ in
       '';
     };
 
+    sessionBlankEnv = lib.mkOption {
+      type = lib.types.listOf (lib.types.strMatching "[A-Za-z_][A-Za-z0-9_]*");
+      default = [
+        "__HM_SESS_VARS_SOURCED"
+        "__HM_ZSH_SESS_VARS_SOURCED"
+        "__NIX_DARWIN_SET_ENVIRONMENT_DONE"
+      ];
+      description = ''
+        Variables every session starts with set and empty (rendered as
+        `blank_env`, followed by the variables the launchd agent sets for the
+        daemon alone and launchd's `XPC_SERVICE_NAME`). The tmux server keeps
+        the environment of the daemon that started it, whose login shell has
+        already run the operator's startup files and exported their run-once
+        guards; a session that inherits a guard skips that file and keeps the
+        server's old `PATH` and session variables. The defaults are the guards
+        of home-manager's `hm-session-vars.sh` and zsh session variables (each
+        file returns or skips when its guard is non-empty) and of nix-darwin's
+        `set-environment` (sourced by `/etc/zshenv` only when its guard is
+        empty), so an empty value runs each file again. Add the guard of any
+        other startup file the login shell runs once.
+      '';
+    };
+
     claudeJson = lib.mkOption {
       type = lib.types.str;
       default = defaultClaudeJson;
@@ -571,6 +613,8 @@ in
                 HOME = home;
                 # The hash of the rendered config (see configHash above).
                 PG_ASSISTANTS_CONFIG_HASH = configHash;
+                # The hash of the session variables (see sessionVarsHash above).
+                PG_ASSISTANTS_SESSION_VARS_HASH = sessionVarsHash;
               }
               // lib.optionalAttrs cfg.pprof.enable {
                 PG_ASSISTANTS_PPROF_ADDR = pprofSocket;

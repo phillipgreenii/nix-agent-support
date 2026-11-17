@@ -28,11 +28,15 @@ func controlHint(id string) string {
 func TestStartsEnabledAssistant(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := newHarness(t, exampleA)
+		h.cfg.BlankEnv = []string{"EXAMPLE_GUARD"}
 		h.start()
 		defer h.stop()
 		h.until(3 * time.Minute)
 
 		starts := h.w.callsOf("new-session", exampleA)
+		if len(starts) == 1 && !slices.Contains(starts[0].env, "EXAMPLE_GUARD=") {
+			t.Errorf("env = %q, want the config's blank_env entry EXAMPLE_GUARD=", starts[0].env)
+		}
 		if len(starts) != 1 {
 			t.Fatalf("new-session calls = %d, want 1", len(starts))
 		}
@@ -43,7 +47,7 @@ func TestStartsEnabledAssistant(t *testing.T) {
 		if c.cwd != LaunchCwd(a) {
 			t.Errorf("cwd = %q, want %q", c.cwd, LaunchCwd(a))
 		}
-		if want := LaunchEnv(a, h.cfg.Paths.StateDir); !slices.Equal(c.env, want) {
+		if want := LaunchEnv(a, h.cfg.Paths.StateDir, h.cfg.BlankEnv); !slices.Equal(c.env, want) {
 			t.Errorf("env = %q, want %q", c.env, want)
 		}
 		if want := LaunchArgv(h.cfg.Paths, a, "uuid-1"); !slices.Equal(c.argv, want) {

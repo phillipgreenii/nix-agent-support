@@ -83,8 +83,12 @@ Nothing found on 2026-11-16 does the whole job:
    restrictions". claude starts through the operator's login shell as an interactive login shell
    (`<shell> -l -i -c 'exec "$@"'`), and the daemon itself runs through it as a login shell
    (`-l`), so both see the same `PATH` and every `home.sessionVariables` entry. The environment is
-   not filtered. Auto-compact is turned off for the session only (`DISABLE_AUTO_COMPACT=1`), and
-   Claude's child-session markers are blanked.
+   not filtered. The tmux server keeps the environment of the daemon that started it, including
+   the run-once guards its login shell exported, so every session starts with those guards (and
+   the daemon's own variables) set empty, listed in the config's `blank_env`: its login shell then
+   runs the startup files again instead of inheriting what the server froze at its start. A change
+   of the session variables restarts the daemon. Auto-compact is turned off for the session only
+   (`DISABLE_AUTO_COMPACT=1`), and Claude's child-session markers are blanked.
 10. **A daemon restart does not kill the assistants.** The launchd agent sets
     `AbandonProcessGroup`, the daemon leaves its sessions running on shutdown, and the next daemon
     adopts them. A hash of the rendered config rides in the agent's environment, so a config change
