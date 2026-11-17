@@ -58,7 +58,7 @@ in
     # guaranteed before launch, never detected after.
     #
     # This activation is the PRIMARY, non-racy trust path. ccpool's runtime
-    # `ensure` fallback (`packages/ccpool/internal/trust`) exists only for ad-hoc
+    # `ensure` fallback (the shared `claudetrust` package) exists only for ad-hoc
     # `--cwd` values and is deliberately kept near-zero-frequency: ~/.claude.json
     # is Claude-owned, is rewritten on Claude's own schedule, and does NOT honour
     # ccpool's flock, so its read-merge-rename has an unavoidable lost-update

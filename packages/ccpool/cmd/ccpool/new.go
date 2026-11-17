@@ -18,8 +18,8 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
-	"github.com/phillipgreenii/ccpool/internal/trust"
 	"github.com/phillipgreenii/ccpool/internal/wait"
+	"github.com/phillipgreenii/x/claudetrust"
 )
 
 func runNew(args []string) int {
@@ -178,10 +178,10 @@ func applyLabels(m labelMarker, externalID string, labels labelFlag) error {
 	return nil
 }
 
-// truster adapts trust.EnsureTrusted to session.Truster (binds the path).
+// truster adapts claudetrust.Ensure to session.Truster (binds the path).
 type truster struct{ path string }
 
-func (t truster) EnsureTrusted(cwd string) error { return trust.EnsureTrusted(t.path, cwd) }
+func (t truster) EnsureTrusted(cwd string) error { return claudetrust.Ensure(t.path, cwd) }
 
 // storeWaiter adapts the store + wait poll loop to session.Waiter. The poller
 // stays store-only; the launch wait (WaitLaunch) additionally gets a liveness

@@ -16,10 +16,17 @@ cachePackages = [
   'github.com/phillipgreenii/claude-transcript',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen',
+  'github.com/phillipgreenii/x/claudetrust',
+  'github.com/phillipgreenii/x/cmdrun',
+  'github.com/phillipgreenii/x/cmdruntest',
   'github.com/phillipgreenii/x/exitcode',
   'github.com/phillipgreenii/x/gitclient',
   'github.com/phillipgreenii/x/gitfixture',
   'github.com/phillipgreenii/x/gittest',
+  'github.com/phillipgreenii/x/jsonllogger',
+  'github.com/phillipgreenii/x/lifecycle',
+  'github.com/phillipgreenii/x/tmux',
   'github.com/remyoudompheng/bigfft',
   'go.opentelemetry.io/auto/sdk',
   'go.opentelemetry.io/contrib/bridges/otelslog',
@@ -202,8 +209,8 @@ cachePackages = [
     hash = 'sha256-67f5PY1iAwKwnX7EeNkNoLlh01FAqXILXwxeScsCvNc='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261114222359-65f23cfd8d2d'
-    hash = 'sha256-R2j1H6WJeyjkYORQMnvLg1o4f/IPVzkHjDww6G+sjvo='
+    version = 'v0.0.0-20261117212335-9e30e30fb07e'
+    hash = 'sha256-NKh6PqyK0TRGVM5FrJ+4759j4KwYv08oh802H6asFeE='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'

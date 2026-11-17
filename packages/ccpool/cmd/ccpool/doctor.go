@@ -13,7 +13,7 @@ import (
 	"github.com/phillipgreenii/ccpool/internal/session"
 	"github.com/phillipgreenii/ccpool/internal/store"
 	"github.com/phillipgreenii/ccpool/internal/tmux"
-	"github.com/phillipgreenii/ccpool/internal/trust"
+	"github.com/phillipgreenii/x/claudetrust"
 )
 
 // doctorPoolHeader renders the active pool's context for `ccpool doctor`.
@@ -49,7 +49,11 @@ func runDoctor(args []string) int {
 		live := cl.HasSession(session.TmuxName(cfg.Tmux.Prefix, r.ExternalID))
 		// cwd-trust is one of the three hang causes doctor must distinguish:
 		// untrusted cwd, dropped send-key, or missing/failed hook.
-		trusted := r.CWD != "" && trust.IsTrusted(claudeJSON, r.CWD)
+		trusted := false
+		if r.CWD != "" {
+			ok, err := claudetrust.IsTrusted(claudeJSON, r.CWD)
+			trusted = err == nil && ok
+		}
 		fmt.Printf("external_id=%s name=%s state=%s live=%v cwd_trusted=%v claude_session_id=%s\n",
 			r.ExternalID, r.Name, r.State, live, trusted, r.ClaudeSessionID)
 		fmt.Printf("  cwd=%s\n  transcript=%s\n", r.CWD, r.TranscriptPath)

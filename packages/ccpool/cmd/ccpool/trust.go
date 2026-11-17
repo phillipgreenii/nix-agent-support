@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/phillipgreenii/ccpool/internal/trust"
+	"github.com/phillipgreenii/x/claudetrust"
 )
 
 // runTrust pre-trusts a cwd in ~/.claude.json so an automated `claude` launch
@@ -22,14 +22,10 @@ func runTrust(args []string) int {
 	if fs.NArg() >= 1 {
 		cwd = fs.Arg(0)
 	}
-	// Canonicalize so the key matches what Claude records (it resolves symlinks,
-	// e.g. /tmp -> /private/tmp; verified against Claude Code 2.1.170).
-	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = resolved
-	}
-
+	// claudetrust resolves symlinks itself, so the key matches what Claude
+	// records (e.g. /tmp -> /private/tmp; verified against Claude Code 2.1.170).
 	home, _ := os.UserHomeDir()
-	if err := trust.EnsureTrusted(filepath.Join(home, ".claude.json"), cwd); err != nil {
+	if err := claudetrust.Ensure(filepath.Join(home, ".claude.json"), cwd); err != nil {
 		slog.Error("trust: failed", "err", err)
 		return 1
 	}
