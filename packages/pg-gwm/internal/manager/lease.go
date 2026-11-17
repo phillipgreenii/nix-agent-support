@@ -210,6 +210,9 @@ func (m *Manager) reserve(ctx context.Context, r LeaseRequest, mayReclaim bool) 
 	}
 
 	if target != nil { // row 12: the released worktree that holds the branch
+		if err := m.refuseMissingDir(lk, target, now); err != nil {
+			return nil, err
+		}
 		target.Lease = lease
 		m.markLeased(target, lease, now)
 		if err := lk.Commit(); err != nil {
@@ -273,6 +276,9 @@ func (m *Manager) orRenewLive(ctx context.Context, lk *state.Locked, w *state.Wo
 	if r.TTL != nil && r.TTL.None {
 		return Record{}, ErrUsage("renew cannot remove an expiry", "release and lease again with --ttl none", map[string]any{"flag": "--ttl"})
 	}
+	if err := m.refuseMissingDir(lk, w, m.now()); err != nil {
+		return Record{}, err
+	}
 	if err := m.renewLocked(lk, w, r.TTL, r.Metadata); err != nil {
 		return Record{}, err
 	}
@@ -291,6 +297,31 @@ func (m *Manager) orRenewLive(ctx context.Context, lk *state.Locked, w *state.Wo
 			fmt.Sprintf("lease %q was renewed; the branch arguments were ignored and the worktree stays on %s", r.Name, cur))
 	}
 	return rec, nil
+}
+
+// refuseMissingDir is the directory check before a lease is granted on, or
+// renewed on, an existing worktree record: a record whose directory is gone
+// (and that no command is still preparing) is marked broken, its lease is
+// dropped, and the request is refused with the broken error, so a caller is
+// never handed a path that does not exist. The reaper retries broken records.
+func (m *Manager) refuseMissingDir(lk *state.Locked, w *state.Worktree, now time.Time) error {
+	if w.Status == state.Preparing || w.Status == state.Creating {
+		return nil // the directory is still being made
+	}
+	if _, err := os.Lstat(w.Path); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	reason := "the worktree directory is missing: " + w.Path
+	ev := state.Event{Kind: "broken", WorktreeID: w.ID, Outcome: "error", Details: map[string]any{"reason": reason}}
+	if w.Lease != nil {
+		ev.LeaseID, ev.Name, ev.Owner = w.Lease.ID, w.Lease.Name, w.Lease.Owner
+	}
+	w.Status, w.Reason, w.Lease, w.StatusSince = state.Broken, reason, nil, now
+	if err := lk.Commit(); err != nil {
+		return err
+	}
+	m.event(ev)
+	return ErrBroken(w.ID, reason)
 }
 
 func copyMeta(in map[string]string) map[string]string {

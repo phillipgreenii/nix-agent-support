@@ -188,6 +188,9 @@ manager does not manage reports the pseudo-status `unmanaged`.
   expired and otherwise lease a new one, and MUST report in the record whether it renewed. When it
   renews, it MUST ignore any branch arguments (`-b`, `-B`, `--detach`, a commit-ish), report
   `renewed: true`, and warn on standard error, naming the worktree's current branch.
+  A `lease` that would grant a worktree record, and a `lease --or-renew` that would renew one, whose
+  directory no longer exists MUST NOT hand out that path: the manager MUST mark the record `broken`,
+  drop its lease, and refuse with `broken`.
 - **`INV-GWM-8`** <!-- uuid: 7b6f91a0-5a78-4184-845c-2e5842a613c9 --> — When `renew` is given metadata
   it MUST replace the lease's metadata entirely (keys not given are dropped). When it is given none, the
   metadata MUST stay as it was. `lease` MUST accept owner, name and metadata.

@@ -517,3 +517,32 @@ func TestList(t *testing.T) {
 		t.Errorf("unmanaged rows = %d", un)
 	}
 }
+
+func TestLeaseRefusesMissingSlotDir(t *testing.T) {
+	t.Run("or-renew on a live name", func(t *testing.T) {
+		e := newFakeEnv(t)
+		first := e.mustLease(LeaseRequest{Name: "w", Branch: "feat", Create: true})
+		if err := os.RemoveAll(first.WorktreePath); err != nil {
+			t.Fatal(err)
+		}
+		_, err := e.lease(LeaseRequest{Name: "w", OrRenew: true})
+		_ = wantErr(t, err, "broken", CodeBroken)
+		st := e.state()
+		if len(st.Worktrees) != 1 || st.Worktrees[0].Status != state.Broken || st.Worktrees[0].Lease != nil {
+			t.Errorf("record = %+v", st.Worktrees)
+		}
+	})
+	t.Run("reuse of a released worktree", func(t *testing.T) {
+		e := newFakeEnv(t)
+		first := e.mustLease(LeaseRequest{Name: "old", Branch: "b12", Create: true})
+		e.seed(func(st *state.State) { st.Worktrees[0].Status, st.Worktrees[0].Lease = state.Released, nil })
+		if err := os.RemoveAll(first.WorktreePath); err != nil {
+			t.Fatal(err)
+		}
+		_, err := e.lease(LeaseRequest{Name: "new", CommitIsh: "b12"})
+		_ = wantErr(t, err, "broken", CodeBroken)
+		if st := e.state(); st.Worktrees[0].Status != state.Broken {
+			t.Errorf("status = %v", st.Worktrees[0].Status)
+		}
+	})
+}
