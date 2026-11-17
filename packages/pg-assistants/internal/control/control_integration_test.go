@@ -236,7 +236,7 @@ func TestRealControlContract(t *testing.T) {
 			t.Errorf("usage = %+v", u)
 		}
 		if len(u.Limits) != 1 || u.Limits[0].Kind != "five_hour" || u.Limits[0].Fraction != 0.62 ||
-			!u.Limits[0].ResetsAt.Equal(time.Date(2026, 11, 16, 20, 0, 0, 123000000, time.UTC)) {
+			!u.Limits[0].ResetsAt.Equal(time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC)) { // .123 truncated to the second
 			t.Errorf("limits = %+v", u.Limits)
 		}
 	})
