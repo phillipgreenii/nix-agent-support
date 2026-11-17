@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -259,6 +260,19 @@ func TestAssistantRules(t *testing.T) {
 			[]string{assistant("example-a", `model = "claude-sonnet-9"`)},
 			map[int]string{0: "assistant[example-a].model"},
 		},
+		// tmux cannot pass on a value that ends in `\;` intact.
+		{"name ending in \\;", []string{assistant("example-a", `name = "Example\\;"`)}, map[int]string{0: "assistant[example-a].name"}},
+		{
+			"model ending in \\;",
+			[]string{assistant("example-a", `model = "claude-sonnet-5-5\\;"`, `context.window = 1000000`)},
+			map[int]string{0: "assistant[example-a].model"},
+		},
+		{"cwd ending in \\;", []string{assistant("example-a", `cwd = "/example/work/a\\;"`)}, map[int]string{0: "assistant[example-a].cwd"}},
+		{"prompt ending in \\;", []string{assistant("example-a", `prompt = "Resume now\\;"`)}, map[int]string{0: "assistant[example-a].prompt"}},
+		// tmux expands a format in the start directory (##, #{...}).
+		{"cwd with ##", []string{assistant("example-a", `cwd = "/example/work/a##b"`)}, map[int]string{0: "assistant[example-a].cwd"}},
+		{"cwd with #{", []string{assistant("example-a", `cwd = "/example/work/#{session_name}"`)}, map[int]string{0: "assistant[example-a].cwd"}},
+		{"cwd with a lone #", []string{assistant("example-a", `cwd = "/example/work/a#b"`)}, map[int]string{0: "assistant[example-a].cwd"}},
 		{"negative tick", []string{assistant("example-a", `tick = "-1s"`)}, map[int]string{0: "assistant[example-a].tick"}},
 		{"unparseable tick", []string{assistant("example-a", `tick = "soon"`)}, map[int]string{0: "assistant[example-a].tick"}},
 	}
@@ -424,6 +438,7 @@ func TestAssistantEnvRules(t *testing.T) {
 		{"value not a string", `env = { EXAMPLE_FOO = 1 }`, "assistant[example-a].env.EXAMPLE_FOO"},
 		{"key not a variable name", `env = { "EXAMPLE=FOO" = "bar" }`, "assistant[example-a].env.EXAMPLE=FOO"},
 		{"not a table", `env = "EXAMPLE_FOO=bar"`, "assistant[example-a].env"},
+		{"value ending in \\;", `env = { EXAMPLE_FOO = "bar\\;" }`, "assistant[example-a].env.EXAMPLE_FOO"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -458,6 +473,46 @@ func TestLoadFatalErrors(t *testing.T) {
 			t.Fatal("Load returned no error")
 		}
 	})
+}
+
+// The [paths] entries that reach tmux (the shell and claude as argv tokens,
+// the state dir inside an -e value) MUST NOT end in `\;`, which tmux cannot
+// pass on intact; like any bad [paths] entry, that is fatal.
+func TestTmuxPathsEndingInEscapedSemicolonAreFatal(t *testing.T) {
+	for key, old := range map[string]string{
+		"shell":     `"/bin/zsh"`,
+		"claude":    `"/example/store/bin/claude"`,
+		"state_dir": `"/example/state/pg-assistants"`,
+	} {
+		t.Run(key, func(t *testing.T) {
+			body := strings.Replace(pathsTOML, old, strings.TrimSuffix(old, `"`)+`\\;"`, 1)
+			_, err := Load(writeConfig(t, body+assistant("example-a")))
+			var fe FieldError
+			if !errors.As(err, &fe) || fe.Field != "paths."+key {
+				t.Errorf("Load error = %v, want a FieldError for paths.%s", err, key)
+			}
+		})
+	}
+}
+
+// What tmux can pass on intact is accepted: a trailing ";" (escaped at
+// launch), a ";" in the middle, a prompt of just ";", a "#" outside cwd.
+func TestTmuxSafeValuesAccepted(t *testing.T) {
+	cfg := load(t, pathsTOML+assistant(
+		"example-a",
+		`name = "Example A;"`,
+		`cwd = "/example/work/a;b;"`,
+		`prompt = ";"`,
+		`env = { EXAMPLE_FOO = "bar;", EXAMPLE_HASH = "#{x}" }`,
+	)+assistant("example-b", `prompt = "Resume now; then #1;"`))
+	for _, a := range cfg.Assistants {
+		if len(a.Problems) != 0 {
+			t.Errorf("%s Problems = %v, want none", a.ID, a.Problems)
+		}
+	}
+	if len(cfg.Problems) != 0 {
+		t.Errorf("global Problems = %v, want none", cfg.Problems)
+	}
 }
 
 func TestStrictJoinsAll(t *testing.T) {

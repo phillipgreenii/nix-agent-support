@@ -32,19 +32,54 @@ var recordedEnv = append(slices.Clone(wantBlanked),
 	"DISABLE_AUTO_COMPACT", "PG_ASSISTANT_ID", "PG_ASSISTANTS_STATE_DIR",
 	"FOO", "PATH", "PGA_LOGIN", "PGA_INTERACTIVE")
 
-// TestRealLaunchChain runs LaunchArgv and LaunchEnv through a real tmux
-// server and a real login shell, up to a stand-in claude that records what it
-// was given.
+// chainAssistant is the assistant every case starts; a case changes fields.
+func chainAssistant() config.Assistant {
+	return config.Assistant{
+		ID: "example-a", Name: "Example A", Model: "claude-sonnet-5-5", Effort: "medium",
+		Prompt: `Resume "now", please`,
+		Env:    map[string]string{"FOO": "bar"},
+	}
+}
+
+// TestRealLaunchChain runs LaunchArgv, LaunchEnv and LaunchCwd through a
+// real tmux server and a real login shell, up to a stand-in claude that
+// records what it was given.
 func TestRealLaunchChain(t *testing.T) {
-	t.Run("sh", func(t *testing.T) {
+	// shCase starts a under /bin/sh in cwd (a name under the test dir) with
+	// no startup files of the operator's.
+	shCase := func(t *testing.T, a config.Assistant, cwd string) launchRecord {
 		shell := requireTool(t, "/bin/sh")
 		c, dir := newRealTmux(t)
 		t.Setenv("HOME", mkdir(t, dir, "home")) // no ~/.profile
 		t.Setenv("ENV", "")                     // no interactive startup file
-		r := runChain(t, c, dir, shell)
+		return runChain(t, c, dir, shell, a, cwd)
+	}
+
+	t.Run("sh", func(t *testing.T) {
+		r := shCase(t, chainAssistant(), "cwd")
 		if got := r.env["FOO"]; got != "bar" {
 			t.Errorf("FOO = %q, want bar", got)
 		}
+	})
+
+	// tmux reads an argument ending in ";" as the end of a command: unescaped,
+	// a name like this fails new-session ("unknown command: --model"), an env
+	// value does too, and the prompt loses its ";".
+	t.Run("trailing semicolons", func(t *testing.T) {
+		a := chainAssistant()
+		a.Name, a.Model, a.Prompt = "Example A;", "claude-sonnet-5-5;", "Resume now;"
+		a.Env = map[string]string{"FOO": "bar;"}
+		r := shCase(t, a, "cwd;")
+		if got := r.env["FOO"]; got != "bar;" {
+			t.Errorf("FOO = %q, want %q", got, "bar;")
+		}
+	})
+
+	// Unescaped, a prompt of just ";" disappears.
+	t.Run("lone semicolon prompt", func(t *testing.T) {
+		a := chainAssistant()
+		a.Prompt = ";"
+		shCase(t, a, "cwd")
 	})
 
 	// The operator's own startup files run: the login shell is interactive
@@ -64,7 +99,7 @@ func TestRealLaunchChain(t *testing.T) {
 		writeFile(t, filepath.Join(zdot, ".zprofile"), 0o600, "export PGA_LOGIN=zprofile\n")
 		writeFile(t, filepath.Join(zdot, ".zshrc"), 0o600, "export PGA_INTERACTIVE=zshrc\n")
 
-		r := runChain(t, c, dir, shell)
+		r := runChain(t, c, dir, shell, chainAssistant(), "cwd")
 		if p := r.env["PATH"]; !strings.HasPrefix(p, bin+":") {
 			t.Errorf("PATH = %q, want it to start with %q", p, bin+":")
 		}
@@ -82,14 +117,17 @@ type launchRecord struct {
 	pid  int
 	argv []string          // its arguments, without argv[0]
 	env  map[string]string // the recordedEnv variables that were set
+	cwd  string            // its working directory, symlinks resolved
 }
 
-// runChain starts example-a through shell with the stand-in claude, waits
-// for its record and checks what every launch has in common: the pane pid is
-// the claude pid, the argv after the claude path arrived unchanged (the
-// prompt as one argument after --), the fixed environment arrived and the
-// CLAUDE* markers are set and empty.
-func runChain(t *testing.T, c tmux.Client, dir, shell string) launchRecord {
+// runChain starts a through shell with the stand-in claude, in dir/cwdName,
+// waits for its record and checks what every launch has in common: the pane
+// pid is the claude pid, claude got exactly the intended arguments (the
+// prompt as the one argument after --) in the intended directory, the fixed
+// environment arrived and the CLAUDE* markers are set and empty. The
+// arguments are compared with the assistant's own values, not with
+// LaunchArgv's tokens, which carry tmux's escapes.
+func runChain(t *testing.T, c tmux.Client, dir, shell string, a config.Assistant, cwdName string) launchRecord {
 	t.Helper()
 	ctx := t.Context()
 	for _, k := range wantBlanked {
@@ -97,13 +135,9 @@ func runChain(t *testing.T, c tmux.Client, dir, shell string) launchRecord {
 	}
 	claude, rec := fakeClaude(t, dir)
 	stateDir := filepath.Join(dir, "state")
-	a := config.Assistant{
-		ID: "example-a", Name: "Example A", Model: "claude-sonnet-5-5", Effort: "medium",
-		Prompt: `Resume "now", please`,
-		Env:    map[string]string{"FOO": "bar"},
-	}
+	a.Cwd = mkdir(t, dir, cwdName)
 	argv := LaunchArgv(config.Paths{Shell: shell, Claude: claude}, a, "example-session")
-	if err := c.NewSession(ctx, a.ID, mkdir(t, dir, "cwd"), LaunchEnv(a, stateDir), argv); err != nil {
+	if err := c.NewSession(ctx, a.ID, LaunchCwd(a), LaunchEnv(a, stateDir), argv); err != nil {
 		t.Fatal(err)
 	}
 	waitForRecord(t, c, a.ID, rec)
@@ -116,11 +150,19 @@ func runChain(t *testing.T, c tmux.Client, dir, shell string) launchRecord {
 	if pid != r.pid {
 		t.Errorf("pane pid %d != claude pid %d: the shell did not exec claude", pid, r.pid)
 	}
-	if i := slices.Index(argv, claude); i < 0 || !slices.Equal(r.argv, argv[i+1:]) {
-		t.Errorf("claude argv =\n  %q\nwant\n  %q", r.argv, argv[slices.Index(argv, claude)+1:])
+	want := []string{
+		"--allowed-tools", "Bash(pg-assistants exit)", "--session-id", "example-session",
+		"--name", a.Name, "--model", a.Model, "--effort", a.Effort, "--", a.Prompt,
 	}
-	if end := slices.Index(r.argv, "--"); end < 0 || !slices.Equal(r.argv[end+1:], []string{a.Prompt}) {
-		t.Errorf("claude argv %q: want the prompt %q as the one argument after --", r.argv, a.Prompt)
+	if !slices.Equal(r.argv, want) {
+		t.Errorf("claude argv =\n  %q\nwant\n  %q", r.argv, want)
+	}
+	wantCwd, err := filepath.EvalSymlinks(a.Cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.cwd != wantCwd {
+		t.Errorf("claude cwd = %q, want %q", r.cwd, wantCwd)
 	}
 	for k, want := range map[string]string{
 		"DISABLE_AUTO_COMPACT":    "1",
@@ -140,7 +182,8 @@ func runChain(t *testing.T, c tmux.Client, dir, shell string) launchRecord {
 }
 
 // fakeClaude writes a stand-in claude to dir/fake/claude. It records $$, its
-// arguments and the recordedEnv variables that are set (both NUL-separated)
+// working directory (pwd -P), its arguments and the recordedEnv variables
+// that are set (both NUL-separated)
 // under dir/rec, writes dir/rec/done last, then execs sleep so the pane stays
 // alive. It uses only shell builtins until that exec.
 func fakeClaude(t *testing.T, dir string) (bin, rec string) {
@@ -151,6 +194,7 @@ func fakeClaude(t *testing.T, dir string) (bin, rec string) {
 	b.WriteString("#!/bin/sh\n")
 	fmt.Fprintf(&b, "rec=%s\n", shellQuote(rec))
 	b.WriteString(`printf '%s' "$$" > "$rec/pid"` + "\n")
+	b.WriteString(`pwd -P > "$rec/cwd"` + "\n")
 	b.WriteString(`: > "$rec/argv"` + "\n")
 	b.WriteString(`for a in "$@"; do printf '%s\0' "$a" >> "$rec/argv"; done` + "\n")
 	b.WriteString(`: > "$rec/env"` + "\n")
@@ -198,7 +242,12 @@ func readRecord(t *testing.T, rec string) launchRecord {
 	if err != nil {
 		t.Fatalf("recorded pid: %v", err)
 	}
-	r := launchRecord{pid: pid, argv: splitNUL(read("argv")), env: map[string]string{}}
+	r := launchRecord{
+		pid:  pid,
+		argv: splitNUL(read("argv")),
+		env:  map[string]string{},
+		cwd:  strings.TrimSuffix(read("cwd"), "\n"),
+	}
 	for _, kv := range splitNUL(read("env")) {
 		k, v, _ := strings.Cut(kv, "=")
 		r.env[k] = v

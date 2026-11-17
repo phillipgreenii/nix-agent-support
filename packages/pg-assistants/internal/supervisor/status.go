@@ -76,13 +76,19 @@ type Status struct {
 
 // StatusBoard is the in-memory status every loop updates and the file it is
 // flushed to. Its mutex covers only memory: Set and the other setters copy
-// their argument in, and Flush copies the state out under the lock and writes
-// the file outside it, so no loop ever waits on file I/O.
+// their argument in and never wait on file I/O, and Flush copies the state
+// out under the lock and writes the file outside it.
+//
+// Flush writes the file, so it MUST be called only from the daemon's
+// heartbeat goroutine, never from an assistant's loop: a loop that wants the
+// file written at the end of its tick signals the heartbeat, without blocking,
+// instead.
 //
 // One Flush writes at a time. A Flush that finds a write in progress returns
-// nil at once; the writer in progress writes the newer state next and
-// reports any error of that write itself. So the file always ends up holding
-// the latest state flushed, and no Flush waits for another's write.
+// nil at once, handing its state to the writer in progress, which writes it
+// next and reports any error of that write itself. So the file always ends up
+// holding the latest state flushed, and a Flush caller may perform other
+// callers' handed-off writes as well as its own before it returns.
 type StatusBoard struct {
 	path  string
 	write func(path string, s Status) error // writeStatus; a test seam
@@ -139,7 +145,9 @@ func (b *StatusBoard) SetBlocks(l []control.Limit) {
 
 // Flush writes the state to the file atomically (a temporary file in the same
 // directory, then a rename), mode 0600, with written_at set to now (the
-// latest now any Flush has passed). A missing directory is created 0700.
+// latest now any Flush has passed). A missing directory is created 0700; a
+// path that is not absolute is an error. Call it only from the heartbeat
+// goroutine (see StatusBoard).
 func (b *StatusBoard) Flush(now time.Time) error {
 	b.mu.Lock()
 	if now.After(b.flushAt) {
@@ -238,8 +246,13 @@ func ReadStatus(path string) (Status, error) {
 
 // writeFileAtomic writes data to path through a temporary file in the same
 // directory and a rename, so a reader sees the old file or the new one, never
-// part of one. The file is mode 0600; a missing directory is created 0700.
+// part of one. The file is mode 0600; a missing directory is created 0700. A
+// path that is not absolute is refused, so nothing is ever written under the
+// process's working directory.
 func writeFileAtomic(path string, data []byte) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("%q is not an absolute path", path)
+	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

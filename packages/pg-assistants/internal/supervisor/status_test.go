@@ -242,6 +242,11 @@ func TestStatusBoardConcurrent(t *testing.T) {
 // it next, so the last write to complete (what the file holds) carries it.
 // The write is replaced with one whose first call blocks until released;
 // each write is recorded when it completes.
+//
+// A regression here blocks on the board's mutex, which testing/synctest does
+// not count as durably blocked, so synctest cannot turn the hang into a
+// failure. A real-time watchdog does: if the second Set and Flush have not
+// returned within 10s, it releases the blocked write and fails the test.
 func TestFlushNeverWaitsOnAnotherWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "status.json")
 	b := NewStatusBoard(path, DaemonStatus{PID: 1})
@@ -270,11 +275,23 @@ func TestFlushNeverWaitsOnAnotherWrite(t *testing.T) {
 	<-entered
 
 	// While the first write is blocked, Set and Flush return at once.
-	b.Set(AssistantStatus{ID: "example-a", Reason: "during"})
-	if err := b.Flush(statusT0.Add(time.Second)); err != nil {
-		t.Fatalf("second Flush: %v", err)
+	secondDone := make(chan error, 1)
+	go func() {
+		b.Set(AssistantStatus{ID: "example-a", Reason: "during"})
+		secondDone <- b.Flush(statusT0.Add(time.Second))
+	}()
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Errorf("second Flush: %v", err)
+		}
+		close(release)
+	case <-time.After(10 * time.Second):
+		close(release) // unblock the writer so every goroutine can finish
+		<-secondDone
+		<-firstDone
+		t.Fatal("Set or Flush waited for another Flush's write")
 	}
-	close(release)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first Flush: %v", err)
 	}

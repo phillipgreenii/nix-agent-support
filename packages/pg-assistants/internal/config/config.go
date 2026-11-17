@@ -222,15 +222,16 @@ func readPaths(top *table) (Paths, error) {
 	}
 	var p Paths
 	entries := []struct {
-		key string
-		dst *string
+		key  string
+		dst  *string
+		tmux bool // reaches tmux as an argument (argv token or -e value)
 	}{
-		{"tmux", &p.Tmux},
-		{"claude", &p.Claude},
-		{"pg_claude_control", &p.PgClaudeControl},
-		{"shell", &p.Shell},
-		{"state_dir", &p.StateDir},
-		{"claude_json", &p.ClaudeJSON},
+		{"tmux", &p.Tmux, false},
+		{"claude", &p.Claude, true},
+		{"pg_claude_control", &p.PgClaudeControl, false},
+		{"shell", &p.Shell, true},
+		{"state_dir", &p.StateDir, true},
+		{"claude_json", &p.ClaudeJSON, false},
 	}
 	known := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -246,6 +247,9 @@ func readPaths(top *table) (Paths, error) {
 		}
 		if !filepath.IsAbs(s) {
 			return Paths{}, FieldError{field, fmt.Sprintf("%q must be an absolute path", s)}
+		}
+		if e.tmux && endsTmuxEscaped(s) {
+			return Paths{}, FieldError{field, fmt.Sprintf("%q %s", s, tmuxEscapedMsg)}
 		}
 		*e.dst = s
 	}
@@ -332,16 +336,32 @@ func readAssistant(label string, m map[string]any, globalTick time.Duration) Ass
 	if t.requiredString("id", &a.ID) && !ValidID(a.ID) {
 		t.problem("id", fmt.Sprintf("%q must match [a-z0-9-]+", a.ID))
 	}
-	t.requiredString("name", &a.Name)
-	t.requiredString("model", &a.Model)
+	if t.requiredString("name", &a.Name) {
+		t.tmuxPassable("name", a.Name)
+	}
+	if t.requiredString("model", &a.Model) {
+		t.tmuxPassable("model", a.Model)
+	}
 	if t.requiredString("effort", &a.Effort) && !slices.Contains(efforts, a.Effort) {
 		t.problem("effort", fmt.Sprintf("%q must be one of %s", a.Effort, strings.Join(efforts, ", ")))
 	}
-	if t.requiredString("cwd", &a.Cwd) && !filepath.IsAbs(a.Cwd) {
-		t.problem("cwd", fmt.Sprintf("%q must be an absolute path", a.Cwd))
+	if t.requiredString("cwd", &a.Cwd) {
+		switch {
+		case !filepath.IsAbs(a.Cwd):
+			t.problem("cwd", fmt.Sprintf("%q must be an absolute path", a.Cwd))
+		case strings.Contains(a.Cwd, "#"):
+			// tmux expands a format in new-session -c (## and #{...}), and a
+			// directory it then cannot find starts the session in $HOME.
+			t.problem("cwd", fmt.Sprintf("%q must not contain #, which tmux expands as a format in the start directory", a.Cwd))
+		default:
+			t.tmuxPassable("cwd", a.Cwd)
+		}
 	}
-	if t.requiredString("prompt", &a.Prompt) && strings.HasPrefix(a.Prompt, "-") {
-		t.problem("prompt", fmt.Sprintf("%q must not start with \"-\"", a.Prompt))
+	if t.requiredString("prompt", &a.Prompt) {
+		if strings.HasPrefix(a.Prompt, "-") {
+			t.problem("prompt", fmt.Sprintf("%q must not start with \"-\"", a.Prompt))
+		}
+		t.tmuxPassable("prompt", a.Prompt)
 	}
 	t.boolean("enabled", &a.Enabled)
 	t.duration("tick", &a.Tick)
@@ -363,7 +383,7 @@ func readEnv(t *table) map[string]string {
 			continue
 		}
 		var s string
-		if e.str(k, &s) {
+		if e.str(k, &s) && e.tmuxPassable(k, s) {
 			env[k] = s
 		}
 	}
@@ -424,6 +444,24 @@ func readContext(t *table, a *Assistant) {
 		}
 	}
 	c.unknown("limit", "window", "nudge", "interrupt", "kill")
+}
+
+// endsTmuxEscaped reports whether v ends in `\;`. tmux reads an argument
+// ending in ";" as the end of a command, so the launch sends a trailing ";"
+// as `\;`; a value that already ends in `\;` cannot be passed on intact
+// (tmux delivers `X\\;` as "X;").
+func endsTmuxEscaped(v string) bool { return strings.HasSuffix(v, `\;`) }
+
+const tmuxEscapedMsg = `must not end in \; (tmux cannot pass that on intact)`
+
+// tmuxPassable records a problem for key when v, a value that reaches tmux as
+// an argument, ends in `\;`, and reports whether it does not.
+func (t *table) tmuxPassable(key, v string) bool {
+	if endsTmuxEscaped(v) {
+		t.problem(key, fmt.Sprintf("%q %s", v, tmuxEscapedMsg))
+		return false
+	}
+	return true
 }
 
 // checkPoints applies 0 < nudge < interrupt <= kill and returns the key of the

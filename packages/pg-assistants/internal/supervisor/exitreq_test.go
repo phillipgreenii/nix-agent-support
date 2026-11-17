@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/tmux"
 )
 
 func TestExitRequestRoundTrip(t *testing.T) {
@@ -91,6 +93,35 @@ func TestValidID(t *testing.T) {
 		if got := ValidID(id); got != want {
 			t.Errorf("ValidID(%q) = %v, want %v", id, got, want)
 		}
+	}
+}
+
+// An empty or relative state dir is refused by every state-dir helper, so
+// nothing is ever created under the process's working directory.
+func TestStateHelpersRequireAbsoluteStateDir(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	at := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	for _, dir := range []string{"", "state", "./state"} {
+		errs := map[string]error{
+			"WriteExitRequest": WriteExitRequest(dir, "example-a", at),
+			"ClearExitRequest": ClearExitRequest(dir, "example-a"),
+			"WriteLastExit":    WriteLastExit(dir, "example-a", tmux.DeadInfo{Status: 1}, time.Second, at),
+			"Flush":            NewStatusBoard(filepath.Join(dir, "status.json"), DaemonStatus{PID: 1}).Flush(at),
+		}
+		_, errs["HasExitRequest"] = HasExitRequest(dir, "example-a")
+		for name, err := range errs {
+			if err == nil || !strings.Contains(err.Error(), "absolute") {
+				t.Errorf("%s with state dir %q: err = %v, want one saying it is not absolute", name, dir, err)
+			}
+		}
+	}
+	entries, err := os.ReadDir(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("working directory holds %v after refused calls", names(entries))
 	}
 }
 

@@ -22,11 +22,26 @@ import (
 // path.
 func ValidID(id string) bool { return config.ValidID(id) }
 
-func exitRequestPath(stateDir, id string) (string, error) {
-	if !ValidID(id) {
-		return "", fmt.Errorf("exit request: %q is not a valid assistant id ([a-z0-9-]+)", id)
+// stateFile is the path of an assistant's file in a state-dir subdirectory:
+// <stateDir>/<sub>/<id><ext>. It refuses a state dir that is not absolute (an
+// empty or relative one would put the file under the process's working
+// directory) and an id that is not valid.
+func stateFile(stateDir, sub, id, ext string) (string, error) {
+	if !filepath.IsAbs(stateDir) {
+		return "", fmt.Errorf("state dir %q is not an absolute path", stateDir)
 	}
-	return filepath.Join(stateDir, "exit-requests", id), nil
+	if !ValidID(id) {
+		return "", fmt.Errorf("%q is not a valid assistant id ([a-z0-9-]+)", id)
+	}
+	return filepath.Join(stateDir, sub, id+ext), nil
+}
+
+func exitRequestPath(stateDir, id string) (string, error) {
+	path, err := stateFile(stateDir, "exit-requests", id, "")
+	if err != nil {
+		return "", fmt.Errorf("exit request: %w", err)
+	}
+	return path, nil
 }
 
 // WriteExitRequest records an exit request for id at time at, replacing any

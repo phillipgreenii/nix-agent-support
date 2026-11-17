@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/config"
 )
@@ -33,8 +34,9 @@ var blankedMarkers = []string{
 // exec keeps the pane pid equal to the claude pid. --allowed-tools takes any
 // number of values, so it comes first, a single-value flag follows it, and --
 // ends the options so the prompt can never be read as one more tool rule.
+// Every token is escaped for tmux: a trailing ";" is sent as `\;` (tmuxArg).
 func LaunchArgv(p config.Paths, a config.Assistant, sessionID string) []string {
-	return []string{
+	argv := []string{
 		p.Shell, "-l", "-i", "-c", `exec "$@"`, p.Shell,
 		p.Claude,
 		"--allowed-tools", ExitToolRule,
@@ -44,6 +46,29 @@ func LaunchArgv(p config.Paths, a config.Assistant, sessionID string) []string {
 		"--effort", a.Effort,
 		"--", a.Prompt,
 	}
+	for i, s := range argv {
+		argv[i] = tmuxArg(s)
+	}
+	return argv
+}
+
+// LaunchCwd is the start directory to pass to tmux new-session -c: a.Cwd,
+// escaped for tmux as LaunchArgv's tokens are. Check that it exists with a.Cwd
+// itself, not with this.
+func LaunchCwd(a config.Assistant) string { return tmuxArg(a.Cwd) }
+
+// tmuxArg escapes s for tmux's command-line parser, which reads an argument
+// ending in ";" as the end of a command: the ";" is dropped, an argument of
+// just ";" vanishes, and what follows is parsed as another command (so a
+// trailing ";" in the middle of new-session fails it). A trailing ";" is sent
+// as `\;`, which tmux turns back into ";". A ";" anywhere else is safe. A
+// value that itself ends in `\;` cannot be passed on intact this way (tmux
+// delivers `X\\;` as "X;"), so config rejects such values.
+func tmuxArg(s string) string {
+	if strings.HasSuffix(s, ";") {
+		return s[:len(s)-1] + `\;`
+	}
+	return s
 }
 
 // LaunchEnv is an assistant's session environment, as K=V entries for tmux
@@ -52,7 +77,7 @@ func LaunchArgv(p config.Paths, a config.Assistant, sessionID string) []string {
 // PG_ASSISTANTS_STATE_DIR (read by `pg-assistants exit`), the five CLAUDE*
 // markers set empty, then a.Env sorted by name. An a.Env entry for any of the
 // first eight names is dropped. There is no PATH entry: the login shell sets
-// it.
+// it. Every entry is escaped for tmux as LaunchArgv's tokens are.
 func LaunchEnv(a config.Assistant, stateDir string) []string {
 	env := []string{
 		"DISABLE_AUTO_COMPACT=1",
@@ -75,6 +100,9 @@ func LaunchEnv(a config.Assistant, stateDir string) []string {
 	slices.Sort(keys)
 	for _, k := range keys {
 		env = append(env, k+"="+a.Env[k])
+	}
+	for i, e := range env {
+		env[i] = tmuxArg(e)
 	}
 	return env
 }

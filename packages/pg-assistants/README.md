@@ -75,6 +75,12 @@ Rules beyond the comments above:
   `internal/config/windows.go` (no family fallback; a `[1m]` suffix on a known id selects 1M). An
   unknown model needs `context.window`, which is accepted for any model.
 - An unknown key is a problem, so a misspelt key cannot silently run on a default.
+- A value that reaches tmux as an argument (`name`, `model`, `cwd`, `prompt`, an `env` value, and
+  `paths.shell`, `paths.claude`, `paths.state_dir`) MUST NOT end in `\;`. tmux reads an argument
+  ending in `;` as the end of a command, so the daemon sends a trailing `;` as `\;`; a value that
+  already ends in `\;` cannot be passed on intact. A `;` anywhere else, or a trailing `;`, is fine.
+- `cwd` MUST NOT contain `#`: tmux expands a format in the start directory (`##`, `#{...}`), and a
+  directory it then cannot find silently starts the session in `$HOME`.
 - Whether `cwd` exists is NOT checked here (the build sandbox cannot see it).
 
 Where the rules apply:
