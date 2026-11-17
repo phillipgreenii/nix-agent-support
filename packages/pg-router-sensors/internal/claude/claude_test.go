@@ -239,6 +239,20 @@ func TestUnknownCases(t *testing.T) {
 	}
 }
 
+// The live account reports only five_hour (no seven_day): claude_5h answers and
+// claude_week is "no reading" with the reason on stderr and no error, so the
+// router reads claude_week as unknown.
+func TestSevenDayAbsentGivesNoWeekReading(t *testing.T) {
+	b := doc(win(50, resetsFor(DefaultBlock, 0.5)), nil, ts(-time.Minute))
+	obs, se, err := measure(t, New(), cmdruntest.Out(string(b)), "")
+	if err != nil || len(obs) != 1 || obs[0].Resource != Resource5h {
+		t.Fatalf("want only claude_5h, got %v %+v", err, obs)
+	}
+	if !strings.Contains(se, "claude_week: no reading") {
+		t.Errorf("stderr %q does not name claude_week", se)
+	}
+}
+
 func TestResetBypassesDwell(t *testing.T) {
 	b := doc(win(99, now), nil, ts(-time.Minute))
 	obs, _, _ := measure(t, New(), cmdruntest.Out(string(b)), "")

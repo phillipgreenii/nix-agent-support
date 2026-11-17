@@ -115,6 +115,21 @@ func TestClause_absentLevelReadsUnknown(t *testing.T) {
 	}
 }
 
+// A gating clause on a best-unknown resource that never answers (for example
+// claude_week, whose sensor has no seven_day figure) is fail-open: it admits.
+// This pins the documented behavior of INV-REQ-1.
+func TestClause_absentBestResourceGatingClauseFailsOpen(t *testing.T) {
+	rs := testResources()
+	comp, errs := CompileRequires(rs, "role \"r\"", []string{"disk >= OK"})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	res := levels.Decide(levels.Snapshot{Now: time.Unix(1, 0)}, rs.Registry(), comp.Requirement)
+	if !res.Admit || len(res.Failing) != 0 {
+		t.Fatalf("absent best-unknown level must admit, got %+v", res)
+	}
+}
+
 func TestClause_compileAndsClausesPerResourceIntoOneSet(t *testing.T) {
 	rs := testResources()
 	comp, errs := CompileRequires(rs, "role \"r\"", []string{"disk >= OK", "disk != PLENTY", "git_auth_x == AVAILABLE"})

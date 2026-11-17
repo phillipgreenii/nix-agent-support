@@ -821,7 +821,10 @@ A sensor is a level source. It reuses the event-source transport: a **pull** is 
   pure function makes the decision and the explanation. A resource with no clause uses the registry's
   `ignored`; no registration declares a clause "to have one". An absent level (never reported,
   sensor not running, or grace-expired) reads the resource's `unknown` value: best for every
-  resource except credentials, which read the worst level. Validation **MUST** reject an unknown
+  resource except credentials, which read the worst level; a gating clause (`>= OK`) on a best-unknown
+  resource whose sensor never answers therefore **admits** (fail-open) — for example `claude_week`, whose
+  sensor has no reading while the account reports no `seven_day` window (the 5-hour pacing resource still gates).
+  Validation **MUST** reject an unknown
   resource or level and an empty allowed set, and **SHOULD** warn on a clause naming a resource with
   no sensor on this machine; documentation prefers `>=` and `<=`. A role's query is polled when ANY
   consumer could run (the per-resource union of the consumers' allowed sets: it can over-poll, never
