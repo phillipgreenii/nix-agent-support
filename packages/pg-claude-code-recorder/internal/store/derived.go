@@ -301,6 +301,21 @@ func sessionRefIndexesSQL() string {
 	return b.String()
 }
 
+// blobTablesSQL is the dedupe key of the api-request-blob records: one row per
+// (session, content hash), pointing at the record that kept the blob. The
+// parser reads it before inserting a blob record and drops a repeat. It is
+// derived: a re-parse of the file generation that holds the record removes the
+// row with it.
+const blobTablesSQL = `
+CREATE TABLE IF NOT EXISTS blob_hashes(
+  session_ref INTEGER NOT NULL,
+  hash TEXT NOT NULL,
+  rec_id INTEGER NOT NULL,
+  PRIMARY KEY(session_ref, hash)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS blob_hashes_rec ON blob_hashes(rec_id);
+`
+
 // derivedSQL is the tables and then the indexes: what a normal open runs.
 // derivedTables is derivedTablesSQL, without the trigram table when tri is false
 // (the layout of a new index.db built with Options.NoTrigramIndex) and with the
@@ -309,7 +324,7 @@ func sessionRefIndexesSQL() string {
 // sessText is whether records has the legacy session TEXT column; the version 3
 // layout (Options.V3Layout) has none and reads the session through session_ref.
 func derivedTables(tri, ext, sessText bool) string {
-	base := derivedTablesSQL + askTablesSQL
+	base := derivedTablesSQL + askTablesSQL + blobTablesSQL
 	if ext {
 		base += extDDL()
 	}

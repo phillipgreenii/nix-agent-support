@@ -21,6 +21,10 @@ import (
 // Name is the source name.
 const Name = "claude-transcript"
 
+// BlobType is the type of a line that holds one request message body, keyed
+// by its content hash.
+const BlobType = "api-request-blob"
+
 // ParserVersion is stamped on every record; bump it to re-parse stored copies.
 // Version 2 added the saved_to field of a tool_result.
 // Version 3 stores time 0 for a line with no timestamp of its own.
@@ -70,6 +74,8 @@ type Line struct {
 	SourceToolUUID string   `json:"sourceToolAssistantUUID" ingest:"id"`
 	DurationMs     *float64 `json:"durationMs"     ingest:"float"`
 	Summary        string   `json:"summary"        ingest:"text"`
+	// BlobHash is the content hash of an api-request-blob line (its key).
+	BlobHash string `json:"hash" ingest:"id" field:"blob_hash"`
 
 	// Known keys the recorder does not index.
 	Content            json.RawMessage `json:"content"`
@@ -253,6 +259,12 @@ func (*Source) Parse(c source.Captures, raw []byte) ([]source.Record, error) {
 	}
 	out := []source.Record{lineRec}
 
+	// An api-request-blob line is one opaque row: the payload stays in the
+	// copied file (the record points at it), and its blocks are not expanded
+	// into records of their own.
+	if line.Type == BlobType {
+		return out, nil
+	}
 	if line.Message == nil || len(bytes.TrimSpace(line.Message.Content)) == 0 {
 		if line.Summary == "" {
 			return out, nil

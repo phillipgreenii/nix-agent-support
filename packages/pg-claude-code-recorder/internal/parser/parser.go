@@ -149,6 +149,9 @@ var KnownRecordTypes = []string{
 	"queue-operation", "file-history-snapshot",
 	"text", "thinking", "redacted_thinking", "tool_use", "tool_result", "image",
 	"history", "tool_result_body", "registry_deleted", "unknown",
+	"api-request-blob", "api-request", "api-request-shape",
+	"last-prompt", "mode", "permission-mode", "atis-latch", "ai-title",
+	"tools-used", "cost-state", "agent-name",
 }
 
 // OtherType is the type label value of a record type not in KnownRecordTypes.
@@ -864,6 +867,9 @@ WHERE EXISTS(SELECT 1 FROM unknown_keys u WHERE u.file_id=?1 AND u.gen=?2 AND u.
 	if err := p.clearAsk(tx, file, gen); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM blob_hashes WHERE rec_id IN (SELECT id FROM records WHERE file_id=?1 AND gen=?2)`, file, gen); err != nil {
+		return err
+	}
 	for _, s := range stmts {
 		if _, err := tx.Exec(s, file, gen); err != nil {
 			return err
@@ -1087,6 +1093,19 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		if err != nil {
 			return err
 		}
+		// A blob already kept for this session is not stored again.
+		blobHash := ""
+		if src.Name() == blobSource && r.Type == blobType && r.Item == source.ItemLine {
+			blobHash = fieldS(r, blobHashField)
+			var dup int
+			if blobHash != "" {
+				if err := tx.QueryRow(`SELECT 1 FROM blob_hashes WHERE session_ref=? AND hash=?`, ref, blobHash).Scan(&dup); err == nil {
+					continue
+				} else if err != sql.ErrNoRows {
+					return err
+				}
+			}
+		}
 		var res sql.Result
 		if p.cfg.Store.HasSessionText() {
 			res, err = tx.ExecL(tblRecords, `INSERT INTO records(file_id,gen,off,item,len,source,type,parser_version,session,time_ns,session_ref,cwd_id,branch_id,version_id,entrypoint_id,user_type_id,own_time) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -1109,6 +1128,11 @@ func (p *Parser) insert(tx *pstx, f store.File, src source.Source, caps source.C
 		tx.noteSession(ref, tns, f.ID, lk)
 		tx.noteFileFact(f.ID, tns, caps)
 		id, _ := res.LastInsertId()
+		if blobHash != "" {
+			if _, err := tx.Exec(`INSERT OR IGNORE INTO blob_hashes(session_ref,hash,rec_id) VALUES(?,?,?)`, ref, blobHash, id); err != nil {
+				return err
+			}
+		}
 		var extRows map[int]*extRow
 		for _, fl := range r.Fields {
 			if fl.Kind.Searchable() {

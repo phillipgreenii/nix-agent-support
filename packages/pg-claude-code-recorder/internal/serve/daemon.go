@@ -668,6 +668,7 @@ func (d *Daemon) StartCtx(ctx context.Context) error {
 	d.goLoop("lag_reconcile", d.lagReconcileLoop)
 	d.goLoop("file_facts", d.fileFactsLoop)
 	d.goLoop("ask_facts", d.askFactsLoop)
+	d.goLoop("blob_prune", d.blobPruneLoop)
 	d.statusLoopOn.Store(true)
 	d.goLoop("status", d.statusLoop)
 	d.goLoop("wal_checkpoint", d.walCheckpointLoop)
@@ -1129,6 +1130,42 @@ func (d *Daemon) askFactsLoop() {
 			return
 		default:
 			wait = askFactsGap
+		}
+	}
+}
+
+const (
+	blobPruneStart = 90 * time.Second
+	blobPruneGap   = 2 * time.Second
+	blobPruneWait  = 10 * time.Minute
+)
+
+// blobPruneLoop removes the child records stored before an api-request-blob
+// line became one opaque row, one bounded write transaction per pass, then
+// stops once none are left.
+func (d *Daemon) blobPruneLoop() {
+	wait := blobPruneStart
+	for {
+		tick, stop := d.timer("blob_prune", wait)
+		select {
+		case <-d.stop:
+			stop()
+			return
+		case <-tick:
+		}
+		stop()
+		ctx, cancel := context.WithCancel(d.rootCtx())
+		n, err := d.prs.PruneBlobChildren(ctx, parser.BlobPruneSlice)
+		cancel()
+		switch {
+		case err != nil:
+			d.obs.Log.Warn("blob_prune_failed", "err", err.Error())
+			wait = blobPruneWait
+		case n == 0:
+			d.obs.Event("blob_prune_done")
+			return
+		default:
+			wait = blobPruneGap
 		}
 	}
 }
