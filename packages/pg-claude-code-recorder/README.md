@@ -4,6 +4,15 @@ The recorder for Claude Code state (docket `pg2-v77tsx`; design
 `docs/superpowers/specs/2026-10-30-pg-claude-code-recorder-design.md`). The sections below
 follow the phases as they landed.
 
+## Derived facts (access rule amendment)
+
+Behavior line: the recorder serves a derived fact only when it is a deterministic aggregate of
+evidence it already holds, comes with the evidence-level query that returns the rows it counts or
+totals, and carries no interpretation; labels, thresholds and "needs attention" judgements stay in
+clients. The facts it serves today are listed in the decision numbered 6 of
+`docs/adr/0115-pg-claude-code-recorder-domain-model-and-access-rule.md` in this repository; a fact
+not on that list needs its own amendment, and the recorder has no general projection plug-in.
+
 ## Packaging
 
 A Go module built with `mkGoApp` (Pattern A, `.claude/rules/package-versioning.md`),

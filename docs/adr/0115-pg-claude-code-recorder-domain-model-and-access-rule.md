@@ -44,6 +44,35 @@ without context, a real alternative existed), so they are recorded here. The des
    are not built. A `conversation` or `process` capability is added only if discovery finds a caller
    of the backend's `search`, `activity` or `attention` capabilities that needs it. This amends
    `phillipgreenii-nix-agent-support` ADR 0062's capability list and the pg-connector behavior docs.
+6. **Derived facts in the recorder (amendment of 2026-11-18; amends decisions 1 and 4).** Operator
+   ruling (Phillip, 2026-11-17, on the recorder): "(a) allow derived facts such as counts and
+   totals, with interpretation staying in clients (ruling 14), and amend ADR 0115 accordingly."
+   Decision 1 says the recorder stores end evidence and a client derives the labels, and decision 4
+   says any tool MAY read the recorder directly; both are read together with this decision. The
+   recorder MAY serve a derived fact when the fact is (a) an aggregate that is a deterministic
+   function of evidence the recorder already holds, such as a count or a total, (b) accompanied by
+   the evidence-level query that still returns the rows it aggregates, and (c) free of
+   interpretation. Interpretation stays in clients: a label such as "crashed" or "resumable", a
+   threshold, and any "needs attention" judgement. Each derived fact the recorder serves MUST be
+   listed here with the query that serves it, and a fact not on the list needs its own amendment.
+   The recorder does not grow a general projection plug-in in this step; this amendment only
+   legalizes the facts the recorder already serves or is asked to serve.
+
+   Derived facts served today (the evidence-level query is the one that returns the rows):
+
+   | Derived fact                                                                                                                 | Served by                                                                                                        | Evidence-level query                                                               |
+   | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+   | Counts, sums, minima, maxima and averages of record fields, grouped by chosen fields                                         | the `query` operation with aggregates                                                                            | the same `query` operation without aggregates, same `where`                        |
+   | Newest record time of each file                                                                                              | the `files.inventory` operation                                                                                  | the `query` operation over the records of those files                              |
+   | Pipeline counts: files, held, settled, removed, removed Conversations, bad lines, unknown keys, unparsed kinds, largest lags | the `coverage` operation (summary view) and the `stage_counts`, `parser_versions` and `held` figures of `status` | `coverage` with the files view, and the `held` operation                           |
+   | Files copied, parsed and total of the first-run backfill                                                                     | the `backfill` figure of `status` and `coverage`                                                                 | `coverage` with the files view                                                     |
+   | Whether a session has an unanswered question among its newest 50 `AskUserQuestion` tool uses (`awaiting_input`)              | the `sessions.facts` operation                                                                                   | the `query` operation for the `tool_use` and `tool_result` records of that session |
+
+   Exception recorded, not legalized: the `crashed_recent` and `suspected_recent` figures of
+   `status` count Conversations by an end label the daemon computes, which is an interpretation
+   under condition (c). They exist from an earlier step; this amendment does not add them to the
+   list, and moving the label and its count into clients (the crash query stays as the evidence)
+   needs its own change.
 
 ## Consequences
 
