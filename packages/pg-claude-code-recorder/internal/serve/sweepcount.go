@@ -32,6 +32,11 @@ type sweepSeen struct {
 	caught map[string]caughtUp
 }
 
+// seenOf keeps the device number on purpose: a device-only change (a reboot)
+// still reports reason="ino" and the path is ingested once more, which for an
+// append file re-stamps the stored row's identity (copier restampDevice) and
+// copies nothing, and for a snapshot file does the same through TIdent. The
+// next walk then sees the new device in both the seen table and the row.
 func seenOf(fi watcher.FileInfo) seenFile {
 	var birth int64
 	if !fi.Birth.IsZero() {

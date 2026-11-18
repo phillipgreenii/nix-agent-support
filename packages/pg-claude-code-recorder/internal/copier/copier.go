@@ -273,7 +273,39 @@ func (c *Copier) resolveAppend(path string, id Identity, size int64, src *os.Fil
 		}
 		return f, c.addPath(f, path)
 	}
+	if f, ok, err := c.restampDevice(path, id, fh); err != nil || ok {
+		return f, err
+	}
 	return c.createFile(path, id, source, string(scope.Append), "", fh)
+}
+
+// restampDevice handles an append file whose device number changed under it (a
+// reboot or a remount: the inode and birth time stay, the device does not). When
+// the row that currently holds path is a live append row with the same inode and
+// birth time and only the device differs (and the first-bytes hashes agree when
+// both are set), the row's identity is re-stamped with a TIdent record and the
+// row is returned, so its generation continues instead of a second row starting
+// generation 1 and re-cloning the file. A path whose inode or birth time changed
+// is a replacement and is not handled here.
+func (c *Copier) restampDevice(path string, id Identity, fh uint64) (store.File, bool, error) {
+	holders, err := c.st.FilesByCurrentPath(path)
+	if err != nil {
+		return store.File{}, false, err
+	}
+	for _, h := range holders {
+		if h.Mode != string(scope.Append) || h.State == "deleted" || h.Ino != id.Ino || h.Birth != id.Birth || h.Dev == id.Dev {
+			continue
+		}
+		if h.FirstHash != 0 && fh != 0 && h.FirstHash != fh {
+			continue
+		}
+		if err := c.commit(&store.Rec{T: store.TIdent, At: c.now(), File: h.ID, Dev: id.Dev, Ino: id.Ino, Birth: id.Birth}); err != nil {
+			return store.File{}, false, err
+		}
+		f, err := c.st.File(h.ID)
+		return f, true, err
+	}
+	return store.File{}, false, nil
 }
 
 // addPath records path as naming f and closes f's other paths that no longer
