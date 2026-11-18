@@ -1,10 +1,11 @@
 schema = 3
 cachePackages = [
-  'github.com/phillipgreenii/x/exitcode',
   'github.com/dustin/go-humanize',
   'github.com/google/uuid',
   'github.com/mattn/go-isatty',
   'github.com/ncruces/go-strftime',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen',
+  'github.com/phillipgreenii/x/exitcode',
   'github.com/remyoudompheng/bigfft',
   'github.com/spf13/cobra',
   'github.com/spf13/pflag',
