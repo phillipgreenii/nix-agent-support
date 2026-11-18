@@ -1,5 +1,7 @@
 schema = 3
-cachePackages = [ 'github.com/phillipgreenii/x/exitcode' ]
+cachePackages = [
+  'github.com/phillipgreenii/x/exitcode'
+]
 
 [mod]
   [mod.'github.com/phillipgreenii/x']
