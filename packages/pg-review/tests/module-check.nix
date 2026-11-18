@@ -272,7 +272,7 @@ pkgs.runCommand "pg-review-module"
     printf '[[scope]]\nname = "s"\n' > "$cfgHome/pg-review/config.toml"
     rc=0
     pg-review job doctor --config-only > bad.txt 2>&1 || rc=$?
-    [ "$rc" = 4 ] || { echo "FAIL: doctor accepted a scope with no prefix (exit $rc):" >&2; cat bad.txt >&2; exit 1; }
+    [ "$rc" = 7 ] || { echo "FAIL: doctor accepted a scope with no prefix (exit $rc):" >&2; cat bad.txt >&2; exit 1; }
 
     # --- File 2: the generated router stanza text ----------------------------
     yq -p toml -o json ${sampleOpts.routerConfigFile} > router.json
