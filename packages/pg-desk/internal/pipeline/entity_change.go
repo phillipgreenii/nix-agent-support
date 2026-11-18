@@ -3,6 +3,7 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -154,10 +155,12 @@ type EntityChangeResult struct {
 // Step order, pinned so no link_changed is lost: (1) gather and interpret;
 // (2) derive the new link set in memory and diff it against the entity's
 // current derived links, once, across retries; (3) the compare-and-set loop;
-// (4) only after the commit, the other-entity records, the propagation
+// (4) inside the SAME transaction as the entity write, its change row and
+// (on a feed row) the feed marker: the other-entity records, the propagation
 // records, the interpretation row and, LAST, the derived-link replacement. A
-// crash inside (4) MAY duplicate a link_changed on the next hydration (the
-// diff is recomputed against the unreplaced set) but never loses one.
+// failure in (4) rolls the whole write back, so a retry (or a redelivered feed
+// row, whose marker did not advance) redoes all of it and no link_changed is
+// lost or duplicated.
 func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID string, change gather.ChangeKind, opts EntityChangeOptions) (EntityChangeResult, error) {
 	if err := p.store.RequireNewSchema(ctx); err != nil {
 		return EntityChangeResult{}, err
@@ -373,7 +376,15 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		if opts.KeepActive && found {
 			active = !row.Inactive
 		}
+		pc := postCommit{
+			observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
+			interp: interpRow, contentHash: newSnap.ContentHash, haveLinks: haveLinks, newLinks: newLinks,
+		}
+		if pc.targets, err = p.localRecordTargets(ctx, repo, entityType, entityID, pc); err != nil {
+			return casPlan{}, err
+		}
 		return casPlan{
+			post: &pc,
 			entity: store.Entity{
 				Repo: repo, EntityType: entityType, EntityID: entityID,
 				Facts: string(factsJSON), AsOf: asOf, ContentHash: newSnap.ContentHash, HeadSHA: headSHA,
@@ -393,19 +404,10 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		return res, fmt.Errorf("pipeline: write %s %s: still losing the version race after %d retries: %w", entityType, entityID, cr.retries, cr.conflict)
 	}
 	res.Kinds, res.Version, res.Written = lastKinds, cr.version, true
-
-	// (4) after the commit: local records for other entities, the
-	// interpretation, and the derived-link replacement LAST.
-	if err := p.finishEntityChange(ctx, repo, entityType, entityID, postCommit{
-		observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
-		interp: interpRow, contentHash: newSnap.ContentHash, haveLinks: haveLinks, newLinks: newLinks,
-	}); err != nil {
-		return res, err
-	}
 	return res, nil
 }
 
-// postCommit carries what the steps after an entity's commit need.
+// postCommit carries what the steps after an entity's write need.
 type postCommit struct {
 	observed   bool
 	propagate  bool
@@ -414,73 +416,108 @@ type postCommit struct {
 	at         string
 	interp     store.Interpretation
 	// contentHash is the entity.content_hash the interpretation was derived
-	// from (the hash just committed); the interpretation write is skipped only
+	// from (the hash just written); the interpretation write is skipped only
 	// when the stored hash differs.
 	contentHash string
 	haveLinks   bool
 	newLinks    []store.XrefLink
+	// recordsOnly runs the local-records step alone (a removed feed row has no
+	// new snapshot, interpretation or links).
+	recordsOnly bool
+	// targets are the records the local-records step appends, resolved by
+	// localRecordTargets BEFORE the transaction opens (it reads through the
+	// pool, which a transaction in progress would block).
+	targets []classify.Targeted
 }
 
-// finishEntityChange runs the steps that follow the entity's own commit, in
-// the pinned order: the other-entity and propagation records, the
-// interpretation row and, LAST, the derived-link replacement. RunEntityChange
-// and IngestFeedRow both call it.
-func (p *Pipeline) finishEntityChange(ctx context.Context, repo, entityType, entityID string, pc postCommit) error {
-	if h := p.seams.beforeFinish; h != nil {
-		if err := h(); err != nil {
-			return err
+// finishEntityChange runs the steps that follow the entity's own write, in
+// the pinned order, INSIDE the transaction of that write (the post hook of
+// commitCAS): the other-entity and propagation records, the interpretation
+// row and, LAST, the derived-link replacement. A failure returns the error and
+// the caller's transaction rolls all of it back together with the entity, its
+// change row and the feed marker. RunEntityChange and IngestFeedRow both reach
+// it through commitCAS.
+func (p *Pipeline) finishEntityChange(ctx context.Context, tx *sql.Tx, repo, entityType, entityID string, pc postCommit) error {
+	if !pc.recordsOnly {
+		if h := p.seams.beforeFinish; h != nil {
+			if err := h(); err != nil {
+				return err
+			}
 		}
 	}
-	if err := p.appendLocalRecords(ctx, repo, entityType, entityID, pc.observed, pc.propagate, pc.otherLinks, pc.own, pc.at); err != nil {
+	if err := p.appendLocalRecords(ctx, tx, repo, pc); err != nil {
 		return err
 	}
-	if err := p.writeInterpretation(ctx, pc.interp, pc.contentHash); err != nil {
+	if pc.recordsOnly {
+		return nil
+	}
+	if h := p.seams.beforeInterpretationWrite; h != nil {
+		if err := h(); err != nil {
+			return fmt.Errorf("pipeline: persist interpretation %s %s: %w", entityType, entityID, err)
+		}
+	}
+	if err := p.writeInterpretationTx(ctx, tx, pc.interp, pc.contentHash); err != nil {
 		return fmt.Errorf("pipeline: persist interpretation %s %s: %w", entityType, entityID, err)
 	}
 	if pc.haveLinks {
-		if err := p.store.ReplaceDerivedXrefs(ctx, repo, entityType, entityID, pc.newLinks); err != nil {
+		if h := p.seams.beforeLinkReplace; h != nil {
+			if err := h(); err != nil {
+				return fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
+			}
+		}
+		if err := p.store.ReplaceDerivedXrefsTx(ctx, tx, repo, entityType, entityID, pc.newLinks); err != nil {
 			return fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
 		}
 	}
 	return nil
 }
 
-// appendLocalRecords appends, at origin pg-desk, the link records naming the
-// OTHER entity of each changed link and, when the entity's own change was a
-// non-reconcile one, the one-hop propagation records for the entities linked
-// to it. Each (entity, kind) is appended at most once per call; an entity with
-// no row is skipped. An unobserved hydration appends nothing.
-func (p *Pipeline) appendLocalRecords(ctx context.Context, repo, entityType, entityID string, observed, propagate bool, otherLinks []classify.Targeted, own classify.WorkLookup, at string) error {
-	if h := p.seams.appendLocalRecords; h != nil {
-		if err := h(); err != nil {
-			return err
-		}
+// localRecordTargets resolves, outside any transaction, the records the
+// local-records step appends: the link records naming the OTHER entity of each
+// changed link and, when the entity's own change was a non-reconcile one, the
+// one-hop propagation records for the entities linked to it, each (entity,
+// kind) at most once. An unobserved hydration has none.
+func (p *Pipeline) localRecordTargets(ctx context.Context, repo, entityType, entityID string, pc postCommit) ([]classify.Targeted, error) {
+	if !pc.observed {
+		return nil, nil
 	}
-	if !observed {
-		return nil
-	}
-	targets := otherLinks
-	if propagate {
+	targets := pc.otherLinks
+	if pc.propagate {
 		from, err := p.store.ListXrefLinksFrom(ctx, repo, entityType, entityID)
 		if err != nil {
-			return fmt.Errorf("pipeline: propagate %s %s: %w", entityType, entityID, err)
+			return nil, fmt.Errorf("pipeline: propagate %s %s: %w", entityType, entityID, err)
 		}
 		to, err := p.store.ListXrefLinksTo(ctx, repo, entityType, entityID)
 		if err != nil {
-			return fmt.Errorf("pipeline: propagate %s %s: %w", entityType, entityID, err)
+			return nil, fmt.Errorf("pipeline: propagate %s %s: %w", entityType, entityID, err)
 		}
 		targets = append(append([]classify.Targeted(nil), targets...),
-			classify.PropagationRecords(entityType, entityID, append(from, to...), own)...)
+			classify.PropagationRecords(entityType, entityID, append(from, to...), pc.own)...)
 	}
 	type key struct{ t, id, kind string }
 	done := map[key]bool{}
+	var out []classify.Targeted
 	for _, t := range targets {
 		k := key{t.EntityType, t.EntityID, string(t.Kind)}
 		if done[k] {
 			continue
 		}
 		done[k] = true
-		if _, err := p.store.AppendEntityChange(ctx, repo, t.EntityType, t.EntityID, []string{string(t.Kind)}, localChangeOrigin, at); err != nil && !errors.Is(err, store.ErrNoEntity) {
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+// appendLocalRecords appends, at origin pg-desk and inside tx, the records
+// localRecordTargets resolved; an entity with no row is skipped.
+func (p *Pipeline) appendLocalRecords(ctx context.Context, tx *sql.Tx, repo string, pc postCommit) error {
+	if h := p.seams.appendLocalRecords; h != nil {
+		if err := h(); err != nil {
+			return err
+		}
+	}
+	for _, t := range pc.targets {
+		if _, err := p.store.AppendEntityChangeTx(ctx, tx, repo, t.EntityType, t.EntityID, []string{string(t.Kind)}, localChangeOrigin, pc.at); err != nil && !errors.Is(err, store.ErrNoEntity) {
 			return fmt.Errorf("pipeline: append %s for %s %s: %w", t.Kind, t.EntityType, t.EntityID, err)
 		}
 	}

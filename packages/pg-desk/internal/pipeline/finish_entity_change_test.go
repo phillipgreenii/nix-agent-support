@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -43,11 +44,25 @@ func finishPipeline(t *testing.T) *Pipeline {
 	return p
 }
 
+// runFinish drives finishEntityChange the way commitCAS does: targets resolved
+// first, then the steps inside one transaction.
+func runFinish(p *Pipeline, entityType, id string, pc postCommit) error {
+	ctx := context.Background()
+	targets, err := p.localRecordTargets(ctx, ecRepo, entityType, id, pc)
+	if err != nil {
+		return err
+	}
+	pc.targets = targets
+	return p.store.InTx(ctx, func(tx *sql.Tx) error {
+		return p.finishEntityChange(ctx, tx, ecRepo, entityType, id, pc)
+	})
+}
+
 // The pinned order is: local records, then the interpretation, then the
 // derived links LAST. A full success leaves all three written.
 func TestFinishEntityChange_SuccessWritesInterpretationThenLinks(t *testing.T) {
 	p := finishPipeline(t)
-	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
+	err := runFinish(p, "issue", "i-1", postCommit{
 		interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if err != nil {
@@ -69,7 +84,7 @@ func TestFinishEntityChange_NoLinksFlagLeavesStoredLinksAlone(t *testing.T) {
 	if err := p.store.ReplaceDerivedXrefs(context.Background(), ecRepo, "issue", "i-1", []store.XrefLink{finishLink("i-1")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A"), contentHash: finishHash}); err != nil {
+	if err := runFinish(p, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A"), contentHash: finishHash}); err != nil {
 		t.Fatal(err)
 	}
 	if links, _ := p.store.ListXrefLinksFrom(context.Background(), ecRepo, "issue", "i-1"); len(links) != 1 {
@@ -81,10 +96,9 @@ func TestFinishEntityChange_NoLinksFlagLeavesStoredLinksAlone(t *testing.T) {
 // links (the LAST step) are not replaced.
 func TestFinishEntityChange_InterpretationWriteFailureSkipsTheLinks(t *testing.T) {
 	p := finishPipeline(t)
-	bad := finishInterp("i-1", "A")
-	_ = p.store.Close() // a real store failure
-	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
-		interp: bad, contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
+	failStoreWrites(t, p.store, "INSERT", "interpretation") // a real store failure
+	err := runFinish(p, "issue", "i-1", postCommit{
+		interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if err == nil || !strings.Contains(err.Error(), "persist interpretation issue i-1") {
 		t.Fatalf("err = %v, want a persist interpretation error", err)
@@ -98,18 +112,18 @@ func TestFinishEntityChange_InterpretationWriteFailureSkipsTheLinks(t *testing.T
 }
 
 // A link-replacement failure is wrapped, and the interpretation row (written
-// before it) stays: the order is pinned.
-func TestFinishEntityChange_LinkFailureKeepsTheInterpretation(t *testing.T) {
+// before it, in the same transaction) is rolled back with it: all or none.
+func TestFinishEntityChange_LinkFailureRollsBackTheInterpretation(t *testing.T) {
 	p := finishPipeline(t)
 	wrong := finishLink("another-entity") // does not start from i-1: the store refuses it
-	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
+	err := runFinish(p, "issue", "i-1", postCommit{
 		interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{wrong},
 	})
 	if err == nil || !strings.Contains(err.Error(), "links issue i-1") {
 		t.Fatalf("err = %v, want a links error", err)
 	}
-	if got, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); !found || got.AsOf != "A" {
-		t.Fatalf("interpretation = %+v found=%v, want it stored before the links step", got, found)
+	if got, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); found {
+		t.Fatalf("interpretation = %+v, want none: it rolls back with the failed link step", got)
 	}
 }
 
@@ -119,7 +133,7 @@ func TestFinishEntityChange_LocalRecordsFailureStopsTheLaterSteps(t *testing.T) 
 	p := finishPipeline(t)
 	boom := errors.New("injected local records failure")
 	p.seams.appendLocalRecords = func() error { return boom }
-	err := p.finishEntityChange(context.Background(), ecRepo, "issue", "i-1", postCommit{
+	err := runFinish(p, "issue", "i-1", postCommit{
 		observed: true, interp: finishInterp("i-1", "A"), contentHash: finishHash, haveLinks: true, newLinks: []store.XrefLink{finishLink("i-1")},
 	})
 	if !errors.Is(err, boom) {
@@ -133,9 +147,10 @@ func TestFinishEntityChange_LocalRecordsFailureStopsTheLaterSteps(t *testing.T) 
 	}
 }
 
-// The beforeFinish seam sits in the gap after the entity commit: an error
-// there leaves the committed entity but no interpretation, from either caller.
-func TestFinishEntityChange_GapFailureLeavesTheCommittedEntityWithoutAnInterpretation(t *testing.T) {
+// The beforeFinish seam runs inside the entity's own transaction: an error
+// there leaves NOTHING (no entity, interpretation or marker), from either
+// caller.
+func TestFinishEntityChange_FailureLeavesNothingFromEitherCaller(t *testing.T) {
 	var gerr error
 	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", nil)
 	p := ecPipeline(t, &res, &gerr)
@@ -146,11 +161,11 @@ func TestFinishEntityChange_GapFailureLeavesTheCommittedEntityWithoutAnInterpret
 	if !errors.Is(err, boom) {
 		t.Fatalf("RunEntityChange err = %v, want the injected failure", err)
 	}
-	if e, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); !found || e.Version == 0 {
-		t.Fatalf("entity = %+v found=%v, want the commit to stand", e, found)
+	if _, found, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); found {
+		t.Fatal("the entity committed although a post-commit step failed")
 	}
 	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); found {
-		t.Fatal("an interpretation was written despite the gap failure")
+		t.Fatal("an interpretation was written despite the failure")
 	}
 
 	// The same seam is reached from the feed-row path.
@@ -158,6 +173,12 @@ func TestFinishEntityChange_GapFailureLeavesTheCommittedEntityWithoutAnInterpret
 	fp.seams.beforeFinish = func() error { return boom }
 	if _, err := fp.IngestFeedRow(context.Background(), frRow(1, "i-1", "title_changed")); !errors.Is(err, boom) {
 		t.Fatalf("IngestFeedRow err = %v, want the injected failure", err)
+	}
+	if _, found, _ := fp.store.GetEntity(context.Background(), ecRepo, "issue", "i-1"); found {
+		t.Fatal("the feed row's entity committed although a post-commit step failed")
+	}
+	if _, ok, _ := fp.store.FeedMarker(context.Background(), frInstance); ok {
+		t.Fatal("the feed marker advanced although a post-commit step failed")
 	}
 }
 

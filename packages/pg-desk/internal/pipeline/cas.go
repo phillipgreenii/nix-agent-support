@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -18,6 +19,9 @@ type casPlan struct {
 	kinds      []string
 	origin, at string
 	opts       store.WriteOptions
+	// post, when non-nil, is what runs after the entity write inside the same
+	// transaction (finishEntityChange): a failure rolls the whole write back.
+	post *postCommit
 	// skip ends the loop without a write (the caller decides what that means).
 	skip bool
 }
@@ -46,7 +50,10 @@ type casResult struct {
 // times. A store error other than a version conflict, a read error and a
 // cancelled context are returned as errors; an exhausted loop is reported in
 // the result, because the callers treat it differently (RunEntityChange fails,
-// a feed row records a failed ingest).
+// a feed row records a failed ingest). When the plan carries a post step, it
+// runs inside the write's transaction, so the entity, its change row, the feed
+// marker and the post step commit together or not at all (a post failure is
+// returned as the write's error and nothing is written).
 func (p *Pipeline) commitCAS(ctx context.Context, repo, entityType, entityID string, maxRetries int, seam func(attempt int), plan func(cur store.Entity, found bool) (casPlan, error)) (casResult, error) {
 	var res casResult
 	for attempt := 0; ; attempt++ {
@@ -73,7 +80,14 @@ func (p *Pipeline) commitCAS(ctx context.Context, repo, entityType, entityID str
 		if seam != nil {
 			seam(attempt)
 		}
-		v, werr := p.store.WriteEntityStateWithLogOpts(ctx, cp.entity, expected, cp.hydratedAt, cp.active, cp.listFP, cp.kinds, cp.origin, cp.at, cp.opts)
+		wopts := cp.opts
+		if cp.post != nil {
+			post := *cp.post
+			wopts.InTx = func(ctx context.Context, tx *sql.Tx) error {
+				return p.finishEntityChange(ctx, tx, repo, entityType, entityID, post)
+			}
+		}
+		v, werr := p.store.WriteEntityStateWithLogOpts(ctx, cp.entity, expected, cp.hydratedAt, cp.active, cp.listFP, cp.kinds, cp.origin, cp.at, wopts)
 		if werr == nil {
 			res.version, res.written = v, true
 			return res, nil

@@ -323,13 +323,37 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 	}
 	own := classify.NewStoreWorkLookup(ctx, p.store, repo)
 
-	cr, err := p.commitCAS(ctx, repo, issueEntityType, c.entityID, defaultEntityChangeRetries, p.seams.beforeCASWrite, func(store.Entity, bool) (casPlan, error) {
+	cr, err := p.commitCAS(ctx, repo, issueEntityType, c.entityID, defaultEntityChangeRetries, p.seams.beforeCASWrite, func(cur store.Entity, found bool) (casPlan, error) {
+		// A reset replay is a first observation: nothing propagates from it.
+		observed := !c.replay && found && !cur.Inactive && (cur.Version != 0 || cur.HydratedAt != "")
+		propagate := false
+		for _, k := range c.kinds {
+			if k != string(classify.KindReconcile) {
+				propagate = true
+			}
+		}
+		var otherLinks []classify.Targeted
+		if observed {
+			for _, tg := range classify.LinkRecords(linkChanges, own) {
+				if tg.EntityType != issueEntityType || tg.EntityID != c.entityID {
+					otherLinks = append(otherLinks, tg)
+				}
+			}
+		}
+		pc := postCommit{
+			observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
+			interp: interpRow, contentHash: hash, haveLinks: haveLinks, newLinks: newLinks,
+		}
+		var terr error
+		if pc.targets, terr = p.localRecordTargets(ctx, repo, issueEntityType, c.entityID, pc); terr != nil {
+			return casPlan{}, terr
+		}
 		return casPlan{
 			entity: store.Entity{
 				Repo: repo, EntityType: issueEntityType, EntityID: c.entityID,
 				Facts: string(factsJSON), AsOf: asOf, ContentHash: hash, HeadSHA: headSHA,
 			},
-			hydratedAt: at, active: active, kinds: c.kinds, origin: c.origin, at: at, opts: opts,
+			hydratedAt: at, active: active, kinds: c.kinds, origin: c.origin, at: at, opts: opts, post: &pc,
 		}, nil
 	})
 	if err != nil {
@@ -338,31 +362,7 @@ func (p *Pipeline) commitFeedRow(ctx context.Context, c feedCommit) (feedOutcome
 	if cr.exhausted {
 		return feedOutcome{failure: "still losing the version race"}, nil
 	}
-	version, cur, found := cr.version, cr.cur, cr.found
-
-	// A reset replay is a first observation: nothing propagates from it.
-	observed := !c.replay && found && !cur.Inactive && (cur.Version != 0 || cur.HydratedAt != "")
-	propagate := false
-	for _, k := range c.kinds {
-		if k != string(classify.KindReconcile) {
-			propagate = true
-		}
-	}
-	var otherLinks []classify.Targeted
-	if observed {
-		for _, tg := range classify.LinkRecords(linkChanges, own) {
-			if tg.EntityType != issueEntityType || tg.EntityID != c.entityID {
-				otherLinks = append(otherLinks, tg)
-			}
-		}
-	}
-	if err := p.finishEntityChange(ctx, repo, issueEntityType, c.entityID, postCommit{
-		observed: observed, propagate: propagate, otherLinks: otherLinks, own: own, at: at,
-		interp: interpRow, contentHash: hash, haveLinks: haveLinks, newLinks: newLinks,
-	}); err != nil {
-		return feedOutcome{}, err
-	}
-	return feedOutcome{written: true, version: version}, nil
+	return feedOutcome{written: true, version: cr.version}, nil
 }
 
 // commitRemovedFeedRow commits a removed row whose pinned read answered not
@@ -378,7 +378,18 @@ func (p *Pipeline) commitRemovedFeedRow(ctx context.Context, c feedCommit, repo,
 		if hydratedAt == "" {
 			hydratedAt = at
 		}
+		own := classify.NewStoreWorkLookup(ctx, p.store, repo)
+		pc := postCommit{
+			recordsOnly: true, at: at, own: own,
+			observed:  !c.replay && !cur.Inactive && (cur.Version != 0 || cur.HydratedAt != ""),
+			propagate: len(c.kinds) > 0,
+		}
+		var terr error
+		if pc.targets, terr = p.localRecordTargets(ctx, repo, issueEntityType, c.entityID, pc); terr != nil {
+			return casPlan{}, terr
+		}
 		return casPlan{
+			post: &pc,
 			entity: store.Entity{
 				Repo: repo, EntityType: issueEntityType, EntityID: c.entityID,
 				Facts: cur.Facts, AsOf: cur.AsOf, ContentHash: cur.ContentHash, HeadSHA: cur.HeadSHA,
@@ -399,12 +410,6 @@ func (p *Pipeline) commitRemovedFeedRow(ctx context.Context, c feedCommit, repo,
 		return feedOutcome{}, nil
 	case cr.exhausted:
 		return feedOutcome{failure: "still losing the version race"}, nil
-	}
-	cur := cr.cur
-	own := classify.NewStoreWorkLookup(ctx, p.store, repo)
-	observed := !c.replay && !cur.Inactive && (cur.Version != 0 || cur.HydratedAt != "")
-	if err := p.appendLocalRecords(ctx, repo, issueEntityType, c.entityID, observed, len(c.kinds) > 0, nil, own, at); err != nil {
-		return feedOutcome{}, err
 	}
 	return feedOutcome{written: true, version: cr.version}, nil
 }

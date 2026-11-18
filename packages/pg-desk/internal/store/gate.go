@@ -96,6 +96,15 @@ type WriteOptions struct {
 	// in the same transaction as the entity write and its change row (see
 	// feed_marker.go); nil writes none.
 	FeedMarker *FeedMarker
+	// InTx, when non-nil, runs inside the write's transaction after the entity
+	// write, its change row, the column writes and the feed marker, and before
+	// the commit: the caller's follow-on writes (propagation records, the
+	// interpretation row, the derived links) commit or roll back WITH them. An
+	// error aborts and rolls back the whole write. It MUST use only tx (the
+	// pool holds one connection, so a pool call would deadlock) and MUST NOT
+	// start or end the transaction. It runs once per attempt, and a lost race
+	// returns before it runs.
+	InTx func(ctx context.Context, tx *sql.Tx) error
 }
 
 func (o WriteOptions) isZero() bool {

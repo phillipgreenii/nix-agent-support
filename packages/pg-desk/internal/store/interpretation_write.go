@@ -142,6 +142,49 @@ func (s *Store) WriteInterpretation(ctx context.Context, row Interpretation, opt
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
+	res, err := s.writeInterpretationBody(ctx, tx, row, opts, haveStamp, stamp)
+	if err != nil || res.Skipped {
+		return res, err
+	}
+	if err := s.interpStep(StepCommit); err != nil {
+		return InterpretationWriteResult{}, wrap(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return InterpretationWriteResult{}, wrap(err)
+	}
+	return res, nil
+}
+
+// WriteInterpretationTx is WriteInterpretation inside the caller's
+// transaction (the entity's own write): it begins and commits nothing and uses
+// only tx, never the pool (which holds one connection). The caller has checked
+// the schema. Every other rule of WriteInterpretation holds, including the
+// skip when the stored content_hash differs from opts.ExpectedHash.
+func (s *Store) WriteInterpretationTx(ctx context.Context, tx *sql.Tx, row Interpretation, opts InterpretationWriteOptions) (InterpretationWriteResult, error) {
+	wrap := func(err error) error {
+		return fmt.Errorf("store: write interpretation (%s,%s,%s): %w", row.Repo, row.EntityType, row.EntityID, err)
+	}
+	stamp := s.InterpStamp()
+	if opts.RequireStamp && stamp == "" {
+		return InterpretationWriteResult{}, wrap(ErrStampRequired)
+	}
+	var haveStamp bool
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) > 0 FROM pragma_table_info('interpretation') WHERE name = ?`, interpStampColumn,
+	).Scan(&haveStamp); err != nil {
+		return InterpretationWriteResult{}, wrap(err)
+	}
+	return s.writeInterpretationBody(ctx, tx, row, opts, haveStamp, stamp)
+}
+
+// writeInterpretationBody is the lock, compare, read-old, upsert and
+// change-record steps of WriteInterpretation inside tx; the commit is the
+// caller's. A Skipped result wrote nothing.
+func (s *Store) writeInterpretationBody(ctx context.Context, tx *sql.Tx, row Interpretation, opts InterpretationWriteOptions, haveStamp bool, stamp string) (InterpretationWriteResult, error) {
+	wrap := func(err error) error {
+		return fmt.Errorf("store: write interpretation (%s,%s,%s): %w", row.Repo, row.EntityType, row.EntityID, err)
+	}
 	version, hash, err := s.lockEntity(ctx, tx, row.Repo, row.EntityType, row.EntityID)
 	if err != nil {
 		return InterpretationWriteResult{}, wrap(err)
@@ -189,12 +232,6 @@ func (s *Store) WriteInterpretation(ctx context.Context, row Interpretation, opt
 			return InterpretationWriteResult{}, wrap(err)
 		}
 		res.Recorded = true
-	}
-	if err := s.interpStep(StepCommit); err != nil {
-		return InterpretationWriteResult{}, wrap(err)
-	}
-	if err := tx.Commit(); err != nil {
-		return InterpretationWriteResult{}, wrap(err)
 	}
 	return res, nil
 }

@@ -228,6 +228,28 @@ func openReadOnly(path string, conns int) (*Store, error) {
 	return &Store{sql: sqlDB, path: path}, nil
 }
 
+// InTx runs fn inside one transaction and commits it when fn returns nil; an
+// error from fn rolls it back and is returned. fn MUST use only tx (the pool
+// holds one connection). It exists for the follow-on writes of a hydration
+// (see WriteOptions.InTx) and for tests that drive them alone.
+func (s *Store) InTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	if err := s.RequireNewSchema(ctx); err != nil {
+		return err
+	}
+	tx, err := s.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit: %w", err)
+	}
+	return nil
+}
+
 // Path returns the database file the store was opened on, so a caller that
 // needs a second handle on the same file (concurrent writers in a test) can
 // open one.

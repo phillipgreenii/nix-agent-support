@@ -438,7 +438,7 @@ func TestPropagationToALinkedIssueIsGatedByWatched(t *testing.T) {
 	}
 	// The PR's own change record (kinds include link_changed) propagates.
 	own := classify.NewStoreWorkLookup(context.Background(), p.store, ecRepo)
-	if err := p.appendLocalRecords(context.Background(), ecRepo, "pr", prID, true, true, nil, own, "2026-09-16T12:00:00Z"); err != nil {
+	if err := runFinish(p, "pr", prID, postCommit{recordsOnly: true, observed: true, propagate: true, own: own, at: "2026-09-16T12:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 

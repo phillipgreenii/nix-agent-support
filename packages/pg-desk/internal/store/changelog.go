@@ -219,6 +219,11 @@ func (s *Store) writeEntity(ctx context.Context, e Entity, expectedVersion int64
 			return 0, err
 		}
 	}
+	if opts.InTx != nil {
+		if err := opts.InTx(ctx, tx); err != nil {
+			return 0, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("store: write entity (%s,%s,%s): commit: %w", e.Repo, e.EntityType, e.EntityID, err)
 	}
@@ -234,17 +239,31 @@ func (s *Store) AppendEntityChange(ctx context.Context, repo, entityType, entity
 	if err := s.RequireNewSchema(ctx); err != nil {
 		return 0, err
 	}
+	tx, err := s.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("store: append entity change (%s,%s,%s): %w", repo, entityType, entityID, err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
+	seq, err := s.AppendEntityChangeTx(ctx, tx, repo, entityType, entityID, kinds, origin, at)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: append entity change (%s,%s,%s): %w", repo, entityType, entityID, err)
+	}
+	return seq, nil
+}
+
+// AppendEntityChangeTx is AppendEntityChange inside the caller's transaction:
+// it begins and commits nothing, and (like every Tx method) uses only tx, never
+// the pool, because the pool holds one connection. The caller has checked the
+// schema.
+func (s *Store) AppendEntityChangeTx(ctx context.Context, tx *sql.Tx, repo, entityType, entityID string, kinds []string, origin, at string) (int64, error) {
 	wrap := func(err error) error {
 		return fmt.Errorf("store: append entity change (%s,%s,%s): %w", repo, entityType, entityID, err)
 	}
-	tx, err := s.sql.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, wrap(err)
-	}
-	defer func() { _ = tx.Rollback() }() // no-op after Commit
-
 	var version int64
-	err = tx.QueryRowContext(
+	err := tx.QueryRowContext(
 		ctx,
 		`SELECT version FROM entity WHERE repo = ? AND entity_type = ? AND entity_id = ?`,
 		repo, entityType, entityID,
@@ -255,17 +274,10 @@ func (s *Store) AppendEntityChange(ctx context.Context, repo, entityType, entity
 	if err != nil {
 		return 0, wrap(err)
 	}
-	seq, err := s.AppendChangeLogTx(ctx, tx, ChangeRecord{
+	return s.AppendChangeLogTx(ctx, tx, ChangeRecord{
 		Repo: repo, EntityType: entityType, EntityID: entityID,
 		Version: version, Kinds: kinds, Origin: origin, At: at,
 	})
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, wrap(err)
-	}
-	return seq, nil
 }
 
 // conflict counts a lost race and builds the typed error.

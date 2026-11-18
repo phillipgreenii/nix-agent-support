@@ -25,6 +25,7 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -90,6 +91,12 @@ type testSeams struct {
 	// appendLocalRecords runs at the start of appendLocalRecords; a
 	// returned error is that function's error.
 	appendLocalRecords func() error
+	// beforeInterpretationWrite runs inside finishEntityChange just before
+	// the interpretation write; a returned error fails that step.
+	beforeInterpretationWrite func() error
+	// beforeLinkReplace runs inside finishEntityChange just before the
+	// derived-link replacement; a returned error fails that step.
+	beforeLinkReplace func() error
 	// interpretOnlyWrite runs in RunInterpretOnly just before its store
 	// write; a returned error is the store write's error.
 	interpretOnlyWrite func() error
@@ -313,6 +320,18 @@ func (p *Pipeline) writeInterpretation(ctx context.Context, row store.Interpreta
 		})
 	}
 	_, err := p.store.WriteInterpretation(ctx, row, store.InterpretationWriteOptions{ExpectedHash: hash})
+	return err
+}
+
+// writeInterpretationTx is writeInterpretation inside the entity write's
+// transaction (finishEntityChange).
+func (p *Pipeline) writeInterpretationTx(ctx context.Context, tx *sql.Tx, row store.Interpretation, hash string) error {
+	if p.store.InterpStamp() == "" {
+		unstampedWarn.Do(func() {
+			slog.Warn("pg-desk: writing an interpretation through a store handle with no stamp; the row will count as behind (a command forgot pipeline.WithStamp)")
+		})
+	}
+	_, err := p.store.WriteInterpretationTx(ctx, tx, row, store.InterpretationWriteOptions{ExpectedHash: hash})
 	return err
 }
 

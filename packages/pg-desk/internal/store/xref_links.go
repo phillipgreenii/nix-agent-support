@@ -53,6 +53,27 @@ func (s *Store) ReplaceDerivedXrefs(ctx context.Context, repo, fromType, fromID 
 	wrap := func(err error) error {
 		return fmt.Errorf("store: replace derived xrefs (%s,%s,%s): %w", repo, fromType, fromID, err)
 	}
+	tx, err := s.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return wrap(err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
+	if err := s.ReplaceDerivedXrefsTx(ctx, tx, repo, fromType, fromID, links); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return wrap(err)
+	}
+	return nil
+}
+
+// ReplaceDerivedXrefsTx is ReplaceDerivedXrefs inside the caller's
+// transaction: it begins and commits nothing and uses only tx. The caller has
+// checked the schema.
+func (s *Store) ReplaceDerivedXrefsTx(ctx context.Context, tx *sql.Tx, repo, fromType, fromID string, links []XrefLink) error {
+	wrap := func(err error) error {
+		return fmt.Errorf("store: replace derived xrefs (%s,%s,%s): %w", repo, fromType, fromID, err)
+	}
 	for _, l := range links {
 		if l.Repo != repo || l.FromType != fromType || l.FromID != fromID {
 			return wrap(fmt.Errorf("link %s,%s,%s does not start from the entity", l.Repo, l.FromType, l.FromID))
@@ -61,11 +82,6 @@ func (s *Store) ReplaceDerivedXrefs(ctx context.Context, repo, fromType, fromID 
 			return wrap(fmt.Errorf("link to (%s,%s) needs a derived:<extractor> origin (not %q) and a relation", l.ToType, l.ToID, xrefLegacyOrigin))
 		}
 	}
-	tx, err := s.sql.BeginTx(ctx, nil)
-	if err != nil {
-		return wrap(err)
-	}
-	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	type key struct{ toType, toID, relation, origin string }
 	keep := map[key]bool{}
@@ -117,9 +133,6 @@ func (s *Store) ReplaceDerivedXrefs(ctx context.Context, repo, fromType, fromID 
 		); err != nil {
 			return wrap(err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return wrap(err)
 	}
 	return nil
 }

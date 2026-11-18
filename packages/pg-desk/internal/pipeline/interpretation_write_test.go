@@ -15,13 +15,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// INV-REINTERPRET-6 and 14: the hydration's interpretation write is guarded by
-// facts identity (content_hash), never by the entity version. Several writers
-// bump the version while keeping the facts and write no interpretation: a
+// INV-REINTERPRET-6 and 14: the interpretation write is guarded by facts
+// identity (content_hash), never by the entity version. Several writers bump
+// the version while keeping the facts and write no interpretation: a
 // deactivation (changes poll's deactivateIf), a local reconcile (reconcileOne)
-// and a removed feed row (commitRemovedFeedRow). Each lands in the gap between
-// the entity commit and the interpretation write (the beforeFinish seam) and
-// the interpretation MUST still be written, with the handle's stamp.
+// and a removed feed row (commitRemovedFeedRow). Each lands before the next
+// hydration's transaction and the interpretation MUST still be written, with
+// the handle's stamp.
 func TestFinishEntityChange_VersionBumpWithTheSameFactsStillWritesTheInterpretation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -33,28 +33,20 @@ func TestFinishEntityChange_VersionBumpWithTheSameFactsStillWritesTheInterpretat
 		{"removed feed row", false, []string{"removed"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var gerr error
-			res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", nil)
-			p := ecPipeline(t, &res, &gerr)
+			p := finishPipeline(t)
 			p.store.SetInterpStamp("v1/abc")
-			bumped := false
-			p.seams.beforeFinish = func() error {
-				e, found, err := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
-				if err != nil || !found {
-					t.Fatalf("GetEntity found=%v err=%v", found, err)
-				}
-				if _, err := p.store.WriteEntityStateWithLog(context.Background(), store.Entity{
-					Repo: ecRepo, EntityType: "issue", EntityID: "i-1",
-					Facts: e.Facts, AsOf: e.AsOf, ContentHash: e.ContentHash, HeadSHA: e.HeadSHA,
-				}, e.Version, "2026-09-16T01:00:00Z", tc.active, tc.kinds, "pg-desk", "2026-09-16T01:00:00Z"); err != nil {
-					t.Fatalf("version bump with the same facts: %v", err)
-				}
-				bumped = true
-				return nil
+			e, found, err := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
+			if err != nil || !found {
+				t.Fatalf("GetEntity found=%v err=%v", found, err)
 			}
-			mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
-			if !bumped {
-				t.Fatal("the seam did not run")
+			if _, err := p.store.WriteEntityStateWithLog(context.Background(), store.Entity{
+				Repo: ecRepo, EntityType: "issue", EntityID: "i-1",
+				Facts: e.Facts, AsOf: e.AsOf, ContentHash: e.ContentHash, HeadSHA: e.HeadSHA,
+			}, e.Version, "2026-09-16T01:00:00Z", tc.active, tc.kinds, "pg-desk", "2026-09-16T01:00:00Z"); err != nil {
+				t.Fatalf("version bump with the same facts: %v", err)
+			}
+			if err := runFinish(p, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A"), contentHash: finishHash}); err != nil {
+				t.Fatal(err)
 			}
 			got, found, err := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1")
 			if err != nil || !found {
@@ -67,25 +59,15 @@ func TestFinishEntityChange_VersionBumpWithTheSameFactsStillWritesTheInterpretat
 	}
 }
 
-// A hydration overtaken by one with DIFFERENT facts is skipped, and the newer
-// hydration's row stays.
-func TestFinishEntityChange_LateWriteWithDifferentFactsIsSkipped(t *testing.T) {
-	var gerr error
-	res := ecIssue(t, "open", "me", "2026-09-16T00:00:00Z", nil)
-	p := ecPipeline(t, &res, &gerr)
-	p.seams.beforeFinish = func() error {
-		e, _, _ := p.store.GetEntity(context.Background(), ecRepo, "issue", "i-1")
-		if _, err := p.store.WriteEntityStateWithLog(context.Background(), store.Entity{
-			Repo: ecRepo, EntityType: "issue", EntityID: "i-1",
-			Facts: e.Facts, AsOf: e.AsOf, ContentHash: "a-newer-hydration", HeadSHA: e.HeadSHA,
-		}, e.Version, "2026-09-16T01:00:00Z", true, nil, "pg-desk", "2026-09-16T01:00:00Z"); err != nil {
-			t.Fatal(err)
-		}
-		return nil
+// An interpretation derived from DIFFERENT facts than the stored ones is
+// skipped, and nothing is written.
+func TestFinishEntityChange_WriteWithDifferentFactsIsSkipped(t *testing.T) {
+	p := finishPipeline(t)
+	if err := runFinish(p, "issue", "i-1", postCommit{interp: finishInterp("i-1", "A"), contentHash: "a-different-hydration"}); err != nil {
+		t.Fatal(err)
 	}
-	mustRun(t, p, "issue", "i-1", gather.ChangeAdded, EntityChangeOptions{})
 	if _, found, _ := p.store.GetInterpretation(context.Background(), ecRepo, "issue", "i-1"); found {
-		t.Fatal("a late write with different facts was written")
+		t.Fatal("a write derived from different facts was written")
 	}
 }
 
@@ -168,13 +150,13 @@ func TestOnlyWriteInterpretationReachesTheInterpretationUpsert(t *testing.T) {
 	var want []string
 	for _, c := range callers {
 		// The definition of UpsertInterpretation calls the helper; WriteInterpretation
-		// calls it too; the ForTest seeding helpers (testing_seed.go, named and
+		// and its transaction variant share writeInterpretationBody, which calls it; the ForTest seeding helpers (testing_seed.go, named and
 		// guarded as test-only) call UpsertInterpretation. Nothing else may.
 		if strings.Contains(c, "internal/store/testing_seed.go (Seed") {
 			continue
 		}
 		if strings.HasPrefix(c, "upsertInterpretationNew in ../../internal/store/interpretation.go (UpsertInterpretation)") ||
-			strings.HasPrefix(c, "upsertInterpretationNew in ../../internal/store/interpretation_write.go (WriteInterpretation)") {
+			strings.HasPrefix(c, "upsertInterpretationNew in ../../internal/store/interpretation_write.go (writeInterpretationBody)") {
 			continue
 		}
 		want = append(want, c)
