@@ -92,7 +92,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		return conformance.ExitError
 	}
 
-	dctx := executor.DispatchContext{Role: role, Item: dispatchlib.ItemFromPayload(req.Event.Payload), EventID: req.Event.ID}
+	dctx := executor.DispatchContext{Role: role, Item: dispatchlib.ItemFromPayload(req.Event.Payload), EventID: req.Event.ID, DispatchID: req.ID}
 	deps := mkDeps(cfg, role)
 	// The event payload's metadata is a snapshot from enqueue time: re-read the
 	// bead's CURRENT metadata so the rendered argv reflects the bead as it is at
@@ -105,7 +105,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): the core
 		// re-offers the event with backoff. The reason (command-busy) and kind
 		// (busy) are a handler-to-alert contract and stay as they are.
-		wire.DeclineAndReply(stdout, deps.Log, role, dctx.Item.ID, decline)
+		wire.DeclineAndReply(stdout, deps.Log, role, dctx.Item.ID, decline, dctx.EventID, dctx.DispatchID)
 		return conformance.ExitBusy
 	}
 	if err != nil {

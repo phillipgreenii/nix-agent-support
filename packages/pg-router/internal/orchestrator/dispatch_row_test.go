@@ -189,3 +189,52 @@ func TestDispatchRow_RetriedAttemptIsInfoExhaustedIsWarn(t *testing.T) {
 		t.Fatalf("failed-dispatch observer calls = %d, want 1 (only the exhausting attempt)", n)
 	}
 }
+
+// The row carries event_id (the request's event.id) and, on success, dispatch_id
+// from the handler reply's id; the error path has no reply, so dispatch_id is omitted.
+func TestDispatchRow_CarriesEventIDAndDispatchID(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	lw, err := eventlog.New(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{reply: wireclient.Reply{ID: "dsp-0123456789ab"}}
+	o.Log = lw
+	l := o.NewListener(context.Background(), workerRole(o))
+	evt := eventqueue.Event{ID: "ev-1", Type: "pr.changed", At: time.Now(), Payload: map[string]any{"id": "b"}}
+	l.Offer(eventqueue.Offering{ID: "dsp-1", Event: evt})
+	if err := o.RunOne(context.Background(), workerRole(o), evt); err != nil {
+		t.Fatal(err)
+	}
+	rows := dispatchRows(t, logPath)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %v", rows)
+	}
+	for _, r := range rows {
+		if r["event_id"] != "ev-1" || r["dispatch_id"] != "dsp-0123456789ab" {
+			t.Fatalf("row ids = %v/%v, want ev-1/dsp-0123456789ab", r["event_id"], r["dispatch_id"])
+		}
+	}
+}
+
+func TestDispatchRow_ErrorPathOmitsDispatchID(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "events.jsonl")
+	lw, err := eventlog.New(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+	o.Handler = &fakeHandler{reply: wireclient.Reply{ID: "dsp-0123456789ab"}, err: fmt.Errorf("boom")}
+	o.Log = lw
+	l := o.NewListener(context.Background(), workerRole(o))
+	evt := eventqueue.Event{ID: "ev-2", Type: "pr.changed", At: time.Now(), Payload: map[string]any{"id": "b"}}
+	l.Offer(eventqueue.Offering{ID: "dsp-1", Event: evt})
+	rows := dispatchRows(t, logPath)
+	if len(rows) != 1 || rows[0]["event_id"] != "ev-2" {
+		t.Fatalf("rows = %v", rows)
+	}
+	if _, ok := rows[0]["dispatch_id"]; ok {
+		t.Fatalf("dispatch_id must be omitted without a reply: %v", rows[0])
+	}
+}

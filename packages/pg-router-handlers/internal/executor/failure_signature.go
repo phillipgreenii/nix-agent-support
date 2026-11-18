@@ -240,6 +240,7 @@ func (r *ccpoolRun) recordDispatchFailure(d DispatchContext, name string, werr e
 	}
 	fields["failure_signature"] = string(res.Signature)
 	fields["signature_evidence"] = res.Evidence
+	AddCorrelationIDs(fields, d.EventID, d.DispatchID)
 	slog.Warn("dispatch failed", "role", d.Role.Name, "pool", pool, "bead", d.Item.ID,
 		"session", name, "failure_signature", string(res.Signature), "signature_evidence", res.Evidence)
 	if r.deps.Log != nil {

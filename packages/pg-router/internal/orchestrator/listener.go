@@ -480,6 +480,9 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 		started = adopted
 	}
 	meta := newDispatchMeta(evt, started, ran)
+	if err == nil {
+		meta.DispatchID = reply.ID
+	}
 	if errors.Is(err, wireclient.ErrBusy) {
 		// Decline stays eventqueue.DeclineBusy regardless of detail (INV-
 		// FAIL-1: every DeclineReason re-offers alike) — DeclineDetail is a

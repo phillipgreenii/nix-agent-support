@@ -399,7 +399,11 @@ func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, evt eventque
 	d := discover.DeriveContextFromQueueEvent(role, evt)
 	started := time.Now()
 	reply, err := o.workOneWithID(ctx, d, evt)
-	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(d, reply, err), err, newDispatchMeta(evt, started, time.Since(started)))
+	meta := newDispatchMeta(evt, started, time.Since(started))
+	if err == nil {
+		meta.DispatchID = reply.ID
+	}
+	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(d, reply, err), err, meta)
 	return err
 }
 
@@ -506,6 +510,9 @@ type dispatchMeta struct {
 	// handed back for a re-run (bead pg2-974a9m).
 	Attempt   int
 	WillRetry bool
+	// DispatchID is the handler reply's id (the router's dsp- tracking id echoed
+	// back); empty on the error, busy and decline paths, where there is no reply.
+	DispatchID string
 }
 
 func newDispatchMeta(evt eventqueue.Event, started time.Time, d time.Duration) dispatchMeta {
@@ -524,6 +531,10 @@ func (m dispatchMeta) addTo(fields map[string]any) {
 	}
 	if m.Change != "" {
 		fields["change"] = m.Change
+		fields["event_id"] = m.Change
+	}
+	if m.DispatchID != "" {
+		fields["dispatch_id"] = m.DispatchID
 	}
 	if !m.EnqueuedAt.IsZero() {
 		fields["enqueued_at"] = m.EnqueuedAt.UTC().Format(time.RFC3339Nano)

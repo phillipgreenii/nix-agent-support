@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
+	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -133,6 +137,33 @@ func TestBusyDeclineFor_lowFreeSpaceCarriesDetail(t *testing.T) {
 	}
 	if !strings.Contains(d.Detail, "below the floor of 26843545600 bytes") {
 		t.Errorf("detail must name the floor; got %q", d.Detail)
+	}
+}
+
+func TestEmitDispatchDecline_carriesEventAndDispatchID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	log, err := eventlog.New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	EmitDispatchDecline(log, roles.Role{Name: "r"}, "b-1", NeutralDecline("command-busy", ""), "ev-3", "dsp-cccccccccccc")
+	EmitDispatchDecline(log, roles.Role{Name: "r"}, "b-1", NeutralDecline("command-busy", ""), "", "")
+	b, _ := os.ReadFile(path)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %q", lines)
+	}
+	var a, e map[string]any
+	_ = json.Unmarshal([]byte(lines[0]), &a)
+	_ = json.Unmarshal([]byte(lines[1]), &e)
+	if a["event_id"] != "ev-3" || a["dispatch_id"] != "dsp-cccccccccccc" {
+		t.Errorf("ids = %v", a)
+	}
+	if _, ok := e["event_id"]; ok {
+		t.Errorf("empty ids must be omitted: %v", e)
+	}
+	if _, ok := e["dispatch_id"]; ok {
+		t.Errorf("empty ids must be omitted: %v", e)
 	}
 }
 

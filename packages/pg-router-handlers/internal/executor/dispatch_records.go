@@ -68,6 +68,17 @@ func dispatchEndOutcome(cause error) (outcome string, ok bool) {
 	return "", false
 }
 
+// AddCorrelationIDs adds the router event id and dispatch id to a dispatch
+// record's fields as event_id and dispatch_id; an empty id is omitted.
+func AddCorrelationIDs(fields map[string]any, eventID, dispatchID string) {
+	if eventID != "" {
+		fields["event_id"] = eventID
+	}
+	if dispatchID != "" {
+		fields["dispatch_id"] = dispatchID
+	}
+}
+
 // emitDispatchEnd writes the dispatch_end outcome record. session is the ccpool
 // session's external id, "" for a command role (the field is then omitted).
 func emitDispatchEnd(log *eventlog.Writer, d DispatchContext, session, outcome string) {
@@ -80,6 +91,7 @@ func emitDispatchEnd(log *eventlog.Writer, d DispatchContext, session, outcome s
 	if session != "" {
 		fields["session"] = session
 	}
+	AddCorrelationIDs(fields, d.EventID, d.DispatchID)
 	_ = log.Emit("info", DispatchEndKind, "dispatch ended: "+outcome, fields)
 }
 
@@ -92,10 +104,12 @@ func emitDispatchFailed(log *eventlog.Writer, d DispatchContext, pool, session, 
 	if log == nil {
 		return
 	}
-	_ = log.Emit("error", dispatchResultKind, "dispatch failed", map[string]any{
+	fields := map[string]any{
 		"role": d.Role.Name, "pool": pool, "bead": d.Item.ID, "session": session,
 		"failure_signature": string(res.Signature), "signature_evidence": res.Evidence,
-	})
+	}
+	AddCorrelationIDs(fields, d.EventID, d.DispatchID)
+	_ = log.Emit("error", dispatchResultKind, "dispatch failed", fields)
 }
 
 // classifyText classifies a failure that has no session transcript with the
@@ -154,11 +168,12 @@ func (r *commandRun) emitCommandStart(d DispatchContext, argv, baseNames []strin
 	}
 	names := append([]string{}, baseNames...)
 	sort.Strings(names)
-	_ = r.deps.Log.Emit("info", DispatchStartKind, "dispatch accepted: command payload starting",
-		map[string]any{
-			"role": d.Role.Name, "item_id": d.Item.ID, "item_type": d.Item.Type,
-			"argv": argv, "strict_base_env": d.Role.StrictBaseEnv, "base_env_names": names,
-		})
+	fields := map[string]any{
+		"role": d.Role.Name, "item_id": d.Item.ID, "item_type": d.Item.Type,
+		"argv": argv, "strict_base_env": d.Role.StrictBaseEnv, "base_env_names": names,
+	}
+	AddCorrelationIDs(fields, d.EventID, d.DispatchID)
+	_ = r.deps.Log.Emit("info", DispatchStartKind, "dispatch accepted: command payload starting", fields)
 }
 
 // emitCCPoolStart writes the dispatch_start record of an accepted ccpool-role
@@ -181,6 +196,7 @@ func (r *ccpoolRun) emitCCPoolStart(d DispatchContext, route, session string) {
 		"role": d.Role.Name, "item_id": d.Item.ID, "item_type": d.Item.Type,
 		"route": route, "session": session, "session_env": sessionEnvField(d.Role.SessionEnv),
 	}
+	AddCorrelationIDs(fields, d.EventID, d.DispatchID)
 	if route == RouteLaunched {
 		fields["model"] = r.deps.Cfg.Model
 		fields["effort"] = r.deps.Cfg.Effort

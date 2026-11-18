@@ -94,7 +94,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// its reply.
 	declineLog := handlerstate.NewEventLog(cfg)
 	if reason, declined := originGate(ctx, newOriginProber(cfg), newGuardCheck(cfg), role, cfg, dctx.Item.ID); declined {
-		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, wire.NeutralDecline(reason, ""))
+		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, wire.NeutralDecline(reason, ""), dctx.EventID, dctx.DispatchID)
 		return conformance.ExitBusy
 	}
 	deps := mkDeps(cfg, role)
@@ -146,7 +146,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 			// router re-offers.
 			decline.Kind = wire.DeclineKindBusy
 		}
-		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, decline)
+		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, decline, dctx.EventID, dctx.DispatchID)
 		return conformance.ExitBusy
 	}
 	result, err := executor.NewCCPool().Dispatch(ctx, dctx, deps)
@@ -154,7 +154,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		// Pre-accept busy decline (INV-CONC-1, DEC-WIRE-1 exit 9): the core re-offers
 		// the event with backoff. The reason and kind are a handler-to-alert
 		// contract (bead pg2-j4uwg) and stay as they are.
-		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, decline)
+		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, decline, dctx.EventID, dctx.DispatchID)
 		return conformance.ExitBusy
 	}
 	if err != nil {

@@ -293,8 +293,8 @@ func WriteBusyReply(w io.Writer, d BusyDecline) {
 
 // DeclineAndReply writes the dispatch_decline event-log record of d and then the
 // decline's reply body: the one place every decline passes through (INV-CCH-35).
-func DeclineAndReply(w io.Writer, log *eventlog.Writer, role roles.Role, itemID string, d BusyDecline) {
-	EmitDispatchDecline(log, role, itemID, d)
+func DeclineAndReply(w io.Writer, log *eventlog.Writer, role roles.Role, itemID string, d BusyDecline, eventID, dispatchID string) {
+	EmitDispatchDecline(log, role, itemID, d, eventID, dispatchID)
 	WriteBusyReply(w, d)
 }
 
@@ -307,7 +307,7 @@ func DeclineAndReply(w io.Writer, log *eventlog.Writer, role roles.Role, itemID 
 // signature (launch-failed); both are "" for every other reason. A decline of
 // kind fault is logged at warn, the others at info. It never returns an error: a
 // log that cannot be written must not change the decline.
-func EmitDispatchDecline(log *eventlog.Writer, role roles.Role, itemID string, d BusyDecline) {
+func EmitDispatchDecline(log *eventlog.Writer, role roles.Role, itemID string, d BusyDecline, eventID, dispatchID string) {
 	if log == nil {
 		return
 	}
@@ -323,8 +323,10 @@ func EmitDispatchDecline(log *eventlog.Writer, role roles.Role, itemID string, d
 	if d.Kind == DeclineKindFault {
 		level = "warn"
 	}
-	_ = log.Emit(level, executor.DispatchDeclineKind, "dispatch declined: "+d.Reason, map[string]any{
+	fields := map[string]any{
 		"role": role.Name, "item_id": itemID, "reason": d.Reason, "decline_kind": d.Kind,
 		"session_env": sessionEnv, "evidence": evidence, "failure_signature": signature,
-	})
+	}
+	executor.AddCorrelationIDs(fields, eventID, dispatchID)
+	_ = log.Emit(level, executor.DispatchDeclineKind, "dispatch declined: "+d.Reason, fields)
 }

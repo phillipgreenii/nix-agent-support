@@ -303,3 +303,70 @@ func TestDispatch_launchFailed_writesNoDispatchStart(t *testing.T) {
 		t.Errorf("a failed launch must write no dispatch_start: %s", b)
 	}
 }
+
+func dispatchCommandIDs(t *testing.T, role roles.Role, log *eventlog.Writer, eventID, dispatchID string) {
+	t.Helper()
+	d := DispatchContext{Role: role, Item: item.Item{ID: "b-1", Type: "task"}, EventID: eventID, DispatchID: dispatchID}
+	_, _ = commandExecutor{}.Dispatch(context.Background(), d, Deps{Cmd: query.OSCommander{}, Log: log})
+}
+
+func wantIDs(t *testing.T, rec map[string]any, eventID, dispatchID string) {
+	t.Helper()
+	if rec["event_id"] != eventID || rec["dispatch_id"] != dispatchID {
+		t.Errorf("%v record ids = %v/%v, want %s/%s", rec["kind"], rec["event_id"], rec["dispatch_id"], eventID, dispatchID)
+	}
+}
+
+func TestCommandDispatch_startAndEndCarryEventAndDispatchID(t *testing.T) {
+	setHandlerEnv(t)
+	log, path := newTestLog(t)
+	dispatchCommandIDs(t, shCommandRole("exit 0"), log, "ev-7", "dsp-0123456789ab")
+	starts, ends := readRecords(t, path, DispatchStartKind), readRecords(t, path, DispatchEndKind)
+	if len(starts) != 1 || len(ends) != 1 {
+		t.Fatalf("starts=%v ends=%v", starts, ends)
+	}
+	wantIDs(t, starts[0], "ev-7", "dsp-0123456789ab")
+	wantIDs(t, ends[0], "ev-7", "dsp-0123456789ab")
+}
+
+func TestCommandDispatch_failureResultCarriesIDs(t *testing.T) {
+	setHandlerEnv(t)
+	log, path := newTestLog(t)
+	dispatchCommandIDs(t, shCommandRole("exit 3"), log, "ev-8", "dsp-aaaaaaaaaaaa")
+	res := readRecords(t, path, dispatchResultKind)
+	if len(res) != 1 {
+		t.Fatalf("results = %v", res)
+	}
+	wantIDs(t, res[0], "ev-8", "dsp-aaaaaaaaaaaa")
+}
+
+func TestDispatchRecords_emptyIDsAreOmitted(t *testing.T) {
+	setHandlerEnv(t)
+	log, path := newTestLog(t)
+	dispatchCommandIDs(t, shCommandRole("exit 0"), log, "ev-9", "")
+	rec := readRecords(t, path, DispatchStartKind)[0]
+	if rec["event_id"] != "ev-9" {
+		t.Errorf("event_id = %v", rec["event_id"])
+	}
+	if _, ok := rec["dispatch_id"]; ok {
+		t.Errorf("empty dispatch_id must be omitted: %v", rec)
+	}
+	log2, path2 := newTestLog(t)
+	dispatchCommandIDs(t, shCommandRole("exit 0"), log2, "", "")
+	rec = readRecords(t, path2, DispatchStartKind)[0]
+	if _, ok := rec["event_id"]; ok {
+		t.Errorf("empty event_id must be omitted: %v", rec)
+	}
+}
+
+func TestCCPoolRecords_carryIDs(t *testing.T) {
+	log, path := newTestLog(t)
+	d := DispatchContext{Role: roles.Role{Name: "r"}, Item: item.Item{ID: "b-1"}, EventID: "ev-1", DispatchID: "dsp-bbbbbbbbbbbb"}
+	r := &ccpoolRun{deps: Deps{Log: log}}
+	r.emitCCPoolStart(d, RouteAdopted, "s1")
+	emitDispatchEnd(log, d, "s1", OutcomeCompleted)
+	emitDispatchFailed(log, d, "p", "s1", "boom")
+	wantIDs(t, readRecords(t, path, DispatchStartKind)[0], "ev-1", "dsp-bbbbbbbbbbbb")
+	wantIDs(t, readRecords(t, path, DispatchEndKind)[0], "ev-1", "dsp-bbbbbbbbbbbb")
+	wantIDs(t, readRecords(t, path, dispatchResultKind)[0], "ev-1", "dsp-bbbbbbbbbbbb")
+}
