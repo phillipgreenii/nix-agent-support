@@ -192,6 +192,17 @@
             "source": "`pg-router doctor --help`: doctor --clauses"
           }
         },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pg-router doctor",
+            "citation": {
+              "source": "`pg-router --help` doctor entry: \"run \\\"config check\\\" plus quick probes ... and each enabled role's handler \\\"validate\\\"\"; `doctor --clauses`: \"It runs every level-source query of the config once with --raw (and once with --bands)\" (both execute commands the pg-router config names)"
+            }
+          }
+        ],
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",

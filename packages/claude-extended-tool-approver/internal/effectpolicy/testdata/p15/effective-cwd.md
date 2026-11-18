@@ -9,28 +9,28 @@ Change under review: an Exec fact (a `go test`, `pn workspace build`, `nix build
 its command runs in after the `cd`s before it, and EVERY directory it may run in must be trusted (a git checkout, a go module, or at/under a `pn-workspace.toml`).
 So an approval is GRANTED when a `cd` moves an untrusted request cwd into a trusted directory, and WITHHELD when a `cd` moves a trusted request cwd out of trusted ground.
 
-Producers: 44 Exec producers (`ExecProducerPaths`; one representative valid invocation each), listed under "Producers probed" below.
+Producers: 45 Exec producers (`ExecProducerPaths`; one representative valid invocation each), listed under "Producers probed" below.
 Directories: `marker dir` is a workforest set under a `pn-workspace.toml` (no git/go marker), `git checkout` is a directory with `.git`, `no marker` has no marker above it.
 
 ## Summary
 
 - Cells evaluated: 111 (compound shape x request cwd x cd target).
-- Exec facts newly APPROVED: 528 = the sum over cells of (producers approved now and not before).
-- Exec facts newly WITHHELD: 748 = the sum over cells of (producers approved before and not now).
-- Calculation: 12 cells that newly approve x 44 producers = 528; 17 cells that newly withhold x 44 producers = 748.
-- Cells where the 44 producers do not all agree: 0 (every producer is the same exec class, so a mixed cell would be a finding).
+- Exec facts newly APPROVED: 540 = the sum over cells of (producers approved now and not before).
+- Exec facts newly WITHHELD: 765 = the sum over cells of (producers approved before and not now).
+- Calculation: 12 cells that newly approve x 45 producers = 540; 17 cells that newly withhold x 45 producers = 765.
+- Cells where the 45 producers do not all agree: 0 (every producer is the same exec class, so a mixed cell would be a finding).
 - Control facts (no Exec fact, or one the check never reaches) whose verdict moved: 0 of 252 probes.
 
 ## Per shape: producers newly approved (+) or withheld (-), per request cwd (rows) and cd target (columns)
 
-Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/`**-N**` is how many of the 44 producers are newly approved / newly withheld; the verdict now is `approved` when every producer approves and `not approved` when none does. A runtime or relative target is probed under the first shape only.
+Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/`**-N**` is how many of the 45 producers are newly approved / newly withheld; the verdict now is `approved` when every producer approves and `not approved` when none does. A runtime or relative target is probed under the first shape only.
 
 ### `cd D && P`
 
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
   - cd to $D (runtime value): = (not approved)
   - cd to - (previous dir): = (not approved)
   - cd to sub (relative, in a checkout): = (approved)
@@ -38,14 +38,14 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
   - cd to $D (runtime value): = (not approved)
   - cd to - (previous dir): = (not approved)
   - cd to sub (relative, in a checkout): = (approved)
-  - cd to .. (relative, leaves a checkout): **-44** (not approved)
+  - cd to .. (relative, leaves a checkout): **-45** (not approved)
 - request cwd **no marker**
-  - cd to marker dir: **+44** (approved)
-  - cd to git checkout: **+44** (approved)
+  - cd to marker dir: **+45** (approved)
+  - cd to git checkout: **+45** (approved)
   - cd to no marker: = (not approved)
   - cd to $D (runtime value): = (not approved)
   - cd to - (previous dir): = (not approved)
@@ -57,14 +57,14 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **no marker**
-  - cd to marker dir: **+44** (approved)
-  - cd to git checkout: **+44** (approved)
+  - cd to marker dir: **+45** (approved)
+  - cd to git checkout: **+45** (approved)
   - cd to no marker: = (not approved)
 
 ### `cd D && (P)`
@@ -72,14 +72,14 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **no marker**
-  - cd to marker dir: **+44** (approved)
-  - cd to git checkout: **+44** (approved)
+  - cd to marker dir: **+45** (approved)
+  - cd to git checkout: **+45** (approved)
   - cd to no marker: = (not approved)
 
 ### `(cd D && P)`
@@ -87,14 +87,14 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **no marker**
-  - cd to marker dir: **+44** (approved)
-  - cd to git checkout: **+44** (approved)
+  - cd to marker dir: **+45** (approved)
+  - cd to git checkout: **+45** (approved)
   - cd to no marker: = (not approved)
 
 ### `cd D && echo $(P)`
@@ -102,14 +102,14 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **no marker**
-  - cd to marker dir: **+44** (approved)
-  - cd to git checkout: **+44** (approved)
+  - cd to marker dir: **+45** (approved)
+  - cd to git checkout: **+45** (approved)
   - cd to no marker: = (not approved)
 
 ### `for ...; do cd D && P; done`
@@ -117,14 +117,14 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **no marker**
-  - cd to marker dir: **+44** (approved)
-  - cd to git checkout: **+44** (approved)
+  - cd to marker dir: **+45** (approved)
+  - cd to git checkout: **+45** (approved)
   - cd to no marker: = (not approved)
 
 ### `cd D; P`
@@ -132,11 +132,11 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **no marker**
   - cd to marker dir: = (not approved)
   - cd to git checkout: = (not approved)
@@ -147,11 +147,11 @@ Each cell reads `change (verdict now)`. `=` means no producer changed; `**+N**`/
 - request cwd **marker dir**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **git checkout**
   - cd to marker dir: = (approved)
   - cd to git checkout: = (approved)
-  - cd to no marker: **-44** (not approved)
+  - cd to no marker: **-45** (not approved)
 - request cwd **no marker**
   - cd to marker dir: = (not approved)
   - cd to git checkout: = (not approved)
@@ -237,6 +237,7 @@ Each probe is `cd <dir> && <probe>`; the verdict must be identical new and befor
 - pg-git-lander rebase
 - pg-hooks fix
 - pg-hooks run
+- pg-router doctor
 - pg-router run-query
 - pn workspace apply
 - pn workspace build

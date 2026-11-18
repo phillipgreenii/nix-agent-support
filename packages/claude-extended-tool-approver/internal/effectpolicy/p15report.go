@@ -564,6 +564,7 @@ var markerExecProbes = []struct{ path, probe string }{
 	{"pg-git-lander rebase", "pg-git-lander rebase drain/x --onto main --repo ."},
 	{"pg-hooks fix", "pg-hooks fix"},
 	{"pg-hooks run", "pg-hooks run pre-commit a.go"},
+	{"pg-router doctor", "pg-router doctor"},
 	{"pg-router run-query", "pg-router run-query query:work"},
 	{"pn workspace apply", "pn workspace apply"},
 	{"pn workspace build", "pn workspace build"},

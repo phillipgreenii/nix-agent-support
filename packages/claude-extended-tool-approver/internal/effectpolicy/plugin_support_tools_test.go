@@ -60,7 +60,7 @@ var supportToolForms = []supportToolForm{
 	{"pg-router run-until-idle", evalcontract.Abstain, "boots a core and runs configured handlers"},
 	{"pg-router run-role worker {}", evalcontract.Abstain, "dispatches an event through a role"},
 	{"pg-router run-query query:q", evalcontract.Approve, "an Exec fact for the configured source's command, judged by TrustedCheckoutExec (approved from a trusted checkout)"},
-	{"pg-router doctor", evalcontract.Approve, "read-only diagnostics: the handler validate probes are the operator's own configured entry points"},
+	{"pg-router doctor", evalcontract.Approve, "an Exec fact for the configured handlers' validate, judged by TrustedCheckoutExec (approved from a trusted checkout)"},
 	{"pg-router doctor --socket /tmp/other.sock", evalcontract.Abstain, "a caller-chosen socket is unmodeled"},
 	{"pg-router tui", evalcontract.Abstain, "interactive, offers pause and resume"},
 	{"pg-router ingest-event", evalcontract.Abstain, "manager-to-core callback"},

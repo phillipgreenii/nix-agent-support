@@ -90,8 +90,8 @@ func TestCcpoolInterpretation(t *testing.T) {
 	}
 }
 
-// TestPgRouterDoctorRunQuery pins the doctor and run-query additions: doctor
-// carries no Exec fact, run-query exactly one, and the caller-chosen core
+// TestPgRouterDoctorRunQuery pins the doctor and run-query additions: doctor and
+// run-query each carry exactly one Exec fact, and the caller-chosen core
 // flags and the other process-starting verbs stay unmodeled.
 func TestPgRouterDoctorRunQuery(t *testing.T) {
 	execs := func(cmd string) int {
@@ -104,8 +104,8 @@ func TestPgRouterDoctorRunQuery(t *testing.T) {
 		return n
 	}
 	for cmd, want := range map[string]int{
-		"pg-router doctor":                      0,
-		"pg-router doctor --clauses":            0,
+		"pg-router doctor":                      1,
+		"pg-router doctor --clauses":            1,
 		"pg-router run-query query:work":        1,
 		"pg-router run-query --json query:work": 1,
 		"pg-router run-query query:work --json": 1,

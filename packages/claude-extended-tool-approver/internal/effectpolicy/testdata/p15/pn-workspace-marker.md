@@ -37,6 +37,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - exec producer pg-git-lander rebase: `pg-git-lander rebase drain/x --onto main --repo .`
 - exec producer pg-hooks fix: `pg-hooks fix`
 - exec producer pg-hooks run: `pg-hooks run pre-commit a.go`
+- exec producer pg-router doctor: `pg-router doctor`
 - exec producer pg-router run-query: `pg-router run-query query:work`
 - exec producer pn workspace apply: `pn workspace apply`
 - exec producer pn workspace build: `pn workspace build`
@@ -169,6 +170,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - exec producer pg-git-lander rebase: `pg-git-lander rebase drain/x --onto main --repo .` => **approve** inside, **abstain** outside
 - exec producer pg-hooks fix: `pg-hooks fix` => **approve** inside, **abstain** outside
 - exec producer pg-hooks run: `pg-hooks run pre-commit a.go` => **approve** inside, **abstain** outside
+- exec producer pg-router doctor: `pg-router doctor` => **approve** inside, **abstain** outside
 - exec producer pg-router run-query: `pg-router run-query query:work` => **approve** inside, **abstain** outside
 - exec producer pn workspace apply: `pn workspace apply` => **approve** inside, **abstain** outside
 - exec producer pn workspace build: `pn workspace build` => **approve** inside, **abstain** outside

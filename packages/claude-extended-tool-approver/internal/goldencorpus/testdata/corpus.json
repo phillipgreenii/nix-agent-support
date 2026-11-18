@@ -14865,7 +14865,7 @@
     "notes": "pg2-niyyq: sets an operator level override; abstains."
   },
   {
-    "case": "support_tool_pg_router_doctor_approve",
+    "case": "support_tool_pg_router_doctor_untrusted_cwd_not_approve",
     "tags": ["plugin-support-tool", "pg2-niyyq"],
     "tool_input": {
       "tool_name": "Bash",
@@ -14880,8 +14880,8 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "approve",
-    "notes": "Read-only diagnostics: the handler validate probes and the --clauses level-source queries are the operator's own configured entry points, so doctor declares no Exec fact."
+    "expected_verdict": "not-approve",
+    "notes": "Exec fact for the configured handlers' validate: abstains outside a trusted checkout (/repo here has no workspace marker); TestPluginInstructedForms pins the approving case."
   },
   {
     "case": "support_tool_pg_router_status_socket_not_approve",
@@ -16993,7 +16993,7 @@
     "notes": "Closing and purging a session changes pool state: absent from the schema."
   },
   {
-    "case": "pg_router_doctor_clauses",
+    "case": "pg_router_doctor_clauses_untrusted_cwd_not_approve",
     "tags": ["pool-worker-tools", "pg-router"],
     "tool_input": {
       "tool_name": "Bash",
@@ -17008,8 +17008,8 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "approve",
-    "notes": "Read-only report of what the current readings would pause."
+    "expected_verdict": "not-approve",
+    "notes": "Exec fact for the configured level-source queries: abstains outside a trusted checkout."
   },
   {
     "case": "pg_router_run_query_untrusted_cwd_not_approve",
