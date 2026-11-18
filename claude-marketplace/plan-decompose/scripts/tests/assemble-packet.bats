@@ -659,3 +659,101 @@ assemble() {
   [ "$status" -eq 0 ]
   [ "$(cat "$BODY")" = "$first" ]
 }
+
+# ------------------------------------------------------------------ --allow-dir
+
+@test "--allow-dir lets @@file read a fragment outside the repo and leaves the repo clean" {
+  printf 'FRAG\n' >"$OUTSIDE/frag.md"
+  printf 'x\n@@file %s\ny\n' "$OUTSIDE/frag.md" >"$DRAFT"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -q -m fixture
+  OUT2="$OUTSIDE/body.md"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$DRAFT" --out "$OUT2"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUT2")" = "$(printf 'x\nFRAG\ny')" ]
+  [ -z "$(git -C "$REPO" status --porcelain)" ]
+}
+
+@test "--allow-dir works from a working directory outside any git work tree" {
+  printf 'FRAG\n' >"$OUTSIDE/frag.md"
+  printf '@@file frag.md\n' >"$OUTSIDE/draft.md"
+  cd "$OUTSIDE"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$OUTSIDE/draft.md" --out "$OUTSIDE/body.md"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OUTSIDE/body.md")" = "FRAG" ]
+}
+
+@test "--allow-dir is repeatable and the repo toplevel stays readable" {
+  mkdir -p "$GFH_WORK/other"
+  printf 'A\n' >"$OUTSIDE/a.md"
+  printf 'B\n' >"$GFH_WORK/other/b.md"
+  printf 'R\n' >"$REPO/scratch/r.md"
+  printf '@@file %s\n@@file %s\n@@file scratch/r.md\n' "$OUTSIDE/a.md" "$GFH_WORK/other/b.md" >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --allow-dir "$GFH_WORK/other" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BODY")" = "$(printf 'A\nB\nR')" ]
+}
+
+@test "--allow-dir does not widen the boundary to other outside paths (exit 3)" {
+  mkdir -p "$GFH_WORK/elsewhere"
+  printf 'SECRET\n' >"$GFH_WORK/elsewhere/creds.txt"
+  printf '@@file %s\n' "$GFH_WORK/elsewhere/creds.txt" >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 3 ]
+  [[ $output == *"outside the git toplevel"* ]]
+  [ ! -e "$BODY" ]
+}
+
+@test "--allow-dir refuses a .. escape out of the allowed directory (exit 3)" {
+  printf 'SECRET\n' >"$GFH_WORK/creds.txt"
+  printf '@@file %s/../creds.txt\n' "$OUTSIDE" >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 3 ]
+}
+
+@test "--allow-dir refuses a symlink inside the allowed dir that points outside it (exit 3)" {
+  mkdir -p "$GFH_WORK/elsewhere"
+  printf 'SECRET\n' >"$GFH_WORK/elsewhere/creds.txt"
+  ln -s "$GFH_WORK/elsewhere/creds.txt" "$OUTSIDE/link.txt"
+  printf '@@file %s/link.txt\n' "$OUTSIDE" >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 3 ]
+}
+
+@test "--allow-dir keeps the .git guard: a .git component inside an allowed dir is refused" {
+  mkdir -p "$OUTSIDE/.git"
+  printf 'x\n' >"$OUTSIDE/.git/config"
+  printf '@@file %s/.git/config\n' "$OUTSIDE" >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 3 ]
+  [[ $output == *".git"* ]]
+  printf '@@file %s/.GIT/config\n' "$OUTSIDE" >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 3 ]
+}
+
+@test "--allow-dir keeps the .git guard: a symlink into the repo .git is refused" {
+  ln -s "$REPO/.git" "$OUTSIDE/gitlink"
+  printf '@@file %s/gitlink/HEAD\n' "$OUTSIDE" >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$OUTSIDE" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 3 ]
+  [ ! -e "$BODY" ]
+}
+
+@test "--allow-dir naming .git, a dir containing .git, a parent of .git, / or a non-directory exits 2" {
+  printf 'x\n' >"$DRAFT"
+  run "$SCRIPT" --allow-dir "$REPO/.git" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" --allow-dir "$REPO/.git/refs" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" --allow-dir "$REPO" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" --allow-dir "$GFH_WORK" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" --allow-dir / --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" --allow-dir "$OUTSIDE/missing" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" --allow-dir
+  [ "$status" -eq 2 ]
+}

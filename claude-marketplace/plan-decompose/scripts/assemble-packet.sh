@@ -16,7 +16,7 @@ show_help() {
   cat <<'HELP'
 assemble-packet.sh: expand exact-excerpt directives in a packet draft
 
-Usage: assemble-packet.sh --design <design.md> --in <draft.md> --out <body.md>
+Usage: assemble-packet.sh [--allow-dir <dir>]... --design <design.md> --in <draft.md> --out <body.md>
 
 Copies <draft.md> to <body.md>, replacing each directive line with exact text.
 Only a line that STARTS with exactly one of these three prefixes (including
@@ -47,10 +47,12 @@ then the "[design: <heading path>]" line.
 @@file <path> emits the file's bytes (plus a newline when the file lacks a
 final one) and no [design: ...] marker. A relative path resolves against the
 working directory. The resolved real path (symlinks followed) MUST lie inside
-the git toplevel of the working directory and MUST NOT pass through a ".git"
-component (any letter case, or the toplevel's .git itself); anything else,
-and a working directory outside a git work tree, is refused with exit 3. A
-file that exists but cannot be read exits 1. Needs realpath(1).
+the git toplevel of the working directory or inside a directory named by
+--allow-dir, and MUST NOT pass through a ".git" component (any letter case, or
+the toplevel's .git itself); anything else is refused with exit 3, and so is
+any @@file when the working directory is outside a git work tree and no
+--allow-dir was given. A file that exists but cannot be read exits 1. Needs
+realpath(1).
 
 Limits: the heading path and the first-cell text of @@design-table-row are
 split at the first " | ", so neither may contain one; a first-cell text
@@ -63,6 +65,12 @@ Options:
   --design FILE   Design text that @@design-* directives read (materialize it to
                   one file per run; reuse that file for every call)
   --in FILE       Packet draft
+  --allow-dir DIR Extra directory @@file may read from (repeatable), so a run's
+                  fragments can live in its scratch directory outside the
+                  repository and leave the working tree clean. DIR MUST exist,
+                  MUST NOT be "/", and MUST NOT be, contain, or sit inside a
+                  ".git" directory (exit 2). The .git guard and the
+                  outside-path refusal apply to every allowed root.
   --out FILE      Assembled packet body (MUST differ from --in and --design,
                   and MUST NOT be a directory)
   -h, --help      Show this help message
@@ -84,6 +92,7 @@ die() {
 DESIGN=""
 IN=""
 OUT=""
+ALLOW_DIRS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -91,9 +100,10 @@ while [[ $# -gt 0 ]]; do
     show_help
     exit 0
     ;;
-  --design | --in | --out)
+  --design | --in | --out | --allow-dir)
     [[ $# -ge 2 ]] || die "$1 requires a value" 2
     case "$1" in
+    --allow-dir) ALLOW_DIRS+=("$2") ;;
     --design) DESIGN="$2" ;;
     --in) IN="$2" ;;
     --out) OUT="$2" ;;
@@ -275,44 +285,91 @@ resolve_toplevel() {
   TOPLEVEL=$(realpath -- "$top") || return 1
 }
 
+# True when the path (already lowercased and "/"-wrapped) has a .git component.
+has_git_component() {
+  local lower
+  lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "/$lower/" in
+  */.git/*) return 0 ;;
+  esac
+  return 1
+}
+
+# True when $1 is, or lies inside, the .git directory of the git toplevel (identity, not spelling).
+inside_toplevel_git() {
+  local d=$1
+  [[ -n $TOPLEVEL ]] || return 1
+  while [[ $d != / && $d != . ]]; do
+    if [[ -e $TOPLEVEL/.git && $d -ef $TOPLEVEL/.git ]]; then
+      return 0
+    fi
+    d=$(dirname -- "$d")
+  done
+  return 1
+}
+
+# Resolved real paths of the --allow-dir roots, filled by resolve_allow_dirs.
+ALLOW_REAL=()
+resolve_allow_dirs() {
+  local d real
+  command -v realpath >/dev/null 2>&1 || die "realpath not found"
+  for d in ${ALLOW_DIRS[@]+"${ALLOW_DIRS[@]}"}; do
+    [[ -n $d ]] || die "--allow-dir needs a non-empty directory" 2
+    [[ -d $d ]] || die "--allow-dir is not a directory: $d" 2
+    real=$(realpath -- "$d") || die "cannot resolve --allow-dir: $d" 2
+    [[ $real != / ]] || die "--allow-dir MUST NOT be the filesystem root" 2
+    if has_git_component "$real" || inside_toplevel_git "$real"; then
+      die "--allow-dir MUST NOT be or sit inside a .git directory: $d" 2
+    fi
+    if [[ -n $TOPLEVEL && $TOPLEVEL/.git -ef $real ]]; then
+      die "--allow-dir MUST NOT be the repository's .git: $d" 2
+    fi
+    # A directory that contains the toplevel's .git would expose it.
+    if [[ -n $TOPLEVEL && -e $TOPLEVEL/.git ]]; then
+      case "$(realpath -- "$TOPLEVEL/.git")/" in
+      "$real"/*) die "--allow-dir MUST NOT contain the repository's .git: $d" 2 ;;
+      esac
+    fi
+    ALLOW_REAL+=("$real")
+  done
+}
+
 # Prints the resolved real path of $1 to stdout, or returns 3 after a message.
 checked_file_path() {
-  local path=$1 real rel
+  local path=$1 real root rel matched=""
   command -v realpath >/dev/null 2>&1 || die "realpath not found"
   [[ -e $path ]] || {
     echo "assemble-packet.sh: @@file path not found: $path" >&2
     return 3
   }
-  [[ -n $TOPLEVEL ]] || {
+  [[ -n $TOPLEVEL || ${#ALLOW_REAL[@]} -gt 0 ]] || {
     echo "assemble-packet.sh: @@file refused: working directory is not inside a git work tree" >&2
     return 3
   }
   real=$(realpath -- "$path") || return 1
-  case "$real" in
-  "$TOPLEVEL"/*) ;;
-  *)
-    echo "assemble-packet.sh: @@file refused: $path resolves outside the git toplevel ($TOPLEVEL)" >&2
+  for root in ${TOPLEVEL:+"$TOPLEVEL"} ${ALLOW_REAL[@]+"${ALLOW_REAL[@]}"}; do
+    case "$real" in
+    "$root"/*)
+      matched=$root
+      break
+      ;;
+    esac
+  done
+  [[ -n $matched ]] || {
+    echo "assemble-packet.sh: @@file refused: $path resolves outside the git toplevel (${TOPLEVEL:-none}) and every --allow-dir" >&2
     return 3
-    ;;
-  esac
-  rel=${real#"$TOPLEVEL"/}
+  }
+  rel=${real#"$matched"/}
   # Lowercased so a case-insensitive filesystem cannot reach .GIT/ around the check.
-  rel=$(printf '%s' "$rel" | tr '[:upper:]' '[:lower:]')
-  case "/$rel/" in
-  */.git/*)
+  if has_git_component "$rel"; then
     echo "assemble-packet.sh: @@file refused: $path passes through a .git component" >&2
     return 3
-    ;;
-  esac
+  fi
   # Identity check as well as the spelling check: no ancestor of the target may BE the toplevel's .git.
-  local d=$real
-  while [[ $d != "$TOPLEVEL" && $d != / ]]; do
-    if [[ $d -ef $TOPLEVEL/.git ]]; then
-      echo "assemble-packet.sh: @@file refused: $path is inside the repository's .git" >&2
-      return 3
-    fi
-    d=$(dirname -- "$d")
-  done
+  if inside_toplevel_git "$real"; then
+    echo "assemble-packet.sh: @@file refused: $path is inside the repository's .git" >&2
+    return 3
+  fi
   [[ -f $real ]] || {
     echo "assemble-packet.sh: @@file path is not a regular file: $path" >&2
     return 3
@@ -323,6 +380,10 @@ checked_file_path() {
   }
   printf '%s' "$real"
 }
+
+# Resolved once, before any directive, so a bad --allow-dir fails even when no @@file is used.
+resolve_toplevel || true
+resolve_allow_dirs
 
 OUT_DIR=$(dirname -- "$OUT")
 TMP=$(mktemp "$OUT_DIR/.assemble-packet.XXXXXX") || die "cannot create a temporary file next to $OUT"

@@ -311,7 +311,7 @@ deduplication.
    (below), never a raw `bd update`.
 
    **Scratch layout** (one per run; all paths absolute, under one scratch directory `<scratch>` that
-   also holds the design file; `mkdir -p <scratch>/drafts <scratch>/packets <scratch>/excerpts`
+   also holds the design file; `mkdir -p <scratch>/drafts <scratch>/packets <scratch>/excerpts <scratch>/fragments`
    first): `drafts/<key>.draft.md` (may hold `@@` directives) is assembled into
    `packets/<key>.body.md`, and the packet's acceptance criteria are written straight to
    `packets/<key>.acceptance.md` (they never carry directives). `packets/` never holds drafts. Run
@@ -319,6 +319,12 @@ deduplication.
    packet. Those same two packet files feed `create-packet.sh` / `update-packet.sh` (`--body-file`,
    `--acceptance-file`), the cold-reader and the semantic post-checker, so every reader sees
    exactly the stored text. `excerpts/` holds the post-checker's round 2+ design excerpts (step 7).
+
+   `@@file` fragments go in `<scratch>/fragments/` (create it with the `mkdir -p` above), never
+   inside the repository's working tree: a fragment written into the canonical clone leaves it
+   dirty and blocks every fast-forward landing into that repository. Pass
+   `--allow-dir <scratch>/fragments` to every `assemble-packet.sh` call, and write each `@@file`
+   path absolute.
 
    **Design file (one per run)**: materialize the design to ONE file per run and pass it as
    `--design` everywhere. A design stored in the medium (a bead) is written out ONCE via
@@ -339,7 +345,10 @@ deduplication.
    directive-looking line has no escape; reword it. Exit 4
    (ambiguous heading): rewrite the path as one of the `Parent > Child` forms the message lists.
    Exit 3 (not found): correct the path; if the design has no such text, state the gap. Exit 3
-   on `@@file` can also mean the path is outside the repo toplevel; never work around that.
+   on `@@file` can also mean the path is outside the repo toplevel and every `--allow-dir` (or
+   passes through `.git`); move the fragment into `<scratch>/fragments/` and pass that directory
+   with `--allow-dir`, never into the repository and never by widening `--allow-dir` past the
+   scratch directory.
    The ASSEMBLED body (`packets/<key>.body.md`), never the draft, is the packet's text: step 4
    sizes it, step 5 pre-filters it, `create-packet` receives it as `--body-file`, and steps 6 and 7
    hand its path to the cold-reader and the post-checker. Fix-loop edits go to the DRAFT (and to
@@ -553,7 +562,8 @@ path, character for character, as the first word of the Bash command, every time
   included, passes through byte-for-byte, and expanded text is never re-scanned. A section is
   the text up to the next heading of ANY level, without the heading line, ending in
   `[design: <heading path>]`. `@@file` resolves against the working directory and is refused
-  (exit 3) outside the git toplevel. Exit 3 not found, 4 ambiguous heading (the message lists
+  (exit 3) outside the git toplevel and every `--allow-dir <dir>` (repeatable; pass
+  `<scratch>/fragments`), and always through `.git`. Exit 3 not found, 4 ambiguous heading (the message lists
   the `Parent > Child` paths that disambiguate), 2 usage, 1 generic; `--out` is written only on
   success. Step 3 ("Exact excerpts") says when a directive is mandatory; run it for all
   drafts in one Bash loop (step 3, "Scratch layout"), and again only for the drafts edited after a

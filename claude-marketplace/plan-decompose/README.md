@@ -54,7 +54,9 @@ Agents (`agents/`):
 Scripts (`scripts/`, resolved from the skill's base directory):
 
 - `assemble-packet.sh` — expands `@@file`, `@@design-section` and `@@design-table-row`
-  directives in a packet draft into the assembled body, copying exact excerpts by command.
+  directives in a packet draft into the assembled body, copying exact excerpts by command;
+  `--allow-dir` names the scratch directory `@@file` fragments may be read from.
+  `--allow-dir` names the scratch directory `@@file` fragments may be read from.
 - `measure-sizes.sh` — prints design bytes, model-written draft bytes and their ratio for the
   decomposition report.
 - `create-packet.sh` — creates one held packet (`--body-file`, `--acceptance-file`).
