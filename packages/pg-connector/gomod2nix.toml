@@ -131,6 +131,7 @@ cachePackages = [
   'modernc.org/libc/honnef.co/go/netdb',
   'modernc.org/libc/langinfo',
   'modernc.org/libc/limits',
+  'modernc.org/libc/locale',
   'modernc.org/libc/netdb',
   'modernc.org/libc/netinet/in',
   'modernc.org/libc/poll',
@@ -177,16 +178,16 @@ cachePackages = [
     hash = 'sha256-rRweAP7XIb4egtT1f2gkz4sYOu7LDHmcJ5iNsJUd0sE='
 
   [mod.'github.com/gofrs/flock']
-    version = 'v0.13.1'
-    hash = 'sha256-L3VZkZJzCeySVGXi0r5GWVRRUN/5Qz2EsZ4Bh6peVag='
+    version = 'v0.13.2'
+    hash = 'sha256-g+hsU7IRIavPUXe7EdoATSCIUZTGg1ZJRo/Wamzc2rk='
 
   [mod.'github.com/google/uuid']
     version = 'v1.6.0'
     hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
 
   [mod.'github.com/grpc-ecosystem/grpc-gateway/v2']
-    version = 'v2.33.0'
-    hash = 'sha256-WvVvp0wWqIZE4qi3lUOb+VTt1urJAEnjQp7dvRkg2Hg='
+    version = 'v2.34.0'
+    hash = 'sha256-Eo7qRl7wYawYqaCksQAC0UqztR/DuikFY5hZZlnE158='
 
   [mod.'github.com/inconshreveable/mousetrap']
     version = 'v1.1.0'
@@ -205,8 +206,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261114222359-65f23cfd8d2d'
-    hash = 'sha256-R2j1H6WJeyjkYORQMnvLg1o4f/IPVzkHjDww6G+sjvo='
+    version = 'v0.0.0-20261118145935-46d6423c44db'
+    hash = 'sha256-J3GhDpTwvipAFmmqI4GguXKtETEmq6/K+Usj1+GcWsM='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -217,8 +218,8 @@ cachePackages = [
     hash = 'sha256-nbRCTFiDCC2jKK7AHi79n7urYCMP5yDZnWtNVJrDi+k='
 
   [mod.'github.com/spf13/pflag']
-    version = 'v1.0.10'
-    hash = 'sha256-uDPnWjHpSrzXr17KEYEA1yAbizfcsfo5AyztY2tS6ZU='
+    version = 'v1.1.0'
+    hash = 'sha256-B7mjsUWaV/ltrpt8mGFyqeLQBpRd7Xcif019pAjWv+w='
 
   [mod.'go.opentelemetry.io/auto/sdk']
     version = 'v1.2.1'
@@ -265,27 +266,27 @@ cachePackages = [
     hash = 'sha256-M8SCpLO073LypQdj2INMAixdbTRvw0b5Hzw0lIJMc0M='
 
   [mod.'golang.org/x/net']
-    version = 'v0.62.0'
-    hash = 'sha256-BX+i/MyhVigz/sDRJNGydfkimaeAHAFtrRN//eXuZFY='
+    version = 'v0.63.0'
+    hash = 'sha256-CVMFUR5O5JBQEM78dg5gBubXIiseB55Yoy1OEutoU0I='
 
   [mod.'golang.org/x/sync']
-    version = 'v0.24.0'
-    hash = 'sha256-gViyLpsZFBKTEUtK6Li3m6plz5J/VCAcpTLymQVRpj4='
+    version = 'v0.25.0'
+    hash = 'sha256-exsN7AZ9kxJ+V5TK5XewgUVKAu3L0FqmNe95mlPMMSI='
 
   [mod.'golang.org/x/sys']
-    version = 'v0.49.0'
-    hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='
+    version = 'v0.50.0'
+    hash = 'sha256-3T1I5T5pgbQBxRhN9Q2Ajvsy1kJW9WM/uddR9cOUVNA='
 
   [mod.'golang.org/x/text']
-    version = 'v0.43.0'
-    hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
+    version = 'v0.44.0'
+    hash = 'sha256-dTeEJZSwSLJ5jumnR+JjT4gSpXW6E22IxT0aCrcf2vQ='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20261026165753-2ffab32bce7e'
-    hash = 'sha256-sRRg7QCSi0XQZELYEcMA/ElQcFM+CcHeaVOCMgoWcqQ='
+    version = 'v0.0.0-20261118205021-e6950dcf398d'
+    hash = 'sha256-m7LuG0iABzA5uDG5LSDaZ+cBBy3SWpkaR8OiRxiHnX8='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20261026165753-2ffab32bce7e'
+    version = 'v0.0.0-20261118205021-e6950dcf398d'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
@@ -301,17 +302,17 @@ cachePackages = [
     hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
 
   [mod.'modernc.org/libc']
-    version = 'v1.79.1'
-    hash = 'sha256-tTzZIGVxVRIGkbu9JhHUGZGs9NXE+0wISdoqI3xvsoE='
+    version = 'v1.82.2'
+    hash = 'sha256-slFCjEKrdBba6qXI1Egiog9QAGptoHH7Up3qsSwlVd8='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
     hash = 'sha256-COZ5rF2GhQVR1r6a0DanJ8qwQ94JSKdQxTMWrDzE0Cc='
 
   [mod.'modernc.org/memory']
-    version = 'v1.12.1'
-    hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
+    version = 'v1.13.0'
+    hash = 'sha256-aY3vzZt4lOOjKwe9Ox4dwsGsNuIzY3KrcOsD2p/6i08='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.61.1'
-    hash = 'sha256-cmbPRIFECMBD0ZIc8FdjCLXRYT1TAHffxW1kVBPMo68='
+    version = 'v1.62.0'
+    hash = 'sha256-S1fI0x4COR22J9gqNWZo8snnV3SxrPtU+3HR9XiMykg='
