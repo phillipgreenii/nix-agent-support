@@ -49,6 +49,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - exec producer pnwf cleanup: `pnwf cleanup my-branch`
 - exec producer pnwf sync-fetch: `pnwf sync-fetch --set`
 - exec producer pnwf update-relock: `pnwf update-relock --set`
+- exec producer pre-land-eval: `pre-land-eval . main`
 - exec producer prek run: `prek run --files a.go`
 - flag --force of pn workspace apply: `pn workspace apply --force`
 - flag --help of pn workspace apply: `pn workspace apply --help`
@@ -177,6 +178,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - exec producer pnwf cleanup: `pnwf cleanup my-branch` => **approve** inside, **abstain** outside
 - exec producer pnwf sync-fetch: `pnwf sync-fetch --set` => **approve** inside, **abstain** outside
 - exec producer pnwf update-relock: `pnwf update-relock --set` => **approve** inside, **abstain** outside
+- exec producer pre-land-eval: `pre-land-eval . main` => **approve** inside, **abstain** outside
 - exec producer prek run: `prek run --files a.go` => **approve** inside, **abstain** outside
 - flag --force of pn workspace apply: `pn workspace apply --force` => **approve** inside, **abstain** outside
 - flag --help of pn workspace apply: `pn workspace apply --help` => **approve** inside, **abstain** outside

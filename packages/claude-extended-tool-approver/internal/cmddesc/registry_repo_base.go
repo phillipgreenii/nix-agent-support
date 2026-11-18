@@ -330,6 +330,37 @@ var darwinRebuildSchema = CommandSchema{
 	},
 }
 
+// preLandEvalSchema: `pre-land-eval [--no-ifd] <repo-path> <ref>` -- the eval-only
+// pre-land check the drain landers run (usually as `bgrun NAME -- pre-land-eval
+// <worktree> <branch>`). Its --help says it runs, from inside <repo-path>,
+// `pn workspace flake-check --no-build --caller ff-1c [--no-ifd] --rev <ref>
+// <repo-path>`, which evaluates the flake's Nix code and so executes it (and
+// builds any import-from-derivation unless --no-ifd): not a pure read. The Exec
+// fact therefore mirrors the `pn workspace flake-check` verb above and is judged
+// by TrustedCheckoutExec on the working directory. Both operands are literals
+// exactly like flake-check's, so a runtime expansion in either (for example
+// "$PWD") is a dynamic literal and is judged as one; the exit-2 guard for a
+// repo that is no workspace member is the tool's own. A third positional is
+// unmodeled (abstain), and -h/--help/-v/--version drop the operand requirement. Every flag outside
+// --no-ifd, -h/--help and -v/--version stays insufficient.
+var preLandEvalSchema = CommandSchema{
+	Name:       "pre-land-eval",
+	Provenance: "pre-land-eval --help (pre-land-eval 26.11.12.65560+c890eb85, phillipg-nix-repo-base pgHooksScripts), this host 2026-11-17",
+	Flags: map[string]FlagSpec{
+		"--no-ifd": inert, "-h": inert, "--help": inert, "-v": inert, "--version": inert,
+	},
+	Positionals: PositionalSpec{
+		Leading:               []OperandRole{Literal, Literal},
+		LeadingSkippedByFlags: []string{"-h", "--help", "-v", "--version"},
+		Rest:                  Unmodeled,
+	},
+	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "pre-land-eval"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutContent,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
 // readsPaMonitor is the implicit effect of a pa-monitor query: a read over the
 // local Unix-socket RPC to the user's own pa-monitor daemon, the same shape as
 // readsBeads for bd.
@@ -458,5 +489,5 @@ var recorderSchema = CommandSchema{
 
 // repoBaseToolSchemas lists the schemas this file contributes to DefaultRegistry.
 func repoBaseToolSchemas() []CommandSchema {
-	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema, darwinRebuildSchema, paMonitorSchema, recorderSchema}
+	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema, darwinRebuildSchema, paMonitorSchema, recorderSchema, preLandEvalSchema}
 }

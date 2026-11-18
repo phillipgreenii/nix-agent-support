@@ -87,6 +87,7 @@ func TestPnPnwfExecFactMarkerWorkspace(t *testing.T) {
 		"pnwf sync-fetch --set",
 		"pnwf update-relock --set",
 		"pnwf cleanup my-branch",
+		"pre-land-eval . main",
 		"go test ./...",
 	}
 	for _, c := range execForms {

@@ -1,0 +1,122 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pre-land-eval",
+  "command": {
+    "name": "pre-land-eval",
+    "provenance": "pre-land-eval --help (pre-land-eval 26.11.12.65560+c890eb85, phillipg-nix-repo-base pgHooksScripts), this host 2026-11-17",
+    "citations": {
+      "provenance": {
+        "source": "pre-land-eval --help (26.11.12.65560+c890eb85): \"pre-land-eval --version\" prints 26.11.12.65560+c890eb85"
+      },
+      "stdin": {
+        "source": "pre-land-eval --help (26.11.12.65560+c890eb85): no stdin is documented (usage \"pre-land-eval [--no-ifd] <repo-path> <ref>\"); classified never"
+      },
+      "stdout": {
+        "source": "pre-land-eval --help (26.11.12.65560+c890eb85): \"stdout: exactly one of ok, eval-failed.\""
+      },
+      "unknownFlag": {
+        "source": "pre-land-eval --help (26.11.12.65560+c890eb85): the Options list names only --no-ifd, -h/--help and -v/--version; any other flag is unmodeled so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pre-land-eval --help (26.11.12.65560+c890eb85), Options: \"-h, --help     Show this help message\""
+        }
+      },
+      "--no-ifd": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pre-land-eval --help (26.11.12.65560+c890eb85), Options: \"--no-ifd       Pass --no-ifd to pn (nix --option allow-import-from-derivation false).\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pre-land-eval --help (26.11.12.65560+c890eb85), Options: \"-v, --version  Show version information\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pre-land-eval --help (26.11.12.65560+c890eb85), Options: \"-h, --help     Show this help message\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pre-land-eval --help (26.11.12.65560+c890eb85), Options: \"-v, --version  Show version information\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "literal"
+        }
+      ],
+      "leadingSkippedByFlags": ["-h", "--help", "-v", "--version"],
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pre-land-eval --help (26.11.12.65560+c890eb85), Usage: \"pre-land-eval [--no-ifd] <repo-path> <ref>\" (two operands, both literal values)"
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "exec"
+        },
+        "target": "pre-land-eval",
+        "citation": {
+          "source": "pre-land-eval --help (26.11.12.65560+c890eb85): \"Runs, from inside <repo-path>: pn workspace flake-check --no-build --caller ff-1c [--no-ifd] --rev <ref> <repo-path>\" -- evaluates the flake's Nix code, which executes it (same Exec fact as the pn workspace flake-check verb)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

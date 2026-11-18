@@ -16465,5 +16465,85 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "tc-kf5m0 guardrail: the numeric count does not widen an unknown-zone absolute path."
+  },
+  {
+    "case": "pre_land_eval_direct",
+    "tags": ["repo-base-plugins", "pre-land-eval"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pre-land-eval /repo drain/branch"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Eval-only pre-land check the drain landers run; Exec fact judged on the trusted checkout."
+  },
+  {
+    "case": "pre_land_eval_no_ifd_under_bgrun",
+    "tags": ["repo-base-plugins", "pre-land-eval"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgrun pre-land-eval-x -- pre-land-eval --no-ifd /repo drain/branch"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Drain-lander shape under bgrun NAME --."
+  },
+  {
+    "case": "pre_land_eval_pwd_operand_not_approved",
+    "tags": ["repo-base-plugins", "pre-land-eval"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgrun pre-land-eval-x -- pre-land-eval \"$PWD\" drain/branch"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "A quoted live expansion as a positional is a runtime value that may start with a dash: abstains."
+  },
+  {
+    "case": "pre_land_eval_unmodeled_flag_not_approved",
+    "tags": ["repo-base-plugins", "pre-land-eval"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pre-land-eval --impure /repo drain/branch"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Unmodeled flag stays insufficient."
   }
 ]

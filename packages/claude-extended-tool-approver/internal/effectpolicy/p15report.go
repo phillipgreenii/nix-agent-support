@@ -576,6 +576,7 @@ var markerExecProbes = []struct{ path, probe string }{
 	{"pnwf cleanup", "pnwf cleanup my-branch"},
 	{"pnwf sync-fetch", "pnwf sync-fetch --set"},
 	{"pnwf update-relock", "pnwf update-relock --set"},
+	{"pre-land-eval", "pre-land-eval . main"},
 	{"prek run", "prek run --files a.go"},
 }
 

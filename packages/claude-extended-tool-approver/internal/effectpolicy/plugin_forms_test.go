@@ -642,6 +642,17 @@ var pluginForms = []pluginForm{
 	{"pb", `pg-router pause`, evalcontract.Abstain, "sets the operator PAUSED level on resource router: a mutating subcommand, not blanket-approved"},
 	{"integrate-branch", `wtnew pg2-abc12`, evalcontract.Approve, ""},
 	{"integrate-branch", "WT=<ROOT>\nbgrun preland-x -- bash -c \"cd $WT && integrate-branch-support --prek-branch-diff\"", evalcontract.Approve, ""},
+	// pre-land-eval: the eval-only pre-land check the drain landers run. It
+	// evaluates (so executes) the flake's Nix code like `pn workspace flake-check`,
+	// which the Exec fact states; both operands are literals.
+	{"integrate-branch", "pre-land-eval <ROOT> drain/branch", evalcontract.Approve, ""},
+	{"integrate-branch", "pre-land-eval --no-ifd <ROOT> drain/branch", evalcontract.Approve, ""},
+	{"integrate-branch", "bgrun pre-land-eval-x -- pre-land-eval <ROOT> drain/branch", evalcontract.Approve, ""},
+	{"integrate-branch", "bgrun pre-land-eval-x -- pre-land-eval --no-ifd <ROOT> drain/branch", evalcontract.Approve, ""},
+	{"integrate-branch", `bgrun pre-land-eval-x -- pre-land-eval "$PWD" drain/branch`, evalcontract.Abstain, "a quoted live expansion as a positional is a runtime value that may start with a dash, so it abstains (pinned: tracker call 254 shape)"},
+	{"integrate-branch", `bgrun pre-land-eval-x -- pre-land-eval "$WT" drain/branch`, evalcontract.Abstain, "a quoted variable operand is a runtime value this engine does not resolve"},
+	{"integrate-branch", "pre-land-eval <ROOT>", evalcontract.Abstain, "the ref operand is required"},
+	{"integrate-branch", "pre-land-eval --impure <ROOT> drain/branch", evalcontract.Abstain, "an unmodeled flag stays insufficient"},
 }
 
 // TestPluginInstructedForms runs every inventoried form through the full

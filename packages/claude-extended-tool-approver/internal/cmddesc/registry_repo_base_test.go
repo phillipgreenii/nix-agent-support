@@ -49,6 +49,9 @@ func TestRepoBasePnPnwfInterpretation(t *testing.T) {
 		"pnwf sync-fetch --set",
 		"pnwf update-relock --set",
 		"pnwf cleanup my-branch",
+		"pre-land-eval /repo/wt drain/branch",
+		"pre-land-eval --no-ifd /repo/wt drain/branch",
+		"pre-land-eval --help",
 	}
 	insufficient := []string{
 		"pn workspace init",
@@ -65,6 +68,10 @@ func TestRepoBasePnPnwfInterpretation(t *testing.T) {
 		"pnwf cleanup my-branch --force-dirty-worktree-removal",
 		"pnwf cleanup my-branch --force-unlanded-branch-removal",
 		"pnwf frobnicate",
+		"pre-land-eval",
+		"pre-land-eval /repo/wt",
+		"pre-land-eval /repo/wt drain/branch extra",
+		"pre-land-eval --impure /repo/wt drain/branch",
 	}
 	// The verbs that run the workspace's own code: each declares exactly one
 	// EffectExec (judged by effectpolicy.TrustedCheckoutExec). Every other
@@ -92,6 +99,10 @@ func TestRepoBasePnPnwfInterpretation(t *testing.T) {
 		"pnwf sync-fetch --set":                "pnwf sync-fetch",
 		"pnwf update-relock --set":             "pnwf update-relock",
 		"pnwf cleanup my-branch":               "pnwf cleanup",
+
+		"pre-land-eval /repo/wt drain/branch":          "pre-land-eval",
+		"pre-land-eval --no-ifd /repo/wt drain/branch": "pre-land-eval",
+		"pre-land-eval --help":                         "pre-land-eval",
 	}
 	run := func(cmd string) Interpretation {
 		l := leaf(t, cmd)

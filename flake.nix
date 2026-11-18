@@ -7562,6 +7562,11 @@
                     ++ pkgs.lib.optional (
                       (phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { }) ? pg-go-mutate
                     ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pg-go-mutate
+                    # pre-land-eval: the eval-only pre-land check (data/pre-land-eval.json), a
+                    # repo-base package like pn and pg-hooks.
+                    ++ pkgs.lib.optional (
+                      (phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { }) ? pre-land-eval
+                    ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pre-land-eval
                     ++ pkgs.lib.optional (pkgs ? pnwf) pkgs.pnwf
                     # pb (pg2-cjfpy.1): this repo's own overlay package (packages/pb).
                     ++ [ pkgs.pb ]
