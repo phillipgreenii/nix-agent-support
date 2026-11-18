@@ -65,8 +65,15 @@ import "strings"
 //
 // `pb unstick {prepare,batch,marker,report}` (the deterministic stages of the
 // /unstick-beads sweep, including its finished-epic candidate lists and E<NN>
-// batches, tc-tce2q) is likewise not modeled in this file; the finished-epic
-// change added no flag or verb to this model.
+// batches) are modeled below in the same inert-literal way: prepare allocates a
+// fresh work directory (default /tmp/bead-unstick-<date>[-N], or --workdir),
+// exports the bead database and reads `bd ready`; batch writes batches/<name> and
+// facts/<name>.json inside --workdir; marker prints one marker line (and with
+// --check reads marker lines from stdin, so it declares StdinAlways); report
+// re-exports the bead database into --workdir and prints the report. Their
+// writes are scratch files under the work directory and beads bookkeeping, the
+// same class as the pb gate verbs, and --root/--workdir are inert literals for the
+// reason given above (the directory the sweep names is not the project root).
 // Flags and synopses were verified against the host's installed binary
 // (`pb --help`, `pb drain isolate --help`, `pb gate {create,check,
 // attach-verified-child} --help`; pb version 0.0.0-b674b6b9, 2026-10-05) and
@@ -123,6 +130,35 @@ func pbActor() CommandSchema {
 	return s
 }
 
+// pbUnstick is `pb unstick` (the /unstick-beads sweep's deterministic stages),
+// cited against `pb unstick --help` and each stage's --help.
+func pbUnstick() CommandSchema {
+	leaf := func(name string, stdin StdinSpec, extra map[string]FlagSpec) CommandSchema {
+		s := pbLeaf("unstick "+name, extra)
+		s.Provenance = "pb unstick " + name + " --help (pb 0.0.0-66f7a333, this host 2026-11-17)"
+		s.Stdin = stdin
+		return s
+	}
+	g := pbGroup("unstick", map[string]CommandSchema{
+		"prepare": leaf("prepare", StdinNever, map[string]FlagSpec{
+			"--full": inert, "--id-prefix": literal1, "--json": inert,
+			"--label": literal1, "--root": literal1, "--workdir": literal1,
+		}),
+		"batch": leaf("batch", StdinNever, map[string]FlagSpec{
+			"--ids": literal1, "--json": inert, "--name": literal1, "--workdir": literal1,
+		}),
+		"marker": leaf("marker", StdinAlways, map[string]FlagSpec{
+			"--check": inert, "--export": literal1, "--json": inert,
+			"--outcome": literal1, "--reason": literal1, "--recheck-when": literal1,
+		}),
+		"report": leaf("report", StdinNever, map[string]FlagSpec{
+			"--json": inert, "--root": literal1, "--workdir": literal1,
+		}),
+	})
+	g.Provenance = "pb unstick --help (pb 0.0.0-66f7a333, this host 2026-11-17)"
+	return g
+}
+
 var pbSchema = CommandSchema{
 	Name:         "pb",
 	Provenance:   "pb --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
@@ -130,7 +166,8 @@ var pbSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 	Subcommands: map[string]CommandSchema{
-		"actor": pbActor(),
+		"actor":   pbActor(),
+		"unstick": pbUnstick(),
 		"drain": pbGroup("drain", map[string]CommandSchema{
 			"isolate": pbLeaf("drain isolate", map[string]FlagSpec{
 				"--bead": literal1, "--repo": literal1, "--json": inert,

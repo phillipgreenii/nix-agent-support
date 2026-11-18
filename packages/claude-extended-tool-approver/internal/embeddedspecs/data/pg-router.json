@@ -148,6 +148,55 @@
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
+      "doctor": {
+        "name": "doctor",
+        "provenance": "pg-router doctor --help (doctor [--socket <path>] [--token <tok>] | doctor --clauses), pg-router 0.0.0-f56b5176, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`pg-router doctor --help`, pg-router 0.0.0-f56b5176, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`pg-router doctor --help`: no stdin read is documented for this command (pg-router 0.0.0-f56b5176)"
+          },
+          "stdout": {
+            "source": "`pg-router doctor --help`: doctor --clauses"
+          },
+          "unknownFlag": {
+            "source": "`pg-router doctor --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--clauses": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`pg-router doctor --help`: usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] [--shutdown-deadline <dur>] | run-until-idle [--only <selector>]... [--disable <selector>]... [--shutdown-deadline <dur..."
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "`pg-router doctor --help`: doctor --clauses"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
       "explain": {
         "name": "explain",
         "provenance": "pg-router --help, explain <role>: the current admission decision of one role, read from the RUNNING core",
@@ -303,6 +352,71 @@
             "endOfOptions": true
           }
         }
+      },
+      "run-query": {
+        "name": "run-query",
+        "provenance": "pg-router run-query --help (run-query [--json] query:<name>), pg-router 0.0.0-f56b5176, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`pg-router run-query --help`, pg-router 0.0.0-f56b5176, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`pg-router run-query --help`: no stdin read is documented for this command (pg-router 0.0.0-f56b5176)"
+          },
+          "stdout": {
+            "source": "`pg-router run-query --help`: run-query [--json] query:<name>"
+          },
+          "unknownFlag": {
+            "source": "`pg-router run-query --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`pg-router run-query --help`: usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] [--shutdown-deadline <dur>] | run-until-idle [--only <selector>]... [--disable <selector>]... [--shutdown-deadline <dur..."
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "`pg-router run-query --help`: run-query [--json] query:<name>"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pg-router run-query",
+            "citation": {
+              "source": "packages/ccpool/cmd/ccpool/trust.go runTrust: trust.EnsureTrusted(filepath.Join(home, \".claude.json\"), cwd) writes the folder's trust entry; `ccpool --help`: \"trust  pre-trust a cwd so an automated claude launch there doesn't stall on the folder-trust prompt\""
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
       },
       "status": {
         "name": "status",

@@ -670,6 +670,46 @@ var pluginForms = []pluginForm{
 	{"integrate-branch", "pg-git-lander land --continue --no-verify", evalcontract.Abstain, "--no-verify on a resume is unmodeled too"},
 	{"integrate-branch", "bgrun pgl-land-x -- pg-git-lander land drain/x --repo <ROOT> --no-verify --json", evalcontract.Abstain, "--no-verify under bgrun still abstains"},
 	{"integrate-branch", "/etc/profiles/per-user/phillipg/bin/pg-git-lander land drain/x --repo <ROOT>", evalcontract.Abstain, "an absolute-path argv0 is an untrusted executable identity (no trustedExecPath deployed)"},
+	// ccpool: the pool-worker read-only listing/status verbs approve; trust states
+	// its ~/.claude.json write; verbs that drive another agent session or change
+	// pool state abstain.
+	{"pg-router", "ccpool list", evalcontract.Approve, ""},
+	{"pg-router", "ccpool list --json", evalcontract.Approve, ""},
+	{"pg-router", "ccpool list --all --json --state needs_input", evalcontract.Approve, ""},
+	{"pg-router", "ccpool capacity --json", evalcontract.Approve, ""},
+	{"pg-router", "ccpool --pool <ROOT>/pool doctor", evalcontract.Approve, ""},
+	{"pg-router", "ccpool --pool <ROOT>/pool list --all --json", evalcontract.Approve, ""},
+	{"pg-router", "ccpool state worker-1 --json", evalcontract.Approve, ""},
+	{"pg-router", "ccpool tail worker-1", evalcontract.Approve, ""},
+	{"pg-router", "ccpool --help", evalcontract.Approve, ""},
+	{"pg-router", "ccpool list --help", evalcontract.Approve, ""},
+	{"pg-router", "ccpool meta get worker-1 bead", evalcontract.Approve, ""},
+	{"pg-router", "ccpool trust <ROOT>", evalcontract.Reject, "trust writes ~/.claude.json, the agent's own settings file: the path policy rejects a modify under the home directory"},
+	{"pg-router", "ccpool new worker --cwd <ROOT>", evalcontract.Abstain, "launching another agent session is modeled by no effect kind"},
+	{"pg-router", "ccpool reply worker-1 hello", evalcontract.Abstain, "steering another agent's turn is modeled by no effect kind"},
+	{"pg-router", "ccpool reply --help", evalcontract.Abstain, "reply is deliberately absent from the schema, --help included"},
+	{"pg-router", "ccpool attach worker-1", evalcontract.Abstain, "attaching the terminal to another session's pane is modeled by no effect kind"},
+	{"pg-router", "ccpool attend", evalcontract.Abstain, "attend attaches to another session: modeled by no effect kind"},
+	{"pg-router", "ccpool close worker-1 --purge", evalcontract.Abstain, "closing and purging a session changes pool state: absent from the schema"},
+	{"pg-router", "ccpool capacity --emit-metrics", evalcontract.Abstain, "emitting the OTLP gauge is unmodeled"},
+	// pg-router doctor (read-only diagnostics) and run-query (an Exec of the
+	// configured source's query command, judged by TrustedCheckoutExec).
+	{"pg-router", "pg-router doctor", evalcontract.Approve, ""},
+	{"pg-router", "pg-router doctor --clauses", evalcontract.Approve, ""},
+	{"pg-router", "pg-router doctor --socket /tmp/other.sock", evalcontract.Abstain, "a caller-chosen core socket is unmodeled, like status's"},
+	{"pg-router", "pg-router run-query query:work", evalcontract.Approve, ""},
+	{"pg-router", "pg-router run-query --json query:work", evalcontract.Approve, ""},
+	{"pg-router", "pg-router run-query", evalcontract.Abstain, "the query selector is required"},
+	{"pg-router", "pg-router gate --help", evalcontract.Abstain, "gate is a removed verb"},
+	// pb unstick: the /unstick-beads sweep's deterministic stages.
+	{"pb", "pb unstick --help", evalcontract.Approve, ""},
+	{"pb", "pb unstick prepare --root <ROOT> --json", evalcontract.Approve, ""},
+	{"pb", "pb unstick prepare --full --label agent-support --root <ROOT>", evalcontract.Approve, ""},
+	{"pb", "pb unstick batch --workdir /tmp/bead-unstick-2026-11-17 --name FOLLOWUPS --ids pg2-a,pg2-b", evalcontract.Approve, ""},
+	{"pb", `pb unstick marker --outcome unchanged --reason "still blocked on the apply" --recheck-when on-change`, evalcontract.Approve, ""},
+	{"pb", "pb unstick marker --check --export /tmp/bead-unstick-2026-11-17/export.jsonl", evalcontract.Approve, ""},
+	{"pb", "pb unstick report --workdir /tmp/bead-unstick-2026-11-17 --root <ROOT>", evalcontract.Approve, ""},
+	{"pb", "pb unstick prepare --force", evalcontract.Abstain, "an unmodeled flag stays insufficient"},
 }
 
 // TestPluginInstructedForms runs every inventoried form through the full

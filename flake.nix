@@ -7544,6 +7544,7 @@
                       pkgs.pg-ccaudit
                       pkgs.pg-review # data/pg-review.json
                       pkgs.pg-git-lander # data/pg-git-lander.json
+                      pkgs.ccpool # data/ccpool.json
                       pkgs.claude-extended-tool-approver
                       # Not on this PATH by design (specdrift.Exempt/IsExempt): launchctl (macOS
                       # system tool), darwin-rebuild (a nix-darwin script in the system profile,

@@ -14865,7 +14865,7 @@
     "notes": "pg2-niyyq: sets an operator level override; abstains."
   },
   {
-    "case": "support_tool_pg_router_doctor_not_approve",
+    "case": "support_tool_pg_router_doctor_approve",
     "tags": ["plugin-support-tool", "pg2-niyyq"],
     "tool_input": {
       "tool_name": "Bash",
@@ -14880,8 +14880,8 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "not-approve",
-    "notes": "pg2-niyyq: runs every enabled handler's validate (configured executables); abstains."
+    "expected_verdict": "approve",
+    "notes": "Read-only diagnostics: the handler validate probes and the --clauses level-source queries are the operator's own configured entry points, so doctor declares no Exec fact."
   },
   {
     "case": "support_tool_pg_router_status_socket_not_approve",
@@ -16359,9 +16359,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "head -20 README.md" }
+      "tool_input": {
+        "command": "head -20 README.md"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16373,9 +16378,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "tail -100 README.md" }
+      "tool_input": {
+        "command": "tail -100 README.md"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16387,9 +16397,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "cat README.md | head -50" }
+      "tool_input": {
+        "command": "cat README.md | head -50"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16401,9 +16416,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "head -z README.md" }
+      "tool_input": {
+        "command": "head -z README.md"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16415,9 +16435,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "head -20q README.md" }
+      "tool_input": {
+        "command": "head -20q README.md"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16429,9 +16454,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "head -20 ~/.ssh/id_ed25519" }
+      "tool_input": {
+        "command": "head -20 ~/.ssh/id_ed25519"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16443,9 +16473,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "tail -100 .env" }
+      "tool_input": {
+        "command": "tail -100 .env"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16457,9 +16492,14 @@
     "tags": ["ceta-spec", "tc-kf5m0"],
     "tool_input": {
       "tool_name": "Bash",
-      "tool_input": { "command": "head -20 /srv/outside-zone/data.txt" }
+      "tool_input": {
+        "command": "head -20 /srv/outside-zone/data.txt"
+      }
     },
-    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
     "mode": "default",
     "settings": {},
     "rules_config": {},
@@ -16761,5 +16801,328 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "An absolute-path argv0 is an untrusted executable identity (no trustedExecPath is deployed)."
+  },
+  {
+    "case": "ccpool_list_json",
+    "tags": ["pool-worker-tools", "ccpool"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool list --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only listing of the pool's sessions."
+  },
+  {
+    "case": "ccpool_list_all_state",
+    "tags": ["pool-worker-tools", "ccpool"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool list --all --json --state needs_input"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only listing with filters."
+  },
+  {
+    "case": "ccpool_capacity_json",
+    "tags": ["pool-worker-tools", "ccpool"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool capacity --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only pool occupancy."
+  },
+  {
+    "case": "ccpool_state_json",
+    "tags": ["pool-worker-tools", "ccpool"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool state worker-1 --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only session state."
+  },
+  {
+    "case": "ccpool_help",
+    "tags": ["pool-worker-tools", "ccpool"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Help text."
+  },
+  {
+    "case": "ccpool_trust_not_approve",
+    "tags": ["pool-worker-tools", "ccpool", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool trust /repo"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "trust writes ~/.claude.json, the agent's own settings file."
+  },
+  {
+    "case": "ccpool_new_not_approve",
+    "tags": ["pool-worker-tools", "ccpool", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool new worker --cwd /repo"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Launching another agent session is modeled by no effect kind: unmodeled."
+  },
+  {
+    "case": "ccpool_reply_not_approve",
+    "tags": ["pool-worker-tools", "ccpool", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool reply worker-1 hello"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Steering another agent session is unmodeled."
+  },
+  {
+    "case": "ccpool_attach_not_approve",
+    "tags": ["pool-worker-tools", "ccpool", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool attach worker-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Attaching to another session is unmodeled."
+  },
+  {
+    "case": "ccpool_close_purge_not_approve",
+    "tags": ["pool-worker-tools", "ccpool", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ccpool close worker-1 --purge"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Closing and purging a session changes pool state: absent from the schema."
+  },
+  {
+    "case": "pg_router_doctor_clauses",
+    "tags": ["pool-worker-tools", "pg-router"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-router doctor --clauses"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only report of what the current readings would pause."
+  },
+  {
+    "case": "pg_router_run_query_untrusted_cwd_not_approve",
+    "tags": ["pool-worker-tools", "pg-router"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-router run-query --json query:work"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Exec fact for the configured source's query command: abstains outside a trusted checkout (/repo here has no workspace marker); TestPluginInstructedForms pins the approving case."
+  },
+  {
+    "case": "pg_router_doctor_socket_not_approve",
+    "tags": ["pool-worker-tools", "pg-router", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-router doctor --socket /tmp/other.sock"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "A caller-chosen core socket is unmodeled."
+  },
+  {
+    "case": "pb_unstick_prepare",
+    "tags": ["pool-worker-tools", "pb"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb unstick prepare --root /repo --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Deterministic sweep stage."
+  },
+  {
+    "case": "pb_unstick_marker",
+    "tags": ["pool-worker-tools", "pb"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb unstick marker --outcome unchanged --reason \"still blocked\" --recheck-when on-change"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Prints one sweep marker line."
+  },
+  {
+    "case": "pb_unstick_report",
+    "tags": ["pool-worker-tools", "pb"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb unstick report --workdir /tmp/bead-unstick-2026-11-17 --root /repo"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Prints the sweep report."
+  },
+  {
+    "case": "pb_unstick_unmodeled_flag_not_approve",
+    "tags": ["pool-worker-tools", "pb", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb unstick prepare --force"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Unmodeled flag stays insufficient."
   }
 ]

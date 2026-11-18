@@ -1,0 +1,978 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "ccpool",
+  "command": {
+    "name": "ccpool",
+    "provenance": "ccpool --help (usage: ccpool [--pool <dir>] <command> [<args>]), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+    "citations": {
+      "provenance": {
+        "source": "`ccpool --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+      },
+      "stdin": {
+        "source": "`ccpool --help`: no stdin read is documented for this command (ccpool 0.0.0-48e55a29)"
+      },
+      "stdout": {
+        "source": "`ccpool --help`: usage: ccpool [--pool <dir>] <command> [<args>]"
+      },
+      "unknownFlag": {
+        "source": "`ccpool --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "`ccpool --help`: the tool prints its help for -h/--help and exits (usage text)"
+        }
+      },
+      "--pool": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "`ccpool --help`: usage: ccpool [--pool <dir>] <command> [<args>]"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "`ccpool --help`: the tool prints its help for -h/--help and exits (usage text)"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "`ccpool --help`: usage: ccpool [--pool <dir>] <command> [<args>]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "capacity": {
+        "name": "capacity",
+        "provenance": "ccpool capacity --help and ccpool --help (report pool occupancy and free slots), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool capacity --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool capacity --help` documents no stdin read for this command; ccpool --help line: capacity report pool occupancy and free slots"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: capacity report pool occupancy and free slots"
+          },
+          "unknownFlag": {
+            "source": "`ccpool capacity --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool capacity --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool capacity --help`: -json / emit JSON"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool capacity --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: capacity report pool occupancy and free slots"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "consumption": {
+        "name": "consumption",
+        "provenance": "ccpool consumption --help and ccpool --help (print a session's token consumption and estimated cost), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool consumption --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool consumption --help` documents no stdin read for this command; ccpool --help line: consumption print a session's token consumption and estimated cost"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: consumption print a session's token consumption and estimated cost"
+          },
+          "unknownFlag": {
+            "source": "`ccpool consumption --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool consumption --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool consumption --help`: -json / emit JSON"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool consumption --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: consumption print a session's token consumption and estimated cost"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "doctor": {
+        "name": "doctor",
+        "provenance": "ccpool doctor --help and ccpool --help (print each session's pool context and cached store state), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool doctor --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool doctor --help` documents no stdin read for this command; ccpool --help line: doctor print each session's pool context and cached store state"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: doctor print each session's pool context and cached store state"
+          },
+          "unknownFlag": {
+            "source": "`ccpool doctor --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool doctor --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool doctor --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: doctor print each session's pool context and cached store state"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "list": {
+        "name": "list",
+        "provenance": "ccpool list --help and ccpool --help (list sessions in the pool), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool list --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool list --help` documents no stdin read for this command; ccpool --help line: list list sessions in the pool"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: list list sessions in the pool"
+          },
+          "unknownFlag": {
+            "source": "`ccpool list --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--all": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: -all / show cold terminal rows hidden by retention"
+            }
+          },
+          "--filter": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: -filter value / only show sessions whose metadata matches key=value (repeatable, AND-combined)"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: -json / emit a JSON array of sessions instead of the text table"
+            }
+          },
+          "--no-facets": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: -no-facets / with --json, skip the live pane path and git lookups: cwd is the launch dir and git_repo_root/worktree/branch are null (liveness is still read); for pollers that read only state, live and transcript_path"
+            }
+          },
+          "--paths": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: -paths / print only each visible session's launch directory (worktree path), one per line, no header, no other fields — combine with --state needs_input to get a comm/grep -v-able skip list before a manual worktree cleanup sweep (ADR 0037)"
+            }
+          },
+          "--state": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: print only each visible session's launch directory (worktree path), one per line, no header, no other fields — combine with --state needs_input to get a comm/grep -v-able skip list before a manual worktree cleanup sweep (ADR 0037)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool list --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: list list sessions in the pool"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "meta": {
+        "name": "meta",
+        "provenance": "ccpool meta usage (ccpool meta <set|get|list|rm> <external_id> [key] [value]), ccpool 0.0.0-48e55a29, this host 2026-11-17; only get and list are read-only",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool meta` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"), ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool meta` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\") documents no stdin read for this command; ccpool --help line:"
+          },
+          "stdout": {
+            "source": "ccpool --help command table:"
+          },
+          "unknownFlag": {
+            "source": "`ccpool meta` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool meta` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool meta` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table:; running it bare prints \"usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "get": {
+            "name": "get",
+            "provenance": "ccpool get --help and ccpool --help (get a session's metadata key), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+            "citations": {
+              "provenance": {
+                "source": "`ccpool meta get` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"), ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+              },
+              "stdin": {
+                "source": "`ccpool meta get` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\") documents no stdin read for this command; ccpool --help line:"
+              },
+              "stdout": {
+                "source": "ccpool --help command table:"
+              },
+              "unknownFlag": {
+                "source": "`ccpool meta get` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`ccpool meta get` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`ccpool meta get` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+                }
+              }
+            },
+            "positionals": {
+              "leading": [
+                {
+                  "kind": "literal"
+                },
+                {
+                  "kind": "literal"
+                }
+              ],
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "ccpool --help command table:; running it bare prints \"usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "list": {
+            "name": "list",
+            "provenance": "ccpool list --help and ccpool --help (list a session's metadata), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+            "citations": {
+              "provenance": {
+                "source": "`ccpool meta list` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"), ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+              },
+              "stdin": {
+                "source": "`ccpool meta list` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\") documents no stdin read for this command; ccpool --help line:"
+              },
+              "stdout": {
+                "source": "ccpool --help command table:"
+              },
+              "unknownFlag": {
+                "source": "`ccpool meta list` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`ccpool meta list` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`ccpool meta list` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): flag documented in the tool's usage"
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`ccpool meta list` usage (usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]; ccpool --help: \"meta  get/set/list/remove a session's opaque metadata key/value tags\"): the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+                }
+              }
+            },
+            "positionals": {
+              "leading": [
+                {
+                  "kind": "literal"
+                }
+              ],
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "ccpool --help command table:; running it bare prints \"usage: ccpool meta <set|get|list|rm> <external_id> [key] [value]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "result": {
+        "name": "result",
+        "provenance": "ccpool result --help and ccpool --help (resolve a previously dispatched turn's reply from its transcript anchor), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool result --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool result --help` documents no stdin read for this command; ccpool --help line: result resolve a previously dispatched turn's reply from its transcript anchor"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: result resolve a previously dispatched turn's reply from its transcript anchor"
+          },
+          "unknownFlag": {
+            "source": "`ccpool result --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool result --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool result --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: result resolve a previously dispatched turn's reply from its transcript anchor"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "state": {
+        "name": "state",
+        "provenance": "ccpool state --help and ccpool --help (print a session's live, reconciled state), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool state --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool state --help` documents no stdin read for this command; ccpool --help line: state print a session's live, reconciled state"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: state print a session's live, reconciled state"
+          },
+          "unknownFlag": {
+            "source": "`ccpool state --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool state --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool state --help`: -json / emit JSON"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool state --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: state print a session's live, reconciled state; running it bare prints \"usage: ccpool state <external_id> [--json]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "tail": {
+        "name": "tail",
+        "provenance": "ccpool tail --help and ccpool --help (print a session's recent transcript output), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool tail --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool tail --help` documents no stdin read for this command; ccpool --help line: tail print a session's recent transcript output"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: tail print a session's recent transcript output"
+          },
+          "unknownFlag": {
+            "source": "`ccpool tail --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool tail --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool tail --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: tail print a session's recent transcript output; running it bare prints \"usage: ccpool tail <external_id>\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "trust": {
+        "name": "trust",
+        "provenance": "ccpool --help (trust: pre-trust a cwd so an automated claude launch there doesn't stall on the folder-trust prompt); cmd/ccpool/trust.go writes $HOME/.claude.json, ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool trust --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool trust --help` documents no stdin read for this command; ccpool --help line: trust pre-trust a cwd so an automated claude launch there doesn't stall on the folder-trust prompt"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: trust pre-trust a cwd so an automated claude launch there doesn't stall on the folder-trust prompt"
+          },
+          "unknownFlag": {
+            "source": "`ccpool trust --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool trust --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool trust --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: trust pre-trust a cwd so an automated claude launch there doesn't stall on the folder-trust prompt"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": "~/.claude.json",
+            "citation": {
+              "source": "packages/ccpool/cmd/ccpool/trust.go runTrust: trust.EnsureTrusted(filepath.Join(home, \".claude.json\"), cwd) writes the folder's trust entry; `ccpool --help`: \"trust  pre-trust a cwd so an automated claude launch there doesn't stall on the folder-trust prompt\""
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "version": {
+        "name": "version",
+        "provenance": "ccpool version --help and ccpool --help (print the ccpool version), ccpool 0.0.0-48e55a29, this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "`ccpool version --help`, ccpool 0.0.0-48e55a29, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`ccpool version --help` documents no stdin read for this command; ccpool --help line: version print the ccpool version"
+          },
+          "stdout": {
+            "source": "ccpool --help command table: version print the ccpool version"
+          },
+          "unknownFlag": {
+            "source": "`ccpool version --help`: the flags listed there are the ones this schema models; any other flag stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool version --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`ccpool version --help`: the Go flag package prints usage and exits for -h/--help before the command runs (observed 2026-11-17)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "ccpool --help command table: version print the ccpool version"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

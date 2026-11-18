@@ -902,6 +902,541 @@
             "endOfOptions": true
           }
         }
+      },
+      "unstick": {
+        "name": "unstick",
+        "provenance": "pb unstick --help (pb 0.0.0-66f7a333, this host 2026-11-17)",
+        "citations": {
+          "provenance": {
+            "source": "`pb unstick --help`, pb 0.0.0-66f7a333, captured on this host 2026-11-17"
+          },
+          "stdin": {
+            "source": "`pb unstick --help`: no stdin read is documented for this command (pb 0.0.0-66f7a333)"
+          },
+          "stdout": {
+            "source": "`pb unstick --help`: Deterministic stages of the /pb:unstick-beads sweep: inventory and triage"
+          },
+          "unknownFlag": {
+            "source": "`pb unstick --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`pb unstick --help`: the tool prints its help for -h/--help and exits (-h, --help help for unstick)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "`pb unstick --help`: the tool prints its help for -h/--help and exits (-h, --help help for unstick)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "`pb unstick --help`: Deterministic stages of the /pb:unstick-beads sweep: inventory and triage"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "batch": {
+            "name": "batch",
+            "provenance": "pb unstick batch --help (pb 0.0.0-66f7a333, this host 2026-11-17)",
+            "citations": {
+              "provenance": {
+                "source": "`pb unstick batch --help`, pb 0.0.0-66f7a333, captured on this host 2026-11-17"
+              },
+              "stdin": {
+                "source": "`pb unstick batch --help`: no stdin read is documented for this command (pb 0.0.0-66f7a333)"
+              },
+              "stdout": {
+                "source": "`pb unstick batch --help`: Stage 7 of /pb:unstick-beads: builds an extra batch for beads that need a second"
+              },
+              "unknownFlag": {
+                "source": "`pb unstick batch --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick batch --help`: the tool prints its help for -h/--help and exits (-h, --help help for batch)"
+                }
+              },
+              "--ids": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick batch --help`: MUST be present in the export; --ids is a comma-separated list."
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick batch --help`: --json JSON output"
+                }
+              },
+              "--name": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick batch --help`: --name string batch name, e.g. FOLLOWUPS (required)"
+                }
+              },
+              "--workdir": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick batch --help`: --workdir string absolute path of the sweep work directory (required)"
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick batch --help`: the tool prints its help for -h/--help and exits (-h, --help help for batch)"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "`pb unstick batch --help`: Stage 7 of /pb:unstick-beads: builds an extra batch for beads that need a second"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "marker": {
+            "name": "marker",
+            "provenance": "pb unstick marker --help (pb 0.0.0-66f7a333, this host 2026-11-17)",
+            "citations": {
+              "provenance": {
+                "source": "`pb unstick marker --help`, pb 0.0.0-66f7a333, captured on this host 2026-11-17"
+              },
+              "stdin": {
+                "source": "`pb unstick marker --help`: \"--check: reads marker lines from stdin\""
+              },
+              "stdout": {
+                "source": "`pb unstick marker --help`: Generate: prints one marker line stamped with the current UTC time:"
+              },
+              "unknownFlag": {
+                "source": "`pb unstick marker --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+              }
+            },
+            "flags": {
+              "--check": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: --check: reads marker lines from stdin (blank lines ignored) and exits 22"
+                }
+              },
+              "--export": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: if any does not conform. With --export FILE it also scans the notes and"
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: the tool prints its help for -h/--help and exits (-h, --help help for marker)"
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: --json JSON output"
+                }
+              },
+              "--outcome": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: --outcome matches [a-z][a-z-]*. --reason is plain text: no control characters"
+                }
+              },
+              "--reason": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: --outcome matches [a-z][a-z-]*. --reason is plain text: no control characters"
+                }
+              },
+              "--recheck-when": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: --recheck-when is YYYY-MM-DD, \"<bead-id> closes\" or \"on-change\"."
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick marker --help`: the tool prints its help for -h/--help and exits (-h, --help help for marker)"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "`pb unstick marker --help`: Generate: prints one marker line stamped with the current UTC time:"
+              }
+            },
+            "stdin": "always",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "prepare": {
+            "name": "prepare",
+            "provenance": "pb unstick prepare --help (pb 0.0.0-66f7a333, this host 2026-11-17)",
+            "citations": {
+              "provenance": {
+                "source": "`pb unstick prepare --help`, pb 0.0.0-66f7a333, captured on this host 2026-11-17"
+              },
+              "stdin": {
+                "source": "`pb unstick prepare --help`: no stdin read is documented for this command (pb 0.0.0-66f7a333)"
+              },
+              "stdout": {
+                "source": "`pb unstick prepare --help`: Stages 1, 3, 4, 5 and 7-prep of /pb:unstick-beads in one call."
+              },
+              "unknownFlag": {
+                "source": "`pb unstick prepare --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+              }
+            },
+            "flags": {
+              "--full": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: DRAINABLE are computed. --full ignores sweep markers."
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: the tool prints its help for -h/--help and exits (-h, --help help for prepare)"
+                }
+              },
+              "--id-prefix": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: workspace. --label and --id-prefix narrow the TARGETS only after LIVE and"
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: --json JSON output"
+                }
+              },
+              "--label": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: workspace. --label and --id-prefix narrow the TARGETS only after LIVE and"
+                }
+              },
+              "--root": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: --root string pn workspace root holding the beads DB (default: $PN_WORKSPACE_ROOT, else the nearest pn-workspace.toml)"
+                }
+              },
+              "--workdir": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: reused; --workdir names one explicitly and must not exist), exports the bead"
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick prepare --help`: the tool prints its help for -h/--help and exits (-h, --help help for prepare)"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "`pb unstick prepare --help`: Stages 1, 3, 4, 5 and 7-prep of /pb:unstick-beads in one call."
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "report": {
+            "name": "report",
+            "provenance": "pb unstick report --help (pb 0.0.0-66f7a333, this host 2026-11-17)",
+            "citations": {
+              "provenance": {
+                "source": "`pb unstick report --help`, pb 0.0.0-66f7a333, captured on this host 2026-11-17"
+              },
+              "stdin": {
+                "source": "`pb unstick report --help`: no stdin read is documented for this command (pb 0.0.0-66f7a333)"
+              },
+              "stdout": {
+                "source": "`pb unstick report --help`: Stage 8 of /pb:unstick-beads. Re-exports to <workdir>/export.post.jsonl,"
+              },
+              "unknownFlag": {
+                "source": "`pb unstick report --help` lists the flags this schema models; any other flag is unmodeled and stays insufficient (fail-closed)"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick report --help`: the tool prints its help for -h/--help and exits (-h, --help help for report)"
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick report --help`: --json JSON output"
+                }
+              },
+              "--root": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick report --help`: --root string pn workspace root holding the beads DB (default: $PN_WORKSPACE_ROOT, else the nearest pn-workspace.toml)"
+                }
+              },
+              "--workdir": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick report --help`: --workdir string absolute path of the sweep work directory (required)"
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "`pb unstick report --help`: the tool prints its help for -h/--help and exits (-h, --help help for report)"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "`pb unstick report --help`: Stage 8 of /pb:unstick-beads. Re-exports to <workdir>/export.post.jsonl,"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
       }
     }
   }

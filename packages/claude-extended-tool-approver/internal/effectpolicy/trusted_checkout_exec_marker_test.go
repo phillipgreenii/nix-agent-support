@@ -90,6 +90,7 @@ func TestPnPnwfExecFactMarkerWorkspace(t *testing.T) {
 		"pre-land-eval . main",
 		"pg-git-lander land drain/x --repo . --json",
 		"pg-git-lander rebase drain/x --onto main",
+		"pg-router run-query query:work",
 		"go test ./...",
 	}
 	for _, c := range execForms {

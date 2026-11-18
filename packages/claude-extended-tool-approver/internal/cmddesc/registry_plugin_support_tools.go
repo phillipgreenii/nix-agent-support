@@ -45,12 +45,16 @@ package cmddesc
 //	pb                        APPROVE the instructed verbs (registry_pb.go).
 //	pg-router                 APPROVE only the READ-ONLY subcommands: status,
 //	                          level list, explain, config --show / --print-defaults /
-//	                          check, version, help (pgRouterSchema, below). ABSTAIN
-//	                          on every mutating or process-starting one: pause,
-//	                          resume, level set, level clear, level refresh,
+//	                          check, doctor (--clauses or bare), version, help, plus
+//	                          run-query as an Exec fact (pgRouterSchema, below).
+//	                          ABSTAIN on every mutating or process-starting one:
+//	                          pause, resume, level set, level clear, level refresh,
 //	                          push-inject, log compact, run, run-until-idle,
-//	                          run-role, run-query, doctor, tui, ingest-event,
-//	                          self-status.
+//	                          run-role, tui, ingest-event, self-status.
+//	ccpool                    APPROVE the read-only listing/status verbs; trust
+//	                          models its ~/.claude.json write (never approves);
+//	                          new, reply, attach, attend and the pool-mutating
+//	                          verbs abstain (registry_ccpool.go).
 //	example-tick-probe  NOT A PACKAGE OF THIS REPO. It ships in a consumer's
 //	                          monorepo, and this public repo MUST NOT name that
 //	                          consumer's tools (repo CLAUDE.md, "No ZipRecruiter
@@ -136,9 +140,12 @@ var wtnewSchema = CommandSchema{
 //     compact: they change the running core's state (the operator level override
 //     on resource router, a level override, the queue, the event log), which a
 //     blanket approval would hand to any session;
-//   - run, run-until-idle, run-role, run-query, doctor, tui, ingest-event,
-//     self-status: they start a core, execute configured sources and handlers
-//     (doctor runs each handler's `validate`), or are manager-to-core callbacks.
+//   - run, run-until-idle, run-role, tui, ingest-event, self-status: they start a
+//     core, execute configured handlers, or are manager-to-core callbacks.
+//
+// Modeled since the pool workers were refused read-only calls: `doctor` and
+// `run-query` (see their entries below). `pg-router gate` is a removed verb
+// (`pg-router gate --help` prints "unknown subcommand: gate") and stays absent.
 var pgRouterSchema = CommandSchema{
 	Name:       "pg-router",
 	Provenance: "pg-router --help ('pg-router routes typed events from configured sources through a durable queue'), this host 2026-10-26 (help hash identical to the source build at this commit)",
@@ -204,6 +211,42 @@ var pgRouterSchema = CommandSchema{
 			UnknownFlag:  UnknownFlagInsufficient,
 			EndOfOptions: true,
 		},
+		// doctor: "run config check plus quick probes, one verdict line each": the
+		// state directory is writable, the core's socket is reachable, the levels,
+		// and each enabled role's handler "validate" (answered within 5 seconds,
+		// else "timed out"). `doctor --clauses` is "read-only report of what the
+		// CURRENT readings would pause": it runs every level-source query once with
+		// --raw. The handler `validate` entry point and the level-source queries are
+		// the operator's own configured read-only probes (the config, not the
+		// checkout, names them), so doctor declares no Exec fact; only --clauses
+		// and the bare form are modeled, --socket and --token (a caller-chosen
+		// core) stay unmodeled and abstain like status's.
+		"doctor": {
+			Name:         "doctor",
+			Provenance:   "pg-router doctor --help (doctor [--socket <path>] [--token <tok>] | doctor --clauses), pg-router 0.0.0-f56b5176, this host 2026-11-17",
+			Flags:        map[string]FlagSpec{"--clauses": inert},
+			Positionals:  PositionalSpec{Rest: Unmodeled},
+			Stdin:        StdinNever,
+			Stdout:       StdoutContent,
+			UnknownFlag:  UnknownFlagInsufficient,
+			EndOfOptions: true,
+		},
+		// run-query: "smoke-test one named source's query once, read-only, and print
+		// the matches it would emit". The source's query is a COMMAND the config
+		// names, and run-query executes it (sets PG_ROUTER_TEST_MODE=1), so it is an
+		// Exec fact, judged by TrustedCheckoutExec on the working directory exactly
+		// like `pn workspace flake-check`. query:<name> is a literal selector.
+		"run-query": {
+			Name:            "run-query",
+			Provenance:      "pg-router run-query --help (run-query [--json] query:<name>), pg-router 0.0.0-f56b5176, this host 2026-11-17",
+			Flags:           map[string]FlagSpec{"--json": inert},
+			Positionals:     PositionalSpec{Leading: []OperandRole{Literal}, Rest: Unmodeled},
+			ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "pg-router run-query"}},
+			Stdin:           StdinNever,
+			Stdout:          StdoutContent,
+			UnknownFlag:     UnknownFlagInsufficient,
+			EndOfOptions:    true,
+		},
 		"version": {
 			Name:         "version",
 			Provenance:   "pg-router --help, version: print the version and exit",
@@ -229,5 +272,5 @@ var pgRouterSchema = CommandSchema{
 
 // pluginSupportToolSchemas lists the schemas this file adds to DefaultRegistry().
 func pluginSupportToolSchemas() []CommandSchema {
-	return []CommandSchema{handToHumanSchema, wtnewSchema, pgRouterSchema, pgReviewSchema}
+	return []CommandSchema{handToHumanSchema, wtnewSchema, pgRouterSchema, pgReviewSchema, ccpoolSchema}
 }
