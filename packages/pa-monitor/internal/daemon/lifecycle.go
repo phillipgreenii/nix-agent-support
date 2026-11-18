@@ -25,7 +25,6 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
-	"github.com/phillipgreenii/pa-monitor/internal/shutdown"
 	"github.com/phillipgreenii/pa-monitor/internal/store"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
 )
@@ -150,9 +149,9 @@ type SessionLabeler interface {
 type RunOptions struct {
 	Paths   Paths
 	Emitter *otel.Emitter
-	// Shutdown, when non-nil, records the shutdown phase in progress so the
-	// hard-deadline watchdog can name it. A nil Tracker is a no-op.
-	Shutdown     *shutdown.Tracker
+	// SetPhase, when non-nil, records the shutdown phase in progress so the
+	// hard-deadline watchdog can name it.
+	SetPhase     func(name string)
 	Tick         time.Duration
 	Poller       PollerInterface
 	BlockTracker *block.Tracker
@@ -270,6 +269,12 @@ type RunOptions struct {
 // collector would otherwise hold the pidfile lock until launchd's SIGKILL.
 const EmitterFlushTimeout = 3 * time.Second
 
+func setPhase(opts RunOptions, name string) {
+	if opts.SetPhase != nil {
+		opts.SetPhase(name)
+	}
+}
+
 type emitterShutdowner interface {
 	Shutdown(ctx context.Context) error
 }
@@ -361,9 +366,9 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	go RunReaper(ctx, bridgeReg, 30*time.Second, pidAlive)
 
 	defer func() {
-		opts.Shutdown.Phase("emitter_flush")
+		setPhase(opts, "emitter_flush")
 		flushEmitter(context.WithoutCancel(ctx), opts.Emitter, EmitterFlushTimeout)
-		opts.Shutdown.Phase("release_lock")
+		setPhase(opts, "release_lock")
 	}()
 
 	// One-shot migration: copy runtime.json toggles into the DB, then delete

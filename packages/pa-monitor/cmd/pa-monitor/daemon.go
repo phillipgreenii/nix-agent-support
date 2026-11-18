@@ -29,9 +29,9 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
 	"github.com/phillipgreenii/pa-monitor/internal/recorderfacts"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
-	"github.com/phillipgreenii/pa-monitor/internal/shutdown"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
 	"github.com/phillipgreenii/pa-monitor/internal/timing"
+	"github.com/phillipgreenii/x/lifecycle"
 	"github.com/phillipgreenii/x/pprofserver"
 )
 
@@ -44,6 +44,9 @@ func runDaemon(args []string) {
 	pidPath := fs.String("pidfile", "", "Override pidfile path (default: XDG-derived)")
 	tickS := fs.Int("tick-seconds", 5, "Poll cadence in seconds")
 	disablePoller := fs.Bool("no-poller", false, "Disable poller (state RPCs return empty)")
+	// The deployment owns the deadline: the nix module derives launchd's
+	// ExitTimeOut from the same value (deadline plus a margin).
+	shutdownDeadline := lifecycle.DeadlineFlag(fs, "shutdown-deadline", defaultShutdownDeadline)
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitUsage)
@@ -67,18 +70,13 @@ func runDaemon(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	// S5: once ctx ends, the process has shutdown.Deadline to finish before the
-	// watchdog logs shutdown_overrun and exits non-zero. Raw stderr logger: the
-	// OTLP emitter's flush is one of the steps that can hang. Registered first so
-	// its Disarm runs last, after every other deferred cleanup.
+	// S5: once ctx ends, the process has the shutdown deadline to finish before
+	// the watchdog logs shutdown_overrun and exits non-zero. Raw stderr logger:
+	// the OTLP emitter's flush is one of the steps that can hang. Registered
+	// first so its Disarm runs last, after every other deferred cleanup.
 	shutLog := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	shutTracker := shutdown.NewTracker(shutLog)
-	watchdog := shutdown.Watch(ctx, shutdown.Options{Log: shutLog, Tracker: shutTracker})
-	defer func() {
-		if watchdog.Disarm() {
-			shutTracker.Done()
-		}
-	}()
+	group := newShutdownGroup(ctx, *shutdownDeadline, shutLog, nil)
+	defer group.Disarm()
 
 	stopPprof := pprofserver.StartFromEnv(pprofEnv, os.Getenv, os.Stderr)
 	defer stopPprof()
@@ -90,12 +88,32 @@ func runDaemon(args []string) {
 		os.Exit(exitGeneric)
 	}
 	defer cleanup()
-	opts.Shutdown = shutTracker
+	opts.SetPhase = group.SetPhase
 
 	if err := daemon.RunWith(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
 		os.Exit(exitGeneric)
 	}
+}
+
+// defaultShutdownDeadline applies when the --shutdown-deadline flag is absent;
+// it matches the value launchd's ExitTimeOut was derived from.
+const defaultShutdownDeadline = 8 * time.Second
+
+// shutdownExitCode is the process status of a watchdog hard exit.
+const shutdownExitCode = 10
+
+// newShutdownGroup arms the shared shutdown watchdog on ctx, which the daemon
+// cancels from its own signal handler (so the Group registers none). exit
+// replaces os.Exit in tests; nil selects the real one.
+func newShutdownGroup(ctx context.Context, deadline time.Duration, log *slog.Logger, exit func(int)) *lifecycle.Group {
+	return lifecycle.Attach(ctx, lifecycle.Options{
+		Deadline:       deadline,
+		ExitCode:       shutdownExitCode,
+		Log:            log,
+		PhaseDurations: true,
+		Exit:           exit,
+	})
 }
 
 // pprofEnv names the environment variable that turns the daemon's profiling
