@@ -32,6 +32,7 @@ func init() {
 			continue
 		}
 		typeGroup(t).AddCommand(newChangesCmd(t))
+		typeGroup(t).AddCommand(newChangesAckCmd(t))
 	}
 }
 
@@ -42,6 +43,7 @@ type changesFlags struct {
 	reset    bool
 	limit    int
 	jsonOut  bool
+	noAck    bool
 }
 
 // newChangesCmd builds `pg-desk <type> changes --consumer NAME [--query Q]
@@ -85,6 +87,7 @@ Entity types whose list cannot be fingerprinted (thread) are refused.`, entityTy
 	c.Flags().BoolVar(&f.reset, "reset", false, "Replay every active entity to the consumer as reconcile")
 	c.Flags().IntVar(&f.limit, "limit", 0, "Return at most N records (0 = all)")
 	c.Flags().BoolVar(&f.jsonOut, "json", false, "Print the envelope as JSON")
+	c.Flags().BoolVar(&f.noAck, "no-ack", false, "Do not advance the consumer cursor after writing the envelope; acknowledge later with changes-ack --next-seq <cursor.to>")
 	_ = c.MarkFlagRequired("consumer")
 	return c
 }
@@ -149,7 +152,7 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 	jsonOut := resolveJSONOutput(f.jsonOut)
 	out, err := eng.Run(cmd.Context(), changes.Options{
 		EntityType: entityType, Consumer: f.consumer, Query: f.query,
-		Cached: f.cached, Reset: f.reset, Limit: f.limit,
+		Cached: f.cached, Reset: f.reset, Limit: f.limit, NoAck: f.noAck,
 	}, func(env changes.Envelope) error {
 		if jsonOut {
 			return writeChangesJSON(cmd.OutOrStdout(), env)

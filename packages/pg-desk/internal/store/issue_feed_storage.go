@@ -68,6 +68,9 @@ const entityFlowIndexDDL = `CREATE INDEX IF NOT EXISTS entity_flow ON entity(
   entity_type, entity_id, repo, active, watched, backend, hydrated_at, first_seen_at, read_attempt_at, read_ok_at)`
 
 func ensureIssueFeedStorage(ctx context.Context, s *Store) error {
+	if err := ensureConsumerDelivered(ctx, s); err != nil {
+		return err
+	}
 	have, err := s.tableColumns(ctx, "entity")
 	if err != nil {
 		return err
@@ -110,6 +113,28 @@ func ensureIssueFeedStorage(ctx context.Context, s *Store) error {
 			if cerr != nil || !again[col.name] {
 				return fmt.Errorf("add ingest_failed.%s: %w", col.name, err)
 			}
+		}
+	}
+	return nil
+}
+
+// ensureConsumerDelivered adds consumer.delivered, the highest change_log seq
+// handed to the consumer (the bound of a deferred acknowledgement). The column
+// is nullable and a missing value reads as the cursor, so there is no
+// backfill. Additive and idempotent like ensureIssueFeedStorage, and it never
+// touches user_version.
+func ensureConsumerDelivered(ctx context.Context, s *Store) error {
+	have, err := s.tableColumns(ctx, "consumer")
+	if err != nil {
+		return err
+	}
+	if len(have) == 0 || have["delivered"] {
+		return nil
+	}
+	if _, err := s.sql.ExecContext(ctx, `ALTER TABLE consumer ADD COLUMN delivered INTEGER`); err != nil {
+		again, cerr := s.tableColumns(ctx, "consumer")
+		if cerr != nil || !again["delivered"] {
+			return fmt.Errorf("add consumer.delivered: %w", err)
 		}
 	}
 	return nil

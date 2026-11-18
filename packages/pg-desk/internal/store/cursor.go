@@ -39,6 +39,10 @@ type Consumer struct {
 	Type   string
 	Cursor int64
 	SeenAt string
+	// Delivered is the highest change_log seq handed to the consumer, the
+	// upper bound of an acknowledgement. A row from before the column, or one
+	// never delivered to, reads as the cursor.
+	Delivered int64
 }
 
 func formatTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -123,8 +127,8 @@ func (s *Store) AdvanceCursor(ctx context.Context, name, entityType string, seq 
 	if err := s.RequireNewSchema(ctx); err != nil {
 		return err
 	}
-	res, err := s.sql.ExecContext(ctx, `UPDATE consumer SET cursor = ? WHERE name = ? AND type = ? AND cursor < ?`,
-		seq, name, entityType, seq)
+	res, err := s.sql.ExecContext(ctx, `UPDATE consumer SET cursor = ?, delivered = MAX(COALESCE(delivered, cursor), ?) WHERE name = ? AND type = ? AND cursor < ?`,
+		seq, seq, name, entityType, seq)
 	if err != nil {
 		return fmt.Errorf("store: advance consumer (%s,%s): %w", name, entityType, err)
 	}
@@ -140,6 +144,60 @@ func (s *Store) AdvanceCursor(ctx context.Context, name, entityType string, seq 
 		}
 	}
 	return nil
+}
+
+// ErrAckBeyondDelivered is returned (matchable with errors.Is) when an
+// acknowledgement names a seq above the highest seq delivered to the consumer.
+var ErrAckBeyondDelivered = errors.New("acknowledgement is past the highest delivered sequence")
+
+// MarkDelivered raises the consumer's delivered value to seq (never lowers it)
+// without moving the cursor: the bookkeeping of a --no-ack emit. An
+// unregistered consumer returns ErrConsumerNotFound.
+func (s *Store) MarkDelivered(ctx context.Context, name, entityType string, seq int64) error {
+	if err := s.RequireNewSchema(ctx); err != nil {
+		return err
+	}
+	res, err := s.sql.ExecContext(ctx, `UPDATE consumer SET delivered = MAX(COALESCE(delivered, cursor), ?) WHERE name = ? AND type = ?`,
+		seq, name, entityType)
+	if err != nil {
+		return fmt.Errorf("store: mark delivered (%s,%s): %w", name, entityType, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("store: mark delivered (%s,%s): %w", name, entityType, err)
+	} else if n == 0 {
+		return fmt.Errorf("store: mark delivered (%s,%s): %w", name, entityType, ErrConsumerNotFound)
+	}
+	return nil
+}
+
+// AckCursor is the deferred acknowledgement: it moves the cursor forward to
+// seq and returns the cursor afterwards (above seq only when it already was).
+// A seq at or below the cursor is a no-op, never a backward move. An
+// unregistered consumer returns ErrConsumerNotFound (checked first), and a seq
+// above the delivered value returns ErrAckBeyondDelivered. The caller holds
+// the consumer lock.
+func (s *Store) AckCursor(ctx context.Context, name, entityType string, seq int64) (int64, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
+		return 0, err
+	}
+	var cursor, delivered int64
+	err := s.sql.QueryRowContext(ctx, `SELECT cursor, COALESCE(delivered, cursor) FROM consumer WHERE name = ? AND type = ?`,
+		name, entityType).Scan(&cursor, &delivered)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("store: ack consumer (%s,%s): %w", name, entityType, ErrConsumerNotFound)
+	} else if err != nil {
+		return 0, fmt.Errorf("store: ack consumer (%s,%s): %w", name, entityType, err)
+	}
+	if seq > delivered {
+		return cursor, fmt.Errorf("store: ack consumer (%s,%s): %d > %d: %w", name, entityType, seq, delivered, ErrAckBeyondDelivered)
+	}
+	if seq <= cursor {
+		return cursor, nil
+	}
+	if err := s.AdvanceCursor(ctx, name, entityType, seq); err != nil {
+		return 0, err
+	}
+	return seq, nil
 }
 
 // ResetConsumer moves the consumer's cursor back to 0 so the next read
@@ -166,7 +224,7 @@ func (s *Store) ListConsumers(ctx context.Context) ([]Consumer, error) {
 	if err := s.RequireNewSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.sql.QueryContext(ctx, `SELECT name, type, cursor, seen_at FROM consumer ORDER BY type, name`)
+	rows, err := s.sql.QueryContext(ctx, `SELECT name, type, cursor, seen_at, COALESCE(delivered, cursor) FROM consumer ORDER BY type, name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list consumers: %w", err)
 	}
@@ -175,7 +233,7 @@ func (s *Store) ListConsumers(ctx context.Context) ([]Consumer, error) {
 	for rows.Next() {
 		var c Consumer
 		var seen sql.NullString
-		if err := rows.Scan(&c.Name, &c.Type, &c.Cursor, &seen); err != nil {
+		if err := rows.Scan(&c.Name, &c.Type, &c.Cursor, &seen, &c.Delivered); err != nil {
 			return nil, fmt.Errorf("store: scan consumer: %w", err)
 		}
 		c.SeenAt = seen.String

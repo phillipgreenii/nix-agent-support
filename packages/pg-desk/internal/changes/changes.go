@@ -65,6 +65,10 @@ type Options struct {
 	// Reset replays every active entity of the type to the consumer as
 	// reconcile (origin reset). It cannot be combined with Cached.
 	Reset bool
+	// NoAck withholds the cursor advance after the envelope is written; the
+	// caller acknowledges later (changes-ack). The consumer's delivered value
+	// is raised to the envelope's cursor.to instead.
+	NoAck bool
 	// Limit caps records per call; <= 0 means no cap.
 	Limit int
 }
@@ -373,6 +377,14 @@ func (e *Engine) deliver(ctx context.Context, opts Options, sources []Source, em
 	env := e.envelope(ctx, opts, from, sources, rows)
 	if err := emit(env); err != nil {
 		return fmt.Errorf("changes: write output: %w", err)
+	}
+	if opts.NoAck {
+		// Deferred acknowledgement: the cursor stays; delivered records the
+		// highest sequence handed over, the bound of a later changes-ack.
+		if err := e.Store.MarkDelivered(ctx, opts.Consumer, opts.EntityType, env.Cursor.To); err != nil {
+			return fmt.Errorf("changes: %w", err)
+		}
+		return nil
 	}
 	if env.Cursor.To > from {
 		if err := e.Store.AdvanceCursor(ctx, opts.Consumer, opts.EntityType, env.Cursor.To); err != nil {

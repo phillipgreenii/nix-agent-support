@@ -92,6 +92,7 @@ func typedVerbs(typ, id string) map[string]verbClass {
 		typ + " annotate":         safe(id, "--key", "note", "--value", "x"),
 		typ + " annotation-items": safe("--consumer", "annotations:verb-test"),
 		typ + " changes":          safe("--consumer", "verb-test", "--cached"),
+		typ + " changes-ack":      unsafe("advances a consumer cursor (a write to the consumer table)"),
 		typ + " consumer forget":  safe("verb-test"),
 		typ + " consumer list":    safe(),
 		typ + " hide":             safe(id, "test"),
@@ -145,6 +146,7 @@ func verbClasses() map[string]verbClass {
 	// There is no pr changes verb: the daemon is the PR feed (PR lane refactor,
 	// packet P9a-3), so pg-desk runs no PR change flow.
 	delete(m, "pr changes")
+	delete(m, "pr changes-ack")
 	for k, v := range typedVerbs("issue", testIssue) {
 		m[k] = v
 	}

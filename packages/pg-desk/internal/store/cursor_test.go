@@ -555,3 +555,60 @@ func TestCrashBetweenFlushAndAdvanceYieldsDuplicateNotLoss(t *testing.T) {
 		t.Fatalf("after confirmed advance still got %v", seqs(rest))
 	}
 }
+
+func TestDeliveredBoundsAckAndReadsAsCursorWhenNull(t *testing.T) {
+	ctx := context.Background()
+	s := OpenNewSchemaForTest(t)
+	seedChanges(t, s, "issue", 3, curNow)
+	if _, err := s.ReadChanges(ctx, "c", "issue", 0, curNow); err != nil {
+		t.Fatal(err)
+	}
+	get := func() Consumer {
+		cs, err := s.ListConsumers(ctx)
+		if err != nil || len(cs) != 1 {
+			t.Fatalf("consumers = %+v, %v", cs, err)
+		}
+		return cs[0]
+	}
+	// A row from before the column (NULL) reads delivered as the cursor.
+	if _, err := s.sql.ExecContext(ctx, `UPDATE consumer SET delivered = NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if c := get(); c.Delivered != 0 || c.Cursor != 0 {
+		t.Fatalf("null delivered = %+v", c)
+	}
+	if _, err := s.AckCursor(ctx, "c", "issue", 1); !errors.Is(err, ErrAckBeyondDelivered) {
+		t.Fatalf("ack above null delivered: %v", err)
+	}
+	if err := s.MarkDelivered(ctx, "c", "issue", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkDelivered(ctx, "c", "issue", 1); err != nil { // never lowers
+		t.Fatal(err)
+	}
+	if c := get(); c.Delivered != 3 || c.Cursor != 0 {
+		t.Fatalf("after mark = %+v", c)
+	}
+	if got, err := s.AckCursor(ctx, "c", "issue", 2); err != nil || got != 2 {
+		t.Fatalf("ack 2 = %d, %v", got, err)
+	}
+	if got, err := s.AckCursor(ctx, "c", "issue", 1); err != nil || got != 2 {
+		t.Fatalf("ack 1 = %d, %v", got, err)
+	}
+	if _, err := s.AckCursor(ctx, "c", "issue", 4); !errors.Is(err, ErrAckBeyondDelivered) {
+		t.Fatalf("ack 4: %v", err)
+	}
+	if _, err := s.AckCursor(ctx, "nobody", "issue", 99); !errors.Is(err, ErrConsumerNotFound) {
+		t.Fatalf("unregistered: %v", err)
+	}
+	if err := s.MarkDelivered(ctx, "nobody", "issue", 1); !errors.Is(err, ErrConsumerNotFound) {
+		t.Fatalf("mark unregistered: %v", err)
+	}
+	// An ordinary advance never lowers delivered.
+	if err := s.AdvanceCursor(ctx, "c", "issue", 3); err != nil {
+		t.Fatal(err)
+	}
+	if c := get(); c.Cursor != 3 || c.Delivered != 3 {
+		t.Fatalf("after advance = %+v", c)
+	}
+}
