@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"text/template"
@@ -104,8 +105,9 @@ type Watchdog struct {
 
 	// OwnerID and Generation are the dispatch's own lease owner id and the
 	// generation it owns, as recorded at takeover (1 for a fresh launch). The
-	// reminder latch reads them to learn whether the dispatch was superseded; the
-	// watchdog does not read them itself in this version.
+	// reminder latch reads them to learn whether the dispatch was superseded. They
+	// are fixed at construction: the watchdog never adopts a newer value read from
+	// the lease record.
 	OwnerID    string
 	Generation int64
 }
@@ -164,6 +166,11 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 		start = w.now()
 	}
 	highest := budget.None
+	if w.reminderLatched(ctx, sessionName) {
+		// A previous supervisor already pasted the reminder (D-9): treat the level
+		// as reached so a restart past the threshold does not paste it again.
+		highest = budget.Reminder
+	}
 	// heldForDialog is set while a budget message is being held back because the
 	// session is in needs_input (so the suppression is logged once, not per poll).
 	heldForDialog := false
@@ -190,13 +197,23 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 			}
 		} else if level > highest {
 			heldForDialog = false
+			prevHighest := highest
 			highest = level
 			switch level {
 			case budget.Reminder:
 				if w.firstTurnStarted(ctx, sessionName) {
-					if w.sendIfLive(ctx, sessionName, beadID, renderMsg(w.ReminderMsg, beadID)) {
-						w.emit("info", "reminder", "budget reminder threshold reached",
-							map[string]any{"session": sessionName, "bead": beadID})
+					switch w.reminderGate(ctx, sessionName) {
+					case gateSkip:
+						// The lease record could not be read: do not latch, retry next poll.
+						highest = prevHighest
+					case gateSuperseded:
+						// A newer dispatch owns the session: no reminder paste (D-8).
+					default:
+						if w.sendIfLive(ctx, sessionName, beadID, renderMsg(w.ReminderMsg, beadID)) {
+							w.emit("info", "reminder", "budget reminder threshold reached",
+								map[string]any{"session": sessionName, "bead": beadID})
+							w.latchReminder(ctx, sessionName)
+						}
 					}
 				} else {
 					w.emit("warn", "reminder-suppressed", "budget reminder suppressed: no model turn yet",
@@ -291,5 +308,65 @@ func (w *Watchdog) budgetError(snap usage.Snapshot, elapsed time.Duration, sessi
 	return &BudgetError{
 		Role: w.Role, Pool: pool, Bead: beadID, Session: sessionName,
 		Limit: trip.Limit, Used: trip.Used, Cap: trip.Cap, Elapsed: elapsed,
+	}
+}
+
+// reminderGateResult is the outcome of the lease re-read made just before the
+// reminder paste.
+type reminderGateResult int
+
+const (
+	gatePaste      reminderGateResult = iota // not superseded: paste
+	gateSkip                                 // re-read failed: skip this poll, do not latch
+	gateSuperseded                           // a newer generation owns the session: abandon
+)
+
+// reminderLatched reports whether the lease record already carries a parsable
+// pgrouter.reminder_sent (D-9). A Runner that cannot read metadata, a failed
+// read, and an empty or unparsable value all read as unset.
+func (w *Watchdog) reminderLatched(ctx context.Context, sessionName string) bool {
+	mr, ok := w.CC.(ccpool.MetaReader)
+	if !ok {
+		return false
+	}
+	meta, err := mr.GetMeta(ctx, sessionName)
+	if err != nil {
+		return false
+	}
+	_, set := ccpool.ParseReminderSent(meta)
+	return set
+}
+
+// reminderGate re-reads the lease record immediately before the reminder paste
+// and reports whether this dispatch was superseded (a generation above the one
+// it owns; an absent or unparsable generation reads as 0, never superseded). A
+// Runner that cannot read metadata has nothing to fence against.
+func (w *Watchdog) reminderGate(ctx context.Context, sessionName string) reminderGateResult {
+	mr, ok := w.CC.(ccpool.MetaReader)
+	if !ok {
+		return gatePaste
+	}
+	meta, err := mr.GetMeta(ctx, sessionName)
+	if err != nil {
+		slog.Warn("reminder: could not re-read the lease record; skipping the paste for this poll",
+			"session", sessionName, "err", err)
+		return gateSkip
+	}
+	if seen := ccpool.ParseLeaseGeneration(meta); seen > w.Generation {
+		slog.Warn("reminder: lease superseded by a newer dispatch; not pasting",
+			"session", sessionName, "owner", w.OwnerID, "own_generation", w.Generation, "seen_generation", seen)
+		return gateSuperseded
+	}
+	return gatePaste
+}
+
+// latchReminder records the paste instant in the lease record, after the paste
+// (a crash between the two can repeat one reminder; writing first could lose
+// it). A failed write is logged and the in-memory latch (highest) keeps this
+// process from repeating the reminder.
+func (w *Watchdog) latchReminder(ctx context.Context, sessionName string) {
+	if err := w.CC.SetMeta(ctx, sessionName, ccpool.MetaKeyReminderSent, ccpool.FormatMetaTime(w.now())); err != nil {
+		slog.Warn("reminder: could not persist the reminder latch; keeping the in-memory latch",
+			"session", sessionName, "err", err)
 	}
 }

@@ -101,6 +101,11 @@ const (
 	// previous lease was still fresh adds one to the previous value, otherwise
 	// resets it to 1. Never a --label.
 	MetaKeySupervisors = "pgrouter.supervisors"
+	// MetaKeyReminderSent holds the RFC 3339 instant the watchdog pasted the budget
+	// reminder into the session: the reminder level latch, kept in the lease record
+	// so a restarted supervisor does not paste it again. An empty or unparsable
+	// value reads as unset. Never a --label.
+	MetaKeyReminderSent = "pgrouter.reminder_sent"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions
@@ -158,6 +163,12 @@ func ParseLeaseGeneration(meta map[string]string) int64 {
 		return 0
 	}
 	return n
+}
+
+// ParseReminderSent reads the reminder latch out of a session's metadata; ok is
+// false for an absent, empty or unparsable value.
+func ParseReminderSent(meta map[string]string) (time.Time, bool) {
+	return ParseMetaTime(meta[MetaKeyReminderSent])
 }
 
 // LeaseGeneration returns the session's lease generation (0 when absent or
