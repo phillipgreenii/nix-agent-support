@@ -83,6 +83,7 @@ func TestLoad_defaultsWhenNoFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 
 	c, err := Load()
 	if err != nil {
@@ -111,6 +112,7 @@ func TestLoad_autoReapDefaultsTrue(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -132,6 +134,7 @@ func TestLoad_autoReapOptOut(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -177,6 +180,7 @@ func TestLoadForPool_emptyIsDefault(t *testing.T) {
 	t.Setenv("CCPOOL_POOL", "/ignored")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := LoadForPool("")
 	if err != nil {
 		t.Fatalf("LoadForPool(\"\"): %v", err)
@@ -210,6 +214,7 @@ func TestLoad_claudeBinDefaultsToClaude(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -238,6 +243,7 @@ func TestLoad_removedCanonicalMCPSettingsPathIsIgnoredWithDiagnostic(t *testing.
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 
 	var logs bytes.Buffer
 	prev := slog.Default()
@@ -272,6 +278,7 @@ func TestLoad_noRemovedKeyNoDiagnostic(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 
 	var logs bytes.Buffer
 	prev := slog.Default()
@@ -290,6 +297,7 @@ func TestLoad_notifyDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -321,6 +329,7 @@ done_ttl = "15m"
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 
 	c, err := Load()
 	if err != nil {
@@ -342,6 +351,7 @@ func TestLoad_retryDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -384,6 +394,7 @@ classes = ["transient_network"]
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -411,6 +422,7 @@ func TestLoad_metricLabelAllowlistDefaultsToRole(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -445,6 +457,7 @@ func TestLoad_metricLabelAllowlistConfigurable(t *testing.T) {
 			}
 			t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 			t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+			clearAmbientPoolEnv(t)
 			c, err := Load()
 			if err != nil {
 				t.Fatalf("Load: %v", err)
@@ -462,6 +475,7 @@ func TestLoad_usageGateDefaults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -501,6 +515,7 @@ timeout = "2s"
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -524,6 +539,7 @@ func loadWithPoolBlock(t *testing.T, body string) (Config, error) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	clearAmbientPoolEnv(t)
 	return Load()
 }
 
@@ -609,5 +625,69 @@ func TestLoad_closedRowRetention(t *testing.T) {
 	_, err = loadWithPoolBlock(t, "closed_row_retention = \"-1h\"\n")
 	if err == nil || !strings.Contains(err.Error(), "closed_row_retention") {
 		t.Errorf("negative retention: err = %v, want one naming closed_row_retention", err)
+	}
+}
+
+// ambientPoolEnv lists the variables a ccpool pool session exports into every
+// shell it launches; Load() and its neighbours must never read them in a test
+// that did not set them itself.
+var ambientPoolEnv = []string{
+	"CCPOOL_POOL",
+	"CCPOOL_AUTONOMOUS",
+	"CCPOOL_EXTERNAL_ID",
+	"CCPOOL_REGISTRY_DIR",
+}
+
+// clearAmbientPoolEnv removes the ambient pool variables for the test. The
+// t.Setenv registers the restore of the original value; the os.Unsetenv then
+// makes the variable truly unset rather than empty.
+func clearAmbientPoolEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range ambientPoolEnv {
+		t.Setenv(k, "")
+		if err := os.Unsetenv(k); err != nil {
+			t.Fatalf("unset %s: %v", k, err)
+		}
+	}
+}
+
+// TestLoadTests_ignoreAmbientPoolEnv exports sentinel pool variables and reruns
+// every default-pool Load()-calling test as a subtest, so a test that stops
+// clearing the ambient environment fails here in every environment, including
+// a sandbox that never exports them.
+func TestLoadTests_ignoreAmbientPoolEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func(*testing.T)
+	}{
+		{"defaultsWhenNoFile", TestLoad_defaultsWhenNoFile},
+		{"autoReapDefaultsTrue", TestLoad_autoReapDefaultsTrue},
+		{"autoReapOptOut", TestLoad_autoReapOptOut},
+		{"claudeBinDefaultsToClaude", TestLoad_claudeBinDefaultsToClaude},
+		{"removedCanonicalMCPSettingsPath", TestLoad_removedCanonicalMCPSettingsPathIsIgnoredWithDiagnostic},
+		{"noRemovedKeyNoDiagnostic", TestLoad_noRemovedKeyNoDiagnostic},
+		{"notifyDefaults", TestLoad_notifyDefaults},
+		{"readsTOMLOverrides", TestLoad_readsTOMLOverrides},
+		{"retryDefaults", TestLoad_retryDefaults},
+		{"retryTOMLOverrides", TestLoad_retryTOMLOverrides},
+		{"metricLabelAllowlistDefaultsToRole", TestLoad_metricLabelAllowlistDefaultsToRole},
+		{"metricLabelAllowlistConfigurable", TestLoad_metricLabelAllowlistConfigurable},
+		{"usageGateDefaults", TestLoad_usageGateDefaults},
+		{"usageGateTOMLOverrides", TestLoad_usageGateTOMLOverrides},
+		{"deadNeedsInputTTLDefault", TestLoad_deadNeedsInputTTLDefault},
+		{"deadNeedsInputTTLOverrides", TestLoad_deadNeedsInputTTLOverrides},
+		{"deadNeedsInputTTLValidation", TestLoad_deadNeedsInputTTLValidation},
+		{"closedRowRetention", TestLoad_closedRowRetention},
+	}
+	sentinel := filepath.Join(t.TempDir(), "sentinel-pool")
+	t.Setenv("CCPOOL_POOL", sentinel)
+	t.Setenv("CCPOOL_AUTONOMOUS", "1")
+	t.Setenv("CCPOOL_EXTERNAL_ID", "sentinel-external-id")
+	t.Setenv("CCPOOL_REGISTRY_DIR", filepath.Join(t.TempDir(), "sentinel-registry"))
+	for _, tc := range tests {
+		t.Run(tc.name, tc.fn)
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Errorf("sentinel pool %s was created: a Load() read the ambient CCPOOL_POOL", sentinel)
 	}
 }
