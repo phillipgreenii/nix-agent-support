@@ -60,9 +60,9 @@ func TestAssumeIsRejected(t *testing.T) {
 // TestAWSCredentialEnvCurrentVerdicts PINS the current verdicts of the AWS
 // credential-environment forms: every one is approved today (an unclassified
 // name assigned statically is Permitted by EnvAssignment; env -u only unsets).
-// This is NOT a ruling that approval is right: which credential setups to
-// reject is a separate operator decision, and a change to these rows must be
-// that decision, made deliberately.
+// The approval is deliberate: the operator ruled to keep CETA approving them
+// (Phillip, 2026-11-17, answering "c": "Keep CETA approving them"; ADR 0129,
+// decision 5). A change to these rows needs a new operator ruling.
 func TestAWSCredentialEnvCurrentVerdicts(t *testing.T) {
 	root, _ := fixture(t)
 	reg := cmddesc.DefaultRegistry()

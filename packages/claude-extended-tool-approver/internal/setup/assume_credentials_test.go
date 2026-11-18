@@ -22,9 +22,10 @@ func assumeChainVerdict(t *testing.T, cwd, command string) hookio.RuleResult {
 // TestLiveHook_AssumeAndAWSCredentialEnv drives the real rule chain the live
 // hook builds. assume is rejected in every spelling, --exec included (operator
 // ruling, Phillip, 2026-11-17: "yes reject assume --exec like assume."). The
-// AWS credential-environment forms are PINNED at their current verdict
-// (approve, by safe-commands): which credential setups to reject is a separate
-// operator decision, so a change here must be a deliberate one.
+// AWS credential-environment forms are PINNED at their verdict (approve, by
+// safe-commands), which the operator ruled to keep (Phillip, 2026-11-17,
+// answering "c": "Keep CETA approving them"; ADR 0129, decision 5). A change
+// here needs a new operator ruling.
 func TestLiveHook_AssumeAndAWSCredentialEnv(t *testing.T) {
 	withXDGConfig(t, "")
 	cwd := t.TempDir()

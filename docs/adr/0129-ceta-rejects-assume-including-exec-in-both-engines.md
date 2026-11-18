@@ -65,7 +65,12 @@ replaced with a description, because this repository is public.
    7 times). The effect engine permits any unclassified `AWS_*` assignment. Tests in both engines
    pin the current verdicts of `AWS_PROFILE=x cmd`, `export AWS_PROFILE=x`,
    `export AWS_SESSION_TOKEN=x` and `env -u AWS_SESSION_TOKEN AWS_PROFILE=x cmd`: all four approve in
-   both engines. Which credential setups to reject is a separate operator decision, not made here.
+   both engines. The operator then ruled to keep that (Phillip, 2026-11-17, answering "c" to the
+   question whether CETA should approve, defer to the classifier, or reject commands where an agent
+   sets AWS credentials itself; option (c) read "Keep CETA approving them"). The approval is
+   therefore deliberate, with its consequence accepted: once the effect engine is live and a
+   consumer's spec approves a production query tool, an agent that selects a production profile
+   itself and runs that tool is approved with no further check.
 
 ## Consequences
 
@@ -74,5 +79,5 @@ replaced with a description, because this repository is public.
   tracker sample (39 Bash calls mentioning assume, none a real `--exec` call), so no current workflow
   is lost.
 - The block is on creating the assumed environment, not on using production tools inside one.
-- Whoever changes the four pinned AWS credential forms changes a test on purpose and must cite the
-  operator decision.
+- The four pinned AWS credential forms approve by operator ruling (decision 5). Changing them
+  needs a new operator ruling, cited in the test.
