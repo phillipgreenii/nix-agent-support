@@ -245,7 +245,7 @@ func TestWatchedSourceNotObservedUIDIsRegisteredWithTheRouterProbe(t *testing.T)
 
 func assertProbeRegistered(t *testing.T, uid string) {
 	t.Helper()
-	b, err := os.ReadFile("../../../pg-router-probe/cmd/pg-router-probe/run.go")
+	b, err := os.ReadFile("../../../pg-router/cmd/pg-router-probe/run.go")
 	if err != nil {
 		t.Fatal(err)
 	}

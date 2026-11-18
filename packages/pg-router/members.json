@@ -1,0 +1,26 @@
+{
+  "shared": [
+    "conformance",
+    "conformance/driver",
+    "conformance/golden",
+    "procenv",
+    "schemas"
+  ],
+  "members": {
+    "heartbeat": {
+      "cmd": ["pg-router-heartbeat"],
+      "internal": ["heartbeat"],
+      "stdlibOnly": true
+    },
+    "probe": {
+      "cmd": ["pg-router-probe"],
+      "internal": ["probe"],
+      "stdlibOnly": false
+    },
+    "sensors": {
+      "cmd": ["pg-router-sensors"],
+      "internal": ["sensors"],
+      "stdlibOnly": false
+    }
+  }
+}

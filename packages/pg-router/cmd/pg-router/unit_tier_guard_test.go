@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/build/constraint"
@@ -141,9 +142,20 @@ func carriesNonUnitTag(src []byte) bool {
 // ones that carry an integration marker.
 func unitTierViolations(root string) ([]string, error) {
 	var out []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	members, err := memberSubtrees(root)
+	if err != nil {
+		return nil, err
+	}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		// The folded members (members.json) keep their own test tiers and their
+		// own <name>-go-tests checks; this guard covers the router proper.
+		if d.IsDir() {
+			if r, relErr := filepath.Rel(root, path); relErr == nil && members[filepath.ToSlash(r)] {
+				return filepath.SkipDir
+			}
 		}
 		if d.IsDir() || !strings.HasSuffix(path, "_test.go") {
 			return nil
@@ -167,6 +179,37 @@ func unitTierViolations(root string) ([]string, error) {
 	})
 	sort.Strings(out)
 	return out, err
+}
+
+// memberSubtrees returns the module-relative directories the folded members
+// own (their cmd directories and internal subtrees), from members.json.
+func memberSubtrees(root string) (map[string]bool, error) {
+	b, err := os.ReadFile(filepath.Join(root, "members.json"))
+	if os.IsNotExist(err) {
+		return map[string]bool{}, nil // a scratch tree with no members
+	}
+	if err != nil {
+		return nil, err
+	}
+	var m struct {
+		Members map[string]struct {
+			Cmd      []string `json:"cmd"`
+			Internal []string `json:"internal"`
+		} `json:"members"`
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, mem := range m.Members {
+		for _, c := range mem.Cmd {
+			out["cmd/"+c] = true
+		}
+		for _, i := range mem.Internal {
+			out["internal/"+i] = true
+		}
+	}
+	return out, nil
 }
 
 func TestUnitTierHasNoIntegrationTests(t *testing.T) {

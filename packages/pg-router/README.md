@@ -14,6 +14,22 @@ instead. Bare `pg-router` (no subcommand) requires an explicit subcommand.
 > deployment, not here. For how the code realizes a review flow today, see the
 > downstream reference [`docs/pr-review-flow.md`](../../docs/pr-review-flow.md).
 
+## Folded members and the import boundary
+
+`pg-router-heartbeat`, `pg-router-probe` and `pg-router-sensors` are built from this one Go module
+(one `go.mod`, `go.sum`, `gomod2nix.toml` and `update-deps.sh`). Each keeps its own `packages/<name>`
+directory holding only `default.nix`, its own flake attribute and its own `<name>-go-tests` check;
+its sources live under `cmd/<binary>` and `internal/<member>` here (`internal/sensors/...` for the
+sensors). `members.json` lists the members and the shared set (`conformance`, `procenv`, `schemas`);
+both the nix filesets (`members.nix`) and the boundary test read it, so a member binary's `--version`
+changes only when its own fileset changes, and a member-only edit leaves the router's unchanged.
+
+Go's `internal/` rule no longer separates members inside one module, so `boundary_test.go` enforces
+it: a member imports only the standard library, third-party modules, its own subtree and the shared
+set; the router engine imports no member; nothing imports a `cmd/` package; the heartbeat imports the
+standard library only; and each member binary's import closure stays inside its own fileset. Adding a
+package to the shared set is a deliberate edit of `members.json`.
+
 ## Subcommands
 
 | Command                                                        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |

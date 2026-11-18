@@ -235,7 +235,7 @@ func TestIngestFailedRuleAgreesWithTheEmittedSeries(t *testing.T) {
 // pins the full list; this one fails here, in the module that owns the rule,
 // when the uid is renamed or dropped on either side.
 func TestIngestFailedUIDIsRegisteredWithTheRouterProbe(t *testing.T) {
-	b, err := os.ReadFile("../../../pg-router-probe/cmd/pg-router-probe/run.go")
+	b, err := os.ReadFile("../../../pg-router/cmd/pg-router-probe/run.go")
 	if err != nil {
 		t.Fatal(err)
 	}

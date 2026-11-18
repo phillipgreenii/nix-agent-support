@@ -50,6 +50,8 @@ cachePackages = [
   'github.com/prometheus/common/expfmt',
   'github.com/prometheus/common/model',
   'github.com/rivo/uniseg',
+  'github.com/spf13/cobra',
+  'github.com/spf13/pflag',
   'github.com/xo/terminfo',
   'go.opentelemetry.io/auto/sdk',
   'go.opentelemetry.io/collector/featuregate',
@@ -243,6 +245,10 @@ cachePackages = [
     version = 'v1.9.0'
     hash = 'sha256-sRr/50k8Wra0PJLCJgSkIxvR+ce3PItx4HpFvVijGYk='
 
+  [mod.'github.com/inconshreveable/mousetrap']
+    version = 'v1.1.0'
+    hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
+
   [mod.'github.com/json-iterator/go']
     version = 'v1.1.12'
     hash = 'sha256-To8A0h+lbfZ/6zM+2PpRpY3+L6725OPC66lffq6fUoM='
@@ -310,6 +316,14 @@ cachePackages = [
   [mod.'github.com/rivo/uniseg']
     version = 'v0.4.7'
     hash = 'sha256-rDcdNYH6ZD8KouyyiZCUEy8JrjOQoAkxHBhugrfHjFo='
+
+  [mod.'github.com/spf13/cobra']
+    version = 'v1.8.1'
+    hash = 'sha256-yDF6yAHycV1IZOrt3/hofR+QINe+B2yqkcIaVov3Ky8='
+
+  [mod.'github.com/spf13/pflag']
+    version = 'v1.0.5'
+    hash = 'sha256-w9LLYzxxP74WHT4ouBspH/iQZXjuAh2WQCHsuvyEjAw='
 
   [mod.'github.com/xo/terminfo']
     version = 'v1.0.0'

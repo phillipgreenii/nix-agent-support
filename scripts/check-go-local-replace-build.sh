@@ -21,6 +21,9 @@
 # A missing `go` is a LOUD failure (exit 1) only when a build is actually needed.
 set -euo pipefail
 
+# go.work is for the editor and go-work-vet; this check builds each module through its own go.mod.
+export GOWORK=off
+
 root=""
 files=()
 while [ "$#" -gt 0 ]; do

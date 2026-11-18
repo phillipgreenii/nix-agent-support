@@ -136,6 +136,7 @@
             mkGoTest: args:
             (mkGoTest args).overrideAttrs (old: {
               preBuild = (old.preBuild or "") + ''
+                export GOWORK=off
                 export GOFLAGS="''${GOFLAGS:-} -p=${toString goTestPackageParallelism}"
                 if nice -n ${toString goTestNiceLevel} true 2>/dev/null; then
                   go() { nice -n ${toString goTestNiceLevel} "$(type -P go)" "$@"; }
@@ -878,6 +879,8 @@
             # first on PATH) and forbid GOTOOLCHAIN auto-download.
             # Regression guard: tests/run-unit-tests-pinned-go.bats.
             export GOTOOLCHAIN=local
+            # go.work is for the editor and go-work-vet; hook runs resolve through go.mod.
+            export GOWORK=off
             exec bash ${./scripts/run-unit-tests-guard.sh} pg-test-runner --labels unit --files "$@"
           '';
         };
@@ -911,6 +914,7 @@
               exit 0
             fi
             export GOTOOLCHAIN=local
+            export GOWORK=off
             top="$(git rev-parse --show-toplevel)"
             module="''${PG_CONNECTOR_FILESETS_MODULE:-$top/packages/pg-connector}"
             # shellcheck disable=SC2086 # $mode is empty or one flag
@@ -926,7 +930,16 @@
       # and its bats test (tests/golangci-hook-scoping.bats) use the same hook.
       golangci-hook-entry =
         pkgs:
-        (phillipgreenii-nix-base.lib.mkGolangciHook { inherit pkgs; })
+        (
+          let
+            base = phillipgreenii-nix-base.lib.mkGolangciHook { inherit pkgs; };
+          in
+          base
+          // {
+            # go.work is for the editor and go-work-vet; hook runs resolve through go.mod.
+            entry = "env GOWORK=off ${base.entry}";
+          }
+        )
         // {
           files = "^packages/.*(\\.go$|(^|/)go\\.(mod|sum)$)";
         };
@@ -1120,6 +1133,7 @@
                 fi
 
                 top="$(git rev-parse --show-toplevel)"
+                export GOWORK=off
                 cd "$top/packages/claude-extended-tool-approver"
                 exec go test -count=1 -tags integration -run '^TestAgreement$' ./internal/effectpolicy/
               '';
@@ -1335,6 +1349,81 @@
           }/bin/go-local-replace-build-hook";
           language = "system";
           files = "^packages/[^/]+/go\\.(mod|sum)$";
+          pass_filenames = true;
+          require_serial = true;
+        };
+
+        # go.work: the repository-root workspace file for the editor and the
+        # go-work-vet gate. It is GENERATED (scripts/gen-go-work.sh) from the
+        # packages/*/go.mod modules; this hook fails when the tracked file
+        # drifts from the generated one. Nix builds and hook runs set GOWORK=off,
+        # so go.work never changes what a build resolves. Regression guard:
+        # tests/go-work.bats (real go, hermetic fixture).
+        go-work-drift = {
+          enable = true;
+          name = "go-work-drift";
+          description = "go.work must equal the file scripts/gen-go-work.sh generates from packages/*/go.mod";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "go-work-drift-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.coreutils
+                pkgs.diffutils
+                pkgs.gnused
+              ];
+              text = ''
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "go-work-drift: inside the nix build sandbox; skipping (checks.go-work-drift covers this)" >&2
+                  exit 0
+                fi
+                exec bash ${./scripts/gen-go-work.sh} --root "$(git rev-parse --show-toplevel)" --check
+              '';
+            }
+          }/bin/go-work-drift-hook";
+          language = "system";
+          files = "^(go\\.work|packages/[^/]+/go\\.mod|scripts/gen-go-work\\.sh)$";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
+        # go-work-vet: `go vet ./...` with go.work active over every module that
+        # has a changed non-test Go file plus every module consuming it by
+        # `replace`, so a type break across a module seam is caught before a land
+        # (each module builds with GOWORK=off and never sees the other side). It
+        # type-checks across modules, so it is not a unit test and MUST NOT run at
+        # commit: it runs only under `pg-hooks run pre-land`, which sets
+        # PG_TEST_RUNNER_TRANSIENT_FILE (and nothing at commit time does); the
+        # hook skips when that variable is unset. GO_WORK_VET=1 forces a run by
+        # hand. pre-land hands the hook the branch's changed files.
+        go-work-vet = {
+          enable = true;
+          name = "go-work-vet";
+          description = "pre-land only: go vet across the modules a branch changed and the modules that consume them, with go.work active";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "go-work-vet-hook";
+              runtimeInputs = [
+                pkgs.git
+                pkgs.coreutils
+                pkgs.gnugrep
+                pkgs.gnused
+              ];
+              text = ''
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "go-work-vet: inside the nix build sandbox; skipping" >&2
+                  exit 0
+                fi
+                if [ -z "''${PG_TEST_RUNNER_TRANSIENT_FILE:-}" ] && [ "''${GO_WORK_VET:-}" != "1" ]; then
+                  # A commit-time run: this gate belongs to pg-hooks run pre-land.
+                  exit 0
+                fi
+                exec bash ${./scripts/go-work-vet.sh} --root "$(git rev-parse --show-toplevel)" "$@"
+              '';
+            }
+          }/bin/go-work-vet-hook";
+          language = "system";
+          files = "^packages/[^/]+/.*\\.go$";
           pass_filenames = true;
           require_serial = true;
         };
@@ -1622,6 +1711,8 @@
           ceta-agreement-test = "check";
           ceta-depguard = "check";
           go-local-replace-build = "check";
+          go-work-drift = "check";
+          go-work-vet = "check";
           # Runs `golangci-lint run` without --fix: verifies only.
           golangci-lint = "check";
           identifier-allowlist = "check";
@@ -2099,9 +2190,7 @@
                 "pg-router-source-pg-connector"
                 "pg-router-source-pg-desk"
                 "pg-decider"
-                "pg-router-probe"
                 "pg-gwm"
-                "pg-router-heartbeat"
                 "ccpool-probe"
                 "pg-rescue"
                 "pg-task-focus"
@@ -2212,18 +2301,6 @@
                   };
                 })
                 (goLint {
-                  module = "pg-router-sensors";
-                  modRoot = "pg-router-sensors";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/pg-router-sensors
-                      ./packages/pg-router
-                      ./packages/claude-transcript
-                    ];
-                  };
-                })
-                (goLint {
                   module = "pg-router";
                   modRoot = "pg-router";
                   src = lib.fileset.toSource {
@@ -2247,7 +2324,7 @@
                       ./packages/pg-connector
                       # internal/alertrules tests read pg-router-probe's
                       # cmd/pg-router-probe/run.go by relative path.
-                      ./packages/pg-router-probe
+                      ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
                     ];
@@ -2362,7 +2439,7 @@
                       ./packages/pg-connector
                       # internal/alertrules tests read pg-router-probe's
                       # cmd/pg-router-probe/run.go by relative path.
-                      ./packages/pg-router-probe
+                      ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
                     ];
@@ -2385,9 +2462,65 @@
                   };
                 })
               ];
+
+              # The router module's folded members (heartbeat, probe, sensors; see
+              # packages/pg-router/members.json). Each member keeps its own
+              # `<name>-go-tests` check, which runs `go test` over only that
+              # member's subtree of the one router module; the router's own check
+              # runs everything else, so the check names and what each gates are
+              # unchanged by the fold.
+              routerMembers = import ./packages/pg-router/members.nix { inherit lib; };
+              memberGoTests =
+                name: extraFlags: post:
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-router-${name}-go-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.union (routerMembers.memberFileset name) ./packages/pg-router/tests/coverage-gate.sh;
+                  };
+                  modRoot = "pg-router";
+                  gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
+                  testFlags = extraFlags;
+                }).overrideAttrs
+                  (old: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go test ${lib.escapeShellArgs (extraFlags ++ [ "-race" ])} ${routerMembers.memberTestPackages name}
+                      runHook postBuild
+                    '';
+                    postBuild = (old.postBuild or "") + post;
+                  });
             in
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
+
+              # The tracked go.work equals what scripts/gen-go-work.sh generates
+              # from packages/*/go.mod, so it cannot drift. go.work is for the
+              # editor and the go-work-vet gate; builds set GOWORK=off.
+              go-work-drift =
+                pkgs.runCommand "go-work-drift"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.coreutils
+                      pkgs.diffutils
+                      pkgs.gnused
+                    ];
+                  }
+                  ''
+                    bash ${./scripts/gen-go-work.sh} --root ${
+                      lib.fileset.toSource {
+                        root = ./.;
+                        fileset = lib.fileset.unions [
+                          ./go.work
+                          (lib.fileset.fileFilter (f: f.name == "go.mod") ./packages)
+                        ];
+                      }
+                    } --check
+                    touch "$out"
+                  '';
 
               # Every Go module's go.mod MUST also carry `go <pkgs.go.version>` (the
               # locked nixpkgs Go that builds the deployed binaries); the check is
@@ -9082,11 +9215,7 @@
               # no real pg-connector/Grafana; execCmdFactory is swapped to
               # re-exec the test binary itself, and the Grafana client is
               # exercised against an httptest.Server.
-              pg-router-probe-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-router-probe-go-tests";
-                src = lib.cleanSource ./packages/pg-router-probe; # matches default.nix
-                gomod2nixToml = ./packages/pg-router-probe/gomod2nix.toml;
-              };
+              pg-router-probe-go-tests = memberGoTests "probe" [ ] "";
 
               # pg-router-sensors: the shared state-machine library, the answer
               # printer and the subcommand skeleton. Pattern B like the handlers
@@ -9094,29 +9223,15 @@
               # per-package statement-coverage gate (module boundary is the gate
               # boundary).
               pg-router-sensors-go-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-router-sensors-go-tests";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/pg-router-sensors
-                      ./packages/pg-router
-                      ./packages/claude-transcript
-                    ];
-                  };
-                  modRoot = "pg-router-sensors";
-                  gomod2nixToml = ./packages/pg-router-sensors/gomod2nix.toml;
-                  testFlags = [
+                memberGoTests "sensors"
+                  [
                     "-coverprofile=cover.out"
                     "-covermode=atomic"
-                  ];
-                }).overrideAttrs
-                  (old: {
-                    postBuild = (old.postBuild or "") + ''
-                      echo "=== pg-router-sensors per-package statement-coverage gate ==="
-                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
-                    '';
-                  });
+                  ]
+                  ''
+                    echo "=== pg-router-sensors per-package statement-coverage gate ==="
+                    bash tests/coverage-gate.sh cover.out internal/sensors/coverage-thresholds.txt
+                  '';
 
               # pg-gwm: hermetic unit suite over the slot state machine,
               # flock liveness (including a killed helper process), atomic record
@@ -9160,11 +9275,7 @@
 
               # pg-router-heartbeat: unit suite over the pure sleep-aware decision, the
               # run loop with fake clock/probe/notifier, and the probe against httptest.
-              pg-router-heartbeat-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-router-heartbeat-go-tests";
-                src = lib.cleanSource ./packages/pg-router-heartbeat; # matches default.nix
-                gomod2nixToml = ./packages/pg-router-heartbeat/gomod2nix.toml;
-              };
+              pg-router-heartbeat-go-tests = memberGoTests "heartbeat" [ ] "";
 
               # beads-exporter - whole-module unit suite (adapter, categoriser, queues,
               # label cap, stale guard, collector, stranded-claim classifier, renderer
@@ -9345,7 +9456,7 @@
                     tests=${./packages/pg-origin-guard/grafana/alerting/rule-tests}
                     bash ${./packages/pg-origin-guard/grafana/check-alert-rules.sh} "$alerts" "$tests"
                     bash ${./packages/pg-origin-guard/grafana/check-alert-rules.sh} --self-test "$alerts" "$tests"
-                    if grep -rq pg-origin-guard ${./packages/pg-router-probe}; then
+                    if grep -rq pg-origin-guard ${./packages/pg-router/cmd/pg-router-probe}; then
                       echo "FAIL: pg-router-probe names pg-origin-guard" >&2
                       exit 1
                     fi
@@ -9417,7 +9528,7 @@
                       ${./packages/pg-gwm/grafana/alerting/alerts-reaper.yaml} \
                       ${./packages/pg-gwm/grafana/pg-gwm.json} \
                       ${./packages/pg-gwm/grafana/alerting/rule-tests} \
-                      ${./packages/pg-router-probe/cmd/pg-router-probe/run.go} \
+                      ${./packages/pg-router/cmd/pg-router-probe/run.go} \
                       ${./packages/pg-gwm/grafana/alerting/alerts-delete.yaml}
                     touch "$out"
                   '';
@@ -9954,7 +10065,7 @@
                       ${./packages/pg-claude-code-recorder/internal/parser/parser.go}
                       ${./packages/pg-claude-code-recorder/grafana/alerting/alerts.yaml}
                       ${./packages/pg-claude-code-recorder/grafana/alerting/alerts-delete.yaml}
-                      ${./packages/pg-router-probe/cmd/pg-router-probe/run.go}
+                      ${./packages/pg-router/cmd/pg-router-probe/run.go}
                       ${./packages/pg-claude-code-recorder/grafana/pg-claude-code-recorder.json}
                       ${./packages/pg-claude-code-recorder/README.md}
                     )
@@ -11234,7 +11345,7 @@
                       ./packages/pg-sqlite
                       # internal/alertrules tests read pg-router-probe's
                       # cmd/pg-router-probe/run.go by relative path.
-                      ./packages/pg-router-probe
+                      ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
                     ];
@@ -11313,7 +11424,7 @@
                       ./packages/pg-desk
                       ./packages/pg-connector
                       ./packages/pg-sqlite
-                      ./packages/pg-router-probe
+                      ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
                     ];
@@ -11501,6 +11612,22 @@
                   testDeps = [ pkgs.git ];
                 }).overrideAttrs
                   (old: {
+                    # The folded members (heartbeat, probe, sensors) have their own
+                    # `<name>-go-tests` checks, so this one runs every other package
+                    # of the module (the boundary test included).
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      go test ${
+                        lib.escapeShellArgs [
+                          "-coverprofile=cover.out"
+                          "-covermode=atomic"
+                          "-race"
+                        ]
+                      } ${routerMembers.routerTestPackages}
+                      runHook postBuild
+                    '';
                     # mkGoTest's buildPhase ends with `runHook postBuild`; run the
                     # gate there, in the module cwd where `go test ./...` wrote
                     # cover.out and where tests/ (script + thresholds) lives.
@@ -11709,7 +11836,7 @@
 
                   # The sensors module carries its OWN copy of the gate; the same
                   # block/pass/absent cases must hold for that copy.
-                  sgate=${./packages/pg-router-sensors/tests/coverage-gate.sh}
+                  sgate=${./packages/pg-router/tests/coverage-gate.sh}
                   if bash $sgate ${profile} ${belowBar} >/dev/null 2>&1; then
                     fail "pg-router-sensors gate passed a below-threshold package (should block)"
                   fi

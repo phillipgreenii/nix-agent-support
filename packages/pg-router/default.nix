@@ -27,6 +27,9 @@
   pg-connector-scm-git,
 }:
 
+let
+  members = import ./members.nix { inherit lib; };
+in
 mkGoApp {
   pname = "pg-router";
 
@@ -40,12 +43,18 @@ mkGoApp {
       # ./docs holds the behavior docs (docs/behavior/), not build inputs. Exclude
       # them so a doc-only edit does not change the per-source digest and needlessly
       # rebump the pg-router version (repo CLAUDE.md "Versioning"; ADR 0025).
-      (lib.fileset.difference ./. ./docs)
+      # The folded members' cmd directories and internal subtrees (heartbeat,
+      # probe, sensors) are excluded too, so a member-only edit does not bump
+      # the router's --version; each member's own package fileset carries them.
+      members.routerFileset
       ../ccpool
       ../claude-transcript
     ];
   };
   modRoot = "pg-router";
+
+  # go.work is for the editor and go-work-vet only; a build resolves through go.mod.
+  env.GOWORK = "off";
 
   # gomod2nix engine (ADR 0008, Case B): buildGoApplication symlinks the
   # first-party local-replace modules (../ccpool, ../claude-transcript) from
