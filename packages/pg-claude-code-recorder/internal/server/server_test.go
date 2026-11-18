@@ -440,6 +440,20 @@ func TestOKRequestIsNotLoggedAtInfoButFailureIs(t *testing.T) {
 	}
 }
 
+func TestHelloObservesItsLatencyHistogram(t *testing.T) {
+	s, o, _, clock := logServer(t)
+	s.hello = func() any {
+		*clock = clock.Add(3 * time.Second)
+		return map[string]int{"protocol_version": 1}
+	}
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/v1/hello", nil)
+	s.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	h := o.Reg.Hist(obs.MHelloDuration)
+	if h == nil || h.Samples != 1 || h.Sum < 2.9 || h.Sum > 3.1 {
+		t.Fatalf("hello histogram %+v", h)
+	}
+}
+
 func TestSlowHelloLogsSlowRequest(t *testing.T) {
 	s, _, buf, clock := logServer(t)
 	s.hello = func() any {

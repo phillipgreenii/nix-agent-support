@@ -25,6 +25,7 @@ var helpTexts = map[string]string{
 	MFeedDuration:             "Distribution of feed request latencies in seconds, by op.",
 	MRequestsInFlight:         "Requests being served now, by op.",
 	MWaitDuration:             "Distribution of wait request durations in seconds.",
+	MHelloDuration:            "Distribution of GET /v1/hello latencies in seconds; hello reads no database, so a high bucket means a stalled daemon.",
 	MCopiedFiles:              "Files copied by the startup backfill so far.",
 	MBackfillFiles:            "Files the startup backfill has to copy.",
 	MCaughtUp:                 "1 when the startup backfill has finished, else 0.",

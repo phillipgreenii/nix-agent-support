@@ -65,6 +65,7 @@ pg_claude_code_recorder_query_filter_fields_total counter op,field
 pg_claude_code_recorder_feed_latency_seconds histogram op
 pg_claude_code_recorder_requests_inflight gauge op
 pg_claude_code_recorder_wait_duration_seconds histogram -
+pg_claude_code_recorder_hello_duration_seconds histogram -
 pg_claude_code_recorder_backfill_files_copied gauge -
 pg_claude_code_recorder_backfill_files_total gauge -
 pg_claude_code_recorder_caught_up gauge -

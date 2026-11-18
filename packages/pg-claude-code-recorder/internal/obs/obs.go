@@ -57,12 +57,14 @@ const (
 	MRequestsInFlight = "requests_inflight"
 	EvSlowRequest     = "slow_request"
 	MWaitDuration     = "wait_duration_seconds"
-	MCopiedFiles      = "backfill_files_copied"
-	MBackfillFiles    = "backfill_files_total"
-	MCaughtUp         = "caught_up"
-	MFeedWaiters      = "feed_waiters"
-	MIndexRebuilds    = "index_rebuilds_total"
-	EvIndexRebuilt    = "index_rebuilt"
+	// MHelloDuration is the GET /v1/hello latency in seconds (no labels).
+	MHelloDuration = "hello_duration_seconds"
+	MCopiedFiles   = "backfill_files_copied"
+	MBackfillFiles = "backfill_files_total"
+	MCaughtUp      = "caught_up"
+	MFeedWaiters   = "feed_waiters"
+	MIndexRebuilds = "index_rebuilds_total"
+	EvIndexRebuilt = "index_rebuilt"
 	// EvFileIDCollision and MFileIDCollisions: a file id met a file record of a
 	// different mode or source (a rejected new write, or a replayed journal that
 	// already holds one).
@@ -567,6 +569,7 @@ func (o *Obs) RegisterStandard() {
 	}{
 		{MCopyLagHistogram, LagBuckets},
 		{MWaitDuration, WaitBuckets},
+		{MHelloDuration, RequestBuckets},
 		{MSettleTickDuration, LoopBuckets},
 		{MSettleTickKindDuration, LoopBuckets},
 		{MRefreshGaugesDuration, LoopBuckets},

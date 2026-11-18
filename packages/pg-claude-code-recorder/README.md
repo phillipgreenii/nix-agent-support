@@ -217,7 +217,8 @@ parser, so parse lag is reported as 0 and `caught_up` means the first backfill i
   `copies_private_files` (files that sweep counted), `copies_private_scan_timestamp_seconds` (when it finished),
   `requests_total{client,op,outcome}`,
   `query_duration_seconds{op}`, `feed_latency_seconds{op}` (no unlabelled series: use `sum without (op)`),
-  `requests_inflight{op}`, `wait_duration_seconds`, `backfill_files_*`,
+  `requests_inflight{op}`, `wait_duration_seconds`, `hello_duration_seconds` (GET /v1/hello latency, no labels; hello reads no
+  database, so a high bucket means a stalled daemon; the `slow_request` warning is the matching log line), `backfill_files_*`,
   `caught_up`, and the loop and process series: `settle_tick_duration_seconds`,
   `settle_tick_examined_total`, `settle_tick_transitions_total`, `settle_tick_last_duration_seconds`,
   `settle_tick_last_timestamp_seconds`, `settle_run_lock_wait_total{op}` and
@@ -294,6 +295,26 @@ through `github.com/phillipgreenii/x/pprofserver` on `$XDG_STATE_HOME/pg-claude-
 mode 0600. **Recorded mismatch:** the design says elsewhere that `pprof.sock` sits in the state
 directory; this follows the more specific packaging rule above (pg-connector's option), so the
 profiler socket never shares a directory with the data store.
+
+With the profiler on, the daemon also records block and mutex profiles (both are off otherwise, and are
+switched off again when the daemon stops). Block profiling samples every blocking event of 1 ms or longer
+(`runtime.SetBlockProfileRate(1ms in ns)`); mutex profiling samples 1 in 100 contention events
+(`runtime.SetMutexProfileFraction(100)`). Overhead is small at these rates (blocking events under 1 ms are
+skipped, and only 1% of contended unlocks are recorded), but neither is free, which is why they sit behind
+the same default-off switch. Read them over the same socket:
+
+```bash
+curl --unix-socket "$XDG_STATE_HOME/pg-claude-code-recorder/pprof.sock" -o block.pb.gz http://localhost/debug/pprof/block
+go tool pprof -top block.pb.gz        # where goroutines waited, by total delay
+curl --unix-socket "$XDG_STATE_HOME/pg-claude-code-recorder/pprof.sock" -o mutex.pb.gz http://localhost/debug/pprof/mutex
+go tool pprof -top mutex.pb.gz        # who held a contended mutex, by delay caused to others
+```
+
+Both profiles are cumulative since the profiler started, so take two and compare (`go tool pprof -base`)
+to see one interval. A stall behind the write connection shows in the block profile as time in
+`database/sql` connection waits or the store's write lock. GET /v1/hello answers from cached state and
+never takes the write connection; its latency is the `hello_duration_seconds` histogram, and a slow one also
+logs `slow_request` with `op=hello`.
 
 `scripts/profile-cpu.sh --sock SOCK --seconds N [--pid PID]` runs the runbook recipe
 (`curl --unix-socket ... /debug/pprof/profile?seconds=N`, then `go tool pprof -top`) and prints

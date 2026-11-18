@@ -151,6 +151,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		ans := s.hello()
 		// hello is timed like an operation so a stall shows as slow_request.
 		s.warnIfSlow("hello", client, &obs.ReqTrace{ID: s.boot + "-" + strconv.FormatUint(s.reqID.Add(1), 10)}, nil, s.now().Sub(start))
+		s.obs.Reg.Observe(obs.MHelloDuration, s.now().Sub(start).Seconds())
 		s.finish(w, "hello", client, "ok", start, 200, ans)
 	case strings.HasPrefix(r.URL.Path, "/v1/") && r.Method == http.MethodPost:
 		name := strings.TrimPrefix(r.URL.Path, "/v1/")
