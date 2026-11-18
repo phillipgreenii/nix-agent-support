@@ -12,7 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source/claudetranscript"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
 
 // Resolver reads values back from the copies (the database holds no file
@@ -62,65 +62,6 @@ func (e *Engine) noteFilter(op string, b *builder) {
 	if e.FilterFields != nil && len(b.used) > 0 {
 		e.FilterFields(op, b.used)
 	}
-}
-
-// Agg is one aggregate.
-type Agg struct {
-	Fn       string `json:"fn"`
-	Field    string `json:"field,omitempty"`
-	Distinct string `json:"distinct,omitempty"`
-	As       string `json:"as,omitempty"`
-}
-
-// Order is one ordering term.
-type Order struct {
-	By  string `json:"by"`
-	Dir string `json:"dir,omitempty"`
-}
-
-// Request is the query operation's body.
-type Request struct {
-	Op        string   `json:"op,omitempty"`
-	From      string   `json:"from,omitempty"`
-	Where     *Filter  `json:"where,omitempty"`
-	Group     []string `json:"group,omitempty"`
-	Aggregate []Agg    `json:"aggregate,omitempty"`
-	Select    []string `json:"select,omitempty"`
-	Raw       bool     `json:"raw,omitempty"`
-	// Follow resolves a link per row: parent (parent_uuid to uuid), result (a
-	// tool_use to its tool_result) or call (a tool_result to its tool_use).
-	// A link is resolved within the same file first.
-	Follow string  `json:"follow,omitempty"`
-	Order  []Order `json:"order,omitempty"`
-	Limit  int     `json:"limit,omitempty"`
-	// OldGenerations includes records of superseded generations.
-	OldGenerations bool `json:"old_generations,omitempty"`
-}
-
-// RecordRef names a record by its position.
-type RecordRef struct {
-	File   string `json:"file"`
-	Gen    int    `json:"gen"`
-	Offset int64  `json:"offset"`
-	Item   int    `json:"item"`
-}
-
-// Link is a followed record with the same columns as the row.
-type Link struct {
-	Record RecordRef `json:"record"`
-	Row    []any     `json:"row"`
-}
-
-// Answer is the query answer.
-type Answer struct {
-	AsOf     string      `json:"as_of"`
-	Columns  []string    `json:"columns"`
-	Rows     [][]any     `json:"rows"`
-	More     bool        `json:"more"`
-	Degraded bool        `json:"degraded,omitempty"`
-	Records  []RecordRef `json:"records,omitempty"`
-	Links    [][]Link    `json:"links,omitempty"`
-	Raw      []string    `json:"raw,omitempty"`
 }
 
 const (

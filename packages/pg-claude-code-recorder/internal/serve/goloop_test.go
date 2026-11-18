@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/goleak"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
 
 func inFlightNames(d *Daemon) map[string]time.Duration {

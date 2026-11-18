@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

@@ -114,3 +114,5 @@ func TestListSinceReadsNoTranscriptForRowsEndedEarlier(t *testing.T) {
 		t.Fatalf("list ran %d transcript queries for rows ended before since (baseline %d)", n, base)
 	}
 }
+
+func boolp(b bool) *bool { return &b }

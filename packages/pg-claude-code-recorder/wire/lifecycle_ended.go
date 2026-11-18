@@ -1,4 +1,4 @@
-package lifecycle
+package wire
 
 import (
 	"context"
@@ -45,7 +45,7 @@ func boolp(b bool) *bool { return &b }
 // returns a superset of the rows the label can come from, so the precedence
 // rules applied afterwards never miss a row.
 func prefilter(q EndQuery) ConversationFilter {
-	f := ConversationFilter{Ended: boolp(true), Cwd: q.Cwd, Limit: MaxLimit}
+	f := ConversationFilter{Ended: boolp(true), Cwd: q.Cwd, Limit: MaxConversationLimit}
 	if !q.Since.IsZero() {
 		f.Since = q.Since.UTC().Format(time.RFC3339Nano)
 	}
@@ -95,7 +95,7 @@ func QueryEnded(ctx context.Context, p Poster, q EndQuery) (EndedResult, error) 
 	}
 	if q.Label == LabelCrashed && !q.Suspected && len(res.Rows) == 0 {
 		var stale ConversationList
-		f := ConversationFilter{Ended: boolp(true), RegistryStaleAtDiscovery: boolp(true), ExitObserved: boolp(false), Cwd: q.Cwd, Limit: MaxLimit}
+		f := ConversationFilter{Ended: boolp(true), RegistryStaleAtDiscovery: boolp(true), ExitObserved: boolp(false), Cwd: q.Cwd, Limit: MaxConversationLimit}
 		if !q.Since.IsZero() {
 			f.Since = q.Since.UTC().Format(time.RFC3339Nano)
 		}

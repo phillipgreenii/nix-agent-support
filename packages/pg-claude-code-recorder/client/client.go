@@ -26,9 +26,7 @@ import (
 
 	iclient "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/config"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/feed"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
 
 // ProtocolVersion is the highest wire protocol version this package speaks.
@@ -42,37 +40,37 @@ type (
 	// Hello is the answer to hello.
 	Hello = wire.Hello
 	// Filter is the JSON filter language.
-	Filter = query.Filter
+	Filter = wire.Filter
 	// Range bounds a value in a filter.
-	Range = query.Range
+	Range = wire.Range
 	// QueryRequest is the query operation's body.
-	QueryRequest = query.Request
+	QueryRequest = wire.QueryRequest
 	// Agg and Order are query aggregates and orderings.
-	Agg   = query.Agg
-	Order = query.Order
+	Agg   = wire.Agg
+	Order = wire.Order
 	// QueryAnswer is the query answer.
-	QueryAnswer = query.Answer
+	QueryAnswer = wire.QueryAnswer
 	// InventoryRequest, InventoryAnswer and InventoryFile are the files.inventory
 	// operation's shapes.
-	InventoryRequest = query.InventoryRequest
-	InventoryAnswer  = query.InventoryAnswer
-	InventoryFile    = query.InventoryFile
+	InventoryRequest = wire.InventoryRequest
+	InventoryAnswer  = wire.InventoryAnswer
+	InventoryFile    = wire.InventoryFile
 	// SearchRequest is the search operation's body.
-	SearchRequest = query.SearchRequest
+	SearchRequest = wire.SearchRequest
 	// SearchAnswer is the search answer.
-	SearchAnswer = query.SearchAnswer
+	SearchAnswer = wire.SearchAnswer
 	// RecordRef names a record by its position.
-	RecordRef = query.RecordRef
+	RecordRef = wire.RecordRef
 	// Entry is one feed or snapshot entry (a reset or a record).
-	Entry = feed.Entry
+	Entry = wire.Entry
 	// FeedAnswer is one page of the feed.
-	FeedAnswer = feed.Answer
+	FeedAnswer = wire.FeedAnswer
 	// SnapshotRequest and SnapshotAnswer are the snapshot operation's shapes.
-	SnapshotRequest = feed.SnapshotRequest
-	SnapshotAnswer  = feed.SnapshotAnswer
+	SnapshotRequest = wire.SnapshotRequest
+	SnapshotAnswer  = wire.SnapshotAnswer
 	// RawRequest and RawAnswer are the raw operation's shapes.
-	RawRequest = feed.RawRequest
-	RawAnswer  = feed.RawAnswer
+	RawRequest = wire.RawRequest
+	RawAnswer  = wire.RawAnswer
 )
 
 // The typed errors.

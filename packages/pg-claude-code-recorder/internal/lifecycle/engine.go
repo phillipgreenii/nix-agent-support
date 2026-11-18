@@ -411,7 +411,7 @@ func (m *model) conversation(session string) (Conversation, bool) {
 	c := Conversation{SessionID: session, Pid: k.pid, ProcStart: k.ps, Stage: StageQuiet, State: StateClosed, EndReason: m.ends[session]}
 	c.Cwd = last.cwd
 	if vs := m.vers[k]; len(vs) > 0 {
-		c.regTime = vs[len(vs)-1].t
+		c.RegTime = vs[len(vs)-1].t
 	}
 	pstart := processStart(last)
 	c.RegistryStaleAtDiscovery = tracked && prow.Stale
@@ -548,8 +548,8 @@ func (e *Engine) transcriptFacts(ctx context.Context, c *Conversation) error {
 		switch {
 		case c.LastWrite != nil:
 			c.EndTime, c.EndTimeApprox = c.LastWrite, true
-		case c.regTime > 0:
-			c.EndTime, c.EndTimeApprox = tp(c.regTime), true
+		case c.RegTime > 0:
+			c.EndTime, c.EndTimeApprox = tp(c.RegTime), true
 		}
 	}
 	for _, id := range ids {
@@ -563,7 +563,7 @@ func (e *Engine) transcriptFacts(ctx context.Context, c *Conversation) error {
 	return nil
 }
 
-func (c *Conversation) sortTime() int64 {
+func sortTime(c *Conversation) int64 {
 	switch {
 	case c.EndTime != nil:
 		return c.EndTime.UnixNano()
@@ -577,7 +577,7 @@ func (c *Conversation) sortTime() int64 {
 
 func okBool(f *bool, v bool) bool { return f == nil || *f == v }
 
-func (f ConversationFilter) evidenceMatch(c *Conversation) bool {
+func evidenceMatch(f ConversationFilter, c *Conversation) bool {
 	return (f.State == "" || f.State == c.State) && okBool(f.Ended, c.Ended) &&
 		okBool(f.RegistryPresentAtExit, c.RegistryPresentAtExit) && okBool(f.ExitObserved, c.ExitObserved) &&
 		okBool(f.ClearEntry, c.ClearEntry) && okBool(f.ExitEntry, c.ExitEntry) &&
@@ -588,7 +588,7 @@ func (f ConversationFilter) evidenceMatch(c *Conversation) bool {
 // DefaultLimit and MaxLimit bound conversation.list.
 const (
 	DefaultLimit = 1000
-	MaxLimit     = 100000
+	MaxLimit     = MaxConversationLimit
 )
 
 // List returns the Conversations that match the filter, newest first.
@@ -608,19 +608,19 @@ func (e *Engine) List(ctx context.Context, f ConversationFilter) ([]Conversation
 	var out []Conversation
 	for session := range m.segs {
 		c, ok := m.conversation(session)
-		if !ok || !f.evidenceMatch(&c) {
+		if !ok || !evidenceMatch(f, &c) {
 			continue
 		}
 		// A row whose end time the model already knows and that ended before since
 		// is dropped without a transcript read: reading the transcript of every
 		// ended Conversation made a label query outlast the client timeout.
-		if since > 0 && c.EndTime != nil && c.sortTime() < since {
+		if since > 0 && c.EndTime != nil && sortTime(&c) < since {
 			continue
 		}
 		if err := e.transcriptFacts(ctx, &c); err != nil {
 			return nil, err
 		}
-		if since > 0 && c.sortTime() < since {
+		if since > 0 && sortTime(&c) < since {
 			continue
 		}
 		if f.Cwd != "" {
@@ -632,7 +632,7 @@ func (e *Engine) List(ctx context.Context, f ConversationFilter) ([]Conversation
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if a, b := out[i].sortTime(), out[j].sortTime(); a != b {
+		if a, b := sortTime(&out[i]), sortTime(&out[j]); a != b {
 			return a > b
 		}
 		return out[i].SessionID < out[j].SessionID
@@ -1174,7 +1174,7 @@ func (e *Engine) CountEnded(ctx context.Context, since time.Time) (crashed, susp
 				return 0, 0, err
 			}
 		}
-		if !since.IsZero() && c.sortTime() < since.UnixNano() {
+		if !since.IsZero() && sortTime(&c) < since.UnixNano() {
 			continue
 		}
 		suspected++

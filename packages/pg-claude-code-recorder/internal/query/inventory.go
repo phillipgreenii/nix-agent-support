@@ -6,48 +6,8 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
-
-// InventoryRequest is the files.inventory operation's body. It lists the files
-// that have records with their path facts and the newest record time, from the
-// per-file table the parser maintains (file_facts), never from records.
-//
-// Sources limits the files to those sources (empty: every source). Since and
-// Sessions narrow the list: a file is kept when its newest record is at or after
-// Since (RFC 3339) OR its file_session is one of Sessions; with neither set no
-// narrowing applies.
-type InventoryRequest struct {
-	Sources  []string `json:"sources,omitempty"`
-	Since    string   `json:"since,omitempty"`
-	Sessions []string `json:"sessions,omitempty"`
-	// After pages the answer: only files with an id greater than After (the
-	// answer is in file id order; continue from the last file while More).
-	After int64 `json:"after,omitempty"`
-	Limit int   `json:"limit,omitempty"`
-}
-
-// InventoryFile is one file of the inventory.
-type InventoryFile struct {
-	File        int64  `json:"file"`
-	Source      string `json:"source"`
-	Project     string `json:"project,omitempty"`
-	FileSession string `json:"file_session,omitempty"`
-	AgentID     string `json:"agent_id,omitempty"`
-	// Last is the newest record time over every generation of the file (empty
-	// when no record of it carries a time).
-	Last string `json:"last,omitempty"`
-}
-
-// InventoryAnswer is the files.inventory answer. Degraded is set while the
-// recorder is catching up or while file_facts is still being backfilled on a
-// database that existed before it, when a file may be missing from Files.
-type InventoryAnswer struct {
-	AsOf     string          `json:"as_of"`
-	Files    []InventoryFile `json:"files"`
-	More     bool            `json:"more"`
-	Degraded bool            `json:"degraded,omitempty"`
-}
 
 // InventorySQL builds the statement and its arguments. It names only file_facts
 // and files, so the planner has nothing in records to scan.

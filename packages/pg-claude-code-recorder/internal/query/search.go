@@ -9,7 +9,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
 
 // MinSubstringChars is the shortest substring query served.
@@ -20,49 +20,6 @@ const MinSubstringChars = 3
 // session, a time range or a cwd rarely reaches it; an unscoped one stops here,
 // newest records first.
 const DefaultSubstringBudget int64 = 256 << 20
-
-// SearchRequest is the search operation's body.
-type SearchRequest struct {
-	Op     string   `json:"op,omitempty"`
-	Mode   string   `json:"mode,omitempty"` // word (default) or substring
-	Q      string   `json:"q"`
-	Where  *Filter  `json:"where,omitempty"`
-	Fields []string `json:"fields,omitempty"`
-	Limit  int      `json:"limit,omitempty"`
-	// OldGenerations includes records of superseded generations.
-	OldGenerations bool `json:"old_generations,omitempty"`
-}
-
-// Hit is one search hit.
-type Hit struct {
-	Record    RecordRef `json:"record"`
-	SessionID string    `json:"session_id"`
-	Time      string    `json:"time"`
-	Field     string    `json:"field"`
-	Score     float64   `json:"score,omitempty"`
-	MatchAt   *int      `json:"match_at,omitempty"`
-	Snippet   string    `json:"snippet"`
-}
-
-// SearchAnswer is the search answer.
-type SearchAnswer struct {
-	AsOf     string `json:"as_of"`
-	Hits     []Hit  `json:"hits"`
-	More     bool   `json:"more"`
-	Degraded bool   `json:"degraded,omitempty"`
-	// TooShort is true when a substring query was under three characters: it is
-	// refused, so no hits are returned.
-	TooShort bool   `json:"too_short,omitempty"`
-	Note     string `json:"note,omitempty"`
-	// Partial is true when a substring scan stopped at its byte budget or at the
-	// query deadline before it had read every candidate copy. The hits are
-	// correct but may be incomplete: ScannedBytes says how much text was read and
-	// ScannedTo is the time of the oldest record read (the scan runs newest
-	// first), so a retry narrowed to that side of ScannedTo covers the rest.
-	Partial      bool   `json:"partial,omitempty"`
-	ScannedBytes int64  `json:"scanned_bytes,omitempty"`
-	ScannedTo    string `json:"scanned_to,omitempty"`
-}
 
 // Search runs a word or substring search.
 func (e *Engine) Search(ctx context.Context, req SearchRequest) (*SearchAnswer, *wire.Error) {

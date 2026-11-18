@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
 
 // The watchdog's exit code is documented in the exit table.

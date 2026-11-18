@@ -348,7 +348,7 @@ if a rebuild ever has to preserve capture rows the journal cannot regenerate.
 | Catalogue and `ingest` tags (`internal/source`)                                                                                    | Add the storage declaration (section 6) and a test that every catalogued field has exactly one storage.                                                                                                                                                                                |
 | `unknown_keys` consumers (`internal/settle/remove.go`, `internal/obs`)                                                             | Unchanged; add the mismatch metric next to the existing unknown-key metric.                                                                                                                                                                                                            |
 
-The wire protocol (`internal/wire`) does not change: answers still say `session_id`, and the field names
+The wire protocol (`wire`) does not change: answers still say `session_id`, and the field names
 clients filter on are the same. The planner has no `sqlite_stat1` in this store (documented at `cwdQuery`),
 so every new join MUST be written so the intended outer table is forced (as `CROSS JOIN` does there) and
 covered by a query-plan test.

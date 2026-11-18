@@ -11,35 +11,27 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/source"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/wire"
 )
 
-// Filter is the JSON filter: a leaf {"field": F, <operator>: V} or a
-// combination (all, any, not).
-type Filter struct {
-	Field    string          `json:"field,omitempty"`
-	Eq       json.RawMessage `json:"eq,omitempty"`
-	In       []any           `json:"in,omitempty"`
-	Range    *Range          `json:"range,omitempty"`
-	Under    string          `json:"under,omitempty"`
-	Exists   *bool           `json:"exists,omitempty"`
-	Contains string          `json:"contains,omitempty"`
-	Match    string          `json:"match,omitempty"`
-	All      []Filter        `json:"all,omitempty"`
-	Any      []Filter        `json:"any,omitempty"`
-	Not      *Filter         `json:"not,omitempty"`
-}
-
-// Range bounds a value: From inclusive and To exclusive (Gte, Gt, Lte, Lt are
-// the explicit forms).
-type Range struct {
-	From any `json:"from,omitempty"`
-	To   any `json:"to,omitempty"`
-	Gte  any `json:"gte,omitempty"`
-	Gt   any `json:"gt,omitempty"`
-	Lte  any `json:"lte,omitempty"`
-	Lt   any `json:"lt,omitempty"`
-}
+// The request and answer shapes live in the public wire package; these names
+// keep the engine reading as it always did.
+type (
+	Filter           = wire.Filter
+	Range            = wire.Range
+	Agg              = wire.Agg
+	Order            = wire.Order
+	Request          = wire.QueryRequest
+	RecordRef        = wire.RecordRef
+	Link             = wire.Link
+	Answer           = wire.QueryAnswer
+	InventoryRequest = wire.InventoryRequest
+	InventoryFile    = wire.InventoryFile
+	InventoryAnswer  = wire.InventoryAnswer
+	SearchRequest    = wire.SearchRequest
+	Hit              = wire.Hit
+	SearchAnswer     = wire.SearchAnswer
+)
 
 type builder struct {
 	cat      map[string]source.Kind
