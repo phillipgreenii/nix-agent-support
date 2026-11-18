@@ -218,7 +218,7 @@ var pluginForms = []pluginForm{
 	{"session-wrapup", "pg-hooks fix", evalcontract.Approve, ""},
 	{"session-wrapup", "nix build .#checks.aarch64-darwin.foo", evalcontract.Approve, ""},
 	{"session-wrapup", "go test ./...", evalcontract.Approve, ""},
-	{"session-wrapup", "git worktree add <ROOT>/.worktrees/x", evalcontract.Approve, ""},
+	{"session-wrapup", "git worktree add <ROOT>/.worktrees/clean", evalcontract.Approve, ""},
 	{"session-wrapup", "git -C <ROOT> rev-parse --abbrev-ref HEAD", evalcontract.Approve, ""},
 	{"session-wrapup", "git -C <ROOT> status --porcelain", evalcontract.Approve, ""},
 	{"session-wrapup", "git checkout main", evalcontract.Abstain, "R3: agent must not re-checkout the canonical clone on its own initiative"},
@@ -653,6 +653,23 @@ var pluginForms = []pluginForm{
 	{"integrate-branch", `bgrun pre-land-eval-x -- pre-land-eval "$WT" drain/branch`, evalcontract.Abstain, "a quoted variable operand is a runtime value this engine does not resolve"},
 	{"integrate-branch", "pre-land-eval <ROOT>", evalcontract.Abstain, "the ref operand is required"},
 	{"integrate-branch", "pre-land-eval --impure <ROOT> drain/branch", evalcontract.Abstain, "an unmodeled flag stays insufficient"},
+	// pg-git-lander: the local lander every land goes through. Read-only verbs
+	// approve; rebase/land state the repo-configured hook Exec plus the branch and
+	// source-worktree deletions; --no-verify is left unmodeled like git's.
+	{"integrate-branch", "pg-git-lander status --json", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander log drain/x --tail 50", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander config check --json", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander land drain/x --repo <ROOT> --source-worktree <ROOT>/.worktrees/clean --wait 20m --json", evalcontract.Approve, ""},
+	{"integrate-branch", "bgrun pgl-land-x -- pg-git-lander land drain/x --repo <ROOT> --source-worktree <ROOT>/.worktrees/clean --wait 20m --json", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander land drain/x --source-worktree <ROOT>/.worktrees/clean --keep-source-worktree --json", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander rebase drain/x --onto main --repo <ROOT>", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander land drain/x --source-worktree <ROOT>/.worktrees/dirty --json", evalcontract.Reject, "land removes the source worktree, and path:delete of a dirty worktree is rejected by the worktree policy"},
+	{"integrate-branch", "pg-git-lander land --continue --json", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander land drain/x --abort", evalcontract.Approve, ""},
+	{"integrate-branch", "pg-git-lander land drain/x --repo <ROOT> --no-verify", evalcontract.Abstain, "--no-verify is left unmodeled exactly like git's: never without explicit approval"},
+	{"integrate-branch", "pg-git-lander land --continue --no-verify", evalcontract.Abstain, "--no-verify on a resume is unmodeled too"},
+	{"integrate-branch", "bgrun pgl-land-x -- pg-git-lander land drain/x --repo <ROOT> --no-verify --json", evalcontract.Abstain, "--no-verify under bgrun still abstains"},
+	{"integrate-branch", "/etc/profiles/per-user/phillipg/bin/pg-git-lander land drain/x --repo <ROOT>", evalcontract.Abstain, "an absolute-path argv0 is an untrusted executable identity (no trustedExecPath deployed)"},
 }
 
 // TestPluginInstructedForms runs every inventoried form through the full

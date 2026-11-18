@@ -33,6 +33,8 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - exec producer nix flake check: `nix flake check`
 - exec producer nix fmt: `nix fmt`
 - exec producer pg-go-mutate: `pg-go-mutate ./internal/collect --workers 1`
+- exec producer pg-git-lander land: `pg-git-lander land drain/x --repo .`
+- exec producer pg-git-lander rebase: `pg-git-lander rebase drain/x --onto main --repo .`
 - exec producer pg-hooks fix: `pg-hooks fix`
 - exec producer pg-hooks run: `pg-hooks run pre-commit a.go`
 - exec producer pn workspace apply: `pn workspace apply`
@@ -162,6 +164,8 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - exec producer nix flake check: `nix flake check` => **approve** inside, **abstain** outside
 - exec producer nix fmt: `nix fmt` => **approve** inside, **abstain** outside
 - exec producer pg-go-mutate: `pg-go-mutate ./internal/collect --workers 1` => **approve** inside, **abstain** outside
+- exec producer pg-git-lander land: `pg-git-lander land drain/x --repo .` => **approve** inside, **abstain** outside
+- exec producer pg-git-lander rebase: `pg-git-lander rebase drain/x --onto main --repo .` => **approve** inside, **abstain** outside
 - exec producer pg-hooks fix: `pg-hooks fix` => **approve** inside, **abstain** outside
 - exec producer pg-hooks run: `pg-hooks run pre-commit a.go` => **approve** inside, **abstain** outside
 - exec producer pn workspace apply: `pn workspace apply` => **approve** inside, **abstain** outside

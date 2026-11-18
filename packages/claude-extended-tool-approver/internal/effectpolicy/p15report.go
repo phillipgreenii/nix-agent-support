@@ -560,6 +560,8 @@ var markerExecProbes = []struct{ path, probe string }{
 	{"nix flake check", "nix flake check"},
 	{"nix fmt", "nix fmt"},
 	{"pg-go-mutate", "pg-go-mutate ./internal/collect --workers 1"},
+	{"pg-git-lander land", "pg-git-lander land drain/x --repo ."},
+	{"pg-git-lander rebase", "pg-git-lander rebase drain/x --onto main --repo ."},
 	{"pg-hooks fix", "pg-hooks fix"},
 	{"pg-hooks run", "pg-hooks run pre-commit a.go"},
 	{"pn workspace apply", "pn workspace apply"},

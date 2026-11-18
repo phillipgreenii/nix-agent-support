@@ -16545,5 +16545,221 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "Unmodeled flag stays insufficient."
+  },
+  {
+    "case": "pg_git_lander_status",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander status --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only status of the lander's operations: no Exec fact."
+  },
+  {
+    "case": "pg_git_lander_log_tail",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander log drain/x --tail 50"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only operation log."
+  },
+  {
+    "case": "pg_git_lander_config_check",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander config check --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Read-only configuration validation."
+  },
+  {
+    "case": "pg_git_lander_land",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander land drain/x --wait 20m --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Local land: Exec fact for the repo-configured hooks (trust_repo_config gate) plus the branch deletion, judged on the trusted checkout."
+  },
+  {
+    "case": "pg_git_lander_land_under_bgrun",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bgrun pgl-land-x -- pg-git-lander land drain/x --wait 20m --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "The drain landers' real shape: the land runs under bgrun NAME --."
+  },
+  {
+    "case": "pg_git_lander_land_continue",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander land --continue --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Resuming a stopped land shares the land schema and Exec fact."
+  },
+  {
+    "case": "pg_git_lander_rebase",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander rebase drain/x --onto main"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Rebase runs the post-rebase-fix hooks: same Exec fact."
+  },
+  {
+    "case": "pg_git_lander_land_no_verify_abstain",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander land drain/x --no-verify"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Workspace rule, never --no-verify without explicit approval; stays unmodeled exactly like git's --no-verify."
+  },
+  {
+    "case": "pg_git_lander_land_continue_no_verify_abstain",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander land --continue --no-verify"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "--no-verify on a resume is unmodeled too."
+  },
+  {
+    "case": "pg_git_lander_land_outside_checkout_abstain",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-git-lander land drain/x --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Without a trusted-checkout working directory the Exec fact does not approve."
+  },
+  {
+    "case": "pg_git_lander_absolute_path_abstain",
+    "tags": ["repo-base-plugins", "pg-git-lander"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "/etc/profiles/per-user/phillipg/bin/pg-git-lander land drain/x --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "workspace_markers": ["pn-workspace.toml"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "An absolute-path argv0 is an untrusted executable identity (no trustedExecPath is deployed)."
   }
 ]

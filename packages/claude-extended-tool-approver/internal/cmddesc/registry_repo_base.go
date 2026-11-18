@@ -361,6 +361,105 @@ var preLandEvalSchema = CommandSchema{
 	EndOfOptions:    true,
 }
 
+// pgGitLanderSchema: `pg-git-lander <status|log|config check|rebase|land>` -- the
+// local rebase-then-fast-forward lander every land goes through
+// (integrate-branch's ff-merge-to-main handler).
+//
+//   - status, log and `config check` are read-only (the --help marks status
+//     read-only; log prints an operation's log; config check validates a file):
+//     no Exec fact, so they approve from any working directory.
+//   - rebase and land run the repository's configured hooks: post-rebase-fix
+//     may change the tree (autofix commits) and pre-merge-verify runs commands
+//     before the branch moves. Those commands come from the repo file only when
+//     the XDG entry trust_repo_config is true (README configuration table), so
+//     the tool runs checkout-controlled code exactly like `pn workspace
+//     flake-check`: one Exec fact, judged by TrustedCheckoutExec on the working
+//     directory. The resume forms (--continue, --skip, --abort, --quit) share the
+//     rebase/land schema and the same fact.
+//   - land deletes BRANCH and removes the source worktree unless
+//     --keep-source-branch / --keep-source-worktree (--help "keep flags"): the
+//     branch deletion is declared as PathModify of .git (git branch -d's
+//     precedent) unconditionally (the keep flags only reduce it) and the
+//     --source-worktree operand is PathDelete; --repo, --target-worktree and
+//     --work-worktree are PathModify (the fast-forward and the rebase happen
+//     there). BRANCH, REF, TARGET, DURATION and KEY=VALUE are literals.
+//   - --no-verify (rebase, land, --continue, --skip) skips pre-merge-verify and
+//     git's own hooks. It is deliberately NOT modeled, exactly like git's
+//     --no-verify (operator ruling, Phillip, 2026-11-17: "no "ASK" for
+//     --no-verify. we should handle --no-verify with it the same we have with
+//     --no-verify for git."), so a call carrying it is insufficient and abstains.
+//
+// A call by absolute path abstains as an untrusted executable identity
+// (internal/patheval/trustedexec.go), independent of this schema.
+func pgGitLanderOps() map[string]FlagSpec {
+	return map[string]FlagSpec{
+		"--continue": inert, "--skip": inert, "--abort": inert, "--quit": inert,
+		"--json": inert, "--wait": literal1, "-h": inert, "--help": inert,
+	}
+}
+
+func pgGitLanderVerb(name string, extra map[string]FlagSpec, pos PositionalSpec, implicit ...ImplicitEffect) CommandSchema {
+	return CommandSchema{
+		Name:            name,
+		Provenance:      "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+		Flags:           extra,
+		Positionals:     pos,
+		ImplicitEffects: implicit,
+		Stdin:           StdinNever,
+		Stdout:          StdoutContent,
+		UnknownFlag:     UnknownFlagInsufficient,
+		EndOfOptions:    true,
+	}
+}
+
+var pgGitLanderSchema = func() CommandSchema {
+	readOnly := func(extra map[string]FlagSpec) map[string]FlagSpec {
+		return mergeFlags(map[string]FlagSpec{
+			"--repo": {Arity: ArityOne, Operand: PathRead}, "--json": inert, "-h": inert, "--help": inert,
+		}, extra)
+	}
+	mutating := func(extra map[string]FlagSpec) map[string]FlagSpec {
+		return mergeFlags(mergeFlags(pgGitLanderOps(), map[string]FlagSpec{
+			"--repo":            {Arity: ArityOne, Operand: PathModify},
+			"--source-worktree": {Arity: ArityOne, Operand: PathDelete},
+			"--work-worktree":   {Arity: ArityOne, Operand: PathModify},
+			"--context":         literal1,
+		}), extra)
+	}
+	exec := func(verb string) ImplicitEffect {
+		return ImplicitEffect{Role: Exec, Target: "pg-git-lander " + verb}
+	}
+	branchPos := PositionalSpec{Rest: Literal}
+	return CommandSchema{
+		Name:         "pg-git-lander",
+		Provenance:   "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+		Flags:        map[string]FlagSpec{"-h": inert, "--help": inert},
+		UnknownFlag:  UnknownFlagInsufficient,
+		EndOfOptions: true,
+		Subcommands: map[string]CommandSchema{
+			"status": pgGitLanderVerb("status", readOnly(nil), branchPos),
+			"log":    pgGitLanderVerb("log", readOnly(map[string]FlagSpec{"--tail": literal1}), branchPos),
+			"config": {
+				Name:         "config",
+				Provenance:   "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+				Flags:        map[string]FlagSpec{"-h": inert, "--help": inert},
+				UnknownFlag:  UnknownFlagInsufficient,
+				EndOfOptions: true,
+				Subcommands: map[string]CommandSchema{
+					"check": pgGitLanderVerb("check", map[string]FlagSpec{
+						"--file": {Arity: ArityOne, Operand: PathRead}, "--json": inert, "-h": inert, "--help": inert,
+					}, PositionalSpec{}),
+				},
+			},
+			"rebase": pgGitLanderVerb("rebase", mutating(map[string]FlagSpec{"--onto": literal1}), branchPos, exec("rebase")),
+			"land": pgGitLanderVerb("land", mutating(map[string]FlagSpec{
+				"--into": literal1, "--target-worktree": {Arity: ArityOne, Operand: PathModify},
+				"--keep-source-worktree": inert, "--keep-source-branch": inert,
+			}), branchPos, exec("land"), ImplicitEffect{Role: PathModify, Target: ".git"}),
+		},
+	}
+}()
+
 // readsPaMonitor is the implicit effect of a pa-monitor query: a read over the
 // local Unix-socket RPC to the user's own pa-monitor daemon, the same shape as
 // readsBeads for bd.
@@ -489,5 +588,5 @@ var recorderSchema = CommandSchema{
 
 // repoBaseToolSchemas lists the schemas this file contributes to DefaultRegistry.
 func repoBaseToolSchemas() []CommandSchema {
-	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema, darwinRebuildSchema, paMonitorSchema, recorderSchema, preLandEvalSchema}
+	return []CommandSchema{repoBasePnSchema, repoBasePnwfSchema, darwinRebuildSchema, paMonitorSchema, recorderSchema, preLandEvalSchema, pgGitLanderSchema}
 }

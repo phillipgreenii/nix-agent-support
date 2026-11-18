@@ -1,0 +1,851 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-git-lander",
+  "command": {
+    "name": "pg-git-lander",
+    "provenance": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+    "citations": {
+      "provenance": {
+        "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"pg-git-lander --version\" prints pg-git-lander 0.0.0-32f61716"
+      },
+      "stdin": {
+        "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): no stdin is documented in any usage line; classified never"
+      },
+      "stdout": {
+        "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"output: one line per outcome, or one JSON object with --json.\""
+      },
+      "unknownFlag": {
+        "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"Every subcommand and flag is described here\"; flags outside the usage lines are unmodeled, so the fail-closed default (insufficient) applies; --no-verify is deliberately unmodeled like git's --no-verify"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage: the first word selects the subcommand (rebase, land, status, log, config check)"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "config": {
+        "name": "config",
+        "provenance": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"pg-git-lander --version\" prints pg-git-lander 0.0.0-32f61716"
+          },
+          "stdin": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): no stdin is documented in any usage line; classified never"
+          },
+          "stdout": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"output: one line per outcome, or one JSON object with --json.\""
+          },
+          "unknownFlag": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"Every subcommand and flag is described here\"; flags outside the usage lines are unmodeled, so the fail-closed default (insufficient) applies; --no-verify is deliberately unmodeled like git's --no-verify"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"pg-git-lander config check ...\": config takes only the check subcommand"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "check": {
+            "name": "check",
+            "provenance": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+            "citations": {
+              "provenance": {
+                "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"pg-git-lander --version\" prints pg-git-lander 0.0.0-32f61716"
+              },
+              "stdin": {
+                "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): no stdin is documented in any usage line; classified never"
+              },
+              "stdout": {
+                "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"output: one line per outcome, or one JSON object with --json.\""
+              },
+              "unknownFlag": {
+                "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"Every subcommand and flag is described here\"; flags outside the usage lines are unmodeled, so the fail-closed default (insufficient) applies; --no-verify is deliberately unmodeled like git's --no-verify"
+              }
+            },
+            "flags": {
+              "--file": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"config check [--file PATH]\": \"validate the XDG configuration, or the file given by --file\"; the file is only read"
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--json]\": \"output: one line per outcome, or one JSON object with --json.\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"pg-git-lander config check [--file PATH] [--json]\": no positional operand"
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "land": {
+        "name": "land",
+        "provenance": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"pg-git-lander --version\" prints pg-git-lander 0.0.0-32f61716"
+          },
+          "stdin": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): no stdin is documented in any usage line; classified never"
+          },
+          "stdout": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"output: one line per outcome, or one JSON object with --json.\""
+          },
+          "unknownFlag": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"Every subcommand and flag is described here\"; flags outside the usage lines are unmodeled, so the fail-closed default (insufficient) applies; --no-verify is deliberately unmodeled like git's --no-verify"
+          }
+        },
+        "flags": {
+          "--abort": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--context": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--context KEY=VALUE]...\": a KEY=VALUE literal handed to hooks and conflict rules"
+            }
+          },
+          "--continue": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          },
+          "--into": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"land BRANCH [--into TARGET]\": TARGET defaults to the primary branch; a literal"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--json]\": \"output: one line per outcome, or one JSON object with --json.\""
+            }
+          },
+          "--keep-source-branch": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): keep flags (land): \"--keep-source-branch  BRANCH moved to the result, worktree removed\""
+            }
+          },
+          "--keep-source-worktree": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): keep flags (land): \"--keep-source-worktree  BRANCH deleted, source worktree parked on the placeholder branch\""
+            }
+          },
+          "--quit": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-modify"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every form accepts --repo PATH\"; \"repository: --repo PATH, else the clone containing the worktrees named by ...\""
+            }
+          },
+          "--skip": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--source-worktree": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-delete"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"land BRANCH ... [--source-worktree PATH]\"; keep flags: \"none  BRANCH deleted, source worktree removed\" (land removes this worktree unless --keep-source-worktree)"
+            }
+          },
+          "--target-worktree": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-modify"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"land BRANCH [--into TARGET] [--target-worktree PATH]\": the worktree TARGET is fast-forwarded in"
+            }
+          },
+          "--wait": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--wait DURATION]\": a lock-wait duration, a literal; exit code 9 \"busy: a lock was not obtained within the wait\""
+            }
+          },
+          "--work-worktree": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-modify"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--work-worktree PATH]\": the worktree the rebase runs in, which land and rebase modify"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage lines \"pg-git-lander land BRANCH [--into TARGET] ...\" and \"land [BRANCH] --continue | --skip\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pg-git-lander land",
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"hooks (configuration ...): post-rebase-fix runs only after a rebase; may change the tree (autofix commits)\"; \"pre-merge-verify runs on every path before the branch moves\"; README: trust_repo_config \"Run commands named in the repo file.\" (packages/pg-git-lander/README.md)"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): keep flags (land): \"none  BRANCH deleted, source worktree removed\"; the branch deletion is modeled as a .git modification, git branch -d's precedent (the keep flags only reduce it)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "log": {
+        "name": "log",
+        "provenance": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"pg-git-lander --version\" prints pg-git-lander 0.0.0-32f61716"
+          },
+          "stdin": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): no stdin is documented in any usage line; classified never"
+          },
+          "stdout": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"output: one line per outcome, or one JSON object with --json.\""
+          },
+          "unknownFlag": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"Every subcommand and flag is described here\"; flags outside the usage lines are unmodeled, so the fail-closed default (insufficient) applies; --no-verify is deliberately unmodeled like git's --no-verify"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--json]\": \"output: one line per outcome, or one JSON object with --json.\""
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every form accepts --repo PATH\"; \"repository: --repo PATH, else the clone containing the worktrees named by ...\""
+            }
+          },
+          "--tail": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"log OP_ID | BRANCH [--tail N]\": N is a literal line count"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"pg-git-lander log OP_ID | BRANCH [--tail N]\"; the operand is a literal operation id or branch"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "rebase": {
+        "name": "rebase",
+        "provenance": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"pg-git-lander --version\" prints pg-git-lander 0.0.0-32f61716"
+          },
+          "stdin": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): no stdin is documented in any usage line; classified never"
+          },
+          "stdout": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"output: one line per outcome, or one JSON object with --json.\""
+          },
+          "unknownFlag": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"Every subcommand and flag is described here\"; flags outside the usage lines are unmodeled, so the fail-closed default (insufficient) applies; --no-verify is deliberately unmodeled like git's --no-verify"
+          }
+        },
+        "flags": {
+          "--abort": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--context": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--context KEY=VALUE]...\": a KEY=VALUE literal handed to hooks and conflict rules"
+            }
+          },
+          "--continue": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--json]\": \"output: one line per outcome, or one JSON object with --json.\""
+            }
+          },
+          "--onto": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"pg-git-lander rebase BRANCH --onto REF\": REF is a literal"
+            }
+          },
+          "--quit": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-modify"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every form accepts --repo PATH\"; \"repository: --repo PATH, else the clone containing the worktrees named by ...\""
+            }
+          },
+          "--skip": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"--continue, --skip, --abort and --quit resume or end a stopped operation.\""
+            }
+          },
+          "--source-worktree": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-delete"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"land BRANCH ... [--source-worktree PATH]\"; keep flags: \"none  BRANCH deleted, source worktree removed\" (land removes this worktree unless --keep-source-worktree)"
+            }
+          },
+          "--wait": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--wait DURATION]\": a lock-wait duration, a literal; exit code 9 \"busy: a lock was not obtained within the wait\""
+            }
+          },
+          "--work-worktree": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-modify"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--work-worktree PATH]\": the worktree the rebase runs in, which land and rebase modify"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage lines \"pg-git-lander rebase BRANCH --onto REF ...\" and \"rebase [BRANCH] --continue | --skip\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pg-git-lander rebase",
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"hooks (configuration ...): post-rebase-fix runs only after a rebase; may change the tree (autofix commits)\"; \"pre-merge-verify runs on every path before the branch moves\"; README: trust_repo_config \"Run commands named in the repo file.\" (packages/pg-git-lander/README.md)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "status": {
+        "name": "status",
+        "provenance": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716, this repo packages/pg-git-lander), this host 2026-11-17",
+        "citations": {
+          "provenance": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"pg-git-lander --version\" prints pg-git-lander 0.0.0-32f61716"
+          },
+          "stdin": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): no stdin is documented in any usage line; classified never"
+          },
+          "stdout": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"output: one line per outcome, or one JSON object with --json.\""
+          },
+          "unknownFlag": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"Every subcommand and flag is described here\"; flags outside the usage lines are unmodeled, so the fail-closed default (insufficient) applies; --no-verify is deliberately unmodeled like git's --no-verify"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--json]\": \"output: one line per outcome, or one JSON object with --json.\""
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every form accepts --repo PATH\"; \"repository: --repo PATH, else the clone containing the worktrees named by ...\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): \"every subcommand and flag is described here; the help of rebase, land, status, log and config check is this same text\" (-h and --help both print it)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"pg-git-lander status [BRANCH] [--json]\"; \"status  show the operations in this repository (read-only)\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

@@ -88,6 +88,8 @@ func TestPnPnwfExecFactMarkerWorkspace(t *testing.T) {
 		"pnwf update-relock --set",
 		"pnwf cleanup my-branch",
 		"pre-land-eval . main",
+		"pg-git-lander land drain/x --repo . --json",
+		"pg-git-lander rebase drain/x --onto main",
 		"go test ./...",
 	}
 	for _, c := range execForms {
