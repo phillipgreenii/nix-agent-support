@@ -65,8 +65,8 @@ cachePackages = [
     hash = 'sha256-/1S3yy3in72ygZT1CKymvOzJZqCMYiGSqZDfvSyB3LI='
 
   [mod.'modernc.org/libc']
-    version = 'v1.79.1'
-    hash = 'sha256-tTzZIGVxVRIGkbu9JhHUGZGs9NXE+0wISdoqI3xvsoE='
+    version = 'v1.79.0'
+    hash = 'sha256-f70OLLdDHzjlwu2PKdPDPS+427MhJKViGPdUj3a1arA='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
