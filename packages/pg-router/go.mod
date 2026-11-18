@@ -12,10 +12,10 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/muesli/termenv v0.16.0
 	github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d
-	github.com/spf13/cobra v1.8.1
-	github.com/spf13/pflag v1.0.5
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
+	github.com/spf13/cobra v1.8.1
+	github.com/spf13/pflag v1.0.5
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.22.0
