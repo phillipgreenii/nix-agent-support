@@ -4,6 +4,7 @@ cachePackages = [
   'github.com/google/uuid',
   'github.com/mattn/go-isatty',
   'github.com/ncruces/go-strftime',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite/sqliteopen',
   'github.com/remyoudompheng/bigfft',
   'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
