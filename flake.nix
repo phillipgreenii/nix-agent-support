@@ -2496,6 +2496,41 @@
             {
               test-update-locks-lib = checksHelpers.testUpdateLocksLib { };
 
+              # The folded members' filesets (packages/pg-router/members.json): a
+              # member-only source file is in that member's fileset and NOT in the
+              # router's, and not in another member's, so a member-only edit
+              # changes only that member's --version (the per-source digest is of
+              # the fileset content). Evaluation fails when a fileset leaks.
+              test-pg-router-member-filesets =
+                let
+                  names = lib.attrNames routerMembers.data.members;
+                  files = fs: map toString (lib.fileset.toList fs);
+                  routerFiles = files routerMembers.routerFileset;
+                  own =
+                    name:
+                    let
+                      m = routerMembers.data.members.${name};
+                      dirs =
+                        (map (c: toString ./packages/pg-router + "/cmd/${c}/") m.cmd)
+                        ++ (map (i: toString ./packages/pg-router + "/internal/${i}/") m.internal);
+                    in
+                    lib.filter (f: lib.any (d: lib.hasPrefix d f) dirs) (files (routerMembers.memberFileset name));
+                  problems = lib.concatMap (
+                    name:
+                    let
+                      mine = own name;
+                      others = lib.concatMap own (lib.filter (n: n != name) names);
+                    in
+                    lib.optional (mine == [ ]) "${name}: its fileset holds none of its own sources"
+                    ++ map (f: "${name}: ${f} is in the router fileset") (lib.filter (f: lib.elem f routerFiles) mine)
+                    ++ map (f: "${name}: fileset holds another member's ${f}") (
+                      lib.filter (f: lib.elem f others) (files (routerMembers.memberFileset name))
+                    )
+                  ) names;
+                in
+                assert lib.assertMsg (problems == [ ]) (lib.concatStringsSep "; " problems);
+                pkgs.runCommand "test-pg-router-member-filesets" { } "touch $out";
+
               # The tracked go.work equals what scripts/gen-go-work.sh generates
               # from packages/*/go.mod, so it cannot drift. go.work is for the
               # editor and the go-work-vet gate; builds set GOWORK=off.
