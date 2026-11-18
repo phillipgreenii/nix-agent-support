@@ -359,7 +359,7 @@ name = "work-report-pull"
 emits = ["escalated.pg2"]
 type = "command"
 [query.command]
-argv = ["work-report", "pull", "--range", "last-48h", "--output", "pg-router"]
+argv = ["work-report", "pull", "--range", "last-48h", "--output", "pg-router", "--no-items"]
 format = "json"
 [query.trigger]
 kind = "period"
@@ -370,7 +370,7 @@ name = "work-report-pull"
 emits = ["escalated.pg2"]
 type = "command"
 [query.command]
-argv = ["work-report", "pull", "--range", "last-7d", "--output", "pg-router"]
+argv = ["work-report", "pull", "--range", "last-7d", "--output", "pg-router", "--no-items"]
 format = "json"
 [query.trigger]
 kind = "period"

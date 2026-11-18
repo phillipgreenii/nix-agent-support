@@ -51,6 +51,7 @@ func pullOutputFormat(raw string) (string, error) {
 func newPullCmd() *cobra.Command {
 	var rangeSpec string
 	var sources []string
+	var noItems bool
 	cmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Pull activity from pg-connector into the store",
@@ -62,7 +63,10 @@ func newPullCmd() *cobra.Command {
 			"A degraded source is backed by one open escalation bead (created, appended to, " +
 			"or closed again through `pg-connector issue`) in every output mode. --output " +
 			"pg-router prints a JSON array of pg-router items, one per degraded source and " +
-			"none for a healthy pull, and exits non-zero only when the pull could not run at all.\n\n" +
+			"none for a healthy pull, and exits non-zero only when the pull could not run at all. " +
+			"With --no-items it still reconciles the beads but prints an empty array, so a " +
+			"scheduler that already receives escalated beads from the tracker is not handed " +
+			"each one a second time.\n\n" +
 			"Range forms: " + rangespec.Forms + ".",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -70,6 +74,9 @@ func newPullCmd() *cobra.Command {
 			format, err := pullOutputFormat(rawOut)
 			if err != nil {
 				return err
+			}
+			if noItems && format != formatPGRouter {
+				return fmt.Errorf("--no-items only applies to --output %s", formatPGRouter)
 			}
 			cfg, err := config.Load(cfgPath)
 			if err != nil {
@@ -128,7 +135,7 @@ func newPullCmd() *cobra.Command {
 
 			switch format {
 			case formatPGRouter:
-				if items == nil {
+				if items == nil || noItems {
 					items = []degraded.Item{}
 				}
 				if err := writeJSON(cmd.OutOrStdout(), items); err != nil {
@@ -153,6 +160,7 @@ func newPullCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&rangeSpec, "range", "today", "range to pull: "+rangespec.Forms)
+	cmd.Flags().BoolVar(&noItems, "no-items", false, "with --output pg-router: reconcile the degraded-source beads but print no items")
 	cmd.Flags().StringArrayVar(&sources, "source", nil, "pull only this backend (repeatable); default is every source in one fan-out call")
 	return cmd
 }

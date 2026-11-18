@@ -25,6 +25,11 @@ Global flags: `--config FILE`, `--output json|human`, `--store FILE`. Range form
 `work-report report --help` (for example `today`, `yesterday`, `last-week`, a single date, or a
 span).
 
+`work-report pull --output pg-router` prints one pg-router item per degraded source. The scheduled
+stanza adds `--no-items`: the pull still files, appends to and closes the degraded-source beads, but
+prints `[]`, because the deployment's escalated-work feed already delivers each escalated bead to
+the triager once (an item from the pull too queued a second, redundant triager session per bead).
+
 ## Generators and presets
 
 Reporting is split in two. work-report owns everything around a run: it resolves the range and the

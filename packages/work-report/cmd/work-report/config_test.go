@@ -78,6 +78,7 @@ func TestConfigPGRouterQueryDefaults(t *testing.T) {
 		`emits = ["escalated.pg2"]`,
 		`every = "1h"`,
 		`"last-48h"`,
+		`"--output", "pg-router", "--no-items"`,
 		`name = "work-report-pull"`,
 	} {
 		if !strings.Contains(out, want) {

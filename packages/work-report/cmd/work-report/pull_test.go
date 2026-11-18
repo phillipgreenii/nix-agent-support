@@ -349,6 +349,37 @@ func TestPullPGRouterEmitsOneItemPerDegradedSource(t *testing.T) {
 	}
 }
 
+func TestPullPGRouterNoItemsStillReconcilesButPrintsEmptyArray(t *testing.T) {
+	isolate(t)
+	fixedNow(t)
+	rec := fake.Install(
+		t,
+		fake.Route{Match: []string{"activity", "list"}, Stdout: degradedDoc},
+		fake.IssueListRoute(), fake.ConfigValidateRoute(fake.ConfigRow{Source: "backend-slow", Status: "degraded"}),
+		fake.IssueCreateRoute("bd-7"),
+	)
+	cfg := writeCfg(t, "timezone: America/Chicago\n")
+	out, err := runCLI(t, "--config", cfg, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", "pg-router",
+		"pull", "--range", "yesterday", "--no-items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "[]" {
+		t.Errorf("--no-items must print an empty array, got:\n%s", out)
+	}
+	if n := len(issueCalls(rec.Calls(), "create")); n != 1 {
+		t.Errorf("the degraded bead must still be filed; create calls = %d", n)
+	}
+}
+
+func TestPullNoItemsRequiresPGRouterOutput(t *testing.T) {
+	isolate(t)
+	fixedNow(t)
+	if _, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "pull", "--no-items"); err == nil {
+		t.Error("--no-items without --output pg-router must be rejected")
+	}
+}
+
 func TestPullPGRouterHealthyPullPrintsEmptyArray(t *testing.T) {
 	isolate(t)
 	fixedNow(t)

@@ -303,8 +303,13 @@ func (c Config) SourceLabels(backend string) []string {
 }
 
 // PGRouterQueryText renders the pg-router [[query]] stanza that runs the
-// scheduled pull. It emits escalated.pg2, the event type the deployment's
-// escalation-triager role already binds, so no new role binding is needed.
+// scheduled pull. The pull runs with --no-items: it files, appends to and
+// closes the degraded-source beads but hands the router no item, because the
+// deployment's escalated-work feed already delivers each newly escalated bead
+// to the triager exactly once; an item from here too would dispatch a second,
+// redundant triager session per bead. The stanza still declares
+// escalated.pg2, the type the triager role binds, because a query MUST
+// declare an event type that some role binds.
 // Empty schedule values render as the defaults.
 func (c Config) PGRouterQueryText() string {
 	interval, window := c.Schedule.Interval, c.Schedule.Window
@@ -319,7 +324,7 @@ name = "work-report-pull"
 emits = ["escalated.pg2"]
 type = "command"
 [query.command]
-argv = ["work-report", "pull", "--range", "last-%s", "--output", "pg-router"]
+argv = ["work-report", "pull", "--range", "last-%s", "--output", "pg-router", "--no-items"]
 format = "json"
 [query.trigger]
 kind = "period"

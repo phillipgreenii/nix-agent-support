@@ -291,9 +291,11 @@ in
         Read-only output: the pg-router [[query]] stanza that schedules
         `work-report pull` from schedule.interval and schedule.window. It
         equals `work-report config pg-router-query` for the same values. The
-        deployment appends it to pg-router's configText; it emits the
-        escalated.pg2 event type, so the deployment's existing triager role
-        binding needs no change.
+        deployment appends it to pg-router's configText. The pull runs with
+        --no-items, so it hands the router no item: the deployment's
+        escalated-work feed already delivers each newly escalated bead to the
+        triager once. The stanza still declares escalated.pg2 because a
+        query MUST declare an event type that some role binds.
       '';
     };
   };
@@ -310,7 +312,7 @@ in
         emits = ["escalated.pg2"]
         type = "command"
         [query.command]
-        argv = ["work-report", "pull", "--range", "last-${cfg.schedule.window}", "--output", "pg-router"]
+        argv = ["work-report", "pull", "--range", "last-${cfg.schedule.window}", "--output", "pg-router", "--no-items"]
         format = "json"
         [query.trigger]
         kind = "period"
