@@ -54,6 +54,13 @@ type Result struct {
 	// This field is this module's own addition to the otherwise verbatim copy
 	// of the core's report package.
 	StartedAt time.Time
+	// Session and Supervisors are set ONLY by a dispatch that completed a lease
+	// takeover of an existing session: the session's external id and the
+	// supervisor count the takeover returned (at least 1). They are not part of
+	// Fields(); the dispatch subcommand writes them as the reply's optional
+	// session and supervisors. Zero values mean no takeover happened.
+	Session     string
+	Supervisors int
 }
 
 // Fields renders the Result for eventlog.Emit's flat fields map: a slice of

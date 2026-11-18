@@ -106,6 +106,26 @@ type SkippedObserver interface {
 	OnSkipped(eventID, evtType, listenerID, reason string)
 }
 
+// ReofferObserver is notified when Offer hands an event back because the run
+// context was cancelled (the shutdown decline): the next router re-offers such an
+// event by construction, and the queue keeps no attempt history to detect it
+// later, so the hand-back itself is the place to count it. It fires before Offer
+// returns, which is before the shutdown path flushes and exits.
+// internal/metrics.Emitter counts it on
+// pg_router_events_reoffered_after_shutdown_total{role}.
+type ReofferObserver interface {
+	OnReofferedAfterShutdown(listenerID string)
+}
+
+// SupervisionObserver is notified of the supervision report a finished dispatch's
+// reply carried (the ccpool session's external id and the supervisor count a lease
+// takeover returned), only when both were present and valid.
+// internal/metrics.Emitter sets pg_router_supervisors_per_session{role,session}
+// from it (last write wins).
+type SupervisionObserver interface {
+	OnSupervision(listenerID, session string, supervisors int)
+}
+
 // RoleProgressObserver is notified of what each offer to a role came to, for
 // the per-role progress gauges (pg_router_role_last_progress_age_seconds,
 // pg_router_role_unsuccessful_since_progress, pg_router_role_busy_since_progress;
@@ -222,6 +242,10 @@ type roleListener struct {
 	// (bead pg2-6t91v7), captured at construction like the observers above; nil
 	// disables the notification, not the accept.
 	skippedObs SkippedObserver
+	// reofferObs and supervisionObs are the shutdown hand-back and supervision
+	// report observers, captured at construction; nil disables each.
+	reofferObs     ReofferObserver
+	supervisionObs SupervisionObserver
 	// maxRetries is role.MaxDispatchRetries clamped to
 	// roles.MaxDispatchRetriesCap; 0 disables the retry entirely.
 	maxRetries int
@@ -251,6 +275,8 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		levelObs:          o.DispatchLevelObserver,
 		progressObs:       o.RoleProgressObserver,
 		skippedObs:        o.SkippedObserver,
+		reofferObs:        o.ReofferObserver,
+		supervisionObs:    o.SupervisionObserver,
 		maxRetries:        clampRetries(role.MaxDispatchRetries),
 	}
 }
@@ -492,6 +518,9 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 		// counted, and it is not a retry (no ledger slot, no retryObs). A handler
 		// that finished (err == nil) in the same instant is accepted as usual below.
 		l.retries.forget(evt.ID)
+		if l.reofferObs != nil {
+			l.reofferObs.OnReofferedAfterShutdown(l.role.Name)
+		}
 		slog.Info("orchestrator: dispatch cut short by shutdown; leaving the event for the next daemon to re-offer",
 			"role", l.role.Name, "event", evt.ID, "err", err)
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailShutdown}
@@ -511,6 +540,9 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	// A reply that completed the event as skipped (bead pg2-6t91v7) did no work, so
 	// it is not progress either: the observer is told it was skipped instead, before
 	// Offer returns and the queue reports the accept.
+	if err == nil && l.supervisionObs != nil && reply.Session != "" && reply.Supervisors >= 1 {
+		l.supervisionObs.OnSupervision(l.role.Name, reply.Session, reply.Supervisors)
+	}
 	skipped := err == nil && reply.Skipped != ""
 	if skipped && l.skippedObs != nil {
 		l.skippedObs.OnSkipped(evt.ID, evt.Type, l.role.Name, reply.Skipped)

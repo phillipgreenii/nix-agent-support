@@ -135,3 +135,36 @@ func TestBusyDeclineFor_lowFreeSpaceCarriesDetail(t *testing.T) {
 		t.Errorf("detail must name the floor; got %q", d.Detail)
 	}
 }
+
+// The takeover's session and supervisor count ride the outcome reply as two
+// optional properties added together; the reply stays schema-valid with or
+// without them, and a half or out-of-range pair adds nothing.
+func TestWithSupervision_addsBothOrNeither(t *testing.T) {
+	r := WithSupervision(OutcomeReply("r", "o", time.Time{}), "sess-1", 2)
+	if err := schemas.Validate("handler.dispatch-reply", r); err != nil {
+		t.Fatalf("reply with supervision does not validate: %v", err)
+	}
+	if r["session"] != "sess-1" || r["supervisors"] != 2 {
+		t.Fatalf("reply = %v", r)
+	}
+	for _, c := range []struct {
+		session string
+		n       int
+	}{{"", 2}, {"s", 0}, {"s", -1}, {"", 0}} {
+		got := WithSupervision(OutcomeReply("r", "o", time.Time{}), c.session, c.n)
+		if _, has := got["session"]; has {
+			t.Errorf("(%q,%d) must add nothing: %v", c.session, c.n, got)
+		}
+		if _, has := got["supervisors"]; has {
+			t.Errorf("(%q,%d) must add nothing: %v", c.session, c.n, got)
+		}
+		if err := schemas.Validate("handler.dispatch-reply", got); err != nil {
+			t.Errorf("plain reply invalid: %v", err)
+		}
+	}
+	bad := OutcomeReply("r", "o", time.Time{})
+	bad["session"], bad["supervisors"] = "s", 0
+	if err := schemas.Validate("handler.dispatch-reply", bad); err == nil {
+		t.Error("supervisors 0 must fail the schema")
+	}
+}

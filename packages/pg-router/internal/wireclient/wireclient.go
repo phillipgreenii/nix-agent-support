@@ -28,6 +28,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -77,6 +79,13 @@ type Reply struct {
 	// keeps the dispatch's outcome: the field is advisory). This package does not
 	// range-check it; the caller, which knows the event and the offer, does.
 	StartedAt time.Time
+	// Session and Supervisors are the reply's OPTIONAL supervision report: the
+	// ccpool session's external id a lease takeover absorbed and the supervisor
+	// count that takeover returned. They are set only when BOTH were present and
+	// valid (a non-empty string session, an integer supervisors of at least 1);
+	// otherwise both stay zero and the reply is used as before.
+	Session     string
+	Supervisors int
 }
 
 // ErrBusy is returned when the invoked participant's dispatch subcommand
@@ -356,6 +365,11 @@ type dispatchReply struct {
 	// instant, can be ignored with a warning (reportedStart) instead of failing
 	// the whole reply decode and with it a dispatch that worked.
 	StartedAt json.RawMessage `json:"startedAt,omitempty"`
+	// Session and Supervisors are the OPTIONAL supervision report, kept raw like
+	// StartedAt so a value of the wrong JSON type is ignored (reportedSupervision)
+	// instead of failing a dispatch that worked.
+	Session     json.RawMessage `json:"session,omitempty"`
+	Supervisors json.RawMessage `json:"supervisors,omitempty"`
 }
 
 // decodeDeclineBody decodes the OPTIONAL exit-9 reply body (bead pg2-j4uwg; see
@@ -439,7 +453,8 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		if reply.Error != "" {
 			return Reply{}, fmt.Errorf("wireclient: role %q: %s", role.Name, reply.Error)
 		}
-		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome, Skipped: reply.Skipped, StartedAt: reportedStart(role.Name, reply.StartedAt)}, nil
+		session, supervisors := reportedSupervision(reply.Session, reply.Supervisors)
+		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome, Skipped: reply.Skipped, StartedAt: reportedStart(role.Name, reply.StartedAt), Session: session, Supervisors: supervisors}, nil
 	case 9: // DEC-WIRE-1's "Coarse exit codes": 9 is busy.
 		// The OPTIONAL busy-decline reply body (bead pg2-j4uwg): read
 		// opportunistically, exactly the same "peek at stdout on a non-zero
@@ -481,6 +496,26 @@ func reportedStart(role string, raw json.RawMessage) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// reportedSupervision vets the reply's optional session and supervisors: both
+// must be present, session a non-empty JSON string and supervisors a JSON
+// integer of at least 1. Anything else (only one present, an empty session, a
+// non-integer or smaller supervisors) yields ("", 0), so the caller leaves the
+// supervisors gauge unset.
+func reportedSupervision(rawSession, rawSupervisors json.RawMessage) (string, int) {
+	if len(rawSession) == 0 || len(rawSupervisors) == 0 {
+		return "", 0
+	}
+	var session string
+	if err := json.Unmarshal(rawSession, &session); err != nil || session == "" {
+		return "", 0
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(rawSupervisors)), 10, 32)
+	if err != nil || n < 1 {
+		return "", 0
+	}
+	return session, int(n)
 }
 
 // ExitError is Dispatch's error for a handler subprocess that exited with a

@@ -121,6 +121,17 @@ const (
 	// increase as "something was processed", and a stream of no-op completions must
 	// not make a stuck queue look like it is progressing.
 	MetricSkipped = "pg_router_skipped"
+	// MetricReofferedAfterShutdown counts, per role, offers handed back because the
+	// run context was cancelled (the shutdown decline; exposed as
+	// pg_router_events_reoffered_after_shutdown_total). Such an event is re-offered
+	// by the next router by construction and the queue records no attempt history
+	// to detect it later, so the hand-back is counted where it happens.
+	MetricReofferedAfterShutdown = "pg_router_events_reoffered_after_shutdown"
+	// MetricSupervisorsPerSession is, per (role, session), the supervisor count the
+	// latest ended dispatch reported for the ccpool session (last write wins, never
+	// removed while the router runs). Above 1 means a session was taken over while
+	// an earlier supervisor may still be alive.
+	MetricSupervisorsPerSession = "pg_router_supervisors_per_session"
 	// MetricEnqueued counts events admitted to the queue, per type: the ARRIVAL
 	// half of the arrivals-versus-completions comparison the
 	// pg-router-queue-slow-growth alert makes against MetricThroughput (the
@@ -491,6 +502,8 @@ type Emitter struct {
 	throughput      metric.Int64Counter
 	skipped         metric.Int64Counter
 	enqueued        metric.Int64Counter
+	reoffered       metric.Int64Counter
+	supervisors     metric.Int64Gauge
 	sourceFailures  metric.Int64Counter
 	sourceBackoff   metric.Int64Counter
 	ticksSkipped    metric.Int64Counter
@@ -828,6 +841,22 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	if err != nil {
 		return nil, err
 	}
+	reoffered, err := m.Int64Counter(
+		MetricReofferedAfterShutdown,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("offers handed back because the run context was cancelled (the shutdown decline), per role; the next router re-offers each, so a burst is a restart loop"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	supervisors, err := m.Int64Gauge(
+		MetricSupervisorsPerSession,
+		metric.WithUnit("{supervisor}"),
+		metric.WithDescription("the supervisor count the latest ended dispatch reported for a ccpool session, per role and session; above 1 means a takeover happened while an earlier supervisor may still be alive"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	enqueued, err := m.Int64Counter(
 		MetricEnqueued,
 		metric.WithUnit("{event}"),
@@ -1144,6 +1173,8 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	e.throughput = throughput
 	e.skipped = skipped
 	e.enqueued = enqueued
+	e.reoffered = reoffered
+	e.supervisors = supervisors
 	e.sourceFailures = sourceFailures
 	e.sourceBackoff = sourceBackoff
 	e.ticksSkipped = ticksSkipped
@@ -1316,6 +1347,27 @@ func (e *Emitter) OnSkipped(eventID, evtType, listenerID, reason string) {
 		attribute.String("type", evtType),
 		attribute.String("role", listenerID),
 		attribute.String("reason", label),
+	))
+}
+
+// OnReofferedAfterShutdown implements orchestrator.ReofferObserver (structurally,
+// without an import): roleListener.Offer calls it inline when it hands an offer
+// back because the run context was cancelled, before Offer returns.
+func (e *Emitter) OnReofferedAfterShutdown(listenerID string) {
+	e.reoffered.Add(context.Background(), 1, metric.WithAttributes(attribute.String("role", listenerID)))
+}
+
+// OnSupervision implements orchestrator.SupervisionObserver (structurally): it
+// sets the supervisors-per-session gauge for (role, session) from the finished
+// dispatch's reply; the latest write wins. An empty session or supervisors below 1
+// leaves the series untouched.
+func (e *Emitter) OnSupervision(listenerID, session string, supervisors int) {
+	if session == "" || supervisors < 1 {
+		return
+	}
+	e.supervisors.Record(context.Background(), int64(supervisors), metric.WithAttributes(
+		attribute.String("role", listenerID),
+		attribute.String("session", session),
 	))
 }
 

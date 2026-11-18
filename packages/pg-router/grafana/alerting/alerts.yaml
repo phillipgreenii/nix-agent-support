@@ -2748,3 +2748,99 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # Events re-offered after a shutdown. roleListener.Offer hands an offer back when
+      # the run context was cancelled (the shutdown decline) and counts it on
+      # pg_router_events_reoffered_after_shutdown_total{role}; the next router re-offers
+      # such an event by construction, and the queue keeps no attempt history to detect
+      # it later. One or two in an hour are an ordinary restart; three in an hour is a
+      # restart loop, so the rule fires at once (no `for:`). The `>= 3` is in the
+      # expression, and the wrapped `> 0` of the rule check keeps it. A counter that
+      # starts at its first increment makes increase() undercount the first step, which
+      # only delays the alert by one hand-back. Annotations are STATIC.
+      - uid: pg-router-reoffered-after-shutdown
+        title: pg-router events re-offered after shutdown (restart loop)
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router handed back three or more in-flight offers in the last hour because it was shutting down"
+          description: "pg_router_events_reoffered_after_shutdown_total increased by 3 or more in one hour: dispatches in flight were cut short by a router shutdown and handed back to be re-offered by the next router. One or two is an ordinary restart; three in an hour is a restart loop. Check the router's launchd job and its log for why it keeps stopping (a crash, a failing health check, repeated applies), and `pg-router status` for the role named by this alert's role label."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum by (role)(increase(pg_router_events_reoffered_after_shutdown_total[1h])) >= 3"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # More than one supervisor on a ccpool session. A dispatch that took over a
+      # session's lease reports the supervisor count the takeover returned, and the
+      # router keeps the latest ended dispatch's value in
+      # pg_router_supervisors_per_session{role,session} (last write wins, never removed
+      # while the router runs). Above 1 means a session was taken over while an earlier
+      # supervisor may still be alive. No `for:`: the gauge moves only when a dispatch
+      # ends, so a sustained hold would only delay the page. Annotations are STATIC.
+      - uid: pg-router-supervisors-per-session
+        title: pg-router session with more than one supervisor (by role and session)
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a ccpool session has been reported with more than one supervisor"
+          description: "pg_router_supervisors_per_session is above 1 for the role and session named by this alert's labels: the latest dispatch that ended for that session had taken over its lease while an earlier supervisor may still have been alive. Look at the session with ccpool list and the dispatch rows for the session in the router's events.jsonl; the value drops back to 1 only when a later dispatch for that session reports it."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (role, session)(last_over_time(pg_router_supervisors_per_session[10m])) > 1"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

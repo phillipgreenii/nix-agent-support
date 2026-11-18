@@ -378,6 +378,12 @@ func TestShutdownReoffer_RealRouterProcess(t *testing.T) {
 			t.Errorf("pg_router_failures_total{role=%q,class=%q} = %v after a shutdown cut, want no series\nscrape:\n%s", reofferRole, class, v, sr.body)
 		}
 	}
+	// The hand-back counter is exported by this scrape, which was taken after the
+	// hand-back line and the pre-shutdown hook, so the increment was visible
+	// before the shutdown path flushed and exited.
+	if v := seriesValue(sr.body, metrics.MetricReofferedAfterShutdown+"_total", map[string]string{"role": reofferRole}); len(v) != 1 || v[0] != 1 {
+		t.Errorf("pg_router_events_reoffered_after_shutdown_total{role=%q} = %v, want exactly [1]\nscrape:\n%s", reofferRole, v, sr.body)
+	}
 	if n := h.markerLines(reofferStartedMarker); n != 1 {
 		t.Fatalf("handler dispatches before the restart = %d, want 1", n)
 	}

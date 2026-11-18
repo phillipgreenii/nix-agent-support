@@ -1491,6 +1491,13 @@ func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, exis
 	if launched, ok := existing.LaunchedAt(); ok {
 		res.StartedAt = launched
 	}
+	// A takeover that completed before this point reports the supervisor count it
+	// returned (read in process, never from the session's metadata), with the
+	// session it absorbed. r.supervisors stays 0 when no takeover ran.
+	if r.supervisors >= 1 {
+		res.Session = existing.ExternalID
+		res.Supervisors = r.supervisors
+	}
 	return res, err
 }
 

@@ -412,6 +412,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// pg_router_skipped_total{type,role,reason}: an offer the handler accepted and
 	// completed as skipped (bead pg2-6t91v7), kept out of pg_router_throughput_total.
 	o.SkippedObserver = emitter
+	// pg_router_events_reoffered_after_shutdown_total{role} and
+	// pg_router_supervisors_per_session{role,session}.
+	o.ReofferObserver = emitter
+	o.SupervisionObserver = emitter
 	// pg_router_producer_load_backoff / pg_router_producer_ticks_skipped_total.
 	o.LoadBackoffObserver = emitter
 	// The level projection feeds the queue's admission (WithLevelSource); its

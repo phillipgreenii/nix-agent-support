@@ -74,6 +74,21 @@ func OutcomeReply(id, outcome string, startedAt time.Time) map[string]any {
 	return reply
 }
 
+// WithSupervision adds the optional session and supervisors properties to an
+// outcome reply: the ccpool session's external id a lease takeover absorbed and
+// the supervisor count that takeover returned. Both are added only together,
+// and only for a non-empty session and supervisors of at least 1; otherwise the
+// reply is left as it is, so an older router (or a dispatch without a takeover)
+// sees the reply it always did.
+func WithSupervision(reply map[string]any, session string, supervisors int) map[string]any {
+	if session == "" || supervisors < 1 {
+		return reply
+	}
+	reply["session"] = session
+	reply["supervisors"] = supervisors
+	return reply
+}
+
 // SkippedReply builds the inline-outcome handler.dispatch-reply of a MOOT
 // precheck outcome (INV-CCH-22, bead pg2-6t91v7): the handler accepts the event
 // and completes it without doing any work. It is an ordinary outcome reply

@@ -1,0 +1,56 @@
+# promtool unit tests for the pg-router-reoffered-after-shutdown alert: three or more
+# shutdown hand-backs in an hour (a restart loop), with no `for:` delay. Run by the
+# flake check test-pg-router-alert-rules, which generates rules.yml next to this file.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: three hand-backs inside the hour fire at once, labelled with the role
+    interval: 1m
+    input_series:
+      - series: pg_router_events_reoffered_after_shutdown_total{role="desk-pr",job="pg-router"}
+        values: "0 0 0 1 1 1 2 2 2 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-router-reoffered-after-shutdown
+        exp_alerts:
+          - exp_labels:
+              role: desk-pr
+              severity: warning
+
+  - name: two hand-backs are an ordinary restart and do not fire
+    interval: 1m
+    input_series:
+      - series: pg_router_events_reoffered_after_shutdown_total{role="desk-pr",job="pg-router"}
+        values: "0 0 0 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: pg-router-reoffered-after-shutdown
+        exp_alerts: []
+
+  - name: an increase of exactly three fires and one of two does not (the bar is inclusive)
+    interval: 1m
+    input_series:
+      - series: pg_router_events_reoffered_after_shutdown_total{role="a",job="pg-router"}
+        values: "0+1x3 3x40"
+      - series: pg_router_events_reoffered_after_shutdown_total{role="b",job="pg-router"}
+        values: "0+1x2 2x41"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: pg-router-reoffered-after-shutdown
+        exp_alerts:
+          - exp_labels:
+              role: a
+              severity: warning
+
+  - name: three hand-backs spread over more than an hour do not fire
+    interval: 10m
+    input_series:
+      - series: pg_router_events_reoffered_after_shutdown_total{role="desk-pr",job="pg-router"}
+        values: "0 0 0 0 0 0 1 1 1 1 1 1 2 2 2 2 2 2 3 3 3 3 3 3"
+    alert_rule_test:
+      - eval_time: 230m
+        alertname: pg-router-reoffered-after-shutdown
+        exp_alerts: []

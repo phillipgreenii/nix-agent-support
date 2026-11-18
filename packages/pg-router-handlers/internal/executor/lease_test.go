@@ -478,3 +478,17 @@ func TestTakeOverForAbsorb_goneRowIsNotAbsorbable(t *testing.T) {
 		t.Fatalf("a vanished row must not be absorbable: ok=%v err=%v", ok, err)
 	}
 }
+
+// A dispatch that completed a takeover reports the session it absorbed and the
+// supervisor count the takeover returned (read in process): the row carries no
+// recorded supervisors, so the takeover returns 2 (previous count 1, plus this one).
+func TestAbsorb_reportsTheSessionAndSupervisorsOfTheTakeover(t *testing.T) {
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{turnRow()}}}
+	res, err := absorbTurn(t, t.TempDir(), cc, func() {})
+	if err != nil {
+		t.Fatalf("absorb: %v", err)
+	}
+	if res.Session != "att-old" || res.Supervisors != 1 {
+		t.Fatalf("(Session, Supervisors) = (%q, %d), want (att-old, 1)", res.Session, res.Supervisors)
+	}
+}

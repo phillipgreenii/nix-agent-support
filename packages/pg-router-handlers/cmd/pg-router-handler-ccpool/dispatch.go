@@ -168,7 +168,9 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		wire.WriteErrorReply(stdout, "encode outcome: "+err.Error())
 		return conformance.ExitError
 	}
-	wire.WriteReply(stdout, wire.OutcomeReply(req.ID, string(outcomeJSON), result.StartedAt))
+	wire.WriteReply(stdout, wire.WithSupervision(
+		wire.OutcomeReply(req.ID, string(outcomeJSON), result.StartedAt), result.Session, result.Supervisors,
+	))
 	return conformance.ExitOK
 }
 

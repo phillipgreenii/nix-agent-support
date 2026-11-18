@@ -168,6 +168,13 @@ type Orchestrator struct {
 	// disables it; captured by NewListener like the observers above.
 	// cmd/pg-router's bootCore wires the metrics.Emitter in here.
 	SkippedObserver SkippedObserver
+	// ReofferObserver is notified of an offer handed back because the run context
+	// was cancelled, and SupervisionObserver of the supervision report a dispatch
+	// reply carried (see ReofferObserver and SupervisionObserver in listener.go).
+	// nil disables each; captured by NewListener. cmd/pg-router's bootCore wires
+	// the metrics.Emitter in here.
+	ReofferObserver     ReofferObserver
+	SupervisionObserver SupervisionObserver
 	// LoadBackoffObserver is told, once per tick, whether the producer pass was
 	// skipped for host load (cmd/pg-router runOneTick). nil disables it;
 	// bootCore wires the metrics.Emitter in here.
