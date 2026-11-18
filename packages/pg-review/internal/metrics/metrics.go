@@ -31,6 +31,7 @@ type Def struct {
 // checked-in catalog file must agree with it; a test fails when they differ.
 var Catalog = []Def{
 	{"pg_review_runs", "gauge", []string{"lens", "scope", "outcome"}},
+	{"pg_review_infrastructure_skipped_runs", "gauge", []string{"lens", "scope", "reason"}},
 	{"pg_review_run_duration_seconds", "gauge", []string{"lens", "scope"}},
 	{"pg_review_findings_last_run", "gauge", []string{"lens", "scope"}},
 	{"pg_review_last_success_timestamp_seconds", "gauge", []string{"lens", "scope", "schedule"}},
@@ -61,6 +62,9 @@ func Collect(md ledger.MetricsData, now time.Time) []Gauge {
 	var out []Gauge
 	for _, c := range md.Runs {
 		out = append(out, g("pg_review_runs", float64(c.N), "lens", c.Lens, "scope", c.Scope, "outcome", c.Outcome))
+	}
+	for _, c := range md.InfraSkips {
+		out = append(out, g("pg_review_infrastructure_skipped_runs", float64(c.N), "lens", c.Lens, "scope", c.Scope, "reason", c.Class))
 	}
 	for _, r := range md.Latest {
 		out = append(out,

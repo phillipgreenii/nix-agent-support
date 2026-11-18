@@ -140,10 +140,17 @@ const (
 	capacityBackoff = 2 * time.Second
 )
 
-// capacity reads the pool capacity, retrying a failed read with a doubling
-// backoff. When every try fails the run is Skipped with a reason naming the
-// infrastructure cause, so it neither counts as a failed run nor consumes the
-// run key. A cancelled context is not infrastructure and stays a plain error.
+// capacity reads the pool capacity, retrying a TRANSIENT failed read (the
+// command exited non-zero or timed out) with a doubling backoff. When every
+// try fails the run is Skipped with a reason naming the infrastructure cause,
+// so it neither counts as a failed run nor consumes the run key. A PERMANENT
+// fault (a missing ccpool binary, undecodable output) is not retried and ends
+// the run Failed with a message naming it, so install and analyst bugs stay
+// visible to the failed-runs alert. A cancelled context is not infrastructure
+// and stays a plain error.
+//
+// Worst case with a ccpool that hangs: three tries around ccpool's own
+// retries, about 376 s, with no router or adapter role timeout above it.
 func (a *CcpoolAnalyst) capacity(ctx context.Context, runID int64) (ccpool.Capacity, error) {
 	sleep := a.Sleep
 	if sleep == nil {
@@ -163,10 +170,13 @@ func (a *CcpoolAnalyst) capacity(ctx context.Context, runID int64) (ccpool.Capac
 		if ctx.Err() != nil {
 			return ccpool.Capacity{}, fmt.Errorf("ccpool capacity: %w", err)
 		}
+		if !ccpool.IsTransient(err) {
+			return ccpool.Capacity{}, fmt.Errorf("ccpool capacity check failed with a permanent fault (not retried; check the ccpool install): %w", err)
+		}
 		last = err
 	}
 	return ccpool.Capacity{}, &SkippedError{RunID: runID, Reason: fmt.Sprintf(
-		"ccpool capacity check failed %d times (ccpool or its recorder unreachable, likely transient load; the next scheduled run retries): %v",
+		ledger.SkipPrefixCapacity+" %d times (ccpool or its recorder was unreachable or timed out; the next scheduled run retries): %v",
 		capacityTries, last,
 	)}
 }
@@ -185,7 +195,7 @@ func (a *CcpoolAnalyst) Analyse(ctx context.Context, s *State) (err error) {
 		return usageSkip(runID, capa.UsageLimit)
 	}
 	if capa.Free <= 0 {
-		return &SkippedError{RunID: runID, Reason: "ccpool busy: no free session slot"}
+		return &SkippedError{RunID: runID, Reason: ledger.SkipPrefixBusy + ": no free session slot"}
 	}
 
 	res, err := prompt.Assemble(promptParams(s, s.Run.StagingPath))
@@ -331,15 +341,15 @@ func (a *CcpoolAnalyst) send(ctx context.Context, s *State, id, text string) (st
 func refusal(runID int64, err error) *SkippedError {
 	switch {
 	case ccpool.IsUsageLimited(err):
-		return &SkippedError{RunID: runID, Reason: "ccpool usage limit reached: " + err.Error()}
+		return &SkippedError{RunID: runID, Reason: ledger.SkipPrefixUsageLimit + ": " + err.Error()}
 	case ccpool.IsBusy(err):
-		return &SkippedError{RunID: runID, Reason: "ccpool busy"}
+		return &SkippedError{RunID: runID, Reason: ledger.SkipPrefixBusy}
 	}
 	return nil
 }
 
 func usageSkip(runID int64, l *ccpool.UsageLimit) *SkippedError {
-	return &SkippedError{RunID: runID, Reason: fmt.Sprintf("ccpool usage limit reached: %s window at limit, resets at %s",
+	return &SkippedError{RunID: runID, Reason: fmt.Sprintf(ledger.SkipPrefixUsageLimit+": %s window at limit, resets at %s",
 		l.Window, l.ResetsAt.UTC().Format(time.RFC3339))}
 }
 

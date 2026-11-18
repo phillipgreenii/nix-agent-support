@@ -53,7 +53,7 @@ func catchUp(cmd *cobra.Command, p runner.CatchUpParams) error {
 		return ExitErrorf(appcode.Ledger, "%v", err)
 	}
 	defer func() { _ = l.Close() }()
-	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout(), Evidence: runner.EvidenceStage{}}
+	d := &runner.Deps{Ledger: l, Cfg: cfg, Stdout: cmd.OutOrStdout(), Log: cmd.ErrOrStderr(), Evidence: runner.EvidenceStage{}}
 	runner.RegisterCcpool(d)
 	if runnerHook != nil {
 		runnerHook(d)

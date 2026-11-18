@@ -68,6 +68,18 @@ func IsUsageLimited(err error) bool { c, ok := ExitCode(err); return ok && c == 
 // IsBusy reports whether err is a busy-turn refusal (exit 23).
 func IsBusy(err error) bool { c, ok := ExitCode(err); return ok && c == ExitBusy }
 
+// IsTransient reports whether err is a failure that a retry can cure: the
+// ccpool command ran and exited non-zero (a recorder that cannot be reached,
+// a busy pool, a killed call) or a call timed out. A command that could not be
+// started (a missing binary) or output that cannot be decoded is a permanent
+// fault: retrying cannot help and the install needs a person.
+func IsTransient(err error) bool {
+	if _, ok := ExitCode(err); ok {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
 // UsageLimit is a hit account usage window.
 type UsageLimit struct {
 	Window   string    `json:"window"`

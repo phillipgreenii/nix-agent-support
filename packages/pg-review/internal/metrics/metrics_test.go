@@ -41,6 +41,44 @@ func addRun(t *testing.T, l *ledger.Ledger, lens, scope, schedule, state string,
 	}
 }
 
+// addSkip inserts a Skipped run with the given reason.
+func addSkip(t *testing.T, l *ledger.Ledger, lens, scope, reason string) {
+	t.Helper()
+	err := l.WithTx(ctx, func(tx *ledger.Tx) error {
+		_, err := tx.InsertRun(ctx, ledger.Run{Lens: lens, Scope: scope, State: ledger.RunSkipped, PID: 1, EndedAt: t0, SkipReason: reason})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Infrastructure skips are counted by reason class; other skips are not.
+func TestInfrastructureSkippedRunsByReasonClass(t *testing.T) {
+	l := openLedger(t)
+	addSkip(t, l, "lens-a", "scope-a", ledger.SkipPrefixCapacity+" 3 times (x)")
+	addSkip(t, l, "lens-a", "scope-a", ledger.SkipPrefixCapacity+" 3 times (y)")
+	addSkip(t, l, "lens-a", "scope-a", ledger.SkipPrefixUsageLimit+": 5h window")
+	addSkip(t, l, "lens-a", "scope-a", ledger.SkipPrefixBusy+": no free session slot")
+	addSkip(t, l, "lens-a", "scope-a", "pending cap reached: 9 items pending")
+	gs := collect(t, l)
+	for class, want := range map[string]float64{"capacity": 2, "usage_limit": 1, "busy": 1} {
+		g, ok := find(gs, "pg_review_infrastructure_skipped_runs", "lens", "lens-a", "scope", "scope-a", "reason", class)
+		if !ok || g.Value != want {
+			t.Errorf("class %s: %+v (found %v), want %v", class, g, ok, want)
+		}
+	}
+	n := 0
+	for _, g := range gs {
+		if g.Name == "pg_review_infrastructure_skipped_runs" {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Errorf("%d infrastructure series, want 3 (the pending-cap skip is not one)", n)
+	}
+}
+
 func collect(t *testing.T, l *ledger.Ledger) []Gauge {
 	t.Helper()
 	md, err := l.MetricsData(ctx)
@@ -110,6 +148,7 @@ func TestEveryEmittedGaugeIsInTheCatalog(t *testing.T) {
 	l := openLedger(t)
 	addRun(t, l, "lens-a", "scope-a", "daily", ledger.RunFiled, t0, 24*time.Hour, 2)
 	addRun(t, l, "lens-a", "scope-a", "daily", ledger.RunFailed, t0, 24*time.Hour, 0)
+	addSkip(t, l, "lens-a", "scope-a", ledger.SkipPrefixBusy)
 	seedTopic(t, l, "lens-a", "scope-a")
 	gs := collect(t, l)
 	defs := map[string]Def{}

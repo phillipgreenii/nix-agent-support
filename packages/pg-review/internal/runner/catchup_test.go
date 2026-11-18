@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ccpool"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
 )
 
@@ -186,7 +187,7 @@ func TestCatchUpStillFailingCapacityLeavesTheKeyAndCountersAlone(t *testing.T) {
 	e := setupCcpool(t, ccCfg, 0)
 	seedScheduled(t, e, "daily", "k1", ledger.RunSkipped, t0, 24*time.Hour)
 	*e.now = t0.Add(time.Hour)
-	boom := errors.New("recorder unreachable")
+	boom := &ccpool.ExitError{Cmd: "capacity", Code: 1, Stderr: "recorder unreachable"}
 	e.fake.capErrs = []error{boom, boom, boom}
 	_, err := CatchUp(bg, e.d, CatchUpParams{})
 	var sk *SkippedError

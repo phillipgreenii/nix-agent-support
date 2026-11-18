@@ -57,6 +57,14 @@ the tool does not speak gRPC, so with that protocol, or when the HTTP push fails
   `job catch-up --force`), and a daily and a weekly schedule of one lens and scope are separate
   series.
 
+- `pg_review_infrastructure_skipped_runs{lens,scope,reason}` is the count of Skipped runs whose
+  reason is an infrastructure one, by class: `capacity` (the ccpool capacity check failed after its
+  retries), `usage_limit` and `busy`. It is derived from the stored skip reason (the runner and the
+  ledger share the reason prefixes), so it needs no schema change and survives restarts. Skips for
+  the pending cap or a paused lens are not counted, and a permanent capacity fault is a Failed run,
+  not a skip. Each such skip also writes one stderr line
+  `pg-review: infrastructure skip run=<id> lens=<lens> scope=<scope> reason_class=<class>`.
+
 ## Catch-up of Skipped scheduled windows
 
 A scheduled run that ends Skipped (ccpool capacity check failure, usage limit, busy pool) exits

@@ -1,4 +1,5 @@
 pg_review_runs gauge lens,scope,outcome
+pg_review_infrastructure_skipped_runs gauge lens,scope,reason
 pg_review_run_duration_seconds gauge lens,scope
 pg_review_findings_last_run gauge lens,scope
 pg_review_last_success_timestamp_seconds gauge lens,scope,schedule

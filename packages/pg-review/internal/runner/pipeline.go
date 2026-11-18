@@ -80,6 +80,8 @@ type Deps struct {
 	// skipped (its packet has not landed).
 	Analysts map[string]Analyst
 	Stdout   io.Writer
+	// Log receives one line per infrastructure skip (nil discards it).
+	Log io.Writer
 }
 
 func (d *Deps) defaults() {
@@ -183,6 +185,7 @@ func finishFailed(ctx context.Context, d *Deps, s *State, err error) error {
 	var sk *SkippedError
 	if errors.As(err, &sk) {
 		state, reason = ledger.RunSkipped, sk.Reason
+		logInfraSkip(d, s.Run, sk.Reason)
 	}
 	cur, gerr := d.Ledger.GetRun(bg, s.Run.ID)
 	if gerr == nil {
@@ -192,6 +195,17 @@ func finishFailed(ctx context.Context, d *Deps, s *State, err error) error {
 		return fmt.Errorf("%w (also failed to record the end of the run: %v)", err, eerr)
 	}
 	return err
+}
+
+// logInfraSkip writes one line for a run skipped because of the pool or its
+// recorder, so the skip is visible without reading the ledger. Skips for
+// other reasons (pending cap, paused lens) are expected and stay silent.
+func logInfraSkip(d *Deps, r ledger.Run, reason string) {
+	class := ledger.SkipClass(reason)
+	if class == "" || d.Log == nil {
+		return
+	}
+	fmt.Fprintf(d.Log, "pg-review: infrastructure skip run=%d lens=%s scope=%s reason_class=%s\n", r.ID, r.Lens, r.Scope, class)
 }
 
 func resolve(d *Deps, p Params) (*State, error) {

@@ -501,7 +501,7 @@ func TestCapacityErrorRetriesThenSkips(t *testing.T) {
 // same key is not refused as already filed.
 func TestCapacityErrorSkipDoesNotConsumeRunKey(t *testing.T) {
 	e := setupCcpool(t, ccCfg, 0)
-	boom := errors.New("recorder unreachable")
+	boom := &ccpool.ExitError{Cmd: "capacity", Code: 1, Stderr: "recorder unreachable"}
 	e.fake.capErrs = []error{boom, boom, boom}
 	e.fake.capacity = ccpool.Capacity{Free: 0}
 	p := Params{Lens: "agent-workflow", Scope: "demo-scope", Duration: "24h", Analyst: "ccpool", RunKey: "key-1"}
@@ -551,7 +551,7 @@ func TestCapacityErrorSkipLeavesScheduleCountersAlone(t *testing.T) {
 		t.Fatalf("baseline consecutive failed = %d, want 1", n)
 	}
 	e.fake.startErr = nil
-	boom := errors.New("recorder unreachable")
+	boom := &ccpool.ExitError{Cmd: "capacity", Code: 1, Stderr: "recorder unreachable"}
 	e.fake.capCalls, e.fake.capErrs = 0, []error{boom, boom, boom}
 	_, err := Run(bg, e.d, p)
 	var sk *SkippedError
@@ -565,7 +565,7 @@ func TestCapacityErrorSkipLeavesScheduleCountersAlone(t *testing.T) {
 
 func TestCapacityErrorRecoversWithinRetries(t *testing.T) {
 	e := setupCcpool(t, ccCfg, 0)
-	e.fake.capErrs = []error{errors.New("transient"), errors.New("transient")}
+	e.fake.capErrs = []error{&ccpool.ExitError{Cmd: "capacity", Code: 1}, &ccpool.ExitError{Cmd: "capacity", Code: 1}}
 	e.fake.capacity = ccpool.Capacity{Free: 0}
 	_, err := e.runLens(t)
 	var sk *SkippedError

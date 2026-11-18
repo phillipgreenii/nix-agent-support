@@ -12,6 +12,9 @@ type MetricsData struct {
 	// Runs counts terminal runs by (lens, scope, outcome); outcome is filed,
 	// skipped or failed. Running and AwaitingAnalyst runs are not counted.
 	Runs []RunCount
+	// InfraSkips counts Skipped runs by (lens, scope, infrastructure reason
+	// class); a skip for another reason (pending cap, paused lens) is not counted.
+	InfraSkips []SkipCount
 	// Latest holds, per (lens, scope), the latest run in a terminal state.
 	Latest []LatestRun
 	// Schedules holds, per (lens, scope, schedule id), the schedule's state.
@@ -74,6 +77,9 @@ func (l *Ledger) MetricsData(ctx context.Context) (MetricsData, error) {
 	var md MetricsData
 	var err error
 	if md.Runs, err = l.runCounts(ctx); err != nil {
+		return md, err
+	}
+	if md.InfraSkips, err = l.infraSkips(ctx); err != nil {
 		return md, err
 	}
 	if md.Latest, err = l.latestRuns(ctx); err != nil {

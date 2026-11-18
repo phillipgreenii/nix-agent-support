@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/appcode"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ccpool"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/ledger"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/runner"
 	"github.com/phillipgreenii/x/exitcode"
 )
 
@@ -182,8 +184,17 @@ func stripComments(s string) string {
 // A ccpool whose capacity check keeps failing (a recorder unreachable under
 // load) ends the run as Skipped, which the adapter-facing exit code reports
 // as 3. The real binary name is resolved from PATH, so a stub stands in.
-func TestJobRunCapacityFailureExits3(t *testing.T) {
+func TestJobRunCapacityFailureExitsSkipped(t *testing.T) {
 	jobEnv(t, true)
+	// The real ccpool CLI runs against the stub below; only the retry backoff
+	// is replaced, so the test takes milliseconds instead of sleeping 6 s.
+	runnerHook = func(d *runner.Deps) {
+		d.Analysts["ccpool"] = &runner.CcpoolAnalyst{
+			Client: ccpool.CLI{PoolDir: d.Cfg.Ccpool.PoolDir},
+			Sleep:  func(ctx context.Context, _ time.Duration) error { return ctx.Err() },
+		}
+	}
+	t.Cleanup(func() { runnerHook = nil })
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "ccpool"), []byte("#!/bin/sh\necho recorder unreachable >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
