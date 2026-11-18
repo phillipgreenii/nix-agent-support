@@ -4,11 +4,25 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // collectorTimeout bounds how long one collector of the /metrics catalog may
 // hold a snapshot build. Variable only so a test can shorten it.
 var collectorTimeout = 10 * time.Second
+
+// collectorDuration is the wall time of each bounded collector call, labelled
+// by the collector's fixed name (a small closed set, so the label stays
+// bounded). It is observed inside the call's own goroutine, so a call that
+// outlives collectorTimeout is still measured. The edges are dense between 2.5
+// and 5 s, where the snapshot-build target sits. It is shared by every
+// registry newMetricsRegistry builds.
+var collectorDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Name:    "pg_desk_metrics_collector_duration_seconds",
+	Help:    "Wall time of one bounded /metrics collector call, including calls that outlive the collector timeout.",
+	Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 2.5, 3, 3.5, 4, 4.5, 5, 10, 30, 60},
+}, []string{"collector"})
 
 // boundedCollector wraps one catalog data function so a hung call (a store
 // read stuck behind a lock, a slow external call) cannot stretch the whole
@@ -38,7 +52,9 @@ func (c *boundedCollector[T]) get() (T, error) {
 		flight := make(chan struct{})
 		c.flight = flight
 		go func() {
+			began := time.Now()
 			v, err := c.fn()
+			collectorDuration.WithLabelValues(c.name).Observe(time.Since(began).Seconds())
 			c.mu.Lock()
 			c.lastErr = err
 			if err == nil {

@@ -199,3 +199,27 @@ func TestSnapshotGatherer_AgeRisesOnFailureAndResetsAfterSuccess(t *testing.T) {
 		synctest.Wait()
 	})
 }
+
+func TestSnapshotComputeDuration_HasEdgesBetween2_5And5(t *testing.T) {
+	g := newSnapshotGatherer(&fakeSource{}, 15*time.Second, 5*time.Second)
+	g.duration.Observe(3.99)
+	fams, _ := g.meta.Gather()
+	var edges []float64
+	for _, f := range fams {
+		if f.GetName() == "pg_desk_metrics_snapshot_compute_duration_seconds" {
+			for _, b := range f.GetMetric()[0].GetHistogram().GetBucket() {
+				edges = append(edges, b.GetUpperBound())
+				if b.GetUpperBound() == 3 && b.GetCumulativeCount() != 0 || b.GetUpperBound() == 4 && b.GetCumulativeCount() != 1 {
+					t.Fatalf("3.99 s mis-bucketed at le=%v", b.GetUpperBound())
+				}
+			}
+		}
+	}
+	has := map[float64]bool{}
+	for _, e := range edges {
+		has[e] = true
+	}
+	if !has[3] || !has[4] {
+		t.Fatalf("edges %v lack 3 and 4", edges)
+	}
+}

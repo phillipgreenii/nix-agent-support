@@ -60,7 +60,7 @@ func newSnapshotGatherer(src prometheus.Gatherer, interval, firstWait time.Durat
 	g.duration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "pg_desk_metrics_snapshot_compute_duration_seconds",
 		Help:    "How long one background /metrics snapshot build took.",
-		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 3, 4, 5, 10, 30, 60},
 	})
 	g.errs = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "pg_desk_metrics_snapshot_errors_total",

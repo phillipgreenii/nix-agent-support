@@ -72,6 +72,11 @@ func newMetricsRegistry(ctx context.Context, st *store.Store, cfg *config.Config
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: new prometheus exporter: %w", err)
 	}
+	// The per-collector wall-time histogram is a plain prometheus collector
+	// shared by every registry, so it is registered beside the OTel catalog.
+	if err := registry.Register(collectorDuration); err != nil {
+		return nil, fmt.Errorf("httpapi: register collector duration: %w", err)
+	}
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
 	if ro.withProvider != nil {
 		ro.withProvider(mp)
