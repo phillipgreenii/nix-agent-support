@@ -6,7 +6,7 @@ require (
 	github.com/phillipgreenii/ccpool v0.0.0
 	github.com/phillipgreenii/pg-failsig v0.0.0
 	github.com/phillipgreenii/pg-router v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d
+	github.com/phillipgreenii/x v0.0.0-20261117212335-9e30e30fb07e
 )
 
 require (
@@ -23,7 +23,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder v0.0.0
-	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0
+	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	modernc.org/libc v1.79.1 // indirect
