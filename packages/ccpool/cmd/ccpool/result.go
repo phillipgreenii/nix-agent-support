@@ -51,9 +51,6 @@ func runResult(args []string) int {
 	}
 	defer func() { _ = st.Close() }()
 
-	if code := requireFacts("result"); code != 0 {
-		return code
-	}
 	return resultForTurn(context.Background(), st, transcriptAdapter{}, turnID, os.Stdout, os.Stderr)
 }
 

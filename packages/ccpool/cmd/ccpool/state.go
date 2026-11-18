@@ -48,10 +48,14 @@ func runState(args []string) int {
 	}
 	defer func() { _ = st.Close() }()
 
-	// Awaiting input, the reply text and liveness are recorder facts: with the
-	// recorder down the command says so instead of guessing.
-	if code := requireFacts("state"); code != 0 {
-		return code
+	// Awaiting input, the reply text and liveness are recorder facts. Each read
+	// retries on its own; a read that still fails is remembered in factErr and
+	// reported after the gather, so an outage is never answered with a guess.
+	var factErr error
+	noteFact := func(err error) {
+		if err != nil && factErr == nil {
+			factErr = err
+		}
 	}
 	ctx := context.Background()
 	row, ok, _ := st.GetByExternalID(ctx, externalID)
@@ -68,7 +72,9 @@ func runState(args []string) int {
 		if row.TranscriptPath == "" {
 			return false, nil
 		}
-		return transcriptAdapter{}.IsAwaitingInput(row.TranscriptPath)
+		ok, err := transcriptAdapter{}.IsAwaitingInput(row.TranscriptPath)
+		noteFact(err)
+		return ok, err
 	}
 	// lastText mirrors awaiting: an empty path means there is nothing to read
 	// (no transcript anchor yet). Gather only consults it for idle/error.
@@ -76,19 +82,26 @@ func runState(args []string) int {
 		if row.TranscriptPath == "" {
 			return "", nil
 		}
-		return transcriptAdapter{}.LastAssistantText(row.TranscriptPath)
+		txt, err := transcriptAdapter{}.LastAssistantText(row.TranscriptPath)
+		noteFact(err)
+		return txt, err
 	}
 	// registry resolves the shared claude-transcript activity verdict for this
 	// session: it sweeps ~/.claude/sessions, matches the row by ClaudeSessionID,
 	// PID-gates it, and returns ClassifyActivity's verdict. No live match -> false,
 	// and Gather/Classify then ignore it (pane+row fallback).
 	registry := func() (ct.ActivityVerdict, bool) {
-		v, found, _ := registryVerdict(defaultSessionsDir(), row.ClaudeSessionID, row.TranscriptPath, registryWaitingFreshWindow)
-		return v, found // an outage was already refused up front by requireFacts
+		v, found, err := registryVerdict(defaultSessionsDir(), row.ClaudeSessionID, row.TranscriptPath, registryWaitingFreshWindow)
+		noteFact(err)
+		return v, found
 	}
 	res, err := state.Gather(cl, time.Sleep, awaiting, lastText, registry, tmuxName, externalID, row)
 	if err != nil {
 		slog.Error("state: gather failed", "err", err)
+		return 1
+	}
+	if factErr != nil {
+		fmt.Fprintf(os.Stderr, "state: cannot report the state of %s: %v\n", externalID, factErr)
 		return 1
 	}
 

@@ -63,6 +63,24 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   growing pauses, covering the connection handshake too, and MUST log each retry. When every attempt
   fails it MUST fail with an error naming the recorder as unavailable, never a guess, and never
   leave a half-started launch.
+  - **Retry policy.** Every recorder read is tried up to 4 times (the first try included), with a
+    pause of 500 ms before the second try that doubles before each later one, and each try has its
+    own 30 s budget, the connection handshake included. Each retry MUST be logged as a warning
+    (operation, attempt, pause) and counted in `ccpool_recorder_retries_total{op}`. When the last
+    try fails, ccpool MUST log one error line ("recorder read failed after the last attempt") and
+    count `ccpool_recorder_read_failures_total{op}`.
+  - **Final error text.** The error reads `<op>: the recorder did not answer after N attempts:
+the recorder is not available: <cause>; ccpool reads session facts (replies, state,
+resumability) from the recorder and does not guess; check that the recorder daemon is running,
+then re-run the command`. It MUST match the "recorder not available" error for every cause,
+    a slow handshake that missed its budget included, so callers classify it one way. `ccpool
+reply`, `result` and `state` print it and exit 1 when the fact they need cannot be read.
+  - **No refuse-early pre-gate.** ccpool MUST NOT add a recorder pre-check that refuses a
+    command or a dispatch before the command's own reads run (a ping or hello before `reply`,
+    `result`, `state` or a launch), unless the operator rules otherwise anew. Operator ruling
+    (Phillip, 2026-11-17, verbatim): "ccpool shouldn't be worried aif the session is recorderd or
+    not, that is the recorders job to figure out. if it can't connect to recorder to get is
+    information, then it should have built in retries/failure recovery".
 - **`INV-POOL-4`** <!-- uuid: 627882d5-f2ad-4be6-97be-f24e6963f0c1 --> — **A pool MUST NOT accept
   work while the account's usage window is at its limit.** Whenever the co-resident monitor's
   account-level usage surface (`packages/pa-monitor/docs/behavior · INTF-STATE`) reports the

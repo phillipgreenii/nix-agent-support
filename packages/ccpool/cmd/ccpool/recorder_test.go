@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,18 +53,4 @@ func TestRunCapacity_succeedsWhenDaemonOffline(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("runCapacity with the recorder down = %d, %q; want success", code, out)
 	}
-}
-
-// TestRunReply_refusesWhenDaemonOffline: reply to an unknown external_id falls
-// through to a brand-new launch, which never consults the recorder itself. With
-// the recorder down reply must still refuse with "the recorder is not available" and launch
-// nothing (pg2-c8137b).
-func TestRunReply_refusesWhenDaemonOffline(t *testing.T) {
-	a := armedLaunchEnv(t)
-	useDownRecorder(t)
-	out, code := captureStderr(t, func() int { return runReply([]string{"nosuch", "hi", "--no-wait"}) })
-	if code == 0 || !strings.Contains(out, "the recorder is not available") {
-		t.Fatalf("runReply with the recorder down = %d, %q; want failure naming the recorder as not available", code, out)
-	}
-	a.assertNoLaunch(t)
 }

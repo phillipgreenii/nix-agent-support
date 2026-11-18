@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/phillipgreenii/ccpool/internal/telemetry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 )
 
@@ -117,9 +118,22 @@ func (r *Reader) once(ctx context.Context, fn func(context.Context, *client.Clie
 	return nil
 }
 
+// recordRetry and recordFailure are the metric seams (a test swaps them for spies).
+var (
+	recordRetry   = telemetry.RecordRecorderRetry
+	recordFailure = telemetry.RecordRecorderReadFailure
+)
+
+// failureHint is appended to every final recorder error so the operator knows
+// what failed and what to do about it.
+const failureHint = "ccpool reads session facts (replies, state, resumability) from the recorder and does not guess; check that the recorder daemon is running, then re-run the command"
+
 // call runs fn against the recorder with bounded retries and backoff. It logs
-// each retry. After the last attempt it returns the last error, which for an
-// unreachable recorder matches ErrDaemonOffline; each attempt has readAttemptTimeout. A cancelled parent ctx stops the retries at once.
+// and counts each retry. After the last attempt it logs and counts the final
+// failure and returns an error that always matches ErrDaemonOffline (a slow
+// hello that ran past its attempt budget included) and names the operation, the
+// attempts and what to do; each attempt has readAttemptTimeout. A cancelled
+// parent ctx stops the retries at once.
 func (r *Reader) call(parent context.Context, op string, fn func(context.Context, *client.Client) error) error {
 	var err error
 	pause := readBackoff
@@ -134,6 +148,7 @@ func (r *Reader) call(parent context.Context, op string, fn func(context.Context
 			break
 		}
 		slog.Warn("ccpool: recorder read failed; retrying", "op", op, "attempt", attempt, "of", readAttempts, "pause", pause, "err", err)
+		recordRetry(op)
 		select {
 		case <-parent.Done():
 			return err
@@ -141,7 +156,12 @@ func (r *Reader) call(parent context.Context, op string, fn func(context.Context
 		}
 		pause *= 2
 	}
-	return fmt.Errorf("%s: the recorder did not answer after %d attempts: %w", op, readAttempts, err)
+	if !errors.Is(err, ErrDaemonOffline) {
+		err = fmt.Errorf("%w: %w", ErrDaemonOffline, err)
+	}
+	slog.Error("ccpool: recorder read failed after the last attempt", "op", op, "attempts", readAttempts, "err", err)
+	recordFailure(op)
+	return fmt.Errorf("%s: the recorder did not answer after %d attempts: %w; %s", op, readAttempts, err, failureHint)
 }
 
 // SetRetryPolicy replaces the retry policy of every read and returns a function
@@ -167,9 +187,9 @@ func (r *Reader) query(ctx context.Context, req client.QueryRequest) (*client.Qu
 }
 
 // Ping reports nil when the recorder answers a hello (retried like every read)
-// and an error matching ErrDaemonOffline when it does not. It is not a gate for
-// capacity or dispatch: only a fact-reading command that must not mistake an
-// outage for "no data" uses it.
+// and an error matching ErrDaemonOffline when it does not. It is a diagnostic
+// probe only: ccpool MUST NOT call it to refuse a command or a dispatch up
+// front; the reads' own retries decide (see INV-POOL-13).
 func (r *Reader) Ping(ctx context.Context) error {
 	return r.call(ctx, "hello", func(ctx context.Context, c *client.Client) error {
 		_, err := c.Hello(ctx)

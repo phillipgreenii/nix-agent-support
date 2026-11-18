@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"os"
 	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/facts"
@@ -62,22 +59,6 @@ var (
 	_ session.FeedWaiter     = transcriptAdapter{}
 	_ session.CheckedExister = recorderExister{}
 )
-
-// requireFacts fails a fact-reading command, naming the recorder and what could
-// not be done, when the recorder does not answer.
-func requireFacts(cmd string) int {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := factReader.Ping(ctx); err != nil {
-		if errors.Is(err, facts.ErrDaemonOffline) {
-			fmt.Fprintf(os.Stderr, "%s: cannot read session facts: %v\n", cmd, err)
-		} else {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", cmd, err)
-		}
-		return 1
-	}
-	return 0
-}
 
 // backgroundAgentRecency bounds how long a subagent transcript may stay
 // unwritten before its orchestrator stops counting as waiting on it.

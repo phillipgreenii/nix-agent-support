@@ -24,6 +24,9 @@
 // subset of the session's labels: see MetricAttrs, which is the single
 // cardinality guard, and the `attrs` parameter every Record* function takes.
 //
+// Two further counters live in recorder_metrics.go (the recorder-read retries and
+// final failures, labeled by op); the capacity gauge is in capacity_metrics.go.
+//
 // No new polling, no new tracking state, no daemon mode — metrics stay
 // push-based, flushed per invocation (design D6, D4).
 package telemetry

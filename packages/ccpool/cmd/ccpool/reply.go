@@ -40,13 +40,9 @@ func runReply(args []string) int {
 	if code, refused := refuseOnUsageLimit("reply", cfg); refused {
 		return code
 	}
-	// Reply reads recorder facts (resumability, the delivery/ingest feed), and an
-	// unknown external_id falls through to a brand-new launch that never consults
-	// the recorder on its own. Refuse up front saying the recorder is not available so an outage
-	// can neither launch a session nor be mistaken for "the session is gone".
-	if code := requireFacts("reply"); code != 0 {
-		return code
-	}
+	// No recorder pre-gate: whether a session is recorded is the recorder's
+	// concern. A fact read reply needs (resumability, delivery confirmation)
+	// retries on its own and fails with a final error naming the recorder.
 	el := openEventLog(cfg)
 	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {
