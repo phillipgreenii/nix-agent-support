@@ -375,9 +375,15 @@ func TestAbsorb_refreshesLeaseUnderLockBeforeWaiting(t *testing.T) {
 	if writesBeforeWait < 1 {
 		t.Fatalf("the lease must be refreshed before the wait starts; writes before first bead read = %d", writesBeforeWait)
 	}
-	first := cc.SetMetaCalls()[0]
-	if first.ExternalID != "att-old" || first.Key != ccpool.MetaKeyLeaseUntil {
-		t.Errorf("first write = %+v, want a lease refresh of the ABSORBED session att-old", first)
+	var first dtest.MetaSet
+	for _, c := range cc.SetMetaCalls() {
+		if c.Key == ccpool.MetaKeyLeaseUntil {
+			first = c
+			break
+		}
+	}
+	if first.ExternalID != "att-old" {
+		t.Errorf("first lease refresh = %+v, want one of the ABSORBED session att-old", first)
 	}
 	if len(cc.Ensured) != 0 {
 		t.Errorf("absorbing must not launch a second session; Ensured=%v", cc.Ensured)

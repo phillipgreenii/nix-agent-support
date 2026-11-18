@@ -34,7 +34,11 @@ const purgeCloseTimeout = 2 * time.Minute
 type ccpoolExecutor struct{}
 
 func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error) {
-	r := &ccpoolRun{deps: deps}
+	// The dispatch's own cancel-with-cause: the lease refresh cancels it with
+	// ErrSuperseded when a newer dispatch takes the session over (lease.go).
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	r := &ccpoolRun{deps: deps, cancelDispatch: cancel}
 	res, err := r.run(ctx, d)
 	r.recordOutcome(d, err)
 	return res, err
@@ -73,6 +77,17 @@ type ccpoolRun struct {
 	finished     bool
 	waitErr      error
 	outcomeDone  bool
+
+	// The lease ownership of this dispatch (lease.go): ownerID is its dispatch id,
+	// generation the generation it owns (0 until launch or takeover wrote it,
+	// read by the refresh goroutine), supervisors what the takeover reported.
+	// cancelDispatch ends the dispatch's supervision with a cause; superseded
+	// records that the cause was ErrSuperseded.
+	ownerID        string
+	generation     atomic.Int64
+	supervisors    int
+	cancelDispatch context.CancelCauseFunc
+	superseded     atomic.Bool
 }
 
 // recordOutcome writes the ONE outcome record an accepted dispatch owes after
@@ -207,6 +222,10 @@ func (e *LaunchFailedError) Is(target error) bool { return target == ErrLaunchFa
 // the role carries a finite budget. The session is addressed by ExternalID; the
 // stable DisplayName is passed only as ccpool --name.
 func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, error) {
+	r.ownerID = d.DispatchID
+	if r.ownerID == "" {
+		r.ownerID = r.deps.ExternalID
+	}
 	cc := d.Role.CCPool
 	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
 
@@ -404,6 +423,12 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	env["WORKSPACE_ROOT"] = wt
 	meta := ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))
 	r.gwmMeta(meta)
+	if r.deps.Cfg.LeaseTTL > 0 {
+		// The first owner of a new session: generation 1, one supervisor.
+		ccpool.StampLeaseOwner(meta, r.ownerID)
+		r.generation.Store(1)
+		r.supervisors = 1
+	}
 	if cc.Isolation.Type == BeadWorktreeIsolation {
 		// The directory is not this handler's: every teardown path leaves it alone
 		// (bead pg2-b49ydt, ccpool.MetaKeyKeepWorktree).
@@ -740,6 +765,13 @@ func budgetUnlimited(b budget.Budget) bool {
 // absorbed (closeSettledSession, INV-CCH-17, ADR 0082), so a finished session
 // does not hold a counted slot of a max_sessions=1 pool until idle_ttl.
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
+	if r.superseded.Load() {
+		// A newer dispatch took this session over (lease.go): stop without a
+		// terminal action -- no session close, no worktree removal, no failure
+		// report. The newer dispatch owns the session's end.
+		r.finished, r.waitErr = true, ErrSuperseded
+		return report.Result{}, fmt.Errorf("session %s: %w", name, ErrSuperseded)
+	}
 	lost := r.gwm.lost.Load() && werr == nil
 	if lost {
 		werr = ErrWorktreeLost
@@ -1543,6 +1575,8 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 		// whole-file re-reads, and the budget meter does not need 10 s freshness.
 		Poll:          r.deps.Cfg.WatchdogPollInterval(),
 		ClaimTerminal: claimTerminal,
+		OwnerID:       r.ownerID,
+		Generation:    r.generation.Load(),
 	}
 
 	type res struct{ err error }

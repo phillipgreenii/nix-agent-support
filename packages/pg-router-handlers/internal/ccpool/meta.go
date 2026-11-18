@@ -80,6 +80,22 @@ const (
 	// MetaKeyWorktreeLost flags a session whose pg-gwm lease was lost or
 	// released while the session was running.
 	MetaKeyWorktreeLost = "pgrouter.worktree_lost"
+
+	// MetaKeyLeaseOwner is the dispatch id (the id of the handler request) of
+	// the dispatch that currently owns the session's supervision lease. A
+	// session with no owner key has no owner. Never a --label.
+	MetaKeyLeaseOwner = "pgrouter.lease_owner"
+	// MetaKeyLeaseGeneration is the lease's monotonically increasing generation
+	// (a decimal integer): 1 for the first owner of a session, plus one for every
+	// takeover by an absorbing dispatch. An absent or unparsable value reads as
+	// generation 0. A dispatch that sees a higher generation than the one it owns
+	// has been superseded and stops. Never a --label.
+	MetaKeyLeaseGeneration = "pgrouter.lease_generation"
+	// MetaKeySupervisors counts the dispatches believed to be supervising the
+	// session at once (a decimal integer): 1 at launch; a takeover while the
+	// previous lease was still fresh adds one to the previous value, otherwise
+	// resets it to 1. Never a --label.
+	MetaKeySupervisors = "pgrouter.supervisors"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions
@@ -115,6 +131,42 @@ func DispatchMeta(beadID, role string, now time.Time, leaseTTL time.Duration, ev
 		m[MetaKeyLeaseUntil] = FormatMetaTime(now.Add(EnsureTimeout + leaseTTL))
 	}
 	return m
+}
+
+// StampLeaseOwner adds the first-owner lease keys of a freshly launched session
+// to m: owner = ownerID, generation 1 and supervisors 1. An empty ownerID
+// stamps nothing.
+func StampLeaseOwner(m map[string]string, ownerID string) {
+	if ownerID == "" {
+		return
+	}
+	m[MetaKeyLeaseOwner] = ownerID
+	m[MetaKeyLeaseGeneration] = "1"
+	m[MetaKeySupervisors] = "1"
+}
+
+// ParseLeaseGeneration reads the lease generation out of a session's metadata;
+// an absent, unparsable or negative value reads as 0.
+func ParseLeaseGeneration(meta map[string]string) int64 {
+	n, err := strconv.ParseInt(meta[MetaKeyLeaseGeneration], 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// LeaseGeneration returns the session's lease generation (0 when absent or
+// unparsable).
+func (s Session) LeaseGeneration() int64 { return ParseLeaseGeneration(s.Meta) }
+
+// LeaseSupervisors returns the session's recorded supervisor count, 1 when
+// absent or unparsable.
+func (s Session) LeaseSupervisors() int {
+	n, err := strconv.Atoi(s.Meta[MetaKeySupervisors])
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
 }
 
 // FormatMetaTime renders t the way the pgrouter.* time keys carry it: RFC3339, UTC.

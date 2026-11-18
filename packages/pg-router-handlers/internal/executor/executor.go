@@ -49,6 +49,11 @@ type DispatchContext struct {
 	// id; it is stamped on the session at launch and bounds duplicate absorption
 	// of a handler-closed settled row (bead pg2-uprw5, ADR 0082).
 	EventID string
+	// DispatchID is the id the router minted for this dispatch (the id of the
+	// handler request). It is the owner id of the session's supervision lease
+	// (ccpool.MetaKeyLeaseOwner); empty (tests) falls back to the per-attempt
+	// ExternalID.
+	DispatchID string
 }
 
 // Executor dispatches one item for a role and reports the failure action it took.

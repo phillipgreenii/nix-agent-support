@@ -1067,3 +1067,34 @@ func TestArgSummary_keepsCwdPathWhole(t *testing.T) {
 		t.Errorf("--cwd value must not be elided, got %q", got)
 	}
 }
+
+// GetMeta shells out to `ccpool meta list <external_id> --json` and decodes the
+// whole map (the lease refresh reads the lease generation from it).
+func TestGetMeta_argvAndDecode(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	var got []string
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = args
+		return []byte(`{"pgrouter.lease_generation":"3","pgrouter.lease_owner":"d-1"}`), nil, nil
+	}
+	m, err := cli.GetMeta(context.Background(), "ext-1")
+	if err != nil {
+		t.Fatalf("GetMeta: %v", err)
+	}
+	if want := []string{"meta", "list", "ext-1", "--json"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+	if ParseLeaseGeneration(m) != 3 || m[MetaKeyLeaseOwner] != "d-1" {
+		t.Errorf("decoded meta = %v", m)
+	}
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) { return []byte("not json"), nil, nil }
+	if _, err := cli.GetMeta(context.Background(), "ext-1"); err == nil {
+		t.Error("an undecodable answer must be an error")
+	}
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) {
+		return nil, []byte("no such session"), errors.New("exit 1")
+	}
+	if _, err := cli.GetMeta(context.Background(), "ext-1"); err == nil {
+		t.Error("a ccpool failure must be an error")
+	}
+}

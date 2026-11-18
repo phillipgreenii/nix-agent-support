@@ -193,6 +193,14 @@ func ListPreferLight(ctx context.Context, r Runner) ([]Session, error) {
 	return r.List(ctx)
 }
 
+// MetaReader is the optional session-metadata read a Runner MAY offer: the
+// lease refresh reads the session's lease generation through it to learn it has
+// been superseded. A Runner without it is never fenced (the refresh skips the
+// read).
+type MetaReader interface {
+	GetMeta(ctx context.Context, externalID string) (map[string]string, error)
+}
+
 type Runner interface {
 	Ensure(ctx context.Context, externalID, name, cwd string, env, meta map[string]string) error
 	Send(ctx context.Context, externalID, prompt string, mode SendMode) error

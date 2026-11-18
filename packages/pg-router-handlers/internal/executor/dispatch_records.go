@@ -42,6 +42,9 @@ const (
 	// OutcomeInterrupted: the dispatch's context ended (shutdown or a cancelled
 	// payload) before an outcome was known; not a session failure.
 	OutcomeInterrupted = "interrupted"
+	// OutcomeSuperseded: a newer dispatch absorbed this dispatch's session and took
+	// over its supervision lease; this one stopped without a terminal action.
+	OutcomeSuperseded = "superseded"
 )
 
 // dispatchEndOutcome names the dispatch_end outcome of an accepted dispatch's
@@ -57,6 +60,8 @@ func dispatchEndOutcome(cause error) (outcome string, ok bool) {
 		return OutcomeUnclaimedEnd, true
 	case errors.Is(cause, ErrNeedsInputStalled):
 		return OutcomeNeedsInputStalled, true
+	case errors.Is(cause, ErrSuperseded):
+		return OutcomeSuperseded, true
 	case errors.Is(cause, context.Canceled), errors.Is(cause, context.DeadlineExceeded):
 		return OutcomeInterrupted, true
 	}

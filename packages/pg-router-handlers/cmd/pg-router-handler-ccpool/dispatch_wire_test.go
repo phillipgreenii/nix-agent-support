@@ -46,15 +46,18 @@ func TestDispatch_externalIDSessionNamingAndMetadataUnchanged(t *testing.T) {
 	for _, m := range flagValues("--meta") {
 		metaKeys = append(metaKeys, strings.SplitN(m, "=", 2)[0])
 	}
-	want := []string{"pgrouter.bead", "pgrouter.event_id", "pgrouter.launched_at", "pgrouter.lease_until", "pgrouter.pool", "pgrouter.role"}
+	want := []string{"pgrouter.bead", "pgrouter.event_id", "pgrouter.launched_at", "pgrouter.lease_generation", "pgrouter.lease_owner", "pgrouter.lease_until", "pgrouter.pool", "pgrouter.role", "pgrouter.supervisors"}
 	if strings.Join(metaKeys, ",") != strings.Join(want, ",") {
 		t.Errorf("--meta keys = %q, want %q", metaKeys, want)
 	}
 	meta := strings.Join(flagValues("--meta"), "\n")
-	for _, frag := range []string{"pgrouter.bead=zr-w", "pgrouter.event_id=e-1", "pgrouter.pool=pg-router", "pgrouter.role=worker"} {
+	for _, frag := range []string{"pgrouter.bead=zr-w", "pgrouter.event_id=e-1", "pgrouter.pool=pg-router", "pgrouter.role=worker", "pgrouter.lease_generation=1", "pgrouter.supervisors=1"} {
 		if !strings.Contains(meta, frag) {
 			t.Errorf("--meta lacks %q:\n%s", frag, meta)
 		}
+	}
+	if !regexp.MustCompile(`pgrouter\.lease_owner=\S+`).MatchString(meta) {
+		t.Errorf("--meta lacks a non-empty pgrouter.lease_owner (the dispatch id):\n%s", meta)
 	}
 	if got := strings.Join(flagValues("--label"), ","); got != "pgrouter.pool,pgrouter.role" {
 		t.Errorf("--label = %q, want pgrouter.pool,pgrouter.role", got)

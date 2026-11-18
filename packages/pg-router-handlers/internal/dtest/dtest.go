@@ -101,6 +101,43 @@ type FakeCC struct {
 	// dispatch.
 	MetaSets   []MetaSet
 	SetMetaErr error
+	// metas is the per-session metadata the fake answers GetMeta from: seeded by
+	// Ensure's meta and updated by every SetMeta. GetMetaErr, when set, makes
+	// every GetMeta call fail.
+	metas      map[string]map[string]string
+	GetMetaErr error
+}
+
+// GetMeta answers a session-metadata read from what Ensure and SetMeta wrote
+// (ccpool.MetaReader).
+func (f *FakeCC) GetMeta(_ context.Context, externalID string) (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.GetMetaErr != nil {
+		return nil, f.GetMetaErr
+	}
+	out := map[string]string{}
+	for k, v := range f.metas[externalID] {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// MetaOf returns a copy of the metadata the fake holds for a session (empty
+// when it holds none).
+func (f *FakeCC) MetaOf(externalID string) map[string]string {
+	m, _ := f.GetMeta(context.Background(), externalID)
+	return m
+}
+
+func (f *FakeCC) putMetaLocked(externalID, key, value string) {
+	if f.metas == nil {
+		f.metas = map[string]map[string]string{}
+	}
+	if f.metas[externalID] == nil {
+		f.metas[externalID] = map[string]string{}
+	}
+	f.metas[externalID][key] = value
 }
 
 // MetaSet is one recorded FakeCC.SetMeta call.
@@ -118,10 +155,18 @@ func (f *FakeCC) SetMeta(_ context.Context, externalID, key, value string) error
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.MetaSets = append(f.MetaSets, MetaSet{externalID, key, value})
+	if f.SetMetaErr == nil {
+		f.putMetaLocked(externalID, key, value)
+	}
 	return f.SetMetaErr
 }
 
 func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, env, meta map[string]string) error {
+	f.mu.Lock()
+	for k, v := range meta {
+		f.putMetaLocked(externalID, k, v)
+	}
+	f.mu.Unlock()
 	f.Ensured = append(f.Ensured, externalID)
 	f.EnsureNames = append(f.EnsureNames, name)
 	f.EnsuredCwd = cwd

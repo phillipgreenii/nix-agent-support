@@ -101,6 +101,13 @@ type Watchdog struct {
 	// already owns the outcome, so Run skips its mutations and waits for ctx
 	// cancellation. nil ⇒ no racer ⇒ always own (standalone use / tests). (pg2-c1vp)
 	ClaimTerminal func() bool
+
+	// OwnerID and Generation are the dispatch's own lease owner id and the
+	// generation it owns, as recorded at takeover (1 for a fresh launch). The
+	// reminder latch reads them to learn whether the dispatch was superseded; the
+	// watchdog does not read them itself in this version.
+	OwnerID    string
+	Generation int64
 }
 
 func (w *Watchdog) now() time.Time {

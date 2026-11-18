@@ -208,6 +208,10 @@ func (r *ccpoolRun) recordDispatchFailure(d DispatchContext, name string, werr e
 	if errors.Is(werr, ErrUnclaimedEnd) || errors.Is(werr, ErrPeerHeld) {
 		return
 	}
+	// A superseded dispatch stopped on purpose; the newer dispatch owns the outcome.
+	if errors.Is(werr, ErrSuperseded) {
+		return
+	}
 	// A needs_input stall clear is its own event (needs_input_cleared) and has no
 	// failure signature of its own to classify.
 	if errors.Is(werr, ErrNeedsInputStalled) {

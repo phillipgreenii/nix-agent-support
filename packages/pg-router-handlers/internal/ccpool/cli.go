@@ -497,6 +497,20 @@ func (c *CLIRunner) SetMeta(ctx context.Context, externalID, key, value string) 
 	return err
 }
 
+// GetMeta: ccpool meta list <external_id> --json, the session's whole metadata
+// map (MetaReader). Used by the lease refresh to read the lease generation.
+func (c *CLIRunner) GetMeta(ctx context.Context, externalID string) (map[string]string, error) {
+	out, err := c.ccpool(ctx, quickCallTimeout, "meta", "list", externalID, "--json")
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]string{}
+	if err := json.Unmarshal(out, &m); err != nil {
+		return nil, fmt.Errorf("ccpool meta list --json decode: %w", err)
+	}
+	return m, nil
+}
+
 // replyTimeout is the per-call bound for `ccpool reply`. A reply carrying
 // `--confirm-ingest <window>` (ModeNoWait with a positive window) blocks up to
 // the window, so its bound is window + confirmCallSlack; with the 90s default

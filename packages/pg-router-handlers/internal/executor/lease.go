@@ -3,7 +3,9 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
@@ -49,20 +51,36 @@ type leaseRefresher struct {
 	failures int
 }
 
-// refresh stamps pgrouter.lease_until = now + LeaseTTL. A failure never fails
-// the dispatch: it is logged (WARN; ERROR at every leaseErrorAfter-th
-// consecutive failure) and retried on the next tick.
+// ErrSuperseded is the cause a dispatch's supervision is cancelled with when a
+// newer dispatch absorbed its session and took over the lease (a higher
+// generation): the dispatch stops without a terminal action (D-8).
+var ErrSuperseded = errors.New("dispatch superseded by a newer dispatch of the same session")
+
+// refresh first reads the session's metadata and, when the lease generation
+// there is above the one this dispatch owns, ends the dispatch's supervision as
+// superseded (no write). Otherwise it stamps pgrouter.lease_until = now +
+// LeaseTTL. A failure never fails the dispatch: it is logged (WARN; ERROR at
+// every leaseErrorAfter-th consecutive failure) and retried on the next tick.
+// A metadata read that fails counts as a failure but decides nothing: the expiry
+// is still written. The refresh never writes the owner or generation keys.
 func (l *leaseRefresher) refresh(ctx context.Context) {
 	wctx, cancel := context.WithTimeout(ctx, leaseWriteTimeout)
 	defer cancel()
+	readErr := l.checkSuperseded(wctx)
+	if l.r.superseded.Load() {
+		return
+	}
 	until := l.r.deps.clock().Add(l.r.deps.Cfg.LeaseTTL)
 	err := l.r.deps.CC.SetMeta(wctx, l.name, ccpool.MetaKeyLeaseUntil, ccpool.FormatMetaTime(until))
-	if err == nil {
+	if err == nil && readErr == nil {
 		if l.failures > 0 {
 			slog.Info("lease refresh recovered", "session", l.name, "after_failures", l.failures)
 		}
 		l.failures = 0
 		return
+	}
+	if err == nil {
+		err = readErr
 	}
 	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
 		return // the dispatch is ending; not a lease fault
@@ -74,6 +92,33 @@ func (l *leaseRefresher) refresh(ctx context.Context) {
 		return
 	}
 	slog.Warn("lease refresh failed", "session", l.name, "consecutive_failures", l.failures, "err", err)
+}
+
+// checkSuperseded reads the session's lease generation and, when it is above
+// the generation this dispatch owns, marks the dispatch superseded and cancels
+// its supervision (wait loop, watchdog, refresher) with ErrSuperseded. It does
+// nothing for a dispatch that owns no generation (lease off) or a Runner that
+// cannot read metadata; a failed read is returned and decides nothing.
+func (l *leaseRefresher) checkSuperseded(ctx context.Context) error {
+	own := l.r.generation.Load()
+	mr, ok := l.r.deps.CC.(ccpool.MetaReader)
+	if own <= 0 || !ok {
+		return nil
+	}
+	meta, err := mr.GetMeta(ctx, l.name)
+	if err != nil {
+		return fmt.Errorf("read lease generation: %w", err)
+	}
+	if seen := ccpool.ParseLeaseGeneration(meta); seen > own {
+		slog.Warn("lease superseded by a newer dispatch; stopping without terminal actions",
+			"session", l.name, "owner", l.r.ownerID, "own_generation", own,
+			"seen_generation", seen, "seen_owner", meta[ccpool.MetaKeyLeaseOwner])
+		l.r.superseded.Store(true)
+		if l.r.cancelDispatch != nil {
+			l.r.cancelDispatch(ErrSuperseded)
+		}
+	}
+	return nil
 }
 
 // startLease starts the background lease refresh for session name and returns
@@ -127,6 +172,9 @@ func (r *ccpoolRun) startLease(ctx context.Context, name string) (stop func()) {
 // the lease is simply refreshed.
 func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Session, eventID string) (ccpool.Session, bool, error) {
 	if r.deps.LockDir == "" {
+		if _, err := r.takeOverLease(ctx, existing); err != nil {
+			return ccpool.Session{}, false, err
+		}
 		r.refreshLeaseOnce(ctx, existing.ExternalID)
 		return existing, true, nil
 	}
@@ -140,6 +188,9 @@ func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Sessi
 		// Can't tell. Keep the original absorb decision: planPriorSessions already
 		// chose this row, and an unreadable list is also what active() treats as
 		// "keep waiting".
+		if _, err := r.takeOverLease(ctx, existing); err != nil {
+			return ccpool.Session{}, false, err
+		}
 		r.refreshLeaseOnce(ctx, existing.ExternalID)
 		return existing, true, nil
 	}
@@ -152,10 +203,50 @@ func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Sessi
 				"session", s.ExternalID, "close_reason", s.CloseReason, "state", string(s.State), "live", s.Live)
 			return ccpool.Session{}, false, nil
 		}
+		if _, err := r.takeOverLease(ctx, s); err != nil {
+			return ccpool.Session{}, false, err
+		}
 		r.refreshLeaseOnce(ctx, s.ExternalID)
 		return s, true, nil
 	}
 	return ccpool.Session{}, false, nil
+}
+
+// takeOverLease makes this dispatch the session's lease owner (D-8): inside the
+// per-session lock the caller holds, from the row s it just read, it writes
+// owner = this dispatch's id, supervisors, and generation = the row's
+// generation + 1 (an absent or unparsable generation reads as 0, so the first
+// takeover writes 1). supervisors is the previous count (1 when absent or
+// unparsable) plus one when the previous lease expiry is still later than the
+// takeover instant, else 1; it is returned for the caller to report. The owner
+// and supervisors are written before the generation, so a reader that sees the
+// new generation sees its owner. Any write failure aborts the absorption. With
+// the lease off (non-positive LeaseTTL) there is nothing to fence and it
+// writes nothing. The new generation is recorded on the dispatch for its
+// refresher and its watchdog.
+func (r *ccpoolRun) takeOverLease(ctx context.Context, s ccpool.Session) (supervisors int, err error) {
+	if r.deps.Cfg.LeaseTTL <= 0 {
+		return 0, nil
+	}
+	gen := s.LeaseGeneration() + 1
+	supervisors = 1
+	if until, ok := s.LeaseUntil(); ok && until.After(r.deps.clock()) {
+		supervisors = s.LeaseSupervisors() + 1
+	}
+	for _, kv := range [][2]string{
+		{ccpool.MetaKeyLeaseOwner, r.ownerID},
+		{ccpool.MetaKeySupervisors, strconv.Itoa(supervisors)},
+		{ccpool.MetaKeyLeaseGeneration, strconv.FormatInt(gen, 10)},
+	} {
+		if err := r.deps.CC.SetMeta(ctx, s.ExternalID, kv[0], kv[1]); err != nil {
+			return 0, fmt.Errorf("take over the lease of %s (%s): %w", s.ExternalID, kv[0], err)
+		}
+	}
+	r.generation.Store(gen)
+	r.supervisors = supervisors
+	slog.Info("took over the session's supervision lease", "session", s.ExternalID,
+		"owner", r.ownerID, "generation", gen, "supervisors", supervisors)
+	return supervisors, nil
 }
 
 // refreshLeaseOnce writes the lease synchronously, best effort.
