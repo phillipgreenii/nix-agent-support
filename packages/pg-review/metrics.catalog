@@ -4,6 +4,7 @@ pg_review_findings_last_run gauge lens,scope
 pg_review_last_success_timestamp_seconds gauge lens,scope,schedule
 pg_review_last_window_seconds gauge lens,scope,schedule
 pg_review_consecutive_failed_runs gauge lens,scope,schedule
+pg_review_unfiled_window_fraction gauge lens,scope,schedule
 pg_review_pending_items gauge lens,scope
 pg_review_oldest_pending_age_seconds gauge lens,scope
 pg_review_topics gauge lens,scope,state

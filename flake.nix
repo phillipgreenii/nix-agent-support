@@ -4299,12 +4299,12 @@
                     ];
                   }
                   ''
-                    # The registered file is well-formed, holds the three rules in one
+                    # The registered file is well-formed, holds the four rules in one
                     # "Host" folder, and pins no folderUid.
                     yq -o=json '.' ${alertsFile} > alerts.json
                     jq -e '.apiVersion == 1' alerts.json >/dev/null
                     jq -e '[.groups[].folder] | unique == ["Host"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Host" >&2; exit 1; }
-                    jq -e '[.groups[].rules[]] | length == 3' alerts.json >/dev/null || { echo "FAIL: expected 3 rules" >&2; exit 1; }
+                    jq -e '[.groups[].rules[]] | length == 4' alerts.json >/dev/null || { echo "FAIL: expected 4 rules" >&2; exit 1; }
                     jq -e '[.. | objects | select(has("folderUid"))] | length == 0' alerts.json >/dev/null || { echo "FAIL: a folderUid is pinned" >&2; exit 1; }
                     touch $out
                   '';

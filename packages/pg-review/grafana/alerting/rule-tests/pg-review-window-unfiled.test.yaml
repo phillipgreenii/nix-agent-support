@@ -1,0 +1,99 @@
+# promtool unit tests for the pg-review-window-unfiled alert. Run by check-alert-rules.sh, which
+# wraps refId A as `alert: <uid>` with `expr: (<A>) > 0.125` (strictly more than an eighth of the
+# window), `for: 30m` and the labels. All series are synthetic. The series is, per schedule, the
+# time since the latest scheduled window ended divided by the window length while no run Filed it,
+# and 0 once a run Filed it.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a daily series at 0.2 held for 30m fires, labelled per schedule
+    interval: 1m
+    input_series:
+      - series: pg_review_unfiled_window_fraction{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "0x10 0.2x100"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-review-window-unfiled
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-review-window-unfiled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+
+  - name: a weekly series at 0.1 (16.8 hours) does not fire, at 0.13 it does
+    interval: 1m
+    input_series:
+      - series: pg_review_unfiled_window_fraction{lens="lens-a",scope="scope-a",schedule="weekly"}
+        values: "0.1x100 0.13x100"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-review-window-unfiled
+        exp_alerts: []
+      - eval_time: 180m
+        alertname: pg-review-window-unfiled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: weekly
+
+  - name: exactly 0.125 does not fire (strictly greater)
+    interval: 1m
+    input_series:
+      - series: pg_review_unfiled_window_fraction{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "0.125x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-window-unfiled
+        exp_alerts: []
+
+  - name: a missing series does not fire
+    interval: 1m
+    input_series:
+      - series: pg_review_runs{lens="lens-a",scope="scope-a",outcome="skipped"}
+        values: "9x200"
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: pg-review-window-unfiled
+        exp_alerts: []
+
+  - name: a recovery to 0 clears the alert
+    interval: 1m
+    input_series:
+      - series: pg_review_unfiled_window_fraction{lens="lens-a",scope="scope-a",schedule="daily"}
+        values: "0.3x60 0x140"
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: pg-review-window-unfiled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-a
+              scope: scope-a
+              schedule: daily
+      - eval_time: 100m
+        alertname: pg-review-window-unfiled
+        exp_alerts: []
+
+  - name: a never-Filed lens (the series exists, no last-success series) fires
+    interval: 1m
+    input_series:
+      - series: pg_review_unfiled_window_fraction{lens="lens-n",scope="scope-a",schedule="weekly"}
+        values: "0.2x200"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: pg-review-window-unfiled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              lens: lens-n
+              scope: scope-a
+              schedule: weekly

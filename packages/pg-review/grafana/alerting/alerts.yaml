@@ -1,5 +1,6 @@
-# pg-review unified-alerting rules: three warnings (the review queue is too large, a lens has
-# stopped running on its schedule, a schedule keeps failing). Modelled on
+# pg-review unified-alerting rules: four warnings (the review queue is too large, a lens has
+# stopped running on its schedule, a schedule keeps failing, a scheduled window has no Filed
+# run an eighth of its length after it ended). Modelled on
 # packages/pg-keep-awake/grafana/alerting/alerts.yaml; the PromQL behaviour is run under
 # `promtool test rules` by packages/pg-review/check-alert-rules.sh against the cases in
 # rule-tests/. refId A is plain PromQL and refId C a single `gt` threshold stage, so every rule
@@ -8,8 +9,9 @@
 # The series are OTLP gauges computed from the ledger and pushed every 5 minutes (metrics.catalog).
 # OTLP gauges go stale when the pusher stops, so every expression reads max_over_time and ends in
 # `or vector(0)`: a missing series becomes 0, which no rule treats as firing. A schedule that has
-# never filed has no last-success series, so rule 2 cannot fire for it (the failing rule covers a
-# schedule that only ever fails). A manual run carries no schedule id, so it produces no
+# never filed has no last-success series, so rule 2 cannot fire for it; rule 4 covers it, because
+# pg_review_unfiled_window_fraction has a series for every schedule with a scheduled run (rule 3
+# covers three Failed runs in a row). A manual run carries no schedule id, so it produces no
 # schedule-labelled series: it can neither mask a dead schedule nor clear its alert.
 #
 # Rule 2 compares, per schedule, the time since the schedule's last Filed window end with twice
@@ -145,3 +147,42 @@ groups:
                 - evaluator:
                     type: gt
                     params: [2]
+      - uid: pg-review-window-unfiled
+        title: pg-review scheduled window not filed
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A pg-review scheduled window has no Filed run"
+          description: "For the lens, scope and schedule on this alert, the latest scheduled window ended more than an eighth of its length ago with no Filed run (skipped for ccpool capacity, a usage limit or a busy pool, or failed). Catch-up retries a skipped window hourly until the next slot. Run pg-review job status and pg-review job show-run <run id> to read the cause, then pg-review job catch-up <lens> --scope <scope> --force to re-run exactly that window; a plain pg-review job run does not clear this alert."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (lens, scope, schedule) (max_over_time(pg_review_unfiled_window_fraction[10m])) or vector(0)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.125]

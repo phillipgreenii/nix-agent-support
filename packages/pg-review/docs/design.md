@@ -889,8 +889,11 @@ flowchart LR
   S1 --> R1["role review-run<br/>one at a time, FIFO"]
   S2 --> R1
   S3 --> R2["role review-maintain<br/>short, own queue"]
+  S4["timer query review.catchup<br/>trigger period 1 hour"] --> R3["role review-catchup<br/>own queue"]
   R1 --> AD["adapter script<br/>pg-review-router-adapter"]
   R2 --> AD
+  R3 --> AD
+  AD -->|"pg-review job catch-up"| CLI
   AD -->|"pg-review job run LENS --scope SCOPE<br/>--from FROM --to TO --run-key KEY"| CLI["pg-review"]
   AD -->|"pg-review job maintain"| CLI
   CLI --> LED[("ledger")]
@@ -921,7 +924,9 @@ flowchart LR
      stuck lock that keeps skipping is visible, and `job status` counts skipped runs;
   4. on SIGTERM it waits for `pg-review`, which receives the same process-group SIGTERM and closes
      the ccpool session within the router's 5 second grace (C11); the adapter sends no second signal.
-     For `review-maintain` it runs `pg-review job maintain` with the same mapping.
+     For `review-maintain` it runs `pg-review job maintain` with the same mapping, and for
+     `review-catchup` it runs `pg-review job catch-up` with the same mapping (`mapExit` is unchanged:
+     the Skipped code and a held run lock still become 0).
 - `pg-review` itself exposes only generic flags: `--from`, `--to` (or `--duration` and `--at`),
   and `--run-key`. It has no `tick`, no `--scheduled` mode and no knowledge of items, events or
   schedules.
@@ -929,6 +934,22 @@ flowchart LR
   runs at once and the rest wait their turn, visible in router status.
 - `review-maintain` is a separate role so metrics, backups and bead filing never queue behind a
   long analysis; it carries no disk requirement (the deployment writes one only for `review-run`), so it keeps reporting while analysis is held.
+- `review-catchup` is its own role, not a step of `job maintain`, because maintain MUST never queue
+  behind a long analysis (C11). Its timer query fires every hour while any schedule exists, with no
+  retry of its own (`max_dispatch_retries` 0). A router-level retry was rejected for in-window
+  retries: it is capped at 3 tries over about 35 seconds, its count lives in router memory, and it
+  would need a new exit code that the adapter flattens to 0 on purpose. `job catch-up [lens]
+[--scope S] [--force]` instead reads the ledger: for each (lens, scope, schedule id) it takes the
+  latest scheduled row (Filed, Skipped or Failed); that window is eligible when the row is Skipped,
+  no run with its run key Filed, fewer than 24 runs share the key, the newest such run ended at
+  least 55 minutes ago, and now is before the window end plus the window length. It re-runs the
+  SAME window and run key with the same schedule id and trigger as a normal scheduled run
+  (capacity retry and Skipped semantics included), at most ONE window per invocation (the one that
+  ended first), under the same run lock as `job run` (a held lock exits with the busy code and
+  writes no row). Analyst Failed runs are not retried. `--force` (lens required) ignores the
+  cooldown, cap and expiry and also accepts a Failed window; unlike a manual `job run` it carries
+  the schedule id and run key, so a Filed result clears the unfiled-window alert (5.12). With
+  nothing eligible it exits with the Skipped code and writes no row.
 - A manual run is the same command without the adapter: `pg-review job run agent-workflow --scope
 workspace --duration 24h` reviews the previous 24 hours now. There is no router-side manual
   trigger and none is added (operator ruling, 2026-11-06, verbatim: "i should be able to
@@ -938,16 +959,20 @@ workspace --duration 24h` reviews the previous 24 hours now. There is no router-
   its own lens and scope (exit 5 if one holds the lock).
 - A daily schedule reviews exactly 24 hours (operator ruling, 2026-11-06, verbatim: "daily
   is daily, 24h. i want a manual trigger to play catch up if necessary"). Under `next-slot` a night
-  the router was not running, the host was asleep, or the lock was held (a mapped skip) leaves that
-  window unreviewed. The operator catches up by hand with the missed window, for example
+  the router was not running or the host was asleep leaves that window unreviewed; a window that
+  ended Skipped (capacity, usage limit, busy pool) is caught up hourly by `review-catchup` until the
+  next slot supersedes it. The operator catches up by hand with the missed window, for example
   `pg-review job run agent-workflow --scope workspace --from 2026-11-04T02:00:00-05:00 --to
 2026-11-05T02:00:00-05:00`, or one longer window covering several nights (overlapping windows
   dedupe by topic). `job status` and the `pending` banner show the stale lens, and a manual run
   does not clear the "lens not running" alert (5.12), which counts scheduled runs only.
 - A router restart, for example after an apply, cancels a running analysis and re-offers its item;
   C11 makes that safe. `max_dispatch_retries` stays 0; a run cancelled by a restart is retried when
-  the router re-offers its event, and a window whose run stays Failed or Skipped is caught up by
-  hand (the daily bullet above), because the next scheduled window does not cover it.
+  the router re-offers its event, a window whose run stays Skipped is caught up by `review-catchup`
+  within its own length, and a window whose run Failed is caught up by hand (the daily bullet
+  above, or `job catch-up <lens> --force`), because the next scheduled window does not cover it.
+  5.14 amendment: a Skipped scheduled window is re-offered hourly by catch-up within its window; the
+  Skipped semantics and the adapter's exit mapping are unchanged.
 
 ### 5.11 Registration
 
@@ -1007,6 +1032,7 @@ metric carries the labels `lens` and `scope` unless stated.
 | `pg_review_last_window_seconds`            | `schedule`                         | window length of that same Filed run, so alerts need no schedule knowledge and match on `lens`, `scope` and `schedule`                           |
 
 | `pg_review_consecutive_failed_runs` | `schedule` | that schedule's Failed runs since its last Filed run; its Filed run resets it, a Skipped run neither adds to it nor resets it, and manual runs never touch it |
+| `pg_review_unfiled_window_fraction` | `schedule` | per schedule, `(now - window end) / window length` of its latest scheduled run while no run sharing its run key Filed, 0 once one Filed (or while the window is open); a schedule with only Skipped or Failed rows has a series, manual runs never do |
 | `pg_review_pending_items` | | items awaiting a ruling |
 | `pg_review_oldest_pending_age_seconds` | | age of the oldest pending item |
 | `pg_review_topics` | `state` | topics by state |
@@ -1025,6 +1051,7 @@ a missing series.
 | pending too large | `pg_review_pending_items` above the cap (12) for 1 hour                                                                                                                                                                                                                                                                 | warning  |
 | lens not running  | `time() - pg_review_last_success_timestamp_seconds` above twice `pg_review_last_window_seconds`, per schedule, matched on `lens`, `scope` and `schedule` (windows are assumed to tile their period, so the CLI needs no schedule knowledge; a lens and scope with a daily and a weekly schedule is judged per schedule) | warning  |
 | runs failing      | `pg_review_consecutive_failed_runs` at 3 or more for one schedule                                                                                                                                                                                                                                                       | warning  |
+| window unfiled    | `pg_review_unfiled_window_fraction` strictly above 0.125 (an eighth of the window) for one schedule, for 30 minutes; covers a schedule that never filed, which "lens not running" cannot                                                                                                                                | warning  |
 
 A new alert rule uid MUST also be registered with the router's probe in the deployment repository
 or it never escalates to a bead, and the deployment's guard that lists rule files may need this

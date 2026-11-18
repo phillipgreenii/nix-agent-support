@@ -4,9 +4,11 @@
 //
 //	pg-review-router-adapter run <item-id> <schedule_id> <lens> <scope> <window>
 //	pg-review-router-adapter maintain
+//	pg-review-router-adapter catch-up
 //
 // "run" turns a dispatch into `pg-review job run`; "maintain" runs
-// `pg-review job maintain`. Both map pg-review exit codes to router semantics
+// `pg-review job maintain`; "catch-up" runs `pg-review job catch-up`, which
+// re-runs a scheduled window that ended Skipped. All three map pg-review exit codes to router semantics
 // (see mapExit) and write their log to stderr. The adapter makes no scheduling
 // decision: it has no time-of-day, no last-run memory and no clock.
 package main
@@ -40,6 +42,8 @@ func run(args []string, stdout, stderr io.Writer, sigs <-chan os.Signal) int {
 		return cmdRun(args[1:], stdout, stderr, sigs)
 	case "maintain":
 		return cmdMaintain(args[1:], stdout, stderr, sigs)
+	case "catch-up":
+		return cmdCatchUp(args[1:], stdout, stderr, sigs)
 	case "--version", "version":
 		fmt.Fprintln(stdout, "pg-review-router-adapter", Version)
 		return 0
@@ -49,4 +53,4 @@ func run(args []string, stdout, stderr io.Writer, sigs <-chan os.Signal) int {
 	}
 }
 
-const usage = "usage: pg-review-router-adapter run <item-id> <schedule_id> <lens> <scope> <window> | maintain"
+const usage = "usage: pg-review-router-adapter run <item-id> <schedule_id> <lens> <scope> <window> | maintain | catch-up"

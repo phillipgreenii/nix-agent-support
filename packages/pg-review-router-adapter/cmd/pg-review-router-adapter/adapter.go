@@ -131,6 +131,14 @@ func cmdMaintain(args []string, stdout, stderr io.Writer, sigs <-chan os.Signal)
 	return runChild([]string{"job", "maintain"}, stdout, stderr, sigs)
 }
 
+func cmdCatchUp(args []string, stdout, stderr io.Writer, sigs <-chan os.Signal) int {
+	if len(args) != 0 {
+		fmt.Fprintf(stderr, "pg-review-router-adapter: catch-up takes no arguments\n%s\n", usage)
+		return exitUsage
+	}
+	return runChild([]string{"job", "catch-up"}, stdout, stderr, sigs)
+}
+
 // mapExit maps a pg-review exit code to the router's semantics. reason is
 // non-empty when the mapping hides a non-zero code, so the caller logs it.
 func mapExit(code int) (mapped int, reason string) {

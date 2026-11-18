@@ -17,6 +17,9 @@ type MetricsData struct {
 	// Schedules holds, per (lens, scope, schedule id), the schedule's state.
 	// Only runs that carry a schedule id contribute.
 	Schedules []ScheduleState
+	// Windows holds, per (lens, scope, schedule id), the latest scheduled run
+	// and whether its window ever Filed (the unfiled-window gauge).
+	Windows []ScheduledWindow
 	// Pending, Topics, Decisions, Subjects and OutboxFailed are counts by label.
 	Pending      []LabelCount
 	Topics       []LabelCount
@@ -77,6 +80,9 @@ func (l *Ledger) MetricsData(ctx context.Context) (MetricsData, error) {
 		return md, err
 	}
 	if md.Schedules, err = l.scheduleStates(ctx); err != nil {
+		return md, err
+	}
+	if md.Windows, err = l.ScheduledWindows(ctx); err != nil {
 		return md, err
 	}
 	if md.Pending, err = l.labelCounts(ctx, `SELECT t.lens, `+topicScope+`, '', COUNT(*), MIN(t.updated_at) FROM topic t WHERE t.state='Pending' GROUP BY 1,2,3`); err != nil {

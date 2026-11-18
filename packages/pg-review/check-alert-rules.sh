@@ -11,7 +11,7 @@
 # `promtool test rules`.
 #
 # It also pins the Grafana-only fields promtool cannot run (noDataState, severity, for) and the
-# expressions of the three rules.
+# expressions of the four rules.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +30,7 @@ case "$#" in
   ;;
 esac
 
-rule_uids='["pg-review-pending-too-large", "pg-review-lens-not-running", "pg-review-runs-failing"]'
+rule_uids='["pg-review-pending-too-large", "pg-review-lens-not-running", "pg-review-runs-failing", "pg-review-window-unfiled"]'
 
 fail() {
   echo "FAIL: $*" >&2
@@ -63,18 +63,21 @@ printf '%s' "$alerts_json" | jq -e '
   [.groups[].rules[] | {key: .uid, value: .for}] | from_entries
   | .["pg-review-pending-too-large"] == "1h"
     and .["pg-review-lens-not-running"] == "30m"
-    and .["pg-review-runs-failing"] == "30m"' >/dev/null ||
-  fail "for: pending-too-large must be 1h, the other two 30m"
+    and .["pg-review-runs-failing"] == "30m"
+    and .["pg-review-window-unfiled"] == "30m"' >/dev/null ||
+  fail "for: pending-too-large must be 1h, the other three 30m"
 
 # Thresholds: pending above 12; lens-not-running above 0 (the expression is the excess over
-# twice the window); runs-failing above 2 (3 or more).
+# twice the window); runs-failing above 2 (3 or more); window-unfiled above 0.125 (strictly
+# more than an eighth of the window).
 printf '%s' "$alerts_json" | jq -e '
   [.groups[].rules[] | {key: .uid, value: (.data[] | select(.refId == "C") | .model.conditions[0].evaluator)}]
   | from_entries
   | .["pg-review-pending-too-large"] == {type: "gt", params: [12]}
     and .["pg-review-lens-not-running"] == {type: "gt", params: [0]}
-    and .["pg-review-runs-failing"] == {type: "gt", params: [2]}' >/dev/null ||
-  fail "thresholds: pending gt 12, not-running gt 0, failing gt 2"
+    and .["pg-review-runs-failing"] == {type: "gt", params: [2]}
+    and .["pg-review-window-unfiled"] == {type: "gt", params: [0.125]}' >/dev/null ||
+  fail "thresholds: pending gt 12, not-running gt 0, failing gt 2, window-unfiled gt 0.125"
 
 expr_of() {
   printf '%s' "$alerts_json" | jq -r --arg uid "$1" '
@@ -87,6 +90,8 @@ by='lens, scope, schedule'
   fail "lens-not-running expression changed"
 [ "$(expr_of pg-review-runs-failing)" = "max by ($by) (max_over_time(pg_review_consecutive_failed_runs[10m])) or vector(0)" ] ||
   fail "runs-failing expression changed"
+[ "$(expr_of pg-review-window-unfiled)" = "max by ($by) (max_over_time(pg_review_unfiled_window_fraction[10m])) or vector(0)" ] ||
+  fail "window-unfiled expression changed"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

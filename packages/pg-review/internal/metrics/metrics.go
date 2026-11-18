@@ -36,6 +36,7 @@ var Catalog = []Def{
 	{"pg_review_last_success_timestamp_seconds", "gauge", []string{"lens", "scope", "schedule"}},
 	{"pg_review_last_window_seconds", "gauge", []string{"lens", "scope", "schedule"}},
 	{"pg_review_consecutive_failed_runs", "gauge", []string{"lens", "scope", "schedule"}},
+	{"pg_review_unfiled_window_fraction", "gauge", []string{"lens", "scope", "schedule"}},
 	{"pg_review_pending_items", "gauge", []string{"lens", "scope"}},
 	{"pg_review_oldest_pending_age_seconds", "gauge", []string{"lens", "scope"}},
 	{"pg_review_topics", "gauge", []string{"lens", "scope", "state"}},
@@ -76,6 +77,9 @@ func Collect(md ledger.MetricsData, now time.Time) []Gauge {
 		}
 		out = append(out, g("pg_review_consecutive_failed_runs", float64(s.ConsecutiveFailed), "lens", s.Lens, "scope", s.Scope, "schedule", s.Schedule))
 	}
+	for _, w := range md.Windows {
+		out = append(out, g("pg_review_unfiled_window_fraction", UnfiledFraction(w, now), "lens", w.Lens, "scope", w.Scope, "schedule", w.Schedule))
+	}
 	for _, c := range md.Pending {
 		out = append(out, g("pg_review_pending_items", float64(c.N), "lens", c.Lens, "scope", c.Scope))
 	}
@@ -106,6 +110,21 @@ func Collect(md ledger.MetricsData, now time.Time) []Gauge {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// UnfiledFraction is how far past its end a scheduled window is without a
+// Filed run, as a fraction of the window length: (now - window end) / window
+// length for a window whose runs never Filed; 0 for a Filed window, a window
+// still open or one with unreadable bounds.
+func UnfiledFraction(w ledger.ScheduledWindow, now time.Time) float64 {
+	if w.Filed {
+		return 0
+	}
+	from, to, ok := w.Bounds()
+	if !ok || !now.After(to) {
+		return 0
+	}
+	return now.Sub(to).Seconds() / to.Sub(from).Seconds()
 }
 
 // Emit reads the ledger and pushes the gauges through Default. It returns

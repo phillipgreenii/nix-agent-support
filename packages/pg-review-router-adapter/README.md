@@ -7,6 +7,7 @@ or schedules). It makes no scheduling decision: no time-of-day, no last-run memo
 ```text
 pg-review-router-adapter run <item-id> <schedule_id> <lens> <scope> <window>
 pg-review-router-adapter maintain
+pg-review-router-adapter catch-up
 ```
 
 `pg-review` is found on `PATH` and run as a child (the adapter must map its exit code,
@@ -58,6 +59,13 @@ itself and closes its session within the grace. The adapter forwards no signal.
 ## maintain
 
 Runs `pg-review job maintain` with the same exit-code mapping.
+
+## catch-up
+
+Takes no arguments. Runs `pg-review job catch-up` with the same exit-code mapping, so
+"nothing to catch up" and a re-run that is skipped again (both exit 20) and a held run
+lock (exit 9) all report 0 to the router. The command re-runs at most one scheduled
+window that ended Skipped; the adapter makes no decision about which.
 
 ## Tests
 

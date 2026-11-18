@@ -37,7 +37,7 @@ func TestGroupHelpListsCommands(t *testing.T) {
 	want := map[string][]string{
 		"human": {"pending", "show", "rule"},
 		"agent": {"q", "file", "context"},
-		"job":   {"run", "maintain", "doctor", "status", "show-run", "resume"},
+		"job":   {"run", "maintain", "catch-up", "doctor", "status", "show-run", "resume"},
 	}
 	for g, cmds := range want {
 		code, out, _ := run(t, g, "--help")

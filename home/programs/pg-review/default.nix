@@ -12,6 +12,9 @@
 # optional (the built-in providers, lenses and profiles ship embedded in the
 # binary, and a config entry with a built-in id is merged onto it key by key).
 #
+# With schedules declared the router stanzas also carry `review-catchup`, an
+# hourly period query and a role that runs the adapter's `catch-up` command.
+#
 # Two outputs:
 #   * config.toml (File 1): scopes, profile and lens overrides and moved
 #     providers only. Schedules and the router are NOT in it, so the CLI never
@@ -105,6 +108,19 @@ let
     };
   };
 
+  # Catch-up re-runs a scheduled window that ended Skipped (a capacity or usage
+  # limit refusal exits as skipped, which the adapter reports to the router as
+  # success). It is its own role so `maintain` never queues behind a long run.
+  catchupQuery = {
+    name = "review-catchup";
+    type = "timer";
+    emits = [ "review.catchup" ];
+    trigger = {
+      kind = "period";
+      every = "1h";
+    };
+  };
+
   handler = "${cfg.handlerPackage}/bin/pg-router-handler-command";
   adapter = "${cfg.adapterPackage}/bin/pg-review-router-adapter";
 
@@ -137,6 +153,20 @@ let
       }
       // withRequires "review-run"
     )
+    ++ lib.optional (cfg.schedules != { }) (
+      {
+        name = "review-catchup";
+        enabled = true;
+        binds = [ "review.catchup" ];
+        inherit handler;
+        max_dispatch_retries = 0;
+        config.command.argv = [
+          adapter
+          "catch-up"
+        ];
+      }
+      // withRequires "review-catchup"
+    )
     ++ [
       (
         {
@@ -154,7 +184,10 @@ let
       )
     ];
 
-  queries = lib.mapAttrsToList scheduleQuery cfg.schedules ++ [ maintainQuery ];
+  queries =
+    lib.mapAttrsToList scheduleQuery cfg.schedules
+    ++ lib.optional (cfg.schedules != { }) catchupQuery
+    ++ [ maintainQuery ];
 
   routerConfig = {
     query = queries;
@@ -340,6 +373,12 @@ in
             default = [ ];
             example = [ "disk >= OK" ];
             description = "The `requires` clauses of the review-run role, each \"<resource> <op> <LEVEL>\". Default none: the role does not care about any resource level; the deployment supplies its own.";
+          };
+          "review-catchup" = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            example = [ "disk >= OK" ];
+            description = "The `requires` clauses of the review-catchup role (present only while `schedules` is non-empty). Default none; the deployment supplies its own, usually those of review-run.";
           };
           "review-maintain" = mkOption {
             type = types.listOf types.str;

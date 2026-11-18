@@ -194,6 +194,7 @@ func TestUsageErrorsExit2(t *testing.T) {
 		{"run", "2026-11-05T07:00:00Z", "id", "--lens", "s", "24h"},
 		{"run", "2026-11-05T07:00:00Z", "", "l", "s", "24h"},
 		{"maintain", "extra"},
+		{"catch-up", "extra"},
 	}
 	for _, c := range cases {
 		if code, _, _ := do(c...); code != 2 {
@@ -248,6 +249,7 @@ func TestExitCodeMapping(t *testing.T) {
 		for _, sub := range [][]string{
 			{"run", "2026-11-05T07:00:00Z", "id", "l", "s", "24h"},
 			{"maintain"},
+			{"catch-up"},
 		} {
 			if err := os.WriteFile(codeFile, []byte(strconv.Itoa(c.child)), 0o644); err != nil {
 				t.Fatal(err)
@@ -282,6 +284,16 @@ func TestMaintainArgv(t *testing.T) {
 		t.Fatal(code, e)
 	}
 	if got := readLines(t, argv); strings.Join(got, " ") != "job maintain" {
+		t.Fatalf("argv %q", got)
+	}
+}
+
+func TestCatchUpArgv(t *testing.T) {
+	argv, _ := fakePgReview(t, 0, "")
+	if code, _, e := do("catch-up"); code != 0 {
+		t.Fatal(code, e)
+	}
+	if got := readLines(t, argv); strings.Join(got, " ") != "job catch-up" {
 		t.Fatalf("argv %q", got)
 	}
 }

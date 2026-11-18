@@ -7,7 +7,8 @@
 #   * asserts the rendered File 1 holds the scopes and a moved built-in
 #     provider as a command-only entry (so the built-in queries stay in effect),
 #   * asserts the generated router stanzas (timer queries with static metadata,
-#     calendar triggers, the 5 minute maintain period trigger, the two roles
+#     calendar triggers, the 5 minute maintain and hourly catch-up period
+#     triggers (catch-up only with schedules), the three roles
 #     with no requires by default (and the deployment-supplied clauses when the
 #     requires option is set), max_dispatch_retries 0 and adapter argv, an absolute
 #     handler store path, at least one role, every bound event emitted by a
@@ -96,6 +97,7 @@ let
     };
     requires = {
       "review-run" = [ "disk >= OK" ];
+      "review-catchup" = [ "disk >= OK" ];
       "review-maintain" = [ "cpu >= OK" ];
     };
   };
@@ -125,6 +127,8 @@ let
   maintain = queryByName "review-maintain";
   runRole = roleByName "review-run";
   maintainRole = roleByName "review-maintain";
+  catchupQuery = queryByName "review-catchup";
+  catchupRole = roleByName "review-catchup";
   emitted = lib.concatMap (q: q.emits) rc.query;
 
   cases = {
@@ -199,6 +203,27 @@ let
         "${pkgs.pg-review-router-adapter}/bin/pg-review-router-adapter"
         "maintain"
       ];
+    "review-catchup: hourly period query and a role running the adapter catch-up command" =
+      catchupQuery.emits == [ "review.catchup" ]
+      &&
+        catchupQuery.trigger == {
+          kind = "period";
+          every = "1h";
+        }
+      && catchupRole.binds == [ "review.catchup" ]
+      && catchupRole.max_dispatch_retries == 0
+      && !(catchupRole ? requires)
+      &&
+        catchupRole.config.command.argv == [
+          "${pkgs.pg-review-router-adapter}/bin/pg-review-router-adapter"
+          "catch-up"
+        ];
+    "review-catchup requires clauses render into the role" =
+      (lib.findFirst (r: r.name == "review-catchup") null reqRoles).requires == [ "disk >= OK" ];
+    "with no schedules the catch-up query and role are absent" =
+      !(lib.any (
+        q: q.name == "review-catchup"
+      ) noScope.config.phillipgreenii.programs.pg-review.routerConfig.query);
     "every role's bound event is emitted by a generated query" = lib.all (
       r: lib.all (e: lib.elem e emitted) r.binds
     ) rc.role;
@@ -252,11 +277,13 @@ pkgs.runCommand "pg-review-module"
     # --- File 2: the generated router stanza text ----------------------------
     yq -p toml -o json ${sampleOpts.routerConfigFile} > router.json
     jq -e '
-      (.query | length) == 4
-      and ([.query[].name] | sort) == ["agent-workflow-workspace-daily", "agent-workflow-workspace-weekly", "config-health-workspace-weekly", "review-maintain"]
-      and (.role | length) == 2
+      (.query | length) == 5
+      and ([.query[].name] | sort) == ["agent-workflow-workspace-daily", "agent-workflow-workspace-weekly", "config-health-workspace-weekly", "review-catchup", "review-maintain"]
+      and (.query[] | select(.name == "review-catchup") | .type == "timer" and .emits == ["review.catchup"] and .trigger == {kind: "period", every: "1h"})
+      and (.role | length) == 3
       and ([.role[].handler] | all(startswith("/nix/store/")))
-      and ([.role[].max_dispatch_retries] == [0, 0])
+      and ([.role[].max_dispatch_retries] == [0, 0, 0])
+      and (.role[] | select(.name == "review-catchup") | .binds == ["review.catchup"] and (has("requires") | not) and .config.command.argv[1] == "catch-up" and (.config.command.argv | length) == 2)
       and (.role[] | select(.name == "review-run") | .binds == ["review.run"] and (has("requires") | not) and .config.command.argv[1] == "run")
       and (.role[] | select(.name == "review-maintain") | .config.command.argv[1] == "maintain" and (has("requires") | not))
       and (.query[] | select(.name == "agent-workflow-workspace-daily") | .metadata == {schedule_id: "agent-workflow-workspace-daily", lens: "agent-workflow", scope: "workspace", window: "24h"} and .trigger.kind == "calendar" and .trigger.on_missed == "next-slot")

@@ -274,6 +274,68 @@ func TestScheduleGauges(t *testing.T) {
 	}
 }
 
+// addKeyed inserts a terminal scheduled run that carries a run key.
+func addKeyed(t *testing.T, l *ledger.Ledger, lens, schedule, key, state string, windowEnd time.Time, window time.Duration) {
+	t.Helper()
+	err := l.WithTx(ctx, func(tx *ledger.Tx) error {
+		_, err := tx.InsertRun(ctx, ledger.Run{
+			Lens: lens, Scope: "scope-a", ScheduleID: schedule, RunKey: key, Trigger: "scheduled", State: state, PID: 1,
+			WindowFrom: windowEnd.Add(-window).Format(time.RFC3339Nano), WindowTo: windowEnd.Format(time.RFC3339Nano),
+			EndedAt: t0,
+		})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnfiledWindowFraction(t *testing.T) {
+	l := openLedger(t)
+	// collect measures at t0+1h. Window ended 6h before t0 => age 7h.
+	end := t0.Add(-6 * time.Hour)
+	// daily lens: window of 24h, only Skipped rows (a never-Filed lens).
+	addKeyed(t, l, "lens-a", "daily", "a-key", ledger.RunSkipped, end, 24*time.Hour)
+	// weekly schedule of the SAME lens: a Failed latest row, separate series.
+	addKeyed(t, l, "lens-a", "weekly", "w-key", ledger.RunFailed, end, 7*24*time.Hour)
+	// a Skipped row then a Filed row of the same key: 0.
+	addKeyed(t, l, "lens-b", "daily", "b-key", ledger.RunSkipped, end, 24*time.Hour)
+	addKeyed(t, l, "lens-b", "daily", "b-key", ledger.RunFiled, end, 24*time.Hour)
+	// a Filed window, then a later Skipped row for the next window, then Filed: resets to 0.
+	addKeyed(t, l, "lens-c", "daily", "c1", ledger.RunSkipped, end, 24*time.Hour)
+	addKeyed(t, l, "lens-c", "daily", "c2", ledger.RunFiled, end.Add(24*time.Hour), 24*time.Hour)
+	// manual runs never produce a series.
+	addRun(t, l, "lens-m", "scope-a", "", ledger.RunSkipped, end, time.Hour, 0)
+	gs := collect(t, l)
+
+	if g, ok := find(gs, "pg_review_unfiled_window_fraction", "lens", "lens-a", "schedule", "daily"); !ok || g.Value != 7.0/24.0 {
+		t.Errorf("daily skipped: %+v %v", g, ok)
+	}
+	if g, ok := find(gs, "pg_review_unfiled_window_fraction", "lens", "lens-a", "schedule", "weekly"); !ok || g.Value != 7.0/168.0 {
+		t.Errorf("weekly failed: %+v %v", g, ok)
+	}
+	if g, ok := find(gs, "pg_review_unfiled_window_fraction", "lens", "lens-b"); !ok || g.Value != 0 {
+		t.Errorf("filed after skip: %+v %v", g, ok)
+	}
+	if g, ok := find(gs, "pg_review_unfiled_window_fraction", "lens", "lens-c"); !ok || g.Value != 0 {
+		t.Errorf("later window filed: %+v %v", g, ok)
+	}
+	if _, ok := find(gs, "pg_review_last_success_timestamp_seconds", "lens", "lens-a"); ok {
+		t.Error("the never-Filed lens has a last-success series")
+	}
+	if _, ok := find(gs, "pg_review_unfiled_window_fraction", "lens", "lens-m"); ok {
+		t.Error("a manual run produced an unfiled-window series")
+	}
+}
+
+func TestUnfiledWindowFractionOpenWindowIsZero(t *testing.T) {
+	l := openLedger(t)
+	addKeyed(t, l, "lens-a", "daily", "k", ledger.RunSkipped, t0.Add(2*time.Hour), 24*time.Hour)
+	if g, ok := find(collect(t, l), "pg_review_unfiled_window_fraction"); !ok || g.Value != 0 {
+		t.Fatalf("%+v %v", g, ok)
+	}
+}
+
 func TestFiledRunResetsConsecutiveFailures(t *testing.T) {
 	l := openLedger(t)
 	addRun(t, l, "lens-a", "scope-a", "daily", ledger.RunFailed, t0, time.Hour, 0)

@@ -131,8 +131,10 @@ The tool has no router, event or schedule concepts. Recurring reviews run throug
 calls with the item timestamp and the schedule's static metadata. The adapter computes the
 explicit window, builds the run key `<lens>/<scope>/<window>/<window end>`, passes `--run-key`,
 and maps exit codes to router semantics (20 skipped and 9 busy become 0; it never exits 9). The schedule
-entries themselves live in the router configuration, not in `config.toml`. See section 5.10 of
-[docs/design.md](docs/design.md).
+entries themselves live in the router configuration, not in `config.toml`. A scheduled window that
+ended Skipped is re-run hourly by the `review-catchup` role (`pg-review job catch-up [lens]
+[--scope S] [--force]`) until the next slot; `--force` re-runs exactly that window and is what
+clears the `pg-review-window-unfiled` alert. See section 5.10 of [docs/design.md](docs/design.md).
 
 ## Implementation notes
 
