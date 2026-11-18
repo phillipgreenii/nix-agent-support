@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -61,6 +62,10 @@ const (
 	// in MetricIngestFailed and MetricIngestFailedOldestAge too, so the
 	// existing oldest-age alert keeps firing until the entry is cleared.
 	MetricIngestFlagged = "pg_desk_ingest_flagged"
+	// MetricIngestAttemptsMax is the largest number of recorded failures
+	// (attempts) over the failed-ingest entries still being retried (not
+	// flagged), 0 when there are none. One series, no labels.
+	MetricIngestAttemptsMax = "pg_desk_ingest_attempts_max"
 )
 
 // IngestFailedBackend is one backend instance's slice of the failed-ingest
@@ -72,6 +77,10 @@ type IngestFailedBackend struct {
 	Flagged          int64
 	OldestAgeSeconds int64
 }
+
+// IngestAttemptsFunc supplies the largest attempts over the unflagged
+// failed-ingest entries at collect time (0 when there are none).
+type IngestAttemptsFunc func() (int64, error)
 
 // IngestFailedFunc supplies the failed-ingest observation at collect time.
 type IngestFailedFunc func() ([]IngestFailedBackend, error)
@@ -141,6 +150,7 @@ type ChangeFlowOption func(*changeFlowOptions)
 type changeFlowOptions struct {
 	sweepBound   SweepBoundFunc
 	ingestFailed IngestFailedFunc
+	attemptsMax  IngestAttemptsFunc
 	observedAge  OutcomeFunc
 	unflagged    OutcomeFunc
 	watched      WatchedEntitiesFunc
@@ -177,6 +187,14 @@ func WithUnflaggedMembers(fn OutcomeFunc) ChangeFlowOption {
 // read itself.
 func WithIngestFailed(fn IngestFailedFunc) ChangeFlowOption {
 	return func(o *changeFlowOptions) { o.ingestFailed = fn }
+}
+
+// WithIngestAttemptsMax supplies the observation behind
+// MetricIngestAttemptsMax. Without it the metric emits no series. A read error
+// omits the series for that scrape and is logged; the other series are
+// unaffected.
+func WithIngestAttemptsMax(fn IngestAttemptsFunc) ChangeFlowOption {
+	return func(o *changeFlowOptions) { o.attemptsMax = fn }
 }
 
 // WithSweepBound supplies the sizing-bound evaluation behind
@@ -260,6 +278,12 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 		return err
 	}
 
+	ingestAttempts, err := m.Int64ObservableGauge(MetricIngestAttemptsMax,
+		metric.WithDescription("largest number of recorded failures (attempts) over the failed-ingest entries still being retried (not flagged), 0 when there are none; read from the ingest_failed table at scrape time"))
+	if err != nil {
+		return err
+	}
+
 	observedAge, err := m.Int64ObservableGauge(MetricWatchedSourceObservedAge,
 		metric.WithDescription("age in seconds of the oldest successful observation of a watched query of an owning backend instance, read from the feed_observed meta keys at scrape time; 0 while none is recorded"))
 	if err != nil {
@@ -327,6 +351,13 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 				o.ObserveInt64(ingestOldest, r.OldestAgeSeconds, metric.WithAttributes(be))
 			}
 		}
+		if o0.attemptsMax != nil {
+			if n, err := o0.attemptsMax(); err != nil {
+				slog.Error("pg-desk metrics: ingest attempts max unavailable; series omitted", "error", err)
+			} else {
+				o.ObserveInt64(ingestAttempts, n)
+			}
+		}
 		for _, s := range []struct {
 			fn OutcomeFunc
 			g  metric.Int64Observable
@@ -359,7 +390,7 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...Chan
 			))
 		}
 		return nil
-	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestFlagged, ingestOldest, observedAge, unflagged, watchedEntities, oldestOrphan)
+	}, records, hydrations, failures, retries, due, lag, repeated, bound, ingestFailed, ingestFlagged, ingestOldest, ingestAttempts, observedAge, unflagged, watchedEntities, oldestOrphan)
 	return err
 }
 

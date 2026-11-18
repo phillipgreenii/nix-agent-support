@@ -98,6 +98,7 @@ table focus_selection
   index <auto> unique=1 origin=u (focus_period_id,repo,entity_type,entity_id)
 
 table ingest_failed
+  col attempts INTEGER notnull=1 default=1 pk=0
   col entity_id TEXT notnull=1 default=<none> pk=2
   col failure_class TEXT notnull=1 default='' pk=0
   col first_failed_at TEXT notnull=1 default=<none> pk=0

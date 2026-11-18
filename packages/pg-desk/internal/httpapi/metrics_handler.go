@@ -122,6 +122,7 @@ func newMetricsRegistry(ctx context.Context, st *store.Store, cfg *config.Config
 	if err := metrics.RegisterChangeFlow(mp, newBounded("changeflow", flowFn), metrics.WithSweepBound(sweepBound),
 		metrics.WithIngestFailed(newBounded("ingest_failed", metrics.IngestFailedFromStore(ctx, st, cfg.OwningInstances(changes.EntityTypeIssue),
 			func() time.Time { return nowUTC() }))),
+		metrics.WithIngestAttemptsMax(func() (int64, error) { return st.MaxIngestAttempts(ctx) }),
 		metrics.WithWatchedSourceObserved(newBounded("watched_source", metrics.WatchedSourceObservedForConfig(ctx, st, cfg,
 			func() time.Time { return nowUTC() }))),
 		metrics.WithUnflaggedMembers(newBounded("unflagged", metrics.UnflaggedMembersForConfig(ctx, st, cfg))),

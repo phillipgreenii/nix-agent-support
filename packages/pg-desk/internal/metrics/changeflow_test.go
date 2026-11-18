@@ -675,3 +675,93 @@ func TestIngestFlaggedSeriesCountsOnlyFlaggedEntries(t *testing.T) {
 		t.Fatalf("%s{a} = %d, want 2", MetricIngestFailed, count["a"])
 	}
 }
+
+func attemptsMaxPoints(t *testing.T, rm metricdata.ResourceMetrics) []int64 {
+	t.Helper()
+	d, ok := findMetric(t, rm, MetricIngestAttemptsMax).Data.(metricdata.Gauge[int64])
+	if !ok {
+		t.Fatalf("%s is not an int64 gauge", MetricIngestAttemptsMax)
+	}
+	var out []int64
+	for _, p := range d.DataPoints {
+		if p.Attributes.Len() != 0 {
+			t.Fatalf("%s carries labels: %v", MetricIngestAttemptsMax, p.Attributes)
+		}
+		out = append(out, p.Value)
+	}
+	return out
+}
+
+func collectAttempts(t *testing.T, st *store.Store) metricdata.ResourceMetrics {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	flow := func() (changes.Flow, error) { return changes.Flow{Migrated: true}, nil }
+	fn := func() (int64, error) { return st.MaxIngestAttempts(context.Background()) }
+	if err := RegisterChangeFlow(mp, flow, WithIngestAttemptsMax(fn)); err != nil {
+		t.Fatal(err)
+	}
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	return rm
+}
+
+// Repeated ingest attempts for one entry move the measure; flagged entries are
+// excluded and an empty table reads 0.
+func TestIngestAttemptsMaxFollowsRepeatsAndExcludesFlagged(t *testing.T) {
+	ctx := context.Background()
+	st := store.OpenNewSchemaForTest(t)
+	if got := attemptsMaxPoints(t, collectAttempts(t, st)); len(got) != 1 || got[0] != 0 {
+		t.Fatalf("empty = %v, want [0]", got)
+	}
+	rec := func(flagged string) {
+		t.Helper()
+		if err := st.RecordIngestFailure(ctx, store.IngestFailure{Instance: "a", EntityID: "X-1", Seq: 1, FirstFailedAt: "2026-10-01T00:00:00Z", FlaggedAt: flagged}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec("")
+	if got := attemptsMaxPoints(t, collectAttempts(t, st)); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("first = %v, want [1]", got)
+	}
+	rec("")
+	rec("")
+	if got := attemptsMaxPoints(t, collectAttempts(t, st)); len(got) != 1 || got[0] != 3 {
+		t.Fatalf("after repeats = %v, want [3]", got)
+	}
+	rec("2026-10-01T01:00:00Z") // becomes flagged
+	if got := attemptsMaxPoints(t, collectAttempts(t, st)); len(got) != 1 || got[0] != 0 {
+		t.Fatalf("flagged only = %v, want [0]", got)
+	}
+}
+
+// A failing attempts query omits only its own series and the scrape succeeds.
+func TestIngestAttemptsMaxErrorOmitsSeriesOnly(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	flow := func() (changes.Flow, error) { return changes.Flow{Migrated: true}, nil }
+	ing := func() ([]IngestFailedBackend, error) { return []IngestFailedBackend{{Backend: "a", Count: 2}}, nil }
+	bad := func() (int64, error) { return 0, errors.New("boom") }
+	if err := RegisterChangeFlow(mp, flow, WithIngestFailed(ing), WithIngestAttemptsMax(bad)); err != nil {
+		t.Fatal(err)
+	}
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("scrape failed: %v", err)
+	}
+	count, _ := ingestPoints(t, rm)
+	if count["a"] != 2 {
+		t.Fatalf("other series lost: %v", count)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == MetricIngestAttemptsMax {
+				if d, ok := m.Data.(metricdata.Gauge[int64]); ok && len(d.DataPoints) > 0 {
+					t.Fatalf("series present despite error: %+v", d.DataPoints)
+				}
+			}
+		}
+	}
+}

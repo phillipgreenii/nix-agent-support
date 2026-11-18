@@ -26,13 +26,19 @@ type IngestFailure struct {
 	// FlaggedAt is an RFC3339 time: set once the failure's class is permanent,
 	// after which the entry is no longer retried; "" while it is retryable.
 	FlaggedAt string
+	// Attempts is the number of recorded failures of this entry: 1 on the
+	// first record, plus one on each repeat of the same (Instance, EntityID,
+	// Seq). Set by the store; the value passed to RecordIngestFailure is
+	// ignored.
+	Attempts int
 }
 
 // Flagged reports whether the entry is flagged (permanent, not retried).
 func (f IngestFailure) Flagged() bool { return f.FlaggedAt != "" }
 
 // RecordIngestFailure records f. A repeat of the same (Instance, EntityID,
-// Seq) updates LastError and FailureClass, keeps FirstFailedAt, and sets
+// Seq) updates LastError and FailureClass, raises Attempts by one, keeps
+// FirstFailedAt, and sets
 // FlaggedAt only when the entry is not flagged yet. An empty
 // FirstFailedAt on a first record is stamped with the current UTC time.
 func (s *Store) RecordIngestFailure(ctx context.Context, f IngestFailure) error {
@@ -51,11 +57,12 @@ func (s *Store) RecordIngestFailure(ctx context.Context, f IngestFailure) error 
 	if _, err := s.sql.ExecContext(
 		ctx,
 		`INSERT INTO ingest_failed
-		   (instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, failure_class, flagged_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   (instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, failure_class, flagged_at, attempts)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 		 ON CONFLICT (instance, entity_id, seq) DO UPDATE SET
 		   last_error = excluded.last_error,
 		   failure_class = excluded.failure_class,
+		   attempts = ingest_failed.attempts + 1,
 		   flagged_at = CASE WHEN ingest_failed.flagged_at = '' THEN excluded.flagged_at ELSE ingest_failed.flagged_at END`,
 		f.Instance, f.EntityID, f.Seq, f.StoreIdentity, string(kindsJSON), first, f.LastError, f.FailureClass, f.FlaggedAt,
 	); err != nil {
@@ -87,14 +94,17 @@ func (s *Store) ListIngestFailures(ctx context.Context, instance string) ([]Inge
 		return nil, err
 	}
 	// A store opened read-only that predates the added columns reads them as "".
-	class, flagged := `''`, `''`
+	class, flagged, attempts := `''`, `''`, `1`
 	if cols["failure_class"] {
 		class = "failure_class"
 	}
 	if cols["flagged_at"] {
 		flagged = "flagged_at"
 	}
-	q := `SELECT instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, ` + class + `, ` + flagged + ` FROM ingest_failed`
+	if cols["attempts"] {
+		attempts = "attempts"
+	}
+	q := `SELECT instance, entity_id, seq, store_identity, kinds, first_failed_at, last_error, ` + class + `, ` + flagged + `, ` + attempts + ` FROM ingest_failed`
 	var args []any
 	if instance != "" {
 		q += ` WHERE instance = ?`
@@ -110,7 +120,7 @@ func (s *Store) ListIngestFailures(ctx context.Context, instance string) ([]Inge
 	for rows.Next() {
 		var f IngestFailure
 		var kinds string
-		if err := rows.Scan(&f.Instance, &f.EntityID, &f.Seq, &f.StoreIdentity, &kinds, &f.FirstFailedAt, &f.LastError, &f.FailureClass, &f.FlaggedAt); err != nil {
+		if err := rows.Scan(&f.Instance, &f.EntityID, &f.Seq, &f.StoreIdentity, &kinds, &f.FirstFailedAt, &f.LastError, &f.FailureClass, &f.FlaggedAt, &f.Attempts); err != nil {
 			return nil, fmt.Errorf("store: scan ingest failure: %w", err)
 		}
 		if err := json.Unmarshal([]byte(kinds), &f.Kinds); err != nil {
@@ -187,6 +197,29 @@ func (s *Store) OldestIngestFailureAt(ctx context.Context) (at time.Time, ok boo
 		return time.Time{}, false, fmt.Errorf("store: oldest ingest failure: %w", err)
 	}
 	return at, ok, nil
+}
+
+// MaxIngestAttempts returns the largest Attempts over the entries still being
+// retried (FlaggedAt not set), 0 when there are none. A store without the
+// table, or one opened read-only that predates the attempts column, reads 0 or
+// 1 (an entry that predates the column is 1 attempt).
+func (s *Store) MaxIngestAttempts(ctx context.Context) (int64, error) {
+	cols, err := s.tableColumns(ctx, "ingest_failed")
+	if err != nil || len(cols) == 0 {
+		return 0, err
+	}
+	attempts, where := `1`, ``
+	if cols["attempts"] {
+		attempts = "attempts"
+	}
+	if cols["flagged_at"] {
+		where = ` WHERE flagged_at = ''`
+	}
+	var n sql.NullInt64
+	if err := s.sql.QueryRowContext(ctx, `SELECT MAX(`+attempts+`) FROM ingest_failed`+where).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: max ingest attempts: %w", err)
+	}
+	return n.Int64, nil
 }
 
 // CountIngestFailures returns the number of entries of instance ("" = every

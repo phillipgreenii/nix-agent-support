@@ -39,10 +39,13 @@ const ingestFailedDDL = `CREATE TABLE IF NOT EXISTS ingest_failed (
 
 // ingestFailedAddedColumns are the ingest_failed columns added after the
 // table first shipped: failure_class is the typed class of the last failure
-// and flagged_at the time the entry became flagged ("" = not flagged).
+// flagged_at the time the entry became flagged ("" = not flagged), and
+// attempts the number of recorded failures of the entry (rows that predate
+// the column read as 1).
 var ingestFailedAddedColumns = []struct{ name, decl string }{
 	{"failure_class", "TEXT NOT NULL DEFAULT ''"},
 	{"flagged_at", "TEXT NOT NULL DEFAULT ''"},
+	{"attempts", "INTEGER NOT NULL DEFAULT 1"},
 }
 
 // ensureIssueFeedStorage adds the owning-backend issue flow's storage: the

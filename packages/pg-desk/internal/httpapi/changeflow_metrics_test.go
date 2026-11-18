@@ -172,7 +172,7 @@ func TestMetricsExposeTheFailedIngestSeriesFromTheTable(t *testing.T) {
 		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
 	})
 	body := scrape(t, s)
-	for _, want := range []string{`pg_desk_ingest_failed{backend=""} 0`, `pg_desk_ingest_failed_oldest_age_seconds{backend=""} 0`} {
+	for _, want := range []string{`pg_desk_ingest_failed{backend=""} 0`, `pg_desk_ingest_failed_oldest_age_seconds{backend=""} 0`, "pg_desk_ingest_attempts_max 0\n"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("an empty table: body missing %q; full body:\n%s", want, body)
 		}
@@ -187,10 +187,21 @@ func TestMetricsExposeTheFailedIngestSeriesFromTheTable(t *testing.T) {
 	for _, want := range []string{
 		`pg_desk_ingest_failed{backend="jira-a"} 1`,
 		`pg_desk_ingest_failed_oldest_age_seconds{backend="jira-a"} 3600`,
+		"pg_desk_ingest_attempts_max 1\n",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q; full body:\n%s", want, body)
 		}
+	}
+	// A repeat of the same entry moves the measure.
+	if err := s.RecordIngestFailure(context.Background(), store.IngestFailure{
+		Instance: "jira-a", EntityID: "PROJ-1", Seq: 3, StoreIdentity: "s1",
+		FirstFailedAt: "2026-10-01T11:00:00Z", LastError: "boom again",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if body = scrape(t, s); !strings.Contains(body, "pg_desk_ingest_attempts_max 2\n") {
+		t.Errorf("a repeat did not move the measure; full body:\n%s", body)
 	}
 
 	old := store.OpenRetiredSchemaForTest(t)

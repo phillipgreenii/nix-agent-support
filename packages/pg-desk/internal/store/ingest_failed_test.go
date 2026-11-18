@@ -30,6 +30,7 @@ func TestIngestFailed_RecordIsIdempotentPerKey(t *testing.T) {
 	}
 	want := f
 	want.LastError = "second"
+	want.Attempts = 2
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("entry = %+v, want %+v (LastError updated, everything else kept)", got[0], want)
 	}
@@ -183,6 +184,7 @@ func TestIngestFailedLegacyTableGainsFlagColumns(t *testing.T) {
 	for _, stmt := range []string{
 		`ALTER TABLE ingest_failed DROP COLUMN failure_class`,
 		`ALTER TABLE ingest_failed DROP COLUMN flagged_at`,
+		`ALTER TABLE ingest_failed DROP COLUMN attempts`,
 		`INSERT INTO ingest_failed (instance, entity_id, seq, first_failed_at) VALUES ('b','i-1',1,'2026-11-10T09:00:00Z')`,
 	} {
 		if _, err := s.sql.ExecContext(context.Background(), stmt); err != nil {
@@ -196,7 +198,54 @@ func TestIngestFailedLegacyTableGainsFlagColumns(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 	got, err := s.ListIngestFailures(context.Background(), "")
-	if err != nil || len(got) != 1 || got[0].Flagged() || got[0].FailureClass != "" {
+	if err != nil || len(got) != 1 || got[0].Flagged() || got[0].FailureClass != "" || got[0].Attempts != 1 {
 		t.Fatalf("list = %+v, %v", got, err)
+	}
+}
+
+// Each repeat of the same (instance, entity, seq) raises attempts by one; the
+// maximum covers unflagged entries only and is 0 when none is held.
+func TestIngestFailedAttemptsCountRepeatsAndMaxExcludesFlagged(t *testing.T) {
+	ctx := context.Background()
+	s := OpenNewSchemaForTest(t)
+	if n, err := s.MaxIngestAttempts(ctx); err != nil || n != 0 {
+		t.Fatalf("empty max = %d, %v; want 0", n, err)
+	}
+	rec := func(entity string, seq int64, flagged string) {
+		t.Helper()
+		if err := s.RecordIngestFailure(ctx, IngestFailure{Instance: "b", EntityID: entity, Seq: seq, FirstFailedAt: "2026-11-10T09:00:00Z", FlaggedAt: flagged}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec("i-1", 1, "")
+	if n, _ := s.MaxIngestAttempts(ctx); n != 1 {
+		t.Fatalf("first record max = %d, want 1", n)
+	}
+	rec("i-1", 1, "")
+	rec("i-1", 1, "")
+	rec("i-2", 2, "")
+	if n, _ := s.MaxIngestAttempts(ctx); n != 3 {
+		t.Fatalf("max = %d, want 3", n)
+	}
+	// A flagged entry with more attempts is excluded.
+	for i := 0; i < 5; i++ {
+		rec("i-3", 3, "2026-11-10T10:00:00Z")
+	}
+	if n, _ := s.MaxIngestAttempts(ctx); n != 3 {
+		t.Fatalf("max with flagged = %d, want 3 (flagged excluded)", n)
+	}
+	got, _ := s.ListIngestFailures(ctx, "b")
+	by := map[string]int{}
+	for _, f := range got {
+		by[f.EntityID] = f.Attempts
+	}
+	if by["i-1"] != 3 || by["i-2"] != 1 || by["i-3"] != 5 {
+		t.Fatalf("attempts = %v", by)
+	}
+	if err := s.ClearIngestFailure(ctx, "b", "i-1", 1); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.MaxIngestAttempts(ctx); n != 1 {
+		t.Fatalf("max after clear = %d, want 1", n)
 	}
 }
