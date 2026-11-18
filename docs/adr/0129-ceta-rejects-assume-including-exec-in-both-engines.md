@@ -19,8 +19,11 @@ environment the operator assumed. Two holes let an agent perform the assume itse
 
 ## Operator rulings (Phillip, 2026-11-17, verbatim)
 
+Verbatim except one bracketed edit: the name of a consumer-specific production database tool is
+replaced with a description, because this repository is public.
+
 - "yes reject assume --exec like assume."
-- "CETA will not ask for proddb. in general, as long as assume isn't allowed to be called by the
+- "CETA will not ask for [a production database tool]. in general, as long as assume isn't allowed to be called by the
   agent, then it would only be able to access prod systems if it was run in an assumed environment
   which is only possible if i have explicitly done so. so, the block/ask is not on using prod tools or
   accessing prod systems, but on the initial auth/envar setup to allow the access."
