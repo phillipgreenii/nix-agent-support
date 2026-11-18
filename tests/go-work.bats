@@ -73,3 +73,42 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"nothing to vet"* ]]
 }
+
+# A module requiring a dependency served by a file:// GOPROXY: the workspace
+# needs a go.work.sum entry for it, which go appends when it is missing.
+make_dep_fixture() {
+  PROXY="$BATS_TEST_TMPDIR/proxy"
+  local v="$PROXY/example.org/dep/@v" src="$BATS_TEST_TMPDIR/depsrc/example.org/dep@v1.0.0"
+  mkdir -p "$v" "$src"
+  printf 'module example.org/dep\n\ngo 1.21\n' >"$src/go.mod"
+  printf 'package dep\n\nfunc V() int { return 9 }\n' >"$src/dep.go"
+  cp "$src/go.mod" "$v/v1.0.0.mod"
+  printf '{"Version":"v1.0.0","Time":"2020-01-01T00:00:00Z"}\n' >"$v/v1.0.0.info"
+  (cd "$BATS_TEST_TMPDIR/depsrc" && zip -qrD "$v/v1.0.0.zip" example.org/dep@v1.0.0)
+  printf 'module example.com/other\n\ngo 1.21\n\nrequire example.org/dep v1.0.0\n' >"$ROOT/packages/other/go.mod"
+  printf 'package other\n\nimport "example.org/dep"\n\nfunc V() int { return dep.V() }\n' >"$ROOT/packages/other/other.go"
+  export GOPROXY="file://$PROXY" GONOSUMDB='*' GONOSUMCHECK=1 GOFLAGS="-mod=mod -modcacherw" GOSUMDB=off
+  (cd "$ROOT/packages/other" && GOWORK=off go mod tidy)
+}
+
+@test "go-work-vet fails and restores go.work.sum when the committed sums are incomplete" {
+  make_dep_fixture
+  rm -f "$ROOT/packages/other/go.sum"
+  : >"$ROOT/go.work.sum"
+  run bash "$VET" --root "$ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"go.work.sum is incomplete"* ]]
+  [ ! -s "$ROOT/go.work.sum" ]
+}
+
+@test "go-work-vet passes when go.work.sum is complete and leaves it unchanged" {
+  make_dep_fixture
+  rm -f "$ROOT/packages/other/go.sum"
+  # seed the sums the way an editor would, then the vet must leave them alone
+  (cd "$ROOT/packages/other" && GOFLAGS="-modcacherw" GOWORK="$ROOT/go.work" go vet ./... >/dev/null 2>&1)
+  cp "$ROOT/go.work.sum" "$BATS_TEST_TMPDIR/sum.before"
+  run bash "$VET" --root "$ROOT"
+  [ "$status" -eq 0 ]
+  run cmp "$ROOT/go.work.sum" "$BATS_TEST_TMPDIR/sum.before"
+  [ "$status" -eq 0 ]
+}

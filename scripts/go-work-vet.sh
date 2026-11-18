@@ -70,6 +70,18 @@ flags="$(printf '%s' "${flags}" | sed -E 's/(^| )-mod=[^ ]*//g')"
 export GOFLAGS="${flags}"
 export GOWORK="${root}/go.work"
 
+# go.work.sum snapshot: go (and gopls) append missing sums to it when the workspace
+# is active, which dirties the tracked file. Detect that here instead of letting a
+# later editor run rewrite it in the canonical clone.
+sumfile="${root}/go.work.sum"
+sum_before="$(mktemp)"
+trap 'rm -f "${sum_before}"' EXIT
+sum_existed=0
+if [ -f "${sumfile}" ]; then
+  sum_existed=1
+  cp -f "${sumfile}" "${sum_before}"
+fi
+
 failed=()
 for m in $(printf '%s\n' "${!pick[@]}" | LC_ALL=C sort); do
   echo "go-work-vet: go vet ./... in packages/${m}" >&2
@@ -79,6 +91,16 @@ for m in $(printf '%s\n' "${!pick[@]}" | LC_ALL=C sort); do
 done
 if [ "${#failed[@]}" -gt 0 ]; then
   echo "FAIL: go-work-vet found type errors in: ${failed[*]}" >&2
+  exit 1
+fi
+if [ "${sum_existed}" -eq 1 ] && ! cmp -s "${sum_before}" "${sumfile}"; then
+  cp -f "${sum_before}" "${sumfile}"
+  echo "FAIL: go.work.sum is incomplete: go wanted new sums. Run 'go work sync' (or this vet with GOFLAGS=-mod=mod) in a worktree and commit go.work.sum." >&2
+  exit 1
+fi
+if [ "${sum_existed}" -eq 0 ] && [ -f "${sumfile}" ]; then
+  rm -f "${sumfile}"
+  echo "FAIL: go.work.sum did not exist and go created it: run 'go work sync' and commit go.work.sum." >&2
   exit 1
 fi
 echo "OK: go-work-vet passed over ${#pick[@]} module(s)."
