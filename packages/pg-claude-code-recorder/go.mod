@@ -8,11 +8,12 @@ require (
 	github.com/phillipgreenii/x v0.0.0-20261114222359-65f23cfd8d2d
 	github.com/sasha-s/go-deadlock v0.3.9
 	go.uber.org/goleak v1.3.0
-	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.61.1
 	pgregory.net/rapid v1.3.0
 )
+
+require golang.org/x/sync v0.24.0 // indirect
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
