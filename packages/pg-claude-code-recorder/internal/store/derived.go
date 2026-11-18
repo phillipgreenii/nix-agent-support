@@ -199,6 +199,23 @@ func (s *Store) WithWrite(point string, fn func(tx *sql.Tx) error) (err error) {
 func (s *Store) WithWriteCtx(ctx context.Context, point string, fn func(tx *sql.Tx) error) (err error) {
 	s.lockWrite()
 	defer s.mu.Unlock()
+	return s.withWriteLocked(ctx, point, fn)
+}
+
+// WithWriteStop is WithWrite whose wait for the write lock ends once stop
+// closes: it then returns ErrWriteStopped without running fn. Once the lock is
+// held the transaction runs to its commit or rollback as WithWrite does, so a
+// stop never leaves a half-written transaction. A nil stop never fires.
+func (s *Store) WithWriteStop(stop <-chan struct{}, point string, fn func(tx *sql.Tx) error) error {
+	if err := s.lockWriteStop(stop); err != nil {
+		return err
+	}
+	defer s.mu.Unlock()
+	return s.withWriteLocked(context.Background(), point, fn)
+}
+
+// withWriteLocked is the body of WithWriteCtx; the caller holds the write lock.
+func (s *Store) withWriteLocked(ctx context.Context, point string, fn func(tx *sql.Tx) error) (err error) {
 	if s.batching {
 		return s.bulkWriteLocked(ctx, point, fn)
 	}

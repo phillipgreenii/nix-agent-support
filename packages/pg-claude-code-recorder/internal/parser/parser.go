@@ -489,6 +489,9 @@ func (p *Parser) parseStored(files []store.File, first error, stop <-chan struct
 	}()
 	total := 0
 	for _, f := range files {
+		if stopped(stop) {
+			return total, ErrParseStopped
+		}
 		id := f.ID
 		src, ok := p.bySrc[f.Source]
 		if ok && f.Mode == "snapshot" {
@@ -682,7 +685,10 @@ func (p *Parser) runBatches(work []*genWork, stop <-chan struct{}) (int, error) 
 			}
 			return p.mark(tx)
 		}
-		if err := p.cfg.Store.WithWrite("parse.before-commit", fn); err != nil {
+		if err := p.cfg.Store.WithWriteStop(stop, "parse.before-commit", fn); err != nil {
+			if errors.Is(err, store.ErrWriteStopped) {
+				return total, ErrParseStopped
+			}
 			return total, err
 		}
 		if err := p.cfg.Store.BulkAdd(cnt, bytes); err != nil {

@@ -1118,6 +1118,53 @@ func (s *Store) lockWrite() {
 	s.obs.Reg.Observe(obs.MStoreWriteLockWait, now().Sub(start).Seconds())
 }
 
+// ErrWriteStopped is what WithWriteStop returns when stop closed before the
+// write lock was taken; the function never ran and nothing was written.
+var ErrWriteStopped = errors.New("store write: stopped while waiting for the write lock")
+
+// lockWriteStop is lockWrite that gives up once stop closes. A nil stop never
+// fires. A waiter that gives up leaves a helper that takes the lock when its
+// turn comes and releases it at once, so the abandoned wait costs the holders
+// nothing more than a queue slot.
+func (s *Store) lockWriteStop(stop <-chan struct{}) error {
+	if s.mu.TryLock() {
+		return nil
+	}
+	if stop == nil {
+		s.lockWrite()
+		return nil
+	}
+	select {
+	case <-stop:
+		return ErrWriteStopped
+	default:
+	}
+	now := s.waitNow
+	if now == nil {
+		now = time.Now
+	}
+	start := now()
+	if s.onContended != nil {
+		s.onContended()
+	}
+	got := make(chan struct{})
+	go func() {
+		s.mu.Lock()
+		close(got)
+	}()
+	select {
+	case <-got:
+		s.obs.Reg.Observe(obs.MStoreWriteLockWait, now().Sub(start).Seconds())
+		return nil
+	case <-stop:
+		go func() {
+			<-got
+			s.mu.Unlock()
+		}()
+		return ErrWriteStopped
+	}
+}
+
 func (s *Store) commit(ctx context.Context, full bool, recs []*Rec) error {
 	s.lockWrite()
 	defer s.mu.Unlock()

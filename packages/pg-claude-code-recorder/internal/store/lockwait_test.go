@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,5 +46,42 @@ func TestStoreWriteLockWaitIsObservedBeforeAcquiring(t *testing.T) {
 	h := o.Reg.Hist(obs.MStoreWriteLockWait)
 	if h == nil || h.Samples != 1 || h.Sum != 1 {
 		t.Fatalf("store_write_lock_wait_seconds = %+v, want 1 sample of 1 s", h)
+	}
+}
+
+// A write queued behind a held lock gives up when stop closes, never runs its
+// function, and does not keep the lock from the next writer.
+func TestWithWriteStopGivesUpWhileQueued(t *testing.T) {
+	s, err := Open(t.TempDir(), Options{Obs: obs.New(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	s.mu.Lock()
+	stop := make(chan struct{})
+	queued := make(chan struct{})
+	s.onContended = func() { close(queued) }
+	ran := false
+	done := make(chan error, 1)
+	go func() {
+		done <- s.WithWriteStop(stop, "", func(*sql.Tx) error { ran = true; return nil })
+	}()
+	<-queued
+	close(stop)
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrWriteStopped) {
+			t.Fatalf("err = %v, want ErrWriteStopped", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("still queued one second after stop closed")
+	}
+	s.mu.Unlock()
+	if ran {
+		t.Fatal("the function ran after stop")
+	}
+	// The abandoned waiter must release the lock it takes late.
+	if err := s.WithWrite("", func(*sql.Tx) error { return nil }); err != nil {
+		t.Fatal(err)
 	}
 }
