@@ -3,6 +3,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Every Go step resolves a module through its own go.mod, never the root go.work
+# (which is for the editor and go-work-vet only), so `go get -u` and the
+# regenerated gomod2nix.toml see only that module's dependency graph.
+export GOWORK=off
 WORKSPACE_ROOT="${SCRIPT_DIR}/.."
 
 # Every Go module in this repo is identified by a committed gomod2nix.toml beside

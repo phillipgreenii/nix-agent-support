@@ -85,6 +85,26 @@ if [ -z "${pinned}" ] || [ "${pinned}" != "${locked}" ]; then
   problems+=("update-gomod2nix-deps.sh GOMOD2NIX_REV (${pinned:-<none>}) != flake.lock gomod2nix rev (${locked:-<none>})")
 fi
 
+# Every committed gomod2nix.toml must describe only its own module's dependency
+# graph (scripts/check-gomod2nix-cache-scope.sh): a toml generated with a go.work
+# in effect breaks go-cache-env. Exit 3 is findings; anything else means the
+# check itself could not run, which must not pass silently.
+scope_rc=0
+scope_err="$(bash "$(dirname "${BASH_SOURCE[0]}")/check-gomod2nix-cache-scope.sh" "${root}" 2>&1 >/dev/null)" || scope_rc=$?
+case "${scope_rc}" in
+0) ;;
+3)
+  while IFS= read -r line; do
+    case "${line}" in
+    "  - "*) problems+=("${line#  - }") ;;
+    esac
+  done <<<"${scope_err}"
+  ;;
+*)
+  problems+=("gomod2nix.toml scope check could not run (exit ${scope_rc}): ${scope_err}")
+  ;;
+esac
+
 if [ "${#problems[@]}" -gt 0 ]; then
   echo "FAIL: Go dependency refresh is not fully wired (${#problems[@]} problem(s)):" >&2
   printf '  - %s\n' "${problems[@]}" >&2

@@ -2580,6 +2580,7 @@
                       ./update-locks.sh
                       ./flake.lock
                       ./scripts/check-go-deps-wired.sh
+                      ./scripts/check-gomod2nix-cache-scope.sh
                       ./scripts/check-go-lint-wired.sh
                       ./scripts/go-lint-exempt.txt
                       (lib.fileset.fileFilter (
@@ -2587,6 +2588,7 @@
                         builtins.elem file.name [
                           "gomod2nix.toml"
                           "go.mod"
+                          "go.sum"
                           "update-deps.sh"
                           "update-gomod2nix-deps.sh"
                         ]
@@ -2621,6 +2623,7 @@
                         fileset = lib.fileset.unions [
                           ./flake.lock
                           ./scripts/check-go-deps-wired.sh
+                          ./scripts/check-gomod2nix-cache-scope.sh
                           ./packages/update-gomod2nix-deps.sh
                           ./tests/check-go-deps-wired.bats
                         ];

@@ -35,6 +35,14 @@ FLAKE_ROOT="$(cd "${PKG_DIR}/../.." && pwd)"
 # Devbox may export GOEXPERIMENT from its Go; clear so Nix-managed Go isn't confused.
 unset GOEXPERIMENT
 
+# Resolve this module through its OWN go.mod, as every nix build and hook does.
+# The repository-root go.work (for the editor and go-work-vet) would otherwise
+# put the whole workspace in gomod2nix's `all` scope, so the regenerated toml
+# would list other modules' packages in cachePackages and break go-cache-env.
+export GOWORK=off
+
+SCOPE_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/check-gomod2nix-cache-scope.sh"
+
 # Refuse to generate with a gomod2nix that differs from the locked builder.
 LOCKED_REV="$(jq -r '.nodes[.nodes.root.inputs.gomod2nix].locked.rev // empty' "${FLAKE_ROOT}/flake.lock")"
 if [ "${LOCKED_REV}" != "${GOMOD2NIX_REV}" ]; then
@@ -63,6 +71,21 @@ fi
 echo ""
 echo "==> Regenerating gomod2nix.toml (--with-deps, gomod2nix ${GOMOD2NIX_REV})..."
 nix run "github:nix-community/gomod2nix/${GOMOD2NIX_REV}" -- generate --with-deps
+
+# Gate the regenerated toml for EVERY module, library modules included (they
+# have no package build below to catch a bad toml), before anything commits it.
+echo ""
+echo "==> Checking gomod2nix.toml scope (module ${PKG_NAME})..."
+scope_rc=0
+bash "${SCOPE_CHECK}" "${FLAKE_ROOT}" "${PKG_NAME}" || scope_rc=$?
+if [ "${scope_rc}" -eq 3 ]; then
+  echo "" >&2
+  echo "✗ Regenerated gomod2nix.toml for '${PKG_NAME}' lists entries outside the module's own dependency graph (see above)." >&2
+  exit 3
+elif [ "${scope_rc}" -ne 0 ]; then
+  echo "✗ gomod2nix.toml scope check could not run for '${PKG_NAME}' (exit ${scope_rc})." >&2
+  exit 1
+fi
 
 # Library modules (e.g. claude-transcript) have no flake package attr, so there
 # is nothing to `nix build`; skip the verify step for them.

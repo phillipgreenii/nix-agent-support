@@ -66,3 +66,121 @@ mod() {
   [ "$status" -eq 1 ]
   [[ "$stderr" == *"beta: packages/beta/go.mod has no go directive"* ]]
 }
+
+# --- gomod2nix.toml scope (scripts/check-gomod2nix-cache-scope.sh) -----------
+# A toml generated while a root go.work was in effect lists other workspace
+# modules' packages in cachePackages and their dependencies under [mod]. The
+# builder drops only LOCAL-REPLACE modules from the cache roots, so any other
+# first-party entry breaks go-cache-env. These cases run the REAL scope script.
+
+SCOPE="$BATS_TEST_DIRNAME/../scripts/check-gomod2nix-cache-scope.sh"
+
+# toml <module> <cache entries...>: write a gomod2nix-layout toml
+toml() {
+  local m="$1" e
+  shift
+  {
+    printf 'schema = 3\n'
+    if [ "$#" -gt 0 ]; then
+      printf 'cachePackages = [\n'
+      for e in "$@"; do printf "  '%s',\n" "$e"; done
+      printf ']\n'
+    fi
+    printf '\n[mod]\n'
+  } >"$ROOT/packages/$m/gomod2nix.toml"
+}
+
+@test "scope: the module's own package in cachePackages fails" {
+  toml alpha 'example.com/alpha/internal/x'
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"alpha: cachePackages entry example.com/alpha/internal/x belongs to workspace module example.com/alpha"* ]]
+}
+
+@test "scope: a sibling that go.mod does not replace fails and names module and entry" {
+  toml alpha 'example.com/beta/cmd/beta'
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"alpha: cachePackages entry example.com/beta/cmd/beta belongs to workspace module example.com/beta"* ]]
+  [[ "$stderr" == *"GOWORK=off"* ]]
+}
+
+@test "scope: a sibling replaced in a replace block passes" {
+  printf 'module example.com/alpha\n\ngo 1.26.8\n\nreplace (\n\texample.com/beta => ../beta\n)\n' >"$ROOT/packages/alpha/go.mod"
+  toml alpha 'example.com/beta' 'example.com/beta/sub'
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "scope: single-line versioned and ./ replaces pass" {
+  mod gamma "go 1.26.8"
+  printf 'module example.com/alpha\n\ngo 1.26.8\n\nreplace example.com/beta v0.0.0 => ../beta\nreplace example.com/gamma => ./../gamma\n' >"$ROOT/packages/alpha/go.mod"
+  toml alpha 'example.com/beta/x' 'example.com/gamma/y'
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "scope: a prose comment mentioning a replace does not count as one" {
+  printf 'module example.com/alpha\n\ngo 1.26.8\n\n// the same "local replace => ../beta" pattern\n' >"$ROOT/packages/alpha/go.mod"
+  toml alpha 'example.com/beta/x'
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 3 ]
+}
+
+@test "scope: a replace target is not a prefix match for a longer module name" {
+  mod beta-handlers "go 1.26.8"
+  printf 'module example.com/alpha\n\ngo 1.26.8\n\nreplace example.com/beta => ../beta\n' >"$ROOT/packages/alpha/go.mod"
+  toml alpha 'example.com/beta-handlers/x'
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"belongs to workspace module example.com/beta-handlers"* ]]
+}
+
+@test "scope: third-party and non-workspace first-party entries pass" {
+  toml alpha 'github.com/BurntSushi/toml' 'example.com/x/cmdrun' 'example.com/alphabet/y'
+  printf 'github.com/BurntSushi/toml v1.0.0 h1:x=\nexample.com/x v0.1.0 h1:y=\n' >"$ROOT/packages/alpha/go.sum"
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "scope: a [mod] entry missing from go.sum fails; one present passes" {
+  toml alpha
+  printf "\n  [mod.'github.com/BurntSushi/toml']\n    version = 'v1.0.0'\n  [mod.'cel.dev/expr']\n    version = 'v0.1.0'\n" >>"$ROOT/packages/alpha/gomod2nix.toml"
+  printf 'github.com/BurntSushi/toml v1.0.0 h1:x=\ngithub.com/BurntSushi/toml v1.0.0/go.mod h1:y=\n' >"$ROOT/packages/alpha/go.sum"
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"alpha: [mod] entry cel.dev/expr is not in go.sum"* ]]
+  [[ "$stderr" != *"[mod] entry github.com/BurntSushi/toml"* ]]
+}
+
+@test "scope: naming one module checks only that module" {
+  toml beta 'example.com/alpha/x'
+  run --separate-stderr bash "$SCOPE" "$ROOT" alpha
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK: 1 module"* ]]
+}
+
+@test "scope: an unknown module name is a usage error" {
+  run --separate-stderr bash "$SCOPE" "$ROOT" nosuch
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"nosuch"* ]]
+}
+
+@test "scope: a root with no Go modules fails loudly" {
+  run --separate-stderr bash "$SCOPE" "$BATS_TEST_TMPDIR/empty"
+  [ "$status" -eq 2 ]
+}
+
+@test "go-deps-wired reports scope findings as problems" {
+  toml alpha 'example.com/beta/cmd/beta'
+  run --separate-stderr bash "$SCRIPT" "$ROOT" 1.26.8
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"alpha: cachePackages entry example.com/beta/cmd/beta belongs to workspace module example.com/beta"* ]]
+}
+
+@test "go-deps-wired fails hard when the scope check cannot run" {
+  printf 'go 1.26.8\n' >"$ROOT/packages/beta/go.mod"
+  run --separate-stderr bash "$SCRIPT" "$ROOT" 1.26.8
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"gomod2nix.toml scope check could not run"* ]]
+}

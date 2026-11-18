@@ -2,7 +2,8 @@
 # Generate the repository-root go.work from the Go modules under packages/.
 #
 # go.work exists for the editor and for the cross-module vet (go-work-vet) only.
-# Nix builds and hook runs set GOWORK=off, so a build still resolves each module
+# Nix builds, hook runs and the dependency updater (update-locks.sh,
+# packages/update-gomod2nix-deps.sh) set GOWORK=off, so each module still resolves
 # through its own go.mod (the replace lines there stay the build's truth).
 #
 # Usage:

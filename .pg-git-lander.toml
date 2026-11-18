@@ -64,12 +64,13 @@ nix flake lock
 ''']
 
 # go.sum: regenerated from go.mod. Must come before the gomod2nix.toml rule.
-# During a rebase git's "ours" is the side being replayed onto.
+# During a rebase git's "ours" is the side being replayed onto. GOWORK=off: the
+# module resolves through its own go.mod, not the repository-root go.work.
 [[conflict]]
 glob    = "packages/*/go.sum"
 run_per = "dir"
-resolve = ["sh", "-c", "git checkout --ours -- go.sum && go mod tidy"]
-verify  = ["go", "mod", "verify"]
+resolve = ["sh", "-c", "git checkout --ours -- go.sum && GOWORK=off go mod tidy"]
+verify  = ["env", "GOWORK=off", "go", "mod", "verify"]
 
 # gomod2nix.toml: regenerated from go.mod and go.sum by each package's update-deps.sh.
 # The relative command path is accepted only because the repo is trusted.

@@ -33,6 +33,17 @@ resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Autho
 A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
 reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
 
+**Regenerate with `GOWORK=off`, and the toml scope check.** The root `go.work` is for the editor and
+`go-work-vet` only. `update-gomod2nix-deps.sh` and `update-locks.sh` export `GOWORK=off`: under the
+workspace, `gomod2nix generate --with-deps` walks every module's `all` scope and writes other modules'
+packages into `cachePackages`, which breaks the `go-cache-env` build ("import lookup disabled by
+-mod=vendor"; this happened on 2026-11-18). `scripts/check-gomod2nix-cache-scope.sh` enforces the
+result: a first-party `cachePackages` entry MUST lie in a module that `go.mod` replaces with a local
+path (the builder drops only those, never the module's own packages), and every `[mod]` entry MUST
+be in `go.sum`. The updater runs it for the regenerated module, library modules included, and exits
+3 before `update-locks.sh` can commit; the `go-deps-wired` check runs it over every module. Tests:
+`tests/check-go-deps-wired.bats`, `tests/update-gomod2nix-deps-build.bats`.
+
 `mkGoApp` (and so `mkGoBinary`) excludes every `*_test.go` file and every `testdata/` directory from
 `src`, and therefore from the version digest and the build input, unless `doCheck = true`
 (`phillipg-nix-repo-base` ADR 0006 amendment 2026-11-10). A test-only edit changes no derivation,
