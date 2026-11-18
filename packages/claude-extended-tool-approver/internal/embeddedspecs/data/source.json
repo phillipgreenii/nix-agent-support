@@ -1,0 +1,115 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "source",
+  "command": {
+    "name": "source",
+    "provenance": "bash builtin, help source: \"source: source filename [arguments]\"; the assume form per operator ruling, Phillip, 2026-11-17",
+    "citations": {
+      "provenance": {
+        "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+      },
+      "stdin": {
+        "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+      },
+      "stdout": {
+        "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+      },
+      "unknownFlag": {
+        "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "assume": {
+        "name": "assume",
+        "provenance": "operator ruling, Phillip, 2026-11-17: an agent must never run assume (no --help citation: assume is an operator-installed role helper, not packaged here)",
+        "citations": {
+          "provenance": {
+            "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+          },
+          "stdin": {
+            "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+          },
+          "stdout": {
+            "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+          },
+          "unknownFlag": {
+            "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "assume-role"
+            },
+            "target": "aws",
+            "citation": {
+              "source": "operator ruling, Phillip, 2026-11-17: \"yes reject assume --exec like assume.\" and \"as long as assume isn't allowed to be called by the agent, then it would only be able to access prod systems if it was run in an assumed environment which is only possible if i have explicitly done so\" (every assume invocation carries the assume-role effect whatever its flags or operands, so no flag-level fact is modeled)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      }
+    }
+  }
+}

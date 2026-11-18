@@ -17124,5 +17124,81 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "Unmodeled flag stays insufficient."
+  },
+  {
+    "case": "assume_bare",
+    "tags": ["assume", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "assume dev/example-role"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "An agent never assumes a role, --exec included (operator ruling, Phillip, 2026-11-17)."
+  },
+  {
+    "case": "assume_exec_approvable_inner",
+    "tags": ["assume", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "assume dev/example-role --exec \"bin/tool show x\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "An agent never assumes a role, --exec included (operator ruling, Phillip, 2026-11-17)."
+  },
+  {
+    "case": "assume_source_exec",
+    "tags": ["assume", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "source assume dev/example-role --exec \"bin/tool show x\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "An agent never assumes a role, --exec included (operator ruling, Phillip, 2026-11-17)."
+  },
+  {
+    "case": "assume_dot_exec",
+    "tags": ["assume", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": ". assume dev/example-role --exec=ls"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "An agent never assumes a role, --exec included (operator ruling, Phillip, 2026-11-17)."
   }
 ]

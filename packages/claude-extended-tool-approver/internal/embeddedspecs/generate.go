@@ -195,7 +195,8 @@ func citationsFor(schema cmddesc.CommandSchema, prefix string, cite specfmt.Cita
 }
 
 // filenameFor returns a filesystem-safe filename (no directory) for a
-// registry name. Every name but one is already a safe bare filename; "["
+// registry name. Every name but two is already a safe bare filename; "." (the
+// `source` alias) is spelled "dot-source.json" so it is not a hidden file; "["
 // (the test/[ alias, cmddesc/registry.go's renamed(testSchema, "[")) is
 // spelled out instead of written as a literal "[.json" so a directory
 // listing of data/ does not read as truncated/broken. The Repository's own
@@ -204,6 +205,9 @@ func citationsFor(schema cmddesc.CommandSchema, prefix string, cite specfmt.Cita
 func filenameFor(name string) string {
 	if name == "[" {
 		return "bracket-test.json"
+	}
+	if name == "." {
+		return "dot-source.json"
 	}
 	return name + ".json"
 }

@@ -1007,6 +1007,12 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     whose Operation lands in the forbidden class gets the same treatment
 //     automatically.
 //
+//   - "assume-role": assuming a cloud role (`assume`, `source assume`, `. assume`).
+//     Forbidden unconditionally, with or without --exec, by the operator
+//     ruling of 2026-11-17: an agent only reaches production from an
+//     environment the operator assumed himself, so the block is on the
+//     credential setup, not on using production tools.
+//
 //   - "dolt-server": starting, stopping or killing a Dolt SQL server (bd
 //     dolt start/stop/killall, slice 3n). REVISED by slice 3u per an
 //     operator ruling (Phillip, 2026-09-07, verbatim, recorded on tc-vn5z):
@@ -1082,6 +1088,8 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 			return Finding{Verdict: Permitted, Reason: "draft pull request creation (draft-first landing; pg2-25oru, operator ruling 2026-07-30)"}, true
 		}
 		return Finding{Verdict: Unknown, Reason: "pr-create-draft is only covered for the github resource"}, true
+	case "assume-role":
+		return Finding{Verdict: Forbidden, Reason: "an agent must not assume a cloud role: production access comes only from an environment the operator assumed (operator ruling, Phillip, 2026-11-17)"}, true
 	case "pr-create":
 		return Finding{Verdict: Forbidden, Reason: "a non-draft pull request skips the draft-first landing step (operator ruling 2026-07-30, pg2-25oru: gh pr create without --draft is rejected)"}, true
 	case "pr-ready-undo":

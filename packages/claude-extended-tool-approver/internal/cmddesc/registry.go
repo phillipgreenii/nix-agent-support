@@ -54,6 +54,8 @@ func coreSchemas() []CommandSchema {
 		pwdSchema, readSchema, shiftSchema, exitSchema,
 		lsSchema, wcSchema, sortSchema, tailSchema, grepSchema, mkdirSchema,
 		exportSchema,
+		// assume and the source/. builtins that run it: an agent never assumes a role.
+		assumeSchema, sourceSchema, renamed(sourceSchema, "."),
 		// slice 3n (registry_breadth.go): beads, trivial inert commands,
 		// JSON/YAML processors, gofmt.
 		bdSchema, sleepSchema, whichSchema, pgrepSchema, psSchema,
