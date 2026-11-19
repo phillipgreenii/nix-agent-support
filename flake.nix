@@ -1748,7 +1748,6 @@
       # No stampPaths: every hook is defined in flake.nix, which the staleness
       # stamp already covers.
       phillipgreenii.pre-commit = {
-        bundle.enable = true;
         # Every extraHooks entry above only verifies (none rewrites the tree), so
         # all are `check`. pg-connector-filesets is check-only too: its
         # regeneration is the `fixers` entry below, which is not a prek hook.
