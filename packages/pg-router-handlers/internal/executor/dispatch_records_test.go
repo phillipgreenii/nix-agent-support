@@ -99,7 +99,7 @@ func TestCommandDispatch_writesDispatchStart_strictNamesNoValues(t *testing.T) {
 		t.Errorf("strict_base_env = %v, want true", rec["strict_base_env"])
 	}
 	names := strSlice(t, rec["base_env_names"])
-	_, wantNames := commandPayloadEnv(role, item.Item{ID: "b-1", Type: "task"})
+	_, wantNames := commandPayloadEnv(role, item.Item{ID: "b-1", Type: "task"}, "", "")
 	if !reflect.DeepEqual(names, wantNames) || len(names) == 0 {
 		t.Errorf("base_env_names = %v, want %v", names, wantNames)
 	}

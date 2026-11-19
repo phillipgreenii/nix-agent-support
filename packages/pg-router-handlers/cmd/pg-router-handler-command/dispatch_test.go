@@ -94,7 +94,7 @@ func TestDispatch_StrictBaseEnvGolden(t *testing.T) {
 	names, kv := runEnvProbe(t, true)
 	want := []string{
 		"BEADS_ACTOR", "BEADS_DIR", "COLORTERM", "HOME", "LANG", "LOGNAME", "PATH",
-		"PG_ROUTER_ITEM_ID", "PG_ROUTER_ITEM_TYPE", "PG_ROUTER_ROLE", "PG_ROUTER_TEST_MODE",
+		"PG_ROUTER_DISPATCH_ID", "PG_ROUTER_EVENT_ID", "PG_ROUTER_ITEM_ID", "PG_ROUTER_ITEM_TYPE", "PG_ROUTER_ROLE", "PG_ROUTER_TEST_MODE",
 		"TERM", "TMPDIR", "USER", "WORKSPACE_ROOT",
 	}
 	if !reflect.DeepEqual(names, want) {
@@ -102,7 +102,7 @@ func TestDispatch_StrictBaseEnvGolden(t *testing.T) {
 	}
 	for k, v := range map[string]string{
 		"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "PG_ROUTER_ROLE": "cmdrole",
-		"PG_ROUTER_ITEM_ID": "b-1", "PG_ROUTER_ITEM_TYPE": "task", "HOME": "/h", "BEADS_ACTOR": "a",
+		"PG_ROUTER_ITEM_ID": "b-1", "PG_ROUTER_ITEM_TYPE": "task", "PG_ROUTER_EVENT_ID": "evt-1", "PG_ROUTER_DISPATCH_ID": "req-1", "HOME": "/h", "BEADS_ACTOR": "a",
 	} {
 		if kv[k] != v {
 			t.Errorf("%s = %q, want %q", k, kv[k], v)
@@ -119,7 +119,7 @@ func TestDispatch_NotStrictInheritsEnv(t *testing.T) {
 	clearAmbientEnv(t)
 	setHandlerEnv(t)
 	names, kv := runEnvProbe(t, false)
-	want := map[string]bool{"PG_ROUTER_ROLE": true, "PG_ROUTER_ITEM_ID": true, "PG_ROUTER_ITEM_TYPE": true}
+	want := map[string]bool{"PG_ROUTER_ROLE": true, "PG_ROUTER_ITEM_ID": true, "PG_ROUTER_ITEM_TYPE": true, "PG_ROUTER_EVENT_ID": true, "PG_ROUTER_DISPATCH_ID": true}
 	for _, kvs := range os.Environ() {
 		if n, _, _ := strings.Cut(kvs, "="); !shAdds[n] {
 			want[n] = true

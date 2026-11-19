@@ -876,8 +876,41 @@ func TestEnsure_argv_envUnchangedLabelsUnchanged(t *testing.T) {
 	if !slices.Equal(gotEnv, wantEnv) {
 		t.Errorf("--env = %v, want %v", gotEnv, wantEnv)
 	}
-	if want := []string{"pgrouter.role", "pgrouter.pool"}; !slices.Equal(gotLabels, want) {
+	if want := []string{"pgrouter.role", "pgrouter.pool"}; !slices.Equal(gotLabels, want) { // no ids in this meta
 		t.Errorf("--label = %v, want %v", gotLabels, want)
+	}
+}
+
+// The correlation ids are session labels when the meta carries them, so the
+// recorder can index a session by event and dispatch.
+func TestEnsure_labelsCorrelationIDs(t *testing.T) {
+	cli := &CLIRunner{}
+	var got []string
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = args
+		return nil, nil, nil
+	}
+	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0, "evt-7", "")
+	meta[MetaKeyDispatchID] = "dsp-0123456789ab"
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	var labels, metas []string
+	for i, a := range got {
+		switch a {
+		case "--label":
+			labels = append(labels, got[i+1])
+		case "--meta":
+			metas = append(metas, got[i+1])
+		}
+	}
+	for _, k := range []string{"pgrouter.dispatch_id", "pgrouter.event_id"} {
+		if !slices.Contains(labels, k) {
+			t.Errorf("--label lacks %s: %v", k, labels)
+		}
+	}
+	if !slices.Contains(metas, "pgrouter.dispatch_id=dsp-0123456789ab") || !slices.Contains(metas, "pgrouter.event_id=evt-7") {
+		t.Errorf("--meta lacks the ids: %v", metas)
 	}
 }
 

@@ -285,6 +285,14 @@ func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, en
 	if _, ok := meta[MetaKeyPool]; ok {
 		args = append(args, "--label", MetaKeyPool)
 	}
+	// The correlation ids are labels too, so the recorder can index a session
+	// by the event and dispatch that launched it.
+	if _, ok := meta[MetaKeyDispatchID]; ok {
+		args = append(args, "--label", MetaKeyDispatchID)
+	}
+	if _, ok := meta[MetaKeyEventID]; ok {
+		args = append(args, "--label", MetaKeyEventID)
+	}
 	if c.PermissionMode != "" {
 		args = append(args, "--permission-mode", c.PermissionMode)
 	}

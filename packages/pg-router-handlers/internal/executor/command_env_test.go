@@ -145,7 +145,7 @@ func TestCommandPayloadEnv_Contract(t *testing.T) {
 	setHandlerEnv(t)
 	it := item.Item{ID: "b-1", Type: "task", Title: "untrusted"}
 
-	env, base := commandPayloadEnv(roles.Role{Name: "r", StrictBaseEnv: true}, it)
+	env, base := commandPayloadEnv(roles.Role{Name: "r", StrictBaseEnv: true}, it, "", "")
 	if !sort.StringsAreSorted(base) || len(base) != len(env) {
 		t.Fatalf("strict baseNames must be the sorted names of env; base=%v env=%v", base, env)
 	}
@@ -155,7 +155,7 @@ func TestCommandPayloadEnv_Contract(t *testing.T) {
 		}
 	}
 
-	env, base = commandPayloadEnv(roles.Role{Name: "r"}, it)
+	env, base = commandPayloadEnv(roles.Role{Name: "r"}, it, "", "")
 	if base != nil {
 		t.Errorf("non-strict baseNames = %v, want nil", base)
 	}

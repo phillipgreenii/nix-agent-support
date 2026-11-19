@@ -412,7 +412,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	for k, v := range d.Role.SessionEnv {
 		env[k] = v
 	}
-	for k, v := range itemContextEnv(d.Role.Name, d.Item) {
+	for k, v := range itemContextEnv(d.Role.Name, d.Item, d.EventID, d.DispatchID) {
 		env[k] = v
 	}
 	env["BEADS_ACTOR"] = cc.Actor
@@ -422,6 +422,9 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	env["BEADS_DIR"] = beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads"
 	env["WORKSPACE_ROOT"] = wt
 	meta := ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))
+	if d.DispatchID != "" {
+		meta[ccpool.MetaKeyDispatchID] = d.DispatchID
+	}
 	r.gwmMeta(meta)
 	if r.deps.Cfg.LeaseTTL > 0 {
 		// The first owner of a new session: generation 1, one supervisor.

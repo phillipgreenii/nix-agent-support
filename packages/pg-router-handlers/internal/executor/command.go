@@ -106,8 +106,8 @@ var baseEnvExtras = []string{"BEADS_ACTOR", "BEADS_DIR", "WORKSPACE_ROOT", "PG_R
 // the variable names in env. With it off, env is os.Environ() plus the three
 // PG_ROUTER_* entries (they come last, so they win a duplicate) and baseNames
 // is nil.
-func commandPayloadEnv(r roles.Role, it item.Item) (env []string, baseNames []string) {
-	itemCtx := itemContextEnv(r.Name, it)
+func commandPayloadEnv(r roles.Role, it item.Item, eventID, dispatchID string) (env []string, baseNames []string) {
+	itemCtx := itemContextEnv(r.Name, it, eventID, dispatchID)
 	keys := make([]string, 0, len(itemCtx))
 	for k := range itemCtx {
 		keys = append(keys, k)
@@ -141,7 +141,7 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) ([]byte, error)
 	// env is the payload env, baseNames the strict env's variable names (nil when
 	// the strict switch is off); dispatch_start records the argv and the names,
 	// never an env value.
-	env, baseNames := commandPayloadEnv(d.Role, d.Item)
+	env, baseNames := commandPayloadEnv(d.Role, d.Item, d.EventID, d.DispatchID)
 	// dispatch_start is per ACCEPTED dispatch and is written BEFORE the payload
 	// starts, so a payload that hangs or is killed still has its record (ruling
 	// 33). A busy exit 9 is only known after the command ran: it is a decline, and

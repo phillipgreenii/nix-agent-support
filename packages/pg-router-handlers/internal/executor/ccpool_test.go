@@ -2571,7 +2571,7 @@ func launchEnvMeta(t *testing.T, sessionEnv map[string]string, it item.Item) (en
 		{},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 	}}
-	d := DispatchContext{Role: role, Item: it, EventID: "evt-1"}
+	d := DispatchContext{Role: role, Item: it, EventID: "evt-1", DispatchID: "dsp-0123456789ab"}
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = "att-1"
 	deps.Git = &dtest.NoopGit{}
@@ -2615,8 +2615,8 @@ func TestDispatch_launchEnv_sessionEnvAndItemContext(t *testing.T) {
 			t.Errorf("the item title must not reach the launch env; %s=%q", k, v)
 		}
 	}
-	if len(env) != 9 {
-		t.Errorf("launch env = exactly 3 sessionEnv + 3 markers + 3 item context; got %d: %v", len(env), env)
+	if len(env) != 11 {
+		t.Errorf("launch env = exactly 3 sessionEnv + 3 markers + 3 item context + 2 correlation ids; got %d: %v", len(env), env)
 	}
 }
 
@@ -2629,7 +2629,7 @@ func TestDispatch_launchEnv_noSessionEnv(t *testing.T) {
 		got = append(got, k)
 	}
 	slices.Sort(got)
-	want := []string{"BEADS_ACTOR", "BEADS_DIR", "PG_ROUTER_ITEM_ID", "PG_ROUTER_ITEM_TYPE", "PG_ROUTER_ROLE", "WORKSPACE_ROOT"}
+	want := []string{"BEADS_ACTOR", "BEADS_DIR", "PG_ROUTER_DISPATCH_ID", "PG_ROUTER_EVENT_ID", "PG_ROUTER_ITEM_ID", "PG_ROUTER_ITEM_TYPE", "PG_ROUTER_ROLE", "WORKSPACE_ROOT"}
 	if !slices.Equal(got, want) {
 		t.Errorf("launch env keys = %v, want %v", got, want)
 	}
@@ -2670,13 +2670,39 @@ func TestDispatch_launchMeta_unchangedBySessionEnv(t *testing.T) {
 	}
 }
 
+// A ccpool launch stamps both correlation ids in the session meta and the
+// payload environment.
+func TestDispatch_launchCarriesCorrelationIDs(t *testing.T) {
+	env, meta := launchEnvMeta(t, nil, item.Item{ID: "zr-c", Type: "task"})
+	if meta[ccpool.MetaKeyDispatchID] != "dsp-0123456789ab" || meta[ccpool.MetaKeyEventID] != "evt-1" {
+		t.Errorf("meta lacks the ids: %v", meta)
+	}
+	if env["PG_ROUTER_DISPATCH_ID"] != "dsp-0123456789ab" || env["PG_ROUTER_EVENT_ID"] != "evt-1" {
+		t.Errorf("env lacks the ids: %v", env)
+	}
+}
+
 // itemContextEnv returns exactly the three PG_ROUTER_* names, from the item's
 // ID and Type and never its Title.
 func TestItemContextEnv(t *testing.T) {
-	got := itemContextEnv("r1", item.Item{ID: "i-1", Type: "t", Title: "untrusted", Metadata: map[string]any{"a": "b"}})
+	got := itemContextEnv("r1", item.Item{ID: "i-1", Type: "t", Title: "untrusted", Metadata: map[string]any{"a": "b"}}, "", "")
 	want := map[string]string{"PG_ROUTER_ROLE": "r1", "PG_ROUTER_ITEM_ID": "i-1", "PG_ROUTER_ITEM_TYPE": "t"}
 	if !maps.Equal(got, want) {
 		t.Errorf("itemContextEnv = %v, want %v", got, want)
+	}
+}
+
+// The correlation ids join the item context when present and are omitted when
+// empty.
+func TestItemContextEnv_correlationIDs(t *testing.T) {
+	it := item.Item{ID: "i-1", Type: "t"}
+	got := itemContextEnv("r1", it, "evt-9", "dsp-0123456789ab")
+	if got["PG_ROUTER_EVENT_ID"] != "evt-9" || got["PG_ROUTER_DISPATCH_ID"] != "dsp-0123456789ab" {
+		t.Errorf("itemContextEnv = %v, want both correlation ids", got)
+	}
+	only := itemContextEnv("r1", it, "evt-9", "")
+	if _, ok := only["PG_ROUTER_DISPATCH_ID"]; ok || only["PG_ROUTER_EVENT_ID"] != "evt-9" {
+		t.Errorf("empty dispatch id must be omitted: %v", only)
 	}
 }
 

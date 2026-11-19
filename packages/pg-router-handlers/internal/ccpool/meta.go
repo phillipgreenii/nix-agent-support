@@ -41,6 +41,11 @@ const (
 	// when the dispatch carried no event id (such a session is never absorbed).
 	// Never a --label.
 	MetaKeyEventID = "pgrouter.event_id"
+	// MetaKeyDispatchID is the router's own tracking id (dsp-...) of the offer
+	// whose dispatch launched the session. Unlike the other keys it is also
+	// flagged as a ccpool label (with MetaKeyEventID) so the recorder can index
+	// it. Absent when the dispatch carried no dispatch id.
+	MetaKeyDispatchID = "pgrouter.dispatch_id"
 	// MetaKeyHeadSHA is the pinned PR head (the dispatched item's head_sha
 	// metadata) the session was launched for (bead pg2-afre3). It is a record of
 	// what the session reviews, read by people and verification; no decision
