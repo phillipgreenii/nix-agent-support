@@ -13,7 +13,11 @@ _pg_assistants() {
   )
 
   if (( CURRENT == 2 )); then
-    _describe 'subcommand' subcmds
+    if [[ $words[2] == -* ]]; then
+      compadd -- --version --help
+    else
+      _describe 'subcommand' subcmds
+    fi
     return
   fi
 

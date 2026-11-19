@@ -165,6 +165,12 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
+	return Parse(data)
+}
+
+// Parse is Load for file contents already read, so a caller that also hashes
+// the file reads it once.
+func Parse(data []byte) (Config, error) {
 	var doc map[string]any
 	if _, err := toml.Decode(string(data), &doc); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)

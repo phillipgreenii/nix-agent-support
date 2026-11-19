@@ -571,7 +571,8 @@ func (l *assistantLoop) reconcile(ctx context.Context, now time.Time) {
 // running supervises a live session: adopt it if it is not known, read the
 // exit request and the usage report, and take the ladder's next step.
 func (l *assistantLoop) running(ctx context.Context, now time.Time) {
-	if l.sess == nil {
+	adopted := l.sess == nil
+	if adopted {
 		l.sess = &session{target: target{name: l.a.ID}, startedAt: now}
 		l.reason = ""
 		l.readPID(ctx)
@@ -579,7 +580,7 @@ func (l *assistantLoop) running(ctx context.Context, now time.Time) {
 	}
 	s := l.sess
 	s.aliveAt = now
-	if s.pid == 0 {
+	if s.pid == 0 && !adopted { // an adoption just asked: a failed ask is not repeated in the same tick
 		l.readPID(ctx)
 	}
 	req := l.exitRequested()

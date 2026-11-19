@@ -12,6 +12,15 @@ _pg_assistants() {
     return
   fi
 
+  # A flag's value is a file: --config and --claude-json name files, not
+  # directories, whatever the command's positional words are.
+  case "${COMP_WORDS[COMP_CWORD - 1]}" in
+  --config | --claude-json)
+    mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+    return
+    ;;
+  esac
+
   cmd="${COMP_WORDS[1]}"
   case "$cmd" in
   status)

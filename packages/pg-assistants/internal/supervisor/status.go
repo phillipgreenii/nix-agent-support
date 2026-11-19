@@ -267,12 +267,18 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	removeStaleTemps(dir, "."+filepath.Base(path)+".tmp-")
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*") // mode 0600
 	if err != nil {
 		return err
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Sync(); err != nil { // data on disk before the rename publishes it
 		_ = tmp.Close()
 		_ = os.Remove(name)
 		return err
@@ -285,5 +291,30 @@ func writeFileAtomic(path string, data []byte) error {
 		_ = os.Remove(name)
 		return err
 	}
+	if d, err := os.Open(dir); err == nil { // best effort: make the rename itself durable
+		_ = d.Sync()
+		_ = d.Close()
+	}
 	return nil
+}
+
+// staleTempAge is how old a leftover temporary file must be before a later
+// write removes it; younger ones may belong to a write still in flight.
+const staleTempAge = time.Minute
+
+// removeStaleTemps deletes the temporary files a crashed write left in dir
+// (names starting with prefix) that are older than staleTempAge.
+func removeStaleTemps(dir, prefix string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > staleTempAge {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }

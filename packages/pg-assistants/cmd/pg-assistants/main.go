@@ -145,20 +145,32 @@ func configFlag(fs *flag.FlagSet) *string {
 // loadConfig loads the configuration at path, or at the default path when it
 // is empty. A failure is printed and returns exit 7.
 func (c *cli) loadConfig(cmd, path string) (config.Config, int, bool) {
+	cfg, _, code, ok := c.loadConfigRaw(cmd, path)
+	return cfg, code, ok
+}
+
+// loadConfigRaw is loadConfig that also returns the file's bytes, for the
+// caller that hashes them.
+func (c *cli) loadConfigRaw(cmd, path string) (config.Config, []byte, int, bool) {
 	if path == "" {
 		dir, err := osdirs.ConfigDir("pg-assistants")
 		if err != nil {
 			fmt.Fprintf(c.stderr, "pg-assistants %s: %v\n", cmd, err)
-			return config.Config{}, exitcode.Config, false
+			return config.Config{}, nil, exitcode.Config, false
 		}
 		path = filepath.Join(dir, "config.toml")
 	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		fmt.Fprintf(c.stderr, "pg-assistants %s: %s: %v\n", cmd, path, err)
-		return config.Config{}, exitcode.Config, false
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var cfg config.Config
+		if cfg, err = config.Parse(data); err == nil {
+			return cfg, data, exitcode.OK, true
+		}
+	} else {
+		err = fmt.Errorf("read config: %w", err)
 	}
-	return cfg, exitcode.OK, true
+	fmt.Fprintf(c.stderr, "pg-assistants %s: %s: %v\n", cmd, path, err)
+	return config.Config{}, nil, exitcode.Config, false
 }
 
 // The files in the state directory the subcommands share.

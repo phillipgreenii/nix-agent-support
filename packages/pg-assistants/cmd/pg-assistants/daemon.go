@@ -81,14 +81,9 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 		fmt.Fprintln(c.stderr, "pg-assistants daemon: --shutdown-deadline must be positive")
 		return exitcode.Usage
 	}
-	cfg, code, ok := c.loadConfig("daemon", *path)
+	cfg, raw, code, ok := c.loadConfigRaw("daemon", *path)
 	if !ok {
 		return code
-	}
-	raw, err := os.ReadFile(*path)
-	if err != nil {
-		fmt.Fprintf(c.stderr, "pg-assistants daemon: %v\n", err)
-		return exitcode.Config
 	}
 	sum := sha256.Sum256(raw)
 	configPath := *path

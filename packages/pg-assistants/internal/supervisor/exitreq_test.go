@@ -148,3 +148,36 @@ func TestExitRequestRefusesBadID(t *testing.T) {
 		t.Errorf("state dir holds %v after refused calls", names(entries))
 	}
 }
+
+func TestWriteRemovesOnlyStaleTemps(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	reqDir := filepath.Join(stateDir, "exit-requests")
+	if err := os.MkdirAll(reqDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(reqDir, ".example-a.tmp-old")
+	fresh := filepath.Join(reqDir, ".example-a.tmp-new")
+	other := filepath.Join(reqDir, ".example-b.tmp-old")
+	for _, p := range []string{stale, fresh, other} {
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-2 * staleTempAge)
+	for _, p := range []string{stale, other} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := WriteExitRequest(stateDir, "example-a", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale temp of the same file survived: %v", err)
+	}
+	for _, p := range []string{fresh, other} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s was removed: %v", filepath.Base(p), err)
+		}
+	}
+}
