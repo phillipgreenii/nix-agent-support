@@ -30,6 +30,11 @@ set; the router engine imports no member; nothing imports a `cmd/` package; the 
 standard library only; and each member binary's import closure stays inside its own fileset. Adding a
 package to the shared set is a deliberate edit of `members.json`.
 
+The handlers member (`pg-router-ccpool-handler`) is built from this module too: `cmd/pg-router-handler-ccpool`
+and `cmd/pg-router-handler-command` with their sources under `internal/handlers/...`. Its flake
+attribute and `pg-router-ccpool-handler-go-tests` check (which enforces a per-package statement-coverage
+gate) are separate; a role names one of the two binaries as its `handler`.
+
 ## Subcommands
 
 | Command                                                        | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
