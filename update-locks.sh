@@ -113,6 +113,14 @@ while IFS= read -r go_mod; do
   fi
 done < <(go_module_dirs)
 
+# The Go steps above run with GOWORK=off, so they never write the root go.work.sum
+# and their bumps leave it stale; the next workspace-mode go invocation (go-work-vet,
+# an editor) would rewrite it. Refresh it here, in workspace mode, so the refresh
+# commit carries it. Touches go.work.sum only (never a module go.mod/go.sum); the script sets GOWORK itself.
+ul_run_step "go-work-sum" \
+  "update-locks: refresh go.work.sum" \
+  bash "${SCRIPT_DIR}/scripts/refresh-go-work-sum.sh" --root "${SCRIPT_DIR}"
+
 # Refresh the SHA pins of every `uses: owner/repo@<sha> # <ref>` in .github/workflows
 # (ul_refresh_action_pins, shared step from nix-repo-base lib/scripts/update-action-pins-lib.bash;
 # beads pg2-ehu9q, pg2-ct1mp, pg2-1dleq). Mutable refs are reported, not rewritten.

@@ -1196,6 +1196,13 @@
                   exit 1
                 fi
 
+                # Resolve through the module's own go.mod, like the repo's other Go
+                # hooks. In workspace mode (the go.work at the repo root) golangci-lint
+                # rewrites go.work.sum when it is stale, which turns this read-only
+                # check into a hook that modifies the tree and stops the land at
+                # pre-merge-verify. The depguard rules read import paths only, so the
+                # module-mode graph is the right one.
+                export GOWORK=off
                 top="$(git rev-parse --show-toplevel)"
                 cd "$top/packages/claude-extended-tool-approver"
                 exec nice -n 10 golangci-lint run --config "$top/.golangci.yml" \
