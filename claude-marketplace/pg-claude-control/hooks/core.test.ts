@@ -13,6 +13,7 @@ import {
   LineBuffer,
   RespawnCounter,
   REQUEST_LOG_LINES,
+  mapUsage,
   parseAllow,
   parseRequest,
   resolveStateDir,
@@ -251,14 +252,56 @@ test('usage when the engine throws', async () => {
 test('usage without a reply path runs and writes nothing', async () => {
   const { ctl, calls } = fresh()
   let ran = 0
+  const written: string[] = []
+  const base = realIo(calls)
   const io = realIo(calls, {
     usage: async () => {
       ran++
       return {}
     },
+    writeText: async (p, t) => {
+      written.push(p)
+      await base.writeText(p, t)
+    },
   })
-  await ctl.handleLine(io, 'usage')
+  await ctl.handleLine(io, 'id=nr1 usage')
   assert.equal(ran, 1)
+  // Nothing was written but the request log (no reply file, no temporary
+  // reply name), and the request is logged as served, not refused or failed.
+  assert.ok(written.length > 0 && written.every(p => p.startsWith(ctl.requestsPath)), `writes: ${written}`)
+  assert.deepEqual(
+    (await reqs(ctl)).map(r => [r.id, r.verb, r.outcome]),
+    [['nr1', 'usage', 'ok']],
+  )
+  assert.deepEqual(lines(ctl.eventsPath), [])
+})
+
+test('mapUsage drops malformed rate limits leniently: a non-array is none, a bad entry keeps only its well-typed fields', () => {
+  // Pinned current behaviour, not a ruling that it is ideal: an entry with no
+  // usable field stays as an empty object rather than being removed. The Go
+  // reader (internal/control parseUsage) skips an entry without percentUsed,
+  // so the empty entries are harmless there.
+  for (const bad of [undefined, null, 'x', 5, {}, { kind: 'five_hour' }]) {
+    assert.deepEqual(mapUsage({ rateLimits: bad }), { rateLimits: [] }, `rateLimits ${JSON.stringify(bad)}`)
+  }
+  assert.deepEqual(
+    mapUsage({
+      rateLimits: [
+        null,
+        5,
+        'x',
+        [],
+        { kind: 7, percentUsed: '62', resetsAt: 1 },
+        { kind: 'five_hour', percentUsed: '62' },
+        { kind: 'seven_day', percentUsed: 10, resetsAt: '2026-11-16T20:00:00Z' },
+      ],
+    }),
+    {
+      rateLimits: [{}, {}, {}, {}, {}, { kind: 'five_hour' }, { kind: 'seven_day', percentUsed: 10, resetsAt: '2026-11-16T20:00:00Z' }],
+    },
+  )
+  assert.deepEqual(mapUsage(null), { rateLimits: [] })
+  assert.deepEqual(mapUsage('x'), { rateLimits: [] })
 })
 
 test('usage parses as a known verb', () => {

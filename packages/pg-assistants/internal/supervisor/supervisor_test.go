@@ -516,8 +516,24 @@ func TestLeftoverExitRequestClearedBeforeStart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := newHarness(t, exampleA)
 		h.requestExit(exampleA)
+		// The request must be gone before tmux new-session runs, not merely
+		// after the start: a session started while it was on file would be
+		// asked to exit by the first tick.
+		var onFileAtStart bool
+		h.w.newSession = func(name string) error {
+			on, err := HasExitRequest(h.cfg.Paths.StateDir, name)
+			if err != nil {
+				t.Error(err)
+			}
+			onFileAtStart = on
+			h.w.addSession(name)
+			return nil
+		}
 		h.start()
 		defer h.stop()
+		if onFileAtStart {
+			t.Error("the leftover exit request was still on file when new-session ran")
+		}
 		if h.exitRequested(exampleA) {
 			t.Error("the leftover exit request is still on file after the start")
 		}
@@ -1039,4 +1055,75 @@ func TestTickTimeSnapsToTheGrid(t *testing.T) {
 			t.Errorf("%s: tickTime = %s, want %s", c.name, got, c.want)
 		}
 	}
+}
+
+// The daemon Stats the directory and starts tmux in it exactly as the
+// operator wrote it, with no resolving or escaping of its own (x/tmux escapes
+// a trailing ";" itself): a name ending in ";" must reach Stat, trust and
+// new-session unchanged.
+func TestStartUsesTheRawCwd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, exampleA)
+		raw := filepath.Join(h.root, "work", "semi;")
+		if err := os.MkdirAll(raw, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		h.a(exampleA).Cwd = raw
+		var statted []string
+		h.stat = func(p string) (os.FileInfo, error) {
+			statted = append(statted, p)
+			return os.Stat(p)
+		}
+		h.start()
+		defer h.stop()
+		h.until(time.Minute)
+
+		if !slices.Equal(statted, []string{raw}) {
+			t.Errorf("Stat paths = %q, want only the raw cwd %q", statted, raw)
+		}
+		starts := h.w.callsOf("new-session", exampleA)
+		if len(starts) != 1 || starts[0].cwd != raw {
+			t.Fatalf("new-session calls = %+v, want one in the raw cwd %q", starts, raw)
+		}
+		if cs := h.w.callsOf("is-trusted", ""); len(cs) != 1 || cs[0].cwd != raw {
+			t.Errorf("is-trusted calls = %+v, want one for the raw cwd %q", cs, raw)
+		}
+	})
+}
+
+// Every usage call is handed the tick's scheduled time, not the clock at the
+// moment of the call. The fake tmux State call, which every tick makes before
+// it asks for usage, takes 2 s here: with instant fakes the clock at the call
+// equals the tick time and the assertion could not tell them apart.
+func TestUsageGetsTheTickTimeNotTheCallTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, exampleA)
+		var mu sync.Mutex
+		type seen struct{ tick, call time.Duration }
+		var got []seen
+		h.w.state = func(string) { time.Sleep(2 * time.Second) }
+		h.w.usage = func(_ context.Context, name string, _ int, now time.Time) (control.Usage, error) {
+			mu.Lock()
+			got = append(got, seen{now.Sub(h.t0), time.Since(h.t0)})
+			mu.Unlock()
+			return control.Usage{SessionID: "sess-" + name, HaveContext: true, ContextTokens: 1000}, nil
+		}
+		h.start()
+		defer h.stop()
+		h.until(3*time.Minute + 30*time.Second)
+
+		mu.Lock()
+		defer mu.Unlock()
+		if len(got) < 3 {
+			t.Fatalf("usage calls = %v, want at least 3", got)
+		}
+		for _, s := range got {
+			if s.tick%time.Minute != 0 {
+				t.Errorf("usage got tick time %s, want a whole minute", s.tick)
+			}
+			if s.call-s.tick != 2*time.Second {
+				t.Errorf("usage at %s for tick %s: the call is not 2 s after the tick, so the test cannot tell them apart", s.call, s.tick)
+			}
+		}
+	})
 }
