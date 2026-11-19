@@ -16,7 +16,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/dispatchlib"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
 	"github.com/phillipgreenii/pg-router/internal/handlers/handlerstate"
-	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
@@ -117,7 +116,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// failure.
 	deps = sweeper.RunOrphanUnit(ctx, role, cfg, deps)
 	if deps.Reconciler == nil {
-		deps.Reconciler = hygiene.NewPoolReconciler(role, cfg, deps)
+		deps.Reconciler = sweeper.NewPoolReconciler(role, cfg, deps)
 	}
 
 	// Zero-model-cost precheck (INV-CCH-22): a dispatch whose bead no longer

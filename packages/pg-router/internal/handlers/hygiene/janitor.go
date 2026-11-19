@@ -106,24 +106,24 @@ func (p janitorPasses) clock() time.Time {
 
 // prodJanitorPasses wires the janitor's passes to the package's reconcile and
 // sweep functions.
-func prodJanitorPasses(version string) janitorPasses {
+func (s Sweeper) prodJanitorPasses() janitorPasses {
 	gb := newGaugeBatch()
 	return janitorPasses{
-		handlerVersion: version,
+		handlerVersion: s.Version,
 		closedBead: func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
 			return reconcileClosedBeadSessions(withResume(ctx, deps.LockDir, rolePool(role)), deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
 		},
 		defaultPool: func(ctx context.Context, cfg config.Config) int { return reconcileDefaultPool(ctx, cfg) },
 		orphan: func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
-			reclaimed, stopped := reconcileOrphanSessions(ctx, role, deps, orphanEnv{
+			reclaimed, stopped := reconcileOrphanSessions(ctx, role, deps, s.env(orphanEnv{
 				open:    worktree.GitOpener,
 				quiet:   newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil),
 				lockDir: deps.LockDir,
-			})
+			}))
 			return reclaimed + stopped
 		},
 		worktree: func(ctx context.Context, role roles.Role, _ config.Config, deps executor.Deps) int {
-			return sweepLeakedWorktrees(ctx, role, deps, orphanEnv{open: worktree.GitOpener, cwds: processCWDs, lockDir: deps.LockDir})
+			return sweepLeakedWorktrees(ctx, role, deps, s.env(orphanEnv{open: worktree.GitOpener, cwds: s.liveCWDs, lockDir: deps.LockDir}))
 		},
 		lockGC: sweepStaleLocks,
 		emit:   gb.Emit,
@@ -154,6 +154,9 @@ type janitorOptions struct {
 	listDiag      bool
 	listDiagAfter time.Duration
 	listDiagUntil string
+	// listDiagExpiry is the expiry used when listDiagUntil is empty; zero selects
+	// the built-in expiry.
+	listDiagExpiry time.Time
 }
 
 // runJanitor implements the `janitor` subcommand: not part of the wire
@@ -172,11 +175,12 @@ func (s Sweeper) RunJanitor(args []string) int {
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "list what each pass would reclaim; reclaim nothing, take no lock, record no event")
 	fs.BoolVar(&opts.listDiag, "list-diag", true, "sample the process tree when a ccpool list call is slow (bounded; stops at its expiry)")
 	fs.DurationVar(&opts.listDiagAfter, "list-diag-after", defaultListDiagThreshold, "how long a ccpool list call runs before it is sampled")
-	fs.StringVar(&opts.listDiagUntil, "list-diag-until", "", "RFC 3339 time after which the list diagnostic stops (default "+defaultListDiagExpiry.Format(time.RFC3339)+")")
+	fs.StringVar(&opts.listDiagUntil, "list-diag-until", "", "RFC 3339 time after which the list diagnostic stops (default "+s.diagExpiry().Format(time.RFC3339)+")")
 	if exit, done := s.parseFlagsNoStdin("janitor", fs, args); done {
 		return exit
 	}
 	opts.roleFiles = files
+	opts.listDiagExpiry = s.diagExpiry()
 	if opts.listDiagUntil != "" {
 		if _, err := time.Parse(time.RFC3339, opts.listDiagUntil); err != nil {
 			fmt.Fprintln(os.Stderr, "janitor: --list-diag-until must be an RFC 3339 time:", err)
@@ -191,7 +195,7 @@ func (s Sweeper) RunJanitor(args []string) int {
 		fmt.Fprintln(os.Stderr, "janitor: --deadline must be positive")
 		return conformance.ExitUsage
 	}
-	return serveJanitor(context.Background(), os.Stdout, opts, dispatchlib.BuildDeps, prodJanitorPasses(s.Version))
+	return serveJanitor(context.Background(), os.Stdout, opts, dispatchlib.BuildDeps, s.prodJanitorPasses())
 }
 
 // parseFlagsNoStdin is parseFlags with a message that does not claim the

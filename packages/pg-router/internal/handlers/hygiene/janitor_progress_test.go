@@ -39,22 +39,22 @@ func (h *sweepHarness) seenFiles() []string {
 }
 
 func TestProgress_worktreeCountersAddUpWhenTheCapCutsThePass(t *testing.T) {
-	setSweepCaps(t, worktreeSweepMaxPerPass, 3)
 	h := newSweepHarness(t)
-	total := worktreeSweepMaxExamined + 2
+	setSweepCaps(h, 0, 3)
+	total := h.env.examinedCap() + 2
 	for i := 0; i < total; i++ {
 		h.makeDirty(h.leak(fmt.Sprintf("zr-%02d", i)))
 	}
 	h.env.cwds = func(context.Context) ([]string, error) { return nil, nil }
 
 	_, c := h.sweepCounted()
-	if c.Candidates != total || c.Examined != worktreeSweepMaxExamined || c.Cached != 0 || c.Unexamined != 2 {
-		t.Fatalf("pass 1 counters = %+v, want candidates %d examined %d cached 0 unexamined 2", c, total, worktreeSweepMaxExamined)
+	if c.Candidates != total || c.Examined != h.env.examinedCap() || c.Cached != 0 || c.Unexamined != 2 {
+		t.Fatalf("pass 1 counters = %+v, want candidates %d examined %d cached 0 unexamined 2", c, total, h.env.examinedCap())
 	}
 	if c.Candidates != c.Examined+c.Cached+c.Unexamined {
 		t.Errorf("candidates %d != examined %d + cached %d + unexamined %d", c.Candidates, c.Examined, c.Cached, c.Unexamined)
 	}
-	if c.Kept != worktreeSweepMaxExamined || c.Removed != 0 || c.Kept+c.Removed > c.Examined {
+	if c.Kept != h.env.examinedCap() || c.Removed != 0 || c.Kept+c.Removed > c.Examined {
 		t.Errorf("kept %d removed %d examined %d", c.Kept, c.Removed, c.Examined)
 	}
 	if c.ListMS == nil || c.ProbeMS == nil || c.ScanMS == nil {
@@ -66,8 +66,8 @@ func TestProgress_worktreeCountersAddUpWhenTheCapCutsThePass(t *testing.T) {
 
 	// The next run continues: the kept ones are cached, the two left over are examined.
 	_, c = h.sweepCounted()
-	if c.Candidates != total || c.Cached != worktreeSweepMaxExamined || c.Examined != 2 || c.Unexamined != 0 {
-		t.Fatalf("pass 2 counters = %+v, want cached %d examined 2 unexamined 0", c, worktreeSweepMaxExamined)
+	if c.Candidates != total || c.Cached != h.env.examinedCap() || c.Examined != 2 || c.Unexamined != 0 {
+		t.Fatalf("pass 2 counters = %+v, want cached %d examined 2 unexamined 0", c, h.env.examinedCap())
 	}
 	if c.OldestUnexaminedAgeSeconds != 0 || len(h.seenFiles()) != 0 {
 		t.Errorf("age %v and %d first-seen records after every candidate was reached, want 0 and 0", c.OldestUnexaminedAgeSeconds, len(h.seenFiles()))

@@ -47,8 +47,11 @@ const (
 	listDiagToolTimeout = 5 * time.Second
 )
 
-// defaultListDiagExpiry is when the diagnostic stops by itself.
-var defaultListDiagExpiry = time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC)
+// defaultListDiagExpiry is when the diagnostic stops by itself (a Sweeper's
+// listDiagExpiry overrides it).
+func defaultListDiagExpiry() time.Time {
+	return time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC)
+}
 
 // procRow is one line of `ps`.
 type procRow struct {
@@ -129,7 +132,10 @@ func newListDiag(opts janitorOptions, stateDir string, log interface {
 	Emit(level, kind, msg string, fields map[string]any) error
 },
 ) *listDiagConfig {
-	expiry := defaultListDiagExpiry
+	expiry := opts.listDiagExpiry
+	if expiry.IsZero() {
+		expiry = defaultListDiagExpiry()
+	}
 	if t, err := time.Parse(time.RFC3339, opts.listDiagUntil); err == nil {
 		expiry = t
 	}

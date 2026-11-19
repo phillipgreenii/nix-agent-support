@@ -59,9 +59,15 @@ type orphanEnv struct {
 	// quiet is the non-blocking transcript-quiet guard (newTranscriptQuietCheck);
 	// nil disables it.
 	quiet quietCheck
-	// cwds lists the working directory of every live process (processCWDs); nil
+	// cwds lists the working directory of every live process (Sweeper.liveCWDs); nil
 	// disables the worktree sweep's live-process guard (bead pg2-e5yw3).
 	cwds cwdProbe
+	// gauge publishes the orphan last-event gauge; nil publishes nothing (the
+	// Sweeper installs the production emitter).
+	gauge gaugeEmitFn
+	// maxPerPass and maxExamined bound the worktree sweep (perPassCap,
+	// examinedCap); zero selects the production bound.
+	maxPerPass, maxExamined int
 	// lockDir is <handler state dir>/locks (sessionlock.Dir). Required: an empty
 	// lockDir disables the whole reconcile, because acting without mutual
 	// exclusion could race an absorbing dispatch.
@@ -227,9 +233,9 @@ func orphanFields(role roles.Role, s ccpool.Session) map[string]any {
 	}
 }
 
-func emitOrphan(ctx context.Context, deps executor.Deps, level, kind, msg string, fields map[string]any) {
+func emitOrphan(ctx context.Context, env orphanEnv, deps executor.Deps, level, kind, msg string, fields map[string]any) {
 	if role, ok := fields["role"].(string); ok {
-		emitOrphanGauge(ctx, role, kind, orphanNow(deps))
+		emitOrphanGauge(ctx, env.gauge, role, kind, orphanNow(deps))
 	}
 	if deps.Log != nil {
 		_ = deps.Log.Emit(level, kind, msg, fields)
@@ -299,7 +305,7 @@ func reclaimIdleOrphan(ctx context.Context, role roles.Role, deps executor.Deps,
 	f["unclaimed"] = unclaimed
 	slog.Info("orphan reconcile: orphaned session reclaimed", "session", s.ExternalID, "bead", beadID,
 		"role", role.Name, "state", string(s.State), "lease_until", s.Meta[ccpool.MetaKeyLeaseUntil], "unclaimed", unclaimed)
-	emitOrphan(ctx, deps, "info", orphanEventReclaimed, "orphaned session reclaimed after handler loss", f)
+	emitOrphan(ctx, env, deps, "info", orphanEventReclaimed, "orphaned session reclaimed after handler loss", f)
 	return orphanReclaimed
 }
 
@@ -394,7 +400,7 @@ func stopActiveOrphan(ctx context.Context, role roles.Role, deps executor.Deps, 
 	f := orphanFields(role, s)
 	f["elapsed"] = elapsed.Seconds()
 	f["budget_time"] = limit.Seconds()
-	emitOrphan(ctx, deps, "error", orphanEventHardStop, "orphaned session over its time budget hard-stopped", f)
+	emitOrphan(ctx, env, deps, "error", orphanEventHardStop, "orphaned session over its time budget hard-stopped", f)
 	return orphanHardStopped
 }
 
@@ -423,7 +429,7 @@ func closeNeverPromptedOrphan(ctx context.Context, role roles.Role, deps executo
 	f["unclaimed"] = false
 	slog.Info("orphan reconcile: never-prompted over-budget orphan with a closed bead closed", "session", s.ExternalID, "bead", beadID,
 		"role", role.Name, "state", string(s.State), "elapsed", elapsed)
-	emitOrphan(ctx, deps, "info", orphanEventReclaimed, "never-prompted orphaned session closed after its bead closed", f)
+	emitOrphan(ctx, env, deps, "info", orphanEventReclaimed, "never-prompted orphaned session closed after its bead closed", f)
 	return orphanReclaimed
 }
 

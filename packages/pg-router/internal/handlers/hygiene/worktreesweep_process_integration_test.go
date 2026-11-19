@@ -96,7 +96,7 @@ func TestSweep_realProcessInTheWorktreeIsFoundByLsof(t *testing.T) {
 	}
 	h := newSweepHarness(t)
 	path := h.leak("zr-k")
-	h.env.cwds = processCWDs
+	h.env.cwds = Sweeper{}.liveCWDs
 
 	cmd := exec.CommandContext(t.Context(), "sleep", "300")
 	cmd.Dir = path
@@ -108,7 +108,7 @@ func TestSweep_realProcessInTheWorktreeIsFoundByLsof(t *testing.T) {
 	// lsof can lag the exec by an instant; poll briefly until it sees the child.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		cwds, err := processCWDs(context.Background())
+		cwds, err := Sweeper{}.liveCWDs(context.Background())
 		if err != nil {
 			t.Skipf("lsof cannot list working directories here: %v", err)
 		}

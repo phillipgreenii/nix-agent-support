@@ -322,7 +322,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 	cfg.WorktreeDir = wtDir
 	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
 	cc := &poolCC{OrphanCC: &dtest.OrphanCC{}}
-	r := hygiene.NewPoolReconciler(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
+	r := (hygiene.Sweeper{}).NewPoolReconciler(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
 	if err := r.ReclaimLeakedWorktree(context.Background(), "zr-w"); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 			t.Fatalf("%q: %v", bad, err)
 		}
 	}
-	if hygiene.NewPoolReconciler(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
+	if (hygiene.Sweeper{}).NewPoolReconciler(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
 		t.Fatal("a role without a ccpool block has no reconciler")
 	}
 }

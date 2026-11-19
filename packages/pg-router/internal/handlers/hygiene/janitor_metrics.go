@@ -111,6 +111,8 @@ func flushGauges(ctx context.Context, flush func(context.Context) error) {
 
 // allJanitorPasses is every pass name, so a pass that did not run still reports
 // 0 rather than leaving a stale series.
+// allJanitorPasses is a fixed list of pass names, not a port or a setting, so
+// it stays a package-level value and is not a Sweeper field.
 var allJanitorPasses = []string{passClosedBead, passDefaultPool, passOrphan, passWorktree, passLockGC}
 
 // emitJanitorGauges publishes the heartbeat of one run that was not skipped.
@@ -198,17 +200,14 @@ func emitJanitorProgressGauges(ctx context.Context, emit gaugeEmitFn, counts []*
 	}
 }
 
-// orphanGaugeEmit, when set (by main), publishes the time of the latest orphan
-// event per role and kind. It stays nil under test.
-var orphanGaugeEmit gaugeEmitFn
-
-// emitOrphanGauge records an orphan_reclaimed / orphan_hard_stop event as a
-// gauge, the only orphan-frequency signal besides events.jsonl.
-func emitOrphanGauge(ctx context.Context, role, kind string, now time.Time) {
-	if orphanGaugeEmit == nil {
+// emitOrphanGauge records an orphan_reclaimed / orphan_hard_stop event through
+// emit as a gauge, the only orphan-frequency signal besides events.jsonl; a nil
+// emit publishes nothing.
+func emitOrphanGauge(ctx context.Context, emit gaugeEmitFn, role, kind string, now time.Time) {
+	if emit == nil {
 		return
 	}
-	if err := orphanGaugeEmit(ctx, gaugeOrphanLastEvent, float64(now.Unix()), map[string]string{"role": role, "kind": kind}); err != nil {
+	if err := emit(ctx, gaugeOrphanLastEvent, float64(now.Unix()), map[string]string{"role": role, "kind": kind}); err != nil {
 		slog.Warn("orphan: gauge emit failed", "err", err)
 	}
 }

@@ -41,7 +41,7 @@ import (
 //   - no open or live session row in this role's pool names it (by working
 //     directory or by pgrouter.bead), read again under the lock;
 //   - no live process anywhere has it as its working directory (bead pg2-e5yw3,
-//     processCWDs), probed again under the lock; a failed probe keeps it;
+//     Sweeper.liveCWDs), probed again under the lock; a failed probe keeps it;
 //   - its working tree is clean (so nothing uncommitted is lost), unless it is an
 //     interrupted checkout (a zero-byte index.lock in its admin directory older than
 //     the grace window, pg2-f6lxmp; then its status entries are the half-finished
@@ -75,20 +75,38 @@ const (
 	worktreeEventReclaimed = "worktree_reclaimed"
 )
 
-// The two per-pass bounds are variables only so a unit test can lower them
-// (setSweepCaps in the tests): proving a cap holds needs cap+N real worktrees,
-// and at the production values that is dozens of real git checkouts per test.
-// Nothing outside the tests assigns them.
-var (
-	// worktreeSweepMaxPerPass bounds how many worktrees one dispatch removes, so a
-	// large backlog is drained over several dispatches rather than in one.
-	worktreeSweepMaxPerPass = 5
-	// worktreeSweepMaxExamined bounds how many candidates one pass examines with
-	// git (status and commit count), kept or removed, so a backlog of kept
+// The two per-pass bounds are Sweeper fields (worktreeSweepMaxPerPass and
+// worktreeSweepMaxExamined, carried to the sweep in orphanEnv) so a unit test
+// can lower them: proving a cap holds needs cap+N real worktrees, and at the
+// production values that is dozens of real git checkouts per test. A zero field
+// selects the production bound; nothing outside the tests sets them.
+const (
+	// defaultWorktreeSweepMaxPerPass bounds how many worktrees one dispatch
+	// removes, so a large backlog is drained over several dispatches rather than
+	// in one.
+	defaultWorktreeSweepMaxPerPass = 5
+	// defaultWorktreeSweepMaxExamined bounds how many candidates one pass examines
+	// with git (status and commit count), kept or removed, so a backlog of kept
 	// worktrees cannot make one dispatch pay for all of them. A candidate skipped
 	// by the keep cache costs no git work and does not count.
-	worktreeSweepMaxExamined = 20
+	defaultWorktreeSweepMaxExamined = 20
 )
+
+// perPassCap is the removal bound of one pass.
+func (e orphanEnv) perPassCap() int {
+	if e.maxPerPass > 0 {
+		return e.maxPerPass
+	}
+	return defaultWorktreeSweepMaxPerPass
+}
+
+// examinedCap is the git-examination bound of one pass.
+func (e orphanEnv) examinedCap() int {
+	if e.maxExamined > 0 {
+		return e.maxExamined
+	}
+	return defaultWorktreeSweepMaxExamined
+}
 
 // worktreeSweepGrace is how old a worktree must be before the sweep may remove
 // it: the whole launch wait plus one lease TTL.
@@ -209,7 +227,7 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 	// name cannot starve a later one behind the examination cap.
 	orderOldestExamined(env.lockDir, candidates)
 	for _, c := range candidates {
-		if removed >= worktreeSweepMaxPerPass || examined >= worktreeSweepMaxExamined || ctx.Err() != nil {
+		if removed >= env.perPassCap() || examined >= env.examinedCap() || ctx.Err() != nil {
 			break
 		}
 		ok, didGit, cached := reclaimLeakedWorktree(ctx, role, deps, env, c)
@@ -230,7 +248,7 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 		}
 	}
 	for _, l := range leftovers {
-		if removed >= worktreeSweepMaxPerPass || ctx.Err() != nil {
+		if removed >= env.perPassCap() || ctx.Err() != nil {
 			break
 		}
 		if reclaimLeftoverDir(ctx, role, deps, env, l) {
@@ -468,7 +486,7 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	}
 	deleteAnchorBranch(ctx, env.open, deps.Cfg.RepoRoot, "worktree-sweep:"+c.bead, c.bead)
 	slog.Info("worktree sweep: leaked worktree reclaimed", "bead", c.bead, "worktree", c.path, "role", role.Name, "age", c.age)
-	emitOrphan(ctx, deps, "info", worktreeEventReclaimed, "leaked worktree reclaimed", map[string]any{
+	emitOrphan(ctx, env, deps, "info", worktreeEventReclaimed, "leaked worktree reclaimed", map[string]any{
 		"bead": c.bead, "role": role.Name, "worktree": c.path, "branch": branch, "age_seconds": c.age.Seconds(),
 	})
 	return true, true, false

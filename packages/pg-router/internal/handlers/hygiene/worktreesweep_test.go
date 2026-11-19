@@ -50,6 +50,7 @@ type sweepHarness struct {
 	cc       *dtest.OrphanCC
 	deps     executor.Deps
 	env      orphanEnv
+	sweeper  Sweeper
 	logPath  string
 	role     roles.Role
 	opener   worktree.Opener
@@ -59,14 +60,14 @@ type sweepHarness struct {
 }
 
 // setSweepCaps lowers the sweep's per-pass removal and examination bounds for
-// one test, so a test that proves a bound holds needs a handful of real
-// worktrees rather than dozens. The bounds are package variables, so such a
-// test MUST NOT run in parallel (none does).
-func setSweepCaps(t *testing.T, perPass, examined int) {
-	t.Helper()
-	oldPer, oldExam := worktreeSweepMaxPerPass, worktreeSweepMaxExamined
-	worktreeSweepMaxPerPass, worktreeSweepMaxExamined = perPass, examined
-	t.Cleanup(func() { worktreeSweepMaxPerPass, worktreeSweepMaxExamined = oldPer, oldExam })
+// one test (a zero leaves that bound at its production value), so a test that
+// proves a bound holds needs a handful of real worktrees rather than dozens.
+// The bounds are Sweeper fields; the harness's env is re-stamped from its
+// Sweeper.
+func setSweepCaps(h *sweepHarness, perPass, examined int) {
+	h.t.Helper()
+	h.sweeper.worktreeSweepMaxPerPass, h.sweeper.worktreeSweepMaxExamined = perPass, examined
+	h.env = h.sweeper.env(h.env)
 }
 
 // The sweep tests share ONE real repository for the whole package: building a
@@ -542,13 +543,13 @@ func TestSweep_disabledConfigurations(t *testing.T) {
 }
 
 func TestSweep_boundedPerPass(t *testing.T) {
-	setSweepCaps(t, 2, worktreeSweepMaxExamined)
 	h := newSweepHarness(t)
+	setSweepCaps(h, 2, 0)
 	for _, b := range []string{"zr-1", "zr-2", "zr-3", "zr-4"} {
 		h.leak(b)
 	}
-	if got := h.sweep(); got != worktreeSweepMaxPerPass {
-		t.Fatalf("first pass removed %d, want %d", got, worktreeSweepMaxPerPass)
+	if got := h.sweep(); got != h.env.perPassCap() {
+		t.Fatalf("first pass removed %d, want %d", got, h.env.perPassCap())
 	}
 	if got := h.sweep(); got != 2 {
 		t.Fatalf("second pass removed %d, want the remaining 2", got)
@@ -710,12 +711,12 @@ func TestSweep_processEnteringOneOfSeveralCandidatesAfterPrefilterKeepsOnlyThatO
 
 func TestParseLsofCWDs(t *testing.T) {
 	out := []byte("p101\nn/\np20236\nn/Volumes/gitrepos/x/worktrees/pg2-u8y3i\np7\nn\n")
-	got := parseLsofCWDs(out)
+	got := Sweeper{}.parseLsof(out)
 	want := []string{"/", "/Volumes/gitrepos/x/worktrees/pg2-u8y3i"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("parseLsofCWDs = %v, want %v", got, want)
 	}
-	if got := parseLsofCWDs(nil); len(got) != 0 {
+	if got := (Sweeper{}).parseLsof(nil); len(got) != 0 {
 		t.Errorf("empty output parsed to %v", got)
 	}
 }

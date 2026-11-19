@@ -35,7 +35,7 @@ const closedReconcileStampPrefix = "closed-reconcile--"
 // listing is still the pool as it is, so it is returned in the Deps for the
 // executor's prior-session plan to reuse (one list call, not two); otherwise the
 // plan reads the pool afresh, which is the post-reclaim pool it saw before.
-func (Sweeper) RunOrphanUnit(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) executor.Deps {
+func (s Sweeper) RunOrphanUnit(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) executor.Deps {
 	if role.CCPool == nil || deps.CC == nil {
 		return deps
 	}
@@ -49,11 +49,11 @@ func (Sweeper) RunOrphanUnit(ctx context.Context, role roles.Role, cfg config.Co
 		slog.Warn("orphan reconcile: list failed", "role", role.Name, "err", err)
 		return deps
 	}
-	reclaimed, stopped, candidates := reconcileOrphanSessionsFrom(ctx, role, deps, orphanEnv{
+	reclaimed, stopped, candidates := reconcileOrphanSessionsFrom(ctx, role, deps, s.env(orphanEnv{
 		open:    worktree.GitOpener,
 		quiet:   newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil),
 		lockDir: deps.LockDir,
-	}, sessions)
+	}), sessions)
 	recordSweepPass("dispatch", role.Name, "orphan_reconcile", reclaimed+stopped, time.Since(t0), deps)
 	if reclaimed+stopped > 0 {
 		slog.Info("dispatch: reconciled orphaned sessions", "reclaimed", reclaimed, "hard_stopped", stopped)
@@ -70,9 +70,11 @@ type poolReconciler struct {
 	cfg  config.Config
 	deps executor.Deps
 	// cwds overrides the live-process probe on the dispatch path (tests only);
-	// nil means the production probe, processCWDs. It never means "no probe": a
+	// nil means the production probe, the sweeper's liveCWDs. It never means "no probe": a
 	// failed or unavailable probe keeps the directory.
 	cwds cwdProbe
+	// sweeper supplies the ports (gauge, sweep bounds, live-process probe).
+	sweeper Sweeper
 }
 
 // probe returns the live-process probe for the dispatch path.
@@ -80,14 +82,15 @@ func (p poolReconciler) probe() cwdProbe {
 	if p.cwds != nil {
 		return p.cwds
 	}
-	return processCWDs
+	return p.sweeper.liveCWDs
 }
 
-func NewPoolReconciler(role roles.Role, cfg config.Config, deps executor.Deps) executor.Reconciler {
+// NewPoolReconciler builds the dispatch-path reconciler over the Sweeper's ports.
+func (s Sweeper) NewPoolReconciler(role roles.Role, cfg config.Config, deps executor.Deps) executor.Reconciler {
 	if role.CCPool == nil {
 		return nil
 	}
-	return poolReconciler{role: role, cfg: cfg, deps: deps}
+	return poolReconciler{role: role, cfg: cfg, deps: deps, sweeper: s}
 }
 
 // stampPath is the pool's negative-cache stamp: one file per pool, named by a
@@ -175,7 +178,7 @@ func (p poolReconciler) ReclaimLeakedWorktree(ctx context.Context, beadID string
 		// removal, which would otherwise fail this dispatch's `git worktree add`
 		// with "already exists" (leftoverdir.go).
 		if l, isLeftover := leftoverCandidate(filepath.Join(dir, beadID), beadID, p.cfg.RepoRoot, p.now(), worktreeSweepGrace(p.deps)); isLeftover {
-			reclaimLeftoverDir(ctx, p.role, p.deps, orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir}, l)
+			reclaimLeftoverDir(ctx, p.role, p.deps, p.sweeper.env(orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir}), l)
 		}
 		return nil
 	}
@@ -186,7 +189,7 @@ func (p poolReconciler) ReclaimLeakedWorktree(ctx context.Context, beadID string
 	if worktreeHeldByRow(sessions, c) {
 		return nil
 	}
-	env := orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir}
+	env := p.sweeper.env(orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir})
 	if env.cwds != nil {
 		cwds, err := env.cwds(ctx)
 		if err != nil {
