@@ -127,7 +127,7 @@ func runQuery(args []string) int {
 	// unconfigured invocation (no --query-config; TestLiveQuery's own case) must
 	// stay a pure, side-effect-free stub reply, never touching a real ccpool/bd.
 	// Best effort: logged, never turned into a query failure.
-	if closed := reconcileDefaultPool(ctx, cfg); closed > 0 {
+	if closed := sweeper.ReconcileDefaultPool(ctx, cfg); closed > 0 {
 		slog.Info("query: reconciled stale default-pool sessions with closed beads", "closed", closed)
 	}
 	events, err := queryBeadsReady(ctx, br, qf)

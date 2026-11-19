@@ -40,13 +40,18 @@ import (
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/cliutil"
+	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/x/jsonllogger"
 )
 
 var version = "dev"
 
+// sweeper carries the hygiene passes (janitor, orphan unit, reconcile, worktree
+// sweeps) and the ports they need from this command.
+var sweeper = hygiene.Sweeper{Version: version, Help: helpText}
+
 func main() {
-	orphanGaugeEmit = ccpoolGaugeEmit
+	sweeper.InstallProductionGauges()
 	slog.SetDefault(jsonllogger.NewLogger(os.Stderr, jsonllogger.WithService("pg-router-handler-ccpool")))
 	os.Exit(run(os.Args[1:]))
 }
@@ -84,9 +89,9 @@ func run(args []string) int {
 	case "query":
 		return runQuery(args[1:])
 	case "janitor":
-		return runJanitor(args[1:])
+		return sweeper.RunJanitor(args[1:])
 	case "remove-worktree":
-		return runRemoveWorktree(args[1:])
+		return sweeper.RunRemoveWorktree(args[1:])
 	default:
 		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-ccpool: unknown subcommand %q", args[0]), usageLine)
 		return conformance.ExitUsage

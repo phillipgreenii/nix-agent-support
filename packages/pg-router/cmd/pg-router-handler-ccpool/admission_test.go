@@ -17,6 +17,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
+	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
@@ -321,7 +322,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 	cfg.WorktreeDir = wtDir
 	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
 	cc := &poolCC{OrphanCC: &dtest.OrphanCC{}}
-	r := newPoolReconciler(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
+	r := hygiene.NewPoolReconciler(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
 	if err := r.ReclaimLeakedWorktree(context.Background(), "zr-w"); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +334,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 			t.Fatalf("%q: %v", bad, err)
 		}
 	}
-	if newPoolReconciler(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
+	if hygiene.NewPoolReconciler(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
 		t.Fatal("a role without a ccpool block has no reconciler")
 	}
 }
@@ -349,13 +350,5 @@ func TestConfig_declineReconcileMinIntervalDefaultsAndLoads(t *testing.T) {
 	c, err := rolefile.LoadConfig(p)
 	if err != nil || c.DeclineReconcileMinInterval != 5*time.Second {
 		t.Errorf("LoadConfig: %v, interval=%v, want 5s", err, c.DeclineReconcileMinInterval)
-	}
-}
-
-// TestClosedReconcileStampPrefixMatchesDtest pins the shared test helper's copy
-// of the stamp prefix to the production constant.
-func TestClosedReconcileStampPrefixMatchesDtest(t *testing.T) {
-	if dtest.ClosedReconcileStampPrefix != closedReconcileStampPrefix {
-		t.Fatalf("dtest.ClosedReconcileStampPrefix = %q, want %q", dtest.ClosedReconcileStampPrefix, closedReconcileStampPrefix)
 	}
 }

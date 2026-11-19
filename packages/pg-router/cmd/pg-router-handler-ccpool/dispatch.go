@@ -16,6 +16,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/dispatchlib"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
 	"github.com/phillipgreenii/pg-router/internal/handlers/handlerstate"
+	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
@@ -114,9 +115,9 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// closed-bead sessions on capacity pressure and checks its own bead's
 	// worktree, through the Reconciler seam. Best effort, never a dispatch
 	// failure.
-	deps = runOrphanUnit(ctx, role, cfg, deps)
+	deps = sweeper.RunOrphanUnit(ctx, role, cfg, deps)
 	if deps.Reconciler == nil {
-		deps.Reconciler = newPoolReconciler(role, cfg, deps)
+		deps.Reconciler = hygiene.NewPoolReconciler(role, cfg, deps)
 	}
 
 	// Zero-model-cost precheck (INV-CCH-22): a dispatch whose bead no longer

@@ -35,7 +35,7 @@ func alertJanitorFamilyNames(text string) []string {
 func definedJanitorNames(t *testing.T) map[string]bool {
 	t.Helper()
 	defined := map[string]bool{}
-	for _, f := range []string{"janitor_metrics.go", "janitor_census.go"} {
+	for _, f := range []string{"../../internal/handlers/hygiene/janitor_metrics.go", "../../internal/handlers/hygiene/janitor_census.go"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)

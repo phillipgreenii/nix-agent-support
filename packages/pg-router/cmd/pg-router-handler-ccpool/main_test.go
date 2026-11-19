@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"io"
 	"os"
 	"regexp"
@@ -11,6 +10,7 @@ import (
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/corecall"
+	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 )
@@ -59,14 +59,13 @@ func TestMain(m *testing.M) {
 	newGuardCheck = func(config.Config) originguard.Check { return nil }
 	// No test depends on lsof: the closed-bead teardown sees no live process
 	// unless a test sets its own probe.
-	teardownProbe = func(context.Context) ([]string, error) { return nil, nil }
+	hygiene.DisableTeardownProbe()
 	dir, err := os.MkdirTemp("", "ccpool-adapter-state-")
 	if err != nil {
 		panic(err)
 	}
 	_ = os.Setenv("XDG_STATE_HOME", dir)
 	code := m.Run()
-	removeSharedSweepFixture()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
