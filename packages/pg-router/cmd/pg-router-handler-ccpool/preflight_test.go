@@ -57,3 +57,32 @@ func TestPrecheck_bdUnreachable(t *testing.T) {
 		t.Error("unreachable bd should fail precheck")
 	}
 }
+
+// An unset (empty) expected prefix skips the assertion entirely: bd is not even
+// asked for the store's prefix, so a store with any prefix (or none) passes.
+func TestPrecheckPrefix_unsetSkipsAssertion(t *testing.T) {
+	for name, br := range map[string]fakeBR{
+		"other prefix": {out: map[string]string{"config get issue_prefix": "anything"}},
+		"bd errors":    {err: errors.New("bd boom")},
+	} {
+		if err := precheckPrefix(context.Background(), br, ""); err != nil {
+			t.Errorf("%s: unset prefix should skip the assertion, got %v", name, err)
+		}
+	}
+}
+
+func TestPrecheck_unsetPrefixPassesAndSetPrefixStillEnforced(t *testing.T) {
+	br := fakeBR{out: map[string]string{
+		"list --limit 1 --json":   "[]",
+		"config get issue_prefix": "pfx",
+	}}
+	if err := precheck(context.Background(), "/x", "", br); err != nil {
+		t.Errorf("unset prefix should pass precheck, got %v", err)
+	}
+	if err := precheck(context.Background(), "/x", "pfx", br); err != nil {
+		t.Errorf("matching set prefix should pass precheck, got %v", err)
+	}
+	if err := precheck(context.Background(), "/x", "other", br); err == nil {
+		t.Error("a set prefix that differs from the store's must still fail precheck")
+	}
+}

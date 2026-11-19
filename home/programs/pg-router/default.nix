@@ -414,7 +414,7 @@ in
         default = null;
         description = ''
           PG_ROUTER_BEADS_PREFIX override. `null` leaves pg-router's own default
-          (`zr`) or any externally-set env var in effect; set explicitly for a
+          (unset: the precheck skips the prefix assertion) or any externally-set env var in effect; set explicitly for a
           deployment using a different bd issue prefix.
         '';
       };

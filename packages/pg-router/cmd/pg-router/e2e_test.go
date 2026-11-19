@@ -42,10 +42,10 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/core"
 )
 
-// e2eBeadsPrefix matches config.Default()'s BeadsPrefix ("zr") so the real
-// run-until-idle subprocess's precheck (bd config get issue_prefix == expected)
-// passes with no PG_ROUTER_BEADS_PREFIX override needed.
-const e2eBeadsPrefix = "zr"
+// e2eBeadsPrefix is the prefix the throwaway bd store is initialised with. The
+// test also sets PG_ROUTER_BEADS_PREFIX to it, so the real run-until-idle
+// subprocess precheck (bd config get issue_prefix == expected) is enforced.
+const e2eBeadsPrefix = "e2e"
 
 // e2eEventJSON is the operator-supplied event push-inject delivers to the real
 // core. It carries an explicit far-future expiresAt (mirroring
@@ -168,6 +168,7 @@ func TestE2E_RunUntilIdlePushInject_RealBinary(t *testing.T) {
 	writeE2EConfig(t, repoRoot, markerPath)
 
 	t.Setenv("PG_ROUTER_REPO_ROOT", repoRoot)
+	t.Setenv("PG_ROUTER_BEADS_PREFIX", e2eBeadsPrefix)
 	t.Setenv("PG_ROUTER_LOG_DIR", logDir)
 	// Hermetic: never let a real operator's XDG-global budget config leak in.
 	t.Setenv("PG_ROUTER_GLOBAL_CONFIG", filepath.Join(t.TempDir(), "no-such-global-config.toml"))

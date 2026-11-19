@@ -12977,7 +12977,7 @@
                         [ "$(jq -r .permissionMode "$launchConfigFile")" = plan ]
                         # prTool is retired (bead pg2-k9vmd): the launch config no longer renders it.
                         [ "$(jq -r 'has("prTool")' "$launchConfigFile")" = false ]
-                        [ "$(jq -r .beadsPrefix "$launchConfigFile")" = zr ]
+                        [ "$(jq -r .beadsPrefix "$launchConfigFile")" = "" ]
                         [ "$(jq -r .autonomous "$launchConfigFile")" = true ]
                         [ "$(jq -r .effort "$launchConfigFile")" = medium ]
                         [ "$(jq -r .model "$launchConfigFile")" = claude-sonnet-5-5 ]

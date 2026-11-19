@@ -37,9 +37,13 @@ func precheck(ctx context.Context, repoRoot, beadsPrefix string, br beads.Runner
 }
 
 // precheckPrefix asserts the store bd resolves carries the expected issue
-// prefix (a guard against pointing at the wrong store). Testable seam: tests
+// prefix (a guard against pointing at the wrong store). An empty want means no
+// prefix is configured, so the assertion is skipped. Testable seam: tests
 // pass a fake runner returning the prefix.
 func precheckPrefix(ctx context.Context, br beads.Runner, want string) error {
+	if want == "" {
+		return nil
+	}
 	got, err := readBeadsPrefix(ctx, br)
 	if err != nil {
 		return err

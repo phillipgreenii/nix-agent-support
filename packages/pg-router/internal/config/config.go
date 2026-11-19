@@ -302,7 +302,7 @@ func defaultWith(src Sources) Config {
 	return Config{
 		RepoRoot:              cwd,
 		Levels:                DefaultLevelsConfig(),
-		BeadsPrefix:           "zr",
+		BeadsPrefix:           "",
 		WorktreeDir:           state + "/pg-router/worktrees",
 		SkillMD:               "",
 		WorkerSkillMD:         "",

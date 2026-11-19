@@ -189,7 +189,7 @@ const (
 )
 
 // isTriageRole reports whether role is a triage role: its name contains
-// "triage" (covers pg2-/zr-escalation-triager and the split-triage role). A
+// "triage" (covers pg2-/alt-escalation-triager and the split-triage role). A
 // triage role's own budget stop goes to a human, never back onto the escalated
 // path it works, so a bead cannot loop through the triager forever.
 func isTriageRole(role string) bool {

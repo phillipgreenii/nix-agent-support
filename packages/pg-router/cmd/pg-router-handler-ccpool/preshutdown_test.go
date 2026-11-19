@@ -313,7 +313,7 @@ func TestCloseSessionAndWorktree_noBeadMetaSkipsBranchDelete(t *testing.T) {
 
 // TestCloseSinglePhase_worktreeRemoveWarnOnlyForRealFailures pins pg2-tp8rx:
 // a session whose cwd is not inside any git repository (the non-git
-// workspace root /Users/phillipg/phillipg_mbp that drain-pg2/drain-zr
+// workspace root /Users/phillipg/phillipg_mbp that drain-pg2/drain-alt
 // sessions run in) has no worktree to remove, so its teardown must not emit
 // the "worktree remove failed" WARN -- the noise would mask genuine teardown
 // failures. Open's real failure wraps gitclient.ErrNotARepository, so the

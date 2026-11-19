@@ -2201,11 +2201,11 @@ in
       };
       beadsPrefix = lib.mkOption {
         type = lib.types.str;
-        default = "zr";
+        default = "";
         description = ''
           BeadsPrefix in the launch config -- the expected bd issue-store
-          prefix, checked by this module's own precheck. Matches
-          `internal/config.Default()`'s own value.
+          prefix, checked by this module's own precheck. The empty default
+          leaves it unset, so the precheck skips the prefix assertion.
         '';
       };
       permissionMode = lib.mkOption {

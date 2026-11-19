@@ -23,7 +23,7 @@ import (
 
 const (
 	relActor   = "pgii-pool__drain"
-	relSession = "pg-router-drain-zr-d"
+	relSession = "pg-router-drain-alt-d"
 	relBead    = "zr-d"
 )
 

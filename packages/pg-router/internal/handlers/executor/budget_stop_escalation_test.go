@@ -101,7 +101,7 @@ func TestDispatch_budgetStopAtThresholdOne_escalatesBeforeUnclaim(t *testing.T) 
 		notLabels []string
 	}{
 		{"drain-pg2", "escalated", []string{"needs-split-review", "human"}},
-		{"drain-zr", "escalated", []string{"needs-split-review", "human"}},
+		{"drain-alt", "escalated", []string{"needs-split-review", "human"}},
 		{"pg2-escalation-triager", "human", []string{"escalated", "needs-split-review"}},
 	} {
 		t.Run(tc.role, func(t *testing.T) {

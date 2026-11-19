@@ -317,7 +317,7 @@ func TestEscalate_belowThresholdDoesNothing(t *testing.T) {
 // parked for a human, the label and the comment precede the unclaim, and nothing
 // is removed from the bead.
 func TestEscalate_atThresholdLabelsEscalatedBeforeUnclaim(t *testing.T) {
-	for _, role := range []string{"worker", "drain-pg2", "drain-zr", "review"} {
+	for _, role := range []string{"worker", "drain-pg2", "drain-alt", "review"} {
 		for _, sc := range escScenarios {
 			t.Run(role+"/"+sc.name, func(t *testing.T) {
 				bd := seeded(sc.prior...)
@@ -377,7 +377,7 @@ func TestEscalate_splitIneligibleBeadsAreEscalatedWithReason(t *testing.T) {
 // bead back on the escalated path it works, so it goes to human and loses
 // needs-split-review (bead pg2-47rsh), before the unclaim.
 func TestEscalate_triageRoleStopGoesToHuman(t *testing.T) {
-	for _, role := range []string{"pg2-escalation-triager", "zr-escalation-triager", "pg2-split-triager", "split-triage"} {
+	for _, role := range []string{"pg2-escalation-triager", "alt-escalation-triager", "pg2-split-triager", "split-triage"} {
 		for _, sc := range escScenarios {
 			t.Run(role+"/"+sc.name, func(t *testing.T) {
 				bd := seeded(append(append([]string{}, sc.prior...), "needs-split-review")...)

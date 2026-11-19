@@ -465,7 +465,7 @@ func MergeAllowedTools(base string, extra []string) string {
 func Default() Config {
 	return Config{
 		WorktreeDir:                 "",
-		BeadsPrefix:                 "zr",
+		BeadsPrefix:                 "",
 		MaxWait:                     1800 * time.Second,
 		PollInterval:                10 * time.Second,
 		WatchdogPoll:                30 * time.Second,

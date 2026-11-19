@@ -584,8 +584,8 @@ func absentGlobalConfig(t *testing.T) {
 
 func TestDefault(t *testing.T) {
 	d := Default()
-	if d.BeadsPrefix != "zr" {
-		t.Errorf("BeadsPrefix = %q, want zr", d.BeadsPrefix)
+	if d.BeadsPrefix != "" {
+		t.Errorf("BeadsPrefix = %q, want empty (unset: precheck skips the assertion)", d.BeadsPrefix)
 	}
 	if d.MaxFeedback != 1 || d.MaxWorker != 1 {
 		t.Errorf("caps = %d/%d, want 1/1", d.MaxFeedback, d.MaxWorker)

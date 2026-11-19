@@ -184,7 +184,7 @@ the schema and defaults.
 
 Pool-wide settings come from PG_ROUTER_* environment variables:
   PG_ROUTER_REPO_ROOT        monorepo root the drain operates in (default: cwd)
-  PG_ROUTER_BEADS_PREFIX     expected bead prefix, asserted at precheck (default zr)
+  PG_ROUTER_BEADS_PREFIX     expected bead prefix, asserted at precheck (default unset: skipped)
   PG_ROUTER_BUDGET_TOKENS    per-worker token budget; 0 = unlimited (default 0)
   PG_ROUTER_BUDGET_COST      per-worker cost budget in cents; 0 = unlimited (default 0)
   PG_ROUTER_BUDGET_TIME      per-worker wall-clock budget in seconds (default 1500)
