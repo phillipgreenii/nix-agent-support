@@ -43,7 +43,7 @@ func runPreShutdown(args []string) int {
 	// --config is still accepted (the core passes the handler's launch flags to
 	// every subcommand) but is not read.
 	_ = fs.String("config", os.Getenv(rolefile.EnvConfig), "unused: preShutdown reads no launch config")
-	if exit, done := parseFlags("preShutdown", fs, args); done {
+	if exit, done := rolefile.ParseFlags(helpText, "preShutdown", fs, args); done {
 		return exit
 	}
 	return servePreShutdown(os.Stdin, os.Stdout)
@@ -53,7 +53,7 @@ func runPreShutdown(args []string) int {
 // schema or has no usable role gets an error reply; any other request gets an
 // ok reply with no side effect.
 func servePreShutdown(stdin io.Reader, stdout io.Writer) int {
-	raw, _, exit, ok := readRequest("preShutdown", "handler.preShutdown", stdin, stdout)
+	raw, _, exit, ok := rolefile.ReadRequest("preShutdown", "handler.preShutdown", stdin, stdout)
 	if !ok {
 		return exit
 	}

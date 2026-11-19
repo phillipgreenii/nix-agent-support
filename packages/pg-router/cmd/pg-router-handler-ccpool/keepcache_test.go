@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/x/gitclient"
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
@@ -381,13 +383,13 @@ func TestKeepCache_otherBranchKeepIsCachedSoEveryCandidateIsReached(t *testing.T
 
 // listCountCC counts List calls on the harness session client.
 type listCountCC struct {
-	*orphanCC
+	*dtest.OrphanCC
 	lists atomic.Int64
 }
 
 func (c *listCountCC) List(ctx context.Context) ([]ccpool.Session, error) {
 	c.lists.Add(1)
-	return c.orphanCC.List(ctx)
+	return c.OrphanCC.List(ctx)
 }
 
 // A cached candidate costs no per-candidate re-list and no per-candidate process
@@ -395,7 +397,7 @@ func (c *listCountCC) List(ctx context.Context) ([]ccpool.Session, error) {
 // pre-filter probe, and nothing more.
 func TestKeepCache_cachedCandidateSkipsReListAndProbe(t *testing.T) {
 	h := newSweepHarness(t)
-	cc := &listCountCC{orphanCC: h.cc}
+	cc := &listCountCC{OrphanCC: h.cc}
 	h.deps.CC = cc
 	var probes atomic.Int64
 	h.env.cwds = func(context.Context) ([]string, error) {
@@ -437,7 +439,7 @@ func TestKeepCache_cachedCandidateSkipsReListAndProbe(t *testing.T) {
 // worktree and the candidate counts as examined, not cached.
 func TestKeepCache_uncachedCandidateStillHonoursTheDispatchLock(t *testing.T) {
 	h := newSweepHarness(t)
-	cc := &listCountCC{orphanCC: h.cc}
+	cc := &listCountCC{OrphanCC: h.cc}
 	h.deps.CC = cc
 	path := h.leak("zr-k")
 	lock, err := sessionlock.TryLock(h.lockDir, sessionlock.WorktreeKey("zr-k"))

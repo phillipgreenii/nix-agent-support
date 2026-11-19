@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/handlerstate"
 )
@@ -39,10 +42,10 @@ func postStartupWith(t *testing.T, body, cfgPath string, kick janitorKick) (int,
 // the role's first dispatch.)
 func TestServePostStartup_doesNotSweep(t *testing.T) {
 	t.Setenv("CCPOOL_POOL", "")
-	cfgPath, stateDir := launchConfig(t, `,"SessionPrefix":"pg-router-"`)
-	name, cfg := workerRole("", "")
+	cfgPath, stateDir := dtest.LaunchConfig(t, `,"SessionPrefix":"pg-router-"`)
+	name, cfg := dtest.WorkerRole("", "")
 	k := &kickRecorder{}
-	code, out := postStartupWith(t, request("", name, cfg), cfgPath, k.kick)
+	code, out := postStartupWith(t, dtest.Request("", name, cfg), cfgPath, k.kick)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d; reply %s", code, conformance.ExitOK, out)
 	}
@@ -67,7 +70,7 @@ func TestServePostStartup_doesNotSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ro, err := parseRole(body)
+	ro, err := rolefile.ParseRole(body)
 	if err != nil || ro.Name != name {
 		t.Errorf("role file = %s (%v); want the %q role object the janitor can decode", body, err, name)
 	}
@@ -76,12 +79,12 @@ func TestServePostStartup_doesNotSweep(t *testing.T) {
 // A janitor that cannot be started never fails the call: the scheduled janitor
 // still runs, and the reply is still `ok`.
 func TestServePostStartup_kickFailureIsNotAFailure(t *testing.T) {
-	cfgPath, _ := launchConfig(t, "")
-	name, cfg := workerRole("", "")
+	cfgPath, _ := dtest.LaunchConfig(t, "")
+	name, cfg := dtest.WorkerRole("", "")
 	k := &kickRecorder{err: errors.New("spawn refused")}
 	var code int
 	var out string
-	msgs := captureSlog(t, func() { code, out = postStartupWith(t, request("", name, cfg), cfgPath, k.kick) })
+	msgs := dtest.CaptureSlog(t, func() { code, out = postStartupWith(t, dtest.Request("", name, cfg), cfgPath, k.kick) })
 	if code != conformance.ExitOK || decodeReply(t, out)["outcome"] != "ok" {
 		t.Fatalf("exit = %d, reply = %s; want ok", code, out)
 	}
@@ -94,11 +97,11 @@ func TestServePostStartup_kickFailureIsNotAFailure(t *testing.T) {
 // daemon restart) is safe: each call replies ok and kicks the janitor, whose
 // single-flight lock makes the extra runs harmless.
 func TestServePostStartup_repeatedCallsAreSafe(t *testing.T) {
-	cfgPath, _ := launchConfig(t, "")
-	name, cfg := workerRole("", "")
+	cfgPath, _ := dtest.LaunchConfig(t, "")
+	name, cfg := dtest.WorkerRole("", "")
 	k := &kickRecorder{}
 	for i := 0; i < 3; i++ {
-		if code, out := postStartupWith(t, request("", name, cfg), cfgPath, k.kick); code != conformance.ExitOK {
+		if code, out := postStartupWith(t, dtest.Request("", name, cfg), cfgPath, k.kick); code != conformance.ExitOK {
 			t.Fatalf("call %d: exit = %d, reply %s", i, code, out)
 		}
 	}
@@ -115,11 +118,11 @@ func TestKickJanitor_startsADetachedRealJanitor(t *testing.T) {
 	t.Setenv(adapterRunEnv, "1")
 	t.Setenv("PATH", "/usr/bin") // ccpool and bd are unreachable: the passes fail best-effort
 	t.Setenv("CCPOOL_POOL", "")
-	cfgPath, stateDir := launchConfig(t, "")
-	name, cfg := workerRole("", "")
+	cfgPath, stateDir := dtest.LaunchConfig(t, "")
+	name, cfg := dtest.WorkerRole("", "")
 	var out bytes.Buffer
 	k := func(c, r string) error { return kickJanitor(c, r) }
-	if code := servePostStartup(strings.NewReader(request("", name, cfg)), &out, cfgPath, k); code != conformance.ExitOK {
+	if code := servePostStartup(strings.NewReader(dtest.Request("", name, cfg)), &out, cfgPath, k); code != conformance.ExitOK {
 		t.Fatalf("exit = %d, reply %s", code, out.String())
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -143,22 +146,22 @@ func TestKickJanitor_startsADetachedRealJanitor(t *testing.T) {
 // config and one pool.
 func TestFirstDispatchAfterSimulatedBootLaunchesWithAFullPoolOfClosedBeadSessions(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"), pressureRow("b", "zr-x"))
-	name, cfg := workerRole("", "")
+	name, cfg := dtest.WorkerRole("", "")
 	k := &kickRecorder{}
-	if code, out := postStartupWith(t, request("", name, cfg), e.cfgPath, k.kick); code != conformance.ExitOK {
+	if code, out := postStartupWith(t, dtest.Request("", name, cfg), e.cfgPath, k.kick); code != conformance.ExitOK {
 		t.Fatalf("postStartup exit = %d, reply %s", code, out)
 	}
-	if got := e.cc.closed(); len(got) != 0 {
+	if got := e.cc.Closed(); len(got) != 0 {
 		t.Fatalf("postStartup closed %v; the boot must leave the full pool for the dispatch to meet", got)
 	}
 	if _, caps := e.cc.counts(); caps != 0 {
 		t.Fatalf("postStartup touched ccpool capacity (%d calls)", caps)
 	}
-	code, reply := e.dispatch(t, defaultEvent)
+	code, reply := e.dispatch(t, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || reply["reason"] != "launch-failed" {
 		t.Fatalf("exit=%d reply=%v, want the first dispatch to pass the capacity gate and reach the (failing) launch", code, reply)
 	}
-	got := e.cc.closed()
+	got := e.cc.Closed()
 	if len(got) == 0 || got[0] != "pg-router-worker-a" {
 		t.Fatalf("closed = %v, want a closed-bead session freed for the dispatch", got)
 	}
@@ -198,8 +201,8 @@ func TestServePostStartup_requestWithoutRoleIsUsageError(t *testing.T) {
 // A role whose config the strict decoder rejects, or a launch config that
 // cannot be loaded, is an error reply (exit 1) and the janitor is not kicked.
 func TestServePostStartup_invalidRoleOrLaunchConfigIsAnError(t *testing.T) {
-	cfgPath, _ := launchConfig(t, "")
-	_, good := workerRole("", "")
+	cfgPath, _ := dtest.LaunchConfig(t, "")
+	_, good := dtest.WorkerRole("", "")
 	bad := mustCfg(`{"bogus":1}`)
 	for name, tc := range map[string]struct {
 		cfg     map[string]any
@@ -211,7 +214,7 @@ func TestServePostStartup_invalidRoleOrLaunchConfigIsAnError(t *testing.T) {
 		"unreadable launch cfg":   {good, "/does/not/exist/launch.json", "launch.json"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			code, out := postStartupWith(t, request("", "worker", tc.cfg), tc.cfgPath, noKick(t))
+			code, out := postStartupWith(t, dtest.Request("", "worker", tc.cfg), tc.cfgPath, noKick(t))
 			msg, _ := decodeReply(t, out)["error"].(string)
 			if code != conformance.ExitError || !strings.Contains(msg, tc.want) {
 				t.Fatalf("exit = %d, out = %q; want exit %d and %q in the error reply", code, out, conformance.ExitError, tc.want)

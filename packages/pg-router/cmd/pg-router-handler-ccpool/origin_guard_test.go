@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
@@ -88,7 +90,7 @@ func TestDispatch_guardUnavailableDeclinesWithoutBeadsCalls(t *testing.T) {
 	}
 	t.Cleanup(func() { newGuardCheck = old })
 	r := workerWithIsolation(t, `{}`)
-	code, out := dispatchWith(t, r.name, r.cfg, cfgPath, defaultEvent)
+	code, out := dispatchWith(t, r.name, r.cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
 		t.Fatalf("exit=%d out=%q, want a busy origin-unavailable decline", code, out)
 	}

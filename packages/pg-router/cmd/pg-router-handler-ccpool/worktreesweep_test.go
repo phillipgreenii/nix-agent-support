@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/x/gitclient"
 	"github.com/phillipgreenii/x/gitfixture"
 	"github.com/phillipgreenii/x/gittest"
@@ -45,7 +47,7 @@ type sweepHarness struct {
 	repo     string
 	wtDir    string
 	lockDir  string
-	cc       *orphanCC
+	cc       *dtest.OrphanCC
 	deps     executor.Deps
 	env      orphanEnv
 	logPath  string
@@ -157,7 +159,7 @@ func (h *sweepHarness) bind(t *testing.T) {
 		)
 	}
 
-	h.cc = &orphanCC{}
+	h.cc = &dtest.OrphanCC{}
 	h.logPath = filepath.Join(t.TempDir(), "events.jsonl")
 	lw, err := eventlog.New(h.logPath)
 	if err != nil {
@@ -169,7 +171,7 @@ func (h *sweepHarness) bind(t *testing.T) {
 	cfg.WorktreeDir = wtDir
 	cfg.SessionPrefix = "pg-router-"
 	h.nowFixed = time.Now()
-	h.deps = executor.Deps{CC: h.cc, BD: &orphanBD{}, Cfg: cfg, Log: lw, Now: func() time.Time { return h.nowFixed }}
+	h.deps = executor.Deps{CC: h.cc, BD: &dtest.OrphanBD{}, Cfg: cfg, Log: lw, Now: func() time.Time { return h.nowFixed }}
 	h.env = orphanEnv{open: h.opener, lockDir: h.lockDir}
 	h.role = orphanRole(roles.CloseOnly, 0)
 }
@@ -338,7 +340,7 @@ func TestSweep_leakedWorktreeWithNoRow_isReclaimedWithBranch(t *testing.T) {
 func TestSweep_worktreeOfClosedNotLiveRow_isReclaimed(t *testing.T) {
 	h := newSweepHarness(t)
 	path := h.leak("zr-k")
-	h.cc.sessions = []ccpool.Session{{
+	h.cc.Sessions = []ccpool.Session{{
 		ExternalID: "pg-router-worker-zr-k-1", State: ccpool.StateIdle, Live: false, CloseReason: "idle_ttl", CWD: path,
 		Meta: map[string]string{ccpool.MetaKeyBead: "zr-k"},
 	}}
@@ -373,7 +375,7 @@ func TestSweep_keptWhileASessionRowNamesIt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := base.forRow(t)
 			path := h.leak("zr-k")
-			h.cc.sessions = []ccpool.Session{tc.row(path)}
+			h.cc.Sessions = []ccpool.Session{tc.row(path)}
 			if got := h.sweep(); got != 0 {
 				t.Errorf("removed %d, want 0", got)
 			}
@@ -494,7 +496,7 @@ func TestSweep_ignoresDirectoriesThatAreNotLinkedWorktrees(t *testing.T) {
 func TestSweep_listErrorMeansNoAction(t *testing.T) {
 	h := newSweepHarness(t)
 	path := h.leak("zr-k")
-	h.cc.listErr = errors.New("ccpool list: boom")
+	h.cc.ListErr = errors.New("ccpool list: boom")
 	if got := h.sweep(); got != 0 {
 		t.Errorf("removed %d on a list error, want 0", got)
 	}

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
@@ -47,7 +49,7 @@ func newJanitorFixture(t *testing.T, roleSpecs ...[2]string) *janitorFixture {
 	}
 	f := &janitorFixture{t: t, stateDir: stateDir, cfgPath: cfgPath, opts: janitorOptions{cfgPath: cfgPath, deadline: time.Minute}}
 	for _, spec := range roleSpecs {
-		_, ccfg := workerRole("", "")
+		_, ccfg := dtest.WorkerRole("", "")
 		if spec[1] != "" {
 			ccfg["ccpool"].(map[string]any)["poolDir"] = spec[1]
 		}

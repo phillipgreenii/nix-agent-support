@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/x/gitclient"
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
@@ -100,7 +102,7 @@ type staleHarness struct {
 	t      *testing.T
 	cc     *fakeCC
 	open   *guardOpener
-	br     fakeBR
+	br     dtest.FakeBR
 	sess   ccpool.Session
 	latest func(string) (time.Time, bool)
 	wtDir  string // handler cfg.WorktreeDir ("" = single-phase teardown)
@@ -117,7 +119,7 @@ func newStaleHarness(t *testing.T) *staleHarness {
 	h := &staleHarness{
 		t:    t,
 		open: newGuardOpener(),
-		br:   fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}},
+		br:   dtest.FakeBR{Out: map[string]string{"show zr-done --json": `{"status":"closed"}`}},
 		sess: ccpool.Session{
 			ExternalID:     staleSessionID,
 			State:          ccpool.StateNeedsInput,
@@ -291,14 +293,14 @@ func TestStaleDefaultPool_preservesWhenWorktreeStatFails(t *testing.T) {
 func TestStaleDefaultPool_preservesOpenBead(t *testing.T) {
 	for _, status := range []string{"open", "in_progress"} {
 		h := newStaleHarness(t)
-		h.br = fakeBR{out: map[string]string{"show zr-done --json": `{"status":"` + status + `"}`}}
+		h.br = dtest.FakeBR{Out: map[string]string{"show zr-done --json": `{"status":"` + status + `"}`}}
 		h.wantPreserved()
 	}
 }
 
 func TestStaleDefaultPool_preservesOnBeadLookupError(t *testing.T) {
 	h := newStaleHarness(t)
-	h.br = fakeBR{err: errors.New("bd down")}
+	h.br = dtest.FakeBR{Err: errors.New("bd down")}
 	h.wantPreserved()
 }
 
@@ -306,7 +308,7 @@ func TestStaleDefaultPool_preservesBeadThatCannotBeFound(t *testing.T) {
 	// bd reports an unknown id as an error, indistinguishable from an outage:
 	// failing closed is the only safe reading.
 	h := newStaleHarness(t)
-	h.br = fakeBR{err: errors.New("bd show: issue not found")}
+	h.br = dtest.FakeBR{Err: errors.New("bd show: issue not found")}
 	h.wantPreserved()
 }
 
@@ -368,7 +370,7 @@ func TestStaleDefaultPool_ignoresOtherPrefixes(t *testing.T) {
 func TestStaleDefaultPool_listFailureIsSoft(t *testing.T) {
 	cc := &fakeCC{listErr: errors.New("ccpool down")}
 	guard := newStaleSessionGuard((&fakeWorktreeOpener{}).Open, staleRepo, staleSessionMinIdle, nil, nil)
-	if n := reconcileStaleDefaultPoolSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, fakeBR{},
+	if n := reconcileStaleDefaultPoolSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, dtest.FakeBR{},
 		stalePrefix, staleRepo, "", nil, guard); n != 0 {
 		t.Fatalf("n=%d, want 0", n)
 	}
@@ -385,7 +387,7 @@ func TestStaleDefaultPool_mixedPass(t *testing.T) {
 	open := h.sess
 	open.ExternalID = "pg-router-worker-zr-open"
 	open.Meta = map[string]string{ccpool.MetaKeyBead: "zr-open"}
-	h.br = fakeBR{out: map[string]string{
+	h.br = dtest.FakeBR{Out: map[string]string{
 		"show zr-done --json":  `{"status":"closed"}`,
 		"show zr-fresh --json": `{"status":"closed"}`,
 		"show zr-open --json":  `{"status":"open"}`,
@@ -408,7 +410,7 @@ func TestReconcileClosedBeadSessions_unguardedPassIsUnchanged(t *testing.T) {
 		LastActivityAt: staleNow,
 		Meta:           map[string]string{ccpool.MetaKeyBead: "zr-done"},
 	}}}}
-	br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
+	br := dtest.FakeBR{Out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
 	if n := reconcileClosedBeadSessions(context.Background(), cc, (&fakeWorktreeOpener{}).Open, br, stalePrefix, staleRepo, "", nil); n != 1 {
 		t.Fatalf("role-pool pass must still close it; n=%d", n)
 	}

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -33,9 +35,9 @@ func stubTools(t *testing.T) (logPath string) {
 // reads no launch config either, so a missing one cannot fail it.
 func TestServePreShutdown_answersAtOnceWithNoSweepCalls(t *testing.T) {
 	for name, body := range map[string]string{
-		"role with config": request("", "worker", map[string]any{}),
-		"missing config":   request("", "worker", nil),
-		"unknown keys":     request("", "worker", map[string]any{"bogus": 1}),
+		"role with config": dtest.Request("", "worker", map[string]any{}),
+		"missing config":   dtest.Request("", "worker", nil),
+		"unknown keys":     dtest.Request("", "worker", map[string]any{"bogus": 1}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			logPath := stubTools(t)

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -24,7 +26,7 @@ type validateReplyBody struct {
 func validateWith(t *testing.T, name string, cfg map[string]any, skipPoolDirs bool) validateReplyBody {
 	t.Helper()
 	var out bytes.Buffer
-	if code := serveValidate(strings.NewReader(request("", name, cfg)), &out, skipPoolDirs); code != conformance.ExitOK {
+	if code := serveValidate(strings.NewReader(dtest.Request("", name, cfg)), &out, skipPoolDirs); code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d; stdout %s", code, conformance.ExitOK, out.String())
 	}
 	if err := schemas.ValidateBytes("handler.validate-reply", out.Bytes()); err != nil {
@@ -295,7 +297,7 @@ func TestValidateAndDispatchShareOneDecoder(t *testing.T) {
 		if r := validateWith(t, "r", cfg, true); len(r.Problems) != 1 {
 			t.Fatalf("validate problems = %q, want one", r.Problems)
 		}
-		if code, _ := dispatchWith(t, "r", cfg, "", defaultEvent); code != conformance.ExitError {
+		if code, _ := dispatchWith(t, "r", cfg, "", dtest.DefaultEvent); code != conformance.ExitError {
 			t.Errorf("dispatch of a config validate rejects: exit = %d, want %d", code, conformance.ExitError)
 		}
 	}

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -37,7 +39,7 @@ func runAdapterProcess(t *testing.T, args []string, stdin string, env ...string)
 // check, an unknown flag is a usage error, and the help documents the flag.
 func TestProcess_validateFlags(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-pool")
-	req := request("", "r", ccpoolConfig(t, missing, "", ""))
+	req := dtest.Request("", "r", ccpoolConfig(t, missing, "", ""))
 
 	code, out := runAdapterProcess(t, []string{"validate"}, req)
 	var r validateReplyBody

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -45,8 +47,8 @@ func ccpoolCapacityBrokenFake(t *testing.T) {
 
 func TestDispatch_poolCapacityUnknownExitsBusyWithReason(t *testing.T) {
 	ccpoolCapacityBrokenFake(t)
-	name, cfg := workerRole("", "")
-	code, got := dispatchWith(t, name, cfg, "", defaultEvent)
+	name, cfg := dtest.WorkerRole("", "")
+	code, got := dispatchWith(t, name, cfg, "", dtest.DefaultEvent)
 	if code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, conformance.ExitBusy, got)
 	}
@@ -60,8 +62,8 @@ func TestDispatch_poolCapacityUnknownExitsBusyWithReason(t *testing.T) {
 // pool-unreadable (bead pg2-s3pjt), NOT the alert-excluded session-in-flight.
 func TestDispatch_unreadablePoolExitsBusyPoolUnreadable(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
-	name, cfg := workerRole("", "")
-	code, got := dispatchWith(t, name, cfg, "", defaultEvent)
+	name, cfg := dtest.WorkerRole("", "")
+	code, got := dispatchWith(t, name, cfg, "", dtest.DefaultEvent)
 	if code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, conformance.ExitBusy, got)
 	}
@@ -80,10 +82,10 @@ func TestDispatch_unreadablePoolExitsBusyPoolUnreadable(t *testing.T) {
 // dispatch_decline record is written carrying the role's sessionEnv.
 func TestDispatch_launchFailedDeclinesFaultAndRecords(t *testing.T) {
 	fk := ccpoolNewFailsFake(t)
-	cfgPath, stateDir := launchConfig(t, "")
-	name, cfg := workerRole(`,"sessionEnv":{"PG_WRAP_SPEC":"/etc/pg-wrap/worker.toml","K15":"v"}`, "")
+	cfgPath, stateDir := dtest.LaunchConfig(t, "")
+	name, cfg := dtest.WorkerRole(`,"sessionEnv":{"PG_WRAP_SPEC":"/etc/pg-wrap/worker.toml","K15":"v"}`, "")
 
-	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
+	code, got := dispatchWith(t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy; stdout=%q", code, got)
 	}
@@ -102,7 +104,7 @@ func TestDispatch_launchFailedDeclinesFaultAndRecords(t *testing.T) {
 		t.Errorf("the abandoned session must be purge-closed; ccpool calls: %v", fk.Calls())
 	}
 
-	recs := eventRecords(t, stateDir, "dispatch_decline")
+	recs := dtest.EventRecords(t, stateDir, "dispatch_decline")
 	if len(recs) != 1 {
 		t.Fatalf("want one dispatch_decline, got %d: %v", len(recs), recs)
 	}
@@ -131,13 +133,13 @@ func TestDispatch_atCapacityWritesDispatchDecline(t *testing.T) {
 	f.On(cmdruntest.MatchName("ccpool")).Return(cmdruntest.Fail(1, ""))
 	bdAbsent(f)
 	useRunner(t, f.Runner())
-	cfgPath, stateDir := launchConfig(t, "")
-	name, cfg := workerRole(`,"sessionEnv":{"K15":"v"}`, "")
-	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
+	cfgPath, stateDir := dtest.LaunchConfig(t, "")
+	name, cfg := dtest.WorkerRole(`,"sessionEnv":{"K15":"v"}`, "")
+	code, got := dispatchWith(t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy; stdout=%q", code, got)
 	}
-	recs := eventRecords(t, stateDir, "dispatch_decline")
+	recs := dtest.EventRecords(t, stateDir, "dispatch_decline")
 	if len(recs) != 1 {
 		t.Fatalf("want one dispatch_decline, got %d: %v", len(recs), recs)
 	}
@@ -156,8 +158,8 @@ func TestDispatch_atCapacityWritesDispatchDecline(t *testing.T) {
 // sets itself.
 func TestDispatch_sessionEnvReachesCcpoolNewUnchanged(t *testing.T) {
 	fk := ccpoolNewFailsFake(t)
-	name, cfg := workerRole(`,"sessionEnv":{"PG_WRAP_SPEC":"/etc/pg-wrap/worker.toml","K15":"a b=c","EMPTY":""}`, "")
-	if code, got := dispatchWith(t, name, cfg, "", defaultEvent); code != conformance.ExitBusy {
+	name, cfg := dtest.WorkerRole(`,"sessionEnv":{"PG_WRAP_SPEC":"/etc/pg-wrap/worker.toml","K15":"a b=c","EMPTY":""}`, "")
+	if code, got := dispatchWith(t, name, cfg, "", dtest.DefaultEvent); code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy (the stub's new fails); stdout=%q", code, got)
 	}
 	newCall := callArgsOf(t, fk, "ccpool", "new")
@@ -189,8 +191,8 @@ func TestDispatch_badSessionEnvKeyFailsLoadWithoutAnyCall(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			fk := ccpoolNewFailsFake(t)
 			env, _ := json.Marshal(map[string]string{key: "v"})
-			name, cfg := workerRole(`,"sessionEnv":`+string(env), "")
-			code, got := dispatchWith(t, name, cfg, "", defaultEvent)
+			name, cfg := dtest.WorkerRole(`,"sessionEnv":`+string(env), "")
+			code, got := dispatchWith(t, name, cfg, "", dtest.DefaultEvent)
 			if code != conformance.ExitError {
 				t.Fatalf("exit = %d, want ExitError (%d); stdout=%q", code, conformance.ExitError, got)
 			}
@@ -215,8 +217,8 @@ func TestDispatch_unknownConfigKeyFailsStrictDecode(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("PATH", "/usr/bin")
-			rname, cfg := workerRole(tc.top, tc.cc)
-			code, got := dispatchWith(t, rname, cfg, "", defaultEvent)
+			rname, cfg := dtest.WorkerRole(tc.top, tc.cc)
+			code, got := dispatchWith(t, rname, cfg, "", dtest.DefaultEvent)
 			if code != conformance.ExitError {
 				t.Fatalf("exit = %d, want ExitError; stdout=%q", code, got)
 			}
@@ -232,14 +234,14 @@ func TestDispatch_unknownConfigKeyFailsStrictDecode(t *testing.T) {
 // required ccpool table rather than panicking.
 func TestDispatch_requestWithoutUsableRole(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
-	code, got := dispatchWith(t, "", nil, "", defaultEvent) // no role member
+	code, got := dispatchWith(t, "", nil, "", dtest.DefaultEvent) // no role member
 	if code != conformance.ExitUsage {
 		t.Fatalf("no role: exit = %d, want ExitUsage (%d); stdout=%q", code, conformance.ExitUsage, got)
 	}
 	if _, ok := decodeReply(t, got)["error"]; !ok {
 		t.Errorf("no role: reply %q carries no error", got)
 	}
-	code, got = dispatchWith(t, "worker", nil, "", defaultEvent) // role without config
+	code, got = dispatchWith(t, "worker", nil, "", dtest.DefaultEvent) // role without config
 	if code != conformance.ExitError || !strings.Contains(got, "role.config.ccpool: required") {
 		t.Fatalf("missing config: exit = %d stdout=%q, want ExitError naming the required ccpool table", code, got)
 	}
@@ -249,9 +251,9 @@ func TestDispatch_requestWithoutUsableRole(t *testing.T) {
 // the role and the config are loaded.
 func TestDispatch_roleDurationBoundedByLaunchConfig(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
-	cfgPath, _ := launchConfig(t, "")
-	name, cfg := workerRole("", `,"needsInputStall":"1s"`)
-	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
+	cfgPath, _ := dtest.LaunchConfig(t, "")
+	name, cfg := dtest.WorkerRole("", `,"needsInputStall":"1s"`)
+	code, got := dispatchWith(t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitError || !strings.Contains(got, "needsInputStall") {
 		t.Fatalf("exit = %d stdout=%q, want ExitError naming needsInputStall", code, got)
 	}
@@ -279,8 +281,8 @@ func TestDispatch_cancelledContextDoesNotDecline(t *testing.T) {
 		<-ctx.Done()
 		return cmdrun.Result{Code: -1, Signal: "killed", CtxErr: ctx.Err()}
 	})
-	cfgPath, stateDir := launchConfig(t, "")
-	name, cfg := workerRole("", "")
+	cfgPath, stateDir := dtest.LaunchConfig(t, "")
+	name, cfg := dtest.WorkerRole("", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -290,7 +292,7 @@ func TestDispatch_cancelledContextDoesNotDecline(t *testing.T) {
 		}
 		cancel()
 	}()
-	code, got := dispatchCtx(ctx, t, name, cfg, cfgPath, defaultEvent)
+	code, got := dispatchCtx(ctx, t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitError {
 		t.Fatalf("exit = %d, want ExitError (%d): a cancelled launch is a plain failure; stdout=%q", code, conformance.ExitError, got)
 	}
@@ -300,7 +302,7 @@ func TestDispatch_cancelledContextDoesNotDecline(t *testing.T) {
 		t.Fatalf("ccpool new never started")
 	}
 	if _, err := os.ReadFile(filepath.Join(stateDir, "events.jsonl")); err == nil {
-		if recs := eventRecords(t, stateDir, "dispatch_decline"); len(recs) != 0 {
+		if recs := dtest.EventRecords(t, stateDir, "dispatch_decline"); len(recs) != 0 {
 			t.Errorf("a cancelled dispatch must not write a decline record: %v", recs)
 		}
 	}
@@ -369,8 +371,8 @@ func checkReplyAgainstSchema(t *testing.T, reply string) map[string]any {
 func TestDispatch_adoptedSessionRepliesLaunchTimeAsStartedAt(t *testing.T) {
 	const launched = "2026-10-12T23:03:46Z"
 	cfgPath := adoptingFakes(t, launched)
-	name, cfg := workerRole("", "")
-	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
+	name, cfg := dtest.WorkerRole("", "")
+	code, got := dispatchWith(t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d; stdout=%q", code, conformance.ExitOK, got)
 	}
@@ -386,8 +388,8 @@ func TestDispatch_adoptedSessionRepliesLaunchTimeAsStartedAt(t *testing.T) {
 // An adopted session that recorded no launch time replies with no startedAt.
 func TestDispatch_adoptedSessionWithoutLaunchTimeRepliesNoStartedAt(t *testing.T) {
 	cfgPath := adoptingFakes(t, "")
-	name, cfg := workerRole("", "")
-	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
+	name, cfg := dtest.WorkerRole("", "")
+	code, got := dispatchWith(t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d; stdout=%q", code, conformance.ExitOK, got)
 	}
@@ -452,8 +454,8 @@ func readyLaunchFakes(t *testing.T, replyExit int) (cfgPath string, ccpoolCalls 
 // an inline outcome (exit 0), never a decline.
 func TestDispatch_readyLaunchIsAcceptedAndReachesCompletion(t *testing.T) {
 	cfgPath, ccpoolCalls := readyLaunchFakes(t, 0)
-	name, cfg := workerRole("", "")
-	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
+	name, cfg := dtest.WorkerRole("", "")
+	code, got := dispatchWith(t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitOK {
 		t.Fatalf("exit = %d, want %d; stdout=%q", code, conformance.ExitOK, got)
 	}
@@ -478,8 +480,8 @@ func TestDispatch_readyLaunchIsAcceptedAndReachesCompletion(t *testing.T) {
 // bead back, never a pre-accept decline the core would re-offer.
 func TestDispatch_failureAfterReadyStaysAccepted(t *testing.T) {
 	cfgPath, ccpoolCalls := readyLaunchFakes(t, 25)
-	name, cfg := workerRole("", "")
-	code, got := dispatchWith(t, name, cfg, cfgPath, defaultEvent)
+	name, cfg := dtest.WorkerRole("", "")
+	code, got := dispatchWith(t, name, cfg, cfgPath, dtest.DefaultEvent)
 	if code == conformance.ExitBusy {
 		t.Fatalf("a failure after ready must not decline; stdout=%q", got)
 	}
@@ -499,7 +501,7 @@ func TestDispatch_failureAfterReadyStaysAccepted(t *testing.T) {
 // bead: the session it launches is named for the bare id, with no suffix.
 func TestDispatch_retryWindowedEventLaunchesWithTheBareBeadID(t *testing.T) {
 	cfgPath, ccpoolCalls := readyLaunchFakes(t, 0)
-	name, cfg := workerRole("", "")
+	name, cfg := dtest.WorkerRole("", "")
 	event := `{"id":"e-1","type":"dispatch","payload":{"id":"zr-w@46d60fca149d","metadata":{"entity_id":"zr-w"}}}`
 	code, got := dispatchWith(t, name, cfg, cfgPath, event)
 	if code != conformance.ExitOK {

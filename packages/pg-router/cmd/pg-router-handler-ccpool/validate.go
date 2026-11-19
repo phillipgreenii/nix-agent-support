@@ -32,7 +32,7 @@ func runValidate(args []string) int {
 	// config is the handler's own and holds no role config.
 	_ = fs.String("config", os.Getenv(rolefile.EnvConfig), "accepted, not checked")
 	skipPoolDirs := fs.Bool("skip-pool-dirs", false, "skip ONLY the pool-directory existence check (for the nix build sandbox, where the pools do not exist yet); startup and doctor never pass it")
-	if exit, done := parseFlags("validate", fs, args); done {
+	if exit, done := rolefile.ParseFlags(helpText, "validate", fs, args); done {
 		return exit
 	}
 	return serveValidate(os.Stdin, os.Stdout, *skipPoolDirs)
@@ -40,11 +40,11 @@ func runValidate(args []string) int {
 
 // serveValidate is runValidate's testable core.
 func serveValidate(stdin io.Reader, stdout io.Writer, skipPoolDirs bool) int {
-	_, ro, exit, ok := readRequest("validate", "handler.validate", stdin, stdout)
+	_, ro, exit, ok := rolefile.ReadRequest("validate", "handler.validate", stdin, stdout)
 	if !ok {
 		return exit
 	}
-	_, problems := decodeRole(ro)
+	_, problems := rolefile.DecodeRoleObject(ro)
 	var warnings []string
 	for _, k := range sessionEnvKeys(ro.Config) {
 		if rolefile.SecretLookingKey(k) {

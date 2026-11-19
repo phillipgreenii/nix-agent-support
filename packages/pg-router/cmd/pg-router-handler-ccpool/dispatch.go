@@ -43,7 +43,7 @@ func runDispatch(args []string) int {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
-	if exit, done := parseFlags("dispatch", fs, args); done {
+	if exit, done := rolefile.ParseFlags(helpText, "dispatch", fs, args); done {
 		return exit
 	}
 	// The daemon that spawned this adapter MAY exit while the dispatch is still
@@ -68,7 +68,7 @@ func runDispatch(args []string) int {
 // (cancel it to cancel the dispatch, which never declines) and mkDeps builds the
 // executor seams, so a test keeps bd and ccpool off the machine.
 func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPath string, mkDeps func(config.Config, roles.Role) executor.Deps) int {
-	raw, ro, exit, ok := readRequest("dispatch", "handler.dispatch", stdin, stdout)
+	raw, ro, exit, ok := rolefile.ReadRequest("dispatch", "handler.dispatch", stdin, stdout)
 	if !ok {
 		return exit
 	}
@@ -77,7 +77,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	var req wire.DispatchRequest
 	_ = json.Unmarshal(raw, &req)
 
-	role, cfg, err := loadRoleAndConfig(ro, cfgPath)
+	role, cfg, err := rolefile.LoadRoleAndConfig(ro, cfgPath)
 	if err != nil {
 		return failDispatch(stdout, err.Error())
 	}

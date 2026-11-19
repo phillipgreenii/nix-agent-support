@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
 	"github.com/phillipgreenii/x/gitclient"
@@ -170,7 +172,7 @@ func TestTeardown_beadWorktreeMarkerHonouredByFinishPurgeAndClosedBeadReconcile(
 
 	s.Meta = map[string]string{ccpool.MetaKeyBead: "bead-2", ccpool.MetaKeyKeepWorktree: "1"}
 	cc = &fakeCC{ListSeq: [][]ccpool.Session{{s}}}
-	if n := reconcileClosedBeadSessions(t.Context(), cc, h.opener, fakeBR{out: map[string]string{"show bead-2 --json": `{"status":"closed"}`}}, "pg-router-", h.repo, h.wtDir, nil); n != 1 {
+	if n := reconcileClosedBeadSessions(t.Context(), cc, h.opener, dtest.FakeBR{Out: map[string]string{"show bead-2 --json": `{"status":"closed"}`}}, "pg-router-", h.repo, h.wtDir, nil); n != 1 {
 		t.Fatalf("closed-bead reconcile closed %d, want 1", n)
 	}
 	if _, err := os.Stat(dir); err != nil {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
@@ -59,7 +61,7 @@ func TestDispatch_gatedOriginDeclinesWithoutBeadsCalls(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "unmounted", "repo") // step 1 fails: mount-missing
 	cfgPath, stateDir, calls := originFixture(t, missing)
 	r := workerWithIsolation(t, `{}`)
-	code, out := dispatchWith(t, r.name, r.cfg, cfgPath, defaultEvent)
+	code, out := dispatchWith(t, r.name, r.cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, conformance.ExitBusy, out)
 	}
@@ -86,7 +88,7 @@ func TestDispatch_roleWithoutOriginIsNeverGated(t *testing.T) {
 	// the gate and reaches the (fake, failing) ccpool, i.e. it does NOT return the
 	// origin-unavailable decline.
 	r := workerWithIsolation(t, `{"type":"workforest"}`)
-	_, out := dispatchWith(t, r.name, r.cfg, cfgPath, defaultEvent)
+	_, out := dispatchWith(t, r.name, r.cfg, cfgPath, dtest.DefaultEvent)
 	if strings.Contains(out, "origin-unavailable") {
 		t.Fatalf("role with no origin was gated: %s", out)
 	}
@@ -102,12 +104,12 @@ func TestDispatch_pathIsolationIsGatedByItsOwnPathOnly(t *testing.T) {
 	cfgPath, _, _ := originFixture(t, missing)
 
 	elsewhere := workerWithIsolation(t, fmt.Sprintf(`{"type":"path","path":%q}`, filepath.Join(t.TempDir(), "workspace-root")))
-	if _, out := dispatchWith(t, elsewhere.name, elsewhere.cfg, cfgPath, defaultEvent); strings.Contains(out, "origin-unavailable") {
+	if _, out := dispatchWith(t, elsewhere.name, elsewhere.cfg, cfgPath, dtest.DefaultEvent); strings.Contains(out, "origin-unavailable") {
 		t.Fatalf("a path role whose path is not a watched repo root was gated: %s", out)
 	}
 
 	atWatched := workerWithIsolation(t, fmt.Sprintf(`{"type":"path","path":%q}`, missing))
-	code, out := dispatchWith(t, atWatched.name, atWatched.cfg, cfgPath, defaultEvent)
+	code, out := dispatchWith(t, atWatched.name, atWatched.cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
 		t.Fatalf("a path role at the watched repo root must still be gated; exit=%d out=%q", code, out)
 	}
@@ -161,7 +163,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 	// With the kill switch on, a dispatch is never declined by the origin gate.
 	r := workerWithIsolation(t, `{}`)
-	if _, body := dispatchWith(t, r.name, r.cfg, cfgPath, defaultEvent); strings.Contains(body, "origin-unavailable") {
+	if _, body := dispatchWith(t, r.name, r.cfg, cfgPath, dtest.DefaultEvent); strings.Contains(body, "origin-unavailable") {
 		t.Fatalf("ignored origin still declined: %s", body)
 	}
 

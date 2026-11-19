@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 )
 
@@ -79,7 +81,7 @@ func TestFingerprintID(t *testing.T) {
 }
 
 func TestQueryBeadsReady_mapsIssuesToWireEvents(t *testing.T) {
-	br := fakeBR{out: map[string]string{
+	br := dtest.FakeBR{Out: map[string]string{
 		"ready --label worker-ready --exclude-label human --exclude-label needs-split-review --json --limit 0": `{"data":[` +
 			`{"id":"zr-1","issue_type":"task","title":"process-feedback: x","metadata":{"repo":"o/r"}},` +
 			`{"id":"zr-2","issue_type":"task","title":"other"}` +
@@ -107,7 +109,7 @@ func TestQueryBeadsReady_mapsIssuesToWireEvents(t *testing.T) {
 // query always passes --exclude-label for it, and drops it client-side even if
 // bd returned it.
 func TestQueryBeadsReady_needsSplitReviewNotDiscovered(t *testing.T) {
-	br := fakeBR{out: map[string]string{
+	br := dtest.FakeBR{Out: map[string]string{
 		"ready --exclude-label needs-split-review --json --limit 0": `{"data":[` +
 			`{"id":"zr-1","issue_type":"task","title":"a","labels":["needs-split-review"]},` +
 			`{"id":"zr-2","issue_type":"task","title":"b","labels":["x"]}` +
@@ -123,7 +125,7 @@ func TestQueryBeadsReady_needsSplitReviewNotDiscovered(t *testing.T) {
 }
 
 func TestQueryBeadsReady_bdErrorPropagates(t *testing.T) {
-	br := fakeBR{err: errors.New("bd down")}
+	br := dtest.FakeBR{Err: errors.New("bd down")}
 	if _, err := queryBeadsReady(context.Background(), br, queryFile{EmitType: "work.ready"}); err == nil {
 		t.Fatal("a bd failure must propagate, not become zero events")
 	}

@@ -242,7 +242,7 @@ func TestLeftover_refusesAndDeletesNothing(t *testing.T) {
 			return path
 		}},
 		{"a session row names the bead", func(t *testing.T, h *sweepHarness) string {
-			h.cc.sessions = []ccpool.Session{{
+			h.cc.Sessions = []ccpool.Session{{
 				ExternalID: "pg-router-review-zr-k-1", State: ccpool.StateIdle, Live: true,
 				Meta: map[string]string{ccpool.MetaKeyBead: "zr-k"},
 			}}
@@ -250,7 +250,7 @@ func TestLeftover_refusesAndDeletesNothing(t *testing.T) {
 		}},
 		{"a session row names the path", func(t *testing.T, h *sweepHarness) string {
 			path := h.leftover("zr-k")
-			h.cc.sessions = []ccpool.Session{{ExternalID: "pg-router-worker-x-1", State: ccpool.StateWorking, Live: true, CWD: path}}
+			h.cc.Sessions = []ccpool.Session{{ExternalID: "pg-router-worker-x-1", State: ccpool.StateWorking, Live: true, CWD: path}}
 			return path
 		}},
 		{"a live process is inside it", func(t *testing.T, h *sweepHarness) string {

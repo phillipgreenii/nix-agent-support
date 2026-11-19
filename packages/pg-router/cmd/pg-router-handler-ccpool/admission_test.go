@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
@@ -24,10 +26,10 @@ import (
 // one shared pool listing), reconciles closed-bead sessions on capacity pressure
 // behind a per-pool negative cache, and runs none of the janitor's passes.
 
-// poolCC is an orphanCC that counts List and Capacity calls and answers Capacity
+// poolCC is a dtest.OrphanCC that counts List and Capacity calls and answers Capacity
 // from its rows: the pool is full until a row has been closed.
 type poolCC struct {
-	*orphanCC
+	*dtest.OrphanCC
 	cmu      sync.Mutex
 	lists    int
 	caps     int
@@ -38,7 +40,7 @@ func (c *poolCC) List(ctx context.Context) ([]ccpool.Session, error) {
 	c.cmu.Lock()
 	c.lists++
 	c.cmu.Unlock()
-	return c.orphanCC.List(ctx)
+	return c.OrphanCC.List(ctx)
 }
 
 func (c *poolCC) Capacity(context.Context) (ccpool.Capacity, error) {
@@ -46,11 +48,11 @@ func (c *poolCC) Capacity(context.Context) (ccpool.Capacity, error) {
 	c.caps++
 	c.cmu.Unlock()
 	if c.usageHit {
-		return ccpool.Capacity{MaxSessions: 2, Counted: 2, UsageLimit: &ccpool.UsageLimit{Window: "five_hour", UsedPct: 100, ResetsAt: orphanNowT.Add(time.Hour)}}, nil
+		return ccpool.Capacity{MaxSessions: 2, Counted: 2, UsageLimit: &ccpool.UsageLimit{Window: "five_hour", UsedPct: 100, ResetsAt: dtest.OrphanNowT.Add(time.Hour)}}, nil
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, s := range c.sessions {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	for _, s := range c.Sessions {
 		if s.CloseReason != "" {
 			return ccpool.Capacity{MaxSessions: 2, Counted: 1, Free: 1}, nil
 		}
@@ -78,7 +80,7 @@ func pressureRow(id, bead string) ccpool.Session {
 
 type admissionEnv struct {
 	cc      *poolCC
-	bd      *orphanBD
+	bd      *dtest.OrphanBD
 	lockDir string
 	cfgPath string
 	now     time.Time
@@ -86,26 +88,26 @@ type admissionEnv struct {
 
 func newAdmissionEnv(t *testing.T, launchExtra string, sessions ...ccpool.Session) *admissionEnv {
 	t.Helper()
-	cc := &poolCC{orphanCC: &orphanCC{sessions: sessions}}
-	bd := &orphanBD{issues: map[string]string{
+	cc := &poolCC{OrphanCC: &dtest.OrphanCC{Sessions: sessions}}
+	bd := &dtest.OrphanBD{Issues: map[string]string{
 		"zr-w": `{"id":"zr-w","status":"open"}`,
 		"zr-x": `{"id":"zr-x","status":"closed"}`,
 		"zr-y": `{"id":"zr-y","status":"in_progress"}`,
 	}}
-	cfgPath, _ := launchConfig(t, `,"RepoRoot":"`+t.TempDir()+`"`+launchExtra)
-	return &admissionEnv{cc: cc, bd: bd, lockDir: t.TempDir(), cfgPath: cfgPath, now: orphanNowT}
+	cfgPath, _ := dtest.LaunchConfig(t, `,"RepoRoot":"`+t.TempDir()+`"`+launchExtra)
+	return &admissionEnv{cc: cc, bd: bd, lockDir: t.TempDir(), cfgPath: cfgPath, now: dtest.OrphanNowT}
 }
 
 // dispatch runs one dispatch of bead zr-w by the worker role through serveDispatch
 // and returns the exit code and the decoded reply.
 func (e *admissionEnv) dispatch(t *testing.T, event string) (int, map[string]any) {
 	t.Helper()
-	_, cfg := workerRole("", "")
+	_, cfg := dtest.WorkerRole("", "")
 	mk := func(c config.Config, _ roles.Role) executor.Deps {
 		return executor.Deps{CC: e.cc, BD: e.bd, Cfg: c, LockDir: e.lockDir, Now: func() time.Time { return e.now }}
 	}
 	var out bytes.Buffer
-	code := serveDispatch(context.Background(), strings.NewReader(request(event, "worker", cfg)), &out, e.cfgPath, mk)
+	code := serveDispatch(context.Background(), strings.NewReader(dtest.Request(event, "worker", cfg)), &out, e.cfgPath, mk)
 	var reply map[string]any
 	_ = json.Unmarshal(out.Bytes(), &reply)
 	return code, reply
@@ -113,7 +115,7 @@ func (e *admissionEnv) dispatch(t *testing.T, event string) (int, map[string]any
 
 func (e *admissionEnv) showsOf(bead string) int {
 	n := 0
-	for _, c := range e.bd.callsCopy() {
+	for _, c := range e.bd.CallsCopy() {
 		if strings.HasPrefix(c, "show "+bead+" ") || c == "show "+bead {
 			n++
 		}
@@ -121,21 +123,15 @@ func (e *admissionEnv) showsOf(bead string) int {
 	return n
 }
 
-func (b *orphanBD) callsCopy() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]string(nil), b.calls...)
-}
-
 func TestAdmission_fullPoolWithClosedBeadSessionFreesASlotAndLaunches(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"), pressureRow("b", "zr-y"))
-	code, reply := e.dispatch(t, defaultEvent)
+	code, reply := e.dispatch(t, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || reply["reason"] != "launch-failed" {
 		t.Fatalf("exit=%d reply=%v, want the dispatch to pass the gate and reach the (failing) launch", code, reply)
 	}
 	// The first close is the closed-bead session; the second is the purge of the
 	// abandoned launch the test's failing Ensure leaves behind.
-	if got := e.cc.closed(); len(got) != 2 || got[0] != "pg-router-worker-a" || strings.Contains(got[1], "worker-b") {
+	if got := e.cc.Closed(); len(got) != 2 || got[0] != "pg-router-worker-a" || strings.Contains(got[1], "worker-b") {
 		t.Fatalf("closed = %v, want the closed-bead session first and never the open-bead one", got)
 	}
 	if _, caps := e.cc.counts(); caps != 2 {
@@ -145,7 +141,7 @@ func TestAdmission_fullPoolWithClosedBeadSessionFreesASlotAndLaunches(t *testing
 
 func TestAdmission_fullPoolNothingReclaimableDeclinesOnceAndStampsTheNegativeCache(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("b", "zr-y"), pressureRow("c", "zr-y"))
-	code, reply := e.dispatch(t, defaultEvent)
+	code, reply := e.dispatch(t, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || reply["reason"] != "at-capacity" {
 		t.Fatalf("exit=%d reply=%v, want the at-capacity decline", code, reply)
 	}
@@ -158,10 +154,10 @@ func TestAdmission_fullPoolNothingReclaimableDeclinesOnceAndStampsTheNegativeCac
 	if _, caps := e.cc.counts(); caps != 2 {
 		t.Fatalf("capacity calls = %d, want 2: reconcile at most once, no loop", caps)
 	}
-	if len(e.cc.closed()) != 0 {
-		t.Fatalf("closed = %v, want nothing", e.cc.closed())
+	if len(e.cc.Closed()) != 0 {
+		t.Fatalf("closed = %v, want nothing", e.cc.Closed())
 	}
-	stamps, _ := filepath.Glob(filepath.Join(e.lockDir, closedReconcileStampPrefix+"*.stamp"))
+	stamps, _ := filepath.Glob(filepath.Join(e.lockDir, dtest.ClosedReconcileStampPrefix+"*.stamp"))
 	if len(stamps) != 1 {
 		t.Fatalf("stamps = %v, want one negative-cache stamp", stamps)
 	}
@@ -169,12 +165,12 @@ func TestAdmission_fullPoolNothingReclaimableDeclinesOnceAndStampsTheNegativeCac
 
 func TestAdmission_secondDeclineInsideTheIntervalDoesNotReconcile(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("b", "zr-y"))
-	e.dispatch(t, defaultEvent)
+	e.dispatch(t, dtest.DefaultEvent)
 	if n := e.showsOf("zr-y"); n != 1 {
 		t.Fatalf("first decline: bead lookups = %d, want 1", n)
 	}
 	e.now = e.now.Add(10 * time.Second) // inside the 30 s default
-	code, reply := e.dispatch(t, defaultEvent)
+	code, reply := e.dispatch(t, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || reply["reason"] != "at-capacity" {
 		t.Fatalf("exit=%d reply=%v", code, reply)
 	}
@@ -182,7 +178,7 @@ func TestAdmission_secondDeclineInsideTheIntervalDoesNotReconcile(t *testing.T) 
 		t.Fatalf("second decline: bead lookups = %d, want still 1 (no reconcile)", n)
 	}
 	e.now = e.now.Add(time.Minute) // past the interval
-	e.dispatch(t, defaultEvent)
+	e.dispatch(t, dtest.DefaultEvent)
 	if n := e.showsOf("zr-y"); n != 2 {
 		t.Fatalf("after the interval: bead lookups = %d, want 2 (reconciled again)", n)
 	}
@@ -190,8 +186,8 @@ func TestAdmission_secondDeclineInsideTheIntervalDoesNotReconcile(t *testing.T) 
 
 func TestAdmission_intervalIsConfigurableAndZeroDisablesTheCache(t *testing.T) {
 	e := newAdmissionEnv(t, `,"declineReconcileMinInterval":0`, pressureRow("b", "zr-y"))
-	e.dispatch(t, defaultEvent)
-	e.dispatch(t, defaultEvent)
+	e.dispatch(t, dtest.DefaultEvent)
+	e.dispatch(t, dtest.DefaultEvent)
 	if n := e.showsOf("zr-y"); n != 2 {
 		t.Fatalf("bead lookups = %d, want 2: a zero interval reconciles every decline", n)
 	}
@@ -200,12 +196,12 @@ func TestAdmission_intervalIsConfigurableAndZeroDisablesTheCache(t *testing.T) {
 func TestAdmission_usageLimitSkipsTheReconcile(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"))
 	e.cc.usageHit = true
-	code, reply := e.dispatch(t, defaultEvent)
+	code, reply := e.dispatch(t, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || reply["reason"] != "at-capacity" {
 		t.Fatalf("exit=%d reply=%v", code, reply)
 	}
-	if len(e.cc.closed()) != 0 || e.showsOf("zr-x") != 0 {
-		t.Fatalf("a usage limit must skip the reconcile; closed=%v", e.cc.closed())
+	if len(e.cc.Closed()) != 0 || e.showsOf("zr-x") != 0 {
+		t.Fatalf("a usage limit must skip the reconcile; closed=%v", e.cc.Closed())
 	}
 }
 
@@ -214,7 +210,7 @@ func TestAdmission_usageLimitSkipsTheReconcile(t *testing.T) {
 func TestAdmission_noOrphanMeansOneSharedListForOrphanUnitAndPlan(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"))
 	e.cc.usageHit = true
-	e.dispatch(t, defaultEvent)
+	e.dispatch(t, dtest.DefaultEvent)
 	if lists, _ := e.cc.counts(); lists != 1 {
 		t.Fatalf("list calls = %d, want 1 shared by the orphan unit and the plan", lists)
 	}
@@ -225,8 +221,8 @@ func expiredOrphan(id, bead, state, eventID string) ccpool.Session {
 	s.Name = "pg-router-worker-" + bead
 	s.State = ccpool.SessionState(state)
 	s.Meta[ccpool.MetaKeyRole] = "worker"
-	s.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(-time.Minute).Format(time.RFC3339)
-	s.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-10 * time.Minute).Format(time.RFC3339)
+	s.Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Add(-time.Minute).Format(time.RFC3339)
+	s.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-10 * time.Minute).Format(time.RFC3339)
 	if eventID != "" {
 		s.Meta[ccpool.MetaKeyEventID] = eventID
 	}
@@ -234,9 +230,9 @@ func expiredOrphan(id, bead, state, eventID string) ccpool.Session {
 }
 
 func orphanMarked(cc *poolCC, id string) bool {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	for _, m := range cc.metaSets {
+	cc.Mu.Lock()
+	defer cc.Mu.Unlock()
+	for _, m := range cc.MetaSets {
 		if m[0] == id && m[1] == ccpool.MetaKeyOrphanReclaimed {
 			return true
 		}
@@ -248,9 +244,9 @@ func orphanMarked(cc *poolCC, id string) bool {
 // the plan and the capacity check, and the reclaim frees the slot.
 func TestAdmission_orphansOfOtherBeadsAreHandledBeforeTheCapacityCheck(t *testing.T) {
 	e := newAdmissionEnv(t, "", expiredOrphan("o1", "zr-y", "idle", ""), pressureRow("b", "zr-y"))
-	code, reply := e.dispatch(t, defaultEvent)
+	code, reply := e.dispatch(t, dtest.DefaultEvent)
 	if !orphanMarked(e.cc, "pg-router-worker-o1") {
-		t.Fatalf("the orphan of another bead was not reclaimed; closed=%v", e.cc.closed())
+		t.Fatalf("the orphan of another bead was not reclaimed; closed=%v", e.cc.Closed())
 	}
 	if code != conformance.ExitBusy || reply["reason"] != "launch-failed" {
 		t.Fatalf("exit=%d reply=%v, want the reclaimed orphan's slot to let the dispatch reach the launch", code, reply)
@@ -271,7 +267,7 @@ func TestAdmission_sameBeadExpiredLeaseOrphanIsReclaimedAndTheDispatchLaunches(t
 		t.Run(name, func(t *testing.T) {
 			row := expiredOrphan("o2", "zr-w", tc.state, tc.event)
 			e := newAdmissionEnv(t, "", row)
-			code, reply := e.dispatch(t, defaultEvent)
+			code, reply := e.dispatch(t, dtest.DefaultEvent)
 			if !orphanMarked(e.cc, row.ExternalID) {
 				t.Fatalf("the idle orphan was not reclaimed inline; reply=%v", reply)
 			}
@@ -287,7 +283,7 @@ func TestAdmission_rowWithoutLeaseIsNeverAnOrphan(t *testing.T) {
 	row := expiredOrphan("o3", "zr-w", "idle", "e-other")
 	delete(row.Meta, ccpool.MetaKeyLeaseUntil)
 	e := newAdmissionEnv(t, "", row)
-	e.dispatch(t, defaultEvent)
+	e.dispatch(t, dtest.DefaultEvent)
 	if orphanMarked(e.cc, row.ExternalID) {
 		t.Fatal("a row with no lease was reclaimed as an orphan")
 	}
@@ -324,7 +320,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 	cfg := config.Default()
 	cfg.WorktreeDir = wtDir
 	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
-	cc := &poolCC{orphanCC: &orphanCC{}}
+	cc := &poolCC{OrphanCC: &dtest.OrphanCC{}}
 	r := newPoolReconciler(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
 	if err := r.ReclaimLeakedWorktree(context.Background(), "zr-w"); err != nil {
 		t.Fatal(err)
@@ -353,5 +349,13 @@ func TestConfig_declineReconcileMinIntervalDefaultsAndLoads(t *testing.T) {
 	c, err := rolefile.LoadConfig(p)
 	if err != nil || c.DeclineReconcileMinInterval != 5*time.Second {
 		t.Errorf("LoadConfig: %v, interval=%v, want 5s", err, c.DeclineReconcileMinInterval)
+	}
+}
+
+// TestClosedReconcileStampPrefixMatchesDtest pins the shared test helper's copy
+// of the stamp prefix to the production constant.
+func TestClosedReconcileStampPrefixMatchesDtest(t *testing.T) {
+	if dtest.ClosedReconcileStampPrefix != closedReconcileStampPrefix {
+		t.Fatalf("dtest.ClosedReconcileStampPrefix = %q, want %q", dtest.ClosedReconcileStampPrefix, closedReconcileStampPrefix)
 	}
 }

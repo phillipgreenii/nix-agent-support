@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -100,19 +102,19 @@ func TestBrokenStdoutPipe_dispatchExitsNormally(t *testing.T) {
 // a request without a role is a usage error.
 func TestProcess_DispatchAndValidateOverTheRealWire(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
-	name, cfg := workerRole("", "")
-	code, stdout := runAdapterProcess(t, []string{"dispatch"}, request(defaultEvent, name, cfg), "PATH=/usr/bin")
+	name, cfg := dtest.WorkerRole("", "")
+	code, stdout := runAdapterProcess(t, []string{"dispatch"}, dtest.Request(dtest.DefaultEvent, name, cfg), "PATH=/usr/bin")
 	if code != conformance.ExitBusy {
 		t.Fatalf("dispatch: exit = %d, want %d; stdout %s", code, conformance.ExitBusy, stdout)
 	}
 	if reason := decodeReply(t, stdout)["reason"]; reason != "pool-unreadable" {
 		t.Errorf("dispatch: reason = %v, want pool-unreadable", reason)
 	}
-	code, stdout = runAdapterProcess(t, []string{"validate", "--skip-pool-dirs"}, request("", name, cfg))
+	code, stdout = runAdapterProcess(t, []string{"validate", "--skip-pool-dirs"}, dtest.Request("", name, cfg))
 	if code != conformance.ExitOK || len(decodeReply(t, stdout)["problems"].([]any)) != 0 {
 		t.Errorf("validate: exit = %d stdout %s, want 0 and no problems", code, stdout)
 	}
-	code, stdout = runAdapterProcess(t, []string{"dispatch"}, request(defaultEvent, "", nil))
+	code, stdout = runAdapterProcess(t, []string{"dispatch"}, dtest.Request(dtest.DefaultEvent, "", nil))
 	if code != conformance.ExitUsage {
 		t.Errorf("dispatch without a role: exit = %d stdout %s, want %d", code, stdout, conformance.ExitUsage)
 	}

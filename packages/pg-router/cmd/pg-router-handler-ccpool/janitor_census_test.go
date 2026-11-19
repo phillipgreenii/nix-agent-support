@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
@@ -145,7 +147,7 @@ func TestJanitor_censusSkippedUnderDryRun(t *testing.T) {
 	f, pts := censusFixture(t, wt, "a")
 	f.opts.dryRun = true
 	mk := func(config.Config, roles.Role) executor.Deps {
-		return executor.Deps{CC: &fakeCC{}, BD: fakeBR{}, LockDir: sessionlock.Dir(f.stateDir)}
+		return executor.Deps{CC: &fakeCC{}, BD: dtest.FakeBR{}, LockDir: sessionlock.Dir(f.stateDir)}
 	}
 	var out bytes.Buffer
 	if code := serveJanitor(context.Background(), &out, f.opts, mk, f.censusPasses(pts)); code != 0 || !strings.Contains(out.String(), "dry run") {

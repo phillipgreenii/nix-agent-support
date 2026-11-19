@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
 )
@@ -18,14 +20,14 @@ func TestRecordSweepPass_appendsOneRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = lw.Close() }()
-	msgs := captureSlog(t, func() {
+	msgs := dtest.CaptureSlog(t, func() {
 		recordSweepPass("dispatch", "worker", "orphan_reconcile", 2, 5*time.Millisecond, executor.Deps{Log: lw})
 	})
 	if n := countMsgs(msgs, "sweeps done"); n != 1 {
 		t.Errorf("want 1 'sweeps done' log line, got %d (%v)", n, msgs)
 	}
 	_ = lw.Close()
-	recs := eventRecords(t, filepath.Dir(logPath), "sweep_pass")
+	recs := dtest.EventRecords(t, filepath.Dir(logPath), "sweep_pass")
 	if len(recs) != 1 {
 		t.Fatalf("want 1 sweep_pass row, got %d: %v", len(recs), recs)
 	}

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 )
@@ -19,8 +21,8 @@ import (
 // against anyone giving the adapter its own).
 func TestDispatch_externalIDSessionNamingAndMetadataUnchanged(t *testing.T) {
 	fk := ccpoolNewFailsFake(t)
-	name, cfg := workerRole("", "")
-	if code, got := dispatchWith(t, name, cfg, "", defaultEvent); code != conformance.ExitBusy {
+	name, cfg := dtest.WorkerRole("", "")
+	if code, got := dispatchWith(t, name, cfg, "", dtest.DefaultEvent); code != conformance.ExitBusy {
 		t.Fatalf("exit = %d, want ExitBusy (the stub's new fails); stdout=%q", code, got)
 	}
 	args := callArgsOf(t, fk, "ccpool", "new")

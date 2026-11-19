@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
@@ -145,7 +147,7 @@ func TestProgress_closedBeadCounters(t *testing.T) {
 		{ExternalID: "pg-router-w-zr-busy", State: ccpool.StateWorking, Meta: map[string]string{ccpool.MetaKeyBead: "zr-busy"}},
 		{ExternalID: "someone-else", State: ccpool.StateIdle},
 	}}}
-	br := fakeBR{out: map[string]string{
+	br := dtest.FakeBR{Out: map[string]string{
 		"show zr-done --json": `{"status":"closed"}`,
 		"show zr-open --json": `{"status":"open"}`,
 	}}

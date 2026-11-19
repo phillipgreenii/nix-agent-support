@@ -10,42 +10,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/handlerstate"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
-	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
-
-// loadRoleAndConfig decodes the request's role strictly and loads the
-// handler-wide launch config, then applies the checks that need both and the
-// pool-wide budget overlay. It is the preparation dispatch and postStartup share;
-// the error is the message the caller reports.
-func loadRoleAndConfig(ro roleObject, cfgPath string) (roles.Role, config.Config, error) {
-	role, problems := decodeRole(ro)
-	if len(problems) > 0 {
-		return roles.Role{}, config.Config{}, fmt.Errorf("role %q: invalid config: %s", ro.Name, strings.Join(problems, "; "))
-	}
-	cfg, err := rolefile.LoadConfig(cfgPath)
-	if err != nil {
-		return roles.Role{}, config.Config{}, err
-	}
-	// The bounds that depend on the handler-wide config (poll interval, quiet
-	// window maximum) can only be checked here, where both are loaded.
-	if err := cfg.ValidateQuietWindowOverride(role.CCPool.WorktreeQuietWindow); err != nil {
-		return roles.Role{}, config.Config{}, fmt.Errorf("role %s: %v", role.Name, err)
-	}
-	if err := cfg.ValidateNeedsInputStall(role.CCPool.NeedsInputStall); err != nil {
-		return roles.Role{}, config.Config{}, fmt.Errorf("role %s: needsInputStall: %v", role.Name, err)
-	}
-	rolefile.OverlayBudgetThresholds(role, cfg)
-	return role, cfg, nil
-}
 
 // failLifecycle writes msg to stderr and as an error reply, and returns
 // conformance.ExitError.
@@ -76,7 +49,7 @@ func runPostStartup(args []string) int {
 	fs := flag.NewFlagSet("postStartup", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
-	if exit, done := parseFlags("postStartup", fs, args); done {
+	if exit, done := rolefile.ParseFlags(helpText, "postStartup", fs, args); done {
 		return exit
 	}
 	return servePostStartup(os.Stdin, os.Stdout, *cfgPath, kickJanitor)
@@ -90,14 +63,14 @@ type janitorKick func(cfgPath, roleFile string) error
 // the request and the role's config are valid; a failed kick is logged and never
 // fails the call (the scheduled janitor covers it).
 func servePostStartup(stdin io.Reader, stdout io.Writer, cfgPath string, kick janitorKick) int {
-	raw, ro, exit, ok := readRequest("postStartup", "handler.postStartup", stdin, stdout)
+	raw, ro, exit, ok := rolefile.ReadRequest("postStartup", "handler.postStartup", stdin, stdout)
 	if !ok {
 		return exit
 	}
 	var req wire.LifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 
-	_, cfg, err := loadRoleAndConfig(ro, cfgPath)
+	_, cfg, err := rolefile.LoadRoleAndConfig(ro, cfgPath)
 	if err != nil {
 		return failLifecycle("postStartup", stdout, err.Error())
 	}
@@ -116,7 +89,7 @@ func servePostStartup(stdin io.Reader, stdout io.Writer, cfgPath string, kick ja
 // kickJanitorFor writes the role as a role file under the handler state
 // directory (a stable per-role name, overwritten each boot, so nothing
 // accumulates) and starts the janitor on it.
-func kickJanitorFor(cfg config.Config, ro roleObject, cfgPath string, kick janitorKick) error {
+func kickJanitorFor(cfg config.Config, ro rolefile.RoleObject, cfgPath string, kick janitorKick) error {
 	body, err := json.Marshal(map[string]any{"role": map[string]any{"name": ro.Name, "config": ro.Config}})
 	if err != nil {
 		return err

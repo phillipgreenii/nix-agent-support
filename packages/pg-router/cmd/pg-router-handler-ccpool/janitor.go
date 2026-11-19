@@ -228,7 +228,7 @@ func loadJanitorRoles(opts janitorOptions, mkDeps func(config.Config, roles.Role
 		if err != nil {
 			return nil, fmt.Errorf("read role file %s: %w", f, err)
 		}
-		ro, err := parseRole(raw)
+		ro, err := rolefile.ParseRole(raw)
 		if err != nil {
 			return nil, fmt.Errorf("role file %s: %w", f, err)
 		}
@@ -236,7 +236,7 @@ func loadJanitorRoles(opts janitorOptions, mkDeps func(config.Config, roles.Role
 			return nil, fmt.Errorf("role file %s: role %q given twice", f, ro.Name)
 		}
 		seen[ro.Name] = true
-		role, cfg, err := loadRoleAndConfig(ro, opts.cfgPath)
+		role, cfg, err := rolefile.LoadRoleAndConfig(ro, opts.cfgPath)
 		if err != nil {
 			return nil, fmt.Errorf("role file %s: %w", f, err)
 		}

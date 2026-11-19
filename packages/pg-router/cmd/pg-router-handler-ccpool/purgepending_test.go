@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
@@ -76,7 +78,7 @@ func (e *tpEnv) removingWorktree() {
 	e.open.removeHook = func(path string) error { return os.RemoveAll(path) }
 }
 
-var closedBead = fakeBR{out: map[string]string{"show " + tpBead + " --json": `{"status":"closed"}`}}
+var closedBead = dtest.FakeBR{Out: map[string]string{"show " + tpBead + " --json": `{"status":"closed"}`}}
 
 func (e *tpEnv) wantLog(want ...string) {
 	e.t.Helper()
@@ -281,7 +283,7 @@ func TestTwoPhase_interruptBetweenPhasesIsCompletedByNextReconcile(t *testing.T)
 	// The next dispatch: the row survives, closed and marked; list it and reconcile.
 	e.cc.onClose = nil
 	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil)}}
-	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
+	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
 	if n != 1 {
 		t.Fatalf("reconcile = %d, want 1 (the interrupted teardown completed)", n)
 	}
@@ -298,7 +300,7 @@ func TestRetry_existingWorktreeRemovedThenPurged(t *testing.T) {
 	e := newTPEnv(t)
 	e.removingWorktree()
 	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil)}}
-	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
+	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
 	if n != 1 {
 		t.Fatalf("reconcile = %d, want 1", n)
 	}
@@ -319,7 +321,7 @@ func TestRetry_attemptCountIncrements(t *testing.T) {
 	e.removingWorktree()
 	row := e.markedRow(func(s *ccpool.Session) { s.Meta[ccpool.MetaKeyPurgeAttempts] = "2" })
 	e.cc.ListSeq = [][]ccpool.Session{{row}}
-	reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
+	reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
 	if got := e.log.all(); len(got) == 0 || got[0] != e.attemptLog("3") {
 		t.Errorf("first call = %v, want %q", got, e.attemptLog("3"))
 	}
@@ -332,7 +334,7 @@ func TestRetry_missingDirectoryIsPurged(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil)}}
-	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
+	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
 	if n != 1 {
 		t.Fatalf("reconcile = %d, want 1", n)
 	}
@@ -356,7 +358,7 @@ func TestRetry_unregisteredDirectoryIsDeletedAndPurged(t *testing.T) {
 	}
 	e.open.RemoveErrAt = map[string]bool{e.cwd: true}
 	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil)}}
-	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
+	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
 	if n != 1 {
 		t.Fatalf("reconcile = %d, want 1", n)
 	}
@@ -381,7 +383,7 @@ func TestRetry_danglingGitFileIsAHusk(t *testing.T) {
 	}
 	e.open.RemoveErrAt = map[string]bool{e.cwd: true}
 	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil)}}
-	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
+	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
 		t.Fatalf("reconcile = %d, want 1", n)
 	}
 	if _, err := os.Stat(e.cwd); !errors.Is(err, os.ErrNotExist) {
@@ -402,7 +404,7 @@ func TestRetry_neverDeletesOutsideWorktreeDir(t *testing.T) {
 	e.open.RemoveErrAt = map[string]bool{elsewhere: true}
 	row := e.markedRow(func(s *ccpool.Session) { s.CWD = elsewhere })
 	e.cc.ListSeq = [][]ccpool.Session{{row}}
-	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 0 {
+	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 0 {
 		t.Fatalf("reconcile = %d, want 0", n)
 	}
 	if _, err := os.Stat(elsewhere); err != nil {
@@ -420,7 +422,7 @@ func TestRetry_livePeerKeepsWorktree(t *testing.T) {
 			e := newTPEnv(t)
 			peer := ccpool.Session{ExternalID: "pg-router-review-zr-w", State: st, Live: true, CWD: e.cwd}
 			e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil), peer}}
-			n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
+			n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
 			if n != 1 {
 				t.Fatalf("reconcile = %d, want 1", n)
 			}
@@ -441,7 +443,7 @@ func TestRetry_deadPeerDoesNotKeepWorktree(t *testing.T) {
 	e.removingWorktree()
 	peer := ccpool.Session{ExternalID: "pg-router-review-zr-w", State: ccpool.StateIdle, Live: false, CloseReason: "idle_ttl", CWD: e.cwd}
 	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil), peer}}
-	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
+	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
 		t.Fatalf("reconcile = %d, want 1", n)
 	}
 	if len(e.open.Removed) != 1 {
@@ -463,7 +465,7 @@ func TestRetry_boundedToOneRowPerPass(t *testing.T) {
 		s.Meta[ccpool.MetaKeyBead] = "zr-x"
 	})
 	e.cc.ListSeq = [][]ccpool.Session{{a, b}}
-	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
+	n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil)
 	if n != 1 {
 		t.Fatalf("reconcile = %d, want 1 (one retry per pass)", n)
 	}
@@ -492,7 +494,7 @@ func TestRetry_midTurnRowIsSkippedNotCounted(t *testing.T) {
 		s.Meta[ccpool.MetaKeyBead] = "zr-x"
 	})
 	e.cc.ListSeq = [][]ccpool.Session{{working, next}}
-	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
+	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
 		t.Fatalf("reconcile = %d, want 1", n)
 	}
 	for _, id := range e.cc.Closed {
@@ -509,7 +511,7 @@ func TestRetry_liveMarkedRowIsReclosedFirst(t *testing.T) {
 	e.removingWorktree()
 	row := e.markedRow(func(s *ccpool.Session) { s.Live, s.CloseReason = true, "" })
 	e.cc.ListSeq = [][]ccpool.Session{{row}}
-	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
+	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 1 {
 		t.Fatalf("reconcile = %d, want 1", n)
 	}
 	e.wantLog(
@@ -527,7 +529,7 @@ func TestRetry_liveMarkedRowWithActiveTranscriptIsDeferred(t *testing.T) {
 	row := e.markedRow(func(s *ccpool.Session) { s.Live, s.CloseReason = true, "" })
 	e.cc.ListSeq = [][]ccpool.Session{{row}}
 	notQuiet := func(ccpool.Session) bool { return false }
-	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, notQuiet); n != 0 {
+	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, notQuiet); n != 0 {
 		t.Fatalf("reconcile = %d, want 0", n)
 	}
 	e.wantLog()
@@ -541,7 +543,7 @@ func TestRetry_failedRetryKeepsRow(t *testing.T) {
 	}
 	e.open.RemoveErrAt = map[string]bool{e.cwd: true}
 	e.cc.ListSeq = [][]ccpool.Session{{e.markedRow(nil)}}
-	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, fakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 0 {
+	if n := reconcileClosedBeadSessions(context.Background(), e.cc, e.open.Open, dtest.FakeBR{}, "pg-router-", tpRepoRoot, e.wtDir, nil); n != 0 {
 		t.Fatalf("reconcile = %d, want 0", n)
 	}
 	e.wantLog(e.attemptLog("1"), "RemoveWorktree:"+e.cwd)

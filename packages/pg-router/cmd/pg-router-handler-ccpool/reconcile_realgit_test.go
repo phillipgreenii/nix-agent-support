@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 )
 
@@ -45,7 +47,7 @@ func TestReconcileClosedBeadSessions_realGitKeepsUnpushedOrDirtyWork(t *testing.
 				CWD:        path,
 				Meta:       map[string]string{ccpool.MetaKeyBead: "zr-done"},
 			}}}}
-			br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
+			br := dtest.FakeBR{Out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
 			n := reconcileClosedBeadSessions(context.Background(), cc, h.opener, br, "pg-router-", h.repo, "", nil)
 			if c.wantKept {
 				if n != 0 || len(cc.Closed) != 0 {

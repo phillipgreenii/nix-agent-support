@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
@@ -24,136 +26,11 @@ import (
 // Orphan reconcile (bead pg2-g2u9m, INV-CCH-18): reclaim or budget-stop the
 // sessions of one role whose supervision lease expired.
 
-var orphanNowT = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-
 const (
 	orphanActor = "pgii-pool__worker"
 	orphanID    = "pg-router-worker-zr-w-20261006T115000.000000000"
 	orphanCWD   = "/wt/zr-w"
 )
-
-// orphanCC is a ccpool.Runner whose rows really change: Close(non-purge) turns
-// a row into a handler-closed one and SetMeta upserts meta, like ccpool does.
-type orphanCC struct {
-	mu       sync.Mutex
-	sessions []ccpool.Session
-	listErr  error
-	closes   []string
-	purges   []bool
-	metaSets [][3]string
-	onClose  func()
-}
-
-func (c *orphanCC) Ensure(context.Context, string, string, string, map[string]string, map[string]string) error {
-	return nil
-}
-func (c *orphanCC) Send(context.Context, string, string, ccpool.SendMode) error { return nil }
-func (c *orphanCC) Cancel(context.Context, string) error                        { return nil }
-func (c *orphanCC) Capacity(context.Context) (ccpool.Capacity, error) {
-	return ccpool.Capacity{Free: 1}, nil
-}
-
-func (c *orphanCC) List(context.Context) ([]ccpool.Session, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.listErr != nil {
-		return nil, c.listErr
-	}
-	out := make([]ccpool.Session, len(c.sessions))
-	for i, s := range c.sessions {
-		m := make(map[string]string, len(s.Meta))
-		for k, v := range s.Meta {
-			m[k] = v
-		}
-		s.Meta = m
-		out[i] = s
-	}
-	return out, nil
-}
-
-func (c *orphanCC) Close(_ context.Context, id string, purge bool) error {
-	if c.onClose != nil {
-		c.onClose()
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.closes = append(c.closes, id)
-	c.purges = append(c.purges, purge)
-	for i := range c.sessions {
-		if c.sessions[i].ExternalID == id {
-			c.sessions[i].CloseReason, c.sessions[i].Live = "handler", false
-		}
-	}
-	return nil
-}
-
-func (c *orphanCC) SetMeta(_ context.Context, id, key, value string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.metaSets = append(c.metaSets, [3]string{id, key, value})
-	for i := range c.sessions {
-		if c.sessions[i].ExternalID == id {
-			if c.sessions[i].Meta == nil {
-				c.sessions[i].Meta = map[string]string{}
-			}
-			c.sessions[i].Meta[key] = value
-		}
-	}
-	return nil
-}
-
-func (c *orphanCC) closed() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]string(nil), c.closes...)
-}
-
-// orphanBD serves `show` from a status/assignee table and records every other
-// call. showErr makes every show fail.
-type orphanBD struct {
-	mu      sync.Mutex
-	issues  map[string]string // bead id -> raw show JSON
-	showErr error
-	calls   []string
-}
-
-func (b *orphanBD) Run(_ context.Context, args ...string) (string, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if len(args) > 0 && args[0] == "show" {
-		b.calls = append(b.calls, strings.Join(args, " "))
-		if b.showErr != nil {
-			return "", b.showErr
-		}
-		return b.issues[args[1]], nil
-	}
-	b.calls = append(b.calls, strings.Join(args, " "))
-	return "", nil
-}
-
-func (b *orphanBD) writes() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	var w []string
-	for _, c := range b.calls {
-		if !strings.HasPrefix(c, "show ") {
-			w = append(w, c)
-		}
-	}
-	return w
-}
-
-func (b *orphanBD) shows() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	n := 0
-	for _, c := range b.calls {
-		if strings.HasPrefix(c, "show ") {
-			n++
-		}
-	}
-	return n
-}
 
 func inProgressBy(actor string) string {
 	return `{"id":"zr-w","status":"in_progress","assignee":"` + actor + `"}`
@@ -172,15 +49,15 @@ func orphanRow(state ccpool.SessionState) ccpool.Session {
 		ExternalID: orphanID, Name: "pg-router-worker-zr-w", State: state, Live: true, CWD: orphanCWD,
 		Meta: map[string]string{
 			ccpool.MetaKeyBead: "zr-w", ccpool.MetaKeyRole: "worker", ccpool.MetaKeyPool: ccpool.PoolName,
-			ccpool.MetaKeyLeaseUntil: orphanNowT.Add(-time.Minute).Format(time.RFC3339),
-			ccpool.MetaKeyLaunchedAt: orphanNowT.Add(-10 * time.Minute).Format(time.RFC3339),
+			ccpool.MetaKeyLeaseUntil: dtest.OrphanNowT.Add(-time.Minute).Format(time.RFC3339),
+			ccpool.MetaKeyLaunchedAt: dtest.OrphanNowT.Add(-10 * time.Minute).Format(time.RFC3339),
 		},
 	}
 }
 
 type orphanHarness struct {
-	cc      *orphanCC
-	bd      *orphanBD
+	cc      *dtest.OrphanCC
+	bd      *dtest.OrphanBD
 	opener  *fakeWorktreeOpener
 	deps    executor.Deps
 	env     orphanEnv
@@ -189,8 +66,8 @@ type orphanHarness struct {
 
 func newOrphanHarness(t *testing.T, sessions ...ccpool.Session) *orphanHarness {
 	t.Helper()
-	cc := &orphanCC{sessions: sessions}
-	bd := &orphanBD{issues: map[string]string{"zr-w": inProgressBy(orphanActor)}}
+	cc := &dtest.OrphanCC{Sessions: sessions}
+	bd := &dtest.OrphanBD{Issues: map[string]string{"zr-w": inProgressBy(orphanActor)}}
 	opener := &fakeWorktreeOpener{}
 	logPath := filepath.Join(t.TempDir(), "events.jsonl")
 	lw, err := eventlog.New(logPath)
@@ -203,7 +80,7 @@ func newOrphanHarness(t *testing.T, sessions ...ccpool.Session) *orphanHarness {
 	cfg.SessionPrefix = "pg-router-"
 	return &orphanHarness{
 		cc: cc, bd: bd, opener: opener, logPath: logPath,
-		deps: executor.Deps{CC: cc, BD: bd, Cfg: cfg, Log: lw, Now: func() time.Time { return orphanNowT }},
+		deps: executor.Deps{CC: cc, BD: bd, Cfg: cfg, Log: lw, Now: func() time.Time { return dtest.OrphanNowT }},
 		env:  orphanEnv{open: opener.Open, lockDir: t.TempDir()},
 	}
 }
@@ -263,10 +140,10 @@ func TestIsOrphanOf(t *testing.T) {
 	}{
 		{"expired lease, this role, this pool", base, true},
 		{"lease still in the future (still in Ensure / supervised)", with(func(s *ccpool.Session) {
-			s.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(time.Minute).Format(time.RFC3339)
+			s.Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Add(time.Minute).Format(time.RFC3339)
 		}), false},
 		{"lease exactly now is not yet expired", with(func(s *ccpool.Session) {
-			s.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Format(time.RFC3339)
+			s.Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Format(time.RFC3339)
 		}), false},
 		{"no lease at all (older build) is never an orphan", with(func(s *ccpool.Session) { delete(s.Meta, ccpool.MetaKeyLeaseUntil) }), false},
 		{"unparseable lease is never an orphan", with(func(s *ccpool.Session) { s.Meta[ccpool.MetaKeyLeaseUntil] = "garbage" }), false},
@@ -277,7 +154,7 @@ func TestIsOrphanOf(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isOrphanOf(tc.s, role, "pg-router-", orphanNowT); got != tc.want {
+			if got := isOrphanOf(tc.s, role, "pg-router-", dtest.OrphanNowT); got != tc.want {
 				t.Errorf("isOrphanOf = %v, want %v", got, tc.want)
 			}
 		})
@@ -286,26 +163,26 @@ func TestIsOrphanOf(t *testing.T) {
 
 func TestReconcileOrphans_listErrorMeansNoAction(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
-	h.cc.listErr = errors.New("ccpool list: boom")
+	h.cc.ListErr = errors.New("ccpool list: boom")
 	if r, s := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || s != 0 {
 		t.Fatalf("list error must not act: reclaimed=%d stopped=%d", r, s)
 	}
-	if len(h.cc.closed()) != 0 || len(h.bd.writes()) != 0 {
-		t.Errorf("no close / bead write expected; closes=%v writes=%v", h.cc.closed(), h.bd.writes())
+	if len(h.cc.Closed()) != 0 || len(h.bd.Writes()) != 0 {
+		t.Errorf("no close / bead write expected; closes=%v writes=%v", h.cc.Closed(), h.bd.Writes())
 	}
 }
 
 func TestReconcileOrphans_noLockDirDisablesReconcile(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
 	h.env.lockDir = ""
-	if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || len(h.cc.closed()) != 0 {
-		t.Fatalf("acting without mutual exclusion is forbidden; reclaimed=%d closes=%v", r, h.cc.closed())
+	if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || len(h.cc.Closed()) != 0 {
+		t.Fatalf("acting without mutual exclusion is forbidden; reclaimed=%d closes=%v", r, h.cc.Closed())
 	}
 }
 
 func TestReconcileOrphans_untouchedSessions(t *testing.T) {
 	inEnsure := orphanRow(ccpool.StateStarting)
-	inEnsure.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(13 * time.Minute).Format(time.RFC3339)
+	inEnsure.Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Add(13 * time.Minute).Format(time.RFC3339)
 	noLease := orphanRow(ccpool.StateIdle)
 	delete(noLease.Meta, ccpool.MetaKeyLeaseUntil)
 	otherRole := orphanRow(ccpool.StateIdle)
@@ -322,8 +199,8 @@ func TestReconcileOrphans_untouchedSessions(t *testing.T) {
 	if r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r != 0 || s != 0 {
 		t.Fatalf("none of these is an orphan to act on: reclaimed=%d stopped=%d", r, s)
 	}
-	if len(h.cc.closed()) != 0 || len(h.bd.writes()) != 0 || len(h.cc.metaSets) != 0 {
-		t.Errorf("no session or bead may be touched; closes=%v writes=%v meta=%v", h.cc.closed(), h.bd.writes(), h.cc.metaSets)
+	if len(h.cc.Closed()) != 0 || len(h.bd.Writes()) != 0 || len(h.cc.MetaSets) != 0 {
+		t.Errorf("no session or bead may be touched; closes=%v writes=%v meta=%v", h.cc.Closed(), h.bd.Writes(), h.cc.MetaSets)
 	}
 }
 
@@ -331,32 +208,32 @@ func TestReconcileOrphans_untouchedSessions(t *testing.T) {
 func TestReconcileOrphans_leaseRefreshedUnderLockAborts(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
 	refreshed := false
-	h.cc.onClose = func() {} // never reached
+	h.cc.OnClose = func() {} // never reached
 	// First List (candidate scan) sees the expired lease; by the re-List under
 	// the lock a live handler has refreshed it.
-	wrapped := &refreshingCC{orphanCC: h.cc, afterFirstList: func() {
-		h.cc.mu.Lock()
-		h.cc.sessions[0].Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(2 * time.Minute).Format(time.RFC3339)
-		h.cc.mu.Unlock()
+	wrapped := &refreshingCC{OrphanCC: h.cc, afterFirstList: func() {
+		h.cc.Mu.Lock()
+		h.cc.Sessions[0].Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Add(2 * time.Minute).Format(time.RFC3339)
+		h.cc.Mu.Unlock()
 		refreshed = true
 	}}
 	h.deps.CC = wrapped
 	if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 {
 		t.Fatalf("a refreshed lease must abort the reclaim, reclaimed=%d", r)
 	}
-	if !refreshed || len(h.cc.closed()) != 0 || len(h.bd.writes()) != 0 {
-		t.Errorf("refreshed=%v closes=%v writes=%v", refreshed, h.cc.closed(), h.bd.writes())
+	if !refreshed || len(h.cc.Closed()) != 0 || len(h.bd.Writes()) != 0 {
+		t.Errorf("refreshed=%v closes=%v writes=%v", refreshed, h.cc.Closed(), h.bd.Writes())
 	}
 }
 
 type refreshingCC struct {
-	*orphanCC
+	*dtest.OrphanCC
 	afterFirstList func()
 	once           sync.Once
 }
 
 func (r *refreshingCC) List(ctx context.Context) ([]ccpool.Session, error) {
-	out, err := r.orphanCC.List(ctx)
+	out, err := r.OrphanCC.List(ctx)
 	r.once.Do(r.afterFirstList)
 	return out, err
 }
@@ -371,13 +248,13 @@ func TestReclaimIdleOrphan_closeOnlyUnclaimsClosesAndRemovesWorktree(t *testing.
 			if r != 1 || s != 0 {
 				t.Fatalf("reclaimed=%d stopped=%d, want 1/0", r, s)
 			}
-			w := h.bd.writes()
+			w := h.bd.Writes()
 			if len(w) != 2 || !strings.HasPrefix(w[0], "comment zr-w orphaned session "+orphanID+" reclaimed after handler loss (lease expired ") ||
 				w[1] != "update zr-w --status=open --assignee= --if-assignee "+orphanActor+" --if-status in_progress" {
 				t.Errorf("want one reclaim comment then exactly one unclaim; writes=%v", w)
 			}
-			if got := h.cc.closed(); len(got) != 1 || got[0] != orphanID || h.cc.purges[0] {
-				t.Errorf("must close the orphan once, non-purge; closes=%v purges=%v", got, h.cc.purges)
+			if got := h.cc.Closed(); len(got) != 1 || got[0] != orphanID || h.cc.Purges[0] {
+				t.Errorf("must close the orphan once, non-purge; closes=%v purges=%v", got, h.cc.Purges)
 			}
 			if len(h.opener.Removed) != 1 || h.opener.Removed[0] != orphanCWD {
 				t.Errorf("worktree must be removed; removed=%v", h.opener.Removed)
@@ -386,13 +263,13 @@ func TestReclaimIdleOrphan_closeOnlyUnclaimsClosesAndRemovesWorktree(t *testing.
 				t.Errorf("anchor branch must be deleted; got %v", h.opener.BranchDeletes)
 			}
 			marked := false
-			for _, m := range h.cc.metaSets {
+			for _, m := range h.cc.MetaSets {
 				if m[0] == orphanID && m[1] == ccpool.MetaKeyOrphanReclaimed && m[2] != "" {
 					marked = true
 				}
 			}
 			if !marked {
-				t.Errorf("the reclaimed row must be marked so a redelivery launches afresh; meta=%v", h.cc.metaSets)
+				t.Errorf("the reclaimed row must be marked so a redelivery launches afresh; meta=%v", h.cc.MetaSets)
 			}
 			ev := h.eventOfKind(t, "orphan_reclaimed")
 			if ev == nil {
@@ -400,16 +277,16 @@ func TestReclaimIdleOrphan_closeOnlyUnclaimsClosesAndRemovesWorktree(t *testing.
 			}
 			for k, want := range map[string]any{
 				"session": orphanID, "bead": "zr-w", "role": "worker", "pool": "default", "state": string(state),
-				"lease_until": orphanNowT.Add(-time.Minute).Format(time.RFC3339),
-				"launched_at": orphanNowT.Add(-10 * time.Minute).Format(time.RFC3339),
+				"lease_until": dtest.OrphanNowT.Add(-time.Minute).Format(time.RFC3339),
+				"launched_at": dtest.OrphanNowT.Add(-10 * time.Minute).Format(time.RFC3339),
 			} {
 				if ev[k] != want {
 					t.Errorf("event field %s = %v, want %v", k, ev[k], want)
 				}
 			}
 			// Second pass: the row is closed now, so nothing acts again.
-			if r2, _ := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r2 != 0 || len(h.cc.closed()) != 1 {
-				t.Errorf("a reclaimed orphan must not be reclaimed twice; r2=%d closes=%v", r2, h.cc.closed())
+			if r2, _ := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r2 != 0 || len(h.cc.Closed()) != 1 {
+				t.Errorf("a reclaimed orphan must not be reclaimed twice; r2=%d closes=%v", r2, h.cc.Closed())
 			}
 		})
 	}
@@ -434,20 +311,20 @@ func TestReclaimIdleOrphan_beadRules(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
-			h.bd.issues["zr-w"] = tc.issue
+			h.bd.Issues["zr-w"] = tc.issue
 			if r, _ := h.run(orphanRole(tc.completion, 0)); r != 1 {
 				t.Fatalf("the session must still be reclaimed; reclaimed=%d", r)
 			}
-			if got := len(h.bd.writes()); got != tc.wantWrites {
-				t.Errorf("bead writes = %v, want %d", h.bd.writes(), tc.wantWrites)
+			if got := len(h.bd.Writes()); got != tc.wantWrites {
+				t.Errorf("bead writes = %v, want %d", h.bd.Writes(), tc.wantWrites)
 			}
 			if tc.completion == roles.CloseOrTriage || tc.completion == roles.CloseOrSplitTriage {
-				if h.bd.shows() != 0 {
+				if h.bd.Shows() != 0 {
 					t.Errorf("a triage role must not even read the bead")
 				}
 			}
-			if len(h.cc.closed()) != 1 {
-				t.Errorf("session must be closed once; closes=%v", h.cc.closed())
+			if len(h.cc.Closed()) != 1 {
+				t.Errorf("session must be closed once; closes=%v", h.cc.Closed())
 			}
 		})
 	}
@@ -457,17 +334,17 @@ func TestReclaimIdleOrphan_beadRules(t *testing.T) {
 // strand an invisible claim, so nothing is done this pass.
 func TestReclaimIdleOrphan_beadLookupFailureLeavesOrphan(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
-	h.bd.showErr = errors.New("bd: unreachable")
-	if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || len(h.cc.closed()) != 0 || len(h.bd.writes()) != 0 {
-		t.Fatalf("reclaimed=%d closes=%v writes=%v", r, h.cc.closed(), h.bd.writes())
+	h.bd.ShowErr = errors.New("bd: unreachable")
+	if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || len(h.cc.Closed()) != 0 || len(h.bd.Writes()) != 0 {
+		t.Fatalf("reclaimed=%d closes=%v writes=%v", r, h.cc.Closed(), h.bd.Writes())
 	}
 }
 
 func TestReclaimIdleOrphan_transcriptStillActiveDefers(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
 	h.env.quiet = func(ccpool.Session) bool { return false }
-	if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || len(h.cc.closed()) != 0 || len(h.bd.writes()) != 0 {
-		t.Fatalf("a not-quiet orphan (subagents running) must wait; reclaimed=%d closes=%v writes=%v", r, h.cc.closed(), h.bd.writes())
+	if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || len(h.cc.Closed()) != 0 || len(h.bd.Writes()) != 0 {
+		t.Fatalf("a not-quiet orphan (subagents running) must wait; reclaimed=%d closes=%v writes=%v", r, h.cc.Closed(), h.bd.Writes())
 	}
 }
 
@@ -477,7 +354,7 @@ func TestReclaimIdleOrphan_dirtyWorktreeKeptAndLogged(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
 	h.opener.RemoveErrAt = map[string]bool{orphanCWD: true}
 	var r int
-	msgs := captureSlog(t, func() { r, _ = h.run(orphanRole(roles.CloseOnly, 0)) })
+	msgs := dtest.CaptureSlog(t, func() { r, _ = h.run(orphanRole(roles.CloseOnly, 0)) })
 	if r != 1 {
 		t.Fatalf("reclaimed=%d, want 1", r)
 	}
@@ -522,8 +399,8 @@ func TestReclaimIdleOrphan_nonWorktreeIsolationAndRepoRootNeverRemoved(t *testin
 	role := orphanRole(roles.CloseOnly, 0)
 	role.CCPool.Isolation = roles.IsolationConfig{Type: "none"}
 	h.run(role)
-	if len(h.opener.Removed) != 0 || len(h.cc.closed()) != 1 {
-		t.Errorf("none isolation: close yes, remove no; removed=%v closes=%v", h.opener.Removed, h.cc.closed())
+	if len(h.opener.Removed) != 0 || len(h.cc.Closed()) != 1 {
+		t.Errorf("none isolation: close yes, remove no; removed=%v closes=%v", h.opener.Removed, h.cc.Closed())
 	}
 	row := orphanRow(ccpool.StateIdle)
 	row.CWD = "/repo"
@@ -540,7 +417,7 @@ func TestStopActiveOrphan_overBudgetHardStopsOnceThenRemovesWorktree(t *testing.
 	for _, st := range []ccpool.SessionState{ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking} {
 		t.Run(string(st), func(t *testing.T) {
 			row := orphanRow(st)
-			row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
+			row.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
 			h := newOrphanHarness(t, row)
 			role := orphanRole(roles.CloseOnly, 25*time.Minute)
 			role.CCPool.BudgetStopEscalateAfter = 3
@@ -548,11 +425,11 @@ func TestStopActiveOrphan_overBudgetHardStopsOnceThenRemovesWorktree(t *testing.
 			if r != 0 || s != 1 {
 				t.Fatalf("reclaimed=%d stopped=%d, want 0/1", r, s)
 			}
-			if got := h.cc.closed(); len(got) != 1 || got[0] != orphanID || h.cc.purges[0] {
+			if got := h.cc.Closed(); len(got) != 1 || got[0] != orphanID || h.cc.Purges[0] {
 				t.Errorf("the hard stop closes the session once, non-purge; closes=%v", got)
 			}
 			var comment, unclaim, stop bool
-			for _, w := range h.bd.writes() {
+			for _, w := range h.bd.Writes() {
 				comment = comment || w == "comment zr-w interrupted — budget"
 				// The hard stop releases the observed holder's claim with the guard
 				// bd's cross-actor refusal requires (pg2-ybkav).
@@ -560,7 +437,7 @@ func TestStopActiveOrphan_overBudgetHardStopsOnceThenRemovesWorktree(t *testing.
 				stop = stop || strings.Contains(w, "--add-label budget-stop:"+orphanID)
 			}
 			if !comment || !unclaim || !stop {
-				t.Errorf("hard stop sequence incomplete (comment=%v unclaim=%v budget-stop-record=%v); writes=%v", comment, unclaim, stop, h.bd.writes())
+				t.Errorf("hard stop sequence incomplete (comment=%v unclaim=%v budget-stop-record=%v); writes=%v", comment, unclaim, stop, h.bd.Writes())
 			}
 			if len(h.opener.Removed) != 1 || h.opener.Removed[0] != orphanCWD || len(h.opener.BranchDeletes) != 1 {
 				t.Errorf("the worktree and branch go afterwards; removed=%v branches=%v", h.opener.Removed, h.opener.BranchDeletes)
@@ -577,8 +454,8 @@ func TestStopActiveOrphan_overBudgetHardStopsOnceThenRemovesWorktree(t *testing.
 				t.Errorf("the shared terminal sequence also records its own hard_stop event")
 			}
 			// Once: the row is closed now.
-			if _, s2 := h.run(role); s2 != 0 || len(h.cc.closed()) != 1 {
-				t.Errorf("hard stop must fire once; s2=%d closes=%v", s2, h.cc.closed())
+			if _, s2 := h.run(role); s2 != 0 || len(h.cc.Closed()) != 1 {
+				t.Errorf("hard stop must fire once; s2=%d closes=%v", s2, h.cc.Closed())
 			}
 		})
 	}
@@ -593,11 +470,11 @@ func TestStopActiveOrphan_leftAlone(t *testing.T) {
 	}{
 		{"under budget", func(s *ccpool.Session) {}, 25 * time.Minute, ""},
 		{"no time budget (Budget.Time == 0)", func(s *ccpool.Session) {
-			s.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-5 * time.Hour).Format(time.RFC3339)
+			s.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-5 * time.Hour).Format(time.RFC3339)
 		}, 0, ""},
 		{"no launched_at to measure from", func(s *ccpool.Session) { delete(s.Meta, ccpool.MetaKeyLaunchedAt) }, time.Minute, ""},
 		{"over budget but its bead already closed (the hard stop would reopen it; a working session waits for its turn to end)", func(s *ccpool.Session) {
-			s.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
+			s.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
 		}, 25 * time.Minute, `{"id":"zr-w","status":"closed"}`},
 	}
 	for _, tc := range cases {
@@ -606,13 +483,13 @@ func TestStopActiveOrphan_leftAlone(t *testing.T) {
 			tc.mut(&row)
 			h := newOrphanHarness(t, row)
 			if tc.issue != "" {
-				h.bd.issues["zr-w"] = tc.issue
+				h.bd.Issues["zr-w"] = tc.issue
 			}
 			if r, s := h.run(orphanRole(roles.CloseOnly, tc.budget)); r != 0 || s != 0 {
 				t.Fatalf("reclaimed=%d stopped=%d, want untouched", r, s)
 			}
-			if len(h.cc.closed()) != 0 || len(h.bd.writes()) != 0 || len(h.opener.Removed) != 0 {
-				t.Errorf("untouched means untouched; closes=%v writes=%v removed=%v", h.cc.closed(), h.bd.writes(), h.opener.Removed)
+			if len(h.cc.Closed()) != 0 || len(h.bd.Writes()) != 0 || len(h.opener.Removed) != 0 {
+				t.Errorf("untouched means untouched; closes=%v writes=%v removed=%v", h.cc.Closed(), h.bd.Writes(), h.opener.Removed)
 			}
 		})
 	}
@@ -625,18 +502,18 @@ func TestStopActiveOrphan_neverPromptedClosedBeadIsClosed(t *testing.T) {
 	for _, st := range []ccpool.SessionState{ccpool.StateStarting, ccpool.StateReady} {
 		t.Run(string(st), func(t *testing.T) {
 			row := orphanRow(st)
-			row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
+			row.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
 			h := newOrphanHarness(t, row)
-			h.bd.issues["zr-w"] = `{"id":"zr-w","status":"closed"}`
+			h.bd.Issues["zr-w"] = `{"id":"zr-w","status":"closed"}`
 			r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute))
 			if r != 1 || s != 0 {
 				t.Fatalf("reclaimed=%d stopped=%d, want 1/0", r, s)
 			}
-			if got := h.cc.closed(); len(got) != 1 || got[0] != orphanID || h.cc.purges[0] {
+			if got := h.cc.Closed(); len(got) != 1 || got[0] != orphanID || h.cc.Purges[0] {
 				t.Errorf("closes=%v, want one non-purge close", got)
 			}
-			if len(h.bd.writes()) != 0 {
-				t.Errorf("a closed bead is never written; writes=%v", h.bd.writes())
+			if len(h.bd.Writes()) != 0 {
+				t.Errorf("a closed bead is never written; writes=%v", h.bd.Writes())
 			}
 			if len(h.opener.Removed) != 1 || h.opener.Removed[0] != orphanCWD {
 				t.Errorf("worktree must go; removed=%v", h.opener.Removed)
@@ -649,21 +526,21 @@ func TestStopActiveOrphan_neverPromptedClosedBeadIsClosed(t *testing.T) {
 // (covered above); one UNDER budget with a closed bead is not closed either.
 func TestStopActiveOrphan_neverPromptedUnderBudgetClosedBeadLeftAlone(t *testing.T) {
 	row := orphanRow(ccpool.StateReady)
-	row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-5 * time.Minute).Format(time.RFC3339)
+	row.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-5 * time.Minute).Format(time.RFC3339)
 	h := newOrphanHarness(t, row)
-	h.bd.issues["zr-w"] = `{"id":"zr-w","status":"closed"}`
-	if r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r != 0 || s != 0 || len(h.cc.closed()) != 0 {
-		t.Fatalf("reclaimed=%d stopped=%d closes=%v, want untouched", r, s, h.cc.closed())
+	h.bd.Issues["zr-w"] = `{"id":"zr-w","status":"closed"}`
+	if r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r != 0 || s != 0 || len(h.cc.Closed()) != 0 {
+		t.Fatalf("reclaimed=%d stopped=%d closes=%v, want untouched", r, s, h.cc.Closed())
 	}
 }
 
 func TestStopActiveOrphan_beadLookupFailureDoesNotStop(t *testing.T) {
 	row := orphanRow(ccpool.StateWorking)
-	row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
+	row.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
 	h := newOrphanHarness(t, row)
-	h.bd.showErr = errors.New("bd: unreachable")
-	if _, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); s != 0 || len(h.cc.closed()) != 0 {
-		t.Fatalf("stopped=%d closes=%v", s, h.cc.closed())
+	h.bd.ShowErr = errors.New("bd: unreachable")
+	if _, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); s != 0 || len(h.cc.Closed()) != 0 {
+		t.Fatalf("stopped=%d closes=%v", s, h.cc.Closed())
 	}
 }
 
@@ -676,7 +553,7 @@ func TestReconcileOrphans_concurrentHoldersActOnce(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateIdle))
 	inClose := make(chan struct{})
 	release := make(chan struct{})
-	h.cc.onClose = func() {
+	h.cc.OnClose = func() {
 		close(inClose)
 		<-release
 	}
@@ -687,7 +564,7 @@ func TestReconcileOrphans_concurrentHoldersActOnce(t *testing.T) {
 	}()
 	<-inClose // the first holder owns the flock and is inside Close
 	var secondR int
-	msgs := captureSlog(t, func() { secondR, _ = h.run(orphanRole(roles.CloseOnly, 0)) })
+	msgs := dtest.CaptureSlog(t, func() { secondR, _ = h.run(orphanRole(roles.CloseOnly, 0)) })
 	if secondR != 0 {
 		t.Errorf("the second holder must skip a locked session, reclaimed=%d", secondR)
 	}
@@ -698,11 +575,11 @@ func TestReconcileOrphans_concurrentHoldersActOnce(t *testing.T) {
 	if got := <-first; got[0] != 1 {
 		t.Errorf("the first holder reclaims; got %v", got)
 	}
-	if got := h.cc.closed(); len(got) != 1 {
+	if got := h.cc.Closed(); len(got) != 1 {
 		t.Errorf("closed once, got %v", got)
 	}
-	if n := len(h.bd.writes()); n != 2 {
-		t.Errorf("one comment + one unclaim in total, got %v", h.bd.writes())
+	if n := len(h.bd.Writes()); n != 2 {
+		t.Errorf("one comment + one unclaim in total, got %v", h.bd.Writes())
 	}
 	// And the lock is free again.
 	l, err := sessionlock.TryLock(h.env.lockDir, orphanID)
@@ -750,12 +627,12 @@ func TestReclaimIdleOrphan_releasesSessionDerivedActorClaim(t *testing.T) {
 			row := orphanRow(ccpool.StateIdle)
 			row.ClaudeSessionID = sid
 			h := newOrphanHarness(t, row)
-			h.bd.issues["zr-w"] = inProgressBy(tc.holder)
+			h.bd.Issues["zr-w"] = inProgressBy(tc.holder)
 			if r, _ := h.run(orphanRole(roles.CloseOnly, 0)); r != 1 {
 				t.Fatalf("reclaimed=%d, want 1", r)
 			}
 			var updates []string
-			for _, w := range h.bd.writes() {
+			for _, w := range h.bd.Writes() {
 				if strings.HasPrefix(w, "update ") {
 					updates = append(updates, w)
 				}
@@ -797,16 +674,16 @@ func TestReclaimIdleOrphan_unattributableClaimKeptWhileLivePeerWorksBead(t *test
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newOrphanHarness(t, orphanRow(ccpool.StateIdle), tc.peer)
-			h.bd.issues["zr-w"] = inProgressBy("review-zr-w")
+			h.bd.Issues["zr-w"] = inProgressBy("review-zr-w")
 			h.run(orphanRole(roles.CloseOnly, 0))
 			released := false
-			for _, w := range h.bd.writes() {
+			for _, w := range h.bd.Writes() {
 				if strings.HasPrefix(w, "update ") {
 					released = true
 				}
 			}
 			if released != tc.wantRelease {
-				t.Errorf("released=%v, want %v; writes=%v", released, tc.wantRelease, h.bd.writes())
+				t.Errorf("released=%v, want %v; writes=%v", released, tc.wantRelease, h.bd.Writes())
 			}
 		})
 	}
@@ -815,20 +692,12 @@ func TestReclaimIdleOrphan_unattributableClaimKeptWhileLivePeerWorksBead(t *test
 // releaseUpdates returns the bd writes that hand a bead back (status=open).
 func releaseUpdates(h *orphanHarness) []string {
 	var out []string
-	for _, w := range h.bd.writes() {
+	for _, w := range h.bd.Writes() {
 		if strings.HasPrefix(w, "update ") && strings.Contains(w, "--status=open") {
 			out = append(out, w)
 		}
 	}
 	return out
-}
-
-// setSession edits the one row under the fake pool's lock, as ccpool changing
-// under the reconcile would.
-func (c *orphanCC) setSession(mut func(*ccpool.Session)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	mut(&c.sessions[0])
 }
 
 // Actor shapes the dispatcher cannot attribute from the string alone.
@@ -842,19 +711,19 @@ func TestOrphanClaimThenKill_releasesGuardedOnlyAfterSessionDies(t *testing.T) {
 	for _, actor := range dispatcherKeyedActors {
 		t.Run(actor, func(t *testing.T) {
 			row := orphanRow(ccpool.StateWorking)
-			row.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(time.Minute).Format(time.RFC3339)
+			row.Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Add(time.Minute).Format(time.RFC3339)
 			h := newOrphanHarness(t, row)
 			role := orphanRole(roles.CloseOnly, 0)
-			h.bd.issues["zr-w"] = inProgressBy(actor) // the session claims the bead
+			h.bd.Issues["zr-w"] = inProgressBy(actor) // the session claims the bead
 
 			// Alive: the lease is current, so the session is not an orphan.
-			if r, s := h.run(role); r != 0 || s != 0 || len(releaseUpdates(h)) != 0 || len(h.cc.closed()) != 0 {
-				t.Fatalf("a live session must be left alone; r=%d s=%d writes=%v closes=%v", r, s, h.bd.writes(), h.cc.closed())
+			if r, s := h.run(role); r != 0 || s != 0 || len(releaseUpdates(h)) != 0 || len(h.cc.Closed()) != 0 {
+				t.Fatalf("a live session must be left alone; r=%d s=%d writes=%v closes=%v", r, s, h.bd.Writes(), h.cc.Closed())
 			}
 
 			// Killed: the process dies, the pane errors, and the lease lapses.
-			h.cc.setSession(func(s *ccpool.Session) { s.Live, s.State = false, ccpool.StateErrored })
-			now := orphanNowT.Add(2 * time.Minute)
+			h.cc.SetSession(func(s *ccpool.Session) { s.Live, s.State = false, ccpool.StateErrored })
+			now := dtest.OrphanNowT.Add(2 * time.Minute)
 			h.deps.Now = func() time.Time { return now }
 			if r, _ := h.run(role); r != 1 {
 				t.Fatalf("reclaimed=%d, want 1", r)
@@ -879,21 +748,21 @@ func TestStopActiveOrphan_restartReleasesClaimGuardedUnderAnyActor(t *testing.T)
 		for _, st := range []ccpool.SessionState{ccpool.StateStarting, ccpool.StateReady, ccpool.StateWorking} {
 			t.Run(actor+"/"+string(st), func(t *testing.T) {
 				row := orphanRow(st)
-				row.Meta[ccpool.MetaKeyLaunchedAt] = orphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
-				row.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(time.Minute).Format(time.RFC3339)
+				row.Meta[ccpool.MetaKeyLaunchedAt] = dtest.OrphanNowT.Add(-30 * time.Minute).Format(time.RFC3339)
+				row.Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Add(time.Minute).Format(time.RFC3339)
 				h := newOrphanHarness(t, row)
-				h.bd.issues["zr-w"] = inProgressBy(actor)
+				h.bd.Issues["zr-w"] = inProgressBy(actor)
 				role := orphanRole(roles.CloseOnly, 25*time.Minute)
 				role.CCPool.BudgetStopEscalateAfter = 3
 
 				// Supervised: current lease, so no orphan and no release.
 				if _, s := h.run(role); s != 0 || len(releaseUpdates(h)) != 0 {
-					t.Fatalf("a supervised session must not be released; s=%d writes=%v", s, h.bd.writes())
+					t.Fatalf("a supervised session must not be released; s=%d writes=%v", s, h.bd.Writes())
 				}
 
 				// Handler lost: the lease lapses.
-				h.cc.setSession(func(s *ccpool.Session) {
-					s.Meta[ccpool.MetaKeyLeaseUntil] = orphanNowT.Add(-time.Minute).Format(time.RFC3339)
+				h.cc.SetSession(func(s *ccpool.Session) {
+					s.Meta[ccpool.MetaKeyLeaseUntil] = dtest.OrphanNowT.Add(-time.Minute).Format(time.RFC3339)
 				})
 				if _, s := h.run(role); s != 1 {
 					t.Fatalf("stopped=%d, want 1", s)
@@ -911,12 +780,12 @@ func TestStopActiveOrphan_restartReleasesClaimGuardedUnderAnyActor(t *testing.T)
 // its claim with it.
 func TestStopActiveOrphan_restartUnderBudgetKeepsClaim(t *testing.T) {
 	h := newOrphanHarness(t, orphanRow(ccpool.StateWorking)) // launched 10m ago
-	h.bd.issues["zr-w"] = inProgressBy("review-zr-w")
+	h.bd.Issues["zr-w"] = inProgressBy("review-zr-w")
 	if r, s := h.run(orphanRole(roles.CloseOnly, 25*time.Minute)); r != 0 || s != 0 {
 		t.Fatalf("r=%d s=%d, want 0/0", r, s)
 	}
-	if len(h.bd.writes()) != 0 || len(h.cc.closed()) != 0 {
-		t.Errorf("an under-budget orphan keeps its claim; writes=%v closes=%v", h.bd.writes(), h.cc.closed())
+	if len(h.bd.Writes()) != 0 || len(h.cc.Closed()) != 0 {
+		t.Errorf("an under-budget orphan keeps its claim; writes=%v closes=%v", h.bd.Writes(), h.cc.Closed())
 	}
 }
 
@@ -929,12 +798,12 @@ func TestReconcileOrphans_evictedRowIsNotReclaimed(t *testing.T) {
 			row := orphanRow(ccpool.StateIdle)
 			row.Live, row.CloseReason = false, reason
 			h := newOrphanHarness(t, row)
-			h.bd.issues["zr-w"] = inProgressBy("review-zr-w")
+			h.bd.Issues["zr-w"] = inProgressBy("review-zr-w")
 			if r, s := h.run(orphanRole(roles.CloseOnly, 0)); r != 0 || s != 0 {
 				t.Fatalf("r=%d s=%d, want 0/0", r, s)
 			}
-			if len(h.bd.writes()) != 0 || len(h.cc.closed()) != 0 {
-				t.Errorf("an evicted row is not the orphan pass's; writes=%v closes=%v", h.bd.writes(), h.cc.closed())
+			if len(h.bd.Writes()) != 0 || len(h.cc.Closed()) != 0 {
+				t.Errorf("an evicted row is not the orphan pass's; writes=%v closes=%v", h.bd.Writes(), h.cc.Closed())
 			}
 		})
 	}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 )
 
 func TestReadBeadsPrefix_fromBd(t *testing.T) {
-	br := fakeBR{out: map[string]string{"config get issue_prefix": "zr\n"}}
+	br := dtest.FakeBR{Out: map[string]string{"config get issue_prefix": "zr\n"}}
 	got, err := readBeadsPrefix(context.Background(), br)
 	if err != nil {
 		t.Fatalf("readBeadsPrefix error: %v", err)
@@ -18,19 +20,19 @@ func TestReadBeadsPrefix_fromBd(t *testing.T) {
 }
 
 func TestReadBeadsPrefix_bdError(t *testing.T) {
-	if _, err := readBeadsPrefix(context.Background(), fakeBR{err: errors.New("bd boom")}); err == nil {
+	if _, err := readBeadsPrefix(context.Background(), dtest.FakeBR{Err: errors.New("bd boom")}); err == nil {
 		t.Error("bd error should propagate")
 	}
 }
 
 func TestReadBeadsPrefix_emptyOutput(t *testing.T) {
-	if _, err := readBeadsPrefix(context.Background(), fakeBR{out: map[string]string{}}); err == nil {
+	if _, err := readBeadsPrefix(context.Background(), dtest.FakeBR{Out: map[string]string{}}); err == nil {
 		t.Error("empty prefix should error")
 	}
 }
 
 func TestPrecheckPrefix_matchAndMismatch(t *testing.T) {
-	br := fakeBR{out: map[string]string{"config get issue_prefix": "zr"}}
+	br := dtest.FakeBR{Out: map[string]string{"config get issue_prefix": "zr"}}
 	if err := precheckPrefix(context.Background(), br, "zr"); err != nil {
 		t.Errorf("matching prefix should pass, got %v", err)
 	}
@@ -43,7 +45,7 @@ func TestPrecheckPrefix_matchAndMismatch(t *testing.T) {
 // pass from a monorepo worktree/slot that has NO local .beads dir, as long
 // as bd resolves the store there.
 func TestPrecheck_passesWithoutLocalBeadsDir(t *testing.T) {
-	br := fakeBR{out: map[string]string{
+	br := dtest.FakeBR{Out: map[string]string{
 		"list --limit 1 --json":   "[]",
 		"config get issue_prefix": "zr",
 	}}
@@ -53,7 +55,7 @@ func TestPrecheck_passesWithoutLocalBeadsDir(t *testing.T) {
 }
 
 func TestPrecheck_bdUnreachable(t *testing.T) {
-	if err := precheck(context.Background(), "/x", "zr", fakeBR{err: errors.New("bd down")}); err == nil {
+	if err := precheck(context.Background(), "/x", "zr", dtest.FakeBR{Err: errors.New("bd down")}); err == nil {
 		t.Error("unreachable bd should fail precheck")
 	}
 }
@@ -61,9 +63,9 @@ func TestPrecheck_bdUnreachable(t *testing.T) {
 // An unset (empty) expected prefix skips the assertion entirely: bd is not even
 // asked for the store's prefix, so a store with any prefix (or none) passes.
 func TestPrecheckPrefix_unsetSkipsAssertion(t *testing.T) {
-	for name, br := range map[string]fakeBR{
-		"other prefix": {out: map[string]string{"config get issue_prefix": "anything"}},
-		"bd errors":    {err: errors.New("bd boom")},
+	for name, br := range map[string]dtest.FakeBR{
+		"other prefix": {Out: map[string]string{"config get issue_prefix": "anything"}},
+		"bd errors":    {Err: errors.New("bd boom")},
 	} {
 		if err := precheckPrefix(context.Background(), br, ""); err != nil {
 			t.Errorf("%s: unset prefix should skip the assertion, got %v", name, err)
@@ -72,7 +74,7 @@ func TestPrecheckPrefix_unsetSkipsAssertion(t *testing.T) {
 }
 
 func TestPrecheck_unsetPrefixPassesAndSetPrefixStillEnforced(t *testing.T) {
-	br := fakeBR{out: map[string]string{
+	br := dtest.FakeBR{Out: map[string]string{
 		"list --limit 1 --json":   "[]",
 		"config get issue_prefix": "pfx",
 	}}

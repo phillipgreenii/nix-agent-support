@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 )
 
 // lightCC answers List with full rows and ListLight with the same rows minus
 // the facets only the full list resolves (the live pane cwd). It counts calls.
 type lightCC struct {
-	*orphanCC
+	*dtest.OrphanCC
 	full, light []ccpool.Session
 	lightErr    error
 	listCalls   int
@@ -55,7 +57,7 @@ func TestWorktreeHeldByRow_sameOnLightAndFullRows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			full := tc.row
 			light := tc.row // the light row carries the same fields worktreeHeldByRow reads
-			cc := &lightCC{orphanCC: &orphanCC{}, full: []ccpool.Session{full}, light: []ccpool.Session{light}}
+			cc := &lightCC{OrphanCC: &dtest.OrphanCC{}, full: []ccpool.Session{full}, light: []ccpool.Session{light}}
 			gotLight, err := ccpool.ListPreferLight(context.Background(), cc)
 			if err != nil {
 				t.Fatal(err)
@@ -90,7 +92,7 @@ func TestWorktreeSweep_driftedPaneProtectedByProcessProbe(t *testing.T) {
 func TestListPreferLight_fallbacks(t *testing.T) {
 	rows := []ccpool.Session{{ExternalID: "full"}}
 	t.Run("unsupported flag falls back to List", func(t *testing.T) {
-		cc := &lightCC{orphanCC: &orphanCC{}, full: rows, lightErr: fmt.Errorf("%w: old", ccpool.ErrNoFacetsUnsupported)}
+		cc := &lightCC{OrphanCC: &dtest.OrphanCC{}, full: rows, lightErr: fmt.Errorf("%w: old", ccpool.ErrNoFacetsUnsupported)}
 		got, err := ccpool.ListPreferLight(context.Background(), cc)
 		if err != nil || len(got) != 1 || cc.listCalls != 1 {
 			t.Fatalf("got=%v err=%v listCalls=%d", got, err, cc.listCalls)
@@ -98,13 +100,13 @@ func TestListPreferLight_fallbacks(t *testing.T) {
 	})
 	t.Run("other failure is returned, List not tried", func(t *testing.T) {
 		boom := errors.New("boom")
-		cc := &lightCC{orphanCC: &orphanCC{}, full: rows, lightErr: boom}
+		cc := &lightCC{OrphanCC: &dtest.OrphanCC{}, full: rows, lightErr: boom}
 		if _, err := ccpool.ListPreferLight(context.Background(), cc); !errors.Is(err, boom) || cc.listCalls != 0 {
 			t.Fatalf("err=%v listCalls=%d", err, cc.listCalls)
 		}
 	})
 	t.Run("runner without ListLight uses List", func(t *testing.T) {
-		cc := &orphanCC{sessions: rows}
+		cc := &dtest.OrphanCC{Sessions: rows}
 		got, err := ccpool.ListPreferLight(context.Background(), cc)
 		if err != nil || len(got) != 1 {
 			t.Fatalf("got=%v err=%v", got, err)
