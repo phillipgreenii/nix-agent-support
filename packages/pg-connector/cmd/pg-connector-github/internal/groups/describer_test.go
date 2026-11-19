@@ -22,7 +22,7 @@ func content(t *testing.T, s summary.Summary) []byte {
 func TestDescriber_FillsEveryPrimaryField(t *testing.T) {
 	s := summary.Summary{
 		NodeID: "PR_1", Repo: "Acme-Org/Widget", Number: 7, State: "OPEN",
-		HeadRefOid: "head1", BaseRefOid: "base1", HeadRefName: "feature/x",
+		HeadRefOid: "head1", BaseRefOid: "base1", HeadRefName: "feature/x", BaseRefName: "main",
 		UpdatedAt: "2026-10-12T09:30:00Z",
 	}
 	got, err := Describer{}.Describe(content(t, s))
@@ -38,8 +38,8 @@ func TestDescriber_FillsEveryPrimaryField(t *testing.T) {
 	if got.Gone || got.Terminal {
 		t.Errorf("Gone = %v, Terminal = %v for an open pull request, want false, false", got.Gone, got.Terminal)
 	}
-	if got.Attrs[AttrHeadRef] != "feature/x" || got.Attrs[AttrState] != "OPEN" || len(got.Attrs) != 2 {
-		t.Errorf("Attrs = %v, want the head branch and the state only", got.Attrs)
+	if got.Attrs[AttrHeadRef] != "feature/x" || got.Attrs[AttrBaseRef] != "main" || got.Attrs[AttrState] != "OPEN" || len(got.Attrs) != 3 {
+		t.Errorf("Attrs = %v, want the head branch, the base branch and the state only", got.Attrs)
 	}
 }
 

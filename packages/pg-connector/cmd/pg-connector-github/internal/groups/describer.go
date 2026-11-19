@@ -15,6 +15,9 @@ import (
 const (
 	// AttrHeadRef is the pull request's head branch, which the runs group needs.
 	AttrHeadRef = "head_ref"
+	// AttrBaseRef is the pull request's base branch, which the runs group needs to
+	// read the branch rules that say which checks are required.
+	AttrBaseRef = "base_ref"
 	// AttrState is the pull request's state as GitHub spells it.
 	AttrState = "state"
 )
@@ -38,7 +41,7 @@ func (Describer) Describe(content []byte) (engine.Primary, error) {
 		Ref: s.Ref(), Stamp: s.HeadRefOid, Stamp2: s.BaseRefOid,
 		OriginAt: OriginTime(s), Gone: s.Gone,
 		Terminal: summary.IsTerminal(s.State),
-		Attrs:    map[string]string{AttrHeadRef: s.HeadRefName, AttrState: s.State},
+		Attrs:    map[string]string{AttrHeadRef: s.HeadRefName, AttrBaseRef: s.BaseRefName, AttrState: s.State},
 	}, nil
 }
 

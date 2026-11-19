@@ -37,6 +37,8 @@ var newWantActions = map[string][]rule{
 	"18-": {{"update", "focus-item", "focus.item"}},
 	// After the refresh the legacy row plans exactly what scenario 01 does.
 	"19-": {{"create", "anchor", "anchor.lazy"}, {"create", "review-pr", "review.head-advanced"}, {"create", "process-feedback", "feedback.digest-changed"}},
+	// A cancelled run the connector marks not required mints no fix-ci item.
+	"20-": {{"create", "anchor", "anchor.lazy"}, {"create", "review-pr", "review.head-advanced"}},
 }
 
 var newWantAbsent = map[string][]rule{
@@ -53,6 +55,7 @@ var newWantAbsent = map[string][]rule{
 	"14-": {{"reopen", "review-pr", "review.head-advanced"}, {"reopen", "process-feedback", "feedback.digest-changed"}},
 	// The new side reads closed items however the work-beads listing is
 	// filtered, so scenario 15 plans exactly what scenario 14 does.
+	"20-": {{"create", "fix-ci", "fixci.failing-on-head"}},
 	"15-": {{"create", "review-pr", "review.head-advanced"}, {"reopen", "review-pr", "review.head-advanced"}, {"reopen", "process-feedback", "feedback.digest-changed"}},
 }
 

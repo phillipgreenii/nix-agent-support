@@ -152,6 +152,9 @@ type CIRunFixture struct {
 	Conclusion string `json:"conclusion,omitempty"`
 	Attempt    int    `json:"attempt,omitempty"` // default 1
 	HeadSHA    string `json:"head_sha,omitempty"`
+	// Required is the connector's per-run `required` fact: absent in the
+	// scenario means the connector did not say (the run is then required).
+	Required *bool `json:"required,omitempty"`
 }
 
 // BeadFixture is one work bead in the tracker, in its PRE-CUTOVER shape: no
@@ -509,13 +512,14 @@ func (fx *Fixture) ciListJSON(p PRFixture) []byte {
 		Attempt    int    `json:"attempt"`
 		AsOf       string `json:"as_of"`
 		Stale      bool   `json:"stale"`
+		Required   *bool  `json:"required,omitempty"`
 	}
 	runs := make([]run, 0, len(p.CI))
 	for _, c := range p.CI {
 		runs = append(runs, run{
 			ID: c.ID, Name: c.Name, Status: c.Status, Conclusion: c.Conclusion,
 			URL: "https://ci.example/runs/" + c.ID, Provider: "actions", HeadSHA: c.HeadSHA,
-			Repo: FixtureRepo, PRID: entityID(p.Number), Attempt: c.Attempt, AsOf: fixtureAsOf,
+			Repo: FixtureRepo, PRID: entityID(p.Number), Attempt: c.Attempt, AsOf: fixtureAsOf, Required: c.Required,
 		})
 	}
 	return mustJSON(map[string]any{"runs": runs, "sources": []any{}})

@@ -85,6 +85,14 @@ type env struct {
 
 func newEnv(t *testing.T, gh *fakeGH) *env {
 	t.Helper()
+	e := newEnvFor(t, gh)
+	e.gh = gh
+	return e
+}
+
+// newEnvFor builds the env around any gh runner; env.gh stays nil.
+func newEnvFor(t *testing.T, gh ratefeed.Runner) *env {
+	t.Helper()
 	clk := governor.NewManualClock(t0)
 	cfg := config.Defaults().Settings
 	gov, err := governor.New(ratefeed.GovernorConfig(cfg), governor.Options{Clock: clk})
@@ -103,7 +111,7 @@ func newEnv(t *testing.T, gh *fakeGH) *env {
 		Feed: ratefeed.New(gov, gh, clk), Store: st, Rules: *groups.NewRules(cfg),
 		Settings: cfg, Clock: clk, Retry: &policy,
 	}
-	return &env{f: f, gh: gh, gov: gov, st: st, sl: sl, clk: clk}
+	return &env{f: f, gov: gov, st: st, sl: sl, clk: clk}
 }
 
 var background = ratefeed.Meta{Class: governor.ClassKeepAlive, Purpose: governor.PurposeRefresh}

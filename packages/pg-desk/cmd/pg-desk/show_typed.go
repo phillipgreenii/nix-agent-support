@@ -100,6 +100,11 @@ type viewCIRun struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	URL        string `json:"url"`
+	// Required is pg-connector's per-run `required` fact passed through: true
+	// when the merge gate requires the run's check, false when it does not, and
+	// omitted when the connector did not say (a consumer treats that as
+	// required).
+	Required *bool `json:"required,omitempty"`
 }
 
 type viewDecorations struct {
@@ -364,6 +369,7 @@ func buildCI(ent store.Entity, snapshot json.RawMessage) *viewCI {
 				URL        string `json:"url"`
 				HeadSHA    string `json:"head_sha"`
 				Attempt    int    `json:"attempt"`
+				Required   *bool  `json:"required"`
 			} `json:"runs"`
 		} `json:"ci"`
 		HeadSHA string `json:"head_sha"`
@@ -386,7 +392,7 @@ func buildCI(ent store.Entity, snapshot json.RawMessage) *viewCI {
 		if r.HeadSHA != "" && head != "" && r.HeadSHA != head {
 			continue
 		}
-		out.Runs = append(out.Runs, viewCIRun{ID: r.ID, Attempt: r.Attempt, Name: r.Name, Status: r.Status, Conclusion: r.Conclusion, URL: r.URL})
+		out.Runs = append(out.Runs, viewCIRun{ID: r.ID, Attempt: r.Attempt, Name: r.Name, Status: r.Status, Conclusion: r.Conclusion, URL: r.URL, Required: r.Required})
 	}
 	return out
 }

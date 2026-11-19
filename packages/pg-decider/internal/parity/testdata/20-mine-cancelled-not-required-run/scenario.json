@@ -1,0 +1,27 @@
+{
+  "name": "20-mine-cancelled-not-required-run",
+  "description": "My open PR with one passing run and one cancelled run the connector marks not required to merge: no fix-ci item is due, because a failing run of a check the merge gate does not require blocks nothing.",
+  "entities": ["acme/api#120"],
+  "prs": [
+    {
+      "number": 120,
+      "title": "Trim the retry budget",
+      "author": "phillipgreenii",
+      "checks_rollup": "success",
+      "ci": [
+        {
+          "id": "921",
+          "name": "build",
+          "conclusion": "success",
+          "required": true
+        },
+        {
+          "id": "922",
+          "name": "optional-check",
+          "conclusion": "cancelled",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

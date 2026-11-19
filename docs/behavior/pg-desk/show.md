@@ -97,17 +97,28 @@ tell which builds failed on the head commit. A build id is a run's `id` plus its
 
 ```json
 "ci": {"runs": [{"id": "900", "attempt": 2, "name": "build", "status": "completed",
-                 "conclusion": "failure", "url": "https://ci.example/runs/900"}]}
+                 "conclusion": "failure", "url": "https://ci.example/runs/900",
+                 "required": true}]}
 ```
 
-| Field        | Meaning                                                                                                           |
-| ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `id`         | The run id, a string.                                                                                             |
-| `attempt`    | The run's attempt number, an integer; `0` when the backend reported none. A re-run keeps `id`.                    |
-| `name`       | The check name.                                                                                                   |
-| `status`     | The run's lifecycle state (for example `completed`, `in_progress`), so a finished run is told from a pending one. |
-| `conclusion` | The run's outcome, `""` until it completes.                                                                       |
-| `url`        | The run's web URL.                                                                                                |
+| Field        | Meaning                                                                                                                |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `id`         | The run id, a string.                                                                                                  |
+| `attempt`    | The run's attempt number, an integer; `0` when the backend reported none. A re-run keeps `id`.                         |
+| `name`       | The check name.                                                                                                        |
+| `status`     | The run's lifecycle state (for example `completed`, `in_progress`), so a finished run is told from a pending one.      |
+| `conclusion` | The run's outcome, `""` until it completes.                                                                            |
+| `url`        | The run's web URL.                                                                                                     |
+| `required`   | Optional boolean: `true` when the merge gate requires the run's check, `false` when it does not. Omitted when unknown. |
+
+`required` is passed through from pg-connector's `schema.CIRun`, which fills it from the base
+branch's required status check contexts (the repository's branch rules): a run is required when its
+name or one of its job names is such a context, and not required when the contexts are known, the
+run's jobs were fetched and none matches. It is omitted when the connector could not tell (the rules
+were unreadable or hold no required status check, or the run's jobs were not fetched and its own name
+matches no context). A reader MUST treat an omitted `required` as required, so a view that lacks it
+behaves as before. pg-desk copies the value and decides nothing from it; no check or workflow name is
+configured or hardcoded anywhere on this path.
 
 The names are those of pg-connector's `schema.CIRun`; pg-desk reads them from the PR's stored
 `ci` facts without importing pg-connector. Runs are those of the PR's head commit: a run whose

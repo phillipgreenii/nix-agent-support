@@ -101,8 +101,9 @@ func TestListRunsFetchesStaleRunsAtInteractivePriority(t *testing.T) {
 			interactive++
 		}
 	}
-	if interactive != 1 {
-		t.Errorf("%d class 1 interactive runs spends, want 1: %+v", interactive, e.spends(governor.BucketRESTCore))
+	// Two requests: the runs list and the base branch's rules (required checks).
+	if interactive != 2 {
+		t.Errorf("%d class 1 interactive runs spends, want 2: %+v", interactive, e.spends(governor.BucketRESTCore))
 	}
 }
 

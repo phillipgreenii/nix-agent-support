@@ -65,7 +65,7 @@ var (
 	reportPolicy      = policy{"Truncated": excluded, "Total": excluded, "Returned": excluded}
 	runPolicy         = policy{
 		"URL": excluded, "Provider": excluded, "Repo": excluded, "PRID": excluded, "AsOf": excluded,
-		"Stale": excluded, "ServedFrom": excluded, "AgeSeconds": excluded, "Groups": excluded,
+		"Required": excluded, "Stale": excluded, "ServedFrom": excluded, "AgeSeconds": excluded, "Groups": excluded,
 		"ID": derived, "Name": derived, "Status": derived, "Conclusion": derived, "HeadSHA": derived,
 		"Attempt": derived, "Jobs": derived,
 	}

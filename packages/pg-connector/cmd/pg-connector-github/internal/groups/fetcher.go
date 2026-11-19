@@ -23,6 +23,9 @@ type Target struct {
 	Stamps Stamps
 	// HeadRefName is the PR's head branch, which the runs group needs.
 	HeadRefName string
+	// BaseRefName is the PR's base branch; the runs group reads its required
+	// status checks. Empty means they are not looked up.
+	BaseRefName string
 	// State is the PR's state as GitHub spells it.
 	State string
 	// Terminal is true for a merged or closed PR.

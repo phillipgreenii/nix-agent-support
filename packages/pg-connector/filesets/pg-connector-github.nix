@@ -134,6 +134,7 @@
   "cmd/pg-connector-github/internal/runs/fetch.go"
   "cmd/pg-connector-github/internal/runs/freshness.go"
   "cmd/pg-connector-github/internal/runs/jobs.go"
+  "cmd/pg-connector-github/internal/runs/required.go"
   "cmd/pg-connector-github/internal/serve/hooks.go"
   "cmd/pg-connector-github/internal/serve/origin.go"
   "cmd/pg-connector-github/internal/serve/serve.go"

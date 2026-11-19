@@ -128,6 +128,10 @@ func (f *Fetcher) fetchOne(ctx context.Context, call ratefeed.Meta, t groups.Tar
 	o.Cost += jobCost
 	o.LastError = lastErr
 
+	contexts, reqCost := f.requiredContexts(ctx, call, repo, t.BaseRefName)
+	o.Cost += reqCost
+	markRequired(runs, contexts)
+
 	content := Content{Runs: runs}
 	raw, err := content.canonical()
 	if err != nil {

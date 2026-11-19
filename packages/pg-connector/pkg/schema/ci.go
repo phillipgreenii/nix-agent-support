@@ -62,7 +62,12 @@ package schema
 // store_identity to the ci changes answer and to ChangesAckResult. Additive; the
 // bump follows the same rule that ANY change to the capability's wire shapes
 // bumps the version.
-const CISchemaVersion = 8
+//
+// Bumped 8 -> 9 by the CIRun.Required field below: whether the repository's
+// branch rules require the run's check for a merge. Additive and omitted when
+// unknown; the bump follows the same rule that ANY field-shape change bumps
+// the version.
+const CISchemaVersion = 9
 
 // CIRun is the ci capability's shared JSON wire shape, returned by the ci
 // capability's "list_runs" op and carried by
@@ -117,6 +122,15 @@ type CIRun struct {
 	// than failing the run listing. An all-success PR therefore triggers
 	// no job fetches at all.
 	Jobs []CIJob `json:"jobs,omitempty"`
+
+	// Required says whether the merge gate requires this run's check: true
+	// when the required status check contexts of the PR's base branch (the
+	// repository's branch rules) name the run or one of its jobs, false when
+	// the contexts are known and none matches. Omitted (nil) when the backend
+	// could not tell (the rules were unreadable, or the run's jobs were not
+	// fetched and its own name matches no context); a consumer MUST treat an
+	// omitted value as required. Added by CISchemaVersion's 8 -> 9 bump.
+	Required *bool `json:"required,omitempty"`
 
 	// AsOf is this read's own as-of time (RFC3339, UTC) — added by bead
 	// pg2-4aoeg, extending the pr capability's own AsOf/Stale contract

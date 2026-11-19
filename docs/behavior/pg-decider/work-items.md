@@ -323,10 +323,10 @@ The rule decides nothing about which checks are required: that is the view's `re
 which a producer fills from the repository's branch rules (the required status check contexts of
 the base branch). No check or workflow name is configured or hardcoded in the decider.
 
-Realization gap: pg-desk does not yet emit `required` into the `ci` section of the view, so until it
-does every run is treated as required and the behavior above for a non-required check does not
-occur in a live deployment. The decider side is in place and tested against views that carry the
-member.
+pg-desk emits `required` per run in the `ci` section of the view (see
+[`../pg-desk/show.md`](../pg-desk/show.md)), filled by pg-connector from the base branch's rules. A
+run whose requirement the connector could not determine carries no `required` member and is treated
+as required.
 
 | Condition (first that holds)                                                    | Plan                                                                                                   |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |

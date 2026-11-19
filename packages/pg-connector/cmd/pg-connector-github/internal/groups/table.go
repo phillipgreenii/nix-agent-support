@@ -57,7 +57,7 @@ var FieldTable = []FieldAssignment{
 	// group.
 	{KindCI, Runs, []string{
 		"id", "name", "status", "conclusion", "url", "provider", "head_sha", "repo", "pr_id",
-		"attempt", "jobs",
+		"attempt", "jobs", "required",
 	}},
 	{KindCI, Derived, []string{"as_of", "stale", "served_from", "age_seconds", "groups"}},
 }

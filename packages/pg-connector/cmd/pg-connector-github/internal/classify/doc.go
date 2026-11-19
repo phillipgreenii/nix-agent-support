@@ -98,7 +98,7 @@
 //	              author, path, line, thread_id, review_thread_id,
 //	              thread_outdated (line and outdated move with pushes); per
 //	              review: author, submitted_at, commit_oid
-//	runs          per run: url, provider, repo, pr_id, as_of, stale,
+//	runs          per run: url, provider, repo, pr_id, required, as_of, stale,
 //	              served_from, age_seconds, groups; per job: id, url
 //
 // updated_at, base_ref_oid and mergeStateStatus are the three fields pg-desk's

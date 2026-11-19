@@ -95,6 +95,9 @@ func (g *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
 			ans = g.post(endpoint, len(g.posts))
 		}
 		onPost = g.onPost
+	case strings.Contains(endpoint, "/rules/branches/"):
+		// The branch rules (required checks): none, so no run is marked.
+		ans = ghAnswer{status: 200, body: `[]`}
 	case strings.Contains(endpoint, "/jobs"):
 		g.jobCalls = append(g.jobCalls, endpoint)
 		parts := strings.Split(strings.SplitN(endpoint, "?", 2)[0], "/")

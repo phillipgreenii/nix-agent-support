@@ -70,6 +70,7 @@ func targetOf(t sharedsvc.Target, ref entity.Ref) groups.Target {
 		Ref:         ref,
 		Stamps:      groups.Stamps{Head: t.Stamp, Base: t.Stamp2},
 		HeadRefName: t.Attrs[groups.AttrHeadRef],
+		BaseRefName: t.Attrs[groups.AttrBaseRef],
 		State:       t.Attrs[groups.AttrState],
 		Terminal:    t.Terminal,
 	}

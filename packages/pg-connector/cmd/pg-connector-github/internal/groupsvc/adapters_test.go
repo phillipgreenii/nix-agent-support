@@ -58,7 +58,7 @@ func TestTheFetcherAdapterConvertsTargetsAndOutcomesBothWays(t *testing.T) {
 	out := a.Fetch(context.Background(), call, []sharedsvc.Target{
 		{
 			ID: "PR_1", Ref: "Acme-Org/Widget#41", Stamp: "head1", Stamp2: "base1", Terminal: true,
-			Attrs: map[string]string{groups.AttrHeadRef: "feature/x", groups.AttrState: "MERGED"},
+			Attrs: map[string]string{groups.AttrHeadRef: "feature/x", groups.AttrBaseRef: "main", groups.AttrState: "MERGED"},
 		},
 		{ID: "PR_2", Ref: "acme-org/widget#not-a-number"},
 		{ID: "PR_3"},
@@ -71,7 +71,7 @@ func TestTheFetcherAdapterConvertsTargetsAndOutcomesBothWays(t *testing.T) {
 	}
 	want := groups.Target{
 		NodeID: "PR_1", Ref: entity.Ref{Owner: "Acme-Org", Repo: "Widget", Number: 41},
-		Stamps: groups.Stamps{Head: "head1", Base: "base1"}, HeadRefName: "feature/x", State: "MERGED", Terminal: true,
+		Stamps: groups.Stamps{Head: "head1", Base: "base1"}, HeadRefName: "feature/x", BaseRefName: "main", State: "MERGED", Terminal: true,
 	}
 	if f.targets[0] != want {
 		t.Errorf("target = %+v, want %+v", f.targets[0], want)

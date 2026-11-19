@@ -767,3 +767,25 @@ func TestTypedShowPrintsTheUnhydratedHintForAVersionZeroRow(t *testing.T) {
 		t.Errorf("hydrated row prints the hint:\n%s", hydrated)
 	}
 }
+
+func TestTypedShowPRPassesThroughThePerRunRequiredFlag(t *testing.T) {
+	f := newViewFixture(t)
+	f.entity("pr", "o/r#9", `{"pr_show":{"id":"o/r#9","repo":"o/r","number":9,"title":"Required flags","state":"open","head_sha":"abc1234"},"ci":{"runs":[`+
+		`{"id":"1","name":"a","status":"completed","conclusion":"cancelled","url":"u1","attempt":1,"required":false},`+
+		`{"id":"2","name":"b","status":"completed","conclusion":"failure","url":"u2","attempt":1,"required":true},`+
+		`{"id":"3","name":"c","status":"completed","conclusion":"failure","url":"u3","attempt":1}]}}`, "2026-09-29T14:03:10Z", "abc1234")
+	c, _ := showCI(t, "pr", "9")
+	if c.CI == nil || c.CI.Runs == nil || len(*c.CI.Runs) != 3 {
+		t.Fatalf("ci = %+v, want three runs", c.CI)
+	}
+	runs := *c.CI.Runs
+	if v, ok := runs[0]["required"]; !ok || v != false {
+		t.Errorf("run 1 required = %v (present %v), want false", v, ok)
+	}
+	if v, ok := runs[1]["required"]; !ok || v != true {
+		t.Errorf("run 2 required = %v (present %v), want true", v, ok)
+	}
+	if _, ok := runs[2]["required"]; ok {
+		t.Errorf("run 3 has required %v, want the member omitted when the connector did not say", runs[2]["required"])
+	}
+}

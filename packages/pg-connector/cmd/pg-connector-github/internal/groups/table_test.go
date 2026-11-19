@@ -43,6 +43,7 @@ func TestAuditFieldsCatchesDrift(t *testing.T) {
 		Repo       string `json:"repo"`
 		PRID       string `json:"pr_id"`
 		Attempt    int    `json:"attempt,omitempty"`
+		Required   *bool  `json:"required,omitempty"`
 		Jobs       []int  `json:"jobs,omitempty"`
 		AsOf       string `json:"as_of"`
 		Stale      bool   `json:"stale"`
