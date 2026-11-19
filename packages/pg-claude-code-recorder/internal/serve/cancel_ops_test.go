@@ -16,33 +16,12 @@ import (
 
 // cancelBodies maps every operation whose reads run under the request context
 // to a valid body. cancelExempt lists the operations that do not, each with the
-// reason; the test fails for an operation in neither, so a new operation has to
-// be classified.
-var cancelBodies = map[string]string{
-	"coverage":          `{}`,
-	"query":             `{}`,
-	"files.inventory":   `{}`,
-	"search":            `{"q":"line"}`,
-	"feed":              `{}`,
-	"snapshot":          `{}`,
-	"raw":               `{"file":"f_1","length":1}`,
-	"conversation.show": `{"session_id":"example-session"}`,
-	"conversation.list": `{}`,
-	"process.show":      `{"pid":1}`,
-	"process.list":      `{}`,
-	"sessions.facts":    `{"session_ids":["example-session"],"fields":["awaiting_input"]}`,
-	"held":              `{}`,
-	"where":             `{"session":"example-session"}`,
-}
-
-var cancelExempt = map[string]string{
-	"hello":   "answers from the daemon's own state, no store read",
-	"status":  "answers from the snapshot the status loop keeps, issues no query",
-	"remove":  "mutates the archive and the index; cancelling half way would leave partial state",
-	"extract": "copies archive files and commits stage rows; cancelling half way would leave partial state",
-	"sweep":   "starts a background sweep and answers from daemon state, no store read",
-	"doctor":  "verifies files on disk and writes its report; a long file walk, not a pool read",
-}
+// reason; both come from wire.Registry, and the test fails for an operation in
+// neither, so a new operation has to be classified there.
+var (
+	cancelBodies = wire.CancelBodies()
+	cancelExempt = wire.CancelExempt()
+)
 
 func post(d *Daemon, ctx context.Context, op, body string) (int, string) {
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/"+op, strings.NewReader(body))

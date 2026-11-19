@@ -44,7 +44,7 @@ type Fake struct {
 var _ client.API = (*Fake)(nil)
 
 // Operations is the capability list NewFake reports.
-var Operations = []string{"conversation.list", "conversation.show", "coverage", "doctor", "extract", "feed", "files.inventory", "held", "hello", "process.list", "process.show", "query", "raw", "remove", "search", "sessions.facts", "snapshot", "status", "sweep", "where"}
+var Operations = wire.OpNames()
 
 // NewFake returns an empty Fake.
 func NewFake() *Fake {
