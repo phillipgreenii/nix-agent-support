@@ -23,6 +23,13 @@ identities — in code, tests, or docs. All ZR-specific configuration lives in
 `phillipg-nix-ziprecruiter` and is supplied at runtime via config; keep the tools here
 generic and config-driven. (User constraint, 2026-06-24.)
 
+Sharpened by operator ruling (Phillip, 2026-11-17): "that rule might be slightly off. only
+nix-ziprecruiter can refer to zr specific things. so if drain-zr or zr-escalation-triager is
+defined outside of nix-ziprecruiter, then they need to be moved into nix-ziprecruiter." Only
+`phillipg-nix-ziprecruiter` MAY refer to ZipRecruiter-specific things (role names, prefixes,
+hosts). A ZR-specific definition found here MUST be moved there. Generic mechanisms MUST stay in
+this repo and MUST take ZR values as configuration.
+
 Widened by operator ruling (Phillip, 2026-08-24, bead `pg2-tphcc`): public repos MUST carry no
 user identifier of any kind — real name, login, or handle — other than the operator's own
 (`phillipgreenii` / `phillipg@ziprecruiter.com`). No denylist of forbidden tokens (plaintext or
