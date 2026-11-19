@@ -114,6 +114,13 @@ func (e *Error) Is(target error) bool { return e.sentinel != nil && target == e.
 // Unwrap exposes the sentinel.
 func (e *Error) Unwrap() error { return e.sentinel }
 
+// NewError builds the typed error the client returns for the wire error name
+// (what a fake of the client returns so errors.Is matches as it does for the
+// real one).
+func NewError(name, message, cursor string) *Error {
+	return &Error{Name: name, Message: message, Cursor: cursor, sentinel: sentinelOf(name)}
+}
+
 func sentinelOf(name string) error {
 	switch name {
 	case wire.ErrDaemonOffline:

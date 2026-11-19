@@ -28,6 +28,9 @@ type (
 	EndedConversation = wire.Ended
 	// EndQuery asks for the Conversations that ended a given way.
 	EndQuery = wire.EndQuery
+	// ConversationListAnswer and ProcessListAnswer are the list operations' answers.
+	ConversationListAnswer = wire.ConversationList
+	ProcessListAnswer      = wire.ProcessList
 	// EndedResult is the answer of Ended.
 	EndedResult = wire.EndedResult
 )

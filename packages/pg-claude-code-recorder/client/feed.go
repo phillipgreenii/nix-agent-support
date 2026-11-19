@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // FeedOptions tune a Feed iterator.
@@ -30,7 +31,8 @@ type recKey struct {
 // unavailable. Delivery is at least once; the iterator removes the repeats it
 // can see.
 type FeedIter struct {
-	c      *Client
+	c      FeedPager
+	sleep  func(ctx context.Context, d time.Duration) error
 	filter *Filter
 	opt    FeedOptions
 	cursor string
@@ -48,7 +50,25 @@ const seenCap = 1 << 17
 // epoch makes Next return an error matching ErrCursorExpired whose Error.Cursor
 // is the cursor to resync from.
 func (c *Client) Feed(ctx context.Context, filter *Filter, after string, opts ...FeedOptions) *FeedIter {
-	it := &FeedIter{c: c, filter: filter, cursor: after, seen: map[recKey]struct{}{}}
+	return newFeedIter(c, c.opt.Sleep, filter, after, opts...)
+}
+
+// FeedPager is what a FeedIter reads pages from: a Client, or a fake of one.
+type FeedPager interface {
+	FeedPage(ctx context.Context, filter *Filter, after string, project []string, limit, waitMS int) (*FeedAnswer, error)
+}
+
+// NewFeedIter builds a FeedIter over any FeedPager (clienttest.Fake uses it),
+// sleeping between retries with sleep (the context-honoring time.Sleep when nil).
+func NewFeedIter(p FeedPager, sleep func(ctx context.Context, d time.Duration) error, filter *Filter, after string, opts ...FeedOptions) *FeedIter {
+	return newFeedIter(p, sleep, filter, after, opts...)
+}
+
+func newFeedIter(p FeedPager, sleep func(ctx context.Context, d time.Duration) error, filter *Filter, after string, opts ...FeedOptions) *FeedIter {
+	if sleep == nil {
+		sleep = sleepCtx
+	}
+	it := &FeedIter{c: p, sleep: sleep, filter: filter, cursor: after, seen: map[recKey]struct{}{}}
 	if len(opts) > 0 {
 		it.opt = opts[0]
 	}
@@ -126,7 +146,7 @@ func (it *FeedIter) Next(ctx context.Context) (Entry, error) {
 				return Entry{}, ctx.Err()
 			}
 			if Retryable(err) {
-				if serr := it.c.opt.Sleep(ctx, it.back.Next()); serr != nil {
+				if serr := it.sleep(ctx, it.back.Next()); serr != nil {
 					return Entry{}, serr
 				}
 				continue
