@@ -91,9 +91,11 @@ func dispatchWith(t *testing.T, name string, cfg map[string]any, cfgPath, event 
 }
 
 // testWiring is the production wiring with no origin guard: no test depends on
-// a pg-origin-guard installed on the machine running it.
+// a pg-origin-guard installed on the machine running it. No test depends on
+// lsof either: the closed-bead teardown sees no live process.
 func testWiring() wiring {
 	w := newWiring()
+	w.sweeper.DisableTeardownProbe()
 	w.newGuardCheck = func(config.Config) originguard.Check { return nil }
 	return w
 }

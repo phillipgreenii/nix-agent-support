@@ -52,10 +52,9 @@ func TestMain(m *testing.M) {
 		os.Exit(runBareWrite())
 	}
 	isolateAmbientEnv()
-	// No test depends on a pg-origin-guard installed on the machine running it.
-	// No test depends on lsof: the closed-bead teardown sees no live process
-	// unless a test sets its own probe.
-	sweeper.DisableTeardownProbe()
+	// No test depends on a pg-origin-guard installed on the machine running it
+	// or on lsof: testWiring (testutil_test.go) builds the wiring without a
+	// guard and with the teardown probe disabled.
 	dir, err := os.MkdirTemp("", "ccpool-adapter-state-")
 	if err != nil {
 		panic(err)
