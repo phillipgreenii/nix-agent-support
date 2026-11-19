@@ -1,6 +1,6 @@
 # A worktree-keyed sweep reclaims per-bead worktrees no session row leads to
 
-**Status**: Accepted (amends 0083; follows `pg2-w3usi`); amended 2026-10-30 by 0117 (hygiene passes move to a janitor)
+**Status**: Accepted (amends 0083; follows `pg2-w3usi`); amended 2026-10-30 by 0117 (hygiene passes move to a janitor); the worktree sweep is superseded by 0126 (pg-gwm owns the worktrees, and the sweep was removed)
 **Date**: 2026-10-06
 **Deciders**: Phillip Green II
 

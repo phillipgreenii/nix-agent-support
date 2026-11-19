@@ -110,9 +110,7 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   its own role's orphaned sessions in that role's pool: a session whose lease has expired is
   reclaimed or, if still working and over its time budget, hard-stopped (`INV-CCH-18`).
   A dispatch of a role with worktree isolation also holds a shared per-bead worktree lock for its
-  whole run. The janitor (`INV-CCH-41`), not the dispatch, sweeps the worktree directory for leaked
-  per-bead worktrees no session row leads to, removing a worktree and its anchor branch only under
-  the guards of `INV-CCH-19`, and it also reconciles closed-bead sessions, the default pool's stale
+  whole run. The janitor (`INV-CCH-41`), not the dispatch, reconciles closed-bead sessions, the default pool's stale
   sessions and the lock directory (`INV-CCH-14`, `INV-CCH-24`). A dispatch reconciles closed-bead
   sessions only when its pool is full, once, and then declines as always if no slot freed.
   A session in a per-bead linked worktree is torn down in two phases (`INV-CCH-20`): this module

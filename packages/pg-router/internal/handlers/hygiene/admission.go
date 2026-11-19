@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -69,21 +68,9 @@ type poolReconciler struct {
 	role roles.Role
 	cfg  config.Config
 	deps executor.Deps
-	// cwds overrides the live-process probe on the dispatch path (tests only);
-	// nil means the production probe, the sweeper's liveCWDs. It never means "no probe": a
-	// failed or unavailable probe keeps the directory.
-	cwds cwdProbe
 	// sweeper supplies the ports (gauge, sweep bounds, live-process probe,
 	// teardown and bulk-delete ports).
 	sweeper Sweeper
-}
-
-// probe returns the live-process probe for the dispatch path.
-func (p poolReconciler) probe() cwdProbe {
-	if p.cwds != nil {
-		return p.cwds
-	}
-	return p.sweeper.liveCWDs
 }
 
 // NewAdmission builds the executor's Admission port over this package's passes
@@ -93,7 +80,7 @@ func (s Sweeper) NewAdmission(role roles.Role, cfg config.Config, deps executor.
 		return nil
 	}
 	p := poolReconciler{role: role, cfg: cfg, deps: deps, sweeper: s}
-	return &executor.Admission{ReconcileClosedBeads: p.ReconcileClosedBeads, ReclaimLeakedWorktree: p.ReclaimLeakedWorktree}
+	return &executor.Admission{ReconcileClosedBeads: p.ReconcileClosedBeads}
 }
 
 // stampPath is the pool's negative-cache stamp: one file per pool, named by a
@@ -158,49 +145,4 @@ func (p poolReconciler) ReconcileClosedBeads(ctx context.Context) (executor.Reco
 	}
 	p.stampNothingFound()
 	return executor.ReconcileOutcome{}, nil
-}
-
-// ReclaimLeakedWorktree implements executor.Admission.ReclaimLeakedWorktree: the worktree-keyed
-// sweep's cheap pre-filter and guarded reclaim (reclaimLeakedWorktree re-checks
-// everything under the exclusive per-bead lock) applied to ONE bead's worktree.
-func (p poolReconciler) ReclaimLeakedWorktree(ctx context.Context, beadID string) error {
-	dir := p.cfg.WorktreeDir
-	if dir == "" || p.role.CCPool == nil || !executor.UsesWorktreeIsolation(p.role.CCPool.Isolation) {
-		return nil
-	}
-	if beadID == "" || filepath.Base(beadID) != beadID || beadID == "." || beadID == ".." {
-		return nil
-	}
-	if p.deps.LockDir == "" {
-		return errors.New("no lock directory")
-	}
-	c, ok := sweepCandidate(filepath.Join(dir, beadID), beadID, p.now(), worktreeSweepGrace(p.deps))
-	if !ok {
-		// Not a linked worktree: heal the unregistered leftover of a killed
-		// removal, which would otherwise fail this dispatch's `git worktree add`
-		// with "already exists" (leftoverdir.go).
-		if l, isLeftover := leftoverCandidate(filepath.Join(dir, beadID), beadID, p.cfg.RepoRoot, p.now(), worktreeSweepGrace(p.deps)); isLeftover {
-			reclaimLeftoverDir(ctx, p.role, p.deps, p.sweeper.env(orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir}), l)
-		}
-		return nil
-	}
-	sessions, err := p.deps.CC.List(ctx)
-	if err != nil {
-		return err
-	}
-	if worktreeHeldByRow(sessions, c) {
-		return nil
-	}
-	env := p.sweeper.env(orphanEnv{open: worktree.GitOpener, cwds: p.probe(), lockDir: p.deps.LockDir})
-	if env.cwds != nil {
-		cwds, err := env.cwds(ctx)
-		if err != nil {
-			return err
-		}
-		if worktreeHeldByProcess(cwds, c) {
-			return nil
-		}
-	}
-	reclaimLeakedWorktree(ctx, p.role, p.deps, env, c)
-	return nil
 }

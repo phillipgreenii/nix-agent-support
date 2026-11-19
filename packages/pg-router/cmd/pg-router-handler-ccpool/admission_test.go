@@ -291,8 +291,7 @@ func TestAdmission_rowWithoutLeaseIsNeverAnOrphan(t *testing.T) {
 }
 
 // A dispatch runs none of the janitor's passes: not the
-// closed-bead reconcile before capacity, the default-pool pass, the worktree
-// sweep or the lock GC.
+// closed-bead reconcile before capacity, the default-pool pass or the lock GC.
 func TestAdmission_dispatchRunsOnlyTheOrphanUnitBeforeCapacity(t *testing.T) {
 	t.Setenv("CCPOOL_POOL", "")
 	wtDir := filepath.Join(t.TempDir(), "worktrees")
@@ -302,7 +301,7 @@ func TestAdmission_dispatchRunsOnlyTheOrphanUnitBeforeCapacity(t *testing.T) {
 	msgs := sweepDispatch(t, worktreeRoleCfg(`"poolDir":"`+t.TempDir()+`",`), `,"WorktreeDir":"`+wtDir+`"`)
 	for _, m := range msgs {
 		switch m {
-		case "reconcile: list failed", "reconcile: list failed (default pool)", "worktree sweep: session list failed":
+		case "reconcile: list failed", "reconcile: list failed (default pool)":
 			t.Fatalf("dispatch must not run %q; got messages=%v", m, msgs)
 		}
 	}
@@ -311,29 +310,9 @@ func TestAdmission_dispatchRunsOnlyTheOrphanUnitBeforeCapacity(t *testing.T) {
 	}
 }
 
-// The own-bead worktree check keeps its guards: a leaked worktree of the
-// dispatched bead (no row, old enough) is examined, a fresh one is left alone.
-func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
-	wtDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(wtDir, "zr-w"), 0o755); err != nil { // a directory with no .git file
-		t.Fatal(err)
-	}
+// A role without a ccpool block has no admission port.
+func TestNewAdmission_roleWithoutCCPoolHasNone(t *testing.T) {
 	cfg := config.Default()
-	cfg.WorktreeDir = wtDir
-	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
-	cc := &poolCC{OrphanCC: &dtest.OrphanCC{}}
-	r := (hygiene.Sweeper{}).NewAdmission(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
-	if err := r.ReclaimLeakedWorktree(context.Background(), "zr-w"); err != nil {
-		t.Fatal(err)
-	}
-	if lists, _ := cc.counts(); lists != 0 {
-		t.Fatalf("list calls = %d: a non-candidate must cost no ccpool call", lists)
-	}
-	for _, bad := range []string{"", "..", "a/b"} {
-		if err := r.ReclaimLeakedWorktree(context.Background(), bad); err != nil {
-			t.Fatalf("%q: %v", bad, err)
-		}
-	}
 	if (hygiene.Sweeper{}).NewAdmission(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
 		t.Fatal("a role without a ccpool block has no reconciler")
 	}

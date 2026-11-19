@@ -95,7 +95,6 @@ type recorder struct {
 	closedBead  []string // role the pool-level pass ran under
 	defaultPool int
 	orphan      []string
-	worktree    []string
 	lockGC      int
 }
 
@@ -117,12 +116,6 @@ func (r *recorder) passes() janitorPasses {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			r.orphan = append(r.orphan, role.Name)
-			return 0
-		},
-		worktree: func(_ context.Context, role roles.Role, _ config.Config, _ executor.Deps) int {
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			r.worktree = append(r.worktree, role.Name)
 			return 0
 		},
 		lockGC: func(executor.Deps) int {
@@ -167,8 +160,8 @@ func TestJanitor_poolLevelPassesRunOncePerDistinctPool(t *testing.T) {
 		t.Errorf("closed-bead passes ran %d times (%v), want 3 (one per distinct pool)", len(rec.closedBead), rec.closedBead)
 	}
 	// Role-scoped passes run for every role.
-	if len(rec.orphan) != 5 || len(rec.worktree) != 5 {
-		t.Errorf("orphan/worktree ran %d/%d times, want 5/5", len(rec.orphan), len(rec.worktree))
+	if len(rec.orphan) != 5 {
+		t.Errorf("orphan ran %d times, want 5", len(rec.orphan))
 	}
 	// The default-pool pass keys on a role pool dir (sweeps.go): once per run.
 	if rec.defaultPool != 1 {
@@ -291,7 +284,7 @@ func TestJanitor_aPassFailingDoesNotStopTheRest(t *testing.T) {
 	if code != conformance.ExitOK || !strings.Contains(out, "outcome=completed") {
 		t.Fatalf("exit %d out %q", code, out)
 	}
-	if len(rec.worktree) != 1 || rec.lockGC != 1 || len(rec.closedBead) != 1 {
+	if rec.lockGC != 1 || len(rec.closedBead) != 1 {
 		t.Errorf("later passes did not run: %+v", rec)
 	}
 	ev := f.events()

@@ -1,6 +1,7 @@
 package hygiene
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -53,4 +54,26 @@ func countMsgs(msgs []string, m string) int {
 		}
 	}
 	return n
+}
+
+// The records the retired worktree sweep kept beside the locks are removed; a
+// lock file and an unrelated file stay.
+func TestRemoveObsoleteSweepRecords(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"worktree-keep--b.keep", "worktree-seen--b.seen", "worktree-exam--b.exam", "worktree-keep--b.keep.tmp-1", "keep.lock", "other"} {
+		if err := os.WriteFile(filepath.Join(dir, n), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := removeObsoleteSweepRecords(dir); got != 4 {
+		t.Fatalf("removed %d, want 4", got)
+	}
+	for _, n := range []string{"keep.lock", "other"} {
+		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
+			t.Errorf("%s must stay: %v", n, err)
+		}
+	}
+	if got := removeObsoleteSweepRecords(filepath.Join(dir, "missing")); got != 0 {
+		t.Errorf("missing dir removed %d, want 0", got)
+	}
 }

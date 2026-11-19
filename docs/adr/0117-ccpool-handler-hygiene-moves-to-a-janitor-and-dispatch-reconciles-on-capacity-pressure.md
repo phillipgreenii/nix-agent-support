@@ -1,6 +1,6 @@
 # ccpool handler hygiene moves to a janitor, dispatch reconciles on capacity pressure, and the postStartup gate is removed
 
-**Status**: Accepted (operator ruled 2026-10-30 on the plan and on the recommendation to approve the dispatch-time-behavior change; ruling quoted verbatim in the Operator rulings section; amends 0083, 0084 and 0085; epic `pg2-fx5x0l`)
+**Status**: Accepted (operator ruled 2026-10-30 on the plan and on the recommendation to approve the dispatch-time-behavior change; ruling quoted verbatim in the Operator rulings section; amends 0083, 0084 and 0085; the worktree sweep it moved to the janitor is superseded by 0126; epic `pg2-fx5x0l`)
 **Date**: 2026-10-30
 **Deciders**: Phillip Green II
 

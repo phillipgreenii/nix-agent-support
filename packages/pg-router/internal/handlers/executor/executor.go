@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
-	"github.com/phillipgreenii/pg-router/internal/handlers/procprobe"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 
@@ -95,12 +94,6 @@ type Deps struct {
 	// transcript files (nil ⇒ filesystem scan, LatestTranscriptActivity).
 	// ok=false means nothing observable. Tests substitute a fake.
 	LatestActivity func(transcriptPath string) (t time.Time, ok bool)
-	// ProcessCWDs lists the working directory of every live process (nil =>
-	// procprobe.CWDs, `lsof`). The dispatch path never calls it (a pg-gwm lease,
-	// not a process listing, says who holds a worktree); it is a seam a test
-	// counts calls through.
-	ProcessCWDs procprobe.Probe
-	// InFlight reports whether a session transcript (or a subagent's) ends with
 	// a Bash call still inside its declared timeout plus grace (nil ⇒
 	// InFlightToolCall). Only the close-or-release END test asks (INV-CCH-28,
 	// bead pg2-r4ig2); the post-completion quiet checks never do.

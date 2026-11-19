@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|pool-capacity|janitor|remove-worktree|split|query|version|help> [flags]"
+const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|pool-capacity|janitor|split|query|version|help> [flags]"
 
 const helpText = `pg-router-handler-ccpool — the ccpool adapter for pg-router.
 
@@ -77,18 +77,10 @@ Subcommands:
                  run (default 4m, shared out per role, first role rotated each
                  run); --dry-run lists what each pass would reclaim and changes
                  nothing. Per pool: the closed-bead reconcile, the default-pool
-                 pass; per role: orphan reconcile, worktree sweep; then the lock
+                 pass; per role: orphan reconcile; then the lock
                  GC. Single-flight (a second run exits 0, "already running").
                  Exit 0 for completed, skipped or deadline (the janitor_run event
                  row says which), 2 for bad flags or unreadable inputs.
-  remove-worktree  NOT part of the wire contract: remove ONE clean linked
-                 worktree (remove-worktree <path>) through the paced trash drain
-                 every teardown of this handler uses: stop the worktree's fsmonitor
-                 daemon, rename the tree into the trash beside it, prune the
-                 registration, delete the trash in rate-limited batches. Never
-                 forces: a dirty, locked or unregistered tree is refused and left
-                 in place. Run by the nix worktree sweep. Exit 0 removed, 1
-                 refused or failed, 2 usage.
   split         NOT part of the wire contract: the split-triage role's write
                  path: split apply <bead-id> (JSON plan on stdin) / split
                  unsplittable <bead-id> (reason on stdin). See: split --help

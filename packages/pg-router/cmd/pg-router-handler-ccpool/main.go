@@ -89,8 +89,6 @@ func (w wiring) run(args []string) int {
 		return w.runQuery(args[1:])
 	case "janitor":
 		return w.sweeper.RunJanitor(args[1:])
-	case "remove-worktree":
-		return w.sweeper.RunRemoveWorktree(args[1:])
 	default:
 		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-ccpool: unknown subcommand %q", args[0]), usageLine)
 		return conformance.ExitUsage

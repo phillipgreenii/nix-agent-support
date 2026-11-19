@@ -61,7 +61,6 @@ const (
 	passClosedBead  = "closed_bead_reconcile"
 	passDefaultPool = "default_pool"
 	passOrphan      = "orphan_reconcile"
-	passWorktree    = "worktree_sweep"
 	passLockGC      = "lock_gc"
 )
 
@@ -77,7 +76,6 @@ type janitorPasses struct {
 	closedBead  func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int
 	defaultPool func(ctx context.Context, cfg config.Config) int
 	orphan      func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int
-	worktree    func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int
 	lockGC      func(deps executor.Deps) int
 	// emit publishes the run's heartbeat gauges; nil (a test) emits nothing.
 	emit gaugeEmitFn
@@ -123,9 +121,6 @@ func (s Sweeper) prodJanitorPasses() janitorPasses {
 				lockDir: deps.LockDir,
 			}))
 			return reclaimed + stopped
-		},
-		worktree: func(ctx context.Context, role roles.Role, _ config.Config, deps executor.Deps) int {
-			return sweepLeakedWorktrees(ctx, role, deps, s.env(orphanEnv{open: worktree.GitOpener, cwds: s.liveCWDs, lockDir: deps.LockDir}))
 		},
 		lockGC: sweepStaleLocks,
 		emit:   gb.Emit,
@@ -291,7 +286,7 @@ type janitorRun struct {
 }
 
 // cutStage names where a role's share expired: the pass, and for passes that
-// have stages (worktree_sweep: list, probe or scan; closed_bead_reconcile:
+// have stages (closed_bead_reconcile:
 // purge_retry or reconcile) the stage.
 type cutStage struct {
 	Role  string `json:"role"`
@@ -434,8 +429,6 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	run := &janitorRun{passes: passes, stats: map[string]*passStat{}}
 	runCtx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
-	// A trash directory is purged once per run, however many roles share it.
-	runCtx = withTrashPurged(runCtx)
 
 	poolDone := map[string]bool{}
 	defaultPoolDone := false
@@ -465,7 +458,6 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 			run.runPass(rctx, passDefaultPool, name, jr.deps, func(ctx context.Context) int { return passes.defaultPool(ctx, jr.cfg) })
 		}
 		run.runPass(rctx, passOrphan, name, jr.deps, func(ctx context.Context) int { return passes.orphan(ctx, jr.role, jr.cfg, jr.deps) })
-		run.runPass(rctx, passWorktree, name, jr.deps, func(ctx context.Context) int { return passes.worktree(ctx, jr.role, jr.cfg, jr.deps) })
 		rcancel()
 	}
 	// Lock-file collection: handler-wide and cheap, once per run, after every

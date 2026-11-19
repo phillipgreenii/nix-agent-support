@@ -8,9 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
-
-	"github.com/phillipgreenii/pg-router/internal/handlers/procprobe"
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/worktree"
@@ -103,8 +102,6 @@ func (tp teardownPorts) finishPurge(ctx context.Context, cc ccpool.Runner, open 
 	} else if keepWorktree {
 		slog.Info("teardown: worktree kept -- another live session still uses it",
 			"session", s.ExternalID, "cwd", s.CWD)
-	} else if tp.worktreeHeldByStranger(ctx, s) {
-		// kept: the row is still purged (the sweep reclaims the worktree later).
 	} else if !tp.removeWorktreeForPurge(ctx, open, repoRoot, worktreeDir, s) {
 		return false
 	}
@@ -268,25 +265,37 @@ func (tp teardownPorts) retryPurgePending(ctx context.Context, cc ccpool.Runner,
 	return true, true
 }
 
-// worktreeHeldByStranger reports whether the teardown of s MUST keep its
-// worktree because a live process has it, or a directory inside it, as its
-// working directory, or because that cannot be determined (a failed probe
-// keeps it). The session's own process is already gone: every caller has
-// closed the session (non-purge) before it removes the worktree. A session
-// without a working directory has nothing to protect.
-func (tp teardownPorts) worktreeHeldByStranger(ctx context.Context, s ccpool.Session) bool {
-	if s.CWD == "" {
-		return false
-	}
-	keep, err := procprobe.Keep(ctx, tp.probe, s.CWD)
+// worktreeAdminDir resolves path's git admin directory (<common dir>/worktrees/
+// <name>) from its .git file ("gitdir: <dir>"), and confirms the registration is
+// mutual: the admin directory's gitdir file must point back at path/.git. A
+// worktree git no longer knows (pruned) or one pointing elsewhere is not ours to
+// remove.
+func worktreeAdminDir(path string) (string, bool) {
+	raw, err := os.ReadFile(filepath.Join(path, ".git"))
 	if err != nil {
-		slog.Warn("teardown: live-process probe failed; keeping the worktree",
-			"session", s.ExternalID, "cwd", s.CWD, "err", err)
-		return true
+		return "", false
 	}
-	if keep {
-		slog.Info("teardown: worktree kept -- a live process has it as its working directory",
-			"session", s.ExternalID, "cwd", s.CWD)
+	line := strings.TrimSpace(string(raw))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
 	}
-	return keep
+	admin := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(admin) {
+		admin = filepath.Join(path, admin)
+	}
+	admin = filepath.Clean(admin)
+	if filepath.Base(filepath.Dir(admin)) != "worktrees" {
+		return "", false
+	}
+	back, err := os.ReadFile(filepath.Join(admin, "gitdir"))
+	if err != nil {
+		return "", false
+	}
+	want, err1 := filepath.EvalSymlinks(filepath.Join(path, ".git"))
+	got, err2 := filepath.EvalSymlinks(strings.TrimSpace(string(back)))
+	if err1 != nil || err2 != nil || want != got {
+		return "", false
+	}
+	return admin, true
 }

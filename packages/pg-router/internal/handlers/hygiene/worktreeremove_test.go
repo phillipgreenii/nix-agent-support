@@ -102,61 +102,6 @@ func TestWorktreeRemove_parentCancellationStillStopsIt(t *testing.T) {
 	}
 }
 
-// A removal killed at its deadline leaves a path the leftover reclaim heals.
-func TestWorktreeRemove_killAtDeadlineIsHealedByTheLeftoverReclaim(t *testing.T) {
-	prepare := func(t *testing.T, prune bool) (*sweepHarness, string, error) {
-		h := newSweepHarness(t)
-		path := h.leak("zr-kill")
-		if err := os.WriteFile(filepath.Join(path, "top.txt"), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		wm, err := h.opener(context.Background(), path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		killer := slowRemover{WorktreeManager: wm, delay: time.Hour, kill: true}
-		var pruneFn func(context.Context) error
-		if prune {
-			pruneFn = worktree.PruneVia(h.opener, h.repo)
-		}
-		rerr := worktree.RemoveWithin(context.Background(), killer, path, true, 100*time.Millisecond, pruneFn)
-		h.age(path)
-		return h, path, rerr
-	}
-
-	t.Run("without the prune the registration strands the path", func(t *testing.T) {
-		h, path, err := prepare(t, false)
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("RemoveWithin = %v, want a deadline error", err)
-		}
-		if got := h.sweep(); got != 0 {
-			t.Errorf("fixture: sweep reclaimed %d; git still registers the path, so nothing may touch it", got)
-		}
-		if !h.exists(path) {
-			t.Error("fixture: the path must still exist")
-		}
-	})
-
-	t.Run("with the prune the next sweep reclaims it and a dispatch can recreate it", func(t *testing.T) {
-		h, path, err := prepare(t, true)
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("RemoveWithin = %v, want a deadline error", err)
-		}
-		if got := h.registeredWorktrees(); containsPath(got, path) {
-			t.Fatalf("the stale registration must have been pruned:\n%s", got)
-		}
-		if got := h.sweep(); got != 1 {
-			t.Fatalf("sweep reclaimed %d, want 1 (the unregistered leftover)", got)
-		}
-		if h.exists(path) {
-			t.Errorf("leftover %s must be gone from the bead path", path)
-		}
-		if got, err := worktree.Ensure(context.Background(), h.opener, h.wtDir, h.repo, "zr-kill"); err != nil || got != path {
-			t.Errorf("Ensure after the heal = (%q, %v), want a fresh worktree at %s", got, err, path)
-		}
-	})
-}
-
 func containsPath(porcelain, path string) bool {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {

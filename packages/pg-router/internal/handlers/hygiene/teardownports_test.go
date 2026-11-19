@@ -8,10 +8,8 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/worktree"
 )
 
-// testPorts is the teardown ports a test uses by default: production behavior
-// except that no test depends on lsof, so the closed-bead teardown sees no
-// live process unless a test builds its own ports with a probe.
-func testPorts() teardownPorts { return teardownPorts{probe: noLiveProcess} }
+// testPorts is the teardown ports a test uses by default: production behavior.
+func testPorts() teardownPorts { return teardownPorts{} }
 
 // The wrappers below let a test that needs no special port call a teardown
 // pass without naming the ports; a test that substitutes one calls the method

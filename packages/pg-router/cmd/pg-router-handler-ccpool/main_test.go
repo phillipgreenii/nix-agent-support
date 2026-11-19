@@ -99,7 +99,7 @@ func TestRun_SubcommandSet(t *testing.T) {
 	// The ccpool-specific subcommands are real: with no arguments, split and
 	// pool-capacity are usage errors from their own parsers (not "unknown
 	// subcommand"), and pool-capacity -h prints help with exit 0.
-	for _, sub := range []string{"pool-capacity", "janitor", "remove-worktree", "split"} {
+	for _, sub := range []string{"pool-capacity", "janitor", "split"} {
 		if got := run([]string{sub}); got != conformance.ExitUsage {
 			t.Errorf("%s with no arguments: exit %d, want %d", sub, got, conformance.ExitUsage)
 		}
@@ -129,7 +129,7 @@ func TestRun_SubcommandSet(t *testing.T) {
 // twelve subcommands this binary dispatches, and none of the old binary's
 // retired spellings.
 func TestHelp_ListsExactlyItsOwnSubcommands(t *testing.T) {
-	want := []string{"dispatch", "validate", "origin", "postStartup", "preShutdown", "register", "self-status", "pool-capacity", "janitor", "remove-worktree", "split", "query", "version", "help"}
+	want := []string{"dispatch", "validate", "origin", "postStartup", "preShutdown", "register", "self-status", "pool-capacity", "janitor", "split", "query", "version", "help"}
 	for _, sub := range want {
 		if !strings.Contains(usageLine, sub) {
 			t.Errorf("usageLine lacks %q", sub)
@@ -182,22 +182,6 @@ func TestRun_DispatchesEachSubcommandToItsOwnHandler(t *testing.T) {
 	if code != conformance.ExitUsage || !strings.Contains(stderr, "unknown subcommand") {
 		t.Fatalf("bogus: exit %d, stderr %q; want exit %d and an unknown-subcommand message", code, stderr, conformance.ExitUsage)
 	}
-	code, stderr = runCapturingStderr(t, []string{"remove-worktree"})
-	if code != conformance.ExitUsage {
-		t.Errorf("remove-worktree with no path: exit %d, want %d", code, conformance.ExitUsage)
-	}
-	if strings.Contains(stderr, "unknown subcommand") {
-		t.Errorf("remove-worktree fell through to the unknown-subcommand branch: %q", stderr)
-	}
-	if !strings.Contains(stderr, "remove-worktree: exactly one argument is required") {
-		t.Errorf("remove-worktree did not reach its own handler: stderr %q", stderr)
-	}
-	// With a path that is not a worktree the handler runs and refuses (exit 1),
-	// which the unknown-subcommand branch (exit 2) can never produce.
-	code, _ = runCapturingStderr(t, []string{"remove-worktree", t.TempDir()})
-	if code != 1 {
-		t.Errorf("remove-worktree on a non-worktree: exit %d, want 1", code)
-	}
 }
 
 // TestRun_NoSubcommandFallsThroughToUnknown runs every subcommand the switch
@@ -208,7 +192,6 @@ func TestRun_NoSubcommandFallsThroughToUnknown(t *testing.T) {
 		{"pool-capacity"},
 		{"janitor"},
 		{"split"},
-		{"remove-worktree"},
 		{"origin"},
 		{"query", "stray"},
 		{"dispatch", "stray"},

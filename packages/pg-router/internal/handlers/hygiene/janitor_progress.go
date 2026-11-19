@@ -2,24 +2,22 @@ package hygiene
 
 import (
 	"context"
-	"encoding/json"
 	"hash/fnv"
-	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 // Janitor progress counters (INV-CCH-41, design D2): per pass and per role, how
 // many candidates a run saw, how many it examined, skipped as cached, kept and
-// removed, and how many it never reached; plus, for the worktree sweep, the
-// time of each phase and the age of the longest-waiting unreached candidate.
+// removed, and how many it never reached.
 //
 // The counters ride on the pass's context, so the passes keep their signatures
 // and a caller without counters (a dispatch, the inline sweeps) pays nothing:
 // every method is a no-op on a nil *passCounts.
 
-// Phases of the worktree sweep, the names of the phase label of
+// Phases a pass may record, the names of the phase label of
 // ccpool_janitor_phase_seconds.
 const (
 	phaseList  = "list"
@@ -45,17 +43,16 @@ type passCounts struct {
 	Kept       int    `json:"kept"`
 	Removed    int    `json:"removed"`
 	Unexamined int    `json:"unexamined"`
-	// ListMS, ProbeMS and ScanMS are the phases of worktree_sweep only.
+	// ListMS, ProbeMS and ScanMS are the phase times a pass recorded with
+	// setPhase; no pass records one today.
 	ListMS  *int64 `json:"list_ms,omitempty"`
 	ProbeMS *int64 `json:"probe_ms,omitempty"`
 	ScanMS  *int64 `json:"scan_ms,omitempty"`
-	// OldestUnexaminedAgeSeconds is the age of the longest-waiting candidate this
-	// pass did not reach (worktree_sweep only; zero when it reached them all).
+	// OldestUnexaminedAgeSeconds is the age of the longest-waiting candidate a
+	// pass did not reach, and OldestUnexaminedID its id (the gauge carries the
+	// id's stable hash); no pass records one today.
 	OldestUnexaminedAgeSeconds float64 `json:"oldest_unexamined_age_seconds"`
-	// OldestUnexaminedID is the id (the worktree's bead name) of that
-	// longest-waiting candidate, empty when the pass reached them all; the
-	// gauge carries its stable hash.
-	OldestUnexaminedID string `json:"oldest_unexamined_id,omitempty"`
+	OldestUnexaminedID         string  `json:"oldest_unexamined_id,omitempty"`
 	// Pool is the role's pool key; the list numbers below belong to it.
 	Pool string `json:"pool,omitempty"`
 	// ListCalls, ListTimeouts and ListWallMS count the `ccpool list` calls this
@@ -176,96 +173,20 @@ func (c *passCounts) finish(removed int) {
 	}
 }
 
-// trackUnexamined records the age of the candidates the pass did not reach and
-// forgets the first-seen time of those it did. reached is keyed by bead.
-func trackUnexamined(counts *passCounts, lockDir string, now time.Time, candidates []leakedWorktree, reached map[string]bool) {
-	counts.seen(len(candidates))
-	var oldest time.Duration
-	var oldestID string
-	for _, c := range candidates {
-		if reached[c.bead] {
-			clearFirstSeen(lockDir, c)
-			continue
+// keepTmpMarker marks the temp file writeFileAtomic renames into place.
+const keepTmpMarker = ".tmp-"
+
+// keepLikeFile maps a per-key record to a file under dir; characters outside
+// [A-Za-z0-9._-] become "_" so a name can never escape dir.
+func keepLikeFile(dir, prefix, suffix, key string) string {
+	name := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
 		}
-		age := noteFirstSeen(lockDir, c, now)
-		if age > oldest || oldestID == "" {
-			oldest, oldestID = age, c.bead
-		}
-	}
-	if counts != nil {
-		counts.OldestUnexaminedAgeSeconds = oldest.Seconds()
-		counts.OldestUnexaminedID = oldestID
-	}
-}
-
-// First-seen record (design D2). A candidate the sweep sees but does not reach
-// gets one small file beside the keep cache, one per worktree and shared by
-// every role:
-//
-//	<lock dir>/worktree-seen--<bead>.seen
-//
-// It holds the time the candidate was first seen waiting. It is removed when any
-// pass reaches the candidate (examines it or finds it cached) or stops seeing
-// it as a candidate, and by sweepKeepCache once its worktree is gone, so its age
-// is how long the candidate has gone unreached.
-const (
-	seenFilePrefix = "worktree-seen--"
-	seenFileSuffix = ".seen"
-)
-
-type seenEntry struct {
-	Path      string `json:"path"`
-	FirstSeen int64  `json:"first_seen_unix_nano"`
-}
-
-func seenFile(dir, bead string) string {
-	return keepLikeFile(dir, seenFilePrefix, seenFileSuffix, bead)
-}
-
-// readSeen parses a first-seen file; torn or foreign content is absent.
-func readSeen(path string) (seenEntry, bool) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return seenEntry{}, false
-	}
-	var e seenEntry
-	if err := json.Unmarshal(raw, &e); err != nil || e.Path == "" || e.FirstSeen == 0 {
-		return seenEntry{}, false
-	}
-	return e, true
-}
-
-// noteFirstSeen returns how long c has been waiting, recording now as its first
-// sighting when no record for this worktree exists. Best effort: a failed write
-// reports age zero and the next run tries again.
-func noteFirstSeen(lockDir string, c leakedWorktree, now time.Time) time.Duration {
-	if lockDir == "" {
-		return 0
-	}
-	dst := seenFile(lockDir, c.bead)
-	if e, ok := readSeen(dst); ok && e.Path == c.path {
-		if age := now.Sub(time.Unix(0, e.FirstSeen)); age > 0 {
-			return age
-		}
-		return 0
-	}
-	raw, err := json.Marshal(seenEntry{Path: c.path, FirstSeen: now.UnixNano()})
-	if err != nil {
-		return 0
-	}
-	if err := writeFileAtomic(dst, raw); err != nil {
-		slog.Warn("worktree sweep: cannot write the first-seen record", "bead", c.bead, "err", err)
-	}
-	return 0
-}
-
-// clearFirstSeen forgets c's first sighting (it was reached, or is no longer a
-// candidate).
-func clearFirstSeen(lockDir string, c leakedWorktree) {
-	if lockDir == "" {
-		return
-	}
-	_ = os.Remove(seenFile(lockDir, c.bead))
+		return '_'
+	}, key)
+	return filepath.Join(dir, prefix+name+suffix)
 }
 
 // writeFileAtomic writes raw to dst through a temp file and a rename, so a

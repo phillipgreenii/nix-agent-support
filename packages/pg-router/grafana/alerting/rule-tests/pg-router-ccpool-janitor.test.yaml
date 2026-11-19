@@ -101,7 +101,7 @@ tests:
   - name: idle fires when one pass errors on every run, labelled by pass
     interval: 10m
     input_series:
-      - series: ccpool_janitor_pass_errors{pass="worktree_sweep"}
+      - series: ccpool_janitor_pass_errors{pass="sample_pass"}
         values: "1x20"
       - series: ccpool_janitor_pass_errors{pass="orphan_reconcile"}
         values: "0x20"
@@ -114,12 +114,12 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              pass: worktree_sweep
+              pass: sample_pass
 
   - name: idle does not fire when a pass errors only now and then
     interval: 10m
     input_series:
-      - series: ccpool_janitor_pass_errors{pass="worktree_sweep"}
+      - series: ccpool_janitor_pass_errors{pass="sample_pass"}
         values: "1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0"
     alert_rule_test:
       - eval_time: 150m
@@ -162,8 +162,8 @@ tests:
   - name: stagnant fires when a pass keeps an unexamined candidate over 2h, not while it advances
     interval: 10m
     input_series:
-      # worktree_sweep: the oldest unexamined age grows every run (stuck), so it crosses 7200.
-      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="worktree_sweep"}
+      # sample_pass: the oldest unexamined age grows every run (stuck), so it crosses 7200.
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="sample_pass"}
         values: "0+600x60"
       # orphan_reconcile: candidates are reached, the age resets to 0 on every run.
       - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="orphan_reconcile"}
@@ -182,12 +182,12 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              pass: worktree_sweep
+              pass: sample_pass
 
   - name: stagnant stays quiet when ages reset and on a host without the gauge
     interval: 10m
     input_series:
-      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="worktree_sweep"}
+      - series: ccpool_janitor_oldest_unexamined_age_seconds{pass="sample_pass"}
         values: "0+600x10 0x80"
       - series: unrelated_metric
         values: "1x90"

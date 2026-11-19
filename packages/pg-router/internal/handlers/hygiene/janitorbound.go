@@ -8,67 +8,13 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 )
 
-// Per-run bounds of the janitor's passes: the once-per-run trash purge and the
-// closed-bead reconcile resume cursor. Both ride on the pass context, so the
-// passes keep their signatures and a caller without them (a dispatch, the inline
-// sweeps) behaves as before.
-
-// trashPurged is the set of worktree directories whose trash this janitor run
-// has already purged. Every role that shares one worktree directory would
-// otherwise repeat the same drain inside its own share.
-type trashPurged struct {
-	mu   sync.Mutex
-	dirs map[string]bool
-}
-
-type trashPurgedKey struct{}
-
-// withTrashPurged returns ctx carrying an empty set.
-func withTrashPurged(ctx context.Context) context.Context {
-	return context.WithValue(ctx, trashPurgedKey{}, &trashPurged{dirs: map[string]bool{}})
-}
-
-// firstPurge reports whether dir has not been claimed in this run yet and claims
-// it. With no set on ctx every call is a first one.
-func firstPurge(ctx context.Context, dir string) bool {
-	t, _ := ctx.Value(trashPurgedKey{}).(*trashPurged)
-	if t == nil {
-		return true
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.dirs[dir] {
-		return false
-	}
-	t.dirs[dir] = true
-	return true
-}
-
-// trashShareDivisor is the part of the pass context's remaining time one trash
-// purge may spend: 1/2, so the list, probe and scan stages of the sweep that
-// follow it still get time inside the same role share.
-const trashShareDivisor = 2
-
-// trashBudget is the drain budget of a trash purge under ctx: base (the
-// removal's own budget) bounded by 1/trashShareDivisor of the time ctx has
-// left. A context with no deadline leaves base unchanged. A non-positive result
-// means no time is left.
-func trashBudget(ctx context.Context, base time.Duration) time.Duration {
-	dl, ok := ctx.Deadline()
-	if !ok {
-		return base
-	}
-	if b := time.Until(dl) / trashShareDivisor; b < base {
-		return b
-	}
-	return base
-}
+// Per-run bound of the janitor's closed-bead reconcile: its resume cursor. It
+// rides on the pass context, so the pass keeps its signature and a caller
+// without it (a dispatch, the inline sweeps) behaves as before.
 
 // Closed-bead reconcile resume cursor. The pass walks its candidates in
 // ExternalID order and, when its context ends between candidates, the next run

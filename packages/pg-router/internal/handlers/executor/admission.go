@@ -37,10 +37,6 @@ type Admission struct {
 	// bead has closed (INV-CCH-14, INV-CCH-20), rate-limited per pool by the
 	// negative cache (INV-CCH-41).
 	ReconcileClosedBeads func(ctx context.Context) (ReconcileOutcome, error)
-	// ReclaimLeakedWorktree applies the guarded worktree-keyed examination
-	// (INV-CCH-19) to ONE bead's worktree, so a worktree its own bead leaked is
-	// not reused as if it were fresh.
-	ReclaimLeakedWorktree func(ctx context.Context, beadID string) error
 }
 
 // admissionActive reports whether this dispatch can do its housekeeping on

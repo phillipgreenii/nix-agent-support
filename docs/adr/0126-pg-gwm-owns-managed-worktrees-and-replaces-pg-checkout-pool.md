@@ -1,6 +1,6 @@
 # pg-gwm owns managed worktrees and replaces pg-checkout-pool; the ccpool handler stops creating and sweeping its own
 
-**Status**: Proposed (design ruled by the operator 2026-11-14; one open question in the behavior set remains; amends 0084 and 0117)
+**Status**: Accepted (design ruled by the operator 2026-11-14; the handler's worktree sweep, leftover reclaim and process probe were removed after the handler moved onto pg-gwm; amends 0084 and 0117)
 **Date**: 2026-11-14
 **Deciders**: Phillip Green II
 

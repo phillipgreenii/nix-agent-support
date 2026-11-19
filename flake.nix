@@ -12122,14 +12122,10 @@
                   defaultLaunchConfigFile =
                     defaultLaunchConfig.phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
 
-                  # pg2-4roho decision item 4: enabling this module must
-                  # contribute exactly one pg-disk-reclaimer registry entry
-                  # for its own worktree pool, reusing withLaunchConfig's
-                  # already-set launchConfig.worktreeDir above (Reuse First
-                  # -- no separate evalHM call needed for this).
+                  # The handler no longer registers a worktree pool with
+                  # pg-disk-reclaimer (pg-gwm owns its worktrees), so the enabled
+                  # module contributes no registry entry.
                   worktreeReclaimEntries = withLaunchConfig.phillipgreenii.programs.pg-disk-reclaimer.registryEntries;
-                  worktreeReclaimEntry = lib.head worktreeReclaimEntries;
-                  worktreeReclaimVariant = lib.head worktreeReclaimEntry.variants;
 
                   # disabled -- must contribute NO registry entry (zero
                   # behavior change for a consumer that imports this module
@@ -13439,45 +13435,7 @@
                 assert wrapMessageNames npBadHandlerFired "np-bad" "absolute path";
                 assert wrapMessageNames npDefaultPoolFired "np-stray" "default pool";
                 assert wrapMessageNames npSharedPoolFired "np-without-spec" "/tmp/pg2-12gr4-10-shared";
-                # pg2-4roho decision item 4: exactly one registry entry,
-                # scoped to this handler's own configured worktreeDir, with
-                # exactly one variant.
-                assert lib.length worktreeReclaimEntries == 1;
-                assert worktreeReclaimEntry.id == "pg-router-ccpool-handler-worktrees";
-                assert worktreeReclaimEntry.path == "/tmp/pg2-qsred-repo/.worktrees";
-                assert lib.hasInfix "/tmp/pg2-qsred-repo/.worktrees" worktreeReclaimEntry.displayCommand;
-                # pg2-tfckf: the display sizes only the clean candidate
-                # worktrees (not `du` over the whole pool), under a per-item
-                # timeout, and `reclaim` sizes the same candidates through
-                # sizeCommand (KiB on the first line).
-                assert lib.hasInfix "status --porcelain" worktreeReclaimEntry.displayCommand;
-                assert !lib.hasInfix "du -sh" worktreeReclaimEntry.displayCommand;
-                assert lib.hasInfix "held" worktreeReclaimEntry.displayCommand;
-                assert worktreeReclaimEntry.displayTimeoutSeconds == 180;
-                assert worktreeReclaimEntry.sizeCommand != null;
-                assert lib.hasInfix "/tmp/pg2-qsred-repo/.worktrees" worktreeReclaimEntry.sizeCommand;
-                assert lib.hasInfix "du -sk" worktreeReclaimEntry.sizeCommand;
-                # pg2-0tj7h: the dirty/locked worktrees the sweep skips are sized
-                # by heldSizeCommand (from the scan's held_paths array); the
-                # candidate sizing is exact, so no sizeKind is set.
-                assert worktreeReclaimEntry.heldSizeCommand != null;
-                assert lib.hasInfix "held_paths" worktreeReclaimEntry.heldSizeCommand;
-                assert lib.hasInfix "du -sk" worktreeReclaimEntry.heldSizeCommand;
-                assert worktreeReclaimEntry.sizeKind == null;
-                assert lib.length worktreeReclaimEntry.variants == 1;
-                assert worktreeReclaimVariant.aggressiveness == 1;
-                # decision item 5's own guard: neither script ever passes
-                # `--force`, and never runs an unpaced `git worktree remove`
-                # (an unlink event per file); the removal goes through the
-                # handler's paced `remove-worktree` subcommand, which keeps
-                # git's own dirty/locked refusals.
-                assert !lib.hasInfix "--force" worktreeReclaimVariant.dryRunCommand;
-                assert !lib.hasInfix "--force" worktreeReclaimVariant.removeCommand;
-                assert !lib.hasInfix "worktree remove" worktreeReclaimVariant.dryRunCommand;
-                assert lib.hasInfix " remove-worktree " worktreeReclaimVariant.removeCommand;
-                assert !lib.hasInfix "git -C \"$wt\" worktree remove" worktreeReclaimVariant.removeCommand;
-                assert lib.hasInfix "status --porcelain" worktreeReclaimVariant.dryRunCommand;
-                assert lib.hasInfix "status --porcelain" worktreeReclaimVariant.removeCommand;
+                assert worktreeReclaimEntries == [ ];
                 # disabled module: zero behavior change (no registry entry
                 # contributed at all).
                 assert disabledWorktreeReclaimEntries == [ ];

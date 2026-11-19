@@ -250,8 +250,6 @@ name is a `usage` error (row 9 of the branch table, `INV-GWM-16`; operator rulin
 ## Realization gaps
 
 This set's **realization-gap register**: intended behavior the product does not yet deliver, one row
-per gap. The code is still `pg-checkout-pool`, whose contract this set replaces.
-
-| Element      | Intended                                                          | Where the implementation stands                                                                                              |
-| ------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `INV-GWM-26` | Every sibling tool skips a worktree locked with a `pg-gwm` reason | Only the handler's sweep still recognizes pool slots by their old marker; it needs its own change and its own test (task 17) |
+per gap. The register is empty: every element of this set is delivered. The last row, `INV-GWM-26`,
+was removed when the ccpool handler's own worktree sweep (the one place that still recognized the old
+pool slots by their marker) was deleted.

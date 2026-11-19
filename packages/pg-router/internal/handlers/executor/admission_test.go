@@ -52,8 +52,6 @@ type fakeReconciler struct {
 	outcome ReconcileOutcome
 	err     error
 	closed  int
-	wtBeads []string
-	wtErr   error
 }
 
 func (f *fakeReconciler) ReconcileClosedBeads(context.Context) (ReconcileOutcome, error) {
@@ -63,16 +61,9 @@ func (f *fakeReconciler) ReconcileClosedBeads(context.Context) (ReconcileOutcome
 	return f.outcome, f.err
 }
 
-func (f *fakeReconciler) ReclaimLeakedWorktree(_ context.Context, bead string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.wtBeads = append(f.wtBeads, bead)
-	return f.wtErr
-}
-
 // admission exposes the fake through the Admission port.
 func (f *fakeReconciler) admission() *Admission {
-	return &Admission{ReconcileClosedBeads: f.ReconcileClosedBeads, ReclaimLeakedWorktree: f.ReclaimLeakedWorktree}
+	return &Admission{ReconcileClosedBeads: f.ReconcileClosedBeads}
 }
 
 func (f *fakeReconciler) reconciles() int {
@@ -187,17 +178,5 @@ func TestAdmission_capacityUnreadableAfterReconcileFailsClosed(t *testing.T) {
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolCapacityUnknown) || errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("err = %v, want ErrPoolCapacityUnknown", err)
-	}
-}
-
-func TestAdmission_ownWorktreeCheckedBeforeIsolation(t *testing.T) {
-	rec := &fakeReconciler{wtErr: errors.New("worktree check boom")}
-	e, cc, d := admissionRun(t, rec.admission(), freePool)
-	_, err := e.run(context.Background(), d)
-	if !errors.Is(err, ErrLaunchFailed) {
-		t.Fatalf("err = %v, want the dispatch to continue past a failed own-worktree check", err)
-	}
-	if len(rec.wtBeads) != 1 || rec.wtBeads[0] != "zr-w" || len(cc.Ensured) != 1 {
-		t.Fatalf("worktree checks=%v ensured=%v, want one check of zr-w before the launch", rec.wtBeads, cc.Ensured)
 	}
 }

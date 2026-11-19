@@ -337,14 +337,6 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// INV-CCH-19). A SIGKILL drops the lock with the process.
 	useGWM := r.useGWM(cc)
 	if usesWorktreeIsolation(cc.Isolation) && !useGWM {
-		// Before the shared lock (the examination takes the lock exclusively): a
-		// worktree this bead's own earlier attempt leaked is reclaimed, under the
-		// sweep's guards, rather than reused as if it were fresh (INV-CCH-19).
-		if r.admissionActive() {
-			if err := r.deps.Admission.ReclaimLeakedWorktree(ctx, d.Item.ID); err != nil {
-				slog.Warn("own-bead worktree check failed; continuing", "bead", d.Item.ID, "err", err)
-			}
-		}
 		defer r.holdWorktreeLock(ctx, d.Item.ID)()
 	}
 	preexisting := usesWorktreeIsolation(cc.Isolation) && !useGWM && r.worktreePathExists(d.Item.ID)

@@ -12,7 +12,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   want a registered handler participant to run an agent session on my behalf through `ccpool` (or
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
-  `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
+  `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`,
   `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`,
   `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`,
   `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`, `INV-CCH-39`, `INV-CCH-40`.)_
@@ -28,7 +28,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`, `INV-CCH-39`, `INV-CCH-40`, `INV-CCH-41`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-8`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-13`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-16`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`, `INV-CCH-31`, `INV-CCH-32`, `INV-CCH-33`, `INV-CCH-34`, `INV-CCH-35`, `INV-CCH-36`, `INV-CCH-37`, `INV-CCH-38`, `INV-CCH-39`, `INV-CCH-40`, `INV-CCH-41`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`; `USECASE-CCH-SPLIT-TRIAGE` for a role whose completion is `close-or-split-triage`; `USECASE-CCH-LAUNCH-DECLINED` for a dispatch whose session failed before it was ready.
 
 1. The core dispatches one event under one tracking id to a bound role.
@@ -132,18 +132,12 @@ Extensions:
   This is ONE unit of work a dispatch finishes for all of its role's orphans before it checks
   capacity. A role that does not dispatch for a long time does not leave its orphans behind: the
   janitor (2y) reclaims them on its schedule under the same rules.
-- 2e. An earlier dispatch's handler died after it created the per-bead worktree but before the
+- 2e. An earlier dispatch's handler died after it leased its worktree from `pg-gwm` but before the
   session existed (or a session was closed by `ccpool` before anyone reclaimed its worktree), so no
-  session row leads to the worktree. The next janitor run (2y), not a dispatch, scans the worktree
-  directory (`INV-CCH-19`) and removes each worktree, with its anchor branch, that is old enough,
-  clean, holds no commit the canonical clone lacks, is not locked by git, is named by no open or
-  live session row, is not the working directory of any live process (so a spared session of
-  another role's pool is left alone), and is not held by a live dispatch. Anything else is kept and logged. Every
-  dispatch of a worktree-isolation role holds a shared lock on its bead's worktree from before it
-  creates the worktree until it returns, which is how a live dispatch is told from a dead one.
-  The same run removes lock files nothing has acquired for over seven days and nobody holds
-  (`INV-CCH-24`), so the lock directory stays bounded. A dispatch still examines its OWN bead's
-  worktree, under the same guards, before it prepares that worktree.
+  session row leads to the worktree. `pg-gwm` reclaims the worktree once its lease expires
+  (`INV-GWM-23`); the handler itself no longer scans a worktree directory. The next janitor run
+  (2y) removes lock files nothing has acquired for over seven days and nobody holds
+  (`INV-CCH-24`), so the lock directory stays bounded.
 - 2f. An earlier teardown of a session in a per-bead worktree was interrupted (a restart, a crash,
   a slow removal) after the session was closed but before its worktree was gone, so its pool
   record was kept (`INV-CCH-20`). At the pool's next closed-bead reconcile (a janitor run, or a
@@ -155,7 +149,7 @@ Extensions:
   Until then the record is never absorbed (`INV-CCH-30`) and never reclaimed as an orphan.
 - 2y. Hygiene runs off the dispatch path (`INV-CCH-41`). On a schedule, and once when the daemon
   starts, the janitor runs once per pool (closed-bead reconcile, default-pool stale-session pass,
-  lock-file collection) and once per ccpool role (orphans, then the worktree sweep), under a
+  lock-file collection) and once per ccpool role (orphans), under a
   deadline, and records what each pass took and reclaimed. A second run that starts while one is
   active does nothing and succeeds. A dispatch that finds its pool full runs the closed-bead
   reconcile once and re-checks capacity once: a freed slot lets it launch, and no freed slot ends in

@@ -62,15 +62,9 @@ type orphanEnv struct {
 	// quiet is the non-blocking transcript-quiet guard (newTranscriptQuietCheck);
 	// nil disables it.
 	quiet quietCheck
-	// cwds lists the working directory of every live process (Sweeper.liveCWDs); nil
-	// disables the worktree sweep's live-process guard (bead pg2-e5yw3).
-	cwds cwdProbe
 	// gauge publishes the orphan last-event gauge; nil publishes nothing (the
 	// Sweeper installs the production emitter).
 	gauge gaugeEmitFn
-	// maxPerPass and maxExamined bound the worktree sweep (perPassCap,
-	// examinedCap); zero selects the production bound.
-	maxPerPass, maxExamined int
 	// lockDir is <handler state dir>/locks (sessionlock.Dir). Required: an empty
 	// lockDir disables the whole reconcile, because acting without mutual
 	// exclusion could race an absorbing dispatch.

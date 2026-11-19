@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/sessionlock"
-	"github.com/phillipgreenii/x/cmdruntest"
 )
 
 // Session-list observer, the list-call counters and the bounded diagnostic.
@@ -69,7 +67,7 @@ func slowList(t *testing.T, o *listObserver, ctx context.Context, gate chan stru
 }
 
 func TestListObserver_countsCallsWallTimeAndTimeouts(t *testing.T) {
-	counts := &passCounts{Pass: passWorktree, Role: "a"}
+	counts := &passCounts{Pass: passOrphan, Role: "a"}
 	ctx := withCounts(context.Background(), counts)
 	cc := &listCC{}
 	o := &listObserver{Runner: cc}
@@ -96,7 +94,7 @@ func TestListObserver_countsCallsWallTimeAndTimeouts(t *testing.T) {
 // A role deadline that cuts a list call is not a list hang: it must not count
 // as a list timeout, while a per-call timeout still does.
 func TestListObserver_roleDeadlineCutIsNotCountedAsTimeout(t *testing.T) {
-	counts := &passCounts{Pass: passWorktree, Role: "a"}
+	counts := &passCounts{Pass: passOrphan, Role: "a"}
 	ctx := withCounts(context.Background(), counts)
 	cc := &listCC{err: fmt.Errorf("ccpool list cut short: %w", errors.Join(ccpool.ErrCallerDeadline, context.DeadlineExceeded))}
 	o := &listObserver{Runner: cc}
@@ -199,8 +197,8 @@ func TestClassifyStuck(t *testing.T) {
 	}
 }
 
-// The janitor row and the gauges carry the list numbers and the oldest id.
-func TestProgress_janitorRecordsListCallsAndOldestCandidate(t *testing.T) {
+// The janitor row and the gauges carry the list numbers.
+func TestProgress_janitorRecordsListCalls(t *testing.T) {
 	f := newJanitorFixture(t, [2]string{"a", "/pool/a"})
 	cc := &listCC{}
 	mk := func(config.Config, roles.Role) executor.Deps {
@@ -210,12 +208,10 @@ func TestProgress_janitorRecordsListCallsAndOldestCandidate(t *testing.T) {
 	rec := &recorder{}
 	p := rec.passes()
 	p.emit = spyEmit(&pts)
-	p.worktree = func(ctx context.Context, _ roles.Role, _ config.Config, deps executor.Deps) int {
+	p.orphan = func(ctx context.Context, _ roles.Role, _ config.Config, deps executor.Deps) int {
 		_, _ = deps.CC.List(ctx)
 		cc.err = fmt.Errorf("timed out: %w", ccpool.ErrCallTimeout)
 		_, _ = deps.CC.List(ctx)
-		c := countsFrom(ctx)
-		c.OldestUnexaminedID = "bead-old"
 		return 0
 	}
 	out := new(bytes.Buffer)
@@ -238,67 +234,19 @@ func TestProgress_janitorRecordsListCallsAndOldestCandidate(t *testing.T) {
 	}
 	var wt map[string]any
 	for _, r := range row["counters"].([]any) {
-		if m, _ := r.(map[string]any); m["pass"] == passWorktree {
+		if m, _ := r.(map[string]any); m["pass"] == passOrphan {
 			wt = m
 		}
 	}
-	if wt["list_calls"] != 2.0 || wt["list_timeouts"] != 1.0 || wt["pool"] != "/pool/a" || wt["oldest_unexamined_id"] != "bead-old" {
+	if wt["list_calls"] != 2.0 || wt["list_timeouts"] != 1.0 || wt["pool"] != "/pool/a" {
 		t.Fatalf("worktree counters = %v", wt)
 	}
-	for name, want := range map[string]float64{gaugeJanitorListCalls: 2, gaugeJanitorListTimeouts: 1, gaugeJanitorOldestHash: idHash("bead-old")} {
-		if g, ok := find(pts, name, passWorktree); !ok || g.value != want {
+	for name, want := range map[string]float64{gaugeJanitorListCalls: 2, gaugeJanitorListTimeouts: 1} {
+		if g, ok := find(pts, name, passOrphan); !ok || g.value != want {
 			t.Errorf("%s = %+v ok=%v, want %v", name, g, ok, want)
 		}
 	}
-	if g, ok := find(pts, gaugeJanitorListSeconds, passWorktree); !ok || g.labels["pool"] != "/pool/a" {
+	if g, ok := find(pts, gaugeJanitorListSeconds, passOrphan); !ok || g.labels["pool"] != "/pool/a" {
 		t.Errorf("list seconds gauge = %+v ok=%v, want a pool label", g, ok)
-	}
-}
-
-func TestTrackUnexamined_namesTheLongestWaitingCandidate(t *testing.T) {
-	dir := t.TempDir()
-	t0 := time.Unix(1700000000, 0)
-	a := leakedWorktree{bead: "bead-a", path: "/w/a"}
-	b := leakedWorktree{bead: "bead-b", path: "/w/b"}
-	trackUnexamined(&passCounts{}, dir, t0, []leakedWorktree{b}, nil) // b first seen at t0
-	c := &passCounts{}
-	trackUnexamined(c, dir, t0.Add(time.Hour), []leakedWorktree{a, b}, nil)
-	if c.OldestUnexaminedID != "bead-b" || c.OldestUnexaminedAgeSeconds != 3600 {
-		t.Fatalf("oldest = %q %v, want bead-b 3600", c.OldestUnexaminedID, c.OldestUnexaminedAgeSeconds)
-	}
-	c2 := &passCounts{}
-	trackUnexamined(c2, dir, t0.Add(time.Hour), []leakedWorktree{a, b}, map[string]bool{"bead-a": true, "bead-b": true})
-	if c2.OldestUnexaminedID != "" {
-		t.Fatalf("a pass that reached everything names no candidate, got %q", c2.OldestUnexaminedID)
-	}
-}
-
-func TestIdHashIsStable(t *testing.T) {
-	if idHash("abc") != idHash("abc") || idHash("abc") == idHash("abd") {
-		t.Fatal("hash must be stable and discriminating")
-	}
-	if idHash("abc") != 440920331 { // FNV-1a 32 of "abc"
-		t.Fatalf("hash = %v", idHash("abc"))
-	}
-}
-
-func TestSampleProcessTreeWith_psFailureIsReported(t *testing.T) {
-	f := cmdruntest.New(t)
-	f.On(cmdruntest.MatchName("ps")).Return(cmdruntest.Fail(1, "boom"))
-	s := sampleProcessTreeWith(context.Background(), 1, f.Runner())
-	if s.Stuck != "none" || len(s.Procs) != 1 || !strings.HasPrefix(s.Procs[0], "ps failed: ") {
-		t.Fatalf("sample = %+v", s)
-	}
-	if c := f.Calls()[0]; c.Timeout != listDiagToolTimeout {
-		t.Fatalf("ps call unbounded: %+v", c)
-	}
-}
-
-func TestSampleProcessTreeWith_listsTheDescendants(t *testing.T) {
-	f := cmdruntest.New(t)
-	f.On(cmdruntest.MatchName("ps")).Return(cmdruntest.Out("  10     1 S    01:00 ccpool list\n  11    10 S    00:05 sleep 1\n"))
-	s := sampleProcessTreeWith(context.Background(), 10, f.Runner())
-	if len(s.Procs) == 0 {
-		t.Fatalf("sample = %+v, want the ccpool tree", s)
 	}
 }

@@ -113,7 +113,7 @@ func flushGauges(ctx context.Context, flush func(context.Context) error) {
 // 0 rather than leaving a stale series.
 // allJanitorPasses is a fixed list of pass names, not a port or a setting, so
 // it stays a package-level value and is not a Sweeper field.
-var allJanitorPasses = []string{passClosedBead, passDefaultPool, passOrphan, passWorktree, passLockGC}
+var allJanitorPasses = []string{passClosedBead, passDefaultPool, passOrphan, passLockGC}
 
 // emitJanitorGauges publishes the heartbeat of one run that was not skipped.
 // Best effort: a failed emit is logged and never changes the run's outcome.

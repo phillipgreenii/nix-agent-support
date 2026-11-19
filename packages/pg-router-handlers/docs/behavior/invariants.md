@@ -326,7 +326,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     of the same role, or the janitor, reclaims the session: an idle one is closed and its bead claim released, a
     working one has its time budget enforced from its launch time. Until then the session runs
     unsupervised. (e) A worktree left with no session row at all
-    is reclaimed by the janitor's worktree-keyed sweep (`INV-CCH-19`).
+    is reclaimed by `pg-gwm` once its lease expires (`INV-GWM-23`).
 - **`INV-CCH-15`** — a worktree-isolation dispatch MUST lease its worktree from `pg-gwm` under
   the name `<role>/<bead>` (each role holds its own worktree, so no worktree is shared between
   roles and there is no peer-sharing rule and no live-process check), and when the session
@@ -458,122 +458,12 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     orphan, not tokens or cost. Operator rulings (Phillip, 2026-10-05, bead `pg2-g2u9m`; and
     2026-10-30, verbatim: "do the orphan processing as one unit of work before"); see ADR 0083 and
     ADR 0117.
-- **`INV-CCH-19`** — a per-bead worktree, and its `pg-router/<bead>` anchor branch, MUST NOT stay
-  behind once nothing can be using it, even when no session row leads to it: a handler killed or
-  crashed after it created the worktree but before the session existed, or a session closed
-  (`idle_ttl`, eviction, the operator) before anyone reclaimed its worktree, leaves one. The
-  janitor (`INV-CCH-41`) MUST therefore scan the worktree directory itself, per role with worktree
-  isolation, after that role's orphan reconcile (`INV-CCH-18`) and bounded per run: a handful of removals, a fixed cap on candidates examined with git, and a deadline for the whole scan, see below, and remove a
-  worktree and its anchor branch only when ALL of the following hold, each re-checked while holding
-  an exclusive per-bead lock. A dispatch MUST NOT scan the directory before it checks capacity; the
-  one thing it keeps is the same guarded examination of its OWN bead's worktree, before it prepares
-  that worktree, so a worktree its own bead leaked is not reused as if it were fresh:
-  - it is a linked worktree directly under the worktree directory whose checked-out branch is
-    exactly its own anchor branch, and git does not hold it locked;
-  - it is older than a grace window (the launch wait plus the lease TTL);
-  - no open or live session row of the role's pool names it, by working directory or by bead; a row
-    that is closed and no longer live does not protect it;
-  - no live process on the machine has it, or a directory inside it, as its working directory,
-    whichever role, pool or handler owns that process; a process listing that cannot be read keeps
-    every worktree. Every probe that gates a removal runs fresh and is never served from a cache;
-    only the pass pre-filter listing is shared, so a sweep with N removable candidates takes
-    exactly 1 + N listings;
-  - its working tree is clean, and its branch holds no commit the canonical clone's `HEAD` lacks;
-    an unreadable status or commit count keeps it, and so does a git refusal. The one exception is
-    an interrupted checkout: a worktree whose git admin directory holds a zero-byte index lock file
-    older than the grace window is the residue of a checkout that died half-way, so its status
-    entries are not edits; once every other guard holds (no row, no live process, no lock, no
-    unique commit) it MUST be removed with force. A lock file that is not empty, or is younger than
-    the grace window, MUST NOT be treated as an interrupted checkout. A dispatch MUST NOT reuse
-    such a worktree either. When the branch holds no commit the canonical clone's `HEAD` lacks, it
-    discards the worktree and creates a fresh one. When the branch DOES hold such commits (they live
-    in the branch ref), the dispatch MUST NOT fail and MUST NOT delete them: it moves the old
-    directory aside (so uncommitted edits stay recoverable), drops its stale registration, and
-    re-attaches a fresh worktree to the branch's own tip, so a redispatch of the bead proceeds
-    instead of failing the same way on every retry. Only when the commit count cannot be read does
-    it refuse, as an interrupted-checkout failure;
-  - no live dispatch holds the per-bead worktree lock. Every dispatch of a role with worktree
-    isolation MUST hold that lock, shared, from before it creates the worktree until it returns;
-    the operating system drops it when its holder dies, so a killed handler stops protecting its
-    worktree at the moment it dies.
-
-  A removal can be killed at its deadline (a very large checkout outlasts any fixed deadline),
-  leaving a partial checkout at the bead's path that git no longer registers: no `.git` entry and
-  no admin directory naming the path. Such an unregistered leftover directory MUST NOT make every
-  later dispatch of the bead fail with "already exists". The scan, and a dispatch's own-bead
-  examination before it prepares the worktree, MUST reclaim it only when ALL hold, each re-checked
-  under the same exclusive per-bead lock: it is a real, non-empty directory (never a symlink) older
-  than the grace window; it holds no `.git` entry at any depth and nothing but regular files and
-  directories (a symlink or special file anywhere keeps it, and nothing is ever followed); no admin
-  directory under the repository's worktrees directory names it, and an unreadable one keeps it;
-  no open or live session row names its bead or path; no live process has it, or a directory
-  inside it, as its working directory, and an unreadable process listing keeps it. Reclaiming MUST
-  first move the directory aside into a trash directory under the worktree directory and only then
-  delete it, so a delete killed part-way leaves a trash entry and never a half-deleted tree at the
-  bead's path; the scan purges trash entries older than the grace window. Each reclaim
-  is logged and recorded as a reclaimed-worktree event marked as a leftover.
-
-  Every worktree removal this handler runs (the dispatch cleanup, the closed-bead teardown, the
-  orphan reconcile and this scan) MUST run under its own deadline, the removal timeout
-  (`worktreeRemoveTimeout`, default ten minutes, zero uses the default, a negative value is
-  rejected at load). That deadline MUST be independent of, and longer than, the deadline of the
-  pass around the removal (the scan's own deadline, default one minute, and a purge-close's two
-  minutes): a surrounding deadline MUST NOT kill a removal that still has time left under its own,
-  while the surrounding pass being cancelled (the handler told to stop) still stops it. A removal
-  that is nevertheless killed at its deadline MUST NOT strand the bead's path: git drops a
-  worktree's registration only after it has deleted the files, so a kill can leave the
-  registration naming a path whose `.git` entry is already gone, which is neither a linked worktree
-  nor an unregistered leftover. After such a kill the handler MUST prune the stale registration
-  (from the repository root, on a fresh short deadline), so the half-deleted directory becomes the
-  unregistered leftover above and is reclaimed on the next dispatch of the bead or the next scan. A
-  worktree that still has its `.git` entry after a kill stays registered and is retried by the
-  guarded removals.
-
-  The scan MUST stay cheap when worktrees are kept, because the handler is one short-lived process
-  per request and would otherwise re-run `git status` and a commit count on every kept worktree
-  on every scan (each janitor run and each dispatch scan):
-  - a worktree kept because its working tree is dirty or its branch holds unpushed commits MUST NOT
-    be examined again until a recheck interval (default five minutes, configurable, zero disables)
-    has passed, unless its `HEAD`, index or branch tip has changed since, in which case it MUST be
-    examined at once. The record of that decision MUST survive the handler or janitor process (a small file in
-    the handler's lock directory, written atomically; a torn or unreadable one counts as absent) and
-    MUST be removed by the lock-file garbage collection of `INV-CCH-24` once it has expired, is
-    unreadable, or names a worktree that is gone. Only the status and commit-count guards are
-    skipped; the age, row, live-process, git-lock and per-bead lock guards run every time;
-  - one scan MUST examine at most a fixed number of candidates with git (twenty), counting kept and
-    removed ones alike but not ones skipped through the record above, in addition to the removal
-    cap;
-  - candidates MUST be taken oldest-examined-first, so kept worktrees that sort first by name cannot
-    keep a later candidate from ever being reached under that cap: a candidate never examined comes
-    first, then the one examined longest ago, ties broken by name. The time each candidate was last
-    examined with git MUST be recorded per candidate (one entry per worktree, never a cursor per pass
-    or per role), in the same directory as the record above and shared by every role, written
-    atomically, with a torn or unreadable one counting as absent, and removed by the garbage collection
-    of `INV-CCH-24` once its worktree is gone;
-  - the whole scan MUST run under a deadline (default sixty seconds, configurable, zero means none);
-    when it expires the scan logs, stops, and returns what it had done, without failing the
-    dispatch or janitor run. Under the janitor this deadline nests inside the per-role share of
-    `INV-CCH-41`.
-
-  A session list that cannot be read, a lock that cannot be taken, or a missing lock directory
-  means no action. Each removal is logged and recorded as an event naming the bead, role, worktree
-  and age. A worktree that is kept for any reason is left for a later janitor run or for
-  `pg-disk-reclaimer`. This closes the gap `INV-CCH-15` and the session-keyed reconciles leave: each
-  of them keys on a session row. The live-process guard exists because only the dispatching role's
-  own pool is visible to the row guard, and a per-bead worktree is shared by every role's session
-  for the bead: a session of another role whose handler is gone (spared at a daemon restart) shows
-  in no visible row and holds no lock, yet its agent process is still running in the worktree, and
-  reclaiming it leaves that process in a deleted directory (bead `pg2-e5yw3`). Not covered,
-  accepted: a worktree is reclaimed only when the janitor next runs (until then it only costs disk); a clean, commit-free worktree whose session in another role's pool has
-  no running process is removable (the same blind spot `INV-CCH-15` has, now bounded to sessions
-  that are not running); and a session row
-  left in `starting`, `ready`, `working` or `errored` by a killed handler is bounded by
-  `INV-CCH-18`'s lease, not by this invariant (a lease-bearing row is reclaimed or budget-stopped
-  there, and its worktree follows it; a leaseless one is bounded by `ccpool`'s idle timeout, after
-  which this invariant reclaims its worktree). Follow-up to bead `pg2-w3usi`; bead `pg2-ganjb`;
-  see ADR 0084. The scan moved from every dispatch to the janitor by operator ruling (Phillip,
-  2026-10-30, verbatim: "proceed, don't worry about linux machine support for the handler/daemn",
-  given in reply to a recommendation to approve this change); see ADR 0117.
+- **`INV-CCH-19`** — removed. The handler no longer scans its worktree directory for leaked
+  per-bead worktrees, reclaims unregistered leftover directories or probes the process table: a
+  dispatch of a role with worktree isolation leases its worktree from `pg-gwm` (`INV-CCH-15`), and
+  `pg-gwm` reclaims a worktree whose lease ended or expired and preserves unsaved work
+  (`INV-GWM-23`, `INV-GWM-24`). See ADR 0126 (which supersedes the worktree-keyed sweep of ADR 0084
+  and ADR 0117).
 
 - **`INV-CCH-20`** — a session's pool record MUST NOT be deleted until its per-bead worktree has
   been removed or confirmed gone; an interrupted removal MUST be retried by the next reconcile of
@@ -587,10 +477,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   isolation, an unrelated path, or a `bead-worktree` session's drain worktree, which is never
   removed, `INV-CCH-39`) is purged in one step, as is a session whose worktree another
   live session of the pool still uses (`INV-CCH-15`; any state, since a redispatch for the bead
-  reuses the directory), and as is a session whose worktree a live process anywhere on the
-  machine has, or a directory inside it, as its working directory, or whose process listing
-  cannot be read (the guard of `INV-CCH-19`; the session's own process is already gone, because
-  the non-purge close precedes the removal): the record is purged and the worktree and its
+  reuses the directory): the record is purged and the worktree and its
   anchor branch are kept. A failed or interrupted removal leaves the record in place. Each
   closed-bead reconcile of the pool (a janitor run, or a dispatch at capacity pressure,
   `INV-CCH-41`) MUST first retry at most one such record, whether or not its
@@ -606,22 +493,19 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     unlink and rmdir is a filesystem event for every listener on the host (measured 2026-11-04:
     about 284,000 events from two monorepo worktrees, and every delete method emits the same count).
     Every removal this handler performs (the two-phase teardown, the orphan and closed-bead
-    reconciles, the leaked-worktree sweep, dispatch-time cleanup and the operator-run nix
-    worktree sweep, which calls the `remove-worktree` subcommand and never deletes a tree itself) MUST keep git's own refusals
+    reconciles and dispatch-time cleanup) MUST keep git's own refusals
     (not a linked worktree, locked, and for a non-forced removal uncommitted or untracked files),
     stop the worktree's own git fsmonitor daemon (the `core.fsmonitor` setting itself stays on),
     rename the tree aside into a `.trash` directory beside the per-bead worktrees (one rename; the
     worktree path is free and git's registration is pruned at once, so the removal is complete for
     every other rule here), and delete the trash in batches: 500 unlink or rmdir calls, then a
     250 ms pause, within a 3 minute budget per removal. A delete cut short by the budget, a restart
-    or a crash MUST leave only the trash entry; the janitor's worktree sweep MUST finish it on a
-    later pass (an entry is retried once its creation stamp, the number in its name, is older than
-    the sweep grace window), and a record whose worktree is in the trash is purged as for any
-    removed worktree. A trash entry is never a candidate for the leaked-worktree sweep.
+    or a crash MUST leave only the trash entry, and a record whose worktree is in the trash is
+    purged as for any removed worktree.
     All deletes in the process also draw from ONE shared budget: at most 60,000 unlink or rmdir
     events per minute in total (so concurrent removals spread out instead of adding up), and at
     most 8 drains pending at once. A drain that finds the queue full leaves its tree untouched in
-    the trash for the sweep, so a full queue costs latency and never loses a removal, including
+    the trash, so a full queue costs latency and never loses a removal, including
     across a restart (the queue is memory only; the trash is on disk). The two numbers are tunable
     with `PG_ROUTER_WORKTREE_REMOVAL_EVENTS_PER_MINUTE` (0 disables the rate budget) and
     `PG_ROUTER_WORKTREE_REMOVAL_MAX_PENDING`.
@@ -641,7 +525,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   logged and MUST NOT fail or decline the dispatch; the prompt is told it did not succeed and does
   the steps itself. The files MUST live in a directory the repository ignores (the handler adds it
   to the repository's `info/exclude` BEFORE creating it, and creates nothing if that fails),
-  because every non-force worktree removal in this module (`INV-CCH-15`, `INV-CCH-19`,
+  because every non-force worktree removal in this module (`INV-CCH-15`,
   `INV-CCH-20`) refuses a worktree holding untracked files. The outcome is also recorded in the
   worktree, so a prompt rendered for that worktree reports the outcome of the pre-fetch that
   prepared it. Pre-fetch is invalid with any isolation other than the worktree strategy, and a role
@@ -894,16 +778,16 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
   item 3 and `pg2-vlk1f`; see ADR 0082.
 
 - **`INV-CCH-24`** — the handler's lock directory MUST NOT grow without bound. Every session and
-  every per-bead worktree leaves one empty lock file there (`INV-CCH-18`, `INV-CCH-19`), so the
-  janitor (`INV-CCH-41`) MUST also remove lock files, once per lock directory per run and after its
-  worktree sweep, and only one for which ALL of the following hold (a dispatch does not run this
+  every per-bead worktree of a role that does not lease from `pg-gwm` leaves one empty lock file there (`INV-CCH-18`), so the
+  janitor (`INV-CCH-41`) MUST also remove lock files, once per lock directory per run and after the
+  role passes, and only one for which ALL of the following hold (a dispatch does not run this
   collection): its name ends in `.lock`; nothing has acquired it for more than seven
   days (each acquisition refreshes its modification time); and the lock can be taken exclusively
   without waiting, so one held by any live dispatch or reclaimer, shared or exclusive, is never
   removed. Removal MUST NOT weaken the lock's mutual exclusion: a taker that had the file open
   when it was removed MUST retry on the file that now exists rather than report a lock it does not
-  hold. The same pass MUST also remove the worktree-keep records of `INV-CCH-19` that have expired,
-  cannot be read, or name a worktree that is gone, and temp files of an interrupted write. A removal
+  hold. The same pass MUST also remove the records the retired worktree sweep kept beside the locks
+  (keep, first-seen and last-examined records). A removal
   that fails is logged-and-ignored, never a dispatch or janitor failure. Beads `pg2-bjhoq`,
   `pg2-fx5x0l.2`. The collection moved from every dispatch of a worktree-isolation role to the
   janitor (operator ruling, Phillip, 2026-10-30; ADR 0117).
@@ -1495,9 +1379,7 @@ changes a core gate or `INV-LIFE-2`.
       without knowing the role's isolation, the type is stamped on the session row at dispatch
       (`pgrouter.keep_worktree`); a row carrying it is purged and its directory is never removed, even
       when the directory lies under the handler's worktree directory. The dispatch-end cleanup, the
-      abandoned-worktree reclaim, the orphan reconcile and the worktree-keyed sweep (`INV-CCH-19`,
-      which the janitor runs, `INV-CCH-41`) are scoped to the `worktree` isolation and never act on it; the sweep also matches only a worktree
-      directly under the worktree directory on its own `pg-router/<bead>` branch, which a
+      abandoned-worktree reclaim and the orphan reconcile are scoped to the `worktree` isolation and never act on it; a
       `drain/<bead>` worktree is not.
     - **Access is NOT enforced read-only.** The session is an ordinary session and can write in the
       found worktree. The role's prompt MUST forbid edits; nothing in the handler prevents them.
@@ -1531,8 +1413,7 @@ changes a core gate or `INV-LIFE-2`.
   **janitor**.
   - **What the janitor does.** One janitor run performs, per pool, the closed-bead reconcile
     (`INV-CCH-14`, `INV-CCH-20`), the default-pool stale-session pass and the lock-file collection
-    (`INV-CCH-24`); and, per ccpool role, the orphan reconcile (`INV-CCH-18`) and, for a role with
-    worktree isolation, the worktree-keyed sweep (`INV-CCH-19`). It applies the rules of those
+    (`INV-CCH-24`); and, per ccpool role, the orphan reconcile (`INV-CCH-18`). It applies the rules of those
     invariants unchanged; this invariant adds only where and when they run.
   - **A closed-bead session that holds work is kept.** The closed-bead reconcile, in every pool,
     MUST NOT tear down a session whose worktree is dirty, or holds a commit beyond its upstream
@@ -1568,17 +1449,15 @@ changes a core gate or `INV-LIFE-2`.
     the role that ran it), how many candidates it saw (`candidates`), examined, skipped as cached
     (`cached`), kept, removed and did not reach (`unexamined`), so a run that reclaimed nothing can
     be told from one that was stuck. They add up: `candidates = examined + cached + unexamined`
-    and `kept + removed <= examined`. The worktree-keyed sweep also records the milliseconds of its
-    phases (`list_ms`, `probe_ms`, `scan_ms`). They are written into the run's record and published
+    and `kept + removed <= examined`. They are written into the run's record and published
     as gauges (`ccpool_janitor_candidates`, `_examined`, `_cached`, `_kept`, `_unexamined` by pass
-    and role, `_phase_seconds` by pass, role and phase). The sweep MUST keep one first-seen time per
-    candidate worktree, beside the keep cache and shared by all roles, forgotten when any pass
-    reaches the candidate or stops seeing it as one, and publish the age of the longest-waiting
-    candidate it did not reach (`ccpool_janitor_oldest_unexamined_age_seconds` by pass; reported
-    only for a pass that ran). A fourth alert fires when that age stays above two hours, whatever
-    the cause of the pass not advancing. A fifth alert fires when, for one pass and role, at least
+    and role). A pass MAY also record the milliseconds of its phases (`list_ms`, `probe_ms`,
+    `scan_ms`, published as `_phase_seconds` by pass, role and phase) and the age of its
+    longest-waiting unreached candidate (`ccpool_janitor_oldest_unexamined_age_seconds` by pass);
+    no pass records either today, since the worktree sweep that did was removed. The fourth alert
+    fires when that age stays above two hours. A fifth alert fires when, for one pass and role, at least
     six runs in a row over two hours saw candidates and examined or skipped none of them, and a
-    sixth when more than a quarter of the sweeps over six hours spent 55 seconds or more in the
+    sixth when more than a quarter of the passes over six hours spent 55 seconds or more in the
     list phase (the session list is killed at 60 seconds). Their thresholds and the steps to take
     are in `docs/runbooks/ccpool-janitor-progress-alerts.md` of the repository.
   - **Self-description.** The janitor also publishes information about the handler's own system,
@@ -1608,8 +1487,8 @@ changes a core gate or `INV-LIFE-2`.
     stays full would otherwise pay the reconcile on every re-offer, a decline-time reconcile that
     found nothing MUST be remembered per pool for a short interval (launch configuration key
     `declineReconcileMinInterval`, 30 seconds by default, zero disables), and a decline inside the
-    interval MUST NOT reconcile again. A dispatch MUST NOT run the default-pool stale-session pass,
-    the worktree-keyed sweep or the lock-file collection.
+    interval MUST NOT reconcile again. A dispatch MUST NOT run the default-pool stale-session pass
+    or the lock-file collection.
   - **Boot.** The daemon starts no role's dispatch behind a startup hook: the handler's startup
     hook (`postStartup`) validates the request, starts one janitor run without waiting for it, and
     replies `ok`. The single-flight rule makes that run harmless beside the scheduled one. What
