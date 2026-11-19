@@ -14,6 +14,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/blocks"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/control"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/quota"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/supervisor"
 	"github.com/phillipgreenii/x/exitcode"
 	"github.com/phillipgreenii/x/jsonllogger"
@@ -168,6 +169,7 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 		Control: control.Client{Bin: p.PgClaudeControl, Run: c.run},
 		Trust:   newTrustFile(p.ClaudeJSON),
 		Blocks:  tracker,
+		Quota:   quota.Dialing{Socket: c.getenv("PG_CLAUDE_CODE_RECORDER_SOCKET")},
 		Status:  board,
 		Events:  events,
 		Go:      g.Go,

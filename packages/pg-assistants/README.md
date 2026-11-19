@@ -238,6 +238,27 @@ interrupt = 0.95
 kill = 1.00                   # default 1.00; MAY exceed 1.0
 ```
 
+An assistant MAY also carry a quota, spanning sessions, as one more meter on the same ladder:
+
+```toml
+[assistant.quota]
+tokens = 5000000              # exactly one of tokens and dollars
+# dollars = 5.00
+window = "1h"                 # rolling window, a Go duration
+nudge = 0.80                  # 0 < nudge < interrupt <= kill
+interrupt = 0.95
+kill = 1.00                   # default 1.00
+```
+
+The daemon runs one recorder query per tick for an assistant with a quota: assistant records whose
+`cwd` is the assistant's directory or below, in the window, summed per model and counted once per
+`message.id`. `tokens` is the sum of the four usage counters (input, output, cache creation, cache
+read); `dollars` prices each model's tokens with the price table in `internal/quota/pricing.go`, a
+copy of pa-monitor's built-in table (keep them in step; an unknown model is priced at the dearest
+tier). Records written after the assistant `cd`s outside its directory are not counted. The recorder
+socket is found through `PG_CLAUDE_CODE_RECORDER_SOCKET`, else its default path. A failed or
+degraded read skips the quota meter for that tick and logs `quota_failed` once.
+
 Rules beyond the comments above:
 
 - `limit * kill` MUST be strictly below the model's context window: with auto-compact off, a kill
@@ -270,20 +291,21 @@ Rules beyond the comments above:
 Every key is rendered from an option under `phillipgreenii.programs.pg-assistants`; a null option
 is omitted. The module renders only the keys above (an unknown key fails the build).
 
-| Option                                                            | Key                                          | Default                                                                                       |
-| ----------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `tick`, `grace.{interrupt,kill}`                                  | `tick`, `[grace]`                            | `1m`, `5m`, `2m`                                                                              |
-| `sessionBlankEnv`                                                 | `blank_env`, then the daemon-only names      | `__HM_SESS_VARS_SOURCED`, `__HM_ZSH_SESS_VARS_SOURCED`, `__NIX_DARWIN_SET_ENVIRONMENT_DONE`   |
-| `blocks.{nudge,interrupt,kill,unknownResetHold}`                  | `[blocks]`                                   | 0.95, 0.98, 1.00, `1h`                                                                        |
-| `restart.{minUptime,backoffInitial,backoffMax,startTimeout}`      | `[restart]`                                  | `1m`, `1m`, `30m`, `5m`                                                                       |
-| (none)                                                            | `paths.tmux`, `paths.pg_claude_control`      | the `tmux` package; the `pg-claude-control` module's package                                  |
-| `claudePath`                                                      | `paths.claude`                               | the `claude` of `pkgs.llm-agentsPkgs.claude-code` (what `home/programs/claude-code` installs) |
-| `loginShell`                                                      | `paths.shell`                                | `/bin/zsh` (MUST be absolute; asserted)                                                       |
-| (none)                                                            | `paths.state_dir`                            | `$XDG_STATE_HOME/pg-assistants`, expanded at evaluation                                       |
-| `claudeJson`                                                      | `paths.claude_json`                          | `$CLAUDE_CONFIG_DIR/.claude.json` when that session variable is set, else `~/.claude.json`    |
-| `assistants.<id>.{name,enabled,model,effort,cwd,prompt,tick,env}` | `[[assistant]]` (`id` is the attribute name) | `name` the id, `enabled` true, `effort` `medium`, `tick` and `env` omitted                    |
-| `assistants.<id>.context.{limit,window,nudge,interrupt,kill}`     | `[assistant.context]`                        | `limit` required, `window` omitted, 0.80, 0.95, 1.00                                          |
-| `pprof.enable`                                                    | (the agent's `PG_ASSISTANTS_PPROF_ADDR`)     | true: `<state dir>/pprof.sock`                                                                |
+| Option                                                               | Key                                          | Default                                                                                       |
+| -------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `tick`, `grace.{interrupt,kill}`                                     | `tick`, `[grace]`                            | `1m`, `5m`, `2m`                                                                              |
+| `sessionBlankEnv`                                                    | `blank_env`, then the daemon-only names      | `__HM_SESS_VARS_SOURCED`, `__HM_ZSH_SESS_VARS_SOURCED`, `__NIX_DARWIN_SET_ENVIRONMENT_DONE`   |
+| `blocks.{nudge,interrupt,kill,unknownResetHold}`                     | `[blocks]`                                   | 0.95, 0.98, 1.00, `1h`                                                                        |
+| `restart.{minUptime,backoffInitial,backoffMax,startTimeout}`         | `[restart]`                                  | `1m`, `1m`, `30m`, `5m`                                                                       |
+| (none)                                                               | `paths.tmux`, `paths.pg_claude_control`      | the `tmux` package; the `pg-claude-control` module's package                                  |
+| `claudePath`                                                         | `paths.claude`                               | the `claude` of `pkgs.llm-agentsPkgs.claude-code` (what `home/programs/claude-code` installs) |
+| `loginShell`                                                         | `paths.shell`                                | `/bin/zsh` (MUST be absolute; asserted)                                                       |
+| (none)                                                               | `paths.state_dir`                            | `$XDG_STATE_HOME/pg-assistants`, expanded at evaluation                                       |
+| `claudeJson`                                                         | `paths.claude_json`                          | `$CLAUDE_CONFIG_DIR/.claude.json` when that session variable is set, else `~/.claude.json`    |
+| `assistants.<id>.{name,enabled,model,effort,cwd,prompt,tick,env}`    | `[[assistant]]` (`id` is the attribute name) | `name` the id, `enabled` true, `effort` `medium`, `tick` and `env` omitted                    |
+| `assistants.<id>.context.{limit,window,nudge,interrupt,kill}`        | `[assistant.context]`                        | `limit` required, `window` omitted, 0.80, 0.95, 1.00                                          |
+| `assistants.<id>.quota.{tokens,dollars,window,nudge,interrupt,kill}` | `[assistant.quota]`                          | omitted; `window` required with one of `tokens`/`dollars`, 0.80, 0.95, 1.00                   |
+| `pprof.enable`                                                       | (the agent's `PG_ASSISTANTS_PPROF_ADDR`)     | true: `<state dir>/pprof.sock`                                                                |
 
 `blank_env` is `sessionBlankEnv` followed by the variables the launchd agent sets for the daemon
 alone (`PG_ASSISTANTS_CONFIG_HASH`, `PG_ASSISTANTS_PPROF_ADDR`, `PG_ASSISTANTS_SESSION_VARS_HASH`)

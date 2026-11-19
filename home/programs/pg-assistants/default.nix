@@ -135,7 +135,19 @@ let
       // lib.optionalAttrs (a.context.window != null) { inherit (a.context) window; };
     }
     // lib.optionalAttrs (a.tick != null) { inherit (a) tick; }
-    // lib.optionalAttrs (a.env != { }) { inherit (a) env; };
+    // lib.optionalAttrs (a.env != { }) { inherit (a) env; }
+    // lib.optionalAttrs (a.quota != null) {
+      quota = {
+        inherit (a.quota)
+          window
+          nudge
+          interrupt
+          kill
+          ;
+      }
+      // lib.optionalAttrs (a.quota.tokens != null) { inherit (a.quota) tokens; }
+      // lib.optionalAttrs (a.quota.dollars != null) { inherit (a.quota) dollars; };
+    };
 
   settings = {
     inherit (cfg) tick;
@@ -345,6 +357,50 @@ let
           kill = pointOption 1.0 ''
             The fill at which the session is terminated. MAY exceed 1.0.
           '';
+        };
+        quota = lib.mkOption {
+          default = null;
+          description = ''
+            An optional quota spanning sessions: what the assistant's working
+            directory consumes over a rolling `window`, read from the
+            pg-claude-code-recorder (records whose cwd is under `cwd`). It is one
+            more meter on the same nudge, interrupt, kill ladder. Set exactly
+            one of `tokens` (the four usage counters summed) and `dollars`
+            (per-model tokens at the package's price table). Records written
+            after the assistant `cd`s outside its directory are not counted.
+          '';
+          type = lib.types.nullOr (
+            lib.types.submodule {
+              options = {
+                tokens = lib.mkOption {
+                  type = lib.types.nullOr lib.types.ints.positive;
+                  default = null;
+                  description = "The token budget per window; exclusive with `dollars`.";
+                };
+                dollars = lib.mkOption {
+                  type = lib.types.nullOr lib.types.numbers.positive;
+                  default = null;
+                  description = "The dollar budget per window; exclusive with `tokens`.";
+                };
+                window = lib.mkOption {
+                  type = lib.types.str;
+                  example = "1h";
+                  description = "The rolling window, a Go duration such as `1h` or `24h`.";
+                };
+                nudge = pointOption 0.8 ''
+                  The fraction of the quota at which the session is asked to
+                  finish and exit. `0 < nudge < interrupt <= kill`.
+                '';
+                interrupt = pointOption 0.95 ''
+                  The fraction at which the turn is interrupted and the session
+                  told to stop now.
+                '';
+                kill = pointOption 1.0 ''
+                  The fraction at which the session is terminated. MAY exceed 1.0.
+                '';
+              };
+            }
+          );
         };
       };
     };

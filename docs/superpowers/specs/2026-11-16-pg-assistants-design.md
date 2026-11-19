@@ -478,7 +478,11 @@ WAIT NOTE`, or the raw JSON. It marks an assistant `stalled` when its `last_tick
 - The daemon depends on `tmux`, `claude` and `pg-claude-control` at runtime, given as absolute store
   paths in the rendered config or the wrapper, never through launchd's `PATH`.
 
-## Follow-up: quota (deferred)
+## Follow-up: quota (implemented)
+
+Implemented as `[assistant.quota]` (see the package README): the recorder `Query` form below, with
+pa-monitor's price table copied into `internal/quota`. The recorder usage-totals op below is still
+a plan, so the quota reads through `Query`.
 
 Per-assistant quota as tokens per window or dollars per window, spanning sessions:
 

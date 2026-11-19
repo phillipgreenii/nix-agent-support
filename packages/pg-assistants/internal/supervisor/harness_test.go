@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/blocks"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/control"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/quota"
 	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 	"github.com/phillipgreenii/x/tmux"
 )
@@ -392,6 +393,7 @@ type harness struct {
 	cfg    config.Config
 	w      *world
 	blocks *blocks.Tracker
+	quota  quota.Source
 	stat   func(string) (os.FileInfo, error)
 
 	group  *group
@@ -459,7 +461,7 @@ func (h *harness) startWith(board func(*StatusBoard)) {
 	h.runErr = make(chan error, 1)
 	d := Deps{
 		Tmux: fakeTmux{h.w}, Control: fakeControl{h.w}, Trust: fakeTrust{h.w},
-		Blocks: h.blocks, Status: h.status, Events: logger,
+		Blocks: h.blocks, Quota: h.quota, Status: h.status, Events: logger,
 		Go: h.group.Go, NewID: h.w.newID, Stat: h.stat,
 	}
 	go func() { h.runErr <- Run(ctx, h.cfg, d) }()

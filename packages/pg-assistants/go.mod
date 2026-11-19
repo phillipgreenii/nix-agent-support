@@ -8,4 +8,11 @@ require (
 	go.uber.org/goleak v1.3.0
 )
 
-require golang.org/x/sync v0.22.0 // indirect
+require (
+	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder v0.0.0
+	golang.org/x/sync v0.24.0 // indirect
+)
+
+replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder => ../pg-claude-code-recorder
+
+replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite => ../pg-sqlite

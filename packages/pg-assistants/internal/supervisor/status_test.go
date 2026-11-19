@@ -41,6 +41,8 @@ func fullStatus(id string) AssistantStatus {
 		ContextTokens:   162000,
 		ContextFraction: 0.81,
 		ContextAt:       statusT0.Add(-time.Minute),
+		QuotaFraction:   0.4,
+		QuotaDetail:     "40 of 100 tokens in 1h0m0s",
 		Ladder:          "meter",
 		Rung:            "nudge",
 		Reason:          "context at 81% (162000 of 200000 tokens)",

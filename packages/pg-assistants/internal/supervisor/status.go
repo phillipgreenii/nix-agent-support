@@ -35,8 +35,10 @@ type AssistantStatus struct {
 	ContextTokens   int64     `json:"context_tokens,omitempty"`
 	ContextFraction float64   `json:"context_fraction,omitempty"`
 	ContextAt       time.Time `json:"context_at,omitzero"` // when the context figure was read
-	Ladder          string    `json:"ladder,omitempty"`    // meter | disabled | exit
-	Rung            string    `json:"rung,omitempty"`      // nudge | interrupt | kill | force-kill
+	QuotaFraction   float64   `json:"quota_fraction,omitempty"`
+	QuotaDetail     string    `json:"quota_detail,omitempty"`
+	Ladder          string    `json:"ladder,omitempty"` // meter | disabled | exit
+	Rung            string    `json:"rung,omitempty"`   // nudge | interrupt | kill | force-kill
 	Reason          string    `json:"reason,omitempty"`
 	WaitUntil       time.Time `json:"wait_until,omitzero"`
 	WaitReason      string    `json:"wait_reason,omitempty"` // backoff | block_hold | missing_cwd

@@ -124,12 +124,24 @@ type Assistant struct {
 	Tick                                 time.Duration     // resolved: own value or Config.Tick
 	Env                                  map[string]string // extra session environment
 	Context                              Context
+	Quota                                *Quota       // nil: no quota
 	Problems                             []FieldError // non-empty: the daemon does not start this assistant
 }
 
 // Context is the [assistant.context] table.
 type Context struct {
 	Limit, Window int64 // Window resolved from the model table unless set
+	Points
+}
+
+// Quota is the [assistant.quota] table: a rolling-window limit on what the
+// assistant's working directory consumes across sessions, either tokens (the
+// four usage counters summed) or dollars (per-model tokens at the built-in
+// price table). Exactly one of Tokens and Dollars is set.
+type Quota struct {
+	Tokens  int64
+	Dollars float64
+	Window  time.Duration
 	Points
 }
 
@@ -449,7 +461,8 @@ func readAssistant(label string, m map[string]any, globalTick time.Duration) Ass
 	t.duration("tick", &a.Tick)
 	a.Env = readEnv(t)
 	readContext(t, &a)
-	t.unknown("id", "name", "model", "effort", "cwd", "prompt", "enabled", "tick", "env", "context")
+	readQuota(t, &a)
+	t.unknown("id", "name", "model", "effort", "cwd", "prompt", "enabled", "tick", "env", "context", "quota")
 	return a
 }
 
@@ -530,6 +543,61 @@ func readContext(t *table, a *Assistant) {
 		}
 	}
 	c.unknown("limit", "window", "nudge", "interrupt", "kill")
+}
+
+// readQuota reads the optional [assistant.quota] table. The window and the
+// nudge and interrupt points are required; kill defaults to 1.00; exactly one
+// of tokens and dollars must be given.
+func readQuota(t *table, a *Assistant) {
+	c := t.sub("quota")
+	if c == nil {
+		return
+	}
+	q := Quota{Points: Points{Kill: DefaultContextKill}}
+	_, hasTokens := c.m["tokens"]
+	_, hasDollars := c.m["dollars"]
+	ok := true
+	switch {
+	case hasTokens && hasDollars:
+		c.problem("dollars", "tokens and dollars are exclusive; set one")
+		ok = false
+	case !hasTokens && !hasDollars:
+		c.problem("tokens", "required: set tokens or dollars")
+		ok = false
+	case hasTokens:
+		if !c.requiredInt("tokens", &q.Tokens) {
+			ok = false
+		} else if q.Tokens <= 0 {
+			c.problem("tokens", fmt.Sprintf("%d must be above 0", q.Tokens))
+			ok = false
+		}
+	default:
+		if !c.float("dollars", &q.Dollars) {
+			ok = false
+		} else if !(q.Dollars > 0) {
+			c.problem("dollars", fmt.Sprintf("%g must be above 0", q.Dollars))
+			ok = false
+		}
+	}
+	if _, present := c.m["window"]; !present {
+		c.problem("window", "required")
+		ok = false
+	} else if !c.duration("window", &q.Window) {
+		ok = false
+	}
+	pointsOK := c.requiredFloat("nudge", &q.Nudge)
+	pointsOK = c.requiredFloat("interrupt", &q.Interrupt) && pointsOK
+	pointsOK = c.float("kill", &q.Kill) && pointsOK
+	if pointsOK {
+		if key, msg := checkPoints(q.Points); key != "" {
+			c.problem(key, msg)
+			pointsOK = false
+		}
+	}
+	c.unknown("tokens", "dollars", "window", "nudge", "interrupt", "kill")
+	if ok && pointsOK {
+		a.Quota = &q
+	}
 }
 
 // endsTmuxEscaped reports whether v ends in `\;`. tmux reads an argument

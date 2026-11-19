@@ -1,6 +1,7 @@
 schema = 3
 cachePackages = [
   'github.com/BurntSushi/toml',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client',
   'github.com/phillipgreenii/x/claudetrust',
   'github.com/phillipgreenii/x/cmdrun',
   'github.com/phillipgreenii/x/cmdruntest',
@@ -29,5 +30,5 @@ cachePackages = [
     hash = 'sha256-uuwtET8BZ4zjKgSV92DN47k/PM2zYdnWl+naP2CfO5M='
 
   [mod.'golang.org/x/sync']
-    version = 'v0.22.0'
-    hash = 'sha256-VZjl0fAM0p/nI81zh+pdBjzxFupx0UcKYXBBpL2ZS7k='
+    version = 'v0.24.0'
+    hash = 'sha256-gViyLpsZFBKTEUtK6Li3m6plz5J/VCAcpTLymQVRpj4='

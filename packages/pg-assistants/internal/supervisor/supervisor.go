@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/control"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/ladder"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/quota"
 	"github.com/phillipgreenii/x/jsonllogger"
 	"github.com/phillipgreenii/x/tmux"
 )
@@ -50,8 +51,11 @@ type Deps struct {
 	Control Control
 	Trust   Trust
 	Blocks  *blocks.Tracker // seeded by the caller from the previous status.json
-	Status  *StatusBoard
-	Events  *slog.Logger // a jsonllogger logger built with EventLogOptions
+	// Quota reads an assistant's consumption for its [assistant.quota] meter;
+	// nil (or an assistant without a quota) means no quota meter.
+	Quota  quota.Source
+	Status *StatusBoard
+	Events *slog.Logger // a jsonllogger logger built with EventLogOptions
 	// Go starts a named loop: lifecycle.Group.Go in production. A loop
 	// returns nil when its context ends; an error would begin shutdown.
 	Go    func(name string, fn func(ctx context.Context) error)
@@ -65,6 +69,8 @@ type Deps struct {
 // that deadline, and the clients put the same value on their cmdrun.Call.
 const (
 	tmuxTimeout = 10 * time.Second
+	// quotaTimeout bounds one recorder read for a quota meter.
+	quotaTimeout = 20 * time.Second
 	// tickMargin is added to a loop's tick and grace.kill to bound one whole
 	// tick, which may hold a graceful stop.
 	tickMargin = 30 * time.Second
@@ -112,6 +118,7 @@ const (
 	evAdopt             = "adopt"
 	evExited            = "exited"
 	evUsageFailed       = "usage_failed"
+	evQuotaFailed       = "quota_failed"
 	evWindowMismatch    = "window_mismatch"
 	evActionFailed      = "action_failed"
 	evConfigProblem     = "config_problem"
@@ -513,6 +520,10 @@ type session struct {
 	contextTokens   int64
 	contextFraction float64
 	contextAt       time.Time
+
+	quotaErr      string // the quota error last logged
+	quotaFraction float64
+	quotaDetail   string
 }
 
 func (l *assistantLoop) run(ctx context.Context) {
@@ -592,6 +603,9 @@ func (l *assistantLoop) running(ctx context.Context, now time.Time) {
 		if ending(ctx) || l.stalled(ctx, now) {
 			return
 		}
+	}
+	if !req && s.ladder.Kind != ladder.KindExit && s.ladder.Rung < ladder.RungKill {
+		meters = append(meters, l.quota(ctx, now)...)
 	}
 	meters = append(meters, l.s.d.Blocks.Meters(now)...)
 	in := ladder.Input{Now: now, Enabled: l.a.Enabled, ExitRequested: req, Meters: meters}
@@ -690,6 +704,31 @@ func (l *assistantLoop) usage(ctx context.Context, now time.Time) []ladder.Meter
 		Name: "context", Fraction: s.contextFraction, Points: l.a.Context.Points,
 		Detail: fmt.Sprintf("%d of %d tokens", u.ContextTokens, l.a.Context.Limit),
 	}}
+}
+
+// quota reads the assistant's quota consumption from the recorder and returns
+// its meter. A failed read skips the meter for this tick (the ladder still runs
+// on the other meters and the time steps) and is logged once until it changes.
+func (l *assistantLoop) quota(ctx context.Context, now time.Time) []ladder.Meter {
+	q, s := l.a.Quota, l.sess
+	if q == nil || l.s.d.Quota == nil {
+		return nil
+	}
+	var r quota.Reading
+	err := bounded(ctx, quotaTimeout, func(ctx context.Context) (err error) {
+		r, err = quota.Read(ctx, l.s.d.Quota, l.a.Cwd, *q, now)
+		return err
+	})
+	if err != nil {
+		if !ending(ctx) && err.Error() != s.quotaErr {
+			s.quotaErr = err.Error()
+			l.s.event(ctx, slog.LevelWarn, evQuotaFailed, append(s.attrs(), "error", s.quotaErr)...)
+		}
+		return nil
+	}
+	s.quotaErr = ""
+	s.quotaFraction, s.quotaDetail = r.Meter.Fraction, r.Meter.Detail
+	return []ladder.Meter{r.Meter}
 }
 
 // notAnswering reports a usage failure that says the control mod is not
@@ -912,6 +951,7 @@ func (l *assistantLoop) status(now time.Time) AssistantStatus {
 	}
 	st.Running, st.PID, st.SessionID, st.StartedAt = true, s.pid, s.sessionID, s.startedAt
 	st.ContextTokens, st.ContextFraction, st.ContextAt = s.contextTokens, s.contextFraction, s.contextAt
+	st.QuotaFraction, st.QuotaDetail = s.quotaFraction, s.quotaDetail
 	st.Ladder, st.Rung = kindName(s.ladder.Kind), rungName(s.ladder.Rung)
 	var hints []string
 	if s.noControl >= noControlTicks {

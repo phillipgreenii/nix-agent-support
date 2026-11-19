@@ -416,9 +416,10 @@
           pg-keep-awake = final.callPackage ./packages/pg-keep-awake {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-assistants: Pattern A (ADR 0008), the supervisor that keeps
-          # permanent Claude Code assistants running in tmux. One binary; no
-          # local `replace`, so no modRoot.
+          # pg-assistants: the supervisor that keeps permanent Claude Code
+          # assistants running in tmux. One binary; it resolves the recorder
+          # client through a local `replace`, so the source is rooted at
+          # packages/ with a modRoot (see its default.nix).
           pg-assistants = final.callPackage ./packages/pg-assistants {
             inherit (goBuilders) mkGoApp;
           };
@@ -7922,12 +7923,21 @@
                 testFlags = [ "-v" ];
               };
 
-              # pg-assistants - whole-module Go test gate (the unit tier). Pattern A:
-              # flat src at the module dir, no local replace. Real-tool tests are
+              # pg-assistants - whole-module Go test gate (the unit tier). The
+              # source is rooted at packages/ because of the local `replace`
+              # of the recorder client (and its pg-sqlite). Real-tool tests are
               # `integration`-tagged and never run here.
               pg-assistants-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-assistants-go-tests";
-                src = lib.cleanSource ./packages/pg-assistants; # matches default.nix
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-assistants
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
+                  ];
+                }; # matches default.nix
+                modRoot = "pg-assistants";
                 gomod2nixToml = ./packages/pg-assistants/gomod2nix.toml;
                 testFlags = [
                   "-v"

@@ -415,6 +415,17 @@ let
   a = builtins.elemAt s.assistant 0;
   b = builtins.elemAt s.assistant 1;
   trustEntry = c: c.config.home.activation.pgAssistantsTrust;
+  withQuota = case darwin {
+    assistants = two // {
+      example-b = exampleB // {
+        quota = {
+          dollars = 5;
+          window = "24h";
+        };
+      };
+    };
+  };
+  quotaOf = c: (builtins.elemAt (settingsOf c).assistant 1).quota or null;
 
   cases = {
     # ---- the entry exists only when enabled, on darwin ---------------------
@@ -568,6 +579,16 @@ let
       };
     # an array of tables, ordered by id
     assistantsAreAList = builtins.length s.assistant == 2 && a.id == "example-a" && b.id == "example-b";
+    # ---- an assistant's quota ------------------------------------------------
+    quotaOmittedByDefault = !(b ? quota) && !(a ? quota);
+    quotaRendered =
+      quotaOf withQuota == {
+        dollars = 5;
+        window = "24h";
+        nudge = 0.8;
+        interrupt = 0.95;
+        kill = 1.0;
+      };
     assistantAEveryKey =
       a == {
         id = "example-a";

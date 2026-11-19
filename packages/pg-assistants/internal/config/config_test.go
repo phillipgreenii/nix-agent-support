@@ -695,3 +695,60 @@ func TestInlineAssistantArray(t *testing.T) {
 		t.Errorf("Problems = %v, want one for assistant", cfg.Problems)
 	}
 }
+
+func TestQuotaTable(t *testing.T) {
+	ok := []struct {
+		name string
+		kv   []string
+		want Quota
+	}{
+		{
+			"tokens",
+			[]string{`quota.tokens = 5000000`, `quota.window = "1h"`, `quota.nudge = 0.8`, `quota.interrupt = 0.95`},
+			Quota{Tokens: 5_000_000, Window: time.Hour, Points: Points{0.8, 0.95, 1.0}},
+		},
+		{
+			"dollars",
+			[]string{`quota.dollars = 5`, `quota.window = "24h"`, `quota.nudge = 0.9`, `quota.interrupt = 0.95`, `quota.kill = 1.1`},
+			Quota{Dollars: 5, Window: 24 * time.Hour, Points: Points{0.9, 0.95, 1.1}},
+		},
+	}
+	for _, tc := range ok {
+		t.Run(tc.name, func(t *testing.T) {
+			a := load(t, pathsTOML+assistant("example-a", tc.kv...)).Assistants[0]
+			if len(a.Problems) != 0 || a.Quota == nil || *a.Quota != tc.want {
+				t.Errorf("problems %v quota %+v, want %+v", a.Problems, a.Quota, tc.want)
+			}
+		})
+	}
+	if a := load(t, pathsTOML+assistant("example-a")).Assistants[0]; a.Quota != nil {
+		t.Errorf("no [assistant.quota]: Quota = %+v, want nil", a.Quota)
+	}
+
+	bad := []struct {
+		name  string
+		kv    []string
+		field string
+	}{
+		{"neither tokens nor dollars", []string{`quota.window = "1h"`, `quota.nudge = 0.8`, `quota.interrupt = 0.9`}, "assistant[example-a].quota.tokens"},
+		{"both", []string{`quota.tokens = 1`, `quota.dollars = 1`, `quota.window = "1h"`, `quota.nudge = 0.8`, `quota.interrupt = 0.9`}, "assistant[example-a].quota.dollars"},
+		{"zero tokens", []string{`quota.tokens = 0`, `quota.window = "1h"`, `quota.nudge = 0.8`, `quota.interrupt = 0.9`}, "assistant[example-a].quota.tokens"},
+		{"negative dollars", []string{`quota.dollars = -1.5`, `quota.window = "1h"`, `quota.nudge = 0.8`, `quota.interrupt = 0.9`}, "assistant[example-a].quota.dollars"},
+		{"missing window", []string{`quota.tokens = 1`, `quota.nudge = 0.8`, `quota.interrupt = 0.9`}, "assistant[example-a].quota.window"},
+		{"bad window", []string{`quota.tokens = 1`, `quota.window = "soon"`, `quota.nudge = 0.8`, `quota.interrupt = 0.9`}, "assistant[example-a].quota.window"},
+		{"missing nudge", []string{`quota.tokens = 1`, `quota.window = "1h"`, `quota.interrupt = 0.9`}, "assistant[example-a].quota.nudge"},
+		{"interrupt below nudge", []string{`quota.tokens = 1`, `quota.window = "1h"`, `quota.nudge = 0.9`, `quota.interrupt = 0.8`}, "assistant[example-a].quota.interrupt"},
+		{"unknown key", []string{`quota.tokens = 1`, `quota.window = "1h"`, `quota.nudge = 0.8`, `quota.interrupt = 0.9`, `quota.per = 3`}, "assistant[example-a].quota.per"},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			a := load(t, pathsTOML+assistant("example-a", tc.kv...)).Assistants[0]
+			if !slices.Contains(fields(a.Problems), tc.field) {
+				t.Errorf("problems = %v, want one on %s", a.Problems, tc.field)
+			}
+			if a.Quota != nil && tc.name != "unknown key" {
+				t.Errorf("Quota = %+v, want nil for an invalid table", a.Quota)
+			}
+		})
+	}
+}

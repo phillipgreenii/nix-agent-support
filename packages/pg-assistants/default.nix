@@ -6,12 +6,20 @@
 mkGoApp {
   pname = "pg-assistants";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): a single module rooted at this
-  # package dir, with go.mod and the committed gomod2nix.toml side by side. No
-  # local `replace`, so no modRoot and no parent-rooted fileset (mirrors
-  # packages/pg-keep-awake/default.nix).
-  src = lib.cleanSource ./.;
-  modRoot = null;
+  # The module resolves the recorder client (the quota meter's usage source)
+  # through a relative `replace ../pg-claude-code-recorder` (and that module's
+  # `replace ../pg-sqlite`), so the build sandbox must contain those package
+  # dirs at their relative positions: root the source at packages/ and build
+  # the pg-assistants subdir (the same shape as pa-monitor/default.nix).
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../pg-claude-code-recorder
+      ../pg-sqlite
+    ];
+  };
+  modRoot = "pg-assistants";
 
   gomod2nixToml = ./gomod2nix.toml;
 
